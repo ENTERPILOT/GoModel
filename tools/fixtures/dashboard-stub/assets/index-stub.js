@@ -1,0 +1,1 @@
+// dashboard stub: run make frontend for the real bundle

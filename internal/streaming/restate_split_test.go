@@ -4,6 +4,9 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestTransformedSSEStream_ResponsesRestatesDoneEventsAfterReplace(t *testing.T) {
@@ -25,47 +28,38 @@ func TestTransformedSSEStream_ResponsesRestatesDoneEventsAfterReplace(t *testing
 	}}
 	stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ResponsesCodec(), tr, TransformOptions{})
 	got, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	out := string(got)
-	if strings.Contains(out, "secret") {
-		t.Fatalf("original text restated after replace:\n%s", out)
-	}
+	require.NotContains(t, out, "secret", "original text restated after replace:\n%s", out)
+
 	for _, want := range []string{
 		`"type":"response.output_text.done"`, `"text":"key [x] ok"`,
 		`"type":"response.content_part.done"`, `"type":"response.output_item.done"`, `"type":"response.completed"`,
 		`"usage":{"total_tokens":3}`, `"sequence_number":8`,
 	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output lacks %s:\n%s", want, out)
-		}
+		assert.Contains(t, out, want)
 	}
-	if strings.Count(out, `"text":"key [x] ok"`) != 4 {
-		t.Errorf("want the emitted text in all four restating events:\n%s", out)
-	}
+	assert.Equal(t, 4, strings.Count(out, `"text":"key [x] ok"`), "want the emitted text in all four restating events:\n%s", out)
+
 	resp, err := AssembleResponsesResponse(decodeResponsesEvents(t, got))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.Status != "completed" || len(resp.Output) != 1 || resp.Output[0].Content[0].Text != "key [x] ok" {
-		t.Errorf("assembled = %+v", resp)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "completed", resp.Status)
+	require.Len(t, resp.Output, 1)
+	assert.Equal(t, "key [x] ok", resp.Output[0].Content[0].Text, "assembled = %+v", resp)
 }
 
+// A stream nothing edits is relayed byte for byte, renumbering included: its
+// sequence numbers are already the ones the client must see.
 func TestTransformedSSEStream_ResponsesPassThroughStaysByteIdenticalWithoutEdits(t *testing.T) {
-	input := "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"sequence_number\":1,\"output_index\":0,\"item\":{\"id\":\"msg\",\"type\":\"message\",\"content\":[]}}\n\n" +
-		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":3,\"output_index\":0,\"content_index\":0,\"delta\":\"hi\"}\n\n" +
-		"event: response.output_text.done\ndata: {\"type\":\"response.output_text.done\",\"sequence_number\":5,\"output_index\":0,\"content_index\":0,\"text\":\"hi\"}\n\n" +
-		"event: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":8,\"response\":{\"id\":\"r1\",\"output\":[{\"id\":\"msg\",\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"hi\"}]}]}}\n\n"
+	input := "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"sequence_number\":0,\"output_index\":0,\"item\":{\"id\":\"msg\",\"type\":\"message\",\"content\":[]}}\n\n" +
+		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":1,\"output_index\":0,\"content_index\":0,\"delta\":\"hi\"}\n\n" +
+		"event: response.output_text.done\ndata: {\"type\":\"response.output_text.done\",\"sequence_number\":2,\"output_index\":0,\"content_index\":0,\"text\":\"hi\"}\n\n" +
+		"event: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":3,\"response\":{\"id\":\"r1\",\"output\":[{\"id\":\"msg\",\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"hi\"}]}]}}\n\n"
 	stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ResponsesCodec(), &funcTransformer{}, TransformOptions{})
 	got, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != input {
-		t.Fatalf("pass-through changed bytes:\n%s", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, input, string(got), "pass-through changed bytes")
 }
 
 func TestTransformedSSEStream_ChatSplitsMultiChoiceChunks(t *testing.T) {
@@ -80,29 +74,20 @@ func TestTransformedSSEStream_ChatSplitsMultiChoiceChunks(t *testing.T) {
 	}}
 	stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ChatCodec(), tr, TransformOptions{})
 	got, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	out := string(got)
-	if strings.Contains(out, "secret") {
-		t.Fatalf("second choice leaked:\n%s", out)
-	}
-	if got := texts(tr.seen); !equalStrings(got, []string{"a secret", "b secret"}) {
-		t.Errorf("transformer saw %v, want both choices", got)
-	}
-	if strings.Count(out, `"usage":{"total_tokens":2}`) != 1 {
-		t.Errorf("usage must appear exactly once:\n%s", out)
-	}
-	if strings.Count(out, `"finish_reason":"stop"`) != 2 {
-		t.Errorf("both finish chunks expected:\n%s", out)
-	}
+	require.NotContains(t, out, "secret", "second choice leaked:\n%s", out)
+
+	assert.Equal(t, []string{"a secret", "b secret"}, texts(tr.seen), "transformer must see both choices")
+	assert.Equal(t, 1, strings.Count(out, `"usage":{"total_tokens":2}`), "usage must appear exactly once:\n%s", out)
+	assert.Equal(t, 2, strings.Count(out, `"finish_reason":"stop"`), "both finish chunks expected:\n%s", out)
+
 	resp, err := AssembleChatResponse(decodeChatEvents(t, got))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(resp.Choices) != 2 || resp.Choices[0].Message.Content != "a [x]" || resp.Choices[1].Message.Content != "b [x]" {
-		t.Errorf("assembled = %+v", resp.Choices)
-	}
+	require.NoError(t, err)
+	require.Len(t, resp.Choices, 2)
+	assert.Equal(t, "a [x]", resp.Choices[0].Message.Content)
+	assert.Equal(t, "b [x]", resp.Choices[1].Message.Content)
 }
 
 // A part whose text a transformer removes entirely must not reappear in the
@@ -135,24 +120,19 @@ func TestTransformedSSEStream_ResponsesRestatesDoneEventsAfterFullDrop(t *testin
 			}}
 			stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ResponsesCodec(), tr, tc.opts)
 			got, err := io.ReadAll(stream)
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
+
 			out := string(got)
-			if strings.Contains(out, "secret") {
-				t.Fatalf("original text relayed after drop:\n%s", out)
-			}
+			require.NotContains(t, out, "secret", "original text relayed after drop:\n%s", out)
 			// The input already has one empty text: the content_part.added part.
-			if n := strings.Count(out, `"text":""`) - strings.Count(input, `"text":""`); n != 4 {
-				t.Errorf("want empty text in all four restating events, found %d:\n%s", n, out)
-			}
+			n := strings.Count(out, `"text":""`) - strings.Count(input, `"text":""`)
+			assert.Equal(t, 4, n)
+
 			resp, err := AssembleResponsesResponse(decodeResponsesEvents(t, got))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if resp.Status != "completed" || len(resp.Output) != 1 || resp.Output[0].Content[0].Text != "" {
-				t.Errorf("assembled = %+v", resp)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, "completed", resp.Status)
+			require.Len(t, resp.Output, 1)
+			assert.Empty(t, resp.Output[0].Content[0].Text, "assembled = %+v", resp)
 		})
 	}
 }

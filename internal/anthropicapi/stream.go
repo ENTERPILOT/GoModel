@@ -3,6 +3,7 @@ package anthropicapi
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"io"
 
 	"github.com/goccy/go-json"
@@ -20,6 +21,7 @@ type chatChunk struct {
 		Delta struct {
 			Content          string              `json:"content"`
 			ReasoningContent string              `json:"reasoning_content"`
+			Reasoning        string              `json:"reasoning"`
 			StopSequence     string              `json:"stop_sequence"`
 			ToolCalls        []chatToolCallDelta `json:"tool_calls"`
 			// ExtraContent is provider replay state for the turn so far;
@@ -178,12 +180,14 @@ func (sc *streamConverter) handleChunk(chunk *chatChunk) {
 		sc.usage = *chunk.Usage
 	}
 	for _, choice := range chunk.Choices {
-		if choice.Delta.ReasoningContent != "" {
+		// "reasoning_content" wins over "reasoning" (Groq, OpenRouter), the
+		// same precedence the streaming codec applies.
+		if thinking := cmp.Or(choice.Delta.ReasoningContent, choice.Delta.Reasoning); thinking != "" {
 			sc.ensureBlock("thinking")
 			sc.emit("content_block_delta", map[string]any{
 				"type":  "content_block_delta",
 				"index": sc.curIndex,
-				"delta": map[string]any{"type": "thinking_delta", "thinking": choice.Delta.ReasoningContent},
+				"delta": map[string]any{"type": "thinking_delta", "thinking": thinking},
 			})
 		}
 		sc.handleThinkingReplay(choice.Delta.ExtraContent)
@@ -237,14 +241,14 @@ func (sc *streamConverter) handleThinkingReplay(raw json.RawMessage) {
 			sc.openBlock("redacted_thinking", map[string]any{"type": "redacted_thinking", "data": block.Data})
 			sc.closeBlock()
 		default:
-			if block.Signature == "" {
+			if block.Signature == nil || *block.Signature == "" {
 				continue
 			}
 			sc.ensureBlock("thinking")
 			sc.emit("content_block_delta", map[string]any{
 				"type":  "content_block_delta",
 				"index": sc.curIndex,
-				"delta": map[string]any{"type": "signature_delta", "signature": block.Signature},
+				"delta": map[string]any{"type": "signature_delta", "signature": *block.Signature},
 			})
 			sc.closeBlock()
 		}
@@ -289,6 +293,10 @@ func (sc *streamConverter) ensureBlock(blockType string) {
 	contentBlock := map[string]any{"type": blockType}
 	if blockType == "thinking" {
 		contentBlock["thinking"] = ""
+		// Anthropic opens a thinking block with an empty signature and fills it
+		// with a signature_delta; a provider that never signs its reasoning
+		// simply leaves it empty, so the block still matches the schema.
+		contentBlock["signature"] = ""
 	} else {
 		contentBlock["text"] = ""
 	}

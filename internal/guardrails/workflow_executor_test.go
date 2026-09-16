@@ -9,6 +9,8 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // appendPlugin appends its text to the last user message.
@@ -30,9 +32,8 @@ func appendInstance(t *testing.T, name, text string) *plugins.Instance {
 	entry := plugins.Entry{Name: "append", Manifest: plugin.Manifest(), Kinds: plugins.ImplementedKinds(plugin), Source: plugins.SourceBuiltin, Factory: func() pluginapi.Plugin { return plugin }}
 	host := plugins.NewHost(plugins.HostDeps{}, plugins.HostInfo{PluginName: "append", InstanceName: name})
 	inst, err := plugins.NewInstance(context.Background(), entry, plugins.InstanceSpec{Name: name, Timeout: time.Second}, host)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	return inst
 }
 
@@ -44,41 +45,32 @@ func TestProcessGuardedChatKeepsOneSnapshotPerEditingStep(t *testing.T) {
 		{Instance: appendInstance(t, "first", "one"), Step: 1},
 		{Instance: appendInstance(t, "second", "two"), Step: 2},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	req := &core.ChatRequest{Model: "m", Messages: []core.Message{{Role: "user", Content: "hello"}}}
 
 	ctx, state := plugins.WithRequestState(plugins.WithPromptEditCapture(context.Background()))
 	applied, err := processGuardedChat(ctx, chain, req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := applied.Messages[0].Content; got != "hello one two" {
-		t.Fatalf("applied content = %q", got)
-	}
+	require.NoError(t, err)
+	got := applied.Messages[0].Content
+	require.Equal(t, "hello one two", got)
+
 	edits := state.PromptEdits()
-	if len(edits) != 2 || edits[0].Instance != "first" || edits[1].Instance != "second" {
-		t.Fatalf("edits = %+v", edits)
-	}
+	require.Len(t, edits, 2)
+	require.Equal(t, "first", edits[0].Instance)
+	require.Equal(t, "second", edits[1].Instance)
+
 	for i, want := range []string{"hello one", "hello one two"} {
 		step, err := edits[i].Apply()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := step.(*core.ChatRequest).Messages[0].Content; got != want {
-			t.Errorf("step %d content = %q, want %q", i+1, got, want)
-		}
+		require.NoError(t, err)
+		got := step.(*core.ChatRequest).Messages[0].Content
+		assert.Equal(t, want, got)
 	}
-	if req.Messages[0].Content != "hello" {
-		t.Errorf("the original request was edited in place: %q", req.Messages[0].Content)
-	}
+	assert.Equal(t, "hello", req.Messages[0].Content)
 
 	ctx, state = plugins.WithRequestState(context.Background())
-	if _, err := processGuardedChat(ctx, chain, req); err != nil {
-		t.Fatal(err)
-	}
-	if edits := state.PromptEdits(); len(edits) != 0 {
-		t.Errorf("edits kept without capture: %+v", edits)
-	}
+	_, err = processGuardedChat(ctx, chain, req)
+	require.NoError(t, err)
+	edits = state.PromptEdits()
+	assert.Empty(t, edits)
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // exchange abstracts the transport for one cache-mediated request so the
@@ -150,7 +151,7 @@ func (e *internalExchange) Capture(warnMessage string, next func() error) ([]byt
 	if !shouldStoreCapturedResponse(e.status) || len(e.respBody) == 0 {
 		return nil, false, nil
 	}
-	if e.failoverUsed {
+	if e.failoverUsed || core.PluginNoStore(e.ctx) {
 		return nil, false, nil
 	}
 	data, ok := cacheableResponseBody(e.respBody, e.respHeader.Get("Content-Type"))

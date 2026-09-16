@@ -2,14 +2,15 @@ package mcpgateway
 
 import (
 	"context"
-	"errors"
 	"testing"
+	"time"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
+	"github.com/stretchr/testify/require"
 )
 
 // runStoreSuite exercises behaviour every Store implementation owes its
@@ -18,17 +19,15 @@ func runStoreSuite(t *testing.T, body func(t *testing.T, store Store)) {
 	t.Helper()
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		store, err := NewSQLStore(context.Background(), db)
-		if err != nil {
-			t.Fatalf("NewSQLStore: %v", err)
-		}
+		require.NoError(t, err)
+
 		t.Cleanup(func() { _ = store.Close() })
 		body(t, store)
 	})
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
 		store, err := NewMongoDBStore(db)
-		if err != nil {
-			t.Fatalf("NewMongoDBStore: %v", err)
-		}
+		require.NoError(t, err)
+
 		t.Cleanup(func() { _ = store.Close() })
 		body(t, store)
 	})
@@ -51,71 +50,47 @@ func TestStoreRoundTrip(t *testing.T) {
 			UserPaths:          []string{"/team-a"},
 			ToolTimeoutSeconds: 45,
 		}
-		if err := store.Upsert(ctx, server); err != nil {
-			t.Fatalf("Upsert() error = %v", err)
-		}
+		err := store.Upsert(ctx, server)
+		require.NoError(t, err)
 
 		got, err := store.Get(ctx, "github")
-		if err != nil {
-			t.Fatalf("Get() error = %v", err)
-		}
-		if got.URL != server.URL || got.Transport != "http" || !got.Enabled {
-			t.Fatalf("Get() = %+v, want round-tripped row", got)
-		}
-		if got.Name != "github" || got.DisplayName != "GitHub MCP" {
-			t.Fatalf("Get() identity = (%q, %q), want (github, GitHub MCP)", got.Name, got.DisplayName)
-		}
-		if got.Headers["Authorization"] != "Bearer secret" {
-			t.Fatalf("Get().Headers = %v, want secret preserved", got.Headers)
-		}
-		if len(got.AllowedTools) != 1 || got.AllowedTools[0] != "create_issue" {
-			t.Fatalf("Get().AllowedTools = %v", got.AllowedTools)
-		}
-		if got.ToolTimeoutSeconds != 45 {
-			t.Fatalf("Get().ToolTimeoutSeconds = %d, want 45", got.ToolTimeoutSeconds)
-		}
-		if got.CreatedAt.IsZero() || got.UpdatedAt.IsZero() {
-			t.Fatalf("Get() timestamps not stamped: %+v", got)
-		}
+		require.NoError(t, err)
+		require.Equal(t, server.URL, got.URL)
+		require.Equal(t, "http", got.Transport)
+		require.True(t, got.Enabled, "Get() = %+v, want round-tripped row", got)
+		require.Equal(t, "github", got.Name)
+		require.Equal(t, "GitHub MCP", got.DisplayName)
+		require.Equal(t, "Bearer secret", got.Headers["Authorization"], "Get().Headers = %v, want secret preserved", got.Headers)
+		require.Len(t, got.AllowedTools, 1)
+		require.Equal(t, "create_issue", got.AllowedTools[0])
+		require.Equal(t, 45, got.ToolTimeoutSeconds)
+		require.False(t, got.CreatedAt.IsZero())
+		require.False(t, got.UpdatedAt.IsZero(), "Get() timestamps not stamped: %+v", got)
 
 		// Update preserves CreatedAt and bumps the row.
 		server.Description = "updated"
 		server.DisplayName = "GitHub 工具"
 		server.Enabled = false
-		if err := store.Upsert(ctx, server); err != nil {
-			t.Fatalf("Upsert(update) error = %v", err)
-		}
+		err = store.Upsert(ctx, server)
+		require.NoError(t, err)
+
 		updated, err := store.Get(ctx, "github")
-		if err != nil {
-			t.Fatalf("Get(updated) error = %v", err)
-		}
-		if updated.Description != "updated" || updated.Enabled {
-			t.Fatalf("Get(updated) = %+v, want updated row", updated)
-		}
-		if updated.Name != "github" || updated.DisplayName != "GitHub 工具" {
-			t.Fatalf("Get(updated) identity = (%q, %q), want immutable slug and updated display name", updated.Name, updated.DisplayName)
-		}
-		if !updated.CreatedAt.Equal(got.CreatedAt) {
-			t.Fatalf("Get(updated).CreatedAt = %v, want original %v preserved", updated.CreatedAt, got.CreatedAt)
-		}
+		require.NoError(t, err)
+		require.Equal(t, "updated", updated.Description)
+		require.False(t, updated.Enabled, "Get(updated) = %+v, want updated row", updated)
+		require.Equal(t, "github", updated.Name)
+		require.Equal(t, "GitHub 工具", updated.DisplayName)
+		require.True(t, updated.CreatedAt.Equal(got.CreatedAt), "Get(updated).CreatedAt = %v, want original %v preserved", updated.CreatedAt, got.CreatedAt)
 
 		list, err := store.List(ctx)
-		if err != nil {
-			t.Fatalf("List() error = %v", err)
-		}
-		if len(list) != 1 {
-			t.Fatalf("len(List()) = %d, want 1", len(list))
-		}
-
-		if err := store.Delete(ctx, "github"); err != nil {
-			t.Fatalf("Delete() error = %v", err)
-		}
-		if _, err := store.Get(ctx, "github"); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("Get(deleted) error = %v, want ErrNotFound", err)
-		}
-		if err := store.Delete(ctx, "github"); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("Delete(missing) error = %v, want ErrNotFound", err)
-		}
+		require.NoError(t, err)
+		require.Len(t, list, 1)
+		err = store.Delete(ctx, "github")
+		require.NoError(t, err)
+		_, err = store.Get(ctx, "github")
+		require.ErrorIs(t, err, ErrNotFound)
+		err = store.Delete(ctx, "github")
+		require.ErrorIs(t, err, ErrNotFound)
 	})
 }
 
@@ -124,7 +99,7 @@ func TestStoreRoundTrip(t *testing.T) {
 func TestSQLStoreMigratesDisplayName(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
-		if err := db.Schema(ctx, `
+		err := db.Schema(ctx, `
 			CREATE TABLE mcp_servers (
 				name TEXT PRIMARY KEY, url TEXT NOT NULL DEFAULT '', transport TEXT NOT NULL DEFAULT 'http',
 				headers TEXT NOT NULL DEFAULT '{}', description TEXT NOT NULL DEFAULT '',
@@ -132,50 +107,38 @@ func TestSQLStoreMigratesDisplayName(t *testing.T) {
 				allowed_tools TEXT NOT NULL DEFAULT '[]', disallowed_tools TEXT NOT NULL DEFAULT '[]',
 				user_paths TEXT NOT NULL DEFAULT '[]', tool_timeout_seconds INTEGER NOT NULL DEFAULT 0,
 				created_at `+sqlx.TypeInt64+` NOT NULL, updated_at `+sqlx.TypeInt64+` NOT NULL
-			)`); err != nil {
-			t.Fatalf("create legacy schema: %v", err)
-		}
-		if _, err := db.Exec(ctx,
-			`INSERT INTO mcp_servers (name, created_at, updated_at) VALUES (?, ?, ?)`, "linear", 1, 1); err != nil {
-			t.Fatalf("seed legacy row: %v", err)
-		}
+			)`)
+		require.NoError(t, err)
+		_, err = db.Exec(ctx,
+			`INSERT INTO mcp_servers (name, created_at, updated_at) VALUES (?, ?, ?)`, "linear", 1, 1)
+		require.NoError(t, err)
 
 		store, err := NewSQLStore(ctx, db)
-		if err != nil {
-			t.Fatalf("NewSQLStore() migration error = %v", err)
-		}
+		require.NoError(t, err)
+
 		server, err := store.Get(ctx, "linear")
-		if err != nil {
-			t.Fatalf("Get() error = %v", err)
-		}
-		if server.DisplayName != "linear" {
-			t.Fatalf("DisplayName = %q, want legacy slug backfilled", server.DisplayName)
-		}
+		require.NoError(t, err)
+		require.Equal(t, "linear", server.DisplayName)
 	})
 }
 
 func TestManagedServerValidateRejectsStdio(t *testing.T) {
 	t.Parallel()
 	server := ManagedServer{Name: "local", Transport: "stdio"}
-	if err := server.Validate(); err == nil {
-		t.Fatalf("Validate(stdio) should fail: runtime-registered subprocesses are forbidden")
-	}
+	require.Error(t, server.Validate())
 }
 
 func TestManagedServerValidateRequiresURL(t *testing.T) {
 	t.Parallel()
 	server := ManagedServer{Name: "web", Transport: "http"}
-	if err := server.Validate(); err == nil {
-		t.Fatalf("Validate(http without url) should fail")
-	}
+	require.Error(t, server.Validate())
+
 	server.URL = "ftp://nope"
-	if err := server.Validate(); err == nil {
-		t.Fatalf("Validate(non-http url) should fail")
-	}
+	require.Error(t, server.Validate())
+
 	server.URL = "https://example.com/mcp"
-	if err := server.Validate(); err != nil {
-		t.Fatalf("Validate(valid) error = %v", err)
-	}
+	err := server.Validate()
+	require.NoError(t, err)
 }
 
 func TestManagedServerValidateRejectsInvalidUserPath(t *testing.T) {
@@ -186,18 +149,12 @@ func TestManagedServerValidateRejectsInvalidUserPath(t *testing.T) {
 		Transport: "http",
 		UserPaths: []string{"/team/../admin"},
 	}
-	if err := server.Validate(); err == nil {
-		t.Fatalf("Validate(invalid user path) should fail")
-	}
+	require.Error(t, server.Validate())
 }
 
 func TestManagedServerSpecDefaultsTimeout(t *testing.T) {
 	t.Parallel()
 	spec := ManagedServer{Name: "web", URL: "https://example.com/mcp", Transport: "http"}.Spec()
-	if spec.ToolTimeout <= 0 {
-		t.Fatalf("Spec().ToolTimeout = %v, want default applied", spec.ToolTimeout)
-	}
-	if spec.Managed {
-		t.Fatalf("Spec().Managed = true, want false for store rows")
-	}
+	require.Greater(t, spec.ToolTimeout, time.Duration(0))
+	require.False(t, spec.Managed)
 }

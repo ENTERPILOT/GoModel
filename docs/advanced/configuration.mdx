@@ -57,8 +57,9 @@ gateway from clients that open a streaming response and stop reading it. Each
 write to the client gets a fresh deadline, so it fires only when the client's
 socket stays full for that long, never while a slow model has nothing to send.
 When it fires the connection is closed, the upstream provider request is
-cancelled, and the audit entry records `client_stalled`. Raise it for clients
-that legitimately pause reading a stream for over a minute; set `0` to disable.
+cancelled, and the audit entry records `client_stalled`, also when the stream
+was served from the response cache. Raise it for clients that legitimately
+pause reading a stream for over a minute; set `0` to disable.
 
 Set `GOMODEL_DEMO_MODE=true` for a public or shared demonstration instance.
 GoModel logs a warning at startup and every five minutes, renders a persistent

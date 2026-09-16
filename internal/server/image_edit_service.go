@@ -68,7 +68,8 @@ func (s *imageService) CreateImageEdit(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	if resp == nil {
-		return handleError(c, core.NewProviderError("", http.StatusBadGateway, "provider returned empty image response", nil))
+		return handleError(c, core.NewProviderError(route.providerName, http.StatusBadGateway,
+			"provider "+route.providerName+" returned empty image response", nil))
 	}
 	s.logUsage(ctx, route, func(pricing *core.ModelPricing) *usage.UsageEntry {
 		return usage.ExtractFromImageEditResponse(resp, route.requestID, route.model, route.providerType, pricing)

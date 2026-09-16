@@ -1,9 +1,11 @@
 package streaming
 
 import (
-	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func scanAll(t *testing.T, scanner *EventScanner, chunks ...string) []RawEvent {
@@ -108,19 +110,17 @@ func TestEventScanner(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := scanAll(t, &EventScanner{}, tt.chunks...)
-			if len(got) != len(tt.want) {
-				t.Fatalf("got %d events, want %d: %+v", len(got), len(tt.want), got)
-			}
+			require.Len(t, got, len(tt.want), "events: %+v", got)
+
 			for i := range got {
-				if got[i].Name != tt.want[i].Name || got[i].Comment != tt.want[i].Comment ||
-					!bytes.Equal(got[i].Data, tt.want[i].Data) || (got[i].Data == nil) != (tt.want[i].Data == nil) ||
-					!bytes.Equal(got[i].Raw, tt.want[i].Raw) {
-					t.Errorf("event %d = %+v, want %+v", i, got[i], tt.want[i])
-				}
+				assert.Equal(t, tt.want[i].Name, got[i].Name)
+				assert.Equal(t, tt.want[i].Comment, got[i].Comment)
+				assert.Equal(t, tt.want[i].Data, got[i].Data)
+				assert.Equal(t, tt.want[i].Data == nil, got[i].Data == nil)
+				assert.Equal(t, tt.want[i].Raw, got[i].Raw, "event %d = %+v, want %+v", i, got[i], tt.want[i])
 			}
-			if joined := joinRaw(got); joined != strings.Join(tt.chunks, "") {
-				t.Errorf("raw bytes not preserved: %q", joined)
-			}
+			joined := joinRaw(got)
+			assert.Equal(t, strings.Join(tt.chunks, ""), joined)
 		})
 	}
 }
@@ -140,36 +140,25 @@ func TestEventScanner_ByteAtATime(t *testing.T) {
 		chunks = append(chunks, input[i:i+1])
 	}
 	got := scanAll(t, &EventScanner{}, chunks...)
-	if len(got) != 3 {
-		t.Fatalf("got %d events, want 3: %+v", len(got), got)
-	}
-	if got[0].Name != "e" || string(got[0].Data) != `{"a":1}` {
-		t.Errorf("first event = %+v", got[0])
-	}
-	if !got[1].Comment || string(got[1].Raw) != ": c\n\n" {
-		t.Errorf("second event = %+v", got[1])
-	}
-	if string(got[2].Data) != "[DONE]" {
-		t.Errorf("third event = %+v", got[2])
-	}
-	if joinRaw(got) != input {
-		t.Errorf("raw bytes not preserved: %q", joinRaw(got))
-	}
+	require.Len(t, got, 3)
+	assert.Equal(t, "e", got[0].Name)
+	assert.Equal(t, `{"a":1}`, string(got[0].Data), "first event = %+v", got[0])
+	assert.True(t, got[1].Comment)
+	assert.Equal(t, ": c\n\n", string(got[1].Raw), "second event = %+v", got[1])
+	assert.Equal(t, "[DONE]", string(got[2].Data), "third event = %+v", got[2])
+	assert.Equal(t, input, joinRaw(got))
 }
 
 func TestEventScanner_OversizedCompletedEventIsRelayedUnparsed(t *testing.T) {
 	scanner := &EventScanner{MaxEventBytes: 16}
 	big := "data: " + strings.Repeat("x", 40) + "\n\n"
 	got := scanAll(t, scanner, big+"data: ok\n\n")
-	if len(got) != 2 {
-		t.Fatalf("events = %d, want 2: %+v", len(got), got)
-	}
-	if !got[0].Oversized || got[0].Data != nil || string(got[0].Raw) != big {
-		t.Errorf("completed oversized event should be an unparsed fragment: %+v", got[0])
-	}
-	if got[1].Oversized || string(got[1].Data) != "ok" {
-		t.Errorf("event after oversized block = %+v", got[1])
-	}
+	require.Len(t, got, 2)
+	assert.True(t, got[0].Oversized)
+	assert.Nil(t, got[0].Data)
+	assert.Equal(t, big, string(got[0].Raw), "completed oversized event should be an unparsed fragment: %+v", got[0])
+	assert.False(t, got[1].Oversized)
+	assert.Equal(t, "ok", string(got[1].Data), "event after oversized block = %+v", got[1])
 }
 
 func TestEventScanner_OversizedEventIsRelayedUnparsed(t *testing.T) {
@@ -183,21 +172,16 @@ func TestEventScanner_OversizedEventIsRelayedUnparsed(t *testing.T) {
 		raw.Write(ev.Raw)
 		if ev.Oversized {
 			oversized++
-			if ev.Data != nil || ev.Comment {
-				t.Errorf("oversized fragment should be unparsed: %+v", ev)
-			}
+			assert.Nil(t, ev.Data)
+			assert.False(t, ev.Comment, "oversized fragment should be unparsed: %+v", ev)
 		}
 	}
-	if oversized == 0 {
-		t.Fatal("expected oversized fragments")
-	}
+	require.NotEqual(t, 0, oversized)
+
 	last := got[len(got)-1]
-	if last.Oversized || string(last.Data) != "ok" {
-		t.Errorf("event after oversized block = %+v", last)
-	}
-	if raw.String() != big+"\n\ndata: ok\n\n" {
-		t.Errorf("raw bytes not preserved: %q", raw.String())
-	}
+	assert.False(t, last.Oversized)
+	assert.Equal(t, "ok", string(last.Data), "event after oversized block = %+v", last)
+	assert.Equal(t, big+"\n\ndata: ok\n\n", raw.String())
 }
 
 func TestEventEncode(t *testing.T) {
@@ -213,9 +197,8 @@ func TestEventEncode(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := string(tt.ev.Encode()); got != tt.want {
-				t.Errorf("Encode() = %q, want %q", got, tt.want)
-			}
+			got := string(tt.ev.Encode())
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

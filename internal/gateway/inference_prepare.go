@@ -35,6 +35,7 @@ type translatedPrepareSpec[Req any, Prepared any] struct {
 	requiredMessage string
 	patchNilMessage string
 	selector        func(Req) (*string, *string)
+	resolve         func(*InferenceOrchestrator) func(context.Context, Req, *core.Workflow) (context.Context, Req, error)
 	patch           func(*InferenceOrchestrator) func(context.Context, Req) (Req, error)
 	valid           func(Req) bool
 	build           func(context.Context, Req, *core.Workflow) Prepared
@@ -55,6 +56,7 @@ var responsesPrepareSpec = translatedPrepareSpec[*core.ResponsesRequest, *Prepar
 	requiredMessage: "responses request is required",
 	patchNilMessage: "patched responses request is required",
 	selector:        responsesRequestSelector,
+	resolve:         responsesHistoryResolve,
 	patch:           responsesRequestPatch,
 	valid:           validResponsesRequest,
 	build: func(ctx context.Context, req *core.ResponsesRequest, workflow *core.Workflow) *PreparedResponsesRequest {
@@ -75,7 +77,11 @@ func prepareTranslated[Req any, Prepared any](
 	}
 	ctx = WithAttemptRecorder(ctx)
 	model, provider := spec.selector(req)
-	ctx, req, workflow, err := prepareTranslatedRequest(o, ctx, req, meta, model, provider, spec.patch(o), spec.valid, spec.patchNilMessage)
+	var resolve func(context.Context, Req, *core.Workflow) (context.Context, Req, error)
+	if spec.resolve != nil {
+		resolve = spec.resolve(o)
+	}
+	ctx, req, workflow, err := prepareTranslatedRequest(o, ctx, req, meta, model, provider, resolve, spec.patch(o), spec.valid, spec.patchNilMessage)
 	if err != nil {
 		if workflow != nil {
 			// A patch-phase error (a guardrail block or short-circuit) still
@@ -95,6 +101,7 @@ func prepareTranslatedRequest[Req any](
 	meta RequestMeta,
 	model,
 	provider *string,
+	resolve func(context.Context, Req, *core.Workflow) (context.Context, Req, error),
 	patch func(context.Context, Req) (Req, error),
 	valid func(Req) bool,
 	patchNilMessage string,
@@ -106,6 +113,13 @@ func prepareTranslatedRequest[Req any](
 		return ctx, zero, nil, err
 	}
 	ctx = core.WithWorkflow(ctx, workflow)
+	if resolve != nil {
+		ctx, req, err = resolve(ctx, req, workflow)
+		if err != nil {
+			var zero Req
+			return ctx, zero, workflow, err
+		}
+	}
 	if patch != nil {
 		req, err = patch(ctx, req)
 		if err != nil {
@@ -149,6 +163,22 @@ func responsesRequestPatch(o *InferenceOrchestrator) func(context.Context, *core
 		return nil
 	}
 	return o.translatedRequestPatcher.PatchResponsesRequest
+}
+
+// responsesHistoryResolve expands a Responses request's history before the
+// prompt phase, telling the resolver every provider type an attempt of the
+// request may reach.
+func responsesHistoryResolve(o *InferenceOrchestrator) func(context.Context, *core.ResponsesRequest, *core.Workflow) (context.Context, *core.ResponsesRequest, error) {
+	if o.responsesHistoryResolver == nil {
+		return nil
+	}
+	return func(ctx context.Context, req *core.ResponsesRequest, workflow *core.Workflow) (context.Context, *core.ResponsesRequest, error) {
+		types := []string{o.ProviderTypeForSelector(core.ModelSelector{Model: req.Model, Provider: req.Provider}, ProviderTypeFromWorkflow(workflow))}
+		for _, selector := range o.FailoverSelectors(workflow) {
+			types = append(types, o.ProviderTypeForSelector(selector, ""))
+		}
+		return o.responsesHistoryResolver.ResolveResponsesHistory(ctx, req, types)
+	}
 }
 
 func contextWithRequestID(ctx context.Context, requestID string) context.Context {

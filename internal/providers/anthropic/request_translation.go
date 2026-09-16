@@ -353,7 +353,7 @@ func prependThinkingBlocks(msg core.Message, content any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	thinking := extra.ThinkingBlocks
+	thinking := signedThinkingBlocks(extra.ThinkingBlocks)
 	if len(thinking) == 0 {
 		return content, nil
 	}
@@ -370,14 +370,30 @@ func prependThinkingBlocks(msg core.Message, content any) (any, error) {
 	return blocks, nil
 }
 
+// signedThinkingBlocks keeps the replayed blocks Anthropic can accept back.
+// Anthropic rejects a thinking block whose signature it did not mint — a
+// missing one with "signature: Field required", any other with "Invalid
+// signature" — so reasoning another provider produced (which the Messages
+// dialect surfaces as a thinking block with an empty signature) is dropped
+// here instead of failing the whole turn. Redacted blocks carry opaque data
+// rather than a signature and are always kept.
+func signedThinkingBlocks(blocks []anthropicContentBlock) []anthropicContentBlock {
+	kept := make([]anthropicContentBlock, 0, len(blocks))
+	for _, block := range blocks {
+		if block.Type == "thinking" && strings.TrimSpace(block.Signature) == "" {
+			continue
+		}
+		kept = append(kept, block)
+	}
+	return kept
+}
+
 // convertToAnthropicRequest converts core.ChatRequest to Anthropic format.
 func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("anthropic chat request is required", nil)
 	}
-	if err := validateAnthropicUnsupportedChatExtras(req.ExtraFields); err != nil {
-		return nil, err
-	}
+	dropUnsupportedVerbosity(req.ExtraFields)
 
 	anthropicReq := &anthropicRequest{
 		Model:         req.Model,
@@ -400,6 +416,7 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 	}
 
 	dropUnsupportedSamplingParameters(anthropicReq)
+	dropConflictingSamplingParameter(anthropicReq)
 
 	if effort := resolveAnthropicReasoningEffort(req); effort != "" {
 		applyReasoning(anthropicReq, req.Model, effort)
@@ -469,6 +486,10 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 		anthropicReq.System = appendAnthropicSystemContent(anthropicReq.System, forcedToolInstruction)
 	}
 
+	if err := applyAnthropicResponseFormat(anthropicReq, req.ExtraFields); err != nil {
+		return nil, err
+	}
+
 	return anthropicReq, nil
 }
 
@@ -489,6 +510,23 @@ func dropUnsupportedSamplingParameters(req *anthropicRequest) {
 	}
 	slog.Warn("dropping sampling parameters the model does not accept", attrs...)
 	req.Temperature = nil
+	req.TopP = nil
+}
+
+// dropConflictingSamplingParameter drops top_p when the caller sent both
+// temperature and top_p. Anthropic documents the two as mutually exclusive
+// ("we generally recommend altering temperature or top_p, but not both") and
+// every current model answers a request carrying both with a 400
+// ("`temperature` and `top_p` cannot both be specified for this model"), so an
+// OpenAI SDK that fills in both defaults could not reach Anthropic at all.
+// temperature is kept because it is the parameter OpenAI clients actually vary
+// and the one Anthropic's own guidance treats as primary.
+func dropConflictingSamplingParameter(req *anthropicRequest) {
+	if req.Temperature == nil || req.TopP == nil {
+		return
+	}
+	slog.Warn("dropping top_p; Anthropic accepts only one of temperature and top_p",
+		"model", req.Model, "temperature", *req.Temperature, "top_p", *req.TopP)
 	req.TopP = nil
 }
 
@@ -516,31 +554,6 @@ func relaxForcedToolChoice(choice *anthropicToolChoice, model string) (*anthropi
 	relaxed.Type = "auto"
 	relaxed.Name = ""
 	return &relaxed, instruction
-}
-
-func validateAnthropicUnsupportedChatExtras(extra core.UnknownJSONFields) error {
-	for _, field := range []string{"response_format", "verbosity"} {
-		raw := bytes.TrimSpace(extra.Lookup(field))
-		if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
-			continue
-		}
-		if field == "response_format" && isNoopResponseFormat(raw) {
-			continue
-		}
-		return core.NewInvalidRequestError("chat field "+field+" is not supported by Anthropic translation", nil)
-	}
-	return nil
-}
-
-func isNoopResponseFormat(raw json.RawMessage) bool {
-	var responseFormat struct {
-		Type string `json:"type"`
-	}
-	if err := json.Unmarshal(raw, &responseFormat); err != nil {
-		return false
-	}
-	responseFormatType := strings.TrimSpace(responseFormat.Type)
-	return responseFormatType == "" || responseFormatType == "text"
 }
 
 // convertResponsesRequestToAnthropic converts a canonical Responses request by

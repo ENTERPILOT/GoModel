@@ -53,7 +53,7 @@ var _ core.PassthroughProvider = (*Provider)(nil)
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	p := &Provider{keys: opts.Keyring(cfg.APIKey)}
 	clientCfg := llmclient.Config{
-		ProviderName:   "elevenlabs",
+		ProviderName:   opts.ClientName("elevenlabs"),
 		BaseURL:        providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,

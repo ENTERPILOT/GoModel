@@ -13,6 +13,7 @@ import (
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/server"
+	"github.com/stretchr/testify/require"
 )
 
 type stubLifecycleApp struct {
@@ -69,26 +70,18 @@ func TestServeGeneration_TearsDownOnceAfterAFailedStart(t *testing.T) {
 	app := &stubLifecycleApp{startErr: startErr}
 
 	err := serveGeneration(context.Background(), app, nil)
-	if !errors.Is(err, startErr) {
-		t.Fatalf("error = %v, want start error %v", err, startErr)
-	}
-	if calls := app.startCallCount(); calls != 1 {
-		t.Fatalf("startCalls = %d, want 1", calls)
-	}
-	if calls := app.shutdownCallCount(); calls != 1 {
-		t.Fatalf("shutdownCalls = %d, want 1", calls)
-	}
+	require.ErrorIs(t, err, startErr)
+	calls := app.startCallCount()
+	require.Equal(t, 1, calls)
+	calls = app.shutdownCallCount()
+	require.Equal(t, 1, calls)
+
 	shutdownCtx := app.capturedShutdownContext()
-	if shutdownCtx == nil {
-		t.Fatal("shutdown context was not captured")
-	}
+	require.NotNil(t, shutdownCtx)
+
 	deadline, ok := shutdownCtx.Deadline()
-	if !ok {
-		t.Fatal("shutdown context should have a deadline")
-	}
-	if time.Until(deadline) <= 0 {
-		t.Fatal("shutdown context deadline should be in the future")
-	}
+	require.True(t, ok)
+	require.Greater(t, time.Until(deadline), time.Duration(0))
 }
 
 // The start error is what the operator needs to see and what sets the exit
@@ -98,12 +91,9 @@ func TestServeGeneration_ShutdownFailureDoesNotMaskTheStartError(t *testing.T) {
 	app := &stubLifecycleApp{startErr: startErr, shutdownErr: errors.New("close failed")}
 
 	err := serveGeneration(context.Background(), app, nil)
-	if !errors.Is(err, startErr) {
-		t.Fatalf("error = %v, want start error %v", err, startErr)
-	}
-	if calls := app.shutdownCallCount(); calls != 1 {
-		t.Fatalf("shutdownCalls = %d, want 1", calls)
-	}
+	require.ErrorIs(t, err, startErr)
+	calls := app.shutdownCallCount()
+	require.Equal(t, 1, calls)
 }
 
 // A teardown that wedges must not wedge the process with it: the wait is
@@ -128,28 +118,22 @@ func TestServeGeneration_StopsWaitingWhenShutdownTimesOut(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if !errors.Is(err, startErr) {
-			t.Fatalf("error = %v, want start error %v", err, startErr)
-		}
+		require.ErrorIs(t, err, startErr)
+
 	case <-time.After(5 * time.Second):
 		t.Fatal("serveGeneration blocked on a shutdown that never returned")
 	}
-	if calls := app.shutdownCallCount(); calls != 1 {
-		t.Fatalf("shutdownCalls = %d, want 1", calls)
-	}
+	calls := app.shutdownCallCount()
+	require.Equal(t, 1, calls)
 }
 
 // The drain window and the shutdown budget live in different packages, so the
 // comment tying them together is only as good as this check: the budget has to
 // cover the drain plus the usage and audit flushes that follow it.
 func TestGracefulDrainFitsInsideTheShutdownBudget(t *testing.T) {
-	if server.GracefulDrainTimeout >= shutdownTimeout {
-		t.Fatalf("GracefulDrainTimeout = %v must be shorter than shutdownTimeout = %v",
-			server.GracefulDrainTimeout, shutdownTimeout)
-	}
-	if headroom := shutdownTimeout - server.GracefulDrainTimeout; headroom < 5*time.Second {
-		t.Fatalf("only %v left for flushing after the drain; widen shutdownTimeout or shorten the drain", headroom)
-	}
+	require.Less(t, server.GracefulDrainTimeout, shutdownTimeout)
+	headroom := shutdownTimeout - server.GracefulDrainTimeout
+	require.GreaterOrEqual(t, headroom, 5*time.Second)
 }
 
 // servingApp mirrors the ordering that matters in the real App:
@@ -207,37 +191,29 @@ func TestServeGeneration_WaitsForTeardownToFinish(t *testing.T) {
 	close(app.flushing)
 	select {
 	case err := <-returned:
-		if err != nil {
-			t.Fatalf("serveGeneration() error = %v, want nil", err)
-		}
+		require.NoError(t, err)
+
 	case <-time.After(5 * time.Second):
 		t.Fatal("serveGeneration did not return after teardown finished")
 	}
-	if !app.shutdownDone.Load() {
-		t.Fatal("teardown did not run to completion")
-	}
+	require.True(t, app.shutdownDone.Load())
 }
 
 // A server that stops without a signal still owns a database handle and
 // buffered records, so it gets the same teardown.
 func TestServeGeneration_TearsDownWhenServerStopsOnItsOwn(t *testing.T) {
 	app := &stubLifecycleApp{}
-
-	if err := serveGeneration(context.Background(), app, nil); err != nil {
-		t.Fatalf("serveGeneration() error = %v, want nil", err)
-	}
-	if calls := app.shutdownCallCount(); calls != 1 {
-		t.Fatalf("shutdownCalls = %d, want 1", calls)
-	}
+	err := serveGeneration(context.Background(), app, nil)
+	require.NoError(t, err)
+	calls := app.shutdownCallCount()
+	require.Equal(t, 1, calls)
 }
 
 func TestServeGeneration_ReturnsStartFailure(t *testing.T) {
 	startErr := errors.New("listen tcp :8080: bind: address already in use")
 	app := &stubLifecycleApp{startErr: startErr}
-
-	if err := serveGeneration(context.Background(), app, nil); !errors.Is(err, startErr) {
-		t.Fatalf("serveGeneration() error = %v, want start error %v", err, startErr)
-	}
+	err := serveGeneration(context.Background(), app, nil)
+	require.ErrorIs(t, err, startErr)
 }
 
 func TestMain_KimicodeProviderRegistration(t *testing.T) {
@@ -245,17 +221,11 @@ func TestMain_KimicodeProviderRegistration(t *testing.T) {
 
 	registered := factory.RegisteredTypes()
 	found := slices.Contains(registered, "kimicode")
-	if !found {
-		t.Fatalf("kimicode not in RegisteredTypes() = %v", registered)
-	}
+	require.True(t, found, "kimicode not in RegisteredTypes() = %v", registered)
 
 	provider, err := factory.Create(providers.ProviderConfig{Type: "kimicode", APIKey: "test"})
-	if err != nil {
-		t.Fatalf("factory.Create(kimicode) error = %v, want nil", err)
-	}
-	if provider == nil {
-		t.Fatal("factory.Create(kimicode) returned nil provider")
-	}
+	require.NoError(t, err)
+	require.NotNil(t, provider)
 }
 
 func TestMain_EdenAIProviderRegistration(t *testing.T) {
@@ -281,15 +251,9 @@ func TestMain_HetznerProviderRegistration(t *testing.T) {
 
 	registered := factory.RegisteredTypes()
 	found := slices.Contains(registered, "hetzner")
-	if !found {
-		t.Fatalf("hetzner not in RegisteredTypes() = %v", registered)
-	}
+	require.True(t, found, "hetzner not in RegisteredTypes() = %v", registered)
 
 	provider, err := factory.Create(providers.ProviderConfig{Type: "hetzner", APIKey: "test"})
-	if err != nil {
-		t.Fatalf("factory.Create(hetzner) error = %v, want nil", err)
-	}
-	if provider == nil {
-		t.Fatal("factory.Create(hetzner) returned nil provider")
-	}
+	require.NoError(t, err)
+	require.NotNil(t, provider)
 }

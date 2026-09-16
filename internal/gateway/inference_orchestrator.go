@@ -26,6 +26,8 @@ type InferenceConfig struct {
 	FailoverResolver         FailoverResolver
 	FailoverPolicy           *FailoverPolicy // Optional: nil applies the default failover policy
 	TranslatedRequestPatcher TranslatedRequestPatcher
+	ResponsesAttemptPatcher  ResponsesAttemptPatcher  // Optional: per-attempt Responses request adaptation
+	ResponsesHistoryResolver ResponsesHistoryResolver // Optional: expands Responses history before the prompt phase
 	UsageLogger              usage.LoggerInterface
 	PricingResolver          usage.PricingResolver
 	RouteGate                RouteGate
@@ -42,6 +44,8 @@ type InferenceOrchestrator struct {
 	failoverResolver         FailoverResolver
 	failoverPolicy           *FailoverPolicy
 	translatedRequestPatcher TranslatedRequestPatcher
+	responsesAttemptPatcher  ResponsesAttemptPatcher
+	responsesHistoryResolver ResponsesHistoryResolver
 	usageLogger              usage.LoggerInterface
 	pricingResolver          usage.PricingResolver
 	routeGate                RouteGate
@@ -58,6 +62,8 @@ func NewInferenceOrchestrator(cfg InferenceConfig) *InferenceOrchestrator {
 		failoverResolver:         cfg.FailoverResolver,
 		failoverPolicy:           cfg.FailoverPolicy,
 		translatedRequestPatcher: cfg.TranslatedRequestPatcher,
+		responsesAttemptPatcher:  cfg.ResponsesAttemptPatcher,
+		responsesHistoryResolver: cfg.ResponsesHistoryResolver,
 		usageLogger:              cfg.UsageLogger,
 		pricingResolver:          cfg.PricingResolver,
 		routeGate:                cfg.RouteGate,

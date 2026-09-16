@@ -160,6 +160,12 @@ Metrics are histograms in seconds, carrying the same attributes:
 | `gen_ai.client.operation.duration` | Every buffered call, and every streaming call that fails before the stream is established or ends before its first chunk. |
 | `gen_ai.client.operation.time_to_first_chunk` | Every successful streaming call, measured until the first response bytes arrive. |
 
+`gomodel.client.empty_responses` counts buffered chat and Responses API calls
+that returned `200` with no choices, no output, or no token usage. Those calls
+look successful in the histograms above, so alert on this counter instead. Its `error.type` is
+`no_choices`, `no_output` (a completed Responses API call with no output
+items), or `no_usage` (content with zero token usage).
+
 A buffered call produces a `CLIENT` span named `<operation> <model>`, such as
 `chat gpt-5`, nested under the HTTP server span. Retries and failovers to
 another provider are separate calls and therefore separate spans, so a request

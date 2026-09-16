@@ -77,11 +77,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 				Help:        "Error message for block and audit note for warn.",
 				Placeholder: DefaultMessage,
 			},
-			{
-				Key: "block_status", Label: "Block status", Input: pluginapi.InputNumber,
-				Help:        "One HTTP status code between 400 and 599 that a blocked request returns, for example 403. Leave empty to use the phase default: 400 when the prompt is blocked, 502 when the response is blocked.",
-				Placeholder: "phase default",
-			},
+			pluginapi.BlockStatusField(),
 			{
 				Key: "respond_text", Label: "Respond text", Input: pluginapi.InputTextarea, Default: DefaultRespondText,
 				Help:        "Assistant reply sent to the client when the action is respond.",
@@ -89,7 +85,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 			},
 			{
 				Key: "on_unclear", Label: "On unclear verdict", Input: pluginapi.InputSelect, Default: UnclearWarn,
-				Help: "What to do when the judge reply is neither a JSON verdict nor a bare allow or block, or was cut off before it finished.",
+				Help: "What to do when the judge reply is neither a JSON verdict nor a bare allow or block, was cut off before it finished, or was spent entirely on reasoning. Allow and warn let the request through: choose block for a policy the instance must enforce even when the judge answers nothing usable. A judge call that fails outright follows the instance's fail mode instead.",
 				Options: []pluginapi.Option{
 					{Value: UnclearAllow, Label: "Allow"},
 					{Value: UnclearWarn, Label: "Warn"},
@@ -98,7 +94,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 			},
 			{
 				Key: "max_tokens", Label: "Max tokens", Input: pluginapi.InputNumber, Default: DefaultMaxTokens,
-				Help:        "Completion cap for the judge call. The verdict is short; raise it only when the judge model spends tokens on reasoning.",
+				Help:        "Completion cap for the judge call; unused tokens cost nothing. The verdict itself is short, but a reasoning judge model spends the cap on thinking first: when it runs out before the verdict the call is recorded as llm_judge_no_verdict and on_unclear decides. Raise it for a judge that reasons a lot.",
 				Placeholder: fmt.Sprint(DefaultMaxTokens),
 			},
 			{
@@ -134,5 +130,5 @@ func (p *Plugin) Summarize(raw json.RawMessage) string {
 	if err != nil {
 		return ""
 	}
-	return fmt.Sprintf("%s, %s, target %s, unclear: %s", s.model, s.action, s.target, s.onUnclear)
+	return fmt.Sprintf("%s, %s, target %s, unclear: %s", s.model, s.enforcement.Action, s.target, s.onUnclear)
 }

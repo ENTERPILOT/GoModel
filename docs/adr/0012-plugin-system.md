@@ -82,9 +82,17 @@ every phase:
 - `Headers`: inbound (credentials redacted), outbound, and upstream headers.
 - `Values`: a per-request bag shared by every hook of the request.
 
-Edits go through methods (`SetText`, `SetToolArguments`, `SetToolResult`,
-`Insert`, `Append`, `Remove`, `SetParam`, `ReplaceText`, `SetFinishReason`)
-that record a `Changes` map keyed by message ID (or `choice:<n>`). Apply-back
+Edits go through methods (`SetText`, `SetMedia`, `SetToolArguments`,
+`SetToolResult`, `Insert`, `Append`, `Remove`, `SetParam`, `ReplaceText`,
+`SetFinishReason`)
+that record a `Changes` map keyed by message ID (or `choice:<n>`).
+`TextTargets` and `SetTargetText` on both `Prompt` and `Completion` wrap the
+walk over text parts and tool-result text that every text-scanning plugin
+needs, so a plugin lists targets, edits their text, and writes each back
+without knowing the part layout. `SetMedia` replaces the payload of an image
+or audio part with inline data; apply-back rewrites only the payload member
+of the wire part (the image URL, the audio data and format) and keeps the
+rest, so an image redactor edits a request the same way a text redactor does. Apply-back
 copies untouched messages from the original typed request verbatim, so
 `ExtraFields`, `cache_control`, and multi-part structure survive; rewrites a
 touched text part in place; encodes inserted messages from the unified form;
@@ -175,7 +183,11 @@ released when the snapshot drops it), and a request holds a chain for the
 duration of a phase, the whole stream for the stream phase. A delayed or
 failed workflow refresh therefore keeps the old instances open, and a
 closed instance refuses hook calls (`ErrInstanceClosed`, handled under the
-fail mode) as a safety net. The guardrails subsystem closes every active and retired instance on
+fail mode) as a safety net. An instance whose plugin implements
+`pluginapi.HealthChecker` is probed after every refresh, off the request
+path and under a 5 s deadline; the outcome is exposed on the instance view
+as `health` and never changes how traffic is handled, since `fail_mode`
+already decides that. The guardrails subsystem closes every active and retired instance on
 shutdown; the routing-strategy resolver is registered for shutdown as well.
 A build of a stream plugin whose `StreamPolicy` is `buffer` fails unless the
 plugin also implements `ResponseHook`, since buffering runs `OnResponse`.
@@ -201,8 +213,12 @@ three modes in its `StreamPolicy`, and the host does the work:
   cost of N characters of delay. The tail is re-presented after the plugin's
   earlier edit, with `StreamEvent.Overlap` marking it; the contract requires
   plugins to edit only matches extending past the overlap, which keeps
-  non-idempotent replacements from compounding. Chat chunks with several
-  choices are split per choice first so each is transformed. For Responses,
+  non-idempotent replacements from compounding. `MinChunkChars` collects a
+  choice's deltas until that many new characters are pending before the
+  instances see them as one event, so a hook with a high per-call cost runs
+  on windows of useful size; the tail and overlap rules are unchanged and
+  the largest value among the transform instances applies. Chat chunks with
+  several choices are split per choice first so each is transformed. For Responses,
   the codec tracks the emitted text per content part and rewrites the
   `*.done` and terminal `response.*` events that restate it, so completion
   events agree with the transformed deltas. An event larger than 4 MiB was
@@ -282,8 +298,8 @@ list them first, while all instances stay in one store and one editor.
 A plugin type reaches the catalog in one of three ways:
 
 - built in: `internal/plugins/builtin` registers `system_prompt`,
-  `llm_based_altering`, `string_replace`, `header_edit`, `llm_judge`, and
-  the `cheapest_healthy` route strategy, each importing only `pluginapi` so
+  `llm_based_altering`, `string_replace`, `header_edit`, `llm_judge`,
+  `presidio`, and the `cheapest_healthy` route strategy, each importing only `pluginapi` so
   they double as reference implementations;
 - compiled in: `ext.RegisterPlugin(factory)` before `run.Run`, the same
   surface Pro uses for rewriters;
@@ -348,11 +364,17 @@ Declared in the contract or the spec but not run by this release:
   plugins, request logging) but are not forwarded to the provider.
 - `RouteRequest.Prompt` is nil; `RouteChoice.Reason` reaches debug logs
   only. Instance-scoped `secret` fields reach a route plugin redacted.
+- `Host.HTTPClient` hands plugins one shared client built from the gateway's
+  transport settings with a 60 s backstop timeout; per-instance proxy or TLS
+  settings are not modelled.
 - `Host.History` returns an error; earlier Responses turns referenced by
   `previous_response_id` or a conversation are not loaded.
 - The response phase does not run on response-cache hits, because the cache
   is served by middleware before the handler; a policy tightened after an
-  answer was cached applies once the prompt-chain hash changes the key.
+  answer was cached applies once the prompt-chain hash changes the key. A
+  plugin whose reply must not be replayed (one that restores request-specific
+  data on the way out) sets `Decision.NoStore`, which the cache honours after
+  the handler ran, on both the HTTP and the internal request path.
 - A `concurrent` prompt step (running a non-mutating check alongside the
   provider call) is not implemented.
 - A `warn` decided after the stream headers went out (a `transform` stream's

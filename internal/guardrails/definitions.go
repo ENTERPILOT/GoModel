@@ -40,6 +40,13 @@ type View struct {
 	// response (see pluginapi.Manifest.Mutates); within one workflow step the
 	// gateway runs such an instance after the step's readers.
 	Mutates bool `json:"mutates"`
+	// Health is "ok" or "degraded": the outcome of the instance's last
+	// health probe (see pluginapi.HealthChecker). Plugins without a probe
+	// are always "ok". HealthError carries the probe's error when degraded
+	// and HealthCheckedAt when the probe ran.
+	Health          string     `json:"health,omitempty"`
+	HealthError     string     `json:"health_error,omitempty"`
+	HealthCheckedAt *time.Time `json:"health_checked_at,omitempty"`
 }
 
 // ViewFromDefinition projects one guardrail definition into its admin-facing

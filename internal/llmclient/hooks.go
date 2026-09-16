@@ -10,6 +10,7 @@ func JoinHooks(hooks ...Hooks) Hooks {
 	var ends []func(ctx context.Context, info ResponseInfo)
 	var firstChunks []func(ctx context.Context, info ResponseInfo)
 	var empties []func(ctx context.Context, info ResponseInfo)
+	var emptyResponses []func(ctx context.Context, info EmptyResponseInfo)
 	for _, h := range hooks {
 		if h.OnRequestStart != nil {
 			starts = append(starts, h.OnRequestStart)
@@ -22,6 +23,9 @@ func JoinHooks(hooks ...Hooks) Hooks {
 		}
 		if h.OnStreamEmpty != nil {
 			empties = append(empties, h.OnStreamEmpty)
+		}
+		if h.OnEmptyResponse != nil {
+			emptyResponses = append(emptyResponses, h.OnEmptyResponse)
 		}
 	}
 
@@ -60,6 +64,15 @@ func JoinHooks(hooks ...Hooks) Hooks {
 		joined.OnStreamEmpty = func(ctx context.Context, info ResponseInfo) {
 			for _, empty := range empties {
 				empty(ctx, info)
+			}
+		}
+	}
+	if len(emptyResponses) == 1 {
+		joined.OnEmptyResponse = emptyResponses[0]
+	} else if len(emptyResponses) > 1 {
+		joined.OnEmptyResponse = func(ctx context.Context, info EmptyResponseInfo) {
+			for _, emptyResponse := range emptyResponses {
+				emptyResponse(ctx, info)
 			}
 		}
 	}

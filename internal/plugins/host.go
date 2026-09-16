@@ -5,9 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/plugins/exchange"
 	"github.com/enterpilot/gomodel/pluginapi"
 )
@@ -32,7 +36,26 @@ type HostDeps struct {
 	Chat ChatCompleter
 	// Metrics may be nil; a no-op sink is used.
 	Metrics MetricsSink
+	// HTTP is the client handed to plugins for external calls. Nil selects
+	// [DefaultHTTPClient].
+	HTTP *http.Client
 }
+
+// PluginHTTPTimeout is the request timeout of [DefaultHTTPClient]. A plugin
+// call to an external service is normally bounded by the instance timeout
+// through the hook context; this is the backstop when none is set.
+const PluginHTTPTimeout = 60 * time.Second
+
+// DefaultHTTPClient returns the process-wide client plugins use for external
+// calls when HostDeps.HTTP is nil: the gateway's transport settings (proxy
+// from the environment, connection pool, dial and TLS timeouts) with
+// [PluginHTTPTimeout] as the request and response-header timeout.
+var DefaultHTTPClient = sync.OnceValue(func() *http.Client {
+	cfg := httpclient.DefaultConfig()
+	cfg.Timeout = PluginHTTPTimeout
+	cfg.ResponseHeaderTimeout = PluginHTTPTimeout
+	return httpclient.NewHTTPClient(&cfg)
+})
 
 // HostInfo identifies the instance a Host serves.
 type HostInfo struct {
@@ -63,10 +86,15 @@ func NewHost(deps HostDeps, info HostInfo) pluginapi.Host {
 		logger = slog.Default()
 	}
 	logger = logger.With("plugin", info.PluginName, "instance", info.InstanceName)
+	if deps.HTTP == nil {
+		deps.HTTP = DefaultHTTPClient()
+	}
 	return &host{deps: deps, info: info, logger: logger}
 }
 
 func (h *host) Logger() *slog.Logger { return h.logger }
+
+func (h *host) HTTPClient() *http.Client { return h.deps.HTTP }
 
 func (h *host) Inference() pluginapi.Inference { return h }
 

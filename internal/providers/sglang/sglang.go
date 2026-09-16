@@ -48,7 +48,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 			SetHeaders:   setHeaders,
 		}),
 		rootClient: llmclient.New(llmclient.Config{
-			ProviderName:   "sglang",
+			ProviderName:   opts.ClientName("sglang"),
 			BaseURL:        passthroughBaseURL(baseURL),
 			Retry:          opts.Resilience.Retry,
 			Hooks:          opts.Hooks,

@@ -60,9 +60,10 @@ func newProvider(compat *openai.CompatibleProvider) *Provider {
 
 func compatibleConfig(baseURL string) openai.CompatibleProviderConfig {
 	return openai.CompatibleProviderConfig{
-		ProviderName: "groq",
-		BaseURL:      baseURL,
-		SetHeaders:   setHeaders,
+		ProviderName:     "groq",
+		BaseURL:          baseURL,
+		SetHeaders:       setHeaders,
+		AdaptChatRequest: adaptChatRequest,
 	}
 }
 
@@ -79,14 +80,26 @@ func (p *Provider) SetBaseURL(url string) {
 	p.compat.SetBaseURL(url)
 }
 
-// ChatCompletion sends a chat completion request to Groq
+// ChatCompletion sends a chat completion request to Groq, renaming Groq's
+// "reasoning" member to GoModel's canonical "reasoning_content".
 func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
-	return p.compat.ChatCompletion(ctx, req)
+	resp, err := p.compat.ChatCompletion(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	normalizeChatResponse(resp)
+	return resp, nil
 }
 
-// StreamChatCompletion returns a raw response body for streaming (caller must close)
+// StreamChatCompletion returns a response body for streaming (caller must
+// close). Reasoning deltas are renamed to "reasoning_content"; every other
+// line is relayed byte for byte.
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
-	return p.compat.StreamChatCompletion(ctx, req)
+	stream, err := p.compat.StreamChatCompletion(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return normalizeChatStream(stream), nil
 }
 
 // ListModels retrieves the list of available models from Groq
@@ -96,7 +109,7 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 
 // Responses sends a Responses API request to Groq (converted to chat format)
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return providers.ResponsesViaChat(ctx, p, req)
+	return providers.ResponsesViaChat(ctx, p, req, "groq")
 }
 
 // StreamResponses returns a raw response body for streaming Responses API (caller must close)
@@ -112,16 +125,4 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 // CreateSpeech synthesizes speech through Groq's OpenAI-compatible /audio/speech API.
 func (p *Provider) CreateSpeech(ctx context.Context, req *core.AudioSpeechRequest) (*core.AudioResponse, error) {
 	return p.compat.CreateSpeech(ctx, req)
-}
-
-// CreateTranscription transcribes audio through Groq's OpenAI-compatible
-// /audio/transcriptions API (whisper models).
-func (p *Provider) CreateTranscription(ctx context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
-	return p.compat.CreateTranscription(ctx, req)
-}
-
-// CreateTranslation translates audio through Groq's OpenAI-compatible
-// /audio/translations API (whisper models).
-func (p *Provider) CreateTranslation(ctx context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
-	return p.compat.CreateTranslation(ctx, req)
 }

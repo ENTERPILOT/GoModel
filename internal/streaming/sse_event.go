@@ -24,14 +24,23 @@ type Event struct {
 	Kind EventKind
 	// Choice is the chat choice index; always 0 for Responses streams.
 	Choice int
+	// Call is the index of the tool call a tool-call delta belongs to: the
+	// delta's tool_calls[].index in a chat stream, the output_index of the
+	// function_call item in a Responses stream. 0 for other kinds.
+	Call int
 	// Text is the delta text for text and reasoning deltas, and the arguments
 	// fragment carried by a tool call delta. Empty for other kinds.
 	Text string
 	// Overlap is the number of leading characters (runes) of Text that were
-	// already shown in the previous text event of this choice. It is non-zero
-	// only for text deltas re-segmented under lookbehind, where consecutive
-	// windows overlap; Text[Overlap:] is the new text.
+	// already shown in the previous event of this window (a choice's text,
+	// or one of its tool calls' arguments). It is non-zero only for deltas
+	// re-segmented under lookbehind, where consecutive windows overlap;
+	// Text[Overlap:] is the new text.
 	Overlap int
+	// Final marks the last event of a window: its text is emitted in full
+	// after the decision (the stream ended, or a delta of another kind
+	// flushed the window), so nothing of it is withheld for a next event.
+	Final bool
 	// ClosesChoice marks a delta event whose chunk also carries the
 	// finish_reason of its choice (a chat stream may end text and finish in
 	// one chunk), so once it is emitted the choice needs no finish chunk

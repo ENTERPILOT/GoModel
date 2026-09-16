@@ -340,6 +340,7 @@
   }
 
   .audit-request-badge {
+    flex-shrink: 0;
     gap: 6px;
     min-width: 0;
     white-space: nowrap;

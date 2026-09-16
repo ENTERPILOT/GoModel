@@ -3,6 +3,7 @@ package pluginapi
 import (
 	"context"
 	"log/slog"
+	"net/http"
 )
 
 // Host is what GoModel offers a plugin instance. It is passed to
@@ -20,6 +21,13 @@ type Host interface {
 	// Metrics registers and updates counters and histograms under the
 	// plugin's own metric namespace.
 	Metrics() Metrics
+	// HTTPClient returns a client for calling external services (a
+	// classifier, a PII detector, a policy engine). It is shared by every
+	// instance, honours the gateway's proxy environment and connection
+	// limits, and has a 60 s request timeout as a backstop; the instance
+	// timeout_ms bounds each call more tightly through the hook's context,
+	// so build requests with http.NewRequestWithContext.
+	HTTPClient() *http.Client
 }
 
 // Inference runs a chat completion through the gateway on behalf of a plugin.

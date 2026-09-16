@@ -44,7 +44,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 			AdaptChatRequest: adaptChatRequest,
 		}),
 		rootClient: llmclient.New(llmclient.Config{
-			ProviderName:   "vllm",
+			ProviderName:   opts.ClientName("vllm"),
 			BaseURL:        rootBaseURL,
 			Retry:          opts.Resilience.Retry,
 			Hooks:          opts.Hooks,

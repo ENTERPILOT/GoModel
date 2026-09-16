@@ -242,7 +242,7 @@ func convertResponsesInputElement(item core.ResponsesInputElement, index int) (c
 				{
 					ID:          callID,
 					Type:        "function",
-					ExtraFields: core.CloneUnknownJSONFields(item.ExtraFields),
+					ExtraFields: chatExtraFieldsFromResponsesItem(item.ExtraFields),
 					Function: core.FunctionCall{
 						Name:      name,
 						Arguments: item.Arguments,
@@ -266,7 +266,7 @@ func convertResponsesInputElement(item core.ResponsesInputElement, index int) (c
 			Role:        "tool",
 			ToolCallID:  callID,
 			Content:     content,
-			ExtraFields: core.CloneUnknownJSONFields(item.ExtraFields),
+			ExtraFields: chatExtraFieldsFromResponsesItem(item.ExtraFields),
 		}, "function_call_output", nil
 	case "", "message":
 		role := strings.TrimSpace(item.Role)
@@ -281,7 +281,7 @@ func convertResponsesInputElement(item core.ResponsesInputElement, index int) (c
 		return core.Message{
 			Role:        role,
 			Content:     content,
-			ExtraFields: core.CloneUnknownJSONFields(item.ExtraFields),
+			ExtraFields: chatExtraFieldsFromResponsesItem(item.ExtraFields),
 		}, "message", nil
 	case "reasoning":
 		// Recognized by responsesInputReasoningText before item conversion.
@@ -333,7 +333,7 @@ func convertResponsesInputMap(item map[string]any, index int) (core.Message, str
 			Role:        "tool",
 			ToolCallID:  callID,
 			Content:     content,
-			ExtraFields: core.UnknownJSONFieldsFromMap(rawJSONMapFromUnknownKeys(item, "type", "call_id", "status", "output")),
+			ExtraFields: core.UnknownJSONFieldsFromMap(rawJSONMapFromUnknownKeys(item, "type", "call_id", "id", "status", "output")),
 		}, "function_call_output", nil
 	case "", "message":
 	case "reasoning":
@@ -357,7 +357,7 @@ func convertResponsesInputMap(item map[string]any, index int) (core.Message, str
 	return core.Message{
 		Role:        role,
 		Content:     content,
-		ExtraFields: core.UnknownJSONFieldsFromMap(rawJSONMapFromUnknownKeys(item, "type", "role", "status", "content")),
+		ExtraFields: core.UnknownJSONFieldsFromMap(rawJSONMapFromUnknownKeys(item, "type", "role", "id", "status", "content")),
 	}, "message", nil
 }
 

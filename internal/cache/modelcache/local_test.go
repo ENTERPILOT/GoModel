@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestLocalCache(t *testing.T) {
@@ -18,12 +21,8 @@ func TestLocalCache(t *testing.T) {
 		ctx := context.Background()
 
 		result, err := cache.Get(ctx)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if result != nil {
-			t.Fatalf("expected nil result for empty cache, got %v", result)
-		}
+		require.NoError(t, err)
+		require.Nil(t, result)
 
 		data := &ModelCache{
 			UpdatedAt: time.Now().UTC(),
@@ -39,25 +38,16 @@ func TestLocalCache(t *testing.T) {
 		}
 
 		err = cache.Set(ctx, data)
-		if err != nil {
-			t.Fatalf("unexpected error on set: %v", err)
-		}
+		require.NoError(t, err)
 
 		result, err = cache.Get(ctx)
-		if err != nil {
-			t.Fatalf("unexpected error on get: %v", err)
-		}
-		if result == nil {
-			t.Fatal("expected result, got nil")
-			return
-		}
+		require.NoError(t, err)
+
+		require.NotNil(t, result, "expected result, got nil")
 		p, ok := result.Providers["openai"]
-		if !ok || len(p.Models) != 1 {
-			t.Fatalf("expected 1 model in openai provider, got %v", result.Providers)
-		}
-		if p.Models[0].ID != "test-model" {
-			t.Errorf("expected test-model in cache, got %q", p.Models[0].ID)
-		}
+		require.True(t, ok)
+		require.Len(t, p.Models, 1, "expected 1 model in openai provider, got %v", result.Providers)
+		assert.Equal(t, "test-model", p.Models[0].ID)
 	})
 
 	t.Run("CreateDirectoryIfNeeded", func(t *testing.T) {
@@ -72,13 +62,9 @@ func TestLocalCache(t *testing.T) {
 		}
 
 		err := cache.Set(ctx, data)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if _, err := os.Stat(cacheFile); os.IsNotExist(err) {
-			t.Fatal("cache file was not created")
-		}
+		require.NoError(t, err)
+		_, err = os.Stat(cacheFile)
+		require.False(t, os.IsNotExist(err))
 	})
 
 	t.Run("EmptyFilePath", func(t *testing.T) {
@@ -86,43 +72,31 @@ func TestLocalCache(t *testing.T) {
 		ctx := context.Background()
 
 		result, err := cache.Get(ctx)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if result != nil {
-			t.Fatal("expected nil result for empty path")
-		}
+		require.NoError(t, err)
+		require.Nil(t, result)
 
 		data := &ModelCache{}
 		err = cache.Set(ctx, data)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err)
 	})
 
 	t.Run("CloseIsNoOp", func(t *testing.T) {
 		cache := NewLocalCache("/tmp/test.json")
 		err := cache.Close()
-		if err != nil {
-			t.Fatalf("unexpected error on close: %v", err)
-		}
+		require.NoError(t, err)
 	})
 
 	t.Run("InvalidJSON", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		cacheFile := filepath.Join(tmpDir, "models.json")
-
-		if err := os.WriteFile(cacheFile, []byte("not valid json"), 0o644); err != nil {
-			t.Fatalf("failed to write test file: %v", err)
-		}
+		err := os.WriteFile(cacheFile, []byte("not valid json"), 0o644)
+		require.NoError(t, err)
 
 		cache := NewLocalCache(cacheFile)
 		ctx := context.Background()
 
-		_, err := cache.Get(ctx)
-		if err == nil {
-			t.Fatal("expected error for invalid JSON")
-		}
+		_, err = cache.Get(ctx)
+		require.Error(t, err)
 	})
 }
 
@@ -149,31 +123,20 @@ func TestModelCacheSerialization(t *testing.T) {
 		}
 
 		data, err := json.Marshal(original)
-		if err != nil {
-			t.Fatalf("failed to marshal: %v", err)
-		}
+		require.NoError(t, err)
 
 		var restored ModelCache
-		if err := json.Unmarshal(data, &restored); err != nil {
-			t.Fatalf("failed to unmarshal: %v", err)
-		}
+		err = json.Unmarshal(data, &restored)
+		require.NoError(t, err)
+		require.Len(t, restored.Providers, len(original.Providers))
 
-		if len(restored.Providers) != len(original.Providers) {
-			t.Fatalf("provider count mismatch: got %d, want %d", len(restored.Providers), len(original.Providers))
-		}
 		openai, ok := restored.Providers["openai-main"]
-		if !ok || len(openai.Models) == 0 {
-			t.Fatalf("expected openai-main provider with models, got %v", restored.Providers)
-		}
-		if openai.Models[0].ID != "gpt-4" {
-			t.Errorf("openai model ID mismatch: got %q, want %q", openai.Models[0].ID, "gpt-4")
-		}
-		if openai.ProviderType != "openai" {
-			t.Errorf("openai provider type mismatch: got %q, want %q", openai.ProviderType, "openai")
-		}
+		require.True(t, ok)
+		require.NotEmpty(t, openai.Models, "expected openai-main provider with models, got %v", restored.Providers)
+		assert.Equal(t, "gpt-4", openai.Models[0].ID)
+		assert.Equal(t, "openai", openai.ProviderType)
+
 		anthropic := restored.Providers["anthropic-main"]
-		if anthropic.ProviderType != "anthropic" {
-			t.Errorf("anthropic provider type mismatch: got %q, want %q", anthropic.ProviderType, "anthropic")
-		}
+		assert.Equal(t, "anthropic", anthropic.ProviderType)
 	})
 }

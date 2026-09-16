@@ -3,70 +3,66 @@ package stringreplace
 import (
 	"context"
 	"encoding/json"
-	"io"
-	"log/slog"
-	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/enterpilot/gomodel/pluginapi/plugintest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
-
-type fakeHost struct{}
-
-func (fakeHost) Logger() *slog.Logger           { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
-func (fakeHost) Inference() pluginapi.Inference { return nil }
-func (fakeHost) History(context.Context, pluginapi.Meta) ([]pluginapi.Message, error) {
-	return nil, nil
-}
-func (fakeHost) Metrics() pluginapi.Metrics { return noopMetrics{} }
-
-type noopMetrics struct{}
-
-func (noopMetrics) Inc(string, map[string]string)              {}
-func (noopMetrics) Observe(string, float64, map[string]string) {}
 
 func newPlugin(t *testing.T, cfg string) *Plugin {
 	t.Helper()
 	p := New()
-	if err := p.Init(context.Background(), json.RawMessage(cfg), fakeHost{}); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
+	err := p.Init(context.Background(), json.RawMessage(cfg), plugintest.NewHost())
+	require.NoError(t, err)
+
 	return p.(*Plugin)
 }
 
-func exchange(prompt *pluginapi.Prompt, resp *pluginapi.Completion) *pluginapi.Exchange {
-	return &pluginapi.Exchange{Prompt: prompt, Response: resp, Values: pluginapi.Values{}}
-}
-
-func text(role pluginapi.Role, id, s string) pluginapi.Message {
-	m := pluginapi.TextMessage(role, s)
-	m.ID = id
-	return m
+// A chained Responses request replays its stored history through the prompt
+// phase only when an instance edits content, so an instance that only blocks,
+// responds, or warns must say so.
+func TestEditsContent(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  string
+		want bool
+	}{
+		{name: "default replaces", cfg: `{"rules":"a => b"}`, want: true},
+		{name: "replace edits", cfg: `{"rules":"a => b","on_match":"replace"}`, want: true},
+		{name: "block only rejects", cfg: `{"rules":"a => b","on_match":"block"}`},
+		{name: "respond only answers", cfg: `{"rules":"a => b","on_match":"respond"}`},
+		{name: "warn only flags", cfg: `{"rules":"a => b","on_match":"warn"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := newPlugin(t, tt.cfg).EditsContent()
+			require.Equal(t, tt.want, got)
+		})
+	}
 }
 
 func TestManifest(t *testing.T) {
 	m := New().Manifest()
-	if m.Name != "string_replace" || !m.Mutates || !m.Guardrail {
-		t.Fatalf("manifest = %+v", m)
-	}
-	if !reflect.DeepEqual(m.Kinds, []pluginapi.Kind{pluginapi.KindPrompt, pluginapi.KindResponse, pluginapi.KindStream}) {
-		t.Errorf("kinds = %v", m.Kinds)
-	}
+	require.Equal(t, "string_replace", m.Name)
+	require.True(t, m.Mutates)
+	require.True(t, m.Guardrail)
+	assert.Equal(t, []pluginapi.Kind{pluginapi.KindPrompt, pluginapi.KindResponse, pluginapi.KindStream}, m.Kinds)
+
 	want := []string{"rules", "mode", "case_insensitive", "roles", "on_match", "message", "block_status", "stream_lookbehind"}
 	var keys []string
 	for _, f := range m.ConfigSchema {
 		keys = append(keys, f.Key)
-		if f.Label == "" || f.Help == "" {
-			t.Errorf("field %s lacks label or help", f.Key)
-		}
-		if (f.Input == pluginapi.InputSelect || f.Input == pluginapi.InputCheckboxes) && len(f.Options) == 0 {
-			t.Errorf("field %s lacks options", f.Key)
+		assert.NotEmpty(t, f.Label)
+		assert.NotEmpty(t, f.Help, "field %s lacks label or help", f.Key)
+
+		if f.Input == pluginapi.InputSelect || f.Input == pluginapi.InputCheckboxes {
+			assert.NotEmpty(t, f.Options, "field %s lacks options", f.Key)
 		}
 	}
-	if !reflect.DeepEqual(keys, want) {
-		t.Errorf("keys = %v, want %v", keys, want)
-	}
+	assert.Equal(t, want, keys)
+
 	for _, iface := range []struct {
 		name string
 		ok   bool
@@ -75,9 +71,7 @@ func TestManifest(t *testing.T) {
 		{"ResponseHook", func() bool { _, ok := New().(pluginapi.ResponseHook); return ok }()},
 		{"StreamHook", func() bool { _, ok := New().(pluginapi.StreamHook); return ok }()},
 	} {
-		if !iface.ok {
-			t.Errorf("plugin must implement %s", iface.name)
-		}
+		assert.True(t, iface.ok, "plugin must implement %s", iface.name)
 	}
 }
 
@@ -100,36 +94,37 @@ func TestInitErrors(t *testing.T) {
 		{"bad bool", `{"rules": "a => b", "case_insensitive": "maybe"}`, "case_insensitive must be true or false"},
 		{"status too low", `{"rules": "a => b", "block_status": 200}`, "block_status must be an HTTP status between 400 and 599"},
 		{"status text", `{"rules": "a => b", "block_status": "abc"}`, "block_status must be a number"},
-		{"negative lookbehind", `{"rules": "a => b", "stream_lookbehind": -1}`, "stream_lookbehind must be a whole number between 0"},
+		{"negative lookbehind", `{"rules": "a => b", "stream_lookbehind": -1}`, "stream_lookbehind must be between 0"},
 		{"line number", `{"rules": "a => b\n\nbroken"}`, "rules line 3"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := New().Init(context.Background(), json.RawMessage(tt.cfg), fakeHost{})
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("err = %v, want containing %q", err, tt.want)
-			}
+			err := New().Init(context.Background(), json.RawMessage(tt.cfg), plugintest.NewHost())
+			require.ErrorContains(t, err, tt.want)
 		})
 	}
 }
 
 func TestDefaults(t *testing.T) {
 	p := newPlugin(t, `{"rules": "a => b"}`)
-	if p.mode != ModeLiteral || p.onMatch != OnMatchReplace || p.caseInsensitive || p.message != DefaultMessage ||
-		p.blockStatus != 0 || p.lookbehind != DefaultStreamLookbehind {
-		t.Errorf("defaults = %+v", p.settings)
-	}
-	if !reflect.DeepEqual(p.roles, map[pluginapi.Role]bool{pluginapi.RoleUser: true}) {
-		t.Errorf("roles = %v", p.roles)
-	}
+	assert.Equal(t, ModeLiteral, p.mode)
+	assert.Equal(t, OnMatchReplace, p.onMatch)
+	assert.False(t, p.caseInsensitive)
+	assert.Equal(t, DefaultMessage, p.enforcement.Message)
+	assert.Equal(t, 0, p.enforcement.BlockStatus)
+	assert.Equal(t, DefaultStreamLookbehind, p.lookbehind)
+	assert.Equal(t, map[pluginapi.Role]bool{pluginapi.RoleUser: true}, p.roles)
+
 	// Numbers and booleans as strings (dashboard forms), roles as CSV.
 	p = newPlugin(t, `{"rules": ["a => b"], "block_status": "451", "stream_lookbehind": "8", "case_insensitive": "yes", "roles": "system, tool"}`)
-	if p.blockStatus != 451 || p.lookbehind != 8 || !p.caseInsensitive {
-		t.Errorf("settings = %+v", p.settings)
-	}
-	if !p.roles[pluginapi.RoleSystem] || !p.roles[pluginapi.RoleDeveloper] || !p.roles[pluginapi.RoleTool] || p.roles[pluginapi.RoleUser] {
-		t.Errorf("roles = %v", p.roles)
-	}
+	assert.Equal(t, 451, p.enforcement.BlockStatus)
+	assert.Equal(t, 8, p.lookbehind)
+	assert.True(t, p.caseInsensitive)
+
+	assert.True(t, p.roles[pluginapi.RoleSystem])
+	assert.True(t, p.roles[pluginapi.RoleDeveloper])
+	assert.True(t, p.roles[pluginapi.RoleTool])
+	assert.False(t, p.roles[pluginapi.RoleUser])
 }
 
 func TestApplyRules(t *testing.T) {
@@ -160,18 +155,17 @@ func TestApplyRules(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := newPlugin(t, tt.cfg)
-			got, n := apply(p.rules, tt.in, 0)
-			if got != tt.want || n != tt.count {
-				t.Errorf("apply = %q (%d), want %q (%d)", got, n, tt.want, tt.count)
-			}
+			got, n := apply(p.rules, tt.in, whole)
+			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.count, n)
 		})
 	}
 }
 
 func prompt() *pluginapi.Prompt {
 	p := &pluginapi.Prompt{Messages: []pluginapi.Message{
-		text(pluginapi.RoleSystem, "m0", "You work for ACME."),
-		text(pluginapi.RoleUser, "m1", "Tell me about ACME and ACME."),
+		plugintest.Text(pluginapi.RoleSystem, "m0", "You work for ACME."),
+		plugintest.Text(pluginapi.RoleUser, "m1", "Tell me about ACME and ACME."),
 		{ID: "m2", Role: pluginapi.RoleAssistant, Parts: []pluginapi.Part{
 			{Kind: pluginapi.PartText, Text: "ACME is great."},
 			{Kind: pluginapi.PartToolCall, ToolCall: &pluginapi.ToolCall{ID: "c1", Name: "lookup", Arguments: json.RawMessage(`{"q":"ACME"}`)}},
@@ -223,19 +217,17 @@ func TestOnPromptReplace(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := newPlugin(t, tt.cfg)
-			x := exchange(prompt(), nil)
+			x := plugintest.Exchange(prompt(), nil)
 			d, err := p.OnPrompt(context.Background(), x)
-			if err != nil || d.Action != pluginapi.ActionAllow {
-				t.Fatalf("OnPrompt = %+v, %v", d, err)
-			}
+			require.NoError(t, err)
+			require.Equal(t, pluginapi.ActionAllow, d.Action)
+
 			for i, m := range x.Prompt.Messages {
-				if got := m.Text(); got != tt.wantText[i] {
-					t.Errorf("message %s = %q, want %q", m.ID, got, tt.wantText[i])
-				}
+				got := m.Text()
+				assert.Equal(t, tt.wantText[i], got)
 			}
-			if !reflect.DeepEqual(d.Detail, tt.detail) {
-				t.Errorf("detail = %v, want %v", d.Detail, tt.detail)
-			}
+			assert.Equal(t, tt.detail, d.Detail)
+
 			changes := x.Prompt.Changes()
 			var edited []string
 			for id, kind := range changes.Messages {
@@ -244,19 +236,12 @@ func TestOnPromptReplace(t *testing.T) {
 				}
 			}
 			sortStrings(edited)
-			if !reflect.DeepEqual(edited, tt.edited) {
-				t.Errorf("edited = %v, want %v", edited, tt.edited)
-			}
-			if changes.Dirty != (len(tt.edited) > 0) {
-				t.Errorf("dirty = %v", changes.Dirty)
-			}
+			assert.Equal(t, tt.edited, edited)
+			assert.Equal(t, len(tt.edited) > 0, changes.Dirty)
 			// Tool call arguments and non-text parts are never touched.
-			if args := string(x.Prompt.Messages[2].Parts[1].ToolCall.Arguments); args != `{"q":"ACME"}` {
-				t.Errorf("tool call arguments changed: %s", args)
-			}
-			if x.Prompt.Messages[3].Parts[0].ToolResult.Parts[1].URL != "https://x/y.png" {
-				t.Error("image part changed")
-			}
+			args := string(x.Prompt.Messages[2].Parts[1].ToolCall.Arguments)
+			assert.Equal(t, `{"q":"ACME"}`, args)
+			assert.Equal(t, "https://x/y.png", x.Prompt.Messages[3].Parts[0].ToolResult.Parts[1].URL)
 		})
 	}
 }
@@ -279,35 +264,28 @@ func TestOnPromptDecisions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := newPlugin(t, tt.cfg)
-			x := exchange(prompt(), nil)
+			x := plugintest.Exchange(prompt(), nil)
 			d, err := p.OnPrompt(context.Background(), x)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if d.Action != tt.action || d.Status != tt.status || d.Message != tt.message {
-				t.Errorf("decision = %+v", d)
-			}
-			if tt.action != pluginapi.ActionAllow && d.Code != Code {
-				t.Errorf("code = %q", d.Code)
+			require.NoError(t, err)
+			assert.Equal(t, tt.action, d.Action)
+			assert.Equal(t, tt.status, d.Status)
+			assert.Equal(t, tt.message, d.Message)
+
+			if tt.action != pluginapi.ActionAllow {
+				assert.Equal(t, Code, d.Code)
 			}
 			if tt.action == pluginapi.ActionRespond {
-				if d.Response == nil || d.Response.Text(0) != "I cannot discuss that." {
-					t.Errorf("respond completion = %+v", d.Response)
-				}
+				require.NotNil(t, d.Response)
+				assert.Equal(t, "I cannot discuss that.", d.Response.Text(0))
 			}
 			if tt.detail == nil {
-				if d.Detail != nil {
-					t.Errorf("detail = %v, want none", d.Detail)
-				}
-			} else if !reflect.DeepEqual(d.Detail, tt.detail) {
-				t.Errorf("detail = %v, want %v", d.Detail, tt.detail)
+				assert.Nil(t, d.Detail)
+			} else {
+				assert.Equal(t, tt.detail, d.Detail)
 			}
-			if x.Prompt.Changes().Dirty {
-				t.Error("non-replace modes must not edit the prompt")
-			}
-			if got := x.Prompt.Messages[1].Text(); got != "Tell me about ACME and ACME." {
-				t.Errorf("prompt edited: %q", got)
-			}
+			assert.False(t, x.Prompt.Changes().Dirty)
+			got := x.Prompt.Messages[1].Text()
+			assert.Equal(t, "Tell me about ACME and ACME.", got)
 		})
 	}
 }
@@ -329,41 +307,34 @@ func completion() *pluginapi.Completion {
 func TestOnResponse(t *testing.T) {
 	t.Run("replace", func(t *testing.T) {
 		p := newPlugin(t, `{"rules": "ACME => [co]", "roles": ["system"]}`) // roles are ignored on responses
-		x := exchange(nil, completion())
+		x := plugintest.Exchange(nil, completion())
 		d, err := p.OnResponse(context.Background(), x)
-		if err != nil || d.Action != pluginapi.ActionAllow {
-			t.Fatalf("OnResponse = %+v, %v", d, err)
-		}
-		if got := x.Response.Text(0); got != "[co] rocks. Go [co]." {
-			t.Errorf("choice 0 = %q", got)
-		}
-		if got := x.Response.Text(2); got != "[co] again" {
-			t.Errorf("choice 2 = %q", got)
-		}
-		if got := x.Response.Choices[0].Message.Parts[0].Text; got != "ACME thinking" {
-			t.Errorf("reasoning part edited: %q", got)
-		}
-		if !reflect.DeepEqual(d.Detail, map[string]any{"replacements": 3, "messages": 2}) {
-			t.Errorf("detail = %v", d.Detail)
-		}
+		require.NoError(t, err)
+		require.Equal(t, pluginapi.ActionAllow, d.Action)
+		got := x.Response.Text(0)
+		assert.Equal(t, "[co] rocks. Go [co].", got)
+		got = x.Response.Text(2)
+		assert.Equal(t, "[co] again", got)
+		got = x.Response.Choices[0].Message.Parts[0].Text
+		assert.Equal(t, "ACME thinking", got)
+		assert.Equal(t, map[string]any{"replacements": 3, "messages": 2}, d.Detail)
+
 		changes := x.Response.Changes()
-		if changes.Messages["choice:0"] != pluginapi.ChangeEdited || changes.Messages["choice:2"] != pluginapi.ChangeEdited || changes.Messages["choice:1"] != "" {
-			t.Errorf("changes = %v", changes.Messages)
-		}
+		assert.Equal(t, pluginapi.ChangeEdited, changes.Messages["choice:0"])
+		assert.Equal(t, pluginapi.ChangeEdited, changes.Messages["choice:2"])
+		assert.Empty(t, changes.Messages["choice:1"], "changes = %v", changes.Messages)
 	})
 	t.Run("block uses phase default status", func(t *testing.T) {
 		p := newPlugin(t, `{"rules": "ACME => x", "on_match": "block"}`)
-		x := exchange(nil, completion())
+		x := plugintest.Exchange(nil, completion())
 		d, err := p.OnResponse(context.Background(), x)
-		if err != nil || d.Action != pluginapi.ActionBlock || d.Status != 0 || d.Message != DefaultMessage {
-			t.Fatalf("OnResponse = %+v, %v", d, err)
-		}
-		if x.Response.Changes().Dirty || x.Response.Text(0) != "ACME rocks. Go ACME." {
-			t.Error("block must not edit the response")
-		}
-		if !reflect.DeepEqual(d.Detail, map[string]any{"matches": 3, "messages": 2}) {
-			t.Errorf("detail = %v", d.Detail)
-		}
+		require.NoError(t, err)
+		require.Equal(t, pluginapi.ActionBlock, d.Action)
+		require.Equal(t, 0, d.Status)
+		require.Equal(t, DefaultMessage, d.Message)
+		assert.False(t, x.Response.Changes().Dirty)
+		assert.Equal(t, "ACME rocks. Go ACME.", x.Response.Text(0))
+		assert.Equal(t, map[string]any{"matches": 3, "messages": 2}, d.Detail)
 	})
 	t.Run("match split across parts is not a match", func(t *testing.T) {
 		p := newPlugin(t, `{"rules": "secret => x", "on_match": "block"}`)
@@ -372,18 +343,18 @@ func TestOnResponse(t *testing.T) {
 			{Kind: pluginapi.PartText, Text: "ret"},
 		}}}}}
 		c.Reset()
-		if d, err := p.OnResponse(context.Background(), exchange(nil, c)); err != nil || d.Action != pluginapi.ActionAllow {
-			t.Fatalf("OnResponse = %+v, %v; want allow like replace, which cannot edit across parts", d, err)
-		}
+		d, err := p.OnResponse(context.Background(), plugintest.Exchange(nil, c))
+		require.NoError(t, err)
+		require.Equal(t, pluginapi.ActionAllow, d.Action, "OnResponse = %+v, %v; want allow like replace, which cannot edit across parts", d, err)
 	})
 	t.Run("nil exchange parts", func(t *testing.T) {
 		p := newPlugin(t, `{"rules": "ACME => x", "on_match": "block"}`)
-		if d, err := p.OnResponse(context.Background(), exchange(nil, nil)); err != nil || d.Action != pluginapi.ActionAllow {
-			t.Errorf("OnResponse(nil) = %+v, %v", d, err)
-		}
-		if d, err := p.OnPrompt(context.Background(), exchange(nil, nil)); err != nil || d.Action != pluginapi.ActionAllow {
-			t.Errorf("OnPrompt(nil) = %+v, %v", d, err)
-		}
+		d, err := p.OnResponse(context.Background(), plugintest.Exchange(nil, nil))
+		require.NoError(t, err)
+		assert.Equal(t, pluginapi.ActionAllow, d.Action)
+		d, err = p.OnPrompt(context.Background(), plugintest.Exchange(nil, nil))
+		require.NoError(t, err)
+		assert.Equal(t, pluginapi.ActionAllow, d.Action)
 	})
 }
 
@@ -400,19 +371,19 @@ func TestStreamPolicy(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.cfg, func(t *testing.T) {
-			if got := newPlugin(t, tt.cfg).StreamPolicy(); got != tt.want {
-				t.Errorf("StreamPolicy = %+v, want %+v", got, tt.want)
-			}
+			got := newPlugin(t, tt.cfg).StreamPolicy()
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
 
 func TestStreamEvents(t *testing.T) {
+	// Each text delta closes its window (Final), so a match at its end is due.
 	events := []*pluginapi.StreamEvent{
-		{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "Hello ACME"},
+		{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "Hello ACME", Final: true},
 		{Seq: 2, Kind: pluginapi.EventReasoningDelta, Text: "ACME"},
 		{Seq: 3, Kind: pluginapi.EventToolCallDelta, Text: `{"q":"ACME"}`},
-		{Seq: 4, Kind: pluginapi.EventTextDelta, Text: " and ACME"},
+		{Seq: 4, Kind: pluginapi.EventTextDelta, Text: " and ACME", Final: true},
 		{Seq: 5, Kind: pluginapi.EventTextDelta, Text: " bye"},
 		{Seq: 6, Kind: pluginapi.EventFinish},
 	}
@@ -458,28 +429,23 @@ func TestStreamEvents(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := newPlugin(t, tt.cfg)
-			x := exchange(nil, nil)
+			x := plugintest.Exchange(nil, nil)
 			for i, ev := range events {
 				d, err := p.OnStreamEvent(context.Background(), x, ev)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if d.Action != tt.actions[i] || d.Text != tt.texts[i] {
-					t.Errorf("event %d: decision = %+v, want %s %q", ev.Seq, d, tt.actions[i], tt.texts[i])
-				}
+				require.NoError(t, err)
+				assert.Equal(t, tt.actions[i], d.Action)
+				assert.Equal(t, tt.texts[i], d.Text, "event %d: decision = %+v, want %s %q", ev.Seq, d, tt.actions[i], tt.texts[i])
 			}
 			d, err := p.OnStreamEnd(context.Background(), x)
-			if err != nil {
-				t.Fatal(err)
+			require.NoError(t, err)
+			assert.Equal(t, tt.end, d.Action)
+
+			if tt.detail != nil {
+				assert.Equal(t, tt.detail, d.Detail)
 			}
-			if d.Action != tt.end {
-				t.Errorf("end action = %s, want %s", d.Action, tt.end)
-			}
-			if tt.detail != nil && !reflect.DeepEqual(d.Detail, tt.detail) {
-				t.Errorf("end detail = %v, want %v", d.Detail, tt.detail)
-			}
-			if tt.end == pluginapi.ActionWarn && (d.Code != Code || d.Message != DefaultMessage) {
-				t.Errorf("warn decision = %+v", d)
+			if tt.end == pluginapi.ActionWarn {
+				assert.Equal(t, Code, d.Code)
+				assert.Equal(t, DefaultMessage, d.Message)
 			}
 		})
 	}
@@ -488,12 +454,11 @@ func TestStreamEvents(t *testing.T) {
 func TestStreamNilValues(t *testing.T) {
 	p := newPlugin(t, `{"rules": "ACME => [co]", "on_match": "warn"}`)
 	x := &pluginapi.Exchange{}
-	if _, err := p.OnStreamEvent(context.Background(), x, &pluginapi.StreamEvent{Kind: pluginapi.EventTextDelta, Text: "ACME"}); err != nil {
-		t.Fatal(err)
-	}
-	if d, err := p.OnStreamEnd(context.Background(), x); err != nil || d.Action != pluginapi.ActionAllow {
-		t.Errorf("OnStreamEnd without Values = %+v, %v", d, err)
-	}
+	_, err := p.OnStreamEvent(context.Background(), x, &pluginapi.StreamEvent{Kind: pluginapi.EventTextDelta, Text: "ACME"})
+	require.NoError(t, err)
+	d, err := p.OnStreamEnd(context.Background(), x)
+	require.NoError(t, err)
+	assert.Equal(t, pluginapi.ActionAllow, d.Action)
 }
 
 func TestSummarize(t *testing.T) {
@@ -506,9 +471,8 @@ func TestSummarize(t *testing.T) {
 		{`{"rules": ""}`, ""},
 	}
 	for _, tt := range tests {
-		if got := New().(*Plugin).Summarize(json.RawMessage(tt.cfg)); got != tt.want {
-			t.Errorf("Summarize(%s) = %q, want %q", tt.cfg, got, tt.want)
-		}
+		got := New().(*Plugin).Summarize(json.RawMessage(tt.cfg))
+		assert.Equal(t, tt.want, got)
 	}
 }
 
@@ -535,10 +499,41 @@ func TestStreamOverlapIsNotReprocessed(t *testing.T) {
 			name: "expanding rule is applied once",
 			cfg:  `{"rules": "a => aa"}`,
 			events: []*pluginapi.StreamEvent{
-				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "a"},
-				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "aa", Overlap: 2}, // the flushed tail
+				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "ab"},
+				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "aab c", Overlap: 3},
 			},
-			want:  []pluginapi.StreamDecision{pluginapi.Replace("aa"), pluginapi.Pass()},
+			want:  []pluginapi.StreamDecision{pluginapi.Replace("aab"), pluginapi.Pass()},
+			total: 1,
+		},
+		{
+			name: "match at the window end waits until it stops growing",
+			cfg:  `{"rules": "sk-[A-Z]{3,} => [k]", "mode": "regex"}`,
+			events: []*pluginapi.StreamEvent{
+				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "key sk-ABC"},
+				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "key sk-ABCDEF", Overlap: 10},
+				{Seq: 3, Kind: pluginapi.EventTextDelta, Text: "key sk-ABCDEF end", Overlap: 13},
+			},
+			want:  []pluginapi.StreamDecision{pluginapi.Pass(), pluginapi.Pass(), pluginapi.Replace("key [k] end")},
+			total: 1,
+		},
+		{
+			name: "held match is applied when the window closes",
+			cfg:  `{"rules": "sk-[A-Z]{3,} => [k]", "mode": "regex"}`,
+			events: []*pluginapi.StreamEvent{
+				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "key sk-ABC"},
+				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "key sk-ABC", Overlap: 10, Final: true},
+			},
+			want:  []pluginapi.StreamDecision{pluginapi.Pass(), pluginapi.Replace("key [k]")},
+			total: 1,
+		},
+		{
+			name: "match longer than the lookbehind is not held",
+			cfg:  `{"rules": "secret => [x]", "stream_lookbehind": 4}`,
+			events: []*pluginapi.StreamEvent{
+				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "my secret"},
+				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "[x] ok", Overlap: 3},
+			},
+			want:  []pluginapi.StreamDecision{pluginapi.Replace("my [x]"), pluginapi.Pass()},
 			total: 1,
 		},
 		{
@@ -546,19 +541,19 @@ func TestStreamOverlapIsNotReprocessed(t *testing.T) {
 			cfg:  `{"rules": "ab => X"}`,
 			events: []*pluginapi.StreamEvent{
 				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "a"},
-				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "ab", Overlap: 1},
+				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "ab c", Overlap: 1},
 			},
-			want:  []pluginapi.StreamDecision{pluginapi.Pass(), pluginapi.Replace("X")},
+			want:  []pluginapi.StreamDecision{pluginapi.Pass(), pluginapi.Replace("X c")},
 			total: 1,
 		},
 		{
 			name: "match inside the overlap is skipped but a later one in the same window is not",
 			cfg:  `{"rules": "é => e"}`,
 			events: []*pluginapi.StreamEvent{
-				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "é"},
-				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "e é", Overlap: 1},
+				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "é x"},
+				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "e x é y", Overlap: 3},
 			},
-			want:  []pluginapi.StreamDecision{pluginapi.Replace("e"), pluginapi.Replace("e e")},
+			want:  []pluginapi.StreamDecision{pluginapi.Replace("e x"), pluginapi.Replace("e x e y")},
 			total: 2,
 		},
 		{
@@ -566,17 +561,17 @@ func TestStreamOverlapIsNotReprocessed(t *testing.T) {
 			cfg:  `{"rules": "(\\d+)-(\\d+) => $2-$1", "mode": "regex"}`,
 			events: []*pluginapi.StreamEvent{
 				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "12-34 "},
-				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "34-12 56-78", Overlap: 6},
+				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "34-12 56-78 ", Overlap: 6},
 			},
-			want:  []pluginapi.StreamDecision{pluginapi.Replace("34-12 "), pluginapi.Replace("34-12 78-56")},
+			want:  []pluginapi.StreamDecision{pluginapi.Replace("34-12 "), pluginapi.Replace("34-12 78-56 ")},
 			total: 2,
 		},
 		{
 			name: "warn counts only new matches",
 			cfg:  `{"rules": "ACME => x", "on_match": "warn"}`,
 			events: []*pluginapi.StreamEvent{
-				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "ACME"},
-				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "ACME ACME", Overlap: 4},
+				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "ACME "},
+				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "ACME ACME ", Overlap: 5},
 			},
 			want:  []pluginapi.StreamDecision{pluginapi.Pass(), pluginapi.Pass()},
 			total: 2,
@@ -585,19 +580,15 @@ func TestStreamOverlapIsNotReprocessed(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := newPlugin(t, tt.cfg)
-			x := exchange(nil, nil)
+			x := plugintest.Exchange(nil, nil)
 			for i, ev := range tt.events {
 				d, err := p.OnStreamEvent(context.Background(), x, ev)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if d.Action != tt.want[i].Action || d.Text != tt.want[i].Text {
-					t.Errorf("event %d: decision = %+v, want %+v", ev.Seq, d, tt.want[i])
-				}
+				require.NoError(t, err)
+				assert.Equal(t, tt.want[i].Action, d.Action)
+				assert.Equal(t, tt.want[i].Text, d.Text)
 			}
-			if got := p.streamCount(x); got != tt.total {
-				t.Errorf("stream matches = %d, want %d", got, tt.total)
-			}
+			got := p.streamCount(x)
+			assert.Equal(t, tt.total, got)
 		})
 	}
 }
@@ -620,20 +611,64 @@ func TestOnPromptCountsPerPartLikeReplace(t *testing.T) {
 
 	t.Run("split across parts matches in no mode", func(t *testing.T) {
 		block := newPlugin(t, `{"rules": "secret => x", "on_match": "block", "roles": ["user"]}`)
-		if d, err := block.OnPrompt(context.Background(), exchange(newPrompt(), nil)); err != nil || d.Action != pluginapi.ActionAllow {
-			t.Fatalf("block decision = %+v, %v; want allow like replace, which cannot edit across parts", d, err)
-		}
+		d, err := block.OnPrompt(context.Background(), plugintest.Exchange(newPrompt(), nil))
+		require.NoError(t, err)
+		require.Equal(t, pluginapi.ActionAllow, d.Action, "block decision = %+v, %v; want allow like replace, which cannot edit across parts", d, err)
+
 		replace := newPlugin(t, `{"rules": "secret => x", "roles": ["user"]}`)
-		x := exchange(newPrompt(), nil)
-		if _, err := replace.OnPrompt(context.Background(), x); err != nil || x.Prompt.Changes().Dirty {
-			t.Fatalf("replace edited a split match: %v, dirty %v", err, x.Prompt.Changes().Dirty)
-		}
+		x := plugintest.Exchange(newPrompt(), nil)
+		_, err = replace.OnPrompt(context.Background(), x)
+		require.NoError(t, err)
+		require.False(t, x.Prompt.Changes().Dirty)
 	})
 	t.Run("tool results count like they are edited", func(t *testing.T) {
 		block := newPlugin(t, `{"rules": "secret => x", "on_match": "block", "roles": ["tool"]}`)
-		d, err := block.OnPrompt(context.Background(), exchange(newPrompt(), nil))
-		if err != nil || d.Action != pluginapi.ActionBlock || !reflect.DeepEqual(d.Detail, map[string]any{"matches": 1, "messages": 1}) {
-			t.Fatalf("block decision = %+v, %v", d, err)
-		}
+		d, err := block.OnPrompt(context.Background(), plugintest.Exchange(newPrompt(), nil))
+		require.NoError(t, err)
+		require.Equal(t, pluginapi.ActionBlock, d.Action)
+		require.Equal(t, map[string]any{"matches": 1, "messages": 1}, d.Detail)
 	})
+}
+
+// TestStreamDriver runs the plugin through plugintest's stream driver, which
+// reproduces the host's lookbehind and overlap handling: a match split
+// across two deltas is rewritten once and the withheld tail is not
+// rewritten again when it is shown a second time.
+func TestStreamDriver(t *testing.T) {
+	p := newPlugin(t, `{"rules": "secret => [x]", "stream_lookbehind": 4}`)
+	res, err := plugintest.RunStream(context.Background(), p, plugintest.Exchange(nil, nil), []*pluginapi.StreamEvent{
+		plugintest.TextDelta("my se"), plugintest.TextDelta("cret is a secret"), plugintest.TextDelta(" here"), plugintest.Event(pluginapi.EventFinish),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "my [x] is a [x] here", res.Text[0])
+	assert.Nil(t, res.Terminated)
+	detail, ok := res.End.Detail.(map[string]any)
+	assert.True(t, ok)
+	assert.Equal(t, 2, detail["replacements"])
+
+	p = newPlugin(t, `{"rules": "secret => [x]", "on_match": "block", "message": "leak"}`)
+	res, err = plugintest.RunStream(context.Background(), p, plugintest.Exchange(nil, nil), []*pluginapi.StreamEvent{plugintest.TextDelta("a se"), plugintest.TextDelta("cret")})
+	require.NoError(t, err)
+	assert.Equal(t, pluginapi.ActionBlock, res.End.Action)
+	assert.Equal(t, "leak", res.End.Message)
+	assert.Empty(t, res.Text)
+}
+
+// TestStreamOpenEndedPatternMasksWholeKey streams a key in three-character
+// deltas: an open-ended pattern must cover the whole key, not stop at
+// whatever had arrived when the minimum length first matched.
+func TestStreamOpenEndedPatternMasksWholeKey(t *testing.T) {
+	p := newPlugin(t, `{"rules": "sk-[A-Za-z0-9]{20,} => [redacted]", "mode": "regex"}`)
+	for _, text := range []string{"my key is sk-ABCDEFGHIJKLMNOPQRSTUV end", "sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghij and more", "last: sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ"} {
+		var events []*pluginapi.StreamEvent
+		for i := 0; i < len(text); i += 3 {
+			events = append(events, plugintest.TextDelta(text[i:min(i+3, len(text))]))
+		}
+		res, err := plugintest.RunStream(context.Background(), p, plugintest.Exchange(nil, nil), append(events, plugintest.Event(pluginapi.EventFinish)))
+		require.NoError(t, err)
+		got := res.Text[0]
+		assert.NotContains(t, got, "ABC")
+		assert.NotContains(t, got, "UV")
+		assert.Contains(t, got, "[redacted]", "%q streamed as %q", text, got)
+	}
 }

@@ -104,14 +104,41 @@ func unescape(s string) string {
 	return b.String()
 }
 
+// span says which matches of a text are due. Text in the prompt and
+// response phases is whole: every match is due. A streamed window starts
+// with skip bytes an earlier window already transformed (see
+// pluginapi.StreamEvent.Overlap), and unless it is final its end can still
+// grow: a match that touches the end and fits in hold runes is left for the
+// next window, which shows it again, so an open-ended pattern such as
+// `sk-[A-Za-z0-9]{20,}` is rewritten whole instead of leaking the rest of a
+// key. A match ending exactly at skip is such a held match and is due now.
+type span struct {
+	skip  int
+	hold  int
+	final bool
+}
+
+// whole is the span of a text that is not streamed.
+var whole = span{final: true}
+
+// due reports whether match m (submatch indexes into s) is rewritten now.
+func (w span) due(s string, m []int) bool {
+	fits := utf8.RuneCountInString(s[m[0]:m[1]]) <= w.hold
+	switch {
+	case m[1] < w.skip:
+		return false // an earlier window already transformed it
+	case m[1] == w.skip:
+		return w.skip > 0 && fits // held at the end of the previous window
+	}
+	return w.final || m[1] < len(s) || m[0] == m[1] || !fits
+}
+
 // apply runs every rule in order over s and returns the result with the
-// total number of replacements. Matches that end within the first skip
-// bytes are left alone: that prefix is streamed text an earlier window
-// already transformed (see pluginapi.StreamEvent.Overlap).
-func apply(rules []rule, s string, skip int) (string, int) {
+// total number of replacements, rewriting only the matches w says are due.
+func apply(rules []rule, s string, w span) (string, int) {
 	total := 0
 	for _, r := range rules {
-		out, n, first := r.replaceAfter(s, skip)
+		out, n, first := r.replaceDue(s, w)
 		if n == 0 {
 			continue
 		}
@@ -119,18 +146,18 @@ func apply(rules []rule, s string, skip int) (string, int) {
 		s = out
 		// Everything from the first edit on is fresh output; the next rule
 		// may match it.
-		skip = min(skip, first)
+		w.skip = min(w.skip, first)
 	}
 	return s, total
 }
 
-// replaceAfter applies r to every match ending after skip and returns the
-// result, the number of replacements, and the start of the first one.
-func (r rule) replaceAfter(s string, skip int) (string, int, int) {
+// replaceDue applies r to every due match and returns the result, the
+// number of replacements, and the start of the first one.
+func (r rule) replaceDue(s string, w span) (string, int, int) {
 	var b strings.Builder
 	last, n, first := 0, 0, -1
 	for _, m := range r.re.FindAllStringSubmatchIndex(s, -1) {
-		if m[1] <= skip {
+		if !w.due(s, m) {
 			continue
 		}
 		if first < 0 {
@@ -152,13 +179,12 @@ func (r rule) replaceAfter(s string, skip int) (string, int, int) {
 	return b.String(), n, first
 }
 
-// count returns how many rule matches end after the first skip bytes of s
-// without editing it.
-func count(rules []rule, s string, skip int) int {
+// count returns how many matches of s are due without editing it.
+func count(rules []rule, s string, w span) int {
 	total := 0
 	for _, r := range rules {
 		for _, m := range r.re.FindAllStringIndex(s, -1) {
-			if m[1] > skip {
+			if w.due(s, m) {
 				total++
 			}
 		}

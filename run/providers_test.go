@@ -6,6 +6,8 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestDefaultProviderFactoryCredentialForms pins the credential form the
@@ -121,9 +123,8 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.providerType, func(t *testing.T) {
 			schema, ok := schemas[tt.providerType]
-			if !ok {
-				t.Fatalf("no credential schema for provider type %q", tt.providerType)
-			}
+			require.True(t, ok, "no credential schema for provider type %q", tt.providerType)
+
 			if tt.defaultURL != "" && schema.DefaultBaseURL != tt.defaultURL {
 				t.Errorf("DefaultBaseURL = %q, want %q", schema.DefaultBaseURL, tt.defaultURL)
 			}
@@ -132,35 +133,27 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			for _, field := range schema.Fields {
 				names = append(names, field.Name)
 			}
-			if !slices.Equal(names, tt.fields) {
-				t.Errorf("fields = %v, want %v", names, tt.fields)
-			}
+			assert.True(t, slices.Equal(names, tt.fields), "fields = %v, want %v", names, tt.fields)
+
 			var requiredNames []string
 			for _, field := range schema.Fields {
 				if field.Required {
 					requiredNames = append(requiredNames, field.Name)
 				}
 			}
-			if !slices.Equal(requiredNames, tt.required) {
-				t.Errorf("required = %v, want %v", requiredNames, tt.required)
-			}
+			assert.True(t, slices.Equal(requiredNames, tt.required), "required = %v, want %v", requiredNames, tt.required)
+
 			for _, name := range tt.absent {
-				if schema.Accepts(name) {
-					t.Errorf("Accepts(%s) = true, want false for provider type %q", name, tt.providerType)
-				}
+				assert.False(t, schema.Accepts(name), "Accepts(%s) = true, want false for provider type %q", name, tt.providerType)
 			}
 			for name, want := range tt.options {
 				field, _ := schema.Field(name)
-				if !slices.Equal(field.Options, want) {
-					t.Errorf("%s.Options = %v, want %v", name, field.Options, want)
-				}
+				assert.True(t, slices.Equal(field.Options, want), "%s.Options = %v, want %v", name, field.Options, want)
 			}
 			// Every field a form renders must be one the API accepts, or the
 			// value would be dropped on save.
 			for _, name := range names {
-				if !slices.Contains(credentialPayloadFields, name) {
-					t.Errorf("field %q is not part of the upsert payload", name)
-				}
+				assert.True(t, slices.Contains(credentialPayloadFields, name), "field %q is not part of the upsert payload", name)
 			}
 		})
 	}
@@ -188,9 +181,7 @@ func TestDefaultProviderFactoryRegistersAllProviderTypes(t *testing.T) {
 		got := factory.RegisteredTypes()
 		slices.Sort(got)
 
-		if !slices.Equal(got, expected) {
-			t.Errorf("metrics=%v: registered types = %v, want %v", metricsEnabled, got, expected)
-		}
+		assert.True(t, slices.Equal(got, expected), "metrics=%v: registered types = %v, want %v", metricsEnabled, got, expected)
 
 		// CredentialSchemas is the source for
 		// GET /admin/provider-credentials/types, which drives the dashboard's
@@ -199,8 +190,6 @@ func TestDefaultProviderFactoryRegistersAllProviderTypes(t *testing.T) {
 		for _, schema := range factory.CredentialSchemas() {
 			dashboardTypes = append(dashboardTypes, schema.Type)
 		}
-		if !slices.Equal(dashboardTypes, expected) {
-			t.Errorf("metrics=%v: dashboard provider types = %v, want %v", metricsEnabled, dashboardTypes, expected)
-		}
+		assert.True(t, slices.Equal(dashboardTypes, expected), "metrics=%v: dashboard provider types = %v, want %v", metricsEnabled, dashboardTypes, expected)
 	}
 }

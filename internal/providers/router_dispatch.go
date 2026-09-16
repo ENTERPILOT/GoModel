@@ -80,6 +80,7 @@ func routeResolvedModelCall[Req any, Resp any](
 	}
 
 	resp, err := call(ctx, route.provider, buildForward(route))
+	r.observeEmptyResponse(ctx, route, resp, err)
 	return resp, route.providerType, err
 }
 

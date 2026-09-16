@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"io"
-	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -42,7 +41,7 @@ func convertAnthropicResponseToResponses(resp *anthropicResponse, model string) 
 	msg.ExtraFields = withThinkingReplay(msg.ExtraFields, resp.Content)
 	output := providers.BuildResponsesOutputItems(msg)
 
-	return &core.ResponsesResponse{
+	converted := &core.ResponsesResponse{
 		ID:        resp.ID,
 		Object:    "response",
 		CreatedAt: time.Now().Unix(),
@@ -51,14 +50,25 @@ func convertAnthropicResponseToResponses(resp *anthropicResponse, model string) 
 		Output:    output,
 		Usage:     buildAnthropicResponsesUsage(resp.Usage),
 	}
+	providers.ApplyResponsesFinishReason(converted, normalizeAnthropicStopReason(resp.StopReason))
+	return converted
 }
 
-// buildAnthropicResponsesUsage creates a ResponsesUsage from anthropicUsage, including RawUsage.
+// buildAnthropicResponsesUsage creates a ResponsesUsage from anthropicUsage.
+// Cache reads and thinking tokens are reported in the OpenAI Responses shape;
+// the Anthropic-named counts stay in RawUsage, which feeds usage records and
+// cost calculation without reaching the client response.
 func buildAnthropicResponsesUsage(u anthropicUsage) *core.ResponsesUsage {
 	usage := &core.ResponsesUsage{
 		InputTokens:  u.InputTokens,
 		OutputTokens: u.OutputTokens,
 		TotalTokens:  u.InputTokens + u.OutputTokens,
+	}
+	if u.CacheReadInputTokens > 0 {
+		usage.PromptTokensDetails = &core.PromptTokensDetails{CachedTokens: u.CacheReadInputTokens}
+	}
+	if u.OutputTokensDetails.ThinkingTokens > 0 {
+		usage.CompletionTokensDetails = &core.CompletionTokensDetails{ReasoningTokens: u.OutputTokensDetails.ThinkingTokens}
 	}
 	rawUsage := buildAnthropicRawUsage(u)
 	if len(rawUsage) > 0 {
@@ -67,6 +77,10 @@ func buildAnthropicResponsesUsage(u anthropicUsage) *core.ResponsesUsage {
 	return usage
 }
 
+// anthropicResponsesUsagePayload renders the usage object carried by the
+// terminal stream event. It keeps the Anthropic-named cache counts: a stream's
+// usage is recorded by parsing this payload, so dropping them would drop the
+// cache pricing with them.
 func anthropicResponsesUsagePayload(usage *anthropicUsage) map[string]any {
 	if usage == nil {
 		return nil
@@ -141,9 +155,11 @@ type responsesStreamConverter struct {
 	thinking             thinkingReplayState
 	buffer               streaming.StreamBuffer
 	closed               bool
+	sentCreate           bool
 	sentDone             bool
-	sawStop              bool  // upstream signalled the end of the message
-	pendingErr           error // upstream read error deferred until terminal events are drained
+	sawStop              bool   // upstream signalled the end of the message
+	stopReason           string // Anthropic stop_reason, used for incomplete_details
+	pendingErr           error  // upstream read error deferred until terminal events are drained
 	usage                anthropicUsage
 	hasUsage             bool
 }
@@ -264,15 +280,24 @@ func (sc *responsesStreamConverter) reserveAssistantMessageOutput() {
 // once. A stream that ends without Anthropic signalling the end of the message
 // (message_stop or a stop_reason) was interrupted: it ends with
 // response.incomplete instead of fabricating completion, and its open items
-// close with status "incomplete".
+// close with status "incomplete". A stream that stopped early on its own
+// (stop_reason "max_tokens") ends the same way, with the matching
+// incomplete_details reason.
 func (sc *responsesStreamConverter) appendTerminalEvents() {
 	if sc.sentDone {
 		return
 	}
 	sc.sentDone = true
+	// A body cut before message_start still owes the client the opening
+	// events: stream helpers snapshot the created response before anything else.
+	sc.buffer.AppendString(sc.startResponse())
 	status := "completed"
 	eventName := "response.completed"
-	if !sc.sawStop {
+	incompleteReason := "interrupted"
+	if sc.sawStop {
+		incompleteReason = providers.ResponsesIncompleteReason(normalizeAnthropicStopReason(sc.stopReason))
+	}
+	if incompleteReason != "" {
 		status = "incomplete"
 		eventName = "response.incomplete"
 	}
@@ -294,28 +319,32 @@ func (sc *responsesStreamConverter) appendTerminalEvents() {
 		"created_at": sc.createdAt,
 		"output":     sc.output.FinalOutputItems(sc.reasoningOutputIndex, sc.assistantOutputIndex, sc.toolCalls, true),
 	}
-	if status == "incomplete" {
-		responseData["incomplete_details"] = map[string]any{"reason": "interrupted"}
+	if incompleteReason != "" {
+		responseData["incomplete_details"] = map[string]any{"reason": incompleteReason}
 	}
 	// Include merged usage data captured across message_start/message_delta.
 	if sc.hasUsage {
 		responseData["usage"] = anthropicResponsesUsagePayload(&sc.usage)
 	}
-	doneEvent := map[string]any{
-		"type":     eventName,
-		"response": responseData,
-	}
-	jsonData, marshalErr := json.Marshal(doneEvent)
-	if marshalErr != nil {
-		slog.Error("failed to marshal terminal responses event", "error", marshalErr, "event", eventName, "response_id", sc.responseID)
-		return
-	}
 	sc.buffer.AppendString(prefix)
-	sc.buffer.AppendString("event: ")
-	sc.buffer.AppendString(eventName)
-	sc.buffer.AppendString("\ndata: ")
-	sc.buffer.AppendBytes(jsonData)
-	sc.buffer.AppendString("\n\ndata: [DONE]\n\n")
+	sc.buffer.AppendString(sc.output.FinishResponse(eventName, responseData))
+}
+
+// startResponse opens the stream with response.created and
+// response.in_progress once.
+func (sc *responsesStreamConverter) startResponse() string {
+	if sc.sentCreate {
+		return ""
+	}
+	sc.sentCreate = true
+	return sc.output.StartResponse(map[string]any{
+		"id":         sc.responseID,
+		"object":     "response",
+		"status":     "in_progress",
+		"model":      sc.model,
+		"provider":   "anthropic",
+		"created_at": sc.createdAt,
+	})
 }
 
 // completePendingToolCalls emits the done events for tool calls the upstream
@@ -363,18 +392,7 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 		if mergeAnthropicUsage(&sc.usage, event.Usage) {
 			sc.hasUsage = true
 		}
-		// Send response.created event
-		return sc.output.WriteEvent("response.created", map[string]any{
-			"type": "response.created",
-			"response": map[string]any{
-				"id":         sc.responseID,
-				"object":     "response",
-				"status":     "in_progress",
-				"model":      sc.model,
-				"provider":   "anthropic",
-				"created_at": sc.createdAt,
-			},
-		})
+		return sc.startResponse()
 
 	case "content_block_start":
 		if sc.thinking.track(event.Index, event.ContentBlock) {
@@ -425,12 +443,7 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 			if event.Delta.Text != "" {
 				prefix := sc.output.CompleteReasoningOutput(sc.reasoningOutputIndex)
 				sc.reserveAssistantMessageOutput()
-				prefix += sc.output.StartAssistantOutput(sc.assistantOutputIndex)
-				sc.output.AppendAssistantText(event.Delta.Text)
-				return prefix + sc.output.WriteEvent("response.output_text.delta", map[string]any{
-					"type":  "response.output_text.delta",
-					"delta": event.Delta.Text,
-				})
+				return prefix + sc.output.AppendAssistantDelta(sc.assistantOutputIndex, event.Delta.Text)
 			}
 		case "input_json_delta":
 			if event.Delta.PartialJSON == "" {
@@ -476,6 +489,9 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 		// stream is cut before message_stop arrives.
 		if event.Delta != nil && event.Delta.StopReason != "" {
 			sc.sawStop = true
+			if sc.stopReason == "" {
+				sc.stopReason = event.Delta.StopReason
+			}
 		}
 		if !sc.output.AssistantReserved() && len(sc.toolCalls) == 0 {
 			sc.reserveAssistantMessageOutput()

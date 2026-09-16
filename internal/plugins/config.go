@@ -141,8 +141,10 @@ func SchemaDefaults(schema []pluginapi.Field) json.RawMessage {
 			continue
 		}
 		switch field.Input {
-		case pluginapi.InputCheckboxes:
+		case pluginapi.InputCheckboxes, pluginapi.InputList:
 			out[field.Key] = []string{}
+		case pluginapi.InputBool:
+			out[field.Key] = false
 		case pluginapi.InputNumber, pluginapi.InputSelect:
 		default:
 			out[field.Key] = ""
@@ -245,6 +247,10 @@ func coerceField(field pluginapi.Field, value any) (any, error) {
 		return coerceString(value, false)
 	case pluginapi.InputTextarea:
 		return coerceTextarea(value)
+	case pluginapi.InputBool:
+		return coerceBool(value)
+	case pluginapi.InputList:
+		return coerceList(value)
 	default: // text, model, or unknown
 		return coerceString(value, true)
 	}
@@ -328,6 +334,72 @@ func normalizeFloat(f float64) any {
 		return int64(f)
 	}
 	return f
+}
+
+// coerceBool accepts a JSON boolean, a 0/1 number, or the words true, false,
+// yes, no, on, off in any case. An empty string is treated as unset.
+func coerceBool(value any) (any, error) {
+	switch v := value.(type) {
+	case bool:
+		return v, nil
+	case json.Number:
+		switch v.String() {
+		case "0":
+			return false, nil
+		case "1":
+			return true, nil
+		}
+		return nil, fmt.Errorf("expected true or false, got %s", v.String())
+	case string:
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "":
+			return nil, nil
+		case "true", "yes", "on", "1":
+			return true, nil
+		case "false", "no", "off", "0":
+			return false, nil
+		}
+		return nil, fmt.Errorf("expected true or false, got %q", v)
+	default:
+		return nil, fmt.Errorf("expected true or false, got %T", value)
+	}
+}
+
+// coerceList accepts a list of strings or one string split on commas and
+// newlines. Entries are trimmed, empty ones dropped, duplicates removed.
+func coerceList(value any) ([]string, error) {
+	var items []any
+	switch v := value.(type) {
+	case []any:
+		items = v
+	case []string:
+		for _, s := range v {
+			items = append(items, s)
+		}
+	case string:
+		for _, piece := range strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == '\n' }) {
+			items = append(items, piece)
+		}
+	default:
+		return nil, fmt.Errorf("expected a list of strings, got %T", value)
+	}
+	out := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for i, item := range items {
+		s, err := coerceString(item, true)
+		if err != nil {
+			return nil, fmt.Errorf("item %d: %w", i, err)
+		}
+		if s == "" {
+			continue
+		}
+		if _, dup := seen[s]; dup {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out, nil
 }
 
 func coerceCheckboxes(field pluginapi.Field, value any) ([]string, error) {

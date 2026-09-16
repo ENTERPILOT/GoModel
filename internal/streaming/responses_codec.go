@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,12 +32,16 @@ type responsesEventView struct {
 // responsesItem tracks an output item announced by response.output_item.added
 // so a cut stream can close it.
 type responsesItem struct {
-	index        int
-	id           string
-	itemType     string
-	raw          json.RawMessage
-	text         strings.Builder
-	arguments    strings.Builder
+	index     int
+	id        string
+	itemType  string
+	raw       json.RawMessage
+	text      strings.Builder
+	arguments strings.Builder
+	// argsOpen says an arguments delta was decoded for the item, so the
+	// events restating its arguments are rewritten to what was emitted
+	// even when that is nothing.
+	argsOpen     bool
 	contentIndex int
 	partOpen     bool
 	done         bool
@@ -75,16 +80,21 @@ type responsesCodec struct {
 	id, model, provider string
 	createdAt           int64
 	seq                 int
-	items               map[int]*responsesItem
+	// out is the next outgoing sequence_number while renumbering, and
+	// renumbering says the codec, not the upstream, numbers the events the
+	// client sees. See Renumber.
+	out         int
+	renumbering bool
+	items       map[int]*responsesItem
 	order               []int
-	// textIndex and argsIndex are the output_index of the most recently
-	// decoded text and function-call delta; emitted deltas (which may be
-	// re-segmented copies) are attributed to them by Track. textPart is
-	// the content or summary index of that text delta and textSummary says
-	// which of the two it is.
-	textIndex, argsIndex int
-	textPart             int
-	textSummary          bool
+	// textIndex is the output_index of the most recently decoded text
+	// delta; emitted text deltas (which may be re-segmented copies) are
+	// attributed to it by Track. textPart is the content or summary index
+	// of that delta and textSummary says which of the two it is. Tool-call
+	// deltas carry their item in Event.Call instead.
+	textIndex   int
+	textPart    int
+	textSummary bool
 }
 
 // ResponsesCodec returns a codec for Responses API event streams.
@@ -109,11 +119,58 @@ func (c *responsesCodec) Decode(raw RawEvent, seq int) Event {
 	case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 		ev.Kind, ev.Text = KindReasoningDelta, view.Delta
 	case "response.function_call_arguments.delta":
-		ev.Kind, ev.Text = KindToolCallDelta, view.Delta
+		ev.Kind, ev.Text, ev.Call = KindToolCallDelta, view.Delta, view.OutputIndex
 	case "response.completed", "response.incomplete", "response.failed":
 		ev.Kind = KindFinish
 	}
 	return ev
+}
+
+// BeginRenumber puts the codec in renumbering mode.
+func (c *responsesCodec) BeginRenumber() { c.renumbering = true }
+
+// Renumber stamps the next outgoing sequence_number on an event about to
+// reach the client, so a stream that drops, merges, splits or injects events
+// still delivers 0..N without gaps. An event that arrived without a number
+// gets one; an event whose number is already the right one is left untouched
+// (ok is false), which keeps an unedited pass-through byte identical.
+func (c *responsesCodec) Renumber(ev Event) (Event, bool) {
+	if ev.Kind == KindDone || !jsonObject(ev.Data) {
+		return ev, false
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(ev.Data, &top); err != nil {
+		return ev, false
+	}
+	next := c.nextSeq()
+	if current, err := strconv.Atoi(string(bytes.TrimSpace(top["sequence_number"]))); err == nil && current == next {
+		return ev, false
+	}
+	encoded, err := json.Marshal(next)
+	if err != nil {
+		return ev, false
+	}
+	top["sequence_number"] = encoded
+	data, err := json.Marshal(top)
+	if err != nil {
+		return ev, false
+	}
+	ev.Data = data
+	return ev, true
+}
+
+// nextSeq returns the number the next emitted event carries: the outgoing
+// count while renumbering, and otherwise one past the highest number seen
+// upstream.
+func (c *responsesCodec) nextSeq() int {
+	if c.renumbering {
+		n := c.out
+		c.out++
+		return n
+	}
+	n := c.seq
+	c.seq++
+	return n
 }
 
 func (c *responsesCodec) remember(view *responsesEventView) {
@@ -142,7 +199,9 @@ func (c *responsesCodec) remember(view *responsesEventView) {
 		c.textIndex, c.textPart, c.textSummary = view.OutputIndex, view.SummaryIndex, true
 		c.openPart()
 	case "response.function_call_arguments.delta":
-		c.argsIndex = view.OutputIndex
+		if item := c.items[view.OutputIndex]; item != nil {
+			item.argsOpen = true
+		}
 	}
 }
 
@@ -182,7 +241,9 @@ func (c *responsesCodec) Track(ev Event) {
 		}
 		return
 	case KindToolCallDelta:
-		if item := c.items[c.argsIndex]; item != nil {
+		// The event names its item: a window flushed by a later item's
+		// delta must not be credited to that later item.
+		if item := c.items[ev.Call]; item != nil {
 			item.arguments.WriteString(ev.Text)
 		}
 		return
@@ -226,7 +287,7 @@ func (c *responsesCodec) Track(ev Event) {
 }
 
 func (c *responsesCodec) RewriteText(ev Event, text string) (Event, error) {
-	if ev.Kind != KindTextDelta && ev.Kind != KindReasoningDelta {
+	if !isDelta(ev.Kind) {
 		return ev, ErrNotTextEvent
 	}
 	var top map[string]json.RawMessage
@@ -248,8 +309,8 @@ func (c *responsesCodec) RewriteText(ev Event, text string) (Event, error) {
 }
 
 // StripTerminal is a no-op: a Responses text delta carries no per-choice
-// terminal members. A re-segmented delta repeats its sequence_number, which
-// clients do not act on.
+// terminal members. A re-segmented delta is renumbered on its way out, so it
+// does not repeat the sequence_number of the chunk it was rendered from.
 func (c *responsesCodec) StripTerminal(ev Event) (Event, bool) { return ev, false }
 
 // Split is a no-op: a Responses event carries one delta.
@@ -277,6 +338,8 @@ func (c *responsesCodec) Restate(ev Event) (Event, bool) {
 		changed = c.restateText(top, "text", view.OutputIndex, view.ContentIndex, false)
 	case "response.reasoning_summary_text.done":
 		changed = c.restateText(top, "text", view.OutputIndex, view.SummaryIndex, true)
+	case "response.function_call_arguments.done":
+		changed = c.restateArguments(top, c.items[view.OutputIndex])
 	case "response.content_part.done":
 		changed = c.restateNested(top, "part", func(part map[string]json.RawMessage) bool {
 			return c.restateText(part, "text", view.OutputIndex, view.ContentIndex, false)
@@ -330,6 +393,23 @@ func (c *responsesCodec) restateText(obj map[string]json.RawMessage, key string,
 	return true
 }
 
+// restateArguments sets obj["arguments"] to the emitted arguments of a
+// function-call item when deltas were tracked for it and they differ.
+func (c *responsesCodec) restateArguments(obj map[string]json.RawMessage, item *responsesItem) bool {
+	if item == nil || !item.argsOpen {
+		return false
+	}
+	if current, ok := jsonStringOf(obj["arguments"]); ok && current == item.arguments.String() {
+		return false
+	}
+	encoded, err := json.Marshal(item.arguments.String())
+	if err != nil {
+		return false
+	}
+	obj["arguments"] = encoded
+	return true
+}
+
 // restateNested decodes obj[key] as an object, lets fn edit it, and writes
 // it back when fn reports a change.
 func (c *responsesCodec) restateNested(obj map[string]json.RawMessage, key string, fn func(map[string]json.RawMessage) bool) bool {
@@ -355,7 +435,7 @@ func (c *responsesCodec) restateItem(obj map[string]json.RawMessage, item *respo
 	if item == nil {
 		return false
 	}
-	changed := false
+	changed := c.restateArguments(obj, item)
 	for _, member := range []struct {
 		key     string
 		emitted map[int]*strings.Builder
@@ -447,8 +527,7 @@ func isResponsesRestatingEvent(ev Event) bool {
 // emit appends one event with the next sequence_number.
 func (c *responsesCodec) emit(out [][]byte, name string, payload map[string]any) [][]byte {
 	payload["type"] = name
-	payload["sequence_number"] = c.seq
-	c.seq++
+	payload["sequence_number"] = c.nextSeq()
 	encoded, err := encodeJSONEvent(name, payload)
 	if err != nil {
 		return out

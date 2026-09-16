@@ -83,8 +83,9 @@ Responses, conversations, batches, and uploaded files remember the `user_path`
 they were created under. Retrieving, listing, updating, cancelling, or deleting
 one of them by ID succeeds only when that path lies inside the caller's scope;
 otherwise the gateway answers `404`, exactly as for an unknown ID. A
-`/v1/responses` call that references a conversation from another subtree fails
-the same way.
+`/v1/responses` call that references a conversation, or a
+`previous_response_id`, from another subtree fails the same way — including on
+providers that resolve `previous_response_id` themselves.
 
 Scoped credentials can only address objects the gateway tracks: an ID the
 gateway has no record of is reported as missing, and `GET /v1/files` lists the

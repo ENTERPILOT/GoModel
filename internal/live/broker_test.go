@@ -7,6 +7,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBrokerPublishesAndReplaysBySequence(t *testing.T) {
@@ -29,23 +30,16 @@ func TestBrokerPublishesAndReplaysBySequence(t *testing.T) {
 	})
 
 	sub := b.Subscribe(1)
-	if sub == nil {
-		t.Fatal("Subscribe returned nil")
-	}
+	require.NotNil(t, sub)
+
 	defer sub.Close()
 
-	if sub.Reset {
-		t.Fatal("Subscribe reset = true, want false")
-	}
-	if len(sub.Replay) != 1 {
-		t.Fatalf("replay len = %d, want 1", len(sub.Replay))
-	}
-	if got := sub.Replay[0].Type; got != EventUsageCompleted {
-		t.Fatalf("replay type = %q, want %q", got, EventUsageCompleted)
-	}
-	if got := sub.Replay[0].Seq; got != 2 {
-		t.Fatalf("replay seq = %d, want 2", got)
-	}
+	require.False(t, sub.Reset)
+	require.Len(t, sub.Replay, 1)
+	got := sub.Replay[0].Type
+	require.Equal(t, EventUsageCompleted, got)
+
+	require.EqualValues(t, 2, sub.Replay[0].Seq, "replay seq")
 }
 
 func TestSubscriptionLatestSnapshotsSequenceAtSubscribe(t *testing.T) {
@@ -76,15 +70,12 @@ func TestSubscriptionLatestSnapshotsSequenceAtSubscribe(t *testing.T) {
 			}
 			publish(tc.publishBefore)
 			sub := b.Subscribe(0)
-			if sub == nil {
-				t.Fatal("Subscribe returned nil")
-			}
+			require.NotNil(t, sub)
+
 			defer sub.Close()
 			publish(tc.publishAfter)
 
-			if sub.Latest != tc.want {
-				t.Fatalf("sub.Latest = %d, want %d", sub.Latest, tc.want)
-			}
+			require.Equal(t, tc.want, sub.Latest)
 		})
 	}
 }
@@ -105,23 +96,17 @@ func TestBrokerBroadcastsCachedUsageEvents(t *testing.T) {
 		Timestamp: now.Add(time.Second),
 		CacheType: usage.CacheTypeSemantic,
 	})
-
-	if got := b.LatestSeq(); got != 2 {
-		t.Fatalf("latest seq = %d, want 2", got)
-	}
+	got := b.LatestSeq()
+	require.Equal(t, uint64(2), got)
 
 	sub := b.Subscribe(0)
-	if sub == nil {
-		t.Fatal("Subscribe returned nil")
-	}
+	require.NotNil(t, sub)
+
 	defer sub.Close()
-	if len(sub.Replay) != 2 {
-		t.Fatalf("replay len = %d, want 2", len(sub.Replay))
-	}
+	require.Len(t, sub.Replay, 2)
+
 	for i, event := range sub.Replay {
-		if event.Type != EventUsageCompleted {
-			t.Fatalf("replay[%d] type = %q, want %q", i, event.Type, EventUsageCompleted)
-		}
+		require.Equal(t, EventUsageCompleted, event.Type, "replay[%d] type = %q, want %q", i, event.Type, EventUsageCompleted)
 	}
 }
 
@@ -152,30 +137,20 @@ func TestBrokerReplaysActiveSnapshotsForFreshSubscribers(t *testing.T) {
 	})
 
 	sub := b.Subscribe(0)
-	if sub == nil {
-		t.Fatal("Subscribe returned nil")
-	}
+	require.NotNil(t, sub)
+
 	defer sub.Close()
 
-	if sub.Reset {
-		t.Fatal("Subscribe reset = true, want false")
-	}
-	if len(sub.Replay) != 2 {
-		t.Fatalf("replay len = %d, want 2", len(sub.Replay))
-	}
-	if got := sub.Replay[0].Type; got != EventAuditUpdated {
-		t.Fatalf("audit snapshot type = %q, want %q", got, EventAuditUpdated)
-	}
+	require.False(t, sub.Reset)
+	require.Len(t, sub.Replay, 2)
+	got := sub.Replay[0].Type
+	require.Equal(t, EventAuditUpdated, got)
+
 	payload := eventPayload(t, sub.Replay[0])
-	if got := payload["method"]; got != "POST" {
-		t.Fatalf("snapshot method = %v, want POST", got)
-	}
-	if got := payload["provider"]; got != "openai" {
-		t.Fatalf("snapshot provider = %v, want openai", got)
-	}
-	if got := sub.Replay[1].Type; got != EventUsageCompleted {
-		t.Fatalf("usage snapshot type = %q, want %q", got, EventUsageCompleted)
-	}
+	require.Equal(t, "POST", payload["method"], "snapshot method")
+	require.Equal(t, "openai", payload["provider"], "snapshot provider")
+	got = sub.Replay[1].Type
+	require.Equal(t, EventUsageCompleted, got)
 }
 
 func TestBrokerNormalizesAuditActiveSnapshotAliases(t *testing.T) {
@@ -193,34 +168,27 @@ func TestBrokerNormalizesAuditActiveSnapshotAliases(t *testing.T) {
 	})
 
 	sub := b.Subscribe(0)
-	if sub == nil {
-		t.Fatal("Subscribe returned nil")
-	}
+	require.NotNil(t, sub)
+
 	defer sub.Close()
 
-	if len(sub.Replay) != 1 {
-		t.Fatalf("replay len = %d, want 1", len(sub.Replay))
-	}
+	require.Len(t, sub.Replay, 1)
+
 	payload := eventPayload(t, sub.Replay[0])
-	if got := payload["method"]; got != "POST" {
-		t.Fatalf("snapshot method = %v, want POST", got)
-	}
-	if got := payload["provider"]; got != "openai" {
-		t.Fatalf("snapshot provider = %v, want openai", got)
-	}
+	got := payload["method"]
+	require.Equal(t, "POST", got)
+	got = payload["provider"]
+	require.Equal(t, "openai", got)
 
 	b.publish(EventAuditFlushed, "audit-1", "req-1", now.Add(2*time.Second), map[string]any{
 		"id":         "audit-1",
 		"request_id": "req-1",
 	})
 	subAfterFlush := b.Subscribe(0)
-	if subAfterFlush == nil {
-		t.Fatal("Subscribe returned nil after flush")
-	}
+	require.NotNil(t, subAfterFlush)
+
 	defer subAfterFlush.Close()
-	if len(subAfterFlush.Replay) != 0 {
-		t.Fatalf("post-flush replay len = %d, want 0", len(subAfterFlush.Replay))
-	}
+	require.Empty(t, subAfterFlush.Replay)
 }
 
 func TestBrokerNormalizesUsageActiveSnapshotAliases(t *testing.T) {
@@ -238,34 +206,27 @@ func TestBrokerNormalizesUsageActiveSnapshotAliases(t *testing.T) {
 	})
 
 	sub := b.Subscribe(0)
-	if sub == nil {
-		t.Fatal("Subscribe returned nil")
-	}
+	require.NotNil(t, sub)
+
 	defer sub.Close()
 
-	if len(sub.Replay) != 1 {
-		t.Fatalf("replay len = %d, want 1", len(sub.Replay))
-	}
+	require.Len(t, sub.Replay, 1)
+
 	payload := eventPayload(t, sub.Replay[0])
-	if got := payload["total_tokens"]; got != float64(14) {
-		t.Fatalf("snapshot total_tokens = %v, want 14", got)
-	}
-	if got := payload["model"]; got != "gpt-test" {
-		t.Fatalf("snapshot model = %v, want gpt-test", got)
-	}
+	got := payload["total_tokens"]
+	require.Equal(t, float64(14), got)
+	got = payload["model"]
+	require.Equal(t, "gpt-test", got)
 
 	b.publish(EventUsageFlushed, "usage-1", "req-1", now.Add(2*time.Second), map[string]any{
 		"id":         "usage-1",
 		"request_id": "req-1",
 	})
 	subAfterFlush := b.Subscribe(0)
-	if subAfterFlush == nil {
-		t.Fatal("Subscribe returned nil after flush")
-	}
+	require.NotNil(t, subAfterFlush)
+
 	defer subAfterFlush.Close()
-	if len(subAfterFlush.Replay) != 0 {
-		t.Fatalf("post-flush replay len = %d, want 0", len(subAfterFlush.Replay))
-	}
+	require.Empty(t, subAfterFlush.Replay)
 }
 
 func TestBrokerOmitsFlushedSnapshotsForFreshSubscribers(t *testing.T) {
@@ -294,13 +255,10 @@ func TestBrokerOmitsFlushedSnapshotsForFreshSubscribers(t *testing.T) {
 	})
 
 	sub := b.Subscribe(0)
-	if sub == nil {
-		t.Fatal("Subscribe returned nil")
-	}
+	require.NotNil(t, sub)
+
 	defer sub.Close()
-	if len(sub.Replay) != 0 {
-		t.Fatalf("replay len = %d, want 0", len(sub.Replay))
-	}
+	require.Empty(t, sub.Replay)
 }
 
 func TestBrokerStaleCursorReceivesResetAndActiveSnapshots(t *testing.T) {
@@ -317,19 +275,13 @@ func TestBrokerStaleCursorReceivesResetAndActiveSnapshots(t *testing.T) {
 	}
 
 	sub := b.Subscribe(1)
-	if sub == nil {
-		t.Fatal("Subscribe returned nil")
-	}
+	require.NotNil(t, sub)
+
 	defer sub.Close()
-	if !sub.Reset {
-		t.Fatal("Subscribe reset = false, want true")
-	}
-	if len(sub.Replay) != 1 {
-		t.Fatalf("replay len = %d, want 1", len(sub.Replay))
-	}
-	if got := sub.Replay[0].Seq; got != 3 {
-		t.Fatalf("snapshot seq = %d, want 3", got)
-	}
+	require.True(t, sub.Reset)
+	require.Len(t, sub.Replay, 1)
+	got := sub.Replay[0].Seq
+	require.Equal(t, uint64(3), got)
 }
 
 func TestBrokerSignalsResetWhenCursorFallsOutOfReplayWindow(t *testing.T) {
@@ -343,13 +295,10 @@ func TestBrokerSignalsResetWhenCursorFallsOutOfReplayWindow(t *testing.T) {
 	}
 
 	sub := b.Subscribe(1)
-	if sub == nil {
-		t.Fatal("Subscribe returned nil")
-	}
+	require.NotNil(t, sub)
+
 	defer sub.Close()
-	if !sub.Reset {
-		t.Fatal("Subscribe reset = false, want true")
-	}
+	require.True(t, sub.Reset)
 }
 
 func TestBrokerSignalsResetWhenReplayGapExceedsLimit(t *testing.T) {
@@ -367,19 +316,13 @@ func TestBrokerSignalsResetWhenReplayGapExceedsLimit(t *testing.T) {
 	}
 
 	sub := b.Subscribe(1)
-	if sub == nil {
-		t.Fatal("Subscribe returned nil")
-	}
+	require.NotNil(t, sub)
+
 	defer sub.Close()
-	if !sub.Reset {
-		t.Fatal("Subscribe reset = false, want true")
-	}
-	if len(sub.Replay) != 1 {
-		t.Fatalf("replay len = %d, want active snapshot only", len(sub.Replay))
-	}
-	if got := sub.Replay[0].Seq; got != 5 {
-		t.Fatalf("snapshot seq = %d, want 5", got)
-	}
+	require.True(t, sub.Reset)
+	require.Len(t, sub.Replay, 1)
+	got := sub.Replay[0].Seq
+	require.Equal(t, uint64(5), got)
 }
 
 func TestBrokerSignalsResetWhenCursorIsAheadOfLatest(t *testing.T) {
@@ -394,27 +337,20 @@ func TestBrokerSignalsResetWhenCursorIsAheadOfLatest(t *testing.T) {
 	})
 
 	sub := b.Subscribe(99)
-	if sub == nil {
-		t.Fatal("Subscribe returned nil")
-	}
+	require.NotNil(t, sub)
+
 	defer sub.Close()
-	if !sub.Reset {
-		t.Fatal("Subscribe reset = false, want true")
-	}
-	if len(sub.Replay) != 1 {
-		t.Fatalf("replay len = %d, want active snapshot only", len(sub.Replay))
-	}
-	if got := sub.Replay[0].Seq; got != 1 {
-		t.Fatalf("snapshot seq = %d, want 1", got)
-	}
+	require.True(t, sub.Reset)
+	require.Len(t, sub.Replay, 1)
+	got := sub.Replay[0].Seq
+	require.Equal(t, uint64(1), got)
 }
 
 func TestBrokerDropsSlowSubscribers(t *testing.T) {
 	b := NewBroker(Config{Enabled: true, BufferSize: 10, SubscriberBuffer: 1})
 	sub := b.Subscribe(0)
-	if sub == nil {
-		t.Fatal("Subscribe returned nil")
-	}
+	require.NotNil(t, sub)
+
 	defer sub.Close()
 
 	for range 4 {
@@ -430,9 +366,8 @@ func TestBrokerDropsSlowSubscribers(t *testing.T) {
 		select {
 		case _, ok := <-sub.Events:
 			if !ok {
-				if received == 0 {
-					t.Fatal("slow subscriber received no buffered event before close")
-				}
+				require.NotEqual(t, 0, received)
+
 				return
 			}
 			received++
@@ -445,35 +380,27 @@ func TestBrokerDropsSlowSubscribers(t *testing.T) {
 func TestBrokerCloseStopsSubscribersAndRejectsNewSubscriptions(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
 	sub := b.Subscribe(0)
-	if sub == nil {
-		t.Fatal("Subscribe returned nil")
-	}
+	require.NotNil(t, sub)
 
 	b.Close()
 
 	select {
 	case _, ok := <-sub.Events:
-		if ok {
-			t.Fatal("subscriber channel remained open after broker close")
-		}
+		require.False(t, ok)
+
 	case <-time.After(time.Second):
 		t.Fatal("subscriber channel was not closed")
 	}
-	if b.Enabled() {
-		t.Fatal("Enabled() = true after broker close, want false")
-	}
-	if got := b.Subscribe(0); got != nil {
-		t.Fatal("Subscribe returned a subscription after broker close")
-	}
+	require.False(t, b.Enabled())
+	got := b.Subscribe(0)
+	require.Nil(t, got)
 
 	b.PublishAuditEvent(EventAuditStarted, &auditlog.LogEntry{
 		ID:        "audit-closed",
 		RequestID: "req-closed",
 		Timestamp: time.Now(),
 	})
-	if got := b.LatestSeq(); got != 0 {
-		t.Fatalf("LatestSeq() = %d after close publish, want 0", got)
-	}
+	require.Zero(t, b.LatestSeq(), "LatestSeq() after close publish")
 
 	sub.Close()
 	b.Close()
@@ -497,31 +424,22 @@ func TestBrokerAuditStartedPreviewIncludesRequestHeadersOnly(t *testing.T) {
 
 	payload := eventPayload(t, b.events[0])
 	data, ok := payload["data"].(map[string]any)
-	if !ok {
-		t.Fatalf("preview data = %T, want object", payload["data"])
-	}
+	require.True(t, ok, "preview data = %T, want object", payload["data"])
+
 	headers, ok := data["request_headers"].(map[string]any)
-	if !ok {
-		t.Fatalf("request_headers = %T, want object", data["request_headers"])
-	}
-	if got := headers["Authorization"]; got != "[REDACTED]" {
-		t.Fatalf("request_headers[Authorization] = %v, want [REDACTED]", got)
-	}
-	if got := data["user_agent"]; got != "test-agent" {
-		t.Fatalf("user_agent = %v, want test-agent", got)
-	}
-	if got := data["api_key_hash"]; got != "hash123" {
-		t.Fatalf("api_key_hash = %v, want hash123", got)
-	}
-	if _, ok := data["request_body"]; ok {
-		t.Fatal("started preview data contains request body")
-	}
-	if _, ok := data["response_headers"]; ok {
-		t.Fatal("started preview data contains response headers")
-	}
-	if _, ok := data["response_body"]; ok {
-		t.Fatal("started preview data contains response body")
-	}
+	require.True(t, ok, "request_headers = %T, want object", data["request_headers"])
+	got := headers["Authorization"]
+	require.Equal(t, "[REDACTED]", got)
+	got = data["user_agent"]
+	require.Equal(t, "test-agent", got)
+	got = data["api_key_hash"]
+	require.Equal(t, "hash123", got)
+	_, ok = data["request_body"]
+	require.False(t, ok)
+	_, ok = data["response_headers"]
+	require.False(t, ok)
+	_, ok = data["response_body"]
+	require.False(t, ok)
 }
 
 func TestBrokerAuditActiveSnapshotMergesNestedPreviewData(t *testing.T) {
@@ -546,33 +464,28 @@ func TestBrokerAuditActiveSnapshotMergesNestedPreviewData(t *testing.T) {
 	})
 
 	sub := b.Subscribe(0)
-	if sub == nil {
-		t.Fatal("Subscribe returned nil")
-	}
+	require.NotNil(t, sub)
+
 	defer sub.Close()
-	if len(sub.Replay) != 1 {
-		t.Fatalf("replay len = %d, want 1", len(sub.Replay))
-	}
+	require.Len(t, sub.Replay, 1)
 
 	payload := eventPayload(t, sub.Replay[0])
 	data, ok := payload["data"].(map[string]any)
-	if !ok {
-		t.Fatalf("preview data = %T, want object", payload["data"])
-	}
-	if headers, ok := data["request_headers"].(map[string]any); !ok || headers["Authorization"] != "[REDACTED]" {
-		t.Fatalf("request_headers = %#v, want redacted authorization", data["request_headers"])
-	}
-	if features, ok := data["workflow_features"].(map[string]any); !ok || features["audit"] != true || features["usage"] != true {
-		t.Fatalf("workflow_features = %#v, want audit and usage flags", data["workflow_features"])
-	}
+	require.True(t, ok, "preview data = %T, want object", payload["data"])
+	headers, ok := data["request_headers"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "[REDACTED]", headers["Authorization"], "request_headers = %#v, want redacted authorization", data["request_headers"])
+	features, ok := data["workflow_features"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, features["audit"])
+	require.Equal(t, true, features["usage"], "workflow_features = %#v, want audit and usage flags", data["workflow_features"])
 }
 
 func TestBrokerAuditUpdatedPreviewIncludesRequestBodyOnly(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
 	sub := b.Subscribe(0)
-	if sub == nil {
-		t.Fatal("Subscribe returned nil")
-	}
+	require.NotNil(t, sub)
+
 	defer sub.Close()
 
 	b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
@@ -591,42 +504,32 @@ func TestBrokerAuditUpdatedPreviewIncludesRequestBodyOnly(t *testing.T) {
 	// Connected subscribers receive the request body live.
 	payload := eventPayload(t, <-sub.Events)
 	data, ok := payload["data"].(map[string]any)
-	if !ok {
-		t.Fatalf("preview data = %T, want object", payload["data"])
-	}
-	if body, ok := data["request_body"].(map[string]any); !ok || body["model"] != "gpt-test" {
-		t.Fatalf("request_body = %#v, want model", data["request_body"])
-	}
-	if _, ok := data["response_headers"]; ok {
-		t.Fatal("updated preview data contains response headers")
-	}
-	if _, ok := data["response_body"]; ok {
-		t.Fatal("updated preview data contains response body")
-	}
+	require.True(t, ok, "preview data = %T, want object", payload["data"])
+	body, ok := data["request_body"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "gpt-test", body["model"], "request_body = %#v, want model", data["request_body"])
+	_, ok = data["response_headers"]
+	require.False(t, ok)
+	_, ok = data["response_body"]
+	require.False(t, ok)
 
 	// The replay ring retains the preview without the body, flagged as captured.
 	retained := eventPayload(t, b.events[0])
 	retainedData, ok := retained["data"].(map[string]any)
-	if !ok {
-		t.Fatalf("retained preview data = %T, want object", retained["data"])
-	}
-	if _, ok := retainedData["request_body"]; ok {
-		t.Fatal("retained preview contains request body")
-	}
-	if retainedData["request_body_captured"] != true {
-		t.Fatalf("request_body_captured = %#v, want true", retainedData["request_body_captured"])
-	}
-	if headers, ok := retainedData["request_headers"].(map[string]any); !ok || headers["Authorization"] != "[REDACTED]" {
-		t.Fatalf("retained request_headers = %#v, want redacted authorization", retainedData["request_headers"])
-	}
+	require.True(t, ok, "retained preview data = %T, want object", retained["data"])
+	_, ok = retainedData["request_body"]
+	require.False(t, ok)
+	require.Equal(t, true, retainedData["request_body_captured"])
+	headers, ok := retainedData["request_headers"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "[REDACTED]", headers["Authorization"], "retained request_headers = %#v, want redacted authorization", retainedData["request_headers"])
 }
 
 func TestBrokerAuditCompletedPreviewIncludesCapturedDetailData(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
 	sub := b.Subscribe(0)
-	if sub == nil {
-		t.Fatal("Subscribe returned nil")
-	}
+	require.NotNil(t, sub)
+
 	defer sub.Close()
 
 	entry := &auditlog.LogEntry{
@@ -653,47 +556,39 @@ func TestBrokerAuditCompletedPreviewIncludesCapturedDetailData(t *testing.T) {
 	// later entry mutations.
 	payload := eventPayload(t, <-sub.Events)
 	data, ok := payload["data"].(map[string]any)
-	if !ok {
-		t.Fatalf("preview data = %T, want object", payload["data"])
-	}
-	if headers, ok := data["request_headers"].(map[string]any); !ok || headers["Authorization"] != "Bearer redacted" {
-		t.Fatalf("request_headers = %#v, want redacted authorization", data["request_headers"])
-	}
-	if headers, ok := data["response_headers"].(map[string]any); !ok || headers["X-Request-ID"] != "req-1" {
-		t.Fatalf("response_headers = %#v, want x-request-id", data["response_headers"])
-	}
-	if body, ok := data["request_body"].(map[string]any); !ok || body["model"] != "gpt-test" {
-		t.Fatalf("request_body = %#v, want model", data["request_body"])
-	}
-	if body := data["request_body"].(map[string]any); body["nested"].(map[string]any)["token"] != "before" {
-		t.Fatalf("request_body nested = %#v, want original nested token", body["nested"])
-	}
-	if body, ok := data["response_body"].(map[string]any); !ok || body["id"] != "chatcmpl-test" {
-		t.Fatalf("response_body = %#v, want response id", data["response_body"])
-	}
-	if body := data["response_body"].(map[string]any); body["usage"].(map[string]any)["total_tokens"] != float64(150) {
-		t.Fatalf("response_body usage = %#v, want original usage", body["usage"])
-	}
+	require.True(t, ok, "preview data = %T, want object", payload["data"])
+	headers, ok := data["request_headers"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "Bearer redacted", headers["Authorization"], "request_headers = %#v, want redacted authorization", data["request_headers"])
+	headers, ok = data["response_headers"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "req-1", headers["X-Request-ID"], "response_headers = %#v, want x-request-id", data["response_headers"])
+	body, ok := data["request_body"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "gpt-test", body["model"], "request_body = %#v, want model", data["request_body"])
+	nested, ok := body["nested"].(map[string]any)
+	require.True(t, ok, "request_body nested = %#v, want object", body["nested"])
+	require.Equal(t, "before", nested["token"], "request_body nested = %#v, want original nested token", nested)
+	body, ok = data["response_body"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "chatcmpl-test", body["id"], "response_body = %#v, want response id", data["response_body"])
+	usage, ok := body["usage"].(map[string]any)
+	require.True(t, ok, "response_body usage = %#v, want object", body["usage"])
+	require.Equal(t, float64(150), usage["total_tokens"], "response_body usage = %#v, want original usage", usage)
 
 	// The replay ring keeps the detail without bodies, flagged as captured.
 	retained := eventPayload(t, b.events[0])
 	retainedData, ok := retained["data"].(map[string]any)
-	if !ok {
-		t.Fatalf("retained preview data = %T, want object", retained["data"])
-	}
-	if _, ok := retainedData["request_body"]; ok {
-		t.Fatal("retained preview contains request body")
-	}
-	if _, ok := retainedData["response_body"]; ok {
-		t.Fatal("retained preview contains response body")
-	}
-	if retainedData["request_body_captured"] != true || retainedData["response_body_captured"] != true {
-		t.Fatalf("captured flags = %#v/%#v, want true/true",
-			retainedData["request_body_captured"], retainedData["response_body_captured"])
-	}
-	if headers, ok := retainedData["response_headers"].(map[string]any); !ok || headers["X-Request-ID"] != "req-1" {
-		t.Fatalf("retained response_headers = %#v, want x-request-id", retainedData["response_headers"])
-	}
+	require.True(t, ok, "retained preview data = %T, want object", retained["data"])
+	_, ok = retainedData["request_body"]
+	require.False(t, ok)
+	_, ok = retainedData["response_body"]
+	require.False(t, ok)
+	require.Equal(t, true, retainedData["request_body_captured"])
+	require.Equal(t, true, retainedData["response_body_captured"])
+	headers, ok = retainedData["response_headers"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "req-1", headers["X-Request-ID"], "retained response_headers = %#v, want x-request-id", retainedData["response_headers"])
 }
 
 func TestBrokerAuditPreviewIncludesCompactWorkflowData(t *testing.T) {
@@ -715,23 +610,16 @@ func TestBrokerAuditPreviewIncludesCompactWorkflowData(t *testing.T) {
 
 	payload := eventPayload(t, b.events[0])
 	data, ok := payload["data"].(map[string]any)
-	if !ok {
-		t.Fatalf("preview data = %T, want object", payload["data"])
-	}
+	require.True(t, ok, "preview data = %T, want object", payload["data"])
+
 	features, ok := data["workflow_features"].(map[string]any)
-	if !ok {
-		t.Fatalf("workflow_features = %T, want object", data["workflow_features"])
-	}
-	if features["cache"] != true || features["failover"] != true {
-		t.Fatalf("workflow_features = %#v, want compact workflow flags", features)
-	}
+	require.True(t, ok, "workflow_features = %T, want object", data["workflow_features"])
+	require.Equal(t, true, features["cache"])
+	require.Equal(t, true, features["failover"], "workflow_features = %#v, want compact workflow flags", features)
+
 	failover, ok := data["failover"].(map[string]any)
-	if !ok {
-		t.Fatalf("failover = %T, want object", data["failover"])
-	}
-	if failover["target_model"] != "fallback-model" {
-		t.Fatalf("failover target = %v, want fallback-model", failover["target_model"])
-	}
+	require.True(t, ok, "failover = %T, want object", data["failover"])
+	require.Equal(t, "fallback-model", failover["target_model"])
 }
 
 func TestBrokerAuditPreviewIncludesCompactAttempts(t *testing.T) {
@@ -752,26 +640,51 @@ func TestBrokerAuditPreviewIncludesCompactAttempts(t *testing.T) {
 
 	payload := eventPayload(t, b.events[0])
 	data, ok := payload["data"].(map[string]any)
-	if !ok {
-		t.Fatalf("preview data = %T, want object", payload["data"])
-	}
+	require.True(t, ok, "preview data = %T, want object", payload["data"])
+
 	attempts, ok := data["attempts"].([]any)
-	if !ok || len(attempts) != 2 {
-		t.Fatalf("attempts = %#v, want 2 compact attempts in the live preview", data["attempts"])
-	}
+	require.True(t, ok)
+	require.Len(t, attempts, 2)
+
 	primary, ok := attempts[0].(map[string]any)
-	if !ok {
-		t.Fatalf("attempt[0] = %T, want object", attempts[0])
-	}
-	if primary["kind"] != auditlog.AttemptKindPrimary || primary["status_code"].(float64) != 404 {
-		t.Fatalf("attempt[0] = %#v, want failed primary metadata", primary)
-	}
-	if _, present := primary["response_body"]; present {
-		t.Fatalf("live preview attempt should omit response_body, got %#v", primary)
-	}
-	if _, present := primary["response_headers"]; present {
-		t.Fatalf("live preview attempt should omit response_headers, got %#v", primary)
-	}
+	require.True(t, ok, "attempt[0] = %T, want object", attempts[0])
+	require.Equal(t, auditlog.AttemptKindPrimary, primary["kind"])
+	require.Equal(t, float64(404), primary["status_code"], "attempt[0] = %#v, want failed primary metadata", primary)
+	_, present := primary["response_body"]
+	require.False(t, present, "live preview attempt should omit response_body, got %#v", primary)
+	_, present = primary["response_headers"]
+	require.False(t, present, "live preview attempt should omit response_headers, got %#v", primary)
+}
+
+func TestBrokerAuditPreviewIncludesGuardrailOutcomesWithoutDetail(t *testing.T) {
+	b := NewBroker(Config{Enabled: true})
+	b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
+		ID:        "audit-1",
+		RequestID: "req-1",
+		Timestamp: time.Now(),
+		Data: &auditlog.LogData{
+			Guardrails: []auditlog.GuardrailOutcomeSnapshot{
+				{Seq: 1, Phase: "prompt", Instance: "check", Action: auditlog.GuardrailActionBlock, Code: "policy",
+					Detail: map[string]any{"verdict": "unsafe"}},
+			},
+		},
+	})
+
+	payload := eventPayload(t, b.events[0])
+	data, ok := payload["data"].(map[string]any)
+	require.True(t, ok, "preview data = %T, want object", payload["data"])
+
+	outcomes, ok := data["guardrails"].([]any)
+	require.True(t, ok)
+	require.Len(t, outcomes, 1, "guardrails = %#v, want 1 outcome in the live preview", data["guardrails"])
+
+	outcome, ok := outcomes[0].(map[string]any)
+	require.True(t, ok, "guardrails[0] = %T, want object", outcomes[0])
+	require.Equal(t, "check", outcome["instance"])
+	require.Equal(t, auditlog.GuardrailActionBlock, outcome["action"])
+	require.Equal(t, "policy", outcome["code"], "guardrails[0] = %#v, want the block outcome", outcome)
+	_, present := outcome["detail"]
+	require.False(t, present, "live preview outcome should omit detail, got %#v", outcome)
 }
 
 func TestAuditPreviewRemainsPendingUntilFlush(t *testing.T) {
@@ -782,19 +695,13 @@ func TestAuditPreviewRemainsPendingUntilFlush(t *testing.T) {
 	}
 
 	queued := auditPreviewFromEntry(EventAuditCompleted, entry)
-	if !queued.LivePending {
-		t.Fatal("completed audit preview pending = false, want true until storage flush")
-	}
+	require.True(t, queued.LivePending)
 
 	flushed := auditPreviewFromEntry(EventAuditFlushed, entry)
-	if flushed.LivePending {
-		t.Fatal("flushed audit preview pending = true, want false")
-	}
+	require.False(t, flushed.LivePending)
 
 	failed := auditPreviewFromEntry(EventAuditFailed, entry)
-	if failed.LivePending {
-		t.Fatal("failed audit preview pending = true, want false")
-	}
+	require.False(t, failed.LivePending)
 }
 
 func TestUsagePreviewIncludesRawData(t *testing.T) {
@@ -812,34 +719,32 @@ func TestUsagePreviewIncludesRawData(t *testing.T) {
 		RawData:   rawData,
 	})
 
-	if preview.RawData["prompt_cached_tokens"] != 150 {
-		t.Fatalf("raw_data[prompt_cached_tokens] = %v, want 150", preview.RawData["prompt_cached_tokens"])
-	}
+	require.Equal(t, 150, preview.RawData["prompt_cached_tokens"])
+
 	rawData["prompt_cached_tokens"] = 200
-	if preview.RawData["prompt_cached_tokens"] != 150 {
-		t.Fatalf("raw_data was not copied, got %v", preview.RawData["prompt_cached_tokens"])
-	}
+	require.Equal(t, 150, preview.RawData["prompt_cached_tokens"])
+
 	rawData["details"].(map[string]any)["cache_read_tokens"] = 999
-	if details, ok := preview.RawData["details"].(map[string]any); !ok || details["cache_read_tokens"] != 125 {
-		t.Fatalf("raw_data details = %#v, want original nested details", preview.RawData["details"])
-	}
+	details, ok := preview.RawData["details"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, 125, details["cache_read_tokens"], "raw_data details = %#v, want original nested details", preview.RawData["details"])
+
 	rawData["segments"].([]any)[0].(map[string]any)["kind"] = "changed"
-	if segments, ok := preview.RawData["segments"].([]any); !ok || len(segments) != 1 || segments[0].(map[string]any)["kind"] != "cached" {
-		t.Fatalf("raw_data segments = %#v, want original nested segment", preview.RawData["segments"])
-	}
+	segments, ok := preview.RawData["segments"].([]any)
+	require.True(t, ok)
+	require.Len(t, segments, 1)
+	segment, ok := segments[0].(map[string]any)
+	require.True(t, ok, "segments[0] = %T, want object", segments[0])
+	require.Equal(t, "cached", segment["kind"])
 }
 
 func TestBrokerRingCapacityBoundedByReplayWindow(t *testing.T) {
 	b := NewBroker(Config{Enabled: true, BufferSize: 10000, ReplayLimit: 100})
-	if b.bufferSize != 101 {
-		t.Fatalf("bufferSize = %d, want 101 (replay limit + 1)", b.bufferSize)
-	}
+	require.Equal(t, 101, b.bufferSize)
 
 	// A buffer smaller than the replay window is kept as configured.
 	b = NewBroker(Config{Enabled: true, BufferSize: 50, ReplayLimit: 100})
-	if b.bufferSize != 50 {
-		t.Fatalf("bufferSize = %d, want 50", b.bufferSize)
-	}
+	require.Equal(t, 50, b.bufferSize)
 }
 
 func TestBrokerActiveSnapshotsExcludeBodiesForFreshSubscribers(t *testing.T) {
@@ -854,24 +759,17 @@ func TestBrokerActiveSnapshotsExcludeBodiesForFreshSubscribers(t *testing.T) {
 	})
 
 	sub := b.Subscribe(0)
-	if sub == nil {
-		t.Fatal("Subscribe returned nil")
-	}
+	require.NotNil(t, sub)
+
 	defer sub.Close()
 
-	if len(sub.Replay) != 1 {
-		t.Fatalf("replay len = %d, want 1", len(sub.Replay))
-	}
+	require.Len(t, sub.Replay, 1)
+
 	data, ok := eventPayload(t, sub.Replay[0])["data"].(map[string]any)
-	if !ok {
-		t.Fatalf("snapshot data missing")
-	}
-	if _, ok := data["request_body"]; ok {
-		t.Fatal("active snapshot contains request body")
-	}
-	if data["request_body_captured"] != true {
-		t.Fatalf("request_body_captured = %#v, want true", data["request_body_captured"])
-	}
+	require.True(t, ok)
+	_, ok = data["request_body"]
+	require.False(t, ok)
+	require.Equal(t, true, data["request_body_captured"])
 }
 
 func TestBrokerCompactsOversizedRetainedEvents(t *testing.T) {
@@ -893,27 +791,20 @@ func TestBrokerCompactsOversizedRetainedEvents(t *testing.T) {
 	})
 
 	retained := b.events[0]
-	if len(retained.Data) > maxRetainedEventBytes {
-		t.Fatalf("retained event size = %d, want <= %d", len(retained.Data), maxRetainedEventBytes)
-	}
+	require.LessOrEqual(t, len(retained.Data), maxRetainedEventBytes)
+
 	data, ok := eventPayload(t, retained)["data"].(map[string]any)
-	if !ok {
-		t.Fatalf("compacted data missing")
-	}
-	if _, ok := data["request_headers"]; ok {
-		t.Fatal("compacted event still contains oversized headers")
-	}
-	if data["request_body_captured"] != true {
-		t.Fatalf("request_body_captured = %#v, want true", data["request_body_captured"])
-	}
+	require.True(t, ok)
+	_, ok = data["request_headers"]
+	require.False(t, ok)
+	require.Equal(t, true, data["request_body_captured"])
 }
 
 func TestBrokerAuditStreamPreviewCarriesPartialResponseBody(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
 	sub := b.Subscribe(0)
-	if sub == nil {
-		t.Fatal("Subscribe returned nil")
-	}
+	require.NotNil(t, sub)
+
 	defer sub.Close()
 
 	b.PublishAuditEvent(EventAuditStream, &auditlog.LogEntry{
@@ -936,74 +827,51 @@ func TestBrokerAuditStreamPreviewCarriesPartialResponseBody(t *testing.T) {
 	// Connected subscribers receive the partial body, flagged as partial and
 	// still pending.
 	payload := eventPayload(t, <-sub.Events)
-	if payload["_live_state"] != EventAuditStream {
-		t.Fatalf("_live_state = %#v, want %q", payload["_live_state"], EventAuditStream)
-	}
-	if payload["_live_pending"] != true {
-		t.Fatalf("_live_pending = %#v, want true", payload["_live_pending"])
-	}
+	require.Equal(t, EventAuditStream, payload["_live_state"])
+	require.Equal(t, true, payload["_live_pending"])
+
 	data, ok := payload["data"].(map[string]any)
-	if !ok {
-		t.Fatalf("preview data = %T, want object", payload["data"])
-	}
-	if _, ok := data["response_body"].(map[string]any); !ok {
-		t.Fatalf("response_body = %#v, want partial body", data["response_body"])
-	}
-	if data["response_body_partial"] != true {
-		t.Fatalf("response_body_partial = %#v, want true", data["response_body_partial"])
-	}
+	require.True(t, ok, "preview data = %T, want object", payload["data"])
+	_, ok = data["response_body"].(map[string]any)
+	require.True(t, ok, "response_body = %#v, want partial body", data["response_body"])
+	require.Equal(t, true, data["response_body_partial"])
 
 	// The replay ring drops the partial body without claiming it was captured
 	// (it is not in the persisted entry yet) and without the partial flag,
 	// which would go stale in merged active snapshots.
 	retained := eventPayload(t, b.events[0])
 	retainedData, ok := retained["data"].(map[string]any)
-	if !ok {
-		t.Fatalf("retained preview data = %T, want object", retained["data"])
-	}
-	if _, ok := retainedData["response_body"]; ok {
-		t.Fatal("retained preview contains partial response body")
-	}
-	if _, ok := retainedData["response_body_captured"]; ok {
-		t.Fatal("retained preview claims a partial body was captured")
-	}
-	if _, ok := retainedData["response_body_partial"]; ok {
-		t.Fatal("retained preview keeps the partial flag")
-	}
+	require.True(t, ok, "retained preview data = %T, want object", retained["data"])
+	_, ok = retainedData["response_body"]
+	require.False(t, ok)
+	_, ok = retainedData["response_body_captured"]
+	require.False(t, ok)
+	_, ok = retainedData["response_body_partial"]
+	require.False(t, ok)
 }
 
 func TestBrokerHasLiveSubscribers(t *testing.T) {
 	var nilBroker *Broker
-	if nilBroker.HasLiveSubscribers() {
-		t.Fatal("nil broker reports subscribers")
-	}
-	if NewBroker(Config{}).HasLiveSubscribers() {
-		t.Fatal("disabled broker reports subscribers")
-	}
+	require.False(t, nilBroker.HasLiveSubscribers())
+	require.False(t, NewBroker(Config{}).HasLiveSubscribers())
 
 	b := NewBroker(Config{Enabled: true})
-	if b.HasLiveSubscribers() {
-		t.Fatal("fresh broker reports subscribers")
-	}
+	require.False(t, b.HasLiveSubscribers())
+
 	sub := b.Subscribe(0)
-	if sub == nil {
-		t.Fatal("Subscribe returned nil")
-	}
-	if !b.HasLiveSubscribers() {
-		t.Fatal("broker with a subscription reports none")
-	}
+	require.NotNil(t, sub)
+	require.True(t, b.HasLiveSubscribers())
+
 	sub.Close()
-	if b.HasLiveSubscribers() {
-		t.Fatal("broker reports subscribers after unsubscribe")
-	}
+	require.False(t, b.HasLiveSubscribers())
 }
 
 func eventPayload(t *testing.T, event Event) map[string]any {
 	t.Helper()
 	var payload map[string]any
-	if err := json.Unmarshal(event.Data, &payload); err != nil {
-		t.Fatalf("unmarshal event payload: %v", err)
-	}
+	err := json.Unmarshal(event.Data, &payload)
+	require.NoError(t, err)
+
 	return payload
 }
 
@@ -1047,47 +915,110 @@ func TestBrokerReplayAfterBufferWrap(t *testing.T) {
 	}
 
 	sub := b.Subscribe(4)
-	if sub == nil {
-		t.Fatal("Subscribe returned nil")
-	}
+	require.NotNil(t, sub)
+
 	defer sub.Close()
-	if sub.Reset {
-		t.Fatal("Subscribe reset = true, want false for cursor inside retained window")
-	}
-	if len(sub.Replay) != 2 {
-		t.Fatalf("replay len = %d, want 2", len(sub.Replay))
-	}
+	require.False(t, sub.Reset)
+	require.Len(t, sub.Replay, 2)
+
 	for i, wantSeq := range []uint64{5, 6} {
-		if got := sub.Replay[i].Seq; got != wantSeq {
-			t.Fatalf("replay[%d].Seq = %d, want %d", i, got, wantSeq)
-		}
+		got := sub.Replay[i].Seq
+		require.Equal(t, wantSeq, got, "replay[%d].Seq = %d, want %d", i, got, wantSeq)
 	}
 
 	// Cursor exactly one before the oldest retained event replays the whole window.
 	subFull := b.Subscribe(2)
-	if subFull == nil {
-		t.Fatal("Subscribe(2) returned nil")
-	}
+	require.NotNil(t, subFull)
+
 	defer subFull.Close()
-	if subFull.Reset {
-		t.Fatal("Subscribe(2) reset = true, want false")
-	}
-	if len(subFull.Replay) != 4 {
-		t.Fatalf("full replay len = %d, want 4", len(subFull.Replay))
-	}
+	require.False(t, subFull.Reset)
+	require.Len(t, subFull.Replay, 4)
+
 	for i, wantSeq := range []uint64{3, 4, 5, 6} {
-		if got := subFull.Replay[i].Seq; got != wantSeq {
-			t.Fatalf("full replay[%d].Seq = %d, want %d", i, got, wantSeq)
-		}
+		got := subFull.Replay[i].Seq
+		require.Equal(t, wantSeq, got, "full replay[%d].Seq = %d, want %d", i, got, wantSeq)
 	}
 
 	// A cursor older than the retained window resets to active snapshots.
 	subStale := b.Subscribe(1)
-	if subStale == nil {
-		t.Fatal("Subscribe(1) returned nil")
-	}
+	require.NotNil(t, subStale)
+
 	defer subStale.Close()
-	if !subStale.Reset {
-		t.Fatal("Subscribe(1) reset = false, want true for cursor before retained window")
+	require.True(t, subStale.Reset)
+}
+
+// benchAuditRequestLifecycle publishes the audit events one non-streaming chat
+// request emits with body and header capture on: audit.started, the
+// audit.updated events handlers raise while enriching the entry, then
+// audit.completed and audit.flushed. It is the per-request broker cost on
+// every request, whether or not a dashboard is connected.
+func benchAuditRequestLifecycle(b *testing.B, subscribe bool) {
+	// The subscriber buffer is far larger than the default so a drain
+	// goroutine that falls behind cannot get the subscriber dropped, which
+	// would silently turn the subscribed case into the idle one.
+	broker := NewBroker(Config{Enabled: true, BufferSize: 10000, ReplayLimit: 1000, SubscriberBuffer: 1 << 16})
+	if subscribe {
+		sub := broker.Subscribe(0)
+		require.NotNil(b, sub)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for range sub.Events {
+			}
+		}()
+		b.Cleanup(func() {
+			sub.Close()
+			<-done
+		})
 	}
+
+	requestBody := auditlog.CaptureLoggedBody([]byte(`{"model":"gpt-4o-mini","messages":[{"role":"system","content":"You are a helpful assistant that answers briefly."},{"role":"user","content":"Summarise the attached incident report in three bullet points and suggest one follow-up action for the on-call engineer."}],"temperature":0.2,"max_tokens":256,"stream":false}`))
+	responseBody := auditlog.CaptureLoggedBody([]byte(`{"id":"chatcmpl-bench","object":"chat.completion","created":1700000000,"model":"gpt-4o-mini","choices":[{"index":0,"message":{"role":"assistant","content":"- Database failover took 4 minutes\n- Alerts fired late\n- No data loss\nFollow-up: tune the replica lag alert."},"finish_reason":"stop"}],"usage":{"prompt_tokens":61,"completion_tokens":34,"total_tokens":95}}`))
+	requestHeaders := map[string]string{"Authorization": "[REDACTED]", "Content-Type": "application/json", "User-Agent": "openai-python/1.60.0"}
+	responseHeaders := map[string]string{"Content-Type": "application/json", "X-Request-Id": "req-bench"}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		entry := &auditlog.LogEntry{
+			ID:        "audit-bench",
+			RequestID: "req-bench",
+			Timestamp: time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC),
+			Method:    "POST",
+			Path:      "/v1/chat/completions",
+			Data: &auditlog.LogData{
+				UserAgent:      "openai-python/1.60.0",
+				RequestHeaders: requestHeaders,
+				RequestBody:    requestBody,
+			},
+		}
+		broker.PublishAuditEvent(EventAuditStarted, entry)
+
+		entry.RequestedModel, entry.Provider = "gpt-4o-mini", "openai"
+		broker.PublishAuditEvent(EventAuditUpdated, entry)
+		entry.AuthMethod = "master_key"
+		broker.PublishAuditEvent(EventAuditUpdated, entry)
+		entry.ResolvedModel, entry.ProviderName = "openai/gpt-4o-mini", "openai"
+		broker.PublishAuditEvent(EventAuditUpdated, entry)
+		entry.UserPath = "/team"
+		broker.PublishAuditEvent(EventAuditUpdated, entry)
+
+		entry.StatusCode, entry.DurationNs = 200, 812_000_000
+		entry.Data.ResponseHeaders = responseHeaders
+		entry.Data.ResponseBody = responseBody
+		broker.PublishAuditEvent(EventAuditCompleted, entry)
+		broker.PublishAuditEvent(EventAuditFlushed, entry)
+	}
+	b.StopTimer()
+	if subscribe && !broker.HasLiveSubscribers() {
+		b.Fatal("the subscriber was dropped during the run, so the idle path was measured")
+	}
+}
+
+func BenchmarkBrokerAuditRequestLifecycleNoSubscribers(b *testing.B) {
+	benchAuditRequestLifecycle(b, false)
+}
+
+func BenchmarkBrokerAuditRequestLifecycleWithSubscriber(b *testing.B) {
+	benchAuditRequestLifecycle(b, true)
 }

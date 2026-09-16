@@ -49,8 +49,12 @@ and passes through unchanged.
 | `xhigh` / `max` | `xhigh` on `grok-4.6` and later, and on the multi-agent Grok family (where it selects the agent count); `high` on older models, including the experimental `grok-4.20` family |
 | anything else | passed through for xAI to judge |
 
-Models without reasoning support reject the field upstream; omit `reasoning`
-for those.
+Models that do not take a configurable effort answer `400 ... does not support
+parameter reasoningEffort`. GoModel drops the field for them instead of
+forwarding it, so the same request works across the catalog: the
+`-non-reasoning` Grok variants, the `grok-build` coding family, `grok-2`, and
+`grok-3` (only `grok-3-mini` takes an effort). Unknown model IDs keep the
+field, so a new reasoning model works before GoModel learns about it.
 
 ## Prompt-cache affinity
 
@@ -63,3 +67,11 @@ tokens are often billed at the uncached price.
   messages — cache affinity works with no client change.
 - **Responses API:** pass `prompt_cache_key` in the request body; GoModel
   forwards it verbatim.
+
+## `metadata` on the Responses API
+
+xAI's native `/responses` endpoint rejects the standard OpenAI `metadata`
+member with `400 "Argument not supported: metadata"`. GoModel drops it from
+the outbound request (logging that it did) instead of relaying the error, so
+clients that tag every request with metadata keep working. The member is only
+removed on the way to xAI; nothing else about the request changes.

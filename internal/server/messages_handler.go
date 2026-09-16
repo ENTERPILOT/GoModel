@@ -176,20 +176,27 @@ func (s *translatedInferenceService) Messages(c *echo.Context) error {
 	if err != nil {
 		if short := shortCircuitOf(err); short != nil {
 			attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
+			s.recordGuardrailOutcomes(c)
 			recordPromptPluginRevisions(c, s.logger, req, nil)
 			return s.writeChatShortCircuit(c, workflow, req, short, messagesJSON, messagesOuterWrap(req, resolvedModelFromWorkflow(workflow, req.Model)))
 		}
 		// A block or fail-closed outcome still belongs to the resolved
 		// workflow: the audit entry must carry it like every other outcome.
 		attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
+		s.recordGuardrailOutcomes(c)
 		recordPromptPluginRevisions(c, s.logger, req, nil)
 		return handleError(c, err)
 	}
 	attachPreparedWorkflow(c, ctx, workflow)
+	s.recordGuardrailOutcomes(c)
 	recordPromptPluginRevisions(c, s.logger, req, prepared)
 	applyPluginRequestHeaders(c)
 
-	if s.canForwardMessagesNatively(ctx, workflow) {
+	// An unsigned thinking block is worth leaving the native path for only when
+	// the translated pipeline can actually carry the request: content it cannot
+	// represent (server-tool history, …) still belongs upstream verbatim.
+	unsignedThinking := translateErr == nil && anthropicapi.HasUnsignedThinking(decoded)
+	if s.canForwardMessagesNatively(ctx, workflow, unsignedThinking) {
 		return s.dispatchMessagesNative(c, prepared, workflow)
 	}
 	if translateErr != nil {

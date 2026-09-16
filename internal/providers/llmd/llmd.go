@@ -81,7 +81,7 @@ func newProvider(apiKey, baseURL string, controls ControlConfig, opts providers.
 		SetHeaders:   p.setHeaders,
 	}
 	rootCfg := llmclient.Config{
-		ProviderName:   "llmd",
+		ProviderName:   opts.ClientName("llmd"),
 		BaseURL:        passthroughBaseURL(baseURL),
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,

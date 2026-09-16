@@ -59,6 +59,10 @@ type translatedInferenceService struct {
 	snapshotWrites   sync.WaitGroup
 	snapshotMu       sync.RWMutex
 	snapshotDraining bool
+	// pendingSnapshots holds the in-flight snapshot write per response id, so
+	// a request chained on a just-returned response can wait for its snapshot.
+	pendingSnapshots  map[string]pendingSnapshot
+	pendingSnapshotMu sync.Mutex
 
 	orchestrator *gateway.InferenceOrchestrator
 
@@ -85,6 +89,11 @@ func (s *translatedInferenceService) newInferenceOrchestrator() *gateway.Inferen
 		FailoverResolver:         s.failoverResolver,
 		FailoverPolicy:           s.failoverPolicy,
 		TranslatedRequestPatcher: s.translatedRequestPatcher,
+		// Conversations and previous_response_id are expanded before the
+		// prompt phase; an id left for a native primary is resolved per
+		// attempt for a failover target that cannot resolve it itself.
+		ResponsesHistoryResolver: s,
+		ResponsesAttemptPatcher:  s,
 		UsageLogger:              s.usageLogger,
 		PricingResolver:          s.pricingResolver,
 		GuardrailsHash:           s.guardrailsHash,
@@ -198,16 +207,19 @@ func handleTranslatedJSON[Req any](
 	if err != nil {
 		if short := shortCircuitOf(err); short != nil {
 			attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
+			s.recordGuardrailOutcomes(c)
 			recordPromptPluginRevisions(c, s.logger, req, nil)
 			return shortCircuit(s, c, workflow, req, short)
 		}
 		// A block or fail-closed outcome still belongs to the resolved
 		// workflow: the audit entry must carry it like every other outcome.
 		attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
+		s.recordGuardrailOutcomes(c)
 		recordPromptPluginRevisions(c, s.logger, req, nil)
 		return handleError(c, err)
 	}
 	attachPreparedWorkflow(c, ctx, workflow)
+	s.recordGuardrailOutcomes(c)
 	recordPromptPluginRevisions(c, s.logger, req, preparedReq)
 	applyPluginRequestHeaders(c)
 
@@ -260,15 +272,11 @@ func prepareResponsesRequest(
 	req *core.ResponsesRequest,
 	meta gateway.RequestMeta,
 ) (context.Context, *core.ResponsesRequest, *core.Workflow, error) {
+	// The orchestrator expands conversations and previous_response_id
+	// (ResolveResponsesHistory) before the prompt phase, so guardrails,
+	// the cache key, and the provider all see the merged history.
 	prepared, err := s.inference().PrepareResponsesRequest(ctx, req, meta)
-	ctx, preparedReq, workflow, err := unpackPrepared(ctx, prepared, err, responsesPreparedFields)
-	if err != nil {
-		return ctx, preparedReq, workflow, err
-	}
-	// Resolve gateway-managed conversations before caching and dispatch so the
-	// cache key reflects the merged history and providers never see local IDs.
-	ctx, preparedReq, err = s.applyResponsesConversation(ctx, preparedReq)
-	return ctx, preparedReq, workflow, err
+	return unpackPrepared(ctx, prepared, err, responsesPreparedFields)
 }
 
 func unpackPrepared[Prepared any, Req any](
@@ -328,9 +336,14 @@ func handleWithCache[R any](
 		if marshalErr != nil {
 			slog.Debug("marshalRequestBody failed", "err", marshalErr)
 		} else {
-			return s.responseCache.HandleRequest(c, body, func() error {
+			err := s.responseCache.HandleRequest(c, body, func() error {
 				return dispatch(c, req, workflow)
 			})
+			if replayErr, ok := errors.AsType[*responsecache.ReplayError](err); ok {
+				recordCachedStreamError(c, replayErr.Err)
+				return nil
+			}
+			return err
 		}
 	}
 
@@ -362,9 +375,11 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 			markRequestFailoverUsed(c)
 		}
 		stream := s.wrapPluginStream(ctx, workflow, responsesStreamDialect(), func() *pluginapi.Prompt { return promptOf(exchange.FromResponsesRequest(req)) }, result.Stream)
+		stream = withPreviousResponseID(stream, chainedFrom(ctx, req))
 		if turn := conversationTurnFromContext(ctx); turn != nil {
 			stream = turn.persistingStream(ctx, stream)
 		}
+		stream = s.snapshotStream(ctx, workflow, req, result.Meta.ProviderType, result.Meta.ProviderName, requestID, stream)
 		return s.handleStreamingReadCloser(c, workflow, result.Meta, stream, func(stream io.ReadCloser) io.ReadCloser {
 			return result.WrapDeliveryStream(ctx, stream)
 		})
@@ -407,6 +422,9 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 			))
 		}
 	}
+	// A chained response names its predecessor, as OpenAI's does: the client
+	// sees the link, and a later chained turn walks it to rebuild the history.
+	result.Response.PreviousResponseID = chainedFrom(ctx, req)
 	s.storeResponseSnapshotAsync(ctx, workflow, req, result.Response, result.Meta.ProviderType, result.Meta.ProviderName, requestID)
 
 	applyPluginResponseHeaders(c)
@@ -445,7 +463,7 @@ func (s *translatedInferenceService) storeResponseSnapshotAsync(ctx context.Cont
 	}
 	snapshot, err := responsestore.Detach(&responsestore.StoredResponse{
 		Response:           resp,
-		InputItems:         normalizedResponseInputItems(resp.ID, req),
+		InputItems:         normalizedResponseInputItems(resp.ID, clientInput(ctx, req)),
 		Provider:           strings.TrimSpace(providerType),
 		ProviderName:       strings.TrimSpace(providerName),
 		ProviderResponseID: resp.ID,
@@ -459,7 +477,9 @@ func (s *translatedInferenceService) storeResponseSnapshotAsync(ctx context.Cont
 	}
 
 	writeCtx := context.WithoutCancel(ctx)
+	pending := s.trackPendingSnapshot(resp.ID, core.UserPathFromContext(ctx))
 	scheduled := s.goSnapshotWrite(func() {
+		defer s.finishPendingSnapshot(resp.ID, pending)
 		writeCtx, cancel := context.WithTimeout(writeCtx, snapshotWriteTimeout)
 		defer cancel()
 		if err := snapshot.Persist(writeCtx, store); err != nil {
@@ -467,6 +487,7 @@ func (s *translatedInferenceService) storeResponseSnapshotAsync(ctx context.Cont
 		}
 	})
 	if !scheduled {
+		s.finishPendingSnapshot(resp.ID, pending)
 		s.recordResponseSnapshotStoreFailure(failure, errors.New("server shutting down, snapshot write skipped"))
 	}
 }
@@ -561,20 +582,24 @@ func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
 	}
 	attachPreparedWorkflow(c, prepared.Context, prepared.Workflow)
 
-	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRouteFromWorkflow(prepared.Workflow))
+	return handleWithCache(s, c, prepared.Request, prepared.Workflow, s.dispatchEmbeddings)
+}
+
+func (s *translatedInferenceService) dispatchEmbeddings(c *echo.Context, req *core.EmbeddingRequest, workflow *core.Workflow) error {
+	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRouteFromWorkflow(workflow))
 	if err != nil {
 		return handleError(c, err)
 	}
 	defer adm.release()
 
 	requestID := requestIDFromContextOrHeader(c.Request())
-	result, err := s.inference().ExecuteEmbeddings(c.Request().Context(), prepared.Workflow, prepared.Request, requestID, "/v1/embeddings")
+	result, err := s.inference().ExecuteEmbeddings(c.Request().Context(), workflow, req, requestID, "/v1/embeddings")
 	if err != nil {
 		return handleError(c, err)
 	}
 	auditlog.EnrichEntryWithResolvedRoute(
 		c,
-		qualifyExecutedModel(prepared.Workflow, result.Response.Model, result.Meta.ProviderName),
+		qualifyExecutedModel(workflow, result.Response.Model, result.Meta.ProviderName),
 		result.Meta.ProviderType,
 		result.Meta.ProviderName,
 	)
@@ -724,14 +749,34 @@ func handleStreamingDispatchError(c *echo.Context, err error) error {
 	return handleError(c, err)
 }
 
-func recordStreamingError(streamEntry *auditlog.LogEntry, model, provider, path, requestID string, ctx context.Context, err error) {
-	errorType := "stream_error"
+// classifyStreamError names the audit error_type of a failure while writing
+// a stream to the client.
+func classifyStreamError(ctx context.Context, err error) string {
 	switch {
 	case errors.Is(err, ErrClientStall):
-		errorType = "client_stalled"
+		return "client_stalled"
 	case isClientDisconnect(ctx, err):
-		errorType = "client_disconnected"
+		return "client_disconnected"
 	}
+	return "stream_error"
+}
+
+// recordCachedStreamError records a cache-served stream the client stopped
+// reading or abandoned, so the audit entry does not show a clean 200 for a
+// stalled client just because the response happened to be cached.
+func recordCachedStreamError(c *echo.Context, err error) {
+	errorType := classifyStreamError(c.Request().Context(), err)
+	auditlog.EnrichEntryWithError(c, errorType, err.Error(), "")
+	slog.Warn("cached stream terminated abnormally",
+		"error", err,
+		"error_type", errorType,
+		"path", c.Request().URL.Path,
+		"request_id", requestIDFromContextOrHeader(c.Request()),
+	)
+}
+
+func recordStreamingError(streamEntry *auditlog.LogEntry, model, provider, path, requestID string, ctx context.Context, err error) {
+	errorType := classifyStreamError(ctx, err)
 
 	// The nil-err branch in isClientDisconnect is reachable for callers that
 	// only have a canceled context to report. Fall back to the context error

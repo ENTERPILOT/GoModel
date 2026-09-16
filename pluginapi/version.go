@@ -15,4 +15,4 @@ package pluginapi
 // reports it in diagnostics and stamps it into [BuildInfo], but never uses it
 // to accept or reject a plugin (the Go toolchain already enforces that a
 // shared object was built from identical sources).
-const Version = "0.1.0"
+const Version = "0.2.0"

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestObserveTapsFramesUntilClose verifies the sideband observer consumes every
@@ -43,27 +45,19 @@ func TestObserveTapsFramesUntilClose(t *testing.T) {
 	err := Observe(context.Background(), target, func(frame []byte) {
 		seen = append(seen, string(frame))
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(seen) != len(frames) {
-		t.Fatalf("tapped %d frames, want %d", len(seen), len(frames))
-	}
+	require.NoError(t, err)
+	require.Len(t, seen, len(frames))
+
 	for i := range frames {
-		if seen[i] != frames[i] {
-			t.Errorf("frame %d = %q, want %q", i, seen[i], frames[i])
-		}
+		assert.Equal(t, frames[i], seen[i], "frame %d = %q, want %q", i, seen[i], frames[i])
 	}
-	if gotAuth != "Bearer observer-key" {
-		t.Errorf("upstream saw Authorization %q, want injected observer credentials", gotAuth)
-	}
+	assert.Equal(t, "Bearer observer-key", gotAuth)
 }
 
 func TestObserveReturnsDialError(t *testing.T) {
 	err := Observe(context.Background(), Target{URL: "ws://127.0.0.1:1/v1/realtime"}, nil)
-	if _, ok := errors.AsType[*DialError](err); !ok {
-		t.Fatalf("err = %v, want *DialError", err)
-	}
+	_, ok := errors.AsType[*DialError](err)
+	require.True(t, ok)
 }
 
 func TestObserveDetectsDeadUpstream(t *testing.T) {
@@ -88,15 +82,9 @@ func TestObserveDetectsDeadUpstream(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	err := Observe(ctx, Target{URL: "ws" + strings.TrimPrefix(upstream.URL, "http")}, nil)
-	if err == nil {
-		t.Fatal("expected a heartbeat failure for a dead upstream")
-	}
-	if ctx.Err() != nil {
-		t.Fatal("observer ended only via the outer context; the heartbeat did not fire")
-	}
-	if !strings.Contains(err.Error(), "observer heartbeat") {
-		t.Errorf("err = %v, want a heartbeat-attributed failure", err)
-	}
+	require.Error(t, err)
+	require.NoError(t, ctx.Err())
+	assert.Contains(t, err.Error(), "observer heartbeat")
 }
 
 func TestObserveStopsOnContextCancel(t *testing.T) {
@@ -117,7 +105,6 @@ func TestObserveStopsOnContextCancel(t *testing.T) {
 	if err == nil {
 		return // normalized cancellation is acceptable
 	}
-	if _, ok := errors.AsType[*DialError](err); ok {
-		t.Fatalf("err = %v, want a post-dial termination, not a dial error", err)
-	}
+	_, ok := errors.AsType[*DialError](err)
+	require.False(t, ok)
 }

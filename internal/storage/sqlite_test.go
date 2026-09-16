@@ -7,49 +7,38 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSQLitePing(t *testing.T) {
 	store, err := NewSQLite(SQLiteConfig{Path: filepath.Join(t.TempDir(), "ping.db")})
-	if err != nil {
-		t.Fatalf("failed to create SQLite storage: %v", err)
-	}
+	require.NoError(t, err)
 
 	hc, ok := store.(HealthChecker)
-	if !ok {
-		t.Fatalf("SQLite storage does not implement HealthChecker")
-	}
-
-	if err := hc.Ping(context.Background()); err != nil {
-		t.Fatalf("Ping() error = %v, want nil", err)
-	}
-
-	if err := store.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
-	if err := hc.Ping(context.Background()); err == nil {
-		t.Fatal("Ping() after Close() = nil, want error")
-	}
+	require.True(t, ok)
+	err = hc.Ping(context.Background())
+	require.NoError(t, err)
+	err = store.Close()
+	require.NoError(t, err)
+	require.Error(t, hc.Ping(context.Background()))
 }
 
 func TestSQLiteConcurrentWriteSafety(t *testing.T) {
 	store, err := NewSQLite(SQLiteConfig{Path: filepath.Join(t.TempDir(), "test.db")})
-	if err != nil {
-		t.Fatalf("failed to create SQLite storage: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer store.Close()
 
 	db := store.DB()
 
 	// Create two tables to simulate audit log and usage tracking writing concurrently.
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS test_audit (id TEXT PRIMARY KEY, data TEXT)`)
-	if err != nil {
-		t.Fatalf("failed to create test_audit table: %v", err)
-	}
+	require.NoError(t, err)
+
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS test_usage (id TEXT PRIMARY KEY, data TEXT)`)
-	if err != nil {
-		t.Fatalf("failed to create test_usage table: %v", err)
-	}
+	require.NoError(t, err)
 
 	const goroutines = 10
 	const insertsPerGoroutine = 50
@@ -87,18 +76,12 @@ func TestSQLiteConcurrentWriteSafety(t *testing.T) {
 
 	// Verify all rows were inserted.
 	var auditCount, usageCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM test_audit").Scan(&auditCount); err != nil {
-		t.Fatalf("failed to count audit rows: %v", err)
-	}
-	if err := db.QueryRow("SELECT COUNT(*) FROM test_usage").Scan(&usageCount); err != nil {
-		t.Fatalf("failed to count usage rows: %v", err)
-	}
+	err = db.QueryRow("SELECT COUNT(*) FROM test_audit").Scan(&auditCount)
+	require.NoError(t, err)
+	err = db.QueryRow("SELECT COUNT(*) FROM test_usage").Scan(&usageCount)
+	require.NoError(t, err)
 
 	expectedPerTable := (goroutines / 2) * insertsPerGoroutine
-	if auditCount != expectedPerTable {
-		t.Errorf("test_audit: got %d rows, want %d", auditCount, expectedPerTable)
-	}
-	if usageCount != expectedPerTable {
-		t.Errorf("test_usage: got %d rows, want %d", usageCount, expectedPerTable)
-	}
+	assert.Equal(t, expectedPerTable, auditCount)
+	assert.Equal(t, expectedPerTable, usageCount)
 }

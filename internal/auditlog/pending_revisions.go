@@ -43,6 +43,53 @@ func EnrichEntryWithPendingRequestRevisions(c *echo.Context, compute func() []Re
 	entry.pendingRevisions = append(entry.pendingRevisions, startPendingRequestRevisions(compute))
 }
 
+// Complete finishes the entry right before it is written: pending revision
+// work is folded in and the guardrail outcomes are rebuilt from the phases
+// that ran, the response and stream ones included.
+func (e *LogEntry) Complete() {
+	if e == nil {
+		return
+	}
+	e.CompleteRequestRevisions()
+	e.completeGuardrailOutcomes()
+}
+
+func (e *LogEntry) completeGuardrailOutcomes() {
+	compute := e.guardrailOutcomes
+	if compute == nil {
+		return
+	}
+	e.guardrailOutcomes = nil
+	e.setGuardrailOutcomes(compute())
+}
+
+func (e *LogEntry) setGuardrailOutcomes(outcomes []GuardrailOutcomeSnapshot) {
+	outcomes = normalizeGuardrailOutcomes(outcomes)
+	if len(outcomes) == 0 && (e.Data == nil || e.Data.Guardrails == nil) {
+		return
+	}
+	ensureLogData(e).Guardrails = outcomes
+}
+
+// EnrichEntryWithGuardrailOutcomes records the guardrail outcomes compute
+// returns on the live audit entry now, and again right before the entry is
+// written, since the response and stream phases finish after the handler
+// returned. compute must be safe to call from another goroutine at that
+// point. A missing entry is a no-op; a streamed entry created afterwards
+// (CreateStreamEntry) inherits the work.
+func EnrichEntryWithGuardrailOutcomes(c *echo.Context, compute func() []GuardrailOutcomeSnapshot) {
+	entry := entryFromContext(c)
+	if entry == nil || compute == nil {
+		return
+	}
+	entry.guardrailOutcomes = compute
+	outcomes := compute()
+	entry.setGuardrailOutcomes(outcomes)
+	if len(outcomes) > 0 {
+		publishLiveAuditUpdate(c, entry)
+	}
+}
+
 // CompleteRequestRevisions waits for the entry's pending revision work, if
 // any, and appends its results to the revision chain in sequence. It runs
 // where the entry is about to be written and is a no-op afterwards.

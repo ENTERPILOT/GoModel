@@ -7,6 +7,7 @@
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { auth } from "$lib/stores/auth.svelte.js";
   import { guardrailsStore as store } from "./guardrails.svelte.js";
+  import { guardrailDegraded } from "./guardrails-logic.js";
   import { phaseLabel } from "$lib/utils/pluginPhases.js";
   import { formatNumber } from "$lib/utils/format.js";
   import { Pencil, Plus, ShieldCheck, X } from "lucide";
@@ -67,7 +68,16 @@
         <tbody>
           {#each store.filtered as guardrail (guardrail.name)}
             <tr>
-              <td class="mono font-size-md">{guardrail.name}</td>
+              <td class="mono font-size-md">
+                {guardrail.name}
+                {#if guardrailDegraded(guardrail)}
+                  <span
+                    class="settings-guardrail-health is-degraded"
+                    title={guardrail.health_error || m.guardrails_health_degraded()}
+                    >{m.guardrails_health_degraded()}</span
+                  >
+                {/if}
+              </td>
               <td>
                 <span class="settings-guardrail-type-pill">
                   {#if guardrail.guardrail}
@@ -128,6 +138,20 @@
 </section>
 
 <style>
+  .settings-guardrail-health {
+    margin-left: 6px;
+    font-family: var(--font-sans, inherit);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .settings-guardrail-health.is-degraded {
+    color: var(--danger);
+  }
+
   .settings-guardrails-list {
     min-width: 0;
   }

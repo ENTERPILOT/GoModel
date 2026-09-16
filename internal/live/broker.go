@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -91,6 +92,10 @@ type Broker struct {
 	subscriberBuffer int
 	heartbeat        time.Duration
 
+	// subscriberCount mirrors len(subscribers) so publishers can tell, without
+	// taking mu, whether anyone would receive a live-only fan-out copy.
+	subscriberCount atomic.Int64
+
 	mu        sync.Mutex
 	nextSeq   uint64
 	nextSubID uint64
@@ -154,9 +159,7 @@ func (b *Broker) HasLiveSubscribers() bool {
 	if b == nil || !b.enabled {
 		return false
 	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return !b.closed && len(b.subscribers) > 0
+	return b.subscriberCount.Load() > 0
 }
 
 // Heartbeat returns the stream heartbeat interval.
@@ -194,6 +197,7 @@ func (b *Broker) Subscribe(cursor uint64) *Subscription {
 	id := b.nextSubID
 	ch := make(chan Event, b.subscriberBuffer)
 	b.subscribers[id] = ch
+	b.subscriberCount.Store(int64(len(b.subscribers)))
 
 	return &Subscription{
 		Replay: replay,
@@ -269,6 +273,7 @@ func (b *Broker) unsubscribe(id uint64) {
 		return
 	}
 	delete(b.subscribers, id)
+	b.subscriberCount.Store(int64(len(b.subscribers)))
 	close(ch)
 }
 
@@ -285,6 +290,7 @@ func (b *Broker) Close() {
 	b.closed = true
 	subscribers := b.subscribers
 	b.subscribers = make(map[uint64]chan Event)
+	b.subscriberCount.Store(0)
 	b.mu.Unlock()
 
 	for _, ch := range subscribers {
@@ -360,6 +366,7 @@ func (b *Broker) publishEvent(eventType, entryID, requestID string, timestamp ti
 			close(ch)
 		}
 	}
+	b.subscriberCount.Store(int64(len(b.subscribers)))
 }
 
 func (b *Broker) updateActiveSnapshotsLocked(event *Event, entryID string) {
@@ -492,34 +499,40 @@ func mergeEventData(base, patch json.RawMessage) json.RawMessage {
 // copy retained for replay strips bodies (flagging them as captured so the
 // dashboard hydrates them from the persisted entry) and is size-capped, so
 // broker retention stays bounded regardless of request size.
+//
+// The full preview is encoded only while someone is subscribed. Bodies are the
+// bulk of the payload, and with no dashboard open (the common case) nobody
+// would read them. A subscriber that connects between that check and the
+// publish receives the retained copy, which is what replay gives it anyway.
 func (b *Broker) PublishAuditEvent(eventType string, entry *auditlog.LogEntry) {
 	if b == nil || !b.enabled || entry == nil {
 		return
 	}
 	payload := auditPreviewFromEntry(eventType, entry)
-	fanoutData, err := json.Marshal(payload)
+	retainedPreview, stripped := stripAuditPreviewBodies(payload)
+	retainedData, err := json.Marshal(retainedPreview)
 	if err != nil {
 		return
 	}
-	retainedData, reduced := fanoutData, false
-	if stripped, changed := stripAuditPreviewBodies(payload); changed {
-		retainedData, err = json.Marshal(stripped)
-		if err != nil {
-			return
-		}
-		reduced = true
-	}
+	compacted := false
 	if len(retainedData) > maxRetainedEventBytes {
 		retainedData, err = json.Marshal(compactAuditPreviewForRetention(payload))
 		if err != nil {
 			return
 		}
-		reduced = true
+		compacted = true
 	}
-	if !reduced {
-		// Nothing was stripped: retain and fan out the same payload.
-		b.publishEvent(eventType, entry.ID, entry.RequestID, entry.Timestamp, fanoutData, nil)
+	if !stripped && !compacted {
+		// Nothing was reduced: retain and fan out the same payload.
+		b.publishEvent(eventType, entry.ID, entry.RequestID, entry.Timestamp, retainedData, nil)
 		return
+	}
+	var fanoutData json.RawMessage
+	if b.subscriberCount.Load() > 0 {
+		fanoutData, err = json.Marshal(payload)
+		if err != nil {
+			return
+		}
 	}
 	b.publishEvent(eventType, entry.ID, entry.RequestID, entry.Timestamp, retainedData, fanoutData)
 }
@@ -631,6 +644,10 @@ type auditPreviewData struct {
 	// entry. Per-attempt response bodies/headers are omitted to keep the live
 	// stream compact; they hydrate when the entry detail is fetched.
 	Attempts []auditlog.AttemptSnapshot `json:"attempts,omitempty"`
+	// Guardrails carries the guardrail outcome trail so the live workflow
+	// chart colors its steps as phases finish. The plugin-provided detail is
+	// omitted to keep the stream compact; it hydrates with the entry detail.
+	Guardrails []auditlog.GuardrailOutcomeSnapshot `json:"guardrails,omitempty"`
 }
 
 func auditPreviewFromEntry(eventType string, entry *auditlog.LogEntry) auditPreview {
@@ -671,6 +688,7 @@ func auditPreviewFromEntry(eventType string, entry *auditlog.LogEntry) auditPrev
 			WorkflowFeatures: entry.Data.WorkflowFeatures,
 			Failover:         entry.Data.Failover,
 			Attempts:         compactAttemptsForPreview(entry.Data.Attempts),
+			Guardrails:       compactGuardrailsForPreview(entry.Data.Guardrails),
 		}
 		if auditPreviewIncludesLiveRequestMetadata(eventType) {
 			data.UserAgent = entry.Data.UserAgent
@@ -745,7 +763,22 @@ func (d auditPreviewData) hasValues() bool {
 		d.ResponseBodyPartial ||
 		d.RequestBodyCaptured ||
 		d.ResponseBodyCaptured ||
-		len(d.Attempts) > 0
+		len(d.Attempts) > 0 ||
+		len(d.Guardrails) > 0
+}
+
+// compactGuardrailsForPreview copies the guardrail outcomes for a live
+// preview without the plugin-provided detail.
+func compactGuardrailsForPreview(outcomes []auditlog.GuardrailOutcomeSnapshot) []auditlog.GuardrailOutcomeSnapshot {
+	if len(outcomes) == 0 {
+		return nil
+	}
+	compact := make([]auditlog.GuardrailOutcomeSnapshot, len(outcomes))
+	for i, outcome := range outcomes {
+		outcome.Detail = nil
+		compact[i] = outcome
+	}
+	return compact
 }
 
 // compactAttemptsForPreview copies the attempt summaries for a live preview

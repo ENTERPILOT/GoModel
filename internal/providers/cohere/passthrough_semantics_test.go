@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPassthroughSemanticEnricherRecognizesCohereV2Inference(t *testing.T) {
@@ -15,8 +17,7 @@ func TestPassthroughSemanticEnricherRecognizesCohereV2Inference(t *testing.T) {
 		info := passthroughSemanticEnricher.Enrich(nil, nil, &core.PassthroughRouteInfo{
 			Provider: "cohere", RawEndpoint: endpoint, NormalizedEndpoint: endpoint,
 		})
-		if info == nil || info.GenAIOperation != want {
-			t.Fatalf("GenAIOperation for %q = %+v, want %q", endpoint, info, want)
-		}
+		require.NotNil(t, info, "endpoint %q", endpoint)
+		assert.Equal(t, want, info.GenAIOperation, "endpoint %q", endpoint)
 	}
 }

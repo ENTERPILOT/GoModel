@@ -37,6 +37,7 @@ For request and response details, see the dedicated guides:
 | `/v1/conversations/{id}/items/{item_id}` | DELETE | Delete a conversation item and return the conversation                                                |
 | `/v1/embeddings`                  | POST   | Text embeddings                                                                                              |
 | `/v1/models`                      | GET    | List available models                                                                                        |
+| `/v1/models/{model}`              | GET    | Retrieve one model by ID (`openai/gpt-4.1-mini`; slashes may be sent raw or percent-encoded)                  |
 | `/v1/audio/speech`                | POST   | Text-to-speech, returning binary audio                                                                       |
 | `/v1/audio/transcriptions`        | POST   | Speech-to-text from a multipart upload                                                                       |
 | `/v1/images/generations`          | POST   | Image generation from a text prompt (DALL·E, gpt-image-1, grok-2-image, Imagen, Gemini image models)                                     |

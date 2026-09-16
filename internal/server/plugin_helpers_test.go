@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/plugins/builtin"
@@ -57,25 +59,21 @@ func newGuardrailChains(t *testing.T, chat plugins.ChatCompleter, steps []guardr
 	t.Helper()
 	catalog := plugins.NewCatalog()
 	for _, factory := range append(builtin.All(), extra...) {
-		if err := catalog.Register(factory, plugins.SourceBuiltin); err != nil {
-			t.Fatalf("catalog.Register() error = %v", err)
-		}
+		err := catalog.Register(factory, plugins.SourceBuiltin)
+		require.NoError(t, err)
 	}
 	store := &memoryGuardrailStore{definitions: map[string]guardrails.Definition{}}
 	for _, def := range definitions {
 		store.definitions[def.Name] = def
 	}
 	service, err := guardrails.NewService(store, catalog, plugins.HostDeps{Chat: chat})
-	if err != nil {
-		t.Fatalf("guardrails.NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("guardrails.Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+
 	chains, err := service.BuildChains(steps)
-	if err != nil {
-		t.Fatalf("BuildChains() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	return chains
 }
 

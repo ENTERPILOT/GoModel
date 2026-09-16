@@ -4,6 +4,8 @@ import (
 	"io"
 	"net/http"
 	"sync"
+
+	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
 // streamCopyBufferPool reuses 32KB copy buffers across streaming responses so
@@ -23,7 +25,7 @@ var streamCopyBufferPool = sync.Pool{
 // the final chunk would be recorded as a completed response.
 func flushStream(w io.Writer, stream io.Reader) error {
 	flusher, canFlush := w.(http.Flusher)
-	stalls := findStallReporter(w)
+	stalls := streaming.FindStallReporter(w)
 	if canFlush {
 		flusher.Flush()
 		if stalls != nil {

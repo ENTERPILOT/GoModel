@@ -2,9 +2,11 @@ package sqlutil
 
 import (
 	"encoding/json"
-	"reflect"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNullableJSONStrings(t *testing.T) {
@@ -19,9 +21,8 @@ func TestNullableJSONStrings(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := NullableJSONStrings(tt.values, "row-1"); got != tt.want {
-				t.Fatalf("NullableJSONStrings(%v) = %v, want %v", tt.values, got, tt.want)
-			}
+			got := NullableJSONStrings(tt.values, "row-1")
+			require.Equal(t, tt.want, got, "NullableJSONStrings(%v)", tt.values)
 		})
 	}
 }
@@ -40,9 +41,8 @@ func TestStringsFromJSON(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := StringsFromJSON(tt.raw, "row-1"); !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("StringsFromJSON(%q) = %v, want %v", tt.raw, got, tt.want)
-			}
+			got := StringsFromJSON(tt.raw, "row-1")
+			require.Equal(t, tt.want, got, "StringsFromJSON(%q) = %v, want %v", tt.raw, got, tt.want)
 		})
 	}
 }
@@ -62,29 +62,25 @@ func TestTimeFromUnix(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := TimeFromUnix(tt.value)
-			if !got.Equal(tt.want) {
-				t.Fatalf("TimeFromUnix(%d) = %s, want %s", tt.value, got, tt.want)
-			}
+			require.True(t, got.Equal(tt.want), "TimeFromUnix(%d) = %s, want %s", tt.value, got, tt.want)
+
 			// Equal compares instants only; a stray location would change the
 			// offset every API response serializes.
-			if got.Location() != time.UTC {
-				t.Errorf("TimeFromUnix(%d) location = %s, want UTC", tt.value, got.Location())
-			}
-			// The whole point of the clamp: the result must be encodable, or
-			// one bad row takes down every listing that includes it.
-			if _, err := json.Marshal(got); err != nil {
-				t.Fatalf("TimeFromUnix(%d) is not JSON-encodable: %v", tt.value, err)
-			}
+			assert.Same(t, time.UTC, got.Location(), "TimeFromUnix(%d) location = %s, want UTC", tt.value, got.Location())
+			_, err := // The whole point of the clamp: the result must be encodable, or
+				// one bad row takes down every listing that includes it.
+				json.Marshal(got)
+			require.NoError(t, err, "TimeFromUnix(%d) is not JSON-encodable: %v", tt.value, err)
 		})
 	}
 }
 
 func TestTimeFromUnixPtr(t *testing.T) {
-	if got := TimeFromUnixPtr(nil); got != nil {
-		t.Fatalf("TimeFromUnixPtr(nil) = %v, want nil", got)
-	}
+	got := TimeFromUnixPtr(nil)
+	require.Nil(t, got)
+
 	out := int64(99999999999999)
-	if got := TimeFromUnixPtr(&out); got == nil || !got.IsZero() {
-		t.Fatalf("TimeFromUnixPtr(out-of-range) = %v, want zero time", got)
-	}
+	got = TimeFromUnixPtr(&out)
+	require.NotNil(t, got)
+	require.True(t, got.IsZero())
 }

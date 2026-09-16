@@ -2,8 +2,10 @@
 // plugin config) and the virtual-model editor (route-scoped plugin config).
 // Pure helpers over a plain config object; SchemaFields.svelte renders them.
 // Field shape (from GET /admin/guardrails/types and GET /admin/plugins):
-//   { key, label, input: text|textarea|number|select|checkboxes|secret|model,
+//   { key, label, input: text|textarea|number|select|checkboxes|secret|model|bool|list,
 //     required, help, placeholder, options: [{value, label}], default, scope }
+// `checkboxes` and `list` hold string arrays, `bool` a boolean, `model` a
+// provider/model selector, alias, or virtual model; everything else a string.
 
 // SECRET_PLACEHOLDER is what the server returns for a stored secret. Sending
 // it back unchanged keeps the stored value; any other value replaces it.
@@ -35,6 +37,33 @@ export function normalizeSchemaArrayValue(value) {
     .split(",")
     .map((item) => item.trim())
     .filter((item) => item);
+}
+
+// normalizeSchemaListValue accepts an array or free text split on commas and
+// newlines and returns a trimmed, non-empty, de-duplicated string array.
+export function normalizeSchemaListValue(value) {
+  const items = Array.isArray(value)
+    ? value.map((item) => String(item ?? "").trim())
+    : String(value ?? "")
+        .split(/[,\n]/)
+        .map((item) => item.trim());
+  return [...new Set(items.filter((item) => item))];
+}
+
+// normalizeSchemaBoolValue reads a stored boolean: JSON booleans, 0/1, and
+// the words true/false, yes/no, on/off in any case.
+export function normalizeSchemaBoolValue(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  switch (String(value ?? "").trim().toLowerCase()) {
+    case "true":
+    case "yes":
+    case "on":
+    case "1":
+      return true;
+    default:
+      return false;
+  }
 }
 
 // instanceSchemaFields keeps the fields an instance editor renders: scope ""
@@ -78,23 +107,24 @@ export function isSecretPlaceholder(value) {
 
 // schemaFieldValue reads a field's current value from a config.
 export function schemaFieldValue(config, field) {
-  if (!field || !config) {
-    return field && field.input === "checkboxes" ? [] : "";
+  const value = field && config ? config[field.key] : undefined;
+  switch (field && field.input) {
+    case "checkboxes":
+      return normalizeSchemaArrayValue(value);
+    case "list":
+      return normalizeSchemaListValue(value);
+    case "bool":
+      return normalizeSchemaBoolValue(value);
+    default:
+      return value === null || value === undefined ? "" : value;
   }
-  const value = config[field.key];
-  if (value === null || value === undefined) {
-    return field.input === "checkboxes" ? [] : "";
-  }
-  if (field.input === "checkboxes") {
-    return normalizeSchemaArrayValue(value);
-  }
-  return value;
 }
 
 // setSchemaFieldValue returns the next config with a field updated: numbers
 // are parsed (empty clears the key, non-numeric input is kept as the trimmed
-// string so the server can reject it), checkbox groups normalize to string
-// arrays, everything else (including secrets) stores the raw value.
+// string so the server can reject it), checkbox groups and lists normalize
+// to string arrays, bools to booleans, everything else (including secrets)
+// stores the raw value.
 export function setSchemaFieldValue(config, field, value) {
   if (!field) {
     return config;
@@ -110,6 +140,10 @@ export function setSchemaFieldValue(config, field, value) {
     }
   } else if (field.input === "checkboxes") {
     nextConfig[field.key] = normalizeSchemaArrayValue(value);
+  } else if (field.input === "list") {
+    nextConfig[field.key] = normalizeSchemaListValue(value);
+  } else if (field.input === "bool") {
+    nextConfig[field.key] = normalizeSchemaBoolValue(value);
   } else {
     nextConfig[field.key] = value;
   }

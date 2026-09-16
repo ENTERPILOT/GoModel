@@ -27,6 +27,11 @@ answer it with a safe message, or let it through with a warning.
   streams too; a plugin whose stream policy buffers has the same effect.
 </Warning>
 
+On `/v1/responses`, a stream-phase guardrail may drop, merge, or split events,
+so GoModel renumbers what it delivers: `sequence_number` still runs from `0`
+without gaps, up to the terminal `response.completed` (or `response.incomplete`
+/ `response.failed` on a cut stream).
+
 Guardrails work across all text-based endpoints:
 
 - `/v1/chat/completions`
@@ -133,7 +138,7 @@ flowchart LR
 
 Each sequential group receives the output of the previous group. Guardrails
 that **edit content** (`system_prompt`, `llm_based_altering`,
-`string_replace`) cannot share an order with another editing guardrail; only
+`string_replace`, `presidio`) cannot share an order with another editing guardrail; only
 one editor per order, and any number of non-editing checks (`llm_judge`,
 `header_edit`) next to it. When several guardrails at one order decide
 differently, the most severe decision wins: `block` > `respond` > `warn` >
@@ -194,7 +199,7 @@ the guardrail endpoints and the dashboard page are unavailable.
 
 ## Guardrail Types
 
-Five types ship with GoModel. Each is a built-in plugin; the tables list its
+Six types ship with GoModel. Each is a built-in plugin; the tables list its
 config keys as they appear under `config:` and on the dashboard form.
 
 ### `system_prompt`
@@ -299,8 +304,9 @@ The internal request uses:
 - request origin: `plugin`
 
 Guardrails are skipped for that internal request to avoid recursion. A rewrite
-that fails keeps the original text; a cancelled or timed-out call fails the
-guardrail (see `fail_mode`).
+that fails (an error, an empty or truncated reply, a tool call instead of
+text) fails the guardrail, so `fail_mode` decides: `closed` rejects the
+request, `open` continues with the original text.
 
 #### Example
 
@@ -335,7 +341,7 @@ text split across two parts is not matched.
 | `on_match` | No | `replace` | `replace` substitutes; `block` rejects with an error; `respond` answers with `message` as an assistant reply; `warn` continues and records the match. Only `replace` edits the text. |
 | `message` | No | `Request blocked by policy` | Error message for `block`, assistant reply for `respond`, audit note for `warn`. |
 | `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`, for example `403`. Empty means 400 when the prompt is blocked, 502 when the response is blocked. |
-| `stream_lookbehind` | No | `64` | Characters of streamed text held back so a match spanning two chunks is still rewritten; set it to at least the longest find text. Used by `replace` and `warn`. |
+| `stream_lookbehind` | No | `64` | Characters of streamed text held back so a match spanning two chunks is still rewritten; set it to at least the longest find text. A match at the end of the text streamed so far is held until it stops growing, so an open-ended pattern such as `sk-[A-Za-z0-9]{20,}` masks the whole value when it is at most this long. Used by `replace` and `warn`. |
 
 In the stream phase, `replace` and `warn` transform events in flight with the
 configured lookbehind. `block` and `respond` buffer the whole stream so
@@ -354,6 +360,76 @@ until the response is complete.
     rules: |
       Project Falcon => [project]
       ACME Corp => [company]
+```
+
+### `tag_replace`
+
+Replaces `{{gomodel.<tag>}}` placeholders in prompt text with values of the
+current request, just before the provider call. Use it to tell the model which
+model it runs as, or today's date, without the client sending them. It pairs
+well with `system_prompt`: put the tags in the system prompt and run
+`tag_replace` at a later `order`.
+
+**Phases:** prompt. **Edits content:** yes.
+
+#### Tags
+
+| Tag | Value |
+| --- | ----- |
+| `{{gomodel.requested_model}}` | Model the client asked for. |
+| `{{gomodel.resolved_model}}` | Provider model the request is sent to. |
+| `{{gomodel.virtual_model}}` | Virtual model that produced the resolution, empty otherwise. |
+| `{{gomodel.provider_type}}` | Provider type, for example `openai`. |
+| `{{gomodel.provider_name}}` | Provider instance name. |
+| `{{gomodel.user_path}}` | Effective user path. |
+| `{{gomodel.request_id}}` | Gateway request ID. |
+| `{{gomodel.session_id}}` | Detected session ID, empty when none. |
+| `{{gomodel.date}}` | Current date, `2026-09-15`. |
+| `{{gomodel.time}}` | Current time, `14:05:00`. |
+| `{{gomodel.datetime}}` | Current date and time in RFC 3339, `2026-09-15T14:05:00Z`. |
+| `{{gomodel.weekday}}` | Current day of the week, `Tuesday`. |
+
+Spaces inside the braces are allowed. Unknown tags are left as written.
+
+A tag with no value for the request, such as `session_id` without a session,
+becomes empty. The model and provider tags name the first selected provider:
+the prompt phase runs once, so a failover attempt receives the same text.
+Values that come from the caller, such as `user_path` and `session_id`, are
+inserted as sent. A request whose prompt had a tag expanded is not stored in the
+response cache, because the reply may repeat request-specific values.
+
+<Warning>
+Time-based tags can break provider prompt caching and raise costs. Providers
+cache the start of a prompt, usually the system message, and reuse it only
+when it is identical. `{{gomodel.time}}` and `{{gomodel.datetime}}` change
+every second, and `{{gomodel.request_id}}` changes on every request, so every
+call pays the full input price and waits longer. `{{gomodel.date}}` and
+`{{gomodel.weekday}}` change once a day and cost one cache miss per day. Prefer
+`date` over `time` or `datetime`, and place volatile tags at the end of the
+prompt rather than the start of a long system message.
+</Warning>
+
+#### Settings
+
+| Key | Required | Default | Description |
+| --- | -------- | ------- | ----------- |
+| `roles` | No | `["system"]` | Prompt messages tags are expanded in: `system` (includes developer), `user`, `assistant`, `tool`. Adding `user` lets callers read request values such as the user path and rewrites template text in their prompts. |
+| `timezone` | No | `UTC` | IANA timezone for the date and time tags, for example `Europe/Warsaw`. The host zone `Local` is rejected. |
+
+#### Example
+
+```yaml
+- name: "model-facts"
+  type: "system_prompt"
+  order: 0
+  system_prompt:
+    mode: "decorator"
+    content: "You are {{gomodel.resolved_model}}. Today is {{gomodel.weekday}}, {{gomodel.date}}."
+- name: "expand-tags"
+  type: "tag_replace"
+  order: 1
+  config:
+    timezone: "Europe/Warsaw"
 ```
 
 ### `header_edit`
@@ -416,14 +492,38 @@ content.
 | `message` | No | `This request was blocked by policy` | Error message for `block`, audit note for `warn`. |
 | `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`, for example `403`. Empty means 400 when the prompt is blocked, 502 when the response is blocked. |
 | `respond_text` | No | `I can't help with that request.` | Assistant reply for `respond`. |
-| `on_unclear` | No | `warn` | When the judge reply cannot be parsed or was cut off by `max_tokens`: `allow`, `warn`, or `block` (applies `action`). A verdict counts only as a JSON object or a bare `allow` or `block`, never as a word inside a sentence. |
-| `max_tokens` | No | `256` | Completion cap for the judge call. |
+| `on_unclear` | No | `warn` | When the judge reply cannot be parsed, was cut off by `max_tokens`, or was spent entirely on reasoning: `allow`, `warn`, or `block` (applies `action`). A verdict counts only as a JSON object or a bare `allow` or `block`, never as a word inside a sentence. |
+| `max_tokens` | No | `2048` | Completion cap for the judge call. Unused tokens cost nothing; size it for the judge model's reasoning, not for the verdict. |
 | `temperature` | No | `0` | Sampling temperature for the judge call (0 to 2). |
 
 Identical text is judged once per request, so an instance that runs in both
 the prompt and the response phase does not double-charge for the same
 content. In the stream phase the whole stream is buffered and judged as a
 complete response.
+
+#### Sizing `max_tokens` for a reasoning judge
+
+A reasoning judge model spends its completion on thinking before it writes
+anything: with a cap that runs out first the judge returns no verdict, and the
+instance enforces nothing — it follows `on_unclear` instead, which by default
+only warns. The default cap of `2048` leaves room for that; unused tokens are
+never billed, so raise it further rather than trimming it when the judge model
+reasons a lot.
+
+A judge that reaches no verdict is recorded apart from a reply that was
+answered but could not be parsed:
+
+| Code | Meaning |
+| ---- | ------- |
+| `llm_judge_block` | The judge returned a block verdict; `action` applies. |
+| `llm_judge_no_verdict` | The reply was cut off (`finish_reason: length`) or was all reasoning. A warning naming the judge model and the cap is logged, and `on_unclear` applies. |
+| `llm_judge_unclear` | The judge answered, but the reply is not a verdict. `on_unclear` applies. |
+
+Check the gateway log for `judge returned no verdict` after configuring an
+instance, and set `on_unclear: block` for a policy that must hold even when the
+judge answers nothing usable. A judge call that fails outright — provider error,
+timeout — is not an unclear verdict: `fail_mode` decides it, like any other
+guardrail failure.
 
 #### Example
 
@@ -436,6 +536,109 @@ complete response.
     model: "openai/gpt-4o-mini"
     action: "respond"
     respond_text: "I can't help with that request."
+```
+
+### `presidio`
+
+Detects personal data with a [Presidio](https://presidio.dataprivacystack.org/)
+analyzer and anonymizes, flags, or blocks it. Only the analyzer service is
+needed; GoModel rewrites the text itself, so it can put the original values
+back into the response.
+
+```bash
+docker run -d -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer:latest
+```
+
+**Phases:** prompt, response, stream. **Edits content:** yes.
+
+#### Settings
+
+| Key | Required | Default | Description |
+| --- | -------- | ------- | ----------- |
+| `analyzer_url` | No | `http://localhost:5002` | Base URL of the analyzer service. |
+| `api_key` | No | | Bearer token sent as `Authorization`, for an analyzer behind an authenticating proxy. Needs an `https://` URL unless the analyzer is on localhost. |
+| `language` | No | `en` | Language code the analyzer runs with. The default image ships only `en`; the instance shows as degraded when the analyzer has no model for the language. |
+| `entities` | No | all | Entity types to look for (`PERSON`, `EMAIL_ADDRESS`, `PHONE_NUMBER`, `CREDIT_CARD`, `US_SSN`, ...; see `GET /supportedentities` on the analyzer). |
+| `block_entities` | No | | Entity types that reject the request (or answer with `message` when the action is `respond`) whatever the action. |
+| `score_threshold` | No | analyzer default | Minimum confidence, 0 to 1. Raise it when common words are taken for names or dates. |
+| `allow_list` | No | | Exact words never treated as personal data: product names, your company. |
+| `ad_hoc_recognizers` | No | | JSON array of Presidio pattern recognizers (`supported_entity` plus `patterns` or `deny_list`) for identifiers of your own. |
+| `roles` | No | `["user", "assistant", "tool"]` | Prompt messages analyzed, tool-result text and tool-call arguments included. In the response phase the assistant text and tool-call arguments are always analyzed. |
+| `action` | No | `anonymize` | `anonymize` rewrites the values; `block` rejects with an error; `respond` answers with `message` as an assistant reply; `warn` continues and records the entity types. |
+| `operator` | No | `replace` | How `anonymize` rewrites a value: `replace` with a numbered placeholder (`<PERSON_1>`, the same one for every occurrence of that value in the request), `mask` with `*` per character, `redact` (removed), `hash` (SHA-256). |
+| `restore` | No | `false` | Put the original values back where the model repeats a placeholder. Needs `operator: replace`; see below. |
+| `message` | No | `Request blocked: it contains personal data` | Error message for `block`, assistant reply for `respond`, audit note for `warn`. |
+| `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`. Empty means 400 when the prompt is blocked, 502 when the response is blocked. |
+| `stream_chunk` | No | `256` | Characters of streamed text (or tool-call arguments) collected before the analyzer runs on them, so it sees whole sentences and runs once per chunk. The client waits for at most this much text at a time. |
+| `stream_lookbehind` | No | `64` | Characters of streamed text (or tool-call arguments) held back so a value or placeholder split across two chunks is still handled. |
+
+Every text part is analyzed on its own (one analyzer call each, up to eight
+in flight), so the analyzer never sees the whole conversation as one text and
+the analyzer's own limits apply per part. The audit detail records entity
+types and counts, never the values, and errors from the analyzer never carry
+the text it was given. The analyzer receives the text in clear, so run it as
+a sidecar on the same host or reach it over `https://` or a private network.
+
+<Tip>
+  Start with an explicit `entities` list. With every type enabled, the
+  analyzer's language model also reports `DATE_TIME`, `LOCATION`, `NRP`, and
+  `URL`, which turns phrases like "a nice day" or "Paris" into placeholders
+  in both the prompt and the reply. `PERSON`, `EMAIL_ADDRESS`, `PHONE_NUMBER`,
+  `CREDIT_CARD`, `IBAN_CODE`, and the national identifiers you need cover most
+  deployments. Some models, Claude among them, treat unexplained
+  `<PERSON_1>`-style tokens with suspicion and may refuse to repeat them; a
+  system prompt line such as `Values like <PERSON_1> are privacy placeholders;
+  use them as ordinary values` fixes that.
+</Tip>
+
+In the stream phase, `anonymize` and `warn` transform events in flight in
+chunks of `stream_chunk` characters with `stream_lookbehind` of overlap; a
+`block_entities` type found mid-stream cuts the stream before that chunk
+reaches the client. `block` and `respond` buffer the whole stream so nothing
+leaks before the decision.
+
+#### Restoring values
+
+With `restore: true` the prompt phase replaces values with numbered
+placeholders and remembers them for the request; the response or stream
+phase puts the values back where the model repeats a placeholder, in text
+and in tool-call arguments, so the client sees its own data while the
+provider never does. Set `restore` on the instances in both phases: the
+prompt-phase instance records the values, the response-phase instance
+restores them. Only values from user messages, earlier assistant turns, and
+tool results are put back; a value from a system or developer message stays
+a placeholder, so a user cannot make the model reveal it. A value the model
+produced on its own is still anonymized on the way out. Such responses are
+kept out of the [response cache](/features/cache). Placeholder-shaped text
+already in the conversation, such as a `<PERSON_2>` an earlier reply carried
+back, is left as it is and its number is never reused for a new value.
+
+Streamed tool-call arguments are restored in flight as well, each call's
+arguments as a window of its own under `stream_lookbehind`, including
+placeholders whose angle brackets the provider escaped (Gemini returns
+`\u003cPERSON_1\u003e`).
+
+#### Example
+
+```yaml
+- name: "pii-in"
+  type: "presidio"
+  order: 1
+  timeout_ms: 5000
+  config:
+    entities: ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
+    block_entities: ["CREDIT_CARD", "US_SSN"]
+    restore: true
+
+- name: "pii-out"
+  type: "presidio"
+  phase: "response"
+  order: 1
+  timeout_ms: 5000
+  fail_mode: "open"
+  config:
+    entities: ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
+    restore: true
 ```
 
 ## Examples
@@ -589,6 +792,30 @@ path (the native passthrough is skipped). A response cut by a guardrail is
 reported with `finish_reason: "content_filter"` on OpenAI-compatible
 endpoints and `stop_reason: "end_turn"` on `/v1/messages`.
 
+## Guardrails and the Response Cache
+
+The [response cache](/features/cache) stores the reply the response and stream
+chains already produced, and a cache hit replays it without running those
+chains again. Both cache layers therefore key on the guardrail chain the
+request resolves to, across all three phases:
+
+- Editing, adding or removing a step makes every entry stored under the old
+  chain unreachable; the next request runs the full pipeline and stores its own
+  entry.
+- Two workflows with different chains never share entries, so a tenant whose
+  workflow redacts on the way out is never served another tenant's unredacted
+  reply.
+- A blocked response is not a cacheable response, so a blocking guardrail can
+  never be skipped by a hit.
+
+Prompt-phase guardrails run before the cache is consulted, so a prompt-phase
+block or answer applies to a request that would otherwise have been a hit. A
+response a guardrail restores request-specific data into is never cached at all
+(see `restore` under [`presidio`](#presidio)).
+
+Because the response chain does not run on a hit, the audit entry for a hit
+records the prompt-phase outcomes only, plus the cache type.
+
 ## Decisions, Errors, and Rejection
 
 | Outcome | What the client sees |
@@ -601,3 +828,11 @@ endpoints and `stop_reason: "end_turn"` on `/v1/messages`.
 A blocked request never reaches the provider; a blocked response never
 reaches the client. See [Plugins](/advanced/plugins#decisions) for how
 decisions merge when several guardrails run at the same order.
+
+Every outcome, a silent allow included, is recorded in the request's audit
+entry under `data.guardrails`, with the phase, step, decision, whether the
+guardrail edited the request or response, and how it failed. The dashboard
+colors the guardrail steps of an audit entry's workflow chart from it: green
+when the step passed or edited, amber for a warning or a fail-open error,
+red for a block, an answer or a fail-closed error, dimmed when the step never
+ran. See [Plugins](/advanced/plugins#audit-trail) for the fields.

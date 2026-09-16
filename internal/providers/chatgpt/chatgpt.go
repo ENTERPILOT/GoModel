@@ -61,7 +61,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 		models: resolveModels(opts.Models),
 	}
 	p.client = llmclient.New(llmclient.Config{
-		ProviderName:   "chatgpt",
+		ProviderName:   opts.ClientName("chatgpt"),
 		BaseURL:        providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,

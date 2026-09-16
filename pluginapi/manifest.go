@@ -74,8 +74,16 @@ const (
 	InputCheckboxes Input = "checkboxes"
 	// InputSecret is a masked text box; the value is stored encrypted.
 	InputSecret Input = "secret"
-	// InputModel is a model picker listing the gateway's models.
+	// InputModel is a model picker listing the gateway's models; the value
+	// is a "provider/model" selector, an alias, or a virtual model.
 	InputModel Input = "model"
+	// InputBool is an on/off toggle. The value is stored as a JSON boolean;
+	// configuration files may also write true/false as text.
+	InputBool Input = "bool"
+	// InputList is a free-text list of strings, entered one per line in the
+	// dashboard. The value is stored as a JSON array of strings;
+	// configuration files may write a list or one comma-separated line.
+	InputList Input = "list"
 )
 
 // FieldScope says which editor shows a [Field].

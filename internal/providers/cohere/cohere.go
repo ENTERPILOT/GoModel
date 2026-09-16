@@ -38,7 +38,7 @@ var _ core.PassthroughProvider = (*Provider)(nil)
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	p := &Provider{keys: opts.Keyring(cfg.APIKey)}
 	clientCfg := llmclient.Config{
-		ProviderName:   "cohere",
+		ProviderName:   opts.ClientName("cohere"),
 		BaseURL:        providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
@@ -151,7 +151,7 @@ func supportedModel(model modelInfo) bool {
 
 // Responses translates the OpenAI Responses API through Cohere chat.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return providers.ResponsesViaChat(ctx, p, req)
+	return providers.ResponsesViaChat(ctx, p, req, "cohere")
 }
 
 // StreamResponses translates a streaming OpenAI Responses request through Cohere chat.

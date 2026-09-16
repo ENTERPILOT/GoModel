@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -104,13 +105,16 @@ func seedConfiguredRules(ctx context.Context, service *Service, cfg config.RateL
 				seconds = parsed
 			}
 			rules = append(rules, Rule{
-				Scope:         scope,
-				Subject:       normalized,
-				PerChild:      perChild || limit.PerChild,
-				PeriodSeconds: seconds,
-				MaxRequests:   limit.MaxRequests,
-				MaxTokens:     limit.MaxTokens,
-				Source:        SourceConfig,
+				Scope:   scope,
+				Subject: normalized,
+				// Keep the configured spelling for display; provider and
+				// model subjects are stored case-folded to match.
+				SubjectDisplay: strings.TrimSpace(subject),
+				PerChild:       perChild || limit.PerChild,
+				PeriodSeconds:  seconds,
+				MaxRequests:    limit.MaxRequests,
+				MaxTokens:      limit.MaxTokens,
+				Source:         SourceConfig,
 			})
 		}
 		return nil

@@ -99,8 +99,9 @@ workflows are returned unchanged; the dashboard always writes version 2.
 
 Workflow views (`GET /admin/workflows`, `GET /admin/workflows/:id`) expose the
 hash of each compiled chain as `chain_hashes` (`{"prompt": "...", "response": "...", "stream": "..."}`).
-The prompt hash is part of the semantic response cache key, so changing a
-prompt-phase guardrail invalidates cached answers produced under the old rules.
+The compiled chain identity is part of both response cache keys, so changing a
+guardrail in any phase invalidates cached answers produced under the old rules,
+and two workflows with different chains never share cached answers.
 
 ## Examples
 

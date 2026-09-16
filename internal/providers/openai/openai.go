@@ -40,9 +40,10 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 	baseURL := providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL)
 	return &Provider{
 		CompatibleProvider: NewCompatibleProvider(cfg.APIKey, opts, CompatibleProviderConfig{
-			ProviderName: "openai",
-			BaseURL:      baseURL,
-			SetHeaders:   setHeaders,
+			ProviderName:     "openai",
+			BaseURL:          baseURL,
+			SetHeaders:       setHeaders,
+			AdaptChatRequest: adaptChatRequest,
 		}),
 	}
 }
@@ -52,9 +53,10 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
 	return &Provider{
 		CompatibleProvider: NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, CompatibleProviderConfig{
-			ProviderName: "openai",
-			BaseURL:      defaultBaseURL,
-			SetHeaders:   setHeaders,
+			ProviderName:     "openai",
+			BaseURL:          defaultBaseURL,
+			SetHeaders:       setHeaders,
+			AdaptChatRequest: adaptChatRequest,
 		}),
 	}
 }
@@ -118,6 +120,30 @@ func adaptForReasoningChat(req *core.ChatRequest) (any, error) {
 		adapted.ExtraFields = extra
 	}
 	return &adapted, nil
+}
+
+// isNonReasoningChatModel reports whether the model belongs to an OpenAI
+// family that rejects reasoning_effort on Chat Completions (gpt-3.5, gpt-4*,
+// chatgpt-4o). Unknown models are not included: custom OpenAI-compatible
+// endpoints serve arbitrary names and may accept the field.
+func isNonReasoningChatModel(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(m, "gpt-3.5") || strings.HasPrefix(m, "gpt-4") || strings.HasPrefix(m, "chatgpt-")
+}
+
+// adaptChatRequest maps GoModel's nested reasoning shape (set by the Messages
+// API's thinking and by clients sending reasoning.effort) onto the flat
+// reasoning_effort field: OpenAI Chat Completions rejects "reasoning".
+// Models that cannot reason reject reasoning_effort too, so it is dropped.
+func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
+	if req == nil || req.Reasoning == nil {
+		return req, nil
+	}
+	effort := strings.TrimSpace(req.Reasoning.Effort)
+	if effort == "" || isNonReasoningChatModel(req.Model) {
+		return providers.DropReasoning(req), nil
+	}
+	return providers.AdaptReasoningEffortRequest(req, effort)
 }
 
 // chatRequestBody returns the appropriate request body for the model.

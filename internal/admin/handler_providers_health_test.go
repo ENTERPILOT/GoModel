@@ -6,6 +6,8 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/health"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestApplyRequestHealth(t *testing.T) {
@@ -139,18 +141,10 @@ func TestApplyRequestHealth(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			status, label, reason, lastError := applyRequestHealth(tc.status, tc.label, "base reason", tc.lastError, tc.rh)
-			if status != tc.wantStatus {
-				t.Errorf("status = %q, want %q", status, tc.wantStatus)
-			}
-			if label != tc.wantLabel {
-				t.Errorf("label = %q, want %q", label, tc.wantLabel)
-			}
-			if reason != tc.wantReason {
-				t.Errorf("reason = %q, want %q", reason, tc.wantReason)
-			}
-			if lastError != tc.wantLastError {
-				t.Errorf("lastError = %q, want %q", lastError, tc.wantLastError)
-			}
+			assert.Equal(t, tc.wantStatus, status)
+			assert.Equal(t, tc.wantLabel, label)
+			assert.Equal(t, tc.wantReason, reason)
+			assert.Equal(t, tc.wantLastError, lastError)
 		})
 	}
 }
@@ -159,12 +153,11 @@ func TestRequestHealthForTrimsSnapshotKeys(t *testing.T) {
 	healthByName := map[string]health.ProviderHealth{
 		" openai ": {Requests: 2},
 	}
-	if got := requestHealthFor(healthByName, "openai"); got == nil || got.Requests != 2 {
-		t.Fatalf("requestHealthFor() = %+v, want snapshot with 2 requests", got)
-	}
-	if got := requestHealthFor(healthByName, "missing"); got != nil {
-		t.Fatalf("requestHealthFor(missing) = %+v, want nil", got)
-	}
+	got := requestHealthFor(healthByName, "openai")
+	require.NotNil(t, got)
+	require.Equal(t, 2, got.Requests)
+	got = requestHealthFor(healthByName, "missing")
+	require.Nil(t, got)
 }
 
 type staticRequestHealth map[string]health.ProviderHealth
@@ -188,20 +181,14 @@ func TestBuildProviderStatusResponseIncludesRequestHealth(t *testing.T) {
 	}
 
 	resp := handler.buildProviderStatusResponse()
-	if len(resp.Providers) != 1 {
-		t.Fatalf("providers = %d, want 1", len(resp.Providers))
-	}
+	require.Len(t, resp.Providers, 1)
+
 	item := resp.Providers[0]
-	if item.RequestHealth == nil {
-		t.Fatalf("RequestHealth = nil, want snapshot attached")
-	}
-	if item.RequestHealth.Errors != 3 {
-		t.Fatalf("RequestHealth.Errors = %d, want 3", item.RequestHealth.Errors)
-	}
+	require.NotNil(t, item.RequestHealth)
+	require.Equal(t, 3, item.RequestHealth.Errors)
+
 	// Provider has no discovered models (base "Configured"/degraded), so the
 	// flagged model must not upgrade or further change the base status, but
 	// its error visibility arrives via request_health.
-	if item.Status != "degraded" {
-		t.Fatalf("Status = %q, want degraded", item.Status)
-	}
+	require.Equal(t, "degraded", item.Status)
 }

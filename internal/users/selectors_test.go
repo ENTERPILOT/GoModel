@@ -1,10 +1,10 @@
 package users
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 type testCatalog []string
@@ -36,20 +36,13 @@ func TestNormalizeAllowedModels(t *testing.T) {
 			t.Parallel()
 			got, err := NormalizeAllowedModels(catalog, tc.raw)
 			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("NormalizeAllowedModels(%v) error = nil, want error", tc.raw)
-				}
-				if !IsValidationError(err) {
-					t.Fatalf("error %v is not a validation error", err)
-				}
+				require.Error(t, err)
+				require.True(t, IsValidationError(err))
+
 				return
 			}
-			if err != nil {
-				t.Fatalf("NormalizeAllowedModels(%v) error = %v", tc.raw, err)
-			}
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("NormalizeAllowedModels(%v) = %v, want %v", tc.raw, got, tc.want)
-			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got, "NormalizeAllowedModels(%v) = %v, want %v", tc.raw, got, tc.want)
 		})
 	}
 }
@@ -80,9 +73,8 @@ func TestMatches(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := Matches(tc.allowed, tc.selector); got != tc.want {
-				t.Fatalf("Matches(%v, %s) = %v, want %v", tc.allowed, tc.selector.QualifiedModel(), got, tc.want)
-			}
+			got := Matches(tc.allowed, tc.selector)
+			require.Equal(t, tc.want, got, "Matches(%v, %s) = %v, want %v", tc.allowed, tc.selector.QualifiedModel(), got, tc.want)
 		})
 	}
 }

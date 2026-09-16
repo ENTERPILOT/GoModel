@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -86,7 +88,7 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	if resp == nil {
-		return s.respondAudio(c, resp) // emits the 502 guard; no usage for a failed call
+		return s.respondAudio(c, route.providerName, resp) // emits the 502 guard; no usage for a failed call
 	}
 	s.logUsage(ctx, route, func(pricing *core.ModelPricing) *usage.UsageEntry {
 		return usage.ExtractFromSpeechRequest(req.Input, resp.Data, speechResponseFormat(req, resp), route.requestID, route.model, route.providerType, pricing)
@@ -94,7 +96,7 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 	if err := waitForModelSlowdownFactor(ctx, route.slowdown, inferenceTime); err != nil {
 		return handleError(c, err)
 	}
-	return s.respondAudio(c, resp)
+	return s.respondAudio(c, route.providerName, resp)
 }
 
 // speechResponseFormat resolves the codec of the synthesized audio so usage can
@@ -171,18 +173,20 @@ func (s *audioService) createAudioTranscription(c *echo.Context, translation boo
 		return handleError(c, err)
 	}
 	if resp == nil {
-		return s.respondAudio(c, resp) // emits the 502 guard before resp.Data is read
+		return s.respondAudio(c, route.providerName, resp) // emits the 502 guard before resp.Data is read
 	}
 	s.logUsage(ctx, route, func(pricing *core.ModelPricing) *usage.UsageEntry {
+		// The uploaded audio backs duration pricing when the provider reports no
+		// usage (whisper text/srt/vtt, Groq, ElevenLabs, every translation).
 		if translation {
-			return usage.ExtractFromTranslationResponse(resp.Data, route.requestID, route.model, route.providerType, pricing)
+			return usage.ExtractFromTranslationResponse(resp.Data, req.File, route.requestID, route.model, route.providerType, pricing)
 		}
-		return usage.ExtractFromTranscriptionResponse(resp.Data, route.requestID, route.model, route.providerType, pricing)
+		return usage.ExtractFromTranscriptionResponse(resp.Data, req.File, route.requestID, route.model, route.providerType, pricing)
 	})
 	if err := waitForModelSlowdownFactor(ctx, route.slowdown, inferenceTime); err != nil {
 		return handleError(c, err)
 	}
-	return s.respondAudio(c, resp)
+	return s.respondAudio(c, route.providerName, resp)
 }
 
 func audioTranscriptionRequestFromForm(c *echo.Context, includeTranscriptionFields bool) (*core.AudioTranscriptionRequest, error) {
@@ -241,13 +245,43 @@ func audioTranscriptionRequestFromForm(c *echo.Context, includeTranscriptionFiel
 		ResponseFormat:         strings.TrimSpace(c.FormValue("response_format")),
 		Temperature:            strings.TrimSpace(c.FormValue("temperature")),
 		TimestampGranularities: granularities,
+		Fields:                 passthroughFormFields(form),
 		Provider:               strings.TrimSpace(c.FormValue("provider")),
 	}, nil
 }
 
-func (s *audioService) respondAudio(c *echo.Context, resp *core.AudioResponse) error {
+// passthroughFormFields collects the form values the gateway does not consume
+// itself so they reach the provider unchanged (ADR-0011 rule 1). Names are
+// sorted for a deterministic upstream body; values sharing a name keep their
+// request order.
+func passthroughFormFields(form *multipart.Form) []core.FormField {
+	if form == nil {
+		return nil
+	}
+	names := make([]string, 0, len(form.Value))
+	for name := range form.Value {
+		if !core.ReservedAudioTranscriptionFormFields[name] {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	sort.Strings(names)
+
+	fields := make([]core.FormField, 0, len(names))
+	for _, name := range names {
+		for _, value := range form.Value[name] {
+			fields = append(fields, core.FormField{Name: name, Value: value})
+		}
+	}
+	return fields
+}
+
+func (s *audioService) respondAudio(c *echo.Context, providerName string, resp *core.AudioResponse) error {
 	if resp == nil {
-		return handleError(c, core.NewProviderError("", http.StatusBadGateway, "provider returned empty audio response", nil))
+		return handleError(c, core.NewProviderError(providerName, http.StatusBadGateway,
+			"provider "+providerName+" returned empty audio response", nil))
 	}
 	contentType := strings.TrimSpace(resp.ContentType)
 	if contentType == "" {
@@ -340,5 +374,29 @@ func audioTranscriptionAuditInput(req *core.AudioTranscriptionRequest) map[strin
 	if len(req.TimestampGranularities) > 0 {
 		meta["timestamp_granularities"] = req.TimestampGranularities
 	}
+	// Forwarded fields are arbitrary client input and may carry provider-native
+	// credentials, so the audit entry records only which ones were passed
+	// through, never their values.
+	if names := forwardedFieldNames(req.Fields); len(names) > 0 {
+		meta["forwarded_fields"] = names
+	}
 	return meta
+}
+
+// forwardedFieldNames lists the distinct passthrough field names in request
+// order, for the audit metadata.
+func forwardedFieldNames(fields []core.FormField) []string {
+	if len(fields) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(fields))
+	seen := make(map[string]struct{}, len(fields))
+	for _, field := range fields {
+		if _, ok := seen[field.Name]; ok {
+			continue
+		}
+		seen[field.Name] = struct{}{}
+		names = append(names, field.Name)
+	}
+	return names
 }

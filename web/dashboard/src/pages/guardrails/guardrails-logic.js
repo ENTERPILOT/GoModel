@@ -203,3 +203,10 @@ export function buildGuardrailPayload(form) {
     timeout_ms: Number.isInteger(timeout) && timeout > 0 ? timeout : undefined,
   };
 }
+
+// guardrailDegraded reports whether an instance's last health probe failed
+// (see pluginapi.HealthChecker). Instances of plugins without a probe, and
+// views without the field, read as healthy.
+export function guardrailDegraded(guardrail) {
+  return Boolean(guardrail) && String(guardrail.health || "").trim() === "degraded";
+}

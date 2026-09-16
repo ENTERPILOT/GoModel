@@ -7,8 +7,10 @@
 // than opening a *sql.DB directly.
 //
 // SQLite always runs, in memory. PostgreSQL runs only when
-// GOMODEL_TEST_POSTGRES_URL names a reachable server; otherwise that subtest
-// skips. The variable is deliberately not POSTGRES_URL — pointing a suite that
+// GOMODEL_TEST_POSTGRES_URL is set; otherwise that subtest skips. A set but
+// unreachable URL fails the test rather than skipping, so CI cannot stay green
+// while the server it started is not the one being tested. The variable is
+// deliberately not POSTGRES_URL — pointing a suite that
 // creates and drops schemas at a configured application database should take a
 // separate, explicit opt-in.
 package sqlxtest
@@ -113,12 +115,12 @@ func NewPostgresPool(t *testing.T) *pgxpool.Pool {
 	ctx := context.Background()
 	admin, err := pgxpool.New(ctx, baseURL)
 	if err != nil {
-		t.Skipf("connect to %s: %v", PostgresURLEnv, err)
+		t.Fatalf("connect to %s: %v", PostgresURLEnv, err)
 		return nil
 	}
 	if err := admin.Ping(ctx); err != nil {
 		admin.Close()
-		t.Skipf("ping %s: %v", PostgresURLEnv, err)
+		t.Fatalf("ping %s: %v", PostgresURLEnv, err)
 		return nil
 	}
 

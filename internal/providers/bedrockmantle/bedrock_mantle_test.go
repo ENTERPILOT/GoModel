@@ -10,52 +10,38 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
 func TestResponsesUsesOpenAIPathForGPT56(t *testing.T) {
-	var path, authorization string
-	var body map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path = r.URL.Path
-		authorization = r.Header.Get("Authorization")
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"id":"resp_1","object":"response","model":"openai.gpt-5.6-sol","status":"completed","output":[]}`)
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"id":"resp_1","object":"response","model":"openai.gpt-5.6-sol","status":"completed","output":[]}`)
 
 	p := testProvider(t, server, modeAuto, providers.NewKeyring("secret", "second-secret"), nil)
 	var req core.ResponsesRequest
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"model":"openai.gpt-5.6-sol",
 		"input":"hello",
 		"previous_response_id":"resp_previous",
 		"custom_bedrock_option":true
-	}`), &req); err != nil {
-		t.Fatal(err)
-	}
+	}`), &req)
+	require.NoError(t, err)
 
 	resp, err := p.Responses(context.Background(), &req)
-	if err != nil {
-		t.Fatalf("Responses() error = %v", err)
-	}
-	if resp.ID != "resp_1" {
-		t.Errorf("response ID = %q, want resp_1", resp.ID)
-	}
-	if path != "/openai/v1/responses" {
-		t.Errorf("path = %q, want /openai/v1/responses", path)
-	}
-	if authorization != "Bearer secret" {
-		t.Errorf("Authorization = %q, want first bearer token", authorization)
-	}
-	if body["previous_response_id"] != "resp_previous" || body["custom_bedrock_option"] != true {
-		t.Errorf("request body did not preserve Responses fields: %#v", body)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "resp_1", resp.ID)
+
+	sent := capture.Last(t)
+	assert.Equal(t, "/openai/v1/responses", sent.Path)
+	assert.Equal(t, "Bearer secret", sent.Header.Get("Authorization"))
+	body := sent.JSON(t)
+	assert.Equal(t, "resp_previous", body["previous_response_id"])
+	custom, _ := body["custom_bedrock_option"].(bool)
+	assert.True(t, custom, "request body did not preserve Responses fields: %#v", body)
 }
 
 func TestMantleEndpointRouting(t *testing.T) {
@@ -96,86 +82,50 @@ func TestMantleEndpointRouting(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var path string
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				path = r.URL.Path
+			server, capture := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				switch {
-				case strings.HasSuffix(path, "/chat/completions"):
+				if strings.HasSuffix(r.URL.Path, "/chat/completions") {
 					_, _ = io.WriteString(w, `{"id":"chat_1","object":"chat.completion","choices":[]}`)
-				default:
-					_, _ = io.WriteString(w, `{"id":"resp_1","object":"response","status":"completed","output":[]}`)
+					return
 				}
-			}))
-			defer server.Close()
+				_, _ = io.WriteString(w, `{"id":"resp_1","object":"response","status":"completed","output":[]}`)
+			})
 
 			p := testProvider(t, server, tt.mode, providers.NewKeyring("secret"), nil)
-			if err := tt.call(context.Background(), p); err != nil {
-				t.Fatalf("request error = %v", err)
-			}
-			if path != tt.wantPath {
-				t.Errorf("path = %q, want %q", path, tt.wantPath)
-			}
+			require.NoError(t, tt.call(context.Background(), p))
+			assert.Equal(t, tt.wantPath, capture.Last(t).Path)
 		})
 	}
 }
 
 func TestListModelsAlwaysUsesCatalogPath(t *testing.T) {
-	var path string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path = r.URL.Path
-		_, _ = io.WriteString(w, `{"data":[{"id":"openai.gpt-5.6-luna"}]}`)
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"data":[{"id":"openai.gpt-5.6-luna"}]}`)
 
 	p := testProvider(t, server, modeOpenAI, providers.NewKeyring("secret"), nil)
 	models, err := p.ListModels(context.Background())
-	if err != nil {
-		t.Fatalf("ListModels() error = %v", err)
-	}
-	if path != "/v1/models" {
-		t.Errorf("path = %q, want /v1/models", path)
-	}
-	if models.Object != "list" || len(models.Data) != 1 || models.Data[0].Object != "model" {
-		t.Errorf("models were not normalized: %#v", models)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "/v1/models", capture.Last(t).Path)
+	assert.Equal(t, "list", models.Object)
+	require.Len(t, models.Data, 1)
+	assert.Equal(t, "model", models.Data[0].Object, "models were not normalized")
 }
 
 func TestStreamResponsesUsesOpenAIPath(t *testing.T) {
-	var path string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path = r.URL.Path
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, "event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n")
-	}))
-	defer server.Close()
+	server, capture := providertest.SSEServer(t, "event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n")
 
 	p := testProvider(t, server, modeAuto, providers.NewKeyring("secret"), nil)
 	stream, err := p.StreamResponses(context.Background(), &core.ResponsesRequest{Model: "openai.gpt-5.6-luna", Input: "hello"})
-	if err != nil {
-		t.Fatalf("StreamResponses() error = %v", err)
-	}
+	require.NoError(t, err)
 	defer func() { _ = stream.Close() }()
+
 	body, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if path != "/openai/v1/responses" {
-		t.Errorf("path = %q, want /openai/v1/responses", path)
-	}
-	if !strings.Contains(string(body), "[DONE]") {
-		t.Errorf("stream = %q, want terminal [DONE]", body)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "/openai/v1/responses", capture.Last(t).Path)
+	assert.Contains(t, string(body), "[DONE]", "stream must end with the terminal marker")
 }
 
 func TestSigV4AuthenticationUsesBedrockService(t *testing.T) {
-	var authorization, securityToken string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authorization = r.Header.Get("Authorization")
-		securityToken = r.Header.Get("X-Amz-Security-Token")
-		_, _ = io.WriteString(w, `{"data":[]}`)
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"data":[]}`)
 
 	provider := aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
 		return aws.Credentials{
@@ -185,50 +135,39 @@ func TestSigV4AuthenticationUsesBedrockService(t *testing.T) {
 		}, nil
 	})
 	p := testProvider(t, server, modeAuto, nil, provider)
-	if _, err := p.ListModels(context.Background()); err != nil {
-		t.Fatalf("ListModels() error = %v", err)
-	}
-	if !strings.HasPrefix(authorization, "AWS4-HMAC-SHA256 ") {
-		t.Fatalf("Authorization = %q, want SigV4", authorization)
-	}
-	if !strings.Contains(authorization, "Credential=AKID/") || !strings.Contains(authorization, "/us-east-1/bedrock/aws4_request") {
-		t.Errorf("Authorization has wrong credential scope: %q", authorization)
-	}
-	if securityToken != "session-token" {
-		t.Errorf("X-Amz-Security-Token = %q", securityToken)
-	}
+	_, err := p.ListModels(context.Background())
+	require.NoError(t, err)
+
+	sent := capture.Last(t)
+	authorization := sent.Header.Get("Authorization")
+	require.True(t, strings.HasPrefix(authorization, "AWS4-HMAC-SHA256 "), "Authorization = %q, want SigV4", authorization)
+	assert.Contains(t, authorization, "Credential=AKID/")
+	assert.Contains(t, authorization, "/us-east-1/bedrock/aws4_request")
+	assert.Equal(t, "session-token", sent.Header.Get("X-Amz-Security-Token"))
 }
 
 func TestBearerAuthenticationRotatesKeys(t *testing.T) {
-	var authorizations []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authorizations = append(authorizations, r.Header.Get("Authorization"))
-		_, _ = io.WriteString(w, `{"data":[]}`)
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"data":[]}`)
 
 	p := testProvider(t, server, modeAuto, providers.NewKeyring("first", "second"), nil)
 	for range 2 {
-		if _, err := p.ListModels(context.Background()); err != nil {
-			t.Fatalf("ListModels() error = %v", err)
-		}
+		_, err := p.ListModels(context.Background())
+		require.NoError(t, err)
 	}
-	if len(authorizations) != 2 || authorizations[0] != "Bearer first" || authorizations[1] != "Bearer second" {
-		t.Errorf("Authorization headers = %v", authorizations)
-	}
+	requests := capture.All()
+	require.Len(t, requests, 2)
+	assert.Equal(t, "Bearer first", requests[0].Header.Get("Authorization"))
+	assert.Equal(t, "Bearer second", requests[1].Header.Get("Authorization"))
 }
 
 func TestProviderDoesNotAdvertiseUnsupportedOpenAISurfaces(t *testing.T) {
 	p := &Provider{}
-	if _, ok := any(p).(core.NativeResponseLifecycleProvider); ok {
-		t.Error("Bedrock Mantle unexpectedly implements response lifecycle APIs")
-	}
-	if _, ok := any(p).(core.NativeBatchProvider); ok {
-		t.Error("Bedrock Mantle unexpectedly implements batch APIs")
-	}
-	if _, ok := any(p).(core.NativeFileProvider); ok {
-		t.Error("Bedrock Mantle unexpectedly implements file APIs")
-	}
+	_, ok := any(p).(core.NativeResponseLifecycleProvider)
+	assert.False(t, ok)
+	_, ok = any(p).(core.NativeBatchProvider)
+	assert.False(t, ok)
+	_, ok = any(p).(core.NativeFileProvider)
+	assert.False(t, ok)
 }
 
 func testProvider(t *testing.T, server *httptest.Server, mode string, keys *providers.Keyring, credentialsProvider aws.CredentialsProvider) *Provider {

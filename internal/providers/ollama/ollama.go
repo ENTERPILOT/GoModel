@@ -88,7 +88,7 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 	p.compat = openai.NewCompatibleProvider(providerCfg.APIKey, opts, compatibleConfig(defaultBaseURL))
 
 	nativeCfg := llmclient.Config{
-		ProviderName:   "ollama",
+		ProviderName:   opts.ClientName("ollama"),
 		BaseURL:        defaultNativeBaseURL,
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
@@ -191,7 +191,7 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 
 // Responses sends a Responses API request to Ollama (converted to chat format)
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return providers.ResponsesViaChat(ctx, p, req)
+	return providers.ResponsesViaChat(ctx, p, req, "ollama")
 }
 
 // StreamResponses returns a raw response body for streaming Responses API (caller must close)

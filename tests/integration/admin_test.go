@@ -38,8 +38,7 @@ func TestAdminUsageSummary_PostgreSQL(t *testing.T) {
 		closeBody(resp)
 	}
 
-	// Wait for usage buffer to flush (flush interval is 1s in tests)
-	time.Sleep(2 * time.Second)
+	waitForUsageFlush(t, fixture.ServerURL, 2)
 
 	// Query admin API
 	resp, err := http.Get(fixture.ServerURL + "/admin/usage/summary?days=30")
@@ -81,8 +80,7 @@ func TestAdminDailyUsage_PostgreSQL(t *testing.T) {
 		closeBody(resp)
 	}
 
-	// Wait for usage buffer to flush
-	time.Sleep(2 * time.Second)
+	waitForUsageFlush(t, fixture.ServerURL, 2)
 
 	// Query admin API
 	resp, err := http.Get(fixture.ServerURL + "/admin/usage/daily?days=30")
@@ -136,8 +134,7 @@ func TestAdminUsageSummary_MongoDB(t *testing.T) {
 		closeBody(resp)
 	}
 
-	// Wait for usage buffer to flush
-	time.Sleep(2 * time.Second)
+	waitForUsageFlush(t, fixture.ServerURL, 2)
 
 	// Query admin API
 	resp, err := http.Get(fixture.ServerURL + "/admin/usage/summary?days=30")
@@ -169,13 +166,13 @@ func TestAdminDailyUsage_WithInterval_PostgreSQL(t *testing.T) {
 	})
 
 	// Send a request so there's data
+	before := usageRequestCount(t, fixture.ServerURL)
 	payload := newChatRequest("gpt-4", "Hello!")
 	resp := sendChatRequest(t, fixture.ServerURL, payload)
 	require.Equal(t, 200, resp.StatusCode)
 	closeBody(resp)
 
-	// Wait for usage buffer to flush
-	time.Sleep(2 * time.Second)
+	waitForUsageFlush(t, fixture.ServerURL, before+1)
 
 	// Query with weekly interval
 	resp, err := http.Get(fixture.ServerURL + "/admin/usage/daily?interval=weekly")
@@ -212,7 +209,7 @@ func TestAdminPricingRecalculationNoMasterKey_PostgreSQL(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	closeBody(resp)
 
-	time.Sleep(2 * time.Second)
+	waitForUsageFlush(t, fixture.ServerURL, 1)
 
 	req, err := http.NewRequest(http.MethodPost, fixture.ServerURL+"/admin/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"recalculate"}`))
 	require.NoError(t, err)
@@ -248,7 +245,7 @@ func TestAdminPricingRecalculationRefreshesRewriteSavings_PostgreSQL(t *testing.
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	closeBody(resp)
 
-	time.Sleep(2 * time.Second)
+	waitForUsageFlush(t, fixture.ServerURL, 1)
 
 	// Simulate a request-rewriter savings estimate persisted with a stale
 	// cost, as if pricing changed after the row was written.

@@ -1,6 +1,10 @@
 package guardrails
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestComputeGuardrailsHash_Stable(t *testing.T) {
 	rules := []RuleDescriptor{
@@ -9,9 +13,7 @@ func TestComputeGuardrailsHash_Stable(t *testing.T) {
 	}
 	h1 := ComputeGuardrailsHash(rules)
 	h2 := ComputeGuardrailsHash(rules)
-	if h1 != h2 {
-		t.Fatal("hash should be stable across calls")
-	}
+	require.Equal(t, h2, h1)
 }
 
 func TestComputeGuardrailsHash_OrderIndependent(t *testing.T) {
@@ -23,27 +25,19 @@ func TestComputeGuardrailsHash_OrderIndependent(t *testing.T) {
 		{Name: "privacy", Type: "system_prompt", Order: 0, Mode: "", Content: "No PII."},
 		{Name: "safety", Type: "system_prompt", Order: 0, Mode: "", Content: "Be safe."},
 	}
-	if ComputeGuardrailsHash(rules1) != ComputeGuardrailsHash(rules2) {
-		t.Fatal("hash should be order-independent (rules are sorted)")
-	}
+	require.Equal(t, ComputeGuardrailsHash(rules2), ComputeGuardrailsHash(rules1))
 }
 
 func TestComputeGuardrailsHash_ChangesOnContentChange(t *testing.T) {
 	v1 := []RuleDescriptor{{Name: "safety", Type: "system_prompt", Order: 0, Mode: "", Content: "Be safe."}}
 	v2 := []RuleDescriptor{{Name: "safety", Type: "system_prompt", Order: 0, Mode: "", Content: "Be very safe."}}
-	if ComputeGuardrailsHash(v1) == ComputeGuardrailsHash(v2) {
-		t.Fatal("hash should change when rule content changes")
-	}
+	require.NotEqual(t, ComputeGuardrailsHash(v2), ComputeGuardrailsHash(v1))
 }
 
 func TestComputeGuardrailsHash_ChangesOnRuleOrderOrMode(t *testing.T) {
 	base := []RuleDescriptor{{Name: "safety", Type: "system_prompt", Order: 0, Mode: "inject", Content: "Be safe."}}
 	reordered := []RuleDescriptor{{Name: "safety", Type: "system_prompt", Order: 1, Mode: "inject", Content: "Be safe."}}
 	mode := []RuleDescriptor{{Name: "safety", Type: "system_prompt", Order: 0, Mode: "override", Content: "Be safe."}}
-	if ComputeGuardrailsHash(base) == ComputeGuardrailsHash(reordered) {
-		t.Fatal("hash should change when guardrail execution order changes")
-	}
-	if ComputeGuardrailsHash(base) == ComputeGuardrailsHash(mode) {
-		t.Fatal("hash should change when system_prompt mode changes")
-	}
+	require.NotEqual(t, ComputeGuardrailsHash(reordered), ComputeGuardrailsHash(base))
+	require.NotEqual(t, ComputeGuardrailsHash(mode), ComputeGuardrailsHash(base))
 }

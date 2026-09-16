@@ -73,6 +73,30 @@ func (c *Completion) SetText(choice, partIdx int, text string) error {
 	return nil
 }
 
+// SetToolArguments replaces the arguments of tool call callID in the given
+// choice. args must be valid JSON. Plugins that anonymize or restore values
+// use it so the client runs the tool with the intended arguments.
+func (c *Completion) SetToolArguments(choice int, callID string, args json.RawMessage) error {
+	ch, err := c.choice(choice)
+	if err != nil {
+		return err
+	}
+	if !json.Valid(args) {
+		return fmt.Errorf("pluginapi: tool arguments for call %q are not valid JSON", callID)
+	}
+	for i := range ch.Message.Parts {
+		part := &ch.Message.Parts[i]
+		if part.Kind == PartToolCall && part.ToolCall != nil && part.ToolCall.ID == callID {
+			call := *part.ToolCall
+			call.Arguments = append(json.RawMessage(nil), args...)
+			part.ToolCall = &call
+			c.changes.mark(choiceKey(choice), ChangeEdited)
+			return nil
+		}
+	}
+	return fmt.Errorf("pluginapi: choice %d has no tool call %q", choice, callID)
+}
+
 // SetFinishReason sets the finish reason of the given choice.
 // "content_filter" is the OpenAI-compatible way to say the response was cut.
 func (c *Completion) SetFinishReason(choice int, reason string) error {

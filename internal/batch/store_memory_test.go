@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMemoryStoreLifecycle(t *testing.T) {
@@ -22,40 +23,23 @@ func TestMemoryStoreLifecycle(t *testing.T) {
 			},
 		},
 	}
-
-	if err := store.Create(ctx, b); err != nil {
-		t.Fatalf("create: %v", err)
-	}
+	err := store.Create(ctx, b)
+	require.NoError(t, err)
 
 	got, err := store.Get(ctx, "batch-1")
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	if got.Batch == nil {
-		t.Fatal("got.Batch = nil")
-	}
-	if got.Batch.ID != b.Batch.ID {
-		t.Fatalf("id = %q, want %q", got.Batch.ID, b.Batch.ID)
-	}
-	if len(got.Batch.Results) != 1 {
-		t.Fatalf("results len = %d, want 1", len(got.Batch.Results))
-	}
+	require.NoError(t, err)
+	require.NotNil(t, got.Batch)
+	require.Equal(t, b.Batch.ID, got.Batch.ID)
+	require.Len(t, got.Batch.Results, 1)
 
 	got.Batch.Status = "cancelled"
-	if err := store.Update(ctx, got); err != nil {
-		t.Fatalf("update: %v", err)
-	}
+	err = store.Update(ctx, got)
+	require.NoError(t, err)
 
 	got2, err := store.Get(ctx, "batch-1")
-	if err != nil {
-		t.Fatalf("get after update: %v", err)
-	}
-	if got2.Batch == nil {
-		t.Fatal("got2.Batch = nil")
-	}
-	if got2.Batch.Status != "cancelled" {
-		t.Fatalf("status = %q, want cancelled", got2.Batch.Status)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, got2.Batch)
+	require.Equal(t, "cancelled", got2.Batch.Status)
 }
 
 func TestMemoryStoreListAfter(t *testing.T) {
@@ -69,47 +53,33 @@ func TestMemoryStoreListAfter(t *testing.T) {
 	}
 	for _, b := range inputs {
 		b.Batch.Object = "batch"
-		if err := store.Create(ctx, b); err != nil {
-			t.Fatalf("create %s: %v", b.Batch.ID, err)
-		}
+		err := store.Create(ctx, b)
+		require.NoError(t, err, "create %s: %v", b.Batch.ID, err)
 	}
 
 	list, err := store.List(ctx, 2, "", "")
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(list) != 2 {
-		t.Fatalf("list len = %d, want 2", len(list))
-	}
-	if list[0].Batch.ID != "batch-c" || list[1].Batch.ID != "batch-b" {
-		t.Fatalf("unexpected order: %s, %s", list[0].Batch.ID, list[1].Batch.ID)
-	}
+	require.NoError(t, err)
+	require.Len(t, list, 2)
+	require.Equal(t, "batch-c", list[0].Batch.ID)
+	require.Equal(t, "batch-b", list[1].Batch.ID)
 
 	next, err := store.List(ctx, 2, "batch-b", "")
-	if err != nil {
-		t.Fatalf("list after: %v", err)
-	}
-	if len(next) != 1 || next[0].Batch.ID != "batch-a" {
-		t.Fatalf("unexpected after result: %+v", next)
-	}
+	require.NoError(t, err)
+	require.Len(t, next, 1)
+	require.Equal(t, "batch-a", next[0].Batch.ID)
 }
 
 func TestMemoryStoreDelete(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := context.Background()
-
-	if err := store.Delete(ctx, "missing"); err != ErrNotFound {
-		t.Fatalf("delete missing = %v, want ErrNotFound", err)
-	}
+	err := store.Delete(ctx, "missing")
+	require.ErrorIs(t, err, ErrNotFound)
 
 	b := &StoredBatch{Batch: &core.BatchResponse{ID: "batch-1", Object: "batch", Status: "completed"}}
-	if err := store.Create(ctx, b); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	if err := store.Delete(ctx, "batch-1"); err != nil {
-		t.Fatalf("delete: %v", err)
-	}
-	if _, err := store.Get(ctx, "batch-1"); err != ErrNotFound {
-		t.Fatalf("get after delete = %v, want ErrNotFound", err)
-	}
+	err = store.Create(ctx, b)
+	require.NoError(t, err)
+	err = store.Delete(ctx, "batch-1")
+	require.NoError(t, err)
+	_, err = store.Get(ctx, "batch-1")
+	require.ErrorIs(t, err, ErrNotFound)
 }

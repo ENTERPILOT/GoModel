@@ -2,8 +2,9 @@ package conversationstore
 
 import (
 	"context"
-	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestWaitForMongoMutationRetryHonorsCanceledContext(t *testing.T) {
@@ -11,7 +12,5 @@ func TestWaitForMongoMutationRetryHonorsCanceledContext(t *testing.T) {
 	cancel()
 
 	err := waitForMongoMutationRetry(ctx, 0)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("retry error = %v, want context canceled", err)
-	}
+	require.ErrorIs(t, err, context.Canceled)
 }

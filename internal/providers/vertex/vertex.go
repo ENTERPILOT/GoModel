@@ -77,7 +77,7 @@ func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOp
 	p.gemini = gemini.NewVertexWithHTTPClient(providerCfg, opts, authClient)
 	nativeBaseURL := vertexNativeBaseURL(providerCfg)
 	nativeCfg := llmclient.Config{
-		ProviderName:   "vertex",
+		ProviderName:   opts.ClientName("vertex"),
 		BaseURL:        nativeBaseURL,
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
@@ -223,7 +223,7 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 	if err := p.ready(); err != nil {
 		return nil, err
 	}
-	return providers.ResponsesViaChat(ctx, p, req)
+	return providers.ResponsesViaChat(ctx, p, req, "vertex")
 }
 
 // StreamResponses returns a raw response body for streaming Responses API.

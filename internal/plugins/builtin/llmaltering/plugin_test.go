@@ -4,37 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/enterpilot/gomodel/pluginapi/plugintest"
+	"github.com/stretchr/testify/require"
 )
-
-type fakeHost struct {
-	mu       sync.Mutex
-	requests []pluginapi.InferenceRequest
-	reply    func(req pluginapi.InferenceRequest) (*pluginapi.Completion, error)
-}
-
-func (h *fakeHost) Logger() *slog.Logger           { return slog.Default() }
-func (h *fakeHost) Inference() pluginapi.Inference { return h }
-func (h *fakeHost) History(context.Context, pluginapi.Meta) ([]pluginapi.Message, error) {
-	return nil, nil
-}
-func (h *fakeHost) Metrics() pluginapi.Metrics { return noopMetrics{} }
-func (h *fakeHost) Complete(_ context.Context, req pluginapi.InferenceRequest) (*pluginapi.Completion, error) {
-	h.mu.Lock()
-	h.requests = append(h.requests, req)
-	h.mu.Unlock()
-	return h.reply(req)
-}
-
-type noopMetrics struct{}
-
-func (noopMetrics) Inc(string, map[string]string)              {}
-func (noopMetrics) Observe(string, float64, map[string]string) {}
 
 func replyWith(text string) *pluginapi.Completion {
 	return &pluginapi.Completion{Choices: []pluginapi.Choice{{Message: pluginapi.TextMessage(pluginapi.RoleAssistant, text), FinishReason: "stop"}}}
@@ -46,12 +22,12 @@ func upper(req pluginapi.InferenceRequest) (*pluginapi.Completion, error) {
 	return replyWith("<TEXT_TO_ALTER>\n" + strings.ToUpper(inner) + "\n</TEXT_TO_ALTER>"), nil
 }
 
-func newPlugin(t *testing.T, cfg string, host *fakeHost) *Plugin {
+func newPlugin(t *testing.T, cfg string, host *plugintest.Host) *Plugin {
 	t.Helper()
 	p := New().(*Plugin)
-	if err := p.Init(context.Background(), json.RawMessage(cfg), host); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
+	err := p.Init(context.Background(), json.RawMessage(cfg), host)
+	require.NoError(t, err)
+
 	return p
 }
 
@@ -65,7 +41,7 @@ func prompt(msgs ...pluginapi.Message) *pluginapi.Prompt {
 }
 
 func TestOnPromptRewritesSelectedRoles(t *testing.T) {
-	host := &fakeHost{reply: upper}
+	host := &plugintest.Host{Reply: upper}
 	p := newPlugin(t, `{"model":"gpt","provider":"openai","roles":["user","tool"],"skip_content_prefix":"### safe","max_tokens":7}`, host)
 	toolMsg := pluginapi.Message{Role: pluginapi.RoleTool, ToolCallID: "c1", Parts: []pluginapi.Part{{Kind: pluginapi.PartToolResult, ToolResult: &pluginapi.ToolResult{CallID: "c1", Parts: []pluginapi.Part{{Kind: pluginapi.PartText, Text: "result"}}}}}}
 	pr := prompt(
@@ -76,38 +52,38 @@ func TestOnPromptRewritesSelectedRoles(t *testing.T) {
 		toolMsg,
 	)
 	x := &pluginapi.Exchange{Prompt: pr, Values: pluginapi.Values{}}
-	if _, err := p.OnPrompt(context.Background(), x); err != nil {
-		t.Fatalf("OnPrompt() error = %v", err)
-	}
-	if got := pr.Messages[0].Text(); got != "sys" {
-		t.Fatalf("system rewritten: %q", got)
-	}
-	if got := pr.Messages[1].Text(); got != "HELLO" {
-		t.Fatalf("user = %q", got)
-	}
-	if got := pr.Messages[2].Text(); got != "### safe keep" {
-		t.Fatalf("skip prefix ignored: %q", got)
-	}
-	if parts := pr.Messages[3].Parts; parts[0].Text != "A" || parts[1].Kind != pluginapi.PartImage || parts[2].Text != "B" {
-		t.Fatalf("multipart = %+v", parts)
-	}
-	if got := pr.Messages[4].Text(); got != "RESULT" {
-		t.Fatalf("tool result = %q", got)
-	}
+	_, err := p.OnPrompt(context.Background(), x)
+	require.NoError(t, err)
+	got := pr.Messages[0].Text()
+	require.Equal(t, "sys", got)
+	got = pr.Messages[1].Text()
+	require.Equal(t, "HELLO", got)
+	got = pr.Messages[2].Text()
+	require.Equal(t, "### safe keep", got)
+	parts := pr.Messages[3].Parts
+	require.Equal(t, "A", parts[0].Text)
+	require.Equal(t, pluginapi.PartImage, parts[1].Kind)
+	require.Equal(t, "B", parts[2].Text)
+	got = pr.Messages[4].Text()
+	require.Equal(t, "RESULT", got)
+
 	changes := pr.Changes()
-	if changes.Messages["m1"] != pluginapi.ChangeEdited || changes.Messages["m4"] != pluginapi.ChangeEdited || changes.Messages["m0"] != "" {
-		t.Fatalf("changes = %+v", changes)
-	}
-	if len(host.requests) != 4 {
-		t.Fatalf("requests = %d, want 4", len(host.requests))
-	}
-	req := host.requests[0]
-	if req.Model != "openai/gpt" || req.MaxTokens != 7 || req.Temperature == nil || *req.Temperature != 0 || req.Messages[0].Text() != DefaultPrompt {
-		t.Fatalf("request = %+v", req)
-	}
+	require.Equal(t, pluginapi.ChangeEdited, changes.Messages["m1"])
+	require.Equal(t, pluginapi.ChangeEdited, changes.Messages["m4"])
+	require.Empty(t, changes.Messages["m0"])
+	require.Len(t, host.Requests(), 4)
+
+	req := host.Requests()[0]
+	require.Equal(t, "openai/gpt", req.Model)
+	require.Equal(t, 7, req.MaxTokens)
+	require.NotNil(t, req.Temperature)
+	require.Equal(t, float64(0), *req.Temperature)
+	require.Equal(t, DefaultPrompt, req.Messages[0].Text())
 }
 
-func TestOnPromptKeepsTextOnRewriteFailures(t *testing.T) {
+// A rewrite that fails is reported to the runtime, so the instance's
+// fail_mode decides; the prompt is left untouched either way.
+func TestOnPromptReturnsRewriteFailures(t *testing.T) {
 	tests := []struct {
 		name  string
 		reply func(pluginapi.InferenceRequest) (*pluginapi.Completion, error)
@@ -128,49 +104,41 @@ func TestOnPromptKeepsTextOnRewriteFailures(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := newPlugin(t, `{"model":"m"}`, &fakeHost{reply: tt.reply})
+			p := newPlugin(t, `{"model":"m"}`, &plugintest.Host{Reply: tt.reply})
 			pr := prompt(pluginapi.TextMessage(pluginapi.RoleUser, "hello"))
-			if _, err := p.OnPrompt(context.Background(), &pluginapi.Exchange{Prompt: pr, Values: pluginapi.Values{}}); err != nil {
-				t.Fatalf("OnPrompt() error = %v", err)
-			}
-			if pr.Messages[0].Text() != "hello" || pr.Changes().Dirty {
-				t.Fatalf("prompt changed: %+v", pr.Messages[0])
-			}
+			_, err := p.OnPrompt(context.Background(), &pluginapi.Exchange{Prompt: pr, Values: pluginapi.Values{}})
+			require.Error(t, err)
+			require.Equal(t, "hello", pr.Messages[0].Text())
+			require.False(t, pr.Changes().Dirty, "prompt changed: %+v", pr.Messages[0])
 		})
 	}
 }
 
 func TestOnPromptPropagatesCancellation(t *testing.T) {
-	p := newPlugin(t, `{"model":"m"}`, &fakeHost{reply: func(pluginapi.InferenceRequest) (*pluginapi.Completion, error) { return nil, context.Canceled }})
+	p := newPlugin(t, `{"model":"m"}`, &plugintest.Host{Reply: func(pluginapi.InferenceRequest) (*pluginapi.Completion, error) { return nil, context.Canceled }})
 	pr := prompt(pluginapi.TextMessage(pluginapi.RoleUser, "hello"))
-	if _, err := p.OnPrompt(context.Background(), &pluginapi.Exchange{Prompt: pr, Values: pluginapi.Values{}}); !errors.Is(err, context.Canceled) {
-		t.Fatalf("error = %v, want context.Canceled", err)
-	}
+	_, err := p.OnPrompt(context.Background(), &pluginapi.Exchange{Prompt: pr, Values: pluginapi.Values{}})
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestOnResponseRewritesAssistant(t *testing.T) {
-	host := &fakeHost{reply: upper}
+	host := &plugintest.Host{Reply: upper}
 	completion := &pluginapi.Completion{Choices: []pluginapi.Choice{
 		{Index: 0, Message: pluginapi.TextMessage(pluginapi.RoleAssistant, "one")},
 		{Index: 1, Message: pluginapi.Message{Role: pluginapi.RoleAssistant, Parts: []pluginapi.Part{{Kind: pluginapi.PartReasoning, Text: "think"}, {Kind: pluginapi.PartText, Text: "two"}}}},
 	}}
 	completion.Reset()
 	x := &pluginapi.Exchange{Response: completion, Values: pluginapi.Values{}}
-	if _, err := newPlugin(t, `{"model":"m","roles":["user"]}`, host).OnResponse(context.Background(), x); err != nil {
-		t.Fatal(err)
-	}
-	if completion.Text(0) != "one" || len(host.requests) != 0 {
-		t.Fatal("assistant not selected but response rewritten")
-	}
-	if _, err := newPlugin(t, `{"model":"m","roles":["assistant"]}`, host).OnResponse(context.Background(), x); err != nil {
-		t.Fatal(err)
-	}
-	if completion.Text(0) != "ONE" || completion.Text(1) != "TWO" || completion.Choices[1].Message.Parts[0].Text != "think" {
-		t.Fatalf("completion = %+v", completion.Choices)
-	}
-	if completion.Changes().Messages["choice:0"] != pluginapi.ChangeEdited {
-		t.Fatalf("changes = %+v", completion.Changes())
-	}
+	_, err := newPlugin(t, `{"model":"m","roles":["user"]}`, host).OnResponse(context.Background(), x)
+	require.NoError(t, err)
+	require.Equal(t, "one", completion.Text(0))
+	require.Empty(t, host.Requests())
+	_, err = newPlugin(t, `{"model":"m","roles":["assistant"]}`, host).OnResponse(context.Background(), x)
+	require.NoError(t, err)
+	require.Equal(t, "ONE", completion.Text(0))
+	require.Equal(t, "TWO", completion.Text(1))
+	require.Equal(t, "think", completion.Choices[1].Message.Parts[0].Text)
+	require.Equal(t, pluginapi.ChangeEdited, completion.Changes().Messages["choice:0"])
 }
 
 func TestParseConfig(t *testing.T) {
@@ -192,55 +160,47 @@ func TestParseConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := ParseConfig(json.RawMessage(tt.raw))
 			if tt.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("error = %v, want %q", err, tt.wantErr)
-				}
+				require.ErrorContains(t, err, tt.wantErr)
 				return
 			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got.Model != tt.want.Model || got.Prompt != tt.want.Prompt || got.MaxTokens != tt.want.MaxTokens || got.SkipContentPrefix != tt.want.SkipContentPrefix || strings.Join(got.Roles, ",") != strings.Join(tt.want.Roles, ",") {
-				t.Fatalf("got %+v, want %+v", got, tt.want)
-			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want.Model, got.Model)
+			require.Equal(t, tt.want.Prompt, got.Prompt)
+			require.Equal(t, tt.want.MaxTokens, got.MaxTokens)
+			require.Equal(t, tt.want.SkipContentPrefix, got.SkipContentPrefix)
+			require.Equal(t, strings.Join(tt.want.Roles, ","), strings.Join(got.Roles, ","), "got %+v, want %+v", got, tt.want)
 		})
 	}
 }
 
 func TestSummarize(t *testing.T) {
 	p := New().(*Plugin)
-	if got := p.Summarize(json.RawMessage(`{"model":"gpt","provider":"openai","roles":["user","tool"]}`)); got != "openai/gpt • user,tool • default prompt" {
-		t.Fatalf("Summarize() = %q", got)
-	}
-	if got := p.Summarize(json.RawMessage(`{"model":"gpt","prompt":"Rewrite   this\ncarefully"}`)); got != "gpt • user • Rewrite this carefully" {
-		t.Fatalf("Summarize(custom) = %q", got)
-	}
-	if got := p.Summarize(json.RawMessage(`{"model":"gpt","prompt":"` + strings.Repeat("a", 60) + `"}`)); !strings.HasSuffix(got, "...") {
-		t.Fatalf("Summarize(long) = %q", got)
-	}
-	if p.Summarize(json.RawMessage(`{}`)) != "" {
-		t.Fatal("invalid config should summarize empty")
-	}
-	if m := p.Manifest(); m.Name != Name || len(m.Kinds) != 2 || !m.Mutates || !m.Guardrail {
-		t.Fatalf("manifest = %+v", m)
-	}
+	got := p.Summarize(json.RawMessage(`{"model":"gpt","provider":"openai","roles":["user","tool"]}`))
+	require.Equal(t, "openai/gpt • user,tool • default prompt", got)
+	got = p.Summarize(json.RawMessage(`{"model":"gpt","prompt":"Rewrite   this\ncarefully"}`))
+	require.Equal(t, "gpt • user • Rewrite this carefully", got)
+	got = p.Summarize(json.RawMessage(`{"model":"gpt","prompt":"` + strings.Repeat("a", 60) + `"}`))
+	require.True(t, strings.HasSuffix(got, "..."), "Summarize(long) = %q", got)
+	require.Empty(t, p.Summarize(json.RawMessage(`{}`)))
+	m := p.Manifest()
+	require.Equal(t, Name, m.Name)
+	require.Len(t, m.Kinds, 2)
+	require.True(t, m.Mutates)
+	require.True(t, m.Guardrail)
 }
 
 // "system" covers developer messages, the Responses spelling of system.
 func TestOnPromptSystemRoleIncludesDeveloper(t *testing.T) {
-	host := &fakeHost{reply: upper}
+	host := &plugintest.Host{Reply: upper}
 	p := newPlugin(t, `{"model":"gpt","provider":"openai","roles":["system"]}`, host)
 	pr := prompt(
 		pluginapi.TextMessage(pluginapi.RoleDeveloper, "dev rules"),
 		pluginapi.TextMessage(pluginapi.RoleUser, "hello"),
 	)
-	if _, err := p.OnPrompt(context.Background(), &pluginapi.Exchange{Prompt: pr, Values: pluginapi.Values{}}); err != nil {
-		t.Fatalf("OnPrompt() error = %v", err)
-	}
-	if got := pr.Messages[0].Text(); got != "DEV RULES" {
-		t.Fatalf("developer message = %q, want rewritten", got)
-	}
-	if got := pr.Messages[1].Text(); got != "hello" {
-		t.Fatalf("user message = %q, want untouched", got)
-	}
+	_, err := p.OnPrompt(context.Background(), &pluginapi.Exchange{Prompt: pr, Values: pluginapi.Values{}})
+	require.NoError(t, err)
+	got := pr.Messages[0].Text()
+	require.Equal(t, "DEV RULES", got)
+	got = pr.Messages[1].Text()
+	require.Equal(t, "hello", got)
 }

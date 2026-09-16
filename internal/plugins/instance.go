@@ -77,6 +77,8 @@ type Instance struct {
 	refs atomic.Int64
 	// closed is set by Close; a closed instance refuses hook calls.
 	closed atomic.Bool
+	// health is the last outcome of CheckHealth.
+	health atomic.Pointer[Health]
 }
 
 // ErrInstanceClosed is returned by Call for an instance that was closed.
@@ -252,6 +254,20 @@ func (i *Instance) HasKind(kind pluginapi.Kind) bool {
 // Mutates reports whether the plugin declares that it edits content.
 func (i *Instance) Mutates() bool {
 	return i != nil && i.Manifest.Mutates
+}
+
+// EditsContent reports whether the configured instance edits content. A
+// mutating plugin may be configured only to flag or block — presidio with
+// action "warn", string_replace with on_match "block" — and then leaves the
+// request as it is; such a plugin says so through [pluginapi.ContentEditor].
+func (i *Instance) EditsContent() bool {
+	if !i.Mutates() {
+		return false
+	}
+	if editor, ok := i.Plugin.(pluginapi.ContentEditor); ok {
+		return editor.EditsContent()
+	}
+	return true
 }
 
 // EffectiveFailMode resolves the fail mode for a phase.
