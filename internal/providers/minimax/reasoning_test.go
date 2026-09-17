@@ -555,6 +555,24 @@ func TestThinkParser_OrphanCloseDoesNotStickInCarry(t *testing.T) {
 	assert.Empty(t, p.carry, "carry must not accumulate after an orphan close")
 }
 
+func TestStripOrphanClosesFastPath(t *testing.T) {
+	// The fast-path that returns the input verbatim when there is nothing to
+	// strip is small enough that the compiler may inline it; assert it
+	// directly so coverage sees it.
+	assert.Equal(t, "hello world", stripOrphanCloses("hello world"))
+	assert.Equal(t, "<tag>", stripOrphanCloses("<tag>"))
+	assert.Empty(t, stripOrphanCloses(""))
+	assert.Equal(t, "no tags here", stripOrphanCloses("no tags here"))
+}
+
+func TestStripOrphanClosesSlowPath(t *testing.T) {
+	// The slow path fires when a stray close marker survives the streaming
+	// parse (rare: the parser strips most orphans earlier, but a marker can
+	// land inside a content segment that is emitted wholesale).
+	assert.Equal(t, "abc def", stripOrphanCloses("abc</think> def"))
+	assert.Equal(t, "ab", stripOrphanCloses("</think>ab</think>"))
+}
+
 func TestSplitThink_NoOrphanCloseLeavesContentUntouched(t *testing.T) {
 	// The stripOrphanCloses helper has a fast-path for content that does
 	// not contain </think>; assert the round-trip is byte-for-byte.
