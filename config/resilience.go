@@ -28,9 +28,11 @@ func DefaultRetryConfig() RetryConfig {
 
 // TripRuleConfig opens the circuit breaker instantly when an upstream error
 // message matches Match. A zero TTL uses the breaker's open-state timeout.
+// TTL encodes as JSON nanoseconds wherever the rule crosses the admin/store
+// wire as {match, ttl}.
 type TripRuleConfig struct {
-	Match string        `yaml:"match"`
-	TTL   time.Duration `yaml:"ttl"`
+	Match string        `yaml:"match" json:"match"`
+	TTL   time.Duration `yaml:"ttl" json:"ttl"`
 }
 
 // CircuitBreakerConfig holds resolved circuit breaker settings.

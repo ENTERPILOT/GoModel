@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
+
+	"github.com/enterpilot/gomodel/config"
 )
 
 func encodeCredentialList(value []string) (string, error) {
@@ -30,6 +32,35 @@ func decodeCredentialList(data []byte) ([]string, error) {
 		return nil, nil
 	}
 	return value, nil
+}
+
+// encodeTripRules stores trip rules as a JSON array of {match, ttl}. Nil
+// rules encode as an empty array, matching encodeCredentialList.
+func encodeTripRules(rules []config.TripRuleConfig) (string, error) {
+	if rules == nil {
+		rules = []config.TripRuleConfig{}
+	}
+	data, err := json.Marshal(rules)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// decodeTripRules reads trip rules back; empty input or an empty array reads
+// as nil, like never set.
+func decodeTripRules(data []byte) ([]config.TripRuleConfig, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	var rules []config.TripRuleConfig
+	if err := json.Unmarshal(data, &rules); err != nil {
+		return nil, err
+	}
+	if len(rules) == 0 {
+		return nil, nil
+	}
+	return rules, nil
 }
 
 // stampCredentialUpsert sets timestamps: CreatedAt on insert, UpdatedAt always.

@@ -58,6 +58,7 @@ type Handler struct {
 	configuredProviders []providers.SanitizedProviderConfig
 	providerCredentials ProviderCredentialsAdmin
 	requestHealth       RequestHealthSource
+	breakerResetter     BreakerResetter
 	quotaTemplates      bool
 
 	mutationMu sync.Mutex
@@ -137,6 +138,11 @@ type providerStatusItemResponse struct {
 	LastError    string                            `json:"last_error,omitempty"`
 	Config       providers.SanitizedProviderConfig `json:"config"`
 	Runtime      providers.ProviderRuntimeSnapshot `json:"runtime"`
+	// CircuitState mirrors the live circuit-breaker state ("open",
+	// "half-open", ...) from request health; empty until the provider has
+	// served traffic or no breaker state is tracked. The dashboard drives
+	// the reset button off this field.
+	CircuitState string `json:"circuit_state"`
 	// RequestHealth reports windowed real-traffic outcomes (per-model error
 	// counts and the live circuit-breaker state); nil when the provider has
 	// served no recent requests or request-health tracking is not wired.
@@ -366,6 +372,19 @@ type RequestHealthSource interface {
 func WithRequestHealth(source RequestHealthSource) Option {
 	return func(h *Handler) {
 		h.requestHealth = source
+	}
+}
+
+// BreakerResetter force-closes a named provider's circuit breaker(s),
+// backing the circuit-breaker reset endpoint.
+type BreakerResetter interface {
+	ResetCircuitBreaker(providerName string) error
+}
+
+// WithBreakerResetter enables POST /admin/providers/{name}/circuit-breaker/reset.
+func WithBreakerResetter(resetter BreakerResetter) Option {
+	return func(h *Handler) {
+		h.breakerResetter = resetter
 	}
 }
 

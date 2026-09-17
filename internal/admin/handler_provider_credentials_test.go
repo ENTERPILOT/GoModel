@@ -8,13 +8,16 @@ import (
 	"net/http/httptest"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/health"
 )
 
 // providerCredentialsAdminFake is an in-memory ProviderCredentialsAdmin for
@@ -449,6 +452,53 @@ func TestProviderCredentialsEndpointsReturn503WhenUnavailable(t *testing.T) {
 	assertUnavailable("DeleteProviderCredential", h.DeleteProviderCredential(deleteCtx), deleteRec)
 }
 
+// Trip rules are plain configuration, so the upsert stores them, the stored
+// view lists them unredacted, and the declared (config.yaml/env) read-only
+// view carries the effective rules from the sanitized config.
+func TestUpsertProviderCredential_TripRulesRoundTrip(t *testing.T) {
+	fake := newProviderCredentialsAdminFake()
+	h := newProviderCredentialsHandler(fake)
+
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials",
+		`{"name":"my-openai","type":"openai","api_keys":["sk-real"],"trip_on":[{"match":"insufficient_quota","ttl":60000000000}]}`)
+	err := h.UpsertProviderCredential(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	want := []config.TripRuleConfig{{Match: "insufficient_quota", TTL: 60 * time.Second}}
+	stored, ok := fake.rows["my-openai"]
+	require.True(t, ok)
+	assert.Equal(t, want, stored.TripOn)
+
+	response := echotest.Decode[providerCredentialViewResponse](t, rec)
+	assert.Equal(t, want, response.TripOn)
+}
+
+func TestListProviderCredentials_DeclaredViewShowsTripRules(t *testing.T) {
+	fake := newProviderCredentialsAdminFake()
+	h := newProviderCredentialsHandlerWithConfigured(fake, []providers.SanitizedProviderConfig{
+		{
+			Name: "openai",
+			Type: "openai",
+			Resilience: providers.SanitizedResilienceConfig{
+				CircuitBreaker: providers.SanitizedCircuitBreakerConfig{
+					TripOn: []config.TripRuleConfig{{Match: "rate limit", TTL: 30 * time.Second}},
+				},
+			},
+		},
+	})
+
+	c, rec := echotest.Get(t, "/admin/provider-credentials")
+	err := h.ListProviderCredentials(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	body := echotest.Decode[[]providerCredentialViewResponse](t, rec)
+	require.Len(t, body, 1)
+	assert.True(t, body[0].Managed)
+	assert.Equal(t, []config.TripRuleConfig{{Match: "rate limit", TTL: 30 * time.Second}}, body[0].TripOn)
+}
+
 func TestUpsertProviderCredential_BubblesProviderErrorOnStoreFailure(t *testing.T) {
 	fake := newProviderCredentialsAdminFake()
 	fake.upsertErr = errors.New("disk full")
@@ -527,4 +577,63 @@ func TestProviderStatus_ReportsCredentialServiceConfigForRuntimeProviders(t *tes
 			assert.Equal(t, tt.wantLabel, item.StatusLabel)
 		})
 	}
+}
+
+// requestHealthFake replays canned per-provider health snapshots.
+type requestHealthFake struct {
+	snapshot map[string]health.ProviderHealth
+}
+
+func (f requestHealthFake) Snapshot() map[string]health.ProviderHealth {
+	return f.snapshot
+}
+
+// The status item must surface the live breaker state as a first-class field
+// (the dashboard's reset button keys off it) and the effective trip rules as
+// plain, unredacted configuration.
+func TestProviderStatus_ExposesCircuitStateAndTripRules(t *testing.T) {
+	tripOn := []config.TripRuleConfig{{Match: "insufficient_quota", TTL: time.Minute}}
+	fake := newProviderCredentialsAdminFake()
+	fake.configured = []providers.SanitizedProviderConfig{{
+		Name: "dash-openai",
+		Type: "openai",
+		Resilience: providers.SanitizedResilienceConfig{
+			CircuitBreaker: providers.SanitizedCircuitBreakerConfig{TripOn: tripOn},
+		},
+	}}
+	h := NewHandler(nil, nil,
+		WithProviderCredentials(fake),
+		WithRequestHealth(requestHealthFake{snapshot: map[string]health.ProviderHealth{
+			"dash-openai": {CircuitState: "open"},
+		}}),
+	)
+
+	c, rec := echotest.Get(t, "/admin/providers/status")
+	err := h.ProviderStatus(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	body := echotest.Decode[providerStatusResponse](t, rec)
+	require.Len(t, body.Providers, 1)
+
+	item := body.Providers[0]
+	assert.Equal(t, "open", item.CircuitState)
+	assert.Equal(t, tripOn, item.Config.Resilience.CircuitBreaker.TripOn)
+}
+
+// A provider with no traffic yet reports an empty circuit_state rather than a
+// made-up state.
+func TestProviderStatus_CircuitStateEmptyWithoutTraffic(t *testing.T) {
+	h := NewHandler(nil, nil, WithConfiguredProviders([]providers.SanitizedProviderConfig{
+		{Name: "idle", Type: "openai"},
+	}))
+
+	c, rec := echotest.Get(t, "/admin/providers/status")
+	err := h.ProviderStatus(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	body := echotest.Decode[providerStatusResponse](t, rec)
+	require.Len(t, body.Providers, 1)
+	assert.Empty(t, body.Providers[0].CircuitState)
 }

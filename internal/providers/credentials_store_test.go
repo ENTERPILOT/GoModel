@@ -3,8 +3,11 @@ package providers
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/enterpilot/gomodel/config"
 )
 
 func TestCredentialStore_RoundTrip(t *testing.T) {
@@ -29,6 +32,7 @@ func TestCredentialStore_RoundTrip(t *testing.T) {
 			ServiceAccountJSONBase64: "eyJ0eXBlIjoic2VydmljZV9hY2NvdW50In0=",
 			GCPScope:                 "https://www.googleapis.com/auth/cloud-platform",
 			Models:                   []string{"gemini-2.5-pro", "gemini-2.5-flash"},
+			TripOn:                   []config.TripRuleConfig{{Match: "quota exceeded", TTL: 30 * time.Second}},
 			Enabled:                  true,
 		}
 		require.NoError(t, store.Upsert(ctx, cred))
@@ -89,17 +93,19 @@ func TestCredentialStore_Defaults(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, got.APIKeys)
 		require.Nil(t, got.Models)
+		require.Nil(t, got.TripOn)
 		require.NotNil(t, got.SessionStickyKeys, "nil SessionStickyKeys means enabled and is stored as such")
 		require.True(t, *got.SessionStickyKeys)
 		require.False(t, got.Enabled)
 		require.Empty(t, got.BaseURL)
 
 		// Empty slices read back as nil, like never set.
-		require.NoError(t, store.Upsert(ctx, ManagedProviderCredential{Name: "ollama", Type: "ollama", APIKeys: []string{}, Models: []string{}}))
+		require.NoError(t, store.Upsert(ctx, ManagedProviderCredential{Name: "ollama", Type: "ollama", APIKeys: []string{}, Models: []string{}, TripOn: []config.TripRuleConfig{}}))
 		got, err = store.Get(ctx, "ollama")
 		require.NoError(t, err)
 		require.Nil(t, got.APIKeys)
 		require.Nil(t, got.Models)
+		require.Nil(t, got.TripOn)
 	})
 }
 
@@ -111,6 +117,7 @@ func TestCredentialStore_UpsertClearsLists(t *testing.T) {
 			Type:    "openai",
 			APIKeys: []string{"sk-one"},
 			Models:  []string{"gpt-4o"},
+			TripOn:  []config.TripRuleConfig{{Match: "quota exceeded"}},
 			Enabled: true,
 		}))
 
@@ -122,6 +129,7 @@ func TestCredentialStore_UpsertClearsLists(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, got.APIKeys)
 		require.Nil(t, got.Models)
+		require.Nil(t, got.TripOn)
 		require.False(t, got.Enabled)
 	})
 }

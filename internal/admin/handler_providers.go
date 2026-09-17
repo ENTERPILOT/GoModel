@@ -163,8 +163,48 @@ func buildProviderStatusItem(name string, cfg providers.SanitizedProviderConfig,
 		LastError:     lastError,
 		Config:        cfg,
 		Runtime:       runtime,
+		CircuitState:  circuitStateFor(requestHealth),
 		RequestHealth: requestHealth,
 	}
+}
+
+// circuitStateFor lifts the live breaker state into a first-class response
+// field; empty until the provider has served traffic.
+func circuitStateFor(requestHealth *health.ProviderHealth) string {
+	if requestHealth == nil {
+		return ""
+	}
+	return requestHealth.CircuitState
+}
+
+// ResetProviderCircuitBreaker handles POST /admin/providers/:name/circuit-breaker/reset.
+//
+// @Summary      Force-close a provider's circuit breaker(s)
+// @Description  Clears an open or half-open breaker (including any quota trip window) so traffic resumes immediately, without a restart. Responds 404 for an unknown provider and 400 for a provider whose adapter cannot reset its breaker.
+// @Tags         admin
+// @Security     BearerAuth
+// @Param        name  path  string  true  "Provider name"
+// @Success      204   "No Content"
+// @Failure      400   {object}  core.GatewayError
+// @Failure      401   {object}  core.GatewayError
+// @Failure      404   {object}  core.GatewayError
+// @Failure      503   {object}  core.GatewayError
+// @Router       /admin/providers/{name}/circuit-breaker/reset [post]
+func (h *Handler) ResetProviderCircuitBreaker(c *echo.Context) error {
+	if h.breakerResetter == nil {
+		return handleError(c, featureUnavailableError("circuit breaker reset is unavailable"))
+	}
+	name := strings.TrimSpace(c.Param("name"))
+	if name == "" {
+		return handleError(c, core.NewInvalidRequestError("provider name is required", nil))
+	}
+	if err := h.breakerResetter.ResetCircuitBreaker(name); err != nil {
+		if errors.Is(err, providers.ErrProviderNotFound) {
+			return handleError(c, core.NewNotFoundError("provider not found: "+name))
+		}
+		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 // requestHealthFor matches a status row (keyed by trimmed provider name) to

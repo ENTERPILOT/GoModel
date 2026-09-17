@@ -9,28 +9,31 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
+	"github.com/enterpilot/gomodel/config"
 )
 
 type mongoCredentialDocument struct {
-	ID                       string    `bson:"_id"`
-	Type                     string    `bson:"type"`
-	APIKeys                  []string  `bson:"api_keys,omitempty"`
-	BaseURL                  string    `bson:"base_url,omitempty"`
-	APIVersion               string    `bson:"api_version,omitempty"`
-	Backend                  string    `bson:"backend,omitempty"`
-	AuthType                 string    `bson:"auth_type,omitempty"`
-	APIMode                  string    `bson:"api_mode,omitempty"`
-	VertexProject            string    `bson:"vertex_project,omitempty"`
-	VertexLocation           string    `bson:"vertex_location,omitempty"`
-	ServiceAccountFile       string    `bson:"service_account_file,omitempty"`
-	ServiceAccountJSON       string    `bson:"service_account_json,omitempty"`
-	ServiceAccountJSONBase64 string    `bson:"service_account_json_base64,omitempty"`
-	GCPScope                 string    `bson:"gcp_scope,omitempty"`
-	Models                   []string  `bson:"models,omitempty"`
-	SessionStickyKeys        *bool     `bson:"session_sticky_keys,omitempty"`
-	Enabled                  bool      `bson:"enabled"`
-	CreatedAt                time.Time `bson:"created_at"`
-	UpdatedAt                time.Time `bson:"updated_at"`
+	ID                       string                  `bson:"_id"`
+	Type                     string                  `bson:"type"`
+	APIKeys                  []string                `bson:"api_keys,omitempty"`
+	BaseURL                  string                  `bson:"base_url,omitempty"`
+	APIVersion               string                  `bson:"api_version,omitempty"`
+	Backend                  string                  `bson:"backend,omitempty"`
+	AuthType                 string                  `bson:"auth_type,omitempty"`
+	APIMode                  string                  `bson:"api_mode,omitempty"`
+	VertexProject            string                  `bson:"vertex_project,omitempty"`
+	VertexLocation           string                  `bson:"vertex_location,omitempty"`
+	ServiceAccountFile       string                  `bson:"service_account_file,omitempty"`
+	ServiceAccountJSON       string                  `bson:"service_account_json,omitempty"`
+	ServiceAccountJSONBase64 string                  `bson:"service_account_json_base64,omitempty"`
+	GCPScope                 string                  `bson:"gcp_scope,omitempty"`
+	Models                   []string                `bson:"models,omitempty"`
+	TripOn                   []config.TripRuleConfig `bson:"trip_on,omitempty"`
+	SessionStickyKeys        *bool                   `bson:"session_sticky_keys,omitempty"`
+	Enabled                  bool                    `bson:"enabled"`
+	CreatedAt                time.Time               `bson:"created_at"`
+	UpdatedAt                time.Time               `bson:"updated_at"`
 }
 
 type mongoCredentialIDFilter struct {
@@ -114,6 +117,7 @@ func (s *MongoDBCredentialStore) Upsert(ctx context.Context, cred ManagedProvide
 			"service_account_json_base64": cred.ServiceAccountJSONBase64,
 			"gcp_scope":                   cred.GCPScope,
 			"models":                      cred.Models,
+			"trip_on":                     cred.TripOn,
 			"session_sticky_keys":         sessionStickyKeysEnabled(cred.SessionStickyKeys),
 			"enabled":                     cred.Enabled,
 			"updated_at":                  cred.UpdatedAt,
@@ -169,6 +173,9 @@ func credentialFromMongo(doc mongoCredentialDocument) ManagedProviderCredential 
 	}
 	if len(doc.Models) > 0 {
 		cred.Models = append([]string(nil), doc.Models...)
+	}
+	if len(doc.TripOn) > 0 {
+		cred.TripOn = append([]config.TripRuleConfig(nil), doc.TripOn...)
 	}
 	return cred
 }
