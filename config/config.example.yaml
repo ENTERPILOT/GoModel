@@ -335,6 +335,16 @@ resilience:
     failure_threshold: 5
     success_threshold: 2
     timeout: 30s
+    # trip_on opens the breaker instantly when an upstream error message
+    # matches `match` (a Go regexp tested against the error message and code):
+    # failures are not counted, the breaker simply stays open for `ttl`
+    # (default: the `timeout` above), then probes recovery as usual. Meant for
+    # hard quota/billing stops that retries cannot fix. Rules are inert until
+    # configured; `trip_on: []` disables them; an empty match, an invalid
+    # regexp, or a negative ttl fails config load.
+    # trip_on:
+    #   - match: "insufficient_quota|exceeded your current quota"
+    #     ttl: 30m
 
 guardrails:
   enabled: false
@@ -479,6 +489,10 @@ providers:
     #     max_retries: 5
     #   circuit_breaker:
     #     enabled: false
+    #     # A trip_on list here replaces the global one entirely; omit to inherit.
+    #     trip_on:
+    #       - match: "billing hard limit reached"
+    #         ttl: 1h
 
   anthropic:
     type: anthropic

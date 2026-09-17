@@ -36,6 +36,7 @@ you need.
 | `failure_threshold` | `5`     | Consecutive failures before the circuit opens  |
 | `success_threshold` | `2`     | Consecutive successes to close it again        |
 | `timeout`           | `30s`   | How long the circuit stays open before probing |
+| `trip_on`           | `[]`    | Upstream error-message regexps that open the breaker instantly |
 
 To disable retries, set `max_retries: 0` — every request gets exactly one
 attempt. To disable the circuit breaker, set `circuit_breaker.enabled: false`
@@ -143,6 +144,83 @@ preserved. If every slot is protected, a new model receives a failover-eligible
 
 State resets on restart
 and nothing is shared between replicas.
+
+## Trip rules
+
+`trip_on` rules open the circuit breaker **instantly** when an upstream error
+message matches a Go regular expression — without counting failures toward
+`failure_threshold`. Use them for errors that mean "stop calling this
+provider", such as exhausted quota or a disabled billing key, where retrying
+only burns requests.
+
+```yaml
+resilience:
+  circuit_breaker:
+    timeout: 30s
+    trip_on:
+      - match: "insufficient_quota|exceeded your current quota"
+        ttl: 30m
+```
+
+- `match` is a Go regexp tested against the provider's error message and
+  error code.
+- `ttl` is how long the breaker stays open. Omit it to reuse `timeout`
+  (default `30s`).
+- Rules are inert until configured: without them the breaker behaves exactly
+  as described above. `trip_on: []` disables them explicitly.
+- A provider's `trip_on` list **replaces** the global list entirely; omit the
+  key to inherit the global rules.
+- An empty `match`, a pattern that does not compile, or a negative `ttl`
+  fails configuration loading with a `circuit_breaker.trip_on[i]` error.
+
+Override per provider like any other breaker setting:
+
+```yaml
+providers:
+  anthropic:
+    type: anthropic
+    api_key: ${ANTHROPIC_API_KEY}
+    resilience:
+      circuit_breaker:
+        trip_on:
+          - match: "credit balance is too low"
+            ttl: 1h # replaces the global trip_on list
+```
+
+A tripped breaker behaves like an ordinary open one: requests fail fast with
+a `503` before reaching the provider, failover virtual models route around
+it, and after `ttl` the half-open probe decides whether traffic resumes. If
+the probe sees the same error, the trip window restarts.
+
+### Resetting a tripped breaker
+
+Once the quota or key is fixed, you do not have to wait out the `ttl`. Use
+the **Reset breaker** button on the provider's dashboard card (enabled while
+the breaker is open or half-open), or call the admin API:
+
+```bash
+curl -X POST http://localhost:8080/admin/providers/anthropic/circuit-breaker/reset \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+`204` resumes traffic immediately. `404` means the provider name is unknown,
+`400` that the provider's adapter cannot reset its breaker, and `503` that
+the reset hook is unavailable on the gateway.
+
+### Why did my provider pause?
+
+A provider card showing `Circuit Open` while requests fail with `503` before
+reaching the provider means the breaker is open — either `failure_threshold`
+failures accumulated or a `trip_on` rule matched. `GET
+/admin/providers/status` reports the live state per provider as
+`circuit_state` (`closed`, `open`, or `half-open`; empty until the provider
+has served traffic) alongside the effective `resilience.circuit_breaker`
+settings, including `trip_on`.
+
+Providers configured in the dashboard can edit their trip rules directly in
+the credential editor ("Quota breaker"). Providers declared in `config.yaml`
+or environment variables show their rules read-only there; change them in
+the YAML file. Trip rules have no environment-variable equivalent.
 
 ## Environment Variables
 
