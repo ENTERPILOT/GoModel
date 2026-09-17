@@ -29,8 +29,8 @@ const (
 )
 
 // thinkCloseTags lists every closing marker the parser accepts. Order does
-// not matter: the streaming parser closes on the earliest match in the
-// stream, and the buffered splitThink closes on the last one (greedy).
+// not matter: both the buffered and the streaming parser take the earliest
+// match in the text they are scanning.
 var thinkCloseTags = []string{"</think>", "</mm:think>"}
 
 // isReasoningModel reports whether model is a MiniMax family member that
@@ -88,43 +88,93 @@ func normalizeChoice(choice *core.Choice) {
 
 // splitThink extracts the reasoning body of s.
 //
-// Greedy matching: the first <think> opens the block and the LAST accepted
-// closing marker closes it. Everything between the two is reasoning,
-// including any literal <think> or </think> markers the model wrote as
-// text while reasoning about the tags themselves — those markers must not
-// split the reasoning or close the block early, because a reasoning trace
-// has no second pre-running <think> to pair against and the parser cannot
-// otherwise tell an orphan marker from a real tag.
+// Confirmed-close matching: a closing marker inside a think block is a real
+// close in two cases only — no closing marker comes after it (final close),
+// or a <think> open comes after it before the next closing marker (a chained
+// block follows). Every other closing marker is literal text the model wrote
+// while reasoning about the tags themselves and stays in the reasoning
+// output verbatim. This keeps chained think → answer → think → answer
+// sequences intact without letting a stray marker close the block early.
 //
-// Text before the opening marker and after the closing marker is content.
-// An unterminated block (no closing marker at all, typically
+// Text outside think blocks is content; orphan closing markers in content
+// are dropped. An unterminated block (no closing marker at all, typically
 // finish_reason=length) emits the partial inner text as reasoning so the
 // client still sees the chain of thought the model produced before it was
 // cut off.
 func splitThink(s string) (content, reasoning string) {
-	open := strings.Index(s, thinkOpenTag)
-	if open < 0 {
-		// No think block: content is the whole input with any orphan
-		// closing markers stripped.
-		return strings.TrimSpace(stripAllCloses(s)), ""
-	}
-	lastClose, lastCloseLen := -1, 0
-	for _, tag := range thinkCloseTags {
-		if i := strings.LastIndex(s, tag); i > lastClose {
-			lastClose, lastCloseLen = i, len(tag)
+	var cb, rb strings.Builder
+	rest := s
+	inThink := false
+	for len(rest) > 0 {
+		if inThink {
+			ci, tag := earliestClose(rest)
+			if ci < 0 {
+				rb.WriteString(rest)
+				break
+			}
+			if isRealClose(rest[ci+len(tag):]) {
+				rb.WriteString(rest[:ci])
+				rest = rest[ci+len(tag):]
+				inThink = false
+				continue
+			}
+			// Literal close inside reasoning: keep it verbatim.
+			rb.WriteString(rest[:ci+len(tag)])
+			rest = rest[ci+len(tag):]
+			continue
+		}
+		open := strings.Index(rest, thinkOpenTag)
+		ci, tag := earliestClose(rest)
+		switch {
+		case open < 0 && ci < 0:
+			cb.WriteString(rest)
+			rest = ""
+		case ci >= 0 && (open < 0 || ci < open):
+			// Orphan close in content: drop the marker.
+			cb.WriteString(rest[:ci])
+			rest = rest[ci+len(tag):]
+		default:
+			cb.WriteString(rest[:open])
+			rest = rest[open+len(thinkOpenTag):]
+			inThink = true
 		}
 	}
-	if lastClose < open {
-		// Unterminated: emit the partial inner text as reasoning rather
-		// than drop it, so finish_reason=length still carries the chain
-		// of thought the model produced before it was cut off.
-		return strings.TrimSpace(s[:open]), s[open+len(thinkOpenTag):]
+	return strings.TrimSpace(cb.String()), rb.String()
+}
+
+// isRealClose reports whether a closing marker ends the current think
+// block. s is the text right after the marker. The marker is real when no
+// closing marker follows it, or when a <think> open follows it before the
+// next closing marker.
+func isRealClose(s string) bool {
+	ci, _ := earliestClose(s)
+	if ci < 0 {
+		return true
 	}
-	var contentBuilder, reasoningBuilder strings.Builder
-	contentBuilder.WriteString(s[:open])
-	contentBuilder.WriteString(s[lastClose+lastCloseLen:])
-	reasoningBuilder.WriteString(s[open+len(thinkOpenTag) : lastClose])
-	return strings.TrimSpace(stripAllCloses(contentBuilder.String())), reasoningBuilder.String()
+	open := strings.Index(s, thinkOpenTag)
+	return open >= 0 && open < ci
+}
+
+// earliestClose returns the index and text of the first accepted closing
+// marker in s. index is -1 when s contains none.
+func earliestClose(s string) (index int, tag string) {
+	index, tag = -1, ""
+	for _, t := range thinkCloseTags {
+		if i := strings.Index(s, t); i >= 0 && (index < 0 || i < index) {
+			index, tag = i, t
+		}
+	}
+	return index, tag
+}
+
+// earliestMarker returns the index and text of the first opening or closing
+// marker in s, whichever comes first. index is -1 when s contains none.
+func earliestMarker(s string) (index int, tag string) {
+	index, tag = earliestClose(s)
+	if o := strings.Index(s, thinkOpenTag); o >= 0 && (index < 0 || o < index) {
+		return o, thinkOpenTag
+	}
+	return index, tag
 }
 
 // stripAllCloses removes every accepted closing marker from s.
@@ -326,25 +376,37 @@ func (s *thinkStream) rewriteChoice(raw json.RawMessage) (json.RawMessage, bool)
 type thinkParser struct {
 	inThink bool
 	carry   string // bytes held back from the end of the previous feed
+
+	// Hold mode. A <think> open seen inside an open think block is literal
+	// text, and it proves the block contains marker text — the next closing
+	// marker is then suspect and gets held back until one of three events
+	// resolves it: a new open (the held close was real, a chained block
+	// follows), another close (the held close was literal), or EOF (the
+	// held close was the real final close).
+	suspect bool            // nested open seen; the next close is suspect
+	heldTag string          // the held closing marker, "" when none is held
+	pending strings.Builder // text received after the held closing marker
 }
 
 // feed consumes one content delta and returns the text to emit on the
 // content and reasoning_content members of the next outgoing delta. Carry
 // across calls lets a <think> or closing tag that lands across an SSE line
-// feed consumes one content delta and returns the text to emit on the
-// content and reasoning_content members of the next outgoing delta. Carry
-// across calls lets a <think> or closing tag that lands across an SSE line
-// boundary still be recognised. Reasoning emits live: as soon as the
-// parser sees a </think> it exits think mode for the next delta, so a
-// reasoning block whose only marker is the final delta is delivered
-// without delay. The trade-off is that a literal </think> the model
-// wrote as text inside its reasoning is treated as a real close for the
-// remaining deltas — the buffered splitThink handles that exact shape
-// correctly via greedy matching.
+// boundary still be recognised.
+//
+// Fast mode is the default: every marker toggles the state at once, so
+// chained think blocks stream without delay and reasoning emits live. The
+// accepted trade-off is that a literal </think> written inside reasoning
+// closes the block early — zero hold beats rare leakage.
+//
+// Hold mode engages only after a nested <think> open. From then on the
+// parser holds each closing marker (and the text after it) until the
+// confirmed-close rule can decide it: a following <think> confirms the held
+// close as real, a following close proves it literal (it is restored into
+// reasoning verbatim), and end of stream confirms it as the final close.
 func (p *thinkParser) feed(text string) (content, reasoning string) {
 	combined := p.carry + text
 	p.carry = ""
-	if !p.inThink {
+	if !p.inThink && p.heldTag == "" {
 		// Orphan close markers at the head of the combined buffer mean the
 		// parser already exited an inner think while the outer one stayed
 		// open. Strip them: otherwise the `<` at position 0 keeps the parser
@@ -356,55 +418,78 @@ func (p *thinkParser) feed(text string) (content, reasoning string) {
 	var cb, rb strings.Builder
 	i := 0
 	for i < len(combined) {
-		// The tag the parser looks for depends on state: outside think it
-		// wants the opening marker; inside think it wants whichever close
-		// spelling MiniMax happens to use, whichever one comes first.
-		tag := thinkOpenTag
-		if p.inThink {
-			tag = earliestCloseTag(combined[i:])
-		}
-		// Skip the search when the remainder is shorter than the tag:
-		// strings.Index reports a zero-length match in that case and the
-		// parser would otherwise consume those bytes as if a tag had landed.
-		j := -1
-		if len(combined)-i >= len(tag) {
-			j = strings.Index(combined[i:], tag)
-		}
-		if j < 0 {
-			// No complete tag in the remainder. Hold from the last '<' so
-			// a tag split across this feed and the next is still recognised:
-			// emitting those bytes now would leak a partial tag to the client
-			// when the next feed happens to complete it.
-			lastAngle := strings.LastIndex(combined[i:], "<")
-			if lastAngle < 0 {
-				emit(p.inThink, &cb, &rb, combined[i:])
-				return stripOrphanCloses(cb.String()), rb.String()
+		// The marker the parser looks for depends on state: holding a
+		// suspect close it watches for any marker, inside a think block it
+		// watches for any marker (a nested open arms hold mode), and
+		// outside a block it watches for the open.
+		idx, tag := -1, ""
+		switch {
+		case p.heldTag != "" || p.inThink:
+			idx, tag = earliestMarker(combined[i:])
+		default:
+			if j := strings.Index(combined[i:], thinkOpenTag); j >= 0 {
+				idx, tag = j, thinkOpenTag
 			}
-			boundary := i + lastAngle
-			if boundary > i {
-				emit(p.inThink, &cb, &rb, combined[i:boundary])
+		}
+		if idx < 0 {
+			// No complete marker in the remainder. Hold from the last '<'
+			// so a tag split across this feed and the next is still
+			// recognised: emitting those bytes now would leak a partial tag
+			// to the client when the next feed happens to complete it.
+			rest := combined[i:]
+			lastAngle := strings.LastIndex(rest, "<")
+			emitUntil := len(rest)
+			if lastAngle >= 0 {
+				emitUntil = lastAngle
+				p.carry = rest[lastAngle:]
 			}
-			p.carry = combined[boundary:]
+			if emitUntil > 0 {
+				if p.heldTag != "" {
+					p.pending.WriteString(rest[:emitUntil])
+				} else {
+					emit(p.inThink, &cb, &rb, rest[:emitUntil])
+				}
+			}
 			return stripOrphanCloses(cb.String()), rb.String()
 		}
-		emit(p.inThink, &cb, &rb, combined[i:i+j])
-		i += j + len(tag)
-		p.inThink = !p.inThink
-	}
-	return stripOrphanCloses(cb.String()), rb.String()
-}
-
-// earliestCloseTag returns whichever closing marker appears first in s, or
-// the plain spelling when neither is present (the caller only uses the
-// result as the search needle, and misses fall through to the j < 0 branch).
-func earliestCloseTag(s string) string {
-	best, bestAt := thinkCloseTags[0], -1
-	for _, tag := range thinkCloseTags {
-		if i := strings.Index(s, tag); i >= 0 && (bestAt < 0 || i < bestAt) {
-			best, bestAt = tag, i
+		segment := combined[i : i+idx]
+		i += idx + len(tag)
+		switch {
+		case p.heldTag != "" && tag == thinkOpenTag:
+			// A new block opened: the held close was real and the pending
+			// text is content between the two blocks.
+			p.pending.WriteString(segment)
+			cb.WriteString(p.pending.String())
+			p.pending.Reset()
+			p.heldTag = ""
+			p.suspect = false
+		case p.heldTag != "":
+			// Another close arrived first: the held close was literal text.
+			// Restore it into reasoning verbatim and hold the new close.
+			p.pending.WriteString(segment)
+			rb.WriteString(p.heldTag)
+			rb.WriteString(p.pending.String())
+			p.pending.Reset()
+			p.heldTag = tag
+		case !p.inThink:
+			cb.WriteString(segment)
+			p.inThink = true
+		case tag == thinkOpenTag:
+			// Nested open inside a block: literal text, arms hold mode.
+			rb.WriteString(segment)
+			rb.WriteString(tag)
+			p.suspect = true
+		case p.suspect:
+			// First close after a nested open: hold it until resolved.
+			rb.WriteString(segment)
+			p.heldTag = tag
+		default:
+			// Fast close: exit the block immediately.
+			rb.WriteString(segment)
+			p.inThink = false
 		}
 	}
-	return best
+	return stripOrphanCloses(cb.String()), rb.String()
 }
 
 // stripOrphanCloses removes close markers that leaked into the content
@@ -427,14 +512,21 @@ func containsAnyClose(s string) bool {
 	return false
 }
 
-// flush emits any carry bytes the parser was still holding when the stream
-// ended. An unfinished think block is treated as closed — the carry
-// becomes reasoning so the client sees the partial chain of thought —
-// matching the posture of any other interrupted turn. Outside think mode
-// the carry becomes content with orphan closes stripped.
+// flush emits everything the parser was still holding when the stream
+// ended. A held suspect close is confirmed as the real final close: the
+// pending text after it is content. An unfinished think block is treated
+// as closed — the carry becomes reasoning so the client sees the partial
+// chain of thought — matching the posture of any other interrupted turn.
+// Outside think mode the carry becomes content with orphan closes stripped.
 func (p *thinkParser) flush() (content, reasoning string) {
 	carry := p.carry
 	p.carry = ""
+	if p.heldTag != "" {
+		c := stripOrphanCloses(p.pending.String() + carry)
+		p.pending.Reset()
+		p.heldTag = ""
+		return c, ""
+	}
 	if carry == "" {
 		return "", ""
 	}

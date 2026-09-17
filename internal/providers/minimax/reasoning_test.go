@@ -56,10 +56,10 @@ func TestSplitThink(t *testing.T) {
 			wantThink: "hidden",
 		},
 		{
-			name:      "multiple think blocks are merged by greedy matching",
+			name:      "multiple think blocks split sequentially",
 			in:        "<think>one</think>mid<think>two</think>end",
-			wantText:  "end",
-			wantThink: "one</think>mid<think>two",
+			wantText:  "midend",
+			wantThink: "onetwo",
 		},
 		{
 			name:      "M2 prod shape: closed think followed by max_tokens cutoff",
@@ -128,11 +128,11 @@ func TestNormalizeChatResponse(t *testing.T) {
 			wantThink:    "hidden",
 		},
 		{
-			name:         "multiple think blocks are merged by greedy matching",
+			name:         "multiple think blocks split sequentially",
 			content:      "<think>one</think>mid<think>two</think>end",
-			wantContent:  "end",
+			wantContent:  "midend",
 			wantThinkKey: true,
-			wantThink:    "one</think>mid<think>two",
+			wantThink:    "onetwo",
 		},
 		{
 			name:         "unterminated think emits inner text as reasoning",
@@ -256,7 +256,7 @@ func TestThinkParserFeed(t *testing.T) {
 			},
 		},
 		{
-			name:  "multiple think blocks: streaming emits immediate-exit, only buffered greedy merges",
+			name:  "multiple think blocks toggle sequentially in fast mode",
 			feeds: []string{"<think>on", "e</think>mid<t", "hink>two</think>end"},
 			wantOut: []string{
 				"", "on",
@@ -531,19 +531,23 @@ func TestSplitThink_NestedThinkBlock(t *testing.T) {
 }
 
 func TestSplitThink_OrphanOpenAndCloseInReasoning(t *testing.T) {
-	// Both marker spellings appear as literal text inside the reasoning
-	// (the model reasons about the tags themselves). Greedy matching pairs
-	// the first <think> with the LAST closing marker, so every literal
-	// marker in between stays reasoning text and none of them splits or
-	// closes the block early.
+	// The model reasons about the tags themselves: the reasoning mentions
+	// a literal <think>, then a literal </think>, then another literal
+	// <think>. The literal close is followed by another open before the
+	// next close, so confirmed-close matching reads it as a chained block
+	// boundary — the same call the streaming hold mode makes when a new
+	// <think> resolves a held close. The shape is genuinely ambiguous, and
+	// both paths resolve it the same way.
 	raw := "Outer<think>'inner reasoning now can contain orphaned single <think> or </think> wich would result in new reasoning wich it shouldnt or closing it early cause no second prerunning <think> so it can be aware of it'</think>outer-after"
 	content, reasoning := splitThink(raw)
-	assert.Equal(t, "Outerouter-after", content, "only text outside the outermost think pair is content")
-	assert.NotContains(t, content, "<think>", "no marker leaks into content")
 	assert.Equal(t,
-		"'inner reasoning now can contain orphaned single <think> or </think> wich would result in new reasoning wich it shouldnt or closing it early cause no second prerunning <think> so it can be aware of it'",
+		"Outer wich would result in new reasoning wich it shouldnt or closing it early cause no second prerunning outer-after",
+		content,
+		"the text between the literal close and the next literal open reads as content between chained blocks")
+	assert.Equal(t,
+		"'inner reasoning now can contain orphaned single <think> or  so it can be aware of it'",
 		reasoning,
-		"literal markers inside reasoning are kept verbatim")
+		"the two reasoning bodies concatenate; the markers that formed the chain boundary are consumed")
 }
 
 func TestSplitThink_OrphanCloseInContent(t *testing.T) {
@@ -555,13 +559,13 @@ func TestSplitThink_OrphanCloseInContent(t *testing.T) {
 }
 
 func TestSplitThink_MultipleSequentialThinkBlocks(t *testing.T) {
-	// Greedy matching treats the LAST </think> as the real close, so the
-	// block before it absorbs every earlier close marker. Reasoning keeps
-	// every literal marker the model wrote.
+	// A model can think, answer, and think again. Confirmed-close matching
+	// ends each block at its own close marker, so the text between blocks
+	// is content and the reasoning bodies concatenate.
 	raw := "<think>one</think>mid<think>two</think>end"
 	content, reasoning := splitThink(raw)
-	assert.Equal(t, "end", content)
-	assert.Equal(t, "one</think>mid<think>two", reasoning)
+	assert.Equal(t, "midend", content)
+	assert.Equal(t, "onetwo", reasoning)
 }
 
 func TestSplitThink_NestedThenTrailing(t *testing.T) {
@@ -677,12 +681,84 @@ func TestThinkParser_NestedCloseAcrossFeeds(t *testing.T) {
 		gotContent += c
 		gotReasoning += r
 	}
-	// The parser exits on the inner close (single-level nesting), so the
-	// "trailing" text is content and the outer close is an orphan stripped
-	// from the content stream. The nested <think> open marker stays in the
-	// reasoning verbatim — reasoning is never rewritten.
-	assert.Equal(t, "trailingafter", gotContent)
-	assert.Equal(t, "outer<think>inner", gotReasoning)
+	// The nested <think> open arms hold mode, so the inner close is held.
+	// The outer close arrives first and proves the held close was literal:
+	// it is restored into the reasoning verbatim, together with the text
+	// that followed it. The outer close is now the held candidate.
+	assert.Empty(t, gotContent, "nothing emits while a suspect close is held")
+	assert.Equal(t, "outer<think>inner</think>trailing", gotReasoning)
+	// End of stream resolves the held close as the real final close: the
+	// text after it is content.
+	c, r := p.flush()
+	assert.Equal(t, "after", c)
+	assert.Empty(t, r)
+}
+
+func TestThinkParser_DiscordShapeAcrossFeeds(t *testing.T) {
+	// The shape reported upstream: the model reasons about the tags
+	// themselves and writes a literal <think> and a literal </think>
+	// mid-sentence. The nested open arms hold mode, the literal close is
+	// held, and the final close resolves it as literal. The full reasoning
+	// reaches the client intact and only the real answer is content.
+	var p thinkParser
+	var gotContent, gotReasoning string
+	feeds := []string{
+		`<think>Wait, I accidentally typed "inlineXML" instead of "inline<th`,
+		`ink>XML" — and lost the</think>' reference. `,
+		"Let me fix that.</think>Done.",
+	}
+	for _, f := range feeds {
+		c, r := p.feed(f)
+		gotContent += c
+		gotReasoning += r
+	}
+	c, r := p.flush()
+	gotContent += c
+	gotReasoning += r
+	assert.Equal(t, "Done.", gotContent)
+	assert.Equal(t,
+		`Wait, I accidentally typed "inlineXML" instead of "inline<think>XML" — and lost the</think>' reference. Let me fix that.`,
+		gotReasoning,
+		"the literal markers stay in the reasoning verbatim, byte for byte")
+}
+
+func TestThinkParser_HeldCloseResolvedByChainedOpen(t *testing.T) {
+	// A nested open arms hold mode, but the model really does chain: it
+	// closes the block, answers, and thinks again. The new <think> open
+	// resolves the held close as real — the pending text is content — and
+	// the parser returns to fast mode for the new block.
+	var p thinkParser
+	var gotContent, gotReasoning string
+	feeds := []string{
+		"<think>a<think>b</think>mid",
+		"<think>c</think>end",
+	}
+	for _, f := range feeds {
+		c, r := p.feed(f)
+		gotContent += c
+		gotReasoning += r
+	}
+	assert.Equal(t, "midend", gotContent, "text between the chained blocks is content")
+	assert.Equal(t, "a<think>bc", gotReasoning,
+		"the nested open stays reasoning text; the confirmed close and the new open are consumed")
+}
+
+func TestThinkParser_FastModeOrphanCloseLeaks(t *testing.T) {
+	// Pinned accepted trade-off: without a nested open there is no hold,
+	// so a lone literal </think> inside reasoning closes the block early.
+	// The tail lands in content; the orphan real close is stripped.
+	var p thinkParser
+	var gotContent, gotReasoning string
+	for _, f := range []string{"<think>a</think>b</think>c"} {
+		c, r := p.feed(f)
+		gotContent += c
+		gotReasoning += r
+	}
+	// The trailing orphan close sits in the carry until the stream ends.
+	c, _ := p.flush()
+	gotContent += c
+	assert.Equal(t, "bc", gotContent)
+	assert.Equal(t, "a", gotReasoning)
 }
 
 func TestNormalizeChoice_ExistingReasoningContentKept(t *testing.T) {
