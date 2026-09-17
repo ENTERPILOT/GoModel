@@ -317,34 +317,60 @@ func auditLogValues(dialect sqlx.Dialect, e *LogEntry) []any {
 	}
 }
 
+// attemptRef names one attempt row for error reporting: a rejected multi-row
+// insert reports a database error for the statement, not for the tuple, so the
+// range the statement covered is what lets an operator find the bad record.
+type attemptRef struct {
+	entryID string
+	seq     int
+}
+
+func (r attemptRef) String() string {
+	return fmt.Sprintf("%s seq %d", r.entryID, r.seq)
+}
+
+// writeAttempts inserts the provider attempts of every entry, one multi-row
+// statement per chunk. Rows are serialized into the chunk being filled and
+// handed to the database as soon as it is full, so the transient cost stays
+// bounded by the chunk size however many attempts (and however large their
+// captured bodies) the batch carries.
 func (s *SQLStore) writeAttempts(ctx context.Context, entries []*LogEntry) error {
 	dialect := s.db.Dialect()
-	rows := make([][]any, 0, len(entries))
-	for _, entry := range entries {
-		for _, attempt := range auditAttempts(entry) {
-			rows = append(rows, auditAttemptValues(dialect, entry.ID, attempt))
+	values := make([]any, 0, maxAttemptsPerBatch*columnsPerAttempt)
+	rows := 0
+	var first, last attemptRef
+
+	flush := func() error {
+		if rows == 0 {
+			return nil
 		}
-	}
-	if len(rows) == 0 {
+		placeholders := strings.TrimSuffix(strings.Repeat(attemptRowPlaceholder+",", rows), ",")
+		query := insertAttemptPrefix + placeholders + insertAttemptSuffix
+		if _, err := s.db.Exec(ctx, query, values...); err != nil {
+			return fmt.Errorf("failed to insert audit log attempts %s through %s: %w", first, last, err)
+		}
+		values = values[:0]
+		rows = 0
 		return nil
 	}
 
-	for i := 0; i < len(rows); i += maxAttemptsPerBatch {
-		chunk := rows[i:min(i+maxAttemptsPerBatch, len(rows))]
-
-		placeholders := make([]string, len(chunk))
-		values := make([]any, 0, len(chunk)*columnsPerAttempt)
-		for j, row := range chunk {
-			placeholders[j] = attemptRowPlaceholder
-			values = append(values, row...)
-		}
-
-		query := insertAttemptPrefix + strings.Join(placeholders, ",") + insertAttemptSuffix
-		if _, err := s.db.Exec(ctx, query, values...); err != nil {
-			return fmt.Errorf("failed to insert audit log attempts batch %d: %w", i/maxAttemptsPerBatch, err)
+	for _, entry := range entries {
+		for _, attempt := range auditAttempts(entry) {
+			ref := attemptRef{entryID: entry.ID, seq: attempt.Seq}
+			if rows == 0 {
+				first = ref
+			}
+			last = ref
+			values = append(values, auditAttemptValues(dialect, entry.ID, attempt)...)
+			rows++
+			if rows == maxAttemptsPerBatch {
+				if err := flush(); err != nil {
+					return err
+				}
+			}
 		}
 	}
-	return nil
+	return flush()
 }
 
 func auditAttemptValues(dialect sqlx.Dialect, entryID string, attempt AttemptSnapshot) []any {
