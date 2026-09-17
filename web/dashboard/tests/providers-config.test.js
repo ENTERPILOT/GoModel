@@ -779,6 +779,14 @@ test("trip-rule list helpers summarize rows and gate the read-only column", () =
   assert.equal(providerCredentialTripRulesLabel({}), "");
   assert.equal(providerCredentialTripRulesLabel(null), "");
 
+  // ttl 0 means "use breaker timeout"; the label shows match only, no (0s).
+  assert.equal(
+    providerCredentialTripRulesLabel({
+      trip_on: [{ match: "insufficient_quota", ttl: 0 }],
+    }),
+    "insufficient_quota",
+  );
+
   assert.equal(providerRowsHaveTripRules([row, { trip_on: [] }]), true);
   assert.equal(providerRowsHaveTripRules([{ trip_on: [] }, {}]), false);
   assert.equal(providerRowsHaveTripRules([]), false);

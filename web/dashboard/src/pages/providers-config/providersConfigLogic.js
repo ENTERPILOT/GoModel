@@ -466,7 +466,11 @@ export function providerCredentialTripRulesLabel(row) {
   return (Array.isArray(row && row.trip_on) ? row.trip_on : [])
     .map((rule) => {
       const ttl = formatGoDurationNs(rule && rule.ttl);
-      return String((rule && rule.match) || "") + (ttl ? " (" + ttl + ")" : "");
+      // ttl 0 means "use breaker timeout" (operator left it blank); omit the suffix.
+      if (!rule || rule.ttl === 0) {
+        return String((rule && rule.match) || "");
+      }
+      return String((rule && rule.match) || "") + " (" + ttl + ")";
     })
     .filter(Boolean)
     .join(", ");

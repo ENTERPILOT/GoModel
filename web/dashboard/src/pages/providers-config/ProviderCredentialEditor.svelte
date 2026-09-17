@@ -59,7 +59,14 @@
       return;
     }
     providersConfig.focusField = "";
-    const element = document.getElementById("provider-credential-" + target);
+    // "trip_on" wraps a rule list: focus the derived target element
+    // (first rule's match input or the add button).
+    let element;
+    if (target === "trip_on") {
+      element = document.getElementById(tripOnTargetId);
+    } else {
+      element = document.getElementById("provider-credential-" + target);
+    }
     if (element) {
       element.scrollIntoView({ block: "center" });
       element.focus({ preventScroll: true });

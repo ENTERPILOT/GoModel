@@ -100,4 +100,8 @@ test("the reset button renders on every card, disabled off the breaker state", (
     /disabled=\{!breakerResettable \|\| resetting\}/,
   );
   assert.match(source, /providerStatusState\.resetBreaker\(provider\)/);
+  // The reset guard is global: any in-flight reset disables ALL cards'
+  // buttons (single-flight). It does not compare resettingName to a
+  // specific provider.name.
+  assert.match(source, /const resetting = \$derived\(providerStatusState\.resettingName\)/);
 });

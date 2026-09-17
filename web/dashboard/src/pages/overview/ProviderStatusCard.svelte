@@ -27,9 +27,9 @@
 
   const expanded = $derived(providerStatusState.cardExpanded(provider));
   // Only a tripped breaker (open/half-open) offers the reset; the button
-  // also waits out its own in-flight POST.
+  // also waits out any in-flight POST (single-flight guard blocks all cards).
   const breakerResettable = $derived(providerBreakerResettable(provider));
-  const resetting = $derived(providerStatusState.resettingName === provider.name);
+  const resetting = $derived(providerStatusState.resettingName);
   const formatTimestamp = (ts) => timezone.formatTimestamp(ts);
 </script>
 
