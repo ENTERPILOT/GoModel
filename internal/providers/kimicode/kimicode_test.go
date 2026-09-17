@@ -74,7 +74,7 @@ func TestDefaultTripOn_Compile(t *testing.T) {
 			err := config.ValidateResilience(config.ResilienceConfig{
 				CircuitBreaker: config.CircuitBreakerConfig{TripOn: []config.TripRuleConfig{r}},
 			})
-			assert.NoError(t, err, "rule[%d] match must be a valid regex", 0)
+			require.NoError(t, err, "rule[%d] match must be a valid regex", 0)
 			assert.NotZero(t, r.TTL, "rule[%d] must carry a TTL", 0)
 		})
 	}
@@ -110,7 +110,7 @@ func TestDefaultTripOn_MatchesPinnedBodies(t *testing.T) {
 			for _, rule := range compiled {
 				if rule.Pattern.MatchString(gatewayErr.Message) {
 					found = true
-					assert.Equal(t, tt.wantOK, true,
+					assert.True(t, tt.wantOK,
 						"rule %q should successfully match body %q", rule.Pattern.String(), tt.name)
 					assert.Equal(t, tt.wantTTL, rule.TTL,
 						"rule %q TTL mismatch for body %q", rule.Pattern.String(), tt.name)
