@@ -138,7 +138,13 @@ stop_gw; rm -f "$WORK/config.yaml"
 fail_start(){ # name, VM_ENV  -> expect the process to EXIT with a clear error
   for sp in $(lsof -nP -t -iTCP:$NEG_PORT -sTCP:LISTEN 2>/dev/null); do kill "$sp" 2>/dev/null; done
   ( cd "$WORK"; nohup env GOMODEL_MASTER_KEY= PORT=$NEG_PORT BASE_PATH= STORAGE_TYPE=sqlite SQLITE_PATH="$WORK/data/neg.db" REDIS_URL= RESPONSE_CACHE_SIMPLE_ENABLED=false VIRTUAL_MODELS="$2" "$BIN" >"$WORK/neg.log" 2>&1 < /dev/null & echo $! >"$WORK/neg.pid" )
-  sleep 4
+  # Startup validation runs after the provider catalog warms up, and an
+  # unreachable provider (a stopped local Ollama) stretches that warm-up past
+  # any fixed sleep, so poll for the exit instead of guessing how long it takes.
+  for _ in $(seq 1 30); do
+    kill -0 "$(cat "$WORK/neg.pid")" 2>/dev/null || break
+    sleep 1
+  done
   if kill -0 "$(cat "$WORK/neg.pid")" 2>/dev/null; then bad "$1 (process still alive)";
   elif grep -qiE 'failed to initialize virtual models|strateg|cannot target itself|unknown target provider' "$WORK/neg.log"; then ok "$1"; note "$(grep -iE 'error' "$WORK/neg.log" | tail -1 | sed 's/.*"error"://')";
   else bad "$1 (no clear error)"; tail -3 "$WORK/neg.log"; fi
