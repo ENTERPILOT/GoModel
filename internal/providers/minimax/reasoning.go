@@ -65,16 +65,12 @@ func normalizeChoice(choice *core.Choice) {
 		// Already canonical: keep the upstream value, just strip the tags.
 		return
 	}
-	encoded, err := json.Marshal(reasoning)
-	if err != nil {
-		return
-	}
-	merged, err := core.MergeUnknownJSONFields(msg.ExtraFields, map[string]json.RawMessage{
+	// json.Marshal on a string and MergeUnknownJSONFields on a pre-validated
+	// base cannot fail; both results are therefore used directly.
+	encoded, _ := json.Marshal(reasoning)
+	merged, _ := core.MergeUnknownJSONFields(msg.ExtraFields, map[string]json.RawMessage{
 		reasoningKey: encoded,
 	})
-	if err != nil {
-		return
-	}
 	msg.ExtraFields = merged
 }
 
@@ -171,15 +167,11 @@ func (s *thinkStream) rewrite(line []byte) []byte {
 	if !changed {
 		return line
 	}
-	encoded, err := json.Marshal(choices)
-	if err != nil {
-		return line
-	}
+	// Marshaling a decoded []json.RawMessage slice or map cannot fail; both
+	// results are used directly.
+	encoded, _ := json.Marshal(choices)
 	chunk["choices"] = encoded
-	out, err := json.Marshal(chunk)
-	if err != nil {
-		return line
-	}
+	out, _ := json.Marshal(chunk)
 	result := make([]byte, 0, len(sseDataPrefix)+len(out)+1)
 	result = append(result, sseDataPrefix...)
 	result = append(result, out...)
@@ -213,28 +205,18 @@ func (s *thinkStream) rewriteChoice(raw json.RawMessage) (json.RawMessage, bool)
 	}
 	delete(d, "content")
 	if text != "" {
-		encoded, err := json.Marshal(text)
-		if err != nil {
-			return raw, false
-		}
+		encoded, _ := json.Marshal(text)
 		d["content"] = encoded
 	}
 	if reasoning != "" {
-		encoded, err := json.Marshal(reasoning)
-		if err != nil {
-			return raw, false
-		}
+		encoded, _ := json.Marshal(reasoning)
 		d["reasoning_content"] = encoded
 	}
-	encDelta, err := json.Marshal(d)
-	if err != nil {
-		return raw, false
-	}
+	// Marshaling decoded maps of json.RawMessage cannot fail; all three
+	// results are used directly.
+	encDelta, _ := json.Marshal(d)
 	choice["delta"] = encDelta
-	out, err := json.Marshal(choice)
-	if err != nil {
-		return raw, false
-	}
+	out, _ := json.Marshal(choice)
 	return out, true
 }
 

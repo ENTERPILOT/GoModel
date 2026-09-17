@@ -1,6 +1,7 @@
 package minimax
 
 import (
+	"bufio"
 	"context"
 	"io"
 	"net/http"
@@ -391,4 +392,106 @@ data: {"choices":[{"delta":{"reasoning_content":"pa"},"index":0}]}
 func TestNormalizeChatStreamNilIsSafe(t *testing.T) {
 	got := normalizeChatStream(nil)
 	assert.Nil(t, got)
+}
+
+func TestNormalizeChoice_NonStringContentIsLeftAlone(t *testing.T) {
+	resp := &core.ChatResponse{
+		Choices: []core.Choice{{
+			Message: core.ResponseMessage{
+				Role:    "assistant",
+				Content: []core.ContentPart{{Type: "text", Text: "<think>no tags</think>"}},
+			},
+		}},
+	}
+	normalizeChatResponse(resp)
+	assert.Equal(t, []core.ContentPart{{Type: "text", Text: "<think>no tags</think>"}}, resp.Choices[0].Message.Content)
+	assert.Nil(t, resp.Choices[0].Message.ExtraFields.Lookup(reasoningKey))
+}
+
+func TestNormalizeChoice_EmptyContentIsLeftAlone(t *testing.T) {
+	resp := &core.ChatResponse{
+		Choices: []core.Choice{{Message: core.ResponseMessage{Role: "assistant", Content: ""}}},
+	}
+	normalizeChatResponse(resp)
+	assert.Equal(t, "", resp.Choices[0].Message.Content)
+}
+
+func TestRewrite_BadChunkJSONRelaysOriginal(t *testing.T) {
+	ts := &thinkStream{src: bufio.NewReader(strings.NewReader("")), closer: io.NopCloser(strings.NewReader(""))}
+	got := ts.rewrite([]byte(`data: {"content":"x","choices":[`))
+	assert.Equal(t, []byte(`data: {"content":"x","choices":[`), got)
+}
+
+func TestRewrite_ChoicesNotArrayRelaysOriginal(t *testing.T) {
+	ts := &thinkStream{src: bufio.NewReader(strings.NewReader("")), closer: io.NopCloser(strings.NewReader(""))}
+	got := ts.rewrite([]byte(`data: {"choices":null,"content":"x"}`))
+	assert.Equal(t, []byte(`data: {"choices":null,"content":"x"}`), got)
+}
+
+func TestRewrite_NoChoicesRelaysOriginal(t *testing.T) {
+	ts := &thinkStream{src: bufio.NewReader(strings.NewReader("")), closer: io.NopCloser(strings.NewReader(""))}
+	got := ts.rewrite([]byte(`data: {"content":"x"}`))
+	assert.Equal(t, []byte(`data: {"content":"x"}`), got)
+}
+
+func TestRewriteChoice_ChoiceNotMapRelaysOriginal(t *testing.T) {
+	ts := &thinkStream{src: bufio.NewReader(strings.NewReader("")), closer: io.NopCloser(strings.NewReader(""))}
+	got, ok := ts.rewriteChoice(json.RawMessage(`"a string"`))
+	assert.False(t, ok)
+	assert.Equal(t, json.RawMessage(`"a string"`), got)
+}
+
+func TestRewriteChoice_NoDeltaRelaysOriginal(t *testing.T) {
+	ts := &thinkStream{src: bufio.NewReader(strings.NewReader("")), closer: io.NopCloser(strings.NewReader(""))}
+	got, ok := ts.rewriteChoice(json.RawMessage(`{"index":0,"finish_reason":"stop"}`))
+	assert.False(t, ok)
+	assert.Equal(t, json.RawMessage(`{"index":0,"finish_reason":"stop"}`), got)
+}
+
+func TestRewriteChoice_DeltaNotMapRelaysOriginal(t *testing.T) {
+	ts := &thinkStream{src: bufio.NewReader(strings.NewReader("")), closer: io.NopCloser(strings.NewReader(""))}
+	got, ok := ts.rewriteChoice(json.RawMessage(`{"delta":"oops"}`))
+	assert.False(t, ok)
+	assert.Equal(t, json.RawMessage(`{"delta":"oops"}`), got)
+}
+
+func TestRewriteChoice_NoContentRelaysOriginal(t *testing.T) {
+	ts := &thinkStream{src: bufio.NewReader(strings.NewReader("")), closer: io.NopCloser(strings.NewReader(""))}
+	_, ok := ts.rewriteChoice(json.RawMessage(`{"delta":{"role":"assistant"}}`))
+	assert.False(t, ok)
+}
+
+func TestRewriteChoice_EmptyContentRelaysOriginal(t *testing.T) {
+	ts := &thinkStream{src: bufio.NewReader(strings.NewReader("")), closer: io.NopCloser(strings.NewReader(""))}
+	_, ok := ts.rewriteChoice(json.RawMessage(`{"delta":{"content":"   "}}`))
+	assert.False(t, ok)
+}
+
+func TestRewriteChoice_ContentNotStringRelaysOriginal(t *testing.T) {
+	ts := &thinkStream{src: bufio.NewReader(strings.NewReader("")), closer: io.NopCloser(strings.NewReader(""))}
+	_, ok := ts.rewriteChoice(json.RawMessage(`{"delta":{"content":42}}`))
+	assert.False(t, ok)
+}
+
+func TestRewriteChoice_NoChangeRelaysOriginal(t *testing.T) {
+	ts := &thinkStream{src: bufio.NewReader(strings.NewReader("")), closer: io.NopCloser(strings.NewReader(""))}
+	_, ok := ts.rewriteChoice(json.RawMessage(`{"delta":{"content":"hi"}}`))
+	assert.False(t, ok)
+}
+
+func TestThinkParser_BoundaryAtZeroHoldsCarry(t *testing.T) {
+	var p thinkParser
+	p.inThink = true
+	p.carry = ""
+	content, reasoning := p.feed("<d")
+	assert.Equal(t, "", content, "content")
+	assert.Equal(t, "", reasoning, "reasoning")
+	assert.Equal(t, "<d", p.carry, "carry must hold the partial tag start")
+}
+
+func TestThinkParser_LoopExitsAtExactEnd(t *testing.T) {
+	var p thinkParser
+	content, reasoning := p.feed("<think>x</think>")
+	assert.Equal(t, "", content, "content")
+	assert.Equal(t, "x", reasoning, "reasoning")
 }
