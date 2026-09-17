@@ -490,3 +490,34 @@ func TestCircuitBreaker_Reset(t *testing.T) {
 	cb.RecordFailure()
 	assert.Equal(t, "closed", cb.State())
 }
+
+// A matching quota error in a streaming response body opens the breaker on
+// the first stream establishment, just like the non-streaming Do path. When
+// the provider returns a non-200 status the error body is parsed identically
+// to the response path and quotaTripTTL fires.
+func TestTripRule_DoStreamMatchingErrorTripsInstantly(t *testing.T) {
+	t.Parallel()
+
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(quotaErrorBody))
+	}))
+	defer server.Close()
+
+	client := newQuotaTripTestClient(t, server.URL, nil)
+
+	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/chat"})
+	require.Error(t, err)
+	require.Nil(t, stream)
+	assert.Equal(t, int32(1), attempts.Load())
+	assert.Equal(t, "open", client.circuitBreaker.State())
+
+	// The second DoStream call must be rejected locally.
+	stream, err = client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/chat"})
+	require.Error(t, err)
+	require.Nil(t, stream)
+	assert.Equal(t, int32(1), attempts.Load(), "rejected stream must not reach the upstream")
+}
