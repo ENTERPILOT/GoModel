@@ -219,44 +219,62 @@ func appendUnknownJSONMembers(buf *bytes.Buffer, body []byte, skip map[string]st
 	return nil
 }
 
-// Lookup returns the raw JSON value for key or nil when absent.
-// It scans the stored object on demand so single-lookups stay allocation-light,
-// but repeated lookups on the same value are linear in the raw JSON size.
+// Lookup returns the raw JSON value for key or nil when absent. It scans the
+// stored object on demand so single lookups stay allocation-light, but
+// repeated lookups on the same value are linear in the raw JSON size; reach
+// for HasAny when several keys are only tested for presence.
+//
+// Keys are matched literally. The scan deliberately does not use a gjson path,
+// which would read "a.b" as a nested lookup and "x*" as a wildcard.
+//
+// A member whose value does not parse is reported as absent, so callers never
+// receive bytes they cannot hand back to a JSON decoder. A container can only
+// hold such a value if it was built from an invalid raw map.
 func (fields UnknownJSONFields) Lookup(key string) json.RawMessage {
+	var found json.RawMessage
+	fields.forEachMember(func(name string, value gjson.Result) bool {
+		if name != key || !gjson.Valid(value.Raw) {
+			return true
+		}
+		found = CloneRawJSON(json.RawMessage(value.Raw))
+		return false
+	})
+	return found
+}
+
+// HasAny reports whether any of the named members is present, in one pass over
+// the stored object rather than one pass per key. Callers that only test for
+// presence — the prompt-cache planner checks six directive keys on every
+// message, content part and tool call — would otherwise rescan the same raw
+// JSON once per key.
+func (fields UnknownJSONFields) HasAny(keys ...string) bool {
+	if len(keys) == 0 {
+		return false
+	}
+	present := false
+	fields.forEachMember(func(name string, value gjson.Result) bool {
+		if !slices.Contains(keys, name) || !gjson.Valid(value.Raw) {
+			return true
+		}
+		present = true
+		return false
+	})
+	return present
+}
+
+// forEachMember visits the stored members in document order until visit
+// returns false. A value that is not a JSON object has no members.
+func (fields UnknownJSONFields) forEachMember(visit func(name string, value gjson.Result) bool) {
 	if len(fields.raw) == 0 {
-		return nil
+		return
 	}
-
-	dec := json.NewDecoder(bytes.NewReader(fields.raw))
-	tok, err := dec.Token()
-	if err != nil {
-		return nil
+	root := gjson.ParseBytes(fields.raw)
+	if !root.IsObject() {
+		return
 	}
-	delim, ok := tok.(json.Delim)
-	if !ok || delim != '{' {
-		return nil
-	}
-
-	for dec.More() {
-		keyToken, err := dec.Token()
-		if err != nil {
-			return nil
-		}
-		fieldName, ok := keyToken.(string)
-		if !ok {
-			return nil
-		}
-
-		var value json.RawMessage
-		if err := dec.Decode(&value); err != nil {
-			return nil
-		}
-		if fieldName == key {
-			return CloneRawJSON(value)
-		}
-	}
-
-	return nil
+	root.ForEach(func(key, value gjson.Result) bool {
+		return visit(key.String(), value)
+	})
 }
 
 // IsEmpty reports whether the container has no stored fields.
