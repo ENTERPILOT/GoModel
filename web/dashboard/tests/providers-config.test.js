@@ -581,7 +581,6 @@ test("providerRowsHaveActions is false when every provider is managed", () => {
 // --- Quota breaker trip rules ---
 
 test("parseGoDuration mirrors time.ParseDuration for the strings operators type", () => {
-  const NANO = 1;
   assert.equal(parseGoDuration("15m"), 15 * 60 * 1e9);
   assert.equal(parseGoDuration("1h"), 3600 * 1e9);
   assert.equal(parseGoDuration("1h30m"), 5400 * 1e9);
