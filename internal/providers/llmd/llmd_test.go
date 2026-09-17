@@ -174,7 +174,7 @@ func TestPassthroughSelectsV1AndRouterRootPaths(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{}`)
 
 	provider := NewWithHTTPClient("", server.URL+"/v1", ControlConfig{}, server.Client(), llmclient.Hooks{})
-	for _, endpoint := range []string{"completions", "messages", "inference/v1/generate", "tokenize"} {
+	for _, endpoint := range []string{"completions", "messages", "inference/v1/generate", "tokenize", "completions?stream=false", "tokenize?fast=1"} {
 		resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 			Method:   http.MethodPost,
 			Endpoint: endpoint,
@@ -189,7 +189,9 @@ func TestPassthroughSelectsV1AndRouterRootPaths(t *testing.T) {
 	for _, req := range capture.All() {
 		gotPaths = append(gotPaths, req.Path)
 	}
-	assert.Equal(t, []string{"/v1/completions", "/v1/messages", "/inference/v1/generate", "/tokenize"}, gotPaths)
+	// The last two carry a query string, which the server appends to the
+	// endpoint: it must not change which base URL the request is sent to.
+	assert.Equal(t, []string{"/v1/completions", "/v1/messages", "/inference/v1/generate", "/tokenize", "/v1/completions", "/tokenize"}, gotPaths)
 }
 
 func TestCompatibleAndRootClientsShareKeyRotation(t *testing.T) {

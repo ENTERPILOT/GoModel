@@ -69,6 +69,10 @@ func TestPassthrough_RoutesByEndpointWhenBaseURLIncludesV1(t *testing.T) {
 			body:     `{"model":"Qwen/Qwen2.5-0.5B-Instruct","messages":[{"role":"user","content":"hi"}]}`,
 			wantPath: "/v1/chat/completions",
 		},
+		// The server appends the request's raw query to the endpoint, so the
+		// path has to be classified with the query removed.
+		{name: "query string keeps /v1", endpoint: "models?limit=10", body: "{}", wantPath: "/v1/models"},
+		{name: "query string keeps a root path", endpoint: "tokenize?fast=1", body: "{}", wantPath: "/tokenize"},
 	}
 
 	for _, tt := range tests {
