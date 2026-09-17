@@ -29,7 +29,8 @@ const (
 )
 
 // thinkCloseTags lists every closing marker the parser accepts. Order does
-// not matter — the earliest match in the stream wins.
+// not matter: the streaming parser closes on the earliest match in the
+// stream, and the buffered splitThink closes on the last one (greedy).
 var thinkCloseTags = []string{"</think>", "</mm:think>"}
 
 // isReasoningModel reports whether model is a MiniMax family member that
@@ -85,50 +86,45 @@ func normalizeChoice(choice *core.Choice) {
 	msg.ExtraFields = merged
 }
 
-// splitThink returns content with every <think>...</think> block removed and
-// the inner text concatenated as the reasoning string. An unterminated
-// block (no closing tag, typically finish_reason=length) emits the partial
-// inner text as reasoning so the client still sees what the model thought
-// before it got cut off — same posture as any other interrupted turn.
-// Orphan close markers — the ones a model leaks when it nests a second
-// <think>…</think> inside its outer think and the parser exits on the
-// inner close first — are stripped from the content too, so the tag bytes
-// never reach the client.
+// splitThink extracts the reasoning body of s.
+//
+// Greedy matching: the first <think> opens the block and the LAST accepted
+// closing marker closes it. Everything between the two is reasoning,
+// including any literal <think> or </think> markers the model wrote as
+// text while reasoning about the tags themselves — those markers must not
+// split the reasoning or close the block early, because a reasoning trace
+// has no second pre-running <think> to pair against and the parser cannot
+// otherwise tell an orphan marker from a real tag.
+//
+// Text before the opening marker and after the closing marker is content.
+// An unterminated block (no closing marker at all, typically
+// finish_reason=length) emits the partial inner text as reasoning so the
+// client still sees the chain of thought the model produced before it was
+// cut off.
 func splitThink(s string) (content, reasoning string) {
-	var cb, rb strings.Builder
-	rest := s
-	for {
-		open := strings.Index(rest, thinkOpenTag)
-		if open < 0 {
-			cb.WriteString(rest)
-			break
-		}
-		cb.WriteString(rest[:open])
-		rest = rest[open+len(thinkOpenTag):]
-		close, closeLen, found := earliestClose(rest)
-		if !found {
-			// Unterminated: emit the partial inner text as reasoning rather
-			// than drop it, so finish_reason=length still carries the chain
-			// of thought the model produced before it was cut off.
-			rb.WriteString(rest)
-			break
-		}
-		rb.WriteString(rest[:close])
-		rest = rest[close+closeLen:]
+	open := strings.Index(s, thinkOpenTag)
+	if open < 0 {
+		// No think block: content is the whole input with any orphan
+		// closing markers stripped.
+		return strings.TrimSpace(stripAllCloses(s)), ""
 	}
-	return strings.TrimSpace(stripAllCloses(cb.String())), rb.String()
-}
-
-// earliestClose reports the index and length of the first accepted closing
-// marker in s. ok is false when s contains none.
-func earliestClose(s string) (index, length int, ok bool) {
-	index, length = -1, 0
+	lastClose, lastCloseLen := -1, 0
 	for _, tag := range thinkCloseTags {
-		if i := strings.Index(s, tag); i >= 0 && (index < 0 || i < index) {
-			index, length = i, len(tag)
+		if i := strings.LastIndex(s, tag); i > lastClose {
+			lastClose, lastCloseLen = i, len(tag)
 		}
 	}
-	return index, length, index >= 0
+	if lastClose < open {
+		// Unterminated: emit the partial inner text as reasoning rather
+		// than drop it, so finish_reason=length still carries the chain
+		// of thought the model produced before it was cut off.
+		return strings.TrimSpace(s[:open]), s[open+len(thinkOpenTag):]
+	}
+	var contentBuilder, reasoningBuilder strings.Builder
+	contentBuilder.WriteString(s[:open])
+	contentBuilder.WriteString(s[lastClose+lastCloseLen:])
+	reasoningBuilder.WriteString(s[open+len(thinkOpenTag) : lastClose])
+	return strings.TrimSpace(stripAllCloses(contentBuilder.String())), reasoningBuilder.String()
 }
 
 // stripAllCloses removes every accepted closing marker from s.
@@ -329,13 +325,22 @@ func (s *thinkStream) rewriteChoice(raw json.RawMessage) (json.RawMessage, bool)
 // they are confirmed as not the start of a tag.
 type thinkParser struct {
 	inThink bool
-	carry   string // bytes held back at the end of the previous feed
+	carry   string // bytes held back from the end of the previous feed
 }
 
 // feed consumes one content delta and returns the text to emit on the
 // content and reasoning_content members of the next outgoing delta. Carry
 // across calls lets a <think> or closing tag that lands across an SSE line
-// boundary still be recognised.
+// feed consumes one content delta and returns the text to emit on the
+// content and reasoning_content members of the next outgoing delta. Carry
+// across calls lets a <think> or closing tag that lands across an SSE line
+// boundary still be recognised. Reasoning emits live: as soon as the
+// parser sees a </think> it exits think mode for the next delta, so a
+// reasoning block whose only marker is the final delta is delivered
+// without delay. The trade-off is that a literal </think> the model
+// wrote as text inside its reasoning is treated as a real close for the
+// remaining deltas — the buffered splitThink handles that exact shape
+// correctly via greedy matching.
 func (p *thinkParser) feed(text string) (content, reasoning string) {
 	combined := p.carry + text
 	p.carry = ""

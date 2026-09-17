@@ -56,10 +56,10 @@ func TestSplitThink(t *testing.T) {
 			wantThink: "hidden",
 		},
 		{
-			name:      "multiple think blocks",
+			name:      "multiple think blocks are merged by greedy matching",
 			in:        "<think>one</think>mid<think>two</think>end",
-			wantText:  "midend",
-			wantThink: "onetwo",
+			wantText:  "end",
+			wantThink: "one</think>mid<think>two",
 		},
 		{
 			name:      "M2 prod shape: closed think followed by max_tokens cutoff",
@@ -128,11 +128,11 @@ func TestNormalizeChatResponse(t *testing.T) {
 			wantThink:    "hidden",
 		},
 		{
-			name:         "multiple think blocks concatenate",
+			name:         "multiple think blocks are merged by greedy matching",
 			content:      "<think>one</think>mid<think>two</think>end",
-			wantContent:  "midend",
+			wantContent:  "end",
 			wantThinkKey: true,
-			wantThink:    "onetwo",
+			wantThink:    "one</think>mid<think>two",
 		},
 		{
 			name:         "unterminated think emits inner text as reasoning",
@@ -256,7 +256,7 @@ func TestThinkParserFeed(t *testing.T) {
 			},
 		},
 		{
-			name:  "multiple think blocks across feeds",
+			name:  "multiple think blocks: streaming emits immediate-exit, only buffered greedy merges",
 			feeds: []string{"<think>on", "e</think>mid<t", "hink>two</think>end"},
 			wantOut: []string{
 				"", "on",
@@ -513,23 +513,37 @@ func TestThinkParser_LoopExitsAtExactEnd(t *testing.T) {
 func TestSplitThink_NestedThinkBlock(t *testing.T) {
 	// Shape captured from a live MiniMax session (also reported upstream):
 	// the model accidentally emits a second, inner <think>…</think> inside
-	// its outer think. The parser exits on the inner close, so the outer
-	// close trails in the content stream and is stripped from content. The
-	// nested <think> open marker stays in reasoning verbatim — reasoning is
-	// never rewritten.
-	raw := "<think>Wait, I accidentally typed \"inlineXML\" instead of \"inline<think>XML\" — and lost the</think>' reference. Let me fix that.</think>"
+	// its outer think. Greedy matching treats the LAST closing marker as
+	// the real close, so the inner open and the inner close stay as
+	// reasoning text and only the trailing outer close is stripped from
+	// content.
+	raw := "Outer<think>'inner reasoning now can contain orphaned single </think>' reference. Let me fix that.</think>outer-after"
 	content, reasoning := splitThink(raw)
-	assert.Equal(t, "' reference. Let me fix that.",
+	assert.Equal(t, "Outerouter-after",
 		content,
-		"text between the inner close and the outer close is the answer the model meant to emit")
-	assert.NotContains(t, content, "</think>",
-		"the outer close is an orphan and must be stripped")
+		"text before the first <think> and after the last </think> is content; the trailing outer close is an orphan and is stripped")
 	assert.NotContains(t, content, "<think>",
 		"the inner open is reasoning text and never reaches content")
 	assert.Equal(t,
-		"Wait, I accidentally typed \"inlineXML\" instead of \"inline<think>XML\" — and lost the",
+		"'inner reasoning now can contain orphaned single </think>' reference. Let me fix that.",
 		reasoning,
-		"inner reasoning is preserved verbatim, including the nested <think> marker")
+		"greedy matching keeps every literal marker the model wrote inside its reasoning")
+}
+
+func TestSplitThink_OrphanOpenAndCloseInReasoning(t *testing.T) {
+	// Both marker spellings appear as literal text inside the reasoning
+	// (the model reasons about the tags themselves). Greedy matching pairs
+	// the first <think> with the LAST closing marker, so every literal
+	// marker in between stays reasoning text and none of them splits or
+	// closes the block early.
+	raw := "Outer<think>'inner reasoning now can contain orphaned single <think> or </think> wich would result in new reasoning wich it shouldnt or closing it early cause no second prerunning <think> so it can be aware of it'</think>outer-after"
+	content, reasoning := splitThink(raw)
+	assert.Equal(t, "Outerouter-after", content, "only text outside the outermost think pair is content")
+	assert.NotContains(t, content, "<think>", "no marker leaks into content")
+	assert.Equal(t,
+		"'inner reasoning now can contain orphaned single <think> or </think> wich would result in new reasoning wich it shouldnt or closing it early cause no second prerunning <think> so it can be aware of it'",
+		reasoning,
+		"literal markers inside reasoning are kept verbatim")
 }
 
 func TestSplitThink_OrphanCloseInContent(t *testing.T) {
@@ -541,20 +555,23 @@ func TestSplitThink_OrphanCloseInContent(t *testing.T) {
 }
 
 func TestSplitThink_MultipleSequentialThinkBlocks(t *testing.T) {
+	// Greedy matching treats the LAST </think> as the real close, so the
+	// block before it absorbs every earlier close marker. Reasoning keeps
+	// every literal marker the model wrote.
 	raw := "<think>one</think>mid<think>two</think>end"
 	content, reasoning := splitThink(raw)
-	assert.Equal(t, "midend", content)
-	assert.Equal(t, "onetwo", reasoning)
+	assert.Equal(t, "end", content)
+	assert.Equal(t, "one</think>mid<think>two", reasoning)
 }
 
 func TestSplitThink_NestedThenTrailing(t *testing.T) {
-	// Outer <think> nests an inner <think>; the parser exits on the inner
-	// close, treats the outer close as an orphan, and the trailing text
-	// survives as content.
+	// Greedy matching: the LAST </think> is the real close. The
+	// inner close is reasoning text; the trailing text after the real
+	// close is content.
 	raw := "<think>a<think>b</think>c</think>d"
 	content, reasoning := splitThink(raw)
-	assert.Equal(t, "cd", content, "c survives as content, orphan close is stripped, d follows")
-	assert.Equal(t, "a<think>b", reasoning, "inner open is reasoning text, first close exits")
+	assert.Equal(t, "d", content)
+	assert.Equal(t, "a<think>b</think>c", reasoning)
 }
 
 func TestSplitThink_NamespacedClose(t *testing.T) {
@@ -575,12 +592,12 @@ func TestSplitThink_NamespacedCloseInsideContent(t *testing.T) {
 }
 
 func TestSplitThink_EarliestCloseWins(t *testing.T) {
-	// Both spellings present: the earliest one terminates the block and
-	// the second one becomes an orphan in content.
+	// Both spellings present: the LATEST one in the source terminates
+	// the block (greedy) and the earlier one stays as reasoning text.
 	raw := "<think>plan</think>a</mm:think>b"
 	content, reasoning := splitThink(raw)
-	assert.Equal(t, "ab", content)
-	assert.Equal(t, "plan", reasoning)
+	assert.Equal(t, "b", content)
+	assert.Equal(t, "plan</think>a", reasoning)
 }
 
 func TestThinkParser_NamespacedCloseAcrossFeeds(t *testing.T) {
