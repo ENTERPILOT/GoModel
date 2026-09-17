@@ -53,6 +53,6 @@ func TestBreakerResetter_ProviderWithoutBreakerResetSupport(t *testing.T) {
 
 	err := NewBreakerResetter(registry).ResetCircuitBreaker("legacy")
 	require.Error(t, err)
-	assert.NotErrorIs(t, err, ErrProviderNotFound)
+	require.NotErrorIs(t, err, ErrProviderNotFound)
 	assert.Contains(t, err.Error(), "does not support circuit breaker reset")
 }
