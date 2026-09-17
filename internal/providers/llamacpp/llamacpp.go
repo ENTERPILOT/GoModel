@@ -62,7 +62,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 		}),
 		rootClient: llmclient.New(llmclient.Config{
 			ProviderName:   opts.ClientName("llamacpp"),
-			BaseURL:        passthroughBaseURL(baseURL),
+			BaseURL:        providers.PassthroughBaseURL(baseURL),
 			Retry:          opts.Resilience.Retry,
 			Hooks:          opts.Hooks,
 			CircuitBreaker: opts.Resilience.CircuitBreaker,
@@ -81,7 +81,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 func newPropsClient(providerName, baseURL string, hooks llmclient.Hooks, setHeader llmclient.HeaderSetter) *llmclient.Client {
 	return llmclient.New(llmclient.Config{
 		ProviderName: providerName,
-		BaseURL:      passthroughBaseURL(baseURL),
+		BaseURL:      providers.PassthroughBaseURL(baseURL),
 		Hooks:        hooks,
 	}, setHeader)
 }
@@ -90,7 +90,7 @@ func newPropsClient(providerName, baseURL string, hooks llmclient.Hooks, setHead
 // If httpClient is nil, http.DefaultClient is used.
 func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
 	resolvedBaseURL := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	rootClientCfg := llmclient.DefaultConfig("llamacpp", passthroughBaseURL(resolvedBaseURL))
+	rootClientCfg := llmclient.DefaultConfig("llamacpp", providers.PassthroughBaseURL(resolvedBaseURL))
 	rootClientCfg.Hooks = hooks
 	return &Provider{
 		compatible: openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, openai.CompatibleProviderConfig{
@@ -103,7 +103,7 @@ func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, h
 		}),
 		propsClient: llmclient.NewWithHTTPClient(httpClient, llmclient.Config{
 			ProviderName: "llamacpp",
-			BaseURL:      passthroughBaseURL(resolvedBaseURL),
+			BaseURL:      providers.PassthroughBaseURL(resolvedBaseURL),
 			Hooks:        hooks,
 		}, func(req *http.Request) {
 			setHeaders(req, apiKey)
@@ -114,8 +114,8 @@ func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, h
 // SetBaseURL allows configuring a custom base URL for the provider.
 func (p *Provider) SetBaseURL(url string) {
 	p.compatible.SetBaseURL(url)
-	p.rootClient.SetBaseURL(passthroughBaseURL(url))
-	p.propsClient.SetBaseURL(passthroughBaseURL(url))
+	p.rootClient.SetBaseURL(providers.PassthroughBaseURL(url))
+	p.propsClient.SetBaseURL(providers.PassthroughBaseURL(url))
 }
 
 func setHeaders(req *http.Request, apiKey string) {
@@ -161,7 +161,7 @@ func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest
 		return nil, core.NewInvalidRequestError("passthrough request is required", nil)
 	}
 	endpoint := providers.PassthroughEndpoint(req.Endpoint)
-	if !usesV1PassthroughBase(endpoint) {
+	if !providers.UsesV1PassthroughBase(endpoint, v1PassthroughPrefixes) {
 		resp, err := p.rootClient.DoPassthrough(ctx, llmclient.Request{
 			Method:          req.Method,
 			Endpoint:        endpoint,
@@ -184,34 +184,12 @@ func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest
 	return p.compatible.Passthrough(ctx, req)
 }
 
-func passthroughBaseURL(baseURL string) string {
-	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if before, ok := strings.CutSuffix(trimmed, "/v1"); ok {
-		return before
-	}
-	return trimmed
-}
-
-func usesV1PassthroughBase(endpoint string) bool {
-	endpoint = providers.PassthroughEndpoint(endpoint)
-	// Classify by path only; the server appends the request's query string to
-	// the endpoint before it reaches the provider.
-	endpoint, _, _ = strings.Cut(endpoint, "?")
-	if strings.HasPrefix(endpoint, "/v1/") {
-		return false
-	}
-
-	v1Prefixes := []string{
-		"/models",
-		"/chat/completions",
-		"/responses",
-		"/completions",
-		"/embeddings",
-	}
-	for _, prefix := range v1Prefixes {
-		if endpoint == prefix || strings.HasPrefix(endpoint, prefix+"/") {
-			return true
-		}
-	}
-	return false
+// v1PassthroughPrefixes are the paths llamacpp serves from its
+// OpenAI-compatible /v1 surface; everything else goes to its root paths.
+var v1PassthroughPrefixes = []string{
+	"/models",
+	"/chat/completions",
+	"/responses",
+	"/completions",
+	"/embeddings",
 }

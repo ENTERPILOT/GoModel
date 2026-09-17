@@ -82,7 +82,7 @@ func newProvider(apiKey, baseURL string, controls ControlConfig, opts providers.
 	}
 	rootCfg := llmclient.Config{
 		ProviderName:   opts.ClientName("llmd"),
-		BaseURL:        passthroughBaseURL(baseURL),
+		BaseURL:        providers.PassthroughBaseURL(baseURL),
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
@@ -104,7 +104,7 @@ func newProvider(apiKey, baseURL string, controls ControlConfig, opts providers.
 func (p *Provider) SetBaseURL(baseURL string) {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	p.compatible.SetBaseURL(baseURL)
-	p.rootClient.SetBaseURL(passthroughBaseURL(baseURL))
+	p.rootClient.SetBaseURL(providers.PassthroughBaseURL(baseURL))
 }
 
 // ChatCompletion sends a chat completion request to llm-d.
@@ -154,7 +154,7 @@ func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest
 	clean := *req
 	clean.Headers = cloneWithoutSensitiveHeaders(req.Headers)
 	endpoint := providers.PassthroughEndpoint(clean.Endpoint)
-	if usesV1PassthroughBase(endpoint) {
+	if providers.UsesV1PassthroughBase(endpoint, v1PassthroughPrefixes) {
 		resp, err := p.compatible.Passthrough(ctx, &clean)
 		return resp, exposeDroppedReason(err)
 	}
@@ -233,28 +233,6 @@ func isControlHeader(key string) bool {
 		strings.HasPrefix(key, "x-slo-")
 }
 
-func passthroughBaseURL(baseURL string) string {
-	if before, ok := strings.CutSuffix(strings.TrimRight(strings.TrimSpace(baseURL), "/"), "/v1"); ok {
-		return before
-	}
-	return strings.TrimRight(strings.TrimSpace(baseURL), "/")
-}
-
-func usesV1PassthroughBase(endpoint string) bool {
-	endpoint = providers.PassthroughEndpoint(endpoint)
-	if strings.HasPrefix(endpoint, "/v1/") {
-		return false
-	}
-	for _, prefix := range []string{
-		"/models", "/chat/completions", "/responses", "/completions", "/embeddings", "/messages",
-	} {
-		if endpoint == prefix || strings.HasPrefix(endpoint, prefix+"/") {
-			return true
-		}
-	}
-	return false
-}
-
 func exposeDroppedReason(err error) error {
 	if err == nil {
 		return nil
@@ -281,3 +259,14 @@ type responseHeaderError struct {
 func (e *responseHeaderError) Error() string                { return e.err.Error() }
 func (e *responseHeaderError) Unwrap() error                { return e.err }
 func (e *responseHeaderError) ResponseHeaders() http.Header { return e.headers.Clone() }
+
+// v1PassthroughPrefixes are the paths llmd serves from its
+// OpenAI-compatible /v1 surface; everything else goes to its root paths.
+var v1PassthroughPrefixes = []string{
+	"/models",
+	"/chat/completions",
+	"/responses",
+	"/completions",
+	"/embeddings",
+	"/messages",
+}

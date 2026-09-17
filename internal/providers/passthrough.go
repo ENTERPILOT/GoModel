@@ -20,6 +20,39 @@ func PassthroughEndpoint(endpoint string) string {
 	return "/" + endpoint
 }
 
+// PassthroughBaseURL strips a trailing "/v1" from a configured base URL, so a
+// provider can address both the OpenAI-compatible surface under /v1 and the
+// server's own root paths from one configured value.
+func PassthroughBaseURL(baseURL string) string {
+	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if before, ok := strings.CutSuffix(trimmed, "/v1"); ok {
+		return before
+	}
+	return trimmed
+}
+
+// UsesV1PassthroughBase reports whether a passthrough endpoint belongs to the
+// upstream's OpenAI-compatible /v1 surface rather than its root paths.
+// v1Prefixes is the server's own list, since each one exposes a different set.
+//
+// An endpoint that already starts with "/v1/" is addressed as given. The query
+// string is removed before matching: the server appends the request's raw
+// query to the endpoint (see passthrough_execution_helpers.go), so classifying
+// on the unsplit value would miss every request that carries one.
+func UsesV1PassthroughBase(endpoint string, v1Prefixes []string) bool {
+	endpoint = PassthroughEndpoint(endpoint)
+	endpoint, _, _ = strings.Cut(endpoint, "?")
+	if strings.HasPrefix(endpoint, "/v1/") {
+		return false
+	}
+	for _, prefix := range v1Prefixes {
+		if endpoint == prefix || strings.HasPrefix(endpoint, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // CloneHTTPHeaders returns a detached copy of an http.Header map.
 func CloneHTTPHeaders(src http.Header) map[string][]string {
 	if len(src) == 0 {

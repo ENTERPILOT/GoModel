@@ -5,7 +5,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
@@ -49,7 +48,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 		}),
 		rootClient: llmclient.New(llmclient.Config{
 			ProviderName:   opts.ClientName("sglang"),
-			BaseURL:        passthroughBaseURL(baseURL),
+			BaseURL:        providers.PassthroughBaseURL(baseURL),
 			Retry:          opts.Resilience.Retry,
 			Hooks:          opts.Hooks,
 			CircuitBreaker: opts.Resilience.CircuitBreaker,
@@ -63,7 +62,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 // If httpClient is nil, http.DefaultClient is used.
 func NewWithHTTPClient(apiKey, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
 	resolvedBaseURL := providers.ResolveBaseURL(baseURL, defaultBaseURL)
-	rootClientCfg := llmclient.DefaultConfig("sglang", passthroughBaseURL(resolvedBaseURL))
+	rootClientCfg := llmclient.DefaultConfig("sglang", providers.PassthroughBaseURL(resolvedBaseURL))
 	rootClientCfg.Hooks = hooks
 	return &Provider{
 		compatible: openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, openai.CompatibleProviderConfig{
@@ -80,7 +79,7 @@ func NewWithHTTPClient(apiKey, baseURL string, httpClient *http.Client, hooks ll
 // SetBaseURL updates both the OpenAI-compatible and native endpoint clients.
 func (p *Provider) SetBaseURL(url string) {
 	p.compatible.SetBaseURL(url)
-	p.rootClient.SetBaseURL(passthroughBaseURL(url))
+	p.rootClient.SetBaseURL(providers.PassthroughBaseURL(url))
 }
 
 func setHeaders(req *http.Request, apiKey string) {
@@ -127,7 +126,7 @@ func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest
 		return nil, core.NewInvalidRequestError("passthrough request is required", nil)
 	}
 	endpoint := providers.PassthroughEndpoint(req.Endpoint)
-	if usesV1PassthroughBase(endpoint) {
+	if providers.UsesV1PassthroughBase(endpoint, v1PassthroughPrefixes) {
 		return p.compatible.Passthrough(ctx, req)
 	}
 
@@ -151,37 +150,17 @@ func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest
 	}, nil
 }
 
-func passthroughBaseURL(baseURL string) string {
-	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if before, ok := strings.CutSuffix(trimmed, "/v1"); ok {
-		return before
-	}
-	return trimmed
-}
-
-func usesV1PassthroughBase(endpoint string) bool {
-	endpoint = providers.PassthroughEndpoint(endpoint)
-	endpoint, _, _ = strings.Cut(endpoint, "?")
-	if strings.HasPrefix(endpoint, "/v1/") {
-		return false
-	}
-
-	v1Prefixes := []string{
-		"/models",
-		"/chat/completions",
-		"/responses",
-		"/completions",
-		"/embeddings",
-		"/rerank",
-		"/tokenize",
-		"/audio",
-		"/files",
-		"/batches",
-	}
-	for _, prefix := range v1Prefixes {
-		if endpoint == prefix || strings.HasPrefix(endpoint, prefix+"/") {
-			return true
-		}
-	}
-	return false
+// v1PassthroughPrefixes are the paths sglang serves from its
+// OpenAI-compatible /v1 surface; everything else goes to its root paths.
+var v1PassthroughPrefixes = []string{
+	"/models",
+	"/chat/completions",
+	"/responses",
+	"/completions",
+	"/embeddings",
+	"/rerank",
+	"/tokenize",
+	"/audio",
+	"/files",
+	"/batches",
 }
