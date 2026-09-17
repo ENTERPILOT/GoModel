@@ -773,8 +773,8 @@ func TestNormalizeChoice_ExistingReasoningContentKept(t *testing.T) {
 	resp := &core.ChatResponse{
 		Choices: []core.Choice{{
 			Message: core.ResponseMessage{
-				Role:       "assistant",
-				Content:    "<think>hidden</think>after",
+				Role:        "assistant",
+				Content:     "<think>hidden</think>after",
 				ExtraFields: extra,
 			},
 		}},
