@@ -26,6 +26,13 @@ func DefaultRetryConfig() RetryConfig {
 	}
 }
 
+// TripRuleConfig opens the circuit breaker instantly when an upstream error
+// message matches Match. A zero TTL uses the breaker's open-state timeout.
+type TripRuleConfig struct {
+	Match string        `yaml:"match"`
+	TTL   time.Duration `yaml:"ttl"`
+}
+
 // CircuitBreakerConfig holds resolved circuit breaker settings.
 // This is the canonical type shared between config and llmclient.
 type CircuitBreakerConfig struct {
@@ -35,10 +42,11 @@ type CircuitBreakerConfig struct {
 	// Enabled switches the circuit breaker on or off. When false, requests are
 	// never short-circuited regardless of the thresholds below.
 	// Default: true
-	Enabled          bool          `yaml:"enabled"           env:"CIRCUIT_BREAKER_ENABLED"`
-	FailureThreshold int           `yaml:"failure_threshold" env:"CIRCUIT_BREAKER_FAILURE_THRESHOLD"`
-	SuccessThreshold int           `yaml:"success_threshold" env:"CIRCUIT_BREAKER_SUCCESS_THRESHOLD"`
-	Timeout          time.Duration `yaml:"timeout"           env:"CIRCUIT_BREAKER_TIMEOUT"`
+	Enabled          bool             `yaml:"enabled"           env:"CIRCUIT_BREAKER_ENABLED"`
+	FailureThreshold int              `yaml:"failure_threshold" env:"CIRCUIT_BREAKER_FAILURE_THRESHOLD"`
+	SuccessThreshold int              `yaml:"success_threshold" env:"CIRCUIT_BREAKER_SUCCESS_THRESHOLD"`
+	Timeout          time.Duration    `yaml:"timeout"           env:"CIRCUIT_BREAKER_TIMEOUT"`
+	TripOn           []TripRuleConfig `yaml:"trip_on"`
 }
 
 // DefaultCircuitBreakerConfig returns the default circuit breaker settings.

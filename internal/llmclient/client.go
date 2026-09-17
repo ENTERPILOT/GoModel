@@ -7,8 +7,10 @@ package llmclient
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"sync"
 	"time"
 
@@ -135,6 +137,7 @@ type Client struct {
 	configErr       error
 	retryStatuses   map[int]bool
 	failureStatuses map[int]bool
+	tripRules       []TripRule
 }
 
 // New creates a new LLM client with the given configuration
@@ -159,6 +162,10 @@ func New(cfg Config, headerSetter HeaderSetter) *Client {
 	if c.configErr != nil {
 		return c
 	}
+	c.tripRules, c.configErr = compileTripRules(cfg.CircuitBreaker.TripOn)
+	if c.configErr != nil {
+		return c
+	}
 
 	// The breaker is off when explicitly disabled or when it can never trip.
 	if cfg.CircuitBreaker.Enabled && cfg.CircuitBreaker.FailureThreshold > 0 {
@@ -177,6 +184,36 @@ func NewWithHTTPClient(httpClient *http.Client, cfg Config, headerSetter HeaderS
 	c := New(cfg, headerSetter)
 	c.httpClient = httpClient
 	return c
+}
+
+// compileTripRules turns configured error-message matchers into breaker trip
+// rules. An empty list yields nil: the feature stays inert without rules.
+func compileTripRules(rules []config.TripRuleConfig) ([]TripRule, error) {
+	if len(rules) == 0 {
+		return nil, nil
+	}
+	compiled := make([]TripRule, 0, len(rules))
+	for i, rule := range rules {
+		pattern, err := regexp.Compile(rule.Match)
+		if err != nil {
+			return nil, fmt.Errorf("invalid circuit_breaker.trip_on[%d] pattern: %w", i, err)
+		}
+		compiled = append(compiled, TripRule{Pattern: pattern, TTL: rule.TTL})
+	}
+	return compiled, nil
+}
+
+// ResetBreaker force-closes the provider-level breaker and every model-scoped
+// breaker, clearing any quota trip window so traffic resumes immediately.
+func (c *Client) ResetBreaker() {
+	if c.circuitBreaker != nil {
+		c.circuitBreaker.Reset()
+	}
+	c.modelBreakersMu.Lock()
+	defer c.modelBreakersMu.Unlock()
+	for _, entry := range c.modelBreakers {
+		entry.breaker.Reset()
+	}
 }
 
 // SetBaseURL updates the base URL (thread-safe)
