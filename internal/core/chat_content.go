@@ -369,6 +369,26 @@ func NormalizeMessageContent(content any) (any, error) {
 	}
 }
 
+// messageContentForMarshal validates content and returns its canonical form
+// for encoding. It is NormalizeMessageContent without the defensive copies:
+// the value is handed straight to the JSON encoder and never retained, so it
+// may share every ExtraFields container with the content it came from.
+func messageContentForMarshal(content any) (any, error) {
+	parts, ok := content.([]ContentPart)
+	if !ok {
+		return NormalizeMessageContent(content)
+	}
+	canonical := make([]ContentPart, len(parts))
+	for i, part := range parts {
+		normalized, err := canonicalTypedContentPart(part, false)
+		if err != nil {
+			return nil, fmt.Errorf("part %d: %w", i, err)
+		}
+		canonical[i] = normalized
+	}
+	return canonical, nil
+}
+
 // ExtractTextContent returns the textual portion of request content.
 // Structured content parts are reduced to their text components only.
 func ExtractTextContent(content any) string {
@@ -521,6 +541,28 @@ func unmarshalContentPart(data []byte) (ContentPart, error) {
 }
 
 func normalizeTypedContentPart(part ContentPart) (ContentPart, error) {
+	return canonicalTypedContentPart(part, true)
+}
+
+// maybeCloneUnknownJSONFields copies fields only when the caller will retain
+// them. It is a plain function rather than a closure so the hot marshal path
+// does not allocate one per part.
+func maybeCloneUnknownJSONFields(fields UnknownJSONFields, clone bool) UnknownJSONFields {
+	if !clone {
+		return fields
+	}
+	return CloneUnknownJSONFields(fields)
+}
+
+// canonicalTypedContentPart validates a typed content part and returns it in
+// canonical form: the part types the gateway emits, with the fields foreign to
+// each type dropped.
+//
+// With clone set the returned part owns a copy of every ExtraFields container,
+// which is what callers that retain the result need. The marshal path clears
+// it: the canonical part is encoded immediately and thrown away, so copying
+// the raw JSON of every part of every message on every marshal is waste.
+func canonicalTypedContentPart(part ContentPart, clone bool) (ContentPart, error) {
 	switch part.Type {
 	case "text", "input_text":
 		if part.Text == "" {
@@ -529,7 +571,7 @@ func normalizeTypedContentPart(part ContentPart) (ContentPart, error) {
 		return ContentPart{
 			Type:        "text",
 			Text:        part.Text,
-			ExtraFields: CloneUnknownJSONFields(part.ExtraFields),
+			ExtraFields: maybeCloneUnknownJSONFields(part.ExtraFields, clone),
 		}, nil
 	case "image_url", "input_image":
 		if part.ImageURL == nil || part.ImageURL.URL == "" {
@@ -541,17 +583,17 @@ func normalizeTypedContentPart(part ContentPart) (ContentPart, error) {
 				URL:         part.ImageURL.URL,
 				Detail:      part.ImageURL.Detail,
 				MediaType:   part.ImageURL.MediaType,
-				ExtraFields: CloneUnknownJSONFields(part.ImageURL.ExtraFields),
+				ExtraFields: maybeCloneUnknownJSONFields(part.ImageURL.ExtraFields, clone),
 			},
-			ExtraFields: CloneUnknownJSONFields(part.ExtraFields),
+			ExtraFields: maybeCloneUnknownJSONFields(part.ExtraFields, clone),
 		}, nil
 	case "video_url":
 		if part.VideoURL == nil || strings.TrimSpace(part.VideoURL.URL) == "" {
 			return ContentPart{}, fmt.Errorf("video_url part is missing video_url.url")
 		}
 		video := *part.VideoURL
-		video.ExtraFields = CloneUnknownJSONFields(part.VideoURL.ExtraFields)
-		return ContentPart{Type: "video_url", VideoURL: &video, ExtraFields: CloneUnknownJSONFields(part.ExtraFields)}, nil
+		video.ExtraFields = maybeCloneUnknownJSONFields(part.VideoURL.ExtraFields, clone)
+		return ContentPart{Type: "video_url", VideoURL: &video, ExtraFields: maybeCloneUnknownJSONFields(part.ExtraFields, clone)}, nil
 	case "input_audio":
 		if part.InputAudio == nil {
 			return ContentPart{}, fmt.Errorf("input_audio part is missing data or format")
@@ -564,20 +606,20 @@ func normalizeTypedContentPart(part ContentPart) (ContentPart, error) {
 			InputAudio: &InputAudioContent{
 				Data:        part.InputAudio.Data,
 				Format:      part.InputAudio.Format,
-				ExtraFields: CloneUnknownJSONFields(part.InputAudio.ExtraFields),
+				ExtraFields: maybeCloneUnknownJSONFields(part.InputAudio.ExtraFields, clone),
 			},
-			ExtraFields: CloneUnknownJSONFields(part.ExtraFields),
+			ExtraFields: maybeCloneUnknownJSONFields(part.ExtraFields, clone),
 		}, nil
 	case "file", "input_file":
 		if !ValidFilePayload(part.File) {
 			return ContentPart{}, fmt.Errorf("file part is missing file.file_data, file.file_url, or file.file_id")
 		}
 		file := *part.File
-		file.ExtraFields = CloneUnknownJSONFields(part.File.ExtraFields)
+		file.ExtraFields = maybeCloneUnknownJSONFields(part.File.ExtraFields, clone)
 		return ContentPart{
 			Type:        "file",
 			File:        &file,
-			ExtraFields: CloneUnknownJSONFields(part.ExtraFields),
+			ExtraFields: maybeCloneUnknownJSONFields(part.ExtraFields, clone),
 		}, nil
 	default:
 		return ContentPart{}, fmt.Errorf("unsupported content part type %q", part.Type)

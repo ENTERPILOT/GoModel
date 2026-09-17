@@ -510,8 +510,13 @@ func (d *prefixDigest) key() string {
 	return "gomodel-" + hex.EncodeToString(d.hash.Sum(nil)[:16])
 }
 
+// cacheModelSeparators folds the separators model names vary on, so the
+// family checks below match "gpt-5.6", "gpt_5_6" and "GPT-5-6" alike. It is
+// built once: providerCacheMinimum runs twice per planned request.
+var cacheModelSeparators = strings.NewReplacer(".", "-", "_", "-")
+
 func providerCacheMinimum(profile promptCacheProfile, model string) int {
-	model = strings.NewReplacer(".", "-", "_", "-").Replace(strings.ToLower(model))
+	model = cacheModelSeparators.Replace(strings.ToLower(model))
 	switch profile.mode {
 	case promptCacheOpenAI:
 		return 1024
