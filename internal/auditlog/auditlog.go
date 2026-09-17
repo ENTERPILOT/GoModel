@@ -543,4 +543,9 @@ type Config struct {
 	// OnlyModelInteractions limits logging to AI model endpoints only
 	// When true, only /v1/chat/completions, /v1/responses, /v1/embeddings, /v1/files, and /v1/batches are logged
 	OnlyModelInteractions bool
+
+	// TrustedProxies resolves audit client IPs from X-Forwarded-For when a
+	// request arrives from one of the operator's proxy networks. Nil (the
+	// default) records the socket peer address and ignores forwarding headers.
+	TrustedProxies *TrustedProxies
 }

@@ -83,6 +83,7 @@ func buildLoggerConfig(logCfg config.LogConfig) Config {
 		FlushInterval:         time.Duration(logCfg.FlushInterval) * time.Second,
 		RetentionDays:         logCfg.RetentionDays,
 		OnlyModelInteractions: logCfg.OnlyModelInteractions,
+		TrustedProxies:        ParseTrustedProxies(logCfg.TrustedProxyCIDRs),
 	}
 
 	// Apply defaults
