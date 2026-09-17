@@ -77,7 +77,10 @@ func normalizeChoice(choice *core.Choice) {
 // splitThink returns content with every <think>...</think> block removed and
 // the inner text concatenated as the reasoning string. An unterminated block
 // (no closing tag, typically finish_reason=length) drops its inner text so
-// the parser never emits a half-open tag.
+// the parser never emits a half-open tag. Orphan close markers — the ones a
+// model leaks when it nests a second <think>…</think> inside its outer
+// think and the parser exits on the inner close first — are stripped from
+// the content too, so the tag bytes never reach the client.
 func splitThink(s string) (content, reasoning string) {
 	var cb, rb strings.Builder
 	rest := s
@@ -85,18 +88,19 @@ func splitThink(s string) (content, reasoning string) {
 		open := strings.Index(rest, thinkOpenTag)
 		if open < 0 {
 			cb.WriteString(rest)
-			return strings.TrimSpace(cb.String()), rb.String()
+			break
 		}
 		cb.WriteString(rest[:open])
 		rest = rest[open+len(thinkOpenTag):]
 		close := strings.Index(rest, thinkCloseTag)
 		if close < 0 {
 			// Unterminated: drop the partial block rather than emit a half tag.
-			return strings.TrimSpace(cb.String()), rb.String()
+			break
 		}
 		rb.WriteString(rest[:close])
 		rest = rest[close+len(thinkCloseTag):]
 	}
+	return strings.TrimSpace(strings.ReplaceAll(cb.String(), thinkCloseTag, "")), rb.String()
 }
 
 // sseDataPrefix introduces the JSON payload of an SSE event.
@@ -236,6 +240,16 @@ type thinkParser struct {
 func (p *thinkParser) feed(text string) (content, reasoning string) {
 	combined := p.carry + text
 	p.carry = ""
+	if !p.inThink {
+		// Orphan close markers at the head of the combined buffer mean the
+		// parser already exited an inner think while the outer one stayed
+		// open. Strip them: otherwise the `<` at position 0 keeps the parser
+		// waiting for a `<think>` open that never comes and the carry grows
+		// forever without ever emitting.
+		for strings.HasPrefix(combined, thinkCloseTag) {
+			combined = combined[len(thinkCloseTag):]
+		}
+	}
 
 	var cb, rb strings.Builder
 	i := 0
@@ -259,20 +273,30 @@ func (p *thinkParser) feed(text string) (content, reasoning string) {
 			lastAngle := strings.LastIndex(combined[i:], "<")
 			if lastAngle < 0 {
 				emit(p.inThink, &cb, &rb, combined[i:])
-				return cb.String(), rb.String()
+				return stripOrphanCloses(cb.String()), rb.String()
 			}
 			boundary := i + lastAngle
 			if boundary > i {
 				emit(p.inThink, &cb, &rb, combined[i:boundary])
 			}
 			p.carry = combined[boundary:]
-			return cb.String(), rb.String()
+			return stripOrphanCloses(cb.String()), rb.String()
 		}
 		emit(p.inThink, &cb, &rb, combined[i:i+j])
 		i += j + len(tag)
 		p.inThink = !p.inThink
 	}
-	return cb.String(), rb.String()
+	return stripOrphanCloses(cb.String()), rb.String()
+}
+
+// stripOrphanCloses removes close markers that leaked into the content
+// stream because the parser exited on an inner think's close while the
+// outer one was still open. They are formatting noise, never content.
+func stripOrphanCloses(s string) string {
+	if !strings.Contains(s, thinkCloseTag) {
+		return s
+	}
+	return strings.ReplaceAll(s, thinkCloseTag, "")
 }
 
 func emit(inThink bool, content, reasoning *strings.Builder, segment string) {

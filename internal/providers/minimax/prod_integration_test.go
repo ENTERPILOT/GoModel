@@ -98,9 +98,24 @@ func TestProdStreamM27_EndToEnd(t *testing.T) {
 	assert.Contains(t, out, "Proof")
 }
 
-// TestProdStreamSpeechModel_PassesThrough verifies that a non-reasoning
-// MiniMax model (speech family) sees the stream unchanged. The normalizer
-// must stay inert on anything that does not start with MiniMax-M3 / MiniMax-M2.
+// TestProdStreamM27_NestedThinkShape exercises the real MiniMax M2.7
+// nested-think shape captured from production: the model emitted an inner
+// <think>…</think> inside its outer reasoning, so the parser exits on the
+// inner close and the outer close trails in the content stream as an
+// orphan. The stream transform must strip the orphan from content and keep
+// the nested open marker in reasoning verbatim.
+func TestProdStreamM27_NestedThinkShape(t *testing.T) {
+	raw := loadFixture(t, "testdata/prod_m27_nested.json")
+	var resp core.ChatResponse
+	require.NoError(t, json.Unmarshal([]byte(raw), &resp))
+	normalizeChatResponse(&resp)
+
+	msg := resp.Choices[0].Message
+	content, ok := msg.Content.(string)
+	require.True(t, ok)
+	assert.NotContains(t, content, "<think>", "opening tag must not leak into content")
+	assert.NotContains(t, content, "</think>", "orphan close must not leak into content")
+}
 func TestProdStreamSpeechModel_PassesThrough(t *testing.T) {
 	raw := loadFixture(t, "testdata/prod_m27_stream.txt")
 	server, _ := providertest.SSEServer(t, raw)

@@ -413,7 +413,7 @@ func TestNormalizeChoice_EmptyContentIsLeftAlone(t *testing.T) {
 		Choices: []core.Choice{{Message: core.ResponseMessage{Role: "assistant", Content: ""}}},
 	}
 	normalizeChatResponse(resp)
-	assert.Equal(t, "", resp.Choices[0].Message.Content)
+	assert.Empty(t, resp.Choices[0].Message.Content)
 }
 
 func TestRewrite_BadChunkJSONRelaysOriginal(t *testing.T) {
@@ -484,14 +484,101 @@ func TestThinkParser_BoundaryAtZeroHoldsCarry(t *testing.T) {
 	p.inThink = true
 	p.carry = ""
 	content, reasoning := p.feed("<d")
-	assert.Equal(t, "", content, "content")
-	assert.Equal(t, "", reasoning, "reasoning")
+	assert.Empty(t, content, "content")
+	assert.Empty(t, reasoning, "reasoning")
 	assert.Equal(t, "<d", p.carry, "carry must hold the partial tag start")
 }
 
 func TestThinkParser_LoopExitsAtExactEnd(t *testing.T) {
 	var p thinkParser
 	content, reasoning := p.feed("<think>x</think>")
-	assert.Equal(t, "", content, "content")
+	assert.Empty(t, content, "content")
 	assert.Equal(t, "x", reasoning, "reasoning")
+}
+
+func TestSplitThink_NestedThinkBlock(t *testing.T) {
+	// Shape captured from a live MiniMax session (also reported upstream):
+	// the model accidentally emits a second, inner <think>…</think> inside
+	// its outer think. The parser exits on the inner close, so the outer
+	// close trails in the content stream and is stripped from content. The
+	// nested <think> open marker stays in reasoning verbatim — reasoning is
+	// never rewritten.
+	raw := "<think>Wait, I accidentally typed \"inlineXML\" instead of \"inline<think>XML\" — and lost the</think>' reference. Let me fix that.</think>"
+	content, reasoning := splitThink(raw)
+	assert.Equal(t, "' reference. Let me fix that.",
+		content,
+		"text between the inner close and the outer close is the answer the model meant to emit")
+	assert.NotContains(t, content, "</think>",
+		"the outer close is an orphan and must be stripped")
+	assert.NotContains(t, content, "<think>",
+		"the inner open is reasoning text and never reaches content")
+	assert.Equal(t,
+		"Wait, I accidentally typed \"inlineXML\" instead of \"inline<think>XML\" — and lost the",
+		reasoning,
+		"inner reasoning is preserved verbatim, including the nested <think> marker")
+}
+
+func TestSplitThink_OrphanCloseInContent(t *testing.T) {
+	// A stray </think> in content with no open before it is formatting
+	// noise; it must not reach the client verbatim.
+	content, reasoning := splitThink("hello</think>world")
+	assert.Equal(t, "helloworld", content, "orphan close is stripped")
+	assert.Empty(t, reasoning)
+}
+
+func TestSplitThink_MultipleSequentialThinkBlocks(t *testing.T) {
+	raw := "<think>one</think>mid<think>two</think>end"
+	content, reasoning := splitThink(raw)
+	assert.Equal(t, "midend", content)
+	assert.Equal(t, "onetwo", reasoning)
+}
+
+func TestSplitThink_NestedThenTrailing(t *testing.T) {
+	// Outer <think> nests an inner <think>; the parser exits on the inner
+	// close, treats the outer close as an orphan, and the trailing text
+	// survives as content.
+	raw := "<think>a<think>b</think>c</think>d"
+	content, reasoning := splitThink(raw)
+	assert.Equal(t, "cd", content, "c survives as content, orphan close is stripped, d follows")
+	assert.Equal(t, "a<think>b", reasoning, "inner open is reasoning text, first close exits")
+}
+
+func TestThinkParser_OrphanCloseDoesNotStickInCarry(t *testing.T) {
+	var p thinkParser
+	// Feed the shape where a stray close is split across feeds; the parser
+	// must not hold the whole tail in carry waiting for an open that never
+	// arrives.
+	p.feed("hello</thi")
+	content, reasoning := p.feed("nk>world more text")
+	assert.Equal(t, "world more text", content, "orphan close stripped, tail emitted")
+	assert.Empty(t, reasoning)
+	assert.Empty(t, p.carry, "carry must not accumulate after an orphan close")
+}
+
+func TestSplitThink_NoOrphanCloseLeavesContentUntouched(t *testing.T) {
+	// The stripOrphanCloses helper has a fast-path for content that does
+	// not contain </think>; assert the round-trip is byte-for-byte.
+	got, reasoning := splitThink("hello world")
+	assert.Equal(t, "hello world", got)
+	assert.Empty(t, reasoning)
+}
+
+func TestThinkParser_NestedCloseAcrossFeeds(t *testing.T) {
+	var p thinkParser
+	var gotContent, gotReasoning string
+	feeds := []string{
+		"<think>outer<think>inner</think>trailing",
+		"</think>after",
+	}
+	for _, f := range feeds {
+		c, r := p.feed(f)
+		gotContent += c
+		gotReasoning += r
+	}
+	// The parser exits on the inner close (single-level nesting), so the
+	// "trailing" text is content and the outer close is an orphan stripped
+	// from the content stream. The nested <think> open marker stays in the
+	// reasoning verbatim — reasoning is never rewritten.
+	assert.Equal(t, "trailingafter", gotContent)
+	assert.Equal(t, "outer<think>inner", gotReasoning)
 }
