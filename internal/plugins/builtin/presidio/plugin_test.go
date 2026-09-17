@@ -521,7 +521,7 @@ func TestStreamWarn(t *testing.T) {
 func TestHealth(t *testing.T) {
 	a := newAnalyzer(t)
 	err := newPlugin(t, a, `{}`).Health(context.Background())
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	err = newPlugin(t, a, `{"language": "xx"}`).Health(context.Background())
 	require.ErrorContains(t, err, `HTTP 500 for language "xx"`)

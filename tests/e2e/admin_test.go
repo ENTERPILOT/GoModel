@@ -316,7 +316,7 @@ func TestAdminAPI_ModelsEndpoint_E2E(t *testing.T) {
 
 	// Should be sorted by model ID
 	for i := 1; i < len(models); i++ {
-		assert.True(t, models[i-1].Model.ID < models[i].Model.ID,
+		assert.Less(t, models[i-1].Model.ID, models[i].Model.ID,
 			"models should be sorted, but %s >= %s", models[i-1].Model.ID, models[i].Model.ID)
 	}
 

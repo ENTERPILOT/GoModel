@@ -30,7 +30,7 @@ func TestMCPServerDisplayNameAndSlug(t *testing.T) {
 
 	for _, name := range []string{"Linear MCP", "线性 MCP", "Линейный сервер", "MCP 🚀"} {
 		err := ValidateMCPServerName(name)
-		assert.NoError(t, err)
+		require.NoError(t, err, "ValidateMCPServerName(%q)", name)
 	}
 	err := ValidateMCPServerSlug("linear-mcp")
 	require.NoError(t, err)

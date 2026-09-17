@@ -43,7 +43,7 @@ func TestFromResponsesResponse(t *testing.T) {
 	assert.Equal(t, "hello world", c.Text(0))
 
 	plain, err := FromResponsesResponse(&core.ResponsesResponse{Status: "incomplete"})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "length", plain.Choices[0].FinishReason)
 }
 
@@ -125,7 +125,7 @@ func TestCompletionToResponsesResponse(t *testing.T) {
 	require.NotNil(t, resp.Usage)
 	assert.Equal(t, 0, resp.Usage.TotalTokens)
 	_, err := json.Marshal(resp)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	empty := CompletionToResponsesResponse(nil, "m")
 	require.Len(t, empty.Output, 1)

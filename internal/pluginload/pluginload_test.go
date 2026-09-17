@@ -68,9 +68,7 @@ func TestResolve(t *testing.T) {
 			// Relative files are returned with symlinks resolved; absolute
 			// files as given.
 			real, _ := filepath.EvalSymlinks(tt.want)
-			if got != tt.want && got != real {
-				t.Fatalf("Resolve() = %q, want %q", got, tt.want)
-			}
+			require.Contains(t, []string{tt.want, real}, got, "Resolve()")
 		})
 	}
 }

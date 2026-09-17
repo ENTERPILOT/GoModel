@@ -297,8 +297,8 @@ func assertNormalizeResult(t *testing.T, got Selector, err error, tt selectorCas
 	require.NoError(t, err)
 	require.Equal(t, tt.want, got)
 
-	if got.Selector != String(got.ProviderName, got.Model) && !IsGlobal(got.Selector) {
-		t.Fatalf("selector string = %q, want canonical %q", got.Selector, String(got.ProviderName, got.Model))
+	if !IsGlobal(got.Selector) {
+		require.Equal(t, String(got.ProviderName, got.Model), got.Selector, "selector string")
 	}
 	scope := ScopeKindFor(got.Selector, got.ProviderName, got.Model)
 	require.Equal(t, tt.wantScope, scope)

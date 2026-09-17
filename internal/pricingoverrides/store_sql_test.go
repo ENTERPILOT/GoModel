@@ -110,7 +110,7 @@ func TestSQLStoreListIsOrderedBySelector(t *testing.T) {
 			got = append(got, override.Selector)
 		}
 		want := []string{"anthropic/claude", "openai/gpt-4o", "xai/grok"}
-		require.Equal(t, len(want), len(got), "selectors = %v, want %v", got, want)
+		require.Len(t, got, len(want), "selectors = %v, want %v", got, want)
 
 		for i := range want {
 			require.Equal(t, want[i], got[i], "selectors = %v, want %v", got, want)

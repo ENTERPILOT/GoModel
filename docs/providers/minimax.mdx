@@ -29,6 +29,21 @@ providers:
 `https://api.minimax.io/v1`); accounts on the China platform should set it to
 `https://api.minimaxi.com/v1`.
 
+## Video input
+
+Use `video_url` message content parts with `MiniMax-M3` for video input
+on `/v1/chat/completions`, including streaming requests:
+
+```json
+{"type":"video_url","video_url":{"url":"mm_file://your-file-id","detail":"high","fps":2}}
+```
+
+The gateway preserves video URLs and processing settings. A URL, base64 data
+URL, or an existing MiniMax file reference can be supplied. Upload large videos
+through MiniMax's Files API first; the gateway does not upload videos for you.
+See the [MiniMax video input reference](https://platform.minimax.io/docs/api-reference/text-openai-api#multimodal-input)
+for supported formats and size limits.
+
 ## Temperature
 
 MiniMax requires `temperature` in `(0.0, 1.0]` and rejects zero. GoModel clamps
@@ -143,3 +158,29 @@ Masks and unsupported edit fields return a validation error.
 
 See the [MiniMax image-to-image API](https://platform.minimax.io/docs/api-reference/image-generation-i2i)
 for model-specific parameter limits.
+
+## Image generation
+
+Use `image-01` or `image-01-live` with `/v1/images/generations`. GoModel translates
+requests to MiniMax's native `/v1/image_generation` endpoint using the configured
+base URL and returns generated images in `data`.
+
+```json
+{"model":"image-01","provider":"minimax","prompt":"A lighthouse at sunrise","aspect_ratio":"16:9","n":1}
+```
+
+The default response format is `url`; URLs expire after 24 hours. Use
+`response_format: "b64_json"` for inline images. Native `base64` is also accepted.
+`size: "1024x1024"` maps to `width` and `height`; omit `size` when supplying
+native dimensions or `aspect_ratio`. Native options such as `seed` and
+`prompt_optimizer` pass through. `quality` and streaming are unsupported.
+
+MiniMax reports image and speech failures as HTTP 200 with a non-zero
+`base_resp.status_code`. GoModel maps that code to the matching OpenAI error
+status — 429 for rate and usage limits, 401 for auth, 402 for balance, 400 for
+invalid or rejected input, 502 otherwise — and appends MiniMax's own
+`base_resp.status_msg` to the error message so the upstream diagnostic is not
+lost.
+
+See the [MiniMax image API reference](https://platform.minimax.io/docs/api-reference/image-generation-t2i)
+for model-specific limits.

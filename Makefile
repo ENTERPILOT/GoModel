@@ -1,4 +1,4 @@
-.PHONY: all build run demo clean tidy mod-check frontend frontend-check test test-race test-dashboard test-e2e test-integration test-contract test-all lint lint-fix fix fix-check record-api swagger docs-openapi helm-lint install-tools perf-check perf-bench infra image seed-demo-data build-plugins image-plugins example-plugins
+.PHONY: all build run demo clean tidy mod-check frontend frontend-check frontend-stub test test-race test-dashboard test-e2e test-integration test-contract test-all lint lint-fix fix fix-check record-api swagger docs-openapi helm-lint install-tools perf-check perf-bench infra image seed-demo-data build-plugins image-plugins example-plugins
 
 all: frontend build
 
@@ -129,6 +129,12 @@ frontend:
 frontend-check:
 	@test -f internal/admin/dashboard/static/dist/index.html || { \
 		echo "internal/admin/dashboard/static/dist is missing: run 'make frontend' first." >&2; exit 1; }
+
+# Write a placeholder bundle so the Go suites compile and pass without Node.
+# CI test jobs use this instead of waiting for the `frontend` job; the Build
+# job and releases still embed the real bundle. A no-op when a bundle exists.
+frontend-stub:
+	sh tools/frontend-stub.sh
 
 # Run dashboard JavaScript unit tests
 test-dashboard:

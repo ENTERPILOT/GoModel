@@ -125,8 +125,8 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			schema, ok := schemas[tt.providerType]
 			require.True(t, ok, "no credential schema for provider type %q", tt.providerType)
 
-			if tt.defaultURL != "" && schema.DefaultBaseURL != tt.defaultURL {
-				t.Errorf("DefaultBaseURL = %q, want %q", schema.DefaultBaseURL, tt.defaultURL)
+			if tt.defaultURL != "" {
+				assert.Equal(t, tt.defaultURL, schema.DefaultBaseURL, "DefaultBaseURL")
 			}
 
 			var names []string

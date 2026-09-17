@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/enterpilot/gomodel/internal/storage"
 )
@@ -189,6 +189,7 @@ func buildDefaultConfig() *Config {
 		HTTP: HTTPConfig{
 			Timeout:               600,
 			ResponseHeaderTimeout: 600,
+			StreamIdleTimeout:     300,
 		},
 		Failover: FailoverConfig{
 			Enabled:     true,

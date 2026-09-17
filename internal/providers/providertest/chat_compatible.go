@@ -3,7 +3,7 @@ package providertest
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -12,6 +12,8 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ChatCompletionJSON is a minimal OpenAI-shaped chat completion reply whose
@@ -27,6 +29,25 @@ const ChatCompletionJSON = `{
 
 // ChatChunkSSE is a one-chunk chat completion stream ending in [DONE].
 const ChatChunkSSE = "data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\",\"model\":\"" + Model + "\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"" + Reply + "\"}}]}\n\ndata: [DONE]\n\n"
+
+// ResponsesJSON is a minimal Responses API reply whose single message says
+// Reply.
+const ResponsesJSON = `{
+	"id":"` + ResponsesID + `",
+	"object":"response",
+	"model":"` + Model + `",
+	"status":"completed",
+	"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"` + Reply + `"}]}],
+	"usage":{"input_tokens":5,"output_tokens":1,"total_tokens":6}
+}`
+
+// ResponsesID is the response ID the native Responses fixtures carry.
+const ResponsesID = "resp-test"
+
+// ResponsesSSE is a Responses API stream that opens with response.created,
+// carries one text delta, and ends in [DONE].
+const ResponsesSSE = "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"" + ResponsesID + "\",\"object\":\"response\",\"model\":\"" + Model + "\",\"status\":\"in_progress\"}}\n\n" +
+	"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"" + Reply + "\"}\n\ndata: [DONE]\n\n"
 
 // ModelsJSON lists Model as the only available model.
 const ModelsJSON = `{"object":"list","data":[{"id":"` + Model + `","object":"model","owned_by":"test"}]}`
@@ -46,7 +67,9 @@ const (
 // adapter so AssertChatCompatible can check the contract every such provider
 // shares.
 type ChatCompatible struct {
-	// Registration is the provider's factory registration.
+	// Registration is the provider's factory registration. When its
+	// Discovery.AllowAPIKeyless is set, the helper also checks that keyless
+	// requests carry no credentials.
 	Registration providers.Registration
 	// Type is the expected Registration.Type.
 	Type string
@@ -54,10 +77,17 @@ type ChatCompatible struct {
 	DefaultBaseURL string
 	// New is the provider's NewWithHTTPClient constructor.
 	New func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider
+	// NativeResponses reports whether the provider forwards Responses API
+	// requests to the upstream /responses endpoint. When false the helper
+	// expects them translated to chat completions.
+	NativeResponses bool
 	// Embeddings reports whether the provider forwards embeddings upstream.
 	// When false the helper asserts a typed invalid-request error and no
 	// upstream call.
 	Embeddings bool
+	// SkipEmbeddings leaves embeddings to the provider's own tests, for
+	// providers that call a native, non-OpenAI embeddings endpoint.
+	SkipEmbeddings bool
 	// AuthHeader and AuthPrefix describe how the API key is sent. They
 	// default to Authorization and "Bearer ".
 	AuthHeader string
@@ -66,8 +96,8 @@ type ChatCompatible struct {
 
 // AssertChatCompatible checks the contract shared by providers that embed
 // the OpenAI-compatible adapter: registration metadata, constructor safety,
-// and that chat, streaming, model listing, Responses translation, and
-// embeddings reach the expected upstream paths with the API key attached.
+// and that chat, streaming, model listing, Responses, and embeddings reach
+// the expected upstream paths with the API key attached.
 func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 	t.Helper()
 	if p.AuthHeader == "" {
@@ -80,60 +110,51 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 	wantAuth := p.AuthPrefix + apiKey
 
 	t.Run("registration", func(t *testing.T) {
-		if p.Registration.Type != p.Type {
-			t.Errorf("Registration.Type = %q, want %q", p.Registration.Type, p.Type)
-		}
-		if p.Registration.New == nil {
-			t.Fatal("Registration.New is nil")
-		}
-		if got := p.Registration.Discovery.DefaultBaseURL; got != p.DefaultBaseURL {
-			t.Errorf("Registration.Discovery.DefaultBaseURL = %q, want %q", got, p.DefaultBaseURL)
-		}
+		assert.Equal(t, p.Type, p.Registration.Type, "Registration.Type")
+		require.NotNil(t, p.Registration.New, "Registration.New")
+		assert.Equal(t, p.DefaultBaseURL, p.Registration.Discovery.DefaultBaseURL, "Registration.Discovery.DefaultBaseURL")
 		provider := p.Registration.New(providers.ProviderConfig{APIKey: apiKey}, providers.ProviderOptions{})
-		if provider == nil {
-			t.Fatal("Registration.New returned nil")
-		}
+		assert.NotNil(t, provider, "Registration.New returned nil")
 	})
 
 	t.Run("constructor tolerates nil client and zero hooks", func(t *testing.T) {
-		if provider := p.New(apiKey, "http://example.invalid", nil, llmclient.Hooks{}); provider == nil {
-			t.Fatal("NewWithHTTPClient(nil client) returned nil")
-		}
+		provider := p.New(apiKey, "http://example.invalid", nil, llmclient.Hooks{})
+		assert.NotNil(t, provider, "NewWithHTTPClient(nil client) returned nil")
 	})
 
 	t.Run("chat completion via registered factory", func(t *testing.T) {
 		server, capture := JSONServer(t, http.StatusOK, ChatCompletionJSON)
 		provider := p.Registration.New(providers.ProviderConfig{APIKey: apiKey, BaseURL: server.URL}, providers.ProviderOptions{})
-		resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
-			Model:    Model,
-			Messages: []core.Message{{Role: "user", Content: Prompt}},
-		})
-		if err != nil {
-			t.Fatalf("ChatCompletion() error = %v", err)
-		}
+		resp, err := provider.ChatCompletion(context.Background(), chatRequest())
+		require.NoError(t, err)
 		req := capture.Last(t)
 		assertUpstream(t, req, http.MethodPost, "/chat/completions", p.AuthHeader, wantAuth)
 		assertChatRequest(t, req.JSON(t), false)
-		if resp.Model != Model || len(resp.Choices) != 1 || resp.Choices[0].Message.Content != Reply {
-			t.Errorf("unexpected response: %+v", resp)
-		}
+		assert.Equal(t, Model, resp.Model)
+		require.Len(t, resp.Choices, 1)
+		assert.Equal(t, Reply, resp.Choices[0].Message.Content)
+		assert.Equal(t, 5, resp.Usage.PromptTokens, "usage prompt tokens")
+		assert.Equal(t, 1, resp.Usage.CompletionTokens, "usage completion tokens")
+		assert.Equal(t, 6, resp.Usage.TotalTokens, "usage total tokens")
 	})
+
+	if p.Registration.Discovery.AllowAPIKeyless {
+		t.Run("keyless requests carry no credentials", func(t *testing.T) {
+			server, capture := JSONServer(t, http.StatusOK, ChatCompletionJSON)
+			provider := p.Registration.New(providers.ProviderConfig{BaseURL: server.URL}, providers.ProviderOptions{})
+			require.NotNil(t, provider)
+			_, err := provider.ChatCompletion(context.Background(), chatRequest())
+			require.NoError(t, err)
+			assert.Empty(t, capture.Last(t).Header.Get(p.AuthHeader), "upstream %s header", p.AuthHeader)
+		})
+	}
 
 	t.Run("stream chat completion", func(t *testing.T) {
 		server, capture := SSEServer(t, ChatChunkSSE)
 		provider := p.New(apiKey, server.URL, server.Client(), llmclient.Hooks{})
-		stream, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
-			Model:    Model,
-			Messages: []core.Message{{Role: "user", Content: Prompt}},
-		})
-		if err != nil {
-			t.Fatalf("StreamChatCompletion() error = %v", err)
-		}
-		defer stream.Close()
-		body, err := io.ReadAll(stream)
-		if err != nil {
-			t.Fatalf("ReadAll() error = %v", err)
-		}
+		stream, err := provider.StreamChatCompletion(context.Background(), chatRequest())
+		require.NoError(t, err)
+		body := readAll(t, stream)
 		req := capture.Last(t)
 		assertUpstream(t, req, http.MethodPost, "/chat/completions", p.AuthHeader, wantAuth)
 		assertChatRequest(t, req.JSON(t), true)
@@ -144,80 +165,92 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 		server, capture := JSONServer(t, http.StatusOK, ModelsJSON)
 		provider := p.New(apiKey, server.URL, server.Client(), llmclient.Hooks{})
 		resp, err := provider.ListModels(context.Background())
-		if err != nil {
-			t.Fatalf("ListModels() error = %v", err)
-		}
-		assertUpstream(t, capture.Last(t), http.MethodGet, "/models", p.AuthHeader, wantAuth)
-		if len(resp.Data) != 1 || resp.Data[0].ID != Model {
-			t.Errorf("models = %+v, want one model %q", resp.Data, Model)
-		}
+		require.NoError(t, err)
+		// Some providers probe per-model details after listing, so the
+		// listing is the first upstream request rather than the last.
+		requests := capture.All()
+		require.NotEmpty(t, requests)
+		assertUpstream(t, requests[0], http.MethodGet, "/models", p.AuthHeader, wantAuth)
+		require.Len(t, resp.Data, 1)
+		assert.Equal(t, Model, resp.Data[0].ID)
 	})
 
-	t.Run("responses translate to chat completions", func(t *testing.T) {
-		server, capture := JSONServer(t, http.StatusOK, ChatCompletionJSON)
+	// Responses reach the upstream either translated to chat completions or
+	// forwarded to its own /responses endpoint; only the path, fixtures, and
+	// request shape differ.
+	// Translation keeps the chat completion ID on the reply but mints a resp_
+	// ID for the stream; native forwarding keeps the upstream ID for both.
+	responsesMode, responsesPath := "translate to chat completions", "/chat/completions"
+	responsesReply, responsesStream := ChatCompletionJSON, ChatChunkSSE
+	checkResponsesRequest := assertChatRequest
+	wantResponseID := "chatcmpl-test"
+	checkStreamID := func(t testing.TB, id string) {
+		assert.True(t, strings.HasPrefix(id, "resp_"), "response.created id = %q, want a generated resp_ ID", id)
+	}
+	if p.NativeResponses {
+		responsesMode, responsesPath = "forward to the upstream responses endpoint", "/responses"
+		responsesReply, responsesStream = ResponsesJSON, ResponsesSSE
+		checkResponsesRequest = assertResponsesRequest
+		wantResponseID = ResponsesID
+		checkStreamID = func(t testing.TB, id string) {
+			assert.Equal(t, ResponsesID, id, "response.created id")
+		}
+	}
+
+	t.Run("responses "+responsesMode, func(t *testing.T) {
+		server, capture := JSONServer(t, http.StatusOK, responsesReply)
 		provider := p.New(apiKey, server.URL, server.Client(), llmclient.Hooks{})
-		resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{Model: Model, Input: Prompt})
-		if err != nil {
-			t.Fatalf("Responses() error = %v", err)
-		}
+		resp, err := provider.Responses(context.Background(), responsesRequest())
+		require.NoError(t, err)
 		req := capture.Last(t)
-		assertUpstream(t, req, http.MethodPost, "/chat/completions", p.AuthHeader, wantAuth)
-		assertChatRequest(t, req.JSON(t), false)
-		if resp.Object != "response" || resp.Status != "completed" {
-			t.Errorf("response object/status = %q/%q, want response/completed", resp.Object, resp.Status)
-		}
-		if got := outputText(resp); got != Reply {
-			t.Errorf("response output text = %q, want %q", got, Reply)
-		}
+		assertUpstream(t, req, http.MethodPost, responsesPath, p.AuthHeader, wantAuth)
+		checkResponsesRequest(t, req.JSON(t), false)
+		assertResponse(t, resp)
+		assert.Equal(t, wantResponseID, resp.ID, "response id")
 	})
 
-	t.Run("stream responses translate to chat completions", func(t *testing.T) {
-		server, capture := SSEServer(t, ChatChunkSSE)
+	t.Run("stream responses "+responsesMode, func(t *testing.T) {
+		server, capture := SSEServer(t, responsesStream)
 		provider := p.New(apiKey, server.URL, server.Client(), llmclient.Hooks{})
-		stream, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{Model: Model, Input: Prompt})
-		if err != nil {
-			t.Fatalf("StreamResponses() error = %v", err)
-		}
-		defer stream.Close()
-		body, err := io.ReadAll(stream)
-		if err != nil {
-			t.Fatalf("ReadAll() error = %v", err)
-		}
+		stream, err := provider.StreamResponses(context.Background(), responsesRequest())
+		require.NoError(t, err)
+		body := readAll(t, stream)
 		req := capture.Last(t)
-		assertUpstream(t, req, http.MethodPost, "/chat/completions", p.AuthHeader, wantAuth)
-		assertChatRequest(t, req.JSON(t), true)
+		assertUpstream(t, req, http.MethodPost, responsesPath, p.AuthHeader, wantAuth)
+		checkResponsesRequest(t, req.JSON(t), true)
 		assertStreamBody(t, body, "response.output_text.delta", Reply, "data: [DONE]")
+		createdAt := strings.Index(string(body), `"type":"response.created"`)
+		deltaAt := strings.Index(string(body), `"type":"response.output_text.delta"`)
+		require.GreaterOrEqual(t, createdAt, 0, "response.created event")
+		require.GreaterOrEqual(t, deltaAt, 0, "response.output_text.delta event")
+		assert.Less(t, createdAt, deltaAt, "response.created must precede output events")
+		created := responseCreated(t, body)
+		checkStreamID(t, fmt.Sprint(created["id"]))
+		assert.Equal(t, Model, created["model"], "response.created model")
 	})
 
+	if p.SkipEmbeddings {
+		return
+	}
 	t.Run("embeddings", func(t *testing.T) {
 		server, capture := JSONServer(t, http.StatusOK, EmbeddingsJSON)
 		provider := p.New(apiKey, server.URL, server.Client(), llmclient.Hooks{})
 		resp, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{Model: Model, Input: Prompt})
 		if !p.Embeddings {
 			AssertUnsupported(t, err)
-			if capture.Count() != 0 {
-				t.Errorf("upstream received %d requests, want 0 (embeddings must not be forwarded)", capture.Count())
-			}
+			assert.Zero(t, capture.Count(), "embeddings must not be forwarded upstream")
 			return
 		}
-		if err != nil {
-			t.Fatalf("Embeddings() error = %v", err)
-		}
+		require.NoError(t, err)
 		req := capture.Last(t)
 		assertUpstream(t, req, http.MethodPost, "/embeddings", p.AuthHeader, wantAuth)
-		if sent := req.JSON(t); sent["model"] != Model || sent["input"] != Prompt {
-			t.Errorf("embeddings request = %#v, want model %q and input %q", sent, Model, Prompt)
-		}
-		if len(resp.Data) != 1 {
-			t.Fatalf("embeddings = %+v, want one vector", resp.Data)
-		}
+		sent := req.JSON(t)
+		assert.Equal(t, Model, sent["model"], "embeddings request model")
+		assert.Equal(t, Prompt, sent["input"], "embeddings request input")
+		require.Len(t, resp.Data, 1)
 		var vector []float64
-		if err := json.Unmarshal(resp.Data[0].Embedding, &vector); err != nil {
-			t.Fatalf("embedding vector %s: %v", resp.Data[0].Embedding, err)
-		}
-		if len(vector) != 2 || vector[0] != 0.1 || vector[1] != 0.2 {
-			t.Errorf("embedding vector = %v, want [0.1 0.2]", vector)
-		}
+		require.NoError(t, json.Unmarshal(resp.Data[0].Embedding, &vector))
+		assert.Equal(t, []float64{0.1, 0.2}, vector)
 	})
 }
 
@@ -225,19 +258,11 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 // provider returns for a surface it does not offer.
 func AssertUnsupported(t testing.TB, err error) {
 	t.Helper()
-	if err == nil {
-		t.Fatal("error = nil, want typed unsupported error")
-	}
+	require.Error(t, err, "want typed unsupported error")
 	var gwErr *core.GatewayError
-	if !errors.As(err, &gwErr) {
-		t.Fatalf("error type = %T, want *core.GatewayError", err)
-	}
-	if gwErr.Type != core.ErrorTypeInvalidRequest {
-		t.Errorf("error Type = %v, want %v", gwErr.Type, core.ErrorTypeInvalidRequest)
-	}
-	if gwErr.StatusCode != http.StatusBadRequest {
-		t.Errorf("error StatusCode = %d, want %d", gwErr.StatusCode, http.StatusBadRequest)
-	}
+	require.ErrorAs(t, err, &gwErr)
+	assert.Equal(t, core.ErrorTypeInvalidRequest, gwErr.Type)
+	assert.Equal(t, http.StatusBadRequest, gwErr.HTTPStatusCode())
 }
 
 // AssertNoNativeSurfaces checks that provider does not advertise the optional
@@ -245,26 +270,41 @@ func AssertUnsupported(t testing.TB, err error) {
 // adapter cannot accidentally claim capabilities its upstream lacks.
 func AssertNoNativeSurfaces(t testing.TB, provider any) {
 	t.Helper()
-	if _, ok := provider.(core.NativeBatchProvider); ok {
-		t.Error("provider should not implement core.NativeBatchProvider")
-	}
-	if _, ok := provider.(core.NativeFileProvider); ok {
-		t.Error("provider should not implement core.NativeFileProvider")
-	}
-	if _, ok := provider.(core.AudioProvider); ok {
-		t.Error("provider should not implement core.AudioProvider")
+	_, ok := provider.(core.NativeBatchProvider)
+	assert.False(t, ok, "provider should not implement core.NativeBatchProvider")
+	_, ok = provider.(core.NativeFileProvider)
+	assert.False(t, ok, "provider should not implement core.NativeFileProvider")
+	_, ok = provider.(core.AudioProvider)
+	assert.False(t, ok, "provider should not implement core.AudioProvider")
+}
+
+func chatRequest() *core.ChatRequest {
+	return &core.ChatRequest{
+		Model:    Model,
+		Messages: []core.Message{{Role: "user", Content: Prompt}},
 	}
 }
 
-// assertChatRequest checks a translated chat completions body: the model,
-// the stream flag, and that the user prompt survived translation.
+func responsesRequest() *core.ResponsesRequest {
+	return &core.ResponsesRequest{Model: Model, Input: Prompt}
+}
+
+func readAll(t testing.TB, stream io.ReadCloser) []byte {
+	t.Helper()
+	require.NotNil(t, stream, "stream")
+	defer stream.Close()
+	body, err := io.ReadAll(stream)
+	require.NoError(t, err)
+	return body
+}
+
+// assertChatRequest checks a chat completions body: the model, the stream
+// flag, and that the user prompt survived any translation.
 func assertChatRequest(t testing.TB, sent map[string]any, stream bool) {
 	t.Helper()
-	if sent["model"] != Model {
-		t.Errorf("request model = %#v, want %q", sent["model"], Model)
-	}
-	if stream && sent["stream"] != true {
-		t.Errorf("request stream = %#v, want true", sent["stream"])
+	assert.Equal(t, Model, sent["model"], "request model")
+	if stream {
+		assert.Equal(t, true, sent["stream"], "request stream")
 	}
 	messages, _ := sent["messages"].([]any)
 	found := false
@@ -274,18 +314,60 @@ func assertChatRequest(t testing.TB, sent map[string]any, stream bool) {
 			found = true
 		}
 	}
-	if !found {
-		t.Errorf("request messages = %#v, want a user message %q", sent["messages"], Prompt)
+	assert.True(t, found, "request messages = %#v, want a user message %q", sent["messages"], Prompt)
+}
+
+// assertResponsesRequest checks a forwarded Responses API body.
+func assertResponsesRequest(t testing.TB, sent map[string]any, stream bool) {
+	t.Helper()
+	assert.Equal(t, Model, sent["model"], "request model")
+	assert.Equal(t, Prompt, sent["input"], "request input")
+	if stream {
+		assert.Equal(t, true, sent["stream"], "request stream")
 	}
+}
+
+// assertResponse checks a completed Responses API reply that says Reply,
+// including the normalized model and token usage both fixtures carry.
+func assertResponse(t testing.TB, resp *core.ResponsesResponse) {
+	t.Helper()
+	require.NotNil(t, resp)
+	assert.Equal(t, "response", resp.Object)
+	assert.Equal(t, "completed", resp.Status)
+	assert.Equal(t, Model, resp.Model)
+	assert.Equal(t, Reply, outputText(resp))
+	require.NotNil(t, resp.Usage, "usage")
+	assert.Equal(t, 5, resp.Usage.InputTokens, "usage input tokens")
+	assert.Equal(t, 1, resp.Usage.OutputTokens, "usage output tokens")
+	assert.Equal(t, 6, resp.Usage.TotalTokens, "usage total tokens")
+}
+
+// responseCreated returns the response object of the stream's
+// response.created event.
+func responseCreated(t testing.TB, body []byte) map[string]any {
+	t.Helper()
+	for line := range strings.SplitSeq(string(body), "\n") {
+		data, ok := strings.CutPrefix(line, "data: ")
+		if !ok {
+			continue
+		}
+		var event map[string]any
+		if json.Unmarshal([]byte(data), &event) != nil || event["type"] != "response.created" {
+			continue
+		}
+		response, ok := event["response"].(map[string]any)
+		require.True(t, ok, "response.created event = %s, want a response object", data)
+		return response
+	}
+	require.FailNow(t, "stream has no response.created event", "stream body = %q", body)
+	return nil
 }
 
 // assertStreamBody checks that each expected fragment appears in the stream.
 func assertStreamBody(t testing.TB, body []byte, want ...string) {
 	t.Helper()
 	for _, fragment := range want {
-		if !strings.Contains(string(body), fragment) {
-			t.Errorf("stream body = %q, want %q", body, fragment)
-		}
+		assert.Contains(t, string(body), fragment)
 	}
 }
 
@@ -307,13 +389,7 @@ func outputText(resp *core.ResponsesResponse) string {
 
 func assertUpstream(t testing.TB, req Recorded, method, path, authHeader, wantAuth string) {
 	t.Helper()
-	if req.Method != method {
-		t.Errorf("upstream method = %s, want %s", req.Method, method)
-	}
-	if req.Path != path {
-		t.Errorf("upstream path = %q, want %q", req.Path, path)
-	}
-	if got := req.Header.Get(authHeader); got != wantAuth {
-		t.Errorf("upstream %s header = %q, want %q", authHeader, got, wantAuth)
-	}
+	assert.Equal(t, method, req.Method, "upstream method")
+	assert.Equal(t, path, req.Path, "upstream path")
+	assert.Equal(t, wantAuth, req.Header.Get(authHeader), "upstream %s header", authHeader)
 }

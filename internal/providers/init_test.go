@@ -552,5 +552,5 @@ func TestInitializeProviders_DoesNotLaunchUnboundedWorkers(t *testing.T) {
 		t.Fatal("initializeProviders did not finish")
 	}
 
-	require.Equal(t, providerCount-maxWorkers, len(started))
+	require.Len(t, started, providerCount-maxWorkers)
 }

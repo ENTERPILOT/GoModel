@@ -7,11 +7,6 @@ ARG TARGETVARIANT
 
 WORKDIR /app
 
-# Install ca-certificates for HTTPS requests.
-# Do not pin the apk revision here: Alpine rotates package revisions
-# within a release branch, which breaks Docker builds over time.
-RUN apk add --no-cache ca-certificates
-
 # Download dependencies first for better layer caching
 COPY go.mod go.sum ./
 RUN go mod download

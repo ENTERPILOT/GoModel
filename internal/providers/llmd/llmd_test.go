@@ -268,9 +268,23 @@ func TestExposeDroppedReasonReturnsOnlySafeLLMDHeader(t *testing.T) {
 	assert.Empty(t, headers.Get("Set-Cookie"))
 }
 
-func TestProviderDoesNotAdvertiseUnsupportedNativeSurfaces(t *testing.T) {
+// llm-d serves the OpenAI-compatible surface natively, including Responses and
+// embeddings, requires a configured base URL, and may run without an API key.
+// It must not advertise native batch, file, audio, or response-lifecycle
+// support.
+func TestChatCompatibleContract(t *testing.T) {
+	providertest.AssertChatCompatible(t, providertest.ChatCompatible{
+		Registration:    Registration,
+		Type:            "llmd",
+		NativeResponses: true,
+		Embeddings:      true,
+		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
+			return NewWithHTTPClient(apiKey, baseURL, ControlConfig{}, client, hooks)
+		},
+	})
+
 	provider := NewWithHTTPClient("", "http://llmd.invalid/v1", ControlConfig{}, nil, llmclient.Hooks{})
 	providertest.AssertNoNativeSurfaces(t, provider)
 	_, ok := any(provider).(core.NativeResponseLifecycleProvider)
-	require.False(t, ok)
+	assert.False(t, ok, "provider should not implement core.NativeResponseLifecycleProvider")
 }

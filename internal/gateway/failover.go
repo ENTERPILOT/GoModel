@@ -159,7 +159,9 @@ func executeTranslatedWithFailover[Req any, Resp any](
 			return resp, ResponseProviderType(ProviderTypeFromWorkflow(workflow), responseProvider), ProviderNameFromWorkflow(workflow), nil
 		},
 		func(selector core.ModelSelector, providerType, providerName string) (Resp, string, error) {
-			resp, responseProvider, err := call(ctx, cloneForSelector(req, selector), providerName)
+			// A failover target gets a different request body, so it must not
+			// reuse the client's idempotency key.
+			resp, responseProvider, err := call(core.WithIdempotencyKey(ctx, ""), cloneForSelector(req, selector), providerName)
 			if err != nil {
 				var zero Resp
 				return zero, "", err

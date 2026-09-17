@@ -312,6 +312,7 @@ opentelemetry:
 http:
   timeout: 600 # seconds (10 minutes)
   response_header_timeout: 600
+  stream_idle_timeout: 300 # seconds of silence allowed mid-stream before a stalled stream fails; 0 disables
 
 workflows:
   refresh_interval: 1m
@@ -340,8 +341,8 @@ guardrails:
   enable_for_batch_processing: false
   rules:
     # Each entry is a guardrail instance built from a plugin (`type`). Built-in
-    # plugins: system_prompt, llm_based_altering, string_replace, header_edit,
-    # llm_judge, presidio; loaded .so plugins are referenced by their manifest
+    # plugins: system_prompt, llm_based_altering, string_replace, tag_replace,
+    # header_edit, llm_judge, presidio; loaded .so plugins are referenced by their manifest
     # name.
     # Instances are seeded into the guardrails store and referenced by the
     # default workflow at `order` in `phase` (prompt | response | stream,

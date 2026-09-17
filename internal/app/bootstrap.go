@@ -64,6 +64,7 @@ func newBootstrap(ctx context.Context, cfg Config) *bootstrap {
 	// Install config-file HTTP timeouts before any provider constructs a
 	// transport; env vars still take precedence inside httpclient.
 	httpclient.SetConfiguredTimeouts(appCfg.HTTP.Timeout, appCfg.HTTP.ResponseHeaderTimeout)
+	httpclient.SetConfiguredStreamIdleTimeout(appCfg.HTTP.StreamIdleTimeout)
 	if appCfg.Offline {
 		catalog := "disabled"
 		if appCfg.Cache.Model.ModelList.URL != "" {

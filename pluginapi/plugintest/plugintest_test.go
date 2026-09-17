@@ -133,7 +133,7 @@ func TestHostAndFixtures(t *testing.T) {
 
 	h.Err = errors.New("down")
 	_, err = h.Complete(context.Background(), pluginapi.InferenceRequest{})
-	assert.Error(t, err)
+	require.Error(t, err)
 
 	h.Metrics().Inc("calls", map[string]string{"k": "v"})
 	h.Metrics().Inc("calls", nil)

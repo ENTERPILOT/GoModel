@@ -1987,7 +1987,8 @@ func TestHandleStreamingResponse_RecordsStreamingError(t *testing.T) {
 	logged := logger.entries[0]
 	require.Equal(t, "stream_error", logged.ErrorType)
 	require.NotNil(t, logged.Data)
-	require.Equal(t, expectedErr.Error(), logged.Data.ErrorMessage)
+	// The provider read failure is recorded behind the incomplete-stream marker.
+	require.Equal(t, "provider stream ended before completion: "+expectedErr.Error(), logged.Data.ErrorMessage)
 }
 
 func TestHandleStreamingResponse_ClientDisconnectBeforeUpstream(t *testing.T) {
@@ -3803,7 +3804,7 @@ func TestBatchLifecyclePersistsAndUsesInternalEndpointHints(t *testing.T) {
 	err := handler.Batches(createCtx)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, createRec.Code)
-	require.False(t, strings.Contains(createRec.Body.String(), "request_endpoint_by_custom_id"), "create response leaked internal hints: %s", createRec.Body.String())
+	require.NotContains(t, createRec.Body.String(), "request_endpoint_by_custom_id", "create response leaked internal hints: %s", createRec.Body.String())
 	require.Equal(t, "anthropic", mock.capturedBatchProvider)
 	got := core.GetRequestID(mock.capturedBatchCtx)
 	require.NotEmpty(t, got)
@@ -6274,7 +6275,7 @@ func TestHandleWithCache_ExactEntryIsScopedToGuardrailChain(t *testing.T) {
 	got = guarded.Header().Get("X-Cache")
 	require.Empty(t, got)
 	require.Equal(t, 2, dispatches)
-	require.False(t, strings.Contains(guarded.Body.String(), "sk-ABCDEFGHIJKLMNOPQRSTUVWX1234"), "response guardrail was bypassed by the cache: %s", guarded.Body.String())
+	require.NotContains(t, guarded.Body.String(), "sk-ABCDEFGHIJKLMNOPQRSTUVWX1234", "response guardrail was bypassed by the cache: %s", guarded.Body.String())
 
 	// The guarded miss stores its own entry, which replays only to its chain.
 	store.waitForWrite(t)

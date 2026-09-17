@@ -35,6 +35,10 @@ checksum:
 
 release:
   replace_existing_draft: true
+  footer: |
+    {{- if .PreviousTag }}
+    **Full Changelog**: https://github.com/ENTERPILOT/GoModel/compare/{{ .PreviousTag }}...{{ .Tag }}
+    {{- end }}
 
 snapshot:
   version_template: "{{ .Tag }}-next"

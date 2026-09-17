@@ -42,7 +42,7 @@ func TestContentPartFileRequiresPayload(t *testing.T) {
 		`{"type":"file","file":{"filename":"x.pdf"}}`,
 	} {
 		var part ContentPart
-		assert.Error(t, json.Unmarshal([]byte(raw), &part), "Unmarshal(%s) = nil error, want payload error", raw)
+		require.Error(t, json.Unmarshal([]byte(raw), &part), "Unmarshal(%s) = nil error, want payload error", raw)
 	}
 	var part ContentPart
 	err := json.Unmarshal([]byte(`{"type":"input_file","file":{"file_id":"file_123"}}`), &part)

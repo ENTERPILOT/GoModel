@@ -359,3 +359,56 @@ func TestBlockErrorClampsStatus(t *testing.T) {
 	got = BlockError(pluginapi.Block(0, "x", "y"), 99)
 	assert.Equal(t, 400, got.HTTPStatusCode())
 }
+
+// A step with one reader takes its own path, which skips the goroutine and
+// the per-reader slices. It must merge back exactly what the concurrent path
+// does: values, response headers, and request headers the reader set,
+// removed or left alone.
+func TestRunSingleReaderMergesBackLikeTheConcurrentPath(t *testing.T) {
+	reader := newTestInstance(&fakePlugin{name: "solo", onPrompt: func(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+		x.Values.Set("solo", true)
+		x.Headers.Response.Add("X-Solo", "1")
+		x.Headers.Request.Set("X-Team", "platform")
+		x.Headers.Request.Del("X-Debug")
+		return pluginapi.Warn("w", "warned", nil), nil
+	}}, InstanceSpec{})
+	chain, err := BuildChain(pluginapi.KindPrompt, []Ref{{reader, 10}})
+	require.NoError(t, err)
+
+	x := withPromptText(newExchange(), "hi")
+	x.Headers.Request = http.Header{"X-Debug": {"1"}, "X-Keep": {"same"}}
+
+	outcome, err := chain.RunPrompt(context.Background(), x)
+	require.NoError(t, err)
+	require.Equal(t, pluginapi.ActionWarn, outcome.Decision.Action, "decision = %+v", outcome.Decision)
+
+	_, ok := x.Values.Get("solo")
+	assert.True(t, ok, "the reader's values must merge back")
+	assert.Equal(t, "1", x.Headers.Response.Get("X-Solo"), "response headers must merge back")
+	assert.Equal(t, "platform", x.Headers.Request.Get("X-Team"), "an added request header must merge back")
+	_, present := x.Headers.Request["X-Debug"]
+	assert.False(t, present, "a removed request header must stay removed")
+	assert.Equal(t, "same", x.Headers.Request.Get("X-Keep"), "an untouched request header must survive")
+}
+
+// The single-reader path drops an abandoned reader's copy, like the
+// concurrent one: the hook is still writing it after the run returned.
+func TestRunSingleAbandonedReaderCopyIsDropped(t *testing.T) {
+	reader := &fakePlugin{name: "solo", onPrompt: stuckPrompt(100*time.Millisecond, func(x *pluginapi.Exchange) {
+		x.Values.Set("late", true)
+		x.Headers.Response.Add("X-Late", "1")
+	})}
+	chain, err := BuildChain(pluginapi.KindPrompt, []Ref{
+		{newTestInstance(reader, InstanceSpec{Timeout: 20 * time.Millisecond, FailMode: FailOpen}), 10},
+	})
+	require.NoError(t, err)
+
+	x := withPromptText(newExchange(), "x")
+	_, err = chain.RunPrompt(context.Background(), x)
+	require.NoError(t, err, "an abandoned reader fails open")
+
+	time.Sleep(150 * time.Millisecond) // let the abandoned hook finish writing its copy
+	_, ok := x.Values.Get("late")
+	assert.False(t, ok, "the abandoned reader's copy must not merge back")
+	assert.Empty(t, x.Headers.Response.Get("X-Late"), "nor its response headers")
+}

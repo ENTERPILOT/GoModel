@@ -2,7 +2,11 @@
 
 package integration
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestParseDockerRunContainerID(t *testing.T) {
 	t.Parallel()
@@ -13,21 +17,15 @@ func TestParseDockerRunContainerID(t *testing.T) {
 		"e591860a76dbb858258e678a2d9c76fbd5fc3e6c5bf6e86f93266a14ca6be7f8\r\n"
 
 	id, err := parseDockerRunContainerID(output)
-	if err != nil {
-		t.Fatalf("parseDockerRunContainerID returned error: %v", err)
-	}
+	require.NoError(t, err)
 
 	const want = "e591860a76dbb858258e678a2d9c76fbd5fc3e6c5bf6e86f93266a14ca6be7f8"
-	if id != want {
-		t.Fatalf("parseDockerRunContainerID returned %q, want %q", id, want)
-	}
+	require.Equal(t, want, id)
 }
 
 func TestParseDockerRunContainerIDRejectsUnexpectedOutput(t *testing.T) {
 	t.Parallel()
 
 	_, err := parseDockerRunContainerID("Status: Downloaded newer image for postgres:16-alpine")
-	if err == nil {
-		t.Fatal("parseDockerRunContainerID unexpectedly succeeded")
-	}
+	require.Error(t, err)
 }

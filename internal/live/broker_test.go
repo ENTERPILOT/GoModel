@@ -2,12 +2,15 @@ package live
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/usage"
-	"github.com/stretchr/testify/require"
 )
 
 func TestBrokerPublishesAndReplaysBySequence(t *testing.T) {
@@ -39,9 +42,7 @@ func TestBrokerPublishesAndReplaysBySequence(t *testing.T) {
 	got := sub.Replay[0].Type
 	require.Equal(t, EventUsageCompleted, got)
 
-	if got := sub.Replay[0].Seq; got != 2 {
-		t.Fatalf("replay seq = %d, want 2", got)
-	}
+	require.EqualValues(t, 2, sub.Replay[0].Seq, "replay seq")
 }
 
 func TestSubscriptionLatestSnapshotsSequenceAtSubscribe(t *testing.T) {
@@ -149,12 +150,8 @@ func TestBrokerReplaysActiveSnapshotsForFreshSubscribers(t *testing.T) {
 	require.Equal(t, EventAuditUpdated, got)
 
 	payload := eventPayload(t, sub.Replay[0])
-	if got := payload["method"]; got != "POST" {
-		t.Fatalf("snapshot method = %v, want POST", got)
-	}
-	if got := payload["provider"]; got != "openai" {
-		t.Fatalf("snapshot provider = %v, want openai", got)
-	}
+	require.Equal(t, "POST", payload["method"], "snapshot method")
+	require.Equal(t, "openai", payload["provider"], "snapshot provider")
 	got = sub.Replay[1].Type
 	require.Equal(t, EventUsageCompleted, got)
 }
@@ -163,14 +160,19 @@ func TestBrokerNormalizesAuditActiveSnapshotAliases(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
 
-	b.publish(EventAuditUpdated, "audit-1", "", now, map[string]any{
-		"id":     "audit-1",
-		"method": "POST",
+	// The first event has no request ID, so its snapshot is keyed by entry ID;
+	// the second carries both and must take over that snapshot rather than
+	// start a second one.
+	b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
+		ID:        "audit-1",
+		Timestamp: now,
+		Method:    "POST",
 	})
-	b.publish(EventAuditUpdated, "audit-1", "req-1", now.Add(time.Second), map[string]any{
-		"id":         "audit-1",
-		"request_id": "req-1",
-		"provider":   "openai",
+	b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
+		ID:        "audit-1",
+		RequestID: "req-1",
+		Timestamp: now.Add(time.Second),
+		Provider:  "openai",
 	})
 
 	sub := b.Subscribe(0)
@@ -186,9 +188,10 @@ func TestBrokerNormalizesAuditActiveSnapshotAliases(t *testing.T) {
 	got = payload["provider"]
 	require.Equal(t, "openai", got)
 
-	b.publish(EventAuditFlushed, "audit-1", "req-1", now.Add(2*time.Second), map[string]any{
-		"id":         "audit-1",
-		"request_id": "req-1",
+	b.PublishAuditEvent(EventAuditFlushed, &auditlog.LogEntry{
+		ID:        "audit-1",
+		RequestID: "req-1",
+		Timestamp: now.Add(2 * time.Second),
 	})
 	subAfterFlush := b.Subscribe(0)
 	require.NotNil(t, subAfterFlush)
@@ -406,9 +409,7 @@ func TestBrokerCloseStopsSubscribersAndRejectsNewSubscriptions(t *testing.T) {
 		RequestID: "req-closed",
 		Timestamp: time.Now(),
 	})
-	if got := b.LatestSeq(); got != 0 {
-		t.Fatalf("LatestSeq() = %d after close publish, want 0", got)
-	}
+	require.Zero(t, b.LatestSeq(), "LatestSeq() after close publish")
 
 	sub.Close()
 	b.Close()
@@ -953,4 +954,227 @@ func TestBrokerReplayAfterBufferWrap(t *testing.T) {
 
 	defer subStale.Close()
 	require.True(t, subStale.Reset)
+}
+
+// benchAuditRequestLifecycle publishes the audit events one non-streaming chat
+// request emits with body and header capture on: audit.started, the
+// audit.updated events handlers raise while enriching the entry, then
+// audit.completed and audit.flushed. It is the per-request broker cost on
+// every request, whether or not a dashboard is connected.
+func benchAuditRequestLifecycle(b *testing.B, subscribe bool) {
+	// The subscriber buffer is far larger than the default so a drain
+	// goroutine that falls behind cannot get the subscriber dropped, which
+	// would silently turn the subscribed case into the idle one.
+	broker := NewBroker(Config{Enabled: true, BufferSize: 10000, ReplayLimit: 1000, SubscriberBuffer: 1 << 16})
+	if subscribe {
+		sub := broker.Subscribe(0)
+		require.NotNil(b, sub)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for range sub.Events {
+			}
+		}()
+		b.Cleanup(func() {
+			sub.Close()
+			<-done
+		})
+	}
+
+	requestBody := auditlog.CaptureLoggedBody([]byte(`{"model":"gpt-4o-mini","messages":[{"role":"system","content":"You are a helpful assistant that answers briefly."},{"role":"user","content":"Summarise the attached incident report in three bullet points and suggest one follow-up action for the on-call engineer."}],"temperature":0.2,"max_tokens":256,"stream":false}`))
+	responseBody := auditlog.CaptureLoggedBody([]byte(`{"id":"chatcmpl-bench","object":"chat.completion","created":1700000000,"model":"gpt-4o-mini","choices":[{"index":0,"message":{"role":"assistant","content":"- Database failover took 4 minutes\n- Alerts fired late\n- No data loss\nFollow-up: tune the replica lag alert."},"finish_reason":"stop"}],"usage":{"prompt_tokens":61,"completion_tokens":34,"total_tokens":95}}`))
+	requestHeaders := map[string]string{"Authorization": "[REDACTED]", "Content-Type": "application/json", "User-Agent": "openai-python/1.60.0"}
+	responseHeaders := map[string]string{"Content-Type": "application/json", "X-Request-Id": "req-bench"}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		entry := &auditlog.LogEntry{
+			ID:        "audit-bench",
+			RequestID: "req-bench",
+			Timestamp: time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC),
+			Method:    "POST",
+			Path:      "/v1/chat/completions",
+			Data: &auditlog.LogData{
+				UserAgent:      "openai-python/1.60.0",
+				RequestHeaders: requestHeaders,
+				RequestBody:    requestBody,
+			},
+		}
+		broker.PublishAuditEvent(EventAuditStarted, entry)
+
+		entry.RequestedModel, entry.Provider = "gpt-4o-mini", "openai"
+		broker.PublishAuditEvent(EventAuditUpdated, entry)
+		entry.AuthMethod = "master_key"
+		broker.PublishAuditEvent(EventAuditUpdated, entry)
+		entry.ResolvedModel, entry.ProviderName = "openai/gpt-4o-mini", "openai"
+		broker.PublishAuditEvent(EventAuditUpdated, entry)
+		entry.UserPath = "/team"
+		broker.PublishAuditEvent(EventAuditUpdated, entry)
+
+		entry.StatusCode, entry.DurationNs = 200, 812_000_000
+		entry.Data.ResponseHeaders = responseHeaders
+		entry.Data.ResponseBody = responseBody
+		broker.PublishAuditEvent(EventAuditCompleted, entry)
+		broker.PublishAuditEvent(EventAuditFlushed, entry)
+	}
+	b.StopTimer()
+	if subscribe && !broker.HasLiveSubscribers() {
+		b.Fatal("the subscriber was dropped during the run, so the idle path was measured")
+	}
+}
+
+func BenchmarkBrokerAuditRequestLifecycleNoSubscribers(b *testing.B) {
+	benchAuditRequestLifecycle(b, false)
+}
+
+func BenchmarkBrokerAuditRequestLifecycleWithSubscriber(b *testing.B) {
+	benchAuditRequestLifecycle(b, true)
+}
+
+// An event reports only what its type carries, so the accumulated snapshot
+// must keep what earlier events established rather than let a later event's
+// zero fields erase it.
+func TestBrokerAuditActiveSnapshotKeepsEarlierFields(t *testing.T) {
+	b := NewBroker(Config{Enabled: true})
+	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
+
+	b.PublishAuditEvent(EventAuditStarted, &auditlog.LogEntry{
+		ID:        "audit-1",
+		RequestID: "req-1",
+		Timestamp: now,
+		Method:    "POST",
+		Path:      "/v1/chat/completions",
+		Stream:    true,
+		Data: &auditlog.LogData{
+			UserAgent:      "openai-python/1.60.0",
+			RequestHeaders: map[string]string{"Authorization": "[REDACTED]", "Content-Type": "application/json"},
+		},
+	})
+	b.PublishAuditEvent(EventAuditCompleted, &auditlog.LogEntry{
+		ID:         "audit-1",
+		RequestID:  "req-1",
+		Timestamp:  now.Add(time.Second),
+		StatusCode: 200,
+		Data: &auditlog.LogData{
+			ResponseHeaders: map[string]string{"X-Request-Id": "req-1"},
+			RequestHeaders:  map[string]string{"Content-Type": "application/json; charset=utf-8"},
+		},
+	})
+
+	sub := b.Subscribe(0)
+	require.NotNil(t, sub)
+
+	defer sub.Close()
+	require.Len(t, sub.Replay, 1)
+
+	payload := eventPayload(t, sub.Replay[0])
+	assert.Equal(t, "POST", payload["method"], "method from audit.started")
+	assert.Equal(t, "/v1/chat/completions", payload["path"])
+	assert.Equal(t, true, payload["stream"])
+	assert.Equal(t, float64(200), payload["status_code"], "status code from audit.completed")
+	assert.Equal(t, EventAuditCompleted, payload["_live_state"], "the newest event names the state")
+
+	data, ok := payload["data"].(map[string]any)
+	require.True(t, ok, "preview data = %T, want object", payload["data"])
+	assert.Equal(t, "openai-python/1.60.0", data["user_agent"])
+	requestHeaders, ok := data["request_headers"].(map[string]any)
+	require.True(t, ok, "request_headers = %T, want object", data["request_headers"])
+	assert.Equal(t, "[REDACTED]", requestHeaders["Authorization"], "a header only the first event carried")
+	assert.Equal(t, "application/json; charset=utf-8", requestHeaders["Content-Type"], "the later event wins on conflict")
+	responseHeaders, ok := data["response_headers"].(map[string]any)
+	require.True(t, ok, "response_headers = %T, want object", data["response_headers"])
+	assert.Equal(t, "req-1", responseHeaders["X-Request-Id"])
+}
+
+// Snapshots outlive the request, so they must not alias maps the audit entry
+// goes on mutating.
+func TestBrokerAuditActiveSnapshotDoesNotAliasEntryData(t *testing.T) {
+	b := NewBroker(Config{Enabled: true})
+	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
+	headers := map[string]string{"Authorization": "[REDACTED]"}
+
+	b.PublishAuditEvent(EventAuditStarted, &auditlog.LogEntry{
+		ID:        "audit-1",
+		RequestID: "req-1",
+		Timestamp: now,
+		Data:      &auditlog.LogData{RequestHeaders: headers},
+	})
+	b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
+		ID:        "audit-1",
+		RequestID: "req-1",
+		Timestamp: now.Add(time.Second),
+		Provider:  "openai",
+	})
+	headers["Authorization"] = "sk-leaked"
+	headers["X-Added-Later"] = "1"
+
+	sub := b.Subscribe(0)
+	require.NotNil(t, sub)
+
+	defer sub.Close()
+	require.Len(t, sub.Replay, 1)
+
+	data, ok := eventPayload(t, sub.Replay[0])["data"].(map[string]any)
+	require.True(t, ok)
+	requestHeaders, ok := data["request_headers"].(map[string]any)
+	require.True(t, ok, "request_headers = %T, want object", data["request_headers"])
+	assert.Equal(t, "[REDACTED]", requestHeaders["Authorization"], "the snapshot must hold the value published, not a later mutation")
+	assert.NotContains(t, requestHeaders, "X-Added-Later")
+}
+
+// The retained-size cap bounds the ring, so it has to hold for the accumulated
+// snapshot and not only for the event that produced it.
+func TestBrokerCapsRetainedSizeAfterMerge(t *testing.T) {
+	b := NewBroker(Config{Enabled: true})
+	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
+	half := strings.Repeat("x", maxRetainedEventBytes*2/3)
+
+	for i, header := range []string{"X-First", "X-Second"} {
+		b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
+			ID:        "audit-1",
+			RequestID: "req-1",
+			Timestamp: now.Add(time.Duration(i) * time.Second),
+			Data:      &auditlog.LogData{RequestHeaders: map[string]string{header: half}},
+		})
+	}
+
+	sub := b.Subscribe(0)
+	require.NotNil(t, sub)
+
+	defer sub.Close()
+	require.Len(t, sub.Replay, 1)
+	assert.LessOrEqual(t, len(sub.Replay[0].Data), maxRetainedEventBytes, "merged snapshot exceeds the retention cap")
+}
+
+// Compaction empties the preview's data, but a single oversized top-level
+// field can still carry the event past the retention cap.
+func TestBrokerCapsRetainedEventsWithOversizedErrorMessage(t *testing.T) {
+	cases := []struct {
+		name string
+		size int
+	}{
+		{name: "just over the cap", size: maxRetainedEventBytes + 1},
+		{name: "many times the cap", size: 3 * maxRetainedEventBytes},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := NewBroker(Config{Enabled: true})
+
+			b.PublishAuditEvent(EventAuditFailed, &auditlog.LogEntry{
+				ID:        "audit-1",
+				RequestID: "req-1",
+				Timestamp: time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC),
+				Data:      &auditlog.LogData{ErrorMessage: strings.Repeat("e", tc.size)},
+			})
+
+			require.Len(t, b.events, 1)
+			assert.LessOrEqual(t, len(b.events[0].Data), maxRetainedEventBytes, "retained event exceeds the cap")
+
+			message, ok := eventPayload(t, b.events[0])["error_message"].(string)
+			require.True(t, ok, "error_message missing from the retained event")
+			assert.True(t, strings.HasSuffix(message, retainedTextTruncationMarker), "a truncated message should say so, got %q", message[max(0, len(message)-40):])
+		})
+	}
 }

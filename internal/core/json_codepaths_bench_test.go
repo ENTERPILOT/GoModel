@@ -2,6 +2,8 @@ package core
 
 import (
 	"encoding/json"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -89,6 +91,39 @@ func BenchmarkResponsesRequestJSONMarshal(b *testing.B) {
 	b.ReportAllocs()
 	var req ResponsesRequest
 	if err := json.Unmarshal(benchmarkResponsesRequestPayload, &req); err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	for b.Loop() {
+		body, err := json.Marshal(req)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(body) == 0 {
+			b.Fatal("expected output")
+		}
+	}
+}
+
+// benchmarkMultimodalChatPayload is a vision request of the shape agentic
+// clients send: one message carrying many content parts, each with the
+// passthrough members a client attaches. Marshalling used to copy the raw
+// JSON of every one of them.
+var benchmarkMultimodalChatPayload = func() []byte {
+	parts := make([]string, 0, 12)
+	for i := range 6 {
+		parts = append(parts,
+			`{"type":"text","text":"describe frame `+strconv.Itoa(i)+`","cache_control":{"type":"ephemeral"},"x_part_meta":{"frame":`+strconv.Itoa(i)+`}}`,
+			`{"type":"image_url","image_url":{"url":"https://example.com/frame-`+strconv.Itoa(i)+`.png","detail":"high","x_nested":"image-extra"},"x_part_meta":{"frame":`+strconv.Itoa(i)+`}}`,
+		)
+	}
+	return []byte(`{"model":"gpt-5-mini","messages":[{"role":"user","content":[` + strings.Join(parts, ",") + `]}]}`)
+}()
+
+func BenchmarkChatRequestJSONMarshalMultimodal(b *testing.B) {
+	b.ReportAllocs()
+	var req ChatRequest
+	if err := json.Unmarshal(benchmarkMultimodalChatPayload, &req); err != nil {
 		b.Fatal(err)
 	}
 	b.ResetTimer()

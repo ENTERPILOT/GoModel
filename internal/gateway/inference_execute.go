@@ -386,7 +386,8 @@ func streamTranslatedProviderRequest[Req any](
 
 	return tryFailoverStream(ctx, o, workflow, model, provider, err,
 		func(selector core.ModelSelector, providerType, providerName string) (io.ReadCloser, string, string, error) {
-			stream, err := call(ctx, cloneForSelector(req, selector), providerName)
+			// See executeTranslatedWithFailover: no idempotency key on failover.
+			stream, err := call(core.WithIdempotencyKey(ctx, ""), cloneForSelector(req, selector), providerName)
 			if err != nil {
 				return nil, "", "", err
 			}

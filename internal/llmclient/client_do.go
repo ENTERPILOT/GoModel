@@ -212,6 +212,7 @@ func (c *Client) DoStream(ctx context.Context, req Request) (io.ReadCloser, erro
 		resp.Request.GetBody = nil
 	}
 
+	resp.Body = c.withStreamIdleTimeout(resp.Body)
 	c.completeScope(scope, resp.StatusCode, nil, nil)
 	c.observeFirstChunk(scope, resp, true)
 	return resp.Body, nil

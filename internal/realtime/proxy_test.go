@@ -101,7 +101,7 @@ func TestProxyRelaysBidirectionally(t *testing.T) {
 
 	client.Close(websocket.StatusNormalClosure, "")
 	got := waitProxy(t, retc)
-	assert.NoError(t, got)
+	require.NoError(t, got)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -130,7 +130,7 @@ func TestProxyRelaysLargeFrame(t *testing.T) {
 
 	_, data, err := client.Read(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, len(big), len(data))
+	assert.Len(t, data, len(big))
 
 	client.Close(websocket.StatusNormalClosure, "")
 	got := waitProxy(t, retc)
@@ -155,8 +155,8 @@ func TestProxyDialErrorBeforeUpgrade(t *testing.T) {
 	_, resp, err := websocket.Dial(ctx, wsURL(srv.URL), nil)
 	require.Error(t, err)
 
-	if resp != nil && resp.StatusCode != http.StatusBadGateway {
-		t.Errorf("status = %d, want 502", resp.StatusCode)
+	if resp != nil {
+		assert.Equal(t, http.StatusBadGateway, resp.StatusCode)
 	}
 	var de *realtime.DialError
 	got := waitProxy(t, retc)

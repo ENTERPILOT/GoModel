@@ -8,12 +8,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 // A transport error must never hand the client the upstream URL: it discloses
@@ -73,12 +73,10 @@ func TestTransportErrorMessage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := transportErrorMessage(tt.err)
-			if got != tt.want {
-				t.Fatalf("transportErrorMessage() = %q, want %q", got, tt.want)
-			}
-			if strings.Contains(got, "secret-host.internal") || strings.Contains(got, "s3cret") {
-				t.Fatalf("transportErrorMessage() = %q, must not disclose the upstream URL", got)
-			}
+			require.Equal(t, tt.want, got)
+			require.NotContains(t, got, "secret-host.internal")
+			require.NotContains(t, got, "s3cret", "transportErrorMessage() = %q, must not disclose the upstream URL", got)
+
 		})
 	}
 }
@@ -113,27 +111,22 @@ func TestSanitizedTransportError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := sanitizedTransportError(tt.err)
-			if got != tt.want {
-				t.Fatalf("sanitizedTransportError() = %q, want %q", got, tt.want)
-			}
-			if tt.wantAbsent != "" && strings.Contains(got, tt.wantAbsent) {
-				t.Fatalf("sanitizedTransportError() = %q, must not contain %q", got, tt.wantAbsent)
+			require.Equal(t, tt.want, got)
+
+			if tt.wantAbsent != "" {
+				require.NotContains(t, got, tt.wantAbsent, "sanitizedTransportError()")
 			}
 		})
 	}
 }
 
 func TestReadErrorMessage(t *testing.T) {
-	if got := readErrorMessage(context.DeadlineExceeded); got != "timed out reading provider response" {
-		t.Fatalf("readErrorMessage(timeout) = %q", got)
-	}
-	got := readErrorMessage(&net.OpError{Op: "read", Net: "tcp", Source: mustAddr(t, "127.0.0.1:51423"), Err: errors.New("connection reset by peer")})
-	if got != "failed to read provider response" {
-		t.Fatalf("readErrorMessage() = %q", got)
-	}
-	if strings.Contains(got, "127.0.0.1") {
-		t.Fatalf("readErrorMessage() = %q, must not disclose connection details", got)
-	}
+	got := readErrorMessage(context.DeadlineExceeded)
+	require.Equal(t, "timed out reading provider response", got)
+
+	got = readErrorMessage(&net.OpError{Op: "read", Net: "tcp", Source: mustAddr(t, "127.0.0.1:51423"), Err: errors.New("connection reset by peer")})
+	require.Equal(t, "failed to read provider response", got)
+	require.NotContains(t, got, "127.0.0.1", "readErrorMessage() = %q, must not disclose connection details", got)
 }
 
 // End to end: a refused connection keeps its 502 mapping and names the
@@ -150,29 +143,21 @@ func TestClientTransportErrorHidesBaseURL(t *testing.T) {
 	err := client.Do(context.Background(), Request{Method: http.MethodPost, Endpoint: "/chat/completions"}, nil)
 
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %v (%T), want *core.GatewayError", err, err)
-	}
-	if gatewayErr.StatusCode != http.StatusBadGateway {
-		t.Fatalf("StatusCode = %d, want %d", gatewayErr.StatusCode, http.StatusBadGateway)
-	}
-	if gatewayErr.Provider != "mockB" {
-		t.Fatalf("Provider = %q, want %q", gatewayErr.Provider, "mockB")
-	}
-	if strings.Contains(gatewayErr.Message, baseURL) || strings.Contains(gatewayErr.Message, "127.0.0.1") {
-		t.Fatalf("Message = %q, must not disclose the upstream URL", gatewayErr.Message)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, http.StatusBadGateway, gatewayErr.StatusCode)
+	require.Equal(t, "mockB", gatewayErr.Provider)
+	require.NotContains(t, gatewayErr.Message, baseURL)
+	require.NotContains(t, gatewayErr.Message, "127.0.0.1", "Message = %q, must not disclose the upstream URL", gatewayErr.Message)
+
 	// The full error stays available server-side for logs and diagnostics.
-	if gatewayErr.Err == nil || !strings.Contains(gatewayErr.Err.Error(), baseURL) {
-		t.Fatalf("wrapped error = %v, want the full transport error", gatewayErr.Err)
-	}
+	require.Error(t, gatewayErr.Err)
+	require.Contains(t, gatewayErr.Err.Error(), baseURL)
 }
 
 func mustAddr(t *testing.T, addr string) net.Addr {
 	t.Helper()
 	parsed, err := net.ResolveTCPAddr("tcp", addr)
-	if err != nil {
-		t.Fatalf("ResolveTCPAddr(%q) = %v", addr, err)
-	}
+	require.NoError(t, err, "ResolveTCPAddr(%q) = %v", addr, err)
+
 	return parsed
 }

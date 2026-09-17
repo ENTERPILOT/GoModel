@@ -151,6 +151,11 @@ immediately when the upstream sends a `list_changed` notification.
 **Reconnect** on the dashboard (or `POST /admin/mcp-servers/{slug}/reconnect`)
 forces a redial.
 
+A server saved from the dashboard starts as **connecting**: the first dial runs
+in the background so the save never blocks on upstream IO. The dashboard
+re-checks every few seconds until the row settles on connected or degraded, so
+no page reload is needed.
+
 A last error of `no MCP endpoint at that path` means the URL answered the
 handshake with HTTP 404: something listens there, but not an MCP endpoint at
 that path. Servers mount their endpoint under different paths, so `url` must
@@ -160,6 +165,10 @@ mentioning HTTP 405 means the path exists but rejects the handshake method,
 which is what a streamable HTTP endpoint answers when `transport` is `sse`
 (and an SSE endpoint when it is `http`): fix `transport` first, then the
 path. Stateless servers (no `Mcp-Session-Id`) need no extra configuration.
+
+A last error mentioning `x509: certificate signed by unknown authority` means
+the server's TLS certificate is issued by a CA the container does not trust.
+See [private CA certificates](/guides/production#upstream-certificates-behind-a-private-ca).
 
 ## Inspect a server's catalog
 

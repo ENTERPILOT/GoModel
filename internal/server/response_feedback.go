@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"strconv"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 const responseFeedbackObserversKey = "gomodel.response-feedback-observers"
@@ -122,7 +122,7 @@ type responseFeedbackStreamObserver struct {
 }
 
 func (o *responseFeedbackStreamObserver) WantsJSONEvent(raw []byte) bool {
-	return bytes.Contains(raw, []byte(`"usage"`))
+	return usage.HasUsageObject(raw)
 }
 
 func (o *responseFeedbackStreamObserver) OnJSONEvent(payload map[string]any) {

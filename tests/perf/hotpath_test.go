@@ -34,6 +34,16 @@ const (
 		"data: {\"id\":\"chatcmpl-bench\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":null}]}\n\n" +
 		"data: {\"id\":\"chatcmpl-bench\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,\"total_tokens\":7}}\n\n" +
 		"data: [DONE]\n\n"
+	// sampleChatStreamIncludeUsage is the shape OpenAI sends when the gateway
+	// forces stream_options.include_usage (the default): every chunk carries
+	// "usage":null and only the last one has token counts.
+	sampleChatStreamIncludeUsage = "" +
+		"data: {\"id\":\"chatcmpl-bench\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Hel\"},\"finish_reason\":null}],\"usage\":null}\n\n" +
+		"data: {\"id\":\"chatcmpl-bench\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":null}],\"usage\":null}\n\n" +
+		"data: {\"id\":\"chatcmpl-bench\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" world\"},\"finish_reason\":null}],\"usage\":null}\n\n" +
+		"data: {\"id\":\"chatcmpl-bench\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":null}\n\n" +
+		"data: {\"id\":\"chatcmpl-bench\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o-mini\",\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":3,\"total_tokens\":8}}\n\n" +
+		"data: [DONE]\n\n"
 )
 
 // benchProvider is a mock provider. When models is empty it advertises a single
@@ -322,17 +332,25 @@ func BenchmarkOpenAIResponsesStreamConverter(b *testing.B) {
 }
 
 func BenchmarkSharedStreamingAuditAndUsageObservers(b *testing.B) {
-	benchmarkSharedStreamingObservers(b, auditlog.Config{Enabled: true, LogBodies: true})
+	benchmarkSharedStreamingObservers(b, auditlog.Config{Enabled: true, LogBodies: true}, sampleChatStream)
 }
 
 // BenchmarkSharedStreamingObserversDefaultConfig runs the same pipeline with
-// audit body capture disabled — the default configuration, where the stream
-// can skip decoding content-delta chunks.
+// audit body capture disabled, where the stream can skip decoding
+// content-delta chunks. Body capture is on by default (config.LogConfig), so
+// this measures deployments that turned it off.
 func BenchmarkSharedStreamingObserversDefaultConfig(b *testing.B) {
-	benchmarkSharedStreamingObservers(b, auditlog.Config{Enabled: true})
+	benchmarkSharedStreamingObservers(b, auditlog.Config{Enabled: true}, sampleChatStream)
 }
 
-func benchmarkSharedStreamingObservers(b *testing.B, auditCfg auditlog.Config) {
+// BenchmarkSharedStreamingObserversIncludeUsage is the body-capture-off
+// pipeline over the stream shape OpenAI sends with include_usage forced on,
+// where every content chunk carries "usage":null.
+func BenchmarkSharedStreamingObserversIncludeUsage(b *testing.B) {
+	benchmarkSharedStreamingObservers(b, auditlog.Config{Enabled: true}, sampleChatStreamIncludeUsage)
+}
+
+func benchmarkSharedStreamingObservers(b *testing.B, auditCfg auditlog.Config, sse string) {
 	auditLogger := benchAuditLogger{cfg: auditCfg}
 	usageLogger := benchUsageLogger{cfg: usage.Config{Enabled: true}}
 	// Labels mirror a tagged request so the guard exercises the labelled path.
@@ -362,7 +380,7 @@ func benchmarkSharedStreamingObservers(b *testing.B, auditCfg auditlog.Config) {
 		usageObserver.SetLabels(labels)
 
 		stream := streaming.NewObservedSSEStream(
-			io.NopCloser(strings.NewReader(sampleChatStream)),
+			io.NopCloser(strings.NewReader(sse)),
 			auditlog.NewStreamLogObserver(auditLogger, entry, "/v1/chat/completions"),
 			usageObserver,
 		)
@@ -470,6 +488,19 @@ func TestHotPathPerfGuard(t *testing.T) {
 			maxBytes:  21056, // baseline ~19.6 KB
 		},
 		{
+			// The same shape with live logs on and no dashboard connected,
+			// which is how a running gateway is configured by default. The
+			// broker builds and retains an event for every lifecycle step of
+			// every request; the case above uses a stub audit logger and so
+			// cannot see any of it. Against that case this is the standing
+			// price of live logs: ~14us, ~22KB and 115 allocations per
+			// request, and the ceiling is what keeps it from growing back.
+			name:      "gateway_chat_completion_production_shape_live_broker",
+			bench:     BenchmarkGatewayHotPathProductionShapeLiveBroker,
+			maxAllocs: 280,   // baseline 275
+			maxBytes:  44032, // baseline ~41.5 KB
+		},
+		{
 			// Typed chunk decoding + reused read buffer keep this converter at a
 			// fraction of its former map[string]any-per-chunk cost (was 202/19.6KB).
 			// response.completed now carries the full output array, and the
@@ -498,6 +529,15 @@ func TestHotPathPerfGuard(t *testing.T) {
 			bench:     BenchmarkSharedStreamingObserversDefaultConfig,
 			maxAllocs: 62,   // baseline 60 (incl. request labels on both observers)
 			maxBytes:  3712, // baseline ~3.5 KB (audit entry carries the guardrail outcome trail)
+		},
+		{
+			// include_usage stream shape: every content chunk carries
+			// "usage":null. Before the usage filter required an object value,
+			// every one of those chunks was decoded (196 allocs, ~9.2 KB).
+			name:      "streaming_observers_include_usage",
+			bench:     BenchmarkSharedStreamingObserversIncludeUsage,
+			maxAllocs: 50,   // baseline 48
+			maxBytes:  3136, // baseline ~2.9 KB
 		},
 	}
 
