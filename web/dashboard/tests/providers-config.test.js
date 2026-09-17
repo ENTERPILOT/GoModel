@@ -680,7 +680,7 @@ test("validation rejects blank trip-rule rows and half-filled or invalid rules",
   );
   assert.equal(
     validateProviderCredentialForm(form([{ match: "quota", ttl: "" }]), "create", [], OPENAI_SCHEMA).trip_on,
-    "TTL is required when a match is set.",
+    undefined,
   );
   assert.match(
     validateProviderCredentialForm(form([{ match: "quota", ttl: "soon" }]), "create", [], OPENAI_SCHEMA).trip_on,
@@ -717,6 +717,26 @@ test("trip_on round-trips from a stored row through the form into the PUT payloa
 test("an empty trip_on list is always in the payload so clearing rules works", () => {
   const body = buildProviderCredentialPayload(defaultProviderCredentialForm(), OPENAI_SCHEMA);
   assert.deepEqual(body.trip_on, []);
+});
+
+test("match-only rows are valid and produce ttl: 0 in the wire payload", () => {
+  const form = (trip_on) => ({
+    ...defaultProviderCredentialForm(),
+    name: "my-openai",
+    type: "openai",
+    api_keys: [{ value: "sk-live" }],
+    trip_on,
+  });
+
+  // Match-only row passes validation.
+  assert.equal(
+    validateProviderCredentialForm(form([{ match: "quota" }]), "create", [], OPENAI_SCHEMA).trip_on,
+    undefined,
+  );
+
+  // Wire payload carries ttl: 0 for a match-only row.
+  const wire = tripRuleRowsToWire([{ match: "quota", ttl: "" }]);
+  assert.deepEqual(wire, [{ match: "quota", ttl: 0 }]);
 });
 
 test("changing provider type keeps trip rules, like the other identity values", () => {

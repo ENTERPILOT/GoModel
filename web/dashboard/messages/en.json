@@ -1201,7 +1201,6 @@
   "providers_add_trip_rule": "Add rule",
   "providers_trip_on_row_blank": "Remove the empty row instead of leaving a rule blank.",
   "providers_trip_on_match_required": "Match is required when a TTL is set.",
-  "providers_trip_on_ttl_required": "TTL is required when a match is set.",
   "providers_trip_on_ttl_invalid": "TTL must be a duration like 15m, 1h, or 90s.",
   "providers_default": "Provider default",
   "providers_edit_action": "Edit provider {name}",

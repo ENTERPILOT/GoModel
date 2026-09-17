@@ -1201,7 +1201,6 @@
   "providers_add_trip_rule": "Regel hinzufügen",
   "providers_trip_on_row_blank": "Leere Zeile entfernen, statt eine Regel leer zu lassen.",
   "providers_trip_on_match_required": "Treffer ist erforderlich, wenn eine TTL gesetzt ist.",
-  "providers_trip_on_ttl_required": "TTL ist erforderlich, wenn ein Treffer gesetzt ist.",
   "providers_trip_on_ttl_invalid": "Die TTL muss eine Dauer wie 15m, 1h oder 90s sein.",
   "providers_default": "Anbieter-Standard",
   "providers_edit_action": "Anbieter {name} bearbeiten",

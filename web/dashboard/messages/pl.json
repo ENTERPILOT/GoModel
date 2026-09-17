@@ -1221,7 +1221,6 @@
   "providers_add_trip_rule": "Dodaj regułę",
   "providers_trip_on_row_blank": "Usuń pusty wiersz zamiast zostawiać regułę pustą.",
   "providers_trip_on_match_required": "Dopasowanie jest wymagane, gdy ustawiono TTL.",
-  "providers_trip_on_ttl_required": "TTL jest wymagany, gdy ustawiono dopasowanie.",
   "providers_trip_on_ttl_invalid": "TTL musi być czasem trwania, np. 15m, 1h lub 90s.",
   "providers_default": "Domyślne dostawcy",
   "providers_edit_action": "Edytuj dostawcę {name}",

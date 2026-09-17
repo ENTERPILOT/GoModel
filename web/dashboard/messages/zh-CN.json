@@ -1111,7 +1111,6 @@
   "providers_add_trip_rule": "添加规则",
   "providers_trip_on_row_blank": "请移除空行，不要留空规则。",
   "providers_trip_on_match_required": "设置 TTL 时必须填写匹配。",
-  "providers_trip_on_ttl_required": "设置匹配时必须填写 TTL。",
   "providers_trip_on_ttl_invalid": "TTL 必须是时长格式，如 15m、1h 或 90s。",
   "providers_default": "供应商默认值",
   "providers_edit_action": "编辑供应商 {name}",

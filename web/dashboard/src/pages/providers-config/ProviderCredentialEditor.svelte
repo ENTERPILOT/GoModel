@@ -160,7 +160,7 @@
           <input
             type="text"
             class="mono provider-trip-rule-ttl"
-            placeholder="e.g. 15m"
+            placeholder="e.g. 15m (optional)"
             aria-label={m.providers_trip_on_ttl({ number: index + 1 })}
             bind:value={rule.ttl}
             oninput={() => providersConfig.clearFieldError("trip_on")}

@@ -426,7 +426,8 @@ export function tripRuleRowsToWire(rows) {
     if (!match && !ttlText) {
       continue;
     }
-    const ttl = parseGoDuration(ttlText);
+    // TTL is optional: empty string means use breaker timeout (encode as 0).
+    const ttl = ttlText ? parseGoDuration(ttlText) : 0;
     if (ttl === null) {
       return null;
     }
@@ -447,10 +448,9 @@ function validateTripRuleRows(rows) {
     if (!match) {
       return m.providers_trip_on_match_required();
     }
-    if (!ttlText) {
-      return m.providers_trip_on_ttl_required();
-    }
-    if (parseGoDuration(ttlText) === null) {
+    // TTL is optional; when omitted the backend uses the breaker's open-state
+    // timeout.  Validate only when the field has content.
+    if (ttlText && parseGoDuration(ttlText) === null) {
       return m.providers_trip_on_ttl_invalid();
     }
   }
