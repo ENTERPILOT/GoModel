@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
@@ -16,6 +17,10 @@ func TestResiliencePolicyLoading(t *testing.T) {
 		{"invalid breaker", "resilience:\n  circuit_breaker:\n    failure_on_statuses: [oops]\n", "circuit_breaker.failure_on_statuses"},
 		{"invalid scope", "resilience:\n  circuit_breaker:\n    scope: global\n", "circuit_breaker.scope"},
 		{"invalid provider", "providers:\n  cloudflare:\n    resilience:\n      retry:\n        retry_on_statuses: [oops]\n", "providers.cloudflare.resilience"},
+		{"trip_on", "resilience:\n  circuit_breaker:\n    trip_on:\n      - match: \"quota exceeded\"\n        ttl: 5m\n", ""},
+		{"invalid trip_on regexp", "resilience:\n  circuit_breaker:\n    trip_on:\n      - match: \"[quota\"\n", "circuit_breaker.trip_on[0]"},
+		{"empty trip_on match", "resilience:\n  circuit_breaker:\n    trip_on:\n      - ttl: 5m\n", "circuit_breaker.trip_on[0]"},
+		{"negative trip_on ttl", "resilience:\n  circuit_breaker:\n    trip_on:\n      - match: \"quota\"\n        ttl: -5m\n", "circuit_breaker.trip_on[0]"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			clearProviderEnvVars(t)
@@ -149,6 +154,28 @@ func TestNormalizeBreakerScope(t *testing.T) {
 	}
 }
 
+func TestTripOnLoadingAndInheritance(t *testing.T) {
+	clearProviderEnvVars(t)
+	dir := t.TempDir()
+	body := "resilience:\n  circuit_breaker:\n    trip_on:\n      - match: \"quota\"\n        ttl: 5m\n      - match: \"overloaded\"\nproviders:\n  cloudflare:\n    resilience:\n      circuit_breaker:\n        trip_on:\n          - match: \"quota\"\n            ttl: 1m\n  openai: {}\n"
+	writeConfigYAML(t, dir, body)
+	t.Chdir(dir)
+	result, err := Load()
+	require.NoError(t, err)
+
+	require.Equal(t, []TripRuleConfig{
+		{Match: "quota", TTL: 5 * time.Minute},
+		{Match: "overloaded"},
+	}, result.Config.Resilience.CircuitBreaker.TripOn)
+	require.Equal(t, []TripRuleConfig{{Match: "quota", TTL: time.Minute}},
+		result.RawProviders["cloudflare"].Resilience.CircuitBreaker.TripOn)
+	// A provider without trip_on keeps no raw override; resolution inherits the
+	// global list (asserted in internal/providers).
+	require.Nil(t, result.RawProviders["openai"].Resilience)
+	// Defaults inject no trip rules; the breaker stays inert when unset.
+	require.Nil(t, DefaultCircuitBreakerConfig().TripOn)
+}
+
 func TestProviderPolicyOverrideValidation(t *testing.T) {
 	for _, tc := range []struct{ name, body, wantError string }{
 		{
@@ -169,6 +196,16 @@ func TestProviderPolicyOverrideValidation(t *testing.T) {
 		{
 			"provider override survives an unrelated global policy",
 			"resilience:\n  circuit_breaker:\n    scope: model\nproviders:\n  cloudflare:\n    resilience:\n      circuit_breaker:\n        scope: provider\n",
+			"",
+		},
+		{
+			"invalid provider trip_on regexp",
+			"providers:\n  cloudflare:\n    resilience:\n      circuit_breaker:\n        trip_on:\n          - match: \"[quota\"\n",
+			"providers.cloudflare.resilience: circuit_breaker.trip_on[0]",
+		},
+		{
+			"valid provider trip_on replaces the global list",
+			"resilience:\n  circuit_breaker:\n    trip_on:\n      - match: \"global\"\nproviders:\n  cloudflare:\n    resilience:\n      circuit_breaker:\n        trip_on:\n          - match: \"quota\"\n            ttl: 1m\n",
 			"",
 		},
 	} {

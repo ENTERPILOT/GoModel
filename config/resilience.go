@@ -77,12 +77,13 @@ type RawResilienceConfig struct {
 // RawCircuitBreakerConfig holds optional per-provider circuit breaker overrides from YAML.
 // Nil fields inherit from the global CircuitBreakerConfig.
 type RawCircuitBreakerConfig struct {
-	FailureOnStatuses []string       `yaml:"failure_on_statuses"`
-	Scope             *string        `yaml:"scope"`
-	Enabled           *bool          `yaml:"enabled"`
-	FailureThreshold  *int           `yaml:"failure_threshold"`
-	SuccessThreshold  *int           `yaml:"success_threshold"`
-	Timeout           *time.Duration `yaml:"timeout"`
+	FailureOnStatuses []string         `yaml:"failure_on_statuses"`
+	Scope             *string          `yaml:"scope"`
+	Enabled           *bool            `yaml:"enabled"`
+	FailureThreshold  *int             `yaml:"failure_threshold"`
+	SuccessThreshold  *int             `yaml:"success_threshold"`
+	Timeout           *time.Duration   `yaml:"timeout"`
+	TripOn            []TripRuleConfig `yaml:"trip_on"`
 }
 
 // RawRetryConfig holds optional per-provider retry overrides from YAML.

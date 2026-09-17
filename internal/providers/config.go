@@ -282,6 +282,9 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		if cb.Timeout != nil {
 			resolved.Resilience.CircuitBreaker.Timeout = *cb.Timeout
 		}
+		if cb.TripOn != nil {
+			resolved.Resilience.CircuitBreaker.TripOn = cb.TripOn
+		}
 	}
 
 	return resolved
