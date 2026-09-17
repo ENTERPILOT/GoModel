@@ -21,6 +21,7 @@ import (
 var skippedDirs = map[string]bool{
 	".git":         true,
 	".cache":       true,
+	".worktrees":   true,
 	"node_modules": true,
 	"third_party":  true,
 	"vendor":       true,
