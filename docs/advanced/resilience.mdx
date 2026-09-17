@@ -170,6 +170,8 @@ resilience:
   as described above. `trip_on: []` disables them explicitly.
 - A provider's `trip_on` list **replaces** the global list entirely; omit the
   key to inherit the global rules.
+- Trip rules match on translated (non-streaming) and streaming errors; raw
+  passthrough routes rely on status-based breaker behavior instead.
 - An empty `match`, a pattern that does not compile, or a negative `ttl`
   fails configuration loading with a `circuit_breaker.trip_on[i]` error.
 
@@ -218,9 +220,12 @@ has served traffic) alongside the effective `resilience.circuit_breaker`
 settings, including `trip_on`.
 
 Providers configured in the dashboard can edit their trip rules directly in
-the credential editor ("Quota breaker"). Providers declared in `config.yaml`
-or environment variables show their rules read-only there; change them in
-the YAML file. Trip rules have no environment-variable equivalent.
+the credential editor ("Quota breaker"). Dashboard-managed providers inherit
+the global rules unless they define their own list; clearing all rule rows
+restores the inherited list (yaml's explicit `trip_on: []` to disable has no
+dashboard-managed equivalent). Providers declared in `config.yaml` or
+environment variables show their rules read-only there; change them in the
+YAML file. Trip rules have no environment-variable equivalent.
 
 ## Environment Variables
 
