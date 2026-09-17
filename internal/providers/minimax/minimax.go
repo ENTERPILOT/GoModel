@@ -63,14 +63,28 @@ func clampTemperature(req *core.ChatRequest) *core.ChatRequest {
 	return &cloned
 }
 
-// ChatCompletion sends a chat completion request to MiniMax.
+// ChatCompletion sends a chat completion request to MiniMax. Reasoning
+// models (M3, M2.7) inline their chain of thought as <think>...</think>
+// XML inside content; the parse step moves that text to the canonical
+// reasoning_content member before the response leaves the gateway.
 func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
-	return p.ChatCompatible.ChatCompletion(ctx, clampTemperature(req))
+	resp, err := p.ChatCompatible.ChatCompletion(ctx, clampTemperature(req))
+	if err != nil || !isReasoningModel(req.Model) {
+		return resp, err
+	}
+	normalizeChatResponse(resp)
+	return resp, nil
 }
 
-// StreamChatCompletion returns a raw response body for streaming.
+// StreamChatCompletion returns a raw response body for streaming. Reasoning
+// models have any <think>...</think> blocks in delta.content split into a
+// delta.reasoning_content member; the tag bytes never reach the client.
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
-	return p.ChatCompatible.StreamChatCompletion(ctx, clampTemperature(req))
+	stream, err := p.ChatCompatible.StreamChatCompletion(ctx, clampTemperature(req))
+	if err != nil || !isReasoningModel(req.Model) {
+		return stream, err
+	}
+	return normalizeChatStream(stream), nil
 }
 
 // Responses sends a Responses API request to MiniMax using chat-completions

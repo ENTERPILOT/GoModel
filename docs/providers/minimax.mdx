@@ -2,7 +2,7 @@
 title: "MiniMax"
 description: "Configure MiniMax in GoModel: chat models, temperature handling, and native text-to-speech through the standard audio endpoint."
 icon: "audio-waveform"
-keywords: ["MiniMax", "text-to-speech", "TTS", "t2a_v2", "provider setup"]
+keywords: ["MiniMax", "text-to-speech", "TTS", "t2a_v2", "reasoning", "thinking", "provider setup"]
 ---
 
 MiniMax speaks an OpenAI-compatible chat API, so chat models work out of the
@@ -49,6 +49,26 @@ for supported formats and size limits.
 MiniMax requires `temperature` in `(0.0, 1.0]` and rejects zero. GoModel clamps
 a zero or negative temperature to `1.0` so OpenAI-style requests that pin
 `temperature: 0` keep working.
+
+## Reasoning
+
+`MiniMax-M3` and `MiniMax-M2` ship their chain of thought as inline
+`<think>...</think>` XML inside the answer content. GoModel strips those tags
+and moves the inner text to the canonical `reasoning_content` member of the
+chat completion message (and the matching `delta.reasoning_content` on
+streaming deltas). The XML never reaches the client, so an OpenAI-compatible
+caller that reads `reasoning_content` — Kimi Code, Open WebUI, anything
+Anthropic-shaped — sees the reasoning as a separate field instead of as the
+answer.
+
+The step only runs for models whose name starts with `MiniMax-M3` or
+`MiniMax-M2`. Other MiniMax models do not emit think tags, so non-reasoning
+responses pass through byte for byte.
+
+When the model is cut off mid-generation (`finish_reason: length`) inside an
+open `<think>` block, the partial inner text is dropped. The rest of the
+response still arrives verbatim. Reasoning tokens stay completion tokens;
+usage accounting is unaffected.
 
 ## Text-to-speech
 
