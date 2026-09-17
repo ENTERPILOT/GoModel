@@ -20,6 +20,10 @@ const (
 	maxSQLParams       = 999
 	columnsPerEntry    = 23
 	maxEntriesPerBatch = maxSQLParams / columnsPerEntry
+	// Attempt rows are inserted the same way, and a failover-heavy batch can
+	// carry several per entry, so they are chunked on their own column count.
+	columnsPerAttempt   = 15
+	maxAttemptsPerBatch = maxSQLParams / columnsPerAttempt
 )
 
 const auditLogTable = "audit_logs"
@@ -141,14 +145,15 @@ const insertAuditLogPrefix = `INSERT INTO audit_logs (
 	session_id, stream, error_type, data
 ) VALUES `
 
-const insertAttemptSQL = `
-	INSERT INTO audit_log_attempts (
-		audit_log_id, seq, kind, provider_type, provider_name, model,
-		status_code, success, error_type, error_code, error_message,
-		response_body, response_headers, started_at, duration_ns
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	ON CONFLICT (audit_log_id, seq) DO NOTHING
-`
+const insertAttemptPrefix = `INSERT INTO audit_log_attempts (
+	audit_log_id, seq, kind, provider_type, provider_name, model,
+	status_code, success, error_type, error_code, error_message,
+	response_body, response_headers, started_at, duration_ns
+) VALUES `
+
+const insertAttemptSuffix = ` ON CONFLICT (audit_log_id, seq) DO NOTHING`
+
+const attemptRowPlaceholder = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
 // NewSQLStore creates a SQL audit log store, creating its tables if needed and
 // starting the retention sweep when one is configured.
@@ -314,32 +319,52 @@ func auditLogValues(dialect sqlx.Dialect, e *LogEntry) []any {
 
 func (s *SQLStore) writeAttempts(ctx context.Context, entries []*LogEntry) error {
 	dialect := s.db.Dialect()
+	rows := make([][]any, 0, len(entries))
 	for _, entry := range entries {
 		for _, attempt := range auditAttempts(entry) {
-			_, err := s.db.Exec(ctx, insertAttemptSQL,
-				entry.ID,
-				attempt.Seq,
-				attempt.Kind,
-				attempt.ProviderType,
-				attempt.ProviderName,
-				attempt.Model,
-				attempt.StatusCode,
-				attempt.Success,
-				attempt.ErrorType,
-				attempt.ErrorCode,
-				attempt.ErrorMessage,
-				marshalAttemptColumn(attempt.ResponseBody),
-				marshalAttemptColumn(attempt.ResponseHeaders),
-				dialect.NullableTimestampArg(attempt.StartedAt),
-				attempt.DurationNs,
-			)
-			if err != nil {
-				return fmt.Errorf("failed to insert audit log attempt for %s seq %d: %w",
-					entry.ID, attempt.Seq, err)
-			}
+			rows = append(rows, auditAttemptValues(dialect, entry.ID, attempt))
+		}
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	for i := 0; i < len(rows); i += maxAttemptsPerBatch {
+		chunk := rows[i:min(i+maxAttemptsPerBatch, len(rows))]
+
+		placeholders := make([]string, len(chunk))
+		values := make([]any, 0, len(chunk)*columnsPerAttempt)
+		for j, row := range chunk {
+			placeholders[j] = attemptRowPlaceholder
+			values = append(values, row...)
+		}
+
+		query := insertAttemptPrefix + strings.Join(placeholders, ",") + insertAttemptSuffix
+		if _, err := s.db.Exec(ctx, query, values...); err != nil {
+			return fmt.Errorf("failed to insert audit log attempts batch %d: %w", i/maxAttemptsPerBatch, err)
 		}
 	}
 	return nil
+}
+
+func auditAttemptValues(dialect sqlx.Dialect, entryID string, attempt AttemptSnapshot) []any {
+	return []any{
+		entryID,
+		attempt.Seq,
+		attempt.Kind,
+		attempt.ProviderType,
+		attempt.ProviderName,
+		attempt.Model,
+		attempt.StatusCode,
+		attempt.Success,
+		attempt.ErrorType,
+		attempt.ErrorCode,
+		attempt.ErrorMessage,
+		marshalAttemptColumn(attempt.ResponseBody),
+		marshalAttemptColumn(attempt.ResponseHeaders),
+		dialect.NullableTimestampArg(attempt.StartedAt),
+		attempt.DurationNs,
+	}
 }
 
 // Flush is a no-op: writes are synchronous.
