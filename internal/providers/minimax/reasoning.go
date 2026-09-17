@@ -19,11 +19,18 @@ import (
 // blocks are stripped from content and moved there. Relaying the inline XML
 // makes a reasoning model look broken to any OpenAI-compatible client that
 // reads reasoning_content (Kimi Code, Open WebUI, anything Anthropic-shaped).
+//
+// MiniMax occasionally closes the block with the namespaced </mm:think>
+// variant instead of the plain </think>, so the parser accepts both spellings
+// of the close marker and treats them identically.
 const (
-	thinkOpenTag  = "<think>"
-	thinkCloseTag = "</think>"
-	reasoningKey  = "reasoning_content"
+	thinkOpenTag = "<think>"
+	reasoningKey = "reasoning_content"
 )
+
+// thinkCloseTags lists every closing marker the parser accepts. Order does
+// not matter — the earliest match in the stream wins.
+var thinkCloseTags = []string{"</think>", "</mm:think>"}
 
 // isReasoningModel reports whether model is a MiniMax family member that
 // emits inline <think> blocks. The M3 line ships adaptive thinking and the
@@ -98,8 +105,8 @@ func splitThink(s string) (content, reasoning string) {
 		}
 		cb.WriteString(rest[:open])
 		rest = rest[open+len(thinkOpenTag):]
-		close := strings.Index(rest, thinkCloseTag)
-		if close < 0 {
+		close, closeLen, found := earliestClose(rest)
+		if !found {
 			// Unterminated: emit the partial inner text as reasoning rather
 			// than drop it, so finish_reason=length still carries the chain
 			// of thought the model produced before it was cut off.
@@ -107,9 +114,44 @@ func splitThink(s string) (content, reasoning string) {
 			break
 		}
 		rb.WriteString(rest[:close])
-		rest = rest[close+len(thinkCloseTag):]
+		rest = rest[close+closeLen:]
 	}
-	return strings.TrimSpace(strings.ReplaceAll(cb.String(), thinkCloseTag, "")), rb.String()
+	return strings.TrimSpace(stripAllCloses(cb.String())), rb.String()
+}
+
+// earliestClose reports the index and length of the first accepted closing
+// marker in s. ok is false when s contains none.
+func earliestClose(s string) (index, length int, ok bool) {
+	index, length = -1, 0
+	for _, tag := range thinkCloseTags {
+		if i := strings.Index(s, tag); i >= 0 && (index < 0 || i < index) {
+			index, length = i, len(tag)
+		}
+	}
+	return index, length, index >= 0
+}
+
+// stripAllCloses removes every accepted closing marker from s.
+func stripAllCloses(s string) string {
+	for _, tag := range thinkCloseTags {
+		s = strings.ReplaceAll(s, tag, "")
+	}
+	return s
+}
+
+// stripLeadingCloses removes every accepted closing marker at the head of s.
+func stripLeadingCloses(s string) string {
+	stripped := true
+	for stripped {
+		stripped = false
+		for _, tag := range thinkCloseTags {
+			if strings.HasPrefix(s, tag) {
+				s = s[len(tag):]
+				stripped = true
+			}
+		}
+	}
+	return s
 }
 
 // sseDataPrefix introduces the JSON payload of an SSE event.
@@ -292,7 +334,7 @@ type thinkParser struct {
 
 // feed consumes one content delta and returns the text to emit on the
 // content and reasoning_content members of the next outgoing delta. Carry
-// across calls lets a <think> or </think> tag that lands across an SSE line
+// across calls lets a <think> or closing tag that lands across an SSE line
 // boundary still be recognised.
 func (p *thinkParser) feed(text string) (content, reasoning string) {
 	combined := p.carry + text
@@ -303,17 +345,18 @@ func (p *thinkParser) feed(text string) (content, reasoning string) {
 		// open. Strip them: otherwise the `<` at position 0 keeps the parser
 		// waiting for a `<think>` open that never comes and the carry grows
 		// forever without ever emitting.
-		for strings.HasPrefix(combined, thinkCloseTag) {
-			combined = combined[len(thinkCloseTag):]
-		}
+		combined = stripLeadingCloses(combined)
 	}
 
 	var cb, rb strings.Builder
 	i := 0
 	for i < len(combined) {
+		// The tag the parser looks for depends on state: outside think it
+		// wants the opening marker; inside think it wants whichever close
+		// spelling MiniMax happens to use, whichever one comes first.
 		tag := thinkOpenTag
 		if p.inThink {
-			tag = thinkCloseTag
+			tag = earliestCloseTag(combined[i:])
 		}
 		// Skip the search when the remainder is shorter than the tag:
 		// strings.Index reports a zero-length match in that case and the
@@ -346,14 +389,37 @@ func (p *thinkParser) feed(text string) (content, reasoning string) {
 	return stripOrphanCloses(cb.String()), rb.String()
 }
 
+// earliestCloseTag returns whichever closing marker appears first in s, or
+// the plain spelling when neither is present (the caller only uses the
+// result as the search needle, and misses fall through to the j < 0 branch).
+func earliestCloseTag(s string) string {
+	best, bestAt := thinkCloseTags[0], -1
+	for _, tag := range thinkCloseTags {
+		if i := strings.Index(s, tag); i >= 0 && (bestAt < 0 || i < bestAt) {
+			best, bestAt = tag, i
+		}
+	}
+	return best
+}
+
 // stripOrphanCloses removes close markers that leaked into the content
 // stream because the parser exited on an inner think's close while the
 // outer one was still open. They are formatting noise, never content.
 func stripOrphanCloses(s string) string {
-	if !strings.Contains(s, thinkCloseTag) {
+	if !containsAnyClose(s) {
 		return s
 	}
-	return strings.ReplaceAll(s, thinkCloseTag, "")
+	return stripAllCloses(s)
+}
+
+// containsAnyClose reports whether s contains any accepted closing marker.
+func containsAnyClose(s string) bool {
+	for _, tag := range thinkCloseTags {
+		if strings.Contains(s, tag) {
+			return true
+		}
+	}
+	return false
 }
 
 // flush emits any carry bytes the parser was still holding when the stream

@@ -557,6 +557,59 @@ func TestSplitThink_NestedThenTrailing(t *testing.T) {
 	assert.Equal(t, "a<think>b", reasoning, "inner open is reasoning text, first close exits")
 }
 
+func TestSplitThink_NamespacedClose(t *testing.T) {
+	// MiniMax sometimes closes the block with the namespaced </mm:think>
+	// variant instead of </think>. Both spellings must be accepted.
+	raw := "<think>reasoning here</mm:think>answer"
+	content, reasoning := splitThink(raw)
+	assert.Equal(t, "answer", content)
+	assert.Equal(t, "reasoning here", reasoning)
+}
+
+func TestSplitThink_NamespacedCloseInsideContent(t *testing.T) {
+	// The namespaced close is an orphan in content just like the plain
+	// one: stripped, never leaked.
+	content, reasoning := splitThink("hello</mm:think>world")
+	assert.Equal(t, "helloworld", content)
+	assert.Empty(t, reasoning)
+}
+
+func TestSplitThink_EarliestCloseWins(t *testing.T) {
+	// Both spellings present: the earliest one terminates the block and
+	// the second one becomes an orphan in content.
+	raw := "<think>plan</think>a</mm:think>b"
+	content, reasoning := splitThink(raw)
+	assert.Equal(t, "ab", content)
+	assert.Equal(t, "plan", reasoning)
+}
+
+func TestThinkParser_NamespacedCloseAcrossFeeds(t *testing.T) {
+	// The namespaced close marker is split across two feeds: the parser
+	// must recognise it once the pieces join.
+	var p thinkParser
+	var gotContent, gotReasoning string
+	for _, f := range []string{"<think>plan</mm:", "think>answer"} {
+		c, r := p.feed(f)
+		gotContent += c
+		gotReasoning += r
+	}
+	assert.Equal(t, "answer", gotContent)
+	assert.Equal(t, "plan", gotReasoning)
+}
+
+func TestNormalizeChatStream_NamespacedClose(t *testing.T) {
+	// End-to-end: the namespaced close must be consumed in the stream and
+	// never reach the client.
+	body := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"<think>plan</mm:think>answer\"}}]}\n\n"
+	got, err := io.ReadAll(normalizeChatStream(io.NopCloser(strings.NewReader(body))))
+	require.NoError(t, err)
+	out := string(got)
+	assert.Contains(t, out, `"reasoning_content":"plan"`)
+	assert.Contains(t, out, `"content":"answer"`)
+	assert.NotContains(t, out, `</mm:think>`)
+	assert.NotContains(t, out, `</think>`)
+}
+
 func TestThinkParser_OrphanCloseDoesNotStickInCarry(t *testing.T) {
 	var p thinkParser
 	// Feed the shape where a stray close is split across feeds; the parser
