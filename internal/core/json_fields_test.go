@@ -396,3 +396,36 @@ func lookupDecoderBaseline(fields UnknownJSONFields, key string) json.RawMessage
 	}
 	return nil
 }
+
+// The request decoder is deliberately more lenient than strict JSON (see
+// TestDecoderLeniencyIsBounded). A passthrough member the gateway accepted on
+// the way in must still be visible on the way out, or it would be dropped
+// from the request forwarded upstream.
+func TestUnknownJSONFieldsSeeEveryValueTheDecoderAccepted(t *testing.T) {
+	accepted := map[string]string{
+		"trailing array comma":  `[1,]`,
+		"trailing object comma": `{"a":1,}`,
+		"leading-zero number":   `01`,
+		"plain object":          `{"a":1}`,
+	}
+	for name, value := range accepted {
+		t.Run(name, func(t *testing.T) {
+			var req ChatRequest
+			require.NoError(t, req.UnmarshalJSON([]byte(`{"model":"m","x_passthrough":`+value+`}`)),
+				"the decoder accepts this body")
+
+			assert.NotEmpty(t, req.ExtraFields.Lookup("x_passthrough"), "the member the decoder accepted must be visible")
+			assert.True(t, req.ExtraFields.HasAny("x_passthrough"))
+		})
+	}
+}
+
+// Bytes the decoder itself rejects stay invisible: Lookup must never hand back
+// a value a caller cannot decode (internal/providers/vllm relies on this).
+func TestUnknownJSONFieldsHideValuesTheDecoderRejects(t *testing.T) {
+	for _, value := range []string{`not-valid-json{{{`, `tru`} {
+		fields := UnknownJSONFieldsFromMap(map[string]json.RawMessage{"x_broken": json.RawMessage(value)})
+		assert.Nil(t, fields.Lookup("x_broken"), "value %q", value)
+		assert.False(t, fields.HasAny("x_broken"), "value %q", value)
+	}
+}

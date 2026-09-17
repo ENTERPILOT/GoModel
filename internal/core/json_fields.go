@@ -227,13 +227,13 @@ func appendUnknownJSONMembers(buf *bytes.Buffer, body []byte, skip map[string]st
 // Keys are matched literally. The scan deliberately does not use a gjson path,
 // which would read "a.b" as a nested lookup and "x*" as a wildcard.
 //
-// A member whose value does not parse is reported as absent, so callers never
-// receive bytes they cannot hand back to a JSON decoder. A container can only
-// hold such a value if it was built from an invalid raw map.
+// A member whose value the request decoder would reject is reported as absent,
+// so callers never receive bytes they cannot hand back to a JSON decoder. A
+// container can only hold such a value if it was built from an invalid raw map.
 func (fields UnknownJSONFields) Lookup(key string) json.RawMessage {
 	var found json.RawMessage
 	fields.forEachMember(func(name string, value gjson.Result) bool {
-		if name != key || !gjson.Valid(value.Raw) {
+		if name != key || !decoderAcceptsJSONValue(value.Raw) {
 			return true
 		}
 		found = CloneRawJSON(json.RawMessage(value.Raw))
@@ -253,13 +253,29 @@ func (fields UnknownJSONFields) HasAny(keys ...string) bool {
 	}
 	present := false
 	fields.forEachMember(func(name string, value gjson.Result) bool {
-		if !slices.Contains(keys, name) || !gjson.Valid(value.Raw) {
+		if !slices.Contains(keys, name) || !decoderAcceptsJSONValue(value.Raw) {
 			return true
 		}
 		present = true
 		return false
 	})
 	return present
+}
+
+// decoderAcceptsJSONValue reports whether raw is a value the request decoder
+// accepts, which is deliberately not the same as strictly valid JSON:
+// goccy/go-json tolerates a trailing comma and a leading-zero number inside a
+// passthrough value (pinned by TestDecoderLeniencyIsBounded), and a member the
+// gateway accepted on the way in must not become invisible on the way out.
+//
+// gjson is the stricter of the two, so its verdict settles the common case
+// without allocating; only a value it rejects is put to the decoder.
+func decoderAcceptsJSONValue(raw string) bool {
+	if gjson.Valid(raw) {
+		return true
+	}
+	var value json.RawMessage
+	return json.Unmarshal([]byte(raw), &value) == nil
 }
 
 // forEachMember visits the stored members in document order until visit
