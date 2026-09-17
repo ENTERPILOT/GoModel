@@ -2,9 +2,10 @@
 // card expand preferences), audit stats, the MCP servers summary, and the
 // activity-calendar data.
 
-import { getJSON, isAbortError } from "$lib/api/client.js";
+import { getJSON, isAbortError, resetCircuitBreaker, errorPayloadMessage } from "$lib/api/client.js";
 import * as m from "$lib/paraglide/messages.js";
 import { dateRange } from "$lib/stores/dateRange.svelte.js";
+import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import {
   emptyProviderStatus,
@@ -24,6 +25,9 @@ class ProviderStatusState {
   loadedOnce = $state(false);
   detailsExpanded = $state(false);
   cardOverrides = $state({});
+  // Provider name whose breaker reset is in flight, so its card's button
+  // cannot be double-clicked while the POST is pending.
+  resettingName = $state("");
   #controller = null;
   #pollTimer = null;
   #prefsLoaded = false;
@@ -104,6 +108,45 @@ class ProviderStatusState {
         this.loading = false;
         this.loadedOnce = true;
       }
+    }
+  }
+
+  // resetBreaker force-closes a tripped circuit breaker (open or half-open)
+  // and refreshes the provider status so the card's button re-disables on
+  // fresh state. Idempotent and low-stakes, so no confirmation dialog.
+  async resetBreaker(provider) {
+    const name = String((provider && provider.name) || "").trim();
+    if (!name || this.resettingName) {
+      return;
+    }
+    this.resettingName = name;
+    try {
+      let result;
+      try {
+        result = await resetCircuitBreaker(name);
+      } catch (e) {
+        console.error("Failed to reset circuit breaker:", e);
+        flash.error(m.overview_reset_breaker_failed());
+        return;
+      }
+      if (result.stale) return;
+      if (result.status === 503) {
+        flash.error(m.overview_reset_breaker_unavailable());
+        return;
+      }
+      if (!result.ok) {
+        // 401 stays silent: the global auth dialog owns it.
+        if (result.status !== 401) {
+          flash.error(
+            errorPayloadMessage(result.data, m.overview_reset_breaker_failed()),
+          );
+        }
+        return;
+      }
+      flash.success(m.overview_reset_breaker_success({ name }));
+      await this.fetch();
+    } finally {
+      this.resettingName = "";
     }
   }
 

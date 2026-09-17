@@ -9,11 +9,14 @@
   import {
     providerCredentialAuthLabel,
     providerCredentialModelsLabel,
+    providerCredentialTripRulesLabel,
     providerRowsHaveActions,
+    providerRowsHaveTripRules,
   } from "./providersConfigLogic.js";
   import { Pencil, X } from "lucide";
 
   const showActions = $derived(providerRowsHaveActions(providersConfig.filteredRows));
+  const showTripRules = $derived(providerRowsHaveTripRules(providersConfig.filteredRows));
 </script>
 
 <div class="table-wrapper">
@@ -25,6 +28,9 @@
         <th>{m.overview_base_url()}</th>
         <th>{m.providers_auth()}</th>
         <th>{m.providers_models()}</th>
+        {#if showTripRules}
+          <th>{m.providers_trip_on()}</th>
+        {/if}
         <th>{m.providers_enabled()}</th>
         <th>{m.providers_updated()}</th>
         {#if showActions}
@@ -48,6 +54,10 @@
           <td class="mono font-size-md" title={row.base_url || ""}>{row.base_url || "—"}</td>
           <td>{providerCredentialAuthLabel(row)}</td>
           <td>{providerCredentialModelsLabel(row)}</td>
+          {#if showTripRules}
+            <td class="mono font-size-md" title={providerCredentialTripRulesLabel(row)}>{providerCredentialTripRulesLabel(row) || "—"}</td>
+          {/if}
+
           <td>
             <span
               class="auth-key-status-badge"

@@ -92,6 +92,20 @@ export function sendJSON(path, method, body, options = {}) {
 // errorMessage extracts a human-readable message from an admin error payload.
 export { errorMessage, errorPayloadMessage } from "./errors.js";
 
+// resetCircuitBreaker force-closes one provider's tripped circuit breaker
+// (POST /admin/providers/{name}/circuit-breaker/reset; 204 No Content on
+// success, 404 for an unknown provider, 400 when the breaker cannot reset).
+export function resetCircuitBreaker(providerName) {
+  return sendJSON(
+    "/admin/providers/" +
+      encodeURIComponent(providerName) +
+      "/circuit-breaker/reset",
+    "POST",
+    undefined,
+    { label: "reset circuit breaker" },
+  );
+}
+
 export function isAbortError(error) {
   return Boolean(error) && (error.name === "AbortError" || error.code === 20);
 }

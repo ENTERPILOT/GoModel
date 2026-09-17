@@ -159,6 +159,9 @@ export function defaultProviderCredentialForm() {
     service_account_json_base64: "",
     gcp_scope: "",
     models: "",
+    // Quota breaker trip rules as editable rows; ttl stays the Go duration
+    // string the operator typed and converts at the payload boundary.
+    trip_on: [],
     enabled: true,
   };
 }
@@ -252,8 +255,9 @@ export function providerCredentialFormFields(schema, defaultBaseURL) {
 }
 
 // Form values that identify the provider rather than configure its type, so a
-// change of type leaves them alone.
-const IDENTITY_FIELDS = new Set(["name", "type", "enabled"]);
+// change of type leaves them alone. trip_on joins them: quota-breaker rules
+// apply to the provider as a whole, whatever type authenticates it.
+const IDENTITY_FIELDS = new Set(["name", "type", "enabled", "trip_on"]);
 
 // resetProviderCredentialFields puts every value the given fields do not
 // render back to its default. Changing type changes which fields exist, and
@@ -313,6 +317,161 @@ export function providerCredentialKeysToRows(apiKeys) {
   }));
 }
 
+// --- Quota breaker trip rules ---
+//
+// The wire format carries trip rules as {match, ttl} with ttl in integer
+// nanoseconds (Go's time.Duration JSON encoding). The editor keeps ttl as
+// the Go duration string the operator typed ("15m", "1h30m", "90s") and
+// converts at the payload boundary.
+
+const GO_DURATION_UNITS = {
+  ns: 1,
+  us: 1000,
+  "µs": 1000,
+  "μs": 1000,
+  ms: 1e6,
+  s: 1e9,
+  m: 60e9,
+  h: 3600e9,
+};
+
+// parseGoDuration converts a Go duration string to integer nanoseconds,
+// mirroring time.ParseDuration ("15m", "1h30m", "90s", "-500ms", "0").
+// Returns null when the text is not a valid duration.
+export function parseGoDuration(text) {
+  let rest = String(text ?? "").trim();
+  if (!rest) return null;
+  let neg = false;
+  const sign = rest.charAt(0);
+  if (sign === "-" || sign === "+") {
+    neg = sign === "-";
+    rest = rest.slice(1);
+  }
+  // A lone "0" is Go's zero-duration special case.
+  if (rest === "0") return 0;
+  if (!rest) return null;
+  let total = 0;
+  while (rest) {
+    // A fresh sticky regex anchors at the slice's start each iteration.
+    const match = /(\d+(?:\.\d*)?|\.\d+)(ns|us|µs|μs|ms|s|m|h)/y.exec(rest);
+    if (!match || match.index !== 0) return null;
+    const value = Number.parseFloat(match[1]);
+    if (!Number.isFinite(value)) return null;
+    total += value * GO_DURATION_UNITS[match[2]];
+    rest = rest.slice(match[0].length);
+  }
+  if (!Number.isFinite(total)) return null;
+  // Fractions below a nanosecond truncate, as in Go.
+  const ns = Math.floor(total);
+  return neg ? -ns : ns;
+}
+
+// formatGoDurationNs renders integer nanoseconds the way Go's
+// time.Duration.String() does ("15m0s", "1h30m0s", "90s", "1.5ms", "0s").
+// Returns "" for values it cannot represent.
+export function formatGoDurationNs(ns) {
+  const value = Number(ns);
+  if (!Number.isFinite(value)) return "";
+  const neg = value < 0;
+  const u = Math.abs(Math.trunc(value));
+  let out;
+  if (u === 0) {
+    out = "0s";
+  } else if (u < 1e3) {
+    out = u + "ns";
+  } else if (u < 1e6) {
+    out = u / 1e3 + "µs";
+  } else if (u < 1e9) {
+    out = u / 1e6 + "ms";
+  } else {
+    const frac = u % 1e9;
+    const totalSeconds = (u - frac) / 1e9;
+    const seconds = totalSeconds % 60;
+    let rest = (totalSeconds - seconds) / 60;
+    const fraction =
+      frac === 0
+        ? ""
+        : "." + String(frac).padStart(9, "0").replace(/0+$/, "");
+    out = seconds + fraction + "s";
+    if (rest > 0) {
+      const minutes = rest % 60;
+      rest = (rest - minutes) / 60;
+      out = minutes + "m" + out;
+      if (rest > 0) {
+        out = rest + "h" + out;
+      }
+    }
+  }
+  return (neg ? "-" : "") + out;
+}
+
+// tripRulesToRows converts a view row's trip_on array ({match, ttl} with ttl
+// in nanoseconds) into editable rows whose ttl is a Go duration string.
+export function tripRulesToRows(tripOn) {
+  return (Array.isArray(tripOn) ? tripOn : []).map((rule) => ({
+    match: String((rule && rule.match) || ""),
+    ttl: formatGoDurationNs(rule && rule.ttl),
+  }));
+}
+
+// tripRuleRowsToWire converts editor rows into the wire trip_on array
+// ({match, ttl} with ttl in nanoseconds), trimming the match and dropping
+// rows the operator left completely empty. Returns null when a filled row's
+// ttl is not a valid Go duration. An empty list is valid: no rules.
+export function tripRuleRowsToWire(rows) {
+  const wire = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const match = String((row && row.match) || "").trim();
+    const ttlText = String((row && row.ttl) || "").trim();
+    if (!match && !ttlText) {
+      continue;
+    }
+    const ttl = parseGoDuration(ttlText);
+    if (ttl === null) {
+      return null;
+    }
+    wire.push({ match, ttl });
+  }
+  return wire;
+}
+
+// validateTripRuleRows returns the editor message for the first trip-rule
+// problem, or "" when the rules can be submitted.
+function validateTripRuleRows(rows) {
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const match = String((row && row.match) || "").trim();
+    const ttlText = String((row && row.ttl) || "").trim();
+    if (!match && !ttlText) {
+      return m.providers_trip_on_row_blank();
+    }
+    if (!match) {
+      return m.providers_trip_on_match_required();
+    }
+    if (!ttlText) {
+      return m.providers_trip_on_ttl_required();
+    }
+    if (parseGoDuration(ttlText) === null) {
+      return m.providers_trip_on_ttl_invalid();
+    }
+  }
+  return "";
+}
+
+// providerCredentialTripRulesLabel summarizes a row's trip rules for the
+// list ("insufficient_quota (15m0s), rate limit (1m0s)"); empty when the row
+// declares none. Read-only for every row: rules are declarative
+// configuration for config-declared providers and editable in the editor for
+// dashboard-managed ones.
+export function providerCredentialTripRulesLabel(row) {
+  return (Array.isArray(row && row.trip_on) ? row.trip_on : [])
+    .map((rule) => {
+      const ttl = formatGoDurationNs(rule && rule.ttl);
+      return String((rule && rule.match) || "") + (ttl ? " (" + ttl + ")" : "");
+    })
+    .filter(Boolean)
+    .join(", ");
+}
+
 // providerCredentialKeyRowsToArray flattens editor rows back into the wire
 // array. Values are NOT trimmed: an untouched "***********" mask must be sent
 // verbatim so the server preserves the stored key at that position.
@@ -367,6 +526,7 @@ export function providerCredentialRowToForm(row) {
     ),
     gcp_scope: String((row && row.gcp_scope) || ""),
     models: (Array.isArray(row && row.models) ? row.models : []).join(", "),
+    trip_on: tripRulesToRows(row && row.trip_on),
     enabled: !row || row.enabled !== false,
   };
 }
@@ -410,6 +570,11 @@ export function validateProviderCredentialForm(form, mode, existingRows, schema)
     if (message) {
       errors[field.name] = message;
     }
+  }
+
+  const tripError = validateTripRuleRows(form && form.trip_on);
+  if (tripError) {
+    errors.trip_on = tripError;
   }
   return errors;
 }
@@ -468,6 +633,11 @@ export function buildProviderCredentialPayload(form, schema) {
     type: String((form && form.type) || "").trim(),
     enabled: Boolean(form && form.enabled),
   };
+  // PUT replaces the whole row, so trip_on is always sent — an empty array
+  // is how clearing every rule works. (Validation rejects invalid ttls
+  // before the payload is built; a null here means "no valid rules".)
+  const tripOn = tripRuleRowsToWire(form && form.trip_on);
+  payload.trip_on = Array.isArray(tripOn) ? tripOn : [];
   const { primary, advanced } = providerCredentialFormFields(schema);
   const hasAdvertisedFields = Boolean(
     schema && Array.isArray(schema.fields) && schema.fields.length > 0,
@@ -524,4 +694,13 @@ function providerCredentialPayloadValue(form, name) {
 // with only managed providers has no use for an actions column.
 export function providerRowsHaveActions(rows) {
   return (Array.isArray(rows) ? rows : []).some((row) => row && !row.managed);
+}
+
+// providerRowsHaveTripRules reports whether any listed provider declares
+// quota-breaker trip rules, which is when the list shows the read-only
+// rules column at all.
+export function providerRowsHaveTripRules(rows) {
+  return (Array.isArray(rows) ? rows : []).some(
+    (row) => Array.isArray(row && row.trip_on) && row.trip_on.length > 0,
+  );
 }

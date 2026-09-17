@@ -208,6 +208,16 @@ class ProvidersConfigState {
     this.clearFieldError("api_keys");
   }
 
+  addTripRuleRow() {
+    this.form.trip_on.push({ match: "", ttl: "" });
+    this.clearFieldError("trip_on");
+  }
+
+  removeTripRuleRow(index) {
+    this.form.trip_on.splice(index, 1);
+    this.clearFieldError("trip_on");
+  }
+
   // #reportSaveError routes a rejected save to the input that caused it. The
   // gateway names the offending credential field in `error.param`, using the
   // same names as the schema, so a server-side rule (which field combinations
