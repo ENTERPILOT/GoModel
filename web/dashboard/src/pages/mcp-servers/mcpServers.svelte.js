@@ -55,15 +55,21 @@ class McpServersState {
   // after the page is gone.
   #pollGeneration = 0;
   #pollFailures = 0;
+  // Row actions and the poll timer can both have a list request in flight.
+  // loadAdminList only reports "stale" when the API key changed, so the
+  // newest request wins here: an older response must not restore the list a
+  // delete just removed, or replace the timer the newer one scheduled.
+  #listSeq = 0;
 
   // --- server list -------------------------------------------------------
 
   // background=true is the poll loop re-fetching: it leaves the loading flag
   // alone so the settled list never flickers back to the spinner.
   async fetchServers({ background = false } = {}) {
-    // Captured before the first await, so a cleanup during any suspension of
-    // this request — not just the list call — retires it.
+    // Both captured before the first await, so a cleanup or a newer request
+    // during any suspension of this one — not just the list call — retires it.
     const generation = this.#pollGeneration;
+    const seq = ++this.#listSeq;
     // Wait for the shared runtime-config request before deciding whether the
     // MCP admin API is available.
     await runtimeConfig.ensureLoaded();
@@ -91,7 +97,7 @@ class McpServersState {
         errorFallback: m.mcp_load_failed(),
         unavailableStatuses: [503, 404],
       });
-      if (outcome.status === "stale") {
+      if (outcome.status === "stale" || seq !== this.#listSeq) {
         return;
       }
       if (outcome.status === "unavailable") {
@@ -126,7 +132,7 @@ class McpServersState {
       this.#pollFailures = 0;
       this.#schedulePoll(generation);
     } finally {
-      if (!background) {
+      if (!background && seq === this.#listSeq) {
         this.loading = false;
       }
     }

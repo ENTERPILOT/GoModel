@@ -157,6 +157,23 @@ test("the MCP connect poll retries failures and cannot outlive the page", () => 
     /^await runtimeConfig\.ensureLoaded\(\);\s*\n\s*if \(generation !== this\.#pollGeneration\) \{\s*\n\s*return;/,
   );
 
+  // Overlapping list requests: the newest one wins. The sequence is taken
+  // before the first await and checked before any response is applied, so a
+  // slow poll cannot restore a list a delete just removed.
+  const seqCapture = fetchServersDecl.indexOf("const seq = ++this.#listSeq;");
+  assert.ok(seqCapture >= 0, "fetchServers must take a list sequence");
+  assert.ok(
+    seqCapture < firstAwait,
+    "the list sequence must be taken before the first await",
+  );
+  const seqCheck = fetchServersDecl.indexOf("seq !== this.#listSeq");
+  assert.ok(seqCheck >= 0, "a superseded response must be dropped");
+  assert.ok(
+    seqCheck < fetchServersDecl.indexOf("this.servers = outcome.items;"),
+    "the sequence check must run before the response is applied",
+  );
+  assert.match(fetchServersDecl, /if \(!background && seq === this\.#listSeq\)/);
+
   // Leaving the page invalidates whatever is in flight.
   const stop = store.match(/stopPolling\(\) \{[\s\S]*?\n  \}/);
   assert.ok(stop, "stopPolling missing");
