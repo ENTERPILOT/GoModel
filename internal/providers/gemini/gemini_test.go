@@ -27,7 +27,7 @@ import (
 func TestNew(t *testing.T) {
 	apiKey := "test-api-key"
 	// Use NewWithHTTPClient to get concrete type for internal testing
-	provider := NewWithHTTPClient(apiKey, nil, llmclient.Hooks{})
+	provider := newTestProvider(apiKey, nil, llmclient.Hooks{})
 	got := provider.keys.Primary()
 	assert.Equal(t, apiKey, got)
 	assert.Equal(t, defaultModelsBaseURL, provider.modelsURL)
@@ -37,7 +37,7 @@ func TestNew(t *testing.T) {
 func TestPrepareCachedContentCreatesAndReusesObject(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"name":"cachedContents/session-prefix","expireTime":"2099-01-01T00:00:00Z"}`)
 
-	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
+	p := newTestProvider("key", server.Client(), llmclient.Hooks{})
 	p.SetBaseURL(server.URL)
 	req := &core.ChatRequest{Model: "gemini-2.5-pro", PromptCachePlan: &core.PromptCachePlan{Key: "prefix-key"}}
 	newBody := func() *geminiGenerateContentRequest {
@@ -66,7 +66,7 @@ func TestPrepareCachedContentCreatesAndReusesObject(t *testing.T) {
 
 func TestPrepareCachedContentSupportsSystemOnlyPrefix(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"name":"cachedContents/system-prefix","expireTime":"2099-01-01T00:00:00Z"}`)
-	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
+	p := newTestProvider("key", server.Client(), llmclient.Hooks{})
 	p.SetBaseURL(server.URL)
 	req := &core.ChatRequest{Model: "gemini-2.5-pro", PromptCachePlan: &core.PromptCachePlan{Key: "system"}}
 	body := &geminiGenerateContentRequest{
@@ -82,7 +82,7 @@ func TestPrepareCachedContentSupportsSystemOnlyPrefix(t *testing.T) {
 
 func TestPrepareCachedContentFailureIsBestEffortAndBackedOff(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusBadRequest, `{"error":{"message":"unsupported"}}`)
-	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
+	p := newTestProvider("key", server.Client(), llmclient.Hooks{})
 	p.SetBaseURL(server.URL)
 	req := &core.ChatRequest{Model: "gemini-2.5-pro", PromptCachePlan: &core.PromptCachePlan{Key: "failure"}}
 	newBody := func() *geminiGenerateContentRequest {
@@ -115,7 +115,7 @@ func TestPrepareCachedContentEmptyNameAndExpiringEntry(t *testing.T) {
 		}
 		_, _ = io.WriteString(w, `{"name":"cachedContents/recreated","expireTime":"2099-01-01T00:00:00Z"}`)
 	})
-	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
+	p := newTestProvider("key", server.Client(), llmclient.Hooks{})
 	p.SetBaseURL(server.URL)
 	req := &core.ChatRequest{Model: "gemini-2.5-pro", PromptCachePlan: &core.PromptCachePlan{Key: "expiry"}}
 	newBody := func() *geminiGenerateContentRequest {
@@ -152,7 +152,7 @@ func TestPrepareCachedContentCoalescesConcurrentCreation(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"name":"cachedContents/concurrent","expireTime":"2099-01-01T00:00:00Z"}`)
 	})
-	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
+	p := newTestProvider("key", server.Client(), llmclient.Hooks{})
 	p.SetBaseURL(server.URL)
 	req := &core.ChatRequest{Model: "gemini-2.5-pro", PromptCachePlan: &core.PromptCachePlan{Key: "concurrent"}}
 	bodies := make([]*geminiGenerateContentRequest, callers)
@@ -179,7 +179,7 @@ func TestPrepareCachedContentCoalescesConcurrentCreation(t *testing.T) {
 
 func TestPrepareCachedContentRequiresStableCredentialAndAIStudio(t *testing.T) {
 	server, capture := providertest.Server(t, nil)
-	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
+	p := newTestProvider("key", server.Client(), llmclient.Hooks{})
 	p.SetBaseURL(server.URL)
 	p.keys = providers.NewKeyring("one", "two")
 	req := &core.ChatRequest{PromptCachePlan: &core.PromptCachePlan{Key: "prefix"}}
@@ -444,7 +444,7 @@ func TestSetBaseURLDerivesNativeRouting(t *testing.T) {
 		}]
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL + "/v1beta/openai")
 
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -475,7 +475,7 @@ func TestSetBaseURLDerivesModelsURL(t *testing.T) {
 		}]
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL + "/v1beta/openai")
 
 	require.Equal(t, server.URL+"/v1beta/openai", provider.client.BaseURL())
@@ -508,7 +508,7 @@ func TestListModels_StampsDiscoveredModes(t *testing.T) {
 		}]
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL + "/v1beta/openai")
 
 	resp, err := provider.ListModels(context.Background())
@@ -905,7 +905,7 @@ func TestChatCompletion_UsesNativeGenerateContentByDefault(t *testing.T) {
 		}
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
 
 	maxTokens := 128
@@ -990,7 +990,7 @@ func TestChatCompletion_NativeUsageMetadata(t *testing.T) {
 		}
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
 
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -1055,7 +1055,7 @@ func TestChatCompletion_NativeBlockedPromptReturnsError(t *testing.T) {
 		}
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
 
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -1074,7 +1074,7 @@ func TestChatCompletion_NativeBlockedPromptReturnsError(t *testing.T) {
 func TestChatCompletion_NativeRejectsRemoteImageURL(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model: "gemini-2.5-flash",
@@ -1110,7 +1110,7 @@ func TestChatCompletion_NativeFunctionCallTranslation(t *testing.T) {
 		}]
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
 
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -1233,7 +1233,7 @@ data: {"responseId":"gemini-stream-123","candidates":[{"content":{"role":"model"
 
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
 
 	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
@@ -1343,7 +1343,7 @@ func TestStreamChatCompletion_NativePerChoiceState(t *testing.T) {
 
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
 
 	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
@@ -1372,7 +1372,7 @@ func TestStreamChatCompletion_NativeBlockedPromptEmitsError(t *testing.T) {
 
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
 
 	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
@@ -1454,7 +1454,7 @@ func TestListModels(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, tt.statusCode, tt.responseBody)
 
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+			provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 			provider.SetModelsURL(server.URL)
 
 			resp, err := provider.ListModels(context.Background())
@@ -1551,7 +1551,7 @@ func TestResponses_Native(t *testing.T) {
 		}
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
 
 	maxOutputTokens := 64
@@ -1651,7 +1651,7 @@ data: {"responseId":"gemini-native-stream-response","candidates":[{"content":{"r
 
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
 
 	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{

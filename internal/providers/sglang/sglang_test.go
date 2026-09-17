@@ -27,11 +27,13 @@ func TestChatCompatibleContract(t *testing.T) {
 		NativeResponses: true,
 		Embeddings:      true,
 		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
-			return NewWithHTTPClient(apiKey, baseURL, client, hooks)
+			opts := providertest.Options(hooks)
+			opts.HTTPClient = client
+			return New(providers.ProviderConfig{APIKey: apiKey, BaseURL: baseURL}, opts)
 		},
 	})
 
-	provider := NewWithHTTPClient("", "", nil, llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{APIKey: ""}, providers.ProviderOptions{})
 	providertest.AssertNoNativeSurfaces(t, provider)
 	_, ok := any(provider).(core.NativeResponseLifecycleProvider)
 	assert.False(t, ok, "provider should not implement core.NativeResponseLifecycleProvider")
@@ -49,7 +51,7 @@ func TestChatCompletionPreservesSGLangExtensionFields(t *testing.T) {
 	}`), &req)
 	require.NoError(t, err)
 
-	provider := NewWithHTTPClient("", server.URL+"/v1", server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("", server.URL+"/v1", server.Client(), llmclient.Hooks{})
 	_, err = provider.ChatCompletion(context.Background(), &req)
 	require.NoError(t, err)
 
@@ -78,7 +80,7 @@ func TestPassthroughRoutesNativeAndOpenAIEndpoints(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, http.StatusOK, `{}`)
 
-			provider := NewWithHTTPClient("sglang-key", server.URL+"/v1", server.Client(), llmclient.Hooks{})
+			provider := newTestProvider("sglang-key", server.URL+"/v1", server.Client(), llmclient.Hooks{})
 			resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 				Method:   http.MethodPost,
 				Endpoint: tt.endpoint,
@@ -123,7 +125,7 @@ func TestNewSharesKeyRotationWithNativePassthrough(t *testing.T) {
 func TestSetBaseURLUpdatesOpenAIAndNativeClients(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"object":"list","data":[]}`)
 
-	provider := NewWithHTTPClient("", "http://127.0.0.1:1/v1", server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("", "http://127.0.0.1:1/v1", server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL + "/v1")
 	_, err := provider.ListModels(context.Background())
 	require.NoError(t, err)

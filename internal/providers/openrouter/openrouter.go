@@ -57,20 +57,6 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 	return p
 }
 
-func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	p := &Provider{
-		siteURL: envOrDefault("OPENROUTER_SITE_URL", defaultSiteURL),
-		appName: envOrDefault("OPENROUTER_APP_NAME", defaultAppName),
-	}
-	p.CompatibleProvider = openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, openai.CompatibleProviderConfig{
-		ProviderName: "openrouter",
-		BaseURL:      defaultBaseURL,
-		SetHeaders:   setHeaders,
-	})
-	p.SetRequestMutator(p.mutateRequest)
-	return p
-}
-
 func (p *Provider) mutateRequest(req *llmclient.Request) {
 	if req.Headers == nil {
 		req.Headers = make(http.Header)

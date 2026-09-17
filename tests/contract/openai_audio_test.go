@@ -17,7 +17,9 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
 func openAIAudioProvider(t *testing.T, routes map[string]replayRoute) core.AudioProvider {
@@ -180,7 +182,9 @@ func newOpenAICapturingAudio(t *testing.T, respType string, respBody []byte) (co
 	t.Helper()
 	captured := &capturedRequest{}
 	client := &http.Client{Transport: &capturingTransport{t: t, captured: captured, respType: respType, respBody: respBody}}
-	provider := openai.NewWithHTTPClient("sk-test", client, llmclient.Hooks{})
+	opts := providertest.Options(llmclient.Hooks{})
+	opts.HTTPClient = client
+	provider := openai.New(providers.ProviderConfig{APIKey: "sk-test"}, opts).(*openai.Provider)
 	provider.SetBaseURL("https://replay.local")
 	// *openai.Provider implements core.AudioProvider via the embedded CompatibleProvider.
 	return provider, captured

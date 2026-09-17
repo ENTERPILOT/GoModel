@@ -9,7 +9,6 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
 
@@ -42,19 +41,6 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 		CompatibleProvider: NewCompatibleProvider(cfg.APIKey, opts, CompatibleProviderConfig{
 			ProviderName:     "openai",
 			BaseURL:          baseURL,
-			SetHeaders:       setHeaders,
-			AdaptChatRequest: adaptChatRequest,
-		}),
-	}
-}
-
-// NewWithHTTPClient creates a new OpenAI provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	return &Provider{
-		CompatibleProvider: NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, CompatibleProviderConfig{
-			ProviderName:     "openai",
-			BaseURL:          defaultBaseURL,
 			SetHeaders:       setHeaders,
 			AdaptChatRequest: adaptChatRequest,
 		}),

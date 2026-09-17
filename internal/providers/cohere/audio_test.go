@@ -60,7 +60,7 @@ func TestCreateTranscriptionTranslatesMultipartRequest(t *testing.T) {
 		_, _ = io.WriteString(w, `{"text":"GoModel routes requests reliably."}`)
 	})
 
-	provider := NewWithHTTPClient("test-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("test-key", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
 		Model:          "cohere-transcribe-03-2026",
 		Filename:       "sample.wav",
@@ -91,7 +91,7 @@ func TestCreateTranscriptionTranslatesMultipartRequest(t *testing.T) {
 }
 
 func TestCreateTranscriptionValidation(t *testing.T) {
-	provider := NewWithHTTPClient("key", "https://example.com", nil, llmclient.Hooks{})
+	provider := newTestProvider("key", "https://example.com", nil, llmclient.Hooks{})
 	tests := []struct {
 		name string
 		req  *core.AudioTranscriptionRequest
@@ -118,7 +118,7 @@ func TestCreateTranscriptionValidation(t *testing.T) {
 }
 
 func TestCreateSpeechIsUnsupported(t *testing.T) {
-	provider := NewWithHTTPClient("key", "https://example.com", nil, llmclient.Hooks{})
+	provider := newTestProvider("key", "https://example.com", nil, llmclient.Hooks{})
 	_, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{})
 	assertInvalidRequest(t, err)
 }

@@ -84,7 +84,7 @@ type Provider struct {
 
 // New creates a new Gemini provider.
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
-	return newProvider(providerCfg, opts, nil, false)
+	return newProvider(providerCfg, opts, opts.HTTPClient, false)
 }
 
 // NewVertexWithHTTPClient creates a Vertex-configured Gemini provider using an
@@ -136,34 +136,6 @@ func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOp
 	p.client = llmclient.New(clientCfg, p.setHeaders)
 	p.nativeClient = llmclient.New(nativeCfg, p.setNativeHeaders)
 	p.modelsClient = llmclient.New(modelsCfg, p.setNativeHeaders)
-	return p
-}
-
-// NewWithHTTPClient creates a new Gemini provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
-	providerCfg := providers.ProviderConfig{APIKey: apiKey}
-	baseURL, nativeBaseURL := geminiBaseURLs(providerCfg, geminiBackendAIStudio)
-	modelsURL := geminiModelsBaseURL(geminiBackendAIStudio, nativeBaseURL)
-	p := &Provider{
-		keys:         providers.NewKeyring(apiKey),
-		backend:      geminiBackendAIStudio,
-		authType:     geminiAuthTypeAPIKey,
-		useNativeAPI: useNativeAPIFromEnv(),
-		modelsURL:    modelsURL,
-	}
-	modelsCfg := llmclient.DefaultConfig("gemini", modelsURL)
-	modelsCfg.Hooks = hooks
-	cfg := llmclient.DefaultConfig("gemini", baseURL)
-	cfg.Hooks = hooks
-	nativeCfg := llmclient.DefaultConfig("gemini", nativeBaseURL)
-	nativeCfg.Hooks = hooks
-	p.client = llmclient.NewWithHTTPClient(httpClient, cfg, p.setHeaders)
-	p.nativeClient = llmclient.NewWithHTTPClient(httpClient, nativeCfg, p.setNativeHeaders)
-	p.modelsClient = llmclient.NewWithHTTPClient(httpClient, modelsCfg, p.setNativeHeaders)
 	return p
 }
 

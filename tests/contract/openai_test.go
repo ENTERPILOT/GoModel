@@ -12,14 +12,18 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
 func newOpenAIReplayProvider(t *testing.T, routes map[string]replayRoute) core.Provider {
 	t.Helper()
 
 	client := newReplayHTTPClient(t, routes)
-	provider := openai.NewWithHTTPClient("sk-test", client, llmclient.Hooks{})
+	opts := providertest.Options(llmclient.Hooks{})
+	opts.HTTPClient = client
+	provider := openai.New(providers.ProviderConfig{APIKey: "sk-test"}, opts).(*openai.Provider)
 	provider.SetBaseURL("https://replay.local")
 	return provider
 }

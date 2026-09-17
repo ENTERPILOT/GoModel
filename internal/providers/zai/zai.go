@@ -2,10 +2,7 @@
 package zai
 
 import (
-	"net/http"
-
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 )
@@ -36,15 +33,6 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 	return &Provider{
 		ChatCompatible: openai.NewChatCompatible(cfg.APIKey, opts, compatibleConfig(providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL))),
 		keys:           opts.Keyring(cfg.APIKey),
-	}
-}
-
-// NewWithHTTPClient creates a new Z.ai provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	return &Provider{
-		ChatCompatible: openai.NewChatCompatibleWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(providers.ResolveBaseURL(baseURL, defaultBaseURL))),
-		keys:           providers.NewKeyring(apiKey),
 	}
 }
 

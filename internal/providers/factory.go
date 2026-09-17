@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -27,6 +28,12 @@ type ProviderOptions struct {
 	// nil for keyless providers and for constructors invoked outside the
 	// factory; use the Keyring method rather than reading it directly.
 	Keys *Keyring
+	// HTTPClient overrides the transport a provider's clients use. The factory
+	// leaves it nil, so production keeps the shared pooled default; tests point
+	// it at their own server, and a provider that embeds another one passes its
+	// client down. Retry, circuit breaking and hooks still come from this
+	// struct, so overriding the transport does not change resilience.
+	HTTPClient *http.Client
 }
 
 // Keyring returns the key source a provider should authenticate with, falling

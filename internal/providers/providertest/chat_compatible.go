@@ -119,7 +119,7 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 
 	t.Run("constructor tolerates nil client and zero hooks", func(t *testing.T) {
 		provider := p.New(apiKey, "http://example.invalid", nil, llmclient.Hooks{})
-		assert.NotNil(t, provider, "NewWithHTTPClient(nil client) returned nil")
+		assert.NotNil(t, provider, "constructor with a nil HTTP client returned nil")
 	})
 
 	t.Run("chat completion via registered factory", func(t *testing.T) {

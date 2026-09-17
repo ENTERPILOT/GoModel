@@ -60,7 +60,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 			BaseURL:      baseURL,
 			SetHeaders:   setHeaders,
 		}),
-		rootClient: llmclient.New(llmclient.Config{
+		rootClient: llmclient.NewWithOptionalHTTPClient(opts.HTTPClient, llmclient.Config{
 			ProviderName:   opts.ClientName("llamacpp"),
 			BaseURL:        providers.PassthroughBaseURL(baseURL),
 			Retry:          opts.Resilience.Retry,
@@ -69,7 +69,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 		}, func(req *http.Request) {
 			setHeaders(req, keys.NextForContext(req.Context()))
 		}),
-		propsClient: newPropsClient(opts.ClientName("llamacpp"), baseURL, opts.Hooks, func(req *http.Request) {
+		propsClient: newPropsClient(opts.ClientName("llamacpp"), baseURL, opts.Hooks, opts.HTTPClient, func(req *http.Request) {
 			setHeaders(req, keys.NextForContext(req.Context()))
 		}),
 	}
@@ -78,37 +78,12 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 // newPropsClient builds the client used for optional /props enrichment: no
 // retries and no circuit breaker, so a failing /props costs one request and
 // leaves the shared native-route budget untouched.
-func newPropsClient(providerName, baseURL string, hooks llmclient.Hooks, setHeader llmclient.HeaderSetter) *llmclient.Client {
-	return llmclient.New(llmclient.Config{
+func newPropsClient(providerName, baseURL string, hooks llmclient.Hooks, httpClient *http.Client, setHeader llmclient.HeaderSetter) *llmclient.Client {
+	return llmclient.NewWithOptionalHTTPClient(httpClient, llmclient.Config{
 		ProviderName: providerName,
 		BaseURL:      providers.PassthroughBaseURL(baseURL),
 		Hooks:        hooks,
 	}, setHeader)
-}
-
-// NewWithHTTPClient creates a new llama.cpp provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	resolvedBaseURL := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	rootClientCfg := llmclient.DefaultConfig("llamacpp", providers.PassthroughBaseURL(resolvedBaseURL))
-	rootClientCfg.Hooks = hooks
-	return &Provider{
-		compatible: openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, openai.CompatibleProviderConfig{
-			ProviderName: "llamacpp",
-			BaseURL:      resolvedBaseURL,
-			SetHeaders:   setHeaders,
-		}),
-		rootClient: llmclient.NewWithHTTPClient(httpClient, rootClientCfg, func(req *http.Request) {
-			setHeaders(req, apiKey)
-		}),
-		propsClient: llmclient.NewWithHTTPClient(httpClient, llmclient.Config{
-			ProviderName: "llamacpp",
-			BaseURL:      providers.PassthroughBaseURL(resolvedBaseURL),
-			Hooks:        hooks,
-		}, func(req *http.Request) {
-			setHeaders(req, apiKey)
-		}),
-	}
 }
 
 // SetBaseURL allows configuring a custom base URL for the provider.

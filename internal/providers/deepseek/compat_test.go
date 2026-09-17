@@ -158,7 +158,7 @@ func TestResponses_DowngradesJSONSchemaTextFormat(t *testing.T) {
 	}`), &req)
 	require.NoError(t, err)
 
-	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
 	_, err = provider.Responses(context.Background(), &req)
 	require.NoError(t, err)
 

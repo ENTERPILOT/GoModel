@@ -61,13 +61,13 @@ func markMutated(req *llmclient.Request) {
 }
 
 func TestNew(t *testing.T) {
-	provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
+	provider := newHTTPTestProvider(testAPIKey, nil, llmclient.Hooks{})
 	assert.Equal(t, testAPIKey, provider.keys.Primary())
 	assert.NotNil(t, provider.client, "nil http client should fall back to a default")
 }
 
 func TestNilRequests_ReturnInvalidRequestError(t *testing.T) {
-	provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
+	provider := newHTTPTestProvider(testAPIKey, nil, llmclient.Hooks{})
 
 	tests := []struct {
 		name string
@@ -193,7 +193,7 @@ func TestCompatibleProvider_FileHelpersApplyRequestMutator(t *testing.T) {
 				}
 			})
 
-			provider := NewCompatibleProviderWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{}, CompatibleProviderConfig{
+			provider := NewCompatibleProvider(testAPIKey, providers.ProviderOptions{HTTPClient: server.Client()}, CompatibleProviderConfig{
 				ProviderName: "test",
 				BaseURL:      server.URL,
 			})
@@ -219,7 +219,7 @@ func TestCompatibleProvider_GetBatchResultsAppliesRequestMutator(t *testing.T) {
 		},
 	})
 
-	provider := NewCompatibleProviderWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{}, CompatibleProviderConfig{
+	provider := NewCompatibleProvider(testAPIKey, providers.ProviderOptions{HTTPClient: server.Client()}, CompatibleProviderConfig{
 		ProviderName: "test",
 		BaseURL:      server.URL,
 	})
@@ -323,7 +323,7 @@ func TestChatCompletion(t *testing.T) {
 
 func TestChatCompletion_PreservesMultimodalContent(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
-	provider := NewWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{})
+	provider := newHTTPTestProvider(testAPIKey, server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -359,7 +359,7 @@ func TestChatCompletion_PreservesMultimodalContent(t *testing.T) {
 
 func TestChatCompletion_PreservesUnknownTopLevelFields(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
-	provider := NewWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{})
+	provider := newHTTPTestProvider(testAPIKey, server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -386,7 +386,7 @@ func TestChatCompletion_PreservesUnknownTopLevelFields(t *testing.T) {
 
 func TestChatCompletion_PreservesUnknownNestedFields(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
-	provider := NewWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{})
+	provider := newHTTPTestProvider(testAPIKey, server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -419,7 +419,7 @@ func TestChatCompletion_PreservesUnknownNestedFields(t *testing.T) {
 
 func TestChatCompletion_PreservesUnknownTopLevelFieldsForOSeries(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
-	provider := NewWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{})
+	provider := newHTTPTestProvider(testAPIKey, server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	maxTokens := 128
@@ -451,7 +451,7 @@ func TestChatCompletion_PreservesUnknownTopLevelFieldsForOSeries(t *testing.T) {
 }
 
 func TestChatCompletion_OSeriesMarshalErrorReturnsInvalidRequest(t *testing.T) {
-	provider := NewWithHTTPClient(testAPIKey, http.DefaultClient, llmclient.Hooks{})
+	provider := newHTTPTestProvider(testAPIKey, http.DefaultClient, llmclient.Hooks{})
 
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model:    "o3-mini",
@@ -736,7 +736,7 @@ func TestResponsesUtilitiesForwardResponseContext(t *testing.T) {
 			_, _ = w.Write([]byte(`{"id":"cmp_1","object":"response.compaction","output":[]}`))
 		},
 	})
-	provider := NewWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{})
+	provider := newHTTPTestProvider(testAPIKey, server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	maxOutputTokens := 128
@@ -830,7 +830,7 @@ func TestResponsesWithArrayInput(t *testing.T) {
 
 func TestResponses_PreservesUnknownNestedFields(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, responsesReplyJSON)
-	provider := NewWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{})
+	provider := newHTTPTestProvider(testAPIKey, server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
@@ -1017,7 +1017,7 @@ func TestChatCompletion_AdaptsTokenParamsByModel(t *testing.T) {
 			var sent map[string]any
 			if tt.stream {
 				srv, capture := providertest.SSEServer(t, providertest.ChatChunkSSE)
-				provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
+				provider := newHTTPTestProvider(testAPIKey, nil, llmclient.Hooks{})
 				provider.SetBaseURL(srv.URL)
 
 				body, err := provider.StreamChatCompletion(context.Background(), req)
@@ -1031,7 +1031,7 @@ func TestChatCompletion_AdaptsTokenParamsByModel(t *testing.T) {
 				assert.True(t, stream)
 			} else {
 				srv, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
-				provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
+				provider := newHTTPTestProvider(testAPIKey, nil, llmclient.Hooks{})
 				provider.SetBaseURL(srv.URL)
 
 				resp, err := provider.ChatCompletion(context.Background(), req)
@@ -1129,7 +1129,7 @@ func TestChatCompletion_PreservesToolConfiguration(t *testing.T) {
 
 func TestPassthrough(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusTooManyRequests, `{"error":"rate limited"}`)
-	provider := NewWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{})
+	provider := newHTTPTestProvider(testAPIKey, server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{

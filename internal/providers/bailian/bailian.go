@@ -14,7 +14,6 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 )
@@ -50,13 +49,6 @@ type Provider struct {
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	compat := openai.NewCompatibleProvider(cfg.APIKey, opts, compatibleConfig(providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL)))
 	return newProvider(compat, opts.Keyring(cfg.APIKey))
-}
-
-// NewWithHTTPClient creates a new Bailian provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	compat := openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(defaultBaseURL))
-	return newProvider(compat, providers.NewKeyring(apiKey))
 }
 
 func newProvider(compat *openai.CompatibleProvider, keys *providers.Keyring) *Provider {

@@ -6,10 +6,7 @@
 package kimicode
 
 import (
-	"net/http"
-
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 )
@@ -40,17 +37,5 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 	return &Provider{openai.NewChatCompatible(cfg.APIKey, opts, openai.CompatibleProviderConfig{
 		ProviderName: "kimicode",
 		BaseURL:      providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
-	})}
-}
-
-// NewWithHTTPClient creates a new Kimi Code provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-//
-// The signature is intentionally stable and matches every other chat-compatible
-// provider on main: (apiKey, baseURL, httpClient, hooks).
-func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	return &Provider{openai.NewChatCompatibleWithHTTPClient(apiKey, httpClient, hooks, openai.CompatibleProviderConfig{
-		ProviderName: "kimicode",
-		BaseURL:      providers.ResolveBaseURL(baseURL, defaultBaseURL),
 	})}
 }

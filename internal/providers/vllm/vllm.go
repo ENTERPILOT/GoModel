@@ -42,7 +42,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 			SetHeaders:       setHeaders,
 			AdaptChatRequest: adaptChatRequest,
 		}),
-		rootClient: llmclient.New(llmclient.Config{
+		rootClient: llmclient.NewWithOptionalHTTPClient(opts.HTTPClient, llmclient.Config{
 			ProviderName:   opts.ClientName("vllm"),
 			BaseURL:        rootBaseURL,
 			Retry:          opts.Resilience.Retry,
@@ -50,25 +50,6 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 			CircuitBreaker: opts.Resilience.CircuitBreaker,
 		}, func(req *http.Request) {
 			setHeaders(req, cfg.APIKey)
-		}),
-	}
-}
-
-// NewWithHTTPClient creates a new vLLM provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	resolvedBaseURL := providers.ResolveBaseURL(baseURL, defaultBaseURL)
-	rootClientCfg := llmclient.DefaultConfig("vllm", providers.PassthroughBaseURL(resolvedBaseURL))
-	rootClientCfg.Hooks = hooks
-	return &Provider{
-		compatible: openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, openai.CompatibleProviderConfig{
-			ProviderName:     "vllm",
-			BaseURL:          resolvedBaseURL,
-			SetHeaders:       setHeaders,
-			AdaptChatRequest: adaptChatRequest,
-		}),
-		rootClient: llmclient.NewWithHTTPClient(httpClient, rootClientCfg, func(req *http.Request) {
-			setHeaders(req, apiKey)
 		}),
 	}
 }
