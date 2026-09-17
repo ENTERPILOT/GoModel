@@ -80,6 +80,16 @@ type Registration struct {
 	New                         ProviderConstructor
 	PassthroughSemanticEnricher core.PassthroughSemanticEnricher
 	Discovery                   DiscoveryConfig
+	// DefaultTripOn are the built-in circuit-breaker trip rules for this
+	// provider type. They apply only when the caller's config does not
+	// declare circuit_breaker.trip_on for that provider instance (nil
+	// inherited from global means "use defaults"; an explicit empty
+	// list disables tripping; a non-empty list overrides defaults).
+	//
+	// The caller's explicit trip_on wins over defaults.  A nil entry
+	// on the struct is inert — no type ships defaults unless it assigns
+	// one here.
+	DefaultTripOn []config.TripRuleConfig
 }
 
 // ProviderFactory manages provider registration and creation.
@@ -88,6 +98,7 @@ type ProviderFactory struct {
 	builders             map[string]ProviderConstructor
 	discoveryConfigs     map[string]DiscoveryConfig
 	passthroughEnrichers map[string]core.PassthroughSemanticEnricher
+	defaultTripOnRules   map[string][]config.TripRuleConfig
 	hooks                llmclient.Hooks
 }
 
@@ -97,6 +108,7 @@ func NewProviderFactory() *ProviderFactory {
 		builders:             make(map[string]ProviderConstructor),
 		discoveryConfigs:     make(map[string]DiscoveryConfig),
 		passthroughEnrichers: make(map[string]core.PassthroughSemanticEnricher),
+		defaultTripOnRules:   make(map[string][]config.TripRuleConfig),
 	}
 }
 
@@ -142,6 +154,14 @@ func (f *ProviderFactory) Add(reg Registration) {
 	} else {
 		delete(f.passthroughEnrichers, reg.Type)
 	}
+	if len(reg.DefaultTripOn) > 0 {
+		// Copy so callers may reuse the same slice across registrations.
+		cp := make([]config.TripRuleConfig, len(reg.DefaultTripOn))
+		copy(cp, reg.DefaultTripOn)
+		f.defaultTripOnRules[reg.Type] = cp
+	} else {
+		delete(f.defaultTripOnRules, reg.Type)
+	}
 }
 
 // Create instantiates a provider based on its resolved configuration.
@@ -156,6 +176,15 @@ func (f *ProviderFactory) Create(cfg ProviderConfig) (core.Provider, error) {
 
 	if !ok {
 		return nil, fmt.Errorf("unknown provider type: %s", cfg.Type)
+	}
+
+	// Apply built-in trip-on defaults when the config-level trip_on is
+	// unset (nil).  An explicit empty list disables tripping; a
+	// non-empty list overrides defaults.
+	if cfg.Resilience.CircuitBreaker.TripOn == nil {
+		if defaults := f.defaultTripOn(cfg.Type); defaults != nil {
+			cfg.Resilience.CircuitBreaker.TripOn = defaults
+		}
 	}
 
 	// One Keyring per provider instance: every client this provider builds
@@ -238,6 +267,17 @@ func (f *ProviderFactory) knowsType(providerType string) bool {
 	defer f.mu.RUnlock()
 	_, ok := f.builders[providerType]
 	return ok
+}
+
+// defaultTripOn returns the built-in trip rules for the given provider type.
+// Returns nil when no defaults are declared or the type is unknown.
+func (f *ProviderFactory) defaultTripOn(providerType string) []config.TripRuleConfig {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if f.defaultTripOnRules == nil {
+		return nil
+	}
+	return f.defaultTripOnRules[providerType]
 }
 
 // RegisteredTypes returns a list of all registered provider types.
