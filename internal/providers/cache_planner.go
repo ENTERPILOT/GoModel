@@ -173,12 +173,7 @@ var cacheDirectiveKeys = []string{
 }
 
 func hasCacheDirective(fields core.UnknownJSONFields) bool {
-	for _, key := range cacheDirectiveKeys {
-		if len(fields.Lookup(key)) > 0 {
-			return true
-		}
-	}
-	return false
+	return fields.HasAny(cacheDirectiveKeys...)
 }
 
 func hasChatCacheDirective(req *core.ChatRequest, prefix []core.Message) bool {

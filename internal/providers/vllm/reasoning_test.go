@@ -129,13 +129,12 @@ func TestChatCompletion_AppliesAdaptChatRequestThroughStandardConstructor(t *tes
 
 // TestAdaptChatRequest_SkipsMalformedReasoningContentWithoutError documents
 // that a syntactically invalid reasoning_content value is never seen by
-// adaptChatRequest at all: UnknownJSONFields.Lookup decodes each value with
-// a streaming json.Decoder, so a malformed value fails to decode and Lookup
-// returns nil (see UnknownJSONFields.Lookup) rather than surfacing invalid
-// bytes. adaptChatRequest then treats the field as absent. There is no
-// reachable path back into core.MergeUnknownJSONFields with invalid JSON
-// here, since Lookup only ever returns bytes it has already decoded
-// successfully, so this request is left unmodified rather than erroring.
+// adaptChatRequest at all: UnknownJSONFields.Lookup reports a member whose
+// value does not parse as absent rather than surfacing invalid bytes, so
+// adaptChatRequest treats the field as missing. There is no reachable path
+// back into core.MergeUnknownJSONFields with invalid JSON here, since Lookup
+// only ever returns bytes that parsed, so this request is left unmodified
+// rather than erroring.
 func TestAdaptChatRequest_SkipsMalformedReasoningContentWithoutError(t *testing.T) {
 	req := &core.ChatRequest{
 		Messages: []core.Message{{Role: "assistant", Content: "hi"}},
