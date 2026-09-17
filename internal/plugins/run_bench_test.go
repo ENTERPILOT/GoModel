@@ -48,8 +48,9 @@ func BenchmarkReportOutcomeNoStrategies(b *testing.B) {
 }
 
 // BenchmarkRunReadersSingle measures a chain step with one reader, the
-// common shape: the run still pays a goroutine, a WaitGroup, three slices
-// and four header clones to run one hook.
+// common shape. The step itself runs inline: what the number still covers is
+// the exchange copy, the merge back, and the goroutine Call keeps to bound a
+// hook that ignores its context.
 func BenchmarkRunReadersSingle(b *testing.B) {
 	c := &Chain{}
 	readers := []*Instance{{Name: "reader"}}
