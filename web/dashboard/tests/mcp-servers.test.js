@@ -118,6 +118,11 @@ test("the MCP connect poll retries failures and cannot outlive the page", () => 
     join(SRC, "pages/mcp-servers/mcpServers.svelte.js"),
     "utf8",
   );
+  const fetchServersDecl = (
+    store.match(
+      /async fetchServers\(\{ background = false \} = \{\}\) \{[\s\S]*?\n  \}/,
+    ) || [""]
+  )[0];
 
   // Every scheduling path passes the generation captured when the request
   // started, and the timer is only armed while that generation is current.
@@ -135,6 +140,23 @@ test("the MCP connect poll retries failures and cannot outlive the page", () => 
     "#schedulePoll must always be called with the request's generation",
   );
 
+  // The generation is captured before the first await, so a cleanup during
+  // the shared runtime-config load retires the request too.
+  assert.ok(fetchServersDecl, "fetchServers declaration missing");
+  const capture = fetchServersDecl.indexOf(
+    "const generation = this.#pollGeneration;",
+  );
+  const firstAwait = fetchServersDecl.indexOf("await ");
+  assert.ok(capture >= 0, "fetchServers must capture the poll generation");
+  assert.ok(
+    capture < firstAwait,
+    "the generation must be captured before the first await",
+  );
+  assert.match(
+    fetchServersDecl.slice(firstAwait),
+    /^await runtimeConfig\.ensureLoaded\(\);\s*\n\s*if \(generation !== this\.#pollGeneration\) \{\s*\n\s*return;/,
+  );
+
   // Leaving the page invalidates whatever is in flight.
   const stop = store.match(/stopPolling\(\) \{[\s\S]*?\n  \}/);
   assert.ok(stop, "stopPolling missing");
@@ -142,11 +164,7 @@ test("the MCP connect poll retries failures and cannot outlive the page", () => 
   assert.match(stop[0], /this\.#clearPoll\(\);/);
 
   // A failed background poll retries on the budget instead of giving up.
-  const fetchServers = store.match(
-    /async fetchServers\(\{ background = false \} = \{\}\) \{[\s\S]*?\n  \}/,
-  );
-  assert.ok(fetchServers, "fetchServers missing");
-  const backgroundFailure = fetchServers[0].match(
+  const backgroundFailure = fetchServersDecl.match(
     /if \(background\) \{[\s\S]*?\n        \}/,
   );
   assert.ok(backgroundFailure, "background failure branch missing");

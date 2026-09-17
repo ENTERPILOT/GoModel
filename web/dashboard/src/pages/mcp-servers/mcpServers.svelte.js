@@ -61,9 +61,15 @@ class McpServersState {
   // background=true is the poll loop re-fetching: it leaves the loading flag
   // alone so the settled list never flickers back to the spinner.
   async fetchServers({ background = false } = {}) {
+    // Captured before the first await, so a cleanup during any suspension of
+    // this request — not just the list call — retires it.
+    const generation = this.#pollGeneration;
     // Wait for the shared runtime-config request before deciding whether the
     // MCP admin API is available.
     await runtimeConfig.ensureLoaded();
+    if (generation !== this.#pollGeneration) {
+      return;
+    }
     if (!runtimeConfig.mcpVisible()) {
       this.stopPolling();
       this.available = false;
@@ -74,7 +80,6 @@ class McpServersState {
     }
 
     this.#clearPoll();
-    const generation = this.#pollGeneration;
     if (!background) {
       this.loading = true;
       this.#pollFailures = 0;
