@@ -140,3 +140,51 @@ func TestCallRegistryIndexDoesNotGrowWithExpiredLookups(t *testing.T) {
 	assert.LessOrEqual(t, r.expiries.Len(), 2*len(r.entries)+16,
 		"expiry index holds %d nodes for %d live calls", r.expiries.Len(), len(r.entries))
 }
+
+// Lookup and the expiry index must agree on what "expired" means: the index
+// treats an entry due at exactly now as expired, so Lookup may not still hand
+// out its route at that instant.
+func TestCallRegistryExpiresAtExactDeadline(t *testing.T) {
+	now := time.Unix(1000, 0)
+	r := newTestRegistry(&now)
+
+	r.Register("rtc_1", CallRoute{Model: "m", Provider: "p"})
+	now = now.Add(DefaultCallTTL - time.Nanosecond)
+	_, ok := r.Lookup("rtc_1")
+	require.True(t, ok, "the call is still live a nanosecond before its deadline")
+
+	now = now.Add(time.Nanosecond)
+	_, ok = r.Lookup("rtc_1")
+	assert.False(t, ok, "the call must expire at its deadline, not after it")
+}
+
+// Every call re-registered since the index tracked it makes eviction walk
+// nothing but stale nodes. Repair is budgeted, so past maxExpiryReconciliations
+// the index is rebuilt once instead; eviction must still drop exactly the call
+// closest to expiry and leave the index matching the map.
+func TestCallRegistryEvictsSoonestAfterEveryCallWasReRegistered(t *testing.T) {
+	now := time.Unix(1000, 0)
+	r := newTestRegistry(&now)
+	require.Greater(t, r.capacity, maxExpiryReconciliations, "the capacity must exceed the repair budget")
+
+	for i := range r.capacity {
+		r.Register(fmt.Sprintf("rtc_%d", i), CallRoute{Model: "m"})
+		now = now.Add(time.Millisecond)
+	}
+	// Re-register every call in the same order: the index now holds a stale
+	// expiry for all of them, and rtc_0 is again the soonest to expire.
+	for i := range r.capacity {
+		r.Register(fmt.Sprintf("rtc_%d", i), CallRoute{Model: "refreshed"})
+		now = now.Add(time.Millisecond)
+	}
+
+	r.Register("rtc_new", CallRoute{Model: "m"})
+
+	require.Len(t, r.entries, r.capacity)
+	_, ok := r.Lookup("rtc_0")
+	assert.False(t, ok, "the call closest to expiry should have been evicted")
+	route, ok := r.Lookup("rtc_1")
+	require.True(t, ok, "no other call may be evicted to make room for one")
+	assert.Equal(t, "refreshed", route.Model)
+	assert.Equal(t, len(r.entries), r.expiries.Len(), "a rebuilt index tracks each live call exactly once")
+}

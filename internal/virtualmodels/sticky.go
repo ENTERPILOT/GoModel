@@ -13,6 +13,14 @@ const (
 	// maxStickySessions caps the pin map; at capacity the entry expiring
 	// soonest is evicted.
 	maxStickySessions = 10000
+	// maxExpiryReconciliations bounds how much index repair a single sweep
+	// does. A pin refreshed since it was tracked surfaces with a stale expiry
+	// and has to be re-tracked; a cache whose pins have all been refreshed
+	// would otherwise repair the entire heap while the lock is held, delaying
+	// every concurrent routing decision. Past the budget the index is rebuilt
+	// once instead, which costs less than the pops it replaces and leaves it
+	// exact, so the sweep cannot need a second rebuild.
+	maxExpiryReconciliations = 64
 )
 
 type stickyKey struct {
@@ -181,6 +189,7 @@ func (s *stickySessions) prune(active map[string]*redirectEntry) {
 // pruneLocked drops expired pins, touching only the keys that are actually
 // due rather than sweeping every pin held.
 func (s *stickySessions) pruneLocked(now time.Time) {
+	reconciled := 0
 	for {
 		key, tracked, ok := s.expiries.Expired(now)
 		if !ok {
@@ -192,6 +201,12 @@ func (s *stickySessions) pruneLocked(now time.Time) {
 			// Already dropped by a lookup, a re-pin, or an earlier sweep.
 		case pin.expires.After(tracked):
 			// Refreshed since: it lives longer than the index recorded.
+			reconciled++
+			if reconciled > maxExpiryReconciliations {
+				// The pin is still in the map, so the rebuild picks it up.
+				s.retrackLocked()
+				continue
+			}
 			s.expiries.Track(key, pin.expires)
 		default:
 			delete(s.entries, key)
@@ -203,6 +218,7 @@ func (s *stickySessions) pruneLocked(now time.Time) {
 }
 
 func (s *stickySessions) evictSoonestLocked() {
+	reconciled := 0
 	for {
 		key, tracked, ok := s.expiries.Soonest()
 		if !ok {
@@ -213,6 +229,13 @@ func (s *stickySessions) evictSoonestLocked() {
 		case !live:
 			continue
 		case pin.expires.After(tracked):
+			reconciled++
+			if reconciled > maxExpiryReconciliations {
+				// The pin is still in the map, so the rebuild picks it up,
+				// and the next pop is the true soonest.
+				s.retrackLocked()
+				continue
+			}
 			s.expiries.Track(key, pin.expires)
 		default:
 			delete(s.entries, key)

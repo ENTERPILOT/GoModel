@@ -17,6 +17,14 @@ const (
 	maxCalls       = 10000
 )
 
+// maxExpiryReconciliations bounds how much index repair a single sweep does.
+// An id refreshed since it was tracked surfaces with a stale expiry and has to
+// be re-tracked; a registry whose calls have all been re-registered would
+// otherwise repair the entire heap while the lock is held. Past the budget the
+// index is rebuilt once instead, which costs less than the pops it replaces
+// and leaves it exact, so the sweep cannot need a second rebuild.
+const maxExpiryReconciliations = 64
+
 // CallRoute remembers which model and provider a WebRTC call was created with,
 // so a later sideband attach (GET /v1/realtime?call_id=...) can route to the
 // same upstream without the client restating them.
@@ -88,7 +96,7 @@ func (r *CallRegistry) Lookup(callID string) (CallRoute, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	entry, ok := r.entries[callID]
-	if !ok || r.now().After(entry.expires) {
+	if !ok || !entry.expires.After(r.now()) {
 		delete(r.entries, callID)
 		return CallRoute{}, false
 	}
@@ -98,6 +106,7 @@ func (r *CallRegistry) Lookup(callID string) (CallRoute, bool) {
 // pruneLocked drops expired entries, touching only the ids that are actually
 // due rather than sweeping the whole registry on every registration.
 func (r *CallRegistry) pruneLocked(now time.Time) {
+	reconciled := 0
 	for {
 		id, tracked, ok := r.expiries.Expired(now)
 		if !ok {
@@ -109,6 +118,12 @@ func (r *CallRegistry) pruneLocked(now time.Time) {
 			// Already dropped, by Lookup or an earlier eviction.
 		case entry.expires.After(tracked):
 			// Re-registered since: it lives longer than the index recorded.
+			reconciled++
+			if reconciled > maxExpiryReconciliations {
+				// The entry is still in the map, so the rebuild picks it up.
+				r.retrackLocked()
+				continue
+			}
 			r.expiries.Track(id, entry.expires)
 		default:
 			delete(r.entries, id)
@@ -121,6 +136,7 @@ func (r *CallRegistry) pruneLocked(now time.Time) {
 
 // evictSoonestLocked removes the entry closest to expiry to make room.
 func (r *CallRegistry) evictSoonestLocked() {
+	reconciled := 0
 	for {
 		id, tracked, ok := r.expiries.Soonest()
 		if !ok {
@@ -131,6 +147,13 @@ func (r *CallRegistry) evictSoonestLocked() {
 		case !live:
 			continue
 		case entry.expires.After(tracked):
+			reconciled++
+			if reconciled > maxExpiryReconciliations {
+				// The entry is still in the map, so the rebuild picks it up,
+				// and the next pop is the true soonest.
+				r.retrackLocked()
+				continue
+			}
 			r.expiries.Track(id, entry.expires)
 		default:
 			delete(r.entries, id)
