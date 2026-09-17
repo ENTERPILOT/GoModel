@@ -14,9 +14,12 @@ import {
   deriveMcpServerSlug,
   filterMcpServers,
   mcpServerFormFromServer,
+  mcpPollShouldRetry,
   mcpServerSlug,
+  mcpServersNeedPolling,
   mcpServerStatus,
   normalizeMcpCatalog,
+  MCP_SERVERS_POLL_MS,
 } from "./mcp-servers.js";
 
 class McpServersState {
@@ -45,13 +48,36 @@ class McpServersState {
 
   filtered = $derived(filterMcpServers(this.servers, this.filter));
 
+  #pollTimer = null;
+  // stopPolling starts a new generation. A list request already in flight
+  // then belongs to the previous one: clearing the timer cannot cancel it, so
+  // the generation is what keeps its response from scheduling a fresh timer
+  // after the page is gone.
+  #pollGeneration = 0;
+  #pollFailures = 0;
+  // Row actions and the poll timer can both have a list request in flight.
+  // loadAdminList only reports "stale" when the API key changed, so the
+  // newest request wins here: an older response must not restore the list a
+  // delete just removed, or replace the timer the newer one scheduled.
+  #listSeq = 0;
+
   // --- server list -------------------------------------------------------
 
-  async fetchServers() {
+  // background=true is the poll loop re-fetching: it leaves the loading flag
+  // alone so the settled list never flickers back to the spinner.
+  async fetchServers({ background = false } = {}) {
+    // Both captured before the first await, so a cleanup or a newer request
+    // during any suspension of this one — not just the list call — retires it.
+    const generation = this.#pollGeneration;
+    const seq = ++this.#listSeq;
     // Wait for the shared runtime-config request before deciding whether the
     // MCP admin API is available.
     await runtimeConfig.ensureLoaded();
+    if (generation !== this.#pollGeneration) {
+      return;
+    }
     if (!runtimeConfig.mcpVisible()) {
+      this.stopPolling();
       this.available = false;
       this.servers = [];
       this.error = "";
@@ -59,7 +85,11 @@ class McpServersState {
       return;
     }
 
-    this.loading = true;
+    this.#clearPoll();
+    if (!background) {
+      this.loading = true;
+      this.#pollFailures = 0;
+    }
     this.error = "";
     try {
       const outcome = await loadAdminList("/admin/mcp-servers", {
@@ -67,7 +97,7 @@ class McpServersState {
         errorFallback: m.mcp_load_failed(),
         unavailableStatuses: [503, 404],
       });
-      if (outcome.status === "stale") {
+      if (outcome.status === "stale" || seq !== this.#listSeq) {
         return;
       }
       if (outcome.status === "unavailable") {
@@ -81,15 +111,64 @@ class McpServersState {
         if (outcome.result) {
           this.available = true;
         }
+        // A failed background poll keeps the list it already has: a blip
+        // while waiting for a dial must not blank the table or replace it
+        // with an error the operator never asked for. It retries, since the
+        // pending row is exactly what the loop is waiting on, until the
+        // failure budget runs out.
+        if (background) {
+          this.#pollFailures += 1;
+          if (mcpPollShouldRetry(this.#pollFailures)) {
+            this.#schedulePoll(generation);
+          }
+          return;
+        }
         this.servers = [];
         this.error = outcome.error;
         return;
       }
       this.available = true;
       this.servers = outcome.items;
+      this.#pollFailures = 0;
+      this.#schedulePoll(generation);
     } finally {
-      this.loading = false;
+      if (!background && seq === this.#listSeq) {
+        this.loading = false;
+      }
     }
+  }
+
+  // --- connect poll ------------------------------------------------------
+
+  #schedulePoll(generation) {
+    // The generation check comes first: a response from a stopped loop must
+    // not clear a timer a newer load already scheduled.
+    if (generation !== this.#pollGeneration) {
+      return;
+    }
+    this.#clearPoll();
+    if (!mcpServersNeedPolling(this.servers)) {
+      return;
+    }
+    this.#pollTimer = setTimeout(() => {
+      this.#pollTimer = null;
+      void this.fetchServers({ background: true });
+    }, MCP_SERVERS_POLL_MS);
+  }
+
+  #clearPoll() {
+    if (this.#pollTimer) {
+      clearTimeout(this.#pollTimer);
+      this.#pollTimer = null;
+    }
+  }
+
+  // stopPolling is called when the page is left, so neither a timer nor an
+  // in-flight request outlives it.
+  stopPolling() {
+    this.#pollGeneration += 1;
+    this.#pollFailures = 0;
+    this.#clearPoll();
   }
 
   // --- editor form -------------------------------------------------------

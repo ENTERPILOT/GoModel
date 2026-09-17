@@ -3,6 +3,9 @@
 // and DOM/template cases are covered by the Svelte components and skipped.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   buildMcpServerPayload,
@@ -16,6 +19,9 @@ import {
   mcpHeadersToRows,
   mcpServerEndpointLabel,
   mcpServerFormFromServer,
+  mcpPollShouldRetry,
+  MCP_SERVERS_POLL_MAX_FAILURES,
+  mcpServersNeedPolling,
   mcpServerStatus,
   mcpServerStatusClass,
   mcpServerStatusTitle,
@@ -66,6 +72,129 @@ test("mcpServerStatusClass maps statuses to badge classes", () => {
 test("mcpServerStatus defaults to connecting", () => {
   assert.equal(mcpServerStatus({}), "connecting");
   assert.equal(mcpServerStatus({ status: " degraded " }), "degraded");
+});
+
+test("mcpServersNeedPolling stays on only while a server is still connecting", () => {
+  assert.equal(mcpServersNeedPolling([{ name: "a", status: "connecting" }]), true);
+  // A server saved a moment ago comes back without a status yet.
+  assert.equal(mcpServersNeedPolling([{ name: "a" }]), true);
+  assert.equal(
+    mcpServersNeedPolling([
+      { name: "a", status: "connected" },
+      { name: "b", status: "connecting" },
+    ]),
+    true,
+  );
+  // Degraded is terminal for the poll loop: the row already shows last_error
+  // and the gateway re-probes it on its own schedule.
+  assert.equal(
+    mcpServersNeedPolling([
+      { name: "a", status: "connected" },
+      { name: "b", status: "degraded" },
+      { name: "c", status: "disabled" },
+    ]),
+    false,
+  );
+  assert.equal(mcpServersNeedPolling([]), false);
+  assert.equal(mcpServersNeedPolling(null), false);
+});
+
+test("mcpPollShouldRetry keeps retrying a failing poll until the budget runs out", () => {
+  assert.equal(mcpPollShouldRetry(0), true);
+  assert.equal(mcpPollShouldRetry(MCP_SERVERS_POLL_MAX_FAILURES - 1), true);
+  assert.equal(mcpPollShouldRetry(MCP_SERVERS_POLL_MAX_FAILURES), false);
+  assert.equal(mcpPollShouldRetry(undefined), true);
+});
+
+// Guard for the poll loop's lifecycle contract (#1024). The store uses runes,
+// so it cannot be imported here; like editor-dialog.test.js, this asserts the
+// wiring on the source. Both halves are regressions the loop shipped with:
+// a failed background poll that never retried left the row it was waiting on
+// stuck on "connecting", and a response landing after the page was left
+// scheduled a timer that outlived it.
+test("the MCP connect poll retries failures and cannot outlive the page", () => {
+  const SRC = fileURLToPath(new URL("../src", import.meta.url));
+  const store = readFileSync(
+    join(SRC, "pages/mcp-servers/mcpServers.svelte.js"),
+    "utf8",
+  );
+  const fetchServersDecl = (
+    store.match(
+      /async fetchServers\(\{ background = false \} = \{\}\) \{[\s\S]*?\n  \}/,
+    ) || [""]
+  )[0];
+
+  // Every scheduling path passes the generation captured when the request
+  // started, and the timer is only armed while that generation is current.
+  const schedule = store.match(/#schedulePoll\(generation\) \{[\s\S]*?\n  \}/);
+  assert.ok(schedule, "#schedulePoll(generation) missing");
+  assert.ok(
+    schedule[0].indexOf("generation !== this.#pollGeneration") <
+      schedule[0].indexOf("this.#clearPoll()"),
+    "a stale generation must return before clearing a newer timer",
+  );
+  assert.match(schedule[0], /setTimeout\(/);
+  assert.equal(
+    store.match(/this\.#schedulePoll\((?!generation\))/),
+    null,
+    "#schedulePoll must always be called with the request's generation",
+  );
+
+  // The generation is captured before the first await, so a cleanup during
+  // the shared runtime-config load retires the request too.
+  assert.ok(fetchServersDecl, "fetchServers declaration missing");
+  const capture = fetchServersDecl.indexOf(
+    "const generation = this.#pollGeneration;",
+  );
+  const firstAwait = fetchServersDecl.indexOf("await ");
+  assert.ok(capture >= 0, "fetchServers must capture the poll generation");
+  assert.ok(
+    capture < firstAwait,
+    "the generation must be captured before the first await",
+  );
+  assert.match(
+    fetchServersDecl.slice(firstAwait),
+    /^await runtimeConfig\.ensureLoaded\(\);\s*\n\s*if \(generation !== this\.#pollGeneration\) \{\s*\n\s*return;/,
+  );
+
+  // Overlapping list requests: the newest one wins. The sequence is taken
+  // before the first await and checked before any response is applied, so a
+  // slow poll cannot restore a list a delete just removed.
+  const seqCapture = fetchServersDecl.indexOf("const seq = ++this.#listSeq;");
+  assert.ok(seqCapture >= 0, "fetchServers must take a list sequence");
+  assert.ok(
+    seqCapture < firstAwait,
+    "the list sequence must be taken before the first await",
+  );
+  const seqCheck = fetchServersDecl.indexOf("seq !== this.#listSeq");
+  assert.ok(seqCheck >= 0, "a superseded response must be dropped");
+  assert.ok(
+    seqCheck < fetchServersDecl.indexOf("this.servers = outcome.items;"),
+    "the sequence check must run before the response is applied",
+  );
+  assert.match(fetchServersDecl, /if \(!background && seq === this\.#listSeq\)/);
+
+  // Leaving the page invalidates whatever is in flight.
+  const stop = store.match(/stopPolling\(\) \{[\s\S]*?\n  \}/);
+  assert.ok(stop, "stopPolling missing");
+  assert.match(stop[0], /this\.#pollGeneration \+= 1;/);
+  assert.match(stop[0], /this\.#clearPoll\(\);/);
+
+  // A failed background poll retries on the budget instead of giving up.
+  const backgroundFailure = fetchServersDecl.match(
+    /if \(background\) \{[\s\S]*?\n        \}/,
+  );
+  assert.ok(backgroundFailure, "background failure branch missing");
+  assert.match(backgroundFailure[0], /this\.#pollFailures \+= 1;/);
+  assert.match(
+    backgroundFailure[0],
+    /mcpPollShouldRetry\(this\.#pollFailures\)[\s\S]*?this\.#schedulePoll\(generation\)/,
+  );
+  assert.equal(
+    backgroundFailure[0].includes("this.servers = []"),
+    false,
+    "a failed background poll must keep the list it already has",
+  );
 });
 
 test("mcpServerStatusTitle surfaces last_error for degraded servers", () => {

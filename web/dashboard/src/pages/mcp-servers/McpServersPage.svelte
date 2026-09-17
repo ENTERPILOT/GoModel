@@ -19,10 +19,13 @@
   const PAGE = "mcp-servers";
   const HELP_TEXT = m.mcp_help();
 
-  // Re-fetch when the page becomes active or the API key changes.
+  // Re-fetch when the page becomes active or the API key changes, and stop
+  // the connect poll loop when navigating away.
   $effect(() => {
     void auth.refreshTick;
-    if (router.page === PAGE) mcpServers.fetchServers();
+    if (router.page !== PAGE) return;
+    mcpServers.fetchServers();
+    return () => mcpServers.stopPolling();
   });
 </script>
 
