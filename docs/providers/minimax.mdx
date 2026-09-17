@@ -52,11 +52,9 @@ a zero or negative temperature to `1.0` so OpenAI-style requests that pin
 
 ## Reasoning
 
-`MiniMax-M3` ships its chain of thought as inline `<think>` XML inside the answer content; the upstream MiniMax API describes the same shape for the M2 line (M2.7 and later). GoModel strips those tags and moves the inner text to the canonical `reasoning_content` member of the chat completion message (and the matching `delta.reasoning_content` on streaming deltas). The XML never reaches the client, so an OpenAI-compatible caller that reads `reasoning_content` — Kimi Code, Open WebUI, anything Anthropic-shaped — sees the reasoning as a separate field instead of as the answer.
+`MiniMax-M3` ships its chain of thought as inline `<think>` XML inside the answer content; the upstream MiniMax API describes the same shape for the M2 line (M2.7 and later). GoModel strips those tags and moves the inner text to the canonical `reasoning_content` member of the chat completion message (and the matching `delta.reasoning_content` on streaming deltas). The XML never reaches the client.
 
-The step runs for any model whose name starts with `MiniMax-M3` or `MiniMax-M2`, so the M2 gate covers M2.7 and any future M2.x reasoning variant. Other MiniMax models (speech, image, embedding) do not emit think tags and pass through unchanged.
-
-When the model is cut off mid-generation (`finish_reason: length`) inside an open `<think>` block, the partial inner text is dropped so a half-open tag never reaches the client. Reasoning tokens stay completion tokens; usage accounting is unaffected.
+The step runs for any model whose name starts with `MiniMax-M3` or `MiniMax-M2`. Other MiniMax models (speech, image, embedding) pass through unchanged. An unfinished think block — the model is cut off mid-reasoning by `finish_reason: length` — is closed and the partial inner text is emitted as reasoning rather than dropped. Reasoning tokens stay completion tokens.
 
 ## Text-to-speech
 

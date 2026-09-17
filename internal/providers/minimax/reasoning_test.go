@@ -62,10 +62,10 @@ func TestSplitThink(t *testing.T) {
 			wantThink: "onetwo",
 		},
 		{
-			name:      "unterminated think is dropped",
-			in:        "pre<think>hidden without close",
-			wantText:  "pre",
-			wantThink: "",
+			name:      "M2 prod shape: closed think followed by max_tokens cutoff",
+			in:        "<think>The user asks a simple question: \"How many primes below 30?\" This is a straightforward math question.\n\nWe need to comply. They ask: \"How many primes below 30?\" We must answer concisely, but not too terse. Let's think: primes less than 30: 2,3,5,7,11,13,17,19,23,29. That's 10 primes. So answer: 10.\n\nWe need to see any instructions: The developer message is empty, but system is default.\n\nWe also see the developer message is empty, but then we have a \"caveman ultra output style\" in the \"Context compression notice\"? That is not a system instruction, it's an instruction in the conversation. Wait let's read carefully:\n\nThe conversation:\n\n```\nSystem: ...\nUser: How many primes below 30?\n```\n\nWait we see the system messages: There's a system message (first). Then we\n</think>\n",
+			wantText:  "",
+			wantThink: "The user asks a simple question: \"How many primes below 30?\" This is a straightforward math question.\n\nWe need to comply. They ask: \"How many primes below 30?\" We must answer concisely, but not too terse. Let's think: primes less than 30: 2,3,5,7,11,13,17,19,23,29. That's 10 primes. So answer: 10.\n\nWe need to see any instructions: The developer message is empty, but system is default.\n\nWe also see the developer message is empty, but then we have a \"caveman ultra output style\" in the \"Context compression notice\"? That is not a system instruction, it's an instruction in the conversation. Wait let's read carefully:\n\nThe conversation:\n\n```\nSystem: ...\nUser: How many primes below 30?\n```\n\nWait we see the system messages: There's a system message (first). Then we\n",
 		},
 		{
 			name:      "empty think is dropped",
@@ -135,10 +135,11 @@ func TestNormalizeChatResponse(t *testing.T) {
 			wantThink:    "onetwo",
 		},
 		{
-			name:         "unterminated think drops its body",
+			name:         "unterminated think emits inner text as reasoning",
 			content:      "pre<think>no close",
 			wantContent:  "pre",
-			wantThinkKey: false,
+			wantThinkKey: true,
+			wantThink:    "no close",
 		},
 		{
 			name:         "existing reasoning_content is kept and tags still stripped",
@@ -416,6 +417,19 @@ func TestNormalizeChoice_EmptyContentIsLeftAlone(t *testing.T) {
 	assert.Empty(t, resp.Choices[0].Message.Content)
 }
 
+func TestNormalizeChoice_WhitespaceContentTrimmedAndIgnored(t *testing.T) {
+	// Whitespace-only content with no think tags trips the second
+	// `if reasoning == ""` return after TrimSpace already changed
+	// stripped away from raw; pins that branch.
+	resp := &core.ChatResponse{
+		Choices: []core.Choice{{
+			Message: core.ResponseMessage{Role: "assistant", Content: "  hello  "},
+		}},
+	}
+	normalizeChatResponse(resp)
+	assert.Equal(t, "hello", resp.Choices[0].Message.Content)
+}
+
 func TestRewrite_BadChunkJSONRelaysOriginal(t *testing.T) {
 	ts := &thinkStream{src: bufio.NewReader(strings.NewReader("")), closer: io.NopCloser(strings.NewReader(""))}
 	got := ts.rewrite([]byte(`data: {"content":"x","choices":[`))
@@ -599,4 +613,128 @@ func TestThinkParser_NestedCloseAcrossFeeds(t *testing.T) {
 	// reasoning verbatim — reasoning is never rewritten.
 	assert.Equal(t, "trailingafter", gotContent)
 	assert.Equal(t, "outer<think>inner", gotReasoning)
+}
+
+func TestNormalizeChoice_ExistingReasoningContentKept(t *testing.T) {
+	// If the upstream already carries a reasoning_content (e.g. it
+	// pre-parsed the think block into a separate field), the parser must
+	// strip the tags from content but never overwrite the upstream
+	// reasoning with text it parsed out of content.
+	extra, err := core.MergeUnknownJSONFields(core.UnknownJSONFields{}, map[string]json.RawMessage{
+		reasoningKey: json.RawMessage(`"upstream text"`),
+	})
+	require.NoError(t, err)
+	resp := &core.ChatResponse{
+		Choices: []core.Choice{{
+			Message: core.ResponseMessage{
+				Role:       "assistant",
+				Content:    "<think>hidden</think>after",
+				ExtraFields: extra,
+			},
+		}},
+	}
+	normalizeChatResponse(resp)
+
+	msg := resp.Choices[0].Message
+	assert.Equal(t, "after", msg.Content, "tags still stripped from content")
+	got := msg.ExtraFields.Lookup(reasoningKey)
+	require.NotNil(t, got, "reasoning_content kept untouched")
+	var s string
+	require.NoError(t, json.Unmarshal(got, &s))
+	assert.Equal(t, "upstream text", s, "upstream reasoning_content wins over parsed text")
+}
+
+func TestSplitThink_EmptyInput(t *testing.T) {
+	got, reasoning := splitThink("")
+	assert.Empty(t, got)
+	assert.Empty(t, reasoning)
+}
+
+func TestThinkParser_FlushAtEOFEmitsCarryAsReasoning(t *testing.T) {
+	// When the stream ends mid-think the carry becomes reasoning: the
+	// client still sees the partial chain of thought the model produced
+	// before it was cut off, matching how every other interrupted turn
+	// is handled.
+	var p thinkParser
+	c, r := p.feed("<think>partial chain of thought")
+	assert.Empty(t, c, "feed already flushed what it had")
+	assert.Equal(t, "partial chain of thought", r, "feed already emits reasoning as it goes")
+	c2, r2 := p.flush()
+	assert.Empty(t, c2)
+	assert.Empty(t, r2, "nothing was still held in carry; nothing left to flush")
+}
+
+func TestThinkParser_FlushAtEOFEmitsPartialTagCarryAsContent(t *testing.T) {
+	// A partial tag across the last two feeds: the carry is held by feed()
+	// because it could be the start of <think>, but no opening ever lands.
+	// At EOF the carry must be flushed as content, never dropped.
+	var p thinkParser
+	c1, r1 := p.feed("hello </thi")
+	assert.Equal(t, "hello ", c1)
+	assert.Empty(t, r1)
+	c2, r2 := p.feed("nk>world")
+	assert.Equal(t, "world", c2, "the partial close and trailing text form a stray </think> the parser strips to content")
+	assert.Empty(t, r2)
+	c3, r3 := p.flush()
+	assert.Empty(t, c3)
+	assert.Empty(t, r3, "nothing was still held in carry; nothing left to flush")
+}
+
+func TestThinkParser_FlushAtEOFEmitsPartialThinkCarryAsReasoning(t *testing.T) {
+	// The stream ends mid-think and the carry still looks like a possible
+	// partial tag. flush() must treat it as reasoning (the unfinished
+	// think block is closed) and the parser must hand the bytes to the
+	// client rather than dropping them.
+	var p thinkParser
+	p.feed("<think>plan<thi")
+	c, r := p.flush()
+	assert.Empty(t, c)
+	assert.Equal(t, "<thi", r, "carry becomes reasoning at EOF when inThink is true")
+}
+
+func TestNormalizeChatStream_FlushAtEOFEmitsCarryDeltaMidThink(t *testing.T) {
+	// The stream ends mid-think with a partial tag in carry; the final
+	// delta must carry the partial reasoning, not be silently dropped.
+	body := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"<think>plan<thi\"}}]}\n\n"
+	got, err := io.ReadAll(normalizeChatStream(io.NopCloser(strings.NewReader(body))))
+	require.NoError(t, err)
+	out := string(got)
+	assert.Contains(t, out, `"reasoning_content"`,
+		"final delta carries the mid-think carry as reasoning")
+	assert.NotContains(t, out, `<think>`)
+	assert.NotContains(t, out, `</think>`)
+}
+
+func TestNormalizeChatStream_FlushAtEOFEmitsFinalDelta(t *testing.T) {
+	// End-to-end: a stream that finishes mid-think must reach the client
+	// with a final delta carrying the partial reasoning. Mirrors the M2
+	// prod shape where the model ran out of tokens inside its think block.
+	body := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"<think>plan</think>start\"}}]}\n\n" +
+		"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"<think>more reasoning\"}}]}\n\n"
+	got, err := io.ReadAll(normalizeChatStream(io.NopCloser(strings.NewReader(body))))
+	require.NoError(t, err)
+	out := string(got)
+	assert.Contains(t, out, `"reasoning_content":"plan"`,
+		"closed think before the cut is fully extracted")
+	assert.Contains(t, out, `"reasoning_content":"more reasoning"`,
+		"partial think at EOF is emitted as a final delta")
+	assert.Contains(t, out, `"content":"start"`,
+		"content between the closed think and the cut is preserved")
+	assert.NotContains(t, out, `<think>`)
+	assert.NotContains(t, out, `</think>`)
+}
+
+func TestNormalizeChatStream_FlushAtEOFEmitsPartialTagCarry(t *testing.T) {
+	// End-to-end: a stream that ends mid-tag (the trailing `<th` is the
+	// start of a tag the next feed would have completed). The parser
+	// holds the carry; EOF must flush it as a separate final delta so the
+	// client sees the full stream instead of losing the last few bytes.
+	body := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello <th\"}}]}\n\n"
+	got, err := io.ReadAll(normalizeChatStream(io.NopCloser(strings.NewReader(body))))
+	require.NoError(t, err)
+	out := string(got)
+	assert.Contains(t, out, `"content":"hello "`, "carry before the partial tag is emitted as content")
+	assert.Contains(t, out, `\u003cth"`, "partial tag flushed at EOF as content (JSON-escaped `<`)")
+	assert.NotContains(t, out, `<think>`)
+	assert.NotContains(t, out, `</think>`)
 }

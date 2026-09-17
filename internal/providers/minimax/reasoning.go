@@ -61,8 +61,12 @@ func normalizeChoice(choice *core.Choice) {
 	if reasoning == "" {
 		return
 	}
+	// Upstream may already carry a reasoning_content (e.g. another layer
+	// pre-parsed the think block). When it does, keep the upstream text
+	// verbatim — the parser only strips the tags from content, never
+	// overwrites an already-canonical reasoning member with what it
+	// extracted from content.
 	if existing := msg.ExtraFields.Lookup(reasoningKey); len(existing) > 0 {
-		// Already canonical: keep the upstream value, just strip the tags.
 		return
 	}
 	// json.Marshal on a string and MergeUnknownJSONFields on a pre-validated
@@ -75,12 +79,14 @@ func normalizeChoice(choice *core.Choice) {
 }
 
 // splitThink returns content with every <think>...</think> block removed and
-// the inner text concatenated as the reasoning string. An unterminated block
-// (no closing tag, typically finish_reason=length) drops its inner text so
-// the parser never emits a half-open tag. Orphan close markers — the ones a
-// model leaks when it nests a second <think>…</think> inside its outer
-// think and the parser exits on the inner close first — are stripped from
-// the content too, so the tag bytes never reach the client.
+// the inner text concatenated as the reasoning string. An unterminated
+// block (no closing tag, typically finish_reason=length) emits the partial
+// inner text as reasoning so the client still sees what the model thought
+// before it got cut off — same posture as any other interrupted turn.
+// Orphan close markers — the ones a model leaks when it nests a second
+// <think>…</think> inside its outer think and the parser exits on the
+// inner close first — are stripped from the content too, so the tag bytes
+// never reach the client.
 func splitThink(s string) (content, reasoning string) {
 	var cb, rb strings.Builder
 	rest := s
@@ -94,7 +100,10 @@ func splitThink(s string) (content, reasoning string) {
 		rest = rest[open+len(thinkOpenTag):]
 		close := strings.Index(rest, thinkCloseTag)
 		if close < 0 {
-			// Unterminated: drop the partial block rather than emit a half tag.
+			// Unterminated: emit the partial inner text as reasoning rather
+			// than drop it, so finish_reason=length still carries the chain
+			// of thought the model produced before it was cut off.
+			rb.WriteString(rest)
 			break
 		}
 		rb.WriteString(rest[:close])
@@ -130,7 +139,13 @@ type thinkStream struct {
 func (s *thinkStream) Read(p []byte) (int, error) {
 	for s.pending.Len() == 0 {
 		if s.err != nil {
-			return 0, s.err
+			s.flushCarry()
+			if s.pending.Len() == 0 {
+				return 0, s.err
+			}
+			// flushCarry produced a final delta; serve it on this Read and
+			// surface the EOF on the next one so the bytes are not dropped.
+			break
 		}
 		line, err := s.src.ReadBytes('\n')
 		s.err = err
@@ -139,6 +154,48 @@ func (s *thinkStream) Read(p []byte) (int, error) {
 		}
 	}
 	return s.pending.Read(p)
+}
+
+// flushCarry emits any carry bytes the parser was still holding at end of
+// stream. An unfinished think block is closed here so the partial chain
+// of thought reaches the client.
+func (s *thinkStream) flushCarry() {
+	c, r := s.parser.flush()
+	if c == "" && r == "" {
+		return
+	}
+	delta := map[string]json.RawMessage{}
+	if c != "" {
+		delta["content"] = json.RawMessage(mustMarshalString(c))
+	}
+	if r != "" {
+		delta["reasoning_content"] = json.RawMessage(mustMarshalString(r))
+	}
+	choices := []map[string]json.RawMessage{{
+		"index": json.RawMessage(`0`),
+		"delta": mustMarshalRaw(delta),
+	}}
+	encoded, _ := json.Marshal(map[string]json.RawMessage{"choices": mustMarshalJSON(choices)})
+	out := make([]byte, 0, len(sseDataPrefix)+len(encoded)+1)
+	out = append(out, sseDataPrefix...)
+	out = append(out, encoded...)
+	out = append(out, '\n')
+	s.pending.Write(out)
+}
+
+func mustMarshalString(s string) string {
+	encoded, _ := json.Marshal(s)
+	return string(encoded)
+}
+
+func mustMarshalRaw(v map[string]json.RawMessage) json.RawMessage {
+	encoded, _ := json.Marshal(v)
+	return encoded
+}
+
+func mustMarshalJSON(v any) json.RawMessage {
+	encoded, _ := json.Marshal(v)
+	return encoded
 }
 
 func (s *thinkStream) Close() error { return s.closer.Close() }
@@ -297,6 +354,23 @@ func stripOrphanCloses(s string) string {
 		return s
 	}
 	return strings.ReplaceAll(s, thinkCloseTag, "")
+}
+
+// flush emits any carry bytes the parser was still holding when the stream
+// ended. An unfinished think block is treated as closed — the carry
+// becomes reasoning so the client sees the partial chain of thought —
+// matching the posture of any other interrupted turn. Outside think mode
+// the carry becomes content with orphan closes stripped.
+func (p *thinkParser) flush() (content, reasoning string) {
+	carry := p.carry
+	p.carry = ""
+	if carry == "" {
+		return "", ""
+	}
+	if p.inThink {
+		return "", carry
+	}
+	return stripOrphanCloses(carry), ""
 }
 
 func emit(inThink bool, content, reasoning *strings.Builder, segment string) {
