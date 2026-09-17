@@ -60,7 +60,7 @@ type Provider struct {
 
 // New creates a new Vertex AI provider.
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
-	return newProvider(providerCfg, opts, nil)
+	return newProvider(providerCfg, opts, opts.HTTPClient)
 }
 
 func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOptions, baseHTTPClient *http.Client) *Provider {
