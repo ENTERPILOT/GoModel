@@ -8,11 +8,6 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
-// Resolve resolves raw model/provider inputs through the redirect table.
-func (s *Service) Resolve(model, provider string) (Resolution, bool, error) {
-	return s.resolveRequested(context.Background(), core.NewRequestedModelSelector(model, provider), "", false, "")
-}
-
 // resolveRequested resolves one requested selector through the redirect
 // table. ctx is the request context when there is one: routing-strategy
 // plugins read request metadata from it and are bounded by it.
