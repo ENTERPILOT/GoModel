@@ -108,4 +108,9 @@ type Reader interface {
 	// GetRequestStats returns time-bucketed status-class counts and
 	// per-provider latency aggregates for the dashboard charts.
 	GetRequestStats(ctx context.Context, params RequestStatsParams) (*RequestStats, error)
+
+	// GetLastUsedByAuthKeys returns the newest audit entry timestamp per auth
+	// key id. Keys without audit entries are absent from the result; an empty
+	// keyIDs list returns an empty map without querying.
+	GetLastUsedByAuthKeys(ctx context.Context, keyIDs []string) (map[string]time.Time, error)
 }

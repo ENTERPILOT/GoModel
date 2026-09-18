@@ -5,13 +5,13 @@
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { formatDateUTC, formatTimestampUTC } from "$lib/utils/format.js";
   import { displayModelSelector } from "$lib/utils/modelSelectors.js";
-  import { authKeyDeactivated, authKeyExpired, labelChipStyle } from "./authKeysLogic.js";
+  import { authKeyDeactivated, authKeyExpired, labelChipStyle, lastUsedCellState } from "./authKeysLogic.js";
   import { authKeysStore as store } from "./authKeys.svelte.js";
   import { Boxes, Info, Pencil, Power, ShieldCheck, ShieldOff, TriangleAlert } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
-<div class="table-wrapper">
+<div class="table-wrapper auth-keys-table-wrapper">
   <table class="data-table">
     <thead>
       <tr>
@@ -38,6 +38,7 @@
         </th>
         <th>{m.api_keys_expires()}</th>
         <th>{m.api_keys_column_created()}</th>
+        <th>{m.api_keys_column_last_used()}</th>
         <th class="col-actions" aria-label={m.api_keys_actions()}></th>
       </tr>
     </thead>
@@ -109,6 +110,28 @@
             {/if}
           </td>
           <td>{timezone.formatTimestamp(key.created_at)}</td>
+          <td>
+            {#if key.last_used_at}
+              {timezone.formatTimestamp(key.last_used_at)}
+            {:else if lastUsedCellState(key.last_used_at, store.retentionDays, key.last_used_available) === "unavailable"}
+              <span
+                class="auth-key-unrestricted"
+                title={m.api_keys_last_used_unknown_help()}
+              >{m.api_keys_last_used_unknown()}</span>
+            {:else if lastUsedCellState(key.last_used_at, store.retentionDays, key.last_used_available) === "never"}
+              <span
+                class="auth-key-unrestricted"
+                title={m.api_keys_last_used_help({ days: 0 })}
+              >{m.api_keys_last_used_never()}</span>
+            {:else if lastUsedCellState(key.last_used_at, store.retentionDays, key.last_used_available) === "outside"}
+              <span
+                class="auth-key-unrestricted"
+                title={m.api_keys_last_used_help({ days: store.retentionDays })}
+              >{m.api_keys_last_used_outside_retention({ days: store.retentionDays })}</span>
+            {:else}
+              <span class="auth-key-unrestricted">{m.api_keys_last_used_no_records()}</span>
+            {/if}
+          </td>
           <td class="auth-key-actions-cell col-actions">
             <div class="auth-key-row-actions">
               {#if key.active}
@@ -163,6 +186,13 @@
 </div>
 
 <style>
+  /* The key table carries many columns (Last used included); scroll sideways
+     on narrow windows instead of clipping the trailing columns. Same
+     approach as the usage log. */
+  .auth-keys-table-wrapper {
+    overflow-x: auto;
+  }
+
   /* Read-only chip variant (e.g. API key labels) — same look, no affordance. */
   .usage-label-chip-static, .usage-label-chip-static:hover {
     cursor: default;

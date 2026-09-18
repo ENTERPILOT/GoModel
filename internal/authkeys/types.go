@@ -35,6 +35,9 @@ type AuthKey struct {
 type View struct {
 	AuthKey
 	Active bool `json:"active"`
+	// LastUsedAt is the key's newest audit-log activity, overlaid by the admin
+	// list handler; presentation-only and never persisted.
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 }
 
 // IssuedKey is returned once on create and includes the plaintext token value.
