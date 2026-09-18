@@ -410,7 +410,8 @@ export function formatGoDurationNs(ns) {
 export function tripRulesToRows(tripOn) {
   return (Array.isArray(tripOn) ? tripOn : []).map((rule) => ({
     match: String((rule && rule.match) || ""),
-    ttl: formatGoDurationNs(rule && rule.ttl),
+    // ttl 0 or absent means "use breaker timeout"; show a blank field, not "0s".
+    ttl: rule && rule.ttl ? formatGoDurationNs(rule.ttl) : "",
   }));
 }
 
@@ -465,12 +466,12 @@ function validateTripRuleRows(rows) {
 export function providerCredentialTripRulesLabel(row) {
   return (Array.isArray(row && row.trip_on) ? row.trip_on : [])
     .map((rule) => {
-      const ttl = formatGoDurationNs(rule && rule.ttl);
-      // ttl 0 means "use breaker timeout" (operator left it blank); omit the suffix.
-      if (!rule || rule.ttl === 0) {
+      // ttl 0 or absent means "use breaker timeout" (operator left it blank);
+      // omit the suffix instead of showing "0s" or "()".
+      if (!rule || !rule.ttl) {
         return String((rule && rule.match) || "");
       }
-      return String((rule && rule.match) || "") + " (" + ttl + ")";
+      return String((rule && rule.match) || "") + " (" + formatGoDurationNs(rule.ttl) + ")";
     })
     .filter(Boolean)
     .join(", ");

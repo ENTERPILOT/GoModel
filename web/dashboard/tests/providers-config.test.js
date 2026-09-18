@@ -638,6 +638,19 @@ test("tripRulesToRows converts the view's nanosecond ttl into duration strings",
   assert.deepEqual(tripRulesToRows("junk"), []);
 });
 
+test("tripRulesToRows renders a zero or absent ttl as a blank field, not 0s", () => {
+  assert.deepEqual(
+    tripRulesToRows([
+      { match: "insufficient_quota", ttl: 0 },
+      { match: "no ttl key" },
+    ]),
+    [
+      { match: "insufficient_quota", ttl: "" },
+      { match: "no ttl key", ttl: "" },
+    ],
+  );
+});
+
 test("tripRuleRowsToWire builds the {match, ttl} payload with nanosecond ttls", () => {
   const wire = tripRuleRowsToWire([
     { match: " insufficient_quota ", ttl: " 15m " },
@@ -782,6 +795,14 @@ test("trip-rule list helpers summarize rows and gate the read-only column", () =
   assert.equal(
     providerCredentialTripRulesLabel({
       trip_on: [{ match: "insufficient_quota", ttl: 0 }],
+    }),
+    "insufficient_quota",
+  );
+
+  // An absent ttl key must not render an empty () suffix either.
+  assert.equal(
+    providerCredentialTripRulesLabel({
+      trip_on: [{ match: "insufficient_quota" }],
     }),
     "insufficient_quota",
   );
