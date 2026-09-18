@@ -242,12 +242,6 @@
   margin-bottom: 16px;
 }
 
-/* The request log carries many columns (labels included); scroll sideways on
-   narrow windows instead of clipping the trailing cost columns. */
-.usage-log-section :global(.table-wrapper) {
-  overflow-x: auto;
-}
-
 .usage-log-toolbar {
   display: grid;
   gap: 12px;
