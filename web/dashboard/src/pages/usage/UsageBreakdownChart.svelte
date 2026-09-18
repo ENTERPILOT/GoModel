@@ -352,8 +352,6 @@
 
 .usage-chart-table-wrapper {
   margin-top: 0;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
 }
 
 .usage-chart-data-table {
