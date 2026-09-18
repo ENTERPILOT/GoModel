@@ -76,21 +76,6 @@ func (s *Service) ResolveRefreshTarget(requested core.RequestedModelSelector) (c
 	return representative.selector, true, nil
 }
 
-// Supports reports whether a redirect currently resolves to a concrete model.
-func (s *Service) Supports(model string) bool {
-	_, ok := s.snapshot().resolveRedirect(model, s.catalog, "", false)
-	return ok
-}
-
-// GetProviderType returns the resolved provider type for a redirect, or empty
-// when unresolved.
-func (s *Service) GetProviderType(model string) string {
-	if resolution, ok := s.snapshot().resolveRedirect(model, s.catalog, "", false); ok {
-		return strings.TrimSpace(s.catalog.GetProviderType(resolution.Resolved.QualifiedModel()))
-	}
-	return ""
-}
-
 // ExposedModels returns enabled redirects projected as model-list entries.
 func (s *Service) ExposedModels() []core.Model {
 	return s.exposedModels("", false, nil)
