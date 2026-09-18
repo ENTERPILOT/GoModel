@@ -52,9 +52,9 @@ a zero or negative temperature to `1.0` so OpenAI-style requests that pin
 
 ## Reasoning
 
-`MiniMax-M3` ships its chain of thought as inline `<think>` XML inside the answer content; the upstream MiniMax API describes the same shape for the M2 line (M2.7 and later). GoModel strips those tags and moves the inner text to the canonical `reasoning_content` member of the chat completion message (and the matching `delta.reasoning_content` on streaming deltas). The XML never reaches the client.
+`MiniMax-M3` ships its chain of thought as inline `<think>` XML inside the answer content; the upstream MiniMax API describes the same shape for the M2 line (M2.7 and later). GoModel strips those tags and moves the inner text to the canonical `reasoning_content` member of the chat completion message (and the matching `delta.reasoning_content` on streaming deltas). Recognized reasoning boundary markers are removed from answer content; only stray text that does not form a complete marker can remain.
 
-The step runs for any model whose name starts with `MiniMax-M3` or `MiniMax-M2`. Other MiniMax models (speech, image, embedding) pass through unchanged. MiniMax occasionally closes the block with the namespaced `</mm:think>` variant; both closing spellings are accepted and stripped. An unfinished think block — the model is cut off mid-reasoning by `finish_reason: length` — is closed and the partial inner text is emitted as reasoning rather than dropped. Reasoning tokens stay completion tokens.
+The step runs for any model whose name starts with `MiniMax-M3` or `MiniMax-M2`. Other MiniMax models (speech, image, embedding) pass through unchanged. MiniMax occasionally closes the block with the namespaced `</mm:think>` variant; both closing spellings are accepted and stripped. An unfinished think block — the model is cut off mid-reasoning by `finish_reason: length` — is closed and the partial inner text is emitted as reasoning rather than dropped. A stray `</think>` or `</mm:think>` in answer content is escaped to `\<\/think\>` / `\<\/mm:think\>` so it renders as visible text and the model keeps its reasoning trace. Reasoning tokens stay completion tokens.
 
 ## Text-to-speech
 
