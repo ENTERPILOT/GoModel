@@ -27,7 +27,9 @@ func kimicodeDefaultTripOn() []config.TripRuleConfig {
 		{Match: `weekly \(7-day\) usage limit`, TTL: 4 * time.Hour},
 		// 5-hour sliding-window limit.
 		{Match: `5-hour usage limit`, TTL: 30 * time.Minute},
-		// Catch-all for usage-limit and quota errors.
-		{Match: `usage limit|quota`, TTL: 15 * time.Minute},
+		// Catch-all for usage-limit and quota-exceeded errors. "quota" alone
+		// is deliberately not matched: non-limit 403s mentioning quota must
+		// not trip the breaker.
+		{Match: `usage limit|quota exceeded`, TTL: 15 * time.Minute},
 	}
 }

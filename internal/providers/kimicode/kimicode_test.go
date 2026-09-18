@@ -44,6 +44,9 @@ const (
 	bodyUsageLimit  = "usage limit reached for this plan"
 	bodyQuotaExceed = "quota exceeded for organization"
 	bodyNonMatching = "rate limit exceeded"
+	// Near-miss: mentions "quota" but is not a quota-limit error; the
+	// catch-all rule must not match it.
+	bodyQuotaNearMiss = "access denied: quota check failed"
 )
 
 func compileTripRulesForTest(rules []config.TripRuleConfig) ([]llmclient.TripRule, error) {
@@ -98,6 +101,7 @@ func TestDefaultTripOn_MatchesPinnedBodies(t *testing.T) {
 		{"usage limit", bodyUsageLimit, true, 15 * time.Minute},
 		{"quota exceeded", bodyQuotaExceed, true, 15 * time.Minute},
 		{"non-matching rate limit", bodyNonMatching, false, 0},
+		{"quota near-miss", bodyQuotaNearMiss, false, 0},
 	}
 
 	for _, tt := range tests {
@@ -117,9 +121,8 @@ func TestDefaultTripOn_MatchesPinnedBodies(t *testing.T) {
 					break
 				}
 			}
-			if !tt.wantOK {
-				assert.False(t, found, "no rule should match body %q", tt.name)
-			}
+			assert.Equal(t, tt.wantOK, found,
+				"rule set should match body %q", tt.name)
 		})
 	}
 }
@@ -325,7 +328,9 @@ func TestDefaultRules_5HourLimitTrips(t *testing.T) {
 func TestDefaultRules_ResetClearsQuotaWindow(t *testing.T) {
 	t.Parallel()
 
+	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(`{"error":{"message":"` + bodyWeeklyLimit + `","code":"weekly_limit"}}`))
@@ -354,6 +359,8 @@ func TestDefaultRules_ResetClearsQuotaWindow(t *testing.T) {
 	// After reset, traffic flows again.
 	err = client.Do(context.Background(), llmclient.Request{Method: http.MethodGet, Endpoint: "/test"}, nil)
 	require.Error(t, err) // still fails (server returns 403), but goes upstream
+	assert.EqualValues(t, 2, calls.Load(),
+		"reset must let the request reach upstream instead of failing fast on the open breaker")
 }
 
 // Non-gateway errors don't trip quota rules.
