@@ -24,32 +24,33 @@ import (
 // forms. The parser accepts every spelling and treats them identically.
 const reasoningKey = "reasoning_content"
 
-// thinkOpenTags lists every opening marker the parser accepts. Order does
-// not matter: the parsers take the earliest match in the scanned text.
-var thinkOpenTags = []string{"<think>", "<mm:think>", "<minimax:think>"}
+// thinkOpenTags returns every opening marker the parser accepts. Order
+// does not matter: the parsers take the earliest match in the scanned
+// text.
+func thinkOpenTags() [3]string {
+	return [3]string{"<think>", "<mm:think>", "<minimax:think>"}
+}
 
-// thinkCloseTags lists every closing marker the parser accepts. Order does
-// not matter: both the buffered and the streaming parser take the earliest
-// match in the text they are scanning.
-var thinkCloseTags = []string{"</think>", "</mm:think>", "</minimax:think>"}
-
-// reasoningModels lists exactly the MiniMax models known to emit inline
-// think blocks: M2, M2.5, M2.7, and M3. The list is exact on purpose:
-// MiniMax ships mN.1 successors, and a future model may be a plain text
-// model or fix the inline tags upstream — a broad prefix would rewrite an
-// unknown model's hot path without evidence.
-var reasoningModels = map[string]bool{
-	"minimax-m2":   true,
-	"minimax-m2.5": true,
-	"minimax-m2.7": true,
-	"minimax-m3":   true,
+// thinkCloseTags returns every closing marker the parser accepts. Order
+// does not matter: both the buffered and the streaming parser take the
+// earliest match in the text they are scanning.
+func thinkCloseTags() [3]string {
+	return [3]string{"</think>", "</mm:think>", "</minimax:think>"}
 }
 
 // isReasoningModel reports whether model is a MiniMax model known to emit
-// inline <think> blocks. Anything else stays untouched, so the parse step
-// stays inert for non-reasoning and future models alike.
+// inline <think> blocks — exactly M2, M2.5, M2.7, and M3. Anything else
+// stays untouched, so the parse step stays inert for non-reasoning and
+// future models alike. The case list is exact on purpose: MiniMax ships
+// mN.1 successors, and a future model may be a plain text model or fix the
+// inline tags upstream — a broad prefix would rewrite an unknown model's
+// hot path without evidence.
 func isReasoningModel(model string) bool {
-	return reasoningModels[strings.ToLower(model)]
+	switch strings.ToLower(model) {
+	case "minimax-m2", "minimax-m2.5", "minimax-m2.7", "minimax-m3":
+		return true
+	}
+	return false
 }
 
 // normalizeChatResponse strips <think>...</think> blocks from every choice's
@@ -173,7 +174,7 @@ func isRealClose(s string) bool {
 // marker in s. index is -1 when s contains none.
 func earliestOpen(s string) (index int, tag string) {
 	index, tag = -1, ""
-	for _, t := range thinkOpenTags {
+	for _, t := range thinkOpenTags() {
 		if i := strings.Index(s, t); i >= 0 && (index < 0 || i < index) {
 			index, tag = i, t
 		}
@@ -185,7 +186,7 @@ func earliestOpen(s string) (index int, tag string) {
 // marker in s. index is -1 when s contains none.
 func earliestClose(s string) (index int, tag string) {
 	index, tag = -1, ""
-	for _, t := range thinkCloseTags {
+	for _, t := range thinkCloseTags() {
 		if i := strings.Index(s, t); i >= 0 && (index < 0 || i < index) {
 			index, tag = i, t
 		}
@@ -203,7 +204,7 @@ func escapedClose(tag string) string {
 // escapeAllCloses replaces every accepted closing marker in s with its
 // Markdown-escaped literal form.
 func escapeAllCloses(s string) string {
-	for _, tag := range thinkCloseTags {
+	for _, tag := range thinkCloseTags() {
 		s = strings.ReplaceAll(s, tag, escapedClose(tag))
 	}
 	return s
@@ -215,7 +216,7 @@ func escapeLeadingCloses(s string) string {
 	escaped := true
 	for escaped {
 		escaped = false
-		for _, tag := range thinkCloseTags {
+		for _, tag := range thinkCloseTags() {
 			if strings.HasPrefix(s, tag) {
 				s = escapedClose(tag) + s[len(tag):]
 				escaped = true
@@ -238,7 +239,7 @@ func escapeOrphanCloses(s string) string {
 
 // containsAnyClose reports whether s contains any accepted closing marker.
 func containsAnyClose(s string) bool {
-	for _, tag := range thinkCloseTags {
+	for _, tag := range thinkCloseTags() {
 		if strings.Contains(s, tag) {
 			return true
 		}

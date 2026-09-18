@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"io"
-	"slices"
 	"sort"
 	"strings"
 
@@ -22,11 +21,6 @@ var sseDataPrefix = []byte("data: ")
 
 // doneEvent is the terminal SSE event of a chat completion stream.
 var doneEvent = []byte("data: [DONE]")
-
-// thinkMarkers lists every marker a split-across-feeds suffix could
-// complete into: every accepted opening tag plus every accepted closing
-// marker.
-var thinkMarkers = slices.Concat(thinkOpenTags, thinkCloseTags)
 
 // normalizeChatStream wraps a chat completion SSE stream, splitting every
 // <think>...</think> block out of the delta.content member into a new
@@ -47,6 +41,26 @@ type thinkStream struct {
 	pending bytes.Buffer
 	err     error
 	parsers map[int]*thinkParser // one parser per choice index
+	// envelope caches the standard chunk envelope members (id, object,
+	// created, model) last seen on the stream so synthetic frames carry
+	// them, matching how SynthesizeChatStream stamps generated chunks.
+	envelope map[string]json.RawMessage
+}
+
+// noteEnvelope records the standard envelope members of a parsed chunk.
+// Members a chunk omits keep their earlier value; a stream that never
+// carried them yields synthetic frames without an envelope at all.
+func (s *thinkStream) noteEnvelope(chunk map[string]json.RawMessage) {
+	for _, key := range [4]string{"id", "object", "created", "model"} {
+		value, ok := chunk[key]
+		if !ok {
+			continue
+		}
+		if s.envelope == nil {
+			s.envelope = map[string]json.RawMessage{}
+		}
+		s.envelope[key] = value
+	}
 }
 
 // parserFor returns the thinkParser for the given choice index, creating it
@@ -124,7 +138,9 @@ func (s *thinkStream) Close() error { return s.closer.Close() }
 // the content event goes first with finish_reason stripped, then any carry
 // the content just parked flushes as its own frame, and the finish_reason
 // travels last on a finish-only frame — prepending the freshly parked carry
-// would hand the client its deltas out of order.
+// would hand the client its deltas out of order. When such suffix frames
+// follow, the rewritten event is terminated with the SSE blank-line
+// delimiter so downstream event parsers see each frame as its own event.
 func (s *thinkStream) rewrite(line []byte) []byte {
 	if !bytes.HasPrefix(line, sseDataPrefix) ||
 		(!bytes.Contains(line, []byte(`"content"`)) && !bytes.Contains(line, []byte(`"finish_reason"`))) {
@@ -135,6 +151,7 @@ func (s *thinkStream) rewrite(line []byte) []byte {
 	if err := json.Unmarshal(payload, &chunk); err != nil {
 		return line
 	}
+	s.noteEnvelope(chunk)
 	var choices []json.RawMessage
 	if err := json.Unmarshal(chunk["choices"], &choices); err != nil {
 		return line
@@ -163,11 +180,21 @@ func (s *thinkStream) rewrite(line []byte) []byte {
 	encoded, _ := json.Marshal(choices)
 	chunk["choices"] = encoded
 	out, _ := json.Marshal(chunk)
-	result := make([]byte, 0, len(prefix)+len(sseDataPrefix)+len(out)+1+len(suffix))
+	result := make([]byte, 0, len(prefix)+len(sseDataPrefix)+len(out)+2+len(suffix))
 	result = append(result, prefix...)
 	result = append(result, sseDataPrefix...)
 	result = append(result, out...)
-	result = append(result, '\n')
+	if len(suffix) > 0 {
+		// The suffix frames are events of their own: terminate the
+		// rewritten event with the SSE blank-line delimiter, or a
+		// downstream SSE parser reads the first suffix frame's data line
+		// as a second data field of this event and drops the frame.
+		result = append(result, '\n', '\n')
+	} else {
+		// No suffix follows: keep the single \n so the trailing blank
+		// line of the original event still terminates it.
+		result = append(result, '\n')
+	}
 	return append(result, suffix...)
 }
 
@@ -305,14 +332,25 @@ func holdFrom(s string) int {
 		if s[i] != '<' {
 			continue
 		}
-		suffix := s[i:]
-		for _, m := range thinkMarkers {
-			if len(suffix) < len(m) && strings.HasPrefix(m, suffix) {
-				return i
-			}
+		if isMarkerPrefix(s[i:]) {
+			return i
 		}
 	}
 	return len(s)
+}
+
+// isMarkerPrefix reports whether s is a proper prefix of any accepted
+// opening or closing marker — a suffix that could still complete into a
+// marker once the next feed lands.
+func isMarkerPrefix(s string) bool {
+	for _, markers := range [2][3]string{thinkOpenTags(), thinkCloseTags()} {
+		for _, m := range markers {
+			if len(s) < len(m) && strings.HasPrefix(m, s) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // flush emits any carry bytes the parser was still holding when the stream

@@ -9,6 +9,8 @@ import (
 	"github.com/goccy/go-json"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
 func TestThinkParserFeed(t *testing.T) {
@@ -733,13 +735,15 @@ func TestNormalizeChatStream_FinishForUnknownChoiceEmitsNoFrame(t *testing.T) {
 }
 
 // dataEvents returns the SSE data payloads of out in stream order, one
-// entry per `data: ` line — a rewritten event ends with a single \n, so
-// frame boundaries alone do not separate events.
+// entry per event block, splitting on the real SSE blank-line boundary —
+// per-line splitting would mask a rewritten event missing its delimiter.
 func dataEvents(out string) []string {
 	var events []string
-	for _, l := range strings.Split(out, "\n") {
-		if strings.HasPrefix(l, "data: ") {
-			events = append(events, l)
+	for _, block := range strings.Split(strings.TrimRight(out, "\n"), "\n\n") {
+		for _, l := range strings.Split(block, "\n") {
+			if strings.HasPrefix(l, "data: ") {
+				events = append(events, l)
+			}
 		}
 	}
 	return events
@@ -831,4 +835,74 @@ func TestNormalizeChatStream_ContentAndFinishSameChunkNoCarryStaysSingleEvent(t 
 	assert.Contains(t, events[0], `"reasoning_content":"plan"`)
 	assert.Contains(t, events[0], `"finish_reason":"stop"`, "finish_reason stays on the rewritten event")
 	assert.Equal(t, "data: [DONE]", events[1])
+}
+
+func TestNormalizeChatStream_SuffixFramesParseAsSeparateSSEEvents(t *testing.T) {
+	// Regression: a terminal content+finish chunk is split into a rewritten
+	// content event plus synthetic carry and finish frames. The rewritten
+	// event must end with the SSE blank-line delimiter; without it the
+	// repo's EventScanner reads the first suffix frame's data line as a
+	// second data field of the rewritten event and the frames are lost.
+	body := "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"created\":1728000000,\"model\":\"minimax-m2\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"answer <th\"},\"finish_reason\":\"length\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	got, err := io.ReadAll(normalizeChatStream(io.NopCloser(strings.NewReader(body))))
+	require.NoError(t, err)
+
+	scanner := &streaming.EventScanner{}
+	raw := append(scanner.Feed(got), scanner.Flush()...)
+	var payloads []string
+	for _, ev := range raw {
+		require.False(t, ev.Oversized, "no event may exceed the scanner limit")
+		if ev.Comment {
+			continue
+		}
+		payloads = append(payloads, string(ev.Data))
+	}
+	require.Len(t, payloads, 4, "content event, carry frame, finish-only frame, [DONE] — each its own event")
+	for i, p := range payloads[:3] {
+		var chunk map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal([]byte(p), &chunk), "event %d must decode as one chat chunk", i)
+		assert.NotContains(t, p, "\n", "event %d must carry a single data field", i)
+	}
+	assert.Contains(t, payloads[0], `"content":"answer "`)
+	assert.NotContains(t, payloads[0], "finish_reason")
+	assert.Contains(t, payloads[1], `\u003cth`, "carry frame survived as its own event")
+	assert.Contains(t, payloads[2], `"finish_reason":"length"`, "finish-only frame survived as its own event")
+	assert.Equal(t, "[DONE]", payloads[3])
+}
+
+func TestNormalizeChatStream_SyntheticFramesCarryEnvelope(t *testing.T) {
+	// Synthetic carry and finish frames inherit the standard chunk envelope
+	// (id, object, created, model) seen on the stream, matching how
+	// SynthesizeChatStream stamps the envelope on generated chunks. usage
+	// stays out of synthetic frames.
+	body := "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"created\":1728000000,\"model\":\"minimax-m2\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"answer <th\"}}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"created\":1728000000,\"model\":\"minimax-m2\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	got, err := io.ReadAll(normalizeChatStream(io.NopCloser(strings.NewReader(body))))
+	require.NoError(t, err)
+
+	events := dataEvents(string(got))
+	require.Len(t, events, 4, "rewritten delta, synthetic carry frame, finish chunk, [DONE]")
+	assert.Contains(t, events[1], `"id":"chatcmpl-1"`, "carry frame carries the envelope id")
+	assert.Contains(t, events[1], `"object":"chat.completion.chunk"`)
+	assert.Contains(t, events[1], `"created":1728000000`)
+	assert.Contains(t, events[1], `"model":"minimax-m2"`)
+	assert.NotContains(t, events[1], "usage", "usage stays out of synthetic frames")
+}
+
+func TestNormalizeChatStream_SyntheticFramesWithoutEnvelopeOmitIt(t *testing.T) {
+	// A stream whose chunks never carried envelope members yields synthetic
+	// frames without them — the frame is still a complete, decodable event.
+	body := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello <th\"}}]}\n\n" +
+		"data: [DONE]\n\n"
+	got, err := io.ReadAll(normalizeChatStream(io.NopCloser(strings.NewReader(body))))
+	require.NoError(t, err)
+
+	events := dataEvents(string(got))
+	require.Len(t, events, 3, "rewritten delta, synthetic carry frame, [DONE]")
+	var chunk map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimPrefix(events[1], "data: ")), &chunk))
+	assert.NotContains(t, chunk, "id", "no envelope seen, none synthesized")
+	assert.NotContains(t, chunk, "model")
 }
