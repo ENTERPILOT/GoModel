@@ -8,35 +8,48 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
-// MiniMax reasoning models (M3, M2.7) ship their chain of thought as inline
-// <think>...</think> XML inside the answer content. Other MiniMax models do
-// not emit that tag. GoModel's canonical shape on /v1/chat/completions is
-// reasoning_content — the same field Anthropic, DeepSeek, Cohere, and vLLM
-// emit and the Responses and Messages translation layers read — so the
-// blocks are stripped from content and moved there. Relaying the inline XML
-// makes a reasoning model look broken to any OpenAI-compatible client that
-// reads reasoning_content (Kimi Code, Open WebUI, anything Anthropic-shaped).
+// MiniMax reasoning models (M3, M2.7, M2.5, M2) ship their chain of
+// thought as inline <think>...</think> XML inside the answer content. Other
+// MiniMax models do not emit that tag. GoModel's canonical shape on
+// /v1/chat/completions is reasoning_content — the same field Anthropic,
+// DeepSeek, Cohere, and vLLM emit and the Responses and Messages
+// translation layers read — so the blocks are stripped from content and
+// moved there. Relaying the inline XML makes a reasoning model look broken
+// to any OpenAI-compatible client that reads reasoning_content (Kimi Code,
+// Open WebUI, anything Anthropic-shaped).
 //
-// MiniMax occasionally closes the block with the namespaced </mm:think>
-// variant instead of the plain </think>, so the parser accepts both spellings
-// of the close marker and treats them identically.
-const (
-	thinkOpenTag = "<think>"
-	reasoningKey = "reasoning_content"
-)
+// MiniMax occasionally uses namespaced spellings of the markers, especially
+// on degraded long-context responses: </mm:think> and </minimax:think> as
+// closing markers, and the matching <mm:think> and <minimax:think> open
+// forms. The parser accepts every spelling and treats them identically.
+const reasoningKey = "reasoning_content"
+
+// thinkOpenTags lists every opening marker the parser accepts. Order does
+// not matter: the parsers take the earliest match in the scanned text.
+var thinkOpenTags = []string{"<think>", "<mm:think>", "<minimax:think>"}
 
 // thinkCloseTags lists every closing marker the parser accepts. Order does
 // not matter: both the buffered and the streaming parser take the earliest
 // match in the text they are scanning.
-var thinkCloseTags = []string{"</think>", "</mm:think>"}
+var thinkCloseTags = []string{"</think>", "</mm:think>", "</minimax:think>"}
 
-// isReasoningModel reports whether model is a MiniMax family member that
-// emits inline <think> blocks. The M3 line ships adaptive thinking and the
-// M2 line (M2.7 and later) thinks by default; anything else does not, so the
-// parse step stays inert.
+// reasoningModels lists exactly the MiniMax models known to emit inline
+// think blocks: M2, M2.5, M2.7, and M3. The list is exact on purpose:
+// MiniMax ships mN.1 successors, and a future model may be a plain text
+// model or fix the inline tags upstream — a broad prefix would rewrite an
+// unknown model's hot path without evidence.
+var reasoningModels = map[string]bool{
+	"minimax-m2":   true,
+	"minimax-m2.5": true,
+	"minimax-m2.7": true,
+	"minimax-m3":   true,
+}
+
+// isReasoningModel reports whether model is a MiniMax model known to emit
+// inline <think> blocks. Anything else stays untouched, so the parse step
+// stays inert for non-reasoning and future models alike.
 func isReasoningModel(model string) bool {
-	m := strings.ToLower(model)
-	return strings.HasPrefix(m, "minimax-m3") || strings.HasPrefix(m, "minimax-m2")
+	return reasoningModels[strings.ToLower(model)]
 }
 
 // normalizeChatResponse strips <think>...</think> blocks from every choice's
@@ -87,8 +100,8 @@ func normalizeChoice(choice *core.Choice) {
 //
 // Confirmed-close matching: a closing marker inside a think block is a real
 // close in two cases only — no closing marker comes after it (final close),
-// or a <think> open comes after it before the next closing marker (a chained
-// block follows). Every other closing marker is literal text the model wrote
+// or an opening marker comes after it before the next closing marker (a
+// chained block follows). Every other closing marker is literal text the model wrote
 // while reasoning about the tags themselves and stays in the reasoning
 // output verbatim. This keeps chained think → answer → think → answer
 // sequences intact without letting a stray marker close the block early.
@@ -122,21 +135,21 @@ func splitThink(s string) (content, reasoning string) {
 			rest = rest[ci+len(tag):]
 			continue
 		}
-		open := strings.Index(rest, thinkOpenTag)
+		oi, otag := earliestOpen(rest)
 		ci, tag := earliestClose(rest)
 		switch {
-		case open < 0 && ci < 0:
+		case oi < 0 && ci < 0:
 			cb.WriteString(rest)
 			rest = ""
-		case ci >= 0 && (open < 0 || ci < open):
+		case ci >= 0 && (oi < 0 || ci < oi):
 			// Orphan close in content: escape the marker so it renders as
 			// visible text instead of vanishing from the transcript.
 			cb.WriteString(rest[:ci])
 			cb.WriteString(escapedClose(tag))
 			rest = rest[ci+len(tag):]
 		default:
-			cb.WriteString(rest[:open])
-			rest = rest[open+len(thinkOpenTag):]
+			cb.WriteString(rest[:oi])
+			rest = rest[oi+len(otag):]
 			inThink = true
 		}
 	}
@@ -145,15 +158,27 @@ func splitThink(s string) (content, reasoning string) {
 
 // isRealClose reports whether a closing marker ends the current think
 // block. s is the text right after the marker. The marker is real when no
-// closing marker follows it, or when a <think> open follows it before the
-// next closing marker.
+// closing marker follows it, or when an opening marker follows it before
+// the next closing marker.
 func isRealClose(s string) bool {
 	ci, _ := earliestClose(s)
 	if ci < 0 {
 		return true
 	}
-	open := strings.Index(s, thinkOpenTag)
-	return open >= 0 && open < ci
+	oi, _ := earliestOpen(s)
+	return oi >= 0 && oi < ci
+}
+
+// earliestOpen returns the index and text of the first accepted opening
+// marker in s. index is -1 when s contains none.
+func earliestOpen(s string) (index int, tag string) {
+	index, tag = -1, ""
+	for _, t := range thinkOpenTags {
+		if i := strings.Index(s, t); i >= 0 && (index < 0 || i < index) {
+			index, tag = i, t
+		}
+	}
+	return index, tag
 }
 
 // earliestClose returns the index and text of the first accepted closing

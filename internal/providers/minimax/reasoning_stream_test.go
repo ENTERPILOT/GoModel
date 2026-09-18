@@ -555,3 +555,184 @@ func TestNormalizeChatStream_FlushAtEOFEmitsPartialTagCarry(t *testing.T) {
 	assert.NotContains(t, out, `<think>`)
 	assert.NotContains(t, out, `</think>`)
 }
+
+func TestThinkParser_NamespacedOpenVariants(t *testing.T) {
+	tests := []struct {
+		name          string
+		feeds         []string
+		wantContent   string
+		wantReasoning string
+	}{
+		{
+			name:          "mm namespaced open and close",
+			feeds:         []string{"<mm:think>plan</mm:think>answer"},
+			wantContent:   "answer",
+			wantReasoning: "plan",
+		},
+		{
+			name:          "minimax namespaced open and close",
+			feeds:         []string{"<minimax:think>plan</minimax:think>answer"},
+			wantContent:   "answer",
+			wantReasoning: "plan",
+		},
+		{
+			name:          "plain open with minimax namespaced close",
+			feeds:         []string{"<think>plan</minimax:think>answer"},
+			wantContent:   "answer",
+			wantReasoning: "plan",
+		},
+		{
+			name: "degraded close sequence",
+			// The broken </mm> fragment is not a marker and stays reasoning
+			// text; the close is recognized at the </minimax:think> tail.
+			feeds:         []string{"<think>reasoning</mm></minimax:think>answer"},
+			wantContent:   "answer",
+			wantReasoning: "reasoning</mm>",
+		},
+		{
+			name:          "namespaced open split across feeds",
+			feeds:         []string{"answer<mm:th", "ink>hidden</mm:think>done"},
+			wantContent:   "answerdone",
+			wantReasoning: "hidden",
+		},
+		{
+			name:          "minimax namespaced close split across feeds",
+			feeds:         []string{"<think>plan</minimax:th", "ink>answer"},
+			wantContent:   "answer",
+			wantReasoning: "plan",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var p thinkParser
+			var gotContent, gotReasoning string
+			for _, f := range tt.feeds {
+				c, r := p.feed(f)
+				gotContent += c
+				gotReasoning += r
+			}
+			assert.Equal(t, tt.wantContent, gotContent, "content")
+			assert.Equal(t, tt.wantReasoning, gotReasoning, "reasoning")
+		})
+	}
+}
+
+func TestNormalizeChatStream_MinimaxNamespacedClose(t *testing.T) {
+	// End-to-end: the </minimax:think> close must be consumed in the
+	// stream and never reach the client.
+	body := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"<think>plan</minimax:think>answer\"}}]}\n\n"
+	got, err := io.ReadAll(normalizeChatStream(io.NopCloser(strings.NewReader(body))))
+	require.NoError(t, err)
+	out := string(got)
+	assert.Contains(t, out, `"reasoning_content":"plan"`)
+	assert.Contains(t, out, `"content":"answer"`)
+	assert.NotContains(t, out, `</minimax:think>`)
+}
+
+func TestNormalizeChatStream_FinishFlushesCarryBeforeFinish(t *testing.T) {
+	// Regression: a content delta ending with a partial marker parks bytes
+	// in the choice's carry; a finish-only delta carries no content and
+	// would bypass the rewrite, forwarding finish_reason BEFORE the carry
+	// flushed at [DONE]. Clients treating finish as terminal would lose the
+	// carried text, so the carry must flush as a synthetic delta frame
+	// before the finish chunk.
+	body := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"answer <th\"}}]}\n\n" +
+		"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	got, err := io.ReadAll(normalizeChatStream(io.NopCloser(strings.NewReader(body))))
+	require.NoError(t, err)
+
+	frames := strings.Split(strings.TrimRight(string(got), "\n"), "\n\n")
+	require.Len(t, frames, 4, "rewritten delta, synthetic carry frame, finish chunk, [DONE]")
+	assert.Contains(t, frames[0], `"content":"answer "`, "carry before the partial tag emits as content")
+	assert.Contains(t, frames[1], `\u003cth`, "carry flushes as a synthetic delta")
+	assert.Contains(t, frames[1], `"index":0`, "synthetic delta carries its choice index")
+	assert.Contains(t, frames[2], `"finish_reason":"length"`, "finish chunk follows the carry frame")
+	assert.Equal(t, "data: [DONE]", frames[3], "nothing left to flush at [DONE]")
+}
+
+func TestNormalizeChatStream_FinishFlushesOnlyFinishingChoice(t *testing.T) {
+	// Multi-choice: a finish_reason on choice 1 must flush only choice 1's
+	// carry. Choice 0's carry stays held until its own finish or [DONE].
+	body := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"zero <th\"}},{\"index\":1,\"delta\":{\"content\":\"one </th\"}}]}\n\n" +
+		"data: {\"choices\":[{\"index\":1,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	got, err := io.ReadAll(normalizeChatStream(io.NopCloser(strings.NewReader(body))))
+	require.NoError(t, err)
+
+	frames := strings.Split(strings.TrimRight(string(got), "\n"), "\n\n")
+	require.Len(t, frames, 5, "rewritten delta, choice 1 carry frame, finish chunk, choice 0 carry frame, [DONE]")
+	assert.Contains(t, frames[1], `\u003c/th`, "choice 1 carry flushes at its finish")
+	assert.Contains(t, frames[1], `"index":1`)
+	assert.Contains(t, frames[2], `"finish_reason":"stop"`)
+	assert.Contains(t, frames[3], `\u003cth`, "choice 0 carry is untouched by choice 1's finish and flushes at [DONE]")
+	assert.Contains(t, frames[3], `"index":0`)
+	assert.Equal(t, "data: [DONE]", frames[4])
+}
+
+func TestNormalizeChatStream_NullFinishReasonDoesNotFlush(t *testing.T) {
+	// A non-terminal finish_reason: null must not trigger the carry flush;
+	// the carry stays held for the next content delta.
+	body := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello <th\"}}]}\n\n" +
+		"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":null}]}\n\n" +
+		"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ink>hidden</think>done\"}}]}\n\n" +
+		"data: [DONE]\n\n"
+	got, err := io.ReadAll(normalizeChatStream(io.NopCloser(strings.NewReader(body))))
+	require.NoError(t, err)
+
+	frames := strings.Split(strings.TrimRight(string(got), "\n"), "\n\n")
+	require.Len(t, frames, 4, "rewritten delta, null-finish chunk, final delta, [DONE]")
+	assert.Contains(t, frames[1], `"finish_reason":null`, "null finish chunk passes through")
+	assert.Contains(t, frames[2], `"reasoning_content":"hidden"`, "carry completed the tag across the null-finish chunk")
+	assert.Contains(t, frames[2], `"content":"done"`)
+}
+
+func TestNormalizeChatStream_FinishWithoutCarryEmitsNoSyntheticFrame(t *testing.T) {
+	// A finishing choice whose parser holds nothing must forward the
+	// finish chunk with no synthetic frame.
+	body := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n\n" +
+		"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	got, err := io.ReadAll(normalizeChatStream(io.NopCloser(strings.NewReader(body))))
+	require.NoError(t, err)
+
+	frames := strings.Split(strings.TrimRight(string(got), "\n"), "\n\n")
+	require.Len(t, frames, 3, "content delta, finish chunk, [DONE]")
+	assert.Contains(t, frames[1], `"finish_reason":"stop"`)
+}
+
+func TestNormalizeChatStream_FinishFlushesMidThinkCarryAsReasoning(t *testing.T) {
+	// finish_reason: length mid-think: the held partial-tag carry flushes
+	// as reasoning before the finish chunk — the unfinished think block is
+	// treated as closed, matching the [DONE] posture.
+	body := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"<think>plan<thi\"}}]}\n\n" +
+		"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	got, err := io.ReadAll(normalizeChatStream(io.NopCloser(strings.NewReader(body))))
+	require.NoError(t, err)
+
+	frames := strings.Split(strings.TrimRight(string(got), "\n"), "\n\n")
+	require.Len(t, frames, 4, "rewritten delta, synthetic carry frame, finish chunk, [DONE]")
+	assert.Contains(t, frames[1], `"reasoning_content":"\u003cthi"`, "mid-think carry flushes as reasoning")
+	assert.Contains(t, frames[2], `"finish_reason":"length"`)
+}
+
+func TestNormalizeChatStream_FinishForUnknownChoiceEmitsNoFrame(t *testing.T) {
+	// A finish chunk for a choice that never carried content has no parser
+	// entry; the finish chunk forwards with no synthetic frame.
+	body := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n\n" +
+		"data: {\"choices\":[{\"index\":1,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	got, err := io.ReadAll(normalizeChatStream(io.NopCloser(strings.NewReader(body))))
+	require.NoError(t, err)
+
+	frames := strings.Split(strings.TrimRight(string(got), "\n"), "\n\n")
+	require.Len(t, frames, 3, "content delta, finish chunk, [DONE]")
+	assert.Contains(t, frames[1], `"finish_reason":"stop"`)
+	assert.Contains(t, frames[1], `"index":1`)
+}
+
+func TestFinishCarryFrame_ChoiceNotMapReturnsNil(t *testing.T) {
+	ts := &thinkStream{src: bufio.NewReader(strings.NewReader("")), closer: io.NopCloser(strings.NewReader(""))}
+	assert.Nil(t, ts.finishCarryFrame(json.RawMessage(`"a string"`)))
+}

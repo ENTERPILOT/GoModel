@@ -20,11 +20,16 @@ func TestIsReasoningModel(t *testing.T) {
 		want  bool
 	}{
 		{"MiniMax-M3", true},
-		{"MiniMax-M3-0301", true},
 		{"minimax-m3", true},
 		{"MiniMax-M2.7", true},
+		{"minimax-m2.7", true},
 		{"MiniMax-M2", true},
 		{"MiniMax-M2.5", true},
+		{"MINIMAX-M2.5", true},
+		{"MiniMax-M3.1", false},
+		{"MiniMax-M3-0301", false},
+		{"minimax-m4", false},
+		{"minimax-m2.1", false},
 		{"speech-2.6-hd", false},
 		{"image-01", false},
 		{"embedding-moka", false},
@@ -357,6 +362,50 @@ func TestSplitThink_EarliestCloseWins(t *testing.T) {
 	content, reasoning := splitThink(raw)
 	assert.Equal(t, "b", content)
 	assert.Equal(t, "plan</think>a", reasoning)
+}
+
+func TestSplitThink_NamespacedOpenAndClose(t *testing.T) {
+	// The namespaced <mm:think> open spelling is accepted just like the
+	// plain <think> one, paired with its matching close.
+	raw := "<mm:think>reasoning here</mm:think>answer"
+	content, reasoning := splitThink(raw)
+	assert.Equal(t, "answer", content)
+	assert.Equal(t, "reasoning here", reasoning)
+}
+
+func TestSplitThink_MinimaxNamespacedClose(t *testing.T) {
+	// The </minimax:think> close spelling ends the block like any other
+	// accepted close marker.
+	raw := "<think>plan</minimax:think>answer"
+	content, reasoning := splitThink(raw)
+	assert.Equal(t, "answer", content)
+	assert.Equal(t, "plan", reasoning)
+}
+
+func TestSplitThink_MinimaxNamespacedOpenAndClose(t *testing.T) {
+	raw := "<minimax:think>plan</minimax:think>answer"
+	content, reasoning := splitThink(raw)
+	assert.Equal(t, "answer", content)
+	assert.Equal(t, "plan", reasoning)
+}
+
+func TestSplitThink_DegradedCloseSequence(t *testing.T) {
+	// Degraded long-context shape: the model emits a broken </mm> fragment
+	// immediately before the real </minimax:think> close. The close is
+	// recognized at the </minimax:think> tail; the </mm> prefix is not a
+	// marker and stays as reasoning text verbatim.
+	raw := "<think>reasoning</mm></minimax:think>answer"
+	content, reasoning := splitThink(raw)
+	assert.Equal(t, "answer", content)
+	assert.Equal(t, "reasoning</mm>", reasoning)
+}
+
+func TestSplitThink_MinimaxNamespacedCloseInsideContent(t *testing.T) {
+	// The </minimax:think> close is an orphan in content just like the
+	// other spellings: escaped as visible text, never leaked as a tag.
+	content, reasoning := splitThink("hello</minimax:think>world")
+	assert.Equal(t, `hello\<\/minimax:think\>world`, content)
+	assert.Empty(t, reasoning)
 }
 
 func TestEscapeOrphanClosesFastPath(t *testing.T) {

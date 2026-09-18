@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 
@@ -22,8 +23,9 @@ var sseDataPrefix = []byte("data: ")
 var doneEvent = []byte("data: [DONE]")
 
 // thinkMarkers lists every marker a split-across-feeds suffix could
-// complete into: the opening tag plus every accepted closing marker.
-var thinkMarkers = append([]string{thinkOpenTag}, thinkCloseTags...)
+// complete into: every accepted opening tag plus every accepted closing
+// marker.
+var thinkMarkers = slices.Concat(thinkOpenTags, thinkCloseTags)
 
 // normalizeChatStream wraps a chat completion SSE stream, splitting every
 // <think>...</think> block out of the delta.content member into a new
@@ -93,9 +95,7 @@ func isDoneEvent(line []byte) bool {
 
 // flushCarry emits one synthetic delta per choice whose parser was still
 // holding carry bytes, in choice-index order. An unfinished think block is
-// closed here so the partial chain of thought reaches the client. Each
-// synthetic frame ends with the SSE delimiter (\n\n) so downstream frame
-// decoders see a complete event.
+// closed here so the partial chain of thought reaches the client.
 func (s *thinkStream) flushCarry() {
 	if len(s.parsers) == 0 {
 		return
@@ -106,30 +106,41 @@ func (s *thinkStream) flushCarry() {
 	}
 	sort.Ints(indices)
 	for _, index := range indices {
-		c, r := s.parsers[index].flush()
-		if c == "" && r == "" {
-			continue
-		}
-		delta := map[string]json.RawMessage{}
-		if c != "" {
-			delta["content"] = json.RawMessage(mustMarshalString(c))
-		}
-		if r != "" {
-			delta["reasoning_content"] = json.RawMessage(mustMarshalString(r))
-		}
-		// json.Marshal on an int cannot fail; the result is used directly.
-		encodedIndex, _ := json.Marshal(index)
-		choices := []map[string]json.RawMessage{{
-			"index": encodedIndex,
-			"delta": mustMarshalRaw(delta),
-		}}
-		encoded, _ := json.Marshal(map[string]json.RawMessage{"choices": mustMarshalJSON(choices)})
-		out := make([]byte, 0, len(sseDataPrefix)+len(encoded)+2)
-		out = append(out, sseDataPrefix...)
-		out = append(out, encoded...)
-		out = append(out, '\n', '\n')
-		s.pending.Write(out)
+		s.pending.Write(s.carryFrame(index))
 	}
+}
+
+// carryFrame flushes the carry of the parser for one choice into a complete
+// synthetic SSE delta frame, or returns nil when that choice holds nothing.
+// Each synthetic frame ends with the SSE delimiter (\n\n) so downstream
+// frame decoders see a complete event.
+func (s *thinkStream) carryFrame(index int) []byte {
+	p, ok := s.parsers[index]
+	if !ok {
+		return nil
+	}
+	c, r := p.flush()
+	if c == "" && r == "" {
+		return nil
+	}
+	delta := map[string]json.RawMessage{}
+	if c != "" {
+		delta["content"] = json.RawMessage(mustMarshalString(c))
+	}
+	if r != "" {
+		delta["reasoning_content"] = json.RawMessage(mustMarshalString(r))
+	}
+	// json.Marshal on an int cannot fail; the result is used directly.
+	encodedIndex, _ := json.Marshal(index)
+	choices := []map[string]json.RawMessage{{
+		"index": encodedIndex,
+		"delta": mustMarshalRaw(delta),
+	}}
+	encoded, _ := json.Marshal(map[string]json.RawMessage{"choices": mustMarshalJSON(choices)})
+	out := make([]byte, 0, len(sseDataPrefix)+len(encoded)+2)
+	out = append(out, sseDataPrefix...)
+	out = append(out, encoded...)
+	return append(out, '\n', '\n')
 }
 
 func mustMarshalString(s string) string {
@@ -151,9 +162,14 @@ func (s *thinkStream) Close() error { return s.closer.Close() }
 
 // rewrite processes one SSE line, returning either the original bytes when
 // no rewrite applies or a rewritten line whose delta.content has had any
-// <think> text split off into a delta.reasoning_content member.
+// <think> text split off into a delta.reasoning_content member. When a
+// choice in the line carries a terminal finish_reason, that choice's held
+// parser carry is flushed as a synthetic delta frame prepended to the
+// returned bytes: clients treat the finish chunk as the end of the stream,
+// so the carry must reach them before it, not at [DONE].
 func (s *thinkStream) rewrite(line []byte) []byte {
-	if !bytes.HasPrefix(line, sseDataPrefix) || !bytes.Contains(line, []byte(`"content"`)) {
+	if !bytes.HasPrefix(line, sseDataPrefix) ||
+		(!bytes.Contains(line, []byte(`"content"`)) && !bytes.Contains(line, []byte(`"finish_reason"`))) {
 		return line
 	}
 	payload := bytes.TrimRight(line[len(sseDataPrefix):], "\r\n")
@@ -165,27 +181,56 @@ func (s *thinkStream) rewrite(line []byte) []byte {
 	if err := json.Unmarshal(chunk["choices"], &choices); err != nil {
 		return line
 	}
+	var prefix []byte
 	changed := false
 	for i, raw := range choices {
 		rewritten, ok := s.rewriteChoice(raw)
-		if !ok {
-			continue
+		if ok {
+			choices[i] = rewritten
+			changed = true
 		}
-		choices[i] = rewritten
-		changed = true
+		prefix = append(prefix, s.finishCarryFrame(raw)...)
 	}
 	if !changed {
-		return line
+		return append(prefix, line...)
 	}
 	// Marshaling a decoded []json.RawMessage slice or map cannot fail; both
 	// results are used directly.
 	encoded, _ := json.Marshal(choices)
 	chunk["choices"] = encoded
 	out, _ := json.Marshal(chunk)
-	result := make([]byte, 0, len(sseDataPrefix)+len(out)+1)
+	result := make([]byte, 0, len(prefix)+len(sseDataPrefix)+len(out)+1)
+	result = append(result, prefix...)
 	result = append(result, sseDataPrefix...)
 	result = append(result, out...)
 	return append(result, '\n')
+}
+
+// finishCarryFrame returns a synthetic carry frame for a choice whose delta
+// carries a terminal finish_reason, or nil when the choice is not finishing
+// (finish_reason absent or null) or its parser holds no carry. Only the
+// finishing choice's own parser is flushed — other choices keep their carry
+// until their own finish or the end of the stream.
+func (s *thinkStream) finishCarryFrame(raw json.RawMessage) []byte {
+	var choice map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &choice); err != nil {
+		return nil
+	}
+	finish, ok := choice["finish_reason"]
+	if !ok || bytes.Equal(bytes.TrimSpace(finish), []byte("null")) {
+		return nil
+	}
+	return s.carryFrame(choiceIndex(choice))
+}
+
+// choiceIndex reads the index of a decoded choice, falling back to 0 when
+// the member is missing or non-numeric.
+func choiceIndex(choice map[string]json.RawMessage) int {
+	index := 0
+	if rawIndex, ok := choice["index"]; ok {
+		_ = json.Unmarshal(rawIndex, &index)
+	}
+	return index
 }
 
 func (s *thinkStream) rewriteChoice(raw json.RawMessage) (json.RawMessage, bool) {
@@ -195,10 +240,7 @@ func (s *thinkStream) rewriteChoice(raw json.RawMessage) (json.RawMessage, bool)
 	}
 	// Each choice feeds the parser keyed by its own index; a missing or
 	// non-numeric index falls back to choice 0.
-	index := 0
-	if rawIndex, ok := choice["index"]; ok {
-		_ = json.Unmarshal(rawIndex, &index)
-	}
+	index := choiceIndex(choice)
 	delta, ok := choice["delta"]
 	if !ok {
 		return raw, false
@@ -279,11 +321,9 @@ func (p *thinkParser) feed(text string) (content, reasoning string) {
 	for i < len(combined) {
 		// The marker the parser looks for depends on state: inside think it
 		// wants a closing marker, outside it wants the opening marker.
-		idx, tag := -1, ""
+		idx, tag := earliestOpen(combined[i:])
 		if p.inThink {
 			idx, tag = earliestClose(combined[i:])
-		} else if j := strings.Index(combined[i:], thinkOpenTag); j >= 0 {
-			idx, tag = j, thinkOpenTag
 		}
 		if idx < 0 {
 			// No complete marker in the remainder. Hold only a suffix that
@@ -309,9 +349,9 @@ func (p *thinkParser) feed(text string) (content, reasoning string) {
 }
 
 // holdFrom returns the index in s at which a suffix begins that is a proper
-// prefix of a recognized marker (<think>, </think>, </mm:think>) — the only
-// bytes worth holding for the next feed. It returns len(s) when no suffix
-// qualifies, in which case the whole remainder emits immediately.
+// prefix of any recognized opening or closing marker — the only bytes worth
+// holding for the next feed. It returns len(s) when no suffix qualifies, in
+// which case the whole remainder emits immediately.
 func holdFrom(s string) int {
 	for i := len(s) - 1; i >= 0; i-- {
 		if s[i] != '<' {
