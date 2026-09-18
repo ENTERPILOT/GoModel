@@ -320,6 +320,18 @@ func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string
 		enabled = current.Enabled
 	}
 
+	// The managed credential path has no concept of explicit disable: the
+	// dashboard always serialises trip_on: [] (never omits the field) when
+	// the user has not configured rules. Normalising an empty slice to nil
+	// lets the factory apply its built-in defaults — the same behaviour a
+	// YAML-declared provider gets when trip_on is absent.  Declarative
+	// configuration can still disable tripping by setting trip_on: [] because
+	// the YAML decoder omits a missing key (nil) and explicitly lists
+	// trip_on: [] which the factory interprets as "no rules".
+	if len(req.TripOn) == 0 {
+		req.TripOn = nil
+	}
+
 	cred := providers.ManagedProviderCredential{
 		Name:                     name,
 		Type:                     strings.TrimSpace(req.Type),
