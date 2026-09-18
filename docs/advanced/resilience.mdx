@@ -17,6 +17,10 @@ default, or per model with `scope: model`. They do not switch to a different mod
 provider on failure. For cross-model failover, see
 [Failover](/features/failover).
 
+This page covers the knobs. For what GoModel does when a provider changes its
+response shape, answers `200` with nothing usable, or dies mid-stream, see
+[Provider failure modes](/advanced/provider-failure-modes).
+
 ## Defaults
 
 The defaults are tuned to be safe for most deployments. Override only what
