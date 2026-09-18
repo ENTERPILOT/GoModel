@@ -120,6 +120,7 @@ The official SDKs therefore work unchanged. Configure their base URLs as follows
 - Z.ai
 - Alibaba Cloud Model Studio (Bailian)
 - Kilo AI
+- Eden AI
 - MiniMax
 - Xiaomi MiMo
 - OpenCode Go

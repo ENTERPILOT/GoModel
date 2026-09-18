@@ -5932,7 +5932,7 @@ func TestProviderPassthrough_RejectsUnsupportedProvider(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Contains(t, rec.Body.String(), `provider passthrough for \"groq\" is not enabled`)
-	require.Contains(t, rec.Body.String(), "anthropic, deepseek, hetzner, kilo, llamacpp, llmd, openai, openrouter, sglang, vllm, zai")
+	require.Contains(t, rec.Body.String(), "anthropic, deepseek, edenai, hetzner, kilo, llamacpp, llmd, openai, openrouter, sglang, vllm, zai")
 }
 
 func TestProviderPassthrough_ChutesRequiresExplicitOptIn(t *testing.T) {

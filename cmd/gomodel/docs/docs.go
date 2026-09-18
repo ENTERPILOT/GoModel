@@ -9874,6 +9874,10 @@ const docTemplate = `{
                 "prompt_tokens": {
                     "type": "integer"
                 },
+                "raw_usage": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
                 "total_tokens": {
                     "type": "integer"
                 }
