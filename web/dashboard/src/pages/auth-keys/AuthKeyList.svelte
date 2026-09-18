@@ -11,7 +11,7 @@
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
-<div class="table-wrapper">
+<div class="table-wrapper auth-keys-table-wrapper">
   <table class="data-table">
     <thead>
       <tr>
@@ -186,6 +186,13 @@
 </div>
 
 <style>
+  /* The key table carries many columns (Last used included); scroll sideways
+     on narrow windows instead of clipping the trailing columns. Same
+     approach as the usage log. */
+  .auth-keys-table-wrapper {
+    overflow-x: auto;
+  }
+
   /* Read-only chip variant (e.g. API key labels) — same look, no affordance. */
   .usage-label-chip-static, .usage-label-chip-static:hover {
     cursor: default;
