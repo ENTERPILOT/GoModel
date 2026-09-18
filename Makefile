@@ -155,8 +155,13 @@ test-contract:
 # Run all tests including dashboard, e2e, integration, and contract tests
 test-all: test test-dashboard test-e2e test-integration test-contract
 
+# Every guard in tests/perf, with no -run filter: the name list this used to
+# carry had to be edited by hand for each new guard, and silently left the ones
+# nobody remembered to add (TestFormatPerfGuardResult,
+# TestSessionIDVisibilityByBodySize) running nowhere. A guard that CI does not
+# execute is worse than no guard, because it reads as covered.
 perf-check:
-	go test -run '^Test(HotPathPerfGuard|VoiceRoutingLatency)$$' -count=1 -v ./tests/perf/...
+	go test -count=1 -v ./tests/perf/...
 
 perf-bench:
 	go test -bench=. -benchmem ./tests/perf/...
