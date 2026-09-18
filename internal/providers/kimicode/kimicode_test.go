@@ -345,7 +345,8 @@ func TestDefaultRules_ResetClearsQuotaWindow(t *testing.T) {
 
 // TestFactoryPath_E2E verifies that factory-applied default trip rules reach
 // the circuit breaker end-to-end: Registration.DefaultTripOn ->
-// ProviderFactory.Create -> provider -> llmclient.
+// ProviderFactory.Create -> provider -> llmclient. The requests below go
+// through the factory-created provider itself, not a hand-built client.
 func TestFactoryPath_E2E(t *testing.T) {
 	t.Parallel()
 
@@ -354,55 +355,38 @@ func TestFactoryPath_E2E(t *testing.T) {
 	factory := providers.NewProviderFactory()
 	factory.Add(Registration)
 
-	// Request via factory with no trip_on: Create applies Registration.DefaultTripOn
-	// to its local cfg copy (see providers/factory.go:184). We replicate the same
-	// default-application in the test client so we exercise the same llmclient path
-	// the factory-created provider would use.
-	cfg := providers.ProviderConfig{
-		Name: "kimi-test",
-		Type: "kimicode",
+	// TripOn nil — the factory must apply Registration.DefaultTripOn.
+	p, err := factory.Create(providers.ProviderConfig{
+		Name:    "kimi-test",
+		Type:    "kimicode",
+		APIKey:  "test-key",
+		BaseURL: server.URL,
 		Resilience: config.ResilienceConfig{
 			CircuitBreaker: config.CircuitBreakerConfig{
 				Enabled:          true,
 				FailureThreshold: 5,
 				SuccessThreshold: 1,
 				Timeout:          20 * time.Millisecond,
-				// TripOn nil — factory defaults must apply.
 			},
 		},
-	}
-
-	p, err := factory.Create(cfg)
+	})
 	require.NoError(t, err)
-	require.NotNil(t, p)
 
-	// Apply the same defaults the factory applied to its local cfg copy.
-	// This exercises the identical llmclient path the factory-created provider uses.
-	breakerCfg := cfg.Resilience.CircuitBreaker
-	if breakerCfg.TripOn == nil {
-		breakerCfg.TripOn = Registration.DefaultTripOn
+	req := &core.ChatRequest{
+		Model:    "kimi-k2",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
 	}
 
-	client := llmclient.New(llmclient.Config{
-		BaseURL:        server.URL,
-		Retry:          config.DefaultRetryConfig(),
-		CircuitBreaker: breakerCfg,
-	}, nil)
-
-	// First request trips the breaker via the factory-applied defaults.
-	err = client.Do(context.Background(), llmclient.Request{Method: http.MethodGet, Endpoint: "/test"}, nil)
+	// First request reaches upstream and trips the breaker via defaults.
+	_, err = p.ChatCompletion(context.Background(), req)
 	require.Error(t, err)
 	assert.Equal(t, 1, capture.Count(), "first failure must reach upstream")
 
 	// Second request is rejected immediately by the circuit breaker.
-	err = client.Do(context.Background(), llmclient.Request{Method: http.MethodGet, Endpoint: "/test"}, nil)
+	_, err = p.ChatCompletion(context.Background(), req)
 	require.Error(t, err)
-	var gwErr *core.GatewayError
-	require.ErrorAs(t, err, &gwErr)
-	assert.Contains(t, gwErr.Message, "circuit breaker is open")
+	assert.Contains(t, err.Error(), "circuit breaker is open")
 	assert.Equal(t, 1, capture.Count(), "breaker must prevent upstream reach")
-
-	_ = p // exercises the factory-created provider (used for assertion above via the same defaults)
 }
 
 // Non-gateway errors don't trip quota rules.
