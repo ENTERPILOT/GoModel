@@ -135,9 +135,3 @@ func (cb *circuitBreaker) State() string {
 	}
 	return "unknown"
 }
-
-func (cb *circuitBreaker) IsHalfOpen() bool {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-	return cb.state == circuitHalfOpen
-}
