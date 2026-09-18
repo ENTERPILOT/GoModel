@@ -300,9 +300,13 @@ func (c *Client) DoPassthrough(ctx context.Context, req Request) (*http.Response
 		retryable := c.isRetryable(resp.StatusCode)
 		if retryable {
 			if errBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes)); readErr == nil {
-				// The body is restored so the caller still proxies the
-				// response unchanged; only the bounded peek feeds the parser.
-				resp.Body = io.NopCloser(bytes.NewReader(errBody))
+				// The peeked prefix plus the unread remainder are spliced back
+				// together so callers still proxy the response unchanged,
+				// whatever its size; only the bounded prefix feeds the parser.
+				resp.Body = passthroughBodyReader{
+					Reader: io.MultiReader(bytes.NewReader(errBody), resp.Body),
+					orig:   resp.Body,
+				}
 				providerErr := attachResponseHeaders(
 					core.ParseProviderError(c.config.ProviderName, resp.StatusCode, errBody, nil), resp.Header)
 				if ttl, ok := c.quotaTripTTL(providerErr); ok {
@@ -338,3 +342,14 @@ func (c *Client) DoPassthrough(ctx context.Context, req Request) (*http.Response
 
 	return nil, c.failAfterRetries(scope)
 }
+
+// passthroughBodyReader splices a peeked prefix back in front of the
+// remainder of an upstream response body. Closing it closes the original
+// upstream body, so callers of DoPassthrough keep the full response plus
+// normal reader lifecycle after the quota-rule peek.
+type passthroughBodyReader struct {
+	io.Reader
+	orig io.Closer
+}
+
+func (r passthroughBodyReader) Close() error { return r.orig.Close() }
