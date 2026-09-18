@@ -681,25 +681,22 @@ func TestThinkParser_NestedCloseAcrossFeeds(t *testing.T) {
 		gotContent += c
 		gotReasoning += r
 	}
-	// The nested <think> open arms hold mode, so the inner close is held.
-	// The outer close arrives first and proves the held close was literal:
-	// it is restored into the reasoning verbatim, together with the text
-	// that followed it. The outer close is now the held candidate.
-	assert.Empty(t, gotContent, "nothing emits while a suspect close is held")
-	assert.Equal(t, "outer<think>inner</think>trailing", gotReasoning)
-	// End of stream resolves the held close as the real final close: the
-	// text after it is content.
-	c, r := p.flush()
-	assert.Equal(t, "after", c)
-	assert.Empty(t, r)
+	// Fast mode: the parser exits on the inner close at once, so the
+	// "trailing" text is content and the outer close is an orphan stripped
+	// from the content stream. The nested <think> open marker stays in the
+	// reasoning verbatim — reasoning is never rewritten.
+	assert.Equal(t, "trailingafter", gotContent)
+	assert.Equal(t, "outer<think>inner", gotReasoning)
 }
 
 func TestThinkParser_DiscordShapeAcrossFeeds(t *testing.T) {
 	// The shape reported upstream: the model reasons about the tags
 	// themselves and writes a literal <think> and a literal </think>
-	// mid-sentence. The nested open arms hold mode, the literal close is
-	// held, and the final close resolves it as literal. The full reasoning
-	// reaches the client intact and only the real answer is content.
+	// mid-sentence. Fast mode cannot wait for confirmation, so the literal
+	// close ends the reasoning early and the rest of the trace lands in
+	// content. The tag bytes themselves never reach the client — this is
+	// the pinned worst case, and it still beats full XML passthrough. The
+	// buffered splitThink handles the same shape exactly.
 	var p thinkParser
 	var gotContent, gotReasoning string
 	feeds := []string{
@@ -712,35 +709,13 @@ func TestThinkParser_DiscordShapeAcrossFeeds(t *testing.T) {
 		gotContent += c
 		gotReasoning += r
 	}
-	c, r := p.flush()
+	c, _ := p.flush()
 	gotContent += c
-	gotReasoning += r
-	assert.Equal(t, "Done.", gotContent)
+	assert.Equal(t, "' reference. Let me fix that.Done.", gotContent)
 	assert.Equal(t,
-		`Wait, I accidentally typed "inlineXML" instead of "inline<think>XML" — and lost the</think>' reference. Let me fix that.`,
+		`Wait, I accidentally typed "inlineXML" instead of "inline<think>XML" — and lost the`,
 		gotReasoning,
-		"the literal markers stay in the reasoning verbatim, byte for byte")
-}
-
-func TestThinkParser_HeldCloseResolvedByChainedOpen(t *testing.T) {
-	// A nested open arms hold mode, but the model really does chain: it
-	// closes the block, answers, and thinks again. The new <think> open
-	// resolves the held close as real — the pending text is content — and
-	// the parser returns to fast mode for the new block.
-	var p thinkParser
-	var gotContent, gotReasoning string
-	feeds := []string{
-		"<think>a<think>b</think>mid",
-		"<think>c</think>end",
-	}
-	for _, f := range feeds {
-		c, r := p.feed(f)
-		gotContent += c
-		gotReasoning += r
-	}
-	assert.Equal(t, "midend", gotContent, "text between the chained blocks is content")
-	assert.Equal(t, "a<think>bc", gotReasoning,
-		"the nested open stays reasoning text; the confirmed close and the new open are consumed")
+		"reasoning ends at the literal close; the nested open stays reasoning text verbatim")
 }
 
 func TestThinkParser_FastModeOrphanCloseLeaks(t *testing.T) {
