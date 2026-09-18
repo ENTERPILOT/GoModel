@@ -1,6 +1,7 @@
 package llmclient
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -114,6 +115,11 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 			lastErr = attachResponseHeaders(core.ParseProviderError(c.config.ProviderName, resp.StatusCode, resp.Body, nil), resp.Header)
 			lastStatusCode = resp.StatusCode
 			lastErrFromTransport = false
+			if ttl, ok := c.quotaTripTTL(lastErr); ok {
+				scope.breaker.RecordQuotaTrip(ttl)
+				c.completeScope(scope, lastStatusCode, lastErr, lastErr)
+				return nil, lastErr
+			}
 			if scope.halfOpenProbe {
 				c.completeScope(scope, lastStatusCode, lastErr, nil)
 				return nil, lastErr
@@ -134,6 +140,11 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 			lastErr = attachResponseHeaders(embedded, resp.Header)
 			lastStatusCode = embedded.StatusCode
 			lastErrFromTransport = false
+			if ttl, ok := c.quotaTripTTL(lastErr); ok {
+				scope.breaker.RecordQuotaTrip(ttl)
+				c.completeScope(scope, lastStatusCode, lastErr, lastErr)
+				return nil, lastErr
+			}
 			if c.isRetryable(embedded.StatusCode) && !scope.halfOpenProbe {
 				continue
 			}
@@ -288,6 +299,20 @@ func (c *Client) DoPassthrough(ctx context.Context, req Request) (*http.Response
 
 		retryable := c.isRetryable(resp.StatusCode)
 		if retryable {
+			if errBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes)); readErr == nil {
+				// The body is restored so the caller still proxies the
+				// response unchanged; only the bounded peek feeds the parser.
+				resp.Body = io.NopCloser(bytes.NewReader(errBody))
+				providerErr := attachResponseHeaders(
+					core.ParseProviderError(c.config.ProviderName, resp.StatusCode, errBody, nil), resp.Header)
+				if ttl, ok := c.quotaTripTTL(providerErr); ok {
+					// A matching quota error must not be retried: trip now so
+					// failover starts immediately instead of after max attempts.
+					scope.breaker.RecordQuotaTrip(ttl)
+					c.completeScope(scope, resp.StatusCode, nil, nil)
+					return resp, nil
+				}
+			}
 			if scope.halfOpenProbe || attempt == maxAttempts-1 {
 				c.completeScope(scope, resp.StatusCode, nil, nil)
 				return resp, nil

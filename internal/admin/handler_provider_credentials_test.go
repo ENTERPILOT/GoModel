@@ -637,3 +637,29 @@ func TestProviderStatus_CircuitStateEmptyWithoutTraffic(t *testing.T) {
 	require.Len(t, body.Providers, 1)
 	assert.Empty(t, body.Providers[0].CircuitState)
 }
+
+// A disabled credential still validates trip_on: an invalid regex is rejected
+// with 400 so operators never store unusable rules that surface only at enable
+// time. A negative TTL is rejected the same way.
+func TestUpsertProviderCredential_DisabledCredentialWithInvalidTripOnReturns400(t *testing.T) {
+	fake := newProviderCredentialsAdminFake()
+	h := newProviderCredentialsHandler(fake)
+
+	t.Run("invalid regex", func(t *testing.T) {
+		c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials",
+			`{"name":"x","type":"openai","api_keys":["sk"],"trip_on":[{"match":"(unclosed","ttl":0}],"enabled":false}`)
+		err := h.UpsertProviderCredential(c)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+		assert.Empty(t, fake.rows, "invalid credential must not be stored")
+	})
+
+	t.Run("negative ttl", func(t *testing.T) {
+		c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials",
+			`{"name":"y","type":"openai","api_keys":["sk"],"trip_on":[{"match":"bad","ttl":-1}],"enabled":false}`)
+		err := h.UpsertProviderCredential(c)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+		assert.Empty(t, fake.rows, "invalid credential must not be stored")
+	})
+}

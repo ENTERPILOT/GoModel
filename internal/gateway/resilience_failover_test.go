@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -13,6 +12,7 @@ import (
 	goconfig "github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,21 +31,21 @@ func (p *retryFailoverProvider) ChatCompletion(ctx context.Context, req *core.Ch
 
 func TestCloudflareTimeoutRetriesBeforeModelFailover(t *testing.T) {
 	var calls []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server, capture := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
 		calls = append(calls, r.URL.Path)
 		if r.URL.Path == "/model1" {
 			w.WriteHeader(524)
 			return
 		}
 		_, _ = w.Write([]byte(`{"id":"backup","model":"model2","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}]}`))
-	}))
-	defer server.Close()
+	})
 	cfg := llmclient.DefaultConfig("cloudflare", server.URL)
 	cfg.Retry.MaxRetries = 2
 	cfg.Retry.InitialBackoff = time.Nanosecond
 	cfg.CircuitBreaker.Scope = "model"
 	cfg.CircuitBreaker.FailureThreshold = 1
 	provider := &retryFailoverProvider{client: llmclient.New(cfg, nil)}
+	_ = capture // uses recorded requests for audit in tests that need it
 	orchestrator := NewInferenceOrchestrator(InferenceConfig{
 		Provider: provider,
 		FailoverResolver: failoverResolverFunc(func(*core.RequestModelResolution, core.Operation) []core.ModelSelector {
@@ -106,7 +106,7 @@ func TestTripRuleQuotaTripsPrimaryInFailoverChain(t *testing.T) {
 	// /model2 returns 200.  We use 500 because the default failover policy
 	// does not treat 403 as retryable, but the trip rule matches the
 	// message text regardless of status.
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server, _ := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		if path == "/model1" {
 			aHits.Add(1)
@@ -118,8 +118,7 @@ func TestTripRuleQuotaTripsPrimaryInFailoverChain(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":"b-resp","model":"model2","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}]}`))
 		}
-	}))
-	defer server.Close()
+	})
 
 	// Primary provider: quotaTripProvider with trip rules hitting /model1.
 	primary := &quotaTripProvider{

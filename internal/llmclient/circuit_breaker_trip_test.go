@@ -70,6 +70,41 @@ func TestTripRule_MatchingMessageTripsInstantly(t *testing.T) {
 	assert.Equal(t, int32(1), attempts.Load(), "rejected request must not reach the upstream")
 }
 
+// A matching quota error on a retryable status trips on the first attempt:
+// the retry loop stops instead of hammering the quota-exhausted provider
+// max_retries+1 times.
+func TestTripRule_RetryableQuotaErrorTripsBeforeRetry(t *testing.T) {
+	t.Parallel()
+
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(quotaErrorBody))
+	}))
+	defer server.Close()
+
+	cfg := DefaultConfig("test", server.URL)
+	cfg.Retry.MaxRetries = 2
+	cfg.CircuitBreaker = goconfig.CircuitBreakerConfig{
+		Enabled:          true,
+		FailureThreshold: 5,
+		SuccessThreshold: 1,
+		Timeout:          20 * time.Millisecond,
+		TripOn:           []goconfig.TripRuleConfig{{Match: `quota exceeded`, TTL: 150 * time.Millisecond}},
+	}
+	client := New(cfg, nil)
+
+	err := client.Do(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"}, nil)
+	require.Error(t, err)
+	var gatewayErr *core.GatewayError
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, http.StatusTooManyRequests, gatewayErr.StatusCode)
+	assert.Equal(t, int32(1), attempts.Load(), "quota trip must stop the retry loop after the first attempt")
+	assert.Equal(t, "open", client.circuitBreaker.State())
+}
+
 // The quota window outlives the breaker timeout: while quotaUntil is in the
 // future the breaker stays open even after lastFailure ages past timeout.
 // Once the window lapses the half-open probe decides recovery.
