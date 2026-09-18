@@ -732,7 +732,103 @@ func TestNormalizeChatStream_FinishForUnknownChoiceEmitsNoFrame(t *testing.T) {
 	assert.Contains(t, frames[1], `"index":1`)
 }
 
-func TestFinishCarryFrame_ChoiceNotMapReturnsNil(t *testing.T) {
-	ts := &thinkStream{src: bufio.NewReader(strings.NewReader("")), closer: io.NopCloser(strings.NewReader(""))}
-	assert.Nil(t, ts.finishCarryFrame(json.RawMessage(`"a string"`)))
+// dataEvents returns the SSE data payloads of out in stream order, one
+// entry per `data: ` line — a rewritten event ends with a single \n, so
+// frame boundaries alone do not separate events.
+func dataEvents(out string) []string {
+	var events []string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, "data: ") {
+			events = append(events, l)
+		}
+	}
+	return events
+}
+
+func TestNormalizeChatStream_ContentAndFinishSameChunkOrdersCarryBeforeFinish(t *testing.T) {
+	// Regression: one chunk carrying BOTH content ending in a partial
+	// marker AND a terminal finish_reason must not prepend the freshly
+	// parked carry to the content event — a client concatenating deltas
+	// would read `<thanswer `. The content event goes first with the
+	// finish_reason stripped, the parked carry follows as its own frame,
+	// and the finish_reason travels last on a finish-only frame.
+	body := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"answer <th\"},\"finish_reason\":\"length\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	got, err := io.ReadAll(normalizeChatStream(io.NopCloser(strings.NewReader(body))))
+	require.NoError(t, err)
+
+	events := dataEvents(string(got))
+	require.Len(t, events, 4, "content event, carry frame, finish-only frame, [DONE]")
+	assert.Contains(t, events[0], `"content":"answer "`, "content before the partial tag emits first")
+	assert.NotContains(t, events[0], "finish_reason", "finish_reason stripped from the content event")
+	assert.Contains(t, events[1], `\u003cth`, "parked carry flushes after the content event")
+	assert.Contains(t, events[1], `"index":0`)
+	assert.NotContains(t, events[1], "finish_reason", "carry frame carries no finish_reason")
+	assert.Contains(t, events[2], `"finish_reason":"length"`, "finish_reason travels last")
+	assert.Contains(t, events[2], `"index":0`, "finish-only frame keeps its choice index")
+	assert.NotContains(t, events[2], "content", "finish-only frame carries no content")
+	assert.Equal(t, "data: [DONE]", events[3])
+}
+
+func TestNormalizeChatStream_ContentAndFinishSameChunkFlushesOldCarryInOrder(t *testing.T) {
+	// A choice with carry held from an earlier chunk whose terminal chunk
+	// carries content AND finish: the old carry feeds the parser first, so
+	// its bytes precede the new content inside the content event, then the
+	// newly parked carry flushes, then the finish-only frame.
+	body := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello <th\"}}]}\n\n" +
+		"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"answer <t\"},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	got, err := io.ReadAll(normalizeChatStream(io.NopCloser(strings.NewReader(body))))
+	require.NoError(t, err)
+
+	events := dataEvents(string(got))
+	require.Len(t, events, 5, "first delta, content event, carry frame, finish-only frame, [DONE]")
+	assert.Contains(t, events[0], `"content":"hello "`)
+	assert.Contains(t, events[1], `"content":"\u003cthanswer "`,
+		"old carry bytes precede the new content inside the content event")
+	assert.NotContains(t, events[1], "finish_reason")
+	assert.Contains(t, events[2], `"content":"\u003ct"`, "newly parked carry flushes after the content event")
+	assert.Contains(t, events[2], `"index":0`)
+	assert.Contains(t, events[3], `"finish_reason":"stop"`)
+	assert.Contains(t, events[3], `"index":0`)
+	assert.Equal(t, "data: [DONE]", events[4])
+}
+
+func TestNormalizeChatStream_ContentAndFinishSameChunkKeepsChoiceIsolation(t *testing.T) {
+	// Multi-choice: choice 1's terminal content+finish chunk splits into
+	// content, carry, and finish frames while choice 0's carry stays held
+	// until [DONE] — the finish on choice 1 never touches choice 0.
+	body := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"zero <th\"}},{\"index\":1,\"delta\":{\"content\":\"one \"}}]}\n\n" +
+		"data: {\"choices\":[{\"index\":1,\"delta\":{\"content\":\"tail <t\"},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	got, err := io.ReadAll(normalizeChatStream(io.NopCloser(strings.NewReader(body))))
+	require.NoError(t, err)
+
+	events := dataEvents(string(got))
+	require.Len(t, events, 6, "first delta, content event, choice 1 carry frame, choice 1 finish frame, choice 0 carry frame, [DONE]")
+	assert.Contains(t, events[1], `"content":"tail "`)
+	assert.NotContains(t, events[1], "finish_reason")
+	assert.Contains(t, events[2], `"content":"\u003ct"`, "choice 1 parked carry flushes after its content event")
+	assert.Contains(t, events[2], `"index":1`)
+	assert.Contains(t, events[3], `"finish_reason":"stop"`)
+	assert.Contains(t, events[3], `"index":1`)
+	assert.Contains(t, events[4], `\u003cth`, "choice 0 carry is untouched by choice 1's finish")
+	assert.Contains(t, events[4], `"index":0`)
+	assert.Equal(t, "data: [DONE]", events[5])
+}
+
+func TestNormalizeChatStream_ContentAndFinishSameChunkNoCarryStaysSingleEvent(t *testing.T) {
+	// A terminal chunk whose rewrite parks no carry needs no splitting:
+	// the finish_reason stays on the single rewritten event.
+	body := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"<think>plan</think>answer\"},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	got, err := io.ReadAll(normalizeChatStream(io.NopCloser(strings.NewReader(body))))
+	require.NoError(t, err)
+
+	events := dataEvents(string(got))
+	require.Len(t, events, 2, "single rewritten event, [DONE]")
+	assert.Contains(t, events[0], `"content":"answer"`)
+	assert.Contains(t, events[0], `"reasoning_content":"plan"`)
+	assert.Contains(t, events[0], `"finish_reason":"stop"`, "finish_reason stays on the rewritten event")
+	assert.Equal(t, "data: [DONE]", events[1])
 }

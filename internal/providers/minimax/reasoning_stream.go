@@ -14,7 +14,8 @@ import (
 // Streaming half of the MiniMax <think> handling: normalizeChatStream wraps
 // the SSE stream and thinkParser runs the state machine across successive
 // content deltas. The buffered half (response normalization and the
-// close-marker helpers) lives in reasoning.go.
+// close-marker helpers) lives in reasoning.go; the synthetic SSE frame
+// builders (carry and finish frames) live in reasoning_frames.go.
 
 // sseDataPrefix introduces the JSON payload of an SSE event.
 var sseDataPrefix = []byte("data: ")
@@ -110,63 +111,20 @@ func (s *thinkStream) flushCarry() {
 	}
 }
 
-// carryFrame flushes the carry of the parser for one choice into a complete
-// synthetic SSE delta frame, or returns nil when that choice holds nothing.
-// Each synthetic frame ends with the SSE delimiter (\n\n) so downstream
-// frame decoders see a complete event.
-func (s *thinkStream) carryFrame(index int) []byte {
-	p, ok := s.parsers[index]
-	if !ok {
-		return nil
-	}
-	c, r := p.flush()
-	if c == "" && r == "" {
-		return nil
-	}
-	delta := map[string]json.RawMessage{}
-	if c != "" {
-		delta["content"] = json.RawMessage(mustMarshalString(c))
-	}
-	if r != "" {
-		delta["reasoning_content"] = json.RawMessage(mustMarshalString(r))
-	}
-	// json.Marshal on an int cannot fail; the result is used directly.
-	encodedIndex, _ := json.Marshal(index)
-	choices := []map[string]json.RawMessage{{
-		"index": encodedIndex,
-		"delta": mustMarshalRaw(delta),
-	}}
-	encoded, _ := json.Marshal(map[string]json.RawMessage{"choices": mustMarshalJSON(choices)})
-	out := make([]byte, 0, len(sseDataPrefix)+len(encoded)+2)
-	out = append(out, sseDataPrefix...)
-	out = append(out, encoded...)
-	return append(out, '\n', '\n')
-}
-
-func mustMarshalString(s string) string {
-	encoded, _ := json.Marshal(s)
-	return string(encoded)
-}
-
-func mustMarshalRaw(v map[string]json.RawMessage) json.RawMessage {
-	encoded, _ := json.Marshal(v)
-	return encoded
-}
-
-func mustMarshalJSON(v any) json.RawMessage {
-	encoded, _ := json.Marshal(v)
-	return encoded
-}
-
 func (s *thinkStream) Close() error { return s.closer.Close() }
 
 // rewrite processes one SSE line, returning either the original bytes when
 // no rewrite applies or a rewritten line whose delta.content has had any
 // <think> text split off into a delta.reasoning_content member. When a
 // choice in the line carries a terminal finish_reason, that choice's held
-// parser carry is flushed as a synthetic delta frame prepended to the
-// returned bytes: clients treat the finish chunk as the end of the stream,
-// so the carry must reach them before it, not at [DONE].
+// parser carry must reach the client before the finish — clients treat the
+// finish chunk as the end of the stream. A finish-only chunk keeps its held
+// carry flushed as a synthetic delta frame prepended to the returned bytes.
+// A chunk whose content AND finish_reason arrive together is split instead:
+// the content event goes first with finish_reason stripped, then any carry
+// the content just parked flushes as its own frame, and the finish_reason
+// travels last on a finish-only frame — prepending the freshly parked carry
+// would hand the client its deltas out of order.
 func (s *thinkStream) rewrite(line []byte) []byte {
 	if !bytes.HasPrefix(line, sseDataPrefix) ||
 		(!bytes.Contains(line, []byte(`"content"`)) && !bytes.Contains(line, []byte(`"finish_reason"`))) {
@@ -181,15 +139,21 @@ func (s *thinkStream) rewrite(line []byte) []byte {
 	if err := json.Unmarshal(chunk["choices"], &choices); err != nil {
 		return line
 	}
-	var prefix []byte
+	var prefix, suffix []byte
 	changed := false
 	for i, raw := range choices {
 		rewritten, ok := s.rewriteChoice(raw)
-		if ok {
-			choices[i] = rewritten
-			changed = true
+		if !ok {
+			// No content was rewritten: a terminal choice can only be a
+			// finish-only chunk here, so its held carry flushes ahead of
+			// the finish as before.
+			prefix = append(prefix, s.finishCarryFrame(raw)...)
+			continue
 		}
-		prefix = append(prefix, s.finishCarryFrame(raw)...)
+		rewritten, frames := s.finishSplit(rewritten)
+		choices[i] = rewritten
+		changed = true
+		suffix = append(suffix, frames...)
 	}
 	if !changed {
 		return append(prefix, line...)
@@ -199,28 +163,12 @@ func (s *thinkStream) rewrite(line []byte) []byte {
 	encoded, _ := json.Marshal(choices)
 	chunk["choices"] = encoded
 	out, _ := json.Marshal(chunk)
-	result := make([]byte, 0, len(prefix)+len(sseDataPrefix)+len(out)+1)
+	result := make([]byte, 0, len(prefix)+len(sseDataPrefix)+len(out)+1+len(suffix))
 	result = append(result, prefix...)
 	result = append(result, sseDataPrefix...)
 	result = append(result, out...)
-	return append(result, '\n')
-}
-
-// finishCarryFrame returns a synthetic carry frame for a choice whose delta
-// carries a terminal finish_reason, or nil when the choice is not finishing
-// (finish_reason absent or null) or its parser holds no carry. Only the
-// finishing choice's own parser is flushed — other choices keep their carry
-// until their own finish or the end of the stream.
-func (s *thinkStream) finishCarryFrame(raw json.RawMessage) []byte {
-	var choice map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &choice); err != nil {
-		return nil
-	}
-	finish, ok := choice["finish_reason"]
-	if !ok || bytes.Equal(bytes.TrimSpace(finish), []byte("null")) {
-		return nil
-	}
-	return s.carryFrame(choiceIndex(choice))
+	result = append(result, '\n')
+	return append(result, suffix...)
 }
 
 // choiceIndex reads the index of a decoded choice, falling back to 0 when
