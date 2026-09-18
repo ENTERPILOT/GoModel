@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -16,6 +15,12 @@ import (
 )
 
 var _ core.ImageEditProvider = (*Provider)(nil)
+
+// liveModel reports whether model is MiniMax's image-01-live variant, which
+// composes from aspect_ratio only and ignores explicit pixel dimensions.
+func liveModel(model string) bool {
+	return strings.EqualFold(strings.TrimSpace(model), "image-01-live")
+}
 
 // CreateImageEdit generates images using uploaded character portrait references.
 func (p *Provider) CreateImageEdit(ctx context.Context, req *core.ImageEditRequest) (*core.ImageGenerationResponse, error) {
@@ -38,7 +43,17 @@ func (p *Provider) CreateImageEdit(ctx context.Context, req *core.ImageEditReque
 	}
 	payload := map[string]any{"model": req.Model, "prompt": req.Prompt, "subject_reference": references}
 	format := "url"
+	// MiniMax honours width and height only for image-01; image-01-live ignores
+	// them and would return a differently sized image, so reject the dimension
+	// fields instead of accepting a request that cannot be satisfied.
+	live := liveModel(req.Model)
 	for _, field := range req.Fields {
+		if live {
+			switch field.Name {
+			case "width", "height", "size":
+				return nil, core.NewInvalidRequestError("minimax "+field.Name+" is supported only by image-01; use aspect_ratio with image-01-live", nil)
+			}
+		}
 		switch field.Name {
 		case "response_format":
 			format = field.Value
@@ -104,30 +119,19 @@ func (p *Provider) CreateImageEdit(ctx context.Context, req *core.ImageEditReque
 			URLs   []string `json:"image_urls"`
 			Base64 []string `json:"image_base64"`
 		} `json:"data"`
-		BaseResponse struct {
-			Code *int `json:"status_code"`
+		BaseResponse *struct {
+			StatusCode *int   `json:"status_code"`
+			StatusMsg  string `json:"status_msg"`
 		} `json:"base_resp"`
 	}
 	if err := json.Unmarshal(responseBody, &response); err != nil {
 		return nil, core.NewProviderError("minimax", http.StatusBadGateway, "failed to parse image response", err)
 	}
-	if response.BaseResponse.Code == nil {
+	if response.BaseResponse == nil || response.BaseResponse.StatusCode == nil {
 		return nil, core.NewProviderError("minimax", http.StatusBadGateway, "image response is missing status_code", nil)
 	}
-	if *response.BaseResponse.Code != 0 {
-		message := fmt.Sprintf("minimax image request failed (status %d)", *response.BaseResponse.Code)
-		switch *response.BaseResponse.Code {
-		case 1002:
-			return nil, core.NewRateLimitError("minimax", message)
-		case 1004, 2049:
-			return nil, core.NewAuthenticationError("minimax", message)
-		case 1008:
-			return nil, core.NewProviderError("minimax", http.StatusPaymentRequired, message, nil)
-		case 1026, 2013:
-			return nil, core.NewInvalidRequestError(message, nil)
-		default:
-			return nil, core.NewProviderError("minimax", http.StatusBadGateway, message, nil)
-		}
+	if code := *response.BaseResponse.StatusCode; code != 0 {
+		return nil, statusError("image edit", code, response.BaseResponse.StatusMsg, responseBody)
 	}
 	result := &core.ImageGenerationResponse{Created: time.Now().Unix(), Provider: "minimax", Data: []core.ImageData{}}
 	if format == "base64" {

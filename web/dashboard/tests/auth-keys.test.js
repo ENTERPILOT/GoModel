@@ -12,10 +12,12 @@ import {
   defaultAuthKeyForm,
   filterAuthKeys,
   labelChipStyle,
+  lastUsedCellState,
   labelColor,
   normalizeAuthKeyUserPath,
   parseAuthKeyAllowedModels,
   parseAuthKeyLabels,
+  retentionDaysFromConfig,
   sortAuthKeys,
 } from "../src/pages/auth-keys/authKeysLogic.js";
 
@@ -299,4 +301,44 @@ test("filterAuthKeys userPath keeps the path and its subtree on segment boundari
   assert.equal(filterAuthKeys(keys, { userPath: "" }).length, 5);
   assert.equal(authKeyUnderPath(authKey({ user_path: "/x" }), "/"), true);
   assert.equal(authKeyUnderPath(authKey({ user_path: "" }), "/acme"), false);
+});
+
+test("lastUsedCellState shows the timestamp whenever an audit entry exists", () => {
+  assert.equal(lastUsedCellState("2026-08-26T23:39:51Z", null, true), "used");
+  assert.equal(lastUsedCellState("2026-08-26T23:39:51Z", 0, true), "used");
+  assert.equal(lastUsedCellState("2026-08-26T23:39:51Z", 30, true), "used");
+});
+
+test("lastUsedCellState: retention disabled (0 days) means a missing entry is never-used", () => {
+  assert.equal(lastUsedCellState(null, 0, true), "never");
+});
+
+test("lastUsedCellState: a retention window makes a missing entry possibly-outside", () => {
+  assert.equal(lastUsedCellState(null, 30, true), "outside");
+});
+
+test("lastUsedCellState: unknown retention keeps the state no_records", () => {
+  assert.equal(lastUsedCellState(null, null, true), "no_records");
+  assert.equal(lastUsedCellState(null, undefined, true), "no_records");
+  assert.equal(lastUsedCellState(null, -1, true), "no_records");
+});
+
+test("lastUsedCellState: an unavailable lookup stays unavailable at any retention", () => {
+  assert.equal(lastUsedCellState(null, 0, false), "unavailable");
+  assert.equal(lastUsedCellState(null, 30, false), "unavailable");
+  assert.equal(lastUsedCellState(null, null, false), "unavailable");
+});
+
+test("retentionDaysFromConfig passes known windows and the forever marker through", () => {
+  assert.equal(retentionDaysFromConfig("30"), 30);
+  assert.equal(retentionDaysFromConfig("0"), 0);
+  assert.equal(retentionDaysFromConfig(7), 7);
+});
+
+test("retentionDaysFromConfig yields null for unknown or invalid values", () => {
+  assert.equal(retentionDaysFromConfig(undefined), null);
+  assert.equal(retentionDaysFromConfig(null), null);
+  assert.equal(retentionDaysFromConfig(""), null);
+  assert.equal(retentionDaysFromConfig("abc"), null);
+  assert.equal(retentionDaysFromConfig("-5"), null);
 });
