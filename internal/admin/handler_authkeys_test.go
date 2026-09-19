@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/echotest"
 )
@@ -97,6 +99,20 @@ func newAuthKeyHandler(t *testing.T, store authkeys.Store) *Handler {
 	require.NoError(t, err)
 
 	return NewHandler(nil, nil, WithAuthKeys(service))
+}
+
+// newAuthKeyHandlerWithReader adds an audit reader, as initAdmin wires it.
+func newAuthKeyHandlerWithReader(t *testing.T, store authkeys.Store, reader auditlog.Reader) *Handler {
+	t.Helper()
+	service, err := authkeys.NewService(store)
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+
+	return NewHandler(nil, nil,
+		WithAuthKeys(service),
+		WithAuditReader(reader),
+	)
 }
 
 func TestAuthKeyEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
@@ -208,4 +224,61 @@ func TestCreateAuthKeyRejectsInvalidUserPath(t *testing.T) {
 	c, rec := echotest.Post(t, "/admin/auth-keys", `{"name":"primary","user_path":"/team/../alpha"}`)
 	require.NoError(t, h.CreateAuthKey(c))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestListAuthKeysIncludesLastUsed(t *testing.T) {
+	usedAt := time.Date(2026, 1, 16, 12, 30, 0, 0, time.UTC)
+	reader := &mockAuditReader{}
+	h := newAuthKeyHandlerWithReader(t, newAuthKeyTestStore(), reader)
+	usedKey := createAuthKey(t, h, `{"name":"used"}`)
+	unusedKey := createAuthKey(t, h, `{"name":"unused"}`)
+	reader.lastUsed = map[string]time.Time{usedKey.ID: usedAt}
+
+	c, rec := echotest.Get(t, "/admin/auth-keys")
+	require.NoError(t, h.ListAuthKeys(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := echotest.Decode[[]map[string]any](t, rec)
+
+	rowsByID := make(map[string]map[string]any, len(body))
+	for _, row := range body {
+		rowsByID[row["id"].(string)] = row
+	}
+	assert.Equal(t, usedAt.Format(time.RFC3339), rowsByID[usedKey.ID]["last_used_at"])
+	_, ok := rowsByID[unusedKey.ID]["last_used_at"]
+	assert.False(t, ok)
+	// A successful lookup (even without entries) reports availability.
+	assert.Equal(t, true, rowsByID[usedKey.ID]["last_used_available"])
+	assert.Equal(t, true, rowsByID[unusedKey.ID]["last_used_available"])
+
+	// Every listed key id reached the reader in one call.
+	assert.ElementsMatch(t, []string{usedKey.ID, unusedKey.ID}, reader.lastUsedKeyIDs)
+}
+
+func TestListAuthKeysWorksWithoutLastUsedData(t *testing.T) {
+	// Without an audit reader the list still answers, with no last-used data.
+	h := newAuthKeyHandler(t, newAuthKeyTestStore())
+	createAuthKey(t, h, `{"name":"any"}`)
+	c, rec := echotest.Get(t, "/admin/auth-keys")
+	require.NoError(t, h.ListAuthKeys(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	body := echotest.Decode[[]map[string]any](t, rec)
+	require.Len(t, body, 1)
+	_, ok := body[0]["last_used_at"]
+	assert.False(t, ok)
+	_, ok = body[0]["last_used_available"]
+	assert.False(t, ok)
+
+	// A failing reader degrades the same way.
+	reader := &mockAuditReader{lastUsedErr: errors.New("audit reader down")}
+	h = newAuthKeyHandlerWithReader(t, newAuthKeyTestStore(), reader)
+	createAuthKey(t, h, `{"name":"any"}`)
+	c, rec = echotest.Get(t, "/admin/auth-keys")
+	require.NoError(t, h.ListAuthKeys(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	body = echotest.Decode[[]map[string]any](t, rec)
+	require.Len(t, body, 1)
+	_, ok = body[0]["last_used_at"]
+	assert.False(t, ok)
+	_, ok = body[0]["last_used_available"]
+	assert.False(t, ok)
 }

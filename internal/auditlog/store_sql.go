@@ -20,6 +20,10 @@ const (
 	maxSQLParams       = 999
 	columnsPerEntry    = 23
 	maxEntriesPerBatch = maxSQLParams / columnsPerEntry
+	// Attempt rows are inserted the same way, and a failover-heavy batch can
+	// carry several per entry, so they are chunked on their own column count.
+	columnsPerAttempt   = 15
+	maxAttemptsPerBatch = maxSQLParams / columnsPerAttempt
 )
 
 const auditLogTable = "audit_logs"
@@ -141,14 +145,15 @@ const insertAuditLogPrefix = `INSERT INTO audit_logs (
 	session_id, stream, error_type, data
 ) VALUES `
 
-const insertAttemptSQL = `
-	INSERT INTO audit_log_attempts (
-		audit_log_id, seq, kind, provider_type, provider_name, model,
-		status_code, success, error_type, error_code, error_message,
-		response_body, response_headers, started_at, duration_ns
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	ON CONFLICT (audit_log_id, seq) DO NOTHING
-`
+const insertAttemptPrefix = `INSERT INTO audit_log_attempts (
+	audit_log_id, seq, kind, provider_type, provider_name, model,
+	status_code, success, error_type, error_code, error_message,
+	response_body, response_headers, started_at, duration_ns
+) VALUES `
+
+const insertAttemptSuffix = ` ON CONFLICT (audit_log_id, seq) DO NOTHING`
+
+const attemptRowPlaceholder = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
 // NewSQLStore creates a SQL audit log store, creating its tables if needed and
 // starting the retention sweep when one is configured.
@@ -312,34 +317,80 @@ func auditLogValues(dialect sqlx.Dialect, e *LogEntry) []any {
 	}
 }
 
+// attemptRef names one attempt row for error reporting: a rejected multi-row
+// insert reports a database error for the statement, not for the tuple, so the
+// range the statement covered is what lets an operator find the bad record.
+type attemptRef struct {
+	entryID string
+	seq     int
+}
+
+func (r attemptRef) String() string {
+	return fmt.Sprintf("%s seq %d", r.entryID, r.seq)
+}
+
+// writeAttempts inserts the provider attempts of every entry, one multi-row
+// statement per chunk. Rows are serialized into the chunk being filled and
+// handed to the database as soon as it is full, so the transient cost stays
+// bounded by the chunk size however many attempts (and however large their
+// captured bodies) the batch carries.
 func (s *SQLStore) writeAttempts(ctx context.Context, entries []*LogEntry) error {
 	dialect := s.db.Dialect()
+	values := make([]any, 0, maxAttemptsPerBatch*columnsPerAttempt)
+	rows := 0
+	var first, last attemptRef
+
+	flush := func() error {
+		if rows == 0 {
+			return nil
+		}
+		placeholders := strings.TrimSuffix(strings.Repeat(attemptRowPlaceholder+",", rows), ",")
+		query := insertAttemptPrefix + placeholders + insertAttemptSuffix
+		if _, err := s.db.Exec(ctx, query, values...); err != nil {
+			return fmt.Errorf("failed to insert audit log attempts %s through %s: %w", first, last, err)
+		}
+		values = values[:0]
+		rows = 0
+		return nil
+	}
+
 	for _, entry := range entries {
 		for _, attempt := range auditAttempts(entry) {
-			_, err := s.db.Exec(ctx, insertAttemptSQL,
-				entry.ID,
-				attempt.Seq,
-				attempt.Kind,
-				attempt.ProviderType,
-				attempt.ProviderName,
-				attempt.Model,
-				attempt.StatusCode,
-				attempt.Success,
-				attempt.ErrorType,
-				attempt.ErrorCode,
-				attempt.ErrorMessage,
-				marshalAttemptColumn(attempt.ResponseBody),
-				marshalAttemptColumn(attempt.ResponseHeaders),
-				dialect.NullableTimestampArg(attempt.StartedAt),
-				attempt.DurationNs,
-			)
-			if err != nil {
-				return fmt.Errorf("failed to insert audit log attempt for %s seq %d: %w",
-					entry.ID, attempt.Seq, err)
+			ref := attemptRef{entryID: entry.ID, seq: attempt.Seq}
+			if rows == 0 {
+				first = ref
+			}
+			last = ref
+			values = append(values, auditAttemptValues(dialect, entry.ID, attempt)...)
+			rows++
+			if rows == maxAttemptsPerBatch {
+				if err := flush(); err != nil {
+					return err
+				}
 			}
 		}
 	}
-	return nil
+	return flush()
+}
+
+func auditAttemptValues(dialect sqlx.Dialect, entryID string, attempt AttemptSnapshot) []any {
+	return []any{
+		entryID,
+		attempt.Seq,
+		attempt.Kind,
+		attempt.ProviderType,
+		attempt.ProviderName,
+		attempt.Model,
+		attempt.StatusCode,
+		attempt.Success,
+		attempt.ErrorType,
+		attempt.ErrorCode,
+		attempt.ErrorMessage,
+		marshalAttemptColumn(attempt.ResponseBody),
+		marshalAttemptColumn(attempt.ResponseHeaders),
+		dialect.NullableTimestampArg(attempt.StartedAt),
+		attempt.DurationNs,
+	}
 }
 
 // Flush is a no-op: writes are synchronous.

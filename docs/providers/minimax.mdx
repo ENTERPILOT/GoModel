@@ -141,6 +141,28 @@ option:
 - Realtime voice-to-voice — MiniMax's conversational realtime schema is not
   OpenAI-compatible, so it is not exposed at `/v1/realtime`.
 
+## Image-to-image generation
+
+Send a multipart request to `/v1/images/edits` with `model=image-01` or
+`model=image-01-live`, a `prompt`, and uploaded `image` files. MiniMax uses the
+images as character portrait references; it does not perform masked edits.
+Use front-facing portraits in JPEG or PNG format, each smaller than 10 MB.
+
+The adapter sends the portraits as data URLs in `subject_reference` to MiniMax's
+`/v1/image_generation` endpoint using the configured regional base URL.
+`size=WIDTHxHEIGHT` maps to `width` and `height`. Custom dimensions apply to
+`image-01` only: `size`, `width`, and `height` are rejected for `image-01-live`,
+which is sized with `aspect_ratio`. Native `aspect_ratio`, `seed`, `n`, and
+`prompt_optimizer` fields are also supported.
+`response_format=b64_json` maps to MiniMax's `base64` format and returns
+`data[].b64_json`; the default returns `data[].url` (links expire after 24 hours).
+Masks and unsupported edit fields return a validation error.
+Native HTTP-200 failures are mapped to the matching OpenAI error status the same
+way as image generation, described below.
+
+See the [MiniMax image-to-image API](https://platform.minimax.io/docs/api-reference/image-generation-i2i)
+for model-specific parameter limits.
+
 ## Image generation
 
 Use `image-01` or `image-01-live` with `/v1/images/generations`. GoModel translates
@@ -157,7 +179,7 @@ The default response format is `url`; URLs expire after 24 hours. Use
 native dimensions or `aspect_ratio`. Native options such as `seed` and
 `prompt_optimizer` pass through. `quality` and streaming are unsupported.
 
-MiniMax reports image and speech failures as HTTP 200 with a non-zero
+MiniMax reports image, image-edit, and speech failures as HTTP 200 with a non-zero
 `base_resp.status_code`. GoModel maps that code to the matching OpenAI error
 status — 429 for rate and usage limits, 401 for auth, 402 for balance, 400 for
 invalid or rejected input, 502 otherwise — and appends MiniMax's own

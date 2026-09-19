@@ -8,11 +8,6 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
-// Resolve resolves raw model/provider inputs through the redirect table.
-func (s *Service) Resolve(model, provider string) (Resolution, bool, error) {
-	return s.resolveRequested(context.Background(), core.NewRequestedModelSelector(model, provider), "", false, "")
-}
-
 // resolveRequested resolves one requested selector through the redirect
 // table. ctx is the request context when there is one: routing-strategy
 // plugins read request metadata from it and are bounded by it.
@@ -79,21 +74,6 @@ func (s *Service) ResolveRefreshTarget(requested core.RequestedModelSelector) (c
 		return core.ModelSelector{}, false, nil
 	}
 	return representative.selector, true, nil
-}
-
-// Supports reports whether a redirect currently resolves to a concrete model.
-func (s *Service) Supports(model string) bool {
-	_, ok := s.snapshot().resolveRedirect(model, s.catalog, "", false)
-	return ok
-}
-
-// GetProviderType returns the resolved provider type for a redirect, or empty
-// when unresolved.
-func (s *Service) GetProviderType(model string) string {
-	if resolution, ok := s.snapshot().resolveRedirect(model, s.catalog, "", false); ok {
-		return strings.TrimSpace(s.catalog.GetProviderType(resolution.Resolved.QualifiedModel()))
-	}
-	return ""
 }
 
 // ExposedModels returns enabled redirects projected as model-list entries.

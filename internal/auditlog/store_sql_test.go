@@ -233,3 +233,50 @@ func TestUserPathIndexesMatchReaderExpression(t *testing.T) {
 	}
 	require.Equal(t, `user_path COLLATE "C"`, readerDialectFor(sqlx.PostgreSQL).userPath)
 }
+
+// Attempt rows are chunked on their own column count: a failover-heavy batch
+// carries several per entry, so the attempts of a single entry chunk can go
+// well past the parameter limit on their own.
+func TestSQLStoreWriteBatchChunksAttemptsBeyondParameterLimit(t *testing.T) {
+	runSQLStoreTest(t, 0, func(t *testing.T, store *SQLStore, db sqlx.DB) {
+		ctx := context.Background()
+		now := time.Unix(1700000000, 0).UTC()
+
+		const attemptsPerEntry = 8
+		entryCount := (maxAttemptsPerBatch*2)/attemptsPerEntry + 1
+		require.LessOrEqual(t, entryCount, maxEntriesPerBatch, "the entries must fit one entry chunk, so attempt chunking is what is exercised")
+
+		entries := make([]*LogEntry, 0, entryCount)
+		for i := range entryCount {
+			entry := testLogEntry(fmt.Sprintf("attempts-%03d", i), now)
+			attempts := make([]AttemptSnapshot, 0, attemptsPerEntry)
+			for seq := range attemptsPerEntry {
+				attempts = append(attempts, AttemptSnapshot{
+					Seq:          seq + 1,
+					Kind:         AttemptKindFailover,
+					ProviderType: "openai",
+					Model:        "openai/gpt-5.5",
+					StatusCode:   503,
+					ErrorType:    "server_error",
+				})
+			}
+			if entry.Data == nil {
+				entry.Data = &LogData{}
+			}
+			entry.Data.Attempts = attempts
+			entries = append(entries, entry)
+		}
+
+		require.Greater(t, entryCount*attemptsPerEntry, maxAttemptsPerBatch*2, "more than two attempt chunks")
+		require.NoError(t, store.WriteBatch(ctx, entries))
+
+		var count int
+		err := db.QueryRow(ctx, `SELECT COUNT(*) FROM audit_log_attempts`).Scan(&count)
+		require.NoError(t, err)
+		assert.Equal(t, entryCount*attemptsPerEntry, count)
+	})
+}
+
+func TestSQLStoreAttemptParameterLimitFitsOneChunk(t *testing.T) {
+	require.LessOrEqual(t, maxAttemptsPerBatch*columnsPerAttempt, maxSQLParams)
+}

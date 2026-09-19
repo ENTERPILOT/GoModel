@@ -111,7 +111,6 @@ func TestFailover_SelfTargetShadowsConcreteModel(t *testing.T) {
 	primary, chain := failoverChain(t, svc, "openai/gpt-4o")
 	require.Equal(t, "openai/gpt-4o", primary)
 	require.Equal(t, []string{"anthropic/claude"}, chain, "resolved %q with chain %v; want the shadowed model then anthropic/claude", primary, chain)
-	require.True(t, svc.Supports("openai/gpt-4o"))
 	// The self target is not a chain hop, so it can be deleted like any redirect.
 	err = svc.Delete(ctx, "openai/gpt-4o")
 	require.NoError(t, err)
