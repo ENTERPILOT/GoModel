@@ -99,7 +99,7 @@ func (db *batchRecordingDB) InTx(context.Context, func(sqlx.Querier) error) erro
 
 func TestSQLReader_GetLastUsedByAuthKeys_BatchesKeys(t *testing.T) {
 	ids := make([]string, 0, maxLastUsedKeysPerQuery+1)
-	for i := 0; i < maxLastUsedKeysPerQuery+1; i++ {
+	for i := range maxLastUsedKeysPerQuery + 1 {
 		ids = append(ids, fmt.Sprintf("key-%d", i))
 	}
 
