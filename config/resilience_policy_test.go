@@ -17,10 +17,10 @@ func TestResiliencePolicyLoading(t *testing.T) {
 		{"invalid breaker", "resilience:\n  circuit_breaker:\n    failure_on_statuses: [oops]\n", "circuit_breaker.failure_on_statuses"},
 		{"invalid scope", "resilience:\n  circuit_breaker:\n    scope: global\n", "circuit_breaker.scope"},
 		{"invalid provider", "providers:\n  cloudflare:\n    resilience:\n      retry:\n        retry_on_statuses: [oops]\n", "providers.cloudflare.resilience"},
-		{"trip_on", "resilience:\n  circuit_breaker:\n    trip_on:\n      - match: \"quota exceeded\"\n        ttl: 5m\n", ""},
-		{"invalid trip_on regexp", "resilience:\n  circuit_breaker:\n    trip_on:\n      - match: \"[quota\"\n", "circuit_breaker.trip_on[0]"},
-		{"empty trip_on match", "resilience:\n  circuit_breaker:\n    trip_on:\n      - ttl: 5m\n", "circuit_breaker.trip_on[0]"},
-		{"negative trip_on ttl", "resilience:\n  circuit_breaker:\n    trip_on:\n      - match: \"quota\"\n        ttl: -5m\n", "circuit_breaker.trip_on[0]"},
+		{"trip_on", "resilience:\n  circuit_breaker:\n    trip_on:\n      quota:\n        match: \"quota exceeded\"\n        ttl: 5m\n", ""},
+		{"invalid trip_on regexp", "resilience:\n  circuit_breaker:\n    trip_on:\n      bad:\n        match: \"[quota\"\n", "circuit_breaker.trip_on[bad]"},
+		{"empty trip_on match", "resilience:\n  circuit_breaker:\n    trip_on:\n      empty:\n        ttl: 5m\n", "circuit_breaker.trip_on[empty]"},
+		{"negative trip_on ttl", "resilience:\n  circuit_breaker:\n    trip_on:\n      neg:\n        match: \"quota\"\n        ttl: -5m\n", "circuit_breaker.trip_on[neg]"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			clearProviderEnvVars(t)
@@ -157,17 +157,17 @@ func TestNormalizeBreakerScope(t *testing.T) {
 func TestTripOnLoadingAndInheritance(t *testing.T) {
 	clearProviderEnvVars(t)
 	dir := t.TempDir()
-	body := "resilience:\n  circuit_breaker:\n    trip_on:\n      - match: \"quota\"\n        ttl: 5m\n      - match: \"overloaded\"\nproviders:\n  cloudflare:\n    resilience:\n      circuit_breaker:\n        trip_on:\n          - match: \"quota\"\n            ttl: 1m\n  openai: {}\n"
+	body := "resilience:\n  circuit_breaker:\n    trip_on:\n      quota:\n        match: \"quota\"\n        ttl: 5m\n      overloaded:\n        match: \"overloaded\"\nproviders:\n  cloudflare:\n    resilience:\n      circuit_breaker:\n        trip_on:\n          quota:\n            match: \"quota\"\n            ttl: 1m\n  openai: {}\n"
 	writeConfigYAML(t, dir, body)
 	t.Chdir(dir)
 	result, err := Load()
 	require.NoError(t, err)
 
-	require.Equal(t, []TripRuleConfig{
-		{Match: "quota", TTL: 5 * time.Minute},
-		{Match: "overloaded"},
+	require.Equal(t, TripRuleMap{
+		"overloaded": {Name: "overloaded", Match: "overloaded"},
+		"quota":      {Name: "quota", Match: "quota", TTL: 5 * time.Minute},
 	}, result.Config.Resilience.CircuitBreaker.TripOn)
-	require.Equal(t, []TripRuleConfig{{Match: "quota", TTL: time.Minute}},
+	require.Equal(t, TripRuleMap{"quota": {Name: "quota", Match: "quota", TTL: time.Minute}},
 		result.RawProviders["cloudflare"].Resilience.CircuitBreaker.TripOn)
 	// A provider without trip_on keeps no raw override; resolution inherits the
 	// global list (asserted in internal/providers).
@@ -200,12 +200,12 @@ func TestProviderPolicyOverrideValidation(t *testing.T) {
 		},
 		{
 			"invalid provider trip_on regexp",
-			"providers:\n  cloudflare:\n    resilience:\n      circuit_breaker:\n        trip_on:\n          - match: \"[quota\"\n",
-			"providers.cloudflare.resilience: circuit_breaker.trip_on[0]",
+			"providers:\n  cloudflare:\n    resilience:\n      circuit_breaker:\n        trip_on:\n          bad:\n            match: \"[quota\"\n",
+			"providers.cloudflare.resilience: circuit_breaker.trip_on[bad]",
 		},
 		{
 			"valid provider trip_on replaces the global list",
-			"resilience:\n  circuit_breaker:\n    trip_on:\n      - match: \"global\"\nproviders:\n  cloudflare:\n    resilience:\n      circuit_breaker:\n        trip_on:\n          - match: \"quota\"\n            ttl: 1m\n",
+			"resilience:\n  circuit_breaker:\n    trip_on:\n      global:\n        match: \"global\"\nproviders:\n  cloudflare:\n    resilience:\n      circuit_breaker:\n        trip_on:\n          quota:\n            match: \"quota\"\n            ttl: 1m\n",
 			"",
 		},
 	} {

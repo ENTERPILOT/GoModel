@@ -90,7 +90,7 @@ func (m ManagedProviderCredential) toRawProviderConfig() config.RawProviderConfi
 	// resolved global breaker config untouched.
 	if len(m.TripOn) > 0 {
 		raw.Resilience = &config.RawResilienceConfig{
-			CircuitBreaker: &config.RawCircuitBreakerConfig{TripOn: m.TripOn},
+			CircuitBreaker: &config.RawCircuitBreakerConfig{TripOn: config.TripRuleMapFromList(m.TripOn)},
 		}
 	}
 	if len(m.APIKeys) > 0 {

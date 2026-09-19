@@ -15,6 +15,18 @@ func applyEnvOverrides(cfg *Config) error {
 	if err := applyEnvOverridesValue(reflect.ValueOf(cfg).Elem()); err != nil {
 		return err
 	}
+	// Trip rules use named env groups (CIRCUIT_BREAKER_TRIP_ON_<GROUP>_MATCH /
+	// _TTL) instead of a single list variable, mirroring the per-provider
+	// <PROVIDER>_CIRCUIT_BREAKER_TRIP_ON_<GROUP>_* convention. A group
+	// replaces the config rule of the same name; other rules survive.
+	groups, err := CollectTripRuleGroups(os.Environ(), "CIRCUIT_BREAKER_TRIP_ON")
+	if err != nil {
+		return err
+	}
+	if len(groups) > 0 {
+		cfg.Resilience.CircuitBreaker.TripOn = TripRuleMapFromList(
+			MergeTripRuleGroups(cfg.Resilience.CircuitBreaker.TripOn.List(), groups))
+	}
 	normalizeModelListURL(cfg)
 	applyOfflineMode(cfg)
 	return nil
@@ -140,14 +152,6 @@ func applyEnvOverridesValue(v reflect.Value) error {
 		case reflect.Bool:
 			fieldVal.SetBool(parseBool(envVal))
 		case reflect.Slice:
-			if field.Type == reflect.TypeFor[[]TripRuleConfig]() {
-				rules, err := ParseTripRulesEnv(envVal)
-				if err != nil {
-					return fmt.Errorf("invalid value for %s (%s): %w", field.Name, envKey, err)
-				}
-				fieldVal.Set(reflect.ValueOf(rules))
-				continue
-			}
 			if field.Type.Elem().Kind() != reflect.String {
 				continue
 			}

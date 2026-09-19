@@ -162,7 +162,7 @@ func New(cfg Config, headerSetter HeaderSetter) *Client {
 	if c.configErr != nil {
 		return c
 	}
-	c.tripRules, c.configErr = compileTripRules(cfg.CircuitBreaker.TripOn)
+	c.tripRules, c.configErr = compileTripRules(cfg.CircuitBreaker.TripOn.List())
 	if c.configErr != nil {
 		return c
 	}

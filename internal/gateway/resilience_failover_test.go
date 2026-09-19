@@ -132,8 +132,8 @@ func TestTripRuleQuotaTripsPrimaryInFailoverChain(t *testing.T) {
 				SuccessThreshold: 1,
 				Timeout:          time.Minute,
 				Scope:            "model",
-				TripOn: []goconfig.TripRuleConfig{
-					{Match: `weekly.*usage limit`, TTL: time.Minute},
+				TripOn: goconfig.TripRuleMap{
+					"weekly": {Match: `weekly.*usage limit`, TTL: time.Minute},
 				},
 			},
 		}, nil),

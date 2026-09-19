@@ -157,8 +157,9 @@ only burns requests.
 resilience:
   circuit_breaker:
     timeout: 30s
-    trip_on:
-      - match: "insufficient_quota|exceeded your current quota"
+    trip_on: # docker-compose style named groups
+      insufficient_quota:
+        match: "insufficient_quota|exceeded your current quota"
         ttl: 30m
 ```
 
@@ -166,28 +167,31 @@ resilience:
   error code.
 - `ttl` is how long the breaker stays open. Omit it to reuse `timeout`
   (default `30s`).
+- The group name only matters for env overrides; resolution evaluates rules
+  in group-name order.
 - Rules are inert until configured: without them the breaker behaves exactly
-  as described above. `trip_on: []` disables them explicitly.
-- A provider's `trip_on` list **replaces** the global list entirely; omit the
+  as described above. `trip_on: {}` disables them explicitly.
+- A provider's `trip_on` map **replaces** the global map entirely; omit the
   key to inherit the global rules.
 
 ### Environment variables
 
-The same rules are settable without a config file. Globally:
+The same rules are settable without a config file — one `MATCH` (plus
+optional `TTL`) variable per named group:
 
 ```bash
-# semicolon-separated `pattern=ttl` pairs; ttl is an optional Go duration
-CIRCUIT_BREAKER_TRIP_ON="weekly usage limit=4h;quota exceeded=15m"
+# global
+CIRCUIT_BREAKER_TRIP_ON_WEEKLY_QUOTA_MATCH="weekly \(7-day\) usage limit"
+CIRCUIT_BREAKER_TRIP_ON_WEEKLY_QUOTA_TTL=4h
+
+# per provider
+KIMICODE_CIRCUIT_BREAKER_TRIP_ON_WEEKLY_QUOTA_MATCH="..."
 ```
 
-Per provider — the value **replaces** the global rules for that provider only:
-
-```bash
-KIMICODE_TRIP_ON="weekly \(7-day\) usage limit=4h"
-```
-
-A malformed entry (empty pattern or invalid duration) fails config load,
-matching YAML behavior.
+Env groups **override config rules by name only** (case-insensitive): a group
+named like an existing config rule replaces it; config rules with other names
+survive; env-only names append. A malformed group (missing `MATCH`, invalid
+duration) fails config load, matching YAML behavior.
 - Trip rules match on translated (non-streaming) and streaming errors; raw
   passthrough routes rely on status-based breaker behavior instead.
 - An empty `match`, a pattern that does not compile, or a negative `ttl`
@@ -203,8 +207,9 @@ providers:
     resilience:
       circuit_breaker:
         trip_on:
-          - match: "credit balance is too low"
-            ttl: 1h # replaces the global trip_on list
+          credit_balance: # group name
+            match: "credit balance is too low"
+            ttl: 1h # replaces the global trip_on rules
 ```
 
 A tripped breaker behaves like an ordinary open one: requests fail fast with

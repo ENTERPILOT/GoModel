@@ -209,7 +209,7 @@ class ProvidersConfigState {
   }
 
   addTripRuleRow() {
-    this.form.trip_on.push({ match: "", ttl: "" });
+    this.form.trip_on.push({ name: "", match: "", ttl: "" });
     this.clearFieldError("trip_on");
   }
 

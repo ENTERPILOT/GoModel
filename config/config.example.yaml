@@ -339,14 +339,16 @@ resilience:
     # matches `match` (a Go regexp tested against the error message and code):
     # failures are not counted, the breaker simply stays open for `ttl`
     # (default: the `timeout` above), then probes recovery as usual. Meant for
-    # hard quota/billing stops that retries cannot fix. Rules are inert until
-    # configured; `trip_on: []` disables them; an empty match, an invalid
-    # regexp, or a negative ttl fails config load.
+    # hard quota/billing stops that retries cannot fix. Rules are named groups
+    # (docker-compose style); they are inert until configured, `trip_on: {}`
+    # disables them, and an empty match, an invalid regexp, or a negative ttl
+    # fails config load. Env overrides by group name:
+    # CIRCUIT_BREAKER_TRIP_ON_<GROUP>_MATCH / _TTL (global),
+    # <PROVIDER>_CIRCUIT_BREAKER_TRIP_ON_<GROUP>_MATCH / _TTL (per provider).
     # trip_on:
-    #   - match: "insufficient_quota|exceeded your current quota"
+    #   insufficient_quota:
+    #     match: "insufficient_quota|exceeded your current quota"
     #     ttl: 30m
-    # env: CIRCUIT_BREAKER_TRIP_ON="pattern=ttl;pattern" (same shape as the
-    # yaml list; per-provider env override: <PROVIDER>_TRIP_ON). See .env.template.
 
 guardrails:
   enabled: false

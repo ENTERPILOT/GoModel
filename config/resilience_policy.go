@@ -67,15 +67,16 @@ func ValidateResilience(r ResilienceConfig) error {
 	default:
 		return fmt.Errorf("circuit_breaker.scope must be provider or model")
 	}
-	for i, rule := range r.CircuitBreaker.TripOn {
+	for _, rule := range r.CircuitBreaker.TripOn.List() {
+		name := "trip_on[" + rule.Name + "]"
 		if rule.Match == "" {
-			return fmt.Errorf("circuit_breaker.trip_on[%d]: match must not be empty", i)
+			return fmt.Errorf("circuit_breaker.%s: match must not be empty", name)
 		}
 		if _, err := regexp.Compile(rule.Match); err != nil {
-			return fmt.Errorf("circuit_breaker.trip_on[%d]: %w", i, err)
+			return fmt.Errorf("circuit_breaker.%s: %w", name, err)
 		}
 		if rule.TTL < 0 {
-			return fmt.Errorf("circuit_breaker.trip_on[%d]: ttl must not be negative", i)
+			return fmt.Errorf("circuit_breaker.%s: ttl must not be negative", name)
 		}
 	}
 	return nil

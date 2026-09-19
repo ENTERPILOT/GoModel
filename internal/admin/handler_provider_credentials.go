@@ -259,7 +259,7 @@ func (h *Handler) UpsertProviderCredential(c *echo.Context) error {
 	// Validate trip rules regardless of enabled state: an invalid regex or
 	// negative TTL stored in a disabled credential would surface only at
 	// enable time and break the operator's workflow.
-	if err := config.ValidateResilience(config.ResilienceConfig{CircuitBreaker: config.CircuitBreakerConfig{TripOn: cred.TripOn}}); err != nil {
+	if err := config.ValidateResilience(config.ResilienceConfig{CircuitBreaker: config.CircuitBreakerConfig{TripOn: config.TripRuleMapFromList(cred.TripOn)}}); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid trip_on rules: "+err.Error(), nil))
 	}
 	if err := h.providerCredentials.Upsert(c.Request().Context(), cred); err != nil {

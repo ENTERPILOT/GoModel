@@ -1106,6 +1106,7 @@
   "providers_trip_on": "配额熔断",
   "providers_trip_on_hint": "错误匹配到规则时立即触发熔断器，在 TTL 内保持断开，随后试探恢复。规则可选。",
   "providers_trip_on_match": "匹配 {number}",
+  "providers_trip_on_name": "规则名称 {number}",
   "providers_trip_on_ttl": "TTL {number}",
   "providers_remove_trip_rule": "移除规则 {number}",
   "providers_add_trip_rule": "添加规则",

@@ -630,8 +630,8 @@ test("tripRulesToRows converts the view's nanosecond ttl into duration strings",
       { match: "rate limit", ttl: 60000000000 },
     ]),
     [
-      { match: "insufficient_quota", ttl: "15m0s" },
-      { match: "rate limit", ttl: "1m0s" },
+      { name: "", match: "insufficient_quota", ttl: "15m0s" },
+      { name: "", match: "rate limit", ttl: "1m0s" },
     ],
   );
   assert.deepEqual(tripRulesToRows(undefined), []);
@@ -645,8 +645,8 @@ test("tripRulesToRows renders a zero or absent ttl as a blank field, not 0s", ()
       { match: "no ttl key" },
     ]),
     [
-      { match: "insufficient_quota", ttl: "" },
-      { match: "no ttl key", ttl: "" },
+      { name: "", match: "insufficient_quota", ttl: "" },
+      { name: "", match: "no ttl key", ttl: "" },
     ],
   );
 });
@@ -670,6 +670,13 @@ test("tripRuleRowsToWire builds the {match, ttl} payload with nanosecond ttls", 
 
   // A filled row with an unparsable ttl is reported, not guessed at.
   assert.equal(tripRuleRowsToWire([{ match: "quota", ttl: "soon" }]), null);
+
+  // A group name rides along so env overrides can match by name; blanks
+  // stay omitted.
+  assert.deepEqual(
+    tripRuleRowsToWire([{ name: " weekly_quota ", match: "usage limit", ttl: "4h" }]),
+    [{ name: "weekly_quota", match: "usage limit", ttl: 4 * 3600 * 1e9 }],
+  );
 });
 
 test("validation rejects blank trip-rule rows and half-filled or invalid rules", () => {
@@ -683,7 +690,7 @@ test("validation rejects blank trip-rule rows and half-filled or invalid rules",
 
   assert.equal(validateProviderCredentialForm(form([]), "create", [], OPENAI_SCHEMA).trip_on, undefined);
   assert.equal(
-    validateProviderCredentialForm(form([{ match: "", ttl: "" }]), "create", [], OPENAI_SCHEMA).trip_on,
+    validateProviderCredentialForm(form([{ match: "", ttl: "", name: "" }]), "create", [], OPENAI_SCHEMA).trip_on,
     "Remove the empty row instead of leaving a rule blank.",
   );
   assert.equal(
@@ -715,8 +722,8 @@ test("trip_on round-trips from a stored row through the form into the PUT payloa
 
   const form = providerCredentialRowToForm(row);
   assert.deepEqual(form.trip_on, [
-    { match: "insufficient_quota", ttl: "15m0s" },
-    { match: "rate limit", ttl: "1m0s" },
+    { name: "", match: "insufficient_quota", ttl: "15m0s" },
+    { name: "", match: "rate limit", ttl: "1m0s" },
   ]);
 
   const body = buildProviderCredentialPayload(form, OPENAI_SCHEMA);

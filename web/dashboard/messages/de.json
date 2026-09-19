@@ -1196,6 +1196,7 @@
   "providers_trip_on": "Quota-Breaker",
   "providers_trip_on_hint": "Löst den Circuit Breaker sofort aus, wenn ein Fehler auf eine Regel passt; er bleibt für die TTL offen und tastet dann die Erholung ab. Regeln sind optional.",
   "providers_trip_on_match": "Treffer {number}",
+  "providers_trip_on_name": "Regelname {number}",
   "providers_trip_on_ttl": "TTL {number}",
   "providers_remove_trip_rule": "Regel {number} entfernen",
   "providers_add_trip_rule": "Regel hinzufügen",

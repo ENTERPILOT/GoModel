@@ -28,18 +28,18 @@ func TestProviderResilienceStatusOverrides(t *testing.T) {
 
 func TestProviderResilienceTripOnOverrides(t *testing.T) {
 	global := config.ResilienceConfig{Retry: config.DefaultRetryConfig(), CircuitBreaker: config.DefaultCircuitBreakerConfig()}
-	global.CircuitBreaker.TripOn = []config.TripRuleConfig{{Match: "global", TTL: time.Minute}}
+	global.CircuitBreaker.TripOn = config.TripRuleMap{"global": {Match: "global", TTL: time.Minute}}
 
 	// A provider-level trip_on list replaces the global list wholesale.
 	var raw config.RawProviderConfig
-	err := yaml.Unmarshal([]byte("type: openai\nresilience:\n  circuit_breaker:\n    trip_on:\n      - match: \"quota\"\n        ttl: 2m\n"), &raw)
+	err := yaml.Unmarshal([]byte("type: openai\nresilience:\n  circuit_breaker:\n    trip_on:\n      quota:\n        match: \"quota\"\n        ttl: 2m\n"), &raw)
 	require.NoError(t, err)
 	got := buildProviderConfig(raw, global).Resilience
-	require.Equal(t, []config.TripRuleConfig{{Match: "quota", TTL: 2 * time.Minute}}, got.CircuitBreaker.TripOn)
+	require.Equal(t, config.TripRuleMap{"quota": {Name: "quota", Match: "quota", TTL: 2 * time.Minute}}, got.CircuitBreaker.TripOn)
 
-	// An explicit empty list replaces the global list and disables message trips.
+	// An explicit empty map replaces the global rules and disables message trips.
 	var disabled config.RawProviderConfig
-	err = yaml.Unmarshal([]byte("type: openai\nresilience:\n  circuit_breaker:\n    trip_on: []\n"), &disabled)
+	err = yaml.Unmarshal([]byte("type: openai\nresilience:\n  circuit_breaker:\n    trip_on: {}\n"), &disabled)
 	require.NoError(t, err)
 	got = buildProviderConfig(disabled, global).Resilience
 	require.NotNil(t, got.CircuitBreaker.TripOn)
@@ -78,9 +78,9 @@ func TestFactoryRejectsInvalidResilience(t *testing.T) {
 		{Retry: config.RetryConfig{RetryOnStatuses: []string{"bad"}}},
 		{CircuitBreaker: config.CircuitBreakerConfig{FailureOnStatuses: []string{"600"}}},
 		{CircuitBreaker: config.CircuitBreakerConfig{Scope: "bad"}},
-		{CircuitBreaker: config.CircuitBreakerConfig{TripOn: []config.TripRuleConfig{{Match: "["}}}},
-		{CircuitBreaker: config.CircuitBreakerConfig{TripOn: []config.TripRuleConfig{{Match: "quota", TTL: -time.Second}}}},
-		{CircuitBreaker: config.CircuitBreakerConfig{TripOn: []config.TripRuleConfig{{}}}},
+		{CircuitBreaker: config.CircuitBreakerConfig{TripOn: config.TripRuleMap{"invalid": {Match: "["}}}},
+		{CircuitBreaker: config.CircuitBreakerConfig{TripOn: config.TripRuleMap{"neg": {Match: "quota", TTL: -time.Second}}}},
+		{CircuitBreaker: config.CircuitBreakerConfig{TripOn: config.TripRuleMap{"empty": {}}}},
 	} {
 		_, err := factory.Create(ProviderConfig{Resilience: r})
 		require.Error(t, err)

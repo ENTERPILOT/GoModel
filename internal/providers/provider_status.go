@@ -128,7 +128,7 @@ func SanitizeProviderConfigs(configs map[string]ProviderConfig) []SanitizedProvi
 					FailureThreshold:  cfg.Resilience.CircuitBreaker.FailureThreshold,
 					SuccessThreshold:  cfg.Resilience.CircuitBreaker.SuccessThreshold,
 					Timeout:           cfg.Resilience.CircuitBreaker.Timeout.String(),
-					TripOn:            cfg.Resilience.CircuitBreaker.TripOn,
+					TripOn:            cfg.Resilience.CircuitBreaker.TripOn.List(),
 				},
 			},
 		})

@@ -409,6 +409,8 @@ export function formatGoDurationNs(ns) {
 // in nanoseconds) into editable rows whose ttl is a Go duration string.
 export function tripRulesToRows(tripOn) {
   return (Array.isArray(tripOn) ? tripOn : []).map((rule) => ({
+    // Optional group name: env overrides match config rules by name.
+    name: String((rule && rule.name) || ""),
     match: String((rule && rule.match) || ""),
     // ttl 0 or absent means "use breaker timeout"; show a blank field, not "0s".
     ttl: rule && rule.ttl ? formatGoDurationNs(rule.ttl) : "",
@@ -422,9 +424,10 @@ export function tripRulesToRows(tripOn) {
 export function tripRuleRowsToWire(rows) {
   const wire = [];
   for (const row of Array.isArray(rows) ? rows : []) {
+    const name = String((row && row.name) || "").trim();
     const match = String((row && row.match) || "").trim();
     const ttlText = String((row && row.ttl) || "").trim();
-    if (!match && !ttlText) {
+    if (!match && !ttlText && !name) {
       continue;
     }
     // TTL is optional: empty string means use breaker timeout (encode as 0).
@@ -432,7 +435,11 @@ export function tripRuleRowsToWire(rows) {
     if (ttl === null) {
       return null;
     }
-    wire.push({ match, ttl });
+    const wireRule = { match, ttl };
+    if (name) {
+      wireRule.name = name;
+    }
+    wire.push(wireRule);
   }
   return wire;
 }
@@ -443,7 +450,7 @@ function validateTripRuleRows(rows) {
   for (const row of Array.isArray(rows) ? rows : []) {
     const match = String((row && row.match) || "").trim();
     const ttlText = String((row && row.ttl) || "").trim();
-    if (!match && !ttlText) {
+    if (!match && !ttlText && !String((row && row.name) || "").trim()) {
       return m.providers_trip_on_row_blank();
     }
     if (!match) {

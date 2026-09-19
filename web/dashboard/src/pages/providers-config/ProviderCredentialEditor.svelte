@@ -152,6 +152,14 @@
       {#each providersConfig.form.trip_on as rule, index (index)}
         <div class="vm-target-row">
           <input
+            type="text"
+            class="mono provider-trip-rule-name"
+            placeholder="name (optional)"
+            aria-label={m.providers_trip_on_name({ number: index + 1 })}
+            bind:value={rule.name}
+            oninput={() => providersConfig.clearFieldError("trip_on")}
+          />
+          <input
             id={index === 0 ? tripOnId + "-match-0" : undefined}
             type="text"
             class="mono vm-target-model"

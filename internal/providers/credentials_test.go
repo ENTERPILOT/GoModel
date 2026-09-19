@@ -412,7 +412,7 @@ func TestToRawProviderConfig_TripRules(t *testing.T) {
 		raw := cred.toRawProviderConfig()
 		require.NotNil(t, raw.Resilience)
 		require.NotNil(t, raw.Resilience.CircuitBreaker)
-		require.Equal(t, cred.TripOn, raw.Resilience.CircuitBreaker.TripOn)
+		require.Equal(t, config.TripRuleMap{"rule_1": cred.TripOn[0]}, raw.Resilience.CircuitBreaker.TripOn)
 		require.Nil(t, raw.Resilience.Retry)
 
 		// The rules ride the same pipeline declarative providers use: other
@@ -420,7 +420,7 @@ func TestToRawProviderConfig_TripRules(t *testing.T) {
 		resolved := buildProviderConfig(raw, config.ResilienceConfig{
 			CircuitBreaker: config.DefaultCircuitBreakerConfig(),
 		})
-		require.Equal(t, cred.TripOn, resolved.Resilience.CircuitBreaker.TripOn)
+		require.Equal(t, config.TripRuleMap{"rule_1": cred.TripOn[0]}, resolved.Resilience.CircuitBreaker.TripOn)
 		require.Equal(t, config.DefaultCircuitBreakerConfig().FailureThreshold, resolved.Resilience.CircuitBreaker.FailureThreshold)
 	})
 

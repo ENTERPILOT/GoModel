@@ -1216,6 +1216,7 @@
   "providers_trip_on": "Quota breaker",
   "providers_trip_on_hint": "Natychmiast otwiera circuit breaker, gdy błąd pasuje do reguły; pozostaje otwarty przez TTL, po czym sprawdza powrót sprawności. Reguły są opcjonalne.",
   "providers_trip_on_match": "Dopasowanie {number}",
+  "providers_trip_on_name": "Nazwa reguły {number}",
   "providers_trip_on_ttl": "TTL {number}",
   "providers_remove_trip_rule": "Usuń regułę {number}",
   "providers_add_trip_rule": "Dodaj regułę",

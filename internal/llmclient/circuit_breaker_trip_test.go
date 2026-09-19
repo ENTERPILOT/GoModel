@@ -27,8 +27,8 @@ func newQuotaTripTestClient(t *testing.T, serverURL string, mutate func(cb *goco
 		FailureThreshold: 5,
 		SuccessThreshold: 1,
 		Timeout:          20 * time.Millisecond,
-		TripOn: []goconfig.TripRuleConfig{
-			{Match: `quota (exceeded|exhausted)`, TTL: 150 * time.Millisecond},
+		TripOn: goconfig.TripRuleMap{
+			"quota": {Match: `quota (exceeded|exhausted)`, TTL: 150 * time.Millisecond},
 		},
 	}
 	if mutate != nil {
@@ -92,7 +92,7 @@ func TestTripRule_RetryableQuotaErrorTripsBeforeRetry(t *testing.T) {
 		FailureThreshold: 5,
 		SuccessThreshold: 1,
 		Timeout:          20 * time.Millisecond,
-		TripOn:           []goconfig.TripRuleConfig{{Match: `quota exceeded`, TTL: 150 * time.Millisecond}},
+		TripOn:           goconfig.TripRuleMap{"quota": {Match: `quota exceeded`, TTL: 150 * time.Millisecond}},
 	}
 	client := New(cfg, nil)
 
@@ -203,7 +203,7 @@ func TestTripRule_ZeroTTLUsesBreakerTimeout(t *testing.T) {
 
 	client := newQuotaTripTestClient(t, server.URL, func(cb *goconfig.CircuitBreakerConfig) {
 		cb.Timeout = 50 * time.Millisecond
-		cb.TripOn = []goconfig.TripRuleConfig{{Match: `quota exceeded`}}
+		cb.TripOn = goconfig.TripRuleMap{"quota": {Match: `quota exceeded`}}
 	})
 
 	err := client.Do(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"}, nil)
@@ -307,7 +307,7 @@ func TestResetBreaker_ClearsProviderAndModelBreakers(t *testing.T) {
 	client := newQuotaTripTestClient(t, server.URL, func(cb *goconfig.CircuitBreakerConfig) {
 		cb.Scope = "model"
 		cb.Timeout = time.Minute
-		cb.TripOn = []goconfig.TripRuleConfig{{Match: `quota exceeded`}}
+		cb.TripOn = goconfig.TripRuleMap{"quota": {Match: `quota exceeded`}}
 	})
 
 	req := Request{Method: http.MethodGet, Endpoint: "/test", Model: "m1"}
@@ -345,7 +345,7 @@ func TestTripRule_InvalidRegexReportsConfigError(t *testing.T) {
 		BaseURL:      "http://localhost",
 		CircuitBreaker: goconfig.CircuitBreakerConfig{
 			Enabled: true,
-			TripOn:  []goconfig.TripRuleConfig{{Match: "(unclosed"}},
+			TripOn:  goconfig.TripRuleMap{"invalid": {Match: "(unclosed"}},
 		},
 	}, nil)
 	require.Error(t, client.configErr)
@@ -428,7 +428,7 @@ func TestQuotaTripTTL(t *testing.T) {
 				CircuitBreaker: goconfig.CircuitBreakerConfig{
 					Enabled: true,
 					Timeout: timeout,
-					TripOn:  tt.tripOn,
+					TripOn:  goconfig.TripRuleMapFromList(tt.tripOn),
 				},
 			}, nil)
 			require.NoError(t, client.configErr)
