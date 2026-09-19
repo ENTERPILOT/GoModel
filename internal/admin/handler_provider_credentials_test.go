@@ -452,6 +452,27 @@ func TestProviderCredentialsEndpointsReturn503WhenUnavailable(t *testing.T) {
 	assertUnavailable("DeleteProviderCredential", h.DeleteProviderCredential(deleteCtx), deleteRec)
 }
 
+// The managed path normalises an explicit empty trip_on slice to nil so the
+// factory can apply built-in defaults — the dashboard never needs to omit the
+// field (it always sends trip_on: [] when no rules are configured).
+func TestUpsertProviderCredential_EmptyTripOnNormalizedToNil(t *testing.T) {
+	fake := newProviderCredentialsAdminFake()
+	h := newProviderCredentialsHandler(fake)
+
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials",
+		`{"name":"my-openai","type":"openai","api_keys":["sk-real"],"trip_on":[]}`)
+	err := h.UpsertProviderCredential(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	stored, ok := fake.rows["my-openai"]
+	require.True(t, ok)
+	assert.Nil(t, stored.TripOn, "explicit empty trip_on must be normalized to nil")
+
+	response := echotest.Decode[providerCredentialViewResponse](t, rec)
+	assert.Nil(t, response.TripOn)
+}
+
 // Trip rules are plain configuration, so the upsert stores them, the stored
 // view lists them unredacted, and the declared (config.yaml/env) read-only
 // view carries the effective rules from the sanitized config.

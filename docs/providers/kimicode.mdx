@@ -74,3 +74,26 @@ providers:
     api_key: "${KIMICODE_API_KEY}"
     retries: 3
 ```
+
+### Built-in quota trip rules
+
+Kimi Code rejects requests once a quota bucket is exhausted (HTTP 403). To fail
+fast instead of retrying against a spent quota, `kimicode` providers ship
+built-in circuit-breaker trip rules (see [Resilience](/advanced/resilience)):
+
+| Matches upstream message    | Breaker TTL |
+| --------------------------- | ----------- |
+| `weekly \(7-day\) usage limit` | 4h          |
+| `5-hour usage limit`        | 30m         |
+| `usage limit\|quota exceeded` | 15m         |
+
+The rules apply only when the provider has no `trip_on` of its own:
+
+- Omit `trip_on` to inherit these defaults.
+- Set your own `trip_on` list to replace them entirely.
+- Set `trip_on: []` to disable quota tripping for that provider.
+
+Dashboard-managed providers always inherit the defaults when no rules are
+configured; the dashboard editor has no explicit-disable concept. An open
+breaker can be closed early with the **Reset breaker** button or
+`POST /admin/providers/{name}/circuit-breaker/reset`.
