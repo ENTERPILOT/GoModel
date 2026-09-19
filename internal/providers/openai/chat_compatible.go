@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
 
@@ -33,16 +32,6 @@ func NewChatCompatible(apiKey string, opts providers.ProviderOptions, cfg Compat
 	applyChatCompatibleDefaults(&cfg)
 	return &ChatCompatible{
 		compatible:   NewCompatibleProvider(apiKey, opts, cfg),
-		providerName: cfg.ProviderName,
-	}
-}
-
-// NewChatCompatibleWithHTTPClient creates a chat-centric adapter with a
-// custom HTTP client. If httpClient is nil, http.DefaultClient is used.
-func NewChatCompatibleWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks, cfg CompatibleProviderConfig) *ChatCompatible {
-	applyChatCompatibleDefaults(&cfg)
-	return &ChatCompatible{
-		compatible:   NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, cfg),
 		providerName: cfg.ProviderName,
 	}
 }

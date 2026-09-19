@@ -46,7 +46,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 			BaseURL:      baseURL,
 			SetHeaders:   setHeaders,
 		}),
-		rootClient: llmclient.New(llmclient.Config{
+		rootClient: llmclient.NewWithOptionalHTTPClient(opts.HTTPClient, llmclient.Config{
 			ProviderName:   opts.ClientName("sglang"),
 			BaseURL:        providers.PassthroughBaseURL(baseURL),
 			Retry:          opts.Resilience.Retry,
@@ -54,24 +54,6 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 			CircuitBreaker: opts.Resilience.CircuitBreaker,
 		}, func(req *http.Request) {
 			setHeaders(req, keys.NextForContext(req.Context()))
-		}),
-	}
-}
-
-// NewWithHTTPClient creates a new SGLang provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	resolvedBaseURL := providers.ResolveBaseURL(baseURL, defaultBaseURL)
-	rootClientCfg := llmclient.DefaultConfig("sglang", providers.PassthroughBaseURL(resolvedBaseURL))
-	rootClientCfg.Hooks = hooks
-	return &Provider{
-		compatible: openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, openai.CompatibleProviderConfig{
-			ProviderName: "sglang",
-			BaseURL:      resolvedBaseURL,
-			SetHeaders:   setHeaders,
-		}),
-		rootClient: llmclient.NewWithHTTPClient(httpClient, rootClientCfg, func(req *http.Request) {
-			setHeaders(req, apiKey)
 		}),
 	}
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,11 +28,13 @@ func TestChatCompatibleContract(t *testing.T) {
 		NativeResponses: true,
 		Embeddings:      true,
 		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
-			return NewWithHTTPClient(apiKey, baseURL, client, hooks)
+			opts := providertest.Options(hooks)
+			opts.HTTPClient = client
+			return New(providers.ProviderConfig{APIKey: apiKey, BaseURL: baseURL}, opts)
 		},
 	})
 
-	provider := NewWithHTTPClient("", "", nil, llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{APIKey: ""}, providers.ProviderOptions{})
 	providertest.AssertNoNativeSurfaces(t, provider)
 	_, ok := any(provider).(core.NativeResponseLifecycleProvider)
 	assert.False(t, ok, "provider should not implement core.NativeResponseLifecycleProvider")
@@ -40,7 +43,7 @@ func TestChatCompatibleContract(t *testing.T) {
 func TestPassthrough_ForwardsProviderNativeEndpoint(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"tokens":[1,2,3]}`)
 
-	provider := NewWithHTTPClient("vllm-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("vllm-key", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 		Method:   http.MethodPost,
 		Endpoint: "tokenize",
@@ -79,7 +82,7 @@ func TestPassthrough_RoutesByEndpointWhenBaseURLIncludesV1(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, http.StatusOK, `{}`)
 
-			provider := NewWithHTTPClient("", server.URL+"/v1", server.Client(), llmclient.Hooks{})
+			provider := newTestProvider("", server.URL+"/v1", server.Client(), llmclient.Hooks{})
 			resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 				Method:   http.MethodPost,
 				Endpoint: tt.endpoint,

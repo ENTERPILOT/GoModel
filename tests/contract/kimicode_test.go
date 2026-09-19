@@ -12,14 +12,18 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/kimicode"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
 func newKimicodeReplayProvider(t *testing.T, routes map[string]replayRoute) core.Provider {
 	t.Helper()
 
 	client := newReplayHTTPClient(t, routes)
-	provider := kimicode.NewWithHTTPClient("kimi-test", "https://replay.local", client, llmclient.Hooks{})
+	opts := providertest.Options(llmclient.Hooks{})
+	opts.HTTPClient = client
+	provider := kimicode.New(providers.ProviderConfig{APIKey: "kimi-test", BaseURL: "https://replay.local"}, opts).(*kimicode.Provider)
 	provider.SetBaseURL("https://replay.local")
 	return provider
 }

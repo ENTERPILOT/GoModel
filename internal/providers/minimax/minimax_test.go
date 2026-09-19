@@ -7,6 +7,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,7 +19,9 @@ func TestChatCompatibleContract(t *testing.T) {
 		Type:           "minimax",
 		DefaultBaseURL: "https://api.minimax.io/v1",
 		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
-			return NewWithHTTPClient(apiKey, baseURL, client, hooks)
+			opts := providertest.Options(hooks)
+			opts.HTTPClient = client
+			return New(providers.ProviderConfig{APIKey: apiKey, BaseURL: baseURL}, opts)
 		},
 		Embeddings: true,
 	})
@@ -26,7 +29,7 @@ func TestChatCompatibleContract(t *testing.T) {
 
 func TestChatCompletion_ClampsZeroTemperature(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
-	provider := NewWithHTTPClient("minimax-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("minimax-key", server.URL, server.Client(), llmclient.Hooks{})
 
 	temp := 0.0
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -41,7 +44,7 @@ func TestChatCompletion_ClampsZeroTemperature(t *testing.T) {
 // MiniMax serves speech natively (see audio.go), so only the batch and file
 // surfaces must stay hidden.
 func TestProvider_DoesNotExposeBatchOrFileInterfaces(t *testing.T) {
-	provider := NewWithHTTPClient("minimax-key", "", nil, llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{APIKey: "minimax-key"}, providers.ProviderOptions{})
 	_, ok := any(provider).(core.NativeBatchProvider)
 	require.False(t, ok)
 	_, ok = any(provider).(core.NativeFileProvider)

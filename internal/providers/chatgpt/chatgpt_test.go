@@ -52,7 +52,7 @@ func TestRegistration_TypeIsChatGPT(t *testing.T) {
 func TestStreamResponses_SendsCodexDialect(t *testing.T) {
 	srv, capture := providertest.SSEServer(t, codexSSE)
 	token := tokenWithAccount(t, "acct-123")
-	provider := NewWithHTTPClient(token, srv.URL, srv.Client(), llmclient.Hooks{})
+	provider := newTestProvider(token, srv.URL, srv.Client(), llmclient.Hooks{})
 
 	temperature := 0.7
 	maxTokens := 128
@@ -114,7 +114,7 @@ func TestStreamResponses_SendsCodexDialect(t *testing.T) {
 // backend refuses stream:false, so GoModel streams and returns the final object.
 func TestResponses_CollapsesUpstreamStream(t *testing.T) {
 	srv, _ := providertest.SSEServer(t, codexSSE)
-	provider := NewWithHTTPClient("token", srv.URL, srv.Client(), llmclient.Hooks{})
+	provider := newTestProvider("token", srv.URL, srv.Client(), llmclient.Hooks{})
 	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
 		Model: "gpt-5.6-terra",
 		Input: []core.ResponsesInputElement{{Type: "message", Role: "user", Content: "hi"}},
@@ -154,7 +154,7 @@ func TestResponses_TruncatedStreamIsAnError(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, _ := providertest.SSEServer(t, tc.body)
-			provider := NewWithHTTPClient("token", srv.URL, srv.Client(), llmclient.Hooks{})
+			provider := newTestProvider("token", srv.URL, srv.Client(), llmclient.Hooks{})
 			_, err := provider.Responses(context.Background(), &core.ResponsesRequest{Model: "gpt-5.6-terra", Input: "hi"})
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.want)
@@ -190,7 +190,7 @@ func TestResponses_NonSuccessTerminalIsReturnedAsAResponse(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, _ := providertest.SSEServer(t, "event: "+tc.event+"\ndata: "+tc.payload+"\n\n")
-			provider := NewWithHTTPClient("token", srv.URL, srv.Client(), llmclient.Hooks{})
+			provider := newTestProvider("token", srv.URL, srv.Client(), llmclient.Hooks{})
 			resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{Model: "gpt-5.6-terra", Input: "hi"})
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantStatus, resp.Status)
@@ -205,7 +205,7 @@ func TestResponses_NonSuccessTerminalIsReturnedAsAResponse(t *testing.T) {
 }
 
 func TestStreamResponses_RequiresToken(t *testing.T) {
-	provider := NewWithHTTPClient("", "http://example.invalid", http.DefaultClient, llmclient.Hooks{})
+	provider := newTestProvider("", "http://example.invalid", http.DefaultClient, llmclient.Hooks{})
 	_, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{Model: "gpt-5.6-terra", Input: "hi"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "CHATGPT_API_KEY")

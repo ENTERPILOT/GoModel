@@ -26,11 +26,13 @@ func TestChatCompatibleContract(t *testing.T) {
 		Type:           "chutes",
 		DefaultBaseURL: "https://llm.chutes.ai/v1",
 		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
-			return NewWithHTTPClient(apiKey, baseURL, client, hooks)
+			opts := providertest.Options(hooks)
+			opts.HTTPClient = client
+			return New(providers.ProviderConfig{APIKey: apiKey, BaseURL: baseURL}, opts)
 		},
 	})
 
-	provider := NewWithHTTPClient("cpk_test", "", nil, llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{APIKey: "cpk_test"}, providers.ProviderOptions{})
 	providertest.AssertNoNativeSurfaces(t, provider)
 	_, ok := any(provider).(core.NativeResponseLifecycleProvider)
 	assert.False(t, ok, "provider should not implement core.NativeResponseLifecycleProvider")
@@ -39,7 +41,7 @@ func TestChatCompatibleContract(t *testing.T) {
 func TestSetBaseURL_ChangesRequestTarget(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"object":"list","data":[]}`)
 
-	provider := NewWithHTTPClient("cpk_test", "https://unused.example/v1", server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("cpk_test", "https://unused.example/v1", server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 	_, err := provider.ListModels(context.Background())
 	require.NoError(t, err)

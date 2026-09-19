@@ -83,23 +83,7 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 		Hooks:          opts.Hooks,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
-	p.client = llmclient.New(clientCfg, p.setHeaders)
-	return p
-}
-
-// NewWithHTTPClient creates a new Anthropic provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
-	p := &Provider{
-		keys:                 providers.NewKeyring(apiKey),
-		batchResultEndpoints: make(map[string]map[string]string),
-	}
-	cfg := llmclient.DefaultConfig("anthropic", defaultBaseURL)
-	cfg.Hooks = hooks
-	p.client = llmclient.NewWithHTTPClient(httpClient, cfg, p.setHeaders)
+	p.client = llmclient.NewWithOptionalHTTPClient(opts.HTTPClient, clientCfg, p.setHeaders)
 	return p
 }
 

@@ -100,32 +100,13 @@ func NewCompatibleProvider(apiKey string, opts providers.ProviderOptions, cfg Co
 			cfg.SetHeaders(req, p.keys.NextForContext(req.Context()))
 		}
 	}
-	if cfg.HTTPClient != nil {
-		p.client = llmclient.NewWithHTTPClient(cfg.HTTPClient, clientCfg, headerSetter)
-	} else {
-		p.client = llmclient.New(clientCfg, headerSetter)
-	}
-	return p
-}
-
-func NewCompatibleProviderWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks, cfg CompatibleProviderConfig) *CompatibleProvider {
+	// cfg wins over opts: a provider that sets one is doing it for a
+	// transport-level concern of its own, such as request signing.
+	httpClient := cfg.HTTPClient
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = opts.HTTPClient
 	}
-	p := &CompatibleProvider{
-		keys:               providers.NewKeyring(apiKey),
-		providerName:       cfg.ProviderName,
-		requestMutator:     cfg.RequestMutator,
-		adaptChatRequest:   cfg.AdaptChatRequest,
-		chatRequestHeaders: cfg.ChatRequestHeaders,
-	}
-	clientCfg := llmclient.DefaultConfig(cfg.ProviderName, cfg.BaseURL)
-	clientCfg.Hooks = hooks
-	p.client = llmclient.NewWithHTTPClient(httpClient, clientCfg, func(req *http.Request) {
-		if cfg.SetHeaders != nil {
-			cfg.SetHeaders(req, p.keys.NextForContext(req.Context()))
-		}
-	})
+	p.client = llmclient.NewWithOptionalHTTPClient(httpClient, clientCfg, headerSetter)
 	return p
 }
 

@@ -47,7 +47,7 @@ func TestChatCompletionTranslatesRequestAndResponse(t *testing.T) {
 		}
 	}`)
 
-	provider := NewWithHTTPClient("test-key", server.URL, server.Client(), llmclient.Hooks{
+	provider := newTestProvider("test-key", server.URL, server.Client(), llmclient.Hooks{
 		OnRequestStart: func(ctx context.Context, info llmclient.RequestInfo) context.Context {
 			operation = info.Operation
 			return ctx
@@ -176,7 +176,7 @@ func TestChatCompletionReturnsCohereGenerationFailures(t *testing.T) {
 				"usage":{}
 			}`)
 
-			provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+			provider := newTestProvider("key", server.URL, server.Client(), llmclient.Hooks{})
 			resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 				Model:    "command-a",
 				Messages: []core.Message{{Role: "user", Content: "hello"}},
@@ -223,7 +223,7 @@ func TestStreamChatCompletionConvertsCohereEvents(t *testing.T) {
 		``,
 	))
 
-	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("key", server.URL, server.Client(), llmclient.Hooks{})
 	stream, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
 		Model:         "command-a",
 		Messages:      []core.Message{{Role: "user", Content: "hello"}},
@@ -265,7 +265,7 @@ func TestStreamChatCompletionReturnsGenerationFailure(t *testing.T) {
 		``,
 	))
 
-	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("key", server.URL, server.Client(), llmclient.Hooks{})
 	stream, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
 		Model:    "command-a",
 		Messages: []core.Message{{Role: "user", Content: "hello"}},
@@ -290,7 +290,7 @@ func TestStreamResponsesPropagatesGenerationFailure(t *testing.T) {
 		``,
 	))
 
-	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("key", server.URL, server.Client(), llmclient.Hooks{})
 	stream, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "command-a",
 		Input: "hello",
@@ -350,7 +350,7 @@ func TestStreamResponsesPropagatesAdapterFailures(t *testing.T) {
 				_, _ = io.WriteString(w, tt.body)
 			})
 
-			provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+			provider := newTestProvider("key", server.URL, server.Client(), llmclient.Hooks{})
 			stream, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 				Model: "command-a",
 				Input: "hello",
@@ -374,7 +374,7 @@ func TestStreamResponsesPropagatesAdapterFailures(t *testing.T) {
 func TestStreamChatCompletionDoesNotTurnIncompleteStreamIntoSuccess(t *testing.T) {
 	server, _ := providertest.SSEServer(t, "data: {\"type\":\"content-delta\",\"delta\":{\"message\":{\"content\":{\"text\":\"partial\"}}}}\n\n")
 
-	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("key", server.URL, server.Client(), llmclient.Hooks{})
 	stream, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
 		Model:    "command-a",
 		Messages: []core.Message{{Role: "user", Content: "hello"}},
@@ -399,7 +399,7 @@ func TestEmbeddingsTranslatesOpenAIShape(t *testing.T) {
 		"meta":{"billed_units":{"input_tokens":7}}
 	}`)
 
-	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("key", server.URL, server.Client(), llmclient.Hooks{})
 	dimensions := 2
 	resp, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
 		Model:      "embed-v4.0",
@@ -444,7 +444,7 @@ func TestListModelsFiltersUnsupportedEndpointsAndRotatesKeys(t *testing.T) {
 		{"name":"legacy-unknown"}
 	]}`)
 
-	provider := NewWithHTTPClient("first", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("first", server.URL, server.Client(), llmclient.Hooks{})
 	provider.keys = providers.NewKeyring("first", "second")
 	for range 2 {
 		resp, err := provider.ListModels(context.Background())
@@ -516,7 +516,7 @@ func TestPassthroughForwardsNativeCohereRequest(t *testing.T) {
 		_, _ = io.WriteString(w, upstreamBody)
 	})
 
-	provider := NewWithHTTPClient("test-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("test-key", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 		Method:   http.MethodPost,
 		Endpoint: "v2/rerank?priority=high",

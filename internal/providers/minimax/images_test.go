@@ -19,7 +19,7 @@ func TestCreateImage(t *testing.T) {
 		for _, format := range []string{"", "url", "b64_json", "base64"} {
 			t.Run(model+"/"+format, func(t *testing.T) {
 				server, capture := providertest.JSONServer(t, http.StatusOK, `{"data":{"image_urls":["https://example.com/image.png"],"image_base64":["aW1hZ2U="]},"metadata":{"success_count":"1","failed_count":"1"},"base_resp":{"status_code":0}}`)
-				provider := NewWithHTTPClient("test-key", server.URL+"/v1", server.Client(), llmclient.Hooks{})
+				provider := newTestProvider("test-key", server.URL+"/v1", server.Client(), llmclient.Hooks{})
 				var req core.ImageGenerationRequest
 				require.NoError(t, json.Unmarshal([]byte(fmt.Sprintf(`{"model":%q,"prompt":"A lighthouse","n":2,"size":"1024x1024","response_format":%q,"provider":"minimax","user":"local-user","seed":42,"prompt_optimizer":false}`, model, format)), &req))
 				before, err := json.Marshal(req)
@@ -59,7 +59,7 @@ func TestCreateImage(t *testing.T) {
 
 func TestCreateImageNativeDimensions(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"data":{"image_urls":["https://example.com/image.png"]},"base_resp":{"status_code":0}}`)
-	p := NewWithHTTPClient("test-key", server.URL, server.Client(), llmclient.Hooks{})
+	p := newTestProvider("test-key", server.URL, server.Client(), llmclient.Hooks{})
 	var req core.ImageGenerationRequest
 	require.NoError(t, json.Unmarshal([]byte(`{"model":"image-01","prompt":"A lighthouse","aspect_ratio":"16:9"}`), &req))
 	_, err := p.CreateImage(context.Background(), &req)
@@ -96,7 +96,7 @@ func TestCreateImageErrors(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server, _ := providertest.JSONServer(t, tc.status, tc.body)
-			p := NewWithHTTPClient("test-key", server.URL, server.Client(), llmclient.Hooks{})
+			p := newTestProvider("test-key", server.URL, server.Client(), llmclient.Hooks{})
 			_, err := p.CreateImage(context.Background(), &core.ImageGenerationRequest{Model: "image-01", Prompt: "A lighthouse"})
 			var gatewayErr *core.GatewayError
 			require.ErrorAs(t, err, &gatewayErr)
@@ -114,7 +114,7 @@ func TestCreateImageErrors(t *testing.T) {
 func TestCreateImageOmitsBlankNativeMessage(t *testing.T) {
 	const body = `{"base_resp":{"status_code":2013,"status_msg":"  "}}`
 	server, _ := providertest.JSONServer(t, http.StatusOK, body)
-	p := NewWithHTTPClient("test-key", server.URL, server.Client(), llmclient.Hooks{})
+	p := newTestProvider("test-key", server.URL, server.Client(), llmclient.Hooks{})
 
 	_, err := p.CreateImage(context.Background(), &core.ImageGenerationRequest{Model: "image-01", Prompt: "A lighthouse"})
 
@@ -136,7 +136,7 @@ func TestCreateImageValidation(t *testing.T) {
 	} {
 		t.Run(body, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, 200, `{}`)
-			p := NewWithHTTPClient("test-key", server.URL, server.Client(), llmclient.Hooks{})
+			p := newTestProvider("test-key", server.URL, server.Client(), llmclient.Hooks{})
 			var req *core.ImageGenerationRequest
 			require.NoError(t, json.Unmarshal([]byte(body), &req))
 			_, err := p.CreateImage(context.Background(), req)

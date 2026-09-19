@@ -58,9 +58,9 @@ func TestChatCompatibleContract(t *testing.T) {
 		DefaultBaseURL: "http://localhost:11434/v1",
 		SkipEmbeddings: true,
 		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
-			provider := NewWithHTTPClient(apiKey, client, hooks)
-			provider.SetBaseURL(baseURL)
-			return provider
+			opts := providertest.Options(hooks)
+			opts.HTTPClient = client
+			return New(providers.ProviderConfig{APIKey: apiKey, BaseURL: baseURL}, opts)
 		},
 	})
 }
@@ -76,7 +76,7 @@ func TestNew(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			provider := NewWithHTTPClient(tt.apiKey, nil, llmclient.Hooks{})
+			provider := newHTTPTestProvider(tt.apiKey, nil, llmclient.Hooks{})
 			assert.Equal(t, tt.apiKey, provider.keys.Primary())
 			assert.NotNil(t, provider.compat)
 			assert.NotNil(t, provider.nativeClient)

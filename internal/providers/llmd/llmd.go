@@ -60,13 +60,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 	return newProvider(cfg.APIKey, cfg.BaseURL, ControlConfig{
 		InferenceObjective:   cfg.InferenceObjective,
 		FairnessFromUserPath: cfg.FairnessFromUserPath,
-	}, opts, nil)
-}
-
-// NewWithHTTPClient creates an llm-d provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey, baseURL string, controls ControlConfig, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	return newProvider(apiKey, baseURL, controls, providers.ProviderOptions{Hooks: hooks}, httpClient)
+	}, opts, opts.HTTPClient)
 }
 
 func newProvider(apiKey, baseURL string, controls ControlConfig, opts providers.ProviderOptions, httpClient *http.Client) *Provider {
