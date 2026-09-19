@@ -11,6 +11,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
@@ -57,7 +58,11 @@ type upsertProviderCredentialRequest struct {
 	ServiceAccountJSONBase64 string   `json:"service_account_json_base64,omitempty"`
 	GCPScope                 string   `json:"gcp_scope,omitempty"`
 	Models                   []string `json:"models,omitempty"`
-	Enabled                  *bool    `json:"enabled,omitempty"`
+	// TripOn carries circuit-breaker trip rules as {match, ttl} objects;
+	// ttl is nanoseconds, config's duration encoding. Plain configuration,
+	// never redacted.
+	TripOn  []config.TripRuleConfig `json:"trip_on,omitempty"`
+	Enabled *bool                   `json:"enabled,omitempty"`
 }
 
 // providerCredentialFieldResponse describes one credential field a provider
@@ -88,26 +93,27 @@ type providerCredentialTypeResponse struct {
 // credential: its definition (secrets redacted) plus whether it is read-only
 // (config/env-declared).
 type providerCredentialViewResponse struct {
-	Name                     string     `json:"name"`
-	Type                     string     `json:"type"`
-	APIKeys                  []string   `json:"api_keys,omitempty"`
-	SessionStickyKeys        bool       `json:"session_sticky_keys"`
-	BaseURL                  string     `json:"base_url,omitempty"`
-	APIVersion               string     `json:"api_version,omitempty"`
-	Backend                  string     `json:"backend,omitempty"`
-	AuthType                 string     `json:"auth_type,omitempty"`
-	APIMode                  string     `json:"api_mode,omitempty"`
-	VertexProject            string     `json:"vertex_project,omitempty"`
-	VertexLocation           string     `json:"vertex_location,omitempty"`
-	ServiceAccountFile       string     `json:"service_account_file,omitempty"`
-	ServiceAccountJSON       string     `json:"service_account_json,omitempty"`
-	ServiceAccountJSONBase64 string     `json:"service_account_json_base64,omitempty"`
-	GCPScope                 string     `json:"gcp_scope,omitempty"`
-	Models                   []string   `json:"models,omitempty"`
-	Enabled                  bool       `json:"enabled"`
-	Managed                  bool       `json:"managed"`
-	CreatedAt                *time.Time `json:"created_at,omitempty"`
-	UpdatedAt                *time.Time `json:"updated_at,omitempty"`
+	Name                     string                  `json:"name"`
+	Type                     string                  `json:"type"`
+	APIKeys                  []string                `json:"api_keys,omitempty"`
+	SessionStickyKeys        bool                    `json:"session_sticky_keys"`
+	BaseURL                  string                  `json:"base_url,omitempty"`
+	APIVersion               string                  `json:"api_version,omitempty"`
+	Backend                  string                  `json:"backend,omitempty"`
+	AuthType                 string                  `json:"auth_type,omitempty"`
+	APIMode                  string                  `json:"api_mode,omitempty"`
+	VertexProject            string                  `json:"vertex_project,omitempty"`
+	VertexLocation           string                  `json:"vertex_location,omitempty"`
+	ServiceAccountFile       string                  `json:"service_account_file,omitempty"`
+	ServiceAccountJSON       string                  `json:"service_account_json,omitempty"`
+	ServiceAccountJSONBase64 string                  `json:"service_account_json_base64,omitempty"`
+	GCPScope                 string                  `json:"gcp_scope,omitempty"`
+	Models                   []string                `json:"models,omitempty"`
+	TripOn                   []config.TripRuleConfig `json:"trip_on,omitempty"`
+	Enabled                  bool                    `json:"enabled"`
+	Managed                  bool                    `json:"managed"`
+	CreatedAt                *time.Time              `json:"created_at,omitempty"`
+	UpdatedAt                *time.Time              `json:"updated_at,omitempty"`
 }
 
 // ListProviderCredentials handles GET /admin/provider-credentials.
@@ -250,6 +256,12 @@ func (h *Handler) UpsertProviderCredential(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	// Validate trip rules regardless of enabled state: an invalid regex or
+	// negative TTL stored in a disabled credential would surface only at
+	// enable time and break the operator's workflow.
+	if err := config.ValidateResilience(config.ResilienceConfig{CircuitBreaker: config.CircuitBreakerConfig{TripOn: cred.TripOn}}); err != nil {
+		return handleError(c, core.NewInvalidRequestError("invalid trip_on rules: "+err.Error(), nil))
+	}
 	if err := h.providerCredentials.Upsert(c.Request().Context(), cred); err != nil {
 		return handleError(c, providerCredentialWriteError(err))
 	}
@@ -331,6 +343,7 @@ func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string
 		ServiceAccountJSONBase64: serviceAccountJSONBase64,
 		GCPScope:                 strings.TrimSpace(req.GCPScope),
 		Models:                   req.Models,
+		TripOn:                   req.TripOn,
 		Enabled:                  enabled,
 	}
 	if current != nil {
@@ -418,6 +431,7 @@ func (h *Handler) providerCredentialView(cred providers.ManagedProviderCredentia
 		ServiceAccountFile: cred.ServiceAccountFile,
 		GCPScope:           cred.GCPScope,
 		Models:             cred.Models,
+		TripOn:             cred.TripOn,
 		Enabled:            cred.Enabled,
 		Managed:            h.providerCredentials.IsManaged(cred.Name),
 		CreatedAt:          nonZeroTime(cred.CreatedAt),
@@ -445,6 +459,7 @@ func (h *Handler) declaredProviderCredentialView(cfg providers.SanitizedProvider
 		BaseURL:           cfg.BaseURL,
 		APIVersion:        cfg.APIVersion,
 		Models:            cfg.Models,
+		TripOn:            cfg.Resilience.CircuitBreaker.TripOn,
 		SessionStickyKeys: cfg.SessionStickyKeys,
 		Enabled:           true,
 		Managed:           true,

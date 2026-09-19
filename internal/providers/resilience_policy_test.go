@@ -3,6 +3,7 @@ package providers
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/stretchr/testify/require"
@@ -23,6 +24,33 @@ func TestProviderResilienceStatusOverrides(t *testing.T) {
 	require.Equal(t, global.Retry.MaxRetries, got.Retry.MaxRetries)
 	require.Equal(t, global.CircuitBreaker.FailureThreshold, got.CircuitBreaker.FailureThreshold)
 	require.Equal(t, global, buildProviderConfig(config.RawProviderConfig{}, global).Resilience)
+}
+
+func TestProviderResilienceTripOnOverrides(t *testing.T) {
+	global := config.ResilienceConfig{Retry: config.DefaultRetryConfig(), CircuitBreaker: config.DefaultCircuitBreakerConfig()}
+	global.CircuitBreaker.TripOn = []config.TripRuleConfig{{Match: "global", TTL: time.Minute}}
+
+	// A provider-level trip_on list replaces the global list wholesale.
+	var raw config.RawProviderConfig
+	err := yaml.Unmarshal([]byte("type: openai\nresilience:\n  circuit_breaker:\n    trip_on:\n      - match: \"quota\"\n        ttl: 2m\n"), &raw)
+	require.NoError(t, err)
+	got := buildProviderConfig(raw, global).Resilience
+	require.Equal(t, []config.TripRuleConfig{{Match: "quota", TTL: 2 * time.Minute}}, got.CircuitBreaker.TripOn)
+
+	// An explicit empty list replaces the global list and disables message trips.
+	var disabled config.RawProviderConfig
+	err = yaml.Unmarshal([]byte("type: openai\nresilience:\n  circuit_breaker:\n    trip_on: []\n"), &disabled)
+	require.NoError(t, err)
+	got = buildProviderConfig(disabled, global).Resilience
+	require.NotNil(t, got.CircuitBreaker.TripOn)
+	require.Empty(t, got.CircuitBreaker.TripOn)
+
+	// Without a provider trip_on the global list is inherited as-is.
+	got = buildProviderConfig(config.RawProviderConfig{Type: "openai"}, global).Resilience
+	require.Equal(t, global.CircuitBreaker.TripOn, got.CircuitBreaker.TripOn)
+
+	// Unset everywhere stays nil so llmclient never trips on messages.
+	require.Nil(t, buildProviderConfig(config.RawProviderConfig{}, config.ResilienceConfig{}).Resilience.CircuitBreaker.TripOn)
 }
 
 func TestSanitizedResiliencePolicies(t *testing.T) {
@@ -50,6 +78,9 @@ func TestFactoryRejectsInvalidResilience(t *testing.T) {
 		{Retry: config.RetryConfig{RetryOnStatuses: []string{"bad"}}},
 		{CircuitBreaker: config.CircuitBreakerConfig{FailureOnStatuses: []string{"600"}}},
 		{CircuitBreaker: config.CircuitBreakerConfig{Scope: "bad"}},
+		{CircuitBreaker: config.CircuitBreakerConfig{TripOn: []config.TripRuleConfig{{Match: "["}}}},
+		{CircuitBreaker: config.CircuitBreakerConfig{TripOn: []config.TripRuleConfig{{Match: "quota", TTL: -time.Second}}}},
+		{CircuitBreaker: config.CircuitBreakerConfig{TripOn: []config.TripRuleConfig{{}}}},
 	} {
 		_, err := factory.Create(ProviderConfig{Resilience: r})
 		require.Error(t, err)

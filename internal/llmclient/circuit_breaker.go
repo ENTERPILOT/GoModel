@@ -1,9 +1,18 @@
 package llmclient
 
 import (
+	"regexp"
 	"sync"
 	"time"
 )
+
+// TripRule opens the breaker instantly when an upstream error message matches
+// Pattern, skipping the failure threshold. A zero TTL defers to the breaker's
+// open-state timeout at trip time.
+type TripRule struct {
+	Pattern *regexp.Regexp
+	TTL     time.Duration
+}
 
 // circuitBreaker implements a circuit breaker pattern with half-open state protection
 type circuitBreaker struct {
@@ -15,7 +24,10 @@ type circuitBreaker struct {
 	successThreshold int
 	timeout          time.Duration
 	lastFailure      time.Time
-	halfOpenAllowed  bool // Controls single-request probe in half-open state
+	// quotaUntil keeps the breaker open for a quota trip window even after
+	// lastFailure ages past timeout. Zero unless a quota trip happened.
+	quotaUntil      time.Time
+	halfOpenAllowed bool // Controls single-request probe in half-open state
 }
 
 type circuitState int
@@ -46,8 +58,8 @@ func (cb *circuitBreaker) acquire() (bool, bool) {
 	case circuitClosed:
 		return true, false
 	case circuitOpen:
-		// Check if timeout has passed
-		if time.Since(cb.lastFailure) > cb.timeout {
+		// Check if timeout has passed and no quota trip window is active
+		if time.Since(cb.lastFailure) > cb.timeout && time.Now().After(cb.quotaUntil) {
 			cb.state = circuitHalfOpen
 			cb.successes = 0
 			cb.halfOpenAllowed = true // Allow the first probe request
@@ -118,6 +130,34 @@ func (cb *circuitBreaker) RecordFailure() {
 		cb.successes = 0
 		cb.halfOpenAllowed = true // Reset for next timeout period
 	}
+}
+
+// RecordQuotaTrip opens the breaker instantly, without counting failures,
+// because a matching upstream error proves the provider's quota is gone. The
+// breaker stays open for ttl regardless of the open-state timeout; acquire
+// honors whichever deadline expires last.
+func (cb *circuitBreaker) RecordQuotaTrip(ttl time.Duration) {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	now := time.Now()
+	cb.state = circuitOpen
+	cb.lastFailure = now
+	cb.quotaUntil = now.Add(ttl)
+	cb.successes = 0
+	cb.halfOpenAllowed = true // Reset for next timeout period
+}
+
+// Reset force-closes the breaker and clears any quota trip window.
+func (cb *circuitBreaker) Reset() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	cb.state = circuitClosed
+	cb.failures = 0
+	cb.successes = 0
+	cb.quotaUntil = time.Time{}
+	cb.halfOpenAllowed = true
 }
 
 // State returns the current circuit state (for testing/monitoring)

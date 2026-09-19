@@ -1,6 +1,9 @@
 package config
 
-import "fmt"
+import (
+	"fmt"
+	"regexp"
+)
 
 // ParseResilienceStatuses expands exact HTTP codes and classes. Nil uses the
 // supplied defaults; an explicit empty list disables status-based matches.
@@ -40,6 +43,9 @@ func validateResilienceConfig(global ResilienceConfig, providers map[string]RawP
 			if cb.Scope != nil {
 				r.CircuitBreaker.Scope = *cb.Scope
 			}
+			if cb.TripOn != nil {
+				r.CircuitBreaker.TripOn = cb.TripOn
+			}
 		}
 		if err := ValidateResilience(r); err != nil {
 			return fmt.Errorf("providers.%s.resilience: %w", name, err)
@@ -60,6 +66,17 @@ func ValidateResilience(r ResilienceConfig) error {
 	case "", "provider", "model":
 	default:
 		return fmt.Errorf("circuit_breaker.scope must be provider or model")
+	}
+	for i, rule := range r.CircuitBreaker.TripOn {
+		if rule.Match == "" {
+			return fmt.Errorf("circuit_breaker.trip_on[%d]: match must not be empty", i)
+		}
+		if _, err := regexp.Compile(rule.Match); err != nil {
+			return fmt.Errorf("circuit_breaker.trip_on[%d]: %w", i, err)
+		}
+		if rule.TTL < 0 {
+			return fmt.Errorf("circuit_breaker.trip_on[%d]: ttl must not be negative", i)
+		}
 	}
 	return nil
 }

@@ -9,11 +9,14 @@
   import EnabledToggle from "$lib/components/atoms/EnabledToggle.svelte";
   import EditorDialog from "$lib/components/organisms/EditorDialog.svelte";
   import ProviderCredentialField from "./ProviderCredentialField.svelte";
+  import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
+  import Icon from "$lib/components/atoms/Icon.svelte";
   import { providersConfig } from "./providersConfig.svelte.js";
   import {
     providerCredentialTypeOptions,
     suggestProviderCredentialName,
   } from "./providersConfigLogic.js";
+  import { Plus, Trash2 } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   const typeOptions = $derived(
@@ -22,6 +25,15 @@
   const fields = $derived(providersConfig.formFields);
   const nameError = $derived(providersConfig.fieldErrors.name || "");
   const typeError = $derived(providersConfig.fieldErrors.type || "");
+  const tripOnError = $derived(providersConfig.fieldErrors.trip_on || "");
+
+  // The id lands on the first rule's match input (or the add button while
+  // there are no rows), so a rejected save can scroll/focus the block the
+  // same way it does for the schema-driven fields.
+  const tripOnId = "provider-credential-trip_on";
+  const tripOnTargetId = $derived(
+    providersConfig.form.trip_on.length > 0 ? tripOnId + "-match-0" : tripOnId + "-add",
+  );
 
   // onTypeChange resets the Name field to a fresh suggestion whenever the
   // Type selection changes while creating a provider (Type is immutable once
@@ -47,7 +59,14 @@
       return;
     }
     providersConfig.focusField = "";
-    const element = document.getElementById("provider-credential-" + target);
+    // "trip_on" wraps a rule list: focus the derived target element
+    // (first rule's match input or the add button).
+    let element;
+    if (target === "trip_on") {
+      element = document.getElementById(tripOnTargetId);
+    } else {
+      element = document.getElementById("provider-credential-" + target);
+    }
     if (element) {
       element.scrollIntoView({ block: "center" });
       element.focus({ preventScroll: true });
@@ -127,6 +146,60 @@
     <ProviderCredentialField {field} />
   {/each}
 
+  <div class="form-field" id={tripOnId}>
+    <label class="form-field-label" for={tripOnTargetId}>{m.providers_trip_on()}</label>
+    <div class="vm-target-list">
+      {#each providersConfig.form.trip_on as rule, index (index)}
+        <div class="vm-target-row">
+          <input
+            id={index === 0 ? tripOnId + "-match-0" : undefined}
+            type="text"
+            class="mono vm-target-model"
+            placeholder="insufficient_quota"
+            aria-label={m.providers_trip_on_match({ number: index + 1 })}
+            aria-invalid={tripOnError ? "true" : undefined}
+            aria-describedby={index === 0 && tripOnError
+              ? tripOnId + "-error"
+              : undefined}
+            bind:value={rule.match}
+            oninput={() => providersConfig.clearFieldError("trip_on")}
+          />
+          <input
+            type="text"
+            class="mono provider-trip-rule-ttl"
+            placeholder="e.g. 15m (optional)"
+            aria-label={m.providers_trip_on_ttl({ number: index + 1 })}
+            bind:value={rule.ttl}
+            oninput={() => providersConfig.clearFieldError("trip_on")}
+          />
+          <TableActionButton
+            label={m.providers_remove_trip_rule({ number: index + 1 })}
+            class="table-action-btn-danger table-icon-btn vm-target-remove"
+            onclick={() => providersConfig.removeTripRuleRow(index)}
+          >
+            <Icon icon={Trash2} class="table-icon-svg" />
+          </TableActionButton>
+        </div>
+      {/each}
+    </div>
+    <div class="failover-target-actions">
+      <button
+        type="button"
+        id={tripOnId + "-add"}
+        class="btn btn-with-icon"
+        onclick={() => providersConfig.addTripRuleRow()}
+      >
+        <Icon icon={Plus} class="form-action-icon" />
+        <span>{m.providers_add_trip_rule()}</span>
+      </button>
+    </div>
+    {#if tripOnError}
+      <small class="form-field-error" id={tripOnId + "-error"} role="alert">{tripOnError}</small>
+    {:else}
+      <small class="form-hint">{m.providers_trip_on_hint()}</small>
+    {/if}
+  </div>
+
   <div class="vm-status-row">
     <div class="vm-status-toggle">
       <EnabledToggle
@@ -158,3 +231,11 @@
     </details>
   {/if}
 </EditorDialog>
+
+<style>
+  /* Trip-rule TTL column stays narrow next to the free-form match pattern. */
+  .provider-trip-rule-ttl {
+    flex: 0 0 120px;
+    width: 120px;
+  }
+</style>

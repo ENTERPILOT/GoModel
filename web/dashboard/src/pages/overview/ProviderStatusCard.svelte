@@ -18,6 +18,7 @@
     providerLastCheckedTime,
     providerLastCheckedTitle,
     providerStatusPillTitle,
+    providerBreakerResettable,
   } from "./providersLogic.js";
   import { ChevronDown } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
@@ -25,6 +26,10 @@
   let { provider } = $props();
 
   const expanded = $derived(providerStatusState.cardExpanded(provider));
+  // Only a tripped breaker (open/half-open) offers the reset; the button
+  // also waits out any in-flight POST (single-flight guard blocks all cards).
+  const breakerResettable = $derived(providerBreakerResettable(provider));
+  const resetting = $derived(providerStatusState.resettingName);
   const formatTimestamp = (ts) => timezone.formatTimestamp(ts);
 </script>
 
@@ -54,10 +59,19 @@
         {/if}
       </h4>
     </div>
-    <span
-      class="provider-status-pill {providerStatusBadgeClass(provider.status)}"
-      title={providerStatusPillTitle(provider)}
-    >{provider.status_label}</span>
+    <div class="provider-status-head-end">
+      <button
+        type="button"
+        class="provider-breaker-reset"
+        disabled={!breakerResettable || resetting}
+        title={m.overview_reset_breaker_title()}
+        onclick={() => providerStatusState.resetBreaker(provider)}
+      >{m.overview_reset_breaker()}</button>
+      <span
+        class="provider-status-pill {providerStatusBadgeClass(provider.status)}"
+        title={providerStatusPillTitle(provider)}
+      >{provider.status_label}</span>
+    </div>
   </div>
 
   <div class="provider-status-meta">
@@ -150,6 +164,45 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
+  }
+
+  .provider-status-head-end {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* Breaker reset: a quiet action next to the status pill, greyed out unless
+     the breaker actually needs it. Shares the section toggle's palette. */
+  .provider-breaker-reset {
+    padding: 4px 10px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 12px;
+    font-family: inherit;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color 0.18s ease,
+      border-color 0.18s ease,
+      color 0.18s ease;
+  }
+
+  .provider-breaker-reset:hover:enabled {
+    background: var(--bg-surface-hover);
+  }
+
+  .provider-breaker-reset:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 28%, transparent);
+    outline-offset: 2px;
+  }
+
+  .provider-breaker-reset:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
   }
 
   .provider-status-name {

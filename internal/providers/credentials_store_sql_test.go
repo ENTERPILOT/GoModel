@@ -67,3 +67,24 @@ func TestSQLCredentialStoreReopenKeepsRows(t *testing.T) {
 		require.False(t, *got.SessionStickyKeys)
 	})
 }
+
+// A row whose trip_on column holds invalid JSON must surface as an error at
+// read time, not silently yield an empty rule set.
+func TestSQLCredentialStoreCorruptTripOnRowReturnsError(t *testing.T) {
+	runSQLCredentialStoreTest(t, func(t *testing.T, store *SQLCredentialStore, db sqlx.DB) {
+		ctx := context.Background()
+		err := store.Upsert(ctx, ManagedProviderCredential{
+			Name:    "my-openai",
+			Type:    "openai",
+			APIKeys: []string{"sk-one"},
+			Enabled: true,
+		})
+		require.NoError(t, err)
+
+		_, err = db.Exec(ctx, `UPDATE provider_credentials SET trip_on = '{' WHERE name = 'my-openai'`)
+		require.NoError(t, err)
+
+		_, err = store.List(ctx)
+		require.Error(t, err)
+	})
+}

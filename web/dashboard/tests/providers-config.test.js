@@ -23,6 +23,12 @@ import {
   validateProviderCredentialForm,
   buildProviderCredentialPayload,
   providerRowsHaveActions,
+  providerRowsHaveTripRules,
+  providerCredentialTripRulesLabel,
+  parseGoDuration,
+  formatGoDurationNs,
+  tripRulesToRows,
+  tripRuleRowsToWire,
 } from "../src/pages/providers-config/providersConfigLogic.js";
 
 // Schemas shaped like GET /admin/provider-credentials/types serves them.
@@ -102,6 +108,7 @@ test("the payload carries the fields the provider type accepts", () => {
     "models",
     "name",
     "session_sticky_keys",
+    "trip_on",
     "type",
   ]);
 });
@@ -569,4 +576,239 @@ test("providerRowsHaveActions is false when every provider is managed", () => {
     true,
   );
   assert.equal(providerRowsHaveActions(undefined), false);
+});
+
+// --- Quota breaker trip rules ---
+
+test("parseGoDuration mirrors time.ParseDuration for the strings operators type", () => {
+  assert.equal(parseGoDuration("15m"), 15 * 60 * 1e9);
+  assert.equal(parseGoDuration("1h"), 3600 * 1e9);
+  assert.equal(parseGoDuration("1h30m"), 5400 * 1e9);
+  assert.equal(parseGoDuration("90s"), 90 * 1e9);
+  assert.equal(parseGoDuration("500ms"), 5e8);
+  assert.equal(parseGoDuration("2h45m"), 9900 * 1e9);
+  assert.equal(parseGoDuration("0"), 0);
+  assert.equal(parseGoDuration("-500ms"), -5e8);
+  assert.equal(parseGoDuration("1.5h"), 5400 * 1e9);
+  assert.equal(parseGoDuration(" 15m "), 900 * 1e9);
+
+  // Go's exact strings round-trip through both directions.
+  assert.equal(parseGoDuration(formatGoDurationNs(900 * 1e9)), 900 * 1e9);
+
+  // Invalid: missing unit, empty, unknown suffix, trailing junk.
+  assert.equal(parseGoDuration(""), null);
+  assert.equal(parseGoDuration("15"), null);
+  assert.equal(parseGoDuration("abc"), null);
+  assert.equal(parseGoDuration("15x"), null);
+  assert.equal(parseGoDuration("15m30"), null);
+  assert.equal(parseGoDuration(null), null);
+  assert.equal(parseGoDuration(undefined), null);
+});
+
+test("formatGoDurationNs renders durations the way Go's Duration.String does", () => {
+  assert.equal(formatGoDurationNs(0), "0s");
+  assert.equal(formatGoDurationNs(900 * 1e9), "15m0s");
+  assert.equal(formatGoDurationNs(3600 * 1e9), "1h0m0s");
+  assert.equal(formatGoDurationNs(5400 * 1e9), "1h30m0s");
+  assert.equal(formatGoDurationNs(90 * 1e9), "1m30s");
+  assert.equal(formatGoDurationNs(45 * 1e9), "45s");
+  assert.equal(formatGoDurationNs(5e8), "500ms");
+  assert.equal(formatGoDurationNs(15e5), "1.5ms");
+  assert.equal(formatGoDurationNs(15e2), "1.5µs");
+  assert.equal(formatGoDurationNs(42), "42ns");
+  assert.equal(formatGoDurationNs(-5e8), "-500ms");
+  assert.equal(formatGoDurationNs("not a number"), "");
+  // A missing ttl decodes to 0 and displays as Go's zero duration.
+  assert.equal(formatGoDurationNs(null), "0s");
+  assert.equal(formatGoDurationNs(undefined), "");
+});
+
+test("tripRulesToRows converts the view's nanosecond ttl into duration strings", () => {
+  assert.deepEqual(
+    tripRulesToRows([
+      { match: "insufficient_quota", ttl: 900 * 1e9 },
+      { match: "rate limit", ttl: 60000000000 },
+    ]),
+    [
+      { match: "insufficient_quota", ttl: "15m0s" },
+      { match: "rate limit", ttl: "1m0s" },
+    ],
+  );
+  assert.deepEqual(tripRulesToRows(undefined), []);
+  assert.deepEqual(tripRulesToRows("junk"), []);
+});
+
+test("tripRulesToRows renders a zero or absent ttl as a blank field, not 0s", () => {
+  assert.deepEqual(
+    tripRulesToRows([
+      { match: "insufficient_quota", ttl: 0 },
+      { match: "no ttl key" },
+    ]),
+    [
+      { match: "insufficient_quota", ttl: "" },
+      { match: "no ttl key", ttl: "" },
+    ],
+  );
+});
+
+test("tripRuleRowsToWire builds the {match, ttl} payload with nanosecond ttls", () => {
+  const wire = tripRuleRowsToWire([
+    { match: " insufficient_quota ", ttl: " 15m " },
+    { match: "", ttl: "" },
+    { match: "rate limit", ttl: "1h30m" },
+  ]);
+
+  assert.deepEqual(wire, [
+    { match: "insufficient_quota", ttl: 900 * 1e9 },
+    { match: "rate limit", ttl: 5400 * 1e9 },
+  ]);
+
+  // An empty list is fine: rules are optional.
+  assert.deepEqual(tripRuleRowsToWire([]), []);
+  assert.deepEqual(tripRuleRowsToWire(undefined), []);
+  assert.deepEqual(tripRuleRowsToWire([{ match: "", ttl: "" }]), []);
+
+  // A filled row with an unparsable ttl is reported, not guessed at.
+  assert.equal(tripRuleRowsToWire([{ match: "quota", ttl: "soon" }]), null);
+});
+
+test("validation rejects blank trip-rule rows and half-filled or invalid rules", () => {
+  const form = (trip_on) => ({
+    ...defaultProviderCredentialForm(),
+    name: "my-openai",
+    type: "openai",
+    api_keys: [{ value: "sk-live" }],
+    trip_on,
+  });
+
+  assert.equal(validateProviderCredentialForm(form([]), "create", [], OPENAI_SCHEMA).trip_on, undefined);
+  assert.equal(
+    validateProviderCredentialForm(form([{ match: "", ttl: "" }]), "create", [], OPENAI_SCHEMA).trip_on,
+    "Remove the empty row instead of leaving a rule blank.",
+  );
+  assert.equal(
+    validateProviderCredentialForm(form([{ match: "", ttl: "15m" }]), "create", [], OPENAI_SCHEMA).trip_on,
+    "Match is required when a TTL is set.",
+  );
+  assert.equal(
+    validateProviderCredentialForm(form([{ match: "quota", ttl: "" }]), "create", [], OPENAI_SCHEMA).trip_on,
+    undefined,
+  );
+  assert.match(
+    validateProviderCredentialForm(form([{ match: "quota", ttl: "soon" }]), "create", [], OPENAI_SCHEMA).trip_on,
+    /duration like 15m/,
+  );
+});
+
+test("trip_on round-trips from a stored row through the form into the PUT payload", () => {
+  const row = {
+    name: "my-openai",
+    type: "openai",
+    api_keys: ["***********"],
+    trip_on: [
+      { match: "insufficient_quota", ttl: 900 * 1e9 },
+      { match: "rate limit", ttl: 60000000000 },
+    ],
+    managed: false,
+    enabled: true,
+  };
+
+  const form = providerCredentialRowToForm(row);
+  assert.deepEqual(form.trip_on, [
+    { match: "insufficient_quota", ttl: "15m0s" },
+    { match: "rate limit", ttl: "1m0s" },
+  ]);
+
+  const body = buildProviderCredentialPayload(form, OPENAI_SCHEMA);
+  assert.deepEqual(body.trip_on, [
+    { match: "insufficient_quota", ttl: 900 * 1e9 },
+    { match: "rate limit", ttl: 60000000000 },
+  ]);
+});
+
+test("an empty trip_on list is always in the payload so clearing rules works", () => {
+  const body = buildProviderCredentialPayload(defaultProviderCredentialForm(), OPENAI_SCHEMA);
+  assert.deepEqual(body.trip_on, []);
+});
+
+test("match-only rows are valid and produce ttl: 0 in the wire payload", () => {
+  const form = (trip_on) => ({
+    ...defaultProviderCredentialForm(),
+    name: "my-openai",
+    type: "openai",
+    api_keys: [{ value: "sk-live" }],
+    trip_on,
+  });
+
+  // Match-only row passes validation.
+  assert.equal(
+    validateProviderCredentialForm(form([{ match: "quota" }]), "create", [], OPENAI_SCHEMA).trip_on,
+    undefined,
+  );
+
+  // Wire payload carries ttl: 0 for a match-only row.
+  const wire = tripRuleRowsToWire([{ match: "quota", ttl: "" }]);
+  assert.deepEqual(wire, [{ match: "quota", ttl: 0 }]);
+});
+
+test("changing provider type keeps trip rules, like the other identity values", () => {
+  const typed = {
+    ...defaultProviderCredentialForm(),
+    name: "my-openai",
+    type: "openai",
+    api_keys: [{ value: "sk-live" }],
+    trip_on: [{ match: "insufficient_quota", ttl: "15m" }],
+    vertex_project: "left-over",
+  };
+
+  const form = resetProviderCredentialFields(
+    typed,
+    providerCredentialFormFields(OPENAI_SCHEMA),
+  );
+
+  assert.equal(form.vertex_project, "");
+  assert.deepEqual(form.trip_on, [{ match: "insufficient_quota", ttl: "15m" }]);
+});
+
+test("trip-rule list helpers summarize rows and gate the read-only column", () => {
+  const quota = 900 * 1e9;
+  const row = {
+    name: "dash-openai",
+    managed: true,
+    trip_on: [
+      { match: "insufficient_quota", ttl: quota },
+      { match: "rate limit", ttl: 60 * 1e9 },
+    ],
+  };
+
+  // Read-only rendering: every row's rules are shown in the list, declared
+  // or managed.
+  assert.equal(
+    providerCredentialTripRulesLabel(row),
+    "insufficient_quota (15m0s), rate limit (1m0s)",
+  );
+  assert.equal(providerCredentialTripRulesLabel({ trip_on: [] }), "");
+  assert.equal(providerCredentialTripRulesLabel({}), "");
+  assert.equal(providerCredentialTripRulesLabel(null), "");
+
+  // ttl 0 means "use breaker timeout"; the label shows match only, no (0s).
+  assert.equal(
+    providerCredentialTripRulesLabel({
+      trip_on: [{ match: "insufficient_quota", ttl: 0 }],
+    }),
+    "insufficient_quota",
+  );
+
+  // An absent ttl key must not render an empty () suffix either.
+  assert.equal(
+    providerCredentialTripRulesLabel({
+      trip_on: [{ match: "insufficient_quota" }],
+    }),
+    "insufficient_quota",
+  );
+
+  assert.equal(providerRowsHaveTripRules([row, { trip_on: [] }]), true);
+  assert.equal(providerRowsHaveTripRules([{ trip_on: [] }, {}]), false);
+  assert.equal(providerRowsHaveTripRules([]), false);
+  assert.equal(providerRowsHaveTripRules(undefined), false);
 });

@@ -114,6 +114,11 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 			lastErr = attachResponseHeaders(core.ParseProviderError(c.config.ProviderName, resp.StatusCode, resp.Body, nil), resp.Header)
 			lastStatusCode = resp.StatusCode
 			lastErrFromTransport = false
+			if ttl, ok := c.quotaTripTTL(lastErr); ok {
+				scope.breaker.RecordQuotaTrip(ttl)
+				c.completeScope(scope, lastStatusCode, lastErr, lastErr)
+				return nil, lastErr
+			}
 			if scope.halfOpenProbe {
 				c.completeScope(scope, lastStatusCode, lastErr, nil)
 				return nil, lastErr
@@ -134,6 +139,11 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 			lastErr = attachResponseHeaders(embedded, resp.Header)
 			lastStatusCode = embedded.StatusCode
 			lastErrFromTransport = false
+			if ttl, ok := c.quotaTripTTL(lastErr); ok {
+				scope.breaker.RecordQuotaTrip(ttl)
+				c.completeScope(scope, lastStatusCode, lastErr, lastErr)
+				return nil, lastErr
+			}
 			if c.isRetryable(embedded.StatusCode) && !scope.halfOpenProbe {
 				continue
 			}

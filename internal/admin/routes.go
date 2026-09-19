@@ -46,6 +46,7 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/audit/conversation", h.AuditConversation)
 
 	g.GET("/providers/status", h.ProviderStatus, global)
+	g.POST("/providers/:name/circuit-breaker/reset", h.ResetProviderCircuitBreaker, global)
 	g.POST("/runtime/refresh", h.RefreshRuntime, global)
 
 	g.GET("/provider-credentials", h.ListProviderCredentials, global)

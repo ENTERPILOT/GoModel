@@ -26,6 +26,15 @@ func DefaultRetryConfig() RetryConfig {
 	}
 }
 
+// TripRuleConfig opens the circuit breaker instantly when an upstream error
+// message matches Match. A zero TTL uses the breaker's open-state timeout.
+// TTL encodes as JSON nanoseconds wherever the rule crosses the admin/store
+// wire as {match, ttl}.
+type TripRuleConfig struct {
+	Match string        `yaml:"match" json:"match"`
+	TTL   time.Duration `yaml:"ttl" json:"ttl"`
+}
+
 // CircuitBreakerConfig holds resolved circuit breaker settings.
 // This is the canonical type shared between config and llmclient.
 type CircuitBreakerConfig struct {
@@ -35,10 +44,11 @@ type CircuitBreakerConfig struct {
 	// Enabled switches the circuit breaker on or off. When false, requests are
 	// never short-circuited regardless of the thresholds below.
 	// Default: true
-	Enabled          bool          `yaml:"enabled"           env:"CIRCUIT_BREAKER_ENABLED"`
-	FailureThreshold int           `yaml:"failure_threshold" env:"CIRCUIT_BREAKER_FAILURE_THRESHOLD"`
-	SuccessThreshold int           `yaml:"success_threshold" env:"CIRCUIT_BREAKER_SUCCESS_THRESHOLD"`
-	Timeout          time.Duration `yaml:"timeout"           env:"CIRCUIT_BREAKER_TIMEOUT"`
+	Enabled          bool             `yaml:"enabled"           env:"CIRCUIT_BREAKER_ENABLED"`
+	FailureThreshold int              `yaml:"failure_threshold" env:"CIRCUIT_BREAKER_FAILURE_THRESHOLD"`
+	SuccessThreshold int              `yaml:"success_threshold" env:"CIRCUIT_BREAKER_SUCCESS_THRESHOLD"`
+	Timeout          time.Duration    `yaml:"timeout"           env:"CIRCUIT_BREAKER_TIMEOUT"`
+	TripOn           []TripRuleConfig `yaml:"trip_on"`
 }
 
 // DefaultCircuitBreakerConfig returns the default circuit breaker settings.
@@ -69,12 +79,13 @@ type RawResilienceConfig struct {
 // RawCircuitBreakerConfig holds optional per-provider circuit breaker overrides from YAML.
 // Nil fields inherit from the global CircuitBreakerConfig.
 type RawCircuitBreakerConfig struct {
-	FailureOnStatuses []string       `yaml:"failure_on_statuses"`
-	Scope             *string        `yaml:"scope"`
-	Enabled           *bool          `yaml:"enabled"`
-	FailureThreshold  *int           `yaml:"failure_threshold"`
-	SuccessThreshold  *int           `yaml:"success_threshold"`
-	Timeout           *time.Duration `yaml:"timeout"`
+	FailureOnStatuses []string         `yaml:"failure_on_statuses"`
+	Scope             *string          `yaml:"scope"`
+	Enabled           *bool            `yaml:"enabled"`
+	FailureThreshold  *int             `yaml:"failure_threshold"`
+	SuccessThreshold  *int             `yaml:"success_threshold"`
+	Timeout           *time.Duration   `yaml:"timeout"`
+	TripOn            []TripRuleConfig `yaml:"trip_on"`
 }
 
 // RawRetryConfig holds optional per-provider retry overrides from YAML.

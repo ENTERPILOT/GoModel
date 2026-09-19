@@ -204,6 +204,7 @@ func newAdminHandlers(
 		admin.WithDashboardRuntimeConfig(runtimeConfig),
 		admin.WithLiveBroker(liveBroker),
 		admin.WithRequestHealth(requestHealth),
+		admin.WithBreakerResetter(providers.NewBreakerResetter(registry)),
 	)
 
 	var dashHandler *dashboard.Handler

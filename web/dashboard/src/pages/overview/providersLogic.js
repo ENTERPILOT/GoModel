@@ -270,6 +270,22 @@ export function providerBreakerState(provider) {
   return requestHealth ? String(requestHealth.circuit_state || "").trim() : "";
 }
 
+// Live breaker state from the status payload's top-level circuit_state
+// ("open", "half-open", "closed", or "" before the provider served traffic).
+// This is the field the reset button is driven from; it mirrors the
+// request-health snapshot the details section renders.
+export function providerCircuitState(provider) {
+  return String((provider && provider.circuit_state) || "").trim();
+}
+
+// Reset is only meaningful while the breaker blocks traffic or is probing
+// recovery: open has tripped, half-open is mid-recovery. A closed breaker
+// (or an unconfigured one, which reports no state) needs no reset.
+export function providerBreakerResettable(provider) {
+  const state = providerCircuitState(provider);
+  return state === "open" || state === "half-open";
+}
+
 export function providerBreakerStateLabel(provider) {
   const state = providerBreakerState(provider);
   if (!state) return "";

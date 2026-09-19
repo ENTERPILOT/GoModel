@@ -48,6 +48,11 @@ type ManagedProviderCredential struct {
 	GCPScope                 string
 	Models                   []string
 
+	// TripOn holds circuit-breaker trip rules for this provider. Rules are
+	// configuration, not secrets, so they travel unredacted through the
+	// admin API and are persisted as plain JSON.
+	TripOn []config.TripRuleConfig
+
 	// Enabled controls whether this credential is applied to the running
 	// registry. Disabling one keeps the row (and its keys) on file without
 	// routing traffic to it — the same effect as deleting it, without losing
@@ -79,6 +84,14 @@ func (m ManagedProviderCredential) toRawProviderConfig() config.RawProviderConfi
 		ServiceAccountJSONBase64: m.ServiceAccountJSONBase64,
 		GCPScope:                 m.GCPScope,
 		Models:                   rawProviderModelsFromIDs(m.Models),
+	}
+	// Trip rules ride the same per-provider override pipeline declarative
+	// providers use; only set when present so rows without rules keep the
+	// resolved global breaker config untouched.
+	if len(m.TripOn) > 0 {
+		raw.Resilience = &config.RawResilienceConfig{
+			CircuitBreaker: &config.RawCircuitBreakerConfig{TripOn: m.TripOn},
+		}
 	}
 	if len(m.APIKeys) > 0 {
 		raw.APIKey = m.APIKeys[0]

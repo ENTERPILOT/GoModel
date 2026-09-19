@@ -398,3 +398,34 @@ func TestCredentialsService_ConfiguredProvidersCarryGlobalResilience(t *testing.
 		})
 	}
 }
+
+func TestToRawProviderConfig_TripRules(t *testing.T) {
+	t.Run("with rules, overrides the breaker trip list only", func(t *testing.T) {
+		cred := ManagedProviderCredential{
+			Name: "openai-main",
+			Type: "openai",
+			TripOn: []config.TripRuleConfig{
+				{Match: "insufficient_quota", TTL: time.Minute},
+			},
+		}
+
+		raw := cred.toRawProviderConfig()
+		require.NotNil(t, raw.Resilience)
+		require.NotNil(t, raw.Resilience.CircuitBreaker)
+		require.Equal(t, cred.TripOn, raw.Resilience.CircuitBreaker.TripOn)
+		require.Nil(t, raw.Resilience.Retry)
+
+		// The rules ride the same pipeline declarative providers use: other
+		// breaker settings keep inheriting from the global config.
+		resolved := buildProviderConfig(raw, config.ResilienceConfig{
+			CircuitBreaker: config.DefaultCircuitBreakerConfig(),
+		})
+		require.Equal(t, cred.TripOn, resolved.Resilience.CircuitBreaker.TripOn)
+		require.Equal(t, config.DefaultCircuitBreakerConfig().FailureThreshold, resolved.Resilience.CircuitBreaker.FailureThreshold)
+	})
+
+	t.Run("without rules, resilience stays untouched", func(t *testing.T) {
+		raw := ManagedProviderCredential{Name: "openai-main", Type: "openai"}.toRawProviderConfig()
+		require.Nil(t, raw.Resilience)
+	})
+}

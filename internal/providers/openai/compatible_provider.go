@@ -144,6 +144,12 @@ func (p *CompatibleProvider) SetRequestMutator(mutator RequestMutator) {
 	p.requestMutator = mutator
 }
 
+// ResetBreaker force-closes the provider-level and model-scoped circuit
+// breakers so traffic resumes immediately after a trip, without a restart.
+func (p *CompatibleProvider) ResetBreaker() {
+	p.client.ResetBreaker()
+}
+
 func (p *CompatibleProvider) prepareRequest(req llmclient.Request) llmclient.Request {
 	if p.requestMutator != nil {
 		p.requestMutator(&req)

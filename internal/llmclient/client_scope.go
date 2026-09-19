@@ -173,7 +173,7 @@ func (r *firstChunkReadCloser) Read(p []byte) (int, error) {
 // whether the failure was transport-level) and emits the metrics observation.
 // Use this whenever a code path returns from one of the public Do* methods.
 func (c *Client) completeScope(scope requestScope, statusCode int, err, cbErr error) {
-	c.recordCircuitBreakerCompletion(scope, statusCode, cbErr)
+	c.recordCircuitBreakerCompletion(scope, statusCode, err, cbErr)
 	c.finishRequest(scope, statusCode, err)
 }
 
@@ -215,19 +215,32 @@ func (c *Client) waitForRetryAttempt(ctx context.Context, scope requestScope, at
 	return nil
 }
 
-func (c *Client) recordCircuitBreakerCompletion(scope requestScope, statusCode int, err error) {
+// recordCircuitBreakerCompletion turns a finished request into a breaker
+// outcome. err is the request's final error, cbErr only the transport-level
+// portion: HTTP-status and embedded-200 failures carry their parsed provider
+// error in err while cbErr stays nil, so trip rules can match their message.
+func (c *Client) recordCircuitBreakerCompletion(scope requestScope, statusCode int, err, cbErr error) {
 	if scope.breaker == nil {
 		return
 	}
-	if err != nil {
+	if cbErr != nil {
 		// A caller-side cancellation aborts the transport but proves nothing
 		// about provider health, so it is neither a success nor a failure.
 		// Client deadlines (context.DeadlineExceeded) still count: the
 		// provider failed to answer within the latency budget.
-		if errors.Is(err, context.Canceled) {
+		if errors.Is(cbErr, context.Canceled) {
 			c.releaseHalfOpenProbe(scope)
 			return
 		}
+	}
+	// A quota trip wins over classification: the message proves the provider's
+	// quota is gone, so open instantly even when the status alone would count
+	// as a success.
+	if ttl, ok := c.quotaTripTTL(err); ok {
+		scope.breaker.RecordQuotaTrip(ttl)
+		return
+	}
+	if cbErr != nil {
 		scope.breaker.RecordFailure()
 		return
 	}
@@ -236,6 +249,33 @@ func (c *Client) recordCircuitBreakerCompletion(scope requestScope, statusCode i
 		return
 	}
 	scope.breaker.RecordSuccess()
+}
+
+// quotaTripTTL returns the trip window of the first rule matching the error's
+// provider message (and code), substituting the breaker timeout for a zero
+// rule TTL. Inert without rules.
+func (c *Client) quotaTripTTL(err error) (time.Duration, bool) {
+	if len(c.tripRules) == 0 || err == nil {
+		return 0, false
+	}
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		return 0, false
+	}
+	text := gatewayErr.Message
+	if gatewayErr.Code != nil && *gatewayErr.Code != "" {
+		text += " " + *gatewayErr.Code
+	}
+	for _, rule := range c.tripRules {
+		if rule.Pattern.MatchString(text) {
+			ttl := rule.TTL
+			if ttl == 0 {
+				ttl = c.config.CircuitBreaker.Timeout
+			}
+			return ttl, true
+		}
+	}
+	return 0, false
 }
 
 func (c *Client) shouldTripCircuitBreaker(statusCode int) bool {
