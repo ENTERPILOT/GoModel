@@ -66,7 +66,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 				ID:        uuid.NewString(),
 				Timestamp: start,
 				RequestID: requestID,
-				ClientIP:  c.RealIP(),
+				ClientIP:  cfg.TrustedProxies.ClientIP(req, c.RealIP()),
 				Method:    req.Method,
 				Path:      req.URL.Path,
 				UserPath:  userPath,

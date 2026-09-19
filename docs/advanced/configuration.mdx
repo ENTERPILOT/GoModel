@@ -163,6 +163,7 @@ Storage is shared by audit logging, usage tracking, and future features like IAM
 | `LOGGING_BUFFER_SIZE`             | In-memory buffer before flush              | `1000`  |
 | `LOGGING_FLUSH_INTERVAL`          | Flush interval in seconds                  | `5`     |
 | `LOGGING_RETENTION_DAYS`          | Auto-delete after N days (0 = forever)     | `30`    |
+| `LOGGING_TRUSTED_PROXY_CIDRS`   | Networks your proxies sit on; enables X-Forwarded-For client IPs in audit entries | _(empty)_ |
 
 Realtime dashboard previews and persisted audit logs are separate features.
 With `DASHBOARD_LIVE_LOGS_ENABLED=true` and `LOGGING_ENABLED=false`, requests
@@ -177,6 +178,23 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
   still works but scans every entry in the selected date range. To enable it on
   a restricted role, run `CREATE EXTENSION pg_trgm;` as a superuser once and
   restart GoModel.
+</Note>
+
+<Note>
+  Audit entries record the address of the connection that reached the gateway,
+  so behind a proxy they all show the proxy. Set
+  `LOGGING_TRUSTED_PROXY_CIDRS` (or `logging.trusted_proxy_cidrs`) to the
+  networks your own proxies sit on to record the forwarded client instead: each
+  entry then carries the nearest `X-Forwarded-For` hop that is not one of those
+  networks, which is the last address your infrastructure wrote and the one a
+  client cannot overwrite. Requests arriving from outside the listed networks,
+  requests whose header cannot be parsed, and requests whose whole chain is made
+  of listed networks keep their connection address — in that last case no hop
+  was written by anything the gateway does not already trust, so the chain is a
+  claim an internal client could invent rather than evidence. Loopback and
+  private ranges are not trusted implicitly, so list every hop between clients
+  and the gateway, for example `10.0.0.0/8,127.0.0.1`. Changing it requires a
+  restart.
 </Note>
 
 <Warning>

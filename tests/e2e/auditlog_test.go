@@ -859,3 +859,63 @@ func TestAuditLogOnlyModelInteractions(t *testing.T) {
 		assert.Equal(t, "/v1/chat/completions", entries[0].Path)
 	})
 }
+
+// TestAuditLogClientIP checks that audit entries keep recording the
+// connection address by default, and record the forwarded client instead once
+// the gateway's own proxy network is listed as trusted.
+func TestAuditLogClientIP(t *testing.T) {
+	t.Run("records the connection address when no proxies are trusted", func(t *testing.T) {
+		store := newMockLogStore()
+		cfg := auditlog.Config{
+			Enabled:               true,
+			BufferSize:            100,
+			FlushInterval:         100 * time.Millisecond,
+			OnlyModelInteractions: true,
+		}
+
+		serverURL, cleanup := setupAuditLogTestServer(t, cfg, store)
+		defer cleanup()
+
+		body, _ := json.Marshal(defaultChatReq("Hello"))
+		req, err := http.NewRequest(http.MethodPost, serverURL+"/v1/chat/completions", bytes.NewReader(body))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Forwarded-For", "198.51.100.23")
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer closeBody(resp)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		entries := store.WaitForAPIEntries(1, 2*time.Second)
+		require.Len(t, entries, 1)
+		assert.Equal(t, "127.0.0.1", entries[0].ClientIP, "forwarding headers must not be trusted by default")
+	})
+
+	t.Run("records the forwarded client behind a trusted proxy network", func(t *testing.T) {
+		store := newMockLogStore()
+		cfg := auditlog.Config{
+			Enabled:               true,
+			BufferSize:            100,
+			FlushInterval:         100 * time.Millisecond,
+			OnlyModelInteractions: true,
+			TrustedProxies:        auditlog.ParseTrustedProxies([]string{"127.0.0.0/8"}),
+		}
+
+		serverURL, cleanup := setupAuditLogTestServer(t, cfg, store)
+		defer cleanup()
+
+		body, _ := json.Marshal(defaultChatReq("Hello"))
+		req, err := http.NewRequest(http.MethodPost, serverURL+"/v1/chat/completions", bytes.NewReader(body))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Forwarded-For", "203.0.113.9, 198.51.100.23")
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer closeBody(resp)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		entries := store.WaitForAPIEntries(1, 2*time.Second)
+		require.Len(t, entries, 1)
+		assert.Equal(t, "198.51.100.23", entries[0].ClientIP)
+	})
+}
