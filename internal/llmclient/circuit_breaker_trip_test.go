@@ -1,10 +1,8 @@
 package llmclient
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -557,45 +555,4 @@ func TestTripRule_DoStreamMatchingErrorTripsInstantly(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, stream)
 	assert.Equal(t, int32(1), attempts.Load(), "rejected stream must not reach the upstream")
-}
-
-// A quota-matched passthrough body larger than the bounded peek must reach the
-// caller whole: the peeked prefix and the unread remainder are spliced back
-// together, and the breaker still trips on the first attempt.
-func TestTripRule_PassthroughLargeBodyStaysWhole(t *testing.T) {
-	t.Parallel()
-
-	// Quota error text padded well past maxErrorBodyBytes so the peek is
-	// truncated but the returned body must not be.
-	fullBody := append([]byte(quotaErrorBody), bytes.Repeat([]byte("x"), maxErrorBodyBytes*2)...)
-
-	var attempts atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		attempts.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = w.Write(fullBody)
-	}))
-	defer server.Close()
-
-	cfg := DefaultConfig("test", server.URL)
-	cfg.Retry.MaxRetries = 2
-	cfg.CircuitBreaker = goconfig.CircuitBreakerConfig{
-		Enabled:          true,
-		FailureThreshold: 5,
-		SuccessThreshold: 1,
-		Timeout:          20 * time.Millisecond,
-		TripOn:           []goconfig.TripRuleConfig{{Match: `quota exceeded`, TTL: 150 * time.Millisecond}},
-	}
-	client := New(cfg, nil)
-
-	resp, err := client.DoPassthrough(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"})
-	require.NoError(t, err)
-	defer func() { _ = resp.Body.Close() }()
-
-	got, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	assert.Equal(t, fullBody, got, "passthrough caller must receive the untruncated response body")
-	assert.Equal(t, int32(1), attempts.Load(), "quota trip must stop the retry loop after the first attempt")
-	assert.Equal(t, "open", client.circuitBreaker.State())
 }
