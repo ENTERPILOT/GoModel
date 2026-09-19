@@ -140,6 +140,14 @@ func applyEnvOverridesValue(v reflect.Value) error {
 		case reflect.Bool:
 			fieldVal.SetBool(parseBool(envVal))
 		case reflect.Slice:
+			if field.Type == reflect.TypeFor[[]TripRuleConfig]() {
+				rules, err := ParseTripRulesEnv(envVal)
+				if err != nil {
+					return fmt.Errorf("invalid value for %s (%s): %w", field.Name, envKey, err)
+				}
+				fieldVal.Set(reflect.ValueOf(rules))
+				continue
+			}
 			if field.Type.Elem().Kind() != reflect.String {
 				continue
 			}

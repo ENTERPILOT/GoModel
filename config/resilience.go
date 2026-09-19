@@ -1,6 +1,10 @@
 package config
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 // RetryConfig holds resolved retry settings for an LLM client.
 // This is the canonical type shared between config and llmclient.
@@ -35,6 +39,34 @@ type TripRuleConfig struct {
 	TTL   time.Duration `yaml:"ttl" json:"ttl"`
 }
 
+// ParseTripRulesEnv parses an env-format trip-rule list: `;`-separated
+// `pattern=ttl` pairs where ttl is a Go duration and may be omitted (a zero
+// TTL uses the breaker's timeout, matching YAML). Commas stay usable inside
+// patterns because `;` is the separator. Blank entries are skipped.
+func ParseTripRulesEnv(value string) ([]TripRuleConfig, error) {
+	var rules []TripRuleConfig
+	for i, part := range strings.Split(value, ";") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		pattern, ttlText, hasTTL := strings.Cut(part, "=")
+		rule := TripRuleConfig{Match: strings.TrimSpace(pattern)}
+		if rule.Match == "" {
+			return nil, fmt.Errorf("trip rule %d has an empty match pattern", i+1)
+		}
+		if hasTTL {
+			ttl, err := time.ParseDuration(strings.TrimSpace(ttlText))
+			if err != nil {
+				return nil, fmt.Errorf("trip rule %d (%q) has an invalid ttl: %w", i+1, rule.Match, err)
+			}
+			rule.TTL = ttl
+		}
+		rules = append(rules, rule)
+	}
+	return rules, nil
+}
+
 // CircuitBreakerConfig holds resolved circuit breaker settings.
 // This is the canonical type shared between config and llmclient.
 type CircuitBreakerConfig struct {
@@ -48,7 +80,7 @@ type CircuitBreakerConfig struct {
 	FailureThreshold int              `yaml:"failure_threshold" env:"CIRCUIT_BREAKER_FAILURE_THRESHOLD"`
 	SuccessThreshold int              `yaml:"success_threshold" env:"CIRCUIT_BREAKER_SUCCESS_THRESHOLD"`
 	Timeout          time.Duration    `yaml:"timeout"           env:"CIRCUIT_BREAKER_TIMEOUT"`
-	TripOn           []TripRuleConfig `yaml:"trip_on"`
+	TripOn           []TripRuleConfig `yaml:"trip_on"           env:"CIRCUIT_BREAKER_TRIP_ON"`
 }
 
 // DefaultCircuitBreakerConfig returns the default circuit breaker settings.

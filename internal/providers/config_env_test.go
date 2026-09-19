@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/stretchr/testify/assert"
@@ -146,4 +147,81 @@ func TestApplyProviderEnvVars_BareTypeEnvVarsAgainstRenamedProviders(t *testing.
 			assert.NotContains(t, out, envKey, "warning leaked the env api key")
 		})
 	}
+}
+
+// TRIP_ON env vars set per-provider quota trip rules; a malformed value must
+// fail resilience validation instead of silently dropping quota protection.
+func TestApplyProviderEnvVars_TripOn(t *testing.T) {
+	const envValue = "quota exceeded=15m;usage limit"
+	oneMinute := time.Minute
+
+	t.Run("bare type env creates provider with parsed trip rules", func(t *testing.T) {
+		t.Setenv("KIMICODE_TRIP_ON", envValue)
+		got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, map[string]DiscoveryConfig{
+			"kimicode": {DefaultBaseURL: "https://api.kimi.com/coding/v1"},
+		})
+
+		p, ok := got["kimicode"]
+		require.True(t, ok, "kimicode provider missing")
+		require.NotNil(t, p.Resilience, "resilience overlay missing")
+		require.NotNil(t, p.Resilience.CircuitBreaker, "circuit_breaker overlay missing")
+		assert.Equal(t, []config.TripRuleConfig{
+			{Match: "quota exceeded", TTL: 15 * time.Minute},
+			{Match: "usage limit"},
+		}, p.Resilience.CircuitBreaker.TripOn)
+	})
+
+	t.Run("overlay merges trip_on without dropping YAML resilience overrides", func(t *testing.T) {
+		t.Setenv("KIMICODE_TRIP_ON", envValue)
+		existing := map[string]config.RawProviderConfig{
+			"kimicode": {
+				Type: "kimicode",
+				Resilience: &config.RawResilienceConfig{
+					CircuitBreaker: &config.RawCircuitBreakerConfig{Timeout: &oneMinute},
+				},
+			},
+		}
+		got := applyProviderEnvVars(existing, map[string]DiscoveryConfig{"kimicode": {}})
+
+		p := got["kimicode"]
+		require.NotNil(t, p.Resilience)
+		require.NotNil(t, p.Resilience.CircuitBreaker)
+		assert.Equal(t, time.Minute, *p.Resilience.CircuitBreaker.Timeout, "YAML timeout must survive the env overlay")
+		assert.Equal(t, []config.TripRuleConfig{
+			{Match: "quota exceeded", TTL: 15 * time.Minute},
+			{Match: "usage limit"},
+		}, p.Resilience.CircuitBreaker.TripOn)
+	})
+
+	t.Run("renamed provider with YAML trip_on ignores the env value", func(t *testing.T) {
+		t.Setenv("KIMICODE_TRIP_ON", envValue)
+		yamlRules := []config.TripRuleConfig{{Match: "yaml rule"}}
+		existing := map[string]config.RawProviderConfig{
+			"kimi-renamed": {
+				Type: "kimicode",
+				Resilience: &config.RawResilienceConfig{
+					CircuitBreaker: &config.RawCircuitBreakerConfig{TripOn: yamlRules},
+				},
+			},
+		}
+		logs := captureSlog(t)
+		got := applyProviderEnvVars(existing, map[string]DiscoveryConfig{"kimicode": {}})
+
+		p := got["kimi-renamed"]
+		assert.Equal(t, yamlRules, p.Resilience.CircuitBreaker.TripOn, "YAML rules must win over env")
+		assert.Contains(t, logs.String(), "trip_on")
+	})
+
+	t.Run("malformed value fails resilience validation", func(t *testing.T) {
+		t.Setenv("KIMICODE_TRIP_ON", "quota exceeded=banana")
+		got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, map[string]DiscoveryConfig{
+			"kimicode": {DefaultBaseURL: "https://api.kimi.com/coding/v1"},
+		})
+
+		p := got["kimicode"]
+		require.NotNil(t, p.Resilience)
+		require.Error(t, config.ValidateResilience(config.ResilienceConfig{
+			CircuitBreaker: config.CircuitBreakerConfig{TripOn: p.Resilience.CircuitBreaker.TripOn},
+		}), "malformed TRIP_ON must fail validation")
+	})
 }

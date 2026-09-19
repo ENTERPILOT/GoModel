@@ -170,6 +170,24 @@ resilience:
   as described above. `trip_on: []` disables them explicitly.
 - A provider's `trip_on` list **replaces** the global list entirely; omit the
   key to inherit the global rules.
+
+### Environment variables
+
+The same rules are settable without a config file. Globally:
+
+```bash
+# semicolon-separated `pattern=ttl` pairs; ttl is an optional Go duration
+CIRCUIT_BREAKER_TRIP_ON="weekly usage limit=4h;quota exceeded=15m"
+```
+
+Per provider — the value **replaces** the global rules for that provider only:
+
+```bash
+KIMICODE_TRIP_ON="weekly \(7-day\) usage limit=4h"
+```
+
+A malformed entry (empty pattern or invalid duration) fails config load,
+matching YAML behavior.
 - Trip rules match on translated (non-streaming) and streaming errors; raw
   passthrough routes rely on status-based breaker behavior instead.
 - An empty `match`, a pattern that does not compile, or a negative `ttl`

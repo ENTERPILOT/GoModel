@@ -361,6 +361,16 @@ func TestApplyEnvOverrides(t *testing.T) {
 				assert.Equal(t, 10*time.Second, cfg.Resilience.CircuitBreaker.Timeout)
 			},
 		},
+		{
+			name:    "circuit breaker trip_on override",
+			envVars: map[string]string{"CIRCUIT_BREAKER_TRIP_ON": "quota exceeded=15m;usage limit"},
+			check: func(t *testing.T, cfg *Config) {
+				assert.Equal(t, []TripRuleConfig{
+					{Match: "quota exceeded", TTL: 15 * time.Minute},
+					{Match: "usage limit"},
+				}, cfg.Resilience.CircuitBreaker.TripOn)
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -374,4 +384,15 @@ func TestApplyEnvOverrides(t *testing.T) {
 			tt.check(t, cfg)
 		})
 	}
+}
+
+// A malformed CIRCUIT_BREAKER_TRIP_ON fails configuration loading instead of
+// silently dropping quota protection.
+func TestApplyEnvOverrides_TripOnInvalid(t *testing.T) {
+	t.Setenv("CIRCUIT_BREAKER_TRIP_ON", "quota exceeded=banana")
+
+	cfg := buildDefaultConfig()
+	err := applyEnvOverrides(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CIRCUIT_BREAKER_TRIP_ON")
 }

@@ -345,6 +345,8 @@ resilience:
     # trip_on:
     #   - match: "insufficient_quota|exceeded your current quota"
     #     ttl: 30m
+    # env: CIRCUIT_BREAKER_TRIP_ON="pattern=ttl;pattern" (same shape as the
+    # yaml list; per-provider env override: <PROVIDER>_TRIP_ON). See .env.template.
 
 guardrails:
   enabled: false
