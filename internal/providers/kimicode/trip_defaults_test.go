@@ -32,12 +32,12 @@ const (
 	bodyQuotaNearMiss = "access denied: quota check failed"
 )
 
-func compileTripRulesForTest(rules []config.TripRuleConfig) ([]llmclient.TripRule, error) {
+func compileTripRulesForTest(rules config.TripRuleMap) ([]llmclient.TripRule, error) {
 	if len(rules) == 0 {
 		return nil, nil
 	}
 	compiled := make([]llmclient.TripRule, 0, len(rules))
-	for _, rule := range rules {
+	for _, rule := range rules.List() {
 		pat, err := regexp.Compile(rule.Match)
 		if err != nil {
 			return nil, err
@@ -58,7 +58,7 @@ func TestDefaultTripOn_Compile(t *testing.T) {
 		r := rule
 		t.Run(r.Match, func(t *testing.T) {
 			err := config.ValidateResilience(config.ResilienceConfig{
-				CircuitBreaker: config.CircuitBreakerConfig{TripOn: []config.TripRuleConfig{r}},
+				CircuitBreaker: config.CircuitBreakerConfig{TripOn: config.TripRuleMap{r.Name: r}},
 			})
 			require.NoError(t, err, "rule[%d] match must be a valid regex", 0)
 			assert.NotZero(t, r.TTL, "rule[%d] must carry a TTL", 0)
@@ -173,7 +173,7 @@ func TestFactoryApplyDefaults(t *testing.T) {
 			Type: "kimicode",
 			Resilience: config.ResilienceConfig{
 				CircuitBreaker: config.CircuitBreakerConfig{
-					TripOn: []config.TripRuleConfig{}, // explicit empty
+					TripOn: config.TripRuleMap{}, // explicit empty
 				},
 			},
 		}
@@ -194,8 +194,8 @@ func TestFactoryApplyDefaults(t *testing.T) {
 			Type: "kimicode",
 			Resilience: config.ResilienceConfig{
 				CircuitBreaker: config.CircuitBreakerConfig{
-					TripOn: []config.TripRuleConfig{
-						{Match: `custom rule`, TTL: 1 * time.Minute},
+					TripOn: config.TripRuleMap{
+						"custom": {Match: `custom rule`, TTL: 1 * time.Minute},
 					},
 				},
 			},

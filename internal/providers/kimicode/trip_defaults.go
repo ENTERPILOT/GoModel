@@ -21,15 +21,17 @@ import (
 //
 // Pin the exact body fragments in unit tests (see kimicode_test.go).
 
-func kimicodeDefaultTripOn() []config.TripRuleConfig {
-	return []config.TripRuleConfig{
+// Group names double as evaluation priority: resolution evaluates rules in
+// name order, so the most specific pattern sorts first.
+func kimicodeDefaultTripOn() config.TripRuleMap {
+	return config.TripRuleMap{
 		// Weekly 7-day plan limit → 4 hour cooldown.
-		{Match: `weekly \(7-day\) usage limit`, TTL: 4 * time.Hour},
+		"1_weekly_limit": {Match: `weekly \(7-day\) usage limit`, TTL: 4 * time.Hour},
 		// 5-hour sliding-window limit.
-		{Match: `5-hour usage limit`, TTL: 30 * time.Minute},
+		"2_five_hour_limit": {Match: `5-hour usage limit`, TTL: 30 * time.Minute},
 		// Catch-all for usage-limit and quota-exceeded errors. "quota" alone
 		// is deliberately not matched: non-limit 403s mentioning quota must
 		// not trip the breaker.
-		{Match: `usage limit|quota exceeded`, TTL: 15 * time.Minute},
+		"3_usage_limit": {Match: `usage limit|quota exceeded`, TTL: 15 * time.Minute},
 	}
 }

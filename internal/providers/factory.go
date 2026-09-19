@@ -89,7 +89,7 @@ type Registration struct {
 	// The caller's explicit trip_on wins over defaults.  A nil entry
 	// on the struct is inert — no type ships defaults unless it assigns
 	// one here.
-	DefaultTripOn []config.TripRuleConfig
+	DefaultTripOn config.TripRuleMap
 }
 
 // ProviderFactory manages provider registration and creation.
@@ -98,7 +98,7 @@ type ProviderFactory struct {
 	builders             map[string]ProviderConstructor
 	discoveryConfigs     map[string]DiscoveryConfig
 	passthroughEnrichers map[string]core.PassthroughSemanticEnricher
-	defaultTripOnRules   map[string][]config.TripRuleConfig
+	defaultTripOnRules   map[string]config.TripRuleMap
 	hooks                llmclient.Hooks
 }
 
@@ -108,7 +108,7 @@ func NewProviderFactory() *ProviderFactory {
 		builders:             make(map[string]ProviderConstructor),
 		discoveryConfigs:     make(map[string]DiscoveryConfig),
 		passthroughEnrichers: make(map[string]core.PassthroughSemanticEnricher),
-		defaultTripOnRules:   make(map[string][]config.TripRuleConfig),
+		defaultTripOnRules:   make(map[string]config.TripRuleMap),
 	}
 }
 
@@ -155,9 +155,9 @@ func (f *ProviderFactory) Add(reg Registration) {
 		delete(f.passthroughEnrichers, reg.Type)
 	}
 	if len(reg.DefaultTripOn) > 0 {
-		// Copy so callers may reuse the same slice across registrations.
-		cp := make([]config.TripRuleConfig, len(reg.DefaultTripOn))
-		copy(cp, reg.DefaultTripOn)
+		// Copy so callers may reuse the same map across registrations.
+		cp := make(config.TripRuleMap, len(reg.DefaultTripOn))
+		maps.Copy(cp, reg.DefaultTripOn)
 		f.defaultTripOnRules[reg.Type] = cp
 	} else {
 		delete(f.defaultTripOnRules, reg.Type)
@@ -271,13 +271,19 @@ func (f *ProviderFactory) knowsType(providerType string) bool {
 
 // defaultTripOn returns the built-in trip rules for the given provider type.
 // Returns nil when no defaults are declared or the type is unknown.
-func (f *ProviderFactory) defaultTripOn(providerType string) []config.TripRuleConfig {
+func (f *ProviderFactory) defaultTripOn(providerType string) config.TripRuleMap {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	if f.defaultTripOnRules == nil {
 		return nil
 	}
-	return f.defaultTripOnRules[providerType]
+	defaults := f.defaultTripOnRules[providerType]
+	if len(defaults) == 0 {
+		return nil
+	}
+	cp := make(config.TripRuleMap, len(defaults))
+	maps.Copy(cp, defaults)
+	return cp
 }
 
 // RegisteredTypes returns a list of all registered provider types.
