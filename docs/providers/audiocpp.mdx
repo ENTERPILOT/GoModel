@@ -1,0 +1,191 @@
+---
+title: "audio.cpp"
+description: "Route GoModel speech and transcription requests to a local audio.cpp server, including its native detail, alignment, and live-streaming routes."
+icon: "audio-lines"
+keywords: ["audio.cpp", "audiocpp_server", "text-to-speech", "TTS", "speech-to-text", "ASR", "local models", "self-hosted", "GGUF"]
+---
+
+[audio.cpp](https://github.com/0xShug0/audio.cpp) is a local C++ audio
+inference server built on `ggml`: text-to-speech, speech-to-text, alignment,
+diarization, separation, and more, across 80+ model families. GoModel has a
+dedicated `audiocpp` provider type for it.
+
+It is an audio-only provider. `/v1/audio/speech` and
+`/v1/audio/transcriptions` route to it; chat, `/responses`, and `/v1/embeddings`
+return `invalid_request_error`, because `audiocpp_server` has no such endpoints.
+
+Start the server first, with a config naming the models it serves:
+
+```json
+{
+  "host": "127.0.0.1",
+  "port": 8099,
+  "backend": "metal",
+  "lazy_load": true,
+  "models": [
+    {"id": "moonshine-tiny", "family": "moonshine_asr", "path": "/models/moonshine-streaming-tiny-q8_0.gguf", "task": "asr", "mode": "streaming"},
+    {"id": "pocket-tts", "family": "pocket_tts", "path": "/models/pocket-tts", "task": "tts", "mode": "offline"}
+  ]
+}
+```
+
+```bash
+audiocpp_server --config server.json --no-ui
+```
+
+## Configure
+
+The base URL is required and registers the provider — `audiocpp_server`'s
+default port (8080) collides with GoModel's own, so there is no default:
+
+```bash
+AUDIOCPP_BASE_URL=http://host.docker.internal:8099
+GOMODEL_MASTER_KEY=change-me
+```
+
+`AUDIOCPP_API_KEY` is optional and usually unset: audio.cpp has no
+authentication of its own. Set it only when a reverse proxy in front of the
+server expects a bearer token.
+
+<Note>
+  These examples assume GoModel runs in Docker and audio.cpp is on the host —
+  hence `host.docker.internal`. If GoModel runs on the host directly, use
+  `http://localhost:8099`. A trailing `/v1` is accepted and trimmed, so both
+  spellings address the same server. Running several instances? Register each
+  under a suffixed name: `AUDIOCPP_GPU_BASE_URL=...` creates provider
+  `audiocpp-gpu`.
+</Note>
+
+## Verify
+
+```bash
+curl -s http://localhost:8080/v1/audio/speech \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -o speech.wav \
+  -d '{"model": "audiocpp/pocket-tts", "input": "Reply with exactly ok.", "voice": "alba"}'
+
+curl -s http://localhost:8080/v1/audio/transcriptions \
+  -H "Authorization: Bearer change-me" \
+  -F model=audiocpp/moonshine-tiny \
+  -F file=@speech.wav
+```
+
+## Voices are audio.cpp names, not OpenAI names
+
+`voice` names an audio.cpp voice preset, a cached voice id, or a wav in the
+configured voice library — audio.cpp has no fixed voice set, so OpenAI's
+`alloy`/`nova`/… mean nothing to it. List what a model offers with
+`GET /p/audiocpp/audio/voices?model=<id>`.
+
+`voice` is required on `/v1/audio/speech`, as it is in the OpenAI API. To let
+audio.cpp apply a model's configured `default_voice_preset` instead, call the
+route through passthrough: `POST /p/audiocpp/audio/speech`.
+
+Cloning parameters (`voice_ref`, `reference_text`, `seed`, `max_tokens`,
+`options`, …) are forwarded verbatim, so audio.cpp's own request fields work
+through the standard endpoint:
+
+```bash
+curl -s http://localhost:8080/v1/audio/speech \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -o cloned.wav \
+  -d '{
+    "model": "audiocpp/indextts2",
+    "input": "Cloned from an inline reference.",
+    "voice": "alba",
+    "voice_ref": {"type": "base64", "data": "UklGRh..."},
+    "reference_text": "Transcript of the reference audio."
+  }'
+```
+
+## Audio formats
+
+Synthesis returns WAV whatever `response_format` asked for, unless the server
+was built with the MP3 frontend module. The response is labelled with the type
+audio.cpp actually returned (`audio/wav`), not the one that was requested.
+
+Transcription uploads must be WAV; the server rejects other containers unless
+it was built with the `audio_decode` frontend module, which adds MP3 and FLAC.
+
+## Transcribing without an upload
+
+audio.cpp can read audio from the machine it runs on, so an upload is not
+always needed. Pass an `audio` field naming a server-local path instead of a
+`file` part and GoModel sends audio.cpp's JSON request shape:
+
+```bash
+curl -s http://localhost:8080/v1/audio/transcriptions \
+  -H "Authorization: Bearer change-me" \
+  -F model=audiocpp/moonshine-tiny \
+  -F audio=/srv/audio/meeting.wav
+```
+
+This is provider-specific: every other provider still requires the upload and
+rejects a request without one.
+
+## Streaming
+
+For a model configured with `"mode": "streaming"`, `stream=true` returns
+audio.cpp's OpenAI-shaped transcript events (`transcript.text.delta`,
+`transcript.text.done`, `[DONE]`). GoModel relays the event stream as it is,
+but reads it to completion first, so this shortens nothing end to end — it is
+the *live* route below that emits text while the speaker is still talking.
+
+```bash
+curl -s http://localhost:8080/v1/audio/transcriptions \
+  -H "Authorization: Bearer change-me" \
+  -F model=audiocpp/moonshine-tiny \
+  -F file=@speech.wav \
+  -F stream=true
+```
+
+## Native endpoints
+
+audio.cpp's routes with no OpenAI equivalent are reachable through
+[passthrough](/features/passthrough-api) at `/p/audiocpp/...`. The `/v1`
+prefix is optional (`/p/audiocpp/audio/voices` and
+`/p/audiocpp/v1/audio/voices` are the same route); `/health` is served from the
+server root.
+
+| Route | What it adds |
+| --- | --- |
+| `POST /p/audiocpp/audio/transcriptions/details` | Word timestamps, segments, and speaker turns the plain transcription response drops |
+| `POST /p/audiocpp/audio/transcriptions/live` | Raw chunked PCM in, transcript events out, on one connection |
+| `POST /p/audiocpp/audio/speech/live` | The speech-to-speech live-ingest variant |
+| `POST /p/audiocpp/audio/alignments` | Forced alignment of known text against audio |
+| `GET /p/audiocpp/audio/voices?model=<id>` | The voices a TTS model offers |
+| `POST /p/audiocpp/tasks/run` | audio.cpp's generic framework request, for tasks with no OpenAI endpoint (separation, VAD, diarization, music) |
+| `GET /p/audiocpp/health` | Server readiness and configured model count |
+
+The live route is the one that transcribes speech as it is captured — there is
+no file, and the audio never has to exist on disk:
+
+```bash
+ffmpeg -f avfoundation -i ":0" -ar 16000 -ac 1 -f s16le - \
+  | curl -sN -X POST -H 'Expect:' \
+      -H "Authorization: Bearer change-me" \
+      -T - \
+      'http://localhost:8080/p/audiocpp/audio/transcriptions/live?model=moonshine-tiny&sample_rate=16000&channels=1&sample_format=s16le'
+```
+
+`-T -` is what keeps it live: `--data-binary @-` drains stdin before opening
+the connection, which turns the capture back into a file upload. Whether
+partial text appears *during* capture is a property of the model, not the
+route.
+
+## Model metadata
+
+`GET /v1/models` reports what audio.cpp says about each configured model:
+
+- **Family** — the audio.cpp model family (`pocket_tts`, `moonshine_asr`, …).
+- **Mode** — `audio_speech` for a `tts` model and `audio_transcription` for an
+  `asr` one. Models registered for other tasks (`align`, diarization,
+  separation, …) stay listed without a mode: GoModel has no endpoint to route
+  them to, and they are reached through passthrough instead.
+- **Capabilities** — `streaming` for a model configured with
+  `"mode": "streaming"`.
+
+These are defaults, not decisions: anything you declare under the provider's
+model metadata wins — see [Model metadata](/advanced/model-metadata).

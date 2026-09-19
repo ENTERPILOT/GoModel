@@ -559,6 +559,14 @@ providers:
     # Voice-only provider: text-to-speech and speech-to-text, no chat. The
     # OpenAI "voice" field must be an ElevenLabs voice_id.
 
+  audiocpp:
+    type: audiocpp
+    base_url: "http://localhost:8099"
+    # Audio-only local server: text-to-speech and speech-to-text, no chat.
+    # base_url is required (audiocpp_server's default port collides with the
+    # gateway's own) and a trailing /v1 is accepted. api_key is optional and
+    # usually unset, since audio.cpp has no authentication of its own.
+
   meta:
     type: meta
     api_key: "..."

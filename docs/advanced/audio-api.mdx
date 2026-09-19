@@ -147,7 +147,14 @@ console.log(transcription.text);
 
 </CodeGroup>
 
-`file` and `model` are required. Optional form fields — `language`, `prompt`,
+`model` is required, and so is `file` for every provider that transcribes an
+upload — which is all of them but one. GoModel itself no longer insists on the
+part, so a provider that can transcribe audio it already holds is reachable:
+[audio.cpp](/providers/audiocpp) accepts an `audio` field naming a path on the
+machine it runs on instead. Everywhere else, a request without `file` comes
+back as that provider's own `file is required` error.
+
+Optional form fields — `language`, `prompt`,
 `response_format`, `temperature`, and `timestamp_granularities[]` — are forwarded.
 `response_format` controls the response shape: `json` and `verbose_json` return a
 JSON object; `text`, `srt`, and `vtt` return a `text/plain` body.

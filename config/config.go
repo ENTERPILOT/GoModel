@@ -126,6 +126,7 @@ func buildDefaultConfig() *Config {
 				"vllm",
 				"llamacpp",
 				"llmd",
+				"audiocpp",
 				"deepseek",
 			},
 		},
