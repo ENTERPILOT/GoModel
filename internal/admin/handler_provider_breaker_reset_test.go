@@ -79,3 +79,17 @@ func TestResetProviderCircuitBreaker_FeatureUnavailable(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
 }
+
+func TestResetProviderCircuitBreaker_EmptyName(t *testing.T) {
+	fake := &breakerResetterFake{}
+	h := NewHandler(nil, nil, WithBreakerResetter(fake))
+	// A whitespace-only name trims to empty: the resetter must not be called.
+	c, rec := echotest.Post(t, "/admin/providers/tmp/circuit-breaker/reset", nil,
+		echotest.WithPathValue("name", "   "))
+
+	err := h.ResetProviderCircuitBreaker(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "provider name is required")
+	assert.Empty(t, fake.calls, "an empty provider name must not reach the resetter")
+}

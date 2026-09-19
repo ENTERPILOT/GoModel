@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/config"
@@ -176,5 +177,30 @@ func TestCredentialStore_ListOrdersByName(t *testing.T) {
 			names = append(names, cred.Name)
 		}
 		require.Equal(t, []string{"alpha", "mid", "zeta"}, names)
+	})
+}
+
+func TestDecodeTripRules(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil input reads as never set", func(t *testing.T) {
+		t.Parallel()
+		rules, err := decodeTripRules(nil)
+		require.NoError(t, err)
+		assert.Nil(t, rules)
+	})
+
+	t.Run("empty array reads as never set", func(t *testing.T) {
+		t.Parallel()
+		rules, err := decodeTripRules([]byte(`[]`))
+		require.NoError(t, err)
+		assert.Nil(t, rules)
+	})
+
+	t.Run("corrupt JSON returns an error", func(t *testing.T) {
+		t.Parallel()
+		rules, err := decodeTripRules([]byte(`{`))
+		require.Error(t, err)
+		assert.Nil(t, rules)
 	})
 }

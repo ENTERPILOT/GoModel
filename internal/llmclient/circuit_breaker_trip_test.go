@@ -556,3 +556,32 @@ func TestTripRule_DoStreamMatchingErrorTripsInstantly(t *testing.T) {
 	require.Nil(t, stream)
 	assert.Equal(t, int32(1), attempts.Load(), "rejected stream must not reach the upstream")
 }
+
+// Some providers answer 200 with a bare {"error": ...} body. A quota message
+// there must trip the breaker exactly like a translated error status.
+func TestTripRule_Embedded200QuotaErrorTripsInstantly(t *testing.T) {
+	t.Parallel()
+
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(quotaErrorBody))
+	}))
+	defer server.Close()
+
+	client := newQuotaTripTestClient(t, server.URL, nil)
+
+	err := client.Do(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"}, nil)
+	require.Error(t, err)
+	var gatewayErr *core.GatewayError
+	require.ErrorAs(t, err, &gatewayErr)
+	require.ErrorIs(t, err, core.ErrEmbeddedInSuccess)
+	assert.Equal(t, "open", client.circuitBreaker.State())
+
+	err = client.Do(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"}, nil)
+	require.Error(t, err)
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Contains(t, gatewayErr.Message, "circuit breaker is open")
+	assert.Equal(t, int32(1), attempts.Load(), "rejected request must not reach the upstream")
+}

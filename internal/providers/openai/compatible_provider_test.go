@@ -261,3 +261,17 @@ func TestCompatibleProvider_CreateBatch_InlineRequests(t *testing.T) {
 		})
 	}
 }
+
+func TestCompatibleProvider_ResetBreaker(t *testing.T) {
+	server, _ := providertest.JSONServer(t, http.StatusOK, providertest.ModelsJSON)
+	provider := NewCompatibleProviderWithHTTPClient(
+		"test-key",
+		server.Client(),
+		llmclient.Hooks{},
+		CompatibleProviderConfig{ProviderName: "upstream-only", BaseURL: server.URL},
+	)
+
+	// Must be safe to call at any time: it force-closes the client-level
+	// breaker (and every model-scoped one) without touching the upstream.
+	assert.NotPanics(t, func() { provider.ResetBreaker() })
+}
