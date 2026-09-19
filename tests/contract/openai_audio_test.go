@@ -18,6 +18,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
 func openAIAudioProvider(t *testing.T, routes map[string]replayRoute) core.AudioProvider {
@@ -64,7 +65,8 @@ func TestOpenAIReplayCreateSpeech(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, resp)
 			require.Equal(t, tc.upstreamType, resp.ContentType)
-			require.Equal(t, audioBytes, resp.Data)
+			// Synthesized speech is relayed as the upstream produces it.
+			require.Equal(t, audioBytes, providertest.AudioBytes(t, resp))
 		})
 	}
 }

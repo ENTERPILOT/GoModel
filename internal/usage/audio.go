@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"bytes"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -104,6 +105,46 @@ func (u *transcriptionUsage) tokenBilled() bool {
 // call costs the same whatever format it asked for.
 func ExtractFromTranscriptionResponse(body, audio []byte, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
 	return extractFromAudioTextResponse(body, audio, requestID, model, provider, endpointAudioTranscriptions, pricing...)
+}
+
+// sseDataPrefix opens a server-sent event payload line.
+var sseDataPrefix = []byte("data:")
+
+// TranscriptUsageBody returns the JSON object the transcription and translation
+// extractors read a provider's reported usage from. A buffered transcript
+// already is that object and passes through unchanged. A relayed transcript is
+// a stream of server-sent events whose terminal transcript.text.done event
+// carries the usage; its payload is returned so a streamed call is priced from
+// the provider's own numbers instead of falling back to the upload duration.
+// A body carrying no usage event is returned as-is, leaving that fallback in
+// place.
+func TranscriptUsageBody(body []byte) []byte {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 || trimmed[0] == '{' {
+		return body
+	}
+	var usageEvent []byte
+	for line := range bytes.Lines(trimmed) {
+		payload := bytes.TrimSpace(line)
+		if !bytes.HasPrefix(payload, sseDataPrefix) {
+			continue
+		}
+		payload = bytes.TrimSpace(payload[len(sseDataPrefix):])
+		if len(payload) == 0 || payload[0] != '{' {
+			continue
+		}
+		// Later events win: the transcript closes with the usage-bearing one.
+		var event struct {
+			Usage json.RawMessage `json:"usage"`
+		}
+		if json.Unmarshal(payload, &event) == nil && len(event.Usage) > 0 {
+			usageEvent = payload
+		}
+	}
+	if usageEvent != nil {
+		return usageEvent
+	}
+	return body
 }
 
 // ExtractFromTranslationResponse builds a usage entry for an audio translation
