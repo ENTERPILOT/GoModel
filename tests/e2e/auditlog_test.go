@@ -872,28 +872,38 @@ func TestAuditLogOnlyModelInteractions(t *testing.T) {
 // the gateway's own proxy network is listed as trusted.
 func TestAuditLogClientIP(t *testing.T) {
 	tests := []struct {
-		name     string
-		proxies  []string
-		header   string
-		xffValue string
-		wantIP   string
+		name    string
+		proxies []string
+		header  string
+		headers map[string]string
+		wantIP  string
 	}{
 		{
-			name:     "records the connection address when no proxies are trusted",
-			xffValue: "198.51.100.23",
-			wantIP:   "127.0.0.1",
+			name:    "records the connection address when no proxies are trusted",
+			headers: map[string]string{"X-Forwarded-For": "198.51.100.23"},
+			wantIP:  "127.0.0.1",
 		},
 		{
-			name:     "records the forwarded client behind a trusted proxy network",
-			proxies:  []string{"127.0.0.0/8"},
-			xffValue: "203.0.113.9, 198.51.100.23",
-			wantIP:   "198.51.100.23",
+			name:    "records the forwarded client behind a trusted proxy network",
+			proxies: []string{"127.0.0.0/8"},
+			headers: map[string]string{"X-Forwarded-For": "203.0.113.9, 198.51.100.23"},
+			wantIP:  "198.51.100.23",
 		},
 		{
-			name:     "the loopback preset covers a proxy on the gateway host",
-			proxies:  []string{"loopback"},
-			xffValue: "198.51.100.23",
-			wantIP:   "198.51.100.23",
+			name:    "the loopback preset covers a proxy on the gateway host",
+			proxies: []string{"loopback"},
+			headers: map[string]string{"X-Forwarded-For": "198.51.100.23"},
+			wantIP:  "198.51.100.23",
+		},
+		{
+			name:    "a configured single-address header wins over the chain",
+			proxies: []string{"loopback"},
+			header:  "X-Real-IP",
+			headers: map[string]string{
+				"X-Real-IP":       "198.51.100.23",
+				"X-Forwarded-For": "203.0.113.9",
+			},
+			wantIP: "198.51.100.23",
 		},
 	}
 
@@ -920,7 +930,9 @@ func TestAuditLogClientIP(t *testing.T) {
 			req, err := http.NewRequest(http.MethodPost, serverURL+"/v1/chat/completions", bytes.NewReader(body))
 			require.NoError(t, err)
 			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("X-Forwarded-For", tt.xffValue)
+			for name, value := range tt.headers {
+				req.Header.Set(name, value)
+			}
 			resp, err := http.DefaultClient.Do(req)
 			require.NoError(t, err)
 			defer closeBody(resp)

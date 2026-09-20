@@ -37,10 +37,12 @@ func TestNewUsesConfiguredIPExtractor(t *testing.T) {
 
 	srv := New(nil, &Config{IPExtractor: ClientIPExtractor(cfg.ClientIP)})
 	require.NotNil(t, srv)
+	require.NotNil(t, srv.echo.IPExtractor)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	req.RemoteAddr = "127.0.0.1:4321"
 	req.Header.Set("X-Forwarded-For", "203.0.113.9")
-	c := srv.echo.NewContext(req, httptest.NewRecorder())
-	assert.Equal(t, "203.0.113.9", c.RealIP())
+	// The extractor is what every c.RealIP() in the server runs, so calling it
+	// as echo would is the whole of the wiring under test.
+	assert.Equal(t, "203.0.113.9", srv.echo.IPExtractor(req))
 }
