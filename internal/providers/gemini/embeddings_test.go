@@ -22,7 +22,7 @@ import (
 func newNativeTestProvider(t *testing.T, server *httptest.Server) *Provider {
 	t.Helper()
 	t.Setenv(useNativeAPIEnvVar, "true")
-	p := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	p := newTestProvider("test-api-key", server.Client(), llmclient.Hooks{})
 	p.SetBaseURL(server.URL + "/v1beta/openai")
 	return p
 }
@@ -30,7 +30,7 @@ func newNativeTestProvider(t *testing.T, server *httptest.Server) *Provider {
 func newCompatTestProvider(t *testing.T, server *httptest.Server) *Provider {
 	t.Helper()
 	t.Setenv(useNativeAPIEnvVar, "false")
-	p := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	p := newTestProvider("test-api-key", server.Client(), llmclient.Hooks{})
 	p.SetBaseURL(server.URL + "/v1beta/openai")
 	return p
 }

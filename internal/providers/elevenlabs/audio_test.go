@@ -58,7 +58,7 @@ func multipartFields(t *testing.T, req providertest.Recorded) (fields map[string
 func TestCreateSpeech_UsesVoiceIDInPathAndDefaultsToMP3(t *testing.T) {
 	url, client, capture := audioServer(t, "audio/mpeg")
 
-	provider := NewWithHTTPClient("elk_test", url, client, llmclient.Hooks{})
+	provider := newTestProvider("elk_test", url, client, llmclient.Hooks{})
 	resp, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 		Model: "eleven_multilingual_v2",
 		Input: "hello there",
@@ -96,7 +96,7 @@ func TestCreateSpeech_MapsResponseFormats(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			url, client, capture := audioServer(t, "")
 
-			provider := NewWithHTTPClient("key", url, client, llmclient.Hooks{})
+			provider := newTestProvider("key", url, client, llmclient.Hooks{})
 			resp, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 				Model: "eleven_multilingual_v2", Input: "hi", Voice: "voice-id",
 				ResponseFormat: tt.responseFormat,
@@ -122,7 +122,7 @@ func TestCreateSpeech_ClampsSpeedToSupportedRange(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			url, client, capture := audioServer(t, "")
 
-			provider := NewWithHTTPClient("key", url, client, llmclient.Hooks{})
+			provider := newTestProvider("key", url, client, llmclient.Hooks{})
 			_, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 				Model: "eleven_multilingual_v2", Input: "hi", Voice: "voice-id", Speed: tt.speed,
 			})
@@ -137,7 +137,7 @@ func TestCreateSpeech_ClampsSpeedToSupportedRange(t *testing.T) {
 }
 
 func TestCreateSpeech_ValidatesRequest(t *testing.T) {
-	provider := NewWithHTTPClient("key", "https://example.invalid", nil, llmclient.Hooks{})
+	provider := newTestProvider("key", "https://example.invalid", nil, llmclient.Hooks{})
 	tests := []struct {
 		name string
 		req  *core.AudioSpeechRequest
@@ -162,7 +162,7 @@ func TestCreateSpeech_ValidatesRequest(t *testing.T) {
 func TestCreateSpeech_ReturnsUpstreamError(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusUnauthorized, `{"detail":{"status":"invalid_api_key","message":"bad key"}}`)
 
-	provider := NewWithHTTPClient("bad-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("bad-key", server.URL, server.Client(), llmclient.Hooks{})
 	_, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 		Model: "m", Input: "hi", Voice: "v",
 	})
@@ -198,7 +198,7 @@ func TestRefineElevenLabsError_UnwrapsDetailShapes(t *testing.T) {
 func TestCreateTranscription_SendsMultipartAndReturnsJSON(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"language_code":"en","text":"hello world","words":[{"text":"hello","type":"word","start":0,"end":0.5},{"text":" ","type":"spacing","start":0.5,"end":0.6},{"text":"world","type":"word","start":0.6,"end":1.1}]}`)
 
-	provider := NewWithHTTPClient("elk_test", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("elk_test", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
 		Model:    "scribe_v1",
 		Filename: "clip.mp3",
@@ -229,7 +229,7 @@ func TestCreateTranscription_SendsMultipartAndReturnsJSON(t *testing.T) {
 func TestCreateTranscription_WordGranularityFromRequest(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"text":"hi"}`)
 
-	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("key", server.URL, server.Client(), llmclient.Hooks{})
 	_, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
 		Model:                  "scribe_v1",
 		File:                   []byte("audio"),
@@ -244,7 +244,7 @@ func TestCreateTranscription_WordGranularityFromRequest(t *testing.T) {
 func TestCreateTranscription_VerboseJSONIncludesWordsAndDuration(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusOK, `{"language_code":"en","text":"hi there","words":[{"text":"hi","type":"word","start":0,"end":0.3},{"text":"there","type":"word","start":0.4,"end":0.9}]}`)
 
-	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("key", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
 		Model:          "scribe_v1",
 		File:           []byte("audio"),
@@ -273,7 +273,7 @@ func TestCreateTranscription_VerboseJSONIncludesWordsAndDuration(t *testing.T) {
 func TestCreateTranscription_TextFormatReturnsPlainText(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusOK, `{"text":"plain text result"}`)
 
-	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("key", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
 		Model:          "scribe_v1",
 		File:           []byte("audio"),
@@ -285,7 +285,7 @@ func TestCreateTranscription_TextFormatReturnsPlainText(t *testing.T) {
 }
 
 func TestCreateTranscription_ValidatesRequest(t *testing.T) {
-	provider := NewWithHTTPClient("key", "https://example.invalid", nil, llmclient.Hooks{})
+	provider := newTestProvider("key", "https://example.invalid", nil, llmclient.Hooks{})
 	tests := []struct {
 		name string
 		req  *core.AudioTranscriptionRequest

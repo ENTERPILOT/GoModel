@@ -94,23 +94,8 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 		Hooks:          opts.Hooks,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
-	p.nativeClient = llmclient.New(nativeCfg, p.setNativeHeaders)
+	p.nativeClient = llmclient.NewWithOptionalHTTPClient(opts.HTTPClient, nativeCfg, p.setNativeHeaders)
 	p.SetBaseURL(providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL))
-	return p
-}
-
-// NewWithHTTPClient creates a new Ollama provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
-	p := &Provider{keys: providers.NewKeyring(apiKey)}
-	p.compat = openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(defaultBaseURL))
-
-	nativeCfg := llmclient.DefaultConfig("ollama", defaultNativeBaseURL)
-	nativeCfg.Hooks = hooks
-	p.nativeClient = llmclient.NewWithHTTPClient(httpClient, nativeCfg, p.setNativeHeaders)
 	return p
 }
 

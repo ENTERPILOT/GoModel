@@ -16,7 +16,7 @@ import (
 
 // newTestProvider builds a provider pointed at baseURL.
 func newTestProvider(baseURL string, client *http.Client) *Provider {
-	provider := NewWithHTTPClient("test-api-key", client, llmclient.Hooks{})
+	provider := newHTTPTestProvider("test-api-key", client, llmclient.Hooks{})
 	provider.SetBaseURL(baseURL)
 	return provider
 }

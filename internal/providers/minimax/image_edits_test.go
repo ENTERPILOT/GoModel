@@ -51,7 +51,7 @@ func TestCreateImageEdit(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, http.StatusOK, `{"data":{"image_urls":["https://example.com/portrait.png"],"image_base64":["cG9ydHJhaXQ="]},"base_resp":{"status_code":0}}`)
-			provider := NewWithHTTPClient("minimax-key", server.URL+"/v1", server.Client(), llmclient.Hooks{})
+			provider := newTestProvider("minimax-key", server.URL+"/v1", server.Client(), llmclient.Hooks{})
 			req := portraitRequest()
 			req.Fields = tc.fields
 			response, err := provider.CreateImageEdit(context.Background(), req)
@@ -73,7 +73,7 @@ func TestCreateImageEdit(t *testing.T) {
 
 func TestCreateImageEditMapsNativeOptions(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"data":{"image_urls":["https://example.com/portrait.png"]},"base_resp":{"status_code":0}}`)
-	provider := NewWithHTTPClient("minimax-key", server.URL+"/v1", server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("minimax-key", server.URL+"/v1", server.Client(), llmclient.Hooks{})
 	req := portraitRequest()
 	req.Fields = []core.FormField{{Name: "size", Value: "1024x768"}, {Name: "n", Value: "2"}, {Name: "seed", Value: "42"}, {Name: "prompt_optimizer", Value: "true"}}
 
@@ -111,7 +111,7 @@ func TestCreateImageEditNativeStatusErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			body := fmt.Sprintf(`{"base_resp":{"status_code":%d,"status_msg":%q}}`, tc.statusCode, tc.name)
 			server, _ := providertest.JSONServer(t, http.StatusOK, body)
-			provider := NewWithHTTPClient("minimax-key", server.URL, server.Client(), llmclient.Hooks{})
+			provider := newTestProvider("minimax-key", server.URL, server.Client(), llmclient.Hooks{})
 
 			_, err := provider.CreateImageEdit(context.Background(), portraitRequest())
 
@@ -139,7 +139,7 @@ func TestCreateImageEditErrors(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server, _ := providertest.JSONServer(t, http.StatusOK, tc.body)
-			provider := NewWithHTTPClient("minimax-key", server.URL, server.Client(), llmclient.Hooks{})
+			provider := newTestProvider("minimax-key", server.URL, server.Client(), llmclient.Hooks{})
 			_, err := provider.CreateImageEdit(context.Background(), portraitRequest())
 			var gatewayErr *core.GatewayError
 			require.ErrorAs(t, err, &gatewayErr)
@@ -153,7 +153,7 @@ func TestCreateImageEditErrors(t *testing.T) {
 func TestCreateImageEditRejectsLiveDimensions(t *testing.T) {
 	for _, field := range []core.FormField{{Name: "width", Value: "1024"}, {Name: "height", Value: "1024"}, {Name: "size", Value: "1024x1024"}} {
 		t.Run(field.Name, func(t *testing.T) {
-			provider := NewWithHTTPClient("minimax-key", "http://unused.invalid", nil, llmclient.Hooks{})
+			provider := newTestProvider("minimax-key", "http://unused.invalid", nil, llmclient.Hooks{})
 			req := portraitRequest()
 			req.Model = "image-01-live"
 			req.Fields = []core.FormField{field}
@@ -172,7 +172,7 @@ func TestCreateImageEditRejectsLiveDimensions(t *testing.T) {
 // live model, which is how it is sized.
 func TestCreateImageEditLiveAllowsAspectRatio(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"data":{"image_urls":["https://example.com/portrait.png"]},"base_resp":{"status_code":0}}`)
-	provider := NewWithHTTPClient("minimax-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("minimax-key", server.URL, server.Client(), llmclient.Hooks{})
 	req := portraitRequest()
 	req.Model = "image-01-live"
 	req.Fields = []core.FormField{{Name: "aspect_ratio", Value: "16:9"}}
@@ -190,7 +190,7 @@ func TestCreateImageEditValidation(t *testing.T) {
 		func(req *core.ImageEditRequest) { req.Fields = []core.FormField{{Name: "quality", Value: "high"}} },
 		func(req *core.ImageEditRequest) { req.Fields = []core.FormField{{Name: "size", Value: "auto"}} },
 	} {
-		provider := NewWithHTTPClient("minimax-key", "http://unused.invalid", nil, llmclient.Hooks{})
+		provider := newTestProvider("minimax-key", "http://unused.invalid", nil, llmclient.Hooks{})
 		req := portraitRequest()
 		mutate(req)
 		_, err := provider.CreateImageEdit(context.Background(), req)

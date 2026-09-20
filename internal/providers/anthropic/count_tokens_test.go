@@ -23,7 +23,7 @@ import (
 func TestCountMessagesTokens(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"input_tokens":2414}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	body := []byte(`{"model":"anthropic/claude-haiku-4-5","max_tokens":64,"stream":true,"temperature":0.2,"metadata":{"user_id":"u"},
@@ -46,7 +46,7 @@ func TestCountMessagesTokens(t *testing.T) {
 // An upstream failure is returned as an error so the caller can fall back.
 func TestCountMessagesTokens_UpstreamError(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusBadRequest, `{"type":"error","error":{"type":"invalid_request_error","message":"bad"}}`)
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 	_, err := provider.CountMessagesTokens(context.Background(), "claude-haiku-4-5", []byte(`{"model":"m","messages":[]}`))
 	require.Error(t, err)

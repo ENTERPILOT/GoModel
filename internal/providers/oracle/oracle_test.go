@@ -7,6 +7,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 	"github.com/stretchr/testify/assert"
 )
@@ -20,13 +21,13 @@ func TestChatCompatibleContract(t *testing.T) {
 		Type:            "oracle",
 		NativeResponses: true,
 		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
-			provider := NewWithHTTPClient(apiKey, client, hooks)
-			provider.SetBaseURL(baseURL)
-			return provider
+			opts := providertest.Options(hooks)
+			opts.HTTPClient = client
+			return New(providers.ProviderConfig{APIKey: apiKey, BaseURL: baseURL}, opts)
 		},
 	})
 
-	provider := NewWithHTTPClient("oracle-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("oracle-key", nil, llmclient.Hooks{})
 	providertest.AssertNoNativeSurfaces(t, provider)
 	_, ok := any(provider).(core.PassthroughProvider)
 	assert.False(t, ok, "provider should not implement core.PassthroughProvider")

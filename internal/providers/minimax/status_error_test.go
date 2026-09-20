@@ -40,7 +40,7 @@ func assertBoundedDiagnostic(t *testing.T, gatewayErr *core.GatewayError, diagno
 func TestCreateImageBoundsNativeMessage(t *testing.T) {
 	body, diagnostic := oversizedStatusBody(t, 2013)
 	server, _ := providertest.JSONServer(t, http.StatusOK, body)
-	p := NewWithHTTPClient("test-key", server.URL, server.Client(), llmclient.Hooks{})
+	p := newTestProvider("test-key", server.URL, server.Client(), llmclient.Hooks{})
 
 	_, err := p.CreateImage(context.Background(), &core.ImageGenerationRequest{Model: "image-01", Prompt: "A lighthouse"})
 
@@ -54,7 +54,7 @@ func TestCreateImageBoundsNativeMessage(t *testing.T) {
 func TestCreateSpeechBoundsNativeMessage(t *testing.T) {
 	body, diagnostic := oversizedStatusBody(t, 2013)
 	server, _ := providertest.JSONServer(t, http.StatusOK, body)
-	p := NewWithHTTPClient("test-key", server.URL, server.Client(), llmclient.Hooks{})
+	p := newTestProvider("test-key", server.URL, server.Client(), llmclient.Hooks{})
 
 	_, err := p.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 		Model: "speech-2.8-hd",

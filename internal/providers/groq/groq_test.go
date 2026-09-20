@@ -29,9 +29,9 @@ func TestChatCompatibleContract(t *testing.T) {
 		Type:           "groq",
 		DefaultBaseURL: "https://api.groq.com/openai/v1",
 		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
-			p := NewWithHTTPClient(apiKey, client, hooks)
-			p.SetBaseURL(baseURL)
-			return p
+			opts := providertest.Options(hooks)
+			opts.HTTPClient = client
+			return New(providers.ProviderConfig{APIKey: apiKey, BaseURL: baseURL}, opts)
 		},
 		Embeddings: true,
 	})

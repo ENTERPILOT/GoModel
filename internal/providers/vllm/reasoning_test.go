@@ -36,7 +36,7 @@ func TestChatCompletion_RenamesLegacyReasoningContentOnAssistantMessages(t *test
 	}`), &req)
 	require.NoError(t, err)
 
-	provider := NewWithHTTPClient("", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("", server.URL, server.Client(), llmclient.Hooks{})
 	_, err = provider.ChatCompletion(context.Background(), &req)
 	require.NoError(t, err)
 
@@ -60,7 +60,7 @@ func TestChatCompletion_DoesNotOverrideExistingReasoningField(t *testing.T) {
 	}`), &req)
 	require.NoError(t, err)
 
-	provider := NewWithHTTPClient("", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("", server.URL, server.Client(), llmclient.Hooks{})
 	_, err = provider.ChatCompletion(context.Background(), &req)
 	require.NoError(t, err)
 

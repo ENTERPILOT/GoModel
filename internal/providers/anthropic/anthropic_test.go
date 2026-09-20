@@ -814,7 +814,7 @@ func TestListModels(t *testing.T) {
 func TestListModels_APIError(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusUnauthorized, `{"type": "error", "error": {"type": "authentication_error", "message": "Invalid API key"}}`)
 
-	provider := NewWithHTTPClient("invalid-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("invalid-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	_, err := provider.ListModels(context.Background())
@@ -4898,7 +4898,7 @@ func TestConvertToAnthropicRequest_NormalizesInputTextType(t *testing.T) {
 func TestPassthrough(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusBadRequest, `{"error":{"message":"bad request"}}`)
 
-	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
@@ -4991,7 +4991,7 @@ func TestPassthroughOAuthToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, http.StatusOK, `{}`)
 
-			provider := NewWithHTTPClient("sk-ant-oat01-abc", server.Client(), llmclient.Hooks{})
+			provider := newTestProvider("sk-ant-oat01-abc", server.Client(), llmclient.Hooks{})
 			provider.SetBaseURL(server.URL)
 
 			headers := http.Header{"Content-Type": {"application/json"}}

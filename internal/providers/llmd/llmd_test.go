@@ -72,7 +72,7 @@ func TestChatCompletionInjectsTrustedLLMDHeaders(t *testing.T) {
 				"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]
 			}`)
 
-			provider := NewWithHTTPClient(tt.apiKey, server.URL, tt.controls, server.Client(), llmclient.Hooks{})
+			provider := newTestProvider(tt.apiKey, server.URL, tt.controls, server.Client(), llmclient.Hooks{})
 			resp, err := provider.ChatCompletion(tt.ctx, &core.ChatRequest{
 				Model:    "Qwen/Qwen2.5-0.5B-Instruct",
 				Messages: []core.Message{{Role: "user", Content: "hello"}},
@@ -95,10 +95,15 @@ func TestChatCompletionInjectsTrustedLLMDHeaders(t *testing.T) {
 func TestPassthroughReplacesClientSuppliedControlHeaders(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"tokens":[1,2,3]}`)
 
-	provider := NewWithHTTPClient("router-token", server.URL+"/v1", ControlConfig{
+	opts := providertest.Options(llmclient.Hooks{})
+	opts.HTTPClient = server.Client()
+	provider, ok := New(providers.ProviderConfig{
+		APIKey:               "router-token",
+		BaseURL:              server.URL + "/v1",
 		InferenceObjective:   "trusted-objective",
 		FairnessFromUserPath: true,
-	}, server.Client(), llmclient.Hooks{})
+	}, opts).(core.PassthroughProvider)
+	require.True(t, ok)
 	ctx := core.WithEffectiveUserPath(context.Background(), "/trusted/tenant")
 
 	for _, endpoint := range []string{"tokenize", "chat/completions"} {
@@ -155,7 +160,7 @@ func TestPassthroughPreservesDroppedReasonOnRawErrorResponses(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":{"message":"request dropped"}}`))
 	})
 
-	provider := NewWithHTTPClient("", server.URL+"/v1", ControlConfig{}, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("", server.URL+"/v1", ControlConfig{}, server.Client(), llmclient.Hooks{})
 	for _, endpoint := range []string{"tokenize", "chat/completions"} {
 		resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 			Method:   http.MethodPost,
@@ -173,7 +178,7 @@ func TestPassthroughPreservesDroppedReasonOnRawErrorResponses(t *testing.T) {
 func TestPassthroughSelectsV1AndRouterRootPaths(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{}`)
 
-	provider := NewWithHTTPClient("", server.URL+"/v1", ControlConfig{}, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("", server.URL+"/v1", ControlConfig{}, server.Client(), llmclient.Hooks{})
 	for _, endpoint := range []string{"completions", "messages", "inference/v1/generate", "tokenize", "completions?stream=false", "tokenize?fast=1"} {
 		resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 			Method:   http.MethodPost,
@@ -281,11 +286,13 @@ func TestChatCompatibleContract(t *testing.T) {
 		NativeResponses: true,
 		Embeddings:      true,
 		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
-			return NewWithHTTPClient(apiKey, baseURL, ControlConfig{}, client, hooks)
+			opts := providertest.Options(hooks)
+			opts.HTTPClient = client
+			return New(providers.ProviderConfig{APIKey: apiKey, BaseURL: baseURL}, opts)
 		},
 	})
 
-	provider := NewWithHTTPClient("", "http://llmd.invalid/v1", ControlConfig{}, nil, llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{BaseURL: "http://llmd.invalid/v1"}, providers.ProviderOptions{})
 	providertest.AssertNoNativeSurfaces(t, provider)
 	_, ok := any(provider).(core.NativeResponseLifecycleProvider)
 	assert.False(t, ok, "provider should not implement core.NativeResponseLifecycleProvider")

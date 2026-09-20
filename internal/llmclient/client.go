@@ -179,6 +179,17 @@ func NewWithHTTPClient(httpClient *http.Client, cfg Config, headerSetter HeaderS
 	return c
 }
 
+// NewWithOptionalHTTPClient creates a client on httpClient when one is given
+// and on the shared pooled default otherwise. Providers take their transport
+// from ProviderOptions, which is nil in production, so this keeps the pooling
+// there while letting a test point the same constructor at its own server.
+func NewWithOptionalHTTPClient(httpClient *http.Client, cfg Config, headerSetter HeaderSetter) *Client {
+	if httpClient == nil {
+		return New(cfg, headerSetter)
+	}
+	return NewWithHTTPClient(httpClient, cfg, headerSetter)
+}
+
 // SetBaseURL updates the base URL (thread-safe)
 func (c *Client) SetBaseURL(url string) {
 	c.mu.Lock()

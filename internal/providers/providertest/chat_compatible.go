@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -75,7 +76,7 @@ type ChatCompatible struct {
 	Type string
 	// DefaultBaseURL is the expected Registration.Discovery.DefaultBaseURL.
 	DefaultBaseURL string
-	// New is the provider's NewWithHTTPClient constructor.
+	// New builds the provider on the given base URL and HTTP client.
 	New func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider
 	// NativeResponses reports whether the provider forwards Responses API
 	// requests to the upstream /responses endpoint. When false the helper
@@ -92,6 +93,23 @@ type ChatCompatible struct {
 	// default to Authorization and "Bearer ".
 	AuthHeader string
 	AuthPrefix string
+}
+
+// countingTransport records how many requests travelled through it, so the
+// contract can tell a provider that used the client it was given from one
+// that fell back to a default client the test server also answers.
+type countingTransport struct {
+	base  http.RoundTripper
+	calls atomic.Int64
+}
+
+func (t *countingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.calls.Add(1)
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return base.RoundTrip(req)
 }
 
 // AssertChatCompatible checks the contract shared by providers that embed
@@ -119,7 +137,21 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 
 	t.Run("constructor tolerates nil client and zero hooks", func(t *testing.T) {
 		provider := p.New(apiKey, "http://example.invalid", nil, llmclient.Hooks{})
-		assert.NotNil(t, provider, "NewWithHTTPClient(nil client) returned nil")
+		assert.NotNil(t, provider, "constructor with a nil HTTP client returned nil")
+	})
+
+	// The test server is reachable by http.DefaultClient too, so every other
+	// assertion here would still pass if a constructor quietly ignored the
+	// client it was handed. Count the requests that actually travelled through
+	// the supplied transport.
+	t.Run("sends through the supplied HTTP client", func(t *testing.T) {
+		server, _ := JSONServer(t, http.StatusOK, ChatCompletionJSON)
+		counted := &countingTransport{base: server.Client().Transport}
+		provider := p.New(apiKey, server.URL, &http.Client{Transport: counted}, llmclient.Hooks{})
+		require.NotNil(t, provider)
+		_, err := provider.ChatCompletion(context.Background(), chatRequest())
+		require.NoError(t, err)
+		assert.Positive(t, counted.calls.Load(), "the provider must send through the client it was given, not a default one")
 	})
 
 	t.Run("chat completion via registered factory", func(t *testing.T) {

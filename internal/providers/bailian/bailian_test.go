@@ -44,9 +44,9 @@ func TestChatCompatibleContract(t *testing.T) {
 		Type:           "bailian",
 		DefaultBaseURL: defaultBaseURL,
 		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
-			p := NewWithHTTPClient(apiKey, client, hooks)
-			p.SetBaseURL(baseURL)
-			return p
+			opts := providertest.Options(hooks)
+			opts.HTTPClient = client
+			return New(providers.ProviderConfig{APIKey: apiKey, BaseURL: baseURL}, opts)
 		},
 		Embeddings: true,
 	})
@@ -114,14 +114,14 @@ func TestPassthrough_Delegates(t *testing.T) {
 }
 
 func TestPassthrough_NilRequest(t *testing.T) {
-	provider := NewWithHTTPClient("key", nil, llmclient.Hooks{})
+	provider := newHTTPTestProvider("key", nil, llmclient.Hooks{})
 	_, err := provider.Passthrough(context.Background(), nil)
 	require.Error(t, err)
 }
 
 func TestPassthrough_ReadError(t *testing.T) {
 	readErr := errors.New("read failed")
-	provider := NewWithHTTPClient("key", nil, llmclient.Hooks{})
+	provider := newHTTPTestProvider("key", nil, llmclient.Hooks{})
 
 	_, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 		Method:   http.MethodPost,

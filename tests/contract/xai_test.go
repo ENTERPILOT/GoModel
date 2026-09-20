@@ -12,6 +12,8 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 	"github.com/enterpilot/gomodel/internal/providers/xai"
 )
 
@@ -19,7 +21,9 @@ func newXAIReplayProvider(t *testing.T, routes map[string]replayRoute) core.Prov
 	t.Helper()
 
 	client := newReplayHTTPClient(t, routes)
-	provider := xai.NewWithHTTPClient("xai-test", client, llmclient.Hooks{})
+	opts := providertest.Options(llmclient.Hooks{})
+	opts.HTTPClient = client
+	provider := xai.New(providers.ProviderConfig{APIKey: "xai-test"}, opts).(*xai.Provider)
 	provider.SetBaseURL("https://replay.local")
 	return provider
 }

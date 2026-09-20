@@ -18,7 +18,7 @@ import (
 func TestChatCompletion_MapsReasoningToZaiReasoningEffort(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
 
-	provider := NewWithHTTPClient("zai-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("zai-key", server.URL, server.Client(), llmclient.Hooks{})
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model:     "glm-5.2",
 		Messages:  []core.Message{{Role: "user", Content: "hi"}},
@@ -52,7 +52,7 @@ func TestNew_MapsReasoningToZaiReasoningEffort(t *testing.T) {
 func TestChatCompletion_NormalizesReasoningEffortForGLM53(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
 
-	provider := NewWithHTTPClient("zai-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("zai-key", server.URL, server.Client(), llmclient.Hooks{})
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model:     "glm-5.3-flash",
 		Messages:  []core.Message{{Role: "user", Content: "hi"}},
@@ -68,7 +68,7 @@ func TestChatCompletion_NormalizesReasoningEffortForGLM53(t *testing.T) {
 func TestChatCompletion_DropsReasoningWithoutEffort(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
 
-	provider := NewWithHTTPClient("zai-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("zai-key", server.URL, server.Client(), llmclient.Hooks{})
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model:     "glm-5.3",
 		Messages:  []core.Message{{Role: "user", Content: "hi"}},
@@ -84,7 +84,7 @@ func TestChatCompletion_DropsReasoningWithoutEffort(t *testing.T) {
 func TestChatCompletion_KeepsFlatReasoningEffortWithoutNestedReasoning(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
 
-	provider := NewWithHTTPClient("zai-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("zai-key", server.URL, server.Client(), llmclient.Hooks{})
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model:    "glm-5.3-flash",
 		Messages: []core.Message{{Role: "user", Content: "hi"}},
@@ -100,7 +100,7 @@ func TestChatCompletion_KeepsFlatReasoningEffortWithoutNestedReasoning(t *testin
 func TestResponses_MapsReasoningToZaiReasoningEffort(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
 
-	provider := NewWithHTTPClient("zai-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("zai-key", server.URL, server.Client(), llmclient.Hooks{})
 	_, err := provider.Responses(context.Background(), &core.ResponsesRequest{
 		Model:     "glm-5.3-flash",
 		Input:     "hi",
