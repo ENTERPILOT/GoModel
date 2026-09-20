@@ -80,10 +80,12 @@ can, and to be explicit about truncation where it cannot.
 | Malformed chunk mid-stream | Treated as a truncation: relayed, then `stream_incomplete` | No | Same |
 
 The wait for the *first* byte never counts toward the idle timeout, so a slow
-reasoning model is safe until the provider sends something — but any byte
-starts the clock, including a keep-alive comment. Once the first byte is out
-the response is committed to `200`, so a stall from then on can only be
-reported in-band, never as a status. Details:
+reasoning model is safe until the provider sends something. After that, any
+byte starts the timer — a keep-alive comment included — and every later byte
+restarts it, so the limit bounds the gap between reads rather than the length
+of the response. Once that first byte is out the response is committed to
+`200`, which is why a stall from then on can only be reported in-band and
+never as a status. Details:
 [stream completion](/advanced/resilience#what-counts-as-a-failure),
 [idle timeout](/advanced/configuration),
 [stream-start failover](/features/failover).
