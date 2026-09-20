@@ -64,10 +64,19 @@ func (p *Provider) CreateImageEdit(ctx context.Context, req *core.ImageEditReque
 				return nil, core.NewInvalidRequestError("minimax response_format must be url, base64, or b64_json", nil)
 			}
 			payload[field.Name] = format
-		case "n", "width", "height", "seed":
+		case "n", "seed":
 			value, err := strconv.ParseInt(field.Value, 10, 64)
 			if err != nil {
 				return nil, core.NewInvalidRequestError(field.Name+" must be an integer", err)
+			}
+			payload[field.Name] = value
+		case "width", "height":
+			value, err := strconv.Atoi(field.Value)
+			if err != nil {
+				return nil, core.NewInvalidRequestError(field.Name+" must be an integer", err)
+			}
+			if !validImageDimension(value) {
+				return nil, core.NewInvalidRequestError(imageDimensionError, nil)
 			}
 			payload[field.Name] = value
 		case "prompt_optimizer":
@@ -85,6 +94,9 @@ func (p *Provider) CreateImageEdit(ctx context.Context, req *core.ImageEditReque
 				value, err := strconv.Atoi(parts[i])
 				if err != nil {
 					return nil, core.NewInvalidRequestError("size must be WIDTHxHEIGHT", err)
+				}
+				if !validImageDimension(value) {
+					return nil, core.NewInvalidRequestError(imageDimensionError, nil)
 				}
 				payload[name] = value
 			}

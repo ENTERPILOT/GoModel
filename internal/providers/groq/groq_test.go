@@ -466,7 +466,7 @@ func TestCreateSpeech(t *testing.T) {
 	assert.Equal(t, "Fritz-PlayAI", body["voice"])
 
 	assert.Equal(t, "audio/mpeg", resp.ContentType)
-	assert.Equal(t, string(audio), string(resp.Data))
+	assert.Equal(t, string(audio), string(providertest.AudioBytes(t, resp)))
 }
 
 func TestCreateTranscription(t *testing.T) {

@@ -27,6 +27,7 @@ type settings struct {
 	contentType string
 	remoteAddr  string
 	ipExtractor echo.IPExtractor
+	wrapWriter  func(http.ResponseWriter) http.ResponseWriter
 }
 
 // WithHeader sets a request header.
@@ -70,6 +71,14 @@ func WithContentType(contentType string) Option {
 	return func(s *settings) { s.contentType = contentType }
 }
 
+// WithResponseWriter serves the response through wrap(recorder) instead of the
+// recorder directly, for a handler whose writes or flushes the test needs to
+// observe as they happen. The recorder Request returns is still the one the
+// wrapper writes through, so assertions on the recorded body are unaffected.
+func WithResponseWriter(wrap func(http.ResponseWriter) http.ResponseWriter) Option {
+	return func(s *settings) { s.wrapWriter = wrap }
+}
+
 // Request builds an echo context and recorder for a handler call.
 //
 // body may be nil (no body), a string or []byte (sent verbatim), an io.Reader,
@@ -92,6 +101,10 @@ func Request(t testing.TB, method, target string, body any, opts ...Option) (*ec
 	}
 
 	rec := httptest.NewRecorder()
+	var writer http.ResponseWriter = rec
+	if s.wrapWriter != nil {
+		writer = s.wrapWriter(rec)
+	}
 	e := echo.New()
 	// Echo's zero value consults forwarding headers; the server pins direct
 	// extraction unless a deployment opts in, so tests start from the same
@@ -100,7 +113,7 @@ func Request(t testing.TB, method, target string, body any, opts ...Option) (*ec
 	if s.ipExtractor != nil {
 		e.IPExtractor = s.ipExtractor
 	}
-	c := e.NewContext(req, rec)
+	c := e.NewContext(req, writer)
 	if s.path != "" {
 		c.SetPath(s.path)
 	}

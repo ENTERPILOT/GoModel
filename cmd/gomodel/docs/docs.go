@@ -4206,11 +4206,17 @@ const docTemplate = `{
                         "description": "Timestamp granularities to populate: word and/or segment",
                         "name": "timestamp_granularities[]",
                         "in": "formData"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Relay the transcript as server-sent events while the provider produces it",
+                        "name": "stream",
+                        "in": "formData"
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "Transcription in the requested response_format: a JSON object for json/verbose_json, or a text/plain body for text/srt/vtt",
+                        "description": "Transcription in the requested response_format: a JSON object for json/verbose_json, a text/plain body for text/srt/vtt, or a text/event-stream when stream=true",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -7397,6 +7403,12 @@ const docTemplate = `{
                         "description": "Window length ending today when no explicit dates are given (default 30, max 365)",
                         "name": "days",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Which requests to count: uncached (default, provider-bound only), cached (local response-cache hits only), or all",
+                        "name": "cache_mode",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -9703,6 +9715,9 @@ const docTemplate = `{
                 },
                 "type": {
                     "type": "string"
+                },
+                "video_url": {
+                    "$ref": "#/definitions/core.VideoURLContent"
                 }
             }
         },
@@ -11133,6 +11148,17 @@ const docTemplate = `{
                 },
                 "total_tokens": {
                     "type": "integer"
+                }
+            }
+        },
+        "core.VideoURLContent": {
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
                 }
             }
         },
