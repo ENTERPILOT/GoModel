@@ -197,3 +197,48 @@ func TestCreateImageEditValidation(t *testing.T) {
 		require.Error(t, err)
 	}
 }
+
+// TestCreateImageEditRejectsUnsupportedDimensions pins that edits apply the
+// same dimension rule as image generation. Both post to /image_generation, so
+// values the endpoint cannot satisfy are rejected here instead of upstream.
+func TestCreateImageEditRejectsUnsupportedDimensions(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		field core.FormField
+	}{
+		{name: "size below minimum", field: core.FormField{Name: "size", Value: "10x10"}},
+		{name: "size above maximum", field: core.FormField{Name: "size", Value: "4096x4096"}},
+		{name: "size not divisible by eight", field: core.FormField{Name: "size", Value: "1020x1024"}},
+		{name: "width below minimum", field: core.FormField{Name: "width", Value: "10"}},
+		{name: "height not divisible by eight", field: core.FormField{Name: "height", Value: "1020"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := NewWithHTTPClient("minimax-key", "http://unused.invalid", nil, llmclient.Hooks{})
+			req := portraitRequest()
+			req.Fields = []core.FormField{tc.field}
+
+			_, err := provider.CreateImageEdit(context.Background(), req)
+
+			var gatewayErr *core.GatewayError
+			require.ErrorAs(t, err, &gatewayErr)
+			assert.Equal(t, http.StatusBadRequest, gatewayErr.StatusCode)
+			assert.Equal(t, imageDimensionError, gatewayErr.Message)
+		})
+	}
+}
+
+// TestCreateImageEditForwardsSupportedDimensions keeps valid dimensions
+// flowing through as width and height.
+func TestCreateImageEditForwardsSupportedDimensions(t *testing.T) {
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"data":{"image_urls":["https://example.com/portrait.png"]},"base_resp":{"status_code":0}}`)
+	provider := NewWithHTTPClient("minimax-key", server.URL, server.Client(), llmclient.Hooks{})
+	req := portraitRequest()
+	req.Fields = []core.FormField{{Name: "size", Value: "1024x512"}}
+
+	_, err := provider.CreateImageEdit(context.Background(), req)
+
+	require.NoError(t, err)
+	body := capture.Last(t).JSON(t)
+	assert.Equal(t, float64(1024), body["width"])
+	assert.Equal(t, float64(512), body["height"])
+}
