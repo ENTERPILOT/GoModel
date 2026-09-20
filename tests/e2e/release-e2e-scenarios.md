@@ -98,6 +98,16 @@ Stateful note:
   written by this one) needs two binaries, so it is covered by
   `tests/e2e/upgrade-compat.sh` rather than this matrix, which always runs one
   binary against whatever the stack already holds
+- Client address resolution (`SERVER_TRUSTED_PROXIES`,
+  `SERVER_CLIENT_IP_HEADER`, `SERVER_TRUSTED_HOPS`) needs one gateway per
+  policy, so it is covered by a standalone script rather than this matrix
+  (`tests/e2e/test-clientip.sh`). This stack trusts no proxy, which is the
+  default posture: a forwarding header it carries is ignored and the audit
+  entry records the socket peer
+- Disabled master key authentication (`MASTER_KEY_DISABLED`) needs a gateway
+  booted with the key turned off and a managed key issued before that, so it is
+  covered by a standalone script rather than this matrix
+  (`tests/e2e/test-masterkey-disabled.sh`)
 - `S173`-`S182` exercise the Anthropic Messages drop-in compatibility fixes
   (`x-api-key` auth fallback, `stop_sequence`, seeded stream usage,
   dialect-aware `/v1/models` and 404s); `S173`-`S175` need the auth-enabled
