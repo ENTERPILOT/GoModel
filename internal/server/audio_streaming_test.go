@@ -275,10 +275,14 @@ func TestAudioSpeech_OversizeStreamStillCosted(t *testing.T) {
 	assert.InDelta(t, seconds*0.00025, *captured.TotalCost, 1e-9)
 	assert.Empty(t, captured.CostsCalculationCaveat)
 
-	// The audit body stays bounded: that ceiling is deliberate.
+	// The audit body stays bounded — that ceiling is deliberate — but it still
+	// reports what actually went past, rather than an empty payload.
 	respBody, ok := entry.Data.ResponseBody.(auditlog.AudioBodyLog)
 	require.True(t, ok, "response body not captured as audio, got %T", entry.Data.ResponseBody)
 	assert.False(t, respBody.Stored, "an oversize body was embedded in the audit entry")
+	assert.True(t, respBody.TooLarge)
+	assert.Equal(t, len(wav), respBody.Bytes)
+	assert.Equal(t, "audio/wav", respBody.ContentType)
 }
 
 // TestAudioTranscription_OversizeStreamStillCosted is the transcript half of the

@@ -381,8 +381,8 @@ func (s *audioService) relayAudioStream(c *echo.Context, route modelCallRoute, r
 	// The provider produced (and billed) whatever reached the gateway, so usage
 	// is recorded even when the client went away mid-relay.
 	s.logUsage(ctx, route, sink.Entry)
-	data, _ := capture.Captured()
-	s.captureAudioResponseBody(c, contentType, data)
+	data, complete := capture.Captured()
+	s.captureRelayedAudioResponseBody(c, contentType, data, complete, capture.Total())
 	if flushErr != nil {
 		errorType := classifyStreamError(ctx, flushErr)
 		auditlog.EnrichEntryWithError(c, errorType, flushErr.Error(), "")
@@ -432,6 +432,24 @@ func (s *audioService) captureAudioResponseBody(c *echo.Context, contentType str
 	case isAudioEventStream(contentType) && len(data) > 0 && len(data) <= auditlog.MaxBodyCapture:
 		auditlog.EnrichEntryWithResponseBody(c, auditlog.CaptureLoggedBody(data))
 	}
+}
+
+// captureRelayedAudioResponseBody does the same for a relayed body, which the
+// bounded capture only holds while it stays under the ceiling. Past it the bytes
+// are gone but their count is not, and recording the count keeps the entry
+// honest: a placeholder built from the abandoned buffer would report a
+// multi-megabyte response as zero bytes.
+func (s *audioService) captureRelayedAudioResponseBody(c *echo.Context, contentType string, data []byte, complete bool, total int) {
+	if !s.logBodies {
+		return
+	}
+	if !complete {
+		if auditlog.IsAudioContentType(contentType) {
+			auditlog.EnrichEntryWithResponseBody(c, auditlog.UnretainedAudioResponseBody(contentType, total))
+		}
+		return
+	}
+	s.captureAudioResponseBody(c, contentType, data)
 }
 
 // audioSpeechAuditInput builds the audit request body for a text-to-speech
