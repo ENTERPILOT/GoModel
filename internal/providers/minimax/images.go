@@ -15,6 +15,17 @@ import (
 
 var _ core.ImageProvider = (*Provider)(nil)
 
+// imageDimensionError describes the pixel dimensions MiniMax's image
+// generation endpoint accepts.
+const imageDimensionError = "image dimensions must be multiples of 8 between 512 and 2048"
+
+// validImageDimension reports whether v is a width or height MiniMax accepts.
+// Image generation and image edits both post to /image_generation, so both
+// apply it rather than letting the provider reject the request upstream.
+func validImageDimension(v int) bool {
+	return v >= 512 && v <= 2048 && v%8 == 0
+}
+
 // CreateImage translates image requests to MiniMax's native image endpoint.
 func (p *Provider) CreateImage(ctx context.Context, req *core.ImageGenerationRequest) (*core.ImageGenerationResponse, error) {
 	if err := core.ValidateImageGenerationRequest(req); err != nil {
@@ -54,8 +65,8 @@ func (p *Provider) CreateImage(ctx context.Context, req *core.ImageGenerationReq
 		}
 		width, widthErr := strconv.Atoi(parts[0])
 		height, heightErr := strconv.Atoi(parts[1])
-		if widthErr != nil || heightErr != nil || width < 512 || width > 2048 || height < 512 || height > 2048 || width%8 != 0 || height%8 != 0 {
-			return nil, core.NewInvalidRequestError("image dimensions must be multiples of 8 between 512 and 2048", nil)
+		if widthErr != nil || heightErr != nil || !validImageDimension(width) || !validImageDimension(height) {
+			return nil, core.NewInvalidRequestError(imageDimensionError, nil)
 		}
 		fields["width"] = json.RawMessage(strconv.Itoa(width))
 		fields["height"] = json.RawMessage(strconv.Itoa(height))
