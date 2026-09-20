@@ -48,6 +48,9 @@ The most common way to configure GoModel. Set any of the variables below to over
 | `BODY_SIZE_LIMIT`    | Max request body size (e.g., `10M`, `1024K`, `500KB`) | _(no limit)_           |
 | `STREAM_STALL_TIMEOUT` | Seconds one response write on a model route may wait for the client to read it; `0` disables | `60`                   |
 | `USER_PATH_HEADER`   | Header used to read/write request `user_path` values  | `X-GoModel-User-Path`  |
+| `SERVER_TRUSTED_PROXIES` | Networks your own proxies sit on; enables header-based client addresses | _(empty)_ |
+| `SERVER_CLIENT_IP_HEADER` | Header a trusted proxy passes the client address in | `X-Forwarded-For` |
+| `SERVER_TRUSTED_HOPS` | Proxies between the client and the gateway; `0` scans the chain instead | `0` |
 | `SWAGGER_ENABLED`    | Expose [Swagger UI](/advanced/swagger-ui); needs a `-tags=swagger` build | `false`                |
 | `AUTH_VERIFY_ENABLED` | Expose [`GET /v1/auth/verify`](/advanced/api-endpoints#key-verification), which reports whether the API key a request carries is valid | `false`                |
 | `PID_FILE`           | Where the running gateway records its process id for `gomodel --reload`. Changing it needs a restart | `data/gomodel.pid` next to a `./data` directory, otherwise the per-user data directory |
@@ -60,6 +63,57 @@ When it fires the connection is closed, the upstream provider request is
 cancelled, and the audit entry records `client_stalled`, also when the stream
 was served from the response cache. Raise it for clients that legitimately
 pause reading a stream for over a minute; set `0` to disable.
+
+#### Client addresses behind a proxy
+
+Every client address GoModel reports — audit entries, rate limit keys, logs —
+is the address of the connection that reached the gateway, so behind a reverse
+proxy they all show the proxy. Set `SERVER_TRUSTED_PROXIES` to the networks
+your own proxies sit on and GoModel reads the forwarded client instead.
+Nothing is trusted until you list it, not even loopback, and changing these
+settings needs a restart.
+
+```bash
+SERVER_TRUSTED_PROXIES=10.42.0.0/16,loopback
+```
+
+Entries are CIDR networks, bare addresses (a single host), or a preset:
+
+| Preset     | Expands to                                           |
+| ---------- | ---------------------------------------------------- |
+| `loopback` | `127.0.0.0/8`, `::1/128`                             |
+| `private`  | `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7` |
+
+Prefer the one subnet your proxy sits on. `private` trusts every private
+client to set its own forwarded address, which is the wrong answer when your
+clients are on private addresses too — a home lab whose clients live on
+`192.168.1.0/24` and whose cluster runs on `10.42.0.0/16` should list
+`10.42.0.0/16` alone.
+
+By default GoModel reads `X-Forwarded-For`, where each hop appends the address
+it saw, and records the nearest hop that is not one of your trusted networks:
+the last address your own infrastructure wrote, and the furthest one a client
+cannot overwrite. A request from outside the listed networks, a chain it cannot
+parse, and a chain made entirely of trusted networks all keep the connection
+address — in that last case every entry is a claim an internal client could
+have invented.
+
+Two settings change how the header is read:
+
+- `SERVER_CLIENT_IP_HEADER` names a different header. Anything other than
+  `X-Forwarded-For` carries a single address and is taken verbatim, which is
+  the correct reading behind an edge that resolves the client itself:
+  `SERVER_CLIENT_IP_HEADER=CF-Connecting-IP` behind Cloudflare, or `X-Real-IP`
+  behind an nginx that sets it. RFC 7239 `Forwarded` is not supported.
+- `SERVER_TRUSTED_HOPS` takes the `X-Forwarded-For` entry at a fixed depth
+  instead of scanning the chain — `1` is the rightmost entry, `2` the one
+  before it. Use it when your edge sits at a known depth but rotates through
+  addresses you cannot enumerate. The connection must still come from a trusted
+  network, and a chain shorter than the configured depth falls back to the
+  connection address.
+
+Both require `SERVER_TRUSTED_PROXIES`; on their own they are a startup error
+rather than a setting that silently does nothing.
 
 Set `GOMODEL_DEMO_MODE=true` for a public or shared demonstration instance.
 GoModel logs a warning at startup and every five minutes, renders a persistent
@@ -163,7 +217,11 @@ Storage is shared by audit logging, usage tracking, and future features like IAM
 | `LOGGING_BUFFER_SIZE`             | In-memory buffer before flush              | `1000`  |
 | `LOGGING_FLUSH_INTERVAL`          | Flush interval in seconds                  | `5`     |
 | `LOGGING_RETENTION_DAYS`          | Auto-delete after N days (0 = forever)     | `30`    |
-| `LOGGING_TRUSTED_PROXY_CIDRS`   | Networks your proxies sit on; enables X-Forwarded-For client IPs in audit entries | _(empty)_ |
+
+Audit entries record the client address the gateway resolved. Behind a reverse
+proxy that is the proxy until you list its network in
+`SERVER_TRUSTED_PROXIES` — see [client addresses behind a
+proxy](#client-addresses-behind-a-proxy).
 
 Realtime dashboard previews and persisted audit logs are separate features.
 With `DASHBOARD_LIVE_LOGS_ENABLED=true` and `LOGGING_ENABLED=false`, requests
@@ -178,23 +236,6 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
   still works but scans every entry in the selected date range. To enable it on
   a restricted role, run `CREATE EXTENSION pg_trgm;` as a superuser once and
   restart GoModel.
-</Note>
-
-<Note>
-  Audit entries record the address of the connection that reached the gateway,
-  so behind a proxy they all show the proxy. Set
-  `LOGGING_TRUSTED_PROXY_CIDRS` (or `logging.trusted_proxy_cidrs`) to the
-  networks your own proxies sit on to record the forwarded client instead: each
-  entry then carries the nearest `X-Forwarded-For` hop that is not one of those
-  networks, which is the last address your infrastructure wrote and the one a
-  client cannot overwrite. Requests arriving from outside the listed networks,
-  requests whose header cannot be parsed, and requests whose whole chain is made
-  of listed networks keep their connection address — in that last case no hop
-  was written by anything the gateway does not already trust, so the chain is a
-  claim an internal client could invent rather than evidence. Loopback and
-  private ranges are not trusted implicitly, so list every hop between clients
-  and the gateway, for example `10.0.0.0/8,127.0.0.1`. Changing it requires a
-  restart.
 </Note>
 
 <Warning>

@@ -25,6 +25,8 @@ type settings struct {
 	path        string
 	values      map[string]any
 	contentType string
+	remoteAddr  string
+	ipExtractor echo.IPExtractor
 	wrapWriter  func(http.ResponseWriter) http.ResponseWriter
 }
 
@@ -49,6 +51,19 @@ func WithPath(path string) Option {
 // values middleware would normally provide.
 func WithValue(key string, value any) Option {
 	return func(s *settings) { s.values[key] = value }
+}
+
+// WithRemoteAddr sets the address of the connection the request arrived on,
+// for handlers that distinguish the socket peer from a forwarded client. The
+// value may carry a port ("203.0.113.7:4321") or not.
+func WithRemoteAddr(addr string) Option {
+	return func(s *settings) { s.remoteAddr = addr }
+}
+
+// WithIPExtractor installs the client address strategy the server would apply,
+// so c.RealIP() reads forwarding headers the way the deployment does.
+func WithIPExtractor(extractor echo.IPExtractor) Option {
+	return func(s *settings) { s.ipExtractor = extractor }
 }
 
 // WithContentType overrides the Content-Type set for a non-nil body.
@@ -81,13 +96,24 @@ func Request(t testing.TB, method, target string, body any, opts ...Option) (*ec
 		req.Header.Set(echo.HeaderContentType, s.contentType)
 	}
 	maps.Copy(req.Header, s.headers)
+	if s.remoteAddr != "" {
+		req.RemoteAddr = s.remoteAddr
+	}
 
 	rec := httptest.NewRecorder()
 	var writer http.ResponseWriter = rec
 	if s.wrapWriter != nil {
 		writer = s.wrapWriter(rec)
 	}
-	c := echo.New().NewContext(req, writer)
+	e := echo.New()
+	// Echo's zero value consults forwarding headers; the server pins direct
+	// extraction unless a deployment opts in, so tests start from the same
+	// baseline.
+	e.IPExtractor = echo.ExtractIPDirect()
+	if s.ipExtractor != nil {
+		e.IPExtractor = s.ipExtractor
+	}
+	c := e.NewContext(req, writer)
 	if s.path != "" {
 		c.SetPath(s.path)
 	}

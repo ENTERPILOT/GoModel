@@ -156,6 +156,7 @@ func (b *bootstrap) initServerConfig() error {
 		Tagging:                         app.tagging.Service,
 		SessionDetector:                 session.NewDetectorFromConfig(appCfg.Session),
 		MCPEnabled:                      appCfg.MCP.Enabled,
+		IPExtractor:                     server.ClientIPExtractor(appCfg.Server.ClientIP),
 		VersionChecker:                  app.versionCheck,
 	}
 	if app.mcpGateway != nil {

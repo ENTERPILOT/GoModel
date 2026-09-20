@@ -381,6 +381,16 @@ func (a *App) logStartupInfo() {
 			"recommendation", "list the specific origins you serve an MCP web client from instead of \"*\"")
 	}
 
+	// Client address resolution. Reported whenever a proxy is trusted, because
+	// it decides which address every audit entry, rate limit key, and log line
+	// attributes a request to.
+	if policy := cfg.Server.ClientIP; policy.Enabled() {
+		slog.Info("trusted proxies configured",
+			"networks", cfg.Server.TrustedProxies,
+			"client_ip_header", policy.Header,
+			"trusted_hops", policy.Hops)
+	}
+
 	// Metrics configuration
 	if cfg.Metrics.Enabled {
 		slog.Info("prometheus metrics enabled", "endpoint", cfg.Metrics.Endpoint)
@@ -404,7 +414,6 @@ func (a *App) logStartupInfo() {
 			"log_image_bodies_scope", cfg.Logging.LogImageBodiesScope,
 			"log_headers", cfg.Logging.LogHeaders,
 			"retention_days", cfg.Logging.RetentionDays,
-			"trusted_proxy_cidrs", cfg.Logging.TrustedProxyCIDRs,
 		)
 	} else {
 		slog.Info("audit logging disabled")
