@@ -298,6 +298,12 @@ func Load() (*LoadResult, error) {
 	if err := validateRateLimitConfig(&cfg.RateLimits); err != nil {
 		return nil, err
 	}
+	// A disabled master key is forgotten outright, so no part of the gateway —
+	// the auth middleware, /v1/auth/verify, the version-check identity — can
+	// accept or derive anything from a key the operator turned off.
+	if cfg.Server.MasterKeyDisabled {
+		cfg.Server.MasterKey = ""
+	}
 	cfg.Server.BasePath = NormalizeBasePath(cfg.Server.BasePath)
 	cfg.Server.UserPathHeader, err = NormalizeHeaderName(cfg.Server.UserPathHeader, "X-GoModel-User-Path")
 	if err != nil {

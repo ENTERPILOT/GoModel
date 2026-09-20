@@ -120,6 +120,7 @@ func (b *bootstrap) initServerConfig() error {
 	serverCfg := &server.Config{
 		BasePath:                        appCfg.Server.BasePath,
 		MasterKey:                       appCfg.Server.MasterKey,
+		MasterKeyDisabled:               appCfg.Server.MasterKeyDisabled,
 		Authenticator:                   app.authKeys.Service,
 		MetricsEnabled:                  appCfg.Metrics.Enabled,
 		MetricsEndpoint:                 appCfg.Metrics.Endpoint,

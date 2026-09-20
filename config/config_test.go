@@ -63,7 +63,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
 		"CONFIG_STRICT",
-		"PORT", "BASE_PATH", "GOMODEL_MASTER_KEY", "BODY_SIZE_LIMIT", "STREAM_STALL_TIMEOUT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "USER_PATH_HEADER", "ENABLED_PASSTHROUGH_PROVIDERS",
+		"PORT", "BASE_PATH", "GOMODEL_MASTER_KEY", "MASTER_KEY_DISABLED", "BODY_SIZE_LIMIT", "STREAM_STALL_TIMEOUT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "USER_PATH_HEADER", "ENABLED_PASSTHROUGH_PROVIDERS",
 		"SERVER_TRUSTED_PROXIES", "SERVER_CLIENT_IP_HEADER", "SERVER_TRUSTED_HOPS",
 		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL", "MODEL_LIST_URL", "GOMODEL_OFFLINE", "GOMODEL_VERSION_CHECK_ENABLED",
 		"REDIS_URL", "REDIS_KEY_MODELS", "REDIS_KEY_RESPONSES", "REDIS_TTL_MODELS", "REDIS_TTL_RESPONSES",
@@ -1725,4 +1725,32 @@ server:
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "server.stream_stall_timeout")
 	})
+}
+
+func TestLoadMasterKeyDisabledForgetsTheConfiguredKey(t *testing.T) {
+	tests := []struct {
+		name     string
+		disabled string
+		wantKey  string
+	}{
+		{name: "default keeps the key", disabled: "", wantKey: "secret-key"},
+		{name: "disabled clears the key", disabled: "true", wantKey: ""},
+		{name: "explicit false keeps the key", disabled: "false", wantKey: "secret-key"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			withTempDir(t, func(string) {
+				t.Setenv("GOMODEL_MASTER_KEY", "secret-key")
+				if tt.disabled != "" {
+					t.Setenv("MASTER_KEY_DISABLED", tt.disabled)
+				}
+
+				result, err := Load()
+				require.NoError(t, err)
+				require.Equal(t, tt.wantKey, result.Config.Server.MasterKey)
+				require.Equal(t, tt.disabled == "true", result.Config.Server.MasterKeyDisabled)
+			})
+		})
+	}
 }

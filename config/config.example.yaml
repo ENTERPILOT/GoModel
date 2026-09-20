@@ -7,6 +7,7 @@ server:
   port: "8080"
   base_path: "/" # env: BASE_PATH; set to "/g" to serve the gateway under https://example.com/g/
   master_key: "your-secret-key"
+  master_key_disabled: false # env: MASTER_KEY_DISABLED; true forgets the master key and authenticates managed gateway API keys only. The gateway then requires a credential on every request and keeps the admin API behind a managed key, so create one with dashboard access first
   body_size_limit: "10M"
   stream_stall_timeout: 60 # env: STREAM_STALL_TIMEOUT; seconds one response write on a model route may wait for the client to read it. Fires only when a client stops reading, never while the provider is slow; 0 disables
   swagger_enabled: false # env: SWAGGER_ENABLED; requires a binary built with -tags=swagger
