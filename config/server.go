@@ -22,12 +22,18 @@ var bodySizeLimitRegex = regexp.MustCompile(`(?i)^(\d+)([KMG])?B?$`)
 
 // ServerConfig holds HTTP server configuration
 type ServerConfig struct {
-	Port           string `yaml:"port" env:"PORT"`
-	BasePath       string `yaml:"base_path" env:"BASE_PATH"`             // URL path prefix where the app is mounted (e.g., "/g")
-	MasterKey      string `yaml:"master_key" env:"GOMODEL_MASTER_KEY"`   // Optional: Master key for authentication
-	BodySizeLimit  string `yaml:"body_size_limit" env:"BODY_SIZE_LIMIT"` // Max request body size (e.g., "10M", "1024K")
-	SwaggerEnabled bool   `yaml:"swagger_enabled" env:"SWAGGER_ENABLED"` // Whether to expose the Swagger UI at /swagger/index.html
-	PprofEnabled   bool   `yaml:"pprof_enabled" env:"PPROF_ENABLED"`     // Whether to expose debug profiling routes at /debug/pprof/*
+	Port      string `yaml:"port" env:"PORT"`
+	BasePath  string `yaml:"base_path" env:"BASE_PATH"`           // URL path prefix where the app is mounted (e.g., "/g")
+	MasterKey string `yaml:"master_key" env:"GOMODEL_MASTER_KEY"` // Optional: Master key for authentication
+	// MasterKeyDisabled turns off master key authentication. Default: false.
+	// Set it to leave managed keys and any configured authentication extension
+	// as the only credentials: the master key is forgotten at startup, and the
+	// gateway then requires a credential on every request instead of falling
+	// back to unauthenticated access or opening the admin API for bootstrap.
+	MasterKeyDisabled bool   `yaml:"master_key_disabled" env:"MASTER_KEY_DISABLED"`
+	BodySizeLimit     string `yaml:"body_size_limit" env:"BODY_SIZE_LIMIT"` // Max request body size (e.g., "10M", "1024K")
+	SwaggerEnabled    bool   `yaml:"swagger_enabled" env:"SWAGGER_ENABLED"` // Whether to expose the Swagger UI at /swagger/index.html
+	PprofEnabled      bool   `yaml:"pprof_enabled" env:"PPROF_ENABLED"`     // Whether to expose debug profiling routes at /debug/pprof/*
 	// EnablePassthroughRoutes exposes provider-native passthrough endpoints under
 	// /p/{provider}/{endpoint}. Default: true.
 	EnablePassthroughRoutes bool `yaml:"enable_passthrough_routes" env:"ENABLE_PASSTHROUGH_ROUTES"`

@@ -44,6 +44,7 @@ The most common way to configure GoModel. Set any of the variables below to over
 | `PORT`               | HTTP server port                                      | `8080`                 |
 | `BASE_PATH`          | Mount path prefix, for example `/g`                   | `/`                    |
 | `GOMODEL_MASTER_KEY` | Authentication key for securing the gateway           | _(empty, unsafe mode)_ |
+| `MASTER_KEY_DISABLED` | Turn off master key authentication, leaving [managed keys](/features/users) and authentication extensions as the only credentials | `false`                |
 | `GOMODEL_DEMO_MODE`  | Enable public demo warnings in logs and the dashboard  | `false`                |
 | `BODY_SIZE_LIMIT`    | Max request body size (e.g., `10M`, `1024K`, `500KB`) | _(no limit)_           |
 | `STREAM_STALL_TIMEOUT` | Seconds one response write on a model route may wait for the client to read it; `0` disables | `60`                   |
@@ -127,6 +128,33 @@ gateway API key, so requests require a bearer token even when
 `GOMODEL_MASTER_KEY` is empty. Disabled or expired managed keys keep
 authentication enabled as a fail-closed safety measure. Delete every managed
 key to return to unauthenticated mode, or configure a master key for recovery.
+
+#### Disabling the master key
+
+The master key is a single global credential: whoever holds it is every user
+of the gateway at once. Once managed gateway API keys are issued, set
+`MASTER_KEY_DISABLED=true` (`server.master_key_disabled` in YAML) to retire it
+and leave those keys — together with any authentication extension you run,
+such as SSO — as the only way in. Per-key user paths, budgets, rate limits,
+and audit trails then apply to every request, including the admin API.
+
+```bash
+MASTER_KEY_DISABLED=true
+```
+
+GoModel forgets any configured master key at startup, so nothing accepts or
+derives from it: it fails against the gateway, against
+[`GET /v1/auth/verify`](/advanced/api-endpoints#key-verification), and against
+`/admin`. A key left in the environment or `config.yaml` is inert rather than
+an error, which is what makes the switch safe to flip ahead of removing it.
+
+Disabling is not the same as leaving `GOMODEL_MASTER_KEY` empty, which runs the
+gateway unauthenticated and opens `/admin/*` so the dashboard can bootstrap its
+first managed key. A disabled master key fails closed instead: every request
+needs a credential, and the admin API stays behind one carrying dashboard
+access. Issue that credential before flipping the switch — with no master key,
+no managed key, and no authentication extension, the gateway rejects every
+request and logs a warning at startup saying so.
 
 #### MCP Gateway
 

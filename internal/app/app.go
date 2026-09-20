@@ -345,6 +345,16 @@ func (a *App) logStartupInfo() {
 
 	// Security warnings
 	managedKeysConfigured := a.authKeys != nil && a.authKeys.Service != nil && a.authKeys.Service.Enabled()
+	if cfg.Server.MasterKeyDisabled {
+		// The key is already cleared from the configuration at load; this only
+		// reports the posture, and warns when it leaves nothing to authenticate
+		// with, because then every request is rejected.
+		slog.Info("master key authentication disabled", "master_key_disabled", true)
+		if !managedKeysConfigured && !a.extensionAuth {
+			slog.Warn("SECURITY NOTICE: master key disabled with no other credential configured - every request will be rejected",
+				"recommendation", "create a managed gateway API key, or unset MASTER_KEY_DISABLED to use the master key again")
+		}
+	}
 	switch {
 	case a.extensionAuth && cfg.Server.MasterKey != "" && managedKeysConfigured:
 		slog.Info("authentication enabled", "mode", "master_key+managed_keys+extension")
@@ -356,6 +366,9 @@ func (a *App) logStartupInfo() {
 		slog.Info("authentication enabled", "mode", "master_key+managed_keys", "managed_key_total", a.authKeys.Service.Total(), "managed_key_active", a.authKeys.Service.ActiveCount())
 	case managedKeysConfigured:
 		slog.Info("authentication enabled", "mode", "managed_keys", "managed_key_total", a.authKeys.Service.Total(), "managed_key_active", a.authKeys.Service.ActiveCount())
+	case cfg.Server.MasterKeyDisabled:
+		// Reported above; no master key means no authentication only when one
+		// could have been configured.
 	case cfg.Server.MasterKey == "":
 		slog.Warn("SECURITY WARNING: GOMODEL_MASTER_KEY not set - server running in UNSAFE MODE",
 			"security_risk", "unauthenticated access allowed",

@@ -35,12 +35,43 @@ func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerToken
 // authenticators such as OIDC sessions. Explicit bearer credentials always
 // take precedence over ambient request credentials such as cookies.
 func AuthMiddlewareWithRequestAuthenticators(masterKey string, authenticator BearerTokenAuthenticator, requestAuthenticators []ext.RequestAuthenticator, skipPaths []string, userPathHeader ...string) echo.MiddlewareFunc {
-	userPathHeaderName := configuredUserPathHeaderName(userPathHeader...)
+	return NewAuthMiddleware(AuthMiddlewareConfig{
+		MasterKey:             masterKey,
+		Authenticator:         authenticator,
+		RequestAuthenticators: requestAuthenticators,
+		SkipPaths:             skipPaths,
+		UserPathHeader:        configuredUserPathHeaderName(userPathHeader...),
+	})
+}
+
+// AuthMiddlewareConfig collects what the authentication middleware validates
+// against.
+type AuthMiddlewareConfig struct {
+	MasterKey             string                     // Optional: master key accepted as a bearer credential
+	Authenticator         BearerTokenAuthenticator   // Optional: managed API key authenticator
+	RequestAuthenticators []ext.RequestAuthenticator // Optional: extension authenticators such as OIDC sessions
+	SkipPaths             []string                   // Paths that bypass authentication; a "/*" suffix matches by prefix
+	UserPathHeader        string                     // Header carrying the request user path
+	// RequireCredential rejects requests that carry no valid credential even
+	// when no auth mechanism is configured, instead of allowing them. It is
+	// what keeps a gateway whose master key was turned off closed rather than
+	// wide open once its managed keys are gone.
+	RequireCredential bool
+}
+
+// NewAuthMiddleware creates the authentication middleware from cfg.
+func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
+	masterKey := cfg.MasterKey
+	authenticator := cfg.Authenticator
+	requestAuthenticators := cfg.RequestAuthenticators
+	skipPaths := cfg.SkipPaths
+	userPathHeaderName := configuredUserPathHeaderName(cfg.UserPathHeader)
 	hasRequestAuthenticator := hasRequestAuthenticators(requestAuthenticators)
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
-			// If no auth mechanism is configured, allow all requests.
-			if masterKey == "" && (authenticator == nil || !authenticator.Enabled()) && !hasRequestAuthenticator {
+			// If no auth mechanism is configured, allow all requests unless the
+			// deployment asked for a credential regardless.
+			if !cfg.RequireCredential && masterKey == "" && (authenticator == nil || !authenticator.Enabled()) && !hasRequestAuthenticator {
 				auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodNoKey)
 				setInteractionContinuationAllowed(c, true)
 				return next(c)
