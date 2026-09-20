@@ -66,7 +66,7 @@ func TestCreateSpeech_ForwardsRequestAndLabelsUpstreamFormat(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "audio/wav", resp.ContentType)
-	assert.Equal(t, "RIFF....WAVE", string(resp.Data))
+	assert.Equal(t, "RIFF....WAVE", string(providertest.AudioBytes(t, resp)))
 
 	req := capture.Last(t)
 	assert.Equal(t, http.MethodPost, req.Method)
@@ -130,16 +130,17 @@ func TestCreateTranscription_SendsMultipartUpload(t *testing.T) {
 	provider := newTestProvider("", server.URL, server.Client(), llmclient.Hooks{})
 
 	resp, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
-		Model:    "moonshine-tiny",
-		Filename: "speech.wav",
-		File:     []byte("RIFF-bytes"),
-		Language: "en",
-		Prompt:   "GoModel",
-		Fields:   []core.FormField{{Name: "stream", Value: "true"}, {Name: "busy_timeout_ms", Value: "5000"}},
+		Model:       "moonshine-tiny",
+		Filename:    "speech.wav",
+		File:        []byte("RIFF-bytes"),
+		Language:    "en",
+		Prompt:      "GoModel",
+		Temperature: "0.37",
+		Fields:      []core.FormField{{Name: "busy_timeout_ms", Value: "5000"}},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "application/json", resp.ContentType)
-	assert.JSONEq(t, `{"text":"the task has completed successfully","timing":{"wall_ms":216.4}}`, string(resp.Data))
+	assert.JSONEq(t, `{"text":"the task has completed successfully","timing":{"wall_ms":216.4}}`, string(providertest.AudioBytes(t, resp)))
 
 	req := capture.Last(t)
 	assert.Equal(t, "/v1/audio/transcriptions", req.Path)
@@ -150,7 +151,7 @@ func TestCreateTranscription_SendsMultipartUpload(t *testing.T) {
 		{Name: "model", Value: "moonshine-tiny"},
 		{Name: "language", Value: "en"},
 		{Name: "prompt", Value: "GoModel"},
-		{Name: "stream", Value: "true"},
+		{Name: "temperature", Value: "0.37"},
 		{Name: "busy_timeout_ms", Value: "5000"},
 	}, fields)
 }
@@ -252,13 +253,13 @@ func TestCreateTranscription_TextFormatReturnsPlainTranscript(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "text/plain; charset=utf-8", resp.ContentType)
-	assert.Equal(t, "hello there", string(resp.Data))
+	assert.Equal(t, "hello there", string(providertest.AudioBytes(t, resp)))
 }
 
 // A streamed transcription answers with the OpenAI transcript events, so the
 // body is relayed under its own content type instead of being labelled JSON.
 func TestCreateTranscription_RelaysStreamedEvents(t *testing.T) {
-	server, _ := providertest.SSEServer(t, "event: transcript.text.delta\ndata: {\"delta\":\"hi\"}\n\ndata: [DONE]\n\n")
+	server, capture := providertest.SSEServer(t, "event: transcript.text.delta\ndata: {\"delta\":\"hi\"}\n\ndata: [DONE]\n\n")
 	provider := newTestProvider("", server.URL, server.Client(), llmclient.Hooks{})
 
 	resp, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
@@ -268,7 +269,12 @@ func TestCreateTranscription_RelaysStreamedEvents(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.True(t, strings.HasPrefix(resp.ContentType, "text/event-stream"), "content type %q", resp.ContentType)
-	assert.Contains(t, string(resp.Data), "transcript.text.delta")
+	assert.Contains(t, string(providertest.AudioBytes(t, resp)), "transcript.text.delta")
+
+	// stream is not a field the gateway consumes, so it has to travel verbatim
+	// for the upstream to answer with events at all.
+	fields, _, _ := multipartFields(t, capture.Last(t))
+	assert.Contains(t, fields, core.FormField{Name: "stream", Value: "true"})
 }
 
 // audio.cpp reports errors in the OpenAI envelope, so the client-level parser

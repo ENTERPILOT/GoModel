@@ -40,7 +40,10 @@ func (p *Provider) CreateSpeech(ctx context.Context, req *core.AudioSpeechReques
 		return nil, err
 	}
 
-	raw, err := p.client.DoRaw(ctx, llmclient.Request{
+	// Relayed rather than buffered: audio.cpp streams synthesized audio as it
+	// is generated, and holding the whole take costs time-to-first-byte for
+	// nothing.
+	raw, err := p.client.DoStreamResponse(ctx, llmclient.Request{
 		Method:   http.MethodPost,
 		Endpoint: "/v1/audio/speech",
 		Model:    req.Model,
@@ -49,7 +52,7 @@ func (p *Provider) CreateSpeech(ctx context.Context, req *core.AudioSpeechReques
 	if err != nil {
 		return nil, err
 	}
-	return &core.AudioResponse{ContentType: speechContentType(raw), Data: raw.Body}, nil
+	return &core.AudioResponse{ContentType: speechContentType(raw), Stream: raw.Stream}, nil
 }
 
 // speechContentType describes the bytes audio.cpp actually returned. Its
@@ -123,23 +126,73 @@ func (p *Provider) CreateTranscription(ctx context.Context, req *core.AudioTrans
 
 func (p *Provider) transcribeUpload(ctx context.Context, req *core.AudioTranscriptionRequest, content io.Reader) (*core.AudioResponse, error) {
 	body, contentType := transcriptionMultipart(req, content)
-	raw, err := p.client.DoRaw(ctx, llmclient.Request{
+	upstream := llmclient.Request{
 		Method:        http.MethodPost,
 		Endpoint:      "/v1/audio/transcriptions",
 		Model:         req.Model,
 		RawBodyReader: body,
 		Headers:       http.Header{"Content-Type": {contentType}},
-	})
+	}
+
+	// A forwarded stream=true makes audio.cpp answer with server-sent events as
+	// it transcribes, so the transcript is relayed as it arrives. Everything
+	// else is one complete payload and stays on the buffered path, which is
+	// what response_format=text needs to read the transcript out of.
+	if transcriptionStreamRequested(req) {
+		raw, err := p.client.DoStreamResponse(ctx, upstream)
+		if err != nil {
+			return nil, err
+		}
+		return &core.AudioResponse{ContentType: streamedTranscriptContentType(raw), Stream: raw.Stream}, nil
+	}
+
+	raw, err := p.client.DoRaw(ctx, upstream)
 	if err != nil {
 		return nil, err
 	}
 	return transcriptionResponse(req, raw)
 }
 
+// transcriptionStreamRequested reports whether the caller asked for an
+// incremental transcript. stream is not a field the gateway consumes, so it
+// travels in the passthrough form values (ADR-0011 rule 1) and is read back
+// from there rather than duplicated as a typed member.
+func transcriptionStreamRequested(req *core.AudioTranscriptionRequest) bool {
+	for _, field := range req.Fields {
+		if field.Name != "stream" {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(field.Value)) {
+		case "true", "1":
+			return true
+		}
+	}
+	return false
+}
+
+// streamedTranscriptContentType labels a relayed transcript. Only the upstream
+// can describe a body it is still producing; the fallback is server-sent
+// events, which is what asking for a stream returns.
+func streamedTranscriptContentType(raw *llmclient.Response) string {
+	if raw != nil {
+		if contentType := strings.TrimSpace(raw.ContentType); contentType != "" {
+			return contentType
+		}
+	}
+	return "text/event-stream"
+}
+
 // transcriptionMultipart streams the OpenAI-style upload audio.cpp accepts:
 // the file part plus the fields its multipart parser reads. Unknown parts are
 // ignored upstream, so forwarded fields the gateway does not consume itself
 // (stream, busy_timeout_ms, ...) travel verbatim (ADR-0011 rule 1).
+//
+// The typed fields are written explicitly because the server layer parses them
+// out of the form, which also marks them reserved: they cannot reach the
+// upstream through req.Fields. response_format is the exception and stays
+// behind: audio.cpp reads it only on the speech routes, and its transcription
+// reply is the same JSON whatever is asked for, so the format is applied to
+// that reply here instead.
 func transcriptionMultipart(req *core.AudioTranscriptionRequest, content io.Reader) (io.Reader, string) {
 	filename := strings.TrimSpace(req.Filename)
 	if filename == "" {
@@ -155,6 +208,7 @@ func transcriptionMultipart(req *core.AudioTranscriptionRequest, content io.Read
 			{"model", req.Model},
 			{"language", req.Language},
 			{"prompt", req.Prompt},
+			{"temperature", req.Temperature},
 		}
 		for _, field := range req.Fields {
 			if core.ReservedAudioTranscriptionFormFields[field.Name] {
