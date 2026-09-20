@@ -6,7 +6,6 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/goccy/go-json"
@@ -24,6 +23,9 @@ import (
 // The "voice" a caller sends names an audio.cpp voice preset, cached voice id,
 // or voice-library wav rather than an OpenAI voice, since audio.cpp has no
 // fixed voice set.
+//
+// The one field that does not travel is a voice_ref naming a server-side path:
+// see serverPathVoiceRefError.
 func (p *Provider) CreateSpeech(ctx context.Context, req *core.AudioSpeechRequest) (*core.AudioResponse, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("audio speech request is required", nil)
@@ -33,6 +35,9 @@ func (p *Provider) CreateSpeech(ctx context.Context, req *core.AudioSpeechReques
 	}
 	if strings.TrimSpace(req.Input) == "" {
 		return nil, core.NewInvalidRequestError("input is required", nil)
+	}
+	if err := rejectServerPathVoiceRef(req.ExtraFields.Lookup("voice_ref")); err != nil {
+		return nil, err
 	}
 
 	raw, err := p.client.DoRaw(ctx, llmclient.Request{
@@ -60,23 +65,37 @@ func speechContentType(raw *llmclient.Response) string {
 	return core.SpeechResponseContentType("wav")
 }
 
-// audioPathFields are the request fields audio.cpp reads a server-local audio
-// path from, in its own resolution order. They arrive as passthrough form
-// values because the gateway's typed transcription request has no member for
-// them.
-var audioPathFields = []string{"audio", "audio_path"}
+// rejectServerPathVoiceRef refuses a cloning reference that names a file on the
+// audio.cpp host. Being authorized for a model is not authorization to read the
+// server's filesystem, and this endpoint hands out no other filesystem reach,
+// so a path here would let any caller pick what the server reads. An inline
+// base64 reference carries its own audio and is unaffected; the native request
+// shape stays available through passthrough, which an operator enables
+// deliberately.
+func rejectServerPathVoiceRef(raw json.RawMessage) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	var reference struct {
+		Type string `json:"type"`
+	}
+	// A bare string is a path; an object declares its own type, and only
+	// "base64" carries the audio inline.
+	if err := json.Unmarshal(raw, &reference); err != nil || !strings.EqualFold(strings.TrimSpace(reference.Type), "base64") {
+		return core.NewInvalidRequestError(
+			"audiocpp voice_ref must carry inline base64 audio here; a server-side path is only accepted on the native /p/audiocpp/audio/speech route", nil)
+	}
+	return nil
+}
 
 // CreateTranscription implements speech-to-text against audio.cpp's POST
-// /v1/audio/transcriptions, which accepts two request shapes:
+// /v1/audio/transcriptions as an OpenAI-style multipart upload.
 //
-//   - an OpenAI-style multipart upload, used whenever the caller sent file
-//     bytes;
-//   - a JSON body naming a path the server itself can read, used when the
-//     caller sent an "audio" (or "audio_path") field instead of a file.
-//
-// The second shape is why the gateway does not insist on a "file" part: the
-// audio never leaves the machine audio.cpp runs on, so there is nothing to
-// upload. A request carrying neither is still an error, and says so.
+// audio.cpp also accepts a JSON body naming a path the server itself can read,
+// and a live route that carries raw PCM with no file at all. Neither is offered
+// here: both let the caller choose what the audio.cpp host reads or how long it
+// holds the model, which being authorized for a model does not cover. They stay
+// on the native passthrough surface, which an operator enables deliberately.
 func (p *Provider) CreateTranscription(ctx context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("audio transcription request is required", nil)
@@ -97,7 +116,7 @@ func (p *Provider) CreateTranscription(ctx context.Context, req *core.AudioTrans
 		content = bytes.NewReader(req.File)
 	}
 	if content == nil {
-		return p.transcribeServerPath(ctx, req)
+		return nil, core.NewInvalidRequestError("file is required", nil)
 	}
 	return p.transcribeUpload(ctx, req, content)
 }
@@ -115,81 +134,6 @@ func (p *Provider) transcribeUpload(ctx context.Context, req *core.AudioTranscri
 		return nil, err
 	}
 	return transcriptionResponse(req, raw)
-}
-
-// transcribeServerPath sends the JSON request shape, reachable from the
-// OpenAI-compatible endpoint by passing the path as a form field instead of a
-// file part.
-func (p *Provider) transcribeServerPath(ctx context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
-	audioPath := serverAudioPath(req.Fields)
-	if audioPath == "" {
-		return nil, core.NewInvalidRequestError(
-			"file is required, or an audio field naming a path the audio.cpp server can read", nil)
-	}
-
-	body := map[string]any{"model": req.Model, "audio": audioPath}
-	if language := strings.TrimSpace(req.Language); language != "" {
-		body["language"] = language
-	}
-	// audio.cpp calls the recognition-context field "text"; "prompt" is the
-	// OpenAI name for the same thing.
-	if prompt := strings.TrimSpace(req.Prompt); prompt != "" {
-		body["text"] = prompt
-	}
-	if err := addNativeTranscriptionFields(body, req.Fields); err != nil {
-		return nil, err
-	}
-
-	rawBody, err := json.Marshal(body)
-	if err != nil {
-		return nil, core.NewInvalidRequestError("failed to encode audiocpp transcription request", err)
-	}
-	raw, err := p.client.DoRaw(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/v1/audio/transcriptions",
-		Model:    req.Model,
-		RawBody:  rawBody,
-		Headers:  http.Header{"Content-Type": {"application/json"}},
-	})
-	if err != nil {
-		return nil, err
-	}
-	return transcriptionResponse(req, raw)
-}
-
-// serverAudioPath returns the server-local path the caller named, in the order
-// audio.cpp resolves the fields itself.
-func serverAudioPath(fields []core.FormField) string {
-	for _, name := range audioPathFields {
-		for _, field := range fields {
-			if field.Name == name && strings.TrimSpace(field.Value) != "" {
-				return field.Value
-			}
-		}
-	}
-	return ""
-}
-
-// addNativeTranscriptionFields copies the forwarded form values the JSON
-// request shape understands, restoring the JSON type each one crossed the
-// gateway as a string: audio.cpp reads them as a boolean and a number, and a
-// string in either place fails the request. The rest of the forwarded values
-// are multipart-only and have no place in this body.
-func addNativeTranscriptionFields(body map[string]any, fields []core.FormField) error {
-	for _, field := range fields {
-		value := strings.TrimSpace(field.Value)
-		switch field.Name {
-		case "stream":
-			body["stream"] = value == "true" || value == "True" || value == "1"
-		case "busy_timeout_ms":
-			milliseconds, err := strconv.Atoi(value)
-			if err != nil {
-				return core.NewInvalidRequestError("busy_timeout_ms must be an integer", err)
-			}
-			body["busy_timeout_ms"] = milliseconds
-		}
-	}
-	return nil
 }
 
 // transcriptionMultipart streams the OpenAI-style upload audio.cpp accepts:

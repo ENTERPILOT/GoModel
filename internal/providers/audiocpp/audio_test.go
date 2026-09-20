@@ -87,7 +87,7 @@ func TestCreateSpeech_ForwardsNativeExtraFields(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(`{
 		"model": "pocket-tts",
 		"input": "cloned from an inline reference",
-		"voice_ref": {"type": "path", "path": "voices/alba.wav"},
+		"voice_ref": {"type": "base64", "data": "UklGRh"},
 		"reference_text": "transcript of the reference audio",
 		"seed": "12345678901234567890"
 	}`), &req))
@@ -98,7 +98,7 @@ func TestCreateSpeech_ForwardsNativeExtraFields(t *testing.T) {
 	sent := capture.Last(t).JSON(t)
 	assert.Equal(t, "12345678901234567890", sent["seed"])
 	assert.Equal(t, "transcript of the reference audio", sent["reference_text"])
-	assert.Equal(t, map[string]any{"type": "path", "path": "voices/alba.wav"}, sent["voice_ref"])
+	assert.Equal(t, map[string]any{"type": "base64", "data": "UklGRh"}, sent["voice_ref"])
 }
 
 func TestCreateSpeech_ValidatesRequest(t *testing.T) {
@@ -155,43 +155,56 @@ func TestCreateTranscription_SendsMultipartUpload(t *testing.T) {
 	}, fields)
 }
 
-// A request with no file part is not an error here: audio.cpp transcribes a
-// path on its own machine, which is the case behind the gateway no longer
-// demanding an upload.
-func TestCreateTranscription_SendsJSONForAServerLocalPath(t *testing.T) {
-	for _, field := range audioPathFields {
+// The native request shapes that let a caller choose what the audio.cpp host
+// reads are not offered on the shared endpoint: being authorized for a model is
+// not authorization to name a file on the server.
+func TestCreateTranscription_RejectsServerLocalPaths(t *testing.T) {
+	for _, field := range []string{"audio", "audio_path"} {
 		t.Run(field, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, http.StatusOK, `{"text":"hello"}`)
 			provider := NewWithHTTPClient("", server.URL, server.Client(), llmclient.Hooks{})
 
-			resp, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
-				Model:    "moonshine-tiny",
-				Language: "en",
-				Prompt:   "GoModel",
-				Fields: []core.FormField{
-					{Name: field, Value: "/srv/audio/input.wav"},
-					{Name: "stream", Value: "true"},
-					{Name: "busy_timeout_ms", Value: "5000"},
-					{Name: "unknown_form_only", Value: "x"},
-				},
+			_, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
+				Model:  "moonshine-tiny",
+				Fields: []core.FormField{{Name: field, Value: "/etc/shadow"}},
 			})
-			require.NoError(t, err)
-			assert.JSONEq(t, `{"text":"hello"}`, string(resp.Data))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "file is required")
+			assert.Zero(t, capture.Count(), "the path must not reach the upstream")
+		})
+	}
+}
 
-			req := capture.Last(t)
-			assert.Equal(t, "/v1/audio/transcriptions", req.Path)
-			assert.Equal(t, "application/json", req.Header.Get("Content-Type"))
-			sent := req.JSON(t)
-			assert.Equal(t, "moonshine-tiny", sent["model"])
-			assert.Equal(t, "/srv/audio/input.wav", sent["audio"])
-			assert.Equal(t, "en", sent["language"])
-			// audio.cpp names OpenAI's recognition-context "prompt" field "text".
-			assert.Equal(t, "GoModel", sent["text"])
-			// stream is a boolean and busy_timeout_ms a number upstream; a form
-			// string in either place fails the request.
-			assert.Equal(t, true, sent["stream"])
-			assert.Equal(t, float64(5000), sent["busy_timeout_ms"])
-			assert.NotContains(t, sent, "unknown_form_only")
+// The same boundary on the speech route: a cloning reference may carry its own
+// audio, but may not name one on the server.
+func TestCreateSpeech_RejectsServerPathVoiceRef(t *testing.T) {
+	tests := []struct {
+		name     string
+		voiceRef string
+		wantErr  bool
+	}{
+		{name: "inline base64 is forwarded", voiceRef: `{"type":"base64","data":"UklGRh"}`},
+		{name: "path object is rejected", voiceRef: `{"type":"path","path":"/etc/shadow"}`, wantErr: true},
+		{name: "bare string is a path and is rejected", voiceRef: `"/etc/shadow"`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			url, capture := wavServer(t)
+			provider := NewWithHTTPClient("", url, http.DefaultClient, llmclient.Hooks{})
+
+			var req core.AudioSpeechRequest
+			require.NoError(t, json.Unmarshal([]byte(
+				`{"model":"indextts2","input":"cloned","voice":"alba","voice_ref":`+tt.voiceRef+`}`), &req))
+
+			_, err := provider.CreateSpeech(context.Background(), &req)
+			if !tt.wantErr {
+				require.NoError(t, err)
+				assert.Equal(t, 1, capture.Count())
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "voice_ref must carry inline base64 audio here")
+			assert.Zero(t, capture.Count(), "the path must not reach the upstream")
 		})
 	}
 }
@@ -208,17 +221,9 @@ func TestCreateTranscription_ValidatesRequest(t *testing.T) {
 		{name: "nil request", req: nil, wantErr: "audio transcription request is required"},
 		{name: "no model", req: &core.AudioTranscriptionRequest{File: []byte("RIFF")}, wantErr: "model is required"},
 		{
-			name:    "neither an upload nor a path",
+			name:    "no upload",
 			req:     &core.AudioTranscriptionRequest{Model: "moonshine-tiny"},
-			wantErr: "file is required, or an audio field naming a path the audio.cpp server can read",
-		},
-		{
-			name: "non-numeric busy timeout",
-			req: &core.AudioTranscriptionRequest{
-				Model:  "moonshine-tiny",
-				Fields: []core.FormField{{Name: "audio", Value: "/srv/audio/input.wav"}, {Name: "busy_timeout_ms", Value: "soon"}},
-			},
-			wantErr: "busy_timeout_ms must be an integer",
+			wantErr: "file is required",
 		},
 		{
 			name:    "unsupported response format",

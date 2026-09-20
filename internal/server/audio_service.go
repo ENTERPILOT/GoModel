@@ -207,23 +207,18 @@ func audioTranscriptionRequestFromForm(c *echo.Context, includeTranscriptionFiel
 		}
 	}
 
-	// The upload itself is the provider's requirement, not the transport's:
-	// every provider that needs bytes rejects a request without them, and one
-	// that can transcribe audio it already has (audio.cpp reads a path on its
-	// own machine) must not be refused here for a part it never wanted.
-	var filename, fileContentType string
-	var data []byte
-	if fileHeader, err := c.FormFile("file"); err == nil {
-		file, err := fileHeader.Open()
-		if err != nil {
-			return nil, core.NewInvalidRequestError("failed to open uploaded file", err)
-		}
-		defer func() { _ = file.Close() }()
-		data, err = io.ReadAll(file)
-		if err != nil {
-			return nil, core.NewInvalidRequestError("failed to read uploaded file", err)
-		}
-		filename, fileContentType = fileHeader.Filename, fileHeader.Header.Get("Content-Type")
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		return nil, core.NewInvalidRequestError("file is required", err)
+	}
+	file, err := fileHeader.Open()
+	if err != nil {
+		return nil, core.NewInvalidRequestError("failed to open uploaded file", err)
+	}
+	defer func() { _ = file.Close() }()
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return nil, core.NewInvalidRequestError("failed to read uploaded file", err)
 	}
 
 	var granularities []string
@@ -242,8 +237,8 @@ func audioTranscriptionRequestFromForm(c *echo.Context, includeTranscriptionFiel
 
 	return &core.AudioTranscriptionRequest{
 		Model:                  model,
-		Filename:               filename,
-		FileContentType:        fileContentType,
+		Filename:               fileHeader.Filename,
+		FileContentType:        fileHeader.Header.Get("Content-Type"),
 		File:                   data,
 		Language:               language,
 		Prompt:                 c.FormValue("prompt"),
@@ -329,12 +324,6 @@ func audioSpeechAuditInput(req *core.AudioSpeechRequest) map[string]any {
 // upload: the client-declared part Content-Type when it is an audio type,
 // otherwise a best-effort guess from the filename extension (defaulting to mp3).
 func audioUploadContentType(req *core.AudioTranscriptionRequest) string {
-	// A request that carries no upload (a provider transcribing audio it can
-	// already reach) has no media type to guess at; claiming mp3 would put a
-	// file that never existed in the audit entry.
-	if strings.TrimSpace(req.FileContentType) == "" && strings.TrimSpace(req.Filename) == "" {
-		return ""
-	}
 	// Strip any MIME parameters (e.g. "audio/webm; codecs=opus") so the stored
 	// type is a bare media type the dashboard can use directly in a data: URL.
 	if ct := strings.TrimSpace(req.FileContentType); ct != "" {

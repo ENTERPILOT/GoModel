@@ -84,7 +84,8 @@ route through passthrough: `POST /p/audiocpp/audio/speech`.
 
 Cloning parameters (`voice_ref`, `reference_text`, `seed`, `max_tokens`,
 `options`, …) are forwarded verbatim, so audio.cpp's own request fields work
-through the standard endpoint:
+through the standard endpoint — with one exception, a `voice_ref` naming a
+server-side path (see below):
 
 ```bash
 curl -s http://localhost:8080/v1/audio/speech \
@@ -111,19 +112,16 @@ it was built with the `audio_decode` frontend module, which adds MP3 and FLAC.
 
 ## Transcribing without an upload
 
-audio.cpp can read audio from the machine it runs on, so an upload is not
-always needed. Pass an `audio` field naming a server-local path instead of a
-`file` part and GoModel sends audio.cpp's JSON request shape:
+audio.cpp can also read audio from the machine it runs on, and its live route
+carries raw PCM with no file at all. Neither shape is offered on
+`/v1/audio/transcriptions`: both let the caller choose what the audio.cpp host
+reads or how long it holds a model, and being authorized for a model is not
+authorization for either. They stay on the native surface below, which an
+operator enables deliberately and points only at trusted callers.
 
-```bash
-curl -s http://localhost:8080/v1/audio/transcriptions \
-  -H "Authorization: Bearer change-me" \
-  -F model=audiocpp/moonshine-tiny \
-  -F audio=/srv/audio/meeting.wav
-```
-
-This is provider-specific: every other provider still requires the upload and
-rejects a request without one.
+For the same reason, a `voice_ref` on `/v1/audio/speech` must carry inline
+base64 audio; `{"type": "path"}` and a bare path string are rejected and
+available only through passthrough.
 
 ## Streaming
 
@@ -144,8 +142,19 @@ curl -s http://localhost:8080/v1/audio/transcriptions \
 ## Native endpoints
 
 audio.cpp's routes with no OpenAI equivalent are reachable through
-[passthrough](/features/passthrough-api) at `/p/audiocpp/...`. The `/v1`
-prefix is optional (`/p/audiocpp/audio/voices` and
+[passthrough](/features/passthrough-api) at `/p/audiocpp/...`, once an operator
+opts in:
+
+```bash
+ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,...,audiocpp
+```
+
+It is not on by default, unlike most provider types: this surface is opaque, so
+a request reaching it is not checked against the caller's model allowlist, and
+audio.cpp serves model management (`/models/load`, `/tasks/unload_models`) and
+server-local file paths there. Enable it for trusted callers only.
+
+The `/v1` prefix is optional (`/p/audiocpp/audio/voices` and
 `/p/audiocpp/v1/audio/voices` are the same route); `/health` is served from the
 server root.
 

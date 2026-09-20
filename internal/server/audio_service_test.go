@@ -714,8 +714,6 @@ func TestAudioUploadContentType(t *testing.T) {
 		{"", "clip.flac", "audio/flac"},
 		{"", "clip.m4a", "audio/mp4"},
 		{"", "unknown", "audio/mpeg"},
-		// No upload at all: nothing to describe.
-		{"", "", ""},
 	}
 	for _, tc := range cases {
 		got := audioUploadContentType(&core.AudioTranscriptionRequest{FileContentType: tc.contentType, Filename: tc.filename})
@@ -917,32 +915,20 @@ func TestAudioSpeech_EmptyContentTypeDefaults(t *testing.T) {
 	assert.Equal(t, "application/octet-stream", got)
 }
 
-// TestAudioTranscription_MissingFileReachesProvider covers who owns the upload
-// requirement: the transport no longer insists on a file part, so a provider
-// that can transcribe audio it already holds (audio.cpp transcribes a path on
-// its own machine) sees the request. Providers that do need the bytes reject it
-// themselves, which is what keeps the OpenAI-compatible error in place.
-func TestAudioTranscription_MissingFileReachesProvider(t *testing.T) {
-	mock := &audioMockProvider{
-		mockProvider:      &mockProvider{supportedModels: []string{"gpt-4o-transcribe"}},
-		transcriptionResp: &core.AudioResponse{ContentType: "application/json", Data: []byte(`{"text":"hi"}`)},
-	}
+// TestAudioTranscription_MissingFile covers the multipart guard: a request with a
+// model but no file part is rejected with a 400 before any provider call.
+func TestAudioTranscription_MissingFile(t *testing.T) {
+	mock := &audioMockProvider{mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-transcribe"}}}
 	handler := NewHandler(mock, nil, nil, nil)
 
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	_ = w.WriteField("model", "gpt-4o-transcribe")
-	_ = w.WriteField("audio", "/srv/audio/input.wav")
 	_ = w.Close()
 
 	c, rec := echotest.Post(t, "/v1/audio/transcriptions", &buf, echotest.WithContentType(w.FormDataContentType()))
 	err := handler.AudioTranscriptions(c)
 	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-
-	captured := mock.capturedTranscription
-	require.NotNil(t, captured)
-	assert.Empty(t, captured.File, "no upload was sent")
-	assert.Empty(t, captured.Filename)
-	assert.Equal(t, []core.FormField{{Name: "audio", Value: "/srv/audio/input.wav"}}, captured.Fields)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Nil(t, mock.capturedTranscription)
 }
