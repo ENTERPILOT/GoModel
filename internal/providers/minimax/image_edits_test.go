@@ -213,7 +213,7 @@ func TestCreateImageEditRejectsUnsupportedDimensions(t *testing.T) {
 		{name: "height not divisible by eight", field: core.FormField{Name: "height", Value: "1020"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			provider := NewWithHTTPClient("minimax-key", "http://unused.invalid", nil, llmclient.Hooks{})
+			provider := newTestProvider("minimax-key", "http://unused.invalid", nil, llmclient.Hooks{})
 			req := portraitRequest()
 			req.Fields = []core.FormField{tc.field}
 
@@ -231,7 +231,7 @@ func TestCreateImageEditRejectsUnsupportedDimensions(t *testing.T) {
 // flowing through as width and height.
 func TestCreateImageEditForwardsSupportedDimensions(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"data":{"image_urls":["https://example.com/portrait.png"]},"base_resp":{"status_code":0}}`)
-	provider := NewWithHTTPClient("minimax-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("minimax-key", server.URL, server.Client(), llmclient.Hooks{})
 	req := portraitRequest()
 	req.Fields = []core.FormField{{Name: "size", Value: "1024x512"}}
 
