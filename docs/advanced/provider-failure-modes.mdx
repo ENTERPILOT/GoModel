@@ -76,11 +76,14 @@ can, and to be explicit about truncation where it cannot.
 | `200` stream that ends without ever sending an event | `502 provider returned an empty stream`, before response headers | Yes | `gomodel_requests_total{status_type="error"}` |
 | First event is an `{"error": ...}` payload | The status that payload carries (an in-band `429` behaves like a real one), else `502`, before response headers | Yes | Same |
 | Stream stops before its terminal event | Everything received, then one explicit error event with `"code":"stream_incomplete"` | No — bytes are already sent | Request log records `stream_error` |
-| Stream goes silent mid-flight | Closed with a `504` after `HTTP_STREAM_IDLE_TIMEOUT` (default 300s) | No | Same |
+| Stream goes silent mid-flight | Everything received, then one `"code":"stream_incomplete"` error event, after `HTTP_STREAM_IDLE_TIMEOUT` (default 300s) | No — bytes are already sent | Same |
 | Malformed chunk mid-stream | Treated as a truncation: relayed, then `stream_incomplete` | No | Same |
 
-The wait for the *first* token never counts toward the idle timeout, so slow
-reasoning models are unaffected. Details:
+The wait for the *first* byte never counts toward the idle timeout, so a slow
+reasoning model is safe until the provider sends something — but any byte
+starts the clock, including a keep-alive comment. Once the first byte is out
+the response is committed to `200`, so a stall from then on can only be
+reported in-band, never as a status. Details:
 [stream completion](/advanced/resilience#what-counts-as-a-failure),
 [idle timeout](/advanced/configuration),
 [stream-start failover](/features/failover).
@@ -118,8 +121,9 @@ sum(rate(gomodel_empty_responses_total[5m])) by (provider, model, reason) > 0
 sum(rate(gomodel_empty_responses_total{reason="no_usage"}[15m])) by (provider) > 0
 ```
 
-Both are exported over OpenTelemetry as `gomodel.client.empty_responses` with
-the same `reason` attribute. See
+Both are exported over OpenTelemetry as `gomodel.client.empty_responses`,
+where the reason arrives as `error.type` rather than `reason`, alongside
+`gomodel.provider.name` and `gen_ai.request.model`. See
 [Prometheus metrics](/guides/prometheus-metrics) and
 [OpenTelemetry](/guides/opentelemetry).
 
@@ -139,6 +143,12 @@ It is one static binary with a stateless request path, `/health` and
 `/health/ready` probes, and a 10-second graceful drain on `SIGTERM`, so
 rolling restarts and multiple replicas behind a load balancer work today.
 
+That drain is a cutoff, not a completion guarantee: it is sized for the
+requests that can actually finish in ten seconds, and anything still open
+past it — an in-flight stream above all — has its connection cut. For
+long-lived traffic, drain connections at the load balancer, keep replicas
+overlapping long enough to cover a generation, and let clients retry.
+
 What is per-instance and therefore not shared between replicas: circuit
 breaker state, rate-limit counters, request-health windows, and sticky
 sessions. The [production guide](/guides/production) covers what that means
@@ -146,5 +156,6 @@ for your topology.
 
 If GoModel is down and you need traffic flowing immediately, point
 `base_url` back at the provider directly — the API is OpenAI-compatible in
-both directions. You lose routing, failover, budgets, and logging until it is
-back, and nothing else.
+both directions. Until it is back you lose routing, failover, and logging —
+and, because they run inside GoModel's request path rather than the
+provider's, its rate limits and budget checks stop gating anything at all.
