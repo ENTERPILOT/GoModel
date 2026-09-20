@@ -1,0 +1,270 @@
+package audiocpp
+
+import (
+	"bytes"
+	"context"
+	"io"
+	"mime/multipart"
+	"net/http"
+	"strings"
+
+	"github.com/goccy/go-json"
+
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
+)
+
+// CreateSpeech forwards an OpenAI-compatible text-to-speech request to
+// audio.cpp's POST /v1/audio/speech. The body travels as sent, so the fields
+// audio.cpp adds to the OpenAI shape (voice_ref, reference_text, seed,
+// max_tokens, options, stream_format, ...) reach it unchanged through
+// ExtraFields.
+//
+// The "voice" a caller sends names an audio.cpp voice preset, cached voice id,
+// or voice-library wav rather than an OpenAI voice, since audio.cpp has no
+// fixed voice set.
+//
+// The one field that does not travel is a voice_ref naming a server-side path:
+// see serverPathVoiceRefError.
+func (p *Provider) CreateSpeech(ctx context.Context, req *core.AudioSpeechRequest) (*core.AudioResponse, error) {
+	if req == nil {
+		return nil, core.NewInvalidRequestError("audio speech request is required", nil)
+	}
+	if strings.TrimSpace(req.Model) == "" {
+		return nil, core.NewInvalidRequestError("model is required", nil)
+	}
+	if strings.TrimSpace(req.Input) == "" {
+		return nil, core.NewInvalidRequestError("input is required", nil)
+	}
+	if err := rejectServerPathVoiceRef(req.ExtraFields.Lookup("voice_ref")); err != nil {
+		return nil, err
+	}
+
+	// Relayed rather than buffered: audio.cpp streams synthesized audio as it
+	// is generated, and holding the whole take costs time-to-first-byte for
+	// nothing.
+	raw, err := p.client.DoStreamResponse(ctx, llmclient.Request{
+		Method:   http.MethodPost,
+		Endpoint: "/v1/audio/speech",
+		Model:    req.Model,
+		Body:     req,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &core.AudioResponse{ContentType: speechContentType(raw), Stream: raw.Stream}, nil
+}
+
+// speechContentType describes the bytes audio.cpp actually returned. Its
+// synthesis output is WAV regardless of the requested response_format (a
+// frontend build adds MP3), so the upstream header is the only honest source
+// and the fallback is wav rather than OpenAI's mp3 default.
+func speechContentType(raw *llmclient.Response) string {
+	if raw != nil {
+		if contentType := strings.TrimSpace(raw.ContentType); contentType != "" {
+			return contentType
+		}
+	}
+	return core.SpeechResponseContentType("wav")
+}
+
+// rejectServerPathVoiceRef refuses a cloning reference that names a file on the
+// audio.cpp host. Being authorized for a model is not authorization to read the
+// server's filesystem, and this endpoint hands out no other filesystem reach,
+// so a path here would let any caller pick what the server reads. An inline
+// base64 reference carries its own audio and is unaffected; the native request
+// shape stays available through passthrough, which an operator enables
+// deliberately.
+func rejectServerPathVoiceRef(raw json.RawMessage) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	var reference struct {
+		Type string `json:"type"`
+	}
+	// A bare string is a path; an object declares its own type, and only
+	// "base64" carries the audio inline.
+	if err := json.Unmarshal(raw, &reference); err != nil || !strings.EqualFold(strings.TrimSpace(reference.Type), "base64") {
+		return core.NewInvalidRequestError(
+			"audiocpp voice_ref must carry inline base64 audio here; a server-side path is only accepted on the native /p/audiocpp/audio/speech route", nil)
+	}
+	return nil
+}
+
+// CreateTranscription implements speech-to-text against audio.cpp's POST
+// /v1/audio/transcriptions as an OpenAI-style multipart upload.
+//
+// audio.cpp also accepts a JSON body naming a path the server itself can read,
+// and a live route that carries raw PCM with no file at all. Neither is offered
+// here: both let the caller choose what the audio.cpp host reads or how long it
+// holds the model, which being authorized for a model does not cover. They stay
+// on the native passthrough surface, which an operator enables deliberately.
+func (p *Provider) CreateTranscription(ctx context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
+	if req == nil {
+		return nil, core.NewInvalidRequestError("audio transcription request is required", nil)
+	}
+	if strings.TrimSpace(req.Model) == "" {
+		return nil, core.NewInvalidRequestError("model is required", nil)
+	}
+	// Checked before dispatch: srt and vtt cannot be shaped from what audio.cpp
+	// returns, and finding that out after the model ran wastes the inference.
+	switch strings.ToLower(strings.TrimSpace(req.ResponseFormat)) {
+	case "", "json", "verbose_json", "text":
+	default:
+		return nil, core.NewInvalidRequestError("audiocpp transcription supports json, verbose_json, or text response formats", nil)
+	}
+
+	content := req.FileReader
+	if content == nil && len(req.File) > 0 {
+		content = bytes.NewReader(req.File)
+	}
+	if content == nil {
+		return nil, core.NewInvalidRequestError("file is required", nil)
+	}
+	return p.transcribeUpload(ctx, req, content)
+}
+
+func (p *Provider) transcribeUpload(ctx context.Context, req *core.AudioTranscriptionRequest, content io.Reader) (*core.AudioResponse, error) {
+	body, contentType := transcriptionMultipart(req, content)
+	upstream := llmclient.Request{
+		Method:        http.MethodPost,
+		Endpoint:      "/v1/audio/transcriptions",
+		Model:         req.Model,
+		RawBodyReader: body,
+		Headers:       http.Header{"Content-Type": {contentType}},
+	}
+
+	// A forwarded stream=true makes audio.cpp answer with server-sent events as
+	// it transcribes, so the transcript is relayed as it arrives. Everything
+	// else is one complete payload and stays on the buffered path, which is
+	// what response_format=text needs to read the transcript out of.
+	if transcriptionStreamRequested(req) {
+		raw, err := p.client.DoStreamResponse(ctx, upstream)
+		if err != nil {
+			return nil, err
+		}
+		return &core.AudioResponse{ContentType: streamedTranscriptContentType(raw), Stream: raw.Stream}, nil
+	}
+
+	raw, err := p.client.DoRaw(ctx, upstream)
+	if err != nil {
+		return nil, err
+	}
+	return transcriptionResponse(req, raw)
+}
+
+// transcriptionStreamRequested reports whether the caller asked for an
+// incremental transcript. stream is not a field the gateway consumes, so it
+// travels in the passthrough form values (ADR-0011 rule 1) and is read back
+// from there rather than duplicated as a typed member.
+func transcriptionStreamRequested(req *core.AudioTranscriptionRequest) bool {
+	for _, field := range req.Fields {
+		if field.Name != "stream" {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(field.Value)) {
+		case "true", "1":
+			return true
+		}
+	}
+	return false
+}
+
+// streamedTranscriptContentType labels a relayed transcript. Only the upstream
+// can describe a body it is still producing; the fallback is server-sent
+// events, which is what asking for a stream returns.
+func streamedTranscriptContentType(raw *llmclient.Response) string {
+	if raw != nil {
+		if contentType := strings.TrimSpace(raw.ContentType); contentType != "" {
+			return contentType
+		}
+	}
+	return "text/event-stream"
+}
+
+// transcriptionMultipart streams the OpenAI-style upload audio.cpp accepts:
+// the file part plus the fields its multipart parser reads. Unknown parts are
+// ignored upstream, so forwarded fields the gateway does not consume itself
+// (stream, busy_timeout_ms, ...) travel verbatim (ADR-0011 rule 1).
+//
+// The typed fields are written explicitly because the server layer parses them
+// out of the form, which also marks them reserved: they cannot reach the
+// upstream through req.Fields. response_format is the exception and stays
+// behind: audio.cpp reads it only on the speech routes, and its transcription
+// reply is the same JSON whatever is asked for, so the format is applied to
+// that reply here instead.
+func transcriptionMultipart(req *core.AudioTranscriptionRequest, content io.Reader) (io.Reader, string) {
+	filename := strings.TrimSpace(req.Filename)
+	if filename == "" {
+		filename = "audio"
+	}
+
+	pr, pw := io.Pipe()
+	writer := multipart.NewWriter(pw)
+	go func() {
+		defer func() { _ = pw.Close() }()
+
+		fields := [][2]string{
+			{"model", req.Model},
+			{"language", req.Language},
+			{"prompt", req.Prompt},
+			{"temperature", req.Temperature},
+		}
+		for _, field := range req.Fields {
+			if core.ReservedAudioTranscriptionFormFields[field.Name] {
+				continue
+			}
+			fields = append(fields, [2]string{field.Name, field.Value})
+		}
+		for _, field := range fields {
+			if strings.TrimSpace(field[1]) == "" {
+				continue
+			}
+			if err := writer.WriteField(field[0], field[1]); err != nil {
+				_ = pw.CloseWithError(core.NewInvalidRequestError("failed to write "+field[0]+" field", err))
+				return
+			}
+		}
+
+		part, err := writer.CreateFormFile("file", filename)
+		if err != nil {
+			_ = pw.CloseWithError(core.NewInvalidRequestError("failed to create multipart file field", err))
+			return
+		}
+		if _, err := io.Copy(part, content); err != nil {
+			_ = pw.CloseWithError(core.NewInvalidRequestError("failed to stream file content", err))
+			return
+		}
+		if err := writer.Close(); err != nil {
+			_ = pw.CloseWithError(core.NewInvalidRequestError("failed to finalize multipart payload", err))
+		}
+	}()
+	return pr, writer.FormDataContentType()
+}
+
+// transcriptionResponse shapes audio.cpp's reply into the response_format the
+// caller asked for. Its JSON already carries OpenAI's "text" member (alongside
+// a "timing" object OpenAI has no equivalent for, left in place rather than
+// stripped), so json and verbose_json are proxied verbatim and text is served
+// from the transcript. A streamed reply is relayed with its own content type,
+// as the transcription SSE events are already the OpenAI shape.
+func transcriptionResponse(req *core.AudioTranscriptionRequest, raw *llmclient.Response) (*core.AudioResponse, error) {
+	if raw == nil {
+		return nil, core.NewEmptyProviderResponseError("audiocpp")
+	}
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(raw.ContentType)), "text/event-stream") {
+		return &core.AudioResponse{ContentType: raw.ContentType, Data: raw.Body}, nil
+	}
+
+	format := strings.ToLower(strings.TrimSpace(req.ResponseFormat))
+	if format != "text" {
+		return &core.AudioResponse{ContentType: core.TranscriptionResponseContentType(format), Data: raw.Body}, nil
+	}
+	var upstream struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(raw.Body, &upstream); err != nil {
+		return nil, core.NewProviderError("audiocpp", http.StatusBadGateway, "failed to parse transcription response", err)
+	}
+	return &core.AudioResponse{ContentType: core.TranscriptionResponseContentType(format), Data: []byte(upstream.Text)}, nil
+}

@@ -212,6 +212,7 @@
                     "providers/xiaomi",
                     "providers/minimax",
                     "providers/elevenlabs",
+                    "providers/audiocpp",
                     "providers/opencode-go",
                     "providers/sglang",
                     "providers/vllm",
