@@ -170,6 +170,9 @@ A `200` stream that ends without an event is treated as a `502`
 example an in-band `429`), or `502` when it carries none. Both fail over under
 the default rules. The response headers wait for that first event.
 
+[Provider failure modes](/advanced/provider-failure-modes) lists every such
+case and which of them fail over.
+
 Example: try at most one backup, treat timeouts as failover-eligible but
 keep serving `429` responses to the client, and add a provider-specific
 overload message:

@@ -135,6 +135,7 @@
                             "advanced/api-endpoints",
                             "advanced/swagger-ui",
                             "advanced/resilience",
+                            "advanced/provider-failure-modes",
                             "advanced/version-awareness",
                             "advanced/responses-api",
                             "advanced/responses-compatibility",
