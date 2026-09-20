@@ -1293,15 +1293,17 @@ func TestBuildProviderConfig_CircuitBreaker_FullOverride(t *testing.T) {
 	failureThreshold := 3
 	successThreshold := 1
 	timeout := 10 * time.Second
+	slowCallThreshold := 45 * time.Second
 
 	raw := config.RawProviderConfig{
 		Type:   "openai",
 		APIKey: "sk",
 		Resilience: &config.RawResilienceConfig{
 			CircuitBreaker: &config.RawCircuitBreakerConfig{
-				FailureThreshold: &failureThreshold,
-				SuccessThreshold: &successThreshold,
-				Timeout:          &timeout,
+				FailureThreshold:  &failureThreshold,
+				SuccessThreshold:  &successThreshold,
+				Timeout:           &timeout,
+				SlowCallThreshold: &slowCallThreshold,
 			},
 		},
 	}
@@ -1311,6 +1313,7 @@ func TestBuildProviderConfig_CircuitBreaker_FullOverride(t *testing.T) {
 	assert.Equal(t, 3, cb.FailureThreshold)
 	assert.Equal(t, 1, cb.SuccessThreshold)
 	assert.Equal(t, 10*time.Second, cb.Timeout)
+	assert.Equal(t, 45*time.Second, cb.SlowCallThreshold)
 }
 
 func TestBuildProviderConfig_CircuitBreaker_ZeroValueOverride(t *testing.T) {

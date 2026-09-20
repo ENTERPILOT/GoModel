@@ -342,6 +342,9 @@ resilience:
     failure_threshold: 5
     success_threshold: 2
     timeout: 30s
+    # Count a call answered slower than this as a failure, so sustained latency
+    # opens the circuit (and fails over) like sustained errors. 0 disables it.
+    slow_call_threshold: 0s # env: CIRCUIT_BREAKER_SLOW_CALL_THRESHOLD; e.g. 60s
 
 guardrails:
   enabled: false

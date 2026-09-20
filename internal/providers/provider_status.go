@@ -25,6 +25,7 @@ type SanitizedCircuitBreakerConfig struct {
 	FailureThreshold  int      `json:"failure_threshold"`
 	SuccessThreshold  int      `json:"success_threshold"`
 	Timeout           string   `json:"timeout"`
+	SlowCallThreshold string   `json:"slow_call_threshold"`
 }
 
 // SanitizedResilienceConfig exposes effective resilience settings.
@@ -125,6 +126,7 @@ func SanitizeProviderConfigs(configs map[string]ProviderConfig) []SanitizedProvi
 					FailureThreshold:  cfg.Resilience.CircuitBreaker.FailureThreshold,
 					SuccessThreshold:  cfg.Resilience.CircuitBreaker.SuccessThreshold,
 					Timeout:           cfg.Resilience.CircuitBreaker.Timeout.String(),
+					SlowCallThreshold: cfg.Resilience.CircuitBreaker.SlowCallThreshold.String(),
 				},
 			},
 		})
