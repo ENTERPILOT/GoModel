@@ -66,7 +66,8 @@ func TestOpenAIReplayCreateSpeech(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, resp)
 			require.Equal(t, tc.upstreamType, resp.ContentType)
-			require.Equal(t, audioBytes, resp.Data)
+			// Synthesized speech is relayed as the upstream produces it.
+			require.Equal(t, audioBytes, providertest.AudioBytes(t, resp))
 		})
 	}
 }

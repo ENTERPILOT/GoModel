@@ -232,4 +232,7 @@ type Response struct {
 	// provider attempts; it is not relayed to API clients.
 	Header http.Header
 	Body   []byte
+	// Stream is the live upstream body of a streaming response (DoStreamResponse),
+	// where Body stays nil. The caller owns closing it.
+	Stream io.ReadCloser
 }

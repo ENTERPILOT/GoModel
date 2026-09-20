@@ -6437,6 +6437,10 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "stream": {
+                    "description": "Relay the transcript as server-sent events while the provider produces it",
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -6450,7 +6454,7 @@
         },
         "responses": {
           "200": {
-            "description": "Transcription in the requested response_format: a JSON object for json/verbose_json, or a text/plain body for text/srt/vtt",
+            "description": "Transcription in the requested response_format: a JSON object for json/verbose_json, a text/plain body for text/srt/vtt, or a text/event-stream when stream=true",
             "content": {
               "application/json": {
                 "schema": {
@@ -13475,6 +13479,9 @@
           },
           "type": {
             "type": "string"
+          },
+          "video_url": {
+            "$ref": "#/components/schemas/core.VideoURLContent"
           }
         }
       },
@@ -14939,6 +14946,17 @@
           },
           "total_tokens": {
             "type": "integer"
+          }
+        }
+      },
+      "core.VideoURLContent": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
           }
         }
       },
