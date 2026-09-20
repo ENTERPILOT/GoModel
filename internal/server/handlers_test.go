@@ -185,6 +185,7 @@ func (c *aliasesTestCatalog) ProviderNames() []string {
 type chunkedReadCloser struct {
 	chunks [][]byte
 	index  int
+	offset int
 }
 
 func (r *chunkedReadCloser) Read(p []byte) (int, error) {
@@ -192,8 +193,14 @@ func (r *chunkedReadCloser) Read(p []byte) (int, error) {
 		return 0, io.EOF
 	}
 
-	n := copy(p, r.chunks[r.index])
-	r.index++
+	// A chunk wider than the caller's buffer is delivered over several reads, as
+	// a real body would be; dropping its tail would silently shorten the stream.
+	n := copy(p, r.chunks[r.index][r.offset:])
+	r.offset += n
+	if r.offset >= len(r.chunks[r.index]) {
+		r.index++
+		r.offset = 0
+	}
 	return n, nil
 }
 

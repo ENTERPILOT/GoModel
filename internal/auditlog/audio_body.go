@@ -51,6 +51,19 @@ func BuildAudioUploadBody(contentType string, data []byte, storeBytes bool, meta
 	return buildAudioBody(contentType, data, storeBytes, meta)
 }
 
+// UnretainedAudioResponseBody builds the audit value for an audio response the
+// gateway relayed without keeping: past its capture ceiling only the size is
+// known. It is recorded the way a buffered body past audioBodyMaxBytes is, so a
+// long response reads as too large to store rather than as zero bytes.
+func UnretainedAudioResponseBody(contentType string, bytes int) AudioBodyLog {
+	return AudioBodyLog{
+		Audio:       true,
+		ContentType: strings.TrimSpace(contentType),
+		Bytes:       bytes,
+		TooLarge:    true,
+	}
+}
+
 func buildAudioBody(contentType string, data []byte, storeBytes bool, meta map[string]any) AudioBodyLog {
 	body := AudioBodyLog{
 		Audio:       true,

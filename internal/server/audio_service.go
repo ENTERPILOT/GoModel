@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
@@ -14,8 +15,48 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/streaming"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
+
+// maxCapturedAudioResponseBytes bounds how much of a relayed audio body is kept
+// in memory for audit capture. It matches the ceiling the audit store embeds
+// audio at, so nothing an audit entry would have kept is dropped, while a
+// runaway upstream can no longer grow the process without bound (the buffered
+// path holds the whole body today). Usage accounting does not share this
+// buffer: it measures the relay as it passes (see audioUsageSink), so a
+// response past the cap is still billed.
+const maxCapturedAudioResponseBytes = 8 * 1024 * 1024
+
+// audioUsageExtractor derives the usage entry for a buffered audio call from the
+// complete payload the client received.
+type audioUsageExtractor func(data []byte, pricing *core.ModelPricing) *usage.UsageEntry
+
+// audioUsageSink derives it for a relayed one, accumulating what pricing needs
+// as the body streams past — a running duration, or the terminal usage event —
+// and never the body itself. Measuring a copy of the body instead would have to
+// cap that copy, and a capped copy silently stops billing a long response.
+type audioUsageSink interface {
+	io.Writer
+	Entry(pricing *core.ModelPricing) *usage.UsageEntry
+}
+
+// audioUsageAccounting prices an audio call from whichever form its body took.
+type audioUsageAccounting struct {
+	extract       audioUsageExtractor
+	newStreamSink func() audioUsageSink
+}
+
+// audioStreamSink pairs a bounded accumulator with the function pricing what it
+// collected.
+type audioStreamSink struct {
+	io.Writer
+	entry func(*core.ModelPricing) *usage.UsageEntry
+}
+
+func (s audioStreamSink) Entry(pricing *core.ModelPricing) *usage.UsageEntry {
+	return s.entry(pricing)
+}
 
 // audioService adapts Echo requests to the model-routed audio provider for the
 // OpenAI-compatible /v1/audio/* endpoints. It stays a thin transport layer:
@@ -83,20 +124,21 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 	defer release()
 	started := time.Now()
 	resp, err := router.CreateSpeech(ctx, req)
-	inferenceTime := time.Since(started)
 	if err != nil {
 		return handleError(c, err)
 	}
-	if resp == nil {
-		return s.respondAudio(c, route.providerName, resp) // emits the 502 guard; no usage for a failed call
-	}
-	s.logUsage(ctx, route, func(pricing *core.ModelPricing) *usage.UsageEntry {
-		return usage.ExtractFromSpeechRequest(req.Input, resp.Data, speechResponseFormat(req, resp), route.requestID, route.model, route.providerType, pricing)
+	format := speechResponseFormat(req, resp)
+	return s.finishAudio(c, route, resp, started, audioUsageAccounting{
+		extract: func(data []byte, pricing *core.ModelPricing) *usage.UsageEntry {
+			return usage.ExtractFromSpeechRequest(req.Input, data, format, route.requestID, route.model, route.providerType, pricing)
+		},
+		newStreamSink: func() audioUsageSink {
+			meter := usage.NewSpeechDurationMeter(format)
+			return audioStreamSink{Writer: meter, entry: func(pricing *core.ModelPricing) *usage.UsageEntry {
+				return usage.ExtractFromStreamedSpeechRequest(req.Input, meter, format, route.requestID, route.model, route.providerType, pricing)
+			}}
+		},
 	})
-	if err := waitForModelSlowdownFactor(ctx, route.slowdown, inferenceTime); err != nil {
-		return handleError(c, err)
-	}
-	return s.respondAudio(c, route.providerName, resp)
 }
 
 // speechResponseFormat resolves the codec of the synthesized audio so usage can
@@ -168,25 +210,35 @@ func (s *audioService) createAudioTranscription(c *echo.Context, translation boo
 	defer release()
 	started := time.Now()
 	resp, err := call(ctx, req)
-	inferenceTime := time.Since(started)
 	if err != nil {
 		return handleError(c, err)
 	}
-	if resp == nil {
-		return s.respondAudio(c, route.providerName, resp) // emits the 502 guard before resp.Data is read
-	}
-	s.logUsage(ctx, route, func(pricing *core.ModelPricing) *usage.UsageEntry {
-		// The uploaded audio backs duration pricing when the provider reports no
-		// usage (whisper text/srt/vtt, Groq, ElevenLabs, every translation).
+	// The uploaded audio backs duration pricing when the provider reports no
+	// usage at all (whisper text/srt/vtt, Groq, ElevenLabs, every translation).
+	priceTranscript := func(body []byte, pricing *core.ModelPricing) *usage.UsageEntry {
 		if translation {
-			return usage.ExtractFromTranslationResponse(resp.Data, req.File, route.requestID, route.model, route.providerType, pricing)
+			return usage.ExtractFromTranslationResponse(body, req.File, route.requestID, route.model, route.providerType, pricing)
 		}
-		return usage.ExtractFromTranscriptionResponse(resp.Data, req.File, route.requestID, route.model, route.providerType, pricing)
-	})
-	if err := waitForModelSlowdownFactor(ctx, route.slowdown, inferenceTime); err != nil {
-		return handleError(c, err)
+		return usage.ExtractFromTranscriptionResponse(body, req.File, route.requestID, route.model, route.providerType, pricing)
 	}
-	return s.respondAudio(c, route.providerName, resp)
+	return s.finishAudio(c, route, resp, started, audioUsageAccounting{
+		extract: func(data []byte, pricing *core.ModelPricing) *usage.UsageEntry {
+			// A transcript relayed by a provider that ignored stream=true is one
+			// JSON object; TranscriptUsageBody also recovers the usage event from
+			// a body that turned out to be server-sent events.
+			return priceTranscript(usage.TranscriptUsageBody(data), pricing)
+		},
+		newStreamSink: func() audioUsageSink {
+			// A relayed transcript reports its usage in the terminal
+			// transcript.text.done event, which the collector keeps while
+			// discarding the transcript, so a streamed call is priced from the
+			// provider's own numbers however long it runs.
+			collector := usage.NewTranscriptUsageCollector(maxCapturedAudioResponseBytes)
+			return audioStreamSink{Writer: collector, entry: func(pricing *core.ModelPricing) *usage.UsageEntry {
+				return priceTranscript(collector.UsageBody(), pricing)
+			}}
+		},
+	})
 }
 
 func audioTranscriptionRequestFromForm(c *echo.Context, includeTranscriptionFields bool) (*core.AudioTranscriptionRequest, error) {
@@ -278,6 +330,78 @@ func passthroughFormFields(form *multipart.Form) []core.FormField {
 	return fields
 }
 
+// finishAudio delivers the provider response and records usage for it. A body
+// the provider is still producing is relayed as it arrives; a complete one keeps
+// the single-blob path.
+func (s *audioService) finishAudio(c *echo.Context, route modelCallRoute, resp *core.AudioResponse, started time.Time, accounting audioUsageAccounting) error {
+	if resp == nil {
+		return s.respondAudio(c, route.providerName, resp) // emits the 502 guard; no usage for a failed call
+	}
+	if resp.Stream != nil {
+		return s.relayAudioStream(c, route, resp, started, accounting.newStreamSink())
+	}
+	ctx := c.Request().Context()
+	s.logUsage(ctx, route, func(pricing *core.ModelPricing) *usage.UsageEntry {
+		return accounting.extract(resp.Data, pricing)
+	})
+	if err := waitForModelSlowdownFactor(ctx, route.slowdown, time.Since(started)); err != nil {
+		return handleError(c, err)
+	}
+	return s.respondAudio(c, route.providerName, resp)
+}
+
+// relayAudioStream forwards a provider audio body to the client chunk by chunk,
+// so time-to-first-byte tracks the provider instead of the whole generation:
+// synthesized speech and a stream=true transcript are both produced
+// incrementally, and buffering them costs the client every second of the
+// generation before its first byte. The relayed bytes are teed to the usage sink,
+// which measures them as they go, and into a bounded buffer for audit capture.
+func (s *audioService) relayAudioStream(c *echo.Context, route modelCallRoute, resp *core.AudioResponse, started time.Time, sink audioUsageSink) error {
+	ctx := c.Request().Context()
+	// A slowdown factor paces the relay rather than delaying its start, so an
+	// artificially slowed model still streams (see streaming.NewSlowdownStream).
+	stream := streaming.NewSlowdownStream(ctx, resp.Stream, route.slowdown, started)
+	defer func() { _ = stream.Close() }()
+
+	contentType := strings.TrimSpace(resp.ContentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	header := c.Response().Header()
+	header.Set("Content-Type", contentType)
+	if isAudioEventStream(contentType) {
+		header.Set("Cache-Control", "no-cache")
+		header.Set("Connection", "keep-alive")
+		auditlog.EnrichEntryWithStream(c, true)
+	}
+	c.Response().WriteHeader(http.StatusOK)
+
+	capture := newCappedCaptureBuffer(maxCapturedAudioResponseBytes)
+	flushErr := flushStream(c.Response(), io.TeeReader(stream, io.MultiWriter(sink, capture)))
+	// The provider produced (and billed) whatever reached the gateway, so usage
+	// is recorded even when the client went away mid-relay.
+	s.logUsage(ctx, route, sink.Entry)
+	data, complete := capture.Captured()
+	s.captureRelayedAudioResponseBody(c, contentType, data, complete, capture.Total())
+	if flushErr != nil {
+		errorType := classifyStreamError(ctx, flushErr)
+		auditlog.EnrichEntryWithError(c, errorType, flushErr.Error(), "")
+		slog.Warn("audio stream terminated abnormally",
+			"error", flushErr,
+			"error_type", errorType,
+			"path", c.Request().URL.Path,
+			"request_id", route.requestID,
+		)
+	}
+	return nil
+}
+
+// isAudioEventStream reports whether a relayed body is a server-sent event
+// transcript rather than binary audio.
+func isAudioEventStream(contentType string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "text/event-stream")
+}
+
 func (s *audioService) respondAudio(c *echo.Context, providerName string, resp *core.AudioResponse) error {
 	if resp == nil {
 		return handleError(c, core.NewProviderError(providerName, http.StatusBadGateway,
@@ -287,17 +411,45 @@ func (s *audioService) respondAudio(c *echo.Context, providerName string, resp *
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-
-	// Audio output is binary; the audit middleware skips audio Content-Types so
-	// it never corrupts the bytes via UTF-8 coercion. Capture it here instead.
-	// Body logging is the master switch (LogBodies); LogAudioBodies only decides
-	// whether the bytes are embedded as base64 for playback or recorded as a
-	// lightweight placeholder.
-	if auditlog.IsAudioContentType(contentType) && s.logBodies {
-		auditlog.EnrichEntryWithResponseBody(c, auditlog.BuildAudioResponseBody(contentType, resp.Data, s.logAudioBodies))
-	}
-
+	s.captureAudioResponseBody(c, contentType, resp.Data)
 	return c.Blob(http.StatusOK, contentType, resp.Data)
+}
+
+// captureAudioResponseBody records the returned payload on the live audit entry.
+// The audit middleware cannot: it coerces bodies to UTF-8, which would corrupt
+// binary audio, and it skips a response that announced itself as a stream.
+// LogBodies is the master switch; LogAudioBodies only decides whether audio
+// bytes are embedded as base64 for playback or recorded as a lightweight
+// placeholder. A relayed transcript is text, so it is stored as the middleware
+// would have, under the same size ceiling.
+func (s *audioService) captureAudioResponseBody(c *echo.Context, contentType string, data []byte) {
+	if !s.logBodies {
+		return
+	}
+	switch {
+	case auditlog.IsAudioContentType(contentType):
+		auditlog.EnrichEntryWithResponseBody(c, auditlog.BuildAudioResponseBody(contentType, data, s.logAudioBodies))
+	case isAudioEventStream(contentType) && len(data) > 0 && len(data) <= auditlog.MaxBodyCapture:
+		auditlog.EnrichEntryWithResponseBody(c, auditlog.CaptureLoggedBody(data))
+	}
+}
+
+// captureRelayedAudioResponseBody does the same for a relayed body, which the
+// bounded capture only holds while it stays under the ceiling. Past it the bytes
+// are gone but their count is not, and recording the count keeps the entry
+// honest: a placeholder built from the abandoned buffer would report a
+// multi-megabyte response as zero bytes.
+func (s *audioService) captureRelayedAudioResponseBody(c *echo.Context, contentType string, data []byte, complete bool, total int) {
+	if !s.logBodies {
+		return
+	}
+	if !complete {
+		if auditlog.IsAudioContentType(contentType) {
+			auditlog.EnrichEntryWithResponseBody(c, auditlog.UnretainedAudioResponseBody(contentType, total))
+		}
+		return
+	}
+	s.captureAudioResponseBody(c, contentType, data)
 }
 
 // audioSpeechAuditInput builds the audit request body for a text-to-speech
