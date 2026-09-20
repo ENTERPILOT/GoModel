@@ -339,6 +339,9 @@ func Load() (*LoadResult, error) {
 	if !cfg.Logging.LogImageBodiesScope.Valid() {
 		return nil, fmt.Errorf("logging.log_image_bodies_scope must be one of: all, input, output; got %q", cfg.Logging.LogImageBodiesScope)
 	}
+	if err := NormalizeTrustedProxyCIDRs(&cfg.Logging); err != nil {
+		return nil, err
+	}
 
 	return &LoadResult{
 		Config:       cfg,

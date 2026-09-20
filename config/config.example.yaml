@@ -217,6 +217,13 @@ logging:
   flush_interval: 5 # seconds
   retention_days: 30 # 0 = keep forever
   only_model_interactions: true
+  # Networks your own proxies sit on. With this set, an audit entry records the
+  # nearest X-Forwarded-For hop that is not one of these networks (the last
+  # address your infrastructure wrote, which a client cannot overwrite).
+  # Requests that do not arrive from a listed network keep their socket address.
+  # Loopback and private ranges are not trusted implicitly. Leave empty to
+  # ignore forwarding headers entirely (default).
+  # trusted_proxy_cidrs: ["10.0.0.0/8", "127.0.0.1"]
 
 usage:
   # Usage actions require USAGE_ENABLED=true (or usage.enabled: true) and a supported

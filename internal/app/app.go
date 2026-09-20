@@ -404,6 +404,7 @@ func (a *App) logStartupInfo() {
 			"log_image_bodies_scope", cfg.Logging.LogImageBodiesScope,
 			"log_headers", cfg.Logging.LogHeaders,
 			"retention_days", cfg.Logging.RetentionDays,
+			"trusted_proxy_cidrs", cfg.Logging.TrustedProxyCIDRs,
 		)
 	} else {
 		slog.Info("audit logging disabled")
