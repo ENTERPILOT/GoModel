@@ -44,11 +44,13 @@ adds 50%, so a response that takes 2 seconds upstream is returned after about
 from a concrete model. Leaving the field empty leaves the setting unspecified.
 Delays honor request cancellation.
 
-For Chat Completions and Responses API SSE streams, GoModel drains the upstream
-in the background and releases each read chunk on the scaled timeline. This
+For streamed responses — Chat Completions and Responses API SSE, and the
+[audio endpoints](/advanced/audio-api#streaming) — GoModel drains the upstream in
+the background and releases each read chunk on the scaled timeline. This
 preserves the provider's relative chunk timing while delayed chunks accumulate
-in memory. A large factor on a long or high-volume stream can therefore use
-substantial memory. Realtime WebSocket sessions are not slowed.
+in memory. A large factor on a long or high-volume stream, or on a large audio
+response, can therefore use substantial memory; leave slowdown unset in
+production, where it has no purpose. Realtime WebSocket sessions are not slowed.
 
 When an alias and its concrete target both have a slowdown, the alias value
 wins. An alias without its own value inherits the selected target model's

@@ -42,6 +42,23 @@ const (
 // model (not the raw user input) so the row groups and prices consistently with
 // the pricing lookup, mirroring the transcription extractor.
 func ExtractFromSpeechRequest(input string, output []byte, format, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
+	var seconds float64
+	var measured bool
+	if len(output) > 0 {
+		seconds, measured = measureSpeechDurationSeconds(output, format)
+	}
+	return speechUsageEntry(input, seconds, measured, format, requestID, model, provider, pricing...)
+}
+
+// ExtractFromStreamedSpeechRequest builds the same entry for a relayed response,
+// whose duration a SpeechDurationMeter measured as the audio streamed past
+// instead of from a retained body.
+func ExtractFromStreamedSpeechRequest(input string, meter *SpeechDurationMeter, format, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
+	seconds, measured := meter.Seconds()
+	return speechUsageEntry(input, seconds, measured, format, requestID, model, provider, pricing...)
+}
+
+func speechUsageEntry(input string, seconds float64, measured bool, format, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
 	entry := &UsageEntry{
 		ID:        uuid.New().String(),
 		RequestID: requestID,
@@ -62,10 +79,8 @@ func ExtractFromSpeechRequest(input string, output []byte, format, requestID, mo
 	if codec := normalizeAudioFormat(format); codec != "" {
 		raw[rawKeyAudioOutputFormat] = codec
 	}
-	if len(output) > 0 {
-		if seconds, ok := measureSpeechDurationSeconds(output, format); ok {
-			raw[rawKeyAudioOutputSeconds] = seconds
-		}
+	if measured {
+		raw[rawKeyAudioOutputSeconds] = seconds
 	}
 	if len(raw) > 0 {
 		entry.RawData = raw

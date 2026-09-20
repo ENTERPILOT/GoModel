@@ -184,7 +184,10 @@ curl -N https://your-gateway/v1/audio/transcriptions \
 
 Usage and [cost tracking](#cost-tracking) are unchanged: a streamed transcript is
 priced from the token counts its `transcript.text.done` event reports, and
-streamed speech from the duration of the audio that passed through.
+streamed speech from the duration of the audio that passed through. Both are
+measured as the response streams rather than from a buffered copy of it, so a
+response of any length is billed in full — only the
+[audit body](#audit-logging) is capped.
 
 <Note>
   A streamed response cannot be retried once its first bytes have reached the

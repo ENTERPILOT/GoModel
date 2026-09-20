@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -50,9 +51,10 @@ func TestCreateSpeech_RelaysUpstreamBody(t *testing.T) {
 	assert.Empty(t, resp.Data, "a relayed body must not also be buffered")
 	assert.Equal(t, "audio/mpeg", resp.ContentType)
 
-	// The first chunk is readable while the upstream still holds the rest.
+	// The first chunk is readable while the upstream still holds the rest. A
+	// single Read may return less than it, so the prefix is read in full.
 	head := make([]byte, len("first-"))
-	_, err = resp.Stream.Read(head)
+	_, err = io.ReadFull(resp.Stream, head)
 	require.NoError(t, err)
 	assert.Equal(t, "first-", string(head))
 

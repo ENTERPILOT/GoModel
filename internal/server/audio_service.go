@@ -20,18 +20,43 @@ import (
 )
 
 // maxCapturedAudioResponseBytes bounds how much of a relayed audio body is kept
-// in memory for usage accounting and audit capture. It matches the ceiling the
-// audit store embeds audio at, so nothing an audit entry would have kept is
-// dropped, while a runaway upstream can no longer grow the process without
-// bound (the buffered path holds the whole body today). Past the cap a
-// duration-priced model records its missing-usage caveat instead of a rate
-// applied to bytes the gateway never saw whole.
+// in memory for audit capture. It matches the ceiling the audit store embeds
+// audio at, so nothing an audit entry would have kept is dropped, while a
+// runaway upstream can no longer grow the process without bound (the buffered
+// path holds the whole body today). Usage accounting does not share this
+// buffer: it measures the relay as it passes (see audioUsageSink), so a
+// response past the cap is still billed.
 const maxCapturedAudioResponseBytes = 8 * 1024 * 1024
 
-// audioUsageExtractor derives the usage entry for a finished audio call from the
-// payload the client received. A relayed body only has it once the relay
-// completes, so both response paths go through the same function.
+// audioUsageExtractor derives the usage entry for a buffered audio call from the
+// complete payload the client received.
 type audioUsageExtractor func(data []byte, pricing *core.ModelPricing) *usage.UsageEntry
+
+// audioUsageSink derives it for a relayed one, accumulating what pricing needs
+// as the body streams past — a running duration, or the terminal usage event —
+// and never the body itself. Measuring a copy of the body instead would have to
+// cap that copy, and a capped copy silently stops billing a long response.
+type audioUsageSink interface {
+	io.Writer
+	Entry(pricing *core.ModelPricing) *usage.UsageEntry
+}
+
+// audioUsageAccounting prices an audio call from whichever form its body took.
+type audioUsageAccounting struct {
+	extract       audioUsageExtractor
+	newStreamSink func() audioUsageSink
+}
+
+// audioStreamSink pairs a bounded accumulator with the function pricing what it
+// collected.
+type audioStreamSink struct {
+	io.Writer
+	entry func(*core.ModelPricing) *usage.UsageEntry
+}
+
+func (s audioStreamSink) Entry(pricing *core.ModelPricing) *usage.UsageEntry {
+	return s.entry(pricing)
+}
 
 // audioService adapts Echo requests to the model-routed audio provider for the
 // OpenAI-compatible /v1/audio/* endpoints. It stays a thin transport layer:
@@ -102,8 +127,17 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	return s.finishAudio(c, route, resp, started, func(data []byte, pricing *core.ModelPricing) *usage.UsageEntry {
-		return usage.ExtractFromSpeechRequest(req.Input, data, speechResponseFormat(req, resp), route.requestID, route.model, route.providerType, pricing)
+	format := speechResponseFormat(req, resp)
+	return s.finishAudio(c, route, resp, started, audioUsageAccounting{
+		extract: func(data []byte, pricing *core.ModelPricing) *usage.UsageEntry {
+			return usage.ExtractFromSpeechRequest(req.Input, data, format, route.requestID, route.model, route.providerType, pricing)
+		},
+		newStreamSink: func() audioUsageSink {
+			meter := usage.NewSpeechDurationMeter(format)
+			return audioStreamSink{Writer: meter, entry: func(pricing *core.ModelPricing) *usage.UsageEntry {
+				return usage.ExtractFromStreamedSpeechRequest(req.Input, meter, format, route.requestID, route.model, route.providerType, pricing)
+			}}
+		},
 	})
 }
 
@@ -179,17 +213,31 @@ func (s *audioService) createAudioTranscription(c *echo.Context, translation boo
 	if err != nil {
 		return handleError(c, err)
 	}
-	return s.finishAudio(c, route, resp, started, func(data []byte, pricing *core.ModelPricing) *usage.UsageEntry {
-		// A relayed transcript arrives as server-sent events, whose terminal
-		// event carries the provider-reported usage; usage.TranscriptUsageBody
-		// recovers it so a streamed call is priced like a buffered one. The
-		// uploaded audio backs duration pricing when the provider reports no
-		// usage at all (whisper text/srt/vtt, Groq, ElevenLabs, every translation).
-		body := usage.TranscriptUsageBody(data)
+	// The uploaded audio backs duration pricing when the provider reports no
+	// usage at all (whisper text/srt/vtt, Groq, ElevenLabs, every translation).
+	priceTranscript := func(body []byte, pricing *core.ModelPricing) *usage.UsageEntry {
 		if translation {
 			return usage.ExtractFromTranslationResponse(body, req.File, route.requestID, route.model, route.providerType, pricing)
 		}
 		return usage.ExtractFromTranscriptionResponse(body, req.File, route.requestID, route.model, route.providerType, pricing)
+	}
+	return s.finishAudio(c, route, resp, started, audioUsageAccounting{
+		extract: func(data []byte, pricing *core.ModelPricing) *usage.UsageEntry {
+			// A transcript relayed by a provider that ignored stream=true is one
+			// JSON object; TranscriptUsageBody also recovers the usage event from
+			// a body that turned out to be server-sent events.
+			return priceTranscript(usage.TranscriptUsageBody(data), pricing)
+		},
+		newStreamSink: func() audioUsageSink {
+			// A relayed transcript reports its usage in the terminal
+			// transcript.text.done event, which the collector keeps while
+			// discarding the transcript, so a streamed call is priced from the
+			// provider's own numbers however long it runs.
+			collector := usage.NewTranscriptUsageCollector(maxCapturedAudioResponseBytes)
+			return audioStreamSink{Writer: collector, entry: func(pricing *core.ModelPricing) *usage.UsageEntry {
+				return priceTranscript(collector.UsageBody(), pricing)
+			}}
+		},
 	})
 }
 
@@ -285,16 +333,16 @@ func passthroughFormFields(form *multipart.Form) []core.FormField {
 // finishAudio delivers the provider response and records usage for it. A body
 // the provider is still producing is relayed as it arrives; a complete one keeps
 // the single-blob path.
-func (s *audioService) finishAudio(c *echo.Context, route modelCallRoute, resp *core.AudioResponse, started time.Time, extract audioUsageExtractor) error {
+func (s *audioService) finishAudio(c *echo.Context, route modelCallRoute, resp *core.AudioResponse, started time.Time, accounting audioUsageAccounting) error {
 	if resp == nil {
 		return s.respondAudio(c, route.providerName, resp) // emits the 502 guard; no usage for a failed call
 	}
 	if resp.Stream != nil {
-		return s.relayAudioStream(c, route, resp, started, extract)
+		return s.relayAudioStream(c, route, resp, started, accounting.newStreamSink())
 	}
 	ctx := c.Request().Context()
 	s.logUsage(ctx, route, func(pricing *core.ModelPricing) *usage.UsageEntry {
-		return extract(resp.Data, pricing)
+		return accounting.extract(resp.Data, pricing)
 	})
 	if err := waitForModelSlowdownFactor(ctx, route.slowdown, time.Since(started)); err != nil {
 		return handleError(c, err)
@@ -306,10 +354,9 @@ func (s *audioService) finishAudio(c *echo.Context, route modelCallRoute, resp *
 // so time-to-first-byte tracks the provider instead of the whole generation:
 // synthesized speech and a stream=true transcript are both produced
 // incrementally, and buffering them costs the client every second of the
-// generation before its first byte. The relayed bytes are teed into a bounded
-// buffer so usage accounting and audit capture still see the payload once the
-// relay completes.
-func (s *audioService) relayAudioStream(c *echo.Context, route modelCallRoute, resp *core.AudioResponse, started time.Time, extract audioUsageExtractor) error {
+// generation before its first byte. The relayed bytes are teed to the usage sink,
+// which measures them as they go, and into a bounded buffer for audit capture.
+func (s *audioService) relayAudioStream(c *echo.Context, route modelCallRoute, resp *core.AudioResponse, started time.Time, sink audioUsageSink) error {
 	ctx := c.Request().Context()
 	// A slowdown factor paces the relay rather than delaying its start, so an
 	// artificially slowed model still streams (see streaming.NewSlowdownStream).
@@ -330,13 +377,11 @@ func (s *audioService) relayAudioStream(c *echo.Context, route modelCallRoute, r
 	c.Response().WriteHeader(http.StatusOK)
 
 	capture := newCappedCaptureBuffer(maxCapturedAudioResponseBytes)
-	flushErr := flushStream(c.Response(), io.TeeReader(stream, capture))
+	flushErr := flushStream(c.Response(), io.TeeReader(stream, io.MultiWriter(sink, capture)))
 	// The provider produced (and billed) whatever reached the gateway, so usage
 	// is recorded even when the client went away mid-relay.
+	s.logUsage(ctx, route, sink.Entry)
 	data, _ := capture.Captured()
-	s.logUsage(ctx, route, func(pricing *core.ModelPricing) *usage.UsageEntry {
-		return extract(data, pricing)
-	})
 	s.captureAudioResponseBody(c, contentType, data)
 	if flushErr != nil {
 		errorType := classifyStreamError(ctx, flushErr)

@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v5"
@@ -236,4 +237,82 @@ type closeTrackingReadCloser struct {
 func (r *closeTrackingReadCloser) Close() error {
 	r.closed = true
 	return nil
+}
+
+// TestAudioSpeech_OversizeStreamStillCosted guards the accounting seam: audit
+// capture is bounded at maxCapturedAudioResponseBytes, and usage must not be
+// bounded with it. A response past that ceiling is priced by the duration the
+// relay measured, not written off with a cost caveat.
+func TestAudioSpeech_OversizeStreamStillCosted(t *testing.T) {
+	// 200 s of 24 kHz mono 16-bit audio is 9.6 MB, past the capture ceiling.
+	const seconds = 200.0
+	wav := wavBytes(24000, 1, 16, seconds)
+	require.Greater(t, len(wav), maxCapturedAudioResponseBytes)
+
+	chunks := make([][]byte, 0, len(wav)/(64*1024)+1)
+	for start := 0; start < len(wav); start += 64 * 1024 {
+		chunks = append(chunks, wav[start:min(start+64*1024, len(wav))])
+	}
+
+	var captured *usage.UsageEntry
+	logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
+	svc := &audioService{
+		provider:        streamingSpeechMock(chunks, "audio/wav"),
+		usageLogger:     logger,
+		pricingResolver: &mockPricingResolver{pricing: &core.ModelPricing{PerSecondOutput: new(0.00025)}},
+		logBodies:       true,
+		logAudioBodies:  true,
+	}
+	c, rec, entry := newStreamingSpeechRequest(t, &flushRecordingWriter{})
+
+	require.NoError(t, svc.CreateSpeech(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, len(wav), rec.Body.Len(), "client did not receive the whole response")
+
+	require.NotNil(t, captured)
+	assert.InDelta(t, seconds, captured.RawData["audio_output_seconds"], 0.001)
+	require.NotNil(t, captured.TotalCost)
+	assert.InDelta(t, seconds*0.00025, *captured.TotalCost, 1e-9)
+	assert.Empty(t, captured.CostsCalculationCaveat)
+
+	// The audit body stays bounded: that ceiling is deliberate.
+	respBody, ok := entry.Data.ResponseBody.(auditlog.AudioBodyLog)
+	require.True(t, ok, "response body not captured as audio, got %T", entry.Data.ResponseBody)
+	assert.False(t, respBody.Stored, "an oversize body was embedded in the audit entry")
+}
+
+// TestAudioTranscription_OversizeStreamStillCosted is the transcript half of the
+// same guard: a transcript past the capture ceiling is still priced from the
+// provider's own token counts in its terminal event.
+func TestAudioTranscription_OversizeStreamStillCosted(t *testing.T) {
+	filler := []byte("data: {\"type\":\"transcript.text.delta\",\"delta\":\"" +
+		strings.Repeat("word ", 6000) + "\"}\n\n") // 30 kB per event
+	chunks := make([][]byte, 0, 350)
+	for range 350 { // ~10 MB of deltas
+		chunks = append(chunks, filler)
+	}
+	chunks = append(chunks, transcriptSSE[2], transcriptSSE[3])
+
+	var captured *usage.UsageEntry
+	logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
+	svc := &audioService{
+		provider: &audioMockProvider{
+			mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-transcribe"}},
+			transcriptionResp: &core.AudioResponse{
+				ContentType: "text/event-stream",
+				Stream:      &chunkedReadCloser{chunks: chunks},
+			},
+		},
+		usageLogger: logger,
+	}
+	c, rec, _ := newStreamingTranscriptionRequest(t, &flushRecordingWriter{})
+
+	require.NoError(t, svc.CreateTranscription(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Greater(t, rec.Body.Len(), maxCapturedAudioResponseBytes)
+
+	require.NotNil(t, captured)
+	assert.Equal(t, 7, captured.InputTokens)
+	assert.Equal(t, 3, captured.OutputTokens)
+	assert.Equal(t, 10, captured.TotalTokens)
 }
