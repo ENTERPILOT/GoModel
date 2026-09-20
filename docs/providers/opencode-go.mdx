@@ -1,8 +1,9 @@
 ---
-title: "OpenCode Go"
+title: "OpenCode Go: Base URL & OpenAI-Compatible Endpoint"
+sidebarTitle: "OpenCode Go"
 description: "Configure OpenCode Zen (Go subscription) in GoModel using an OpenAI-compatible endpoint."
 icon: "terminal"
-keywords: ["OpenCode Zen", "OpenCode Go", "provider setup"]
+keywords: ["OpenCode Zen", "OpenCode Go", "OPENCODE_GO_BASE_URL", "OpenCode Go endpoint", "provider setup"]
 ---
 
 [OpenCode Zen](https://opencode.ai/docs/zen/) exposes its "Go" subscription
@@ -13,6 +14,8 @@ provider that defaults the base URL, so you only need an API key.
 
 ```bash
 OPENCODE_GO_API_KEY=sk-...
+# Optional: override the default endpoint.
+# OPENCODE_GO_BASE_URL=https://opencode.ai/zen/go/v1
 ```
 
 Or in `config.yaml`:
