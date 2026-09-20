@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -97,7 +98,11 @@ func (m *mockLogStore) WaitForAPIEntries(count int, timeout time.Duration) []*au
 }
 
 // setupAuditLogTestServer creates a test server with audit logging enabled
-func setupAuditLogTestServer(t *testing.T, cfg auditlog.Config, store *mockLogStore) (string, func()) {
+// serverOption adjusts the server configuration an audit log test runs
+// against, for behavior that is decided outside the audit logger.
+type serverOption func(*server.Config)
+
+func setupAuditLogTestServer(t *testing.T, cfg auditlog.Config, store *mockLogStore, opts ...serverOption) (string, func()) {
 	t.Helper()
 
 	// Reserve a loopback listener up front so the port cannot be stolen before
@@ -120,9 +125,11 @@ func setupAuditLogTestServer(t *testing.T, cfg auditlog.Config, store *mockLogSt
 	logger := auditlog.NewLogger(store, cfg)
 
 	// Create server with audit logging
-	srv := server.New(router, &server.Config{
-		AuditLogger: logger,
-	})
+	serverCfg := &server.Config{AuditLogger: logger}
+	for _, opt := range opts {
+		opt(serverCfg)
+	}
+	srv := server.New(router, serverCfg)
 
 	// Start server (bind to loopback only)
 	serverURL := "http://" + listener.Addr().String()
@@ -864,58 +871,64 @@ func TestAuditLogOnlyModelInteractions(t *testing.T) {
 // connection address by default, and record the forwarded client instead once
 // the gateway's own proxy network is listed as trusted.
 func TestAuditLogClientIP(t *testing.T) {
-	t.Run("records the connection address when no proxies are trusted", func(t *testing.T) {
-		store := newMockLogStore()
-		cfg := auditlog.Config{
-			Enabled:               true,
-			BufferSize:            100,
-			FlushInterval:         100 * time.Millisecond,
-			OnlyModelInteractions: true,
-		}
+	tests := []struct {
+		name     string
+		proxies  []string
+		header   string
+		xffValue string
+		wantIP   string
+	}{
+		{
+			name:     "records the connection address when no proxies are trusted",
+			xffValue: "198.51.100.23",
+			wantIP:   "127.0.0.1",
+		},
+		{
+			name:     "records the forwarded client behind a trusted proxy network",
+			proxies:  []string{"127.0.0.0/8"},
+			xffValue: "203.0.113.9, 198.51.100.23",
+			wantIP:   "198.51.100.23",
+		},
+		{
+			name:     "the loopback preset covers a proxy on the gateway host",
+			proxies:  []string{"loopback"},
+			xffValue: "198.51.100.23",
+			wantIP:   "198.51.100.23",
+		},
+	}
 
-		serverURL, cleanup := setupAuditLogTestServer(t, cfg, store)
-		defer cleanup()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			serverCfg := config.ServerConfig{TrustedProxies: tt.proxies, ClientIPHeader: tt.header}
+			require.NoError(t, config.ResolveClientIPPolicy(&serverCfg))
 
-		body, _ := json.Marshal(defaultChatReq("Hello"))
-		req, err := http.NewRequest(http.MethodPost, serverURL+"/v1/chat/completions", bytes.NewReader(body))
-		require.NoError(t, err)
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Forwarded-For", "198.51.100.23")
-		resp, err := http.DefaultClient.Do(req)
-		require.NoError(t, err)
-		defer closeBody(resp)
-		require.Equal(t, http.StatusOK, resp.StatusCode)
+			store := newMockLogStore()
+			cfg := auditlog.Config{
+				Enabled:               true,
+				BufferSize:            100,
+				FlushInterval:         100 * time.Millisecond,
+				OnlyModelInteractions: true,
+			}
 
-		entries := store.WaitForAPIEntries(1, 2*time.Second)
-		require.Len(t, entries, 1)
-		assert.Equal(t, "127.0.0.1", entries[0].ClientIP, "forwarding headers must not be trusted by default")
-	})
+			serverURL, cleanup := setupAuditLogTestServer(t, cfg, store, func(c *server.Config) {
+				c.IPExtractor = server.ClientIPExtractor(serverCfg.ClientIP)
+			})
+			defer cleanup()
 
-	t.Run("records the forwarded client behind a trusted proxy network", func(t *testing.T) {
-		store := newMockLogStore()
-		cfg := auditlog.Config{
-			Enabled:               true,
-			BufferSize:            100,
-			FlushInterval:         100 * time.Millisecond,
-			OnlyModelInteractions: true,
-			TrustedProxies:        auditlog.ParseTrustedProxies([]string{"127.0.0.0/8"}),
-		}
+			body, err := json.Marshal(defaultChatReq("Hello"))
+			require.NoError(t, err)
+			req, err := http.NewRequest(http.MethodPost, serverURL+"/v1/chat/completions", bytes.NewReader(body))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-Forwarded-For", tt.xffValue)
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			defer closeBody(resp)
+			require.Equal(t, http.StatusOK, resp.StatusCode)
 
-		serverURL, cleanup := setupAuditLogTestServer(t, cfg, store)
-		defer cleanup()
-
-		body, _ := json.Marshal(defaultChatReq("Hello"))
-		req, err := http.NewRequest(http.MethodPost, serverURL+"/v1/chat/completions", bytes.NewReader(body))
-		require.NoError(t, err)
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Forwarded-For", "203.0.113.9, 198.51.100.23")
-		resp, err := http.DefaultClient.Do(req)
-		require.NoError(t, err)
-		defer closeBody(resp)
-		require.Equal(t, http.StatusOK, resp.StatusCode)
-
-		entries := store.WaitForAPIEntries(1, 2*time.Second)
-		require.Len(t, entries, 1)
-		assert.Equal(t, "198.51.100.23", entries[0].ClientIP)
-	})
+			entries := store.WaitForAPIEntries(1, 2*time.Second)
+			require.Len(t, entries, 1)
+			assert.Equal(t, tt.wantIP, entries[0].ClientIP)
+		})
+	}
 }

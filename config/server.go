@@ -69,6 +69,41 @@ type ServerConfig struct {
 	// provider connection until the provider side times out.
 	// Default: 60 (DefaultStreamStallTimeoutSeconds). 0 disables the limit.
 	StreamStallTimeout int `yaml:"stream_stall_timeout" env:"STREAM_STALL_TIMEOUT"`
+
+	// TrustedProxies lists the networks your own proxies sit on, enabling
+	// header-based client addresses everywhere the gateway reports one (audit
+	// entries, rate limit keys, logs). Entries are CIDR networks, bare
+	// addresses (a single host), or the presets "loopback" and "private".
+	//
+	// When empty (default), the gateway records the address of the socket peer
+	// that connected to it and ignores every forwarding header. Nothing is
+	// trusted implicitly, not even loopback: list the hops between your
+	// clients and the gateway, or name the preset that covers them.
+	// Example: ["10.42.0.0/16", "loopback"].
+	// Default: empty (forwarding headers ignored)
+	TrustedProxies []string `yaml:"trusted_proxies" env:"SERVER_TRUSTED_PROXIES"`
+
+	// ClientIPHeader is the header a trusted proxy passes the client address
+	// in. X-Forwarded-For (the default) carries a chain and is resolved hop by
+	// hop; any other header (X-Real-IP, CF-Connecting-IP, True-Client-IP)
+	// carries one address and is taken verbatim, which is the correct reading
+	// behind an edge like Cloudflare that writes the client itself. Requires
+	// TrustedProxies. RFC 7239 Forwarded is not supported.
+	// Default: X-Forwarded-For
+	ClientIPHeader string `yaml:"client_ip_header" env:"SERVER_CLIENT_IP_HEADER"`
+
+	// TrustedHops is how many proxies sit between the client and the gateway,
+	// selecting the X-Forwarded-For entry at that depth instead of scanning the
+	// chain against TrustedProxies. Use it when your edge is at a fixed depth
+	// but rotates through addresses you cannot enumerate; the socket peer must
+	// still be in TrustedProxies. A chain shorter than this depth falls back to
+	// the socket peer. Requires TrustedProxies and the default header.
+	// Default: 0 (scan the chain against TrustedProxies)
+	TrustedHops int `yaml:"trusted_hops" env:"SERVER_TRUSTED_HOPS"`
+
+	// ClientIP is the compiled form of the three settings above, resolved once
+	// at load. It is not configured directly.
+	ClientIP ClientIPPolicy `yaml:"-"`
 }
 
 // DefaultStreamStallTimeoutSeconds is the default ServerConfig.StreamStallTimeout.

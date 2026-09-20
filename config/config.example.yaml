@@ -17,6 +17,15 @@ server:
   enabled_passthrough_providers: ["openai", "anthropic", "cohere", "openrouter", "kilo", "zai", "sglang", "vllm", "llmd", "deepseek", "bailian"] # providers enabled on /p/{provider}/...
   auth_verify_enabled: false # env: AUTH_VERIFY_ENABLED; expose GET /v1/auth/verify, which reports whether the API key a request carries authenticates against this gateway (401 when it does not; 200 with {"valid":false,"method":"none"} when the gateway has no authentication configured). Outside /admin, so it works with the admin API disabled
   realtime_enabled: true # env: REALTIME_ENABLED; expose the /v1/realtime and /v1/realtime/translations websockets, their calls/client_secrets siblings, and /p/{provider}/v1/realtime upgrades
+  # Client address resolution. Leave trusted_proxies empty (default) and every
+  # client address GoModel reports is the socket peer, with forwarding headers
+  # ignored. Entries are CIDR networks, bare addresses, or the presets
+  # "loopback" and "private" (RFC 1918 + ULA); prefer the one subnet your proxy
+  # sits on over "private", which trusts every private client to set its own
+  # forwarded address.
+  # trusted_proxies: ["10.42.0.0/16", "loopback"]
+  # client_ip_header: "CF-Connecting-IP" # env: SERVER_CLIENT_IP_HEADER; default X-Forwarded-For, resolved hop by hop. Any other header carries one address and is taken verbatim, which is correct behind an edge like Cloudflare. Requires trusted_proxies; RFC 7239 Forwarded is not supported
+  # trusted_hops: 1 # env: SERVER_TRUSTED_HOPS; proxies between the client and the gateway. Takes the X-Forwarded-For entry at that depth instead of scanning the chain, for an edge at a fixed depth with addresses you cannot enumerate. Requires trusted_proxies
   pid_file: "data/gomodel.pid" # env: PID_FILE; where the running gateway records its process id so `gomodel --reload` can find it. Set per instance when several gateways share a host; empty writes no pid file and disables --reload; changing it needs a restart, not a reload
 
 models:
@@ -217,13 +226,6 @@ logging:
   flush_interval: 5 # seconds
   retention_days: 30 # 0 = keep forever
   only_model_interactions: true
-  # Networks your own proxies sit on. With this set, an audit entry records the
-  # nearest X-Forwarded-For hop that is not one of these networks (the last
-  # address your infrastructure wrote, which a client cannot overwrite).
-  # Requests that do not arrive from a listed network keep their socket address.
-  # Loopback and private ranges are not trusted implicitly. Leave empty to
-  # ignore forwarding headers entirely (default).
-  # trusted_proxy_cidrs: ["10.0.0.0/8", "127.0.0.1"]
 
 usage:
   # Usage actions require USAGE_ENABLED=true (or usage.enabled: true) and a supported
