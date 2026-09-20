@@ -3,6 +3,7 @@ package auditlog
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -26,17 +27,12 @@ func (r *SQLReader) GetLastUsedByAuthKeys(ctx context.Context, keyIDs []string) 
 	}
 
 	for start := 0; start < len(keyIDs); start += maxLastUsedKeysPerQuery {
-		end := start + maxLastUsedKeysPerQuery
-		if end > len(keyIDs) {
-			end = len(keyIDs)
-		}
+		end := min(start+maxLastUsedKeysPerQuery, len(keyIDs))
 		batch, err := r.queryLastUsedBatch(ctx, keyIDs[start:end])
 		if err != nil {
 			return nil, err
 		}
-		for id, ts := range batch {
-			result[id] = ts
-		}
+		maps.Copy(result, batch)
 	}
 	return result, nil
 }
