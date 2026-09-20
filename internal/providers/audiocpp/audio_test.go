@@ -56,7 +56,7 @@ func multipartFields(t testing.TB, req providertest.Recorded) (fields []core.For
 // labelled from the upstream header rather than the requested format.
 func TestCreateSpeech_ForwardsRequestAndLabelsUpstreamFormat(t *testing.T) {
 	url, capture := wavServer(t)
-	provider := NewWithHTTPClient("", url, http.DefaultClient, llmclient.Hooks{})
+	provider := newTestProvider("", url, http.DefaultClient, llmclient.Hooks{})
 
 	resp, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 		Model:          "pocket-tts",
@@ -81,7 +81,7 @@ func TestCreateSpeech_ForwardsRequestAndLabelsUpstreamFormat(t *testing.T) {
 // unchanged rather than being dropped as unknown (ADR-0011 rule 1).
 func TestCreateSpeech_ForwardsNativeExtraFields(t *testing.T) {
 	url, capture := wavServer(t)
-	provider := NewWithHTTPClient("", url, http.DefaultClient, llmclient.Hooks{})
+	provider := newTestProvider("", url, http.DefaultClient, llmclient.Hooks{})
 
 	var req core.AudioSpeechRequest
 	require.NoError(t, json.Unmarshal([]byte(`{
@@ -103,7 +103,7 @@ func TestCreateSpeech_ForwardsNativeExtraFields(t *testing.T) {
 
 func TestCreateSpeech_ValidatesRequest(t *testing.T) {
 	url, capture := wavServer(t)
-	provider := NewWithHTTPClient("", url, http.DefaultClient, llmclient.Hooks{})
+	provider := newTestProvider("", url, http.DefaultClient, llmclient.Hooks{})
 
 	tests := []struct {
 		name    string
@@ -127,7 +127,7 @@ func TestCreateSpeech_ValidatesRequest(t *testing.T) {
 func TestCreateTranscription_SendsMultipartUpload(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK,
 		`{"text":"the task has completed successfully","timing":{"wall_ms":216.4}}`)
-	provider := NewWithHTTPClient("", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("", server.URL, server.Client(), llmclient.Hooks{})
 
 	resp, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
 		Model:    "moonshine-tiny",
@@ -162,7 +162,7 @@ func TestCreateTranscription_RejectsServerLocalPaths(t *testing.T) {
 	for _, field := range []string{"audio", "audio_path"} {
 		t.Run(field, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, http.StatusOK, `{"text":"hello"}`)
-			provider := NewWithHTTPClient("", server.URL, server.Client(), llmclient.Hooks{})
+			provider := newTestProvider("", server.URL, server.Client(), llmclient.Hooks{})
 
 			_, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
 				Model:  "moonshine-tiny",
@@ -190,7 +190,7 @@ func TestCreateSpeech_RejectsServerPathVoiceRef(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			url, capture := wavServer(t)
-			provider := NewWithHTTPClient("", url, http.DefaultClient, llmclient.Hooks{})
+			provider := newTestProvider("", url, http.DefaultClient, llmclient.Hooks{})
 
 			var req core.AudioSpeechRequest
 			require.NoError(t, json.Unmarshal([]byte(
@@ -211,7 +211,7 @@ func TestCreateSpeech_RejectsServerPathVoiceRef(t *testing.T) {
 
 func TestCreateTranscription_ValidatesRequest(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"text":"hello"}`)
-	provider := NewWithHTTPClient("", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("", server.URL, server.Client(), llmclient.Hooks{})
 
 	tests := []struct {
 		name    string
@@ -243,7 +243,7 @@ func TestCreateTranscription_ValidatesRequest(t *testing.T) {
 
 func TestCreateTranscription_TextFormatReturnsPlainTranscript(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusOK, `{"text":"hello there","timing":{"wall_ms":1}}`)
-	provider := NewWithHTTPClient("", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("", server.URL, server.Client(), llmclient.Hooks{})
 
 	resp, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
 		Model:          "moonshine-tiny",
@@ -259,7 +259,7 @@ func TestCreateTranscription_TextFormatReturnsPlainTranscript(t *testing.T) {
 // body is relayed under its own content type instead of being labelled JSON.
 func TestCreateTranscription_RelaysStreamedEvents(t *testing.T) {
 	server, _ := providertest.SSEServer(t, "event: transcript.text.delta\ndata: {\"delta\":\"hi\"}\n\ndata: [DONE]\n\n")
-	provider := NewWithHTTPClient("", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("", server.URL, server.Client(), llmclient.Hooks{})
 
 	resp, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
 		Model:  "moonshine-tiny",
@@ -276,7 +276,7 @@ func TestCreateTranscription_RelaysStreamedEvents(t *testing.T) {
 func TestCreateTranscription_SurfacesUpstreamError(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusBadRequest,
 		`{"error":{"message":"only WAV audio uploads are currently supported for transcription","type":"invalid_request_error"}}`)
-	provider := NewWithHTTPClient("", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("", server.URL, server.Client(), llmclient.Hooks{})
 
 	_, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
 		Model:    "moonshine-tiny",

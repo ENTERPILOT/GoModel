@@ -31,9 +31,11 @@ func TestRegistration_DescribesALocalKeylessServer(t *testing.T) {
 	assert.True(t, Registration.Discovery.AllowAPIKeyless)
 	assert.Empty(t, Registration.Discovery.DefaultBaseURL)
 
+	// Zero options are what a keyless provider is built with outside the
+	// factory: no keyring, no resilience settings, and no test transport, so
+	// the client falls back to the shared pooled one.
 	provider := Registration.New(providers.ProviderConfig{BaseURL: "http://localhost:8099"}, providers.ProviderOptions{})
 	assert.NotNil(t, provider)
-	assert.NotNil(t, NewWithHTTPClient("", "http://localhost:8099", nil, llmclient.Hooks{}))
 }
 
 // The inference surfaces audio.cpp does not implement must fail as typed
@@ -41,7 +43,7 @@ func TestRegistration_DescribesALocalKeylessServer(t *testing.T) {
 // those routes.
 func TestUnsupportedCapabilities_ReturnInvalidRequestErrors(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{}`)
-	provider := NewWithHTTPClient("", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("", server.URL, server.Client(), llmclient.Hooks{})
 
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{Model: "pocket-tts"})
 	providertest.AssertUnsupported(t, err)
@@ -64,7 +66,7 @@ func TestBaseURL_AcceptsServerRootAndV1Suffix(t *testing.T) {
 	for _, suffix := range []string{"", "/v1", "/v1/"} {
 		t.Run("suffix "+suffix, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, http.StatusOK, `{"object":"list","data":[]}`)
-			provider := NewWithHTTPClient("", server.URL+suffix, server.Client(), llmclient.Hooks{})
+			provider := newTestProvider("", server.URL+suffix, server.Client(), llmclient.Hooks{})
 
 			_, err := provider.ListModels(context.Background())
 			require.NoError(t, err)
@@ -75,7 +77,7 @@ func TestBaseURL_AcceptsServerRootAndV1Suffix(t *testing.T) {
 
 func TestSetBaseURL_ChangesRequestTarget(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"object":"list","data":[]}`)
-	provider := NewWithHTTPClient("", "http://unused.invalid/v1", server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("", "http://unused.invalid/v1", server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL + "/v1")
 
 	_, err := provider.ListModels(context.Background())
@@ -106,7 +108,7 @@ func TestPassthrough_ForwardsNativeEndpointsVerbatim(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, http.StatusOK, `{"ok":true}`)
-			provider := NewWithHTTPClient("proxy-token", server.URL, server.Client(), llmclient.Hooks{})
+			provider := newTestProvider("proxy-token", server.URL, server.Client(), llmclient.Hooks{})
 
 			resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 				Method:   http.MethodPost,
@@ -152,7 +154,7 @@ func TestPassthrough_RelaysNativeErrors(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte(`{"error":{"message":"model busy","type":"server_busy"}}`))
 	})
-	provider := NewWithHTTPClient("", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("", server.URL, server.Client(), llmclient.Hooks{})
 
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 		Method:   http.MethodPost,
@@ -168,7 +170,7 @@ func TestPassthrough_RelaysNativeErrors(t *testing.T) {
 }
 
 func TestPassthrough_RequiresRequest(t *testing.T) {
-	provider := NewWithHTTPClient("", "http://localhost:8099", nil, llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{BaseURL: "http://localhost:8099"}, providers.ProviderOptions{}).(*Provider)
 	_, err := provider.Passthrough(context.Background(), nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "passthrough request is required")

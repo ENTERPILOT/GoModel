@@ -27,7 +27,7 @@ const modelsJSON = `{
 
 func TestListModels_MapsTaskToModeAndKeepsTheRest(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, modelsJSON)
-	provider := NewWithHTTPClient("", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("", server.URL, server.Client(), llmclient.Hooks{})
 
 	resp, err := provider.ListModels(context.Background())
 	require.NoError(t, err)
@@ -61,7 +61,7 @@ func TestListModels_MapsTaskToModeAndKeepsTheRest(t *testing.T) {
 
 func TestListModels_FillsMissingObjectNames(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusOK, `{"data":[{"id":"pocket-tts","task":"tts"}]}`)
-	provider := NewWithHTTPClient("", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("", server.URL, server.Client(), llmclient.Hooks{})
 
 	resp, err := provider.ListModels(context.Background())
 	require.NoError(t, err)
@@ -73,7 +73,7 @@ func TestListModels_FillsMissingObjectNames(t *testing.T) {
 func TestListModels_PropagatesUpstreamFailure(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusInternalServerError,
 		`{"error":{"message":"models unavailable","type":"server_error"}}`)
-	provider := NewWithHTTPClient("", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("", server.URL, server.Client(), llmclient.Hooks{})
 
 	_, err := provider.ListModels(context.Background())
 	require.Error(t, err)

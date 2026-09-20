@@ -34,6 +34,7 @@ var Registration = providers.Registration{
 // invalid_request_error because audio.cpp has no such endpoints.
 type Provider struct {
 	client *llmclient.Client
+	keys   *providers.Keyring
 }
 
 var (
@@ -48,29 +49,16 @@ var (
 // /v1 (the shape every other local-server provider uses) is accepted and
 // trimmed, so both spellings address the same server.
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
-	keys := opts.Keyring(cfg.APIKey)
-	return &Provider{client: llmclient.New(llmclient.Config{
+	p := &Provider{keys: opts.Keyring(cfg.APIKey)}
+	clientCfg := llmclient.Config{
 		ProviderName:   opts.ClientName("audiocpp"),
 		BaseURL:        providers.PassthroughBaseURL(cfg.BaseURL),
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
-	}, func(req *http.Request) {
-		setHeaders(req, keys.NextForContext(req.Context()))
-	})}
-}
-
-// NewWithHTTPClient creates an audio.cpp provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	if httpClient == nil {
-		httpClient = http.DefaultClient
 	}
-	cfg := llmclient.DefaultConfig("audiocpp", providers.PassthroughBaseURL(baseURL))
-	cfg.Hooks = hooks
-	return &Provider{client: llmclient.NewWithHTTPClient(httpClient, cfg, func(req *http.Request) {
-		setHeaders(req, apiKey)
-	})}
+	p.client = llmclient.NewWithOptionalHTTPClient(opts.HTTPClient, clientCfg, p.setHeaders)
+	return p
 }
 
 // SetBaseURL allows configuring a custom base URL for the provider.
@@ -78,8 +66,10 @@ func (p *Provider) SetBaseURL(url string) {
 	p.client.SetBaseURL(providers.PassthroughBaseURL(url))
 }
 
-func setHeaders(req *http.Request, apiKey string) {
-	providers.SetAuthHeaders(req, apiKey, providers.AuthHeaderConfig{
+// setHeaders resolves the credential per request rather than capturing it, so
+// several configured keys rotate across calls.
+func (p *Provider) setHeaders(req *http.Request) {
+	providers.SetAuthHeaders(req, p.keys.NextForContext(req.Context()), providers.AuthHeaderConfig{
 		AuthScheme:      "Bearer ",
 		RequestIDHeader: "X-Request-Id",
 		OptionalAPIKey:  true,
