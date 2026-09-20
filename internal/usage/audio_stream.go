@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 )
 
-// speechHeaderCapture bounds the leading bytes a SpeechDurationMeter keeps. A
-// RIFF/WAVE header reaches its data chunk well inside this, including the extra
-// chunks some encoders write first, and nothing past that chunk is needed: the
-// duration follows from the byte rate and the byte count.
-const speechHeaderCapture = 8 * 1024
+// speechHeaderCapture bounds the leading bytes a SpeechDurationMeter keeps while
+// it works out what the stream is. A RIFF/WAVE container can carry chunks of any
+// size before its audio (JUNK padding, LIST metadata), so the header is retained
+// until the data chunk is reached rather than to a fixed size; this is only the
+// ceiling past which such a header is treated as unmeasurable. Nothing beyond
+// the data chunk is ever needed: the duration follows from the byte rate and the
+// byte count.
+const speechHeaderCapture = 1024 * 1024
 
 // SpeechDurationMeter measures the playback duration of synthesized speech as
 // it streams past, so a relayed response is priced by the same rules as a
@@ -22,9 +25,17 @@ const speechHeaderCapture = 8 * 1024
 // mp3 from the running sum of its frame headers.
 type SpeechDurationMeter struct {
 	format string
-	head   []byte
 	total  int64
-	mp3    mp3FrameWalker
+
+	head     []byte
+	headDone bool // the stream has been identified; no more of it need be kept
+
+	wav             bool
+	wavByteRate     uint32
+	wavDataOffset   int
+	wavDeclaredSize int
+
+	mp3 mp3FrameWalker
 }
 
 // NewSpeechDurationMeter returns a meter for speech in the given
@@ -39,14 +50,43 @@ func (m *SpeechDurationMeter) Write(p []byte) (int, error) {
 	if m == nil {
 		return len(p), nil
 	}
-	if room := speechHeaderCapture - len(m.head); room > 0 {
-		m.head = append(m.head, p[:min(room, len(p))]...)
+	if !m.headDone {
+		m.head = append(m.head, p...)
+		m.identify()
 	}
 	m.total += int64(len(p))
 	if m.format == "mp3" {
 		m.mp3.write(p)
 	}
 	return len(p), nil
+}
+
+// identify reads the retained head as far as it needs to. A stream that is not a
+// WAVE container needs none of it; one that is needs it up to the data chunk, so
+// the head is released as soon as either is settled.
+func (m *SpeechDurationMeter) identify() {
+	if len(m.head) < 12 {
+		return
+	}
+	if string(m.head[0:4]) != "RIFF" || string(m.head[8:12]) != "WAVE" {
+		m.stopIdentifying()
+		return
+	}
+	if byteRate, dataOffset, declaredSize, ok := wavHeader(m.head); ok {
+		m.wav, m.wavByteRate, m.wavDataOffset, m.wavDeclaredSize = true, byteRate, dataOffset, declaredSize
+		m.stopIdentifying()
+		return
+	}
+	// The chunks before the audio are implausibly long; stop rather than retain
+	// the response to find a data chunk that may never come.
+	if len(m.head) > speechHeaderCapture {
+		m.stopIdentifying()
+	}
+}
+
+func (m *SpeechDurationMeter) stopIdentifying() {
+	m.headDone = true
+	m.head = nil
 }
 
 // Seconds returns the duration of the audio written so far, and whether the
@@ -59,13 +99,13 @@ func (m *SpeechDurationMeter) Seconds() (float64, bool) {
 	}
 	// A WAVE container describes itself, so it wins over the requested format
 	// for the same reason it does when the whole body is in hand.
-	if byteRate, dataOffset, declaredSize, ok := wavHeader(m.head); ok {
-		streamed := m.total - int64(dataOffset)
-		if declaredSize > 0 && int64(declaredSize) <= streamed {
-			streamed = int64(declaredSize)
+	if m.wav {
+		streamed := m.total - int64(m.wavDataOffset)
+		if m.wavDeclaredSize > 0 && int64(m.wavDeclaredSize) <= streamed {
+			streamed = int64(m.wavDeclaredSize)
 		}
 		if streamed > 0 {
-			return float64(streamed) / float64(byteRate), true
+			return float64(streamed) / float64(m.wavByteRate), true
 		}
 		return 0, false
 	}

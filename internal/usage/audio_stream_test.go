@@ -2,6 +2,7 @@ package usage
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"strings"
 	"testing"
@@ -24,6 +25,24 @@ func writeInChunks(t *testing.T, w interface {
 	}
 }
 
+// wavWithPreDataChunk builds a valid WAVE container that writes a JUNK chunk of
+// the given size before its fmt and data chunks, as alignment padding and
+// metadata do in the wild, pushing the audio past the start of the stream.
+func wavWithPreDataChunk(t *testing.T, junk int, seconds float64) []byte {
+	t.Helper()
+	require.Zero(t, junk%2, "RIFF chunks are word-aligned")
+
+	base := buildWAV(t, 24000, 1, 16, seconds)
+	chunk := append([]byte("JUNK"), byte(junk), byte(junk>>8), byte(junk>>16), byte(junk>>24))
+	chunk = append(chunk, make([]byte, junk)...)
+
+	out := append([]byte(nil), base[:12]...)
+	out = append(out, chunk...)
+	out = append(out, base[12:]...)
+	binary.LittleEndian.PutUint32(out[4:8], uint32(len(out)-8)) // RIFF size
+	return out
+}
+
 // TestSpeechDurationMeter_MatchesBufferedMeasurement pins the meter to the
 // buffered measurement it replaces on the streamed path: the same audio must
 // cost the same whether it was relayed or held.
@@ -35,6 +54,9 @@ func TestSpeechDurationMeter_MatchesBufferedMeasurement(t *testing.T) {
 	}{
 		{name: "wav", format: "wav", audio: buildWAV(t, 24000, 1, 16, 2)},
 		{name: "wav stereo", format: "wav", audio: buildWAV(t, 44100, 2, 16, 0.75)},
+		// The audio starts past any fixed-size view of the head, so the header
+		// must be read as far as it actually runs.
+		{name: "wav behind a 9 kB junk chunk", format: "wav", audio: wavWithPreDataChunk(t, 9000, 2)},
 		{name: "pcm", format: "pcm", audio: make([]byte, pcmBytesPerSecond*3)},
 		{name: "mp3", format: "mp3", audio: buildMP3(500)},
 		{name: "mp3 behind an id3 tag", format: "mp3", audio: append(
@@ -283,4 +305,26 @@ func TestExtractFromStreamedSpeechRequest_UnmeasurableFormat(t *testing.T) {
 	require.NotNil(t, entry)
 	assert.NotContains(t, entry.RawData, rawKeyAudioOutputSeconds)
 	assert.Equal(t, "opus", entry.RawData[rawKeyAudioOutputFormat])
+}
+
+// TestSpeechDurationMeter_PreDataChunkPastTheCeiling pins the documented bound on
+// reading a container header: a stream whose audio starts beyond
+// speechHeaderCapture is reported unmeasurable, so the call takes a cost caveat
+// rather than the meter retaining the response to keep looking.
+func TestSpeechDurationMeter_PreDataChunkPastTheCeiling(t *testing.T) {
+	audio := wavWithPreDataChunk(t, 4*speechHeaderCapture, 1)
+
+	meter := NewSpeechDurationMeter("wav")
+	writeInChunks(t, meter, audio, 64*1024)
+
+	seconds, ok := meter.Seconds()
+	assert.False(t, ok)
+	assert.Zero(t, seconds)
+	assert.Nil(t, meter.head, "the head was retained past the ceiling")
+
+	// The same container measures when it is buffered, which is why the ceiling
+	// is set well beyond any header a real encoder writes.
+	buffered, bufferedOK := measureSpeechDurationSeconds(audio, "wav")
+	require.True(t, bufferedOK)
+	assert.InDelta(t, 1.0, buffered, 1e-9)
 }
