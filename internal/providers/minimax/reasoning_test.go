@@ -246,3 +246,15 @@ func TestChatCompletion_NormalizesReasoningDetailsForGatedModel(t *testing.T) {
 		})
 	}
 }
+
+func TestUpstreamErrorPathsPropagate(t *testing.T) {
+	server, _ := providertest.JSONServer(t, http.StatusInternalServerError, `{"error":{"message":"boom"}}`)
+	provider := newTestProvider("minimax-key", server.URL, server.Client(), llmclient.Hooks{})
+	req := &core.ChatRequest{Model: "MiniMax-M2.5", Messages: []core.Message{{Role: "user", Content: "hi"}}}
+
+	_, err := provider.ChatCompletion(context.Background(), req)
+	require.Error(t, err, "buffered upstream error must propagate")
+
+	_, err = provider.StreamChatCompletion(context.Background(), req)
+	require.Error(t, err, "streaming upstream error must propagate")
+}
