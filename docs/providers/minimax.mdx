@@ -55,9 +55,11 @@ a zero or negative temperature to `1.0` so OpenAI-style requests that pin
 `MiniMax-M3`, `MiniMax-M2.7`, `MiniMax-M2.5` and `MiniMax-M2` (plus the M2.x
 `-highspeed` variants) write their chain of thought separately from the answer.
 GoModel sets `reasoning_split: true` on these requests, so the thinking arrives
-in `reasoning_content` — not as inline `<think>` tags inside `content` — and is
-normalized onto the canonical `reasoning_content` member on buffered responses
-and streaming deltas. Every other MiniMax model passes through untouched.
+natively in `reasoning_content` — not as inline `<think>` tags inside
+`content` — and is relayed as is. On streamed responses MiniMax also sends a
+`reasoning_details` array that duplicates every `reasoning_content` delta; the
+gateway strips that redundant member from `choices[].delta`. Every other
+MiniMax model passes through untouched.
 
 ## Text-to-speech
 

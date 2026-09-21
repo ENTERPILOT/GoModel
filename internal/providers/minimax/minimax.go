@@ -53,25 +53,16 @@ func clampTemperature(req *core.ChatRequest) *core.ChatRequest {
 }
 
 // ChatCompletion sends a chat completion request to MiniMax. Reasoning
-// models are asked to split their chain of thought out of the answer, and
-// the reasoning_details they return are normalized onto the canonical
-// reasoning_content member.
+// models are asked to split their chain of thought out of the answer; the
+// reasoning then arrives natively in the reasoning_content member and is
+// relayed untouched.
 func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
-	adapted := adaptChatRequest(clampTemperature(req))
-	resp, err := p.ChatCompatible.ChatCompletion(ctx, adapted)
-	if err != nil {
-		return nil, err
-	}
-	if req != nil && isReasoningModel(req.Model) {
-		normalizeChatResponse(resp)
-	}
-	return resp, nil
+	return p.ChatCompatible.ChatCompletion(ctx, adaptChatRequest(clampTemperature(req)))
 }
 
 // StreamChatCompletion returns a raw response body for streaming (caller
-// must close). On the reasoning models the cumulative reasoning_details
-// deltas are rewritten to reasoning_content suffixes and the trailing
-// summary event collapses to its usage; every other stream is relayed byte
+// must close). On the reasoning models the redundant reasoning_details
+// member is stripped from every delta; every other stream is relayed byte
 // for byte.
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
 	adapted := adaptChatRequest(clampTemperature(req))

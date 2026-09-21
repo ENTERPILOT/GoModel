@@ -14,7 +14,10 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
-const minimalChatCompletionJSON = `{"id":"c1","object":"chat.completion","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`
+// Verbatim buffered response from a live MiniMax OpenAI-compatible capture
+// (reasoning_split: true). reasoning_content and reasoning_details arrive
+// natively; content is clean.
+const capturedChatCompletionJSON = `{"id":"07008f32b85f686000437e3973488aaf","object":"chat.completion","model":"MiniMax-M2.7","provider":"minimax","choices":[{"message":{"role":"assistant","content":"**Proof.** Let odd numbers be ` + "`2a + 1`" + ` and ` + "`2b + 1`" + `. Their sum: ` + "`(2a + 1) + (2b + 1) = 2a + 2b + 2 = 2(a + b + 1)`" + `. Divisible by 2. Even. ∎","name":"MiniMax AI","audio_content":"","reasoning_content":"The user wants a proof that the sum of two odd numbers is even. I'll keep this in caveman style as per the instructions.","reasoning_details":[{"type":"reasoning.text","id":"reasoning-text-1","format":"MiniMax-response-v1","index":0,"text":"The user wants a proof that the sum of two odd numbers is even. I'll keep this in caveman style as per the instructions."}]},"finish_reason":"stop","index":0}],"usage":{"completion_tokens":103,"prompt_tokens":769,"total_characters":0,"total_tokens":872},"created":1790008370,"input_sensitive":false,"output_sensitive":false,"input_sensitive_type":0,"output_sensitive_type":0,"output_sensitive_int":0,"base_resp":{"status_code":0,"status_msg":""}}`
 
 func TestIsReasoningModel(t *testing.T) {
 	tests := []struct {
@@ -116,13 +119,13 @@ func TestChatCompletion_SendsReasoningSplitPerModel(t *testing.T) {
 		caller string // caller-supplied reasoning_split, "" for none
 		want   any    // nil means the field must be absent
 	}{
-		{name: "gated model splits reasoning", model: "MiniMax-M2.5", want: true},
+		{name: "gated model splits reasoning", model: "MiniMax-M2.7", want: true},
 		{name: "non-gated model is left alone", model: "minimax-text"},
 		{name: "caller choice wins", model: "minimax-m3", caller: "false", want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server, capture := providertest.JSONServer(t, http.StatusOK, minimalChatCompletionJSON)
+			server, capture := providertest.JSONServer(t, http.StatusOK, capturedChatCompletionJSON)
 			provider := newTestProvider("minimax-key", server.URL, server.Client(), llmclient.Hooks{})
 
 			req := &core.ChatRequest{Model: tt.model, Messages: []core.Message{{Role: "user", Content: "hi"}}}
@@ -131,8 +134,9 @@ func TestChatCompletion_SendsReasoningSplitPerModel(t *testing.T) {
 					"reasoning_split": json.RawMessage(tt.caller),
 				})
 			}
-			_, err := provider.ChatCompletion(context.Background(), req)
+			resp, err := provider.ChatCompletion(context.Background(), req)
 			require.NoError(t, err)
+			require.Len(t, resp.Choices, 1)
 
 			raw := capture.Last(t).JSON(t)
 			if tt.want == nil {
@@ -144,107 +148,25 @@ func TestChatCompletion_SendsReasoningSplitPerModel(t *testing.T) {
 	}
 }
 
-func TestNormalizeChatResponse(t *testing.T) {
-	tests := []struct {
-		name    string
-		message string
-		want    string
-		absent  string
-	}{
-		{
-			name:    "reasoning_details are joined into reasoning_content",
-			message: `{"role":"assistant","content":"4","reasoning_details":[{"text":"2 + "},{"text":"2 = 4"}]}`,
-			want:    `"reasoning_content":"2 + 2 = 4"`,
-		},
-		{
-			name:    "existing reasoning_content wins",
-			message: `{"role":"assistant","content":"4","reasoning_details":[{"text":"derived"}],"reasoning_content":"kept"}`,
-			want:    `"reasoning_content":"kept"`,
-			absent:  `2 + 2 = 4`,
-		},
-		{
-			name:    "a message without reasoning_details is untouched",
-			message: `{"role":"assistant","content":"4","channel":"final"}`,
-			want:    `"channel":"final"`,
-			absent:  `"reasoning_content"`,
-		},
-		{
-			name:    "a reasoning_details value of the wrong shape is untouched",
-			message: `{"role":"assistant","content":"4","reasoning_details":"nope"}`,
-			want:    `"content":"4"`,
-			absent:  `"reasoning_content"`,
-		},
-		{
-			name:    "empty reasoning_details add nothing",
-			message: `{"role":"assistant","content":"4","reasoning_details":[]}`,
-			want:    `"content":"4"`,
-			absent:  `"reasoning_content"`,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var msg core.ResponseMessage
-			err := json.Unmarshal([]byte(tt.message), &msg)
-			require.NoError(t, err)
+func TestChatCompletion_RelaysNativeReasoningMembers(t *testing.T) {
+	server, _ := providertest.JSONServer(t, http.StatusOK, capturedChatCompletionJSON)
+	provider := newTestProvider("minimax-key", server.URL, server.Client(), llmclient.Hooks{})
 
-			resp := &core.ChatResponse{Choices: []core.Choice{{Message: msg}}}
-			normalizeChatResponse(resp)
+	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "MiniMax-M2.7",
+		Messages: []core.Message{{Role: "user", Content: "prove it"}},
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Choices, 1)
 
-			encoded, err := json.Marshal(resp.Choices[0].Message)
-			require.NoError(t, err)
-			assert.Contains(t, string(encoded), tt.want)
-			if tt.absent != "" {
-				assert.NotContains(t, string(encoded), tt.absent)
-			}
-		})
-	}
-}
-
-func TestNormalizeChatResponse_MergeFailureLeavesMessageUntouched(t *testing.T) {
-	msg := &core.ResponseMessage{ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
-		"reasoning_details": json.RawMessage(`[{"text":"kept"}]`),
-		"zz_broken":         json.RawMessage(`{`),
-	})}
-	normalizeReasoningMessage(msg)
-	assert.Equal(t, json.RawMessage(`[{"text":"kept"}]`), msg.ExtraFields.Lookup(reasoningDetailsKey))
-	assert.Nil(t, msg.ExtraFields.Lookup(canonicalReasoningKey))
-}
-
-func TestNormalizeChatResponseNilIsSafe(t *testing.T) {
-	normalizeChatResponse(nil)
-}
-
-func TestChatCompletion_NormalizesReasoningDetailsForGatedModel(t *testing.T) {
-	server, _ := providertest.JSONServer(t, http.StatusOK, `{"id":"c1","object":"chat.completion","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"4","reasoning_details":[{"text":"2 + "},{"text":"2 = 4"}]},"finish_reason":"stop"}]}`)
-
-	tests := []struct {
-		name          string
-		model         string
-		wantReasoning string // "" means reasoning_content must be absent
-	}{
-		{name: "gated model", model: "MiniMax-M2.5", wantReasoning: "2 + 2 = 4"},
-		{name: "non-gated model", model: "minimax-text"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			provider := newTestProvider("minimax-key", server.URL, server.Client(), llmclient.Hooks{})
-			resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
-				Model:    tt.model,
-				Messages: []core.Message{{Role: "user", Content: "hi"}},
-			})
-			require.NoError(t, err)
-			require.Len(t, resp.Choices, 1)
-
-			got := resp.Choices[0].Message.ExtraFields.Lookup(canonicalReasoningKey)
-			if tt.wantReasoning == "" {
-				assert.Nil(t, got)
-				return
-			}
-			require.NotNil(t, got)
-			assert.Equal(t, `"2 + 2 = 4"`, string(got), "reasoning_content must hold the joined text")
-			assert.Equal(t, "4", resp.Choices[0].Message.Content, "content must stay clean")
-		})
-	}
+	msg := resp.Choices[0].Message
+	assert.Equal(t, "**Proof.** Let odd numbers be `2a + 1` and `2b + 1`. Their sum: `(2a + 1) + (2b + 1) = 2a + 2b + 2 = 2(a + b + 1)`. Divisible by 2. Even. ∎", msg.Content, "content must stay clean and untouched")
+	require.NotNil(t, msg.ExtraFields.Lookup("reasoning_content"), "reasoning_content must be relayed")
+	assert.Equal(t, `"The user wants a proof that the sum of two odd numbers is even. I'll keep this in caveman style as per the instructions."`, string(msg.ExtraFields.Lookup("reasoning_content")))
+	require.NotNil(t, msg.ExtraFields.Lookup(reasoningDetailsKey), "reasoning_details must be relayed untouched")
+	assert.JSONEq(t,
+		`[{"type":"reasoning.text","id":"reasoning-text-1","format":"MiniMax-response-v1","index":0,"text":"The user wants a proof that the sum of two odd numbers is even. I'll keep this in caveman style as per the instructions."}]`,
+		string(msg.ExtraFields.Lookup(reasoningDetailsKey)))
 }
 
 func TestUpstreamErrorPathsPropagate(t *testing.T) {

@@ -14,6 +14,30 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
+// Verbatim data lines from a live MiniMax OpenAI-compatible capture
+// (reasoning_split: true). reasoning_content and reasoning_details are both
+// incremental; content deltas carry neither member; the stream ends with a
+// standard usage-only chunk.
+const (
+	capturedReasoningDelta1 = `{"id":"07008f4a82fecea87b8c3822c4ed23c0","choices":[{"index":0,"delta":{"role":"assistant","name":"MiniMax AI","audio_content":"","reasoning_content":"The","reasoning_details":[{"type":"reasoning.text","id":"reasoning-text-1","format":"MiniMax-response-v1","index":0,"text":"The"}]}}],"created":1790008394,"model":"MiniMax-M2.7","object":"chat.completion.chunk","usage":null,"input_sensitive":false,"output_sensitive":false,"input_sensitive_type":0,"output_sensitive_type":0,"output_sensitive_int":0}`
+
+	capturedReasoningDelta2 = `{"id":"07008f4a82fecea87b8c3822c4ed23c0","choices":[{"index":0,"delta":{"content":"","role":"assistant","name":"MiniMax AI","audio_content":"","reasoning_content":" user wants a proof that the sum of two odd numbers is even. This is a straightforward number theory proof. I should present it concisely in caveman style.","reasoning_details":[{"type":"reasoning.text","id":"reasoning-text-1","format":"MiniMax-response-v1","index":0,"text":" user wants a proof that the sum of two odd numbers is even. This is a straightforward number theory proof. I should present it concisely in caveman style."}]}}],"created":1790008394,"model":"MiniMax-M2.7","object":"chat.completion.chunk","usage":null,"input_sensitive":false,"output_sensitive":false,"input_sensitive_type":0,"output_sensitive_type":0,"output_sensitive_int":0}`
+
+	capturedContentDelta = `{"id":"07008f4a82fecea87b8c3822c4ed23c0","choices":[{"index":0,"delta":{"content":"**","role":"assistant","name":"MiniMax AI","audio_content":""}}],"created":1790008394,"model":"MiniMax-M2.7","object":"chat.completion.chunk","usage":null,"input_sensitive":false,"output_sensitive":false,"input_sensitive_type":0,"output_sensitive_type":0,"output_sensitive_int":0}`
+
+	capturedFinishChunk = `{"id":"07008f4a82fecea87b8c3822c4ed23c0","choices":[{"finish_reason":"stop","index":0,"delta":{"content":" = 2(a + b + 1)$$\n\nResult divisible by 2. Even. ∎","role":"assistant","name":"MiniMax AI","audio_content":""}}],"created":1790008394,"model":"MiniMax-M2.7","object":"chat.completion.chunk","usage":null,"input_sensitive":false,"output_sensitive":false,"input_sensitive_type":0,"output_sensitive_type":0,"output_sensitive_int":0}`
+
+	capturedUsageChunk = `{"id":"07008f4a82fecea87b8c3822c4ed23c0","choices":[],"created":1790008394,"model":"MiniMax-M2.7","object":"chat.completion.chunk","usage":{"total_tokens":885,"total_characters":0,"prompt_tokens":769,"completion_tokens":116,"completion_tokens_details":{"reasoning_tokens":37},"prompt_tokens_details":{"cached_tokens":443}},"base_resp":{"status_code":0,"status_msg":""}}`
+)
+
+// A rewritten chunk is re-encoded from raw members, so it keeps every other
+// member's original bytes; the map re-encode sorts keys.
+const (
+	strippedReasoningDelta1 = `{"choices":[{"delta":{"audio_content":"","name":"MiniMax AI","reasoning_content":"The","role":"assistant"},"index":0}],"created":1790008394,"id":"07008f4a82fecea87b8c3822c4ed23c0","input_sensitive":false,"input_sensitive_type":0,"model":"MiniMax-M2.7","object":"chat.completion.chunk","output_sensitive":false,"output_sensitive_int":0,"output_sensitive_type":0,"usage":null}`
+
+	strippedReasoningDelta2 = `{"choices":[{"delta":{"audio_content":"","content":"","name":"MiniMax AI","reasoning_content":" user wants a proof that the sum of two odd numbers is even. This is a straightforward number theory proof. I should present it concisely in caveman style.","role":"assistant"},"index":0}],"created":1790008394,"id":"07008f4a82fecea87b8c3822c4ed23c0","input_sensitive":false,"input_sensitive_type":0,"model":"MiniMax-M2.7","object":"chat.completion.chunk","output_sensitive":false,"output_sensitive_int":0,"output_sensitive_type":0,"usage":null}`
+)
+
 func TestNormalizeChatStream(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -22,79 +46,64 @@ func TestNormalizeChatStream(t *testing.T) {
 		want  string
 	}{
 		{
-			name: "cumulative details emit only the new suffix and are stripped",
-			in: "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_details\":[{\"text\":\"Hel\"},{\"text\":\"lo\"}]}}]}\n\n" +
-				"data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_details\":[{\"text\":\"Hello\"},{\"text\":\" world\"}]}}]}\n\n" +
-				"data: [DONE]\n\n",
-			want: "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"Hello\"},\"index\":0}]}\n\n" +
-				"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\" world\"},\"index\":0}]}\n\n" +
-				"data: [DONE]\n\n",
+			name: "a reasoning delta keeps reasoning_content and loses reasoning_details",
+			in:   "data: " + capturedReasoningDelta1 + "\n\n",
+			want: "data: " + strippedReasoningDelta1 + "\n\n",
 		},
 		{
-			name: "a repeated cumulative buffer emits an empty delta",
-			in: "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_details\":[{\"text\":\"Hi\"}]}}]}\n\n" +
-				"data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_details\":[{\"text\":\"Hi\"}]}}]}\n\n",
-			want: "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"Hi\"},\"index\":0}]}\n\n" +
-				"data: {\"choices\":[{\"delta\":{},\"index\":0}]}\n\n",
+			name: "the next incremental reasoning delta is rewritten the same way",
+			in:   "data: " + capturedReasoningDelta2 + "\n\n",
+			want: "data: " + strippedReasoningDelta2 + "\n\n",
 		},
 		{
-			name: "a replaced buffer forwards the whole text",
-			in: "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_details\":[{\"text\":\"abc\"}]}}]}\n\n" +
-				"data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_details\":[{\"text\":\"xy\"}]}}]}\n\n",
-			want: "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"abc\"},\"index\":0}]}\n\n" +
-				"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"xy\"},\"index\":0}]}\n\n",
+			name: "a wrong-shape reasoning_details is still stripped",
+			in:   "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\",\"reasoning_details\":{\"text\":\"x\"}}}]}",
+			want: "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"},\"index\":0}]}\n",
 		},
 		{
-			name: "choice buffers are independent",
-			in: "data: {\"choices\":[{\"index\":1,\"delta\":{\"reasoning_details\":[{\"text\":\"B\"}]}},{\"index\":0,\"delta\":{\"reasoning_details\":[{\"text\":\"A\"}]}}]}\n\n" +
-				"data: {\"choices\":[{\"index\":1,\"delta\":{\"reasoning_details\":[{\"text\":\"BC\"}]}}]}\n\n",
-			want: "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"B\"},\"index\":1},{\"delta\":{\"reasoning_content\":\"A\"},\"index\":0}]}\n\n" +
-				"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"C\"},\"index\":1}]}\n\n",
+			name: "a content delta is relayed byte for byte",
+			in:   "data: " + capturedContentDelta + "\n\n",
+			want: "data: " + capturedContentDelta + "\n\n",
 		},
 		{
-			name: "a missing index member falls back to the array position",
-			in:   "data: {\"choices\":[{\"delta\":{\"reasoning_details\":[{\"text\":\"C\"}]}}]}\n\n",
-			want: "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"C\"}}]}\n\n",
+			name: "the finish chunk is relayed byte for byte",
+			in:   "data: " + capturedFinishChunk + "\n\n",
+			want: "data: " + capturedFinishChunk + "\n\n",
 		},
 		{
-			name: "a non-number index member falls back to the array position",
-			in:   "data: {\"choices\":[{\"index\":\"zero\",\"delta\":{\"reasoning_details\":[{\"text\":\"C\"}]}}]}\n\n",
-			want: "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"C\"},\"index\":\"zero\"}]}\n\n",
+			name: "the trailing usage-only chunk is relayed byte for byte",
+			in:   "data: " + capturedUsageChunk + "\n\n",
+			want: "data: " + capturedUsageChunk + "\n\n",
 		},
 		{
-			name: "a delta with reasoning_content is relayed byte for byte",
-			in:   "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"We\"}}]}\n\n",
-			want: "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"We\"}}]}\n\n",
+			name: "[DONE] passes through",
+			in:   "data: [DONE]\n\n",
+			want: "data: [DONE]\n\n",
 		},
 		{
-			name: "a delta carrying both spellings is relayed byte for byte",
-			in:   "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_details\":[{\"text\":\"x\"}],\"reasoning_content\":\"keep\"}}]}\n\n",
-			want: "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_details\":[{\"text\":\"x\"}],\"reasoning_content\":\"keep\"}}]}\n\n",
+			name: "a delta without reasoning_details is relayed byte for byte",
+			in:   "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\",\"reasoning_content\":\"keep\"}}]}",
+			want: "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\",\"reasoning_content\":\"keep\"}}]}",
 		},
 		{
-			name: "the trailing summary event collapses to its usage",
-			in:   "data: {\"id\":\"c\",\"object\":\"chat.completion\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"done\",\"reasoning_details\":[{\"text\":\"all\"}]},\"finish_reason\":\"stop\"}],\"usage\":{\"total_tokens\":9007199254740993}}\n\n",
-			want: "data: {\"choices\":[{\"finish_reason\":\"stop\",\"index\":0}],\"id\":\"c\",\"object\":\"chat.completion\",\"usage\":{\"total_tokens\":9007199254740993}}\n\n",
-		},
-		{
-			name: "a summary event without usage is relayed byte for byte",
-			in:   "data: {\"choices\":[{\"message\":{\"role\":\"assistant\"}}]}\n\n",
-			want: "data: {\"choices\":[{\"message\":{\"role\":\"assistant\"}}]}\n\n",
-		},
-		{
-			name: "content deltas are relayed byte for byte",
-			in:   "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n",
-			want: "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n",
-		},
-		{
-			name: "a delta without reasoning members is relayed byte for byte",
+			name: "the marker elsewhere in the envelope rewrites nothing",
 			in:   "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}],\"reasoning_details\":[]}\n\n",
 			want: "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}],\"reasoning_details\":[]}\n\n",
 		},
 		{
-			name: "a choice without a delta is relayed byte for byte",
-			in:   "data: {\"choices\":[{\"index\":0}],\"reasoning_details\":[]}\n\n",
-			want: "data: {\"choices\":[{\"index\":0}],\"reasoning_details\":[]}\n\n",
+			name: "a bare data prefix without a space is accepted",
+			in:   "data:{\"choices\":[{\"index\":0,\"delta\":{\"reasoning_details\":[{\"text\":\"x\"}],\"reasoning_content\":\"y\"}}]}",
+			want: "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"y\"},\"index\":0}]}\n",
+		},
+		{
+			name: "an unparsable payload is relayed unchanged",
+			in:   "data: {\"reasoning_details\"\n\n",
+			want: "data: {\"reasoning_details\"\n\n",
+		},
+		{
+			name: "an unparsable choices member is relayed unchanged",
+			in:   "data: {\"choices\":{},\"reasoning_details\":[]}\n\n",
+			want: "data: {\"choices\":{},\"reasoning_details\":[]}\n\n",
 		},
 		{
 			name: "a choice that is not an object is relayed unchanged",
@@ -102,24 +111,14 @@ func TestNormalizeChatStream(t *testing.T) {
 			want: "data: {\"choices\":[1],\"reasoning_details\":[]}\n\n",
 		},
 		{
-			name: "payloads without choices are relayed unchanged",
-			in:   "data: {\"reasoning_details\":true}\n\n",
-			want: "data: {\"reasoning_details\":true}\n\n",
-		},
-		{
-			name: "unparsable deltas are relayed unchanged",
+			name: "a delta that is not an object is relayed unchanged",
 			in:   "data: {\"choices\":[{\"index\":0,\"delta\":\"x\"}],\"reasoning_details\":[]}\n\n",
 			want: "data: {\"choices\":[{\"index\":0,\"delta\":\"x\"}],\"reasoning_details\":[]}\n\n",
 		},
 		{
-			name: "reasoning_details of the wrong shape are relayed unchanged",
-			in:   "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_details\":{\"text\":\"x\"}}}]}\n\n",
-			want: "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_details\":{\"text\":\"x\"}}}]}\n\n",
-		},
-		{
-			name: "unparsable payloads are relayed unchanged",
-			in:   "data: {\"reasoning_details\"\n\n",
-			want: "data: {\"reasoning_details\"\n\n",
+			name: "a choice without a delta is relayed byte for byte",
+			in:   "data: {\"choices\":[{\"index\":0}],\"reasoning_details\":[]}\n\n",
+			want: "data: {\"choices\":[{\"index\":0}],\"reasoning_details\":[]}\n\n",
 		},
 		{
 			name: "comments survive",
@@ -129,10 +128,8 @@ func TestNormalizeChatStream(t *testing.T) {
 		{
 			name:  "a non-gated model's stream passes through untouched",
 			model: "minimax-text",
-			in: "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_details\":[{\"text\":\"raw\"}]}}]}\n\n" +
-				"data: {\"choices\":[],\"usage\":{}}\n\n",
-			want: "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_details\":[{\"text\":\"raw\"}]}}]}\n\n" +
-				"data: {\"choices\":[],\"usage\":{}}\n\n",
+			in:    "data: " + capturedReasoningDelta1 + "\n\n",
+			want:  "data: " + capturedReasoningDelta1 + "\n\n",
 		},
 	}
 	for _, tt := range tests {
@@ -174,19 +171,22 @@ func TestNormalizeChatStreamCloseClosesTheSource(t *testing.T) {
 	require.NoError(t, stream.Close())
 }
 
-func TestStreamChatCompletion_NormalizesReasoningStreamForGatedModel(t *testing.T) {
-	upstream := "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}\n\n" +
-		"data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_details\":[{\"text\":\"Think\"},{\"text\":\"ing\"}]}}]}\n\n" +
-		"data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_details\":[{\"text\":\"Thinking hard\"}]}}]}\n\n" +
-		"data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Answer\"}}]}\n\n" +
-		"data: {\"id\":\"c\",\"object\":\"chat.completion\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Answer\",\"reasoning_details\":[{\"text\":\"Thinking hard\"}]},\"finish_reason\":\"stop\"}],\"usage\":{\"total_tokens\":21}}\n\n" +
-		"data: [DONE]\n\n"
-	rewritten := "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}\n\n" +
-		"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"Thinking\"},\"index\":0}],\"id\":\"1\",\"object\":\"chat.completion.chunk\"}\n\n" +
-		"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\" hard\"},\"index\":0}],\"id\":\"1\",\"object\":\"chat.completion.chunk\"}\n\n" +
-		"data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Answer\"}}]}\n\n" +
-		"data: {\"choices\":[{\"finish_reason\":\"stop\",\"index\":0}],\"id\":\"c\",\"object\":\"chat.completion\",\"usage\":{\"total_tokens\":21}}\n\n" +
-		"data: [DONE]\n\n"
+// capturedStreamHead is the two reasoning events of the live capture; its
+// tail is everything from the first content delta to the final usage chunk.
+const capturedStreamTail = `data: {"id":"07008f4a82fecea87b8c3822c4ed23c0","choices":[{"index":0,"delta":{"content":"**","role":"assistant","name":"MiniMax AI","audio_content":""}}],"created":1790008394,"model":"MiniMax-M2.7","object":"chat.completion.chunk","usage":null,"input_sensitive":false,"output_sensitive":false,"input_sensitive_type":0,"output_sensitive_type":0,"output_sensitive_int":0}
+
+data: {"id":"07008f4a82fecea87b8c3822c4ed23c0","choices":[{"index":0,"delta":{"content":"Proof.**\n\nOdd numbers: $2a + 1$ and $2b + 1$ for","role":"assistant","name":"MiniMax AI","audio_content":""}}],"created":1790008394,"model":"MiniMax-M2.7","object":"chat.completion.chunk","usage":null,"input_sensitive":false,"output_sensitive":false,"input_sensitive_type":0,"output_sensitive_type":0,"output_sensitive_int":0}
+
+data: {"id":"07008f4a82fecea87b8c3822c4ed23c0","choices":[{"index":0,"delta":{"content":" integers $a, b$.\n\nAdd:\n\n$$(2a + 1) + (2b + 1) = 2a + 2b + 2","role":"assistant","name":"MiniMax AI","audio_content":""}}],"created":1790008394,"model":"MiniMax-M2.7","object":"chat.completion.chunk","usage":null,"input_sensitive":false,"output_sensitive":false,"input_sensitive_type":0,"output_sensitive_type":0,"output_sensitive_int":0}
+
+data: {"id":"07008f4a82fecea87b8c3822c4ed23c0","choices":[{"finish_reason":"stop","index":0,"delta":{"content":" = 2(a + b + 1)$$\n\nResult divisible by 2. Even. ∎","role":"assistant","name":"MiniMax AI","audio_content":""}}],"created":1790008394,"model":"MiniMax-M2.7","object":"chat.completion.chunk","usage":null,"input_sensitive":false,"output_sensitive":false,"input_sensitive_type":0,"output_sensitive_type":0,"output_sensitive_int":0}
+
+data: {"id":"07008f4a82fecea87b8c3822c4ed23c0","choices":[],"created":1790008394,"model":"MiniMax-M2.7","object":"chat.completion.chunk","usage":{"total_tokens":885,"total_characters":0,"prompt_tokens":769,"completion_tokens":116,"completion_tokens_details":{"reasoning_tokens":37},"prompt_tokens_details":{"cached_tokens":443}},"base_resp":{"status_code":0,"status_msg":""}}
+
+`
+
+func TestStreamChatCompletion_StripsReasoningDetailsForGatedModel(t *testing.T) {
+	upstream := "data: " + capturedReasoningDelta1 + "\n\ndata: " + capturedReasoningDelta2 + "\n\n" + capturedStreamTail
 
 	tests := []struct {
 		name       string
@@ -195,9 +195,9 @@ func TestStreamChatCompletion_NormalizesReasoningStreamForGatedModel(t *testing.
 		wantSplit  any // reasoning_split the upstream must receive; nil means absent
 	}{
 		{
-			name:       "gated model",
-			model:      "MiniMax-M3",
-			wantStream: rewritten,
+			name:       "gated model loses reasoning_details and keeps the rest",
+			model:      "MiniMax-M2.7",
+			wantStream: "data: " + strippedReasoningDelta1 + "\n\ndata: " + strippedReasoningDelta2 + "\n\n" + capturedStreamTail,
 			wantSplit:  true,
 		},
 		{

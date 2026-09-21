@@ -3,9 +3,7 @@ package minimax
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"io"
-	"strings"
 
 	"github.com/goccy/go-json"
 )
@@ -13,20 +11,18 @@ import (
 // sseDataPrefix introduces the JSON payload of an SSE event.
 var sseDataPrefix = []byte("data: ")
 
-// Markers gate the per-chunk decode: content deltas, role chunks and the
-// terminal [DONE] line never carry them and are relayed with their original
-// bytes, so only reasoning turns pay for a re-encode. The summary marker
-// catches the trailing chat.completion event, whose full message announces
-// the end of an M3 reasoning stream.
-var (
-	reasoningDetailsMarker = []byte(`"reasoning_details"`)
-	summaryMarker          = []byte(`"message"`)
-)
+// reasoningDetailsMarker gates the per-chunk decode: content deltas, the
+// terminal usage chunk and [DONE] never carry it and are relayed with their
+// original bytes, so only reasoning turns pay for a re-encode.
+var reasoningDetailsMarker = []byte(`"reasoning_details"`)
 
-// normalizeChatStream rewrites a chat completions SSE stream from MiniMax's
-// cumulative reasoning_details deltas onto canonical reasoning_content
-// deltas, and collapses the trailing summary event to its usage. Streams of
-// non-reasoning models are returned untouched.
+// normalizeChatStream strips the redundant reasoning_details member from
+// choices[].delta on a chat completions SSE stream. The canonical member
+// reasoning_content is already incremental, and reasoning_details duplicates
+// the same payload chunk for chunk, so dropping it halves the reasoning
+// bandwidth. The stream ends with a standard usage-only chunk that passes
+// through byte for byte. Streams of non-reasoning models are returned
+// untouched.
 func normalizeChatStream(stream io.ReadCloser, model string) io.ReadCloser {
 	if stream == nil {
 		return nil
@@ -34,22 +30,16 @@ func normalizeChatStream(stream io.ReadCloser, model string) io.ReadCloser {
 	if !isReasoningModel(model) {
 		return stream
 	}
-	return &reasoningStream{
-		src:        bufio.NewReader(stream),
-		closer:     stream,
-		cumulative: map[int]string{},
-	}
+	return &reasoningStream{src: bufio.NewReader(stream), closer: stream}
 }
 
-// reasoningStream relays MiniMax's SSE stream line by line, tracking the
-// reasoning text already emitted per choice so each delta forwards only the
-// new suffix.
+// reasoningStream relays MiniMax's SSE stream line by line, rewriting only
+// the data lines that carry reasoning_details.
 type reasoningStream struct {
-	src        *bufio.Reader
-	closer     io.Closer
-	pending    bytes.Buffer
-	cumulative map[int]string
-	err        error
+	src     *bufio.Reader
+	closer  io.Closer
+	pending bytes.Buffer
+	err     error
 }
 
 func (s *reasoningStream) Read(p []byte) (int, error) {
@@ -73,14 +63,14 @@ func (s *reasoningStream) Close() error { return s.closer.Close() }
 func (s *reasoningStream) transform(line []byte) []byte {
 	// SSE allows the field name with or without a space before the value;
 	// both spellings must reach the rewrite or a `data:{...}` line would
-	// leak raw cumulative reasoning_details to the client.
+	// leak raw reasoning_details to the client.
 	payload, ok := bytes.CutPrefix(line, []byte("data:"))
 	if !ok {
 		return line
 	}
 	payload = bytes.TrimLeft(payload, " ")
 	payload = bytes.TrimRight(payload, "\r\n")
-	if !bytes.Contains(line, reasoningDetailsMarker) && !bytes.Contains(line, summaryMarker) {
+	if !bytes.Contains(line, reasoningDetailsMarker) {
 		return line
 	}
 	// Members are decoded as raw JSON and re-emitted byte for byte: a
@@ -90,8 +80,8 @@ func (s *reasoningStream) transform(line []byte) []byte {
 	if err := json.Unmarshal(payload, &chunk); err != nil {
 		return line
 	}
-	rewritten, changed, err := s.rewriteChunk(chunk)
-	if err != nil || !changed {
+	rewritten, changed := stripDeltaReasoningDetails(chunk)
+	if !changed {
 		return line
 	}
 	encoded := marshalRaw(rewritten)
@@ -101,106 +91,43 @@ func (s *reasoningStream) transform(line []byte) []byte {
 	return append(out, '\n')
 }
 
-// rewriteChunk rewrites chunk in place and reports whether anything changed,
-// returning the chunk to encode. Every member it does not rewrite keeps its
-// original raw bytes.
-func (s *reasoningStream) rewriteChunk(chunk map[string]json.RawMessage) (map[string]json.RawMessage, bool, error) {
+// stripDeltaReasoningDetails deletes reasoning_details from every choice's
+// delta in place and reports whether anything changed. Every member it does
+// not touch keeps its original raw bytes, and an unparsable envelope leaves
+// the chunk to be relayed unchanged.
+func stripDeltaReasoningDetails(chunk map[string]json.RawMessage) (map[string]json.RawMessage, bool) {
 	var choices []json.RawMessage
 	if err := json.Unmarshal(chunk["choices"], &choices); err != nil {
-		return nil, false, err
+		return chunk, false
 	}
 	changed := false
 	for i, raw := range choices {
 		var choice map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &choice); err != nil {
-			return nil, false, err
-		}
-		if _, isMessage := choice["message"]; isMessage {
-			// MiniMax M3 ends a reasoning stream with a full chat.completion
-			// object — the complete message plus the real usage. Clients have
-			// already received every delta, so the event collapses to an empty
-			// choices array plus the usage and the duplicate message goes. The
-			// rest of the envelope (id, object, created, model) survives, and
-			// a finish_reason on the event is hoisted onto the emptied choice
-			// so downstream consumers still see the terminal status.
-			if _, hasUsage := chunk["usage"]; !hasUsage {
-				return chunk, false, nil
-			}
-			// The emptied choice keeps its index and terminal status so
-			// finish-bearing streams still record completion state. The
-			// members are raw JSON, so the re-encode cannot fail.
-			emptied := map[string]json.RawMessage{}
-			if idx, has := choice["index"]; has {
-				emptied["index"] = idx
-			}
-			if finish, has := choice["finish_reason"]; has {
-				emptied["finish_reason"] = finish
-			}
-			chunk["choices"] = marshalRaw([]map[string]json.RawMessage{emptied})
-			return chunk, true, nil
-		}
-		delta, hasDelta := choice["delta"]
-		if !hasDelta || len(delta) == 0 {
 			continue
 		}
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(delta, &fields); err != nil {
-			return nil, false, err
-		}
-		if _, hasCanonical := fields[canonicalReasoningKey]; hasCanonical {
+		var delta map[string]json.RawMessage
+		if err := json.Unmarshal(choice["delta"], &delta); err != nil {
 			continue
 		}
-		details, hasDetails := fields[reasoningDetailsKey]
-		if !hasDetails {
+		if _, has := delta[reasoningDetailsKey]; !has {
 			continue
 		}
-		suffix, err := s.reasoningSuffix(choiceIndex(choice, i), details)
-		if err != nil {
-			return nil, false, err
-		}
-		delete(fields, reasoningDetailsKey)
-		if suffix != "" {
-			fields[canonicalReasoningKey] = marshalRaw(suffix)
-		}
-		choice["delta"] = marshalRaw(fields)
+		delete(delta, reasoningDetailsKey)
+		choice["delta"] = marshalRaw(delta)
 		choices[i] = marshalRaw(choice)
 		changed = true
 	}
 	if !changed {
-		return nil, false, nil
+		return chunk, false
 	}
 	chunk["choices"] = marshalRaw(choices)
-	return chunk, true, nil
+	return chunk, true
 }
 
-// reasoningSuffix returns the part of a choice's cumulative reasoning_details
-// text that has not been emitted yet, and records the full text as emitted.
-func (s *reasoningStream) reasoningSuffix(index int, raw json.RawMessage) (string, error) {
-	full, ok := concatenateReasoningDetails(raw)
-	if !ok {
-		return "", fmt.Errorf("reasoning_details is not an array of objects")
-	}
-	previous := s.cumulative[index]
-	suffix := ""
-	switch {
-	case full == previous:
-	case strings.HasPrefix(full, previous):
-		suffix = full[len(previous):]
-	default:
-		// The upstream buffer was replaced rather than extended: forward the
-		// whole text so the client's reasoning stays consistent with it.
-		suffix = full
-	}
-	s.cumulative[index] = full
-	return suffix, nil
-}
-
-// choiceIndex returns the choice's index member, falling back to its position
-// in the choices array when the member is absent or not a number.
-func choiceIndex(choice map[string]json.RawMessage, position int) int {
-	var index int
-	if err := json.Unmarshal(choice["index"], &index); err != nil {
-		return position
-	}
-	return index
+// marshalRaw re-encodes v, a value assembled only from strings and raw JSON
+// members. json.Marshal on such a value cannot fail, so the error is dropped.
+func marshalRaw(v any) json.RawMessage {
+	encoded, _ := json.Marshal(v)
+	return encoded
 }
