@@ -18,11 +18,12 @@ const defaultBaseURL = "https://api.kimi.com/coding/v1"
 
 // Registration provides factory registration for the Kimi Code provider.
 var Registration = providers.Registration{
-	Type: "kimicode",
-	New:  New,
+	Type:            "kimicode",
+	New:             New,
 	Discovery: providers.DiscoveryConfig{
 		DefaultBaseURL: defaultBaseURL,
 	},
+	DefaultTripOn: kimicodeDefaultTripOn(),
 }
 
 // Provider implements the core.Provider interface for Kimi Code. Kimi Code is
