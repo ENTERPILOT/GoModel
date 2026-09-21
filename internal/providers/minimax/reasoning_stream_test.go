@@ -73,8 +73,8 @@ func TestNormalizeChatStream(t *testing.T) {
 		},
 		{
 			name: "the trailing summary event collapses to its usage",
-			in:   "data: {\"id\":\"c\",\"object\":\"chat.completion\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"done\",\"reasoning_details\":[{\"text\":\"all\"}]}}],\"usage\":{\"total_tokens\":9007199254740993}}\n\n",
-			want: "data: {\"choices\":[],\"usage\":{\"total_tokens\":9007199254740993}}\n\n",
+			in:   "data: {\"id\":\"c\",\"object\":\"chat.completion\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"done\",\"reasoning_details\":[{\"text\":\"all\"}]},\"finish_reason\":\"stop\"}],\"usage\":{\"total_tokens\":9007199254740993}}\n\n",
+			want: "data: {\"choices\":[{\"finish_reason\":\"stop\",\"index\":0}],\"id\":\"c\",\"object\":\"chat.completion\",\"usage\":{\"total_tokens\":9007199254740993}}\n\n",
 		},
 		{
 			name: "a summary event without usage is relayed byte for byte",
@@ -179,13 +179,13 @@ func TestStreamChatCompletion_NormalizesReasoningStreamForGatedModel(t *testing.
 		"data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_details\":[{\"text\":\"Think\"},{\"text\":\"ing\"}]}}]}\n\n" +
 		"data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_details\":[{\"text\":\"Thinking hard\"}]}}]}\n\n" +
 		"data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Answer\"}}]}\n\n" +
-		"data: {\"id\":\"c\",\"object\":\"chat.completion\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Answer\",\"reasoning_details\":[{\"text\":\"Thinking hard\"}]}}],\"usage\":{\"total_tokens\":21}}\n\n" +
+		"data: {\"id\":\"c\",\"object\":\"chat.completion\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Answer\",\"reasoning_details\":[{\"text\":\"Thinking hard\"}]},\"finish_reason\":\"stop\"}],\"usage\":{\"total_tokens\":21}}\n\n" +
 		"data: [DONE]\n\n"
 	rewritten := "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}\n\n" +
 		"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"Thinking\"},\"index\":0}],\"id\":\"1\",\"object\":\"chat.completion.chunk\"}\n\n" +
 		"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\" hard\"},\"index\":0}],\"id\":\"1\",\"object\":\"chat.completion.chunk\"}\n\n" +
 		"data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Answer\"}}]}\n\n" +
-		"data: {\"choices\":[],\"usage\":{\"total_tokens\":21}}\n\n" +
+		"data: {\"choices\":[{\"finish_reason\":\"stop\",\"index\":0}],\"id\":\"c\",\"object\":\"chat.completion\",\"usage\":{\"total_tokens\":21}}\n\n" +
 		"data: [DONE]\n\n"
 
 	tests := []struct {

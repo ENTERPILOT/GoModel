@@ -71,13 +71,18 @@ func (s *reasoningStream) Close() error { return s.closer.Close() }
 // transform rewrites one SSE line, returning the input unchanged whenever
 // the rewrite does not apply or the payload does not parse.
 func (s *reasoningStream) transform(line []byte) []byte {
-	if !bytes.HasPrefix(line, sseDataPrefix) {
+	// SSE allows the field name with or without a space before the value;
+	// both spellings must reach the rewrite or a `data:{...}` line would
+	// leak raw cumulative reasoning_details to the client.
+	payload, ok := bytes.CutPrefix(line, []byte("data:"))
+	if !ok {
 		return line
 	}
+	payload = bytes.TrimLeft(payload, " ")
+	payload = bytes.TrimRight(payload, "\r\n")
 	if !bytes.Contains(line, reasoningDetailsMarker) && !bytes.Contains(line, summaryMarker) {
 		return line
 	}
-	payload := bytes.TrimRight(line[len(sseDataPrefix):], "\r\n")
 	// Members are decoded as raw JSON and re-emitted byte for byte: a
 	// map[string]any round trip would reformat every number it touches,
 	// silently truncating integers beyond 2^53 in unrelated vendor data.
@@ -114,15 +119,25 @@ func (s *reasoningStream) rewriteChunk(chunk map[string]json.RawMessage) (map[st
 			// MiniMax M3 ends a reasoning stream with a full chat.completion
 			// object — the complete message plus the real usage. Clients have
 			// already received every delta, so the event collapses to an empty
-			// choices array plus the usage and the duplicate message goes.
-			usage, hasUsage := chunk["usage"]
-			if !hasUsage {
+			// choices array plus the usage and the duplicate message goes. The
+			// rest of the envelope (id, object, created, model) survives, and
+			// a finish_reason on the event is hoisted onto the emptied choice
+			// so downstream consumers still see the terminal status.
+			if _, hasUsage := chunk["usage"]; !hasUsage {
 				return chunk, false, nil
 			}
-			return map[string]json.RawMessage{
-				"choices": json.RawMessage(`[]`),
-				"usage":   usage,
-			}, true, nil
+			// The emptied choice keeps its index and terminal status so
+			// finish-bearing streams still record completion state. The
+			// members are raw JSON, so the re-encode cannot fail.
+			emptied := map[string]json.RawMessage{}
+			if idx, has := choice["index"]; has {
+				emptied["index"] = idx
+			}
+			if finish, has := choice["finish_reason"]; has {
+				emptied["finish_reason"] = finish
+			}
+			chunk["choices"] = marshalRaw([]map[string]json.RawMessage{emptied})
+			return chunk, true, nil
 		}
 		delta, hasDelta := choice["delta"]
 		if !hasDelta || len(delta) == 0 {

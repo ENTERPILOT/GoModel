@@ -50,6 +50,15 @@ MiniMax requires `temperature` in `(0.0, 1.0]` and rejects zero. GoModel clamps
 a zero or negative temperature to `1.0` so OpenAI-style requests that pin
 `temperature: 0` keep working.
 
+## Reasoning
+
+`MiniMax-M3`, `MiniMax-M2.7`, `MiniMax-M2.5` and `MiniMax-M2` (plus the M2.x
+`-highspeed` variants) write their chain of thought separately from the answer.
+GoModel sets `reasoning_split: true` on these requests, so the thinking arrives
+in `reasoning_content` — not as inline `<think>` tags inside `content` — and is
+normalized onto the canonical `reasoning_content` member on buffered responses
+and streaming deltas. Every other MiniMax model passes through untouched.
+
 ## Text-to-speech
 
 `POST /v1/audio/speech` is translated to MiniMax's synchronous
