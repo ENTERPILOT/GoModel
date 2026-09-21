@@ -27,7 +27,8 @@
         "metatags": {
             "generator": "GoModel",
             "google-site-verification": "EhaMJtqC22YnPJetcCW5SCi3fdJF2BOai2WHjae8ymY",
-            "robots": "index, follow, max-image-preview:large"
+            "robots": "index, follow, max-image-preview:large",
+            "canonical": "https://gomodel.enterpilot.io/docs"
         },
         "organization": {
             "id": "https://enterpilot.io/#organization",
