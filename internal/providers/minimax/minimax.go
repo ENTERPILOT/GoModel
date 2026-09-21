@@ -62,8 +62,8 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 
 // StreamChatCompletion returns a raw response body for streaming (caller
 // must close). On the reasoning models the redundant reasoning_details
-// member is stripped from every delta; every other stream is relayed byte
-// for byte.
+// member is stripped from deltas that also carry reasoning_content; every
+// other stream is relayed byte for byte.
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
 	adapted := adaptChatRequest(clampTemperature(req))
 	stream, err := p.ChatCompatible.StreamChatCompletion(ctx, adapted)

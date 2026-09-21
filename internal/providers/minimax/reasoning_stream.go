@@ -20,9 +20,11 @@ var reasoningDetailsMarker = []byte(`"reasoning_details"`)
 // choices[].delta on a chat completions SSE stream. The canonical member
 // reasoning_content is already incremental, and reasoning_details duplicates
 // the same payload chunk for chunk, so dropping it halves the reasoning
-// bandwidth. The stream ends with a standard usage-only chunk that passes
-// through byte for byte. Streams of non-reasoning models are returned
-// untouched.
+// bandwidth. A delta carrying reasoning_details without reasoning_content is
+// relayed unchanged — there the array is the only copy of the reasoning, and
+// with a caller-set reasoning_split the stream still reaches this pass. The
+// stream ends with a standard usage-only chunk that passes through byte for
+// byte. Streams of non-reasoning models are returned untouched.
 func normalizeChatStream(stream io.ReadCloser, model string) io.ReadCloser {
 	if stream == nil {
 		return nil
@@ -92,9 +94,9 @@ func (s *reasoningStream) transform(line []byte) []byte {
 }
 
 // stripDeltaReasoningDetails deletes reasoning_details from every choice's
-// delta in place and reports whether anything changed. Every member it does
-// not touch keeps its original raw bytes, and an unparsable envelope leaves
-// the chunk to be relayed unchanged.
+// delta that also carries reasoning_content, in place, and reports whether
+// anything changed. Every member it does not touch keeps its original raw
+// bytes, and an unparsable envelope leaves the chunk to be relayed unchanged.
 func stripDeltaReasoningDetails(chunk map[string]json.RawMessage) (map[string]json.RawMessage, bool) {
 	var choices []json.RawMessage
 	if err := json.Unmarshal(chunk["choices"], &choices); err != nil {
@@ -111,6 +113,10 @@ func stripDeltaReasoningDetails(chunk map[string]json.RawMessage) (map[string]js
 			continue
 		}
 		if _, has := delta[reasoningDetailsKey]; !has {
+			continue
+		}
+		// A details-only delta keeps its only copy of the reasoning.
+		if _, has := delta[reasoningContentKey]; !has {
 			continue
 		}
 		delete(delta, reasoningDetailsKey)

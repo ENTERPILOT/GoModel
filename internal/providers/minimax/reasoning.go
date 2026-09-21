@@ -15,6 +15,7 @@ import (
 // answer, so no response normalization is needed.
 const (
 	reasoningSplitKey   = "reasoning_split"
+	reasoningContentKey = "reasoning_content"
 	reasoningDetailsKey = "reasoning_details"
 )
 

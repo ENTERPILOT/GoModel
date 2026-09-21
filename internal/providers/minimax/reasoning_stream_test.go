@@ -2,6 +2,7 @@ package minimax
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"strings"
 	"testing"
@@ -56,9 +57,9 @@ func TestNormalizeChatStream(t *testing.T) {
 			want: "data: " + strippedReasoningDelta2 + "\n\n",
 		},
 		{
-			name: "a wrong-shape reasoning_details is still stripped",
+			name: "a delta with reasoning_details but no reasoning_content is relayed byte for byte",
 			in:   "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\",\"reasoning_details\":{\"text\":\"x\"}}}]}",
-			want: "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"},\"index\":0}]}\n",
+			want: "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\",\"reasoning_details\":{\"text\":\"x\"}}}]}",
 		},
 		{
 			name: "a content delta is relayed byte for byte",
@@ -229,4 +230,29 @@ func TestStreamChatCompletion_StripsReasoningDetailsForGatedModel(t *testing.T) 
 			assert.Equal(t, tt.wantSplit, raw["reasoning_split"])
 		})
 	}
+}
+
+// With a caller-set reasoning_split the stream still reaches the strip pass,
+// so a delta carrying reasoning_details without reasoning_content must come
+// out byte for byte: the array is then the only copy of the reasoning.
+func TestStreamChatCompletion_CallerSplitFalseRelaysDetailsOnlyDeltas(t *testing.T) {
+	upstream := "data: {\"id\":\"07008f4a82fecea87b8c3822c4ed23c0\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\",\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"only copy\"}]}}],\"created\":1790008394,\"model\":\"MiniMax-M2.7\",\"object\":\"chat.completion.chunk\",\"usage\":null}\n\ndata: [DONE]\n\n"
+	server, capture := providertest.SSEServer(t, upstream)
+	provider := newTestProvider("minimax-key", server.URL, server.Client(), llmclient.Hooks{})
+
+	stream, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "MiniMax-M2.7",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			reasoningSplitKey: json.RawMessage(`false`),
+		}),
+	})
+	require.NoError(t, err)
+	got, err := io.ReadAll(stream)
+	require.NoError(t, err)
+	require.NoError(t, stream.Close())
+
+	assert.Equal(t, upstream, string(got))
+	raw := capture.Last(t).JSON(t)
+	assert.Equal(t, false, raw[reasoningSplitKey], "the caller's reasoning_split must reach upstream unchanged")
 }
