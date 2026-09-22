@@ -86,7 +86,7 @@ func (m *MediaCapture) save(kind mediastore.Kind, contentType string, r io.Reade
 	}
 	object, err := m.store.Put(m.ctx, m.descriptor(kind, contentType), r)
 	if err != nil {
-		slog.Warn("audit media capture failed", "kind", kind, "content_type", contentType, "request_id", m.requestID, "error", err)
+		slog.Warn("audit media capture failed", "kind", kind, "error", err)
 		return nil
 	}
 	if object.Bytes == 0 {
@@ -106,7 +106,7 @@ func (m *MediaCapture) AudioWriter(contentType string) *MediaWriter {
 	}
 	upload, err := m.store.Begin(m.ctx, m.descriptor(mediastore.KindAudio, contentType))
 	if err != nil {
-		slog.Warn("audit media capture failed", "kind", mediastore.KindAudio, "content_type", contentType, "request_id", m.requestID, "error", err)
+		slog.Warn("audit media capture failed", "kind", mediastore.KindAudio, "error", err)
 		return w
 	}
 	w.capture = m
@@ -145,7 +145,7 @@ func (w *MediaWriter) Bytes() int64 {
 func (w *MediaWriter) fail(err error) {
 	w.failed = true
 	_ = w.upload.Close()
-	slog.Warn("audit media capture failed", "kind", mediastore.KindAudio, "content_type", w.contentType, "request_id", w.capture.requestID, "error", err)
+	slog.Warn("audit media capture failed", "kind", mediastore.KindAudio, "error", err)
 }
 
 // finish commits the upload once and returns the stored record, or nil when

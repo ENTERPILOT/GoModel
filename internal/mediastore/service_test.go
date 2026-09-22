@@ -219,3 +219,17 @@ func (failingStore) Expired(context.Context, time.Time, int) ([]*Object, error) 
 	return nil, nil
 }
 func (failingStore) Close() error { return nil }
+
+func TestValidID(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	object, err := svc.Put(context.Background(), Descriptor{Kind: KindAudio, Source: SourceAudit, ContentType: "audio/wav"}, strings.NewReader("x"))
+	require.NoError(t, err)
+	assert.True(t, ValidID(object.ID), "issued id %q must validate", object.ID)
+
+	for _, id := range []string{"", "med_", "med_missing", "MED_" + strings.Repeat("a", 32), "med_" + strings.Repeat("a", 31), "med_" + strings.Repeat("a", 33), "../etc/passwd", `{"$ne": null}`} {
+		assert.False(t, ValidID(id), "ValidID(%q)", id)
+		_, err := svc.Get(context.Background(), id)
+		require.ErrorIs(t, err, ErrNotFound, "Get(%q)", id)
+		assert.ErrorIs(t, svc.Delete(context.Background(), id), ErrNotFound, "Delete(%q)", id)
+	}
+}

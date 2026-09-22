@@ -202,6 +202,11 @@ func (b *bootstrap) initStores() error {
 	// Initialize media storage: records on the shared storage, bytes in the
 	// configured blob backend. Audit logging stores audio and image payloads
 	// through it (docs/adr/0013-media-storage.md).
+	// A config built without config.Load (test harnesses, embedders) still
+	// gets the documented defaults.
+	if err := config.ResolveMediaConfig(&b.appCfg.Media); err != nil {
+		return fmt.Errorf("invalid media storage config: %w", err)
+	}
 	blobs, err := mediastore.OpenBlobStore(b.appCfg.Media.Storage.Type, b.appCfg.Media.Storage.Path)
 	if err != nil {
 		return fmt.Errorf("failed to open media storage: %w", err)

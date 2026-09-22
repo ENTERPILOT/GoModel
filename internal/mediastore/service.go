@@ -152,9 +152,14 @@ func (s *Service) Put(ctx context.Context, d Descriptor, r io.Reader) (*Object, 
 	return upload.Commit(ctx)
 }
 
-// Get returns an object's record, or ErrNotFound once it has expired.
+// Get returns an object's record, or ErrNotFound once it has expired. A
+// malformed id is not found without touching the store.
 func (s *Service) Get(ctx context.Context, id string) (*Object, error) {
-	object, err := s.objects.Get(ctx, strings.TrimSpace(id))
+	id = strings.TrimSpace(id)
+	if !ValidID(id) {
+		return nil, ErrNotFound
+	}
+	object, err := s.objects.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +188,11 @@ func (s *Service) Open(ctx context.Context, id string) (*Object, io.ReadSeekClos
 
 // Delete removes an object's bytes and record.
 func (s *Service) Delete(ctx context.Context, id string) error {
-	object, err := s.objects.Get(ctx, strings.TrimSpace(id))
+	id = strings.TrimSpace(id)
+	if !ValidID(id) {
+		return ErrNotFound
+	}
+	object, err := s.objects.Get(ctx, id)
 	if err != nil {
 		return err
 	}

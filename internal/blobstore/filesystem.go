@@ -40,11 +40,19 @@ func (s *Filesystem) Root() string {
 	return s.root
 }
 
+// path maps a key to its file. ValidateKey already forbids "." and ".."
+// segments; the Rel check makes the containment explicit so the result can
+// never leave the root.
 func (s *Filesystem) path(key string) (string, error) {
 	if err := ValidateKey(key); err != nil {
 		return "", err
 	}
-	return filepath.Join(s.root, filepath.FromSlash(key)), nil
+	target := filepath.Join(s.root, filepath.FromSlash(key))
+	rel, err := filepath.Rel(s.root, target)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("blob key %q escapes the root", key)
+	}
+	return target, nil
 }
 
 // Create opens a temporary file next to the target path.

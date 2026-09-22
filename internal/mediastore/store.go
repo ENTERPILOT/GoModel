@@ -7,12 +7,23 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
 
 // ErrNotFound reports a media object that does not exist or has expired.
 var ErrNotFound = errors.New("media object not found")
+
+// idPattern is the one shape a media id has: "med_" plus a 32-hex UUID.
+var idPattern = regexp.MustCompile(`^med_[0-9a-f]{32}$`)
+
+// ValidID reports whether id has the shape the service issues. Callers that
+// take ids from clients check it first, so a malformed id never reaches a
+// store query or a path.
+func ValidID(id string) bool {
+	return idPattern.MatchString(id)
+}
 
 // Kind classifies a media object by what it holds.
 type Kind string

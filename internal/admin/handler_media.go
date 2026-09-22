@@ -43,6 +43,11 @@ func (h *Handler) Media(c *echo.Context) error {
 	if h.media == nil {
 		return handleError(c, featureUnavailableError("media storage is unavailable"))
 	}
+	// Ids have one shape; anything else is reported as missing before it can
+	// reach a store query.
+	if !mediastore.ValidID(id) {
+		return handleError(c, mediaNotFound(id))
+	}
 	ctx := c.Request().Context()
 	object, err := h.media.Get(ctx, id)
 	if err != nil {
