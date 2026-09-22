@@ -13,13 +13,15 @@ func TestModelPricingTierUnmarshalUpToTokens(t *testing.T) {
 	err := json.Unmarshal([]byte(`{
 		"currency": "USD",
 		"tiers": [
-			{"up_to_tokens": 200000, "input_per_mtok": 1.25, "output_per_mtok": 10.0}
+			{"up_to_tokens": 200000, "input_per_mtok": 1.25, "cached_input_per_mtok": 0.3, "output_per_mtok": 10.0}
 		]
 	}`), &pricing)
 	require.NoError(t, err)
 	require.Len(t, pricing.Tiers, 1)
 	require.NotNil(t, pricing.Tiers[0].UpToTokens)
 	require.Equal(t, float64(200000), *pricing.Tiers[0].UpToTokens)
+	require.NotNil(t, pricing.Tiers[0].CachedInputPerMtok)
+	require.Equal(t, 0.3, *pricing.Tiers[0].CachedInputPerMtok)
 
 	cloned := pricing.Clone()
 	require.NotNil(t, cloned)
@@ -30,6 +32,10 @@ func TestModelPricingTierUnmarshalUpToTokens(t *testing.T) {
 
 	*pricing.Tiers[0].UpToTokens = 123
 	require.Equal(t, float64(200000), *cloned.Tiers[0].UpToTokens)
+
+	require.NotSame(t, pricing.Tiers[0].CachedInputPerMtok, cloned.Tiers[0].CachedInputPerMtok)
+	*cloned.Tiers[0].CachedInputPerMtok = 0.6
+	require.Equal(t, 0.3, *pricing.Tiers[0].CachedInputPerMtok)
 }
 
 func TestMessageUnmarshalJSON_AllowsNullContent(t *testing.T) {

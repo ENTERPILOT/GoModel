@@ -1725,3 +1725,68 @@ func TestGeminiModelSupportedMethods_EmptyMethodFallback(t *testing.T) {
 		assert.Equal(t, tt.wantImage, gotImage, "%s image", tt.model)
 	}
 }
+
+// The native listing pages at 50 models; a listing that stops at the first
+// page silently hides the rest of the catalog.
+func TestListModels_FollowsNativePageTokens(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
+	pages := map[string]string{
+		"":           `{"models":[{"name":"models/gemini-2.5-flash","supportedGenerationMethods":["generateContent"]}],"nextPageToken":"page-two"}`,
+		"page-two":   `{"models":[{"name":"models/gemini-2.5-pro","supportedGenerationMethods":["generateContent"]}],"nextPageToken":"page-three"}`,
+		"page-three": `{"models":[{"name":"models/text-embedding-004","supportedGenerationMethods":["embedContent"]}]}`,
+	}
+	server, capture := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
+		body, ok := pages[r.URL.Query().Get("pageToken")]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, body)
+	})
+
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL + "/v1beta/openai")
+
+	resp, err := provider.ListModels(context.Background())
+	require.NoError(t, err)
+
+	ids := make([]string, 0, len(resp.Data))
+	for _, m := range resp.Data {
+		ids = append(ids, m.ID)
+	}
+	assert.Equal(t, []string{"gemini-2.5-flash", "gemini-2.5-pro", "text-embedding-004"}, ids)
+
+	requests := capture.All()
+	require.Len(t, requests, 3)
+	assert.Empty(t, requests[0].Query.Get("pageToken"))
+	assert.Equal(t, "page-two", requests[1].Query.Get("pageToken"))
+	assert.Equal(t, "page-three", requests[2].Query.Get("pageToken"))
+	for _, req := range requests {
+		assert.Equal(t, "/v1beta/models", req.Path)
+	}
+}
+
+// A failed later page fails the listing: a partial catalog would hide
+// models with no error to explain why, while an error keeps the registry's
+// last known-good inventory.
+func TestListModels_LaterPageFailurePropagates(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
+	server, _ := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("pageToken") != "" {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"error":{"message":"boom"}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"models":[{"name":"models/gemini-2.5-flash","supportedGenerationMethods":["generateContent"]}],"nextPageToken":"page-two"}`)
+	})
+
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL + "/v1beta/openai")
+
+	_, err := provider.ListModels(context.Background())
+	require.Error(t, err)
+}

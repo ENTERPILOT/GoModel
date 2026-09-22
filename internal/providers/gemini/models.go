@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -28,11 +29,19 @@ type geminiModel struct {
 	Thinking         bool     `json:"thinking"`
 }
 
-// geminiModelsResponse represents the native Gemini models list response
+// geminiModelsResponse represents one page of the native Gemini models list.
+// The API pages at 50 models by default and hands out nextPageToken until the
+// last page, which omits it.
 type geminiModelsResponse struct {
 	Models          []geminiModel `json:"models"`
 	PublisherModels []geminiModel `json:"publisherModels"`
+	NextPageToken   string        `json:"nextPageToken"`
 }
+
+// maxModelListPages bounds the pagination loop so a server that keeps handing
+// out tokens cannot stall discovery. At 50 models a page it covers 1000
+// models, far beyond Google's catalog.
+const maxModelListPages = 20
 
 func geminiModelSupportedMethods(modelID string, methods []string) (supportsGenerate, supportsEmbed, supportsImage bool) {
 	normalized := normalizeGeminiModelID(modelID)
@@ -106,7 +115,9 @@ func geminiDiscoveredMetadata(gm geminiModel, supportsGenerate, supportsEmbed, s
 	return metadata
 }
 
-// ListModels retrieves the list of available models from Gemini
+// ListModels retrieves the list of available models from Gemini, following
+// the native listing's page tokens so models past the first page of 50 are
+// not dropped.
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
 	if err := p.ready(); err != nil {
 		return nil, err
@@ -138,6 +149,20 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 			return nil, core.NewProviderError(p.responseProviderName(), http.StatusBadGateway, "failed to parse native Gemini models response", err)
 		}
 		modelEntries := append(geminiResp.Models, geminiResp.PublisherModels...)
+		// The first page decides the response shape; later pages are native
+		// by construction, so they are fetched and appended here.
+		for token, page := geminiResp.NextPageToken, 1; token != "" && page < maxModelListPages; page++ {
+			var next geminiModelsResponse
+			if err := modelsClient.Do(ctx, llmclient.Request{
+				Method:   http.MethodGet,
+				Endpoint: "/models?pageToken=" + url.QueryEscape(token),
+			}, &next); err != nil {
+				return nil, err
+			}
+			modelEntries = append(modelEntries, next.Models...)
+			modelEntries = append(modelEntries, next.PublisherModels...)
+			token = next.NextPageToken
+		}
 		if len(modelEntries) == 0 {
 			return &core.ModelsResponse{
 				Object: "list",
