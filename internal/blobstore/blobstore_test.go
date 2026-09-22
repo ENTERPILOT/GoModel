@@ -179,44 +179,27 @@ func TestNewFilesystem_RequiresRoot(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestFilesystem_SyncFailureUnpublishesTheBlob(t *testing.T) {
+func TestFilesystem_SyncFailureReportsButKeepsTheFile(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "media")
 	store, err := NewFilesystem(root)
 	require.NoError(t, err)
-	original := syncDir
-	syncDir = func(string) error { return assert.AnError }
-	t.Cleanup(func() { syncDir = original })
-
-	w, err := store.Create(context.Background(), "audio/2026/09/22/a.mp3")
-	require.NoError(t, err)
-	_, err = w.Write([]byte("x"))
-	require.NoError(t, err)
-	require.ErrorIs(t, w.Commit(), assert.AnError)
-	require.NoError(t, w.Close())
-
-	_, err = store.Open(context.Background(), "audio/2026/09/22/a.mp3")
-	require.ErrorIs(t, err, ErrNotFound, "a blob whose publish did not complete must not stay on disk")
-	entries, err := os.ReadDir(filepath.Join(root, "audio", "2026", "09", "22"))
-	require.NoError(t, err)
-	assert.Empty(t, entries, "no temp file or renamed file left behind")
-}
-
-func TestFilesystem_SyncFailureKeepsAReplacement(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "media")
-	store, err := NewFilesystem(root)
-	require.NoError(t, err)
-	_, err = Put(context.Background(), store, "k", strings.NewReader("old"))
+	_, err = Put(context.Background(), store, "replaced", strings.NewReader("old"))
 	require.NoError(t, err)
 
 	original := syncDir
 	syncDir = func(string) error { return assert.AnError }
 	t.Cleanup(func() { syncDir = original })
 
-	w, err := store.Create(context.Background(), "k")
+	for _, key := range []string{"fresh", "replaced"} {
+		w, err := store.Create(context.Background(), key)
+		require.NoError(t, err)
+		_, err = w.Write([]byte("new"))
+		require.NoError(t, err)
+		require.ErrorIs(t, w.Commit(), assert.AnError, "key %q", key)
+		require.NoError(t, w.Close())
+		assert.Equal(t, "new", readAll(t, store, key), "the file the rename published stays; the key's owner decides its fate")
+	}
+	entries, err := os.ReadDir(root)
 	require.NoError(t, err)
-	_, err = w.Write([]byte("new"))
-	require.NoError(t, err)
-	require.ErrorIs(t, w.Commit(), assert.AnError)
-	require.NoError(t, w.Close())
-	assert.Equal(t, "new", readAll(t, store, "k"), "the only remaining copy of a replaced key must not be deleted")
+	assert.Len(t, entries, 2, "no temp files left behind")
 }

@@ -312,3 +312,34 @@ func TestService_StoresOnlySafeContentTypes(t *testing.T) {
 	assert.Equal(t, "application/octet-stream", object.ContentType)
 	assert.True(t, strings.HasSuffix(object.StorageKey, ".bin"), "key = %q", object.StorageKey)
 }
+
+// publishThenFailBlobs makes the blob visible and then reports the commit as
+// failed, the shape of a filesystem directory sync that did not complete.
+type publishThenFailBlobs struct{ *blobstore.Memory }
+
+func (b publishThenFailBlobs) Create(ctx context.Context, key string) (blobstore.Writer, error) {
+	w, err := b.Memory.Create(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	return publishThenFailWriter{w}, nil
+}
+
+type publishThenFailWriter struct{ blobstore.Writer }
+
+func (w publishThenFailWriter) Commit() error {
+	if err := w.Writer.Commit(); err != nil {
+		return err
+	}
+	return assert.AnError
+}
+
+func TestService_FailedCommitLeavesNoBlobBehind(t *testing.T) {
+	blobs := blobstore.NewMemory()
+	svc := newService(NewMemoryStore(), publishThenFailBlobs{blobs}, time.Now, false)
+	t.Cleanup(func() { _ = svc.Close() })
+
+	_, err := svc.Put(context.Background(), Descriptor{Kind: KindAudio, Source: SourceAudit, ContentType: "audio/wav"}, strings.NewReader("x"))
+	require.ErrorIs(t, err, assert.AnError)
+	assert.Equal(t, 0, blobs.Len(), "a blob the failed commit published is removed, since nothing records it")
+}

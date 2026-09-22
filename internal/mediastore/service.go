@@ -120,6 +120,9 @@ func (u *Upload) Commit(ctx context.Context) (*Object, error) {
 	}
 	u.done = true
 	if err := u.writer.Commit(); err != nil {
+		// The key was minted for this upload alone, so whatever the failed
+		// commit left behind is ours to remove; no record will point at it.
+		_ = u.service.blobs.Delete(ctx, u.object.StorageKey)
 		return nil, fmt.Errorf("commit media blob: %w", err)
 	}
 	if err := u.service.objects.Insert(ctx, &u.object); err != nil {

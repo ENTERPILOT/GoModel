@@ -18,7 +18,10 @@ var ErrNotFound = errors.New("blob not found")
 type Store interface {
 	// Create opens a writer for key. The blob becomes visible only when the
 	// writer is committed; closing an uncommitted writer discards what was
-	// written. An existing blob at key is replaced on commit.
+	// written. An existing blob at key is replaced on commit. A Commit that
+	// fails after the blob became visible leaves it in place, because the
+	// writer cannot know whether it replaced another writer's blob; a caller
+	// that owns the key and wants nothing left there calls Delete.
 	Create(ctx context.Context, key string) (Writer, error)
 	// Open returns the blob at key for reading. It is the caller's job to
 	// close the reader.
