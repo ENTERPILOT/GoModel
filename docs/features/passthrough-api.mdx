@@ -144,8 +144,10 @@ Passthrough is intentionally narrow while the API is in beta.
   that surface.
 - GoModel does not translate passthrough request bodies or response bodies.
 - The `model` a JSON passthrough body names is checked against the caller's
-  model allowlist whatever the body size. A body that repeats the top-level
-  `model` field is rejected, since the upstream would decide which one wins.
+  model allowlist regardless of body size, up to the configured body limit;
+  a larger body is refused with the limit's own error. A body that repeats
+  the top-level `model` field is rejected, since the upstream would decide
+  which one wins.
 - Provider-native error bodies and status codes are proxied instead of converted
   into OpenAI-compatible responses.
 - Features that depend on OpenAI-compatible request or response shapes may not
