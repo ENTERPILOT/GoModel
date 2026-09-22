@@ -754,7 +754,11 @@ func parseTestSSEEvents(t *testing.T, raw string) []testSSEEvent {
 func TestListModels(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{
 		"data": [
-			{"id": "claude-sonnet-4-5-20250929", "type": "model", "created_at": "2025-09-29T00:00:00Z", "display_name": "Claude Sonnet 4.5"},
+			{"id": "claude-sonnet-4-5-20250929", "type": "model", "created_at": "2025-09-29T00:00:00Z", "display_name": "Claude Sonnet 4.5",
+			 "max_input_tokens": 1000000, "max_tokens": 64000,
+			 "capabilities": {"image_input": {"supported": true}, "pdf_input": {"supported": true}, "structured_outputs": {"supported": true},
+			                  "thinking": {"supported": true, "types": {"adaptive": {"supported": false}}}, "effort": {"supported": false, "low": {"supported": false}},
+			                  "batch": {"supported": true}, "mystery": {}}},
 			{"id": "claude-opus-4-5-20251101", "type": "model", "created_at": "2025-11-01T00:00:00Z", "display_name": "Claude Opus 4.5"},
 			{"id": "claude-3-haiku-20240307", "type": "model", "created_at": "2024-03-07T00:00:00Z", "display_name": "Claude 3 Haiku"}
 		],
@@ -809,6 +813,37 @@ func TestListModels(t *testing.T) {
 			assert.Equal(t, expected, model.Created)
 		}
 	}
+
+	// The listing's limits and capability flags survive under the catalog's keys.
+	var sonnet, haiku core.Model
+	for _, model := range resp.Data {
+		switch model.ID {
+		case "claude-sonnet-4-5-20250929":
+			sonnet = model
+		case "claude-3-haiku-20240307":
+			haiku = model
+		}
+	}
+	require.NotNil(t, sonnet.Metadata)
+	assert.Equal(t, "Claude Sonnet 4.5", sonnet.Metadata.DisplayName)
+	assert.Equal(t, []string{"chat"}, sonnet.Metadata.Modes)
+	require.NotNil(t, sonnet.Metadata.ContextWindow)
+	assert.Equal(t, 1000000, *sonnet.Metadata.ContextWindow)
+	require.NotNil(t, sonnet.Metadata.MaxOutputTokens)
+	assert.Equal(t, 64000, *sonnet.Metadata.MaxOutputTokens)
+	assert.Equal(t, map[string]bool{
+		"vision":            true,
+		"pdf_input":         true,
+		"structured_output": true,
+		"reasoning":         true,
+		"effort":            false,
+		"batch":             true,
+	}, sonnet.Metadata.Capabilities, "a capability without a supported flag is skipped")
+
+	require.NotNil(t, haiku.Metadata)
+	assert.Equal(t, "Claude 3 Haiku", haiku.Metadata.DisplayName)
+	assert.Nil(t, haiku.Metadata.ContextWindow, "missing limits are not reported as zero")
+	assert.Nil(t, haiku.Metadata.Capabilities)
 }
 
 func TestListModels_APIError(t *testing.T) {

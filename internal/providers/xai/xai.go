@@ -268,11 +268,6 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	return p.compat.StreamChatCompletion(ctx, req)
 }
 
-// ListModels retrieves the list of available models from xAI
-func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
-	return p.compat.ListModels(ctx)
-}
-
 // adaptResponsesRequest drops Responses members xAI's native /responses
 // endpoint refuses. xAI answers a request carrying "metadata" with
 // 400 "Argument not supported: metadata", even though it is a standard

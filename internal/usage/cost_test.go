@@ -212,6 +212,26 @@ func TestCalculateGranularCost_TieredPricingUsesPromptTokenThreshold(t *testing.
 	assertCostNear(t, "TotalCost", result.TotalCost, 0.775)
 }
 
+// xAI charges cached prompt tokens more past its long-context threshold too,
+// so a tier carrying a cached rate replaces the base cached rate as well.
+func TestCalculateGranularCost_TieredPricingAppliesCachedRate(t *testing.T) {
+	pricing := &core.ModelPricing{
+		InputPerMtok:       new(2.0),
+		CachedInputPerMtok: new(0.3),
+		OutputPerMtok:      new(6.0),
+		Tiers: []core.ModelPricingTier{
+			{UpToTokens: new(200_000.0), InputPerMtok: new(2.0), CachedInputPerMtok: new(0.3), OutputPerMtok: new(6.0)},
+			{UpToTokens: new(500_000.0), InputPerMtok: new(4.0), CachedInputPerMtok: new(0.6), OutputPerMtok: new(12.0)},
+		},
+	}
+	rawData := map[string]any{"cached_tokens": 100_000}
+	result := CalculateGranularCost(250_000, 10_000, rawData, "xai", pricing)
+
+	// Input: 150k * 4.0/1M + 100k * 0.6/1M = 0.60 + 0.06
+	assertCostNear(t, "InputCost", result.InputCost, 0.66)
+	assertCostNear(t, "OutputCost", result.OutputCost, 0.12)
+}
+
 func TestCalculateGranularCost_XAI_ImageTokens(t *testing.T) {
 	pricing := &core.ModelPricing{
 		InputPerMtok:  new(2.0),

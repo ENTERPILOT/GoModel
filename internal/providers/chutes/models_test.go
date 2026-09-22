@@ -47,7 +47,9 @@ func TestListModels_PreservesChutesMetadata(t *testing.T) {
 	assert.Equal(t, 262144, *model.Metadata.ContextWindow)
 	require.NotNil(t, model.Metadata.MaxOutputTokens)
 	assert.Equal(t, 65536, *model.Metadata.MaxOutputTokens)
-	assert.True(t, model.Metadata.Capabilities["tools"])
+	assert.True(t, model.Metadata.Capabilities["function_calling"], "tools maps onto the catalog's key")
+	assert.True(t, model.Metadata.Capabilities["structured_output"])
+	assert.True(t, model.Metadata.Capabilities["reasoning"])
 	assert.True(t, model.Metadata.Capabilities["vision"])
 	assert.True(t, model.Metadata.Capabilities["confidential_compute"])
 
@@ -103,8 +105,8 @@ func TestModelCapabilities_MapsOptionalModalities(t *testing.T) {
 		InputModalities:   []string{"audio", "video", "unknown"},
 	})
 	assert.True(t, capabilities["json_mode"])
-	assert.True(t, capabilities["audio"])
-	assert.True(t, capabilities["video"])
+	assert.True(t, capabilities["audio_input"], "modalities use the catalog's capability keys")
+	assert.True(t, capabilities["video_input"])
 }
 
 func TestModelPricing_HandlesNilAndPartialPrices(t *testing.T) {

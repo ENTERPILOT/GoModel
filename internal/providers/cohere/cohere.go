@@ -79,8 +79,12 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 		}
 		var metadata *core.ModelMetadata
 		modes := modesFromEndpoints(model.Endpoints)
-		if model.ContextLength > 0 || len(modes) > 0 {
-			metadata = &core.ModelMetadata{}
+		capabilities := providers.CapabilitiesFromFeatures(nil, model.Features)
+		if model.SupportsVision {
+			capabilities = providers.SetCapability(capabilities, "vision", true)
+		}
+		if model.ContextLength > 0 || len(modes) > 0 || capabilities != nil {
+			metadata = &core.ModelMetadata{Capabilities: capabilities}
 			if model.ContextLength > 0 {
 				contextWindow := int(model.ContextLength)
 				metadata.ContextWindow = &contextWindow

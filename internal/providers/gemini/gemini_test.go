@@ -501,9 +501,16 @@ func TestListModels_StampsDiscoveredModes(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusOK, `{
 		"models": [{
 			"name": "models/gemini-2.5-flash",
+			"displayName": "Gemini 2.5 Flash",
+			"description": "Stable version of Gemini 2.5 Flash.",
+			"inputTokenLimit": 1048576,
+			"outputTokenLimit": 65536,
+			"thinking": true,
 			"supportedGenerationMethods": ["generateContent", "streamGenerateContent"]
 		}, {
 			"name": "models/text-embedding-004",
+			"inputTokenLimit": 2048,
+			"outputTokenLimit": 1,
 			"supportedGenerationMethods": ["embedContent"]
 		}]
 	}`)
@@ -534,6 +541,20 @@ func TestListModels_StampsDiscoveredModes(t *testing.T) {
 	assert.Equal(t, "embedding", embed.Metadata.Modes[0])
 	require.Len(t, embed.Metadata.Categories, 1)
 	assert.Equal(t, core.CategoryEmbedding, embed.Metadata.Categories[0])
+
+	// The listing's name, description, token limits and thinking flag are kept.
+	assert.Equal(t, "Gemini 2.5 Flash", chat.Metadata.DisplayName)
+	assert.Equal(t, "Stable version of Gemini 2.5 Flash.", chat.Metadata.Description)
+	require.NotNil(t, chat.Metadata.ContextWindow)
+	assert.Equal(t, 1048576, *chat.Metadata.ContextWindow)
+	require.NotNil(t, chat.Metadata.MaxOutputTokens)
+	assert.Equal(t, 65536, *chat.Metadata.MaxOutputTokens)
+	assert.Equal(t, map[string]bool{"reasoning": true}, chat.Metadata.Capabilities)
+
+	require.NotNil(t, embed.Metadata.ContextWindow)
+	assert.Equal(t, 2048, *embed.Metadata.ContextWindow)
+	assert.Nil(t, embed.Metadata.MaxOutputTokens, "an embedding model's nominal output limit is not a max output")
+	assert.Nil(t, embed.Metadata.Capabilities)
 }
 
 func TestVertexNativeChatUsesOAuthAuthorization(t *testing.T) {
@@ -1703,4 +1724,88 @@ func TestGeminiModelSupportedMethods_EmptyMethodFallback(t *testing.T) {
 		assert.Equal(t, tt.wantEmbed, gotEmbed, "%s embed", tt.model)
 		assert.Equal(t, tt.wantImage, gotImage, "%s image", tt.model)
 	}
+}
+
+// The native listing pages at 50 models; a listing that stops at the first
+// page silently hides the rest of the catalog.
+func TestListModels_FollowsNativePageTokens(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
+	pages := map[string]string{
+		"":           `{"models":[{"name":"models/gemini-2.5-flash","supportedGenerationMethods":["generateContent"]}],"nextPageToken":"page-two"}`,
+		"page-two":   `{"models":[{"name":"models/gemini-2.5-pro","supportedGenerationMethods":["generateContent"]}],"nextPageToken":"page-three"}`,
+		"page-three": `{"models":[{"name":"models/text-embedding-004","supportedGenerationMethods":["embedContent"]}]}`,
+	}
+	server, capture := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
+		body, ok := pages[r.URL.Query().Get("pageToken")]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, body)
+	})
+
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL + "/v1beta/openai")
+
+	resp, err := provider.ListModels(context.Background())
+	require.NoError(t, err)
+
+	ids := make([]string, 0, len(resp.Data))
+	for _, m := range resp.Data {
+		ids = append(ids, m.ID)
+	}
+	assert.Equal(t, []string{"gemini-2.5-flash", "gemini-2.5-pro", "text-embedding-004"}, ids)
+
+	requests := capture.All()
+	require.Len(t, requests, 3)
+	assert.Empty(t, requests[0].Query.Get("pageToken"))
+	assert.Equal(t, "page-two", requests[1].Query.Get("pageToken"))
+	assert.Equal(t, "page-three", requests[2].Query.Get("pageToken"))
+	for _, req := range requests {
+		assert.Equal(t, "/v1beta/models", req.Path)
+	}
+}
+
+// A failed later page fails the listing: a partial catalog would hide
+// models with no error to explain why, while an error keeps the registry's
+// last known-good inventory.
+func TestListModels_LaterPageFailurePropagates(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
+	server, _ := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("pageToken") != "" {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"error":{"message":"boom"}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"models":[{"name":"models/gemini-2.5-flash","supportedGenerationMethods":["generateContent"]}],"nextPageToken":"page-two"}`)
+	})
+
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL + "/v1beta/openai")
+
+	_, err := provider.ListModels(context.Background())
+	require.Error(t, err)
+}
+
+// A token that repeats would loop forever without the cap and, with it,
+// publish duplicates as a complete catalog; both are reported as errors.
+func TestListModels_RejectsRepeatedPageToken(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
+	server, capture := providertest.Server(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"models":[{"name":"models/gemini-2.5-flash","supportedGenerationMethods":["generateContent"]}],"nextPageToken":"again"}`)
+	})
+
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL + "/v1beta/openai")
+
+	_, err := provider.ListModels(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "repeated page token")
+	assert.Len(t, capture.All(), 2, "the repeat is caught before a third request")
 }

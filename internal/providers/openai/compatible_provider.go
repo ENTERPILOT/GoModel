@@ -226,6 +226,39 @@ func (p *CompatibleProvider) ListModels(ctx context.Context) (*core.ModelsRespon
 	return &resp, nil
 }
 
+// ListModelsWithMaxModelLen lists models like ListModels but keeps the
+// max_model_len field vLLM-style servers (vLLM, SGLang, llm-d) add to each
+// entry, reporting it as the model's context window: for a self-hosted
+// server the running process is the only source that knows the real limit.
+func (p *CompatibleProvider) ListModelsWithMaxModelLen(ctx context.Context) (*core.ModelsResponse, error) {
+	var upstream struct {
+		Object string `json:"object"`
+		Data   []struct {
+			core.Model
+			MaxModelLen int `json:"max_model_len"`
+		} `json:"data"`
+	}
+	if err := p.Do(ctx, llmclient.Request{
+		Method:   http.MethodGet,
+		Endpoint: "/models",
+	}, &upstream); err != nil {
+		return nil, err
+	}
+	resp := &core.ModelsResponse{Object: upstream.Object, Data: make([]core.Model, 0, len(upstream.Data))}
+	for _, entry := range upstream.Data {
+		model := entry.Model
+		if entry.MaxModelLen > 0 {
+			if model.Metadata == nil {
+				model.Metadata = &core.ModelMetadata{}
+			}
+			model.Metadata.ContextWindow = new(entry.MaxModelLen)
+		}
+		resp.Data = append(resp.Data, model)
+	}
+	normalizeModelsResponse(resp)
+	return resp, nil
+}
+
 func normalizeModelsResponse(resp *core.ModelsResponse) {
 	if resp == nil {
 		return

@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
 
@@ -70,6 +71,13 @@ func (c *ChatCompatible) StreamChatCompletion(ctx context.Context, req *core.Cha
 // ListModels retrieves the list of available models from the provider.
 func (c *ChatCompatible) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
 	return c.compatible.ListModels(ctx)
+}
+
+// Do sends a request through the underlying compatible provider's client,
+// for adapters that decode a provider-specific payload (a richer model
+// listing) while keeping the shared transport, auth and resilience.
+func (c *ChatCompatible) Do(ctx context.Context, req llmclient.Request, out any) error {
+	return c.compatible.Do(ctx, req, out)
 }
 
 // Responses sends a Responses API request using chat-completions translation.

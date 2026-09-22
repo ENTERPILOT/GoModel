@@ -83,8 +83,10 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 }
 
 // ListModels retrieves the models served by SGLang.
+// ListModels lists the served models, keeping the max_model_len SGLang
+// reports per entry as the context window.
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
-	return p.compatible.ListModels(ctx)
+	return p.compatible.ListModelsWithMaxModelLen(ctx)
 }
 
 // Responses sends an OpenAI Responses API request to SGLang.

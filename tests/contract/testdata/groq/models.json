@@ -2,14 +2,24 @@
   "object": "list",
   "data": [
     {
-      "id": "canopylabs/orpheus-v1-english",
+      "id": "whisper-large-v3-turbo",
       "object": "model",
-      "created": 1766186316,
-      "owned_by": "Canopy Labs",
+      "created": 1728413088,
+      "owned_by": "OpenAI",
       "active": true,
-      "context_window": 4000,
+      "context_window": 448,
       "public_apps": null,
-      "max_completion_tokens": 50000
+      "max_completion_tokens": 448,
+      "hugging_face_id": "openai/whisper-large-v3-turbo",
+      "name": "Whisper Large V3 Turbo",
+      "input_modalities": [
+        "audio"
+      ],
+      "output_modalities": [
+        "transcription"
+      ],
+      "context_length": 448,
+      "max_output_length": 448
     },
     {
       "id": "whisper-large-v3",
@@ -19,157 +29,17 @@
       "active": true,
       "context_window": 448,
       "public_apps": null,
-      "max_completion_tokens": 448
-    },
-    {
-      "id": "moonshotai/kimi-k2-instruct",
-      "object": "model",
-      "created": 1752435491,
-      "owned_by": "Moonshot AI",
-      "active": true,
-      "context_window": 131072,
-      "public_apps": null,
-      "max_completion_tokens": 16384
-    },
-    {
-      "id": "canopylabs/orpheus-arabic-saudi",
-      "object": "model",
-      "created": 1765926439,
-      "owned_by": "Canopy Labs",
-      "active": true,
-      "context_window": 4000,
-      "public_apps": null,
-      "max_completion_tokens": 50000
-    },
-    {
-      "id": "moonshotai/kimi-k2-instruct-0905",
-      "object": "model",
-      "created": 1757046093,
-      "owned_by": "Moonshot AI",
-      "active": true,
-      "context_window": 262144,
-      "public_apps": null,
-      "max_completion_tokens": 16384
-    },
-    {
-      "id": "meta-llama/llama-4-maverick-17b-128e-instruct",
-      "object": "model",
-      "created": 1743877158,
-      "owned_by": "Meta",
-      "active": true,
-      "context_window": 131072,
-      "public_apps": null,
-      "max_completion_tokens": 8192
-    },
-    {
-      "id": "openai/gpt-oss-20b",
-      "object": "model",
-      "created": 1754407957,
-      "owned_by": "OpenAI",
-      "active": true,
-      "context_window": 131072,
-      "public_apps": null,
-      "max_completion_tokens": 65536
-    },
-    {
-      "id": "meta-llama/llama-guard-4-12b",
-      "object": "model",
-      "created": 1746743847,
-      "owned_by": "Meta",
-      "active": true,
-      "context_window": 131072,
-      "public_apps": null,
-      "max_completion_tokens": 1024
-    },
-    {
-      "id": "llama-3.1-8b-instant",
-      "object": "model",
-      "created": 1693721698,
-      "owned_by": "Meta",
-      "active": true,
-      "context_window": 131072,
-      "public_apps": null,
-      "max_completion_tokens": 131072
-    },
-    {
-      "id": "meta-llama/llama-4-scout-17b-16e-instruct",
-      "object": "model",
-      "created": 1743874824,
-      "owned_by": "Meta",
-      "active": true,
-      "context_window": 131072,
-      "public_apps": null,
-      "max_completion_tokens": 8192
-    },
-    {
-      "id": "allam-2-7b",
-      "object": "model",
-      "created": 1737672203,
-      "owned_by": "SDAIA",
-      "active": true,
-      "context_window": 4096,
-      "public_apps": null,
-      "max_completion_tokens": 4096
-    },
-    {
-      "id": "groq/compound-mini",
-      "object": "model",
-      "created": 1756949707,
-      "owned_by": "Groq",
-      "active": true,
-      "context_window": 131072,
-      "public_apps": null,
-      "max_completion_tokens": 8192
-    },
-    {
-      "id": "whisper-large-v3-turbo",
-      "object": "model",
-      "created": 1728413088,
-      "owned_by": "OpenAI",
-      "active": true,
-      "context_window": 448,
-      "public_apps": null,
-      "max_completion_tokens": 448
-    },
-    {
-      "id": "qwen/qwen3-32b",
-      "object": "model",
-      "created": 1748396646,
-      "owned_by": "Alibaba Cloud",
-      "active": true,
-      "context_window": 131072,
-      "public_apps": null,
-      "max_completion_tokens": 40960
-    },
-    {
-      "id": "meta-llama/llama-prompt-guard-2-22m",
-      "object": "model",
-      "created": 1748632101,
-      "owned_by": "Meta",
-      "active": true,
-      "context_window": 512,
-      "public_apps": null,
-      "max_completion_tokens": 512
-    },
-    {
-      "id": "openai/gpt-oss-120b",
-      "object": "model",
-      "created": 1754408224,
-      "owned_by": "OpenAI",
-      "active": true,
-      "context_window": 131072,
-      "public_apps": null,
-      "max_completion_tokens": 65536
-    },
-    {
-      "id": "groq/compound",
-      "object": "model",
-      "created": 1756949530,
-      "owned_by": "Groq",
-      "active": true,
-      "context_window": 131072,
-      "public_apps": null,
-      "max_completion_tokens": 8192
+      "max_completion_tokens": 448,
+      "hugging_face_id": "openai/whisper-large-v3",
+      "name": "Whisper",
+      "input_modalities": [
+        "audio"
+      ],
+      "output_modalities": [
+        "transcription"
+      ],
+      "context_length": 448,
+      "max_output_length": 448
     },
     {
       "id": "meta-llama/llama-prompt-guard-2-86m",
@@ -179,7 +49,265 @@
       "active": true,
       "context_window": 512,
       "public_apps": null,
-      "max_completion_tokens": 512
+      "max_completion_tokens": 512,
+      "name": "Prompt Guard 2 86M",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "context_length": 512,
+      "max_output_length": 512,
+      "pricing": {
+        "prompt": "0.00000004",
+        "completion": "0.00000004",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0.00000002"
+      },
+      "supported_sampling_parameters": [
+        "temperature",
+        "top_p",
+        "stop",
+        "seed",
+        "max_tokens"
+      ],
+      "supported_features": [
+        "json_mode"
+      ]
+    },
+    {
+      "id": "canopylabs/orpheus-arabic-saudi",
+      "object": "model",
+      "created": 1765926439,
+      "owned_by": "Canopy Labs",
+      "active": true,
+      "context_window": 4000,
+      "public_apps": null,
+      "max_completion_tokens": 50000,
+      "name": "Canopy Labs Orpheus Arabic Saudi",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "speech"
+      ],
+      "context_length": 4000,
+      "max_output_length": 50000,
+      "pricing": {
+        "prompt": "0.00004",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0.00002"
+      }
+    },
+    {
+      "id": "qwen/qwen3.8-27b",
+      "object": "model",
+      "created": 1786984846,
+      "owned_by": "Alibaba Cloud",
+      "active": true,
+      "context_window": 131042,
+      "public_apps": null,
+      "max_completion_tokens": 16384,
+      "name": "Qwen/Qwen3.8-27B",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "context_length": 131042,
+      "max_output_length": 16384,
+      "pricing": {
+        "prompt": "0.0000008",
+        "completion": "0.000004",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0.0000004"
+      },
+      "supported_sampling_parameters": [
+        "temperature",
+        "top_p",
+        "stop",
+        "seed",
+        "max_tokens"
+      ],
+      "supported_features": [
+        "tools",
+        "json_mode",
+        "reasoning"
+      ]
+    },
+    {
+      "id": "allam-2-7b",
+      "object": "model",
+      "created": 1737672203,
+      "owned_by": "SDAIA",
+      "active": true,
+      "context_window": 4096,
+      "public_apps": null,
+      "max_completion_tokens": 4096,
+      "hugging_face_id": "ALLaM-AI/ALLaM-2.0-7B-Instruct",
+      "name": "ALLaM-2-7b",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "context_length": 4096,
+      "max_output_length": 4096,
+      "supported_sampling_parameters": [
+        "temperature",
+        "top_p",
+        "stop",
+        "seed",
+        "max_tokens"
+      ],
+      "supported_features": [
+        "json_mode"
+      ]
+    },
+    {
+      "id": "meta-llama/llama-prompt-guard-2-22m",
+      "object": "model",
+      "created": 1748632101,
+      "owned_by": "Meta",
+      "active": true,
+      "context_window": 512,
+      "public_apps": null,
+      "max_completion_tokens": 512,
+      "name": "Llama Prompt Guard 2 22M",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "context_length": 512,
+      "max_output_length": 512,
+      "pricing": {
+        "prompt": "0.00000003",
+        "completion": "0.00000003",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0.000000015"
+      },
+      "supported_sampling_parameters": [
+        "temperature",
+        "top_p",
+        "stop",
+        "seed",
+        "max_tokens"
+      ]
+    },
+    {
+      "id": "openai/gpt-oss-20b",
+      "object": "model",
+      "created": 1754407957,
+      "owned_by": "OpenAI",
+      "active": true,
+      "context_window": 131072,
+      "public_apps": null,
+      "max_completion_tokens": 65536,
+      "hugging_face_id": "openai/gpt-oss-20b",
+      "name": "GPT OSS 20B",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "context_length": 131072,
+      "max_output_length": 65536,
+      "pricing": {
+        "prompt": "0.000000075",
+        "completion": "0.0000003",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0.0000000375"
+      },
+      "supported_sampling_parameters": [
+        "temperature",
+        "top_p",
+        "stop",
+        "seed",
+        "max_tokens"
+      ],
+      "supported_features": [
+        "tools",
+        "json_mode",
+        "structured_outputs",
+        "reasoning"
+      ]
+    },
+    {
+      "id": "openai/gpt-oss-120b",
+      "object": "model",
+      "created": 1754408224,
+      "owned_by": "OpenAI",
+      "active": true,
+      "context_window": 131072,
+      "public_apps": null,
+      "max_completion_tokens": 65536,
+      "hugging_face_id": "openai/gpt-oss-120b",
+      "name": "GPT OSS 120B",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "context_length": 131072,
+      "max_output_length": 65536,
+      "pricing": {
+        "prompt": "0.00000015",
+        "completion": "0.0000006",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0.000000075"
+      },
+      "supported_sampling_parameters": [
+        "temperature",
+        "top_p",
+        "stop",
+        "seed",
+        "max_tokens"
+      ],
+      "supported_features": [
+        "tools",
+        "json_mode",
+        "structured_outputs",
+        "reasoning"
+      ]
+    },
+    {
+      "id": "canopylabs/orpheus-v1-english",
+      "object": "model",
+      "created": 1766186316,
+      "owned_by": "Canopy Labs",
+      "active": true,
+      "context_window": 4000,
+      "public_apps": null,
+      "max_completion_tokens": 50000,
+      "name": "Canopy Labs Orpheus V1 English",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "speech"
+      ],
+      "context_length": 4000,
+      "max_output_length": 50000,
+      "pricing": {
+        "prompt": "0.000022",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0.000011"
+      }
     },
     {
       "id": "openai/gpt-oss-safeguard-20b",
@@ -189,17 +317,37 @@
       "active": true,
       "context_window": 131072,
       "public_apps": null,
-      "max_completion_tokens": 65536
-    },
-    {
-      "id": "llama-3.3-70b-versatile",
-      "object": "model",
-      "created": 1733447754,
-      "owned_by": "Meta",
-      "active": true,
-      "context_window": 131072,
-      "public_apps": null,
-      "max_completion_tokens": 32768
+      "max_completion_tokens": 65536,
+      "hugging_face_id": "openai/gpt-oss-safeguard-20b",
+      "name": "Safety GPT OSS 20B",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "context_length": 131072,
+      "max_output_length": 65536,
+      "pricing": {
+        "prompt": "0.000000075",
+        "completion": "0.0000003",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0.0000000375"
+      },
+      "supported_sampling_parameters": [
+        "temperature",
+        "top_p",
+        "stop",
+        "seed",
+        "max_tokens"
+      ],
+      "supported_features": [
+        "tools",
+        "json_mode",
+        "structured_outputs",
+        "reasoning"
+      ]
     }
   ]
 }

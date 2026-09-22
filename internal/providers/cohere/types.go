@@ -99,6 +99,10 @@ type modelInfo struct {
 	Name          string   `json:"name"`
 	Endpoints     []string `json:"endpoints,omitempty"`
 	ContextLength float64  `json:"context_length,omitempty"`
+	// Features lists what the model supports on its endpoints (json_mode,
+	// json_schema, tools, strict_tools, safety_modes, ...).
+	Features       []string `json:"features,omitempty"`
+	SupportsVision bool     `json:"supports_vision,omitempty"`
 }
 
 type embedRequest struct {

@@ -72,6 +72,7 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 
 	g.GET("/models", h.ListModels)
 	g.GET("/models/categories", h.ListCategories)
+	g.GET("/models/metadata", h.ModelMetadataLayers)
 
 	g.GET("/virtual-models", h.ListVirtualModels, global)
 	g.PUT("/virtual-models", h.UpsertVirtualModel, global)

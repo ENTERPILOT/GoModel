@@ -28,16 +28,25 @@ flowchart LR
    fields win field-by-field over everything below; omitted fields inherit. This
    is the escape hatch for local models: declaring `modes: [embedding]` also
    derives the model's category.
-3. **Provider discovery** — some providers report metadata in their own model
+3. **Provider discovery** — most providers describe their models in their own
    listings, and what a provider says about its own deployment wins over the
-   catalog field by field: Gemini's `supportedGenerationMethods`, Cohere's
-   per-model `endpoints` and context length, OpenRouter's architecture
-   modalities and context length, Chutes' context length, max output,
-   capabilities, and pricing, Ollama's `/api/show` capabilities, and llama.cpp's
-   context window and modalities (see [llama.cpp](/providers/llamacpp)). This
-   matters most for self-hosted servers, where the running process is the only
-   source that can know the real context window. Models declared via configured
-   model lists skip this step.
+   catalog field by field: Anthropic's display name, token limits and
+   capability flags; Gemini's display name, description, token limits and
+   thinking support (also on Vertex); Groq's context window, output limit,
+   modalities, features and prices; xAI's context window, prices (with the
+   long-context tier) and reasoning support; Fireworks' model kind, context
+   window and feature flags; OpenRouter's name, description, modalities,
+   supported parameters and prices; Cohere's endpoints, context length and
+   features; Bedrock's display name, modalities and streaming support;
+   Chutes' context length, max output, features and prices; Ollama's
+   `/api/show` capabilities, family and context length; vLLM, SGLang and
+   llm-d's `max_model_len`; and llama.cpp's context window and modalities
+   (see [llama.cpp](/providers/llamacpp)). Capability names are mapped onto
+   the catalog's vocabulary (`function_calling`, `vision`, `reasoning`, ...)
+   so both layers describe one feature under one key. This matters most for
+   self-hosted servers, where the running process is the only source that
+   can know the real context window. Models declared via configured model
+   lists skip this step.
 4. **The model catalog** — the
    [`ai-model-list`](https://github.com/ENTERPILOT/ai-model-list) registry,
    fetched from `MODEL_LIST_URL` (default: the registry's `models.min.json` on
@@ -52,6 +61,14 @@ flowchart LR
    matching well-known embedding families (`bge`, `e5`, `gte`, `minilm`) become
    embedding models, IDs containing `rerank` become reranking models. Namespaced
    IDs are matched by their final path segment. When unsure, it claims nothing.
+
+## Checking where a value came from
+
+Expand a row on the dashboard's **Models** page to see the model's effective
+metadata with the layer that supplied each field, and switch the panel to
+**Provider**, **Catalog**, or **Config** to see one layer on its own. The same
+data is served by
+[`GET /admin/models/metadata`](/advanced/admin-endpoints#get-adminmodelsmetadata).
 
 ## What metadata affects
 
