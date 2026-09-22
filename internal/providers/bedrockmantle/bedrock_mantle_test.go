@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -174,4 +175,29 @@ func testProvider(t *testing.T, server *httptest.Server, mode string, keys *prov
 	t.Helper()
 	client := authenticatedClient(server.Client(), keys, credentialsProvider, defaultRegion)
 	return newProvider(endpointConfig{baseURL: server.URL, region: defaultRegion, mode: mode}, providers.ProviderConfig{}, providers.ProviderOptions{}, client)
+}
+
+// roundTripperFunc adapts a function to http.RoundTripper.
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// The factory hands a proxy-aware client down through ProviderOptions; the
+// provider must wrap that client with its auth rather than build its own.
+func TestNew_UsesTheFactoryTransport(t *testing.T) {
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"data":[{"id":"openai.gpt-5.6-luna"}]}`)
+	var calls atomic.Int32
+	client := &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		return server.Client().Transport.RoundTrip(r)
+	})}
+
+	p, ok := New(providers.ProviderConfig{APIKey: "secret", BaseURL: server.URL, APIMode: modeOpenAI}, providers.ProviderOptions{HTTPClient: client}).(*Provider)
+	require.True(t, ok)
+	require.NoError(t, p.ready())
+
+	_, err := p.ListModels(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), calls.Load(), "request must travel through the factory-supplied client")
+	assert.Equal(t, "Bearer secret", capture.Last(t).Header.Get("Authorization"))
 }

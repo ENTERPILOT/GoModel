@@ -203,6 +203,7 @@
                 "pages": [
                     "providers/overview",
                     "providers/key-rotation",
+                    "providers/outbound-proxy",
                     "providers/anthropic",
                     "providers/chatgpt",
                     "providers/cohere",

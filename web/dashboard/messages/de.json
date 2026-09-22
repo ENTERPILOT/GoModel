@@ -1214,6 +1214,8 @@
   "providers_service_account_json": "Service-Account-JSON",
   "providers_service_account_json_base64": "Service-Account-JSON (base64)",
   "providers_gcp_scope": "GCP-Scope",
+  "providers_proxy_url": "Ausgehende Proxy-URL",
+  "providers_proxy_url_hint": "Leitet den Datenverkehr dieses Anbieters über einen HTTP-, HTTPS- oder SOCKS5-Proxy, z. B. socks5://user:pass@host:1080. Leer lassen, um die gatewayweiten HTTP_PROXY-/HTTPS_PROXY-Einstellungen zu verwenden.",
   "providers_models_field": "Modelle (kommagetrennt)",
   "providers_api_keys_hint": "Erkannte Sitzungen bleiben standardmäßig an einem Schlüssel, was die Prompt-Cache-Treffer beim Anbieter verbessert. Gespeicherte Werte sind maskiert; lasse die Sternchen unverändert, um den gespeicherten Schlüssel zu behalten.",
   "providers_session_sticky_hint": "Halte jede erkannte Konversation an einem API-Schlüssel, um die Prompt-Cache-Affinität beim Anbieter zu bewahren. Ausschalten, um die Schlüssel bei jeder Anfrage im Round-Robin zu rotieren.",

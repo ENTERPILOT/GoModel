@@ -1214,6 +1214,8 @@
   "providers_service_account_json": "Service Account JSON",
   "providers_service_account_json_base64": "Service Account JSON (base64)",
   "providers_gcp_scope": "GCP Scope",
+  "providers_proxy_url": "Outbound proxy URL",
+  "providers_proxy_url_hint": "Send this provider's traffic through an HTTP, HTTPS, or SOCKS5 proxy, e.g. socks5://user:pass@host:1080. Leave empty to use the gateway-wide HTTP_PROXY / HTTPS_PROXY settings.",
   "providers_models_field": "Models (comma-separated)",
   "providers_api_keys_hint": "Identified sessions stay on one key by default, improving provider prompt-cache hits. Saved values are masked; leave the asterisks unchanged to keep the stored key.",
   "providers_session_sticky_hint": "Keep each identified conversation on one API key to preserve provider prompt-cache affinity. Turn off to rotate keys round-robin on every request.",

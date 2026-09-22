@@ -12,6 +12,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
 
@@ -56,8 +57,11 @@ type upsertProviderCredentialRequest struct {
 	ServiceAccountJSON       string   `json:"service_account_json,omitempty"`
 	ServiceAccountJSONBase64 string   `json:"service_account_json_base64,omitempty"`
 	GCPScope                 string   `json:"gcp_scope,omitempty"`
-	Models                   []string `json:"models,omitempty"`
-	Enabled                  *bool    `json:"enabled,omitempty"`
+	// ProxyURL may be sent back exactly as the view rendered it (password
+	// masked) to keep the stored proxy credentials.
+	ProxyURL string   `json:"proxy_url,omitempty"`
+	Models   []string `json:"models,omitempty"`
+	Enabled  *bool    `json:"enabled,omitempty"`
 }
 
 // providerCredentialFieldResponse describes one credential field a provider
@@ -88,26 +92,28 @@ type providerCredentialTypeResponse struct {
 // credential: its definition (secrets redacted) plus whether it is read-only
 // (config/env-declared).
 type providerCredentialViewResponse struct {
-	Name                     string     `json:"name"`
-	Type                     string     `json:"type"`
-	APIKeys                  []string   `json:"api_keys,omitempty"`
-	SessionStickyKeys        bool       `json:"session_sticky_keys"`
-	BaseURL                  string     `json:"base_url,omitempty"`
-	APIVersion               string     `json:"api_version,omitempty"`
-	Backend                  string     `json:"backend,omitempty"`
-	AuthType                 string     `json:"auth_type,omitempty"`
-	APIMode                  string     `json:"api_mode,omitempty"`
-	VertexProject            string     `json:"vertex_project,omitempty"`
-	VertexLocation           string     `json:"vertex_location,omitempty"`
-	ServiceAccountFile       string     `json:"service_account_file,omitempty"`
-	ServiceAccountJSON       string     `json:"service_account_json,omitempty"`
-	ServiceAccountJSONBase64 string     `json:"service_account_json_base64,omitempty"`
-	GCPScope                 string     `json:"gcp_scope,omitempty"`
-	Models                   []string   `json:"models,omitempty"`
-	Enabled                  bool       `json:"enabled"`
-	Managed                  bool       `json:"managed"`
-	CreatedAt                *time.Time `json:"created_at,omitempty"`
-	UpdatedAt                *time.Time `json:"updated_at,omitempty"`
+	Name                     string   `json:"name"`
+	Type                     string   `json:"type"`
+	APIKeys                  []string `json:"api_keys,omitempty"`
+	SessionStickyKeys        bool     `json:"session_sticky_keys"`
+	BaseURL                  string   `json:"base_url,omitempty"`
+	APIVersion               string   `json:"api_version,omitempty"`
+	Backend                  string   `json:"backend,omitempty"`
+	AuthType                 string   `json:"auth_type,omitempty"`
+	APIMode                  string   `json:"api_mode,omitempty"`
+	VertexProject            string   `json:"vertex_project,omitempty"`
+	VertexLocation           string   `json:"vertex_location,omitempty"`
+	ServiceAccountFile       string   `json:"service_account_file,omitempty"`
+	ServiceAccountJSON       string   `json:"service_account_json,omitempty"`
+	ServiceAccountJSONBase64 string   `json:"service_account_json_base64,omitempty"`
+	GCPScope                 string   `json:"gcp_scope,omitempty"`
+	// ProxyURL is the provider's outbound proxy with any password masked.
+	ProxyURL  string     `json:"proxy_url,omitempty"`
+	Models    []string   `json:"models,omitempty"`
+	Enabled   bool       `json:"enabled"`
+	Managed   bool       `json:"managed"`
+	CreatedAt *time.Time `json:"created_at,omitempty"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 }
 
 // ListProviderCredentials handles GET /admin/provider-credentials.
@@ -330,6 +336,7 @@ func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string
 		ServiceAccountJSON:       serviceAccountJSON,
 		ServiceAccountJSONBase64: serviceAccountJSONBase64,
 		GCPScope:                 strings.TrimSpace(req.GCPScope),
+		ProxyURL:                 mergeRedactedProxyURL(req.ProxyURL, currentField(current, func(c providers.ManagedProviderCredential) string { return c.ProxyURL })),
 		Models:                   req.Models,
 		Enabled:                  enabled,
 	}
@@ -392,6 +399,17 @@ func mergeRedactedValue(field, incoming, stored string) (string, error) {
 	return stored, nil
 }
 
+// mergeRedactedProxyURL keeps the stored proxy URL when the client echoes the
+// masked form the view rendered ("socks5://user:xxxxx@host:1080"), so editing
+// another field never strips the proxy password. Any other value replaces it.
+func mergeRedactedProxyURL(incoming, stored string) string {
+	incoming = strings.TrimSpace(incoming)
+	if incoming != "" && stored != "" && incoming == httpclient.RedactProxyURL(stored) {
+		return stored
+	}
+	return incoming
+}
+
 // isRedactedCredentialValue recognizes both the current display mask and
 // legacy masks emitted by older dashboard versions. Requiring at least three
 // asterisks avoids treating a stray single character as an intentional
@@ -417,6 +435,7 @@ func (h *Handler) providerCredentialView(cred providers.ManagedProviderCredentia
 		VertexLocation:     cred.VertexLocation,
 		ServiceAccountFile: cred.ServiceAccountFile,
 		GCPScope:           cred.GCPScope,
+		ProxyURL:           httpclient.RedactProxyURL(cred.ProxyURL),
 		Models:             cred.Models,
 		Enabled:            cred.Enabled,
 		Managed:            h.providerCredentials.IsManaged(cred.Name),
@@ -446,6 +465,7 @@ func (h *Handler) declaredProviderCredentialView(cfg providers.SanitizedProvider
 		APIVersion:        cfg.APIVersion,
 		Models:            cfg.Models,
 		SessionStickyKeys: cfg.SessionStickyKeys,
+		ProxyURL:          cfg.ProxyURL,
 		Enabled:           true,
 		Managed:           true,
 	}

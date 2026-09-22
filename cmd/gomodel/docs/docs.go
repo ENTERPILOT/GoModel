@@ -8159,6 +8159,10 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "proxy_url": {
+                    "description": "ProxyURL is the provider's outbound proxy with any password masked.",
+                    "type": "string"
+                },
                 "service_account_file": {
                     "type": "string"
                 },
@@ -8550,6 +8554,10 @@ const docTemplate = `{
                     }
                 },
                 "name": {
+                    "type": "string"
+                },
+                "proxy_url": {
+                    "description": "ProxyURL may be sent back exactly as the view rendered it (password\nmasked) to keep the stored proxy credentials.",
                     "type": "string"
                 },
                 "service_account_file": {

@@ -494,6 +494,10 @@ providers:
     #   - "${OPENAI_API_KEY_3}"
     # Set false for strict per-request round robin (usually worse for prompt caching).
     # session_sticky_keys: false
+    # Send only this provider's traffic through an HTTP(S) or SOCKS5 proxy.
+    # Providers without one keep the process-wide HTTP_PROXY / HTTPS_PROXY / NO_PROXY.
+    # Equivalent env var: OPENAI_PROXY_URL
+    # proxy_url: "socks5://user:pass@10.0.0.1:1080"
     # Per-provider resilience overrides (optional).
     # Only specified fields override the global defaults above.
     # resilience:

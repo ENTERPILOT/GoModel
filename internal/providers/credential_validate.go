@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/enterpilot/gomodel/internal/httpclient"
 )
 
 // CredentialFieldError reports a credential row the operator has to fix,
@@ -27,6 +29,9 @@ func credentialFieldError(field, format string, args ...any) *CredentialFieldErr
 // silently unroutable.
 func validateCredential(cred ManagedProviderCredential, schema CredentialSchema) error {
 	if err := validateCredentialAPIKeys(cred, schema); err != nil {
+		return err
+	}
+	if err := validateCredentialProxyURL(cred); err != nil {
 		return err
 	}
 	// Google's project/service-account auth replaces the "one required field
@@ -152,4 +157,17 @@ func validateGoogleCredential(cred ManagedProviderCredential) error {
 	default:
 		return credentialFieldError(CredentialFieldAuthType, "auth_type %q cannot authenticate against Vertex; use gcp_adc or gcp_service_account", cred.AuthType)
 	}
+}
+
+// validateCredentialProxyURL rejects a malformed outbound proxy before the
+// row is stored, naming the field so the form can point at it. The message
+// never includes the value, which may carry proxy credentials.
+func validateCredentialProxyURL(cred ManagedProviderCredential) error {
+	if strings.TrimSpace(cred.ProxyURL) == "" {
+		return nil
+	}
+	if _, err := httpclient.ParseProxyURL(cred.ProxyURL); err != nil {
+		return credentialFieldError(CredentialFieldProxyURL, "%s", err.Error())
+	}
+	return nil
 }

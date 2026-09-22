@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
@@ -261,3 +262,34 @@ func tokenRequestScope(t *testing.T, form url.Values) string {
 
 	return claims.Scope
 }
+
+// A provider behind an outbound proxy hands its proxied client to
+// CredentialsContext; the token exchange must then travel through that client
+// rather than the default transport.
+func TestCredentialsContextRoutesTokenExchangeThroughTheClient(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"via-client","token_type":"Bearer","expires_in":3600}`))
+	}))
+	defer tokenServer.Close()
+
+	var calls atomic.Int32
+	base := &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		return http.DefaultTransport.RoundTrip(r)
+	})}
+
+	creds, err := FindCredentials(CredentialsContext(base), Config{
+		AuthType:           "gcp_service_account",
+		ServiceAccountJSON: serviceAccountCredentials(t, tokenServer.URL),
+	})
+	require.NoError(t, err)
+	token, err := creds.TokenSource.Token()
+	require.NoError(t, err)
+	assert.Equal(t, "via-client", token.AccessToken)
+	assert.Equal(t, int32(1), calls.Load(), "token exchange must use the supplied client")
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

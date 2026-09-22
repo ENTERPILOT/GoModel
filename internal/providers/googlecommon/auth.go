@@ -187,6 +187,17 @@ func paddedBase64(value string) string {
 	}
 }
 
+// CredentialsContext returns the context to pass to FindCredentials so the
+// token sources it builds exchange tokens through base rather than the
+// default transport. Without it a provider behind an outbound proxy would
+// send its API calls through the proxy but fetch OAuth tokens directly.
+func CredentialsContext(base *http.Client) context.Context {
+	if base == nil {
+		return context.Background()
+	}
+	return context.WithValue(context.Background(), oauth2.HTTPClient, base)
+}
+
 // HTTPClient returns an *http.Client that injects bearer tokens from source on
 // every request and, when quotaProject is non-empty, also sets the
 // X-Goog-User-Project header. The latter is required for ADC user-credential

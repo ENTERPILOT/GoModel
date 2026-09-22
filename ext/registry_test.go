@@ -3,6 +3,7 @@ package ext
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"sync"
 	"testing"
 
@@ -192,4 +193,24 @@ func TestRouteTargetQualified(t *testing.T) {
 func TestRejectionErrorMessage(t *testing.T) {
 	err := &RejectionError{Status: 422, Code: "policy_violation", Message: "blocked by policy"}
 	assert.Equal(t, "request rejected (422 policy_violation): blocked by policy", err.Error())
+}
+
+type namedProxySelector struct{ name string }
+
+func (s *namedProxySelector) Name() string { return s.name }
+
+func (s *namedProxySelector) SelectProxy(ProxyRequest) (*url.URL, error) { return nil, nil }
+
+func TestRegistryProxySelectorSingleSlot(t *testing.T) {
+	reg := &Registry{}
+	assert.Nil(t, reg.ProxySelector())
+
+	reg.RegisterProxySelector(&namedProxySelector{name: "first"})
+	reg.RegisterProxySelector(&namedProxySelector{name: "second"})
+	got := reg.ProxySelector()
+	require.NotNil(t, got)
+	assert.Equal(t, "second", got.Name())
+
+	reg.RegisterProxySelector(nil)
+	assert.Nil(t, reg.ProxySelector())
 }

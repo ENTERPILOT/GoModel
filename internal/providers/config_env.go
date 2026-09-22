@@ -58,6 +58,7 @@ const (
 	providerEnvFieldServiceAccountJSON
 	providerEnvFieldServiceAccountJSONBase64
 	providerEnvFieldGCPScope
+	providerEnvFieldProxyURL
 	providerEnvFieldSessionStickyKeys
 	providerEnvFieldInferenceObjective
 	providerEnvFieldFairnessFromUserPath
@@ -90,6 +91,7 @@ type providerEnvValues struct {
 	ServiceAccountJSON       string
 	ServiceAccountJSONBase64 string
 	GCPScope                 string
+	ProxyURL                 string
 	InferenceObjective       string
 	Models                   []string
 	ModelFilterInclude       []string
@@ -171,6 +173,7 @@ func (v providerEnvValues) empty() bool {
 		strings.TrimSpace(v.ServiceAccountJSON) == "" &&
 		strings.TrimSpace(v.ServiceAccountJSONBase64) == "" &&
 		strings.TrimSpace(v.GCPScope) == "" &&
+		strings.TrimSpace(v.ProxyURL) == "" &&
 		strings.TrimSpace(v.InferenceObjective) == "" &&
 		v.SessionStickyKeys == nil &&
 		v.FairnessFromUserPath == nil &&
@@ -255,6 +258,8 @@ func collectProviderEnvValues(prefix string, spec DiscoveryConfig, environ []str
 			values.ServiceAccountJSONBase64 = value
 		case providerEnvFieldGCPScope:
 			values.GCPScope = value
+		case providerEnvFieldProxyURL:
+			values.ProxyURL = value
 		case providerEnvFieldSessionStickyKeys:
 			if parsed, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil {
 				values.SessionStickyKeys = &parsed
@@ -311,6 +316,7 @@ func parseProviderEnvKey(prefix, key string, spec DiscoveryConfig) (string, prov
 		field providerEnvField
 	}{
 		{name: "SESSION_STICKY_KEYS", field: providerEnvFieldSessionStickyKeys},
+		{name: "PROXY_URL", field: providerEnvFieldProxyURL},
 		{name: "API_VERSION", field: providerEnvFieldAPIVersion},
 		{name: "BASE_URL", field: providerEnvFieldBaseURL},
 		{name: "AUTH_TYPE", field: providerEnvFieldAuthType},
@@ -506,6 +512,7 @@ func (v providerEnvValues) rawConfig(providerType string, spec DiscoveryConfig) 
 		ServiceAccountJSON:       v.ServiceAccountJSON,
 		ServiceAccountJSONBase64: v.ServiceAccountJSONBase64,
 		GCPScope:                 v.GCPScope,
+		ProxyURL:                 v.ProxyURL,
 		InferenceObjective:       v.InferenceObjective,
 		FairnessFromUserPath:     v.FairnessFromUserPath,
 		Models:                   rawProviderModelsFromIDs(v.Models),
@@ -564,6 +571,9 @@ func overlayProviderEnvValues(existing config.RawProviderConfig, values provider
 	}
 	if values.GCPScope != "" {
 		existing.GCPScope = values.GCPScope
+	}
+	if values.ProxyURL != "" {
+		existing.ProxyURL = values.ProxyURL
 	}
 	if values.InferenceObjective != "" {
 		existing.InferenceObjective = values.InferenceObjective
@@ -624,6 +634,7 @@ func (v providerEnvValues) withoutFieldsSetBy(existing config.RawProviderConfig)
 		{"service_account_json", &v.ServiceAccountJSON, existing.ServiceAccountJSON},
 		{"service_account_json_base64", &v.ServiceAccountJSONBase64, existing.ServiceAccountJSONBase64},
 		{"gcp_scope", &v.GCPScope, existing.GCPScope},
+		{"proxy_url", &v.ProxyURL, existing.ProxyURL},
 		{"inference_objective", &v.InferenceObjective, existing.InferenceObjective},
 	}
 	for _, f := range stringFields {

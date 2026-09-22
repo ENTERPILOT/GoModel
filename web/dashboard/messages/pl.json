@@ -1234,6 +1234,8 @@
   "providers_service_account_json": "Service Account JSON",
   "providers_service_account_json_base64": "Service Account JSON (base64)",
   "providers_gcp_scope": "Zakres GCP",
+  "providers_proxy_url": "Adres URL proxy wychodzącego",
+  "providers_proxy_url_hint": "Kieruje ruch tego dostawcy przez proxy HTTP, HTTPS lub SOCKS5, np. socks5://user:pass@host:1080. Pozostaw puste, aby użyć ustawień HTTP_PROXY / HTTPS_PROXY całej bramy.",
   "providers_models_field": "Modele (oddzielone przecinkami)",
   "providers_api_keys_hint": "Zidentyfikowane sesje domyślnie pozostają przy jednym kluczu, co poprawia trafienia prompt cache dostawcy. Zapisane wartości są zamaskowane; pozostaw gwiazdki bez zmian, aby zachować klucz.",
   "providers_session_sticky_hint": "Przypisz każdą zidentyfikowaną rozmowę do jednego klucza API, aby zachować prompt cache affinity. Wyłącz, aby zmieniać klucze metodą round-robin przy każdym Requeście.",
