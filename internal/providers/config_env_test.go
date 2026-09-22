@@ -147,3 +147,24 @@ func TestApplyProviderEnvVars_BareTypeEnvVarsAgainstRenamedProviders(t *testing.
 		})
 	}
 }
+
+func TestApplyProviderEnvVars_ProxyURL(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-openai")
+	t.Setenv("OPENAI_PROXY_URL", "http://proxy.internal:3128")
+	t.Setenv("OPENAI_EU_API_KEY", "sk-eu")
+	t.Setenv("OPENAI_EU_PROXY_URL", "socks5://user:pass@10.0.0.1:1080")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{
+		"anthropic": {Type: "anthropic", APIKey: "sk-ant", ProxyURL: "http://yaml-proxy:3128"},
+	}, testDiscoveryConfigs)
+
+	require.Contains(t, got, "openai")
+	assert.Equal(t, "http://proxy.internal:3128", got["openai"].ProxyURL)
+	require.Contains(t, got, "openai-eu")
+	assert.Equal(t, "socks5://user:pass@10.0.0.1:1080", got["openai-eu"].ProxyURL)
+	// YAML keeps its proxy when the environment sets none for that provider.
+	assert.Equal(t, "http://yaml-proxy:3128", got["anthropic"].ProxyURL)
+
+	resolved := buildProviderConfig(got["openai-eu"], config.ResilienceConfig{Retry: config.DefaultRetryConfig(), CircuitBreaker: config.DefaultCircuitBreakerConfig()})
+	assert.Equal(t, "socks5://user:pass@10.0.0.1:1080", resolved.ProxyURL)
+}

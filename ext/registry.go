@@ -29,6 +29,7 @@ type Registry struct {
 	routes          []func(*echo.Echo)
 	publicPaths     []string
 	routeSelector   RouteSelector
+	proxySelector   ProxySelector
 	settings        []RuntimeSetting
 	authenticators  []RequestAuthenticator
 	capabilities    map[Capability]struct{}
@@ -125,6 +126,23 @@ func (r *Registry) RegisterRouteSelector(sel RouteSelector) {
 	r.routeSelector = sel
 }
 
+// RegisterProxySelector installs the selector consulted for the outbound
+// proxy of every upstream request whose provider sets no `proxy_url` of its
+// own. Only one selector can be active; a later registration replaces an
+// earlier one.
+func (r *Registry) RegisterProxySelector(sel ProxySelector) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.proxySelector = sel
+}
+
+// ProxySelector returns the registered proxy selector, or nil.
+func (r *Registry) ProxySelector() ProxySelector {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.proxySelector
+}
+
 // Rewriters returns a defensive copy of the registered rewriters.
 func (r *Registry) Rewriters() []RequestRewriter {
 	r.mu.Lock()
@@ -202,6 +220,9 @@ func AddPublicPaths(paths ...string) { Default.AddPublicPaths(paths...) }
 
 // RegisterRouteSelector installs a route selector on the Default registry.
 func RegisterRouteSelector(sel RouteSelector) { Default.RegisterRouteSelector(sel) }
+
+// RegisterProxySelector installs a proxy selector on the Default registry.
+func RegisterProxySelector(sel ProxySelector) { Default.RegisterProxySelector(sel) }
 
 // RegisterSetting registers a runtime setting on the Default registry.
 func RegisterSetting(setting RuntimeSetting) { Default.RegisterSetting(setting) }

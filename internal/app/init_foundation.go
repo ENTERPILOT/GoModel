@@ -76,6 +76,15 @@ func (b *bootstrap) initProviders() error {
 	if b.routeSelector != nil {
 		b.cfg.Factory.AddHooks(routeSelectorHooks(b.routeSelector))
 	}
+	// An extension proxy selector steers the egress of every provider without
+	// its own proxy_url. Providers capture their transport at construction,
+	// so it too must be installed before the first one exists.
+	if b.cfg.Extensions != nil {
+		if selector := b.cfg.Extensions.ProxySelector(); selector != nil {
+			b.cfg.Factory.SetProxySelector(selector)
+			slog.Info("outbound proxy selector enabled", "selector", selector.Name())
+		}
+	}
 	// Routing-strategy plugins learn target health from every upstream
 	// attempt, so the plugin catalog and the strategy resolver are built here,
 	// before the first provider captures the hook set. Guardrails, admin and

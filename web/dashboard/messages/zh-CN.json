@@ -1123,6 +1123,8 @@
   "providers_service_account_json": "服务账号 JSON",
   "providers_service_account_json_base64": "服务账号 JSON（base64）",
   "providers_gcp_scope": "GCP 权限范围",
+  "providers_proxy_url": "出站代理 URL",
+  "providers_proxy_url_hint": "通过 HTTP、HTTPS 或 SOCKS5 代理发送该供应商的流量，例如 socks5://user:pass@host:1080。留空则使用网关全局的 HTTP_PROXY / HTTPS_PROXY 设置。",
   "providers_models_field": "模型（逗号分隔）",
   "providers_api_keys_hint": "已识别会话默认固定使用一个密钥，可提升供应商 Prompt 缓存命中率。已保存的值会被掩码；保持星号不变即可保留已存储的密钥。",
   "providers_session_sticky_hint": "让每个已识别会话固定使用一个 API 密钥，以保持供应商 Prompt 缓存的亲和性。关闭后，每次请求将轮询切换密钥。",

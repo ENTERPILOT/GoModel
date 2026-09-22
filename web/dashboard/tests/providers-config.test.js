@@ -570,3 +570,25 @@ test("providerRowsHaveActions is false when every provider is managed", () => {
   );
   assert.equal(providerRowsHaveActions(undefined), false);
 });
+
+test("proxy_url round-trips through the form and is trimmed in the payload", () => {
+  const schema = {
+    ...OPENAI_SCHEMA,
+    fields: [...OPENAI_SCHEMA.fields, { name: "proxy_url", required: false, advanced: true }],
+  };
+  const form = providerCredentialRowToForm({
+    name: "my-openai",
+    type: "openai",
+    api_keys: ["***********"],
+    proxy_url: "socks5://user:xxxxx@proxy:1080",
+  });
+  assert.equal(form.proxy_url, "socks5://user:xxxxx@proxy:1080");
+  assert.equal(providerCredentialFieldMeta("proxy_url").control, "text");
+
+  form.proxy_url = "  http://proxy.internal:3128  ";
+  const body = buildProviderCredentialPayload(form, schema);
+  assert.equal(body.proxy_url, "http://proxy.internal:3128");
+
+  const blank = { ...defaultProviderCredentialForm(), name: "x", type: "openai" };
+  assert.equal("proxy_url" in buildProviderCredentialPayload(blank, OPENAI_SCHEMA), false);
+});

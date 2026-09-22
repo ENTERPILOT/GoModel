@@ -69,7 +69,13 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 		credentials = awsCfg.Credentials
 	}
 
-	client := authenticatedClient(httpclient.NewDefaultHTTPClient(), keys, credentials, endpoint.region)
+	// opts.HTTPClient carries the factory's proxy-aware transport when the
+	// provider has an outbound proxy; auth wraps it either way.
+	base := opts.HTTPClient
+	if base == nil {
+		base = httpclient.NewDefaultHTTPClient()
+	}
+	client := authenticatedClient(base, keys, credentials, endpoint.region)
 	return newProvider(endpoint, cfg, opts, client)
 }
 

@@ -4,6 +4,7 @@ package httpclient
 import (
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"sync/atomic"
@@ -35,6 +36,11 @@ type ClientConfig struct {
 
 	// ResponseHeaderTimeout specifies the amount of time to wait for a server's response headers
 	ResponseHeaderTimeout time.Duration
+
+	// Proxy selects the outbound proxy for each request. Nil keeps the
+	// process-wide HTTP_PROXY / HTTPS_PROXY / NO_PROXY behaviour; a function
+	// returning nil sends that request directly.
+	Proxy func(*http.Request) (*url.URL, error)
 }
 
 // getEnvDuration reads a duration from an environment variable, returning the default if not set or invalid.
@@ -109,8 +115,12 @@ func NewHTTPClient(config *ClientConfig) *http.Client {
 		config = &cfg
 	}
 
+	proxy := config.Proxy
+	if proxy == nil {
+		proxy = http.ProxyFromEnvironment
+	}
 	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
+		Proxy: proxy,
 		DialContext: (&net.Dialer{
 			Timeout:   config.DialTimeout,
 			KeepAlive: config.KeepAlive,

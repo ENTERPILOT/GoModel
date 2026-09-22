@@ -36,9 +36,13 @@ type ProviderConfig struct {
 	ServiceAccountJSON       string
 	ServiceAccountJSONBase64 string
 	GCPScope                 string
-	InferenceObjective       string
-	FairnessFromUserPath     bool
-	Models                   []string
+	// ProxyURL routes this provider's upstream traffic through one HTTP(S)
+	// or SOCKS5 proxy. Empty defers to the extension proxy selector, if any,
+	// and then to the process environment.
+	ProxyURL             string
+	InferenceObjective   string
+	FairnessFromUserPath bool
+	Models               []string
 	// ModelMetadataOverrides holds operator-supplied metadata keyed by raw model
 	// ID (as it appears in the provider's /models response). The registry merges
 	// these onto remote-registry metadata after enrichment; non-zero fields here
@@ -227,6 +231,7 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		ServiceAccountJSON:       raw.ServiceAccountJSON,
 		ServiceAccountJSONBase64: raw.ServiceAccountJSONBase64,
 		GCPScope:                 raw.GCPScope,
+		ProxyURL:                 strings.TrimSpace(raw.ProxyURL),
 		Models:                   config.ProviderModelIDs(raw.Models),
 		ModelMetadataOverrides:   config.ProviderModelMetadataOverrides(raw.Models),
 		ModelFilter:              raw.ModelFilter.Normalize(),
