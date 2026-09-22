@@ -152,6 +152,8 @@ func (w *fileWriter) Commit() error {
 		w.discard()
 		return fmt.Errorf("close blob: %w", err)
 	}
+	_, statErr := os.Stat(w.target)
+	replacing := statErr == nil
 	if err := os.Rename(w.file.Name(), w.target); err != nil {
 		_ = os.Remove(w.file.Name())
 		w.closed = true
@@ -159,11 +161,16 @@ func (w *fileWriter) Commit() error {
 	}
 	w.closed = true
 	// The rename is only durable once the directory entry reaches disk;
-	// without this a power loss could keep the record and lose the file. A
-	// failed sync unpublishes the file again: no record will point at it,
-	// so leaving it would leak storage retention can never reclaim.
+	// without this a power loss could keep the record and lose the file.
+	// When the sync fails on a first publish the file is unpublished again:
+	// no record will point at it, and leaving it would leak storage that
+	// retention can never reclaim. A replacement is left in place instead,
+	// since the previous file is already gone and the new one is the only
+	// copy of the key.
 	if err := syncDir(filepath.Dir(w.target)); err != nil {
-		_ = os.Remove(w.target)
+		if !replacing {
+			_ = os.Remove(w.target)
+		}
 		return fmt.Errorf("sync blob directory: %w", err)
 	}
 	w.committed = true
