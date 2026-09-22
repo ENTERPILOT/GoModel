@@ -178,3 +178,25 @@ func TestNewFilesystem_RequiresRoot(t *testing.T) {
 	_, err := NewFilesystem("  ")
 	assert.Error(t, err)
 }
+
+func TestFilesystem_SyncFailureUnpublishesTheBlob(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "media")
+	store, err := NewFilesystem(root)
+	require.NoError(t, err)
+	original := syncDir
+	syncDir = func(string) error { return assert.AnError }
+	t.Cleanup(func() { syncDir = original })
+
+	w, err := store.Create(context.Background(), "audio/2026/09/22/a.mp3")
+	require.NoError(t, err)
+	_, err = w.Write([]byte("x"))
+	require.NoError(t, err)
+	require.ErrorIs(t, w.Commit(), assert.AnError)
+	require.NoError(t, w.Close())
+
+	_, err = store.Open(context.Background(), "audio/2026/09/22/a.mp3")
+	require.ErrorIs(t, err, ErrNotFound, "a blob whose publish did not complete must not stay on disk")
+	entries, err := os.ReadDir(filepath.Join(root, "audio", "2026", "09", "22"))
+	require.NoError(t, err)
+	assert.Empty(t, entries, "no temp file or renamed file left behind")
+}

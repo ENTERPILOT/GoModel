@@ -159,8 +159,11 @@ func (w *fileWriter) Commit() error {
 	}
 	w.closed = true
 	// The rename is only durable once the directory entry reaches disk;
-	// without this a power loss could keep the record and lose the file.
+	// without this a power loss could keep the record and lose the file. A
+	// failed sync unpublishes the file again: no record will point at it,
+	// so leaving it would leak storage retention can never reclaim.
 	if err := syncDir(filepath.Dir(w.target)); err != nil {
+		_ = os.Remove(w.target)
 		return fmt.Errorf("sync blob directory: %w", err)
 	}
 	w.committed = true
@@ -168,8 +171,9 @@ func (w *fileWriter) Commit() error {
 }
 
 // syncDir flushes a directory's entries to disk. Windows has no directory
-// fsync, and its rename is already durable in the way that matters here.
-func syncDir(dir string) error {
+// fsync, and its rename is already durable in the way that matters here. It
+// is a variable so a test can inject a failure.
+var syncDir = func(dir string) error {
 	if runtime.GOOS == "windows" {
 		return nil
 	}
