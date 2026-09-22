@@ -382,3 +382,21 @@ func TestService_FailedCleanupIsRetriedByTheSweep(t *testing.T) {
 	assert.Equal(t, 1, removed)
 	assert.Equal(t, 0, blobs.Len(), "the sweep finishes the cleanup")
 }
+
+// stuckDeleteBlobs stores normally but never lets a blob go.
+type stuckDeleteBlobs struct{ *blobstore.Memory }
+
+func (stuckDeleteBlobs) Delete(context.Context, string) error { return assert.AnError }
+
+func TestService_RecordFailureReportsEveryCleanupFailure(t *testing.T) {
+	blobs := blobstore.NewMemory()
+	svc := newService(failingStore{}, stuckDeleteBlobs{blobs}, time.Now, false)
+	t.Cleanup(func() { _ = svc.Close() })
+
+	_, err := svc.Put(context.Background(), Descriptor{Kind: KindAudio, Source: SourceAudit, ContentType: "audio/wav"}, strings.NewReader("x"))
+	require.Error(t, err)
+	require.ErrorContains(t, err, "record media object")
+	require.ErrorContains(t, err, "remove media blob")
+	require.ErrorContains(t, err, "record media blob for retention", "every failed step is reported so the operator can clean up by hand")
+	assert.Equal(t, 1, blobs.Len(), "a blob nothing could remove or record is left, not silently forgotten")
+}

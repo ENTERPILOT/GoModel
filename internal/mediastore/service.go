@@ -123,8 +123,7 @@ func (u *Upload) Commit(ctx context.Context) (*Object, error) {
 		return nil, u.service.abandon(ctx, u.object, fmt.Errorf("commit media blob: %w", err))
 	}
 	if err := u.service.objects.Insert(ctx, &u.object); err != nil {
-		_ = u.service.blobs.Delete(ctx, u.object.StorageKey)
-		return nil, fmt.Errorf("record media object: %w", err)
+		return nil, u.service.abandon(ctx, u.object, fmt.Errorf("record media object: %w", err))
 	}
 	object := u.object
 	return &object, nil
