@@ -15,6 +15,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
+	"github.com/enterpilot/gomodel/internal/mediastore"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -71,6 +72,7 @@ func (b *bootstrap) initAdmin() error {
 			app.runtimeSettings,
 			app.mcpGateway,
 			app.providerCredentials,
+			app.media,
 			app,
 			adminRuntimeConfig,
 			b.quotaTemplatesEnabled,
@@ -136,6 +138,7 @@ func newAdminHandlers(
 	runtimeSettingsService *runtimesettings.Service,
 	mcpResult *mcpgateway.Result,
 	providerCredentialsResult *providers.CredentialsResult,
+	mediaResult *mediastore.Result,
 	runtimeRefresher admin.RuntimeRefresher,
 	runtimeConfig admin.DashboardConfigResponse,
 	quotaTemplatesEnabled bool,
@@ -178,6 +181,10 @@ func newAdminHandlers(
 	if providerCredentialsResult != nil && providerCredentialsResult.Service != nil {
 		providerCredentialsOption = admin.WithProviderCredentials(providerCredentialsResult.Service)
 	}
+	var mediaOption admin.Option
+	if mediaResult != nil && mediaResult.Service != nil {
+		mediaOption = admin.WithMediaStore(mediaResult.Service)
+	}
 
 	adminHandler := admin.NewHandler(
 		reader,
@@ -200,6 +207,7 @@ func newAdminHandlers(
 		admin.WithRuntimeSettings(runtimeSettingsService),
 		mcpOption,
 		providerCredentialsOption,
+		mediaOption,
 		admin.WithRuntimeRefresher(runtimeRefresher),
 		admin.WithDashboardRuntimeConfig(runtimeConfig),
 		admin.WithLiveBroker(liveBroker),

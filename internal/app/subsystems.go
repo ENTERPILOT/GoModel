@@ -57,6 +57,7 @@ const (
 	subsystemRateLimits          = "rate limits"
 	subsystemBatch               = "batch store"
 	subsystemFileStore           = "file store"
+	subsystemMediaStore          = "media store"
 	subsystemResponseStore       = "response store"
 	subsystemConversationStore   = "conversation store"
 	subsystemProviderCredentials = "provider credentials"
@@ -127,6 +128,9 @@ func (a *App) shutdownOrder() []registeredSubsystem {
 		{name: subsystemAuthKeys, close: closerOf(a.authKeys)},
 		{name: subsystemUsers, close: closerOf(a.users)},
 		{name: subsystemFileStore, close: closerOf(a.fileStore)},
+		// Stops the media retention sweep; audit entries referencing media
+		// are flushed by the audit subsystem below.
+		{name: subsystemMediaStore, close: closerOf(a.media)},
 		// The remaining stores flush buffered work into storage, so they must
 		// close before the connection they write through.
 		{name: subsystemBatch, close: closerOf(a.batch)},

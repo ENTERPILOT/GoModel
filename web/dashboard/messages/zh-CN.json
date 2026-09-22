@@ -266,6 +266,7 @@
   "audit_audio_not_logged": "音频未记录。请设置 LOGGING_LOG_AUDIO_BODIES=true 以捕获可播放音频。",
   "audit_image_too_large": "图片过大，无法存储。",
   "audit_image_not_logged": "图片未记录。请设置 LOGGING_LOG_IMAGE_BODIES=true 以捕获图片。",
+  "audit_media_unavailable": "媒体不可用：已过期或已从媒体存储中移除。",
   "audit_image_role_input": "输入",
   "audit_image_role_mask": "遮罩",
   "audit_image_role_output": "输出",

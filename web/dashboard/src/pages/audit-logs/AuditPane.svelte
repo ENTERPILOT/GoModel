@@ -11,9 +11,21 @@
     renderAudioBody,
     renderImageBody,
   } from "./conversation-helpers.js";
+  import { loadMedia } from "./media-loader.js";
+  import { fetchMediaBlob } from "$lib/api/media.js";
   import * as m from "$lib/paraglide/messages.js";
 
   let { pane } = $props();
+
+  // Stored audio and images are referenced by media id in the rendered
+  // markup; once it is in the DOM the loader fetches them with the API
+  // client and revokes the object URLs when the markup changes.
+  let bodyElement = $state(null);
+  $effect(() => {
+    void renderedBody;
+    if (!bodyElement) return;
+    return loadMedia(bodyElement, { fetchMedia: fetchMediaBlob });
+  });
 
   const copyBodyState = createCopyState({
     logPrefix: "Failed to copy audit payload:",
@@ -168,6 +180,7 @@
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
       <pre
         class="audit-json audit-json-body"
+        bind:this={bodyElement}
         onmousedown={(event) => conversationDrawer.startBodyInteraction(event)}
         onclick={(event) =>
           conversationDrawer.handleBodyConversationClick(

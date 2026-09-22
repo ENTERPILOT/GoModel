@@ -187,8 +187,7 @@ Usage and [cost tracking](#cost-tracking) are unchanged: a streamed transcript i
 priced from the token counts its `transcript.text.done` event reports, and
 streamed speech from the duration of the audio that passed through. Both are
 measured as the response streams rather than from a buffered copy of it, so a
-response of any length is billed in full — only the
-[audit body](#audit-logging) is capped.
+response of any length is billed in full.
 
 <Note>
   A streamed response cannot be retried once its first bytes have reached the
@@ -295,7 +294,12 @@ unless body logging is enabled:
 - **Body logging on, audio off** (the default) — the audio response is recorded
   as a lightweight `{__audio__, content_type, bytes, stored: false}` placeholder; no audio bytes are stored.
 - **Body logging on, audio on** — `/v1/audio/speech` stores its text input and the
-  generated audio (base64, capped at 8 MB) so the **dashboard renders an inline
-  player**, and `/v1/audio/transcriptions` stores the uploaded audio (base64,
-  capped at 8 MB, also playable in the dashboard) alongside the upload metadata
-  (filename, model, params).
+  generated audio so the **dashboard renders an inline player**, and
+  `/v1/audio/transcriptions` stores the uploaded audio (also playable in the
+  dashboard) alongside the upload metadata (filename, model, params).
+
+The audio bytes go to [media storage](/advanced/configuration#media-storage),
+not into the audit database: the entry carries a `media_id` and the dashboard
+fetches the file through `GET /admin/media/{id}`. Nothing caps the size, and a
+streamed response is stored as it is relayed. Files are kept as long as the
+audit entries that reference them (`LOGGING_RETENTION_DAYS`).

@@ -229,6 +229,26 @@ Storage is shared by audit logging, usage tracking, and future features like IAM
   SQLite and MongoDB deployments are unaffected.
 </Warning>
 
+#### Media Storage
+
+Media files — the audio and images captured for the audit log when
+`LOGGING_LOG_AUDIO_BODIES` or `LOGGING_LOG_IMAGE_BODIES` is on — are kept
+outside the database. Their metadata lives in the storage backend above; only
+the bytes go here, so they are never capped in size and the database stays
+small. See [ADR-0013](https://github.com/ENTERPILOT/GoModel/blob/main/docs/adr/0013-media-storage.md).
+
+| Variable             | Description                                                  | Default      |
+| -------------------- | ------------------------------------------------------------ | ------------ |
+| `MEDIA_STORAGE_TYPE` | Blob backend: `filesystem` or `memory` (lost on restart)     | `filesystem` |
+| `MEDIA_STORAGE_PATH` | Directory for the filesystem backend                         | `data/media` |
+
+The default path follows the SQLite rule: `./data/media` when a `./data`
+directory exists next to the process, otherwise the OS per-user data
+directory. In containers mount a volume there; with several replicas use a
+shared mount (EFS, an S3 FUSE mount) so every instance can serve every file.
+Files are retained as long as the audit entries that reference them
+(`LOGGING_RETENTION_DAYS`) and removed by an hourly sweep.
+
 #### Audit Logging
 
 | Variable                          | Description                                | Default |

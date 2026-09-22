@@ -25,6 +25,7 @@ type Config struct {
 	Cache         CacheConfig         `yaml:"cache"`
 	Storage       StorageConfig       `yaml:"storage"`
 	Logging       LogConfig           `yaml:"logging"`
+	Media         MediaConfig         `yaml:"media"`
 	Usage         UsageConfig         `yaml:"usage"`
 	Budgets       BudgetsConfig       `yaml:"budgets"`
 	RateLimits    RateLimitsConfig    `yaml:"rate_limits"`
@@ -155,6 +156,12 @@ func buildDefaultConfig() *Config {
 			},
 			PostgreSQL: PostgreSQLStorageConfig{
 				MaxConns: 10,
+			},
+		},
+		Media: MediaConfig{
+			Storage: MediaStorageConfig{
+				Type: MediaStorageFilesystem,
+				Path: DefaultMediaPath(),
 			},
 		},
 		Logging: LogConfig{
@@ -345,6 +352,9 @@ func Load() (*LoadResult, error) {
 	cfg.Logging.LogImageBodiesScope = ResolveImageBodyScope(cfg.Logging.LogImageBodiesScope)
 	if !cfg.Logging.LogImageBodiesScope.Valid() {
 		return nil, fmt.Errorf("logging.log_image_bodies_scope must be one of: all, input, output; got %q", cfg.Logging.LogImageBodiesScope)
+	}
+	if err := ResolveMediaConfig(&cfg.Media); err != nil {
+		return nil, err
 	}
 	if err := ResolveClientIPPolicy(&cfg.Server); err != nil {
 		return nil, err

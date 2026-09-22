@@ -1,31 +1,23 @@
 package auditlog
 
 import (
-	"encoding/base64"
+	"bytes"
 	"strings"
-)
 
-// audioBodyMaxBytes caps how much *raw* audio is embedded as base64 in an audit
-// log entry; larger payloads are recorded as metadata-only placeholders so the
-// audit store does not balloon on long generations. The stored base64 is ~4/3 of
-// this (≈10.7 MB at the cap), deliberately kept well under document-store
-// per-record ceilings (e.g. MongoDB's 16 MB BSON limit) so a near-cap clip plus
-// the rest of the entry (request text, headers, workflow metadata) and encoding
-// overhead cannot push the document over the limit and fail the audit insert.
-const audioBodyMaxBytes = 8 * 1024 * 1024
+	"github.com/enterpilot/gomodel/internal/mediastore"
+)
 
 // AudioBodyLog is the audit representation of an audio request/response body.
 // The "__audio__" marker lets the dashboard detect audio payloads and render a
-// player (when Data is present) or a labeled placeholder. When Data is set it
-// holds the base64-encoded audio, suitable for a data: URL of ContentType.
+// player (when MediaID names a stored object) or a labeled placeholder. Rows
+// written before ADR-0013 carry the audio inline as base64 under "encoding"
+// and "data" instead; the dashboard still renders those.
 type AudioBodyLog struct {
 	Audio       bool           `json:"__audio__" bson:"__audio__"`
 	ContentType string         `json:"content_type,omitempty" bson:"content_type,omitempty"`
-	Bytes       int            `json:"bytes" bson:"bytes"`
-	Encoding    string         `json:"encoding,omitempty" bson:"encoding,omitempty"`
-	Data        string         `json:"data,omitempty" bson:"data,omitempty"`
+	Bytes       int64          `json:"bytes" bson:"bytes"`
+	MediaID     string         `json:"media_id,omitempty" bson:"media_id,omitempty"`
 	Stored      bool           `json:"stored" bson:"stored"`
-	TooLarge    bool           `json:"too_large,omitempty" bson:"too_large,omitempty"`
 	Meta        map[string]any `json:"meta,omitempty" bson:"meta,omitempty"`
 }
 
@@ -36,50 +28,50 @@ func IsAudioContentType(contentType string) bool {
 	return len(mediaType) >= 6 && strings.EqualFold(mediaType[:6], "audio/")
 }
 
-// BuildAudioResponseBody builds the audit value for a binary audio response.
-// When storeBytes is true and the payload fits within audioBodyMaxBytes the
-// audio is embedded as base64 for playback; otherwise only metadata is kept.
-func BuildAudioResponseBody(contentType string, data []byte, storeBytes bool) AudioBodyLog {
-	return buildAudioBody(contentType, data, storeBytes, nil)
+// BuildAudioResponseBody builds the audit value for a binary audio response,
+// storing the bytes through capture when it is non-nil.
+func BuildAudioResponseBody(capture *MediaCapture, contentType string, data []byte) AudioBodyLog {
+	return buildAudioBody(capture, contentType, data, nil)
 }
 
 // BuildAudioUploadBody builds the audit value for an uploaded audio request
 // (e.g. a transcription input). It behaves like BuildAudioResponseBody but
 // attaches request metadata (model, params) alongside the audio so the
 // dashboard can show both a player and the parameters.
-func BuildAudioUploadBody(contentType string, data []byte, storeBytes bool, meta map[string]any) AudioBodyLog {
-	return buildAudioBody(contentType, data, storeBytes, meta)
+func BuildAudioUploadBody(capture *MediaCapture, contentType string, data []byte, meta map[string]any) AudioBodyLog {
+	return buildAudioBody(capture, contentType, data, meta)
 }
 
-// UnretainedAudioResponseBody builds the audit value for an audio response the
-// gateway relayed without keeping: past its capture ceiling only the size is
-// known. It is recorded the way a buffered body past audioBodyMaxBytes is, so a
-// long response reads as too large to store rather than as zero bytes.
-func UnretainedAudioResponseBody(contentType string, bytes int) AudioBodyLog {
-	return AudioBodyLog{
+// BuildRelayedAudioResponseBody builds the audit value for an audio response
+// that was teed into w while it streamed to the client. It commits the
+// stored object, so it is called exactly once per relay.
+func BuildRelayedAudioResponseBody(w *MediaWriter) AudioBodyLog {
+	body := AudioBodyLog{
 		Audio:       true,
-		ContentType: strings.TrimSpace(contentType),
-		Bytes:       bytes,
-		TooLarge:    true,
+		ContentType: strings.TrimSpace(w.contentType),
+		Bytes:       w.Bytes(),
 	}
+	body.attach(w.finish())
+	return body
 }
 
-func buildAudioBody(contentType string, data []byte, storeBytes bool, meta map[string]any) AudioBodyLog {
+func buildAudioBody(capture *MediaCapture, contentType string, data []byte, meta map[string]any) AudioBodyLog {
 	body := AudioBodyLog{
 		Audio:       true,
 		ContentType: strings.TrimSpace(contentType),
-		Bytes:       len(data),
+		Bytes:       int64(len(data)),
 		Meta:        meta,
 	}
-	if !storeBytes || len(data) == 0 {
-		return body
+	if len(data) > 0 {
+		body.attach(capture.save(mediastore.KindAudio, contentType, bytes.NewReader(data)))
 	}
-	if len(data) > audioBodyMaxBytes {
-		body.TooLarge = true
-		return body
-	}
-	body.Encoding = "base64"
-	body.Data = base64.StdEncoding.EncodeToString(data)
-	body.Stored = true
 	return body
+}
+
+func (b *AudioBodyLog) attach(object *mediastore.Object) {
+	if object == nil {
+		return
+	}
+	b.MediaID = object.ID
+	b.Stored = true
 }

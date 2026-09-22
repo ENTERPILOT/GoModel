@@ -20,6 +20,7 @@ import (
 // skippedDirs are trees that hold no Go tests of ours.
 var skippedDirs = map[string]bool{
 	".git":         true,
+	".claude":      true, // local agent worktrees, gitignored
 	".cache":       true,
 	"node_modules": true,
 	"third_party":  true,

@@ -3,7 +3,6 @@ package server
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
@@ -516,11 +515,12 @@ func newTranscriptionMock() *audioMockProvider {
 }
 
 // TestAudioTranscription_LogsUploadedAudioWhenEnabled: with both flags on, the
-// uploaded audio is captured losslessly as a playable base64 request body, with
-// the upload metadata attached. Content type falls back to the filename
-// extension when the multipart part declares a non-audio type.
+// uploaded audio is stored losslessly in the media store and the request body
+// references it, with the upload metadata attached. Content type falls back
+// to the filename extension when the multipart part declares a non-audio type.
 func TestAudioTranscription_LogsUploadedAudioWhenEnabled(t *testing.T) {
-	svc := &audioService{provider: newTranscriptionMock(), logBodies: true, logAudioBodies: true}
+	media, store := newTestMediaCapturer(t)
+	svc := &audioService{provider: newTranscriptionMock(), logBodies: true, logAudioBodies: true, media: media}
 	c, rec, entry := newTranscriptionRequestWithAuditEntry(t, "speech.mp3", []byte("uploaded-audio-bytes"))
 	err := svc.CreateTranscription(c)
 	require.NoError(t, err)
@@ -530,12 +530,23 @@ func TestAudioTranscription_LogsUploadedAudioWhenEnabled(t *testing.T) {
 	require.True(t, ok, "request body not an AudioBodyLog, got %T", entry.Data.RequestBody)
 	require.True(t, body.Stored)
 	require.Equal(t, "audio/mpeg", body.ContentType, "expected stored audio/mpeg (from .mp3 extension), got %+v", body)
-
-	decoded, err := base64.StdEncoding.DecodeString(body.Data)
-	require.NoError(t, err)
-	assert.Equal(t, "uploaded-audio-bytes", string(decoded))
+	assert.Equal(t, "uploaded-audio-bytes", string(readTestMedia(t, store, body.MediaID)))
 	assert.Equal(t, "gpt-4o-transcribe", body.Meta["model"])
 	assert.Equal(t, "en", body.Meta["language"], "upload metadata mismatch: %+v", body.Meta)
+}
+
+// TestAudioTranscription_PlaceholderWithoutMediaStore: the flags alone do not
+// store bytes; without a media store the upload is a sized placeholder.
+func TestAudioTranscription_PlaceholderWithoutMediaStore(t *testing.T) {
+	svc := &audioService{provider: newTranscriptionMock(), logBodies: true, logAudioBodies: true}
+	c, _, entry := newTranscriptionRequestWithAuditEntry(t, "speech.mp3", []byte("uploaded-audio-bytes"))
+	require.NoError(t, svc.CreateTranscription(c))
+
+	body, ok := entry.Data.RequestBody.(auditlog.AudioBodyLog)
+	require.True(t, ok, "request body not an AudioBodyLog, got %T", entry.Data.RequestBody)
+	assert.False(t, body.Stored)
+	assert.Empty(t, body.MediaID)
+	assert.Equal(t, int64(len("uploaded-audio-bytes")), body.Bytes)
 }
 
 // TestAudioTranscription_MetadataPlaceholderWhenAudioDisabled: with LogBodies on
@@ -550,7 +561,7 @@ func TestAudioTranscription_MetadataPlaceholderWhenAudioDisabled(t *testing.T) {
 	body, ok := entry.Data.RequestBody.(auditlog.AudioBodyLog)
 	require.True(t, ok, "request body not an AudioBodyLog, got %T", entry.Data.RequestBody)
 	assert.False(t, body.Stored)
-	assert.Empty(t, body.Data, "audio bytes must not be stored when LogAudioBodies is off, got %+v", body)
+	assert.Empty(t, body.MediaID, "audio bytes must not be stored when LogAudioBodies is off, got %+v", body)
 	assert.Equal(t, "gpt-4o-transcribe", body.Meta["model"], "metadata must be preserved on the placeholder, got %+v", body.Meta)
 }
 
@@ -757,9 +768,10 @@ func newSpeechMock() *audioMockProvider {
 
 // TestAudioSpeech_LogsAudioBodiesWhenEnabled: with both LogBodies and
 // LogAudioBodies on, the speech input is logged and the audio output is stored
-// losslessly as base64 for playback.
+// losslessly in the media store for playback.
 func TestAudioSpeech_LogsAudioBodiesWhenEnabled(t *testing.T) {
-	svc := &audioService{provider: newSpeechMock(), logBodies: true, logAudioBodies: true}
+	media, store := newTestMediaCapturer(t)
+	svc := &audioService{provider: newSpeechMock(), logBodies: true, logAudioBodies: true, media: media}
 	c, rec, entry := newSpeechRequestWithAuditEntry(t)
 	err := svc.CreateSpeech(c)
 	require.NoError(t, err)
@@ -773,11 +785,8 @@ func TestAudioSpeech_LogsAudioBodiesWhenEnabled(t *testing.T) {
 	respBody, ok := entry.Data.ResponseBody.(auditlog.AudioBodyLog)
 	require.True(t, ok, "response body not an AudioBodyLog, got %T", entry.Data.ResponseBody)
 	require.True(t, respBody.Stored)
-	require.Equal(t, "base64", respBody.Encoding, "expected stored base64 audio, got %+v", respBody)
-
-	decoded, err := base64.StdEncoding.DecodeString(respBody.Data)
-	require.NoError(t, err)
-	assert.Equal(t, "synthetic-audio", string(decoded))
+	assert.Equal(t, int64(len("synthetic-audio")), respBody.Bytes)
+	assert.Equal(t, "synthetic-audio", string(readTestMedia(t, store, respBody.MediaID)))
 }
 
 // TestAudioSpeech_PlaceholderWhenAudioDisabled: with LogBodies on but
@@ -795,8 +804,8 @@ func TestAudioSpeech_PlaceholderWhenAudioDisabled(t *testing.T) {
 	respBody, ok := entry.Data.ResponseBody.(auditlog.AudioBodyLog)
 	require.True(t, ok, "response body not an AudioBodyLog, got %T", entry.Data.ResponseBody)
 	assert.False(t, respBody.Stored)
-	assert.Empty(t, respBody.Data, "audio bytes must not be stored when LogAudioBodies is off, got %+v", respBody)
-	assert.Equal(t, len("synthetic-audio"), respBody.Bytes)
+	assert.Empty(t, respBody.MediaID, "audio bytes must not be stored when LogAudioBodies is off, got %+v", respBody)
+	assert.Equal(t, int64(len("synthetic-audio")), respBody.Bytes)
 }
 
 // TestAudioSpeech_NoAudioBodyWhenBodiesDisabled: LogBodies is the master switch.

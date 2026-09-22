@@ -19,14 +19,12 @@ import (
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
-// maxCapturedAudioResponseBytes bounds how much of a relayed audio body is kept
-// in memory for audit capture. It matches the ceiling the audit store embeds
-// audio at, so nothing an audit entry would have kept is dropped, while a
-// runaway upstream can no longer grow the process without bound (the buffered
-// path holds the whole body today). Usage accounting does not share this
-// buffer: it measures the relay as it passes (see audioUsageSink), so a
-// response past the cap is still billed.
-const maxCapturedAudioResponseBytes = 8 * 1024 * 1024
+// maxCollectedTranscriptBytes bounds how much of a relayed transcript stream
+// the usage collector holds while it waits for the terminal usage event, so a
+// runaway upstream cannot grow the process without bound. Audio bytes are not
+// held at all: a relayed audio body is teed straight into the media store for
+// audit capture (auditlog.MediaWriter) and measured as it passes for usage.
+const maxCollectedTranscriptBytes = 8 * 1024 * 1024
 
 // audioUsageExtractor derives the usage entry for a buffered audio call from the
 // complete payload the client received.
@@ -67,10 +65,22 @@ type audioService struct {
 	// endpoints are not ingress-managed, so the audit middleware cannot capture
 	// their (binary/multipart) bodies; the service captures them here instead.
 	// logBodies is the master switch: audio bodies are only captured when it is
-	// on. logAudioBodies then decides whether the audio bytes are stored as
-	// base64 (playable) or as a lightweight placeholder.
+	// on. logAudioBodies then decides whether the audio bytes are stored in the
+	// media store (playable from the dashboard) or recorded as a lightweight
+	// placeholder. media is where the bytes go; nil leaves placeholders.
 	logBodies      bool
 	logAudioBodies bool
+	media          *auditlog.MediaCapturer
+}
+
+// audioCapture returns the media capture for this request, or nil when audio
+// bytes are not to be stored (bodies or audio logging off, no media store,
+// or no live audit entry to reference them from).
+func (s *audioService) audioCapture(c *echo.Context) *auditlog.MediaCapture {
+	if !s.logBodies || !s.logAudioBodies {
+		return nil
+	}
+	return s.media.For(c)
 }
 
 func (s *audioService) router() (core.AudioProvider, error) {
@@ -190,11 +200,11 @@ func (s *audioService) createAudioTranscription(c *echo.Context, translation boo
 	}
 
 	// LogBodies is the master switch: when on, the upload metadata is always
-	// recorded; LogAudioBodies additionally embeds the raw audio as base64 for
+	// recorded; LogAudioBodies additionally stores the raw audio for
 	// playback, otherwise the entry keeps a metadata-only placeholder.
 	if s.logBodies {
 		auditlog.EnrichEntryWithRequestBody(c, auditlog.BuildAudioUploadBody(
-			audioUploadContentType(req), req.File, s.logAudioBodies, audioTranscriptionAuditInput(req)))
+			s.audioCapture(c), audioUploadContentType(req), req.File, audioTranscriptionAuditInput(req)))
 	}
 
 	ctx, route, err := s.prepare(c, req.Model, req.Provider)
@@ -233,7 +243,7 @@ func (s *audioService) createAudioTranscription(c *echo.Context, translation boo
 			// transcript.text.done event, which the collector keeps while
 			// discarding the transcript, so a streamed call is priced from the
 			// provider's own numbers however long it runs.
-			collector := usage.NewTranscriptUsageCollector(maxCapturedAudioResponseBytes)
+			collector := usage.NewTranscriptUsageCollector(maxCollectedTranscriptBytes)
 			return audioStreamSink{Writer: collector, entry: func(pricing *core.ModelPricing) *usage.UsageEntry {
 				return priceTranscript(collector.UsageBody(), pricing)
 			}}
@@ -355,7 +365,8 @@ func (s *audioService) finishAudio(c *echo.Context, route modelCallRoute, resp *
 // synthesized speech and a stream=true transcript are both produced
 // incrementally, and buffering them costs the client every second of the
 // generation before its first byte. The relayed bytes are teed to the usage sink,
-// which measures them as they go, and into a bounded buffer for audit capture.
+// which measures them as they go, and to the audit capture: binary audio goes
+// into the media store as it streams, a transcript into a bounded buffer.
 func (s *audioService) relayAudioStream(c *echo.Context, route modelCallRoute, resp *core.AudioResponse, started time.Time, sink audioUsageSink) error {
 	ctx := c.Request().Context()
 	// A slowdown factor paces the relay rather than delaying its start, so an
@@ -376,13 +387,31 @@ func (s *audioService) relayAudioStream(c *echo.Context, route modelCallRoute, r
 	}
 	c.Response().WriteHeader(http.StatusOK)
 
-	capture := newCappedCaptureBuffer(maxCapturedAudioResponseBytes)
+	var (
+		mediaWriter *auditlog.MediaWriter
+		textCapture *cappedCaptureBuffer
+		capture     io.Writer
+	)
+	if auditlog.IsAudioContentType(contentType) {
+		mediaWriter = s.audioCapture(c).AudioWriter(contentType)
+		capture = mediaWriter
+	} else {
+		textCapture = newCappedCaptureBuffer(auditlog.MaxBodyCapture)
+		capture = textCapture
+	}
 	flushErr := flushStream(c.Response(), io.TeeReader(stream, io.MultiWriter(sink, capture)))
 	// The provider produced (and billed) whatever reached the gateway, so usage
 	// is recorded even when the client went away mid-relay.
 	s.logUsage(ctx, route, sink.Entry)
-	data, complete := capture.Captured()
-	s.captureRelayedAudioResponseBody(c, contentType, data, complete, capture.Total())
+	if mediaWriter != nil {
+		// Built unconditionally so the upload is always committed or discarded.
+		body := auditlog.BuildRelayedAudioResponseBody(mediaWriter)
+		if s.logBodies {
+			auditlog.EnrichEntryWithResponseBody(c, body)
+		}
+	} else if data, complete := textCapture.Captured(); complete {
+		s.captureAudioResponseBody(c, contentType, data)
+	}
 	if flushErr != nil {
 		errorType := classifyStreamError(ctx, flushErr)
 		auditlog.EnrichEntryWithError(c, errorType, flushErr.Error(), "")
@@ -419,37 +448,19 @@ func (s *audioService) respondAudio(c *echo.Context, providerName string, resp *
 // The audit middleware cannot: it coerces bodies to UTF-8, which would corrupt
 // binary audio, and it skips a response that announced itself as a stream.
 // LogBodies is the master switch; LogAudioBodies only decides whether audio
-// bytes are embedded as base64 for playback or recorded as a lightweight
-// placeholder. A relayed transcript is text, so it is stored as the middleware
-// would have, under the same size ceiling.
+// bytes are stored for playback or recorded as a lightweight placeholder. A
+// relayed transcript is text, so it is stored as the middleware would have,
+// under the same size ceiling.
 func (s *audioService) captureAudioResponseBody(c *echo.Context, contentType string, data []byte) {
 	if !s.logBodies {
 		return
 	}
 	switch {
 	case auditlog.IsAudioContentType(contentType):
-		auditlog.EnrichEntryWithResponseBody(c, auditlog.BuildAudioResponseBody(contentType, data, s.logAudioBodies))
+		auditlog.EnrichEntryWithResponseBody(c, auditlog.BuildAudioResponseBody(s.audioCapture(c), contentType, data))
 	case isAudioEventStream(contentType) && len(data) > 0 && len(data) <= auditlog.MaxBodyCapture:
 		auditlog.EnrichEntryWithResponseBody(c, auditlog.CaptureLoggedBody(data))
 	}
-}
-
-// captureRelayedAudioResponseBody does the same for a relayed body, which the
-// bounded capture only holds while it stays under the ceiling. Past it the bytes
-// are gone but their count is not, and recording the count keeps the entry
-// honest: a placeholder built from the abandoned buffer would report a
-// multi-megabyte response as zero bytes.
-func (s *audioService) captureRelayedAudioResponseBody(c *echo.Context, contentType string, data []byte, complete bool, total int) {
-	if !s.logBodies {
-		return
-	}
-	if !complete {
-		if auditlog.IsAudioContentType(contentType) {
-			auditlog.EnrichEntryWithResponseBody(c, auditlog.UnretainedAudioResponseBody(contentType, total))
-		}
-		return
-	}
-	s.captureAudioResponseBody(c, contentType, data)
 }
 
 // audioSpeechAuditInput builds the audit request body for a text-to-speech
@@ -477,7 +488,7 @@ func audioSpeechAuditInput(req *core.AudioSpeechRequest) map[string]any {
 // otherwise a best-effort guess from the filename extension (defaulting to mp3).
 func audioUploadContentType(req *core.AudioTranscriptionRequest) string {
 	// Strip any MIME parameters (e.g. "audio/webm; codecs=opus") so the stored
-	// type is a bare media type the dashboard can use directly in a data: URL.
+	// type is a bare media type the dashboard can serve the audio under.
 	if ct := strings.TrimSpace(req.FileContentType); ct != "" {
 		mediaType := strings.ToLower(strings.TrimSpace(strings.Split(ct, ";")[0]))
 		if auditlog.IsAudioContentType(mediaType) {

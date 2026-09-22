@@ -44,6 +44,7 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/audit/stats", h.AuditStats)
 	g.GET("/audit/detail", h.AuditLogDetail)
 	g.GET("/audit/conversation", h.AuditConversation)
+	g.GET("/media/:id", h.Media)
 
 	g.GET("/providers/status", h.ProviderStatus, global)
 	g.POST("/runtime/refresh", h.RefreshRuntime, global)

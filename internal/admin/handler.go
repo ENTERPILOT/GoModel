@@ -19,6 +19,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
+	"github.com/enterpilot/gomodel/internal/mediastore"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -58,6 +59,7 @@ type Handler struct {
 	configuredProviders []providers.SanitizedProviderConfig
 	providerCredentials ProviderCredentialsAdmin
 	requestHealth       RequestHealthSource
+	media               *mediastore.Service
 	quotaTemplates      bool
 
 	mutationMu sync.Mutex

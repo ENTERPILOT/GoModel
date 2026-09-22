@@ -293,6 +293,7 @@
   "audit_audio_not_logged": "Audio nicht aufgezeichnet. Setze LOGGING_LOG_AUDIO_BODIES=true, um abspielbares Audio zu erfassen.",
   "audit_image_too_large": "Bild zu groß zum Speichern.",
   "audit_image_not_logged": "Bild nicht aufgezeichnet. Setze LOGGING_LOG_IMAGE_BODIES=true, um Bilder zu erfassen.",
+  "audit_media_unavailable": "Medien nicht verfügbar: abgelaufen oder aus dem Medienspeicher entfernt.",
   "audit_image_role_input": "Eingabe",
   "audit_image_role_mask": "Maske",
   "audit_image_role_output": "Ausgabe",

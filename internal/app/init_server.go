@@ -105,6 +105,7 @@ func (b *bootstrap) initServerDependencies() error {
 	// /version keeps reporting the local build.
 	app.versionCheck = newVersionChecker(b.ctx, appCfg.VersionCheck, app.storage, appCfg.Server.MasterKey)
 	warnIfDataDirEphemeral(appCfg.Storage.BackendConfig())
+	warnIfMediaDirEphemeral(appCfg)
 	return nil
 }
 
@@ -144,6 +145,7 @@ func (b *bootstrap) initServerConfig() error {
 		PassthroughSemanticEnrichers:    b.cfg.Factory.PassthroughSemanticEnrichers(),
 		BatchStore:                      app.batch.Store,
 		FileStore:                       app.fileStore.Store,
+		MediaStore:                      app.media.Service,
 		ResponseStore:                   app.responseStore.Store,
 		ConversationStore:               app.conversations.Store,
 		LogOnlyModelInteractions:        appCfg.Logging.OnlyModelInteractions,

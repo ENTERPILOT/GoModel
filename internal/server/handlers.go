@@ -13,6 +13,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
+	"github.com/enterpilot/gomodel/internal/mediastore"
 	"github.com/enterpilot/gomodel/internal/realtime"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/responsestore"
@@ -42,7 +43,10 @@ type Handler struct {
 	pricingResolver                 usage.PricingResolver
 	batchStore                      batchstore.Store
 	fileStore                       filestore.Store
-	responseStore                   responsestore.Store
+	// mediaCapturer stores audited audio and image payloads outside the
+	// audit document; nil records placeholders only.
+	mediaCapturer *auditlog.MediaCapturer
+	responseStore responsestore.Store
 	// storesMu guards responseStore, conversationStore, and translatedSvc wiring.
 	storesMu                     sync.RWMutex
 	conversationStore            conversationstore.Store
@@ -119,6 +123,19 @@ func (h *Handler) SetFileStore(store filestore.Store) {
 		return
 	}
 	h.fileStore = store
+}
+
+// SetMediaStore routes audited audio and image payloads into the media store,
+// retained as long as the audit entries that reference them. nil is ignored.
+func (h *Handler) SetMediaStore(store *mediastore.Service) {
+	if store == nil {
+		return
+	}
+	retentionDays := 0
+	if h.logger != nil {
+		retentionDays = h.logger.Config().RetentionDays
+	}
+	h.mediaCapturer = auditlog.NewMediaCapturer(store, retentionDays)
 }
 
 // SetResponseStore replaces the response snapshot store used by lifecycle endpoints.
@@ -217,21 +234,17 @@ func (h *Handler) modelCalls() modelCallService {
 }
 
 func (h *Handler) audio() *audioService {
-	var logBodies, logAudioBodies bool
+	svc := &audioService{modelCallService: h.modelCalls(), media: h.mediaCapturer}
 	if h.logger != nil {
 		cfg := h.logger.Config()
-		logBodies = cfg.LogBodies
-		logAudioBodies = cfg.LogAudioBodies
+		svc.logBodies = cfg.LogBodies
+		svc.logAudioBodies = cfg.LogAudioBodies
 	}
-	return &audioService{
-		modelCallService: h.modelCalls(),
-		logBodies:        logBodies,
-		logAudioBodies:   logAudioBodies,
-	}
+	return svc
 }
 
 func (h *Handler) images() *imageService {
-	svc := &imageService{modelCallService: h.modelCalls()}
+	svc := &imageService{modelCallService: h.modelCalls(), media: h.mediaCapturer}
 	if h.logger != nil {
 		cfg := h.logger.Config()
 		svc.logBodies = cfg.LogBodies
