@@ -242,6 +242,9 @@ try {
 
 - Minimal overhead: ~100ns per request for hook execution
 - Memory: ~1MB for metric storage (depends on cardinality)
+- The `endpoint` label is a path template: the query string is dropped and
+  resource IDs become `{id}` (for example `/files/{id}/content`), so file,
+  batch, and response IDs do not create new series
 - CPU: Negligible impact (`<0.1%` in benchmarks)
 
 ### Metrics Disabled
