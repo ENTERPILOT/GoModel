@@ -237,7 +237,7 @@ func (r *MongoDBReader) accumulateInputSegments(ctx context.Context, matchFilter
 	projection := bson.D{
 		{Key: "input_tokens", Value: 1},
 		{Key: "provider", Value: 1},
-		{Key: "raw_data", Value: 1},
+		{Key: "raw_data", Value: mongoPromptCacheRawData()},
 	}
 	cursor, err := r.collection.Find(ctx, matchFilters, options.Find().SetProjection(projection))
 	if err != nil {
@@ -454,7 +454,7 @@ func mongoUsageCacheStatsPipeline(params UsageQueryParams, canonicalUserPath boo
 		{Key: "cache_type", Value: 1},
 		{Key: "input_tokens", Value: 1},
 		{Key: "output_tokens", Value: 1},
-		{Key: "raw_data", Value: 1},
+		{Key: "raw_data", Value: mongoPromptCacheRawData()},
 		{Key: "timestamp", Value: 1},
 	}}})
 	return pipeline, nil
@@ -984,7 +984,7 @@ func (r *MongoDBReader) GetDailyUsage(ctx context.Context, params UsageQueryPara
 		{Key: "cache_type", Value: 1},
 		{Key: "input_tokens", Value: 1},
 		{Key: "provider", Value: 1},
-		{Key: "raw_data", Value: 1},
+		{Key: "raw_data", Value: mongoPromptCacheRawData()},
 	}}})
 	splitCursor, err := r.collection.Aggregate(ctx, splitPipeline)
 	if err != nil {
@@ -1161,7 +1161,7 @@ func (r *MongoDBReader) GetTokenThroughput(ctx context.Context, gran ThroughputG
 		{Key: "output_tokens", Value: 1},
 		{Key: "total_tokens", Value: 1},
 		{Key: "provider", Value: 1},
-		{Key: "raw_data", Value: 1},
+		{Key: "raw_data", Value: mongoPromptCacheRawData()},
 	}
 
 	cursor, err := r.collection.Find(ctx, match, options.Find().SetProjection(projection))
