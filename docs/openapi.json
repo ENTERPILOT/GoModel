@@ -1823,6 +1823,11 @@
             }
           }
         },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
         "x-mint": {
           "metadata": {
             "sidebarTitle": "/admin/media/{id}",

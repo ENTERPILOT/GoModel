@@ -194,3 +194,24 @@ test("loadMedia revokes downloads that finish after cleanup", async () => {
   assert.equal(audio.attrs.has("src"), false, "a disposed pane must not receive a URL");
   assert.deepEqual(revoked, ["blob:slow"], "the late URL is released right away");
 });
+
+test("loadMedia treats an image that fails to decode as unavailable", async () => {
+  const img = fakeNode("IMG", "med_corrupt");
+  const listeners = {};
+  img.addEventListener = (name, handler) => {
+    listeners[name] = handler;
+  };
+  const root = fakeContainer([img]);
+  loadMedia(root, {
+    fetchMedia: async () => ({}),
+    createObjectURL: () => "blob:corrupt",
+    revokeObjectURL: () => {},
+  });
+  await flush();
+  assert.equal(img.attrs.get("src"), "blob:corrupt");
+  assert.equal(typeof listeners.error, "function", "an error listener is registered before src is set");
+
+  listeners.error();
+  assert.equal(img.attrs.get("data-media-state"), "unavailable");
+  assert.equal(root.note.attrs.has("hidden"), false);
+});

@@ -277,3 +277,38 @@ func TestService_SweepContinuesPastAFailedObject(t *testing.T) {
 	assert.Equal(t, 1, removed)
 	assert.Equal(t, 0, blobs.Len())
 }
+
+func TestSafeContentTypeAndInline(t *testing.T) {
+	tests := []struct {
+		kind   Kind
+		in     string
+		want   string
+		inline bool
+	}{
+		{KindAudio, "audio/mpeg", "audio/mpeg", true},
+		{KindAudio, "Audio/WAV", "audio/wav", true},
+		{KindAudio, "text/html", "application/octet-stream", false},
+		{KindAudio, "image/png", "application/octet-stream", false},
+		{KindImage, "image/png", "image/png", true},
+		{KindImage, "image/webp", "image/webp", true},
+		{KindImage, "image/svg+xml", "application/octet-stream", false},
+		{KindImage, "text/html", "application/octet-stream", false},
+		{KindImage, "", "application/octet-stream", false},
+		{KindVideo, "video/mp4", "video/mp4", true},
+		{KindVideo, "application/javascript", "application/octet-stream", false},
+	}
+	for _, tt := range tests {
+		got := SafeContentType(tt.kind, tt.in)
+		assert.Equal(t, tt.want, got, "SafeContentType(%s, %q)", tt.kind, tt.in)
+		assert.Equal(t, tt.inline, Inline(got), "Inline(%q)", got)
+	}
+	assert.False(t, Inline("text/html"), "a type that slipped into storage is still not served inline")
+}
+
+func TestService_StoresOnlySafeContentTypes(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	object, err := svc.Put(context.Background(), Descriptor{Kind: KindImage, Source: SourceAudit, ContentType: "text/html; charset=utf-8"}, strings.NewReader("<script>"))
+	require.NoError(t, err)
+	assert.Equal(t, "application/octet-stream", object.ContentType)
+	assert.True(t, strings.HasSuffix(object.StorageKey, ".bin"), "key = %q", object.StorageKey)
+}

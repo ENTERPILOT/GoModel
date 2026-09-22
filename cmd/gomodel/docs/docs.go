@@ -1318,7 +1318,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/core.GatewayError"
                         }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             }
         },
         "/admin/model-pricing-overrides": {

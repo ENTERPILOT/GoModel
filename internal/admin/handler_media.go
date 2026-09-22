@@ -27,6 +27,7 @@ func WithMediaStore(store *mediastore.Service) Option {
 // @Description  are honored so browser players can seek. An object outside the
 // @Description  caller's user-path scope is reported as missing.
 // @Tags         admin
+// @Security     BearerAuth
 // @Produce      octet-stream
 // @Param        id   path      string  true  "Media object id"
 // @Success      200  {file}    file
@@ -66,9 +67,17 @@ func (h *Handler) Media(c *echo.Context) error {
 
 	header := c.Response().Header()
 	header.Set("Content-Type", object.ContentType)
-	header.Set("Content-Disposition", "inline")
+	// Only passive audio and raster image types render inline; anything
+	// else downloads, so a stored object can never run as a page.
+	if mediastore.Inline(object.ContentType) {
+		header.Set("Content-Disposition", "inline")
+	} else {
+		header.Set("Content-Disposition", `attachment; filename="`+object.ID+`"`)
+	}
 	header.Set("X-Content-Type-Options", "nosniff")
-	header.Set("Cache-Control", "private, max-age=3600")
+	// The response is scoped to the caller, so a shared browser profile
+	// must not replay it for another user.
+	header.Set("Cache-Control", "private, no-store")
 	// ServeContent adds Accept-Ranges, serves byte ranges as 206, and keeps
 	// the Content-Type set above because no name is given to sniff from.
 	http.ServeContent(c.Response(), c.Request(), "", object.CreatedAt, reader)

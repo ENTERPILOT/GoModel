@@ -44,6 +44,11 @@ export function loadMedia(root, { fetchMedia, createObjectURL, revokeObjectURL }
     download.then(
       (url) => {
         if (disposed || !url) return;
+        if (node.tagName !== "A" && typeof node.addEventListener === "function") {
+          // A download can succeed and still not decode (corrupt or
+          // mislabeled bytes); that is unavailable too.
+          node.addEventListener("error", () => markUnavailable(node), { once: true });
+        }
         node.setAttribute(node.tagName === "A" ? "href" : "src", url);
         node.setAttribute("data-media-state", "loaded");
       },

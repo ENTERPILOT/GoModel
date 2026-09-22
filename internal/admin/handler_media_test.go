@@ -123,3 +123,27 @@ func TestMedia_ObjectWithoutUserPathIsGlobalOnly(t *testing.T) {
 	require.NoError(t, h.Media(c))
 	assert.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
 }
+
+func TestMedia_NoBrowserCacheAndAttachmentForUntrustedTypes(t *testing.T) {
+	store := newMediaTestStore(t)
+	audio := storeTestMedia(t, store, "/team/a", "synthetic-audio")
+	html, err := store.Put(context.Background(), mediastore.Descriptor{
+		Kind:        mediastore.KindImage,
+		Source:      mediastore.SourceAudit,
+		ContentType: "text/html",
+	}, strings.NewReader("<script>alert(1)</script>"))
+	require.NoError(t, err)
+	h := NewHandler(nil, nil, WithMediaStore(store))
+
+	c, rec := echotest.Get(t, "/admin/media/"+audio.ID, echotest.WithPathValue("id", audio.ID))
+	require.NoError(t, h.Media(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "private, no-store", rec.Header().Get("Cache-Control"))
+	assert.Equal(t, "inline", rec.Header().Get("Content-Disposition"))
+
+	c, rec = echotest.Get(t, "/admin/media/"+html.ID, echotest.WithPathValue("id", html.ID))
+	require.NoError(t, h.Media(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "application/octet-stream", rec.Header().Get("Content-Type"), "a client-declared active type is never stored as such")
+	assert.Equal(t, `attachment; filename="`+html.ID+`"`, rec.Header().Get("Content-Disposition"))
+}

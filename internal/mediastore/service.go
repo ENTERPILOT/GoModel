@@ -83,7 +83,7 @@ func (s *Service) Begin(ctx context.Context, d Descriptor) (*Upload, error) {
 		ID:          newObjectID(),
 		Kind:        d.Kind,
 		Source:      d.Source,
-		ContentType: bareContentType(d.ContentType),
+		ContentType: SafeContentType(d.Kind, bareContentType(d.ContentType)),
 		RequestID:   strings.TrimSpace(d.RequestID),
 		UserPath:    strings.TrimSpace(d.UserPath),
 		CreatedAt:   now,

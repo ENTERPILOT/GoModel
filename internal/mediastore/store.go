@@ -110,3 +110,47 @@ func normalizeObject(object *Object) (*Object, error) {
 	}
 	return &normalized, nil
 }
+
+// inlineImageTypes are the raster image types a browser renders passively.
+// SVG is deliberately absent: it can carry scripts.
+var inlineImageTypes = map[string]bool{
+	"image/png":  true,
+	"image/jpeg": true,
+	"image/gif":  true,
+	"image/webp": true,
+	"image/bmp":  true,
+	"image/avif": true,
+}
+
+// SafeContentType returns the content type an object of kind may be stored
+// under. A type is trusted only when it matches the kind (audio/* for audio,
+// a passive raster type for images, video/* for video); anything else,
+// including a client-declared text/html on an upload, is stored as
+// application/octet-stream so it can never be served as active content.
+func SafeContentType(kind Kind, contentType string) string {
+	contentType = strings.ToLower(strings.TrimSpace(contentType))
+	switch kind {
+	case KindAudio:
+		if strings.HasPrefix(contentType, "audio/") {
+			return contentType
+		}
+	case KindImage:
+		if inlineImageTypes[contentType] {
+			return contentType
+		}
+	case KindVideo:
+		if strings.HasPrefix(contentType, "video/") {
+			return contentType
+		}
+	}
+	return "application/octet-stream"
+}
+
+// Inline reports whether a stored content type is safe to serve inline. It
+// is the same allowlist SafeContentType applies, so an object stored before
+// a rule changed is still judged at serve time.
+func Inline(contentType string) bool {
+	return contentType != "application/octet-stream" && (SafeContentType(KindAudio, contentType) == contentType ||
+		SafeContentType(KindImage, contentType) == contentType ||
+		SafeContentType(KindVideo, contentType) == contentType)
+}

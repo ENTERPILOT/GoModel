@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -156,9 +157,28 @@ func (w *fileWriter) Commit() error {
 		w.closed = true
 		return fmt.Errorf("publish blob: %w", err)
 	}
-	w.committed = true
 	w.closed = true
+	// The rename is only durable once the directory entry reaches disk;
+	// without this a power loss could keep the record and lose the file.
+	if err := syncDir(filepath.Dir(w.target)); err != nil {
+		return fmt.Errorf("sync blob directory: %w", err)
+	}
+	w.committed = true
 	return nil
+}
+
+// syncDir flushes a directory's entries to disk. Windows has no directory
+// fsync, and its rename is already durable in the way that matters here.
+func syncDir(dir string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = d.Close() }()
+	return d.Sync()
 }
 
 // Close discards an uncommitted blob.
