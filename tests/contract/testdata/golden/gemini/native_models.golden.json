@@ -473,6 +473,48 @@
     },
     {
       "created": 0,
+      "id": "gemini-omni-1.1-flash",
+      "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
+        "categories": [
+          "text_generation"
+        ],
+        "context_window": 131072,
+        "description": "Gemini Omni 1.1 Flash",
+        "display_name": "Gemini Omni 1.1 Flash",
+        "max_output_tokens": 65536,
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.5-transcribe",
+      "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
+        "categories": [
+          "text_generation"
+        ],
+        "context_window": 98304,
+        "description": "Gemini 3.5 Transcribe",
+        "display_name": "Gemini 3.5 Transcribe",
+        "max_output_tokens": 32768,
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
       "id": "gemini-3.6-flash",
       "metadata": {
         "capabilities": {
@@ -515,6 +557,27 @@
     },
     {
       "created": 0,
+      "id": "gemini-3.8-flash",
+      "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
+        "categories": [
+          "text_generation"
+        ],
+        "context_window": 1048576,
+        "description": "Gemini 3.8 Flash",
+        "display_name": "Gemini 3.8 Flash",
+        "max_output_tokens": 65536,
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
       "id": "gemini-3.1-flash-tts-preview",
       "metadata": {
         "capabilities": {
@@ -527,27 +590,6 @@
         "description": "Gemini 3.1 Flash TTS Preview",
         "display_name": "Gemini 3.1 Flash TTS Preview",
         "max_output_tokens": 16384,
-        "modes": [
-          "chat"
-        ]
-      },
-      "object": "model",
-      "owned_by": "google"
-    },
-    {
-      "created": 0,
-      "id": "gemini-robotics-er-1.6-preview",
-      "metadata": {
-        "capabilities": {
-          "reasoning": true
-        },
-        "categories": [
-          "text_generation"
-        ],
-        "context_window": 131072,
-        "description": "Gemini Robotics-ER 1.6 Preview",
-        "display_name": "Gemini Robotics-ER 1.6 Preview",
-        "max_output_tokens": 65536,
         "modes": [
           "chat"
         ]

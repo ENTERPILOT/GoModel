@@ -45,8 +45,13 @@ type modelInfo struct {
 	} `json:"capabilities"`
 }
 
-// priceUnitsPerUSD is how many xAI price units make one US dollar.
-const priceUnitsPerUSD = 10_000_000_000
+// priceUnitsPerUSD is how many xAI price units make one US dollar, and
+// priceUnitsPerUSDPerMtok how many a per-token unit price carries per
+// million tokens (12500 per token is $1.25 per million).
+const (
+	priceUnitsPerUSD        = 10_000_000_000
+	priceUnitsPerUSDPerMtok = priceUnitsPerUSD / 1_000_000
+)
 
 // ListModels returns xAI's model listing, keeping the context window, prices
 // (including the long-context tier) and reasoning support each entry reports.
@@ -130,12 +135,13 @@ func unitsToUSD(units *int64) *float64 {
 	return &usd
 }
 
+// unitsToUSDPerMtok divides once so round unit prices stay round dollars
+// (2000 → 0.2, not 0.19999999999999998).
 func unitsToUSDPerMtok(units *int64) *float64 {
-	usd := unitsToUSD(units)
-	if usd == nil {
+	if units == nil || *units < 0 {
 		return nil
 	}
-	perMtok := *usd * 1_000_000
+	perMtok := float64(*units) / priceUnitsPerUSDPerMtok
 	return &perMtok
 }
 
