@@ -14225,6 +14225,9 @@
       "core.ModelPricingTier": {
         "type": "object",
         "properties": {
+          "cached_input_per_mtok": {
+            "type": "number"
+          },
           "input_per_mtok": {
             "type": "number"
           },
@@ -15280,7 +15283,8 @@
               {
                 "$ref": "#/components/schemas/core.ModelMetadata"
               }
-            ]
+            ],
+            "nullable": true
           },
           "config": {
             "description": "Config is the config.yaml metadata override.",
@@ -15288,7 +15292,8 @@
               {
                 "$ref": "#/components/schemas/core.ModelMetadata"
               }
-            ]
+            ],
+            "nullable": true
           },
           "effective": {
             "description": "Effective is the merged metadata, as listed by /admin/models.",
@@ -15304,7 +15309,8 @@
               {
                 "$ref": "#/components/schemas/core.ModelMetadata"
               }
-            ]
+            ],
+            "nullable": true
           },
           "selector": {
             "type": "string"

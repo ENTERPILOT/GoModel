@@ -30,14 +30,15 @@ type modelInfo struct {
 	Aliases       []string `json:"aliases"`
 	ContextLength int      `json:"context_length"`
 
-	PromptTextTokenPrice                *int64 `json:"prompt_text_token_price"`
-	CachedPromptTextTokenPrice          *int64 `json:"cached_prompt_text_token_price"`
-	PromptImageTokenPrice               *int64 `json:"prompt_image_token_price"`
-	CompletionTextTokenPrice            *int64 `json:"completion_text_token_price"`
-	PromptTextTokenPriceLongContext     *int64 `json:"prompt_text_token_price_long_context"`
-	CompletionTextTokenPriceLongContext *int64 `json:"completion_text_token_price_long_context"`
-	LongContextThreshold                *int64 `json:"long_context_threshold"`
-	ImagePrice                          *int64 `json:"image_price"`
+	PromptTextTokenPrice                  *int64 `json:"prompt_text_token_price"`
+	CachedPromptTextTokenPrice            *int64 `json:"cached_prompt_text_token_price"`
+	PromptImageTokenPrice                 *int64 `json:"prompt_image_token_price"`
+	CompletionTextTokenPrice              *int64 `json:"completion_text_token_price"`
+	PromptTextTokenPriceLongContext       *int64 `json:"prompt_text_token_price_long_context"`
+	CachedPromptTextTokenPriceLongContext *int64 `json:"cached_prompt_text_token_price_long_context"`
+	CompletionTextTokenPriceLongContext   *int64 `json:"completion_text_token_price_long_context"`
+	LongContextThreshold                  *int64 `json:"long_context_threshold"`
+	ImagePrice                            *int64 `json:"image_price"`
 
 	Capabilities struct {
 		ReasoningEffort []string `json:"reasoning_effort"`
@@ -160,14 +161,15 @@ func (m modelInfo) textPricing() *core.ModelPricing {
 		return nil
 	}
 	longInput := unitsToUSDPerMtok(m.PromptTextTokenPriceLongContext)
+	longCached := unitsToUSDPerMtok(m.CachedPromptTextTokenPriceLongContext)
 	longOutput := unitsToUSDPerMtok(m.CompletionTextTokenPriceLongContext)
 	if m.LongContextThreshold != nil && *m.LongContextThreshold > 0 && m.ContextLength > int(*m.LongContextThreshold) &&
-		(longInput != nil || longOutput != nil) {
+		(longInput != nil || longCached != nil || longOutput != nil) {
 		threshold := float64(*m.LongContextThreshold)
 		limit := float64(m.ContextLength)
 		pricing.Tiers = []core.ModelPricingTier{
-			{UpToTokens: &threshold, InputPerMtok: pricing.InputPerMtok, OutputPerMtok: pricing.OutputPerMtok},
-			{UpToTokens: &limit, InputPerMtok: longInput, OutputPerMtok: longOutput},
+			{UpToTokens: &threshold, InputPerMtok: pricing.InputPerMtok, CachedInputPerMtok: pricing.CachedInputPerMtok, OutputPerMtok: pricing.OutputPerMtok},
+			{UpToTokens: &limit, InputPerMtok: longInput, CachedInputPerMtok: longCached, OutputPerMtok: longOutput},
 		}
 	}
 	return pricing

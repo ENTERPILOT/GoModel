@@ -65,13 +65,12 @@
           {#if section.chips}
             <ul class="model-details-chips">
               {#each section.chips as chip (chip.label)}
-                <li
-                  class="provider-badge model-details-chip"
-                  class:is-off={!chip.enabled}
-                  title={[chip.enabled ? m.models_details_supported() : m.models_details_unsupported(), chip.source]
-                    .filter(Boolean)
-                    .join(" · ")}
-                >{chip.label}</li>
+                {@const chipStatus = [chip.enabled ? m.models_details_supported() : m.models_details_unsupported(), chip.source]
+                  .filter(Boolean)
+                  .join(" · ")}
+                <li class="provider-badge model-details-chip" class:is-off={!chip.enabled} title={chipStatus}>
+                  {chip.label}<span class="model-details-sr-only">, {chipStatus}</span>
+                </li>
               {/each}
             </ul>
           {:else}
@@ -79,7 +78,7 @@
               {#each section.items as field (field.label)}
                 <dt>{field.label}</dt>
                 <dd class:mono={field.mono} title={field.hint || undefined}>
-                  {field.value}{#if field.hint}<span class="model-details-hint" aria-hidden="true">*</span>{/if}
+                  {field.value}{#if field.hint}<span class="model-details-hint" aria-hidden="true">*</span><span class="model-details-sr-only">, {field.hint}</span>{/if}
                   {#if field.source}
                     <span class="model-details-source">({field.source})</span>
                   {/if}
@@ -175,6 +174,20 @@
   .model-details-chip.is-off {
     opacity: 0.55;
     border-style: dashed;
+  }
+
+  /* Text for assistive technology only: the chip's status and a price's
+     time-window hint are otherwise carried by non-focusable title tooltips. */
+  .model-details-sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   @media (max-width: 768px) {

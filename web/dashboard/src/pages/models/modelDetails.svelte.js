@@ -43,7 +43,9 @@ class ModelDetailsState {
     const provider = row && row.provider_name;
     const model = row && row.model && row.model.id;
     if (!key || !provider || !model) return;
-    if (this.#layers[key] || this.#controllers.has(key)) return;
+    // A failed load is not cached: reopening the row retries it.
+    const existing = this.#layers[key];
+    if ((existing && existing.status !== "error") || this.#controllers.has(key)) return;
 
     const controller = new AbortController();
     this.#controllers.set(key, controller);
@@ -56,7 +58,7 @@ class ModelDetailsState {
         signal: controller.signal,
       });
       if (result.stale || controller.signal.aborted || result.status === 401) {
-        this.#dropEntry(key);
+        this.#dropEntry(key, controller);
         return;
       }
       if (result.ok && result.data && typeof result.data === "object") {
@@ -66,7 +68,7 @@ class ModelDetailsState {
       }
     } catch (e) {
       if (isAbortError(e)) {
-        this.#dropEntry(key);
+        this.#dropEntry(key, controller);
         return;
       }
       console.error("Failed to fetch model metadata:", e);
@@ -90,8 +92,11 @@ class ModelDetailsState {
     this.#layers = { ...this.#layers, [key]: entry };
   }
 
-  #dropEntry(key) {
-    if (!this.#layers[key]) return;
+  // dropEntry forgets a row's entry, but only on behalf of the request that
+  // still owns the key: an aborted load must not remove the entry a newer
+  // load for the same row has since written.
+  #dropEntry(key, controller) {
+    if (!this.#layers[key] || this.#controllers.get(key) !== controller) return;
     const next = { ...this.#layers };
     delete next[key];
     this.#layers = next;

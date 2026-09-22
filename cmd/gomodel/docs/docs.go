@@ -10437,6 +10437,9 @@ const docTemplate = `{
         "core.ModelPricingTier": {
             "type": "object",
             "properties": {
+                "cached_input_per_mtok": {
+                    "type": "number"
+                },
                 "input_per_mtok": {
                     "type": "number"
                 },
@@ -11456,7 +11459,8 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/core.ModelMetadata"
                         }
-                    ]
+                    ],
+                    "x-nullable": true
                 },
                 "config": {
                     "description": "Config is the config.yaml metadata override.",
@@ -11464,7 +11468,8 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/core.ModelMetadata"
                         }
-                    ]
+                    ],
+                    "x-nullable": true
                 },
                 "effective": {
                     "description": "Effective is the merged metadata, as listed by /admin/models.",
@@ -11480,7 +11485,8 @@ const docTemplate = `{
                         {
                             "$ref": "#/definitions/core.ModelMetadata"
                         }
-                    ]
+                    ],
+                    "x-nullable": true
                 },
                 "selector": {
                     "type": "string"

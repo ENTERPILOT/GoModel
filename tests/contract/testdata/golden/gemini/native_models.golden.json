@@ -4,9 +4,16 @@
       "created": 0,
       "id": "gemini-2.5-flash",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation"
         ],
+        "context_window": 1048576,
+        "description": "Stable version of Gemini 2.5 Flash, our mid-size multimodal model that supports up to 1 million tokens, released in June of 2025.",
+        "display_name": "Gemini 2.5 Flash",
+        "max_output_tokens": 65536,
         "modes": [
           "chat"
         ]
@@ -18,9 +25,16 @@
       "created": 0,
       "id": "gemini-2.5-pro",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation"
         ],
+        "context_window": 1048576,
+        "description": "Stable release (June 17th, 2025) of Gemini 2.5 Pro",
+        "display_name": "Gemini 2.5 Pro",
+        "max_output_tokens": 65536,
         "modes": [
           "chat"
         ]
@@ -35,6 +49,10 @@
         "categories": [
           "text_generation"
         ],
+        "context_window": 8192,
+        "description": "Gemini 2.5 Flash Preview TTS",
+        "display_name": "Gemini 2.5 Flash Preview TTS",
+        "max_output_tokens": 16384,
         "modes": [
           "chat"
         ]
@@ -49,6 +67,10 @@
         "categories": [
           "text_generation"
         ],
+        "context_window": 8192,
+        "description": "Gemini 2.5 Pro Preview TTS",
+        "display_name": "Gemini 2.5 Pro Preview TTS",
+        "max_output_tokens": 16384,
         "modes": [
           "chat"
         ]
@@ -60,9 +82,16 @@
       "created": 0,
       "id": "gemini-flash-latest",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation"
         ],
+        "context_window": 1048576,
+        "description": "Latest release of Gemini Flash",
+        "display_name": "Gemini Flash Latest",
+        "max_output_tokens": 65536,
         "modes": [
           "chat"
         ]
@@ -74,9 +103,16 @@
       "created": 0,
       "id": "gemini-flash-lite-latest",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation"
         ],
+        "context_window": 1048576,
+        "description": "Latest release of Gemini Flash-Lite",
+        "display_name": "Gemini Flash-Lite Latest",
+        "max_output_tokens": 65536,
         "modes": [
           "chat"
         ]
@@ -88,9 +124,16 @@
       "created": 0,
       "id": "gemini-pro-latest",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation"
         ],
+        "context_window": 1048576,
+        "description": "Latest release of Gemini Pro",
+        "display_name": "Gemini Pro Latest",
+        "max_output_tokens": 65536,
         "modes": [
           "chat"
         ]
@@ -102,9 +145,16 @@
       "created": 0,
       "id": "gemini-2.5-flash-lite",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation"
         ],
+        "context_window": 1048576,
+        "description": "Stable version of Gemini 2.5 Flash-Lite, released in July of 2025",
+        "display_name": "Gemini 2.5 Flash-Lite",
+        "max_output_tokens": 65536,
         "modes": [
           "chat"
         ]
@@ -120,6 +170,10 @@
           "text_generation",
           "image"
         ],
+        "context_window": 32768,
+        "description": "Gemini 2.5 Flash Preview Image",
+        "display_name": "Nano Banana",
+        "max_output_tokens": 32768,
         "modes": [
           "chat",
           "image_generation",
@@ -133,9 +187,16 @@
       "created": 0,
       "id": "gemini-3-flash-preview",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation"
         ],
+        "context_window": 1048576,
+        "description": "Gemini 3 Flash Preview",
+        "display_name": "Gemini 3 Flash Preview",
+        "max_output_tokens": 65536,
         "modes": [
           "chat"
         ]
@@ -147,9 +208,16 @@
       "created": 0,
       "id": "gemini-3.1-pro-preview",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation"
         ],
+        "context_window": 1048576,
+        "description": "Gemini 3.1 Pro Preview",
+        "display_name": "Gemini 3.1 Pro Preview",
+        "max_output_tokens": 65536,
         "modes": [
           "chat"
         ]
@@ -161,9 +229,16 @@
       "created": 0,
       "id": "gemini-3.1-pro-preview-customtools",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation"
         ],
+        "context_window": 1048576,
+        "description": "Gemini 3.1 Pro Preview optimized for custom tool usage",
+        "display_name": "Gemini 3.1 Pro Preview Custom Tools",
+        "max_output_tokens": 65536,
         "modes": [
           "chat"
         ]
@@ -175,9 +250,16 @@
       "created": 0,
       "id": "gemini-3.1-flash-lite-preview",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation"
         ],
+        "context_window": 1048576,
+        "description": "Gemini 3.1 Flash Lite Preview",
+        "display_name": "Gemini 3.1 Flash Lite Preview",
+        "max_output_tokens": 65536,
         "modes": [
           "chat"
         ]
@@ -189,9 +271,16 @@
       "created": 0,
       "id": "gemini-3.1-flash-lite",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation"
         ],
+        "context_window": 1048576,
+        "description": "Gemini 3.1 Flash Lite",
+        "display_name": "Gemini 3.1 Flash Lite",
+        "max_output_tokens": 65536,
         "modes": [
           "chat"
         ]
@@ -203,10 +292,17 @@
       "created": 0,
       "id": "gemini-3-pro-image-preview",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation",
           "image"
         ],
+        "context_window": 131072,
+        "description": "Gemini 3 Pro Image Preview",
+        "display_name": "Nano Banana Pro",
+        "max_output_tokens": 32768,
         "modes": [
           "chat",
           "image_generation",
@@ -220,10 +316,17 @@
       "created": 0,
       "id": "gemini-3-pro-image",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation",
           "image"
         ],
+        "context_window": 131072,
+        "description": "Gemini 3 Pro Image",
+        "display_name": "Nano Banana Pro",
+        "max_output_tokens": 32768,
         "modes": [
           "chat",
           "image_generation",
@@ -237,10 +340,17 @@
       "created": 0,
       "id": "gemini-3.1-flash-image-preview",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation",
           "image"
         ],
+        "context_window": 65536,
+        "description": "Gemini 3.1 Flash Image Preview.",
+        "display_name": "Nano Banana 2",
+        "max_output_tokens": 65536,
         "modes": [
           "chat",
           "image_generation",
@@ -254,10 +364,17 @@
       "created": 0,
       "id": "gemini-3.1-flash-image",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation",
           "image"
         ],
+        "context_window": 65536,
+        "description": "Gemini 3.1 Flash Image.",
+        "display_name": "Nano Banana 2",
+        "max_output_tokens": 65536,
         "modes": [
           "chat",
           "image_generation",
@@ -271,10 +388,17 @@
       "created": 0,
       "id": "gemini-3.1-flash-lite-image",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation",
           "image"
         ],
+        "context_window": 65536,
+        "description": "Gemini 3.1 Flash Lite Image.",
+        "display_name": "Nano Banana 2 Lite",
+        "max_output_tokens": 65536,
         "modes": [
           "chat",
           "image_generation",
@@ -288,9 +412,16 @@
       "created": 0,
       "id": "gemini-3.5-flash",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation"
         ],
+        "context_window": 1048576,
+        "description": "Gemini 3.5 Flash",
+        "display_name": "Gemini 3.5 Flash",
+        "max_output_tokens": 65536,
         "modes": [
           "chat"
         ]
@@ -302,9 +433,16 @@
       "created": 0,
       "id": "gemini-3.5-flash-lite",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation"
         ],
+        "context_window": 1048576,
+        "description": "Gemini 3.5 Flash Lite",
+        "display_name": "Gemini 3.5 Flash Lite",
+        "max_output_tokens": 65536,
         "modes": [
           "chat"
         ]
@@ -316,9 +454,16 @@
       "created": 0,
       "id": "gemini-omni-flash-preview",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation"
         ],
+        "context_window": 131072,
+        "description": "Gemini Omni Flash Preview",
+        "display_name": "Gemini Omni Flash Preview",
+        "max_output_tokens": 65536,
         "modes": [
           "chat"
         ]
@@ -330,9 +475,16 @@
       "created": 0,
       "id": "gemini-3.6-flash",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation"
         ],
+        "context_window": 1048576,
+        "description": "Gemini 3.6 Flash",
+        "display_name": "Gemini 3.6 Flash",
+        "max_output_tokens": 65536,
         "modes": [
           "chat"
         ]
@@ -344,9 +496,16 @@
       "created": 0,
       "id": "gemini-3.7-flash",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation"
         ],
+        "context_window": 1048576,
+        "description": "Gemini 3.7 Flash",
+        "display_name": "Gemini 3.7 Flash",
+        "max_output_tokens": 65536,
         "modes": [
           "chat"
         ]
@@ -358,9 +517,16 @@
       "created": 0,
       "id": "gemini-3.1-flash-tts-preview",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation"
         ],
+        "context_window": 8192,
+        "description": "Gemini 3.1 Flash TTS Preview",
+        "display_name": "Gemini 3.1 Flash TTS Preview",
+        "max_output_tokens": 16384,
         "modes": [
           "chat"
         ]
@@ -372,9 +538,16 @@
       "created": 0,
       "id": "gemini-robotics-er-1.6-preview",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation"
         ],
+        "context_window": 131072,
+        "description": "Gemini Robotics-ER 1.6 Preview",
+        "display_name": "Gemini Robotics-ER 1.6 Preview",
+        "max_output_tokens": 65536,
         "modes": [
           "chat"
         ]
@@ -386,9 +559,16 @@
       "created": 0,
       "id": "gemini-robotics-er-2-preview",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation"
         ],
+        "context_window": 131072,
+        "description": "Gemini Robotics-ER 2 Preview",
+        "display_name": "Gemini Robotics-ER 2 Preview",
+        "max_output_tokens": 65536,
         "modes": [
           "chat"
         ]
@@ -400,9 +580,16 @@
       "created": 0,
       "id": "gemini-2.5-computer-use-preview-10-2025",
       "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
         "categories": [
           "text_generation"
         ],
+        "context_window": 131072,
+        "description": "Gemini 2.5 Computer Use Preview 10-2025",
+        "display_name": "Gemini 2.5 Computer Use Preview 10-2025",
+        "max_output_tokens": 65536,
         "modes": [
           "chat"
         ]
@@ -417,6 +604,9 @@
         "categories": [
           "embedding"
         ],
+        "context_window": 2048,
+        "description": "Obtain a distributed representation of a text.",
+        "display_name": "Gemini Embedding 001",
         "modes": [
           "embedding"
         ]
@@ -431,6 +621,9 @@
         "categories": [
           "embedding"
         ],
+        "context_window": 8192,
+        "description": "Obtain a distributed representation of multimodal content.",
+        "display_name": "Gemini Embedding 2 Preview",
         "modes": [
           "embedding"
         ]
@@ -445,6 +638,9 @@
         "categories": [
           "embedding"
         ],
+        "context_window": 8192,
+        "description": "Obtain a distributed representation of multimodal content.",
+        "display_name": "Gemini Embedding 2",
         "modes": [
           "embedding"
         ]

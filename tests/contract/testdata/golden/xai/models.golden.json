@@ -3,72 +3,186 @@
     {
       "created": 0,
       "id": "grok-2-vision-1212",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat",
+          "responses"
+        ]
+      },
       "object": "model",
       "owned_by": "xai"
     },
     {
       "created": 0,
       "id": "grok-3",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat",
+          "responses"
+        ]
+      },
       "object": "model",
       "owned_by": "xai"
     },
     {
       "created": 0,
       "id": "grok-3-mini",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat",
+          "responses"
+        ]
+      },
       "object": "model",
       "owned_by": "xai"
     },
     {
       "created": 0,
       "id": "grok-4-0709",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat",
+          "responses"
+        ]
+      },
       "object": "model",
       "owned_by": "xai"
     },
     {
       "created": 0,
       "id": "grok-4-1-fast-non-reasoning",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat",
+          "responses"
+        ]
+      },
       "object": "model",
       "owned_by": "xai"
     },
     {
       "created": 0,
       "id": "grok-4-1-fast-reasoning",
+      "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat",
+          "responses"
+        ]
+      },
       "object": "model",
       "owned_by": "xai"
     },
     {
       "created": 0,
       "id": "grok-4-fast-non-reasoning",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat",
+          "responses"
+        ]
+      },
       "object": "model",
       "owned_by": "xai"
     },
     {
       "created": 0,
       "id": "grok-4-fast-reasoning",
+      "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat",
+          "responses"
+        ]
+      },
       "object": "model",
       "owned_by": "xai"
     },
     {
       "created": 0,
       "id": "grok-code-fast-1",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat",
+          "responses"
+        ]
+      },
       "object": "model",
       "owned_by": "xai"
     },
     {
       "created": 0,
       "id": "grok-2-image-1212",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat",
+          "responses"
+        ]
+      },
       "object": "model",
       "owned_by": "xai"
     },
     {
       "created": 0,
       "id": "grok-4.5",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat",
+          "responses"
+        ]
+      },
       "object": "model",
       "owned_by": "xai"
     },
     {
       "created": 0,
       "id": "grok-4.6",
+      "metadata": {
+        "categories": [
+          "text_generation"
+        ],
+        "modes": [
+          "chat",
+          "responses"
+        ]
+      },
       "object": "model",
       "owned_by": "xai"
     }

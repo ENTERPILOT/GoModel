@@ -13,11 +13,11 @@ type ModelMetadataLayers struct {
 	// Effective is the merged metadata, as listed by /admin/models.
 	Effective *core.ModelMetadata `json:"effective"`
 	// Provider is what the provider reported in its own model listing.
-	Provider *core.ModelMetadata `json:"provider"`
+	Provider *core.ModelMetadata `json:"provider" extensions:"x-nullable"`
 	// Catalog is the model list (ai-model-list) entry.
-	Catalog *core.ModelMetadata `json:"catalog"`
+	Catalog *core.ModelMetadata `json:"catalog" extensions:"x-nullable"`
 	// Config is the config.yaml metadata override.
-	Config *core.ModelMetadata `json:"config"`
+	Config *core.ModelMetadata `json:"config" extensions:"x-nullable"`
 	// Sources names the layer that supplied each effective field
 	// (see modeldata.MetadataSources).
 	Sources map[string]string `json:"sources"`

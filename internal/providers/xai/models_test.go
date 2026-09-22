@@ -68,9 +68,13 @@ func TestListModels_KeepsXAIMetadata(t *testing.T) {
 	require.NotNil(t, pricing.Tiers[0].UpToTokens)
 	assert.Equal(t, float64(200000), *pricing.Tiers[0].UpToTokens)
 	assert.InDelta(t, 2.0, *pricing.Tiers[0].InputPerMtok, 1e-9)
+	require.NotNil(t, pricing.Tiers[0].CachedInputPerMtok)
+	assert.InDelta(t, 0.3, *pricing.Tiers[0].CachedInputPerMtok, 1e-9)
 	require.NotNil(t, pricing.Tiers[1].UpToTokens)
 	assert.Equal(t, float64(500000), *pricing.Tiers[1].UpToTokens)
 	assert.InDelta(t, 4.0, *pricing.Tiers[1].InputPerMtok, 1e-9)
+	require.NotNil(t, pricing.Tiers[1].CachedInputPerMtok, "the long-context cached rate rides on the second tier")
+	assert.InDelta(t, 0.6, *pricing.Tiers[1].CachedInputPerMtok, 1e-9)
 	assert.InDelta(t, 12.0, *pricing.Tiers[1].OutputPerMtok, 1e-9)
 
 	plain := byID["grok-4.20-0309-non-reasoning"]
@@ -78,7 +82,8 @@ func TestListModels_KeepsXAIMetadata(t *testing.T) {
 	assert.Nil(t, plain.Metadata.Capabilities, "no reasoning effort and a zero image rate claim nothing")
 	require.NotNil(t, plain.Metadata.Pricing)
 	assert.Nil(t, plain.Metadata.Pricing.CachedInputPerMtok, "a missing rate is not reported as zero")
-	assert.Len(t, plain.Metadata.Pricing.Tiers, 2)
+	require.Len(t, plain.Metadata.Pricing.Tiers, 2)
+	assert.Nil(t, plain.Metadata.Pricing.Tiers[1].CachedInputPerMtok)
 
 	build := byID["grok-build-0.1"]
 	require.NotNil(t, build.Metadata)

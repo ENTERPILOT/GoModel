@@ -3,120 +3,200 @@
     {
       "created": 0,
       "id": "canopylabs/orpheus-v1-english",
+      "metadata": {
+        "context_window": 4000,
+        "max_output_tokens": 50000
+      },
       "object": "model",
       "owned_by": "Canopy Labs"
     },
     {
       "created": 0,
       "id": "whisper-large-v3",
+      "metadata": {
+        "context_window": 448,
+        "max_output_tokens": 448
+      },
       "object": "model",
       "owned_by": "OpenAI"
     },
     {
       "created": 0,
       "id": "moonshotai/kimi-k2-instruct",
+      "metadata": {
+        "context_window": 131072,
+        "max_output_tokens": 16384
+      },
       "object": "model",
       "owned_by": "Moonshot AI"
     },
     {
       "created": 0,
       "id": "canopylabs/orpheus-arabic-saudi",
+      "metadata": {
+        "context_window": 4000,
+        "max_output_tokens": 50000
+      },
       "object": "model",
       "owned_by": "Canopy Labs"
     },
     {
       "created": 0,
       "id": "moonshotai/kimi-k2-instruct-0905",
+      "metadata": {
+        "context_window": 262144,
+        "max_output_tokens": 16384
+      },
       "object": "model",
       "owned_by": "Moonshot AI"
     },
     {
       "created": 0,
       "id": "meta-llama/llama-4-maverick-17b-128e-instruct",
+      "metadata": {
+        "context_window": 131072,
+        "max_output_tokens": 8192
+      },
       "object": "model",
       "owned_by": "Meta"
     },
     {
       "created": 0,
       "id": "openai/gpt-oss-20b",
+      "metadata": {
+        "context_window": 131072,
+        "max_output_tokens": 65536
+      },
       "object": "model",
       "owned_by": "OpenAI"
     },
     {
       "created": 0,
       "id": "meta-llama/llama-guard-4-12b",
+      "metadata": {
+        "context_window": 131072,
+        "max_output_tokens": 1024
+      },
       "object": "model",
       "owned_by": "Meta"
     },
     {
       "created": 0,
       "id": "llama-3.1-8b-instant",
+      "metadata": {
+        "context_window": 131072,
+        "max_output_tokens": 131072
+      },
       "object": "model",
       "owned_by": "Meta"
     },
     {
       "created": 0,
       "id": "meta-llama/llama-4-scout-17b-16e-instruct",
+      "metadata": {
+        "context_window": 131072,
+        "max_output_tokens": 8192
+      },
       "object": "model",
       "owned_by": "Meta"
     },
     {
       "created": 0,
       "id": "allam-2-7b",
+      "metadata": {
+        "context_window": 4096,
+        "max_output_tokens": 4096
+      },
       "object": "model",
       "owned_by": "SDAIA"
     },
     {
       "created": 0,
       "id": "groq/compound-mini",
+      "metadata": {
+        "context_window": 131072,
+        "max_output_tokens": 8192
+      },
       "object": "model",
       "owned_by": "Groq"
     },
     {
       "created": 0,
       "id": "whisper-large-v3-turbo",
+      "metadata": {
+        "context_window": 448,
+        "max_output_tokens": 448
+      },
       "object": "model",
       "owned_by": "OpenAI"
     },
     {
       "created": 0,
       "id": "qwen/qwen3-32b",
+      "metadata": {
+        "context_window": 131072,
+        "max_output_tokens": 40960
+      },
       "object": "model",
       "owned_by": "Alibaba Cloud"
     },
     {
       "created": 0,
       "id": "meta-llama/llama-prompt-guard-2-22m",
+      "metadata": {
+        "context_window": 512,
+        "max_output_tokens": 512
+      },
       "object": "model",
       "owned_by": "Meta"
     },
     {
       "created": 0,
       "id": "openai/gpt-oss-120b",
+      "metadata": {
+        "context_window": 131072,
+        "max_output_tokens": 65536
+      },
       "object": "model",
       "owned_by": "OpenAI"
     },
     {
       "created": 0,
       "id": "groq/compound",
+      "metadata": {
+        "context_window": 131072,
+        "max_output_tokens": 8192
+      },
       "object": "model",
       "owned_by": "Groq"
     },
     {
       "created": 0,
       "id": "meta-llama/llama-prompt-guard-2-86m",
+      "metadata": {
+        "context_window": 512,
+        "max_output_tokens": 512
+      },
       "object": "model",
       "owned_by": "Meta"
     },
     {
       "created": 0,
       "id": "openai/gpt-oss-safeguard-20b",
+      "metadata": {
+        "context_window": 131072,
+        "max_output_tokens": 65536
+      },
       "object": "model",
       "owned_by": "OpenAI"
     },
     {
       "created": 0,
       "id": "llama-3.3-70b-versatile",
+      "metadata": {
+        "context_window": 131072,
+        "max_output_tokens": 32768
+      },
       "object": "model",
       "owned_by": "Meta"
     }
