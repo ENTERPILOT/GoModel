@@ -214,6 +214,15 @@ storage:
     url: "mongodb://localhost:27017"
     database: "gomodel"
 
+# Where media files go: audio and images captured for the audit log (see
+# logging.log_audio_bodies / log_image_bodies). Metadata stays in storage
+# above; only the bytes are written here. Mount a volume at the path in
+# containers, or a shared mount (EFS, S3 FUSE) when running several replicas.
+media:
+  storage:
+    type: "filesystem" # "filesystem" (default) or "memory" (lost on restart)
+    path: "data/media" # default: data/media when ./data exists, else the OS data dir
+
 logging:
   enabled: true
   log_bodies: true # WARNING: may contain sensitive data

@@ -25,6 +25,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
+	"github.com/enterpilot/gomodel/internal/mediastore"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -54,6 +55,7 @@ type App struct {
 	rateLimits          *ratelimit.Result
 	batch               *batch.Result
 	fileStore           *filestore.Result
+	media               *mediastore.Result
 	responseStore       *responsestore.Result
 	conversations       *conversationstore.Result
 	virtualModels       *virtualmodels.Result
@@ -416,6 +418,12 @@ func (a *App) logStartupInfo() {
 		slog.Info("storage configured", "type", backend.Type, "path", backend.SQLite.Path)
 	} else {
 		slog.Info("storage configured", "type", backend.Type)
+	}
+
+	if cfg.Media.Storage.Type == config.MediaStorageFilesystem {
+		slog.Info("media storage configured", "type", cfg.Media.Storage.Type, "path", cfg.Media.Storage.Path)
+	} else {
+		slog.Info("media storage configured", "type", cfg.Media.Storage.Type)
 	}
 
 	// Audit logging configuration

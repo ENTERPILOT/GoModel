@@ -78,3 +78,25 @@ func warnIfDataDirEphemeral(cfg storage.Config) {
 			"dir", dir)
 	}
 }
+
+// warnIfMediaDirEphemeral does the same for the media directory, but only
+// when something writes to it: with audio and image body logging off the
+// directory holds nothing worth keeping.
+func warnIfMediaDirEphemeral(cfg *config.Config) {
+	if cfg == nil || cfg.Media.Storage.Type != config.MediaStorageFilesystem {
+		return
+	}
+	if !cfg.Logging.Enabled || !cfg.Logging.LogBodies || (!cfg.Logging.LogAudioBodies && !cfg.Logging.LogImageBodies) {
+		return
+	}
+	dir := cfg.Media.Storage.Path
+	if dir == "" {
+		dir = config.DefaultMediaPath()
+	}
+	if platformdir.Ephemeral(dir) {
+		slog.Warn("media directory is on the container's own filesystem, not a volume: "+
+			"logged audio and images are lost when the container is recreated; "+
+			"mount a volume there or set MEDIA_STORAGE_PATH",
+			"dir", dir)
+	}
+}

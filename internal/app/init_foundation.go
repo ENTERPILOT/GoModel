@@ -15,6 +15,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/filestore"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/mediastore"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/health"
@@ -197,6 +198,21 @@ func (b *bootstrap) initStores() error {
 	}
 	app.fileStore = fileStoreResult
 	app.register(subsystemFileStore, ownedByShutdown, app.fileStore.Close)
+
+	// Initialize media storage: records on the shared storage, bytes in the
+	// configured blob backend. Audit logging stores audio and image payloads
+	// through it (docs/adr/0013-media-storage.md).
+	blobs, err := mediastore.OpenBlobStore(b.appCfg.Media.Storage.Type, b.appCfg.Media.Storage.Path)
+	if err != nil {
+		return fmt.Errorf("failed to open media storage: %w", err)
+	}
+	mediaResult, err := mediastore.New(b.ctx, app.storage, blobs)
+	if err != nil {
+		_ = blobs.Close()
+		return fmt.Errorf("failed to initialize media storage: %w", err)
+	}
+	app.media = mediaResult
+	app.register(subsystemMediaStore, ownedByShutdown, app.media.Close)
 
 	// Initialize Responses/Conversations lifecycle persistence so agentic
 	// response chains and conversation history land in storage instead of

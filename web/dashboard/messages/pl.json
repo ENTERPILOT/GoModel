@@ -299,6 +299,7 @@
   "audit_audio_not_logged": "Audio nie zostało zapisane. Ustaw LOGGING_LOG_AUDIO_BODIES=true, aby zapisywać audio możliwe do odtworzenia.",
   "audit_image_too_large": "Obraz jest zbyt duży, aby go zapisać.",
   "audit_image_not_logged": "Obraz nie został zapisany. Ustaw LOGGING_LOG_IMAGE_BODIES=true, aby zapisywać obrazy.",
+  "audit_media_unavailable": "Media niedostępne: wygasły lub zostały usunięte z magazynu mediów.",
   "audit_image_role_input": "Wejście",
   "audit_image_role_mask": "Maska",
   "audit_image_role_output": "Wynik",

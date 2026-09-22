@@ -109,14 +109,16 @@ func TestAudioSpeech_StreamedResponseCosted(t *testing.T) {
 	assert.Empty(t, captured.CostsCalculationCaveat)
 }
 
-// TestAudioSpeech_StreamedResponseAudited verifies a relayed body is still
-// captured for playback in the audit entry, which only has the bytes once the
-// relay finishes.
+// TestAudioSpeech_StreamedResponseAudited verifies a relayed body is stored
+// for playback as it streams: the audit entry references the media object
+// once the relay finishes, and the object holds every chunk.
 func TestAudioSpeech_StreamedResponseAudited(t *testing.T) {
+	media, store := newTestMediaCapturer(t)
 	svc := &audioService{
 		provider:       streamingSpeechMock([][]byte{[]byte("synthetic-"), []byte("audio")}, "audio/mpeg"),
 		logBodies:      true,
 		logAudioBodies: true,
+		media:          media,
 	}
 	c, rec, entry := newStreamingSpeechRequest(t, &flushRecordingWriter{})
 
@@ -124,8 +126,30 @@ func TestAudioSpeech_StreamedResponseAudited(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	respBody, ok := entry.Data.ResponseBody.(auditlog.AudioBodyLog)
 	require.True(t, ok, "response body not captured as audio, got %T", entry.Data.ResponseBody)
-	assert.True(t, respBody.Stored)
-	assert.Equal(t, len("synthetic-audio"), respBody.Bytes)
+	require.True(t, respBody.Stored)
+	assert.Equal(t, int64(len("synthetic-audio")), respBody.Bytes)
+	assert.Equal(t, "synthetic-audio", string(readTestMedia(t, store, respBody.MediaID)))
+}
+
+// TestAudioSpeech_StreamedResponsePlaceholderWhenAudioDisabled: with audio
+// logging off, the relay still records the audio's size and type.
+func TestAudioSpeech_StreamedResponsePlaceholderWhenAudioDisabled(t *testing.T) {
+	media, _ := newTestMediaCapturer(t)
+	svc := &audioService{
+		provider:  streamingSpeechMock([][]byte{[]byte("synthetic-"), []byte("audio")}, "audio/mpeg"),
+		logBodies: true,
+		media:     media,
+	}
+	c, rec, entry := newStreamingSpeechRequest(t, &flushRecordingWriter{})
+
+	require.NoError(t, svc.CreateSpeech(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	respBody, ok := entry.Data.ResponseBody.(auditlog.AudioBodyLog)
+	require.True(t, ok, "response body not captured as audio, got %T", entry.Data.ResponseBody)
+	assert.False(t, respBody.Stored)
+	assert.Empty(t, respBody.MediaID)
+	assert.Equal(t, int64(len("synthetic-audio")), respBody.Bytes)
+	assert.Equal(t, "audio/mpeg", respBody.ContentType)
 }
 
 // newStreamingTranscriptionRequest builds a stream=true transcription call whose
@@ -239,15 +263,15 @@ func (r *closeTrackingReadCloser) Close() error {
 	return nil
 }
 
-// TestAudioSpeech_OversizeStreamStillCosted guards the accounting seam: audit
-// capture is bounded at maxCapturedAudioResponseBytes, and usage must not be
-// bounded with it. A response past that ceiling is priced by the duration the
-// relay measured, not written off with a cost caveat.
-func TestAudioSpeech_OversizeStreamStillCosted(t *testing.T) {
-	// 200 s of 24 kHz mono 16-bit audio is 9.6 MB, past the capture ceiling.
+// TestAudioSpeech_LongStreamStoredWholeAndCosted guards two seams of a long
+// relay: usage is priced from the duration the relay measured, not written off
+// with a cost caveat, and the media store keeps the whole body since nothing
+// caps it any more.
+func TestAudioSpeech_LongStreamStoredWholeAndCosted(t *testing.T) {
+	// 200 s of 24 kHz mono 16-bit audio is 9.6 MB, past the old 8 MB audit cap.
 	const seconds = 200.0
 	wav := wavBytes(24000, 1, 16, seconds)
-	require.Greater(t, len(wav), maxCapturedAudioResponseBytes)
+	require.Greater(t, len(wav), 8*1024*1024)
 
 	chunks := make([][]byte, 0, len(wav)/(64*1024)+1)
 	for start := 0; start < len(wav); start += 64 * 1024 {
@@ -256,12 +280,14 @@ func TestAudioSpeech_OversizeStreamStillCosted(t *testing.T) {
 
 	var captured *usage.UsageEntry
 	logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
+	media, store := newTestMediaCapturer(t)
 	svc := &audioService{
 		provider:        streamingSpeechMock(chunks, "audio/wav"),
 		usageLogger:     logger,
 		pricingResolver: &mockPricingResolver{pricing: &core.ModelPricing{PerSecondOutput: new(0.00025)}},
 		logBodies:       true,
 		logAudioBodies:  true,
+		media:           media,
 	}
 	c, rec, entry := newStreamingSpeechRequest(t, &flushRecordingWriter{})
 
@@ -275,14 +301,12 @@ func TestAudioSpeech_OversizeStreamStillCosted(t *testing.T) {
 	assert.InDelta(t, seconds*0.00025, *captured.TotalCost, 1e-9)
 	assert.Empty(t, captured.CostsCalculationCaveat)
 
-	// The audit body stays bounded — that ceiling is deliberate — but it still
-	// reports what actually went past, rather than an empty payload.
 	respBody, ok := entry.Data.ResponseBody.(auditlog.AudioBodyLog)
 	require.True(t, ok, "response body not captured as audio, got %T", entry.Data.ResponseBody)
-	assert.False(t, respBody.Stored, "an oversize body was embedded in the audit entry")
-	assert.True(t, respBody.TooLarge)
-	assert.Equal(t, len(wav), respBody.Bytes)
+	require.True(t, respBody.Stored)
+	assert.Equal(t, int64(len(wav)), respBody.Bytes)
 	assert.Equal(t, "audio/wav", respBody.ContentType)
+	assert.Equal(t, wav, readTestMedia(t, store, respBody.MediaID))
 }
 
 // TestAudioTranscription_OversizeStreamStillCosted is the transcript half of the
@@ -313,7 +337,7 @@ func TestAudioTranscription_OversizeStreamStillCosted(t *testing.T) {
 
 	require.NoError(t, svc.CreateTranscription(c))
 	require.Equal(t, http.StatusOK, rec.Code)
-	require.Greater(t, rec.Body.Len(), maxCapturedAudioResponseBytes)
+	require.Greater(t, rec.Body.Len(), maxCollectedTranscriptBytes)
 
 	require.NotNil(t, captured)
 	assert.Equal(t, 7, captured.InputTokens)

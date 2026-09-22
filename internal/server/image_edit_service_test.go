@@ -306,11 +306,13 @@ func TestImageEdits_AuditsRequestMetadata(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := newImageEditMock()
 			mock.resolved = &core.ModelSelector{Provider: "openai", Model: "gpt-image-1"}
+			media, store := newTestMediaCapturer(t)
 			svc := &imageService{
 				provider:        mock,
 				logBodies:       tt.logBodies,
 				logImageInputs:  tt.logImageInputs,
 				logImageOutputs: tt.logImageOutputs,
+				media:           media,
 			}
 			c, rec := newImageEditRequest(t,
 				[][2]string{{"model", "gpt-image-1"}, {"prompt", "add a hat"}, {"size", "1024x1024"}, {"provider", "openai"}},
@@ -346,17 +348,24 @@ func TestImageEdits_AuditsRequestMetadata(t *testing.T) {
 			src, mask := reqBody.Items[0], reqBody.Items[1]
 			assert.Equal(t, "input", src.Role)
 			assert.Equal(t, "cat.png", src.Filename)
-			assert.Equal(t, len("cat-bytes"), src.Bytes)
+			assert.Equal(t, int64(len("cat-bytes")), src.Bytes)
 			assert.Equal(t, "mask", mask.Role)
 			assert.Equal(t, "mask.png", mask.Filename, "audited uploads = %+v", reqBody.Items)
 			assert.Equal(t, tt.logImageInputs, src.Stored)
 			assert.Equal(t, tt.logImageInputs, mask.Stored)
+			if tt.logImageInputs {
+				assert.Equal(t, "cat-bytes", string(readTestMedia(t, store, src.MediaID)))
+				assert.Equal(t, "mask-bytes", string(readTestMedia(t, store, mask.MediaID)))
+			}
 
 			respBody, ok := entry.Data.ResponseBody.(auditlog.ImageBodyLog)
 			require.True(t, ok, "response body = %T, want auditlog.ImageBodyLog", entry.Data.ResponseBody)
 			require.Len(t, respBody.Items, 1)
 			assert.Equal(t, "output", respBody.Items[0].Role)
 			assert.Equal(t, tt.logImageOutputs, respBody.Items[0].Stored)
+			if tt.logImageOutputs {
+				assert.Equal(t, "hi", string(readTestMedia(t, store, respBody.Items[0].MediaID)))
+			}
 			usage, _ := respBody.Meta["usage"].(map[string]any)
 			require.NotNil(t, usage)
 			assert.Equal(t, 1050, usage["total_tokens"])
