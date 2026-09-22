@@ -142,10 +142,20 @@ type anthropicDelta struct {
 
 // anthropicModelInfo represents a model in Anthropic's models API response
 type anthropicModelInfo struct {
-	ID          string `json:"id"`
-	Type        string `json:"type"`
-	CreatedAt   string `json:"created_at"`
-	DisplayName string `json:"display_name"`
+	ID             string `json:"id"`
+	Type           string `json:"type"`
+	CreatedAt      string `json:"created_at"`
+	DisplayName    string `json:"display_name"`
+	MaxInputTokens int    `json:"max_input_tokens"`
+	MaxTokens      int    `json:"max_tokens"`
+	// Capabilities is keyed by feature (image_input, pdf_input, thinking,
+	// structured_outputs, batch, ...); each value carries a "supported" flag
+	// plus feature-specific detail this adapter does not decode.
+	Capabilities map[string]anthropicCapability `json:"capabilities"`
+}
+
+type anthropicCapability struct {
+	Supported *bool `json:"supported"`
 }
 
 // anthropicModelsResponse represents the Anthropic models API response

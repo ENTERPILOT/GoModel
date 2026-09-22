@@ -285,7 +285,9 @@ func TestListModels_StampsShowCapabilities(t *testing.T) {
 			case "nomic-embed-text":
 				_, _ = w.Write([]byte(`{"capabilities":["embedding"]}`))
 			case "llama3.2":
-				_, _ = w.Write([]byte(`{"capabilities":["completion","tools"]}`))
+				_, _ = w.Write([]byte(`{"capabilities":["completion","tools","vision","thinking"],
+					"details":{"family":"llama","parameter_size":"3.2B"},
+					"model_info":{"general.architecture":"llama","llama.context_length":131072,"llama.embedding_length":3072}}`))
 			default:
 				w.WriteHeader(http.StatusInternalServerError)
 			}
@@ -309,6 +311,11 @@ func TestListModels_StampsShowCapabilities(t *testing.T) {
 	chat := byID["llama3.2"]
 	require.NotNil(t, chat.Metadata)
 	assert.Equal(t, []string{"chat"}, chat.Metadata.Modes)
+	assert.Equal(t, "llama", chat.Metadata.Family)
+	require.NotNil(t, chat.Metadata.ContextWindow)
+	assert.Equal(t, 131072, *chat.Metadata.ContextWindow)
+	assert.Equal(t, map[string]bool{"function_calling": true, "vision": true, "reasoning": true}, chat.Metadata.Capabilities)
+	assert.Nil(t, embed.Metadata.Capabilities)
 	assert.Nil(t, byID["mystery-model"].Metadata)
 
 	// Second listing: successes served from cache, the failure re-probed.

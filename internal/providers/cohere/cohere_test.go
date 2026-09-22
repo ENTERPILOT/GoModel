@@ -437,7 +437,7 @@ func TestEmbeddingsSupportsBase64(t *testing.T) {
 
 func TestListModelsFiltersUnsupportedEndpointsAndRotatesKeys(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"models":[
-		{"name":"command-a","endpoints":["chat"],"context_length":128000},
+		{"name":"command-a","endpoints":["chat"],"context_length":128000,"features":["json_mode","json_schema","tools","strict_tools","safety_modes"],"supports_vision":true},
 		{"name":"embed-v4.0","endpoints":["embed"]},
 		{"name":"cohere-transcribe-03-2026","endpoints":["transcriptions"]},
 		{"name":"rerank-v3.5","endpoints":["rerank"]},
@@ -453,6 +453,14 @@ func TestListModelsFiltersUnsupportedEndpointsAndRotatesKeys(t *testing.T) {
 		require.NotNil(t, resp.Data[0].Metadata)
 		require.NotNil(t, resp.Data[0].Metadata.ContextWindow)
 		assert.Equal(t, 128000, *resp.Data[0].Metadata.ContextWindow)
+		assert.Equal(t, map[string]bool{
+			"json_mode":         true,
+			"structured_output": true,
+			"function_calling":  true,
+			"strict_tools":      true,
+			"safety_modes":      true,
+			"vision":            true,
+		}, resp.Data[0].Metadata.Capabilities, "features map onto the catalog's keys; Cohere-only ones keep their name")
 
 		wantModes := map[string][]string{
 			"command-a":                 {"chat"},

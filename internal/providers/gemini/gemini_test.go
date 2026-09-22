@@ -501,9 +501,16 @@ func TestListModels_StampsDiscoveredModes(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusOK, `{
 		"models": [{
 			"name": "models/gemini-2.5-flash",
+			"displayName": "Gemini 2.5 Flash",
+			"description": "Stable version of Gemini 2.5 Flash.",
+			"inputTokenLimit": 1048576,
+			"outputTokenLimit": 65536,
+			"thinking": true,
 			"supportedGenerationMethods": ["generateContent", "streamGenerateContent"]
 		}, {
 			"name": "models/text-embedding-004",
+			"inputTokenLimit": 2048,
+			"outputTokenLimit": 1,
 			"supportedGenerationMethods": ["embedContent"]
 		}]
 	}`)
@@ -534,6 +541,20 @@ func TestListModels_StampsDiscoveredModes(t *testing.T) {
 	assert.Equal(t, "embedding", embed.Metadata.Modes[0])
 	require.Len(t, embed.Metadata.Categories, 1)
 	assert.Equal(t, core.CategoryEmbedding, embed.Metadata.Categories[0])
+
+	// The listing's name, description, token limits and thinking flag are kept.
+	assert.Equal(t, "Gemini 2.5 Flash", chat.Metadata.DisplayName)
+	assert.Equal(t, "Stable version of Gemini 2.5 Flash.", chat.Metadata.Description)
+	require.NotNil(t, chat.Metadata.ContextWindow)
+	assert.Equal(t, 1048576, *chat.Metadata.ContextWindow)
+	require.NotNil(t, chat.Metadata.MaxOutputTokens)
+	assert.Equal(t, 65536, *chat.Metadata.MaxOutputTokens)
+	assert.Equal(t, map[string]bool{"reasoning": true}, chat.Metadata.Capabilities)
+
+	require.NotNil(t, embed.Metadata.ContextWindow)
+	assert.Equal(t, 2048, *embed.Metadata.ContextWindow)
+	assert.Nil(t, embed.Metadata.MaxOutputTokens, "an embedding model's nominal output limit is not a max output")
+	assert.Nil(t, embed.Metadata.Capabilities)
 }
 
 func TestVertexNativeChatUsesOAuthAuthorization(t *testing.T) {

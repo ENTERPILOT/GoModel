@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"reflect"
 	"strings"
@@ -45,22 +46,35 @@ type Provider struct {
 	compat       *openai.CompatibleProvider
 	nativeClient *llmclient.Client
 	keys         *providers.Keyring // Optional; Ollama accepts a bearer token but does not require one
-	// modeCache remembers /api/show-derived modes per model name (including
+	// showCache remembers /api/show-derived metadata per model name (including
 	// confirmed-empty results) so repeated listings don't re-probe upstream.
-	modeCache sync.Map // string → []string
+	showCache sync.Map // string → *core.ModelMetadata (nil when nothing was reported)
 }
 
-// discoveredModes maps a model's native /api/show capabilities onto gateway
-// mode strings. Errors are swallowed and not cached, so a transient failure
-// retries on the next listing while a server without the capabilities field
-// (older Ollama, or an OpenAI-compatible impostor) caches an empty result.
-func (p *Provider) discoveredModes(ctx context.Context, model string) []string {
-	if cached, ok := p.modeCache.Load(model); ok {
-		return cached.([]string)
+// showResponse is the subset of Ollama's /api/show reply the listing keeps:
+// the capability list (completion, embedding, vision, tools, thinking), the
+// model family, and the architecture-keyed model_info map that holds the
+// trained context length under "<architecture>.context_length".
+type showResponse struct {
+	Capabilities []string `json:"capabilities"`
+	Details      struct {
+		Family string `json:"family"`
+	} `json:"details"`
+	ModelInfo map[string]any `json:"model_info"`
+}
+
+// discoveredMetadata maps a model's native /api/show reply onto gateway
+// metadata: modes from the completion/embedding capabilities, catalog
+// capability keys for vision, tools and thinking, the family, and the context
+// length. Errors are swallowed and not cached, so a transient failure retries
+// on the next listing while a server without the capabilities field (older
+// Ollama, or an OpenAI-compatible impostor) caches an empty result. The
+// cached value is cloned on every read so no two listings share metadata.
+func (p *Provider) discoveredMetadata(ctx context.Context, model string) *core.ModelMetadata {
+	if cached, ok := p.showCache.Load(model); ok {
+		return cached.(*core.ModelMetadata).Clone()
 	}
-	var show struct {
-		Capabilities []string `json:"capabilities"`
-	}
+	var show showResponse
 	err := p.nativeClient.Do(ctx, llmclient.Request{
 		Method:   http.MethodPost,
 		Endpoint: "/api/show",
@@ -69,17 +83,50 @@ func (p *Provider) discoveredModes(ctx context.Context, model string) []string {
 	if err != nil {
 		return nil
 	}
-	modes := make([]string, 0, len(show.Capabilities))
-	for _, capability := range show.Capabilities {
+	metadata := show.metadata()
+	p.showCache.Store(model, metadata)
+	return metadata.Clone()
+}
+
+func (s showResponse) metadata() *core.ModelMetadata {
+	metadata := &core.ModelMetadata{Family: strings.TrimSpace(s.Details.Family)}
+	modes := make([]string, 0, 2)
+	for _, capability := range s.Capabilities {
 		switch strings.ToLower(strings.TrimSpace(capability)) {
 		case "completion":
 			modes = append(modes, "chat")
 		case "embedding":
 			modes = append(modes, "embedding")
+		case "vision", "tools", "thinking":
+			metadata.Capabilities = providers.SetCapability(metadata.Capabilities, capability, true)
 		}
 	}
-	p.modeCache.Store(model, modes)
-	return modes
+	if len(modes) > 0 {
+		metadata.Modes = modes
+		metadata.Categories = core.CategoriesForModes(modes)
+	}
+	if contextLength := s.contextLength(); contextLength > 0 {
+		metadata.ContextWindow = &contextLength
+	}
+	if metadata.Family == "" && len(modes) == 0 && metadata.Capabilities == nil && metadata.ContextWindow == nil {
+		return nil
+	}
+	return metadata
+}
+
+// contextLength reads "<architecture>.context_length" from model_info, the
+// context the model was trained for.
+func (s showResponse) contextLength() int {
+	architecture, _ := s.ModelInfo["general.architecture"].(string)
+	architecture = strings.TrimSpace(architecture)
+	if architecture == "" {
+		return 0
+	}
+	value, ok := s.ModelInfo[architecture+".context_length"].(float64)
+	if !ok || value <= 0 || value > float64(math.MaxInt32) {
+		return 0
+	}
+	return int(value)
 }
 
 // New creates a new Ollama provider.
@@ -150,11 +197,12 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 }
 
 // ListModels retrieves the list of available models from Ollama, stamping
-// modes/categories from each model's native /api/show capabilities so local
-// embedding models are classified without a remote-registry entry. Capability
-// lookups are best-effort (older Ollama versions lack the field; a failed call
-// just leaves the model unstamped for the ID heuristic) and cached per model
-// name, so steady-state listings cost no extra requests.
+// modes/categories, capabilities, family and context length from each model's
+// native /api/show reply so local models are described without a
+// remote-registry entry. Lookups are best-effort (older Ollama versions lack
+// the capabilities field; a failed call just leaves the model unstamped for
+// the ID heuristic) and cached per model name, so steady-state listings cost
+// no extra requests.
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
 	resp, err := p.compat.ListModels(ctx)
 	if err != nil || resp == nil {
@@ -164,12 +212,7 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 		if resp.Data[i].Metadata != nil {
 			continue
 		}
-		if modes := p.discoveredModes(ctx, resp.Data[i].ID); len(modes) > 0 {
-			resp.Data[i].Metadata = &core.ModelMetadata{
-				Modes:      modes,
-				Categories: core.CategoriesForModes(modes),
-			}
-		}
+		resp.Data[i].Metadata = p.discoveredMetadata(ctx, resp.Data[i].ID)
 	}
 	return resp, nil
 }

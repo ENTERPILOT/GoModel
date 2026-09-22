@@ -95,11 +95,6 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	return normalizeChatStream(stream), nil
 }
 
-// ListModels retrieves the list of available models from Groq
-func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
-	return p.compat.ListModels(ctx)
-}
-
 // Responses sends a Responses API request to Groq (converted to chat format)
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
 	return providers.ResponsesViaChat(ctx, p, req, "groq")

@@ -117,7 +117,9 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 // Operators should configure providers.<name>.models when their HTTPRoute does
 // not forward GET /v1/models to a model server.
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
-	resp, err := p.compatible.ListModels(ctx)
+	// max_model_len from the vLLM workers behind the gateway is the context
+	// window a request is actually measured against.
+	resp, err := p.compatible.ListModelsWithMaxModelLen(ctx)
 	return resp, exposeDroppedReason(err)
 }
 

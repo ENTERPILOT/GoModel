@@ -127,7 +127,7 @@ func TestListModels_SurfacesServerReportedMetadata(t *testing.T) {
 			// must not become a public capability on its own.
 			props:             `{"default_generation_settings":{"n_ctx":4096},"modalities":{"vision":true,"video":true,"audio":false,"telepathy":true}}`,
 			wantContextWindow: 4096,
-			wantCapabilities:  map[string]bool{"vision": true, "video": true},
+			wantCapabilities:  map[string]bool{"vision": true, "video_input": true},
 			wantPropsFetched:  true,
 		},
 	}

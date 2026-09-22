@@ -7,6 +7,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 type modelsResponse struct {
@@ -85,29 +86,14 @@ func (m modelInfo) toCore() core.Model {
 	}
 }
 
-// modelCapabilities maps Chutes features and input modalities to GoModel capabilities.
+// modelCapabilities maps Chutes features and input modalities onto the
+// catalog's capability keys (tools → function_calling, image → vision, ...);
+// confidential_compute has no catalog key and keeps its own.
 func modelCapabilities(m modelInfo) map[string]bool {
-	capabilities := make(map[string]bool, len(m.SupportedFeatures)+3)
-	for _, feature := range m.SupportedFeatures {
-		if normalized := strings.ToLower(strings.TrimSpace(feature)); normalized != "" {
-			capabilities[normalized] = true
-		}
-	}
-	for _, modality := range m.InputModalities {
-		switch strings.ToLower(strings.TrimSpace(modality)) {
-		case "image":
-			capabilities["vision"] = true
-		case "video":
-			capabilities["video"] = true
-		case "audio":
-			capabilities["audio"] = true
-		}
-	}
+	capabilities := providers.CapabilitiesFromFeatures(nil, m.SupportedFeatures)
+	capabilities = providers.CapabilitiesFromInputModalities(capabilities, m.InputModalities)
 	if m.ConfidentialCompute {
-		capabilities["confidential_compute"] = true
-	}
-	if len(capabilities) == 0 {
-		return nil
+		capabilities = providers.SetCapability(capabilities, "confidential_compute", true)
 	}
 	return capabilities
 }

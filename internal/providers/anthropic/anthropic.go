@@ -350,10 +350,11 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 	for _, m := range anthropicResp.Data {
 		created := parseCreatedAt(m.CreatedAt)
 		models = append(models, core.Model{
-			ID:      m.ID,
-			Object:  "model",
-			OwnedBy: "anthropic",
-			Created: created,
+			ID:       m.ID,
+			Object:   "model",
+			OwnedBy:  "anthropic",
+			Created:  created,
+			Metadata: m.metadata(),
 		})
 	}
 
@@ -583,4 +584,29 @@ func normalizeAnthropicStopReason(stopReason string) string {
 // Voyage AI (Anthropic's recommended embedding provider) may be added in the future.
 func (p *Provider) Embeddings(_ context.Context, _ *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
 	return nil, core.NewInvalidRequestError("anthropic does not support embeddings — consider using Voyage AI", nil)
+}
+
+// metadata keeps what Anthropic's listing says about a model: its display
+// name, context window (max_input_tokens), output limit (max_tokens) and the
+// supported flags of its capabilities, under the catalog's capability keys.
+func (m anthropicModelInfo) metadata() *core.ModelMetadata {
+	modes := []string{"chat"}
+	metadata := &core.ModelMetadata{
+		DisplayName: strings.TrimSpace(m.DisplayName),
+		Modes:       modes,
+		Categories:  core.CategoriesForModes(modes),
+	}
+	if m.MaxInputTokens > 0 {
+		metadata.ContextWindow = new(m.MaxInputTokens)
+	}
+	if m.MaxTokens > 0 {
+		metadata.MaxOutputTokens = new(m.MaxTokens)
+	}
+	for name, capability := range m.Capabilities {
+		if capability.Supported == nil {
+			continue
+		}
+		metadata.Capabilities = providers.SetCapability(metadata.Capabilities, name, *capability.Supported)
+	}
+	return metadata
 }
