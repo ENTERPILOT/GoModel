@@ -83,8 +83,10 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 			ctx := core.WithUserPathHeaderName(req.Context(), userPathHeaderName)
 			ctx = core.WithRequestSnapshot(ctx, snapshot)
 			if semantics := core.DeriveWhiteBoxPrompt(snapshot); semantics != nil {
-				if !bodyCaptured {
-					seedRequestBodySelectorHints(req, desc.BodyMode, semantics)
+				if bodyCaptured {
+					verifyCapturedOpaqueSelectorHints(desc.BodyMode, bodyBytes, semantics)
+				} else if err := seedRequestBodySelectorHints(req, desc.BodyMode, semantics); err != nil {
+					return handleError(c, requestBodyReadError(err))
 				}
 				ctx = core.WithWhiteBoxPrompt(ctx, semantics)
 			}
@@ -93,6 +95,32 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 			return next(c)
 		}
 	}
+}
+
+// verifyCapturedOpaqueSelectorHints re-reads the selector fields of a
+// captured opaque body with the complete decoder. The snapshot's own peek
+// takes the first model it meets, which is fine for a body the gateway will
+// decode canonically, but an opaque body is forwarded as written and the
+// upstream's parser may take the last one instead; a repeated model is
+// therefore recorded as ambiguous so the passthrough route refuses it.
+func verifyCapturedOpaqueSelectorHints(bodyMode core.BodyMode, body []byte, env *core.WhiteBoxPrompt) {
+	if bodyMode != core.BodyModeOpaque || env == nil || !env.JSONBodyParsed {
+		return
+	}
+	if hints := decodeCompleteRequestBodySelectorHints(bytes.NewReader(body)); hints.modelAmbiguous {
+		core.MarkPassthroughModelAmbiguous(env)
+	}
+}
+
+// requestBodyReadError shapes a failure to read the request body as a gateway
+// error. One that already carries an HTTP status (the body limit's 413) keeps
+// it so the client learns why; any other read failure is the client's
+// malformed or interrupted request.
+func requestBodyReadError(err error) error {
+	if status := echo.StatusCode(err); status > 0 {
+		return core.NewInvalidRequestErrorWithStatus(status, echoErrorMessage(err, status), err)
+	}
+	return core.NewInvalidRequestError("failed to read request body", err)
 }
 
 func configuredUserPathHeaderName(headerNames ...string) string {
