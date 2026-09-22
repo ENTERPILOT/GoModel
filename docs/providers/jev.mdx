@@ -1,0 +1,173 @@
+---
+title: "Jev / Kev (TypeSafe System One)"
+sidebarTitle: "Jev / Kev"
+description: "Route TypeSafe System One decision requests through GoModel, to the hosted Jev API or a self-hosted Kev server."
+icon: "scale-balanced"
+keywords: ["Jev", "Kev", "TypeSafe", "System One", "decision model", "classification", "noul", "choice", "score", "self-hosted"]
+---
+
+[Jev](https://docs.typesafe.ai/introduction) is TypeSafe's System One model: a
+decision model rather than a text generator. A request carries a `state` (the
+text or record to evaluate) and a map of typed questions, and the answer is a
+calibrated probability per question. [Kev](https://github.com/jaredpalmer/kev)
+is a family of small open-weight models that implement the same API, so one
+`jev` provider type covers both.
+
+There are three question types:
+
+| Type | Asks | Answer |
+| --- | --- | --- |
+| `noul` | A yes/no question | `noul`: the probability of yes |
+| `choice` | Pick one option from a set you define | `choice`, plus `probabilities` and `confidence` |
+| `score` | Rate against ordered levels | `score`, plus `legend`, `probabilities` and `confidence` |
+
+The API is not OpenAI-compatible, and its answers have no chat equivalent, so
+GoModel does not translate it: System One requests go through
+[passthrough](/features/passthrough-api) at `/p/jev/...`, which is enabled by
+default for this provider. Chat, `/responses`, and `/v1/embeddings` return
+`invalid_request_error` for `jev` models.
+
+## Configure
+
+For the hosted API, the key is the whole setup:
+
+```bash
+JEV_API_KEY=ts-...
+GOMODEL_MASTER_KEY=change-me
+```
+
+For a self-hosted Kev server, set the base URL instead. Kev has no
+authentication of its own, so leave the key unset:
+
+```bash
+JEV_BASE_URL=http://host.docker.internal:8009
+GOMODEL_MASTER_KEY=change-me
+```
+
+<Note>
+  The default base URL is `https://api.typesafe.ai`, the origin TypeSafe's SDKs
+  use; a trailing `/v1` is accepted and trimmed, so both spellings address the
+  same server. To run the hosted API and a local Kev side by side, register the
+  second under a suffixed name: `JEV_KEV_BASE_URL=...` creates provider
+  `jev-kev`, reached at `/p/jev-kev/...`.
+</Note>
+
+## Verify
+
+```bash
+curl -s http://localhost:8080/p/jev/v1/systemone \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "state": "Shoes arrived two weeks late and in the wrong size. Also I see two charges on my card.",
+    "model": "jev-latest",
+    "questions": {
+      "department": {"type": "choice", "instructions": "Which team should handle this?",
+                     "criteria": {"returns": "Exchanges, refunds, wrong or damaged items",
+                                  "shipping": "Delivery status, delays, lost packages",
+                                  "billing": "Charges, invoices, payment problems"}},
+      "escalate":   {"type": "noul", "instructions": "Does this need urgent human attention?"},
+      "frustration": {"type": "score", "instructions": "How frustrated is the customer?",
+                      "criteria": ["Calm", "Frustrated", "Very angry"]}
+    }
+  }'
+```
+
+```json
+{
+  "model": "jev-1.13.0",
+  "answers": {
+    "department":  {"type": "choice", "choice": "returns", "confidence": 0.21,
+                    "probabilities": {"returns": 0.47, "shipping": 0.28, "billing": 0.25}},
+    "escalate":    {"type": "noul", "noul": 0.93},
+    "frustration": {"type": "score", "score": 1.44, "confidence": 0.78,
+                    "legend": {"0": "Calm", "1": "Frustrated", "2": "Very angry"},
+                    "probabilities": {"0": 0.00, "1": 0.56, "2": 0.44}}
+  },
+  "usage": {"input_tokens": 101, "output_tokens": 161}
+}
+```
+
+The `/v1` segment is optional: `/p/jev/systemone` is the same route. Use
+`kev-latest` as the model on a Kev server; it also answers to `jev-latest`.
+
+## Using the TypeSafe SDKs
+
+The SDKs send `POST {base_url}/v1/systemone`, so point them at the provider's
+passthrough root and authenticate with your GoModel key:
+
+<CodeGroup>
+```python Python
+from typesafe_sdk import Noul, TypeSafeClient
+
+client = TypeSafeClient(api_key="change-me", base_url="http://localhost:8080/p/jev")
+response = client.system_one(
+    state="I was charged twice. Please fix this ASAP.",
+    questions={"billing": Noul(instructions="Is this ticket about billing?")},
+)
+print(response.nouls["billing"].noul)
+```
+
+```typescript JavaScript
+import { TypeSafeClient, noul } from "@typesafe-ai/sdk";
+
+const client = new TypeSafeClient({ apiKey: "change-me", baseURL: "http://localhost:8080/p/jev" });
+const result = await client.systemOne({
+  state: "I was charged twice. Please fix this ASAP.",
+  questions: { billing: noul({ instructions: "Is this ticket about billing?" }) },
+});
+console.log(result.answers.billing.noul);
+```
+</CodeGroup>
+
+The same works with `TYPESAFE_BASE_URL=http://localhost:8080/p/jev` and
+`TYPESAFE_API_KEY=change-me` in the environment.
+
+## Native routes
+
+| Route | What it does |
+| --- | --- |
+| `POST /p/jev/v1/systemone` | Evaluate a state against a map of questions |
+| `GET /p/jev/v1/models` | The names the `model` field accepts, in the upstream's own shape |
+| `POST /p/jev/v1/systemone/permute` | Kev only: run one Choice question with several option orders |
+| `POST /p/jev/v1/systemone/separate` | Kev only: run each question in its own forward pass |
+
+Upstream errors keep their status code, with the provider's body carried in
+the gateway error message: a malformed question comes back as TypeSafe's `422`
+naming the offending field, and `429` or `529` mean back off and retry.
+
+## Models, access control, and cost
+
+`GET /v1/models` lists what the upstream reports, as `jev/jev-latest` and so
+on. TypeSafe lists its aliases (`jev-latest`, `jev-preview`); a Kev server
+lists its checkpoint (`kev-latest`) and the aliases it answers to. Versioned
+IDs such as `jev-1.13.0` are accepted by the `model` field whether or not they
+are listed. The models are categorized as utility models with no generation
+mode, since there is no OpenAI endpoint to route them to.
+
+Every System One request names its model, so the passthrough surface applies
+the caller's [model allowlist](/features/users) to it like any other
+request.
+
+The response's `usage.input_tokens` and `usage.output_tokens` are recorded, so
+System One calls appear in the usage API and dashboard under the model that
+answered (`jev-1.13.0`, or the Kev checkpoint). Jev is priced per input token
+and is not in the upstream model catalog; declare its pricing on the provider
+to have those rows costed, or set it in the
+[pricing override editor](/features/cost-tracking):
+
+```yaml
+providers:
+  jev:
+    type: jev
+    api_key: "${JEV_API_KEY}"
+    models:
+      - id: "jev-1.13.0"
+        metadata:
+          pricing:
+            currency: USD
+            input_per_mtok: 0.042
+            output_per_mtok: 0
+```
+
+A local Kev server costs nothing per token, so it needs no pricing.

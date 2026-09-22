@@ -61,6 +61,7 @@ support, not every individual model capability exposed by an upstream provider.
 | Xiaomi MiMo | `XIAOMI_API_KEY` (`XIAOMI_BASE_URL` optional) | `mimo-v2.5-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [Xiaomi MiMo](/providers/xiaomi) |
 | ElevenLabs (voice only) | `ELEVENLABS_API_KEY` (`ELEVENLABS_BASE_URL` optional) | `eleven_multilingual_v2` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [ElevenLabs](/providers/elevenlabs) |
 | audio.cpp (audio only) | `AUDIOCPP_BASE_URL` (`AUDIOCPP_API_KEY` optional) | `pocket-tts` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [audio.cpp](/providers/audiocpp) |
+| Jev / Kev (System One only) | `JEV_API_KEY` (`JEV_BASE_URL` optional) | `jev-latest` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [Jev](/providers/jev) |
 | OpenCode Go | `OPENCODE_GO_API_KEY` (`OPENCODE_GO_BASE_URL` optional) | `glm-5.1` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [OpenCode Go](/providers/opencode-go) |
 | Kimi Code | `KIMICODE_API_KEY` | `kimi-for-coding` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Kimi Code](/providers/kimicode) |
 | Hetzner (experimental) | `HETZNER_API_KEY` (`HETZNER_BASE_URL` optional) | `Qwen/Qwen3.6-35B-A3B-FP8` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [Hetzner](/providers/hetzner) |
@@ -206,6 +207,12 @@ support, not every individual model capability exposed by an upstream provider.
   its own. Audio only: `/v1/audio/speech` and `/v1/audio/transcriptions` route
   to it, and its detail, alignment, and live-streaming routes are reachable
   through passthrough. See [audio.cpp](/providers/audiocpp).
+- **Jev / Kev** — TypeSafe's System One API is a decision API (state plus
+  typed questions in, calibrated probabilities out) with no OpenAI-compatible
+  surface, so it is reached only through passthrough at
+  `POST /p/jev/v1/systemone`. `JEV_API_KEY` configures the hosted API; for a
+  self-hosted Kev server, which speaks the same API without authentication,
+  set `JEV_BASE_URL` and leave the key unset. See [Jev](/providers/jev).
 - **llama.cpp / LM Studio** — `LLAMACPP_BASE_URL` is required (llama-server's
   default port collides with GoModel's own 8080, so there is no default);
   `LLAMACPP_API_KEY` is optional. Do not register these servers as `ollama`,

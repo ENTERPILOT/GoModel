@@ -214,6 +214,7 @@
                     "providers/minimax",
                     "providers/elevenlabs",
                     "providers/audiocpp",
+                    "providers/jev",
                     "providers/opencode-go",
                     "providers/sglang",
                     "providers/vllm",

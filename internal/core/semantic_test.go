@@ -311,3 +311,28 @@ func TestDeriveBatchRouteInfoFromTransport_MessagesBatches(t *testing.T) {
 		})
 	}
 }
+
+// A repeated model field leaves no value the gateway can authorize, so the
+// marker drops the first-match hint along with recording the ambiguity, and
+// a later body refresh keeps the ambiguity on the merged route info.
+func TestMarkPassthroughModelAmbiguous_DropsModelAndSurvivesRefresh(t *testing.T) {
+	env := &WhiteBoxPrompt{}
+	CachePassthroughRouteInfo(env, &PassthroughRouteInfo{Provider: "jev"})
+	ApplyBodySelectorHints(env, "jev-latest", "", false)
+	require.Equal(t, "jev-latest", env.RouteHints.Model)
+
+	MarkPassthroughModelAmbiguous(env)
+
+	require.Empty(t, env.RouteHints.Model)
+	info := env.CachedPassthroughRouteInfo()
+	require.NotNil(t, info)
+	require.True(t, info.ModelAmbiguous)
+	require.Empty(t, info.Model)
+
+	snapshot := NewRequestSnapshot(http.MethodPost, "/p/jev/systemone", map[string]string{"provider": "jev", "endpoint": "systemone"}, nil, nil, "application/json", []byte(`{"model":"jev-latest","model":"jev-preview"}`), false, "", nil)
+	refreshed := RefreshWhiteBoxPrompt(snapshot, env)
+	require.NotNil(t, refreshed)
+	require.True(t, refreshed.CachedPassthroughRouteInfo().ModelAmbiguous)
+
+	MarkPassthroughModelAmbiguous(nil) // a missing envelope is ignored
+}
