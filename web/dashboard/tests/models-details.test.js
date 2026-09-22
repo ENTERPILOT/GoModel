@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 
 import {
   buildModelDetails,
+  metadataForView,
+  metadataSourceLabel,
+  metadataViewOptions,
+  resolveMetadataView,
   rowHasModelDetails,
 } from "../src/pages/models/modelDetails.js";
 import { formatNumber } from "../src/lib/utils/format.js";
@@ -107,9 +111,9 @@ test("properties format lists and token counts and skip empty fields", () => {
 test("capabilities are sorted chips carrying their enabled flag", () => {
   const details = buildModelDetails(modelRow(), {}, {});
   assert.deepEqual(section(details, "capabilities").chips, [
-    { label: "audio_input", enabled: false },
-    { label: "tools", enabled: true },
-    { label: "vision", enabled: true },
+    { label: "audio_input", enabled: false, source: "" },
+    { label: "tools", enabled: true, source: "" },
+    { label: "vision", enabled: true, source: "" },
   ]);
 });
 
@@ -165,4 +169,112 @@ test("a model without metadata only lists what the provider reported", () => {
   const details = buildModelDetails(modelRow({ model: { id: "local-llm", owned_by: "library" } }), {}, {});
   assert.equal(details.has_metadata, false);
   assert.deepEqual(sectionKeys(details), ["listing"]);
+});
+
+// ---- Metadata layers and views ----
+
+function layersFixture(overrides = {}) {
+  return {
+    selector: "openai/gpt-4o",
+    effective: modelRow().model.metadata,
+    provider: { context_window: 4096, capabilities: { tools: false } },
+    catalog: { display_name: "GPT-4o", modes: ["chat"], context_window: 128000, pricing: { input_per_mtok: 2.5 } },
+    config: null,
+    sources: {
+      display_name: "catalog",
+      context_window: "provider",
+      modes: "catalog",
+      categories: "inferred",
+      "capabilities.tools": "provider",
+      "capabilities.vision": "catalog",
+      "rankings.lmarena": "catalog",
+    },
+    ...overrides,
+  };
+}
+
+test("metadataViewOptions offers config only when an override exists", () => {
+  assert.deepEqual(
+    metadataViewOptions(layersFixture()).map((option) => option.value),
+    ["effective", "provider", "catalog"],
+  );
+  assert.deepEqual(
+    metadataViewOptions(layersFixture({ config: { display_name: "x" } })).map((option) => option.value),
+    ["effective", "provider", "catalog", "config"],
+  );
+  assert.deepEqual(metadataViewOptions(null), []);
+});
+
+test("resolveMetadataView falls back to effective for views a row lacks", () => {
+  assert.equal(resolveMetadataView("catalog", layersFixture()), "catalog");
+  assert.equal(resolveMetadataView("config", layersFixture()), "effective");
+  assert.equal(resolveMetadataView("provider", null), "effective");
+});
+
+test("metadataForView reads the inventory row for the effective view", () => {
+  const row = modelRow();
+  assert.equal(metadataForView(row, null, "effective"), row.model.metadata);
+  assert.equal(metadataForView(row, layersFixture(), "effective"), row.model.metadata);
+  assert.deepEqual(metadataForView(row, layersFixture(), "provider"), layersFixture().provider);
+  assert.equal(metadataForView(row, layersFixture(), "config"), null);
+});
+
+test("metadataSourceLabel names every layer and ignores unknown ones", () => {
+  assert.equal(metadataSourceLabel("provider"), m.models_details_source_provider());
+  assert.equal(metadataSourceLabel("catalog"), m.models_details_source_catalog());
+  assert.equal(metadataSourceLabel("config"), m.models_details_source_config());
+  assert.equal(metadataSourceLabel("inferred"), m.models_details_source_inferred());
+  assert.equal(metadataSourceLabel(""), "");
+  assert.equal(metadataSourceLabel("bogus"), "");
+});
+
+test("the effective view labels each field with its source layer", () => {
+  const details = buildModelDetails(modelRow(), {}, {}, { view: "effective", layers: layersFixture() });
+  const properties = section(details, "properties").items;
+  const byLabel = Object.fromEntries(properties.map((entry) => [entry.label, entry.source]));
+  assert.equal(byLabel[m.models_details_display_name()], m.models_details_source_catalog());
+  assert.equal(byLabel[m.models_details_context_window()], m.models_details_source_provider());
+  assert.equal(byLabel[m.models_details_categories()], m.models_details_source_inferred());
+  assert.equal(byLabel[m.models_details_tags()], "");
+  assert.deepEqual(
+    section(details, "capabilities").chips.map((chip) => chip.source),
+    ["", m.models_details_source_provider(), m.models_details_source_catalog()],
+  );
+  assert.equal(section(details, "rankings").items[0].source, m.models_details_source_catalog());
+});
+
+test("the effective view carries no source labels before the layers arrive", () => {
+  const details = buildModelDetails(modelRow(), {}, {});
+  assert.ok(section(details, "properties").items.every((entry) => !entry.source));
+});
+
+test("layer views render only that layer, with its own pricing", () => {
+  const provider = buildModelDetails(modelRow(), { input_per_mtok: 3 }, { input_per_mtok: "config.yaml" }, {
+    view: "provider",
+    layers: layersFixture(),
+  });
+  assert.equal(provider.view, "provider");
+  assert.equal(provider.has_metadata, true);
+  assert.deepEqual(sectionKeys(provider), ["listing", "properties", "capabilities"]);
+  assert.equal(
+    itemValue(provider, "properties", m.models_details_context_window()),
+    m.models_details_tokens({ value: formatNumber(4096) }),
+  );
+  assert.ok(section(provider, "properties").items.every((entry) => !entry.source));
+
+  const catalog = buildModelDetails(modelRow(), { input_per_mtok: 3 }, { input_per_mtok: "config.yaml" }, {
+    view: "catalog",
+    layers: layersFixture(),
+  });
+  assert.deepEqual(sectionKeys(catalog), ["properties", "pricing"]);
+  assert.deepEqual(
+    section(catalog, "pricing").items.map((entry) => [entry.value, entry.source]),
+    [["$2.50", ""]],
+  );
+});
+
+test("an empty layer view reports it has no metadata", () => {
+  const details = buildModelDetails(modelRow(), {}, {}, { view: "config", layers: layersFixture() });
+  assert.equal(details.has_metadata, false);
+  assert.deepEqual(sectionKeys(details), []);
 });

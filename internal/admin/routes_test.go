@@ -80,6 +80,7 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 
 		"GET /admin/models",
 		"GET /admin/models/categories",
+		"GET /admin/models/metadata",
 
 		"GET /admin/virtual-models",
 		"PUT /admin/virtual-models",

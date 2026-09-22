@@ -526,6 +526,48 @@ Returns all registered models with both provider type and configured provider na
 
 This differs from the standard `/v1/models` endpoint: the admin version includes both `provider_type` and `provider_name` for each model, making it useful for understanding both the provider family and the concrete configured provider instance that serves the model.
 
+
+### GET /admin/models/metadata
+
+Returns where one model's metadata comes from: the merged metadata the gateway
+serves (`effective`) and each layer it was merged from. `provider` is what the
+provider reported in its own model listing, `catalog` the
+[ai-model-list](https://github.com/ENTERPILOT/ai-model-list) entry, and
+`config` the `config.yaml` metadata override; a `null` layer knows nothing
+about the model. `sources` names the winning layer per effective field
+(`config`, `provider`, `catalog`, or `inferred` for modes guessed from the
+model ID). See [Model metadata](/advanced/model-metadata) for the precedence.
+
+The dashboard's **Models** page fetches this when a row is expanded. Nothing
+is stored for it: the layers are already held per model and the catalog entry
+is resolved on demand.
+
+**Query parameters:**
+
+- `provider` (required): provider instance name or provider type
+- `model` (required): raw upstream model ID
+
+**Response:**
+
+```json
+{
+  "selector": "local/gemma-3-4b-it",
+  "effective": { "display_name": "Gemma (local)", "modes": ["chat"], "context_window": 4096 },
+  "provider": { "context_window": 4096 },
+  "catalog": { "display_name": "Gemma 3 4B IT", "modes": ["chat"], "context_window": 131072 },
+  "config": { "display_name": "Gemma (local)" },
+  "sources": {
+    "display_name": "config",
+    "context_window": "provider",
+    "modes": "catalog",
+    "categories": "catalog"
+  }
+}
+```
+
+Returns `400` when a parameter is missing and `404` when the model is not
+registered.
+
 ### Plugin, guardrail, and workflow endpoints
 
 | Method | Path | Description |

@@ -1518,6 +1518,65 @@ const docTemplate = `{
                 ]
             }
         },
+        "/admin/models/metadata": {
+            "get": {
+                "description": "Returns the merged metadata the gateway serves for a model together with each layer it was merged from: the provider's own listing, the model catalog entry and the config.yaml override. A null layer knows nothing about the model. ` + "`" + `sources` + "`" + ` names the winning layer per field (config, provider, catalog or inferred).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Show where one model's metadata comes from",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider instance name or provider type",
+                        "name": "provider",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Raw upstream model ID",
+                        "name": "model",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/providers.ModelMetadataLayers"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/provider-credentials": {
             "get": {
                 "produces": [
@@ -11385,6 +11444,53 @@ const docTemplate = `{
                 },
                 "display_name": {
                     "type": "string"
+                }
+            }
+        },
+        "providers.ModelMetadataLayers": {
+            "type": "object",
+            "properties": {
+                "catalog": {
+                    "description": "Catalog is the model list (ai-model-list) entry.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/core.ModelMetadata"
+                        }
+                    ]
+                },
+                "config": {
+                    "description": "Config is the config.yaml metadata override.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/core.ModelMetadata"
+                        }
+                    ]
+                },
+                "effective": {
+                    "description": "Effective is the merged metadata, as listed by /admin/models.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/core.ModelMetadata"
+                        }
+                    ]
+                },
+                "provider": {
+                    "description": "Provider is what the provider reported in its own model listing.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/core.ModelMetadata"
+                        }
+                    ]
+                },
+                "selector": {
+                    "type": "string"
+                },
+                "sources": {
+                    "description": "Sources names the layer that supplied each effective field\n(see modeldata.MetadataSources).",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
                 }
             }
         },

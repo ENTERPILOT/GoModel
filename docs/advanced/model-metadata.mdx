@@ -53,6 +53,14 @@ flowchart LR
    embedding models, IDs containing `rerank` become reranking models. Namespaced
    IDs are matched by their final path segment. When unsure, it claims nothing.
 
+## Checking where a value came from
+
+Expand a row on the dashboard's **Models** page to see the model's effective
+metadata with the layer that supplied each field, and switch the panel to
+**Provider**, **Catalog**, or **Config** to see one layer on its own. The same
+data is served by
+[`GET /admin/models/metadata`](/advanced/admin-endpoints#get-adminmodelsmetadata).
+
 ## What metadata affects
 
 - **Pricing** drives [cost tracking](/features/cost-tracking), budgets, and

@@ -2097,6 +2097,89 @@
         }
       }
     },
+    "/admin/models/metadata": {
+      "get": {
+        "description": "Returns the merged metadata the gateway serves for a model together with each layer it was merged from: the provider's own listing, the model catalog entry and the config.yaml override. A null layer knows nothing about the model. `sources` names the winning layer per field (config, provider, catalog or inferred).",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Show where one model's metadata comes from",
+        "parameters": [
+          {
+            "description": "Provider instance name or provider type",
+            "name": "provider",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Raw upstream model ID",
+            "name": "model",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/providers.ModelMetadataLayers"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/models/metadata",
+            "title": "Show where one model's metadata comes from",
+            "description": "GoModel API reference for GET /admin/models/metadata: Show where one model's metadata comes from."
+          }
+        }
+      }
+    },
     "/admin/provider-credentials": {
       "get": {
         "tags": [
@@ -15185,6 +15268,53 @@
           },
           "display_name": {
             "type": "string"
+          }
+        }
+      },
+      "providers.ModelMetadataLayers": {
+        "type": "object",
+        "properties": {
+          "catalog": {
+            "description": "Catalog is the model list (ai-model-list) entry.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/core.ModelMetadata"
+              }
+            ]
+          },
+          "config": {
+            "description": "Config is the config.yaml metadata override.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/core.ModelMetadata"
+              }
+            ]
+          },
+          "effective": {
+            "description": "Effective is the merged metadata, as listed by /admin/models.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/core.ModelMetadata"
+              }
+            ]
+          },
+          "provider": {
+            "description": "Provider is what the provider reported in its own model listing.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/core.ModelMetadata"
+              }
+            ]
+          },
+          "selector": {
+            "type": "string"
+          },
+          "sources": {
+            "description": "Sources names the layer that supplied each effective field\n(see modeldata.MetadataSources).",
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         }
       },

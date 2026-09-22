@@ -1,27 +1,62 @@
 <script>
   // The details row under an expanded model row: what the provider listed,
-  // the merged catalog properties, capabilities, rankings and the effective
-  // pricing with the source of each price. Rendered by ModelRow while the
-  // row is expanded; `id` is what the toggle's aria-controls points at.
+  // the model's properties, capabilities, rankings and pricing. The panel
+  // opens on the effective metadata the inventory row already carries, then
+  // fetches the layers behind it (/admin/models/metadata) to label each
+  // field's source and offer the provider / catalog / config views.
+  // Rendered by ModelRow while the row is expanded; `id` is what the
+  // toggle's aria-controls points at.
+  import { untrack } from "svelte";
+  import SegmentedControl from "$lib/components/atoms/SegmentedControl.svelte";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
-  import { buildModelDetails } from "./modelDetails.js";
+  import { modelDetailsState } from "./modelDetails.svelte.js";
+  import {
+    buildModelDetails,
+    metadataViewEmptyMessage,
+    metadataViewOptions,
+    resolveMetadataView,
+  } from "./modelDetails.js";
   import * as m from "$lib/paraglide/messages.js";
 
   let { row, colspan, id } = $props();
 
+  $effect(() => {
+    const current = row;
+    untrack(() => modelDetailsState.loadLayers(current));
+  });
+
+  const entry = $derived(modelDetailsState.layersEntry(row));
+  const layers = $derived(entry && entry.status === "ok" ? entry.layers : null);
+  const viewOptions = $derived(metadataViewOptions(layers));
+  const view = $derived(resolveMetadataView(modelDetailsState.view, layers));
   const details = $derived(
     buildModelDetails(
       row,
       pricingOverrides.modelRowPricing(row),
       pricingOverrides.modelRowPricingSources(row),
+      { view, layers },
     ),
   );
 </script>
 
 <tr class="model-details-row" {id}>
   <td colspan={colspan}>
+    {#if viewOptions.length > 0}
+      <div class="model-details-toolbar">
+        <SegmentedControl
+          options={viewOptions}
+          value={view}
+          ariaLabel={m.models_details_view_label()}
+          onchange={(next) => (modelDetailsState.view = next)}
+        />
+      </div>
+    {:else if entry && entry.status === "loading"}
+      <p class="model-details-note">{m.models_details_layers_loading()}</p>
+    {:else if entry && entry.status === "error"}
+      <p class="model-details-note">{m.models_details_layers_failed()}</p>
+    {/if}
     {#if !details.has_metadata}
-      <p class="model-details-note">{m.models_details_no_metadata()}</p>
+      <p class="model-details-note">{metadataViewEmptyMessage(view)}</p>
     {/if}
     <div class="model-details">
       {#each details.sections as section (section.key)}
@@ -33,18 +68,20 @@
                 <li
                   class="provider-badge model-details-chip"
                   class:is-off={!chip.enabled}
-                  title={chip.enabled ? m.models_details_supported() : m.models_details_unsupported()}
+                  title={[chip.enabled ? m.models_details_supported() : m.models_details_unsupported(), chip.source]
+                    .filter(Boolean)
+                    .join(" · ")}
                 >{chip.label}</li>
               {/each}
             </ul>
           {:else}
             <dl class="model-details-list">
-              {#each section.items as entry (entry.label)}
-                <dt>{entry.label}</dt>
-                <dd class:mono={entry.mono} title={entry.hint || undefined}>
-                  {entry.value}{#if entry.hint}<span class="model-details-hint" aria-hidden="true">*</span>{/if}
-                  {#if entry.source}
-                    <span class="model-details-source">({entry.source})</span>
+              {#each section.items as field (field.label)}
+                <dt>{field.label}</dt>
+                <dd class:mono={field.mono} title={field.hint || undefined}>
+                  {field.value}{#if field.hint}<span class="model-details-hint" aria-hidden="true">*</span>{/if}
+                  {#if field.source}
+                    <span class="model-details-source">({field.source})</span>
                   {/if}
                 </dd>
               {/each}
@@ -63,6 +100,12 @@
   .model-details-row:hover :global(td) {
     background: color-mix(in srgb, var(--bg-surface) 70%, var(--bg));
     padding: 12px var(--space-cell) 16px;
+  }
+
+  .model-details-toolbar {
+    display: flex;
+    align-items: center;
+    margin-bottom: 12px;
   }
 
   .model-details-note {
