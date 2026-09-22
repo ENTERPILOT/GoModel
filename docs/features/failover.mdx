@@ -79,6 +79,11 @@ Provider retries run before failover for non-streaming requests. To retry
 Cloudflare `522`/`524` responses and then switch models on the same provider,
 use [resilience settings with per-model breakers](/advanced/resilience#retry-cloudflare-timeouts-then-switch-models).
 
+Failover reacts to failed attempts, not slow ones. To move traffic off a
+provider that still answers but takes too long, set a
+[slow-call threshold](/advanced/resilience#fail-over-from-a-slow-provider) on
+its circuit breaker.
+
 ## When it runs
 
 Failover is attempted only after an attempt returns:

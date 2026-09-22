@@ -40,6 +40,7 @@ you need.
 | `failure_threshold` | `5`     | Consecutive failures before the circuit opens  |
 | `success_threshold` | `2`     | Consecutive successes to close it again        |
 | `timeout`           | `30s`   | How long the circuit stays open before probing |
+| `slow_call_threshold` | `0` (off) | Answers slower than this count as breaker failures |
 
 To disable retries, set `max_retries: 0` — every request gets exactly one
 attempt. To disable the circuit breaker, set `circuit_breaker.enabled: false`
@@ -121,6 +122,25 @@ triggers while retaining transport-error handling. For example,
 including during recovery probes. Invalid codes or scopes fail configuration
 loading.
 
+**Sustained latency** can open the circuit too. Set
+`circuit_breaker.slow_call_threshold` (or
+`CIRCUIT_BREAKER_SLOW_CALL_THRESHOLD`) and any call the provider answers
+slower than that counts as a breaker failure, exactly like a `5xx`. The slow
+answer is still returned to its caller; after `failure_threshold` consecutive
+slow or failed calls the circuit opens, later requests fail fast with a
+failover-eligible `503`, and a slow recovery probe reopens it. See
+[Fail over from a slow provider](#fail-over-from-a-slow-provider).
+
+The clock covers the whole call including retries. For streaming requests it
+stops at the first data event, so the threshold bounds time to first token,
+not the length of the stream.
+
+It is off by default because normal latency depends on the workload: a
+non-streaming reasoning call can legitimately take minutes. Pick a value well
+above your slowest healthy request, and override it per provider when
+workloads differ. The threshold never cancels a request — that is
+`HTTP_TIMEOUT`'s job, and a call that hits it already counts as a failure.
+
 The default now includes `429` breaker failures. Deployments that previously
 relied on rate limits leaving the breaker closed can set
 `failure_on_statuses: [5xx]` to retain that behavior.
@@ -174,6 +194,7 @@ in YAML.
 | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | int      | `5`     | Consecutive failures before opening           |
 | `CIRCUIT_BREAKER_SUCCESS_THRESHOLD` | int      | `2`     | Consecutive successes to close again          |
 | `CIRCUIT_BREAKER_TIMEOUT`           | duration | `30s`   | How long the circuit stays open before probing |
+| `CIRCUIT_BREAKER_SLOW_CALL_THRESHOLD` | duration | `0`   | Answers slower than this count as failures; `0` disables |
 
 ## YAML
 
@@ -357,3 +378,40 @@ skips its upstream calls without blocking model2. With the default
 The caller's deadline must allow time for the attempts and backoff. Streaming
 requests do not get this retry sequence; a partially delivered response
 cannot be restarted transparently.
+
+## Fail over from a slow provider
+
+A provider that still answers, but takes minutes to do so, never produces the
+errors that open the circuit. `slow_call_threshold` makes latency count:
+
+```yaml
+providers:
+  opencode:
+    # Keep your existing type, base_url, and credentials here.
+    resilience:
+      circuit_breaker:
+        scope: model # one slow model must not pause the whole provider
+        slow_call_threshold: 60s
+        failure_threshold: 3
+
+virtual_models:
+  - source: resilient-chat
+    strategy: failover
+    targets:
+      - model: opencode/deepseek-v3
+      - model: openai/gpt-4o-mini
+
+failover:
+  enabled: true
+```
+
+Once three calls in a row to `opencode/deepseek-v3` take longer than 60
+seconds (or fail), its circuit opens and `resilient-chat` requests go straight
+to `openai/gpt-4o-mini` without waiting. Every `timeout` (default 30s) one
+probe request tries the primary again; traffic returns once probes answer
+within the threshold.
+
+A fast answer in between resets the count, so occasional slow calls never
+open the circuit. Prefer `scope: model` here: with the default
+`scope: provider`, fast models on the same provider keep resetting the count
+for the slow one.

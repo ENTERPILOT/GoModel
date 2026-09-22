@@ -101,6 +101,7 @@ The conventional cases, for completeness.
 | `500` | `500`, immediately | No | Yes | Yes |
 | `4xx` other than `429` | The provider's status and message | No | No | Only on a matching `retry_on_errors` phrase |
 | Local HTTP client timeout | `504` | No | Yes | Yes |
+| Answer slower than `slow_call_threshold` (off by default) | The provider's answer, unchanged | No | Yes | Once the circuit opens |
 | Circuit breaker already open | `503 circuit breaker is open - provider <name> temporarily unavailable` | No | — | Yes |
 
 Streaming requests are never retried once dispatched, and passthrough

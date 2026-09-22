@@ -39,6 +39,11 @@ type CircuitBreakerConfig struct {
 	FailureThreshold int           `yaml:"failure_threshold" env:"CIRCUIT_BREAKER_FAILURE_THRESHOLD"`
 	SuccessThreshold int           `yaml:"success_threshold" env:"CIRCUIT_BREAKER_SUCCESS_THRESHOLD"`
 	Timeout          time.Duration `yaml:"timeout"           env:"CIRCUIT_BREAKER_TIMEOUT"`
+	// SlowCallThreshold counts a call that was answered, but slower than this,
+	// as a breaker failure, so sustained latency opens the circuit like
+	// sustained errors do. Zero disables the latency trigger.
+	// Default: 0
+	SlowCallThreshold time.Duration `yaml:"slow_call_threshold" env:"CIRCUIT_BREAKER_SLOW_CALL_THRESHOLD"`
 }
 
 // DefaultCircuitBreakerConfig returns the default circuit breaker settings.
@@ -75,6 +80,7 @@ type RawCircuitBreakerConfig struct {
 	FailureThreshold  *int           `yaml:"failure_threshold"`
 	SuccessThreshold  *int           `yaml:"success_threshold"`
 	Timeout           *time.Duration `yaml:"timeout"`
+	SlowCallThreshold *time.Duration `yaml:"slow_call_threshold"`
 }
 
 // RawRetryConfig holds optional per-provider retry overrides from YAML.

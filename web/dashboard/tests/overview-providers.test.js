@@ -104,6 +104,13 @@ test("provider helper methods format configured models and resilience summaries"
     "3 retries, 1s initial, 30s max, factor 2, jitter 0.1",
   );
   assert.equal(providerCircuitBreakerSummary(provider), "5 fail, 2 success, 30s timeout");
+  provider.config.resilience.circuit_breaker.slow_call_threshold = "0s";
+  assert.equal(providerCircuitBreakerSummary(provider), "5 fail, 2 success, 30s timeout");
+  provider.config.resilience.circuit_breaker.slow_call_threshold = "45s";
+  assert.equal(
+    providerCircuitBreakerSummary(provider),
+    "5 fail, 2 success, 30s timeout, slow over 45s",
+  );
   assert.equal(providerLastChecked(provider), "2026-04-10T12:00:00Z");
   // The most recent of the two check timestamps wins, whichever side it is.
   assert.equal(
