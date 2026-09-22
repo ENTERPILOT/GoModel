@@ -127,6 +127,7 @@ func buildDefaultConfig() *Config {
 				"llamacpp",
 				"llmd",
 				"deepseek",
+				"jev",
 			},
 		},
 		Models: ModelsConfig{
