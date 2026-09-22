@@ -380,6 +380,7 @@
   "overview_hide_details": "Hide Details",
   "overview_view_provider_docs": "View {provider} provider docs",
   "overview_models_available": "Models Available",
+  "overview_view_provider_models": "View models from {provider}",
   "overview_last_checked": "Last Checked",
   "overview_expand_provider_details": "Expand {provider} details",
   "overview_collapse_provider_details": "Collapse {provider} details",

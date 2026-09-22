@@ -380,6 +380,7 @@
   "overview_hide_details": "Details ausblenden",
   "overview_view_provider_docs": "Anbieterdokumentation zu {provider} öffnen",
   "overview_models_available": "Verfügbare Modelle",
+  "overview_view_provider_models": "Modelle von {provider} anzeigen",
   "overview_last_checked": "Zuletzt geprüft",
   "overview_expand_provider_details": "Details zu {provider} ausklappen",
   "overview_collapse_provider_details": "Details zu {provider} einklappen",

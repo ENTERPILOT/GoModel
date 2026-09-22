@@ -353,6 +353,7 @@
   "overview_hide_details": "隐藏详情",
   "overview_view_provider_docs": "查看 {provider} 供应商文档",
   "overview_models_available": "可用模型",
+  "overview_view_provider_models": "查看 {provider} 的模型",
   "overview_last_checked": "上次检查时间",
   "overview_expand_provider_details": "展开 {provider} 详情",
   "overview_collapse_provider_details": "收起 {provider} 详情",

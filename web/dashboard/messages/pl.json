@@ -386,6 +386,7 @@
   "overview_hide_details": "Ukryj szczegóły",
   "overview_view_provider_docs": "Zobacz dokumentację dostawcy {provider}",
   "overview_models_available": "Dostępne modele",
+  "overview_view_provider_models": "Pokaż modele dostawcy {provider}",
   "overview_last_checked": "Ostatnio sprawdzono",
   "overview_expand_provider_details": "Rozwiń szczegóły dostawcy {provider}",
   "overview_collapse_provider_details": "Zwiń szczegóły dostawcy {provider}",
