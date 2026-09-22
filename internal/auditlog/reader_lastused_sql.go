@@ -16,7 +16,7 @@ import (
 const maxLastUsedKeysPerQuery = 500
 
 // GetLastUsedByAuthKeys returns the newest audit timestamp per auth key id.
-// The query rides the idx_audit_auth_key_id index; MAX over the timestamp
+// The query rides the idx_audit_auth_key_timestamp index; MAX over the timestamp
 // column orders the same way the list queries' ORDER BY timestamp DESC does.
 // Key ids are queried in bounded batches so key lists beyond the SQLite
 // variable limit still resolve.
@@ -44,13 +44,7 @@ func (r *SQLReader) queryLastUsedBatch(ctx context.Context, keyIDs []string) (ma
 	for i, id := range keyIDs {
 		args[i] = id
 	}
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(keyIDs)), ",")
-
-	rows, err := r.db.Query(ctx, `
-		SELECT auth_key_id, MAX(timestamp) FROM audit_logs
-		WHERE auth_key_id IN (`+placeholders+`)
-		GROUP BY auth_key_id
-	`, args...)
+	rows, err := r.db.Query(ctx, lastUsedQuery(len(keyIDs)), args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query auth key last used: %w", err)
 	}
@@ -68,4 +62,12 @@ func (r *SQLReader) queryLastUsedBatch(ctx context.Context, keyIDs []string) (ma
 		return nil, fmt.Errorf("error iterating auth key last used rows: %w", err)
 	}
 	return result, nil
+}
+
+// lastUsedQuery returns the per-key MAX(timestamp) query for n key ids.
+func lastUsedQuery(n int) string {
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", n), ",")
+	return `SELECT auth_key_id, MAX(timestamp) FROM audit_logs
+		WHERE auth_key_id IN (` + placeholders + `)
+		GROUP BY auth_key_id`
 }

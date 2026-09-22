@@ -123,7 +123,11 @@ var sqlIndexes = []string{
 	"CREATE INDEX IF NOT EXISTS idx_audit_workflow_version_id ON audit_logs(workflow_version_id)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_request_id ON audit_logs(request_id)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_principal_id ON audit_logs(principal_id)",
-	"CREATE INDEX IF NOT EXISTS idx_audit_auth_key_id ON audit_logs(auth_key_id)",
+	// Composite: serves the auth_key_id filter and the per-key MAX(timestamp)
+	// last-used lookup from the index alone. The drop retires the single-column
+	// predecessor.
+	"DROP INDEX IF EXISTS idx_audit_auth_key_id",
+	"CREATE INDEX IF NOT EXISTS idx_audit_auth_key_timestamp ON audit_logs(auth_key_id, timestamp)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_client_ip ON audit_logs(client_ip)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_path ON audit_logs(path)",
 	// Composite: serves both the session_id equality filter and its per-thread
