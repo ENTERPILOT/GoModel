@@ -343,3 +343,42 @@ func TestService_FailedCommitLeavesNoBlobBehind(t *testing.T) {
 	require.ErrorIs(t, err, assert.AnError)
 	assert.Equal(t, 0, blobs.Len(), "a blob the failed commit published is removed, since nothing records it")
 }
+
+// flakyDeleteBlobs publishes on commit, reports the commit as failed, and
+// refuses the first delete of every key, so cleanup has to be retried.
+type flakyDeleteBlobs struct {
+	publishThenFailBlobs
+	refused map[string]bool
+}
+
+func (b *flakyDeleteBlobs) Delete(ctx context.Context, key string) error {
+	if !b.refused[key] {
+		b.refused[key] = true
+		return assert.AnError
+	}
+	return b.Memory.Delete(ctx, key)
+}
+
+func TestService_FailedCleanupIsRetriedByTheSweep(t *testing.T) {
+	blobs := blobstore.NewMemory()
+	flaky := &flakyDeleteBlobs{publishThenFailBlobs: publishThenFailBlobs{blobs}, refused: map[string]bool{}}
+	now := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+	svc := newService(NewMemoryStore(), flaky, func() time.Time { return now }, false)
+	t.Cleanup(func() { _ = svc.Close() })
+	ctx := context.Background()
+
+	_, err := svc.Put(ctx, Descriptor{Kind: KindAudio, Source: SourceAudit, ContentType: "audio/wav"}, strings.NewReader("x"))
+	require.ErrorIs(t, err, assert.AnError)
+	require.Equal(t, 1, blobs.Len(), "the blob the failed commit published is still there")
+
+	expired, err := svc.objects.Expired(ctx, now, 10)
+	require.NoError(t, err)
+	require.Len(t, expired, 1, "the orphan is recorded as already expired")
+	_, err = svc.Get(ctx, expired[0].ID)
+	require.ErrorIs(t, err, ErrNotFound, "an expired record never reads as a live object")
+
+	removed, err := svc.Sweep(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 1, removed)
+	assert.Equal(t, 0, blobs.Len(), "the sweep finishes the cleanup")
+}

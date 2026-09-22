@@ -120,10 +120,7 @@ func (u *Upload) Commit(ctx context.Context) (*Object, error) {
 	}
 	u.done = true
 	if err := u.writer.Commit(); err != nil {
-		// The key was minted for this upload alone, so whatever the failed
-		// commit left behind is ours to remove; no record will point at it.
-		_ = u.service.blobs.Delete(ctx, u.object.StorageKey)
-		return nil, fmt.Errorf("commit media blob: %w", err)
+		return nil, u.service.abandon(ctx, u.object, fmt.Errorf("commit media blob: %w", err))
 	}
 	if err := u.service.objects.Insert(ctx, &u.object); err != nil {
 		_ = u.service.blobs.Delete(ctx, u.object.StorageKey)
@@ -140,6 +137,23 @@ func (u *Upload) Close() error {
 	}
 	u.done = true
 	return u.writer.Close()
+}
+
+// abandon removes whatever a failed commit may have published under the
+// upload's key. The key was minted for this upload alone, so nothing else
+// can be there. If the blob cannot be removed now, its record is written
+// already expired, so the retention sweep keeps retrying the removal
+// instead of the blob being orphaned.
+func (s *Service) abandon(ctx context.Context, object Object, cause error) error {
+	deleteErr := s.blobs.Delete(ctx, object.StorageKey)
+	if deleteErr == nil {
+		return cause
+	}
+	object.ExpiresAt = s.now().UTC()
+	if insertErr := s.objects.Insert(ctx, &object); insertErr != nil {
+		return errors.Join(cause, fmt.Errorf("remove media blob: %w", deleteErr), fmt.Errorf("record media blob for retention: %w", insertErr))
+	}
+	return errors.Join(cause, fmt.Errorf("remove media blob (left for the retention sweep): %w", deleteErr))
 }
 
 // Put stores everything r yields as one object.
