@@ -40,7 +40,8 @@ type geminiModelsResponse struct {
 
 // maxModelListPages bounds the pagination loop so a server that keeps handing
 // out tokens cannot stall discovery. At 50 models a page it covers 1000
-// models, far beyond Google's catalog.
+// models, far beyond Google's catalog; a listing that still has pages past
+// it is reported as an error rather than published incomplete.
 const maxModelListPages = 20
 
 func geminiModelSupportedMethods(modelID string, methods []string) (supportsGenerate, supportsEmbed, supportsImage bool) {
@@ -150,8 +151,16 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 		}
 		modelEntries := append(geminiResp.Models, geminiResp.PublisherModels...)
 		// The first page decides the response shape; later pages are native
-		// by construction, so they are fetched and appended here.
-		for token, page := geminiResp.NextPageToken, 1; token != "" && page < maxModelListPages; page++ {
+		// by construction, so they are fetched and appended here. A partial
+		// catalog would hide models with nothing to explain why, so a token
+		// that repeats or outlives the page cap fails the listing instead.
+		seen := map[string]struct{}{}
+		token := geminiResp.NextPageToken
+		for page := 1; token != "" && page < maxModelListPages; page++ {
+			if _, dup := seen[token]; dup {
+				return nil, core.NewProviderError(p.responseProviderName(), http.StatusBadGateway, "Gemini models listing repeated page token "+token, nil)
+			}
+			seen[token] = struct{}{}
 			var next geminiModelsResponse
 			if err := modelsClient.Do(ctx, llmclient.Request{
 				Method:   http.MethodGet,
@@ -162,6 +171,9 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 			modelEntries = append(modelEntries, next.Models...)
 			modelEntries = append(modelEntries, next.PublisherModels...)
 			token = next.NextPageToken
+		}
+		if token != "" {
+			return nil, core.NewProviderError(p.responseProviderName(), http.StatusBadGateway, fmt.Sprintf("Gemini models listing did not end within %d pages", maxModelListPages), nil)
 		}
 		if len(modelEntries) == 0 {
 			return &core.ModelsResponse{

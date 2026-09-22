@@ -1790,3 +1790,22 @@ func TestListModels_LaterPageFailurePropagates(t *testing.T) {
 	_, err := provider.ListModels(context.Background())
 	require.Error(t, err)
 }
+
+// A token that repeats would loop forever without the cap and, with it,
+// publish duplicates as a complete catalog; both are reported as errors.
+func TestListModels_RejectsRepeatedPageToken(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
+	server, capture := providertest.Server(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"models":[{"name":"models/gemini-2.5-flash","supportedGenerationMethods":["generateContent"]}],"nextPageToken":"again"}`)
+	})
+
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL + "/v1beta/openai")
+
+	_, err := provider.ListModels(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "repeated page token")
+	assert.Len(t, capture.All(), 2, "the repeat is caught before a third request")
+}

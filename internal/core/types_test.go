@@ -34,6 +34,7 @@ func TestModelPricingTierUnmarshalUpToTokens(t *testing.T) {
 	require.Equal(t, float64(200000), *cloned.Tiers[0].UpToTokens)
 
 	require.NotSame(t, pricing.Tiers[0].CachedInputPerMtok, cloned.Tiers[0].CachedInputPerMtok)
+	require.Equal(t, 0.3, *cloned.Tiers[0].CachedInputPerMtok)
 	*cloned.Tiers[0].CachedInputPerMtok = 0.6
 	require.Equal(t, 0.3, *pricing.Tiers[0].CachedInputPerMtok)
 }
