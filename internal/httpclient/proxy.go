@@ -2,6 +2,7 @@ package httpclient
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"slices"
 	"strings"
@@ -37,23 +38,29 @@ func ParseProxyURL(raw string) (*url.URL, error) {
 		return nil, fmt.Errorf("proxy URL must not carry a path, query, or fragment")
 	}
 	u.Path = ""
+	// net/http fills in 80/443 for HTTP proxies but dials a SOCKS5 host
+	// verbatim, so give SOCKS5 its conventional port here.
+	if u.Port() == "" && (scheme == "socks5" || scheme == "socks5h") {
+		u.Host = net.JoinHostPort(u.Hostname(), "1080")
+	}
 	return u, nil
 }
 
-// RedactProxyURL returns raw with any password replaced by "xxxxx", for logs
-// and admin views. Values that do not parse are returned as-is only when they
-// contain no userinfo; otherwise the whole value is masked.
+// redactedProxyURL stands in for any proxy value that does not validate: a
+// misparsed value can hide credentials where url.URL.Redacted would not look
+// (an opaque "user:pass@host:1080" parses with scheme "user"), so nothing of
+// it is shown.
+const redactedProxyURL = "***********"
+
+// RedactProxyURL returns a valid proxy URL with any password replaced by
+// "xxxxx", for logs and admin views, and a fixed mask for anything else.
 func RedactProxyURL(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
+	if strings.TrimSpace(raw) == "" {
 		return ""
 	}
-	u, err := url.Parse(raw)
+	u, err := ParseProxyURL(raw)
 	if err != nil {
-		if strings.Contains(raw, "@") {
-			return "***********"
-		}
-		return raw
+		return redactedProxyURL
 	}
 	return u.Redacted()
 }

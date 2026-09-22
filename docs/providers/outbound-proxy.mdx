@@ -1,6 +1,6 @@
 ---
 title: "Outbound Proxies"
-description: "Send one provider's traffic through an HTTP, HTTPS, or SOCKS5 proxy while the rest connects directly."
+description: "Send one provider's traffic through an HTTP, HTTPS, or SOCKS5 proxy while the rest keep the gateway-wide proxy settings."
 icon: "route"
 keywords: ["proxy", "SOCKS5", "HTTP proxy", "egress", "HTTPS_PROXY", "geo-restricted", "static IP"]
 ---
@@ -60,9 +60,9 @@ stored one.
 | `socks5h://` | Same as `socks5://` |
 
 Hostnames are always resolved on the proxy, so `socks5://` and `socks5h://`
-behave identically. The URL must be scheme, host, port, and optional
-credentials: a path, query, or fragment is rejected at startup and in the
-dashboard.
+behave identically. The URL is a scheme, a host, an optional port (80, 443,
+or 1080 by default), and optional credentials: a path, query, or fragment is
+rejected at startup and in the dashboard.
 
 ## Rules
 
@@ -83,7 +83,7 @@ The provider status endpoint reports the masked proxy for each provider:
 
 ```bash
 curl -s -H "Authorization: Bearer $GOMODEL_API_KEY" \
-  http://localhost:8080/admin/providers/status | jq '.[] | {name, proxy_url}'
+  http://localhost:8080/admin/providers/status | jq '.providers[] | {name, proxy_url: .config.proxy_url}'
 ```
 
 Then send one request and confirm it appears in the proxy's access log while

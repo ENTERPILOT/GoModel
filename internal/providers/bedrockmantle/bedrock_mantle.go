@@ -60,21 +60,23 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 		return &Provider{configErr: err}
 	}
 
+	// opts.HTTPClient carries the factory's proxy-aware transport when the
+	// provider has an outbound proxy; auth wraps it either way, and the AWS
+	// credential chain resolves through it too.
+	base := opts.HTTPClient
+	if base == nil {
+		base = httpclient.NewDefaultHTTPClient()
+	}
+
 	var credentials aws.CredentialsProvider
 	if keys.Len() == 0 {
-		awsCfg, loadErr := awsconfig.LoadDefaultConfig(context.Background(), awsconfig.WithRegion(endpoint.region))
+		awsCfg, loadErr := awsconfig.LoadDefaultConfig(context.Background(), awsconfig.WithRegion(endpoint.region), awsconfig.WithHTTPClient(base))
 		if loadErr != nil {
 			return &Provider{configErr: fmt.Errorf("load AWS config: %w", loadErr)}
 		}
 		credentials = awsCfg.Credentials
 	}
 
-	// opts.HTTPClient carries the factory's proxy-aware transport when the
-	// provider has an outbound proxy; auth wraps it either way.
-	base := opts.HTTPClient
-	if base == nil {
-		base = httpclient.NewDefaultHTTPClient()
-	}
 	client := authenticatedClient(base, keys, credentials, endpoint.region)
 	return newProvider(endpoint, cfg, opts, client)
 }

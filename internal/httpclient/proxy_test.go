@@ -20,6 +20,8 @@ func TestParseProxyURL(t *testing.T) {
 		{name: "https with trailing slash", raw: "https://proxy.internal:3129/", want: "https://proxy.internal:3129"},
 		{name: "socks5 with credentials", raw: "socks5://user:pass@10.0.0.1:1080", want: "socks5://user:pass@10.0.0.1:1080"},
 		{name: "socks5h", raw: "socks5h://proxy:1080", want: "socks5h://proxy:1080"},
+		{name: "socks5 without a port gets 1080", raw: "socks5://user:pass@proxy", want: "socks5://user:pass@proxy:1080"},
+		{name: "http without a port is left to net/http", raw: "http://proxy", want: "http://proxy"},
 		{name: "scheme is case-insensitive", raw: "SOCKS5://proxy:1080", want: "socks5://proxy:1080"},
 		{name: "surrounding whitespace", raw: "  http://proxy:3128  ", want: "http://proxy:3128"},
 		{name: "empty", raw: "   ", wantErr: "empty"},
@@ -55,6 +57,10 @@ func TestRedactProxyURL(t *testing.T) {
 		{name: "password masked", raw: "socks5://user:s3cret@proxy:1080", want: "socks5://user:xxxxx@proxy:1080"},
 		{name: "user only kept", raw: "http://user@proxy:3128", want: "http://user@proxy:3128"},
 		{name: "unparseable with userinfo is fully masked", raw: "http://user:p@ss@%zz", want: "***********"},
+		// url.Parse reads this as scheme "user" with an opaque part, where
+		// Redacted() would leave the password visible.
+		{name: "scheme-less value is fully masked", raw: "user:pass@10.0.0.1:1080", want: "***********"},
+		{name: "unsupported scheme is fully masked", raw: "ftp://user:pass@proxy:21", want: "***********"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

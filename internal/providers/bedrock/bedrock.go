@@ -72,6 +72,11 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 	if region != "" {
 		loadOpts = append(loadOpts, awsconfig.WithRegion(region))
 	}
+	// The factory supplies a proxy-aware client when the provider has an
+	// outbound proxy; both SDK clients and the credential chain must use it.
+	if opts.HTTPClient != nil {
+		loadOpts = append(loadOpts, awsconfig.WithHTTPClient(opts.HTTPClient))
+	}
 
 	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(), loadOpts...)
 	if err != nil {

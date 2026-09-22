@@ -140,13 +140,15 @@ func (p *Provider) authHTTPClient(providerCfg providers.ProviderConfig, base *ht
 	}
 	authCfg := buildGoogleAuthConfig(providerCfg)
 	authCfg.AuthType = p.authType
-	creds, err := googlecommon.FindCredentials(context.Background(), authCfg)
+	if base == nil {
+		base = httpclient.NewDefaultHTTPClient()
+	}
+	// Token exchange must use the same (possibly proxied) transport as the
+	// API calls it authenticates.
+	creds, err := googlecommon.FindCredentials(googlecommon.CredentialsContext(base), authCfg)
 	if err != nil {
 		p.configErr = err
 		return base
-	}
-	if base == nil {
-		base = httpclient.NewDefaultHTTPClient()
 	}
 	quotaProject := creds.QuotaProjectID
 	if strings.TrimSpace(quotaProject) == "" {

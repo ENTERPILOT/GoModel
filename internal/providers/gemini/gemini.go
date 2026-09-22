@@ -2,7 +2,6 @@
 package gemini
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -188,7 +187,12 @@ func (p *Provider) authHTTPClient(providerCfg providers.ProviderConfig, base *ht
 	if p.configErr != nil || p.authType == geminiAuthTypeAPIKey {
 		return base
 	}
-	creds, err := googlecommon.FindCredentials(context.Background(), googlecommon.Config{
+	if base == nil {
+		base = httpclient.NewDefaultHTTPClient()
+	}
+	// Token exchange must use the same (possibly proxied) transport as the
+	// API calls it authenticates.
+	creds, err := googlecommon.FindCredentials(googlecommon.CredentialsContext(base), googlecommon.Config{
 		AuthType:                 p.authType,
 		ServiceAccountFile:       providerCfg.ServiceAccountFile,
 		ServiceAccountJSON:       providerCfg.ServiceAccountJSON,
@@ -198,9 +202,6 @@ func (p *Provider) authHTTPClient(providerCfg providers.ProviderConfig, base *ht
 	if err != nil {
 		p.configErr = err
 		return base
-	}
-	if base == nil {
-		base = httpclient.NewDefaultHTTPClient()
 	}
 	quotaProject := creds.QuotaProjectID
 	if strings.TrimSpace(quotaProject) == "" {
