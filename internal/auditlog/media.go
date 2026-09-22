@@ -131,7 +131,7 @@ func (w *MediaWriter) Write(p []byte) (int, error) {
 	w.bytes += int64(len(p))
 	if w.upload != nil && !w.failed {
 		if _, err := w.upload.Write(p); err != nil {
-			w.fail(err)
+			w.fail(w.upload, err)
 		}
 	}
 	return len(p), nil
@@ -142,9 +142,13 @@ func (w *MediaWriter) Bytes() int64 {
 	return w.bytes
 }
 
-func (w *MediaWriter) fail(err error) {
+// fail abandons the upload after a store error. upload is passed explicitly
+// because finish clears w.upload before committing.
+func (w *MediaWriter) fail(upload *mediastore.Upload, err error) {
 	w.failed = true
-	_ = w.upload.Close()
+	if upload != nil {
+		_ = upload.Close()
+	}
 	slog.Warn("audit media capture failed", "kind", mediastore.KindAudio, "error", err)
 }
 
@@ -165,7 +169,7 @@ func (w *MediaWriter) finish() *mediastore.Object {
 	}
 	object, err := upload.Commit(w.capture.ctx)
 	if err != nil {
-		w.fail(err)
+		w.fail(upload, err)
 		return nil
 	}
 	w.object = object

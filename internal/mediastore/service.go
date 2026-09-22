@@ -210,7 +210,11 @@ func (s *Service) remove(ctx context.Context, object *Object) error {
 }
 
 // Sweep removes every object whose retention has run out and reports how
-// many it removed. The hourly loop calls it; tests call it directly.
+// many it removed. An object that cannot be removed does not stop the
+// others: the sweep works through the batch, then reports the failures
+// together. It stops after a batch with failures rather than reselecting the
+// same objects forever; the next hourly run tries them again. The hourly
+// loop calls it; tests call it directly.
 func (s *Service) Sweep(ctx context.Context) (int, error) {
 	removed := 0
 	for {
@@ -218,11 +222,16 @@ func (s *Service) Sweep(ctx context.Context) (int, error) {
 		if err != nil {
 			return removed, err
 		}
+		var failures []error
 		for _, object := range expired {
 			if err := s.remove(ctx, object); err != nil {
-				return removed, err
+				failures = append(failures, fmt.Errorf("%s: %w", object.ID, err))
+				continue
 			}
 			removed++
+		}
+		if len(failures) > 0 {
+			return removed, fmt.Errorf("%d of %d expired media objects not removed: %w", len(failures), len(expired), errors.Join(failures...))
 		}
 		if len(expired) < sweepBatch {
 			return removed, nil

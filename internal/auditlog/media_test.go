@@ -166,3 +166,37 @@ type failingWriter struct{}
 func (failingWriter) Write([]byte) (int, error) { return 0, assert.AnError }
 func (failingWriter) Commit() error             { return assert.AnError }
 func (failingWriter) Close() error              { return nil }
+
+// commitFailingBlobs accepts every write and fails only at commit, the case
+// where finish has already let go of the upload.
+type commitFailingBlobs struct{ blobstore.Store }
+
+func (b commitFailingBlobs) Create(ctx context.Context, key string) (blobstore.Writer, error) {
+	w, err := b.Store.Create(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	return commitFailingWriter{w}, nil
+}
+
+type commitFailingWriter struct{ blobstore.Writer }
+
+func (commitFailingWriter) Commit() error { return assert.AnError }
+
+func TestMediaWriter_CommitFailureRecordsUnstored(t *testing.T) {
+	store := mediastore.NewService(mediastore.NewMemoryStore(), commitFailingBlobs{blobstore.NewMemory()})
+	t.Cleanup(func() { _ = store.Close() })
+	c, _ := echotest.Post(t, "/v1/audio/speech", `{}`)
+	c.Set(string(LogEntryKey), &LogEntry{RequestID: "req-1"})
+	capture := NewMediaCapturer(store, 30).For(c)
+
+	w := capture.AudioWriter("audio/mpeg")
+	_, err := w.Write([]byte("chunk"))
+	require.NoError(t, err)
+	body := BuildRelayedAudioResponseBody(w)
+	assert.False(t, body.Stored)
+	assert.Empty(t, body.MediaID)
+	assert.Equal(t, int64(5), body.Bytes)
+	again := BuildRelayedAudioResponseBody(w)
+	assert.False(t, again.Stored, "a second build after a failed commit stays unstored")
+}

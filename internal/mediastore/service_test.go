@@ -233,3 +233,47 @@ func TestValidID(t *testing.T) {
 		assert.ErrorIs(t, svc.Delete(context.Background(), id), ErrNotFound, "Delete(%q)", id)
 	}
 }
+
+// stickyBlobs refuses to delete one key so a sweep can be watched working
+// past it.
+type stickyBlobs struct {
+	*blobstore.Memory
+	stuck string
+}
+
+func (b stickyBlobs) Delete(ctx context.Context, key string) error {
+	if key == b.stuck {
+		return assert.AnError
+	}
+	return b.Memory.Delete(ctx, key)
+}
+
+func TestService_SweepContinuesPastAFailedObject(t *testing.T) {
+	blobs := blobstore.NewMemory()
+	now := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+	sticky := &stickyBlobs{Memory: blobs}
+	svc := newService(NewMemoryStore(), sticky, func() time.Time { return now }, false)
+	t.Cleanup(func() { _ = svc.Close() })
+	ctx := context.Background()
+
+	oldest, err := svc.Put(ctx, Descriptor{Kind: KindAudio, Source: SourceAudit, ContentType: "audio/wav", TTL: time.Minute}, strings.NewReader("oldest"))
+	require.NoError(t, err)
+	sticky.stuck = oldest.StorageKey
+	later, err := svc.Put(ctx, Descriptor{Kind: KindAudio, Source: SourceAudit, ContentType: "audio/wav", TTL: 2 * time.Minute}, strings.NewReader("later"))
+	require.NoError(t, err)
+
+	now = now.Add(time.Hour)
+	removed, err := svc.Sweep(ctx)
+	require.Error(t, err, "the stuck object is reported")
+	assert.Equal(t, 1, removed)
+	_, err = svc.objects.Get(ctx, later.ID)
+	require.ErrorIs(t, err, ErrNotFound, "the later object is removed despite the earlier failure")
+	_, err = svc.objects.Get(ctx, oldest.ID)
+	require.NoError(t, err, "the stuck object stays for the next sweep")
+
+	sticky.stuck = ""
+	removed, err = svc.Sweep(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 1, removed)
+	assert.Equal(t, 0, blobs.Len())
+}

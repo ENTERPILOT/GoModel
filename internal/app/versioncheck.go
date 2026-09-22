@@ -86,7 +86,7 @@ func warnIfMediaDirEphemeral(cfg *config.Config) {
 	if cfg == nil || cfg.Media.Storage.Type != config.MediaStorageFilesystem {
 		return
 	}
-	if !cfg.Logging.Enabled || !cfg.Logging.LogBodies || (!cfg.Logging.LogAudioBodies && !cfg.Logging.LogImageBodies) {
+	if !mediaCaptureEnabled(cfg) {
 		return
 	}
 	dir := cfg.Media.Storage.Path

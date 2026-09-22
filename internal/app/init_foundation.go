@@ -209,7 +209,14 @@ func (b *bootstrap) initStores() error {
 	}
 	blobs, err := mediastore.OpenBlobStore(b.appCfg.Media.Storage.Type, b.appCfg.Media.Storage.Path)
 	if err != nil {
-		return fmt.Errorf("failed to open media storage: %w", err)
+		// A path nothing will write to must not keep the gateway from
+		// starting; a path a feature depends on must.
+		if mediaCaptureEnabled(b.appCfg) {
+			return fmt.Errorf("failed to open media storage: %w", err)
+		}
+		slog.Warn("media storage unavailable; using in-memory media storage until it is fixed",
+			"type", b.appCfg.Media.Storage.Type, "path", b.appCfg.Media.Storage.Path, "error", err)
+		blobs, _ = mediastore.OpenBlobStore(mediastore.StorageMemory, "")
 	}
 	mediaResult, err := mediastore.New(b.ctx, app.storage, blobs)
 	if err != nil {
@@ -302,4 +309,10 @@ func selectorLabel(selector ext.RouteSelector) (name string) {
 		}
 	}()
 	return selector.Name()
+}
+
+// mediaCaptureEnabled reports whether any enabled feature writes media: today
+// that is audit capture of audio or image bodies.
+func mediaCaptureEnabled(cfg *config.Config) bool {
+	return cfg.Logging.Enabled && cfg.Logging.LogBodies && (cfg.Logging.LogAudioBodies || cfg.Logging.LogImageBodies)
 }
