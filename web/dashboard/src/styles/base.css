@@ -1,3 +1,14 @@
+/* App shell: the document never scrolls; the sidebar and the content column
+   own their scrolling. Heights chain from html so the shell always matches
+   the real viewport (100vh over-measures on mobile browsers and whenever a
+   horizontal scrollbar takes viewport height, leaving a second, document-
+   level scrollbar). */
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
   font-family:
     "Inter",
@@ -11,13 +22,9 @@ body {
   line-height: 1.5;
 }
 
-body.dashboard-modal-open {
-  overflow: hidden;
-}
-
 .app {
   display: flex;
-  height: 100vh;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
 }
