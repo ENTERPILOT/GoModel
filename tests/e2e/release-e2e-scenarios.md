@@ -912,7 +912,7 @@ Checks translated chat on Groq.
 RESP_FILE="$QA_RUN_DIR/s21.chat.json"
 curl -fsS "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"groq/compound-mini","messages":[{"role":"user","content":"Reply with exactly QA_GROQ_OK"}],"max_tokens":20}' \
+  -d '{"model":"groq/openai/gpt-oss-20b","messages":[{"role":"user","content":"Reply with exactly QA_GROQ_OK"}],"max_tokens":200}' \
   > "$RESP_FILE"
 jq '{model,provider,usage,answer:.choices[0].message.content}' "$RESP_FILE"
 assert_chat_response_contains "$RESP_FILE" "groq" "QA_GROQ_OK"
@@ -2717,11 +2717,11 @@ Creates a two-target round-robin redirect and verifies the admin view shape.
 SRC="qa-lb-rr-$QA_SUFFIX"
 curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
-  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/groq/compound-mini\"}],\"description\":\"qa lb rr\"}" \
+  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/openai/gpt-oss-20b\"}],\"description\":\"qa lb rr\"}" \
   | jq -e --arg s "$SRC" '
       .source == $s and .kind == "redirect" and .strategy == "round_robin"
       and (.targets | length) == 2
-      and .targets[0].model == "openai/gpt-4.1-nano" and .targets[1].model == "groq/groq/compound-mini"
+      and .targets[0].model == "openai/gpt-4.1-nano" and .targets[1].model == "groq/openai/gpt-oss-20b"
       and .enabled == true
     ' >/dev/null
 curl -fsS -X DELETE "$BASE_URL/admin/virtual-models" \
@@ -2738,8 +2738,8 @@ requests resolve to each provider three times.
 SRC="qa-lb-rrd-$QA_SUFFIX"
 curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
-  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"session_affinity\":false,\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/groq/compound-mini\"}]}" >/dev/null
-for M in openai/gpt-4.1-nano groq/groq/compound-mini; do
+  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"session_affinity\":false,\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/openai/gpt-oss-20b\"}]}" >/dev/null
+for M in openai/gpt-4.1-nano groq/openai/gpt-oss-20b; do
   curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
     -d "{\"model\":\"$M\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":5}" >/dev/null
 done
@@ -2768,8 +2768,8 @@ of them to the target that served the first — the weighting would never run.
 SRC="qa-lb-w-$QA_SUFFIX"
 curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
-  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"session_affinity\":false,\"targets\":[{\"model\":\"openai/gpt-4.1-nano\",\"weight\":2},{\"model\":\"groq/groq/compound-mini\",\"weight\":1}]}" >/dev/null
-for M in openai/gpt-4.1-nano groq/groq/compound-mini; do
+  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"session_affinity\":false,\"targets\":[{\"model\":\"openai/gpt-4.1-nano\",\"weight\":2},{\"model\":\"groq/openai/gpt-oss-20b\",\"weight\":1}]}" >/dev/null
+for M in openai/gpt-4.1-nano groq/openai/gpt-oss-20b; do
   curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
     -d "{\"model\":\"$M\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":5}" >/dev/null
 done
@@ -2848,7 +2848,7 @@ HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s123.headers.XXXXXX")
 BODY_FILE=$(mktemp "$QA_RUN_DIR/s123.body.XXXXXX")
 curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
-  -d "{\"source\":\"qa-lb-bad-$QA_SUFFIX\",\"strategy\":\"weighted\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/groq/compound-mini\"}]}"
+  -d "{\"source\":\"qa-lb-bad-$QA_SUFFIX\",\"strategy\":\"weighted\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/openai/gpt-oss-20b\"}]}"
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
 jq -e '.error.type == "invalid_request_error" and (.error.message | test("strategy"))' "$BODY_FILE" >/dev/null
 ```
