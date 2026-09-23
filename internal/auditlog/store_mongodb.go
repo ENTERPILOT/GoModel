@@ -140,19 +140,18 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 	}
 
 	// Best-effort: retire the index on the pre-v0.1.17 execution_plan_version_id
-	// field, which the workflow rename left behind on older collections, and
-	// the single-field auth_key_id index the compound one replaces. "Not found"
-	// is the expected outcome on collections that never had them.
-	for _, name := range []string{legacyExecutionPlanIndex, legacyAuthKeyIndex} {
-		if err := collection.Indexes().DropOne(ctx, name); err != nil && !isIndexNotFound(err) {
-			slog.Warn("failed to drop legacy MongoDB index", "index", name, "error", err)
-		}
-	}
+	// field, which the workflow rename left behind on older collections. Most
+	// collections never had it, so "not found" is the expected outcome.
+	dropLegacyMongoIndex(ctx, collection, legacyExecutionPlanIndex)
 
 	_, err := collection.Indexes().CreateMany(ctx, indexes)
 	if err != nil {
 		// Log warning but don't fail - indexes may already exist
 		slog.Warn("failed to create some MongoDB indexes", "error", err)
+	} else {
+		// Retire the single-field auth_key_id index only once the compound
+		// index that replaces it exists.
+		dropLegacyMongoIndex(ctx, collection, legacyAuthKeyIndex)
 	}
 
 	return &MongoDBStore{
@@ -215,4 +214,11 @@ func (s *MongoDBStore) Flush(_ context.Context) error {
 // Close is a no-op for MongoDB as the client is managed by the storage layer.
 func (s *MongoDBStore) Close() error {
 	return nil
+}
+
+// dropLegacyMongoIndex drops a retired index, treating "not found" as done.
+func dropLegacyMongoIndex(ctx context.Context, collection *mongo.Collection, name string) {
+	if err := collection.Indexes().DropOne(ctx, name); err != nil && !isIndexNotFound(err) {
+		slog.Warn("failed to drop legacy MongoDB index", "index", name, "error", err)
+	}
 }
