@@ -46,6 +46,16 @@ func newTestProvider(server *httptest.Server) core.Provider {
 	return New(providers.ProviderConfig{APIKey: "kimi-key", BaseURL: server.URL}, opts)
 }
 
+func TestRejectPreviousResponseID(t *testing.T) {
+	t.Run("nil request passes through", func(t *testing.T) {
+		assert.NoError(t, rejectPreviousResponseID(nil))
+	})
+
+	t.Run("clean request passes through", func(t *testing.T) {
+		assert.NoError(t, rejectPreviousResponseID(&core.ResponsesRequest{Model: "kimi-for-coding", Input: "hi"}))
+	})
+}
+
 func TestAdaptResponsesRequest(t *testing.T) {
 	t.Run("nil passes through", func(t *testing.T) {
 		assert.Nil(t, adaptResponsesRequest(nil))
