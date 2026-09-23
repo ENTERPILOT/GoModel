@@ -22,17 +22,18 @@ func applyEnvOverrides(cfg *Config) error {
 }
 
 // parsePluginLoadEntry parses one PLUGINS_LOAD item. The last "=" separates
-// file from digest only when the suffix is exactly 64 hex characters (a
-// sha256); anything else — including "=" or "," inside a file name — makes
-// the whole item the file name. Commas delimit entries by design, so file
-// names containing commas are not supported.
+// file from digest only when the trimmed suffix is exactly 64 hex characters
+// (a sha256); anything else — including "=" or "," inside a file name — makes
+// the whole item the file name. Whitespace around the separator is trimmed.
+// Commas delimit entries by design, so file names containing commas are not
+// supported.
 func parsePluginLoadEntry(item string) PluginFileConfig {
 	item = strings.TrimSpace(item)
 	i := strings.LastIndex(item, "=")
 	if i < 0 {
 		return PluginFileConfig{File: item}
 	}
-	if sha := item[i+1:]; isSHA256Hex(sha) {
+	if sha := strings.TrimSpace(item[i+1:]); isSHA256Hex(sha) {
 		return PluginFileConfig{File: strings.TrimSpace(item[:i]), SHA256: sha}
 	}
 	return PluginFileConfig{File: item}

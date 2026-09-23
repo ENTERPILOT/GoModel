@@ -368,7 +368,9 @@ a startup error naming the file.
 
 Installations without a `config.yaml` can list the same entries through the
 environment: `PLUGINS_LOAD` is a comma-separated list of `file` values, each
-optionally `file=sha256` to pin the digest. When non-empty, it replaces the
+optionally `file=sha256` to pin the digest. Only the final `=` followed by
+exactly 64 hexadecimal characters starts a digest pin; any other entry is a
+file name. When non-empty, it replaces the
 `plugins.load` list from `config.yaml` (env > config, like every other
 env-configurable value).
 

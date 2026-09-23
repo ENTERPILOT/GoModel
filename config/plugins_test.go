@@ -102,6 +102,15 @@ func TestApplyPluginsLoadEnv(t *testing.T) {
 	}, cfg.Plugins.Load)
 }
 
+func TestApplyPluginsLoadEnvSpacedDigest(t *testing.T) {
+	sha := strings.Repeat("ab", 32) // 64 hex chars
+	t.Setenv("PLUGINS_LOAD", "b.so = "+sha)
+
+	cfg := &Config{}
+	require.NoError(t, applyEnvOverrides(cfg))
+	require.Equal(t, []PluginFileConfig{{File: "b.so", SHA256: sha}}, cfg.Plugins.Load)
+}
+
 func TestApplyPluginsLoadEnvDelimiterBearingFilenames(t *testing.T) {
 	sha := strings.Repeat("ab", 32) // 64 hex chars
 	tests := []struct {
