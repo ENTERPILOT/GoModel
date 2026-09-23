@@ -40,7 +40,7 @@ updates:
 
   - package-ecosystem: "npm"
     # Docs CI tooling (mint) locked in docs/package-lock.json; see the
-    # `docs-validation` job in .github/workflows/test.yml.
+    # `docs-validate` job in .github/workflows/test.yml.
     directory: "/docs"
     schedule:
       interval: "weekly"

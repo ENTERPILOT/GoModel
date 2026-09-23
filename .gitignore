@@ -44,7 +44,7 @@
 /internal/admin/dashboard/static/dist/
 
 # Mintlify CLI pinned for docs validation; see docs/package.json and the
-# `docs-validation` job in .github/workflows/test.yml.
+# `docs-validate` job in .github/workflows/test.yml.
 /docs/node_modules/
 
 # Example plugin shared objects built by `make example-plugins`.
