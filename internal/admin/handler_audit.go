@@ -51,6 +51,7 @@ const conversationBuildTimeout = 10 * time.Second
 // @Param        error_type   query     string  false  "Filter by error type"
 // @Param        status_code  query     int     false  "Filter by status code"
 // @Param        stream       query     bool    false  "Filter by stream mode (true/false)"
+// @Param        operation    query     string  false  "Comma-separated endpoint operations to keep, e.g. chat_completions,responses (mcp, provider_passthrough, audio_speech, ...)"
 // @Param        search       query     string  false  "Search across request_id/requested_model/provider/method/path/session_id/error_type/error_message"
 // @Param        limit        query     int     false  "Page size (default 25, max 100)"
 // @Param        offset       query     int     false  "Offset for pagination"
@@ -169,6 +170,14 @@ func parseAuditLogQueryParams(c *echo.Context) (auditlog.LogQueryParams, error) 
 		params.Stream = &parsed
 	}
 
+	if raw := c.QueryParam("operation"); raw != "" {
+		ops, unknown, ok := core.ParseOperations(raw)
+		if !ok {
+			return params, core.NewInvalidRequestError("invalid operation: "+unknown, nil)
+		}
+		params.Operations = ops
+	}
+
 	if l := c.QueryParam("limit"); l != "" {
 		parsed, err := strconv.Atoi(l)
 		if err != nil || parsed <= 0 {
@@ -211,6 +220,7 @@ func parseAuditLogQueryParams(c *echo.Context) (auditlog.LogQueryParams, error) 
 // @Param        error_type   query     string  false  "Filter by error type"
 // @Param        status_code  query     int     false  "Filter by status code"
 // @Param        stream       query     bool    false  "Filter by stream mode (true/false)"
+// @Param        operation    query     string  false  "Comma-separated endpoint operations to keep, e.g. chat_completions,responses (mcp, provider_passthrough, audio_speech, ...)"
 // @Param        search       query     string  false  "Search across request_id/requested_model/provider/method/path/session_id/error_type/error_message"
 // @Param        limit        query     int     false  "Page size in threads (default 25, max 100)"
 // @Param        offset       query     int     false  "Offset for pagination"

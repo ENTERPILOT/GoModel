@@ -331,6 +331,14 @@
             }
           },
           {
+            "description": "Comma-separated endpoint operations to keep, e.g. chat_completions,responses (mcp, provider_passthrough, audio_speech, ...)",
+            "name": "operation",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Search across request_id/requested_model/provider/method/path/session_id/error_type/error_message",
             "name": "search",
             "in": "query",
@@ -505,6 +513,14 @@
             "in": "query",
             "schema": {
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Comma-separated endpoint operations to keep, e.g. chat_completions,responses (mcp, provider_passthrough, audio_speech, ...)",
+            "name": "operation",
+            "in": "query",
+            "schema": {
+              "type": "string"
             }
           },
           {

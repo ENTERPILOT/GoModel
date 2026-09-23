@@ -66,7 +66,7 @@ func applyPluginsLoadEnv(cfg *Config) {
 		return
 	}
 	load := make([]PluginFileConfig, 0, 4)
-	for _, item := range strings.Split(v, ",") {
+	for item := range strings.SplitSeq(v, ",") {
 		if entry := parsePluginLoadEntry(item); entry.File != "" {
 			load = append(load, entry)
 		}

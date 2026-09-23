@@ -6,6 +6,7 @@
 import { formatJSON, formatNumber } from "../../lib/utils/format.js";
 import * as m from "../../lib/paraglide/messages.js";
 import { phaseLabel } from "../../lib/utils/pluginPhases.js";
+import { auditEntryTypeVisible, auditOperationsQuery } from "./audit-operations.js";
 import {
   workflowEntryGuardrails,
   workflowGuardrailActionLabel,
@@ -125,6 +126,7 @@ export function buildAuditLogQuery({
   method,
   statusCode,
   stream,
+  hiddenTypes,
 }) {
   let qs = dateQuery;
   qs += "&limit=" + limit + "&offset=" + offset;
@@ -132,6 +134,8 @@ export function buildAuditLogQuery({
   if (method) qs += "&method=" + encodeURIComponent(method);
   if (statusCode) qs += "&status_code=" + encodeURIComponent(statusCode);
   if (stream) qs += "&stream=" + encodeURIComponent(stream);
+  const operations = auditOperationsQuery(hiddenTypes);
+  if (operations) qs += "&operation=" + encodeURIComponent(operations);
   return qs;
 }
 
@@ -320,7 +324,9 @@ export function auditLogWithLiveEntries(payload, currentEntries, filters) {
   if (!auditLogAllowsLiveEntries(next, filters)) return next;
 
   const liveEntries = (Array.isArray(currentEntries) ? currentEntries : []).filter(
-    (entry) => auditEntryLivePreviewPending(entry),
+    (entry) =>
+      auditEntryLivePreviewPending(entry) &&
+      auditEntryTypeVisible(entry, filters && filters.hiddenTypes),
   );
   if (liveEntries.length === 0) return next;
 
@@ -356,7 +362,9 @@ export function auditGroupedLogWithLiveEntries(payload, currentEntries, filters)
   if (!auditLogAllowsLiveEntries(next, filters)) return next;
 
   const liveEntries = (Array.isArray(currentEntries) ? currentEntries : []).filter(
-    (entry) => auditEntryLivePreviewPending(entry),
+    (entry) =>
+      auditEntryLivePreviewPending(entry) &&
+      auditEntryTypeVisible(entry, filters && filters.hiddenTypes),
   );
   if (liveEntries.length === 0) return next;
 

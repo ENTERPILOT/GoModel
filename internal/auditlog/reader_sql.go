@@ -12,6 +12,7 @@ import (
 
 	"github.com/goccy/go-json"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
@@ -242,6 +243,10 @@ func (r *SQLReader) logFilters(ctx context.Context, params LogQueryParams) ([]st
 	}
 	if params.Stream != nil {
 		add("stream = ?", *params.Stream)
+	}
+	if len(params.Operations) > 0 {
+		condition, values := operationsSQLFilter(params.Operations)
+		add(condition, values...)
 	}
 	if params.Search != "" {
 		condition, values := r.searchFilter(params.Search, r.searchIsIndexed(ctx))
@@ -559,4 +564,23 @@ func isMissingAuditAttemptsTable(err error) bool {
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "audit_log_attempts") &&
 		(strings.Contains(message, "no such table") || strings.Contains(message, "does not exist"))
+}
+
+// operationsSQLFilter matches paths belonging to any of the operations. The
+// prefixes hold no LIKE wildcards, so they need no escaping.
+func operationsSQLFilter(ops []core.Operation) (string, []any) {
+	var clauses []string
+	var args []any
+	for _, op := range ops {
+		paths, _ := core.PathsForOperation(op)
+		for _, exact := range paths.Exact {
+			clauses = append(clauses, "path = ?")
+			args = append(args, exact)
+		}
+		for _, prefix := range paths.Prefixes {
+			clauses = append(clauses, "path = ?", "path LIKE ?")
+			args = append(args, prefix, prefix+"/%")
+		}
+	}
+	return "(" + strings.Join(clauses, " OR ") + ")", args
 }

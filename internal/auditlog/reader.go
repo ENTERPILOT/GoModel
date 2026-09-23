@@ -3,6 +3,8 @@ package auditlog
 import (
 	"context"
 	"time"
+
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // QueryParams specifies the date range for audit log retrieval.
@@ -24,8 +26,11 @@ type LogQueryParams struct {
 	Search         string
 	StatusCode     *int
 	Stream         *bool
-	Limit          int
-	Offset         int
+	// Operations keeps entries whose path belongs to one of these operations.
+	// Empty matches every entry.
+	Operations []core.Operation
+	Limit      int
+	Offset     int
 	// OmitAttempts excludes provider attempts from returned entries. The default is false.
 	OmitAttempts bool
 	// ExactUserPath matches only UserPath instead of its subtree. The default is false.

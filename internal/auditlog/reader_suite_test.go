@@ -7,6 +7,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
@@ -101,5 +102,50 @@ func TestReader_GetLastUsedByAuthKeys(t *testing.T) {
 		assert.True(t, lastUsed["key-2"].Equal(old.Add(time.Hour)), "key-2 last used = %v", lastUsed["key-2"])
 		_, ok := lastUsed["key-unknown"]
 		assert.False(t, ok)
+	})
+}
+
+func TestReader_GetLogsFiltersByOperation(t *testing.T) {
+	runReaderSuite(t, func(t *testing.T, store LogStore, reader Reader) {
+		ctx := context.Background()
+		base := time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC)
+		paths := []string{
+			"/v1/chat/completions", "/mcp", "/mcp/github", "/mcpx",
+			"/v1/audio/speech", "/v1/audio/transcriptions", "/p/openai/v1/models",
+		}
+		entries := make([]*LogEntry, 0, len(paths))
+		for i, path := range paths {
+			entries = append(entries, &LogEntry{
+				ID:        "op-" + path,
+				Timestamp: base.Add(time.Duration(i) * time.Minute),
+				Path:      path,
+			})
+		}
+		require.NoError(t, store.WriteBatch(ctx, entries))
+
+		tests := []struct {
+			name string
+			ops  []core.Operation
+			want []string
+		}{
+			{name: "mcp prefix", ops: []core.Operation{core.OperationMCP}, want: []string{"/mcp", "/mcp/github"}},
+			{name: "exact and prefix", ops: []core.Operation{core.OperationAudioSpeech, core.OperationProviderPassthrough}, want: []string{"/v1/audio/speech", "/p/openai/v1/models"}},
+			{name: "everything but mcp", ops: []core.Operation{
+				core.OperationChatCompletions, core.OperationAudioSpeech,
+				core.OperationAudioTranscriptions, core.OperationProviderPassthrough,
+			}, want: []string{"/v1/chat/completions", "/v1/audio/speech", "/v1/audio/transcriptions", "/p/openai/v1/models"}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				result, err := reader.GetLogs(ctx, LogQueryParams{Operations: tt.ops, Limit: 50})
+				require.NoError(t, err)
+				got := make([]string, 0, len(result.Entries))
+				for _, entry := range result.Entries {
+					got = append(got, entry.Path)
+				}
+				assert.ElementsMatch(t, tt.want, got)
+				assert.Equal(t, len(tt.want), result.Total)
+			})
+		}
 	})
 }

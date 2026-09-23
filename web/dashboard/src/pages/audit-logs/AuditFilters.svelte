@@ -1,15 +1,35 @@
 <script>
-  // Audit-log toolbar: consolidated search + method/status/stream selects and
-  // the Clear button.
+  // Audit-log toolbar: consolidated search + method/status/stream selects,
+  // the request-type checklist, and the Clear button.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { debounced } from "$lib/utils/debounce.js";
   import { auditList } from "./auditList.svelte.js";
+  import { AUDIT_TYPES } from "./audit-operations.js";
   import { X } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   const onSearchInput = debounced(() => auditList.fetchAuditLog(true));
   $effect(() => onSearchInput.cancel);
+
+  let typeMenu = $state();
+  const hiddenCount = $derived(auditList.auditHiddenTypes.length);
+
+  // Close the type checklist on an outside click or Escape.
+  $effect(() => {
+    const close = (event) => {
+      if (!typeMenu || !typeMenu.open) return;
+      if (event.type === "keydown" ? event.key === "Escape" : !typeMenu.contains(event.target)) {
+        typeMenu.open = false;
+      }
+    };
+    document.addEventListener("click", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("click", close);
+      document.removeEventListener("keydown", close);
+    };
+  });
 </script>
 
 <div class="audit-log-toolbar">
@@ -69,6 +89,26 @@
       <option value="true">{m.audit_filter_streaming()}</option>
       <option value="false">{m.audit_filter_non_streaming()}</option>
     </select>
+    <details class="audit-filter-select audit-type-filter" bind:this={typeMenu}>
+      <summary class="usage-log-select" aria-label={m.audit_filter_type_label()}>
+        {hiddenCount > 0 ? m.audit_filter_types_hidden({ count: hiddenCount }) : m.audit_filter_all_types()}
+      </summary>
+      <fieldset class="audit-type-menu">
+        <legend class="audit-type-legend">{m.audit_filter_type_label()}</legend>
+        {#each AUDIT_TYPES as type (type.key)}
+          {@const visible = !auditList.auditHiddenTypes.includes(type.key)}
+          <label class="audit-type-option">
+            <input
+              type="checkbox"
+              checked={visible}
+              disabled={visible && hiddenCount === AUDIT_TYPES.length - 1}
+              onchange={() => auditList.toggleAuditType(type.key)}
+            />
+            <span>{type.label()}</span>
+          </label>
+        {/each}
+      </fieldset>
+    </details>
     <button
       type="button"
       class="btn audit-clear-btn"
@@ -112,6 +152,64 @@
     grid-column: 11 / -1;
     justify-self: end;
     min-width: 108px;
+  }
+
+  .audit-filter-row-controls .audit-type-filter {
+    position: relative;
+    grid-column: span 3;
+  }
+
+  .audit-type-filter summary {
+    display: block;
+    list-style: none;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    cursor: pointer;
+  }
+
+  .audit-type-filter summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .audit-type-menu {
+    position: absolute;
+    z-index: 20;
+    top: calc(100% + 4px);
+    left: 0;
+    min-width: 100%;
+    margin: 0;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
+  }
+
+  .audit-type-legend {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .audit-type-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 13px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .audit-type-option:hover {
+    background: var(--bg-surface-hover);
   }
 
   /* Colors come from the shared .btn styles: the stylesheet

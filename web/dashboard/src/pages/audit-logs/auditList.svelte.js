@@ -17,6 +17,7 @@ import { getJSON } from "$lib/api/client.js";
 import { writeStored } from "$lib/utils/storage.js";
 import { dateRange } from "$lib/stores/dateRange.svelte.js";
 import { liveLogs } from "./liveLogs.svelte.js";
+import { normalizeHiddenTypes } from "./audit-operations.js";
 import { auditWorkflows } from "./audit-workflows.svelte.js";
 import {
   auditEntryKey,
@@ -80,6 +81,13 @@ class AuditListStore {
   set auditStream(value) {
     liveLogs.auditStream = value;
   }
+  get auditHiddenTypes() {
+    return liveLogs.auditHiddenTypes;
+  }
+  set auditHiddenTypes(value) {
+    liveLogs.auditHiddenTypes = normalizeHiddenTypes(value);
+    writeStored("gomodel_audit_hidden_types", JSON.stringify(liveLogs.auditHiddenTypes));
+  }
   get auditGroupSessions() {
     return liveLogs.auditGroupSessions;
   }
@@ -92,6 +100,7 @@ class AuditListStore {
       method: this.auditMethod,
       statusCode: this.auditStatusCode,
       stream: this.auditStream,
+      hiddenTypes: this.auditHiddenTypes,
       customStartDate: dateRange.customStartDate,
       customEndDate: dateRange.customEndDate,
     };
@@ -99,6 +108,15 @@ class AuditListStore {
 
   // toggleAuditGroupSessions flips the persisted view preference. It is a view
   // preference, not a filter: clearAuditFilters leaves it alone.
+  // toggleAuditType shows or hides one request type and refetches.
+  toggleAuditType(key) {
+    const hidden = this.auditHiddenTypes;
+    this.auditHiddenTypes = hidden.includes(key)
+      ? hidden.filter((item) => item !== key)
+      : [...hidden, key];
+    this.fetchAuditLog(true);
+  }
+
   toggleAuditGroupSessions() {
     liveLogs.auditGroupSessions = !liveLogs.auditGroupSessions;
     writeStored("gomodel_audit_group_sessions", liveLogs.auditGroupSessions);
@@ -121,6 +139,7 @@ class AuditListStore {
         method: this.auditMethod,
         statusCode: this.auditStatusCode,
         stream: this.auditStream,
+        hiddenTypes: this.auditHiddenTypes,
       });
 
       const path = grouped ? "/admin/audit/sessions?" : "/admin/audit/log?";
@@ -303,6 +322,7 @@ class AuditListStore {
     this.auditMethod = "";
     this.auditStatusCode = "";
     this.auditStream = "";
+    this.auditHiddenTypes = [];
     this.fetchAuditLog(true);
   }
 

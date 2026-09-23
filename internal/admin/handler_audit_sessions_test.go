@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -136,4 +137,18 @@ func TestAuditLog_SessionIDSkipsDefaultDateWindow(t *testing.T) {
 	require.NoError(t, h.AuditLog(c))
 	require.False(t, reader.lastQuery.StartDate.IsZero())
 	require.False(t, reader.lastQuery.EndDate.IsZero())
+}
+
+func TestAuditLog_OperationFilter(t *testing.T) {
+	reader := &mockAuditReader{logResult: &auditlog.LogListResult{}}
+	h := NewHandler(nil, nil, WithAuditReader(reader))
+
+	c, _ := echotest.Get(t, "/admin/audit/log?operation=chat_completions,audio_speech")
+	require.NoError(t, h.AuditLog(c))
+	assert.Equal(t, []core.Operation{core.OperationChatCompletions, core.OperationAudioSpeech}, reader.lastQuery.Operations)
+
+	c, rec := echotest.Get(t, "/admin/audit/log?operation=mcp,nope")
+	require.NoError(t, h.AuditLog(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "invalid operation: nope")
 }
