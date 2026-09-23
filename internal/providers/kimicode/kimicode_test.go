@@ -181,7 +181,9 @@ func TestStreamResponses_NativeEndpoint(t *testing.T) {
 
 	req := capture.Last(t)
 	assert.Equal(t, "/responses", req.Path)
-	assert.Equal(t, true, req.JSON(t)["stream"], "wire stream")
+	wire := req.JSON(t)
+	assert.Equal(t, false, wire["store"], "wire store")
+	assert.Equal(t, true, wire["stream"], "wire stream")
 	assert.Contains(t, string(body), "event: response.completed")
 	assert.True(t, strings.HasSuffix(strings.TrimSpace(string(body)), "data: [DONE]"),
 		"stream should end with data: [DONE], got %q", string(body))
