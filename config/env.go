@@ -17,7 +17,61 @@ func applyEnvOverrides(cfg *Config) error {
 	}
 	normalizeModelListURL(cfg)
 	applyOfflineMode(cfg)
+	applyPluginsLoadEnv(cfg)
 	return nil
+}
+
+// parsePluginLoadEntry parses one PLUGINS_LOAD item. The last "=" separates
+// file from digest only when the trimmed suffix is exactly 64 hex characters
+// (a sha256); anything else — including "=" or "," inside a file name — makes
+// the whole item the file name. Whitespace around the separator is trimmed.
+// Commas delimit entries by design, so file names containing commas are not
+// supported.
+func parsePluginLoadEntry(item string) PluginFileConfig {
+	item = strings.TrimSpace(item)
+	i := strings.LastIndex(item, "=")
+	if i < 0 {
+		return PluginFileConfig{File: item}
+	}
+	if sha := strings.TrimSpace(item[i+1:]); isSHA256Hex(sha) {
+		return PluginFileConfig{File: strings.TrimSpace(item[:i]), SHA256: sha}
+	}
+	return PluginFileConfig{File: item}
+}
+
+// isSHA256Hex reports whether s is exactly 64 hex characters.
+func isSHA256Hex(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, r := range s {
+		isHex := (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')
+		if !isHex {
+			return false
+		}
+	}
+	return true
+}
+
+// applyPluginsLoadEnv applies PLUGINS_LOAD, replacing plugins.load from the
+// config file, so env > config for the plugin list like for every other
+// env-configurable value. The generic env overlay cannot express a list of
+// structs, so this variable is applied explicitly after the struct walk —
+// the same pattern as the existing normalizeModelListURL. The value is a
+// comma-separated list of .so file names, each entry optionally
+// "file=sha256hex" to pin the digest.
+func applyPluginsLoadEnv(cfg *Config) {
+	v := strings.TrimSpace(os.Getenv("PLUGINS_LOAD"))
+	if v == "" {
+		return
+	}
+	load := make([]PluginFileConfig, 0, 4)
+	for _, item := range strings.Split(v, ",") {
+		if entry := parsePluginLoadEntry(item); entry.File != "" {
+			load = append(load, entry)
+		}
+	}
+	cfg.Plugins.Load = load
 }
 
 // applyOfflineMode enforces the offline switch after every other source has
