@@ -27,9 +27,20 @@ func WithQuotaTemplates(enabled bool) ServiceOption {
 	}
 }
 
+// WithSpendCacheTTL sets how long enforcement checks reuse a window's spend.
+// Zero or negative disables the cache.
+func WithSpendCacheTTL(ttl time.Duration) ServiceOption {
+	return func(service *Service) {
+		service.spendCacheTTL = ttl
+	}
+}
+
 type Service struct {
 	store Store
 	mu    sync.RWMutex
+
+	spendCacheTTL time.Duration
+	spends        *spendCache
 
 	budgets  []Budget
 	settings Settings
@@ -45,11 +56,15 @@ func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Se
 		store:          store,
 		settings:       DefaultSettings(),
 		quotaTemplates: true,
+		spendCacheTTL:  defaultSpendCacheTTL,
 	}
 	for _, option := range options {
 		if option != nil {
 			option(service)
 		}
+	}
+	if service.spendCacheTTL > 0 {
+		service.spends = newSpendCache(service.spendCacheTTL)
 	}
 	if err := service.Refresh(ctx); err != nil {
 		return nil, err
@@ -195,7 +210,7 @@ func (s *Service) statusesMatching(ctx context.Context, subjects *Subjects, now 
 	if err != nil {
 		return nil, err
 	}
-	return s.evaluate(ctx, matching, now, settings)
+	return s.evaluate(ctx, matching, now, settings, false)
 }
 
 func (s *Service) ResetBudget(ctx context.Context, scope Scope, subject string, periodSeconds int64, at time.Time) error {
@@ -247,7 +262,7 @@ func (s *Service) CheckWithResults(ctx context.Context, subjects Subjects, now t
 	if len(matching) == 0 {
 		return nil, nil
 	}
-	results, err := s.evaluate(ctx, matching, now, settings)
+	results, err := s.evaluate(ctx, matching, now, settings, true)
 	if err != nil {
 		return results, err
 	}
@@ -295,8 +310,9 @@ func (s *Service) match(subjects *Subjects, now time.Time) ([]Budget, Settings, 
 
 // evaluate resolves the active period of every budget and asks the store for
 // all their spends in one round trip. Enforcement runs on every request, so the
-// batched lookup is what keeps a wide match set from costing a query each.
-func (s *Service) evaluate(ctx context.Context, budgets []Budget, now time.Time, settings Settings) ([]CheckResult, error) {
+// batched lookup is what keeps a wide match set from costing a query each, and
+// useCache lets it reuse recently summed windows.
+func (s *Service) evaluate(ctx context.Context, budgets []Budget, now time.Time, settings Settings, useCache bool) ([]CheckResult, error) {
 	if len(budgets) == 0 {
 		return []CheckResult{}, nil
 	}
@@ -326,12 +342,9 @@ func (s *Service) evaluate(ctx context.Context, budgets []Budget, now time.Time,
 		return results, nil
 	}
 
-	spends, err := s.store.SumSpend(ctx, windows)
+	spends, err := s.sumSpend(ctx, windows, useCache)
 	if err != nil {
 		return nil, err
-	}
-	if len(spends) != len(windows) {
-		return nil, fmt.Errorf("budget store returned %d spends for %d windows", len(spends), len(windows))
 	}
 	for i, spend := range spends {
 		result := &results[windowIndexes[i]]
@@ -340,4 +353,59 @@ func (s *Service) evaluate(ctx context.Context, budgets []Budget, now time.Time,
 		result.Remaining = result.Budget.Amount - spend.Total
 	}
 	return results, nil
+}
+
+// sumSpend returns the spend of every window. With useCache it queries the
+// store only for windows the cache does not hold; without it every window is
+// queried fresh, and the result still refreshes the cache.
+func (s *Service) sumSpend(ctx context.Context, windows []SpendWindow, useCache bool) ([]Spend, error) {
+	cache := s.spends
+	if cache == nil {
+		return s.querySpend(ctx, windows)
+	}
+	if !useCache {
+		generation := cache.currentGeneration()
+		spends, err := s.querySpend(ctx, windows)
+		if err == nil {
+			cache.put(windows, spends, generation)
+		}
+		return spends, err
+	}
+	spends, misses, generation := cache.get(windows)
+	if len(misses) == 0 {
+		return spends, nil
+	}
+	missed := make([]SpendWindow, len(misses))
+	for i, index := range misses {
+		missed[i] = windows[index]
+	}
+	fresh, err := s.querySpend(ctx, missed)
+	if err != nil {
+		return nil, err
+	}
+	cache.put(missed, fresh, generation)
+	for i, index := range misses {
+		spends[index] = fresh[i]
+	}
+	return spends, nil
+}
+
+func (s *Service) querySpend(ctx context.Context, windows []SpendWindow) ([]Spend, error) {
+	spends, err := s.store.SumSpend(ctx, windows)
+	if err != nil {
+		return nil, err
+	}
+	if len(spends) != len(windows) {
+		return nil, fmt.Errorf("budget store returned %d spends for %d windows", len(spends), len(windows))
+	}
+	return spends, nil
+}
+
+// InvalidateSpend drops cached spends. The usage logger calls it after each
+// flush, so the next enforcement check sums the newly written usage.
+func (s *Service) InvalidateSpend() {
+	if s == nil || s.spends == nil {
+		return
+	}
+	s.spends.clear()
 }

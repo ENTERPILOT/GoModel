@@ -22,6 +22,7 @@ type Logger struct {
 	closed        atomic.Bool
 	liveMu        sync.RWMutex
 	livePublisher LiveEventPublisher
+	flushListener atomic.Pointer[func()]
 }
 
 // NewLogger creates a new async buffered Logger.
@@ -95,6 +96,15 @@ func (l *Logger) SetLivePublisher(p LiveEventPublisher) {
 	l.liveMu.Lock()
 	defer l.liveMu.Unlock()
 	l.livePublisher = p
+}
+
+// SetFlushListener registers fn to run after every batch is written, so
+// readers that cache usage-derived totals (budgets) can drop them.
+func (l *Logger) SetFlushListener(fn func()) {
+	if l == nil {
+		return
+	}
+	l.flushListener.Store(&fn)
 }
 
 func (l *Logger) publishLiveEvent(eventType string, entry *UsageEntry) {
@@ -212,6 +222,9 @@ func (l *Logger) flushBatch(batch []*UsageEntry) {
 		return
 	}
 
+	if fn := l.flushListener.Load(); fn != nil && *fn != nil {
+		(*fn)()
+	}
 	for _, entry := range batch {
 		l.publishLiveEvent(LiveEventUsageFlushed, entry)
 	}
