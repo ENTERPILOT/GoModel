@@ -938,3 +938,52 @@ func TestResponsesBlocksFromContentPartsKeepsLargeIntegersExact(t *testing.T) {
 		require.Contains(t, string(encoded), want)
 	}
 }
+
+func TestResponsesResponseJSON_CompletedAtAndStoreRoundTrip(t *testing.T) {
+	cases := []struct {
+		name       string
+		storeJSON  string
+		wantStore  *bool
+		wantStored bool
+	}{
+		{name: "store false", storeJSON: `,"store":false`, wantStore: new(bool), wantStored: true},
+		{name: "store absent", storeJSON: ``, wantStore: nil, wantStored: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var resp ResponsesResponse
+			err := json.Unmarshal([]byte(`{
+				"id":"resp_123",
+				"object":"response",
+				"created_at":1677652288,
+				"completed_at":1677652299,
+				"model":"gpt-4o-mini",
+				"provider":"openai",
+				"status":"completed",
+				"output":[]`+tc.storeJSON+`
+			}`), &resp)
+			require.NoError(t, err)
+			require.Equal(t, int64(1677652299), resp.CompletedAt)
+			if tc.wantStore == nil {
+				require.Nil(t, resp.Store)
+			} else {
+				require.NotNil(t, resp.Store)
+				require.Equal(t, *tc.wantStore, *resp.Store)
+			}
+
+			body, err := json.Marshal(resp)
+			require.NoError(t, err)
+
+			var decoded map[string]any
+			err = json.Unmarshal(body, &decoded)
+			require.NoError(t, err)
+			require.Equal(t, float64(1677652299), decoded["completed_at"])
+			store, present := decoded["store"]
+			require.Equal(t, tc.wantStored, present, "store presence mismatch in marshaled payload: %s", string(body))
+			if tc.wantStore != nil {
+				require.Equal(t, *tc.wantStore, store)
+			}
+		})
+	}
+}

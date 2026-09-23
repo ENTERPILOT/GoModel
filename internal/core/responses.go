@@ -184,15 +184,19 @@ type ResponsesInputElement struct {
 
 // ResponsesResponse represents the response from the Responses API.
 type ResponsesResponse struct {
-	ID        string                `json:"id"`
-	Object    string                `json:"object"` // "response"
-	CreatedAt int64                 `json:"created_at"`
-	Model     string                `json:"model"`
-	Provider  string                `json:"provider"`
-	Status    string                `json:"status"` // "completed", "incomplete", "failed", "in_progress"
-	Output    []ResponsesOutputItem `json:"output"`
-	Usage     *ResponsesUsage       `json:"usage,omitempty"`
-	Error     *ResponsesError       `json:"error,omitempty"`
+	ID        string `json:"id"`
+	Object    string `json:"object"` // "response"
+	CreatedAt int64  `json:"created_at"`
+	// CompletedAt is the upstream completion timestamp; zero while the
+	// response is still in progress.
+	CompletedAt int64                 `json:"completed_at,omitempty"`
+	Store       *bool                 `json:"store,omitempty"`
+	Model       string                `json:"model"`
+	Provider    string                `json:"provider"`
+	Status      string                `json:"status"` // "completed", "incomplete", "failed", "in_progress"
+	Output      []ResponsesOutputItem `json:"output"`
+	Usage       *ResponsesUsage       `json:"usage,omitempty"`
+	Error       *ResponsesError       `json:"error,omitempty"`
 	// IncompleteDetails explains a status of "incomplete": the model hit
 	// max_output_tokens, was stopped by a content filter, or the upstream
 	// stream was interrupted.

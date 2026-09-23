@@ -118,3 +118,34 @@ func TestResponsesUsageMarshalJSON_UsesResponsesDetailFieldNames(t *testing.T) {
 	_, exists = payload["raw_usage"]
 	require.False(t, exists, "did not expect raw_usage in marshaled responses payload: %s", string(body))
 }
+
+func TestResponsesUsageJSON_CacheWriteTokensRoundTrip(t *testing.T) {
+	var usage ResponsesUsage
+	err := json.Unmarshal([]byte(`{
+		"input_tokens": 100,
+		"output_tokens": 20,
+		"total_tokens": 120,
+		"input_tokens_details": {
+			"cached_tokens": 88,
+			"cache_write_tokens": 12
+		}
+	}`), &usage)
+	require.NoError(t, err)
+	require.NotNil(t, usage.PromptTokensDetails)
+	require.Equal(t, 88, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 12, usage.PromptTokensDetails.CacheWriteTokens)
+
+	body, err := json.Marshal(usage)
+	require.NoError(t, err)
+
+	var payload map[string]any
+	err = json.Unmarshal(body, &payload)
+	require.NoError(t, err)
+
+	inputDetails, ok := payload["input_tokens_details"].(map[string]any)
+	require.True(t, ok, "decoded input_tokens_details = %#v, want object", payload["input_tokens_details"])
+	require.Equal(t, float64(88), inputDetails["cached_tokens"])
+	require.Equal(t, float64(12), inputDetails["cache_write_tokens"])
+	_, exists := payload["raw_usage"]
+	require.False(t, exists, "did not expect cache_write_tokens to leak into raw_usage: %s", string(body))
+}

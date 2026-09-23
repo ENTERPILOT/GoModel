@@ -155,9 +155,12 @@ type ResponseMessage struct {
 // PromptTokensDetails holds extended input token breakdown (OpenAI/xAI).
 type PromptTokensDetails struct {
 	CachedTokens int `json:"cached_tokens"`
-	AudioTokens  int `json:"audio_tokens"`
-	TextTokens   int `json:"text_tokens"`
-	ImageTokens  int `json:"image_tokens"`
+	// CacheWriteTokens counts tokens written to the provider's prompt cache
+	// (Kimi Code / Anthropic-style cache creation).
+	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
+	AudioTokens      int `json:"audio_tokens"`
+	TextTokens       int `json:"text_tokens"`
+	ImageTokens      int `json:"image_tokens"`
 }
 
 // CompletionTokensDetails holds extended output token breakdown (OpenAI/xAI).
