@@ -22,8 +22,18 @@ type Logger struct {
 	closed        atomic.Bool
 	liveMu        sync.RWMutex
 	livePublisher LiveEventPublisher
-	flushListener atomic.Pointer[func()]
+	flushListener atomic.Pointer[flushListenerBox]
 }
+
+// FlushListener is told when a batch write starts and when it has finished,
+// so readers that cache usage-derived totals (budgets) can stop caching while
+// new rows may already be visible and drop what they cached before.
+type FlushListener interface {
+	UsageFlushStarted()
+	UsageFlushFinished()
+}
+
+type flushListenerBox struct{ listener FlushListener }
 
 // NewLogger creates a new async buffered Logger.
 // The logger starts a background goroutine for flushing entries.
@@ -98,13 +108,12 @@ func (l *Logger) SetLivePublisher(p LiveEventPublisher) {
 	l.livePublisher = p
 }
 
-// SetFlushListener registers fn to run after every batch is written, so
-// readers that cache usage-derived totals (budgets) can drop them.
-func (l *Logger) SetFlushListener(fn func()) {
+// SetFlushListener registers the listener told about every batch write.
+func (l *Logger) SetFlushListener(listener FlushListener) {
 	if l == nil {
 		return
 	}
-	l.flushListener.Store(&fn)
+	l.flushListener.Store(&flushListenerBox{listener: listener})
 }
 
 func (l *Logger) publishLiveEvent(eventType string, entry *UsageEntry) {
@@ -208,6 +217,11 @@ func (l *Logger) flushBatch(batch []*UsageEntry) {
 		return
 	}
 
+	if box := l.flushListener.Load(); box != nil && box.listener != nil {
+		box.listener.UsageFlushStarted()
+		defer box.listener.UsageFlushFinished()
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -222,9 +236,6 @@ func (l *Logger) flushBatch(batch []*UsageEntry) {
 		return
 	}
 
-	if fn := l.flushListener.Load(); fn != nil && *fn != nil {
-		(*fn)()
-	}
 	for _, entry := range batch {
 		l.publishLiveEvent(LiveEventUsageFlushed, entry)
 	}

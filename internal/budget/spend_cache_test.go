@@ -66,20 +66,30 @@ func TestServiceCheckReusesSpendWithinTTL(t *testing.T) {
 	assert.Equal(t, 2, store.sumCalls)
 }
 
-func TestServiceInvalidateSpendForcesFreshSum(t *testing.T) {
+func TestServiceUsageFlushInvalidatesSpend(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
 	spent := 1.0
 	store := teamBudgetStore(&spent)
 	service, _ := newCachedTestService(t, store)
+	var exceeded *ExceededError
 
 	require.NoError(t, service.Check(ctx, path("/team/app"), now))
-	spent = 20
-	service.InvalidateSpend()
 
-	var exceeded *ExceededError
+	// Rows can be visible before the batch write returns, so a check during
+	// the flush must sum fresh and must not cache what it saw.
+	service.UsageFlushStarted()
+	spent = 20
 	require.ErrorAs(t, service.Check(ctx, path("/team/app"), now), &exceeded)
-	assert.Equal(t, 2, store.sumCalls)
+	spent = 30
+	require.ErrorAs(t, service.Check(ctx, path("/team/app"), now), &exceeded)
+	assert.Equal(t, 3, store.sumCalls, "no caching while a flush runs")
+	service.UsageFlushFinished()
+
+	require.ErrorAs(t, service.Check(ctx, path("/team/app"), now), &exceeded)
+	require.ErrorAs(t, service.Check(ctx, path("/team/app"), now), &exceeded)
+	assert.Equal(t, 4, store.sumCalls, "caching resumes after the flush")
+	assert.InDelta(t, 30, exceeded.Result.Spent, 0)
 }
 
 func TestServiceStatusesAlwaysSumFreshAndRefreshCache(t *testing.T) {
@@ -128,20 +138,31 @@ func TestServiceSpendCacheDisabled(t *testing.T) {
 	require.NoError(t, service.Check(ctx, path("/team/app"), now))
 	require.NoError(t, service.Check(ctx, path("/team/app"), now))
 	assert.Equal(t, 2, store.sumCalls)
-	service.InvalidateSpend()
+	service.UsageFlushStarted()
+	service.UsageFlushFinished()
 }
 
-func TestSpendCacheDropsResultsSummedBeforeClear(t *testing.T) {
-	cache := newSpendCache(time.Minute)
+func TestSpendCacheDropsResultsSummedAcrossAFlush(t *testing.T) {
 	windows := []SpendWindow{{Scope: ScopeUserPath, Subject: "/team", Start: time.Unix(100, 0)}}
+	tests := []struct {
+		name  string
+		flush func(*spendCache)
+	}{
+		{"flush started during the query", func(c *spendCache) { c.beginFlush() }},
+		{"flush finished during the query", func(c *spendCache) { c.beginFlush(); c.endFlush() }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cache := newSpendCache(time.Minute)
+			_, misses, generation := cache.get(windows)
+			require.Equal(t, []int{0}, misses)
+			tt.flush(cache)
+			cache.put(windows, []Spend{{Total: 1, HasUsage: true}}, generation)
 
-	_, misses, generation := cache.get(windows)
-	require.Equal(t, []int{0}, misses)
-	cache.clear() // a usage flush lands while the query runs
-	cache.put(windows, []Spend{{Total: 1, HasUsage: true}}, generation)
-
-	_, misses, _ = cache.get(windows)
-	assert.Equal(t, []int{0}, misses)
+			_, misses, _ = cache.get(windows)
+			assert.Equal(t, []int{0}, misses)
+		})
+	}
 }
 
 func TestSpendCacheSweepsExpiredWindows(t *testing.T) {

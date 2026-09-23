@@ -401,11 +401,20 @@ func (s *Service) querySpend(ctx context.Context, windows []SpendWindow) ([]Spen
 	return spends, nil
 }
 
-// InvalidateSpend drops cached spends. The usage logger calls it after each
-// flush, so the next enforcement check sums the newly written usage.
-func (s *Service) InvalidateSpend() {
+// UsageFlushStarted stops spend caching while the usage logger writes a
+// batch, since its rows can become visible before the write returns.
+func (s *Service) UsageFlushStarted() {
 	if s == nil || s.spends == nil {
 		return
 	}
-	s.spends.clear()
+	s.spends.beginFlush()
+}
+
+// UsageFlushFinished drops cached spends once a batch write has finished, so
+// the next enforcement check sums the newly written usage.
+func (s *Service) UsageFlushFinished() {
+	if s == nil || s.spends == nil {
+		return
+	}
+	s.spends.endFlush()
 }

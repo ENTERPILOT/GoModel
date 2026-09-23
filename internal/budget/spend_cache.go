@@ -6,9 +6,10 @@ import (
 )
 
 // defaultSpendCacheTTL bounds how long an enforcement check reuses a window's
-// spend. The usage logger clears the cache after every flush, so within one
-// instance new spend is seen exactly when it reaches the database; the TTL
-// only bounds staleness from other instances' writes and admin changes.
+// spend. The cache is bypassed while the usage logger writes a batch and
+// cleared once it finishes, so within one instance new spend is seen as soon
+// as it reaches the database; the TTL only bounds staleness from other
+// instances' writes.
 const defaultSpendCacheTTL = 2 * time.Second
 
 // spendKey identifies a budget window. The end is always "now", so it is not
@@ -33,9 +34,12 @@ type spendCache struct {
 	mu        sync.Mutex
 	entries   map[spendKey]cachedSpend
 	nextSweep time.Time
-	// generation advances on every clear, so a query that started before a
-	// clear cannot store its now-stale result after it.
+	// generation advances whenever a flush starts or ends, so a query that
+	// started before either cannot store its now-stale result after it.
 	generation uint64
+	// flushing counts usage batch writes in progress; while any runs, rows
+	// may be visible before the write returns, so nothing is served or stored.
+	flushing int
 }
 
 func newSpendCache(ttl time.Duration) *spendCache {
@@ -55,6 +59,10 @@ func (c *spendCache) get(windows []SpendWindow) ([]Spend, []int, uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for i, window := range windows {
+		if c.flushing > 0 {
+			misses = append(misses, i)
+			continue
+		}
 		entry, ok := c.entries[keyFor(window)]
 		if !ok || !now.Before(entry.expiresAt) {
 			misses = append(misses, i)
@@ -72,13 +80,13 @@ func (c *spendCache) currentGeneration() uint64 {
 	return c.generation
 }
 
-// put stores spends summed during generation; it drops them when the cache
-// was cleared since.
+// put stores spends summed during generation; it drops them when a flush
+// started or ended since, or is still running.
 func (c *spendCache) put(windows []SpendWindow, spends []Spend, generation uint64) {
 	now := c.now()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if generation != c.generation {
+	if generation != c.generation || c.flushing > 0 {
 		return
 	}
 	// Drop expired windows at most once per TTL, so per-child budgets with
@@ -96,10 +104,21 @@ func (c *spendCache) put(windows []SpendWindow, spends []Spend, generation uint6
 	}
 }
 
-// clear drops every cached spend.
-func (c *spendCache) clear() {
+// beginFlush stops serving and storing spends until the matching endFlush.
+func (c *spendCache) beginFlush() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.flushing++
+	c.generation++
+}
+
+// endFlush drops every cached spend, since the written batch changed them.
+func (c *spendCache) endFlush() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.flushing > 0 {
+		c.flushing--
+	}
 	clear(c.entries)
 	c.generation++
 }

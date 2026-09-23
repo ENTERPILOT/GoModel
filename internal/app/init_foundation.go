@@ -166,8 +166,10 @@ func (b *bootstrap) initTracking() error {
 	app.budgets = budgetResult
 	if budgetResult.Service != nil {
 		// Budget checks cache spend between usage flushes; each flush clears it.
-		if logger, ok := app.usage.Logger.(interface{ SetFlushListener(func()) }); ok {
-			logger.SetFlushListener(budgetResult.Service.InvalidateSpend)
+		if logger, ok := app.usage.Logger.(interface {
+			SetFlushListener(usage.FlushListener)
+		}); ok {
+			logger.SetFlushListener(budgetResult.Service)
 		}
 	}
 	app.register(subsystemBudgets, ownedByShutdown, app.budgets.Close)
