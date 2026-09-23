@@ -117,7 +117,7 @@ func TestConvertMessagesToResponsesInput_MultimodalParts(t *testing.T) {
 
 	input, instructions, err := ConvertMessagesToResponsesInput(messages)
 	require.NoError(t, err)
-	assert.Equal(t, "", instructions)
+	assert.Empty(t, instructions)
 
 	items := responsesInputItems(t, input)
 	require.Len(t, items, 1)
@@ -367,4 +367,74 @@ func TestConvertMessagesToResponsesInput_RejectsUnknownPartType(t *testing.T) {
 			assert.Contains(t, gatewayErr.Message, tt.wantName)
 		})
 	}
+}
+
+func TestConvertMessagesToResponsesInput_ContentEdgeCases(t *testing.T) {
+	tests := []struct {
+		name        string
+		content     core.MessageContent
+		wantContent any
+	}{
+		{name: "nil content becomes an empty string", content: nil, wantContent: ""},
+		{name: "empty string content stays empty", content: "", wantContent: ""},
+		{name: "empty parts array becomes an empty string", content: []any{}, wantContent: ""},
+		{name: "unnormalizable parts become an empty string", content: []any{"nope"}, wantContent: ""},
+		{name: "non-text scalar content becomes an empty string", content: 42, wantContent: ""},
+		{
+			name:        "dynamic JSON parts convert",
+			content:     []any{map[string]any{"type": "text", "text": "hi"}},
+			wantContent: []any{map[string]any{"type": "input_text", "text": "hi"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input, _, err := ConvertMessagesToResponsesInput([]core.Message{
+				{Role: "user", Content: tt.content},
+			})
+			require.NoError(t, err)
+
+			items := responsesInputItems(t, input)
+			require.Len(t, items, 1)
+			assert.Equal(t, tt.wantContent, items[0].Content)
+		})
+	}
+}
+
+func TestConvertMessagesToResponsesInput_MalformedPartsSkipped(t *testing.T) {
+	// Malformed parts of a known type are skipped, matching
+	// buildResponsesContentItemsFromParts on the inbound path.
+	messages := []core.Message{
+		{Role: "user", Content: []core.ContentPart{
+			{Type: "text", Text: ""},
+			{Type: "image_url"},
+			{Type: "image_url", ImageURL: &core.ImageURLContent{URL: "  "}},
+			{Type: "input_audio"},
+			{Type: "input_audio", InputAudio: &core.InputAudioContent{Data: "aGk="}},
+			{Type: "file", File: &core.FileContent{}},
+			{Type: "file", File: &core.FileContent{FileData: "aGk=", Filename: "a.pdf"}},
+		}},
+	}
+
+	input, _, err := ConvertMessagesToResponsesInput(messages)
+	require.NoError(t, err)
+
+	items := responsesInputItems(t, input)
+	require.Len(t, items, 1)
+	blocks, ok := items[0].Content.([]any)
+	require.True(t, ok, "content must be []any blocks, got %T", items[0].Content)
+	require.Len(t, blocks, 1)
+	assert.Equal(t, map[string]any{"type": "input_file", "file_data": "aGk=", "filename": "a.pdf"}, blocks[0])
+}
+
+func TestConvertMessagesToResponsesInput_ToolOutputUnserializable(t *testing.T) {
+	input, _, err := ConvertMessagesToResponsesInput([]core.Message{
+		{Role: "tool", ToolCallID: "call_1", Content: map[string]any{"callback": func() {}}},
+	})
+	require.Error(t, err)
+	assert.Nil(t, input)
+
+	var gatewayErr *core.GatewayError
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
+	assert.Contains(t, gatewayErr.Message, "function_call_output")
 }

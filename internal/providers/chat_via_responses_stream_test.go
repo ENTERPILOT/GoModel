@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -168,7 +167,7 @@ func TestOpenAIChatStreamConverter_SingleToolCall(t *testing.T) {
 	function, ok := call["function"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "get_weather", function["name"])
-	assert.Equal(t, "", function["arguments"])
+	assert.Empty(t, function["arguments"])
 
 	first := chatChunkToolCalls(t, events[2].Payload)[0].(map[string]any)
 	assert.Equal(t, float64(0), first["index"])
@@ -385,7 +384,7 @@ func TestOpenAIChatStreamConverter_FailedMidStream(t *testing.T) {
 
 	events, raw, err := readChatViaResponsesStream(t, stream, false)
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, streaming.ErrStreamIncomplete), "err = %v", err)
+	require.ErrorIs(t, err, streaming.ErrStreamIncomplete)
 
 	// role + content delta + in-band error; no finish chunk, no [DONE].
 	require.Len(t, events, 3)
@@ -410,7 +409,7 @@ func TestOpenAIChatStreamConverter_TopLevelErrorEvent(t *testing.T) {
 
 	events, _, err := readChatViaResponsesStream(t, stream, false)
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, streaming.ErrStreamIncomplete), "err = %v", err)
+	require.ErrorIs(t, err, streaming.ErrStreamIncomplete)
 
 	require.Len(t, events, 2)
 	errorPayload, ok := events[1].Payload["error"].(map[string]any)
@@ -429,7 +428,7 @@ func TestOpenAIChatStreamConverter_EndsWithoutTerminalEvent(t *testing.T) {
 
 	events, raw, err := readChatViaResponsesStream(t, stream, false)
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, streaming.ErrStreamIncomplete), "err = %v", err)
+	require.ErrorIs(t, err, streaming.ErrStreamIncomplete)
 
 	// role + content delta + in-band truncation error; never a stop finish.
 	require.Len(t, events, 3)
@@ -464,7 +463,7 @@ func TestOpenAIChatStreamConverter_DataOnlyParsing(t *testing.T) {
 	crlfEvents, _, err := readChatViaResponsesStream(t, decorated.String(), false)
 	require.NoError(t, err)
 
-	require.Equal(t, len(plainEvents), len(crlfEvents))
+	require.Len(t, crlfEvents, len(plainEvents))
 	for i := range plainEvents {
 		assert.Equal(t, plainEvents[i].Done, crlfEvents[i].Done)
 		if plainEvents[i].Done {
@@ -472,4 +471,270 @@ func TestOpenAIChatStreamConverter_DataOnlyParsing(t *testing.T) {
 		}
 		assert.Equal(t, plainEvents[i].Payload["choices"], crlfEvents[i].Payload["choices"], "chunk %d differs under CRLF framing", i)
 	}
+}
+
+func TestOpenAIChatStreamConverter_IgnoresNoiseAndMalformedEvents(t *testing.T) {
+	// SSE comment lines, non-JSON data (a stray [DONE]), and malformed JSON
+	// payloads are skipped; classification happens on well-formed events only.
+	stream := ": keep-alive\n\n" +
+		"data: [DONE]\n\n" +
+		"data: {not-json\n\n" +
+		chatViaResponsesTextStream()
+
+	events, _, err := readChatViaResponsesStream(t, stream, false)
+	require.NoError(t, err)
+	// Same output as the plain text stream: role + 2 content + finish + [DONE].
+	require.Len(t, events, 5)
+	assert.Equal(t, "Hello", chatChunkDelta(t, events[1].Payload)["content"])
+	assert.True(t, events[4].Done)
+}
+
+func TestOpenAIChatStreamConverter_MalformedOutputItemAdded(t *testing.T) {
+	stream := chatViaResponsesStreamOf(
+		chatViaResponsesCreated,
+		`{"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":"bogus"}`,
+		`{"type":"response.output_text.delta","sequence_number":3,"item_id":"msg_1","output_index":0,"content_index":0,"delta":"hi"}`,
+		`{"type":"response.completed","sequence_number":4,"response":{"id":"resp_abc123","status":"completed","output":[{"id":"msg_1","type":"message"}]}}`,
+	)
+
+	events, _, err := readChatViaResponsesStream(t, stream, false)
+	require.NoError(t, err)
+	// role + content + finish + [DONE]; the malformed item event is skipped.
+	require.Len(t, events, 4)
+	assert.Equal(t, "hi", chatChunkDelta(t, events[1].Payload)["content"])
+	assert.True(t, events[3].Done)
+}
+
+func TestOpenAIChatStreamConverter_ArgumentsDeltaForUnannouncedItem(t *testing.T) {
+	// A delta for an item the stream never announced still lands under a
+	// stable dense index (Postel's law).
+	stream := chatViaResponsesStreamOf(
+		chatViaResponsesCreated,
+		`{"type":"response.function_call_arguments.delta","sequence_number":2,"item_id":"fc_1","output_index":0,"delta":"{\"city\":\"Warsaw\"}"}`,
+		`{"type":"response.completed","sequence_number":3,"response":{"id":"resp_abc123","status":"completed","output":[{"id":"fc_1","type":"function_call","call_id":"call_abc","name":"get_weather","arguments":"{\"city\":\"Warsaw\"}"}]}}`,
+	)
+
+	events, _, err := readChatViaResponsesStream(t, stream, false)
+	require.NoError(t, err)
+	// role + synthesized start chunk + arguments delta + finish + [DONE].
+	require.Len(t, events, 5)
+
+	start := chatChunkToolCalls(t, events[1].Payload)[0].(map[string]any)
+	assert.Equal(t, float64(0), start["index"])
+	assert.Nil(t, start["id"], "an unannounced item has no call id")
+	function, ok := start["function"].(map[string]any)
+	require.True(t, ok)
+	assert.Empty(t, function["arguments"])
+
+	delta := chatChunkToolCalls(t, events[2].Payload)[0].(map[string]any)
+	assert.Equal(t, float64(0), delta["index"])
+	assert.Equal(t, `{"city":"Warsaw"}`, delta["function"].(map[string]any)["arguments"])
+
+	assert.Equal(t, "tool_calls", chatChunkFinishReason(t, events[3].Payload))
+	assert.True(t, events[4].Done)
+}
+
+func TestOpenAIChatStreamConverter_EmptyArgumentsDelta(t *testing.T) {
+	// An empty arguments delta still registers the item and emits its start
+	// chunk, but no arguments chunk.
+	stream := chatViaResponsesStreamOf(
+		chatViaResponsesCreated,
+		`{"type":"response.function_call_arguments.delta","sequence_number":2,"item_id":"fc_1","output_index":0,"delta":""}`,
+		`{"type":"response.completed","sequence_number":3,"response":{"id":"resp_abc123","status":"completed","output":[{"id":"fc_1","type":"function_call"}]}}`,
+	)
+
+	events, _, err := readChatViaResponsesStream(t, stream, false)
+	require.NoError(t, err)
+	// role + synthesized start chunk + finish + [DONE].
+	require.Len(t, events, 4)
+	assert.Equal(t, "tool_calls", chatChunkFinishReason(t, events[2].Payload))
+	assert.True(t, events[3].Done)
+}
+
+func TestOpenAIChatStreamConverter_ArgumentsDeltaFallsBackToOutputIndex(t *testing.T) {
+	// A delta carrying an item_id the stream never announced but a known
+	// output_index routes to the item registered under that index.
+	stream := chatViaResponsesStreamOf(
+		chatViaResponsesCreated,
+		`{"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_abc","name":"get_weather","arguments":""}}`,
+		`{"type":"response.function_call_arguments.delta","sequence_number":3,"item_id":"fc_stale","output_index":0,"delta":"{\"city\":\"Warsaw\"}"}`,
+		`{"type":"response.completed","sequence_number":4,"response":{"id":"resp_abc123","status":"completed","output":[{"id":"fc_1","type":"function_call","call_id":"call_abc","name":"get_weather","arguments":"{\"city\":\"Warsaw\"}"}]}}`,
+	)
+
+	events, _, err := readChatViaResponsesStream(t, stream, false)
+	require.NoError(t, err)
+	// role + start chunk + one arguments delta routed by output_index +
+	// finish + [DONE].
+	require.Len(t, events, 5)
+	delta := chatChunkToolCalls(t, events[2].Payload)[0].(map[string]any)
+	assert.Equal(t, float64(0), delta["index"])
+	assert.Equal(t, `{"city":"Warsaw"}`, delta["function"].(map[string]any)["arguments"])
+}
+
+func TestOpenAIChatStreamConverter_ArgumentsDeltaForMessageItemIgnored(t *testing.T) {
+	// An arguments delta naming an item announced as a message has no dense
+	// tool-call index and is dropped.
+	stream := chatViaResponsesStreamOf(
+		chatViaResponsesCreated,
+		`{"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"msg_1","type":"message","role":"assistant"}}`,
+		`{"type":"response.function_call_arguments.delta","sequence_number":3,"item_id":"msg_1","output_index":0,"delta":"{}"}`,
+		`{"type":"response.completed","sequence_number":4,"response":{"id":"resp_abc123","status":"completed","output":[{"id":"msg_1","type":"message"}]}}`,
+	)
+
+	events, _, err := readChatViaResponsesStream(t, stream, false)
+	require.NoError(t, err)
+	// role + finish + [DONE].
+	require.Len(t, events, 3)
+	assert.Equal(t, "stop", chatChunkFinishReason(t, events[1].Payload))
+	assert.True(t, events[2].Done)
+}
+
+func TestOpenAIChatStreamConverter_MalformedTerminalPayload(t *testing.T) {
+	stream := chatViaResponsesStreamOf(
+		chatViaResponsesCreated,
+		`{"type":"response.completed","sequence_number":2,"response":"oops"}`,
+	)
+
+	events, _, err := readChatViaResponsesStream(t, stream, false)
+	require.Error(t, err)
+	require.ErrorIs(t, err, streaming.ErrStreamIncomplete)
+	// role + in-band truncation error: an unreadable terminal payload is no
+	// terminal event.
+	require.Len(t, events, 2)
+	errorPayload, ok := events[1].Payload["error"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "stream_incomplete", errorPayload["code"])
+}
+
+func TestOpenAIChatStreamConverter_TerminalStatusFromEventType(t *testing.T) {
+	// The event type carries the status when the terminal payload omits it.
+	stream := chatViaResponsesStreamOf(
+		chatViaResponsesCreated,
+		`{"type":"response.incomplete","sequence_number":2,"response":{"id":"resp_abc123","incomplete_details":{"reason":"max_output_tokens"},"output":[]}}`,
+	)
+
+	events, _, err := readChatViaResponsesStream(t, stream, false)
+	require.NoError(t, err)
+	// role + finish + [DONE].
+	require.Len(t, events, 3)
+	assert.Equal(t, "length", chatChunkFinishReason(t, events[1].Payload))
+	assert.True(t, events[2].Done)
+}
+
+func TestOpenAIChatStreamConverter_CompletedEventCarryingFailedStatus(t *testing.T) {
+	stream := chatViaResponsesStreamOf(
+		chatViaResponsesCreated,
+		`{"type":"response.completed","sequence_number":2,"response":{"id":"resp_abc123","status":"failed","error":{"code":"server_error","message":"boom"}}}`,
+	)
+
+	events, _, err := readChatViaResponsesStream(t, stream, false)
+	require.Error(t, err)
+	require.ErrorIs(t, err, streaming.ErrStreamIncomplete)
+
+	// role + in-band error; the payload status wins over the event type.
+	require.Len(t, events, 2)
+	errorPayload, ok := events[1].Payload["error"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "boom", errorPayload["message"])
+	assert.Equal(t, "server_error", errorPayload["code"])
+}
+
+func TestOpenAIChatStreamConverter_IncompleteWithoutDetails(t *testing.T) {
+	stream := chatViaResponsesStreamOf(
+		chatViaResponsesCreated,
+		`{"type":"response.incomplete","sequence_number":2,"response":{"id":"resp_abc123","status":"incomplete","output":[]}}`,
+	)
+
+	events, _, err := readChatViaResponsesStream(t, stream, false)
+	require.NoError(t, err)
+	// role + finish with a null finish_reason + [DONE]: no honest mapping
+	// exists without incomplete_details.
+	require.Len(t, events, 3)
+	assert.Nil(t, chatChunkFinishReason(t, events[1].Payload))
+	assert.True(t, events[2].Done)
+}
+
+func TestOpenAIChatStreamConverter_ErrorEventWithoutCodeOrMessage(t *testing.T) {
+	stream := chatViaResponsesStreamOf(
+		chatViaResponsesCreated,
+		`{"type":"error","sequence_number":1}`,
+	)
+
+	events, _, err := readChatViaResponsesStream(t, stream, false)
+	require.Error(t, err)
+	require.ErrorIs(t, err, streaming.ErrStreamIncomplete)
+
+	// role + in-band error with the repo's default code and message.
+	require.Len(t, events, 2)
+	errorPayload, ok := events[1].Payload["error"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "provider_error", errorPayload["code"])
+	assert.Equal(t, "provider stream failed", errorPayload["message"])
+}
+
+func TestOpenAIChatStreamConverter_UnterminatedTrailingEvent(t *testing.T) {
+	// The final event lacks its closing blank line; the scanner flush on EOF
+	// must still deliver it.
+	stream := "data: " + chatViaResponsesCreated + "\n\n" +
+		`data: {"type":"response.completed","sequence_number":2,"response":{"id":"resp_abc123","status":"completed","output":[]}}`
+
+	events, _, err := readChatViaResponsesStream(t, stream, false)
+	require.NoError(t, err)
+	// role + finish + [DONE].
+	require.Len(t, events, 3)
+	assert.Equal(t, "stop", chatChunkFinishReason(t, events[1].Payload))
+	assert.True(t, events[2].Done)
+}
+
+func TestOpenAIChatStreamConverter_ReadAfterClose(t *testing.T) {
+	converter := NewOpenAIChatStreamConverter(
+		io.NopCloser(strings.NewReader(chatViaResponsesTextStream())),
+		"gpt-5.1-codex", "test-provider", false,
+	)
+	require.NoError(t, converter.Close())
+
+	n, err := converter.Read(make([]byte, 4096))
+	assert.Zero(t, n)
+	require.ErrorIs(t, err, io.EOF)
+}
+
+// stubZeroThenDataReader returns a zero-byte read once (a legal io.Reader
+// result) before serving the stream data.
+type stubZeroThenDataReader struct {
+	data    []byte
+	stalled bool
+}
+
+func (r *stubZeroThenDataReader) Read(p []byte) (int, error) {
+	if !r.stalled {
+		r.stalled = true
+		return 0, nil
+	}
+	if len(r.data) == 0 {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	return n, nil
+}
+
+func (r *stubZeroThenDataReader) Close() error { return nil }
+
+func TestOpenAIChatStreamConverter_ZeroByteReadRetried(t *testing.T) {
+	converter := NewOpenAIChatStreamConverter(
+		&stubZeroThenDataReader{data: []byte(chatViaResponsesTextStream())},
+		"gpt-5.1-codex", "test-provider", false,
+	)
+	defer func() {
+		_ = converter.Close()
+	}()
+
+	n, err := converter.Read(make([]byte, 4096))
+	require.NoError(t, err)
+	assert.Zero(t, n, "a zero-byte upstream read must surface as (0, nil)")
+
+	raw, err := io.ReadAll(converter)
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), "chat.completion.chunk")
+	assert.Contains(t, string(raw), "data: [DONE]")
 }

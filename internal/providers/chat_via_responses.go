@@ -215,6 +215,8 @@ func flattenChatToolsForResponses(tools []map[string]any) ([]map[string]any, err
 
 func flattenChatToolForResponses(tool map[string]any) map[string]any {
 	if len(tool) == 0 {
+		// Unreachable: flattenChatToolsForResponses only forwards tools whose
+		// type is "function", so the map always has at least that member.
 		return tool
 	}
 
@@ -307,6 +309,8 @@ func ChatViaResponses(ctx context.Context, p ResponsesProvider, req *core.ChatRe
 
 	chatResp := ConvertResponsesResponseToChat(resp)
 	if chatResp == nil || len(chatResp.Choices) == 0 {
+		// Defensive: ConvertResponsesResponseToChat always returns a response
+		// with exactly one choice.
 		return nil, core.NewNoChoicesProviderError(providerName)
 	}
 	return chatResp, nil

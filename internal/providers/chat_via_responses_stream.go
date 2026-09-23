@@ -444,6 +444,8 @@ func (sc *OpenAIChatStreamConverter) failTerminalError(upstreamError *responsesS
 // names no code gets "provider_error".
 func (sc *OpenAIChatStreamConverter) failUpstream(code, message string) {
 	if sc.finished || sc.failed {
+		// Unreachable: the only callers (processEvent's "error" case and
+		// failTerminalError) run after processEvent's finished/failed guard.
 		return
 	}
 	sc.failed = true
@@ -462,6 +464,8 @@ func (sc *OpenAIChatStreamConverter) failUpstream(code, message string) {
 // Read returns the read failure wrapped in streaming.ErrStreamIncomplete.
 func (sc *OpenAIChatStreamConverter) failTruncated(err error) {
 	if sc.finished || sc.failed {
+		// Unreachable: Read, the only caller, invokes failTruncated only when
+		// neither flag is set.
 		return
 	}
 	sc.failed = true
@@ -482,6 +486,7 @@ func (sc *OpenAIChatStreamConverter) emitError(code, message string) {
 
 func (sc *OpenAIChatStreamConverter) emitChunk(delta map[string]any, finishReason *string) {
 	if delta == nil {
+		// Defensive: every caller passes a map literal.
 		delta = map[string]any{}
 	}
 	sc.emitPayload(chatCompletionStreamChunk{
@@ -501,6 +506,8 @@ func (sc *OpenAIChatStreamConverter) emitChunk(delta map[string]any, finishReaso
 func (sc *OpenAIChatStreamConverter) emitPayload(payload any) {
 	data, err := json.Marshal(payload)
 	if err != nil {
+		// Unreachable: payloads are fixed chunk and error shapes built from
+		// marshalable values only.
 		return
 	}
 	event := streaming.Event{Data: data}
@@ -540,6 +547,8 @@ func (sc *OpenAIChatStreamConverter) Read(p []byte) (int, error) {
 		if sc.buffer.Len() > 0 {
 			return sc.buffer.Read(p), nil
 		}
+		// Defensive: every path that sets finished or failed appends bytes to
+		// the buffer, so it is never empty at this point.
 		if sc.endErr != nil {
 			return sc.closeRead(sc.endErr)
 		}

@@ -143,6 +143,21 @@ func TestConvertChatRequestToResponses_MaxTokensMapping(t *testing.T) {
 	})
 }
 
+func TestConvertChatRequestToResponses_MessageConversionError(t *testing.T) {
+	// A message content part with no Responses equivalent fails the whole
+	// translation, and the message error reaches the caller unchanged.
+	_, err := ConvertChatRequestToResponses(&core.ChatRequest{
+		Model: "m",
+		Messages: []core.Message{
+			{Role: "user", Content: []core.ContentPart{
+				{Type: "video_url", VideoURL: &core.VideoURLContent{URL: "https://example.com/v.mp4"}},
+			}},
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "video_url")
+}
+
 func TestConvertChatRequestToResponses_MessagesAndInstructions(t *testing.T) {
 	req := &core.ChatRequest{
 		Model: "m",
@@ -310,6 +325,12 @@ func TestConvertChatRequestToResponses_ResponseFormat(t *testing.T) {
 				"strict": true,
 			},
 		}, responsesReq.Text)
+	})
+
+	t.Run("json_schema without schema object rejected", func(t *testing.T) {
+		_, err := ConvertChatRequestToResponses(newRequest(`{"type":"json_schema"}`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "response_format")
 	})
 
 	t.Run("unknown format type rejected", func(t *testing.T) {

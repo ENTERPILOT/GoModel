@@ -208,6 +208,8 @@ func chatContentToResponsesBlocks(content any, textType string) ([]any, error) {
 		if text == "" {
 			return nil, nil
 		}
+		// Unreachable: ExtractTextContent only reads string and content-part
+		// content, so every type landing in this branch yields "".
 		return []any{map[string]any{"type": textType, "text": text}}, nil
 	}
 }

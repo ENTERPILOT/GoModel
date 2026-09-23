@@ -112,7 +112,7 @@ func TestConvertResponsesResponseToChat_ToolCalls(t *testing.T) {
 			choice := chat.Choices[0]
 			assert.Equal(t, "tool_calls", choice.FinishReason)
 			assert.Equal(t, tt.want, choice.Message.ToolCalls)
-			assert.Equal(t, "", choice.Message.Content)
+			assert.Empty(t, choice.Message.Content)
 		})
 	}
 }
@@ -240,7 +240,7 @@ func TestConvertResponsesResponseToChat_Refusal(t *testing.T) {
 	require.Len(t, chat.Choices, 1)
 	message := chat.Choices[0].Message
 
-	assert.Equal(t, "", message.Content)
+	assert.Empty(t, message.Content)
 	raw := message.ExtraFields.Lookup("refusal")
 	require.NotEmpty(t, raw, "refusal part must surface as the message refusal member")
 	var refusal string
@@ -350,4 +350,43 @@ func TestConvertResponsesResponseToChat_MintsClientFacingID(t *testing.T) {
 	assert.True(t, strings.HasPrefix(chat.ID, "chatcmpl-"), "client-facing ID must be chatcmpl- prefixed, got %q", chat.ID)
 	assert.NotContains(t, chat.ID, resp.ID, "upstream resp_ ID must not leak onto the chat surface")
 	assert.NotEqual(t, chat.ID, ConvertResponsesResponseToChat(resp).ID, "each conversion mints a fresh ID")
+}
+
+func TestConvertResponsesResponseToChat_ReasoningWithoutReadableText(t *testing.T) {
+	tests := []struct {
+		name string
+		item core.ResponsesOutputItem
+	}{
+		{
+			name: "encrypted-only reasoning has no readable text",
+			item: core.ResponsesOutputItem{
+				ID:   "rs_1",
+				Type: "reasoning",
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					core.ExtraContentField: json.RawMessage(`{"openai":{"encrypted_content":"abc"}}`),
+				}),
+			},
+		},
+		{
+			name: "malformed summary is ignored",
+			item: core.ResponsesOutputItem{
+				ID:   "rs_1",
+				Type: "reasoning",
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					"summary": json.RawMessage(`"not-an-array"`),
+				}),
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chat := ConvertResponsesResponseToChat(&core.ResponsesResponse{
+				ID:     "resp_upstream",
+				Status: "completed",
+				Output: []core.ResponsesOutputItem{tt.item},
+			})
+			require.Len(t, chat.Choices, 1)
+			assert.Nil(t, chat.Choices[0].Message.ExtraFields.Lookup("reasoning_content"))
+		})
+	}
 }

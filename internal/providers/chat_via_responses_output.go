@@ -157,6 +157,7 @@ func responsesOutputReasoningText(item core.ResponsesOutputItem) string {
 func chatViaResponsesJSONString(s string) json.RawMessage {
 	raw, err := json.Marshal(s)
 	if err != nil {
+		// Unreachable: marshaling a plain string cannot fail.
 		return nil
 	}
 	return raw
