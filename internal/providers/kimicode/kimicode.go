@@ -92,12 +92,21 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 	return p.responses.StreamResponses(ctx, adaptResponsesRequest(req))
 }
 
-// rejectPreviousResponseID fails requests chaining from an earlier response:
-// Kimi Code does not retain responses, so a previous response ID can never be
-// resolved and answering statelessly would silently drop the conversation
-// context the caller expects.
+// rejectPreviousResponseID fails requests chaining from earlier state:
+// Kimi Code does not retain responses, so neither a previous response ID nor
+// a gateway-local conversation can be resolved upstream, and answering
+// statelessly would silently drop the conversation context the caller
+// expects. Requests whose state the gateway already expanded (both fields
+// cleared) pass through.
 func rejectPreviousResponseID(req *core.ResponsesRequest) error {
-	if req == nil || req.PreviousResponseID == "" {
+	if req == nil {
+		return nil
+	}
+	if req.Conversation != nil {
+		return core.NewInvalidRequestError(
+			"kimicode does not retain responses: conversation is not supported", nil)
+	}
+	if req.PreviousResponseID == "" {
 		return nil
 	}
 	return core.NewInvalidRequestError(
