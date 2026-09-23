@@ -209,6 +209,22 @@ func TestResponses_RejectsPreviousResponseID(t *testing.T) {
 		assert.Nil(t, resp)
 		assert.Equal(t, 0, capture.Count(), "whitespace ID must not reach the upstream")
 	})
+
+	t.Run("conversation reference is rejected", func(t *testing.T) {
+		resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
+			Model:        "kimi-for-coding",
+			Input:        "Say OK",
+			Conversation: &core.ResponsesConversationRef{ID: "conv_old"},
+		})
+		require.Error(t, err)
+		assert.Nil(t, resp)
+
+		var gatewayErr *core.GatewayError
+		require.ErrorAs(t, err, &gatewayErr)
+		assert.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
+		assert.Contains(t, gatewayErr.Error(), "conversation")
+		assert.Equal(t, 0, capture.Count(), "conversation request must not reach the upstream")
+	})
 }
 
 func TestStreamResponses_RejectsPreviousResponseID(t *testing.T) {
