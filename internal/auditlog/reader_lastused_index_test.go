@@ -3,6 +3,7 @@ package auditlog
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -112,7 +113,12 @@ func TestEnsureAuthKeyIndexLeavesAnotherInstancesBuild(t *testing.T) {
 		_, err = db.Exec(ctx, "DROP INDEX "+authKeyTimestampIndex)
 		require.NoError(t, err)
 
+		// Release the held writer on every exit path, or a failed assertion
+		// leaves the build and the schema cleanup waiting on it forever.
 		release := make(chan struct{})
+		var releaseOnce sync.Once
+		releaseWriter := func() { releaseOnce.Do(func() { close(release) }) }
+		t.Cleanup(releaseWriter)
 		writerDone := make(chan error, 1)
 		writerStarted := make(chan struct{})
 		go func() {
@@ -147,7 +153,7 @@ func TestEnsureAuthKeyIndexLeavesAnotherInstancesBuild(t *testing.T) {
 		_, exists := indexValidity(ctx, db, authKeyTimestampIndex)
 		assert.True(t, exists, "the in-progress index was dropped")
 
-		close(release)
+		releaseWriter()
 		require.NoError(t, <-writerDone)
 		require.NoError(t, <-buildDone)
 		valid, _ := indexValidity(ctx, db, authKeyTimestampIndex)
