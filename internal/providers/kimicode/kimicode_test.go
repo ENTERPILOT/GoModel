@@ -198,6 +198,17 @@ func TestResponses_RejectsPreviousResponseID(t *testing.T) {
 	assert.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
 	assert.Contains(t, gatewayErr.Error(), "previous_response_id")
 	assert.Equal(t, 0, capture.Count(), "rejected request must not reach the upstream")
+
+	t.Run("whitespace-only ID is rejected too", func(t *testing.T) {
+		resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
+			Model:              "kimi-for-coding",
+			Input:              "Say OK",
+			PreviousResponseID: "   ",
+		})
+		require.Error(t, err)
+		assert.Nil(t, resp)
+		assert.Equal(t, 0, capture.Count(), "whitespace ID must not reach the upstream")
+	})
 }
 
 func TestStreamResponses_RejectsPreviousResponseID(t *testing.T) {
