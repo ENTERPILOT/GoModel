@@ -10645,6 +10645,10 @@ const docTemplate = `{
                 "audio_tokens": {
                     "type": "integer"
                 },
+                "cache_write_tokens": {
+                    "description": "CacheWriteTokens counts tokens written to the provider's prompt cache\n(Kimi Code / Anthropic-style cache creation).",
+                    "type": "integer"
+                },
                 "cached_tokens": {
                     "type": "integer"
                 },
@@ -11162,6 +11166,10 @@ const docTemplate = `{
         "core.ResponsesResponse": {
             "type": "object",
             "properties": {
+                "completed_at": {
+                    "description": "CompletedAt is the upstream completion timestamp; zero while the\nresponse is still in progress.",
+                    "type": "integer"
+                },
                 "created_at": {
                     "type": "integer"
                 },
@@ -11202,6 +11210,9 @@ const docTemplate = `{
                 "status": {
                     "description": "\"completed\", \"incomplete\", \"failed\", \"in_progress\"",
                     "type": "string"
+                },
+                "store": {
+                    "type": "boolean"
                 },
                 "usage": {
                     "$ref": "#/definitions/core.ResponsesUsage"
