@@ -2,6 +2,7 @@ package observability
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -58,4 +59,15 @@ func TestPrometheusHooksBoundEndpointCardinality(t *testing.T) {
 	assert.Equal(t, 1, testutil.CollectAndCount(RequestDuration))
 	assert.Equal(t, 1, testutil.CollectAndCount(InFlightRequests))
 	assert.InDelta(t, 3, testutil.ToFloat64(RequestsTotal.WithLabelValues("openai", "", "/files/{id}", "200", "success", "false")), 0)
+}
+
+func TestMetricEndpointCapsDistinctLabels(t *testing.T) {
+	ResetMetrics()
+	t.Cleanup(ResetMetrics)
+
+	for i := range maxEndpointLabels {
+		assert.Equal(t, "/custom/resource-"+strconv.Itoa(i), metricEndpoint("/custom/resource-"+strconv.Itoa(i)))
+	}
+	assert.Equal(t, otherEndpointLabel, metricEndpoint("/custom/resource-alpha"), "new paths past the cap collapse")
+	assert.Equal(t, "/custom/resource-0", metricEndpoint("/custom/resource-0"), "admitted paths keep their label")
 }

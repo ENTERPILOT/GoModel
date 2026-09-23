@@ -193,6 +193,7 @@ func NewPrometheusHooks() llmclient.Hooks {
 
 // ResetMetrics resets all metrics to zero (useful for testing)
 func ResetMetrics() {
+	resetEndpointLabels()
 	RequestsTotal.Reset()
 	RequestDuration.Reset()
 	InFlightRequests.Reset()

@@ -2,7 +2,21 @@ package observability
 
 import (
 	"strings"
+	"sync"
 )
+
+// maxEndpointLabels caps the distinct endpoint label values. Templating
+// catches ID-like segments, but passthrough paths are caller-chosen, so any
+// path beyond the cap is reported as otherEndpointLabel.
+const (
+	maxEndpointLabels  = 256
+	otherEndpointLabel = "/{other}"
+)
+
+var endpointLabels = struct {
+	sync.RWMutex
+	seen map[string]struct{}
+}{seen: map[string]struct{}{}}
 
 // idCollections are upstream path segments followed by a resource ID
 // (files, batches, stored responses, voices, models, ...).
@@ -45,7 +59,35 @@ func metricEndpoint(endpoint string) string {
 			segments[i] = templateSegment(segment)
 		}
 	}
-	return "/" + strings.Join(segments, "/")
+	return boundEndpointLabel("/" + strings.Join(segments, "/"))
+}
+
+// boundEndpointLabel admits a label until maxEndpointLabels distinct values
+// are in use; a label once admitted keeps its value.
+func boundEndpointLabel(label string) string {
+	endpointLabels.RLock()
+	_, ok := endpointLabels.seen[label]
+	endpointLabels.RUnlock()
+	if ok {
+		return label
+	}
+	endpointLabels.Lock()
+	defer endpointLabels.Unlock()
+	if _, ok := endpointLabels.seen[label]; ok {
+		return label
+	}
+	if len(endpointLabels.seen) >= maxEndpointLabels {
+		return otherEndpointLabel
+	}
+	endpointLabels.seen[label] = struct{}{}
+	return label
+}
+
+// resetEndpointLabels forgets admitted labels, alongside a metrics reset.
+func resetEndpointLabels() {
+	endpointLabels.Lock()
+	defer endpointLabels.Unlock()
+	clear(endpointLabels.seen)
 }
 
 // templateSegment replaces an ID while keeping a Gemini-style ":action"
