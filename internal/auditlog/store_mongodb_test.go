@@ -48,13 +48,15 @@ func TestIsIndexNotFound(t *testing.T) {
 
 func TestNewMongoDBStoreReplacesLegacyAuthKeyIndex(t *testing.T) {
 	tests := []struct {
-		name       string
-		conflict   bool
-		wantLegacy bool
+		name          string
+		conflict      bool
+		wantLegacy    bool
+		wantTimestamp int32
 	}{
-		{name: "compound index created, legacy dropped"},
-		// When the compound index cannot be created, the legacy index stays.
-		{name: "create fails, legacy kept", conflict: true, wantLegacy: true},
+		{name: "compound index created, legacy dropped", wantTimestamp: -1},
+		// When the compound index cannot be created, the legacy index stays
+		// and the conflicting index is left untouched.
+		{name: "create fails, legacy kept", conflict: true, wantLegacy: true, wantTimestamp: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -79,12 +81,22 @@ func TestNewMongoDBStoreReplacesLegacyAuthKeyIndex(t *testing.T) {
 				require.NoError(t, err)
 				var specs []bson.M
 				require.NoError(t, cursor.All(ctx, &specs))
-				names := map[string]bool{}
+				keys := map[string]map[string]any{}
 				for _, spec := range specs {
-					names[spec["name"].(string)] = true
+					fields, ok := spec["key"].(bson.D)
+					require.True(t, ok, "index spec: %v", spec)
+					key := map[string]any{}
+					for _, field := range fields {
+						key[field.Key] = field.Value
+					}
+					keys[spec["name"].(string)] = key
 				}
-				assert.Equal(t, tt.wantLegacy, names[legacyAuthKeyIndex], "indexes: %v", specs)
-				assert.True(t, names["auth_key_id_1_timestamp_-1"], "indexes: %v", specs)
+				_, hasLegacy := keys[legacyAuthKeyIndex]
+				assert.Equal(t, tt.wantLegacy, hasLegacy, "indexes: %v", specs)
+				compound, ok := keys["auth_key_id_1_timestamp_-1"]
+				require.True(t, ok, "indexes: %v", specs)
+				assert.EqualValues(t, 1, compound["auth_key_id"])
+				assert.EqualValues(t, tt.wantTimestamp, compound["timestamp"])
 			})
 		})
 	}

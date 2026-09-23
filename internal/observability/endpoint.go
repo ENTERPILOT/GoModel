@@ -67,9 +67,13 @@ func metricEndpoint(endpoint string) string {
 func boundEndpointLabel(label string) string {
 	endpointLabels.RLock()
 	_, ok := endpointLabels.seen[label]
+	full := len(endpointLabels.seen) >= maxEndpointLabels
 	endpointLabels.RUnlock()
 	if ok {
 		return label
+	}
+	if full {
+		return otherEndpointLabel
 	}
 	endpointLabels.Lock()
 	defer endpointLabels.Unlock()

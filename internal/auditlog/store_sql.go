@@ -169,12 +169,13 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 	if err := sqlx.AddColumns(ctx, db, sqlMigrations...); err != nil {
 		return nil, err
 	}
-	indexes := append(append(append(sqlIndexes, userPathIndexes(db.Dialect())...), jsonPathIndexes(db.Dialect())...), authKeyIndexes(db.Dialect())...)
+	indexes := append(append(sqlIndexes, userPathIndexes(db.Dialect())...), jsonPathIndexes(db.Dialect())...)
 	for _, statement := range indexes {
 		if _, err := db.Exec(ctx, statement); err != nil {
 			slog.Warn("failed to create index", "error", err)
 		}
 	}
+	ensureSQLiteAuthKeyIndex(ctx, db)
 
 	store := &SQLStore{
 		db:            db,

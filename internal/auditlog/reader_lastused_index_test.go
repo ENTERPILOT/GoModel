@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -93,4 +94,63 @@ func sqlIndexExists(ctx context.Context, t *testing.T, db sqlx.DB, name string) 
 	var count int
 	require.NoError(t, db.QueryRow(ctx, query, name).Scan(&count))
 	return count > 0
+}
+
+// TestEnsureAuthKeyIndexLeavesAnotherInstancesBuild starts a concurrent build
+// that stays in progress (an open writer holds it), then checks a second
+// instance's startup neither drops that index nor blocks on it.
+func TestEnsureAuthKeyIndexLeavesAnotherInstancesBuild(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		if db.Dialect() != sqlx.PostgreSQL {
+			t.Skip("concurrent index builds are PostgreSQL only")
+		}
+		ctx := context.Background()
+		store, err := newSQLStoreForTest(t, db, 0)
+		require.NoError(t, err)
+		store.indexBuild.Wait()
+		require.NoError(t, store.Close())
+		_, err = db.Exec(ctx, "DROP INDEX "+authKeyTimestampIndex)
+		require.NoError(t, err)
+
+		release := make(chan struct{})
+		writerDone := make(chan error, 1)
+		writerStarted := make(chan struct{})
+		go func() {
+			writerDone <- db.InTx(ctx, func(q sqlx.Querier) error {
+				if _, err := q.Exec(ctx, "INSERT INTO audit_logs (id, timestamp) VALUES ('held', NOW())"); err != nil {
+					close(writerStarted)
+					return err
+				}
+				close(writerStarted)
+				<-release
+				return nil
+			})
+		}()
+		<-writerStarted
+		buildDone := make(chan error, 1)
+		go func() {
+			_, err := db.Exec(ctx, "CREATE INDEX CONCURRENTLY "+authKeyTimestampIndex+" ON audit_logs(auth_key_id, timestamp)")
+			buildDone <- err
+		}()
+		require.Eventually(t, func() bool { return indexBuildInProgress(ctx, db, authKeyTimestampIndex) }, 10*time.Second, 20*time.Millisecond)
+
+		finished := make(chan struct{})
+		go func() {
+			ensureAuthKeyTimestampIndex(ctx, db)
+			close(finished)
+		}()
+		select {
+		case <-finished:
+		case <-time.After(5 * time.Second):
+			t.Fatal("startup blocked on another instance's index build")
+		}
+		_, exists := indexValidity(ctx, db, authKeyTimestampIndex)
+		assert.True(t, exists, "the in-progress index was dropped")
+
+		close(release)
+		require.NoError(t, <-writerDone)
+		require.NoError(t, <-buildDone)
+		valid, _ := indexValidity(ctx, db, authKeyTimestampIndex)
+		assert.True(t, valid)
+	})
 }
