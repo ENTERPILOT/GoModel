@@ -43,9 +43,9 @@ var Registration = providers.Registration{
 }
 
 // Provider implements the core.Provider interface for the ChatGPT Codex
-// backend. Only the Responses surface is served: the upstream has no chat
-// completions, embeddings, or models endpoint, and advertising them would
-// route traffic that can only fail.
+// backend. The upstream speaks only the Responses API: chat completions are
+// translated onto it, while embeddings and the models endpoint have no
+// upstream equivalent.
 type Provider struct {
 	client *llmclient.Client
 	keys   *providers.Keyring
@@ -139,15 +139,17 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 	return providers.EnsureResponsesDone(stream), nil
 }
 
-// ChatCompletion is unsupported: the ChatGPT Codex backend serves only the
-// Responses API. Clients reach these models through /v1/responses.
-func (p *Provider) ChatCompletion(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
-	return nil, unsupported("chat completions")
+// ChatCompletion translates the chat request onto the Responses API: the Codex
+// backend serves only Responses, so the request is converted, executed against
+// p.Responses, and the response is converted back to a chat completion.
+func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
+	return providers.ChatViaResponses(ctx, p, req, "chatgpt")
 }
 
-// StreamChatCompletion is unsupported for the same reason as ChatCompletion.
-func (p *Provider) StreamChatCompletion(_ context.Context, _ *core.ChatRequest) (io.ReadCloser, error) {
-	return nil, unsupported("chat completions")
+// StreamChatCompletion is the streaming counterpart of ChatCompletion: the
+// upstream Responses SSE stream is converted to chat completion chunks.
+func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
+	return providers.StreamChatViaResponses(ctx, p, req, "chatgpt")
 }
 
 // Embeddings is unsupported: the Codex backend exposes no embeddings endpoint.
@@ -161,10 +163,12 @@ func (p *Provider) Embeddings(_ context.Context, _ *core.EmbeddingRequest) (*cor
 // do that" apart from "your request was malformed".
 const unsupportedOperationCode = "unsupported_provider_operation"
 
-// unsupported reports a surface the Codex backend does not serve.
+// unsupported reports a surface the Codex backend does not serve. Chat
+// completions are translated onto the Responses API, so only surfaces with
+// no upstream endpoint at all (embeddings) reach this.
 func unsupported(surface string) error {
 	return core.NewInvalidRequestErrorWithStatus(http.StatusNotImplemented,
-		"chatgpt serves only the Responses API; "+surface+" are not available on a ChatGPT subscription",
+		"chatgpt serves chat completions and the Responses API; "+surface+" are not available on a ChatGPT subscription",
 		nil).WithCode(unsupportedOperationCode)
 }
 
