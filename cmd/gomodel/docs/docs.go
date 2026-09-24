@@ -254,6 +254,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Comma-separated endpoint operations to hide, e.g. mcp,provider_passthrough,audio_speech; other entries, including unclassified ones, stay",
+                        "name": "exclude_operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Search across request_id/requested_model/provider/method/path/session_id/error_type/error_message",
                         "name": "search",
                         "in": "query"
@@ -379,6 +385,12 @@ const docTemplate = `{
                         "type": "boolean",
                         "description": "Filter by stream mode (true/false)",
                         "name": "stream",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated endpoint operations to hide, e.g. mcp,provider_passthrough,audio_speech; other entries, including unclassified ones, stay",
+                        "name": "exclude_operation",
                         "in": "query"
                     },
                     {

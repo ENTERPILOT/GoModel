@@ -6,6 +6,7 @@
 import { formatJSON, formatNumber } from "../../lib/utils/format.js";
 import * as m from "../../lib/paraglide/messages.js";
 import { phaseLabel } from "../../lib/utils/pluginPhases.js";
+import { auditEntryTypeVisible, auditExcludeOperationsQuery } from "./audit-operations.js";
 import {
   workflowEntryGuardrails,
   workflowGuardrailActionLabel,
@@ -125,6 +126,7 @@ export function buildAuditLogQuery({
   method,
   statusCode,
   stream,
+  hiddenTypes,
 }) {
   let qs = dateQuery;
   qs += "&limit=" + limit + "&offset=" + offset;
@@ -132,20 +134,27 @@ export function buildAuditLogQuery({
   if (method) qs += "&method=" + encodeURIComponent(method);
   if (statusCode) qs += "&status_code=" + encodeURIComponent(statusCode);
   if (stream) qs += "&stream=" + encodeURIComponent(stream);
-  return qs;
+  return qs + excludeOperationsParam(hiddenTypes);
+}
+
+function excludeOperationsParam(hiddenTypes) {
+  const operations = auditExcludeOperationsQuery(hiddenTypes);
+  return operations ? "&exclude_operation=" + encodeURIComponent(operations) : "";
 }
 
 // buildAuditSessionQuery renders the thread-children fetch for one session:
 // GET /admin/audit/log?session_id=…  Deliberately no active list filters, so
 // an expanded thread shows the whole session even when requests fall outside
-// the date, user-path, or other filters used to find the thread.
-export function buildAuditSessionQuery({ sessionId, limit }) {
+// the date, user-path, or other filters used to find the thread. Hidden
+// request types are the exception: hiding MCP hides it inside threads too.
+export function buildAuditSessionQuery({ sessionId, limit, hiddenTypes }) {
   return (
     "session_id=" +
     encodeURIComponent(sessionId) +
     "&limit=" +
     (limit || 100) +
-    "&offset=0"
+    "&offset=0" +
+    excludeOperationsParam(hiddenTypes)
   );
 }
 
@@ -320,7 +329,9 @@ export function auditLogWithLiveEntries(payload, currentEntries, filters) {
   if (!auditLogAllowsLiveEntries(next, filters)) return next;
 
   const liveEntries = (Array.isArray(currentEntries) ? currentEntries : []).filter(
-    (entry) => auditEntryLivePreviewPending(entry),
+    (entry) =>
+      auditEntryLivePreviewPending(entry) &&
+      auditEntryTypeVisible(entry, filters && filters.hiddenTypes),
   );
   if (liveEntries.length === 0) return next;
 
@@ -356,7 +367,9 @@ export function auditGroupedLogWithLiveEntries(payload, currentEntries, filters)
   if (!auditLogAllowsLiveEntries(next, filters)) return next;
 
   const liveEntries = (Array.isArray(currentEntries) ? currentEntries : []).filter(
-    (entry) => auditEntryLivePreviewPending(entry),
+    (entry) =>
+      auditEntryLivePreviewPending(entry) &&
+      auditEntryTypeVisible(entry, filters && filters.hiddenTypes),
   );
   if (liveEntries.length === 0) return next;
 

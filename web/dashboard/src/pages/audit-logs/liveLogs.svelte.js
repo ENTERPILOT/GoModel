@@ -27,6 +27,7 @@ import { apiFetch, getJSON, isAbortError } from "$lib/api/client.js";
 import { nextReconnect } from "$lib/api/eventStream.js";
 import { access } from "$lib/stores/access.svelte.js";
 import { readStored } from "$lib/utils/storage.js";
+import { normalizeHiddenTypes } from "./audit-operations.js";
 import { auth } from "$lib/stores/auth.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { router } from "$lib/stores/router.svelte.js";
@@ -58,6 +59,10 @@ class LiveLogsStore {
   auditMethod = $state("");
   auditStatusCode = $state("");
   auditStream = $state("");
+  // Request types hidden from the list (audit-operations.js keys). Unlike
+  // the filters above it does not pause live inserts: live rows of a hidden
+  // type are dropped instead, so hiding MCP traffic keeps the list live.
+  auditHiddenTypes = $state(readStoredHiddenTypes());
 
   // Session grouping view preference (default ON) and the lazily-fetched
   // per-thread children lists ({ [session_id]: {loading, entries, total} }).
@@ -340,3 +345,11 @@ $effect.root(() => {
     });
   });
 });
+
+function readStoredHiddenTypes() {
+  try {
+    return normalizeHiddenTypes(JSON.parse(readStored("gomodel_audit_hidden_types", "[]")));
+  } catch {
+    return [];
+  }
+}
