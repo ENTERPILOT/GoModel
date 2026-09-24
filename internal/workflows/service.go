@@ -277,6 +277,8 @@ func (s *Service) Deactivate(ctx context.Context, id string) error {
 }
 
 // GetView returns one workflow version view, including inactive historical versions.
+// GetView returns one workflow version by ID. A version that no longer
+// compiles is returned with CompileError set rather than as an error.
 func (s *Service) GetView(ctx context.Context, id string) (View, error) {
 	if s == nil {
 		return View{}, fmt.Errorf("workflow service is required")
