@@ -293,7 +293,13 @@ func (s *Service) GetView(ctx context.Context, id string) (View, error) {
 		return View{}, ErrNotFound
 	}
 
-	return s.viewForVersion(*version)
+	view, err := s.viewForVersion(*version)
+	if err != nil {
+		// Historical versions may reference guardrails that no longer exist;
+		// still show them, flagged like ListViews does.
+		return viewWithError(*version, err), nil
+	}
+	return view, nil
 }
 
 // ListViews returns the active workflows together with their effective
