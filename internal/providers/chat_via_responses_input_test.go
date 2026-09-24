@@ -85,9 +85,17 @@ func TestConvertMessagesToResponsesInput_RoleMapping(t *testing.T) {
 			},
 		},
 		{
-			name:             "empty message list",
-			messages:         nil,
-			wantInstructions: "",
+			name: "system message stays in place after another role",
+			messages: []core.Message{
+				{Role: "system", Content: "be terse"},
+				{Role: "user", Content: "hi"},
+				{Role: "system", Content: "now be loud"},
+			},
+			wantInstructions: "be terse",
+			wantItems: []core.ResponsesInputElement{
+				{Type: "message", Role: "user", Content: []any{map[string]any{"type": "input_text", "text": "hi"}}},
+				{Type: "message", Role: "system", Content: []any{map[string]any{"type": "input_text", "text": "now be loud"}}},
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -437,4 +445,107 @@ func TestConvertMessagesToResponsesInput_ToolOutputUnserializable(t *testing.T) 
 	require.ErrorAs(t, err, &gatewayErr)
 	assert.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
 	assert.Contains(t, gatewayErr.Message, "function_call_output")
+}
+
+func TestConvertMessagesToResponsesInput_ToolMessageRequiresToolCallID(t *testing.T) {
+	input, _, err := ConvertMessagesToResponsesInput([]core.Message{
+		{Role: "tool", Content: "done"},
+	})
+	require.Error(t, err)
+	assert.Nil(t, input)
+
+	var gatewayErr *core.GatewayError
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
+	assert.Contains(t, gatewayErr.Message, "tool_call_id")
+}
+
+func TestConvertMessagesToResponsesInput_MessageRequiresRole(t *testing.T) {
+	input, _, err := ConvertMessagesToResponsesInput([]core.Message{
+		{Content: "hi"},
+	})
+	require.Error(t, err)
+	assert.Nil(t, input)
+
+	var gatewayErr *core.GatewayError
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
+	assert.Contains(t, gatewayErr.Message, "role")
+}
+
+func TestConvertMessagesToResponsesInput_RequiresInputOrInstructions(t *testing.T) {
+	// An empty conversation would marshal as "input":null upstream; the
+	// gateway rejects it with a 400 naming messages instead.
+	for _, messages := range [][]core.Message{nil, {}} {
+		input, _, err := ConvertMessagesToResponsesInput(messages)
+		require.Error(t, err)
+		assert.Nil(t, input)
+
+		var gatewayErr *core.GatewayError
+		require.ErrorAs(t, err, &gatewayErr)
+		assert.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
+		assert.Contains(t, gatewayErr.Message, "messages")
+	}
+}
+
+func TestConvertMessagesToResponsesInput_StripsChatOnlyExtras(t *testing.T) {
+	extras := func() core.UnknownJSONFields {
+		return core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"name":     json.RawMessage(`"alice"`),
+			"refusal":  json.RawMessage(`"no"`),
+			"x_vendor": json.RawMessage(`"keep-me"`),
+		})
+	}
+
+	t.Run("message items drop name and refusal", func(t *testing.T) {
+		input, _, err := ConvertMessagesToResponsesInput([]core.Message{
+			{Role: "assistant", Content: "answer", ExtraFields: extras()},
+		})
+		require.NoError(t, err)
+
+		items := responsesInputItems(t, input)
+		require.Len(t, items, 1)
+		assert.Empty(t, items[0].ExtraFields.Lookup("name"))
+		assert.Empty(t, items[0].ExtraFields.Lookup("refusal"))
+		assert.JSONEq(t, `"keep-me"`, string(items[0].ExtraFields.Lookup("x_vendor")))
+	})
+
+	t.Run("function_call_output drops name", func(t *testing.T) {
+		input, _, err := ConvertMessagesToResponsesInput([]core.Message{
+			{Role: "tool", ToolCallID: "call_1", Content: "done", ExtraFields: extras()},
+		})
+		require.NoError(t, err)
+
+		items := responsesInputItems(t, input)
+		require.Len(t, items, 1)
+		assert.Empty(t, items[0].ExtraFields.Lookup("name"))
+		assert.JSONEq(t, `"keep-me"`, string(items[0].ExtraFields.Lookup("x_vendor")))
+	})
+}
+
+func TestConvertMessagesToResponsesInput_NormalizesEmptyToolCallArguments(t *testing.T) {
+	tests := []struct {
+		name      string
+		arguments string
+	}{
+		{name: "empty", arguments: ""},
+		{name: "whitespace", arguments: "  "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input, _, err := ConvertMessagesToResponsesInput([]core.Message{
+				{
+					Role: "assistant",
+					ToolCalls: []core.ToolCall{
+						{ID: "call_1", Type: "function", Function: core.FunctionCall{Name: "ping", Arguments: tt.arguments}},
+					},
+				},
+			})
+			require.NoError(t, err)
+
+			items := responsesInputItems(t, input)
+			require.Len(t, items, 1)
+			assert.Equal(t, `{}`, items[0].Arguments)
+		})
+	}
 }

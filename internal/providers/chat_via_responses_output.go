@@ -49,7 +49,7 @@ func ConvertResponsesResponseToChat(resp *core.ResponsesResponse) *core.ChatResp
 				Type: "function",
 				Function: core.FunctionCall{
 					Name:      item.Name,
-					Arguments: item.Arguments,
+					Arguments: normalizeChatToolCallArguments(item.Arguments),
 				},
 				// extra_content replay state rides along so the next
 				// translated request can echo it back.
@@ -60,6 +60,10 @@ func ConvertResponsesResponseToChat(resp *core.ResponsesResponse) *core.ChatResp
 				reasoning = append(reasoning, text)
 			}
 			if replay := item.ExtraFields.Lookup(core.ExtraContentField); !core.IsJSONNull(replay) {
+				// Several reasoning items collapse onto one message, so the
+				// last item's replay state wins. That is deliberate: the
+				// final reasoning item is the state the next translated
+				// request must echo back.
 				extra[core.ExtraContentField] = replay
 			}
 		}

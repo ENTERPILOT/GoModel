@@ -61,18 +61,24 @@ func ConvertChatRequestToResponses(req *core.ChatRequest) (*core.ResponsesReques
 	// prediction and n have no Responses equivalent: prediction is a pure
 	// speed hint and a validated n=1 is a no-op, so neither is rejected —
 	// but both are stripped from the translated request rather than leaking
-	// upstream as unknown fields.
-	responsesReq.ExtraFields = responsesReq.ExtraFields.Without("prediction", "n")
+	// upstream as unknown fields. The tolerated zero-value extras
+	// (validation accepts only null/zero for them) are stripped likewise.
+	responsesReq.ExtraFields = responsesReq.ExtraFields.Without("prediction", "n",
+		"logprobs", "top_logprobs", "frequency_penalty", "presence_penalty")
 
 	// An explicit max_completion_tokens extra wins over the mapped max_tokens,
 	// mirroring the documented Bailian quirk. Both map to max_output_tokens.
-	if raw := responsesReq.ExtraFields.Lookup("max_completion_tokens"); raw != nil {
+	// The extra never travels upstream: an explicit null spells "not set" (the
+	// max_tokens fallback stays effective), and a non-integer value is a 400
+	// rather than an unknown field the upstream rejects less clearly.
+	if raw := responsesReq.ExtraFields.Lookup("max_completion_tokens"); !core.IsJSONNull(raw) {
 		var maxCompletionTokens int
-		if err := json.Unmarshal(raw, &maxCompletionTokens); err == nil {
-			responsesReq.MaxOutputTokens = &maxCompletionTokens
-			responsesReq.ExtraFields = responsesReq.ExtraFields.Without("max_completion_tokens")
+		if err := json.Unmarshal(raw, &maxCompletionTokens); err != nil {
+			return nil, unsupportedChatResponsesTranslationField("max_completion_tokens")
 		}
+		responsesReq.MaxOutputTokens = &maxCompletionTokens
 	}
+	responsesReq.ExtraFields = responsesReq.ExtraFields.Without("max_completion_tokens")
 	if responsesReq.MaxOutputTokens == nil && req.MaxTokens != nil {
 		responsesReq.MaxOutputTokens = req.MaxTokens
 	}
@@ -135,6 +141,17 @@ var unsupportedChatResponsesTranslationExtraFields = []string{
 	"functions",
 }
 
+// zeroValueToleratedChatExtraFields lists the unsupported fields whose zero
+// value spells "not set": logprobs:false, top_logprobs:0, and the penalties
+// at 0 change nothing, so clients that send them unconditionally must not be
+// rejected. A non-zero value still is.
+var zeroValueToleratedChatExtraFields = map[string]bool{
+	"logprobs":          true,
+	"top_logprobs":      true,
+	"frequency_penalty": true,
+	"presence_penalty":  true,
+}
+
 func validateChatRequestForResponsesTranslation(req *core.ChatRequest) error {
 	if raw := req.ExtraFields.Lookup("n"); !core.IsJSONNull(raw) {
 		var n float64
@@ -145,13 +162,33 @@ func validateChatRequestForResponsesTranslation(req *core.ChatRequest) error {
 		}
 	}
 	for _, field := range unsupportedChatResponsesTranslationExtraFields {
+		raw := req.ExtraFields.Lookup(field)
 		// An explicit JSON null spells "not set" on the wire, so it is
 		// tolerated like an absent field rather than rejected.
-		if raw := req.ExtraFields.Lookup(field); !core.IsJSONNull(raw) {
-			return unsupportedChatResponsesTranslationField(field)
+		if core.IsJSONNull(raw) {
+			continue
 		}
+		if zeroValueToleratedChatExtraFields[field] && isZeroJSONValue(raw) {
+			continue
+		}
+		return unsupportedChatResponsesTranslationField(field)
 	}
 	return nil
+}
+
+// isZeroJSONValue reports whether raw decodes to a JSON false or 0.
+func isZeroJSONValue(raw json.RawMessage) bool {
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false
+	}
+	switch v := value.(type) {
+	case bool:
+		return !v
+	case float64:
+		return v == 0
+	}
+	return false
 }
 
 func unsupportedChatResponsesTranslationField(field string) error {
@@ -194,9 +231,10 @@ func chatResponseFormatToResponsesText(raw json.RawMessage) (any, error) {
 }
 
 // flattenChatToolsForResponses flattens chat function tools
-// ({type:"function", function:{...}}) into the Responses shape
-// ({type:"function", name, ...}), the inverse of normalizeResponsesToolForChat.
-// Non-function tools have no meaning on a chat request and are rejected.
+// ({type:"function", function:{...}}) and custom tools
+// ({type:"custom", custom:{...}}) into the flat Responses shape, the inverse
+// of normalizeResponsesToolForChat. Other tool types have no meaning on a
+// chat request and are rejected.
 func flattenChatToolsForResponses(tools []map[string]any) ([]map[string]any, error) {
 	if len(tools) == 0 {
 		return nil, nil
@@ -205,7 +243,9 @@ func flattenChatToolsForResponses(tools []map[string]any) ([]map[string]any, err
 	flattened := make([]map[string]any, 0, len(tools))
 	for _, tool := range tools {
 		toolType, _ := tool["type"].(string)
-		if strings.TrimSpace(toolType) != "function" {
+		switch strings.TrimSpace(toolType) {
+		case "function", "custom":
+		default:
 			return nil, unsupportedChatResponsesTranslationField("tools")
 		}
 		flattened = append(flattened, flattenChatToolForResponses(tool))
@@ -213,24 +253,32 @@ func flattenChatToolsForResponses(tools []map[string]any) ([]map[string]any, err
 	return flattened, nil
 }
 
+// flattenChatToolForResponses flattens one chat tool: its nested member
+// ("function" or "custom", keyed by the type) dissolves into the flat
+// Responses shape. A tool that is already flat passes through unchanged.
 func flattenChatToolForResponses(tool map[string]any) map[string]any {
 	if len(tool) == 0 {
 		// Unreachable: flattenChatToolsForResponses only forwards tools whose
-		// type is "function", so the map always has at least that member.
+		// type is "function" or "custom", so the map always has that member.
 		return tool
 	}
 
-	function, ok := tool["function"].(map[string]any)
+	nestedKey, payloadKeys := "function", []string{"name", "description", "parameters", "strict"}
+	if toolType, _ := tool["type"].(string); strings.TrimSpace(toolType) == "custom" {
+		nestedKey, payloadKeys = "custom", []string{"name", "description", "format"}
+	}
+
+	nested, ok := tool[nestedKey].(map[string]any)
 	if !ok {
 		// Already flat (Responses-shaped); pass through unchanged.
 		return cloneStringAnyMap(tool)
 	}
 
 	flattened := cloneStringAnyMap(tool)
-	delete(flattened, "function")
-	for _, key := range []string{"name", "description", "parameters", "strict"} {
+	delete(flattened, nestedKey)
+	for _, key := range payloadKeys {
 		delete(flattened, key)
-		if value, ok := function[key]; ok {
+		if value, ok := nested[key]; ok {
 			flattened[key] = value
 		}
 	}
@@ -245,7 +293,14 @@ func flattenChatToolChoiceForResponses(choice any) (any, error) {
 		return nil, nil
 	}
 	if choiceString, ok := choice.(string); ok {
-		return choiceString, nil
+		switch strings.TrimSpace(choiceString) {
+		case "auto", "required", "none":
+			return choiceString, nil
+		}
+		// Only the mode strings translate; anything else (a hosted-tool name,
+		// a vendor mode) has no Responses equivalent, mirroring the
+		// restriction normalizeResponsesToolChoiceForChat applies inbound.
+		return nil, unsupportedChatResponsesTranslationField("tool_choice")
 	}
 
 	choiceMap, ok := choice.(map[string]any)
@@ -307,6 +362,10 @@ func ChatViaResponses(ctx context.Context, p ResponsesProvider, req *core.ChatRe
 		return nil, providerErr
 	}
 
+	// resp.Status is terminal here: the only ResponsesProvider in use
+	// (chatgpt) answers a non-streaming Responses call with
+	// collapseResponsesStream, which returns only the terminal event's
+	// response object or a 502 — in_progress/queued never reach this point.
 	chatResp := ConvertResponsesResponseToChat(resp)
 	if chatResp == nil || len(chatResp.Choices) == 0 {
 		// Defensive: ConvertResponsesResponseToChat always returns a response

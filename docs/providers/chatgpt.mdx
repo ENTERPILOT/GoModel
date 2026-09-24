@@ -1,6 +1,6 @@
 ---
 title: "ChatGPT subscription"
-description: "Route Responses API traffic through a ChatGPT subscription instead of an OpenAI Platform API key."
+description: "Route Responses API traffic — and chat completions translated onto it — through a ChatGPT subscription instead of an OpenAI Platform API key."
 icon: "message-circle"
 keywords: ["ChatGPT", "Codex", "subscription", "OAuth", "Responses API", "provider setup"]
 ---
@@ -71,16 +71,18 @@ embeddings endpoint.
 
 Chat requests are converted to Responses requests, executed upstream, and
 converted back to chat completions. The returned `chatcmpl-` IDs are labels,
-not resource handles: the backend pins `store: false` and rejects
-`previous_response_id`, so no chaining is possible and chat clients resend
-full history as usual.
+not resource handles: GoModel pins `store: false` and drops
+`previous_response_id` (the backend allows neither), so no chaining is
+possible and chat clients resend full history as usual.
 
 Chat parameters with no Responses equivalent are rejected with a `400` that
-names the field, before any upstream call: `n` greater than 1, `logit_bias`,
+names the field, before any upstream call: `n` other than 1, `logit_bias`,
 `stop`, `seed`, `frequency_penalty`, `presence_penalty`, `logprobs`,
 `top_logprobs`, `modalities`, `audio`, `web_search_options`, and
-the deprecated `functions` / `function_call` pair. `prediction` is dropped
-instead: it is a speed hint and never changes the answer.
+the deprecated `functions` / `function_call` pair. Zero spellings of
+`logprobs`, `top_logprobs`, and the penalties (`false` / `0`) are tolerated:
+they change nothing. `prediction` is dropped instead: it is a speed hint and
+never changes the answer.
 
 The backend also validates against a strict parameter allowlist. GoModel
 adapts requests rather than failing them, so callers keep using the standard

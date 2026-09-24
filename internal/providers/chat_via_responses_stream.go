@@ -64,10 +64,13 @@ type OpenAIChatStreamConverter struct {
 	items           map[string]*chatStreamItemState
 	itemsByIndex    map[int]*chatStreamItemState
 	nextToolCallIdx int
-	finished        bool // terminal success events (finish chunk, usage, [DONE]) emitted
-	failed          bool // in-band error emitted
-	closed          bool
-	endErr          error // returned by Read once the error bytes are drained
+	// extraContentSent marks the items whose replay state chunk already went
+	// out, so an output_item.done and the terminal event do not emit it twice.
+	extraContentSent map[string]bool
+	finished         bool // terminal success events (finish chunk, usage, [DONE]) emitted
+	failed           bool // in-band error emitted
+	closed           bool
+	endErr           error // returned by Read once the error bytes are drained
 }
 
 // NewOpenAIChatStreamConverter creates a converter that transforms a
@@ -75,17 +78,18 @@ type OpenAIChatStreamConverter struct {
 // returned reader owns reader and closes it on Close.
 func NewOpenAIChatStreamConverter(reader io.ReadCloser, model, provider string, includeUsage bool) io.ReadCloser {
 	return &OpenAIChatStreamConverter{
-		reader:       reader,
-		model:        model,
-		provider:     provider,
-		includeUsage: includeUsage,
-		chatID:       "chatcmpl-" + uuid.New().String(),
-		created:      time.Now().Unix(),
-		scanner:      streaming.EventScanner{MaxEventBytes: maxResponsesStreamEventBytes},
-		buffer:       streaming.NewStreamBuffer(4096),
-		readBuf:      make([]byte, 4096),
-		items:        make(map[string]*chatStreamItemState),
-		itemsByIndex: make(map[int]*chatStreamItemState),
+		reader:           reader,
+		model:            model,
+		provider:         provider,
+		includeUsage:     includeUsage,
+		chatID:           "chatcmpl-" + uuid.New().String(),
+		created:          time.Now().Unix(),
+		scanner:          streaming.EventScanner{MaxEventBytes: maxResponsesStreamEventBytes},
+		buffer:           streaming.NewStreamBuffer(4096),
+		readBuf:          make([]byte, 4096),
+		items:            make(map[string]*chatStreamItemState),
+		itemsByIndex:     make(map[int]*chatStreamItemState),
+		extraContentSent: make(map[string]bool),
 	}
 }
 
@@ -114,12 +118,14 @@ type responsesStreamEventView struct {
 }
 
 // responsesStreamItemView decodes the item of a response.output_item.added
-// event.
+// or response.output_item.done event.
 type responsesStreamItemView struct {
 	ID     string `json:"id"`
 	Type   string `json:"type"`
 	CallID string `json:"call_id"`
 	Name   string `json:"name"`
+	// ExtraContent is the item's replay state, relayed on completion.
+	ExtraContent json.RawMessage `json:"extra_content"`
 }
 
 // responsesStreamErrorView decodes the error member of a failed terminal
@@ -136,7 +142,9 @@ type responsesStreamErrorView struct {
 type responsesTerminalResponseView struct {
 	Status string `json:"status"`
 	Output []struct {
-		Type string `json:"type"`
+		ID           string          `json:"id"`
+		Type         string          `json:"type"`
+		ExtraContent json.RawMessage `json:"extra_content"`
 	} `json:"output"`
 	IncompleteDetails *struct {
 		Reason string `json:"reason"`
@@ -187,7 +195,15 @@ type chatCompletionStreamChoice struct {
 // processEvent translates one upstream SSE event into chat chunks appended
 // to the output buffer.
 func (sc *OpenAIChatStreamConverter) processEvent(raw streaming.RawEvent) {
-	if sc.finished || sc.failed || raw.Comment || raw.Oversized {
+	if sc.finished || sc.failed || raw.Comment {
+		return
+	}
+	if raw.Oversized {
+		// An oversized event was never parsed, so the deltas it carried are
+		// gone and the stream can no longer be trusted. Fail closed with
+		// ErrEventTooLarge, mirroring NewTransformedSSEStream, instead of
+		// silently dropping it and finishing as if complete.
+		sc.failTruncated(streaming.ErrEventTooLarge)
 		return
 	}
 	data := bytes.TrimSpace(raw.Data)
@@ -213,6 +229,8 @@ func (sc *OpenAIChatStreamConverter) processEvent(raw streaming.RawEvent) {
 		sc.emitDelta(map[string]any{"reasoning_content": event.Delta})
 	case "response.function_call_arguments.delta":
 		sc.handleArgumentsDelta(event.ItemID, event.OutputIndex, event.Delta)
+	case "response.output_item.done":
+		sc.handleItemDone(event.OutputIndex, event.Item)
 	case "response.completed", "response.incomplete":
 		sc.handleTerminal(event.Type, event.Response)
 	case "response.failed":
@@ -220,9 +238,9 @@ func (sc *OpenAIChatStreamConverter) processEvent(raw streaming.RawEvent) {
 	case "error":
 		sc.failUpstream(event.Code, event.Message)
 	}
-	// Everything else (content_part.*, *.done, output_item.done, annotation
-	// events, hosted-tool items) carries nothing the deltas did not already
-	// deliver.
+	// Everything else (content_part.*, the remaining *.done events,
+	// annotation events, hosted-tool items) carries nothing the deltas did
+	// not already deliver.
 }
 
 // handleCreated takes model and created from the response.created payload
@@ -277,8 +295,15 @@ func (sc *OpenAIChatStreamConverter) handleItemAdded(outputIndex int, raw json.R
 }
 
 // registerItem records an output item, claiming a dense tool-call index for
-// function_call items.
+// function_call items. An item a delta already registered keeps its state:
+// claiming a second dense index would emit a duplicate start chunk.
 func (sc *OpenAIChatStreamConverter) registerItem(id string, outputIndex int, itemType string) *chatStreamItemState {
+	if id != "" {
+		if state := sc.items[id]; state != nil {
+			sc.itemsByIndex[outputIndex] = state
+			return state
+		}
+	}
 	state := &chatStreamItemState{toolIndex: -1}
 	if itemType == "function_call" {
 		state.toolIndex = sc.nextToolCallIdx
@@ -291,6 +316,46 @@ func (sc *OpenAIChatStreamConverter) registerItem(id string, outputIndex int, it
 	return state
 }
 
+// handleItemDone relays a completed item's replay state (extra_content) to
+// the chat client, so a streamed turn keeps the state the next translated
+// request needs to continue reasoning or tool use.
+func (sc *OpenAIChatStreamConverter) handleItemDone(outputIndex int, raw json.RawMessage) {
+	var item responsesStreamItemView
+	if err := json.Unmarshal(raw, &item); err != nil {
+		return
+	}
+	sc.emitItemExtraContent(item.ID, outputIndex, item.Type, item.ExtraContent)
+}
+
+// emitItemExtraContent emits one chunk carrying the item's extra_content,
+// once per item. Reasoning and message state rides the delta's extra_content
+// member, function_call state the tool call's extra_content — the same
+// convention the inverse converter (OpenAIResponsesStreamConverter) reads.
+func (sc *OpenAIChatStreamConverter) emitItemExtraContent(itemID string, outputIndex int, itemType string, extra json.RawMessage) {
+	if core.IsJSONNull(extra) || (itemID != "" && sc.extraContentSent[itemID]) {
+		return
+	}
+	switch itemType {
+	case "function_call":
+		state := sc.items[itemID]
+		if state == nil {
+			state = sc.itemsByIndex[outputIndex]
+		}
+		if state == nil || state.toolIndex < 0 {
+			return
+		}
+		sc.emitDelta(map[string]any{"tool_calls": []any{map[string]any{
+			"index":                state.toolIndex,
+			core.ExtraContentField: extra,
+		}}})
+	default:
+		sc.emitDelta(map[string]any{core.ExtraContentField: extra})
+	}
+	if itemID != "" {
+		sc.extraContentSent[itemID] = true
+	}
+}
+
 // handleArgumentsDelta emits one tool-call delta carrying the arguments
 // fragment under the item's dense chat index. Deltas of parallel calls may
 // interleave; each carries its item_id, so they never share an index.
@@ -300,6 +365,11 @@ func (sc *OpenAIChatStreamConverter) handleArgumentsDelta(itemID string, outputI
 		state = sc.itemsByIndex[outputIndex]
 	}
 	if state == nil {
+		if itemID == "" {
+			// No item_id and no known output_index: the fragment has nothing
+			// to attach to.
+			return
+		}
 		// A delta for an item the stream never announced: register it so the
 		// arguments still land under a stable dense index (Postel's law).
 		state = sc.registerItem(itemID, outputIndex, "function_call")
@@ -364,8 +434,13 @@ func (sc *OpenAIChatStreamConverter) handleTerminal(eventType string, raw json.R
 		return
 	}
 	sc.ensureRoleChunk()
+	// The terminal response's output still owes the client any replay state
+	// (extra_content) its items carry when no output_item.done delivered it.
+	for outputIndex, item := range response.Output {
+		sc.emitItemExtraContent(item.ID, outputIndex, item.Type, item.ExtraContent)
+	}
 	sc.finished = true
-	sc.emitChunk(map[string]any{}, terminalFinishReason(&response))
+	sc.emitChunk(map[string]any{}, terminalFinishReason(&response, sc.nextToolCallIdx > 0))
 	if sc.includeUsage && response.Usage != nil {
 		sc.emitUsage(response.Usage)
 	}
@@ -373,10 +448,17 @@ func (sc *OpenAIChatStreamConverter) handleTerminal(eventType string, raw json.R
 }
 
 // terminalFinishReason maps the terminal response's status onto a chat
-// finish reason, returning nil when no honest mapping exists.
-func terminalFinishReason(response *responsesTerminalResponseView) *string {
+// finish reason, returning nil when no honest mapping exists. A completed
+// response yields "tool_calls" when its output holds a function_call item
+// or the stream already emitted tool-call chunks (emittedToolCalls), even
+// when the terminal event's output omits them.
+func terminalFinishReason(response *responsesTerminalResponseView, emittedToolCalls bool) *string {
 	switch response.Status {
 	case "completed":
+		if emittedToolCalls {
+			reason := "tool_calls"
+			return &reason
+		}
 		for _, item := range response.Output {
 			if item.Type == "function_call" {
 				reason := "tool_calls"

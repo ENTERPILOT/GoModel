@@ -330,6 +330,30 @@ func TestConvertResponsesResponseToChat_Usage(t *testing.T) {
 	assert.Equal(t, 3, chat.Usage.CompletionTokensDetails.ReasoningTokens)
 }
 
+func TestConvertResponsesResponseToChat_NormalizesEmptyToolCallArguments(t *testing.T) {
+	tests := []struct {
+		name      string
+		arguments string
+	}{
+		{name: "empty", arguments: ""},
+		{name: "whitespace", arguments: "  "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chat := ConvertResponsesResponseToChat(&core.ResponsesResponse{
+				ID:     "resp_upstream",
+				Status: "completed",
+				Output: []core.ResponsesOutputItem{
+					{ID: "fc_1", Type: "function_call", Status: "completed", CallID: "call_1", Name: "ping", Arguments: tt.arguments},
+				},
+			})
+			require.Len(t, chat.Choices, 1)
+			require.Len(t, chat.Choices[0].Message.ToolCalls, 1)
+			assert.Equal(t, `{}`, chat.Choices[0].Message.ToolCalls[0].Function.Arguments)
+		})
+	}
+}
+
 func TestConvertResponsesResponseToChat_WithoutUsage(t *testing.T) {
 	resp := &core.ResponsesResponse{ID: "resp_upstream", Status: "completed"}
 

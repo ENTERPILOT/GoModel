@@ -11,10 +11,12 @@ import (
 
 // ConvertMessagesToResponsesInput converts Chat Completions messages into a
 // Responses API input array plus a top-level instructions string. It is the
-// inverse of ConvertResponsesInputToMessages: system and developer messages
-// become instructions (joined with a blank line), user and assistant messages
-// become message items, assistant tool calls become function_call items, and
-// tool results become function_call_output items.
+// inverse of ConvertResponsesInputToMessages: leading system and developer
+// messages become instructions (joined with a blank line), while one
+// appearing after any other role stays in place as a message item, keeping
+// the conversation's order semantics; user and assistant messages become
+// message items, assistant tool calls become function_call items, and tool
+// results become function_call_output items.
 //
 // Message content parts are emitted with Responses spellings as generic
 // blocks rather than core.ContentPart values: ContentPart marshals to the
@@ -23,26 +25,47 @@ import (
 func ConvertMessagesToResponsesInput(messages []core.Message) (input any, instructions string, err error) {
 	items := make([]core.ResponsesInputElement, 0, len(messages))
 	instructionParts := make([]string, 0, 1)
+	leading := true
 	for i := range messages {
 		msg := messages[i]
+		if strings.TrimSpace(msg.Role) == "" {
+			return nil, "", core.NewInvalidRequestError(
+				"chat message role is required to translate messages onto Responses input",
+				nil,
+			)
+		}
 		switch msg.Role {
 		case "system", "developer":
-			if text := core.ExtractTextContent(msg.Content); strings.TrimSpace(text) != "" {
-				instructionParts = append(instructionParts, text)
+			if leading {
+				if text := core.ExtractTextContent(msg.Content); strings.TrimSpace(text) != "" {
+					instructionParts = append(instructionParts, text)
+				}
+				continue
 			}
+			// A mid-conversation system/developer message is no global
+			// instruction: Responses accepts these roles in input, so the
+			// message stays where the caller put it.
+			item, convErr := chatMessageToResponsesItem(msg, "input_text")
+			if convErr != nil {
+				return nil, "", convErr
+			}
+			items = append(items, item)
 		case "assistant":
+			leading = false
 			assistantItems, convErr := chatAssistantMessageToResponsesItems(msg)
 			if convErr != nil {
 				return nil, "", convErr
 			}
 			items = append(items, assistantItems...)
 		case "tool":
+			leading = false
 			item, convErr := chatToolMessageToResponsesItem(msg)
 			if convErr != nil {
 				return nil, "", convErr
 			}
 			items = append(items, item)
 		default:
+			leading = false
 			// "user" and any other role travel as a plain message item.
 			item, convErr := chatMessageToResponsesItem(msg, "input_text")
 			if convErr != nil {
@@ -51,10 +74,19 @@ func ConvertMessagesToResponsesInput(messages []core.Message) (input any, instru
 			items = append(items, item)
 		}
 	}
+	instructions = strings.Join(instructionParts, "\n\n")
 	if len(items) == 0 {
-		return nil, strings.Join(instructionParts, "\n\n"), nil
+		if strings.TrimSpace(instructions) == "" {
+			// An empty input marshals as "input":null upstream, which the
+			// Responses API rejects with a less clear error.
+			return nil, "", core.NewInvalidRequestError(
+				"chat messages must yield at least one Responses input item or a non-empty instructions string",
+				nil,
+			)
+		}
+		return nil, instructions, nil
 	}
-	return items, strings.Join(instructionParts, "\n\n"), nil
+	return items, instructions, nil
 }
 
 // chatMessageToResponsesItem converts a plain (non-tool) chat message into a
@@ -104,17 +136,33 @@ func chatAssistantMessageToResponsesItems(msg core.Message) ([]core.ResponsesInp
 			Type:        "function_call",
 			CallID:      callID,
 			Name:        call.Function.Name,
-			Arguments:   call.Function.Arguments,
+			Arguments:   normalizeChatToolCallArguments(call.Function.Arguments),
 			ExtraFields: toolCallExtraContent(call.ExtraFields),
 		})
 	}
 	return items, nil
 }
 
+// normalizeChatToolCallArguments turns empty or whitespace-only tool-call
+// arguments into "{}", the smallest valid JSON object: providers reject an
+// empty arguments string on a function_call item.
+func normalizeChatToolCallArguments(arguments string) string {
+	if strings.TrimSpace(arguments) == "" {
+		return "{}"
+	}
+	return arguments
+}
+
 // chatToolMessageToResponsesItem converts a tool-role message into a
 // function_call_output item. Non-string content is stringified via JSON,
 // mirroring stringifyResponsesInputValueWithError on the inbound path.
 func chatToolMessageToResponsesItem(msg core.Message) (core.ResponsesInputElement, error) {
+	if strings.TrimSpace(msg.ToolCallID) == "" {
+		return core.ResponsesInputElement{}, core.NewInvalidRequestError(
+			"chat tool message requires tool_call_id to translate onto a Responses function_call_output item",
+			nil,
+		)
+	}
 	output, err := stringifyResponsesInputValueWithError(msg.Content)
 	if err != nil {
 		return core.ResponsesInputElement{}, core.NewInvalidRequestError(
@@ -123,10 +171,12 @@ func chatToolMessageToResponsesItem(msg core.Message) (core.ResponsesInputElemen
 		)
 	}
 	return core.ResponsesInputElement{
-		Type:        "function_call_output",
-		CallID:      msg.ToolCallID,
-		Output:      output,
-		ExtraFields: core.CloneUnknownJSONFields(msg.ExtraFields),
+		Type:   "function_call_output",
+		CallID: msg.ToolCallID,
+		Output: output,
+		// The chat-only "name" member must not travel onto the item: strict
+		// upstream allowlists (Codex) reject unknown members.
+		ExtraFields: core.CloneUnknownJSONFields(msg.ExtraFields).Without("name"),
 	}, nil
 }
 
@@ -175,11 +225,16 @@ func chatMessageReasoningText(msg core.Message) string {
 	return ""
 }
 
-// chatMessageExtraFieldsForResponses strips the chat-only reasoning members
-// consumed by the reasoning replay from a message's unknown fields; every
-// other extension travels onto the Responses item unchanged.
+// chatMessageExtraFieldsForResponses strips the chat-only members consumed
+// by the translation from a message's unknown fields; every other extension
+// travels onto the Responses item unchanged. Stripped are the reasoning
+// members (the reasoning replay item carries them), extra_content (same),
+// "refusal" (an assistant refusal is content on a Responses item, not a
+// member — replaying the chat member would leak a wrong-shape field), and
+// the chat-only "name" (strict upstream allowlists such as Codex reject
+// unknown members).
 func chatMessageExtraFieldsForResponses(fields core.UnknownJSONFields) core.UnknownJSONFields {
-	return fields.Without("reasoning_content", "reasoning", core.ExtraContentField)
+	return fields.Without("reasoning_content", "reasoning", "refusal", "name", core.ExtraContentField)
 }
 
 // chatContentToResponsesBlocks converts chat message content into Responses

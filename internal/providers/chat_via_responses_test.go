@@ -133,6 +133,35 @@ func TestConvertChatRequestToResponses_MaxTokensMapping(t *testing.T) {
 		assert.Nil(t, responsesReq.ExtraFields.Lookup("max_completion_tokens"))
 	})
 
+	t.Run("null max_completion_tokens strips the extra and keeps max_tokens fallback", func(t *testing.T) {
+		responsesReq, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:     "m",
+			Messages:  []core.Message{{Role: "user", Content: "hi"}},
+			MaxTokens: &maxTokens,
+			ExtraFields: chatViaResponsesExtras(map[string]string{
+				"max_completion_tokens": `null`,
+			}),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, responsesReq.MaxOutputTokens)
+		assert.Equal(t, 512, *responsesReq.MaxOutputTokens)
+		assert.Nil(t, responsesReq.ExtraFields.Lookup("max_completion_tokens"))
+	})
+
+	t.Run("malformed max_completion_tokens rejected", func(t *testing.T) {
+		for _, raw := range []string{`2048.5`, `true`} {
+			_, err := ConvertChatRequestToResponses(&core.ChatRequest{
+				Model:    "m",
+				Messages: []core.Message{{Role: "user", Content: "hi"}},
+				ExtraFields: chatViaResponsesExtras(map[string]string{
+					"max_completion_tokens": raw,
+				}),
+			})
+			require.Error(t, err, "value %s", raw)
+			assert.Contains(t, err.Error(), "max_completion_tokens")
+		}
+	})
+
 	t.Run("unset when neither is present", func(t *testing.T) {
 		responsesReq, err := ConvertChatRequestToResponses(&core.ChatRequest{
 			Model:    "m",
@@ -220,11 +249,50 @@ func TestConvertChatRequestToResponses_FlattensTools(t *testing.T) {
 		}, responsesReq.Tools[0])
 	})
 
-	t.Run("non-function tool rejected", func(t *testing.T) {
-		_, err := ConvertChatRequestToResponses(&core.ChatRequest{
+	t.Run("nested chat custom tool flattens", func(t *testing.T) {
+		responsesReq, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+			Tools: []map[string]any{
+				{
+					"type": "custom",
+					"custom": map[string]any{
+						"name":        "exec_command",
+						"description": "Run a command.",
+						"format":      map[string]any{"type": "grammar", "syntax": "lark"},
+					},
+				},
+			},
+		})
+		require.NoError(t, err)
+		require.Len(t, responsesReq.Tools, 1)
+		assert.Equal(t, map[string]any{
+			"type":        "custom",
+			"name":        "exec_command",
+			"description": "Run a command.",
+			"format":      map[string]any{"type": "grammar", "syntax": "lark"},
+		}, responsesReq.Tools[0])
+	})
+
+	t.Run("already flat custom tool passes through", func(t *testing.T) {
+		responsesReq, err := ConvertChatRequestToResponses(&core.ChatRequest{
 			Model:    "m",
 			Messages: []core.Message{{Role: "user", Content: "hi"}},
 			Tools:    []map[string]any{{"type": "custom", "name": "exec_command"}},
+		})
+		require.NoError(t, err)
+		require.Len(t, responsesReq.Tools, 1)
+		assert.Equal(t, map[string]any{
+			"type": "custom",
+			"name": "exec_command",
+		}, responsesReq.Tools[0])
+	})
+
+	t.Run("unknown tool type rejected", func(t *testing.T) {
+		_, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+			Tools:    []map[string]any{{"type": "web_search"}},
 		})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "tools")
@@ -269,6 +337,16 @@ func TestConvertChatRequestToResponses_ToolChoice(t *testing.T) {
 			Model:      "m",
 			Messages:   []core.Message{{Role: "user", Content: "hi"}},
 			ToolChoice: map[string]any{"type": "allowed_tools", "tools": []any{}},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "tool_choice")
+	})
+
+	t.Run("unknown string rejected", func(t *testing.T) {
+		_, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:      "m",
+			Messages:   []core.Message{{Role: "user", Content: "hi"}},
+			ToolChoice: "web_search",
 		})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "tool_choice")
@@ -428,6 +506,26 @@ func TestConvertChatRequestToResponses_ToleratesExplicitNulls(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Nil(t, responsesReq.ExtraFields.Lookup("n"))
+}
+
+func TestConvertChatRequestToResponses_ToleratesZeroValues(t *testing.T) {
+	// A zero value spells the default too: logprobs:false, top_logprobs:0,
+	// and the penalties at 0 change nothing, so clients sending them
+	// unconditionally must not be rejected.
+	responsesReq, err := ConvertChatRequestToResponses(&core.ChatRequest{
+		Model:    "m",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		ExtraFields: chatViaResponsesExtras(map[string]string{
+			"logprobs":          `false`,
+			"top_logprobs":      `0`,
+			"frequency_penalty": `0`,
+			"presence_penalty":  `0.0`,
+		}),
+	})
+	require.NoError(t, err)
+	for _, field := range []string{"logprobs", "top_logprobs", "frequency_penalty", "presence_penalty"} {
+		assert.Nil(t, responsesReq.ExtraFields.Lookup(field), "%s must not leak upstream", field)
+	}
 }
 
 func chatViaResponsesCompletedResponse() *core.ResponsesResponse {
