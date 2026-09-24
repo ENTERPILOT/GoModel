@@ -114,7 +114,8 @@
                             "pro/overview",
                             "pro/compression",
                             "pro/sso",
-                            "pro/intelligent-routing"
+                            "pro/intelligent-routing",
+                            "pro/egress"
                         ]
                     },
                     {
