@@ -1,7 +1,8 @@
 // Request-type filter for the audit log. Each type groups one or more gateway
-// operations (core.Operation); the server filters stored rows by operation,
-// and auditTypeForPath mirrors internal/core/endpoint_operations.go so live
-// rows can be filtered the same way before they are persisted.
+// operations (core.Operation); the server drops stored rows of hidden
+// operations, and auditTypeForPath mirrors internal/core/endpoint_operations.go
+// so live rows are dropped the same way before they are persisted. Rows
+// outside every type (e.g. authentication events) always stay visible.
 // Pure logic with relative imports so node --test can load it directly.
 
 import * as m from "../../lib/paraglide/messages.js";
@@ -63,28 +64,23 @@ export function auditTypeForPath(path) {
   return "";
 }
 
-// normalizeHiddenTypes keeps known keys and never hides every type: an empty
-// list would silently match nothing, so that choice resets to showing all.
+// normalizeHiddenTypes keeps known, unique keys.
 export function normalizeHiddenTypes(hidden) {
   const keys = Array.isArray(hidden) ? hidden.filter((key) => TYPE_KEYS.has(key)) : [];
-  const unique = [...new Set(keys)];
-  return unique.length >= AUDIT_TYPES.length ? [] : unique;
+  return [...new Set(keys)];
 }
 
-// auditOperationsQuery renders the `operation` query value for the visible
-// types, or "" when nothing is hidden.
-export function auditOperationsQuery(hidden) {
+// auditExcludeOperationsQuery renders the `exclude_operation` query value for
+// the hidden types, or "" when nothing is hidden.
+export function auditExcludeOperationsQuery(hidden) {
   const hiddenSet = new Set(normalizeHiddenTypes(hidden));
-  if (hiddenSet.size === 0) return "";
-  return AUDIT_TYPES.filter((type) => !hiddenSet.has(type.key))
+  return AUDIT_TYPES.filter((type) => hiddenSet.has(type.key))
     .flatMap((type) => type.operations)
     .join(",");
 }
 
 // auditEntryTypeVisible reports whether a (live) entry passes the filter.
 export function auditEntryTypeVisible(entry, hidden) {
-  const hiddenSet = new Set(normalizeHiddenTypes(hidden));
-  if (hiddenSet.size === 0) return true;
   const type = auditTypeForPath(entry && entry.path);
-  return type !== "" && !hiddenSet.has(type);
+  return type === "" || !normalizeHiddenTypes(hidden).includes(type);
 }

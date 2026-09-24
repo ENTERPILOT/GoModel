@@ -108,12 +108,15 @@ class AuditListStore {
 
   // toggleAuditGroupSessions flips the persisted view preference. It is a view
   // preference, not a filter: clearAuditFilters leaves it alone.
-  // toggleAuditType shows or hides one request type and refetches.
+  // toggleAuditType shows or hides one request type and refetches. Loaded
+  // thread children were fetched under the old filter, so they are dropped.
   toggleAuditType(key) {
     const hidden = this.auditHiddenTypes;
     this.auditHiddenTypes = hidden.includes(key)
       ? hidden.filter((item) => item !== key)
       : [...hidden, key];
+    this.auditExpandedThreads = {};
+    liveLogs.auditThreadChildren = {};
     this.fetchAuditLog(true);
   }
 
@@ -275,6 +278,7 @@ class AuditListStore {
       const qs = buildAuditSessionQuery({
         sessionId,
         limit: THREAD_CHILDREN_LIMIT,
+        hiddenTypes: this.auditHiddenTypes,
       });
       const result = await getJSON("/admin/audit/log?" + qs, {
         label: "audit session",
@@ -322,7 +326,11 @@ class AuditListStore {
     this.auditMethod = "";
     this.auditStatusCode = "";
     this.auditStream = "";
-    this.auditHiddenTypes = [];
+    if (this.auditHiddenTypes.length > 0) {
+      this.auditHiddenTypes = [];
+      this.auditExpandedThreads = {};
+      liveLogs.auditThreadChildren = {};
+    }
     this.fetchAuditLog(true);
   }
 

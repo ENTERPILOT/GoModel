@@ -4,11 +4,11 @@ import assert from "node:assert/strict";
 import {
   AUDIT_TYPES,
   auditEntryTypeVisible,
-  auditOperationsQuery,
+  auditExcludeOperationsQuery,
   auditTypeForPath,
   normalizeHiddenTypes,
 } from "../src/pages/audit-logs/audit-operations.js";
-import { auditLogWithLiveEntries, buildAuditLogQuery } from "../src/pages/audit-logs/audit-logic.js";
+import { auditLogWithLiveEntries, buildAuditLogQuery, buildAuditSessionQuery } from "../src/pages/audit-logs/audit-logic.js";
 
 test("auditTypeForPath mirrors the gateway endpoint classification", () => {
   const cases = [
@@ -33,35 +33,38 @@ test("auditTypeForPath mirrors the gateway endpoint classification", () => {
   }
 });
 
-test("normalizeHiddenTypes drops unknown keys and never hides everything", () => {
+test("normalizeHiddenTypes keeps known unique keys", () => {
   assert.deepEqual(normalizeHiddenTypes(["mcp", "nope", "mcp"]), ["mcp"]);
-  assert.deepEqual(normalizeHiddenTypes(AUDIT_TYPES.map((type) => type.key)), []);
+  const all = AUDIT_TYPES.map((type) => type.key);
+  assert.deepEqual(normalizeHiddenTypes(all), all);
   assert.deepEqual(normalizeHiddenTypes("mcp"), []);
 });
 
-test("auditOperationsQuery lists the operations of the visible types", () => {
-  assert.equal(auditOperationsQuery([]), "");
-  const ops = auditOperationsQuery(["mcp", "audio", "passthrough"]).split(",");
-  assert.ok(ops.includes("chat_completions"));
-  assert.ok(ops.includes("conversations"));
-  assert.ok(!ops.includes("mcp"));
-  assert.ok(!ops.includes("audio_speech"));
-  assert.ok(!ops.includes("provider_passthrough"));
+test("auditExcludeOperationsQuery lists the operations of the hidden types", () => {
+  assert.equal(auditExcludeOperationsQuery([]), "");
+  assert.equal(
+    auditExcludeOperationsQuery(["mcp", "audio", "passthrough"]),
+    "audio_speech,audio_transcriptions,audio_translations,provider_passthrough,mcp",
+  );
 });
 
-test("buildAuditLogQuery sends the operation filter only when a type is hidden", () => {
+test("audit list and session queries send exclude_operation only when a type is hidden", () => {
   const base = { dateQuery: "days=7", limit: 25, offset: 0 };
-  assert.doesNotMatch(buildAuditLogQuery(base), /operation=/);
-  const qs = buildAuditLogQuery({ ...base, hiddenTypes: ["mcp"] });
-  assert.match(qs, /operation=chat_completions%2Cresponses%2C/);
-  assert.doesNotMatch(qs, /%2Cmcp/);
+  assert.doesNotMatch(buildAuditLogQuery(base), /exclude_operation=/);
+  assert.match(buildAuditLogQuery({ ...base, hiddenTypes: ["mcp"] }), /&exclude_operation=mcp$/);
+  assert.doesNotMatch(buildAuditSessionQuery({ sessionId: "s" }), /exclude_operation=/);
+  assert.match(
+    buildAuditSessionQuery({ sessionId: "s", hiddenTypes: ["passthrough"] }),
+    /&exclude_operation=provider_passthrough$/,
+  );
 });
 
-test("auditEntryTypeVisible drops hidden and unclassified live rows", () => {
+test("auditEntryTypeVisible drops hidden types and keeps unclassified rows", () => {
   assert.equal(auditEntryTypeVisible({ path: "/mcp" }, []), true);
   assert.equal(auditEntryTypeVisible({ path: "/mcp" }, ["mcp"]), false);
   assert.equal(auditEntryTypeVisible({ path: "/v1/chat/completions" }, ["mcp"]), true);
-  assert.equal(auditEntryTypeVisible({}, ["mcp"]), false);
+  assert.equal(auditEntryTypeVisible({ path: "/sso/callback" }, ["mcp"]), true);
+  assert.equal(auditEntryTypeVisible({}, ["mcp"]), true);
 });
 
 test("auditLogWithLiveEntries keeps pending previews of hidden types off the page", () => {

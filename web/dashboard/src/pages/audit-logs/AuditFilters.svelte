@@ -101,7 +101,6 @@
             <input
               type="checkbox"
               checked={visible}
-              disabled={visible && hiddenCount === AUDIT_TYPES.length - 1}
               onchange={() => auditList.toggleAuditType(type.key)}
             />
             <span>{type.label()}</span>

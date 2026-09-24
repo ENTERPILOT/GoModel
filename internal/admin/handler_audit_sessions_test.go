@@ -139,16 +139,16 @@ func TestAuditLog_SessionIDSkipsDefaultDateWindow(t *testing.T) {
 	require.False(t, reader.lastQuery.EndDate.IsZero())
 }
 
-func TestAuditLog_OperationFilter(t *testing.T) {
+func TestAuditLog_ExcludeOperationFilter(t *testing.T) {
 	reader := &mockAuditReader{logResult: &auditlog.LogListResult{}}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
 
-	c, _ := echotest.Get(t, "/admin/audit/log?operation=chat_completions,audio_speech")
+	c, _ := echotest.Get(t, "/admin/audit/log?exclude_operation=mcp,audio_speech")
 	require.NoError(t, h.AuditLog(c))
-	assert.Equal(t, []core.Operation{core.OperationChatCompletions, core.OperationAudioSpeech}, reader.lastQuery.Operations)
+	assert.Equal(t, []core.Operation{core.OperationMCP, core.OperationAudioSpeech}, reader.lastQuery.ExcludeOperations)
 
-	c, rec := echotest.Get(t, "/admin/audit/log?operation=mcp,nope")
+	c, rec := echotest.Get(t, "/admin/audit/log?exclude_operation=mcp,nope")
 	require.NoError(t, h.AuditLog(c))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "invalid operation: nope")
+	assert.Contains(t, rec.Body.String(), "invalid exclude_operation: nope")
 }

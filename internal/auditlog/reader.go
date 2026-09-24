@@ -26,11 +26,12 @@ type LogQueryParams struct {
 	Search         string
 	StatusCode     *int
 	Stream         *bool
-	// Operations keeps entries whose path belongs to one of these operations.
-	// Empty matches every entry.
-	Operations []core.Operation
-	Limit      int
-	Offset     int
+	// ExcludeOperations drops entries whose path belongs to one of these
+	// operations. Entries outside every operation (e.g. authentication
+	// events) always stay.
+	ExcludeOperations []core.Operation
+	Limit             int
+	Offset            int
 	// OmitAttempts excludes provider attempts from returned entries. The default is false.
 	OmitAttempts bool
 	// ExactUserPath matches only UserPath instead of its subtree. The default is false.

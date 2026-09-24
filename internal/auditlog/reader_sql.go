@@ -244,8 +244,8 @@ func (r *SQLReader) logFilters(ctx context.Context, params LogQueryParams) ([]st
 	if params.Stream != nil {
 		add("stream = ?", *params.Stream)
 	}
-	if len(params.Operations) > 0 {
-		condition, values := operationsSQLFilter(params.Operations)
+	if len(params.ExcludeOperations) > 0 {
+		condition, values := excludeOperationsSQLFilter(params.ExcludeOperations)
 		add(condition, values...)
 	}
 	if params.Search != "" {
@@ -566,21 +566,22 @@ func isMissingAuditAttemptsTable(err error) bool {
 		(strings.Contains(message, "no such table") || strings.Contains(message, "does not exist"))
 }
 
-// operationsSQLFilter matches paths belonging to any of the operations. The
-// prefixes hold no LIKE wildcards, so they need no escaping.
-func operationsSQLFilter(ops []core.Operation) (string, []any) {
+// excludeOperationsSQLFilter drops paths belonging to any of the operations.
+// Exact paths also match with one trailing slash, as DescribeEndpoint does.
+// The prefixes hold no LIKE wildcards, so they need no escaping.
+func excludeOperationsSQLFilter(ops []core.Operation) (string, []any) {
 	var clauses []string
 	var args []any
 	for _, op := range ops {
 		paths, _ := core.PathsForOperation(op)
 		for _, exact := range paths.Exact {
-			clauses = append(clauses, "path = ?")
-			args = append(args, exact)
+			clauses = append(clauses, "path = ?", "path = ?")
+			args = append(args, exact, exact+"/")
 		}
 		for _, prefix := range paths.Prefixes {
 			clauses = append(clauses, "path = ?", "path LIKE ?")
 			args = append(args, prefix, prefix+"/%")
 		}
 	}
-	return "(" + strings.Join(clauses, " OR ") + ")", args
+	return "(path IS NULL OR NOT (" + strings.Join(clauses, " OR ") + "))", args
 }

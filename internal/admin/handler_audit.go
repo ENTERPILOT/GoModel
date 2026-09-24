@@ -51,7 +51,7 @@ const conversationBuildTimeout = 10 * time.Second
 // @Param        error_type   query     string  false  "Filter by error type"
 // @Param        status_code  query     int     false  "Filter by status code"
 // @Param        stream       query     bool    false  "Filter by stream mode (true/false)"
-// @Param        operation    query     string  false  "Comma-separated endpoint operations to keep, e.g. chat_completions,responses (mcp, provider_passthrough, audio_speech, ...)"
+// @Param        exclude_operation  query  string  false  "Comma-separated endpoint operations to hide, e.g. mcp,provider_passthrough,audio_speech; other entries, including unclassified ones, stay"
 // @Param        search       query     string  false  "Search across request_id/requested_model/provider/method/path/session_id/error_type/error_message"
 // @Param        limit        query     int     false  "Page size (default 25, max 100)"
 // @Param        offset       query     int     false  "Offset for pagination"
@@ -170,12 +170,12 @@ func parseAuditLogQueryParams(c *echo.Context) (auditlog.LogQueryParams, error) 
 		params.Stream = &parsed
 	}
 
-	if raw := c.QueryParam("operation"); raw != "" {
+	if raw := c.QueryParam("exclude_operation"); raw != "" {
 		ops, unknown, ok := core.ParseOperations(raw)
 		if !ok {
-			return params, core.NewInvalidRequestError("invalid operation: "+unknown, nil)
+			return params, core.NewInvalidRequestError("invalid exclude_operation: "+unknown, nil)
 		}
-		params.Operations = ops
+		params.ExcludeOperations = ops
 	}
 
 	if l := c.QueryParam("limit"); l != "" {
@@ -220,7 +220,7 @@ func parseAuditLogQueryParams(c *echo.Context) (auditlog.LogQueryParams, error) 
 // @Param        error_type   query     string  false  "Filter by error type"
 // @Param        status_code  query     int     false  "Filter by status code"
 // @Param        stream       query     bool    false  "Filter by stream mode (true/false)"
-// @Param        operation    query     string  false  "Comma-separated endpoint operations to keep, e.g. chat_completions,responses (mcp, provider_passthrough, audio_speech, ...)"
+// @Param        exclude_operation  query  string  false  "Comma-separated endpoint operations to hide, e.g. mcp,provider_passthrough,audio_speech; other entries, including unclassified ones, stay"
 // @Param        search       query     string  false  "Search across request_id/requested_model/provider/method/path/session_id/error_type/error_message"
 // @Param        limit        query     int     false  "Page size in threads (default 25, max 100)"
 // @Param        offset       query     int     false  "Offset for pagination"

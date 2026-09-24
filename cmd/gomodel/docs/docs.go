@@ -254,8 +254,8 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Comma-separated endpoint operations to keep, e.g. chat_completions,responses (mcp, provider_passthrough, audio_speech, ...)",
-                        "name": "operation",
+                        "description": "Comma-separated endpoint operations to hide, e.g. mcp,provider_passthrough,audio_speech; other entries, including unclassified ones, stay",
+                        "name": "exclude_operation",
                         "in": "query"
                     },
                     {
@@ -389,8 +389,8 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Comma-separated endpoint operations to keep, e.g. chat_completions,responses (mcp, provider_passthrough, audio_speech, ...)",
-                        "name": "operation",
+                        "description": "Comma-separated endpoint operations to hide, e.g. mcp,provider_passthrough,audio_speech; other entries, including unclassified ones, stay",
+                        "name": "exclude_operation",
                         "in": "query"
                     },
                     {

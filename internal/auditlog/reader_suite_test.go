@@ -2,6 +2,7 @@ package auditlog
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -105,18 +106,19 @@ func TestReader_GetLastUsedByAuthKeys(t *testing.T) {
 	})
 }
 
-func TestReader_GetLogsFiltersByOperation(t *testing.T) {
+func TestReader_GetLogsExcludesOperations(t *testing.T) {
 	runReaderSuite(t, func(t *testing.T, store LogStore, reader Reader) {
 		ctx := context.Background()
 		base := time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC)
 		paths := []string{
 			"/v1/chat/completions", "/mcp", "/mcp/github", "/mcpx",
-			"/v1/audio/speech", "/v1/audio/transcriptions", "/p/openai/v1/models",
+			"/v1/audio/speech", "/v1/audio/speech/", "/v1/audio/transcriptions",
+			"/p/openai/v1/models", "/sso/callback", "",
 		}
 		entries := make([]*LogEntry, 0, len(paths))
 		for i, path := range paths {
 			entries = append(entries, &LogEntry{
-				ID:        "op-" + path,
+				ID:        fmt.Sprintf("op-%d", i),
 				Timestamp: base.Add(time.Duration(i) * time.Minute),
 				Path:      path,
 			})
@@ -128,16 +130,24 @@ func TestReader_GetLogsFiltersByOperation(t *testing.T) {
 			ops  []core.Operation
 			want []string
 		}{
-			{name: "mcp prefix", ops: []core.Operation{core.OperationMCP}, want: []string{"/mcp", "/mcp/github"}},
-			{name: "exact and prefix", ops: []core.Operation{core.OperationAudioSpeech, core.OperationProviderPassthrough}, want: []string{"/v1/audio/speech", "/p/openai/v1/models"}},
-			{name: "everything but mcp", ops: []core.Operation{
-				core.OperationChatCompletions, core.OperationAudioSpeech,
+			{name: "mcp prefix", ops: []core.Operation{core.OperationMCP}, want: []string{
+				"/v1/chat/completions", "/mcpx", "/v1/audio/speech", "/v1/audio/speech/",
+				"/v1/audio/transcriptions", "/p/openai/v1/models", "/sso/callback", "",
+			}},
+			{name: "exact with trailing slash and prefix", ops: []core.Operation{
+				core.OperationAudioSpeech, core.OperationProviderPassthrough,
+			}, want: []string{
+				"/v1/chat/completions", "/mcp", "/mcp/github", "/mcpx",
+				"/v1/audio/transcriptions", "/sso/callback", "",
+			}},
+			{name: "every classified type keeps unclassified rows", ops: []core.Operation{
+				core.OperationChatCompletions, core.OperationMCP, core.OperationAudioSpeech,
 				core.OperationAudioTranscriptions, core.OperationProviderPassthrough,
-			}, want: []string{"/v1/chat/completions", "/v1/audio/speech", "/v1/audio/transcriptions", "/p/openai/v1/models"}},
+			}, want: []string{"/mcpx", "/sso/callback", ""}},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				result, err := reader.GetLogs(ctx, LogQueryParams{Operations: tt.ops, Limit: 50})
+				result, err := reader.GetLogs(ctx, LogQueryParams{ExcludeOperations: tt.ops, Limit: 50})
 				require.NoError(t, err)
 				got := make([]string, 0, len(result.Entries))
 				for _, entry := range result.Entries {
