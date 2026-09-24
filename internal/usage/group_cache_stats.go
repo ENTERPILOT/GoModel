@@ -187,11 +187,7 @@ func foldUsageCacheRows(rows inputSegmentRows, keysFor groupKeysFunc) (map[strin
 				slog.Warn("failed to unmarshal labels JSON", "error", err)
 			}
 		}
-		if rawDataJSON != nil && *rawDataJSON != "" {
-			if err := json.Unmarshal([]byte(*rawDataJSON), &row.RawData); err != nil {
-				slog.Warn("failed to unmarshal raw_data JSON", "error", err)
-			}
-		}
+		row.RawData = promptCacheRawData(rawDataJSON)
 		accumulateGroupCacheStats(out, keysFor, row)
 	}
 	return out, rows.Err()

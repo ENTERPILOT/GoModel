@@ -46,6 +46,10 @@ var auditLogPartialWriteFailures = promauto.NewCounter(
 // MongoDBStore implements LogStore for MongoDB.
 const legacyExecutionPlanIndex = "execution_plan_version_id_1"
 
+// legacyAuthKeyIndex is the single-field predecessor of the auth_key_id +
+// timestamp compound index.
+const legacyAuthKeyIndex = "auth_key_id_1"
+
 // isIndexNotFound reports MongoDB's IndexNotFound (code 27) server error.
 func isIndexNotFound(err error) bool {
 	var cmdErr mongo.CommandError
@@ -94,7 +98,8 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 			Keys: bson.D{{Key: "principal_id", Value: 1}},
 		},
 		{
-			Keys: bson.D{{Key: "auth_key_id", Value: 1}},
+			// Serves the auth_key_id filter and the per-key last-used lookup.
+			Keys: bson.D{{Key: "auth_key_id", Value: 1}, {Key: "timestamp", Value: -1}},
 		},
 		{
 			Keys: bson.D{{Key: "client_ip", Value: 1}},
@@ -137,14 +142,16 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 	// Best-effort: retire the index on the pre-v0.1.17 execution_plan_version_id
 	// field, which the workflow rename left behind on older collections. Most
 	// collections never had it, so "not found" is the expected outcome.
-	if err := collection.Indexes().DropOne(ctx, legacyExecutionPlanIndex); err != nil && !isIndexNotFound(err) {
-		slog.Warn("failed to drop legacy MongoDB index", "index", legacyExecutionPlanIndex, "error", err)
-	}
+	dropLegacyMongoIndex(ctx, collection, legacyExecutionPlanIndex)
 
 	_, err := collection.Indexes().CreateMany(ctx, indexes)
 	if err != nil {
 		// Log warning but don't fail - indexes may already exist
 		slog.Warn("failed to create some MongoDB indexes", "error", err)
+	} else {
+		// Retire the single-field auth_key_id index only once the compound
+		// index that replaces it exists.
+		dropLegacyMongoIndex(ctx, collection, legacyAuthKeyIndex)
 	}
 
 	return &MongoDBStore{
@@ -207,4 +214,11 @@ func (s *MongoDBStore) Flush(_ context.Context) error {
 // Close is a no-op for MongoDB as the client is managed by the storage layer.
 func (s *MongoDBStore) Close() error {
 	return nil
+}
+
+// dropLegacyMongoIndex drops a retired index, treating "not found" as done.
+func dropLegacyMongoIndex(ctx context.Context, collection *mongo.Collection, name string) {
+	if err := collection.Indexes().DropOne(ctx, name); err != nil && !isIndexNotFound(err) {
+		slog.Warn("failed to drop legacy MongoDB index", "index", name, "error", err)
+	}
 }
