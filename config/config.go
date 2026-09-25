@@ -128,6 +128,7 @@ func buildDefaultConfig() *Config {
 				"llamacpp",
 				"llmd",
 				"deepseek",
+        "edenai",
 				"jev",
 			},
 		},

@@ -225,6 +225,7 @@
                     "providers/multiple-ollama",
                     "providers/kimicode",
                     "providers/hetzner",
+                    "providers/edenai",
                     {
                         "group": "Cloud Platforms",
                         "icon": "cloud",
