@@ -1715,8 +1715,10 @@ func TestConvertOpenAIToolsToAnthropic(t *testing.T) {
 			checkFn: func(t *testing.T, tools []anthropicTool) {
 				assert.True(t, tools[0].Strict)
 				assert.Equal(t, false, tools[0].InputSchema["additionalProperties"])
-				properties, _ := tools[0].InputSchema["properties"].(map[string]any)
-				city, _ := properties["city"].(map[string]any)
+				properties, ok := tools[0].InputSchema["properties"].(map[string]any)
+				require.True(t, ok)
+				city, ok := properties["city"].(map[string]any)
+				require.True(t, ok)
 				assert.NotContains(t, city, "minLength")
 			},
 		},

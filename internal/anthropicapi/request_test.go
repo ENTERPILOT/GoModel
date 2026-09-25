@@ -256,9 +256,11 @@ func TestToChatRequestToolStrict(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, chat.Tools, 2)
 
-	strictFn, _ := chat.Tools[0]["function"].(map[string]any)
+	strictFn, ok := chat.Tools[0]["function"].(map[string]any)
+	require.True(t, ok)
 	assert.Equal(t, true, strictFn["strict"])
-	plainFn, _ := chat.Tools[1]["function"].(map[string]any)
+	plainFn, ok := chat.Tools[1]["function"].(map[string]any)
+	require.True(t, ok)
 	assert.NotContains(t, plainFn, "strict")
 }
 
