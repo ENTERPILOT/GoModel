@@ -88,6 +88,7 @@ type Tool struct {
 	Name         string          `json:"name"`
 	Description  string          `json:"description,omitempty"`
 	InputSchema  json.RawMessage `json:"input_schema,omitempty" swaggertype:"object"`
+	Strict       *bool           `json:"strict,omitempty"`
 	CacheControl json.RawMessage `json:"cache_control,omitempty" swaggertype:"object"`
 }
 

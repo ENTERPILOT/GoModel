@@ -233,6 +233,17 @@ the completion before parsing `message.content`:
 Only `finish_reason: "stop"` with non-empty content is worth handing to a JSON
 parser; treat anything else as an error rather than parsing it.
 
+## Developer messages and strict tools
+
+`developer` messages are OpenAI's newer name for `system`; GoModel sends them to
+Anthropic as system content, following the same placement rules as `system`
+messages.
+
+A function tool with `"strict": true` is forwarded as an Anthropic strict tool.
+Strict tool schemas are held to the same limits as structured output, so GoModel
+adapts them with the same rules as in [Structured output](#structured-output).
+Tools without `strict` keep their schema exactly as sent.
+
 ## Verbosity
 
 OpenAI's `verbosity` (and `text.verbosity` on `/v1/responses`) has no Anthropic

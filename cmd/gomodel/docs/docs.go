@@ -9027,6 +9027,9 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "strict": {
+                    "type": "boolean"
+                },
                 "type": {
                     "type": "string"
                 }

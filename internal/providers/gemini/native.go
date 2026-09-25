@@ -264,7 +264,7 @@ func convertChatRequestToGemini(req *core.ChatRequest) (*geminiGenerateContentRe
 		return nil, err
 	}
 	out.Tools = tools
-	out.ToolConfig = geminiToolConfigFromOpenAI(req.ToolChoice)
+	out.ToolConfig = geminiToolConfigFromOpenAI(req.ToolChoice, hasStrictTool(req.Tools))
 	out.GenerationConfig = geminiGenerationConfig(req)
 	out.SafetySettings = geminiSafetySettings(req)
 	out.CachedContent = geminiCachedContent(req)
@@ -642,7 +642,11 @@ func validateGeminiParametersJSONSchema(encoded json.RawMessage) (json.RawMessag
 	return stripped, nil
 }
 
-func geminiToolConfigFromOpenAI(choice any) *geminiToolConfig {
+// geminiToolConfigFromOpenAI maps tool_choice onto functionCallingConfig. With
+// strict set (any tool declared strict: true), the free-choice mode becomes
+// VALIDATED, Gemini's AUTO with schema-adherent function calls; ANY already
+// guarantees schema adherence.
+func geminiToolConfigFromOpenAI(choice any, strict bool) *geminiToolConfig {
 	mode := ""
 	var allowed []string
 
@@ -658,16 +662,22 @@ func geminiToolConfigFromOpenAI(choice any) *geminiToolConfig {
 		}
 	case map[string]any:
 		choiceType, _ := value["type"].(string)
-		if strings.TrimSpace(choiceType) == "function" {
+		switch strings.TrimSpace(choiceType) {
+		case "function":
 			mode = "ANY"
 			if fn, ok := value["function"].(map[string]any); ok {
 				if name, _ := fn["name"].(string); name != "" {
 					allowed = []string{name}
 				}
 			}
+		case "allowed_tools":
+			mode, allowed = geminiAllowedToolsConfig(value)
 		}
 	}
 
+	if strict && (mode == "" || mode == "AUTO") {
+		mode = "VALIDATED"
+	}
 	if mode == "" {
 		return nil
 	}
@@ -675,6 +685,47 @@ func geminiToolConfigFromOpenAI(choice any) *geminiToolConfig {
 		Mode:                 mode,
 		AllowedFunctionNames: allowed,
 	}}
+}
+
+// geminiAllowedToolsConfig maps an allowed_tools choice onto a mode and the
+// allowedFunctionNames subset. Gemini accepts allowedFunctionNames only with
+// ANY or VALIDATED, so "auto" becomes VALIDATED: the model may still answer in
+// text, but any call is limited to the subset.
+func geminiAllowedToolsConfig(choice map[string]any) (string, []string) {
+	spec, _ := choice["allowed_tools"].(map[string]any)
+	tools, _ := spec["tools"].([]any)
+	var names []string
+	for _, raw := range tools {
+		tool, _ := raw.(map[string]any)
+		fn, _ := tool["function"].(map[string]any)
+		if name, _ := fn["name"].(string); strings.TrimSpace(name) != "" {
+			names = append(names, name)
+		}
+	}
+
+	mode, _ := spec["mode"].(string)
+	switch {
+	case strings.TrimSpace(mode) == "required":
+		mode = "ANY"
+	case len(names) > 0:
+		mode = "VALIDATED"
+	default:
+		mode = "AUTO"
+	}
+	return mode, names
+}
+
+// hasStrictTool reports whether any function tool asks for strict schema
+// adherence.
+func hasStrictTool(tools []map[string]any) bool {
+	for _, tool := range tools {
+		if fn, ok := tool["function"].(map[string]any); ok {
+			if strict, _ := fn["strict"].(bool); strict {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func geminiGenerationConfig(req *core.ChatRequest) map[string]any {
