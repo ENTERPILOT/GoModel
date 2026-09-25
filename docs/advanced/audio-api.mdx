@@ -165,6 +165,27 @@ JSON object; `text`, `srt`, and `vtt` return a `text/plain` body.
 Add `stream=true` to receive the transcript as it is produced — see
 [Streaming](#streaming).
 
+### Self-hosted speech-to-text servers
+
+Many self-hosted STT servers serve `/v1/audio/transcriptions` but no `/v1/models`.
+Register one as an `openai` provider and list the model it serves:
+
+```yaml
+providers:
+  local-stt:
+    type: openai
+    base_url: "http://localhost:8000/v1"
+    api_key: "unused"
+    models:
+      - id: "whisper-1" # the model name your server expects
+        metadata:
+          modes: [audio_transcription] # lists it as an audio model
+```
+
+When `/models` answers 404 or 405, GoModel serves the configured models and
+reports the provider as healthy. Other `/models` failures still mark it as
+degraded.
+
 ## Streaming
 
 GoModel forwards an audio body to the client **as the provider produces it**, so

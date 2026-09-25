@@ -175,7 +175,9 @@ func (r *ModelRegistry) fetchAllProviderModels(
 				"reason", string(configuredReason),
 				"configured_models", len(configuredModels),
 			}
-			if err != nil {
+			if configuredReason == configuredProviderModelsUpstreamUnlisted {
+				slog.Debug("provider does not list models, using configured provider models", attrs...)
+			} else if err != nil {
 				configuredUpstreamError = err.Error()
 				attrs = append(attrs, "error", err)
 				slog.Warn("upstream ListModels failed, using configured provider models", attrs...)
@@ -234,30 +236,37 @@ func (r *ModelRegistry) fetchAllProviderModels(
 		}
 
 		runtimeUpdate := providerRuntimeState{
-			registered:          true,
-			lastModelFetchAt:    fetchAt,
-			lastModelFetchError: configuredUpstreamError,
+			registered:              true,
+			lastModelFetchAt:        fetchAt,
+			lastModelFetchError:     configuredUpstreamError,
+			modelListingUnsupported: configuredReason == configuredProviderModelsUpstreamUnlisted,
 		}
 		// Mark the inventory as authoritatively populated when this fetch is the
-		// last word on the provider's model list. That covers two cases:
+		// last word on the provider's model list. That covers these cases:
 		//  - upstream succeeded (no allowlist, or allowlist overlaid on a real
 		//    response) — reason is configuredProviderModelsNotApplied
 		//  - allowlist mode intentionally skipped upstream and produced the
 		//    inventory from configuration — reason is configuredProviderModelsAllowlist
 		//  - merge mode overlaid configured models on a healthy upstream
 		//    response — reason is configuredProviderModelsMerge
+		//  - the upstream has no /models endpoint, so the configured list is
+		//    the whole inventory — reason is configuredProviderModelsUpstreamUnlisted
 		// Fallback cases (configured*UpstreamError, *Nil, *Empty) keep
 		// lastModelFetchSuccessAt unset so health surfaces "live refresh failed,
 		// serving configured fallback".
 		if configuredReason == configuredProviderModelsNotApplied ||
 			configuredReason == configuredProviderModelsAllowlist ||
-			configuredReason == configuredProviderModelsMerge {
+			configuredReason == configuredProviderModelsMerge ||
+			configuredReason == configuredProviderModelsUpstreamUnlisted {
 			runtimeUpdate.lastModelFetchSuccessAt = fetchAt
 		}
-		// Merge keeps availability signals too: the upstream call actually
-		// succeeded, unlike the fallback reasons.
+		// Merge and unlisted keep availability signals too: the upstream
+		// answered, unlike the fallback reasons. For unlisted this also clears
+		// a startup probe that hit the same missing /models endpoint before
+		// configured models were known.
 		if configuredReason == configuredProviderModelsNotApplied ||
-			configuredReason == configuredProviderModelsMerge {
+			configuredReason == configuredProviderModelsMerge ||
+			configuredReason == configuredProviderModelsUpstreamUnlisted {
 			runtimeUpdate.lastAvailabilityCheckAt = fetchAt
 			runtimeUpdate.lastAvailabilityOKAt = fetchAt
 		}
@@ -470,6 +479,7 @@ func (r *ModelRegistry) applyProviderRuntimeUpdatesLocked(updates map[string]pro
 			// this matters in particular for allowlist-mode refreshes which
 			// don't bump SuccessAt but still produce usable models.
 			current.lastModelFetchError = optionalFailureMessage(update.lastModelFetchError)
+			current.modelListingUnsupported = update.modelListingUnsupported
 		}
 		if !update.lastModelFetchSuccessAt.IsZero() {
 			current.lastModelFetchSuccessAt = update.lastModelFetchSuccessAt

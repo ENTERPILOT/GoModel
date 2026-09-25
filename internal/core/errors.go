@@ -188,6 +188,35 @@ func NewEmptyProviderResponseError(provider string) *GatewayError {
 // an empty 200 response apart from other 502s.
 var ErrNoChoices = errors.New("provider returned no choices")
 
+// ErrModelListingUnsupported marks a model-list failure meaning the upstream
+// has no /models endpoint, as opposed to a listing that failed; test with
+// errors.Is.
+var ErrModelListingUnsupported = errors.New("provider does not list models")
+
+// MarkModelListingUnsupported tags a 404 or 405 from an OpenAI-compatible
+// /models call with ErrModelListingUnsupported. The message is unchanged and
+// errors.As still finds the GatewayError; other errors pass through as is.
+// Only call it on errors from a /models request: the same statuses from other
+// APIs do not mean the endpoint is missing.
+func MarkModelListingUnsupported(err error) error {
+	gatewayErr, ok := errors.AsType[*GatewayError](err)
+	if !ok {
+		return err
+	}
+	switch gatewayErr.HTTPStatusCode() {
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		return modelListingUnsupportedError{err}
+	default:
+		return err
+	}
+}
+
+type modelListingUnsupportedError struct{ error }
+
+func (e modelListingUnsupportedError) Unwrap() []error {
+	return []error{e.error, ErrModelListingUnsupported}
+}
+
 // NewNoChoicesProviderError reports a chat completion that succeeded upstream
 // but carried no choices (502), so failover treats it as a failed attempt.
 func NewNoChoicesProviderError(provider string) *GatewayError {
