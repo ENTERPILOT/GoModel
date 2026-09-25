@@ -2,7 +2,6 @@ package providers
 
 import (
 	"errors"
-	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -88,18 +87,11 @@ func applyConfiguredProviderModels(
 }
 
 // modelListingUnsupported reports whether err means the upstream has no model
-// listing endpoint at all, as opposed to a listing that failed.
+// listing endpoint at all, as opposed to a listing that failed. Providers mark
+// such errors at the /models call, so a 404 from another API (e.g. the Bedrock
+// control plane) still counts as a failure.
 func modelListingUnsupported(err error) bool {
-	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		return false
-	}
-	switch gatewayErr.HTTPStatusCode() {
-	case http.StatusNotFound, http.StatusMethodNotAllowed:
-		return true
-	default:
-		return false
-	}
+	return errors.Is(err, core.ErrModelListingUnsupported)
 }
 
 // configuredModelOwner picks the owned_by value for synthesized entries.

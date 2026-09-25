@@ -183,7 +183,7 @@ func TestModelRegistry(t *testing.T) {
 		registry := NewModelRegistry()
 		mock := &registryMockProvider{
 			name: "stt",
-			err:  core.ParseProviderError("openai", http.StatusNotFound, []byte("<html>404 Not Found</html>"), nil),
+			err:  core.MarkModelListingUnsupported(core.ParseProviderError("openai", http.StatusNotFound, []byte("<html>404 Not Found</html>"), nil)),
 		}
 		registry.RegisterProviderWithNameAndType(mock, "stt", "openai")
 		registry.SetProviderConfiguredModels("stt", []string{"whisper-1"})
@@ -1160,7 +1160,7 @@ func (p *availabilityFailingProvider) CheckAvailability(context.Context) error {
 // models the provider must still leave the recheck set and pass the refresh
 // gate.
 func TestRefreshProviderModels_MissingModelsEndpointPassesAvailabilityGate(t *testing.T) {
-	notFound := core.ParseProviderError("ollama", http.StatusNotFound, []byte("404 page not found"), nil)
+	notFound := core.MarkModelListingUnsupported(core.ParseProviderError("ollama", http.StatusNotFound, []byte("404 page not found"), nil))
 	registry := NewModelRegistry()
 	stt := &availabilityFailingProvider{
 		registryMockProvider: &registryMockProvider{name: "stt", err: notFound},
@@ -1188,7 +1188,7 @@ func TestRefreshProviderModels_MissingModelsEndpointPassesAvailabilityGate(t *te
 
 // Without configured models a 404 probe is still a failure.
 func TestRefreshProviderModels_MissingModelsEndpointWithoutConfiguredModelsFails(t *testing.T) {
-	notFound := core.ParseProviderError("ollama", http.StatusNotFound, []byte("404 page not found"), nil)
+	notFound := core.MarkModelListingUnsupported(core.ParseProviderError("ollama", http.StatusNotFound, []byte("404 page not found"), nil))
 	registry := NewModelRegistry()
 	stt := &availabilityFailingProvider{
 		registryMockProvider: &registryMockProvider{name: "stt", err: notFound},
@@ -1199,6 +1199,23 @@ func TestRefreshProviderModels_MissingModelsEndpointWithoutConfiguredModelsFails
 	_, err := registry.RefreshProviderModels(context.Background(), "stt")
 	require.Error(t, err)
 	assert.Equal(t, []string{"stt"}, registry.FailedProviderNames())
+}
+
+// A 404 from a probe that does not call /models (Bedrock's control plane) is a
+// real failure even when models are configured.
+func TestRefreshProviderModels_UnmarkedNotFoundProbeFailsWithConfiguredModels(t *testing.T) {
+	notFound := core.ParseProviderError("bedrock", http.StatusNotFound, nil, nil)
+	registry := NewModelRegistry()
+	bedrock := &availabilityFailingProvider{
+		registryMockProvider: &registryMockProvider{name: "bedrock", err: notFound},
+		availabilityErr:      notFound,
+	}
+	registry.RegisterProviderWithNameAndType(bedrock, "bedrock", "bedrock")
+	registry.SetProviderConfiguredModels("bedrock", []string{"anthropic.claude"})
+
+	_, err := registry.RefreshProviderModels(context.Background(), "bedrock")
+	require.Error(t, err)
+	assert.Equal(t, []string{"bedrock"}, registry.FailedProviderNames())
 }
 
 // A failed availability check during a per-provider refresh marks the

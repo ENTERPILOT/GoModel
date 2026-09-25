@@ -31,9 +31,9 @@ func (r *ModelRegistry) probeAvailability(ctx context.Context, provider core.Pro
 
 	err := checker.CheckAvailability(probeCtx)
 	if modelListingUnsupported(err) && r.hasConfiguredProviderModels(providerName) {
-		// Probes that list models get a 404/405 from servers without a
-		// /models endpoint. The server answered, and its configured models
-		// are the inventory, so it is reachable.
+		// Probes that list models (Ollama, Bedrock Mantle) fail on servers
+		// without a /models endpoint. The server answered, and its configured
+		// models are the inventory, so it is reachable.
 		err = nil
 	}
 	r.RecordAvailabilityCheck(providerName, err)
