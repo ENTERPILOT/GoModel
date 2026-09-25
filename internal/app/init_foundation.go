@@ -15,6 +15,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/filestore"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/mediastore"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/health"
@@ -75,6 +76,15 @@ func (b *bootstrap) initProviders() error {
 	}
 	if b.routeSelector != nil {
 		b.cfg.Factory.AddHooks(routeSelectorHooks(b.routeSelector))
+	}
+	// An extension proxy selector steers the egress of every provider without
+	// its own proxy_url. Providers capture their transport at construction,
+	// so it too must be installed before the first one exists.
+	if b.cfg.Extensions != nil {
+		if selector := b.cfg.Extensions.ProxySelector(); selector != nil {
+			b.cfg.Factory.SetProxySelector(selector)
+			slog.Info("outbound proxy selector enabled", "selector", selector.Name())
+		}
 	}
 	// Routing-strategy plugins learn target health from every upstream
 	// attempt, so the plugin catalog and the strategy resolver are built here,
@@ -198,6 +208,33 @@ func (b *bootstrap) initStores() error {
 	app.fileStore = fileStoreResult
 	app.register(subsystemFileStore, ownedByShutdown, app.fileStore.Close)
 
+	// Initialize media storage: records on the shared storage, bytes in the
+	// configured blob backend. Audit logging stores audio and image payloads
+	// through it (docs/adr/0013-media-storage.md).
+	// A config built without config.Load (test harnesses, embedders) still
+	// gets the documented defaults.
+	if err := config.ResolveMediaConfig(&b.appCfg.Media); err != nil {
+		return fmt.Errorf("invalid media storage config: %w", err)
+	}
+	blobs, err := mediastore.OpenBlobStore(b.appCfg.Media.Storage.Type, b.appCfg.Media.Storage.Path)
+	if err != nil {
+		// A path nothing will write to must not keep the gateway from
+		// starting; a path a feature depends on must.
+		if mediaCaptureEnabled(b.appCfg) {
+			return fmt.Errorf("failed to open media storage: %w", err)
+		}
+		slog.Warn("media storage unavailable; using in-memory media storage until it is fixed",
+			"type", b.appCfg.Media.Storage.Type, "path", b.appCfg.Media.Storage.Path, "error", err)
+		blobs, _ = mediastore.OpenBlobStore(mediastore.StorageMemory, "")
+	}
+	mediaResult, err := mediastore.New(b.ctx, app.storage, blobs)
+	if err != nil {
+		_ = blobs.Close()
+		return fmt.Errorf("failed to initialize media storage: %w", err)
+	}
+	app.media = mediaResult
+	app.register(subsystemMediaStore, ownedByShutdown, app.media.Close)
+
 	// Initialize Responses/Conversations lifecycle persistence so agentic
 	// response chains and conversation history land in storage instead of
 	// accumulating in process memory.
@@ -281,4 +318,10 @@ func selectorLabel(selector ext.RouteSelector) (name string) {
 		}
 	}()
 	return selector.Name()
+}
+
+// mediaCaptureEnabled reports whether any enabled feature writes media: today
+// that is audit capture of audio or image bodies.
+func mediaCaptureEnabled(cfg *config.Config) bool {
+	return cfg.Logging.Enabled && cfg.Logging.LogBodies && (cfg.Logging.LogAudioBodies || cfg.Logging.LogImageBodies)
 }

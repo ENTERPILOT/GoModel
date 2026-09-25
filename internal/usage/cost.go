@@ -456,6 +456,9 @@ func pricingForTokenCount(pricing *core.ModelPricing, inputTokens int) *core.Mod
 	if tier.InputPerMtok != nil {
 		effective.InputPerMtok = tier.InputPerMtok
 	}
+	if tier.CachedInputPerMtok != nil {
+		effective.CachedInputPerMtok = tier.CachedInputPerMtok
+	}
 	if tier.OutputPerMtok != nil {
 		effective.OutputPerMtok = tier.OutputPerMtok
 	}

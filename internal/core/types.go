@@ -363,10 +363,11 @@ func (p *ModelPricing) FieldSources(source string) map[string]string {
 
 // ModelPricingTier represents a volume-based pricing tier.
 type ModelPricingTier struct {
-	UpToTokens    *float64 `json:"up_to_tokens,omitempty" yaml:"up_to_tokens,omitempty"`
-	UpToMtok      *float64 `json:"up_to_mtok,omitempty" yaml:"up_to_mtok,omitempty"`
-	InputPerMtok  *float64 `json:"input_per_mtok,omitempty" yaml:"input_per_mtok,omitempty"`
-	OutputPerMtok *float64 `json:"output_per_mtok,omitempty" yaml:"output_per_mtok,omitempty"`
+	UpToTokens         *float64 `json:"up_to_tokens,omitempty" yaml:"up_to_tokens,omitempty"`
+	UpToMtok           *float64 `json:"up_to_mtok,omitempty" yaml:"up_to_mtok,omitempty"`
+	InputPerMtok       *float64 `json:"input_per_mtok,omitempty" yaml:"input_per_mtok,omitempty"`
+	CachedInputPerMtok *float64 `json:"cached_input_per_mtok,omitempty" yaml:"cached_input_per_mtok,omitempty"`
+	OutputPerMtok      *float64 `json:"output_per_mtok,omitempty" yaml:"output_per_mtok,omitempty"`
 }
 
 func cloneFloatPtr(v *float64) *float64 {
@@ -423,10 +424,11 @@ func (p *ModelPricing) Clone() *ModelPricing {
 		tiers := make([]ModelPricingTier, len(p.Tiers))
 		for i, t := range p.Tiers {
 			tiers[i] = ModelPricingTier{
-				UpToTokens:    cloneFloatPtr(t.UpToTokens),
-				UpToMtok:      cloneFloatPtr(t.UpToMtok),
-				InputPerMtok:  cloneFloatPtr(t.InputPerMtok),
-				OutputPerMtok: cloneFloatPtr(t.OutputPerMtok),
+				UpToTokens:         cloneFloatPtr(t.UpToTokens),
+				UpToMtok:           cloneFloatPtr(t.UpToMtok),
+				InputPerMtok:       cloneFloatPtr(t.InputPerMtok),
+				CachedInputPerMtok: cloneFloatPtr(t.CachedInputPerMtok),
+				OutputPerMtok:      cloneFloatPtr(t.OutputPerMtok),
 			}
 		}
 		out.Tiers = tiers

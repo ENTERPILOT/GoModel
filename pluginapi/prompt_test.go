@@ -38,12 +38,8 @@ func TestPromptViews(t *testing.T) {
 	assert.True(t, calls[0].HasResult)
 	assert.Equal(t, "weather", calls[0].Call.Name)
 
-	if got := len(p.NewSince(3)); got != 2 {
-		t.Errorf("NewSince(3) len = %d, want 2", got)
-	}
-	if got := p.NewSince(99); got != nil {
-		t.Errorf("NewSince(99) = %v, want nil", got)
-	}
+	assert.Len(t, p.NewSince(3), 2, "NewSince(3)")
+	assert.Nil(t, p.NewSince(99), "NewSince(99)")
 	assert.Nil(t, p.Message("nope"))
 	assert.Equal(t, RoleTool, p.Message("m3").Role)
 	assert.False(t, p.Changes().Dirty)
@@ -89,13 +85,13 @@ func TestPromptToolEdits(t *testing.T) {
 	require.NoError(t, err)
 	got := string(p.Message("m2").Parts[0].ToolCall.Arguments)
 	assert.Equal(t, `{"city":"Bergen"}`, got)
-	assert.Error(t, p.SetToolArguments("m2", "call_1", json.RawMessage(`{bad`)))
-	assert.Error(t, p.SetToolArguments("m2", "call_9", json.RawMessage(`{}`)))
+	require.Error(t, p.SetToolArguments("m2", "call_1", json.RawMessage(`{bad`)))
+	require.Error(t, p.SetToolArguments("m2", "call_9", json.RawMessage(`{}`)))
 	err = p.SetToolResult("m3", "call_1", []Part{{Kind: PartText, Text: "[redacted]"}})
 	require.NoError(t, err)
 	got = p.Message("m3").Text()
 	assert.Equal(t, "[redacted]", got)
-	assert.Error(t, p.SetToolResult("m3", "call_9", nil))
+	require.Error(t, p.SetToolResult("m3", "call_9", nil))
 
 	ch := p.Changes()
 	assert.Equal(t, ChangeEdited, ch.Messages["m2"])
@@ -132,10 +128,10 @@ func TestPromptInsertAppendRemove(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, ChangeRemoved, p.Changes().Messages["m0"])
 	assert.Nil(t, p.Message("m0"))
-	assert.Error(t, p.Remove("m0"))
-	assert.Error(t, p.Remove("zz"))
+	require.Error(t, p.Remove("m0"))
+	require.Error(t, p.Remove("zz"))
 	err = p.Validate()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// IDs never collide with ones the host handed out.
 	q := &Prompt{Messages: []Message{{ID: "new-1", Role: RoleUser}}}
@@ -162,11 +158,11 @@ func TestPromptRemoveToolPairs(t *testing.T) {
 			assert.Equal(t, "call_1", dangling.CallID, "dangling = %+v", dangling)
 			assert.Nil(t, p.Message(tt.order[0]))
 			verr := p.Validate()
-			assert.ErrorAs(t, verr, &dangling)
+			require.ErrorAs(t, verr, &dangling)
 			err = p.Remove(dangling.PartnerID)
 			require.NoError(t, err)
 			err = p.Validate()
-			assert.NoError(t, err)
+			require.NoError(t, err)
 
 			ch := p.Changes()
 			assert.Equal(t, ChangeRemoved, ch.Messages["m2"])
@@ -246,9 +242,8 @@ func TestPromptClone(t *testing.T) {
 	assert.Nil(t, p.Message(id))
 	assert.Equal(t, "new-1", p.Clone().Insert(0, TextMessage(RoleSystem, "y")))
 
-	if got := c.Changes(); got.Messages["m4"] != "" || len(c.removed) != 0 {
-		t.Errorf("removal on the original reached the clone: %+v", got)
-	}
+	assert.Empty(t, c.Changes().Messages["m4"], "removal on the original reached the clone")
+	assert.Empty(t, c.removed, "removal on the original reached the clone")
 	assert.Nil(t, (*Prompt)(nil).Clone())
 
 	// Tool-call arguments are their own bytes on each side.
@@ -262,17 +257,20 @@ func TestPromptClone(t *testing.T) {
 	c = p.Clone()
 	p.Params.Extra["metadata"].(map[string]any)["team"] = "b"
 	p.Params.Extra["new"] = true
-	if got := c.Params.Extra["metadata"].(map[string]any)["team"]; got != "a" || c.Params.Extra["new"] != nil {
-		t.Errorf("clone shares the original's extra parameters: %v", c.Params.Extra)
-	}
+	metadata, ok := c.Params.Extra["metadata"].(map[string]any)
+	require.True(t, ok, "clone metadata = %#v, want an object", c.Params.Extra["metadata"])
+	assert.Equal(t, "a", metadata["team"], "clone shares the original's extra parameters: %v", c.Params.Extra)
+	assert.Nil(t, c.Params.Extra["new"], "clone shares the original's extra parameters: %v", c.Params.Extra)
 
 	// Object-valued parameters are copied too, not shared.
 	p.Params.ToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": "weather"}}
 	c = p.Clone()
 	p.Params.ToolChoice.(map[string]any)["function"].(map[string]any)["name"] = "changed"
-	if got := c.Params.ToolChoice.(map[string]any)["function"].(map[string]any)["name"]; got != "weather" {
-		t.Errorf("clone tool_choice shares the original's map: %v", got)
-	}
+	choice, ok := c.Params.ToolChoice.(map[string]any)
+	require.True(t, ok, "clone tool_choice = %#v, want an object", c.Params.ToolChoice)
+	function, ok := choice["function"].(map[string]any)
+	require.True(t, ok, "clone tool_choice function = %#v, want an object", choice["function"])
+	assert.Equal(t, "weather", function["name"], "clone tool_choice shares the original's map")
 }
 
 func TestPromptSetParam(t *testing.T) {

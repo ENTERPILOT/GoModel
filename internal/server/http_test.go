@@ -1052,7 +1052,9 @@ func TestProviderPassthroughRoute_EnabledByDefault(t *testing.T) {
 	require.Equal(t, "openai", got)
 }
 
-func TestProviderPassthroughRoute_MarksOversizedStreamIntentUncertain(t *testing.T) {
+// An opaque body past the peek limit is read whole, so its model and stream
+// intent are known and the bytes reach the provider unchanged.
+func TestProviderPassthroughRoute_ReadsOversizedBodyCompletely(t *testing.T) {
 	mock := &mockProvider{
 		passthroughResponse: &core.PassthroughResponse{
 			StatusCode: http.StatusOK,
@@ -1070,7 +1072,84 @@ func TestProviderPassthroughRoute_MarksOversizedStreamIntentUncertain(t *testing
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.NotNil(t, mock.lastPassthroughReq)
-	require.True(t, mock.lastPassthroughReq.StreamUncertain)
+	require.Equal(t, "gpt-5-mini", mock.lastPassthroughReq.Model)
+	require.True(t, mock.lastPassthroughReq.Stream)
+	require.False(t, mock.lastPassthroughReq.StreamUncertain)
+	forwarded, err := io.ReadAll(mock.lastPassthroughReq.Body)
+	require.NoError(t, err)
+	require.Equal(t, body, string(forwarded))
+}
+
+// A System One state is routinely longer than the peek limit. The model named
+// after it must still be checked against the caller's allowlist, or a key
+// restricted to other models could evaluate through /p/jev unchecked.
+func TestProviderPassthroughRoute_AuthorizesModelFromOversizedBody(t *testing.T) {
+	mock := &mockProvider{}
+	authorizer := &recordingModelAuthorizer{err: core.NewInvalidRequestError("requested model is not available for this API key", nil)}
+	srv := New(mock, &Config{ModelAuthorizer: authorizer})
+	body := `{"state":"` + strings.Repeat("x", 65*1024) + `","model":"jev-latest","questions":{"q":{"type":"noul","instructions":"?"}}}`
+	req := httptest.NewRequest(http.MethodPost, "/p/jev/v1/systemone", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "not available for this API key")
+	require.Equal(t, "jev-latest", authorizer.lastSelector.Model)
+	require.Nil(t, mock.lastPassthroughReq, "a denied request must not reach the provider")
+}
+
+// The body is forwarded as written, so a repeated top-level model would let
+// the upstream's parser pick a value the gateway never checked. Such a body
+// is rejected whether or not an allowlist is configured.
+func TestProviderPassthroughRoute_RejectsRepeatedModelField(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        string
+		knownLength bool
+	}{
+		{name: "small body captured inline", body: `{"model":"jev-latest","state":"x","questions":{},"model":"jev-preview"}`, knownLength: true},
+		{name: "small body with unknown length", body: `{"model":"jev-latest","state":"x","questions":{},"model":"jev-preview"}`},
+		{name: "repeat past the peek limit", body: `{"model":"jev-latest","state":"` + strings.Repeat("x", 65*1024) + `","model":"jev-preview"}`, knownLength: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mock := &mockProvider{}
+			srv := New(mock, &Config{})
+			req := httptest.NewRequest(http.MethodPost, "/p/jev/systemone", strings.NewReader(test.body))
+			if !test.knownLength {
+				req.ContentLength = -1
+			}
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+
+			srv.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.Contains(t, rec.Body.String(), "model field is repeated")
+			require.Nil(t, mock.lastPassthroughReq)
+		})
+	}
+}
+
+// Reading an oversized body in full stays bounded by the body limit: a body
+// past it is refused with the limit's own 413 instead of being forwarded
+// with its model unchecked.
+func TestProviderPassthroughRoute_OversizedBodyHonorsBodyLimit(t *testing.T) {
+	mock := &mockProvider{}
+	srv := New(mock, &Config{BodySizeLimit: "100K"})
+	body := `{"state":"` + strings.Repeat("x", 120*1024) + `","model":"jev-latest"}`
+	req := httptest.NewRequest(http.MethodPost, "/p/jev/systemone", strings.NewReader(body))
+	req.ContentLength = -1 // a chunked upload, so the limit is hit while reading rather than declared up front
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+	require.Nil(t, mock.lastPassthroughReq)
 }
 
 func TestProviderPassthroughRoute_DisabledRequiresAuthBefore404(t *testing.T) {

@@ -139,11 +139,8 @@
   }
 
   /* The server table has seven information-dense columns. Preserve readable
-     cells on narrow screens and let the table scroll instead of clipping it. */
-  .mcp-server-table-wrapper {
-    overflow-x: auto;
-  }
-
+     cells on narrow screens and let the wrapper scroll instead of squeezing
+     them. */
   .mcp-server-table-wrapper :global(.data-table) {
     min-width: 860px;
   }

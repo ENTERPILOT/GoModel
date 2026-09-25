@@ -11,6 +11,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -37,7 +38,7 @@ func newASRServer(t *testing.T, text string) (*httptest.Server, *providertest.Ca
 func TestCreateSpeech_TranslatesToMiMoChatTTS(t *testing.T) {
 	wavBytes := []byte("RIFF-fake-wav")
 	server, capture := newTTSServer(t, base64.StdEncoding.EncodeToString(wavBytes))
-	provider := NewWithHTTPClient("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
 
 	resp, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 		Model:        "mimo-v2.5-tts",
@@ -69,7 +70,7 @@ func TestCreateSpeech_TranslatesToMiMoChatTTS(t *testing.T) {
 
 func TestCreateSpeech_MapsPCMAndRejectsUnsupportedFormats(t *testing.T) {
 	server, capture := newTTSServer(t, base64.StdEncoding.EncodeToString([]byte("pcm")))
-	provider := NewWithHTTPClient("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
 
 	resp, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 		Model: "mimo-v2.5-tts", Input: "hi", ResponseFormat: "pcm",
@@ -93,7 +94,7 @@ func TestCreateSpeech_TreatsMP3AsUnspecified(t *testing.T) {
 	for _, format := range []string{"", "mp3", "MP3", " mp3 ", "wav"} {
 		t.Run(format, func(t *testing.T) {
 			server, capture := newTTSServer(t, base64.StdEncoding.EncodeToString([]byte("wav")))
-			provider := NewWithHTTPClient("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
+			provider := newTestProvider("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
 
 			resp, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 				Model: "mimo-v2.5-tts", Input: "hi", ResponseFormat: format,
@@ -106,20 +107,25 @@ func TestCreateSpeech_TreatsMP3AsUnspecified(t *testing.T) {
 }
 
 func TestCreateSpeech_RequiresInput(t *testing.T) {
-	provider := NewWithHTTPClient("mimo-key", "", nil, llmclient.Hooks{})
+	provider, ok := New(providers.ProviderConfig{APIKey: "mimo-key"}, providers.ProviderOptions{}).(core.AudioProvider)
+	require.True(t, ok)
 	_, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{Model: "mimo-v2.5-tts"})
 	require.Error(t, err)
 }
 
 func TestCreateSpeech_RejectsSpeedControl(t *testing.T) {
-	provider := NewWithHTTPClient("mimo-key", "", nil, llmclient.Hooks{})
+	provider, ok := New(providers.ProviderConfig{APIKey: "mimo-key"}, providers.ProviderOptions{}).(core.AudioProvider)
+	require.True(t, ok)
 	_, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 		Model: "mimo-v2.5-tts", Input: "hi", Speed: 1.5,
 	})
 	require.Error(t, err)
 
 	server, _ := newTTSServer(t, base64.StdEncoding.EncodeToString([]byte("wav")))
-	provider = NewWithHTTPClient("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
+	opts := providertest.Options(llmclient.Hooks{})
+	opts.HTTPClient = server.Client()
+	provider, ok = New(providers.ProviderConfig{APIKey: "mimo-key", BaseURL: server.URL}, opts).(core.AudioProvider)
+	require.True(t, ok)
 	_, err = provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 		Model: "mimo-v2.5-tts", Input: "hi", Speed: 1,
 	})
@@ -128,7 +134,7 @@ func TestCreateSpeech_RejectsSpeedControl(t *testing.T) {
 
 func TestCreateTranscription_TranslatesToMiMoChatASR(t *testing.T) {
 	server, capture := newASRServer(t, "hello there")
-	provider := NewWithHTTPClient("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
 
 	audio := []byte("RIFF-fake-wav")
 	resp, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
@@ -158,7 +164,7 @@ func TestCreateTranscription_TranslatesToMiMoChatASR(t *testing.T) {
 
 func TestCreateTranscription_TextFormatAndValidation(t *testing.T) {
 	server, _ := newASRServer(t, "plain text")
-	provider := NewWithHTTPClient("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
 
 	resp, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
 		Model: "mimo-v2.5-asr", Filename: "clip.wav", File: []byte("audio"), ResponseFormat: "text",
@@ -200,7 +206,7 @@ func TestCreateTranscription_FileReaderAndMIMEInference(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			server, capture := newASRServer(t, "ok")
-			provider := NewWithHTTPClient("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
+			provider := newTestProvider("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
 
 			audio := []byte("audio-bytes-" + tc.name)
 			req := &core.AudioTranscriptionRequest{

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/enterpilot/gomodel/internal/storage"
 )
@@ -25,6 +25,7 @@ type Config struct {
 	Cache         CacheConfig         `yaml:"cache"`
 	Storage       StorageConfig       `yaml:"storage"`
 	Logging       LogConfig           `yaml:"logging"`
+	Media         MediaConfig         `yaml:"media"`
 	Usage         UsageConfig         `yaml:"usage"`
 	Budgets       BudgetsConfig       `yaml:"budgets"`
 	RateLimits    RateLimitsConfig    `yaml:"rate_limits"`
@@ -127,8 +128,8 @@ func buildDefaultConfig() *Config {
 				"llamacpp",
 				"llmd",
 				"deepseek",
-				"hetzner",
-				"edenai",
+        "edenai",
+				"jev",
 			},
 		},
 		Models: ModelsConfig{
@@ -156,6 +157,12 @@ func buildDefaultConfig() *Config {
 			},
 			PostgreSQL: PostgreSQLStorageConfig{
 				MaxConns: 10,
+			},
+		},
+		Media: MediaConfig{
+			Storage: MediaStorageConfig{
+				Type: MediaStorageFilesystem,
+				Path: DefaultMediaPath(),
 			},
 		},
 		Logging: LogConfig{
@@ -191,6 +198,7 @@ func buildDefaultConfig() *Config {
 		HTTP: HTTPConfig{
 			Timeout:               600,
 			ResponseHeaderTimeout: 600,
+			StreamIdleTimeout:     300,
 		},
 		Failover: FailoverConfig{
 			Enabled:     true,
@@ -299,6 +307,12 @@ func Load() (*LoadResult, error) {
 	if err := validateRateLimitConfig(&cfg.RateLimits); err != nil {
 		return nil, err
 	}
+	// A disabled master key is forgotten outright, so no part of the gateway —
+	// the auth middleware, /v1/auth/verify, the version-check identity — can
+	// accept or derive anything from a key the operator turned off.
+	if cfg.Server.MasterKeyDisabled {
+		cfg.Server.MasterKey = ""
+	}
 	cfg.Server.BasePath = NormalizeBasePath(cfg.Server.BasePath)
 	cfg.Server.UserPathHeader, err = NormalizeHeaderName(cfg.Server.UserPathHeader, "X-GoModel-User-Path")
 	if err != nil {
@@ -339,6 +353,12 @@ func Load() (*LoadResult, error) {
 	cfg.Logging.LogImageBodiesScope = ResolveImageBodyScope(cfg.Logging.LogImageBodiesScope)
 	if !cfg.Logging.LogImageBodiesScope.Valid() {
 		return nil, fmt.Errorf("logging.log_image_bodies_scope must be one of: all, input, output; got %q", cfg.Logging.LogImageBodiesScope)
+	}
+	if err := ResolveMediaConfig(&cfg.Media); err != nil {
+		return nil, err
+	}
+	if err := ResolveClientIPPolicy(&cfg.Server); err != nil {
+		return nil, err
 	}
 
 	return &LoadResult{

@@ -3,9 +3,10 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 func TestResiliencePolicyLoading(t *testing.T) {
@@ -15,6 +16,8 @@ func TestResiliencePolicyLoading(t *testing.T) {
 		{"invalid retry", "resilience:\n  retry:\n    retry_on_statuses: [600]\n", "retry.retry_on_statuses"},
 		{"invalid breaker", "resilience:\n  circuit_breaker:\n    failure_on_statuses: [oops]\n", "circuit_breaker.failure_on_statuses"},
 		{"invalid scope", "resilience:\n  circuit_breaker:\n    scope: global\n", "circuit_breaker.scope"},
+		{"slow call threshold", "resilience:\n  circuit_breaker:\n    slow_call_threshold: 45s\n", ""},
+		{"negative slow call threshold", "resilience:\n  circuit_breaker:\n    slow_call_threshold: -1s\n", "circuit_breaker.slow_call_threshold"},
 		{"invalid provider", "providers:\n  cloudflare:\n    resilience:\n      retry:\n        retry_on_statuses: [oops]\n", "providers.cloudflare.resilience"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -43,6 +46,7 @@ func TestResilienceEmptyListsAndEnvironment(t *testing.T) {
 	t.Setenv("RETRY_ON_STATUSES", "429,524")
 	t.Setenv("CIRCUIT_BREAKER_FAILURE_ON_STATUSES", "429,5xx")
 	t.Setenv("CIRCUIT_BREAKER_SCOPE", "model")
+	t.Setenv("CIRCUIT_BREAKER_SLOW_CALL_THRESHOLD", "45s")
 	err = applyEnvOverrides(cfg)
 	require.NoError(t, err)
 
@@ -51,6 +55,7 @@ func TestResilienceEmptyListsAndEnvironment(t *testing.T) {
 	require.True(t, statuses[429])
 	require.True(t, statuses[524])
 	require.Equal(t, "model", cfg.Resilience.CircuitBreaker.Scope)
+	require.Equal(t, 45*time.Second, cfg.Resilience.CircuitBreaker.SlowCallThreshold)
 	require.Equal(t, "429,524", strings.Join(cfg.Resilience.Retry.RetryOnStatuses, ","))
 }
 
@@ -160,6 +165,11 @@ func TestProviderPolicyOverrideValidation(t *testing.T) {
 			"invalid provider breaker statuses",
 			"providers:\n  cloudflare:\n    resilience:\n      circuit_breaker:\n        failure_on_statuses: [6xx]\n",
 			"providers.cloudflare.resilience: circuit_breaker.failure_on_statuses",
+		},
+		{
+			"negative provider slow call threshold",
+			"providers:\n  cloudflare:\n    resilience:\n      circuit_breaker:\n        slow_call_threshold: -1s\n",
+			"providers.cloudflare.resilience: circuit_breaker.slow_call_threshold",
 		},
 		{
 			"valid provider override",

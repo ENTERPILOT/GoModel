@@ -160,7 +160,7 @@ jobs:
           MONGO_TEST_DSN: mongodb://localhost:27017/?replicaSet=rs&directConnection=true
 
       - name: Upload coverage
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7
         with:
           files: ./coverage.out
           fail_ci_if_error: false
@@ -191,11 +191,29 @@ jobs:
       - name: Run tests
         run: go test ${{ env.GO_TEST_SHORT }} -tags=e2e -timeout=5m ./tests/e2e/...
 
-  # The suite pulls and starts its own PostgreSQL and MongoDB containers in
-  # TestMain (MongoDB as a replica set, which a service container cannot be).
+  # MongoDB still comes from TestMain, which starts it as a replica set — a
+  # service container cannot be one. PostgreSQL is a service container, so the
+  # runner pulls and starts it while the suite compiles rather than after;
+  # GOMODEL_INTEGRATION_POSTGRES_URL tells TestMain to use it.
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        # The version TestMain starts locally, from the ECR Public mirror of
+        # Docker Hub's official image.
+        image: public.ecr.aws/docker/library/postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: gomodel_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d gomodel_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -217,6 +235,10 @@ jobs:
 
       - name: Run tests
         run: go test -tags=integration -timeout=10m ./tests/integration/...
+        env:
+          # The suite drops and recreates its tables, so the database name has
+          # to end in _test — TestMain refuses anything else.
+          GOMODEL_INTEGRATION_POSTGRES_URL: postgres://test:test@localhost:5432/gomodel_test?sslmode=disable
 
   performance:
     name: Performance Guard

@@ -1,0 +1,164 @@
+---
+title: "Provider Failure Modes"
+description: "What GoModel does when a provider changes its response shape, answers 200 with nothing useful, or dies mid-stream — and which of those fail over."
+icon: "triangle-alert"
+keywords: ["schema drift", "failure modes", "empty response", "malformed response", "truncated stream", "blast radius"]
+---
+
+Providers break in ways that are not outages. A field changes type after a
+silent deploy, a `200 OK` arrives carrying nothing, a stream stops halfway
+through a tool call. This page is the contract for those cases: what the
+caller gets, whether GoModel retries or fails over, and where the event shows
+up in your monitoring.
+
+For the knobs that control retries and the circuit breaker, see
+[Resilience](/advanced/resilience). For picking a backup model, see
+[Failover](/features/failover).
+
+## Schema drift
+
+A provider changing its response shape is the failure that gateways usually
+stay quiet about, because answering it means having an opinion on what a
+response should look like. GoModel's opinion is the OpenAI schema, applied
+generously: unknown members survive, known members are normalized, and only
+a response we cannot read at all becomes an error.
+
+| What drifted | What the caller gets | Fails over | Signal |
+| --- | --- | --- | --- |
+| **New field we do not model** | Passed through untouched, on the response and inside `choices`, `tool_calls`, and `usage` | No | None — this is the designed path ([extra content](/advanced/extra-content)) |
+| **Known field disappears** | The response, with that field empty or zero. No error | No | `gomodel_empty_responses_total{reason="no_usage"}` when the loss is token usage |
+| **Field changes type** | `502` naming the provider, with the decode error: `failed to unmarshal response: ...` | Yes | `gomodel_requests_total{status_type="error"}` |
+| **Whole body is unparseable or absent** | `502 provider returned empty response` | Yes | Same |
+| **Error hidden behind `200`** | The real error: a status in `error.code` is preserved, anything else maps to `502` | Yes | Same |
+
+<Warning>
+  The disappearing-field row is the one to alert on. It is not an incident —
+  it is a number that quietly gets smaller, and nobody goes looking for that.
+  See [Catching the quiet failures](#catching-the-quiet-failures) below.
+</Warning>
+
+Passthrough endpoints opt out of all of this:
+[`/p/{provider}/...`](/advanced/api-endpoints#provider-passthrough) forwards
+the provider's bytes with none of GoModel's opinion applied, so a client that
+would rather handle drift itself can.
+
+## Successful-looking empty responses
+
+A `200` with no usable content is a failure wearing a success's clothes. The
+question is whether it is worth failing over on — and for chat completions,
+the answer is yes.
+
+| Provider behavior | What the caller gets | Fails over | Signal |
+| --- | --- | --- | --- |
+| `200` with an empty `choices` array | `502 provider returned no choices` | Yes | `reason="no_choices"` |
+| `200` with content but all-zero `usage` | The response, delivered normally | No | `reason="no_usage"` |
+| `200` from a native `/v1/responses` provider, `status: completed`, empty `output` | The response, delivered normally | No | `reason="no_output"` |
+| `200` from a chat-adapted `/v1/responses` provider with no choices | `502 provider returned no choices` | Yes | `reason="no_choices"` |
+
+Every row logs a warning naming the provider, model, and reason, and
+increments `gomodel_empty_responses_total`. Because `gomodel_requests_total`
+counts the delivered rows as successes, that counter is the only place the
+non-failing rows appear.
+
+<Note>
+  A background or in-progress `/v1/responses` call legitimately carries
+  neither output nor usage, and is never reported as empty.
+</Note>
+
+## Streaming failures
+
+A stream that has already sent bytes cannot be retried — the client has part
+of an answer. So GoModel's rule is to decide before the first byte where it
+can, and to be explicit about truncation where it cannot.
+
+| Provider behavior | What the caller gets | Fails over | Signal |
+| --- | --- | --- | --- |
+| `200` stream that ends without ever sending an event | `502 provider returned an empty stream`, before response headers | Yes | `gomodel_requests_total{status_type="error"}` |
+| First event is an `{"error": ...}` payload | The status that payload carries (an in-band `429` behaves like a real one), else `502`, before response headers | Yes | Same |
+| Stream stops before its terminal event | Everything received, then one explicit error event with `"code":"stream_incomplete"` | No — bytes are already sent | Request log records `stream_error` |
+| Stream goes silent mid-flight | Everything received, then one `"code":"stream_incomplete"` error event, after `HTTP_STREAM_IDLE_TIMEOUT` (default 300s) | No — bytes are already sent | Same |
+| Malformed chunk mid-stream | Treated as a truncation: relayed, then `stream_incomplete` | No | Same |
+
+The wait for the *first* byte never counts toward the idle timeout, so a slow
+reasoning model is safe until the provider sends something. After that, any
+byte starts the timer — a keep-alive comment included — and every later byte
+restarts it, so the limit bounds the gap between reads rather than the length
+of the response. Once that first byte is out the response is committed to
+`200`, which is why a stall from then on can only be reported in-band and
+never as a status. Details:
+[stream completion](/advanced/resilience#what-counts-as-a-failure),
+[idle timeout](/advanced/configuration),
+[stream-start failover](/features/failover).
+
+## Transport and status failures
+
+The conventional cases, for completeness.
+
+| Provider behavior | What the caller gets | Retried | Breaker failure | Fails over |
+| --- | --- | --- | --- | --- |
+| Connection refused, reset, DNS failure | `502`/`503` naming the provider | Yes | Yes | Yes |
+| `429`, `502`, `503`, `504`, `522`, `524` | The status, after retries are exhausted | Yes | Yes (`429` and `5xx`) | Yes |
+| `500` | `500`, immediately | No | Yes | Yes |
+| `4xx` other than `429` | The provider's status and message | No | No | Only on a matching `retry_on_errors` phrase |
+| Local HTTP client timeout | `504` | No | Yes | Yes |
+| Answer slower than `slow_call_threshold` (off by default) | The provider's answer, unchanged | No | Yes | Once the circuit opens |
+| Circuit breaker already open | `503 circuit breaker is open - provider <name> temporarily unavailable` | No | — | Yes |
+
+Streaming requests are never retried once dispatched, and passthrough
+requests only when replay-safe (`GET`, `HEAD`, `OPTIONS`, `PUT`, or any
+request carrying an `Idempotency-Key`).
+
+## Catching the quiet failures
+
+The rows above that do **not** fail over are the ones that need an alert,
+because by definition nothing else complains:
+
+```promql
+# Any empty 200, by provider and reason
+sum(rate(gomodel_empty_responses_total[5m])) by (provider, model, reason) > 0
+```
+
+```promql
+# Usage reporting stopped while requests kept succeeding —
+# the signature of a renamed or dropped usage field
+sum(rate(gomodel_empty_responses_total{reason="no_usage"}[15m])) by (provider) > 0
+```
+
+Both are exported over OpenTelemetry as `gomodel.client.empty_responses`,
+where the reason arrives as `error.type` rather than `reason`, alongside
+`gomodel.provider.name` and `gen_ai.request.model`. See
+[Prometheus metrics](/guides/prometheus-metrics) and
+[OpenTelemetry](/guides/opentelemetry).
+
+The dashboard reads the same signals: a model whose recent requests keep
+failing marks its provider **Degraded** even while model discovery still
+succeeds, which is what catches an upstream that lists models fine but fails
+real calls.
+
+## If GoModel itself is down
+
+Putting a gateway in the request path trades provider risk for gateway risk,
+so the honest numbers matter more than reassurance.
+
+GoModel fails loud, not silent: a dead instance gives you connection refused
+or a `502` from whatever fronts it, never a plausible-looking wrong answer.
+It is one static binary with a stateless request path, `/health` and
+`/health/ready` probes, and a 10-second graceful drain on `SIGTERM`, so
+rolling restarts and multiple replicas behind a load balancer work today.
+
+That drain is a cutoff, not a completion guarantee: it is sized for the
+requests that can actually finish in ten seconds, and anything still open
+past it — an in-flight stream above all — has its connection cut. For
+long-lived traffic, drain connections at the load balancer, keep replicas
+overlapping long enough to cover a generation, and let clients retry.
+
+What is per-instance and therefore not shared between replicas: circuit
+breaker state, rate-limit counters, request-health windows, and sticky
+sessions. The [production guide](/guides/production) covers what that means
+for your topology.
+
+If GoModel is down and you need traffic flowing immediately, point
+`base_url` back at the provider directly — the API is OpenAI-compatible in
+both directions. Until it is back you lose routing, failover, and logging —
+and, because they run inside GoModel's request path rather than the
+provider's, its rate limits and budget checks stop gating anything at all.

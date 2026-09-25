@@ -79,6 +79,11 @@ Provider retries run before failover for non-streaming requests. To retry
 Cloudflare `522`/`524` responses and then switch models on the same provider,
 use [resilience settings with per-model breakers](/advanced/resilience#retry-cloudflare-timeouts-then-switch-models).
 
+Failover reacts to failed attempts, not slow ones. To move traffic off a
+provider that still answers but takes too long, set a
+[slow-call threshold](/advanced/resilience#fail-over-from-a-slow-provider) on
+its circuit breaker.
+
 ## When it runs
 
 Failover is attempted only after an attempt returns:
@@ -162,6 +167,16 @@ A non-streaming chat completion that returns `200` with an empty `choices`
 array is treated as a `502` (`provider returned no choices`), so it fails over
 under the default `5xx` status rule. Each such attempt is also logged and
 counted in `gomodel_empty_responses_total`.
+
+Streaming requests are checked the same way before any bytes reach the client.
+A `200` stream that ends without an event is treated as a `502`
+(`provider returned an empty stream`), and a stream whose first event is an
+`{"error": ...}` payload fails with the status that payload carries (for
+example an in-band `429`), or `502` when it carries none. Both fail over under
+the default rules. The response headers wait for that first event.
+
+[Provider failure modes](/advanced/provider-failure-modes) lists every such
+case and which of them fail over.
 
 Example: try at most one backup, treat timeouts as failover-eligible but
 keep serving `429` responses to the client, and add a provider-specific

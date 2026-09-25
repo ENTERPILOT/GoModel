@@ -86,7 +86,7 @@ type responsesCodec struct {
 	out         int
 	renumbering bool
 	items       map[int]*responsesItem
-	order               []int
+	order       []int
 	// textIndex is the output_index of the most recently decoded text
 	// delta; emitted text deltas (which may be re-segmented copies) are
 	// attributed to it by Track. textPart is the content or summary index

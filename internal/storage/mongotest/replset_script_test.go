@@ -145,9 +145,9 @@ func TestReplsetScriptPullStates(t *testing.T) {
 			t.Parallel()
 			run := runReplset(t, tc.env, "__pull_and_run")
 			if tc.wantErr {
-				assert.Error(t, run.err, run.output)
+				require.Error(t, run.err, run.output)
 			} else {
-				assert.NoError(t, run.err, run.output)
+				require.NoError(t, run.err, run.output)
 			}
 			assert.Equal(t, tc.wantState, readTrimmed(t, filepath.Join(run.dir, "gomodel-mongo-start.state")))
 			assert.Equal(t, tc.wantPulls, readTrimmed(t, filepath.Join(run.dir, "pulls")))

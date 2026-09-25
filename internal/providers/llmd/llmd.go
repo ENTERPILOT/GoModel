@@ -60,13 +60,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 	return newProvider(cfg.APIKey, cfg.BaseURL, ControlConfig{
 		InferenceObjective:   cfg.InferenceObjective,
 		FairnessFromUserPath: cfg.FairnessFromUserPath,
-	}, opts, nil)
-}
-
-// NewWithHTTPClient creates an llm-d provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey, baseURL string, controls ControlConfig, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	return newProvider(apiKey, baseURL, controls, providers.ProviderOptions{Hooks: hooks}, httpClient)
+	}, opts, opts.HTTPClient)
 }
 
 func newProvider(apiKey, baseURL string, controls ControlConfig, opts providers.ProviderOptions, httpClient *http.Client) *Provider {
@@ -82,7 +76,7 @@ func newProvider(apiKey, baseURL string, controls ControlConfig, opts providers.
 	}
 	rootCfg := llmclient.Config{
 		ProviderName:   opts.ClientName("llmd"),
-		BaseURL:        passthroughBaseURL(baseURL),
+		BaseURL:        providers.PassthroughBaseURL(baseURL),
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
@@ -104,7 +98,7 @@ func newProvider(apiKey, baseURL string, controls ControlConfig, opts providers.
 func (p *Provider) SetBaseURL(baseURL string) {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	p.compatible.SetBaseURL(baseURL)
-	p.rootClient.SetBaseURL(passthroughBaseURL(baseURL))
+	p.rootClient.SetBaseURL(providers.PassthroughBaseURL(baseURL))
 }
 
 // ChatCompletion sends a chat completion request to llm-d.
@@ -123,7 +117,9 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 // Operators should configure providers.<name>.models when their HTTPRoute does
 // not forward GET /v1/models to a model server.
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
-	resp, err := p.compatible.ListModels(ctx)
+	// max_model_len from the vLLM workers behind the gateway is the context
+	// window a request is actually measured against.
+	resp, err := p.compatible.ListModelsWithMaxModelLen(ctx)
 	return resp, exposeDroppedReason(err)
 }
 
@@ -154,7 +150,7 @@ func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest
 	clean := *req
 	clean.Headers = cloneWithoutSensitiveHeaders(req.Headers)
 	endpoint := providers.PassthroughEndpoint(clean.Endpoint)
-	if usesV1PassthroughBase(endpoint) {
+	if providers.UsesV1PassthroughBase(endpoint, v1PassthroughPrefixes) {
 		resp, err := p.compatible.Passthrough(ctx, &clean)
 		return resp, exposeDroppedReason(err)
 	}
@@ -233,28 +229,6 @@ func isControlHeader(key string) bool {
 		strings.HasPrefix(key, "x-slo-")
 }
 
-func passthroughBaseURL(baseURL string) string {
-	if before, ok := strings.CutSuffix(strings.TrimRight(strings.TrimSpace(baseURL), "/"), "/v1"); ok {
-		return before
-	}
-	return strings.TrimRight(strings.TrimSpace(baseURL), "/")
-}
-
-func usesV1PassthroughBase(endpoint string) bool {
-	endpoint = providers.PassthroughEndpoint(endpoint)
-	if strings.HasPrefix(endpoint, "/v1/") {
-		return false
-	}
-	for _, prefix := range []string{
-		"/models", "/chat/completions", "/responses", "/completions", "/embeddings", "/messages",
-	} {
-		if endpoint == prefix || strings.HasPrefix(endpoint, prefix+"/") {
-			return true
-		}
-	}
-	return false
-}
-
 func exposeDroppedReason(err error) error {
 	if err == nil {
 		return nil
@@ -281,3 +255,14 @@ type responseHeaderError struct {
 func (e *responseHeaderError) Error() string                { return e.err.Error() }
 func (e *responseHeaderError) Unwrap() error                { return e.err }
 func (e *responseHeaderError) ResponseHeaders() http.Header { return e.headers.Clone() }
+
+// v1PassthroughPrefixes are the paths llmd serves from its
+// OpenAI-compatible /v1 surface; everything else goes to its root paths.
+var v1PassthroughPrefixes = []string{
+	"/models",
+	"/chat/completions",
+	"/responses",
+	"/completions",
+	"/embeddings",
+	"/messages",
+}

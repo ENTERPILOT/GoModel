@@ -58,9 +58,9 @@ func TestChatCompatibleContract(t *testing.T) {
 		DefaultBaseURL: "http://localhost:11434/v1",
 		SkipEmbeddings: true,
 		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
-			provider := NewWithHTTPClient(apiKey, client, hooks)
-			provider.SetBaseURL(baseURL)
-			return provider
+			opts := providertest.Options(hooks)
+			opts.HTTPClient = client
+			return New(providers.ProviderConfig{APIKey: apiKey, BaseURL: baseURL}, opts)
 		},
 	})
 }
@@ -76,7 +76,7 @@ func TestNew(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			provider := NewWithHTTPClient(tt.apiKey, nil, llmclient.Hooks{})
+			provider := newHTTPTestProvider(tt.apiKey, nil, llmclient.Hooks{})
 			assert.Equal(t, tt.apiKey, provider.keys.Primary())
 			assert.NotNil(t, provider.compat)
 			assert.NotNil(t, provider.nativeClient)
@@ -285,7 +285,9 @@ func TestListModels_StampsShowCapabilities(t *testing.T) {
 			case "nomic-embed-text":
 				_, _ = w.Write([]byte(`{"capabilities":["embedding"]}`))
 			case "llama3.2":
-				_, _ = w.Write([]byte(`{"capabilities":["completion","tools"]}`))
+				_, _ = w.Write([]byte(`{"capabilities":["completion","tools","vision","thinking"],
+					"details":{"family":"llama","parameter_size":"3.2B"},
+					"model_info":{"general.architecture":"llama","llama.context_length":131072,"llama.embedding_length":3072}}`))
 			default:
 				w.WriteHeader(http.StatusInternalServerError)
 			}
@@ -309,6 +311,11 @@ func TestListModels_StampsShowCapabilities(t *testing.T) {
 	chat := byID["llama3.2"]
 	require.NotNil(t, chat.Metadata)
 	assert.Equal(t, []string{"chat"}, chat.Metadata.Modes)
+	assert.Equal(t, "llama", chat.Metadata.Family)
+	require.NotNil(t, chat.Metadata.ContextWindow)
+	assert.Equal(t, 131072, *chat.Metadata.ContextWindow)
+	assert.Equal(t, map[string]bool{"function_calling": true, "vision": true, "reasoning": true}, chat.Metadata.Capabilities)
+	assert.Nil(t, embed.Metadata.Capabilities)
 	assert.Nil(t, byID["mystery-model"].Metadata)
 
 	// Second listing: successes served from cache, the failure re-probed.

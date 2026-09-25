@@ -4,10 +4,8 @@ package minimax
 import (
 	"context"
 	"io"
-	"net/http"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 )
@@ -42,15 +40,6 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 	})}
 }
 
-// NewWithHTTPClient creates a new MiniMax provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	return &Provider{openai.NewChatCompatibleWithHTTPClient(apiKey, httpClient, hooks, openai.CompatibleProviderConfig{
-		ProviderName: "minimax",
-		BaseURL:      providers.ResolveBaseURL(baseURL, defaultBaseURL),
-	})}
-}
-
 // clampTemperature returns the request with temperature clamped to (0.0, 1.0].
 // MiniMax rejects temperature=0; if zero or negative, defaultTemperature is used.
 func clampTemperature(req *core.ChatRequest) *core.ChatRequest {
@@ -63,14 +52,29 @@ func clampTemperature(req *core.ChatRequest) *core.ChatRequest {
 	return &cloned
 }
 
-// ChatCompletion sends a chat completion request to MiniMax.
+// ChatCompletion sends a chat completion request to MiniMax. Reasoning
+// models are asked to split their chain of thought out of the answer; the
+// reasoning then arrives natively in the reasoning_content member and is
+// relayed untouched.
 func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
-	return p.ChatCompatible.ChatCompletion(ctx, clampTemperature(req))
+	return p.ChatCompatible.ChatCompletion(ctx, adaptChatRequest(clampTemperature(req)))
 }
 
-// StreamChatCompletion returns a raw response body for streaming.
+// StreamChatCompletion returns a raw response body for streaming (caller
+// must close). On the reasoning models the redundant reasoning_details
+// member is stripped from deltas that also carry reasoning_content; every
+// other stream is relayed byte for byte.
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
-	return p.ChatCompatible.StreamChatCompletion(ctx, clampTemperature(req))
+	adapted := adaptChatRequest(clampTemperature(req))
+	stream, err := p.ChatCompatible.StreamChatCompletion(ctx, adapted)
+	if err != nil {
+		return nil, err
+	}
+	model := ""
+	if req != nil {
+		model = req.Model
+	}
+	return normalizeChatStream(stream, model), nil
 }
 
 // Responses sends a Responses API request to MiniMax using chat-completions

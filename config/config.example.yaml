@@ -7,6 +7,7 @@ server:
   port: "8080"
   base_path: "/" # env: BASE_PATH; set to "/g" to serve the gateway under https://example.com/g/
   master_key: "your-secret-key"
+  master_key_disabled: false # env: MASTER_KEY_DISABLED; true forgets the master key, leaving managed gateway API keys and any configured authentication extension as the only credentials. The gateway then requires a credential on every request and keeps the admin API gated, so issue one with dashboard access first
   body_size_limit: "10M"
   stream_stall_timeout: 60 # env: STREAM_STALL_TIMEOUT; seconds one response write on a model route may wait for the client to read it. Fires only when a client stops reading, never while the provider is slow; 0 disables
   swagger_enabled: false # env: SWAGGER_ENABLED; requires a binary built with -tags=swagger
@@ -17,6 +18,15 @@ server:
   enabled_passthrough_providers: ["openai", "anthropic", "cohere", "openrouter", "kilo", "zai", "sglang", "vllm", "llmd", "deepseek", "bailian"] # providers enabled on /p/{provider}/...
   auth_verify_enabled: false # env: AUTH_VERIFY_ENABLED; expose GET /v1/auth/verify, which reports whether the API key a request carries authenticates against this gateway (401 when it does not; 200 with {"valid":false,"method":"none"} when the gateway has no authentication configured). Outside /admin, so it works with the admin API disabled
   realtime_enabled: true # env: REALTIME_ENABLED; expose the /v1/realtime and /v1/realtime/translations websockets, their calls/client_secrets siblings, and /p/{provider}/v1/realtime upgrades
+  # Client address resolution. Leave trusted_proxies empty (default) and every
+  # client address GoModel reports is the socket peer, with forwarding headers
+  # ignored. Entries are CIDR networks, bare addresses, or the presets
+  # "loopback" and "private" (RFC 1918 + ULA); prefer the one subnet your proxy
+  # sits on over "private", which trusts every private client to set its own
+  # forwarded address.
+  # trusted_proxies: ["10.42.0.0/16", "loopback"]
+  # client_ip_header: "CF-Connecting-IP" # env: SERVER_CLIENT_IP_HEADER; default X-Forwarded-For, resolved hop by hop. Any other header carries one address and is taken verbatim, which is correct behind an edge like Cloudflare. Requires trusted_proxies; RFC 7239 Forwarded is not supported
+  # trusted_hops: 1 # env: SERVER_TRUSTED_HOPS; proxies between the client and the gateway. Takes the X-Forwarded-For entry at that depth instead of scanning the chain, for an edge at a fixed depth with addresses you cannot enumerate. Requires trusted_proxies
   pid_file: "data/gomodel.pid" # env: PID_FILE; where the running gateway records its process id so `gomodel --reload` can find it. Set per instance when several gateways share a host; empty writes no pid file and disables --reload; changing it needs a restart, not a reload
 
 models:
@@ -204,6 +214,15 @@ storage:
     url: "mongodb://localhost:27017"
     database: "gomodel"
 
+# Where media files go: audio and images captured for the audit log (see
+# logging.log_audio_bodies / log_image_bodies). Metadata stays in storage
+# above; only the bytes are written here. Mount a volume at the path in
+# containers, or a shared mount (EFS, S3 FUSE) when running several replicas.
+media:
+  storage:
+    type: "filesystem" # "filesystem" (default) or "memory" (lost on restart)
+    path: "data/media" # default: data/media when ./data exists, else the OS data dir
+
 logging:
   enabled: true
   log_bodies: true # WARNING: may contain sensitive data
@@ -312,6 +331,7 @@ opentelemetry:
 http:
   timeout: 600 # seconds (10 minutes)
   response_header_timeout: 600
+  stream_idle_timeout: 300 # seconds of silence allowed mid-stream before a stalled stream fails; 0 disables
 
 workflows:
   refresh_interval: 1m
@@ -334,6 +354,9 @@ resilience:
     failure_threshold: 5
     success_threshold: 2
     timeout: 30s
+    # Count a call answered slower than this as a failure, so sustained latency
+    # opens the circuit (and fails over) like sustained errors. 0 disables it.
+    slow_call_threshold: 0s # env: CIRCUIT_BREAKER_SLOW_CALL_THRESHOLD; e.g. 60s
 
 guardrails:
   enabled: false
@@ -471,6 +494,10 @@ providers:
     #   - "${OPENAI_API_KEY_3}"
     # Set false for strict per-request round robin (usually worse for prompt caching).
     # session_sticky_keys: false
+    # Send only this provider's traffic through an HTTP(S) or SOCKS5 proxy.
+    # Providers without one keep the process-wide HTTP_PROXY / HTTPS_PROXY / NO_PROXY.
+    # Equivalent env var: OPENAI_PROXY_URL
+    # proxy_url: "socks5://user:pass@10.0.0.1:1080"
     # Per-provider resilience overrides (optional).
     # Only specified fields override the global defaults above.
     # resilience:
@@ -565,6 +592,32 @@ providers:
     # base_url defaults to "https://api.elevenlabs.io".
     # Voice-only provider: text-to-speech and speech-to-text, no chat. The
     # OpenAI "voice" field must be an ElevenLabs voice_id.
+
+  audiocpp:
+    type: audiocpp
+    base_url: "http://localhost:8099"
+    # Audio-only local server: text-to-speech and speech-to-text, no chat.
+    # base_url is required (audiocpp_server's default port collides with the
+    # gateway's own) and a trailing /v1 is accepted. api_key is optional and
+    # usually unset, since audio.cpp has no authentication of its own.
+
+  jev:
+    type: jev
+    api_key: "${JEV_API_KEY}"
+    # base_url defaults to "https://api.typesafe.ai". TypeSafe's System One
+    # API is a decision API with no OpenAI-compatible surface: requests go to
+    # POST /p/jev/v1/systemone, or point the TypeSafe SDK at /p/jev. A
+    # self-hosted Kev server speaks the same API without authentication:
+    # set base_url (e.g. "http://localhost:8009") and omit api_key.
+    # Jev is priced per input token and is not in the upstream model catalog;
+    # declare its pricing here to have the gateway cost System One requests.
+    # models:
+    #   - id: "jev-1.13.0"
+    #     metadata:
+    #       pricing:
+    #         currency: USD
+    #         input_per_mtok: 0.042
+    #         output_per_mtok: 0
 
   meta:
     type: meta

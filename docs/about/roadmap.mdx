@@ -5,24 +5,11 @@ icon: "list-todo"
 keywords: ["roadmap", "milestones", "upcoming features", "releases"]
 ---
 
-## Commercial features
-
-- [x] Intelligent routing ([GoModel Pro](/pro/intelligent-routing), beta)
-- [x] Context window compression ([GoModel Pro](/pro/compression))
-- [x] OIDC single sign-on ([GoModel Pro](/pro/sso))
-- [ ] Cluster mode
-- [ ] LDAP integration
-- [ ] Role-based access control (RBAC) for the dashboard and admin API
-- [ ] Secret manager integrations (Vault, AWS Secrets Manager/KMS, Azure Key Vault, GCP Secret Manager)
-- [ ] Managed HTTP/SOCKS5 outbound proxies with per-provider-key assignment
-- [ ] Audit-log export/streaming to object storage and data lakes
-- [ ] IP / CIDR allowlists
-- [ ] LTS channel with signed artifacts, SBOM, and CVE pre-notification
-- [ ] SAML 2.0 + SCIM directory sync
-
 ## Roadmap to 0.2.0
 
+- [ ] Improving/reinventing the testing strategy
 - [ ] Guardrails hardening: better UI, simpler architecture, easier custom guardrails, and response-side guardrails applied before output reaches the client
+- [x] Writing the customized Code of Conduct
 - [x] Plugins - at least for guardrails
 - [x] OpenTelemetry (OTel) support
 - [x] Full support for the OpenAI `/conversations` lifecycle
@@ -36,14 +23,41 @@ keywords: ["roadmap", "milestones", "upcoming features", "releases"]
 
 ## Roadmap to 0.3.0
 
-- [ ] Working on Audio endpoints
+- [ ] Hardening and extending MCP proxy features
+- [ ] Improving the overall quality and simplicity of configuration and UI
+- [ ] Rethinking and reworking pass-through API
+- [ ] Support for Gemini native API and translations from Gemini native API calls to other dialects
+- [ ] Default prices correctness improvements
+  - [ ] setting up an AI curator / agent to monitor the prices across the providers websites
+- [ ] Improving UI and Audit Logs view performance
+- [ ] Improving resilient features (explicit failure + failover for cases like vLLM stopped in the middle of streaming etc.)
+- [ ] Facilitate migration from LiteLLM to GoModel (script/command + config.yaml convertedr + guide)
+- [ ] Better support for /audio related endpoints and modalities
 - [ ] Better for Video Generation (storing artifacts and more)
 - [ ] Provider-native passthrough for all providers, beyond the current beta coverage
 - [ ] Failover for the image endpoints, so image generation and edits can fall back across providers like chat does
 - [ ] Streaming image generation (SSE relay of partial images on `/v1/images/*`)
 - [ ] Plugins hardening
-- [ ] Dashboard customization
+- [ ] Driving model properties by models.json file attributes more than the model names
+  - [ ] \<think\> / \<thinking\> blocks instead of a separated field in the response
+  - [ ] Supported endpoints per model
+- [ ] Dashboard customization (more charts, more data to surface, waterfall charts)
 - [ ] Workflows rework with better UI/UX and a more flexible design
+
+## Commercial features (Pro/Enterprise version)
+
+- [x] Intelligent routing ([GoModel Pro](/pro/intelligent-routing), beta)
+- [x] Context window compression ([GoModel Pro](/pro/compression))
+- [x] OIDC single sign-on ([GoModel Pro](/pro/sso))
+- [x] Egress proxy pools with health checks and failover ([GoModel Pro](/pro/egress), beta; per-provider `proxy_url` is in [core](/providers/outbound-proxy))
+- [ ] Cluster mode
+- [ ] LDAP integration
+- [ ] Role-based access control (RBAC) for the dashboard and admin API
+- [ ] Secret manager integrations (Vault, AWS Secrets Manager/KMS, Azure Key Vault, GCP Secret Manager)
+- [ ] Audit-log export/streaming to object storage and data lakes
+- [ ] IP / CIDR allowlists
+- [ ] LTS channel with signed artifacts, SBOM, and CVE pre-notification
+- [ ] SAML 2.0 + SCIM directory sync
 
 ## Any suggestions?
 

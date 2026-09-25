@@ -154,7 +154,7 @@ func TestStoreDeactivate(t *testing.T) {
 		// Deactivating twice reports not-found rather than silently succeeding.
 		err = store.Deactivate(ctx, created.ID)
 		require.ErrorIs(t, err, ErrNotFound)
-		assert.ErrorIs(t, store.Deactivate(ctx, "missing"), ErrNotFound)
+		require.ErrorIs(t, store.Deactivate(ctx, "missing"), ErrNotFound)
 
 		got, err := store.Get(ctx, created.ID)
 		require.NoError(t, err)

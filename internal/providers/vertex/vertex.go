@@ -60,10 +60,17 @@ type Provider struct {
 
 // New creates a new Vertex AI provider.
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
-	return newProvider(providerCfg, opts, nil)
+	return newProvider(providerCfg, opts, opts.HTTPClient, false)
 }
 
-func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOptions, baseHTTPClient *http.Client) *Provider {
+// newProvider builds the provider over baseHTTPClient. preauthenticated says
+// the caller already layered Google credentials onto that client, which only
+// the tests do. Otherwise the supplied client is the *base* for Vertex's own
+// authenticated client rather than a replacement for it: ProviderOptions
+// .HTTPClient is a transport override, not a credential, and Vertex headers
+// add only the request ID, so using it as-is would send requests with no ADC
+// or service-account token at all.
+func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOptions, baseHTTPClient *http.Client, preauthenticated bool) *Provider {
 	providerCfg.Backend = "vertex"
 	p := &Provider{
 		authType: normalizeAuthType(providerCfg),
@@ -71,8 +78,8 @@ func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOp
 	p.validateConfig(providerCfg)
 
 	authClient := baseHTTPClient
-	if authClient == nil {
-		authClient = p.authHTTPClient(providerCfg, nil)
+	if !preauthenticated {
+		authClient = p.authHTTPClient(providerCfg, baseHTTPClient)
 	}
 	p.gemini = gemini.NewVertexWithHTTPClient(providerCfg, opts, authClient)
 	nativeBaseURL := vertexNativeBaseURL(providerCfg)
@@ -133,13 +140,15 @@ func (p *Provider) authHTTPClient(providerCfg providers.ProviderConfig, base *ht
 	}
 	authCfg := buildGoogleAuthConfig(providerCfg)
 	authCfg.AuthType = p.authType
-	creds, err := googlecommon.FindCredentials(context.Background(), authCfg)
+	if base == nil {
+		base = httpclient.NewDefaultHTTPClient()
+	}
+	// Token exchange must use the same (possibly proxied) transport as the
+	// API calls it authenticates.
+	creds, err := googlecommon.FindCredentials(googlecommon.CredentialsContext(base), authCfg)
 	if err != nil {
 		p.configErr = err
 		return base
-	}
-	if base == nil {
-		base = httpclient.NewDefaultHTTPClient()
 	}
 	quotaProject := creds.QuotaProjectID
 	if strings.TrimSpace(quotaProject) == "" {

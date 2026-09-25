@@ -5,11 +5,13 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 )
@@ -27,6 +29,13 @@ type ProviderOptions struct {
 	// nil for keyless providers and for constructors invoked outside the
 	// factory; use the Keyring method rather than reading it directly.
 	Keys *Keyring
+	// HTTPClient overrides the transport a provider's clients use. The factory
+	// sets it only when an outbound proxy applies to the provider and leaves
+	// it nil otherwise, so production keeps the pooled default; tests point it
+	// at their own server, and a provider that embeds another one passes its
+	// client down. Retry, circuit breaking and hooks still come from this
+	// struct, so overriding the transport does not change resilience.
+	HTTPClient *http.Client
 }
 
 // Keyring returns the key source a provider should authenticate with, falling
@@ -89,6 +98,7 @@ type ProviderFactory struct {
 	discoveryConfigs     map[string]DiscoveryConfig
 	passthroughEnrichers map[string]core.PassthroughSemanticEnricher
 	hooks                llmclient.Hooks
+	proxySelector        ext.ProxySelector
 }
 
 // NewProviderFactory creates a new provider factory instance.
@@ -152,6 +162,7 @@ func (f *ProviderFactory) Create(cfg ProviderConfig) (core.Provider, error) {
 	f.mu.RLock()
 	builder, ok := f.builders[cfg.Type]
 	hooks := f.hooks
+	proxySelector := f.proxySelector
 	f.mu.RUnlock()
 
 	if !ok {
@@ -163,12 +174,17 @@ func (f *ProviderFactory) Create(cfg ProviderConfig) (core.Provider, error) {
 	// One trimmed name for the clients and the hooks, so both attribute a
 	// request to the same instance.
 	name := strings.TrimSpace(cfg.Name)
+	httpClient, err := providerHTTPClient(cfg, proxySelector)
+	if err != nil {
+		return nil, err
+	}
 	opts := ProviderOptions{
 		Name:       name,
 		Hooks:      hooksWithProviderIdentity(hooks, name, cfg.Type),
 		Models:     cfg.Models,
 		Resilience: cfg.Resilience,
 		Keys:       NewKeyringWithSessionStickiness(cfg.SessionStickyKeys, cfg.APIKeys...),
+		HTTPClient: httpClient,
 	}
 
 	return builder(cfg, opts), nil

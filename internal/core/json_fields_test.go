@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -269,4 +270,162 @@ func TestExtractUnknownJSONFields_DoesNotRetainBodySizedCapacity(t *testing.T) {
 	require.Equal(t, `{"custom_flag":true}`, got)
 	c := cap(fields.raw)
 	require.LessOrEqual(t, c, 4096)
+}
+
+// Member names are matched literally. A gjson path would read "a.b" as a
+// nested lookup and "x*" as a wildcard, quietly answering for a member the
+// caller never asked about.
+func TestUnknownJSONFieldsMatchMemberNamesLiterally(t *testing.T) {
+	fields, err := extractUnknownJSONFields([]byte(`{"model":"m","a.b":1,"x*":2,"nested":{"leaf":3}}`), "model")
+	require.NoError(t, err)
+
+	assert.Equal(t, json.RawMessage("1"), fields.Lookup("a.b"), "a dotted name is a member, not a path")
+	assert.Equal(t, json.RawMessage("2"), fields.Lookup("x*"), "an asterisk in a name is not a wildcard")
+	assert.Nil(t, fields.Lookup("nested.leaf"), "a path must not reach into a nested object")
+	assert.Nil(t, fields.Lookup("x_absent"))
+
+	assert.True(t, fields.HasAny("x_absent", "a.b"))
+	assert.True(t, fields.HasAny("x*"))
+	assert.False(t, fields.HasAny("nested.leaf"), "a path must not reach into a nested object")
+	assert.False(t, fields.HasAny("x_absent"))
+	assert.False(t, fields.HasAny(), "no keys means nothing to find")
+}
+
+// HasAny answers for the same members Lookup finds, including ones whose value
+// is null or an empty object, and finds nothing in an empty container.
+func TestUnknownJSONFieldsHasAnyMatchesLookup(t *testing.T) {
+	fields, err := extractUnknownJSONFields([]byte(`{"model":"m","x_null":null,"x_empty":{},"x_set":1}`), "model")
+	require.NoError(t, err)
+
+	for _, key := range []string{"x_null", "x_empty", "x_set"} {
+		assert.True(t, fields.HasAny(key), "HasAny(%q)", key)
+		assert.NotNil(t, fields.Lookup(key), "Lookup(%q)", key)
+	}
+	assert.True(t, fields.HasAny("x_absent", "x_null"), "one present key of several is enough")
+
+	assert.False(t, UnknownJSONFields{}.HasAny("x_set"))
+	assert.Nil(t, UnknownJSONFields{}.Lookup("x_set"))
+}
+
+func BenchmarkUnknownJSONFieldsHasAny(b *testing.B) {
+	fields, err := extractUnknownJSONFields([]byte(`{"model":"m","name":"alice","x_message_meta":{"id":"msg-1"},"x_trace":{"id":"trace-1"}}`), "model")
+	if err != nil {
+		b.Fatal(err)
+	}
+	directives := []string{
+		"cache_control",
+		"cached_content",
+		"prompt_cache_key",
+		"prompt_cache_options",
+		"prompt_cache_breakpoint",
+		"x_gomodel_cache_point",
+	}
+
+	// The prompt-cache planner's shape: several keys tested for presence on a
+	// container that has none of them.
+	b.Run("has_any_absent", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			if fields.HasAny(directives...) {
+				b.Fatal("unexpected directive")
+			}
+		}
+	})
+	b.Run("lookup_per_key_absent", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			for _, key := range directives {
+				if len(fields.Lookup(key)) > 0 {
+					b.Fatal("unexpected directive")
+				}
+			}
+		}
+	})
+	b.Run("lookup_hit", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			if len(fields.Lookup("x_trace")) == 0 {
+				b.Fatal("expected the member")
+			}
+		}
+	})
+	// Lookup used to decode the stored object with a streaming json.Decoder.
+	// Single lookups are on hundreds of translation paths, so keep the
+	// replaced implementation measurable beside the one in use.
+	b.Run("lookup_hit_decoder_baseline", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			if len(lookupDecoderBaseline(fields, "x_trace")) == 0 {
+				b.Fatal("expected the member")
+			}
+		}
+	})
+}
+
+// lookupDecoderBaseline is UnknownJSONFields.Lookup as it was before the
+// gjson scan replaced it, kept only as a benchmark reference.
+func lookupDecoderBaseline(fields UnknownJSONFields, key string) json.RawMessage {
+	if len(fields.raw) == 0 {
+		return nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(fields.raw))
+	tok, err := dec.Token()
+	if err != nil {
+		return nil
+	}
+	delim, ok := tok.(json.Delim)
+	if !ok || delim != '{' {
+		return nil
+	}
+	for dec.More() {
+		keyToken, err := dec.Token()
+		if err != nil {
+			return nil
+		}
+		fieldName, ok := keyToken.(string)
+		if !ok {
+			return nil
+		}
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return nil
+		}
+		if fieldName == key {
+			return CloneRawJSON(value)
+		}
+	}
+	return nil
+}
+
+// The request decoder is deliberately more lenient than strict JSON (see
+// TestDecoderLeniencyIsBounded). A passthrough member the gateway accepted on
+// the way in must still be visible on the way out, or it would be dropped
+// from the request forwarded upstream.
+func TestUnknownJSONFieldsSeeEveryValueTheDecoderAccepted(t *testing.T) {
+	accepted := map[string]string{
+		"trailing array comma":  `[1,]`,
+		"trailing object comma": `{"a":1,}`,
+		"leading-zero number":   `01`,
+		"plain object":          `{"a":1}`,
+	}
+	for name, value := range accepted {
+		t.Run(name, func(t *testing.T) {
+			var req ChatRequest
+			require.NoError(t, req.UnmarshalJSON([]byte(`{"model":"m","x_passthrough":`+value+`}`)),
+				"the decoder accepts this body")
+
+			assert.NotEmpty(t, req.ExtraFields.Lookup("x_passthrough"), "the member the decoder accepted must be visible")
+			assert.True(t, req.ExtraFields.HasAny("x_passthrough"))
+		})
+	}
+}
+
+// Bytes the decoder itself rejects stay invisible: Lookup must never hand back
+// a value a caller cannot decode (internal/providers/vllm relies on this).
+func TestUnknownJSONFieldsHideValuesTheDecoderRejects(t *testing.T) {
+	for _, value := range []string{`not-valid-json{{{`, `tru`} {
+		fields := UnknownJSONFieldsFromMap(map[string]json.RawMessage{"x_broken": json.RawMessage(value)})
+		assert.Nil(t, fields.Lookup("x_broken"), "value %q", value)
+		assert.False(t, fields.HasAny("x_broken"), "value %q", value)
+	}
 }

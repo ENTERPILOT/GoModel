@@ -25,9 +25,7 @@ func TestStreamState(t *testing.T) {
 	got = s.Text(2)
 	assert.Empty(t, got)
 
-	if got := s.Events(); got != 4 {
-		t.Errorf("Events = %d, want 4", got)
-	}
+	assert.Equal(t, 4, s.Events(), "Events")
 }
 
 func TestStreamDecisions(t *testing.T) {
@@ -70,7 +68,6 @@ func TestStreamStateReplaceTail(t *testing.T) {
 	assert.Equal(t, "my key [x] ", got)
 
 	s.ReplaceTail(&StreamEvent{Seq: 4, Kind: EventReasoningDelta, Text: "hmm"}, 0, "")
-	if got, n := s.Text(0), s.Events(); got != "my key [x] " || n != 4 {
-		t.Errorf("reasoning delta changed text %q, events = %d", got, n)
-	}
+	assert.Equal(t, "my key [x] ", s.Text(0), "reasoning delta changed text")
+	assert.Equal(t, 4, s.Events(), "reasoning delta changed the event count")
 }

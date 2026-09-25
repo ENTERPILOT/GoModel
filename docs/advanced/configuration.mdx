@@ -44,10 +44,14 @@ The most common way to configure GoModel. Set any of the variables below to over
 | `PORT`               | HTTP server port                                      | `8080`                 |
 | `BASE_PATH`          | Mount path prefix, for example `/g`                   | `/`                    |
 | `GOMODEL_MASTER_KEY` | Authentication key for securing the gateway           | _(empty, unsafe mode)_ |
+| `MASTER_KEY_DISABLED` | Turn off master key authentication, leaving [managed keys](/features/users) and authentication extensions as the only credentials | `false`                |
 | `GOMODEL_DEMO_MODE`  | Enable public demo warnings in logs and the dashboard  | `false`                |
 | `BODY_SIZE_LIMIT`    | Max request body size (e.g., `10M`, `1024K`, `500KB`) | _(no limit)_           |
 | `STREAM_STALL_TIMEOUT` | Seconds one response write on a model route may wait for the client to read it; `0` disables | `60`                   |
 | `USER_PATH_HEADER`   | Header used to read/write request `user_path` values  | `X-GoModel-User-Path`  |
+| `SERVER_TRUSTED_PROXIES` | Networks your own proxies sit on; enables header-based client addresses | _(empty)_ |
+| `SERVER_CLIENT_IP_HEADER` | Header a trusted proxy passes the client address in | `X-Forwarded-For` |
+| `SERVER_TRUSTED_HOPS` | Proxies between the client and the gateway; `0` scans the chain instead | `0` |
 | `SWAGGER_ENABLED`    | Expose [Swagger UI](/advanced/swagger-ui); needs a `-tags=swagger` build | `false`                |
 | `AUTH_VERIFY_ENABLED` | Expose [`GET /v1/auth/verify`](/advanced/api-endpoints#key-verification), which reports whether the API key a request carries is valid | `false`                |
 | `PID_FILE`           | Where the running gateway records its process id for `gomodel --reload`. Changing it needs a restart | `data/gomodel.pid` next to a `./data` directory, otherwise the per-user data directory |
@@ -61,6 +65,57 @@ cancelled, and the audit entry records `client_stalled`, also when the stream
 was served from the response cache. Raise it for clients that legitimately
 pause reading a stream for over a minute; set `0` to disable.
 
+#### Client addresses behind a proxy
+
+Every client address GoModel reports — audit entries, rate limit keys, logs —
+is the address of the connection that reached the gateway, so behind a reverse
+proxy they all show the proxy. Set `SERVER_TRUSTED_PROXIES` to the networks
+your own proxies sit on and GoModel reads the forwarded client instead.
+Nothing is trusted until you list it, not even loopback, and changing these
+settings needs a restart.
+
+```bash
+SERVER_TRUSTED_PROXIES=10.42.0.0/16,loopback
+```
+
+Entries are CIDR networks, bare addresses (a single host), or a preset:
+
+| Preset     | Expands to                                           |
+| ---------- | ---------------------------------------------------- |
+| `loopback` | `127.0.0.0/8`, `::1/128`                             |
+| `private`  | `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7` |
+
+Prefer the one subnet your proxy sits on. `private` trusts every private
+client to set its own forwarded address, which is the wrong answer when your
+clients are on private addresses too — a home lab whose clients live on
+`192.168.1.0/24` and whose cluster runs on `10.42.0.0/16` should list
+`10.42.0.0/16` alone.
+
+By default GoModel reads `X-Forwarded-For`, where each hop appends the address
+it saw, and records the nearest hop that is not one of your trusted networks:
+the last address your own infrastructure wrote, and the furthest one a client
+cannot overwrite. A request from outside the listed networks, a chain it cannot
+parse, and a chain made entirely of trusted networks all keep the connection
+address — in that last case every entry is a claim an internal client could
+have invented.
+
+Two settings change how the header is read:
+
+- `SERVER_CLIENT_IP_HEADER` names a different header. Anything other than
+  `X-Forwarded-For` carries a single address and is taken verbatim, which is
+  the correct reading behind an edge that resolves the client itself:
+  `SERVER_CLIENT_IP_HEADER=CF-Connecting-IP` behind Cloudflare, or `X-Real-IP`
+  behind an nginx that sets it. RFC 7239 `Forwarded` is not supported.
+- `SERVER_TRUSTED_HOPS` takes the `X-Forwarded-For` entry at a fixed depth
+  instead of scanning the chain — `1` is the rightmost entry, `2` the one
+  before it. Use it when your edge sits at a known depth but rotates through
+  addresses you cannot enumerate. The connection must still come from a trusted
+  network, and a chain shorter than the configured depth falls back to the
+  connection address.
+
+Both require `SERVER_TRUSTED_PROXIES`; on their own they are a startup error
+rather than a setting that silently does nothing.
+
 Set `GOMODEL_DEMO_MODE=true` for a public or shared demonstration instance.
 GoModel logs a warning at startup and every five minutes, renders a persistent
 warning at the top of the dashboard, and exposes `DEMO_MODE=on` through the
@@ -73,6 +128,33 @@ gateway API key, so requests require a bearer token even when
 `GOMODEL_MASTER_KEY` is empty. Disabled or expired managed keys keep
 authentication enabled as a fail-closed safety measure. Delete every managed
 key to return to unauthenticated mode, or configure a master key for recovery.
+
+#### Disabling the master key
+
+The master key is a single global credential: whoever holds it is every user
+of the gateway at once. Once managed gateway API keys are issued, set
+`MASTER_KEY_DISABLED=true` (`server.master_key_disabled` in YAML) to retire it
+and leave those keys — together with any authentication extension you run,
+such as SSO — as the only way in. Per-key user paths, budgets, rate limits,
+and audit trails then apply to every request, including the admin API.
+
+```bash
+MASTER_KEY_DISABLED=true
+```
+
+GoModel forgets any configured master key at startup, so nothing accepts or
+derives from it: it fails against the gateway, against
+[`GET /v1/auth/verify`](/advanced/api-endpoints#key-verification), and against
+`/admin`. A key left in the environment or `config.yaml` is inert rather than
+an error, which is what makes the switch safe to flip ahead of removing it.
+
+Disabling is not the same as leaving `GOMODEL_MASTER_KEY` empty, which runs the
+gateway unauthenticated and opens `/admin/*` so the dashboard can bootstrap its
+first managed key. A disabled master key fails closed instead: every request
+needs a credential, and the admin API stays behind one carrying dashboard
+access. Issue that credential before flipping the switch — with no master key,
+no managed key, and no authentication extension, the gateway rejects every
+request and logs a warning at startup saying so.
 
 #### MCP Gateway
 
@@ -147,6 +229,26 @@ Storage is shared by audit logging, usage tracking, and future features like IAM
   SQLite and MongoDB deployments are unaffected.
 </Warning>
 
+#### Media Storage
+
+Media files — the audio and images captured for the audit log when
+`LOGGING_LOG_AUDIO_BODIES` or `LOGGING_LOG_IMAGE_BODIES` is on — are kept
+outside the database. Their metadata lives in the storage backend above; only
+the bytes go here, so they are never capped in size and the database stays
+small. See [ADR-0013](https://github.com/ENTERPILOT/GoModel/blob/main/docs/adr/0013-media-storage.md).
+
+| Variable             | Description                                                  | Default      |
+| -------------------- | ------------------------------------------------------------ | ------------ |
+| `MEDIA_STORAGE_TYPE` | Blob backend: `filesystem` or `memory` (lost on restart)     | `filesystem` |
+| `MEDIA_STORAGE_PATH` | Directory for the filesystem backend                         | `data/media` |
+
+The default path follows the SQLite rule: `./data/media` when a `./data`
+directory exists next to the process, otherwise the OS per-user data
+directory. In containers mount a volume there; with several replicas use a
+shared mount (EFS, an S3 FUSE mount) so every instance can serve every file.
+Files are retained as long as the audit entries that reference them
+(`LOGGING_RETENTION_DAYS`) and removed by an hourly sweep.
+
 #### Audit Logging
 
 | Variable                          | Description                                | Default |
@@ -163,6 +265,11 @@ Storage is shared by audit logging, usage tracking, and future features like IAM
 | `LOGGING_BUFFER_SIZE`             | In-memory buffer before flush              | `1000`  |
 | `LOGGING_FLUSH_INTERVAL`          | Flush interval in seconds                  | `5`     |
 | `LOGGING_RETENTION_DAYS`          | Auto-delete after N days (0 = forever)     | `30`    |
+
+Audit entries record the client address the gateway resolved. Behind a reverse
+proxy that is the proxy until you list its network in
+`SERVER_TRUSTED_PROXIES` — see [client addresses behind a
+proxy](#client-addresses-behind-a-proxy).
 
 Realtime dashboard previews and persisted audit logs are separate features.
 With `DASHBOARD_LIVE_LOGS_ENABLED=true` and `LOGGING_ENABLED=false`, requests
@@ -307,6 +414,12 @@ These control timeouts for upstream API requests to LLM providers.
 | ------------------------------ | -------------------------------------------- | -------------- |
 | `HTTP_TIMEOUT`                 | Overall request timeout in seconds           | `600` (10 min) |
 | `HTTP_RESPONSE_HEADER_TIMEOUT` | Time to wait for response headers in seconds | `600` (10 min) |
+| `HTTP_STREAM_IDLE_TIMEOUT`     | Longest silence in seconds a stream may keep once its first bytes arrived; `0` disables | `300` (5 min) |
+
+A stream that goes quiet for longer than `HTTP_STREAM_IDLE_TIMEOUT` is closed
+with a `504` provider error instead of hanging until `HTTP_TIMEOUT`. The wait
+for the first token does not count, so slow reasoning models are unaffected.
+Raise it only for a provider that legitimately pauses for minutes mid-stream.
 
 #### Provider API Keys
 

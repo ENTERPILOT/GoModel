@@ -27,7 +27,8 @@
         "metatags": {
             "generator": "GoModel",
             "google-site-verification": "EhaMJtqC22YnPJetcCW5SCi3fdJF2BOai2WHjae8ymY",
-            "robots": "index, follow, max-image-preview:large"
+            "robots": "index, follow, max-image-preview:large",
+            "canonical": "https://gomodel.enterpilot.io/docs"
         },
         "organization": {
             "id": "https://enterpilot.io/#organization",
@@ -113,7 +114,8 @@
                             "pro/overview",
                             "pro/compression",
                             "pro/sso",
-                            "pro/intelligent-routing"
+                            "pro/intelligent-routing",
+                            "pro/egress"
                         ]
                     },
                     {
@@ -135,6 +137,7 @@
                             "advanced/api-endpoints",
                             "advanced/swagger-ui",
                             "advanced/resilience",
+                            "advanced/provider-failure-modes",
                             "advanced/version-awareness",
                             "advanced/responses-api",
                             "advanced/responses-compatibility",
@@ -201,6 +204,7 @@
                 "pages": [
                     "providers/overview",
                     "providers/key-rotation",
+                    "providers/outbound-proxy",
                     "providers/anthropic",
                     "providers/chatgpt",
                     "providers/cohere",
@@ -211,6 +215,8 @@
                     "providers/xiaomi",
                     "providers/minimax",
                     "providers/elevenlabs",
+                    "providers/audiocpp",
+                    "providers/jev",
                     "providers/opencode-go",
                     "providers/sglang",
                     "providers/vllm",

@@ -100,32 +100,13 @@ func NewCompatibleProvider(apiKey string, opts providers.ProviderOptions, cfg Co
 			cfg.SetHeaders(req, p.keys.NextForContext(req.Context()))
 		}
 	}
-	if cfg.HTTPClient != nil {
-		p.client = llmclient.NewWithHTTPClient(cfg.HTTPClient, clientCfg, headerSetter)
-	} else {
-		p.client = llmclient.New(clientCfg, headerSetter)
-	}
-	return p
-}
-
-func NewCompatibleProviderWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks, cfg CompatibleProviderConfig) *CompatibleProvider {
+	// cfg wins over opts: a provider that sets one is doing it for a
+	// transport-level concern of its own, such as request signing.
+	httpClient := cfg.HTTPClient
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = opts.HTTPClient
 	}
-	p := &CompatibleProvider{
-		keys:               providers.NewKeyring(apiKey),
-		providerName:       cfg.ProviderName,
-		requestMutator:     cfg.RequestMutator,
-		adaptChatRequest:   cfg.AdaptChatRequest,
-		chatRequestHeaders: cfg.ChatRequestHeaders,
-	}
-	clientCfg := llmclient.DefaultConfig(cfg.ProviderName, cfg.BaseURL)
-	clientCfg.Hooks = hooks
-	p.client = llmclient.NewWithHTTPClient(httpClient, clientCfg, func(req *http.Request) {
-		if cfg.SetHeaders != nil {
-			cfg.SetHeaders(req, p.keys.NextForContext(req.Context()))
-		}
-	})
+	p.client = llmclient.NewWithOptionalHTTPClient(httpClient, clientCfg, headerSetter)
 	return p
 }
 
@@ -243,6 +224,39 @@ func (p *CompatibleProvider) ListModels(ctx context.Context) (*core.ModelsRespon
 	}
 	normalizeModelsResponse(&resp)
 	return &resp, nil
+}
+
+// ListModelsWithMaxModelLen lists models like ListModels but keeps the
+// max_model_len field vLLM-style servers (vLLM, SGLang, llm-d) add to each
+// entry, reporting it as the model's context window: for a self-hosted
+// server the running process is the only source that knows the real limit.
+func (p *CompatibleProvider) ListModelsWithMaxModelLen(ctx context.Context) (*core.ModelsResponse, error) {
+	var upstream struct {
+		Object string `json:"object"`
+		Data   []struct {
+			core.Model
+			MaxModelLen int `json:"max_model_len"`
+		} `json:"data"`
+	}
+	if err := p.Do(ctx, llmclient.Request{
+		Method:   http.MethodGet,
+		Endpoint: "/models",
+	}, &upstream); err != nil {
+		return nil, err
+	}
+	resp := &core.ModelsResponse{Object: upstream.Object, Data: make([]core.Model, 0, len(upstream.Data))}
+	for _, entry := range upstream.Data {
+		model := entry.Model
+		if entry.MaxModelLen > 0 {
+			if model.Metadata == nil {
+				model.Metadata = &core.ModelMetadata{}
+			}
+			model.Metadata.ContextWindow = new(entry.MaxModelLen)
+		}
+		resp.Data = append(resp.Data, model)
+	}
+	normalizeModelsResponse(resp)
+	return resp, nil
 }
 
 func normalizeModelsResponse(resp *core.ModelsResponse) {

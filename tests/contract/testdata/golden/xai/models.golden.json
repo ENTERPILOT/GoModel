@@ -2,73 +2,403 @@
   "data": [
     {
       "created": 0,
-      "id": "grok-2-vision-1212",
+      "id": "grok-4.20-0309-non-reasoning",
+      "metadata": {
+        "capabilities": {
+          "vision": true
+        },
+        "categories": [
+          "text_generation"
+        ],
+        "context_window": 1000000,
+        "modes": [
+          "chat",
+          "responses"
+        ],
+        "pricing": {
+          "cached_input_per_mtok": 0.2,
+          "currency": "USD",
+          "input_per_mtok": 1.25,
+          "output_per_mtok": 2.5,
+          "tiers": [
+            {
+              "cached_input_per_mtok": 0.2,
+              "input_per_mtok": 1.25,
+              "output_per_mtok": 2.5,
+              "up_to_tokens": 200000
+            },
+            {
+              "cached_input_per_mtok": 0.4,
+              "input_per_mtok": 2.5,
+              "output_per_mtok": 5,
+              "up_to_tokens": 1000000
+            }
+          ]
+        }
+      },
       "object": "model",
       "owned_by": "xai"
     },
     {
       "created": 0,
-      "id": "grok-3",
+      "id": "grok-4.20-0309-reasoning",
+      "metadata": {
+        "capabilities": {
+          "reasoning": true,
+          "vision": true
+        },
+        "categories": [
+          "text_generation"
+        ],
+        "context_window": 1000000,
+        "modes": [
+          "chat",
+          "responses"
+        ],
+        "pricing": {
+          "cached_input_per_mtok": 0.2,
+          "currency": "USD",
+          "input_per_mtok": 1.25,
+          "output_per_mtok": 2.5,
+          "tiers": [
+            {
+              "cached_input_per_mtok": 0.2,
+              "input_per_mtok": 1.25,
+              "output_per_mtok": 2.5,
+              "up_to_tokens": 200000
+            },
+            {
+              "cached_input_per_mtok": 0.4,
+              "input_per_mtok": 2.5,
+              "output_per_mtok": 5,
+              "up_to_tokens": 1000000
+            }
+          ]
+        }
+      },
       "object": "model",
       "owned_by": "xai"
     },
     {
       "created": 0,
-      "id": "grok-3-mini",
+      "id": "grok-4.20-multi-agent-0309",
+      "metadata": {
+        "capabilities": {
+          "vision": true
+        },
+        "categories": [
+          "text_generation"
+        ],
+        "context_window": 1000000,
+        "modes": [
+          "chat",
+          "responses"
+        ],
+        "pricing": {
+          "cached_input_per_mtok": 0.2,
+          "currency": "USD",
+          "input_per_mtok": 1.25,
+          "output_per_mtok": 2.5,
+          "tiers": [
+            {
+              "cached_input_per_mtok": 0.2,
+              "input_per_mtok": 1.25,
+              "output_per_mtok": 2.5,
+              "up_to_tokens": 200000
+            },
+            {
+              "cached_input_per_mtok": 0.4,
+              "input_per_mtok": 2.5,
+              "output_per_mtok": 5,
+              "up_to_tokens": 1000000
+            }
+          ]
+        }
+      },
       "object": "model",
       "owned_by": "xai"
     },
     {
       "created": 0,
-      "id": "grok-4-0709",
-      "object": "model",
-      "owned_by": "xai"
-    },
-    {
-      "created": 0,
-      "id": "grok-4-1-fast-non-reasoning",
-      "object": "model",
-      "owned_by": "xai"
-    },
-    {
-      "created": 0,
-      "id": "grok-4-1-fast-reasoning",
-      "object": "model",
-      "owned_by": "xai"
-    },
-    {
-      "created": 0,
-      "id": "grok-4-fast-non-reasoning",
-      "object": "model",
-      "owned_by": "xai"
-    },
-    {
-      "created": 0,
-      "id": "grok-4-fast-reasoning",
-      "object": "model",
-      "owned_by": "xai"
-    },
-    {
-      "created": 0,
-      "id": "grok-code-fast-1",
-      "object": "model",
-      "owned_by": "xai"
-    },
-    {
-      "created": 0,
-      "id": "grok-2-image-1212",
+      "id": "grok-4.3",
+      "metadata": {
+        "capabilities": {
+          "reasoning": true,
+          "vision": true
+        },
+        "categories": [
+          "text_generation"
+        ],
+        "context_window": 1000000,
+        "modes": [
+          "chat",
+          "responses"
+        ],
+        "pricing": {
+          "cached_input_per_mtok": 0.2,
+          "currency": "USD",
+          "input_per_mtok": 1.25,
+          "output_per_mtok": 2.5,
+          "tiers": [
+            {
+              "cached_input_per_mtok": 0.2,
+              "input_per_mtok": 1.25,
+              "output_per_mtok": 2.5,
+              "up_to_tokens": 200000
+            },
+            {
+              "cached_input_per_mtok": 0.4,
+              "input_per_mtok": 2.5,
+              "output_per_mtok": 5,
+              "up_to_tokens": 1000000
+            }
+          ]
+        }
+      },
       "object": "model",
       "owned_by": "xai"
     },
     {
       "created": 0,
       "id": "grok-4.5",
+      "metadata": {
+        "capabilities": {
+          "reasoning": true,
+          "vision": true
+        },
+        "categories": [
+          "text_generation"
+        ],
+        "context_window": 500000,
+        "modes": [
+          "chat",
+          "responses"
+        ],
+        "pricing": {
+          "cached_input_per_mtok": 0.3,
+          "currency": "USD",
+          "input_per_mtok": 2,
+          "output_per_mtok": 6,
+          "tiers": [
+            {
+              "cached_input_per_mtok": 0.3,
+              "input_per_mtok": 2,
+              "output_per_mtok": 6,
+              "up_to_tokens": 200000
+            },
+            {
+              "cached_input_per_mtok": 0.6,
+              "input_per_mtok": 4,
+              "output_per_mtok": 12,
+              "up_to_tokens": 500000
+            }
+          ]
+        }
+      },
       "object": "model",
       "owned_by": "xai"
     },
     {
       "created": 0,
       "id": "grok-4.6",
+      "metadata": {
+        "capabilities": {
+          "reasoning": true,
+          "vision": true
+        },
+        "categories": [
+          "text_generation"
+        ],
+        "context_window": 500000,
+        "modes": [
+          "chat",
+          "responses"
+        ],
+        "pricing": {
+          "cached_input_per_mtok": 0.5,
+          "currency": "USD",
+          "input_per_mtok": 2,
+          "output_per_mtok": 6,
+          "tiers": [
+            {
+              "cached_input_per_mtok": 0.5,
+              "input_per_mtok": 2,
+              "output_per_mtok": 6,
+              "up_to_tokens": 200000
+            },
+            {
+              "cached_input_per_mtok": 1,
+              "input_per_mtok": 4,
+              "output_per_mtok": 12,
+              "up_to_tokens": 500000
+            }
+          ]
+        }
+      },
+      "object": "model",
+      "owned_by": "xai"
+    },
+    {
+      "created": 0,
+      "id": "grok-4.7",
+      "metadata": {
+        "capabilities": {
+          "reasoning": true,
+          "vision": true
+        },
+        "categories": [
+          "text_generation"
+        ],
+        "context_window": 500000,
+        "modes": [
+          "chat",
+          "responses"
+        ],
+        "pricing": {
+          "cached_input_per_mtok": 0.5,
+          "currency": "USD",
+          "input_per_mtok": 2,
+          "output_per_mtok": 6,
+          "tiers": [
+            {
+              "cached_input_per_mtok": 0.5,
+              "input_per_mtok": 2,
+              "output_per_mtok": 6,
+              "up_to_tokens": 200000
+            },
+            {
+              "cached_input_per_mtok": 1,
+              "input_per_mtok": 4,
+              "output_per_mtok": 12,
+              "up_to_tokens": 500000
+            }
+          ]
+        }
+      },
+      "object": "model",
+      "owned_by": "xai"
+    },
+    {
+      "created": 0,
+      "id": "grok-build-0.1",
+      "metadata": {
+        "capabilities": {
+          "vision": true
+        },
+        "categories": [
+          "text_generation"
+        ],
+        "context_window": 256000,
+        "modes": [
+          "chat",
+          "responses"
+        ],
+        "pricing": {
+          "cached_input_per_mtok": 0.2,
+          "currency": "USD",
+          "input_per_mtok": 1,
+          "output_per_mtok": 2,
+          "tiers": [
+            {
+              "cached_input_per_mtok": 0.2,
+              "input_per_mtok": 1,
+              "output_per_mtok": 2,
+              "up_to_tokens": 200000
+            },
+            {
+              "cached_input_per_mtok": 0.4,
+              "input_per_mtok": 2,
+              "output_per_mtok": 4,
+              "up_to_tokens": 256000
+            }
+          ]
+        }
+      },
+      "object": "model",
+      "owned_by": "xai"
+    },
+    {
+      "created": 0,
+      "id": "grok-imagine-image",
+      "metadata": {
+        "categories": [
+          "image"
+        ],
+        "context_window": 16000,
+        "modes": [
+          "image_generation"
+        ],
+        "pricing": {
+          "currency": "USD",
+          "per_image": 0.02
+        }
+      },
+      "object": "model",
+      "owned_by": "xai"
+    },
+    {
+      "created": 0,
+      "id": "grok-imagine-image-2.0",
+      "metadata": {
+        "categories": [
+          "image"
+        ],
+        "context_window": 64000,
+        "modes": [
+          "image_generation"
+        ],
+        "pricing": {
+          "currency": "USD",
+          "per_image": 0.06
+        }
+      },
+      "object": "model",
+      "owned_by": "xai"
+    },
+    {
+      "created": 0,
+      "id": "grok-imagine-image-quality",
+      "metadata": {
+        "categories": [
+          "image"
+        ],
+        "context_window": 16000,
+        "modes": [
+          "image_generation"
+        ],
+        "pricing": {
+          "currency": "USD",
+          "per_image": 0.05
+        }
+      },
+      "object": "model",
+      "owned_by": "xai"
+    },
+    {
+      "created": 0,
+      "id": "grok-imagine-video",
+      "metadata": {
+        "categories": [
+          "video"
+        ],
+        "modes": [
+          "video_generation"
+        ]
+      },
+      "object": "model",
+      "owned_by": "xai"
+    },
+    {
+      "created": 0,
+      "id": "grok-imagine-video-1.5",
+      "metadata": {
+        "categories": [
+          "video"
+        ],
+        "modes": [
+          "video_generation"
+        ]
+      },
       "object": "model",
       "owned_by": "xai"
     }

@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
@@ -28,10 +28,9 @@ func findRequest(capture *providertest.Capture, method, path string) (providerte
 
 func TestCompatibleProvider_ListModels_ReturnsUpstreamOnSuccess(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusOK, providertest.ModelsJSON)
-	provider := NewCompatibleProviderWithHTTPClient(
+	provider := NewCompatibleProvider(
 		"test-key",
-		server.Client(),
-		llmclient.Hooks{},
+		providers.ProviderOptions{HTTPClient: server.Client()},
 		CompatibleProviderConfig{ProviderName: "upstream-only", BaseURL: server.URL},
 	)
 
@@ -43,10 +42,9 @@ func TestCompatibleProvider_ListModels_ReturnsUpstreamOnSuccess(t *testing.T) {
 
 func TestCompatibleProvider_ListModels_DefaultsMissingObjectFields(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusOK, `{"data":[{"id":"openrouter/model","object":"","owned_by":"openrouter"}]}`)
-	provider := NewCompatibleProviderWithHTTPClient(
+	provider := NewCompatibleProvider(
 		"test-key",
-		server.Client(),
-		llmclient.Hooks{},
+		providers.ProviderOptions{HTTPClient: server.Client()},
 		CompatibleProviderConfig{ProviderName: "openrouter", BaseURL: server.URL},
 	)
 
@@ -59,10 +57,9 @@ func TestCompatibleProvider_ListModels_DefaultsMissingObjectFields(t *testing.T)
 
 func TestCompatibleProvider_ListModels_ReturnsUpstreamError(t *testing.T) {
 	server, _ := providertest.Server(t, http.NotFound)
-	provider := NewCompatibleProviderWithHTTPClient(
+	provider := NewCompatibleProvider(
 		"test-key",
-		server.Client(),
-		llmclient.Hooks{},
+		providers.ProviderOptions{HTTPClient: server.Client()},
 		CompatibleProviderConfig{ProviderName: "test-provider", BaseURL: server.URL},
 	)
 
@@ -74,10 +71,9 @@ func TestCompatibleProvider_ListModels_ReturnsUpstreamError(t *testing.T) {
 
 func TestCompatibleProvider_AdaptChatRequest_RewritesBodyOnChatAndStream(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"id":"resp","model":"quirk-1","choices":[]}`)
-	provider := NewCompatibleProviderWithHTTPClient(
+	provider := NewCompatibleProvider(
 		"test-key",
-		server.Client(),
-		llmclient.Hooks{},
+		providers.ProviderOptions{HTTPClient: server.Client()},
 		CompatibleProviderConfig{
 			ProviderName: "quirky",
 			BaseURL:      server.URL,
@@ -108,10 +104,9 @@ func TestCompatibleProvider_AdaptChatRequest_RewritesBodyOnChatAndStream(t *test
 
 func TestCompatibleProvider_AdaptChatRequest_ErrorAborts(t *testing.T) {
 	server, capture := providertest.Server(t, nil)
-	provider := NewCompatibleProviderWithHTTPClient(
+	provider := NewCompatibleProvider(
 		"test-key",
-		server.Client(),
-		llmclient.Hooks{},
+		providers.ProviderOptions{HTTPClient: server.Client()},
 		CompatibleProviderConfig{
 			ProviderName: "quirky",
 			BaseURL:      server.URL,
@@ -132,10 +127,9 @@ func TestCompatibleProvider_ChatRequestHeaders_AppliedToChatOnly(t *testing.T) {
 		"/models":           jsonHandler(`{"object":"list","data":[]}`),
 		"/chat/completions": jsonHandler(`{"id":"resp","model":"m","choices":[]}`),
 	})
-	provider := NewCompatibleProviderWithHTTPClient(
+	provider := NewCompatibleProvider(
 		"test-key",
-		server.Client(),
-		llmclient.Hooks{},
+		providers.ProviderOptions{HTTPClient: server.Client()},
 		CompatibleProviderConfig{
 			ProviderName: "affine",
 			BaseURL:      server.URL,
@@ -220,10 +214,9 @@ func TestCompatibleProvider_CreateBatch_InlineRequests(t *testing.T) {
 				}
 			})
 
-			provider := NewCompatibleProviderWithHTTPClient(
+			provider := NewCompatibleProvider(
 				"test-key",
-				server.Client(),
-				llmclient.Hooks{},
+				providers.ProviderOptions{HTTPClient: server.Client()},
 				CompatibleProviderConfig{ProviderName: "openai", BaseURL: server.URL},
 			)
 

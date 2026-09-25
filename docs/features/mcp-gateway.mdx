@@ -140,6 +140,60 @@ Per-server fields:
 Invalid declarations (bad slug, missing `url`/`command`, unknown transport)
 abort startup with a clear error rather than silently dropping the server.
 
+### Run stdio servers with Docker
+
+The official image contains only the GoModel binary — no shell, Node, or
+Python — so `npx` and `uvx` commands cannot start inside it. stdio servers
+that ship as a static binary work: mount the binary and point `command` at it.
+
+For everything else, run the stdio server in its own container behind a
+stdio-to-HTTP bridge such as
+[supergateway](https://github.com/supercorp-ai/supergateway), and declare it
+as a regular `http` server:
+
+```yaml
+services:
+  mcp-files:
+    image: supercorp/supergateway
+    command:
+      - --stdio
+      - npx -y @modelcontextprotocol/server-filesystem /data
+      - --outputTransport
+      - streamableHttp
+      - --port
+      - "8000"
+    volumes:
+      - ./files:/data
+
+  gomodel:
+    image: enterpilot/gomodel
+    ports: ["8080:8080"]
+    environment:
+      GOMODEL_MASTER_KEY: change-me
+      MCP_SERVERS: '{"files":{"url":"http://mcp-files:8000/mcp"}}'
+    depends_on: [mcp-files]
+```
+
+This keeps the MCP server's runtime and dependencies out of the gateway
+container. The bridge has no authentication, so do not publish its port —
+leave it reachable only on the internal Compose network.
+
+To spawn the subprocess from the gateway itself, build your own image instead.
+The binary is static, so it runs on any base:
+
+```dockerfile
+FROM node:22-slim
+COPY --from=enterpilot/gomodel /gomodel /gomodel
+COPY --from=enterpilot/gomodel /app /app
+RUN chown -R node:node /app
+USER node
+WORKDIR /app
+EXPOSE 8080
+ENTRYPOINT ["/gomodel"]
+```
+
+You then own that image's updates and security patches.
+
 ## Health and lifecycle
 
 The dashboard shows each server as **connected**, **degraded**, **connecting**,
@@ -151,6 +205,11 @@ immediately when the upstream sends a `list_changed` notification.
 **Reconnect** on the dashboard (or `POST /admin/mcp-servers/{slug}/reconnect`)
 forces a redial.
 
+A server saved from the dashboard starts as **connecting**: the first dial runs
+in the background so the save never blocks on upstream IO. The dashboard
+re-checks every few seconds until the row settles on connected or degraded, so
+no page reload is needed.
+
 A last error of `no MCP endpoint at that path` means the URL answered the
 handshake with HTTP 404: something listens there, but not an MCP endpoint at
 that path. Servers mount their endpoint under different paths, so `url` must
@@ -160,6 +219,10 @@ mentioning HTTP 405 means the path exists but rejects the handshake method,
 which is what a streamable HTTP endpoint answers when `transport` is `sse`
 (and an SSE endpoint when it is `http`): fix `transport` first, then the
 path. Stateless servers (no `Mcp-Session-Id`) need no extra configuration.
+
+A last error mentioning `x509: certificate signed by unknown authority` means
+the server's TLS certificate is issued by a CA the container does not trust.
+See [private CA certificates](/guides/production#upstream-certificates-behind-a-private-ca).
 
 ## Inspect a server's catalog
 

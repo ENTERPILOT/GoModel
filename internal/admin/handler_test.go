@@ -68,6 +68,9 @@ type mockAuditReader struct {
 	lastStatsParams     auditlog.RequestStatsParams
 	sessionsResult      *auditlog.SessionListResult
 	sessionsErr         error
+	lastUsed            map[string]time.Time
+	lastUsedErr         error
+	lastUsedKeyIDs      []string
 }
 
 type mockRuntimeRefresher struct {
@@ -206,6 +209,14 @@ func (m *mockAuditReader) GetConversation(_ context.Context, logID string, limit
 		return nil, m.conversationErr
 	}
 	return m.conversationResult, nil
+}
+
+func (m *mockAuditReader) GetLastUsedByAuthKeys(_ context.Context, keyIDs []string) (map[string]time.Time, error) {
+	m.lastUsedKeyIDs = keyIDs
+	if m.lastUsedErr != nil {
+		return nil, m.lastUsedErr
+	}
+	return m.lastUsed, nil
 }
 
 // handlerMockProvider implements core.Provider for ListModels registry testing.

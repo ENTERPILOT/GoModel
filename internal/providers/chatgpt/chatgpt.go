@@ -60,7 +60,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 		keys:   opts.Keyring(cfg.APIKey),
 		models: resolveModels(opts.Models),
 	}
-	p.client = llmclient.New(llmclient.Config{
+	p.client = llmclient.NewWithOptionalHTTPClient(opts.HTTPClient, llmclient.Config{
 		ProviderName:   opts.ClientName("chatgpt"),
 		BaseURL:        providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
 		Retry:          opts.Resilience.Retry,
@@ -68,21 +68,6 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}, nil)
 	return p
-}
-
-// NewWithHTTPClient creates a new ChatGPT provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
-	clientCfg := llmclient.DefaultConfig("chatgpt", providers.ResolveBaseURL(baseURL, defaultBaseURL))
-	clientCfg.Hooks = hooks
-	return &Provider{
-		client: llmclient.NewWithHTTPClient(httpClient, clientCfg, nil),
-		keys:   providers.NewKeyring(apiKey),
-		models: resolveModels(nil),
-	}
 }
 
 // resolveModels returns the operator-configured inventory when present,

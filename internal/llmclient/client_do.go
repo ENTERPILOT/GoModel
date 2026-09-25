@@ -162,6 +162,17 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 // Note: Streaming requests do NOT retry (as partial data may have been sent)
 // Metrics note: Duration is measured from start to stream establishment, not stream close
 func (c *Client) DoStream(ctx context.Context, req Request) (io.ReadCloser, error) {
+	resp, err := c.DoStreamResponse(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Stream, nil
+}
+
+// DoStreamResponse is DoStream with the upstream response metadata alongside the
+// body. A relay that forwards the bytes verbatim rather than re-encoding them
+// (audio) needs the upstream Content-Type to describe what it hands on.
+func (c *Client) DoStreamResponse(ctx context.Context, req Request) (*Response, error) {
 	scope, err := c.beginRequest(ctx, req, true)
 	if err != nil {
 		closeRawBodyReader(req)
@@ -202,6 +213,13 @@ func (c *Client) DoStream(ctx context.Context, req Request) (io.ReadCloser, erro
 		c.completeScope(scope, embedded.StatusCode, providerErr, nil)
 		return nil, providerErr
 	}
+	// An empty stream, or one whose first SSE event is an error, fails here
+	// for the same reason: before headers are committed, so it can fail over.
+	if startErr := interceptStreamStart(c.config.ProviderName, resp); startErr != nil {
+		providerErr := attachResponseHeaders(startErr, resp.Header)
+		c.completeScope(scope, startErr.StatusCode, providerErr, nil)
+		return nil, providerErr
+	}
 
 	// The stream can outlive the request by minutes while transport internals
 	// keep resp.Request reachable. GetBody closes over the fully marshaled
@@ -212,9 +230,15 @@ func (c *Client) DoStream(ctx context.Context, req Request) (io.ReadCloser, erro
 		resp.Request.GetBody = nil
 	}
 
+	resp.Body = c.withStreamIdleTimeout(resp.Body)
 	c.completeScope(scope, resp.StatusCode, nil, nil)
 	c.observeFirstChunk(scope, resp, true)
-	return resp.Body, nil
+	return &Response{
+		StatusCode:  resp.StatusCode,
+		ContentType: resp.Header.Get("Content-Type"),
+		Header:      resp.Header,
+		Stream:      resp.Body,
+	}, nil
 }
 
 func canRetryPassthrough(req Request) bool {

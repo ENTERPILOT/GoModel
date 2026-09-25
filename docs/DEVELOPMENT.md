@@ -29,7 +29,7 @@ make test-e2e        # End-to-end tests (requires -tags=e2e; uses in-process moc
 make test-all        # All tests
 ```
 
-Tests assert with [testify](https://github.com/stretchr/testify). Handler tests build requests with `internal/echotest`, provider tests fake upstreams with `internal/providers/providertest`, and providers built on the shared chat-compatible adapter run the `providertest.AssertChatCompatible` contract instead of repeating the same request tests.
+Tests assert with [testify](https://github.com/stretchr/testify). Handler tests build requests with `internal/echotest`, provider tests fake upstreams with `internal/providers/providertest`, and providers built on the shared OpenAI-compatible adapter run the `providertest.AssertChatCompatible` contract instead of repeating the same request tests. `make test` also runs `internal/testconventions`, which rejects hand-rolled `if cond { t.Fatal(...) }` assertions.
 
 ## Linting
 

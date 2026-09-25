@@ -127,7 +127,7 @@ func TestListModels_SurfacesServerReportedMetadata(t *testing.T) {
 			// must not become a public capability on its own.
 			props:             `{"default_generation_settings":{"n_ctx":4096},"modalities":{"vision":true,"video":true,"audio":false,"telepathy":true}}`,
 			wantContextWindow: 4096,
-			wantCapabilities:  map[string]bool{"vision": true, "video": true},
+			wantCapabilities:  map[string]bool{"vision": true, "video_input": true},
 			wantPropsFetched:  true,
 		},
 	}
@@ -139,7 +139,7 @@ func TestListModels_SurfacesServerReportedMetadata(t *testing.T) {
 				"/props":     jsonRoute(tt.propsStatus, tt.props),
 			})
 
-			provider := NewWithHTTPClient("", server.URL+"/v1", server.Client(), llmclient.Hooks{})
+			provider := newTestProvider("", server.URL+"/v1", server.Client(), llmclient.Hooks{})
 
 			resp, err := provider.ListModels(context.Background())
 			require.NoError(t, err)
@@ -178,7 +178,7 @@ func TestListModels_RouterModeKeepsPerModelContextAndSkipsProps(t *testing.T) {
 		"/props": jsonRoute(http.StatusOK, `{"default_generation_settings":{"n_ctx":512}}`),
 	})
 
-	provider := NewWithHTTPClient("", server.URL+"/v1", server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("", server.URL+"/v1", server.Client(), llmclient.Hooks{})
 
 	resp, err := provider.ListModels(context.Background())
 	require.NoError(t, err)
@@ -199,7 +199,7 @@ func TestListModels_LeavesMetadataUnsetWhenServerReportsNothing(t *testing.T) {
 		"/props":     jsonRoute(http.StatusOK, `{"default_generation_settings":{"n_ctx":0}}`),
 	})
 
-	provider := NewWithHTTPClient("", server.URL+"/v1", server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("", server.URL+"/v1", server.Client(), llmclient.Hooks{})
 
 	resp, err := provider.ListModels(context.Background())
 	require.NoError(t, err)

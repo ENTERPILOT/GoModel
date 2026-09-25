@@ -310,9 +310,9 @@ func TestStoreDeleteRemovesDefinition(t *testing.T) {
 		err := store.Delete(ctx, "  g  ")
 		require.NoError(t, err)
 		_, err = store.Get(ctx, "g")
-		assert.ErrorIs(t, err, ErrNotFound, "Get after Delete")
+		require.ErrorIs(t, err, ErrNotFound, "Get after Delete")
 		err = store.Delete(ctx, "g")
-		assert.ErrorIs(t, err, ErrNotFound, "second Delete")
+		require.ErrorIs(t, err, ErrNotFound, "second Delete")
 
 		definitions, err := store.List(ctx)
 		require.NoError(t, err)

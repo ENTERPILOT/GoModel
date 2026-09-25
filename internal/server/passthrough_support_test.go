@@ -33,13 +33,16 @@ func TestBuildPassthroughHeadersSkipsConfiguredUserPathHeader(t *testing.T) {
 	require.Equal(t, "responses=v1", value)
 }
 
-// TestDefaultEnabledPassthroughProvidersIncludesHetzner asserts that the default
-// allowlist contains hetzner — the provider matrix marks hetzner passthrough ✅,
-// and the default handler must not reject those requests before contacting the
-// upstream. Caught by greptile P1 on PR #701.
-func TestDefaultEnabledPassthroughProvidersIncludesHetzner(t *testing.T) {
-	found := slices.Contains(defaultEnabledPassthroughProviders, "hetzner")
-	require.True(t, found, "defaultEnabledPassthroughProviders = %v, want hetzner included", defaultEnabledPassthroughProviders)
+// TestDefaultEnabledPassthroughProvidersIncludesMatrixProviders asserts that
+// the default allowlist contains the providers the matrix marks passthrough ✅,
+// so the default handler does not reject those requests before contacting the
+// upstream. hetzner was caught by greptile P1 on PR #701; jev is reachable
+// only through passthrough, so leaving it out would make the provider inert.
+func TestDefaultEnabledPassthroughProvidersIncludesMatrixProviders(t *testing.T) {
+	for _, providerType := range []string{"hetzner", "jev"} {
+		found := slices.Contains(defaultEnabledPassthroughProviders, providerType)
+		require.True(t, found, "defaultEnabledPassthroughProviders = %v, want %s included", defaultEnabledPassthroughProviders, providerType)
+	}
 }
 
 // TestDefaultEnabledPassthroughProvidersIncludesEdenAI asserts that the default

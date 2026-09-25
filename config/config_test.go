@@ -9,7 +9,7 @@ import (
 
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/stretchr/testify/assert"
@@ -63,7 +63,8 @@ func clearAllConfigEnvVars(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
 		"CONFIG_STRICT",
-		"PORT", "BASE_PATH", "GOMODEL_MASTER_KEY", "BODY_SIZE_LIMIT", "STREAM_STALL_TIMEOUT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "USER_PATH_HEADER", "ENABLED_PASSTHROUGH_PROVIDERS",
+		"PORT", "BASE_PATH", "GOMODEL_MASTER_KEY", "MASTER_KEY_DISABLED", "BODY_SIZE_LIMIT", "STREAM_STALL_TIMEOUT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "USER_PATH_HEADER", "ENABLED_PASSTHROUGH_PROVIDERS",
+		"SERVER_TRUSTED_PROXIES", "SERVER_CLIENT_IP_HEADER", "SERVER_TRUSTED_HOPS",
 		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL", "MODEL_LIST_URL", "GOMODEL_OFFLINE", "GOMODEL_VERSION_CHECK_ENABLED",
 		"REDIS_URL", "REDIS_KEY_MODELS", "REDIS_KEY_RESPONSES", "REDIS_TTL_MODELS", "REDIS_TTL_RESPONSES",
 		"RESPONSE_CACHE_SIMPLE_ENABLED",
@@ -88,7 +89,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"RATE_LIMITS_ENABLED", "RATE_LIMITS_FLUSH_INTERVAL",
 		"DASHBOARD_LIVE_LOGS_ENABLED", "DASHBOARD_LIVE_LOGS_BUFFER_SIZE",
 		"DASHBOARD_LIVE_LOGS_REPLAY_LIMIT", "DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS",
-		"GUARDRAILS_ENABLED", "ENABLE_GUARDRAILS_FOR_BATCH_PROCESSING", "PLUGINS_ENABLED",
+		"GUARDRAILS_ENABLED", "ENABLE_GUARDRAILS_FOR_BATCH_PROCESSING", "PLUGINS_ENABLED", "PLUGINS_LOAD",
 		"FAILOVER_MODE", "FAILOVER_MANUAL_RULES_PATH", "FAILOVER_ENABLED", "FAILOVER_RULES_JSON", "FAILOVER_DISABLED_MODELS", "FAILOVER_DISABLED_MODELS_JSON",
 		"MODELS_ENABLED_BY_DEFAULT", "KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT", "UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT", "CONFIGURED_PROVIDER_MODELS_MODE",
 		"HTTP_TIMEOUT", "HTTP_RESPONSE_HEADER_TIMEOUT",
@@ -131,7 +132,7 @@ func TestBuildDefaultConfig(t *testing.T) {
 	assert.Equal(t, DefaultStreamStallTimeoutSeconds, cfg.Server.StreamStallTimeout)
 	assert.True(t, cfg.Server.EnablePassthroughRoutes)
 	assert.True(t, cfg.Server.AllowPassthroughV1Alias)
-	assert.Equal(t, []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "edenai"}, cfg.Server.EnabledPassthroughProviders)
+	assert.Equal(t, []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "edenai", "jev"}, cfg.Server.EnabledPassthroughProviders)
 	assert.Equal(t, ConfiguredProviderModelsModeFallback, cfg.Models.ConfiguredProviderModelsMode)
 	assert.Nil(t, cfg.Cache.Model.Local)
 	assert.Equal(t, 3600, cfg.Cache.Model.RefreshInterval)
@@ -1176,6 +1177,16 @@ func TestLoad_HTTPConfig(t *testing.T) {
 		assert.Equal(t, 30, result.Config.HTTP.Timeout)
 		assert.Equal(t, 60, result.Config.HTTP.ResponseHeaderTimeout)
 	})
+
+	withTempDir(t, func(_ string) {
+		// internal/httpclient reads this one with duration parsing; the
+		// generic env overlay must not reject a Go duration as an integer.
+		t.Setenv("HTTP_STREAM_IDLE_TIMEOUT", "2m")
+
+		result, err := Load()
+		require.NoError(t, err)
+		assert.Equal(t, 300, result.Config.HTTP.StreamIdleTimeout)
+	})
 }
 
 func TestLoad_WorkflowRefreshInterval(t *testing.T) {
@@ -1714,4 +1725,32 @@ server:
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "server.stream_stall_timeout")
 	})
+}
+
+func TestLoadMasterKeyDisabledForgetsTheConfiguredKey(t *testing.T) {
+	tests := []struct {
+		name     string
+		disabled string
+		wantKey  string
+	}{
+		{name: "default keeps the key", disabled: "", wantKey: "secret-key"},
+		{name: "disabled clears the key", disabled: "true", wantKey: ""},
+		{name: "explicit false keeps the key", disabled: "false", wantKey: "secret-key"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			withTempDir(t, func(string) {
+				t.Setenv("GOMODEL_MASTER_KEY", "secret-key")
+				if tt.disabled != "" {
+					t.Setenv("MASTER_KEY_DISABLED", tt.disabled)
+				}
+
+				result, err := Load()
+				require.NoError(t, err)
+				require.Equal(t, tt.wantKey, result.Config.Server.MasterKey)
+				require.Equal(t, tt.disabled == "true", result.Config.Server.MasterKeyDisabled)
+			})
+		})
+	}
 }

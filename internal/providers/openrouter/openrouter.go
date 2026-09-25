@@ -2,10 +2,8 @@ package openrouter
 
 import (
 	"context"
-	"math"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -57,20 +55,6 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 	return p
 }
 
-func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	p := &Provider{
-		siteURL: envOrDefault("OPENROUTER_SITE_URL", defaultSiteURL),
-		appName: envOrDefault("OPENROUTER_APP_NAME", defaultAppName),
-	}
-	p.CompatibleProvider = openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, openai.CompatibleProviderConfig{
-		ProviderName: "openrouter",
-		BaseURL:      defaultBaseURL,
-		SetHeaders:   setHeaders,
-	})
-	p.SetRequestMutator(p.mutateRequest)
-	return p
-}
-
 func (p *Provider) mutateRequest(req *llmclient.Request) {
 	if req.Headers == nil {
 		req.Headers = make(http.Header)
@@ -90,17 +74,30 @@ func (p *Provider) mutateRequest(req *llmclient.Request) {
 // and context length, which the generic listing parser would drop.
 type openrouterModel struct {
 	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
 	Created       int64  `json:"created"`
 	ContextLength int    `json:"context_length"`
 	Architecture  struct {
 		InputModalities  []string `json:"input_modalities"`
 		OutputModalities []string `json:"output_modalities"`
 	} `json:"architecture"`
+	TopProvider struct {
+		MaxCompletionTokens int `json:"max_completion_tokens"`
+	} `json:"top_provider"`
+	// SupportedParameters lists the request parameters the model accepts
+	// (tools, reasoning, response_format, structured_outputs, ...).
+	SupportedParameters []string `json:"supported_parameters"`
 	// Pricing holds OpenRouter's per-token USD rates as decimal strings.
 	// "-1" marks a rate OpenRouter cannot state up front (auto-routed models).
+	// Image is the rate per input image.
 	Pricing struct {
-		Prompt     string `json:"prompt"`
-		Completion string `json:"completion"`
+		Prompt            string `json:"prompt"`
+		Completion        string `json:"completion"`
+		InputCacheRead    string `json:"input_cache_read"`
+		InputCacheWrite   string `json:"input_cache_write"`
+		InternalReasoning string `json:"internal_reasoning"`
+		Image             string `json:"image"`
 	} `json:"pricing"`
 }
 
@@ -192,10 +189,13 @@ func openrouterMetadata(m openrouterModel) *core.ModelMetadata {
 		}
 	}
 	pricing := openrouterPricing(m)
-	if len(modes) == 0 && m.ContextLength <= 0 && pricing == nil {
-		return nil
+	capabilities := openrouterCapabilities(m)
+	meta := &core.ModelMetadata{
+		DisplayName:  strings.TrimSpace(m.Name),
+		Description:  strings.TrimSpace(m.Description),
+		Capabilities: capabilities,
+		Pricing:      pricing,
 	}
-	meta := &core.ModelMetadata{}
 	if len(modes) > 0 {
 		meta.Modes = modes
 		meta.Categories = core.CategoriesForModes(modes)
@@ -204,8 +204,28 @@ func openrouterMetadata(m openrouterModel) *core.ModelMetadata {
 		contextWindow := m.ContextLength
 		meta.ContextWindow = &contextWindow
 	}
-	meta.Pricing = pricing
+	if m.TopProvider.MaxCompletionTokens > 0 {
+		meta.MaxOutputTokens = new(m.TopProvider.MaxCompletionTokens)
+	}
+	if len(modes) == 0 && meta.ContextWindow == nil && meta.MaxOutputTokens == nil && pricing == nil &&
+		capabilities == nil && meta.DisplayName == "" && meta.Description == "" {
+		return nil
+	}
 	return meta
+}
+
+// openrouterCapabilities maps the request parameters a model accepts and the
+// input modalities it takes onto the catalog's capability keys. Sampling
+// knobs (temperature, top_p, ...) are not capabilities and are skipped.
+func openrouterCapabilities(m openrouterModel) map[string]bool {
+	var capabilities map[string]bool
+	for _, parameter := range m.SupportedParameters {
+		switch strings.ToLower(strings.TrimSpace(parameter)) {
+		case "tools", "tool_choice", "parallel_tool_calls", "reasoning", "structured_outputs", "response_format", "web_search_options":
+			capabilities = providers.SetCapability(capabilities, parameter, true)
+		}
+	}
+	return providers.CapabilitiesFromInputModalities(capabilities, m.Architecture.InputModalities)
 }
 
 // openrouterPricing converts OpenRouter's per-token rates into the gateway's
@@ -226,24 +246,27 @@ func openrouterPricing(m openrouterModel) *core.ModelPricing {
 	if hasOutput {
 		pricing.OutputPerMtok = &output
 	}
+	if rate, ok := perMtok(m.Pricing.InputCacheRead); ok && m.Pricing.InputCacheRead != "" {
+		pricing.CachedInputPerMtok = &rate
+	}
+	if rate, ok := perMtok(m.Pricing.InputCacheWrite); ok && m.Pricing.InputCacheWrite != "" {
+		pricing.CacheWritePerMtok = &rate
+	}
+	if rate, ok := perMtok(m.Pricing.InternalReasoning); ok && m.Pricing.InternalReasoning != "" {
+		pricing.ReasoningOutputPerMtok = &rate
+	}
+	// The image rate is per input image, not per token, so it is not scaled.
+	if rate, ok := perMtok(m.Pricing.Image); ok && m.Pricing.Image != "" && rate > 0 {
+		perImage := rate / 1_000_000
+		pricing.InputPerImage = &perImage
+	}
 	return pricing
 }
 
-// perMtok parses a per-token USD rate and scales it to per million tokens.
-// Rates that are unparseable, negative, or non-finite report no price rather
-// than a wrong one: ParseFloat accepts "NaN" and "Inf", and scaling a huge rate
-// can overflow to infinity, either of which would corrupt every downstream
-// price comparison and cost calculation.
+// perMtok parses a per-token USD rate and scales it to per million tokens;
+// see providers.PerTokenRateToMtok for the rejected inputs.
 func perMtok(rate string) (float64, bool) {
-	perToken, err := strconv.ParseFloat(strings.TrimSpace(rate), 64)
-	if err != nil || perToken < 0 || math.IsNaN(perToken) || math.IsInf(perToken, 0) {
-		return 0, false
-	}
-	scaled := perToken * 1_000_000
-	if math.IsInf(scaled, 0) {
-		return 0, false
-	}
-	return scaled, true
+	return providers.PerTokenRateToMtok(rate)
 }
 
 func setHeaders(req *http.Request, apiKey string) {

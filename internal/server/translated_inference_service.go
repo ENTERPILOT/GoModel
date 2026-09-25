@@ -705,6 +705,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 			providerName: providerName,
 		})
 	}
+	stream = guardStreamCompletion(endpoint, stream)
 	wrappedStream := streaming.NewObservedSSEStream(stream, observers...)
 	if outerWrap != nil {
 		wrappedStream = outerWrap(wrappedStream)
@@ -755,6 +756,10 @@ func classifyStreamError(ctx context.Context, err error) string {
 	switch {
 	case errors.Is(err, ErrClientStall):
 		return "client_stalled"
+	case errors.Is(err, streaming.ErrStreamIncomplete) && (ctx == nil || ctx.Err() != context.Canceled):
+		// The provider stream failed while being read, so a connection reset
+		// it wraps is the provider's, not the client's.
+		return "stream_error"
 	case isClientDisconnect(ctx, err):
 		return "client_disconnected"
 	}

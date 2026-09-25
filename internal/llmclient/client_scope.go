@@ -231,7 +231,7 @@ func (c *Client) recordCircuitBreakerCompletion(scope requestScope, statusCode i
 		scope.breaker.RecordFailure()
 		return
 	}
-	if c.shouldTripCircuitBreaker(statusCode) {
+	if c.shouldTripCircuitBreaker(statusCode) || c.isSlowCall(scope) {
 		scope.breaker.RecordFailure()
 		return
 	}
@@ -240,6 +240,15 @@ func (c *Client) recordCircuitBreakerCompletion(scope requestScope, statusCode i
 
 func (c *Client) shouldTripCircuitBreaker(statusCode int) bool {
 	return c.failureStatuses[statusCode]
+}
+
+// isSlowCall reports whether the provider took longer than the configured
+// slow-call threshold to answer. The clock covers the whole logical request,
+// retries included, and for streams stops at the first data event. The answer
+// is still returned to the caller; only the breaker treats it as a failure.
+func (c *Client) isSlowCall(scope requestScope) bool {
+	threshold := c.config.CircuitBreaker.SlowCallThreshold
+	return threshold > 0 && time.Since(scope.startedAt) > threshold
 }
 
 func (c *Client) maxAttempts() int {

@@ -194,7 +194,7 @@
     flex-direction: column;
     position: sticky;
     top: 0;
-    max-height: 100vh;
+    max-height: 100%;
     overflow-y: auto;
     overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
@@ -387,7 +387,7 @@
     position: sticky;
     top: 0;
     width: 6px;
-    height: 100vh;
+    height: 100%;
     padding: 0;
     background: transparent;
     border: none;

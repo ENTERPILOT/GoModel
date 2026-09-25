@@ -17,6 +17,10 @@ default, or per model with `scope: model`. They do not switch to a different mod
 provider on failure. For cross-model failover, see
 [Failover](/features/failover).
 
+This page covers the knobs. For what GoModel does when a provider changes its
+response shape, answers `200` with nothing usable, or dies mid-stream, see
+[Provider failure modes](/advanced/provider-failure-modes).
+
 ## Defaults
 
 The defaults are tuned to be safe for most deployments. Override only what
@@ -36,6 +40,7 @@ you need.
 | `failure_threshold` | `5`     | Consecutive failures before the circuit opens  |
 | `success_threshold` | `2`     | Consecutive successes to close it again        |
 | `timeout`           | `30s`   | How long the circuit stays open before probing |
+| `slow_call_threshold` | `0` (off) | Answers slower than this count as breaker failures |
 
 To disable retries, set `max_retries: 0` — every request gets exactly one
 attempt. To disable the circuit breaker, set `circuit_breaker.enabled: false`
@@ -67,6 +72,14 @@ retry less than the table suggests:
   `GET`, `HEAD`, `OPTIONS`, `PUT`, or any request carrying an
   `Idempotency-Key` header.
 
+**Idempotency keys** reach the provider. When a client sends an
+`Idempotency-Key` header, GoModel forwards it unchanged on the provider call
+it makes for that request and on every retry of that call, so a provider that
+deduplicates by the key can recognize a replayed request. A failover attempt to another target sends a
+different request body, so it goes out without the key, and so do gateway-internal
+calls such as guardrail checks. Keys must be visible ASCII of at most 255
+characters; any other value is ignored.
+
 **Errors hidden behind HTTP 200** are unmasked before any of this applies.
 Some providers (OpenRouter is the best-known) answer `200 OK` with a bare
 `{"error": ...}` JSON body. GoModel detects such payloads and handles them as
@@ -76,6 +89,24 @@ The mapped status then drives retries, the circuit breaker, and failover
 exactly like a genuine error status, and the response is never cached as a
 success. Passthrough endpoints are exempt: they forward the provider's
 response byte-for-byte.
+
+**Streams that stop early** end with an explicit error instead of a silent
+EOF. When a provider stream closes or fails before its terminal event
+(`data: [DONE]` or a `finish_reason` for chat completions, a terminal
+`response.*` event for `/v1/responses`, `message_stop` for `/v1/messages`),
+GoModel relays everything received so far and then sends one error event in
+the endpoint's format:
+
+- chat completions: `data: {"error":{"code":"stream_incomplete",...}}`
+- `/v1/responses`: an `error` event with `"code":"stream_incomplete"`
+- `/v1/messages`: an Anthropic `error` event with `error.type` set to
+  `api_error`
+
+This covers malformed chunks, a connection dropped in the middle of a tool
+call, and similar truncations, so a client never mistakes a partial answer for
+a complete one. A stream that already sent its terminal event stays complete
+even if the connection fails afterwards. The request log records a truncated
+stream as a `stream_error`.
 
 **The circuit breaker** counts transport errors and, by default, `429` and
 all `5xx` responses as failures. One exhausted retry sequence counts as one
@@ -90,6 +121,25 @@ triggers while retaining transport-error handling. For example,
 `failure_on_statuses: [5xx]` excludes rate limits from breaker failures,
 including during recovery probes. Invalid codes or scopes fail configuration
 loading.
+
+**Sustained latency** can open the circuit too. Set
+`circuit_breaker.slow_call_threshold` (or
+`CIRCUIT_BREAKER_SLOW_CALL_THRESHOLD`) and any call the provider answers
+slower than that counts as a breaker failure, exactly like a `5xx`. The slow
+answer is still returned to its caller; after `failure_threshold` consecutive
+slow or failed calls the circuit opens, later requests fail fast with a
+failover-eligible `503`, and a slow recovery probe reopens it. See
+[Fail over from a slow provider](#fail-over-from-a-slow-provider).
+
+The clock covers the whole call including retries. For streaming requests it
+stops at the first data event, so the threshold bounds time to first token,
+not the length of the stream.
+
+It is off by default because normal latency depends on the workload: a
+non-streaming reasoning call can legitimately take minutes. Pick a value well
+above your slowest healthy request, and override it per provider when
+workloads differ. The threshold never cancels a request — that is
+`HTTP_TIMEOUT`'s job, and a call that hits it already counts as a failure.
 
 The default now includes `429` breaker failures. Deployments that previously
 relied on rate limits leaving the breaker closed can set
@@ -144,6 +194,7 @@ in YAML.
 | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | int      | `5`     | Consecutive failures before opening           |
 | `CIRCUIT_BREAKER_SUCCESS_THRESHOLD` | int      | `2`     | Consecutive successes to close again          |
 | `CIRCUIT_BREAKER_TIMEOUT`           | duration | `30s`   | How long the circuit stays open before probing |
+| `CIRCUIT_BREAKER_SLOW_CALL_THRESHOLD` | duration | `0`   | Answers slower than this count as failures; `0` disables |
 
 ## YAML
 
@@ -327,3 +378,40 @@ skips its upstream calls without blocking model2. With the default
 The caller's deadline must allow time for the attempts and backoff. Streaming
 requests do not get this retry sequence; a partially delivered response
 cannot be restarted transparently.
+
+## Fail over from a slow provider
+
+A provider that still answers, but takes minutes to do so, never produces the
+errors that open the circuit. `slow_call_threshold` makes latency count:
+
+```yaml
+providers:
+  opencode:
+    # Keep your existing type, base_url, and credentials here.
+    resilience:
+      circuit_breaker:
+        scope: model # one slow model must not pause the whole provider
+        slow_call_threshold: 60s
+        failure_threshold: 3
+
+virtual_models:
+  - source: resilient-chat
+    strategy: failover
+    targets:
+      - model: opencode/deepseek-v3
+      - model: openai/gpt-4o-mini
+
+failover:
+  enabled: true
+```
+
+Once three calls in a row to `opencode/deepseek-v3` take longer than 60
+seconds (or fail), its circuit opens and `resilient-chat` requests go straight
+to `openai/gpt-4o-mini` without waiting. Every `timeout` (default 30s) one
+probe request tries the primary again; traffic returns once probes answer
+within the threshold.
+
+A fast answer in between resets the count, so occasional slow calls never
+open the circuit. Prefer `scope: model` here: with the default
+`scope: provider`, fast models on the same provider keep resetting the count
+for the slow one.

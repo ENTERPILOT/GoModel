@@ -31,6 +31,27 @@ export function defaultMcpCatalog() {
   };
 }
 
+// A freshly saved server is returned before its first dial finishes, so the
+// list arrives as "connecting" and only the gateway's background connect
+// settles it. Re-poll until nothing is pending; without this the row reads
+// "connecting" until the operator reloads the page.
+export const MCP_SERVERS_POLL_MS = 3000;
+
+// A failing poll retries: the row it is waiting on would otherwise stay
+// "connecting" forever after one blip, which is the bug the loop exists to
+// fix. The budget is what stops a properly down gateway being polled for as
+// long as the page stays open.
+export const MCP_SERVERS_POLL_MAX_FAILURES = 3;
+
+export function mcpServersNeedPolling(servers) {
+  const list = Array.isArray(servers) ? servers : [];
+  return list.some((server) => mcpServerStatus(server) === "connecting");
+}
+
+export function mcpPollShouldRetry(consecutiveFailures) {
+  return Number(consecutiveFailures || 0) < MCP_SERVERS_POLL_MAX_FAILURES;
+}
+
 export function mcpServerSlug(server) {
   return String((server && (server.slug || server.name)) || "").trim();
 }

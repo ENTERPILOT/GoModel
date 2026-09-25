@@ -31,9 +31,6 @@ func TestChain_ResolvesThroughVirtualModel(t *testing.T) {
 	require.True(t, changed, "ResolveModel() = %v, %v, %v; want change", sel, changed, err)
 	got := sel.QualifiedModel()
 	require.Equal(t, "groq/llama", got)
-	require.True(t, svc.Supports("production"))
-	got = svc.GetProviderType("production")
-	require.Equal(t, "openai", got)
 
 	refresh, ok, _ := svc.ResolveRefreshTarget(core.NewRequestedModelSelector("production", ""))
 	require.True(t, ok)
@@ -87,7 +84,6 @@ func TestChain_DisabledOrUnavailableInnerLegIsSkipped(t *testing.T) {
 	upsertRedirect(t, svc, "only-cheap", "", "cheap")
 	_, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("only-cheap", ""))
 	require.False(t, changed)
-	require.False(t, svc.Supports("only-cheap"))
 }
 
 func TestChain_ExposedModelsProjectLeafMetadata(t *testing.T) {

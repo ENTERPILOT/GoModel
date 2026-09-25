@@ -10,6 +10,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,11 +29,13 @@ func TestChatCompatibleContract(t *testing.T) {
 		Type:           "deepseek",
 		DefaultBaseURL: "https://api.deepseek.com",
 		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
-			return NewWithHTTPClient(apiKey, baseURL, client, hooks)
+			opts := providertest.Options(hooks)
+			opts.HTTPClient = client
+			return New(providers.ProviderConfig{APIKey: apiKey, BaseURL: baseURL}, opts)
 		},
 	})
 
-	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{APIKey: "deepseek-key"}, providers.ProviderOptions{})
 	providertest.AssertNoNativeSurfaces(t, provider)
 	_, ok := any(provider).(core.NativeResponseLifecycleProvider)
 	assert.False(t, ok, "provider should not implement core.NativeResponseLifecycleProvider")
@@ -41,7 +44,7 @@ func TestChatCompatibleContract(t *testing.T) {
 func TestChatCompletion_MapsReasoningToDeepSeekReasoningEffort(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
 
-	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model:     "deepseek-v4-pro",
 		Messages:  []core.Message{{Role: "user", Content: "hi"}},
@@ -70,7 +73,7 @@ func TestChatCompletion_PadsMissingReasoningContentForAssistantToolCalls(t *test
 	}`), &req)
 	require.NoError(t, err)
 
-	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
 	_, err = provider.ChatCompletion(context.Background(), &req)
 	require.NoError(t, err)
 
@@ -107,7 +110,7 @@ func TestResponses_MapsTokensAndReasoningEffort(t *testing.T) {
 		"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}
 	}`)
 
-	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
 	maxOutputTokens := 64
 	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
 		Model:           "deepseek-v4-pro",
@@ -148,7 +151,7 @@ func TestResponses_ReplaysReasoningContentForToolCall(t *testing.T) {
 	}`), &req)
 	require.NoError(t, err)
 
-	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
 	_, err = provider.Responses(context.Background(), &req)
 	require.NoError(t, err)
 
@@ -164,7 +167,7 @@ func TestResponses_ReplaysReasoningContentForToolCall(t *testing.T) {
 func TestStreamResponses_TranslatesToChatCompletions(t *testing.T) {
 	server, capture := providertest.SSEServer(t, "data: {\"id\":\"chatcmpl-deepseek\",\"object\":\"chat.completion.chunk\",\"created\":1677652288,\"model\":\"deepseek-v4-pro\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n")
 
-	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
 	stream, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "deepseek-v4-pro",
 		Input: "hi",
@@ -202,7 +205,7 @@ func TestNormalizeReasoningEffort(t *testing.T) {
 func TestPassthrough_ForwardsRequestWithBearerAuth(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"object":"fim_completion","choices":[{"text":"world"}]}`)
 
-	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 		Method:   http.MethodPost,
 		Endpoint: "/beta/completions",
@@ -222,7 +225,8 @@ func TestPassthrough_ForwardsRequestWithBearerAuth(t *testing.T) {
 }
 
 func TestPassthrough_NilRequest_ReturnsError(t *testing.T) {
-	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{})
+	provider, ok := New(providers.ProviderConfig{APIKey: "deepseek-key"}, providers.ProviderOptions{}).(core.PassthroughProvider)
+	require.True(t, ok)
 	_, err := provider.Passthrough(context.Background(), nil)
 	require.Error(t, err)
 }
@@ -231,7 +235,7 @@ func TestPassthrough_PreservesNon2xxStatusAndBody(t *testing.T) {
 	const upstreamBody = `{"error":{"message":"rate_limit_exceeded","type":"rate_limit_error"}}`
 	server, _ := providertest.JSONServer(t, http.StatusTooManyRequests, upstreamBody)
 
-	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 		Method:   http.MethodPost,
 		Endpoint: "/beta/completions",
@@ -249,7 +253,7 @@ func TestPassthrough_PreservesNon2xxStatusAndBody(t *testing.T) {
 func TestPassthrough_ForwardsQueryString(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{}`)
 
-	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 		Method:   http.MethodGet,
 		Endpoint: "/beta/completions?stream=true",
@@ -264,7 +268,7 @@ func TestPassthrough_ForwardsQueryString(t *testing.T) {
 }
 
 func TestResponses_NilRequest_ReturnsError(t *testing.T) {
-	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{APIKey: "deepseek-key"}, providers.ProviderOptions{})
 
 	_, err := provider.Responses(context.Background(), nil)
 	require.Error(t, err)

@@ -254,6 +254,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Comma-separated endpoint operations to hide, e.g. mcp,provider_passthrough,audio_speech; other entries, including unclassified ones, stay",
+                        "name": "exclude_operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Search across request_id/requested_model/provider/method/path/session_id/error_type/error_message",
                         "name": "search",
                         "in": "query"
@@ -379,6 +385,12 @@ const docTemplate = `{
                         "type": "boolean",
                         "description": "Filter by stream mode (true/false)",
                         "name": "stream",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated endpoint operations to hide, e.g. mcp,provider_passthrough,audio_speech; other entries, including unclassified ones, stay",
+                        "name": "exclude_operation",
                         "in": "query"
                     },
                     {
@@ -1268,6 +1280,64 @@ const docTemplate = `{
                 ]
             }
         },
+        "/admin/media/{id}": {
+            "get": {
+                "description": "Streams the bytes of an audio or image object the audit log\nreferences by media_id, with its content type. Range requests\nare honored so browser players can seek. An object outside the\ncaller's user-path scope is reported as missing.",
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Download a stored media object",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Media object id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "206": {
+                        "description": "Partial Content",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/model-pricing-overrides": {
             "get": {
                 "description": "Lists persisted USD pricing overrides. Selectors support global \"/\", provider-wide \"provider/\", model-wide \"model\", and exact \"provider/model\" scopes.",
@@ -1506,6 +1576,65 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/models/metadata": {
+            "get": {
+                "description": "Returns the merged metadata the gateway serves for a model together with each layer it was merged from: the provider's own listing, the model catalog entry and the config.yaml override. A null layer knows nothing about the model. ` + "`" + `sources` + "`" + ` names the winning layer per field (config, provider, catalog or inferred).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Show where one model's metadata comes from",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider instance name or provider type",
+                        "name": "provider",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Raw upstream model ID",
+                        "name": "model",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/providers.ModelMetadataLayers"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -4206,11 +4335,17 @@ const docTemplate = `{
                         "description": "Timestamp granularities to populate: word and/or segment",
                         "name": "timestamp_granularities[]",
                         "in": "formData"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Relay the transcript as server-sent events while the provider produces it",
+                        "name": "stream",
+                        "in": "formData"
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "Transcription in the requested response_format: a JSON object for json/verbose_json, or a text/plain body for text/srt/vtt",
+                        "description": "Transcription in the requested response_format: a JSON object for json/verbose_json, a text/plain body for text/srt/vtt, or a text/event-stream when stream=true",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -7397,6 +7532,12 @@ const docTemplate = `{
                         "description": "Window length ending today when no explicit dates are given (default 30, max 365)",
                         "name": "days",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Which requests to count: uncached (default, provider-bound only), cached (local response-cache hits only), or all",
+                        "name": "cache_mode",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -8030,6 +8171,10 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "proxy_url": {
+                    "description": "ProxyURL is the provider's outbound proxy with any password masked.",
+                    "type": "string"
+                },
                 "service_account_file": {
                     "type": "string"
                 },
@@ -8421,6 +8566,10 @@ const docTemplate = `{
                     }
                 },
                 "name": {
+                    "type": "string"
+                },
+                "proxy_url": {
+                    "description": "ProxyURL may be sent back exactly as the view rendered it (password\nmasked) to keep the stored proxy credentials.",
                     "type": "string"
                 },
                 "service_account_file": {
@@ -9703,6 +9852,9 @@ const docTemplate = `{
                 },
                 "type": {
                     "type": "string"
+                },
+                "video_url": {
+                    "$ref": "#/definitions/core.VideoURLContent"
                 }
             }
         },
@@ -10367,6 +10519,9 @@ const docTemplate = `{
         "core.ModelPricingTier": {
             "type": "object",
             "properties": {
+                "cached_input_per_mtok": {
+                    "type": "number"
+                },
                 "input_per_mtok": {
                     "type": "number"
                 },
@@ -11140,6 +11295,17 @@ const docTemplate = `{
                 }
             }
         },
+        "core.VideoURLContent": {
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
         "mcpgateway.CatalogFeature": {
             "type": "object",
             "properties": {
@@ -11363,6 +11529,56 @@ const docTemplate = `{
                 },
                 "display_name": {
                     "type": "string"
+                }
+            }
+        },
+        "providers.ModelMetadataLayers": {
+            "type": "object",
+            "properties": {
+                "catalog": {
+                    "description": "Catalog is the model list (ai-model-list) entry.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/core.ModelMetadata"
+                        }
+                    ],
+                    "x-nullable": true
+                },
+                "config": {
+                    "description": "Config is the config.yaml metadata override.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/core.ModelMetadata"
+                        }
+                    ],
+                    "x-nullable": true
+                },
+                "effective": {
+                    "description": "Effective is the merged metadata, as listed by /admin/models.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/core.ModelMetadata"
+                        }
+                    ]
+                },
+                "provider": {
+                    "description": "Provider is what the provider reported in its own model listing.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/core.ModelMetadata"
+                        }
+                    ],
+                    "x-nullable": true
+                },
+                "selector": {
+                    "type": "string"
+                },
+                "sources": {
+                    "description": "Sources names the layer that supplied each effective field\n(see modeldata.MetadataSources).",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
                 }
             }
         },

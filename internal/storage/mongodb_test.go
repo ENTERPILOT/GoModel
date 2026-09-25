@@ -28,11 +28,11 @@ func TestNewMongoDBConnectsAndPings(t *testing.T) {
 	require.True(t, ok, "%T does not implement HealthChecker", store)
 
 	err = checker.Ping(ctx)
-	assert.NoError(t, err, "Ping")
+	require.NoError(t, err, "Ping")
 	assert.Equal(t, "gomodel_test_storage_ping", store.Database().Name())
 
 	err = store.Close()
-	assert.NoError(t, err, "Close")
+	require.NoError(t, err, "Close")
 
 	err = checker.Ping(ctx)
 	assert.Error(t, err, "Ping after Close should fail")

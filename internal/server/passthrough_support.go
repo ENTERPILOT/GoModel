@@ -20,7 +20,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
-var defaultEnabledPassthroughProviders = []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "hetzner", "edenai"}
+var defaultEnabledPassthroughProviders = []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "hetzner", "edenai", "jev"}
 
 const llmdDroppedReasonHeader = "X-Llm-D-Request-Dropped-Reason"
 
@@ -390,6 +390,7 @@ const maxObservedJSONResponseBytes = 8 << 20
 type cappedCaptureBuffer struct {
 	buf      bytes.Buffer
 	max      int
+	total    int
 	overflow bool
 }
 
@@ -398,6 +399,7 @@ func newCappedCaptureBuffer(maxBytes int) *cappedCaptureBuffer {
 }
 
 func (b *cappedCaptureBuffer) Write(p []byte) (int, error) {
+	b.total += len(p)
 	if !b.overflow {
 		if b.buf.Len()+len(p) > b.max {
 			b.overflow = true
@@ -407,6 +409,12 @@ func (b *cappedCaptureBuffer) Write(p []byte) (int, error) {
 		}
 	}
 	return len(p), nil
+}
+
+// Total reports how many bytes were written, including any past the cap, so a
+// caller can describe a payload it could not keep.
+func (b *cappedCaptureBuffer) Total() int {
+	return b.total
 }
 
 func (b *cappedCaptureBuffer) Captured() ([]byte, bool) {

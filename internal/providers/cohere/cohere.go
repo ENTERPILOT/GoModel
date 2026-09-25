@@ -44,19 +44,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 		Hooks:          opts.Hooks,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
-	p.client = llmclient.New(clientCfg, p.setHeaders)
-	return p
-}
-
-// NewWithHTTPClient creates a Cohere provider with a custom HTTP client.
-func NewWithHTTPClient(apiKey, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
-	p := &Provider{keys: providers.NewKeyring(apiKey)}
-	cfg := llmclient.DefaultConfig("cohere", providers.ResolveBaseURL(baseURL, defaultBaseURL))
-	cfg.Hooks = hooks
-	p.client = llmclient.NewWithHTTPClient(httpClient, cfg, p.setHeaders)
+	p.client = llmclient.NewWithOptionalHTTPClient(opts.HTTPClient, clientCfg, p.setHeaders)
 	return p
 }
 
@@ -91,8 +79,12 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 		}
 		var metadata *core.ModelMetadata
 		modes := modesFromEndpoints(model.Endpoints)
-		if model.ContextLength > 0 || len(modes) > 0 {
-			metadata = &core.ModelMetadata{}
+		capabilities := providers.CapabilitiesFromFeatures(nil, model.Features)
+		if model.SupportsVision {
+			capabilities = providers.SetCapability(capabilities, "vision", true)
+		}
+		if model.ContextLength > 0 || len(modes) > 0 || capabilities != nil {
+			metadata = &core.ModelMetadata{Capabilities: capabilities}
 			if model.ContextLength > 0 {
 				contextWindow := int(model.ContextLength)
 				metadata.ContextWindow = &contextWindow

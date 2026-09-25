@@ -154,7 +154,7 @@ func (s *EventScanner) Feed(chunk []byte) []RawEvent {
 	}
 
 	for len(data) > 0 {
-		idx, sepLen := nextEventBoundary(data)
+		idx, sepLen := NextEventBoundary(data)
 		if idx == -1 {
 			break
 		}
@@ -219,7 +219,7 @@ func parseRawEvent(raw, body []byte) RawEvent {
 			if idx := bytes.IndexByte(body, '\n'); idx != -1 {
 				line, rest = body[:idx], body[idx+1:]
 			}
-			if data, ok := parseDataLine(line); ok {
+			if data, ok := ParseDataLine(line); ok {
 				dataLines = append(dataLines, data)
 			} else {
 				parseEventLine(&ev, line)
@@ -242,7 +242,7 @@ func parseEventLine(ev *RawEvent, line []byte) {
 	line = bytes.TrimSuffix(line, []byte("\r"))
 	switch {
 	case bytes.HasPrefix(line, dataPrefix):
-		data, _ := parseDataLine(line)
+		data, _ := ParseDataLine(line)
 		ev.Data = data
 	case bytes.HasPrefix(line, eventPrefix):
 		name := bytes.TrimPrefix(line, eventPrefix)

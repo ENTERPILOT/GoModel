@@ -37,16 +37,6 @@ func NewChatCompatible(apiKey string, opts providers.ProviderOptions, cfg Compat
 	}
 }
 
-// NewChatCompatibleWithHTTPClient creates a chat-centric adapter with a
-// custom HTTP client. If httpClient is nil, http.DefaultClient is used.
-func NewChatCompatibleWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks, cfg CompatibleProviderConfig) *ChatCompatible {
-	applyChatCompatibleDefaults(&cfg)
-	return &ChatCompatible{
-		compatible:   NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, cfg),
-		providerName: cfg.ProviderName,
-	}
-}
-
 func applyChatCompatibleDefaults(cfg *CompatibleProviderConfig) {
 	if cfg.SetHeaders == nil {
 		cfg.SetHeaders = bearerHeaders
@@ -81,6 +71,13 @@ func (c *ChatCompatible) StreamChatCompletion(ctx context.Context, req *core.Cha
 // ListModels retrieves the list of available models from the provider.
 func (c *ChatCompatible) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
 	return c.compatible.ListModels(ctx)
+}
+
+// Do sends a request through the underlying compatible provider's client,
+// for adapters that decode a provider-specific payload (a richer model
+// listing) while keeping the shared transport, auth and resilience.
+func (c *ChatCompatible) Do(ctx context.Context, req llmclient.Request, out any) error {
+	return c.compatible.Do(ctx, req, out)
 }
 
 // Responses sends a Responses API request using chat-completions translation.

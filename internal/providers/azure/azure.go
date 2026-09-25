@@ -52,22 +52,6 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 	return p
 }
 
-func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	p := &Provider{apiVersion: defaultAPIVersion, keys: providers.NewKeyring(apiKey)}
-	cfg := openai.CompatibleProviderConfig{
-		ProviderName: "azure",
-		BaseURL:      "https://example.invalid",
-		SetHeaders:   setHeaders,
-	}
-	p.CompatibleProvider = openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, cfg)
-	p.resourceProvider = openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, cfg)
-	p.openAIResourceProvider = openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, cfg)
-	p.SetRequestMutator(p.mutateRequest)
-	p.resourceProvider.SetRequestMutator(p.mutateRequest)
-	p.openAIResourceProvider.SetRequestMutator(p.mutateRequest)
-	return p
-}
-
 func (p *Provider) SetBaseURL(baseURL string) {
 	resourceRoot := resourceRootBaseURL(baseURL)
 	p.CompatibleProvider.SetBaseURL(baseURL)

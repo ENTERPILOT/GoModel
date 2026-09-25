@@ -1,8 +1,9 @@
 ---
-title: "Audio API"
+title: "Audio API: Speech-to-Text and Text-to-Speech"
+sidebarTitle: "Audio API"
 description: "OpenAI-compatible text-to-speech and transcription through GoModel, routed by model with the same access rules, budgets, and virtual models as chat."
 icon: "audio-lines"
-keywords: ["audio API", "text-to-speech", "speech-to-text", "transcription", "TTS", "STT"]
+keywords: ["audio API", "text-to-speech", "speech-to-text", "transcription", "TTS", "STT", "input_audio"]
 ---
 
 ## Overview
@@ -92,8 +93,12 @@ await writeFile("speech.wav", Buffer.from(await speech.arrayBuffer()));
 
 `model`, `input`, and `voice` are required. Optional fields — `instructions`,
 `response_format` (`mp3` default, plus `opus`, `aac`, `flac`, `wav`, `pcm`), and
-`speed` — are forwarded to the provider. The response `Content-Type` is derived
-from `response_format` (for example `wav` → `audio/wav`).
+`speed` — are forwarded to the provider. The response `Content-Type` is the one
+the upstream returns, falling back to the type implied by `response_format` (for
+example `wav` → `audio/wav`).
+
+Synthesized audio is **relayed as the provider produces it** — see
+[Streaming](#streaming).
 
 ## Speech-to-text
 
@@ -157,6 +162,46 @@ JSON object; `text`, `srt`, and `vtt` return a `text/plain` body.
   also accepts the unbracketed `timestamp_granularities` for client compatibility.
 </Tip>
 
+Add `stream=true` to receive the transcript as it is produced — see
+[Streaming](#streaming).
+
+## Streaming
+
+GoModel forwards an audio body to the client **as the provider produces it**, so
+time-to-first-byte tracks the provider instead of the whole generation:
+
+| Call | What streams |
+| --- | --- |
+| `POST /v1/audio/speech` | Always. Chunked audio in the requested `response_format`, or server-sent events when the forwarded `stream_format: "sse"` asks for them. |
+| `POST /v1/audio/transcriptions` | With the forwarded `stream: true`, as `text/event-stream` (`transcript.text.delta` events closed by `transcript.text.done`). Without it, the complete transcript in one response. |
+
+```bash Incremental transcript
+curl -N https://your-gateway/v1/audio/transcriptions \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -F "file=@speech.wav" \
+  -F "model=gpt-4o-transcribe" \
+  -F "stream=true"
+```
+
+Usage and [cost tracking](#cost-tracking) are unchanged: a streamed transcript is
+priced from the token counts its `transcript.text.done` event reports, and
+streamed speech from the duration of the audio that passed through. Both are
+measured as the response streams rather than from a buffered copy of it, so a
+response of any length is billed in full.
+
+<Note>
+  A streamed response cannot be retried once its first bytes have reached the
+  client, so — as with streamed chat completions — GoModel does not retry a
+  failed upstream attempt on `/v1/audio/speech` or on a `stream: true`
+  transcription. A plain transcription request keeps the usual retries.
+</Note>
+
+<Note>
+  Streaming applies to the OpenAI-compatible upstreams. Providers whose native
+  audio API GoModel translates (Xiaomi MiMo, Cohere, MiniMax, ElevenLabs) return
+  a complete body, which GoModel forwards as one response.
+</Note>
+
 ## Parameter forwarding
 
 Any parameter GoModel does not name above is **forwarded to the provider
@@ -183,15 +228,6 @@ upload; only the audio in `file` is sent.
 Forwarded values are not stored in the [audit log](/advanced/admin-endpoints):
 because they are arbitrary client input that may carry provider credentials,
 the entry records only the field **names** under `forwarded_fields`.
-
-<Note>
-  **Streaming is relayed, not streamed.** A forwarded `stream_format: "sse"`
-  (speech) or `stream: true` (transcription) makes the upstream answer with
-  server-sent events, and GoModel returns that body with its
-  `text/event-stream` Content-Type — but the bytes are buffered and delivered
-  in one piece, so a client sees the complete event sequence at the end of the
-  call rather than incrementally.
-</Note>
 
 <Note>
   Forwarding applies to the OpenAI-compatible upstreams. Providers whose native
@@ -238,6 +274,7 @@ through the full inference orchestrator**. Compared with `/v1/chat/completions`:
   audio format. OpenAI-compatible upstreams receive it unchanged; Xiaomi MiMo,
   Cohere, and MiniMax requests are translated to each provider's native audio
   contract. Providers beyond those are not adapted behind this endpoint.
+- **No retries for a streamed response** — see [Streaming](#streaming).
 - **Realtime voice-to-voice** (the WebSocket realtime API) is not supported.
 
 For a provider whose native audio API differs from OpenAI's, use the
@@ -257,7 +294,12 @@ unless body logging is enabled:
 - **Body logging on, audio off** (the default) — the audio response is recorded
   as a lightweight `{__audio__, content_type, bytes, stored: false}` placeholder; no audio bytes are stored.
 - **Body logging on, audio on** — `/v1/audio/speech` stores its text input and the
-  generated audio (base64, capped at 8 MB) so the **dashboard renders an inline
-  player**, and `/v1/audio/transcriptions` stores the uploaded audio (base64,
-  capped at 8 MB, also playable in the dashboard) alongside the upload metadata
-  (filename, model, params).
+  generated audio so the **dashboard renders an inline player**, and
+  `/v1/audio/transcriptions` stores the uploaded audio (also playable in the
+  dashboard) alongside the upload metadata (filename, model, params).
+
+The audio bytes go to [media storage](/advanced/configuration#media-storage),
+not into the audit database: the entry carries a `media_id` and the dashboard
+fetches the file through `GET /admin/media/{id}`. Nothing caps the size, and a
+streamed response is stored as it is relayed. Files are kept as long as the
+audit entries that reference them (`LOGGING_RETENTION_DAYS`).

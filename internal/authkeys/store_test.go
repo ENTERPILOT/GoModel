@@ -30,7 +30,7 @@ func listByID(t *testing.T, store Store) map[string]AuthKey {
 	require.NoError(t, err)
 	byID := make(map[string]AuthKey, len(keys))
 	for _, key := range keys {
-		require.False(t, byID[key.ID].ID != "", "List() returned duplicate key %s", key.ID)
+		require.Empty(t, byID[key.ID].ID, "List() returned duplicate key %s", key.ID)
 		byID[key.ID] = key
 	}
 	return byID

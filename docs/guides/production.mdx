@@ -172,6 +172,26 @@ key all cross the network in cleartext.
 There is also no CORS middleware, so browser clients on another origin cannot
 call the gateway directly. Add the headers at your proxy if you need that.
 
+### Upstream certificates behind a private CA
+
+Outbound HTTPS — providers and MCP servers — is verified against the system CA
+bundle. The container images ship it (`/etc/ssl/certs/ca-certificates.crt`), so
+public endpoints need no setup.
+
+An upstream whose certificate is issued by an internal or corporate CA fails
+the connection with `x509: certificate signed by unknown authority`. Mount the
+CA certificate into the trusted directory, which GoModel reads in addition to
+the public roots:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -v "$PWD/corp-ca.crt:/etc/ssl/certs/corp-ca.crt:ro" \
+  enterpilot/gomodel:latest
+```
+
+`SSL_CERT_FILE` works too, but it replaces the bundle file rather than adding
+to it, so point it at a bundle that also contains the public roots you need.
+
 ## Air-gapped and offline deployments
 
 **GoModel runs fully air-gapped.** There is no telemetry, no analytics, and no

@@ -331,6 +331,14 @@
             }
           },
           {
+            "description": "Comma-separated endpoint operations to hide, e.g. mcp,provider_passthrough,audio_speech; other entries, including unclassified ones, stay",
+            "name": "exclude_operation",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Search across request_id/requested_model/provider/method/path/session_id/error_type/error_message",
             "name": "search",
             "in": "query",
@@ -505,6 +513,14 @@
             "in": "query",
             "schema": {
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Comma-separated endpoint operations to hide, e.g. mcp,provider_passthrough,audio_speech; other entries, including unclassified ones, stay",
+            "name": "exclude_operation",
+            "in": "query",
+            "schema": {
+              "type": "string"
             }
           },
           {
@@ -1751,6 +1767,92 @@
         }
       }
     },
+    "/admin/media/{id}": {
+      "get": {
+        "description": "Streams the bytes of an audio or image object the audit log\nreferences by media_id, with its content type. Range requests\nare honored so browser players can seek. An object outside the\ncaller's user-path scope is reported as missing.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Download a stored media object",
+        "parameters": [
+          {
+            "description": "Media object id",
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "Partial Content",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/media/{id}",
+            "title": "Download a stored media object",
+            "description": "GoModel API reference for GET /admin/media/{id}: Download a stored media object."
+          }
+        }
+      }
+    },
     "/admin/model-pricing-overrides": {
       "get": {
         "description": "Lists persisted USD pricing overrides. Selectors support global \"/\", provider-wide \"provider/\", model-wide \"model\", and exact \"provider/model\" scopes.",
@@ -2093,6 +2195,89 @@
             "sidebarTitle": "/admin/models/categories",
             "title": "List model categories with counts",
             "description": "GoModel API reference for GET /admin/models/categories: List model categories with counts."
+          }
+        }
+      }
+    },
+    "/admin/models/metadata": {
+      "get": {
+        "description": "Returns the merged metadata the gateway serves for a model together with each layer it was merged from: the provider's own listing, the model catalog entry and the config.yaml override. A null layer knows nothing about the model. `sources` names the winning layer per field (config, provider, catalog or inferred).",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Show where one model's metadata comes from",
+        "parameters": [
+          {
+            "description": "Provider instance name or provider type",
+            "name": "provider",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Raw upstream model ID",
+            "name": "model",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/providers.ModelMetadataLayers"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/models/metadata",
+            "title": "Show where one model's metadata comes from",
+            "description": "GoModel API reference for GET /admin/models/metadata: Show where one model's metadata comes from."
           }
         }
       }
@@ -6437,6 +6622,10 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "stream": {
+                    "description": "Relay the transcript as server-sent events while the provider produces it",
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -6450,7 +6639,7 @@
         },
         "responses": {
           "200": {
-            "description": "Transcription in the requested response_format: a JSON object for json/verbose_json, or a text/plain body for text/srt/vtt",
+            "description": "Transcription in the requested response_format: a JSON object for json/verbose_json, a text/plain body for text/srt/vtt, or a text/event-stream when stream=true",
             "content": {
               "application/json": {
                 "schema": {
@@ -11774,6 +11963,10 @@
           "name": {
             "type": "string"
           },
+          "proxy_url": {
+            "description": "ProxyURL is the provider's outbound proxy with any password masked.",
+            "type": "string"
+          },
           "service_account_file": {
             "type": "string"
           },
@@ -12176,6 +12369,10 @@
             }
           },
           "name": {
+            "type": "string"
+          },
+          "proxy_url": {
+            "description": "ProxyURL may be sent back exactly as the view rendered it (password\nmasked) to keep the stored proxy credentials.",
             "type": "string"
           },
           "service_account_file": {
@@ -13475,6 +13672,9 @@
           },
           "type": {
             "type": "string"
+          },
+          "video_url": {
+            "$ref": "#/components/schemas/core.VideoURLContent"
           }
         }
       },
@@ -14139,6 +14339,9 @@
       "core.ModelPricingTier": {
         "type": "object",
         "properties": {
+          "cached_input_per_mtok": {
+            "type": "number"
+          },
           "input_per_mtok": {
             "type": "number"
           },
@@ -14946,6 +15149,17 @@
           }
         }
       },
+      "core.VideoURLContent": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
       "mcpgateway.CatalogFeature": {
         "type": "object",
         "properties": {
@@ -15171,6 +15385,56 @@
           },
           "display_name": {
             "type": "string"
+          }
+        }
+      },
+      "providers.ModelMetadataLayers": {
+        "type": "object",
+        "properties": {
+          "catalog": {
+            "description": "Catalog is the model list (ai-model-list) entry.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/core.ModelMetadata"
+              }
+            ],
+            "nullable": true
+          },
+          "config": {
+            "description": "Config is the config.yaml metadata override.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/core.ModelMetadata"
+              }
+            ],
+            "nullable": true
+          },
+          "effective": {
+            "description": "Effective is the merged metadata, as listed by /admin/models.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/core.ModelMetadata"
+              }
+            ]
+          },
+          "provider": {
+            "description": "Provider is what the provider reported in its own model listing.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/core.ModelMetadata"
+              }
+            ],
+            "nullable": true
+          },
+          "selector": {
+            "type": "string"
+          },
+          "sources": {
+            "description": "Sources names the layer that supplied each effective field\n(see modeldata.MetadataSources).",
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         }
       },

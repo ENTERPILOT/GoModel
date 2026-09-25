@@ -197,31 +197,6 @@ func (s *snapshot) findRedirect(name, userPath string, enforceUserPaths bool) (*
 	return entry, true
 }
 
-// resolveRedirect returns a stateless, representative resolution for a redirect
-// name: the first catalog-supported concrete model behind it, descending chained
-// virtual models. It backs validity checks and model listing, which must not
-// advance any load-balancing state. The request path uses
-// Service.balancedResolution, which applies the redirect's load-balancing
-// strategy across all available targets.
-func (s *snapshot) resolveRedirect(name string, catalog Catalog, userPath string, enforceUserPaths bool) (Resolution, bool) {
-	name = strings.TrimSpace(name)
-	resolution := Resolution{
-		Requested: core.ModelSelector{Model: name},
-		Resolved:  core.ModelSelector{Model: name},
-	}
-	entry, ok := s.findRedirect(name, userPath, enforceUserPaths)
-	if !ok {
-		return resolution, false
-	}
-	leaves := s.leafTargets(entry, catalog)
-	if len(leaves) == 0 {
-		return resolution, false
-	}
-	resolution.Resolved = leaves[0].selector
-	resolution.Source = entry.vm.Source
-	return resolution, true
-}
-
 // effectiveState resolves the compiled access state for one concrete selector.
 func (s *snapshot) effectiveState(selector core.ModelSelector) EffectiveState {
 	model := strings.TrimSpace(selector.Model)

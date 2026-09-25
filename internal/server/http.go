@@ -27,6 +27,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/filestore"
 	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
+	"github.com/enterpilot/gomodel/internal/mediastore"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/responsestore"
 	"github.com/enterpilot/gomodel/internal/session"
@@ -68,6 +69,7 @@ const (
 type Config struct {
 	BasePath                        string                                 // URL path prefix where the app is mounted (default: /)
 	MasterKey                       string                                 // Optional: Master key for authentication
+	MasterKeyDisabled               bool                                   // Master key authentication turned off: require a credential and never open admin bootstrap
 	Authenticator                   BearerTokenAuthenticator               // Optional: managed API key authenticator
 	MetricsEnabled                  bool                                   // Whether to expose Prometheus metrics endpoint
 	MetricsEndpoint                 string                                 // HTTP path for metrics endpoint (default: /metrics)
@@ -94,6 +96,7 @@ type Config struct {
 	PassthroughSemanticEnrichers    []core.PassthroughSemanticEnricher     // Optional: provider-owned passthrough semantic enrichers before workflow resolution
 	BatchStore                      batchstore.Store                       // Optional: Batch lifecycle persistence store
 	FileStore                       filestore.Store                        // Optional: File provider mapping persistence store
+	MediaStore                      *mediastore.Service                    // Optional: where audited audio and image payloads are stored
 	ResponseStore                   responsestore.Store                    // Optional: Responses lifecycle persistence store
 	ConversationStore               conversationstore.Store                // Optional: Conversations lifecycle persistence store
 	LogOnlyModelInteractions        bool                                   // Only log AI model endpoints (default: true)
@@ -124,6 +127,16 @@ type Config struct {
 	Tagging                         *tagging.Service                       // Optional: request labelling based on configured tagging headers
 	SessionDetector                 *session.Detector                      // Optional: client session identification for sticky routing and audit grouping
 	VersionChecker                  *versioncheck.Checker                  // Optional: daily update check backing GET /version
+}
+
+// effectiveMasterKey returns the master key this gateway accepts as a
+// credential. A deployment that disabled master key authentication accepts
+// none, whatever the field still holds.
+func (c *Config) effectiveMasterKey() string {
+	if c == nil || c.MasterKeyDisabled {
+		return ""
+	}
+	return c.MasterKey
 }
 
 // ReadinessProbe verifies that a dependency the gateway owns is reachable.
@@ -214,7 +227,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	handler.realtimeEnabled = cfg == nil || cfg.RealtimeEnabled
 	if cfg != nil {
 		handler.versionChecker = cfg.VersionChecker
-		handler.masterKey = cfg.MasterKey
+		handler.masterKey = cfg.effectiveMasterKey()
 	}
 	if cfg != nil {
 		handler.mcpEnabled = cfg.MCPEnabled
@@ -228,6 +241,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 	if cfg != nil && cfg.FileStore != nil {
 		handler.SetFileStore(cfg.FileStore)
+	}
+	if cfg != nil && cfg.MediaStore != nil {
+		handler.SetMediaStore(cfg.MediaStore)
 	}
 	if cfg != nil && cfg.ResponseStore != nil {
 		handler.SetResponseStore(cfg.ResponseStore)
@@ -258,8 +274,10 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		authSkipPaths = append(authSkipPaths, "/admin/dashboard", "/admin/dashboard/*", "/admin/static/*")
 	}
 	// When no bootstrap master key is configured, keep admin APIs reachable so
-	// the dashboard can recover managed-key access instead of locking itself out.
-	if cfg != nil && cfg.MasterKey == "" && !hasRequestAuthenticators(cfg.RequestAuthenticators) && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
+	// the dashboard can recover managed-key access instead of locking itself
+	// out. A master key that was deliberately turned off is not an absent one:
+	// that deployment wants managed keys enforced, admin API included.
+	if cfg != nil && cfg.effectiveMasterKey() == "" && !cfg.MasterKeyDisabled && !hasRequestAuthenticators(cfg.RequestAuthenticators) && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
 		authSkipPaths = append(authSkipPaths, "/admin/*")
 	}
 	if cfg != nil && cfg.SwaggerEnabled && SwaggerAvailable() {
@@ -371,9 +389,16 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 
 	// Authentication (skips public paths)
 	// Register by authenticator presence; its Enabled state can change at runtime.
-	authMiddlewareRegistered := cfg != nil && (cfg.MasterKey != "" || cfg.Authenticator != nil || hasRequestAuthenticators(cfg.RequestAuthenticators))
+	authMiddlewareRegistered := cfg != nil && (cfg.effectiveMasterKey() != "" || cfg.Authenticator != nil || hasRequestAuthenticators(cfg.RequestAuthenticators) || cfg.MasterKeyDisabled)
 	if authMiddlewareRegistered {
-		e.Use(AuthMiddlewareWithRequestAuthenticators(cfg.MasterKey, cfg.Authenticator, cfg.RequestAuthenticators, authSkipPaths, userPathHeaderName))
+		e.Use(NewAuthMiddleware(AuthMiddlewareConfig{
+			MasterKey:             cfg.effectiveMasterKey(),
+			Authenticator:         cfg.Authenticator,
+			RequestAuthenticators: cfg.RequestAuthenticators,
+			SkipPaths:             authSkipPaths,
+			UserPathHeader:        userPathHeaderName,
+			RequireCredential:     cfg.MasterKeyDisabled,
+		}))
 	}
 
 	// Session identification runs after auth so session ids are scoped by the

@@ -157,6 +157,9 @@ func (c *Chain) runReaders(ctx context.Context, readers []*Instance, x *pluginap
 	if len(readers) == 0 {
 		return nil, nil
 	}
+	if len(readers) == 1 {
+		return c.runReader(ctx, readers[0], x, call)
+	}
 	records := make([]Record, len(readers))
 	errs := make([]error, len(readers))
 	copies := make([]*pluginapi.Exchange, len(readers))
@@ -183,6 +186,21 @@ func (c *Chain) runReaders(ctx context.Context, readers []*Instance, x *pluginap
 		}
 	}
 	return records, nil
+}
+
+// runReader is runReaders for a step with a single reader, which is the
+// common shape. The copy and the merge back are still needed — an abandoned
+// reader may keep writing its copy — but nothing has to run concurrently with
+// nothing, so the goroutine, the WaitGroup and the per-reader slices go.
+// Call still bounds the hook, so the abandonment guarantee is unchanged.
+func (c *Chain) runReader(ctx context.Context, inst *Instance, x *pluginapi.Exchange, call hookCall) ([]Record, error) {
+	original := x.Headers.Request.Clone()
+	cp := shallowCopy(x)
+	record, err := c.invoke(ctx, inst, cp, call, false)
+	if !errors.Is(record.Err, ErrAbandoned) {
+		mergeBack(x, cp, original)
+	}
+	return []Record{record}, err
 }
 
 // invoke calls one instance with timeout, panic recovery and fail-mode

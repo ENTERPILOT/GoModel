@@ -145,12 +145,30 @@ that turn, so prefer echoing the real signature.
 For URL-hosted images in native mode, Google's own examples fetch the URL
 first and send the bytes to `generateContent`.
 
+## Video input
+
+| Mode | OpenAI-style `video_url` |
+| ---- | ----- |
+| `native` (default) | inline `data:` URLs, YouTube links, Gemini Files API URIs, and `gs://` objects |
+| `openai_compatible` | forwarded unchanged, but Google's OpenAI-compatible endpoint has no video input — use `native` |
+
+```json
+{"type":"video_url","video_url":{"url":"https://www.youtube.com/watch?v=abc123"}}
+```
+
+In native mode a `data:` URL becomes an inline video part (defaulting to
+`video/mp4` when the data URL declares no media type), while YouTube, Files API,
+and Cloud Storage URIs are sent as a file reference Gemini resolves itself. Any
+other remote `https://...` URL is rejected rather than dropped — upload it
+through the Gemini Files API first.
+
 ## Not yet integrated
 
 - Automatic fetching of remote `image_url` values in native mode.
-- Uploading remote images through the Gemini Files API before a chat request.
+- Uploading remote images or videos through the Gemini Files API before a chat request.
 
 ## References
 
 - [Gemini image understanding](https://ai.google.dev/gemini-api/docs/image-understanding)
+- [Gemini video understanding](https://ai.google.dev/gemini-api/docs/video-understanding)
 - [Gemini OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai)

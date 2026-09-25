@@ -2,14 +2,17 @@ package auditlog
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -71,5 +74,88 @@ func TestReader_GetLogByIDAndInteractionParent(t *testing.T) {
 		noParent, err := reader.GetInteractionParent(ctx, "absent")
 		require.NoError(t, err)
 		require.Nil(t, noParent)
+	})
+}
+
+func TestReader_GetLastUsedByAuthKeys(t *testing.T) {
+	runReaderSuite(t, func(t *testing.T, store LogStore, reader Reader) {
+		ctx := context.Background()
+
+		// An empty id list must not query at all and must not error.
+		empty, err := reader.GetLastUsedByAuthKeys(ctx, nil)
+		require.NoError(t, err)
+		assert.Empty(t, empty)
+
+		old := time.Date(2026, 1, 10, 8, 0, 0, 0, time.UTC)
+		recent := time.Date(2026, 1, 16, 12, 30, 0, 0, time.UTC)
+		err = store.WriteBatch(ctx, []*LogEntry{
+			{ID: "k1-old", Timestamp: old, AuthKeyID: "key-1", RequestedModel: "gpt-5", Provider: "openai", StatusCode: 200},
+			{ID: "k1-new", Timestamp: recent, AuthKeyID: "key-1", RequestedModel: "gpt-5", Provider: "openai", StatusCode: 200},
+			{ID: "k2-only", Timestamp: old.Add(time.Hour), AuthKeyID: "key-2", RequestedModel: "gpt-5", Provider: "openai", StatusCode: 200},
+			{ID: "anonymous", Timestamp: recent.Add(time.Hour), RequestedModel: "gpt-5", Provider: "openai", StatusCode: 200},
+		})
+		require.NoError(t, err)
+
+		lastUsed, err := reader.GetLastUsedByAuthKeys(ctx, []string{"key-1", "key-2", "key-unknown"})
+		require.NoError(t, err)
+		require.Len(t, lastUsed, 2)
+		assert.True(t, lastUsed["key-1"].Equal(recent), "key-1 last used = %v, want %v", lastUsed["key-1"], recent)
+		assert.True(t, lastUsed["key-2"].Equal(old.Add(time.Hour)), "key-2 last used = %v", lastUsed["key-2"])
+		_, ok := lastUsed["key-unknown"]
+		assert.False(t, ok)
+	})
+}
+
+func TestReader_GetLogsExcludesOperations(t *testing.T) {
+	runReaderSuite(t, func(t *testing.T, store LogStore, reader Reader) {
+		ctx := context.Background()
+		base := time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC)
+		paths := []string{
+			"/v1/chat/completions", "/mcp", "/mcp/github", "/mcpx",
+			"/v1/audio/speech", "/v1/audio/speech/", "/v1/audio/transcriptions",
+			"/p/openai/v1/models", "/sso/callback", "",
+		}
+		entries := make([]*LogEntry, 0, len(paths))
+		for i, path := range paths {
+			entries = append(entries, &LogEntry{
+				ID:        fmt.Sprintf("op-%d", i),
+				Timestamp: base.Add(time.Duration(i) * time.Minute),
+				Path:      path,
+			})
+		}
+		require.NoError(t, store.WriteBatch(ctx, entries))
+
+		tests := []struct {
+			name string
+			ops  []core.Operation
+			want []string
+		}{
+			{name: "mcp prefix", ops: []core.Operation{core.OperationMCP}, want: []string{
+				"/v1/chat/completions", "/mcpx", "/v1/audio/speech", "/v1/audio/speech/",
+				"/v1/audio/transcriptions", "/p/openai/v1/models", "/sso/callback", "",
+			}},
+			{name: "exact with trailing slash and prefix", ops: []core.Operation{
+				core.OperationAudioSpeech, core.OperationProviderPassthrough,
+			}, want: []string{
+				"/v1/chat/completions", "/mcp", "/mcp/github", "/mcpx",
+				"/v1/audio/transcriptions", "/sso/callback", "",
+			}},
+			{name: "every classified type keeps unclassified rows", ops: []core.Operation{
+				core.OperationChatCompletions, core.OperationMCP, core.OperationAudioSpeech,
+				core.OperationAudioTranscriptions, core.OperationProviderPassthrough,
+			}, want: []string{"/mcpx", "/sso/callback", ""}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				result, err := reader.GetLogs(ctx, LogQueryParams{ExcludeOperations: tt.ops, Limit: 50})
+				require.NoError(t, err)
+				got := make([]string, 0, len(result.Entries))
+				for _, entry := range result.Entries {
+					got = append(got, entry.Path)
+				}
+				assert.ElementsMatch(t, tt.want, got)
+				assert.Equal(t, len(tt.want), result.Total)
+			})
+		}
 	})
 }

@@ -169,10 +169,17 @@ seed() {
   jput /admin/virtual-models \
     '{"source":"compat-lb","targets":[{"provider":"openai","model":"gpt-4.1-nano","weight":2},{"provider":"groq","model":"groq/compound-mini"}],"strategy":"round_robin"}' >/dev/null
 
-  # The baseline still has the standalone failover store; the working tree
-  # converts this mapping into a failover-strategy virtual model at startup.
-  jput /admin/failover \
-    '{"primary_model":"compat-failover-src","fallback_models":["groq/groq/compound-mini","gemini/gemini-2.5-flash-lite"]}' >/dev/null
+  # A baseline older than #788 still has the standalone failover store, and the
+  # working tree converts that mapping into a failover-strategy virtual model at
+  # startup. Once #788 is itself in the baseline the route is gone, so seed it
+  # only when the baseline answers it.
+  if jput /admin/failover \
+    '{"primary_model":"compat-failover-src","fallback_models":["groq/groq/compound-mini","gemini/gemini-2.5-flash-lite"]}' >/dev/null 2>&1; then
+    SEEDED_FAILOVER=1
+  else
+    SEEDED_FAILOVER=0
+    echo "   .. $BASELINE_REF has no /admin/failover; skipping the failover migration row"
+  fi
 
   jput /admin/guardrails \
     '{"name":"compat-guardrail","type":"system_prompt","description":"upgrade compat","config":{"mode":"inject","content":"compat guardrail content"}}' >/dev/null
@@ -244,7 +251,7 @@ snapshot() {
     > "$out/budgets.json"
   curl -fsS "$BASE/admin/budgets/settings" | jq -S 'del(.updated_at)' > "$out/budget-settings.json"
   curl -fsS "$BASE/admin/rate-limits" \
-    | jq -S 'del(.server_time) | .rate_limits |= map(select(.subject == "openai" or (.subject|startswith("/compat"))) | del(.requests_used, .requests_remaining, .tokens_used, .tokens_remaining, .window_start, .window_reset))' \
+    | jq -S 'del(.server_time) | .rate_limits |= map(select(.subject == "openai" or (.subject|startswith("/compat"))) | del(.requests_used, .requests_remaining, .tokens_used, .tokens_remaining, .window_start, .window_end, .window_reset))' \
     > "$out/rate-limits.json"
   curl -fsS "$BASE/admin/tagging/settings" | jq -S '.' > "$out/tagging.json"
   curl -fsS "$BASE/admin/mcp-servers" \
@@ -272,8 +279,14 @@ snapshot() {
 
   curl -fsS "$BASE/admin/usage/summary?days=7" \
     | jq -S 'del(.server_time, .generated_at)' > "$out/usage-summary.json"
+  # Only the POSTs the seed made are compared: snapshot itself reads back the
+  # conversation, response and file over /v1, and those GETs are audited too, so
+  # counting every entry would measure the snapshot rather than the upgrade.
+  # The model lives on requested_model/resolved_model — an audit entry has no
+  # .model field.
   curl -fsS "$BASE/admin/audit/log?limit=20" \
-    | jq -S '{count: ((.entries // .logs // []) | length), models: [((.entries // .logs // [])[] | .model)] | sort}' \
+    | jq -S '[(.entries // .logs // [])[] | select(.method == "POST")
+              | [.path, .requested_model, .resolved_model, .status_code]] | sort' \
     > "$out/audit-log.json"
 }
 
@@ -353,11 +366,14 @@ for baseline_file in "$WORK/baseline"/*.json; do
 done
 
 # The baseline's failover mapping must come back as a failover-strategy
-# virtual model shadowing its primary model, with the fallbacks in order.
-migrated="$(curl -fsS "$BASE/admin/virtual-models" \
-  | jq -c '.[] | select(.source == "compat-failover-src") | [.strategy, (.targets | map(.model))]')"
-[[ "$migrated" == '["failover",["compat-failover-src","groq/groq/compound-mini","gemini/gemini-2.5-flash-lite"]]' ]]
-report "failover mapping converted into a failover-strategy virtual model" "$?"
+# virtual model shadowing its primary model, with the fallbacks in order. Only
+# a baseline that still had the standalone failover store seeded one.
+if [[ "${SEEDED_FAILOVER:-0}" == 1 ]]; then
+  migrated="$(curl -fsS "$BASE/admin/virtual-models" \
+    | jq -c '.[] | select(.source == "compat-failover-src") | [.strategy, (.targets | map(.model))]')"
+  [[ "$migrated" == '["failover",["compat-failover-src","groq/groq/compound-mini","gemini/gemini-2.5-flash-lite"]]' ]]
+  report "failover mapping converted into a failover-strategy virtual model" "$?"
+fi
 
 echo "-- exercising writes on the upgraded database"
 write_check() {

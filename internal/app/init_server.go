@@ -105,6 +105,7 @@ func (b *bootstrap) initServerDependencies() error {
 	// /version keeps reporting the local build.
 	app.versionCheck = newVersionChecker(b.ctx, appCfg.VersionCheck, app.storage, appCfg.Server.MasterKey)
 	warnIfDataDirEphemeral(appCfg.Storage.BackendConfig())
+	warnIfMediaDirEphemeral(appCfg)
 	return nil
 }
 
@@ -120,6 +121,7 @@ func (b *bootstrap) initServerConfig() error {
 	serverCfg := &server.Config{
 		BasePath:                        appCfg.Server.BasePath,
 		MasterKey:                       appCfg.Server.MasterKey,
+		MasterKeyDisabled:               appCfg.Server.MasterKeyDisabled,
 		Authenticator:                   app.authKeys.Service,
 		MetricsEnabled:                  appCfg.Metrics.Enabled,
 		MetricsEndpoint:                 appCfg.Metrics.Endpoint,
@@ -143,6 +145,7 @@ func (b *bootstrap) initServerConfig() error {
 		PassthroughSemanticEnrichers:    b.cfg.Factory.PassthroughSemanticEnrichers(),
 		BatchStore:                      app.batch.Store,
 		FileStore:                       app.fileStore.Store,
+		MediaStore:                      app.media.Service,
 		ResponseStore:                   app.responseStore.Store,
 		ConversationStore:               app.conversations.Store,
 		LogOnlyModelInteractions:        appCfg.Logging.OnlyModelInteractions,
@@ -156,6 +159,7 @@ func (b *bootstrap) initServerConfig() error {
 		Tagging:                         app.tagging.Service,
 		SessionDetector:                 session.NewDetectorFromConfig(appCfg.Session),
 		MCPEnabled:                      appCfg.MCP.Enabled,
+		IPExtractor:                     server.ClientIPExtractor(appCfg.Server.ClientIP),
 		VersionChecker:                  app.versionCheck,
 	}
 	if app.mcpGateway != nil {

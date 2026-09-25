@@ -1,7 +1,6 @@
 package auditlog
 
 import (
-	"encoding/base64"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -26,74 +25,55 @@ func TestIsAudioContentType(t *testing.T) {
 	}
 }
 
-func TestBuildAudioResponseBody_StoresBase64WhenEnabled(t *testing.T) {
+func TestBuildAudioResponseBody_StoresMediaWhenCaptured(t *testing.T) {
+	capture, store := newTestMediaCapture(t, 30)
 	data := []byte{0x00, 0x01, 0x02, 0xff, 0xfe}
-	body := BuildAudioResponseBody("audio/mpeg", data, true)
+	body := BuildAudioResponseBody(capture, "audio/mpeg", data)
 
 	require.True(t, body.Audio)
 	require.True(t, body.Stored)
-	require.Equal(t, "base64", body.Encoding)
-	assert.Equal(t, len(data), body.Bytes)
+	require.NotEmpty(t, body.MediaID)
+	assert.Equal(t, int64(len(data)), body.Bytes)
+	assert.Equal(t, "audio/mpeg", body.ContentType)
 
-	decoded, err := base64.StdEncoding.DecodeString(body.Data)
-	require.NoError(t, err)
-	assert.Equal(t, string(data), string(decoded))
+	_, stored := readMedia(t, store, body.MediaID)
+	assert.Equal(t, data, stored)
 }
 
-func TestBuildAudioResponseBody_PlaceholderWhenDisabled(t *testing.T) {
+func TestBuildAudioResponseBody_PlaceholderWithoutCapture(t *testing.T) {
 	data := []byte{0x00, 0x01, 0x02}
-	body := BuildAudioResponseBody("audio/mpeg", data, false)
+	body := BuildAudioResponseBody(nil, "audio/mpeg", data)
 
 	require.True(t, body.Audio)
 	assert.False(t, body.Stored)
-	assert.Empty(t, body.Data)
-	assert.Empty(t, body.Encoding, "no bytes should be stored when disabled: %+v", body)
-	assert.Equal(t, len(data), body.Bytes)
+	assert.Empty(t, body.MediaID, "no media should be stored without a capture: %+v", body)
+	assert.Equal(t, int64(len(data)), body.Bytes)
 }
 
-func TestBuildAudioUploadBody_StoresBase64AndMeta(t *testing.T) {
-	data := []byte("uploaded-audio")
+func TestBuildAudioResponseBody_EmptyPayloadStoresNothing(t *testing.T) {
+	capture, _ := newTestMediaCapture(t, 30)
+	body := BuildAudioResponseBody(capture, "audio/mpeg", nil)
+	assert.False(t, body.Stored)
+	assert.Equal(t, int64(0), body.Bytes)
+}
+
+func TestBuildAudioUploadBody_StoresMediaAndMeta(t *testing.T) {
+	capture, store := newTestMediaCapture(t, 30)
 	meta := map[string]any{"model": "gpt-4o-transcribe", "filename": "a.mp3"}
-	body := BuildAudioUploadBody("audio/mpeg", data, true, meta)
+	body := BuildAudioUploadBody(capture, "audio/mpeg", []byte("uploaded-audio"), meta)
 
 	require.True(t, body.Audio)
 	require.True(t, body.Stored)
-	require.Equal(t, "base64", body.Encoding)
-
-	decoded, err := base64.StdEncoding.DecodeString(body.Data)
-	require.NoError(t, err)
-	require.Equal(t, "uploaded-audio", string(decoded))
+	_, stored := readMedia(t, store, body.MediaID)
+	require.Equal(t, "uploaded-audio", string(stored))
 	assert.Equal(t, "gpt-4o-transcribe", body.Meta["model"], "meta not preserved alongside audio: %+v", body.Meta)
 }
 
 func TestBuildAudioUploadBody_PlaceholderKeepsMeta(t *testing.T) {
 	meta := map[string]any{"model": "whisper-1"}
-	body := BuildAudioUploadBody("audio/wav", []byte("x"), false, meta)
+	body := BuildAudioUploadBody(nil, "audio/wav", []byte("x"), meta)
 
 	assert.False(t, body.Stored)
-	assert.Empty(t, body.Data, "no bytes should be stored when disabled: %+v", body)
+	assert.Empty(t, body.MediaID, "no media should be stored without a capture: %+v", body)
 	assert.Equal(t, "whisper-1", body.Meta["model"], "meta should be kept on the placeholder: %+v", body.Meta)
-}
-
-func TestBuildAudioResponseBody_TooLarge(t *testing.T) {
-	data := make([]byte, audioBodyMaxBytes+1)
-	body := BuildAudioResponseBody("audio/mpeg", data, true)
-
-	assert.False(t, body.Stored)
-	assert.Empty(t, body.Data)
-	assert.True(t, body.TooLarge)
-}
-
-func TestBuildAudioResponseBody_AvoidsUTF8Corruption(t *testing.T) {
-	// MP3 frame headers contain bytes that are invalid UTF-8; the old capture
-	// path coerced these to U+FFFD. base64 must preserve them exactly.
-	data := []byte{0xff, 0xfb, 0x90, 0x00}
-	body := BuildAudioResponseBody("audio/mpeg", data, true)
-	decoded, err := base64.StdEncoding.DecodeString(body.Data)
-	require.NoError(t, err)
-
-	// The bytes must survive verbatim — the old toValidUTF8String path would
-	// have rewritten 0xff/0x90 into the U+FFFD replacement character (0xEF 0xBF
-	// 0xBD), changing the byte length and content.
-	require.Equal(t, data, decoded)
 }

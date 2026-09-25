@@ -28,6 +28,7 @@ func TestCredentialStore_RoundTrip(t *testing.T) {
 			ServiceAccountJSON:       `{"type":"service_account"}`,
 			ServiceAccountJSONBase64: "eyJ0eXBlIjoic2VydmljZV9hY2NvdW50In0=",
 			GCPScope:                 "https://www.googleapis.com/auth/cloud-platform",
+			ProxyURL:                 "socks5://user:pass@proxy.internal:1080",
 			Models:                   []string{"gemini-2.5-pro", "gemini-2.5-flash"},
 			Enabled:                  true,
 		}

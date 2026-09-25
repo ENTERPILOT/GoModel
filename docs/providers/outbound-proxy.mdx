@@ -1,0 +1,96 @@
+---
+title: "Outbound Proxies"
+description: "Send one provider's traffic through an HTTP, HTTPS, or SOCKS5 proxy while the rest keep the gateway-wide proxy settings."
+icon: "route"
+keywords: ["proxy", "SOCKS5", "HTTP proxy", "egress", "HTTPS_PROXY", "geo-restricted", "static IP"]
+---
+
+By default GoModel connects to every provider directly, honouring the standard
+`HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` variables for the whole process.
+That covers a corporate egress proxy that everything must pass through.
+
+Set `proxy_url` on a provider when only **some** providers need a proxy, or
+different providers need different ones: reaching a provider that is blocked
+from your region, giving one provider a fixed egress IP for its allowlist, or
+inspecting a single provider's traffic while the rest stays direct.
+
+## Configure
+
+Environment-only providers use the provider prefix and optional instance
+suffix, like every other provider setting:
+
+```bash
+OPENAI_API_KEY=sk-...
+OPENAI_PROXY_URL=socks5://user:pass@10.0.0.1:1080
+
+# A second instance of the same type, on its own proxy
+OPENAI_EU_API_KEY=sk-...
+OPENAI_EU_PROXY_URL=http://egress-eu.internal:3128
+
+# Local models stay direct: no proxy_url
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  openai:
+    type: openai
+    api_key: "${OPENAI_API_KEY}"
+    proxy_url: "${OPENAI_PROXY_URL}"
+  anthropic:
+    type: anthropic
+    api_key: "${ANTHROPIC_API_KEY}"
+    proxy_url: "http://egress.internal:3128"
+```
+
+The same setting is the **Outbound proxy URL** field in the dashboard's
+provider editor, under the advanced fields. The password is masked once saved;
+editing another field re-sends the masked value and the gateway keeps the
+stored one.
+
+## Supported proxies
+
+| Scheme | Proxy type |
+| --- | --- |
+| `http://` | HTTP CONNECT proxy (HTTPS upstreams are tunnelled) |
+| `https://` | HTTP CONNECT proxy reached over TLS |
+| `socks5://` | SOCKS5, with optional `user:pass@` authentication |
+| `socks5h://` | Same as `socks5://` |
+
+Hostnames are always resolved on the proxy, so `socks5://` and `socks5h://`
+behave identically. The URL is a scheme, a host, an optional port (80, 443,
+or 1080 by default), and optional credentials: a path, query, or fragment is
+rejected at startup and in the dashboard.
+
+## Rules
+
+- A provider's `proxy_url` applies to everything that provider sends: model
+  discovery, inference, streaming, files, and batches.
+- A provider with `proxy_url` ignores `HTTP_PROXY`, `HTTPS_PROXY`, and
+  `NO_PROXY`. A provider without one keeps the process-wide behaviour.
+- An invalid `proxy_url` is a configuration error: the provider is skipped at
+  startup with a log entry naming it, and the dashboard rejects the save.
+- Proxy credentials are never logged. The admin API and provider status show
+  the URL with the password replaced by `xxxxx`.
+- Connections are pooled per provider, so each provider keeps its own
+  keep-alive connections to its proxy.
+
+## Verify
+
+The provider status endpoint reports the masked proxy for each provider:
+
+```bash
+curl -s -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  http://localhost:8080/admin/providers/status | jq '.providers[] | {name, proxy_url: .config.proxy_url}'
+```
+
+Then send one request and confirm it appears in the proxy's access log while
+nothing reaches the provider from the gateway's own IP.
+
+<Note>
+  Pooled proxies with health checks, automatic failover between proxies, and
+  assignment rules that cover many providers at once are a
+  [GoModel Pro feature](/pro/egress).
+</Note>

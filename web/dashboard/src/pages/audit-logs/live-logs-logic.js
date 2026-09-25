@@ -7,7 +7,7 @@
 //     skippedLiveUsageByRequestId, liveLogsLastSeq, auditGroupSessions,
 //     auditThreadChildren ({ [session_id]: {loading, entries, total} })
 //   - insert-gate fields: auditSearch, auditMethod, auditStatusCode,
-//     auditStream, customStartDate, customEndDate, usageLogSearch,
+//     auditStream, auditHiddenTypes, customStartDate, customEndDate, usageLogSearch,
 //     usageFilterModel, usageFilterProvider, usageFilterLabel,
 //     usageFilterUserPath, usageFilterSession, usageLogHideCached, page
 //   - optional cross-module hooks (guarded with typeof):
@@ -18,6 +18,7 @@
 // runs this file directly and cannot resolve the `$lib` alias.
 
 import { consumeEventStream } from "../../lib/api/eventStream.js";
+import { auditEntryTypeVisible } from "./audit-operations.js";
 import * as m from "../../lib/paraglide/messages.js";
 
 const LIVE_LOGS_STREAM_PATH = "/admin/live/logs?types=audit,usage";
@@ -160,7 +161,7 @@ export function liveLogsMethods() {
             // List filters and pagination gate visual insertion only. The
             // normalized cache still receives every event so an already-open
             // Interactions drawer cannot lose its live continuation.
-            if (!this.auditLiveInsertAllowed()) {
+            if (!this.auditLiveInsertAllowed() || !auditEntryTypeVisible(patch, this.auditHiddenTypes)) {
                 this.cacheMergedAuditRecord(patch, eventType);
                 return;
             }

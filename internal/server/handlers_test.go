@@ -185,6 +185,7 @@ func (c *aliasesTestCatalog) ProviderNames() []string {
 type chunkedReadCloser struct {
 	chunks [][]byte
 	index  int
+	offset int
 }
 
 func (r *chunkedReadCloser) Read(p []byte) (int, error) {
@@ -192,8 +193,14 @@ func (r *chunkedReadCloser) Read(p []byte) (int, error) {
 		return 0, io.EOF
 	}
 
-	n := copy(p, r.chunks[r.index])
-	r.index++
+	// A chunk wider than the caller's buffer is delivered over several reads, as
+	// a real body would be; dropping its tail would silently shorten the stream.
+	n := copy(p, r.chunks[r.index][r.offset:])
+	r.offset += n
+	if r.offset >= len(r.chunks[r.index]) {
+		r.index++
+		r.offset = 0
+	}
 	return n, nil
 }
 
@@ -1987,7 +1994,8 @@ func TestHandleStreamingResponse_RecordsStreamingError(t *testing.T) {
 	logged := logger.entries[0]
 	require.Equal(t, "stream_error", logged.ErrorType)
 	require.NotNil(t, logged.Data)
-	require.Equal(t, expectedErr.Error(), logged.Data.ErrorMessage)
+	// The provider read failure is recorded behind the incomplete-stream marker.
+	require.Equal(t, "provider stream ended before completion: "+expectedErr.Error(), logged.Data.ErrorMessage)
 }
 
 func TestHandleStreamingResponse_ClientDisconnectBeforeUpstream(t *testing.T) {
@@ -5931,7 +5939,7 @@ func TestProviderPassthrough_RejectsUnsupportedProvider(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Contains(t, rec.Body.String(), `provider passthrough for \"groq\" is not enabled`)
-	require.Contains(t, rec.Body.String(), "anthropic, deepseek, edenai, hetzner, kilo, llamacpp, llmd, openai, openrouter, sglang, vllm, zai")
+	require.Contains(t, rec.Body.String(), "anthropic, deepseek, edenai, hetzner, jev, kilo, llamacpp, llmd, openai, openrouter, sglang, vllm, zai")
 }
 
 func TestProviderPassthrough_ChutesRequiresExplicitOptIn(t *testing.T) {

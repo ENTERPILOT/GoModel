@@ -107,6 +107,30 @@ type streamConverter struct {
 	usage         chatUsage
 	finalized     bool
 	closed        bool
+	// endErr is what Read returns once a stream that stopped early has
+	// emitted its error event.
+	endErr error
+}
+
+// finish ends the converted stream when the upstream stops reading. An
+// upstream that signalled completion ([DONE] or a finish_reason) ends with
+// message_stop, even when the connection fails after that; one that stopped
+// early ends with an error event instead, so a truncated answer is not
+// presented as a finished turn.
+func (sc *streamConverter) finish(err error) {
+	if sc.finalized {
+		return
+	}
+	if sc.stopReason != "" {
+		sc.finalize()
+		return
+	}
+	sc.finalized = true
+	sc.endErr = streaming.IncompleteStreamError(err)
+	sc.emit("error", map[string]any{
+		"type":  "error",
+		"error": map[string]any{"type": "api_error", "message": streaming.ErrStreamIncomplete.Error()},
+	})
 }
 
 func (sc *streamConverter) Read(p []byte) (int, error) {
@@ -117,6 +141,9 @@ func (sc *streamConverter) Read(p []byte) (int, error) {
 	// stream stays with Close so observers (audit, usage) still fire on
 	// OnStreamClose; Read must never mark the converter closed.
 	if sc.finalized || sc.closed {
+		if sc.endErr != nil {
+			return 0, sc.endErr
+		}
 		return 0, io.EOF
 	}
 
@@ -128,14 +155,14 @@ func (sc *streamConverter) Read(p []byte) (int, error) {
 			}
 		}
 		if err != nil {
-			if err == io.EOF {
-				sc.finalize()
-				if sc.buffer.Len() > 0 {
-					return sc.buffer.Read(p), nil
-				}
-				return 0, io.EOF
+			sc.finish(err)
+			if sc.buffer.Len() > 0 {
+				return sc.buffer.Read(p), nil
 			}
-			return 0, err
+			if sc.endErr != nil {
+				return 0, sc.endErr
+			}
+			return 0, io.EOF
 		}
 		if sc.buffer.Len() > 0 {
 			return sc.buffer.Read(p), nil

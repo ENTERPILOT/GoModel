@@ -28,11 +28,13 @@ func TestChatCompatibleContract(t *testing.T) {
 		NativeResponses: true,
 		Embeddings:      true,
 		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
-			return NewWithHTTPClient(apiKey, baseURL, client, hooks)
+			opts := providertest.Options(hooks)
+			opts.HTTPClient = client
+			return New(providers.ProviderConfig{APIKey: apiKey, BaseURL: baseURL}, opts)
 		},
 	})
 
-	provider := NewWithHTTPClient("", "", nil, llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{APIKey: ""}, providers.ProviderOptions{})
 	providertest.AssertNoNativeSurfaces(t, provider)
 	_, ok := any(provider).(core.NativeResponseLifecycleProvider)
 	assert.False(t, ok, "provider should not implement core.NativeResponseLifecycleProvider")
@@ -59,7 +61,7 @@ func TestPassthrough_RoutesNativeEndpointsToServerRoot(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, http.StatusOK, `{"ok":true}`)
 
-			provider := NewWithHTTPClient("llamacpp-key", server.URL+"/v1", server.Client(), llmclient.Hooks{})
+			provider := newTestProvider("llamacpp-key", server.URL+"/v1", server.Client(), llmclient.Hooks{})
 
 			resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 				Method:   http.MethodPost,

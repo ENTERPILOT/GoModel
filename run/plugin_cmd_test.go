@@ -61,13 +61,13 @@ func TestRunPluginCommand_Usage(t *testing.T) {
 			got := ExitCode(err)
 			require.Equal(t, tt.wantCode, got)
 
-			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
-				t.Fatalf("error = %v, want containing %q", err, tt.wantErr)
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
 			}
 			// `plugin help` writes to stdout; `build -h` uses the flag
 			// package's stderr convention.
-			if tt.wantCode == 0 && !strings.Contains(stdout.String()+stderr.String(), "plugin build") {
-				t.Fatalf("help output = %q / %q", stdout.String(), stderr.String())
+			if tt.wantCode == 0 {
+				require.Contains(t, stdout.String()+stderr.String(), "plugin build", "help output")
 			}
 		})
 	}

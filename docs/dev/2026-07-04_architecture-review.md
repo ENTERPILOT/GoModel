@@ -489,8 +489,8 @@ guardrails error).
   named after the review session that produced them; rename to describe behavior.
 - **[SMELL]** Dated snapshot docs look authoritative while months stale.
   `docs/dev/2026-03-16_ARCHITECTURE_SNAPSHOT.md` was deleted on 2026-07-25 for
-  this reason; `docs/2026-04-09_CODEBASE_SNAPSHOT.md` (1,368 lines) remains and
-  has the same problem.
+  this reason, and `docs/2026-04-09_CODEBASE_SNAPSHOT.md` (1,368 lines) was
+  deleted for the same reason afterwards.
 - **[GOOD]** Test culture: test LOC ≈ source LOC in most packages
   (`internal/server`: 15.8k test vs 8k source), plus e2e/integration/contract
   suites and dashboard JS tests. `internal/streaming`'s cross-chunk boundary logic

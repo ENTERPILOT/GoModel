@@ -33,6 +33,11 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 	if !isEnabledPassthroughProvider(providerType, s.enabledPassthroughProviders) {
 		return handleError(c, s.unsupportedPassthroughProviderError(providerType))
 	}
+	// The body is forwarded unchanged, so a repeated model field would let the
+	// upstream's parser pick a value the gateway never checked.
+	if info.ModelAmbiguous {
+		return handleError(c, core.NewInvalidRequestError("passthrough request body must name the model once; the model field is repeated", nil))
+	}
 	if s.modelAuthorizer != nil {
 		if selector, ok := passthroughAccessSelector(s.provider, info); ok {
 			if err := s.modelAuthorizer.ValidateModelAccess(c.Request().Context(), selector); err != nil {

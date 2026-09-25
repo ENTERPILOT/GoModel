@@ -1,115 +1,75 @@
 package auditlog
 
 import (
+	"bytes"
 	"encoding/base64"
 	"sort"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/mediastore"
 )
-
-// imageBodyMaxBytes caps the *stored base64* image bytes in one audit entry,
-// across its request and response bodies together. The budget is charged in
-// encoded bytes — the size the document store actually persists — so together
-// with the capped meta (imageMetaMaxBytes), the capped middleware body
-// captures (MaxBodyCapture), and headers, a full entry stays well under a
-// document store's per-record ceiling (MongoDB: 16 MiB BSON). Images are
-// stored in order until the entry's budget is spent and the rest are recorded
-// as metadata-only placeholders.
-const imageBodyMaxBytes = 8 * 1024 * 1024
 
 // imageMetaMaxBytes bounds the total string bytes kept in an image body's
 // meta. The edit prompt and forwarded fields are client-controlled (up to the
-// request body limit), so without a cap they could consume the headroom the
-// image budget leaves. Values beyond the cap are truncated and flagged.
+// request body limit), so without a cap they could push the audit document
+// past a store's per-record ceiling. Values beyond the cap are truncated and
+// flagged.
 const imageMetaMaxBytes = 1024 * 1024
 
 // imageRevisedPromptMaxBytes bounds the provider-returned revised_prompt kept
 // per image item; real revised prompts are a few hundred bytes.
 const imageRevisedPromptMaxBytes = 16 * 1024
 
-// ImageBodyBudget tracks one audit entry's remaining image-byte allowance.
-// Share a single budget between the request and response image bodies of the
-// same entry.
-type ImageBodyBudget struct {
-	remaining int
-}
-
-// NewImageBodyBudget returns a fresh per-entry budget.
-func NewImageBodyBudget() *ImageBodyBudget {
-	return &ImageBodyBudget{remaining: imageBodyMaxBytes}
-}
-
-// take reserves size encoded bytes, reporting whether they fit. Non-positive
-// sizes are rejected so a caller bug can never grow the budget.
-func (b *ImageBodyBudget) take(size int) bool {
-	if size <= 0 || size > b.remaining {
-		return false
-	}
-	b.remaining -= size
-	return true
-}
-
 // ImageBodyLog is the audit representation of an image request or response.
 // The "__images__" marker lets the dashboard detect it and render a gallery
-// (when items carry Data) or labeled placeholders. Meta holds the surrounding
-// parameters: prompt and options for an upload, the response envelope
-// (created, usage, size, ...) for an output.
+// (for items with a MediaID) or labeled placeholders. Meta holds the
+// surrounding parameters: prompt and options for an upload, the response
+// envelope (created, usage, size, ...) for an output.
 type ImageBodyLog struct {
 	Images bool           `json:"__images__" bson:"__images__"`
 	Items  []ImageItemLog `json:"images" bson:"images"`
 	Meta   map[string]any `json:"meta,omitempty" bson:"meta,omitempty"`
-
-	budget *ImageBodyBudget
 }
 
 // ImageItemLog is one image inside an ImageBodyLog. Role is "input" (an edit
 // source), "mask", or "output". URL items (hosted DALL·E results) carry no
-// bytes; base64 items carry Data when Stored is true.
+// bytes; stored items name their media object. Rows written before ADR-0013
+// carry the pixels inline as base64 under "encoding" and "data" instead.
 type ImageItemLog struct {
 	Role          string `json:"role" bson:"role"`
 	Filename      string `json:"filename,omitempty" bson:"filename,omitempty"`
 	ContentType   string `json:"content_type,omitempty" bson:"content_type,omitempty"`
-	Bytes         int    `json:"bytes" bson:"bytes"`
+	Bytes         int64  `json:"bytes" bson:"bytes"`
 	URL           string `json:"url,omitempty" bson:"url,omitempty"`
 	RevisedPrompt string `json:"revised_prompt,omitempty" bson:"revised_prompt,omitempty"`
-	Encoding      string `json:"encoding,omitempty" bson:"encoding,omitempty"`
-	Data          string `json:"data,omitempty" bson:"data,omitempty"`
+	MediaID       string `json:"media_id,omitempty" bson:"media_id,omitempty"`
 	Stored        bool   `json:"stored" bson:"stored"`
-	TooLarge      bool   `json:"too_large,omitempty" bson:"too_large,omitempty"`
 }
 
 // BuildImageUploadBody builds the audit value for an image edit request: the
 // uploaded source image(s) and optional mask plus the request parameters.
-// Image bytes are embedded (base64) only when storeBytes is true and budget —
-// the entry-wide allowance, shared with the response body — allows; otherwise
-// each item keeps its metadata. A nil budget starts a fresh one.
-func BuildImageUploadBody(images []core.ImageFile, mask *core.ImageFile, storeBytes bool, meta map[string]any, budget *ImageBodyBudget) ImageBodyLog {
-	body := ImageBodyLog{Images: true, Items: []ImageItemLog{}, Meta: capImageMeta(meta), budget: budget}
-	if body.budget == nil {
-		body.budget = NewImageBodyBudget()
-	}
+// Image bytes are stored through capture when it is non-nil; otherwise each
+// item keeps its metadata.
+func BuildImageUploadBody(capture *MediaCapture, images []core.ImageFile, mask *core.ImageFile, meta map[string]any) ImageBodyLog {
+	body := ImageBodyLog{Images: true, Items: []ImageItemLog{}, Meta: capImageMeta(meta)}
 	for _, img := range images {
-		body.addRaw("input", img, storeBytes)
+		body.addUpload(capture, "input", img)
 	}
 	if mask != nil {
-		body.addRaw("mask", *mask, storeBytes)
+		body.addUpload(capture, "mask", *mask)
 	}
 	return body
 }
 
 // BuildImageResponseBody builds the audit value for an image generation or
-// edit response. Hosted URLs are always kept; base64 images are embedded only
-// when storeBytes is true and within budget, so a body logged without image
-// storage stays small and complete (usage, size, quality) instead of being
-// truncated mid-base64 by the generic capture limit. budget is the entry-wide
-// image allowance (shared with an edit's upload body); nil starts a fresh one.
-func BuildImageResponseBody(resp *core.ImageGenerationResponse, storeBytes bool, budget *ImageBodyBudget) ImageBodyLog {
-	body := ImageBodyLog{Images: true, Items: []ImageItemLog{}, budget: budget}
-	if body.budget == nil {
-		body.budget = NewImageBodyBudget()
-	}
+// edit response. Hosted URLs are always kept; base64 images are stored
+// through capture when it is non-nil, so a body logged without image storage
+// stays small and complete (usage, size, quality) instead of being truncated
+// mid-base64 by the generic capture limit.
+func BuildImageResponseBody(capture *MediaCapture, resp *core.ImageGenerationResponse) ImageBodyLog {
+	body := ImageBodyLog{Images: true, Items: []ImageItemLog{}}
 	if resp == nil {
 		return body
 	}
@@ -122,42 +82,37 @@ func BuildImageResponseBody(resp *core.ImageGenerationResponse, storeBytes bool,
 			item.URL = data.URL
 		case data.B64JSON != "":
 			item.ContentType = contentType
-			item.Bytes = base64DecodedLen(data.B64JSON)
-			body.store(&item, data.B64JSON, storeBytes)
+			item.Bytes = int64(base64DecodedLen(data.B64JSON))
+			if item.Bytes > 0 {
+				item.attach(capture.save(mediastore.KindImage, contentType,
+					base64.NewDecoder(base64.StdEncoding, strings.NewReader(data.B64JSON))))
+			}
 		}
 		body.Items = append(body.Items, item)
 	}
 	return body
 }
 
-func (b *ImageBodyLog) addRaw(role string, img core.ImageFile, storeBytes bool) {
+func (b *ImageBodyLog) addUpload(capture *MediaCapture, role string, img core.ImageFile) {
 	item := ImageItemLog{
 		Role:        role,
 		Filename:    img.Filename,
 		ContentType: bareMediaType(img.ContentType),
-		Bytes:       len(img.Data),
+		Bytes:       int64(len(img.Data)),
 	}
 	if len(img.Data) > 0 {
-		b.store(&item, base64.StdEncoding.EncodeToString(img.Data), storeBytes)
+		item.attach(capture.save(mediastore.KindImage, item.ContentType, bytes.NewReader(img.Data)))
 	}
 	b.Items = append(b.Items, item)
 }
 
-// store attaches the base64 payload when storage is enabled and the item fits
-// the entry's remaining budget; otherwise it flags the item as too large. The
-// budget is charged with the encoded length — what the audit store persists —
-// not the smaller decoded size.
-func (b *ImageBodyLog) store(item *ImageItemLog, b64 string, storeBytes bool) {
-	if !storeBytes || item.Bytes == 0 {
+func (i *ImageItemLog) attach(object *mediastore.Object) {
+	if object == nil {
 		return
 	}
-	if !b.budget.take(len(b64)) {
-		item.TooLarge = true
-		return
-	}
-	item.Encoding = "base64"
-	item.Data = b64
-	item.Stored = true
+	i.MediaID = object.ID
+	i.Stored = true
+	i.Bytes = object.Bytes
 }
 
 // capImageMeta bounds the total string bytes in an image body's meta so
@@ -266,14 +221,15 @@ func imageOutputContentType(outputFormat string) string {
 	}
 }
 
-// bareMediaType strips MIME parameters so the stored type works in a data: URL.
+// bareMediaType strips MIME parameters so the stored type works in a
+// Content-Type header.
 func bareMediaType(contentType string) string {
 	return strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
 }
 
 // base64DecodedLen returns the byte length a base64 string decodes to, without
 // decoding it. Malformed input (e.g. padding only) yields 0, never a negative
-// length that would corrupt the entry's image budget.
+// length.
 func base64DecodedLen(b64 string) int {
 	n := len(b64)
 	if n == 0 {

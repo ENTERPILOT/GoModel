@@ -70,6 +70,19 @@ func TestFailover_ChainDescendsChainedVirtualModels(t *testing.T) {
 	require.Equal(t, []string{"groq/llama", "local/mistral"}, chain, "chain = %v, want every concrete model behind the chained leg", chain)
 }
 
+func TestFailover_SingleTargetRedirectKeepsChainedLegs(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	upsertRedirect(t, svc, "resilient", StrategyFailover, "openai/gpt-4o", "anthropic/claude")
+	upsertRedirect(t, svc, "alias", "", "resilient")
+
+	// The alias declares one target, but that target is a failover subtree:
+	// its remaining leaves are the chain.
+	primary, chain := failoverChain(t, svc, "alias")
+	require.Equal(t, "openai/gpt-4o", primary)
+	require.Equal(t, []string{"anthropic/claude"}, chain, "chain = %v, want the subtree's alternative leaf", chain)
+}
+
 func TestFailover_NoChainWithoutRedirectOrForSingleTarget(t *testing.T) {
 	t.Parallel()
 	svc := newBalancingService(t)
@@ -98,7 +111,6 @@ func TestFailover_SelfTargetShadowsConcreteModel(t *testing.T) {
 	primary, chain := failoverChain(t, svc, "openai/gpt-4o")
 	require.Equal(t, "openai/gpt-4o", primary)
 	require.Equal(t, []string{"anthropic/claude"}, chain, "resolved %q with chain %v; want the shadowed model then anthropic/claude", primary, chain)
-	require.True(t, svc.Supports("openai/gpt-4o"))
 	// The self target is not a chain hop, so it can be deleted like any redirect.
 	err = svc.Delete(ctx, "openai/gpt-4o")
 	require.NoError(t, err)
