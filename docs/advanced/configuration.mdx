@@ -452,7 +452,9 @@ Every provider type also accepts a comma-separated configured model list via
 `<PROVIDER>_MODELS`, for example `OPENROUTER_MODELS`, `ORACLE_MODELS`,
 `AZURE_MODELS`, `SGLANG_MODELS`, `VLLM_MODELS`, or `LLMD_MODELS`. By default,
 `CONFIGURED_PROVIDER_MODELS_MODE=fallback` uses configured lists only when
-upstream `/models` fails, returns nil, or returns an empty list. Set
+upstream `/models` fails, returns nil, or returns an empty list. A provider
+without a `/models` endpoint (404 or 405) is served from its configured list and
+reported healthy, which suits single-API servers such as speech-to-text. Set
 `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose only configured models for
 providers that define a list and skip their upstream `/models` calls. YAML
 `providers.<name>.models` provides the same model-list input for named provider

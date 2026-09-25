@@ -179,6 +179,39 @@ func TestModelRegistry(t *testing.T) {
 		require.Nil(t, snapshots[0].LastModelFetchSuccessAt)
 	})
 
+	t.Run("ConfiguredModelsWithoutModelsEndpointAreHealthy", func(t *testing.T) {
+		registry := NewModelRegistry()
+		mock := &registryMockProvider{
+			name: "stt",
+			err:  core.ParseProviderError("openai", http.StatusNotFound, []byte("<html>404 Not Found</html>"), nil),
+		}
+		registry.RegisterProviderWithNameAndType(mock, "stt", "openai")
+		registry.SetProviderConfiguredModels("stt", []string{"whisper-1"})
+
+		err := registry.Initialize(context.Background())
+		require.NoError(t, err)
+		require.True(t, registry.Supports("whisper-1"))
+		require.Empty(t, registry.FailedProviderNames())
+
+		snapshots := registry.ProviderRuntimeSnapshots()
+		require.Len(t, snapshots, 1)
+		assert.Empty(t, snapshots[0].LastModelFetchError)
+		assert.NotNil(t, snapshots[0].LastModelFetchSuccessAt)
+		assert.True(t, snapshots[0].ModelListingUnsupported)
+
+		// A server that later starts listing models drops the marker.
+		mock.err = nil
+		mock.modelsResponse = &core.ModelsResponse{
+			Object: "list",
+			Data:   []core.Model{{ID: "whisper-1", Object: "model", OwnedBy: "stt"}},
+		}
+		err = registry.Initialize(context.Background())
+		require.NoError(t, err)
+		snapshots = registry.ProviderRuntimeSnapshots()
+		require.Len(t, snapshots, 1)
+		assert.False(t, snapshots[0].ModelListingUnsupported)
+	})
+
 	t.Run("SuccessfulLiveModelFetchClearsAvailabilityError", func(t *testing.T) {
 		registry := NewModelRegistry()
 		mock := &registryMockProvider{
