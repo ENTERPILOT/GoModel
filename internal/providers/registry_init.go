@@ -260,10 +260,13 @@ func (r *ModelRegistry) fetchAllProviderModels(
 			configuredReason == configuredProviderModelsUpstreamUnlisted {
 			runtimeUpdate.lastModelFetchSuccessAt = fetchAt
 		}
-		// Merge keeps availability signals too: the upstream call actually
-		// succeeded, unlike the fallback reasons.
+		// Merge and unlisted keep availability signals too: the upstream
+		// answered, unlike the fallback reasons. For unlisted this also clears
+		// a startup probe that hit the same missing /models endpoint before
+		// configured models were known.
 		if configuredReason == configuredProviderModelsNotApplied ||
-			configuredReason == configuredProviderModelsMerge {
+			configuredReason == configuredProviderModelsMerge ||
+			configuredReason == configuredProviderModelsUpstreamUnlisted {
 			runtimeUpdate.lastAvailabilityCheckAt = fetchAt
 			runtimeUpdate.lastAvailabilityOKAt = fetchAt
 		}

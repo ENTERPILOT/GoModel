@@ -1155,6 +1155,52 @@ func (p *availabilityFailingProvider) CheckAvailability(context.Context) error {
 	return p.availabilityErr
 }
 
+// Providers whose availability probe lists models (Ollama, Bedrock Mantle) hit
+// the same 404 as the refresh on a server without /models. With configured
+// models the provider must still leave the recheck set and pass the refresh
+// gate.
+func TestRefreshProviderModels_MissingModelsEndpointPassesAvailabilityGate(t *testing.T) {
+	notFound := core.ParseProviderError("ollama", http.StatusNotFound, []byte("404 page not found"), nil)
+	registry := NewModelRegistry()
+	stt := &availabilityFailingProvider{
+		registryMockProvider: &registryMockProvider{name: "stt", err: notFound},
+		availabilityErr:      notFound,
+	}
+	registry.RegisterProviderWithNameAndType(stt, "stt", "ollama")
+	// Startup probes before configured models are registered.
+	registry.RecordAvailabilityCheck("stt", notFound)
+	registry.SetProviderConfiguredModels("stt", []string{"whisper-1"})
+
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, registry.FailedProviderNames())
+
+	count, err := registry.RefreshProviderModels(context.Background(), "stt")
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+	assert.True(t, registry.ModelAvailable("stt/whisper-1"))
+
+	snapshots := registry.ProviderRuntimeSnapshots()
+	require.Len(t, snapshots, 1)
+	assert.Empty(t, snapshots[0].LastAvailabilityError)
+	assert.Empty(t, snapshots[0].LastModelFetchError)
+}
+
+// Without configured models a 404 probe is still a failure.
+func TestRefreshProviderModels_MissingModelsEndpointWithoutConfiguredModelsFails(t *testing.T) {
+	notFound := core.ParseProviderError("ollama", http.StatusNotFound, []byte("404 page not found"), nil)
+	registry := NewModelRegistry()
+	stt := &availabilityFailingProvider{
+		registryMockProvider: &registryMockProvider{name: "stt", err: notFound},
+		availabilityErr:      notFound,
+	}
+	registry.RegisterProviderWithNameAndType(stt, "stt", "ollama")
+
+	_, err := registry.RefreshProviderModels(context.Background(), "stt")
+	require.Error(t, err)
+	assert.Equal(t, []string{"stt"}, registry.FailedProviderNames())
+}
+
 // A failed availability check during a per-provider refresh marks the
 // provider stale just like a failed model fetch.
 func TestRefreshProviderModels_AvailabilityFailureMarksStale(t *testing.T) {
