@@ -182,10 +182,13 @@ but any call it makes is limited to the listed tools. `VALIDATED` applies to
 the whole request, so one strict tool makes every declared tool
 schema-validated.
 
-Gemini has no way to limit a turn to one function call. When
-`parallel_tool_calls: false` (or Anthropic's `disable_parallel_tool_use`)
-matters, keep only the tool you want called in `tool_choice`, or handle one call
-per turn in your client.
+Gemini has no way to limit a turn to one function call, and naming a single
+tool does not help: Gemini can call the same function more than once in a turn.
+When `parallel_tool_calls: false` (or Anthropic's `disable_parallel_tool_use`)
+matters, handle or reject the extra calls in your client.
+
+An `allowed_tools` choice with an empty `tools` list is rejected with a 400, as
+OpenAI does.
 
 ## Not yet integrated
 

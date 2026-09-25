@@ -264,7 +264,10 @@ func convertChatRequestToGemini(req *core.ChatRequest) (*geminiGenerateContentRe
 		return nil, err
 	}
 	out.Tools = tools
-	out.ToolConfig = geminiToolConfigFromOpenAI(req.ToolChoice, hasStrictTool(req.Tools))
+	out.ToolConfig, err = geminiToolConfigFromOpenAI(req.ToolChoice, hasStrictTool(req.Tools))
+	if err != nil {
+		return nil, err
+	}
 	out.GenerationConfig = geminiGenerationConfig(req)
 	out.SafetySettings = geminiSafetySettings(req)
 	out.CachedContent = geminiCachedContent(req)
@@ -646,7 +649,7 @@ func validateGeminiParametersJSONSchema(encoded json.RawMessage) (json.RawMessag
 // strict set (any tool declared strict: true), the free-choice mode becomes
 // VALIDATED, Gemini's AUTO with schema-adherent function calls; ANY already
 // guarantees schema adherence.
-func geminiToolConfigFromOpenAI(choice any, strict bool) *geminiToolConfig {
+func geminiToolConfigFromOpenAI(choice any, strict bool) (*geminiToolConfig, error) {
 	mode := ""
 	var allowed []string
 
@@ -671,7 +674,11 @@ func geminiToolConfigFromOpenAI(choice any, strict bool) *geminiToolConfig {
 				}
 			}
 		case "allowed_tools":
-			mode, allowed = geminiAllowedToolsConfig(value)
+			var err error
+			mode, allowed, err = geminiAllowedToolsConfig(value)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -679,19 +686,20 @@ func geminiToolConfigFromOpenAI(choice any, strict bool) *geminiToolConfig {
 		mode = "VALIDATED"
 	}
 	if mode == "" {
-		return nil
+		return nil, nil
 	}
 	return &geminiToolConfig{FunctionCallingConfig: geminiFunctionCallingConfig{
 		Mode:                 mode,
 		AllowedFunctionNames: allowed,
-	}}
+	}}, nil
 }
 
 // geminiAllowedToolsConfig maps an allowed_tools choice onto a mode and the
 // allowedFunctionNames subset. Gemini accepts allowedFunctionNames only with
 // ANY or VALIDATED, so "auto" becomes VALIDATED: the model may still answer in
-// text, but any call is limited to the subset.
-func geminiAllowedToolsConfig(choice map[string]any) (string, []string) {
+// text, but any call is limited to the subset. An empty subset is rejected, as
+// OpenAI does, rather than widened to every declared tool.
+func geminiAllowedToolsConfig(choice map[string]any) (string, []string, error) {
 	spec, _ := choice["allowed_tools"].(map[string]any)
 	tools, _ := spec["tools"].([]any)
 	var names []string
@@ -703,16 +711,14 @@ func geminiAllowedToolsConfig(choice map[string]any) (string, []string) {
 		}
 	}
 
-	mode, _ := spec["mode"].(string)
-	switch {
-	case strings.TrimSpace(mode) == "required":
-		mode = "ANY"
-	case len(names) > 0:
-		mode = "VALIDATED"
-	default:
-		mode = "AUTO"
+	if len(names) == 0 {
+		return "", nil, core.NewInvalidRequestError("tool_choice.allowed_tools.tools must list at least one function", nil)
 	}
-	return mode, names
+
+	if mode, _ := spec["mode"].(string); strings.TrimSpace(mode) == "required" {
+		return "ANY", names, nil
+	}
+	return "VALIDATED", names, nil
 }
 
 // hasStrictTool reports whether any function tool asks for strict schema

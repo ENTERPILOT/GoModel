@@ -51,11 +51,6 @@ func TestGeminiToolConfigFromOpenAI(t *testing.T) {
 			wantMode:    "VALIDATED",
 			wantAllowed: []string{"tool_b"},
 		},
-		{
-			name:     "allowed_tools without tools",
-			choice:   allowedTools("auto"),
-			wantMode: "AUTO",
-		},
 		{name: "strict unset", choice: nil, strict: true, wantMode: "VALIDATED"},
 		{name: "strict auto", choice: "auto", strict: true, wantMode: "VALIDATED"},
 		{name: "strict required", choice: "required", strict: true, wantMode: "ANY"},
@@ -64,7 +59,8 @@ func TestGeminiToolConfigFromOpenAI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := geminiToolConfigFromOpenAI(tt.choice, tt.strict)
+			got, err := geminiToolConfigFromOpenAI(tt.choice, tt.strict)
+			require.NoError(t, err)
 			if tt.wantMode == "" {
 				assert.Nil(t, got)
 				return
@@ -72,6 +68,20 @@ func TestGeminiToolConfigFromOpenAI(t *testing.T) {
 			require.NotNil(t, got)
 			assert.Equal(t, tt.wantMode, got.FunctionCallingConfig.Mode)
 			assert.Equal(t, tt.wantAllowed, got.FunctionCallingConfig.AllowedFunctionNames)
+		})
+	}
+}
+
+func TestGeminiToolConfigFromOpenAIRejectsEmptyAllowedTools(t *testing.T) {
+	for _, mode := range []string{"auto", "required"} {
+		t.Run(mode, func(t *testing.T) {
+			_, err := geminiToolConfigFromOpenAI(map[string]any{
+				"type":          "allowed_tools",
+				"allowed_tools": map[string]any{"mode": mode, "tools": []any{}},
+			}, false)
+			var gatewayErr *core.GatewayError
+			require.ErrorAs(t, err, &gatewayErr)
+			assert.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
 		})
 	}
 }
