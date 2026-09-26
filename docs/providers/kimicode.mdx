@@ -7,8 +7,14 @@ keywords: ["Kimi Code", "Moonshot", "quota", "provider setup"]
 
 Kimi Code is an OpenAI-compatible coding assistant served at `https://api.kimi.com/coding/v1`.
 GoModel routes chat, model listing, embeddings, and passthrough requests through the shared
-OpenAI adapter. The `/v1/responses` endpoint is translated through chat completions, while
-files and batches are not supported by the upstream endpoint.
+OpenAI adapter. The `/v1/responses` endpoint is forwarded natively to the upstream Responses
+API instead of being translated through chat completions, while files and batches are not
+supported by the upstream endpoint.
+
+Kimi Code retains no responses. Requests with `store: true` are rewritten to `store: false`
+(the upstream rejects `store: true` with a 400), and requests carrying a
+`previous_response_id` are rejected with an invalid-request error instead of being answered
+statelessly, because the upstream can never resolve the referenced response.
 
 ## Configure
 
