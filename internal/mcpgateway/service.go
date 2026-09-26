@@ -616,16 +616,25 @@ func (s *Service) registerResources(server *mcp.Server, upstreamName string, sna
 // was bound to may still use upstreamName. Sessions snapshot their catalog at
 // initialize, so without this a narrowed user_paths or a new
 // disallowed_user_paths entry would not reach sessions that are already open.
-// A session without a binding is treated as a caller without a user path,
-// which fails closed for scoped servers.
+// A session without a binding is rejected: bindings live as long as the
+// session, so a missing one means it was deleted or expired mid-call, and
+// guessing a user path could slip past disallowed_user_paths.
 func (s *Service) authorizeSession(session *mcp.ServerSession, upstreamName string) error {
-	userPath := ""
+	sessionID := ""
 	if session != nil {
-		s.bindMu.Lock()
-		userPath = s.bindings[session.ID()].userPath
-		s.bindMu.Unlock()
+		sessionID = session.ID()
 	}
-	if _, ok := s.findVisibleServer(upstreamName, userPath); !ok {
+	return s.authorizeSessionID(sessionID, upstreamName)
+}
+
+func (s *Service) authorizeSessionID(sessionID, upstreamName string) error {
+	s.bindMu.Lock()
+	binding, ok := s.bindings[sessionID]
+	s.bindMu.Unlock()
+	if !ok {
+		return fmt.Errorf("mcp server %q: %w", upstreamName, ErrServerNotVisible)
+	}
+	if _, visible := s.findVisibleServer(upstreamName, binding.userPath); !visible {
 		return fmt.Errorf("mcp server %q: %w", upstreamName, ErrServerNotVisible)
 	}
 	return nil

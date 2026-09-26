@@ -511,6 +511,23 @@ func TestUserPathEditAppliesInPlaceAndReachesOpenSessions(t *testing.T) {
 	assert.False(t, result.IsError)
 }
 
+func TestAuthorizeSessionFailsClosedWithoutBinding(t *testing.T) {
+	url := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	service, _ := newTestService(t, nil, testSpec("alpha", url, func(spec *ServerSpec) {
+		spec.DisallowedUserPaths = []string{"/contractors"}
+	}))
+
+	// A binding removed mid-call (DELETE or expiry) must not be read as a
+	// caller without a user path, which the denylist alone would admit.
+	err := service.authorizeSessionID("deleted-session", "alpha")
+	require.ErrorIs(t, err, ErrServerNotVisible)
+
+	service.bindSession("live", "", "/staff", "")
+	require.NoError(t, service.authorizeSessionID("live", "alpha"))
+	service.bindSession("contractor", "", "/contractors/acme", "")
+	require.ErrorIs(t, service.authorizeSessionID("contractor", "alpha"), ErrServerNotVisible)
+}
+
 func TestSessionBindingRejectsForeignUserPath(t *testing.T) {
 	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
 	_, gatewayURL := newTestService(t, nil, testSpec("alpha", alphaURL, nil))
