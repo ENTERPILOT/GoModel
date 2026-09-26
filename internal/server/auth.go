@@ -100,10 +100,11 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 				// sessions. Hide every identity value installed by outer extension
 				// middleware before validating the selected credential; clearing only
 				// the response header would leave downstream context consumers scoped
-				// to the wrong principal.
+				// to the wrong principal. The caller's own user-path header is not
+				// such an identity and is restored (see transportOwnedUserPath).
 				setAuthenticationUserHeader(c, "")
 				ctx := ext.WithoutAuthentication(c.Request().Context())
-				ctx = core.WithEffectiveUserPath(ctx, "")
+				ctx = core.WithEffectiveUserPath(ctx, transportOwnedUserPath(c.Request(), userPathHeaderName))
 				ctx = core.WithCredentialAllowedModels(ctx, nil)
 				ctx = core.WithAccessScope(ctx, core.AccessScope{})
 				c.SetRequest(c.Request().WithContext(ctx))
@@ -156,6 +157,27 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 			return writeGatewayError(c, authErr)
 		}
 	}
+}
+
+// transportOwnedUserPath returns the request's user-path header for model
+// endpoints that own their transport (MCP, realtime, audio uploads), and ""
+// for every other endpoint. Those endpoints take no request snapshot, so
+// RequestSnapshotCapture seeds the header path as the effective user path;
+// without restoring it here, master-key and unbound-key callers lose their
+// path there while ingress-managed endpoints keep it through the snapshot.
+// Only this middleware and RequestSnapshotCapture write the header, so the
+// value is the caller's own, never an outer extension session's. A key with
+// a bound user path still overrides it in applyAuthKeyResult.
+func transportOwnedUserPath(req *http.Request, headerName string) string {
+	desc := core.DescribeEndpoint(req.Method, req.URL.Path)
+	if desc.IngressManaged || !desc.ModelInteraction {
+		return ""
+	}
+	userPath, err := core.NormalizeUserPath(req.Header.Get(headerName))
+	if err != nil {
+		return ""
+	}
+	return userPath
 }
 
 func hasRequestAuthenticators(authenticators []ext.RequestAuthenticator) bool {
