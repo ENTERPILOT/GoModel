@@ -34,7 +34,10 @@ const maxResponsesStreamEventBytes = 8 << 20
 //   - output_text / refusal / reasoning deltas map to delta.content,
 //     delta.refusal, and the reasoning_content extension.
 //   - function_call_arguments.delta maps to a tool_calls delta carrying only
-//     the arguments fragment.
+//     the arguments fragment. A delta arriving before the item's
+//     output_item.added is buffered until added delivers the call id and
+//     name; a stream that ends with such an item still pending fails as
+//     truncated.
 //   - response.completed / response.incomplete emit the finish chunk
 //     (finish_reason from the terminal response's status and output, never
 //     re-emitting that output as content), an optional usage chunk when the
@@ -101,6 +104,12 @@ type chatStreamItemState struct {
 	callID    string
 	name      string
 	started   bool
+	// identityPending marks a function_call item a delta registered before
+	// its output_item.added event: the call id and name are still unknown,
+	// so no start chunk goes out and argument fragments accumulate in
+	// pendingArgs until added delivers the identity.
+	identityPending bool
+	pendingArgs     strings.Builder
 }
 
 // responsesStreamEventView decodes the members of a Responses API stream
@@ -292,6 +301,19 @@ func (sc *OpenAIChatStreamConverter) handleItemAdded(outputIndex int, raw json.R
 	state.callID = item.CallID
 	state.name = item.Name
 	sc.emitToolCallStart(state)
+	if !state.identityPending {
+		return
+	}
+	// A delta registered this item before the added event delivered its
+	// identity: the start chunk just went out with the real call id and
+	// name, so flush the buffered argument fragments under the same index.
+	state.identityPending = false
+	if args := state.pendingArgs.String(); args != "" {
+		sc.emitDelta(map[string]any{"tool_calls": []any{map[string]any{
+			"index":    state.toolIndex,
+			"function": map[string]any{"arguments": args},
+		}}})
+	}
 }
 
 // registerItem records an output item, claiming a dense tool-call index for
@@ -318,10 +340,20 @@ func (sc *OpenAIChatStreamConverter) registerItem(id string, outputIndex int, it
 
 // handleItemDone relays a completed item's replay state (extra_content) to
 // the chat client, so a streamed turn keeps the state the next translated
-// request needs to continue reasoning or tool use.
+// request needs to continue reasoning or tool use. A done event for an
+// item whose added event never arrived ends the stream: the tool call's
+// identity is unrecoverable, so the stream is unusable.
 func (sc *OpenAIChatStreamConverter) handleItemDone(outputIndex int, raw json.RawMessage) {
 	var item responsesStreamItemView
 	if err := json.Unmarshal(raw, &item); err != nil {
+		return
+	}
+	state := sc.items[item.ID]
+	if state == nil {
+		state = sc.itemsByIndex[outputIndex]
+	}
+	if state != nil && state.identityPending {
+		sc.failTruncated(errors.New("tool call stream ended before output_item.added delivered the call identity"))
 		return
 	}
 	sc.emitItemExtraContent(item.ID, outputIndex, item.Type, item.ExtraContent)
@@ -358,7 +390,11 @@ func (sc *OpenAIChatStreamConverter) emitItemExtraContent(itemID string, outputI
 
 // handleArgumentsDelta emits one tool-call delta carrying the arguments
 // fragment under the item's dense chat index. Deltas of parallel calls may
-// interleave; each carries its item_id, so they never share an index.
+// interleave; each carries its item_id, so they never share an index. A
+// delta for an item the stream never announced registers it so the dense
+// index stays stable (Postel's law), but the start chunk and the fragment
+// wait for output_item.added to deliver the call id and name — a start
+// chunk without identity is unusable to chat clients.
 func (sc *OpenAIChatStreamConverter) handleArgumentsDelta(itemID string, outputIndex int, delta string) {
 	state := sc.items[itemID]
 	if state == nil {
@@ -370,11 +406,14 @@ func (sc *OpenAIChatStreamConverter) handleArgumentsDelta(itemID string, outputI
 			// to attach to.
 			return
 		}
-		// A delta for an item the stream never announced: register it so the
-		// arguments still land under a stable dense index (Postel's law).
 		state = sc.registerItem(itemID, outputIndex, "function_call")
+		state.identityPending = true
 	}
 	if state.toolIndex < 0 {
+		return
+	}
+	if state.identityPending {
+		state.pendingArgs.WriteString(delta)
 		return
 	}
 	sc.emitToolCallStart(state)
@@ -432,6 +471,15 @@ func (sc *OpenAIChatStreamConverter) handleTerminal(eventType string, raw json.R
 	if response.Status == "failed" {
 		sc.failTerminalError(response.Error)
 		return
+	}
+	// A tool call whose output_item.added never arrived has no call id or
+	// name; its arguments are undeliverable, so the stream is unusable.
+	// Fail closed rather than reporting a successful finish.
+	for _, state := range sc.items {
+		if state.identityPending {
+			sc.failTruncated(errors.New("stream ended before output_item.added delivered the tool call identity"))
+			return
+		}
 	}
 	sc.ensureRoleChunk()
 	// The terminal response's output still owes the client any replay state
