@@ -104,7 +104,10 @@ func TestConvertMessagesToResponsesInput_RoleMapping(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantInstructions, instructions)
 			if len(tt.wantItems) == 0 {
-				assert.Nil(t, input)
+				// Instruction-only rows now return a non-nil empty slice
+				// (providers reject a nil input); the content stays empty.
+				require.NotNil(t, input)
+				assert.Empty(t, input)
 				return
 			}
 			assert.Equal(t, tt.wantItems, responsesInputItems(t, input))
@@ -486,6 +489,19 @@ func TestConvertMessagesToResponsesInput_RequiresInputOrInstructions(t *testing.
 		assert.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
 		assert.Contains(t, gatewayErr.Message, "messages")
 	}
+}
+
+func TestConvertMessagesToResponsesInput_InstructionOnlyHasEmptyNonNilInput(t *testing.T) {
+	// A system-only conversation yields instructions but no input items. The
+	// input must stay a non-nil empty slice: providers such as chatgpt reject
+	// a nil input even when instructions carry the prompt.
+	input, instructions, err := ConvertMessagesToResponsesInput([]core.Message{
+		{Role: "system", Content: "you are terse"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "you are terse", instructions)
+	require.NotNil(t, input)
+	assert.Empty(t, input)
 }
 
 func TestConvertMessagesToResponsesInput_StripsChatOnlyExtras(t *testing.T) {
