@@ -83,6 +83,7 @@ func (h *Handler) SystemOne(c *echo.Context) error {
 // @Failure      400      {object}  core.OpenAIErrorEnvelope
 // @Failure      401      {object}  core.OpenAIErrorEnvelope
 // @Failure      404      {object}  core.OpenAIErrorEnvelope
+// @Failure      429      {object}  core.OpenAIErrorEnvelope
 // @Failure      502      {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/systemone/permute [post]
 func (h *Handler) SystemOnePermute(c *echo.Context) error {
@@ -102,6 +103,7 @@ func (h *Handler) SystemOnePermute(c *echo.Context) error {
 // @Failure      400      {object}  core.OpenAIErrorEnvelope
 // @Failure      401      {object}  core.OpenAIErrorEnvelope
 // @Failure      404      {object}  core.OpenAIErrorEnvelope
+// @Failure      429      {object}  core.OpenAIErrorEnvelope
 // @Failure      502      {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/systemone/separate [post]
 func (h *Handler) SystemOneSeparate(c *echo.Context) error {

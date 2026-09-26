@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -58,7 +57,14 @@ func (s *translatedInferenceService) dispatchSystemOne(c *echo.Context, route sy
 	ctx := adm.dispatchContext(c.Request().Context())
 
 	headers := buildPassthroughHeaders(ctx, c.Request().Header)
-	resp, executed, meta, err := s.inference().ExecutePassthroughWithFailover(ctx, workflow,
+	// The client's Idempotency-Key reaches the primary through the request
+	// context, which failover attempts clear; forwarded as an explicit header
+	// it would also mark every failover target's different body.
+	headers.Del(core.IdempotencyKeyHeader)
+	eligible := func(selector core.ModelSelector, providerType string) bool {
+		return s.systemOneUnsupportedReason(route, selector, providerType) == ""
+	}
+	resp, executed, meta, err := s.inference().ExecutePassthroughWithFailover(ctx, workflow, eligible,
 		func(ctx context.Context, selector core.ModelSelector, providerType, providerName string) (*core.PassthroughResponse, error) {
 			return s.sendSystemOne(ctx, passthroughProvider, route, selector, providerType, providerName, headers, body)
 		})
@@ -86,10 +92,15 @@ func (s *translatedInferenceService) dispatchSystemOne(c *echo.Context, route sy
 	return proxyPassthroughResponse(c, s.logger, s.usageLogger, s.pricingResolver, meta.ProviderType, meta.ProviderName, route.endpoint, info, resp)
 }
 
-// sendSystemOne sends the body to one target under its own model name. A
-// target that cannot serve the route is refused before any call, so a
-// failover chain never carries System One traffic to a chat model, and an
-// upstream error status comes back as an error the failover policy can judge.
+// maxSystemOneErrorBodyBytes caps how much of an upstream error body is read
+// to build the gateway error, so a misbehaving upstream cannot make the
+// gateway buffer an unbounded body.
+const maxSystemOneErrorBodyBytes = 64 << 10
+
+// sendSystemOne sends the body to one target under its own model name. Only
+// targets that serve the route reach it: the handler checks the primary and
+// the failover sweep skips ineligible targets. An upstream error status comes
+// back as an error the failover policy can judge.
 func (s *translatedInferenceService) sendSystemOne(
 	ctx context.Context,
 	passthroughProvider core.RoutablePassthrough,
@@ -99,9 +110,6 @@ func (s *translatedInferenceService) sendSystemOne(
 	headers http.Header,
 	body []byte,
 ) (*core.PassthroughResponse, error) {
-	if reason := s.systemOneUnsupportedReason(route, selector, providerType); reason != "" {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("model %q %s", selector.QualifiedModel(), reason), nil)
-	}
 	forwarded, err := rewriteMessagesModel(body, selector.Model)
 	if err != nil {
 		return nil, core.NewInvalidRequestError("invalid request body: "+err.Error(), err)
@@ -125,7 +133,7 @@ func (s *translatedInferenceService) sendSystemOne(
 		return resp, nil
 	}
 	defer func() { _ = resp.Body.Close() }()
-	errorBody, err := io.ReadAll(resp.Body)
+	errorBody, err := io.ReadAll(io.LimitReader(resp.Body, maxSystemOneErrorBodyBytes))
 	if err != nil {
 		return nil, core.NewProviderError(providerType, http.StatusBadGateway, "failed to read provider error response", err)
 	}

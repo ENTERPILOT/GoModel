@@ -48,7 +48,7 @@ func TestTryFailoverResponseSkipsWhenContextCanceled(t *testing.T) {
 		return "", "", core.NewProviderError("openai", http.StatusBadGateway, "unexpected failover call", nil)
 	}
 
-	_, meta, err := tryFailoverResponse(ctx, o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+	_, meta, err := tryFailoverResponse(ctx, o, workflow, "openai/gpt-4o", "openai", primaryErr, nil, call)
 
 	require.False(t, called)
 	require.False(t, meta.UsedFailover)
@@ -66,7 +66,7 @@ func TestTryFailoverResponseAttemptsWhenContextLive(t *testing.T) {
 		return "ok", "openai", nil
 	}
 
-	resp, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+	resp, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, nil, call)
 
 	require.True(t, called)
 	require.True(t, meta.UsedFailover)
@@ -100,7 +100,7 @@ func TestTryFailoverResponseSkipsRateLimitedTargets(t *testing.T) {
 		return "ok", "anthropic", nil
 	}
 
-	resp, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+	resp, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, nil, call)
 
 	require.Len(t, attempted, 1)
 	require.Equal(t, "anthropic/claude", attempted[0])

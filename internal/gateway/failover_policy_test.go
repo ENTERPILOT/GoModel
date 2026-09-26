@@ -92,7 +92,7 @@ func TestTryFailoverResponseHonorsMaxAttempts(t *testing.T) {
 				return "", "", core.NewProviderError("openai", http.StatusBadGateway, selector.Model+" down", nil)
 			}
 
-			_, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+			_, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, nil, call)
 
 			require.False(t, meta.UsedFailover)
 			require.Error(t, err)
@@ -102,6 +102,25 @@ func TestTryFailoverResponseHonorsMaxAttempts(t *testing.T) {
 			require.ErrorContains(t, err, strings.TrimPrefix(want, "openai/")+" down", "want the error of %s", want)
 		})
 	}
+}
+
+// Targets that cannot serve the request (a chat model in a System One chain)
+// are skipped before a call, so they do not consume attempts either.
+func TestTryFailoverResponseIneligibleTargetsDoNotConsumeAttempts(t *testing.T) {
+	o, workflow := threeTargetFixture(&FailoverPolicy{MaxAttempts: 1})
+	primaryErr := core.NewProviderError("openai", http.StatusBadGateway, "primary down", nil)
+	eligible := func(selector core.ModelSelector, _ string) bool { return selector.Model != "a" }
+	var calls []string
+	call := func(selector core.ModelSelector, _, _ string) (string, string, error) {
+		calls = append(calls, selector.QualifiedModel())
+		return "ok", "openai", nil
+	}
+
+	_, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, eligible, call)
+
+	require.NoError(t, err)
+	require.True(t, meta.UsedFailover)
+	require.Equal(t, []string{"openai/b"}, calls)
 }
 
 // Targets skipped before a call (rate-limited routes) do not consume attempts.
@@ -115,7 +134,7 @@ func TestTryFailoverResponseMaxAttemptsCountsCallsOnly(t *testing.T) {
 		return "ok", "openai", nil
 	}
 
-	_, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+	_, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, nil, call)
 
 	require.True(t, meta.UsedFailover)
 	require.NoError(t, err)
@@ -150,7 +169,7 @@ func TestTryFailoverResponseSkipsWhenPolicyDoesNotMatch(t *testing.T) {
 		return "ok", "openai", nil
 	}
 
-	_, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+	_, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, nil, call)
 
 	require.False(t, called)
 	require.False(t, meta.UsedFailover)

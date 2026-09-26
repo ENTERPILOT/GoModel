@@ -18,6 +18,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/cache"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -31,6 +32,8 @@ type scriptedSystemOneProvider struct {
 	statuses map[string]int
 	catalog  map[string]core.Model
 	calls    []string
+	// idempotencyKeys records the explicit Idempotency-Key of each call.
+	idempotencyKeys []string
 }
 
 // newScriptedSystemOneProvider configures the given "<provider>/<model>"
@@ -58,6 +61,7 @@ func (p *scriptedSystemOneProvider) Passthrough(_ context.Context, _ string, req
 		return nil, err
 	}
 	p.calls = append(p.calls, req.ProviderName+" "+req.Endpoint+" "+sent.Model)
+	p.idempotencyKeys = append(p.idempotencyKeys, req.Headers.Get(core.IdempotencyKeyHeader))
 
 	status := p.statuses[sent.Model]
 	body := `{"error":{"message":"overloaded"}}`
@@ -141,8 +145,8 @@ func TestSystemOne_CacheKeyCoversTheState(t *testing.T) {
 
 // When the primary fails with an availability error, the request moves to
 // the virtual model's next target in its own dialect. A target without the
-// System One API is refused rather than called, and usage and audit carry
-// the model that answered.
+// System One API is skipped rather than called, and usage and audit carry the
+// model that answered.
 func TestSystemOne_FailsOverToTheNextSystemOneTarget(t *testing.T) {
 	provider := newScriptedSystemOneProvider(map[string]string{
 		"kev/kev-latest":               "jev",
@@ -167,14 +171,39 @@ func TestSystemOne_FailsOverToTheNextSystemOneTarget(t *testing.T) {
 	assert.Equal(t, "openrouter/typesafe/jev-1.13", entry.Data.Failover.TargetModel)
 	assert.Equal(t, "openrouter/typesafe/jev-1.13", entry.ResolvedModel)
 	assert.Equal(t, "openrouter", entry.Provider)
-	require.Len(t, entry.Data.Attempts, 3)
+	require.Len(t, entry.Data.Attempts, 2, "a skipped target is not an attempt")
 	assert.Equal(t, http.StatusServiceUnavailable, entry.Data.Attempts[0].StatusCode)
-	assert.False(t, entry.Data.Attempts[1].Success, "the chat model attempt is refused")
-	assert.True(t, entry.Data.Attempts[2].Success)
+	assert.True(t, entry.Data.Attempts[1].Success)
 
 	require.Len(t, usageLogger.entries, 1)
 	assert.Equal(t, "openrouter", usageLogger.entries[0].Provider)
 	assert.Equal(t, "typesafe/jev-1.13-answered", usageLogger.entries[0].Model)
+}
+
+// A skipped target does not count against max_attempts, so a chat model ahead
+// of a valid target in the chain cannot use up the only failover attempt. The
+// client's Idempotency-Key is not forwarded as a header: it reaches the
+// primary through the request context, and a failover target's different
+// body must not carry it.
+func TestSystemOne_FailoverSkipsTargetsWithoutUsingAttempts(t *testing.T) {
+	provider := newScriptedSystemOneProvider(map[string]string{
+		"kev/kev-latest":               "jev",
+		"openai/gpt-5-mini":            "openai",
+		"openrouter/typesafe/jev-1.13": "openrouter",
+	})
+	provider.statuses["kev-latest"] = http.StatusServiceUnavailable
+	handler := newHandler(provider, nil, nil, nil, nil, nil, failoverResolverStub{selectors: []core.ModelSelector{
+		{Provider: "openai", Model: "gpt-5-mini"},
+		{Provider: "openrouter", Model: "typesafe/jev-1.13"},
+	}}, nil)
+	handler.failoverPolicy = &gateway.FailoverPolicy{MaxAttempts: 1}
+
+	c, rec := echotest.Post(t, "/v1/systemone", systemOneRequest("kev/kev-latest"), echotest.WithHeader(core.IdempotencyKeyHeader, "client-key-1"))
+	require.NoError(t, handler.SystemOne(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	assert.Equal(t, []string{"kev systemone kev-latest", "openrouter systemone typesafe/jev-1.13"}, provider.calls)
+	assert.Equal(t, []string{"", ""}, provider.idempotencyKeys, "the key must not travel as an explicit header")
 }
 
 // A client error such as a malformed question is not an availability

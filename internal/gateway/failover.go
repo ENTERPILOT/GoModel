@@ -42,6 +42,7 @@ func tryFailoverResponse[T any](
 	workflow *core.Workflow,
 	model, provider string,
 	primaryErr error,
+	eligible func(selector core.ModelSelector, providerType string) bool,
 	call func(selector core.ModelSelector, providerType, providerName string) (T, string, error),
 ) (T, ExecutionMeta, error) {
 	var zero T
@@ -75,6 +76,16 @@ func tryFailoverResponse[T any](
 		qualified := selector.QualifiedModel()
 		providerType := o.ProviderTypeForSelector(selector, ProviderTypeFromWorkflow(workflow))
 		providerName := ResolvedProviderName(o.provider, selector, ProviderNameFromWorkflow(workflow))
+		// A target that cannot serve the request is skipped before it counts
+		// against the attempt cap, so it never crowds out a later valid one.
+		if eligible != nil && !eligible(selector, providerType) {
+			slog.Info("skipping failover target that cannot serve the request",
+				"request_id", requestID,
+				"to", qualified,
+				"provider_type", providerType,
+			)
+			continue
+		}
 		if o.routeGate != nil && !o.routeGate.RouteAvailable(providerName, qualified) {
 			slog.Info("skipping rate-limited failover target",
 				"request_id", requestID,
@@ -121,13 +132,14 @@ func executeWithFailoverResponse[T any](
 	workflow *core.Workflow,
 	model, provider string,
 	primary func() (T, string, string, error),
+	eligible func(selector core.ModelSelector, providerType string) bool,
 	failoverFn func(selector core.ModelSelector, providerType, providerName string) (T, string, error),
 ) (T, ExecutionMeta, error) {
 	resp, resolvedProviderType, resolvedProviderName, err := primary()
 	if err == nil {
 		return resp, ExecutionMeta{ProviderType: resolvedProviderType, ProviderName: resolvedProviderName}, nil
 	}
-	return tryFailoverResponse(ctx, o, workflow, model, provider, err, failoverFn)
+	return tryFailoverResponse(ctx, o, workflow, model, provider, err, eligible, failoverFn)
 }
 
 func executeTranslatedWithFailover[Req any, Resp any](
@@ -158,6 +170,7 @@ func executeTranslatedWithFailover[Req any, Resp any](
 			}
 			return resp, ResponseProviderType(ProviderTypeFromWorkflow(workflow), responseProvider), ProviderNameFromWorkflow(workflow), nil
 		},
+		nil,
 		func(selector core.ModelSelector, providerType, providerName string) (Resp, string, error) {
 			// A failover target gets a different request body, so it must not
 			// reuse the client's idempotency key.
@@ -265,9 +278,11 @@ type PassthroughCall func(ctx context.Context, selector core.ModelSelector, prov
 // the workflow's resolved route and then, while the failover policy allows,
 // against its failover targets. It is the native-endpoint counterpart of the
 // translated failover path: attempts are recorded the same way, but every
-// target receives the client's own dialect, so call must refuse a target that
-// cannot serve it. The selector that answered is returned with the response.
-func (o *InferenceOrchestrator) ExecutePassthroughWithFailover(ctx context.Context, workflow *core.Workflow, call PassthroughCall) (*core.PassthroughResponse, core.ModelSelector, ExecutionMeta, error) {
+// target receives the client's own dialect, so eligible must reject a
+// failover target that cannot serve it; rejected targets are skipped without
+// counting against the attempt cap. The selector that answered is returned
+// with the response.
+func (o *InferenceOrchestrator) ExecutePassthroughWithFailover(ctx context.Context, workflow *core.Workflow, eligible func(selector core.ModelSelector, providerType string) bool, call PassthroughCall) (*core.PassthroughResponse, core.ModelSelector, ExecutionMeta, error) {
 	primary := core.ModelSelector{}
 	if workflow != nil && workflow.Resolution != nil {
 		primary = workflow.Resolution.ResolvedSelector
@@ -294,6 +309,7 @@ func (o *InferenceOrchestrator) ExecutePassthroughWithFailover(ctx context.Conte
 			}
 			return answer{resp: resp, selector: primary}, providerType, providerName, nil
 		},
+		eligible,
 		func(selector core.ModelSelector, providerType, providerName string) (answer, string, error) {
 			// A failover target gets a different body, so it must not reuse
 			// the client's idempotency key.
