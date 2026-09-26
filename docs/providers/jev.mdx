@@ -23,7 +23,7 @@ There are three question types:
 
 The API is not OpenAI-compatible, and its answers have no chat equivalent, so
 GoModel forwards it natively instead of translating it: `POST /v1/systemone`
-is available as soon as a `jev` provider is configured, and
+is available as soon as a `jev` or `openrouter` provider is configured, and
 [passthrough](/features/passthrough-api) at `/p/jev/...` reaches every other
 upstream route. Chat, `/responses`, and `/v1/embeddings` return
 `invalid_request_error` for `jev` models, pointing at `/v1/systemone`.
@@ -147,20 +147,38 @@ GoModel:
 4. Relays the answer unchanged, and records it in the audit log (as a
    **System One** request) and in usage.
 
-The endpoint never translates. If a model resolves to a provider without the
-System One API, for example a virtual model pointing at a chat model, the
-request fails with `400 invalid_request_error` explaining why, and the gateway
-logs a warning. Without a `jev` provider, the route answers `404`.
-
-Two targets serve the API natively: `jev` providers (hosted Jev or a Kev
-server) and, once the endpoint is available,
-[OpenRouter](https://openrouter.ai/docs/guides/community/jev), which serves
-Jev at the same path (`openrouter/typesafe/jev-1.13`). A virtual model can therefore front a local
-Kev server and OpenRouter's `typesafe/jev-1.13` together. OpenRouter adds `id`,
-`provider`, and `usage.cost` to the answer, and GoModel records the reported
-cost.
+The endpoint never translates. A model that cannot answer System One fails
+with `400 invalid_request_error` explaining why, and the gateway logs a
+warning: one on a provider without the API, or one the catalog lists as a
+chat, embedding, or other generation model, such as a virtual model pointing
+at a chat model. Without a `jev` or `openrouter` provider, the route answers
+`404`.
 
 Response caching and failover do not apply to this endpoint yet.
+
+### Through OpenRouter
+
+[OpenRouter serves Jev natively](https://openrouter.ai/docs/guides/community/jev)
+at the same path, so an OpenRouter key alone is enough:
+
+```bash
+OPENROUTER_API_KEY=sk-or-...
+```
+
+OpenRouter's decision models appear in `GET /v1/models` as utility models,
+priced from OpenRouter's listing: `openrouter/typesafe/jev-1.13`,
+`openrouter/~typesafe/jev-latest` (tracks the newest Jev), and other decision
+models such as Kev 4B (`openrouter/jaredpalmer/kev-4b`). Name them that way in
+`model`. OpenRouter accepts `jev-latest` itself, but GoModel routes on its
+catalog IDs, so to keep the TypeSafe SDK's plain `jev-latest` working, add a
+[virtual model](/features/virtual-models) `jev-latest` that targets
+`openrouter/~typesafe/jev-latest`. Chat models on the same provider are
+rejected, since they have no System One API.
+
+The answer carries OpenRouter's `id`, `provider`, and `usage.cost`, and GoModel
+records that reported cost with the request's usage. With a `jev` provider
+configured as well, one virtual model can front a local Kev server and
+OpenRouter's Jev together.
 
 ### Guardrails
 

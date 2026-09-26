@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/goccy/go-json"
@@ -20,18 +21,13 @@ import (
 const (
 	systemOnePath     = "/v1/systemone"
 	systemOneEndpoint = "systemone"
-	// jevProviderType serves TypeSafe's hosted Jev API and self-hosted Kev
-	// servers; configuring one is what makes /v1/systemone available.
-	jevProviderType = "jev"
 )
 
 // systemOneProviderTypes are the provider types that serve the System One API
-// natively. OpenRouter serves Jev at the same path with the same request and
-// answer shapes, so it can back a virtual model next to a jev provider.
-var systemOneProviderTypes = map[string]struct{}{
-	jevProviderType: {},
-	"openrouter":    {},
-}
+// natively: jev (TypeSafe's hosted Jev and self-hosted Kev servers) and
+// OpenRouter, which serves Jev and Kev at the same path with the same request
+// and answer shapes. Configuring either makes /v1/systemone available.
+var systemOneProviderTypes = []string{"jev", "openrouter"}
 
 // SystemOne handles POST /v1/systemone.
 //
@@ -42,7 +38,7 @@ var systemOneProviderTypes = map[string]struct{}{
 // provider has no System One API is rejected.
 //
 // @Summary      Evaluate a System One decision request (Jev / Kev)
-// @Description  Available when a jev provider is configured. The request and answer follow TypeSafe's System One API; models on providers without that API are rejected rather than translated.
+// @Description  Available when a jev or openrouter provider is configured. The request and answer follow TypeSafe's System One API; models on providers without that API are rejected rather than translated.
 // @Tags         systemone
 // @Accept       json
 // @Produce      json
@@ -62,7 +58,7 @@ func (h *Handler) SystemOne(c *echo.Context) error {
 // SystemOne resolves, guards, and forwards one System One request.
 func (s *translatedInferenceService) SystemOne(c *echo.Context) error {
 	if !s.systemOneAvailable() {
-		return handleError(c, core.NewNotFoundError("POST "+systemOnePath+" is available only when a jev provider is configured"))
+		return handleError(c, core.NewNotFoundError("POST "+systemOnePath+" is available only when a jev or openrouter provider is configured"))
 	}
 	body, err := requestBodyBytes(c)
 	if err != nil {
@@ -87,9 +83,8 @@ func (s *translatedInferenceService) SystemOne(c *echo.Context) error {
 			return handleError(c, err)
 		}
 	}
-	providerType := strings.TrimSpace(resolution.ProviderType)
-	if _, ok := systemOneProviderTypes[providerType]; !ok {
-		return handleError(c, systemOneUnsupportedModelError(c, resolution))
+	if reason := s.systemOneUnsupportedReason(resolution); reason != "" {
+		return handleError(c, systemOneUnsupportedModelError(c, resolution, reason))
 	}
 
 	body, err = s.guardSystemOneState(c, workflow, &req, body)
@@ -103,12 +98,20 @@ func (s *translatedInferenceService) SystemOne(c *echo.Context) error {
 	return s.dispatchSystemOne(c, workflow, model, body)
 }
 
-// systemOneAvailable reports whether a jev provider is configured. It is
-// checked per request rather than at route registration so a provider added
-// at runtime makes the endpoint available without a restart.
+// systemOneAvailable reports whether a provider that serves System One is
+// configured. It is checked per request rather than at route registration so
+// a provider added at runtime makes the endpoint available without a restart.
 func (s *translatedInferenceService) systemOneAvailable() bool {
 	named, ok := s.provider.(core.ProviderTypeNameResolver)
-	return ok && strings.TrimSpace(named.GetProviderNameForType(jevProviderType)) != ""
+	if !ok {
+		return false
+	}
+	for _, providerType := range systemOneProviderTypes {
+		if strings.TrimSpace(named.GetProviderNameForType(providerType)) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // systemOneWorkflow returns the request's workflow with its model resolved.
@@ -131,26 +134,53 @@ func (s *translatedInferenceService) systemOneWorkflow(c *echo.Context, model st
 	return workflow, nil
 }
 
-// systemOneUnsupportedModelError explains a request whose model routes to a
-// provider without the System One API. It is also logged: a virtual model
-// that sends System One traffic to a chat model is an operator mistake the
-// caller cannot fix.
-func systemOneUnsupportedModelError(c *echo.Context, resolution *core.RequestModelResolution) error {
+// modelCatalog describes single catalog models; the provider router
+// implements it.
+type modelCatalog interface {
+	LookupModel(model string) (*core.Model, bool)
+}
+
+// systemOneUnsupportedReason explains why the resolved model cannot answer a
+// System One request, or returns "" when it can. The provider must serve the
+// API, and since OpenRouter also serves chat models, the model must not be
+// catalogued with a generation mode. A model the catalog does not describe is
+// given the benefit of the doubt: the upstream reports it if it is wrong.
+func (s *translatedInferenceService) systemOneUnsupportedReason(resolution *core.RequestModelResolution) string {
+	providerType := strings.TrimSpace(resolution.ProviderType)
+	if !slices.Contains(systemOneProviderTypes, providerType) {
+		return fmt.Sprintf("is served by a %s provider, which has no System One API", providerType)
+	}
+	catalog, ok := s.provider.(modelCatalog)
+	if !ok {
+		return ""
+	}
+	model, ok := catalog.LookupModel(resolution.ResolvedQualifiedModel())
+	if !ok || model == nil || model.Metadata == nil || len(model.Metadata.Modes) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("is a %s model, not a System One model", strings.Join(model.Metadata.Modes, "/"))
+}
+
+// systemOneUnsupportedModelError explains a request whose model cannot answer
+// System One. It is also logged: a virtual model that sends System One
+// traffic to a chat model is an operator mistake the caller cannot fix.
+func systemOneUnsupportedModelError(c *echo.Context, resolution *core.RequestModelResolution, reason string) error {
 	requested := resolution.RequestedQualifiedModel()
 	resolved := resolution.ResolvedQualifiedModel()
-	slog.Warn("System One request routed to a provider without the System One API",
+	slog.Warn("System One request routed to a model without the System One API",
 		"request_id", requestIDFromContextOrHeader(c.Request()),
 		"requested_model", requested,
 		"resolved_model", resolved,
 		"provider_type", resolution.ProviderType,
+		"reason", reason,
 	)
 	target := fmt.Sprintf("%q", requested)
 	if resolved != requested {
 		target += fmt.Sprintf(" (resolved to %q)", resolved)
 	}
 	return core.NewInvalidRequestError(fmt.Sprintf(
-		"model %s is served by a %s provider, which has no System One API; %s forwards requests natively and does not translate them to other APIs, so use a jev model",
-		target, resolution.ProviderType, systemOnePath,
+		"model %s %s; %s forwards requests natively and does not translate them to other APIs, so use a System One model such as a jev model or OpenRouter's typesafe/jev-1.13",
+		target, reason, systemOnePath,
 	), nil).WithParam("model")
 }
 

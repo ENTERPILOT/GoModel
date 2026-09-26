@@ -7506,7 +7506,7 @@ const docTemplate = `{
         },
         "/v1/systemone": {
             "post": {
-                "description": "Available when a jev provider is configured. The request and answer follow TypeSafe's System One API; models on providers without that API are rejected rather than translated.",
+                "description": "Available when a jev or openrouter provider is configured. The request and answer follow TypeSafe's System One API; models on providers without that API are rejected rather than translated.",
                 "consumes": [
                     "application/json"
                 ],
