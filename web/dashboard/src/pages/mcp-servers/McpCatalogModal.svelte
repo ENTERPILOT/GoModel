@@ -1,7 +1,8 @@
 <script>
   // Catalog inspector: read-only view of what one server currently exposes
-  // (tools, prompts, resources, resource templates). Tools and prompts also
-  // show their namespaced name on the aggregated /mcp endpoint.
+  // (tools, prompts, resources, resource templates), plus the tools its
+  // filters exclude. Exposed tools and prompts also show their namespaced
+  // name on the aggregated /mcp endpoint.
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import DialogCloseButton from "$lib/components/atoms/DialogCloseButton.svelte";
   import Modal from "$lib/components/atoms/Modal.svelte";
@@ -9,12 +10,18 @@
   import {
     mcpCatalogIsEmpty,
     mcpCatalogSections,
+    mcpServerSlug,
     mcpServerStatus,
     mcpServerStatusClass,
   } from "./mcp-servers.js";
   import * as m from "$lib/paraglide/messages.js";
 
   const sections = $derived(mcpCatalogSections(mcpServers.catalog));
+  const editable = $derived(
+    mcpServers.servers.some(
+      (server) => mcpServerSlug(server) === mcpServers.catalog.server && !server.managed,
+    ),
+  );
 </script>
 
 <Modal open={mcpServers.catalogOpen} variant="editor" onclose={() => mcpServers.closeCatalog()}>
@@ -47,12 +54,26 @@
       {#each sections as section (section.key)}
         <section class="form-section mcp-catalog-section">
           <h4 class="form-field-label">{section.title}</h4>
-          <ul class="mcp-catalog-list">
+          {#if section.hint}
+            <p class="form-hint mcp-catalog-section-hint">{section.hint}</p>
+          {/if}
+          <ul class="mcp-catalog-list" class:mcp-catalog-list-excluded={section.excluded}>
             {#each section.items as item (item.key)}
               <li class="mcp-catalog-item">
                 <code class="mcp-catalog-item-name mono" title={item.aggregated || item.name}
                   >{item.name}</code
                 >
+                {#if item.readOnly}
+                  <span class="mcp-catalog-badge" title={m.mcp_tools_hint_title()}
+                    >{m.mcp_tools_read_only()}</span
+                  >
+                {/if}
+                {#if item.destructive}
+                  <span
+                    class="mcp-catalog-badge mcp-catalog-badge-danger"
+                    title={m.mcp_tools_hint_title()}>{m.mcp_tools_destructive()}</span
+                  >
+                {/if}
                 {#if item.aggregated}
                   <div
                     class="mcp-catalog-item-aggregated mono"
@@ -76,6 +97,11 @@
     {/if}
 
     <div class="form-actions">
+      {#if editable && !mcpServers.catalogLoading && !mcpServers.catalogError}
+        <button type="button" class="btn" onclick={() => mcpServers.chooseToolsFromCatalog()}
+          >{m.mcp_catalog_choose_tools()}</button
+        >
+      {/if}
       <button type="button" class="btn" onclick={() => mcpServers.closeCatalog()}>{m.mcp_close()}</button>
     </div>
   </div>
@@ -107,9 +133,36 @@
     gap: 12px;
   }
 
+  .mcp-catalog-section-hint {
+    margin: 0 0 8px;
+    font-size: 12px;
+  }
+
   .mcp-catalog-item-name {
     font-size: 13px;
     overflow-wrap: anywhere;
+  }
+
+  .mcp-catalog-list-excluded .mcp-catalog-item-name {
+    color: var(--text-muted);
+    text-decoration: line-through;
+  }
+
+  .mcp-catalog-badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 6px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 18px;
+    vertical-align: middle;
+  }
+
+  .mcp-catalog-badge-danger {
+    border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+    color: var(--danger);
   }
 
   .mcp-catalog-item-aggregated {

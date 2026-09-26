@@ -2,12 +2,14 @@
   // MCP server editor modal (create + edit), built on the shared EditorDialog
   // shell. The slug is derived from the name until manually edited and becomes
   // immutable once the server exists. Saved header values arrive masked as
-  // "***"; leaving them unchanged keeps the stored secret on save.
+  // "***"; leaving them unchanged keeps the stored secret on save. Tool
+  // exposure lives in McpToolPicker.
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import EnabledToggle from "$lib/components/atoms/EnabledToggle.svelte";
   import FormField from "$lib/components/molecules/FormField.svelte";
   import EditorDialog from "$lib/components/organisms/EditorDialog.svelte";
+  import McpToolPicker from "./McpToolPicker.svelte";
   import { mcpServers } from "./mcpServers.svelte.js";
   import { Plus, Trash2 } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
@@ -125,6 +127,8 @@
     </div>
   </div>
 
+  <McpToolPicker />
+
   <details
     class="mcp-server-advanced"
     open={mcpServers.advancedOpen}
@@ -149,28 +153,6 @@
       </div>
 
       <div class="form-field">
-        <label class="form-field-label" for="mcp-server-allowed-tools">{m.mcp_allowed_tools()}</label>
-        <input
-          id="mcp-server-allowed-tools"
-          type="text"
-          class="mono"
-          placeholder={m.mcp_allowed_tools_placeholder()}
-          bind:value={mcpServers.form.allowed_tools}
-        />
-      </div>
-
-      <div class="form-field">
-        <label class="form-field-label" for="mcp-server-disallowed-tools">{m.mcp_disallowed_tools()}</label>
-        <input
-          id="mcp-server-disallowed-tools"
-          type="text"
-          class="mono"
-          placeholder={m.mcp_disallowed_tools_placeholder()}
-          bind:value={mcpServers.form.disallowed_tools}
-        />
-      </div>
-
-      <div class="form-field">
         <label class="form-field-label" for="mcp-server-user-paths">{m.mcp_user_paths()}</label>
         <textarea
           id="mcp-server-user-paths"
@@ -179,6 +161,20 @@
           placeholder={"/\n/team/alpha"}
           bind:value={mcpServers.form.user_paths}
         ></textarea>
+      </div>
+
+      <div class="form-field">
+        <label class="form-field-label" for="mcp-server-disallowed-user-paths"
+          >{m.mcp_disallowed_user_paths()}</label
+        >
+        <textarea
+          id="mcp-server-disallowed-user-paths"
+          rows="3"
+          class="mono"
+          placeholder={"/contractors"}
+          bind:value={mcpServers.form.disallowed_user_paths}
+        ></textarea>
+        <small class="form-hint">{m.mcp_disallowed_user_paths_help()}</small>
       </div>
 
       <div class="form-field">

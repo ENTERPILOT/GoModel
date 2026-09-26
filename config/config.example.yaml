@@ -144,9 +144,10 @@ models:
 #       headers:
 #         Authorization: "Bearer ${GITHUB_PAT}"
 #       description: GitHub tools
-#       allowed_tools: [] # allowlist of upstream tool names; empty = all
-#       disallowed_tools: [] # blocklist, applied after the allowlist
+#       allowed_tools: [] # allowlist of upstream tool names; empty = all (new upstream tools stay hidden when set)
+#       disallowed_tools: [] # tools to exclude, applied after the allowlist; edits apply without a reconnect
 #       user_paths: [] # restrict visibility to these user-path subtrees; empty = everyone
+#       disallowed_user_paths: [] # hide from these subtrees, even inside user_paths
 #       tool_timeout: 30s # per tools/call upper bound
 #     local-files: # stdio servers spawn a subprocess and are declarative-only:
 #       transport: stdio # the admin API and dashboard reject them by design
