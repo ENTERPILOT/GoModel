@@ -440,6 +440,11 @@ func TestToolFilterEditAppliesInPlaceAndBlocksOpenSessions(t *testing.T) {
 	assert.Equal(t, 1, view.ExcludedToolCount)
 	assert.Equal(t, []string{"write"}, view.Spec.DisallowedTools)
 
+	service.manager.Apply([]ServerSpec{spec})
+	unchanged, ok := service.manager.get("alpha")
+	require.True(t, ok)
+	assert.Same(t, after, unchanged, "re-applying an identical spec must keep the upstream")
+
 	_, err := openSession.CallTool(context.Background(), &mcp.CallToolParams{Name: "alpha_write"})
 	require.Error(t, err, "an excluded tool must not be callable from a session opened before the edit")
 	assert.Contains(t, err.Error(), "excluded")
