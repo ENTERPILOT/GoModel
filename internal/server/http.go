@@ -496,6 +496,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.POST("/v1/audio/translations", handler.AudioTranslations)
 	e.POST("/v1/images/generations", handler.ImageGenerations)
 	e.POST("/v1/images/edits", handler.ImageEdits)
+	// System One decisions (Jev / Kev). The handler answers 404 until a jev
+	// provider is configured, so the route costs nothing otherwise.
+	e.POST("/v1/systemone", handler.SystemOne)
 	if cfg == nil || cfg.RealtimeEnabled {
 		e.GET("/v1/realtime", handler.Realtime)
 		e.POST("/v1/realtime/calls", handler.RealtimeCalls)

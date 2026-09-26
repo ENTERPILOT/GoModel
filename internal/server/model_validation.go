@@ -103,7 +103,7 @@ func deriveWorkflowWithPolicy(
 		}
 		return workflow, nil
 
-	case core.OperationChatCompletions, core.OperationResponses, core.OperationEmbeddings:
+	case core.OperationChatCompletions, core.OperationResponses, core.OperationEmbeddings, core.OperationSystemOne:
 		workflow.Mode = core.ExecutionModeTranslated
 		if desc.BodyMode != core.BodyModeJSON {
 			// Responses lifecycle routes (GET/DELETE /v1/responses/{id},

@@ -3,8 +3,8 @@
 // API. System One is a decision API rather than a text-generation one: a
 // request carries a state and a map of typed questions (noul, choice, score)
 // and the answer is a calibrated probability per question. It has no
-// OpenAI-compatible surface, so the gateway reaches it through native
-// passthrough at /p/jev/systemone.
+// OpenAI-compatible surface, so the gateway forwards it natively, at
+// POST /v1/systemone or through passthrough at /p/jev/systemone.
 package jev
 
 import (
@@ -110,12 +110,12 @@ func (p *Provider) Embeddings(_ context.Context, _ *core.EmbeddingRequest) (*cor
 }
 
 func unsupported(surface string) error {
-	return core.NewInvalidRequestError("jev does not support "+surface+"; send System One requests to /p/jev/systemone", nil)
+	return core.NewInvalidRequestError("jev does not support "+surface+"; it answers System One decision requests, which GoModel does not translate: send them to POST /v1/systemone", nil)
 }
 
-// Passthrough forwards a System One request as the client wrote it. It is the
-// only way to reach the evaluation endpoint, since the request and answer
-// shapes have no OpenAI equivalent.
+// Passthrough forwards a System One request as the client wrote it. Both
+// /v1/systemone and /p/jev/... reach the evaluation endpoint through it,
+// since the request and answer shapes have no OpenAI equivalent.
 func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("passthrough request is required", nil)

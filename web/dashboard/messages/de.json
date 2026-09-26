@@ -233,6 +233,7 @@
   "audit_type_embeddings": "Embeddings",
   "audit_type_audio": "Audio",
   "audit_type_images": "Bilder",
+  "audit_type_systemone": "System One",
   "audit_type_batches": "Batches & Dateien",
   "audit_type_realtime": "Realtime",
   "audit_type_passthrough": "Passthrough",

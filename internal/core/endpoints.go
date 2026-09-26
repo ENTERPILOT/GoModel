@@ -33,6 +33,7 @@ const (
 	OperationRealtime            Operation = "realtime"
 	OperationProviderPassthrough Operation = "provider_passthrough"
 	OperationMCP                 Operation = "mcp"
+	OperationSystemOne           Operation = "systemone"
 )
 
 // EndpointDescriptor centralizes the transport-facing classification of model and provider routes.
@@ -169,6 +170,16 @@ func describeEndpointPath(path string) EndpointDescriptor {
 			Dialect:          "openai_compat",
 			Operation:        OperationImageEdits,
 		}
+	case path == "/v1/systemone":
+		// TypeSafe's System One decision API (Jev, Kev). It has no canonical
+		// translation: the body is forwarded to a System One provider
+		// unchanged, apart from the routed model and guardrail edits to state.
+		return EndpointDescriptor{
+			ModelInteraction: true,
+			IngressManaged:   true,
+			Dialect:          "systemone",
+			Operation:        OperationSystemOne,
+		}
 	case isRealtimePath(path):
 		// The realtime endpoints relay the provider's schema verbatim: /v1/realtime
 		// upgrades to a websocket, /v1/realtime/calls exchanges WebRTC SDP, and
@@ -238,7 +249,7 @@ func bodyModeForEndpoint(method, path string, operation Operation) BodyMode {
 			return BodyModeMultipart
 		}
 		return BodyModeNone
-	case OperationAudioSpeech, OperationImageGenerations:
+	case OperationAudioSpeech, OperationImageGenerations, OperationSystemOne:
 		return BodyModeJSON
 	case OperationAudioTranscriptions, OperationAudioTranslations, OperationImageEdits:
 		return BodyModeMultipart

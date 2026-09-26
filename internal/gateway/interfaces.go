@@ -53,6 +53,12 @@ type TranslatedRequestPatcher interface {
 	PatchResponsesRequest(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesRequest, error)
 }
 
+// SystemOneRequestPatcher is an optional TranslatedRequestPatcher capability:
+// it runs the prompt phase over a System One decision request's state.
+type SystemOneRequestPatcher interface {
+	PatchSystemOneRequest(ctx context.Context, req *core.SystemOneRequest) (*core.SystemOneRequest, error)
+}
+
 // PromptContentEditor is an optional TranslatedRequestPatcher capability: it
 // reports whether the prompt phase may rewrite the content of this request.
 // Only a rewriting prompt phase (anonymization, redaction) needs the replayed

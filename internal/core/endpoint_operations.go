@@ -29,6 +29,7 @@ var operationPaths = map[Operation]OperationPaths{
 		"/v1/realtime/translations", "/v1/realtime/translations/calls", "/v1/realtime/translations/client_secrets",
 	}},
 	OperationMCP:                 {Prefixes: []string{"/mcp"}},
+	OperationSystemOne:           {Exact: []string{"/v1/systemone"}},
 	OperationProviderPassthrough: {Prefixes: []string{"/p"}},
 }
 

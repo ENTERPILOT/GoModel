@@ -20,6 +20,8 @@ test("auditTypeForPath mirrors the gateway endpoint classification", () => {
     ["/v1/files/f_1/content", "batches"],
     ["/v1/audio/transcriptions?x=1", "audio"],
     ["/v1/images/edits/", "images"],
+    ["/v1/systemone", "systemone"],
+    ["/v1/systemone/permute", ""],
     ["/v1/realtime/translations/calls", "realtime"],
     ["/mcp", "mcp"],
     ["/mcp/github", "mcp"],
