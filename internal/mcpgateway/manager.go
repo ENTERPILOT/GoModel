@@ -46,7 +46,8 @@ func NewManager(httpClient *http.Client) *Manager {
 // Apply reconciles the running upstreams with the desired specs: removed
 // servers are closed, new servers are added, changed servers are redialed.
 // Unchanged servers keep their live session and catalog; servers whose only
-// change is the tool filters keep their session and re-filter in place.
+// change is the access policy (tool filters, user-path scopes) keep their
+// session and apply the new policy in place.
 // Initial connects run asynchronously so startup and admin edits never block
 // on upstream IO.
 func (m *Manager) Apply(specs []ServerSpec) {
@@ -66,8 +67,8 @@ func (m *Manager) Apply(specs []ServerSpec) {
 				delete(desired, name)
 				continue
 			}
-			if current.withoutToolFilters().equal(spec.withoutToolFilters()) {
-				existing.setToolFilters(spec.AllowedTools, spec.DisallowedTools)
+			if current.withoutAccessPolicy().equal(spec.withoutAccessPolicy()) {
+				existing.setAccessPolicy(spec)
 				delete(desired, name)
 				continue
 			}

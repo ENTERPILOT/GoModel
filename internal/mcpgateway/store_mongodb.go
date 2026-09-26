@@ -13,19 +13,20 @@ import (
 )
 
 type mongoMCPServerDocument struct {
-	ID                 string            `bson:"_id"`
-	DisplayName        string            `bson:"display_name,omitempty"`
-	URL                string            `bson:"url,omitempty"`
-	Transport          string            `bson:"transport,omitempty"`
-	Headers            map[string]string `bson:"headers,omitempty"`
-	Description        string            `bson:"description,omitempty"`
-	Enabled            bool              `bson:"enabled"`
-	AllowedTools       []string          `bson:"allowed_tools,omitempty"`
-	DisallowedTools    []string          `bson:"disallowed_tools,omitempty"`
-	UserPaths          []string          `bson:"user_paths,omitempty"`
-	ToolTimeoutSeconds int               `bson:"tool_timeout_seconds,omitempty"`
-	CreatedAt          time.Time         `bson:"created_at"`
-	UpdatedAt          time.Time         `bson:"updated_at"`
+	ID                  string            `bson:"_id"`
+	DisplayName         string            `bson:"display_name,omitempty"`
+	URL                 string            `bson:"url,omitempty"`
+	Transport           string            `bson:"transport,omitempty"`
+	Headers             map[string]string `bson:"headers,omitempty"`
+	Description         string            `bson:"description,omitempty"`
+	Enabled             bool              `bson:"enabled"`
+	AllowedTools        []string          `bson:"allowed_tools,omitempty"`
+	DisallowedTools     []string          `bson:"disallowed_tools,omitempty"`
+	UserPaths           []string          `bson:"user_paths,omitempty"`
+	DisallowedUserPaths []string          `bson:"disallowed_user_paths,omitempty"`
+	ToolTimeoutSeconds  int               `bson:"tool_timeout_seconds,omitempty"`
+	CreatedAt           time.Time         `bson:"created_at"`
+	UpdatedAt           time.Time         `bson:"updated_at"`
 }
 
 type mongoMCPServerIDFilter struct {
@@ -94,17 +95,18 @@ func (s *MongoDBStore) Upsert(ctx context.Context, server ManagedServer) error {
 	stampUpsert(&server)
 	update := bson.M{
 		"$set": bson.M{
-			"display_name":         server.DisplayName,
-			"url":                  server.URL,
-			"transport":            server.Transport,
-			"headers":              server.Headers,
-			"description":          server.Description,
-			"enabled":              server.Enabled,
-			"allowed_tools":        server.AllowedTools,
-			"disallowed_tools":     server.DisallowedTools,
-			"user_paths":           server.UserPaths,
-			"tool_timeout_seconds": server.ToolTimeoutSeconds,
-			"updated_at":           server.UpdatedAt,
+			"display_name":          server.DisplayName,
+			"url":                   server.URL,
+			"transport":             server.Transport,
+			"headers":               server.Headers,
+			"description":           server.Description,
+			"enabled":               server.Enabled,
+			"allowed_tools":         server.AllowedTools,
+			"disallowed_tools":      server.DisallowedTools,
+			"user_paths":            server.UserPaths,
+			"disallowed_user_paths": server.DisallowedUserPaths,
+			"tool_timeout_seconds":  server.ToolTimeoutSeconds,
+			"updated_at":            server.UpdatedAt,
 		},
 		"$setOnInsert": bson.M{
 			"created_at": server.CreatedAt,
@@ -158,6 +160,9 @@ func managedServerFromMongo(doc mongoMCPServerDocument) ManagedServer {
 	}
 	if len(doc.UserPaths) > 0 {
 		server.UserPaths = append([]string(nil), doc.UserPaths...)
+	}
+	if len(doc.DisallowedUserPaths) > 0 {
+		server.DisallowedUserPaths = append([]string(nil), doc.DisallowedUserPaths...)
 	}
 	return server
 }

@@ -223,7 +223,7 @@ func TestUpsertMCPServer_CreatesAndReturnsRedactedView(t *testing.T) {
 	fake := newMCPAdminFake()
 	h := newMCPHandler(fake)
 
-	body := `{"name":"notion","url":"https://mcp.notion.com/mcp","headers":{"Authorization":"Bearer real-token"},"description":"notes","user_paths":["/team"]}`
+	body := `{"name":"notion","url":"https://mcp.notion.com/mcp","headers":{"Authorization":"Bearer real-token"},"description":"notes","user_paths":["/team"],"disallowed_user_paths":[" team/contractors/ "]}`
 	c, rec := echotest.Request(t, http.MethodPut, "/admin/mcp-servers", body)
 	err := h.UpsertMCPServer(c)
 	require.NoError(t, err)
@@ -240,6 +240,8 @@ func TestUpsertMCPServer_CreatesAndReturnsRedactedView(t *testing.T) {
 	stored, ok := fake.stored["notion"]
 	require.True(t, ok, "upsert did not reach the service")
 	assert.Equal(t, "Bearer real-token", stored.Headers["Authorization"])
+	assert.Equal(t, []string{"/team/contractors"}, stored.DisallowedUserPaths)
+	assert.Equal(t, []string{"/team/contractors"}, view.DisallowedUserPaths)
 }
 
 func TestUpsertMCPServer_PreservesRedactedHeadersAndEnabled(t *testing.T) {

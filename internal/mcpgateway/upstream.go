@@ -79,23 +79,25 @@ func (u *upstream) view() ServerView {
 	}
 }
 
-// currentSpec returns the spec under the state lock; tool filters can change
-// in place (setToolFilters), so readers of those fields must not race it.
+// currentSpec returns the spec under the state lock; the access policy can
+// change in place (setAccessPolicy), so readers of it must not race it.
 func (u *upstream) currentSpec() ServerSpec {
 	u.stateMu.Lock()
 	defer u.stateMu.Unlock()
 	return u.spec
 }
 
-// setToolFilters swaps the operator tool filters and re-filters the cached
-// catalog without touching the upstream session. Filters are gateway policy,
-// so changing them never needs a redial.
-func (u *upstream) setToolFilters(allowed, disallowed []string) {
+// setAccessPolicy swaps the tool filters and user-path scopes from spec and
+// re-filters the cached catalog without touching the upstream session. They
+// are gateway policy, so changing them never needs a redial.
+func (u *upstream) setAccessPolicy(spec ServerSpec) {
 	u.stateMu.Lock()
 	defer u.stateMu.Unlock()
-	u.spec.AllowedTools = allowed
-	u.spec.DisallowedTools = disallowed
-	u.catalog = u.catalog.withToolFilters(allowed, disallowed)
+	u.spec.AllowedTools = spec.AllowedTools
+	u.spec.DisallowedTools = spec.DisallowedTools
+	u.spec.UserPaths = spec.UserPaths
+	u.spec.DisallowedUserPaths = spec.DisallowedUserPaths
+	u.catalog = u.catalog.withToolFilters(spec.AllowedTools, spec.DisallowedTools)
 }
 
 // toolExposed reports whether the current filters expose name. Downstream

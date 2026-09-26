@@ -252,6 +252,7 @@ test("buildMcpServerPayload produces the normalized PUT payload", () => {
       tool_mode: "allow",
       tool_names: ["search_issues", " get_file ", "search_issues"],
       user_paths: "/team/alpha\n/team/beta",
+      disallowed_user_paths: " /team/alpha/contractors \n\n",
       tool_timeout_seconds: "45",
     },
     "edit",
@@ -270,6 +271,7 @@ test("buildMcpServerPayload produces the normalized PUT payload", () => {
     allowed_tools: ["search_issues", "get_file"],
     disallowed_tools: [],
     user_paths: ["/team/alpha", "/team/beta"],
+    disallowed_user_paths: ["/team/alpha/contractors"],
     tool_timeout_seconds: 45,
   });
 });
@@ -361,6 +363,7 @@ test("mcpServerFormFromServer prefills the editor form", () => {
       allowed_tools: ["search_issues"],
       disallowed_tools: ["delete_repo"],
       user_paths: ["/team/alpha"],
+      disallowed_user_paths: ["/team/alpha/contractors"],
       tool_timeout_seconds: 45,
     }),
     {
@@ -374,6 +377,7 @@ test("mcpServerFormFromServer prefills the editor form", () => {
       tool_mode: "allow",
       tool_names: ["search_issues"],
       user_paths: "/team/alpha",
+      disallowed_user_paths: "/team/alpha/contractors",
       tool_timeout_seconds: "45",
     },
   );

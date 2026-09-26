@@ -1197,6 +1197,8 @@
   "mcp_connected_since": "Connected since {date}",
   "mcp_local_command": "local command",
   "mcp_sub_counts": "{prompts} prompts · {resources} resources",
+  "mcp_disallowed_user_paths": "Excluded user paths",
+  "mcp_disallowed_user_paths_help": "Callers in these subtrees never see this server, even inside an allowed user path.",
   "mcp_name_required": "Name is required.",
   "mcp_slug_invalid": "Slug must use 1–64 lowercase ASCII letters, numbers, hyphens, or underscores.",
   "mcp_slug_in_use": "Slug \"{slug}\" is already in use.",

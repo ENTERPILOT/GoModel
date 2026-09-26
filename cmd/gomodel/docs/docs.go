@@ -7994,6 +7994,12 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "disallowed_user_paths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "enabled": {
                     "type": "boolean"
                 },
@@ -8484,6 +8490,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "disallowed_tools": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "disallowed_user_paths": {
                     "type": "array",
                     "items": {
                         "type": "string"

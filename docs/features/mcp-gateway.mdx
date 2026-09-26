@@ -17,8 +17,8 @@ the same way it already sits between your apps and model providers:
 - **Aggregation with namespacing.** Tools and prompts from every configured
   server appear in one catalog as `{slug}_{name}` (for example
   `github_create_issue`), in a stable, deterministic order.
-- **Least-privilege discovery.** A server can be scoped to `user_paths`;
-  callers outside the subtree do not merely get errors — the tools never
+- **Least-privilege discovery.** A server can be scoped to `user_paths` and
+  carved out with `disallowed_user_paths`; hidden callers do not merely get errors — the tools never
   appear in their `tools/list` at all. Operator-level `allowed_tools` /
   `disallowed_tools` filters trim noisy servers, which keeps agent context
   small.
@@ -84,8 +84,8 @@ Open **MCP Servers** and click **Add MCP Server**. Fill in:
   saved values are shown redacted afterward.
 - **Tools** — check the tools clients may use; see
   [Choose which tools each server exposes](#choose-which-tools-each-server-exposes).
-- Optional **user paths** under **Advanced** to scope visibility, the same
-  field available in `config.yaml`.
+- Optional **user paths** and **excluded user paths** under **Advanced**; see
+  [Limit who can see a server](#limit-who-can-see-a-server).
 
 Save to connect immediately. Use the row's refresh icon to force a
 **Reconnect**, the list icon to open the catalog inspector, and the pencil
@@ -112,6 +112,7 @@ mcp:
       headers:
         Authorization: "Bearer ${GITHUB_PAT}"
       user_paths: ["/engineering"] # optional visibility scope
+      disallowed_user_paths: ["/engineering/contractors"] # carve-out; wins over user_paths
       disallowed_tools: ["delete_repo"]
     local-files:
       transport: stdio # declarative-only; see security notes
@@ -137,6 +138,7 @@ Per-server fields:
 | `allowed_tools` | all | Allowlist of upstream tool names |
 | `disallowed_tools` | none | Blocklist, applied after the allowlist |
 | `user_paths` | everyone | Visibility subtrees, like virtual models |
+| `disallowed_user_paths` | none | Subtrees that never see the server; wins over `user_paths` |
 | `tool_timeout` | `30s` | Upper bound for one `tools/call` |
 
 Invalid declarations (bad slug, missing `url`/`command`, unknown transport)
@@ -265,6 +267,24 @@ mcp:
       url: https://api.githubcopilot.com/mcp
       disallowed_tools: ["delete_repository", "merge_pull_request"]
 ```
+
+## Limit who can see a server
+
+`user_paths` lists who may see a server; `disallowed_user_paths` carves callers
+out. Both match subtrees, so `/contractors` also covers `/contractors/acme`,
+and an exclusion wins over an allowed path.
+
+| Goal | Configuration |
+| --- | --- |
+| Everyone | leave both empty (default) |
+| Only engineering | `user_paths: ["/engineering"]` |
+| Everyone except contractors | `disallowed_user_paths: ["/contractors"]` |
+| Engineering except its contractors | both of the above, scoped under `/engineering` |
+
+Hidden servers are left out of `tools/list`, and `/mcp/{slug}` returns 404 for
+them. Like tool filters, visibility edits apply without reconnecting to the
+server and are checked on every call, so they also reach MCP sessions that are
+already open.
 
 ## Inspect a server's catalog
 

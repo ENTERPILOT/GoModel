@@ -1107,6 +1107,8 @@
   "mcp_connected_since": "自 {date} 起已连接",
   "mcp_local_command": "本地命令",
   "mcp_sub_counts": "{prompts} 个提示词 · {resources} 个资源",
+  "mcp_disallowed_user_paths": "排除的用户路径",
+  "mcp_disallowed_user_paths_help": "这些子树中的调用方永远看不到此服务器，即使位于允许的用户路径内。",
   "mcp_name_required": "名称为必填项。",
   "mcp_slug_invalid": "Slug 必须使用 1–64 个 ASCII 小写字母、数字、连字符或下划线。",
   "mcp_slug_in_use": "Slug \"{slug}\" 已被占用。",

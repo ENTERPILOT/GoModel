@@ -1217,6 +1217,8 @@
   "mcp_connected_since": "Połączono od {date}",
   "mcp_local_command": "komenda lokalna",
   "mcp_sub_counts": "Prompty: {prompts} · zasoby: {resources}",
+  "mcp_disallowed_user_paths": "Wykluczone User Paths",
+  "mcp_disallowed_user_paths_help": "Wywołujący z tych poddrzew nigdy nie widzą tego serwera, nawet w ramach dozwolonej ścieżki użytkownika.",
   "mcp_name_required": "Nazwa jest wymagana.",
   "mcp_slug_invalid": "Slug musi zawierać 1–64 małych liter ASCII, cyfr, łączników lub podkreśleń.",
   "mcp_slug_in_use": "Slug „{slug}” jest już używany.",
