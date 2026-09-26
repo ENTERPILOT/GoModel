@@ -282,8 +282,9 @@ and an exclusion wins over an allowed path.
 | Engineering except its contractors | both of the above, scoped under `/engineering` |
 
 The caller's user path comes from its API key when the key has one. Otherwise,
-including with the master key, it comes from the `X-GoModel-User-Path` header,
-which is a quick way to check what a given subtree sees.
+including with the master key, it comes from the `X-GoModel-User-Path` header
+(or the header named by `USER_PATH_HEADER`), which is a quick way to check what
+a given subtree sees.
 
 Hidden servers are left out of `tools/list`, and `/mcp/{slug}` returns 404 for
 them. Like tool filters, visibility edits apply without reconnecting to the
