@@ -11,6 +11,9 @@ MONGO_DATABASE="${GOMODEL_RELEASE_MONGO_DATABASE:-gomodel_release_e2e}"
 MOCK_MCP_BIN="${GOMODEL_RELEASE_MOCK_MCP_BINARY:-$REPO_ROOT/bin/mockmcp}"
 MOCK_MCP_PORT="${GOMODEL_RELEASE_MOCK_MCP_PORT:-18090}"
 MOCK_MCP_TOKEN="${GOMODEL_RELEASE_MOCK_MCP_TOKEN:-qa-mock-mcp-secret}"
+MOCK_JEV_BIN="${GOMODEL_RELEASE_MOCK_JEV_BINARY:-$REPO_ROOT/bin/mockjev}"
+MOCK_JEV_PORT="${GOMODEL_RELEASE_MOCK_JEV_PORT:-18091}"
+MOCK_JEV_KEY="${GOMODEL_RELEASE_MOCK_JEV_KEY:-qa-mock-jev-key}"
 
 BUILD_BEFORE_START=0
 
@@ -37,6 +40,7 @@ Gateways:
 
 Helpers:
   mock-mcp              http://localhost:18090 (mock MCP upstream: /alpha token-gated, /beta open)
+  mock-jev              http://localhost:18091 (mock System One upstreams: /jev keyed, /kev keyless Kev, /down always 529)
 EOF
 }
 
@@ -99,7 +103,16 @@ load_env() {
   export OPENROUTER_MODEL_FILTER_INCLUDE="${OPENROUTER_MODEL_FILTER_INCLUDE:-*:free}"
   export XAI_MODELS="${XAI_MODELS:-grok-4.3,grok-voice-latest}"
   export BAILIAN_MODELS="${BAILIAN_MODELS:-qwen3-omni-flash-realtime}"
-  export ENABLED_PASSTHROUGH_PROVIDERS="${ENABLED_PASSTHROUGH_PROVIDERS:-openai,anthropic,openrouter,zai,vllm,deepseek,bailian,xai}"
+  export ENABLED_PASSTHROUGH_PROVIDERS="${ENABLED_PASSTHROUGH_PROVIDERS:-openai,anthropic,openrouter,zai,vllm,deepseek,bailian,xai,jev}"
+  # System One (Jev / Kev) providers backed by the local mockjev upstream:
+  # "jev" is hosted-shaped and keyed, "jev-kev" a keyless Kev server, and
+  # "jev-down" answers 529 so System One failover can be exercised. They
+  # override any JEV_* values in .env: the scenarios assert what the mock
+  # echoes back. The Kev URL keeps a trailing /v1, which the provider trims.
+  export JEV_API_KEY="$MOCK_JEV_KEY"
+  export JEV_BASE_URL="http://localhost:$MOCK_JEV_PORT/jev"
+  export JEV_KEV_BASE_URL="http://localhost:$MOCK_JEV_PORT/kev/v1"
+  export JEV_DOWN_BASE_URL="http://localhost:$MOCK_JEV_PORT/down"
 }
 
 ensure_binary() {
@@ -109,54 +122,62 @@ ensure_binary() {
   if (( BUILD_BEFORE_START == 1 )) || [[ ! -x "$MOCK_MCP_BIN" ]]; then
     (cd "$REPO_ROOT" && go build -o "$MOCK_MCP_BIN" ./tests/e2e/mockmcp)
   fi
+  if (( BUILD_BEFORE_START == 1 )) || [[ ! -x "$MOCK_JEV_BIN" ]]; then
+    (cd "$REPO_ROOT" && go build -o "$MOCK_JEV_BIN" ./tests/e2e/mockjev)
+  fi
 }
 
-start_mock_mcp() {
-  local dir="$STACK_DIR/mock-mcp"
+# Starts one mock upstream binary on its port and waits for /healthz.
+# usage: start_mock NAME PORT BINARY [ENV=VALUE...]
+start_mock() {
+  local name="$1" port="$2" bin="$3"
+  shift 3
+  local dir="$STACK_DIR/$name"
   local log_file="$dir/logs/server.log"
   local pid_file="$dir/server.pid"
 
   mkdir -p "$dir/logs"
 
   if is_pid_running "$pid_file"; then
-    printf 'mock-mcp already running pid=%s url=http://localhost:%s\n' "$(cat "$pid_file")" "$MOCK_MCP_PORT"
+    printf '%s already running pid=%s url=http://localhost:%s\n' "$name" "$(cat "$pid_file")" "$port"
     return 0
   fi
 
   # A foreign process on the port would answer the health probe and mask a
-  # failed bind (e.g. a manually started mockmcp with a different token).
-  if curl -fsS "http://localhost:$MOCK_MCP_PORT/healthz" >/dev/null 2>&1; then
-    die "port $MOCK_MCP_PORT is already in use by an unmanaged process; stop it before starting mock-mcp"
+  # failed bind (e.g. a manually started mock with different settings).
+  if curl -fsS "http://localhost:$port/healthz" >/dev/null 2>&1; then
+    die "port $port is already in use by an unmanaged process; stop it before starting $name"
   fi
 
   rm -f "$pid_file"
 
   (
     cd "$dir"
-    nohup env PORT="$MOCK_MCP_PORT" MOCK_MCP_TOKEN="$MOCK_MCP_TOKEN" "$MOCK_MCP_BIN" >"$log_file" 2>&1 < /dev/null &
+    nohup env PORT="$port" "$@" "$bin" >"$log_file" 2>&1 < /dev/null &
     echo $! >"$pid_file"
   )
 
   local attempt
   for attempt in $(seq 1 15); do
-    if curl -fsS "http://localhost:$MOCK_MCP_PORT/healthz" >/dev/null 2>&1; then
-      printf 'started mock-mcp pid=%s url=http://localhost:%s\n' "$(cat "$pid_file")" "$MOCK_MCP_PORT"
+    if curl -fsS "http://localhost:$port/healthz" >/dev/null 2>&1; then
+      printf 'started %s pid=%s url=http://localhost:%s\n' "$name" "$(cat "$pid_file")" "$port"
       return 0
     fi
     sleep 1
   done
 
-  echo "failed to start mock-mcp on port $MOCK_MCP_PORT" >&2
+  echo "failed to start $name on port $port" >&2
   [[ -f "$log_file" ]] && tail -n 40 "$log_file" >&2
   exit 1
 }
 
-stop_mock_mcp() {
-  local pid_file="$STACK_DIR/mock-mcp/server.pid"
+stop_mock() {
+  local name="$1"
+  local pid_file="$STACK_DIR/$name/server.pid"
   local pid
 
   if [[ ! -f "$pid_file" ]]; then
-    printf 'mock-mcp not running\n'
+    printf '%s not running\n' "$name"
     return 0
   fi
 
@@ -165,22 +186,23 @@ stop_mock_mcp() {
     kill "$pid" 2>/dev/null || true
   fi
   rm -f "$pid_file"
-  printf 'stopped mock-mcp\n'
+  printf 'stopped %s\n' "$name"
 }
 
-status_mock_mcp() {
-  local pid_file="$STACK_DIR/mock-mcp/server.pid"
+status_mock() {
+  local name="$1" port="$2"
+  local pid_file="$STACK_DIR/$name/server.pid"
   local health="down"
   local pid="stopped"
 
   if is_pid_running "$pid_file"; then
     pid="$(cat "$pid_file")"
-    if curl -fsS "http://localhost:$MOCK_MCP_PORT/healthz" >/dev/null 2>&1; then
+    if curl -fsS "http://localhost:$port/healthz" >/dev/null 2>&1; then
       health="ok"
     fi
   fi
 
-  printf '%-12s pid=%-8s url=http://localhost:%s health=%s\n' "mock-mcp" "$pid" "$MOCK_MCP_PORT" "$health"
+  printf '%-12s pid=%-8s url=http://localhost:%s health=%s\n' "$name" "$pid" "$port" "$health"
 }
 
 ensure_pg_database() {
@@ -360,7 +382,8 @@ start_stack() {
   mkdir -p "$STACK_DIR"
   ensure_pg_database
   write_guardrail_config
-  start_mock_mcp
+  start_mock mock-mcp "$MOCK_MCP_PORT" "$MOCK_MCP_BIN" MOCK_MCP_TOKEN="$MOCK_MCP_TOKEN"
+  start_mock mock-jev "$MOCK_JEV_PORT" "$MOCK_JEV_BIN" MOCK_JEV_KEY="$MOCK_JEV_KEY"
 
   start_gateway sqlite-main \
     -u GOMODEL_MASTER_KEY \
@@ -457,11 +480,13 @@ stop_stack() {
   stop_gateway mongo-smoke
   stop_gateway pg-smoke
   stop_gateway sqlite-main
-  stop_mock_mcp
+  stop_mock mock-jev
+  stop_mock mock-mcp
 }
 
 status_stack() {
-  status_mock_mcp
+  status_mock mock-mcp "$MOCK_MCP_PORT"
+  status_mock mock-jev "$MOCK_JEV_PORT"
   status_gateway sqlite-main
   status_gateway pg-smoke
   status_gateway mongo-smoke

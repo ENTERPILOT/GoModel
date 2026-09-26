@@ -11,6 +11,9 @@ These scenarios are prepared for execution across these local gateways:
 - `http://localhost:18090` - mock MCP upstream (`tests/e2e/mockmcp`, started by
   the stack manager; `/alpha` requires the `X-Mock-Token` header, `/beta` is
   open)
+- `http://localhost:18091` - mock System One upstreams (`tests/e2e/mockjev`,
+  started by the stack manager and registered on every gateway as the `jev`,
+  `jev-kev`, and `jev-down` providers)
 
 ## Recommended runner
 
@@ -171,6 +174,22 @@ Stateful note:
   Gemini 3 tool call replayed with its thought signature. They create and clean
   up their own artifacts and are rerunnable in any order; `S227` reloads the
   SQLite gateway and therefore stays sequential
+- `S229`-`S241` exercise the Jev / Kev System One API (`/v1/systemone`, Kev's
+  `/permute` and `/separate`, passthrough, pinned versions, misuse negatives,
+  audit and usage, failover, exact cache on the auth gateway, state guardrails
+  on the guardrail gateway, managed-key allowlists) against the mock upstream
+  on port 18091, since no hosted Jev key or Kev server is available; each
+  prints `SKIPPED:` and exits 0 when the mock is down. They create and delete
+  their own `$QA_SUFFIX`-scoped virtual models, guardrails, workflows, keys,
+  and pricing overrides and are rerunnable in any order. `S237` sets a pricing
+  override and `S240` a guardrail workflow, so both stay sequential
+- `S242`-`S244` exercise MCP per-server tool filters and
+  `disallowed_user_paths` (in-place edits reaching open sessions) and the
+  master key keeping the caller's user-path header on `/mcp` and audio
+  uploads; they register `$QA_SUFFIX`-scoped servers and delete them, but
+  mutate the shared MCP catalog, so they stay sequential
+- `S245`-`S246` exercise `developer` messages, `strict` tools, and Gemini's
+  `allowed_tools` tool choice; they are read-only and rerunnable in any order
 - `S218` exercises Gemini's native `batchEmbedContents` path (batch input,
   `dimensions`); read-only and rerunnable in any order
 - `S219` asserts the effective resilience configuration on
@@ -485,6 +504,58 @@ mcp_cleanup_release_servers() {
   local base="$1"
   curl -sS -o /dev/null -X DELETE "$base/admin/mcp-servers/$QA_MCP_ALPHA" || true
   curl -sS -o /dev/null -X DELETE "$base/admin/mcp-servers/$QA_MCP_BETA" || true
+}
+
+# System One (Jev / Kev) upstreams served by tests/e2e/mockjev: the stack
+# manager registers "jev" (hosted shape, keyed), "jev-kev" (keyless Kev
+# server), and "jev-down" (always 529) on every gateway.
+export JEV_MOCK_BASE="${JEV_MOCK_BASE:-http://localhost:18091}"
+export QA_SYSTEMONE_QUESTIONS='{"department":{"type":"choice","instructions":"Which team should handle this?","criteria":{"returns":"Exchanges and refunds","shipping":"Delivery delays","billing":"Charges and invoices"}},"escalate":{"type":"noul","instructions":"Does this need urgent human attention?"},"frustration":{"type":"score","instructions":"How frustrated is the customer?","criteria":["Calm","Frustrated","Very angry"]}}'
+export QA_SYSTEMONE_CHOICE='{"department":{"type":"choice","instructions":"Which team?","criteria":{"returns":"Returns","billing":"Billing"}}}'
+
+# Skips when the mock upstream is down, and fails when the gateway was started
+# without the mock-backed jev providers (an outdated stack manager).
+# usage: systemone_require_mock BASE_URL [curl args...]
+systemone_require_mock() {
+  local base="$1"
+  shift
+  if ! curl -fsS "$JEV_MOCK_BASE/healthz" >/dev/null 2>&1; then
+    echo "SKIPPED: mock System One upstream is not running on $JEV_MOCK_BASE"
+    exit 0
+  fi
+  if ! curl -fsS "$base/v1/models" "$@" | jq -e '
+      any(.data[]; .id == "jev/jev-latest") and any(.data[]; .id == "jev-kev/kev-latest")
+    ' >/dev/null; then
+    echo "error: $base has no mock-backed jev providers; restart it with tests/e2e/manage-release-e2e-stack.sh" >&2
+    exit 1
+  fi
+}
+
+# Asserts an HTTP status and prints the body on a mismatch.
+# usage: assert_http_status WANT GOT BODY_FILE
+assert_http_status() {
+  if [ "$2" != "$1" ]; then
+    echo "error: expected HTTP $1, got $2" >&2
+    cat "$3" >&2 || true
+    exit 1
+  fi
+}
+
+# Polls the audit or usage log until an entry for the request id appears.
+# usage: wait_log_entry BASE_URL audit|usage REQUEST_ID OUTPUT_FILE [curl args...]
+wait_log_entry() {
+  local base="$1" kind="$2" rid="$3" out="$4"
+  shift 4
+  for _ in $(seq 1 15); do
+    curl -fsS "$base/admin/$kind/log?search=$rid&limit=5" "$@" > "$out"
+    if jq -e --arg rid "$rid" 'any(.entries[]?; .request_id == $rid)' "$out" >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  jq . "$out" >&2 || true
+  echo "error: no $kind entry for $rid on $base" >&2
+  exit 1
 }
 
 run_release_budget_enforcement() {
@@ -3565,7 +3636,7 @@ if jq -e '.providers[] | select(.name == "fireworks") | (.status != "healthy") a
   exit 0
 fi
 FIREWORKS_MODEL=$(curl -fsS "$BASE_URL/v1/models" \
-  | jq -er '[.data[].id | select(startswith("fireworks/"))] | (map(select(test("llama-v3p1-8b-instruct$"))) + .)[0]')
+  | jq -er '[.data[].id | select(startswith("fireworks/"))] | (map(select(test("gpt-oss-120b$"))) + .)[0]')
 RESP_FILE="$QA_RUN_DIR/s153.chat.json"
 curl -fsS "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
@@ -3589,7 +3660,7 @@ if jq -e '.providers[] | select(.name == "fireworks") | (.status != "healthy") a
   exit 0
 fi
 FIREWORKS_MODEL=$(curl -fsS "$BASE_URL/v1/models" \
-  | jq -er '[.data[].id | select(startswith("fireworks/"))] | (map(select(test("llama-v3p1-8b-instruct$"))) + .)[0]')
+  | jq -er '[.data[].id | select(startswith("fireworks/"))] | (map(select(test("gpt-oss-120b$"))) + .)[0]')
 SSE_FILE="$QA_RUN_DIR/s154.chat.sse"
 curl -fsS --no-buffer "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
@@ -6165,4 +6236,929 @@ jq -c --argjson tools "$TOOLS" '{
   > "$FOLLOW_FILE"
 jq '{provider,answer:.choices[0].message.content}' "$FOLLOW_FILE"
 assert_chat_response_contains "$FOLLOW_FILE" "gemini" "22"
+```
+
+## 35. Jev / Kev System One API
+
+`POST /v1/systemone` (and Kev's `/permute` and `/separate`) forwards TypeSafe
+System One decision requests natively. No hosted Jev key or Kev server is
+available to the matrix, so the stack manager starts `tests/e2e/mockjev` on
+port 18091 and registers three `jev` providers against it on every gateway:
+`jev` (hosted-API shape, keyed, lists `jev-latest`/`jev-preview`, accepts any
+versioned `jev-X.Y.Z`), `jev-kev` (keyless Kev server whose base URL keeps a
+trailing `/v1`, checkpoint `kev-latest` with alias `kev-4b`), and `jev-down`
+(lists `kev-down`, answers every System One route with `529`). Each mock
+answer carries a `mock` object echoing what reached the upstream (model,
+state, questions, extra fields, whether an `Authorization` header arrived,
+`X-Request-Id`, and a per-upstream request sequence), so the scenarios can
+assert exactly what the gateway forwarded and whether an answer was replayed
+from cache.
+
+### S229 System One providers register and list utility models
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+MODELS_FILE="$QA_RUN_DIR/s229.models.json"
+curl -fsS "$BASE_URL/v1/models" > "$MODELS_FILE"
+jq -c '[.data[] | select(.owned_by | startswith("jev")) | {id, categories: .metadata.categories, modes: .metadata.modes}]' "$MODELS_FILE"
+jq -e '
+  ([.data[] | select(.owned_by | startswith("jev")) | .id] | sort)
+    == ["jev-down/kev-down","jev-kev/kev-4b","jev-kev/kev-latest","jev/jev-latest","jev/jev-preview"]
+  and all(.data[] | select(.owned_by | startswith("jev")); .metadata.categories == ["utility"] and ((.metadata.modes // []) | length == 0))
+  and any(.data[]; .id == "jev/jev-latest" and .metadata.description == "Latest Jev (mock)" and .created > 0)
+' "$MODELS_FILE" >/dev/null
+
+STATUS_FILE="$QA_RUN_DIR/s229.status.json"
+curl -fsS "$BASE_URL/admin/providers/status" > "$STATUS_FILE"
+# jev-down turns degraded once failover scenarios have sent it traffic (its
+# 529s count against request health), so it only has to be registered.
+jq -e '
+  [.. | objects | select(.type? == "jev" and has("status")) | {name, status}] | sort_by(.name) as $s
+  | ($s | map(.name)) == ["jev","jev-down","jev-kev"]
+    and all($s[]; if .name == "jev-down" then (.status | IN("healthy","degraded")) else .status == "healthy" end)
+' "$STATUS_FILE" >/dev/null
+
+# Passthrough lists models in each upstream's own shape.
+curl -fsS "$BASE_URL/p/jev/v1/models" \
+  | jq -e '[.models[].name] == ["jev-latest","jev-preview"]' >/dev/null
+curl -fsS "$BASE_URL/p/jev-kev/v1/models" \
+  | jq -e '.models[0].id == "kev-latest" and .models[0].aliases == ["kev-4b"]' >/dev/null
+```
+
+### S230 Native `/v1/systemone` answers every question type on hosted Jev
+
+Sends choice, noul, and score questions plus an extra top-level field. The
+answer is relayed unchanged, only `model` is rewritten to the resolved name,
+the questions and extra field reach the upstream byte for byte, the client's
+`Authorization` header is replaced by the provider key, and the request ID is
+forwarded.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+for MODEL in jev-latest jev/jev-latest; do
+  RID="qa-s1-hosted-$QA_SUFFIX-${MODEL//\//-}"
+  RESP_FILE="$QA_RUN_DIR/s230.${MODEL//\//-}.json"
+  CODE=$(curl -sS -o "$RESP_FILE" -w '%{http_code}' "$BASE_URL/v1/systemone" \
+    -H 'Content-Type: application/json' \
+    -H 'Authorization: Bearer qa-client-token-must-not-reach-upstream' \
+    -H "X-Request-ID: $RID" \
+    -d "{\"model\":\"$MODEL\",\"state\":\"Shoes arrived late and I see two charges on my card.\",\"questions\":$QA_SYSTEMONE_QUESTIONS,\"qa_marker\":{\"nested\":[1,2,3]}}")
+  assert_http_status 200 "$CODE" "$RESP_FILE"
+  jq -c '{model, answers, usage, mock: (.mock | {upstream, received_model, authorization, request_id})}' "$RESP_FILE"
+  jq -e --arg rid "$RID" --argjson questions "$QA_SYSTEMONE_QUESTIONS" '
+    .model == "jev-1.13.0"
+    and .answers.department.type == "choice" and (.answers.department.choice | IN("returns","shipping","billing"))
+    and (.answers.department.probabilities | keys | sort) == ["billing","returns","shipping"]
+    and .answers.escalate.type == "noul" and (.answers.escalate.noul | type == "number")
+    and .answers.frustration.type == "score" and .answers.frustration.legend == {"0":"Calm","1":"Frustrated","2":"Very angry"}
+    and .usage.input_tokens > 0 and .usage.output_tokens > 0
+    and .mock.upstream == "jev"
+    and .mock.received_model == "jev-latest"
+    and .mock.questions == $questions
+    and .mock.extra == {"qa_marker":{"nested":[1,2,3]}}
+    and .mock.authorization == "provider-key"
+    and .mock.request_id == $rid
+  ' "$RESP_FILE" >/dev/null
+done
+```
+
+### S231 Keyless Kev server by checkpoint and alias
+
+The `jev-kev` provider has no key and its base URL ends in `/v1`, which the
+provider trims. No `Authorization` header may reach it, not even the client's.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+for MODEL in jev-kev/kev-latest kev-latest jev-kev/kev-4b kev-4b; do
+  RESP_FILE="$QA_RUN_DIR/s231.${MODEL//\//-}.json"
+  CODE=$(curl -sS -o "$RESP_FILE" -w '%{http_code}' "$BASE_URL/v1/systemone" \
+    -H 'Content-Type: application/json' \
+    -H 'Authorization: Bearer qa-client-token-must-not-reach-upstream' \
+    -d "{\"model\":\"$MODEL\",\"state\":\"I was charged twice.\",\"questions\":$QA_SYSTEMONE_CHOICE}")
+  assert_http_status 200 "$CODE" "$RESP_FILE"
+  jq -e --arg sent "${MODEL#jev-kev/}" '
+    .model == "kev-4b-e2e"
+    and .mock.upstream == "kev"
+    and .mock.received_model == $sent
+    and .mock.authorization == "none"
+    and .answers.department.type == "choice"
+  ' "$RESP_FILE" >/dev/null
+done
+```
+
+### S232 Pinned Jev versions route without being listed
+
+TypeSafe lists only its aliases but accepts any versioned ID. A name that
+says which `jev` provider to use reaches it unlisted; a bare unlisted name is
+not guessed while several `jev` providers are configured; a model the
+upstream rejects comes back with the upstream's status.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+for MODEL in jev/jev-1.13.0 jev/jev-1.12.0; do
+  RESP_FILE="$QA_RUN_DIR/s232.${MODEL//\//-}.json"
+  CODE=$(curl -sS -o "$RESP_FILE" -w '%{http_code}' "$BASE_URL/v1/systemone" \
+    -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$MODEL\",\"state\":\"pinned\",\"questions\":$QA_SYSTEMONE_CHOICE}")
+  assert_http_status 200 "$CODE" "$RESP_FILE"
+  jq -e --arg version "${MODEL#jev/}" '.model == $version and .mock.upstream == "jev" and .mock.received_model == $version' "$RESP_FILE" >/dev/null
+done
+
+# Bare and unlisted, with jev, jev-kev, and jev-down all configured.
+RESP_FILE="$QA_RUN_DIR/s232.bare.json"
+CODE=$(curl -sS -o "$RESP_FILE" -w '%{http_code}' "$BASE_URL/v1/systemone" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"jev-1.13.0\",\"state\":\"pinned\",\"questions\":$QA_SYSTEMONE_CHOICE}")
+assert_http_status 404 "$CODE" "$RESP_FILE"
+jq -e '.error.code == "model_not_found"' "$RESP_FILE" >/dev/null
+
+# Routed to jev because the name says so; the upstream rejects it.
+RESP_FILE="$QA_RUN_DIR/s232.unknown.json"
+CODE=$(curl -sS -o "$RESP_FILE" -w '%{http_code}' "$BASE_URL/v1/systemone" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"jev/not-a-jev-model\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}")
+assert_http_status 404 "$CODE" "$RESP_FILE"
+jq -e '.error.type == "not_found_error" and .error.provider == "jev" and (.error.message | contains("not-a-jev-model"))' "$RESP_FILE" >/dev/null
+```
+
+### S233 A virtual model pins an unlisted Jev version
+
+The System One docs state that a virtual model can pin a version the same way
+a provider-qualified name does (`virtual_models: [{source: ..., target:
+jev/jev-1.13.0}]`). This creates one through the admin API and sends a request
+through it.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+NAME="qa-jev-pinned-$QA_SUFFIX"
+cleanup_s233() {
+  curl -sS -o /dev/null -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+    -d "{\"source\":\"$NAME\"}" || true
+}
+trap cleanup_s233 EXIT
+
+VM_FILE="$QA_RUN_DIR/s233.vm.json"
+CODE=$(curl -sS -o "$VM_FILE" -w '%{http_code}' -X PUT "$BASE_URL/admin/virtual-models" \
+  -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$NAME\",\"target_model\":\"jev/jev-1.12.0\"}")
+assert_http_status 200 "$CODE" "$VM_FILE"
+
+RESP_FILE="$QA_RUN_DIR/s233.answer.json"
+CODE=$(curl -sS -o "$RESP_FILE" -w '%{http_code}' "$BASE_URL/v1/systemone" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$NAME\",\"state\":\"pinned through a virtual model\",\"questions\":$QA_SYSTEMONE_CHOICE}")
+assert_http_status 200 "$CODE" "$RESP_FILE"
+jq -e '.model == "jev-1.12.0" and .mock.upstream == "jev" and .mock.received_model == "jev-1.12.0"' "$RESP_FILE" >/dev/null
+```
+
+### S234 Kev diagnostic routes `/permute` and `/separate`
+
+Kev serves both diagnostic routes; the hosted-shaped `jev` answers them with
+its own `404`, and an OpenRouter model is refused before any upstream call
+since OpenRouter serves only the evaluation route.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+post_systemone() {
+  local route="$1" body="$2" out="$3"
+  curl -sS -o "$out" -w '%{http_code}' "$BASE_URL/v1/systemone$route" -H 'Content-Type: application/json' -d "$body"
+}
+
+F="$QA_RUN_DIR/s234.permute.json"
+CODE=$(post_systemone /permute "{\"model\":\"jev-kev/kev-latest\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE,\"n_perm\":3}" "$F")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.n_perm == 3 and .mock.route == "permute" and .mock.received_model == "kev-latest"' "$F" >/dev/null
+
+F="$QA_RUN_DIR/s234.permute-default.json"
+CODE=$(post_systemone /permute "{\"model\":\"kev-latest\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}" "$F")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.n_perm == 6' "$F" >/dev/null
+
+F="$QA_RUN_DIR/s234.permute-bad.json"
+CODE=$(post_systemone /permute "{\"model\":\"kev-latest\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE,\"n_perm\":65}" "$F")
+assert_http_status 422 "$CODE" "$F"
+jq -e '.error.type == "invalid_request_error" and (.error.message | contains("n_perm"))' "$F" >/dev/null
+
+F="$QA_RUN_DIR/s234.separate.json"
+CODE=$(post_systemone /separate "{\"model\":\"jev-kev/kev-4b\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_QUESTIONS}" "$F")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.separate == true and .mock.route == "separate" and (.answers | keys | length) == 3' "$F" >/dev/null
+
+F="$QA_RUN_DIR/s234.hosted-permute.json"
+CODE=$(post_systemone /permute "{\"model\":\"jev/jev-latest\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}" "$F")
+assert_http_status 404 "$CODE" "$F"
+jq -e '.error.type == "not_found_error" and .error.provider == "jev"' "$F" >/dev/null
+
+OPENROUTER_MODEL=$(curl -fsS "$BASE_URL/v1/models" | jq -r '[.data[].id | select(startswith("openrouter/"))][0] // empty')
+if [ -n "$OPENROUTER_MODEL" ]; then
+  F="$QA_RUN_DIR/s234.openrouter-permute.json"
+  CODE=$(post_systemone /permute "{\"model\":\"$OPENROUTER_MODEL\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}" "$F")
+  assert_http_status 400 "$CODE" "$F"
+  jq -e '.error.param == "model" and (.error.message | contains("answers only /v1/systemone"))' "$F" >/dev/null
+else
+  echo "note: no openrouter model in the catalog; OpenRouter permute refusal not checked"
+fi
+```
+
+### S235 System One misuse is rejected with an explanation (negatives)
+
+The endpoint never translates: missing or malformed input, chat models (direct
+or through a virtual model), and System One models on OpenAI routes are all
+`400 invalid_request_error` naming the fix. A malformed question reaches the
+upstream and comes back as its `422`.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+NAME="qa-s1-chat-vm-$QA_SUFFIX"
+cleanup_s235() {
+  curl -sS -o /dev/null -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+    -d "{\"source\":\"$NAME\"}" || true
+}
+trap cleanup_s235 EXIT
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$NAME\",\"target_model\":\"openai/gpt-4.1-nano\"}" >/dev/null
+
+# expect_invalid PATH BODY JQ_MESSAGE_FILTER
+expect_invalid() {
+  local path="$1" body="$2" filter="$3" out
+  out=$(mktemp "$QA_RUN_DIR/s235.XXXXXX")
+  local code
+  code=$(curl -sS -o "$out" -w '%{http_code}' "$BASE_URL$path" -H 'Content-Type: application/json' -d "$body")
+  assert_http_status 400 "$code" "$out"
+  if ! jq -e ".error.type == \"invalid_request_error\" and ($filter)" "$out" >/dev/null; then
+    echo "error: unexpected 400 body for $path" >&2
+    cat "$out" >&2
+    exit 1
+  fi
+}
+
+expect_invalid /v1/systemone "{\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}" \
+  '.error.param == "model" and .error.message == "model is required"'
+expect_invalid /v1/systemone '{"model":' \
+  '.error.message | startswith("invalid request body")'
+expect_invalid /v1/systemone "{\"model\":\"openai/gpt-4.1-nano\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}" \
+  '.error.param == "model" and (.error.message | contains("provider type openai, which has no System One API"))'
+expect_invalid /v1/systemone "{\"model\":\"$NAME\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}" \
+  '.error.message | contains("(resolved to \"openai/gpt-4.1-nano\")")'
+OPENROUTER_MODEL=$(curl -fsS "$BASE_URL/v1/models" | jq -r '[.data[] | select((.id | startswith("openrouter/")) and ((.metadata.modes // []) | index("chat")))][0].id // empty')
+if [ -n "$OPENROUTER_MODEL" ]; then
+  expect_invalid /v1/systemone "{\"model\":\"$OPENROUTER_MODEL\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}" \
+    '.error.message | contains("not a System One model")'
+fi
+
+expect_invalid /v1/chat/completions '{"model":"jev/jev-latest","messages":[{"role":"user","content":"hi"}]}' \
+  '.error.param == "model" and (.error.message | contains("does not support chat completions") and contains("POST /v1/systemone"))'
+expect_invalid /v1/responses '{"model":"jev-kev/kev-latest","input":"hi"}' \
+  '.error.message | contains("does not support responses") and contains("POST /v1/systemone")'
+expect_invalid /v1/embeddings '{"model":"jev-latest","input":"hi"}' \
+  '.error.message | contains("does not support embeddings") and contains("POST /v1/systemone")'
+
+# A misrouted System One request is an operator mistake, so it is logged.
+grep -Fq 'System One request routed to a model without the System One API' \
+  "$RELEASE_STACK_DIR/sqlite-main/logs/server.log"
+
+F="$QA_RUN_DIR/s235.bad-question.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone" -H 'Content-Type: application/json' \
+  -d '{"model":"jev-kev/kev-latest","state":"x","questions":{"q":{"type":"maybe","instructions":"?"}}}')
+assert_http_status 422 "$CODE" "$F"
+jq -e '.error.provider == "jev" and (.error.message | contains("questions") and contains("maybe"))' "$F" >/dev/null
+
+F="$QA_RUN_DIR/s235.get.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone")
+assert_http_status 405 "$CODE" "$F"
+```
+
+### S236 Passthrough reaches the same upstreams under `/p/jev*`
+
+Passthrough forwards the body as sent (no model rewrite), rejects a body that
+names the model twice (the upstream parser could pick a value the gateway
+never checked), and reaches Kev's diagnostic routes on the suffixed provider.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+F="$QA_RUN_DIR/s236.systemone.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/p/jev/v1/systemone" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"jev-latest\",\"state\":\"via passthrough\",\"questions\":$QA_SYSTEMONE_CHOICE}")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.model == "jev-1.13.0" and .mock.received_model == "jev-latest" and .mock.authorization == "provider-key"' "$F" >/dev/null
+
+# The /v1 prefix is optional on passthrough routes.
+F="$QA_RUN_DIR/s236.permute.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/p/jev-kev/systemone/permute" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"kev-latest\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE,\"n_perm\":2}")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.n_perm == 2 and .mock.upstream == "kev" and .mock.authorization == "none"' "$F" >/dev/null
+
+F="$QA_RUN_DIR/s236.dup-model.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/p/jev/v1/systemone" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"jev-latest\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE,\"model\":\"jev-preview\"}")
+assert_http_status 400 "$CODE" "$F"
+jq -e '.error.message | contains("model field is repeated")' "$F" >/dev/null
+```
+
+### S237 System One calls are audited, filterable, metered, and priced
+
+Checks the audit entry (route, requested and resolved model, provider, one
+successful primary attempt), the `exclude_operation=systemone` request-type
+filter, and the usage entry: tokens copied from the answer, recorded under
+the model that answered, and priced by an operator override.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+SELECTOR="jev/jev-1.13.0"
+cleanup_s237() {
+  curl -sS -o /dev/null -X DELETE "$BASE_URL/admin/model-pricing-overrides" \
+    -H 'Content-Type: application/json' -d "{\"selector\":\"$SELECTOR\"}" || true
+}
+trap cleanup_s237 EXIT
+curl -fsS -X PUT "$BASE_URL/admin/model-pricing-overrides" -H 'Content-Type: application/json' \
+  -d "{\"selector\":\"$SELECTOR\",\"pricing\":{\"input_per_mtok\":42,\"output_per_mtok\":0}}" >/dev/null
+
+RID="qa-s1-audit-$QA_SUFFIX"
+ANSWER_FILE="$QA_RUN_DIR/s237.answer.json"
+curl -fsS "$BASE_URL/v1/systemone" -H 'Content-Type: application/json' -H "X-Request-ID: $RID" \
+  -d "{\"model\":\"jev/jev-latest\",\"state\":\"audit me\",\"questions\":$QA_SYSTEMONE_QUESTIONS}" > "$ANSWER_FILE"
+IN=$(jq -er '.usage.input_tokens' "$ANSWER_FILE")
+OUT=$(jq -er '.usage.output_tokens' "$ANSWER_FILE")
+
+AUDIT_FILE="$QA_RUN_DIR/s237.audit.json"
+wait_log_entry "$BASE_URL" audit "$RID" "$AUDIT_FILE"
+jq -e --arg rid "$RID" '
+  any(.entries[]; .request_id == $rid
+    and .path == "/v1/systemone" and .method == "POST" and .status_code == 200
+    and .requested_model == "jev/jev-latest" and .resolved_model == "jev/jev-latest"
+    and .provider == "jev" and .provider_name == "jev"
+    and ([.data.attempts[]? | {kind, provider_name, success}] == [{"kind":"primary","provider_name":"jev","success":true}]))
+' "$AUDIT_FILE" >/dev/null
+
+curl -fsS "$BASE_URL/admin/audit/log?search=$RID&limit=5&exclude_operation=systemone" \
+  | jq -e '(.entries // []) | length == 0' >/dev/null
+curl -fsS "$BASE_URL/admin/audit/log?search=$RID&limit=5&exclude_operation=chat_completions,provider_passthrough" \
+  | jq -e --arg rid "$RID" 'any(.entries[]; .request_id == $rid)' >/dev/null
+CODE=$(curl -sS -o "$QA_RUN_DIR/s237.bad-filter.json" -w '%{http_code}' "$BASE_URL/admin/audit/log?exclude_operation=not_an_operation")
+assert_http_status 400 "$CODE" "$QA_RUN_DIR/s237.bad-filter.json"
+
+USAGE_FILE="$QA_RUN_DIR/s237.usage.json"
+wait_log_entry "$BASE_URL" usage "$RID" "$USAGE_FILE"
+jq -c --arg rid "$RID" '.entries[] | select(.request_id == $rid)' "$USAGE_FILE"
+jq -e --arg rid "$RID" --argjson in "$IN" --argjson out "$OUT" '
+  any(.entries[]; .request_id == $rid
+    and .endpoint == "/v1/systemone" and .model == "jev-1.13.0"
+    and .provider == "jev" and .provider_name == "jev"
+    and .input_tokens == $in and .output_tokens == $out)
+' "$USAGE_FILE" >/dev/null
+# The two checks below are independent, so both are reported before failing.
+FAILED=0
+if ! jq -e --arg rid "$RID" --argjson total "$((IN + OUT))" \
+    'any(.entries[]; .request_id == $rid and .total_tokens == $total)' "$USAGE_FILE" >/dev/null; then
+  echo "error: usage total_tokens is not input_tokens + output_tokens ($IN + $OUT) for a System One answer" >&2
+  FAILED=1
+fi
+# Jev's documented pricing: per input token, output_per_mtok 0.
+if ! jq -e --arg rid "$RID" --argjson in "$IN" '
+    any(.entries[]; .request_id == $rid and ((((.input_cost // -1) - ($in * 42 / 1000000)) | fabs) < 0.000000001))
+  ' "$USAGE_FILE" >/dev/null; then
+  echo "error: the pricing override (input 42/Mtok, output 0) did not cost the System One usage entry" >&2
+  FAILED=1
+fi
+[ "$FAILED" = 0 ]
+```
+
+### S238 Failover moves System One requests between System One targets
+
+A `failover` virtual model whose primary answers `529` moves to its next
+target, skips a chat model without spending an attempt, and records the
+answer under the target that did the work. A client error (`422`) is returned
+without failover.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+FO="qa-s1-failover-$QA_SUFFIX"
+FO422="qa-s1-failover-422-$QA_SUFFIX"
+cleanup_s238() {
+  for name in "$FO" "$FO422"; do
+    curl -sS -o /dev/null -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+      -d "{\"source\":\"$name\"}" || true
+  done
+}
+trap cleanup_s238 EXIT
+
+# The down target on its own relays the upstream overload status (or 503
+# once its circuit breaker has opened after earlier reruns).
+F="$QA_RUN_DIR/s238.down.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"jev-down/kev-down\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}")
+case "$CODE" in 529|503) ;; *) assert_http_status 529 "$CODE" "$F" ;; esac
+
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$FO\",\"strategy\":\"failover\",\"targets\":[{\"model\":\"jev-down/kev-down\"},{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"jev-kev/kev-latest\"}]}" >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$FO422\",\"strategy\":\"failover\",\"targets\":[{\"model\":\"jev-kev/kev-latest\"},{\"model\":\"jev/jev-latest\"}]}" >/dev/null
+
+RID="qa-s1-failover-$QA_SUFFIX"
+F="$QA_RUN_DIR/s238.failover.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $RID" \
+  -d "{\"model\":\"$FO\",\"state\":\"fail over please\",\"questions\":$QA_SYSTEMONE_CHOICE}")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.model == "kev-4b-e2e" and .mock.upstream == "kev" and .mock.received_model == "kev-latest"' "$F" >/dev/null
+
+AUDIT_FILE="$QA_RUN_DIR/s238.audit.json"
+wait_log_entry "$BASE_URL" audit "$RID" "$AUDIT_FILE"
+jq -c --arg rid "$RID" '.entries[] | select(.request_id == $rid) | [.data.attempts[] | {kind, provider_name, status_code, success}]' "$AUDIT_FILE"
+jq -e --arg rid "$RID" --arg fo "$FO" '
+  any(.entries[]; .request_id == $rid
+    and .requested_model == $fo and .resolved_model == "jev-kev/kev-latest" and .provider_name == "jev-kev"
+    and .data.failover != null
+    and ([.data.attempts[] | .provider_name] == ["jev-down","jev-kev"])
+    and .data.attempts[0].success == false and .data.attempts[1].kind == "failover" and .data.attempts[1].success == true)
+' "$AUDIT_FILE" >/dev/null
+
+USAGE_FILE="$QA_RUN_DIR/s238.usage.json"
+wait_log_entry "$BASE_URL" usage "$RID" "$USAGE_FILE"
+jq -e --arg rid "$RID" 'any(.entries[]; .request_id == $rid and .provider_name == "jev-kev" and .model == "kev-4b-e2e")' "$USAGE_FILE" >/dev/null
+
+RID422="qa-s1-failover-422-$QA_SUFFIX"
+F="$QA_RUN_DIR/s238.no-failover.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $RID422" \
+  -d "{\"model\":\"$FO422\",\"state\":\"x\",\"questions\":{\"q\":{\"type\":\"maybe\",\"instructions\":\"?\"}}}")
+assert_http_status 422 "$CODE" "$F"
+wait_log_entry "$BASE_URL" audit "$RID422" "$AUDIT_FILE"
+jq -e --arg rid "$RID422" '
+  any(.entries[]; .request_id == $rid and .status_code == 422 and ([.data.attempts[] | .provider_name] == ["jev-kev"]))
+' "$AUDIT_FILE" >/dev/null
+```
+
+### S239 Identical System One requests hit the exact response cache
+
+Runs on the auth + exact-cache gateway. The replayed answer carries the same
+mock request sequence (the upstream was not called), `Cache-Control: no-cache`
+bypasses the cache, a different state misses, and the hit is audited and
+recorded in usage as an exact cache hit.
+
+```bash
+systemone_require_mock "$AUTH_BASE_URL" -H "$ADMIN_AUTH_HEADER"
+
+STATE="release cache probe $QA_SUFFIX"
+BODY="{\"model\":\"jev-kev/kev-latest\",\"state\":\"$STATE\",\"questions\":$QA_SYSTEMONE_CHOICE}"
+send_cached() {
+  local rid="$1" headers="$2" body_file="$3"
+  shift 3
+  curl -fsS -D "$headers" -o "$body_file" "$AUTH_BASE_URL/v1/systemone" \
+    -H "$ADMIN_AUTH_HEADER" -H 'Content-Type: application/json' -H "X-Request-ID: $rid" "$@" -d "${BODY_OVERRIDE:-$BODY}"
+}
+
+RID1="qa-s1-cache-$QA_SUFFIX-1"
+RID2="qa-s1-cache-$QA_SUFFIX-2"
+RID3="qa-s1-cache-$QA_SUFFIX-3"
+send_cached "$RID1" "$QA_RUN_DIR/s239.1.headers" "$QA_RUN_DIR/s239.1.json"
+send_cached "$RID2" "$QA_RUN_DIR/s239.2.headers" "$QA_RUN_DIR/s239.2.json"
+send_cached "$RID3" "$QA_RUN_DIR/s239.3.headers" "$QA_RUN_DIR/s239.3.json" -H 'Cache-Control: no-cache'
+BODY_OVERRIDE="{\"model\":\"jev-kev/kev-latest\",\"state\":\"$STATE changed\",\"questions\":$QA_SYSTEMONE_CHOICE}" \
+  send_cached "qa-s1-cache-$QA_SUFFIX-4" "$QA_RUN_DIR/s239.4.headers" "$QA_RUN_DIR/s239.4.json"
+
+SEQ1=$(jq -er '.mock.request_seq' "$QA_RUN_DIR/s239.1.json")
+grep -Eiq '^X-Cache: *HIT \(exact\)' "$QA_RUN_DIR/s239.2.headers"
+jq -e --argjson seq "$SEQ1" '.mock.request_seq == $seq and .model == "kev-4b-e2e"' "$QA_RUN_DIR/s239.2.json" >/dev/null
+cmp -s "$QA_RUN_DIR/s239.1.json" "$QA_RUN_DIR/s239.2.json"
+for n in 3 4; do
+  if grep -Eiq '^X-Cache:' "$QA_RUN_DIR/s239.$n.headers"; then
+    echo "error: request $n should not have been served from cache" >&2
+    exit 1
+  fi
+  jq -e --argjson seq "$SEQ1" '.mock.request_seq > $seq' "$QA_RUN_DIR/s239.$n.json" >/dev/null
+done
+
+AUDIT_FILE="$QA_RUN_DIR/s239.audit.json"
+wait_log_entry "$AUTH_BASE_URL" audit "$RID2" "$AUDIT_FILE" -H "$ADMIN_AUTH_HEADER"
+jq -e --arg rid "$RID2" 'any(.entries[]; .request_id == $rid and .cache_type == "exact" and .status_code == 200 and .path == "/v1/systemone")' "$AUDIT_FILE" >/dev/null
+
+USAGE_FILE="$QA_RUN_DIR/s239.usage.json"
+wait_log_entry "$AUTH_BASE_URL" usage "$RID1" "$USAGE_FILE" -H "$ADMIN_AUTH_HEADER"
+# Cache hits are listed only with cache_mode=cached.
+for _ in $(seq 1 15); do
+  curl -fsS "$AUTH_BASE_URL/admin/usage/log?search=$RID2&cache_mode=cached&limit=5" -H "$ADMIN_AUTH_HEADER" > "$USAGE_FILE"
+  if jq -e --arg rid "$RID2" 'any(.entries[]?; .request_id == $rid)' "$USAGE_FILE" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+jq -e --arg rid "$RID2" '
+  any(.entries[]; .request_id == $rid and .cache_type == "exact" and .endpoint == "/v1/systemone"
+    and .input_tokens > 0 and .total_tokens == .input_tokens + .output_tokens and .provider_name == "jev-kev")
+' "$USAGE_FILE" >/dev/null
+```
+
+### S240 Guardrails see the System One state and nothing else
+
+Runs on the guardrail gateway. Its global `system_prompt` override has no
+place in a decision request, so the edit is dropped with a one-time warning
+and the state is forwarded untouched. A workflow scoped to `jev-kev` and a
+user path then masks card numbers in a string state and in a JSON state
+(which stays JSON), and blocks a forbidden state before any upstream call.
+
+```bash
+systemone_require_mock "$GR_BASE_URL"
+
+S="${QA_SUFFIX//[^[:alnum:]-]/-}"
+MASK="qa-s1-mask-$S"
+BLOCK="qa-s1-block-$S"
+SCOPE_PATH="/qa/systemone/$S"
+WORKFLOW_ID_FILE="$QA_RUN_DIR/s240.workflow.id"
+cleanup_s240() {
+  if [ -s "$WORKFLOW_ID_FILE" ]; then
+    curl -sS -o /dev/null -X POST "$GR_BASE_URL/admin/workflows/$(cat "$WORKFLOW_ID_FILE")/deactivate" || true
+  fi
+  for name in "$MASK" "$BLOCK"; do
+    curl -sS -o /dev/null -X DELETE "$GR_BASE_URL/admin/guardrails" -H 'Content-Type: application/json' \
+      -d "{\"name\":\"$name\"}" || true
+  done
+}
+trap cleanup_s240 EXIT
+
+# Global system_prompt guardrail: dropped, state unchanged, warning logged.
+F="$QA_RUN_DIR/s240.global.json"
+curl -fsS "$GR_BASE_URL/v1/systemone" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"jev-kev/kev-latest\",\"state\":\"card 4111 1111 1111 1111\",\"questions\":$QA_SYSTEMONE_CHOICE}" > "$F"
+jq -e '.mock.received_state == "card 4111 1111 1111 1111" and .answers.department.type == "choice"' "$F" >/dev/null
+grep -Fq 'guardrail edits a System One request cannot carry were dropped' "$RELEASE_STACK_DIR/guardrails/logs/server.log"
+
+jq -n --arg name "$MASK" '{
+  name: $name, type: "string_replace", description: "release e2e: mask card numbers",
+  config: {mode: "regex", rules: "\\b(\\d{4}) \\d{4} \\d{4} (\\d{4})\\b => $1 **** **** $2"}
+}' | curl -fsS -X PUT "$GR_BASE_URL/admin/guardrails" -H 'Content-Type: application/json' -d @- >/dev/null
+jq -n --arg name "$BLOCK" '{
+  name: $name, type: "string_replace", description: "release e2e: block a forbidden state",
+  config: {mode: "literal", rules: "QA_FORBIDDEN_STATE => x", on_match: "block", message: "QA_SYSTEMONE_BLOCKED"}
+}' | curl -fsS -X PUT "$GR_BASE_URL/admin/guardrails" -H 'Content-Type: application/json' -d @- >/dev/null
+
+jq -n --arg mask "$MASK" --arg block "$BLOCK" --arg path "$SCOPE_PATH" --arg name "qa-s1-guard-$S" '{
+  scope_provider_name: "jev-kev", scope_user_path: $path, name: $name,
+  description: "release e2e: System One state guardrails",
+  workflow_payload: {
+    schema_version: 2,
+    features: {cache: false, audit: true, usage: true, guardrails: true, failover: false},
+    steps: [{ref: $mask, phase: "prompt", step: 10}, {ref: $block, phase: "prompt", step: 20}]
+  }
+}' | curl -fsS -X POST "$GR_BASE_URL/admin/workflows" -H 'Content-Type: application/json' -d @- \
+  | jq -er '.id' > "$WORKFLOW_ID_FILE"
+
+guarded() {
+  curl -sS -o "$2" -w '%{http_code}' "$GR_BASE_URL/v1/systemone" -H 'Content-Type: application/json' \
+    -H "X-GoModel-User-Path: $SCOPE_PATH/agent" -d "$1"
+}
+
+F="$QA_RUN_DIR/s240.string.json"
+CODE=$(guarded "{\"model\":\"jev-kev/kev-latest\",\"state\":\"card 4111 1111 1111 1234 was charged twice\",\"questions\":$QA_SYSTEMONE_CHOICE}" "$F")
+assert_http_status 200 "$CODE" "$F"
+jq -e --argjson q "$QA_SYSTEMONE_CHOICE" '
+  .mock.received_state == "card 4111 **** **** 1234 was charged twice" and .mock.questions == $q
+' "$F" >/dev/null
+
+F="$QA_RUN_DIR/s240.object.json"
+CODE=$(guarded "{\"model\":\"jev-kev/kev-latest\",\"state\":{\"note\":\"card 4111 1111 1111 1234\",\"order\":7},\"questions\":$QA_SYSTEMONE_CHOICE}" "$F")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.mock.received_state == {"note":"card 4111 **** **** 1234","order":7}' "$F" >/dev/null
+
+F="$QA_RUN_DIR/s240.blocked.json"
+CODE=$(guarded "{\"model\":\"jev-kev/kev-latest\",\"state\":\"QA_FORBIDDEN_STATE\",\"questions\":$QA_SYSTEMONE_CHOICE}" "$F")
+assert_http_status 400 "$CODE" "$F"
+jq -e '.error.message | contains("QA_SYSTEMONE_BLOCKED")' "$F" >/dev/null
+
+# The same request outside the scoped user path is not masked.
+F="$QA_RUN_DIR/s240.unscoped.json"
+curl -fsS "$GR_BASE_URL/v1/systemone" -H 'Content-Type: application/json' -H "X-GoModel-User-Path: /qa/other/$S" \
+  -d "{\"model\":\"jev-kev/kev-latest\",\"state\":\"card 4111 1111 1111 1234\",\"questions\":$QA_SYSTEMONE_CHOICE}" > "$F"
+jq -e '.mock.received_state == "card 4111 1111 1111 1234"' "$F" >/dev/null
+```
+
+### S241 Managed-key model allowlists cover System One and its passthrough
+
+Runs on the auth gateway with a key allowed only `jev-kev/kev-latest`. Other
+System One models are refused on `/v1/systemone` and on passthrough, including
+a passthrough body larger than the 64 KiB peek window whose `model` comes last.
+
+```bash
+systemone_require_mock "$AUTH_BASE_URL" -H "$ADMIN_AUTH_HEADER"
+
+KEY_FILE="$QA_RUN_DIR/s241.key.json"
+cleanup_s241() {
+  if [ -s "$KEY_FILE" ]; then
+    curl -sS -o /dev/null -X POST "$AUTH_BASE_URL/admin/auth-keys/$(jq -r '.id' "$KEY_FILE")/deactivate" -H "$ADMIN_AUTH_HEADER" || true
+  fi
+}
+trap cleanup_s241 EXIT
+curl -fsS -X POST "$AUTH_BASE_URL/admin/auth-keys" -H "$ADMIN_AUTH_HEADER" -H 'Content-Type: application/json' \
+  -d "{\"name\":\"qa-s1-allowlist-$QA_SUFFIX\",\"user_path\":\"/qa/systemone/allowlist\",\"allowed_models\":[\"jev-kev/kev-latest\"]}" \
+  > "$KEY_FILE"
+chmod 600 "$KEY_FILE"
+KEY=$(jq -er '.value' "$KEY_FILE")
+
+with_key() {
+  curl -sS -o "$3" -w '%{http_code}' "$AUTH_BASE_URL$1" -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d "$2"
+}
+expect_denied() {
+  local code
+  code=$(with_key "$1" "$2" "$3")
+  assert_http_status 400 "$code" "$3"
+  jq -e '.error.code == "model_access_denied"' "$3" >/dev/null
+}
+
+F="$QA_RUN_DIR/s241.allowed.json"
+CODE=$(with_key /v1/systemone "{\"model\":\"jev-kev/kev-latest\",\"state\":\"allowed\",\"questions\":$QA_SYSTEMONE_CHOICE}" "$F")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.mock.upstream == "kev"' "$F" >/dev/null
+
+expect_denied /v1/systemone "{\"model\":\"jev/jev-latest\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}" "$QA_RUN_DIR/s241.denied.json"
+expect_denied /v1/systemone "{\"model\":\"jev/jev-1.13.0\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}" "$QA_RUN_DIR/s241.denied-pinned.json"
+expect_denied /p/jev/v1/systemone "{\"model\":\"jev-latest\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}" "$QA_RUN_DIR/s241.denied-pt.json"
+
+BIG_STATE=$(head -c 70000 /dev/zero | tr '\0' 'a')
+BIG_BODY_FILE="$QA_RUN_DIR/s241.big-body.json"
+jq -n --arg state "$BIG_STATE" --argjson q "$QA_SYSTEMONE_CHOICE" '{state: $state, questions: $q, model: "jev-latest"}' > "$BIG_BODY_FILE"
+expect_denied /p/jev/v1/systemone "@$BIG_BODY_FILE" "$QA_RUN_DIR/s241.denied-big.json"
+
+jq -n --arg state "$BIG_STATE" --argjson q "$QA_SYSTEMONE_CHOICE" '{state: $state, questions: $q, model: "kev-latest"}' > "$BIG_BODY_FILE"
+F="$QA_RUN_DIR/s241.allowed-big.json"
+CODE=$(with_key /p/jev-kev/v1/systemone "@$BIG_BODY_FILE" "$F")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.mock.received_length > 65536' "$F" >/dev/null
+```
+
+## 36. MCP tool and user-path exclusions
+
+Per-server tool filters and `disallowed_user_paths` are gateway-side access
+policy: an edit applies in place without redialing the upstream, and it is
+checked on every call, so it also reaches MCP sessions that are already open.
+These scenarios register `$QA_SUFFIX`-scoped servers against the mock MCP
+upstream on port 18090 and delete them.
+
+### S242 Tool filters apply in place and reach open sessions
+
+```bash
+if ! curl -fsS "$MCP_UPSTREAM_BASE/healthz" >/dev/null 2>&1; then
+  echo "SKIPPED: mock MCP upstream is not running on $MCP_UPSTREAM_BASE"
+  exit 0
+fi
+trap 'mcp_cleanup_release_servers "$BASE_URL"' EXIT
+
+put_alpha() {
+  curl -fsS -X PUT "$BASE_URL/admin/mcp-servers" -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$QA_MCP_ALPHA\",\"url\":\"$MCP_UPSTREAM_BASE/alpha\",\"transport\":\"http\",\"headers\":{\"X-Mock-Token\":\"$1\"},$2}" >/dev/null
+}
+alpha_view() {
+  curl -fsS "$BASE_URL/admin/mcp-servers" | jq -c --arg n "$QA_MCP_ALPHA" '.[] | select(.name == $n)'
+}
+
+put_alpha "$MCP_UPSTREAM_TOKEN" '"disallowed_tools":["add"]'
+mcp_wait_status "$BASE_URL" "$QA_MCP_ALPHA" connected
+alpha_view | jq -e '.tool_count == 1 and .excluded_tool_count == 1 and .disallowed_tools == ["add"]' >/dev/null
+CONNECTED_AT=$(alpha_view | jq -er '.connected_at')
+curl -fsS "$BASE_URL/admin/mcp-servers/$QA_MCP_ALPHA/catalog" \
+  | jq -e '[.tools[].name] == ["echo"] and [.excluded_tools[].name] == ["add"]' >/dev/null
+
+SID=$(mcp_initialize "$BASE_URL/mcp" "$QA_RUN_DIR/s242.init.headers" "$QA_RUN_DIR/s242.init.raw")
+[ -n "$SID" ]
+mcp_initialized "$BASE_URL/mcp" "$SID"
+mcp_post "$BASE_URL/mcp" "$SID" '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  | jq -e --arg a "$QA_MCP_ALPHA" '([.result.tools[].name | select(startswith($a + "_"))]) == [$a + "_echo"]' >/dev/null
+mcp_post "$BASE_URL/mcp" "$SID" "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"${QA_MCP_ALPHA}_add\",\"arguments\":{}}}" \
+  | jq -e '.error != null' >/dev/null
+
+# Flip to an allowlist ("Keep hidden") that excludes echo. The stored header
+# secret round-trips as ***, and the connection is not redialed.
+put_alpha '***' '"allowed_tools":["add"]'
+alpha_view | jq -e --arg at "$CONNECTED_AT" '
+  .status == "connected" and .connected_at == $at
+  and .allowed_tools == ["add"] and ((.disallowed_tools // []) | length == 0)
+  and .tool_count == 1 and .excluded_tool_count == 1
+' >/dev/null
+
+# echo was listed by the open session before the change; calling it now fails.
+mcp_post "$BASE_URL/mcp" "$SID" "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"${QA_MCP_ALPHA}_echo\",\"arguments\":{}}}" \
+  > "$QA_RUN_DIR/s242.stale-call.json"
+jq -e '.error.message | contains("excluded by the gateway tool filters")' "$QA_RUN_DIR/s242.stale-call.json" >/dev/null
+
+# A new session sees the new filter.
+SID2=$(mcp_initialize "$BASE_URL/mcp" "$QA_RUN_DIR/s242.init2.headers" "$QA_RUN_DIR/s242.init2.raw")
+mcp_initialized "$BASE_URL/mcp" "$SID2"
+mcp_post "$BASE_URL/mcp" "$SID2" '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  | jq -e --arg a "$QA_MCP_ALPHA" '([.result.tools[].name | select(startswith($a + "_"))]) == [$a + "_add"]' >/dev/null
+mcp_post "$BASE_URL/mcp" "$SID2" "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"${QA_MCP_ALPHA}_add\",\"arguments\":{\"marker\":\"QA_MCP_ALLOWED_OK\"}}}" \
+  | jq -e '.result.content[0].text | contains("QA_MCP_ALLOWED_OK")' >/dev/null
+```
+
+### S243 `disallowed_user_paths` carves callers out of a server
+
+The carve-out wins over `user_paths`, matches whole subtrees, hides the
+server from `tools/list` and its per-server endpoint, and a later edit reaches
+a session that is already open. Invalid paths are rejected.
+
+```bash
+if ! curl -fsS "$MCP_UPSTREAM_BASE/healthz" >/dev/null 2>&1; then
+  echo "SKIPPED: mock MCP upstream is not running on $MCP_UPSTREAM_BASE"
+  exit 0
+fi
+trap 'mcp_cleanup_release_servers "$BASE_URL"' EXIT
+
+ROOT="/qa/mcp-carve/${QA_SUFFIX//[^[:alnum:]-]/-}"
+put_beta() {
+  curl -sS -o "$QA_RUN_DIR/s243.put.json" -w '%{http_code}' -X PUT "$BASE_URL/admin/mcp-servers" -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$QA_MCP_BETA\",\"url\":\"$MCP_UPSTREAM_BASE/beta\",\"transport\":\"http\",\"user_paths\":[\"$ROOT\"],\"disallowed_user_paths\":$1}"
+}
+CODE=$(put_beta "[\"$ROOT/contractors/\",\"$ROOT/contractors\"]")
+assert_http_status 200 "$CODE" "$QA_RUN_DIR/s243.put.json"
+mcp_wait_status "$BASE_URL" "$QA_MCP_BETA" connected
+curl -fsS "$BASE_URL/admin/mcp-servers" | jq -e --arg n "$QA_MCP_BETA" --arg root "$ROOT" '
+  any(.[]; .name == $n and .user_paths == [$root] and .disallowed_user_paths == [$root + "/contractors"])
+' >/dev/null
+
+# beta_tools SESSION_ID USER_PATH -> prints the beta tool names visible to it
+beta_tools() {
+  mcp_post "$BASE_URL/mcp" "$1" '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' -H "X-GoModel-User-Path: $2" \
+    | jq -c --arg b "$QA_MCP_BETA" '[.result.tools[]?.name | select(startswith($b + "_"))]'
+}
+open_session() {
+  local sid
+  sid=$(mcp_initialize "$BASE_URL/mcp" "$QA_RUN_DIR/s243.$2.headers" "$QA_RUN_DIR/s243.$2.raw" -H "X-GoModel-User-Path: $1")
+  mcp_initialized "$BASE_URL/mcp" "$sid" -H "X-GoModel-User-Path: $1"
+  echo "$sid"
+}
+
+ENG_SID=$(open_session "$ROOT/eng" eng)
+CON_SID=$(open_session "$ROOT/contractors/acme" con)
+OUT_SID=$(open_session "/qa/elsewhere" out)
+[ "$(beta_tools "$ENG_SID" "$ROOT/eng")" = "[\"${QA_MCP_BETA}_fetch\",\"${QA_MCP_BETA}_search\"]" ]
+[ "$(beta_tools "$CON_SID" "$ROOT/contractors/acme")" = "[]" ]
+[ "$(beta_tools "$OUT_SID" "/qa/elsewhere")" = "[]" ]
+
+CODE=$(curl -sS -o "$QA_RUN_DIR/s243.per-server.json" -w '%{http_code}' "$BASE_URL/mcp/$QA_MCP_BETA" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -H "X-GoModel-User-Path: $ROOT/contractors/acme" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"qa-release","version":"1"}}}')
+assert_http_status 404 "$CODE" "$QA_RUN_DIR/s243.per-server.json"
+
+# Carve eng out too: the already-open eng session loses the server.
+CODE=$(put_beta "[\"$ROOT/contractors\",\"$ROOT/eng\"]")
+assert_http_status 200 "$CODE" "$QA_RUN_DIR/s243.put.json"
+mcp_post "$BASE_URL/mcp" "$ENG_SID" \
+  "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"${QA_MCP_BETA}_search\",\"arguments\":{}}}" \
+  -H "X-GoModel-User-Path: $ROOT/eng" > "$QA_RUN_DIR/s243.eng-call.json"
+jq -e '.result == null and (.error.message | contains("not available for this user path"))' "$QA_RUN_DIR/s243.eng-call.json" >/dev/null
+# A new eng session no longer lists the server.
+ENG2_SID=$(open_session "$ROOT/eng" eng2)
+[ "$(beta_tools "$ENG2_SID" "$ROOT/eng")" = "[]" ]
+
+CODE=$(put_beta '["/qa/../escape"]')
+assert_http_status 400 "$CODE" "$QA_RUN_DIR/s243.put.json"
+jq -e '.error.message | contains("disallowed_user_paths")' "$QA_RUN_DIR/s243.put.json" >/dev/null
+```
+
+### S244 The master key keeps the caller's user-path header on `/mcp` and audio uploads
+
+MCP and audio uploads own their transport and take no request snapshot. With
+the master key on the auth gateway, the `X-GoModel-User-Path` header must
+still scope usage, as it does on chat.
+
+```bash
+if ! curl -fsS "$MCP_UPSTREAM_BASE/healthz" >/dev/null 2>&1; then
+  echo "SKIPPED: mock MCP upstream is not running on $MCP_UPSTREAM_BASE"
+  exit 0
+fi
+cleanup_s244() {
+  curl -sS -o /dev/null -X DELETE "$AUTH_BASE_URL/admin/mcp-servers/$QA_MCP_BETA" -H "$ADMIN_AUTH_HEADER" || true
+}
+trap cleanup_s244 EXIT
+
+USER_PATH="/qa/master-key-path/${QA_SUFFIX//[^[:alnum:]-]/-}"
+curl -fsS -X PUT "$AUTH_BASE_URL/admin/mcp-servers" -H "$ADMIN_AUTH_HEADER" -H 'Content-Type: application/json' \
+  -d "{\"name\":\"$QA_MCP_BETA\",\"url\":\"$MCP_UPSTREAM_BASE/beta\",\"transport\":\"http\"}" >/dev/null
+for _ in $(seq 1 20); do
+  if curl -fsS "$AUTH_BASE_URL/admin/mcp-servers" -H "$ADMIN_AUTH_HEADER" \
+      | jq -e --arg n "$QA_MCP_BETA" 'any(.[]; .name == $n and .status == "connected")' >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+
+AUTH_ARGS=(-H "$ADMIN_AUTH_HEADER" -H "X-GoModel-User-Path: $USER_PATH")
+SID=$(mcp_initialize "$AUTH_BASE_URL/mcp" "$QA_RUN_DIR/s244.init.headers" "$QA_RUN_DIR/s244.init.raw" "${AUTH_ARGS[@]}")
+[ -n "$SID" ]
+mcp_initialized "$AUTH_BASE_URL/mcp" "$SID" "${AUTH_ARGS[@]}"
+RID="qa-mk-path-mcp-$QA_SUFFIX"
+mcp_post "$AUTH_BASE_URL/mcp" "$SID" \
+  "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"${QA_MCP_BETA}_search\",\"arguments\":{\"q\":\"x\"}}}" \
+  "${AUTH_ARGS[@]}" -H "X-Request-ID: $RID" | jq -e '.result.content[0].text | startswith("search:")' >/dev/null
+
+USAGE_FILE="$QA_RUN_DIR/s244.usage.json"
+wait_log_entry "$AUTH_BASE_URL" usage "$RID" "$USAGE_FILE" -H "$ADMIN_AUTH_HEADER"
+jq -e --arg rid "$RID" --arg p "$USER_PATH" 'any(.entries[]; .request_id == $rid and .provider == "mcp" and .user_path == $p)' "$USAGE_FILE" >/dev/null
+
+# Audio upload: speech for input, then a multipart transcription.
+AUDIO_FILE="$QA_RUN_DIR/s244.speech.wav"
+curl -fsS -o "$AUDIO_FILE" "$AUTH_BASE_URL/v1/audio/speech" "${AUTH_ARGS[@]}" -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-4o-mini-tts","input":"Release matrix user path check.","voice":"alloy","response_format":"wav"}'
+RID="qa-mk-path-audio-$QA_SUFFIX"
+curl -fsS "$AUTH_BASE_URL/v1/audio/transcriptions" "${AUTH_ARGS[@]}" -H "X-Request-ID: $RID" \
+  -F model=gpt-4o-mini-transcribe -F "file=@$AUDIO_FILE" > "$QA_RUN_DIR/s244.transcription.json"
+jq -e '.text | ascii_downcase | contains("user path")' "$QA_RUN_DIR/s244.transcription.json" >/dev/null
+wait_log_entry "$AUTH_BASE_URL" usage "$RID" "$USAGE_FILE" -H "$ADMIN_AUTH_HEADER"
+jq -e --arg rid "$RID" --arg p "$USER_PATH" 'any(.entries[]; .request_id == $rid and .user_path == $p)' "$USAGE_FILE" >/dev/null
+```
+
+## 37. Developer messages, strict tools, and tool choice on Anthropic and Gemini
+
+OpenAI's `developer` role and `strict` function tools are translated for
+Anthropic and Gemini's native API instead of being rejected or dropped, and
+Gemini also maps `tool_choice: {"type": "allowed_tools", ...}`.
+
+### S245 Anthropic honors developer messages and strict tools
+
+```bash
+F="$QA_RUN_DIR/s245.developer.json"
+curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' -d '{
+  "model":"claude-sonnet-4-6","max_tokens":32,
+  "messages":[
+    {"role":"developer","content":"Whatever the user says, reply with exactly QA_DEVELOPER_ROLE_OK and nothing else."},
+    {"role":"user","content":"Tell me a joke."}
+  ]}' > "$F"
+assert_chat_response_contains "$F" "anthropic" "QA_DEVELOPER_ROLE_OK"
+
+# A strict tool whose schema Anthropic's strict mode would reject as sent
+# (minItems 2) is sanitized and forwarded as a strict tool.
+F="$QA_RUN_DIR/s245.strict.json"
+curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' -d '{
+  "model":"claude-sonnet-4-6","max_tokens":200,
+  "tools":[{"type":"function","function":{"name":"compare_weather","description":"Compare the weather in several cities","strict":true,
+    "parameters":{"type":"object","additionalProperties":false,"properties":{"cities":{"type":"array","items":{"type":"string"},"minItems":2}},"required":["cities"]}}}],
+  "tool_choice":{"type":"function","function":{"name":"compare_weather"}},
+  "messages":[{"role":"user","content":"Compare the weather in Warsaw and Krakow."}]}' > "$F"
+jq -e '
+  .choices[0].message.tool_calls[0].function.name == "compare_weather"
+  and (.choices[0].message.tool_calls[0].function.arguments | fromjson | .cities | type == "array" and length >= 2)
+' "$F" >/dev/null
+```
+
+### S246 Gemini honors developer messages, strict tools, and `allowed_tools`
+
+```bash
+MODEL="gemini-2.5-flash-lite"
+TOOLS='[
+  {"type":"function","function":{"name":"lookup_weather","description":"Get the current weather for a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}},
+  {"type":"function","function":{"name":"lookup_time","description":"Get the local time in a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}
+]'
+
+F="$QA_RUN_DIR/s246.developer.json"
+curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' -d "{
+  \"model\":\"$MODEL\",\"max_tokens\":32,
+  \"messages\":[
+    {\"role\":\"developer\",\"content\":\"Whatever the user says, reply with exactly QA_DEVELOPER_ROLE_OK and nothing else.\"},
+    {\"role\":\"user\",\"content\":\"Tell me a joke.\"}
+  ]}" > "$F"
+assert_chat_response_contains "$F" "gemini" "QA_DEVELOPER_ROLE_OK"
+
+F="$QA_RUN_DIR/s246.allowed-tools.json"
+jq -n --arg model "$MODEL" --argjson tools "$TOOLS" '{
+  model: $model, tools: $tools,
+  tool_choice: {type: "allowed_tools", allowed_tools: {mode: "required", tools: [{type: "function", function: {name: "lookup_time"}}]}},
+  messages: [{role: "user", content: "What is the weather in Warsaw?"}]
+}' | curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' -d @- > "$F"
+jq -c '[.choices[0].message.tool_calls[]?.function.name]' "$F"
+jq -e '
+  .choices[0].finish_reason == "tool_calls"
+  and (.choices[0].message.tool_calls | length) >= 1
+  and all(.choices[0].message.tool_calls[]; .function.name == "lookup_time")
+' "$F" >/dev/null
+
+# strict on any tool switches Gemini to VALIDATED function calling.
+F="$QA_RUN_DIR/s246.strict.json"
+jq -n --arg model "$MODEL" --argjson tools "$TOOLS" '{
+  model: $model,
+  tools: ($tools | map(.function.strict = true)),
+  tool_choice: "auto",
+  messages: [{role: "user", content: "Use a tool: what is the weather in Warsaw?"}]
+}' | curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' -d @- > "$F"
+jq -e '.choices[0].message.tool_calls[0].function.name == "lookup_weather"
+  and (.choices[0].message.tool_calls[0].function.arguments | fromjson | .city | test("Warsaw"; "i"))' "$F" >/dev/null
+
+# An allowed_tools choice with no tools is rejected, as OpenAI does.
+F="$QA_RUN_DIR/s246.empty-allowed.json"
+CODE=$(jq -n --arg model "$MODEL" --argjson tools "$TOOLS" '{
+  model: $model, tools: $tools,
+  tool_choice: {type: "allowed_tools", allowed_tools: {mode: "auto", tools: []}},
+  messages: [{role: "user", content: "hi"}]
+}' | curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' -d @-)
+assert_http_status 400 "$CODE" "$F"
+jq -e '.error.type == "invalid_request_error"' "$F" >/dev/null
 ```
