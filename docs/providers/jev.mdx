@@ -2,7 +2,7 @@
 title: "Jev / Kev (TypeSafe System One)"
 sidebarTitle: "Jev / Kev"
 description: "Route TypeSafe System One decision requests through GoModel, to the hosted Jev API or a self-hosted Kev server."
-icon: "scale-balanced"
+icon: "scale"
 keywords: ["Jev", "Kev", "TypeSafe", "System One", "decision model", "classification", "noul", "choice", "score", "self-hosted"]
 ---
 
@@ -22,10 +22,11 @@ There are three question types:
 | `score` | Rate against ordered levels | `score`, plus `legend`, `probabilities` and `confidence` |
 
 The API is not OpenAI-compatible, and its answers have no chat equivalent, so
-GoModel does not translate it: System One requests go through
-[passthrough](/features/passthrough-api) at `/p/jev/...`, which is enabled by
-default for this provider. Chat, `/responses`, and `/v1/embeddings` return
-`invalid_request_error` for `jev` models.
+GoModel forwards it natively instead of translating it: `POST /v1/systemone`
+is available as soon as a `jev` or `openrouter` provider is configured, and
+[passthrough](/features/passthrough-api) at `/p/jev/...` reaches every other
+upstream route. Chat, `/responses`, and `/v1/embeddings` return
+`invalid_request_error` for `jev` models, pointing at `/v1/systemone`.
 
 ## Configure
 
@@ -49,13 +50,15 @@ GOMODEL_MASTER_KEY=change-me
   use; a trailing `/v1` is accepted and trimmed, so both spellings address the
   same server. To run the hosted API and a local Kev side by side, register the
   second under a suffixed name: `JEV_KEV_BASE_URL=...` creates provider
-  `jev-kev`, reached at `/p/jev-kev/...`.
+  `jev-kev`, reached at `/p/jev-kev/...`. In `config.yaml`, any name works,
+  such as `kev: {type: jev, base_url: ...}`, and that name is what logs,
+  usage, and model prefixes show.
 </Note>
 
 ## Verify
 
 ```bash
-curl -s http://localhost:8080/p/jev/v1/systemone \
+curl -s http://localhost:8080/v1/systemone \
   -H "Authorization: Bearer change-me" \
   -H "Content-Type: application/json" \
   -d '{
@@ -88,19 +91,21 @@ curl -s http://localhost:8080/p/jev/v1/systemone \
 }
 ```
 
-The `/v1` segment is optional: `/p/jev/systemone` is the same route. Use
-`kev-latest` as the model on a Kev server; it also answers to `jev-latest`.
+Use `kev-latest` as the model on a Kev server; it also answers to
+`jev-latest`. The same request works at `/p/jev/v1/systemone`, but that
+passthrough route skips virtual models and guardrails; see
+[the native endpoint](#the-native-endpoint).
 
 ## Using the TypeSafe SDKs
 
-The SDKs send `POST {base_url}/v1/systemone`, so point them at the provider's
-passthrough root and authenticate with your GoModel key:
+The SDKs send `POST {base_url}/v1/systemone`, so point them at the gateway
+itself and authenticate with your GoModel key:
 
 <CodeGroup>
 ```python Python
 from typesafe_sdk import Noul, TypeSafeClient
 
-client = TypeSafeClient(api_key="change-me", base_url="http://localhost:8080/p/jev")
+client = TypeSafeClient(api_key="change-me", base_url="http://localhost:8080")
 response = client.system_one(
     state="I was charged twice. Please fix this ASAP.",
     questions={"billing": Noul(instructions="Is this ticket about billing?")},
@@ -111,7 +116,7 @@ print(response.nouls["billing"].noul)
 ```typescript JavaScript
 import { TypeSafeClient, noul } from "@typesafe-ai/sdk";
 
-const client = new TypeSafeClient({ apiKey: "change-me", baseURL: "http://localhost:8080/p/jev" });
+const client = new TypeSafeClient({ apiKey: "change-me", baseURL: "http://localhost:8080" });
 const result = await client.systemOne({
   state: "I was charged twice. Please fix this ASAP.",
   questions: { billing: noul({ instructions: "Is this ticket about billing?" }) },
@@ -120,14 +125,79 @@ console.log(result.answers.billing.noul);
 ```
 </CodeGroup>
 
-The same works with `TYPESAFE_BASE_URL=http://localhost:8080/p/jev` and
-`TYPESAFE_API_KEY=change-me` in the environment.
+The same works with `TYPESAFE_BASE_URL=http://localhost:8080` and
+`TYPESAFE_API_KEY=change-me` in the environment. With several System One
+providers, name the model with its provider (`kev/kev-latest`) or a
+[virtual model](/features/virtual-models).
+The SDKs' model listing expects TypeSafe's shape, while the gateway's
+`/v1/models` is OpenAI-shaped; list upstream models at `/p/jev/v1/models`.
+
+## The native endpoint
+
+`POST /v1/systemone` is a gateway endpoint, not a raw proxy. For each request
+GoModel:
+
+1. Resolves `model` like any other endpoint: a bare name, a provider-qualified
+   name (`jev/jev-latest`), or a virtual model, then applies the caller's
+   model allowlist, rate limits, and budgets.
+2. Runs the workflow's prompt [guardrails](/advanced/guardrails) over `state`.
+3. Forwards the body with only `model` (to the resolved name) and `state` (if
+   a guardrail edited it) changed. Questions, criteria, and every other field
+   reach the provider byte for byte.
+4. Relays the answer unchanged, and records it in the audit log (as a
+   **System One** request) and in usage.
+
+The endpoint never translates. A model that cannot answer System One fails
+with `400 invalid_request_error` explaining why, and the gateway logs a
+warning: one on a provider without the API, or one the catalog lists as a
+chat, embedding, or other generation model, such as a virtual model pointing
+at a chat model. Without a `jev` or `openrouter` provider, the route answers
+`404`.
+
+Response caching and failover do not apply to this endpoint yet.
+
+### Through OpenRouter
+
+[OpenRouter serves Jev natively](https://openrouter.ai/docs/guides/community/jev)
+at the same path, so an OpenRouter key alone is enough:
+
+```bash
+OPENROUTER_API_KEY=sk-or-...
+```
+
+OpenRouter's decision models appear in `GET /v1/models` as utility models,
+priced from OpenRouter's listing: `openrouter/typesafe/jev-1.13`,
+`openrouter/~typesafe/jev-latest` (tracks the newest Jev), and other decision
+models such as Kev 4B (`openrouter/jaredpalmer/kev-4b`). Name them that way in
+`model`. OpenRouter accepts `jev-latest` itself, but GoModel routes on its
+catalog IDs, so to keep the TypeSafe SDK's plain `jev-latest` working, add a
+[virtual model](/features/virtual-models) `jev-latest` that targets
+`openrouter/~typesafe/jev-latest`. Chat models on the same provider are
+rejected, since they have no System One API.
+
+The answer carries OpenRouter's `id`, `provider`, and `usage.cost`, and GoModel
+records that reported cost with the request's usage. With a `jev` provider
+configured as well, one virtual model can front a local Kev server and
+OpenRouter's Jev together.
+
+### Guardrails
+
+Guardrails see `state` as a single user message: a string state as its text,
+any other JSON value as its encoded JSON (which must still be valid JSON after
+an edit). This is what anonymizing or blocking guardrails need. The questions
+are your application's fixed schema and are not exposed.
+
+Guardrail edits a decision request has no place for, such as a system prompt
+injected by a workflow that also covers chat models, are dropped with a
+warning in the logs rather than failing the request. A guardrail that would
+answer the request itself blocks it instead, since System One callers expect
+typed answers, not text.
 
 ## Native routes
 
 | Route | What it does |
 | --- | --- |
-| `POST /p/jev/v1/systemone` | Evaluate a state against a map of questions |
+| `POST /p/jev/v1/systemone` | Evaluate a state against a map of questions, without virtual models or guardrails |
 | `GET /p/jev/v1/models` | The names the `model` field accepts, in the upstream's own shape |
 | `POST /p/jev/v1/systemone/permute` | Kev only: run one Choice question with several option orders |
 | `POST /p/jev/v1/systemone/separate` | Kev only: run each question in its own forward pass |
@@ -145,9 +215,14 @@ IDs such as `jev-1.13.0` are accepted by the `model` field whether or not they
 are listed. The models are categorized as utility models with no generation
 mode, since there is no OpenAI endpoint to route them to.
 
-Every System One request names its model, so the passthrough surface applies
-the caller's [model allowlist](/features/users) to it like any other
-request.
+Every System One request names its model, so both `/v1/systemone` and the
+passthrough surface apply the caller's [model allowlist](/features/users) to
+it like any other request.
+
+`/v1/systemone` routes only to models in the catalog. To pin a version the
+upstream does not list, such as `jev-1.13.0`, declare it under the provider's
+`models` (as in the pricing example below) and set
+`CONFIGURED_PROVIDER_MODELS_MODE=merge`; passthrough accepts any name.
 
 The response's `usage.input_tokens` and `usage.output_tokens` are recorded, so
 System One calls appear in the usage API and dashboard under the model that

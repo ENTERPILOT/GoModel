@@ -11,6 +11,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -328,4 +329,32 @@ func TestWorkflowBatchPreparerRejectsRespondDecisions(t *testing.T) {
 	var gatewayErr *core.GatewayError
 	require.ErrorAs(t, err, &gatewayErr)
 	require.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
+}
+
+// A System One request exposes only its state: an anonymizing guardrail
+// rewrites it, while a system prompt a workflow injects for chat models has
+// no place in a decision request and is dropped rather than failing it.
+func TestWorkflowRequestPatcherSystemOneGuardsState(t *testing.T) {
+	store := newTestStore(
+		systemPromptDefinition("safety", "be safe"),
+		Definition{Name: "privacy", Type: "llm_based_altering", Config: rawConfig(t, map[string]any{"model": "openai/gpt-4o-mini", "roles": []string{"user"}})},
+	)
+	service := newService(t, store, chatFunc(func(_ context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
+		text := core.ExtractTextContent(req.Messages[1].Content)
+		inner := strings.TrimSuffix(strings.TrimPrefix(text, "<TEXT_TO_ALTER>\n"), "\n</TEXT_TO_ALTER>")
+		return replyChat(strings.ReplaceAll(inner, "John", "[PERSON]"))(context.Background(), req)
+	}))
+	patcher := NewWorkflowRequestPatcher(staticChains{chainsFor(t, service,
+		StepReference{Ref: "privacy", Step: 10},
+		StepReference{Ref: "safety", Step: 20},
+	)})
+
+	req := &core.SystemOneRequest{Model: "kev-latest", State: json.RawMessage(`"John was charged twice"`)}
+	ctx, state := plugins.WithRequestState(context.Background())
+	got, err := patcher.PatchSystemOneRequest(ctx, req)
+	require.NoError(t, err)
+	assert.JSONEq(t, `"[PERSON] was charged twice"`, string(got.State))
+	assert.Equal(t, "kev-latest", got.Model)
+	assert.JSONEq(t, `"John was charged twice"`, string(req.State), "the original request must not change")
+	require.Len(t, state.Snapshot(), 2)
 }

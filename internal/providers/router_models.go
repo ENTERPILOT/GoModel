@@ -182,3 +182,17 @@ func (r *Router) NativeResponseProviderTypes() []string {
 		return ok
 	})
 }
+
+// LookupModel returns a copy of the catalog entry for a model selector, or
+// false when the model is unknown or the lookup cannot describe one model.
+func (r *Router) LookupModel(model string) (*core.Model, bool) {
+	if r.caps.modelInfo == nil {
+		return nil, false
+	}
+	info := r.caps.modelInfo.GetModel(model)
+	if info == nil {
+		return nil, false
+	}
+	cloned := info.Model
+	return &cloned, true
+}

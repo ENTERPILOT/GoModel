@@ -11193,6 +11193,100 @@
         }
       }
     },
+    "/v1/systemone": {
+      "post": {
+        "description": "Available when a jev or openrouter provider is configured. The request and answer follow TypeSafe's System One API; models on providers without that API are rejected rather than translated.",
+        "tags": [
+          "systemone"
+        ],
+        "summary": "Evaluate a System One decision request (Jev / Kev)",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "description": "System One request: model, state, and questions",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "System One answers, in the provider's shape",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/systemone",
+            "title": "Evaluate a System One decision request (Jev / Kev)",
+            "description": "GoModel API reference for POST /v1/systemone: Evaluate a System One decision request (Jev / Kev)."
+          }
+        }
+      }
+    },
     "/v1/usage": {
       "get": {
         "description": "Returns recorded usage, budget statuses, and rate limit statuses for the caller's effective user path (the path bound to the managed API key, or the user-path header for master-key callers).",

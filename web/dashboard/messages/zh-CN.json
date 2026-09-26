@@ -224,6 +224,7 @@
   "audit_type_embeddings": "嵌入",
   "audit_type_audio": "音频",
   "audit_type_images": "图像",
+  "audit_type_systemone": "System One",
   "audit_type_batches": "批处理与文件",
   "audit_type_realtime": "实时",
   "audit_type_passthrough": "透传",

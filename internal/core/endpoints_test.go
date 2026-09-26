@@ -42,6 +42,8 @@ func TestDescribeEndpointPath(t *testing.T) {
 		{path: "/v1/realtime/translations/client_secrets", managed: false, dialect: "openai_compat", operation: OperationRealtime, bodyMode: BodyModeNone, interaction: true},
 		{path: "/mcp", managed: false, dialect: "mcp", operation: OperationMCP, bodyMode: BodyModeNone, interaction: true},
 		{path: "/mcp/linear", managed: false, dialect: "mcp", operation: OperationMCP, bodyMode: BodyModeNone, interaction: true},
+		{path: "/v1/systemone", managed: true, dialect: "systemone", operation: OperationSystemOne, bodyMode: BodyModeJSON, interaction: true},
+		{path: "/v1/systemone/permute", managed: false, dialect: "", operation: "", bodyMode: BodyModeNone, interaction: false},
 		{path: "/p/openai/responses", managed: true, dialect: "provider_passthrough", operation: OperationProviderPassthrough, bodyMode: BodyModeOpaque, interaction: true},
 		{path: "/v1/models", managed: false, dialect: "", operation: "", bodyMode: BodyModeNone, interaction: false},
 	}

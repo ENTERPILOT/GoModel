@@ -59,6 +59,11 @@ func TestListModels_StampsArchitectureModalities(t *testing.T) {
 		 "architecture":{"input_modalities":["text"],"output_modalities":["rerank"]}},
 		{"id":"acme/video-only","created":1721260800,
 		 "architecture":{"input_modalities":["text"],"output_modalities":["video"]}},
+		{"id":"typesafe/jev-1.13","name":"TypeSafe: Jev 1.13","created":1789689684,"context_length":32000,
+		 "architecture":{"input_modalities":["text"],"output_modalities":["decisions"]},
+		 "pricing":{"prompt":"0.000000042","completion":"0"}},
+		{"id":"~typesafe/jev-latest","created":1789689684,
+		 "architecture":{"input_modalities":["text"],"output_modalities":["decisions"]}},
 		{"id":"mystery/no-architecture","created":1721260800}
 	]}`)
 	provider := newTestProvider(server.URL, server.Client())
@@ -72,7 +77,7 @@ func TestListModels_StampsArchitectureModalities(t *testing.T) {
 	// embedding models would never enter the catalog.
 	assert.Equal(t, "all", req.Query.Get("output_modalities"))
 
-	require.Len(t, resp.Data, 6)
+	require.Len(t, resp.Data, 8)
 	byID := modelsByID(resp)
 
 	chat := byID["openai/gpt-4o-mini"]
@@ -113,6 +118,17 @@ func TestListModels_StampsArchitectureModalities(t *testing.T) {
 	stt := byID["mistralai/voxtral-mini-3b-2507"]
 	require.NotNil(t, stt.Metadata)
 	assert.Equal(t, []string{"audio_transcription"}, stt.Metadata.Modes)
+
+	// Decision models serve /v1/systemone only: listed, but as utility models
+	// with no mode that would route an OpenAI request to them.
+	for _, id := range []string{"typesafe/jev-1.13", "~typesafe/jev-latest"} {
+		decision := byID[id]
+		require.NotNil(t, decision.Metadata, id)
+		assert.Empty(t, decision.Metadata.Modes, id)
+		assert.Equal(t, []core.ModelCategory{core.CategoryUtility}, decision.Metadata.Categories, id)
+	}
+	require.NotNil(t, byID["typesafe/jev-1.13"].Metadata.Pricing)
+	assert.InDelta(t, 0.042, *byID["typesafe/jev-1.13"].Metadata.Pricing.InputPerMtok, 1e-9)
 
 	assert.NotContains(t, byID, "cohere/rerank-only")
 	assert.NotContains(t, byID, "acme/video-only")

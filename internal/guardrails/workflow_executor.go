@@ -2,6 +2,7 @@ package guardrails
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/plugins"
@@ -34,6 +35,25 @@ func (p *WorkflowRequestPatcher) PatchChatRequest(ctx context.Context, req *core
 // PatchResponsesRequest runs the prompt chain over a translated responses request.
 func (p *WorkflowRequestPatcher) PatchResponsesRequest(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesRequest, error) {
 	return processGuardedResponses(ctx, p.chain(ctx), req)
+}
+
+// PatchSystemOneRequest runs the prompt chain over a System One request's
+// state. Edits a decision request has no place for, such as an injected
+// system prompt, are dropped with a warning rather than failing the request:
+// a guardrail scoped to every model is not wrong for System One models, it
+// only has nothing to change there.
+func (p *WorkflowRequestPatcher) PatchSystemOneRequest(ctx context.Context, req *core.SystemOneRequest) (*core.SystemOneRequest, error) {
+	if req == nil {
+		return nil, nil
+	}
+	return processGuarded(ctx, p.chain(ctx), req, "System One", exchange.FromSystemOneRequest, applySystemOneEdits)
+}
+
+func applySystemOneEdits(req *core.SystemOneRequest, prompt *pluginapi.Prompt) (*core.SystemOneRequest, error) {
+	if dropped := exchange.SystemOneUncarriedEdits(prompt); len(dropped) > 0 {
+		slog.Warn("guardrail edits a System One request cannot carry were dropped; only the state is guarded", "model", req.Model, "dropped", dropped)
+	}
+	return exchange.ApplyToSystemOneRequest(req, prompt)
 }
 
 // EditsPromptContent reports whether the request's prompt chain holds an

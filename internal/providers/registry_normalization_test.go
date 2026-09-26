@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -339,4 +340,28 @@ func TestRecordAvailabilityCheckKeepsFailureMarker(t *testing.T) {
 			require.Equal(t, tt.want, snapshots[0].LastAvailabilityError)
 		})
 	}
+}
+
+// LookupModel describes one catalog model by any selector the router resolves,
+// including OpenRouter's "~"-prefixed alias IDs.
+func TestRouterLookupModel(t *testing.T) {
+	registry := newTestRegistryWithModels(registryModelEntry{
+		provider:     &mockProvider{name: "openrouter"},
+		providerName: "openrouter",
+		providerType: "openrouter",
+		modelID:      "~typesafe/jev-latest",
+	})
+	router, err := NewRouter(registry)
+	require.NoError(t, err)
+
+	for _, selector := range []string{"openrouter/~typesafe/jev-latest", "~typesafe/jev-latest"} {
+		model, ok := router.LookupModel(selector)
+		require.True(t, ok, selector)
+		assert.Equal(t, "~typesafe/jev-latest", model.ID, selector)
+	}
+	_, ok := router.LookupModel("openrouter/unknown")
+	assert.False(t, ok)
+
+	_, ok = (&Router{}).LookupModel("openrouter/~typesafe/jev-latest")
+	assert.False(t, ok, "a lookup without single-model access describes nothing")
 }
