@@ -84,7 +84,10 @@ func ConvertMessagesToResponsesInput(messages []core.Message) (input any, instru
 				nil,
 			)
 		}
-		return nil, instructions, nil
+		// Instruction-only requests still need a non-nil empty input: the
+		// chatgpt provider's normalizeInput rejects a nil input ("responses
+		// input is required") even when instructions carry the prompt.
+		return []core.ResponsesInputElement{}, instructions, nil
 	}
 	return items, instructions, nil
 }
