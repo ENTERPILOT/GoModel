@@ -268,6 +268,38 @@ func (s *translatedInferenceService) systemOneUnsupportedReason(route systemOneR
 	return fmt.Sprintf("is a %s model, not a System One model", strings.Join(model.Metadata.Modes, "/"))
 }
 
+// systemOneOnlyModel reports whether the resolved model answers only System
+// One requests: served by a System One provider and catalogued as a utility
+// model with no generation mode, as jev models and OpenRouter's decision
+// models are. The catalog is consulted rather than the provider, so the check
+// holds from startup, before any provider has listed its models again.
+func systemOneOnlyModel(provider core.RoutableProvider, resolution *core.RequestModelResolution) bool {
+	if resolution == nil || !slices.Contains(systemOneProviderTypes, strings.TrimSpace(resolution.ProviderType)) {
+		return false
+	}
+	catalog, ok := provider.(modelCatalog)
+	if !ok {
+		return false
+	}
+	model, ok := catalog.LookupModel(resolution.ResolvedQualifiedModel())
+	if !ok || model == nil || model.Metadata == nil || len(model.Metadata.Modes) > 0 {
+		return false
+	}
+	return slices.Contains(model.Metadata.Categories, core.CategoryUtility)
+}
+
+// systemOneOnlyModelError points a chat, Responses, or embeddings request for
+// a System One model at /v1/systemone. Without it the caller would see the
+// upstream's own advice, which names the upstream's endpoint, not the
+// gateway's.
+func systemOneOnlyModelError(operation core.Operation, resolution *core.RequestModelResolution) error {
+	surface := strings.ReplaceAll(string(operation), "_", " ")
+	return core.NewInvalidRequestError(fmt.Sprintf(
+		"model %q is a System One decision model and does not support %s; it answers decision requests, which GoModel does not translate: send them to POST %s",
+		resolution.RequestedQualifiedModel(), surface, systemOneEvaluate.path,
+	), nil).WithParam("model")
+}
+
 // systemOneUnsupportedModelError explains a request whose model cannot answer
 // System One. It is also logged: a virtual model that sends System One
 // traffic to a chat model is an operator mistake the caller cannot fix.

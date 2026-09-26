@@ -132,108 +132,23 @@ providers, name the model with its provider (`kev/kev-latest`) or a
 The SDKs' model listing expects TypeSafe's shape, while the gateway's
 `/v1/models` is OpenAI-shaped; list upstream models at `/p/jev/v1/models`.
 
-## The native endpoint
+## System One API
 
-`POST /v1/systemone` is a gateway endpoint, not a raw proxy. For each request
-GoModel:
+`POST /v1/systemone` is a gateway endpoint, not a raw proxy: it applies
+virtual models, guardrails on `state`, the response cache, failover, audit,
+and usage, and it forwards the request natively without translating it. Kev's
+`/v1/systemone/permute` and `/v1/systemone/separate` work the same way. See
+[System One API](/advanced/systemone-api) for the full behavior, including
+OpenRouter, which serves Jev natively too.
 
-1. Resolves `model` like any other endpoint: a bare name, a provider-qualified
-   name (`jev/jev-latest`), or a virtual model, then applies the caller's
-   model allowlist, rate limits, and budgets.
-2. Runs the workflow's prompt [guardrails](/advanced/guardrails) over `state`.
-3. Forwards the body with only `model` (to the resolved name) and `state` (if
-   a guardrail edited it) changed. Questions, criteria, and every other field
-   reach the provider byte for byte.
-4. Relays the answer unchanged, and records it in the audit log (as a
-   **System One** request) and in usage.
-
-The endpoint never translates. A model that cannot answer System One fails
-with `400 invalid_request_error` explaining why, and the gateway logs a
-warning: one on a provider without the API, or one the catalog lists as a
-chat, embedding, or other generation model, such as a virtual model pointing
-at a chat model. Without a `jev` or `openrouter` provider, the route answers
-`404`.
-
-### Caching and failover
-
-With the [response cache](/features/cache) enabled, an identical request
-(same route, resolved model, guardrails, and body after guardrail edits) is
-answered from the exact cache without reaching the provider, and recorded in
-usage as a cache hit. The semantic cache never serves System One: a state
-that is merely similar is not the same decision. Send
-`Cache-Control: no-cache` to skip the cache for one request.
-
-A [virtual model](/features/virtual-models) with the `failover` strategy moves
-a request to its next target when the current one fails with an availability
-error (`429` or `5xx`, including TypeSafe's `529`, by default; see
-`failover.retry_on_statuses`), as it does for chat. Every target receives the
-request in its own System One form, so a target without the API, such as a
-chat model, is skipped rather than called. Client errors such as a malformed
-question (`422`) are returned without failover. The audit log shows each
-attempt, and usage is recorded under the target that answered:
-
-```yaml
-virtual_models:
-  - source: decider
-    strategy: failover
-    targets:
-      - { model: kev/kev-latest }                # local Kev first
-      - { model: openrouter/typesafe/jev-1.13 }  # hosted Jev when Kev is down
-```
-
-A failover answer is not cached, the same as for chat.
-
-### Through OpenRouter
-
-[OpenRouter serves Jev natively](https://openrouter.ai/docs/guides/community/jev)
-at the same path, so an OpenRouter key alone is enough:
-
-```bash
-OPENROUTER_API_KEY=sk-or-...
-```
-
-OpenRouter's decision models appear in `GET /v1/models` as utility models,
-priced from OpenRouter's listing: `openrouter/typesafe/jev-1.13`,
-`openrouter/~typesafe/jev-latest` (tracks the newest Jev), and other decision
-models such as Kev 4B (`openrouter/jaredpalmer/kev-4b`). Name them that way in
-`model`. OpenRouter accepts `jev-latest` itself, but GoModel routes on its
-catalog IDs, so to keep the TypeSafe SDK's plain `jev-latest` working, add a
-[virtual model](/features/virtual-models) `jev-latest` that targets
-`openrouter/~typesafe/jev-latest`. Chat models on the same provider are
-rejected, since they have no System One API.
-
-The answer carries OpenRouter's `id`, `provider`, and `usage.cost`, and GoModel
-records that reported cost with the request's usage. With a `jev` provider
-configured as well, one virtual model can front a local Kev server and
-OpenRouter's Jev together.
-
-### Guardrails
-
-Guardrails see `state` as a single user message: a string state as its text,
-any other JSON value as its encoded JSON (which must still be valid JSON after
-an edit). This is what anonymizing or blocking guardrails need. The questions
-are your application's fixed schema and are not exposed.
-
-Guardrail edits a decision request has no place for, such as a system prompt
-injected by a workflow that also covers chat models, are dropped with a
-warning in the logs rather than failing the request. A guardrail that would
-answer the request itself blocks it instead, since System One callers expect
-typed answers, not text.
-
-## Routes
+Every other upstream route is reachable through
+[passthrough](/features/passthrough-api), without virtual models, guardrails,
+or caching:
 
 | Route | What it does |
 | --- | --- |
-| `POST /v1/systemone` | Evaluate a state against a map of questions |
-| `POST /v1/systemone/permute` | Kev only: run one Choice question with several option orders (`n_perm`, 1 to 64, default 6) |
-| `POST /v1/systemone/separate` | Kev only: run each question in its own forward pass |
 | `GET /p/jev/v1/models` | The names the `model` field accepts, in the upstream's own shape |
-| `/p/jev/...` | Any upstream route, [passed through](/features/passthrough-api) without virtual models, guardrails, or caching |
-
-The Kev routes work like `/v1/systemone`, including virtual models,
-guardrails, caching, audit, and usage. They are refused for OpenRouter, which
-answers only the evaluation route; a hosted TypeSafe `jev` provider returns
-its own `404` for them.
+| `POST /p/jev/v1/systemone` | The evaluation route, forwarded as sent |
 
 Upstream errors keep their status code, with the provider's body carried in
 the gateway error message: a malformed question comes back as TypeSafe's `422`
@@ -252,12 +167,8 @@ Every System One request names its model, so both `/v1/systemone` and the
 passthrough surface apply the caller's [model allowlist](/features/users) to
 it like any other request.
 
-TypeSafe lists only its aliases but accepts any versioned ID, so a pinned
-version such as `jev-1.13.0` works without being declared. GoModel routes a
-model it does not list to a `jev` provider when the name says which one
-(`jev/jev-1.13.0`, or `kev/...` for a provider named `kev`), or, for a bare
-name, when exactly one `jev` provider is configured. A virtual model can pin a
-version the same way. The upstream rejects a name it does not know.
+A pinned version such as `jev-1.13.0` works without being declared; see
+[Models](/advanced/systemone-api#models) for how unlisted names are routed.
 
 The response's `usage.input_tokens` and `usage.output_tokens` are recorded, so
 System One calls appear in the usage API and dashboard under the model that

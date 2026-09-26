@@ -3,6 +3,8 @@ package guardrails
 import (
 	"context"
 	"log/slog"
+	"strings"
+	"sync"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/plugins"
@@ -49,9 +51,20 @@ func (p *WorkflowRequestPatcher) PatchSystemOneRequest(ctx context.Context, req 
 	return processGuarded(ctx, p.chain(ctx), req, "System One", exchange.FromSystemOneRequest, applySystemOneEdits)
 }
 
+// systemOneDropsWarned records the kinds of dropped guardrail edits already
+// logged at warning level. A guardrail scoped to every model edits every
+// System One request the same way, so the misconfiguration is reported once
+// per kind; repeats are logged at debug level.
+var systemOneDropsWarned sync.Map
+
 func applySystemOneEdits(req *core.SystemOneRequest, prompt *pluginapi.Prompt) (*core.SystemOneRequest, error) {
 	if dropped := exchange.SystemOneUncarriedEdits(prompt); len(dropped) > 0 {
-		slog.Warn("guardrail edits a System One request cannot carry were dropped; only the state is guarded", "model", req.Model, "dropped", dropped)
+		const message = "guardrail edits a System One request cannot carry were dropped; only the state is guarded"
+		if _, repeated := systemOneDropsWarned.LoadOrStore(strings.Join(dropped, ","), struct{}{}); repeated {
+			slog.Debug(message, "model", req.Model, "dropped", dropped)
+		} else {
+			slog.Warn(message+" (repeats are logged at debug level)", "model", req.Model, "dropped", dropped)
+		}
 	}
 	return exchange.ApplyToSystemOneRequest(req, prompt)
 }

@@ -133,6 +133,9 @@ func deriveWorkflowWithPolicy(
 			}
 			return workflow, nil
 		}
+		if systemOneOnlyModel(provider, resolution) {
+			return nil, systemOneOnlyModelError(desc.Operation, resolution)
+		}
 		return translatedWorkflow(c.Request().Context(), requestID, desc, resolution, policyResolver)
 
 	default:

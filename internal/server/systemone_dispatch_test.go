@@ -291,3 +291,44 @@ func TestSystemOne_RoutesUnlistedPinnedVersions(t *testing.T) {
 		})
 	}
 }
+
+// A System One model sent to an OpenAI-compatible route is refused by the
+// gateway with a pointer at /v1/systemone, from the catalog alone, so the
+// caller never sees the upstream's advice to use the upstream's own endpoint.
+// Chat models on the same provider are unaffected.
+func TestSystemOneModels_OnOpenAIRoutesPointAtSystemOne(t *testing.T) {
+	provider := newScriptedSystemOneProvider(map[string]string{
+		"openrouter/~typesafe/jev-latest": "openrouter",
+		"openrouter/openai/gpt-4o-mini":   "openrouter",
+	})
+	provider.catalog = map[string]core.Model{
+		"openrouter/~typesafe/jev-latest": {ID: "~typesafe/jev-latest", Metadata: &core.ModelMetadata{
+			Categories: []core.ModelCategory{core.CategoryUtility},
+		}},
+		"openrouter/openai/gpt-4o-mini": {ID: "openai/gpt-4o-mini", Metadata: &core.ModelMetadata{
+			Modes: []string{"chat"}, Categories: []core.ModelCategory{core.CategoryTextGeneration},
+		}},
+	}
+	provider.response = &core.ChatResponse{ID: "c1", Object: "chat.completion", Model: "openai/gpt-4o-mini",
+		Choices: []core.Choice{{Message: core.ResponseMessage{Role: "assistant", Content: "ok"}, FinishReason: "stop"}}}
+	srv := New(provider, &Config{ModelResolver: systemOneAliasResolver{"jev-latest": {Provider: "openrouter", Model: "~typesafe/jev-latest"}}})
+
+	requests := map[string]string{
+		"/v1/chat/completions": `{"model":"jev-latest","messages":[{"role":"user","content":"hi"}]}`,
+		"/v1/responses":        `{"model":"openrouter/~typesafe/jev-latest","input":"hi"}`,
+		"/v1/embeddings":       `{"model":"openrouter/~typesafe/jev-latest","input":"hi"}`,
+		"/v1/messages":         `{"model":"jev-latest","max_tokens":8,"messages":[{"role":"user","content":"hi"}]}`,
+	}
+	for path, body := range requests {
+		t.Run(path, func(t *testing.T) {
+			rec := postJSON(t, srv, path, body)
+			assert.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+			assert.Contains(t, rec.Body.String(), "System One decision model")
+			assert.Contains(t, rec.Body.String(), "POST /v1/systemone")
+		})
+	}
+	assert.Zero(t, provider.chatCompletionCalls)
+
+	rec := postJSON(t, srv, "/v1/chat/completions", `{"model":"openrouter/openai/gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`)
+	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+}

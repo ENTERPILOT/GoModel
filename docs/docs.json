@@ -143,6 +143,7 @@
                             "advanced/responses-compatibility",
                             "advanced/conversations-api",
                             "advanced/anthropic-messages-api",
+                            "advanced/systemone-api",
                             "advanced/extra-content",
                             "advanced/audio-api",
                             "advanced/images-api",
