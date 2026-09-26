@@ -108,6 +108,18 @@ func (snap snapshot) matchingOverride(providerName, model string) (compiledOverr
 	return compiledOverride{}, false
 }
 
+// hasModelScopedOverride reports whether an override names this model,
+// either for one provider or model-wide.
+func (snap snapshot) hasModelScopedOverride(providerName, model string) bool {
+	if key := modelselectors.ExactMatchKey(providerName, model); key != "" {
+		if _, ok := snap.exact[key]; ok {
+			return true
+		}
+	}
+	_, ok := snap.modelWide[model]
+	return ok
+}
+
 func snapshotOverrides(snap snapshot) []Override {
 	result := make([]Override, 0, len(snap.order))
 	for _, selector := range snap.order {

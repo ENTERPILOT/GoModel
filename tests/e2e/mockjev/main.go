@@ -47,6 +47,10 @@ type upstream struct {
 	seq int
 }
 
+// maxBodyBytes bounds a request body; the largest the matrix sends is about
+// 70 KiB.
+const maxBodyBytes = 1 << 20
+
 var versionedJev = regexp.MustCompile(`^jev-\d+\.\d+\.\d+$`)
 
 func newUpstreams(jevKey string) []*upstream {
@@ -93,9 +97,12 @@ func newUpstreams(jevKey string) []*upstream {
 	}
 }
 
+// question keeps instructions and criteria as raw JSON: the SDKs accept
+// structured values there, and an answer needs only option names and the
+// number of score levels.
 type question struct {
 	Type         string          `json:"type"`
-	Instructions string          `json:"instructions"`
+	Instructions json.RawMessage `json:"instructions"`
 	Criteria     json.RawMessage `json:"criteria"`
 }
 
@@ -161,8 +168,8 @@ func (u *upstream) serveSystemOne(route string) http.HandlerFunc {
 			return
 		}
 		var raw bytes.Buffer
-		if _, err := raw.ReadFrom(r.Body); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"detail": err.Error()})
+		if _, err := raw.ReadFrom(http.MaxBytesReader(w, r.Body, maxBodyBytes)); err != nil {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"detail": err.Error()})
 			return
 		}
 		var req request
@@ -268,7 +275,7 @@ func answerFor(q question) (any, string) {
 	case "noul":
 		return map[string]any{"type": "noul", "noul": 0.93}, ""
 	case "choice":
-		var criteria map[string]string
+		var criteria map[string]json.RawMessage
 		if err := json.Unmarshal(q.Criteria, &criteria); err != nil || len(criteria) < 2 {
 			return nil, "choice criteria must map at least two option names to descriptions"
 		}
@@ -287,14 +294,19 @@ func answerFor(q question) (any, string) {
 		}
 		return map[string]any{"type": "choice", "choice": options[0], "confidence": 0.5, "probabilities": probabilities}, ""
 	case "score":
-		var levels []string
+		var levels []json.RawMessage
 		if err := json.Unmarshal(q.Criteria, &levels); err != nil || len(levels) < 2 {
 			return nil, "score criteria must list at least two ordered levels"
 		}
-		legend := make(map[string]string, len(levels))
+		legend := make(map[string]any, len(levels))
 		probabilities := make(map[string]float64, len(levels))
 		for i, level := range levels {
-			legend[fmt.Sprint(i)] = level
+			var label string
+			if json.Unmarshal(level, &label) == nil {
+				legend[fmt.Sprint(i)] = label
+			} else {
+				legend[fmt.Sprint(i)] = level
+			}
 			probabilities[fmt.Sprint(i)] = 0
 		}
 		probabilities["1"] = 1

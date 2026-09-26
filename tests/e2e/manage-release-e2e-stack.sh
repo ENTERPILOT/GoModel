@@ -106,9 +106,17 @@ load_env() {
   export ENABLED_PASSTHROUGH_PROVIDERS="${ENABLED_PASSTHROUGH_PROVIDERS:-openai,anthropic,openrouter,zai,vllm,deepseek,bailian,xai,jev}"
   # System One (Jev / Kev) providers backed by the local mockjev upstream:
   # "jev" is hosted-shaped and keyed, "jev-kev" a keyless Kev server, and
-  # "jev-down" answers 529 so System One failover can be exercised. They
-  # override any JEV_* values in .env: the scenarios assert what the mock
-  # echoes back. The Kev URL keeps a trailing /v1, which the provider trims.
+  # "jev-down" answers 529 so System One failover can be exercised. Every
+  # JEV_* value from .env is dropped first (suffixed keys, model lists): the
+  # scenarios assert what the mock echoes back, and a key left on a keyless
+  # provider would reach the mock. The Kev URL keeps a trailing /v1, which the
+  # provider trims.
+  local name
+  for name in $(compgen -e); do
+    if [[ "$name" == JEV_* ]]; then
+      unset "$name"
+    fi
+  done
   export JEV_API_KEY="$MOCK_JEV_KEY"
   export JEV_BASE_URL="http://localhost:$MOCK_JEV_PORT/jev"
   export JEV_KEV_BASE_URL="http://localhost:$MOCK_JEV_PORT/kev/v1"

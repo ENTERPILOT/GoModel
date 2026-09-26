@@ -8,6 +8,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -167,6 +168,30 @@ func TestInferenceOrchestratorProviderTypeForSelectorCanonicalizesProviderNameSe
 
 	got := orchestrator.ProviderTypeForSelector(core.ModelSelector{Provider: "openai_test", Model: "gpt-4o"}, "anthropic")
 	require.Equal(t, "openai", got)
+}
+
+// namedProviderStub knows configured provider names and their types, but no
+// catalog entry for the models under test.
+type namedProviderStub struct {
+	providerTypeResolverStub
+	typesByName map[string]string
+}
+
+func (p *namedProviderStub) GetProviderTypeForName(name string) string { return p.typesByName[name] }
+
+// A failover target the catalog does not list, such as a pinned jev version
+// on a provider named kev, is routed to the provider its selector names, with
+// that provider's type, never to the primary's provider.
+func TestUnlistedSelectorResolvesToTheProviderItNames(t *testing.T) {
+	provider := &namedProviderStub{typesByName: map[string]string{"kev": "jev", "jev-down": "jev"}}
+	orchestrator := NewInferenceOrchestrator(InferenceConfig{Provider: provider})
+
+	pinned := core.ModelSelector{Provider: "kev", Model: "kev-4b-2026-09"}
+	assert.Equal(t, "jev", orchestrator.ProviderTypeForSelector(pinned, "openai"))
+	assert.Equal(t, "kev", ResolvedProviderName(provider, pinned, "jev-down"))
+
+	unknown := core.ModelSelector{Provider: "nope", Model: "x"}
+	assert.Equal(t, "jev-down", ResolvedProviderName(provider, unknown, "jev-down"))
 }
 
 func TestQualifyModelWithProviderPrefixesSlashModelIDs(t *testing.T) {

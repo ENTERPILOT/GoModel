@@ -509,7 +509,7 @@ mcp_cleanup_release_servers() {
 # System One (Jev / Kev) upstreams served by tests/e2e/mockjev: the stack
 # manager registers "jev" (hosted shape, keyed), "jev-kev" (keyless Kev
 # server), and "jev-down" (always 529) on every gateway.
-export JEV_MOCK_BASE="${JEV_MOCK_BASE:-http://localhost:18091}"
+export JEV_MOCK_BASE="${JEV_MOCK_BASE:-http://localhost:${GOMODEL_RELEASE_MOCK_JEV_PORT:-18091}}"
 export QA_SYSTEMONE_QUESTIONS='{"department":{"type":"choice","instructions":"Which team should handle this?","criteria":{"returns":"Exchanges and refunds","shipping":"Delivery delays","billing":"Charges and invoices"}},"escalate":{"type":"noul","instructions":"Does this need urgent human attention?"},"frustration":{"type":"score","instructions":"How frustrated is the customer?","criteria":["Calm","Frustrated","Very angry"]}}'
 export QA_SYSTEMONE_CHOICE='{"department":{"type":"choice","instructions":"Which team?","criteria":{"returns":"Returns","billing":"Billing"}}}'
 
@@ -6574,14 +6574,21 @@ the model that answered, and priced by an operator override.
 ```bash
 systemone_require_mock "$BASE_URL"
 
+# A provider-wide rate must not shadow the rate declared for the version that
+# answers the jev-latest alias.
 SELECTOR="jev/jev-1.13.0"
+PROVIDER_SELECTOR="jev/"
 cleanup_s237() {
-  curl -sS -o /dev/null -X DELETE "$BASE_URL/admin/model-pricing-overrides" \
-    -H 'Content-Type: application/json' -d "{\"selector\":\"$SELECTOR\"}" || true
+  for selector in "$SELECTOR" "$PROVIDER_SELECTOR"; do
+    curl -sS -o /dev/null -X DELETE "$BASE_URL/admin/model-pricing-overrides" \
+      -H 'Content-Type: application/json' -d "{\"selector\":\"$selector\"}" || true
+  done
 }
 trap cleanup_s237 EXIT
 curl -fsS -X PUT "$BASE_URL/admin/model-pricing-overrides" -H 'Content-Type: application/json' \
   -d "{\"selector\":\"$SELECTOR\",\"pricing\":{\"input_per_mtok\":42,\"output_per_mtok\":0}}" >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/model-pricing-overrides" -H 'Content-Type: application/json' \
+  -d "{\"selector\":\"$PROVIDER_SELECTOR\",\"pricing\":{\"input_per_mtok\":1,\"output_per_mtok\":1}}" >/dev/null
 
 RID="qa-s1-audit-$QA_SUFFIX"
 ANSWER_FILE="$QA_RUN_DIR/s237.answer.json"
@@ -6645,8 +6652,9 @@ systemone_require_mock "$BASE_URL"
 
 FO="qa-s1-failover-$QA_SUFFIX"
 FO422="qa-s1-failover-422-$QA_SUFFIX"
+FOPIN="qa-s1-failover-pinned-$QA_SUFFIX"
 cleanup_s238() {
-  for name in "$FO" "$FO422"; do
+  for name in "$FO" "$FO422" "$FOPIN"; do
     curl -sS -o /dev/null -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
       -d "{\"source\":\"$name\"}" || true
   done
@@ -6687,6 +6695,16 @@ jq -e --arg rid "$RID" --arg fo "$FO" '
 USAGE_FILE="$QA_RUN_DIR/s238.usage.json"
 wait_log_entry "$BASE_URL" usage "$RID" "$USAGE_FILE"
 jq -e --arg rid "$RID" 'any(.entries[]; .request_id == $rid and .provider_name == "jev-kev" and .model == "kev-4b-e2e")' "$USAGE_FILE" >/dev/null
+
+# A pinned version the catalog does not list is a valid failover target and
+# is sent to the provider it names, not to the failed primary's.
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$FOPIN\",\"strategy\":\"failover\",\"targets\":[{\"model\":\"jev-down/kev-down\"},{\"model\":\"jev/jev-1.12.0\"}]}" >/dev/null
+F="$QA_RUN_DIR/s238.failover-pinned.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$FOPIN\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.model == "jev-1.12.0" and .mock.upstream == "jev" and .mock.received_model == "jev-1.12.0"' "$F" >/dev/null
 
 RID422="qa-s1-failover-422-$QA_SUFFIX"
 F="$QA_RUN_DIR/s238.no-failover.json"

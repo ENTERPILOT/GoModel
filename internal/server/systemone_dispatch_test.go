@@ -121,15 +121,24 @@ func TestSystemOne_ServesRepeatsFromTheExactCache(t *testing.T) {
 	assert.Len(t, provider.calls, 1, "the repeat must not reach the provider")
 }
 
+// answeredModelPricing prices only the models it names, as an operator who
+// declares a price for the versioned model that answers an alias.
+type answeredModelPricing map[string]*core.ModelPricing
+
+func (r answeredModelPricing) ResolvePricing(model, _ string) *core.ModelPricing { return r[model] }
+
 // A cache hit is recorded in usage as an exact hit, with the tokens of the
-// replayed answer.
+// replayed answer, priced like the live answer: by the model that answered
+// when only it carries a price.
 func TestSystemOne_RecordsCacheHitsInUsage(t *testing.T) {
 	provider := newScriptedSystemOneProvider(map[string]string{"kev/kev-latest": "jev"})
 	store := cache.NewMapStore()
 	defer store.Close()
+	rate := 1_000_000.0
+	pricing := answeredModelPricing{"kev-latest-answered": {InputPerMtok: &rate}}
 	usageLogger := &collectingUsageLogger{config: usage.Config{Enabled: true}}
-	mw := responsecache.NewResponseCacheMiddlewareWithStoreAndUsage(store, time.Hour, usageLogger, nil)
-	handler := newHandler(provider, nil, usageLogger, nil, nil, nil, nil, nil)
+	mw := responsecache.NewResponseCacheMiddlewareWithStoreAndUsage(store, time.Hour, usageLogger, pricing)
+	handler := newHandler(provider, nil, usageLogger, pricing, nil, nil, nil, nil)
 	handler.responseCache = mw
 
 	c, first := echotest.Post(t, "/v1/systemone", systemOneRequest("kev-latest"))
@@ -148,6 +157,10 @@ func TestSystemOne_RecordsCacheHitsInUsage(t *testing.T) {
 	assert.Equal(t, "jev", hit.Provider)
 	assert.Equal(t, 10, hit.InputTokens)
 	assert.Equal(t, 1, hit.OutputTokens)
+	for _, entry := range usageLogger.entries {
+		require.NotNil(t, entry.InputCost, "cache type %q", entry.CacheType)
+		assert.InDelta(t, 10.0, *entry.InputCost, 1e-9)
+	}
 }
 
 // A different state is a different decision: it misses the cache.
