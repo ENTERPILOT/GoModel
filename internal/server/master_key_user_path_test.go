@@ -120,7 +120,9 @@ func TestTransportOwnedEndpointsKeepHeaderUserPath(t *testing.T) {
 		token         string
 		headerPath    string
 		outerIdentity string
-		want          string
+		// configuredHeader is the server's USER_PATH_HEADER; empty keeps the default.
+		configuredHeader string
+		want             string
 	}{
 		{name: "master key on /mcp keeps header path", path: "/mcp", token: "master-key", headerPath: "/eng/platform", want: "/eng/platform"},
 		{name: "master key on pinned /mcp/{server}", path: "/mcp/github", token: "master-key", headerPath: "/eng", want: "/eng"},
@@ -131,11 +133,12 @@ func TestTransportOwnedEndpointsKeepHeaderUserPath(t *testing.T) {
 		{name: "bound managed key wins over header", path: "/mcp", token: "sk_bound", headerPath: "/eng/platform", want: "/team/bound"},
 		{name: "outer extension identity is dropped", path: "/mcp", token: "master-key", outerIdentity: "/ext/session", want: ""},
 		{name: "header replaces outer extension identity", path: "/mcp", token: "master-key", outerIdentity: "/ext/session", headerPath: "/eng", want: "/eng"},
+		{name: "configured header name on /mcp", path: "/mcp", token: "master-key", configuredHeader: "X-Tenant-Path", headerPath: "/eng", want: "/eng"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var got string
-			auth := AuthMiddlewareWithAuthenticator("master-key", authenticator, nil)(func(c *echo.Context) error {
+			auth := AuthMiddlewareWithAuthenticator("master-key", authenticator, nil, tt.configuredHeader)(func(c *echo.Context) error {
 				got = core.UserPathFromContext(c.Request().Context())
 				return c.String(http.StatusOK, "ok")
 			})
@@ -148,11 +151,11 @@ func TestTransportOwnedEndpointsKeepHeaderUserPath(t *testing.T) {
 				}
 				return auth(c)
 			}
-			chain := RequestSnapshotCapture()(outer)
+			chain := RequestSnapshotCapture(tt.configuredHeader)(outer)
 
 			opts := []echotest.Option{echotest.WithHeader("Authorization", "Bearer "+tt.token)}
 			if tt.headerPath != "" {
-				opts = append(opts, echotest.WithHeader(core.UserPathHeader, tt.headerPath))
+				opts = append(opts, echotest.WithHeader(core.UserPathHeaderName(tt.configuredHeader), tt.headerPath))
 			}
 			c, rec := echotest.Post(t, tt.path, `{}`, opts...)
 
