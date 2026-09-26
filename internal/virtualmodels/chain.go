@@ -66,7 +66,7 @@ func (s *snapshot) viableTargets(entry *redirectEntry, catalog Catalog) []resolv
 func (s *snapshot) viable(owner *redirectEntry, target resolvedTarget, catalog Catalog) bool {
 	inner, ok := s.chained(owner.vm.Source, target)
 	if !ok {
-		return catalog.ModelAvailable(target.qualified)
+		return modelServable(catalog, target.qualified)
 	}
 	if !inner.vm.Enabled {
 		return false
@@ -100,7 +100,7 @@ func (s *snapshot) leafTargets(entry *redirectEntry, catalog Catalog) []resolved
 func (s *snapshot) leaves(owner *redirectEntry, target resolvedTarget, catalog Catalog) []resolvedTarget {
 	inner, ok := s.chained(owner.vm.Source, target)
 	if !ok {
-		if catalog.ModelAvailable(target.qualified) {
+		if modelServable(catalog, target.qualified) {
 			return []resolvedTarget{target}
 		}
 		return nil

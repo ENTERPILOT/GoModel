@@ -121,6 +121,35 @@ func TestSystemOne_ServesRepeatsFromTheExactCache(t *testing.T) {
 	assert.Len(t, provider.calls, 1, "the repeat must not reach the provider")
 }
 
+// A cache hit is recorded in usage as an exact hit, with the tokens of the
+// replayed answer.
+func TestSystemOne_RecordsCacheHitsInUsage(t *testing.T) {
+	provider := newScriptedSystemOneProvider(map[string]string{"kev/kev-latest": "jev"})
+	store := cache.NewMapStore()
+	defer store.Close()
+	usageLogger := &collectingUsageLogger{config: usage.Config{Enabled: true}}
+	mw := responsecache.NewResponseCacheMiddlewareWithStoreAndUsage(store, time.Hour, usageLogger, nil)
+	handler := newHandler(provider, nil, usageLogger, nil, nil, nil, nil, nil)
+	handler.responseCache = mw
+
+	c, first := echotest.Post(t, "/v1/systemone", systemOneRequest("kev-latest"))
+	require.NoError(t, handler.SystemOne(c))
+	require.Equal(t, http.StatusOK, first.Code, first.Body.String())
+	require.NoError(t, mw.Close())
+
+	c, second := echotest.Post(t, "/v1/systemone", systemOneRequest("kev-latest"))
+	require.NoError(t, handler.SystemOne(c))
+	require.Equal(t, "HIT (exact)", second.Header().Get("X-Cache"))
+
+	require.Len(t, usageLogger.entries, 2)
+	hit := usageLogger.entries[1]
+	assert.Equal(t, usage.CacheTypeExact, hit.CacheType)
+	assert.Equal(t, "/v1/systemone", hit.Endpoint)
+	assert.Equal(t, "jev", hit.Provider)
+	assert.Equal(t, 10, hit.InputTokens)
+	assert.Equal(t, 1, hit.OutputTokens)
+}
+
 // A different state is a different decision: it misses the cache.
 func TestSystemOne_CacheKeyCoversTheState(t *testing.T) {
 	provider := newScriptedSystemOneProvider(map[string]string{"kev/kev-latest": "jev"})
