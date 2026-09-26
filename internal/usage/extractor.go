@@ -223,6 +223,11 @@ func ExtractFromSSEUsage(
 	requestID, model, provider, endpoint string,
 	pricing ...*core.ModelPricing,
 ) *UsageEntry {
+	// Anthropic-style usage (and System One answers) report input and output
+	// tokens without a total.
+	if totalTokens == 0 {
+		totalTokens = inputTokens + outputTokens
+	}
 	entry := &UsageEntry{
 		ID:           uuid.New().String(),
 		RequestID:    requestID,

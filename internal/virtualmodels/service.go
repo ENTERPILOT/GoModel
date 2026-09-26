@@ -679,7 +679,7 @@ func (s *Service) firstUnsupportedTarget(current *snapshot, vm VirtualModel) (st
 		if _, chained := current.chained(vm.Source, candidate); chained {
 			continue
 		}
-		if !s.catalog.Supports(qualified) {
+		if !s.catalog.Supports(qualified) && !modelServable(s.catalog, qualified) {
 			return qualified, true
 		}
 	}

@@ -171,6 +171,28 @@ func (r *ModelRegistry) ModelAvailable(model string) bool {
 	return !r.providerRuntime[info.ProviderName].inventoryStale
 }
 
+// AcceptsUnlistedModel reports whether a provider-qualified model the catalog
+// does not list can still be served, because its provider accepts IDs it does
+// not list (see core.UnlistedModelAcceptor) and its inventory is fresh. A bare
+// name never qualifies: it does not say which provider to use.
+func (r *ModelRegistry) AcceptsUnlistedModel(model string) bool {
+	providerName, _ := splitModelSelector(strings.TrimSpace(model))
+	if providerName == "" {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, provider := range r.providers {
+		if r.providerNames[provider] != providerName {
+			continue
+		}
+		acceptor, ok := provider.(core.UnlistedModelAcceptor)
+		return ok && acceptor.AcceptsUnlistedModels() && !r.providerRuntime[providerName].inventoryStale
+	}
+	return false
+}
+
 // GetProviderType returns the provider type string for the given model.
 // Returns empty string if the model is not found.
 func (r *ModelRegistry) GetProviderType(model string) string {

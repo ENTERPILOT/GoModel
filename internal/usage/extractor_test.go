@@ -436,6 +436,19 @@ func TestExtractFromSSEUsage(t *testing.T) {
 	assert.Equal(t, 25, entry.RawData["cached_tokens"])
 }
 
+func TestExtractFromSSEUsageDerivesMissingTotal(t *testing.T) {
+	// Anthropic-style usage and System One answers carry no total_tokens.
+	entry := ExtractFromSSEUsage(
+		"",
+		27, 9, 0,
+		nil,
+		"req-systemone", "jev-1.13.0", "jev", "/v1/systemone",
+	)
+
+	require.NotNil(t, entry)
+	assert.Equal(t, 36, entry.TotalTokens)
+}
+
 func TestExtractFromSSEUsageEmptyRawData(t *testing.T) {
 	entry := ExtractFromSSEUsage(
 		"chatcmpl-789",
@@ -505,6 +518,7 @@ func TestExtractFromCachedResponseBody(t *testing.T) {
 		require.Equal(t, "jev", entry.Provider)
 		require.Equal(t, 275, entry.InputTokens)
 		require.Equal(t, 20, entry.OutputTokens)
+		require.Equal(t, 295, entry.TotalTokens)
 	})
 
 	t.Run("falls back to synthetic entry when body cannot be parsed", func(t *testing.T) {
