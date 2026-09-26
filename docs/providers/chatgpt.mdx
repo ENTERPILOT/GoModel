@@ -62,11 +62,25 @@ is not supported when using Codex with a ChatGPT account`.
 Codex sessions authenticated with an OpenAI API key, through the `openai`
 provider.
 
-## Responses API only
+## Supported surfaces
 
-The Codex backend serves `/responses` and nothing else, so
-`/v1/chat/completions` and `/v1/embeddings` answer `501` for `chatgpt` models.
-Use `/v1/responses`, which is what Codex sends anyway.
+The Codex backend serves `/responses` and nothing else. GoModel translates
+`/v1/chat/completions` onto it — request, response, and streaming — so chat
+clients work too. `/v1/embeddings` still answers `501`: the backend has no
+embeddings endpoint.
+
+Chat requests are converted to Responses requests, executed upstream, and
+converted back to chat completions. The returned `chatcmpl-` IDs are labels,
+not resource handles: the backend pins `store: false` and rejects
+`previous_response_id`, so no chaining is possible and chat clients resend
+full history as usual.
+
+Chat parameters with no Responses equivalent are rejected with a `400` that
+names the field, before any upstream call: `n` greater than 1, `logit_bias`,
+`stop`, `seed`, `frequency_penalty`, `presence_penalty`, `logprobs`,
+`top_logprobs`, `modalities`, `audio`, `web_search_options`, and
+the deprecated `functions` / `function_call` pair. `prediction` is dropped
+instead: it is a speed hint and never changes the answer.
 
 The backend also validates against a strict parameter allowlist. GoModel
 adapts requests rather than failing them, so callers keep using the standard
@@ -78,6 +92,11 @@ Responses API:
 | `input` as a string | Wrapped into the message list the backend requires |
 | `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `reasoning`, `text`, `include` | Forwarded |
 | `temperature`, `top_p`, `max_output_tokens`, `previous_response_id`, `truncation`, `metadata`, `user`, `service_tier`, `top_logprobs` | Dropped — unsupported upstream |
+
+Translated chat requests go through the same allowlist: `temperature`,
+`top_p`, and `max_tokens` / `max_completion_tokens` map to valid Responses
+fields and are then silently dropped upstream, exactly as for native Responses
+requests.
 
 Because the backend streams only, a non-streaming `POST /v1/responses` is
 served by streaming upstream and returning the final response object. Clients
