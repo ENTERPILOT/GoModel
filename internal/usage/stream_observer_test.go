@@ -617,3 +617,38 @@ func TestStreamUsageObserverAnthropicNativeEvents(t *testing.T) {
 	assert.Equal(t, 100, entry.RawData["cache_creation_input_tokens"])
 	assert.Equal(t, 200, entry.RawData["cache_read_input_tokens"])
 }
+
+// A routed alias (jev-latest) is answered by a versioned model (jev-1.13.0);
+// the routed model's price wins, and the answered model's price applies when
+// only it is declared.
+func TestStreamUsageObserverPricesAnsweredModelWhenRoutedHasNone(t *testing.T) {
+	routedRate, answeredRate := 10.0, 42.0
+	routed := &core.ModelPricing{InputPerMtok: &routedRate}
+	answered := &core.ModelPricing{InputPerMtok: &answeredRate}
+
+	tests := []struct {
+		name      string
+		resolver  mapPricingResolver
+		wantInput float64
+	}{
+		{name: "routed model priced", resolver: mapPricingResolver{"jev-latest/jev": routed, "jev-1.13.0/jev": answered}, wantInput: 10},
+		{name: "only answered model priced", resolver: mapPricingResolver{"jev-1.13.0/jev": answered}, wantInput: 42},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger := &trackingLogger{enabled: true}
+			observer := NewStreamUsageObserver(logger, "jev-latest", "jev", "req-s1", "/v1/systemone", tt.resolver)
+			observer.OnJSONEvent(map[string]any{
+				"model": "jev-1.13.0",
+				"usage": map[string]any{"input_tokens": float64(1_000_000), "output_tokens": float64(0)},
+			})
+			observer.OnStreamClose()
+
+			entries := logger.getEntries()
+			require.Len(t, entries, 1)
+			require.NotNil(t, entries[0].InputCost)
+			assert.InDelta(t, tt.wantInput, *entries[0].InputCost, 1e-9)
+			assert.Equal(t, "jev-1.13.0", entries[0].Model)
+		})
+	}
+}

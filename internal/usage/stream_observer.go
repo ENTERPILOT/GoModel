@@ -169,10 +169,8 @@ func (o *StreamUsageObserver) mergeWithCachedEntry(entry *UsageEntry) *UsageEntr
 		entry.TotalTokens = entry.InputTokens + entry.OutputTokens
 	}
 	var pricingArgs []*core.ModelPricing
-	if o.pricingResolver != nil {
-		if p := o.pricingResolver.ResolvePricing(o.pricingModel(entry.Model), o.pricingProvider()); p != nil {
-			pricingArgs = append(pricingArgs, p)
-		}
+	if p := o.resolvePricing(entry.Model); p != nil {
+		pricingArgs = append(pricingArgs, p)
 	}
 	applyUsageCosts(entry, o.provider, o.endpoint, pricingArgs...)
 	return entry
@@ -267,10 +265,8 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 	}
 
 	var pricingArgs []*core.ModelPricing
-	if o.pricingResolver != nil {
-		if p := o.pricingResolver.ResolvePricing(o.pricingModel(model), o.pricingProvider()); p != nil {
-			pricingArgs = append(pricingArgs, p)
-		}
+	if p := o.resolvePricing(model); p != nil {
+		pricingArgs = append(pricingArgs, p)
 	}
 
 	entry := ExtractFromSSEUsage(
@@ -302,6 +298,16 @@ func (o *StreamUsageObserver) pricingModel(responseModel string) string {
 		return model
 	}
 	return strings.TrimSpace(responseModel)
+}
+
+// resolvePricing prices the routed model or, when only it carries pricing,
+// the model that answered; see ResolveServedModelPricing.
+func (o *StreamUsageObserver) resolvePricing(responseModel string) *core.ModelPricing {
+	if o == nil {
+		return nil
+	}
+	return ResolveServedModelPricing(o.pricingResolver, o.pricingModel(responseModel), o.pricingProvider(),
+		func() string { return responseModel })
 }
 
 func (o *StreamUsageObserver) pricingProvider() string {

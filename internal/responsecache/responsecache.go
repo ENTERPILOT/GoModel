@@ -304,3 +304,11 @@ func NewResponseCacheMiddlewareWithStore(store cache.Store, ttl time.Duration) *
 		simple: newSimpleCacheMiddleware(store, ttl, nil),
 	}
 }
+
+// NewResponseCacheMiddlewareWithStoreAndUsage creates middleware with a custom
+// store that records cache hits in usage (for testing).
+func NewResponseCacheMiddlewareWithStoreAndUsage(store cache.Store, ttl time.Duration, usageLogger usage.LoggerInterface, pricingResolver usage.PricingResolver) *ResponseCacheMiddleware {
+	return &ResponseCacheMiddleware{
+		simple: newSimpleCacheMiddleware(store, ttl, newUsageHitRecorder(usageLogger, pricingResolver)),
+	}
+}

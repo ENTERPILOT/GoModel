@@ -2329,3 +2329,30 @@ func TestSetModelList_ClearsETag(t *testing.T) {
 	got := registry.currentModelListETag("https://example.test/models.min.json")
 	require.Empty(t, got)
 }
+
+// unlistedAcceptingProvider serves model IDs it does not list, as a jev
+// provider serves pinned versions.
+type unlistedAcceptingProvider struct {
+	registryMockProvider
+}
+
+func (p *unlistedAcceptingProvider) AcceptsUnlistedModels() bool { return true }
+
+func TestModelRegistryAcceptsUnlistedModel(t *testing.T) {
+	registry := NewModelRegistry()
+	registry.RegisterProviderWithNameAndType(&unlistedAcceptingProvider{}, "jev", "jev")
+	registry.RegisterProviderWithNameAndType(&registryMockProvider{name: "openai"}, "openai", "openai")
+
+	tests := []struct {
+		model string
+		want  bool
+	}{
+		{model: "jev/jev-1.13.0", want: true},
+		{model: "jev-1.13.0", want: false},
+		{model: "openai/gpt-9", want: false},
+		{model: "unknown/jev-1.13.0", want: false},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, registry.AcceptsUnlistedModel(tt.model), tt.model)
+	}
+}

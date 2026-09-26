@@ -30,6 +30,9 @@ func (o *InferenceOrchestrator) ProviderTypeForSelector(selector core.ModelSelec
 	if providerType := strings.TrimSpace(o.provider.GetProviderType(selector.QualifiedModel())); providerType != "" {
 		return providerType
 	}
+	if _, providerType := configuredSelectorProvider(o.provider, selector); providerType != "" {
+		return providerType
+	}
 	if provider := strings.TrimSpace(selector.Provider); provider != "" {
 		return provider
 	}

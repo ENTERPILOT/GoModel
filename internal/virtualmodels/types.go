@@ -254,3 +254,20 @@ type Catalog interface {
 	LookupModel(model string) (*core.Model, bool)
 	ProviderNames() []string
 }
+
+// unlistedModelCatalog is implemented by catalogs whose providers serve
+// provider-qualified model IDs they do not list, such as a jev provider's
+// pinned versions (jev/jev-1.13.0).
+type unlistedModelCatalog interface {
+	AcceptsUnlistedModel(model string) bool
+}
+
+// modelServable reports whether a concrete target can serve a request now:
+// listed and available, or unlisted on a provider that accepts such IDs.
+func modelServable(catalog Catalog, model string) bool {
+	if catalog.ModelAvailable(model) {
+		return true
+	}
+	unlisted, ok := catalog.(unlistedModelCatalog)
+	return ok && unlisted.AcceptsUnlistedModel(model)
+}

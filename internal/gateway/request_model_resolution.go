@@ -30,7 +30,28 @@ func ResolvedProviderName(provider core.RoutableProvider, selector core.ModelSel
 			return providerName
 		}
 	}
+	// A model the catalog does not list (a pinned jev version) still belongs to
+	// the provider its selector names, not to the fallback's.
+	if providerName, providerType := configuredSelectorProvider(provider, selector); providerType != "" {
+		return providerName
+	}
 	return fallback
+}
+
+// configuredSelectorProvider returns the provider a selector names explicitly
+// and that provider's type, or empty strings when the selector names no
+// configured provider.
+func configuredSelectorProvider(provider core.RoutableProvider, selector core.ModelSelector) (string, string) {
+	providerName := strings.TrimSpace(selector.Provider)
+	named, ok := provider.(core.ProviderNameTypeResolver)
+	if providerName == "" || !ok {
+		return "", ""
+	}
+	providerType := strings.TrimSpace(named.GetProviderTypeForName(providerName))
+	if providerType == "" {
+		return "", ""
+	}
+	return providerName, providerType
 }
 
 // ResolvedWorkflowProviderName returns the configured provider name recorded in a resolution.
