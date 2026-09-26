@@ -365,3 +365,20 @@ func TestRouterLookupModel(t *testing.T) {
 	_, ok = (&Router{}).LookupModel("openrouter/~typesafe/jev-latest")
 	assert.False(t, ok, "a lookup without single-model access describes nothing")
 }
+
+// ProviderNamesForType lists every configured instance of one type, so a
+// caller can tell a single jev provider from several.
+func TestRouterProviderNamesForType(t *testing.T) {
+	registry := newTestRegistryWithModels(
+		registryModelEntry{provider: &mockProvider{name: "kev"}, providerName: "kev", providerType: "jev", modelID: "kev-latest"},
+		registryModelEntry{provider: &mockProvider{name: "jev"}, providerName: "jev", providerType: "jev", modelID: "jev-latest"},
+		registryModelEntry{provider: &mockProvider{name: "openrouter"}, providerName: "openrouter", providerType: "openrouter", modelID: "typesafe/jev-1.13"},
+	)
+	router, err := NewRouter(registry)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"jev", "kev"}, router.ProviderNamesForType("jev"))
+	assert.Equal(t, []string{"openrouter"}, router.ProviderNamesForType("openrouter"))
+	assert.Empty(t, router.ProviderNamesForType("anthropic"))
+	assert.Empty(t, router.ProviderNamesForType(""))
+}

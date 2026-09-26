@@ -37,6 +37,8 @@ const EXACT_PATHS = {
   "/v1/images/generations": "images",
   "/v1/images/edits": "images",
   "/v1/systemone": "systemone",
+  "/v1/systemone/permute": "systemone",
+  "/v1/systemone/separate": "systemone",
   "/v1/realtime": "realtime",
   "/v1/realtime/calls": "realtime",
   "/v1/realtime/client_secrets": "realtime",

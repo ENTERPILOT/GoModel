@@ -255,3 +255,54 @@ func firstNonEmptyString(values ...string) string {
 	}
 	return ""
 }
+
+// PassthroughCall sends one native request to selector's provider. Provider
+// error statuses must come back as errors so the failover policy can judge
+// them.
+type PassthroughCall func(ctx context.Context, selector core.ModelSelector, providerType, providerName string) (*core.PassthroughResponse, error)
+
+// ExecutePassthroughWithFailover runs a native, untranslated request against
+// the workflow's resolved route and then, while the failover policy allows,
+// against its failover targets. It is the native-endpoint counterpart of the
+// translated failover path: attempts are recorded the same way, but every
+// target receives the client's own dialect, so call must refuse a target that
+// cannot serve it. The selector that answered is returned with the response.
+func (o *InferenceOrchestrator) ExecutePassthroughWithFailover(ctx context.Context, workflow *core.Workflow, call PassthroughCall) (*core.PassthroughResponse, core.ModelSelector, ExecutionMeta, error) {
+	primary := core.ModelSelector{}
+	if workflow != nil && workflow.Resolution != nil {
+		primary = workflow.Resolution.ResolvedSelector
+	}
+	type answer struct {
+		resp     *core.PassthroughResponse
+		selector core.ModelSelector
+	}
+	result, meta, err := executeWithFailoverResponse(ctx, o, workflow, primary.Model, primary.Provider,
+		func() (answer, string, string, error) {
+			started := time.Now()
+			providerType, providerName := ProviderTypeFromWorkflow(workflow), ProviderNameFromWorkflow(workflow)
+			qualified := primary.QualifiedModel()
+			// A rate-saturated primary route must not reach the provider; its
+			// stored 429 becomes the primary failure that starts the sweep.
+			if saturated := core.PrimaryRouteSaturated(ctx); saturated != nil {
+				recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, providerType, providerName, qualified, started, saturated))
+				return answer{}, "", "", saturated
+			}
+			resp, err := call(ctx, primary, providerType, providerName)
+			recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, providerType, providerName, qualified, started, err))
+			if err != nil {
+				return answer{}, "", "", err
+			}
+			return answer{resp: resp, selector: primary}, providerType, providerName, nil
+		},
+		func(selector core.ModelSelector, providerType, providerName string) (answer, string, error) {
+			// A failover target gets a different body, so it must not reuse
+			// the client's idempotency key.
+			resp, err := call(core.WithIdempotencyKey(ctx, ""), selector, providerType, providerName)
+			if err != nil {
+				return answer{}, "", err
+			}
+			return answer{resp: resp, selector: selector}, providerType, nil
+		},
+	)
+	return result.resp, result.selector, meta, err
+}

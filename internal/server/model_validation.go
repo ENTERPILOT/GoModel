@@ -103,12 +103,14 @@ func deriveWorkflowWithPolicy(
 		}
 		return workflow, nil
 
-	case core.OperationChatCompletions, core.OperationResponses, core.OperationEmbeddings, core.OperationSystemOne:
-		if desc.Operation == core.OperationSystemOne && !systemOneAvailable(provider) {
-			// The handler answers 404; resolving the model first would
-			// report a model error for an endpoint that is not there.
-			return nil, nil
-		}
+	case core.OperationSystemOne:
+		// The System One handler resolves the model itself: only it knows
+		// whether the endpoint is available (answering 404 before any model
+		// error) and when an unlisted pinned version may still route to a
+		// jev provider.
+		return nil, nil
+
+	case core.OperationChatCompletions, core.OperationResponses, core.OperationEmbeddings:
 		workflow.Mode = core.ExecutionModeTranslated
 		if desc.BodyMode != core.BodyModeJSON {
 			// Responses lifecycle routes (GET/DELETE /v1/responses/{id},

@@ -11201,15 +11201,7 @@
         ],
         "summary": "Evaluate a System One decision request (Jev / Kev)",
         "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object"
-              }
-            }
-          },
-          "description": "System One request: model, state, and questions",
-          "required": true
+          "$ref": "#/components/requestBodies/Request2"
         },
         "responses": {
           "200": {
@@ -11283,6 +11275,166 @@
             "sidebarTitle": "/v1/systemone",
             "title": "Evaluate a System One decision request (Jev / Kev)",
             "description": "GoModel API reference for POST /v1/systemone: Evaluate a System One decision request (Jev / Kev)."
+          }
+        }
+      }
+    },
+    "/v1/systemone/permute": {
+      "post": {
+        "description": "A Kev server diagnostic: the request is a System One request, and n_perm (1 to 64, default 6) sets how many option orders run. Only jev providers pointing at a Kev server serve it.",
+        "tags": [
+          "systemone"
+        ],
+        "summary": "Run one Choice question with several option orders (Kev)",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "description": "System One request with one Choice question",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Kev's answer, in the provider's shape",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/systemone/permute",
+            "title": "Run one Choice question with several option orders (Kev)",
+            "description": "GoModel API reference for POST /v1/systemone/permute: Run one Choice question with several option orders (Kev)."
+          }
+        }
+      }
+    },
+    "/v1/systemone/separate": {
+      "post": {
+        "description": "A Kev server diagnostic that answers each question separately. Only jev providers pointing at a Kev server serve it.",
+        "tags": [
+          "systemone"
+        ],
+        "summary": "Run each System One question in its own forward pass (Kev)",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Request2"
+        },
+        "responses": {
+          "200": {
+            "description": "Kev's answer, in the provider's shape",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/systemone/separate",
+            "title": "Run each System One question in its own forward pass (Kev)",
+            "description": "GoModel API reference for POST /v1/systemone/separate: Run each System One question in its own forward pass (Kev)."
           }
         }
       }
@@ -11451,6 +11603,17 @@
           }
         },
         "description": "Anthropic Messages request",
+        "required": true
+      },
+      "Request2": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object"
+            }
+          }
+        },
+        "description": "System One request: model, state, and questions",
         "required": true
       }
     },

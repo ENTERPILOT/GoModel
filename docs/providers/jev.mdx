@@ -154,7 +154,34 @@ chat, embedding, or other generation model, such as a virtual model pointing
 at a chat model. Without a `jev` or `openrouter` provider, the route answers
 `404`.
 
-Response caching and failover do not apply to this endpoint yet.
+### Caching and failover
+
+With the [response cache](/features/cache) enabled, an identical request
+(same route, resolved model, guardrails, and body after guardrail edits) is
+answered from the exact cache without reaching the provider, and recorded in
+usage as a cache hit. The semantic cache never serves System One: a state
+that is merely similar is not the same decision. Send
+`Cache-Control: no-cache` to skip the cache for one request.
+
+A [virtual model](/features/virtual-models) with the `failover` strategy moves
+a request to its next target when the current one fails with an availability
+error (`429` or `5xx`, including TypeSafe's `529`, by default; see
+`failover.retry_on_statuses`), as it does for chat. Every target receives the
+request in its own System One form, so a target without the API, such as a
+chat model, is skipped rather than called. Client errors such as a malformed
+question (`422`) are returned without failover. The audit log shows each
+attempt, and usage is recorded under the target that answered:
+
+```yaml
+virtual_models:
+  - source: decider
+    strategy: failover
+    targets:
+      - { model: kev/kev-latest }                # local Kev first
+      - { model: openrouter/typesafe/jev-1.13 }  # hosted Jev when Kev is down
+```
+
+A failover answer is not cached, the same as for chat.
 
 ### Through OpenRouter
 
@@ -193,14 +220,20 @@ warning in the logs rather than failing the request. A guardrail that would
 answer the request itself blocks it instead, since System One callers expect
 typed answers, not text.
 
-## Native routes
+## Routes
 
 | Route | What it does |
 | --- | --- |
-| `POST /p/jev/v1/systemone` | Evaluate a state against a map of questions, without virtual models or guardrails |
+| `POST /v1/systemone` | Evaluate a state against a map of questions |
+| `POST /v1/systemone/permute` | Kev only: run one Choice question with several option orders (`n_perm`, 1 to 64, default 6) |
+| `POST /v1/systemone/separate` | Kev only: run each question in its own forward pass |
 | `GET /p/jev/v1/models` | The names the `model` field accepts, in the upstream's own shape |
-| `POST /p/jev/v1/systemone/permute` | Kev only: run one Choice question with several option orders |
-| `POST /p/jev/v1/systemone/separate` | Kev only: run each question in its own forward pass |
+| `/p/jev/...` | Any upstream route, [passed through](/features/passthrough-api) without virtual models, guardrails, or caching |
+
+The Kev routes work like `/v1/systemone`, including virtual models,
+guardrails, caching, audit, and usage. They are refused for OpenRouter, which
+answers only the evaluation route; a hosted TypeSafe `jev` provider returns
+its own `404` for them.
 
 Upstream errors keep their status code, with the provider's body carried in
 the gateway error message: a malformed question comes back as TypeSafe's `422`
@@ -219,10 +252,12 @@ Every System One request names its model, so both `/v1/systemone` and the
 passthrough surface apply the caller's [model allowlist](/features/users) to
 it like any other request.
 
-`/v1/systemone` routes only to models in the catalog. To pin a version the
-upstream does not list, such as `jev-1.13.0`, declare it under the provider's
-`models` (as in the pricing example below) and set
-`CONFIGURED_PROVIDER_MODELS_MODE=merge`; passthrough accepts any name.
+TypeSafe lists only its aliases but accepts any versioned ID, so a pinned
+version such as `jev-1.13.0` works without being declared. GoModel routes a
+model it does not list to a `jev` provider when the name says which one
+(`jev/jev-1.13.0`, or `kev/...` for a provider named `kev`), or, for a bare
+name, when exactly one `jev` provider is configured. A virtual model can pin a
+version the same way. The upstream rejects a name it does not know.
 
 The response's `usage.input_tokens` and `usage.output_tokens` are recorded, so
 System One calls appear in the usage API and dashboard under the model that

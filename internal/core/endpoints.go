@@ -170,10 +170,11 @@ func describeEndpointPath(path string) EndpointDescriptor {
 			Dialect:          "openai_compat",
 			Operation:        OperationImageEdits,
 		}
-	case path == "/v1/systemone":
-		// TypeSafe's System One decision API (Jev, Kev). It has no canonical
-		// translation: the body is forwarded to a System One provider
-		// unchanged, apart from the routed model and guardrail edits to state.
+	case path == "/v1/systemone" || path == "/v1/systemone/permute" || path == "/v1/systemone/separate":
+		// TypeSafe's System One decision API (Jev, Kev) and the diagnostic
+		// variants Kev servers add. It has no canonical translation: the body
+		// is forwarded to a System One provider unchanged, apart from the
+		// routed model and guardrail edits to state.
 		return EndpointDescriptor{
 			ModelInteraction: true,
 			IngressManaged:   true,
