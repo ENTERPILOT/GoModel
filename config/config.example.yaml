@@ -598,6 +598,7 @@ providers:
     # server speaks the same API without authentication: set base_url
     # (e.g. "http://localhost:8009") and omit api_key. Name it "kev" to see
     # that name in logs and usage; no separate provider type is needed.
+    # Pinned versions such as "jev-1.13.0" route here without being listed.
     # Jev is priced per input token and is not in the upstream model catalog;
     # declare its pricing here to have the gateway cost System One requests.
     # models:

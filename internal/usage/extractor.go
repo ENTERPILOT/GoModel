@@ -281,6 +281,9 @@ func ExtractFromCachedResponseBody(
 	if entry == nil {
 		entry = extractFromCachedSSEBody(body, requestID, model, provider, endpoint, pricing...)
 	}
+	if entry == nil {
+		entry = extractFromCachedJSONBody(body, requestID, model, provider, endpoint, pricing...)
+	}
 
 	if entry == nil {
 		entry = &UsageEntry{
@@ -343,6 +346,31 @@ func extractFromCachedSSEBody(
 	_, _ = io.Copy(io.Discard, stream)
 	_ = stream.Close()
 
+	return observer.cachedEntry
+}
+
+// extractFromCachedJSONBody reads usage from a cached JSON body of an
+// endpoint without a typed response, such as a native /v1/systemone answer,
+// the same way a live passthrough response is read.
+func extractFromCachedJSONBody(
+	body []byte,
+	requestID, model, provider, endpoint string,
+	pricing ...*core.ModelPricing,
+) *UsageEntry {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil || payload == nil {
+		return nil
+	}
+	observer := &StreamUsageObserver{
+		model:     strings.TrimSpace(model),
+		provider:  strings.TrimSpace(provider),
+		requestID: strings.TrimSpace(requestID),
+		endpoint:  endpoint,
+	}
+	if len(pricing) > 0 && pricing[0] != nil {
+		observer.pricingResolver = staticPricingResolver{pricing: pricing[0]}
+	}
+	observer.OnJSONEvent(payload)
 	return observer.cachedEntry
 }
 

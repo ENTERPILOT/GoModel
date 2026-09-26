@@ -121,7 +121,9 @@ func TestSystemOneUncarriedEdits(t *testing.T) {
 	require.NoError(t, p.SetText(SystemOneStateMessageID, 0, "[PERSON]"))
 	assert.Nil(t, SystemOneUncarriedEdits(p), "a state edit is carried")
 
-	id := p.Insert(0, pluginapi.TextMessage(pluginapi.RoleSystem, "be safe"))
+	p.Insert(0, pluginapi.TextMessage(pluginapi.RoleSystem, "be safe"))
+	p.Append(pluginapi.TextMessage(pluginapi.RoleSystem, "be brief"))
 	p.SetParam("temperature", 0.1)
-	assert.Equal(t, []string{`inserted message "` + id + `"`, `parameter "temperature"`}, SystemOneUncarriedEdits(p))
+	assert.Equal(t, []string{"inserted message", `parameter "temperature"`}, SystemOneUncarriedEdits(p),
+		"kinds are listed once, without per-request message IDs")
 }

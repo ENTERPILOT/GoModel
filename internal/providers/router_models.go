@@ -196,3 +196,20 @@ func (r *Router) LookupModel(model string) (*core.Model, bool) {
 	cloned := info.Model
 	return &cloned, true
 }
+
+// ProviderNamesForType lists the configured provider instance names of one
+// type, sorted, or nil when the lookup cannot enumerate its providers.
+func (r *Router) ProviderNamesForType(providerType string) []string {
+	providerType = strings.TrimSpace(providerType)
+	if providerType == "" || r.caps.nameLister == nil {
+		return nil
+	}
+	var names []string
+	for _, name := range r.caps.nameLister.ProviderNames() {
+		if r.GetProviderTypeForName(name) == providerType {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}

@@ -86,21 +86,31 @@ func ApplyToSystemOneRequest(original *core.SystemOneRequest, p *pluginapi.Promp
 	return &result, nil
 }
 
-// SystemOneUncarriedEdits describes the prompt edits ApplyToSystemOneRequest
-// does not apply, in a stable order, or nil when every edit was carried.
+// SystemOneUncarriedEdits describes the kinds of prompt edits
+// ApplyToSystemOneRequest does not apply ("inserted message", parameter
+// "temperature"), deduplicated and sorted, or nil when every edit was
+// carried. Message IDs are left out: they differ per request and name
+// nothing an operator can act on.
 func SystemOneUncarriedEdits(p *pluginapi.Prompt) []string {
 	if p == nil {
 		return nil
 	}
 	changes := p.Changes()
-	var uncarried []string
+	seen := map[string]struct{}{}
 	for id, kind := range changes.Messages {
 		if id != SystemOneStateMessageID {
-			uncarried = append(uncarried, fmt.Sprintf("%s message %q", kind, id))
+			seen[string(kind)+" message"] = struct{}{}
 		}
 	}
 	for name := range changes.Params {
-		uncarried = append(uncarried, fmt.Sprintf("parameter %q", name))
+		seen[fmt.Sprintf("parameter %q", name)] = struct{}{}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	uncarried := make([]string, 0, len(seen))
+	for description := range seen {
+		uncarried = append(uncarried, description)
 	}
 	sort.Strings(uncarried)
 	return uncarried

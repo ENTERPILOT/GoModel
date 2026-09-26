@@ -42,6 +42,7 @@ func tryFailoverResponse[T any](
 	workflow *core.Workflow,
 	model, provider string,
 	primaryErr error,
+	eligible func(selector core.ModelSelector, providerType string) bool,
 	call func(selector core.ModelSelector, providerType, providerName string) (T, string, error),
 ) (T, ExecutionMeta, error) {
 	var zero T
@@ -75,6 +76,16 @@ func tryFailoverResponse[T any](
 		qualified := selector.QualifiedModel()
 		providerType := o.ProviderTypeForSelector(selector, ProviderTypeFromWorkflow(workflow))
 		providerName := ResolvedProviderName(o.provider, selector, ProviderNameFromWorkflow(workflow))
+		// A target that cannot serve the request is skipped before it counts
+		// against the attempt cap, so it never crowds out a later valid one.
+		if eligible != nil && !eligible(selector, providerType) {
+			slog.Info("skipping failover target that cannot serve the request",
+				"request_id", requestID,
+				"to", qualified,
+				"provider_type", providerType,
+			)
+			continue
+		}
 		if o.routeGate != nil && !o.routeGate.RouteAvailable(providerName, qualified) {
 			slog.Info("skipping rate-limited failover target",
 				"request_id", requestID,
@@ -121,13 +132,14 @@ func executeWithFailoverResponse[T any](
 	workflow *core.Workflow,
 	model, provider string,
 	primary func() (T, string, string, error),
+	eligible func(selector core.ModelSelector, providerType string) bool,
 	failoverFn func(selector core.ModelSelector, providerType, providerName string) (T, string, error),
 ) (T, ExecutionMeta, error) {
 	resp, resolvedProviderType, resolvedProviderName, err := primary()
 	if err == nil {
 		return resp, ExecutionMeta{ProviderType: resolvedProviderType, ProviderName: resolvedProviderName}, nil
 	}
-	return tryFailoverResponse(ctx, o, workflow, model, provider, err, failoverFn)
+	return tryFailoverResponse(ctx, o, workflow, model, provider, err, eligible, failoverFn)
 }
 
 func executeTranslatedWithFailover[Req any, Resp any](
@@ -158,6 +170,7 @@ func executeTranslatedWithFailover[Req any, Resp any](
 			}
 			return resp, ResponseProviderType(ProviderTypeFromWorkflow(workflow), responseProvider), ProviderNameFromWorkflow(workflow), nil
 		},
+		nil,
 		func(selector core.ModelSelector, providerType, providerName string) (Resp, string, error) {
 			// A failover target gets a different request body, so it must not
 			// reuse the client's idempotency key.
@@ -254,4 +267,58 @@ func firstNonEmptyString(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// PassthroughCall sends one native request to selector's provider. Provider
+// error statuses must come back as errors so the failover policy can judge
+// them.
+type PassthroughCall func(ctx context.Context, selector core.ModelSelector, providerType, providerName string) (*core.PassthroughResponse, error)
+
+// ExecutePassthroughWithFailover runs a native, untranslated request against
+// the workflow's resolved route and then, while the failover policy allows,
+// against its failover targets. It is the native-endpoint counterpart of the
+// translated failover path: attempts are recorded the same way, but every
+// target receives the client's own dialect, so eligible must reject a
+// failover target that cannot serve it; rejected targets are skipped without
+// counting against the attempt cap. The selector that answered is returned
+// with the response.
+func (o *InferenceOrchestrator) ExecutePassthroughWithFailover(ctx context.Context, workflow *core.Workflow, eligible func(selector core.ModelSelector, providerType string) bool, call PassthroughCall) (*core.PassthroughResponse, core.ModelSelector, ExecutionMeta, error) {
+	primary := core.ModelSelector{}
+	if workflow != nil && workflow.Resolution != nil {
+		primary = workflow.Resolution.ResolvedSelector
+	}
+	type answer struct {
+		resp     *core.PassthroughResponse
+		selector core.ModelSelector
+	}
+	result, meta, err := executeWithFailoverResponse(ctx, o, workflow, primary.Model, primary.Provider,
+		func() (answer, string, string, error) {
+			started := time.Now()
+			providerType, providerName := ProviderTypeFromWorkflow(workflow), ProviderNameFromWorkflow(workflow)
+			qualified := primary.QualifiedModel()
+			// A rate-saturated primary route must not reach the provider; its
+			// stored 429 becomes the primary failure that starts the sweep.
+			if saturated := core.PrimaryRouteSaturated(ctx); saturated != nil {
+				recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, providerType, providerName, qualified, started, saturated))
+				return answer{}, "", "", saturated
+			}
+			resp, err := call(ctx, primary, providerType, providerName)
+			recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, providerType, providerName, qualified, started, err))
+			if err != nil {
+				return answer{}, "", "", err
+			}
+			return answer{resp: resp, selector: primary}, providerType, providerName, nil
+		},
+		eligible,
+		func(selector core.ModelSelector, providerType, providerName string) (answer, string, error) {
+			// A failover target gets a different body, so it must not reuse
+			// the client's idempotency key.
+			resp, err := call(core.WithIdempotencyKey(ctx, ""), selector, providerType, providerName)
+			if err != nil {
+				return answer{}, "", err
+			}
+			return answer{resp: resp, selector: selector}, providerType, nil
+		},
+	)
+	return result.resp, result.selector, meta, err
 }

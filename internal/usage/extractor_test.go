@@ -493,6 +493,20 @@ func TestExtractFromCachedResponseBody(t *testing.T) {
 		require.Equal(t, 10, entry.TotalTokens)
 	})
 
+	// A native endpoint without a typed response (System One) is read like a
+	// live passthrough answer, so a cache hit keeps its token counts.
+	t.Run("reads usage from an untyped JSON body", func(t *testing.T) {
+		body := []byte(`{"model":"jev-1.13.0","answers":{"refund":{"type":"noul","noul":0.98}},"usage":{"input_tokens":275,"output_tokens":20}}`)
+
+		entry := ExtractFromCachedResponseBody(body, "req-systemone", "jev-latest", "jev", "/v1/systemone", CacheTypeExact)
+		require.NotNil(t, entry)
+		require.Equal(t, CacheTypeExact, entry.CacheType)
+		require.Equal(t, "/v1/systemone", entry.Endpoint)
+		require.Equal(t, "jev", entry.Provider)
+		require.Equal(t, 275, entry.InputTokens)
+		require.Equal(t, 20, entry.OutputTokens)
+	})
+
 	t.Run("falls back to synthetic entry when body cannot be parsed", func(t *testing.T) {
 		entry := ExtractFromCachedResponseBody([]byte("{"), "req-cache-fallback", "gpt-4o", "openai", "/v1/chat/completions", CacheTypeExact)
 		require.NotNil(t, entry)
