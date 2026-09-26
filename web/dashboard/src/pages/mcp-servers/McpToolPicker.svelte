@@ -14,6 +14,7 @@
   import {
     MCP_TOOL_MODE_ALLOW,
     MCP_TOOL_MODE_EXCLUDE,
+    mcpToolModeSwitchable,
     mcpToolPickerRows,
     mcpToolSelectionSummary,
   } from "./mcp-servers.js";
@@ -25,6 +26,7 @@
   const allowMode = $derived(form.tool_mode === MCP_TOOL_MODE_ALLOW);
   const rows = $derived(mcpToolPickerRows(form, discovered, mcpServers.toolQuery));
   const summary = $derived(mcpToolSelectionSummary(form, discovered));
+  const modeLocked = $derived(!mcpToolModeSwitchable(form, discovered));
   const visibleDiscovered = $derived(
     rows.filter((row) => !row.missing).map((row) => row.name),
   );
@@ -56,11 +58,15 @@
       options={modeOptions}
       value={form.tool_mode}
       ariaLabel={m.mcp_tools_mode_label()}
+      disabled={modeLocked}
       onchange={(mode) => mcpServers.switchToolMode(mode)}
     />
   </div>
   <small class="form-hint">
     {allowMode ? m.mcp_tools_mode_allow_help() : m.mcp_tools_mode_exclude_help()}
+    {#if modeLocked}
+      {m.mcp_tools_mode_locked()}
+    {/if}
   </small>
 
   {#if mcpServers.editorTools.loading}

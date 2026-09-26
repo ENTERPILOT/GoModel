@@ -750,6 +750,7 @@
   "mcp_tools_mode_allow": "Ukrywaj",
   "mcp_tools_mode_exclude_help": "Odznaczone narzędzia są wykluczone. Narzędzia dodane później przez serwer są udostępniane automatycznie.",
   "mcp_tools_mode_allow_help": "Udostępniane są tylko zaznaczone narzędzia. Narzędzia dodane później przez serwer pozostają ukryte, dopóki ich nie zaznaczysz.",
+  "mcp_tools_mode_locked": "Wczytaj narzędzia tego serwera, aby to zmienić; obecna lista zostaje zachowana.",
   "mcp_tools_filter": "Filtruj narzędzia",
   "mcp_tools_expose_all": "Udostępnij wszystkie",
   "mcp_tools_hide_all": "Wyklucz wszystkie",

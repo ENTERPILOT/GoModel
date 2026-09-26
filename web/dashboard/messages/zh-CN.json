@@ -706,6 +706,7 @@
   "mcp_tools_mode_allow": "保持隐藏",
   "mcp_tools_mode_exclude_help": "未勾选的工具会被排除。服务器之后新增的工具会自动公开。",
   "mcp_tools_mode_allow_help": "仅公开已勾选的工具。服务器之后新增的工具会保持隐藏，直到你勾选它们。",
+  "mcp_tools_mode_locked": "需要先加载此服务器的工具才能更改；当前列表保持不变。",
   "mcp_tools_filter": "筛选工具",
   "mcp_tools_expose_all": "全部公开",
   "mcp_tools_hide_all": "全部排除",

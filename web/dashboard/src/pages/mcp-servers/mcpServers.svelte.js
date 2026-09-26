@@ -47,6 +47,9 @@ class McpServersState {
   editorTools = $state({ loading: false, error: "", tools: [] });
   toolQuery = $state("");
   toolDraft = $state("");
+  // Bumped per editor catalog load, so a response for an editor session that
+  // was closed and reopened (same slug) cannot overwrite the newer one.
+  #toolLoadSeq = 0;
 
   deletingName = $state("");
   reconnectingName = $state("");
@@ -218,17 +221,18 @@ class McpServersState {
   }
 
   #resetEditorTools() {
+    this.#toolLoadSeq += 1;
     this.editorTools = { loading: false, error: "", tools: [] };
     this.toolQuery = "";
     this.toolDraft = "";
   }
 
   async #loadEditorTools(server) {
-    const slug = mcpServerSlug(server);
+    const seq = ++this.#toolLoadSeq;
     this.editorTools = { ...this.editorTools, loading: true, error: "" };
     const loaded = await this.#fetchCatalog(server);
-    // The editor may have closed or moved to another server meanwhile.
-    if (!this.formOpen || this.form.slug !== slug) {
+    // The editor may have closed, reopened, or moved to another server.
+    if (seq !== this.#toolLoadSeq) {
       return;
     }
     if (loaded.stale) {

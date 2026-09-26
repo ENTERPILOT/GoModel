@@ -742,6 +742,7 @@
   "mcp_tools_mode_allow": "Keep hidden",
   "mcp_tools_mode_exclude_help": "Unchecked tools are excluded. Tools the server adds later are exposed automatically.",
   "mcp_tools_mode_allow_help": "Only checked tools are exposed. Tools the server adds later stay hidden until you check them.",
+  "mcp_tools_mode_locked": "Load this server's tools to change it; the current list is kept.",
   "mcp_tools_filter": "Filter tools",
   "mcp_tools_expose_all": "Expose all",
   "mcp_tools_hide_all": "Exclude all",

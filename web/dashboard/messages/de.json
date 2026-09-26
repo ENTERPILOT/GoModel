@@ -742,6 +742,7 @@
   "mcp_tools_mode_allow": "Verborgen halten",
   "mcp_tools_mode_exclude_help": "Nicht markierte Tools werden ausgeschlossen. Tools, die der Server später hinzufügt, werden automatisch freigegeben.",
   "mcp_tools_mode_allow_help": "Nur markierte Tools werden freigegeben. Tools, die der Server später hinzufügt, bleiben verborgen, bis Sie sie markieren.",
+  "mcp_tools_mode_locked": "Laden Sie die Tools dieses Servers, um dies zu ändern; die aktuelle Liste bleibt erhalten.",
   "mcp_tools_filter": "Tools filtern",
   "mcp_tools_expose_all": "Alle freigeben",
   "mcp_tools_hide_all": "Alle ausschließen",

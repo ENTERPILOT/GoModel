@@ -439,13 +439,22 @@ export function setMcpToolsExposed(form, names, exposed) {
   return current.filter((name) => !targets.includes(name));
 }
 
+// mcpToolModeSwitchable reports whether the mode can flip without changing
+// what is exposed. Converting between an allowlist and a denylist needs the
+// full tool set; without it, an allowlist would become an empty denylist,
+// which exposes every tool. An empty list is safe to flip either way.
+export function mcpToolModeSwitchable(form, discovered) {
+  return (discovered || []).length > 0 || uniqueToolNames(form.tool_names).length === 0;
+}
+
 // switchMcpToolMode flips the filter mode while keeping every discovered
 // tool's exposure unchanged; only the treatment of future tools changes.
 // Names the server does not report are meaningful only in the old mode.
+// When the flip is not safe (see mcpToolModeSwitchable) the form is kept.
 export function switchMcpToolMode(form, mode, discovered) {
   const next = mode === MCP_TOOL_MODE_ALLOW ? MCP_TOOL_MODE_ALLOW : MCP_TOOL_MODE_EXCLUDE;
-  if (next === form.tool_mode) {
-    return { tool_mode: next, tool_names: uniqueToolNames(form.tool_names) };
+  if (next === form.tool_mode || !mcpToolModeSwitchable(form, discovered)) {
+    return { tool_mode: form.tool_mode, tool_names: uniqueToolNames(form.tool_names) };
   }
   const names = (discovered || []).map((tool) => tool.name);
   const exposed = names.filter((name) => mcpToolExposed(form, name));

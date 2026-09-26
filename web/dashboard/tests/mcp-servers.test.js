@@ -30,6 +30,7 @@ import {
   normalizeMcpUserPaths,
   mcpDiscoveredTools,
   mcpToolFilterFromServer,
+  mcpToolModeSwitchable,
   mcpToolPickerRows,
   mcpToolSelectionSummary,
   setMcpToolsExposed,
@@ -440,6 +441,25 @@ test("switchMcpToolMode keeps every discovered tool's exposure", () => {
 
   const back = switchMcpToolMode(toAllow, "exclude", discovered);
   assert.deepEqual(back, { tool_mode: "exclude", tool_names: ["b"] });
+});
+
+test("switchMcpToolMode keeps the list when the catalog is unknown", () => {
+  // Without the full tool set, an allowlist would become an empty denylist,
+  // which exposes every tool on save.
+  const allow = { tool_mode: "allow", tool_names: ["read"] };
+  assert.equal(mcpToolModeSwitchable(allow, []), false);
+  assert.deepEqual(switchMcpToolMode(allow, "exclude", []), {
+    tool_mode: "allow",
+    tool_names: ["read"],
+  });
+
+  // An empty list flips safely, so a brand-new server can still pick a mode.
+  const fresh = { tool_mode: "exclude", tool_names: [] };
+  assert.equal(mcpToolModeSwitchable(fresh, []), true);
+  assert.deepEqual(switchMcpToolMode(fresh, "allow", []), {
+    tool_mode: "allow",
+    tool_names: [],
+  });
 });
 
 test("mcpToolPickerRows flags listed names the server does not report and filters", () => {
