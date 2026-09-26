@@ -15,6 +15,7 @@ export function defaultMcpServerForm() {
     allowed_tools: "",
     disallowed_tools: "",
     user_paths: "",
+    disallowed_user_paths: "",
     tool_timeout_seconds: "",
   };
 }
@@ -213,6 +214,10 @@ export function mcpServerFormFromServer(server) {
     user_paths: (Array.isArray(server.user_paths) ? server.user_paths : []).join(
       "\n",
     ),
+    disallowed_user_paths: (Array.isArray(server.disallowed_user_paths)
+      ? server.disallowed_user_paths
+      : []
+    ).join("\n"),
     tool_timeout_seconds: server.tool_timeout_seconds
       ? String(server.tool_timeout_seconds)
       : "",
@@ -270,6 +275,7 @@ export function buildMcpServerPayload(form, mode, servers) {
       allowed_tools: splitCommaList(form.allowed_tools),
       disallowed_tools: splitCommaList(form.disallowed_tools),
       user_paths: normalizeMcpUserPaths(form.user_paths),
+      disallowed_user_paths: normalizeMcpUserPaths(form.disallowed_user_paths),
       tool_timeout_seconds: toolTimeoutSeconds,
     },
   };

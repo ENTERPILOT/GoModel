@@ -182,6 +182,20 @@
       </div>
 
       <div class="form-field">
+        <label class="form-field-label" for="mcp-server-disallowed-user-paths"
+          >{m.mcp_disallowed_user_paths()}</label
+        >
+        <textarea
+          id="mcp-server-disallowed-user-paths"
+          rows="3"
+          class="mono"
+          placeholder={"/contractors"}
+          bind:value={mcpServers.form.disallowed_user_paths}
+        ></textarea>
+        <small class="form-hint">{m.mcp_disallowed_user_paths_help()}</small>
+      </div>
+
+      <div class="form-field">
         <label class="form-field-label" for="mcp-server-tool-timeout">{m.mcp_timeout()}</label>
         <input
           id="mcp-server-tool-timeout"

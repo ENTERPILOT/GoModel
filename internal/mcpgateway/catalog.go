@@ -136,10 +136,17 @@ func normalizeUserPaths(paths []string) []string {
 // userPathAllowed reports whether userPath falls inside one of the allowed
 // subtrees. An empty allow list means everyone. Mirrors virtual models.
 func userPathAllowed(userPath string, allowed []string) bool {
-	if len(allowed) == 0 {
-		return true
+	return len(allowed) == 0 || userPathWithin(userPath, allowed)
+}
+
+// userPathWithin reports whether userPath falls inside one of the sorted,
+// normalized subtrees. "/" matches every caller, including one without a
+// user path; an empty list matches nobody.
+func userPathWithin(userPath string, subtrees []string) bool {
+	if len(subtrees) == 0 {
+		return false
 	}
-	if _, ok := slices.BinarySearch(allowed, "/"); ok {
+	if _, ok := slices.BinarySearch(subtrees, "/"); ok {
 		return true
 	}
 	userPath, err := core.NormalizeUserPath(userPath)
@@ -147,7 +154,7 @@ func userPathAllowed(userPath string, allowed []string) bool {
 		return false
 	}
 	for _, candidate := range core.UserPathAncestors(userPath) {
-		if _, ok := slices.BinarySearch(allowed, candidate); ok {
+		if _, ok := slices.BinarySearch(subtrees, candidate); ok {
 			return true
 		}
 	}

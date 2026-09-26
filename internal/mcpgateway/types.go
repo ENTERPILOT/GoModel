@@ -46,7 +46,10 @@ type ServerSpec struct {
 	AllowedTools    []string
 	DisallowedTools []string
 	UserPaths       []string
-	ToolTimeout     time.Duration
+	// DisallowedUserPaths hides the server from these subtrees; it wins over
+	// UserPaths.
+	DisallowedUserPaths []string
+	ToolTimeout         time.Duration
 
 	// Managed marks specs declared in config.yaml / MCP_SERVERS. They override
 	// admin-store rows with the same name and are read-only in the dashboard.
@@ -56,21 +59,22 @@ type ServerSpec struct {
 // SpecFromConfig converts one declarative config entry into a runtime spec.
 func SpecFromConfig(name string, cfg config.MCPServerConfig) ServerSpec {
 	return ServerSpec{
-		Name:            name,
-		DisplayName:     name,
-		URL:             cfg.URL,
-		Transport:       cfg.Transport,
-		Headers:         maps.Clone(cfg.Headers),
-		Command:         cfg.Command,
-		Args:            slices.Clone(cfg.Args),
-		Env:             maps.Clone(cfg.Env),
-		Description:     cfg.Description,
-		Enabled:         config.MCPServerEnabled(cfg),
-		AllowedTools:    slices.Clone(cfg.AllowedTools),
-		DisallowedTools: slices.Clone(cfg.DisallowedTools),
-		UserPaths:       normalizeUserPaths(cfg.UserPaths),
-		ToolTimeout:     cfg.ToolTimeout,
-		Managed:         true,
+		Name:                name,
+		DisplayName:         name,
+		URL:                 cfg.URL,
+		Transport:           cfg.Transport,
+		Headers:             maps.Clone(cfg.Headers),
+		Command:             cfg.Command,
+		Args:                slices.Clone(cfg.Args),
+		Env:                 maps.Clone(cfg.Env),
+		Description:         cfg.Description,
+		Enabled:             config.MCPServerEnabled(cfg),
+		AllowedTools:        slices.Clone(cfg.AllowedTools),
+		DisallowedTools:     slices.Clone(cfg.DisallowedTools),
+		UserPaths:           normalizeUserPaths(cfg.UserPaths),
+		DisallowedUserPaths: normalizeUserPaths(cfg.DisallowedUserPaths),
+		ToolTimeout:         cfg.ToolTimeout,
+		Managed:             true,
 	}
 }
 
@@ -90,8 +94,16 @@ func (s ServerSpec) equal(other ServerSpec) bool {
 		slices.Equal(s.AllowedTools, other.AllowedTools) &&
 		slices.Equal(s.DisallowedTools, other.DisallowedTools) &&
 		slices.Equal(s.UserPaths, other.UserPaths) &&
+		slices.Equal(s.DisallowedUserPaths, other.DisallowedUserPaths) &&
 		s.ToolTimeout == other.ToolTimeout &&
 		s.Managed == other.Managed
+}
+
+// visibleTo reports whether a caller with userPath may see and use this
+// server: inside UserPaths (empty means everyone) and outside every
+// DisallowedUserPaths subtree.
+func (s ServerSpec) visibleTo(userPath string) bool {
+	return userPathAllowed(userPath, s.UserPaths) && !userPathWithin(userPath, s.DisallowedUserPaths)
 }
 
 // ServerView is a point-in-time snapshot of one upstream for admin and

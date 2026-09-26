@@ -37,41 +37,43 @@ const redactedMCPHeaderValue = "***"
 // Header values equal to "***" preserve the stored value; enabled defaults to
 // true, preserving the existing value when omitted on an update.
 type upsertMCPServerRequest struct {
-	Name               string            `json:"name"`
-	Slug               string            `json:"slug,omitempty"`
-	URL                string            `json:"url"`
-	Transport          string            `json:"transport,omitempty"`
-	Headers            map[string]string `json:"headers,omitempty"`
-	Description        string            `json:"description,omitempty"`
-	Enabled            *bool             `json:"enabled,omitempty"`
-	AllowedTools       []string          `json:"allowed_tools,omitempty"`
-	DisallowedTools    []string          `json:"disallowed_tools,omitempty"`
-	UserPaths          []string          `json:"user_paths,omitempty"`
-	ToolTimeoutSeconds int               `json:"tool_timeout_seconds,omitempty"`
+	Name                string            `json:"name"`
+	Slug                string            `json:"slug,omitempty"`
+	URL                 string            `json:"url"`
+	Transport           string            `json:"transport,omitempty"`
+	Headers             map[string]string `json:"headers,omitempty"`
+	Description         string            `json:"description,omitempty"`
+	Enabled             *bool             `json:"enabled,omitempty"`
+	AllowedTools        []string          `json:"allowed_tools,omitempty"`
+	DisallowedTools     []string          `json:"disallowed_tools,omitempty"`
+	UserPaths           []string          `json:"user_paths,omitempty"`
+	DisallowedUserPaths []string          `json:"disallowed_user_paths,omitempty"`
+	ToolTimeoutSeconds  int               `json:"tool_timeout_seconds,omitempty"`
 }
 
 // mcpServerViewResponse is the admin view of one MCP server: its definition
 // (headers redacted) plus runtime connection state. Managed marks
 // config/env-declared servers, which are read-only in the dashboard.
 type mcpServerViewResponse struct {
-	Name               string            `json:"name"`
-	Slug               string            `json:"slug"`
-	URL                string            `json:"url"`
-	Transport          string            `json:"transport"`
-	Description        string            `json:"description,omitempty"`
-	Enabled            bool              `json:"enabled"`
-	AllowedTools       []string          `json:"allowed_tools,omitempty"`
-	DisallowedTools    []string          `json:"disallowed_tools,omitempty"`
-	UserPaths          []string          `json:"user_paths,omitempty"`
-	ToolTimeoutSeconds int               `json:"tool_timeout_seconds,omitempty"`
-	Headers            map[string]string `json:"headers,omitempty"`
-	Managed            bool              `json:"managed"`
-	Status             string            `json:"status"`
-	LastError          string            `json:"last_error,omitempty"`
-	ToolCount          int               `json:"tool_count"`
-	PromptCount        int               `json:"prompt_count"`
-	ResourceCount      int               `json:"resource_count"`
-	ConnectedAt        *time.Time        `json:"connected_at,omitempty"`
+	Name                string            `json:"name"`
+	Slug                string            `json:"slug"`
+	URL                 string            `json:"url"`
+	Transport           string            `json:"transport"`
+	Description         string            `json:"description,omitempty"`
+	Enabled             bool              `json:"enabled"`
+	AllowedTools        []string          `json:"allowed_tools,omitempty"`
+	DisallowedTools     []string          `json:"disallowed_tools,omitempty"`
+	UserPaths           []string          `json:"user_paths,omitempty"`
+	DisallowedUserPaths []string          `json:"disallowed_user_paths,omitempty"`
+	ToolTimeoutSeconds  int               `json:"tool_timeout_seconds,omitempty"`
+	Headers             map[string]string `json:"headers,omitempty"`
+	Managed             bool              `json:"managed"`
+	Status              string            `json:"status"`
+	LastError           string            `json:"last_error,omitempty"`
+	ToolCount           int               `json:"tool_count"`
+	PromptCount         int               `json:"prompt_count"`
+	ResourceCount       int               `json:"resource_count"`
+	ConnectedAt         *time.Time        `json:"connected_at,omitempty"`
 }
 
 // ListMCPServers handles GET /admin/mcp-servers.
@@ -249,17 +251,18 @@ func (h *Handler) buildMCPServerUpsert(ctx context.Context, slug, displayName st
 	}
 
 	server := mcpgateway.ManagedServer{
-		Name:               slug,
-		DisplayName:        displayName,
-		URL:                strings.TrimSpace(req.URL),
-		Transport:          strings.TrimSpace(req.Transport),
-		Headers:            headers,
-		Description:        strings.TrimSpace(req.Description),
-		Enabled:            enabled,
-		AllowedTools:       req.AllowedTools,
-		DisallowedTools:    req.DisallowedTools,
-		UserPaths:          req.UserPaths,
-		ToolTimeoutSeconds: req.ToolTimeoutSeconds,
+		Name:                slug,
+		DisplayName:         displayName,
+		URL:                 strings.TrimSpace(req.URL),
+		Transport:           strings.TrimSpace(req.Transport),
+		Headers:             headers,
+		Description:         strings.TrimSpace(req.Description),
+		Enabled:             enabled,
+		AllowedTools:        req.AllowedTools,
+		DisallowedTools:     req.DisallowedTools,
+		UserPaths:           req.UserPaths,
+		DisallowedUserPaths: req.DisallowedUserPaths,
+		ToolTimeoutSeconds:  req.ToolTimeoutSeconds,
 	}
 	if current != nil {
 		server.CreatedAt = current.CreatedAt
@@ -303,23 +306,24 @@ func (h *Handler) mcpServerView(view mcpgateway.ServerView) mcpServerViewRespons
 		displayName = spec.Name
 	}
 	resp := mcpServerViewResponse{
-		Name:               displayName,
-		Slug:               spec.Name,
-		URL:                spec.URL,
-		Transport:          spec.Transport,
-		Description:        spec.Description,
-		Enabled:            spec.Enabled,
-		AllowedTools:       spec.AllowedTools,
-		DisallowedTools:    spec.DisallowedTools,
-		UserPaths:          spec.UserPaths,
-		ToolTimeoutSeconds: int(spec.ToolTimeout / time.Second),
-		Headers:            redactMCPHeaders(spec.Headers),
-		Managed:            h.mcpServers.IsManaged(spec.Name),
-		Status:             string(view.Status),
-		LastError:          view.LastError,
-		ToolCount:          view.ToolCount,
-		PromptCount:        view.PromptCount,
-		ResourceCount:      view.ResourceCount,
+		Name:                displayName,
+		Slug:                spec.Name,
+		URL:                 spec.URL,
+		Transport:           spec.Transport,
+		Description:         spec.Description,
+		Enabled:             spec.Enabled,
+		AllowedTools:        spec.AllowedTools,
+		DisallowedTools:     spec.DisallowedTools,
+		UserPaths:           spec.UserPaths,
+		DisallowedUserPaths: spec.DisallowedUserPaths,
+		ToolTimeoutSeconds:  int(spec.ToolTimeout / time.Second),
+		Headers:             redactMCPHeaders(spec.Headers),
+		Managed:             h.mcpServers.IsManaged(spec.Name),
+		Status:              string(view.Status),
+		LastError:           view.LastError,
+		ToolCount:           view.ToolCount,
+		PromptCount:         view.PromptCount,
+		ResourceCount:       view.ResourceCount,
 	}
 	if !view.ConnectedAt.IsZero() {
 		connectedAt := view.ConnectedAt

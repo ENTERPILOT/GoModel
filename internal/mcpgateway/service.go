@@ -3,6 +3,7 @@ package mcpgateway
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -60,6 +61,10 @@ type Service struct {
 	stopOnce sync.Once
 	stop     chan struct{}
 }
+
+// ErrServerNotVisible rejects a call from a session whose user path may no
+// longer use the server.
+var ErrServerNotVisible = errors.New("server is not available for this user path")
 
 // sessionBinding pins a downstream MCP session to the user path it was
 // initialized under. Bearer auth still runs on every request; the binding
@@ -452,7 +457,7 @@ func (s *Service) visibleServers(scope requestScope) []ServerView {
 				continue
 			}
 		}
-		if !userPathAllowed(scope.userPath, view.Spec.UserPaths) {
+		if !view.Spec.visibleTo(scope.userPath) {
 			continue
 		}
 		visible = append(visible, view)
@@ -465,7 +470,7 @@ func (s *Service) findVisibleServer(name, userPath string) (ServerView, bool) {
 		if view.Spec.Name != name {
 			continue
 		}
-		if !userPathAllowed(userPath, view.Spec.UserPaths) {
+		if !view.Spec.visibleTo(userPath) {
 			return ServerView{}, false
 		}
 		return view, true
@@ -528,6 +533,9 @@ func (s *Service) registerTools(server *mcp.Server, upstreamName string, snapsho
 
 func (s *Service) toolHandler(upstreamName, toolName, exposedName, endpoint string) mcp.ToolHandler {
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if err := s.authorizeSession(req.Session, upstreamName); err != nil {
+			return nil, err
+		}
 		started := time.Now()
 		result, err := s.manager.CallTool(ctx, upstreamName, toolName, req.Params.Arguments)
 		s.recordToolCall(req, upstreamName, exposedName, endpoint, started, result, err)
@@ -555,6 +563,9 @@ func (s *Service) registerPrompts(server *mcp.Server, upstreamName string, snaps
 		clone.Name = exposed
 		originalName := prompt.Name
 		server.AddPrompt(&clone, func(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+			if err := s.authorizeSession(req.Session, upstreamName); err != nil {
+				return nil, err
+			}
 			params := *req.Params
 			params.Name = originalName
 			result, err := s.manager.GetPrompt(ctx, upstreamName, &params)
@@ -571,6 +582,9 @@ func (s *Service) registerPrompts(server *mcp.Server, upstreamName string, snaps
 // skipped with a warning rather than silently re-routed.
 func (s *Service) registerResources(server *mcp.Server, upstreamName string, snapshot *catalog, owners map[string]string) {
 	read := func(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		if err := s.authorizeSession(req.Session, upstreamName); err != nil {
+			return nil, err
+		}
 		result, err := s.manager.ReadResource(ctx, upstreamName, req.Params)
 		if err != nil {
 			return nil, fmt.Errorf("mcp server %q: %w", upstreamName, err)
@@ -596,6 +610,25 @@ func (s *Service) registerResources(server *mcp.Server, upstreamName string, sna
 		owners[key] = upstreamName
 		server.AddResourceTemplate(template, read)
 	}
+}
+
+// authorizeSession re-checks, on every call, that the user path a session
+// was bound to may still use upstreamName. Sessions snapshot their catalog at
+// initialize, so without this a narrowed user_paths or a new
+// disallowed_user_paths entry would not reach sessions that are already open.
+// A session without a binding is treated as a caller without a user path,
+// which fails closed for scoped servers.
+func (s *Service) authorizeSession(session *mcp.ServerSession, upstreamName string) error {
+	userPath := ""
+	if session != nil {
+		s.bindMu.Lock()
+		userPath = s.bindings[session.ID()].userPath
+		s.bindMu.Unlock()
+	}
+	if _, ok := s.findVisibleServer(upstreamName, userPath); !ok {
+		return fmt.Errorf("mcp server %q: %w", upstreamName, ErrServerNotVisible)
+	}
+	return nil
 }
 
 // bindSession records the principal a new session was initialized under.

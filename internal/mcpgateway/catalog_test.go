@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -110,6 +111,35 @@ func TestFilterToolsNormalizesSchemasForDownstream(t *testing.T) {
 	require.Nil(t, byName["invalid"].OutputSchema)
 	require.Equal(t, validInput, byName["valid"].InputSchema)
 	require.True(t, isObjectSchema(byName["valid"].OutputSchema), "valid output schema = %#v, want preserved object", byName["valid"].OutputSchema)
+}
+
+func TestServerSpecVisibleTo(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		userPath   string
+		allowed    []string
+		disallowed []string
+		want       bool
+	}{
+		{name: "no scope admits everyone", userPath: "/x", want: true},
+		{name: "excluded subtree hides from everyone else's scope", userPath: "/contractors/acme", disallowed: []string{"/contractors"}, want: false},
+		{name: "sibling of excluded subtree stays visible", userPath: "/staff", disallowed: []string{"/contractors"}, want: true},
+		{name: "exclusion wins inside an allowed subtree", userPath: "/eng/contractors", allowed: []string{"/eng"}, disallowed: []string{"/eng/contractors"}, want: false},
+		{name: "rest of allowed subtree stays visible", userPath: "/eng/platform", allowed: []string{"/eng"}, disallowed: []string{"/eng/contractors"}, want: true},
+		{name: "caller without user path is not in an excluded subtree", userPath: "", disallowed: []string{"/contractors"}, want: true},
+		{name: "root exclusion hides from every caller", userPath: "", disallowed: []string{"/"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			spec := ServerSpec{
+				UserPaths:           normalizeUserPaths(tt.allowed),
+				DisallowedUserPaths: normalizeUserPaths(tt.disallowed),
+			}
+			assert.Equal(t, tt.want, spec.visibleTo(tt.userPath))
+		})
+	}
 }
 
 func TestUserPathAllowed(t *testing.T) {

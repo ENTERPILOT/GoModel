@@ -35,17 +35,18 @@ type ManagedServer struct {
 	Name        string `json:"slug"`
 	DisplayName string `json:"name"`
 
-	URL                string            `json:"url"`
-	Transport          string            `json:"transport"`
-	Headers            map[string]string `json:"headers,omitempty"`
-	Description        string            `json:"description,omitempty"`
-	Enabled            bool              `json:"enabled"`
-	AllowedTools       []string          `json:"allowed_tools,omitempty"`
-	DisallowedTools    []string          `json:"disallowed_tools,omitempty"`
-	UserPaths          []string          `json:"user_paths,omitempty"`
-	ToolTimeoutSeconds int               `json:"tool_timeout_seconds,omitempty"`
-	CreatedAt          time.Time         `json:"created_at"`
-	UpdatedAt          time.Time         `json:"updated_at"`
+	URL                 string            `json:"url"`
+	Transport           string            `json:"transport"`
+	Headers             map[string]string `json:"headers,omitempty"`
+	Description         string            `json:"description,omitempty"`
+	Enabled             bool              `json:"enabled"`
+	AllowedTools        []string          `json:"allowed_tools,omitempty"`
+	DisallowedTools     []string          `json:"disallowed_tools,omitempty"`
+	UserPaths           []string          `json:"user_paths,omitempty"`
+	DisallowedUserPaths []string          `json:"disallowed_user_paths,omitempty"`
+	ToolTimeoutSeconds  int               `json:"tool_timeout_seconds,omitempty"`
+	CreatedAt           time.Time         `json:"created_at"`
+	UpdatedAt           time.Time         `json:"updated_at"`
 }
 
 // Validate checks the row against the same rules as declarative config,
@@ -70,11 +71,12 @@ func (m *ManagedServer) Validate() error {
 		return fmt.Errorf("tool_timeout_seconds must not be negative")
 	}
 	cfg := config.MCPServerConfig{
-		URL:         m.URL,
-		Transport:   m.Transport,
-		Headers:     m.Headers,
-		UserPaths:   m.UserPaths,
-		ToolTimeout: time.Duration(m.ToolTimeoutSeconds) * time.Second,
+		URL:                 m.URL,
+		Transport:           m.Transport,
+		Headers:             m.Headers,
+		UserPaths:           m.UserPaths,
+		DisallowedUserPaths: m.DisallowedUserPaths,
+		ToolTimeout:         time.Duration(m.ToolTimeoutSeconds) * time.Second,
 	}
 	if err := config.ValidateMCPServerConfig(&cfg); err != nil {
 		return err
@@ -82,6 +84,7 @@ func (m *ManagedServer) Validate() error {
 	m.Transport = cfg.Transport
 	m.URL = cfg.URL
 	m.UserPaths = cfg.UserPaths
+	m.DisallowedUserPaths = cfg.DisallowedUserPaths
 	return nil
 }
 
@@ -92,18 +95,19 @@ func (m ManagedServer) Spec() ServerSpec {
 		timeout = config.DefaultMCPToolTimeout
 	}
 	return ServerSpec{
-		Name:            m.Name,
-		DisplayName:     m.DisplayName,
-		URL:             m.URL,
-		Transport:       m.Transport,
-		Headers:         maps.Clone(m.Headers),
-		Description:     m.Description,
-		Enabled:         m.Enabled,
-		AllowedTools:    slices.Clone(m.AllowedTools),
-		DisallowedTools: slices.Clone(m.DisallowedTools),
-		UserPaths:       normalizeUserPaths(m.UserPaths),
-		ToolTimeout:     timeout,
-		Managed:         false,
+		Name:                m.Name,
+		DisplayName:         m.DisplayName,
+		URL:                 m.URL,
+		Transport:           m.Transport,
+		Headers:             maps.Clone(m.Headers),
+		Description:         m.Description,
+		Enabled:             m.Enabled,
+		AllowedTools:        slices.Clone(m.AllowedTools),
+		DisallowedTools:     slices.Clone(m.DisallowedTools),
+		UserPaths:           normalizeUserPaths(m.UserPaths),
+		DisallowedUserPaths: normalizeUserPaths(m.DisallowedUserPaths),
+		ToolTimeout:         timeout,
+		Managed:             false,
 	}
 }
 

@@ -26,6 +26,7 @@ var sqlTable = `CREATE TABLE IF NOT EXISTS mcp_servers (
 	allowed_tools TEXT NOT NULL DEFAULT '[]',
 	disallowed_tools TEXT NOT NULL DEFAULT '[]',
 	user_paths TEXT NOT NULL DEFAULT '[]',
+	disallowed_user_paths TEXT NOT NULL DEFAULT '[]',
 	tool_timeout_seconds INTEGER NOT NULL DEFAULT 0,
 	created_at ` + sqlx.TypeInt64 + ` NOT NULL,
 	updated_at ` + sqlx.TypeInt64 + ` NOT NULL
@@ -39,10 +40,11 @@ var sqlIndexes = []string{
 // sqlMigrations backfill columns added after the table's first release.
 var sqlMigrations = []string{
 	`ALTER TABLE mcp_servers ADD COLUMN display_name TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE mcp_servers ADD COLUMN disallowed_user_paths TEXT NOT NULL DEFAULT '[]'`,
 }
 
 const selectMCPServerColumns = `name, display_name, url, transport, headers, description, enabled, ` +
-	`allowed_tools, disallowed_tools, user_paths, tool_timeout_seconds, created_at, updated_at`
+	`allowed_tools, disallowed_tools, user_paths, disallowed_user_paths, tool_timeout_seconds, created_at, updated_at`
 
 // NewSQLStore creates the mcp_servers table and indexes if needed.
 func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
@@ -119,12 +121,16 @@ func (s *SQLStore) Upsert(ctx context.Context, server ManagedServer) error {
 	if err != nil {
 		return err
 	}
+	disallowedPathsJSON, err := encodeJSONList(server.DisallowedUserPaths)
+	if err != nil {
+		return err
+	}
 	_, err = s.db.Exec(ctx, `
 		INSERT INTO mcp_servers (
 			name, display_name, url, transport, headers, description, enabled,
-			allowed_tools, disallowed_tools, user_paths, tool_timeout_seconds, created_at, updated_at
+			allowed_tools, disallowed_tools, user_paths, disallowed_user_paths, tool_timeout_seconds, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(name) DO UPDATE SET
 			display_name = excluded.display_name,
 			url = excluded.url,
@@ -135,6 +141,7 @@ func (s *SQLStore) Upsert(ctx context.Context, server ManagedServer) error {
 			allowed_tools = excluded.allowed_tools,
 			disallowed_tools = excluded.disallowed_tools,
 			user_paths = excluded.user_paths,
+			disallowed_user_paths = excluded.disallowed_user_paths,
 			tool_timeout_seconds = excluded.tool_timeout_seconds,
 			updated_at = excluded.updated_at
 	`,
@@ -148,6 +155,7 @@ func (s *SQLStore) Upsert(ctx context.Context, server ManagedServer) error {
 		allowedJSON,
 		disallowedJSON,
 		pathsJSON,
+		disallowedPathsJSON,
 		server.ToolTimeoutSeconds,
 		server.CreatedAt.Unix(),
 		server.UpdatedAt.Unix(),
@@ -175,7 +183,7 @@ func (s *SQLStore) Close() error {
 
 func scanSQLMCPServer(scanner sqlx.Row) (ManagedServer, error) {
 	var server ManagedServer
-	var headers, allowed, disallowed, userPaths []byte
+	var headers, allowed, disallowed, userPaths, disallowedUserPaths []byte
 	var createdAt, updatedAt int64
 	if err := scanner.Scan(
 		&server.Name,
@@ -188,6 +196,7 @@ func scanSQLMCPServer(scanner sqlx.Row) (ManagedServer, error) {
 		&allowed,
 		&disallowed,
 		&userPaths,
+		&disallowedUserPaths,
 		&server.ToolTimeoutSeconds,
 		&createdAt,
 		&updatedAt,
@@ -205,6 +214,9 @@ func scanSQLMCPServer(scanner sqlx.Row) (ManagedServer, error) {
 		return ManagedServer{}, err
 	}
 	if server.UserPaths, err = decodeJSONList(userPaths); err != nil {
+		return ManagedServer{}, err
+	}
+	if server.DisallowedUserPaths, err = decodeJSONList(disallowedUserPaths); err != nil {
 		return ManagedServer{}, err
 	}
 	if server.DisplayName == "" {

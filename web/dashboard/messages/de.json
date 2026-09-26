@@ -1168,6 +1168,8 @@
   "mcp_connected_since": "Verbunden seit {date}",
   "mcp_local_command": "lokaler Befehl",
   "mcp_sub_counts": "{prompts} Prompts · {resources} Ressourcen",
+  "mcp_disallowed_user_paths": "Ausgeschlossene Nutzerpfade",
+  "mcp_disallowed_user_paths_help": "Aufrufer in diesen Teilbäumen sehen diesen Server nie, auch nicht innerhalb eines erlaubten Nutzerpfads.",
   "mcp_name_required": "Name ist erforderlich.",
   "mcp_slug_invalid": "Der Slug darf nur 1–64 kleingeschriebene ASCII-Buchstaben, Ziffern, Bindestriche oder Unterstriche enthalten.",
   "mcp_slug_in_use": "Der Slug „{slug}“ ist bereits in Verwendung.",
