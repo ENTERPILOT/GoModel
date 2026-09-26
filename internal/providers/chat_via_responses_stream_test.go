@@ -506,8 +506,10 @@ func TestOpenAIChatStreamConverter_MalformedOutputItemAdded(t *testing.T) {
 }
 
 func TestOpenAIChatStreamConverter_ArgumentsDeltaForUnannouncedItem(t *testing.T) {
-	// A delta for an item the stream never announced still lands under a
-	// stable dense index (Postel's law).
+	// A delta for an item the stream never announced registers it so the
+	// dense index stays stable, but without output_item.added the call id
+	// and name stay unknown: the terminal event fails the stream closed
+	// instead of finishing as if the tool call were usable.
 	stream := chatViaResponsesStreamOf(
 		chatViaResponsesCreated,
 		`{"type":"response.function_call_arguments.delta","sequence_number":2,"item_id":"fc_1","output_index":0,"delta":"{\"city\":\"Warsaw\"}"}`,
@@ -515,28 +517,20 @@ func TestOpenAIChatStreamConverter_ArgumentsDeltaForUnannouncedItem(t *testing.T
 	)
 
 	events, _, err := readChatViaResponsesStream(t, stream, false)
-	require.NoError(t, err)
-	// role + synthesized start chunk + arguments delta + finish + [DONE].
-	require.Len(t, events, 5)
-
-	start := chatChunkToolCalls(t, events[1].Payload)[0].(map[string]any)
-	assert.Equal(t, float64(0), start["index"])
-	assert.Nil(t, start["id"], "an unannounced item has no call id")
-	function, ok := start["function"].(map[string]any)
+	require.Error(t, err)
+	require.ErrorIs(t, err, streaming.ErrStreamIncomplete)
+	// role + in-band truncation error: no start chunk without identity, no
+	// finish chunk, no [DONE].
+	require.Len(t, events, 2)
+	errorPayload, ok := events[1].Payload["error"].(map[string]any)
 	require.True(t, ok)
-	assert.Empty(t, function["arguments"])
-
-	delta := chatChunkToolCalls(t, events[2].Payload)[0].(map[string]any)
-	assert.Equal(t, float64(0), delta["index"])
-	assert.Equal(t, `{"city":"Warsaw"}`, delta["function"].(map[string]any)["arguments"])
-
-	assert.Equal(t, "tool_calls", chatChunkFinishReason(t, events[3].Payload))
-	assert.True(t, events[4].Done)
+	assert.Equal(t, "stream_incomplete", errorPayload["code"])
 }
 
 func TestOpenAIChatStreamConverter_EmptyArgumentsDelta(t *testing.T) {
-	// An empty arguments delta still registers the item and emits its start
-	// chunk, but no arguments chunk.
+	// An empty arguments delta still registers an unannounced item, so the
+	// stream ends with the tool call's identity pending: the terminal event
+	// fails closed.
 	stream := chatViaResponsesStreamOf(
 		chatViaResponsesCreated,
 		`{"type":"response.function_call_arguments.delta","sequence_number":2,"item_id":"fc_1","output_index":0,"delta":""}`,
@@ -544,11 +538,13 @@ func TestOpenAIChatStreamConverter_EmptyArgumentsDelta(t *testing.T) {
 	)
 
 	events, _, err := readChatViaResponsesStream(t, stream, false)
-	require.NoError(t, err)
-	// role + synthesized start chunk + finish + [DONE].
-	require.Len(t, events, 4)
-	assert.Equal(t, "tool_calls", chatChunkFinishReason(t, events[2].Payload))
-	assert.True(t, events[3].Done)
+	require.Error(t, err)
+	require.ErrorIs(t, err, streaming.ErrStreamIncomplete)
+	// role + in-band truncation error; no tool-call chunk was emitted.
+	require.Len(t, events, 2)
+	errorPayload, ok := events[1].Payload["error"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "stream_incomplete", errorPayload["code"])
 }
 
 func TestOpenAIChatStreamConverter_ArgumentsDeltaFallsBackToOutputIndex(t *testing.T) {
@@ -874,9 +870,10 @@ func TestOpenAIChatStreamConverter_FinishReasonFallsBackToStreamedToolCalls(t *t
 }
 
 func TestOpenAIChatStreamConverter_ItemAddedAfterDeltaReusesState(t *testing.T) {
-	// The arguments delta arrives before output_item.added: the added event
-	// reuses the registered state instead of claiming a second dense index
-	// and emitting a duplicate start chunk.
+	// The arguments delta arrives before output_item.added: the delta is
+	// buffered, the added event emits the start chunk with the real call id
+	// and name under the dense index the first delta claimed, and the
+	// buffered fragment flushes after it.
 	stream := chatViaResponsesStreamOf(
 		chatViaResponsesCreated,
 		`{"type":"response.function_call_arguments.delta","sequence_number":2,"item_id":"fc_1","output_index":0,"delta":"{\"a\":"}`,
@@ -887,13 +884,20 @@ func TestOpenAIChatStreamConverter_ItemAddedAfterDeltaReusesState(t *testing.T) 
 
 	events, _, err := readChatViaResponsesStream(t, stream, false)
 	require.NoError(t, err)
-	// role + one start chunk + two arguments deltas + finish + [DONE]
+	// role + start chunk with identity + buffered fragment + one arguments
+	// delta + finish + [DONE]
 	require.Len(t, events, 6)
 
 	start := chatChunkToolCalls(t, events[1].Payload)[0].(map[string]any)
 	assert.Equal(t, float64(0), start["index"])
 	assert.Equal(t, "function", start["type"])
-	assert.Nil(t, start["id"], "the item's call_id was unknown when the start chunk went out")
+	assert.Equal(t, "call_a", start["id"], "the start chunk must wait for the added event's call id")
+	assert.Equal(t, "fn_a", start["function"].(map[string]any)["name"])
+	assert.Empty(t, start["function"].(map[string]any)["arguments"])
+
+	buffered := chatChunkToolCalls(t, events[2].Payload)[0].(map[string]any)
+	assert.Equal(t, float64(0), buffered["index"], "the buffered fragment keeps the dense index")
+	assert.Equal(t, `{"a":`, buffered["function"].(map[string]any)["arguments"])
 
 	second := chatChunkToolCalls(t, events[3].Payload)[0].(map[string]any)
 	assert.Equal(t, float64(0), second["index"], "the added event must not claim a second dense index")
@@ -901,6 +905,60 @@ func TestOpenAIChatStreamConverter_ItemAddedAfterDeltaReusesState(t *testing.T) 
 
 	assert.Equal(t, "tool_calls", chatChunkFinishReason(t, events[4].Payload))
 	assert.True(t, events[5].Done)
+}
+
+func TestOpenAIChatStreamConverter_DeltaFirstFlushesBufferedArgumentsInOrder(t *testing.T) {
+	// Multiple deltas arrive before output_item.added: they flush as one
+	// chunk, in arrival order, after the start chunk that carries the
+	// identity.
+	stream := chatViaResponsesStreamOf(
+		chatViaResponsesCreated,
+		`{"type":"response.function_call_arguments.delta","sequence_number":2,"item_id":"fc_1","output_index":0,"delta":"{\"a\":"}`,
+		`{"type":"response.function_call_arguments.delta","sequence_number":3,"item_id":"fc_1","output_index":0,"delta":"1,\"b\":"}`,
+		`{"type":"response.output_item.added","sequence_number":4,"output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_a","name":"fn_a","arguments":""}}`,
+		`{"type":"response.function_call_arguments.delta","sequence_number":5,"item_id":"fc_1","output_index":0,"delta":"2}"}`,
+		`{"type":"response.completed","sequence_number":6,"response":{"id":"resp_abc123","status":"completed","output":[{"id":"fc_1","type":"function_call","call_id":"call_a","name":"fn_a","arguments":"{\"a\":1,\"b\":2}"}]}}`,
+	)
+
+	events, _, err := readChatViaResponsesStream(t, stream, false)
+	require.NoError(t, err)
+	// role + start chunk + buffered flush + trailing delta + finish + [DONE]
+	require.Len(t, events, 6)
+
+	start := chatChunkToolCalls(t, events[1].Payload)[0].(map[string]any)
+	assert.Equal(t, "call_a", start["id"])
+	assert.Equal(t, "fn_a", start["function"].(map[string]any)["name"])
+
+	flushed := chatChunkToolCalls(t, events[2].Payload)[0].(map[string]any)
+	assert.Equal(t, float64(0), flushed["index"])
+	assert.Equal(t, `{"a":1,"b":`, flushed["function"].(map[string]any)["arguments"], "buffered fragments flush in arrival order")
+
+	trailing := chatChunkToolCalls(t, events[3].Payload)[0].(map[string]any)
+	assert.Equal(t, float64(0), trailing["index"])
+	assert.Equal(t, "2}", trailing["function"].(map[string]any)["arguments"])
+}
+
+func TestOpenAIChatStreamConverter_DeltaFirstNeverAddedFailsClosed(t *testing.T) {
+	// A delta arrives but output_item.added never does: the tool call's
+	// identity is unrecoverable, so the stream fails truncated instead of
+	// reporting a successful finish.
+	stream := chatViaResponsesStreamOf(
+		chatViaResponsesCreated,
+		`{"type":"response.function_call_arguments.delta","sequence_number":2,"item_id":"fc_1","output_index":0,"delta":"{\"a\":1}"}`,
+		`{"type":"response.completed","sequence_number":3,"response":{"id":"resp_abc123","status":"completed","output":[{"id":"fc_1","type":"function_call","call_id":"call_a","name":"fn_a","arguments":"{\"a\":1}"}]}}`,
+	)
+
+	events, raw, err := readChatViaResponsesStream(t, stream, false)
+	require.Error(t, err)
+	require.ErrorIs(t, err, streaming.ErrStreamIncomplete)
+	// role + in-band truncation error: no finish chunk, no [DONE], no
+	// arguments emitted for a call without identity.
+	require.Len(t, events, 2)
+	errorPayload, ok := events[1].Payload["error"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "stream_incomplete", errorPayload["code"])
+	assert.NotContains(t, raw, "tool_calls")
+	assert.NotContains(t, raw, "[DONE]")
 }
 
 func TestOpenAIChatStreamConverter_ArgumentsDeltaWithoutItemIDSkipped(t *testing.T) {
