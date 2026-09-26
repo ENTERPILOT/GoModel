@@ -104,6 +104,11 @@ func deriveWorkflowWithPolicy(
 		return workflow, nil
 
 	case core.OperationChatCompletions, core.OperationResponses, core.OperationEmbeddings, core.OperationSystemOne:
+		if desc.Operation == core.OperationSystemOne && !systemOneAvailable(provider) {
+			// The handler answers 404; resolving the model first would
+			// report a model error for an endpoint that is not there.
+			return nil, nil
+		}
 		workflow.Mode = core.ExecutionModeTranslated
 		if desc.BodyMode != core.BodyModeJSON {
 			// Responses lifecycle routes (GET/DELETE /v1/responses/{id},

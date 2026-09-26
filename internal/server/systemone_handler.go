@@ -57,7 +57,7 @@ func (h *Handler) SystemOne(c *echo.Context) error {
 
 // SystemOne resolves, guards, and forwards one System One request.
 func (s *translatedInferenceService) SystemOne(c *echo.Context) error {
-	if !s.systemOneAvailable() {
+	if !systemOneAvailable(s.provider) {
 		return handleError(c, core.NewNotFoundError("POST "+systemOnePath+" is available only when a jev or openrouter provider is configured"))
 	}
 	body, err := requestBodyBytes(c)
@@ -101,8 +101,8 @@ func (s *translatedInferenceService) SystemOne(c *echo.Context) error {
 // systemOneAvailable reports whether a provider that serves System One is
 // configured. It is checked per request rather than at route registration so
 // a provider added at runtime makes the endpoint available without a restart.
-func (s *translatedInferenceService) systemOneAvailable() bool {
-	named, ok := s.provider.(core.ProviderTypeNameResolver)
+func systemOneAvailable(provider core.RoutableProvider) bool {
+	named, ok := provider.(core.ProviderTypeNameResolver)
 	if !ok {
 		return false
 	}
@@ -193,6 +193,9 @@ func (s *translatedInferenceService) guardSystemOneState(c *echo.Context, workfl
 	if !ok || !workflow.GuardrailsEnabled() {
 		return body, nil
 	}
+	// Compare against a copy: a patcher may redact the state in place and
+	// return the same request, and that edit must still reach the body.
+	original := bytes.Clone(req.State)
 	patched, err := patcher.PatchSystemOneRequest(c.Request().Context(), req)
 	s.recordGuardrailOutcomes(c)
 	if err != nil {
@@ -201,7 +204,7 @@ func (s *translatedInferenceService) guardSystemOneState(c *echo.Context, workfl
 		}
 		return nil, err
 	}
-	if patched == nil || patched == req || bytes.Equal(patched.State, req.State) {
+	if patched == nil || bytes.Equal(patched.State, original) {
 		return body, nil
 	}
 	rewritten, err := replaceTopLevelMember(body, "state", patched.State)

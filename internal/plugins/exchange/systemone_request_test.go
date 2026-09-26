@@ -19,6 +19,7 @@ func TestFromSystemOneRequestExposesStateAsUserMessage(t *testing.T) {
 	}{
 		{name: "string state", state: `"charged twice"`, want: "charged twice"},
 		{name: "record state", state: `{"ticket":"charged twice"}`, want: `{"ticket":"charged twice"}`},
+		{name: "null state", state: `null`, want: "null"},
 		{name: "no state", state: ``, want: ""},
 	}
 	for _, tt := range tests {
@@ -61,6 +62,12 @@ func TestApplyToSystemOneRequest(t *testing.T) {
 			state:     `{"name":"John"}`,
 			edit:      func(p *pluginapi.Prompt) error { return p.SetText(SystemOneStateMessageID, 0, `{"name":"[PERSON]"}`) },
 			wantState: `{"name":"[PERSON]"}`,
+		},
+		{
+			name:      "null state keeps its JSON type",
+			state:     `null`,
+			edit:      func(p *pluginapi.Prompt) error { return p.SetText(SystemOneStateMessageID, 0, `{"redacted":true}`) },
+			wantState: `{"redacted":true}`,
 		},
 		{
 			name:    "record state must stay valid JSON",

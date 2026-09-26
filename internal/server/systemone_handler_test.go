@@ -279,19 +279,54 @@ func (stateRedactingPatcher) PatchSystemOneRequest(_ context.Context, req *core.
 	return &patched, nil
 }
 
-// Guardrails see the state and their edits reach the provider; the rest of
-// the body is untouched.
+// inPlaceRedactingPatcher edits the request it was given and returns it; the
+// patcher contract allows that, and the edit must still reach the provider.
+type inPlaceRedactingPatcher struct{ stateRedactingPatcher }
+
+func (inPlaceRedactingPatcher) PatchSystemOneRequest(_ context.Context, req *core.SystemOneRequest) (*core.SystemOneRequest, error) {
+	req.State = json.RawMessage(strings.ReplaceAll(string(req.State), "4111", "[card]"))
+	return req, nil
+}
+
+// Guardrails see the state and their edits reach the provider, whether the
+// patcher returns a copy or edits in place; the rest of the body is untouched.
 func TestSystemOne_GuardrailsEditState(t *testing.T) {
-	provider := newSystemOneProvider(systemOneAnswer)
-	handler := newHandlerWithAuthorizer(provider, nil, nil, nil, systemOneAliases, nil, nil, nil, stateRedactingPatcher{})
+	patchers := map[string]TranslatedRequestPatcher{
+		"copy":     stateRedactingPatcher{},
+		"in place": inPlaceRedactingPatcher{},
+	}
+	for name, patcher := range patchers {
+		t.Run(name, func(t *testing.T) {
+			provider := newSystemOneProvider(systemOneAnswer)
+			handler := newHandlerWithAuthorizer(provider, nil, nil, nil, systemOneAliases, nil, nil, nil, patcher)
 
-	c, rec := echotest.Post(t, "/v1/systemone", systemOneBody("decider"))
-	require.NoError(t, handler.SystemOne(c))
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			c, rec := echotest.Post(t, "/v1/systemone", systemOneBody("decider"))
+			require.NoError(t, handler.SystemOne(c))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-	body := forwardedSystemOneBody(t, provider)
-	assert.Equal(t, "I was charged twice for card [card].", body["state"])
-	assert.Equal(t, "kev-latest", body["model"])
+			body := forwardedSystemOneBody(t, provider)
+			assert.Equal(t, "I was charged twice for card [card].", body["state"])
+			assert.Equal(t, "kev-latest", body["model"])
+		})
+	}
+}
+
+// Through the full middleware stack an unavailable endpoint answers 404
+// before the model is resolved, so a missing or unknown model is not
+// reported for a route that is not there.
+func TestSystemOne_UnavailableBeforeModelResolution(t *testing.T) {
+	provider := &mockProvider{
+		supportedModels: []string{"gpt-5-mini"},
+		providerTypes:   map[string]string{"openai/gpt-5-mini": "openai"},
+		providerNames:   map[string]string{"openai/gpt-5-mini": "openai"},
+	}
+	srv := New(provider, &Config{})
+
+	for _, body := range []string{`{"state":"hi","questions":{}}`, systemOneBody("no-such-model")} {
+		rec := postJSON(t, srv, "/v1/systemone", body)
+		assert.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+		assert.Contains(t, rec.Body.String(), "jev or openrouter provider")
+	}
 }
 
 // Through the full middleware stack a System One call is audited under its

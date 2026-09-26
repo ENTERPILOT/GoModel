@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"bytes"
 	"fmt"
 	"sort"
 
@@ -39,7 +40,7 @@ func FromSystemOneRequest(req *core.SystemOneRequest) (*pluginapi.Prompt, error)
 
 func systemOneStateText(state json.RawMessage) string {
 	var text string
-	if err := json.Unmarshal(state, &text); err == nil {
+	if trimmed := bytes.TrimSpace(state); len(trimmed) > 0 && trimmed[0] == '"' && json.Unmarshal(trimmed, &text) == nil {
 		return text
 	}
 	return string(state)
@@ -67,8 +68,10 @@ func ApplyToSystemOneRequest(original *core.SystemOneRequest, p *pluginapi.Promp
 		return nil, fmt.Errorf("exchange: the System One state was removed")
 	}
 	text := msg.Text()
-	var current string
-	if err := json.Unmarshal(original.State, &current); err == nil || len(original.State) == 0 {
+	// A missing state becomes a string; null, numbers, and records keep
+	// their JSON type (json.Unmarshal would accept null into a string).
+	state := bytes.TrimSpace(original.State)
+	if len(state) == 0 || state[0] == '"' {
 		encoded, err := json.Marshal(text)
 		if err != nil {
 			return nil, fmt.Errorf("exchange: encode System One state: %w", err)
