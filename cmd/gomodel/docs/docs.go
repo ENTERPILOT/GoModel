@@ -1173,7 +1173,7 @@ const docTemplate = `{
         },
         "/admin/mcp-servers/{name}/catalog": {
             "get": {
-                "description": "Lists the tools, prompts, resources, and resource templates the named server currently exposes through the gateway, after operator tool filters. Names are the upstream originals; the aggregated /mcp endpoint prefixes them with the server slug.",
+                "description": "Lists the tools, prompts, resources, and resource templates the named server currently exposes through the gateway, after operator tool filters. Discovered tools the filters hide are listed separately under excluded_tools. Names are the upstream originals; the aggregated /mcp endpoint prefixes them with the server slug.",
                 "produces": [
                     "application/json"
                 ],
@@ -7997,6 +7997,9 @@ const docTemplate = `{
                 "enabled": {
                     "type": "boolean"
                 },
+                "excluded_tool_count": {
+                    "type": "integer"
+                },
                 "headers": {
                     "type": "object",
                     "additionalProperties": {
@@ -11311,8 +11314,14 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
+                "destructive": {
+                    "type": "boolean"
+                },
                 "name": {
                     "type": "string"
+                },
+                "read_only": {
+                    "type": "boolean"
                 }
             }
         },
@@ -11347,6 +11356,12 @@ const docTemplate = `{
         "mcpgateway.CatalogView": {
             "type": "object",
             "properties": {
+                "excluded_tools": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/mcpgateway.CatalogFeature"
+                    }
+                },
                 "instructions": {
                     "type": "string"
                 },

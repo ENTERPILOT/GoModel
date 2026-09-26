@@ -19,6 +19,10 @@ const namespaceSeparator = "_"
 // and prompts keep their original (un-prefixed) names and raw schemas; the
 // per-session server view applies namespacing.
 type catalog struct {
+	// discovered is every tool the upstream lists; tools is the subset the
+	// operator tool filters expose. Keeping both lets filter edits apply
+	// without re-listing and lets the admin inspector show hidden tools.
+	discovered   []*mcp.Tool
 	tools        []*mcp.Tool
 	prompts      []*mcp.Prompt
 	resources    []*mcp.Resource
@@ -31,6 +35,24 @@ func (c *catalog) toolCount() int {
 		return 0
 	}
 	return len(c.tools)
+}
+
+func (c *catalog) excludedToolCount() int {
+	if c == nil {
+		return 0
+	}
+	return len(c.discovered) - len(c.tools)
+}
+
+// withToolFilters returns a copy whose exposed tools reflect the given
+// filters. Catalogs are immutable, so the copy shares every other list.
+func (c *catalog) withToolFilters(allowed, disallowed []string) *catalog {
+	if c == nil {
+		return nil
+	}
+	next := *c
+	next.tools = filterTools(c.discovered, allowed, disallowed)
+	return &next
 }
 
 func (c *catalog) promptCount() int {
@@ -52,24 +74,33 @@ func NamespacedName(server, name string) string {
 	return server + namespaceSeparator + name
 }
 
-// filterTools applies the operator-level allow/deny lists to original tool
-// names and returns tools in deterministic (sorted) order. Deterministic
-// ordering keeps downstream tools/list stable, which keeps provider prompt
-// caches warm for clients that embed the tool list in prompts.
-func filterTools(tools []*mcp.Tool, allowed, disallowed []string) []*mcp.Tool {
-	filtered := make([]*mcp.Tool, 0, len(tools))
+// discoverTools drops unnamed tools, normalizes schemas, and returns tools in
+// deterministic (sorted) order. Deterministic ordering keeps downstream
+// tools/list stable, which keeps provider prompt caches warm for clients that
+// embed the tool list in prompts.
+func discoverTools(tools []*mcp.Tool) []*mcp.Tool {
+	discovered := make([]*mcp.Tool, 0, len(tools))
 	for _, tool := range tools {
 		if tool == nil || tool.Name == "" {
 			continue
 		}
-		if !toolAllowed(tool.Name, allowed, disallowed) {
-			continue
-		}
-		filtered = append(filtered, normalizeToolSchemas(tool))
+		discovered = append(discovered, normalizeToolSchemas(tool))
 	}
-	slices.SortFunc(filtered, func(a, b *mcp.Tool) int {
+	slices.SortFunc(discovered, func(a, b *mcp.Tool) int {
 		return strings.Compare(a.Name, b.Name)
 	})
+	return discovered
+}
+
+// filterTools applies the operator-level allow/deny lists to original tool
+// names, preserving input order.
+func filterTools(tools []*mcp.Tool, allowed, disallowed []string) []*mcp.Tool {
+	filtered := make([]*mcp.Tool, 0, len(tools))
+	for _, tool := range tools {
+		if toolAllowed(tool.Name, allowed, disallowed) {
+			filtered = append(filtered, tool)
+		}
+	}
 	return filtered
 }
 

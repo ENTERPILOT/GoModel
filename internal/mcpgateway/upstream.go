@@ -28,6 +28,9 @@ const connectTimeout = 15 * time.Second
 // listTimeout bounds one full catalog listing pass.
 const listTimeout = 30 * time.Second
 
+// ErrToolExcluded rejects a call to a tool the operator filters hide.
+var ErrToolExcluded = errors.New("tool is excluded by the gateway tool filters")
+
 // upstream owns the client session and catalog snapshot for one server. One
 // shared session serves all downstream sessions: v1 forwards no per-user
 // upstream credentials and bridges no server-to-client requests, so
@@ -65,14 +68,43 @@ func (u *upstream) view() ServerView {
 	u.stateMu.Lock()
 	defer u.stateMu.Unlock()
 	return ServerView{
-		Spec:          u.spec,
-		Status:        u.status,
-		LastError:     u.lastErr,
-		ToolCount:     u.catalog.toolCount(),
-		PromptCount:   u.catalog.promptCount(),
-		ResourceCount: u.catalog.resourceCount(),
-		ConnectedAt:   u.connectedAt,
+		Spec:              u.spec,
+		Status:            u.status,
+		LastError:         u.lastErr,
+		ToolCount:         u.catalog.toolCount(),
+		ExcludedToolCount: u.catalog.excludedToolCount(),
+		PromptCount:       u.catalog.promptCount(),
+		ResourceCount:     u.catalog.resourceCount(),
+		ConnectedAt:       u.connectedAt,
 	}
+}
+
+// currentSpec returns the spec under the state lock; tool filters can change
+// in place (setToolFilters), so readers of those fields must not race it.
+func (u *upstream) currentSpec() ServerSpec {
+	u.stateMu.Lock()
+	defer u.stateMu.Unlock()
+	return u.spec
+}
+
+// setToolFilters swaps the operator tool filters and re-filters the cached
+// catalog without touching the upstream session. Filters are gateway policy,
+// so changing them never needs a redial.
+func (u *upstream) setToolFilters(allowed, disallowed []string) {
+	u.stateMu.Lock()
+	defer u.stateMu.Unlock()
+	u.spec.AllowedTools = allowed
+	u.spec.DisallowedTools = disallowed
+	u.catalog = u.catalog.withToolFilters(allowed, disallowed)
+}
+
+// toolExposed reports whether the current filters expose name. Downstream
+// sessions snapshot their tool list at initialize, so calls re-check here to
+// make an exclusion effective for sessions that are already open.
+func (u *upstream) toolExposed(name string) bool {
+	u.stateMu.Lock()
+	defer u.stateMu.Unlock()
+	return toolAllowed(name, u.spec.AllowedTools, u.spec.DisallowedTools)
 }
 
 // snapshot returns the current catalog (nil when never listed).
@@ -113,7 +145,7 @@ func (u *upstream) refresh(ctx context.Context) error {
 	}
 
 	u.stateMu.Lock()
-	u.catalog = fresh
+	u.catalog = fresh.withToolFilters(u.spec.AllowedTools, u.spec.DisallowedTools)
 	u.status = StatusConnected
 	u.lastErr = ""
 	u.stateMu.Unlock()
@@ -366,7 +398,8 @@ func requestOrigin(raw string) string {
 
 // list rebuilds the catalog from the upstream's declared capabilities. Valid
 // tool schemas and metadata pass through untouched; malformed schemas are
-// made safe for the stricter downstream SDK.
+// made safe for the stricter downstream SDK. Tool filters are applied by the
+// caller, under the state lock.
 func (u *upstream) list(ctx context.Context, session *mcp.ClientSession) (*catalog, error) {
 	fresh := &catalog{}
 	init := session.InitializeResult()
@@ -384,7 +417,7 @@ func (u *upstream) list(ctx context.Context, session *mcp.ClientSession) (*catal
 			}
 			tools = append(tools, tool)
 		}
-		fresh.tools = filterTools(tools, u.spec.AllowedTools, u.spec.DisallowedTools)
+		fresh.discovered = discoverTools(tools)
 	}
 
 	if caps != nil && caps.Prompts != nil {
@@ -438,6 +471,9 @@ func (u *upstream) list(ctx context.Context, session *mcp.ClientSession) (*catal
 // callTool forwards one tools/call with the original tool name. A session
 // that died since the last call is redialed once, transparently.
 func (u *upstream) callTool(ctx context.Context, name string, args json.RawMessage) (*mcp.CallToolResult, error) {
+	if !u.toolExposed(name) {
+		return nil, fmt.Errorf("%w: %q", ErrToolExcluded, name)
+	}
 	params := &mcp.CallToolParams{Name: name}
 	if len(args) > 0 {
 		params.Arguments = args

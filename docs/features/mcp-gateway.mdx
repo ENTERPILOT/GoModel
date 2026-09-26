@@ -82,8 +82,10 @@ Open **MCP Servers** and click **Add MCP Server**. Fill in:
 - **URL** — the upstream MCP endpoint.
 - **Headers** — upstream credentials (for example `Authorization: Bearer …`);
   saved values are shown redacted afterward.
-- Optional **allowed/disallowed tools** and **user paths** to scope
-  visibility, the same fields available in `config.yaml`.
+- **Tools** — check the tools clients may use; see
+  [Choose which tools each server exposes](#choose-which-tools-each-server-exposes).
+- Optional **user paths** under **Advanced** to scope visibility, the same
+  field available in `config.yaml`.
 
 Save to connect immediately. Use the row's refresh icon to force a
 **Reconnect**, the list icon to open the catalog inspector, and the pencil
@@ -224,14 +226,55 @@ A last error mentioning `x509: certificate signed by unknown authority` means
 the server's TLS certificate is issued by a CA the container does not trust.
 See [private CA certificates](/guides/production#upstream-certificates-behind-a-private-ca).
 
+## Choose which tools each server exposes
+
+By default every tool a server reports is exposed. Trim a server's tools to
+keep agent context small and to keep risky tools, such as deletes or merges,
+away from clients.
+
+In the dashboard, edit a server and use its **Tools** section. It lists every
+tool the server reports, with a checkbox for each, a filter box, and
+**Expose all** / **Exclude all** for the filtered rows. Tools the server
+annotates as `read-only` or `destructive` carry a badge. These hints come from
+the upstream; GoModel does not verify them.
+
+**Tools the server adds later** controls what happens when the upstream grows:
+
+| Choice | Saved as | New upstream tools |
+| --- | --- | --- |
+| **Expose automatically** (default) | `disallowed_tools`: the unchecked tools | Exposed |
+| **Keep hidden** | `allowed_tools`: the checked tools | Hidden until you check them |
+
+Choose **Keep hidden** for servers you do not control, so a new tool can never
+reach clients without review.
+
+You can also add a tool by name, for example before the server first
+connects. Names the server does not report stay in the list, marked
+**Not reported by the server**, so typos and removed tools stay visible.
+
+Changing tool filters applies immediately without reconnecting to the server.
+The change also covers MCP sessions that are already open: an excluded tool
+fails with an error even for a client that listed it before the change.
+
+In `config.yaml` the same filters use original, unprefixed tool names:
+
+```yaml
+mcp:
+  servers:
+    github:
+      url: https://api.githubcopilot.com/mcp
+      disallowed_tools: ["delete_repository", "merge_pull_request"]
+```
+
 ## Inspect a server's catalog
 
 The dashboard's catalog inspector (or
-`GET /admin/mcp-servers/{slug}/catalog`) lists exactly what a server
-currently exposes through the gateway — tools, prompts, resources, and
-resource templates with their descriptions, after your `allowed_tools` /
-`disallowed_tools` filters. Names are the upstream originals; the aggregated
-`/mcp` endpoint serves them as `{slug}_{name}`.
+`GET /admin/mcp-servers/{slug}/catalog`) lists what a server currently exposes
+through the gateway: tools, prompts, resources, and resource templates with
+their descriptions, after your `allowed_tools` / `disallowed_tools` filters.
+Tools that the server reports but the filters hide are listed separately under
+`excluded_tools`. Names are the upstream originals; the aggregated `/mcp`
+endpoint serves them as `{slug}_{name}`.
 
 ## Security notes
 

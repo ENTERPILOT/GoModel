@@ -45,8 +45,10 @@ func NewManager(httpClient *http.Client) *Manager {
 
 // Apply reconciles the running upstreams with the desired specs: removed
 // servers are closed, new servers are added, changed servers are redialed.
-// Unchanged servers keep their live session and catalog. Initial connects run
-// asynchronously so startup and admin edits never block on upstream IO.
+// Unchanged servers keep their live session and catalog; servers whose only
+// change is the tool filters keep their session and re-filter in place.
+// Initial connects run asynchronously so startup and admin edits never block
+// on upstream IO.
 func (m *Manager) Apply(specs []ServerSpec) {
 	desired := make(map[string]ServerSpec, len(specs))
 	for _, spec := range specs {
@@ -58,14 +60,20 @@ func (m *Manager) Apply(specs []ServerSpec) {
 
 	m.mu.Lock()
 	for name, existing := range m.upstreams {
-		spec, keep := desired[name]
-		if keep && existing.spec.equal(spec) {
-			delete(desired, name)
-			continue
+		if spec, keep := desired[name]; keep {
+			current := existing.currentSpec()
+			if current.equal(spec) {
+				delete(desired, name)
+				continue
+			}
+			if current.withoutToolFilters().equal(spec.withoutToolFilters()) {
+				existing.setToolFilters(spec.AllowedTools, spec.DisallowedTools)
+				delete(desired, name)
+				continue
+			}
 		}
 		toClose = append(toClose, existing)
 		delete(m.upstreams, name)
-		_ = spec
 	}
 	for name, spec := range desired {
 		fresh := newUpstream(spec, m.httpClient)

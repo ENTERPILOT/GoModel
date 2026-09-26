@@ -13,13 +13,17 @@ import {
   defaultMcpServerForm,
   deriveMcpServerSlug,
   filterMcpServers,
+  mcpDiscoveredTools,
   mcpServerFormFromServer,
   mcpPollShouldRetry,
   mcpServerSlug,
   mcpServersNeedPolling,
   mcpServerStatus,
   normalizeMcpCatalog,
+  setMcpToolsExposed,
+  switchMcpToolMode,
   MCP_SERVERS_POLL_MS,
+  MCP_TOOL_MODE_ALLOW,
 } from "./mcp-servers.js";
 
 class McpServersState {
@@ -37,6 +41,12 @@ class McpServersState {
   slugEdited = $state(false);
   advancedOpen = $state(false);
   form = $state(defaultMcpServerForm());
+
+  // Editor tool picker: every tool the server reports, exposed or not. A new
+  // server, or one that never listed, has none yet.
+  editorTools = $state({ loading: false, error: "", tools: [] });
+  toolQuery = $state("");
+  toolDraft = $state("");
 
   deletingName = $state("");
   reconnectingName = $state("");
@@ -179,6 +189,7 @@ class McpServersState {
     this.advancedOpen = false;
     this.error = "";
     this.form = defaultMcpServerForm();
+    this.#resetEditorTools();
     this.formOpen = true;
   }
 
@@ -191,7 +202,9 @@ class McpServersState {
     this.advancedOpen = false;
     this.error = "";
     this.form = mcpServerFormFromServer(server);
+    this.#resetEditorTools();
     this.formOpen = true;
+    void this.#loadEditorTools(server);
   }
 
   closeForm() {
@@ -201,6 +214,56 @@ class McpServersState {
     this.advancedOpen = false;
     this.error = "";
     this.form = defaultMcpServerForm();
+    this.#resetEditorTools();
+  }
+
+  #resetEditorTools() {
+    this.editorTools = { loading: false, error: "", tools: [] };
+    this.toolQuery = "";
+    this.toolDraft = "";
+  }
+
+  async #loadEditorTools(server) {
+    const slug = mcpServerSlug(server);
+    this.editorTools = { ...this.editorTools, loading: true, error: "" };
+    const loaded = await this.#fetchCatalog(server);
+    // The editor may have closed or moved to another server meanwhile.
+    if (!this.formOpen || this.form.slug !== slug) {
+      return;
+    }
+    if (loaded.stale) {
+      this.editorTools = { ...this.editorTools, loading: false };
+      return;
+    }
+    this.editorTools = {
+      loading: false,
+      error: loaded.error || "",
+      tools: loaded.error ? [] : mcpDiscoveredTools(loaded.catalog),
+    };
+  }
+
+  setToolsExposed(names, exposed) {
+    this.form.tool_names = setMcpToolsExposed(this.form, names, exposed);
+  }
+
+  switchToolMode(mode) {
+    const next = switchMcpToolMode(this.form, mode, this.editorTools.tools);
+    this.form.tool_mode = next.tool_mode;
+    this.form.tool_names = next.tool_names;
+  }
+
+  addToolDraft() {
+    const name = this.toolDraft.trim();
+    if (!name) {
+      return;
+    }
+    // Adding a name lists it in the current mode: excluded or allowed.
+    this.setToolsExposed([name], this.form.tool_mode === MCP_TOOL_MODE_ALLOW);
+    this.toolDraft = "";
+  }
+
+  removeToolName(name) {
+    this.form.tool_names = (this.form.tool_names || []).filter((item) => item !== name);
   }
 
   syncSlugFromName() {
@@ -377,7 +440,6 @@ class McpServersState {
   // so it does not map onto the shared list/mutation ladder.
 
   async openCatalog(server) {
-    const name = String((server && server.name) || "").trim();
     const slug = mcpServerSlug(server);
     if (!slug) {
       return;
@@ -392,39 +454,62 @@ class McpServersState {
       status: mcpServerStatus(server),
     };
 
+    const loaded = await this.#fetchCatalog(server);
+    this.catalogLoading = false;
+    if (loaded.stale) {
+      return;
+    }
+    if (loaded.error) {
+      this.catalogError = loaded.error;
+      return;
+    }
+    this.catalog = loaded.catalog;
+  }
+
+  // chooseToolsFromCatalog jumps from the read-only inspector to the editor's
+  // tool picker for the same server.
+  chooseToolsFromCatalog() {
+    const server = (this.servers || []).find(
+      (item) => mcpServerSlug(item) === this.catalog.server,
+    );
+    if (!server || server.managed) {
+      return;
+    }
+    this.closeCatalog();
+    this.openEdit(server);
+  }
+
+  // #fetchCatalog resolves to { catalog }, { error }, or { stale }.
+  async #fetchCatalog(server) {
+    const name = String((server && server.name) || "").trim();
+    const slug = mcpServerSlug(server);
     try {
       const result = await getJSON(
         "/admin/mcp-servers/" + encodeURIComponent(slug) + "/catalog",
         { label: "mcp server catalog" },
       );
       if (result.stale) {
-        return;
+        return { stale: true };
       }
       if (result.status === 503) {
         this.available = false;
-        this.catalogError = m.mcp_unavailable();
-        return;
+        return { error: m.mcp_unavailable() };
       }
       if (result.status === 404) {
-        this.catalogError = m.mcp_not_found({ name });
-        return;
+        return { error: m.mcp_not_found({ name }) };
       }
       if (!result.ok) {
-        this.catalogError =
-          result.status === 401
-            ? m.common_authentication_required()
-            : errorPayloadMessage(
-                result.data,
-                m.mcp_catalog_load_failed(),
-              );
-        return;
+        return {
+          error:
+            result.status === 401
+              ? m.common_authentication_required()
+              : errorPayloadMessage(result.data, m.mcp_catalog_load_failed()),
+        };
       }
-      this.catalog = normalizeMcpCatalog(slug, result.data);
+      return { catalog: normalizeMcpCatalog(slug, result.data) };
     } catch (e) {
       console.error("Failed to load MCP server catalog:", e);
-      this.catalogError = m.mcp_catalog_load_failed();
-    } finally {
-      this.catalogLoading = false;
+      return { error: m.mcp_catalog_load_failed() };
     }
   }
 

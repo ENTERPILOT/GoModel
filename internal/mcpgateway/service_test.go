@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/config"
@@ -409,6 +410,49 @@ func TestToolFiltersHideTools(t *testing.T) {
 	names := listToolNames(t, session)
 	require.Len(t, names, 1)
 	require.Equal(t, "alpha_read", names[0])
+}
+
+func TestToolFilterEditAppliesInPlaceAndBlocksOpenSessions(t *testing.T) {
+	url := newTestUpstream(t, "alpha", func(server *mcp.Server) {
+		addEchoTool("read")(server)
+		addEchoTool("write")(server)
+	})
+	spec := testSpec("alpha", url, nil)
+	service, gatewayURL := newTestService(t, nil, spec)
+
+	openSession := connectClient(t, gatewayURL+"/mcp", nil)
+	require.Equal(t, []string{"alpha_read", "alpha_write"}, listToolNames(t, openSession))
+
+	before, ok := service.manager.get("alpha")
+	require.True(t, ok)
+	upstreamSession := before.session
+
+	spec.DisallowedTools = []string{"write"}
+	service.manager.Apply([]ServerSpec{spec})
+
+	after, ok := service.manager.get("alpha")
+	require.True(t, ok)
+	assert.Same(t, before, after, "a filter-only edit must not replace the upstream")
+	assert.Same(t, upstreamSession, after.session, "a filter-only edit must not redial")
+	view := after.view()
+	assert.Equal(t, StatusConnected, view.Status)
+	assert.Equal(t, 1, view.ToolCount)
+	assert.Equal(t, 1, view.ExcludedToolCount)
+	assert.Equal(t, []string{"write"}, view.Spec.DisallowedTools)
+
+	_, err := openSession.CallTool(context.Background(), &mcp.CallToolParams{Name: "alpha_write"})
+	require.Error(t, err, "an excluded tool must not be callable from a session opened before the edit")
+	assert.Contains(t, err.Error(), "excluded")
+
+	fresh := connectClient(t, gatewayURL+"/mcp", nil)
+	assert.Equal(t, []string{"alpha_read"}, listToolNames(t, fresh))
+
+	catalog, ok := service.Catalog("alpha")
+	require.True(t, ok)
+	require.Len(t, catalog.Tools, 1)
+	assert.Equal(t, "read", catalog.Tools[0].Name)
+	require.Len(t, catalog.ExcludedTools, 1)
+	assert.Equal(t, "write", catalog.ExcludedTools[0].Name)
 }
 
 func TestSessionBindingRejectsForeignUserPath(t *testing.T) {

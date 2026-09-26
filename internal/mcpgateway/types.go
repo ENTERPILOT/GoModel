@@ -94,14 +94,24 @@ func (s ServerSpec) equal(other ServerSpec) bool {
 		s.Managed == other.Managed
 }
 
+// withoutToolFilters clears the tool filters, so callers can tell a
+// filter-only edit (applied in place) from one that needs a redial.
+func (s ServerSpec) withoutToolFilters() ServerSpec {
+	s.AllowedTools = nil
+	s.DisallowedTools = nil
+	return s
+}
+
 // ServerView is a point-in-time snapshot of one upstream for admin and
 // dashboard consumption.
 type ServerView struct {
-	Spec        ServerSpec
-	Status      ServerStatus
-	LastError   string
-	ToolCount   int
-	PromptCount int
+	Spec      ServerSpec
+	Status    ServerStatus
+	LastError string
+	ToolCount int
+	// ExcludedToolCount counts discovered tools hidden by the tool filters.
+	ExcludedToolCount int
+	PromptCount       int
 	// ResourceCount includes resource templates.
 	ResourceCount int
 	ConnectedAt   time.Time

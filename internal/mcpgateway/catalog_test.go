@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -80,7 +81,7 @@ func TestFilterTools(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			filtered := filterTools(tools, tt.allowed, tt.disallowed)
+			filtered := filterTools(discoverTools(tools), tt.allowed, tt.disallowed)
 			names := make([]string, 0, len(filtered))
 			for _, tool := range filtered {
 				names = append(names, tool.Name)
@@ -90,7 +91,7 @@ func TestFilterTools(t *testing.T) {
 	}
 }
 
-func TestFilterToolsNormalizesSchemasForDownstream(t *testing.T) {
+func TestDiscoverToolsNormalizesSchemasForDownstream(t *testing.T) {
 	t.Parallel()
 	validInput := map[string]any{"type": "object", "properties": map[string]any{"q": map[string]any{"type": "string"}}}
 	tools := []*mcp.Tool{
@@ -99,9 +100,9 @@ func TestFilterToolsNormalizesSchemasForDownstream(t *testing.T) {
 		{Name: "valid", InputSchema: validInput, OutputSchema: map[string]any{"type": "object"}},
 	}
 
-	filtered := filterTools(tools, nil, nil)
-	byName := make(map[string]*mcp.Tool, len(filtered))
-	for _, tool := range filtered {
+	discovered := discoverTools(tools)
+	byName := make(map[string]*mcp.Tool, len(discovered))
+	for _, tool := range discovered {
 		byName[tool.Name] = tool
 	}
 	for _, name := range []string{"missing", "invalid", "valid"} {
@@ -110,6 +111,46 @@ func TestFilterToolsNormalizesSchemasForDownstream(t *testing.T) {
 	require.Nil(t, byName["invalid"].OutputSchema)
 	require.Equal(t, validInput, byName["valid"].InputSchema)
 	require.True(t, isObjectSchema(byName["valid"].OutputSchema), "valid output schema = %#v, want preserved object", byName["valid"].OutputSchema)
+}
+
+func TestCatalogWithToolFiltersKeepsDiscoveredTools(t *testing.T) {
+	t.Parallel()
+	base := &catalog{discovered: discoverTools([]*mcp.Tool{{Name: "write"}, {Name: "read"}})}
+
+	filtered := base.withToolFilters(nil, []string{"write"})
+	require.Len(t, filtered.tools, 1)
+	assert.Equal(t, "read", filtered.tools[0].Name)
+	assert.Equal(t, 1, filtered.excludedToolCount())
+	assert.Len(t, filtered.discovered, 2)
+	assert.Empty(t, base.tools, "withToolFilters must not mutate the receiver")
+
+	var missing *catalog
+	assert.Nil(t, missing.withToolFilters(nil, []string{"write"}))
+}
+
+func TestCatalogToolRelaysExplicitSafetyHints(t *testing.T) {
+	t.Parallel()
+	destructive := true
+	tests := []struct {
+		name            string
+		annotations     *mcp.ToolAnnotations
+		wantReadOnly    bool
+		wantDestructive bool
+	}{
+		{name: "unannotated tool has no hints"},
+		{name: "read-only hint", annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}, wantReadOnly: true},
+		{name: "explicit destructive hint", annotations: &mcp.ToolAnnotations{DestructiveHint: &destructive}, wantDestructive: true},
+		{name: "read-only wins over destructive", annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, DestructiveHint: &destructive}, wantReadOnly: true},
+		{name: "implicit destructive default is not shown", annotations: &mcp.ToolAnnotations{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			feature := catalogTool(&mcp.Tool{Name: "tool", Annotations: tt.annotations})
+			assert.Equal(t, tt.wantReadOnly, feature.ReadOnly)
+			assert.Equal(t, tt.wantDestructive, feature.Destructive)
+		})
+	}
 }
 
 func TestUserPathAllowed(t *testing.T) {

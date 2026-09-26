@@ -69,6 +69,7 @@ type mcpServerViewResponse struct {
 	Status             string            `json:"status"`
 	LastError          string            `json:"last_error,omitempty"`
 	ToolCount          int               `json:"tool_count"`
+	ExcludedToolCount  int               `json:"excluded_tool_count"`
 	PromptCount        int               `json:"prompt_count"`
 	ResourceCount      int               `json:"resource_count"`
 	ConnectedAt        *time.Time        `json:"connected_at,omitempty"`
@@ -203,7 +204,7 @@ func (h *Handler) ReconnectMCPServer(c *echo.Context) error {
 // MCPServerCatalog handles GET /admin/mcp-servers/:name/catalog.
 //
 // @Summary      Inspect one MCP server's current catalog
-// @Description  Lists the tools, prompts, resources, and resource templates the named server currently exposes through the gateway, after operator tool filters. Names are the upstream originals; the aggregated /mcp endpoint prefixes them with the server slug.
+// @Description  Lists the tools, prompts, resources, and resource templates the named server currently exposes through the gateway, after operator tool filters. Discovered tools the filters hide are listed separately under excluded_tools. Names are the upstream originals; the aggregated /mcp endpoint prefixes them with the server slug.
 // @Tags         admin
 // @Produce      json
 // @Security     BearerAuth
@@ -318,6 +319,7 @@ func (h *Handler) mcpServerView(view mcpgateway.ServerView) mcpServerViewRespons
 		Status:             string(view.Status),
 		LastError:          view.LastError,
 		ToolCount:          view.ToolCount,
+		ExcludedToolCount:  view.ExcludedToolCount,
 		PromptCount:        view.PromptCount,
 		ResourceCount:      view.ResourceCount,
 	}

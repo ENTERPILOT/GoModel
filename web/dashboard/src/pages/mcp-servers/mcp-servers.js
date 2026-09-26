@@ -3,6 +3,13 @@
 
 import * as m from "../../lib/paraglide/messages.js";
 
+// Tool filter modes. "exclude" stores disallowed_tools: every tool is exposed
+// except the listed ones, so tools the server adds later appear automatically.
+// "allow" stores allowed_tools: only the listed tools are exposed, so new
+// tools stay hidden until selected.
+export const MCP_TOOL_MODE_EXCLUDE = "exclude";
+export const MCP_TOOL_MODE_ALLOW = "allow";
+
 export function defaultMcpServerForm() {
   return {
     name: "",
@@ -12,8 +19,8 @@ export function defaultMcpServerForm() {
     description: "",
     enabled: true,
     headers: [],
-    allowed_tools: "",
-    disallowed_tools: "",
+    tool_mode: MCP_TOOL_MODE_EXCLUDE,
+    tool_names: [],
     user_paths: "",
     tool_timeout_seconds: "",
   };
@@ -25,6 +32,7 @@ export function defaultMcpCatalog() {
     status: "",
     instructions: "",
     tools: [],
+    excluded_tools: [],
     prompts: [],
     resources: [],
     templates: [],
@@ -202,14 +210,7 @@ export function mcpServerFormFromServer(server) {
     description: String(server.description || "").trim(),
     enabled: server.enabled !== false,
     headers: mcpHeadersToRows(server.headers),
-    allowed_tools: (Array.isArray(server.allowed_tools)
-      ? server.allowed_tools
-      : []
-    ).join(", "),
-    disallowed_tools: (Array.isArray(server.disallowed_tools)
-      ? server.disallowed_tools
-      : []
-    ).join(", "),
+    ...mcpToolFilterFromServer(server),
     user_paths: (Array.isArray(server.user_paths) ? server.user_paths : []).join(
       "\n",
     ),
@@ -247,6 +248,13 @@ export function buildMcpServerPayload(form, mode, servers) {
   if (!url) {
     return { error: m.mcp_url_required() };
   }
+  const toolNames = uniqueToolNames(form.tool_names);
+  const allowMode = form.tool_mode === MCP_TOOL_MODE_ALLOW;
+  if (allowMode && toolNames.length === 0) {
+    // An empty allowed_tools list means "no restriction" on the gateway, the
+    // opposite of what an operator who unchecked everything expects.
+    return { error: m.mcp_tools_allow_empty() };
+  }
   let toolTimeoutSeconds;
   const rawTimeout = String(form.tool_timeout_seconds || "").trim();
   if (rawTimeout !== "") {
@@ -267,8 +275,8 @@ export function buildMcpServerPayload(form, mode, servers) {
       headers: mcpHeaderRowsToObject(form.headers),
       description: String(form.description || "").trim(),
       enabled: Boolean(form.enabled),
-      allowed_tools: splitCommaList(form.allowed_tools),
-      disallowed_tools: splitCommaList(form.disallowed_tools),
+      allowed_tools: allowMode ? toolNames : [],
+      disallowed_tools: allowMode ? [] : toolNames,
       user_paths: normalizeMcpUserPaths(form.user_paths),
       tool_timeout_seconds: toolTimeoutSeconds,
     },
@@ -289,6 +297,7 @@ export function normalizeMcpCatalog(name, payload) {
     status: String(source.status || "").trim(),
     instructions: String(source.instructions || "").trim(),
     tools: list(source.tools),
+    excluded_tools: list(source.excluded_tools),
     prompts: list(source.prompts),
     resources: list(source.resources),
     templates: list(source.templates),
@@ -316,9 +325,21 @@ export function mcpCatalogSections(catalog) {
     name: String(item.name || ""),
     aggregated: mcpNamespacedName(source, item.name),
     description: String(item.description || "").trim(),
+    readOnly: item.read_only === true,
+    destructive: item.destructive === true,
   });
   const sections = [
     { key: "tools", title: m.mcp_catalog_tools(), items: (source.tools || []).map(feature("tool")) },
+    {
+      key: "excluded_tools",
+      title: m.mcp_catalog_excluded_tools(),
+      hint: m.mcp_catalog_excluded_tools_hint(),
+      excluded: true,
+      items: (source.excluded_tools || []).map((item) => ({
+        ...feature("excluded")(item),
+        aggregated: "",
+      })),
+    },
     {
       key: "prompts",
       title: m.mcp_catalog_prompts(),
@@ -350,4 +371,133 @@ export function mcpCatalogSections(catalog) {
 
 export function mcpCatalogIsEmpty(catalog) {
   return mcpCatalogSections(catalog).length === 0;
+}
+
+// --- tool picker -----------------------------------------------------------
+
+function uniqueToolNames(names) {
+  const seen = new Set();
+  const result = [];
+  (Array.isArray(names) ? names : []).forEach((value) => {
+    const name = String(value || "").trim();
+    if (name && !seen.has(name)) {
+      seen.add(name);
+      result.push(name);
+    }
+  });
+  return result;
+}
+
+// mcpToolFilterFromServer maps the stored allow/deny lists onto one editor
+// mode. Config accepts both lists at once (deny applies after allow); the
+// allow mode with allowed − disallowed exposes exactly the same tools.
+export function mcpToolFilterFromServer(server) {
+  const allowed = uniqueToolNames(server && server.allowed_tools);
+  const disallowed = uniqueToolNames(server && server.disallowed_tools);
+  if (allowed.length > 0) {
+    return {
+      tool_mode: MCP_TOOL_MODE_ALLOW,
+      tool_names: allowed.filter((name) => !disallowed.includes(name)),
+    };
+  }
+  return { tool_mode: MCP_TOOL_MODE_EXCLUDE, tool_names: disallowed };
+}
+
+// mcpDiscoveredTools merges the exposed and excluded catalog lists into one
+// name-sorted list: the full set the upstream reports, whatever the filters.
+export function mcpDiscoveredTools(catalog) {
+  const source = catalog || {};
+  const byName = new Map();
+  [...(source.tools || []), ...(source.excluded_tools || [])].forEach((item) => {
+    const name = String((item && item.name) || "").trim();
+    if (name && !byName.has(name)) {
+      byName.set(name, {
+        name,
+        description: String(item.description || "").trim(),
+        readOnly: item.read_only === true,
+        destructive: item.destructive === true,
+      });
+    }
+  });
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function mcpToolExposed(form, name) {
+  const listed = (form.tool_names || []).includes(name);
+  return form.tool_mode === MCP_TOOL_MODE_ALLOW ? listed : !listed;
+}
+
+// setMcpToolsExposed returns the tool_names list after exposing or hiding
+// every given tool in the form's current mode.
+export function setMcpToolsExposed(form, names, exposed) {
+  const targets = uniqueToolNames(names);
+  const listed = form.tool_mode === MCP_TOOL_MODE_ALLOW ? exposed : !exposed;
+  const current = uniqueToolNames(form.tool_names);
+  if (listed) {
+    return uniqueToolNames([...current, ...targets]);
+  }
+  return current.filter((name) => !targets.includes(name));
+}
+
+// switchMcpToolMode flips the filter mode while keeping every discovered
+// tool's exposure unchanged; only the treatment of future tools changes.
+// Names the server does not report are meaningful only in the old mode.
+export function switchMcpToolMode(form, mode, discovered) {
+  const next = mode === MCP_TOOL_MODE_ALLOW ? MCP_TOOL_MODE_ALLOW : MCP_TOOL_MODE_EXCLUDE;
+  if (next === form.tool_mode) {
+    return { tool_mode: next, tool_names: uniqueToolNames(form.tool_names) };
+  }
+  const names = (discovered || []).map((tool) => tool.name);
+  const exposed = names.filter((name) => mcpToolExposed(form, name));
+  return {
+    tool_mode: next,
+    tool_names:
+      next === MCP_TOOL_MODE_ALLOW
+        ? exposed
+        : names.filter((name) => !exposed.includes(name)),
+  };
+}
+
+// mcpToolPickerRows lists every discovered tool with its exposure in the
+// form, followed by listed names the server does not report (typos, removed
+// tools, or names added before the server connected). query narrows by name
+// or description.
+export function mcpToolPickerRows(form, discovered, query) {
+  const needle = String(query || "").trim().toLowerCase();
+  const known = new Set((discovered || []).map((tool) => tool.name));
+  const rows = (discovered || []).map((tool) => ({
+    ...tool,
+    exposed: mcpToolExposed(form, tool.name),
+    missing: false,
+  }));
+  uniqueToolNames(form.tool_names).forEach((name) => {
+    if (!known.has(name)) {
+      rows.push({
+        name,
+        description: "",
+        readOnly: false,
+        destructive: false,
+        exposed: form.tool_mode === MCP_TOOL_MODE_ALLOW,
+        missing: true,
+      });
+    }
+  });
+  if (!needle) {
+    return rows;
+  }
+  return rows.filter(
+    (row) =>
+      row.name.toLowerCase().includes(needle) ||
+      row.description.toLowerCase().includes(needle),
+  );
+}
+
+// mcpToolSelectionSummary counts discovered tools only: a listed name the
+// server does not report is neither exposed nor hidden today.
+export function mcpToolSelectionSummary(form, discovered) {
+  const total = (discovered || []).length;
+  const exposed = (discovered || []).filter((tool) =>
+    mcpToolExposed(form, tool.name),
+  ).length;
+  return { exposed, total };
 }
