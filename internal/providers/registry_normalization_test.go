@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -339,4 +340,45 @@ func TestRecordAvailabilityCheckKeepsFailureMarker(t *testing.T) {
 			require.Equal(t, tt.want, snapshots[0].LastAvailabilityError)
 		})
 	}
+}
+
+// LookupModel describes one catalog model by any selector the router resolves,
+// including OpenRouter's "~"-prefixed alias IDs.
+func TestRouterLookupModel(t *testing.T) {
+	registry := newTestRegistryWithModels(registryModelEntry{
+		provider:     &mockProvider{name: "openrouter"},
+		providerName: "openrouter",
+		providerType: "openrouter",
+		modelID:      "~typesafe/jev-latest",
+	})
+	router, err := NewRouter(registry)
+	require.NoError(t, err)
+
+	for _, selector := range []string{"openrouter/~typesafe/jev-latest", "~typesafe/jev-latest"} {
+		model, ok := router.LookupModel(selector)
+		require.True(t, ok, selector)
+		assert.Equal(t, "~typesafe/jev-latest", model.ID, selector)
+	}
+	_, ok := router.LookupModel("openrouter/unknown")
+	assert.False(t, ok)
+
+	_, ok = (&Router{}).LookupModel("openrouter/~typesafe/jev-latest")
+	assert.False(t, ok, "a lookup without single-model access describes nothing")
+}
+
+// ProviderNamesForType lists every configured instance of one type, so a
+// caller can tell a single jev provider from several.
+func TestRouterProviderNamesForType(t *testing.T) {
+	registry := newTestRegistryWithModels(
+		registryModelEntry{provider: &mockProvider{name: "kev"}, providerName: "kev", providerType: "jev", modelID: "kev-latest"},
+		registryModelEntry{provider: &mockProvider{name: "jev"}, providerName: "jev", providerType: "jev", modelID: "jev-latest"},
+		registryModelEntry{provider: &mockProvider{name: "openrouter"}, providerName: "openrouter", providerType: "openrouter", modelID: "typesafe/jev-1.13"},
+	)
+	router, err := NewRouter(registry)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"jev", "kev"}, router.ProviderNamesForType("jev"))
+	assert.Equal(t, []string{"openrouter"}, router.ProviderNamesForType("openrouter"))
+	assert.Empty(t, router.ProviderNamesForType("anthropic"))
+	assert.Empty(t, router.ProviderNamesForType(""))
 }

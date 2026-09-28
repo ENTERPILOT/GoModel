@@ -64,6 +64,7 @@ type ProviderRuntimeSnapshot struct {
 	LastAvailabilityOKAt    *time.Time `json:"last_availability_ok_at,omitempty"`
 	LastAvailabilityError   string     `json:"last_availability_error,omitempty"`
 	InventoryStale          bool       `json:"inventory_stale,omitempty"`
+	ModelListingUnsupported bool       `json:"model_listing_unsupported,omitempty"`
 }
 
 type providerRuntimeState struct {
@@ -80,6 +81,9 @@ type providerRuntimeState struct {
 	// provider with an honest 502/503) but are skipped by ModelAvailable,
 	// which load balancing uses to route around the provider.
 	inventoryStale bool
+	// modelListingUnsupported marks a provider without a /models endpoint
+	// whose inventory comes from its configured model list.
+	modelListingUnsupported bool
 }
 
 // SanitizeProviderConfigs converts effective provider configs into a stable,

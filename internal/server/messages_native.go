@@ -3,8 +3,8 @@ package server
 import (
 	"bytes"
 	"context"
-	// encoding/json rather than goccy: rewriteMessagesModel needs the
-	// decoder's InputOffset to splice the model value in place.
+	// encoding/json rather than goccy: replaceTopLevelMember needs the
+	// decoder's InputOffset to splice a value in place.
 	"encoding/json"
 	"errors"
 	"io"
@@ -138,6 +138,17 @@ func rewriteMessagesModel(body []byte, model string) ([]byte, error) {
 	if strings.TrimSpace(model) == "" {
 		return body, nil
 	}
+	encoded, err := json.Marshal(model)
+	if err != nil {
+		return nil, err
+	}
+	return replaceTopLevelMember(body, "model", encoded)
+}
+
+// replaceTopLevelMember returns body with the value of its top-level key
+// member replaced by value, splicing only those bytes. The body is returned
+// unchanged when the member is absent or already holds value.
+func replaceTopLevelMember(body []byte, key string, value []byte) ([]byte, error) {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	tok, err := dec.Token()
 	if err != nil {
@@ -146,45 +157,36 @@ func rewriteMessagesModel(body []byte, model string) ([]byte, error) {
 	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
 		return nil, errors.New("request body is not a JSON object")
 	}
-	// Walk every top-level member and remember the span of the last "model"
+	// Walk every top-level member and remember the span of the last matching
 	// value: decoders keep the last duplicate member, so that is the one the
-	// resolved model came from and the one to rewrite.
-	var modelRaw json.RawMessage
-	var modelEnd int64
+	// gateway read and the one to rewrite.
+	var found json.RawMessage
+	var foundEnd int64
 	for dec.More() {
 		keyTok, err := dec.Token()
 		if err != nil {
 			return nil, err
 		}
-		key, _ := keyTok.(string)
+		name, _ := keyTok.(string)
 		var raw json.RawMessage
 		if err := dec.Decode(&raw); err != nil {
 			return nil, err
 		}
-		if key != "model" {
+		if name != key {
 			continue
 		}
-		modelRaw = raw
-		modelEnd = dec.InputOffset()
+		found = raw
+		foundEnd = dec.InputOffset()
 	}
-	if modelRaw == nil {
+	if found == nil || bytes.Equal(found, value) {
 		return body, nil
 	}
-	var current string
-	_ = json.Unmarshal(modelRaw, &current)
-	if current == model {
-		return body, nil
-	}
-	encoded, err := json.Marshal(model)
-	if err != nil {
-		return nil, err
-	}
-	// The model value is a scalar, so modelRaw holds its exact source bytes
-	// and modelEnd points just past them.
-	start := modelEnd - int64(len(modelRaw))
-	rewritten := make([]byte, 0, int64(len(body))-int64(len(modelRaw))+int64(len(encoded)))
+	// The decoder hands back the value's exact source bytes, and foundEnd
+	// points just past them.
+	start := foundEnd - int64(len(found))
+	rewritten := make([]byte, 0, int64(len(body))-int64(len(found))+int64(len(value)))
 	rewritten = append(rewritten, body[:start]...)
-	rewritten = append(rewritten, encoded...)
-	rewritten = append(rewritten, body[modelEnd:]...)
+	rewritten = append(rewritten, value...)
+	rewritten = append(rewritten, body[foundEnd:]...)
 	return rewritten, nil
 }

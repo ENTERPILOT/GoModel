@@ -38,17 +38,18 @@ func TestStoreRoundTrip(t *testing.T) {
 		ctx := context.Background()
 
 		server := ManagedServer{
-			Name:               "github",
-			DisplayName:        "GitHub MCP",
-			URL:                "https://api.githubcopilot.com/mcp",
-			Transport:          "http",
-			Headers:            map[string]string{"Authorization": "Bearer secret"},
-			Description:        "GitHub tools",
-			Enabled:            true,
-			AllowedTools:       []string{"create_issue"},
-			DisallowedTools:    []string{"delete_repo"},
-			UserPaths:          []string{"/team-a"},
-			ToolTimeoutSeconds: 45,
+			Name:                "github",
+			DisplayName:         "GitHub MCP",
+			URL:                 "https://api.githubcopilot.com/mcp",
+			Transport:           "http",
+			Headers:             map[string]string{"Authorization": "Bearer secret"},
+			Description:         "GitHub tools",
+			Enabled:             true,
+			AllowedTools:        []string{"create_issue"},
+			DisallowedTools:     []string{"delete_repo"},
+			UserPaths:           []string{"/team-a"},
+			DisallowedUserPaths: []string{"/team-a/contractors"},
+			ToolTimeoutSeconds:  45,
 		}
 		err := store.Upsert(ctx, server)
 		require.NoError(t, err)
@@ -64,6 +65,7 @@ func TestStoreRoundTrip(t *testing.T) {
 		require.Len(t, got.AllowedTools, 1)
 		require.Equal(t, "create_issue", got.AllowedTools[0])
 		require.Equal(t, 45, got.ToolTimeoutSeconds)
+		require.Equal(t, []string{"/team-a/contractors"}, got.DisallowedUserPaths)
 		require.False(t, got.CreatedAt.IsZero())
 		require.False(t, got.UpdatedAt.IsZero(), "Get() timestamps not stamped: %+v", got)
 
@@ -119,6 +121,7 @@ func TestSQLStoreMigratesDisplayName(t *testing.T) {
 		server, err := store.Get(ctx, "linear")
 		require.NoError(t, err)
 		require.Equal(t, "linear", server.DisplayName)
+		require.Empty(t, server.DisallowedUserPaths)
 	})
 }
 

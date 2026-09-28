@@ -141,6 +141,7 @@ func (r *ModelRegistry) ProviderRuntimeSnapshots() []ProviderRuntimeSnapshot {
 			LastAvailabilityOKAt:    timePtrUTC(state.lastAvailabilityOKAt),
 			LastAvailabilityError:   state.lastAvailabilityError,
 			InventoryStale:          state.inventoryStale,
+			ModelListingUnsupported: state.modelListingUnsupported,
 		})
 	}
 	r.mu.RUnlock()

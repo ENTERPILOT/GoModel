@@ -141,8 +141,9 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 
 // servableOpenRouterModalities are output modalities the gateway can reach on
 // OpenRouter: text and image generation flow through chat completions,
-// embeddings through /embeddings, and speech/transcription through the
-// /audio endpoints. A model listing none of these (rerank-only, video) has no
+// embeddings through /embeddings, speech/transcription through the /audio
+// endpoints, and decisions (System One models such as Jev) through
+// /v1/systemone. A model listing none of these (rerank-only, video) has no
 // working endpoint here.
 var servableOpenRouterModalities = map[string]struct{}{
 	"text":          {},
@@ -150,6 +151,7 @@ var servableOpenRouterModalities = map[string]struct{}{
 	"embeddings":    {},
 	"speech":        {},
 	"transcription": {},
+	"decisions":     {},
 }
 
 func openrouterServable(m openrouterModel) bool {
@@ -171,6 +173,7 @@ func openrouterServable(m openrouterModel) bool {
 // ID inference.
 func openrouterMetadata(m openrouterModel) *core.ModelMetadata {
 	modes := make([]string, 0, 2)
+	decisions := false
 	// "rerank" is deliberately not mapped: the gateway has no rerank surface
 	// on OpenRouter, and the rerank mode would sort the model into the
 	// Embeddings category despite being unreachable here.
@@ -186,6 +189,8 @@ func openrouterMetadata(m openrouterModel) *core.ModelMetadata {
 			modes = append(modes, "audio_speech")
 		case "transcription":
 			modes = append(modes, "audio_transcription")
+		case "decisions":
+			decisions = true
 		}
 	}
 	pricing := openrouterPricing(m)
@@ -196,9 +201,15 @@ func openrouterMetadata(m openrouterModel) *core.ModelMetadata {
 		Capabilities: capabilities,
 		Pricing:      pricing,
 	}
-	if len(modes) > 0 {
+	switch {
+	case len(modes) > 0:
 		meta.Modes = modes
 		meta.Categories = core.CategoriesForModes(modes)
+	case decisions:
+		// A decision model answers System One requests only. It has no
+		// generation mode to claim, so like the jev provider's models it is
+		// a utility model that no OpenAI endpoint routes to.
+		meta.Categories = []core.ModelCategory{core.CategoryUtility}
 	}
 	if m.ContextLength > 0 {
 		contextWindow := m.ContextLength
@@ -207,7 +218,7 @@ func openrouterMetadata(m openrouterModel) *core.ModelMetadata {
 	if m.TopProvider.MaxCompletionTokens > 0 {
 		meta.MaxOutputTokens = new(m.TopProvider.MaxCompletionTokens)
 	}
-	if len(modes) == 0 && meta.ContextWindow == nil && meta.MaxOutputTokens == nil && pricing == nil &&
+	if len(meta.Categories) == 0 && meta.ContextWindow == nil && meta.MaxOutputTokens == nil && pricing == nil &&
 		capabilities == nil && meta.DisplayName == "" && meta.Description == "" {
 		return nil
 	}

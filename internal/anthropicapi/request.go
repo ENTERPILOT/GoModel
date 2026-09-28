@@ -750,6 +750,9 @@ func convertTools(tools []Tool, lenient bool) ([]map[string]any, error) {
 			}
 			function["parameters"] = schema
 		}
+		if tool.Strict != nil {
+			function["strict"] = *tool.Strict
+		}
 		converted := map[string]any{"type": "function", "function": function}
 		raw, err := validatedCacheControlJSON(tool.CacheControl)
 		if err != nil {

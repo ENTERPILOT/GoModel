@@ -39,6 +39,7 @@ type anthropicTool struct {
 	Name         string          `json:"name"`
 	Description  string          `json:"description,omitempty"`
 	InputSchema  map[string]any  `json:"input_schema"`
+	Strict       bool            `json:"strict,omitempty"`
 	CacheControl json.RawMessage `json:"cache_control,omitempty"`
 }
 

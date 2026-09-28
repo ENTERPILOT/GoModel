@@ -150,9 +150,10 @@ func TestListMCPServers_RedactsHeadersAndFlagsManaged(t *testing.T) {
 			Enabled:     true,
 			ToolTimeout: 30 * time.Second,
 		},
-		Status:      mcpgateway.StatusConnected,
-		ToolCount:   3,
-		ConnectedAt: connectedAt,
+		Status:            mcpgateway.StatusConnected,
+		ToolCount:         3,
+		ExcludedToolCount: 2,
+		ConnectedAt:       connectedAt,
 	})
 	fake.addStored(mcpgateway.ManagedServer{
 		Name:    "notion",
@@ -184,6 +185,7 @@ func TestListMCPServers_RedactsHeadersAndFlagsManaged(t *testing.T) {
 	assert.Equal(t, "***", github.Headers["Authorization"])
 	assert.Equal(t, string(mcpgateway.StatusConnected), github.Status)
 	assert.Equal(t, 3, github.ToolCount)
+	assert.Equal(t, 2, github.ExcludedToolCount)
 	require.NotNil(t, github.ConnectedAt)
 	assert.True(t, github.ConnectedAt.Equal(connectedAt))
 
@@ -221,7 +223,7 @@ func TestUpsertMCPServer_CreatesAndReturnsRedactedView(t *testing.T) {
 	fake := newMCPAdminFake()
 	h := newMCPHandler(fake)
 
-	body := `{"name":"notion","url":"https://mcp.notion.com/mcp","headers":{"Authorization":"Bearer real-token"},"description":"notes","user_paths":["/team"]}`
+	body := `{"name":"notion","url":"https://mcp.notion.com/mcp","headers":{"Authorization":"Bearer real-token"},"description":"notes","user_paths":["/team"],"disallowed_user_paths":[" team/contractors/ "]}`
 	c, rec := echotest.Request(t, http.MethodPut, "/admin/mcp-servers", body)
 	err := h.UpsertMCPServer(c)
 	require.NoError(t, err)
@@ -238,6 +240,8 @@ func TestUpsertMCPServer_CreatesAndReturnsRedactedView(t *testing.T) {
 	stored, ok := fake.stored["notion"]
 	require.True(t, ok, "upsert did not reach the service")
 	assert.Equal(t, "Bearer real-token", stored.Headers["Authorization"])
+	assert.Equal(t, []string{"/team/contractors"}, stored.DisallowedUserPaths)
+	assert.Equal(t, []string{"/team/contractors"}, view.DisallowedUserPaths)
 }
 
 func TestUpsertMCPServer_PreservesRedactedHeadersAndEnabled(t *testing.T) {
@@ -436,8 +440,9 @@ func TestMCPServerCatalog(t *testing.T) {
 		}, mcpgateway.StatusConnected)
 		fake.catalogs = map[string]mcpgateway.CatalogView{
 			"github": {
-				Tools:   []mcpgateway.CatalogFeature{{Name: "create_issue", Description: "Create an issue"}},
-				Prompts: []mcpgateway.CatalogFeature{{Name: "triage"}},
+				Tools:         []mcpgateway.CatalogFeature{{Name: "create_issue", Description: "Create an issue"}},
+				ExcludedTools: []mcpgateway.CatalogFeature{{Name: "delete_repo", Destructive: true}},
+				Prompts:       []mcpgateway.CatalogFeature{{Name: "triage"}},
 				Resources: []mcpgateway.CatalogResource{
 					{URI: "repo://readme", Name: "readme"},
 				},
@@ -475,6 +480,9 @@ func TestMCPServerCatalog(t *testing.T) {
 		assert.Equal(t, mcpgateway.StatusConnected, catalog.Status)
 		require.Len(t, catalog.Tools, 1)
 		assert.Equal(t, "create_issue", catalog.Tools[0].Name)
+		require.Len(t, catalog.ExcludedTools, 1)
+		assert.Equal(t, "delete_repo", catalog.ExcludedTools[0].Name)
+		assert.True(t, catalog.ExcludedTools[0].Destructive)
 		assert.Len(t, catalog.Prompts, 1)
 		assert.Len(t, catalog.Resources, 1)
 	})

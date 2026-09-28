@@ -179,6 +179,39 @@ func TestModelRegistry(t *testing.T) {
 		require.Nil(t, snapshots[0].LastModelFetchSuccessAt)
 	})
 
+	t.Run("ConfiguredModelsWithoutModelsEndpointAreHealthy", func(t *testing.T) {
+		registry := NewModelRegistry()
+		mock := &registryMockProvider{
+			name: "stt",
+			err:  core.MarkModelListingUnsupported(core.ParseProviderError("openai", http.StatusNotFound, []byte("<html>404 Not Found</html>"), nil)),
+		}
+		registry.RegisterProviderWithNameAndType(mock, "stt", "openai")
+		registry.SetProviderConfiguredModels("stt", []string{"whisper-1"})
+
+		err := registry.Initialize(context.Background())
+		require.NoError(t, err)
+		require.True(t, registry.Supports("whisper-1"))
+		require.Empty(t, registry.FailedProviderNames())
+
+		snapshots := registry.ProviderRuntimeSnapshots()
+		require.Len(t, snapshots, 1)
+		assert.Empty(t, snapshots[0].LastModelFetchError)
+		assert.NotNil(t, snapshots[0].LastModelFetchSuccessAt)
+		assert.True(t, snapshots[0].ModelListingUnsupported)
+
+		// A server that later starts listing models drops the marker.
+		mock.err = nil
+		mock.modelsResponse = &core.ModelsResponse{
+			Object: "list",
+			Data:   []core.Model{{ID: "whisper-1", Object: "model", OwnedBy: "stt"}},
+		}
+		err = registry.Initialize(context.Background())
+		require.NoError(t, err)
+		snapshots = registry.ProviderRuntimeSnapshots()
+		require.Len(t, snapshots, 1)
+		assert.False(t, snapshots[0].ModelListingUnsupported)
+	})
+
 	t.Run("SuccessfulLiveModelFetchClearsAvailabilityError", func(t *testing.T) {
 		registry := NewModelRegistry()
 		mock := &registryMockProvider{
@@ -1120,6 +1153,69 @@ type availabilityFailingProvider struct {
 
 func (p *availabilityFailingProvider) CheckAvailability(context.Context) error {
 	return p.availabilityErr
+}
+
+// Providers whose availability probe lists models (Ollama, Bedrock Mantle) hit
+// the same 404 as the refresh on a server without /models. With configured
+// models the provider must still leave the recheck set and pass the refresh
+// gate.
+func TestRefreshProviderModels_MissingModelsEndpointPassesAvailabilityGate(t *testing.T) {
+	notFound := core.MarkModelListingUnsupported(core.ParseProviderError("ollama", http.StatusNotFound, []byte("404 page not found"), nil))
+	registry := NewModelRegistry()
+	stt := &availabilityFailingProvider{
+		registryMockProvider: &registryMockProvider{name: "stt", err: notFound},
+		availabilityErr:      notFound,
+	}
+	registry.RegisterProviderWithNameAndType(stt, "stt", "ollama")
+	// Startup probes before configured models are registered.
+	registry.RecordAvailabilityCheck("stt", notFound)
+	registry.SetProviderConfiguredModels("stt", []string{"whisper-1"})
+
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, registry.FailedProviderNames())
+
+	count, err := registry.RefreshProviderModels(context.Background(), "stt")
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+	assert.True(t, registry.ModelAvailable("stt/whisper-1"))
+
+	snapshots := registry.ProviderRuntimeSnapshots()
+	require.Len(t, snapshots, 1)
+	assert.Empty(t, snapshots[0].LastAvailabilityError)
+	assert.Empty(t, snapshots[0].LastModelFetchError)
+}
+
+// Without configured models a 404 probe is still a failure.
+func TestRefreshProviderModels_MissingModelsEndpointWithoutConfiguredModelsFails(t *testing.T) {
+	notFound := core.MarkModelListingUnsupported(core.ParseProviderError("ollama", http.StatusNotFound, []byte("404 page not found"), nil))
+	registry := NewModelRegistry()
+	stt := &availabilityFailingProvider{
+		registryMockProvider: &registryMockProvider{name: "stt", err: notFound},
+		availabilityErr:      notFound,
+	}
+	registry.RegisterProviderWithNameAndType(stt, "stt", "ollama")
+
+	_, err := registry.RefreshProviderModels(context.Background(), "stt")
+	require.Error(t, err)
+	assert.Equal(t, []string{"stt"}, registry.FailedProviderNames())
+}
+
+// A 404 from a probe that does not call /models (Bedrock's control plane) is a
+// real failure even when models are configured.
+func TestRefreshProviderModels_UnmarkedNotFoundProbeFailsWithConfiguredModels(t *testing.T) {
+	notFound := core.ParseProviderError("bedrock", http.StatusNotFound, nil, nil)
+	registry := NewModelRegistry()
+	bedrock := &availabilityFailingProvider{
+		registryMockProvider: &registryMockProvider{name: "bedrock", err: notFound},
+		availabilityErr:      notFound,
+	}
+	registry.RegisterProviderWithNameAndType(bedrock, "bedrock", "bedrock")
+	registry.SetProviderConfiguredModels("bedrock", []string{"anthropic.claude"})
+
+	_, err := registry.RefreshProviderModels(context.Background(), "bedrock")
+	require.Error(t, err)
+	assert.Equal(t, []string{"bedrock"}, registry.FailedProviderNames())
 }
 
 // A failed availability check during a per-provider refresh marks the
@@ -2232,4 +2328,31 @@ func TestSetModelList_ClearsETag(t *testing.T) {
 	registry.SetModelList(list, raw)
 	got := registry.currentModelListETag("https://example.test/models.min.json")
 	require.Empty(t, got)
+}
+
+// unlistedAcceptingProvider serves model IDs it does not list, as a jev
+// provider serves pinned versions.
+type unlistedAcceptingProvider struct {
+	registryMockProvider
+}
+
+func (p *unlistedAcceptingProvider) AcceptsUnlistedModels() bool { return true }
+
+func TestModelRegistryAcceptsUnlistedModel(t *testing.T) {
+	registry := NewModelRegistry()
+	registry.RegisterProviderWithNameAndType(&unlistedAcceptingProvider{}, "jev", "jev")
+	registry.RegisterProviderWithNameAndType(&registryMockProvider{name: "openai"}, "openai", "openai")
+
+	tests := []struct {
+		model string
+		want  bool
+	}{
+		{model: "jev/jev-1.13.0", want: true},
+		{model: "jev-1.13.0", want: false},
+		{model: "openai/gpt-9", want: false},
+		{model: "unknown/jev-1.13.0", want: false},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, registry.AcceptsUnlistedModel(tt.model), tt.model)
+	}
 }

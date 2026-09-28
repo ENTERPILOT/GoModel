@@ -135,6 +135,10 @@ type MCPServerConfig struct {
 	// (subtree match, same semantics as virtual models). Empty means all.
 	UserPaths []string `yaml:"user_paths,omitempty" json:"user_paths,omitempty"`
 
+	// DisallowedUserPaths hides the server from these user-path subtrees,
+	// even inside an allowed UserPaths subtree. Empty excludes nobody.
+	DisallowedUserPaths []string `yaml:"disallowed_user_paths,omitempty" json:"disallowed_user_paths,omitempty"`
+
 	// ToolTimeout bounds a single tools/call against this server.
 	// Default: 30s.
 	ToolTimeout time.Duration `yaml:"tool_timeout,omitempty" json:"tool_timeout,omitempty"`
@@ -204,6 +208,9 @@ func expandMCPServerEnv(server *MCPServerConfig) {
 	}
 	for i := range server.UserPaths {
 		server.UserPaths[i] = expandString(server.UserPaths[i])
+	}
+	for i := range server.DisallowedUserPaths {
+		server.DisallowedUserPaths[i] = expandString(server.DisallowedUserPaths[i])
 	}
 	for key, value := range server.Headers {
 		server.Headers[key] = expandString(value)
@@ -370,21 +377,33 @@ func ValidateMCPServerConfig(server *MCPServerConfig) error {
 	if server.ToolTimeout == 0 {
 		server.ToolTimeout = DefaultMCPToolTimeout
 	}
-	if len(server.UserPaths) > 0 {
-		normalized := make([]string, 0, len(server.UserPaths))
-		for _, raw := range server.UserPaths {
-			path, err := core.NormalizeUserPath(raw)
-			if err != nil {
-				return fmt.Errorf("invalid user_paths value %q: %w", raw, err)
-			}
-			if path != "" && !slices.Contains(normalized, path) {
-				normalized = append(normalized, path)
-			}
-		}
-		slices.Sort(normalized)
-		server.UserPaths = normalized
+	var err error
+	if server.UserPaths, err = normalizeMCPUserPaths("user_paths", server.UserPaths); err != nil {
+		return err
+	}
+	if server.DisallowedUserPaths, err = normalizeMCPUserPaths("disallowed_user_paths", server.DisallowedUserPaths); err != nil {
+		return err
 	}
 	return nil
+}
+
+// normalizeMCPUserPaths canonicalizes, dedupes, and sorts one user-path list.
+func normalizeMCPUserPaths(field string, paths []string) ([]string, error) {
+	if len(paths) == 0 {
+		return paths, nil
+	}
+	normalized := make([]string, 0, len(paths))
+	for _, raw := range paths {
+		path, err := core.NormalizeUserPath(raw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid %s value %q: %w", field, raw, err)
+		}
+		if path != "" && !slices.Contains(normalized, path) {
+			normalized = append(normalized, path)
+		}
+	}
+	slices.Sort(normalized)
+	return normalized, nil
 }
 
 // MCPServerEnabled reports the effective enabled state (default true).

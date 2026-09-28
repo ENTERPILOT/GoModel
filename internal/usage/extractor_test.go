@@ -436,6 +436,19 @@ func TestExtractFromSSEUsage(t *testing.T) {
 	assert.Equal(t, 25, entry.RawData["cached_tokens"])
 }
 
+func TestExtractFromSSEUsageDerivesMissingTotal(t *testing.T) {
+	// Anthropic-style usage and System One answers carry no total_tokens.
+	entry := ExtractFromSSEUsage(
+		"",
+		27, 9, 0,
+		nil,
+		"req-systemone", "jev-1.13.0", "jev", "/v1/systemone",
+	)
+
+	require.NotNil(t, entry)
+	assert.Equal(t, 36, entry.TotalTokens)
+}
+
 func TestExtractFromSSEUsageEmptyRawData(t *testing.T) {
 	entry := ExtractFromSSEUsage(
 		"chatcmpl-789",
@@ -491,6 +504,21 @@ func TestExtractFromCachedResponseBody(t *testing.T) {
 		require.NotNil(t, entry)
 		require.Equal(t, "/v1/chat/completions", entry.Endpoint)
 		require.Equal(t, 10, entry.TotalTokens)
+	})
+
+	// A native endpoint without a typed response (System One) is read like a
+	// live passthrough answer, so a cache hit keeps its token counts.
+	t.Run("reads usage from an untyped JSON body", func(t *testing.T) {
+		body := []byte(`{"model":"jev-1.13.0","answers":{"refund":{"type":"noul","noul":0.98}},"usage":{"input_tokens":275,"output_tokens":20}}`)
+
+		entry := ExtractFromCachedResponseBody(body, "req-systemone", "jev-latest", "jev", "/v1/systemone", CacheTypeExact)
+		require.NotNil(t, entry)
+		require.Equal(t, CacheTypeExact, entry.CacheType)
+		require.Equal(t, "/v1/systemone", entry.Endpoint)
+		require.Equal(t, "jev", entry.Provider)
+		require.Equal(t, 275, entry.InputTokens)
+		require.Equal(t, 20, entry.OutputTokens)
+		require.Equal(t, 295, entry.TotalTokens)
 	})
 
 	t.Run("falls back to synthetic entry when body cannot be parsed", func(t *testing.T) {

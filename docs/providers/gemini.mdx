@@ -162,6 +162,34 @@ and Cloud Storage URIs are sent as a file reference Gemini resolves itself. Any
 other remote `https://...` URL is rejected rather than dropped — upload it
 through the Gemini Files API first.
 
+## Messages and tools
+
+In native mode, OpenAI chat fields map onto `generateContent` like this:
+
+| OpenAI field | Gemini `generateContent` |
+| ------------ | ------------------------ |
+| `system` and `developer` messages | `system_instruction` (Gemini has no separate developer role) |
+| `tool_choice: "auto"` / `"required"` / `"none"` | `functionCallingConfig.mode` `AUTO` / `ANY` / `NONE` |
+| `tool_choice` naming one function | `ANY` with `allowedFunctionNames: [name]` |
+| `tool_choice: {"type": "allowed_tools", ...}` with mode `required` | `ANY` with `allowedFunctionNames` |
+| `tool_choice: {"type": "allowed_tools", ...}` with mode `auto` | `VALIDATED` with `allowedFunctionNames` |
+| `strict: true` on any function tool | `VALIDATED` instead of `AUTO`; `ANY` already enforces the schema |
+| `parallel_tool_calls: false` | dropped; Gemini has no equivalent |
+
+Gemini accepts `allowedFunctionNames` only with `ANY` or `VALIDATED`, which is
+why an `auto` subset becomes `VALIDATED`: the model can still answer in text,
+but any call it makes is limited to the listed tools. `VALIDATED` applies to
+the whole request, so one strict tool makes every declared tool
+schema-validated.
+
+Gemini has no way to limit a turn to one function call, and naming a single
+tool does not help: Gemini can call the same function more than once in a turn.
+When `parallel_tool_calls: false` (or Anthropic's `disable_parallel_tool_use`)
+matters, handle or reject the extra calls in your client.
+
+An `allowed_tools` choice with an empty `tools` list is rejected with a 400, as
+OpenAI does.
+
 ## Not yet integrated
 
 - Automatic fetching of remote `image_url` values in native mode.

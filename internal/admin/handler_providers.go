@@ -262,6 +262,9 @@ func classifyProviderStatus(cfg providers.SanitizedProviderConfig, runtime provi
 		if usingCachedModels {
 			return "degraded", "Starting", "serving cached model inventory while live refresh finishes", lastError
 		}
+		if runtime.ModelListingUnsupported {
+			return "healthy", "Healthy", "provider does not list models; serving configured models", lastError
+		}
 		return "healthy", "Healthy", "configured and model discovery succeeded", lastError
 	case modelFetchError != "" && runtime.DiscoveredModelCount > 0:
 		// Refresh failed but the inventory was deliberately kept fresh (no

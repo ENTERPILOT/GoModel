@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/config"
@@ -409,6 +410,127 @@ func TestToolFiltersHideTools(t *testing.T) {
 	names := listToolNames(t, session)
 	require.Len(t, names, 1)
 	require.Equal(t, "alpha_read", names[0])
+}
+
+func TestToolFilterEditAppliesInPlaceAndBlocksOpenSessions(t *testing.T) {
+	url := newTestUpstream(t, "alpha", func(server *mcp.Server) {
+		addEchoTool("read")(server)
+		addEchoTool("write")(server)
+	})
+	spec := testSpec("alpha", url, nil)
+	service, gatewayURL := newTestService(t, nil, spec)
+
+	openSession := connectClient(t, gatewayURL+"/mcp", nil)
+	require.Equal(t, []string{"alpha_read", "alpha_write"}, listToolNames(t, openSession))
+
+	before, ok := service.manager.get("alpha")
+	require.True(t, ok)
+	upstreamSession := before.session
+
+	spec.DisallowedTools = []string{"write"}
+	service.manager.Apply([]ServerSpec{spec})
+
+	after, ok := service.manager.get("alpha")
+	require.True(t, ok)
+	assert.Same(t, before, after, "a filter-only edit must not replace the upstream")
+	assert.Same(t, upstreamSession, after.session, "a filter-only edit must not redial")
+	view := after.view()
+	assert.Equal(t, StatusConnected, view.Status)
+	assert.Equal(t, 1, view.ToolCount)
+	assert.Equal(t, 1, view.ExcludedToolCount)
+	assert.Equal(t, []string{"write"}, view.Spec.DisallowedTools)
+
+	service.manager.Apply([]ServerSpec{spec})
+	unchanged, ok := service.manager.get("alpha")
+	require.True(t, ok)
+	assert.Same(t, after, unchanged, "re-applying an identical spec must keep the upstream")
+
+	_, err := openSession.CallTool(context.Background(), &mcp.CallToolParams{Name: "alpha_write"})
+	require.Error(t, err, "an excluded tool must not be callable from a session opened before the edit")
+	assert.Contains(t, err.Error(), "excluded")
+
+	fresh := connectClient(t, gatewayURL+"/mcp", nil)
+	assert.Equal(t, []string{"alpha_read"}, listToolNames(t, fresh))
+
+	catalog, ok := service.Catalog("alpha")
+	require.True(t, ok)
+	require.Len(t, catalog.Tools, 1)
+	assert.Equal(t, "read", catalog.Tools[0].Name)
+	require.Len(t, catalog.ExcludedTools, 1)
+	assert.Equal(t, "write", catalog.ExcludedTools[0].Name)
+}
+
+func TestDisallowedUserPathsHideServers(t *testing.T) {
+	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	betaURL := newTestUpstream(t, "beta", addEchoTool("search"))
+	_, gatewayURL := newTestService(t, nil,
+		testSpec("alpha", alphaURL, nil),
+		testSpec("beta", betaURL, func(spec *ServerSpec) {
+			spec.UserPaths = []string{"/eng"}
+			spec.DisallowedUserPaths = []string{"/eng/contractors"}
+		}),
+	)
+
+	contractor := connectClient(t, gatewayURL+"/mcp", map[string]string{core.UserPathHeader: "/eng/contractors/acme"})
+	assert.Equal(t, []string{"alpha_echo"}, listToolNames(t, contractor))
+
+	staff := connectClient(t, gatewayURL+"/mcp", map[string]string{core.UserPathHeader: "/eng/platform"})
+	assert.Equal(t, []string{"alpha_echo", "beta_search"}, listToolNames(t, staff))
+
+	req, err := http.NewRequest(http.MethodPost, gatewayURL+"/mcp/beta", strings.NewReader(`{}`))
+	require.NoError(t, err)
+	req.Header.Set(core.UserPathHeader, "/eng/contractors")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+func TestUserPathEditAppliesInPlaceAndReachesOpenSessions(t *testing.T) {
+	url := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	spec := testSpec("alpha", url, nil)
+	service, gatewayURL := newTestService(t, nil, spec)
+
+	session := connectClient(t, gatewayURL+"/mcp", map[string]string{core.UserPathHeader: "/contractors"})
+	require.Equal(t, []string{"alpha_echo"}, listToolNames(t, session))
+
+	before, ok := service.manager.get("alpha")
+	require.True(t, ok)
+	upstreamSession := before.session
+
+	spec.DisallowedUserPaths = []string{"/contractors"}
+	service.manager.Apply([]ServerSpec{spec})
+
+	after, ok := service.manager.get("alpha")
+	require.True(t, ok)
+	assert.Same(t, before, after, "a user-path edit must not replace the upstream")
+	assert.Same(t, upstreamSession, after.session, "a user-path edit must not redial")
+
+	_, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "alpha_echo"})
+	require.Error(t, err, "a session opened before the exclusion must lose access")
+	assert.Contains(t, err.Error(), "not available for this user path")
+
+	other := connectClient(t, gatewayURL+"/mcp", map[string]string{core.UserPathHeader: "/staff"})
+	result, err := other.CallTool(context.Background(), &mcp.CallToolParams{Name: "alpha_echo"})
+	require.NoError(t, err)
+	assert.False(t, result.IsError)
+}
+
+func TestAuthorizeSessionFailsClosedWithoutBinding(t *testing.T) {
+	url := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	service, _ := newTestService(t, nil, testSpec("alpha", url, func(spec *ServerSpec) {
+		spec.DisallowedUserPaths = []string{"/contractors"}
+	}))
+
+	// A binding removed mid-call (DELETE or expiry) must not be read as a
+	// caller without a user path, which the denylist alone would admit.
+	err := service.authorizeSessionID("deleted-session", "alpha")
+	require.ErrorIs(t, err, ErrServerNotVisible)
+
+	service.bindSession("live", "", "/staff", "")
+	require.NoError(t, service.authorizeSessionID("live", "alpha"))
+	service.bindSession("contractor", "", "/contractors/acme", "")
+	require.ErrorIs(t, service.authorizeSessionID("contractor", "alpha"), ErrServerNotVisible)
 }
 
 func TestSessionBindingRejectsForeignUserPath(t *testing.T) {

@@ -182,3 +182,34 @@ func (r *Router) NativeResponseProviderTypes() []string {
 		return ok
 	})
 }
+
+// LookupModel returns a copy of the catalog entry for a model selector, or
+// false when the model is unknown or the lookup cannot describe one model.
+func (r *Router) LookupModel(model string) (*core.Model, bool) {
+	if r.caps.modelInfo == nil {
+		return nil, false
+	}
+	info := r.caps.modelInfo.GetModel(model)
+	if info == nil {
+		return nil, false
+	}
+	cloned := info.Model
+	return &cloned, true
+}
+
+// ProviderNamesForType lists the configured provider instance names of one
+// type, sorted, or nil when the lookup cannot enumerate its providers.
+func (r *Router) ProviderNamesForType(providerType string) []string {
+	providerType = strings.TrimSpace(providerType)
+	if providerType == "" || r.caps.nameLister == nil {
+		return nil
+	}
+	var names []string
+	for _, name := range r.caps.nameLister.ProviderNames() {
+		if r.GetProviderTypeForName(name) == providerType {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}

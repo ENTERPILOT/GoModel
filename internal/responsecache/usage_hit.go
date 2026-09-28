@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/goccy/go-json"
+
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -45,10 +47,8 @@ func newUsageHitRecorder(logger usage.LoggerInterface, pricingResolver usage.Pri
 			requestID = ex.RequestHeader(core.RequestIDHeader)
 		}
 
-		var pricing *core.ModelPricing
-		if pricingResolver != nil {
-			pricing = pricingResolver.ResolvePricing(model, cacheHitPricingProvider(provider, providerName))
-		}
+		pricing := usage.ResolveServedModelPricing(pricingResolver, model, cacheHitPricingProvider(provider, providerName),
+			func() string { return cachedAnsweredModel(body) })
 
 		entry := usage.ExtractFromCachedResponseBody(body, requestID, model, provider, endpoint, cacheType, pricing)
 		if entry == nil {
@@ -60,6 +60,18 @@ func newUsageHitRecorder(logger usage.LoggerInterface, pricingResolver usage.Pri
 		entry.Labels = core.RequestLabelsFromContext(ctx)
 		logger.Write(entry)
 	}
+}
+
+// cachedAnsweredModel returns the model a cached JSON answer names, such as
+// jev-1.13.0 for a request routed to jev-latest, or "" for other bodies.
+func cachedAnsweredModel(body []byte) string {
+	var answer struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(body, &answer); err != nil {
+		return ""
+	}
+	return answer.Model
 }
 
 func cacheHitPricingProvider(provider, providerName string) string {

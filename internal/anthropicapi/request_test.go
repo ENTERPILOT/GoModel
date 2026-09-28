@@ -244,6 +244,26 @@ func TestToChatRequestTools(t *testing.T) {
 	require.Equal(t, "function", choice["type"], "tool_choice = %#v", chat.ToolChoice)
 }
 
+func TestToChatRequestToolStrict(t *testing.T) {
+	chat, err := ToChatRequest(mustDecode(t, `{
+		"model":"m","max_tokens":10,
+		"messages":[{"role":"user","content":"hi"}],
+		"tools":[
+			{"name":"strict_tool","strict":true,"input_schema":{"type":"object","properties":{}}},
+			{"name":"plain_tool","input_schema":{"type":"object","properties":{}}}
+		]
+	}`))
+	require.NoError(t, err)
+	require.Len(t, chat.Tools, 2)
+
+	strictFn, ok := chat.Tools[0]["function"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, true, strictFn["strict"])
+	plainFn, ok := chat.Tools[1]["function"].(map[string]any)
+	require.True(t, ok)
+	assert.NotContains(t, plainFn, "strict")
+}
+
 func TestToChatRequestRejectsServerTool(t *testing.T) {
 	_, err := ToChatRequest(mustDecode(t, `{
 		"model":"m","max_tokens":10,

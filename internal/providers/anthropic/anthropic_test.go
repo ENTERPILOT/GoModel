@@ -951,6 +951,21 @@ func TestConvertToAnthropicRequest(t *testing.T) {
 			},
 		},
 		{
+			name: "developer message becomes system",
+			input: &core.ChatRequest{
+				Model: "claude-haiku-4-5-20251001",
+				Messages: []core.Message{
+					{Role: "developer", Content: "You are a helpful assistant"},
+					{Role: "user", Content: "Hello"},
+				},
+			},
+			checkFn: func(t *testing.T, req *anthropicRequest) {
+				assert.Equal(t, "You are a helpful assistant", req.System)
+				require.Len(t, req.Messages, 1)
+				assert.Equal(t, "user", req.Messages[0].Role)
+			},
+		},
+		{
 			name: "request with parameters",
 			input: &core.ChatRequest{
 				Model:       "claude-sonnet-4-5-20250929",
@@ -1677,6 +1692,56 @@ func TestConvertOpenAIToolsToAnthropic(t *testing.T) {
 				require.Equal(t, "object", schemaType)
 				_, ok := tools[0].InputSchema["properties"].(map[string]any)
 				require.True(t, ok, "InputSchema.properties = %#v, want object map", tools[0].InputSchema["properties"])
+			},
+		},
+		{
+			name: "strict tool keeps strict and sanitizes schema",
+			tools: []map[string]any{
+				{
+					"type": "function",
+					"function": map[string]any{
+						"name":   "lookup_weather",
+						"strict": true,
+						"parameters": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"city": map[string]any{"type": "string", "minLength": 1},
+							},
+						},
+					},
+				},
+			},
+			wantLen: 1,
+			checkFn: func(t *testing.T, tools []anthropicTool) {
+				assert.True(t, tools[0].Strict)
+				assert.Equal(t, false, tools[0].InputSchema["additionalProperties"])
+				properties, ok := tools[0].InputSchema["properties"].(map[string]any)
+				require.True(t, ok)
+				city, ok := properties["city"].(map[string]any)
+				require.True(t, ok)
+				assert.NotContains(t, city, "minLength")
+			},
+		},
+		{
+			name: "non strict tool keeps schema as sent",
+			tools: []map[string]any{
+				{
+					"type": "function",
+					"function": map[string]any{
+						"name": "lookup_weather",
+						"parameters": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"city": map[string]any{"type": "string", "minLength": 1},
+							},
+						},
+					},
+				},
+			},
+			wantLen: 1,
+			checkFn: func(t *testing.T, tools []anthropicTool) {
+				assert.False(t, tools[0].Strict)
+				assert.NotContains(t, tools[0].InputSchema, "additionalProperties")
 			},
 		},
 		{

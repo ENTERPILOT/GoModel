@@ -496,6 +496,11 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.POST("/v1/audio/translations", handler.AudioTranslations)
 	e.POST("/v1/images/generations", handler.ImageGenerations)
 	e.POST("/v1/images/edits", handler.ImageEdits)
+	// System One decisions (Jev / Kev). The handler answers 404 until a jev
+	// or openrouter provider is configured.
+	e.POST("/v1/systemone", handler.SystemOne)
+	e.POST("/v1/systemone/permute", handler.SystemOnePermute)
+	e.POST("/v1/systemone/separate", handler.SystemOneSeparate)
 	if cfg == nil || cfg.RealtimeEnabled {
 		e.GET("/v1/realtime", handler.Realtime)
 		e.POST("/v1/realtime/calls", handler.RealtimeCalls)

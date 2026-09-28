@@ -28,6 +28,13 @@ import {
   normalizeMcpCatalog,
   splitCommaList,
   normalizeMcpUserPaths,
+  mcpDiscoveredTools,
+  mcpToolFilterFromServer,
+  mcpToolModeSwitchable,
+  mcpToolPickerRows,
+  mcpToolSelectionSummary,
+  setMcpToolsExposed,
+  switchMcpToolMode,
 } from "../src/pages/mcp-servers/mcp-servers.js";
 
 test("deriveMcpServerSlug normalizes display names and falls back to a hash", () => {
@@ -242,9 +249,10 @@ test("buildMcpServerPayload produces the normalized PUT payload", () => {
         { name: "Authorization", value: "***" },
         { name: "", value: "ignored" },
       ],
-      allowed_tools: "search_issues, get_file",
-      disallowed_tools: "",
+      tool_mode: "allow",
+      tool_names: ["search_issues", " get_file ", "search_issues"],
       user_paths: "/team/alpha\n/team/beta",
+      disallowed_user_paths: " /team/alpha/contractors \n\n",
       tool_timeout_seconds: "45",
     },
     "edit",
@@ -263,6 +271,7 @@ test("buildMcpServerPayload produces the normalized PUT payload", () => {
     allowed_tools: ["search_issues", "get_file"],
     disallowed_tools: [],
     user_paths: ["/team/alpha", "/team/beta"],
+    disallowed_user_paths: ["/team/alpha/contractors"],
     tool_timeout_seconds: 45,
   });
 });
@@ -302,6 +311,30 @@ test("buildMcpServerPayload validates required fields and timeout", () => {
   }
 });
 
+test("buildMcpServerPayload maps the tool mode onto one filter list", () => {
+  const base = {
+    ...defaultMcpServerForm(),
+    name: "github",
+    url: "https://mcp.example.com/mcp",
+  };
+
+  const excluded = buildMcpServerPayload(
+    { ...base, tool_names: ["delete_repo"] },
+    "create",
+    [],
+  );
+  assert.deepEqual(excluded.payload.allowed_tools, []);
+  assert.deepEqual(excluded.payload.disallowed_tools, ["delete_repo"]);
+
+  // An empty allowlist would expose every tool on the gateway, so the
+  // "only selected" mode requires at least one selection.
+  assert.equal(
+    buildMcpServerPayload({ ...base, tool_mode: "allow", tool_names: [] }, "create", [])
+      .error,
+    "Select at least one tool, or switch new tools to exposed.",
+  );
+});
+
 test("buildMcpServerPayload rejects duplicate slugs only when creating", () => {
   const form = {
     ...defaultMcpServerForm(),
@@ -330,6 +363,7 @@ test("mcpServerFormFromServer prefills the editor form", () => {
       allowed_tools: ["search_issues"],
       disallowed_tools: ["delete_repo"],
       user_paths: ["/team/alpha"],
+      disallowed_user_paths: ["/team/alpha/contractors"],
       tool_timeout_seconds: 45,
     }),
     {
@@ -340,12 +374,134 @@ test("mcpServerFormFromServer prefills the editor form", () => {
       description: "Issue tools",
       enabled: false,
       headers: [{ name: "Authorization", value: "***" }],
-      allowed_tools: "search_issues",
-      disallowed_tools: "delete_repo",
+      tool_mode: "allow",
+      tool_names: ["search_issues"],
       user_paths: "/team/alpha",
+      disallowed_user_paths: "/team/alpha/contractors",
       tool_timeout_seconds: "45",
     },
   );
+});
+
+test("mcpToolFilterFromServer picks one mode without changing exposure", () => {
+  assert.deepEqual(mcpToolFilterFromServer({}), { tool_mode: "exclude", tool_names: [] });
+  assert.deepEqual(mcpToolFilterFromServer({ disallowed_tools: ["delete_repo"] }), {
+    tool_mode: "exclude",
+    tool_names: ["delete_repo"],
+  });
+  // Deny applies after allow on the gateway, so allowed − disallowed exposes
+  // the same tools.
+  assert.deepEqual(
+    mcpToolFilterFromServer({
+      allowed_tools: ["read", "write"],
+      disallowed_tools: ["write"],
+    }),
+    { tool_mode: "allow", tool_names: ["read"] },
+  );
+});
+
+test("mcpDiscoveredTools merges exposed and excluded tools by name", () => {
+  const discovered = mcpDiscoveredTools(
+    normalizeMcpCatalog("github", {
+      tools: [{ name: "search", read_only: true }],
+      excluded_tools: [{ name: "delete_repo", description: "Delete", destructive: true }],
+    }),
+  );
+  assert.deepEqual(discovered, [
+    { name: "delete_repo", description: "Delete", readOnly: false, destructive: true },
+    { name: "search", description: "", readOnly: true, destructive: false },
+  ]);
+});
+
+test("tool picker toggles, bulk actions, and summary follow the mode", () => {
+  const discovered = [{ name: "a" }, { name: "b" }, { name: "c" }].map((tool) => ({
+    ...tool,
+    description: "",
+    readOnly: false,
+    destructive: false,
+  }));
+
+  const exclude = { tool_mode: "exclude", tool_names: [] };
+  exclude.tool_names = setMcpToolsExposed(exclude, ["b"], false);
+  assert.deepEqual(exclude.tool_names, ["b"]);
+  assert.deepEqual(mcpToolSelectionSummary(exclude, discovered), { exposed: 2, total: 3 });
+  assert.deepEqual(setMcpToolsExposed(exclude, ["a", "b", "c"], true), []);
+  assert.deepEqual(setMcpToolsExposed(exclude, ["a", "b", "c"], false), ["b", "a", "c"]);
+
+  const allow = { tool_mode: "allow", tool_names: ["a"] };
+  assert.deepEqual(setMcpToolsExposed(allow, ["c"], true), ["a", "c"]);
+  assert.deepEqual(setMcpToolsExposed(allow, ["a"], false), []);
+  assert.deepEqual(mcpToolSelectionSummary(allow, discovered), { exposed: 1, total: 3 });
+});
+
+test("switchMcpToolMode keeps every discovered tool's exposure", () => {
+  const discovered = [{ name: "a" }, { name: "b" }, { name: "c" }];
+  const toAllow = switchMcpToolMode(
+    { tool_mode: "exclude", tool_names: ["b", "ghost"] },
+    "allow",
+    discovered,
+  );
+  assert.deepEqual(toAllow, { tool_mode: "allow", tool_names: ["a", "c"] });
+
+  const back = switchMcpToolMode(toAllow, "exclude", discovered);
+  assert.deepEqual(back, { tool_mode: "exclude", tool_names: ["b"] });
+});
+
+test("switchMcpToolMode keeps the list when the catalog is unknown", () => {
+  // Without the full tool set, an allowlist would become an empty denylist,
+  // which exposes every tool on save.
+  const allow = { tool_mode: "allow", tool_names: ["read"] };
+  assert.equal(mcpToolModeSwitchable(allow, []), false);
+  assert.deepEqual(switchMcpToolMode(allow, "exclude", []), {
+    tool_mode: "allow",
+    tool_names: ["read"],
+  });
+
+  // An empty list flips safely, so a brand-new server can still pick a mode.
+  const fresh = { tool_mode: "exclude", tool_names: [] };
+  assert.equal(mcpToolModeSwitchable(fresh, []), true);
+  assert.deepEqual(switchMcpToolMode(fresh, "allow", []), {
+    tool_mode: "allow",
+    tool_names: [],
+  });
+});
+
+test("mcpToolPickerRows flags listed names the server does not report and filters", () => {
+  const discovered = [
+    { name: "create_issue", description: "Create an issue", readOnly: false, destructive: false },
+    { name: "delete_repo", description: "", readOnly: false, destructive: true },
+  ];
+  const form = { tool_mode: "exclude", tool_names: ["delete_repo", "delet_repo"] };
+
+  const rows = mcpToolPickerRows(form, discovered, "");
+  assert.deepEqual(
+    rows.map((row) => [row.name, row.exposed, row.missing]),
+    [
+      ["create_issue", true, false],
+      ["delete_repo", false, false],
+      ["delet_repo", false, true],
+    ],
+  );
+  assert.deepEqual(
+    mcpToolPickerRows(form, discovered, "ISSUE").map((row) => row.name),
+    ["create_issue"],
+  );
+});
+
+test("mcpCatalogSections lists excluded tools without an aggregated name", () => {
+  const sections = mcpCatalogSections(
+    normalizeMcpCatalog("github", {
+      tools: [{ name: "search" }],
+      excluded_tools: [{ name: "delete_repo", destructive: true }],
+    }),
+  );
+  assert.deepEqual(
+    sections.map((section) => section.key),
+    ["tools", "excluded_tools"],
+  );
+  assert.equal(sections[1].excluded, true);
+  assert.equal(sections[1].items[0].aggregated, "");
+  assert.equal(sections[1].items[0].destructive, true);
 });
 
 test("mcpCatalogSections derives aggregated /mcp names for tools and prompts only", () => {
@@ -378,6 +534,8 @@ test("mcpCatalogSections derives aggregated /mcp names for tools and prompts onl
     name: "create_issue",
     aggregated: "github_create_issue",
     description: "Create a GitHub issue",
+    readOnly: false,
+    destructive: false,
   });
   assert.equal(tools[1].aggregated, "github_search_issues");
   assert.equal(tools[1].description, "");

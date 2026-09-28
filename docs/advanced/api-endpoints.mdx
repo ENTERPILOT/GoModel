@@ -12,8 +12,8 @@ documented separately in [Admin Endpoints](/advanced/admin-endpoints).
 For request and response details, see the dedicated guides:
 [Responses API](/advanced/responses-api), [Conversations API](/advanced/conversations-api),
 [Anthropic Messages API](/advanced/anthropic-messages-api),
-[Audio API](/advanced/audio-api), [Images API](/advanced/images-api), and
-[Usage API](/advanced/usage-api).
+[Audio API](/advanced/audio-api), [Images API](/advanced/images-api),
+[System One API](/advanced/systemone-api), and [Usage API](/advanced/usage-api).
 
 ## OpenAI-Compatible API
 
@@ -110,6 +110,17 @@ metered.
 | --------------------------- | ------ | ----------------------------------------------------------------------------- |
 | `/v1/messages`              | POST   | Anthropic Messages API through translated model routing (streaming supported) |
 | `/v1/messages/count_tokens` | POST   | Heuristic Anthropic Messages input token estimate                             |
+
+## System One API
+
+Available when a `jev` or `openrouter` provider is configured; see
+[System One API](/advanced/systemone-api).
+
+| Endpoint                     | Method | Description                                                              |
+| ---------------------------- | ------ | ------------------------------------------------------------------------ |
+| `/v1/systemone`              | POST   | Evaluate a state against typed questions (Jev, Kev), forwarded natively |
+| `/v1/systemone/permute`      | POST   | Kev only: run one Choice question with several option orders            |
+| `/v1/systemone/separate`     | POST   | Kev only: run each question in its own forward pass                     |
 
 ## Gateway Extensions
 

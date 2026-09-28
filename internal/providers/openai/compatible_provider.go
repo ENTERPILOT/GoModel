@@ -220,7 +220,7 @@ func (p *CompatibleProvider) ListModels(ctx context.Context) (*core.ModelsRespon
 		Endpoint: "/models",
 	}, &resp)
 	if err != nil {
-		return nil, err
+		return nil, core.MarkModelListingUnsupported(err)
 	}
 	normalizeModelsResponse(&resp)
 	return &resp, nil
@@ -242,7 +242,7 @@ func (p *CompatibleProvider) ListModelsWithMaxModelLen(ctx context.Context) (*co
 		Method:   http.MethodGet,
 		Endpoint: "/models",
 	}, &upstream); err != nil {
-		return nil, err
+		return nil, core.MarkModelListingUnsupported(err)
 	}
 	resp := &core.ModelsResponse{Object: upstream.Object, Data: make([]core.Model, 0, len(upstream.Data))}
 	for _, entry := range upstream.Data {
