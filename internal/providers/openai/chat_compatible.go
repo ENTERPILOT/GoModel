@@ -47,6 +47,14 @@ func bearerHeaders(req *http.Request, apiKey string) {
 	providers.SetAuthHeaders(req, apiKey, providers.AuthHeaderConfig{AuthScheme: "Bearer "})
 }
 
+// Compatible exposes the underlying OpenAI-compatible adapter, so a provider
+// that embeds ChatCompatible can serve a native Responses endpoint through
+// the same instance instead of building a second adapter with the same
+// configuration.
+func (c *ChatCompatible) Compatible() *CompatibleProvider {
+	return c.compatible
+}
+
 // SetBaseURL allows configuring a custom base URL for the provider.
 func (c *ChatCompatible) SetBaseURL(url string) {
 	c.compatible.SetBaseURL(url)

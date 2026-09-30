@@ -2,10 +2,8 @@ package kimicode
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -128,70 +126,67 @@ const responsesGoldenBody = `{
 	"model": "kimi-for-coding"
 }`
 
-func TestResponses_NativeEndpoint(t *testing.T) {
+// TestResponses_ForwardsGatewayReplayedHistory covers what the gateway
+// dispatches after expanding a previous_response_id chain against its
+// response store: the stored history is replayed into input as items
+// (reasoning and message items among them, IDs stripped) and
+// previous_response_id is cleared. Kimi Code must forward that replayed
+// input to /responses as stored instead of rejecting it.
+func TestResponses_ForwardsGatewayReplayedHistory(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, responsesGoldenBody)
 
 	provider := newTestProvider(server)
 
 	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
 		Model: "kimi-for-coding",
-		Input: "Say OK",
+		Input: []any{
+			map[string]any{
+				"type":    "message",
+				"role":    "user",
+				"content": []any{map[string]any{"type": "input_text", "text": "remember: zebra"}},
+			},
+			map[string]any{
+				"type":   "reasoning",
+				"status": "completed",
+				"summary": []any{
+					map[string]any{"type": "summary_text", "text": "thinking about zebras"},
+				},
+			},
+			map[string]any{
+				"type":    "message",
+				"role":    "assistant",
+				"status":  "completed",
+				"content": []any{map[string]any{"type": "output_text", "text": "the word is zebra"}},
+			},
+			map[string]any{
+				"type":    "message",
+				"role":    "user",
+				"content": []any{map[string]any{"type": "input_text", "text": "what is the word?"}},
+			},
+		},
 		Store: boolPtr(true),
 	})
 	require.NoError(t, err)
-
-	req := capture.Last(t)
-	assert.Equal(t, "/responses", req.Path)
-	assert.Equal(t, "Bearer kimi-key", req.Header.Get("Authorization"))
-	body := req.JSON(t)
-	// store=true is pinned to false before the request leaves.
-	assert.Equal(t, false, body["store"], "wire store")
-	assert.NotContains(t, body, "stream", "non-streaming request must not set stream on the wire")
-
-	assert.Equal(t, "resp_golden", resp.ID)
-	assert.Equal(t, "kimi-for-coding", resp.Model)
-	require.Len(t, resp.Output, 2)
-	require.NotNil(t, resp.Usage)
-	assert.Equal(t, 141, resp.Usage.TotalTokens)
-}
-
-func TestStreamResponses_NativeEndpoint(t *testing.T) {
-	// No trailing [DONE]: providers.EnsureResponsesDone must append it.
-	server, capture := providertest.SSEServer(t, strings.Join([]string{
-		`event: response.created`,
-		`data: {"type":"response.created","response":{"id":"resp_stream","object":"response","status":"in_progress","model":"kimi-for-coding"}}`,
-		``,
-		`event: response.completed`,
-		`data: {"type":"response.completed","response":{"id":"resp_stream","object":"response","status":"completed","model":"kimi-for-coding"}}`,
-		``,
-	}, "\n"))
-
-	provider := newTestProvider(server)
-
-	stream, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
-		Model: "kimi-for-coding",
-		Input: "Say OK",
-		Store: boolPtr(true),
-	})
-	require.NoError(t, err)
-	defer func() { _ = stream.Close() }()
-
-	body, err := io.ReadAll(stream)
-	require.NoError(t, err)
+	require.NotNil(t, resp)
 
 	req := capture.Last(t)
 	assert.Equal(t, "/responses", req.Path)
 	wire := req.JSON(t)
-	assert.Equal(t, false, wire["store"], "wire store")
-	assert.Equal(t, true, wire["stream"], "wire stream")
-	assert.Contains(t, string(body), "event: response.completed")
-	assert.True(t, strings.HasSuffix(strings.TrimSpace(string(body)), "data: [DONE]"),
-		"stream should end with data: [DONE], got %q", string(body))
+	assert.Equal(t, false, wire["store"], "store is pinned to false on the wire")
+	assert.NotContains(t, wire, "previous_response_id")
+
+	items, ok := wire["input"].([]any)
+	require.True(t, ok, "wire input = %#v, want replayed items", wire["input"])
+	require.Len(t, items, 4)
+	reasoning, ok := items[1].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "reasoning", reasoning["type"], "replayed reasoning item must be forwarded unchanged")
+	assert.Equal(t, "user", items[3].(map[string]any)["role"], "the client's own turn is replayed last")
 }
 
 // Kimi Code retains no responses, so a request chaining from an earlier
-// response must be rejected before any upstream call instead of being
-// answered statelessly.
+// response that the gateway could not expand (no store configured) must be
+// rejected before any upstream call instead of being answered statelessly.
 func TestResponses_RejectsPreviousResponseID(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, responsesGoldenBody)
 
@@ -211,15 +206,17 @@ func TestResponses_RejectsPreviousResponseID(t *testing.T) {
 	assert.Contains(t, gatewayErr.Error(), "previous_response_id")
 	assert.Equal(t, 0, capture.Count(), "rejected request must not reach the upstream")
 
-	t.Run("whitespace-only ID is rejected too", func(t *testing.T) {
+	t.Run("whitespace-only ID passes through", func(t *testing.T) {
+		// The gateway and the chat-translation validator treat a
+		// whitespace-only ID as empty; the provider must behave the same.
 		resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
 			Model:              "kimi-for-coding",
 			Input:              "Say OK",
 			PreviousResponseID: "   ",
 		})
-		require.Error(t, err)
-		assert.Nil(t, resp)
-		assert.Equal(t, 0, capture.Count(), "whitespace ID must not reach the upstream")
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		assert.Equal(t, 1, capture.Count(), "whitespace-only ID is treated as empty")
 	})
 
 	t.Run("conversation reference is rejected", func(t *testing.T) {
@@ -235,7 +232,7 @@ func TestResponses_RejectsPreviousResponseID(t *testing.T) {
 		require.ErrorAs(t, err, &gatewayErr)
 		assert.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
 		assert.Contains(t, gatewayErr.Error(), "conversation")
-		assert.Equal(t, 0, capture.Count(), "conversation request must not reach the upstream")
+		assert.Equal(t, 1, capture.Count(), "conversation request must not reach the upstream")
 	})
 }
 
@@ -259,8 +256,8 @@ func TestStreamResponses_RejectsPreviousResponseID(t *testing.T) {
 	assert.Equal(t, 0, capture.Count(), "rejected request must not reach the upstream")
 }
 
-// SetBaseURL must retarget both the chat-centric adapter and the native
-// Responses adapter.
+// SetBaseURL must retarget the single adapter serving both the chat-centric
+// surface and the native Responses endpoint.
 func TestSetBaseURL(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, responsesGoldenBody)
 

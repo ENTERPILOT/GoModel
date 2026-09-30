@@ -4,14 +4,13 @@
 // completions, model listing, embeddings, and passthrough go through the
 // shared chat-centric adapter, while the Responses API is served natively by
 // the upstream /responses endpoint. Kimi Code retains no responses, so
-// previous_response_id is rejected with an invalid-request error and
 // store=true is pinned to false.
 package kimicode
 
 import (
 	"context"
 	"io"
-	"net/http"
+	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -33,53 +32,32 @@ var Registration = providers.Registration{
 // OpenAI-compatible, so most transport goes through the shared chat-centric
 // adapter: chat completions, model listing, embeddings, and passthrough are
 // exposed via the embedded *openai.ChatCompatible. The Responses API is
-// forwarded natively to the upstream /responses endpoint (rejecting
-// previous_response_id and pinning store to false — see Responses below).
+// forwarded natively to the upstream /responses endpoint through the same
+// adapter instance.
 type Provider struct {
 	*openai.ChatCompatible
-	responses *openai.CompatibleProvider
 }
 
 var _ core.Provider = (*Provider)(nil)
 
 // New creates a new Kimi Code provider.
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
-	baseURL := providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL)
-	return &Provider{
-		ChatCompatible: openai.NewChatCompatible(cfg.APIKey, opts, compatibleConfig(baseURL)),
-		responses:      openai.NewCompatibleProvider(cfg.APIKey, opts, compatibleConfig(baseURL)),
-	}
-}
-
-// compatibleConfig is the shared OpenAI-compatible configuration for both
-// adapter instances. SetHeaders defaults to plain Bearer auth because
-// NewCompatibleProvider (unlike NewChatCompatible) applies no default.
-func compatibleConfig(baseURL string) openai.CompatibleProviderConfig {
-	return openai.CompatibleProviderConfig{
+	return &Provider{openai.NewChatCompatible(cfg.APIKey, opts, openai.CompatibleProviderConfig{
 		ProviderName: "kimicode",
-		BaseURL:      baseURL,
-		SetHeaders: func(req *http.Request, apiKey string) {
-			providers.SetAuthHeaders(req, apiKey, providers.AuthHeaderConfig{AuthScheme: "Bearer "})
-		},
-	}
-}
-
-// SetBaseURL overrides the upstream endpoint for both the chat-centric
-// adapter and the native Responses adapter.
-func (p *Provider) SetBaseURL(url string) {
-	p.ChatCompatible.SetBaseURL(url)
-	p.responses.SetBaseURL(url)
+		BaseURL:      providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
+	})}
 }
 
 // Responses serves the Responses API natively through the upstream /responses
 // endpoint. Kimi Code retains no responses, so a non-empty
-// previous_response_id is rejected with an invalid-request error before any
-// upstream call; store=true is pinned to false by adaptResponsesRequest.
+// previous_response_id is rejected before any upstream call (see
+// rejectPreviousResponseID); store=true is pinned to false by
+// adaptResponsesRequest.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
 	if err := rejectPreviousResponseID(req); err != nil {
 		return nil, err
 	}
-	return p.responses.Responses(ctx, adaptResponsesRequest(req))
+	return p.Compatible().Responses(ctx, adaptResponsesRequest(req))
 }
 
 // StreamResponses forwards the request to the upstream /responses endpoint
@@ -89,15 +67,17 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 	if err := rejectPreviousResponseID(req); err != nil {
 		return nil, err
 	}
-	return p.responses.StreamResponses(ctx, adaptResponsesRequest(req))
+	return p.Compatible().StreamResponses(ctx, adaptResponsesRequest(req))
 }
 
 // rejectPreviousResponseID fails requests chaining from earlier state:
-// Kimi Code does not retain responses, so neither a previous response ID nor
-// a gateway-local conversation can be resolved upstream, and answering
-// statelessly would silently drop the conversation context the caller
-// expects. Requests whose state the gateway already expanded (both fields
-// cleared) pass through.
+// Kimi Code cannot resolve a previous response ID or a gateway-local
+// conversation upstream, and answering statelessly would silently drop the
+// conversation context the caller expects. The rejection only fires when the
+// gateway has no store to expand the chain with; requests whose state the
+// gateway already replayed into input (both fields cleared) pass through.
+// The ID check mirrors the gateway and the chat-translation validator, both
+// of which treat a whitespace-only ID as empty.
 func rejectPreviousResponseID(req *core.ResponsesRequest) error {
 	if req == nil {
 		return nil
@@ -106,7 +86,7 @@ func rejectPreviousResponseID(req *core.ResponsesRequest) error {
 		return core.NewInvalidRequestError(
 			"kimicode does not retain responses: conversation is not supported", nil)
 	}
-	if req.PreviousResponseID == "" {
+	if strings.TrimSpace(req.PreviousResponseID) == "" {
 		return nil
 	}
 	return core.NewInvalidRequestError(
@@ -115,8 +95,7 @@ func rejectPreviousResponseID(req *core.ResponsesRequest) error {
 
 // adaptResponsesRequest pins store to false: the service retains no
 // responses, so store=true fails upstream with a 400 (Postel's law — adapt
-// instead of failing). previous_response_id is not adapted here;
-// rejectPreviousResponseID rejects it instead.
+// instead of failing).
 func adaptResponsesRequest(req *core.ResponsesRequest) *core.ResponsesRequest {
 	if req == nil {
 		return nil
