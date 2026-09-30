@@ -237,6 +237,7 @@ func TestResponses_RejectsPreviousResponseID(t *testing.T) {
 	})
 
 	t.Run("conversation reference is rejected", func(t *testing.T) {
+		before := capture.Count()
 		resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
 			Model:        "kimi-for-coding",
 			Input:        "Say OK",
@@ -249,7 +250,7 @@ func TestResponses_RejectsPreviousResponseID(t *testing.T) {
 		require.ErrorAs(t, err, &gatewayErr)
 		assert.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
 		assert.Contains(t, gatewayErr.Error(), "conversation")
-		assert.Equal(t, 1, capture.Count(), "conversation request must not reach the upstream")
+		assert.Equal(t, before, capture.Count(), "conversation request must not reach the upstream")
 	})
 }
 
