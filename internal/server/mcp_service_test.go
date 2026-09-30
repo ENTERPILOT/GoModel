@@ -32,6 +32,16 @@ func TestMCPAuditLabel(t *testing.T) {
 			want: "github_create_issue",
 		},
 		{
+			name: "discovery call_tool labels with the tool it runs",
+			body: `{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"call_tool","arguments":{"name":"github_create_issue","arguments":{}}}}`,
+			want: "github_create_issue",
+		},
+		{
+			name: "call_tool without a target keeps its own name",
+			body: `{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"call_tool","arguments":{}}}`,
+			want: "call_tool",
+		},
+		{
 			name: "prompts/get labels with the prompt name",
 			body: `{"jsonrpc":"2.0","id":4,"method":"prompts/get","params":{"name":"github_triage"}}`,
 			want: "github_triage",

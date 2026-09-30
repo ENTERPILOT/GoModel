@@ -250,3 +250,28 @@ func TestNormalizeMCPAllowedOrigins(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeMCPToolDiscovery(t *testing.T) {
+	tests := []struct {
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{input: "", want: MCPToolDiscoveryOff},
+		{input: "off", want: MCPToolDiscoveryOff},
+		{input: " Search ", want: MCPToolDiscoverySearch},
+		{input: "semantic", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			cfg := MCPConfig{ToolDiscovery: tt.input}
+			err := normalizeMCPConfig(&cfg)
+			if tt.wantErr {
+				require.ErrorContains(t, err, "mcp.tool_discovery")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, cfg.ToolDiscovery)
+		})
+	}
+}

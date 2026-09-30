@@ -95,8 +95,9 @@ func enrichMCPAuditEntry(c *echo.Context, logBodies bool) {
 }
 
 // mcpAuditLabel derives the request-log label from one JSON-RPC frame: the
-// tool/prompt name for calls, otherwise the method. Empty means unlabelable
-// (a bare response or malformed frame).
+// tool/prompt name for calls, otherwise the method. A search-discovery
+// call_tool is labelled with the tool it runs, matching its usage entry.
+// Empty means unlabelable (a bare response or malformed frame).
 func mcpAuditLabel(body []byte) string {
 	method := strings.TrimSpace(gjson.GetBytes(body, "method").String())
 	if method == "" {
@@ -104,6 +105,11 @@ func mcpAuditLabel(body []byte) string {
 	}
 	if name := strings.TrimSpace(gjson.GetBytes(body, "params.name").String()); name != "" &&
 		(method == "tools/call" || method == "prompts/get") {
+		if method == "tools/call" && name == mcpgateway.CallToolName {
+			if inner := strings.TrimSpace(gjson.GetBytes(body, "params.arguments.name").String()); inner != "" {
+				return inner
+			}
+		}
 		return name
 	}
 	return method

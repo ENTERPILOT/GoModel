@@ -60,6 +60,54 @@ Three ways to narrow what a client sees:
 - `/mcp/{slug}` — a single server with its **original** tool names.
 - `X-MCP-Servers: github,jira` header — a comma-separated subset on `/mcp`.
 
+## Search tools instead of listing them
+
+Every tool in `tools/list` is sent to the model on every turn. With a few
+large servers that can be tens of thousands of tokens. Search discovery
+replaces the list with two tools:
+
+- `search_tools` takes keywords (or an exact tool name) and returns the
+  matching tools with their descriptions and input schemas.
+- `call_tool` runs a found tool by `name` with its `arguments`.
+
+It is off by default. Turn it on for every client:
+
+```yaml
+mcp:
+  tool_discovery: search # env: MCP_TOOL_DISCOVERY; default: off
+```
+
+Or per client, with a header that overrides the default for that session:
+
+```json
+{
+  "mcpServers": {
+    "gomodel": {
+      "type": "http",
+      "url": "https://your-gateway/mcp",
+      "headers": {
+        "Authorization": "Bearer sk-your-gomodel-key",
+        "X-MCP-Tool-Discovery": "search"
+      }
+    }
+  }
+}
+```
+
+Use it for clients that send every tool to the model, such as custom agents
+and SDK loops. Leave it off for clients with their own tool search, such as
+Claude Code: they already defer tools, and they get per-tool permission
+prompts and read-only/destructive hints only when tools are listed directly.
+Through `call_tool`, every call looks like the same tool to the client.
+
+Search results and calls respect user paths and tool filters. Failures, such
+as an unknown name or an unreachable server, come back as tool errors the
+model can read and recover from. Usage entries and the request log record the
+real tool name, not `call_tool`. If the catalog is only
+large because of tools nobody uses, trimming it with
+[tool filters](#choose-which-tools-each-server-exposes) or `X-MCP-Servers`
+is simpler and keeps tools listed directly.
+
 ## Declare servers
 
 Servers can be managed in the dashboard (**MCP Servers** page) or declared as
