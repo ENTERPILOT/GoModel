@@ -840,21 +840,13 @@ func TestExtractFromChatResponse_EdenAIExactCostReachesTotalCost(t *testing.T) {
 
 	entry := ExtractFromChatResponse(resp, "req-eden", "edenai", "/v1/chat/completions", pricing)
 
-	if entry == nil {
-		t.Fatal("ExtractFromChatResponse() = nil")
-	}
-	if entry.RawData["cost"] != 0.0002349 {
-		t.Fatalf("RawData[cost] = %#v, want the lifted 0.0002349", entry.RawData["cost"])
-	}
-	if entry.TotalCost == nil || math.Abs(*entry.TotalCost-0.0002349) > 1e-12 {
-		t.Fatalf("TotalCost = %v, want 0.0002349", entry.TotalCost)
-	}
-	if entry.CostSource != CostSourceEdenAICost {
-		t.Fatalf("CostSource = %q, want %q", entry.CostSource, CostSourceEdenAICost)
-	}
-	if entry.InputTokens != 1170 || entry.OutputTokens != 99 {
-		t.Errorf("token counts = %d/%d, want 1170/99", entry.InputTokens, entry.OutputTokens)
-	}
+	require.NotNil(t, entry)
+	require.Equal(t, 0.0002349, entry.RawData["cost"], "RawData[cost] should be the lifted value")
+	require.NotNil(t, entry.TotalCost)
+	require.InDelta(t, 0.0002349, *entry.TotalCost, 1e-12)
+	require.Equal(t, CostSourceEdenAICost, entry.CostSource)
+	assert.Equal(t, 1170, entry.InputTokens)
+	assert.Equal(t, 99, entry.OutputTokens)
 }
 
 // TestExtractFromChatResponse_EdenAIWithoutCostFallsBackToPricing asserts the
@@ -870,16 +862,11 @@ func TestExtractFromChatResponse_EdenAIWithoutCostFallsBackToPricing(t *testing.
 
 	entry := ExtractFromChatResponse(resp, "req-eden", "edenai", "/v1/chat/completions", pricing)
 
-	if entry == nil {
-		t.Fatal("ExtractFromChatResponse() = nil")
-	}
-	if entry.CostSource != CostSourceModelPricing {
-		t.Fatalf("CostSource = %q, want %q", entry.CostSource, CostSourceModelPricing)
-	}
+	require.NotNil(t, entry)
+	require.Equal(t, CostSourceModelPricing, entry.CostSource)
 	// 1M * 0.06/1M + 0.5M * 0.18/1M = 0.06 + 0.09
-	if entry.TotalCost == nil || math.Abs(*entry.TotalCost-0.15) > 1e-9 {
-		t.Fatalf("TotalCost = %v, want 0.15 from discovered per-model pricing", entry.TotalCost)
-	}
+	require.NotNil(t, entry.TotalCost)
+	require.InDelta(t, 0.15, *entry.TotalCost, 1e-9, "TotalCost should come from discovered per-model pricing")
 }
 
 // TestExtractFromEmbeddingResponse_ForwardsRawUsage asserts the provider's
@@ -897,18 +884,11 @@ func TestExtractFromEmbeddingResponse_ForwardsRawUsage(t *testing.T) {
 	}
 
 	entry := ExtractFromEmbeddingResponse(resp, "req", "edenai", "/v1/embeddings")
-	if entry == nil {
-		t.Fatal("ExtractFromEmbeddingResponse returned nil")
-	}
-	if got := entry.RawData["cost"]; got != 0.0000012 {
-		t.Errorf("RawData[cost] = %v, want 0.0000012 forwarded from RawUsage", got)
-	}
-	if entry.TotalCost == nil || *entry.TotalCost != 0.0000012 {
-		t.Errorf("TotalCost = %v, want the provider-reported 0.0000012", entry.TotalCost)
-	}
-	if entry.CostSource != CostSourceEdenAICost {
-		t.Errorf("CostSource = %q, want %q", entry.CostSource, CostSourceEdenAICost)
-	}
+	require.NotNil(t, entry)
+	assert.Equal(t, 0.0000012, entry.RawData["cost"], "RawData[cost] should be forwarded from RawUsage")
+	require.NotNil(t, entry.TotalCost)
+	assert.Equal(t, 0.0000012, *entry.TotalCost, "TotalCost should be the provider-reported figure")
+	assert.Equal(t, CostSourceEdenAICost, entry.CostSource)
 }
 
 // TestExtractFromEmbeddingResponse_NilRawUsageStaysNil asserts a provider that
@@ -923,15 +903,10 @@ func TestExtractFromEmbeddingResponse_NilRawUsageStaysNil(t *testing.T) {
 
 	entry := ExtractFromEmbeddingResponse(resp, "req", "openai", "/v1/embeddings",
 		&core.ModelPricing{Currency: "USD", InputPerMtok: &rate})
-	if entry.RawData != nil {
-		t.Errorf("RawData = %v, want nil when the provider reported no extra usage", entry.RawData)
-	}
-	if entry.TotalCost == nil || *entry.TotalCost != 0.00002 {
-		t.Errorf("TotalCost = %v, want 0.00002 from the token rate", entry.TotalCost)
-	}
-	if entry.CostSource != CostSourceModelPricing {
-		t.Errorf("CostSource = %q, want %q", entry.CostSource, CostSourceModelPricing)
-	}
+	assert.Nil(t, entry.RawData, "RawData should stay nil when the provider reported no extra usage")
+	require.NotNil(t, entry.TotalCost)
+	assert.Equal(t, 0.00002, *entry.TotalCost, "TotalCost should come from the token rate")
+	assert.Equal(t, CostSourceModelPricing, entry.CostSource)
 }
 
 // TestExtractFromEmbeddingResponse_ExactCostSuppressesMissingUsageCaveat
@@ -951,12 +926,9 @@ func TestExtractFromEmbeddingResponse_ExactCostSuppressesMissingUsageCaveat(t *t
 
 	entry := ExtractFromEmbeddingResponse(resp, "req", "edenai", "/v1/embeddings",
 		&core.ModelPricing{Currency: "USD", InputPerMtok: &rate})
-	if entry.CostsCalculationCaveat != "" {
-		t.Errorf("CostsCalculationCaveat = %q, want empty: the cost was reported by the provider", entry.CostsCalculationCaveat)
-	}
-	if entry.TotalCost == nil || *entry.TotalCost != 0.0000012 {
-		t.Errorf("TotalCost = %v, want the provider-reported 0.0000012", entry.TotalCost)
-	}
+	assert.Empty(t, entry.CostsCalculationCaveat, "the cost was reported by the provider, so no caveat is expected")
+	require.NotNil(t, entry.TotalCost)
+	assert.Equal(t, 0.0000012, *entry.TotalCost, "TotalCost should be the provider-reported figure")
 }
 
 // TestExtractFromEmbeddingResponse_ZeroTokenCaveatStillApplies asserts the
@@ -968,9 +940,7 @@ func TestExtractFromEmbeddingResponse_ZeroTokenCaveatStillApplies(t *testing.T) 
 
 	entry := ExtractFromEmbeddingResponse(resp, "req", "gemini", "/v1/embeddings",
 		&core.ModelPricing{Currency: "USD", InputPerMtok: &rate})
-	if entry.CostsCalculationCaveat == "" {
-		t.Error("CostsCalculationCaveat = empty, want the zero-token row flagged")
-	}
+	assert.NotEmpty(t, entry.CostsCalculationCaveat, "the zero-token row should be flagged")
 }
 
 // TestisProviderReportedCostSource pins which cost sources count as figures the
@@ -990,8 +960,6 @@ func TestIsProviderReportedCostSource(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		if got := isProviderReportedCostSource(tc.source); got != tc.want {
-			t.Errorf("isProviderReportedCostSource(%q) = %v, want %v", tc.source, got, tc.want)
-		}
+		assert.Equal(t, tc.want, isProviderReportedCostSource(tc.source), "isProviderReportedCostSource(%q)", tc.source)
 	}
 }

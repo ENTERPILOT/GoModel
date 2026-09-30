@@ -2,7 +2,6 @@ package edenai
 
 import (
 	"context"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,6 +10,8 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // edenChatResponse is a verbatim non-streaming Eden /v3/chat/completions body.
@@ -41,14 +42,12 @@ func chatResponseFrom(t *testing.T, payload string) *core.ChatResponse {
 	}))
 	t.Cleanup(server.Close)
 
-	provider := NewWithHTTPClient("edenai-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("edenai-key", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model:    slashedModel,
 		Messages: []core.Message{{Role: "user", Content: "hi"}},
 	})
-	if err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
+	require.NoError(t, err)
 	return resp
 }
 
@@ -60,16 +59,12 @@ func TestChatCompletion_LiftsRootCostIntoRawUsage(t *testing.T) {
 	resp := chatResponseFrom(t, edenChatResponse)
 
 	cost, ok := resp.Usage.RawUsage["cost"]
-	if !ok {
-		t.Fatalf("Usage.RawUsage = %v, want Eden's root-level cost lifted in", resp.Usage.RawUsage)
-	}
+	require.True(t, ok, "Usage.RawUsage = %v, want Eden's root-level cost lifted in", resp.Usage.RawUsage)
 	value, ok := cost.(float64)
-	if !ok || math.Abs(value-0.0002349) > 1e-12 {
-		t.Fatalf("Usage.RawUsage[\"cost\"] = %#v, want 0.0002349", cost)
-	}
-	if resp.Usage.PromptTokens != 1170 || resp.Usage.CompletionTokens != 99 {
-		t.Errorf("token counts = %+v, want the reported usage preserved", resp.Usage)
-	}
+	require.True(t, ok, "Usage.RawUsage[\"cost\"] = %#v, want 0.0002349", cost)
+	require.InDelta(t, 0.0002349, value, 1e-12, "Usage.RawUsage[\"cost\"] = %#v, want 0.0002349", cost)
+	assert.Equal(t, 1170, resp.Usage.PromptTokens, "token counts = %+v, want the reported usage preserved", resp.Usage)
+	assert.Equal(t, 99, resp.Usage.CompletionTokens, "token counts = %+v, want the reported usage preserved", resp.Usage)
 }
 
 // TestChatCompletion_KeepsCostVisibleToClients asserts lifting the value into
@@ -78,16 +73,12 @@ func TestChatCompletion_KeepsCostVisibleToClients(t *testing.T) {
 	resp := chatResponseFrom(t, edenChatResponse)
 
 	encoded, err := json.Marshal(resp)
-	if err != nil {
-		t.Fatalf("Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 	var decoded map[string]any
-	if err := json.Unmarshal(encoded, &decoded); err != nil {
-		t.Fatalf("Unmarshal() error = %v", err)
-	}
-	if cost, ok := decoded["cost"].(float64); !ok || math.Abs(cost-0.0002349) > 1e-12 {
-		t.Errorf("serialized cost = %#v, want Eden's cost preserved for the client", decoded["cost"])
-	}
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	cost, ok := decoded["cost"].(float64)
+	require.True(t, ok, "serialized cost = %#v, want Eden's cost preserved for the client", decoded["cost"])
+	assert.InDelta(t, 0.0002349, cost, 1e-12, "serialized cost = %#v, want Eden's cost preserved for the client", decoded["cost"])
 }
 
 // TestChatCompletion_RejectsUnusableCost asserts a cost that would corrupt
@@ -109,9 +100,7 @@ func TestChatCompletion_RejectsUnusableCost(t *testing.T) {
 			payload := `{"id":"c","created":1,"model":"m","choices":[],` + tt.cost +
 				`"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`
 			resp := chatResponseFrom(t, payload)
-			if _, ok := resp.Usage.RawUsage["cost"]; ok {
-				t.Fatalf("Usage.RawUsage = %v, want no cost lifted for an unusable value", resp.Usage.RawUsage)
-			}
+			require.NotContains(t, resp.Usage.RawUsage, "cost", "Usage.RawUsage = %v, want no cost lifted for an unusable value", resp.Usage.RawUsage)
 		})
 	}
 }
@@ -124,9 +113,8 @@ func TestChatCompletion_UsageLevelCostWins(t *testing.T) {
 	resp := chatResponseFrom(t, payload)
 
 	value, ok := resp.Usage.RawUsage["cost"].(float64)
-	if !ok || value != 0.5 {
-		t.Fatalf("Usage.RawUsage[\"cost\"] = %#v, want the usage-level 0.5", resp.Usage.RawUsage["cost"])
-	}
+	require.True(t, ok, "Usage.RawUsage[\"cost\"] = %#v, want the usage-level 0.5", resp.Usage.RawUsage["cost"])
+	require.Equal(t, 0.5, value, "Usage.RawUsage[\"cost\"] = %#v, want the usage-level 0.5", resp.Usage.RawUsage["cost"])
 }
 
 // TestChatCompletion_DoesNotReportEdenUpstreamAsExecutingProvider asserts
@@ -139,9 +127,7 @@ func TestChatCompletion_UsageLevelCostWins(t *testing.T) {
 func TestChatCompletion_DoesNotReportEdenUpstreamAsExecutingProvider(t *testing.T) {
 	resp := chatResponseFrom(t, edenChatResponse)
 
-	if resp.Provider != "" {
-		t.Fatalf("Provider = %q, want empty so the gateway labels the request edenai", resp.Provider)
-	}
+	require.Empty(t, resp.Provider, "Provider = %q, want empty so the gateway labels the request edenai", resp.Provider)
 }
 
 // TestChatCompletion_PreservesEdenUpstreamProvider asserts the upstream is not
@@ -151,16 +137,10 @@ func TestChatCompletion_PreservesEdenUpstreamProvider(t *testing.T) {
 	resp := chatResponseFrom(t, edenChatResponse)
 
 	raw := resp.ExtraFields.Lookup(upstreamProviderField)
-	if len(raw) == 0 {
-		t.Fatalf("ExtraFields missing %q", upstreamProviderField)
-	}
+	require.NotEmpty(t, raw, "ExtraFields missing %q", upstreamProviderField)
 	var upstream string
-	if err := json.Unmarshal(raw, &upstream); err != nil {
-		t.Fatalf("Unmarshal(%s) error = %v", raw, err)
-	}
-	if upstream != "openai" {
-		t.Errorf("%s = %q, want openai", upstreamProviderField, upstream)
-	}
+	require.NoError(t, json.Unmarshal(raw, &upstream), "Unmarshal(%s)", raw)
+	assert.Equal(t, "openai", upstream, "%s = %q, want openai", upstreamProviderField, upstream)
 }
 
 // TestChatCompletion_NoUpstreamProviderLeavesNoMarker asserts a response
@@ -169,12 +149,9 @@ func TestChatCompletion_NoUpstreamProviderLeavesNoMarker(t *testing.T) {
 	resp := chatResponseFrom(t, `{"id":"c","created":1,"model":"m","choices":[],
 		"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
 
-	if resp.Provider != "" {
-		t.Errorf("Provider = %q, want empty", resp.Provider)
-	}
-	if raw := resp.ExtraFields.Lookup(upstreamProviderField); len(raw) != 0 {
-		t.Errorf("ExtraFields[%q] = %s, want absent", upstreamProviderField, raw)
-	}
+	assert.Empty(t, resp.Provider, "Provider = %q, want empty", resp.Provider)
+	raw := resp.ExtraFields.Lookup(upstreamProviderField)
+	assert.Empty(t, raw, "ExtraFields[%q] = %s, want absent", upstreamProviderField, raw)
 }
 
 // TestEmbeddings_DoesNotReportEdenUpstreamAsExecutingProvider applies the same
@@ -188,17 +165,13 @@ func TestEmbeddings_DoesNotReportEdenUpstreamAsExecutingProvider(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("edenai-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("edenai-key", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
 		Model: "openai/text-embedding-3-small",
 		Input: "hello",
 	})
-	if err != nil {
-		t.Fatalf("Embeddings() error = %v", err)
-	}
-	if resp.Provider != "" {
-		t.Fatalf("Provider = %q, want empty so the gateway labels the request edenai", resp.Provider)
-	}
+	require.NoError(t, err)
+	require.Empty(t, resp.Provider, "Provider = %q, want empty so the gateway labels the request edenai", resp.Provider)
 }
 
 // TestResponses_InheritsCostLifting asserts the Responses surface picks up the
@@ -210,18 +183,15 @@ func TestResponses_InheritsCostLifting(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("edenai-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("edenai-key", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
 		Model: slashedModel,
 		Input: "hi",
 	})
-	if err != nil {
-		t.Fatalf("Responses() error = %v", err)
-	}
+	require.NoError(t, err)
 	value, ok := resp.Usage.RawUsage["cost"].(float64)
-	if !ok || math.Abs(value-0.0002349) > 1e-12 {
-		t.Fatalf("Responses usage cost = %#v, want 0.0002349 carried through the chat translation", resp.Usage.RawUsage["cost"])
-	}
+	require.True(t, ok, "Responses usage cost = %#v, want 0.0002349 carried through the chat translation", resp.Usage.RawUsage["cost"])
+	require.InDelta(t, 0.0002349, value, 1e-12, "Responses usage cost = %#v, want 0.0002349 carried through the chat translation", resp.Usage.RawUsage["cost"])
 }
 
 // TestChatCompletion_PropagatesUpstreamErrorWithoutNormalizing asserts an
@@ -235,16 +205,12 @@ func TestChatCompletion_PropagatesUpstreamErrorWithoutNormalizing(t *testing.T) 
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("edenai-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("edenai-key", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model:    slashedModel,
 		Messages: []core.Message{{Role: "user", Content: "hi"}},
 	})
 
-	if err == nil {
-		t.Fatal("ChatCompletion() error = nil, want the upstream error propagated")
-	}
-	if resp != nil {
-		t.Errorf("response = %+v, want nil alongside the error", resp)
-	}
+	require.Error(t, err, "ChatCompletion() error = nil, want the upstream error propagated")
+	assert.Nil(t, resp, "response = %+v, want nil alongside the error", resp)
 }

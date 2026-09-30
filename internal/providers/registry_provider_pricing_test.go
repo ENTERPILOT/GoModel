@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/modeldata"
@@ -50,9 +53,7 @@ func TestInitialize_ProviderReportedPricingSurvivesCatalogMiss(t *testing.T) {
 	}
 	registry.RegisterProviderWithNameAndType(provider, "edenai", "edenai")
 
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	require.NoError(t, registry.Initialize(context.Background()), "Initialize")
 
 	// A populated catalog that knows nothing about this provider: the exact
 	// condition Eden models are always in.
@@ -64,25 +65,18 @@ func TestInitialize_ProviderReportedPricingSurvivesCatalogMiss(t *testing.T) {
 	}, nil, "etag", "https://example.invalid/models.json")
 
 	info := registry.GetModel("edenai/openai/gpt-4")
-	if info == nil {
-		t.Fatal("model not registered under its provider-qualified ID")
-	}
-	if info.Discovered == nil || info.Discovered.Pricing == nil {
-		t.Fatalf("Discovered = %+v, want the provider's own report retained", info.Discovered)
-	}
+	require.NotNil(t, info, "model not registered under its provider-qualified ID")
+	require.NotNil(t, info.Discovered, "want the provider's own report retained")
+	require.NotNil(t, info.Discovered.Pricing, "Discovered = %+v, want the provider's own report retained", info.Discovered)
 	meta := info.Model.Metadata
-	if meta == nil || meta.Pricing == nil {
-		t.Fatalf("Metadata = %+v, want provider pricing to survive enrichment", meta)
-	}
+	require.NotNil(t, meta, "want provider pricing to survive enrichment")
+	require.NotNil(t, meta.Pricing, "Metadata = %+v, want provider pricing to survive enrichment", meta)
 	assertPricePtr(t, "InputPerMtok", meta.Pricing.InputPerMtok, 0.06)
 	assertPricePtr(t, "OutputPerMtok", meta.Pricing.OutputPerMtok, 0.18)
 	assertPricePtr(t, "CachedInputPerMtok", meta.Pricing.CachedInputPerMtok, 0.012)
-	if meta.ContextWindow == nil || *meta.ContextWindow != 131072 {
-		t.Errorf("ContextWindow = %v, want 131072", meta.ContextWindow)
-	}
-	if !meta.Capabilities["reasoning"] {
-		t.Errorf("Capabilities = %v, want reasoning retained", meta.Capabilities)
-	}
+	require.NotNil(t, meta.ContextWindow, "ContextWindow = nil, want 131072")
+	assert.Equal(t, 131072, *meta.ContextWindow)
+	assert.True(t, meta.Capabilities["reasoning"], "Capabilities = %v, want reasoning retained", meta.Capabilities)
 }
 
 // TestResolvePricing_UsesProviderReportedPricing closes the loop to the cost
@@ -99,15 +93,11 @@ func TestResolvePricing_UsesProviderReportedPricing(t *testing.T) {
 	}
 	registry.RegisterProviderWithNameAndType(provider, "edenai", "edenai")
 
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	require.NoError(t, registry.Initialize(context.Background()), "Initialize")
 
 	for _, selector := range []string{"edenai/openai/gpt-4", "openai/gpt-4"} {
 		pricing := registry.ResolvePricing(selector, "edenai")
-		if pricing == nil {
-			t.Fatalf("ResolvePricing(%q) = nil, want the provider-reported rates", selector)
-		}
+		require.NotNil(t, pricing, "ResolvePricing(%q) = nil, want the provider-reported rates", selector)
 		assertPricePtr(t, selector+" InputPerMtok", pricing.InputPerMtok, 0.06)
 		assertPricePtr(t, selector+" OutputPerMtok", pricing.OutputPerMtok, 0.18)
 	}
@@ -122,24 +112,13 @@ func TestModelFilter_AdmitsProviderPricedModels(t *testing.T) {
 	unpriced := core.Model{ID: "openai/gpt-5", Object: "model"}
 
 	filter, active := newModelFilter(config.ModelFilter{MaxPricePerMtok: new(1.0)})
-	if !active {
-		t.Fatal("newModelFilter reported an inactive filter for a price cap")
-	}
-	if !filter.keep(priced) {
-		t.Error("priced model rejected by a 1.0/MTok cap, want admitted (0.18 max rate)")
-	}
-	if filter.keep(unpriced) {
-		t.Error("unpriced model admitted by a price cap, want dropped")
-	}
+	require.True(t, active, "newModelFilter reported an inactive filter for a price cap")
+	assert.True(t, filter.keep(priced), "priced model rejected by a 1.0/MTok cap, want admitted (0.18 max rate)")
+	assert.False(t, filter.keep(unpriced), "unpriced model admitted by a price cap, want dropped")
 }
 
 func assertPricePtr(t *testing.T, name string, got *float64, want float64) {
 	t.Helper()
-	if got == nil {
-		t.Errorf("%s = nil, want %v", name, want)
-		return
-	}
-	if *got != want {
-		t.Errorf("%s = %v, want %v", name, *got, want)
-	}
+	require.NotNil(t, got, "%s = nil, want %v", name, want)
+	assert.Equal(t, want, *got, name)
 }

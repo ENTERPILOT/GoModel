@@ -62,49 +62,27 @@ var (
 	_ core.PassthroughProvider = (*Provider)(nil)
 )
 
-// New creates a new Eden AI provider. NewCompatibleProvider takes its
-// transport from CompatibleProviderConfig.HTTPClient, so the guarded client
-// compatibleConfig installs is the one that reaches the network.
+// New creates a new Eden AI provider.
+//
+// The transport comes from opts.HTTPClient — the factory sets it when an
+// outbound proxy applies, and tests point it at their own server — or, when
+// that is nil, from the gateway default client. Either way it is wrapped by
+// guardedHTTPClient (see compatibleConfig), which is what keeps every Eden
+// request off a cleartext connection. NewCompatibleProvider prefers
+// CompatibleProviderConfig.HTTPClient over opts.HTTPClient, so the guarded
+// client has to be handed over through the config; leaving the caller's client
+// on opts alone would send Eden requests through it unguarded.
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	return &Provider{compat: openai.NewCompatibleProvider(cfg.APIKey, opts, compatibleConfig(
 		providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
-		nil,
+		opts.HTTPClient,
 	))}
 }
 
-// NewWithHTTPClient creates a new Eden AI provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-//
-// The nil default is applied here rather than left to
-// NewCompatibleProviderWithHTTPClient so it stays the same default every other
-// chat-compatible provider gets from that helper. Eden always hands it a
-// non-nil client, so the helper's own nil branch is never reached.
-//
-// Either way the client carries Eden's redirect guard (see guardedHTTPClient),
-// installed on a copy so a shared client -- http.DefaultClient above all -- is
-// never modified.
-//
-// Unlike NewCompatibleProvider, NewCompatibleProviderWithHTTPClient takes its
-// transport from the positional argument and ignores
-// CompatibleProviderConfig.HTTPClient entirely, so the guarded client has to be
-// handed over there as well. Passing the raw caller client here would leave
-// this construction path — and only this one — following credential-leaking
-// redirects.
-//
-// The signature matches every other chat-compatible provider on main:
-// (apiKey, baseURL, httpClient, hooks).
-func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
-	cfg := compatibleConfig(providers.ResolveBaseURL(baseURL, defaultBaseURL), httpClient)
-	return &Provider{compat: openai.NewCompatibleProviderWithHTTPClient(apiKey, cfg.HTTPClient, hooks, cfg)}
-}
-
 // compatibleConfig returns the shared OpenAI-compatible transport settings for
-// Eden AI. httpClient is the caller-supplied client, or nil to build the
-// gateway default; either way it is wrapped by guardedHTTPClient, so both
-// constructors get the same redirect policy from one place.
+// Eden AI. httpClient is the caller-supplied client (opts.HTTPClient), or nil
+// to build the gateway default; either way it is wrapped by guardedHTTPClient,
+// so every provider instance gets the same redirect policy from one place.
 func compatibleConfig(baseURL string, httpClient *http.Client) openai.CompatibleProviderConfig {
 	return openai.CompatibleProviderConfig{
 		ProviderName: providerType,
@@ -169,7 +147,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 // completions. Eden's native /responses route is a different API and is
 // deliberately never called.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return providers.ResponsesViaChat(ctx, p, req)
+	return providers.ResponsesViaChat(ctx, p, req, providerType)
 }
 
 // StreamResponses translates a streaming Responses request through Eden chat

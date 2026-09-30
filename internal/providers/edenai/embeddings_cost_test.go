@@ -9,6 +9,8 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // edenEmbeddingBody is the shape Eden documents for /v3/embeddings: the
@@ -31,7 +33,7 @@ func embeddingsProvider(t *testing.T, payload string) *Provider {
 		_, _ = w.Write([]byte(payload))
 	}))
 	t.Cleanup(server.Close)
-	return NewWithHTTPClient("edenai-key", server.URL, server.Client(), llmclient.Hooks{})
+	return newTestProvider("edenai-key", server.URL, server.Client(), llmclient.Hooks{})
 }
 
 // TestEmbeddings_LiftsRootLevelCostIntoUsage asserts Eden's root-level
@@ -45,31 +47,19 @@ func TestEmbeddings_LiftsRootLevelCostIntoUsage(t *testing.T) {
 	provider := embeddingsProvider(t, edenEmbeddingBody)
 
 	resp, err := provider.Embeddings(context.Background(), embeddingRequest())
-	if err != nil {
-		t.Fatalf("Embeddings() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	cost, ok := resp.Usage.RawUsage["cost"]
-	if !ok {
-		t.Fatalf("Usage.RawUsage = %v, want Eden's root-level cost lifted into it", resp.Usage.RawUsage)
-	}
-	if cost != 0.0000012 {
-		t.Errorf("RawUsage[cost] = %v, want 0.0000012 exactly", cost)
-	}
+	require.True(t, ok, "Usage.RawUsage = %v, want Eden's root-level cost lifted into it", resp.Usage.RawUsage)
+	assert.Equal(t, 0.0000012, cost, "RawUsage[cost] = %v, want 0.0000012 exactly", cost)
 	// The rest of the envelope must still decode normally.
-	if resp.Usage.PromptTokens != 9 || resp.Usage.TotalTokens != 9 {
-		t.Errorf("usage tokens = %d/%d, want 9/9", resp.Usage.PromptTokens, resp.Usage.TotalTokens)
-	}
-	if len(resp.Data) != 1 || len(resp.Data[0].Embedding) == 0 {
-		t.Errorf("data = %+v, want one embedding", resp.Data)
-	}
-	if resp.Model != "openai/text-embedding-3-small" {
-		t.Errorf("model = %q, want the Eden model ID forwarded verbatim", resp.Model)
-	}
+	assert.Equal(t, 9, resp.Usage.PromptTokens, "usage tokens = %d/%d, want 9/9", resp.Usage.PromptTokens, resp.Usage.TotalTokens)
+	assert.Equal(t, 9, resp.Usage.TotalTokens, "usage tokens = %d/%d, want 9/9", resp.Usage.PromptTokens, resp.Usage.TotalTokens)
+	require.Len(t, resp.Data, 1, "data = %+v, want one embedding", resp.Data)
+	assert.NotEmpty(t, resp.Data[0].Embedding, "data = %+v, want one embedding", resp.Data)
+	assert.Equal(t, "openai/text-embedding-3-small", resp.Model, "want the Eden model ID forwarded verbatim")
 	// Eden's upstream name must not be reported as the executing provider.
-	if resp.Provider != "" {
-		t.Errorf("Provider = %q, want empty so the gateway reports edenai", resp.Provider)
-	}
+	assert.Empty(t, resp.Provider, "Provider = %q, want empty so the gateway reports edenai", resp.Provider)
 }
 
 // TestEmbeddings_ExactCostReachesRecordedTotal is the end-to-end assertion for
@@ -84,29 +74,17 @@ func TestEmbeddings_ExactCostReachesRecordedTotal(t *testing.T) {
 	provider := embeddingsProvider(t, edenEmbeddingBody)
 
 	resp, err := provider.Embeddings(context.Background(), embeddingRequest())
-	if err != nil {
-		t.Fatalf("Embeddings() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	wrongRate := 100.0 // $100/MTok would price 9 tokens at $0.0009, not $0.0000012.
 	pricing := &core.ModelPricing{Currency: "USD", InputPerMtok: &wrongRate}
 
 	entry := usage.ExtractFromEmbeddingResponse(resp, "req-1", providerType, "/v1/embeddings", pricing)
-	if entry == nil {
-		t.Fatal("ExtractFromEmbeddingResponse returned nil")
-	}
-	if entry.TotalCost == nil {
-		t.Fatal("TotalCost = nil, want Eden's exact charge recorded")
-	}
-	if *entry.TotalCost != 0.0000012 {
-		t.Errorf("TotalCost = %v, want 0.0000012 exactly (Eden's reported charge, not a token-rate estimate)", *entry.TotalCost)
-	}
-	if entry.CostSource != usage.CostSourceEdenAICost {
-		t.Errorf("CostSource = %q, want %q", entry.CostSource, usage.CostSourceEdenAICost)
-	}
-	if entry.CostsCalculationCaveat != "" {
-		t.Errorf("CostsCalculationCaveat = %q, want empty for an exact provider-reported cost", entry.CostsCalculationCaveat)
-	}
+	require.NotNil(t, entry, "ExtractFromEmbeddingResponse returned nil")
+	require.NotNil(t, entry.TotalCost, "TotalCost = nil, want Eden's exact charge recorded")
+	assert.Equal(t, 0.0000012, *entry.TotalCost, "TotalCost = %v, want 0.0000012 exactly (Eden's reported charge, not a token-rate estimate)", *entry.TotalCost)
+	assert.Equal(t, usage.CostSourceEdenAICost, entry.CostSource)
+	assert.Empty(t, entry.CostsCalculationCaveat, "CostsCalculationCaveat = %q, want empty for an exact provider-reported cost", entry.CostsCalculationCaveat)
 }
 
 // TestEmbeddings_FallsBackToTokenPricingWithoutCost asserts the fallback still
@@ -121,29 +99,17 @@ func TestEmbeddings_FallsBackToTokenPricingWithoutCost(t *testing.T) {
 	}`)
 
 	resp, err := provider.Embeddings(context.Background(), embeddingRequest())
-	if err != nil {
-		t.Fatalf("Embeddings() error = %v", err)
-	}
-	if len(resp.Usage.RawUsage) != 0 {
-		t.Errorf("Usage.RawUsage = %v, want empty when Eden reports no cost", resp.Usage.RawUsage)
-	}
+	require.NoError(t, err)
+	assert.Empty(t, resp.Usage.RawUsage, "Usage.RawUsage = %v, want empty when Eden reports no cost", resp.Usage.RawUsage)
 
 	rate := 0.02 // $0.02/MTok * 1000 tokens = $0.00002
 	pricing := &core.ModelPricing{Currency: "USD", InputPerMtok: &rate}
 
 	entry := usage.ExtractFromEmbeddingResponse(resp, "req-2", providerType, "/v1/embeddings", pricing)
-	if entry == nil {
-		t.Fatal("ExtractFromEmbeddingResponse returned nil")
-	}
-	if entry.TotalCost == nil {
-		t.Fatal("TotalCost = nil, want the token-rate fallback to apply")
-	}
-	if *entry.TotalCost != 0.00002 {
-		t.Errorf("TotalCost = %v, want 0.00002 from the catalog rate", *entry.TotalCost)
-	}
-	if entry.CostSource != usage.CostSourceModelPricing {
-		t.Errorf("CostSource = %q, want %q", entry.CostSource, usage.CostSourceModelPricing)
-	}
+	require.NotNil(t, entry, "ExtractFromEmbeddingResponse returned nil")
+	require.NotNil(t, entry.TotalCost, "TotalCost = nil, want the token-rate fallback to apply")
+	assert.Equal(t, 0.00002, *entry.TotalCost, "TotalCost = %v, want 0.00002 from the catalog rate", *entry.TotalCost)
+	assert.Equal(t, usage.CostSourceModelPricing, entry.CostSource)
 }
 
 // TestEmbeddings_RejectsUnusableCost asserts a cost member that would corrupt
@@ -175,19 +141,13 @@ func TestEmbeddings_RejectsUnusableCost(t *testing.T) {
 			}`)
 
 			resp, err := provider.Embeddings(context.Background(), embeddingRequest())
-			if err != nil {
-				t.Fatalf("Embeddings() error = %v", err)
-			}
-			if _, present := resp.Usage.RawUsage["cost"]; present {
-				t.Fatalf("RawUsage[cost] = %v, want absent for an unusable cost member", resp.Usage.RawUsage["cost"])
-			}
+			require.NoError(t, err)
+			require.NotContains(t, resp.Usage.RawUsage, "cost", "RawUsage[cost] = %v, want absent for an unusable cost member", resp.Usage.RawUsage["cost"])
 
 			rate := 0.02
 			entry := usage.ExtractFromEmbeddingResponse(resp, "req", providerType, "/v1/embeddings",
 				&core.ModelPricing{Currency: "USD", InputPerMtok: &rate})
-			if entry.CostSource != usage.CostSourceModelPricing {
-				t.Errorf("CostSource = %q, want the token-rate fallback %q", entry.CostSource, usage.CostSourceModelPricing)
-			}
+			assert.Equal(t, usage.CostSourceModelPricing, entry.CostSource, "CostSource = %q, want the token-rate fallback %q", entry.CostSource, usage.CostSourceModelPricing)
 		})
 	}
 }
@@ -205,19 +165,14 @@ func TestEmbeddings_ZeroCostIsRecordedAsFree(t *testing.T) {
 	}`)
 
 	resp, err := provider.Embeddings(context.Background(), embeddingRequest())
-	if err != nil {
-		t.Fatalf("Embeddings() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	rate := 0.02
 	entry := usage.ExtractFromEmbeddingResponse(resp, "req", providerType, "/v1/embeddings",
 		&core.ModelPricing{Currency: "USD", InputPerMtok: &rate})
-	if entry.TotalCost == nil || *entry.TotalCost != 0 {
-		t.Fatalf("TotalCost = %v, want 0 recorded from Eden's explicit zero", entry.TotalCost)
-	}
-	if entry.CostSource != usage.CostSourceEdenAICost {
-		t.Errorf("CostSource = %q, want %q", entry.CostSource, usage.CostSourceEdenAICost)
-	}
+	require.NotNil(t, entry.TotalCost, "TotalCost = nil, want 0 recorded from Eden's explicit zero")
+	require.Zero(t, *entry.TotalCost, "TotalCost = %v, want 0 recorded from Eden's explicit zero", *entry.TotalCost)
+	assert.Equal(t, usage.CostSourceEdenAICost, entry.CostSource)
 }
 
 // TestEmbeddings_UsageLevelCostWins asserts the conventional location stays
@@ -233,12 +188,8 @@ func TestEmbeddings_UsageLevelCostWins(t *testing.T) {
 	}`)
 
 	resp, err := provider.Embeddings(context.Background(), embeddingRequest())
-	if err != nil {
-		t.Fatalf("Embeddings() error = %v", err)
-	}
-	if got := resp.Usage.RawUsage["cost"]; got != 0.5 {
-		t.Errorf("RawUsage[cost] = %v, want the pre-existing usage-level 0.5 preserved", got)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 0.5, resp.Usage.RawUsage["cost"], "RawUsage[cost] = %v, want the pre-existing usage-level 0.5 preserved", resp.Usage.RawUsage["cost"])
 }
 
 // TestEmbeddings_NilRequestRejected asserts the guard the shared helper used to
@@ -246,9 +197,8 @@ func TestEmbeddings_UsageLevelCostWins(t *testing.T) {
 func TestEmbeddings_NilRequestRejected(t *testing.T) {
 	provider := embeddingsProvider(t, edenEmbeddingBody)
 
-	if _, err := provider.Embeddings(context.Background(), nil); err == nil {
-		t.Fatal("Embeddings(nil) = nil error, want a rejection")
-	}
+	_, err := provider.Embeddings(context.Background(), nil)
+	require.Error(t, err, "Embeddings(nil) = nil error, want a rejection")
 }
 
 // TestEmbeddings_BackfillsModelFromRequest asserts the EnsureModel behavior the
@@ -262,10 +212,6 @@ func TestEmbeddings_BackfillsModelFromRequest(t *testing.T) {
 	}`)
 
 	resp, err := provider.Embeddings(context.Background(), embeddingRequest())
-	if err != nil {
-		t.Fatalf("Embeddings() error = %v", err)
-	}
-	if resp.Model != slashedModel {
-		t.Errorf("Model = %q, want the requested %q backfilled", resp.Model, slashedModel)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, slashedModel, resp.Model, "Model = %q, want the requested %q backfilled", resp.Model, slashedModel)
 }

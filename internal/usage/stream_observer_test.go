@@ -2,6 +2,7 @@ package usage
 
 import (
 	"io"
+	"math"
 	"strings"
 	"sync"
 	"testing"
@@ -639,19 +640,13 @@ func TestStreamUsageObserverEdenAIRootLevelCost(t *testing.T) {
 	observer.OnStreamClose()
 
 	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
+	require.Len(t, entries, 1)
 	entry := entries[0]
-	if entry.RawData == nil || entry.RawData["cost"] != 0.0002349 {
-		t.Fatalf("RawData[cost] = %#v, want 0.0002349 harvested from the chunk root", entry.RawData["cost"])
-	}
-	if entry.TotalCost == nil || *entry.TotalCost != 0.0002349 {
-		t.Fatalf("TotalCost = %v, want 0.0002349", entry.TotalCost)
-	}
-	if entry.CostSource != CostSourceEdenAICost {
-		t.Fatalf("CostSource = %q, want %q", entry.CostSource, CostSourceEdenAICost)
-	}
+	require.NotNil(t, entry.RawData)
+	require.Equal(t, 0.0002349, entry.RawData["cost"], "RawData[cost] should be harvested from the chunk root")
+	require.NotNil(t, entry.TotalCost)
+	require.Equal(t, 0.0002349, *entry.TotalCost)
+	require.Equal(t, CostSourceEdenAICost, entry.CostSource)
 }
 
 // A usage-level cost is the conventional location, so it stays authoritative
@@ -673,12 +668,8 @@ func TestStreamUsageObserverUsageCostWinsOverRootLevelCost(t *testing.T) {
 	observer.OnStreamClose()
 
 	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
-	if got := entries[0].RawData["cost"]; got != 0.5 {
-		t.Fatalf("RawData[cost] = %#v, want the usage-level 0.5", got)
-	}
+	require.Len(t, entries, 1)
+	require.Equal(t, 0.5, entries[0].RawData["cost"], "RawData[cost] should keep the usage-level value")
 }
 
 // An unusable root-level cost must not reach rawData, so the entry falls back
@@ -707,25 +698,14 @@ func TestStreamUsageObserverRejectsUnusableRootLevelCost(t *testing.T) {
 				},
 			})
 			observer.OnStreamClose()
+
 			entries := logger.getEntries()
-      
-			if len(entries) != 1 {
-				t.Fatalf("expected 1 entry, got %d", len(entries))
-			}
+			require.Len(t, entries, 1)
 			entry := entries[0]
-			if _, ok := entry.RawData["cost"]; ok {
-				t.Fatalf("RawData[cost] = %#v, want the unusable value dropped", entry.RawData["cost"])
-			}
-			if entry.CostSource != CostSourceModelPricing {
-				t.Fatalf("CostSource = %q, want %q", entry.CostSource, CostSourceModelPricing)
-			}
-			if entry.TotalCost == nil || math.Abs(*entry.TotalCost-2.0) > 1e-9 {
-				t.Fatalf("TotalCost = %v, want the token-priced 2.0", entry.TotalCost)
-			}
-      require.Len(t, entries, 1)
-			require.NotNil(t, entries[0].InputCost)
-			assert.InDelta(t, tt.wantInput, *entries[0].InputCost, 1e-9)
-			assert.Equal(t, "jev-1.13.0", entries[0].Model)
+			require.NotContains(t, entry.RawData, "cost", "unusable root-level cost should be dropped")
+			require.Equal(t, CostSourceModelPricing, entry.CostSource)
+			require.NotNil(t, entry.TotalCost)
+			require.InDelta(t, 2.0, *entry.TotalCost, 1e-9, "TotalCost should be token-priced")
 		})
 	}
 }
@@ -753,17 +733,13 @@ func TestStreamUsageObserverRootLevelCostDoesNotRepriceOtherProviders(t *testing
 	observer.OnStreamClose()
 
 	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
+	require.Len(t, entries, 1)
 	entry := entries[0]
-	if entry.CostSource != CostSourceModelPricing {
-		t.Fatalf("CostSource = %q, want %q", entry.CostSource, CostSourceModelPricing)
-	}
-	if entry.TotalCost == nil || math.Abs(*entry.TotalCost-2.0) > 1e-9 {
-		t.Fatalf("TotalCost = %v, want the token-priced 2.0", entry.TotalCost)
-	}
+	require.Equal(t, CostSourceModelPricing, entry.CostSource)
+	require.NotNil(t, entry.TotalCost)
+	require.InDelta(t, 2.0, *entry.TotalCost, 1e-9, "TotalCost should be token-priced")
 }
+
 // A routed alias (jev-latest) is answered by a versioned model (jev-1.13.0);
 // the routed model's price wins, and the answered model's price applies when
 // only it is declared.
@@ -787,7 +763,10 @@ func TestStreamUsageObserverPricesAnsweredModelWhenRoutedHasNone(t *testing.T) {
 			observer.OnJSONEvent(map[string]any{
 				"model": "jev-1.13.0",
 				"usage": map[string]any{"input_tokens": float64(1_000_000), "output_tokens": float64(0)},
-        
+			})
+			observer.OnStreamClose()
+
+			entries := logger.getEntries()
 			require.Len(t, entries, 1)
 			require.NotNil(t, entries[0].InputCost)
 			assert.InDelta(t, tt.wantInput, *entries[0].InputCost, 1e-9)

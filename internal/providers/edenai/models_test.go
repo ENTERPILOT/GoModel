@@ -5,11 +5,12 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // edenCatalogEntry is a verbatim entry from a live Eden /v3/models response.
@@ -67,19 +68,15 @@ func modelsServer(t *testing.T, payload string) (*Provider, *string, *string) {
 		_, _ = w.Write([]byte(payload))
 	}))
 	t.Cleanup(server.Close)
-	return NewWithHTTPClient("edenai-key", server.URL, server.Client(), llmclient.Hooks{}), gotPath, gotAuth
+	return newTestProvider("edenai-key", server.URL, server.Client(), llmclient.Hooks{}), gotPath, gotAuth
 }
 
 func firstModel(t *testing.T, payload string) core.Model {
 	t.Helper()
 	provider, _, _ := modelsServer(t, payload)
 	resp, err := provider.ListModels(context.Background())
-	if err != nil {
-		t.Fatalf("ListModels() error = %v", err)
-	}
-	if len(resp.Data) != 1 {
-		t.Fatalf("models = %+v, want exactly one entry", resp.Data)
-	}
+	require.NoError(t, err)
+	require.Len(t, resp.Data, 1, "models = %+v, want exactly one entry", resp.Data)
 	return resp.Data[0]
 }
 
@@ -90,67 +87,44 @@ func TestListModels_MapsLiveCatalogEntry(t *testing.T) {
 	provider, gotPath, gotAuth := modelsServer(t, `{"object":"list","data":[`+edenCatalogEntry+`]}`)
 
 	resp, err := provider.ListModels(context.Background())
-	if err != nil {
-		t.Fatalf("ListModels() error = %v", err)
-	}
-	if *gotPath != "/models" {
-		t.Fatalf("path = %q, want /models", *gotPath)
-	}
-	if *gotAuth != "Bearer edenai-key" {
-		t.Fatalf("authorization = %q, want Bearer edenai-key", *gotAuth)
-	}
-	if resp.Object != "list" || len(resp.Data) != 1 {
-		t.Fatalf("response = %+v, want a one-entry list", resp)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "/models", *gotPath)
+	require.Equal(t, "Bearer edenai-key", *gotAuth)
+	require.Equal(t, "list", resp.Object, "response = %+v, want a one-entry list", resp)
+	require.Len(t, resp.Data, 1, "response = %+v, want a one-entry list", resp)
 
 	model := resp.Data[0]
-	if model.ID != "deepinfra/inclusionAI/Ling-3.0-flash-VL" {
-		t.Errorf("ID = %q, want the Eden ID forwarded unchanged", model.ID)
-	}
-	if model.Object != "model" || model.OwnedBy != "deepinfra" || model.Created != 1788880306 {
-		t.Errorf("identity = %+v, want object/owned_by/created preserved", model)
-	}
+	assert.Equal(t, "deepinfra/inclusionAI/Ling-3.0-flash-VL", model.ID, "want the Eden ID forwarded unchanged")
+	assert.Equal(t, "model", model.Object, "identity = %+v, want object/owned_by/created preserved", model)
+	assert.Equal(t, "deepinfra", model.OwnedBy, "identity = %+v, want object/owned_by/created preserved", model)
+	assert.Equal(t, int64(1788880306), model.Created, "identity = %+v, want object/owned_by/created preserved", model)
 
 	meta := model.Metadata
-	if meta == nil {
-		t.Fatal("Metadata = nil, want Eden catalog metadata")
-	}
-	if meta.ContextWindow == nil || *meta.ContextWindow != 131072 {
-		t.Errorf("ContextWindow = %v, want 131072", meta.ContextWindow)
-	}
+	require.NotNil(t, meta, "Metadata = nil, want Eden catalog metadata")
+	require.NotNil(t, meta.ContextWindow, "ContextWindow = nil, want 131072")
+	assert.Equal(t, 131072, *meta.ContextWindow)
 
 	// output_modalities ["text"] -> chat + responses (Responses is served by
 	// translating through chat completions).
-	if want := []string{"chat", "responses"}; !slices.Equal(meta.Modes, want) {
-		t.Errorf("Modes = %v, want %v", meta.Modes, want)
-	}
-	if len(meta.Categories) != 1 || meta.Categories[0] != core.CategoryTextGeneration {
-		t.Errorf("Categories = %v, want [%v]", meta.Categories, core.CategoryTextGeneration)
-	}
+	assert.Equal(t, []string{"chat", "responses"}, meta.Modes)
+	assert.Equal(t, []core.ModelCategory{core.CategoryTextGeneration}, meta.Categories)
 
 	// Only the true supports_* flags become capabilities, with the prefix
 	// stripped; input_modalities ["text","image"] adds vision.
 	wantCapabilities := map[string]bool{"reasoning": true, "prompt_caching": true, "vision": true}
-	if len(meta.Capabilities) != len(wantCapabilities) {
-		t.Errorf("Capabilities = %v, want %v", meta.Capabilities, wantCapabilities)
-	}
+	assert.Len(t, meta.Capabilities, len(wantCapabilities), "Capabilities = %v, want %v", meta.Capabilities, wantCapabilities)
 	for name := range wantCapabilities {
-		if !meta.Capabilities[name] {
-			t.Errorf("Capabilities[%q] = false, want true", name)
-		}
+		assert.True(t, meta.Capabilities[name], "Capabilities[%q] = false, want true", name)
 	}
-	if meta.Capabilities["web_search"] || meta.Capabilities["function_calling"] {
-		t.Errorf("Capabilities = %v, want false flags omitted", meta.Capabilities)
-	}
+	assert.False(t, meta.Capabilities["web_search"], "Capabilities = %v, want false flags omitted", meta.Capabilities)
+	assert.False(t, meta.Capabilities["function_calling"], "Capabilities = %v, want false flags omitted", meta.Capabilities)
 
 	// 6e-8 USD/token -> $0.06/MTok, 1.8e-7 -> $0.18, 1.2e-8 -> $0.012.
 	// The values come from `pricing`, not the higher `list_pricing` block.
 	assertPrice(t, "InputPerMtok", meta.Pricing.InputPerMtok, 0.06)
 	assertPrice(t, "OutputPerMtok", meta.Pricing.OutputPerMtok, 0.18)
 	assertPrice(t, "CachedInputPerMtok", meta.Pricing.CachedInputPerMtok, 0.012)
-	if meta.Pricing.Currency != "USD" {
-		t.Errorf("Currency = %q, want USD", meta.Pricing.Currency)
-	}
+	assert.Equal(t, "USD", meta.Pricing.Currency)
 }
 
 // TestListModels_UsesDiscountedPricingNotListPricing pins the choice of block:
@@ -158,9 +132,7 @@ func TestListModels_MapsLiveCatalogEntry(t *testing.T) {
 func TestListModels_UsesDiscountedPricingNotListPricing(t *testing.T) {
 	model := firstModel(t, `{"object":"list","data":[`+edenCatalogEntry+`]}`)
 	assertPrice(t, "InputPerMtok", model.Metadata.Pricing.InputPerMtok, 0.06)
-	if got := *model.Metadata.Pricing.InputPerMtok; got == 0.09 {
-		t.Fatal("InputPerMtok took the list_pricing rate; want the discounted pricing block")
-	}
+	require.NotEqual(t, 0.09, *model.Metadata.Pricing.InputPerMtok, "InputPerMtok took the list_pricing rate; want the discounted pricing block")
 }
 
 // TestListModels_FallsBackToListPricing asserts the undiscounted rate card is
@@ -174,9 +146,8 @@ func TestListModels_FallsBackToListPricing(t *testing.T) {
 		"list_pricing": {"input_cost_per_token": 9e-8, "output_cost_per_token": 2.8e-7}
 	}]}`)
 
-	if model.Metadata == nil || model.Metadata.Pricing == nil {
-		t.Fatal("Pricing = nil, want the list_pricing fallback")
-	}
+	require.NotNil(t, model.Metadata, "Pricing = nil, want the list_pricing fallback")
+	require.NotNil(t, model.Metadata.Pricing, "Pricing = nil, want the list_pricing fallback")
 	assertPrice(t, "InputPerMtok", model.Metadata.Pricing.InputPerMtok, 0.09)
 	assertPrice(t, "OutputPerMtok", model.Metadata.Pricing.OutputPerMtok, 0.28)
 }
@@ -289,10 +260,7 @@ func TestListModels_UnusableRateInBothBlocksStaysUnpriced(t *testing.T) {
 	}]}`)
 
 	assertPrice(t, "InputPerMtok", model.Metadata.Pricing.InputPerMtok, 0.06)
-	if model.Metadata.Pricing.OutputPerMtok != nil {
-		t.Errorf("OutputPerMtok = %v, want nil: neither block published a usable output rate",
-			*model.Metadata.Pricing.OutputPerMtok)
-	}
+	assert.Nil(t, model.Metadata.Pricing.OutputPerMtok, "OutputPerMtok want nil: neither block published a usable output rate")
 }
 
 // TestListModels_CachePricingFields asserts both of Eden's cache rates reach
@@ -318,14 +286,8 @@ func TestListModels_CachePricingFields(t *testing.T) {
 	pricing := model.Metadata.Pricing
 	assertPrice(t, "CachedInputPerMtok", pricing.CachedInputPerMtok, 0.012)
 	assertPrice(t, "CacheWritePerMtok", pricing.CacheWritePerMtok, 0.075)
-	if pricing.ReasoningOutputPerMtok != nil {
-		t.Errorf("ReasoningOutputPerMtok = %v, want nil: Eden reports no reasoning token count to price against",
-			*pricing.ReasoningOutputPerMtok)
-	}
-	if pricing.AudioInputPerMtok != nil {
-		t.Errorf("AudioInputPerMtok = %v, want nil: Eden reports no audio token count to price against",
-			*pricing.AudioInputPerMtok)
-	}
+	assert.Nil(t, pricing.ReasoningOutputPerMtok, "ReasoningOutputPerMtok want nil: Eden reports no reasoning token count to price against")
+	assert.Nil(t, pricing.AudioInputPerMtok, "AudioInputPerMtok want nil: Eden reports no audio token count to price against")
 }
 
 // TestListModels_TieredAndPerQueryPricingIgnored asserts the Eden pricing
@@ -349,12 +311,8 @@ func TestListModels_TieredAndPerQueryPricingIgnored(t *testing.T) {
 	pricing := model.Metadata.Pricing
 	assertPrice(t, "InputPerMtok", pricing.InputPerMtok, 0.06)
 	assertPrice(t, "OutputPerMtok", pricing.OutputPerMtok, 0.18)
-	if len(pricing.Tiers) != 0 {
-		t.Errorf("Tiers = %v, want empty: Eden's tiered_pricing shape is not mapped", pricing.Tiers)
-	}
-	if pricing.PerRequest != nil {
-		t.Errorf("PerRequest = %v, want nil: per-query search fees are not per-request charges", *pricing.PerRequest)
-	}
+	assert.Empty(t, pricing.Tiers, "Tiers = %v, want empty: Eden's tiered_pricing shape is not mapped", pricing.Tiers)
+	assert.Nil(t, pricing.PerRequest, "PerRequest want nil: per-query search fees are not per-request charges")
 }
 
 // TestListModels_PricingEdgeCases covers partial, zero, negative, and
@@ -418,14 +376,13 @@ func TestListModels_PricingEdgeCases(t *testing.T) {
 			model := firstModel(t, payload)
 
 			if tt.wantNil {
-				if model.Metadata != nil && model.Metadata.Pricing != nil {
-					t.Fatalf("Pricing = %+v, want nil", model.Metadata.Pricing)
+				if model.Metadata != nil {
+					require.Nil(t, model.Metadata.Pricing, "Pricing = %+v, want nil", model.Metadata.Pricing)
 				}
 				return
 			}
-			if model.Metadata == nil || model.Metadata.Pricing == nil {
-				t.Fatal("Pricing = nil, want a partial pricing block")
-			}
+			require.NotNil(t, model.Metadata, "Pricing = nil, want a partial pricing block")
+			require.NotNil(t, model.Metadata.Pricing, "Pricing = nil, want a partial pricing block")
 			assertOptionalPrice(t, "InputPerMtok", model.Metadata.Pricing.InputPerMtok, tt.wantInput)
 			assertOptionalPrice(t, "OutputPerMtok", model.Metadata.Pricing.OutputPerMtok, tt.wantOutput)
 			assertOptionalPrice(t, "CachedInputPerMtok", model.Metadata.Pricing.CachedInputPerMtok, tt.wantCached)
@@ -438,17 +395,14 @@ func TestListModels_PricingEdgeCases(t *testing.T) {
 // that tolerates them, and both must be refused rather than scaled.
 func TestPerMtok_RejectsNonFiniteRates(t *testing.T) {
 	for _, rate := range []float64{math.NaN(), math.Inf(1), math.Inf(-1), -1} {
-		if _, ok := perMtok(&rate); ok {
-			t.Errorf("perMtok(%v) reported a usable price, want rejected", rate)
-		}
+		_, ok := perMtok(&rate)
+		assert.False(t, ok, "perMtok(%v) reported a usable price, want rejected", rate)
 	}
-	if _, ok := perMtok(nil); ok {
-		t.Error("perMtok(nil) reported a usable price, want rejected")
-	}
+	_, ok := perMtok(nil)
+	assert.False(t, ok, "perMtok(nil) reported a usable price, want rejected")
 	value, ok := perMtok(new(6e-8))
-	if !ok || math.Abs(value-0.06) > 1e-9 {
-		t.Errorf("perMtok(6e-8) = %v, %v; want 0.06, true", value, ok)
-	}
+	assert.True(t, ok, "perMtok(6e-8) = %v, %v; want 0.06, true", value, ok)
+	assert.InDelta(t, 0.06, value, 1e-9, "perMtok(6e-8) = %v, %v; want 0.06, true", value, ok)
 }
 
 // TestListModels_ModalityMapping asserts output modalities become modes (so
@@ -526,13 +480,10 @@ func TestListModels_ModalityMapping(t *testing.T) {
 			if model.Metadata != nil {
 				modes = model.Metadata.Modes
 			}
-			if !slices.Equal(modes, tt.wantModes) {
-				t.Errorf("Modes = %v, want %v", modes, tt.wantModes)
-			}
+			assert.Equal(t, tt.wantModes, modes)
 			for _, capability := range tt.wantCapabilities {
-				if model.Metadata == nil || !model.Metadata.Capabilities[capability] {
-					t.Errorf("Capabilities missing %q", capability)
-				}
+				require.NotNil(t, model.Metadata, "Capabilities missing %q", capability)
+				assert.True(t, model.Metadata.Capabilities[capability], "Capabilities missing %q", capability)
 			}
 		})
 	}
@@ -549,18 +500,11 @@ func TestListModels_SkipsInvalidEntriesAndKeepsBareOnes(t *testing.T) {
 	]}`)
 
 	resp, err := provider.ListModels(context.Background())
-	if err != nil {
-		t.Fatalf("ListModels() error = %v", err)
-	}
-	if len(resp.Data) != 2 {
-		t.Fatalf("models = %+v, want the blank ID dropped", resp.Data)
-	}
-	if resp.Data[0].ID != "openai/gpt-4" || resp.Data[0].Metadata != nil {
-		t.Errorf("bare entry = %+v, want nil Metadata", resp.Data[0])
-	}
-	if resp.Data[1].Object != "model" {
-		t.Errorf("Object = %q, want the default \"model\" applied", resp.Data[1].Object)
-	}
+	require.NoError(t, err)
+	require.Len(t, resp.Data, 2, "models = %+v, want the blank ID dropped", resp.Data)
+	assert.Equal(t, "openai/gpt-4", resp.Data[0].ID, "bare entry = %+v", resp.Data[0])
+	assert.Nil(t, resp.Data[0].Metadata, "bare entry = %+v, want nil Metadata", resp.Data[0])
+	assert.Equal(t, "model", resp.Data[1].Object, `want the default "model" applied`)
 }
 
 // TestListModels_PropagatesUpstreamError asserts a failed catalog fetch
@@ -573,33 +517,22 @@ func TestListModels_PropagatesUpstreamError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("edenai-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("edenai-key", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.ListModels(context.Background())
-	if err == nil {
-		t.Fatalf("ListModels() error = nil, want the upstream failure; resp = %+v", resp)
-	}
-	if resp != nil {
-		t.Errorf("ListModels() resp = %+v, want nil on error", resp)
-	}
+	require.Error(t, err, "ListModels() error = nil, want the upstream failure; resp = %+v", resp)
+	assert.Nil(t, resp, "ListModels() resp = %+v, want nil on error", resp)
 }
 
 func assertPrice(t *testing.T, name string, got *float64, want float64) {
 	t.Helper()
-	if got == nil {
-		t.Errorf("%s = nil, want %v", name, want)
-		return
-	}
-	if math.Abs(*got-want) > 1e-9 {
-		t.Errorf("%s = %v, want %v", name, *got, want)
-	}
+	require.NotNil(t, got, "%s = nil, want %v", name, want)
+	assert.InDelta(t, want, *got, 1e-9, "%s = %v, want %v", name, *got, want)
 }
 
 func assertOptionalPrice(t *testing.T, name string, got, want *float64) {
 	t.Helper()
 	if want == nil {
-		if got != nil {
-			t.Errorf("%s = %v, want nil (an unreported rate must not be costed)", name, *got)
-		}
+		assert.Nil(t, got, "%s want nil (an unreported rate must not be costed)", name)
 		return
 	}
 	assertPrice(t, name, got, *want)

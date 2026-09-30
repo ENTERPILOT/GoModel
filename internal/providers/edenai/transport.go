@@ -62,8 +62,9 @@ func isLoopbackHost(host string) bool {
 // policy drops Authorization only when the redirect target is a different
 // host; it does not look at the scheme, so an HTTPS -> HTTP redirect back to
 // the same host forwards the credential in the clear (verified against
-// net/http, not assumed). Both of this provider's construction paths route
-// through here so the guarantee does not depend on which one a caller used.
+// net/http, not assumed). Every client the provider is built on — the gateway
+// default and a caller-supplied override alike — routes through here, so the
+// guarantee does not depend on how the provider was constructed.
 //
 // base is the caller-supplied client, or nil for the gateway default client
 // (the tuned transport and timeouts llmclient would otherwise install). It is

@@ -4,12 +4,12 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPassthroughSemanticEnricher(t *testing.T) {
-	if got := passthroughSemanticEnricher.ProviderType(); got != "edenai" {
-		t.Fatalf("ProviderType() = %q, want edenai", got)
-	}
+	require.Equal(t, "edenai", passthroughSemanticEnricher.ProviderType())
 
 	tests := []struct {
 		name               string
@@ -43,18 +43,10 @@ func TestPassthroughSemanticEnricher(t *testing.T) {
 				RawEndpoint:        tt.rawEndpoint,
 				NormalizedEndpoint: tt.normalizedEndpoint,
 			})
-			if got == nil {
-				t.Fatal("Enrich() returned nil")
-			}
-			if got.SemanticOperation != tt.wantOperation {
-				t.Errorf("SemanticOperation = %q, want %q", got.SemanticOperation, tt.wantOperation)
-			}
-			if got.GenAIOperation != tt.wantGenAIOperation {
-				t.Errorf("GenAIOperation = %q, want %q", got.GenAIOperation, tt.wantGenAIOperation)
-			}
-			if got.AuditPath != tt.wantAuditPath {
-				t.Errorf("AuditPath = %q, want %q", got.AuditPath, tt.wantAuditPath)
-			}
+			require.NotNil(t, got, "Enrich() returned nil")
+			assert.Equal(t, tt.wantOperation, got.SemanticOperation)
+			assert.Equal(t, tt.wantGenAIOperation, got.GenAIOperation)
+			assert.Equal(t, tt.wantAuditPath, got.AuditPath)
 		})
 	}
 }
@@ -69,13 +61,7 @@ func TestPassthroughSemanticEnricher_ResponsesIsNotOpenAIShaped(t *testing.T) {
 		RawEndpoint:        "v1/responses",
 		NormalizedEndpoint: "responses",
 	})
-	if got == nil {
-		t.Fatal("Enrich() returned nil")
-	}
-	if got.SemanticOperation != "" {
-		t.Errorf("SemanticOperation = %q, want empty: Eden /responses must not be advertised as OpenAI Responses", got.SemanticOperation)
-	}
-	if got.AuditPath != "/p/edenai/responses" {
-		t.Errorf("AuditPath = %q, want /p/edenai/responses", got.AuditPath)
-	}
+	require.NotNil(t, got, "Enrich() returned nil")
+	assert.Empty(t, got.SemanticOperation, "SemanticOperation = %q, want empty: Eden /responses must not be advertised as OpenAI Responses", got.SemanticOperation)
+	assert.Equal(t, "/p/edenai/responses", got.AuditPath)
 }

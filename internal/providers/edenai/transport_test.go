@@ -13,6 +13,9 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // embeddingRequest is the smallest request that reaches the wire, used by the
@@ -46,12 +49,8 @@ func TestCredentialSafeURL(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			parsed, err := url.Parse(tc.raw)
-			if err != nil {
-				t.Fatalf("url.Parse(%q) = %v", tc.raw, err)
-			}
-			if got := secureDestination(parsed); got != tc.want {
-				t.Errorf("secureDestination(%q) = %v, want %v", tc.raw, got, tc.want)
-			}
+			require.NoError(t, err, "url.Parse(%q)", tc.raw)
+			assert.Equal(t, tc.want, secureDestination(parsed), "secureDestination(%q)", tc.raw)
 		})
 	}
 }
@@ -59,23 +58,17 @@ func TestCredentialSafeURL(t *testing.T) {
 // TestCredentialSafeURL_NilIsUnsafe asserts the predicate fails closed. A
 // request with no parsable URL must not be treated as a TLS destination.
 func TestCredentialSafeURL_NilIsUnsafe(t *testing.T) {
-	if secureDestination(nil) {
-		t.Error("secureDestination(nil) = true, want false: the predicate must fail closed")
-	}
+	assert.False(t, secureDestination(nil), "secureDestination(nil) = true, want false: the predicate must fail closed")
 }
 
 // TestSetHeaders_SendsCredentialOverHTTPS asserts the ordinary case still
 // authenticates: an HTTPS destination gets the bearer token.
 func TestSetHeaders_SendsCredentialOverHTTPS(t *testing.T) {
 	req, err := http.NewRequest(http.MethodPost, defaultBaseURL+"/chat/completions", nil)
-	if err != nil {
-		t.Fatalf("http.NewRequest: %v", err)
-	}
+	require.NoError(t, err, "http.NewRequest")
 	setHeaders(req, "eden-key")
 
-	if got := req.Header.Get("Authorization"); got != "Bearer eden-key" {
-		t.Errorf("Authorization = %q, want %q", got, "Bearer eden-key")
-	}
+	assert.Equal(t, "Bearer eden-key", req.Header.Get("Authorization"))
 }
 
 // TestSetHeaders_WithholdsCredentialOverCleartext is the base-URL half of the
@@ -83,14 +76,10 @@ func TestSetHeaders_SendsCredentialOverHTTPS(t *testing.T) {
 // Eden key on the wire in plain text.
 func TestSetHeaders_WithholdsCredentialOverCleartext(t *testing.T) {
 	req, err := http.NewRequest(http.MethodPost, "http://eden.example.com/v3/chat/completions", nil)
-	if err != nil {
-		t.Fatalf("http.NewRequest: %v", err)
-	}
+	require.NoError(t, err, "http.NewRequest")
 	setHeaders(req, "eden-key")
 
-	if got := req.Header.Get("Authorization"); got != "" {
-		t.Errorf("Authorization = %q, want empty: the credential must not be sent in cleartext", got)
-	}
+	assert.Empty(t, req.Header.Get("Authorization"), "the credential must not be sent in cleartext")
 }
 
 // TestSetHeaders_SendsCredentialOverLoopback pins the exemption that keeps a
@@ -98,14 +87,10 @@ func TestSetHeaders_WithholdsCredentialOverCleartext(t *testing.T) {
 // working. Cleartext to the local machine never reaches a network.
 func TestSetHeaders_SendsCredentialOverLoopback(t *testing.T) {
 	req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:9999/v3/chat/completions", nil)
-	if err != nil {
-		t.Fatalf("http.NewRequest: %v", err)
-	}
+	require.NoError(t, err, "http.NewRequest")
 	setHeaders(req, "eden-key")
 
-	if got := req.Header.Get("Authorization"); got != "Bearer eden-key" {
-		t.Errorf("Authorization = %q, want %q", got, "Bearer eden-key")
-	}
+	assert.Equal(t, "Bearer eden-key", req.Header.Get("Authorization"))
 }
 
 // TestCleartextBaseURL_RequestRefusedBeforeSending is the payload half of the
@@ -134,33 +119,26 @@ func TestCleartextBaseURL_RequestRefusedBeforeSending(t *testing.T) {
 	defer server.Close()
 
 	target, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatalf("url.Parse: %v", err)
-	}
+	require.NoError(t, err, "url.Parse")
 	client := &http.Client{Transport: &cleartextRouteTransport{cleartext: target.Host}}
 
-	provider := NewWithHTTPClient("eden-key", "http://eden.example.com/v3", client, llmclient.Hooks{})
+	provider := newTestProvider("eden-key", "http://eden.example.com/v3", client, llmclient.Hooks{})
 	_, err = provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model:    slashedModel,
 		Messages: []core.Message{{Role: "user", Content: "secret-prompt"}},
 	})
-	if err == nil {
-		t.Fatal("ChatCompletion succeeded against a cleartext endpoint, want the request refused")
-	}
+	require.Error(t, err, "ChatCompletion succeeded against a cleartext endpoint, want the request refused")
 
-	if hits != 0 {
-		t.Errorf("cleartext endpoint received %d request(s), want 0", hits)
-	}
-	if gotAuth != "" {
-		t.Errorf("cleartext endpoint saw Authorization = %q, want empty", gotAuth)
-	}
-	if strings.Contains(gotBody, "secret-prompt") {
-		t.Errorf("cleartext endpoint received the prompt body %q; the payload must never be sent", gotBody)
-	}
-	// The refusal must name the destination without quoting the whole URL.
-	if !strings.Contains(err.Error(), "eden.example.com") {
-		t.Errorf("error %q should name the refused host", err)
-	}
+	assert.Zero(t, hits, "cleartext endpoint received requests, want 0")
+	assert.Empty(t, gotAuth, "cleartext endpoint saw an Authorization header, want empty")
+	assert.NotContains(t, gotBody, "secret-prompt", "cleartext endpoint received the prompt body; the payload must never be sent")
+	// The refusal must name the destination without quoting the whole URL. It
+	// is the guard's own error, reached through the *url.Error net/http wraps
+	// it in: llmclient deliberately keeps upstream details out of the
+	// client-facing message and retains the cause only through Unwrap.
+	var urlErr *url.Error
+	require.ErrorAs(t, err, &urlErr, "want the transport refusal retained as the cause")
+	assert.ErrorContains(t, urlErr.Err, "eden.example.com", "the refusal should name the refused host")
 }
 
 // TestCleartextLoopback_RequestStillSent pins the other side of the exemption:
@@ -178,16 +156,11 @@ func TestCleartextLoopback_RequestStillSent(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("eden-key", server.URL, server.Client(), llmclient.Hooks{})
-	if _, err := provider.Embeddings(context.Background(), embeddingRequest()); err != nil {
-		t.Fatalf("Embeddings against a loopback endpoint: %v", err)
-	}
-	if hits != 1 {
-		t.Errorf("loopback endpoint received %d request(s), want 1", hits)
-	}
-	if gotAuth != "Bearer eden-key" {
-		t.Errorf("loopback endpoint saw Authorization = %q, want %q", gotAuth, "Bearer eden-key")
-	}
+	provider := newTestProvider("eden-key", server.URL, server.Client(), llmclient.Hooks{})
+	_, err := provider.Embeddings(context.Background(), embeddingRequest())
+	require.NoError(t, err, "Embeddings against a loopback endpoint")
+	assert.Equal(t, 1, hits, "loopback endpoint request count")
+	assert.Equal(t, "Bearer eden-key", gotAuth, "loopback endpoint Authorization header")
 }
 
 // TestSecureTransport_RoundTrip covers the guard directly, including that an
@@ -211,42 +184,35 @@ func TestSecureTransport_RoundTrip(t *testing.T) {
 			transport := &secureTransport{base: stub}
 
 			req, err := http.NewRequest(http.MethodGet, tc.target, nil)
-			if err != nil {
-				t.Fatalf("http.NewRequest: %v", err)
-			}
+			require.NoError(t, err, "http.NewRequest")
 			resp, err := transport.RoundTrip(req)
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
 			}
 
-			if stub.calls != 0 != tc.wantCalled {
-				t.Errorf("underlying transport calls = %d, wantCalled = %v", stub.calls, tc.wantCalled)
-			}
-			if tc.wantCalled && err != nil {
-				t.Errorf("RoundTrip(%q) = %v, want the request passed through", tc.target, err)
-			}
-			if !tc.wantCalled && err == nil {
-				t.Errorf("RoundTrip(%q) = nil error, want a refusal", tc.target)
+			if tc.wantCalled {
+				assert.NotZero(t, stub.calls, "underlying transport was never called, want the request passed through")
+				require.NoError(t, err, "RoundTrip(%q), want the request passed through", tc.target)
+			} else {
+				assert.Zero(t, stub.calls, "underlying transport was called, want the request refused before it")
+				require.Error(t, err, "RoundTrip(%q) = nil error, want a refusal", tc.target)
 			}
 		})
 	}
 }
 
 // TestSecureTransport_NilBaseUsesDefaultTransport asserts the nil-base fallback
-// is wired, since http.DefaultClient carries a nil Transport and Eden's guard
-// wraps exactly that on the NewWithHTTPClient nil path.
+// is wired: http.DefaultClient carries a nil Transport, and Eden's guard wraps
+// exactly that when a caller hands it in through ProviderOptions.HTTPClient.
 func TestSecureTransport_NilBaseUsesDefaultTransport(t *testing.T) {
 	transport := &secureTransport{}
 
 	// A refused destination never reaches the base, so it proves the guard runs
 	// without needing a live server for the delegating case.
 	req, err := http.NewRequest(http.MethodGet, "http://eden.example.com/v3", nil)
-	if err != nil {
-		t.Fatalf("http.NewRequest: %v", err)
-	}
-	if _, err := transport.RoundTrip(req); err == nil {
-		t.Error("RoundTrip = nil error for a cleartext target, want a refusal")
-	}
+	require.NoError(t, err, "http.NewRequest")
+	_, err = transport.RoundTrip(req)
+	require.Error(t, err, "RoundTrip = nil error for a cleartext target, want a refusal")
 
 	// An allowed loopback destination must reach the network through
 	// http.DefaultTransport rather than panicking on the nil base.
@@ -256,17 +222,11 @@ func TestSecureTransport_NilBaseUsesDefaultTransport(t *testing.T) {
 	defer server.Close()
 
 	req, err = http.NewRequest(http.MethodGet, server.URL, nil)
-	if err != nil {
-		t.Fatalf("http.NewRequest: %v", err)
-	}
+	require.NoError(t, err, "http.NewRequest")
 	resp, err := transport.RoundTrip(req)
-	if err != nil {
-		t.Fatalf("RoundTrip through the nil base: %v", err)
-	}
+	require.NoError(t, err, "RoundTrip through the nil base")
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusNoContent)
-	}
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 }
 
 // recordingRoundTripper counts the requests that made it past the guard.
@@ -305,11 +265,12 @@ func (t *cleartextRouteTransport) RoundTrip(req *http.Request) (*http.Response, 
 	return base.RoundTrip(routed)
 }
 
-// TestCompatibleConfig_InstallsRedirectGuardOnBothPaths asserts neither
-// construction path can reach the network without the redirect policy. Both
-// New and NewWithHTTPClient build their transport through compatibleConfig, so
-// covering it here covers both.
-func TestCompatibleConfig_InstallsRedirectGuardOnBothPaths(t *testing.T) {
+// TestCompatibleConfig_InstallsRedirectGuardForDefaultAndCallerClients asserts
+// neither kind of client can reach the network without the redirect policy.
+// New builds its transport through compatibleConfig whether opts.HTTPClient is
+// nil (the gateway default) or caller-supplied, so covering compatibleConfig
+// here covers both.
+func TestCompatibleConfig_InstallsRedirectGuardForDefaultAndCallerClients(t *testing.T) {
 	tests := []struct {
 		name   string
 		client *http.Client
@@ -321,12 +282,8 @@ func TestCompatibleConfig_InstallsRedirectGuardOnBothPaths(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := compatibleConfig(defaultBaseURL, tc.client)
-			if cfg.HTTPClient == nil {
-				t.Fatal("HTTPClient = nil, want a client carrying the redirect guard")
-			}
-			if cfg.HTTPClient.CheckRedirect == nil {
-				t.Error("CheckRedirect = nil, want Eden's redirect guard installed")
-			}
+			require.NotNil(t, cfg.HTTPClient, "HTTPClient = nil, want a client carrying the redirect guard")
+			assert.NotNil(t, cfg.HTTPClient.CheckRedirect, "CheckRedirect = nil, want Eden's redirect guard installed")
 		})
 	}
 }
@@ -338,15 +295,9 @@ func TestGuardedHTTPClient_DoesNotMutateCallerClient(t *testing.T) {
 	caller := &http.Client{}
 	guarded := guardedHTTPClient(caller)
 
-	if caller.CheckRedirect != nil {
-		t.Error("caller's CheckRedirect was set; the guard must be installed on a copy")
-	}
-	if guarded == caller {
-		t.Error("guardedHTTPClient returned the caller's client; want a copy")
-	}
-	if guarded.CheckRedirect == nil {
-		t.Error("guarded client has no CheckRedirect")
-	}
+	assert.Nil(t, caller.CheckRedirect, "caller's CheckRedirect was set; the guard must be installed on a copy")
+	assert.NotSame(t, caller, guarded, "guardedHTTPClient returned the caller's client; want a copy")
+	assert.NotNil(t, guarded.CheckRedirect, "guarded client has no CheckRedirect")
 }
 
 // TestGuardedHTTPClient_WrapsCallerTransport asserts the guard is layered over
@@ -356,16 +307,11 @@ func TestGuardedHTTPClient_WrapsCallerTransport(t *testing.T) {
 	transport := &http.Transport{}
 	caller := &http.Client{Transport: transport}
 
-	guarded, ok := guardedHTTPClient(caller).Transport.(*secureTransport)
-	if !ok {
-		t.Fatalf("Transport = %T, want *secureTransport wrapping the caller's", guardedHTTPClient(caller).Transport)
-	}
-	if guarded.base != transport {
-		t.Errorf("wrapped base = %v, want the caller's transport preserved", guarded.base)
-	}
-	if caller.Transport != transport {
-		t.Error("the caller's client was modified; the guard must go on a copy")
-	}
+	guarded := guardedHTTPClient(caller)
+	wrapped, ok := guarded.Transport.(*secureTransport)
+	require.True(t, ok, "Transport = %T, want *secureTransport wrapping the caller's", guarded.Transport)
+	assert.Same(t, transport, wrapped.base, "wrapped base should be the caller's transport preserved")
+	assert.Same(t, transport, caller.Transport, "the caller's client was modified; the guard must go on a copy")
 }
 
 // TestCheckRedirect_AllowsSameHostHTTPS asserts the one redirect shape a REST
@@ -375,14 +321,10 @@ func TestCheckRedirect_AllowsSameHostHTTPS(t *testing.T) {
 	origin := mustRequest(t, "https://api.edenai.run/v3/chat/completions")
 	target := mustRequest(t, "https://api.edenai.run/v3/chat/completions-moved")
 
-	if err := checkRedirect(target, []*http.Request{origin}); err != nil {
-		t.Errorf("checkRedirect same-host = %v, want nil", err)
-	}
+	require.NoError(t, checkRedirect(target, []*http.Request{origin}), "checkRedirect same-host")
 	// Host comparison is case-insensitive, as hostnames are.
 	upper := mustRequest(t, "https://API.EdenAI.run/v3/chat/completions-moved")
-	if err := checkRedirect(upper, []*http.Request{origin}); err != nil {
-		t.Errorf("checkRedirect differing-case host = %v, want nil", err)
-	}
+	require.NoError(t, checkRedirect(upper, []*http.Request{origin}), "checkRedirect differing-case host")
 }
 
 // TestCheckRedirect_RefusesCrossHostHTTPS covers the credential-exposure path
@@ -400,13 +342,7 @@ func TestCheckRedirect_RefusesCrossHostHTTPS(t *testing.T) {
 	} {
 		req := mustRequest(t, target)
 		err := checkRedirect(req, []*http.Request{origin})
-		if err == nil {
-			t.Errorf("checkRedirect(%q) = nil, want a refusal", target)
-			continue
-		}
-		if !strings.Contains(err.Error(), "cross-host") {
-			t.Errorf("checkRedirect(%q) = %v, want a cross-host refusal", target, err)
-		}
+		assert.ErrorContains(t, err, "cross-host", "checkRedirect(%q), want a cross-host refusal", target)
 	}
 }
 
@@ -418,9 +354,7 @@ func TestCheckRedirect_ComparesAgainstOriginalHost(t *testing.T) {
 	hop := mustRequest(t, "https://api.edenai.run/v3/models-moved")
 	target := mustRequest(t, "https://elsewhere.edenai.run/v3/models")
 
-	if err := checkRedirect(target, []*http.Request{origin, hop}); err == nil {
-		t.Error("checkRedirect = nil for a second hop leaving the original host, want a refusal")
-	}
+	require.Error(t, checkRedirect(target, []*http.Request{origin, hop}), "checkRedirect = nil for a second hop leaving the original host, want a refusal")
 }
 
 // TestRedirectPolicy_PreservesCallerPolicy asserts the guard composes with the
@@ -439,12 +373,9 @@ func TestRedirectPolicy_PreservesCallerPolicy(t *testing.T) {
 	})
 
 	// Eden allows this same-host hop, so the caller's policy decides.
-	if err := policy(target, []*http.Request{origin}); !errors.Is(err, callerErr) {
-		t.Errorf("policy = %v, want the caller's error returned verbatim", err)
-	}
-	if called != 1 {
-		t.Errorf("caller policy invoked %d times, want 1", called)
-	}
+	err := policy(target, []*http.Request{origin})
+	require.ErrorIs(t, err, callerErr, "want the caller's error returned verbatim")
+	assert.Equal(t, 1, called, "caller policy invocation count")
 }
 
 // TestRedirectPolicy_PropagatesErrUseLastResponse asserts the sentinel a caller
@@ -458,9 +389,8 @@ func TestRedirectPolicy_PropagatesErrUseLastResponse(t *testing.T) {
 		return http.ErrUseLastResponse
 	})
 
-	if err := policy(target, []*http.Request{origin}); !errors.Is(err, http.ErrUseLastResponse) {
-		t.Errorf("policy = %v, want http.ErrUseLastResponse propagated", err)
-	}
+	err := policy(target, []*http.Request{origin})
+	assert.ErrorIs(t, err, http.ErrUseLastResponse, "want http.ErrUseLastResponse propagated")
 }
 
 // TestRedirectPolicy_RecheckAfterCallerMutation is the check-then-mutate case.
@@ -511,12 +441,8 @@ func TestRedirectPolicy_RecheckAfterCallerMutation(t *testing.T) {
 			})
 
 			err := policy(target, []*http.Request{origin})
-			if err == nil {
-				t.Fatalf("policy = nil, want a refusal after the callback rewrote the target to %s", target.URL)
-			}
-			if !strings.Contains(err.Error(), tc.wantErr) {
-				t.Errorf("policy = %v, want an error mentioning %q", err, tc.wantErr)
-			}
+			require.Error(t, err, "policy = nil, want a refusal after the callback rewrote the target to %s", target.URL)
+			assert.ErrorContains(t, err, tc.wantErr, "want an error mentioning %q", tc.wantErr)
 		})
 	}
 }
@@ -533,9 +459,7 @@ func TestRedirectPolicy_AllowsHarmlessCallerMutation(t *testing.T) {
 		return nil
 	})
 
-	if err := policy(target, []*http.Request{origin}); err != nil {
-		t.Errorf("policy = %v, want nil: a same-host path rewrite is fine", err)
-	}
+	require.NoError(t, policy(target, []*http.Request{origin}), "a same-host path rewrite is fine")
 }
 
 // TestRedirectPolicy_CallerErrorsPropagateUnchanged asserts every non-nil
@@ -562,9 +486,8 @@ func TestRedirectPolicy_CallerErrorsPropagateUnchanged(t *testing.T) {
 			policy := redirectPolicy(func(*http.Request, []*http.Request) error {
 				return tc.err
 			})
-			if err := policy(target, []*http.Request{origin}); !errors.Is(err, tc.err) {
-				t.Errorf("policy = %v, want %v returned unchanged", err, tc.err)
-			}
+			err := policy(target, []*http.Request{origin})
+			assert.ErrorIs(t, err, tc.err, "want %v returned unchanged", tc.err)
 		})
 	}
 }
@@ -581,9 +504,8 @@ func TestRedirectPolicy_CallerErrorSurvivesAMutation(t *testing.T) {
 		return http.ErrUseLastResponse
 	})
 
-	if err := policy(target, []*http.Request{origin}); !errors.Is(err, http.ErrUseLastResponse) {
-		t.Errorf("policy = %v, want http.ErrUseLastResponse propagated unchanged", err)
-	}
+	err := policy(target, []*http.Request{origin})
+	assert.ErrorIs(t, err, http.ErrUseLastResponse, "want http.ErrUseLastResponse propagated unchanged")
 }
 
 // TestRedirectPolicy_EdenRefusalWinsOverPermissiveCaller asserts a caller
@@ -603,13 +525,9 @@ func TestRedirectPolicy_EdenRefusalWinsOverPermissiveCaller(t *testing.T) {
 		"http://api.edenai.run/v3/models",       // cleartext downgrade
 		"https://evil.api.edenai.run/v3/models", // cross-host
 	} {
-		if err := policy(mustRequest(t, target), []*http.Request{origin}); err == nil {
-			t.Errorf("policy(%q) = nil, want Eden's refusal to stand", target)
-		}
+		require.Error(t, policy(mustRequest(t, target), []*http.Request{origin}), "policy(%q) = nil, want Eden's refusal to stand", target)
 	}
-	if called != 0 {
-		t.Errorf("caller policy invoked %d times, want 0: Eden refuses before delegating", called)
-	}
+	assert.Zero(t, called, "caller policy was invoked, want 0 calls: Eden refuses before delegating")
 }
 
 // TestRedirectPolicy_NilCallerAllowsEdenApprovedHop asserts the common case —
@@ -618,9 +536,7 @@ func TestRedirectPolicy_NilCallerAllowsEdenApprovedHop(t *testing.T) {
 	origin := mustRequest(t, "https://api.edenai.run/v3/models")
 	target := mustRequest(t, "https://api.edenai.run/v3/models-moved")
 
-	if err := redirectPolicy(nil)(target, []*http.Request{origin}); err != nil {
-		t.Errorf("redirectPolicy(nil) = %v, want nil for a same-host TLS hop", err)
-	}
+	require.NoError(t, redirectPolicy(nil)(target, []*http.Request{origin}), "redirectPolicy(nil), want nil for a same-host TLS hop")
 }
 
 // TestGuardedHTTPClient_ComposesCallerRedirectPolicy asserts the composition is
@@ -636,21 +552,15 @@ func TestGuardedHTTPClient_ComposesCallerRedirectPolicy(t *testing.T) {
 	origin := mustRequest(t, "https://api.edenai.run/v3/models")
 	target := mustRequest(t, "https://api.edenai.run/v3/models-moved")
 
-	if err := guarded.CheckRedirect(target, []*http.Request{origin}); err != nil {
-		t.Fatalf("CheckRedirect = %v, want nil", err)
-	}
-	if !called {
-		t.Error("the caller's redirect policy was not invoked; the guard must compose, not replace")
-	}
+	require.NoError(t, guarded.CheckRedirect(target, []*http.Request{origin}), "CheckRedirect")
+	assert.True(t, called, "the caller's redirect policy was not invoked; the guard must compose, not replace")
 }
 
 // mustRequest builds a GET request for a URL a test controls.
 func mustRequest(t *testing.T, rawURL string) *http.Request {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
-	if err != nil {
-		t.Fatalf("http.NewRequest(%q): %v", rawURL, err)
-	}
+	require.NoError(t, err, "http.NewRequest(%q)", rawURL)
 	return req
 }
 
@@ -660,35 +570,23 @@ func mustRequest(t *testing.T, rawURL string) *http.Request {
 // redirect would otherwise forward the bearer token in the clear.
 func TestCheckRedirect_RefusesSchemeDowngrade(t *testing.T) {
 	req, err := http.NewRequest(http.MethodGet, "http://api.edenai.run/v3/chat/completions", nil)
-	if err != nil {
-		t.Fatalf("http.NewRequest: %v", err)
-	}
+	require.NoError(t, err, "http.NewRequest")
 
 	err = checkRedirect(req, nil)
-	if err == nil {
-		t.Fatal("checkRedirect = nil, want a refusal for a cleartext redirect target")
-	}
-	if !strings.Contains(err.Error(), "api.edenai.run") {
-		t.Errorf("error %q should name the refused host", err)
-	}
+	require.Error(t, err, "checkRedirect = nil, want a refusal for a cleartext redirect target")
+	assert.ErrorContains(t, err, "api.edenai.run", "the error should name the refused host")
 }
 
 // TestCheckRedirect_ErrorOmitsCredentials asserts the refusal message cannot
 // leak a secret carried in the redirect URL's userinfo or query string.
 func TestCheckRedirect_ErrorOmitsCredentials(t *testing.T) {
 	req, err := http.NewRequest(http.MethodGet, "http://user:s3cret@api.edenai.run/v3?api_key=leaked", nil)
-	if err != nil {
-		t.Fatalf("http.NewRequest: %v", err)
-	}
+	require.NoError(t, err, "http.NewRequest")
 
 	err = checkRedirect(req, nil)
-	if err == nil {
-		t.Fatal("checkRedirect = nil, want a refusal")
-	}
+	require.Error(t, err, "checkRedirect = nil, want a refusal")
 	for _, secret := range []string{"s3cret", "leaked"} {
-		if strings.Contains(err.Error(), secret) {
-			t.Errorf("error %q leaked %q from the redirect URL", err, secret)
-		}
+		assert.NotContains(t, err.Error(), secret, "error leaked %q from the redirect URL", secret)
 	}
 }
 
@@ -696,14 +594,10 @@ func TestCheckRedirect_ErrorOmitsCredentials(t *testing.T) {
 // silently remove net/http's own protection against endless redirect chains.
 func TestCheckRedirect_EnforcesRedirectBudget(t *testing.T) {
 	req, err := http.NewRequest(http.MethodGet, defaultBaseURL, nil)
-	if err != nil {
-		t.Fatalf("http.NewRequest: %v", err)
-	}
+	require.NoError(t, err, "http.NewRequest")
 	via := make([]*http.Request, maxRedirects)
 
-	if err := checkRedirect(req, via); err == nil {
-		t.Fatalf("checkRedirect with %d prior hops = nil, want the redirect budget enforced", maxRedirects)
-	}
+	require.Error(t, checkRedirect(req, via), "checkRedirect with %d prior hops = nil, want the redirect budget enforced", maxRedirects)
 }
 
 // TestRedirect_HTTPSToHTTPDoesNotForwardCredential exercises the guard through
@@ -731,27 +625,19 @@ func TestRedirect_HTTPSToHTTPDoesNotForwardCredential(t *testing.T) {
 	defer secure.Close()
 
 	cleartextTarget, err := url.Parse(cleartext.URL)
-	if err != nil {
-		t.Fatalf("url.Parse: %v", err)
-	}
+	require.NoError(t, err, "url.Parse")
 	client := secure.Client()
 	client.Transport = &cleartextRouteTransport{
 		base:      client.Transport,
 		cleartext: cleartextTarget.Host,
 	}
 
-	provider := NewWithHTTPClient("eden-key", secure.URL+"/v3", client, llmclient.Hooks{})
+	provider := newTestProvider("eden-key", secure.URL+"/v3", client, llmclient.Hooks{})
 	_, err = provider.Embeddings(context.Background(), embeddingRequest())
-	if err == nil {
-		t.Fatal("Embeddings succeeded through an HTTPS -> HTTP redirect, want the redirect refused")
-	}
+	require.Error(t, err, "Embeddings succeeded through an HTTPS -> HTTP redirect, want the redirect refused")
 
-	if cleartextHits != 0 {
-		t.Errorf("cleartext endpoint received %d request(s), want 0", cleartextHits)
-	}
-	if cleartextAuth != "" {
-		t.Errorf("cleartext endpoint saw Authorization = %q, want empty", cleartextAuth)
-	}
+	assert.Zero(t, cleartextHits, "cleartext endpoint received requests, want 0")
+	assert.Empty(t, cleartextAuth, "cleartext endpoint saw an Authorization header, want empty")
 }
 
 // TestRedirect_CleartextLoopbackStillFollowed pins the exemption's scope: a
@@ -774,16 +660,11 @@ func TestRedirect_CleartextLoopbackStillFollowed(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	provider := NewWithHTTPClient("eden-key", server.URL+"/v3", server.Client(), llmclient.Hooks{})
-	if _, err := provider.Embeddings(context.Background(), embeddingRequest()); err != nil {
-		t.Fatalf("Embeddings through a loopback redirect: %v", err)
-	}
-	if !served {
-		t.Fatal("redirect target was never reached")
-	}
-	if finalAuth != "Bearer eden-key" {
-		t.Errorf("redirect target saw Authorization = %q, want %q", finalAuth, "Bearer eden-key")
-	}
+	provider := newTestProvider("eden-key", server.URL+"/v3", server.Client(), llmclient.Hooks{})
+	_, err := provider.Embeddings(context.Background(), embeddingRequest())
+	require.NoError(t, err, "Embeddings through a loopback redirect")
+	require.True(t, served, "redirect target was never reached")
+	assert.Equal(t, "Bearer eden-key", finalAuth, "redirect target Authorization header")
 }
 
 // TestRedirect_HTTPSToHTTPSStillFollowed asserts the guard is narrow: a
@@ -806,20 +687,12 @@ func TestRedirect_HTTPSToHTTPSStillFollowed(t *testing.T) {
 	secure := httptest.NewTLSServer(mux)
 	defer secure.Close()
 
-	provider := NewWithHTTPClient("eden-key", secure.URL+"/v3", secure.Client(), llmclient.Hooks{})
+	provider := newTestProvider("eden-key", secure.URL+"/v3", secure.Client(), llmclient.Hooks{})
 	resp, err := provider.Embeddings(context.Background(), embeddingRequest())
-	if err != nil {
-		t.Fatalf("Embeddings through an HTTPS -> HTTPS redirect: %v", err)
-	}
-	if !served {
-		t.Fatal("redirect target was never reached")
-	}
-	if resp == nil {
-		t.Fatal("response = nil")
-	}
-	if finalAuth != "Bearer eden-key" {
-		t.Errorf("redirect target saw Authorization = %q, want %q", finalAuth, "Bearer eden-key")
-	}
+	require.NoError(t, err, "Embeddings through an HTTPS -> HTTPS redirect")
+	require.True(t, served, "redirect target was never reached")
+	require.NotNil(t, resp, "response = nil")
+	assert.Equal(t, "Bearer eden-key", finalAuth, "redirect target Authorization header")
 }
 
 // TestRedirect_HTTPSSubdomainDoesNotForwardCredential is the end-to-end form of
@@ -847,26 +720,18 @@ func TestRedirect_HTTPSSubdomainDoesNotForwardCredential(t *testing.T) {
 	defer server.Close()
 
 	target, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatalf("url.Parse: %v", err)
-	}
+	require.NoError(t, err, "url.Parse")
 	client := server.Client()
 	// Route both hostnames to the one test server; the TLS config from
 	// server.Client() already trusts its certificate.
 	client.Transport = &hostPinnedTransport{base: client.Transport, addr: target.Host}
 
-	provider := NewWithHTTPClient("eden-key", "https://eden.test/v3", client, llmclient.Hooks{})
+	provider := newTestProvider("eden-key", "https://eden.test/v3", client, llmclient.Hooks{})
 	_, err = provider.Embeddings(context.Background(), embeddingRequest())
-	if err == nil {
-		t.Fatal("Embeddings followed an HTTPS subdomain redirect, want it refused")
-	}
+	require.Error(t, err, "Embeddings followed an HTTPS subdomain redirect, want it refused")
 
-	if secondHopHits != 0 {
-		t.Errorf("subdomain endpoint received %d request(s), want 0", secondHopHits)
-	}
-	if secondHopAuth != "" {
-		t.Errorf("subdomain endpoint saw Authorization = %q, want empty: the Eden key must not follow an upstream-chosen host", secondHopAuth)
-	}
+	assert.Zero(t, secondHopHits, "subdomain endpoint received requests, want 0")
+	assert.Empty(t, secondHopAuth, "subdomain endpoint saw an Authorization header, want empty: the Eden key must not follow an upstream-chosen host")
 }
 
 // hostPinnedTransport dials one fixed address whatever hostname the request
@@ -893,9 +758,7 @@ func (t *hostPinnedTransport) RoundTrip(req *http.Request) (*http.Response, erro
 // http:// would silently withhold the API key on ordinary traffic.
 // TestNew_DefaultsBaseURL already covers New resolving to this value.
 func TestDefaultBaseURLIsHTTPS(t *testing.T) {
-	if !strings.HasPrefix(defaultBaseURL, "https://") {
-		t.Fatalf("defaultBaseURL = %q, want an https:// endpoint", defaultBaseURL)
-	}
+	require.True(t, strings.HasPrefix(defaultBaseURL, "https://"), "defaultBaseURL = %q, want an https:// endpoint", defaultBaseURL)
 }
 
 // TestSetBaseURL_OverridesResolvedEndpoint covers the public base-URL override,
@@ -903,89 +766,80 @@ func TestDefaultBaseURLIsHTTPS(t *testing.T) {
 // endpoint the provider was constructed with.
 func TestSetBaseURL_OverridesResolvedEndpoint(t *testing.T) {
 	provider, ok := New(providers.ProviderConfig{APIKey: "eden-key"}, providers.ProviderOptions{}).(*Provider)
-	if !ok {
-		t.Fatal("New did not return *Provider")
-	}
+	require.True(t, ok, "New did not return *Provider")
 
 	const override = "https://eden.eu.example.com/v3"
 	provider.SetBaseURL(override)
-	if got := provider.GetBaseURL(); got != override {
-		t.Errorf("GetBaseURL() = %q, want %q after SetBaseURL", got, override)
-	}
+	assert.Equal(t, override, provider.GetBaseURL(), "GetBaseURL() after SetBaseURL")
 }
 
-// TestGuardedHTTPClient_PreservesDefaultClientSemantics pins what
-// NewWithHTTPClient's nil path produces. Every other chat-compatible provider
-// documents "if httpClient is nil, http.DefaultClient is used", and gets that
-// from NewCompatibleProviderWithHTTPClient; Eden hands that helper an
-// already-guarded client, so it substitutes http.DefaultClient itself. Guarding
-// that client must leave its transport and its absent timeout alone, or the
-// constructor would quietly diverge from every peer.
+// TestGuardedHTTPClient_PreservesDefaultClientSemantics pins what happens when
+// a caller hands New http.DefaultClient through ProviderOptions.HTTPClient.
+// Guarding that client must leave its transport and its absent timeout alone:
+// the caller chose those semantics, and the guard's only job is to add the
+// redirect and cleartext policies on top of them.
 //
 // The guard also has to go on a copy: writing CheckRedirect onto
 // http.DefaultClient would change redirect behavior for every other user of
 // that global in the process. That is the assertion that matters most here.
 //
-// The substitution itself is not observable from outside the provider (the
+// The guarded client itself is not observable from outside the provider (the
 // transport lives on an unexported field of openai.CompatibleProvider), so it
 // is pinned by this test together with
-// TestGuardedHTTPClient_NilBuildsGatewayDefault, which shows the two callers
-// deliberately get different clients.
+// TestGuardedHTTPClient_NilBuildsGatewayDefault, which shows the nil path
+// deliberately gets a different client.
 func TestGuardedHTTPClient_PreservesDefaultClientSemantics(t *testing.T) {
 	guarded := guardedHTTPClient(http.DefaultClient)
 
-	if guarded == http.DefaultClient {
-		t.Fatal("guardedHTTPClient returned http.DefaultClient itself; want a copy")
-	}
-	if http.DefaultClient.CheckRedirect != nil {
-		t.Error("http.DefaultClient.CheckRedirect was set; the process-wide client must not be modified")
-	}
-	if guarded.CheckRedirect == nil {
-		t.Error("CheckRedirect = nil, want Eden's redirect guard on the copy")
-	}
+	require.NotSame(t, http.DefaultClient, guarded, "guardedHTTPClient returned http.DefaultClient itself; want a copy")
+	assert.Nil(t, http.DefaultClient.CheckRedirect, "http.DefaultClient.CheckRedirect was set; the process-wide client must not be modified")
+	assert.NotNil(t, guarded.CheckRedirect, "CheckRedirect = nil, want Eden's redirect guard on the copy")
 	wrapped, ok := guarded.Transport.(*secureTransport)
-	if !ok {
-		t.Fatalf("Transport = %T, want *secureTransport", guarded.Transport)
-	}
+	require.True(t, ok, "Transport = %T, want *secureTransport", guarded.Transport)
 	// http.DefaultClient leaves Transport nil, meaning http.DefaultTransport;
 	// the wrapper preserves that by delegating to it when its base is nil.
-	if wrapped.base != http.DefaultClient.Transport {
-		t.Errorf("wrapped base = %v, want http.DefaultClient's transport (nil)", wrapped.base)
-	}
-	if guarded.Timeout != http.DefaultClient.Timeout {
-		t.Errorf("Timeout = %v, want http.DefaultClient's %v, not the gateway client's", guarded.Timeout, http.DefaultClient.Timeout)
-	}
+	assert.Equal(t, http.DefaultClient.Transport, wrapped.base, "wrapped base should be http.DefaultClient's transport (nil)")
+	assert.Equal(t, http.DefaultClient.Timeout, guarded.Timeout, "Timeout should be http.DefaultClient's, not the gateway client's")
 }
 
-// TestGuardedHTTPClient_NilBuildsGatewayDefault covers the other caller: New
-// passes nil because the factory path has no client of its own, and must get
-// the tuned transport and timeouts llmclient would otherwise have installed —
-// not http.DefaultClient's absent timeout.
+// TestGuardedHTTPClient_NilBuildsGatewayDefault covers the nil path: New
+// passes opts.HTTPClient, which is nil unless the factory applied an outbound
+// proxy or a test injected a client, and that path must produce the tuned
+// gateway client — the transport and timeouts llmclient would otherwise have
+// installed — not http.DefaultClient's absent timeout.
 func TestGuardedHTTPClient_NilBuildsGatewayDefault(t *testing.T) {
 	guarded := guardedHTTPClient(nil)
 
-	if guarded.CheckRedirect == nil {
-		t.Error("CheckRedirect = nil, want Eden's redirect guard")
-	}
-	if guarded.Timeout <= 0 {
-		t.Errorf("Timeout = %v, want the gateway default client's positive timeout", guarded.Timeout)
-	}
+	assert.NotNil(t, guarded.CheckRedirect, "CheckRedirect = nil, want Eden's redirect guard")
+	assert.Positive(t, guarded.Timeout, "Timeout should be the gateway default client's positive timeout")
 }
 
-// TestNewWithHTTPClient_NilClientStillGuardsRedirects proves the nil path is
-// wired end to end: a provider built with no client still refuses a
-// credential-leaking redirect rather than following it.
-func TestNewWithHTTPClient_NilClientStillGuardsRedirects(t *testing.T) {
-	provider := NewWithHTTPClient("eden-key", "http://eden.example.com/v3", nil, llmclient.Hooks{})
-	if provider == nil {
-		t.Fatal("NewWithHTTPClient(..., nil, ...) returned nil")
-	}
+// TestNew_NilClientStillGuardsRedirects proves the nil-client path is wired end
+// to end: a provider built with no client of its own runs on the guarded
+// gateway default client, so a credential-leaking redirect is refused rather
+// than followed. The guard refuses the hop before dialing, so no DNS lookup of
+// the redirect target ever happens.
+//
+// llmclient treats the refusal as a transport error and retries it, so the
+// loopback server sees one request per attempt; every attempt stops at the
+// same guard, and none of them is a followed redirect.
+func TestNew_NilClientStillGuardsRedirects(t *testing.T) {
+	var hits int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		http.Redirect(w, r, "http://eden.example.com/v3/embeddings", http.StatusFound)
+	}))
+	defer server.Close()
 
-	req, err := http.NewRequest(http.MethodGet, "http://api.edenai.run/v3/chat/completions", nil)
-	if err != nil {
-		t.Fatalf("http.NewRequest: %v", err)
-	}
-	if err := checkRedirect(req, nil); err == nil {
-		t.Error("checkRedirect = nil for a cleartext target; the guard must apply on the nil-client path too")
-	}
+	provider := newTestProvider("eden-key", server.URL+"/v3", nil, llmclient.Hooks{})
+	_, err := provider.Embeddings(context.Background(), embeddingRequest())
+	require.Error(t, err, "Embeddings followed a cleartext redirect on the nil-client path, want it refused")
+	// The client-facing message hides upstream details by design; the guard's
+	// refusal is the cause net/http wrapped in a *url.Error.
+	var urlErr *url.Error
+	require.ErrorAs(t, err, &urlErr, "want the redirect refusal retained as the cause")
+	require.ErrorContains(t, urlErr.Err, "follow redirect", "want the redirect guard, not the request guard, to have refused")
+	require.ErrorContains(t, urlErr.Err, "cleartext", "want the redirect guard's cleartext refusal")
+	attempts := 1 + providertest.Resilience().Retry.MaxRetries
+	assert.Equal(t, attempts, hits, "the loopback server should see exactly the original request once per attempt")
 }

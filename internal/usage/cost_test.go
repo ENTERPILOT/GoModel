@@ -790,23 +790,18 @@ func TestCalculateUsageCost_EdenAICostOverridesStaticPricing(t *testing.T) {
 	result := CalculateUsageCost(1170, 99, map[string]any{"cost": 0.0002349}, "edenai", pricing)
 
 	assertCostNear(t, "TotalCost", result.TotalCost, 0.0002349)
-	if result.Source != CostSourceEdenAICost {
-		t.Fatalf("Source = %q, want %q", result.Source, CostSourceEdenAICost)
-	}
+	require.Equal(t, CostSourceEdenAICost, result.Source)
 	// Eden reports no input/output split, so only the total is claimed rather
 	// than inventing a division of it.
-	if result.InputCost != nil || result.OutputCost != nil {
-		t.Fatalf("InputCost/OutputCost = %v/%v, want nil (Eden reports no split)", result.InputCost, result.OutputCost)
-	}
+	require.Nil(t, result.InputCost, "Eden reports no split")
+	require.Nil(t, result.OutputCost, "Eden reports no split")
 }
 
 func TestCalculateUsageCost_EdenAIAcceptsZeroCost(t *testing.T) {
 	result := CalculateUsageCost(10, 4, map[string]any{"cost": 0.0}, "edenai", nil)
 
 	assertCostNear(t, "TotalCost", result.TotalCost, 0)
-	if result.Source != CostSourceEdenAICost {
-		t.Fatalf("Source = %q, want %q", result.Source, CostSourceEdenAICost)
-	}
+	require.Equal(t, CostSourceEdenAICost, result.Source)
 }
 
 // Without a usable cost the request must fall back to the ordinary token math
@@ -836,9 +831,7 @@ func TestCalculateUsageCost_EdenAIFallsBackToModelPricingWhenCostUnusable(t *tes
 			assertCostNear(t, "InputCost", result.InputCost, 1.0)
 			assertCostNear(t, "OutputCost", result.OutputCost, 1.0)
 			assertCostNear(t, "TotalCost", result.TotalCost, 2.0)
-			if result.Source != CostSourceModelPricing {
-				t.Fatalf("Source = %q, want %q", result.Source, CostSourceModelPricing)
-			}
+			require.Equal(t, CostSourceModelPricing, result.Source)
 		})
 	}
 }
@@ -854,9 +847,7 @@ func TestCalculateUsageCost_EdenAICostIgnoredForOtherProviders(t *testing.T) {
 	result := CalculateUsageCost(1_000_000, 500_000, map[string]any{"cost": 0.0002349}, "openai", pricing)
 
 	assertCostNear(t, "TotalCost", result.TotalCost, 2.0)
-	if result.Source != CostSourceModelPricing {
-		t.Fatalf("Source = %q, want %q", result.Source, CostSourceModelPricing)
-	}
+	require.Equal(t, CostSourceModelPricing, result.Source)
 }
 
 // With no pricing and no usable cost the entry stays uncosted rather than
@@ -864,10 +855,6 @@ func TestCalculateUsageCost_EdenAICostIgnoredForOtherProviders(t *testing.T) {
 func TestCalculateUsageCost_EdenAIWithoutCostOrPricingRecordsNothing(t *testing.T) {
 	result := CalculateUsageCost(10, 4, map[string]any{}, "edenai", nil)
 
-	if result.TotalCost != nil {
-		t.Fatalf("TotalCost = %v, want nil", *result.TotalCost)
-	}
-	if result.Source != "" {
-		t.Fatalf("Source = %q, want empty", result.Source)
-	}
+	require.Nil(t, result.TotalCost)
+	require.Empty(t, result.Source)
 }

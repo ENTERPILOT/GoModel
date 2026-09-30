@@ -1481,18 +1481,10 @@ func TestBuildProviderConfig_EdenAI_ResolvesBaseURL(t *testing.T) {
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["edenai"]
-	if !exists {
-		t.Fatal("edenai not discovered by config parser")
-	}
-	if p.Type != "edenai" {
-		t.Errorf("Type = %q, want edenai", p.Type)
-	}
-	if p.APIKey != "edenai-test-key" {
-		t.Errorf("APIKey = %q, want edenai-test-key", p.APIKey)
-	}
-	if p.BaseURL != "https://api.edenai.run/v3" {
-		t.Errorf("BaseURL = %q, want https://api.edenai.run/v3", p.BaseURL)
-	}
+	require.True(t, exists, "edenai not discovered by config parser")
+	assert.Equal(t, "edenai", p.Type)
+	assert.Equal(t, "edenai-test-key", p.APIKey)
+	assert.Equal(t, "https://api.edenai.run/v3", p.BaseURL)
 }
 
 // TestBuildProviderConfig_EdenAI_BaseURLOverride asserts EDENAI_BASE_URL wins
@@ -1505,12 +1497,8 @@ func TestBuildProviderConfig_EdenAI_BaseURLOverride(t *testing.T) {
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["edenai"]
-	if !exists {
-		t.Fatal("edenai not discovered by config parser")
-	}
-	if p.BaseURL != "https://eden.internal.example/v3" {
-		t.Errorf("BaseURL = %q, want https://eden.internal.example/v3", p.BaseURL)
-	}
+	require.True(t, exists, "edenai not discovered by config parser")
+	assert.Equal(t, "https://eden.internal.example/v3", p.BaseURL)
 }
 
 func TestApplyProviderEnvVars_ModelFilter(t *testing.T) {
