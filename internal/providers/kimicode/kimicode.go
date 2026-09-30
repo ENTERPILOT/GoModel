@@ -95,16 +95,24 @@ func rejectPreviousResponseID(req *core.ResponsesRequest) error {
 
 // adaptResponsesRequest pins store to false: the service retains no
 // responses, so store=true fails upstream with a 400 (Postel's law — adapt
-// instead of failing).
+// instead of failing). A whitespace-only previous_response_id is treated as
+// empty by rejectPreviousResponseID and cleared here, because omitempty does
+// not omit a non-empty whitespace string and the upstream cannot resolve it.
 func adaptResponsesRequest(req *core.ResponsesRequest) *core.ResponsesRequest {
 	if req == nil {
 		return nil
 	}
-	if req.Store == nil || !*req.Store {
+	whitespaceID := req.PreviousResponseID != "" && strings.TrimSpace(req.PreviousResponseID) == ""
+	if (req.Store == nil || !*req.Store) && !whitespaceID {
 		return req
 	}
 	cp := *req
-	disabled := false
-	cp.Store = &disabled
+	if req.Store != nil && *req.Store {
+		disabled := false
+		cp.Store = &disabled
+	}
+	if whitespaceID {
+		cp.PreviousResponseID = ""
+	}
 	return &cp
 }

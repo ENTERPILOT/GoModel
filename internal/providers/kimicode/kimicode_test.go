@@ -88,6 +88,18 @@ func TestAdaptResponsesRequest(t *testing.T) {
 		require.NotNil(t, got.Store)
 		assert.False(t, *got.Store, "explicit store=false should stay false")
 	})
+
+	t.Run("whitespace-only previous_response_id is cleared", func(t *testing.T) {
+		req := &core.ResponsesRequest{
+			Model:              "kimi-for-coding",
+			Input:              "hi",
+			PreviousResponseID: "   ",
+		}
+		got := adaptResponsesRequest(req)
+		require.NotSame(t, req, got, "adapted request should be a copy")
+		assert.Empty(t, got.PreviousResponseID)
+		assert.Equal(t, "   ", req.PreviousResponseID, "original request was mutated")
+	})
 }
 
 // responsesGoldenBody mirrors a real non-streaming /responses reply from the
@@ -208,7 +220,9 @@ func TestResponses_RejectsPreviousResponseID(t *testing.T) {
 
 	t.Run("whitespace-only ID passes through", func(t *testing.T) {
 		// The gateway and the chat-translation validator treat a
-		// whitespace-only ID as empty; the provider must behave the same.
+		// whitespace-only ID as empty; the provider must behave the same,
+		// and the unresolvable value must not reach the wire (omitempty
+		// does not omit a non-empty whitespace string).
 		resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
 			Model:              "kimi-for-coding",
 			Input:              "Say OK",
@@ -217,6 +231,9 @@ func TestResponses_RejectsPreviousResponseID(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, resp)
 		assert.Equal(t, 1, capture.Count(), "whitespace-only ID is treated as empty")
+		wire := capture.Last(t).JSON(t)
+		_, present := wire["previous_response_id"]
+		assert.False(t, present, "whitespace-only ID must be omitted from the wire")
 	})
 
 	t.Run("conversation reference is rejected", func(t *testing.T) {
