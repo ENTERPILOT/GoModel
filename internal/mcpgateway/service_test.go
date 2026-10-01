@@ -300,6 +300,30 @@ func TestAggregatedEndpointAcceptsUniqueBareToolName(t *testing.T) {
 	require.Equal(t, "alpha", entries[0].ProviderName)
 }
 
+func TestCanonicalToolNameResolvesSessionAliases(t *testing.T) {
+	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	betaURL := newTestUpstream(t, "beta", func(server *mcp.Server) {
+		addEchoTool("echo")(server)
+		addEchoTool("search")(server)
+	})
+	gammaURL := newTestUpstream(t, "gamma", addEchoTool("fetch"))
+	service, gatewayURL := newTestService(t, nil,
+		testSpec("alpha", alphaURL, nil),
+		testSpec("beta", betaURL, nil),
+		testSpec("gamma", gammaURL, nil),
+	)
+
+	aggregated := connectClient(t, gatewayURL+"/mcp", nil).ID()
+	assert.Equal(t, "beta_search", service.CanonicalToolName(aggregated, "search"))
+	assert.Equal(t, "gamma_fetch", service.CanonicalToolName(aggregated, "fetch"))
+	assert.Equal(t, "echo", service.CanonicalToolName(aggregated, "echo"), "ambiguous names stay as sent")
+	assert.Equal(t, "alpha_echo", service.CanonicalToolName(aggregated, "alpha_echo"))
+
+	pinned := connectClient(t, gatewayURL+"/mcp/beta", nil).ID()
+	assert.Equal(t, "search", service.CanonicalToolName(pinned, "search"), "pinned endpoints use original names")
+	assert.Equal(t, "search", service.CanonicalToolName("unknown-session", "search"))
+}
+
 func TestAggregatedEndpointRejectsAmbiguousBareToolName(t *testing.T) {
 	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
 	betaURL := newTestUpstream(t, "beta", addEchoTool("echo"))
@@ -527,9 +551,9 @@ func TestAuthorizeSessionFailsClosedWithoutBinding(t *testing.T) {
 	err := service.authorizeSessionID("deleted-session", "alpha")
 	require.ErrorIs(t, err, ErrServerNotVisible)
 
-	service.bindSession("live", "", "/staff", "")
+	service.bindSession("live", "", "/staff", "", nil)
 	require.NoError(t, service.authorizeSessionID("live", "alpha"))
-	service.bindSession("contractor", "", "/contractors/acme", "")
+	service.bindSession("contractor", "", "/contractors/acme", "", nil)
 	require.ErrorIs(t, service.authorizeSessionID("contractor", "alpha"), ErrServerNotVisible)
 }
 

@@ -75,6 +75,16 @@ func TestRankTools(t *testing.T) {
 	}
 }
 
+func TestRankToolsFindsExactNamesWithoutSearchTerms(t *testing.T) {
+	idx := &toolIndex{}
+	idx.add("in", "alpha", &mcp.Tool{Name: "in", InputSchema: map[string]any{"type": "object"}})
+	idx.add("x", "alpha", &mcp.Tool{Name: "x", InputSchema: map[string]any{"type": "object"}})
+
+	assert.Equal(t, []string{"in"}, exposedNames(rankTools("in", idx.tools, 5)), "stop word")
+	assert.Equal(t, []string{"x"}, exposedNames(rankTools("X", idx.tools, 5)), "single letter")
+	assert.Empty(t, rankTools("the", idx.tools, 5))
+}
+
 func TestToolArguments(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -74,8 +74,43 @@ func TestMCPAuditLabel(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := mcpAuditLabel([]byte(tt.body))
+			got := mcpAuditLabel([]byte(tt.body), nil)
 			require.Equal(t, tt.want, got, "mcpAuditLabel(%s) = %q, want %q", tt.body, got, tt.want)
+		})
+	}
+}
+
+func TestMCPAuditLabelResolvesToolNames(t *testing.T) {
+	resolve := func(name string) string {
+		if name == "echo" {
+			return "alpha_echo"
+		}
+		return name
+	}
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "bare tools/call name",
+			body: `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo"}}`,
+			want: "alpha_echo",
+		},
+		{
+			name: "bare call_tool target",
+			body: `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"call_tool","arguments":{"name":"echo"}}}`,
+			want: "alpha_echo",
+		},
+		{
+			name: "prompts are not tool names",
+			body: `{"jsonrpc":"2.0","id":3,"method":"prompts/get","params":{"name":"echo"}}`,
+			want: "echo",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, mcpAuditLabel([]byte(tt.body), resolve))
 		})
 	}
 }
@@ -382,7 +417,7 @@ func TestEnrichMCPAuditEntryRestoresBody(t *testing.T) {
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`
 	c, _ := echotest.Post(t, "/mcp", body)
 
-	enrichMCPAuditEntry(c, false)
+	enrichMCPAuditEntry(c, false, nil)
 
 	restored, err := io.ReadAll(c.Request().Body)
 	require.NoError(t, err)
@@ -394,7 +429,7 @@ func TestEnrichMCPAuditEntryCapturesRequestBody(t *testing.T) {
 	entry := &auditlog.LogEntry{}
 	c, _ := echotest.Post(t, "/mcp", body, echotest.WithValue(string(auditlog.LogEntryKey), entry))
 
-	enrichMCPAuditEntry(c, true)
+	enrichMCPAuditEntry(c, true, nil)
 
 	require.NotNil(t, entry.Data)
 	require.NotNil(t, entry.Data.RequestBody)
@@ -410,7 +445,7 @@ func TestEnrichMCPAuditEntryBodyLoggingOff(t *testing.T) {
 	entry := &auditlog.LogEntry{}
 	c, _ := echotest.Post(t, "/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, echotest.WithValue(string(auditlog.LogEntryKey), entry))
 
-	enrichMCPAuditEntry(c, false)
+	enrichMCPAuditEntry(c, false, nil)
 
 	if entry.Data != nil {
 		require.Nil(t, entry.Data.RequestBody, "body logging is off")

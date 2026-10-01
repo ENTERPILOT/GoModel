@@ -41,7 +41,10 @@ func (s *mcpService) handle(c *echo.Context, pinnedServer string) error {
 	// so they count against user-path rate limits and budget gates. GET (the
 	// notification stream) and DELETE (session teardown) stay free.
 	if c.Request().Method == http.MethodPost {
-		enrichMCPAuditEntry(c, s.logBodies)
+		sessionID := strings.TrimSpace(c.Request().Header.Get("Mcp-Session-Id"))
+		enrichMCPAuditEntry(c, s.logBodies, func(name string) string {
+			return s.gateway.CanonicalToolName(sessionID, name)
+		})
 		release, err := enforceRateLimit(c, s.rateLimiter, rateLimitRoute{})
 		if err != nil {
 			return handleError(c, err)
@@ -74,7 +77,7 @@ func (s *mcpService) handle(c *echo.Context, pinnedServer string) error {
 // the JSON-RPC frame as the request body when body logging is on. The body is
 // restored for the gateway handler; the body-limit middleware has already
 // bounded its size.
-func enrichMCPAuditEntry(c *echo.Context, logBodies bool) {
+func enrichMCPAuditEntry(c *echo.Context, logBodies bool, resolveTool func(string) string) {
 	req := c.Request()
 	if req.Body == nil {
 		return
@@ -86,7 +89,7 @@ func enrichMCPAuditEntry(c *echo.Context, logBodies bool) {
 		return
 	}
 
-	if label := mcpAuditLabel(body); label != "" {
+	if label := mcpAuditLabel(body, resolveTool); label != "" {
 		auditlog.EnrichEntry(c, label, "mcp")
 	}
 	if logBodies {
@@ -96,19 +99,26 @@ func enrichMCPAuditEntry(c *echo.Context, logBodies bool) {
 
 // mcpAuditLabel derives the request-log label from one JSON-RPC frame: the
 // tool/prompt name for calls, otherwise the method. A search-discovery
-// call_tool is labelled with the tool it runs, matching its usage entry.
+// call_tool is labelled with the tool it runs, and resolveTool (optional)
+// maps a bare tool name to the namespaced one, both matching usage entries.
 // Empty means unlabelable (a bare response or malformed frame).
-func mcpAuditLabel(body []byte) string {
+func mcpAuditLabel(body []byte, resolveTool func(string) string) string {
 	method := strings.TrimSpace(gjson.GetBytes(body, "method").String())
 	if method == "" {
 		return ""
 	}
 	if name := strings.TrimSpace(gjson.GetBytes(body, "params.name").String()); name != "" &&
 		(method == "tools/call" || method == "prompts/get") {
-		if method == "tools/call" && name == mcpgateway.CallToolName {
+		if method != "tools/call" {
+			return name
+		}
+		if name == mcpgateway.CallToolName {
 			if inner := strings.TrimSpace(gjson.GetBytes(body, "params.arguments.name").String()); inner != "" {
-				return inner
+				name = inner
 			}
+		}
+		if resolveTool != nil {
+			name = resolveTool(name)
 		}
 		return name
 	}

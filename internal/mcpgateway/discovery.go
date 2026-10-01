@@ -94,8 +94,10 @@ func (idx *toolIndex) lookup(name string) (indexedTool, bool) {
 // Each term is weighted by how rare it is, so a server prefix shared by every
 // tool does not drown out the words that tell tools apart.
 func rankTools(query string, candidates []indexedTool, limit int) []indexedTool {
+	// No early return on an empty term list: a stop word or single letter
+	// yields no terms but can still be an exact tool name.
 	terms := dedupe(searchTerms(query))
-	if len(terms) == 0 || len(candidates) == 0 {
+	if len(candidates) == 0 {
 		return nil
 	}
 	exact := strings.ToLower(strings.TrimSpace(query))

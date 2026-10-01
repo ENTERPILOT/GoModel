@@ -79,6 +79,9 @@ type sessionBinding struct {
 	userPath  string
 	pinned    string
 	lastSeen  time.Time
+	// toolAliases maps the session's unambiguous bare tool names to their
+	// namespaced names, so request logs can name the tool a call resolved to.
+	toolAliases map[string]string
 }
 
 // Options configures NewService.
@@ -351,6 +354,9 @@ func (s *Service) scopeFromRequest(r *http.Request) requestScope {
 func (s *Service) getServer(r *http.Request) *mcp.Server {
 	scope := s.scopeFromRequest(r)
 	views := s.visibleServers(scope)
+	// Assigned below; the SDK asks for the session ID only after getServer
+	// returns, so the binding sees the final map.
+	var aliases map[string]string
 
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "gomodel",
@@ -368,7 +374,7 @@ func (s *Service) getServer(r *http.Request) *mcp.Server {
 		},
 		GetSessionID: func() string {
 			id := rand.Text()
-			s.bindSession(id, scope.authKeyID, scope.userPath, scope.pinned)
+			s.bindSession(id, scope.authKeyID, scope.userPath, scope.pinned, aliases)
 			return id
 		},
 	})
@@ -395,7 +401,6 @@ func (s *Service) getServer(r *http.Request) *mcp.Server {
 		s.registerPrompts(server, view.Spec.Name, snapshot, prefixNames, promptOwners)
 		s.registerResources(server, view.Spec.Name, snapshot, resourceOwners)
 	}
-	var aliases map[string]string
 	if prefixNames {
 		aliases = bareToolAliases(toolOwners)
 	}
@@ -671,15 +676,28 @@ func (s *Service) authorizeSessionID(sessionID, upstreamName string) error {
 }
 
 // bindSession records the principal a new session was initialized under.
-func (s *Service) bindSession(sessionID, authKeyID, userPath, pinned string) {
+func (s *Service) bindSession(sessionID, authKeyID, userPath, pinned string, toolAliases map[string]string) {
 	s.bindMu.Lock()
 	s.bindings[sessionID] = sessionBinding{
-		authKeyID: authKeyID,
-		userPath:  userPath,
-		pinned:    pinned,
-		lastSeen:  time.Now(),
+		authKeyID:   authKeyID,
+		userPath:    userPath,
+		pinned:      pinned,
+		lastSeen:    time.Now(),
+		toolAliases: toolAliases,
 	}
 	s.bindMu.Unlock()
+}
+
+// CanonicalToolName resolves a bare tool name the session accepts on the
+// aggregated endpoint to the namespaced name it runs, matching usage
+// entries. Any other name is returned unchanged.
+func (s *Service) CanonicalToolName(sessionID, name string) string {
+	s.bindMu.Lock()
+	defer s.bindMu.Unlock()
+	if exposed, ok := s.bindings[sessionID].toolAliases[name]; ok {
+		return exposed
+	}
+	return name
 }
 
 // touchBinding refreshes a known session binding and reports whether the
