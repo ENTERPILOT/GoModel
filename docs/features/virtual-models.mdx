@@ -304,6 +304,26 @@ Two lenient exceptions keep valid setups booting:
   loads asynchronously, so availability is a runtime concern and an unavailable
   target is simply skipped at resolve time.
 
+## Model availability by default
+
+Every provider model is available unless a `virtual_models` entry says
+otherwise. To flip that default, set:
+
+```env
+MODELS_ENABLED_BY_DEFAULT=false
+```
+
+With the default off, a provider model stays unavailable until an entry
+matches it. An entry with empty `targets` is enough — it acts as a pure
+access rule (`enabled: true`, optionally with `user_paths`). Unavailable
+models fail requests with `400 model_access_denied` and stay out of
+`GET /v1/models`. A redirect still follows its own `enabled` flag, not the
+default.
+
+This is not the reverse of [exposing only redirects](#expose-only-redirects):
+that setting only changes what `GET /v1/models` lists, while the availability
+default decides which models requests may call at all.
+
 ## Expose only redirects
 
 To hide provider models from `GET /v1/models`, set:
