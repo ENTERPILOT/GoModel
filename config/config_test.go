@@ -132,7 +132,7 @@ func TestBuildDefaultConfig(t *testing.T) {
 	assert.Equal(t, DefaultStreamStallTimeoutSeconds, cfg.Server.StreamStallTimeout)
 	assert.True(t, cfg.Server.EnablePassthroughRoutes)
 	assert.True(t, cfg.Server.AllowPassthroughV1Alias)
-	assert.Equal(t, []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "jev"}, cfg.Server.EnabledPassthroughProviders)
+	assert.Equal(t, []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "edenai", "jev"}, cfg.Server.EnabledPassthroughProviders)
 	assert.Equal(t, ConfiguredProviderModelsModeFallback, cfg.Models.ConfiguredProviderModelsMode)
 	assert.Nil(t, cfg.Cache.Model.Local)
 	assert.Equal(t, 3600, cfg.Cache.Model.RefreshInterval)

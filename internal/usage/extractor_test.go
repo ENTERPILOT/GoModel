@@ -817,3 +817,149 @@ func TestExtractFromEmbeddingResponse_NoUsageCaveat(t *testing.T) {
 	retained := retainedMissingUsageCaveat(caveatEmbeddingMissingUsage, 0, nil, tiered)
 	require.Equal(t, caveatEmbeddingMissingUsage, retained)
 }
+
+// TestExtractFromChatResponse_EdenAIExactCostReachesTotalCost closes the seam
+// between the Eden provider and this package. The provider lifts Eden's
+// root-level cost into Usage.RawUsage; this asserts the extractor carries it
+// into rawData and that the entry ends up priced from it, so Eden spend
+// reaches usage records, budgets, and cost reporting.
+func TestExtractFromChatResponse_EdenAIExactCostReachesTotalCost(t *testing.T) {
+	resp := &core.ChatResponse{
+		ID:    "chatcmpl-eden",
+		Model: "gpt-4o-mini-2024-07-18",
+		Usage: core.Usage{
+			PromptTokens:     1170,
+			CompletionTokens: 99,
+			TotalTokens:      1269,
+			RawUsage:         map[string]any{"cost": 0.0002349},
+		},
+	}
+	// Static pricing that would produce a very different number, to prove the
+	// exact charge wins rather than merely agreeing by coincidence.
+	pricing := &core.ModelPricing{InputPerMtok: new(100.0), OutputPerMtok: new(100.0)}
+
+	entry := ExtractFromChatResponse(resp, "req-eden", "edenai", "/v1/chat/completions", pricing)
+
+	require.NotNil(t, entry)
+	require.Equal(t, 0.0002349, entry.RawData["cost"], "RawData[cost] should be the lifted value")
+	require.NotNil(t, entry.TotalCost)
+	require.InDelta(t, 0.0002349, *entry.TotalCost, 1e-12)
+	require.Equal(t, CostSourceEdenAICost, entry.CostSource)
+	assert.Equal(t, 1170, entry.InputTokens)
+	assert.Equal(t, 99, entry.OutputTokens)
+}
+
+// TestExtractFromChatResponse_EdenAIWithoutCostFallsBackToPricing asserts the
+// fallback path: no exact charge means the discovered per-model pricing is
+// used, rather than the entry going uncosted.
+func TestExtractFromChatResponse_EdenAIWithoutCostFallsBackToPricing(t *testing.T) {
+	resp := &core.ChatResponse{
+		ID:    "chatcmpl-eden",
+		Model: "gpt-4o-mini",
+		Usage: core.Usage{PromptTokens: 1_000_000, CompletionTokens: 500_000, TotalTokens: 1_500_000},
+	}
+	pricing := &core.ModelPricing{InputPerMtok: new(0.06), OutputPerMtok: new(0.18)}
+
+	entry := ExtractFromChatResponse(resp, "req-eden", "edenai", "/v1/chat/completions", pricing)
+
+	require.NotNil(t, entry)
+	require.Equal(t, CostSourceModelPricing, entry.CostSource)
+	// 1M * 0.06/1M + 0.5M * 0.18/1M = 0.06 + 0.09
+	require.NotNil(t, entry.TotalCost)
+	require.InDelta(t, 0.15, *entry.TotalCost, 1e-9, "TotalCost should come from discovered per-model pricing")
+}
+
+// TestExtractFromEmbeddingResponse_ForwardsRawUsage asserts the provider's
+// extra usage members reach the cost pipeline. Without this the embeddings
+// path has no channel for a provider-reported exact charge at all, because
+// ExtractFromEmbeddingResponse builds the entry itself.
+func TestExtractFromEmbeddingResponse_ForwardsRawUsage(t *testing.T) {
+	resp := &core.EmbeddingResponse{
+		Model: "openai/text-embedding-3-small",
+		Usage: core.EmbeddingUsage{
+			PromptTokens: 9,
+			TotalTokens:  9,
+			RawUsage:     map[string]any{"cost": 0.0000012},
+		},
+	}
+
+	entry := ExtractFromEmbeddingResponse(resp, "req", "edenai", "/v1/embeddings")
+	require.NotNil(t, entry)
+	assert.Equal(t, 0.0000012, entry.RawData["cost"], "RawData[cost] should be forwarded from RawUsage")
+	require.NotNil(t, entry.TotalCost)
+	assert.Equal(t, 0.0000012, *entry.TotalCost, "TotalCost should be the provider-reported figure")
+	assert.Equal(t, CostSourceEdenAICost, entry.CostSource)
+}
+
+// TestExtractFromEmbeddingResponse_NilRawUsageStaysNil asserts a provider that
+// reports nothing beyond the token counts is unaffected: RawData stays nil, so
+// cost is calculated exactly as it was before embeddings gained the carrier.
+func TestExtractFromEmbeddingResponse_NilRawUsageStaysNil(t *testing.T) {
+	rate := 0.02
+	resp := &core.EmbeddingResponse{
+		Model: "text-embedding-3-small",
+		Usage: core.EmbeddingUsage{PromptTokens: 1000, TotalTokens: 1000},
+	}
+
+	entry := ExtractFromEmbeddingResponse(resp, "req", "openai", "/v1/embeddings",
+		&core.ModelPricing{Currency: "USD", InputPerMtok: &rate})
+	assert.Nil(t, entry.RawData, "RawData should stay nil when the provider reported no extra usage")
+	require.NotNil(t, entry.TotalCost)
+	assert.Equal(t, 0.00002, *entry.TotalCost, "TotalCost should come from the token rate")
+	assert.Equal(t, CostSourceModelPricing, entry.CostSource)
+}
+
+// TestExtractFromEmbeddingResponse_ExactCostSuppressesMissingUsageCaveat
+// asserts a zero-token row is not flagged as uncalculated when the cost came
+// from a figure the provider itself reported.
+//
+// The caveat exists because zero tokens priced from token rates understate the
+// call. A provider-reported total is authoritative however many tokens came
+// with it, so flagging it would tell operators the cost is unreliable when it
+// is the most reliable number available.
+func TestExtractFromEmbeddingResponse_ExactCostSuppressesMissingUsageCaveat(t *testing.T) {
+	rate := 0.02
+	resp := &core.EmbeddingResponse{
+		Model: "openai/text-embedding-3-small",
+		Usage: core.EmbeddingUsage{RawUsage: map[string]any{"cost": 0.0000012}},
+	}
+
+	entry := ExtractFromEmbeddingResponse(resp, "req", "edenai", "/v1/embeddings",
+		&core.ModelPricing{Currency: "USD", InputPerMtok: &rate})
+	assert.Empty(t, entry.CostsCalculationCaveat, "the cost was reported by the provider, so no caveat is expected")
+	require.NotNil(t, entry.TotalCost)
+	assert.Equal(t, 0.0000012, *entry.TotalCost, "TotalCost should be the provider-reported figure")
+}
+
+// TestExtractFromEmbeddingResponse_ZeroTokenCaveatStillApplies asserts the
+// guard above did not disable the caveat generally: a zero-token row with no
+// provider-reported cost is still flagged.
+func TestExtractFromEmbeddingResponse_ZeroTokenCaveatStillApplies(t *testing.T) {
+	rate := 0.02
+	resp := &core.EmbeddingResponse{Model: "gemini-embedding-001"}
+
+	entry := ExtractFromEmbeddingResponse(resp, "req", "gemini", "/v1/embeddings",
+		&core.ModelPricing{Currency: "USD", InputPerMtok: &rate})
+	assert.NotEmpty(t, entry.CostsCalculationCaveat, "the zero-token row should be flagged")
+}
+
+// TestisProviderReportedCostSource pins which cost sources count as figures the
+// provider returned rather than rate-card reconstructions.
+func TestIsProviderReportedCostSource(t *testing.T) {
+	tests := []struct {
+		source string
+		want   bool
+	}{
+		{CostSourceOpenRouterCredits, true},
+		{CostSourceXAITicks, true},
+		{CostSourceEdenAICost, true},
+		{"  " + CostSourceEdenAICost + "  ", true},
+		{CostSourceModelPricing, false},
+		{"", false},
+		{"something_else", false},
+	}
+
+	for _, tc := range tests {
+		assert.Equal(t, tc.want, isProviderReportedCostSource(tc.source), "isProviderReportedCostSource(%q)", tc.source)
+	}
+}

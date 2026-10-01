@@ -44,6 +44,14 @@ func TestDefaultEnabledPassthroughProvidersIncludesMatrixProviders(t *testing.T)
 	}
 }
 
+// TestDefaultEnabledPassthroughProvidersIncludesEdenAI asserts that the default
+// allowlist contains edenai — the provider matrix marks edenai passthrough ✅,
+// and the default handler must not reject those requests before contacting the
+// upstream.
+func TestDefaultEnabledPassthroughProvidersIncludesEdenAI(t *testing.T) {
+	require.Contains(t, defaultEnabledPassthroughProviders, "edenai", "defaultEnabledPassthroughProviders = %v, want edenai included", defaultEnabledPassthroughProviders)
+}
+
 // A successful non-streaming JSON passthrough response must produce a usage
 // entry from its usage member — the same accounting SSE streams get from the
 // stream usage observer. Covers the /p/{provider} surface directly.
