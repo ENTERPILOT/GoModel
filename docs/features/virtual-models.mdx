@@ -317,8 +317,9 @@ With the default off, a provider model stays unavailable until an entry
 matches it. An entry with empty `targets` is enough — it acts as a pure
 access rule (`enabled: true`, optionally with `user_paths`). Unavailable
 models fail requests with `400 model_access_denied` and stay out of
-`GET /v1/models`. A redirect still follows its own `enabled` flag, not the
-default.
+`GET /v1/models`. A redirect resolves by its own `enabled` flag, but its
+target is validated like a direct call: with the default off, give the
+target model its own access entry too.
 
 This is not the reverse of [exposing only redirects](#expose-only-redirects):
 that setting only changes what `GET /v1/models` lists, while the availability
