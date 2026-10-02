@@ -234,6 +234,11 @@ precedence.
   exists, GoModel can serve it without spending additional provider cost.
 </Note>
 
+Spend counts toward a budget once the usage logger writes it (every
+`USAGE_FLUSH_INTERVAL`, 5 seconds by default), so requests sent in that gap can
+overshoot a limit slightly. With several GoModel instances, spend written by
+another instance can take up to 2 more seconds to be seen.
+
 ## Reset windows
 
 Budget reset anchors are configured in the dashboard under:

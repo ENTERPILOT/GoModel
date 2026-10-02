@@ -7,8 +7,10 @@ import (
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,4 +44,60 @@ func TestIsIndexNotFound(t *testing.T) {
 	require.True(t, isIndexNotFound(mongo.CommandError{Code: 27, Name: "IndexNotFound"}))
 	require.False(t, isIndexNotFound(mongo.CommandError{Code: 26, Name: "NamespaceNotFound"}))
 	require.False(t, isIndexNotFound(errors.New("connection reset")))
+}
+
+func TestNewMongoDBStoreReplacesLegacyAuthKeyIndex(t *testing.T) {
+	tests := []struct {
+		name          string
+		conflict      bool
+		wantLegacy    bool
+		wantTimestamp int32
+	}{
+		{name: "compound index created, legacy dropped", wantTimestamp: -1},
+		// When the compound index cannot be created, the legacy index stays
+		// and the conflicting index is left untouched.
+		{name: "create fails, legacy kept", conflict: true, wantLegacy: true, wantTimestamp: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+				ctx := context.Background()
+				coll := db.Collection("audit_logs")
+				_, err := coll.Indexes().CreateOne(ctx, mongo.IndexModel{Keys: bson.D{{Key: "auth_key_id", Value: 1}}})
+				require.NoError(t, err)
+				if tt.conflict {
+					// Same name as the compound index, different keys.
+					_, err = coll.Indexes().CreateOne(ctx, mongo.IndexModel{
+						Keys:    bson.D{{Key: "auth_key_id", Value: 1}, {Key: "timestamp", Value: 1}},
+						Options: options.Index().SetName("auth_key_id_1_timestamp_-1"),
+					})
+					require.NoError(t, err)
+				}
+
+				_, err = NewMongoDBStore(db, 0)
+				require.NoError(t, err)
+
+				cursor, err := coll.Indexes().List(ctx)
+				require.NoError(t, err)
+				var specs []bson.M
+				require.NoError(t, cursor.All(ctx, &specs))
+				keys := map[string]map[string]any{}
+				for _, spec := range specs {
+					fields, ok := spec["key"].(bson.D)
+					require.True(t, ok, "index spec: %v", spec)
+					key := map[string]any{}
+					for _, field := range fields {
+						key[field.Key] = field.Value
+					}
+					keys[spec["name"].(string)] = key
+				}
+				_, hasLegacy := keys[legacyAuthKeyIndex]
+				assert.Equal(t, tt.wantLegacy, hasLegacy, "indexes: %v", specs)
+				compound, ok := keys["auth_key_id_1_timestamp_-1"]
+				require.True(t, ok, "indexes: %v", specs)
+				assert.EqualValues(t, 1, compound["auth_key_id"])
+				assert.EqualValues(t, tt.wantTimestamp, compound["timestamp"])
+			})
+		})
+	}
 }

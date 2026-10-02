@@ -20,9 +20,12 @@ func (r *MongoDBReader) GetLastUsedByAuthKeys(ctx context.Context, keyIDs []stri
 		bson.D{{Key: "$match", Value: bson.D{
 			{Key: "auth_key_id", Value: bson.D{{Key: "$in", Value: keyIDs}}},
 		}}},
+		// Sorting on the compound index lets $group take each key's newest
+		// entry with a distinct scan instead of reading every entry.
+		bson.D{{Key: "$sort", Value: bson.D{{Key: "auth_key_id", Value: 1}, {Key: "timestamp", Value: -1}}}},
 		bson.D{{Key: "$group", Value: bson.D{
 			{Key: "_id", Value: "$auth_key_id"},
-			{Key: "last", Value: bson.D{{Key: "$max", Value: "$timestamp"}}},
+			{Key: "last", Value: bson.D{{Key: "$first", Value: "$timestamp"}}},
 		}}},
 	}
 

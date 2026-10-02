@@ -3,11 +3,8 @@ package usage
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
-
-	"github.com/goccy/go-json"
 )
 
 // UsageQueryParams specifies the query parameters for usage data retrieval.
@@ -90,12 +87,7 @@ func foldInputSegments(rows inputSegmentRows, summary *UsageSummary) error {
 		if err := rows.Scan(&inputTokens, &provider, &rawDataJSON); err != nil {
 			return fmt.Errorf("failed to scan usage input segment row: %w", err)
 		}
-		var rawData map[string]any
-		if rawDataJSON != nil && *rawDataJSON != "" {
-			if err := json.Unmarshal([]byte(*rawDataJSON), &rawData); err != nil {
-				slog.Warn("failed to unmarshal raw_data JSON", "error", err)
-			}
-		}
+		rawData := promptCacheRawData(rawDataJSON)
 		summary.addInputSegments(inputTokens, provider, rawData)
 	}
 	if err := rows.Err(); err != nil {
@@ -287,12 +279,7 @@ func foldPeriodInputSegments(rows inputSegmentRows) (map[string]periodInputSplit
 		if isLocalCacheType(cacheType) {
 			continue
 		}
-		var rawData map[string]any
-		if rawDataJSON != nil && *rawDataJSON != "" {
-			if err := json.Unmarshal([]byte(*rawDataJSON), &rawData); err != nil {
-				slog.Warn("failed to unmarshal raw_data JSON", "error", err)
-			}
-		}
+		rawData := promptCacheRawData(rawDataJSON)
 		accumulatePeriodSplit(out, period, inputTokens, provider, rawData)
 	}
 	return out, rows.Err()

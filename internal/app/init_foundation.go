@@ -164,6 +164,14 @@ func (b *bootstrap) initTracking() error {
 		slog.Info("budgets disabled")
 	}
 	app.budgets = budgetResult
+	if budgetResult.Service != nil {
+		// Budget checks cache spend between usage flushes; each flush clears it.
+		if logger, ok := app.usage.Logger.(interface {
+			SetFlushListener(usage.FlushListener)
+		}); ok {
+			logger.SetFlushListener(budgetResult.Service)
+		}
+	}
 	app.register(subsystemBudgets, ownedByShutdown, app.budgets.Close)
 
 	var rateLimitResult *ratelimit.Result
