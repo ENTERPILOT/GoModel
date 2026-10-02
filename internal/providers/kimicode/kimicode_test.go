@@ -34,8 +34,6 @@ func TestChatCompatibleContract(t *testing.T) {
 	})
 }
 
-func boolPtr(b bool) *bool { return &b }
-
 // newTestProvider builds a provider wired to the test server through the
 // injected HTTP client, matching how the shared contract constructs it.
 func newTestProvider(server *httptest.Server) core.Provider {
@@ -65,7 +63,7 @@ func TestAdaptResponsesRequest(t *testing.T) {
 	})
 
 	t.Run("store true is pinned to false", func(t *testing.T) {
-		req := &core.ResponsesRequest{Model: "kimi-for-coding", Input: "hi", Store: boolPtr(true)}
+		req := &core.ResponsesRequest{Model: "kimi-for-coding", Input: "hi", Store: new(true)}
 		got := adaptResponsesRequest(req)
 		require.NotSame(t, req, got, "adapted request should be a copy")
 		require.NotNil(t, got.Store)
@@ -81,7 +79,7 @@ func TestAdaptResponsesRequest(t *testing.T) {
 			Model:              "kimi-for-coding",
 			Input:              "hi",
 			PreviousResponseID: "resp_old",
-			Store:              boolPtr(false),
+			Store:              new(false),
 		}
 		got := adaptResponsesRequest(req)
 		assert.Equal(t, "resp_old", got.PreviousResponseID)
@@ -176,7 +174,7 @@ func TestResponses_ForwardsGatewayReplayedHistory(t *testing.T) {
 				"content": []any{map[string]any{"type": "input_text", "text": "what is the word?"}},
 			},
 		},
-		Store: boolPtr(true),
+		Store: new(true),
 	})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
