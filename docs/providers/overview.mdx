@@ -86,8 +86,9 @@ support, not every individual model capability exposed by an upstream provider.
   (including GPT-6), GoModel sends `max_tokens` as `max_completion_tokens` and
   drops `temperature`. From GPT-5.6 on, OpenAI accepts function tools on Chat
   Completions only with `reasoning_effort: "none"`, so a tool request that sets
-  no effort gets `"none"`; set an effort yourself to override it. GPT-6 Astra
-  and GPT-6.1 reject `"none"`: call tools on those models through
+  no effort gets `"none"`. An effort you set is kept, and OpenAI then rejects
+  the tools: use `/v1/responses` for tool calls with reasoning. GPT-6 Astra and
+  GPT-6.1 reject `"none"` too, so call tools on those models through
   `/v1/responses`.
 - **llm-d** — point `LLMD_BASE_URL` at the Router/EPP service and declare
   `LLMD_MODELS` when the route does not serve `/v1/models`. The dedicated

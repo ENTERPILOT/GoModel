@@ -984,6 +984,7 @@ func TestIsReasoningChatModel(t *testing.T) {
 		{"gpt-5x", false},
 		{"gpt-", false},
 		{"gpt-.5", false},
+		{"gpt-5.x", false},
 		{"claude-sonnet-4-6", false},
 		{"", false},
 	}
@@ -1233,6 +1234,7 @@ func TestChatCompletion_ToolsGetNoReasoningEffortWhenRequired(t *testing.T) {
 		{name: "gpt-5.5 allows tools with reasoning", model: "gpt-5.5", tools: tools},
 		{name: "astra rejects none", model: "gpt-6-astra", tools: tools},
 		{name: "gpt-6.1 rejects none", model: "gpt-6.1-sol", tools: tools},
+		{name: "gpt-6.10 is not gpt-6.1", model: "gpt-6.10-sol", tools: tools, wantEffort: "none"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -129,8 +129,10 @@ func chatToolsRequireNoReasoning(model string) bool {
 	if !ok || major < 5 || (major == 5 && minor < 6) {
 		return false
 	}
-	m := strings.ToLower(strings.TrimSpace(model))
-	return !strings.HasPrefix(m, "gpt-6-astra") && !strings.HasPrefix(m, "gpt-6.1")
+	if major == 6 && minor == 1 {
+		return false
+	}
+	return !strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "gpt-6-astra")
 }
 
 // adaptForReasoningChat rewrites a ChatRequest body for OpenAI reasoning chat
