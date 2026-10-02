@@ -32,13 +32,8 @@ func TestMCPAuditLabel(t *testing.T) {
 			want: "github_create_issue",
 		},
 		{
-			name: "discovery call_tool labels with the tool it runs",
-			body: `{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"call_tool","arguments":{"name":"github_create_issue","arguments":{}}}}`,
-			want: "github_create_issue",
-		},
-		{
-			name: "call_tool without a target keeps its own name",
-			body: `{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"call_tool","arguments":{}}}`,
+			name: "call_tool keeps its own name without a session resolver",
+			body: `{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"call_tool","arguments":{"name":"github_create_issue"}}}`,
 			want: "call_tool",
 		},
 		{
@@ -81,7 +76,11 @@ func TestMCPAuditLabel(t *testing.T) {
 }
 
 func TestMCPAuditLabelResolvesToolNames(t *testing.T) {
-	resolve := func(name string) string {
+	// Mimics a discovery session on the aggregated endpoint.
+	resolve := func(name, target string) string {
+		if name == "call_tool" && target != "" {
+			name = target
+		}
 		if name == "echo" {
 			return "alpha_echo"
 		}
@@ -101,6 +100,11 @@ func TestMCPAuditLabelResolvesToolNames(t *testing.T) {
 			name: "bare call_tool target",
 			body: `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"call_tool","arguments":{"name":"echo"}}}`,
 			want: "alpha_echo",
+		},
+		{
+			name: "namespaced call_tool target",
+			body: `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"call_tool","arguments":{"name":"github_create_issue"}}}`,
+			want: "github_create_issue",
 		},
 		{
 			name: "prompts are not tool names",

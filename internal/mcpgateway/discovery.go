@@ -23,11 +23,9 @@ import (
 const ToolDiscoveryHeader = "X-MCP-Tool-Discovery"
 
 // Meta-tool names served instead of the catalog in search discovery mode.
-// CallToolName is exported so the request log can label a relayed call with
-// the tool it runs.
 const (
 	searchToolsName = "search_tools"
-	CallToolName    = "call_tool"
+	callToolName    = "call_tool"
 )
 
 const (
@@ -266,7 +264,7 @@ func (s *Service) registerDiscoveryTools(server *mcp.Server, idx *toolIndex, end
 	}, s.searchToolsHandler(idx))
 
 	server.AddTool(&mcp.Tool{
-		Name:        CallToolName,
+		Name:        callToolName,
 		Description: "Call a tool found with " + searchToolsName + ". Pass its exact name and arguments matching its input schema.",
 		InputSchema: map[string]any{
 			"type": "object",
@@ -298,7 +296,7 @@ func searchToolsDescription(idx *toolIndex) string {
 	for i, server := range servers {
 		parts[i] = fmt.Sprintf("%s (%d)", server, counts[server])
 	}
-	desc := "Search the tools available through this gateway by keyword. Returns matching tool names, descriptions, and input schemas; run one with " + CallToolName + "."
+	desc := "Search the tools available through this gateway by keyword. Returns matching tool names, descriptions, and input schemas; run one with " + callToolName + "."
 	if len(parts) > 0 {
 		desc += " Servers: " + strings.Join(parts, ", ") + "."
 	}
@@ -361,7 +359,7 @@ func (s *Service) callToolHandler(idx *toolIndex, endpoint string) mcp.ToolHandl
 			Arguments json.RawMessage `json:"arguments"`
 		}
 		if err := unmarshalArguments(req, &args); err != nil {
-			return toolError("invalid " + CallToolName + " arguments: " + err.Error()), nil
+			return toolError("invalid " + callToolName + " arguments: " + err.Error()), nil
 		}
 		target, ok := idx.lookup(strings.TrimSpace(args.Name))
 		if !ok {

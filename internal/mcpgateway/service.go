@@ -79,8 +79,10 @@ type sessionBinding struct {
 	userPath  string
 	pinned    string
 	lastSeen  time.Time
-	// toolAliases maps the session's unambiguous bare tool names to their
-	// namespaced names, so request logs can name the tool a call resolved to.
+	// discovery and toolAliases let request logs name the tool a call runs:
+	// a discovery session's call_tool target, and the namespaced name an
+	// unambiguous bare name resolves to.
+	discovery   bool
 	toolAliases map[string]string
 }
 
@@ -374,7 +376,7 @@ func (s *Service) getServer(r *http.Request) *mcp.Server {
 		},
 		GetSessionID: func() string {
 			id := rand.Text()
-			s.bindSession(id, scope.authKeyID, scope.userPath, scope.pinned, aliases)
+			s.bindSession(id, scope.authKeyID, scope.userPath, scope.pinned, scope.discovery, aliases)
 			return id
 		},
 	})
@@ -519,7 +521,7 @@ func (s *Service) composeInstructions(scope requestScope, views []ServerView) st
 		if b.Len() > 0 {
 			b.WriteString(" ")
 		}
-		fmt.Fprintf(&b, "Tools are not listed directly: find them with %s and run them with %s.", searchToolsName, CallToolName)
+		fmt.Fprintf(&b, "Tools are not listed directly: find them with %s and run them with %s.", searchToolsName, callToolName)
 	}
 	for _, view := range views {
 		snapshot, _ := s.upstreamCatalog(view.Spec.Name)
@@ -676,25 +678,33 @@ func (s *Service) authorizeSessionID(sessionID, upstreamName string) error {
 }
 
 // bindSession records the principal a new session was initialized under.
-func (s *Service) bindSession(sessionID, authKeyID, userPath, pinned string, toolAliases map[string]string) {
+func (s *Service) bindSession(sessionID, authKeyID, userPath, pinned string, discovery bool, toolAliases map[string]string) {
 	s.bindMu.Lock()
 	s.bindings[sessionID] = sessionBinding{
 		authKeyID:   authKeyID,
 		userPath:    userPath,
 		pinned:      pinned,
 		lastSeen:    time.Now(),
+		discovery:   discovery,
 		toolAliases: toolAliases,
 	}
 	s.bindMu.Unlock()
 }
 
-// CanonicalToolName resolves a bare tool name the session accepts on the
-// aggregated endpoint to the namespaced name it runs, matching usage
-// entries. Any other name is returned unchanged.
-func (s *Service) CanonicalToolName(sessionID, name string) string {
+// ToolCallLabel names the tool a session's tools/call runs, matching its
+// usage entry. name is the called tool and target the call's
+// arguments.name. In a discovery session call_tool resolves to its target,
+// and a bare name the session accepts resolves to its namespaced name. Only
+// the session knows whether call_tool is the meta-tool: on a pinned endpoint
+// without discovery it can be an upstream tool of that name.
+func (s *Service) ToolCallLabel(sessionID, name, target string) string {
 	s.bindMu.Lock()
 	defer s.bindMu.Unlock()
-	if exposed, ok := s.bindings[sessionID].toolAliases[name]; ok {
+	binding := s.bindings[sessionID]
+	if binding.discovery && name == callToolName && target != "" {
+		name = target
+	}
+	if exposed, ok := binding.toolAliases[name]; ok {
 		return exposed
 	}
 	return name

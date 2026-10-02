@@ -136,7 +136,7 @@ func TestSearchDiscoveryServesMetaToolsAndRelaysCalls(t *testing.T) {
 	service.searchDiscovery = true
 
 	session := connectClient(t, gatewayURL+"/mcp", map[string]string{"X-Request-ID": "req-1"})
-	assert.Equal(t, []string{CallToolName, searchToolsName}, listToolNames(t, session))
+	assert.Equal(t, []string{callToolName, searchToolsName}, listToolNames(t, session))
 	assert.Contains(t, session.InitializeResult().Instructions, searchToolsName)
 
 	results := searchTools(t, session, "echo")
@@ -147,7 +147,7 @@ func TestSearchDiscoveryServesMetaToolsAndRelaysCalls(t *testing.T) {
 
 	for _, name := range []string{"alpha_echo", "echo"} {
 		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-			Name:      CallToolName,
+			Name:      callToolName,
 			Arguments: map[string]any{"name": name, "arguments": map[string]any{"value": 1}},
 		})
 		require.NoError(t, err)
@@ -177,7 +177,7 @@ func TestSearchDiscoveryRejectsUnknownToolAsToolError(t *testing.T) {
 
 	session := connectClient(t, gatewayURL+"/mcp", nil)
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name:      CallToolName,
+		Name:      callToolName,
 		Arguments: map[string]any{"name": "alpha_missing"},
 	})
 	require.NoError(t, err)
@@ -196,7 +196,7 @@ func TestToolDiscoveryHeaderOverridesDefault(t *testing.T) {
 	service, gatewayURL := newTestService(t, nil, testSpec("alpha", url, nil))
 
 	optIn := connectClient(t, gatewayURL+"/mcp", map[string]string{ToolDiscoveryHeader: "Search"})
-	assert.Equal(t, []string{CallToolName, searchToolsName}, listToolNames(t, optIn))
+	assert.Equal(t, []string{callToolName, searchToolsName}, listToolNames(t, optIn))
 
 	unknown := connectClient(t, gatewayURL+"/mcp", map[string]string{ToolDiscoveryHeader: "semantic"})
 	assert.Equal(t, []string{"alpha_echo"}, listToolNames(t, unknown))
@@ -206,7 +206,7 @@ func TestToolDiscoveryHeaderOverridesDefault(t *testing.T) {
 	assert.Equal(t, []string{"alpha_echo"}, listToolNames(t, optOut))
 
 	pinned := connectClient(t, gatewayURL+"/mcp/alpha", nil)
-	assert.Equal(t, []string{CallToolName, searchToolsName}, listToolNames(t, pinned))
+	assert.Equal(t, []string{callToolName, searchToolsName}, listToolNames(t, pinned))
 	results := searchTools(t, pinned, "echo")
 	require.NotEmpty(t, results)
 	assert.Equal(t, "echo", results[0].Name, "a pinned endpoint keeps original names")
@@ -232,7 +232,7 @@ func TestSearchDiscoveryHidesToolsExcludedAfterInitialize(t *testing.T) {
 	assert.Equal(t, "alpha_read", results[0].Name)
 
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name:      CallToolName,
+		Name:      callToolName,
 		Arguments: map[string]any{"name": "alpha_write"},
 	})
 	require.NoError(t, err, "failures reach the model as tool errors, not JSON-RPC errors")
@@ -253,7 +253,7 @@ func TestSearchDiscoveryReportsUpstreamFailureAsToolError(t *testing.T) {
 	service.manager.Apply(nil) // the upstream disappears after initialize
 
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name:      CallToolName,
+		Name:      callToolName,
 		Arguments: map[string]any{"name": "alpha_echo"},
 	})
 	require.NoError(t, err)
