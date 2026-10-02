@@ -1,0 +1,12 @@
+{
+  "name": "gomodel-docs",
+  "private": true,
+  "scripts": {
+    "dev": "mint dev",
+    "validate": "mint validate",
+    "broken-links": "mint broken-links"
+  },
+  "devDependencies": {
+    "mint": "4.2.923"
+  }
+}

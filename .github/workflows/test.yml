@@ -325,11 +325,17 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22'
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
 
       - name: Validate docs.json
         if: steps.changes.outputs.docs == 'true'
-        run: npx mint validate
         working-directory: docs
+        env:
+          # mint validate is static; puppeteer's chrome download (only needed
+          # by mint dev / broken-links) is a slow, flaky third-party fetch.
+          PUPPETEER_SKIP_DOWNLOAD: '1'
+        run: npm ci --no-fund --no-audit && npm run validate
 
   # Compiling the binary doesn't depend on tests passing, so this runs in
   # parallel with the test jobs rather than gating behind them. It is the one
