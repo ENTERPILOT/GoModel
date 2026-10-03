@@ -78,36 +78,52 @@ func TestConvert_MasterKey(t *testing.T) {
 // GOMODEL_MASTER_KEY overrides server.master_key, so the LiteLLM master key
 // must be the only value under that name.
 func TestConvert_MasterKeyOwnsGoModelVariable(t *testing.T) {
+	const moved = "environment_variables.GOMODEL_MASTER_KEY: moved to LITELLM_GOMODEL_MASTER_KEY in .env: GoModel uses GOMODEL_MASTER_KEY as its master key, so it would replace general_settings.master_key"
 	tests := []struct {
 		name        string
 		litellm     string
-		wantEnv     string
+		wantEnv     []string
+		wantAPIKey  string
 		wantServer  *serverOut
 		wantWarning string
 	}{
 		{
-			name: "inline key replaces environment_variables",
+			name: "inline key takes the name",
 			litellm: `
 environment_variables:
   GOMODEL_MASTER_KEY: something-else
 general_settings:
   master_key: sk-1234
 `,
-			wantEnv:     "GOMODEL_MASTER_KEY=sk-1234\n",
-			wantWarning: "environment_variables.GOMODEL_MASTER_KEY: removed from .env: GoModel uses GOMODEL_MASTER_KEY as its master key, so it would replace general_settings.master_key",
+			wantEnv:     []string{"LITELLM_GOMODEL_MASTER_KEY=something-else", "GOMODEL_MASTER_KEY=sk-1234"},
+			wantWarning: moved,
 		},
 		{
-			name: "referenced key drops environment_variables",
+			name: "referenced key frees the name",
 			litellm: `
 environment_variables:
   GOMODEL_MASTER_KEY: something-else
-  OTHER: kept
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
 `,
-			wantEnv:     "OTHER=kept\n",
+			wantEnv:     []string{"LITELLM_GOMODEL_MASTER_KEY=something-else"},
 			wantServer:  &serverOut{MasterKey: "${LITELLM_MASTER_KEY}"},
-			wantWarning: "environment_variables.GOMODEL_MASTER_KEY: removed from .env: GoModel uses GOMODEL_MASTER_KEY as its master key, so it would replace general_settings.master_key",
+			wantWarning: moved,
+		},
+		{
+			name: "settings reading the moved value follow it",
+			litellm: `
+environment_variables:
+  GOMODEL_MASTER_KEY: sk-provider
+model_list:
+  - model_name: m
+    litellm_params: {model: openai/gpt-4o, api_key: os.environ/GOMODEL_MASTER_KEY}
+general_settings:
+  master_key: sk-1234
+`,
+			wantEnv:     []string{"LITELLM_GOMODEL_MASTER_KEY=sk-provider", "GOMODEL_MASTER_KEY=sk-1234"},
+			wantAPIKey:  "${LITELLM_GOMODEL_MASTER_KEY}",
+			wantWarning: moved,
 		},
 		{
 			name: "same value is kept",
@@ -117,7 +133,7 @@ environment_variables:
 general_settings:
   master_key: sk-1234
 `,
-			wantEnv: "GOMODEL_MASTER_KEY=sk-1234\n",
+			wantEnv: []string{"GOMODEL_MASTER_KEY=sk-1234"},
 		},
 		{
 			name: "key read from GOMODEL_MASTER_KEY",
@@ -127,15 +143,34 @@ general_settings:
 `,
 			wantServer: &serverOut{MasterKey: "${GOMODEL_MASTER_KEY}"},
 		},
+		{
+			name: "environment provides GOMODEL_MASTER_KEY for another setting",
+			litellm: `
+model_list:
+  - model_name: m
+    litellm_params: {model: openai/gpt-4o, api_key: os.environ/GOMODEL_MASTER_KEY}
+general_settings:
+  master_key: sk-1234
+`,
+			wantEnv:     []string{"GOMODEL_MASTER_KEY_2=sk-1234"},
+			wantAPIKey:  "${GOMODEL_MASTER_KEY}",
+			wantServer:  &serverOut{MasterKey: "${GOMODEL_MASTER_KEY_2}"},
+			wantWarning: "general_settings.master_key: the config also reads GOMODEL_MASTER_KEY, which GoModel uses as its master key in place of this one; rename that variable before starting GoModel",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg, result := convertYAML(t, tt.litellm)
 			assert.Equal(t, tt.wantServer, cfg.Server)
-			assert.NotContains(t, string(result.Env), "something-else")
-			assert.NotContains(t, string(result.Env), "GOMODEL_MASTER_KEY_2")
-			if tt.wantEnv != "" {
-				assert.Contains(t, string(result.Env), tt.wantEnv)
+			for _, line := range tt.wantEnv {
+				assert.Contains(t, "\n"+string(result.Env), "\n"+line+"\n")
+			}
+			if tt.wantAPIKey != "" {
+				var keys []string
+				for _, provider := range cfg.Providers {
+					keys = append(keys, provider.APIKey)
+				}
+				assert.Equal(t, []string{tt.wantAPIKey}, keys)
 			}
 			warnings := findings(result, SeverityWarning)
 			if tt.wantWarning != "" {

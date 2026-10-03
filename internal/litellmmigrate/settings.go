@@ -270,22 +270,32 @@ func (c *converter) convertGeneralSettings() {
 	}
 }
 
-// convertMasterKey keeps LiteLLM's master key. GOMODEL_MASTER_KEY overrides
-// server.master_key in GoModel, so the key must own that name: any other
-// value under it would replace the key clients authenticate with.
+// masterKeyEnv is the variable GoModel reads its master key from. It
+// overrides server.master_key, so the migrated master key must own it.
+const masterKeyEnv = "GOMODEL_MASTER_KEY"
+
+// freeMasterKeyVariable moves a GOMODEL_MASTER_KEY set in
+// environment_variables to another name when LiteLLM's master key is a
+// different value, so it cannot replace the master key clients use.
+// Settings that read os.environ/GOMODEL_MASTER_KEY follow it.
+func (c *converter) freeMasterKeyVariable() {
+	key, _ := c.general.values["master_key"].(string)
+	value, written := c.env.values[masterKeyEnv]
+	if key == "" || !written || key == value || key == "os.environ/"+masterKeyEnv {
+		return
+	}
+	to := c.env.move(masterKeyEnv, "LITELLM_"+masterKeyEnv)
+	c.report.warn("environment_variables."+masterKeyEnv, "moved to "+to+" in .env: GoModel uses "+masterKeyEnv+" as its master key, so it would replace general_settings.master_key")
+}
+
+// convertMasterKey keeps LiteLLM's master key under GOMODEL_MASTER_KEY.
 func (c *converter) convertMasterKey(key string) {
-	const masterKeyEnv = "GOMODEL_MASTER_KEY"
 	name, isRef := envRef(key)
 	if isRef {
 		c.env.require(name)
 	}
-	if name != masterKeyEnv {
-		if previous, written := c.env.values[masterKeyEnv]; written && (isRef || previous != key) {
-			c.env.unset(masterKeyEnv)
-			c.report.warn("environment_variables.GOMODEL_MASTER_KEY", "removed from .env: GoModel uses GOMODEL_MASTER_KEY as its master key, so it would replace general_settings.master_key")
-		} else if c.env.reserved[masterKeyEnv] {
-			c.report.warn("general_settings.master_key", "the config also reads GOMODEL_MASTER_KEY, which GoModel uses as its master key in place of this one; unset it before starting GoModel")
-		}
+	if _, written := c.env.values[masterKeyEnv]; name != masterKeyEnv && !written && c.env.reserved[masterKeyEnv] {
+		c.report.warn("general_settings.master_key", "the config also reads "+masterKeyEnv+", which GoModel uses as its master key in place of this one; rename that variable before starting GoModel")
 	}
 	if isRef {
 		c.out.Server = &serverOut{MasterKey: "${" + name + "}"}

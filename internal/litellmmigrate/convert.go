@@ -75,6 +75,7 @@ func (c *converter) run() {
 	// claim them before any inline secret is given a variable.
 	c.convertEnvironmentVariables()
 	c.reserveEnvRefs()
+	c.freeMasterKeyVariable()
 	for i, d := range c.src.ModelList {
 		c.addDeployment(i, d)
 	}

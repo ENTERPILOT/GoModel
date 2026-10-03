@@ -96,7 +96,8 @@ func TestEnvFile_SetDisambiguatesConflictingValues(t *testing.T) {
 	assert.Equal(t, "KEY_2", env.set("KEY", "b"))
 	assert.Nil(t, (&envFile{}).render())
 
-	env.unset("KEY")
-	assert.Equal(t, []string{"KEY_2"}, env.names)
+	assert.Equal(t, "MOVED", env.move("KEY", "MOVED"))
+	assert.Equal(t, []string{"KEY_2", "MOVED"}, env.names)
+	assert.Equal(t, "MOVED", env.ref("KEY"))
 	assert.Equal(t, "KEY", env.set("KEY", "c"))
 }

@@ -67,8 +67,8 @@ Read `MIGRATION_REPORT.md` before sending traffic. It has three lists:
 
 Start GoModel with the generated files on another port. Add the variables
 listed under **Environment** in the report (the ones LiteLLM already read with
-`os.environ/`) to `.env` or your deployment, then send a few test requests with
-the models your clients use:
+`os.environ/`) to `.env`, creating it if the converter wrote none, then send a
+few test requests with the models your clients use:
 
 ```yaml compose.yaml
 services:
@@ -88,7 +88,9 @@ docker compose up
 Load `.env` with Compose `env_file` (or GoModel's own `.env` loader when you
 run the binary from that directory). `docker run --env-file` reads values
 literally, so it would keep the quotes `.env` puts around values such as
-inline JSON credentials.
+inline JSON credentials. When you run the binary directly, a variable already
+exported in your shell, such as `OPENAI_API_KEY`, wins over the same name in
+`.env`.
 
 ```bash
 curl -s http://localhost:8080/v1/chat/completions \

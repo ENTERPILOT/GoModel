@@ -32,8 +32,9 @@ func (c *converter) instanceFor(kind providerKind, p litellmParams, upstream, su
 		return inst
 	}
 
-	keyEnv, literalKey := envRef(apiKey)
-	literalKey = !literalKey && apiKey != ""
+	keyEnv, isRef := envRef(apiKey)
+	keyEnv = c.env.ref(keyEnv)
+	literalKey := !isRef && apiKey != ""
 	if literalKey && kind.KeyEnv != "" && !c.env.taken(kind.KeyEnv) {
 		// An inline key moves to the .env file; LiteLLM's own default variable
 		// is free, so it takes that name and the provider stays the default.
@@ -133,7 +134,7 @@ func vertexCredentials(value any) string {
 
 func (c *converter) setVertexCredentials(out *providerOut, credentials, envPrefix, subject string) {
 	out.AuthType = "gcp_service_account"
-	if name, ok := envRef(credentials); ok {
+	if name, ok := c.envRef(credentials); ok {
 		out.ServiceAccountJSON = "${" + name + "}"
 		c.env.require(name)
 		c.report.warn(subject, fmt.Sprintf("vertex_credentials reads %s; it was mapped to service_account_json, so if %s holds a file path move it to service_account_file", name, name))
@@ -154,7 +155,7 @@ func (c *converter) secretValue(value, envName string) string {
 	if value == "" {
 		return ""
 	}
-	if name, ok := envRef(value); ok {
+	if name, ok := c.envRef(value); ok {
 		c.env.require(name)
 		return "${" + name + "}"
 	}
@@ -164,11 +165,18 @@ func (c *converter) secretValue(value, envName string) string {
 // plainValue converts a non-secret LiteLLM value, keeping literals inline.
 func (c *converter) plainValue(value string) string {
 	value = strings.TrimSpace(value)
-	if name, ok := envRef(value); ok {
+	if name, ok := c.envRef(value); ok {
 		c.env.require(name)
 		return "${" + name + "}"
 	}
 	return value
+}
+
+// envRef resolves an os.environ/ reference to the variable it reads in the
+// generated files.
+func (c *converter) envRef(value string) (string, bool) {
+	name, ok := envRef(value)
+	return c.env.ref(name), ok
 }
 
 // envName derives an environment variable prefix from a provider name, the

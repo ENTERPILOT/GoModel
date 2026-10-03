@@ -20,6 +20,9 @@ type envFile struct {
 	// Generated names never take one, so a moved secret cannot shadow a value
 	// another setting reads.
 	reserved map[string]bool
+	// moved maps a variable the LiteLLM config reads to the name its value
+	// was moved to in .env, for a name GoModel itself would act on.
+	moved map[string]string
 }
 
 // reserve marks name as owned by the operator's environment.
@@ -57,10 +60,28 @@ func (e *envFile) set(name, value string) string {
 	}
 }
 
-// unset removes name and its value, if written.
-func (e *envFile) unset(name string) {
+// move renames the value written under name to newName (suffixed if taken),
+// so references to name read it from there and name itself is free.
+func (e *envFile) move(name, newName string) string {
+	value := e.values[name]
 	delete(e.values, name)
+	delete(e.reserved, name)
 	e.names = slices.DeleteFunc(e.names, func(n string) bool { return n == name })
+	to := e.set(newName, value)
+	if e.moved == nil {
+		e.moved = map[string]string{}
+	}
+	e.moved[name] = to
+	return to
+}
+
+// ref returns the variable an os.environ/name reference reads in the
+// generated files.
+func (e *envFile) ref(name string) string {
+	if to, ok := e.moved[name]; ok {
+		return to
+	}
+	return name
 }
 
 func (e *envFile) require(name string) {
