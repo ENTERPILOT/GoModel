@@ -69,23 +69,70 @@ func isOSeriesModel(model string) bool {
 	return len(m) >= 2 && m[0] == 'o' && m[1] >= '0' && m[1] <= '9'
 }
 
-// isGPT5Model reports whether the model belongs to the GPT-5 family. Both the
-// hyphenated variants (gpt-5-mini) and the dot-versioned releases
-// (gpt-5.1, gpt-5.6-terra) follow the reasoning chat parameter rules, while
-// unrelated names that merely start with the same bytes (gpt-50) do not.
-func isGPT5Model(model string) bool {
-	m := strings.ToLower(strings.TrimSpace(model))
-	rest, ok := strings.CutPrefix(m, "gpt-5")
-	if !ok {
-		return false
+// gptVersion parses the generation of an OpenAI GPT model name: gpt-5 is 5.0,
+// gpt-5.6-terra is 5.6, gpt-6.1-sol is 6.1. ok is false for names outside the
+// gpt-<major>[.<minor>][-<variant>] scheme, such as gpt-4o or gpt-5x.
+func gptVersion(model string) (major, minor int, ok bool) {
+	rest, found := strings.CutPrefix(strings.ToLower(strings.TrimSpace(model)), "gpt-")
+	if !found {
+		return 0, 0, false
 	}
-	return rest == "" || rest[0] == '-' || rest[0] == '.'
+	if major, rest, ok = leadingInt(rest); !ok {
+		return 0, 0, false
+	}
+	if after, dotted := strings.CutPrefix(rest, "."); dotted {
+		if minor, rest, ok = leadingInt(after); !ok {
+			return 0, 0, false
+		}
+	}
+	if rest != "" && rest[0] != '-' {
+		return 0, 0, false
+	}
+	return major, minor, true
+}
+
+// leadingInt splits the decimal digits at the start of s from the remainder.
+func leadingInt(s string) (int, string, bool) {
+	end := 0
+	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
+		end++
+	}
+	n, err := strconv.Atoi(s[:end])
+	if err != nil {
+		return 0, s, false
+	}
+	return n, s[end:], true
+}
+
+// isGPT5PlusModel reports whether the model belongs to GPT-5 or a later
+// generation (gpt-5-mini, gpt-5.6-terra, gpt-6-sol, gpt-6.1-sol, …). Every
+// generation since GPT-5 follows the reasoning chat parameter rules, so a new
+// one is covered without a code change.
+func isGPT5PlusModel(model string) bool {
+	major, _, ok := gptVersion(model)
+	return ok && major >= 5
 }
 
 // isReasoningChatModel reports whether the model follows OpenAI's reasoning
 // chat parameter rules for max_completion_tokens and temperature handling.
 func isReasoningChatModel(model string) bool {
-	return isOSeriesModel(model) || isGPT5Model(model)
+	return isOSeriesModel(model) || isGPT5PlusModel(model)
+}
+
+// chatToolsRequireNoReasoning reports whether OpenAI rejects function tools on
+// Chat Completions for the model unless reasoning_effort is "none", which holds
+// from GPT-5.6 on. gpt-6-astra and gpt-6.1 reject "none" as well and can call
+// tools only through /v1/responses; they are left out so the caller gets
+// OpenAI's own error, which says so.
+func chatToolsRequireNoReasoning(model string) bool {
+	major, minor, ok := gptVersion(model)
+	if !ok || major < 5 || (major == 5 && minor < 6) {
+		return false
+	}
+	if major == 6 && minor == 1 {
+		return false
+	}
+	return !strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "gpt-6-astra")
 }
 
 // adaptForReasoningChat rewrites a ChatRequest body for OpenAI reasoning chat
@@ -121,11 +168,25 @@ func isNonReasoningChatModel(model string) bool {
 // API's thinking and by clients sending reasoning.effort) onto the flat
 // reasoning_effort field: OpenAI Chat Completions rejects "reasoning".
 // Models that cannot reason reject reasoning_effort too, so it is dropped.
+//
+// A tool request that asks for no reasoning effort gets reasoning_effort
+// "none" on models that reject function tools otherwise: their default effort
+// is not "none", so the request would fail as sent.
 func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
-	if req == nil || req.Reasoning == nil {
+	if req == nil {
 		return req, nil
 	}
-	effort := strings.TrimSpace(req.Reasoning.Effort)
+	effort := ""
+	if req.Reasoning != nil {
+		effort = strings.TrimSpace(req.Reasoning.Effort)
+	}
+	if effort == "" && len(req.Tools) > 0 && chatToolsRequireNoReasoning(req.Model) &&
+		!req.ExtraFields.HasAny("reasoning_effort") {
+		return providers.AdaptReasoningEffortRequest(req, "none")
+	}
+	if req.Reasoning == nil {
+		return req, nil
+	}
 	if effort == "" || isNonReasoningChatModel(req.Model) {
 		return providers.DropReasoning(req), nil
 	}

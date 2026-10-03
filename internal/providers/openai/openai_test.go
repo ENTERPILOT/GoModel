@@ -974,9 +974,17 @@ func TestIsReasoningChatModel(t *testing.T) {
 		{"gpt-5.6-terra", true},
 		{"gpt-5.6", true},
 		{"GPT-5.6-Terra", true},
+		{"gpt-6-sol", true},
+		{"gpt-6-luna", true},
+		{"gpt-6-astra", true},
+		{"gpt-6.1-sol", true},
+		{"gpt-7", true},
 		{"gpt-4o", false},
 		{"gpt-4.1", false},
-		{"gpt-50", false},
+		{"gpt-5x", false},
+		{"gpt-", false},
+		{"gpt-.5", false},
+		{"gpt-5.x", false},
 		{"claude-sonnet-4-6", false},
 		{"", false},
 	}
@@ -1002,6 +1010,8 @@ func TestChatCompletion_AdaptsTokenParamsByModel(t *testing.T) {
 		{name: "non-reasoning passes max_tokens", model: "gpt-4o"},
 		{name: "o-series stream", model: "o4-mini", stream: true, reasoning: true},
 		{name: "gpt-5 stream", model: "gpt-5-nano", stream: true, reasoning: true},
+		{name: "gpt-6 family", model: "gpt-6-luna", reasoning: true},
+		{name: "gpt-6.1 stream", model: "gpt-6.1-sol", stream: true, reasoning: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1187,6 +1197,74 @@ func TestChatCompletion_MapsReasoningToReasoningEffort(t *testing.T) {
 
 			sent := capture.Last(t).JSON(t)
 			assert.NotContains(t, sent, "reasoning", "nested reasoning must not reach Chat Completions")
+			if tt.wantEffort == "" {
+				assert.NotContains(t, sent, "reasoning_effort")
+			} else {
+				assert.Equal(t, tt.wantEffort, sent["reasoning_effort"])
+			}
+		})
+	}
+}
+
+// From GPT-5.6 on, OpenAI rejects function tools on Chat Completions unless
+// reasoning_effort is "none", so a tool request that asks for no effort gets
+// it. An effort the caller chose is kept, and models that reject "none" too
+// (gpt-6-astra, gpt-6.1) are left alone.
+func TestChatCompletion_ToolsGetNoReasoningEffortWhenRequired(t *testing.T) {
+	tools := []map[string]any{{"type": "function", "function": map[string]any{"name": "get_weather"}}}
+	tests := []struct {
+		name       string
+		model      string
+		tools      []map[string]any
+		reasoning  *core.Reasoning
+		extra      core.UnknownJSONFields
+		stream     bool
+		wantEffort string // "" means the field must be absent
+	}{
+		{name: "gpt-6 tools", model: "gpt-6-luna", tools: tools, wantEffort: "none"},
+		{name: "gpt-5.6 tools", model: "gpt-5.6-terra", tools: tools, wantEffort: "none"},
+		{name: "gpt-6 tools stream", model: "gpt-6-sol", tools: tools, stream: true, wantEffort: "none"},
+		{name: "empty effort", model: "gpt-6-luna", tools: tools, reasoning: &core.Reasoning{}, wantEffort: "none"},
+		{name: "caller effort kept", model: "gpt-6-luna", tools: tools, reasoning: &core.Reasoning{Effort: "low"}, wantEffort: "low"},
+		{
+			name: "caller flat effort kept", model: "gpt-6-luna", tools: tools, wantEffort: "high",
+			extra: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"reasoning_effort": json.RawMessage(`"high"`)}),
+		},
+		{name: "no tools", model: "gpt-6-luna"},
+		{name: "gpt-5.5 allows tools with reasoning", model: "gpt-5.5", tools: tools},
+		{name: "astra rejects none", model: "gpt-6-astra", tools: tools},
+		{name: "gpt-6.1 rejects none", model: "gpt-6.1-sol", tools: tools},
+		{name: "gpt-6.10 is not gpt-6.1", model: "gpt-6.10-sol", tools: tools, wantEffort: "none"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &core.ChatRequest{
+				Model:       tt.model,
+				Messages:    []core.Message{{Role: "user", Content: "hi"}},
+				Tools:       tt.tools,
+				Reasoning:   tt.reasoning,
+				ExtraFields: tt.extra,
+			}
+
+			var sent map[string]any
+			if tt.stream {
+				server, capture := providertest.SSEServer(t, providertest.ChatChunkSSE)
+				provider := New(providers.ProviderConfig{APIKey: testAPIKey, BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
+				body, err := provider.StreamChatCompletion(context.Background(), req)
+				require.NoError(t, err)
+				defer func() { _ = body.Close() }()
+				_, err = io.ReadAll(body)
+				require.NoError(t, err)
+				sent = capture.Last(t).JSON(t)
+			} else {
+				server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
+				provider := New(providers.ProviderConfig{APIKey: testAPIKey, BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
+				_, err := provider.ChatCompletion(context.Background(), req)
+				require.NoError(t, err)
+				sent = capture.Last(t).JSON(t)
+			}
+
+			assert.NotContains(t, sent, "reasoning")
 			if tt.wantEffort == "" {
 				assert.NotContains(t, sent, "reasoning_effort")
 			} else {
