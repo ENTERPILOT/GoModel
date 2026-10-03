@@ -222,3 +222,17 @@ func TestStopSequenceStream_KeepsUpstreamError(t *testing.T) {
 	// "al" stays held back: it could still begin "END" when the stream broke.
 	assert.Contains(t, string(body), `"parti"`)
 }
+
+// Text without a stop sequence, and content that is not text, are left as is.
+func TestApplyStopSequences_LeavesOtherChoices(t *testing.T) {
+	parts := []core.ContentPart{{Type: "text", Text: "a END b"}}
+	resp := &core.ChatResponse{Choices: []core.Choice{
+		{Message: core.ResponseMessage{Role: "assistant", Content: "no stop here"}, FinishReason: "length"},
+		{Index: 1, Message: core.ResponseMessage{Role: "assistant", Content: parts}, FinishReason: "stop"},
+	}}
+	applyStopSequences(resp, []string{"END"})
+	assert.Equal(t, "no stop here", resp.Choices[0].Message.Content)
+	assert.Equal(t, "length", resp.Choices[0].FinishReason)
+	assert.Equal(t, parts, resp.Choices[1].Message.Content)
+	assert.Empty(t, resp.Choices[1].StopSequence)
+}

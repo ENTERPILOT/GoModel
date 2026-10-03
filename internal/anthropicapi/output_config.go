@@ -91,9 +91,13 @@ func strictCompatible(schema any) bool {
 				return false
 			}
 			required, _ := node["required"].([]any)
-			listed := make(map[any]bool, len(required))
+			listed := make(map[string]bool, len(required))
 			for _, name := range required {
-				listed[name] = true
+				// Only names count; a malformed entry (an object, an array)
+				// must not be used as a map key.
+				if name, ok := name.(string); ok {
+					listed[name] = true
+				}
 			}
 			for name, property := range properties {
 				if !listed[name] || !strictCompatible(property) {

@@ -32,6 +32,7 @@ func TestToChatRequestOutputConfig(t *testing.T) {
 			wantFormat: wantResponseFormat},
 		{name: "unsupported format", fields: `"output_config":{"format":{"type":"regex","pattern":"a+"}}`, wantInvalidArg: true},
 		{name: "format without schema", fields: `"output_config":{"format":{"type":"json_schema"}}`, wantInvalidArg: true},
+		{name: "format not an object", fields: `"output_config":{"format":"json"}`, wantInvalidArg: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -76,6 +77,9 @@ func TestStrictCompatible(t *testing.T) {
 		{name: "loose nested item", schema: `{"type":"object","properties":{"list":{"type":"array","items":{"type":"object","properties":{"x":{"type":"string"}}}}},"required":["list"],"additionalProperties":false}`},
 		{name: "loose definition", schema: `{"type":"object","properties":{},"additionalProperties":false,"$defs":{"d":{"type":"object","properties":{"x":{"type":"string"}}}}}`},
 		{name: "scalar", schema: `{"type":"string"}`, want: true},
+		{name: "strict anyOf", schema: `{"anyOf":[{"type":"string"},` + outputSchema + `]}`, want: true},
+		{name: "loose anyOf branch", schema: `{"anyOf":[{"type":"string"},{"type":"object","properties":{"x":{"type":"string"}}}]}`},
+		{name: "malformed required entries", schema: `{"type":"object","properties":{"a":{"type":"string"}},"required":[{},["a"],1],"additionalProperties":false}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
