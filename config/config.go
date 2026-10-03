@@ -313,6 +313,11 @@ func Load() (*LoadResult, error) {
 	if cfg.Server.MasterKeyDisabled {
 		cfg.Server.MasterKey = ""
 	}
+	// An unset ${NAME} stays in the value verbatim. As a master key, that
+	// placeholder would be a password anyone who reads config.yaml knows.
+	if name, ok := unresolvedEnvRef(cfg.Server.MasterKey); ok {
+		return nil, fmt.Errorf("server.master_key reads %s, which is not set; set it or remove server.master_key", name)
+	}
 	cfg.Server.BasePath = NormalizeBasePath(cfg.Server.BasePath)
 	cfg.Server.UserPathHeader, err = NormalizeHeaderName(cfg.Server.UserPathHeader, "X-GoModel-User-Path")
 	if err != nil {

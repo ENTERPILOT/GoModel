@@ -67,8 +67,9 @@ Read `MIGRATION_REPORT.md` before sending traffic. It has three lists:
 
 Start GoModel with the generated files on another port. Add the variables
 listed under **Environment** in the report (the ones LiteLLM already read with
-`os.environ/`) to `.env`, creating it if the converter wrote none, then send a
-few test requests with the models your clients use:
+`os.environ/`) to `.env`, creating it if the converter wrote none. GoModel
+refuses to start while the variable `server.master_key` reads is unset. Then
+send a few test requests with the models your clients use:
 
 ```yaml compose.yaml
 services:

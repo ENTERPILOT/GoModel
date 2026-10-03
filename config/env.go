@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -262,6 +263,20 @@ func expandString(s string) string {
 		}
 		return value
 	})
+}
+
+// unresolvedEnvRefPattern matches the ${NAME} placeholder expandString leaves
+// in place when NAME is unset.
+var unresolvedEnvRefPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+// unresolvedEnvRef returns the name of the first unset variable s still
+// references after expansion.
+func unresolvedEnvRef(s string) (string, bool) {
+	match := unresolvedEnvRefPattern.FindStringSubmatch(s)
+	if match == nil {
+		return "", false
+	}
+	return match[1], true
 }
 
 // parseBool returns true if s is "true" or "1" (case-insensitive).
