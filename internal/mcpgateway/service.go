@@ -43,6 +43,11 @@ type pinnedServerKey struct{}
 // virtualServerKey carries the /mcp/{name} virtual server the same way.
 type virtualServerKey struct{}
 
+// virtualBindingPrefix marks a session bound to a virtual server, so a session
+// opened on /mcp/{name} stops matching if a real server takes that path. "/"
+// never occurs in a slug, so the two kinds cannot collide.
+const virtualBindingPrefix = "virtual/"
+
 // Service is the MCP gateway: it merges declarative and admin-store server
 // specs into the upstream manager and serves the downstream MCP endpoints.
 type Service struct {
@@ -82,8 +87,9 @@ var ErrServerNotVisible = errors.New("server is not available for this user path
 type sessionBinding struct {
 	authKeyID string
 	userPath  string
-	// endpoint is the /mcp/{name} segment the session was opened on: a
-	// pinned server or a virtual server; "" for the aggregated endpoint.
+	// endpoint identifies the endpoint the session was opened on: a pinned
+	// server slug, virtualBindingPrefix plus a virtual server name, or "" for
+	// the aggregated endpoint.
 	endpoint string
 	lastSeen time.Time
 	// discovery and toolAliases let request logs name the tool a call runs:
@@ -203,7 +209,13 @@ func (s *Service) Upsert(ctx context.Context, server ManagedServer) error {
 		return err
 	}
 	if s.IsVirtual(server.Name) {
-		return VirtualNameTakenError(server.Name)
+		// Only a new server is refused: one stored before the virtual server
+		// was declared keeps its endpoint and stays editable.
+		if _, err := s.store.Get(ctx, server.Name); errors.Is(err, ErrNotFound) {
+			return VirtualNameTakenError(server.Name)
+		} else if err != nil {
+			return err
+		}
 	}
 	if err := s.store.Upsert(ctx, server); err != nil {
 		return err
@@ -318,8 +330,12 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 		}
 	}
 
+	bindingEndpoint := pinnedServer
+	if virtual != "" {
+		bindingEndpoint = virtualBindingPrefix + virtual
+	}
 	if sessionID := strings.TrimSpace(r.Header.Get("Mcp-Session-Id")); sessionID != "" {
-		if !s.touchBinding(sessionID, authKeyID, userPath, pinnedServer, r.Method == http.MethodDelete) {
+		if !s.touchBinding(sessionID, authKeyID, userPath, bindingEndpoint, r.Method == http.MethodDelete) {
 			// A different principal presented this session ID. Report the
 			// session as gone (404 per the transport spec) so the legitimate
 			// client's session stays unaffected and this caller re-initializes.
@@ -359,6 +375,15 @@ type requestScope struct {
 func (scope requestScope) endpoint() string {
 	if scope.virtual != "" {
 		return scope.virtual
+	}
+	return scope.pinned
+}
+
+// bindingEndpoint is the endpoint identity a session is bound to; see
+// sessionBinding.endpoint.
+func (scope requestScope) bindingEndpoint() string {
+	if scope.virtual != "" {
+		return virtualBindingPrefix + scope.virtual
 	}
 	return scope.pinned
 }
@@ -415,7 +440,7 @@ func (s *Service) getServer(r *http.Request) *mcp.Server {
 		},
 		GetSessionID: func() string {
 			id := rand.Text()
-			s.bindSession(id, scope.authKeyID, scope.userPath, scope.endpoint(), scope.discovery, aliases)
+			s.bindSession(id, scope.authKeyID, scope.userPath, scope.bindingEndpoint(), scope.discovery, aliases)
 			return id
 		},
 	})

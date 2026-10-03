@@ -210,3 +210,39 @@ func TestUpsertRejectsVirtualServerName(t *testing.T) {
 	assert.Equal(t, `slug "coding" is used by virtual MCP server "coding" (declared in config); choose another slug`, err.Error())
 	assert.Empty(t, store.rows, "nothing is persisted")
 }
+
+func TestUpsertKeepsServerStoredBeforeVirtualServerEditable(t *testing.T) {
+	// The row predates the virtual server, so it keeps the name and stays editable.
+	store := &memoryStore{rows: map[string]ManagedServer{
+		"coding": {Name: "coding", URL: "https://old.example.com/mcp", Transport: config.MCPTransportHTTP},
+	}}
+	service, err := NewService(context.Background(), Options{
+		Store:          store,
+		VirtualServers: map[string]VirtualServerSpec{"coding": {Name: "coding", Servers: []string{"alpha"}}},
+	})
+	require.NoError(t, err)
+	t.Cleanup(service.Close)
+
+	err = service.Upsert(context.Background(), ManagedServer{Name: "coding", URL: "https://new.example.com/mcp", Transport: config.MCPTransportHTTP})
+	require.NoError(t, err)
+	assert.Equal(t, "https://new.example.com/mcp", store.rows["coding"].URL)
+}
+
+func TestSessionBindingRejectsVirtualSessionAfterServerTakesName(t *testing.T) {
+	codingURL := newTestUpstream(t, "coding", addEchoTool("lint"))
+	service, gatewayURL := newVirtualTestService(t, nil,
+		VirtualServerSpec{Name: "coding", Servers: []string{"alpha"}})
+	sessionID := initializeRawSession(t, gatewayURL+"/mcp/coding", nil)
+
+	specs := make([]ServerSpec, 0, 4)
+	for _, view := range service.Views() {
+		specs = append(specs, view.Spec)
+	}
+	specs = append(specs, testSpec("coding", codingURL, nil))
+	service.manager.Apply(specs)
+	waitForConnected(t, service, len(specs))
+
+	listBody := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
+	status := rawMCPStatus(t, gatewayURL+"/mcp/coding", listBody, map[string]string{"Mcp-Session-Id": sessionID})
+	assert.Equal(t, http.StatusNotFound, status, "the virtual session must not carry over to the real server's endpoint")
+}

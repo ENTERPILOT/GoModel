@@ -136,7 +136,10 @@ func (h *Handler) UpsertMCPServer(c *echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("mcp server "+slug+" is managed by config/env and is read-only", nil))
 	}
 	if h.mcpServers.IsVirtual(slug) {
-		return handleError(c, core.NewInvalidRequestError(mcpgateway.VirtualNameTakenError(slug).Error(), nil))
+		// A server stored before the virtual server was declared stays editable.
+		if _, err := h.mcpServers.GetManaged(c.Request().Context(), slug); errors.Is(err, mcpgateway.ErrNotFound) {
+			return handleError(c, core.NewInvalidRequestError(mcpgateway.VirtualNameTakenError(slug).Error(), nil))
+		}
 	}
 
 	server, err := h.buildMCPServerUpsert(c.Request().Context(), slug, displayName, req)

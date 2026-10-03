@@ -91,7 +91,7 @@ func TestApplyMCPVirtualEnvMergesOverYAML(t *testing.T) {
 	t.Setenv("MCP_TEST_MEMBER", "linear")
 	t.Setenv("MCP_VIRTUAL_SERVERS", `{"coding":{"servers":["github","${MCP_TEST_MEMBER}"]},"extra":{"servers":["sentry"]}}`)
 	cfg := &Config{MCP: MCPConfig{VirtualServers: map[string]MCPVirtualServerConfig{
-		"coding":   {Servers: []string{"yaml-only"}},
+		"Coding":   {Servers: []string{"yaml-only"}},
 		"research": {Servers: []string{"exa"}},
 	}}}
 	require.NoError(t, applyMCPVirtualEnv(cfg))

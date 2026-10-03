@@ -533,3 +533,15 @@ func TestListMCPVirtualServers(t *testing.T) {
 		{Name: "notion", Servers: []string{"github"}, ToolDiscovery: "off", Conflict: `virtual MCP server "notion" is not served`},
 	}, got)
 }
+
+func TestUpsertMCPServer_EditsServerStoredBeforeVirtualServer(t *testing.T) {
+	fake := newMCPAdminFake()
+	fake.addStored(mcpgateway.ManagedServer{Name: "coding", URL: "https://old.example.com/mcp", Transport: "http", Enabled: true}, mcpgateway.StatusConnected)
+	fake.virtuals = []mcpgateway.VirtualServerView{{Spec: mcpgateway.VirtualServerSpec{Name: "coding", Servers: []string{"github"}}}}
+	h := newMCPHandler(fake)
+
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/mcp-servers", `{"name":"coding","url":"https://new.example.com/mcp"}`)
+	require.NoError(t, h.UpsertMCPServer(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, "https://new.example.com/mcp", fake.stored["coding"].URL)
+}

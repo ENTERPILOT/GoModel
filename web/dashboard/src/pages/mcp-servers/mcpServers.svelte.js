@@ -96,7 +96,7 @@ class McpServersState {
       this.stopPolling();
       this.available = false;
       this.servers = [];
-      this.virtualServers = [];
+      this.#clearVirtualServers();
       this.error = "";
       this.loading = false;
       return;
@@ -120,7 +120,7 @@ class McpServersState {
       if (outcome.status === "unavailable") {
         this.available = false;
         this.servers = [];
-        this.virtualServers = [];
+        this.#clearVirtualServers();
         return;
       }
       if (outcome.status === "error") {
@@ -142,7 +142,7 @@ class McpServersState {
           return;
         }
         this.servers = [];
-        this.virtualServers = [];
+        this.#clearVirtualServers();
         this.error = outcome.error;
         return;
       }
@@ -175,6 +175,13 @@ class McpServersState {
     this.virtualServers = outcome.status === "ok" ? outcome.items : [];
   }
 
+  // Clearing also retires a virtual-list request in flight, so its response
+  // cannot bring the list back.
+  #clearVirtualServers() {
+    this.#virtualSeq += 1;
+    this.virtualServers = [];
+  }
+
   // --- connect poll ------------------------------------------------------
 
   #schedulePoll(generation) {
@@ -204,6 +211,7 @@ class McpServersState {
   // in-flight request outlives it.
   stopPolling() {
     this.#pollGeneration += 1;
+    this.#virtualSeq += 1;
     this.#pollFailures = 0;
     this.#clearPoll();
   }

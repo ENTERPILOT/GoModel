@@ -45,6 +45,12 @@ func applyMCPVirtualEnv(cfg *Config) error {
 	if cfg.MCP.VirtualServers == nil {
 		cfg.MCP.VirtualServers = make(map[string]MCPVirtualServerConfig, len(fromEnv))
 	}
+	// YAML keys are not canonicalized yet, so match them by canonical name:
+	// an env "coding" must replace a YAML "Coding", not sit beside it.
+	yamlKeys := make(map[string]string, len(cfg.MCP.VirtualServers))
+	for name := range cfg.MCP.VirtualServers {
+		yamlKeys[canonicalTextKey(name)] = name
+	}
 	seen := make(map[string]string, len(fromEnv))
 	for name, virtual := range fromEnv {
 		canonical := canonicalTextKey(name)
@@ -56,6 +62,9 @@ func applyMCPVirtualEnv(cfg *Config) error {
 		virtual.ToolDiscovery = expandString(virtual.ToolDiscovery)
 		for i := range virtual.Servers {
 			virtual.Servers[i] = expandString(virtual.Servers[i])
+		}
+		if yamlKey, ok := yamlKeys[canonical]; ok {
+			delete(cfg.MCP.VirtualServers, yamlKey)
 		}
 		cfg.MCP.VirtualServers[canonical] = virtual
 	}
