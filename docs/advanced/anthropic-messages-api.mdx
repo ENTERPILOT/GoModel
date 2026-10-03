@@ -241,10 +241,19 @@ features that have no canonical equivalent are not preserved end to end:
   with a clear `400` error rather than silently dropped.
 - **`stop_sequences`** are honored on every provider. Providers that report the
   matched sequence natively (Anthropic) get the full contract back:
-  `stop_reason: "stop_sequence"` plus the `stop_sequence` value. OpenAI-family
-  providers conflate stop-parameter hits with natural stops in `finish_reason`,
-  so completions there report `stop_reason: "end_turn"` (output is still truncated
-  correctly).
+  `stop_reason: "stop_sequence"` plus the `stop_sequence` value, and so do
+  OpenAI reasoning models (GPT-5 and later, o-series), where GoModel cuts the
+  output itself because OpenAI rejects `stop` for them. Other OpenAI-family
+  models conflate stop-parameter hits with natural stops in `finish_reason`,
+  so completions there report `stop_reason: "end_turn"` (output is still
+  truncated correctly).
+- **`output_config`**: `effort` sets the reasoning effort (taking precedence
+  over the one derived from `thinking`), and `format` (or the older top-level
+  `output_format`) becomes JSON-schema structured output — strict when the
+  schema meets OpenAI's strict-mode rules (`additionalProperties: false`,
+  every property required, and no `allOf`, `not`, or conditional keywords).
+  Other schemas are sent with `strict: false`: they guide the output but do
+  not guarantee it. A format other than `json_schema` is rejected with a `400`.
 - **`thinking`** on a non-Anthropic model becomes a reasoning effort (budget
   under 10000 tokens: `low`, under 20000: `medium`, otherwise `high`; adaptive:
   `medium`), sent as each provider's own field: `reasoning_effort` on OpenAI,

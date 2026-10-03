@@ -129,6 +129,9 @@ func toChatRequest(req *MessagesRequest, lenient bool) (*core.ChatRequest, error
 	if extra := buildExtraFields(req); !extra.IsEmpty() {
 		chat.ExtraFields = extra
 	}
+	if err := applyOutputConfig(req, chat); err != nil && !lenient {
+		return nil, err
+	}
 	return chat, nil
 }
 

@@ -147,11 +147,15 @@ func chatToolsRequireNoReasoning(model string) bool {
 
 // adaptForReasoningChat rewrites a ChatRequest body for OpenAI reasoning chat
 // models, mapping max_tokens -> max_completion_tokens and dropping temperature
-// while preserving all unknown top-level JSON fields. It works on the typed
+// and top_p, which they reject unless reasoning is off (reasoning_effort
+// "none"), while preserving all unknown top-level JSON fields. It works on the typed
 // request directly so the body is marshaled only once, by the HTTP client.
 func adaptForReasoningChat(req *core.ChatRequest) (any, error) {
 	adapted := *req
-	adapted.Temperature = nil
+	if !reasoningOff(flatEffort(req)) {
+		adapted.Temperature = nil
+		adapted.TopP = nil
+	}
 	if req.MaxTokens != nil {
 		adapted.MaxTokens = nil
 		extra, err := core.MergeUnknownJSONFields(req.ExtraFields, map[string]json.RawMessage{
@@ -196,12 +200,12 @@ func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
 		return providers.AdaptReasoningEffortRequest(req, "none")
 	}
 	if req.Reasoning == nil {
-		return req, nil
+		return adaptFlatEffort(req)
 	}
 	if effort == "" || isNonReasoningChatModel(req.Model) {
 		return providers.DropReasoning(req), nil
 	}
-	return providers.AdaptReasoningEffortRequest(req, effort)
+	return providers.AdaptReasoningEffortRequest(req, supportedEffort(req.Model, effort))
 }
 
 // nameInlineFiles gives inline file parts that arrived without a filename the

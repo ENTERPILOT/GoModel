@@ -21,29 +21,51 @@ import (
 
 // ChatCompletion serves the request through Chat Completions, or through the
 // Responses API when Chat Completions cannot serve it (see needsResponses).
+// Stop sequences the model rejects are emulated (see takeStopSequences).
 func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
+	req, stops, err := takeStopSequences(req)
+	if err != nil {
+		return nil, err
+	}
+	var resp *core.ChatResponse
 	if responsesReq, ok := responsesRoute(req); ok {
-		resp, err := p.Responses(ctx, responsesReq)
+		routed, err := p.Responses(ctx, responsesReq)
 		if err != nil {
 			return nil, err
 		}
-		return chatResponseFromResponses(resp, p.providerName)
+		resp, err = chatResponseFromResponses(routed, p.providerName)
+		if err != nil {
+			return nil, err
+		}
+	} else if resp, err = p.CompatibleProvider.ChatCompletion(ctx, req); err != nil {
+		return nil, err
 	}
-	return p.CompatibleProvider.ChatCompletion(ctx, req)
+	applyStopSequences(resp, stops)
+	return resp, nil
 }
 
 // StreamChatCompletion is ChatCompletion for streaming requests; a request
 // served through the Responses API is streamed back as chat completion chunks.
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
+	req, stops, err := takeStopSequences(req)
+	if err != nil {
+		return nil, err
+	}
+	var stream io.ReadCloser
 	if responsesReq, ok := responsesRoute(req); ok {
-		stream, err := p.StreamResponses(ctx, responsesReq)
+		routed, err := p.StreamResponses(ctx, responsesReq)
 		if err != nil {
 			return nil, err
 		}
 		includeUsage := req.StreamOptions != nil && req.StreamOptions.IncludeUsage
-		return newResponsesChatStream(stream, p.providerName, req.Model, includeUsage), nil
+		stream = newResponsesChatStream(routed, p.providerName, req.Model, includeUsage)
+	} else if stream, err = p.CompatibleProvider.StreamChatCompletion(ctx, req); err != nil {
+		return nil, err
 	}
-	return p.CompatibleProvider.StreamChatCompletion(ctx, req)
+	if len(stops) > 0 {
+		stream = newStopSequenceStream(stream, stops)
+	}
+	return stream, nil
 }
 
 // responsesRoute returns the Responses request for a chat request that must
@@ -175,7 +197,8 @@ func chatToResponsesRequest(req *core.ChatRequest) (*core.ResponsesRequest, erro
 		Tools:             tools,
 		ToolChoice:        toolChoice,
 		ParallelToolCalls: req.ParallelToolCalls,
-		TopP:              req.TopP,
+		Temperature:       samplingForResponses(req, req.Temperature),
+		TopP:              samplingForResponses(req, req.TopP),
 		MaxOutputTokens:   req.MaxTokens,
 		Stream:            req.Stream,
 		User:              req.User,
@@ -205,6 +228,16 @@ func chatToResponsesRequest(req *core.ChatRequest) (*core.ResponsesRequest, erro
 	return out, nil
 }
 
+// samplingForResponses keeps a temperature or top_p value only where the
+// model accepts it, as the chat path does: always for non-reasoning models,
+// and for reasoning models only with reasoning turned off.
+func samplingForResponses(req *core.ChatRequest, value *float64) *float64 {
+	if isReasoningChatModel(req.Model) && !reasoningOff(supportedEffort(req.Model, requestedEffort(req))) {
+		return nil
+	}
+	return value
+}
+
 // applyMappedChatFields sets the Responses fields that chat members map onto:
 // the token limit, reasoning effort, and text verbosity and format.
 func applyMappedChatFields(out *core.ResponsesRequest, req *core.ChatRequest) error {
@@ -216,7 +249,7 @@ func applyMappedChatFields(out *core.ResponsesRequest, req *core.ChatRequest) er
 		out.MaxOutputTokens = &limit
 	}
 	if effort := requestedEffort(req); effort != "" {
-		out.Reasoning = &core.Reasoning{Effort: effort}
+		out.Reasoning = &core.Reasoning{Effort: supportedEffort(req.Model, effort)}
 	}
 	text := map[string]any{}
 	if raw := req.ExtraFields.Lookup("verbosity"); len(raw) > 0 {
