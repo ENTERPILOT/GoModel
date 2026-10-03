@@ -274,7 +274,7 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 			markRequestFailoverUsed(c)
 		}
 		stream := s.wrapPluginStream(ctx, workflow, chatStreamDialect(false), chatPromptOf(req), result.Stream)
-		return s.handleStreamingReadCloser(c, workflow, result.Meta, stream, func(stream io.ReadCloser) io.ReadCloser {
+		return s.handleStreamingReadCloser(c, workflow, result.Meta, stream, result.GenerationObserver(), func(stream io.ReadCloser) io.ReadCloser {
 			converted := anthropicapi.NewStreamConverter(stream, result.Meta.Model, anthropicapi.EstimateChatInputTokens(req))
 			return result.WrapDeliveryStream(ctx, converted)
 		})

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.39.0"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 )
 
@@ -34,6 +36,9 @@ const (
 	// closeTimeout bounds the final flush so an unreachable collector cannot
 	// hold up gateway shutdown.
 	closeTimeout = 10 * time.Second
+	// captureContentEnvVar is the standard OpenTelemetry GenAI switch for
+	// recording prompts and completions on spans.
+	captureContentEnvVar = "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"
 )
 
 // Span attributes that identify the caller or the host are never exported.
@@ -96,10 +101,11 @@ func New(ctx context.Context, cfg config.OpenTelemetryConfig, metricsEndpoint, s
 		slog.Warn("opentelemetry export failed", "error", err)
 	}))
 
+	captureContent := captureMessageContent()
 	service := &Service{tracerProvider: tp, meterProvider: mp}
-	service.observer, err = newObserver(tp, mp)
+	service.observer, err = newObserver(tp, mp, captureContent)
 	if err == nil {
-		service.middleware, err = newMiddleware(tp, mp, propagatorsFromEnv(), metricsEndpoint)
+		service.middleware, err = newMiddleware(tp, mp, propagatorsFromEnv(), metricsEndpoint, captureContent)
 	}
 	if err != nil {
 		_ = service.Close()
@@ -113,8 +119,21 @@ func New(ctx context.Context, cfg config.OpenTelemetryConfig, metricsEndpoint, s
 	slog.Info("opentelemetry enabled",
 		"traces_exporter", exporterName("OTEL_TRACES_EXPORTER"),
 		"metrics_exporter", exporterName("OTEL_METRICS_EXPORTER"),
+		"capture_message_content", captureContent,
 	)
 	return service, nil
+}
+
+// captureMessageContent reads the GenAI content capture switch. Besides
+// true and false it accepts the mode names newer instrumentations use;
+// GoModel records content on spans, so the modes that include spans enable it.
+func captureMessageContent() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(captureContentEnvVar))) {
+	case "true", "1", "span_only", "span_and_event":
+		return true
+	default:
+		return false
+	}
 }
 
 // Middleware traces inbound HTTP requests and records the standard HTTP
@@ -151,8 +170,8 @@ func newResource(ctx context.Context, serviceName string) (*resource.Resource, e
 	)
 }
 
-func newMiddleware(tp *sdkTrace.TracerProvider, mp *sdkMetric.MeterProvider, propagators propagation.TextMapPropagator, metricsEndpoint string) (echo.MiddlewareFunc, error) {
-	middleware, err := (echootel.Config{
+func newMiddleware(tp *sdkTrace.TracerProvider, mp *sdkMetric.MeterProvider, propagators propagation.TextMapPropagator, metricsEndpoint string, captureContent bool) (echo.MiddlewareFunc, error) {
+	traced, err := (echootel.Config{
 		TracerProvider:      tp,
 		MeterProvider:       mp,
 		Propagators:         propagators,
@@ -163,7 +182,19 @@ func newMiddleware(tp *sdkTrace.TracerProvider, mp *sdkMetric.MeterProvider, pro
 	if err != nil {
 		return nil, fmt.Errorf("configure OpenTelemetry HTTP middleware: %w", err)
 	}
-	return middleware, nil
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return traced(withGenerationTracing(next, captureContent))
+	}, nil
+}
+
+// withGenerationTracing lets the gateway trace the request's inference calls
+// (see core.GenerationTrace), so their spans carry the decoded usage.
+func withGenerationTracing(next echo.HandlerFunc, captureContent bool) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		req := c.Request()
+		c.SetRequest(req.WithContext(core.WithGenerationTracing(req.Context(), captureContent)))
+		return next(c)
+	}
 }
 
 // operationalEndpointSkipper leaves health probes, Prometheus scrapes, and

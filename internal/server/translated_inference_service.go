@@ -146,7 +146,7 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 			markRequestFailoverUsed(c)
 		}
 		stream := s.wrapPluginStream(ctx, workflow, chatStreamDialect(includeStreamUsage(req)), chatPromptOf(req), result.Stream)
-		return s.handleStreamingReadCloser(c, workflow, result.Meta, stream, func(stream io.ReadCloser) io.ReadCloser {
+		return s.handleStreamingReadCloser(c, workflow, result.Meta, stream, result.GenerationObserver(), func(stream io.ReadCloser) io.ReadCloser {
 			return result.WrapDeliveryStream(ctx, stream)
 		})
 	}
@@ -380,7 +380,7 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 			stream = turn.persistingStream(ctx, stream)
 		}
 		stream = s.snapshotStream(ctx, workflow, req, result.Meta.ProviderType, result.Meta.ProviderName, requestID, stream)
-		return s.handleStreamingReadCloser(c, workflow, result.Meta, stream, func(stream io.ReadCloser) io.ReadCloser {
+		return s.handleStreamingReadCloser(c, workflow, result.Meta, stream, result.GenerationObserver(), func(stream io.ReadCloser) io.ReadCloser {
 			return result.WrapDeliveryStream(ctx, stream)
 		})
 	}
@@ -649,7 +649,9 @@ func cacheWorkflowResolutionHints(c *echo.Context, workflow *core.Workflow) {
 }
 
 // handleStreamingReadCloser flushes a provider SSE stream to the client while
-// fanning audit and usage observers off the canonical (OpenAI-shaped) stream.
+// fanning audit, usage, and generation-trace observers off the canonical
+// (OpenAI-shaped) stream. generation is the stream result's
+// GenerationObserver, nil for synthesized streams.
 // outerWrap, when non-nil, wraps the observed stream as the outermost layer —
 // used by the Anthropic /v1/messages dialect to re-encode the SSE events after
 // the observers have already seen the canonical form.
@@ -658,6 +660,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 	workflow *core.Workflow,
 	meta gateway.ExecutionMeta,
 	stream io.ReadCloser,
+	generation streaming.Observer,
 	outerWrap func(io.ReadCloser) io.ReadCloser,
 ) error {
 	model, provider, providerName := meta.Model, meta.ProviderType, meta.ProviderName
@@ -679,7 +682,10 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 
 	requestID := requestIDFromContextOrHeader(c.Request())
 	endpoint := c.Request().URL.Path
-	observers := make([]streaming.Observer, 0, 3)
+	observers := make([]streaming.Observer, 0, 4)
+	if generation != nil {
+		observers = append(observers, generation)
+	}
 	if auditEnabled && streamEntry != nil {
 		observers = append(observers, auditlog.NewStreamLogObserver(s.logger, streamEntry, endpoint))
 	}

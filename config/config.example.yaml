@@ -332,6 +332,7 @@ opentelemetry:
   sampler: "parentbased_always_on" # e.g. "parentbased_traceidratio" with sampler_arg "0.1"
   # sampler_arg: "0.1"
   propagators: "tracecontext,baggage" # also b3, b3multi, jaeger, ottrace, none
+  capture_message_content: false # record prompts and completions on provider call spans
 
 http:
   timeout: 600 # seconds (10 minutes)

@@ -62,6 +62,12 @@ type OpenTelemetryConfig struct {
 	// ottrace, or none.
 	// Default: "tracecontext,baggage"
 	Propagators string `yaml:"propagators"`
+
+	// CaptureMessageContent records prompts and completions on GenAI spans
+	// (OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT). Content then
+	// leaves the gateway with every exported trace.
+	// Default: false
+	CaptureMessageContent bool `yaml:"capture_message_content"`
 }
 
 // Environment returns the OTEL_* variables that the configured fields stand
@@ -83,6 +89,9 @@ func (c OpenTelemetryConfig) Environment() map[string]string {
 	set("OTEL_TRACES_SAMPLER", c.Sampler)
 	set("OTEL_TRACES_SAMPLER_ARG", c.SamplerArg)
 	set("OTEL_PROPAGATORS", c.Propagators)
+	if c.CaptureMessageContent {
+		set("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "true")
+	}
 	return vars
 }
 
