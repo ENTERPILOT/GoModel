@@ -504,6 +504,15 @@ func TestDashboardRuntimeConfig_ExposesFeatureAvailabilityFlags(t *testing.T) {
 	require.Equal(t, "on", got, "dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigLiveLogsEnabled, got)
 	got = values.MCPEnabled
 	require.Equal(t, "on", got, "dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigMCPEnabled, got)
+	got = values.MCPToolDiscovery
+	require.Equal(t, "off", got, "dashboardRuntimeConfig()[%q] = %q, want off by default", admin.DashboardConfigMCPToolDiscovery, got)
+}
+
+func TestDashboardRuntimeConfig_ExposesMCPToolDiscovery(t *testing.T) {
+	values := dashboardRuntimeConfig(&config.Config{
+		MCP: config.MCPConfig{Enabled: true, ToolDiscovery: config.MCPToolDiscoverySearch},
+	}, false, false, false)
+	require.Equal(t, "search", values.MCPToolDiscovery)
 }
 
 func TestDashboardRuntimeConfig_ExposesIndefiniteLoggingRetention(t *testing.T) {
