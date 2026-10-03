@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
@@ -280,5 +281,25 @@ func TestSQLStoreCleanupDeletesExpiredRows(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, log.Entries, 1)
 		assert.Equal(t, "req-5", log.Entries[0].RequestID)
+	})
+}
+
+// A batch size below the row count makes the recalculation page by id, which
+// on PostgreSQL compares string arguments against the UUID primary key.
+func TestSQLStoreRecalculatePricingPagesByID(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := context.Background()
+		store, _ := newSQLReaderFixture(t, db)
+		store.recalculationBatchSize = 1
+
+		result, err := store.RecalculatePricing(ctx, RecalculatePricingParams{UsageQueryParams: sqlReaderFixtureRange},
+			staticTestPricingResolver{"primary/gpt-5": &core.ModelPricing{InputPerMtok: new(1.0), OutputPerMtok: new(2.0)}})
+		require.NoError(t, err)
+		assert.Equal(t, int64(len(sqlReaderFixture)), result.Matched)
+		assert.Equal(t, int64(3), result.WithPricing, "the three gpt-5 rows")
+
+		var total float64
+		require.NoError(t, db.QueryRow(ctx, "SELECT total_cost FROM usage WHERE id = ?", sqlReaderFixture[1].ID).Scan(&total))
+		assert.InDelta(t, 0.0004, total, 1e-12, "200 input and 100 output tokens at $1/$2 per Mtok")
 	})
 }
