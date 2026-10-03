@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"sort"
 	"strings"
 
@@ -54,16 +55,25 @@ type ProviderConfig struct {
 	Resilience  config.ResilienceConfig
 }
 
-// resolveProviders applies env var overrides from environ to the raw YAML
-// provider map, filters out entries with invalid credentials, and merges each
-// entry with the global ResilienceConfig. The second return value is the
-// credential-filtered raw map (same keys as the first); use it for auxiliary
-// clients that need the same API keys and base URLs as the live router (e.g.
-// semantic-cache embeddings).
-func resolveProviders(raw map[string]config.RawProviderConfig, global config.ResilienceConfig, discovery map[string]DiscoveryConfig, environ []string) (map[string]ProviderConfig, map[string]config.RawProviderConfig) {
-	merged := normalizeProviderAPIKeys(applyProviderEnvVars(raw, discovery, environ))
+// resolveProviders applies env var overrides to the raw YAML provider map,
+// resolves secret references, filters out entries with invalid credentials,
+// and merges each entry with the global ResilienceConfig. The second return
+// value is the credential-filtered raw map (same keys as the first); use it for
+// auxiliary clients that need the same API keys and base URLs as the live
+// router (e.g. semantic-cache embeddings).
+//
+// References are resolved after the env overlay, so a YAML value an env var
+// replaces, or an env var the overlay ignores, is never looked up. One that is
+// used and cannot be resolved is an error, never a value that is dropped or
+// sent upstream.
+func resolveProviders(ctx context.Context, secrets *config.Secrets, raw map[string]config.RawProviderConfig, global config.ResilienceConfig, discovery map[string]DiscoveryConfig) (map[string]ProviderConfig, map[string]config.RawProviderConfig, error) {
+	merged := applyProviderEnvVars(raw, discovery)
+	if err := secrets.ResolveFields(ctx, "providers", &merged); err != nil {
+		return nil, nil, err
+	}
+	merged = normalizeProviderAPIKeys(merged)
 	filtered := filterEmptyProviders(merged, discovery)
-	return buildProviderConfigs(filtered, global), filtered
+	return buildProviderConfigs(filtered, global), filtered, nil
 }
 
 // normalizeProviderAPIKeys collapses each provider's `api_key` and `api_keys`
@@ -93,7 +103,7 @@ func resolvedAPIKeys(keys []string) []string {
 	seen := make(map[string]struct{}, len(keys))
 	for _, key := range keys {
 		key = strings.TrimSpace(key)
-		if !HasResolvedProviderValue(key) {
+		if !providerValueSet(key) {
 			continue
 		}
 		if _, dup := seen[key]; dup {
@@ -199,6 +209,13 @@ func validVertexProviderConfig(p config.RawProviderConfig) bool {
 func HasResolvedProviderValue(value string) bool {
 	value = strings.TrimSpace(value)
 	return value != "" && !strings.Contains(value, "${")
+}
+
+// providerValueSet is HasResolvedProviderValue for values that have not been
+// resolved yet: a secret reference counts as set, because it is resolved or
+// fails later, while a legacy ${VAR} placeholder still does not.
+func providerValueSet(value string) bool {
+	return HasResolvedProviderValue(value) || config.HasSecretReference(value)
 }
 
 // buildProviderConfigs merges each raw provider config with the global ResilienceConfig,

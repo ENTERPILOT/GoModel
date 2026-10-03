@@ -10,26 +10,54 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// ResolveSecrets resolves every secret reference in Config and RawProviders,
-// failing on the first one that cannot be resolved. Extensions are skipped:
-// DecodeExtension resolves a section when it is decoded. It runs once per
-// generation, after the distribution's configuration hook has registered its
-// schemes; later calls do nothing, so a resolved value is never scanned again.
+// ResolveSecrets resolves every secret reference in Config, failing on the
+// first one that cannot be resolved, then re-checks the settings whose
+// load-time validation had to accept a reference. Extensions are skipped:
+// DecodeExtension resolves a section when it is decoded. RawProviders are
+// skipped too: providers.Init resolves them after the provider environment
+// variables are merged, so a value an environment variable replaces is never
+// looked up.
+//
+// It runs once per generation, after the distribution's configuration hook
+// has registered its schemes. Later calls return the first call's result, so a
+// resolved value is never scanned again, not even after a failure left the
+// configuration partly resolved.
 func (r *LoadResult) ResolveSecrets(ctx context.Context) error {
-	if r == nil || r.secretsResolved {
+	if r == nil {
 		return nil
 	}
-	w := secretWalker{ctx: ctx, secrets: r.Secrets}
-	if r.Config != nil {
-		if err := w.walk("", reflect.ValueOf(r.Config).Elem()); err != nil {
-			return err
-		}
+	if !r.secretsResolved {
+		r.secretsResolved = true
+		r.secretsErr = r.resolveSecrets(ctx)
 	}
-	if err := w.walk("providers", reflect.ValueOf(r.RawProviders)); err != nil {
+	return r.secretsErr
+}
+
+func (r *LoadResult) resolveSecrets(ctx context.Context) error {
+	if r.Config == nil {
+		return nil
+	}
+	if err := r.Secrets.ResolveFields(ctx, "", r.Config); err != nil {
 		return err
 	}
-	r.secretsResolved = true
-	return nil
+	return validateResolvedMCPServers(r.Config.MCP.Servers)
+}
+
+// ResolveFields resolves the secret references in every string reachable from
+// target, a pointer or a map: struct fields, slices, maps, and interface
+// values such as map[string]any. yaml.Node values are skipped. Errors name the
+// field by its YAML path below path, for example "providers.openai.api_key".
+//
+// Values are resolved in place, but slices and maps reached through a
+// settable value are replaced by resolved copies, so data shared with
+// another value is not rewritten. Call it once per value: resolved values
+// must not be scanned again.
+func (s *Secrets) ResolveFields(ctx context.Context, path string, target any) error {
+	v := reflect.ValueOf(target)
+	if !v.IsValid() {
+		return nil
+	}
+	return secretWalker{ctx: ctx, secrets: s}.walk(path, v)
 }
 
 // secretWalker visits every string reachable from a configuration value.
@@ -75,6 +103,11 @@ func (w secretWalker) walk(path string, v reflect.Value) error {
 	case reflect.Struct:
 		return w.walkStruct(path, v)
 	case reflect.Slice, reflect.Array:
+		if v.Kind() == reflect.Slice && v.Len() > 0 && v.CanSet() {
+			clone := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
+			reflect.Copy(clone, v)
+			v.Set(clone)
+		}
 		for i := 0; i < v.Len(); i++ {
 			if err := w.walk(path+"["+strconv.Itoa(i)+"]", v.Index(i)); err != nil {
 				return err
@@ -84,13 +117,20 @@ func (w secretWalker) walk(path string, v reflect.Value) error {
 		if v.Type().Elem() == yamlNodeType {
 			return nil // extension sections, resolved by DecodeExtension
 		}
+		target, copied := v, v.CanSet() && !v.IsNil()
+		if copied {
+			target = reflect.MakeMapWithSize(v.Type(), v.Len())
+		}
 		for _, key := range v.MapKeys() {
 			elem := reflect.New(v.Type().Elem()).Elem()
 			elem.Set(v.MapIndex(key))
 			if err := w.walk(joinSecretPath(path, mapKeyString(key)), elem); err != nil {
 				return err
 			}
-			v.SetMapIndex(key, elem)
+			target.SetMapIndex(key, elem)
+		}
+		if copied {
+			v.Set(target)
 		}
 	}
 	return nil

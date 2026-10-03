@@ -85,6 +85,7 @@ type LoadResult struct {
 	Secrets *Secrets
 
 	secretsResolved bool
+	secretsErr      error
 }
 
 // DecodeExtension strictly decodes one named extensions: section into target.

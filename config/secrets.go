@@ -103,7 +103,7 @@ func (s *Secrets) Register(scheme string, r SecretResolver) error {
 // HasReference reports whether value contains at least one secret reference.
 // An escaped $${...} is not a reference.
 func (s *Secrets) HasReference(value string) bool {
-	return hasSecretReference(value)
+	return HasSecretReference(value)
 }
 
 // Resolve replaces every secret reference in value with its resolved value
@@ -176,9 +176,10 @@ func (s *Secrets) resolveReference(ctx context.Context, scheme, reference string
 	return r.ResolveSecret(ctx, reference)
 }
 
-// hasSecretReference reports whether value holds a reference, using the same
-// scan as resolveField.
-func hasSecretReference(value string) bool {
+// HasSecretReference reports whether value contains at least one secret
+// reference, using the same scan as Resolve. An escaped $${...} is not a
+// reference.
+func HasSecretReference(value string) bool {
 	for rest := value; ; {
 		i := strings.Index(rest, "${")
 		if i < 0 {
