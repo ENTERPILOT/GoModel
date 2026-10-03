@@ -1743,6 +1743,8 @@ func TestLoadRejectsMasterKeyFromUnsetVariable(t *testing.T) {
 		{name: "set variable", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"LITELLM_MASTER_KEY": "sk-1234"}, wantKey: "sk-1234"},
 		{name: "empty default", masterKey: "${LITELLM_MASTER_KEY:-}", wantKey: ""},
 		{name: "environment override", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"GOMODEL_MASTER_KEY": "sk-env"}, wantKey: "sk-env"},
+		{name: "environment override holding ${", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"GOMODEL_MASTER_KEY": "pa${ss}"}, wantKey: "pa${ss}"},
+		{name: "set variable holding ${", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"LITELLM_MASTER_KEY": "pa${ss}"}, wantKey: "pa${ss}"},
 		{name: "disabled master key", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"MASTER_KEY_DISABLED": "true"}, wantKey: ""},
 	}
 	for _, tt := range tests {

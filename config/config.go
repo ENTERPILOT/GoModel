@@ -253,10 +253,11 @@ func Load() (*LoadResult, error) {
 		return nil, err
 	}
 
-	rawProviders, err := applyYAML(cfg, strict)
+	rawProviders, masterKeyUnresolved, err := applyYAML(cfg, strict)
 	if err != nil {
 		return nil, err
 	}
+	yamlMasterKey := cfg.Server.MasterKey
 
 	if err := applyResponseSimpleEnv(&cfg.Cache.Response); err != nil {
 		return nil, err
@@ -313,10 +314,10 @@ func Load() (*LoadResult, error) {
 	if cfg.Server.MasterKeyDisabled {
 		cfg.Server.MasterKey = ""
 	}
-	// Expansion leaves an unset ${NAME}, in any form, in the value verbatim.
-	// As a master key, that text would be a password anyone who reads
-	// config.yaml knows. The error names no part of the key.
-	if strings.Contains(cfg.Server.MasterKey, "${") {
+	// Expansion leaves an unset ${NAME} in config.yaml verbatim. As a master
+	// key, that text would be a password anyone who reads the file knows. A
+	// key from GOMODEL_MASTER_KEY replaces it and is used as-is.
+	if masterKeyUnresolved && cfg.Server.MasterKey != "" && cfg.Server.MasterKey == yamlMasterKey {
 		return nil, errors.New("server.master_key reads an environment variable that is not set; set it or remove server.master_key")
 	}
 	cfg.Server.BasePath = NormalizeBasePath(cfg.Server.BasePath)
@@ -413,14 +414,14 @@ func resolveConfigStrict() (bool, error) {
 // zero — otherwise parses as a null section plus unknown top-level keys, and the
 // gateway boots with none of the operator's providers. CONFIG_STRICT=false
 // downgrades unknown keys to warnings; malformed values stay fatal either way.
-func applyYAML(cfg *Config, strict bool) (map[string]RawProviderConfig, error) {
+func applyYAML(cfg *Config, strict bool) (map[string]RawProviderConfig, bool, error) {
 	path, data, err := readConfigFile()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if data == nil {
 		slog.Info("no config file found; using defaults and environment", "searched", configFilePaths)
-		return map[string]RawProviderConfig{}, nil
+		return map[string]RawProviderConfig{}, false, nil
 	}
 
 	// yamlTarget is a local struct that mirrors Config for YAML unmarshaling,
@@ -440,19 +441,35 @@ func applyYAML(cfg *Config, strict bool) (map[string]RawProviderConfig, error) {
 	decodeErr := decoder.Decode(&target)
 	if decodeErr != nil && !errors.Is(decodeErr, io.EOF) {
 		if err := reportYAMLDecodeError(path, decodeErr, strict); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
 	if err := ensureSingleDocument(path, decoder); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	slog.Info("config file loaded", "path", path, "providers", len(target.RawProviders))
 
 	if target.RawProviders == nil {
-		return map[string]RawProviderConfig{}, nil
+		target.RawProviders = map[string]RawProviderConfig{}
 	}
-	return target.RawProviders, nil
+	return target.RawProviders, masterKeyReadsUnsetVariable(data, cfg.Server.MasterKey), nil
+}
+
+// masterKeyReadsUnsetVariable reports whether server.master_key in the
+// unexpanded config file references a variable expansion left unresolved.
+// When the file only parses once expanded, it falls back to looking for a
+// leftover reference in the expanded key.
+func masterKeyReadsUnsetVariable(data []byte, expandedKey string) bool {
+	var raw struct {
+		Server struct {
+			MasterKey string `yaml:"master_key"`
+		} `yaml:"server"`
+	}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return strings.Contains(expandedKey, "${")
+	}
+	return readsUnsetVariable(raw.Server.MasterKey)
 }
 
 // ensureSingleDocument rejects a config file holding more than one YAML document.

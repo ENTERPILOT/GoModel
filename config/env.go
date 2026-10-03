@@ -240,28 +240,40 @@ func applyEnvOverridesValue(v reflect.Value) error {
 }
 
 // expandString expands environment variable references like ${VAR} or ${VAR:-default} in a string.
+// A reference it cannot resolve stays in the result verbatim.
 func expandString(s string) string {
 	if s == "" {
 		return s
 	}
 	return os.Expand(s, func(key string) string {
-		varname := key
-		defaultValue := ""
-		hasDefault := false
-		if before, after, ok := strings.Cut(key, ":-"); ok {
-			varname = before
-			defaultValue = after
-			hasDefault = true
+		if value, ok := resolveEnvRef(key); ok {
+			return value
 		}
-		value := os.Getenv(varname)
-		if value == "" {
-			if hasDefault {
-				return defaultValue
-			}
-			return "${" + key + "}"
-		}
-		return value
+		return "${" + key + "}"
 	})
+}
+
+// resolveEnvRef resolves the key of one ${key} reference. ok is false when
+// the variable is unset or empty and key gives no :- default.
+func resolveEnvRef(key string) (string, bool) {
+	name, defaultValue, hasDefault := strings.Cut(key, ":-")
+	if value := os.Getenv(name); value != "" {
+		return value, true
+	}
+	return defaultValue, hasDefault
+}
+
+// readsUnsetVariable reports whether expandString would leave a reference in
+// s unresolved.
+func readsUnsetVariable(s string) bool {
+	unset := false
+	os.Expand(s, func(key string) string {
+		if _, ok := resolveEnvRef(key); !ok {
+			unset = true
+		}
+		return ""
+	})
+	return unset
 }
 
 // parseBool returns true if s is "true" or "1" (case-insensitive).
