@@ -113,7 +113,7 @@ func TestFromChatResponseStopReasons(t *testing.T) {
 		{name: "stop", finish: "stop", want: "end_turn"},
 		{name: "length", finish: "length", want: "max_tokens"},
 		{name: "tool_calls", finish: "tool_calls", want: "tool_use"},
-		{name: "content_filter", finish: "content_filter", want: "end_turn"},
+		{name: "content_filter", finish: "content_filter", want: "refusal"},
 		{name: "empty", finish: "", want: "end_turn"},
 		// A response carrying tool calls always reports "tool_use". OpenAI-family
 		// providers report finish_reason "stop" alongside tool calls when a tool

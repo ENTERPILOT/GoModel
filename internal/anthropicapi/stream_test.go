@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
 // drainConverter runs the SSE converter over chatStream and returns the parsed
@@ -464,6 +466,46 @@ func TestStreamConverterVendorReasoningMember(t *testing.T) {
 				thinking = append(thinking, delta["thinking"].(string))
 			}
 			assert.Equal(t, tt.want, strings.Join(thinking, ""))
+		})
+	}
+}
+
+// An error the upstream reports mid-stream reaches the client with its own
+// message and the nearest Anthropic error type, instead of the generic
+// incomplete-stream error.
+func TestStreamConverterRelaysUpstreamError(t *testing.T) {
+	start := `data: {"id":"chatcmpl-1","model":"gpt","choices":[{"index":0,"delta":{"content":"Hel"},"finish_reason":null}]}`
+	tests := []struct {
+		name     string
+		tail     []string
+		wantType string
+		wantMsg  string
+	}{
+		{name: "server error then EOF", tail: []string{`data: {"error":{"message":"The server had an error processing your request.","type":"server_error"}}`},
+			wantType: "api_error", wantMsg: "The server had an error processing your request."},
+		{name: "rate limit then [DONE]", tail: []string{`data: {"error":{"message":"Rate limit reached","type":"rate_limit_exceeded"}}`, `data: [DONE]`},
+			wantType: "rate_limit_error", wantMsg: "Rate limit reached"},
+		{name: "no upstream detail", tail: nil,
+			wantType: "api_error", wantMsg: streaming.ErrStreamIncomplete.Error()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stream := strings.Join(append([]string{start}, tt.tail...), "\n\n") + "\n\n"
+			conv := NewStreamConverter(io.NopCloser(strings.NewReader(stream)), "fallback-model", 0)
+			defer conv.Close() //nolint:errcheck
+
+			out, err := io.ReadAll(conv)
+			require.ErrorIs(t, err, streaming.ErrStreamIncomplete)
+
+			var last map[string]any
+			for line := range strings.SplitSeq(string(out), "\n") {
+				if data, ok := strings.CutPrefix(line, "data: "); ok {
+					require.NoError(t, json.Unmarshal([]byte(data), &last))
+				}
+			}
+			assert.Equal(t, "error", last["type"])
+			assert.Equal(t, map[string]any{"type": tt.wantType, "message": tt.wantMsg}, last["error"])
+			assert.NotContains(t, string(out), "message_stop")
 		})
 	}
 }

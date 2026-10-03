@@ -202,7 +202,9 @@ func stopReasonFromFinish(finish string, hasToolCalls bool) string {
 	case "tool_calls":
 		return "tool_use"
 	case "content_filter":
-		return "end_turn"
+		// The model declined or was stopped by the provider's safety
+		// system; Anthropic reports that as a refusal.
+		return "refusal"
 	case "":
 		return ""
 	default:

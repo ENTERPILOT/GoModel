@@ -165,6 +165,9 @@ console.log(message.content[0].text);
 The response uses the Anthropic Messages shape (`type: "message"`, `content` blocks,
 `stop_reason`, `usage`). Errors use the Anthropic error envelope
 (`{"type": "error", "error": {...}}`). `max_tokens` is required, as in the Anthropic API.
+A provider's content filter is reported as `stop_reason: "refusal"`. If the
+provider fails partway through a stream, the stream ends with an `error` event
+carrying the provider's own message.
 
 `usage` follows Anthropic semantics for every provider: `input_tokens` excludes
 cached tokens, which are reported separately as `cache_read_input_tokens` and
@@ -227,14 +230,20 @@ features that have no canonical equivalent are not preserved end to end:
   are forwarded.
 - **Images and documents inside `tool_result` blocks** (screenshots, image and
   PDF files read by a tool — Claude Code returns them this way) are forwarded as
-  native `image` and `document` blocks when routed to Anthropic. Other providers
-  receive only the text portion of the tool result.
+  native `image` and `document` blocks when routed to Anthropic. OpenAI receives
+  them through its Responses API, where the model can see them (see
+  [OpenAI requests served through Responses](/providers/overview#provider-notes)).
+  Other providers receive only the text portion of the tool result.
 - **`document` blocks** (PDF, plain text, URL, or Files API `file_id` sources)
   translate to the OpenAI-style `file` content part (`file_data` for inline
   content, `file_url` for remote URLs, `file_id` for uploads). Anthropic gets the
   document back natively with its `title`; Gemini receives inline data only;
-  OpenAI-compatible providers receive the `file` part as-is. Citation settings and `context` are
-  dropped. The custom-content variant (`source.type: "content"`) degrades to text.
+  OpenAI-compatible providers receive the `file` part as-is. On OpenAI, an
+  untitled document gets a filename (`document.pdf`), a plain-text document is
+  sent to Chat Completions as text (headed by its `title`) because only PDF
+  file data is accepted there, and URL documents go through the Responses API.
+  Citation settings and `context` are dropped. The custom-content variant
+  (`source.type: "content"`) degrades to text.
 - **`search_result` blocks** degrade to text (title, source URL, and content);
   citation metadata is dropped.
 - **Other content blocks** (`container_upload`, `tool_reference`, …) are rejected

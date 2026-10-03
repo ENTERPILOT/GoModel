@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"cmp"
+	"fmt"
 	"io"
+	"strings"
 
 	"github.com/goccy/go-json"
 
@@ -15,8 +17,11 @@ import (
 // chatChunk is the subset of an OpenAI chat.completion.chunk consumed by the
 // stream converter.
 type chatChunk struct {
-	ID      string `json:"id"`
-	Model   string `json:"model"`
+	ID    string `json:"id"`
+	Model string `json:"model"`
+	// Error is an upstream failure reported inside the stream
+	// (data: {"error": {...}}).
+	Error   *upstreamStreamError `json:"error"`
 	Choices []struct {
 		Delta struct {
 			Content          string              `json:"content"`
@@ -31,6 +36,13 @@ type chatChunk struct {
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *chatUsage `json:"usage"`
+}
+
+// upstreamStreamError is the error object an OpenAI-compatible upstream sends
+// in place of a chunk when it fails mid-stream.
+type upstreamStreamError struct {
+	Message string `json:"message"`
+	Type    string `json:"type"`
 }
 
 type chatToolCallDelta struct {
@@ -98,6 +110,9 @@ type streamConverter struct {
 	// endErr is what Read returns once a stream that stopped early has
 	// emitted its error event.
 	endErr error
+	// upstreamErr is the error the upstream reported mid-stream, if any; it
+	// becomes the error event instead of the generic incomplete-stream one.
+	upstreamErr *upstreamStreamError
 }
 
 // finish ends the converted stream when the upstream stops reading. An
@@ -114,11 +129,25 @@ func (sc *streamConverter) finish(err error) {
 		return
 	}
 	sc.finalized = true
+	errType, message := "api_error", streaming.ErrStreamIncomplete.Error()
+	if upstream := sc.upstreamErr; upstream != nil && strings.TrimSpace(upstream.Message) != "" {
+		errType, message = upstreamErrorType(upstream.Type), upstream.Message
+		err = fmt.Errorf("upstream error: %s", upstream.Message)
+	}
 	sc.endErr = streaming.IncompleteStreamError(err)
 	sc.emit("error", map[string]any{
 		"type":  "error",
-		"error": map[string]any{"type": "api_error", "message": streaming.ErrStreamIncomplete.Error()},
+		"error": map[string]any{"type": errType, "message": message},
 	})
+}
+
+// upstreamErrorType maps an OpenAI-style error type onto the nearest
+// Anthropic error type.
+func upstreamErrorType(upstreamType string) string {
+	if strings.HasPrefix(upstreamType, "rate_limit") {
+		return "rate_limit_error"
+	}
+	return anthropicErrorType(&core.GatewayError{Type: core.ErrorType(upstreamType)})
 }
 
 func (sc *streamConverter) Read(p []byte) (int, error) {
@@ -139,7 +168,13 @@ func (sc *streamConverter) Read(p []byte) (int, error) {
 		line, err := sc.reader.ReadBytes('\n')
 		if len(bytes.TrimSpace(line)) > 0 {
 			if done := sc.consumeLine(line); done {
-				sc.finalize()
+				if sc.upstreamErr != nil {
+					// [DONE] after an upstream error still ends the turn
+					// as failed unless a finish arrived before it.
+					sc.finish(nil)
+				} else {
+					sc.finalize()
+				}
 			}
 		}
 		if err != nil {
@@ -190,6 +225,10 @@ func (sc *streamConverter) consumeLine(line []byte) (done bool) {
 }
 
 func (sc *streamConverter) handleChunk(chunk *chatChunk) {
+	if chunk.Error != nil {
+		sc.upstreamErr = chunk.Error
+		return
+	}
 	sc.ensureStarted(chunk.ID, chunk.Model)
 	if chunk.Usage != nil {
 		sc.usage = *chunk.Usage
