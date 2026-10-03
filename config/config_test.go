@@ -1731,6 +1731,7 @@ func TestLoadRejectsMasterKeyFromUnsetVariable(t *testing.T) {
 	const unset = "server.master_key reads an environment variable that is not set"
 	tests := []struct {
 		name      string
+		field     string
 		masterKey string
 		env       map[string]string
 		wantKey   string
@@ -1745,6 +1746,7 @@ func TestLoadRejectsMasterKeyFromUnsetVariable(t *testing.T) {
 		{name: "environment override", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"GOMODEL_MASTER_KEY": "sk-env"}, wantKey: "sk-env"},
 		{name: "environment override holding ${", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"GOMODEL_MASTER_KEY": "pa${ss}"}, wantKey: "pa${ss}"},
 		{name: "set variable holding ${", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"LITELLM_MASTER_KEY": "pa${ss}"}, wantKey: "pa${ss}"},
+		{name: "field name from a variable", field: "master_${SUFFIX}", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"SUFFIX": "key"}, wantErr: unset},
 		{name: "disabled master key", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"MASTER_KEY_DISABLED": "true"}, wantKey: ""},
 	}
 	for _, tt := range tests {
@@ -1755,7 +1757,11 @@ func TestLoadRejectsMasterKeyFromUnsetVariable(t *testing.T) {
 				t.Setenv(name, value)
 			}
 			withTempDir(t, func(dir string) {
-				writeConfigYAML(t, dir, "server:\n  master_key: \""+tt.masterKey+"\"\n")
+				field := tt.field
+				if field == "" {
+					field = "master_key"
+				}
+				writeConfigYAML(t, dir, "server:\n  "+field+": \""+tt.masterKey+"\"\n")
 				result, err := Load()
 				if tt.wantErr != "" {
 					require.ErrorContains(t, err, tt.wantErr)

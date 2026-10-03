@@ -2,6 +2,7 @@
 package config
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -456,20 +457,23 @@ func applyYAML(cfg *Config, strict bool) (map[string]RawProviderConfig, bool, er
 	return target.RawProviders, masterKeyReadsUnsetVariable(data, cfg.Server.MasterKey), nil
 }
 
-// masterKeyReadsUnsetVariable reports whether server.master_key in the
-// unexpanded config file references a variable expansion left unresolved.
-// When the file only parses once expanded, it falls back to looking for a
-// leftover reference in the expanded key.
+// masterKeyReadsUnsetVariable reports whether the master key decoded from
+// data holds a reference expansion left unresolved. It expands data again with
+// a random marker in place of each unresolved reference, so field names expand
+// exactly as in the real decode and a key that merely contains "${" passes.
 func masterKeyReadsUnsetVariable(data []byte, expandedKey string) bool {
-	var raw struct {
+	marker := "gomodel-unset-" + rand.Text()
+	var marked struct {
 		Server struct {
 			MasterKey string `yaml:"master_key"`
 		} `yaml:"server"`
 	}
-	if err := yaml.Unmarshal(data, &raw); err != nil {
+	if err := yaml.Unmarshal([]byte(expandWith(string(data), func(string) string { return marker })), &marked); err != nil {
+		// Unreachable when the real decode succeeded, since a marker parses
+		// wherever "${...}" does; stay closed regardless.
 		return strings.Contains(expandedKey, "${")
 	}
-	return readsUnsetVariable(raw.Server.MasterKey)
+	return strings.Contains(marked.Server.MasterKey, marker)
 }
 
 // ensureSingleDocument rejects a config file holding more than one YAML document.
