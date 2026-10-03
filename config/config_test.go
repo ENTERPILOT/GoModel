@@ -1728,16 +1728,22 @@ server:
 }
 
 func TestLoadRejectsMasterKeyFromUnsetVariable(t *testing.T) {
+	const unset = "server.master_key reads an environment variable that is not set"
 	tests := []struct {
-		name    string
-		env     map[string]string
-		wantKey string
-		wantErr string
+		name      string
+		masterKey string
+		env       map[string]string
+		wantKey   string
+		wantErr   string
 	}{
-		{name: "unset variable", wantErr: "server.master_key reads LITELLM_MASTER_KEY, which is not set"},
-		{name: "set variable", env: map[string]string{"LITELLM_MASTER_KEY": "sk-1234"}, wantKey: "sk-1234"},
-		{name: "environment override", env: map[string]string{"GOMODEL_MASTER_KEY": "sk-env"}, wantKey: "sk-env"},
-		{name: "disabled master key", env: map[string]string{"MASTER_KEY_DISABLED": "true"}, wantKey: ""},
+		{name: "unset variable", masterKey: "${LITELLM_MASTER_KEY}", wantErr: unset},
+		{name: "unset non-identifier name", masterKey: "${LITELLM-MASTER-KEY}", wantErr: unset},
+		{name: "unset bare reference", masterKey: "$LITELLM_MASTER_KEY", wantErr: unset},
+		{name: "unset inside a value", masterKey: "sk-${LITELLM_MASTER_KEY}", wantErr: unset},
+		{name: "set variable", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"LITELLM_MASTER_KEY": "sk-1234"}, wantKey: "sk-1234"},
+		{name: "empty default", masterKey: "${LITELLM_MASTER_KEY:-}", wantKey: ""},
+		{name: "environment override", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"GOMODEL_MASTER_KEY": "sk-env"}, wantKey: "sk-env"},
+		{name: "disabled master key", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"MASTER_KEY_DISABLED": "true"}, wantKey: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1747,7 +1753,7 @@ func TestLoadRejectsMasterKeyFromUnsetVariable(t *testing.T) {
 				t.Setenv(name, value)
 			}
 			withTempDir(t, func(dir string) {
-				writeConfigYAML(t, dir, "server:\n  master_key: ${LITELLM_MASTER_KEY}\n")
+				writeConfigYAML(t, dir, "server:\n  master_key: \""+tt.masterKey+"\"\n")
 				result, err := Load()
 				if tt.wantErr != "" {
 					require.ErrorContains(t, err, tt.wantErr)

@@ -313,10 +313,11 @@ func Load() (*LoadResult, error) {
 	if cfg.Server.MasterKeyDisabled {
 		cfg.Server.MasterKey = ""
 	}
-	// An unset ${NAME} stays in the value verbatim. As a master key, that
-	// placeholder would be a password anyone who reads config.yaml knows.
-	if name, ok := unresolvedEnvRef(cfg.Server.MasterKey); ok {
-		return nil, fmt.Errorf("server.master_key reads %s, which is not set; set it or remove server.master_key", name)
+	// Expansion leaves an unset ${NAME}, in any form, in the value verbatim.
+	// As a master key, that text would be a password anyone who reads
+	// config.yaml knows. The error names no part of the key.
+	if strings.Contains(cfg.Server.MasterKey, "${") {
+		return nil, errors.New("server.master_key reads an environment variable that is not set; set it or remove server.master_key")
 	}
 	cfg.Server.BasePath = NormalizeBasePath(cfg.Server.BasePath)
 	cfg.Server.UserPathHeader, err = NormalizeHeaderName(cfg.Server.UserPathHeader, "X-GoModel-User-Path")
