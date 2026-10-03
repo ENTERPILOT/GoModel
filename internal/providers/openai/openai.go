@@ -3,6 +3,7 @@ package openai
 
 import (
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -119,20 +120,29 @@ func isReasoningChatModel(model string) bool {
 	return isOSeriesModel(model) || isGPT5PlusModel(model)
 }
 
-// chatToolsRequireNoReasoning reports whether OpenAI rejects function tools on
-// Chat Completions for the model unless reasoning_effort is "none", which holds
-// from GPT-5.6 on. gpt-6-astra and gpt-6.1 reject "none" as well and can call
-// tools only through /v1/responses; they are left out so the caller gets
-// OpenAI's own error, which says so.
-func chatToolsRequireNoReasoning(model string) bool {
+// restrictsChatTools reports whether OpenAI accepts function tools on Chat
+// Completions for the model only with reasoning_effort "none", which holds from
+// GPT-5.6 on.
+func restrictsChatTools(model string) bool {
 	major, minor, ok := gptVersion(model)
-	if !ok || major < 5 || (major == 5 && minor < 6) {
-		return false
+	return ok && (major > 5 || (major == 5 && minor >= 6))
+}
+
+// rejectsNoReasoning reports whether the model refuses reasoning_effort
+// "none" (gpt-6-astra and gpt-6.1), so it can call tools only through
+// /v1/responses.
+func rejectsNoReasoning(model string) bool {
+	major, minor, ok := gptVersion(model)
+	if ok && major == 6 && minor == 1 {
+		return true
 	}
-	if major == 6 && minor == 1 {
-		return false
-	}
-	return !strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "gpt-6-astra")
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "gpt-6-astra")
+}
+
+// chatToolsRequireNoReasoning reports whether a tool request that sets no
+// effort must be sent with reasoning_effort "none" to stay on Chat Completions.
+func chatToolsRequireNoReasoning(model string) bool {
+	return restrictsChatTools(model) && !rejectsNoReasoning(model)
 }
 
 // adaptForReasoningChat rewrites a ChatRequest body for OpenAI reasoning chat
@@ -176,6 +186,7 @@ func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
 	if req == nil {
 		return req, nil
 	}
+	req = nameInlineFiles(req)
 	effort := ""
 	if req.Reasoning != nil {
 		effort = strings.TrimSpace(req.Reasoning.Effort)
@@ -191,6 +202,40 @@ func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
 		return providers.DropReasoning(req), nil
 	}
 	return providers.AdaptReasoningEffortRequest(req, effort)
+}
+
+// nameInlineFiles gives inline file parts that arrived without a filename the
+// default name OpenAI requires alongside file_data. The caller's request is
+// left unchanged; it is returned as-is when no part needs a name.
+func nameInlineFiles(req *core.ChatRequest) *core.ChatRequest {
+	adapted := req
+	for i, msg := range req.Messages {
+		parts, ok := msg.Content.([]core.ContentPart)
+		if !ok || !slices.ContainsFunc(parts, unnamedInlineFile) {
+			continue
+		}
+		named := slices.Clone(parts)
+		for j, part := range named {
+			if unnamedInlineFile(part) {
+				file := *part.File
+				file.Filename = core.DefaultFilename(file.FileData)
+				named[j].File = &file
+			}
+		}
+		if adapted == req {
+			cloned := *req
+			cloned.Messages = slices.Clone(req.Messages)
+			adapted = &cloned
+		}
+		adapted.Messages[i].Content = named
+	}
+	return adapted
+}
+
+// unnamedInlineFile reports whether a part is inline file data without a
+// filename.
+func unnamedInlineFile(part core.ContentPart) bool {
+	return part.Type == "file" && part.File != nil && part.File.FileData != "" && part.File.Filename == ""
 }
 
 // chatRequestBody returns the appropriate request body for the model.

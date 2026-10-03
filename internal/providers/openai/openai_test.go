@@ -1208,8 +1208,8 @@ func TestChatCompletion_MapsReasoningToReasoningEffort(t *testing.T) {
 
 // From GPT-5.6 on, OpenAI rejects function tools on Chat Completions unless
 // reasoning_effort is "none", so a tool request that asks for no effort gets
-// it. An effort the caller chose is kept, and models that reject "none" too
-// (gpt-6-astra, gpt-6.1) are left alone.
+// it. An effort the caller chose is kept. Requests that cannot stay on Chat
+// Completions are routed to the Responses API (chat_via_responses_test.go).
 func TestChatCompletion_ToolsGetNoReasoningEffortWhenRequired(t *testing.T) {
 	tools := []map[string]any{{"type": "function", "function": map[string]any{"name": "get_weather"}}}
 	tests := []struct {
@@ -1225,15 +1225,13 @@ func TestChatCompletion_ToolsGetNoReasoningEffortWhenRequired(t *testing.T) {
 		{name: "gpt-5.6 tools", model: "gpt-5.6-terra", tools: tools, wantEffort: "none"},
 		{name: "gpt-6 tools stream", model: "gpt-6-sol", tools: tools, stream: true, wantEffort: "none"},
 		{name: "empty effort", model: "gpt-6-luna", tools: tools, reasoning: &core.Reasoning{}, wantEffort: "none"},
-		{name: "caller effort kept", model: "gpt-6-luna", tools: tools, reasoning: &core.Reasoning{Effort: "low"}, wantEffort: "low"},
+		{name: "caller effort kept", model: "gpt-5.5", tools: tools, reasoning: &core.Reasoning{Effort: "low"}, wantEffort: "low"},
 		{
-			name: "caller flat effort kept", model: "gpt-6-luna", tools: tools, wantEffort: "high",
+			name: "caller flat effort kept", model: "gpt-5.5", tools: tools, wantEffort: "high",
 			extra: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"reasoning_effort": json.RawMessage(`"high"`)}),
 		},
 		{name: "no tools", model: "gpt-6-luna"},
 		{name: "gpt-5.5 allows tools with reasoning", model: "gpt-5.5", tools: tools},
-		{name: "astra rejects none", model: "gpt-6-astra", tools: tools},
-		{name: "gpt-6.1 rejects none", model: "gpt-6.1-sol", tools: tools},
 		{name: "gpt-6.10 is not gpt-6.1", model: "gpt-6.10-sol", tools: tools, wantEffort: "none"},
 	}
 	for _, tt := range tests {
