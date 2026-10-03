@@ -17,7 +17,10 @@ const chatToolPreambleTokens = 82
 // serve it sends it: a request served through the Responses API is counted as
 // translated, one served through Chat Completions with its chat adaptations
 // applied and, when it carries tools on GPT-5 and later, the Chat tools
-// preamble added. A request the translation cannot carry exactly answers
+// preamble added. Older families have their own, smaller Chat preamble (6
+// tokens on gpt-4o-mini) that is not added, so a Chat-served tool request
+// there counts slightly below the billed input; OpenAI offers no count for
+// Chat Completions itself. A request the translation cannot carry exactly answers
 // core.ErrMessagesTokenCountUnsupported, so the caller estimates instead.
 func (p *Provider) CountChatTokens(ctx context.Context, req *core.ChatRequest) (int, error) {
 	// Stop sequences do not affect the input; the translation would refuse
