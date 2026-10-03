@@ -694,14 +694,14 @@ test("a stale virtual-server response cannot restore the list", () => {
 
   const fetchVirtual = (store.match(/async fetchVirtualServers\(\) \{[\s\S]*?\n  \}/) || [""])[0];
   assert.ok(fetchVirtual, "fetchVirtualServers missing");
-  assert.ok(
-    fetchVirtual.indexOf("const seq = ++this.#virtualSeq;") < fetchVirtual.indexOf("await "),
-    "the sequence must be taken before the request",
-  );
-  assert.ok(
-    fetchVirtual.indexOf("seq !== this.#virtualSeq") < fetchVirtual.indexOf("this.virtualServers ="),
-    "a retired response must be dropped before it is applied",
-  );
+  // Each expression must exist: indexOf's -1 would pass an order check.
+  const assertBefore = (first, second, message) => {
+    const firstIndex = fetchVirtual.indexOf(first);
+    const secondIndex = fetchVirtual.indexOf(second);
+    assert.ok(firstIndex >= 0 && secondIndex >= 0 && firstIndex < secondIndex, message);
+  };
+  assertBefore("const seq = ++this.#virtualSeq;", "await ", "the sequence must be taken before the request");
+  assertBefore("seq !== this.#virtualSeq", "this.virtualServers =", "a retired response must be dropped before it is applied");
 
   const clear = store.match(/#clearVirtualServers\(\) \{[\s\S]*?\n  \}/);
   assert.ok(clear, "#clearVirtualServers missing");
