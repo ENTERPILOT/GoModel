@@ -86,6 +86,7 @@ const (
 	DashboardConfigPricingRecalculation = "USAGE_PRICING_RECALCULATION_ENABLED"
 	DashboardConfigLiveLogsEnabled      = "DASHBOARD_LIVE_LOGS_ENABLED"
 	DashboardConfigMCPEnabled           = "MCP_ENABLED"
+	DashboardConfigMCPToolDiscovery     = "MCP_TOOL_DISCOVERY"
 	DashboardConfigVMStrategies         = "VIRTUAL_MODEL_STRATEGIES"
 	DashboardConfigUserPathHeader       = "USER_PATH_HEADER"
 )
@@ -111,6 +112,9 @@ type DashboardConfigResponse struct {
 	PricingRecalculation  string `json:"USAGE_PRICING_RECALCULATION_ENABLED,omitempty"`
 	LiveLogsEnabled       string `json:"DASHBOARD_LIVE_LOGS_ENABLED,omitempty"`
 	MCPEnabled            string `json:"MCP_ENABLED,omitempty"`
+	// MCPToolDiscovery is the gateway's default MCP tool discovery mode
+	// ("off" or "search"), so the dashboard can show how clients see tools.
+	MCPToolDiscovery string `json:"MCP_TOOL_DISCOVERY,omitempty"`
 	// VirtualModelStrategies is the comma-separated list of load-balancing
 	// strategies this deployment supports. "adaptive" appears only when a
 	// route-selector extension is registered, so the dashboard never offers
@@ -438,6 +442,7 @@ func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardCo
 		PricingRecalculation:   strings.TrimSpace(values.PricingRecalculation),
 		LiveLogsEnabled:        strings.TrimSpace(values.LiveLogsEnabled),
 		MCPEnabled:             strings.TrimSpace(values.MCPEnabled),
+		MCPToolDiscovery:       strings.TrimSpace(values.MCPToolDiscovery),
 		VirtualModelStrategies: strings.TrimSpace(values.VirtualModelStrategies),
 		UserPathHeader:         strings.TrimSpace(values.UserPathHeader),
 	}

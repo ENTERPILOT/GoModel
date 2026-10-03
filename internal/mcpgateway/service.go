@@ -14,6 +14,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/usage"
 	"github.com/enterpilot/gomodel/internal/version"
@@ -46,6 +47,9 @@ type Service struct {
 	usageLogger    usage.LoggerInterface
 	userPathHeader string
 	configSpecs    map[string]ServerSpec
+	// searchDiscovery is the default for sessions that do not send
+	// ToolDiscoveryHeader: serve search_tools/call_tool instead of the catalog.
+	searchDiscovery bool
 
 	handler http.Handler
 	origins *originGuard
@@ -75,6 +79,11 @@ type sessionBinding struct {
 	userPath  string
 	pinned    string
 	lastSeen  time.Time
+	// discovery and toolAliases let request logs name the tool a call runs:
+	// a discovery session's call_tool target, and the namespaced name an
+	// unambiguous bare name resolves to.
+	discovery   bool
+	toolAliases map[string]string
 }
 
 // Options configures NewService.
@@ -92,20 +101,24 @@ type Options struct {
 	// AllowedOrigins are the browser origins permitted to reach the endpoint.
 	// Empty trusts none, which is the default; see originGuard.
 	AllowedOrigins []string
+	// ToolDiscovery is the default discovery mode, config.MCPToolDiscoveryOff
+	// or config.MCPToolDiscoverySearch.
+	ToolDiscovery string
 }
 
 // NewService builds the gateway service and starts connecting to the merged
 // server set. Upstream connects are asynchronous; construction never blocks.
 func NewService(ctx context.Context, opts Options) (*Service, error) {
 	s := &Service{
-		manager:        NewManager(opts.HTTPClient),
-		store:          opts.Store,
-		usageLogger:    opts.UsageLogger,
-		userPathHeader: core.UserPathHeaderName(opts.UserPathHeader),
-		configSpecs:    opts.ConfigServers,
-		bindings:       make(map[string]sessionBinding),
-		requestCancels: make(map[uint64]context.CancelFunc),
-		stop:           make(chan struct{}),
+		manager:         NewManager(opts.HTTPClient),
+		store:           opts.Store,
+		usageLogger:     opts.UsageLogger,
+		userPathHeader:  core.UserPathHeaderName(opts.UserPathHeader),
+		configSpecs:     opts.ConfigServers,
+		searchDiscovery: opts.ToolDiscovery == config.MCPToolDiscoverySearch,
+		bindings:        make(map[string]sessionBinding),
+		requestCancels:  make(map[uint64]context.CancelFunc),
+		stop:            make(chan struct{}),
 	}
 	guard, err := newOriginGuard(opts.AllowedOrigins)
 	if err != nil {
@@ -313,12 +326,14 @@ type requestScope struct {
 	userPath  string
 	pinned    string
 	include   map[string]struct{}
+	discovery bool
 }
 
 func (s *Service) scopeFromRequest(r *http.Request) requestScope {
 	scope := requestScope{
 		authKeyID: core.GetAuthKeyID(r.Context()),
 		userPath:  core.UserPathFromContext(r.Context()),
+		discovery: s.discoveryMode(r),
 	}
 	if pinned, ok := r.Context().Value(pinnedServerKey{}).(string); ok {
 		scope.pinned = pinned
@@ -341,6 +356,9 @@ func (s *Service) scopeFromRequest(r *http.Request) requestScope {
 func (s *Service) getServer(r *http.Request) *mcp.Server {
 	scope := s.scopeFromRequest(r)
 	views := s.visibleServers(scope)
+	// Assigned below; the SDK asks for the session ID only after getServer
+	// returns, so the binding sees the final map.
+	var aliases map[string]string
 
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "gomodel",
@@ -358,7 +376,7 @@ func (s *Service) getServer(r *http.Request) *mcp.Server {
 		},
 		GetSessionID: func() string {
 			id := rand.Text()
-			s.bindSession(id, scope.authKeyID, scope.userPath, scope.pinned)
+			s.bindSession(id, scope.authKeyID, scope.userPath, scope.pinned, scope.discovery, aliases)
 			return id
 		},
 	})
@@ -369,6 +387,10 @@ func (s *Service) getServer(r *http.Request) *mcp.Server {
 		endpoint = "/mcp/" + scope.pinned
 	}
 
+	var index *toolIndex
+	if scope.discovery {
+		index = &toolIndex{}
+	}
 	toolOwners := make(map[string]string)
 	promptOwners := make(map[string]string)
 	resourceOwners := make(map[string]string)
@@ -377,14 +399,18 @@ func (s *Service) getServer(r *http.Request) *mcp.Server {
 		if snapshot == nil {
 			continue
 		}
-		s.registerTools(server, view.Spec.Name, snapshot, prefixNames, endpoint, toolOwners)
+		s.registerTools(server, view.Spec.Name, snapshot, prefixNames, endpoint, toolOwners, index)
 		s.registerPrompts(server, view.Spec.Name, snapshot, prefixNames, promptOwners)
 		s.registerResources(server, view.Spec.Name, snapshot, resourceOwners)
 	}
 	if prefixNames {
-		if aliases := bareToolAliases(toolOwners); len(aliases) > 0 {
-			server.AddReceivingMiddleware(bareToolCallMiddleware(aliases))
-		}
+		aliases = bareToolAliases(toolOwners)
+	}
+	if index != nil {
+		index.aliases = aliases
+		s.registerDiscoveryTools(server, index, endpoint)
+	} else if len(aliases) > 0 {
+		server.AddReceivingMiddleware(bareToolCallMiddleware(aliases))
 	}
 	return server
 }
@@ -491,6 +517,12 @@ func (s *Service) composeInstructions(scope requestScope, views []ServerView) st
 		fmt.Fprintf(&b, "GoModel MCP gateway aggregating %d server(s): %s. Tools and prompts are namespaced as {server}%s{name}.",
 			len(names), strings.Join(names, ", "), namespaceSeparator)
 	}
+	if scope.discovery {
+		if b.Len() > 0 {
+			b.WriteString(" ")
+		}
+		fmt.Fprintf(&b, "Tools are not listed directly: find them with %s and run them with %s.", searchToolsName, callToolName)
+	}
 	for _, view := range views {
 		snapshot, _ := s.upstreamCatalog(view.Spec.Name)
 		if snapshot == nil || strings.TrimSpace(snapshot.instructions) == "" {
@@ -512,8 +544,9 @@ func (s *Service) composeInstructions(scope requestScope, views []ServerView) st
 // registerTools adds one upstream's tools to a session server. Tool metadata
 // and valid schemas relay verbatim; only the name is prefixed on the
 // aggregated endpoint. Arguments relay as raw JSON — validation belongs to
-// the upstream.
-func (s *Service) registerTools(server *mcp.Server, upstreamName string, snapshot *catalog, prefix bool, endpoint string, owners map[string]string) {
+// the upstream. A non-nil index collects the tools for search discovery
+// instead of listing them.
+func (s *Service) registerTools(server *mcp.Server, upstreamName string, snapshot *catalog, prefix bool, endpoint string, owners map[string]string, index *toolIndex) {
 	for _, tool := range snapshot.tools {
 		exposed := tool.Name
 		if prefix {
@@ -525,6 +558,10 @@ func (s *Service) registerTools(server *mcp.Server, upstreamName string, snapsho
 			continue
 		}
 		owners[exposed] = upstreamName
+		if index != nil {
+			index.add(exposed, upstreamName, tool)
+			continue
+		}
 		clone := *tool
 		clone.Name = exposed
 		server.AddTool(&clone, s.toolHandler(upstreamName, tool.Name, exposed, endpoint))
@@ -641,15 +678,36 @@ func (s *Service) authorizeSessionID(sessionID, upstreamName string) error {
 }
 
 // bindSession records the principal a new session was initialized under.
-func (s *Service) bindSession(sessionID, authKeyID, userPath, pinned string) {
+func (s *Service) bindSession(sessionID, authKeyID, userPath, pinned string, discovery bool, toolAliases map[string]string) {
 	s.bindMu.Lock()
 	s.bindings[sessionID] = sessionBinding{
-		authKeyID: authKeyID,
-		userPath:  userPath,
-		pinned:    pinned,
-		lastSeen:  time.Now(),
+		authKeyID:   authKeyID,
+		userPath:    userPath,
+		pinned:      pinned,
+		lastSeen:    time.Now(),
+		discovery:   discovery,
+		toolAliases: toolAliases,
 	}
 	s.bindMu.Unlock()
+}
+
+// ToolCallLabel names the tool a session's tools/call runs, matching its
+// usage entry. name is the called tool and target the call's
+// arguments.name. In a discovery session call_tool resolves to its target,
+// and a bare name the session accepts resolves to its namespaced name. Only
+// the session knows whether call_tool is the meta-tool: on a pinned endpoint
+// without discovery it can be an upstream tool of that name.
+func (s *Service) ToolCallLabel(sessionID, name, target string) string {
+	s.bindMu.Lock()
+	defer s.bindMu.Unlock()
+	binding := s.bindings[sessionID]
+	if binding.discovery && name == callToolName && target != "" {
+		name = target
+	}
+	if exposed, ok := binding.toolAliases[name]; ok {
+		return exposed
+	}
+	return name
 }
 
 // touchBinding refreshes a known session binding and reports whether the

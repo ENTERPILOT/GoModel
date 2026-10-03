@@ -35,6 +35,10 @@ import {
   mcpToolSelectionSummary,
   setMcpToolsExposed,
   switchMcpToolMode,
+  mcpClientConfig,
+  mcpEndpointIsInsecure,
+  mcpGatewayEndpoint,
+  normalizeMcpToolDiscovery,
 } from "../src/pages/mcp-servers/mcp-servers.js";
 
 test("deriveMcpServerSlug normalizes display names and falls back to a hash", () => {
@@ -612,4 +616,48 @@ test("filterMcpServers matches name, url, transport, and status", () => {
     ["github"],
   );
   assert.equal(filterMcpServers(servers, "").length, 2);
+});
+
+test("normalizeMcpToolDiscovery accepts search loosely and defaults to off", () => {
+  assert.equal(normalizeMcpToolDiscovery(" Search "), "search");
+  assert.equal(normalizeMcpToolDiscovery("off"), "off");
+  assert.equal(normalizeMcpToolDiscovery(""), "off");
+  assert.equal(normalizeMcpToolDiscovery("semantic"), "off");
+});
+
+test("mcpGatewayEndpoint honors the base path", () => {
+  assert.equal(mcpGatewayEndpoint("https://gw.example.com", "/"), "https://gw.example.com/mcp");
+  assert.equal(mcpGatewayEndpoint("https://gw.example.com/", "/gomodel/"), "https://gw.example.com/gomodel/mcp");
+  assert.equal(mcpGatewayEndpoint("http://localhost:8080", ""), "http://localhost:8080/mcp");
+});
+
+test("mcpClientConfig adds the discovery header only when it changes the default", () => {
+  const headersFor = (mode, defaultMode) =>
+    JSON.parse(mcpClientConfig("https://gw/mcp", mode, defaultMode)).mcpServers.gomodel.headers;
+
+  assert.deepEqual(headersFor("off", "off"), { Authorization: "Bearer YOUR_GOMODEL_API_KEY" });
+  assert.deepEqual(headersFor("search", "off"), {
+    Authorization: "Bearer YOUR_GOMODEL_API_KEY",
+    "X-MCP-Tool-Discovery": "search",
+  });
+  assert.deepEqual(headersFor("off", "search"), {
+    Authorization: "Bearer YOUR_GOMODEL_API_KEY",
+    "X-MCP-Tool-Discovery": "off",
+  });
+  assert.deepEqual(headersFor("search", "search"), { Authorization: "Bearer YOUR_GOMODEL_API_KEY" });
+
+  const config = JSON.parse(mcpClientConfig("https://gw/mcp", "off", "off"));
+  assert.equal(config.mcpServers.gomodel.type, "http");
+  assert.equal(config.mcpServers.gomodel.url, "https://gw/mcp");
+});
+
+test("mcpEndpointIsInsecure flags plain HTTP only off loopback", () => {
+  assert.equal(mcpEndpointIsInsecure("http://gw.example.com/mcp"), true);
+  assert.equal(mcpEndpointIsInsecure("http://10.0.0.5:8080/mcp"), true);
+  assert.equal(mcpEndpointIsInsecure("https://gw.example.com/mcp"), false);
+  assert.equal(mcpEndpointIsInsecure("http://localhost:8080/mcp"), false);
+  assert.equal(mcpEndpointIsInsecure("http://gomodel.localhost/mcp"), false);
+  assert.equal(mcpEndpointIsInsecure("http://127.0.0.1:8080/mcp"), false);
+  assert.equal(mcpEndpointIsInsecure("http://[::1]:8080/mcp"), false);
+  assert.equal(mcpEndpointIsInsecure("not a url"), false);
 });

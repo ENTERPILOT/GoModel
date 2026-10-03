@@ -34,6 +34,9 @@ func buildRawUsageFromDetails(ptd *core.PromptTokensDetails, ctd *core.Completio
 		if ptd.ImageTokens > 0 {
 			raw["prompt_image_tokens"] = ptd.ImageTokens
 		}
+		if ptd.CacheWriteTokens > 0 {
+			raw["prompt_cache_write_tokens"] = ptd.CacheWriteTokens
+		}
 	}
 	if ctd != nil {
 		if ctd.ReasoningTokens > 0 {

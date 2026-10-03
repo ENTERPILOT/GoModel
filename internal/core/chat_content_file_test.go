@@ -92,3 +92,18 @@ func TestContentPartFileURLRoundTrip(t *testing.T) {
 	_, ok := decoded.File["file_data"]
 	assert.False(t, ok, "encoded emitted empty file_data: %s", encoded)
 }
+
+func TestDefaultFilename(t *testing.T) {
+	tests := map[string]string{
+		"data:application/pdf;base64,JVBERi0=": "document.pdf",
+		"data:APPLICATION/PDF;base64,JVBERi0=": "document.pdf",
+		"data:text/plain;base64,aGVsbG8=":      "document.txt",
+		"data:application/msword;base64,AAAA":  "document",
+		"not a data url":                       "document",
+	}
+	for fileData, want := range tests {
+		t.Run(fileData, func(t *testing.T) {
+			assert.Equal(t, want, DefaultFilename(fileData))
+		})
+	}
+}

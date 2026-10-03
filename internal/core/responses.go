@@ -220,8 +220,10 @@ type ResponsesOutputItem struct {
 
 // ResponsesContentItem represents a content item in the output.
 type ResponsesContentItem struct {
-	Type       string             `json:"type"` // "output_text", "input_image", "input_audio", etc.
-	Text       string             `json:"text,omitempty"`
+	Type string `json:"type"` // "output_text", "refusal", "input_image", "input_audio", etc.
+	Text string `json:"text,omitempty"`
+	// Refusal is the model's explanation on a "refusal" content item.
+	Refusal    string             `json:"refusal,omitempty"`
 	ImageURL   *ImageURLContent   `json:"image_url,omitempty"`
 	InputAudio *InputAudioContent `json:"input_audio,omitempty"`
 	// input_file items carry their file fields flat, unlike chat file parts.

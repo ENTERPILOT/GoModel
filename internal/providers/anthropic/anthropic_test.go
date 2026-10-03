@@ -6224,3 +6224,11 @@ func TestStreamResponses_CutBeforeMessageStartStillOpens(t *testing.T) {
 	}
 	require.Equal(t, want, got, "event order")
 }
+
+// The registry recognizes a provider on its type's default base URL through
+// GetBaseURL (for the model catalog fallback).
+func TestGetBaseURL(t *testing.T) {
+	assert.Equal(t, defaultBaseURL, New(providers.ProviderConfig{APIKey: "k"}, providertest.Options(llmclient.Hooks{})).(*Provider).GetBaseURL())
+	assert.Equal(t, "https://proxy.example.com/v1",
+		New(providers.ProviderConfig{APIKey: "k", BaseURL: "https://proxy.example.com/v1"}, providertest.Options(llmclient.Hooks{})).(*Provider).GetBaseURL())
+}

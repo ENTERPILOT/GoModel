@@ -137,6 +137,10 @@ models:
 #   # page's Origin and Host agree with each other, so comparing them proves
 #   # nothing). Add an origin only if you serve an MCP web client from it.
 #   allowed_origins: [] # env: MCP_ALLOWED_ORIGINS; "*" disables the check
+#   # off (default) lists every tool; search lists only search_tools and call_tool,
+#   # so large catalogs stop costing model context. Clients override it per session
+#   # with the X-MCP-Tool-Discovery header.
+#   tool_discovery: off # env: MCP_TOOL_DISCOVERY
 #   servers:
 #     github:
 #       url: https://api.githubcopilot.com/mcp
