@@ -116,7 +116,10 @@ func (h *Handler) RetrieveModel(c *echo.Context) error {
 	if resp != nil {
 		models = resp.Data
 	}
-	model, ok := h.listedModel(c.Request().Context(), models, modelID)
+	model, ok, err := h.listedModel(c.Request().Context(), models, modelID)
+	if err != nil {
+		return respondModelError(c, err)
+	}
 	if !ok {
 		return respondModelError(c, core.NewModelNotFoundError(modelID))
 	}
@@ -135,8 +138,9 @@ func (h *Handler) RetrieveModel(c *echo.Context) error {
 // listedModel finds the listed model an ID names: the listed ID itself, or
 // the model it resolves to the way an inference request would, so a bare ID
 // that works for chat (gpt-6-luna) also retrieves its listed model
-// (openai/gpt-6-luna).
-func (h *Handler) listedModel(ctx context.Context, models []core.Model, modelID string) (core.Model, bool) {
+// (openai/gpt-6-luna). A resolution error (a registry that is not ready, a
+// malformed ID) is returned as inference would report it.
+func (h *Handler) listedModel(ctx context.Context, models []core.Model, modelID string) (core.Model, bool, error) {
 	find := func(id string) (core.Model, bool) {
 		for _, model := range models {
 			if model.ID == id {
@@ -146,13 +150,14 @@ func (h *Handler) listedModel(ctx context.Context, models []core.Model, modelID 
 		return core.Model{}, false
 	}
 	if model, ok := find(modelID); ok {
-		return model, true
+		return model, true, nil
 	}
 	selector, err := resolveServiceModel(ctx, h.provider, h.modelResolver, modelID, "")
 	if err != nil {
-		return core.Model{}, false
+		return core.Model{}, false, err
 	}
-	return find(selector.QualifiedModel())
+	model, ok := find(selector.QualifiedModel())
+	return model, ok, nil
 }
 
 // respondModelError renders a retrieve failure in the caller's dialect, the

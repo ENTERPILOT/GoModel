@@ -252,6 +252,9 @@ type resolvingProvider struct {
 }
 
 func (p *resolvingProvider) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	if requested.Model == "not-ready" {
+		return core.ModelSelector{}, false, core.NewProviderError("", http.StatusServiceUnavailable, "model registry not ready", nil)
+	}
 	if qualified, ok := p.resolved[requested.Model]; ok {
 		selector, err := core.ParseModelSelector(qualified, "")
 		return selector, true, err
@@ -287,6 +290,8 @@ func TestRetrieveModel_ResolvesBareIDs(t *testing.T) {
 	}
 	require.Equal(t, http.StatusNotFound, get("/v1/models/gpt-hidden", false).Code)
 	require.Equal(t, http.StatusNotFound, get("/v1/models/unknown-model", false).Code)
+	require.Equal(t, http.StatusServiceUnavailable, get("/v1/models/not-ready", false).Code,
+		"a resolution error keeps the status inference reports")
 }
 
 // Anthropic SDK clients that page the list get Anthropic paging; without
