@@ -205,3 +205,16 @@ version, stamps a `GoModelBuildInfo` variable into the plugin, and refuses an
 output built with a different Go version. Loading needs a cgo build of
 GoModel (`make build-plugins` or the `gomodel:<version>-plugins` image).
 `gomodel --version` prints the Go and `pluginapi` versions plugins must match.
+
+## Migrating from LiteLLM
+
+`gomodel migrate litellm` converts a LiteLLM proxy `config.yaml` into a GoModel
+`config.yaml`, a `.env` with the secrets that were inline, and a migration
+report. Without `--out` it is a dry run that writes nothing.
+
+```sh
+gomodel migrate litellm [--out DIR] [--force] <litellm-config.yaml>
+```
+
+See [Migrating from LiteLLM](/guides/migrate-from-litellm) for the full
+walkthrough.

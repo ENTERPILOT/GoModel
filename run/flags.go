@@ -25,6 +25,9 @@ type cliOptions struct {
 	// PluginArgs is non-nil when the first argument is the "plugin"
 	// subcommand; it holds the arguments after it.
 	PluginArgs []string
+	// MigrateArgs is non-nil when the first argument is the "migrate"
+	// subcommand; it holds the arguments after it.
+	MigrateArgs []string
 }
 
 func parseCLI(productName string, args []string, output io.Writer) (cliOptions, error) {
@@ -33,10 +36,14 @@ func parseCLI(productName string, args []string, output io.Writer) (cliOptions, 
 		opts.PluginArgs = append([]string{}, args[1:]...)
 		return opts, nil
 	}
+	if len(args) > 0 && args[0] == migrateCommand {
+		opts.MigrateArgs = append([]string{}, args[1:]...)
+		return opts, nil
+	}
 	flags := flag.NewFlagSet(productName, flag.ContinueOnError)
 	flags.SetOutput(output)
 	flags.Usage = func() {
-		fmt.Fprintf(output, "Usage:\n  %[1]s [flags]\n  %[1]s plugin build|inspect ... (see \"%[1]s plugin help\")\n\nFlags:\n", productName)
+		fmt.Fprintf(output, "Usage:\n  %[1]s [flags]\n  %[1]s plugin build|inspect ... (see \"%[1]s plugin help\")\n  %[1]s migrate litellm ... (see \"%[1]s migrate help\")\n\nFlags:\n", productName)
 		flags.PrintDefaults()
 	}
 	flags.BoolVar(&opts.Version, "version", false, "Print version information")

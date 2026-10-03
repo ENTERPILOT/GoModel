@@ -1,0 +1,163 @@
+---
+title: "Migrating from LiteLLM"
+description: "Convert a LiteLLM proxy config.yaml to GoModel with one command, run both gateways side by side, and move clients over without changing model names."
+icon: "arrow-right-left"
+keywords: ["LiteLLM", "migration", "migrate", "LiteLLM alternative", "config.yaml", "model_list", "router_settings", "virtual keys", "fallbacks"]
+---
+
+GoModel speaks the same OpenAI-compatible API as the LiteLLM proxy, so most
+applications only need a new base URL and key. The work is in the gateway
+config, and `gomodel migrate litellm` does most of it.
+
+| What | How it moves |
+| --- | --- |
+| `model_list`, `router_settings`, `litellm_settings`, `general_settings` | Converted by `gomodel migrate litellm` |
+| Model names clients call | Kept: every `model_name` becomes a [virtual model](/features/virtual-models) |
+| Master key | Kept |
+| Virtual keys, teams, users, budgets, spend | Live in the LiteLLM database: recreate them in GoModel ([below](#4-recreate-keys-teams-and-budgets)) |
+
+## 1. Convert the config
+
+Run a dry run first. It prints the migration report and the generated config,
+and writes nothing:
+
+```bash
+gomodel migrate litellm litellm_config.yaml
+```
+
+Then write the files:
+
+```bash
+gomodel migrate litellm --out ./gomodel litellm_config.yaml
+```
+
+With Docker (the image runs as a non-root user, so pass yours to write into the
+mounted directory):
+
+```bash
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work \
+  enterpilot/gomodel migrate litellm --out /work/gomodel /work/litellm_config.yaml
+```
+
+`--out` writes three files and refuses to overwrite them unless you pass
+`--force`:
+
+| File | Contents |
+| --- | --- |
+| `config.yaml` | Providers, virtual models, retries, timeouts, and observability settings |
+| `.env` | Secrets that were inline in the LiteLLM config (API keys, master key). Created with mode `0600`; keep it out of version control |
+| `MIGRATION_REPORT.md` | Providers and virtual models created, environment variables to set, and every setting changed or left behind |
+
+`os.environ/NAME` references become `${NAME}`, so the environment you already
+run LiteLLM with keeps working. `include:` files are followed.
+
+## 2. Review the report
+
+Read `MIGRATION_REPORT.md` before sending traffic. It has three lists:
+
+- **Review before switching traffic**: things you must finish, such as
+  guardrails, model access groups, or a Langfuse callback. GoModel guardrails
+  are off until you configure them.
+- **Not migrated**: settings with no GoModel equivalent, named one by one.
+  Nothing is dropped silently.
+- **Behavior changes**: settings that were converted but behave a little
+  differently, such as routing strategies.
+
+## 3. Run GoModel next to LiteLLM
+
+Start GoModel with the generated files on another port. Add the variables
+listed under **Environment** in the report (the ones LiteLLM already read with
+`os.environ/`) to `.env`, creating it if the converter wrote none. GoModel
+refuses to start while the variable `server.master_key` reads is unset. Then
+send a few test requests with the models your clients use:
+
+```yaml compose.yaml
+services:
+  gomodel:
+    image: enterpilot/gomodel
+    ports: ["8080:8080"]
+    env_file: .env
+    volumes:
+      - ./config.yaml:/app/config/config.yaml:ro
+```
+
+```bash
+cd gomodel
+docker compose up
+```
+
+Load `.env` with Compose `env_file` (or GoModel's own `.env` loader when you
+run the binary from that directory). `docker run --env-file` reads values
+literally, so it would keep the quotes `.env` puts around values such as
+inline JSON credentials. When you run the binary directly, a variable already
+exported in your shell, such as `OPENAI_API_KEY`, wins over the same name in
+`.env`.
+
+```bash
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gpt-4o", "messages": [{"role": "user", "content": "ok?"}]}'
+```
+
+`GET /v1/models` lists the same model names LiteLLM did. Then move clients
+over one team at a time.
+
+## 4. Recreate keys, teams, and budgets
+
+LiteLLM keeps virtual keys, teams, users, budgets, and spend in its Postgres
+database, so `config.yaml` does not carry them. GoModel models the same ideas
+with a [user path](/features/user-path) hierarchy:
+
+| LiteLLM | GoModel |
+| --- | --- |
+| Organization / team / user | User path, such as `/acme/search-team/alice` |
+| Virtual key | [API key](/features/user-path#api-keys) bound to a user path |
+| Key or team `models` | [Allowed models](/features/users) on the user path or key |
+| `max_budget` + `budget_duration` | [Budget](/features/budgets) on the user path (hourly, daily, weekly, monthly) |
+| `tpm_limit` / `rpm_limit` | [Rate limit](/features/rate-limits) on the user path |
+| `metadata.tags` | [Labels](/features/labelling) |
+
+Create them in the dashboard or with the [admin API](/advanced/admin-endpoints).
+Clients get new `sk_gom_...` keys.
+
+## What changes for clients
+
+| LiteLLM | GoModel |
+| --- | --- |
+| Base URL `http://litellm:4000` or `http://litellm:4000/v1` | Base URL must end in `/v1`: `http://gomodel:8080/v1` |
+| Virtual key `sk-...` | GoModel API key `sk_gom_...`; the master key is unchanged |
+| `model_name` aliases | Unchanged |
+| `/health/liveliness`, `/health/readiness` | [`/health` and `/health/ready`](/advanced/cli#health-probe) |
+| Pass-through `/anthropic/*`, `/gemini/*`, `/vertex_ai/*` | [`/p/{provider}/*`](/features/passthrough-api); Anthropic SDKs can also use `/v1/messages` directly |
+| `metadata.tags` in the request body | A tagging header, such as `X-My-Tags`; see [Labelling](/features/labelling) |
+| `x-litellm-*` response headers, `/key/*`, `/team/*` management API | GoModel's [admin API](/advanced/admin-endpoints) and [usage API](/advanced/usage-api) |
+
+## How settings map
+
+| LiteLLM | GoModel |
+| --- | --- |
+| `litellm_params.model: provider/model` | A provider in `providers`, and the model in its `models` list |
+| Deployments sharing a `model_name` | A `round_robin` virtual model, weighted by `weight`, else `rpm`, else `tpm` |
+| `routing_strategy: cost-based-routing` | Virtual model `strategy: cost` |
+| Other routing strategies | `round_robin` with failover (noted in the report) |
+| `fallbacks`, `default_fallbacks` | A `failover` virtual model that tries the group, then its fallbacks |
+| `context_window_fallbacks`, `content_policy_fallbacks` | Not converted; add error phrases to [`failover.retry_on_errors`](/features/failover) |
+| `model_group_alias` | A virtual model pointing at the group |
+| `openai/*` wildcards | The provider serves its whole catalog; partial wildcards become a [`model_filter`](/advanced/config-yaml#filtering-a-providers-models) |
+| `input_cost_per_token`, `output_cost_per_token`, `max_input_tokens` | Model `metadata.pricing` (per million tokens) and `context_window` |
+| Deployment `rpm` / `tpm` under usage-based routing | [Model rate limits](/features/rate-limits) |
+| `num_retries`, `timeout` | `resilience.retry.max_retries`, `http.timeout` |
+| `allowed_fails`, `cooldown_time` | Circuit breaker `failure_threshold`, `timeout` |
+| `callbacks: prometheus` / `otel` | `metrics.enabled` / `opentelemetry.enabled` |
+| `callbacks: langfuse` | [Langfuse over OpenTelemetry](/guides/langfuse) |
+| `master_key` | `GOMODEL_MASTER_KEY` (or `server.master_key`) |
+| `database_url` | Not reused; GoModel uses its own [storage](/guides/production) |
+
+Provider names follow GoModel's environment conventions: a deployment using
+LiteLLM's default key variable (`OPENAI_API_KEY`) becomes provider `openai`,
+one reading `OPENAI_EU_API_KEY` becomes `openai-eu`, and each Azure deployment
+becomes its own provider, such as `azure-gpt-4o-prod`.
+
+Providers GoModel does not support yet, such as Replicate or SageMaker, are
+listed under **Not migrated** in the report.
