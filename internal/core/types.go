@@ -158,6 +158,10 @@ type PromptTokensDetails struct {
 	AudioTokens  int `json:"audio_tokens"`
 	TextTokens   int `json:"text_tokens"`
 	ImageTokens  int `json:"image_tokens"`
+	// CacheWriteTokens is the part of the prompt written to the prompt cache
+	// (OpenAI GPT-5.6+), billed at the cache-write rate. Omitted when zero
+	// so providers that never report it do not gain the member.
+	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
 }
 
 // CompletionTokensDetails holds extended output token breakdown (OpenAI/xAI).

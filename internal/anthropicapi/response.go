@@ -63,13 +63,39 @@ func FromChatResponse(resp *core.ChatResponse) *MessagesResponse {
 }
 
 func usageFromCore(usage core.Usage) Usage {
-	out := Usage{
-		InputTokens:  usage.PromptTokens,
-		OutputTokens: usage.CompletionTokens,
+	return anthropicUsage(
+		usage.PromptTokens,
+		usage.CompletionTokens,
+		intFromRaw(usage.RawUsage["cache_read_input_tokens"]),
+		intFromRaw(usage.RawUsage["cache_creation_input_tokens"]),
+		usage.PromptTokensDetails,
+	)
+}
 
-		CacheCreationInputTokens: intFromRaw(usage.RawUsage["cache_creation_input_tokens"]),
-		CacheReadInputTokens:     intFromRaw(usage.RawUsage["cache_read_input_tokens"])}
-	return out
+// anthropicUsage renders token counts in the Anthropic shape, where
+// input_tokens excludes cached tokens: input_tokens + cache_read_input_tokens +
+// cache_creation_input_tokens is the whole prompt. A provider reporting in that
+// shape names its cache counts cache_read_input_tokens and
+// cache_creation_input_tokens (nativeRead, nativeWrite), which pass through.
+// OpenAI-family providers instead report a prompt_tokens total that includes
+// cached_tokens and cache_write_tokens, so those are taken out of it. Both the
+// response and the stream converter render through here so the two agree.
+func anthropicUsage(promptTokens, outputTokens, nativeRead, nativeWrite int, details *core.PromptTokensDetails) Usage {
+	if nativeRead > 0 || nativeWrite > 0 || details == nil {
+		return Usage{
+			InputTokens:              promptTokens,
+			OutputTokens:             outputTokens,
+			CacheReadInputTokens:     nativeRead,
+			CacheCreationInputTokens: nativeWrite,
+		}
+	}
+	read, write := details.CachedTokens, details.CacheWriteTokens
+	return Usage{
+		InputTokens:              max(promptTokens-read-write, 0),
+		OutputTokens:             outputTokens,
+		CacheReadInputTokens:     read,
+		CacheCreationInputTokens: write,
+	}
 }
 
 // normalizeMessageID ensures the response carries an Anthropic-style msg_ id.

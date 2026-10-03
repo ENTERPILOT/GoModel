@@ -10886,6 +10886,10 @@ const docTemplate = `{
                 "audio_tokens": {
                     "type": "integer"
                 },
+                "cache_write_tokens": {
+                    "description": "CacheWriteTokens is the part of the prompt written to the prompt cache\n(OpenAI GPT-5.6+), billed at the cache-write rate. Omitted when zero\nso providers that never report it do not gain the member.",
+                    "type": "integer"
+                },
                 "cached_tokens": {
                     "type": "integer"
                 },

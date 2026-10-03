@@ -45,23 +45,11 @@ type chatToolCallDelta struct {
 }
 
 type chatUsage struct {
-	PromptTokens             int `json:"prompt_tokens"`
-	CompletionTokens         int `json:"completion_tokens"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-	PromptTokensDetails      *struct {
-		CachedTokens int `json:"cached_tokens"`
-	} `json:"prompt_tokens_details"`
-}
-
-func (u chatUsage) cacheRead() int {
-	if u.CacheReadInputTokens > 0 {
-		return u.CacheReadInputTokens
-	}
-	if u.PromptTokensDetails != nil {
-		return u.PromptTokensDetails.CachedTokens
-	}
-	return 0
+	PromptTokens             int                       `json:"prompt_tokens"`
+	CompletionTokens         int                       `json:"completion_tokens"`
+	CacheCreationInputTokens int                       `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int                       `json:"cache_read_input_tokens"`
+	PromptTokensDetails      *core.PromptTokensDetails `json:"prompt_tokens_details"`
 }
 
 // NewStreamConverter wraps an OpenAI-style chat completion SSE stream and emits
@@ -407,15 +395,17 @@ func (sc *streamConverter) finalize() {
 }
 
 func (sc *streamConverter) usagePayload() map[string]any {
-	payload := map[string]any{"output_tokens": sc.usage.CompletionTokens}
+	usage := anthropicUsage(sc.usage.PromptTokens, sc.usage.CompletionTokens,
+		sc.usage.CacheReadInputTokens, sc.usage.CacheCreationInputTokens, sc.usage.PromptTokensDetails)
+	payload := map[string]any{"output_tokens": usage.OutputTokens}
 	if sc.usage.PromptTokens > 0 {
-		payload["input_tokens"] = sc.usage.PromptTokens
+		payload["input_tokens"] = usage.InputTokens
 	}
-	if read := sc.usage.cacheRead(); read > 0 {
-		payload["cache_read_input_tokens"] = read
+	if usage.CacheReadInputTokens > 0 {
+		payload["cache_read_input_tokens"] = usage.CacheReadInputTokens
 	}
-	if sc.usage.CacheCreationInputTokens > 0 {
-		payload["cache_creation_input_tokens"] = sc.usage.CacheCreationInputTokens
+	if usage.CacheCreationInputTokens > 0 {
+		payload["cache_creation_input_tokens"] = usage.CacheCreationInputTokens
 	}
 	return payload
 }
