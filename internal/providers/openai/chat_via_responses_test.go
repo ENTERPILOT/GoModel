@@ -92,8 +92,10 @@ func TestChatCompletion_RoutesToResponsesOnlyWhenChatCannotServe(t *testing.T) {
 			req: core.ChatRequest{Model: "gpt-6-luna", Messages: []core.Message{{Role: "user", Content: []core.ContentPart{
 				{Type: "file", File: &core.FileContent{FileURL: "https://example.com/a.pdf"}},
 			}}}}},
-		{name: "non-reasoning model stays on chat", wantPath: "/chat/completions",
+		{name: "gpt-4o tool result with an image", wantPath: "/responses",
 			req: core.ChatRequest{Model: "gpt-4o", Messages: toolMessages(image)}},
+		{name: "custom model name stays on chat", wantPath: "/chat/completions",
+			req: core.ChatRequest{Model: "llama-3.3-70b", Messages: toolMessages(image)}},
 		{name: "untranslatable field stays on chat", wantPath: "/chat/completions",
 			req: core.ChatRequest{Model: "gpt-6-astra", Tools: weatherTool,
 				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"n": json.RawMessage(`2`)})}},
@@ -204,6 +206,14 @@ func TestChatToResponsesRequest_RejectsWhatItCannotCarry(t *testing.T) {
 		{name: "custom tool", req: core.ChatRequest{Model: "gpt-6-astra",
 			Tools: []map[string]any{{"type": "custom", "custom": map[string]any{"name": "grep"}}}}},
 		{name: "unknown role", req: core.ChatRequest{Model: "gpt-6-astra", Messages: []core.Message{{Role: "function", Content: "x"}}}},
+		{name: "speaker name", req: core.ChatRequest{Model: "gpt-6-astra", Messages: []core.Message{{Role: "user", Content: "x",
+			ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"name": json.RawMessage(`"ada"`)})}}}},
+		{name: "part member", req: core.ChatRequest{Model: "gpt-6-astra", Messages: []core.Message{{Role: "user", Content: []core.ContentPart{
+			{Type: "text", Text: "x", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"x_note": json.RawMessage(`1`)})},
+		}}}}},
+		{name: "assistant image without text", req: core.ChatRequest{Model: "gpt-6-astra", Messages: []core.Message{{Role: "assistant", Content: []core.ContentPart{
+			{Type: "image_url", ImageURL: &core.ImageURLContent{URL: "https://example.com/a.png"}},
+		}}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -247,6 +257,25 @@ func TestChatResponseFromResponses_StatusMapping(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "length", resp.Choices[0].FinishReason)
 		assert.Empty(t, resp.Choices[0].Message.Content)
+	})
+	t.Run("refusal is the refusal member", func(t *testing.T) {
+		var resp core.ResponsesResponse
+		require.NoError(t, json.Unmarshal([]byte(`{"id":"resp_1","status":"completed","output":[{"type":"message","id":"m1","role":"assistant",
+			"content":[{"type":"refusal","refusal":"I can't help with that."}]}]}`), &resp))
+		chat, err := chatResponseFromResponses(&resp, "openai")
+		require.NoError(t, err)
+		body, err := json.Marshal(chat.Choices[0].Message)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"role":"assistant","content":"","refusal":"I can't help with that."}`, string(body))
+		assert.Equal(t, "stop", chat.Choices[0].FinishReason)
+	})
+	t.Run("interrupted turn is an error", func(t *testing.T) {
+		_, err := chatResponseFromResponses(&core.ResponsesResponse{Status: "incomplete",
+			IncompleteDetails: &core.ResponsesIncompleteDetails{Reason: "interrupted"},
+			Output:            []core.ResponsesOutputItem{{Type: "function_call", CallID: "call_1", Name: "f", Arguments: "{"}}}, "openai")
+		var gwErr *core.GatewayError
+		require.ErrorAs(t, err, &gwErr)
+		assert.Contains(t, gwErr.Message, "interrupted")
 	})
 	t.Run("failed is an error with the upstream message", func(t *testing.T) {
 		_, err := chatResponseFromResponses(&core.ResponsesResponse{Status: "failed",
@@ -371,6 +400,8 @@ func TestResponsesChatStream_EndsWithUpstreamErrorOrTruncation(t *testing.T) {
 			wantError: "The server had an error"},
 		{name: "failed response", upstream: sse(created, `{"type":"response.failed","response":{"id":"resp_1","status":"failed","output":[],"error":{"code":"server_error","message":"boom"}}}`),
 			wantError: "boom"},
+		{name: "interrupted response", upstream: sse(created, `{"type":"response.incomplete","response":{"id":"resp_1","status":"incomplete","output":[],"incomplete_details":{"reason":"interrupted"}}}`),
+			wantError: "the response is incomplete: interrupted"},
 		{name: "truncated", upstream: sse(created, `{"type":"response.output_text.delta","delta":"Hel"}`), wantTrunc: true},
 	}
 	for _, tt := range tests {
@@ -387,4 +418,23 @@ func TestResponsesChatStream_EndsWithUpstreamErrorOrTruncation(t *testing.T) {
 			assert.Equal(t, tt.wantError, last["error"].(map[string]any)["message"])
 		})
 	}
+}
+
+// OpenAI rejects inline file data without a filename on Chat Completions too,
+// so the chat path names such files without changing the caller's request.
+func TestChatCompletion_NamesUnnamedInlineFiles(t *testing.T) {
+	provider, capture := newRoutingProvider(t)
+	file := &core.FileContent{FileData: "data:application/pdf;base64,AAAA"}
+	req := &core.ChatRequest{Model: "gpt-5.5", Messages: []core.Message{{Role: "user", Content: []core.ContentPart{
+		{Type: "file", File: file}, {Type: "text", Text: "Summarize"},
+	}}}}
+
+	_, err := provider.ChatCompletion(context.Background(), req)
+	require.NoError(t, err)
+
+	sent := capture.Last(t)
+	assert.Equal(t, "/chat/completions", sent.Path)
+	parts := sent.JSON(t)["messages"].([]any)[0].(map[string]any)["content"].([]any)
+	assert.Equal(t, "document.pdf", parts[0].(map[string]any)["file"].(map[string]any)["filename"])
+	assert.Empty(t, file.Filename, "the caller's request must not change")
 }

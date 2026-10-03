@@ -80,8 +80,11 @@ var chatMappedFields = []string{"max_completion_tokens", "reasoning_effort", "ve
 //   - tool results carrying images or files, which Chat Completions accepts
 //     but the model never sees;
 //   - file parts given by URL, which Chat Completions does not accept.
+//
+// The content cases apply to every OpenAI model name; models that predate
+// the Responses API cannot take images or files on Chat Completions either.
 func needsResponses(req *core.ChatRequest) bool {
-	if req == nil || !isReasoningChatModel(req.Model) {
+	if req == nil {
 		return false
 	}
 	if len(req.Tools) > 0 && restrictsChatTools(req.Model) {
@@ -90,7 +93,23 @@ func needsResponses(req *core.ChatRequest) bool {
 			return true
 		}
 	}
-	return hasContentChatCannotCarry(req.Messages)
+	return isOpenAIModelName(req.Model) && hasContentChatCannotCarry(req.Messages)
+}
+
+// isOpenAIModelName reports whether the model is named like an OpenAI chat
+// model, so a custom endpoint configured as this provider keeps its own
+// model names on Chat Completions.
+func isOpenAIModelName(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(m, "gpt-") || strings.HasPrefix(m, "chatgpt-") || isOSeriesModel(m)
+}
+
+// carriesChatOnlyFields reports whether a message, part or tool call has
+// members beyond the ones the translation maps (for example a speaker name).
+// Other providers' replay state (extra_content) is removed by the router
+// before the request reaches this provider.
+func carriesChatOnlyFields(fields core.UnknownJSONFields) bool {
+	return !fields.Without(core.ExtraContentField).IsEmpty()
 }
 
 // requestedEffort returns the reasoning effort the caller asked for, from the
@@ -244,7 +263,7 @@ func responsesInput(messages []core.Message) ([]any, error) {
 	input := make([]any, 0, len(messages))
 	for _, msg := range messages {
 		content, err := core.NormalizeMessageContent(msg.Content)
-		if err != nil {
+		if err != nil || carriesChatOnlyFields(msg.ExtraFields) {
 			return nil, errNotTranslatable
 		}
 		switch msg.Role {
@@ -255,17 +274,18 @@ func responsesInput(messages []core.Message) ([]any, error) {
 			}
 			input = append(input, map[string]any{"role": msg.Role, "content": parts})
 		case "assistant":
+			if !textOnly(content) {
+				return nil, errNotTranslatable
+			}
 			if text := core.ExtractTextContent(content); text != "" {
-				if !textOnly(content) {
-					return nil, errNotTranslatable
-				}
 				input = append(input, map[string]any{
 					"role":    "assistant",
 					"content": []any{map[string]any{"type": "output_text", "text": text}},
 				})
 			}
 			for _, call := range msg.ToolCalls {
-				if call.Type != "" && call.Type != "function" {
+				if (call.Type != "" && call.Type != "function") ||
+					carriesChatOnlyFields(call.ExtraFields) || carriesChatOnlyFields(call.Function.ExtraFields) {
 					return nil, errNotTranslatable
 				}
 				input = append(input, map[string]any{
@@ -294,7 +314,7 @@ func textOnly(content any) bool {
 		return true
 	}
 	for _, part := range parts {
-		if part.Type != "text" {
+		if part.Type != "text" || carriesChatOnlyFields(part.ExtraFields) {
 			return false
 		}
 	}
@@ -322,6 +342,9 @@ func responsesInputContent(content any) ([]any, error) {
 	parts, _ := content.([]core.ContentPart)
 	out := make([]any, 0, len(parts))
 	for _, part := range parts {
+		if carriesChatOnlyFields(part.ExtraFields) {
+			return nil, errNotTranslatable
+		}
 		switch part.Type {
 		case "text":
 			out = append(out, map[string]any{"type": "input_text", "text": part.Text})

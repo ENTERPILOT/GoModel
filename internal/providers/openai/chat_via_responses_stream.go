@@ -19,14 +19,17 @@ func chatResponseFromResponses(resp *core.ResponsesResponse, provider string) (*
 	if resp.Status == "failed" {
 		return nil, core.NewProviderError(provider, http.StatusBadGateway, responsesErrorMessage(resp.Error), nil)
 	}
-	var text strings.Builder
+	var text, refusal strings.Builder
 	var calls []core.ToolCall
 	for _, item := range resp.Output {
 		switch item.Type {
 		case "message":
 			for _, content := range item.Content {
-				if content.Type == "output_text" {
+				switch content.Type {
+				case "output_text":
 					text.WriteString(content.Text)
+				case "refusal":
+					refusal.WriteString(content.Refusal)
 				}
 			}
 		case "function_call":
@@ -37,10 +40,22 @@ func chatResponseFromResponses(resp *core.ResponsesResponse, provider string) (*
 			})
 		}
 	}
+	finishReason, ok := chatFinishReason(resp, len(calls) > 0)
+	if !ok {
+		return nil, core.NewProviderError(provider, http.StatusBadGateway, incompleteMessage(resp), nil)
+	}
 	message := core.ResponseMessage{Role: "assistant", ToolCalls: calls}
-	// Chat Completions reports content null on a tool-call-only turn.
-	if text.Len() > 0 || len(calls) == 0 {
+	// Chat Completions reports content null on a tool-call-only or refused
+	// turn, and the refusal in its own member.
+	if text.Len() > 0 || (len(calls) == 0 && refusal.Len() == 0) {
 		message.Content = text.String()
+	}
+	if refusal.Len() > 0 {
+		raw, err := json.Marshal(refusal.String())
+		if err != nil {
+			return nil, core.NewProviderError(provider, http.StatusBadGateway, "invalid refusal in response", err)
+		}
+		message.ExtraFields = core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"refusal": raw})
 	}
 	return &core.ChatResponse{
 		ID:      resp.ID,
@@ -49,25 +64,42 @@ func chatResponseFromResponses(resp *core.ResponsesResponse, provider string) (*
 		Model:   resp.Model,
 		Choices: []core.Choice{{
 			Message:      message,
-			FinishReason: chatFinishReason(resp, len(calls) > 0),
+			FinishReason: finishReason,
 		}},
 		Usage: chatUsageFromResponses(resp.Usage),
 	}, nil
 }
 
-func chatFinishReason(resp *core.ResponsesResponse, hasToolCalls bool) string {
-	if resp.Status == "incomplete" && resp.IncompleteDetails != nil {
-		switch resp.IncompleteDetails.Reason {
+// chatFinishReason maps a finished response onto a chat finish_reason. ok is
+// false for a response that stopped early for a reason Chat Completions has no
+// finish_reason for (for example an interrupted turn): its partial answer or
+// tool call must not be presented as complete.
+func chatFinishReason(resp *core.ResponsesResponse, hasToolCalls bool) (string, bool) {
+	if resp.Status == "incomplete" {
+		reason := ""
+		if resp.IncompleteDetails != nil {
+			reason = resp.IncompleteDetails.Reason
+		}
+		switch reason {
 		case "max_output_tokens":
-			return "length"
+			return "length", true
 		case "content_filter":
-			return "content_filter"
+			return "content_filter", true
+		default:
+			return "", false
 		}
 	}
 	if hasToolCalls {
-		return "tool_calls"
+		return "tool_calls", true
 	}
-	return "stop"
+	return "stop", true
+}
+
+func incompleteMessage(resp *core.ResponsesResponse) string {
+	if resp.IncompleteDetails != nil && resp.IncompleteDetails.Reason != "" {
+		return "the response is incomplete: " + resp.IncompleteDetails.Reason
+	}
+	return "the response is incomplete"
 }
 
 func chatUsageFromResponses(usage *core.ResponsesUsage) core.Usage {
@@ -203,11 +235,16 @@ func (s *responsesChatStream) handle(data []byte) {
 		if event.Response == nil {
 			return
 		}
+		finishReason, ok := chatFinishReason(event.Response, len(s.tools) > 0)
+		if !ok {
+			s.fail(incompleteMessage(event.Response), "")
+			return
+		}
 		var usage map[string]any
 		if s.includeUsage {
 			usage = usagePayload(chatUsageFromResponses(event.Response.Usage))
 		}
-		s.emit(map[string]any{}, chatFinishReason(event.Response, len(s.tools) > 0), usage)
+		s.emit(map[string]any{}, finishReason, usage)
 		s.buffer.AppendString("data: [DONE]\n\n")
 		s.finished = true
 	case "response.failed":
