@@ -572,6 +572,10 @@ providers:
     api_key: "${OPENAI_API_KEY}"
 ```
 
+To read a value from a mounted file, or to fail startup when a variable is
+unset, use a [secret reference](/advanced/secret-references):
+`${file:/run/secrets/openai}` or `${env:OPENAI_API_KEY}`.
+
 <Tip>
   The YAML file is entirely optional. Any setting you can put in YAML can also
   be set via environment variables. Use YAML when you need per-provider

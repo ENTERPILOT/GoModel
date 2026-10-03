@@ -2,6 +2,12 @@
 # Copy to config/config.yaml to customize.
 # Environment variables always override values in this file.
 # All settings have sensible defaults — no config file is required.
+#
+# Any string value can be a secret reference, resolved after the file is read:
+#   ${env:NAME}         the variable's value; unset or empty stops startup
+#   ${file:/abs/path}   the file's contents minus one trailing newline (Docker/Kubernetes secrets)
+# References may sit inside a value ("Bearer ${env:TOKEN}"); write $${ for a literal ${.
+# The plain ${NAME} / ${NAME:-default} form still works and leaves an unset NAME in place.
 
 server:
   port: "8080"
@@ -491,7 +497,7 @@ failover:
 providers:
   openai:
     type: openai
-    api_key: "sk-..."
+    api_key: "sk-..." # or a secret reference: ${file:/run/secrets/openai}
     # Identified sessions stay on one key by default, preserving provider prompt
     # cache affinity while still spreading different sessions across keys.
     # Equivalent env vars: OPENAI_API_KEY_2, OPENAI_API_KEY_3, ...

@@ -38,8 +38,9 @@ are plain security hygiene belong in core for everyone.
 ### 1. One reference syntax: `${scheme:reference}`
 
 A secret reference is `${<scheme>:<reference>}`, where `scheme` matches
-`[a-z][a-z0-9+.-]*` and the reference does not start with `-`. The `-` rule
-keeps the existing `${VAR:-default}` form unambiguous. The syntax follows the
+`[a-z][a-z0-9+.-]*` and the reference is non-empty, does not start with `-`,
+and contains no `{` or `}`. The `-` rule keeps the existing `${VAR:-default}`
+form unambiguous. The syntax follows the
 OpenTelemetry Collector's configuration providers (`${env:NAME}`,
 `${file:/path}`), extends the `${VAR}` form GoModel users already know, and
 is plain YAML: unlike Kong's `{vault://...}` it does not open a flow mapping.
@@ -77,7 +78,8 @@ Both are reserved: an extension cannot replace them.
 ### 3. Resolution happens per field, after decoding
 
 The text-level `${VAR}` expansion skips anything that parses as a secret
-reference. References are resolved later, field by field, by
+reference, and leaves `$$` alone so the `$${` escape survives to the field
+pass. References are resolved later, field by field, by
 `config.Secrets`, so a resolved value is never pasted back into YAML text and
 can contain any bytes.
 
@@ -88,11 +90,20 @@ can contain any bytes.
 type SecretResolver interface {
     ResolveSecret(ctx context.Context, reference string) (string, error)
 }
+type SecretResolverFunc func(ctx context.Context, reference string) (string, error)
 
+func NewSecrets() *Secrets // built-in schemes only; a nil *Secrets behaves the same
 func (s *Secrets) Register(scheme string, r SecretResolver) error // env and file are reserved
 func (s *Secrets) Resolve(ctx context.Context, value string) (string, error)
 func (s *Secrets) HasReference(value string) bool
 func (s *Secrets) NotifyChanged() // see section 5
+
+// LoadResult.Secrets is set by Load. ResolveSecrets is step 3 below; it runs
+// once per generation, so resolved values are never scanned again.
+func (r *LoadResult) ResolveSecrets(ctx context.Context) error
+
+// Resolution failures are *SecretError{Field, Scheme, Err}; an unknown scheme
+// wraps ErrUnknownSecretScheme.
 ```
 
 The resolver lives on `LoadResult` rather than on `ext.Registry` because it
