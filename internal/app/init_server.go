@@ -270,6 +270,8 @@ func applyExtensions(serverCfg *server.Config, extensions *ext.Registry) {
 	serverCfg.OuterMiddleware = extensions.OuterMiddleware()
 	serverCfg.ExtraMiddleware = extensions.Middleware()
 	serverCfg.ExtraRoutes = extensions.Routes()
+	serverCfg.ExtraAdminRoutes = extensions.AdminRoutes()
+	serverCfg.HealthCheckers = extensions.HealthCheckers()
 	serverCfg.ExtraAuthSkipPaths = extensions.PublicPaths()
 	serverCfg.RequestAuthenticators = extensions.Authenticators()
 }

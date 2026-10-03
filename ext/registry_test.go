@@ -75,10 +75,30 @@ func TestRegistryCollectsMiddlewareAndRoutes(t *testing.T) {
 	reg.UseOuterMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 	reg.UseMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 	reg.RegisterRoutes(func(_ *echo.Echo) {})
+	reg.RegisterAdminRoutes(func(_ *echo.Group) {})
 
 	assert.Len(t, reg.OuterMiddleware(), 1)
 	assert.Len(t, reg.Middleware(), 1)
 	assert.Len(t, reg.Routes(), 1)
+	assert.Len(t, reg.AdminRoutes(), 1)
+}
+
+type namedHealthChecker struct{ name string }
+
+func (c namedHealthChecker) Name() string { return c.name }
+
+func (namedHealthChecker) CheckHealth(context.Context) HealthStatus { return HealthOK }
+
+func TestRegistryCollectsHealthCheckers(t *testing.T) {
+	reg := &Registry{}
+	reg.RegisterHealthChecker(namedHealthChecker{name: "vaults"})
+
+	snapshot := reg.HealthCheckers()
+	require.Len(t, snapshot, 1)
+	assert.Equal(t, "vaults", snapshot[0].Name())
+	reg.RegisterHealthChecker(namedHealthChecker{name: "other"})
+	assert.Len(t, snapshot, 1, "earlier snapshot must not grow")
+	assert.Len(t, reg.HealthCheckers(), 2)
 }
 
 func TestRegistryCollectsRequestAuthenticators(t *testing.T) {

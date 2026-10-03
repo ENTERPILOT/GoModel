@@ -4,9 +4,13 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v5"
+
+	"github.com/enterpilot/gomodel/ext"
 )
 
 // readinessProbeTimeout caps each dependency check. It is intentionally shorter
@@ -21,9 +25,14 @@ const (
 	readyStatusDegraded = "degraded"
 	readyStatusNotReady = "not_ready"
 
-	readyComponentOK   = "ok"
-	readyComponentDown = "down"
+	readyComponentOK       = "ok"
+	readyComponentDegraded = "degraded"
+	readyComponentDown     = "down"
 )
+
+// coreReadyComponents are the component keys core reports itself; extension
+// health checkers cannot claim them.
+var coreReadyComponents = []string{"storage", "cache", "models"}
 
 // readinessResponse is the JSON body returned by GET /health/ready.
 type readinessResponse struct {
@@ -43,6 +52,8 @@ type readinessResponse struct {
 //     discovery has not succeeded and nothing is cached), requests fail with
 //     503 until it does. The response is degraded (HTTP 200) so the condition
 //     is visible without taking the instance out of rotation.
+//   - Extension health checkers report under their own name: degraded keeps
+//     HTTP 200, down makes the response not_ready (HTTP 503).
 //
 // Upstream provider reachability is deliberately excluded — a provider outage
 // must not pull a healthy gateway out of rotation. Use GET /health for liveness.
@@ -90,6 +101,22 @@ func (h *Handler) Ready(c *echo.Context) error {
 		}
 	}
 
+	for _, hc := range h.healthCheckers {
+		switch checkHealthWithTimeout(c.Request().Context(), hc.checker) {
+		case ext.HealthOK:
+			components[hc.name] = readyComponentOK
+		case ext.HealthDown:
+			components[hc.name] = readyComponentDown
+			status = readyStatusNotReady
+			slog.Warn("readiness: extension reports down", "component", hc.name)
+		default:
+			components[hc.name] = readyComponentDegraded
+			if status == readyStatusReady {
+				status = readyStatusDegraded
+			}
+		}
+	}
+
 	code := http.StatusOK
 	if status == readyStatusNotReady {
 		code = http.StatusServiceUnavailable
@@ -103,4 +130,40 @@ func pingWithTimeout(ctx context.Context, probe ReadinessProbe) error {
 	ctx, cancel := context.WithTimeout(ctx, readinessProbeTimeout)
 	defer cancel()
 	return probe.Ping(ctx)
+}
+
+// checkHealthWithTimeout runs an extension health check under the same bound
+// as the core readiness probes.
+func checkHealthWithTimeout(ctx context.Context, checker ext.HealthChecker) ext.HealthStatus {
+	ctx, cancel := context.WithTimeout(ctx, readinessProbeTimeout)
+	defer cancel()
+	return checker.CheckHealth(ctx)
+}
+
+// namedHealthChecker pairs an extension health checker with the component name
+// it was accepted under.
+type namedHealthChecker struct {
+	name    string
+	checker ext.HealthChecker
+}
+
+// validHealthCheckers drops checkers readiness cannot report unambiguously:
+// nil ones, empty names, and names taken by a core component or an earlier
+// checker.
+func validHealthCheckers(checkers []ext.HealthChecker) []namedHealthChecker {
+	var valid []namedHealthChecker
+	for _, checker := range checkers {
+		if isNilExtension(checker) {
+			continue
+		}
+		name := strings.TrimSpace(checker.Name())
+		taken := slices.Contains(coreReadyComponents, name) ||
+			slices.ContainsFunc(valid, func(hc namedHealthChecker) bool { return hc.name == name })
+		if name == "" || taken {
+			slog.Warn("readiness: ignoring extension health checker with an empty or duplicate name", "name", name)
+			continue
+		}
+		valid = append(valid, namedHealthChecker{name: name, checker: checker})
+	}
+	return valid
 }
