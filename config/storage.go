@@ -15,6 +15,16 @@ type StorageConfig struct {
 
 	// MongoDB configuration
 	MongoDB MongoDBStorageConfig `yaml:"mongodb"`
+
+	// DuckDB configuration (needs a binary built with -tags duckdb)
+	DuckDB DuckDBStorageConfig `yaml:"duckdb"`
+}
+
+// DuckDBStorageConfig holds DuckDB-specific storage configuration
+type DuckDBStorageConfig struct {
+	// Path is the database file path. Default: gomodel.duckdb next to the
+	// SQLite default.
+	Path string `yaml:"path" env:"DUCKDB_PATH"`
 }
 
 // SQLiteStorageConfig holds SQLite-specific storage configuration
@@ -56,6 +66,9 @@ func (c StorageConfig) BackendConfig() storage.Config {
 		MongoDB: storage.MongoDBConfig{
 			URL:      c.MongoDB.URL,
 			Database: c.MongoDB.Database,
+		},
+		DuckDB: storage.DuckDBConfig{
+			Path: c.DuckDB.Path,
 		},
 	}
 	if cfg.Type == "" {
