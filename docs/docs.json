@@ -176,6 +176,7 @@
                 "pages": [
                     "guides/production",
                     "guides/updating",
+                    "guides/migrate-from-litellm",
                     "guides/caddy",
                     "guides/openai-agents-sdk",
                     "guides/openclaw",
