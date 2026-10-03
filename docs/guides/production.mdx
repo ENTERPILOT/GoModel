@@ -331,7 +331,7 @@ itself, which works in a distroless image with no shell or `curl`.
 | Purpose | HTTP | CLI | Checks |
 | --- | --- | --- | --- |
 | Liveness | `GET /health` | `gomodel --health` | Nothing. Confirms the listener answers. |
-| Readiness | `GET /health/ready` | `gomodel --ready` | Storage (503 if down), Redis (degraded, still 200). |
+| Readiness | `GET /health/ready` | `gomodel --ready` | Storage (503 if down), Redis (degraded, still 200), extension components (degraded: 200, down: 503). |
 
 Point Kubernetes readiness at `/health/ready`, not `/health`. The Helm chart in
 the repository's `helm/` directory does this already, runs the gateway as the

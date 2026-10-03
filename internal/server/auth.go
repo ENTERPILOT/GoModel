@@ -190,10 +190,16 @@ func hasRequestAuthenticators(authenticators []ext.RequestAuthenticator) bool {
 }
 
 func requestAuthenticatorIsNil(authenticator ext.RequestAuthenticator) bool {
-	if authenticator == nil {
+	return isNilExtension(authenticator)
+}
+
+// isNilExtension reports whether an extension-provided interface value is nil,
+// including a typed nil pointer, map, or func behind the interface.
+func isNilExtension(v any) bool {
+	if v == nil {
 		return true
 	}
-	value := reflect.ValueOf(authenticator)
+	value := reflect.ValueOf(v)
 	switch value.Kind() {
 	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
 		return value.IsNil()

@@ -27,6 +27,8 @@ type Registry struct {
 	outerMiddleware []echo.MiddlewareFunc
 	middleware      []echo.MiddlewareFunc
 	routes          []func(*echo.Echo)
+	adminRoutes     []func(*echo.Group)
+	healthCheckers  []HealthChecker
 	publicPaths     []string
 	routeSelector   RouteSelector
 	proxySelector   ProxySelector
@@ -102,11 +104,33 @@ func (r *Registry) UseMiddleware(m echo.MiddlewareFunc) {
 }
 
 // RegisterRoutes adds a callback that registers extra routes after all core
-// routes. Paths are relative to the server base path.
+// routes. Paths are relative to the server base path. These routes pass
+// gateway authentication only; core applies no admin authorization to them,
+// even under /admin. Register admin endpoints with RegisterAdminRoutes.
 func (r *Registry) RegisterRoutes(fn func(e *echo.Echo)) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.routes = append(r.routes, fn)
+}
+
+// RegisterAdminRoutes adds a callback that registers admin API routes on the
+// core /admin group, after the built-in admin routes. Group paths are
+// relative to /admin (itself relative to the server base path), and the
+// routes get the same authorization as the built-in admin API: the master
+// key passes, and managed keys and extension identities need dashboard
+// access. Like the built-in admin API, they are only mounted when admin
+// endpoints are enabled. Use RegisterRoutes for routes outside that guard.
+func (r *Registry) RegisterAdminRoutes(fn func(g *echo.Group)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.adminRoutes = append(r.adminRoutes, fn)
+}
+
+// RegisterHealthChecker adds a component reported by GET /health/ready.
+func (r *Registry) RegisterHealthChecker(checker HealthChecker) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.healthCheckers = append(r.healthCheckers, checker)
 }
 
 // AddPublicPaths appends paths to the authentication skip list (for example
@@ -171,6 +195,20 @@ func (r *Registry) Routes() []func(*echo.Echo) {
 	return slices.Clone(r.routes)
 }
 
+// AdminRoutes returns a defensive copy of the registered admin route callbacks.
+func (r *Registry) AdminRoutes() []func(*echo.Group) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.adminRoutes)
+}
+
+// HealthCheckers returns a defensive copy of the registered health checkers.
+func (r *Registry) HealthCheckers() []HealthChecker {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.healthCheckers)
+}
+
 // PublicPaths returns a defensive copy of the registered public paths.
 func (r *Registry) PublicPaths() []string {
 	r.mu.Lock()
@@ -214,6 +252,12 @@ func UseOuterMiddleware(m echo.MiddlewareFunc) { Default.UseOuterMiddleware(m) }
 
 // RegisterRoutes registers a route callback on the Default registry.
 func RegisterRoutes(fn func(e *echo.Echo)) { Default.RegisterRoutes(fn) }
+
+// RegisterAdminRoutes registers an admin route callback on the Default registry.
+func RegisterAdminRoutes(fn func(g *echo.Group)) { Default.RegisterAdminRoutes(fn) }
+
+// RegisterHealthChecker registers a health checker on the Default registry.
+func RegisterHealthChecker(checker HealthChecker) { Default.RegisterHealthChecker(checker) }
 
 // AddPublicPaths registers auth-skip paths on the Default registry.
 func AddPublicPaths(paths ...string) { Default.AddPublicPaths(paths...) }
