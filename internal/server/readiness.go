@@ -4,8 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"slices"
-	"strings"
 	"time"
 
 	"github.com/labstack/echo/v5"
@@ -53,7 +51,9 @@ type readinessResponse struct {
 //     503 until it does. The response is degraded (HTTP 200) so the condition
 //     is visible without taking the instance out of rotation.
 //   - Extension health checkers report under their own name: degraded keeps
-//     HTTP 200, down makes the response not_ready (HTTP 503).
+//     HTTP 200, down makes the response not_ready (HTTP 503). They run
+//     concurrently under one shared deadline; one that does not answer in
+//     time reports degraded.
 //
 // Upstream provider reachability is deliberately excluded — a provider outage
 // must not pull a healthy gateway out of rotation. Use GET /health for liveness.
@@ -67,6 +67,10 @@ type readinessResponse struct {
 func (h *Handler) Ready(c *echo.Context) error {
 	components := map[string]string{}
 	status := readyStatusReady
+	// Extension checks run concurrently with the core probes under one shared
+	// deadline, so they add no latency beyond readinessProbeTimeout however
+	// many are registered.
+	waitExtensionHealth := startExtensionHealthChecks(c.Request().Context(), h.healthCheckers)
 
 	if h.storageProbe != nil {
 		if err := pingWithTimeout(c.Request().Context(), h.storageProbe); err != nil {
@@ -101,8 +105,9 @@ func (h *Handler) Ready(c *echo.Context) error {
 		}
 	}
 
+	extensionHealth := waitExtensionHealth()
 	for _, hc := range h.healthCheckers {
-		switch checkHealthWithTimeout(c.Request().Context(), hc.checker) {
+		switch extensionHealth[hc.name] {
 		case ext.HealthOK:
 			components[hc.name] = readyComponentOK
 		case ext.HealthDown:
@@ -130,40 +135,4 @@ func pingWithTimeout(ctx context.Context, probe ReadinessProbe) error {
 	ctx, cancel := context.WithTimeout(ctx, readinessProbeTimeout)
 	defer cancel()
 	return probe.Ping(ctx)
-}
-
-// checkHealthWithTimeout runs an extension health check under the same bound
-// as the core readiness probes.
-func checkHealthWithTimeout(ctx context.Context, checker ext.HealthChecker) ext.HealthStatus {
-	ctx, cancel := context.WithTimeout(ctx, readinessProbeTimeout)
-	defer cancel()
-	return checker.CheckHealth(ctx)
-}
-
-// namedHealthChecker pairs an extension health checker with the component name
-// it was accepted under.
-type namedHealthChecker struct {
-	name    string
-	checker ext.HealthChecker
-}
-
-// validHealthCheckers drops checkers readiness cannot report unambiguously:
-// nil ones, empty names, and names taken by a core component or an earlier
-// checker.
-func validHealthCheckers(checkers []ext.HealthChecker) []namedHealthChecker {
-	var valid []namedHealthChecker
-	for _, checker := range checkers {
-		if isNilExtension(checker) {
-			continue
-		}
-		name := strings.TrimSpace(checker.Name())
-		taken := slices.Contains(coreReadyComponents, name) ||
-			slices.ContainsFunc(valid, func(hc namedHealthChecker) bool { return hc.name == name })
-		if name == "" || taken {
-			slog.Warn("readiness: ignoring extension health checker with an empty or duplicate name", "name", name)
-			continue
-		}
-		valid = append(valid, namedHealthChecker{name: name, checker: checker})
-	}
-	return valid
 }

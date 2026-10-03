@@ -26,8 +26,10 @@ const (
 // and must not collide with a core component ("storage", "cache", "models") or
 // another checker. CheckHealth runs on every readiness probe under a short
 // timeout, so it should report recently observed state rather than call slow
-// remote services. An unrecognized status is reported as degraded.
-// Implementations must be safe for concurrent use.
+// remote services. An unrecognized status is reported as degraded, as is a
+// check that panics or does not return before the deadline; core runs at most
+// one call per checker at a time. Implementations must be safe for concurrent
+// use.
 type HealthChecker interface {
 	Name() string
 	CheckHealth(ctx context.Context) HealthStatus

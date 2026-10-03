@@ -62,7 +62,7 @@ type Handler struct {
 	storageProbe                 ReadinessProbe
 	cacheProbe                   ReadinessProbe
 	modelInventory               ModelInventory
-	healthCheckers               []namedHealthChecker
+	healthCheckers               []*namedHealthChecker
 	versionChecker               *versioncheck.Checker
 	// masterKey mirrors Config.MasterKey so GET /v1/auth/verify can confirm a
 	// master-key caller from the request itself instead of inferring it. It is
