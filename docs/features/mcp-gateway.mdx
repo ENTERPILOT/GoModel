@@ -51,6 +51,9 @@ as a bearer token:
 }
 ```
 
+The dashboard's **MCP Servers** page has a **Connect a client** panel with
+the endpoint URL and a ready-to-copy client config.
+
 For client-specific commands, environment-variable authentication, and
 verification steps, see [Connect Claude Code and Codex](/mcp-proxy/claude-code-and-codex).
 
@@ -77,7 +80,9 @@ mcp:
   tool_discovery: search # env: MCP_TOOL_DISCOVERY; default: off
 ```
 
-Or per client, with a header that overrides the default for that session:
+Or per client, with a header that overrides the default for that session.
+The **Connect a client** panel shows the gateway default and adds the header
+to its config snippet when you pick **Search tools**:
 
 ```json
 {

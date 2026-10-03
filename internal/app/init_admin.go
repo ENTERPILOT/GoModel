@@ -246,9 +246,19 @@ func dashboardRuntimeConfig(cfg *config.Config, usageEnabled, demoMode, adaptive
 		SemanticCacheEnabled:   dashboardEnabledValue(semanticResponseCacheConfigured(cfg)),
 		LiveLogsEnabled:        dashboardEnabledValue(cfg != nil && cfg.Admin.LiveLogsEnabled),
 		MCPEnabled:             dashboardEnabledValue(cfg != nil && cfg.MCP.Enabled),
+		MCPToolDiscovery:       dashboardMCPToolDiscovery(cfg),
 		VirtualModelStrategies: dashboardVirtualModelStrategies(adaptiveRouting, nil),
 		UserPathHeader:         dashboardUserPathHeader(cfg),
 	}
+}
+
+// dashboardMCPToolDiscovery is the default MCP tool discovery mode. Loaded
+// config is already normalized; an unset value means the "off" default.
+func dashboardMCPToolDiscovery(cfg *config.Config) string {
+	if cfg == nil || cfg.MCP.ToolDiscovery == "" {
+		return config.MCPToolDiscoveryOff
+	}
+	return cfg.MCP.ToolDiscovery
 }
 
 // dashboardUserPathHeader is the canonical user-path header name the public

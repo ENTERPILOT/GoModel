@@ -516,3 +516,40 @@ export function mcpToolSelectionSummary(form, discovered) {
   ).length;
   return { exposed, total };
 }
+
+// Tool discovery modes (mcp.tool_discovery / MCP_TOOL_DISCOVERY). "off" lists
+// every tool; "search" lists only search_tools and call_tool. Clients override
+// the gateway default per session with MCP_TOOL_DISCOVERY_HEADER.
+export const MCP_TOOL_DISCOVERY_OFF = "off";
+export const MCP_TOOL_DISCOVERY_SEARCH = "search";
+export const MCP_TOOL_DISCOVERY_HEADER = "X-MCP-Tool-Discovery";
+
+// Placeholder for the client's GoModel API key; the dashboard never embeds a
+// real key in a copyable snippet.
+export const MCP_API_KEY_PLACEHOLDER = "YOUR_GOMODEL_API_KEY";
+
+export function normalizeMcpToolDiscovery(value) {
+  return String(value || "").trim().toLowerCase() === MCP_TOOL_DISCOVERY_SEARCH
+    ? MCP_TOOL_DISCOVERY_SEARCH
+    : MCP_TOOL_DISCOVERY_OFF;
+}
+
+// mcpGatewayEndpoint is the aggregated /mcp URL clients connect to, under
+// the dashboard's base path when the gateway is mounted on a sub-path.
+export function mcpGatewayEndpoint(origin, basePath) {
+  const base = !basePath || basePath === "/" ? "" : String(basePath).replace(/\/+$/, "");
+  return `${String(origin || "").replace(/\/+$/, "")}${base}/mcp`;
+}
+
+// mcpClientConfig renders the mcpServers JSON most MCP clients accept. The
+// discovery header is added only when the chosen mode differs from the
+// gateway default, so the snippet stays minimal.
+export function mcpClientConfig(endpoint, mode, defaultMode) {
+  const headers = { Authorization: `Bearer ${MCP_API_KEY_PLACEHOLDER}` };
+  const chosen = normalizeMcpToolDiscovery(mode);
+  if (chosen !== normalizeMcpToolDiscovery(defaultMode)) {
+    headers[MCP_TOOL_DISCOVERY_HEADER] = chosen;
+  }
+  const config = { mcpServers: { gomodel: { type: "http", url: endpoint, headers } } };
+  return JSON.stringify(config, null, 2);
+}
