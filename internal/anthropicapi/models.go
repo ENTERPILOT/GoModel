@@ -1,6 +1,7 @@
 package anthropicapi
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -53,10 +54,12 @@ const maxModelsPageLimit = 1000
 // FromModelsPage renders one page of the catalog in the Anthropic models-list
 // shape. has_more reports whether more models follow in the paging direction,
 // so SDK auto-pagination walks the catalog with after_id. A cursor naming no
-// listed model yields an empty page.
-func FromModelsPage(models []core.Model, page ModelsPage) *ModelsList {
+// listed model (one removed by a refresh between pages, for example) is an
+// invalid request: an empty last page would let the client stop paging and
+// silently miss the models that follow.
+func FromModelsPage(models []core.Model, page ModelsPage) (*ModelsList, error) {
 	if page == (ModelsPage{}) {
-		return FromModels(models)
+		return FromModels(models), nil
 	}
 	limit := page.Limit
 	if limit <= 0 {
@@ -67,17 +70,17 @@ func FromModelsPage(models []core.Model, page ModelsPage) *ModelsList {
 	if page.AfterID != "" {
 		start = modelIndex(models, page.AfterID) + 1
 		if start == 0 {
-			return FromModels(nil)
+			return nil, unknownCursorError("after_id", page.AfterID)
 		}
 	}
 	if page.BeforeID != "" {
 		end = modelIndex(models, page.BeforeID)
 		if end < 0 {
-			return FromModels(nil)
+			return nil, unknownCursorError("before_id", page.BeforeID)
 		}
 	}
 	if start >= end {
-		return FromModels(nil)
+		return FromModels(nil), nil
 	}
 	var selected []core.Model
 	var hasMore bool
@@ -90,7 +93,11 @@ func FromModelsPage(models []core.Model, page ModelsPage) *ModelsList {
 	}
 	out := FromModels(selected)
 	out.HasMore = hasMore
-	return out
+	return out, nil
+}
+
+func unknownCursorError(param, id string) error {
+	return core.NewInvalidRequestError(fmt.Sprintf("%s %q does not name a listed model; restart paging from the first page", param, id), nil).WithParam(param)
 }
 
 func modelIndex(models []core.Model, id string) int {

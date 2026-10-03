@@ -74,7 +74,11 @@ func (h *Handler) ListModels(c *echo.Context) error {
 		if resp != nil {
 			models = resp.Data
 		}
-		return c.JSON(http.StatusOK, anthropicapi.FromModelsPage(models, anthropicModelsPage(c)))
+		list, err := anthropicapi.FromModelsPage(models, anthropicModelsPage(c))
+		if err != nil {
+			return respondModelError(c, err)
+		}
+		return c.JSON(http.StatusOK, list)
 	}
 
 	return c.JSON(http.StatusOK, resp)

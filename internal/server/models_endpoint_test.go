@@ -316,4 +316,13 @@ func TestListModels_AnthropicPaging(t *testing.T) {
 	require.Equal(t, false, next["has_more"])
 
 	require.Len(t, list("?limit=nonsense")["data"], 3, "an invalid limit is ignored")
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models?limit=1&after_id=removed/model", nil)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Equal(t, "error", body["type"], "Anthropic error envelope")
 }

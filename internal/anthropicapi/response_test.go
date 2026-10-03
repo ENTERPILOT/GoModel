@@ -2,6 +2,7 @@ package anthropicapi
 
 import (
 	"encoding/json"
+	"net/http"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -297,11 +298,11 @@ func TestFromModelsPage(t *testing.T) {
 		{name: "before_id", page: ModelsPage{Limit: 2, BeforeID: "e"}, want: []string{"c", "d"}, wantMore: true},
 		{name: "before_id reaching the start", page: ModelsPage{Limit: 5, BeforeID: "c"}, want: []string{"a", "b"}},
 		{name: "after_id without limit", page: ModelsPage{AfterID: "c"}, want: []string{"d", "e"}},
-		{name: "unknown cursor", page: ModelsPage{Limit: 2, AfterID: "zz"}, want: []string{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := FromModelsPage(models, tt.page)
+			got, err := FromModelsPage(models, tt.page)
+			require.NoError(t, err)
 			assert.Equal(t, tt.want, ids(got))
 			assert.Equal(t, tt.wantMore, got.HasMore)
 			if len(tt.want) > 0 {
@@ -309,5 +310,17 @@ func TestFromModelsPage(t *testing.T) {
 				assert.Equal(t, tt.want[len(tt.want)-1], *got.LastID)
 			}
 		})
+	}
+}
+
+// A cursor that names no listed model (removed by a refresh between pages) is
+// a 400, never an empty last page that would end the client's paging early.
+func TestFromModelsPage_UnknownCursor(t *testing.T) {
+	models := []core.Model{{ID: "a"}, {ID: "b"}}
+	for _, page := range []ModelsPage{{Limit: 1, AfterID: "gone"}, {Limit: 1, BeforeID: "gone"}} {
+		_, err := FromModelsPage(models, page)
+		var gwErr *core.GatewayError
+		require.ErrorAs(t, err, &gwErr)
+		assert.Equal(t, http.StatusBadRequest, gwErr.HTTPStatusCode())
 	}
 }
