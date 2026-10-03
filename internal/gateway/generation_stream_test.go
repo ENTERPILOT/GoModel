@@ -144,6 +144,25 @@ func TestStreamResponsesFinishesGenerationTraceWithCompletedResponse(t *testing.
 	assert.Equal(t, 1, resp.Usage.OutputTokens)
 }
 
+func TestGenerationStreamObserverBoundsCapturedContent(t *testing.T) {
+	_, trace := core.StartGenerationTrace(core.WithGenerationTracing(t.Context(), true))
+	observer := newChatGenerationObserver(trace, &core.ChatRequest{})
+	chunk := strings.Repeat("x", 1024)
+	for range 2 * core.GenerationContentLimit / len(chunk) {
+		observer.OnJSONEvent(map[string]any{"choices": []any{map[string]any{
+			"index": float64(0),
+			"delta": map[string]any{
+				"content":    chunk,
+				"tool_calls": []any{map[string]any{"index": float64(0), "function": map[string]any{"arguments": chunk}}},
+			},
+		}}})
+	}
+
+	message := observer.chatResponse().Choices[0].Message
+	assert.Len(t, message.Content, core.GenerationContentLimit+1, "text stops growing one byte past the export limit")
+	assert.Len(t, message.ToolCalls[0].Function.Arguments, core.GenerationContentLimit+1)
+}
+
 func TestStreamResultWithoutTracingHasNoGenerationObserver(t *testing.T) {
 	provider := &tracingProvider{stream: "data: [DONE]\n\n"}
 	orchestrator := NewInferenceOrchestrator(InferenceConfig{Provider: provider})

@@ -13,6 +13,11 @@ const (
 	generationTraceKey contextKey = "generation-trace"
 )
 
+// GenerationContentLimit is the most bytes of one captured text part
+// (a message text, tool arguments, or a tool result) that telemetry exports.
+// Streams accumulate no more than this while content is captured.
+const GenerationContentLimit = 64 << 10
+
 // GenerationOutcome is what the gateway learned from one inference call once
 // it decoded the result: the request it served and the response it returned.
 // Response is nil when the call produced no usable response.

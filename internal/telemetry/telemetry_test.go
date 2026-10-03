@@ -48,6 +48,25 @@ func TestMiddlewareEnablesGenerationTracing(t *testing.T) {
 	require.True(t, trace.CapturesContent())
 }
 
+func TestMiddlewareSkipsGenerationTracingForUnsampledRequests(t *testing.T) {
+	t.Setenv("OTEL_TRACES_EXPORTER", "none")
+	t.Setenv("OTEL_METRICS_EXPORTER", "none")
+	t.Setenv("OTEL_TRACES_SAMPLER", "always_off")
+
+	service, err := New(t.Context(), config.OpenTelemetryConfig{}, "/metrics", "")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = service.Close() })
+
+	c, _ := echotest.Request(t, http.MethodPost, "/v1/chat/completions", nil)
+	var trace *core.GenerationTrace
+	err = service.Middleware()(func(c *echo.Context) error {
+		_, trace = core.StartGenerationTrace(c.Request().Context())
+		return nil
+	})(c)
+	require.NoError(t, err)
+	require.Nil(t, trace, "a dropped trace is not rebuilt")
+}
+
 func TestCaptureMessageContent(t *testing.T) {
 	tests := []struct {
 		value string

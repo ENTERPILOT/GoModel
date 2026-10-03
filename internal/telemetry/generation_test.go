@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -327,6 +328,35 @@ func TestContentAttributesTruncateLongText(t *testing.T) {
 	require.Len(t, messages, 1)
 	content := messages[0].Parts[0].Content
 	assert.Less(t, len(content), len(long))
-	assert.Contains(t, content, "[truncated ")
-	assert.True(t, strings.HasPrefix(long, strings.SplitN(content, "…", 2)[0]), "text is cut at a rune boundary")
+	require.True(t, strings.HasSuffix(content, truncatedMarker))
+	kept := strings.TrimSuffix(content, truncatedMarker)
+	assert.LessOrEqual(t, len(kept), maxContentBytes)
+	assert.True(t, strings.HasPrefix(long, kept) && utf8.ValidString(kept), "text is cut at a rune boundary")
+}
+
+func TestContentAttributesKeepNewestMessagesWithinAttributeBudget(t *testing.T) {
+	part := strings.Repeat("a", maxContentBytes)
+	messages := make([]core.Message, 0, 12)
+	for range 11 {
+		messages = append(messages, core.Message{Role: "user", Content: part})
+	}
+	messages = append(messages, core.Message{Role: "user", Content: "latest question"})
+	attrs := attributeMap(contentAttributes(core.GenerationOutcome{
+		Request: &core.ChatRequest{Messages: messages},
+	}))
+
+	var got []genAIMessage
+	require.NoError(t, json.Unmarshal([]byte(attrs["gen_ai.input.messages"]), &got))
+	require.Len(t, got, len(messages), "every message keeps its place")
+	assert.Equal(t, "latest question", got[len(got)-1].Parts[0].Content)
+	assert.Equal(t, part, got[len(got)-2].Parts[0].Content, "recent messages stay intact")
+	assert.Equal(t, truncatedMarker, got[0].Parts[0].Content, "the oldest text is dropped first")
+
+	total := 0
+	for _, message := range got {
+		for _, p := range message.Parts {
+			total += len(strings.TrimSuffix(p.Content, truncatedMarker))
+		}
+	}
+	assert.LessOrEqual(t, total, maxAttributeContentBytes)
 }

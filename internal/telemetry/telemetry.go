@@ -24,6 +24,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdkTrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.39.0"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -188,11 +189,15 @@ func newMiddleware(tp *sdkTrace.TracerProvider, mp *sdkMetric.MeterProvider, pro
 }
 
 // withGenerationTracing lets the gateway trace the request's inference calls
-// (see core.GenerationTrace), so their spans carry the decoded usage.
+// (see core.GenerationTrace), so their spans carry the decoded usage. A
+// request the sampler dropped is skipped: its spans are never exported, so
+// rebuilding its outcome would be wasted work.
 func withGenerationTracing(next echo.HandlerFunc, captureContent bool) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		req := c.Request()
-		c.SetRequest(req.WithContext(core.WithGenerationTracing(req.Context(), captureContent)))
+		if trace.SpanFromContext(req.Context()).IsRecording() {
+			c.SetRequest(req.WithContext(core.WithGenerationTracing(req.Context(), captureContent)))
+		}
 		return next(c)
 	}
 }

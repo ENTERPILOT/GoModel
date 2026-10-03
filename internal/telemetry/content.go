@@ -2,7 +2,7 @@ package telemetry
 
 import (
 	"encoding/json"
-	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -11,10 +11,16 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
-// maxContentBytes caps each captured text part so one huge prompt or
-// completion cannot blow up a span. Longer text is cut at a rune boundary
-// and marked.
-const maxContentBytes = 64 << 10
+const (
+	// maxContentBytes caps each captured text part so one huge prompt or
+	// completion cannot blow up a span. Longer text is cut at a rune
+	// boundary and marked.
+	maxContentBytes = core.GenerationContentLimit
+	// maxAttributeContentBytes caps the text of one content attribute, so
+	// many parts within their own limit cannot add up to an oversized span.
+	maxAttributeContentBytes = 512 << 10
+	truncatedMarker          = "… [truncated]"
+)
 
 // genAIMessage and genAIPart follow the OpenTelemetry GenAI message schema
 // used by gen_ai.input.messages and gen_ai.output.messages. Media and file
@@ -61,10 +67,52 @@ func contentAttributes(outcome core.GenerationOutcome) []attribute.KeyValue {
 		}
 	}
 
+	limitParts(system, maxAttributeContentBytes)
+	limitMessages(input)
+	limitMessages(output)
+
 	var attrs []attribute.KeyValue
 	attrs = appendJSONAttribute(attrs, "gen_ai.system_instructions", system)
 	attrs = appendJSONAttribute(attrs, "gen_ai.input.messages", input)
 	return appendJSONAttribute(attrs, "gen_ai.output.messages", output)
+}
+
+// limitMessages spends the attribute's text budget from the newest message
+// backwards, so a long conversation keeps its latest turns intact and loses
+// the oldest text first.
+func limitMessages(messages []genAIMessage) {
+	remaining := maxAttributeContentBytes
+	for _, message := range slices.Backward(messages) {
+		remaining = limitParts(message.Parts, remaining)
+	}
+}
+
+// limitParts cuts the parts' text to the remaining budget and returns what
+// is left of it.
+func limitParts(parts []genAIPart, remaining int) int {
+	for i := range parts {
+		part := &parts[i]
+		part.Content, remaining = spendText(part.Content, remaining)
+		part.Response, remaining = spendText(part.Response, remaining)
+		switch arguments := part.Arguments.(type) {
+		case string:
+			part.Arguments, remaining = spendText(arguments, remaining)
+		case json.RawMessage:
+			if len(arguments) > remaining {
+				part.Arguments, remaining = truncatedMarker, 0
+			} else {
+				remaining -= len(arguments)
+			}
+		}
+	}
+	return remaining
+}
+
+func spendText(text string, remaining int) (string, int) {
+	if len(text) <= remaining {
+		return text, remaining - len(text)
+	}
+	return cutText(text, remaining), 0
 }
 
 func appendJSONAttribute[T any](attrs []attribute.KeyValue, key string, value []T) []attribute.KeyValue {
@@ -253,12 +301,18 @@ func toolCallPart(id, name, arguments string) genAIPart {
 }
 
 func truncateContent(text string) string {
-	if len(text) <= maxContentBytes {
+	return cutText(text, maxContentBytes)
+}
+
+// cutText keeps at most limit bytes of text, cut at a rune boundary and
+// marked.
+func cutText(text string, limit int) string {
+	if len(text) <= limit {
 		return text
 	}
-	cut := maxContentBytes
+	cut := max(limit, 0)
 	for cut > 0 && !utf8.RuneStart(text[cut]) {
 		cut--
 	}
-	return text[:cut] + fmt.Sprintf("… [truncated %d bytes]", len(text)-cut)
+	return text[:cut] + truncatedMarker
 }

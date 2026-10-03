@@ -28,9 +28,29 @@ type generationStreamObserver struct {
 
 type chatChoiceState struct {
 	role         string
-	text         strings.Builder
-	toolCalls    map[int]*core.ToolCall
+	text         cappedText
+	toolCalls    map[int]*streamToolCall
 	finishReason string
+}
+
+type streamToolCall struct {
+	id        string
+	name      string
+	arguments cappedText
+}
+
+// cappedText accumulates streamed text up to one byte past
+// core.GenerationContentLimit, so memory stays bounded however long the
+// stream runs while the exporter still sees the text as too long and marks
+// it truncated.
+type cappedText struct {
+	strings.Builder
+}
+
+func (t *cappedText) append(text string) {
+	if room := core.GenerationContentLimit + 1 - t.Len(); room > 0 {
+		t.WriteString(text[:min(len(text), room)])
+	}
 }
 
 func newChatGenerationObserver(trace *core.GenerationTrace, req *core.ChatRequest) *generationStreamObserver {
@@ -168,7 +188,7 @@ func (s *chatChoiceState) observeDelta(delta map[string]any) {
 		s.role = role
 	}
 	if text, ok := delta["content"].(string); ok {
-		s.text.WriteString(text)
+		s.text.append(text)
 	}
 	calls, _ := delta["tool_calls"].([]any)
 	for _, raw := range calls {
@@ -178,22 +198,22 @@ func (s *chatChoiceState) observeDelta(delta map[string]any) {
 		}
 		index := intValue(call["index"])
 		if s.toolCalls == nil {
-			s.toolCalls = make(map[int]*core.ToolCall)
+			s.toolCalls = make(map[int]*streamToolCall)
 		}
 		state, ok := s.toolCalls[index]
 		if !ok {
-			state = &core.ToolCall{Type: "function"}
+			state = &streamToolCall{}
 			s.toolCalls[index] = state
 		}
 		if id, ok := call["id"].(string); ok && id != "" {
-			state.ID = id
+			state.id = id
 		}
 		if function, ok := call["function"].(map[string]any); ok {
 			if name, ok := function["name"].(string); ok && name != "" {
-				state.Function.Name = name
+				state.name = name
 			}
 			if arguments, ok := function["arguments"].(string); ok {
-				state.Function.Arguments += arguments
+				state.arguments.append(arguments)
 			}
 		}
 	}
@@ -208,7 +228,12 @@ func (o *generationStreamObserver) chatResponse() *core.ChatResponse {
 			message.Content = text
 		}
 		for _, callIndex := range sortedKeys(state.toolCalls) {
-			message.ToolCalls = append(message.ToolCalls, *state.toolCalls[callIndex])
+			call := state.toolCalls[callIndex]
+			message.ToolCalls = append(message.ToolCalls, core.ToolCall{
+				ID:       call.id,
+				Type:     "function",
+				Function: core.FunctionCall{Name: call.name, Arguments: call.arguments.String()},
+			})
 		}
 		resp.Choices = append(resp.Choices, core.Choice{Index: index, Message: message, FinishReason: state.finishReason})
 	}

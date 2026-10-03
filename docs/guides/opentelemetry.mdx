@@ -224,8 +224,11 @@ as JSON:
 | `gen_ai.output.messages` | The response messages with their finish reason. |
 | `gen_ai.system_instructions` | The Responses API `instructions`. |
 
-Text parts longer than 64 KiB are truncated and marked. Images, audio, and files
-are reduced to their part type: binary data and data URLs are never exported.
+Text parts longer than 64 KiB are truncated and marked, and each attribute
+keeps at most 512 KiB of text: a long conversation loses its oldest messages'
+text first. Images, audio, and files are reduced to their part type: binary
+data and data URLs are never exported. Requests dropped by the trace sampler
+are not captured at all.
 The variable also accepts `SPAN_ONLY` and `SPAN_AND_EVENT`, the mode names of
 newer OpenTelemetry instrumentations.
 
