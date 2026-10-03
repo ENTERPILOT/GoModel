@@ -35,6 +35,10 @@ type Provider struct {
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	baseURL := providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL)
 	rootBaseURL := providers.PassthroughBaseURL(baseURL)
+	// One keyring for both clients, so native passthrough rotates with the
+	// OpenAI-compatible routes and picks up keys swapped in at runtime.
+	keys := opts.Keyring(cfg.APIKey)
+	opts.Keys = keys
 	return &Provider{
 		compatible: openai.NewCompatibleProvider(cfg.APIKey, opts, openai.CompatibleProviderConfig{
 			ProviderName:     "vllm",
@@ -49,7 +53,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 			Hooks:          opts.Hooks,
 			CircuitBreaker: opts.Resilience.CircuitBreaker,
 		}, func(req *http.Request) {
-			setHeaders(req, cfg.APIKey)
+			setHeaders(req, keys.NextForContext(req.Context()))
 		}),
 	}
 }

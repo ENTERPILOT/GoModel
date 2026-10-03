@@ -217,7 +217,9 @@ last, which may belong to a reload that was rejected. So the process shares
 one `SecretNotifier` between all generations' `Secrets`, and only the
 generation that is serving listens: its watcher starts when its server starts
 and stops with it. A notification sent through any generation's `Secrets`
-reaches the serving one, which re-checks with its own `Secrets`. `env` and
+reaches the serving one, which re-checks with its own `Secrets`. Stopping a
+watcher waits only briefly for a resolver; a check that outlives its
+generation takes no action and passes the notification on to the next one. `env` and
 `file` references are not polled; they rotate with a reload.
 
 Rotating `server.master_key` also changes the derived anonymous install ID,

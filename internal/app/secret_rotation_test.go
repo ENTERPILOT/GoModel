@@ -193,3 +193,59 @@ func TestSecretRotationListensOnlyOnceServing(t *testing.T) {
 	pending.rotation.start(t.Context())
 	assert.Nil(t, pending.rotation.cancel, "a closed watcher does not start")
 }
+
+// A resolver that ignores cancellation must not hold up shutdown, and the
+// check it strands must neither act nor swallow the notification: the next
+// serving generation has to see it.
+func TestSecretRotationCloseDoesNotWaitForAStuckResolver(t *testing.T) {
+	previous := secretRotationCloseTimeout
+	secretRotationCloseTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { secretRotationCloseTimeout = previous })
+
+	notifier := config.NewSecretNotifier()
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	secrets := config.NewSecrets()
+	secrets.SetNotifier(notifier)
+	var blocking atomic.Bool
+	require.NoError(t, secrets.Register("vault", config.SecretResolverFunc(func(context.Context, string) (string, error) {
+		if blocking.Load() {
+			close(entered)
+			<-release // ignores its context
+			return "d2", nil
+		}
+		return "d1", nil
+	})))
+	fields := map[string]string{"storage.postgresql.url": "${vault:dsn}"}
+	require.NoError(t, secrets.ResolveFields(t.Context(), "", &fields))
+
+	reloads := make(chan string, 1)
+	rotation := &secretRotation{
+		secrets:  secrets,
+		planKeys: func(*config.SecretRecheck) keySwap { return nil },
+		reload:   func(reason string) { reloads <- reason },
+	}
+	rotation.start(t.Context())
+	blocking.Store(true)
+	secrets.NotifyChanged()
+	<-entered
+
+	closed := make(chan struct{})
+	go func() {
+		assert.NoError(t, rotation.Close())
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close waited for a resolver that ignores cancellation")
+	}
+
+	close(release)
+	select {
+	case <-notifier.C():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stranded check did not hand its notification on")
+	}
+	assert.Empty(t, reloads, "a check outliving its generation must not act")
+}

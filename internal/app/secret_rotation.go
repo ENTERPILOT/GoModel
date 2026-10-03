@@ -16,6 +16,11 @@ import (
 // so a backend that hangs cannot wedge later checks.
 var secretRecheckTimeout = 30 * time.Second
 
+// secretRotationCloseTimeout bounds how long Close waits for a check in
+// progress. A resolver that ignores its context must not hold up the rest of
+// the shutdown; a check that outlives Close takes no action (see check).
+var secretRotationCloseTimeout = 5 * time.Second
+
 // keySwap is a planned in-place swap of provider API keys.
 type keySwap interface {
 	Providers() []string
@@ -82,13 +87,21 @@ func (w *secretRotation) start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-w.secrets.Changes():
+				if ctx.Err() != nil {
+					// Both were ready and select took the notification:
+					// hand it back to whichever generation serves next.
+					w.secrets.NotifyChanged()
+					return
+				}
 				w.check(ctx)
 			}
 		}
 	}()
 }
 
-// Close stops the watcher and waits for a check in progress to finish.
+// Close stops the watcher and waits, up to secretRotationCloseTimeout, for a
+// check in progress to finish. A check still running after that is left
+// behind: it acts on nothing once it returns.
 func (w *secretRotation) Close() error {
 	if w == nil {
 		return nil
@@ -97,22 +110,34 @@ func (w *secretRotation) Close() error {
 	w.closed = true
 	cancel, done := w.cancel, w.done
 	w.mu.Unlock()
-	if cancel != nil {
-		cancel()
-		<-done
+	if cancel == nil {
+		return nil
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(secretRotationCloseTimeout):
+		slog.Warn("a secret resolver did not return after cancellation; leaving its check behind",
+			"waited", secretRotationCloseTimeout)
 	}
 	return nil
 }
 
-func (w *secretRotation) check(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, secretRecheckTimeout)
+// check re-resolves, then swaps keys or requests a reload. generation is the
+// serving generation's context: once it ends, a check that was still
+// resolving drops its result and hands the notification on, so the next
+// generation re-checks with its own resolvers.
+func (w *secretRotation) check(generation context.Context) {
+	ctx, cancel := context.WithTimeout(generation, secretRecheckTimeout)
 	defer cancel()
 
 	recheck, err := w.secrets.Recheck(ctx)
+	if generation.Err() != nil {
+		w.secrets.NotifyChanged()
+		return
+	}
 	if err != nil {
-		if ctx.Err() == nil {
-			slog.Warn("secret references could not be re-resolved; keeping the current values", "error", err)
-		}
+		slog.Warn("secret references could not be re-resolved; keeping the current values", "error", err)
 		return
 	}
 	fields := recheck.Fields()
