@@ -399,17 +399,6 @@ model_list:
 			wantEnv:    []string{"OPENAI_1_API_KEY=sk-inline"},
 			wantServer: &serverOut{MasterKey: "${OPENAI_API_KEY}"},
 		},
-		{
-			name: "master key follows a renamed variable",
-			litellm: `
-environment_variables:
-  GOMODEL_MASTER_KEY: something-else
-general_settings:
-  master_key: sk-1234
-`,
-			wantEnv:    []string{"GOMODEL_MASTER_KEY=something-else", "GOMODEL_MASTER_KEY_2=sk-1234"},
-			wantServer: &serverOut{MasterKey: "${GOMODEL_MASTER_KEY_2}"},
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

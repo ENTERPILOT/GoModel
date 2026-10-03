@@ -75,6 +75,78 @@ func TestConvert_MasterKey(t *testing.T) {
 	}
 }
 
+// GOMODEL_MASTER_KEY overrides server.master_key, so the LiteLLM master key
+// must be the only value under that name.
+func TestConvert_MasterKeyOwnsGoModelVariable(t *testing.T) {
+	tests := []struct {
+		name        string
+		litellm     string
+		wantEnv     string
+		wantServer  *serverOut
+		wantWarning string
+	}{
+		{
+			name: "inline key replaces environment_variables",
+			litellm: `
+environment_variables:
+  GOMODEL_MASTER_KEY: something-else
+general_settings:
+  master_key: sk-1234
+`,
+			wantEnv:     "GOMODEL_MASTER_KEY=sk-1234\n",
+			wantWarning: "environment_variables.GOMODEL_MASTER_KEY: removed from .env: GoModel uses GOMODEL_MASTER_KEY as its master key, so it would replace general_settings.master_key",
+		},
+		{
+			name: "referenced key drops environment_variables",
+			litellm: `
+environment_variables:
+  GOMODEL_MASTER_KEY: something-else
+  OTHER: kept
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+`,
+			wantEnv:     "OTHER=kept\n",
+			wantServer:  &serverOut{MasterKey: "${LITELLM_MASTER_KEY}"},
+			wantWarning: "environment_variables.GOMODEL_MASTER_KEY: removed from .env: GoModel uses GOMODEL_MASTER_KEY as its master key, so it would replace general_settings.master_key",
+		},
+		{
+			name: "same value is kept",
+			litellm: `
+environment_variables:
+  GOMODEL_MASTER_KEY: sk-1234
+general_settings:
+  master_key: sk-1234
+`,
+			wantEnv: "GOMODEL_MASTER_KEY=sk-1234\n",
+		},
+		{
+			name: "key read from GOMODEL_MASTER_KEY",
+			litellm: `
+general_settings:
+  master_key: os.environ/GOMODEL_MASTER_KEY
+`,
+			wantServer: &serverOut{MasterKey: "${GOMODEL_MASTER_KEY}"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, result := convertYAML(t, tt.litellm)
+			assert.Equal(t, tt.wantServer, cfg.Server)
+			assert.NotContains(t, string(result.Env), "something-else")
+			assert.NotContains(t, string(result.Env), "GOMODEL_MASTER_KEY_2")
+			if tt.wantEnv != "" {
+				assert.Contains(t, string(result.Env), tt.wantEnv)
+			}
+			warnings := findings(result, SeverityWarning)
+			if tt.wantWarning != "" {
+				assert.Contains(t, warnings, tt.wantWarning)
+			} else {
+				assert.Empty(t, warnings)
+			}
+		})
+	}
+}
+
 func TestConvert_ReportsEverythingLeftBehind(t *testing.T) {
 	_, result := convertYAML(t, `
 router_settings:

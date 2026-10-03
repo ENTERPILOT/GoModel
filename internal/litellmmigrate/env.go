@@ -57,6 +57,12 @@ func (e *envFile) set(name, value string) string {
 	}
 }
 
+// unset removes name and its value, if written.
+func (e *envFile) unset(name string) {
+	delete(e.values, name)
+	e.names = slices.DeleteFunc(e.names, func(n string) bool { return n == name })
+}
+
 func (e *envFile) require(name string) {
 	if !slices.Contains(e.required, name) {
 		e.required = append(e.required, name)

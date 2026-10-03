@@ -259,15 +259,7 @@ func (c *converter) convertCallbacks() {
 func (c *converter) convertGeneralSettings() {
 	if raw, ok := c.general.get("master_key"); ok {
 		if key, _ := raw.(string); key != "" {
-			if name, isRef := envRef(key); isRef {
-				c.env.require(name)
-				c.out.Server = &serverOut{MasterKey: "${" + name + "}"}
-			} else if name := c.env.set("GOMODEL_MASTER_KEY", key); name != "GOMODEL_MASTER_KEY" {
-				// GOMODEL_MASTER_KEY is taken by another value; point the
-				// config at the name the key was written under instead.
-				c.out.Server = &serverOut{MasterKey: "${" + name + "}"}
-			}
-			c.report.info("general_settings.master_key", "kept: admin scripts using the LiteLLM master key keep working against GoModel")
+			c.convertMasterKey(key)
 		}
 	}
 	if _, ok := c.general.get("database_url"); ok {
@@ -276,6 +268,33 @@ func (c *converter) convertGeneralSettings() {
 	if _, ok := c.general.get("store_model_in_db"); ok {
 		c.report.warn("general_settings.store_model_in_db", "models added through the LiteLLM UI live in its database, not in config.yaml; recreate them in GoModel")
 	}
+}
+
+// convertMasterKey keeps LiteLLM's master key. GOMODEL_MASTER_KEY overrides
+// server.master_key in GoModel, so the key must own that name: any other
+// value under it would replace the key clients authenticate with.
+func (c *converter) convertMasterKey(key string) {
+	const masterKeyEnv = "GOMODEL_MASTER_KEY"
+	name, isRef := envRef(key)
+	if isRef {
+		c.env.require(name)
+	}
+	if name != masterKeyEnv {
+		if previous, written := c.env.values[masterKeyEnv]; written && (isRef || previous != key) {
+			c.env.unset(masterKeyEnv)
+			c.report.warn("environment_variables.GOMODEL_MASTER_KEY", "removed from .env: GoModel uses GOMODEL_MASTER_KEY as its master key, so it would replace general_settings.master_key")
+		} else if c.env.reserved[masterKeyEnv] {
+			c.report.warn("general_settings.master_key", "the config also reads GOMODEL_MASTER_KEY, which GoModel uses as its master key in place of this one; unset it before starting GoModel")
+		}
+	}
+	if isRef {
+		c.out.Server = &serverOut{MasterKey: "${" + name + "}"}
+	} else if written := c.env.set(masterKeyEnv, key); written != masterKeyEnv {
+		// Only when the environment provides GOMODEL_MASTER_KEY (warned
+		// above): keep the key in .env under the name it was written as.
+		c.out.Server = &serverOut{MasterKey: "${" + written + "}"}
+	}
+	c.report.info("general_settings.master_key", "kept: admin scripts using the LiteLLM master key keep working against GoModel")
 }
 
 // reportKnownUnsupported explains LiteLLM settings that are deliberately
