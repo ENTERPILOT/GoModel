@@ -1727,6 +1727,53 @@ server:
 	})
 }
 
+func TestLoadRejectsMasterKeyFromUnsetVariable(t *testing.T) {
+	const unset = "server.master_key reads an environment variable that is not set"
+	tests := []struct {
+		name      string
+		field     string
+		masterKey string
+		env       map[string]string
+		wantKey   string
+		wantErr   string
+	}{
+		{name: "unset variable", masterKey: "${LITELLM_MASTER_KEY}", wantErr: unset},
+		{name: "unset non-identifier name", masterKey: "${LITELLM-MASTER-KEY}", wantErr: unset},
+		{name: "unset bare reference", masterKey: "$LITELLM_MASTER_KEY", wantErr: unset},
+		{name: "unset inside a value", masterKey: "sk-${LITELLM_MASTER_KEY}", wantErr: unset},
+		{name: "set variable", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"LITELLM_MASTER_KEY": "sk-1234"}, wantKey: "sk-1234"},
+		{name: "empty default", masterKey: "${LITELLM_MASTER_KEY:-}", wantKey: ""},
+		{name: "environment override", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"GOMODEL_MASTER_KEY": "sk-env"}, wantKey: "sk-env"},
+		{name: "environment override holding ${", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"GOMODEL_MASTER_KEY": "pa${ss}"}, wantKey: "pa${ss}"},
+		{name: "set variable holding ${", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"LITELLM_MASTER_KEY": "pa${ss}"}, wantKey: "pa${ss}"},
+		{name: "field name from a variable", field: "master_${SUFFIX}", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"SUFFIX": "key"}, wantErr: unset},
+		{name: "disabled master key", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"MASTER_KEY_DISABLED": "true"}, wantKey: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			t.Setenv("LITELLM_MASTER_KEY", "")
+			for name, value := range tt.env {
+				t.Setenv(name, value)
+			}
+			withTempDir(t, func(dir string) {
+				field := tt.field
+				if field == "" {
+					field = "master_key"
+				}
+				writeConfigYAML(t, dir, "server:\n  "+field+": \""+tt.masterKey+"\"\n")
+				result, err := Load()
+				if tt.wantErr != "" {
+					require.ErrorContains(t, err, tt.wantErr)
+					return
+				}
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantKey, result.Config.Server.MasterKey)
+			})
+		})
+	}
+}
+
 func TestLoadMasterKeyDisabledForgetsTheConfiguredKey(t *testing.T) {
 	tests := []struct {
 		name     string

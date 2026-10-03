@@ -164,6 +164,10 @@ func Run(ctx context.Context, opts Options) error {
 		return runPluginCommand(ctx, opts.ProductName, cliOpts.PluginArgs, opts.Stdout, opts.Stderr)
 	}
 
+	if cliOpts.MigrateArgs != nil {
+		return runMigrateCommand(opts.ProductName, cliOpts.MigrateArgs, opts.Stdout, opts.Stderr)
+	}
+
 	if cliOpts.Version {
 		fmt.Fprintln(opts.Stdout, versionLine(opts.ProductName))
 		return nil
