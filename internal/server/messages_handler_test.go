@@ -366,3 +366,121 @@ func TestCountMessageTokens_ProviderBacked(t *testing.T) {
 	failing := &tokenCountingMockProvider{mockProvider: &mockProvider{supportedModels: []string{"claude-test"}}, countErr: errors.New("upstream down")}
 	assert.Equal(t, heuristic, call(t, failing))
 }
+
+type chatTokenCountingMockProvider struct {
+	*mockProvider
+	messagesErr   error // answer of the native Messages counter
+	messagesCalls int
+	chatCount     int
+	chatErr       error
+	chatCalls     int
+	last          *core.ChatRequest
+	lastDialect   core.RequestDialect
+}
+
+func (m *chatTokenCountingMockProvider) CountMessagesTokens(context.Context, string, []byte) (int, error) {
+	m.messagesCalls++
+	return 0, m.messagesErr
+}
+
+func (m *chatTokenCountingMockProvider) CountChatTokens(ctx context.Context, req *core.ChatRequest) (int, error) {
+	m.chatCalls++
+	m.last, m.lastDialect = req, core.RequestDialectFromContext(ctx)
+	if m.chatErr != nil {
+		return 0, m.chatErr
+	}
+	return m.chatCount, nil
+}
+
+// A provider without a native Messages counter counts the request's chat
+// translation (OpenAI); an upstream failure on either path falls back to the
+// estimate.
+func TestCountMessageTokens_ChatCounter(t *testing.T) {
+	body := `{"model":"gpt-test","messages":[{"role":"user","content":"count these tokens please"}]}`
+	call := func(t *testing.T, provider core.RoutableProvider) float64 {
+		t.Helper()
+		handler := NewHandler(provider, nil, nil, nil)
+		c, rec := echotest.Post(t, "/v1/messages/count_tokens", body)
+		require.NoError(t, handler.CountMessageTokens(c))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		return echotest.Decode[map[string]any](t, rec)["input_tokens"].(float64)
+	}
+	base := func() *mockProvider { return &mockProvider{supportedModels: []string{"gpt-test"}} }
+	estimate := call(t, base())
+
+	counted := &chatTokenCountingMockProvider{mockProvider: base(), messagesErr: core.ErrMessagesTokenCountUnsupported, chatCount: 777}
+	assert.Equal(t, float64(777), call(t, counted))
+	require.NotNil(t, counted.last)
+	assert.Contains(t, counted.last.Model, "gpt-test")
+	assert.Equal(t, core.RequestDialectAnthropicMessages, counted.lastDialect)
+
+	chatFails := &chatTokenCountingMockProvider{mockProvider: base(), messagesErr: core.ErrMessagesTokenCountUnsupported, chatErr: errors.New("upstream down")}
+	assert.Equal(t, estimate, call(t, chatFails))
+
+	nativeFails := &chatTokenCountingMockProvider{mockProvider: base(), messagesErr: errors.New("upstream down"), chatCount: 777}
+	assert.Equal(t, estimate, call(t, nativeFails))
+	assert.Zero(t, nativeFails.chatCalls, "a failed native count does not fall through to the chat counter")
+}
+
+// Under a workflow with prompt guardrails the prompt is never sent to a
+// provider for counting (guardrails do not run for a count), so the estimate
+// answers. Response- and stream-only guardrails never see the prompt, so the
+// count stays exact.
+func TestCountMessageTokens_PromptGuardrailsKeepThePromptLocal(t *testing.T) {
+	body := `{"model":"gpt-test","messages":[{"role":"user","content":"my email is jane@example.com"}]}`
+	tests := []struct {
+		name       string
+		chains     map[string]string
+		wantRemote bool
+	}{
+		{name: "prompt guardrails", chains: map[string]string{"prompt": "redact-pii"}},
+		{name: "prompt and response guardrails", chains: map[string]string{"prompt": "redact-pii", "response": "tone"}},
+		{name: "response-only guardrails", chains: map[string]string{"response": "tone"}, wantRemote: true},
+		{name: "stream-only guardrails", chains: map[string]string{"stream": "tone"}, wantRemote: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := &chatTokenCountingMockProvider{
+				mockProvider: &mockProvider{supportedModels: []string{"gpt-test"}},
+				messagesErr:  core.ErrMessagesTokenCountUnsupported,
+				chatCount:    777,
+			}
+			handler := NewHandler(provider, nil, nil, nil)
+			c, rec := echotest.Post(t, "/v1/messages/count_tokens", body)
+			workflow := &core.Workflow{Policy: &core.ResolvedWorkflowPolicy{
+				VersionID: "v1", Features: core.DefaultWorkflowFeatures(), GuardrailsHash: "any", ChainHashes: tt.chains,
+			}}
+			c.SetRequest(c.Request().WithContext(core.WithWorkflow(c.Request().Context(), workflow)))
+
+			require.NoError(t, handler.CountMessageTokens(c))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			count := echotest.Decode[map[string]any](t, rec)["input_tokens"].(float64)
+			if tt.wantRemote {
+				assert.Equal(t, float64(777), count)
+				return
+			}
+			assert.NotEqual(t, float64(777), count)
+			assert.Zero(t, provider.messagesCalls, "the prompt must not reach the native Messages counter")
+			assert.Zero(t, provider.chatCalls, "the prompt must not reach the chat counter")
+		})
+	}
+}
+
+// Counting sends the prompt to the model's provider, so a caller that may not
+// use the model is denied as an inference request would be, before either
+// counter runs, instead of getting an estimate.
+func TestCountMessageTokens_DeniedModel(t *testing.T) {
+	provider := &chatTokenCountingMockProvider{
+		mockProvider: &mockProvider{supportedModels: []string{"gpt-test"}},
+		messagesErr:  core.ErrMessagesTokenCountUnsupported,
+		chatCount:    777,
+	}
+	handler := NewHandler(provider, nil, nil, nil)
+	handler.modelAuthorizer = &recordingModelAuthorizer{err: core.NewPermissionError("model is not allowed for this key")}
+
+	c, rec := echotest.Post(t, "/v1/messages/count_tokens", `{"model":"gpt-test","messages":[{"role":"user","content":"hi"}]}`)
+	require.NoError(t, handler.CountMessageTokens(c))
+	assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+	assert.Zero(t, provider.messagesCalls)
+	assert.Zero(t, provider.chatCalls)
+}
