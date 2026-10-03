@@ -223,7 +223,11 @@ func (s *translatedInferenceService) CountMessageTokens(c *echo.Context) error {
 	if strings.TrimSpace(req.Model) == "" {
 		return handleError(c, core.NewInvalidRequestError("model is required", nil).WithParam("model"))
 	}
-	if count, ok := s.countMessageTokensUpstream(c.Request().Context(), req, body); ok {
+	count, ok, err := s.countMessageTokensUpstream(c.Request().Context(), req, body)
+	if err != nil {
+		return handleError(c, err)
+	}
+	if ok {
 		return c.JSON(http.StatusOK, anthropicapi.CountTokensResponse{InputTokens: count})
 	}
 	return c.JSON(http.StatusOK, anthropicapi.CountTokensResponse{
@@ -235,34 +239,42 @@ func (s *translatedInferenceService) CountMessageTokens(c *echo.Context) error {
 // natively when it counts Messages requests, otherwise from the request's
 // chat translation. ok is false when no provider can answer: guardrails apply
 // to the request, the model does not resolve, the provider has no counting
-// endpoint, or the call failed.
-func (s *translatedInferenceService) countMessageTokensUpstream(ctx context.Context, req *anthropicapi.MessagesRequest, body []byte) (int, bool) {
+// endpoint, or the call failed. err is a denial: the caller may not use the
+// model, as an inference request would be told.
+func (s *translatedInferenceService) countMessageTokensUpstream(ctx context.Context, req *anthropicapi.MessagesRequest, body []byte) (int, bool, error) {
+	selector, err := resolveServiceModel(ctx, s.provider, s.modelResolver, req.Model, "")
+	if err != nil {
+		return 0, false, nil
+	}
+	// The count sends the prompt to the model's provider, so the caller must
+	// be allowed to use the model, exactly as for inference.
+	if s.modelAuthorizer != nil {
+		if err := s.modelAuthorizer.ValidateModelAccess(ctx, selector); err != nil {
+			return 0, false, err
+		}
+	}
 	// Prompt guardrails run in the prompt phase of an inference request,
 	// which a count skips. Under a workflow with prompt guardrails the prompt
 	// must not reach a provider unchecked (it could carry content a rule would
 	// block or redact), so the count is estimated locally instead. Response-
 	// and stream-only rules never see the prompt and keep exact counts.
 	if core.GetWorkflow(ctx).PromptGuardrailsHash() != "" {
-		return 0, false
-	}
-	selector, err := resolveServiceModel(ctx, s.provider, s.modelResolver, req.Model, "")
-	if err != nil {
-		return 0, false
+		return 0, false, nil
 	}
 	model := selector.QualifiedModel()
 	if counter, ok := s.provider.(core.MessagesTokenCounter); ok {
 		count, err := counter.CountMessagesTokens(ctx, model, body)
 		if err == nil {
-			return count, true
+			return count, true, nil
 		}
 		if !errors.Is(err, core.ErrMessagesTokenCountUnsupported) {
 			slog.Debug("count_tokens: provider count failed, falling back to the estimate", "model", model, "error", err)
-			return 0, false
+			return 0, false, nil
 		}
 	}
 	counter, ok := s.provider.(core.ChatTokenCounter)
 	if !ok {
-		return 0, false
+		return 0, false, nil
 	}
 	// A count request carries no max_tokens; the translation requires one,
 	// and it does not affect the input.
@@ -270,7 +282,7 @@ func (s *translatedInferenceService) countMessageTokensUpstream(ctx context.Cont
 	countable.MaxTokens = max(countable.MaxTokens, 1)
 	chatReq, err := anthropicapi.ToChatRequest(&countable)
 	if err != nil {
-		return 0, false
+		return 0, false, nil
 	}
 	chatReq.Model = model
 	count, err := counter.CountChatTokens(core.WithRequestDialect(ctx, core.RequestDialectAnthropicMessages), chatReq)
@@ -278,9 +290,9 @@ func (s *translatedInferenceService) countMessageTokensUpstream(ctx context.Cont
 		if !errors.Is(err, core.ErrMessagesTokenCountUnsupported) {
 			slog.Debug("count_tokens: provider count failed, falling back to the estimate", "model", model, "error", err)
 		}
-		return 0, false
+		return 0, false, nil
 	}
-	return count, true
+	return count, true, nil
 }
 
 func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core.ChatRequest, workflow *core.Workflow) error {

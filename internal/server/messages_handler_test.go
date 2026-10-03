@@ -465,3 +465,22 @@ func TestCountMessageTokens_PromptGuardrailsKeepThePromptLocal(t *testing.T) {
 		})
 	}
 }
+
+// Counting sends the prompt to the model's provider, so a caller that may not
+// use the model is denied as an inference request would be, before either
+// counter runs, instead of getting an estimate.
+func TestCountMessageTokens_DeniedModel(t *testing.T) {
+	provider := &chatTokenCountingMockProvider{
+		mockProvider: &mockProvider{supportedModels: []string{"gpt-test"}},
+		messagesErr:  core.ErrMessagesTokenCountUnsupported,
+		chatCount:    777,
+	}
+	handler := NewHandler(provider, nil, nil, nil)
+	handler.modelAuthorizer = &recordingModelAuthorizer{err: core.NewPermissionError("model is not allowed for this key")}
+
+	c, rec := echotest.Post(t, "/v1/messages/count_tokens", `{"model":"gpt-test","messages":[{"role":"user","content":"hi"}]}`)
+	require.NoError(t, handler.CountMessageTokens(c))
+	assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+	assert.Zero(t, provider.messagesCalls)
+	assert.Zero(t, provider.chatCalls)
+}
