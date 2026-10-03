@@ -206,6 +206,18 @@ output built with a different Go version. Loading needs a cgo build of
 GoModel (`make build-plugins` or the `gomodel:<version>-plugins` image).
 `gomodel --version` prints the Go and `pluginapi` versions plugins must match.
 
+## Encrypting stored secrets
+
+`gomodel secrets reencrypt` encrypts every dashboard-managed secret that is
+still in plaintext and moves values under older data keys to the active one.
+It needs `GOMODEL_ENCRYPTION_KEY`, prints counts only, and is idempotent.
+
+```bash
+gomodel secrets reencrypt [--rotate-data-key]
+```
+
+See [Encryption at Rest](/advanced/encryption-at-rest).
+
 ## Migrating from LiteLLM
 
 `gomodel migrate litellm` converts a LiteLLM proxy `config.yaml` into a GoModel

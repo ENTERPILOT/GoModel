@@ -9,6 +9,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
+	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
@@ -55,15 +56,17 @@ func (r *Result) Close() error {
 }
 
 // New creates a guardrails subsystem using an existing storage connection,
-// building instances from the plugin catalog.
-func New(ctx context.Context, shared storage.Storage, refreshInterval time.Duration, catalog *plugins.Catalog, deps plugins.HostDeps) (*Result, error) {
+// building instances from the plugin catalog. Secret config values are
+// sealed with box; a nil box stores them in plaintext.
+func New(ctx context.Context, shared storage.Storage, box *encryption.Box, refreshInterval time.Duration, catalog *plugins.Catalog, deps plugins.HostDeps) (*Result, error) {
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
-	store, err := createStore(ctx, shared)
+	rawStore, err := createStore(ctx, shared)
 	if err != nil {
 		return nil, err
 	}
+	store := sealStore(rawStore, box, catalogSecretKeys(catalog))
 	service, err := NewService(store, catalog, deps)
 	if err != nil {
 		return nil, err
@@ -83,6 +86,19 @@ func New(ctx context.Context, shared storage.Storage, refreshInterval time.Durat
 		RefreshErrors: refreshErrors,
 		stopRefresh:   stopRefresh,
 	}, nil
+}
+
+// Reencrypt seals every guardrail secret that is in plaintext or sealed with
+// a data key other than box's active one. The catalog identifies which config
+// values are secret; a plaintext secret of a plugin missing from it is left
+// as it is.
+func Reencrypt(ctx context.Context, shared storage.Storage, box *encryption.Box, catalog *plugins.Catalog) (encryption.Report, error) {
+	store, err := createStore(ctx, shared)
+	if err != nil {
+		return encryption.Report{Entity: "guardrail_definitions"}, err
+	}
+	defer func() { _ = store.Close() }()
+	return (&sealedStore{Store: store, box: box, secretKeys: catalogSecretKeys(catalog)}).reencrypt(ctx)
 }
 
 func createStore(ctx context.Context, store storage.Storage) (Store, error) {

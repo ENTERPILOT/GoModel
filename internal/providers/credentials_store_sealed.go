@@ -1,0 +1,102 @@
+package providers
+
+import (
+	"context"
+	"slices"
+
+	"github.com/enterpilot/gomodel/internal/encryption"
+)
+
+// credentialSecretKind names provider credentials in sealed values' AAD.
+const credentialSecretKind = "provider_credential"
+
+// sealedCredentialStore encrypts a credential's secret fields on the way into
+// the store and decrypts them on the way out, so the service and the admin
+// API (which masks them) only ever see plaintext.
+type sealedCredentialStore struct {
+	CredentialStore
+	box *encryption.Box
+}
+
+func sealCredentialStore(store CredentialStore, box *encryption.Box) CredentialStore {
+	if box == nil {
+		return store
+	}
+	return &sealedCredentialStore{CredentialStore: store, box: box}
+}
+
+// credentialSecretFields points at every secret field of cred. API keys share
+// one field name: they are interchangeable members of one rotation set.
+func credentialSecretFields(cred *ManagedProviderCredential) []encryption.Field {
+	fields := []encryption.Field{
+		{Name: "service_account_json", Value: &cred.ServiceAccountJSON},
+		{Name: "service_account_json_base64", Value: &cred.ServiceAccountJSONBase64},
+		{Name: "proxy_url", Value: &cred.ProxyURL},
+	}
+	for i := range cred.APIKeys {
+		fields = append(fields, encryption.Field{Name: "api_keys", Value: &cred.APIKeys[i]})
+	}
+	return fields
+}
+
+func (s *sealedCredentialStore) open(cred *ManagedProviderCredential) error {
+	return s.box.OpenFields(credentialSecretKind, normalizeCredentialName(cred.Name), credentialSecretFields(cred)...)
+}
+
+func (s *sealedCredentialStore) List(ctx context.Context) ([]ManagedProviderCredential, error) {
+	creds, err := s.CredentialStore.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range creds {
+		if err := s.open(&creds[i]); err != nil {
+			return nil, err
+		}
+	}
+	return creds, nil
+}
+
+func (s *sealedCredentialStore) Get(ctx context.Context, name string) (*ManagedProviderCredential, error) {
+	cred, err := s.CredentialStore.Get(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.open(cred); err != nil {
+		return nil, err
+	}
+	return cred, nil
+}
+
+func (s *sealedCredentialStore) Upsert(ctx context.Context, cred ManagedProviderCredential) error {
+	// The caller's slice must not end up holding ciphertext.
+	cred.APIKeys = slices.Clone(cred.APIKeys)
+	if err := s.box.SealFields(credentialSecretKind, normalizeCredentialName(cred.Name), credentialSecretFields(&cred)...); err != nil {
+		return err
+	}
+	return s.CredentialStore.Upsert(ctx, cred)
+}
+
+// reencrypt rewrites every row holding plaintext or a value sealed with an
+// older data key.
+func (s *sealedCredentialStore) reencrypt(ctx context.Context) (encryption.Report, error) {
+	report := encryption.Report{Entity: "provider_credentials"}
+	raw, err := s.CredentialStore.List(ctx)
+	if err != nil {
+		return report, err
+	}
+	report.Rows = len(raw)
+	for i := range raw {
+		cred := raw[i]
+		if !s.box.NeedsReseal(credentialSecretFields(&cred)...) {
+			continue
+		}
+		if err := s.open(&cred); err != nil {
+			return report, err
+		}
+		if err := s.Upsert(ctx, cred); err != nil {
+			return report, err
+		}
+		report.Reencrypted++
+	}
+	return report, nil
+}

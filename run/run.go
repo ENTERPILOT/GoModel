@@ -168,6 +168,18 @@ func Run(ctx context.Context, opts Options) error {
 		return runMigrateCommand(opts.ProductName, cliOpts.MigrateArgs, opts.Stdout, opts.Stderr)
 	}
 
+	var secretsOpts *secretsOptions
+	if cliOpts.SecretsArgs != nil {
+		secretsOpts, err = parseSecretsArgs(opts.ProductName, cliOpts.SecretsArgs, opts.Stdout, opts.Stderr)
+		if err != nil {
+			fmt.Fprintln(opts.Stderr, err)
+			return &usageError{err: err}
+		}
+		if secretsOpts == nil {
+			return nil // help
+		}
+	}
+
 	if cliOpts.Version {
 		fmt.Fprintln(opts.Stdout, versionLine(opts.ProductName))
 		return nil
@@ -209,6 +221,13 @@ func Run(ctx context.Context, opts Options) error {
 	if err := configureLogging(opts.Stderr); err != nil {
 		fmt.Fprintf(opts.Stderr, "failed to configure logging: %v\n", err)
 		return err
+	}
+	if secretsOpts != nil {
+		if err := runSecretsReencrypt(ctx, opts, *secretsOpts); err != nil {
+			fmt.Fprintln(opts.Stderr, err)
+			return err
+		}
+		return nil
 	}
 	if demoMode {
 		demoCtx, stopDemoWarnings := context.WithCancel(ctx)
@@ -328,8 +347,12 @@ func Run(ctx context.Context, opts Options) error {
 
 // configHooks sequences a distribution's configuration hooks across
 // generations: SetupConfig for the first, ReloadConfig for every later one.
+//
+// A key wrapper set by SetupConfig is carried into later generations, like
+// the extensions it registers, unless ReloadConfig sets another one.
 func configHooks(ctx context.Context, opts Options) func(*config.LoadResult) error {
 	first := true
+	var keyWrapper config.KeyWrapper
 	return func(result *config.LoadResult) error {
 		if first {
 			first = false
@@ -338,13 +361,16 @@ func configHooks(ctx context.Context, opts Options) func(*config.LoadResult) err
 					return fmt.Errorf("failed to set up configured extensions: %w", err)
 				}
 			}
+			keyWrapper = result.KeyWrapper()
 			return nil
 		}
+		result.SetKeyWrapper(keyWrapper)
 		if opts.ReloadConfig != nil {
 			if err := opts.ReloadConfig(ctx, result); err != nil {
 				return fmt.Errorf("configured extensions rejected the reloaded configuration: %w", err)
 			}
 		}
+		keyWrapper = result.KeyWrapper()
 		return nil
 	}
 }

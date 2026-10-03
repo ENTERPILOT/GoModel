@@ -21,6 +21,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/filestore"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
@@ -72,6 +73,7 @@ type App struct {
 	live                *live.Broker
 	server              *server.Server
 	storage             storage.Storage
+	secrets             *encryption.Box
 	runtimeSettings     *runtimesettings.Service
 	versionCheck        *versioncheck.Checker
 	extensionAuth       bool

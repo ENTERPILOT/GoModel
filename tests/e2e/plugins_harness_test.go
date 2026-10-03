@@ -90,7 +90,7 @@ func setupPluginServer(t *testing.T, loaded ...pluginload.Loaded) *pluginFixture
 	router, err := providers.NewRouter(registry)
 	require.NoError(t, err, "create router")
 
-	guardrailResult, err := guardrails.New(ctx, store, time.Hour, catalog, plugins.HostDeps{Chat: router})
+	guardrailResult, err := guardrails.New(ctx, store, nil, time.Hour, catalog, plugins.HostDeps{Chat: router})
 	require.NoError(t, err, "init guardrails")
 	t.Cleanup(func() { _ = guardrailResult.Close() })
 

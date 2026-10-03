@@ -43,6 +43,13 @@ func (b *bootstrap) initStorage() error {
 	app.storage = sharedStorage
 	app.register(subsystemStorage, ownedByShutdown, sharedStorage.Close)
 
+	// Dashboard-managed secrets are sealed with the database's data keys;
+	// every store that holds one is built after this point.
+	app.secrets, err = openSecretBox(b.ctx, sharedStorage, b.cfg.AppConfig)
+	if err != nil {
+		return fmt.Errorf("failed to load encryption keys: %w", err)
+	}
+
 	var registeredSettings []ext.RuntimeSetting
 	if b.cfg.Extensions != nil {
 		registeredSettings = b.cfg.Extensions.Settings()
