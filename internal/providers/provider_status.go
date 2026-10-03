@@ -84,6 +84,11 @@ type providerRuntimeState struct {
 	// modelListingUnsupported marks a provider without a /models endpoint
 	// whose inventory comes from its configured model list.
 	modelListingUnsupported bool
+	// catalogStandIn marks an inventory taken from the model catalog because
+	// the provider's listing failed with nothing else to go on. It was never
+	// confirmed by the provider, so it is not cached and is replaced as soon
+	// as a listing succeeds.
+	catalogStandIn bool
 }
 
 // SanitizeProviderConfigs converts effective provider configs into a stable,

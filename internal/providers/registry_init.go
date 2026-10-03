@@ -246,6 +246,7 @@ func (r *ModelRegistry) fetchAllProviderModels(
 			lastModelFetchAt:        fetchAt,
 			lastModelFetchError:     configuredUpstreamError,
 			modelListingUnsupported: configuredReason == configuredProviderModelsUpstreamUnlisted,
+			catalogStandIn:          configuredReason == catalogProviderModelsUpstreamError,
 		}
 		// Mark the inventory as authoritatively populated when this fetch is the
 		// last word on the provider's model list. That covers these cases:
@@ -538,6 +539,13 @@ func (r *ModelRegistry) applyProviderRuntimeUpdatesLocked(updates map[string]pro
 			// don't bump SuccessAt but still produce usable models.
 			current.lastModelFetchError = optionalFailureMessage(update.lastModelFetchError)
 			current.modelListingUnsupported = update.modelListingUnsupported
+			// A catalog stand-in lasts until a fetch produces a real inventory;
+			// a failed fetch carries the stand-in forward, still unconfirmed.
+			if update.catalogStandIn {
+				current.catalogStandIn = true
+			} else if update.lastModelFetchError == "" {
+				current.catalogStandIn = false
+			}
 		}
 		if !update.lastModelFetchSuccessAt.IsZero() {
 			current.lastModelFetchSuccessAt = update.lastModelFetchSuccessAt

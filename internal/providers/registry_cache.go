@@ -162,6 +162,12 @@ func (r *ModelRegistry) SaveToCache(ctx context.Context) error {
 		if r.providerRuntime[providerName].inventoryStale {
 			continue
 		}
+		// A catalog stand-in was never confirmed by the provider; caching it
+		// would restore it on a restart even if the provider's base URL
+		// changed in between.
+		if r.providerRuntime[providerName].catalogStandIn {
+			continue
+		}
 		modelsByProvider[providerName] = make(map[string]*ModelInfo, len(models))
 		maps.Copy(modelsByProvider[providerName], models)
 	}

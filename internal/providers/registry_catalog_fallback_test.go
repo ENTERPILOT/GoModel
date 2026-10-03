@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/cache/modelcache"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/modeldata"
 )
@@ -124,4 +125,41 @@ func TestRefreshProviderModels_CatalogNeverReplacesKnownInventory(t *testing.T) 
 	_, err = registry.RefreshProviderModels(context.Background(), "openai")
 	require.Error(t, err)
 	assert.Equal(t, []string{"gpt-live"}, modelIDs(registry), "a known inventory is kept, not replaced by the catalog")
+}
+
+// A catalog stand-in was never confirmed by the provider, so it is not cached,
+// not even after a failed recheck carries it forward; the provider's own list
+// is cached once a listing succeeds.
+func TestSaveToCache_SkipsCatalogStandIn(t *testing.T) {
+	cacheFile := t.TempDir() + "/models.json"
+	provider := &baseURLMockProvider{baseURL: "https://api.openai.com/v1"}
+	provider.err = errListingDown
+	registry := newCatalogRegistry(t, provider)
+	registry.SetCache(modelcache.NewLocalCache(cacheFile))
+
+	cachedModels := func() int {
+		t.Helper()
+		restored := NewModelRegistry()
+		restored.SetCache(modelcache.NewLocalCache(cacheFile))
+		restored.RegisterProviderWithNameAndType(&registryMockProvider{err: errListingDown}, "openai", "openai")
+		loaded, err := restored.LoadFromCache(context.Background())
+		require.NoError(t, err)
+		return loaded
+	}
+
+	require.NoError(t, registry.Initialize(context.Background()))
+	require.NoError(t, registry.SaveToCache(context.Background()))
+	assert.Zero(t, cachedModels(), "the stand-in must not be cached")
+
+	_, err := registry.RefreshProviderModels(context.Background(), "openai")
+	require.Error(t, err)
+	require.NoError(t, registry.SaveToCache(context.Background()))
+	assert.Zero(t, cachedModels(), "a failed recheck keeps the stand-in uncached")
+
+	provider.err = nil
+	provider.modelsResponse = &core.ModelsResponse{Object: "list", Data: []core.Model{{ID: "gpt-live", Object: "model"}}}
+	_, err = registry.RefreshProviderModels(context.Background(), "openai")
+	require.NoError(t, err)
+	require.NoError(t, registry.SaveToCache(context.Background()))
+	assert.Equal(t, 1, cachedModels(), "the live list is cached")
 }
