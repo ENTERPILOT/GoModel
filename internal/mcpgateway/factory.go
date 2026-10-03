@@ -80,6 +80,7 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 		UsageLogger:    usageLogger,
 		UserPathHeader: cfg.Server.UserPathHeader,
 		AllowedOrigins: cfg.MCP.AllowedOrigins,
+		ToolDiscovery:  cfg.MCP.ToolDiscovery,
 	})
 	if err != nil {
 		return nil, err

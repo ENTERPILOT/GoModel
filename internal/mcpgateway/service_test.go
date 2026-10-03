@@ -300,6 +300,36 @@ func TestAggregatedEndpointAcceptsUniqueBareToolName(t *testing.T) {
 	require.Equal(t, "alpha", entries[0].ProviderName)
 }
 
+func TestToolCallLabelResolvesSessionAliases(t *testing.T) {
+	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	betaURL := newTestUpstream(t, "beta", func(server *mcp.Server) {
+		addEchoTool("echo")(server)
+		addEchoTool("search")(server)
+	})
+	gammaURL := newTestUpstream(t, "gamma", addEchoTool("fetch"))
+	service, gatewayURL := newTestService(t, nil,
+		testSpec("alpha", alphaURL, nil),
+		testSpec("beta", betaURL, nil),
+		testSpec("gamma", gammaURL, nil),
+	)
+
+	aggregated := connectClient(t, gatewayURL+"/mcp", nil).ID()
+	assert.Equal(t, "beta_search", service.ToolCallLabel(aggregated, "search", ""))
+	assert.Equal(t, "gamma_fetch", service.ToolCallLabel(aggregated, "fetch", ""))
+	assert.Equal(t, "echo", service.ToolCallLabel(aggregated, "echo", ""), "ambiguous names stay as sent")
+	assert.Equal(t, "alpha_echo", service.ToolCallLabel(aggregated, "alpha_echo", ""))
+
+	discovery := connectClient(t, gatewayURL+"/mcp", map[string]string{ToolDiscoveryHeader: "search"}).ID()
+	assert.Equal(t, "gamma_fetch", service.ToolCallLabel(discovery, callToolName, "fetch"), "call_tool resolves to its bare target")
+	assert.Equal(t, "alpha_echo", service.ToolCallLabel(discovery, callToolName, "alpha_echo"))
+	assert.Equal(t, callToolName, service.ToolCallLabel(discovery, callToolName, ""))
+
+	pinned := connectClient(t, gatewayURL+"/mcp/beta", nil).ID()
+	assert.Equal(t, "search", service.ToolCallLabel(pinned, "search", ""), "pinned endpoints use original names")
+	assert.Equal(t, callToolName, service.ToolCallLabel(pinned, callToolName, "search"), "without discovery call_tool is an upstream tool name")
+	assert.Equal(t, "search", service.ToolCallLabel("unknown-session", "search", ""))
+}
+
 func TestAggregatedEndpointRejectsAmbiguousBareToolName(t *testing.T) {
 	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
 	betaURL := newTestUpstream(t, "beta", addEchoTool("echo"))
@@ -527,9 +557,9 @@ func TestAuthorizeSessionFailsClosedWithoutBinding(t *testing.T) {
 	err := service.authorizeSessionID("deleted-session", "alpha")
 	require.ErrorIs(t, err, ErrServerNotVisible)
 
-	service.bindSession("live", "", "/staff", "")
+	service.bindSession("live", "", "/staff", "", false, nil)
 	require.NoError(t, service.authorizeSessionID("live", "alpha"))
-	service.bindSession("contractor", "", "/contractors/acme", "")
+	service.bindSession("contractor", "", "/contractors/acme", "", false, nil)
 	require.ErrorIs(t, service.authorizeSessionID("contractor", "alpha"), ErrServerNotVisible)
 }
 

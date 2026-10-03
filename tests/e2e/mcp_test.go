@@ -41,7 +41,12 @@ func startMockMCPServer(t *testing.T, name string, tools ...string) *httptest.Se
 
 func newE2EMCPGateway(t *testing.T, specs map[string]mcpgateway.ServerSpec) *mcpgateway.Service {
 	t.Helper()
-	service, err := mcpgateway.NewService(context.Background(), mcpgateway.Options{ConfigServers: specs})
+	return newE2EMCPGatewayWithOptions(t, mcpgateway.Options{ConfigServers: specs})
+}
+
+func newE2EMCPGatewayWithOptions(t *testing.T, opts mcpgateway.Options) *mcpgateway.Service {
+	t.Helper()
+	service, err := mcpgateway.NewService(context.Background(), opts)
 	require.NoError(t, err)
 	t.Cleanup(service.Close)
 
@@ -70,7 +75,8 @@ func e2eMCPSpec(name, url string) mcpgateway.ServerSpec {
 // bearerTransport injects the gateway API key the way MCP clients configure
 // custom headers.
 type bearerTransport struct {
-	token string
+	token   string
+	headers map[string]string
 }
 
 func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -78,15 +84,23 @@ func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if t.token != "" {
 		clone.Header.Set("Authorization", "Bearer "+t.token)
 	}
+	for name, value := range t.headers {
+		clone.Header.Set(name, value)
+	}
 	return http.DefaultTransport.RoundTrip(clone)
 }
 
 func connectMCPClient(t *testing.T, endpoint, token string) *sdk.ClientSession {
 	t.Helper()
+	return connectMCPClientWithHeaders(t, endpoint, token, nil)
+}
+
+func connectMCPClientWithHeaders(t *testing.T, endpoint, token string, headers map[string]string) *sdk.ClientSession {
+	t.Helper()
 	client := sdk.NewClient(&sdk.Implementation{Name: "e2e-client", Version: "1"}, nil)
 	session, err := client.Connect(context.Background(), &sdk.StreamableClientTransport{
 		Endpoint:   endpoint,
-		HTTPClient: &http.Client{Transport: &bearerTransport{token: token}},
+		HTTPClient: &http.Client{Transport: &bearerTransport{token: token, headers: headers}},
 	}, nil)
 	require.NoError(t, err, "MCP client failed to connect through the gateway")
 	t.Cleanup(func() { _ = session.Close() })
@@ -207,4 +221,61 @@ func TestMCPGatewayDisabled(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+func e2eToolNames(t *testing.T, session *sdk.ClientSession) []string {
+	t.Helper()
+	tools, err := session.ListTools(context.Background(), nil)
+	require.NoError(t, err)
+	names := make([]string, 0, len(tools.Tools))
+	for _, tool := range tools.Tools {
+		names = append(names, tool.Name)
+	}
+	return names
+}
+
+// TestMCPGatewaySearchDiscovery drives search discovery through the fully
+// wired server: the configured default, the per-session header override, and
+// a search-then-call round trip to the upstream.
+func TestMCPGatewaySearchDiscovery(t *testing.T) {
+	alpha := startMockMCPServer(t, "alpha", "echo")
+	beta := startMockMCPServer(t, "beta", "search", "fetch")
+	gateway := newE2EMCPGatewayWithOptions(t, mcpgateway.Options{
+		ConfigServers: map[string]mcpgateway.ServerSpec{
+			"alpha": e2eMCPSpec("alpha", alpha.URL),
+			"beta":  e2eMCPSpec("beta", beta.URL),
+		},
+		ToolDiscovery: "search",
+	})
+
+	srv := setupE2EServer(t, e2eServerOptions{masterKey: "sk-e2e-master", mcpGateway: gateway})
+	ts := httptest.NewServer(srv)
+	t.Cleanup(ts.Close)
+
+	session := connectMCPClient(t, ts.URL+"/mcp", "sk-e2e-master")
+	assert.Equal(t, []string{"call_tool", "search_tools"}, e2eToolNames(t, session))
+
+	found, err := session.CallTool(context.Background(), &sdk.CallToolParams{
+		Name:      "search_tools",
+		Arguments: map[string]any{"query": "fetch"},
+	})
+	require.NoError(t, err)
+	require.False(t, found.IsError)
+	text, ok := found.Content[0].(*sdk.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, text.Text, `"name":"beta_fetch"`)
+
+	result, err := session.CallTool(context.Background(), &sdk.CallToolParams{
+		Name:      "call_tool",
+		Arguments: map[string]any{"name": "beta_fetch", "arguments": map[string]any{"url": "x"}},
+	})
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+	text, ok = result.Content[0].(*sdk.TextContent)
+	require.True(t, ok)
+	assert.Equal(t, `fetch:{"url":"x"}`, text.Text)
+
+	optOut := connectMCPClientWithHeaders(t, ts.URL+"/mcp", "sk-e2e-master",
+		map[string]string{mcpgateway.ToolDiscoveryHeader: "off"})
+	assert.Equal(t, []string{"alpha_echo", "beta_fetch", "beta_search"}, e2eToolNames(t, optOut))
 }

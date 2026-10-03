@@ -41,7 +41,10 @@ func (s *mcpService) handle(c *echo.Context, pinnedServer string) error {
 	// so they count against user-path rate limits and budget gates. GET (the
 	// notification stream) and DELETE (session teardown) stay free.
 	if c.Request().Method == http.MethodPost {
-		enrichMCPAuditEntry(c, s.logBodies)
+		sessionID := strings.TrimSpace(c.Request().Header.Get("Mcp-Session-Id"))
+		enrichMCPAuditEntry(c, s.logBodies, func(name, target string) string {
+			return s.gateway.ToolCallLabel(sessionID, name, target)
+		})
 		release, err := enforceRateLimit(c, s.rateLimiter, rateLimitRoute{})
 		if err != nil {
 			return handleError(c, err)
@@ -74,7 +77,7 @@ func (s *mcpService) handle(c *echo.Context, pinnedServer string) error {
 // the JSON-RPC frame as the request body when body logging is on. The body is
 // restored for the gateway handler; the body-limit middleware has already
 // bounded its size.
-func enrichMCPAuditEntry(c *echo.Context, logBodies bool) {
+func enrichMCPAuditEntry(c *echo.Context, logBodies bool, resolveTool func(name, target string) string) {
 	req := c.Request()
 	if req.Body == nil {
 		return
@@ -86,7 +89,7 @@ func enrichMCPAuditEntry(c *echo.Context, logBodies bool) {
 		return
 	}
 
-	if label := mcpAuditLabel(body); label != "" {
+	if label := mcpAuditLabel(body, resolveTool); label != "" {
 		auditlog.EnrichEntry(c, label, "mcp")
 	}
 	if logBodies {
@@ -95,16 +98,21 @@ func enrichMCPAuditEntry(c *echo.Context, logBodies bool) {
 }
 
 // mcpAuditLabel derives the request-log label from one JSON-RPC frame: the
-// tool/prompt name for calls, otherwise the method. Empty means unlabelable
-// (a bare response or malformed frame).
-func mcpAuditLabel(body []byte) string {
+// tool/prompt name for calls, otherwise the method. resolveTool (optional)
+// receives a tools/call name and its arguments.name and returns the tool the
+// session actually runs, matching usage entries. Empty means unlabelable (a
+// bare response or malformed frame).
+func mcpAuditLabel(body []byte, resolveTool func(name, target string) string) string {
 	method := strings.TrimSpace(gjson.GetBytes(body, "method").String())
 	if method == "" {
 		return ""
 	}
 	if name := strings.TrimSpace(gjson.GetBytes(body, "params.name").String()); name != "" &&
 		(method == "tools/call" || method == "prompts/get") {
-		return name
+		if method != "tools/call" || resolveTool == nil {
+			return name
+		}
+		return resolveTool(name, strings.TrimSpace(gjson.GetBytes(body, "params.arguments.name").String()))
 	}
 	return method
 }

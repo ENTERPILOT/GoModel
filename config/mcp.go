@@ -42,10 +42,22 @@ type MCPConfig struct {
 	// ("*") turns the check off and is logged as a warning at startup.
 	AllowedOrigins []string `yaml:"allowed_origins" env:"MCP_ALLOWED_ORIGINS"`
 
+	// ToolDiscovery selects how sessions see tools by default. "off" (the
+	// default) lists every visible tool. "search" lists only search_tools and
+	// call_tool, so large catalogs stop costing context on every model turn.
+	// Clients override it per session with the X-MCP-Tool-Discovery header.
+	ToolDiscovery string `yaml:"tool_discovery" env:"MCP_TOOL_DISCOVERY"`
+
 	// Servers maps stable server slugs to upstream definitions. Slugs become
 	// tool namespaces and URL segments, so they are restricted to [a-z0-9_-].
 	Servers map[string]MCPServerConfig `yaml:"servers"`
 }
+
+// MCP tool discovery modes accepted in MCPConfig.ToolDiscovery.
+const (
+	MCPToolDiscoveryOff    = "off"
+	MCPToolDiscoverySearch = "search"
+)
 
 // TrustAnyOrigin is the mcp.allowed_origins entry that trusts every browser
 // origin. It exists for deployments that enforce their own origin checks in
@@ -224,6 +236,14 @@ func expandMCPServerEnv(server *MCPServerConfig) {
 // invalid entries. It runs at load time so a bad declaration fails startup
 // loudly instead of silently dropping the server.
 func normalizeMCPConfig(cfg *MCPConfig) error {
+	switch mode := strings.ToLower(strings.TrimSpace(cfg.ToolDiscovery)); mode {
+	case "":
+		cfg.ToolDiscovery = MCPToolDiscoveryOff
+	case MCPToolDiscoveryOff, MCPToolDiscoverySearch:
+		cfg.ToolDiscovery = mode
+	default:
+		return fmt.Errorf("mcp.tool_discovery must be %q or %q, got %q", MCPToolDiscoveryOff, MCPToolDiscoverySearch, cfg.ToolDiscovery)
+	}
 	if len(cfg.AllowedOrigins) > 0 {
 		normalized := make([]string, 0, len(cfg.AllowedOrigins))
 		for _, raw := range cfg.AllowedOrigins {
