@@ -1,6 +1,6 @@
 ---
 title: "GoModel & Langfuse"
-description: "Send GoModel gateway traces to Langfuse over OTLP, capture full prompts with the Langfuse SDK pointed at GoModel, and stitch both into one trace."
+description: "Send GoModel gateway traces with token usage and optional prompts to Langfuse over OTLP, or use the Langfuse SDK pointed at GoModel, and stitch both into one trace."
 icon: "telescope"
 keywords: ["Langfuse", "LLM observability", "tracing", "OTLP", "OpenTelemetry", "prompt tracing", "langfuse.openai", "self-hosted", "setup guide"]
 ---
@@ -14,12 +14,13 @@ complementary ways:
 - **Gateway traces.** GoModel's [OpenTelemetry exporter](/guides/opentelemetry)
   sends a trace for every request to Langfuse's OTLP endpoint. Every client of
   the gateway is covered without touching application code, and each trace
-  shows the model, the provider that served it, latency, status, and every
-  retry or failover — but never prompts or completions.
+  shows the model, the provider that served it, latency, token usage and cost,
+  status, and every retry or failover. Prompts and completions are added only
+  when you turn on content capture.
 - **Application traces.** The Langfuse SDK's OpenAI drop-in wrapper, pointed
   at GoModel as its base URL. Langfuse records full prompts, completions, and
   token usage; GoModel supplies the routing, failover, caching, and its own
-  [audit log](/features/audit-logging) and cost tracking underneath.
+  [audit log](/advanced/configuration#audit-logging) and cost tracking underneath.
 
 Use either on its own, or both together — with W3C trace context propagation
 they merge into a single Langfuse trace per request (see
@@ -87,28 +88,50 @@ UI on port 3000.
 
 Each gateway request becomes one trace: a `POST /v1/chat/completions` span
 with a nested generation per provider call, named after the operation and
-model (`chat gpt-5-mini`). The generation's metadata carries
-`gen_ai.request.model`, `gen_ai.provider.name`, and `gomodel.provider.name`
-(the exact provider from your configuration), so a request that
-[failed over](/features/failover) shows one generation per attempt — which
-provider failed, with what error class, and which one answered. Langfuse
-matches the model name against its model catalog, so gateway generations
-group under the right model in its dashboards.
+model (`chat gpt-5-mini`). The generation carries the model the provider
+answered with, input and output token counts, and the finish reason, so
+Langfuse prices it from its model catalog and fills its cost and token
+dashboards. Its metadata also carries `gen_ai.provider.name` and
+`gomodel.provider.name` (the exact provider from your configuration), so a
+request that [failed over](/features/failover) shows one generation per
+attempt — which provider failed, with what error class, and which one
+answered, with the usage on the attempt that answered.
 
-Two things are absent by design. Prompts and completions never leave the
-gateway in telemetry — they stay in GoModel's [audit log](/features/audit-logging);
-Langfuse traces from the gateway carry timing and routing metadata only. And
-token usage is not attached either, so cost analytics in Langfuse stay empty
-on this path — GoModel's own [cost tracking](/features/cost-tracking) has
-per-request cost, or use the SDK path below to get both into Langfuse.
-Streaming requests keep their HTTP server span but get no separate generation
-span; [OpenTelemetry](/guides/opentelemetry#provider-call-spans-and-genai-metrics)
-explains why.
+Streamed chat completions, Responses API, and translated `/v1/messages`
+calls get a generation that lasts until the stream ends, with the same usage.
+`/v1/messages` requests that GoModel forwards natively to an Anthropic provider
+appear without usage.
 
-## 2. Capture prompts with the Langfuse SDK
+Langfuse computes cost from its own price list. GoModel's
+[cost tracking](/features/cost-tracking) applies your pricing overrides and
+cache rates, so the two totals can differ.
 
-For full prompt-level traces, instrument the application with Langfuse's
-OpenAI wrapper and point it at GoModel — two changed lines in an existing
+### Capture prompts and completions
+
+Prompts and completions stay out of telemetry unless you turn on content
+capture:
+
+```bash
+OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true
+```
+
+Each generation then shows the request messages as its input and the
+response as its output, including tool calls and tool results. Images and
+files appear as their type only, and very long text is truncated; see
+[Prompt and completion capture](/guides/opentelemetry#prompt-and-completion-capture).
+
+<Warning>
+  Content capture sends every sampled prompt and completion to Langfuse. Keep
+  it off when that data must not leave the gateway; the
+  [audit log](/advanced/configuration#audit-logging) records it in your own
+  storage instead.
+</Warning>
+
+## 2. Trace from the application with the Langfuse SDK
+
+To trace from the application instead — for example to group calls into your
+own spans or attach Langfuse prompt versions — instrument it with Langfuse's
+OpenAI wrapper and point it at GoModel. That takes two changed lines in an existing
 OpenAI-SDK app:
 
 ```python
@@ -164,6 +187,11 @@ The resulting single trace nests the application span, the SDK generation
 with the prompt, GoModel's server span, and the provider generation — what
 the user asked, what it cost, and how the gateway routed it, in one view.
 
+Both generations in that trace carry the call's token usage, so Langfuse adds
+its cost twice to the trace total. When you rely on trace-level cost, filter
+cost views to one of the two generations, or send the gateway's traces to a
+separate Langfuse project.
+
 <Note>
   Verified with Langfuse v4.27.0 (self-hosted via docker compose) and
   Langfuse Python SDK 4.15.1: gateway OTLP traces for buffered and streaming
@@ -176,8 +204,9 @@ the user asked, what it cost, and how the gateway routed it, in one view.
 | Symptom | Fix |
 | --- | --- |
 | No traces appear in Langfuse | Check the `Authorization` header is `Basic` + base64 of `pk-lf-...:sk-lf-...` (not the raw keys), and the endpoint ends in `/api/public/otel`. GoModel logs `opentelemetry enabled` at startup when the exporter is on. Exports are batched — allow a few seconds. |
-| Traces arrive, but a chat has no generation span | Streaming responses get only the HTTP server span from the gateway; see the [OpenTelemetry guide](/guides/opentelemetry). The SDK path records streaming generations fully. |
-| Gateway generations show no prompt, tokens, or cost | By design: GoModel never exports request content or usage in telemetry. Prompts and costs live in the [audit log](/features/audit-logging) and [cost tracking](/features/cost-tracking); for prompts in Langfuse, use the SDK path. |
+| Gateway generations show no prompt or completion | Content capture is off by default. Set `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true`. |
+| A streamed generation shows no tokens or cost | The provider sent no usage chunk. GoModel requests one only while usage tracking is on (`USAGE_ENABLED`, the default). |
+| Generations have tokens but no cost | Langfuse found no price for the model. Add the model under **Settings -> Models** in Langfuse. |
 | Connection errors with a gRPC endpoint | Langfuse's OTLP endpoint is HTTP-only. Keep `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` (the default). |
 | Every request shows up as two traces | Gateway and SDK both export without shared context. Propagate `traceparent` as above, or send each path to a different Langfuse project. |
 | `GET /api/public/traces` returns 404 on self-hosted Langfuse | Langfuse v4 serves reads from its v2 APIs (e.g. `/api/public/v2/observations`); the v1 trace endpoints are gone. Use the UI or the v2 APIs. |

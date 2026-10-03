@@ -24,6 +24,17 @@ type MessagesRequest struct {
 	ToolChoice    *ToolChoice     `json:"tool_choice,omitempty"`
 	Thinking      *Thinking       `json:"thinking,omitempty"`
 	CacheControl  json.RawMessage `json:"cache_control,omitempty" swaggertype:"object"`
+	// OutputConfig carries structured output (format) and the effort level.
+	OutputConfig *OutputConfig `json:"output_config,omitempty"`
+	// OutputFormat is the deprecated top-level form of output_config.format.
+	OutputFormat json.RawMessage `json:"output_format,omitempty" swaggertype:"object"`
+}
+
+// OutputConfig is the Anthropic output configuration: the effort level and a
+// structured output format ({"type":"json_schema","schema":{...}}).
+type OutputConfig struct {
+	Effort string          `json:"effort,omitempty"`
+	Format json.RawMessage `json:"format,omitempty" swaggertype:"object"`
 }
 
 // Metadata carries the optional Anthropic request metadata object.

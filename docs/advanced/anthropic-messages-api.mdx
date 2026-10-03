@@ -50,9 +50,9 @@ Anthropic unchanged.
 | Endpoint | Behavior |
 | --- | --- |
 | `POST /v1/messages` | Creates a message through translated model routing. Supports streaming (`stream: true`) with Anthropic-format SSE events. |
-| `POST /v1/messages/count_tokens` | Counts input tokens. Exact for models whose provider has a counting endpoint (Anthropic); a calibrated estimate otherwise. |
-| `GET /v1/models` | Returns the catalog in the Anthropic list shape (`type: "model"`, `display_name`, `created_at`) when the request carries the `anthropic-version` header the Anthropic SDKs always send; OpenAI shape otherwise. |
-| `GET /v1/models/{model}` | Retrieves one model, in the Anthropic model shape when the request carries `anthropic-version`; OpenAI shape otherwise. Failures (for example an unknown model) use the Anthropic error envelope (`{"type": "error", "error": {...}}`) on the same condition. |
+| `POST /v1/messages/count_tokens` | Counts input tokens. Exact for models whose provider has a counting endpoint (Anthropic, OpenAI); a calibrated estimate otherwise. |
+| `GET /v1/models` | Returns the catalog in the Anthropic list shape (`type: "model"`, `display_name`, `created_at`) when the request carries the `anthropic-version` header the Anthropic SDKs always send; OpenAI shape otherwise. The whole catalog comes back in one page unless the client pages with `limit`, `after_id`, or `before_id` (Anthropic paging, `has_more` set accordingly); a cursor that names no listed model is a `400`, so restart from the first page. |
+| `GET /v1/models/{model}` | Retrieves one model, in the Anthropic model shape when the request carries `anthropic-version`; OpenAI shape otherwise. A bare ID that works for inference (`gpt-6-luna`) retrieves the listed model it resolves to. Failures (for example an unknown model) use the Anthropic error envelope (`{"type": "error", "error": {...}}`) on the same condition. |
 | `POST /v1/messages/batches` | Creates a Message Batch. Inline `requests[].params` are translated per item, so a batch can target any provider with native batch support (Anthropic, OpenAI, …), not only Anthropic. |
 | `GET /v1/messages/batches` | Lists batches (`limit`, `after_id`). |
 | `GET /v1/messages/batches/{id}` | Retrieves a batch (`processing_status`, `request_counts`, `results_url` once ended). |
@@ -165,6 +165,9 @@ console.log(message.content[0].text);
 The response uses the Anthropic Messages shape (`type: "message"`, `content` blocks,
 `stop_reason`, `usage`). Errors use the Anthropic error envelope
 (`{"type": "error", "error": {...}}`). `max_tokens` is required, as in the Anthropic API.
+A provider's content filter is reported as `stop_reason: "refusal"`. If the
+provider fails partway through a stream, the stream ends with an `error` event
+carrying the provider's own message.
 
 `usage` follows Anthropic semantics for every provider: `input_tokens` excludes
 cached tokens, which are reported separately as `cache_read_input_tokens` and
@@ -227,24 +230,41 @@ features that have no canonical equivalent are not preserved end to end:
   are forwarded.
 - **Images and documents inside `tool_result` blocks** (screenshots, image and
   PDF files read by a tool — Claude Code returns them this way) are forwarded as
-  native `image` and `document` blocks when routed to Anthropic. Other providers
-  receive only the text portion of the tool result.
+  native `image` and `document` blocks when routed to Anthropic. OpenAI receives
+  them through its Responses API, where the model can see them (see
+  [OpenAI requests served through Responses](/providers/overview#provider-notes)).
+  Other providers receive only the text portion of the tool result.
 - **`document` blocks** (PDF, plain text, URL, or Files API `file_id` sources)
   translate to the OpenAI-style `file` content part (`file_data` for inline
   content, `file_url` for remote URLs, `file_id` for uploads). Anthropic gets the
   document back natively with its `title`; Gemini receives inline data only;
-  OpenAI-compatible providers receive the `file` part as-is. Citation settings and `context` are
-  dropped. The custom-content variant (`source.type: "content"`) degrades to text.
+  OpenAI-compatible providers receive the `file` part as-is. On OpenAI, an
+  untitled PDF gets a filename (`document.pdf`), and URL documents go through
+  the Responses API. A plain-text document on a request that stays on Chat
+  Completions is sent as text (headed by its `title`), because only PDF file
+  data is accepted there; on a request served through the Responses API, such
+  as one with a text document inside a `tool_result`, it stays a file.
+  Citation settings and `context` are dropped. The custom-content variant
+  (`source.type: "content"`) degrades to text.
 - **`search_result` blocks** degrade to text (title, source URL, and content);
   citation metadata is dropped.
 - **Other content blocks** (`container_upload`, `tool_reference`, …) are rejected
   with a clear `400` error rather than silently dropped.
 - **`stop_sequences`** are honored on every provider. Providers that report the
   matched sequence natively (Anthropic) get the full contract back:
-  `stop_reason: "stop_sequence"` plus the `stop_sequence` value. OpenAI-family
-  providers conflate stop-parameter hits with natural stops in `finish_reason`,
-  so completions there report `stop_reason: "end_turn"` (output is still truncated
-  correctly).
+  `stop_reason: "stop_sequence"` plus the `stop_sequence` value, and so do
+  OpenAI reasoning models (GPT-5 and later, o-series), where GoModel cuts the
+  output itself because OpenAI rejects `stop` for them. Other OpenAI-family
+  models conflate stop-parameter hits with natural stops in `finish_reason`,
+  so completions there report `stop_reason: "end_turn"` (output is still
+  truncated correctly).
+- **`output_config`**: `effort` sets the reasoning effort (taking precedence
+  over the one derived from `thinking`), and `format` (or the older top-level
+  `output_format`) becomes JSON-schema structured output — strict when the
+  schema meets OpenAI's strict-mode rules (`additionalProperties: false`,
+  every property required, and no `allOf`, `not`, or conditional keywords).
+  Other schemas are sent with `strict: false`: they guide the output but do
+  not guarantee it. A format other than `json_schema` is rejected with a `400`.
 - **`thinking`** on a non-Anthropic model becomes a reasoning effort (budget
   under 10000 tokens: `low`, under 20000: `medium`, otherwise `high`; adaptive:
   `medium`), sent as each provider's own field: `reasoning_effort` on OpenAI,
@@ -260,7 +280,15 @@ features that have no canonical equivalent are not preserved end to end:
   and only the members that endpoint accepts: `messages`, `system`, `tools`,
   `tool_choice`, `thinking`, `cache_control`, and `output_config`; `max_tokens`,
   `stream`, `metadata`, and the sampling controls are left out because Anthropic
-  rejects them there. For every other provider, and whenever
+  rejects them there. OpenAI models are counted by OpenAI's
+  `/v1/responses/input_tokens` endpoint for the request as GoModel will send
+  it. On GPT-5 and later the count matches the billed input (within a token):
+  for a request Chat Completions serves with tools, the fixed tools preamble it
+  bills is added. On older model families such a request can count a few tokens
+  below the billed input (6 on `gpt-4o-mini`). Guardrails do not run for a
+  count, so when the request's workflow has prompt guardrails the prompt is
+  never sent to a provider for counting and the estimate answers (response- and
+  stream-only guardrails keep exact counts). For every other provider, and whenever
   that call fails, the gateway answers with an estimate that weights text by
   how densely it tokenizes (prose, code and JSON, CJK, emoji), adds per-message
   and per-tool framing plus the tool-use system prompt, and prices images by

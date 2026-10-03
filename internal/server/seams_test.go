@@ -88,5 +88,5 @@ func (s *translatedInferenceService) handleStreamingResponse(
 		return handleStreamingDispatchError(c, err)
 	}
 	meta := gateway.ExecutionMeta{Model: model, ProviderType: provider, ProviderName: providerName}
-	return s.handleStreamingReadCloser(c, workflow, meta, stream, nil)
+	return s.handleStreamingReadCloser(c, workflow, meta, stream, nil, nil)
 }

@@ -47,6 +47,11 @@ func TestOpenTelemetryConfigEnvironment(t *testing.T) {
 				"OTEL_RESOURCE_ATTRIBUTES":   "deployment.environment=prod%20eu",
 			},
 		},
+		{
+			name: "content capture uses the GenAI switch",
+			cfg:  OpenTelemetryConfig{CaptureMessageContent: true},
+			want: map[string]string{"OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT": "true"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

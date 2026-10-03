@@ -9101,6 +9101,18 @@ const docTemplate = `{
                 "model": {
                     "type": "string"
                 },
+                "output_config": {
+                    "description": "OutputConfig carries structured output (format) and the effort level.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/anthropicapi.OutputConfig"
+                        }
+                    ]
+                },
+                "output_format": {
+                    "description": "OutputFormat is the deprecated top-level form of output_config.format.",
+                    "type": "object"
+                },
                 "stop_sequences": {
                     "type": "array",
                     "items": {
@@ -9183,6 +9195,17 @@ const docTemplate = `{
             "properties": {
                 "user_id": {
                     "type": "string"
+                }
+            }
+        },
+        "anthropicapi.OutputConfig": {
+            "type": "object",
+            "properties": {
+                "effort": {
+                    "type": "string"
+                },
+                "format": {
+                    "type": "object"
                 }
             }
         },
@@ -11229,11 +11252,15 @@ const docTemplate = `{
                 "input_audio": {
                     "$ref": "#/definitions/core.InputAudioContent"
                 },
+                "refusal": {
+                    "description": "Refusal is the model's explanation on a \"refusal\" content item.",
+                    "type": "string"
+                },
                 "text": {
                     "type": "string"
                 },
                 "type": {
-                    "description": "\"output_text\", \"input_image\", \"input_audio\", etc.",
+                    "description": "\"output_text\", \"refusal\", \"input_image\", \"input_audio\", etc.",
                     "type": "string"
                 }
             }

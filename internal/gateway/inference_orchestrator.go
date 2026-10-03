@@ -135,6 +135,17 @@ type StreamResult struct {
 
 	slowdownFactor   float64
 	inferenceStarted time.Time
+	generation       *generationStreamObserver
+}
+
+// GenerationObserver returns the stream observer that completes this
+// result's generation trace when the stream closes, or nil when the request
+// is not traced. Attach it with the other observers of the canonical stream.
+func (r *StreamResult) GenerationObserver() streaming.Observer {
+	if r == nil || r.generation == nil {
+		return nil
+	}
+	return r.generation
 }
 
 // WrapDeliveryStream applies this result's client-facing slowdown after any
