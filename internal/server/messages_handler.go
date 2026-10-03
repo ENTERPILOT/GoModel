@@ -233,9 +233,17 @@ func (s *translatedInferenceService) CountMessageTokens(c *echo.Context) error {
 
 // countMessageTokensUpstream asks the route's provider for an exact count:
 // natively when it counts Messages requests, otherwise from the request's
-// chat translation. ok is false when no provider can answer: the model does
-// not resolve, the provider has no counting endpoint, or the call failed.
+// chat translation. ok is false when no provider can answer: guardrails apply
+// to the request, the model does not resolve, the provider has no counting
+// endpoint, or the call failed.
 func (s *translatedInferenceService) countMessageTokensUpstream(ctx context.Context, req *anthropicapi.MessagesRequest, body []byte) (int, bool) {
+	// Guardrails run in the prompt phase of an inference request, which a
+	// count skips. Under a workflow with guardrails the prompt must not reach
+	// a provider unchecked (it could carry content a rule would block or
+	// redact), so the count is estimated locally instead.
+	if core.GetWorkflow(ctx).GuardrailsHash() != "" {
+		return 0, false
+	}
 	selector, err := resolveServiceModel(ctx, s.provider, s.modelResolver, req.Model, "")
 	if err != nil {
 		return 0, false

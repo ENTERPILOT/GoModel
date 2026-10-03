@@ -419,3 +419,27 @@ func TestCountMessageTokens_ChatCounter(t *testing.T) {
 	assert.Equal(t, estimate, call(t, nativeFails))
 	assert.Zero(t, nativeFails.chatCalls, "a failed native count does not fall through to the chat counter")
 }
+
+// Under a workflow with guardrails the prompt is never sent to a provider for
+// counting (guardrails do not run for a count), so the estimate answers.
+func TestCountMessageTokens_GuardrailsKeepThePromptLocal(t *testing.T) {
+	body := `{"model":"gpt-test","messages":[{"role":"user","content":"my card is 4111 1111 1111 1111"}]}`
+	provider := &chatTokenCountingMockProvider{
+		mockProvider: &mockProvider{supportedModels: []string{"gpt-test"}},
+		messagesErr:  core.ErrMessagesTokenCountUnsupported,
+		chatCount:    777,
+	}
+	handler := NewHandler(provider, nil, nil, nil)
+	c, rec := echotest.Post(t, "/v1/messages/count_tokens", body)
+	workflow := &core.Workflow{Policy: &core.ResolvedWorkflowPolicy{
+		VersionID: "v1", Features: core.DefaultWorkflowFeatures(), GuardrailsHash: "redact-pii",
+	}}
+	c.SetRequest(c.Request().WithContext(core.WithWorkflow(c.Request().Context(), workflow)))
+
+	require.NoError(t, handler.CountMessageTokens(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	count := echotest.Decode[map[string]any](t, rec)["input_tokens"].(float64)
+	assert.NotEqual(t, float64(777), count)
+	assert.Greater(t, count, float64(0))
+	assert.Zero(t, provider.chatCalls, "the prompt must not reach the provider")
+}
