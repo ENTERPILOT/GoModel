@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -106,6 +108,9 @@ type stopSequenceStream struct {
 	stops    []string
 	holdBack int
 	choices  map[float64]*stopChoiceState
+	// envelope holds the id, object, created and model of the latest chunk,
+	// for the chunks that flush held-back text.
+	envelope map[string]any
 	err      error
 }
 
@@ -145,6 +150,9 @@ func (s *stopSequenceStream) Read(p []byte) (int, error) {
 			s.handleLine(line)
 		}
 		if err != nil {
+			// The stream ended or broke: whatever text was held back to watch
+			// for a stop sequence is delivered before the end or the error.
+			s.flushPending()
 			s.err = err
 		}
 	}
@@ -159,11 +167,16 @@ func (s *stopSequenceStream) Close() error {
 // handleLine rewrites one SSE line; anything but a chunk passes through.
 func (s *stopSequenceStream) handleLine(line []byte) {
 	payload, ok := bytes.CutPrefix(bytes.TrimSpace(line), []byte("data:"))
+	payload = bytes.TrimSpace(payload)
+	if ok && bytes.Equal(payload, []byte("[DONE]")) {
+		s.flushPending()
+	}
 	var chunk map[string]any
-	if !ok || json.Unmarshal(bytes.TrimSpace(payload), &chunk) != nil {
+	if !ok || json.Unmarshal(payload, &chunk) != nil {
 		s.buffer.AppendBytes(line)
 		return
 	}
+	s.envelope = map[string]any{"id": chunk["id"], "object": chunk["object"], "created": chunk["created"], "model": chunk["model"]}
 	choices, _ := chunk["choices"].([]any)
 	for _, raw := range choices {
 		if choice, ok := raw.(map[string]any); ok {
@@ -176,6 +189,26 @@ func (s *stopSequenceStream) handleLine(line []byte) {
 		return
 	}
 	s.buffer.AppendString("data: " + string(rewritten) + "\n\n")
+}
+
+// flushPending delivers the text each choice still holds back, as one chunk
+// per choice, when the stream ends without a finish that would flush it.
+func (s *stopSequenceStream) flushPending() {
+	for _, index := range slices.Sorted(maps.Keys(s.choices)) {
+		state := s.choices[index]
+		if state.pending == "" {
+			continue
+		}
+		chunk := maps.Clone(s.envelope)
+		if chunk == nil {
+			chunk = map[string]any{}
+		}
+		chunk["choices"] = []any{map[string]any{"index": index, "delta": map[string]any{"content": state.pending}, "finish_reason": nil}}
+		state.pending = ""
+		if raw, err := json.Marshal(chunk); err == nil {
+			s.buffer.AppendString("data: " + string(raw) + "\n\n")
+		}
+	}
 }
 
 // rewriteChoice applies the stop sequences to one streamed choice.

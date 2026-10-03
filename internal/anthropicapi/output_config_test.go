@@ -79,6 +79,11 @@ func TestStrictCompatible(t *testing.T) {
 		{name: "scalar", schema: `{"type":"string"}`, want: true},
 		{name: "strict anyOf", schema: `{"anyOf":[{"type":"string"},` + outputSchema + `]}`, want: true},
 		{name: "loose anyOf branch", schema: `{"anyOf":[{"type":"string"},{"type":"object","properties":{"x":{"type":"string"}}}]}`},
+		{name: "nullable object without additionalProperties", schema: `{"type":["object","null"],"properties":{"a":{"type":"string"}},"required":["a"]}`},
+		{name: "strict nullable object", schema: `{"type":["object","null"],"properties":{"a":{"type":"string"}},"required":["a"],"additionalProperties":false}`, want: true},
+		{name: "allOf", schema: `{"allOf":[` + outputSchema + `]}`},
+		{name: "conditional", schema: `{"type":"object","properties":{},"additionalProperties":false,"if":{"type":"object"},"then":{"type":"object"}}`},
+		{name: "patternProperties", schema: `{"type":"object","properties":{},"additionalProperties":false,"patternProperties":{"^x":{"type":"string"}}}`},
 		{name: "malformed required entries", schema: `{"type":"object","properties":{"a":{"type":"string"}},"required":[{},["a"],1],"additionalProperties":false}`},
 	}
 	for _, tt := range tests {
@@ -92,9 +97,13 @@ func TestStrictCompatible(t *testing.T) {
 
 // A schema strict mode would reject is sent non-strict instead of failing.
 func TestToChatRequestOutputConfigLooseSchema(t *testing.T) {
-	loose := `{"type":"object","properties":{"name":{"type":"string"},"age":{"type":"integer"}},"required":["name"]}`
-	chat, err := ToChatRequest(mustDecode(t, `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hi"}],"output_config":{"format":{"type":"json_schema","schema":`+loose+`}}}`))
-	require.NoError(t, err)
-	assert.JSONEq(t, `{"type":"json_schema","json_schema":{"name":"output","strict":false,"schema":`+loose+`}}`,
-		string(chat.ExtraFields.Lookup("response_format")))
+	for _, loose := range []string{
+		`{"type":"object","properties":{"name":{"type":"string"},"age":{"type":"integer"}},"required":["name"]}`,
+		`{"type":["object","null"],"properties":{"name":{"type":"string"}},"required":["name"]}`,
+	} {
+		chat, err := ToChatRequest(mustDecode(t, `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hi"}],"output_config":{"format":{"type":"json_schema","schema":`+loose+`}}}`))
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"type":"json_schema","json_schema":{"name":"output","strict":false,"schema":`+loose+`}}`,
+			string(chat.ExtraFields.Lookup("response_format")), loose)
+	}
 }

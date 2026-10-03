@@ -94,9 +94,15 @@ func runStopStream(t *testing.T, stops []string, upstream string) streamResult {
 	defer func() { _ = stream.Close() }()
 	body, err := io.ReadAll(stream)
 	require.NoError(t, err)
+	return runStopStreamBody(t, string(body))
+}
 
+// runStopStreamBody collects the text, stop sequence, finish reason, usage and
+// [DONE] marker from a rewritten chat SSE body.
+func runStopStreamBody(t *testing.T, body string) streamResult {
+	t.Helper()
 	var got streamResult
-	for line := range strings.SplitSeq(string(body), "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		data, ok := strings.CutPrefix(line, "data: ")
 		if !ok {
 			continue
@@ -219,8 +225,8 @@ func TestStopSequenceStream_KeepsUpstreamError(t *testing.T) {
 	stream := newStopSequenceStream(io.NopCloser(upstream), []string{"END"})
 	body, err := io.ReadAll(stream)
 	require.ErrorIs(t, err, broken)
-	// "al" stays held back: it could still begin "END" when the stream broke.
-	assert.Contains(t, string(body), `"parti"`)
+	got := runStopStreamBody(t, string(body))
+	assert.Equal(t, "partial", got.text, "held-back text is delivered before the error")
 }
 
 // Text without a stop sequence, and content that is not text, are left as is.
@@ -235,4 +241,16 @@ func TestApplyStopSequences_LeavesOtherChoices(t *testing.T) {
 	assert.Equal(t, "length", resp.Choices[0].FinishReason)
 	assert.Equal(t, parts, resp.Choices[1].Message.Content)
 	assert.Empty(t, resp.Choices[1].StopSequence)
+}
+
+// Held-back text reaches the client even when the stream ends with [DONE] or
+// EOF and no finish chunk flushed it.
+func TestStopSequenceStream_FlushesAtEnd(t *testing.T) {
+	for name, tail := range map[string]string{"done": "data: [DONE]\n\n", "eof": ""} {
+		t.Run(name, func(t *testing.T) {
+			got := runStopStream(t, []string{"END"}, chunkLine(0, map[string]any{"content": "almost E"}, nil)+tail)
+			assert.Equal(t, "almost E", got.text)
+			assert.Equal(t, name == "done", got.sawDone)
+		})
+	}
 }

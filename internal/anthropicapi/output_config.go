@@ -72,9 +72,15 @@ func responseFormatFromOutputFormat(raw json.RawMessage) (json.RawMessage, error
 	})
 }
 
+// strictUnsupportedKeywords are JSON Schema keywords OpenAI's strict mode
+// rejects or supports only for some models; a schema using any of them is
+// sent non-strict.
+var strictUnsupportedKeywords = []string{"allOf", "not", "if", "then", "else", "prefixItems", "patternProperties"}
+
 // strictCompatible reports whether a JSON schema meets OpenAI's strict-mode
 // rules: every object sets additionalProperties to false and lists all of its
-// properties as required, throughout nested schemas.
+// properties as required, throughout nested schemas, and no keyword strict
+// mode rejects is used.
 func strictCompatible(schema any) bool {
 	switch node := schema.(type) {
 	case []any:
@@ -85,8 +91,13 @@ func strictCompatible(schema any) bool {
 		}
 		return true
 	case map[string]any:
+		for _, keyword := range strictUnsupportedKeywords {
+			if _, ok := node[keyword]; ok {
+				return false
+			}
+		}
 		properties, hasProperties := node["properties"].(map[string]any)
-		if node["type"] == "object" || hasProperties {
+		if objectType(node["type"]) || hasProperties {
 			if additional, ok := node["additionalProperties"].(bool); !ok || additional {
 				return false
 			}
@@ -105,7 +116,7 @@ func strictCompatible(schema any) bool {
 				}
 			}
 		}
-		for _, key := range []string{"items", "anyOf", "oneOf", "allOf", "$defs", "definitions"} {
+		for _, key := range []string{"items", "anyOf", "oneOf", "$defs", "definitions"} {
 			child, ok := node[key]
 			if !ok {
 				continue
@@ -126,4 +137,20 @@ func strictCompatible(schema any) bool {
 	default:
 		return true
 	}
+}
+
+// objectType reports whether a schema type is "object" or a type list (such
+// as a nullable object) that includes it.
+func objectType(schemaType any) bool {
+	switch t := schemaType.(type) {
+	case string:
+		return t == "object"
+	case []any:
+		for _, member := range t {
+			if member == "object" {
+				return true
+			}
+		}
+	}
+	return false
 }
