@@ -58,3 +58,41 @@ func TestCountChatTokens_UntranslatableIsUnsupported(t *testing.T) {
 	require.ErrorIs(t, err, core.ErrMessagesTokenCountUnsupported)
 	assert.Zero(t, capture.Count())
 }
+
+// The count follows the path that will serve the request: a Chat Completions
+// tool request on GPT-5+ adds the Chat tools preamble, a Responses-served one
+// does not, and a Chat-served text file is counted as the text Chat receives.
+func TestCountChatTokens_CountsTheServingPath(t *testing.T) {
+	textFile := []core.ContentPart{{Type: "file", File: &core.FileContent{FileData: "data:text/plain;base64,aGVsbG8=", Filename: "a.txt"}}}
+	tests := []struct {
+		name      string
+		req       core.ChatRequest
+		want      int
+		wantInput any // the counted input, when checked
+	}{
+		{name: "chat-served tools on gpt-6", want: 50 + chatToolPreambleTokens,
+			req: core.ChatRequest{Model: "gpt-6-luna", Tools: weatherTool}},
+		{name: "responses-served tools on astra", want: 50,
+			req: core.ChatRequest{Model: "gpt-6-astra", Tools: weatherTool}},
+		{name: "no tools", want: 50, req: core.ChatRequest{Model: "gpt-6-luna"}},
+		{name: "chat-served text file counted as text", want: 50,
+			req:       core.ChatRequest{Model: "gpt-6-luna", Messages: []core.Message{{Role: "user", Content: textFile}}},
+			wantInput: []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": "a.txt\n\nhello"}}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server, capture := providertest.JSONServer(t, http.StatusOK, `{"object":"response.input_tokens","input_tokens":50}`)
+			provider := New(providers.ProviderConfig{APIKey: testAPIKey, BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
+			req := tt.req
+			if req.Messages == nil {
+				req.Messages = []core.Message{{Role: "user", Content: "Weather in Paris?"}}
+			}
+			got, err := provider.CountChatTokens(context.Background(), &req)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+			if tt.wantInput != nil {
+				assert.Equal(t, tt.wantInput, capture.Last(t).JSON(t)["input"])
+			}
+		})
+	}
+}
