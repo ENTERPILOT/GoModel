@@ -178,6 +178,10 @@ var openAICompatibleTokenCostMappings = []tokenCostMapping{
 	// Treat it as a cached-input alias; the miss count needs no rate (the base
 	// input rate already covers it) and is listed in informationalFields.
 	{rawDataKey: "prompt_cache_hit_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
+	// OpenAI GPT-5.6+ reports prompt-cache writes as
+	// prompt_tokens_details.cache_write_tokens, part of prompt_tokens and
+	// billed at the cache-write rate instead of the base input rate.
+	{rawDataKey: "prompt_cache_write_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CacheWritePerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
 	{rawDataKey: "reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
 	{rawDataKey: "completion_reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
 	{rawDataKey: "prompt_audio_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.AudioInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},

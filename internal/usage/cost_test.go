@@ -50,6 +50,24 @@ func TestCalculateGranularCost_OpenAI_CachedAndReasoning(t *testing.T) {
 	require.Empty(t, result.Caveat)
 }
 
+func TestCalculateGranularCost_OpenAI_CacheWriteTokens(t *testing.T) {
+	pricing := &core.ModelPricing{
+		InputPerMtok:       new(2.0),
+		OutputPerMtok:      new(10.0),
+		CachedInputPerMtok: new(0.2),
+		CacheWritePerMtok:  new(2.5),
+	}
+	rawData := map[string]any{
+		"prompt_cached_tokens":      800_000,
+		"prompt_cache_write_tokens": 150_000,
+	}
+	result := CalculateGranularCost(1_000_000, 0, rawData, "openai", pricing)
+
+	// Input: 1M * 2.0/1M + 800k * (0.2-2.0)/1M + 150k * (2.5-2.0)/1M = 2.0 - 1.44 + 0.075
+	assertCostNear(t, "InputCost", result.InputCost, 0.635)
+	require.Empty(t, result.Caveat)
+}
+
 func TestCalculateGranularCost_OpenAI_AudioTokens(t *testing.T) {
 	pricing := &core.ModelPricing{
 		InputPerMtok:       new(2.50),

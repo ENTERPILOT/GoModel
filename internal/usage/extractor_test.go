@@ -193,6 +193,48 @@ func TestExtractFromChatResponse_WithPromptTokensDetails(t *testing.T) {
 	assert.Equal(t, 150, entry.RawData["prompt_cached_tokens"])
 }
 
+// OpenAI GPT-5.6+ reports cache writes inside the prompt details. They must
+// survive decoding and be priced at the cache-write rate, on Chat Completions
+// and Responses alike.
+func TestExtract_OpenAICacheWriteTokens(t *testing.T) {
+	pricing := &core.ModelPricing{
+		InputPerMtok:       new(2.0),
+		OutputPerMtok:      new(10.0),
+		CachedInputPerMtok: new(0.2),
+		CacheWritePerMtok:  new(2.5),
+	}
+	// 50 uncached at $2, 800 cached at $0.20 and 150 written at $2.50 per 1M.
+	wantInput := (50*2.0 + 800*0.2 + 150*2.5) / 1_000_000
+
+	t.Run("chat completions", func(t *testing.T) {
+		var resp core.ChatResponse
+		require.NoError(t, json.Unmarshal([]byte(`{"id":"chatcmpl-1","model":"gpt-6-sol","choices":[],"usage":{
+			"prompt_tokens":1000,"completion_tokens":0,"total_tokens":1000,
+			"prompt_tokens_details":{"cached_tokens":800,"cache_write_tokens":150,"audio_tokens":0}}}`), &resp))
+
+		entry := ExtractFromChatResponse(&resp, "req-1", "openai", "/v1/chat/completions", pricing)
+		require.NotNil(t, entry)
+		assert.Equal(t, 150, entry.RawData["prompt_cache_write_tokens"])
+		require.NotNil(t, entry.InputCost)
+		assert.InDelta(t, wantInput, *entry.InputCost, 1e-12)
+		assert.Empty(t, entry.CostsCalculationCaveat)
+	})
+
+	t.Run("responses", func(t *testing.T) {
+		var resp core.ResponsesResponse
+		require.NoError(t, json.Unmarshal([]byte(`{"id":"resp_1","object":"response","model":"gpt-6-sol","status":"completed","output":[],"usage":{
+			"input_tokens":1000,"output_tokens":0,"total_tokens":1000,
+			"input_tokens_details":{"cached_tokens":800,"cache_write_tokens":150}}}`), &resp))
+
+		entry := ExtractFromResponsesResponse(&resp, "req-2", "openai", "/v1/responses", pricing)
+		require.NotNil(t, entry)
+		assert.Equal(t, 150, entry.RawData["prompt_cache_write_tokens"])
+		require.NotNil(t, entry.InputCost)
+		assert.InDelta(t, wantInput, *entry.InputCost, 1e-12)
+		assert.Empty(t, entry.CostsCalculationCaveat)
+	})
+}
+
 func TestExtractFromChatResponse_WithCompletionTokensDetails(t *testing.T) {
 	resp := &core.ChatResponse{
 		ID:    "chatcmpl-reasoning",

@@ -166,6 +166,13 @@ The response uses the Anthropic Messages shape (`type: "message"`, `content` blo
 `stop_reason`, `usage`). Errors use the Anthropic error envelope
 (`{"type": "error", "error": {...}}`). `max_tokens` is required, as in the Anthropic API.
 
+`usage` follows Anthropic semantics for every provider: `input_tokens` excludes
+cached tokens, which are reported separately as `cache_read_input_tokens` and
+`cache_creation_input_tokens`. For OpenAI-compatible providers, whose
+`prompt_tokens` includes cached tokens, GoModel moves `cached_tokens` and
+`cache_write_tokens` into those fields, so the three counts add up to the whole
+prompt.
+
 Streaming responses emit the Anthropic SSE event sequence (`message_start`,
 `content_block_start`/`content_block_delta`/`content_block_stop`, `message_delta`,
 `message_stop`).
