@@ -25,6 +25,8 @@ type MCPServerAdmin interface {
 	Delete(ctx context.Context, name string) error
 	Reconnect(ctx context.Context, name string) (mcpgateway.ServerView, error)
 	Catalog(name string) (mcpgateway.CatalogView, bool)
+	IsVirtual(name string) bool
+	VirtualViews() []mcpgateway.VirtualServerView
 }
 
 // redactedMCPHeaderValue replaces upstream header values (the credential
@@ -132,6 +134,12 @@ func (h *Handler) UpsertMCPServer(c *echo.Context) error {
 	}
 	if h.mcpServers.IsManaged(slug) {
 		return handleError(c, core.NewInvalidRequestError("mcp server "+slug+" is managed by config/env and is read-only", nil))
+	}
+	if h.mcpServers.IsVirtual(slug) {
+		// A server stored before the virtual server was declared stays editable.
+		if _, err := h.mcpServers.GetManaged(c.Request().Context(), slug); errors.Is(err, mcpgateway.ErrNotFound) {
+			return handleError(c, core.NewInvalidRequestError(mcpgateway.VirtualNameTakenError(slug).Error(), nil))
+		}
 	}
 
 	server, err := h.buildMCPServerUpsert(c.Request().Context(), slug, displayName, req)

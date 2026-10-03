@@ -290,6 +290,9 @@ func Load() (*LoadResult, error) {
 	if err := applyMCPEnv(cfg); err != nil {
 		return nil, err
 	}
+	if err := applyMCPVirtualEnv(cfg); err != nil {
+		return nil, err
+	}
 	if err := normalizeMCPConfig(&cfg.MCP); err != nil {
 		return nil, err
 	}
