@@ -118,7 +118,7 @@ type providerModelRefresher interface {
 }
 
 func registryUnavailableError(err error) error {
-	return core.NewProviderError("", http.StatusServiceUnavailable, err.Error(), err)
+	return core.NewProviderError("", http.StatusServiceUnavailable, "model registry not ready: no models have been loaded yet, retry shortly", err)
 }
 
 // NewRouter creates a new provider router with a model lookup.

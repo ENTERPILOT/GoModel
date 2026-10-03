@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,6 +19,7 @@ type requestRefreshProvider struct {
 	refreshErr          error
 	resolveErrWhenEmpty bool
 	refreshCalls        int
+	resolveErr          error
 }
 
 func newRequestRefreshProvider(modelCount int) *requestRefreshProvider {
@@ -47,6 +49,9 @@ func (p *requestRefreshProvider) RefreshProviderModels(_ context.Context, provid
 }
 
 func (p *requestRefreshProvider) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	if p.resolveErr != nil {
+		return core.ModelSelector{}, false, p.resolveErr
+	}
 	if p.resolveErrWhenEmpty && p.modelCount == 0 {
 		return core.ModelSelector{}, false, core.NewProviderError("", http.StatusServiceUnavailable, "model registry not initialized", nil)
 	}
@@ -291,4 +296,46 @@ func TestResolveRequestModelReturnsRefreshError(t *testing.T) {
 	require.ErrorAs(t, err, &gatewayErr)
 	require.Equal(t, http.StatusServiceUnavailable, gatewayErr.HTTPStatusCode())
 	require.Equal(t, core.ErrorTypeProvider, gatewayErr.Type)
+}
+
+// A resolver's typed gateway error keeps its status: while the model registry
+// is still empty the router answers 503 so clients retry, and that must not be
+// rewritten into a 400 that blames the request.
+func TestResolveRequestModelKeepsResolverErrorStatus(t *testing.T) {
+	tests := []struct {
+		name       string
+		model      string
+		wantStatus int
+		wantType   core.ErrorType
+	}{
+		{name: "registry not ready", model: "openai/gpt-4o", wantStatus: http.StatusServiceUnavailable, wantType: core.ErrorTypeProvider},
+		{name: "plain resolver error", model: "openai/gpt-4o", wantStatus: http.StatusBadRequest, wantType: core.ErrorTypeInvalidRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			notReady := tt.wantStatus == http.StatusServiceUnavailable
+			modelCount := 1
+			if notReady {
+				modelCount = 0
+			}
+			provider := newRequestRefreshProvider(modelCount)
+			provider.resolveErrWhenEmpty = notReady
+			if !notReady {
+				provider.resolveErr = errors.New("unknown alias")
+			}
+
+			_, err := ResolveRequestModelWithAuthorizer(
+				context.Background(),
+				provider,
+				nil,
+				nil,
+				core.NewRequestedModelSelector(tt.model, ""),
+			)
+
+			var gatewayErr *core.GatewayError
+			require.ErrorAs(t, err, &gatewayErr)
+			assert.Equal(t, tt.wantStatus, gatewayErr.HTTPStatusCode())
+			assert.Equal(t, tt.wantType, gatewayErr.Type)
+		})
+	}
 }

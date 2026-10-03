@@ -19,6 +19,13 @@ type fakeProbe struct {
 
 func (f fakeProbe) Ping(context.Context) error { return f.err }
 
+type fakeInventory struct {
+	models, providers int
+}
+
+func (f fakeInventory) ModelCount() int    { return f.models }
+func (f fakeInventory) ProviderCount() int { return f.providers }
+
 func TestReadyEndpoint(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -54,6 +61,27 @@ func TestReadyEndpoint(t *testing.T) {
 			wantStatusCode: http.StatusOK,
 			wantStatus:     "degraded",
 			wantComponents: map[string]string{"storage": "ok", "cache": "down"},
+		},
+		{
+			name:           "models loaded",
+			config:         &Config{StorageProbe: fakeProbe{}, ModelInventory: fakeInventory{models: 7, providers: 1}},
+			wantStatusCode: http.StatusOK,
+			wantStatus:     "ready",
+			wantComponents: map[string]string{"storage": "ok", "models": "ok"},
+		},
+		{
+			name:           "no models yet is degraded but stays in rotation",
+			config:         &Config{StorageProbe: fakeProbe{}, ModelInventory: fakeInventory{providers: 1}},
+			wantStatusCode: http.StatusOK,
+			wantStatus:     "degraded",
+			wantComponents: map[string]string{"storage": "ok", "models": "down"},
+		},
+		{
+			name:           "no providers configured reports no models component",
+			config:         &Config{ModelInventory: fakeInventory{}},
+			wantStatusCode: http.StatusOK,
+			wantStatus:     "ready",
+			wantComponents: map[string]string{},
 		},
 		{
 			name:           "storage down dominates cache ok",

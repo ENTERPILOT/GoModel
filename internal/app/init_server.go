@@ -187,6 +187,11 @@ func (b *bootstrap) initServerConfig() error {
 	if hc, ok := app.storage.(storage.HealthChecker); ok {
 		serverCfg.StorageProbe = hc
 	}
+	// The model registry is reported but never blocks traffic: see
+	// server.ModelInventory.
+	if app.providers.Registry != nil {
+		serverCfg.ModelInventory = app.providers.Registry
+	}
 	b.serverCfg = serverCfg
 	return nil
 }

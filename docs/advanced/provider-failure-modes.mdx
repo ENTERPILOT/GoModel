@@ -135,6 +135,29 @@ failing marks its provider **Degraded** even while model discovery still
 succeeds, which is what catches an upstream that lists models fine but fails
 real calls.
 
+## Model discovery outages
+
+A provider's `/models` listing can fail while inference still works. GoModel
+keeps routing with, in order:
+
+1. The last inventory it fetched or loaded from its cache.
+2. Configured models (`<PROVIDER>_MODELS`, see `CONFIGURED_PROVIDER_MODELS_MODE`).
+3. For a provider on its default base URL, the
+   [model catalog's](/advanced/configuration) list for its provider type.
+
+Failed providers are rechecked every `PROVIDER_RECHECK_INTERVAL` seconds
+(default `60`), and the live list replaces the stand-in once a listing
+succeeds. With nothing to serve, requests return `503` so clients retry, and
+`/health/ready` reports `degraded` with `"models": "down"` while the instance
+stays in rotation.
+
+To never depend on discovery, list the models yourself and set
+`CONFIGURED_PROVIDER_MODELS_MODE=allowlist`:
+
+```bash
+OPENAI_MODELS=gpt-6-sol,gpt-6-luna CONFIGURED_PROVIDER_MODELS_MODE=allowlist
+```
+
 ## If GoModel itself is down
 
 Putting a gateway in the request path trades provider risk for gateway risk,
