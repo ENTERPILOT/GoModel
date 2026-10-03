@@ -239,9 +239,11 @@ features that have no canonical equivalent are not preserved end to end:
   content, `file_url` for remote URLs, `file_id` for uploads). Anthropic gets the
   document back natively with its `title`; Gemini receives inline data only;
   OpenAI-compatible providers receive the `file` part as-is. On OpenAI, an
-  untitled document gets a filename (`document.pdf`), a plain-text document is
-  sent to Chat Completions as text (headed by its `title`) because only PDF
-  file data is accepted there, and URL documents go through the Responses API.
+  untitled PDF gets a filename (`document.pdf`), and URL documents go through
+  the Responses API. A plain-text document on a request that stays on Chat
+  Completions is sent as text (headed by its `title`), because only PDF file
+  data is accepted there; on a request served through the Responses API, such
+  as one with a text document inside a `tool_result`, it stays a file.
   Citation settings and `context` are dropped. The custom-content variant
   (`source.type: "content"`) degrades to text.
 - **`search_result` blocks** degrade to text (title, source URL, and content);

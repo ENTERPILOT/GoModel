@@ -509,3 +509,22 @@ func TestStreamConverterRelaysUpstreamError(t *testing.T) {
 		})
 	}
 }
+
+// An upstream error after the finish chunk still fails the turn: the stream
+// broke, so it must not end with message_stop.
+func TestStreamConverterUpstreamErrorAfterFinish(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-1","model":"gpt","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		`data: {"error":{"message":"The server had an error processing your request.","type":"server_error"}}`,
+		`data: [DONE]`,
+		"",
+	}, "\n\n")
+	conv := NewStreamConverter(io.NopCloser(strings.NewReader(stream)), "fallback-model", 0)
+	defer conv.Close() //nolint:errcheck
+
+	out, err := io.ReadAll(conv)
+	require.ErrorIs(t, err, streaming.ErrStreamIncomplete)
+	assert.NotContains(t, string(out), "message_stop")
+	assert.Contains(t, string(out), "The server had an error processing your request.")
+}

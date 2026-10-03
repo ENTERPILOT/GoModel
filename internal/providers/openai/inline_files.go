@@ -12,7 +12,7 @@ import (
 // requires a filename alongside file_data and accepts only PDF data:
 //   - a file without a filename gets the default name for its media type;
 //   - a plain-text file (text/* data) becomes a text part carrying its
-//     content, headed by its filename when the caller named it.
+//     content, headed by its filename when it has one.
 //
 // The caller's request is left unchanged; it is returned as-is when no part
 // needs adapting.
@@ -52,15 +52,14 @@ func needsFileAdapting(part core.ContentPart) bool {
 // adaptFilePart applies adaptInlineFiles to one part.
 func adaptFilePart(part core.ContentPart) core.ContentPart {
 	file := *part.File
-	defaultName := core.DefaultFilename(file.FileData)
 	if text, ok := inlineText(file.FileData); ok {
-		if name := strings.TrimSpace(file.Filename); name != "" && name != defaultName {
+		if name := strings.TrimSpace(file.Filename); name != "" {
 			text = name + "\n\n" + text
 		}
 		return core.ContentPart{Type: "text", Text: text, ExtraFields: part.ExtraFields}
 	}
 	if file.Filename == "" {
-		file.Filename = defaultName
+		file.Filename = core.DefaultFilename(file.FileData)
 	}
 	part.File = &file
 	return part

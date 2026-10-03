@@ -124,7 +124,9 @@ func (sc *streamConverter) finish(err error) {
 	if sc.finalized {
 		return
 	}
-	if sc.stopReason != "" {
+	// An error the upstream reported fails the turn even after a finish:
+	// the stream broke, so it must not end as a completed message.
+	if sc.stopReason != "" && sc.upstreamErr == nil {
 		sc.finalize()
 		return
 	}
@@ -169,8 +171,8 @@ func (sc *streamConverter) Read(p []byte) (int, error) {
 		if len(bytes.TrimSpace(line)) > 0 {
 			if done := sc.consumeLine(line); done {
 				if sc.upstreamErr != nil {
-					// [DONE] after an upstream error still ends the turn
-					// as failed unless a finish arrived before it.
+					// [DONE] after an upstream error still ends the
+					// turn as failed.
 					sc.finish(nil)
 				} else {
 					sc.finalize()
