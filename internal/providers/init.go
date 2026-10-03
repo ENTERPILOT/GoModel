@@ -82,7 +82,14 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 		ctx = context.Background()
 	}
 
-	providerMap, credentialResolved := resolveProviders(result.RawProviders, result.Config.Resilience, factory.discoveryConfigsSnapshot())
+	discovery := factory.discoveryConfigsSnapshot()
+	// Provider env vars are merged here, after run resolved the config file,
+	// so references they carry are resolved here too.
+	environ, err := resolveProviderEnvSecrets(ctx, result.Secrets, os.Environ(), discovery)
+	if err != nil {
+		return nil, err
+	}
+	providerMap, credentialResolved := resolveProviders(result.RawProviders, result.Config.Resilience, discovery, environ)
 	// Validated after the env overlay so one rule covers both sources: a bad
 	// price cap must not start the gateway with a cost control that silently
 	// admits everything.

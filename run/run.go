@@ -244,6 +244,12 @@ func Run(ctx context.Context, opts Options) error {
 		if err := configure(result); err != nil {
 			return nil, nil, err
 		}
+		// After the hook, so schemes it registered (Pro's vault) resolve too.
+		// A failure rejects this generation: startup aborts, a reload keeps
+		// the running one.
+		if err := result.ResolveSecrets(ctx); err != nil {
+			return nil, nil, fmt.Errorf("failed to resolve secret references: %w", err)
+		}
 		opts.ConfigureSwaggerDocs(result.Config.Server.BasePath)
 
 		application, err := app.New(ctx, app.Config{

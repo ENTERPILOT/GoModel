@@ -6,6 +6,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -162,5 +164,46 @@ func TestRunHealthAndReadyDispatch(t *testing.T) {
 		}
 		got := ExitCode(err)
 		assert.Equal(t, 1, got, "ExitCode(Run(%s) error) = %d, want 1", flag, got)
+	}
+}
+
+func TestRunResolvesSecretReferencesAfterTheConfigHook(t *testing.T) {
+	tests := []struct {
+		name     string
+		register bool
+		wantErr  string
+	}{
+		{
+			name:    "unknown scheme stops startup",
+			wantErr: "failed to resolve secret references: server.master_key: secret reference ${vault:...}: unknown secret scheme \"vault\": the vault scheme is provided by GoModel Pro vaults (extensions.vaults)",
+		},
+		{
+			name:     "scheme registered by the hook is used",
+			register: true,
+			wantErr:  "failed to resolve secret references: server.master_key: secret reference ${vault:...}: lookup prod/master-key failed",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Chdir(dir)
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("server:\n  master_key: ${vault:prod/master-key}\n"), 0o600))
+			t.Setenv("GOMODEL_MASTER_KEY", "")
+
+			err := Run(t.Context(), Options{
+				Args:   []string{},
+				Stdout: io.Discard,
+				Stderr: io.Discard,
+				SetupConfig: func(_ context.Context, result *config.LoadResult) error {
+					if !tt.register {
+						return nil
+					}
+					return result.Secrets.Register("vault", config.SecretResolverFunc(func(_ context.Context, reference string) (string, error) {
+						return "", errors.New("lookup " + reference + " failed")
+					}))
+				},
+			})
+			require.EqualError(t, err, tt.wantErr)
+		})
 	}
 }

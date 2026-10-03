@@ -2,6 +2,7 @@ package providers
 
 import (
 	"math"
+	"os"
 	"testing"
 	"time"
 
@@ -445,7 +446,7 @@ func TestFilterEmptyProviders_LLMDRequiresBaseURLButNotAPIKey(t *testing.T) {
 func TestApplyProviderEnvVars_DiscoversFromAPIKey(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "sk-from-env")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	p, exists := got["openai"]
 	require.True(t, exists)
@@ -461,7 +462,7 @@ func TestApplyProviderEnvVars_LLMDControls(t *testing.T) {
 	t.Setenv("LLMD_CANARY_INFERENCE_OBJECTIVE", "canary-traffic")
 	t.Setenv("LLMD_CANARY_FAIRNESS_FROM_USER_PATH", "false")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 	tests := []struct {
 		name      string
 		provider  string
@@ -535,7 +536,7 @@ func TestApplyProviderEnvVars_SessionStickyKeys(t *testing.T) {
 			for key, value := range tt.env {
 				t.Setenv(key, value)
 			}
-			got := applyProviderEnvVars(tt.raw, testDiscoveryConfigs)
+			got := applyProviderEnvVars(tt.raw, testDiscoveryConfigs, os.Environ())
 			sticky := got[tt.provider].SessionStickyKeys
 			if tt.wantNil {
 				require.Nil(t, sticky)
@@ -551,7 +552,7 @@ func TestApplyProviderEnvVars_SessionStickyKeys(t *testing.T) {
 func TestApplyProviderEnvVars_DiscoversFromBaseURL(t *testing.T) {
 	t.Setenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	p, exists := got["ollama"]
 	require.True(t, exists)
@@ -562,7 +563,7 @@ func TestApplyProviderEnvVars_DiscoversMultipleSuffixedOllamaProvidersFromBaseUR
 	t.Setenv("OLLAMA_A_BASE_URL", "http://localhost:11434/v1")
 	t.Setenv("OLLAMA_B_BASE_URL", "http://localhost:11435/v1")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	providerA, exists := got["ollama-a"]
 	require.True(t, exists)
@@ -592,7 +593,7 @@ func TestApplyProviderEnvVars_DiscoversTypeFromAPIKeyWithDefaultBaseURL(t *testi
 		t.Run(tt.providerType, func(t *testing.T) {
 			t.Setenv(tt.envVar, tt.apiKey)
 
-			got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+			got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 			p, exists := got[tt.providerType]
 			require.True(t, exists)
@@ -608,7 +609,7 @@ func TestApplyProviderEnvVars_DiscoversZAIWithExplicitBaseURL(t *testing.T) {
 	t.Setenv("ZAI_API_KEY", "zai-key")
 	t.Setenv("ZAI_BASE_URL", explicitBaseURL)
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	p, exists := got["zai"]
 	require.True(t, exists)
@@ -624,7 +625,7 @@ func TestApplyProviderEnvVars_DiscoversVertexProviderFromEnvAlias(t *testing.T) 
 	t.Setenv("VERTEX_API_MODE", "native")
 	t.Setenv("VERTEX_MODELS", "google/gemini-2.5-flash")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	p, exists := got["vertex"]
 	require.True(t, exists)
@@ -645,7 +646,7 @@ func TestApplyProviderEnvVars_DiscoversSuffixedVertexProvider(t *testing.T) {
 	t.Setenv("BEDROCK_US_BASE_URL", "us-east-1")
 	t.Setenv("BEDROCK_US_MODELS", "anthropic.claude-3-5-haiku-20241022-v1:0")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	p, exists := got["vertex-us"]
 	require.True(t, exists)
@@ -666,7 +667,7 @@ func TestApplyProviderEnvVars_DiscoversBedrockMantle(t *testing.T) {
 	t.Setenv("BEDROCK_MANTLE_API_MODE", "auto")
 	t.Setenv("BEDROCK_MANTLE_MODELS", "openai.gpt-5.6-sol,openai.gpt-5.6-terra")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 	p, exists := got["bedrock-mantle"]
 	require.True(t, exists)
 	require.Equal(t, "bedrock-mantle", p.Type)
@@ -682,7 +683,7 @@ func TestResolveProviders_FiltersVertexWithoutProjectOrLocation(t *testing.T) {
 	t.Setenv("VERTEX_PROJECT", "prod-ai")
 	t.Setenv("VERTEX_AUTH_TYPE", "gcp_adc")
 
-	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
+	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs, os.Environ())
 	_, exists := got["vertex"]
 	require.False(t, exists)
 	_, exists = filteredRaw["vertex"]
@@ -693,7 +694,7 @@ func TestResolveProviders_KeepsVertexWithProjectAndLocationUsingDefaultADC(t *te
 	t.Setenv("VERTEX_PROJECT", "prod-ai")
 	t.Setenv("VERTEX_LOCATION", "us-central1")
 
-	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
+	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs, os.Environ())
 
 	p, exists := got["vertex"]
 	require.True(t, exists)
@@ -706,7 +707,7 @@ func TestResolveProviders_KeepsVertexWithBaseURLWithoutProjectLocation(t *testin
 	t.Setenv("VERTEX_BASE_URL", "https://proxy.example.com/v1/projects/prod-ai/locations/us-central1/publishers/google")
 	t.Setenv("VERTEX_AUTH_TYPE", "gcp_adc")
 
-	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
+	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs, os.Environ())
 
 	p, exists := got["vertex"]
 	require.True(t, exists)
@@ -721,7 +722,7 @@ func TestResolveProviders_FiltersVertexServiceAccountWithoutCredentials(t *testi
 	t.Setenv("VERTEX_LOCATION", "us-central1")
 	t.Setenv("VERTEX_AUTH_TYPE", "gcp_service_account")
 
-	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
+	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs, os.Environ())
 	_, exists := got["vertex"]
 	require.False(t, exists)
 	_, exists = filteredRaw["vertex"]
@@ -738,7 +739,7 @@ func TestResolveProviders_FiltersVertexWithUnresolvedProjectPlaceholder(t *testi
 		},
 	}
 
-	got, filteredRaw := resolveProviders(raw, globalResilience, testDiscoveryConfigs)
+	got, filteredRaw := resolveProviders(raw, globalResilience, testDiscoveryConfigs, os.Environ())
 	_, exists := got["vertex"]
 	require.False(t, exists)
 	_, exists = filteredRaw["vertex"]
@@ -756,7 +757,7 @@ func TestResolveProviders_FiltersVertexWithUnresolvedServiceAccountPlaceholder(t
 		},
 	}
 
-	got, filteredRaw := resolveProviders(raw, globalResilience, testDiscoveryConfigs)
+	got, filteredRaw := resolveProviders(raw, globalResilience, testDiscoveryConfigs, os.Environ())
 	_, exists := got["vertex"]
 	require.False(t, exists)
 	_, exists = filteredRaw["vertex"]
@@ -770,7 +771,7 @@ func TestApplyProviderEnvVars_GeminiIgnoresVertexSpecificEnv(t *testing.T) {
 	t.Setenv("GEMINI_GCP_SCOPE", "scope-a")
 	t.Setenv("GEMINI_SERVICE_ACCOUNT_FILE", "/secrets/gemini.json")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	p, exists := got["gemini"]
 	require.True(t, exists)
@@ -784,7 +785,7 @@ func TestApplyProviderEnvVars_GeminiIgnoresVertexSpecificEnv(t *testing.T) {
 func TestApplyProviderEnvVars_DiscoversVLLMFromBaseURLWithoutAPIKey(t *testing.T) {
 	t.Setenv("VLLM_BASE_URL", "http://localhost:8000/v1")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	p, exists := got["vllm"]
 	require.True(t, exists)
@@ -821,7 +822,7 @@ func TestApplyProviderEnvVars_DiscoversSGLang(t *testing.T) {
 			t.Setenv("SGLANG_API_KEY", tt.apiKey)
 			t.Setenv("SGLANG_BASE_URL", tt.baseURL)
 
-			got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+			got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 			p, exists := got["sglang"]
 			require.True(t, exists)
 			require.Equal(t, "sglang", p.Type)
@@ -835,7 +836,7 @@ func TestApplyProviderEnvVars_DiscoversUnsuffixedAndSuffixedVLLMProvidersFromBas
 	t.Setenv("VLLM_BASE_URL", "http://localhost:8000/v1")
 	t.Setenv("VLLM_TEST_BASE_URL", "http://localhost:8000/v1")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	primary, exists := got["vllm"]
 	require.True(t, exists)
@@ -851,7 +852,7 @@ func TestApplyProviderEnvVars_DiscoversUnsuffixedAndSuffixedVLLMProvidersFromBas
 func TestApplyProviderEnvVars_DiscoversVLLMFromAPIKeyWithDefaultBaseURL(t *testing.T) {
 	t.Setenv("VLLM_API_KEY", "vllm-key")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	p, exists := got["vllm"]
 	require.True(t, exists)
@@ -862,7 +863,7 @@ func TestApplyProviderEnvVars_DiscoversVLLMFromAPIKeyWithDefaultBaseURL(t *testi
 func TestApplyProviderEnvVars_DiscoversVLLMFromModelsEnv(t *testing.T) {
 	t.Setenv("VLLM_MODELS", "meta-llama/Llama-3.1-8B-Instruct")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	p, exists := got["vllm"]
 	require.True(t, exists)
@@ -877,7 +878,7 @@ func TestApplyProviderEnvVars_DiscoversMultipleSuffixedOpenAIProviders(t *testin
 	t.Setenv("OPENAI_WEST_API_KEY", "sk-west")
 	t.Setenv("OPENAI_WEST_BASE_URL", "")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	east, exists := got["openai-east"]
 	require.True(t, exists)
@@ -906,7 +907,7 @@ func TestApplyProviderEnvVars_DiscoversSuffixedProvidersForEveryRegisteredType(t
 		}
 	}
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	for providerType, spec := range testDiscoveryConfigs {
 		separator := spec.NameSeparator
@@ -934,7 +935,7 @@ func TestApplyProviderEnvVars_DiscoversAzureFromExplicitEnvVars(t *testing.T) {
 	t.Setenv("AZURE_API_KEY", "sk-azure")
 	t.Setenv("AZURE_BASE_URL", "https://example-resource.openai.azure.com/openai/deployments/gpt-4o")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	p, exists := got["azure"]
 	require.True(t, exists)
@@ -948,7 +949,7 @@ func TestApplyProviderEnvVars_AzureAPIVersionEnvWins(t *testing.T) {
 	t.Setenv("AZURE_BASE_URL", "https://example-resource.openai.azure.com/openai/deployments/gpt-4o")
 	t.Setenv("AZURE_API_VERSION", "2025-04-01-preview")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	p, exists := got["azure"]
 	require.True(t, exists)
@@ -967,7 +968,7 @@ func TestApplyProviderEnvVars_AzureAPIVersionEnvWinsWithoutOtherAzureEnvVars(t *
 		},
 	}
 
-	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs, os.Environ())
 
 	require.Equal(t, "2025-04-01-preview", got["azure"].APIVersion)
 }
@@ -975,7 +976,7 @@ func TestApplyProviderEnvVars_AzureAPIVersionEnvWinsWithoutOtherAzureEnvVars(t *
 func TestApplyProviderEnvVars_DoesNotDiscoverAzureWithoutBaseURL(t *testing.T) {
 	t.Setenv("AZURE_API_KEY", "sk-azure")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 	_, exists := got["azure"]
 	require.False(t, exists)
 }
@@ -985,7 +986,7 @@ func TestApplyProviderEnvVars_DiscoversSuffixedAzureWithAPIVersion(t *testing.T)
 	t.Setenv("AZURE_GPT4O_BASE_URL", "https://example-resource.openai.azure.com/openai/deployments/gpt-4o")
 	t.Setenv("AZURE_GPT4O_API_VERSION", "2025-04-01-preview")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	p, exists := got["azure-gpt4o"]
 	require.True(t, exists)
@@ -998,7 +999,7 @@ func TestApplyProviderEnvVars_DiscoversSuffixedAzureWithAPIVersion(t *testing.T)
 func TestApplyProviderEnvVars_DoesNotDiscoverSuffixedAzureWithoutBaseURL(t *testing.T) {
 	t.Setenv("AZURE_EAST_API_KEY", "sk-azure")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 	_, exists := got["azure-east"]
 	require.False(t, exists)
 }
@@ -1008,7 +1009,7 @@ func TestApplyProviderEnvVars_DiscoversOracleFromExplicitEnvVars(t *testing.T) {
 	t.Setenv("ORACLE_BASE_URL", "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1")
 	t.Setenv("ORACLE_MODELS", " openai.gpt-oss-120b, xai.grok-3 ,, ")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	p, exists := got["oracle"]
 	require.True(t, exists)
@@ -1025,7 +1026,7 @@ func TestApplyProviderEnvVars_DiscoversSuffixedOracleModels(t *testing.T) {
 	t.Setenv("ORACLE_REGION_BASE_URL", "https://oracle.example.com/v1")
 	t.Setenv("ORACLE_REGION_MODELS", " openai.gpt-oss-120b, xai.grok-3 ,, ")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	p, exists := got["oracle-region"]
 	require.True(t, exists)
@@ -1040,7 +1041,7 @@ func TestApplyProviderEnvVars_DiscoversSuffixedOracleModels(t *testing.T) {
 func TestApplyProviderEnvVars_DoesNotDiscoverOracleWithoutBaseURL(t *testing.T) {
 	t.Setenv("ORACLE_API_KEY", "oracle-key")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 	_, exists := got["oracle"]
 	require.False(t, exists)
 }
@@ -1056,7 +1057,7 @@ func TestApplyProviderEnvVars_OracleModelsEnvWinsOverYAMLWithoutOtherOracleEnvVa
 	}
 	t.Setenv("ORACLE_MODELS", "openai.gpt-oss-120b, xai.grok-3")
 
-	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs, os.Environ())
 
 	p := got["oracle"]
 	require.Equal(t, "oracle-key", p.APIKey)
@@ -1072,7 +1073,7 @@ func TestApplyProviderEnvVars_EnvWinsOverYAML(t *testing.T) {
 	raw := map[string]config.RawProviderConfig{
 		"openai": {Type: "openai", APIKey: "sk-yaml-key", BaseURL: "https://custom.api.com"},
 	}
-	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs, os.Environ())
 
 	assert.Equal(t, "sk-env-key", got["openai"].APIKey)
 	assert.Equal(t, "https://custom.api.com", got["openai"].BaseURL)
@@ -1084,7 +1085,7 @@ func TestApplyProviderEnvVars_SingleCustomNamedProviderUsesTypeEnvVars(t *testin
 	raw := map[string]config.RawProviderConfig{
 		"openai_name": {Type: "openai"},
 	}
-	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs, os.Environ())
 
 	provider, exists := got["openai_name"]
 	require.True(t, exists)
@@ -1101,7 +1102,7 @@ func TestApplyProviderEnvVars_AmbiguousCustomNamedProvidersSkipTypeEnvOverlay(t 
 		"openai-east": {Type: "openai", APIKey: "east-key", BaseURL: "https://east.example.com/v1"},
 		"openai-west": {Type: "openai", APIKey: "west-key", BaseURL: "https://west.example.com/v1"},
 	}
-	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs, os.Environ())
 
 	assert.Equal(t, "east-key", got["openai-east"].APIKey)
 	assert.Equal(t, "west-key", got["openai-west"].APIKey)
@@ -1115,7 +1116,7 @@ func TestApplyProviderEnvVars_BaseURLEnvWinsOverYAML(t *testing.T) {
 	raw := map[string]config.RawProviderConfig{
 		"openai": {Type: "openai", APIKey: "sk-key", BaseURL: "https://yaml-url.com"},
 	}
-	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs, os.Environ())
 
 	assert.Equal(t, "https://env-override.com", got["openai"].BaseURL)
 }
@@ -1127,7 +1128,7 @@ func TestApplyProviderEnvVars_DefaultBaseReplacesPlaceholderYAMLBaseURL(t *testi
 		"openrouter": {Type: "openrouter", APIKey: "sk-yaml", BaseURL: "${OPENROUTER_BASE_URL}"},
 	}
 
-	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs, os.Environ())
 
 	require.Equal(t, testDiscoveryConfigs["openrouter"].DefaultBaseURL, got["openrouter"].BaseURL)
 }
@@ -1136,7 +1137,7 @@ func TestApplyProviderEnvVars_PlaceholderBaseURLEnvFallsBackToDefault(t *testing
 	t.Setenv("OPENROUTER_API_KEY", "sk-openrouter")
 	t.Setenv("OPENROUTER_BASE_URL", "${OPENROUTER_BASE_URL}")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	require.Equal(t, testDiscoveryConfigs["openrouter"].DefaultBaseURL, got["openrouter"].BaseURL)
 }
@@ -1145,7 +1146,7 @@ func TestApplyProviderEnvVars_DoesNotDiscoverAzureWithPlaceholderBaseURL(t *test
 	t.Setenv("AZURE_API_KEY", "sk-azure")
 	t.Setenv("AZURE_BASE_URL", "${AZURE_BASE_URL}")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 	_, exists := got["azure"]
 	require.False(t, exists)
 }
@@ -1163,7 +1164,7 @@ func TestApplyProviderEnvVars_PreservesYAMLResilience(t *testing.T) {
 			},
 		},
 	}
-	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs, os.Environ())
 
 	require.NotNil(t, got["openai"].Resilience)
 	require.NotNil(t, got["openai"].Resilience.Retry)
@@ -1186,7 +1187,7 @@ func TestApplyProviderEnvVars_SuffixedEnvOverlaysMatchingYAMLProvider(t *testing
 		},
 	}
 
-	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs, os.Environ())
 
 	p := got["openai-east"]
 	assert.Equal(t, "sk-env-key", p.APIKey)
@@ -1226,7 +1227,7 @@ func TestApplyProviderEnvVars_SkipsWhenNoEnvVars(t *testing.T) {
 			t.Setenv(envNames.APIVersion, "")
 		}
 	}
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 	assert.Empty(t, got)
 }
 
@@ -1234,7 +1235,7 @@ func TestApplyProviderEnvVars_PreservesUnknownYAMLProviders(t *testing.T) {
 	raw := map[string]config.RawProviderConfig{
 		"custom-provider": {Type: "custom", APIKey: "sk-custom"},
 	}
-	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs, os.Environ())
 	_, exists := got["custom-provider"]
 	assert.True(t, exists)
 }
@@ -1385,7 +1386,7 @@ func TestResolveProviders_EndToEnd(t *testing.T) {
 		},
 	}
 
-	got, filteredRaw := resolveProviders(raw, globalResilience, testDiscoveryConfigs)
+	got, filteredRaw := resolveProviders(raw, globalResilience, testDiscoveryConfigs, os.Environ())
 	_, exists := got["bad"]
 	assert.False(t, exists)
 	assert.Equal(t, 10, got["openai"].Resilience.Retry.MaxRetries)
@@ -1400,7 +1401,7 @@ func TestResolveProviders_EndToEnd(t *testing.T) {
 func TestResolveProviders_EmptyRaw_OnlyEnvVars(t *testing.T) {
 	t.Setenv("GROQ_API_KEY", "sk-groq")
 
-	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
+	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs, os.Environ())
 
 	assert.Equal(t, "sk-groq", got["groq"].APIKey)
 	assert.Equal(t, "sk-groq", filteredRaw["groq"].APIKey)
@@ -1411,7 +1412,7 @@ func TestResolveProviders_EmptyRaw_SuffixedEnvVars(t *testing.T) {
 	t.Setenv("OPENAI_WEST_API_KEY", "sk-west")
 	t.Setenv("OPENAI_WEST_BASE_URL", "https://west.example.com/v1")
 
-	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
+	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs, os.Environ())
 
 	east, exists := got["openai-east"]
 	require.True(t, exists)
@@ -1437,7 +1438,7 @@ func TestResolveProviders_SingleCustomNamedProviderDoesNotDuplicateTypeKey(t *te
 		"openai_name": {Type: "openai"},
 	}
 
-	got, filteredRaw := resolveProviders(raw, globalResilience, testDiscoveryConfigs)
+	got, filteredRaw := resolveProviders(raw, globalResilience, testDiscoveryConfigs, os.Environ())
 
 	provider, exists := got["openai_name"]
 	require.True(t, exists)
@@ -1450,7 +1451,7 @@ func TestResolveProviders_SingleCustomNamedProviderDoesNotDuplicateTypeKey(t *te
 }
 
 func TestResolveProviders_NoProvidersNoEnvVars(t *testing.T) {
-	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
+	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs, os.Environ())
 	assert.Empty(t, got)
 	assert.Empty(t, filteredRaw)
 }
@@ -1461,7 +1462,7 @@ func TestBuildProviderConfig_Hetzner_ResolvesBaseURL(t *testing.T) {
 	raw := map[string]config.RawProviderConfig{
 		"hetzner": {Type: "hetzner", APIKey: "hetzner-test-key"},
 	}
-	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs, os.Environ())
 
 	p, exists := got["hetzner"]
 	require.True(t, exists)
@@ -1478,7 +1479,7 @@ func TestBuildProviderConfig_Hetzner_ResolvesBaseURL(t *testing.T) {
 func TestBuildProviderConfig_EdenAI_ResolvesBaseURL(t *testing.T) {
 	t.Setenv("EDENAI_API_KEY", "edenai-test-key")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	p, exists := got["edenai"]
 	require.True(t, exists, "edenai not discovered by config parser")
@@ -1494,7 +1495,7 @@ func TestBuildProviderConfig_EdenAI_BaseURLOverride(t *testing.T) {
 	t.Setenv("EDENAI_API_KEY", "edenai-test-key")
 	t.Setenv("EDENAI_BASE_URL", "https://eden.internal.example/v3")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	p, exists := got["edenai"]
 	require.True(t, exists, "edenai not discovered by config parser")
@@ -1507,7 +1508,7 @@ func TestApplyProviderEnvVars_ModelFilter(t *testing.T) {
 	t.Setenv("OPENROUTER_MODEL_FILTER_EXCLUDE", "*-preview:free")
 	t.Setenv("OPENROUTER_MODEL_FILTER_MAX_PRICE_PER_MTOK", "0")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	p, exists := got["openrouter"]
 	require.True(t, exists)
@@ -1529,7 +1530,7 @@ func TestApplyProviderEnvVars_ModelFilterOverlaysYAMLPerRule(t *testing.T) {
 			ModelFilter: config.ModelFilter{Include: []string{"qwen/*"}},
 		},
 	}
-	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs, os.Environ())
 
 	filter := got["openrouter"].ModelFilter
 	assert.Equal(t, []string{"qwen/*"}, filter.Include, "Include preserved from YAML")
@@ -1544,7 +1545,7 @@ func TestApplyProviderEnvVars_ModelFilterRejectsMalformedPrice(t *testing.T) {
 	t.Setenv("OPENROUTER_API_KEY", "sk-openrouter")
 	t.Setenv("OPENROUTER_MODEL_FILTER_MAX_PRICE_PER_MTOK", "cheap")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
 
 	limit := got["openrouter"].ModelFilter.MaxPricePerMtok
 	require.NotNil(t, limit)
@@ -1559,7 +1560,7 @@ func TestResolveProviders_RejectsMalformedModelFilterPrice(t *testing.T) {
 	t.Setenv("OPENROUTER_API_KEY", "sk-openrouter")
 	t.Setenv("OPENROUTER_MODEL_FILTER_MAX_PRICE_PER_MTOK", "cheap")
 
-	resolved, _ := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
+	resolved, _ := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs, os.Environ())
 	_, ok := resolved["openrouter"]
 	require.True(t, ok)
 
