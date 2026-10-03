@@ -84,8 +84,8 @@ type LoadResult struct {
 	// more schemes in its configuration hook before ResolveSecrets runs.
 	Secrets *Secrets
 
-	secretsResolved bool
-	secretsErr      error
+	secretsResolved     bool
+	secretsErr          error
 	keyWrapper          KeyWrapper
 	previousKeyWrappers []KeyWrapper
 }
