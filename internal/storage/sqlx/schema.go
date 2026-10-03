@@ -32,7 +32,15 @@ func execSchema(ctx context.Context, q Querier, dialect Dialect, statements []st
 // add with a recognisable message, so one list now serves both.
 func AddColumns(ctx context.Context, db DB, statements ...string) error {
 	for _, statement := range statements {
-		_, err := db.Exec(ctx, db.Dialect().ExpandTypes(statement))
+		statement = db.Dialect().ExpandTypes(statement)
+		if db.Dialect() == DuckDB {
+			// DuckDB cannot ADD COLUMN with constraints and rejects the
+			// statement before checking whether the column exists. A DuckDB
+			// table is always created from the current schema, so dropping the
+			// constraint only affects the duplicate-column no-op.
+			statement = strings.ReplaceAll(statement, " NOT NULL", "")
+		}
+		_, err := db.Exec(ctx, statement)
 		if err != nil && !IsDuplicateColumnError(err) {
 			return fmt.Errorf("apply migration %q: %w", statement, err)
 		}
