@@ -99,7 +99,10 @@ func limitParts(parts []genAIPart, remaining int) int {
 			part.Arguments, remaining = spendText(arguments, remaining)
 		case json.RawMessage:
 			if len(arguments) > remaining {
-				part.Arguments, remaining = truncatedMarker, 0
+				part.Arguments, remaining = spendText(truncatedMarker, remaining)
+				if part.Arguments == "" {
+					part.Arguments = nil
+				}
 			} else {
 				remaining -= len(arguments)
 			}
@@ -304,13 +307,17 @@ func truncateContent(text string) string {
 	return cutText(text, maxContentBytes)
 }
 
-// cutText keeps at most limit bytes of text, cut at a rune boundary and
-// marked.
+// cutText keeps text within limit bytes, the truncation marker included:
+// longer text is cut at a rune boundary and marked, and dropped entirely
+// when not even the marker fits.
 func cutText(text string, limit int) string {
 	if len(text) <= limit {
 		return text
 	}
-	cut := max(limit, 0)
+	if limit < len(truncatedMarker) {
+		return ""
+	}
+	cut := limit - len(truncatedMarker)
 	for cut > 0 && !utf8.RuneStart(text[cut]) {
 		cut--
 	}

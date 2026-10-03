@@ -317,6 +317,28 @@ func TestContentAttributesConvertMessages(t *testing.T) {
 	}
 }
 
+func TestLimitPartsChargesMarkersForOversizedArguments(t *testing.T) {
+	arguments := json.RawMessage(`{"q":"` + strings.Repeat("a", 64) + `"}`)
+	tests := []struct {
+		name      string
+		remaining int
+		want      any
+		left      int
+	}{
+		{name: "fits", remaining: len(arguments), want: arguments, left: 0},
+		{name: "marker fits", remaining: 20, want: truncatedMarker, left: 20 - len(truncatedMarker)},
+		{name: "nothing fits", remaining: 5, want: nil, left: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parts := []genAIPart{{Type: "tool_call", Arguments: arguments}}
+			left := limitParts(parts, tt.remaining)
+			assert.Equal(t, tt.want, parts[0].Arguments)
+			assert.Equal(t, tt.left, left)
+		})
+	}
+}
+
 func TestContentAttributesTruncateLongText(t *testing.T) {
 	long := strings.Repeat("é", maxContentBytes)
 	attrs := attributeMap(contentAttributes(core.GenerationOutcome{
@@ -329,8 +351,8 @@ func TestContentAttributesTruncateLongText(t *testing.T) {
 	content := messages[0].Parts[0].Content
 	assert.Less(t, len(content), len(long))
 	require.True(t, strings.HasSuffix(content, truncatedMarker))
+	assert.LessOrEqual(t, len(content), maxContentBytes, "the marker fits within the limit")
 	kept := strings.TrimSuffix(content, truncatedMarker)
-	assert.LessOrEqual(t, len(kept), maxContentBytes)
 	assert.True(t, strings.HasPrefix(long, kept) && utf8.ValidString(kept), "text is cut at a rune boundary")
 }
 
@@ -350,13 +372,14 @@ func TestContentAttributesKeepNewestMessagesWithinAttributeBudget(t *testing.T) 
 	require.Len(t, got, len(messages), "every message keeps its place")
 	assert.Equal(t, "latest question", got[len(got)-1].Parts[0].Content)
 	assert.Equal(t, part, got[len(got)-2].Parts[0].Content, "recent messages stay intact")
-	assert.Equal(t, truncatedMarker, got[0].Parts[0].Content, "the oldest text is dropped first")
+	assert.Empty(t, got[0].Parts[0].Content, "the oldest text is dropped first")
+	assert.Equal(t, 1, strings.Count(attrs["gen_ai.input.messages"], truncatedMarker), "only the message cut at the budget's edge is marked")
 
 	total := 0
 	for _, message := range got {
 		for _, p := range message.Parts {
-			total += len(strings.TrimSuffix(p.Content, truncatedMarker))
+			total += len(p.Content)
 		}
 	}
-	assert.LessOrEqual(t, total, maxAttributeContentBytes)
+	assert.LessOrEqual(t, total, maxAttributeContentBytes, "markers count toward the budget")
 }
