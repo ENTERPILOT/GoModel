@@ -86,10 +86,16 @@ support, not every individual model capability exposed by an upstream provider.
   (including GPT-6), GoModel sends `max_tokens` as `max_completion_tokens` and
   drops `temperature`. From GPT-5.6 on, OpenAI accepts function tools on Chat
   Completions only with `reasoning_effort: "none"`, so a tool request that sets
-  no effort gets `"none"`. An effort you set is kept, and OpenAI then rejects
-  the tools: use `/v1/responses` for tool calls with reasoning. GPT-6 Astra and
-  GPT-6.1 reject `"none"` too, so call tools on those models through
-  `/v1/responses`.
+  no effort gets `"none"`.
+- **OpenAI requests served through Responses** — some chat requests (Chat
+  Completions and `/v1/messages`) cannot be served by OpenAI's Chat
+  Completions: function tools with a reasoning effort on GPT-5.6+, any tool
+  call on GPT-6 Astra and GPT-6.1 (they reject `"none"`), tool results with
+  images or files (Chat Completions accepts them but the model never sees
+  them), and files given by URL. GoModel sends these to OpenAI's
+  `/v1/responses` with `store: false` and returns a normal chat completion or
+  chunk stream. A request with a field the Responses API has no equivalent for
+  (for example `n` or `logprobs`) stays on Chat Completions.
 - **llm-d** — point `LLMD_BASE_URL` at the Router/EPP service and declare
   `LLMD_MODELS` when the route does not serve `/v1/models`. The dedicated
   provider injects trusted inference-objective and user-path fairness headers.

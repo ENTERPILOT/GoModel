@@ -558,11 +558,20 @@ func TestToChatRequestDocumentBlocks(t *testing.T) {
 			},
 		},
 		{
+			name:     "base64 pdf without title gets a filename",
+			block:    `{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0="}}`,
+			wantType: "file",
+			check: func(t *testing.T, part core.ContentPart) {
+				assert.Equal(t, "document.pdf", part.File.Filename, "file = %+v", part.File)
+			},
+		},
+		{
 			name:     "plain text",
 			block:    `{"type":"document","source":{"type":"text","media_type":"text/plain","data":"hello"}}`,
 			wantType: "file",
 			check: func(t *testing.T, part core.ContentPart) {
 				assert.Equal(t, "data:text/plain;base64,aGVsbG8=", part.File.FileData, "file = %+v", part.File)
+				assert.Equal(t, "document.txt", part.File.Filename)
 			},
 		},
 		{
@@ -572,6 +581,7 @@ func TestToChatRequestDocumentBlocks(t *testing.T) {
 			check: func(t *testing.T, part core.ContentPart) {
 				assert.Equal(t, "https://example.com/a.pdf", part.File.FileURL)
 				assert.Empty(t, part.File.FileData, "file = %+v", part.File)
+				assert.Empty(t, part.File.Filename, "only inline data needs a filename")
 			},
 		},
 		{
