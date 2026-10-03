@@ -147,6 +147,10 @@ func (h *Handler) UpsertMCPServer(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	if err := h.mcpServers.Upsert(c.Request().Context(), server); err != nil {
+		if errors.Is(err, mcpgateway.ErrVirtualNameTaken) {
+			// The server was deleted while this edit was in flight.
+			return handleError(c, core.NewInvalidRequestError(err.Error(), err))
+		}
 		return handleError(c, mcpServerWriteError(err))
 	}
 

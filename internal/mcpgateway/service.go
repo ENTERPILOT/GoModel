@@ -208,16 +208,18 @@ func (s *Service) Upsert(ctx context.Context, server ManagedServer) error {
 	if err := server.Validate(); err != nil {
 		return err
 	}
+	write := s.store.Upsert
 	if s.IsVirtual(server.Name) {
 		// Only a new server is refused: one stored before the virtual server
-		// was declared keeps its endpoint and stays editable.
-		if _, err := s.store.Get(ctx, server.Name); errors.Is(err, ErrNotFound) {
-			return VirtualNameTakenError(server.Name)
-		} else if err != nil {
-			return err
-		}
+		// was declared keeps its endpoint and stays editable. Update fails
+		// atomically if the row is gone, so an edit racing a delete cannot
+		// recreate it under the virtual server's name.
+		write = s.store.Update
 	}
-	if err := s.store.Upsert(ctx, server); err != nil {
+	if err := write(ctx, server); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return VirtualNameTakenError(server.Name)
+		}
 		return err
 	}
 	if err := s.Reload(ctx); err != nil {

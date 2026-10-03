@@ -714,4 +714,11 @@ test("a stale virtual-server response cannot restore the list", () => {
 
   const stop = store.match(/stopPolling\(\) \{[\s\S]*?\n  \}/);
   assert.match(stop[0], /this\.#virtualSeq \+= 1;/, "leaving the page retires the request");
+
+  // A main-list response landing after the page was left must not start one.
+  assert.match(
+    store,
+    /if \(!background && generation === this\.#pollGeneration\) \{\s*\n\s*void this\.fetchVirtualServers\(\);/,
+    "fetchVirtualServers must only start for the current page generation",
+  );
 });

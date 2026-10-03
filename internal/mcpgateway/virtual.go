@@ -1,6 +1,7 @@
 package mcpgateway
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -101,11 +102,23 @@ func (s *Service) virtualDiscovery(name string) bool {
 	return s.searchDiscovery
 }
 
-// VirtualNameTakenError rejects an admin-managed server whose slug a virtual
+// ErrVirtualNameTaken marks a new admin-managed server whose slug a virtual
 // server already serves at /mcp/{name}.
+var ErrVirtualNameTaken = errors.New("slug is used by a virtual MCP server")
+
+// VirtualNameTakenError explains ErrVirtualNameTaken for one slug; it
+// matches ErrVirtualNameTaken under errors.Is.
 func VirtualNameTakenError(name string) error {
-	return fmt.Errorf("slug %q is used by virtual MCP server %q (declared in config); choose another slug", name, name)
+	return virtualNameTakenError{name: name}
 }
+
+type virtualNameTakenError struct{ name string }
+
+func (e virtualNameTakenError) Error() string {
+	return fmt.Sprintf("slug %q is used by virtual MCP server %q (declared in config); choose another slug", e.name, e.name)
+}
+
+func (e virtualNameTakenError) Is(target error) bool { return target == ErrVirtualNameTaken }
 
 // logVirtualServerIssues reports virtual servers that are not served and
 // members that match no server, so a typo in config surfaces at startup and

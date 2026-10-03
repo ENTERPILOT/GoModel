@@ -150,7 +150,9 @@ class McpServersState {
       this.servers = outcome.items;
       this.#pollFailures = 0;
       this.#schedulePoll(generation);
-      if (!background) {
+      // A list response can land after the page was left; it must not start
+      // a request the cleanup can no longer retire.
+      if (!background && generation === this.#pollGeneration) {
         void this.fetchVirtualServers();
       }
     } finally {

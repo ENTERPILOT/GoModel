@@ -189,6 +189,14 @@ func (m *memoryStore) Upsert(_ context.Context, server ManagedServer) error {
 	return nil
 }
 
+func (m *memoryStore) Update(_ context.Context, server ManagedServer) error {
+	if _, ok := m.rows[server.Name]; !ok {
+		return ErrNotFound
+	}
+	m.rows[server.Name] = server
+	return nil
+}
+
 func (m *memoryStore) Delete(_ context.Context, name string) error {
 	delete(m.rows, name)
 	return nil
@@ -206,9 +214,9 @@ func TestUpsertRejectsVirtualServerName(t *testing.T) {
 	t.Cleanup(service.Close)
 
 	err = service.Upsert(context.Background(), ManagedServer{Name: "coding", URL: "https://example.com/mcp", Transport: config.MCPTransportHTTP})
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrVirtualNameTaken)
 	assert.Equal(t, `slug "coding" is used by virtual MCP server "coding" (declared in config); choose another slug`, err.Error())
-	assert.Empty(t, store.rows, "nothing is persisted")
+	assert.Empty(t, store.rows, "nothing is persisted, including by an edit whose row was deleted meanwhile")
 }
 
 func TestUpsertKeepsServerStoredBeforeVirtualServerEditable(t *testing.T) {

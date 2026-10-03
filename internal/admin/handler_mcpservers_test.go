@@ -534,6 +534,20 @@ func TestListMCPVirtualServers(t *testing.T) {
 	}, got)
 }
 
+func TestUpsertMCPServer_DeletedDuringEditOfVirtualNameIsBadRequest(t *testing.T) {
+	fake := newMCPAdminFake()
+	fake.addStored(mcpgateway.ManagedServer{Name: "coding", URL: "https://old.example.com/mcp", Transport: "http", Enabled: true}, mcpgateway.StatusConnected)
+	fake.virtuals = []mcpgateway.VirtualServerView{{Spec: mcpgateway.VirtualServerSpec{Name: "coding", Servers: []string{"github"}}}}
+	// The row passes the handler's check, then a concurrent delete wins.
+	fake.upsertErr = mcpgateway.VirtualNameTakenError("coding")
+	h := newMCPHandler(fake)
+
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/mcp-servers", `{"name":"coding","url":"https://new.example.com/mcp"}`)
+	require.NoError(t, h.UpsertMCPServer(c))
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), `is used by virtual MCP server`)
+}
+
 func TestUpsertMCPServer_EditsServerStoredBeforeVirtualServer(t *testing.T) {
 	fake := newMCPAdminFake()
 	fake.addStored(mcpgateway.ManagedServer{Name: "coding", URL: "https://old.example.com/mcp", Transport: "http", Enabled: true}, mcpgateway.StatusConnected)
