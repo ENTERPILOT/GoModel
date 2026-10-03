@@ -18,6 +18,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/server"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -156,10 +157,13 @@ func setupSQLiteUsageFixture(t *testing.T) *e2eUsageFixture {
 		require.NoError(t, db.Close())
 	})
 
-	store, err := usage.NewSQLiteStore(db, 0)
+	usageDB, err := sqlx.NewSQLite(db)
 	require.NoError(t, err)
 
-	reader, err := usage.NewSQLiteReader(db)
+	store, err := usage.NewSQLStore(context.Background(), usageDB, 0)
+	require.NoError(t, err)
+
+	reader, err := usage.NewSQLReader(usageDB)
 	require.NoError(t, err)
 
 	cfg := usage.DefaultConfig()
