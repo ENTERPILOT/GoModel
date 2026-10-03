@@ -366,3 +366,56 @@ func TestCountMessageTokens_ProviderBacked(t *testing.T) {
 	failing := &tokenCountingMockProvider{mockProvider: &mockProvider{supportedModels: []string{"claude-test"}}, countErr: errors.New("upstream down")}
 	assert.Equal(t, heuristic, call(t, failing))
 }
+
+type chatTokenCountingMockProvider struct {
+	*mockProvider
+	messagesErr error // answer of the native Messages counter
+	chatCount   int
+	chatErr     error
+	chatCalls   int
+	last        *core.ChatRequest
+	lastDialect core.RequestDialect
+}
+
+func (m *chatTokenCountingMockProvider) CountMessagesTokens(context.Context, string, []byte) (int, error) {
+	return 0, m.messagesErr
+}
+
+func (m *chatTokenCountingMockProvider) CountChatTokens(ctx context.Context, req *core.ChatRequest) (int, error) {
+	m.chatCalls++
+	m.last, m.lastDialect = req, core.RequestDialectFromContext(ctx)
+	if m.chatErr != nil {
+		return 0, m.chatErr
+	}
+	return m.chatCount, nil
+}
+
+// A provider without a native Messages counter counts the request's chat
+// translation (OpenAI); an upstream failure on either path falls back to the
+// estimate.
+func TestCountMessageTokens_ChatCounter(t *testing.T) {
+	body := `{"model":"gpt-test","messages":[{"role":"user","content":"count these tokens please"}]}`
+	call := func(t *testing.T, provider core.RoutableProvider) float64 {
+		t.Helper()
+		handler := NewHandler(provider, nil, nil, nil)
+		c, rec := echotest.Post(t, "/v1/messages/count_tokens", body)
+		require.NoError(t, handler.CountMessageTokens(c))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		return echotest.Decode[map[string]any](t, rec)["input_tokens"].(float64)
+	}
+	base := func() *mockProvider { return &mockProvider{supportedModels: []string{"gpt-test"}} }
+	estimate := call(t, base())
+
+	counted := &chatTokenCountingMockProvider{mockProvider: base(), messagesErr: core.ErrMessagesTokenCountUnsupported, chatCount: 777}
+	assert.Equal(t, float64(777), call(t, counted))
+	require.NotNil(t, counted.last)
+	assert.Contains(t, counted.last.Model, "gpt-test")
+	assert.Equal(t, core.RequestDialectAnthropicMessages, counted.lastDialect)
+
+	chatFails := &chatTokenCountingMockProvider{mockProvider: base(), messagesErr: core.ErrMessagesTokenCountUnsupported, chatErr: errors.New("upstream down")}
+	assert.Equal(t, estimate, call(t, chatFails))
+
+	nativeFails := &chatTokenCountingMockProvider{mockProvider: base(), messagesErr: errors.New("upstream down"), chatCount: 777}
+	assert.Equal(t, estimate, call(t, nativeFails))
+	assert.Zero(t, nativeFails.chatCalls, "a failed native count does not fall through to the chat counter")
+}

@@ -206,8 +206,9 @@ func (s *translatedInferenceService) Messages(c *echo.Context) error {
 }
 
 // CountMessageTokens answers a Messages token count. The provider that owns
-// the model counts exactly when it has an endpoint for it (Anthropic does);
-// otherwise, and whenever that call fails, the gateway's estimate answers, so
+// the model counts exactly when it has an endpoint for it: Anthropic counts
+// the Messages request natively, OpenAI counts its chat translation.
+// Otherwise, and whenever that call fails, the gateway's estimate answers, so
 // the endpoint works for every model and never depends on an upstream being
 // reachable (ADR-0007, amended).
 func (s *translatedInferenceService) CountMessageTokens(c *echo.Context) error {
@@ -222,7 +223,7 @@ func (s *translatedInferenceService) CountMessageTokens(c *echo.Context) error {
 	if strings.TrimSpace(req.Model) == "" {
 		return handleError(c, core.NewInvalidRequestError("model is required", nil).WithParam("model"))
 	}
-	if count, ok := s.countMessageTokensUpstream(c.Request().Context(), req.Model, body); ok {
+	if count, ok := s.countMessageTokensUpstream(c.Request().Context(), req, body); ok {
 		return c.JSON(http.StatusOK, anthropicapi.CountTokensResponse{InputTokens: count})
 	}
 	return c.JSON(http.StatusOK, anthropicapi.CountTokensResponse{
@@ -230,22 +231,43 @@ func (s *translatedInferenceService) CountMessageTokens(c *echo.Context) error {
 	})
 }
 
-// countMessageTokensUpstream asks the route's provider for an exact count.
-// ok is false when no provider can answer: the model does not resolve, the
-// provider has no counting endpoint, or the call failed.
-func (s *translatedInferenceService) countMessageTokensUpstream(ctx context.Context, model string, body []byte) (int, bool) {
-	counter, ok := s.provider.(core.MessagesTokenCounter)
+// countMessageTokensUpstream asks the route's provider for an exact count:
+// natively when it counts Messages requests, otherwise from the request's
+// chat translation. ok is false when no provider can answer: the model does
+// not resolve, the provider has no counting endpoint, or the call failed.
+func (s *translatedInferenceService) countMessageTokensUpstream(ctx context.Context, req *anthropicapi.MessagesRequest, body []byte) (int, bool) {
+	selector, err := resolveServiceModel(ctx, s.provider, s.modelResolver, req.Model, "")
+	if err != nil {
+		return 0, false
+	}
+	model := selector.QualifiedModel()
+	if counter, ok := s.provider.(core.MessagesTokenCounter); ok {
+		count, err := counter.CountMessagesTokens(ctx, model, body)
+		if err == nil {
+			return count, true
+		}
+		if !errors.Is(err, core.ErrMessagesTokenCountUnsupported) {
+			slog.Debug("count_tokens: provider count failed, falling back to the estimate", "model", model, "error", err)
+			return 0, false
+		}
+	}
+	counter, ok := s.provider.(core.ChatTokenCounter)
 	if !ok {
 		return 0, false
 	}
-	selector, err := resolveServiceModel(ctx, s.provider, s.modelResolver, model, "")
+	// A count request carries no max_tokens; the translation requires one,
+	// and it does not affect the input.
+	countable := *req
+	countable.MaxTokens = max(countable.MaxTokens, 1)
+	chatReq, err := anthropicapi.ToChatRequest(&countable)
 	if err != nil {
 		return 0, false
 	}
-	count, err := counter.CountMessagesTokens(ctx, selector.QualifiedModel(), body)
+	chatReq.Model = model
+	count, err := counter.CountChatTokens(core.WithRequestDialect(ctx, core.RequestDialectAnthropicMessages), chatReq)
 	if err != nil {
 		if !errors.Is(err, core.ErrMessagesTokenCountUnsupported) {
-			slog.Debug("count_tokens: provider count failed, falling back to the estimate", "model", selector.QualifiedModel(), "error", err)
+			slog.Debug("count_tokens: provider count failed, falling back to the estimate", "model", model, "error", err)
 		}
 		return 0, false
 	}

@@ -23,3 +23,25 @@ func (r *Router) CountMessagesTokens(ctx context.Context, model string, body []b
 	)
 	return count, err
 }
+
+// CountChatTokens routes a chat token count to the provider that owns the
+// model. The request is forwarded as for a completion (model resolved, other
+// providers' replay state and unsupported cache directives removed), so the
+// count covers what the provider would actually receive.
+func (r *Router) CountChatTokens(ctx context.Context, req *core.ChatRequest) (int, error) {
+	if req == nil {
+		return 0, core.NewInvalidRequestError("chat request is required", nil)
+	}
+	count, _, err := routeResolvedModelCall(
+		r, ctx, req.Model, req.Provider,
+		func(route resolvedRoute) *core.ChatRequest { return forwardChatRequest(ctx, req, route) },
+		func(ctx context.Context, provider core.Provider, forward *core.ChatRequest) (int, error) {
+			counter, ok := provider.(core.ChatTokenCounter)
+			if !ok {
+				return 0, core.ErrMessagesTokenCountUnsupported
+			}
+			return counter.CountChatTokens(ctx, forward)
+		},
+	)
+	return count, err
+}
