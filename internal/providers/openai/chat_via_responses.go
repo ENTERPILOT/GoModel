@@ -349,7 +349,7 @@ func responsesInputContent(content any) ([]any, error) {
 		case "text":
 			out = append(out, map[string]any{"type": "input_text", "text": part.Text})
 		case "image_url":
-			if part.ImageURL == nil {
+			if part.ImageURL == nil || carriesChatOnlyFields(part.ImageURL.ExtraFields) {
 				return nil, errNotTranslatable
 			}
 			detail := part.ImageURL.Detail
@@ -358,7 +358,7 @@ func responsesInputContent(content any) ([]any, error) {
 			}
 			out = append(out, map[string]any{"type": "input_image", "image_url": part.ImageURL.URL, "detail": detail})
 		case "file":
-			if !core.ValidFilePayload(part.File) {
+			if !core.ValidFilePayload(part.File) || carriesChatOnlyFields(part.File.ExtraFields) {
 				return nil, errNotTranslatable
 			}
 			file := map[string]any{"type": "input_file"}

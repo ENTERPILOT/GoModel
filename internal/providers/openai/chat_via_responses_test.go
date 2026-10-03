@@ -211,6 +211,14 @@ func TestChatToResponsesRequest_RejectsWhatItCannotCarry(t *testing.T) {
 		{name: "part member", req: core.ChatRequest{Model: "gpt-6-astra", Messages: []core.Message{{Role: "user", Content: []core.ContentPart{
 			{Type: "text", Text: "x", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"x_note": json.RawMessage(`1`)})},
 		}}}}},
+		{name: "image member", req: core.ChatRequest{Model: "gpt-6-astra", Messages: []core.Message{{Role: "user", Content: []core.ContentPart{
+			{Type: "image_url", ImageURL: &core.ImageURLContent{URL: "https://example.com/a.png",
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"x_crop": json.RawMessage(`1`)})}},
+		}}}}},
+		{name: "file member", req: core.ChatRequest{Model: "gpt-6-astra", Messages: []core.Message{{Role: "user", Content: []core.ContentPart{
+			{Type: "file", File: &core.FileContent{FileURL: "https://example.com/a.pdf",
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"x_pages": json.RawMessage(`2`)})}},
+		}}}}},
 		{name: "assistant image without text", req: core.ChatRequest{Model: "gpt-6-astra", Messages: []core.Message{{Role: "assistant", Content: []core.ContentPart{
 			{Type: "image_url", ImageURL: &core.ImageURLContent{URL: "https://example.com/a.png"}},
 		}}}}},
