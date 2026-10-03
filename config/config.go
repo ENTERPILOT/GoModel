@@ -86,6 +86,8 @@ type LoadResult struct {
 
 	secretsResolved bool
 	secretsErr      error
+	keyWrapper          KeyWrapper
+	previousKeyWrappers []KeyWrapper
 }
 
 // DecodeExtension strictly decodes one named extensions: section into target.

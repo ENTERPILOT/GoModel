@@ -72,7 +72,9 @@ const (
 	InputSelect Input = "select"
 	// InputCheckboxes is a multi-choice list over Field.Options.
 	InputCheckboxes Input = "checkboxes"
-	// InputSecret is a masked text box; the value is stored encrypted.
+	// InputSecret is a masked text box. The admin API never returns the
+	// value, only a mask; the value is encrypted at rest when
+	// GOMODEL_ENCRYPTION_KEY is set, and stored in plaintext otherwise.
 	InputSecret Input = "secret"
 	// InputModel is a model picker listing the gateway's models; the value
 	// is a "provider/model" selector, an alias, or a virtual model.

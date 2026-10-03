@@ -57,7 +57,7 @@ func (b *bootstrap) initModelCatalog() error {
 	}
 	b.managedProviderNames = managedProviderNames
 
-	providerCredentialsResult, err := providers.NewCredentialsStore(b.ctx, app.storage, providerResult.Factory, providerResult.Registry, managedProviderNames, b.appCfg.Resilience)
+	providerCredentialsResult, err := providers.NewCredentialsStore(b.ctx, app.storage, app.secrets, providerResult.Factory, providerResult.Registry, managedProviderNames, b.appCfg.Resilience)
 	if err != nil {
 		return fmt.Errorf("failed to initialize provider credentials store: %w", err)
 	}
