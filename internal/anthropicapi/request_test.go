@@ -571,7 +571,7 @@ func TestToChatRequestDocumentBlocks(t *testing.T) {
 			wantType: "file",
 			check: func(t *testing.T, part core.ContentPart) {
 				assert.Equal(t, "data:text/plain;base64,aGVsbG8=", part.File.FileData, "file = %+v", part.File)
-				assert.Equal(t, "document.txt", part.File.Filename)
+				assert.Empty(t, part.File.Filename, "a text document gets no invented title")
 			},
 		},
 		{

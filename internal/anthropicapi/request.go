@@ -387,9 +387,11 @@ func documentPart(block ContentBlock, extra core.UnknownJSONFields) (core.Conten
 	default:
 		return core.ContentPart{}, false, fmt.Errorf("unsupported document source type %q", source.Type)
 	}
-	if file.Filename == "" && file.FileData != "" {
+	if file.Filename == "" && source.Type == "base64" {
 		// OpenAI rejects inline file data without a filename, and Anthropic
-		// clients often send documents with no title.
+		// clients often send documents with no title. Text documents keep no
+		// invented name: providers that cannot take text files receive them
+		// as text, where a name would read as the caller's title.
 		file.Filename = core.DefaultFilename(file.FileData)
 	}
 	return core.ContentPart{Type: "file", File: file, ExtraFields: extra}, true, nil

@@ -3,7 +3,6 @@ package openai
 
 import (
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -190,7 +189,7 @@ func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
 	if req == nil {
 		return req, nil
 	}
-	req = nameInlineFiles(req)
+	req = adaptInlineFiles(req)
 	effort := ""
 	if req.Reasoning != nil {
 		effort = strings.TrimSpace(req.Reasoning.Effort)
@@ -206,40 +205,6 @@ func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
 		return providers.DropReasoning(req), nil
 	}
 	return providers.AdaptReasoningEffortRequest(req, supportedEffort(req.Model, effort))
-}
-
-// nameInlineFiles gives inline file parts that arrived without a filename the
-// default name OpenAI requires alongside file_data. The caller's request is
-// left unchanged; it is returned as-is when no part needs a name.
-func nameInlineFiles(req *core.ChatRequest) *core.ChatRequest {
-	adapted := req
-	for i, msg := range req.Messages {
-		parts, ok := msg.Content.([]core.ContentPart)
-		if !ok || !slices.ContainsFunc(parts, unnamedInlineFile) {
-			continue
-		}
-		named := slices.Clone(parts)
-		for j, part := range named {
-			if unnamedInlineFile(part) {
-				file := *part.File
-				file.Filename = core.DefaultFilename(file.FileData)
-				named[j].File = &file
-			}
-		}
-		if adapted == req {
-			cloned := *req
-			cloned.Messages = slices.Clone(req.Messages)
-			adapted = &cloned
-		}
-		adapted.Messages[i].Content = named
-	}
-	return adapted
-}
-
-// unnamedInlineFile reports whether a part is inline file data without a
-// filename.
-func unnamedInlineFile(part core.ContentPart) bool {
-	return part.Type == "file" && part.File != nil && part.File.FileData != "" && part.File.Filename == ""
 }
 
 // chatRequestBody returns the appropriate request body for the model.
