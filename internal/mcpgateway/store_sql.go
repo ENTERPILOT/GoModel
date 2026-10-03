@@ -103,25 +103,33 @@ func (s *SQLStore) Get(ctx context.Context, name string) (*ManagedServer, error)
 	return &server, nil
 }
 
+// sqlMCPServerJSON holds one row's JSON-encoded collection columns.
+type sqlMCPServerJSON struct {
+	headers, allowed, disallowed, paths, disallowedPaths string
+}
+
+func encodeSQLMCPServerJSON(server ManagedServer) (sqlMCPServerJSON, error) {
+	var encoded sqlMCPServerJSON
+	var err error
+	if encoded.headers, err = encodeJSONMap(server.Headers); err != nil {
+		return encoded, err
+	}
+	if encoded.allowed, err = encodeJSONList(server.AllowedTools); err != nil {
+		return encoded, err
+	}
+	if encoded.disallowed, err = encodeJSONList(server.DisallowedTools); err != nil {
+		return encoded, err
+	}
+	if encoded.paths, err = encodeJSONList(server.UserPaths); err != nil {
+		return encoded, err
+	}
+	encoded.disallowedPaths, err = encodeJSONList(server.DisallowedUserPaths)
+	return encoded, err
+}
+
 func (s *SQLStore) Upsert(ctx context.Context, server ManagedServer) error {
 	stampUpsert(&server)
-	headersJSON, err := encodeJSONMap(server.Headers)
-	if err != nil {
-		return err
-	}
-	allowedJSON, err := encodeJSONList(server.AllowedTools)
-	if err != nil {
-		return err
-	}
-	disallowedJSON, err := encodeJSONList(server.DisallowedTools)
-	if err != nil {
-		return err
-	}
-	pathsJSON, err := encodeJSONList(server.UserPaths)
-	if err != nil {
-		return err
-	}
-	disallowedPathsJSON, err := encodeJSONList(server.DisallowedUserPaths)
+	encoded, err := encodeSQLMCPServerJSON(server)
 	if err != nil {
 		return err
 	}
@@ -149,19 +157,55 @@ func (s *SQLStore) Upsert(ctx context.Context, server ManagedServer) error {
 		server.DisplayName,
 		server.URL,
 		server.Transport,
-		headersJSON,
+		encoded.headers,
 		server.Description,
 		server.Enabled,
-		allowedJSON,
-		disallowedJSON,
-		pathsJSON,
-		disallowedPathsJSON,
+		encoded.allowed,
+		encoded.disallowed,
+		encoded.paths,
+		encoded.disallowedPaths,
 		server.ToolTimeoutSeconds,
 		server.CreatedAt.Unix(),
 		server.UpdatedAt.Unix(),
 	)
 	if err != nil {
 		return fmt.Errorf("upsert mcp server: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLStore) Update(ctx context.Context, server ManagedServer) error {
+	stampUpsert(&server)
+	encoded, err := encodeSQLMCPServerJSON(server)
+	if err != nil {
+		return err
+	}
+	affected, err := s.db.Exec(ctx, `
+		UPDATE mcp_servers SET
+			display_name = ?, url = ?, transport = ?, headers = ?, description = ?, enabled = ?,
+			allowed_tools = ?, disallowed_tools = ?, user_paths = ?, disallowed_user_paths = ?,
+			tool_timeout_seconds = ?, updated_at = ?
+		WHERE name = ?
+	`,
+		server.DisplayName,
+		server.URL,
+		server.Transport,
+		encoded.headers,
+		server.Description,
+		server.Enabled,
+		encoded.allowed,
+		encoded.disallowed,
+		encoded.paths,
+		encoded.disallowedPaths,
+		server.ToolTimeoutSeconds,
+		server.UpdatedAt.Unix(),
+		strings.TrimSpace(server.Name),
+	)
+	if err != nil {
+		return fmt.Errorf("update mcp server: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
 	}
 	return nil
 }

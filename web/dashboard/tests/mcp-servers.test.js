@@ -38,6 +38,8 @@ import {
   mcpClientConfig,
   mcpEndpointIsInsecure,
   mcpGatewayEndpoint,
+  mcpServedVirtualServers,
+  mcpVirtualServerEndpoint,
   normalizeMcpToolDiscovery,
 } from "../src/pages/mcp-servers/mcp-servers.js";
 
@@ -660,4 +662,63 @@ test("mcpEndpointIsInsecure flags plain HTTP only off loopback", () => {
   assert.equal(mcpEndpointIsInsecure("http://127.0.0.1:8080/mcp"), false);
   assert.equal(mcpEndpointIsInsecure("http://[::1]:8080/mcp"), false);
   assert.equal(mcpEndpointIsInsecure("not a url"), false);
+});
+
+test("mcpVirtualServerEndpoint appends the virtual server name to /mcp", () => {
+  assert.equal(mcpVirtualServerEndpoint("https://gw/base/mcp", "coding"), "https://gw/base/mcp/coding");
+});
+
+test("mcpServedVirtualServers drops virtual servers a same-named server shadows", () => {
+  assert.deepEqual(
+    mcpServedVirtualServers([
+      { name: "coding", servers: ["github"] },
+      { name: "notion", servers: ["github"], conflict: "not served" },
+      { servers: ["github"] },
+    ]).map((virtual) => virtual.name),
+    ["coding"],
+  );
+  assert.deepEqual(mcpServedVirtualServers(null), []);
+});
+
+test("mcpClientConfig names a virtual server's entry after it", () => {
+  const servers = JSON.parse(mcpClientConfig("https://gw/mcp/coding", "off", "off", "coding")).mcpServers;
+  assert.deepEqual(Object.keys(servers), ["gomodel-coding"]);
+  assert.equal(servers["gomodel-coding"].url, "https://gw/mcp/coding");
+});
+
+// Regression: a virtual-list response landing after the page was left, or
+// after the main list was cleared, put stale virtual servers back.
+test("a stale virtual-server response cannot restore the list", () => {
+  const SRC = fileURLToPath(new URL("../src", import.meta.url));
+  const store = readFileSync(join(SRC, "pages/mcp-servers/mcpServers.svelte.js"), "utf8");
+
+  const fetchVirtual = (store.match(/async fetchVirtualServers\(\) \{[\s\S]*?\n  \}/) || [""])[0];
+  assert.ok(fetchVirtual, "fetchVirtualServers missing");
+  // Each expression must exist: indexOf's -1 would pass an order check.
+  const assertBefore = (first, second, message) => {
+    const firstIndex = fetchVirtual.indexOf(first);
+    const secondIndex = fetchVirtual.indexOf(second);
+    assert.ok(firstIndex >= 0 && secondIndex >= 0 && firstIndex < secondIndex, message);
+  };
+  assertBefore("const seq = ++this.#virtualSeq;", "await ", "the sequence must be taken before the request");
+  assertBefore("seq !== this.#virtualSeq", "this.virtualServers =", "a retired response must be dropped before it is applied");
+
+  const clear = store.match(/#clearVirtualServers\(\) \{[\s\S]*?\n  \}/);
+  assert.ok(clear, "#clearVirtualServers missing");
+  assert.match(clear[0], /this\.#virtualSeq \+= 1;/);
+  assert.equal(
+    store.match(/this\.virtualServers = \[\];/g).length,
+    1,
+    "lists are cleared only through #clearVirtualServers",
+  );
+
+  const stop = store.match(/stopPolling\(\) \{[\s\S]*?\n  \}/);
+  assert.match(stop[0], /this\.#virtualSeq \+= 1;/, "leaving the page retires the request");
+
+  // A main-list response landing after the page was left must not start one.
+  assert.match(
+    store,
+    /if \(!background && generation === this\.#pollGeneration\) \{\s*\n\s*void this\.fetchVirtualServers\(\);/,
+    "fetchVirtualServers must only start for the current page generation",
+  );
 });
