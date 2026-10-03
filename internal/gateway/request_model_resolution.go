@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -96,11 +98,11 @@ func ResolveRequestModelWithAuthorizer(
 			return nil, refreshErr
 		}
 		if !refreshed {
-			return nil, core.NewInvalidRequestError(err.Error(), err)
+			return nil, resolutionError(err)
 		}
 		resolvedSelector, aliasApplied, err = ResolveExecutionSelector(ctx, provider, resolver, requested)
 		if err != nil {
-			return nil, core.NewInvalidRequestError(err.Error(), err)
+			return nil, resolutionError(err)
 		}
 	}
 	if resolvedSelector == (core.ModelSelector{}) {
@@ -121,14 +123,14 @@ func ResolveRequestModelWithAuthorizer(
 			if refreshed {
 				resolvedSelector, aliasApplied, err = ResolveExecutionSelector(ctx, provider, resolver, requested)
 				if err != nil {
-					return nil, core.NewInvalidRequestError(err.Error(), err)
+					return nil, resolutionError(err)
 				}
 				resolvedModel = resolvedSelector.QualifiedModel()
 			}
 		}
 	}
 	if counted, ok := provider.(modelCountProvider); ok && counted.ModelCount() == 0 {
-		return nil, core.NewProviderError("", 0, "model registry not initialized", nil)
+		return nil, core.NewProviderError("", http.StatusServiceUnavailable, "model registry not initialized: no models have been loaded yet, retry shortly", nil)
 	}
 	if !provider.Supports(resolvedModel) {
 		if !refreshed {
@@ -140,7 +142,7 @@ func ResolveRequestModelWithAuthorizer(
 			if refreshed {
 				resolvedSelector, aliasApplied, err = ResolveExecutionSelector(ctx, provider, resolver, requested)
 				if err != nil {
-					return nil, core.NewInvalidRequestError(err.Error(), err)
+					return nil, resolutionError(err)
 				}
 				resolvedModel = resolvedSelector.QualifiedModel()
 			}
@@ -166,6 +168,16 @@ func ResolveRequestModelWithAuthorizer(
 		resolution.Slowdown = slowdownResolver.ResolveSlowdown(ctx, requested, resolvedSelector)
 	}
 	return resolution, nil
+}
+
+// resolutionError reports a failed model resolution. A typed gateway error
+// keeps its status (the router answers 503 while the model registry is still
+// empty, so clients retry); anything else is a selector the caller got wrong.
+func resolutionError(err error) error {
+	if gatewayErr, ok := errors.AsType[*core.GatewayError](err); ok {
+		return gatewayErr
+	}
+	return core.NewInvalidRequestError(err.Error(), err)
 }
 
 func refreshProviderModelsForResolution(

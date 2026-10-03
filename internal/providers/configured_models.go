@@ -24,6 +24,10 @@ const (
 	configuredProviderModelsUpstreamUnlisted configuredProviderModelsApplyReason = "upstream_unlisted"
 	configuredProviderModelsUpstreamNil      configuredProviderModelsApplyReason = "upstream_nil"
 	configuredProviderModelsUpstreamEmpty    configuredProviderModelsApplyReason = "upstream_empty"
+	// catalogProviderModelsUpstreamError means the provider's listing failed
+	// and nothing else describes its inventory, so the model catalog's list
+	// for its type stands in until a live listing succeeds.
+	catalogProviderModelsUpstreamError configuredProviderModelsApplyReason = "catalog_upstream_error"
 )
 
 func normalizeConfiguredProviderModels(models []string) []string {

@@ -118,6 +118,7 @@ type Config struct {
 	IPExtractor                     echo.IPExtractor                       // Optional: trusted client IP extraction strategy for proxied deployments
 	StorageProbe                    ReadinessProbe                         // Optional: primary storage connectivity check; failure makes /health/ready report not_ready (503)
 	CacheProbe                      ReadinessProbe                         // Optional: Redis cache connectivity check; failure makes /health/ready report degraded (200, non-blocking)
+	ModelInventory                  ModelInventory                         // Optional: model registry; no models with providers configured makes /health/ready report degraded (200, non-blocking)
 	RequestRewriters                []ext.RequestRewriter                  // Optional: raw-body rewriters invoked on inference ingress (post-auth, pre-workflow-resolution)
 	OuterMiddleware                 []echo.MiddlewareFunc                  // Optional: extension middleware after sensitive URI redaction, before logging/recovery/limits
 	ExtraMiddleware                 []echo.MiddlewareFunc                  // Optional: extension middleware registered after audit, before gateway auth
@@ -145,6 +146,14 @@ func (c *Config) effectiveMasterKey() string {
 // an external provider outage must not pull a healthy gateway out of rotation.
 type ReadinessProbe interface {
 	Ping(ctx context.Context) error
+}
+
+// ModelInventory reports how many models are routable and how many providers
+// are configured. Providers with no models means model discovery has not
+// succeeded yet and nothing is cached: requests fail with 503 until it does.
+type ModelInventory interface {
+	ModelCount() int
+	ProviderCount() int
 }
 
 // New creates a new HTTP server
@@ -218,6 +227,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		handler.guardrailsHash = cfg.GuardrailsHash
 		handler.storageProbe = cfg.StorageProbe
 		handler.cacheProbe = cfg.CacheProbe
+		handler.modelInventory = cfg.ModelInventory
 	}
 	if cfg != nil && cfg.EnabledPassthroughProviders != nil {
 		handler.setEnabledPassthroughProviders(cfg.EnabledPassthroughProviders)

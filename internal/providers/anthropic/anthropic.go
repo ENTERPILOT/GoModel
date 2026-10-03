@@ -87,6 +87,11 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 	return p
 }
 
+// GetBaseURL returns the provider's current API base URL.
+func (p *Provider) GetBaseURL() string {
+	return p.client.BaseURL()
+}
+
 // SetBaseURL allows configuring a custom base URL for the provider
 func (p *Provider) SetBaseURL(url string) {
 	p.client.SetBaseURL(url)

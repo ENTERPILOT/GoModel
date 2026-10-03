@@ -141,6 +141,7 @@ func (r *ModelRegistry) fetchAllProviderModels(
 		fetchAt          time.Time
 		err              error
 	}
+	catalogModels := r.catalogFallbackModels(providers, providerTypes, names, configuredProviderModels)
 	results := make([]fetchResult, len(providers))
 	var wg sync.WaitGroup
 	for i, provider := range providers {
@@ -154,6 +155,7 @@ func (r *ModelRegistry) fetchAllProviderModels(
 				providerTypes[provider],
 				configuredProviderModelsMode,
 				configuredProviderModels[names[i]],
+				catalogModels[names[i]],
 			)
 			results[i] = fetchResult{resp: resp, configuredReason: configuredReason, fetchAt: fetchAt, err: err}
 		}(i, provider)
@@ -177,6 +179,10 @@ func (r *ModelRegistry) fetchAllProviderModels(
 			}
 			if configuredReason == configuredProviderModelsUpstreamUnlisted {
 				slog.Debug("provider does not list models, using configured provider models", attrs...)
+			} else if err != nil && configuredReason == catalogProviderModelsUpstreamError {
+				configuredUpstreamError = err.Error()
+				attrs = append(attrs, "catalog_models", len(resp.Data), "error", err)
+				slog.Warn("upstream ListModels failed, serving the model catalog's list for the provider until it recovers", attrs...)
 			} else if err != nil {
 				configuredUpstreamError = err.Error()
 				attrs = append(attrs, "error", err)
@@ -240,6 +246,7 @@ func (r *ModelRegistry) fetchAllProviderModels(
 			lastModelFetchAt:        fetchAt,
 			lastModelFetchError:     configuredUpstreamError,
 			modelListingUnsupported: configuredReason == configuredProviderModelsUpstreamUnlisted,
+			catalogStandIn:          configuredReason == catalogProviderModelsUpstreamError,
 		}
 		// Mark the inventory as authoritatively populated when this fetch is the
 		// last word on the provider's model list. That covers these cases:
@@ -425,6 +432,7 @@ func fetchProviderInventory(
 	providerType string,
 	mode config.ConfiguredProviderModelsMode,
 	configuredModels []string,
+	catalogModels []string,
 ) (*core.ModelsResponse, configuredProviderModelsApplyReason, time.Time, error) {
 	fetchAt := time.Now().UTC()
 	if mode == config.ConfiguredProviderModelsModeAllowlist && len(configuredModels) > 0 {
@@ -451,7 +459,58 @@ func fetchProviderInventory(
 		err,
 		fetchAt.Unix(),
 	)
+	if err != nil && reason == configuredProviderModelsNotApplied && len(catalogModels) > 0 {
+		resp = configuredProviderModelsResponse(providerName, providerType, catalogModels, nil, fetchAt.Unix())
+		reason = catalogProviderModelsUpstreamError
+	}
 	return resp, reason, fetchAt, err
+}
+
+// catalogFallbackModels returns, per provider name, the model catalog's model
+// IDs to serve when that provider's own listing fails: a control-plane outage
+// where /models errors while inference still works must not leave a gateway
+// with nothing routable. It applies only to a provider with no inventory yet
+// (no cache, no earlier fetch) and no configured models, which take
+// precedence, that talks to its type's default base URL — a custom endpoint
+// may serve other models than the public catalog lists.
+func (r *ModelRegistry) catalogFallbackModels(
+	providers []core.Provider,
+	providerTypes map[core.Provider]string,
+	names []string,
+	configuredProviderModels map[string][]string,
+) map[string][]string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.modelList == nil {
+		return nil
+	}
+	out := make(map[string][]string)
+	for i, provider := range providers {
+		name, providerType := names[i], providerTypes[provider]
+		if len(configuredProviderModels[name]) > 0 || len(r.discoveredByProvider[name]) > 0 {
+			continue
+		}
+		if !usesDefaultBaseURL(provider, r.modelList.ProviderDefaultBaseURL(providerType)) {
+			continue
+		}
+		if ids := r.modelList.ProviderModelIDs(providerType); len(ids) > 0 {
+			out[name] = ids
+		}
+	}
+	return out
+}
+
+// usesDefaultBaseURL reports whether the provider talks to the given default
+// API base URL. Providers that do not expose their base URL never match.
+func usesDefaultBaseURL(provider core.Provider, defaultBaseURL string) bool {
+	withBaseURL, ok := provider.(interface{ GetBaseURL() string })
+	if !ok || defaultBaseURL == "" {
+		return false
+	}
+	normalize := func(url string) string {
+		return strings.TrimRight(strings.ToLower(strings.TrimSpace(url)), "/")
+	}
+	return normalize(withBaseURL.GetBaseURL()) == normalize(defaultBaseURL)
 }
 
 func (r *ModelRegistry) applyFetchedProviderRuntimeUpdates(fetched *fetchedInventory) {
@@ -480,6 +539,13 @@ func (r *ModelRegistry) applyProviderRuntimeUpdatesLocked(updates map[string]pro
 			// don't bump SuccessAt but still produce usable models.
 			current.lastModelFetchError = optionalFailureMessage(update.lastModelFetchError)
 			current.modelListingUnsupported = update.modelListingUnsupported
+			// A catalog stand-in lasts until a fetch produces a real inventory;
+			// a failed fetch carries the stand-in forward, still unconfirmed.
+			if update.catalogStandIn {
+				current.catalogStandIn = true
+			} else if update.lastModelFetchError == "" {
+				current.catalogStandIn = false
+			}
 		}
 		if !update.lastModelFetchSuccessAt.IsZero() {
 			current.lastModelFetchSuccessAt = update.lastModelFetchSuccessAt

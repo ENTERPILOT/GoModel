@@ -39,6 +39,10 @@ type readinessResponse struct {
 //     requests, so the response is not_ready (HTTP 503).
 //   - The Redis exact cache is a performance optimization: if it is unreachable
 //     the gateway still serves requests, so the response is degraded (HTTP 200).
+//   - The model registry: with providers configured but no models loaded (model
+//     discovery has not succeeded and nothing is cached), requests fail with
+//     503 until it does. The response is degraded (HTTP 200) so the condition
+//     is visible without taking the instance out of rotation.
 //
 // Upstream provider reachability is deliberately excluded — a provider outage
 // must not pull a healthy gateway out of rotation. Use GET /health for liveness.
@@ -72,6 +76,17 @@ func (h *Handler) Ready(c *echo.Context) error {
 			slog.Warn("readiness: cache probe failed", "error", err)
 		} else {
 			components["cache"] = readyComponentOK
+		}
+	}
+
+	if h.modelInventory != nil && h.modelInventory.ProviderCount() > 0 {
+		if h.modelInventory.ModelCount() == 0 {
+			components["models"] = readyComponentDown
+			if status == readyStatusReady {
+				status = readyStatusDegraded
+			}
+		} else {
+			components["models"] = readyComponentOK
 		}
 	}
 
