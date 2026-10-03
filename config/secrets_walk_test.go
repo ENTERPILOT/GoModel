@@ -48,7 +48,7 @@ func TestLoadResultResolveSecretsWalksEveryString(t *testing.T) {
 			Storage: StorageConfig{PostgreSQL: PostgreSQLStorageConfig{URL: "${vault:pg}"}},
 			Cache:   CacheConfig{Model: ModelCacheConfig{Redis: &RedisModelConfig{URL: "${vault:redis}"}}},
 			MCP: MCPConfig{Servers: map[string]MCPServerConfig{
-				"github": {Headers: map[string]string{"Authorization": "Bearer ${env:GOMODEL_TEST_TOKEN}"}},
+				"github": {URL: "https://mcp.example.com/mcp", Headers: map[string]string{"Authorization": "Bearer ${env:GOMODEL_TEST_TOKEN}"}},
 			}},
 			Guardrails: GuardrailsConfig{Rules: []GuardrailRuleConfig{{
 				Name:   "scan",
@@ -79,37 +79,93 @@ func TestLoadResultResolveSecretsWalksEveryString(t *testing.T) {
 	assert.Equal(t, "otel-key", cfg.OpenTelemetry.Headers["x-api-key"])
 	assert.Equal(t, []string{"literal ${not-a-ref}"}, cfg.Server.EnabledPassthroughProviders)
 
-	openai := result.RawProviders["openai"]
+	// Extensions are decoded on demand, and providers are resolved by
+	// providers.Init after the env overlay.
+	stored := cfg.Extensions["sso"]
+	assert.Equal(t, "${vault:unregistered}", stored.Content[0].Content[1].Value)
+	assert.Equal(t, "${vault:openai}", result.RawProviders["openai"].APIKey)
+
+	providers := result.RawProviders
+	require.NoError(t, result.Secrets.ResolveFields(t.Context(), "providers", &providers))
+	openai := providers["openai"]
 	assert.Equal(t, "sk-1", openai.APIKey)
 	assert.Equal(t, []string{"sk-2", "${LEGACY_UNSET}"}, openai.APIKeys)
 	assert.Equal(t, "http://gomodel:proxypass@proxy:3128", openai.ProxyURL)
 	assert.Equal(t, "${vault:master}", openai.BaseURL, "a resolved value is never rescanned")
+	// The resolved map and its slices are copies: the loaded providers keep
+	// their references.
+	assert.Equal(t, []string{"${vault:openai2}", "${LEGACY_UNSET}"}, result.RawProviders["openai"].APIKeys)
+}
 
-	// Extensions are decoded on demand, not walked.
-	stored := cfg.Extensions["sso"]
-	assert.Equal(t, "${vault:unregistered}", stored.Content[0].Content[1].Value)
+func TestLoadResultResolveSecretsRunsOnce(t *testing.T) {
+	t.Setenv("GOMODEL_TEST_NESTED", "${env:GOMODEL_TEST_UNSET}")
+	result := &LoadResult{Config: &Config{
+		Server:  ServerConfig{MasterKey: "${env:GOMODEL_TEST_NESTED}"},
+		Storage: StorageConfig{PostgreSQL: PostgreSQLStorageConfig{URL: "${env:GOMODEL_TEST_UNSET}"}},
+	}}
+	err := result.ResolveSecrets(t.Context())
+	require.ErrorContains(t, err, "storage.postgresql.url")
 
-	// A second call is a no-op, so resolved values are not scanned again.
-	require.NoError(t, result.ResolveSecrets(t.Context()))
-	assert.Equal(t, "${vault:master}", result.RawProviders["openai"].BaseURL)
+	// A retry must not scan the value the first call already resolved.
+	again := result.ResolveSecrets(t.Context())
+	require.Same(t, err, again)
+	assert.Equal(t, "${env:GOMODEL_TEST_UNSET}", result.Config.Server.MasterKey)
+
+	ok := &LoadResult{Config: &Config{Server: ServerConfig{MasterKey: "${env:GOMODEL_TEST_NESTED}"}}}
+	require.NoError(t, ok.ResolveSecrets(t.Context()))
+	require.NoError(t, ok.ResolveSecrets(t.Context()))
+	assert.Equal(t, "${env:GOMODEL_TEST_UNSET}", ok.Config.Server.MasterKey)
+}
+
+func TestLoadResultResolveSecretsChecksReferencedMCPURLs(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		want    string
+		wantErr string
+	}{
+		{name: "valid", url: "https://mcp.example.com/mcp", want: "https://mcp.example.com/mcp"},
+		{name: "invalid after resolution", url: "mcp.example.com", wantErr: `mcp.servers["github"]: url must start with http:// or https://`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			t.Setenv("GOMODEL_TEST_MCP_URL", tt.url)
+			withTempDir(t, func(dir string) {
+				result := loadConfigYAML(t, dir, "mcp:\n  servers:\n    github:\n      url: ${env:GOMODEL_TEST_MCP_URL}\n")
+				err := result.ResolveSecrets(t.Context())
+				if tt.wantErr != "" {
+					require.EqualError(t, err, tt.wantErr)
+					return
+				}
+				require.NoError(t, err)
+				assert.Equal(t, tt.want, result.Config.MCP.Servers["github"].URL)
+			})
+		})
+	}
+
+	// The admin API path stays strict: it does not resolve references.
+	err := ValidateMCPServerConfig(&MCPServerConfig{URL: "${env:GOMODEL_TEST_MCP_URL}"})
+	require.EqualError(t, err, "url must start with http:// or https://")
 }
 
 func TestLoadResultResolveSecretsErrorsNameTheField(t *testing.T) {
 	tests := []struct {
 		name      string
 		result    *LoadResult
+		providers map[string]RawProviderConfig
 		wantField string
 		wantText  string
 	}{
 		{
 			name:      "provider api key",
-			result:    &LoadResult{Config: &Config{}, RawProviders: map[string]RawProviderConfig{"openai": {APIKey: "${vault:prod/openai}"}}},
+			providers: map[string]RawProviderConfig{"openai": {APIKey: "${vault:prod/openai}"}},
 			wantField: "providers.openai.api_key",
 			wantText:  "GoModel Pro vaults",
 		},
 		{
 			name:      "provider api_keys entry",
-			result:    &LoadResult{Config: &Config{}, RawProviders: map[string]RawProviderConfig{"openai": {APIKeys: []string{"ok", "${env:GOMODEL_TEST_UNSET}"}}}},
+			providers: map[string]RawProviderConfig{"openai": {APIKeys: []string{"ok", "${env:GOMODEL_TEST_UNSET}"}}},
 			wantField: "providers.openai.api_keys[1]",
 			wantText:  "GOMODEL_TEST_UNSET is not set",
 		},
@@ -138,7 +194,12 @@ func TestLoadResultResolveSecretsErrorsNameTheField(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.result.ResolveSecrets(t.Context())
+			var err error
+			if tt.providers != nil {
+				err = NewSecrets().ResolveFields(t.Context(), "providers", &tt.providers)
+			} else {
+				err = tt.result.ResolveSecrets(t.Context())
+			}
 			require.Error(t, err)
 			secretErr, ok := errors.AsType[*SecretError](err)
 			require.True(t, ok, "error %v is not a *SecretError", err)
@@ -158,14 +219,16 @@ func TestLoadResultResolveSecretsNeverLeaksValues(t *testing.T) {
 		return "", errors.New("access denied")
 	})))
 	result := &LoadResult{
-		Secrets:      secrets,
-		Config:       &Config{},
-		RawProviders: map[string]RawProviderConfig{"openai": {APIKey: "${vault:good}", ProxyURL: "http://u:${vault:good}@h${vault:bad}"}},
+		Secrets: secrets,
+		Config: &Config{
+			Server:  ServerConfig{MasterKey: "${vault:good}"},
+			Storage: StorageConfig{PostgreSQL: PostgreSQLStorageConfig{URL: "postgres://u:${vault:good}@h${vault:bad}"}},
+		},
 	}
 	err := result.ResolveSecrets(t.Context())
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "sk-very-secret")
-	assert.Contains(t, err.Error(), "providers.openai.proxy_url: secret reference ${vault:...}: access denied")
+	assert.Contains(t, err.Error(), "storage.postgresql.url: secret reference ${vault:...}: access denied")
 }
 
 func TestLoadResultResolveSecretsHandlesNil(t *testing.T) {
@@ -195,8 +258,11 @@ providers:
 
 		require.NoError(t, result.ResolveSecrets(t.Context()))
 		assert.Equal(t, "mk-from-file", result.Config.Server.MasterKey)
-		assert.Equal(t, "tok", result.RawProviders["openai"].APIKey)
-		assert.Equal(t, "https://legacy.example.com/${literal}", result.RawProviders["openai"].BaseURL)
+
+		providers := result.RawProviders
+		require.NoError(t, result.Secrets.ResolveFields(t.Context(), "providers", &providers))
+		assert.Equal(t, "tok", providers["openai"].APIKey)
+		assert.Equal(t, "https://legacy.example.com/${literal}", providers["openai"].BaseURL)
 	})
 }
 

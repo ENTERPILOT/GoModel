@@ -65,10 +65,9 @@ func newRotationHarness(t *testing.T, swap *fakeKeySwap) *rotationHarness {
 	}
 	secrets := config.NewSecrets()
 	require.NoError(t, secrets.Register("vault", h.vault))
-	for field, value := range map[string]string{"providers.openai.api_key": "${vault:openai}", "storage.postgresql.url": "${vault:dsn}"} {
-		_, err := secrets.ResolveField(t.Context(), field, value)
-		require.NoError(t, err)
-	}
+	// Map keys become the recorded field paths.
+	fields := map[string]string{"providers.openai.api_key": "${vault:openai}", "storage.postgresql.url": "${vault:dsn}"}
+	require.NoError(t, secrets.ResolveFields(t.Context(), "", &fields))
 	h.rotation = &secretRotation{
 		secrets: secrets,
 		planKeys: func(*config.SecretRecheck) keySwap {

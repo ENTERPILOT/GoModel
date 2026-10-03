@@ -41,19 +41,20 @@ type rotationFixture struct {
 	keyrings map[string]*Keyring
 }
 
-// newRotationFixture resolves raw and environ the way a generation does
-// (config walk, provider env vars, provider resolution) and keeps one keyring
+// newRotationFixture resolves raw and env the way a generation does (env
+// overlay, then secret resolution, then normalization) and keeps one keyring
 // per provider.
-func newRotationFixture(t *testing.T, values map[string]string, raw map[string]config.RawProviderConfig, environ []string) *rotationFixture {
+func newRotationFixture(t *testing.T, values map[string]string, raw map[string]config.RawProviderConfig, env map[string]string) *rotationFixture {
 	t.Helper()
+	for key, value := range env {
+		t.Setenv(key, value)
+	}
 	vault := &rotationVault{values: values}
 	secrets := config.NewSecrets()
 	require.NoError(t, secrets.Register("vault", vault))
-	result := &config.LoadResult{Config: &config.Config{}, RawProviders: raw, Secrets: secrets}
-	require.NoError(t, result.ResolveSecrets(t.Context()))
-	resolvedEnv, err := resolveProviderEnvSecrets(t.Context(), secrets, environ, testDiscoveryConfigs)
+	merged, err := mergeProviderSources(t.Context(), secrets, raw, testDiscoveryConfigs)
 	require.NoError(t, err)
-	providerMap, _ := resolveProviders(result.RawProviders, config.ResilienceConfig{}, testDiscoveryConfigs, resolvedEnv)
+	providerMap, _ := finishProviders(merged, config.ResilienceConfig{}, testDiscoveryConfigs)
 	keyrings := make(map[string]*Keyring, len(providerMap))
 	for name, p := range providerMap {
 		keyrings[name] = NewKeyringWithSessionStickiness(p.SessionStickyKeys, p.APIKeys...)
@@ -61,7 +62,7 @@ func newRotationFixture(t *testing.T, values map[string]string, raw map[string]c
 	return &rotationFixture{
 		secrets:  secrets,
 		vault:    vault,
-		rotation: newKeyRotation(result.RawProviders, resolvedEnv, testDiscoveryConfigs, config.ResilienceConfig{}, providerMap, keyrings),
+		rotation: newKeyRotation(merged, testDiscoveryConfigs, config.ResilienceConfig{}, providerMap, keyrings),
 		keyrings: keyrings,
 	}
 }
@@ -82,9 +83,10 @@ func TestKeyRotationSwapsProviderKeys(t *testing.T) {
 	tests := []struct {
 		name     string
 		raw      map[string]config.RawProviderConfig
-		environ  []string
+		env      map[string]string
 		rotate   string
 		provider string
+		fields   []string
 		want     []string
 	}{
 		{
@@ -92,6 +94,7 @@ func TestKeyRotationSwapsProviderKeys(t *testing.T) {
 			raw:      map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKey: "${vault:a}", APIKeys: []string{"literal"}}},
 			rotate:   "a",
 			provider: "openai",
+			fields:   []string{"providers.openai.api_key"},
 			want:     []string{"a-new", "literal"},
 		},
 		{
@@ -99,39 +102,44 @@ func TestKeyRotationSwapsProviderKeys(t *testing.T) {
 			raw:      map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKeys: []string{"literal", "${vault:a}"}}},
 			rotate:   "a",
 			provider: "openai",
+			fields:   []string{"providers.openai.api_keys[1]"},
 			want:     []string{"literal", "a-new"},
 		},
 		{
 			name:     "numbered env var",
 			raw:      map[string]config.RawProviderConfig{},
-			environ:  []string{"OPENAI_API_KEY=literal", "OPENAI_API_KEY_2=${vault:a}"},
+			env:      map[string]string{"OPENAI_API_KEY": "literal", "OPENAI_API_KEY_2": "${vault:a}"},
 			rotate:   "a",
 			provider: "openai",
+			fields:   []string{"providers.openai.api_keys[1]"},
 			want:     []string{"literal", "a-new"},
 		},
 		{
 			name:     "suffixed env var maps to its provider",
 			raw:      map[string]config.RawProviderConfig{},
-			environ:  []string{"OPENAI_API_KEY=other", "OPENAI_EU_API_KEY=${vault:a}"},
+			env:      map[string]string{"OPENAI_API_KEY": "other", "OPENAI_EU_API_KEY": "${vault:a}"},
 			rotate:   "a",
 			provider: "openai-eu",
+			fields:   []string{"providers.openai-eu.api_key", "providers.openai-eu.api_keys[0]"},
 			want:     []string{"a-new"},
 		},
 		{
 			name:     "bare env var overlays the one config provider of its type",
 			raw:      map[string]config.RawProviderConfig{"primary": {Type: "openai", BaseURL: "https://example.test/v1"}},
-			environ:  []string{"OPENAI_API_KEY=${vault:a}"},
+			env:      map[string]string{"OPENAI_API_KEY": "${vault:a}"},
 			rotate:   "a",
 			provider: "primary",
+			fields:   []string{"providers.primary.api_key", "providers.primary.api_keys[0]"},
 			want:     []string{"a-new"},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			f := newRotationFixture(t, map[string]string{"a": "a-old"}, tt.raw, tt.environ)
+			f := newRotationFixture(t, map[string]string{"a": "a-old"}, tt.raw, tt.env)
 			f.vault.set(tt.rotate, "a-new")
 
 			recheck, plan := f.plan(t)
+			assert.Equal(t, tt.fields, recheck.Fields(), "env-supplied keys are recorded under their provider")
 			require.NotNil(t, plan)
 			assert.Equal(t, []string{tt.provider}, plan.Providers())
 			assert.NotContains(t, ringKeys(f.keyrings[tt.provider]), "a-new", "planning must not swap")
@@ -153,10 +161,10 @@ func TestKeyRotationSwapsProviderKeys(t *testing.T) {
 
 func TestKeyRotationNeedsReload(t *testing.T) {
 	tests := []struct {
-		name    string
-		raw     map[string]config.RawProviderConfig
-		environ []string
-		value   string
+		name  string
+		raw   map[string]config.RawProviderConfig
+		env   map[string]string
+		value string
 	}{
 		{
 			name:  "yaml base_url",
@@ -164,10 +172,10 @@ func TestKeyRotationNeedsReload(t *testing.T) {
 			value: "https://other.test/v1",
 		},
 		{
-			name:    "env base_url",
-			raw:     map[string]config.RawProviderConfig{},
-			environ: []string{"OPENAI_API_KEY=k", "OPENAI_BASE_URL=${vault:a}"},
-			value:   "https://other.test/v1",
+			name:  "env base_url",
+			raw:   map[string]config.RawProviderConfig{},
+			env:   map[string]string{"OPENAI_API_KEY": "k", "OPENAI_BASE_URL": "${vault:a}"},
+			value: "https://other.test/v1",
 		},
 		{
 			name:  "yaml proxy_url composite",
@@ -182,7 +190,7 @@ func TestKeyRotationNeedsReload(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			f := newRotationFixture(t, map[string]string{"a": "https://a.test/v1"}, tt.raw, tt.environ)
+			f := newRotationFixture(t, map[string]string{"a": "https://a.test/v1"}, tt.raw, tt.env)
 			f.vault.set("a", tt.value)
 			_, plan := f.plan(t)
 			assert.Nil(t, plan)
@@ -190,18 +198,30 @@ func TestKeyRotationNeedsReload(t *testing.T) {
 	}
 }
 
-func TestKeyRotationShadowedKeyChangesNothing(t *testing.T) {
-	// An env key replaces the YAML key set, so rotating the YAML key has no
-	// effect on the provider.
+func TestKeyRotationShadowedYAMLKeyIsNotTracked(t *testing.T) {
+	// An env key replaces the YAML key set, so the YAML reference is never
+	// resolved, never recorded, and rotating it changes nothing.
 	f := newRotationFixture(t, map[string]string{"a": "a-old"},
 		map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKey: "${vault:a}"}},
-		[]string{"OPENAI_API_KEY=from-env"})
+		map[string]string{"OPENAI_API_KEY": "from-env"})
 	f.vault.set("a", "a-new")
+	recheck, err := f.secrets.Recheck(t.Context())
+	require.NoError(t, err)
+	assert.Empty(t, recheck.Fields())
+}
+
+func TestKeyRotationWithoutEffectiveChange(t *testing.T) {
+	// The rotated value trims to a key the provider already has, so its key
+	// set stays the same: nothing to swap, but the change is still applied.
+	f := newRotationFixture(t, map[string]string{"a": "k1"},
+		map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKey: "k1", APIKeys: []string{"${vault:a}"}}},
+		nil)
+	f.vault.set("a", "k1 ")
 	_, plan := f.plan(t)
 	require.NotNil(t, plan)
 	assert.Empty(t, plan.Providers())
 	plan.Apply()
-	assert.Equal(t, []string{"from-env"}, ringKeys(f.keyrings["openai"]))
+	assert.Equal(t, []string{"k1"}, ringKeys(f.keyrings["openai"]))
 }
 
 func TestInitResultPlanKeyRotation(t *testing.T) {
@@ -238,10 +258,25 @@ func TestInitResultPlanKeyRotation(t *testing.T) {
 	vault.set("test", "sk-2")
 	recheck, err := secrets.Recheck(t.Context())
 	require.NoError(t, err)
-	assert.Equal(t, []string{"TEST_API_KEY"}, recheck.Fields())
+	assert.Equal(t, []string{"providers.test.api_key", "providers.test.api_keys[0]"}, recheck.Fields())
 	plan := result.PlanKeyRotation(recheck)
 	require.NotNil(t, plan)
 	assert.Equal(t, []string{"test"}, plan.Providers())
 	plan.Apply()
 	assert.Equal(t, "sk-2", keys.Primary(), "the provider's own keyring is swapped")
+}
+
+func TestProviderSecretFieldIsTheProviderPath(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "literal")
+	t.Setenv("OPENAI_API_KEY_2", "${vault:a}")
+	var fields []string
+	secrets := config.NewSecrets()
+	require.NoError(t, secrets.Register("vault", config.SecretResolverFunc(func(ctx context.Context, _ string) (string, error) {
+		field, _ := config.SecretFieldFromContext(ctx)
+		fields = append(fields, field)
+		return "sk", nil
+	})))
+	_, err := mergeProviderSources(t.Context(), secrets, nil, testDiscoveryConfigs)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"providers.openai.api_keys[1]"}, fields, "a resolver sees the provider field an env var set, not the variable")
 }

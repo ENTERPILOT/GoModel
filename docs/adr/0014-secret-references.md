@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted. Sections 1–3 and 5 are implemented; sections 4 and 6 are planned
+and land in separate pull requests.
 
 ## Context
 
@@ -96,18 +97,20 @@ func NewSecrets() *Secrets // built-in schemes only; a nil *Secrets behaves the 
 func (s *Secrets) Register(scheme string, r SecretResolver) error // env and file are reserved
 func (s *Secrets) Resolve(ctx context.Context, value string) (string, error)
 func (s *Secrets) HasReference(value string) bool
-func (s *Secrets) ResolveField(ctx context.Context, field, value string) (string, error)
+func (s *Secrets) ResolveFields(ctx context.Context, path string, target any) error
+func HasSecretReference(value string) bool
 func (s *Secrets) NotifyChanged() // see section 5
 // Core-side rotation plumbing, also section 5: Changes, Recheck returning a
 // *SecretRecheck (Fields, Value, Commit), and SecretNotifier with SetNotifier.
 
-// The field being resolved ("providers.openai.api_key", or a provider
-// environment variable name such as "OPENAI_API_KEY") is on the context a
-// resolver receives. Field paths are not secret; resolvers may audit-log them.
+// The field being resolved ("server.master_key", "providers.openai.api_key")
+// is on the context a resolver receives. Field paths are not secret;
+// resolvers may audit-log them.
 func SecretFieldFromContext(ctx context.Context) (string, bool)
 
 // LoadResult.Secrets is set by Load. ResolveSecrets is step 3 below; it runs
-// once per generation, so resolved values are never scanned again.
+// once per generation, and a retry returns the first result, so a resolved
+// value is never scanned again, even after a failure.
 func (r *LoadResult) ResolveSecrets(ctx context.Context) error
 
 // Resolution failures are *SecretError{Field, Scheme, Err}; an unknown scheme
@@ -129,10 +132,13 @@ Resolution order for one generation:
    in the decoded section with the schemes registered at that moment, so an
    extension's own section can use them.
 3. `run` resolves every string in `Config` (except `extensions`, which are
-   decoded on demand) and `RawProviders`.
-4. `providers.Init` resolves references that arrive through provider
-   environment variables (`OPENAI_API_KEY=${vault:prod/llm#openai}`), which
-   are merged after the hook.
+   decoded on demand). A load-time check that has to accept a reference, such
+   as the MCP server URL scheme, is repeated on the resolved value.
+4. `providers.Init` merges the provider environment variables
+   (`OPENAI_API_KEY=${vault:prod/llm#openai}`) into `RawProviders` and then
+   resolves the merged result. A `config.yaml` value that an environment
+   variable replaces, or an environment variable the merge ignores, is never
+   looked up.
 
 Any reference that is still unresolved after step 3 or 4 stops the
 generation with an error naming the field and the scheme, never the value.
@@ -170,19 +176,21 @@ is persisted. Core ships no writer.
 
 `Secrets` remembers each field a reference resolved into: its path, the value
 as configured, and an HMAC-SHA256 fingerprint of the resolved value under a
-random per-process key (never the value itself). Configuration fields are
-recorded by path (`providers.openai.api_keys[1]`, `server.master_key`,
-`extensions.vaults.token`); provider environment variables by name
-(`OPENAI_API_KEY_2`).
+random per-process key (never the value itself). Fields are recorded by
+path (`server.master_key`, `extensions.vaults.token`,
+`providers.openai.api_keys[1]`). Provider fields are recorded after the
+environment overlay, so a key set by `OPENAI_API_KEY_2` is recorded under the
+provider it landed on, like one written in `config.yaml`.
 
 `NotifyChanged`, called by an extension when its backend reports a new
 version, never blocks, and calls that arrive before the check runs coalesce
 into one. Core then re-resolves every recorded reference with the same
 resolvers and compares fingerprints:
 
-- When only provider API keys changed, the provider environment overlay and
-  key normalization run again on the new values, exactly as at startup, and
-  the affected providers' keyrings are swapped in place. `Keyring` gains
+- When only provider API keys (`providers.<name>.api_key` or
+  `providers.<name>.api_keys[i]`) changed, key normalization and credential
+  filtering run again on the new values, exactly as at startup, and the
+  affected providers' keyrings are swapped in place. `Keyring` gains
   `Replace`, an atomic swap of an immutable key set. Requests in flight finish
   on the key they started with. Session stickiness is rendezvous hashing over
   the key set, so sessions on a removed key move, and a new key takes its

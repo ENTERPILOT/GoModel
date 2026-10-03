@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"maps"
 	"math"
+	"os"
 	"slices"
 	"sort"
 	"strconv"
@@ -13,12 +14,12 @@ import (
 	"github.com/enterpilot/gomodel/config"
 )
 
-// applyProviderEnvVars overlays well-known provider env vars, given as
-// os.Environ-style KEY=value entries, onto the raw YAML map. Env var values
-// always win over YAML values for the same provider name.
-func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig, environ []string) map[string]config.RawProviderConfig {
+// applyProviderEnvVars overlays well-known provider env vars onto the raw YAML map.
+// Env var values always win over YAML values for the same provider name.
+func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig) map[string]config.RawProviderConfig {
 	result := make(map[string]config.RawProviderConfig, len(raw))
 	maps.Copy(result, raw)
+	environ := os.Environ()
 
 	for _, providerType := range sortedDiscoveryTypes(discovery) {
 		spec := discovery[providerType]
@@ -145,14 +146,14 @@ func (v providerEnvValues) apiKeys() []string {
 // It probes the fields directly rather than calling apiKeys: empty() asks this
 // question for every env group, and ordering the keys to then discard them
 // costs a map, a sort, and two slices. Both spellings agree because a key that
-// fails HasResolvedProviderValue -- blank, whitespace, or an unresolved
-// `${VAR}` -- is one that apiKeys would drop.
+// fails providerValueSet -- blank, whitespace, or an unresolved `${VAR}` --
+// is one that apiKeys would drop.
 func (v providerEnvValues) hasAPIKey() bool {
-	if HasResolvedProviderValue(v.APIKey) {
+	if providerValueSet(v.APIKey) {
 		return true
 	}
 	for _, key := range v.APIKeysByIndex {
-		if HasResolvedProviderValue(key) {
+		if providerValueSet(key) {
 			return true
 		}
 	}
@@ -638,7 +639,7 @@ func (v providerEnvValues) withoutFieldsSetBy(existing config.RawProviderConfig)
 	}
 	for _, f := range stringFields {
 		env := f.env
-		drop(f.name, strings.TrimSpace(*env) != "", HasResolvedProviderValue(f.cfg), func() { *env = "" })
+		drop(f.name, strings.TrimSpace(*env) != "", providerValueSet(f.cfg), func() { *env = "" })
 	}
 
 	drop("session_sticky_keys", v.SessionStickyKeys != nil, existing.SessionStickyKeys != nil, func() { v.SessionStickyKeys = nil })
@@ -655,11 +656,11 @@ func (v providerEnvValues) withoutFieldsSetBy(existing config.RawProviderConfig)
 // least one model ID that is not an unresolved ${VAR} placeholder, so a list
 // left to the environment does not block the bare <PROVIDER>_MODELS fill.
 func rawProviderHasResolvedModel(cfg config.RawProviderConfig) bool {
-	return slices.ContainsFunc(cfg.Models, func(m config.RawProviderModel) bool { return HasResolvedProviderValue(m.ID) })
+	return slices.ContainsFunc(cfg.Models, func(m config.RawProviderModel) bool { return providerValueSet(m.ID) })
 }
 
 func rawProviderHasAPIKey(cfg config.RawProviderConfig) bool {
-	return HasResolvedProviderValue(cfg.APIKey) || slices.ContainsFunc(cfg.APIKeys, HasResolvedProviderValue)
+	return providerValueSet(cfg.APIKey) || slices.ContainsFunc(cfg.APIKeys, providerValueSet)
 }
 
 func providerNameForEnvSuffix(source providerEnvSource, suffix string) string {
@@ -790,6 +791,9 @@ func parseCSVEnvList(value string) []string {
 func isUnresolvedEnvPlaceholder(value string) bool {
 	if !strings.HasPrefix(value, "${") || !strings.HasSuffix(value, "}") || len(value) <= 3 {
 		return false
+	}
+	if config.HasSecretReference(value) {
+		return false // resolved after the overlay
 	}
 	inner := value[2 : len(value)-1]
 	return inner != "" && !strings.ContainsAny(inner, "{}")

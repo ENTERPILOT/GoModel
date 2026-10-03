@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"os"
 	"testing"
 
 	"github.com/enterpilot/gomodel/config"
@@ -13,7 +12,7 @@ import (
 // resolveKeys is a shorthand for the API key set the given provider ends up with.
 func resolveKeys(t *testing.T, raw map[string]config.RawProviderConfig, provider string) ProviderConfig {
 	t.Helper()
-	got, _ := resolveProviders(raw, globalResilience, testDiscoveryConfigs, os.Environ())
+	got, _ := mustResolveProviders(t, raw, globalResilience, testDiscoveryConfigs)
 	cfg, ok := got[provider]
 	require.True(t, ok, "provider %q not resolved; got %v", provider, got)
 
@@ -179,7 +178,7 @@ func TestResolveProviders_ProviderWithOnlyUnresolvedKeysIsDropped(t *testing.T) 
 	raw := map[string]config.RawProviderConfig{
 		"openai": {Type: "openai", APIKey: "${OPENAI_API_KEY}"},
 	}
-	got, _ := resolveProviders(raw, globalResilience, testDiscoveryConfigs, os.Environ())
+	got, _ := mustResolveProviders(t, raw, globalResilience, testDiscoveryConfigs)
 	_, ok := got["openai"]
 	assert.False(t, ok)
 }

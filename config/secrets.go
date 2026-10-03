@@ -105,7 +105,7 @@ func (s *Secrets) Register(scheme string, r SecretResolver) error {
 // HasReference reports whether value contains at least one secret reference.
 // An escaped $${...} is not a reference.
 func (s *Secrets) HasReference(value string) bool {
-	return hasSecretReference(value)
+	return HasSecretReference(value)
 }
 
 // Resolve replaces every secret reference in value with its resolved value
@@ -196,10 +196,11 @@ type secretFieldKey struct{}
 
 // SecretFieldFromContext returns the field a SecretResolver is resolving
 // for, as passed to ResolveSecret: a configuration path such as
-// "providers.openai.api_key" or "extensions.vaults.token", or the name of a
-// provider environment variable such as "OPENAI_API_KEY". Field paths are not
-// secret, so resolvers may log them for audit. The boolean is false for an
-// anonymous Resolve.
+// "server.master_key", "extensions.vaults.token", or
+// "providers.openai.api_keys[1]". A provider value set by an environment
+// variable is named by the provider field it set. Field paths are not secret,
+// so resolvers may log them for audit. The boolean is false for an anonymous
+// Resolve.
 func SecretFieldFromContext(ctx context.Context) (string, bool) {
 	if ctx == nil {
 		return "", false
@@ -219,9 +220,10 @@ func withSecretField(ctx context.Context, field string) context.Context {
 	return context.WithValue(ctx, secretFieldKey{}, field)
 }
 
-// hasSecretReference reports whether value holds a reference, using the same
-// scan as resolveField.
-func hasSecretReference(value string) bool {
+// HasSecretReference reports whether value contains at least one secret
+// reference, using the same scan as Resolve. An escaped $${...} is not a
+// reference.
+func HasSecretReference(value string) bool {
 	for rest := value; ; {
 		i := strings.Index(rest, "${")
 		if i < 0 {

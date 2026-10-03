@@ -59,6 +59,8 @@ func resolvedWithVault(t *testing.T, vault *fakeVault) *LoadResult {
 		Secrets: secrets,
 	}
 	require.NoError(t, result.ResolveSecrets(t.Context()))
+	// providers.Init resolves the providers after its env overlay.
+	require.NoError(t, secrets.ResolveFields(t.Context(), "providers", &result.RawProviders))
 	return result
 }
 
@@ -115,15 +117,13 @@ func TestSecretsRecordOnlyNamedReferencedFields(t *testing.T) {
 
 	_, err := secrets.Resolve(t.Context(), "${env:GOMODEL_TEST_ROTATION}")
 	require.NoError(t, err)
-	_, err = secrets.ResolveField(t.Context(), "plain", "no reference")
-	require.NoError(t, err)
-	_, err = secrets.ResolveField(t.Context(), "OPENAI_API_KEY", "${env:GOMODEL_TEST_ROTATION}")
-	require.NoError(t, err)
+	fields := map[string]string{"plain": "no reference", "legacy": "${GOMODEL_TEST_ROTATION}", "referenced": "${env:GOMODEL_TEST_ROTATION}"}
+	require.NoError(t, secrets.ResolveFields(t.Context(), "", &fields))
 
 	t.Setenv("GOMODEL_TEST_ROTATION", "v2")
 	recheck, err := secrets.Recheck(t.Context())
 	require.NoError(t, err)
-	assert.Equal(t, []string{"OPENAI_API_KEY"}, recheck.Fields(), "anonymous Resolve and literal values are not recorded")
+	assert.Equal(t, []string{"referenced"}, recheck.Fields(), "anonymous Resolve and values without a reference are not recorded")
 }
 
 func TestSecretsRecordsDecodedExtensionFields(t *testing.T) {
@@ -214,11 +214,10 @@ func TestSecretFieldFromContext(t *testing.T) {
 		Secrets:      secrets,
 	}
 	require.NoError(t, result.ResolveSecrets(t.Context()))
+	require.NoError(t, secrets.ResolveFields(t.Context(), "providers", &result.RawProviders))
 	_, err := secrets.Resolve(t.Context(), "${vault:anonymous}")
 	require.NoError(t, err)
-	_, err = secrets.ResolveField(t.Context(), "OPENAI_API_KEY", "${vault:env}")
-	require.NoError(t, err)
-	assert.Equal(t, []string{"server.master_key", "providers.openai.api_keys[0]", "<none>", "OPENAI_API_KEY"}, fields)
+	assert.Equal(t, []string{"server.master_key", "providers.openai.api_keys[0]", "<none>"}, fields)
 
 	_, ok := SecretFieldFromContext(t.Context())
 	assert.False(t, ok)
