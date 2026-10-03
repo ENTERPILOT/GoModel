@@ -101,9 +101,11 @@ func (s *MongoDBKeyStore) UpdateWrapping(ctx context.Context, key Key) error {
 	return nil
 }
 
-// Activate sets the new key active before clearing the others, so a reader
-// in between sees two active keys (and picks the newest) rather than none.
-// MongoDB transactions need a replica set, which a standalone server lacks.
+// Activate sets the new key active, then clears the flag of every older key.
+// MongoDB transactions need a replica set, which a standalone server lacks, so
+// the two steps are not atomic. Clearing only lower ids keeps concurrent
+// rotations from clearing each other's key: whatever interleaving, the
+// newest activated key stays active, and readers pick the newest of several.
 func (s *MongoDBKeyStore) Activate(ctx context.Context, id string) error {
 	result, err := s.collection.UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": bson.M{"active": true}})
 	if err != nil {
@@ -112,7 +114,20 @@ func (s *MongoDBKeyStore) Activate(ctx context.Context, id string) error {
 	if result.MatchedCount == 0 {
 		return fmt.Errorf("activate encryption key: key %q not found", id)
 	}
-	if _, err := s.collection.UpdateMany(ctx, bson.M{"_id": bson.M{"$ne": id}}, bson.M{"$set": bson.M{"active": false}}); err != nil {
+	keys, err := s.List(ctx)
+	if err != nil {
+		return fmt.Errorf("activate encryption key: %w", err)
+	}
+	older := bson.A{}
+	for _, key := range keys {
+		if key.Active && keyNumber(key.ID) < keyNumber(id) {
+			older = append(older, key.ID)
+		}
+	}
+	if len(older) == 0 {
+		return nil
+	}
+	if _, err := s.collection.UpdateMany(ctx, bson.M{"_id": bson.M{"$in": older}}, bson.M{"$set": bson.M{"active": false}}); err != nil {
 		return fmt.Errorf("activate encryption key: %w", err)
 	}
 	return nil

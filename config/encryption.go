@@ -8,11 +8,12 @@ import "context"
 // GOMODEL_ENCRYPTION_KEY. An extension sets a KeyWrapper with
 // LoadResult.SetKeyWrapper to wrap data keys with a KMS instead.
 //
-// ID names the wrapper and is stored with every key it wraps. It must stay
-// stable across restarts, and change when the underlying key does: a data
-// key wrapped under a different id is unwrapped with GOMODEL_ENCRYPTION_KEY
-// (or GOMODEL_ENCRYPTION_KEY_PREVIOUS) and re-wrapped with this wrapper at
-// startup.
+// ID names the wrapper and is stored with every key it wraps; only a wrapper
+// with the same id is asked to unwrap that key. It must stay stable across
+// restarts. At startup a data key stored under another id is unwrapped with a
+// previous wrapper passed to SetKeyWrapper, or with GOMODEL_ENCRYPTION_KEY
+// (or GOMODEL_ENCRYPTION_KEY_PREVIOUS) when it was wrapped locally, and then
+// re-wrapped with this wrapper.
 //
 // Implementations must never log or return the data key in an error.
 type KeyWrapper interface {
@@ -24,11 +25,16 @@ type KeyWrapper interface {
 // SetKeyWrapper replaces the key-encryption key derived from
 // GOMODEL_ENCRYPTION_KEY with w for this configuration generation. Call it
 // from run.Options.SetupConfig, before the application opens storage. A
-// reload keeps the wrapper of the previous generation unless
-// run.Options.ReloadConfig sets another one.
-func (r *LoadResult) SetKeyWrapper(w KeyWrapper) {
+// reload keeps the wrappers of the previous generation unless
+// run.Options.ReloadConfig sets others.
+//
+// previous lists wrappers w replaces, for example after moving to another
+// KMS key: data keys they wrapped are re-wrapped with w at startup, after
+// which they can be dropped.
+func (r *LoadResult) SetKeyWrapper(w KeyWrapper, previous ...KeyWrapper) {
 	if r != nil {
 		r.keyWrapper = w
+		r.previousKeyWrappers = previous
 	}
 }
 
@@ -38,4 +44,12 @@ func (r *LoadResult) KeyWrapper() KeyWrapper {
 		return nil
 	}
 	return r.keyWrapper
+}
+
+// PreviousKeyWrappers returns the previous wrappers passed to SetKeyWrapper.
+func (r *LoadResult) PreviousKeyWrappers() []KeyWrapper {
+	if r == nil {
+		return nil
+	}
+	return r.previousKeyWrappers
 }

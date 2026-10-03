@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"slices"
 
 	"github.com/enterpilot/gomodel/internal/encryption"
@@ -77,23 +78,30 @@ func (s *sealedCredentialStore) Upsert(ctx context.Context, cred ManagedProvider
 }
 
 // reencrypt rewrites every row holding plaintext or a value sealed with an
-// older data key.
+// older data key. Each row is re-read just before it is rewritten, so an edit
+// or delete made since the listing is not overwritten with the listed copy.
 func (s *sealedCredentialStore) reencrypt(ctx context.Context) (encryption.Report, error) {
 	report := encryption.Report{Entity: "provider_credentials"}
-	raw, err := s.CredentialStore.List(ctx)
+	listed, err := s.CredentialStore.List(ctx)
 	if err != nil {
 		return report, err
 	}
-	report.Rows = len(raw)
-	for i := range raw {
-		cred := raw[i]
-		if !s.box.NeedsReseal(credentialSecretFields(&cred)...) {
+	report.Rows = len(listed)
+	for _, row := range listed {
+		cred, err := s.CredentialStore.Get(ctx, row.Name)
+		if errors.Is(err, ErrCredentialNotFound) {
 			continue
 		}
-		if err := s.open(&cred); err != nil {
+		if err != nil {
 			return report, err
 		}
-		if err := s.Upsert(ctx, cred); err != nil {
+		if !s.box.NeedsReseal(credentialSecretFields(cred)...) {
+			continue
+		}
+		if err := s.open(cred); err != nil {
+			return report, err
+		}
+		if err := s.Upsert(ctx, *cred); err != nil {
 			return report, err
 		}
 		report.Reencrypted++

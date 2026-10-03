@@ -60,7 +60,7 @@ func TestBoxOpenRejects(t *testing.T) {
 		{"other entity", AAD("mcp_server", "gitlab", "headers.Authorization"), sealed, "moved from another row or field"},
 		{"other field", AAD("mcp_server", "github", "headers.X-Token"), sealed, "moved from another row or field"},
 		{"other kind", AAD("guardrail", "github", "headers.Authorization"), sealed, "moved from another row or field"},
-		{"unknown key", aad, strings.Replace(sealed, "enc:v1:1:", "enc:v1:9:", 1), `unknown data key "9"`},
+		{"unknown key", aad, strings.Replace(sealed, "enc:v1:1:", "enc:v1:9:", 1), "not in encryption_keys"},
 		{"no payload", aad, "enc:v1:1:", "malformed"},
 		{"bad base64", aad, "enc:v1:1:!!!", "malformed"},
 		{"too short", aad, "enc:v1:1:AAAA", "malformed"},
@@ -176,4 +176,30 @@ func TestPlaintextWarningLogsOnce(t *testing.T) {
 	_, err := Disabled().Open(AAD("k", "id", "f"), "")
 	require.NoError(t, err)
 	assert.Empty(t, logs.String(), "empty values are not secrets")
+}
+
+func TestBoxReloadsKeysForUnknownKeyID(t *testing.T) {
+	stale := testBox(t, "1")
+	fresh := testBox(t, "2", "1")
+	fresh.keys["1"] = stale.keys["1"]
+	sealed, err := fresh.Seal(AAD("k", "id", "f"), "v")
+	require.NoError(t, err)
+
+	reloads := 0
+	stale.reload = func() (*Box, error) {
+		reloads++
+		return fresh, nil
+	}
+	opened, err := stale.Open(AAD("k", "id", "f"), sealed)
+	require.NoError(t, err)
+	assert.Equal(t, "v", opened)
+	assert.Equal(t, 1, reloads)
+	assert.Equal(t, "2", stale.ActiveKeyID(), "new values are sealed with the rotated key")
+
+	unknown := strings.Replace(sealed, "enc:v1:2:", "enc:v1:7:", 1)
+	_, err = stale.Open(AAD("k", "id", "f"), unknown)
+	require.ErrorIs(t, err, errUnknownKey)
+	_, err = stale.Open(AAD("k", "id", "f"), unknown)
+	require.ErrorIs(t, err, errUnknownKey)
+	assert.Equal(t, 1, reloads, "reloads are rate limited")
 }

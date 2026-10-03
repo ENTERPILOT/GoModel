@@ -281,3 +281,56 @@ func TestOpenNeverLogsKeyMaterial(t *testing.T) {
 	require.NotEmpty(t, logs.String())
 	assert.NotContains(t, logs.String(), "secret-key")
 }
+
+func TestRunningBoxPicksUpRotatedDataKey(t *testing.T) {
+	runKeyStoreSuite(t, func(t *testing.T, store encryption.KeyStore) {
+		opts := encryption.Options{Key: "k1"}
+		running := open(t, store, opts)
+
+		rotated, err := encryption.RotateDataKey(context.Background(), store, opts)
+		require.NoError(t, err)
+		value := seal(t, rotated, "sk-new")
+
+		assertOpens(t, running, value, "sk-new")
+		assert.Equal(t, "2", running.ActiveKeyID())
+	})
+}
+
+func TestActivateNeverLeavesNoActiveKey(t *testing.T) {
+	runKeyStoreSuite(t, func(t *testing.T, store encryption.KeyStore) {
+		ctx := context.Background()
+		for _, id := range []string{"1", "2", "3"} {
+			inserted, err := store.Insert(ctx, encryption.Key{ID: id, Wrapped: []byte{1}, WrapperID: "w", Active: id == "1", CreatedAt: time.Now()})
+			require.NoError(t, err)
+			require.True(t, inserted)
+		}
+		// Two overlapping rotations finishing out of order.
+		require.NoError(t, store.Activate(ctx, "3"))
+		require.NoError(t, store.Activate(ctx, "2"))
+
+		active := 0
+		for _, key := range onlyKeys(t, store) {
+			if key.Active {
+				active++
+				assert.NotEqual(t, "1", key.ID)
+			}
+		}
+		assert.GreaterOrEqual(t, active, 1)
+	})
+}
+
+func TestOpenMovesDataKeyBetweenExtensionWrappers(t *testing.T) {
+	runKeyStoreSuite(t, func(t *testing.T, store encryption.KeyStore) {
+		ctx := context.Background()
+		oldKMS, newKMS := newFakeKMS(t, "kms:old"), newFakeKMS(t, "kms:new")
+		sealed := seal(t, open(t, store, encryption.Options{Wrapper: oldKMS}), "sk-one")
+
+		_, err := encryption.Open(ctx, store, encryption.Options{Wrapper: newKMS})
+		require.ErrorContains(t, err, "previous key wrapper")
+
+		moved := open(t, store, encryption.Options{Wrapper: newKMS, PreviousWrappers: []encryption.Wrapper{oldKMS}})
+		assertOpens(t, moved, sealed, "sk-one")
+		assert.Equal(t, "kms:new", onlyKey(t, store).WrapperID)
+		assertOpens(t, open(t, store, encryption.Options{Wrapper: newKMS}), sealed, "sk-one")
+	})
+}

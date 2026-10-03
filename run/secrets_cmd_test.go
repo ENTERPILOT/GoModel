@@ -99,7 +99,7 @@ func TestConfigHooksCarryKeyWrapperAcrossGenerations(t *testing.T) {
 	reloadSets := false
 	configure := configHooks(t.Context(), Options{
 		SetupConfig: func(_ context.Context, result *config.LoadResult) error {
-			result.SetKeyWrapper(first)
+			result.SetKeyWrapper(first, namedKeyWrapper{id: "kms:retired"})
 			return nil
 		},
 		ReloadConfig: func(_ context.Context, result *config.LoadResult) error {
@@ -116,7 +116,9 @@ func TestConfigHooksCarryKeyWrapperAcrossGenerations(t *testing.T) {
 	}
 
 	assert.Equal(t, first, generation().KeyWrapper())
-	assert.Equal(t, first, generation().KeyWrapper(), "a reload keeps the startup wrapper")
+	reloaded := generation()
+	assert.Equal(t, first, reloaded.KeyWrapper(), "a reload keeps the startup wrapper")
+	assert.Equal(t, []config.KeyWrapper{namedKeyWrapper{id: "kms:retired"}}, reloaded.PreviousKeyWrappers())
 	reloadSets = true
 	assert.Equal(t, second, generation().KeyWrapper(), "ReloadConfig can replace it")
 	reloadSets = false

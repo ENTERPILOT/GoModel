@@ -78,7 +78,8 @@ type LoadResult struct {
 	Config       *Config
 	RawProviders map[string]RawProviderConfig
 
-	keyWrapper KeyWrapper
+	keyWrapper          KeyWrapper
+	previousKeyWrappers []KeyWrapper
 }
 
 // DecodeExtension strictly decodes one named extensions: section into target.

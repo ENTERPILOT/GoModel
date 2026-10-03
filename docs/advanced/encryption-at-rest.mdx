@@ -22,7 +22,8 @@ Credentials declared in environment variables or `config.yaml` are never
 written to the database, so they are not affected.
 
 Default: unset. Secrets are stored in plaintext, and GoModel logs one warning
-at startup when it finds any.
+at startup when an enabled feature (providers, and MCP or guardrails when they
+are on) loads a plaintext secret.
 
 ## Enable it
 
@@ -36,9 +37,10 @@ openssl rand -base64 32
 GOMODEL_ENCRYPTION_KEY=<generated value>
 ```
 
-Any string works, but 32 random bytes is the recommendation. Deliver it the
-way you deliver other secrets, from a secret manager at runtime, not from a
-committed file.
+An empty value leaves encryption off. Any other string works, but the
+key-encryption key is derived from it, so a short or guessable value weakens
+the encryption: use 32 random bytes as above. Deliver it the way you deliver
+other secrets, from a secret manager at runtime, not from a committed file.
 
 <Warning>
   Losing the key makes the encrypted secrets unrecoverable. Store it as
@@ -59,7 +61,9 @@ gomodel secrets reencrypt
 
 It uses the same configuration and environment as the gateway, prints counts
 per table (never values), and is safe to run repeatedly and while the gateway
-is running.
+is running. Each entry is re-read just before it is rewritten, so an edit or
+delete made during the run is kept, but avoid editing entries while it runs:
+an edit landing in that same instant can still be overwritten.
 
 ## Rotate the key
 
@@ -83,7 +87,8 @@ gomodel secrets reencrypt --rotate-data-key
 ```
 
 This creates a new data key and re-encrypts every secret with it. Values under
-older data keys stay readable throughout.
+older data keys stay readable throughout, and a running gateway loads the new
+key from the database the first time it reads a value sealed with it.
 
 ## How it works
 
@@ -106,4 +111,5 @@ A distribution built on GoModel can wrap the data key with a KMS instead of
 `GOMODEL_ENCRYPTION_KEY` by calling `LoadResult.SetKeyWrapper` with a
 `config.KeyWrapper` from `run.Options.SetupConfig`. On the first start with a
 new wrapper, keep `GOMODEL_ENCRYPTION_KEY` set once so the existing data key
-can be moved to it.
+can be moved to it. To move from one wrapper to another, pass the old one as
+a previous wrapper: `SetKeyWrapper(next, previous)`.

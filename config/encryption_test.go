@@ -46,10 +46,15 @@ func TestLoadResultKeyWrapper(t *testing.T) {
 	result := &LoadResult{}
 	result.SetKeyWrapper(stubKeyWrapper{})
 	assert.Equal(t, stubKeyWrapper{}, result.KeyWrapper())
+	assert.Empty(t, result.PreviousKeyWrappers())
+	result.SetKeyWrapper(stubKeyWrapper{}, stubKeyWrapper{})
+	assert.Equal(t, []KeyWrapper{stubKeyWrapper{}}, result.PreviousKeyWrappers())
 	result.SetKeyWrapper(nil)
 	assert.Nil(t, result.KeyWrapper())
+	assert.Empty(t, result.PreviousKeyWrappers())
 
 	var nilResult *LoadResult
 	nilResult.SetKeyWrapper(stubKeyWrapper{})
 	assert.Nil(t, nilResult.KeyWrapper())
+	assert.Nil(t, nilResult.PreviousKeyWrappers())
 }

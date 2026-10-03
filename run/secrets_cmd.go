@@ -21,12 +21,14 @@ func secretsUsage(productName string) string {
 Encrypts every dashboard-managed secret (provider credentials, MCP server
 headers, guardrail secrets) that is still stored in plaintext, and re-encrypts
 values sealed with an older data key under the active one. Safe to run more
-than once, and while the gateway is running.
+than once, and while the gateway is running; avoid editing entries while it
+runs.
 
 Reads the same configuration and environment as the gateway, and needs
 GOMODEL_ENCRYPTION_KEY (or a key wrapper registered by the distribution).
 
-  --rotate-data-key   create a new data key and move every secret to it
+  --rotate-data-key   create a new data key and move every secret to it;
+                      running gateways load the new key on first use
 `, productName)
 }
 

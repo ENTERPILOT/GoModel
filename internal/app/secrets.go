@@ -17,11 +17,15 @@ import (
 // encryptionOptions selects the key-encryption key for one generation: an
 // extension's wrapper when set, otherwise GOMODEL_ENCRYPTION_KEY.
 func encryptionOptions(loaded *config.LoadResult) encryption.Options {
-	return encryption.Options{
+	opts := encryption.Options{
 		Key:         loaded.Config.Storage.EncryptionKey,
 		PreviousKey: loaded.Config.Storage.EncryptionKeyPrevious,
 		Wrapper:     loaded.KeyWrapper(),
 	}
+	for _, w := range loaded.PreviousKeyWrappers() {
+		opts.PreviousWrappers = append(opts.PreviousWrappers, w)
+	}
+	return opts
 }
 
 // openSecretBox loads the data keys that seal dashboard-managed secrets.

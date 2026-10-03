@@ -353,6 +353,7 @@ func Run(ctx context.Context, opts Options) error {
 func configHooks(ctx context.Context, opts Options) func(*config.LoadResult) error {
 	first := true
 	var keyWrapper config.KeyWrapper
+	var previousKeyWrappers []config.KeyWrapper
 	return func(result *config.LoadResult) error {
 		if first {
 			first = false
@@ -361,16 +362,16 @@ func configHooks(ctx context.Context, opts Options) func(*config.LoadResult) err
 					return fmt.Errorf("failed to set up configured extensions: %w", err)
 				}
 			}
-			keyWrapper = result.KeyWrapper()
+			keyWrapper, previousKeyWrappers = result.KeyWrapper(), result.PreviousKeyWrappers()
 			return nil
 		}
-		result.SetKeyWrapper(keyWrapper)
+		result.SetKeyWrapper(keyWrapper, previousKeyWrappers...)
 		if opts.ReloadConfig != nil {
 			if err := opts.ReloadConfig(ctx, result); err != nil {
 				return fmt.Errorf("configured extensions rejected the reloaded configuration: %w", err)
 			}
 		}
-		keyWrapper = result.KeyWrapper()
+		keyWrapper, previousKeyWrappers = result.KeyWrapper(), result.PreviousKeyWrappers()
 		return nil
 	}
 }

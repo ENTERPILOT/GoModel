@@ -108,3 +108,24 @@ func TestReencryptGuardrailSecrets(t *testing.T) {
 		assert.Equal(t, 0, again.Reencrypted)
 	})
 }
+
+func TestReencryptKeepsSealedSecretsOfUnknownPlugins(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, raw Store) {
+		ctx := context.Background()
+		box, keys := encryptiontest.NewBox(t)
+		require.NoError(t, sealStore(raw, box, testSecretKeys).Upsert(ctx, Definition{Name: "pii", Type: "presidio", Config: []byte(`{"api_key":"pk-old"}`)}))
+
+		// The plugin is no longer in the catalog when the pass runs.
+		noSchema := func(string) map[string]bool { return nil }
+		sealed := &sealedStore{Store: raw, box: encryptiontest.Rotate(t, keys), secretKeys: noSchema}
+		report, err := sealed.reencrypt(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, 1, report.Reencrypted)
+
+		stored := storedConfigValues(t, raw, "pii")["api_key"].(string)
+		assert.True(t, sealed.box.IsCurrent(stored), "the secret moves to the new key instead of being written as plaintext")
+		got, err := sealed.Get(ctx, "pii")
+		require.NoError(t, err)
+		assertJSONEqual(t, got.Config, `{"api_key":"pk-old"}`)
+	})
+}

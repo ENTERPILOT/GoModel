@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 )
 
 // sealedPrefix marks a sealed value and names its format version.
@@ -34,14 +35,31 @@ const dekSize = 32
 // encryption key configured.
 var ErrKeyRequired = errors.New("value is encrypted but GOMODEL_ENCRYPTION_KEY is not set")
 
+// errUnknownKey reports a value sealed with a data key this Box does not
+// hold. The key id is deliberately left out of the message: it is read from
+// the stored value, and errors from this package must not echo stored data.
+var errUnknownKey = errors.New("value is encrypted with a data key that is not in encryption_keys")
+
+// minReloadInterval bounds how often a Box re-reads encryption_keys after
+// meeting an unknown key id, so a corrupt row cannot turn every read into a
+// key-store round trip and an Argon2id derivation.
+const minReloadInterval = 10 * time.Second
+
 // Box seals and opens secret field values. A Box without keys (Disabled, or a
 // nil *Box) passes plaintext through unchanged, which is the behaviour of a
 // deployment without GOMODEL_ENCRYPTION_KEY.
 //
 // A Box is safe for concurrent use.
 type Box struct {
+	mu     sync.RWMutex
 	active string
 	keys   map[string]cipher.AEAD
+
+	// reload re-reads the key store. A running gateway uses it to pick up a
+	// data key that `secrets reencrypt --rotate-data-key` created after the
+	// gateway started. Nil for a Box that cannot reload.
+	reload     func() (*Box, error)
+	lastReload time.Time
 
 	plaintextOnce sync.Once
 }
@@ -80,9 +98,10 @@ func newAEAD(key []byte) (cipher.AEAD, error) {
 	return cipher.NewGCM(block)
 }
 
-// Enabled reports whether the Box seals new values.
+// Enabled reports whether the Box seals new values. It never changes over
+// the life of a Box: a reload only adds keys or moves the active one.
 func (b *Box) Enabled() bool {
-	return b != nil && b.active != ""
+	return b.ActiveKeyID() != ""
 }
 
 // ActiveKeyID returns the id of the data key new values are sealed with, or
@@ -91,7 +110,57 @@ func (b *Box) ActiveKeyID() string {
 	if b == nil {
 		return ""
 	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 	return b.active
+}
+
+// sealingKey returns the active key and its id.
+func (b *Box) sealingKey() (string, cipher.AEAD) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.active, b.keys[b.active]
+}
+
+// openingKey returns the data key with id, re-reading the key store once if
+// this Box does not hold it yet.
+func (b *Box) openingKey(id string) (cipher.AEAD, bool) {
+	b.mu.RLock()
+	aead, ok := b.keys[id]
+	b.mu.RUnlock()
+	if ok {
+		return aead, true
+	}
+	if b.reloadKeys() {
+		b.mu.RLock()
+		aead, ok = b.keys[id]
+		b.mu.RUnlock()
+	}
+	return aead, ok
+}
+
+// reloadKeys adopts the key store's current keys and active key. It reports
+// whether a reload happened.
+func (b *Box) reloadKeys() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.reload == nil || time.Since(b.lastReload) < minReloadInterval {
+		return false
+	}
+	b.lastReload = time.Now()
+	next, err := b.reload()
+	if err != nil {
+		slog.Warn("could not reload encryption keys", "error", err)
+		return false
+	}
+	if !next.Enabled() {
+		return false
+	}
+	next.mu.RLock()
+	defer next.mu.RUnlock()
+	b.keys, b.active = next.keys, next.active
+	slog.Info("reloaded encryption keys", "active_key_id", b.active)
+	return true
 }
 
 // AAD builds the additional authenticated data for one secret field.
@@ -108,7 +177,7 @@ func IsSealed(value string) bool {
 // re-encryption can skip it.
 func (b *Box) IsCurrent(value string) bool {
 	keyID, _, ok := splitSealed(value)
-	return ok && b.Enabled() && keyID == b.active
+	return ok && b.Enabled() && keyID == b.ActiveKeyID()
 }
 
 // Seal encrypts plaintext under the active data key. Empty values and every
@@ -117,13 +186,13 @@ func (b *Box) Seal(aad []byte, plaintext string) (string, error) {
 	if plaintext == "" || !b.Enabled() {
 		return plaintext, nil
 	}
-	aead := b.keys[b.active]
+	active, aead := b.sealingKey()
 	nonce := make([]byte, aead.NonceSize(), aead.NonceSize()+len(plaintext)+aead.Overhead())
 	if _, err := rand.Read(nonce); err != nil {
 		return "", fmt.Errorf("generate nonce: %w", err)
 	}
 	sealed := aead.Seal(nonce, nonce, []byte(plaintext), aad)
-	return sealedPrefix + b.active + ":" + base64.StdEncoding.EncodeToString(sealed), nil
+	return sealedPrefix + active + ":" + base64.StdEncoding.EncodeToString(sealed), nil
 }
 
 // Open decrypts a sealed value. Plaintext is returned as-is: rows written
@@ -143,9 +212,9 @@ func (b *Box) Open(aad []byte, value string) (string, error) {
 	if !ok {
 		return "", errors.New("malformed encrypted value")
 	}
-	aead, ok := b.keys[keyID]
+	aead, ok := b.openingKey(keyID)
 	if !ok {
-		return "", fmt.Errorf("value is encrypted with unknown data key %q", keyID)
+		return "", errUnknownKey
 	}
 	raw, err := base64.StdEncoding.DecodeString(payload)
 	if err != nil || len(raw) < aead.NonceSize()+aead.Overhead() {

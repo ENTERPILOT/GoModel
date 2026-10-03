@@ -22,6 +22,9 @@ type Options struct {
 	// local KEK; Key and PreviousKey then only unwrap data keys that still
 	// need to be moved to it.
 	Wrapper Wrapper
+	// PreviousWrappers unwrap data keys held by wrappers Wrapper replaces,
+	// so they can be re-wrapped with it.
+	PreviousWrappers []Wrapper
 }
 
 func (o Options) current() kek {
@@ -38,6 +41,11 @@ func (o Options) current() kek {
 // fallbacks are KEKs that may unwrap a data key but never wrap one.
 func (o Options) fallbacks() []kek {
 	var out []kek
+	for _, w := range o.PreviousWrappers {
+		if w != nil {
+			out = append(out, extensionKEK{wrapper: w})
+		}
+	}
 	if o.Wrapper != nil && o.Key != "" {
 		out = append(out, newLocalKEK(o.Key))
 	}
@@ -87,8 +95,20 @@ func Open(ctx context.Context, store KeyStore, opts Options) (*Box, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newBox(active, deks)
+	box, err := newBox(active, deks)
+	if err != nil {
+		return nil, err
+	}
+	box.reload = func() (*Box, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), reloadTimeout)
+		defer cancel()
+		return Open(ctx, store, opts)
+	}
+	return box, nil
 }
+
+// reloadTimeout bounds a key-store reload triggered by a read.
+const reloadTimeout = 30 * time.Second
 
 // RotateDataKey creates a new data key, wraps it with the current KEK, and
 // makes it active. Values sealed with older data keys stay readable; `gomodel
@@ -193,7 +213,7 @@ func missingWrapperError(key Key, current kek) error {
 			"set GOMODEL_ENCRYPTION_KEY to the old value once so it can be re-wrapped", key.ID, current.id())
 	}
 	return fmt.Errorf("data key %q is wrapped by key wrapper %q, which is not configured (current: %q); "+
-		"configure that wrapper so the key can be re-wrapped", key.ID, key.WrapperID, current.id())
+		"pass it as a previous key wrapper so the key can be re-wrapped", key.ID, key.WrapperID, current.id())
 }
 
 func rewrap(ctx context.Context, store KeyStore, key Key, current kek, dek []byte) error {

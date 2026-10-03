@@ -39,7 +39,8 @@ type KeyStore interface {
 	Insert(ctx context.Context, key Key) (bool, error)
 	// UpdateWrapping replaces how a key is wrapped (after a KEK rotation).
 	UpdateWrapping(ctx context.Context, key Key) error
-	// Activate makes id the active key.
+	// Activate marks id, the newest key, active and clears the flag of
+	// older keys.
 	Activate(ctx context.Context, id string) error
 }
 

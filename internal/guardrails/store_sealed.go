@@ -2,6 +2,7 @@ package guardrails
 
 import (
 	"context"
+	"errors"
 
 	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/plugins"
@@ -63,7 +64,11 @@ func (s *sealedStore) open(definition *Definition) error {
 }
 
 func (s *sealedStore) seal(definition *Definition) error {
-	secret := s.secretKeys(definition.Type)
+	return s.sealKeys(definition, s.secretKeys(definition.Type))
+}
+
+// sealKeys seals the config values under the given keys.
+func (s *sealedStore) sealKeys(definition *Definition, secret map[string]bool) error {
 	if len(secret) == 0 {
 		return nil
 	}
@@ -131,42 +136,62 @@ func (s *sealedStore) UpsertMany(ctx context.Context, definitions []Definition) 
 	return s.Store.UpsertMany(ctx, sealed)
 }
 
-// needsReseal reports whether a stored definition holds a plaintext secret or
-// a value sealed with an older data key.
-func (s *sealedStore) needsReseal(definition Definition) (bool, error) {
-	secret := s.secretKeys(definition.Type)
+// storedSecretKeys returns the keys of a stored definition that hold a secret:
+// those its plugin schema marks secret, plus any already sealed. The second
+// set matters when the plugin is missing from the catalog or no longer marks
+// the field secret, so re-encryption never writes a sealed value back as
+// plaintext.
+func (s *sealedStore) storedSecretKeys(definition Definition) (map[string]bool, []encryption.Field, error) {
+	keys := map[string]bool{}
+	for key := range s.secretKeys(definition.Type) {
+		keys[key] = true
+	}
 	var fields []encryption.Field
 	_, err := plugins.MapConfigStrings(definition.Config, func(key, value string) (string, error) {
-		if secret[key] || encryption.IsSealed(value) {
+		if encryption.IsSealed(value) {
+			keys[key] = true
+		}
+		if keys[key] {
 			fields = append(fields, encryption.Field{Name: key, Value: &value})
 		}
 		return value, nil
 	})
-	return s.box.NeedsReseal(fields...), err
+	return keys, fields, err
 }
 
 // reencrypt rewrites every definition holding a plaintext secret or a value
-// sealed with an older data key.
+// sealed with an older data key. Each row is re-read just before it is
+// rewritten, so an edit or delete made since the listing is not overwritten
+// with the listed copy.
 func (s *sealedStore) reencrypt(ctx context.Context) (encryption.Report, error) {
 	report := encryption.Report{Entity: "guardrail_definitions"}
-	raw, err := s.Store.List(ctx)
+	listed, err := s.Store.List(ctx)
 	if err != nil {
 		return report, err
 	}
-	report.Rows = len(raw)
-	for i := range raw {
-		definition := raw[i]
-		stale, err := s.needsReseal(definition)
+	report.Rows = len(listed)
+	for _, row := range listed {
+		definition, err := s.Store.Get(ctx, row.Name)
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
 		if err != nil {
 			return report, err
 		}
-		if !stale {
-			continue
-		}
-		if err := s.open(&definition); err != nil {
+		keys, fields, err := s.storedSecretKeys(*definition)
+		if err != nil {
 			return report, err
 		}
-		if err := s.Upsert(ctx, definition); err != nil {
+		if !s.box.NeedsReseal(fields...) {
+			continue
+		}
+		if err := s.open(definition); err != nil {
+			return report, err
+		}
+		if err := s.sealKeys(definition, keys); err != nil {
+			return report, err
+		}
+		if err := s.Store.Upsert(ctx, *definition); err != nil {
 			return report, err
 		}
 		report.Reencrypted++

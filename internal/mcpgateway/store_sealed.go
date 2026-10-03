@@ -2,6 +2,7 @@ package mcpgateway
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/encryption"
@@ -91,23 +92,31 @@ func (s *sealedStore) Upsert(ctx context.Context, server ManagedServer) error {
 }
 
 // reencrypt rewrites every server holding a plaintext header or one sealed
-// with an older data key.
+// with an older data key. Each row is re-read just before it is rewritten, so
+// an edit or delete made since the listing is not overwritten with the listed
+// copy.
 func (s *sealedStore) reencrypt(ctx context.Context) (encryption.Report, error) {
 	report := encryption.Report{Entity: "mcp_servers"}
-	raw, err := s.Store.List(ctx)
+	listed, err := s.Store.List(ctx)
 	if err != nil {
 		return report, err
 	}
-	report.Rows = len(raw)
-	for i := range raw {
-		server := raw[i]
+	report.Rows = len(listed)
+	for _, row := range listed {
+		server, err := s.Store.Get(ctx, row.Name)
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return report, err
+		}
 		if !s.box.NeedsReseal(headerSecretFields(server.Headers)...) {
 			continue
 		}
-		if err := s.open(&server); err != nil {
+		if err := s.open(server); err != nil {
 			return report, err
 		}
-		if err := s.Upsert(ctx, server); err != nil {
+		if err := s.Upsert(ctx, *server); err != nil {
 			return report, err
 		}
 		report.Reencrypted++

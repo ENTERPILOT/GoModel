@@ -141,3 +141,41 @@ func TestReencryptCredentials(t *testing.T) {
 		assert.Equal(t, 0, again.Reencrypted, "a second pass rewrites nothing")
 	})
 }
+
+// editAfterList runs edit right after List returns, standing in for an admin
+// change that lands while a re-encryption pass is running.
+type editAfterList struct {
+	CredentialStore
+	edit func()
+}
+
+func (s editAfterList) List(ctx context.Context) ([]ManagedProviderCredential, error) {
+	rows, err := s.CredentialStore.List(ctx)
+	s.edit()
+	return rows, err
+}
+
+func TestReencryptCredentialsKeepsConcurrentChanges(t *testing.T) {
+	runCredentialStoreSuite(t, func(t *testing.T, raw CredentialStore) {
+		ctx := context.Background()
+		box, _ := encryptiontest.NewBox(t)
+		require.NoError(t, raw.Upsert(ctx, ManagedProviderCredential{Name: "edited", Type: "openai", APIKeys: []string{"sk-old"}, Enabled: true}))
+		require.NoError(t, raw.Upsert(ctx, ManagedProviderCredential{Name: "deleted", Type: "openai", APIKeys: []string{"sk-gone"}, Enabled: true}))
+
+		store := editAfterList{CredentialStore: raw, edit: func() {
+			require.NoError(t, raw.Upsert(ctx, ManagedProviderCredential{Name: "edited", Type: "openai", APIKeys: []string{"sk-new"}, Enabled: false}))
+			require.NoError(t, raw.Delete(ctx, "deleted"))
+		}}
+		sealed := &sealedCredentialStore{CredentialStore: store, box: box}
+		report, err := sealed.reencrypt(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, 1, report.Reencrypted)
+
+		got, err := sealed.Get(ctx, "edited")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"sk-new"}, got.APIKeys, "the edit is not overwritten with the listed copy")
+		assert.False(t, got.Enabled)
+		_, err = raw.Get(ctx, "deleted")
+		require.ErrorIs(t, err, ErrCredentialNotFound, "a deleted row is not recreated")
+	})
+}
