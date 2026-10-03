@@ -84,7 +84,8 @@ support, not every individual model capability exposed by an upstream provider.
 
 - **OpenAI reasoning models** — for o-series and GPT-5 or later models
   (including GPT-6), GoModel sends `max_tokens` as `max_completion_tokens` and
-  drops `temperature` and `top_p`. OpenAI rejects `stop` for these models, so
+  drops `temperature` and `top_p` unless `reasoning_effort` is `"none"` (the
+  only case these models accept them). OpenAI rejects `stop` for these models, so
   GoModel cuts the output at the first stop sequence itself and reports it in
   `stop_sequence`. A `reasoning_effort` the model does not accept moves to the
   closest level it does (for example `minimal` becomes `low` from GPT-5.1 on,

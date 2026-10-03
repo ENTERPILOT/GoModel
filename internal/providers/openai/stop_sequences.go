@@ -68,7 +68,9 @@ func firstStop(text string, stops []string) (int, string) {
 	return at, matched
 }
 
-// applyStopSequences cuts each choice's text at its first stop sequence.
+// applyStopSequences cuts each choice's text at its first stop sequence. A
+// choice that also called tools keeps its tool calls and finish reason, so the
+// caller can continue its tool loop.
 func applyStopSequences(resp *core.ChatResponse, stops []string) {
 	if resp == nil || len(stops) == 0 {
 		return
@@ -79,9 +81,12 @@ func applyStopSequences(resp *core.ChatResponse, stops []string) {
 		if !ok {
 			continue
 		}
-		if at, stop := firstStop(text, stops); at >= 0 {
-			choice.Message.Content = text[:at]
-			choice.Message.ToolCalls = nil
+		at, stop := firstStop(text, stops)
+		if at < 0 {
+			continue
+		}
+		choice.Message.Content = text[:at]
+		if len(choice.Message.ToolCalls) == 0 {
 			choice.FinishReason = "stop"
 			choice.StopSequence = stop
 		}
@@ -89,9 +94,11 @@ func applyStopSequences(resp *core.ChatResponse, stops []string) {
 }
 
 // stopSequenceStream emulates stop sequences on a chat completion SSE stream.
-// It holds back the text a stop sequence could still complete, cuts the answer
-// at the first match and finishes that choice there, then keeps reading the
-// upstream so its usage chunk still arrives. It is single-reader.
+// It holds back the text a stop sequence could still complete and cuts the
+// text at the first match, dropping what follows. Tool calls and the upstream
+// finish still pass, and the stream is read to its end so the usage chunk
+// arrives; a choice that called no tools finishes as stopped by the sequence.
+// It is single-reader.
 type stopSequenceStream struct {
 	reader   *bufio.Reader
 	body     io.ReadCloser
@@ -99,12 +106,13 @@ type stopSequenceStream struct {
 	stops    []string
 	holdBack int
 	choices  map[float64]*stopChoiceState
-	done     bool
+	err      error
 }
 
 type stopChoiceState struct {
-	pending string
-	stopped bool
+	pending      string
+	stop         string // the matched stop sequence, once the text is cut
+	sawToolCalls bool
 }
 
 func newStopSequenceStream(body io.ReadCloser, stops []string) io.ReadCloser {
@@ -122,25 +130,22 @@ func newStopSequenceStream(body io.ReadCloser, stops []string) io.ReadCloser {
 	}
 }
 
-// Read returns the rewritten stream, passing upstream errors through.
+// Read returns the rewritten stream. An upstream error (or io.EOF) is
+// returned once the data read before it has been delivered.
 func (s *stopSequenceStream) Read(p []byte) (int, error) {
 	for {
 		if s.buffer.Len() > 0 {
 			return s.buffer.Read(p), nil
 		}
-		if s.done {
-			return 0, io.EOF
+		if s.err != nil {
+			return 0, s.err
 		}
 		line, err := s.reader.ReadBytes('\n')
 		if len(line) > 0 {
 			s.handleLine(line)
 		}
 		if err != nil {
-			if s.buffer.Len() > 0 {
-				s.done = true
-				return s.buffer.Read(p), nil
-			}
-			return 0, err
+			s.err = err
 		}
 	}
 }
@@ -160,16 +165,11 @@ func (s *stopSequenceStream) handleLine(line []byte) {
 		return
 	}
 	choices, _ := chunk["choices"].([]any)
-	kept := make([]any, 0, len(choices))
 	for _, raw := range choices {
-		if choice, ok := raw.(map[string]any); ok && s.rewriteChoice(choice) {
-			kept = append(kept, choice)
+		if choice, ok := raw.(map[string]any); ok {
+			s.rewriteChoice(choice)
 		}
 	}
-	if len(kept) == 0 && len(choices) > 0 && chunk["usage"] == nil {
-		return
-	}
-	chunk["choices"] = kept
 	rewritten, err := json.Marshal(chunk)
 	if err != nil {
 		s.buffer.AppendBytes(line)
@@ -178,34 +178,31 @@ func (s *stopSequenceStream) handleLine(line []byte) {
 	s.buffer.AppendString("data: " + string(rewritten) + "\n\n")
 }
 
-// rewriteChoice applies the stop sequences to one streamed choice and reports
-// whether it is still sent; a choice already finished at a stop sequence is
-// dropped.
-func (s *stopSequenceStream) rewriteChoice(choice map[string]any) bool {
+// rewriteChoice applies the stop sequences to one streamed choice.
+func (s *stopSequenceStream) rewriteChoice(choice map[string]any) {
 	index, _ := choice["index"].(float64)
 	state := s.choices[index]
 	if state == nil {
 		state = &stopChoiceState{}
 		s.choices[index] = state
 	}
-	if state.stopped {
-		return false
-	}
 	delta, _ := choice["delta"].(map[string]any)
 	if delta == nil {
 		delta = map[string]any{}
 		choice["delta"] = delta
 	}
+	if delta["tool_calls"] != nil {
+		state.sawToolCalls = true
+	}
 	content, hasContent := delta["content"].(string)
-	if hasContent || state.pending != "" {
+	switch {
+	case state.stop != "":
+		delete(delta, "content") // the text ended at the stop sequence
+	case hasContent || state.pending != "":
 		text := state.pending + content
 		if at, stop := firstStop(text, s.stops); at >= 0 {
-			delta["content"] = text[:at]
-			delete(delta, "tool_calls")
-			delta["stop_sequence"] = stop
-			choice["finish_reason"] = "stop"
-			state.pending, state.stopped = "", true
-			return true
+			delta["content"], state.pending, state.stop = text[:at], "", stop
+			break
 		}
 		emit := len(text) - s.holdBack
 		if choice["finish_reason"] != nil || delta["tool_calls"] != nil {
@@ -217,5 +214,8 @@ func (s *stopSequenceStream) rewriteChoice(choice map[string]any) bool {
 		}
 		delta["content"], state.pending = text[:emit], text[emit:]
 	}
-	return true
+	if choice["finish_reason"] != nil && state.stop != "" && !state.sawToolCalls {
+		choice["finish_reason"] = "stop"
+		delta["stop_sequence"] = state.stop
+	}
 }

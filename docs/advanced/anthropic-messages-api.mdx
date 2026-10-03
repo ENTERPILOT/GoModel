@@ -249,8 +249,10 @@ features that have no canonical equivalent are not preserved end to end:
   truncated correctly).
 - **`output_config`**: `effort` sets the reasoning effort (taking precedence
   over the one derived from `thinking`), and `format` (or the older top-level
-  `output_format`) becomes strict JSON-schema structured output. A format other
-  than `json_schema` is rejected with a `400`.
+  `output_format`) becomes JSON-schema structured output — strict when the
+  schema meets OpenAI's strict-mode rules (`additionalProperties: false` and
+  every property required). A format other than `json_schema` is rejected with
+  a `400`.
 - **`thinking`** on a non-Anthropic model becomes a reasoning effort (budget
   under 10000 tokens: `low`, under 20000: `medium`, otherwise `high`; adaptive:
   `medium`), sent as each provider's own field: `reasoning_effort` on OpenAI,

@@ -54,15 +54,28 @@ func supportedEffort(model, effort string) string {
 	return levels[len(levels)-1]
 }
 
+// reasoningOff reports whether an effort turns reasoning off, the only case in
+// which OpenAI reasoning models accept temperature and top_p.
+func reasoningOff(effort string) bool {
+	return effort == "none"
+}
+
+// flatEffort returns the reasoning_effort member of a request, or "".
+func flatEffort(req *core.ChatRequest) string {
+	var effort string
+	if raw := req.ExtraFields.Lookup("reasoning_effort"); len(raw) > 0 && json.Unmarshal(raw, &effort) == nil {
+		return strings.TrimSpace(effort)
+	}
+	return ""
+}
+
 // adaptFlatEffort applies supportedEffort to a reasoning_effort member the
 // caller sent directly, leaving the request unchanged when it already fits.
 func adaptFlatEffort(req *core.ChatRequest) (*core.ChatRequest, error) {
-	raw := req.ExtraFields.Lookup("reasoning_effort")
-	var effort string
-	if len(raw) == 0 || json.Unmarshal(raw, &effort) != nil {
+	effort := flatEffort(req)
+	if effort == "" {
 		return req, nil
 	}
-	effort = strings.TrimSpace(effort)
 	if supported := supportedEffort(req.Model, effort); supported != effort {
 		return providers.AdaptReasoningEffortRequest(req, supported)
 	}

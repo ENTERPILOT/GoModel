@@ -197,7 +197,8 @@ func chatToResponsesRequest(req *core.ChatRequest) (*core.ResponsesRequest, erro
 		Tools:             tools,
 		ToolChoice:        toolChoice,
 		ParallelToolCalls: req.ParallelToolCalls,
-		TopP:              topPForResponses(req),
+		Temperature:       samplingForResponses(req, req.Temperature),
+		TopP:              samplingForResponses(req, req.TopP),
 		MaxOutputTokens:   req.MaxTokens,
 		Stream:            req.Stream,
 		User:              req.User,
@@ -227,12 +228,14 @@ func chatToResponsesRequest(req *core.ChatRequest) (*core.ResponsesRequest, erro
 	return out, nil
 }
 
-// topPForResponses drops top_p for reasoning models, as the chat path does.
-func topPForResponses(req *core.ChatRequest) *float64 {
-	if isReasoningChatModel(req.Model) {
+// samplingForResponses keeps a temperature or top_p value only where the
+// model accepts it, as the chat path does: always for non-reasoning models,
+// and for reasoning models only with reasoning turned off.
+func samplingForResponses(req *core.ChatRequest, value *float64) *float64 {
+	if isReasoningChatModel(req.Model) && !reasoningOff(supportedEffort(req.Model, requestedEffort(req))) {
 		return nil
 	}
-	return req.TopP
+	return value
 }
 
 // applyMappedChatFields sets the Responses fields that chat members map onto:

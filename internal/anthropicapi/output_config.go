@@ -43,8 +43,9 @@ func applyOutputConfig(req *MessagesRequest, chat *core.ChatRequest) error {
 }
 
 // responseFormatFromOutputFormat maps an Anthropic output format onto the
-// OpenAI-compatible response_format. Anthropic enforces the schema, so the
-// mapped format is strict.
+// OpenAI-compatible response_format. It is strict when the schema meets
+// OpenAI's strict-mode rules, which reject other schemas outright; otherwise
+// the schema still guides the output without the guarantee.
 func responseFormatFromOutputFormat(raw json.RawMessage) (json.RawMessage, error) {
 	var format struct {
 		Type   string          `json:"type"`
@@ -57,12 +58,68 @@ func responseFormatFromOutputFormat(raw json.RawMessage) (json.RawMessage, error
 	if format.Type != "json_schema" || len(schema) == 0 || schema[0] != '{' {
 		return nil, fmt.Errorf(`output_config.format must be {"type":"json_schema","schema":{...}}`)
 	}
+	var decoded any
+	if err := json.Unmarshal(schema, &decoded); err != nil {
+		return nil, fmt.Errorf("output_config.format.schema: %v", err)
+	}
 	return json.Marshal(map[string]any{
 		"type": "json_schema",
 		"json_schema": map[string]any{
 			"name":   "output",
-			"strict": true,
+			"strict": strictCompatible(decoded),
 			"schema": json.RawMessage(schema),
 		},
 	})
+}
+
+// strictCompatible reports whether a JSON schema meets OpenAI's strict-mode
+// rules: every object sets additionalProperties to false and lists all of its
+// properties as required, throughout nested schemas.
+func strictCompatible(schema any) bool {
+	switch node := schema.(type) {
+	case []any:
+		for _, item := range node {
+			if !strictCompatible(item) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		properties, hasProperties := node["properties"].(map[string]any)
+		if node["type"] == "object" || hasProperties {
+			if additional, ok := node["additionalProperties"].(bool); !ok || additional {
+				return false
+			}
+			required, _ := node["required"].([]any)
+			listed := make(map[any]bool, len(required))
+			for _, name := range required {
+				listed[name] = true
+			}
+			for name, property := range properties {
+				if !listed[name] || !strictCompatible(property) {
+					return false
+				}
+			}
+		}
+		for _, key := range []string{"items", "anyOf", "oneOf", "allOf", "$defs", "definitions"} {
+			child, ok := node[key]
+			if !ok {
+				continue
+			}
+			if defs, isMap := child.(map[string]any); isMap && (key == "$defs" || key == "definitions") {
+				for _, def := range defs {
+					if !strictCompatible(def) {
+						return false
+					}
+				}
+				continue
+			}
+			if !strictCompatible(child) {
+				return false
+			}
+		}
+		return true
+	default:
+		return true
+	}
 }

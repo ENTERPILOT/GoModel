@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -84,7 +85,7 @@ func chunkLine(index int, delta map[string]any, finish any) string {
 
 type streamResult struct {
 	text, stopSequence, finish string
-	sawUsage, sawDone       bool
+	sawUsage, sawDone          bool
 }
 
 func runStopStream(t *testing.T, stops []string, upstream string) streamResult {
@@ -171,4 +172,53 @@ func TestStopSequenceStream_FlushesBeforeToolCalls(t *testing.T) {
 	got := runStopStream(t, []string{"END"}, upstream)
 	assert.Equal(t, "Checking E", got.text)
 	assert.Equal(t, "tool_calls", got.finish)
+}
+
+// A stop sequence cuts the text but never a tool call: the caller needs it to
+// continue its tool loop, and the turn finishes as a tool call.
+func TestStopSequences_KeepToolCalls(t *testing.T) {
+	t.Run("stream", func(t *testing.T) {
+		call := map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "call_1", "type": "function",
+			"function": map[string]any{"name": "f", "arguments": "{}"}}}}
+		upstream := chunkLine(0, map[string]any{"content": "Plan: END then call"}, nil) + chunkLine(0, call, nil) +
+			chunkLine(0, map[string]any{}, "tool_calls") + "data: [DONE]\n\n"
+		stream := newStopSequenceStream(io.NopCloser(strings.NewReader(upstream)), []string{"END"})
+		body, err := io.ReadAll(stream)
+		require.NoError(t, err)
+		assert.Contains(t, string(body), `"call_1"`)
+
+		got := runStopStream(t, []string{"END"}, upstream)
+		assert.Equal(t, "Plan: ", got.text)
+		assert.Equal(t, "tool_calls", got.finish)
+		assert.Empty(t, got.stopSequence)
+	})
+	t.Run("blocking", func(t *testing.T) {
+		resp := &core.ChatResponse{Choices: []core.Choice{{
+			Message: core.ResponseMessage{Role: "assistant", Content: "Plan: END then call",
+				ToolCalls: []core.ToolCall{{ID: "call_1", Type: "function", Function: core.FunctionCall{Name: "f", Arguments: "{}"}}}},
+			FinishReason: "tool_calls",
+		}}}
+		applyStopSequences(resp, []string{"END"})
+		choice := resp.Choices[0]
+		assert.Equal(t, "Plan: ", choice.Message.Content)
+		assert.Len(t, choice.Message.ToolCalls, 1)
+		assert.Equal(t, "tool_calls", choice.FinishReason)
+		assert.Empty(t, choice.StopSequence)
+	})
+}
+
+type failingReader struct{ err error }
+
+func (r failingReader) Read([]byte) (int, error) { return 0, r.err }
+
+// An upstream read error is returned after the data before it, never turned
+// into a clean end of stream.
+func TestStopSequenceStream_KeepsUpstreamError(t *testing.T) {
+	broken := errors.New("connection reset")
+	upstream := io.MultiReader(strings.NewReader(chunkLine(0, map[string]any{"content": "partial"}, nil)), failingReader{err: broken})
+	stream := newStopSequenceStream(io.NopCloser(upstream), []string{"END"})
+	body, err := io.ReadAll(stream)
+	require.ErrorIs(t, err, broken)
+	// "al" stays held back: it could still begin "END" when the stream broke.
+	assert.Contains(t, string(body), `"parti"`)
 }

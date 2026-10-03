@@ -69,6 +69,10 @@ func TestChatCompletion_AdaptsEffortAndTopP(t *testing.T) {
 			wantEffort: "high"},
 		{name: "top_p dropped on a reasoning model", req: core.ChatRequest{Model: "gpt-6-luna", TopP: &topP}},
 		{name: "top_p kept on gpt-4o", req: core.ChatRequest{Model: "gpt-4o", TopP: &topP}, wantTopP: 0.5},
+		{name: "top_p kept with reasoning off", req: core.ChatRequest{Model: "gpt-6-luna", TopP: &topP,
+			Reasoning: &core.Reasoning{Effort: "none"}}, wantEffort: "none", wantTopP: 0.5},
+		{name: "top_p dropped when none is not accepted", req: core.ChatRequest{Model: "gpt-6-astra", TopP: &topP,
+			Reasoning: &core.Reasoning{Effort: "none"}}, wantEffort: "low"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -83,6 +87,26 @@ func TestChatCompletion_AdaptsEffortAndTopP(t *testing.T) {
 			sent := capture.Last(t).JSON(t)
 			assert.Equal(t, tt.wantEffort, sent["reasoning_effort"])
 			assert.Equal(t, tt.wantTopP, sent["top_p"])
+		})
+	}
+}
+
+// The Responses route keeps sampling exactly where the chat path does.
+func TestSamplingForResponses(t *testing.T) {
+	temperature := 0.3
+	tests := []struct {
+		name string
+		req  core.ChatRequest
+		want *float64
+	}{
+		{name: "reasoning model", req: core.ChatRequest{Model: "gpt-6-luna", Reasoning: &core.Reasoning{Effort: "low"}}},
+		{name: "reasoning off", req: core.ChatRequest{Model: "gpt-6-luna", Reasoning: &core.Reasoning{Effort: "none"}}, want: &temperature},
+		{name: "none not accepted", req: core.ChatRequest{Model: "gpt-6-astra", Reasoning: &core.Reasoning{Effort: "none"}}},
+		{name: "non-reasoning model", req: core.ChatRequest{Model: "gpt-4o"}, want: &temperature},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, samplingForResponses(&tt.req, &temperature))
 		})
 	}
 }

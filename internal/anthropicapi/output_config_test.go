@@ -1,6 +1,7 @@
 package anthropicapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -61,4 +62,35 @@ func TestToChatRequestOutputConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStrictCompatible(t *testing.T) {
+	tests := []struct {
+		name   string
+		schema string
+		want   bool
+	}{
+		{name: "strict object", schema: outputSchema, want: true},
+		{name: "missing additionalProperties", schema: `{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]}`},
+		{name: "optional property", schema: `{"type":"object","properties":{"a":{"type":"string"},"b":{"type":"string"}},"required":["a"],"additionalProperties":false}`},
+		{name: "loose nested item", schema: `{"type":"object","properties":{"list":{"type":"array","items":{"type":"object","properties":{"x":{"type":"string"}}}}},"required":["list"],"additionalProperties":false}`},
+		{name: "loose definition", schema: `{"type":"object","properties":{},"additionalProperties":false,"$defs":{"d":{"type":"object","properties":{"x":{"type":"string"}}}}}`},
+		{name: "scalar", schema: `{"type":"string"}`, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var schema any
+			require.NoError(t, json.Unmarshal([]byte(tt.schema), &schema))
+			assert.Equal(t, tt.want, strictCompatible(schema))
+		})
+	}
+}
+
+// A schema strict mode would reject is sent non-strict instead of failing.
+func TestToChatRequestOutputConfigLooseSchema(t *testing.T) {
+	loose := `{"type":"object","properties":{"name":{"type":"string"},"age":{"type":"integer"}},"required":["name"]}`
+	chat, err := ToChatRequest(mustDecode(t, `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hi"}],"output_config":{"format":{"type":"json_schema","schema":`+loose+`}}}`))
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"type":"json_schema","json_schema":{"name":"output","strict":false,"schema":`+loose+`}}`,
+		string(chat.ExtraFields.Lookup("response_format")))
 }
