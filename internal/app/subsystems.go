@@ -50,6 +50,7 @@ const (
 	subsystemStorage             = "storage"
 	subsystemRuntimeSettings     = "runtime settings"
 	subsystemProviders           = "providers"
+	subsystemSecretRotation      = "secret rotation"
 	subsystemRouteStrategies     = "routing-strategy plugins"
 	subsystemAudit               = "audit"
 	subsystemUsage               = "usage"
@@ -110,6 +111,9 @@ func (a *App) unwind() error {
 // while leaking on SIGTERM.
 func (a *App) shutdownOrder() []registeredSubsystem {
 	return []registeredSubsystem{
+		// Stop applying rotated secrets before anything they would swap into
+		// or reload is torn down.
+		{name: subsystemSecretRotation, close: closerOf(a.secretRotation)},
 		// Stop live setting reconciliation before tearing down anything it can
 		// reconfigure.
 		{name: subsystemRuntimeSettings, close: closerOf(a.runtimeSettings)},

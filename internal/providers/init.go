@@ -33,6 +33,10 @@ type InitResult struct {
 	// map (same keys as Router). Keys match top-level providers YAML names.
 	CredentialResolvedProviders map[string]config.RawProviderConfig
 
+	// keys swaps rotated API keys into the registered providers; see
+	// PlanKeyRotation.
+	keys *keyRotation
+
 	// stopRefresh is called to stop the background refresh goroutine
 	stopRefresh func()
 
@@ -117,7 +121,7 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 	registry.SetCache(modelCache)
 	registry.SetConfiguredProviderModelsMode(result.Config.Models.ConfiguredProviderModelsMode)
 
-	count, err := initializeProviders(ctx, providerMap, factory, registry)
+	count, keyrings, err := initializeProviders(ctx, providerMap, factory, registry)
 	if err != nil {
 		modelCache.Close()
 		return nil, err
@@ -200,6 +204,7 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 		Cache:                       modelCache,
 		Factory:                     factory,
 		CredentialResolvedProviders: credentialResolved,
+		keys:                        newKeyRotation(result.RawProviders, environ, discovery, result.Config.Resilience, providerMap, keyrings),
 		stopRefresh:                 stopRefresh,
 	}, nil
 }
@@ -272,8 +277,9 @@ func defaultModelCacheDir() string {
 }
 
 // initializeProviders instantiates and registers all resolved providers.
-// Returns the count of successfully registered providers.
-func initializeProviders(ctx context.Context, providerMap map[string]ProviderConfig, factory *ProviderFactory, registry *ModelRegistry) (int, error) {
+// Returns the count of successfully registered providers and their keyrings by
+// name (nil for a keyless provider).
+func initializeProviders(ctx context.Context, providerMap map[string]ProviderConfig, factory *ProviderFactory, registry *ModelRegistry) (int, map[string]*Keyring, error) {
 	// Sort provider names for deterministic initialization order
 	names := make([]string, 0, len(providerMap))
 	for name := range providerMap {
@@ -285,6 +291,7 @@ func initializeProviders(ctx context.Context, providerMap map[string]ProviderCon
 		name            string
 		config          ProviderConfig
 		provider        core.Provider
+		keys            *Keyring
 		createErr       error
 		availabilityErr error
 	}
@@ -302,7 +309,8 @@ func initializeProviders(ctx context.Context, providerMap map[string]ProviderCon
 			defer func() { <-sem }()
 
 			pCfg := providerMap[name]
-			p, err := factory.Create(pCfg)
+			keys := NewKeyringWithSessionStickiness(pCfg.SessionStickyKeys, pCfg.APIKeys...)
+			p, err := factory.create(pCfg, keys)
 			if err != nil {
 				results[i] = initializedProvider{name: name, config: pCfg, createErr: err}
 				return
@@ -312,6 +320,7 @@ func initializeProviders(ctx context.Context, providerMap map[string]ProviderCon
 				name:            name,
 				config:          pCfg,
 				provider:        p,
+				keys:            keys,
 				availabilityErr: registry.probeAvailability(ctx, p, name, availabilityProbeTimeout),
 			}
 		}(i, name)
@@ -319,6 +328,7 @@ func initializeProviders(ctx context.Context, providerMap map[string]ProviderCon
 	wg.Wait()
 
 	var count int
+	keyrings := make(map[string]*Keyring, len(results))
 	for _, result := range results {
 		name, pCfg, p := result.name, result.config, result.provider
 		if result.createErr != nil {
@@ -348,11 +358,12 @@ func initializeProviders(ctx context.Context, providerMap map[string]ProviderCon
 			registry.SetProviderMetadataOverrides(name, pCfg.ModelMetadataOverrides)
 		}
 		registry.SetProviderModelFilter(name, pCfg.ModelFilter)
+		keyrings[name] = result.keys
 		count++
 		slog.Info("provider registered", "name", name, "type", pCfg.Type)
 	}
 
-	return count, nil
+	return count, keyrings, nil
 }
 
 // validateProviderModelFilters rejects model filters that cannot express what

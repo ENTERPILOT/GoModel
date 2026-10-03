@@ -23,6 +23,21 @@ import (
 // works just as well.
 const reloadSignal = syscall.SIGHUP
 
+// reloadRequester returns a function that asks for a reload from inside the
+// process, exactly as SIGHUP does: it sends on the channel serveUntilShutdown
+// watches. It never blocks; a reload already pending absorbs the request, and
+// a reload that fails keeps the running generation, as for SIGHUP.
+func reloadRequester(reload chan<- os.Signal) func(reason string) {
+	return func(reason string) {
+		select {
+		case reload <- reloadSignal:
+			slog.Info("configuration reload requested", "reason", reason)
+		default:
+			slog.Info("configuration reload already pending", "reason", reason)
+		}
+	}
+}
+
 // envFile is the environment file loaded at startup and re-read on reload.
 const envFile = ".env"
 

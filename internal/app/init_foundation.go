@@ -123,6 +123,19 @@ func (b *bootstrap) initProviders() error {
 	}
 	app.providers = providerResult
 	app.register(subsystemProviders, ownedByShutdown, app.providers.Close)
+
+	// Secret references were all resolved by now (config, then provider env
+	// vars), so the watcher compares against everything this generation uses.
+	if secrets := b.cfg.AppConfig.Secrets; secrets != nil {
+		app.secretRotation = &secretRotation{
+			secrets:  secrets,
+			planKeys: providerKeyPlanner(providerResult),
+			pinned:   []string{semanticEmbedderProvider(b.appCfg)},
+			reload:   b.cfg.RequestReload,
+		}
+		// Started by startServer, once this generation serves.
+		app.register(subsystemSecretRotation, ownedByShutdown, app.secretRotation.Close)
+	}
 	return nil
 }
 

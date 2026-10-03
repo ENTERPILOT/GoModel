@@ -2,7 +2,6 @@ package providers
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	"github.com/enterpilot/gomodel/config"
@@ -22,12 +21,10 @@ func resolveProviderEnvSecrets(ctx context.Context, secrets *config.Secrets, env
 		if !ok || !strings.Contains(value, "${") || !isProviderEnvKey(key, discovery) {
 			continue
 		}
-		next, err := secrets.Resolve(ctx, value)
+		// The variable is the field: errors name what the operator set, and
+		// key rotation (see keyRotation) finds API keys by it.
+		next, err := secrets.ResolveField(ctx, key, value)
 		if err != nil {
-			// Name the variable the operator set, not an empty field.
-			if secretErr, isSecretErr := errors.AsType[*config.SecretError](err); isSecretErr {
-				secretErr.Field = key
-			}
 			return nil, err
 		}
 		if next == value {
@@ -47,14 +44,32 @@ func resolveProviderEnvSecrets(ctx context.Context, secrets *config.Secrets, env
 // isProviderEnvKey reports whether key configures a provider, using the same
 // parsing as applyProviderEnvVars.
 func isProviderEnvKey(key string, discovery map[string]DiscoveryConfig) bool {
+	_, ok := providerEnvKeyField(key, discovery)
+	return ok
+}
+
+// isProviderEnvEntry is isProviderEnvKey for a KEY=value environ entry.
+func isProviderEnvEntry(entry string, discovery map[string]DiscoveryConfig) bool {
+	key, _, _ := strings.Cut(entry, "=")
+	return isProviderEnvKey(key, discovery)
+}
+
+// isProviderEnvAPIKey reports whether key sets a provider API key:
+// <PROVIDER>[_<SUFFIX>]_API_KEY[_<n>].
+func isProviderEnvAPIKey(key string, discovery map[string]DiscoveryConfig) bool {
+	field, ok := providerEnvKeyField(key, discovery)
+	return ok && field == providerEnvFieldAPIKey
+}
+
+func providerEnvKeyField(key string, discovery map[string]DiscoveryConfig) (providerEnvField, bool) {
 	for providerType, spec := range discovery {
 		prefix := envPrefix(providerType)
 		if !strings.HasPrefix(key, prefix+"_") {
 			continue
 		}
-		if _, _, _, ok := parseProviderEnvKey(prefix, key, spec); ok {
-			return true
+		if _, field, _, ok := parseProviderEnvKey(prefix, key, spec); ok {
+			return field, true
 		}
 	}
-	return false
+	return 0, false
 }

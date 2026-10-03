@@ -156,6 +156,12 @@ func (f *ProviderFactory) Add(reg Registration) {
 
 // Create instantiates a provider based on its resolved configuration.
 func (f *ProviderFactory) Create(cfg ProviderConfig) (core.Provider, error) {
+	return f.create(cfg, NewKeyringWithSessionStickiness(cfg.SessionStickyKeys, cfg.APIKeys...))
+}
+
+// create is Create with the provider's Keyring supplied, so a caller that
+// rotates keys in place (see keyRotation) keeps a handle on it.
+func (f *ProviderFactory) create(cfg ProviderConfig, keys *Keyring) (core.Provider, error) {
 	if err := config.ValidateResilience(cfg.Resilience); err != nil {
 		return nil, fmt.Errorf("invalid resilience configuration: %w", err)
 	}
@@ -183,7 +189,7 @@ func (f *ProviderFactory) Create(cfg ProviderConfig) (core.Provider, error) {
 		Hooks:      hooksWithProviderIdentity(hooks, name, cfg.Type),
 		Models:     cfg.Models,
 		Resilience: cfg.Resilience,
-		Keys:       NewKeyringWithSessionStickiness(cfg.SessionStickyKeys, cfg.APIKeys...),
+		Keys:       keys,
 		HTTPClient: httpClient,
 	}
 

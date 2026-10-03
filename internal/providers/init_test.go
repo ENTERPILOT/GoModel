@@ -377,7 +377,7 @@ func TestInitializeProviders_UnavailableProviderCanRefreshLater(t *testing.T) {
 	})
 
 	registry := NewModelRegistry()
-	count, err := initializeProviders(ctx, map[string]ProviderConfig{
+	count, _, err := initializeProviders(ctx, map[string]ProviderConfig{
 		"test": {Type: "test", APIKey: "sk-test"},
 	}, factory, registry)
 	require.NoError(t, err)
@@ -417,7 +417,7 @@ func TestInitializeProviders_AvailabilityCheckUsesCallerContext(t *testing.T) {
 	})
 
 	registry := NewModelRegistry()
-	count, err := initializeProviders(ctx, map[string]ProviderConfig{
+	count, _, err := initializeProviders(ctx, map[string]ProviderConfig{
 		"test": {Type: "test", APIKey: "sk-test"},
 	}, factory, registry)
 	require.NoError(t, err)
@@ -467,7 +467,7 @@ func TestInitializeProviders_ParallelizesProbesAndRegistersDeterministically(t *
 	}
 	done := make(chan result, 1)
 	go func() {
-		count, err := initializeProviders(t.Context(), providerConfigs, factory, registry)
+		count, _, err := initializeProviders(t.Context(), providerConfigs, factory, registry)
 		done <- result{count: count, err: err}
 	}()
 
@@ -527,7 +527,7 @@ func TestInitializeProviders_DoesNotLaunchUnboundedWorkers(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		_, _ = initializeProviders(t.Context(), providerConfigs, factory, NewModelRegistry())
+		_, _, _ = initializeProviders(t.Context(), providerConfigs, factory, NewModelRegistry())
 		close(done)
 	}()
 

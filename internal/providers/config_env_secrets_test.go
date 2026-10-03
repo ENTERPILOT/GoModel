@@ -123,3 +123,15 @@ func TestInit_ResolvesProviderEnvSecretReferences(t *testing.T) {
 		assert.Empty(t, got.APIKeys, "a provider must not be built from an unresolved reference")
 	})
 }
+
+func TestResolveProviderEnvSecretsPassesTheVariableAsField(t *testing.T) {
+	var field string
+	secrets := config.NewSecrets()
+	require.NoError(t, secrets.Register("vault", config.SecretResolverFunc(func(ctx context.Context, _ string) (string, error) {
+		field, _ = config.SecretFieldFromContext(ctx)
+		return "sk", nil
+	})))
+	_, err := resolveProviderEnvSecrets(t.Context(), secrets, []string{"OPENAI_API_KEY_2=${vault:x}"}, testDiscoveryConfigs)
+	require.NoError(t, err)
+	assert.Equal(t, "OPENAI_API_KEY_2", field)
+}

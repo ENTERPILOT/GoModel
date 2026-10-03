@@ -231,6 +231,16 @@ func Run(ctx context.Context, opts Options) error {
 
 	configure := configHooks(ctx, opts)
 
+	// Reload requests arrive as SIGHUP or from inside the process, when a
+	// referenced secret other than a provider API key rotates. Both land on
+	// this channel; signal.Notify is wired to it further down.
+	reload := make(chan os.Signal, 1)
+	requestReload := reloadRequester(reload)
+	// One notifier for every generation: an extension notifying the Secrets
+	// of a generation whose reload was rejected still reaches the one
+	// serving, which is the only one listening.
+	secretChanges := config.NewSecretNotifier()
+
 	// build produces one generation of the gateway from the configuration as it
 	// stands right now. It is called again for every reload, which is what lets
 	// a reload re-read every configuration value rather than a hand-picked
@@ -241,6 +251,7 @@ func Run(ctx context.Context, opts Options) error {
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to load config: %w", err)
 		}
+		result.Secrets.SetNotifier(secretChanges)
 		if err := configure(result); err != nil {
 			return nil, nil, err
 		}
@@ -253,11 +264,12 @@ func Run(ctx context.Context, opts Options) error {
 		opts.ConfigureSwaggerDocs(result.Config.Server.BasePath)
 
 		application, err := app.New(ctx, app.Config{
-			AppConfig:   result,
-			Factory:     defaultProviderFactory(result.Config),
-			Extensions:  opts.Extensions,
-			DemoMode:    demoMode,
-			ProductName: opts.ProductName,
+			AppConfig:     result,
+			Factory:       defaultProviderFactory(result.Config),
+			Extensions:    opts.Extensions,
+			DemoMode:      demoMode,
+			ProductName:   opts.ProductName,
+			RequestReload: requestReload,
 		})
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize application: %w", err)
@@ -283,7 +295,6 @@ func Run(ctx context.Context, opts Options) error {
 	// tells an operator or a process manager that this instance can be signalled,
 	// and until Notify runs, SIGHUP still carries its default disposition: it
 	// would kill the gateway instead of reloading it.
-	reload := make(chan os.Signal, 1)
 	signal.Notify(reload, reloadSignal)
 	defer signal.Stop(reload)
 
