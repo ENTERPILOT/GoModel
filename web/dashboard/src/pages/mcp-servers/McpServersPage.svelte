@@ -9,6 +9,7 @@
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import { auth } from "$lib/stores/auth.svelte.js";
   import { router } from "$lib/stores/router.svelte.js";
+  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import McpCatalogModal from "./McpCatalogModal.svelte";
   import McpConnectPanel from "./McpConnectPanel.svelte";
   import McpServerEditor from "./McpServerEditor.svelte";
@@ -62,7 +63,8 @@
     <LoadingState label={m.mcp_loading()} />
   {/if}
 
-  {#if mcpServers.available && !auth.authError}
+  <!-- Waits for runtime config so the panel never shows a fallback default. -->
+  {#if runtimeConfig.loaded && mcpServers.available && !auth.authError}
     <McpConnectPanel />
   {/if}
 

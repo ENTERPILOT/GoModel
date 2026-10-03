@@ -36,6 +36,7 @@ import {
   setMcpToolsExposed,
   switchMcpToolMode,
   mcpClientConfig,
+  mcpEndpointIsInsecure,
   mcpGatewayEndpoint,
   normalizeMcpToolDiscovery,
 } from "../src/pages/mcp-servers/mcp-servers.js";
@@ -648,4 +649,15 @@ test("mcpClientConfig adds the discovery header only when it changes the default
   const config = JSON.parse(mcpClientConfig("https://gw/mcp", "off", "off"));
   assert.equal(config.mcpServers.gomodel.type, "http");
   assert.equal(config.mcpServers.gomodel.url, "https://gw/mcp");
+});
+
+test("mcpEndpointIsInsecure flags plain HTTP only off loopback", () => {
+  assert.equal(mcpEndpointIsInsecure("http://gw.example.com/mcp"), true);
+  assert.equal(mcpEndpointIsInsecure("http://10.0.0.5:8080/mcp"), true);
+  assert.equal(mcpEndpointIsInsecure("https://gw.example.com/mcp"), false);
+  assert.equal(mcpEndpointIsInsecure("http://localhost:8080/mcp"), false);
+  assert.equal(mcpEndpointIsInsecure("http://gomodel.localhost/mcp"), false);
+  assert.equal(mcpEndpointIsInsecure("http://127.0.0.1:8080/mcp"), false);
+  assert.equal(mcpEndpointIsInsecure("http://[::1]:8080/mcp"), false);
+  assert.equal(mcpEndpointIsInsecure("not a url"), false);
 });

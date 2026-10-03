@@ -541,6 +541,21 @@ export function mcpGatewayEndpoint(origin, basePath) {
   return `${String(origin || "").replace(/\/+$/, "")}${base}/mcp`;
 }
 
+// mcpEndpointIsInsecure reports a plain-HTTP endpoint on a non-loopback host,
+// where clients would send their API key unencrypted. Loopback HTTP stays
+// quiet so local development is not nagged.
+export function mcpEndpointIsInsecure(endpoint) {
+  let url;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "http:") return false;
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  return !(host === "localhost" || host.endsWith(".localhost") || host === "::1" || host.startsWith("127."));
+}
+
 // mcpClientConfig renders the mcpServers JSON most MCP clients accept. The
 // discovery header is added only when the chosen mode differs from the
 // gateway default, so the snippet stays minimal.

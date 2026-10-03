@@ -14,6 +14,7 @@
     MCP_TOOL_DISCOVERY_OFF,
     MCP_TOOL_DISCOVERY_SEARCH,
     mcpClientConfig,
+    mcpEndpointIsInsecure,
     mcpGatewayEndpoint,
   } from "./mcp-servers.js";
   import * as m from "$lib/paraglide/messages.js";
@@ -22,6 +23,7 @@
     typeof window === "undefined" ? "" : window.location.origin,
     basePath(),
   );
+  const insecure = mcpEndpointIsInsecure(endpoint);
   const defaultMode = $derived(runtimeConfig.mcpToolDiscovery());
   // null follows the gateway default until the user picks a mode.
   let picked = $state(null);
@@ -59,6 +61,9 @@
         onclick={() => endpointCopy.copy(endpoint)}
       />
     </div>
+    {#if insecure}
+      <p class="alert alert-warning mcp-connect-warning">{m.mcp_connect_insecure_warning()}</p>
+    {/if}
 
     <div class="mcp-connect-row">
       <span class="mcp-connect-label">{m.mcp_connect_mode_label()}</span>
@@ -117,6 +122,11 @@
     min-width: 0;
     overflow-wrap: anywhere;
     font-size: 13px;
+  }
+
+  /* The panel's flex gap spaces rows; drop the alert's own margin. */
+  .mcp-connect-warning {
+    margin: 0;
   }
 
   .mcp-connect-snippet {
