@@ -1,8 +1,9 @@
 <script>
   // "Connect a client" disclosure on the MCP Servers page: the aggregated
-  // /mcp endpoint, the gateway's default tool discovery mode, and a copyable
-  // client config. The mode picker only changes the snippet; it adds the
-  // X-MCP-Tool-Discovery header when the choice differs from the default.
+  // /mcp endpoint or a virtual server's /mcp/{name}, the endpoint's default
+  // tool discovery mode, and a copyable client config. The pickers only change
+  // the snippet; it adds the X-MCP-Tool-Discovery header when the chosen mode
+  // differs from the endpoint's default.
   import CopyButton from "$lib/components/atoms/CopyButton.svelte";
   import SegmentedControl from "$lib/components/atoms/SegmentedControl.svelte";
   import { basePath } from "$lib/api/paths.js";
@@ -16,19 +17,33 @@
     mcpClientConfig,
     mcpEndpointIsInsecure,
     mcpGatewayEndpoint,
+    mcpServedVirtualServers,
+    mcpVirtualServerEndpoint,
+    normalizeMcpToolDiscovery,
   } from "./mcp-servers.js";
+  import { mcpServers } from "./mcpServers.svelte.js";
   import * as m from "$lib/paraglide/messages.js";
 
-  const endpoint = mcpGatewayEndpoint(
+  const gatewayEndpoint = mcpGatewayEndpoint(
     typeof window === "undefined" ? "" : window.location.origin,
     basePath(),
   );
-  const insecure = mcpEndpointIsInsecure(endpoint);
-  const defaultMode = $derived(runtimeConfig.mcpToolDiscovery());
-  // null follows the gateway default until the user picks a mode.
+  const gatewayMode = $derived(runtimeConfig.mcpToolDiscovery());
+  const virtualServers = $derived(mcpServedVirtualServers(mcpServers.virtualServers));
+  // "" is the aggregated /mcp endpoint; otherwise a virtual server name.
+  let target = $state("");
+  const virtual = $derived(virtualServers.find((entry) => entry.name === target));
+  const endpoint = $derived(
+    virtual ? mcpVirtualServerEndpoint(gatewayEndpoint, virtual.name) : gatewayEndpoint,
+  );
+  const insecure = $derived(mcpEndpointIsInsecure(endpoint));
+  const defaultMode = $derived(
+    virtual ? normalizeMcpToolDiscovery(virtual.tool_discovery) : gatewayMode,
+  );
+  // null follows the endpoint's default until the user picks a mode.
   let picked = $state(null);
   const mode = $derived(picked ?? defaultMode);
-  const snippet = $derived(mcpClientConfig(endpoint, mode, defaultMode));
+  const snippet = $derived(mcpClientConfig(endpoint, mode, defaultMode, virtual?.name));
 
   const modeOptions = [
     { value: MCP_TOOL_DISCOVERY_OFF, label: m.mcp_connect_mode_all() },
@@ -43,13 +58,29 @@
     <span class="mcp-server-advanced-summary-copy">
       <span class="mcp-server-advanced-title">{m.mcp_connect_title()}</span>
       <span class="form-hint">
-        {defaultMode === MCP_TOOL_DISCOVERY_SEARCH
+        {gatewayMode === MCP_TOOL_DISCOVERY_SEARCH
           ? m.mcp_connect_summary_search()
           : m.mcp_connect_summary_off()}
       </span>
     </span>
   </summary>
   <div class="mcp-server-advanced-fields">
+    {#if virtualServers.length > 0}
+      <div class="mcp-connect-row">
+        <label class="mcp-connect-label" for="mcp-connect-target">{m.mcp_connect_target_label()}</label>
+        <select
+          id="mcp-connect-target"
+          class="form-select mcp-connect-target"
+          bind:value={target}
+          onchange={() => (picked = null)}
+        >
+          <option value="">{m.mcp_connect_target_all()}</option>
+          {#each virtualServers as entry (entry.name)}
+            <option value={entry.name}>{m.mcp_connect_target_virtual({ name: entry.name })}</option>
+          {/each}
+        </select>
+      </div>
+    {/if}
     <div class="mcp-connect-row">
       <span class="mcp-connect-label">{m.mcp_connect_endpoint()}</span>
       <code class="mcp-connect-endpoint mono">{endpoint}</code>
@@ -76,10 +107,16 @@
     </div>
     <p class="form-hint">
       {mode === MCP_TOOL_DISCOVERY_SEARCH ? m.mcp_connect_mode_help_search() : m.mcp_connect_mode_help_all()}
-      {m.mcp_connect_default_note({
-        mode: defaultMode,
-        header: MCP_TOOL_DISCOVERY_HEADER,
-      })}
+      {virtual
+        ? m.mcp_connect_virtual_default_note({
+            name: virtual.name,
+            mode: defaultMode,
+            header: MCP_TOOL_DISCOVERY_HEADER,
+          })
+        : m.mcp_connect_default_note({
+            mode: defaultMode,
+            header: MCP_TOOL_DISCOVERY_HEADER,
+          })}
     </p>
 
     <div class="mcp-connect-snippet">
@@ -116,6 +153,11 @@
     color: var(--text-muted);
     font-size: 12px;
     font-weight: 600;
+  }
+
+  .mcp-connect-target {
+    width: auto;
+    min-width: 220px;
   }
 
   .mcp-connect-endpoint {

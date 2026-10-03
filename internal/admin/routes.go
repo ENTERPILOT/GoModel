@@ -84,6 +84,7 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.DELETE("/mcp-servers/:name", h.DeleteMCPServer, global)
 	g.POST("/mcp-servers/:name/reconnect", h.ReconnectMCPServer, global)
 	g.GET("/mcp-servers/:name/catalog", h.MCPServerCatalog, global)
+	g.GET("/mcp-virtual-servers", h.ListMCPVirtualServers, global)
 
 	g.GET("/model-pricing-overrides", h.ListModelPricingOverrides, global)
 	g.PUT("/model-pricing-overrides", h.UpsertModelPricingOverride, global)

@@ -556,15 +556,30 @@ export function mcpEndpointIsInsecure(endpoint) {
   return !(host === "localhost" || host.endsWith(".localhost") || host === "::1" || host.startsWith("127."));
 }
 
+// mcpVirtualServerEndpoint is a virtual server's /mcp/{name} URL.
+export function mcpVirtualServerEndpoint(gatewayEndpoint, name) {
+  return `${gatewayEndpoint}/${encodeURIComponent(name)}`;
+}
+
+// mcpServedVirtualServers keeps the virtual servers clients can connect to:
+// one whose name a real server holds is not served.
+export function mcpServedVirtualServers(virtualServers) {
+  return (Array.isArray(virtualServers) ? virtualServers : []).filter(
+    (virtual) => virtual?.name && !virtual.conflict,
+  );
+}
+
 // mcpClientConfig renders the mcpServers JSON most MCP clients accept. The
 // discovery header is added only when the chosen mode differs from the
-// gateway default, so the snippet stays minimal.
-export function mcpClientConfig(endpoint, mode, defaultMode) {
+// endpoint's default, so the snippet stays minimal. A virtual server gets its
+// own entry name, so several can sit side by side in one client config.
+export function mcpClientConfig(endpoint, mode, defaultMode, virtualName = "") {
   const headers = { Authorization: `Bearer ${MCP_API_KEY_PLACEHOLDER}` };
   const chosen = normalizeMcpToolDiscovery(mode);
   if (chosen !== normalizeMcpToolDiscovery(defaultMode)) {
     headers[MCP_TOOL_DISCOVERY_HEADER] = chosen;
   }
-  const config = { mcpServers: { gomodel: { type: "http", url: endpoint, headers } } };
+  const entry = virtualName ? `gomodel-${virtualName}` : "gomodel";
+  const config = { mcpServers: { [entry]: { type: "http", url: endpoint, headers } } };
   return JSON.stringify(config, null, 2);
 }

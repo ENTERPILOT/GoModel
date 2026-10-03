@@ -28,6 +28,8 @@ import {
 
 class McpServersState {
   servers = $state([]);
+  // Config-declared virtual servers (read-only), each served at /mcp/{name}.
+  virtualServers = $state([]);
   available = $state(true);
   loading = $state(false);
   // Load and in-form errors only; row-action feedback goes through the
@@ -73,6 +75,7 @@ class McpServersState {
   // newest request wins here: an older response must not restore the list a
   // delete just removed, or replace the timer the newer one scheduled.
   #listSeq = 0;
+  #virtualSeq = 0;
 
   // --- server list -------------------------------------------------------
 
@@ -93,6 +96,7 @@ class McpServersState {
       this.stopPolling();
       this.available = false;
       this.servers = [];
+      this.virtualServers = [];
       this.error = "";
       this.loading = false;
       return;
@@ -116,6 +120,7 @@ class McpServersState {
       if (outcome.status === "unavailable") {
         this.available = false;
         this.servers = [];
+        this.virtualServers = [];
         return;
       }
       if (outcome.status === "error") {
@@ -137,6 +142,7 @@ class McpServersState {
           return;
         }
         this.servers = [];
+        this.virtualServers = [];
         this.error = outcome.error;
         return;
       }
@@ -144,11 +150,29 @@ class McpServersState {
       this.servers = outcome.items;
       this.#pollFailures = 0;
       this.#schedulePoll(generation);
+      if (!background) {
+        void this.fetchVirtualServers();
+      }
     } finally {
       if (!background && seq === this.#listSeq) {
         this.loading = false;
       }
     }
+  }
+
+  // Virtual servers change only with config, so they load with the list and
+  // skip the connect poll. A failure leaves the section hidden: the server
+  // list above already reports gateway errors.
+  async fetchVirtualServers() {
+    const seq = ++this.#virtualSeq;
+    const outcome = await loadAdminList("/admin/mcp-virtual-servers", {
+      label: "mcp virtual servers",
+      unavailableStatuses: [503, 404],
+    });
+    if (outcome.status === "stale" || seq !== this.#virtualSeq) {
+      return;
+    }
+    this.virtualServers = outcome.status === "ok" ? outcome.items : [];
   }
 
   // --- connect poll ------------------------------------------------------

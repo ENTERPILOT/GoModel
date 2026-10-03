@@ -14,6 +14,7 @@
   import McpConnectPanel from "./McpConnectPanel.svelte";
   import McpServerEditor from "./McpServerEditor.svelte";
   import McpServerList from "./McpServerList.svelte";
+  import McpVirtualServerList from "./McpVirtualServerList.svelte";
   import { mcpServers } from "./mcpServers.svelte.js";
   import { Plus } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
@@ -86,6 +87,10 @@
 
   {#if mcpServers.filtered.length > 0 && mcpServers.available && !auth.authError}
     <McpServerList />
+  {/if}
+
+  {#if mcpServers.virtualServers.length > 0 && mcpServers.available && !auth.authError}
+    <McpVirtualServerList />
   {/if}
 
   {#if mcpServers.servers.length === 0 && !mcpServers.filter && !mcpServers.loading && !auth.authError && !mcpServers.error && mcpServers.available}

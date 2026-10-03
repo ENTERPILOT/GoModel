@@ -38,6 +38,8 @@ import {
   mcpClientConfig,
   mcpEndpointIsInsecure,
   mcpGatewayEndpoint,
+  mcpServedVirtualServers,
+  mcpVirtualServerEndpoint,
   normalizeMcpToolDiscovery,
 } from "../src/pages/mcp-servers/mcp-servers.js";
 
@@ -660,4 +662,26 @@ test("mcpEndpointIsInsecure flags plain HTTP only off loopback", () => {
   assert.equal(mcpEndpointIsInsecure("http://127.0.0.1:8080/mcp"), false);
   assert.equal(mcpEndpointIsInsecure("http://[::1]:8080/mcp"), false);
   assert.equal(mcpEndpointIsInsecure("not a url"), false);
+});
+
+test("mcpVirtualServerEndpoint appends the virtual server name to /mcp", () => {
+  assert.equal(mcpVirtualServerEndpoint("https://gw/base/mcp", "coding"), "https://gw/base/mcp/coding");
+});
+
+test("mcpServedVirtualServers drops virtual servers a same-named server shadows", () => {
+  assert.deepEqual(
+    mcpServedVirtualServers([
+      { name: "coding", servers: ["github"] },
+      { name: "notion", servers: ["github"], conflict: "not served" },
+      { servers: ["github"] },
+    ]).map((virtual) => virtual.name),
+    ["coding"],
+  );
+  assert.deepEqual(mcpServedVirtualServers(null), []);
+});
+
+test("mcpClientConfig names a virtual server's entry after it", () => {
+  const servers = JSON.parse(mcpClientConfig("https://gw/mcp/coding", "off", "off", "coding")).mcpServers;
+  assert.deepEqual(Object.keys(servers), ["gomodel-coding"]);
+  assert.equal(servers["gomodel-coding"].url, "https://gw/mcp/coding");
 });
