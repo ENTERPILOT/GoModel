@@ -127,6 +127,9 @@ func requestedEffort(req *core.ChatRequest) string {
 	return ""
 }
 
+// hasContentChatCannotCarry reports whether any message holds content Chat
+// Completions rejects or hides from the model: non-text tool results, or files
+// given by URL.
 func hasContentChatCannotCarry(messages []core.Message) bool {
 	for _, msg := range messages {
 		content, err := core.NormalizeMessageContent(msg.Content)
@@ -202,6 +205,8 @@ func chatToResponsesRequest(req *core.ChatRequest) (*core.ResponsesRequest, erro
 	return out, nil
 }
 
+// applyMappedChatFields sets the Responses fields that chat members map onto:
+// the token limit, reasoning effort, and text verbosity and format.
 func applyMappedChatFields(out *core.ResponsesRequest, req *core.ChatRequest) error {
 	if raw := req.ExtraFields.Lookup("max_completion_tokens"); len(raw) > 0 {
 		var limit int
@@ -308,6 +313,8 @@ func responsesInput(messages []core.Message) ([]any, error) {
 	return input, nil
 }
 
+// textOnly reports whether content is a string or text parts with no members
+// the translation does not carry.
 func textOnly(content any) bool {
 	parts, ok := content.([]core.ContentPart)
 	if !ok {
@@ -321,14 +328,12 @@ func textOnly(content any) bool {
 	return true
 }
 
-// functionCallOutput renders a tool result: plain text stays a string, while
-// results with images or files become a content list the model can see.
+// functionCallOutput renders a tool result: a string stays a string, while a
+// list of parts (text, images, files) stays a list, so attachments are visible
+// to the model and part boundaries are kept.
 func functionCallOutput(content any) (any, error) {
 	if text, ok := content.(string); ok {
 		return text, nil
-	}
-	if textOnly(content) {
-		return core.ExtractTextContent(content), nil
 	}
 	return responsesInputContent(content)
 }

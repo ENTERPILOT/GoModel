@@ -95,6 +95,7 @@ func chatFinishReason(resp *core.ResponsesResponse, hasToolCalls bool) (string, 
 	return "stop", true
 }
 
+// incompleteMessage describes why a response stopped early.
 func incompleteMessage(resp *core.ResponsesResponse) string {
 	if resp.IncompleteDetails != nil && resp.IncompleteDetails.Reason != "" {
 		return "the response is incomplete: " + resp.IncompleteDetails.Reason
@@ -102,6 +103,8 @@ func incompleteMessage(resp *core.ResponsesResponse) string {
 	return "the response is incomplete"
 }
 
+// chatUsageFromResponses renders Responses token usage in the chat shape,
+// keeping the cache and reasoning detail counts.
 func chatUsageFromResponses(usage *core.ResponsesUsage) core.Usage {
 	if usage == nil {
 		return core.Usage{}
@@ -116,6 +119,8 @@ func chatUsageFromResponses(usage *core.ResponsesUsage) core.Usage {
 	}
 }
 
+// responsesErrorMessage returns the upstream error message of a failed
+// response, or a generic one when it reported none.
 func responsesErrorMessage(err *core.ResponsesError) string {
 	if err == nil || strings.TrimSpace(err.Message) == "" {
 		return "the response failed"
@@ -153,6 +158,8 @@ type responsesChatStream struct {
 	endErr   error
 }
 
+// newResponsesChatStream wraps a Responses SSE body; includeUsage adds the
+// usage object to the final chunk, as stream_options.include_usage requests.
 func newResponsesChatStream(body io.ReadCloser, provider, model string, includeUsage bool) io.ReadCloser {
 	return &responsesChatStream{
 		reader:       bufio.NewReader(body),
@@ -165,6 +172,8 @@ func newResponsesChatStream(body io.ReadCloser, provider, model string, includeU
 	}
 }
 
+// Read returns converted chat chunks, ending with an error when the upstream
+// stopped before a terminal event.
 func (s *responsesChatStream) Read(p []byte) (int, error) {
 	for {
 		if s.buffer.Len() > 0 {
@@ -189,11 +198,13 @@ func (s *responsesChatStream) Read(p []byte) (int, error) {
 	}
 }
 
+// Close releases the buffer and closes the upstream body.
 func (s *responsesChatStream) Close() error {
 	s.buffer.Release()
 	return s.body.Close()
 }
 
+// handle converts one Responses event into chat chunks.
 func (s *responsesChatStream) handle(data []byte) {
 	var event responsesEvent
 	if s.finished || json.Unmarshal(data, &event) != nil {
@@ -258,6 +269,7 @@ func (s *responsesChatStream) handle(data []byte) {
 	}
 }
 
+// emit appends one chat chunk for the delta, finish reason and usage.
 func (s *responsesChatStream) emit(delta map[string]any, finishReason any, usage map[string]any) {
 	s.buffer.AppendString(providers.FormatChatChunkSSE(s.id, s.created, s.model, s.provider, delta, finishReason, usage))
 }

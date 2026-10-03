@@ -232,6 +232,8 @@ func nameInlineFiles(req *core.ChatRequest) *core.ChatRequest {
 	return adapted
 }
 
+// unnamedInlineFile reports whether a part is inline file data without a
+// filename.
 func unnamedInlineFile(part core.ContentPart) bool {
 	return part.Type == "file" && part.File != nil && part.File.FileData != "" && part.File.Filename == ""
 }

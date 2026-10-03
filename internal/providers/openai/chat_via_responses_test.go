@@ -446,3 +446,128 @@ func TestChatCompletion_NamesUnnamedInlineFiles(t *testing.T) {
 	assert.Equal(t, "document.pdf", parts[0].(map[string]any)["file"].(map[string]any)["filename"])
 	assert.Empty(t, file.Filename, "the caller's request must not change")
 }
+
+// Field-level mapping of the translation: each case lists the Responses
+// members it must produce, or that it cannot be translated at all.
+func TestChatToResponsesRequest_MapsFields(t *testing.T) {
+	extra := func(name, raw string) core.UnknownJSONFields {
+		return core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{name: json.RawMessage(raw)})
+	}
+	type typedChoice struct {
+		Type     string            `json:"type"`
+		Function map[string]string `json:"function"`
+	}
+	tests := []struct {
+		name   string
+		req    core.ChatRequest
+		want   map[string]any // members that must be present with these values
+		reject bool
+	}{
+		{name: "max_completion_tokens", req: core.ChatRequest{ExtraFields: extra("max_completion_tokens", `700`)},
+			want: map[string]any{"max_output_tokens": float64(700)}},
+		{name: "caller stores the response", req: core.ChatRequest{ExtraFields: extra("store", `true`)},
+			want: map[string]any{"store": true}},
+		{name: "response_format text", req: core.ChatRequest{ExtraFields: extra("response_format", `{"type":"text"}`)},
+			want: map[string]any{"text": map[string]any{"format": map[string]any{"type": "text"}}}},
+		{name: "response_format json_object", req: core.ChatRequest{ExtraFields: extra("response_format", `{"type":"json_object"}`)},
+			want: map[string]any{"text": map[string]any{"format": map[string]any{"type": "json_object"}}}},
+		{name: "tool_choice mode", req: core.ChatRequest{Tools: weatherTool, ToolChoice: "required"},
+			want: map[string]any{"tool_choice": "required"}},
+		{name: "typed tool_choice", req: core.ChatRequest{Tools: weatherTool,
+			ToolChoice: typedChoice{Type: "function", Function: map[string]string{"name": "get_weather"}}},
+			want: map[string]any{"tool_choice": map[string]any{"type": "function", "name": "get_weather"}}},
+		{name: "text-only tool output keeps its parts", req: core.ChatRequest{Messages: toolMessages([]core.ContentPart{
+			{Type: "text", Text: "Sunny"}, {Type: "text", Text: "31C"}})}},
+		{name: "invalid store", req: core.ChatRequest{ExtraFields: extra("store", `"yes"`)}, reject: true},
+		{name: "invalid max_completion_tokens", req: core.ChatRequest{ExtraFields: extra("max_completion_tokens", `"many"`)}, reject: true},
+		{name: "invalid verbosity", req: core.ChatRequest{ExtraFields: extra("verbosity", `3`)}, reject: true},
+		{name: "unknown response_format", req: core.ChatRequest{ExtraFields: extra("response_format", `{"type":"grammar"}`)}, reject: true},
+		{name: "malformed response_format", req: core.ChatRequest{ExtraFields: extra("response_format", `"json"`)}, reject: true},
+		{name: "allowed_tools tool_choice", req: core.ChatRequest{Tools: weatherTool,
+			ToolChoice: map[string]any{"type": "allowed_tools", "allowed_tools": map[string]any{"mode": "auto"}}}, reject: true},
+		{name: "non-object typed tool_choice", req: core.ChatRequest{Tools: weatherTool, ToolChoice: []string{"auto"}}, reject: true},
+		{name: "tool call member", req: core.ChatRequest{Messages: []core.Message{{Role: "assistant", ToolCalls: []core.ToolCall{{
+			ID: "call_1", Type: "function", Function: core.FunctionCall{Name: "f", Arguments: "{}"},
+			ExtraFields: extra("x_trace", `1`)}}}}}, reject: true},
+		{name: "malformed tool message", req: core.ChatRequest{Messages: []core.Message{{Role: "tool", ToolCallID: "c", Content: 42}}}, reject: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := tt.req
+			req.Model = "gpt-6-astra"
+			if req.Messages == nil {
+				req.Messages = []core.Message{{Role: "user", Content: "hi"}}
+			}
+			got, err := chatToResponsesRequest(&req)
+			if tt.reject {
+				require.ErrorIs(t, err, errNotTranslatable)
+				return
+			}
+			require.NoError(t, err)
+			body, err := json.Marshal(got)
+			require.NoError(t, err)
+			var sent map[string]any
+			require.NoError(t, json.Unmarshal(body, &sent))
+			for key, want := range tt.want {
+				assert.Equal(t, want, sent[key], key)
+			}
+			if tt.name == "text-only tool output keeps its parts" {
+				items := sent["input"].([]any)
+				assert.Equal(t, []any{
+					map[string]any{"type": "input_text", "text": "Sunny"},
+					map[string]any{"type": "input_text", "text": "31C"},
+				}, items[len(items)-1].(map[string]any)["output"])
+			}
+		})
+	}
+}
+
+// An upstream error on the Responses route reaches the caller as the
+// provider's error, both blocking and streaming.
+func TestChatCompletion_ViaResponsesReturnsUpstreamErrors(t *testing.T) {
+	server, _ := providertest.JSONServer(t, http.StatusBadRequest,
+		`{"error":{"message":"Invalid schema for function 'get_weather'","type":"invalid_request_error","param":"tools[0].parameters"}}`)
+	provider := New(providers.ProviderConfig{APIKey: testAPIKey, BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
+	req := &core.ChatRequest{Model: "gpt-6-astra", Tools: weatherTool, Messages: []core.Message{{Role: "user", Content: "hi"}}}
+
+	_, err := provider.ChatCompletion(context.Background(), req)
+	var gwErr *core.GatewayError
+	require.ErrorAs(t, err, &gwErr)
+	assert.Equal(t, http.StatusBadRequest, gwErr.HTTPStatusCode())
+	assert.Contains(t, gwErr.Message, "Invalid schema")
+
+	_, err = provider.StreamChatCompletion(context.Background(), req)
+	require.ErrorAs(t, err, &gwErr)
+	assert.Equal(t, http.StatusBadRequest, gwErr.HTTPStatusCode())
+}
+
+// Refusal deltas, content-filter stops and events the converter does not use.
+func TestResponsesChatStream_RefusalFilterAndUnusedEvents(t *testing.T) {
+	upstream := sse(
+		`{"type":"response.created","response":{"id":"resp_1","model":"gpt-6-astra","status":"in_progress","output":[]}}`,
+		`{"type":"response.in_progress"}`,
+		`{"type":"response.function_call_arguments.delta","item_id":"fc_unknown","delta":"{"}`,
+		`{"type":"response.refusal.delta","delta":"I can't"}`,
+		`{"type":"response.incomplete","response":{"id":"resp_1","status":"incomplete","output":[],"incomplete_details":{"reason":"content_filter"}}}`,
+	) + "data: {not json\n\n"
+	chunks, body, err := readChatChunks(t, newResponsesChatStream(io.NopCloser(strings.NewReader(upstream)), "openai", "gpt-6-astra", false))
+	require.NoError(t, err)
+	assert.True(t, strings.HasSuffix(body, "data: [DONE]\n\n"))
+
+	var refusal string
+	var finish any
+	for _, chunk := range chunks {
+		assert.NotContains(t, chunk, "usage", "usage is sent only when the caller asked for it")
+		choice := chunk["choices"].([]any)[0].(map[string]any)
+		delta := choice["delta"].(map[string]any)
+		assert.NotContains(t, delta, "tool_calls", "arguments for an unknown item are dropped")
+		if r, ok := delta["refusal"].(string); ok {
+			refusal += r
+		}
+		if choice["finish_reason"] != nil {
+			finish = choice["finish_reason"]
+		}
+	}
+	assert.Equal(t, "I can't", refusal)
+	assert.Equal(t, "content_filter", finish)
+}
