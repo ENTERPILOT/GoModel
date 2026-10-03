@@ -13,8 +13,9 @@ so a Jaeger, Grafana Tempo, Honeycomb, Datadog, or any other OTLP-compatible
 backend shows which model was called, through which provider, how long it took,
 and whether it failed.
 
-Prompts, responses, credentials, and error messages are never exported. For
-Prometheus scraping, see [Prometheus Metrics](/guides/prometheus-metrics); both
+Credentials and error messages are never exported. Prompts and completions
+are exported only when you turn on
+[content capture](#prompt-and-completion-capture). For Prometheus scraping, see [Prometheus Metrics](/guides/prometheus-metrics); both
 can run at the same time.
 
 ## Quick start
@@ -78,6 +79,7 @@ wins over the YAML value.
 | `OTEL_TRACES_SAMPLER` | `sampler` | `parentbased_always_on` | Sampler, e.g. `parentbased_traceidratio` to keep a fraction of new traces. |
 | `OTEL_TRACES_SAMPLER_ARG` | `sampler_arg` | — | Sampler argument, e.g. `0.1` for 10%. |
 | `OTEL_PROPAGATORS` | `propagators` | `tracecontext,baggage` | Comma-separated: `tracecontext`, `baggage`, `b3`, `b3multi`, `jaeger`, `ottrace`, or `none`. |
+| `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | `capture_message_content` | `false` | Record prompts and completions on provider call spans. See [Prompt and completion capture](#prompt-and-completion-capture). |
 | `OTEL_METRIC_EXPORT_INTERVAL` | — | `60000` | Metric export interval in milliseconds. |
 
 A typical production setup:
@@ -152,6 +154,18 @@ Each logical call to a model provider is instrumented with:
 | `gen_ai.request.stream` | `true` | Present only on streaming calls. |
 | `error.type` | `429`, `timeout`, `network_error`, `empty_stream` | Present only on failures; `empty_stream` marks a stream that ended before its first chunk. |
 | `http.response.status_code` | `200` | Upstream status. |
+| `gen_ai.response.model` | `gpt-5-2025-08-07` | The model the provider reports, often a dated version. |
+| `gen_ai.response.id` | `chatcmpl-…` | The provider's response ID. |
+| `gen_ai.response.finish_reasons` | `["stop"]` | One per choice. Responses API calls report `stop` when completed, or the incomplete reason such as `max_output_tokens`. |
+| `gen_ai.usage.input_tokens` | `1200` | Prompt tokens, as GoModel's [usage tracking](/advanced/configuration#token-usage-tracking) records them. |
+| `gen_ai.usage.output_tokens` | `85` | Completion tokens, including reasoning tokens. |
+
+The response and usage attributes are set on chat completions, Responses API,
+and translated `/v1/messages` calls, buffered or streamed, once the gateway has
+decoded the response. Usage is present when the provider reported it. For
+streams, GoModel asks the provider for a usage chunk only while usage tracking
+is on (the default). `/v1/messages` requests that GoModel forwards natively to an Anthropic
+provider, and other passthrough calls, carry the request attributes only.
 
 Metrics are histograms in seconds, carrying the same attributes:
 
@@ -171,20 +185,69 @@ A buffered call produces a `CLIENT` span named `<operation> <model>`, such as
 another provider are separate calls and therefore separate spans, so a request
 that failed over shows exactly which provider failed and which one answered.
 
-Streaming calls do not get a client span: the gateway can only observe when
-the stream was established, not when the model finished, and a span ending at
-the headers would misreport latency. The enclosing HTTP server span still
-covers the full stream lifetime as seen by the client. A stream that fails to
-establish, or ends before delivering its first chunk, gets a retrospective
-failure span, so errors are always traced.
+A streamed chat completion, Responses API, or translated `/v1/messages` call
+gets a client span that ends when the stream ends, so its duration covers the
+whole generation. Other streams, such as passthrough calls, get no client
+span: the gateway sees only when they were established, and a span ending at
+the headers would misreport latency. Their HTTP server span still covers the
+full stream lifetime as seen by the client. A stream that fails to establish,
+or ends before delivering its first chunk, always gets a failure span, so
+errors are traced.
+
+### Prompt and completion capture
+
+Content capture is **off by default**. Turn it on to see the exchanged
+messages in your tracing backend, for example as generation input and output
+in [Langfuse](/guides/langfuse):
+
+<CodeGroup>
+
+```bash Environment
+OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true
+```
+
+```yaml config.yaml
+opentelemetry:
+  capture_message_content: true
+```
+
+</CodeGroup>
+
+Provider call spans for chat completions, Responses API, and translated
+`/v1/messages` calls then carry the
+[GenAI message attributes](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/)
+as JSON:
+
+| Attribute | Content |
+| --- | --- |
+| `gen_ai.input.messages` | The request messages, including system messages, tool calls, and tool results. |
+| `gen_ai.output.messages` | The response messages with their finish reason. |
+| `gen_ai.system_instructions` | The Responses API `instructions`. |
+
+Text parts longer than 64 KiB are truncated and marked, and each attribute
+keeps at most 512 KiB of text: a long conversation loses its oldest messages'
+text first. Images, audio, and files are reduced to their part type: binary
+data and data URLs are never exported. Requests dropped by the trace sampler
+are not captured at all.
+The variable also accepts `SPAN_ONLY` and `SPAN_AND_EVENT`, the mode names of
+newer OpenTelemetry instrumentations.
+
+<Warning>
+  With capture on, every sampled prompt and completion leaves the gateway with
+  its trace. Enable it only for a backend that may store that data, and
+  consider sampling (`OTEL_TRACES_SAMPLER`) to limit the volume. The
+  [audit log](/advanced/configuration#audit-logging) keeps content inside your own storage
+  instead.
+</Warning>
 
 ## Privacy
 
 The exporter is designed so that telemetry can go to a third-party backend
 without leaking what flows through the gateway:
 
-- Request and response bodies, prompts, completions, and tool calls are never
-  attached to spans or metrics.
+- Prompts, completions, and tool calls are attached to spans only when
+  [content capture](#prompt-and-completion-capture) is on, and never to
+  metrics. Request and response bodies are never exported as-is.
 - Credentials and upstream error messages are never exported; failures carry
   only a status code or an error class.
 - `client.address`, `network.peer.*`, `server.address`, `server.port`, and

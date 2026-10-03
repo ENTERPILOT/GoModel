@@ -177,11 +177,16 @@ func TestSemanticProviderName(t *testing.T) {
 
 func newTestHooks(t *testing.T) (llmclient.Hooks, *tracetest.SpanRecorder, *metric.ManualReader) {
 	t.Helper()
+	return newTestHooksWithCapture(t, false)
+}
+
+func newTestHooksWithCapture(t *testing.T, captureContent bool) (llmclient.Hooks, *tracetest.SpanRecorder, *metric.ManualReader) {
+	t.Helper()
 	recorder := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
 	reader := metric.NewManualReader()
 	mp := metric.NewMeterProvider(metric.WithReader(reader))
-	observer, err := newObserver(tp, mp)
+	observer, err := newObserver(tp, mp, captureContent)
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
