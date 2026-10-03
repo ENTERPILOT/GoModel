@@ -234,6 +234,16 @@ func (p *Workflow) GuardrailsHash() string {
 	return strings.TrimSpace(p.Policy.GuardrailsHash)
 }
 
+// PromptGuardrailsHash returns the hash of the guardrails that run on the
+// prompt, or "" when none do (no guardrails, guardrails disabled, or only
+// response- and stream-phase rules).
+func (p *Workflow) PromptGuardrailsHash() string {
+	if p == nil || p.Policy == nil || !p.GuardrailsEnabled() {
+		return ""
+	}
+	return strings.TrimSpace(p.Policy.ChainHashes["prompt"])
+}
+
 func (p *Workflow) featureEnabled(pick func(WorkflowFeatures) bool) bool {
 	if p == nil || p.Policy == nil || strings.TrimSpace(p.Policy.VersionID) == "" {
 		return pick(DefaultWorkflowFeatures())

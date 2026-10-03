@@ -286,8 +286,9 @@ features that have no canonical equivalent are not preserved end to end:
   for a request Chat Completions serves with tools, the fixed tools preamble it
   bills is added. On older model families such a request can count a few tokens
   below the billed input (6 on `gpt-4o-mini`). Guardrails do not run for a
-  count, so when the request's workflow has guardrails the prompt is never sent
-  to a provider for counting and the estimate answers. For every other provider, and whenever
+  count, so when the request's workflow has prompt guardrails the prompt is
+  never sent to a provider for counting and the estimate answers (response- and
+  stream-only guardrails keep exact counts). For every other provider, and whenever
   that call fails, the gateway answers with an estimate that weights text by
   how densely it tokenizes (prose, code and JSON, CJK, emoji), adds per-message
   and per-tool framing plus the tool-use system prompt, and prices images by

@@ -237,11 +237,12 @@ func (s *translatedInferenceService) CountMessageTokens(c *echo.Context) error {
 // to the request, the model does not resolve, the provider has no counting
 // endpoint, or the call failed.
 func (s *translatedInferenceService) countMessageTokensUpstream(ctx context.Context, req *anthropicapi.MessagesRequest, body []byte) (int, bool) {
-	// Guardrails run in the prompt phase of an inference request, which a
-	// count skips. Under a workflow with guardrails the prompt must not reach
-	// a provider unchecked (it could carry content a rule would block or
-	// redact), so the count is estimated locally instead.
-	if core.GetWorkflow(ctx).GuardrailsHash() != "" {
+	// Prompt guardrails run in the prompt phase of an inference request,
+	// which a count skips. Under a workflow with prompt guardrails the prompt
+	// must not reach a provider unchecked (it could carry content a rule would
+	// block or redact), so the count is estimated locally instead. Response-
+	// and stream-only rules never see the prompt and keep exact counts.
+	if core.GetWorkflow(ctx).PromptGuardrailsHash() != "" {
 		return 0, false
 	}
 	selector, err := resolveServiceModel(ctx, s.provider, s.modelResolver, req.Model, "")

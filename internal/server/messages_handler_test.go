@@ -369,15 +369,17 @@ func TestCountMessageTokens_ProviderBacked(t *testing.T) {
 
 type chatTokenCountingMockProvider struct {
 	*mockProvider
-	messagesErr error // answer of the native Messages counter
-	chatCount   int
-	chatErr     error
-	chatCalls   int
-	last        *core.ChatRequest
-	lastDialect core.RequestDialect
+	messagesErr   error // answer of the native Messages counter
+	messagesCalls int
+	chatCount     int
+	chatErr       error
+	chatCalls     int
+	last          *core.ChatRequest
+	lastDialect   core.RequestDialect
 }
 
 func (m *chatTokenCountingMockProvider) CountMessagesTokens(context.Context, string, []byte) (int, error) {
+	m.messagesCalls++
 	return 0, m.messagesErr
 }
 
@@ -420,26 +422,46 @@ func TestCountMessageTokens_ChatCounter(t *testing.T) {
 	assert.Zero(t, nativeFails.chatCalls, "a failed native count does not fall through to the chat counter")
 }
 
-// Under a workflow with guardrails the prompt is never sent to a provider for
-// counting (guardrails do not run for a count), so the estimate answers.
-func TestCountMessageTokens_GuardrailsKeepThePromptLocal(t *testing.T) {
-	body := `{"model":"gpt-test","messages":[{"role":"user","content":"my card is 4111 1111 1111 1111"}]}`
-	provider := &chatTokenCountingMockProvider{
-		mockProvider: &mockProvider{supportedModels: []string{"gpt-test"}},
-		messagesErr:  core.ErrMessagesTokenCountUnsupported,
-		chatCount:    777,
+// Under a workflow with prompt guardrails the prompt is never sent to a
+// provider for counting (guardrails do not run for a count), so the estimate
+// answers. Response- and stream-only guardrails never see the prompt, so the
+// count stays exact.
+func TestCountMessageTokens_PromptGuardrailsKeepThePromptLocal(t *testing.T) {
+	body := `{"model":"gpt-test","messages":[{"role":"user","content":"my email is jane@example.com"}]}`
+	tests := []struct {
+		name       string
+		chains     map[string]string
+		wantRemote bool
+	}{
+		{name: "prompt guardrails", chains: map[string]string{"prompt": "redact-pii"}},
+		{name: "prompt and response guardrails", chains: map[string]string{"prompt": "redact-pii", "response": "tone"}},
+		{name: "response-only guardrails", chains: map[string]string{"response": "tone"}, wantRemote: true},
+		{name: "stream-only guardrails", chains: map[string]string{"stream": "tone"}, wantRemote: true},
 	}
-	handler := NewHandler(provider, nil, nil, nil)
-	c, rec := echotest.Post(t, "/v1/messages/count_tokens", body)
-	workflow := &core.Workflow{Policy: &core.ResolvedWorkflowPolicy{
-		VersionID: "v1", Features: core.DefaultWorkflowFeatures(), GuardrailsHash: "redact-pii",
-	}}
-	c.SetRequest(c.Request().WithContext(core.WithWorkflow(c.Request().Context(), workflow)))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := &chatTokenCountingMockProvider{
+				mockProvider: &mockProvider{supportedModels: []string{"gpt-test"}},
+				messagesErr:  core.ErrMessagesTokenCountUnsupported,
+				chatCount:    777,
+			}
+			handler := NewHandler(provider, nil, nil, nil)
+			c, rec := echotest.Post(t, "/v1/messages/count_tokens", body)
+			workflow := &core.Workflow{Policy: &core.ResolvedWorkflowPolicy{
+				VersionID: "v1", Features: core.DefaultWorkflowFeatures(), GuardrailsHash: "any", ChainHashes: tt.chains,
+			}}
+			c.SetRequest(c.Request().WithContext(core.WithWorkflow(c.Request().Context(), workflow)))
 
-	require.NoError(t, handler.CountMessageTokens(c))
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	count := echotest.Decode[map[string]any](t, rec)["input_tokens"].(float64)
-	assert.NotEqual(t, float64(777), count)
-	assert.Greater(t, count, float64(0))
-	assert.Zero(t, provider.chatCalls, "the prompt must not reach the provider")
+			require.NoError(t, handler.CountMessageTokens(c))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			count := echotest.Decode[map[string]any](t, rec)["input_tokens"].(float64)
+			if tt.wantRemote {
+				assert.Equal(t, float64(777), count)
+				return
+			}
+			assert.NotEqual(t, float64(777), count)
+			assert.Zero(t, provider.messagesCalls, "the prompt must not reach the native Messages counter")
+			assert.Zero(t, provider.chatCalls, "the prompt must not reach the chat counter")
+		})
+	}
 }
