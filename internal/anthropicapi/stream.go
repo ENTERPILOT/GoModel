@@ -394,6 +394,10 @@ func (sc *streamConverter) finalize() {
 	sc.emit("message_stop", map[string]any{"type": "message_stop"})
 }
 
+// usagePayload renders the stream's final usage for message_delta in the
+// Anthropic shape (see anthropicUsage). input_tokens is present only once the
+// upstream reported a prompt count, so the message_start estimate stands until
+// then.
 func (sc *streamConverter) usagePayload() map[string]any {
 	usage := anthropicUsage(sc.usage.PromptTokens, sc.usage.CompletionTokens,
 		sc.usage.CacheReadInputTokens, sc.usage.CacheCreationInputTokens, sc.usage.PromptTokensDetails)

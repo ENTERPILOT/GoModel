@@ -62,6 +62,8 @@ func FromChatResponse(resp *core.ChatResponse) *MessagesResponse {
 	return out
 }
 
+// usageFromCore renders a canonical chat response's usage in the Anthropic
+// shape (see anthropicUsage).
 func usageFromCore(usage core.Usage) Usage {
 	return anthropicUsage(
 		usage.PromptTokens,
