@@ -34,11 +34,10 @@ func (c *converter) instanceFor(kind providerKind, p litellmParams, upstream, su
 
 	keyEnv, literalKey := envRef(apiKey)
 	literalKey = !literalKey && apiKey != ""
-	if literalKey && kind.KeyEnv != "" && !c.keyEnvInUse[kind.KeyEnv] {
+	if literalKey && kind.KeyEnv != "" && !c.env.taken(kind.KeyEnv) {
 		// An inline key moves to the .env file; LiteLLM's own default variable
 		// is free, so it takes that name and the provider stays the default.
 		keyEnv = kind.KeyEnv
-		c.keyEnvInUse[keyEnv] = true
 	}
 	inst := &instance{name: c.instanceName(kind, keyEnv, deployment), kind: kind}
 	envPrefix := envName(inst.name)

@@ -365,3 +365,112 @@ model_list:
 	assert.Equal(t, "${VERTEX_1_SERVICE_ACCOUNT_JSON}", inline.ServiceAccountJSON)
 	assert.Contains(t, string(result.Env), "VERTEX_1_SERVICE_ACCOUNT_JSON=")
 }
+
+func TestConvert_GeneratedSecretsNeverShadowReferencedVariables(t *testing.T) {
+	tests := []struct {
+		name       string
+		litellm    string
+		wantAPIKey string
+		wantEnv    []string
+		wantServer *serverOut
+	}{
+		{
+			name: "environment_variables owns its names",
+			litellm: `
+environment_variables:
+  OPENAI_API_KEY: sk-from-section
+model_list:
+  - model_name: m
+    litellm_params: {model: openai/gpt-4o, api_key: sk-inline}
+`,
+			wantAPIKey: "${OPENAI_1_API_KEY}",
+			wantEnv:    []string{"OPENAI_API_KEY=sk-from-section", "OPENAI_1_API_KEY=sk-inline"},
+		},
+		{
+			name: "a variable another setting reads is not adopted",
+			litellm: `
+general_settings:
+  master_key: os.environ/OPENAI_API_KEY
+model_list:
+  - model_name: m
+    litellm_params: {model: openai/gpt-4o, api_key: sk-inline}
+`,
+			wantAPIKey: "${OPENAI_1_API_KEY}",
+			wantEnv:    []string{"OPENAI_1_API_KEY=sk-inline"},
+			wantServer: &serverOut{MasterKey: "${OPENAI_API_KEY}"},
+		},
+		{
+			name: "master key follows a renamed variable",
+			litellm: `
+environment_variables:
+  GOMODEL_MASTER_KEY: something-else
+general_settings:
+  master_key: sk-1234
+`,
+			wantEnv:    []string{"GOMODEL_MASTER_KEY=something-else", "GOMODEL_MASTER_KEY_2=sk-1234"},
+			wantServer: &serverOut{MasterKey: "${GOMODEL_MASTER_KEY_2}"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, result := convertYAML(t, tt.litellm)
+			if tt.wantAPIKey != "" {
+				require.Contains(t, cfg.Providers, "openai-1")
+				assert.Equal(t, tt.wantAPIKey, cfg.Providers["openai-1"].APIKey)
+			}
+			for _, line := range tt.wantEnv {
+				assert.Contains(t, string(result.Env), line+"\n")
+			}
+			assert.Equal(t, tt.wantServer, cfg.Server)
+		})
+	}
+}
+
+func TestConvert_RequiredEnvExcludesWrittenValues(t *testing.T) {
+	_, result := convertYAML(t, `
+environment_variables:
+  OPENAI_API_KEY: sk-from-section
+model_list:
+  - model_name: a
+    litellm_params: {model: openai/gpt-4o}
+  - model_name: b
+    litellm_params: {model: anthropic/claude-sonnet-4-5}
+`)
+	assert.Equal(t, []string{"ANTHROPIC_API_KEY"}, result.Report.RequiredEnv)
+}
+
+func TestConvert_PoolNameAvoidsAliases(t *testing.T) {
+	cfg, _ := convertYAML(t, `
+model_list:
+  - model_name: a
+    litellm_params: {model: openai/gpt-4o}
+  - model_name: a
+    litellm_params: {model: groq/llama-3.3-70b}
+  - model_name: b
+    litellm_params: {model: anthropic/claude-sonnet-4-5}
+router_settings:
+  fallbacks: [{a: [b]}]
+  model_group_alias:
+    a-pool: b
+`)
+	assert.Equal(t, []targetOut{{Model: "a-pool-2"}, {Provider: "anthropic", Model: "claude-sonnet-4-5"}}, virtualModel(t, cfg, "a").Targets)
+	assert.Equal(t, []targetOut{{Model: "b"}}, virtualModel(t, cfg, "a-pool").Targets, "the alias keeps its name")
+	sources := map[string]int{}
+	for _, vm := range cfg.VirtualModels {
+		sources[vm.Source]++
+	}
+	for source, n := range sources {
+		assert.Equal(t, 1, n, "virtual model %q declared more than once", source)
+	}
+}
+
+func TestConvert_AccessGroupsAreFlagged(t *testing.T) {
+	_, result := convertYAML(t, `
+model_list:
+  - model_name: restricted
+    litellm_params: {model: openai/gpt-4o}
+    model_info:
+      access_groups: [beta-users, internal]
+`)
+	assert.Contains(t, findings(result, SeverityWarning), "model_list[0] (restricted): model_info.access_groups beta-users, internal not migrated: LiteLLM limits this model to keys and teams in those groups, while any GoModel key can call it until you set allowed models on the user paths or keys")
+}

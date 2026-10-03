@@ -45,7 +45,11 @@ func convert(src *liteLLMConfig, source string) (*Result, error) {
 		return nil, fmt.Errorf("render GoModel config: %w", err)
 	}
 
-	c.report.RequiredEnv = c.env.required
+	for _, name := range c.env.required {
+		if _, written := c.env.values[name]; !written {
+			c.report.RequiredEnv = append(c.report.RequiredEnv, name)
+		}
+	}
 	c.report.WrittenEnv = c.env.names
 	return &Result{Config: body.Bytes(), Env: c.env.render(), Report: &c.report}, nil
 }

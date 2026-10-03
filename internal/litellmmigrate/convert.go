@@ -25,14 +25,14 @@ type converter struct {
 	instances   []*instance
 	byKey       map[string]*instance
 	usedNames   map[string]bool
-	// keyEnvInUse holds the API key variables deployments read, so an inline
-	// key is never moved to a variable another provider already uses.
-	keyEnvInUse map[string]bool
 	groups      []*group
 	groupByName map[string]*group
 	// wildcard is set when a deployment exposes a provider's whole catalog,
 	// which GoModel serves without virtual models.
 	wildcard bool
+	// poolNames holds the load balancer names generated for groups with
+	// fallbacks.
+	poolNames []string
 	// usageBasedRouting is set under LiteLLM's usage-based routing, the one
 	// strategy where LiteLLM enforces deployment rpm/tpm.
 	usageBasedRouting bool
@@ -60,7 +60,6 @@ func newConverter(src *liteLLMConfig, source string) *converter {
 		credentials: map[string]map[string]string{},
 		byKey:       map[string]*instance{},
 		usedNames:   map[string]bool{},
-		keyEnvInUse: map[string]bool{},
 		groupByName: map[string]*group{},
 	}
 	c.report.Source = source
@@ -72,16 +71,16 @@ func newConverter(src *liteLLMConfig, source string) *converter {
 
 func (c *converter) run() {
 	c.report.Deployments = len(c.src.ModelList)
-	for _, d := range c.src.ModelList {
-		c.markKeyEnv(d.LiteLLMParams)
-	}
+	// Values the LiteLLM config sets or reads by name keep those names;
+	// claim them before any inline secret is given a variable.
+	c.convertEnvironmentVariables()
+	c.reserveEnvRefs()
 	for i, d := range c.src.ModelList {
 		c.addDeployment(i, d)
 	}
 	c.finalizeInstances()
 	c.buildVirtualModels()
 	c.convertSettings()
-	c.convertEnvironmentVariables()
 }
 
 func (c *converter) addDeployment(index int, d deployment) {
@@ -125,18 +124,22 @@ func (c *converter) addDeployment(index int, d deployment) {
 	c.groupFor(d.ModelName).add(targetOut{Provider: inst.name, Model: upstream}, p)
 }
 
-// markKeyEnv records the API key variable a deployment reads.
-func (c *converter) markKeyEnv(p litellmParams) {
-	if values, ok := c.credentials[p.CredentialName]; ok && p.APIKey == "" {
-		p.APIKey = values["api_key"]
+// reserveEnvRefs reserves every variable the LiteLLM config reads: each
+// os.environ/ reference anywhere in it, and the default key variable of each
+// deployment that sets no api_key.
+func (c *converter) reserveEnvRefs() {
+	for _, name := range collectEnvRefs(c.src) {
+		c.env.reserve(name)
 	}
-	if name, ok := envRef(p.APIKey); ok {
-		c.keyEnvInUse[name] = true
-		return
-	}
-	prefix, _ := splitModel(p.Model, p.CustomLLMProvider)
-	if kind, ok := providerKinds[prefix]; ok && p.APIKey == "" && kind.KeyEnv != "" {
-		c.keyEnvInUse[kind.KeyEnv] = true
+	for _, d := range c.src.ModelList {
+		p := d.LiteLLMParams
+		if values, ok := c.credentials[p.CredentialName]; ok && p.APIKey == "" {
+			p.APIKey = values["api_key"]
+		}
+		prefix, _ := splitModel(p.Model, p.CustomLLMProvider)
+		if kind, ok := providerKinds[prefix]; ok && p.APIKey == "" && kind.KeyEnv != "" {
+			c.env.reserve(kind.KeyEnv)
+		}
 	}
 }
 
@@ -233,6 +236,9 @@ func perMtok(perToken float64) *float64 {
 }
 
 func (c *converter) reportUnmigratedParams(subject string, p litellmParams, d deployment) {
+	if len(d.ModelInfo.AccessGroups) > 0 {
+		c.report.warn(subject, fmt.Sprintf("model_info.access_groups %s not migrated: LiteLLM limits this model to keys and teams in those groups, while any GoModel key can call it until you set allowed models on the user paths or keys", strings.Join(d.ModelInfo.AccessGroups, ", ")))
+	}
 	if p.AWSAccessKeyID != "" || p.AWSSecretAccessKey != "" || p.AWSProfileName != "" {
 		c.report.warn(subject, "GoModel's Bedrock provider authenticates with the standard AWS credential chain; set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY or AWS_PROFILE for the gateway instead of per-deployment credentials")
 	}

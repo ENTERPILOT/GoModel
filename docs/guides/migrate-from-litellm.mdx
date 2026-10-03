@@ -55,8 +55,9 @@ run LiteLLM with keeps working. `include:` files are followed.
 
 Read `MIGRATION_REPORT.md` before sending traffic. It has three lists:
 
-- **Review before switching traffic**: things you must finish, such as a
-  Langfuse callback or a database URL.
+- **Review before switching traffic**: things you must finish, such as
+  guardrails, model access groups, or a Langfuse callback. GoModel guardrails
+  are off until you configure them.
 - **Not migrated**: settings with no GoModel equivalent, named one by one.
   Nothing is dropped silently.
 - **Behavior changes**: settings that were converted but behave a little
@@ -69,12 +70,25 @@ listed under **Environment** in the report (the ones LiteLLM already read with
 `os.environ/`) to `.env` or your deployment, then send a few test requests with
 the models your clients use:
 
+```yaml compose.yaml
+services:
+  gomodel:
+    image: enterpilot/gomodel
+    ports: ["8080:8080"]
+    env_file: .env
+    volumes:
+      - ./config.yaml:/app/config/config.yaml:ro
+```
+
 ```bash
 cd gomodel
-docker run --rm -p 8080:8080 --env-file .env \
-  -v "$PWD/config.yaml:/app/config/config.yaml:ro" \
-  enterpilot/gomodel
+docker compose up
 ```
+
+Load `.env` with Compose `env_file` (or GoModel's own `.env` loader when you
+run the binary from that directory). `docker run --env-file` reads values
+literally, so it would keep the quotes `.env` puts around values such as
+inline JSON credentials.
 
 ```bash
 curl -s http://localhost:8080/v1/chat/completions \

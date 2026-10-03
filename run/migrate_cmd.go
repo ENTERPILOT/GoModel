@@ -135,18 +135,15 @@ func migrateLiteLLM(opts migrateOptions, stdout io.Writer) error {
 	if !opts.Force {
 		for _, f := range files {
 			path := filepath.Join(opts.Out, f.name)
-			if _, err := os.Stat(path); err == nil {
+			// Lstat, so a dangling symlink counts as an existing file.
+			if _, err := os.Lstat(path); err == nil {
 				return fmt.Errorf("migrate litellm: %s already exists; pass --force to overwrite", path)
 			}
 		}
 	}
 	for _, f := range files {
 		path := filepath.Join(opts.Out, f.name)
-		if err := os.WriteFile(path, f.data, f.mode); err != nil {
-			return fmt.Errorf("migrate litellm: %w", err)
-		}
-		// WriteFile keeps the mode of a file it overwrites; .env holds secrets.
-		if err := os.Chmod(path, f.mode); err != nil {
+		if err := replaceFile(path, f.data, f.mode); err != nil {
 			return fmt.Errorf("migrate litellm: %w", err)
 		}
 		fmt.Fprintf(stdout, "wrote %s\n", path)
@@ -157,4 +154,31 @@ func migrateLiteLLM(opts migrateOptions, stdout io.Writer) error {
 		report.Count(litellmmigrate.SeverityWarning), report.Count(litellmmigrate.SeveritySkipped),
 		filepath.Join(opts.Out, migrationReport))
 	return nil
+}
+
+// replaceFile writes data to a private temporary file next to path, sets its
+// mode, and renames it over path. Secrets are never readable under an
+// overwritten file's looser mode, and a symlink at path is replaced rather
+// than followed.
+func replaceFile(path string, data []byte, mode fs.FileMode) (err error) {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tmp.Close()
+			_ = os.Remove(tmp.Name())
+		}
+	}()
+	if _, err = tmp.Write(data); err != nil {
+		return err
+	}
+	if err = tmp.Chmod(mode); err != nil {
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }

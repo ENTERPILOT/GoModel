@@ -1,6 +1,7 @@
 package litellmmigrate
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -92,14 +93,15 @@ mcp_servers: {}
 	skipped := findings(result, SeveritySkipped)
 	assert.Contains(t, skipped, "router_settings.some_new_router_flag: no GoModel equivalent; not migrated")
 	assert.Contains(t, skipped, "router_settings.context_window_fallbacks: GoModel fails over on 429, 5xx, and model-not-found errors; add the error phrases you need to failover.retry_on_errors")
-	assert.Contains(t, skipped, "guardrails: GoModel guardrails are configured differently; see /advanced/guardrails")
 	assert.Contains(t, skipped, "mcp_servers: no GoModel equivalent; not migrated")
 
 	info := findings(result, SeverityInfo)
 	assert.Contains(t, info, "router_settings.redis_host: not needed for routing: GoModel keeps routing state in the gateway")
 	assert.Contains(t, info, "litellm_settings.drop_params: not needed: GoModel adapts parameters to each provider by default")
 	assert.Contains(t, info, "general_settings.alerting: GoModel has no built-in alerting; alert on its Prometheus metrics")
-	assert.Contains(t, findings(result, SeverityWarning)[0], "general_settings.database_url: not reused")
+	warnings := findings(result, SeverityWarning)
+	assert.Contains(t, warnings, "guardrails (pii): not migrated, and GoModel guardrails are off by default: rebuild them before switching traffic; see /advanced/guardrails")
+	assert.Contains(t, strings.Join(warnings, "\n"), "general_settings.database_url: not reused")
 }
 
 func TestConvert_EnvironmentVariables(t *testing.T) {

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -67,8 +69,10 @@ type modelInfo struct {
 	CacheCreationInputTokenCost *float64 `yaml:"cache_creation_input_token_cost"`
 	MaxInputTokens              *int     `yaml:"max_input_tokens"`
 	MaxOutputTokens             *int     `yaml:"max_output_tokens"`
-	// Other model_info keys (id, mode, base_model, access_groups, ...) are
-	// descriptive metadata; they are accepted and ignored.
+	// AccessGroups restricts the model to keys and teams in these groups.
+	AccessGroups []string `yaml:"access_groups"`
+	// Other model_info keys (id, mode, base_model, ...) are descriptive
+	// metadata; they are accepted and ignored.
 	Extra map[string]any `yaml:",inline"`
 }
 
@@ -161,4 +165,42 @@ func envRef(value string) (string, bool) {
 		return "", false
 	}
 	return name, true
+}
+
+// collectEnvRefs returns the names of all os.environ/ references in cfg, in
+// first-seen order.
+func collectEnvRefs(cfg *liteLLMConfig) []string {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return nil
+	}
+	var tree any
+	if err := yaml.Unmarshal(data, &tree); err != nil {
+		return nil
+	}
+	var names []string
+	var walk func(node any)
+	walk = func(node any) {
+		switch v := node.(type) {
+		case string:
+			if name, ok := envRef(v); ok && !slices.Contains(names, name) {
+				names = append(names, name)
+			}
+		case []any:
+			for _, item := range v {
+				walk(item)
+			}
+		case map[string]any:
+			keys := make([]string, 0, len(v))
+			for key := range v {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			for _, key := range keys {
+				walk(v[key])
+			}
+		}
+	}
+	walk(tree)
+	return names
 }

@@ -142,12 +142,31 @@ func (c *converter) convertSettings() {
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		message := "no GoModel equivalent; not migrated"
 		if key == "guardrails" {
-			message = "GoModel guardrails are configured differently; see /advanced/guardrails"
+			c.reportGuardrails()
+			continue
 		}
-		c.report.skip(key, message)
+		c.report.skip(key, "no GoModel equivalent; not migrated")
 	}
+}
+
+// reportGuardrails flags LiteLLM guardrails as work to finish: GoModel
+// guardrails are off by default, so traffic would lose the protection.
+func (c *converter) reportGuardrails() {
+	entries, _ := c.src.Extra["guardrails"].([]any)
+	var names []string
+	for _, entry := range entries {
+		if fields, ok := entry.(map[string]any); ok {
+			if name, _ := fields["guardrail_name"].(string); name != "" {
+				names = append(names, name)
+			}
+		}
+	}
+	subject := "guardrails"
+	if len(names) > 0 {
+		subject += " (" + strings.Join(names, ", ") + ")"
+	}
+	c.report.warn(subject, "not migrated, and GoModel guardrails are off by default: rebuild them before switching traffic; see /advanced/guardrails")
 }
 
 func (c *converter) convertResilience() {
@@ -243,8 +262,10 @@ func (c *converter) convertGeneralSettings() {
 			if name, isRef := envRef(key); isRef {
 				c.env.require(name)
 				c.out.Server = &serverOut{MasterKey: "${" + name + "}"}
-			} else {
-				c.env.set("GOMODEL_MASTER_KEY", key)
+			} else if name := c.env.set("GOMODEL_MASTER_KEY", key); name != "GOMODEL_MASTER_KEY" {
+				// GOMODEL_MASTER_KEY is taken by another value; point the
+				// config at the name the key was written under instead.
+				c.out.Server = &serverOut{MasterKey: "${" + name + "}"}
 			}
 			c.report.info("general_settings.master_key", "kept: admin scripts using the LiteLLM master key keep working against GoModel")
 		}

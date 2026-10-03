@@ -136,12 +136,19 @@ func (c *converter) addVirtualModel(vm virtualModelOut) {
 	c.report.VirtualModels = append(c.report.VirtualModels, vm)
 }
 
-// uniqueSource returns name, suffixed until it clashes with no model group.
+// uniqueSource returns name, suffixed until it clashes with no model group,
+// model_group_alias entry, or earlier generated name.
 func (c *converter) uniqueSource(name string) string {
+	aliases, _ := c.router.values["model_group_alias"].(map[string]any)
+	taken := func(candidate string) bool {
+		_, alias := aliases[candidate]
+		return alias || c.groupByName[candidate] != nil || c.hasVirtualModel(candidate) || slices.Contains(c.poolNames, candidate)
+	}
 	candidate := name
-	for i := 2; c.groupByName[candidate] != nil; i++ {
+	for i := 2; taken(candidate); i++ {
 		candidate = fmt.Sprintf("%s-%d", name, i)
 	}
+	c.poolNames = append(c.poolNames, candidate)
 	return candidate
 }
 

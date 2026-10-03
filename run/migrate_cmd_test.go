@@ -108,3 +108,21 @@ func TestRunMigrateCommand_WritesFiles(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "--force restores the secret file's mode")
 }
+
+func TestRunMigrateCommand_DoesNotFollowSymlinks(t *testing.T) {
+	path := writeLiteLLMConfig(t)
+	out := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "stolen.env")
+	require.NoError(t, os.Symlink(outside, filepath.Join(out, ".env")))
+	args := []string{"litellm", "--out", out, path}
+
+	err := runMigrateCommand("gomodel", args, io.Discard, io.Discard)
+	require.ErrorContains(t, err, "already exists", "a dangling symlink counts as an existing file")
+
+	require.NoError(t, runMigrateCommand("gomodel", append([]string{"litellm", "--force"}, args[1:]...), io.Discard, io.Discard))
+	assert.NoFileExists(t, outside, "the secret file is not written through the link")
+	info, err := os.Lstat(filepath.Join(out, ".env"))
+	require.NoError(t, err)
+	assert.True(t, info.Mode().IsRegular())
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+}
