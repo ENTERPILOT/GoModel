@@ -2,16 +2,15 @@ package usage
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
 // Result holds the initialized usage logger and its dependencies.
@@ -50,7 +49,7 @@ func New(ctx context.Context, cfg *config.Config, store storage.Storage) (*Resul
 	}
 
 	// Create the usage store based on storage type
-	usageStore, err := createUsageStore(store, cfg.Usage.RetentionDays)
+	usageStore, err := createUsageStore(ctx, store, cfg.Usage.RetentionDays)
 	if err != nil {
 		return nil, err
 	}
@@ -68,10 +67,10 @@ func NewReader(store storage.Storage) (UsageReader, error) {
 		return nil, nil
 	}
 
-	return storage.ResolveBackend[UsageReader](
+	return storage.ResolveSQLBackend[UsageReader](
+		context.Background(),
 		store,
-		func(db *sql.DB) (UsageReader, error) { return NewSQLiteReader(db) },
-		func(pool *pgxpool.Pool) (UsageReader, error) { return NewPostgreSQLReader(pool) },
+		func(db sqlx.DB) (UsageReader, error) { return NewSQLReader(db) },
 		func(db *mongo.Database) (UsageReader, error) { return NewMongoDBReader(db) },
 	)
 }
@@ -83,19 +82,11 @@ func NewPricingRecalculator(store storage.Storage) (PricingRecalculator, error) 
 		return nil, nil
 	}
 
-	return storage.ResolveBackend[PricingRecalculator](
+	return storage.ResolveSQLBackend[PricingRecalculator](
+		context.Background(),
 		store,
-		func(db *sql.DB) (PricingRecalculator, error) {
-			if db == nil {
-				return nil, fmt.Errorf("database connection is required")
-			}
-			return &SQLiteStore{db: db}, nil
-		},
-		func(pool *pgxpool.Pool) (PricingRecalculator, error) {
-			if pool == nil {
-				return nil, fmt.Errorf("connection pool is required")
-			}
-			return &PostgreSQLStore{pool: pool}, nil
+		func(db sqlx.DB) (PricingRecalculator, error) {
+			return &SQLStore{db: db, dialect: usageDialectFor(db.Dialect())}, nil
 		},
 		func(db *mongo.Database) (PricingRecalculator, error) {
 			if db == nil {
@@ -107,11 +98,11 @@ func NewPricingRecalculator(store storage.Storage) (PricingRecalculator, error) 
 }
 
 // createUsageStore creates the appropriate UsageStore for the given storage backend.
-func createUsageStore(store storage.Storage, retentionDays int) (UsageStore, error) {
-	return storage.ResolveBackend[UsageStore](
+func createUsageStore(ctx context.Context, store storage.Storage, retentionDays int) (UsageStore, error) {
+	return storage.ResolveSQLBackend[UsageStore](
+		ctx,
 		store,
-		func(db *sql.DB) (UsageStore, error) { return NewSQLiteStore(db, retentionDays) },
-		func(pool *pgxpool.Pool) (UsageStore, error) { return NewPostgreSQLStore(pool, retentionDays) },
+		func(db sqlx.DB) (UsageStore, error) { return NewSQLStore(ctx, db, retentionDays) },
 		func(db *mongo.Database) (UsageStore, error) { return NewMongoDBStore(db, retentionDays) },
 	)
 }

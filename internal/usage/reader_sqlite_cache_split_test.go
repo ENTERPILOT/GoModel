@@ -22,7 +22,7 @@ func TestSQLiteReaderSummary_AggregatesProviderCacheSplit(t *testing.T) {
 
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	ts := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
@@ -72,7 +72,7 @@ func TestSQLiteReaderSummary_AggregatesProviderCacheSplit(t *testing.T) {
 	err = store.WriteBatch(ctx, append(append([]*UsageEntry{}, providerEntries...), localHit))
 	require.NoError(t, err)
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	summary, err := reader.GetSummary(ctx, UsageQueryParams{

@@ -3,6 +3,8 @@ package usage
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -17,7 +19,7 @@ func seedGroupCacheStatsFixture(t *testing.T) (*sql.DB, context.Context) {
 
 	t.Cleanup(func() { db.Close() })
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -54,7 +56,7 @@ func seedGroupCacheStatsFixture(t *testing.T) (*sql.DB, context.Context) {
 
 func TestSQLiteGetUsageByModelIncludesGroupCacheStats(t *testing.T) {
 	db, ctx := seedGroupCacheStatsFixture(t)
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	got, err := reader.GetUsageByModel(ctx, UsageQueryParams{})
@@ -75,7 +77,7 @@ func TestSQLiteGetUsageByModelIncludesGroupCacheStats(t *testing.T) {
 
 func TestSQLiteGetUsageByUserPathAndLabelIncludeGroupCacheStats(t *testing.T) {
 	db, ctx := seedGroupCacheStatsFixture(t)
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	paths, err := reader.GetUsageByUserPath(ctx, UsageQueryParams{})
@@ -108,7 +110,7 @@ func TestSQLiteGetUsageByUserPathAndLabelIncludeGroupCacheStats(t *testing.T) {
 
 func TestSQLiteGroupCacheStatsFollowFilters(t *testing.T) {
 	db, ctx := seedGroupCacheStatsFixture(t)
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	got, err := reader.GetUsageByModel(ctx, UsageQueryParams{Label: "batch"})
@@ -123,7 +125,7 @@ func TestSQLiteGroupCacheStatsFollowFilters(t *testing.T) {
 
 func TestSQLiteLocalOnlyGroupsMaterializeRows(t *testing.T) {
 	db, ctx := seedGroupCacheStatsFixture(t)
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	// A model served exclusively from the local cache in the period: the
@@ -137,7 +139,7 @@ func TestSQLiteLocalOnlyGroupsMaterializeRows(t *testing.T) {
 	}})
 	require.NoError(t, err)
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	models, err := reader.GetUsageByModel(ctx, UsageQueryParams{})
@@ -171,7 +173,7 @@ func TestSQLiteLocalOnlyGroupsMaterializeRows(t *testing.T) {
 
 func TestSQLiteCacheStatsSkippedOutsideUncachedMode(t *testing.T) {
 	db, ctx := seedGroupCacheStatsFixture(t)
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	for _, mode := range []string{CacheModeAll, CacheModeCached} {
@@ -186,12 +188,44 @@ func TestSQLiteCacheStatsSkippedOutsideUncachedMode(t *testing.T) {
 	}
 }
 
-// Err completes the inputSegmentRows interface for the shared pgx-style
-// fixture; the fake never fails mid-iteration.
-func (f *fakePgxRows) Err() error { return nil }
+// fakeRows feeds the fold helpers rows whose values are laid out in the
+// reader's SELECT column order. Scan assigns via reflection and leaves the
+// destination untouched for nil values, matching how both drivers scan SQL
+// NULL into pointer targets. A row/dest length mismatch errors so the fixtures
+// must track the scan target list.
+type fakeRows struct {
+	rows [][]any
+	idx  int
+}
+
+func (f *fakeRows) Next() bool {
+	if f.idx >= len(f.rows) {
+		return false
+	}
+	f.idx++
+	return true
+}
+
+func (f *fakeRows) Scan(dest ...any) error {
+	row := f.rows[f.idx-1]
+	if len(dest) != len(row) {
+		return fmt.Errorf("scan target count %d does not match fixture column count %d", len(dest), len(row))
+	}
+	for i, value := range row {
+		if value == nil {
+			continue
+		}
+		reflect.ValueOf(dest[i]).Elem().Set(reflect.ValueOf(value))
+	}
+	return nil
+}
+
+// Err completes the inputSegmentRows interface; the fake never fails
+// mid-iteration.
+func (f *fakeRows) Err() error { return nil }
 
 // TestFoldUsageCacheRowsScansNullableColumns drives the SQL-backend scan
-// path through the same pgx-style row interface the PostgreSQL reader uses,
+// path through the same row interface the SQL reader uses,
 // covering nil provider_name/user_path/labels/cache_type/raw_data columns,
 // label expansion, and the local-vs-provider row split.
 func TestFoldUsageCacheRowsScansNullableColumns(t *testing.T) {
@@ -199,7 +233,7 @@ func TestFoldUsageCacheRowsScansNullableColumns(t *testing.T) {
 	// 2026-08-24 is a Monday; PostgreSQL streams the timestamp as time.Time,
 	// SQLite as stored text.
 	monday := time.Date(2026, 8, 24, 12, 30, 0, 0, time.UTC)
-	rows := &fakePgxRows{rows: [][]any{
+	rows := &fakeRows{rows: [][]any{
 		// model, provider, provider_name, user_path, labels, cache_type, input, output, raw_data, timestamp
 		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), str(`["prod","batch"]`), nil, 100, 20, str(`{"prompt_cached_tokens": 60}`), monday},
 		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), nil, str(CacheTypeExact), 100, 20, nil, "2026-08-24T12:31:00Z"},
@@ -234,7 +268,7 @@ func TestFoldUsageCacheRowsScansNullableColumns(t *testing.T) {
 	require.Equal(t, int64(0), gpt4o.CachedInputTokens)
 
 	// The same rows folded per label: only the labelled row contributes.
-	labelRows := &fakePgxRows{rows: [][]any{
+	labelRows := &fakeRows{rows: [][]any{
 		{"gpt-5", "openai", nil, nil, str(`["prod","batch"]`), nil, 100, 20, str(`{"prompt_cached_tokens": 60}`), nil},
 	}}
 	labelStats, err := foldUsageCacheRows(labelRows, labelGroupKeys)

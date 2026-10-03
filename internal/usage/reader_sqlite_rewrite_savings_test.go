@@ -21,7 +21,7 @@ func TestSQLiteReader_UsageLogCarriesRewriteSavings(t *testing.T) {
 
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	cost := 0.0375
@@ -56,7 +56,8 @@ func TestSQLiteReader_UsageLogCarriesRewriteSavings(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	reader := &SQLiteReader{db: db}
+	reader, err := newSQLiteReader(db)
+	require.NoError(t, err)
 
 	log, err := reader.GetUsageLog(ctx, UsageLogParams{})
 	require.NoError(t, err)

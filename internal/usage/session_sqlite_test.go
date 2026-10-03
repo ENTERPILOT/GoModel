@@ -16,10 +16,10 @@ func TestSQLiteSessionUsageRoundTripAggregationAndFilter(t *testing.T) {
 
 	t.Cleanup(func() { _ = db.Close() })
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	cost := func(value float64) *float64 { return &value }
@@ -117,10 +117,10 @@ func TestSQLiteSessionUsagePaginationHasStableTimestampTies(t *testing.T) {
 
 	t.Cleanup(func() { _ = db.Close() })
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	timestamp := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
