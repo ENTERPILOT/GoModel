@@ -2,6 +2,8 @@ package server
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/labstack/echo/v5"
 
@@ -72,7 +74,7 @@ func (h *Handler) ListModels(c *echo.Context) error {
 		if resp != nil {
 			models = resp.Data
 		}
-		return c.JSON(http.StatusOK, anthropicapi.FromModels(models))
+		return c.JSON(http.StatusOK, anthropicapi.FromModelsPage(models, anthropicModelsPage(c)))
 	}
 
 	return c.JSON(http.StatusOK, resp)
@@ -94,4 +96,19 @@ func (h *Handler) ListModels(c *echo.Context) error {
 // @Router       /v1/embeddings [post]
 func (h *Handler) Embeddings(c *echo.Context) error {
 	return h.translatedInference().Embeddings(c)
+}
+
+// anthropicModelsPage reads the Anthropic models-list paging parameters. A
+// limit that is not a positive number is ignored, as if it were not sent.
+func anthropicModelsPage(c *echo.Context) anthropicapi.ModelsPage {
+	query := c.Request().URL.Query()
+	limit, err := strconv.Atoi(strings.TrimSpace(query.Get("limit")))
+	if err != nil || limit < 0 {
+		limit = 0
+	}
+	return anthropicapi.ModelsPage{
+		Limit:    limit,
+		AfterID:  strings.TrimSpace(query.Get("after_id")),
+		BeforeID: strings.TrimSpace(query.Get("before_id")),
+	}
 }

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"strings"
@@ -115,23 +116,43 @@ func (h *Handler) RetrieveModel(c *echo.Context) error {
 	if resp != nil {
 		models = resp.Data
 	}
-	for _, model := range models {
-		if model.ID != modelID {
-			continue
-		}
-		// The models routes are shared by both wire dialects; Anthropic SDK
-		// clients are identified by the anthropic-version header they always
-		// send (see ListModels).
-		if c.Request().Header.Get("anthropic-version") != "" {
-			return c.JSON(http.StatusOK, anthropicapi.FromModel(model))
-		}
-		if model.Object == "" {
-			model.Object = "model"
-		}
-		return c.JSON(http.StatusOK, model)
+	model, ok := h.listedModel(c.Request().Context(), models, modelID)
+	if !ok {
+		return respondModelError(c, core.NewModelNotFoundError(modelID))
 	}
+	// The models routes are shared by both wire dialects; Anthropic SDK
+	// clients are identified by the anthropic-version header they always
+	// send (see ListModels).
+	if c.Request().Header.Get("anthropic-version") != "" {
+		return c.JSON(http.StatusOK, anthropicapi.FromModel(model))
+	}
+	if model.Object == "" {
+		model.Object = "model"
+	}
+	return c.JSON(http.StatusOK, model)
+}
 
-	return respondModelError(c, core.NewModelNotFoundError(modelID))
+// listedModel finds the listed model an ID names: the listed ID itself, or
+// the model it resolves to the way an inference request would, so a bare ID
+// that works for chat (gpt-6-luna) also retrieves its listed model
+// (openai/gpt-6-luna).
+func (h *Handler) listedModel(ctx context.Context, models []core.Model, modelID string) (core.Model, bool) {
+	find := func(id string) (core.Model, bool) {
+		for _, model := range models {
+			if model.ID == id {
+				return model, true
+			}
+		}
+		return core.Model{}, false
+	}
+	if model, ok := find(modelID); ok {
+		return model, true
+	}
+	selector, err := resolveServiceModel(ctx, h.provider, h.modelResolver, modelID, "")
+	if err != nil {
+		return core.Model{}, false
+	}
+	return find(selector.QualifiedModel())
 }
 
 // respondModelError renders a retrieve failure in the caller's dialect, the
