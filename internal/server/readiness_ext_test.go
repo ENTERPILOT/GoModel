@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -55,10 +56,7 @@ func TestExtensionHealthKeepsInTimeAnswerCollectedAfterDeadline(t *testing.T) {
 
 func TestExtensionHealthResultsAcceptOnlyAnswersRecordedBeforeTheDeadline(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	results := newExtensionHealthResults(ctx)
-	results.expect()
-	results.expect()
-	results.expect()
+	results := newExtensionHealthResults(ctx, 3)
 
 	results.record("in-time", ext.HealthDown)
 	cancel()
@@ -68,4 +66,22 @@ func TestExtensionHealthResultsAcceptOnlyAnswersRecordedBeforeTheDeadline(t *tes
 	results.record("after-collect", ext.HealthOK)
 
 	assert.Equal(t, map[string]ext.HealthStatus{"in-time": ext.HealthDown}, got)
+}
+
+func TestExtensionHealthManyFastChecksAllReport(t *testing.T) {
+	checkers := make([]*namedHealthChecker, 64)
+	for i := range checkers {
+		checkers[i] = &namedHealthChecker{
+			name:    fmt.Sprintf("ext-%d", i),
+			checker: funcHealthChecker(func(context.Context) ext.HealthStatus { return ext.HealthOK }),
+		}
+	}
+
+	for range 20 {
+		statuses := startExtensionHealthChecks(context.Background(), checkers)()
+		require.Len(t, statuses, len(checkers))
+		for _, hc := range checkers {
+			awaitExtensionHealthCheck(t, hc)
+		}
+	}
 }

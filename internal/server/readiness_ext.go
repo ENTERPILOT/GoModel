@@ -53,13 +53,18 @@ func startExtensionHealthChecks(ctx context.Context, checkers []*namedHealthChec
 		return func() map[string]ext.HealthStatus { return nil }
 	}
 	ctx, cancel := context.WithTimeout(ctx, readinessProbeTimeout)
-	results := newExtensionHealthResults(ctx)
+	var claimed []*namedHealthChecker
 	for _, hc := range checkers {
 		if !hc.inFlight.CompareAndSwap(false, true) {
 			slog.Warn("readiness: extension health check still running from an earlier probe", "component", hc.name)
 			continue
 		}
-		results.expect()
+		claimed = append(claimed, hc)
+	}
+	// Every check is counted before any starts, so a fast one cannot finish
+	// the collection while others are still being launched.
+	results := newExtensionHealthResults(ctx, len(claimed))
+	for _, hc := range claimed {
 		go func() {
 			defer hc.inFlight.Store(false)
 			var status ext.HealthStatus
@@ -92,15 +97,9 @@ type extensionHealthResults struct {
 	done     chan struct{}
 }
 
-func newExtensionHealthResults(ctx context.Context) *extensionHealthResults {
-	return &extensionHealthResults{ctx: ctx, statuses: map[string]ext.HealthStatus{}, done: make(chan struct{})}
-}
-
-// expect registers one more started check; call it before the check starts.
-func (r *extensionHealthResults) expect() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.pending++
+// newExtensionHealthResults expects one answer from each of pending checks.
+func newExtensionHealthResults(ctx context.Context, pending int) *extensionHealthResults {
+	return &extensionHealthResults{ctx: ctx, statuses: map[string]ext.HealthStatus{}, pending: pending, done: make(chan struct{})}
 }
 
 // record stores an answer unless the deadline has passed or collection ended.
