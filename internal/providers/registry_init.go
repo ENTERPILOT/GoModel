@@ -415,12 +415,12 @@ func (r *ModelRegistry) enrichFetchedProviderModelMaps(
 	list := r.modelList
 	r.mu.RUnlock()
 
-	configOverrides := r.snapshotConfigOverrides()
+	overrides := r.snapshotMetadataOverrides()
 	metadataStats := metadataEnrichmentStats{}
 	if list != nil {
 		metadataStats = enrichProviderModelMaps(list, providerTypes, modelsByProvider, nil)
 	}
-	metadataStats.Enriched += applyConfigMetadataOverrides(configOverrides, modelsByProvider, nil)
+	metadataStats.Enriched += overrides.apply(modelsByProvider, nil)
 	metadataStats.Enriched += applyInferredModelMetadata(modelsByProvider, nil)
 	return metadataStats
 }

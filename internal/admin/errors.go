@@ -112,17 +112,19 @@ func deactivateByID(
 	return c.NoContent(http.StatusNoContent)
 }
 
-// modelPricingOverrideSelectorMaxLen caps decoded selectors to a sane size; provider
+// modelOverrideSelectorMaxLen caps decoded selectors to a sane size; provider
 // IDs and model IDs are short identifiers, never essays.
-const modelPricingOverrideSelectorMaxLen = 256
+const modelOverrideSelectorMaxLen = 256
 
-func normalizeModelPricingOverrideSelector(selector string) (string, error) {
+// normalizeModelOverrideSelector trims and bounds the selector of a model
+// pricing or metadata override; kind names the override in error messages.
+func normalizeModelOverrideSelector(kind, selector string) (string, error) {
 	selector = strings.TrimSpace(selector)
 	if selector == "" {
-		return "", core.NewInvalidRequestError("model pricing override selector is required", nil)
+		return "", core.NewInvalidRequestError(kind+" selector is required", nil)
 	}
-	if len(selector) > modelPricingOverrideSelectorMaxLen {
-		return "", core.NewInvalidRequestError("model pricing override selector is too long", nil)
+	if len(selector) > modelOverrideSelectorMaxLen {
+		return "", core.NewInvalidRequestError(kind+" selector is too long", nil)
 	}
 	return selector, nil
 }
