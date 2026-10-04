@@ -52,3 +52,20 @@ func TestExtensionHealthKeepsInTimeAnswerCollectedAfterDeadline(t *testing.T) {
 
 	assert.Equal(t, ext.HealthDown, wait()["vaults"])
 }
+
+func TestExtensionHealthResultsAcceptOnlyAnswersRecordedBeforeTheDeadline(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	results := newExtensionHealthResults(ctx)
+	results.expect()
+	results.expect()
+	results.expect()
+
+	results.record("in-time", ext.HealthDown)
+	cancel()
+	results.record("late", ext.HealthOK)
+
+	got := results.collect()
+	results.record("after-collect", ext.HealthOK)
+
+	assert.Equal(t, map[string]ext.HealthStatus{"in-time": ext.HealthDown}, got)
+}
