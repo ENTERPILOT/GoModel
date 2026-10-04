@@ -1773,7 +1773,7 @@
         "tags": [
           "admin"
         ],
-        "summary": "List virtual MCP servers (config-declared, read-only)",
+        "summary": "List virtual MCP servers (config-declared and admin-managed)",
         "responses": {
           "200": {
             "description": "OK",
@@ -1817,8 +1817,176 @@
         "x-mint": {
           "metadata": {
             "sidebarTitle": "/admin/mcp-virtual-servers",
-            "title": "List virtual MCP servers (config-declared, read-only)",
-            "description": "GoModel API reference for GET /admin/mcp-virtual-servers: List virtual MCP servers (config-declared, read-only)."
+            "title": "List virtual MCP servers (config-declared and admin-managed)",
+            "description": "GoModel API reference for GET /admin/mcp-virtual-servers: List virtual MCP servers (config-declared and admin-managed)."
+          }
+        }
+      },
+      "put": {
+        "description": "Members must be existing MCP servers. A new virtual server may not use an MCP server's slug, and config-declared virtual servers are read-only.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create or update one admin-managed virtual MCP server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/admin.upsertMCPVirtualServerRequest"
+              }
+            }
+          },
+          "description": "Virtual MCP server definition",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/admin.mcpVirtualServerResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/mcp-virtual-servers",
+            "title": "Create or update one admin-managed virtual MCP server",
+            "description": "GoModel API reference for PUT /admin/mcp-virtual-servers: Create or update one admin-managed virtual MCP server."
+          }
+        }
+      }
+    },
+    "/admin/mcp-virtual-servers/{name}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete one admin-managed virtual MCP server",
+        "parameters": [
+          {
+            "description": "Virtual MCP server name",
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/mcp-virtual-servers/{name}",
+            "title": "Delete one admin-managed virtual MCP server",
+            "description": "GoModel API reference for DELETE /admin/mcp-virtual-servers/{name}: Delete one admin-managed virtual MCP server."
           }
         }
       }
@@ -12185,11 +12353,18 @@
       "admin.mcpVirtualServerResponse": {
         "type": "object",
         "properties": {
+          "configured_tool_discovery": {
+            "description": "ConfiguredToolDiscovery is the stored setting: \"off\", \"search\", or \"\"\nto inherit the gateway default. ToolDiscovery is the effective mode.",
+            "type": "string"
+          },
           "conflict": {
             "type": "string"
           },
           "description": {
             "type": "string"
+          },
+          "managed": {
+            "type": "boolean"
           },
           "missing_servers": {
             "type": "array",
@@ -12695,6 +12870,26 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "admin.upsertMCPVirtualServerRequest": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "servers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tool_discovery": {
+            "type": "string"
           }
         }
       },

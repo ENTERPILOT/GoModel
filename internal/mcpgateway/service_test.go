@@ -96,10 +96,17 @@ func newTestService(t *testing.T, usageLogger usage.LoggerInterface, specs ...Se
 	for _, spec := range specs {
 		configServers[spec.Name] = spec
 	}
-	service, err := NewService(context.Background(), Options{
+	return newTestServiceWithOptions(t, Options{
 		ConfigServers: configServers,
 		UsageLogger:   usageLogger,
 	})
+}
+
+// newTestServiceWithOptions is newTestService for callers that also need
+// stores or virtual servers; the config servers come from opts.
+func newTestServiceWithOptions(t *testing.T, opts Options) (*Service, string) {
+	t.Helper()
+	service, err := NewService(context.Background(), opts)
 	require.NoError(t, err)
 
 	t.Cleanup(service.Close)
@@ -125,7 +132,7 @@ func newTestService(t *testing.T, usageLogger usage.LoggerInterface, specs ...Se
 	}))
 	t.Cleanup(gateway.Close)
 
-	waitForConnected(t, service, len(specs))
+	waitForConnected(t, service, len(service.Views()))
 	return service, gateway.URL
 }
 
@@ -557,9 +564,9 @@ func TestAuthorizeSessionFailsClosedWithoutBinding(t *testing.T) {
 	err := service.authorizeSessionID("deleted-session", "alpha")
 	require.ErrorIs(t, err, ErrServerNotVisible)
 
-	service.bindSession("live", "", "/staff", "", false, nil)
+	service.bindSession("live", "", "/staff", "", false, nil, nil)
 	require.NoError(t, service.authorizeSessionID("live", "alpha"))
-	service.bindSession("contractor", "", "/contractors/acme", "", false, nil)
+	service.bindSession("contractor", "", "/contractors/acme", "", false, nil, nil)
 	require.ErrorIs(t, service.authorizeSessionID("contractor", "alpha"), ErrServerNotVisible)
 }
 
@@ -654,7 +661,7 @@ func TestUpstreamHeadersStayOnConfiguredOrigin(t *testing.T) {
 		Name: "headers", URL: origin.URL, Transport: "http", Enabled: true,
 		Headers: map[string]string{"Authorization": "Bearer upstream-secret"},
 	}, http.DefaultClient)
-	client := u.dialClient(&connectProbe{})
+	client := u.dialClient(&connectProbe{}, context.Background())
 	resp, err := client.Get(origin.URL + "/same-origin")
 	require.NoError(t, err)
 

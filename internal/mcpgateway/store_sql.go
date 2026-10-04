@@ -65,6 +65,9 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	if err := db.Schema(ctx, sqlIndexes...); err != nil {
 		return nil, fmt.Errorf("failed to create mcp_servers index: %w", err)
 	}
+	if err := db.Schema(ctx, sqlVirtualTable); err != nil {
+		return nil, fmt.Errorf("failed to create mcp_virtual_servers table: %w", err)
+	}
 	return &SQLStore{db: db}, nil
 }
 

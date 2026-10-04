@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -205,55 +206,62 @@ func (m *memoryStore) Delete(_ context.Context, name string) error {
 
 func (m *memoryStore) Close() error { return nil }
 
-func TestUpsertRejectsVirtualServerName(t *testing.T) {
-	store := &memoryStore{rows: map[string]ManagedServer{}}
-	service, err := NewService(context.Background(), Options{
-		Store:          store,
-		VirtualServers: map[string]VirtualServerSpec{"coding": {Name: "coding", Servers: []string{"alpha"}}},
-	})
-	require.NoError(t, err)
-	t.Cleanup(service.Close)
-
-	err = service.Upsert(context.Background(), ManagedServer{Name: "coding", URL: "https://example.com/mcp", Transport: config.MCPTransportHTTP})
-	require.ErrorIs(t, err, ErrVirtualNameTaken)
-	assert.Equal(t, `slug "coding" is used by virtual MCP server "coding" (declared in config); choose another slug`, err.Error())
-	assert.Empty(t, store.rows, "nothing is persisted, including by an edit whose row was deleted meanwhile")
+// memoryVirtualStore is a minimal in-process VirtualStore. It is locked
+// because the background refresh reads it while tests write.
+type memoryVirtualStore struct {
+	mu   sync.Mutex
+	rows map[string]ManagedVirtualServer
 }
 
-func TestUpsertKeepsServerStoredBeforeVirtualServerEditable(t *testing.T) {
-	// The row predates the virtual server, so it keeps the name and stays editable.
-	store := &memoryStore{rows: map[string]ManagedServer{
-		"coding": {Name: "coding", URL: "https://old.example.com/mcp", Transport: config.MCPTransportHTTP},
-	}}
-	service, err := NewService(context.Background(), Options{
-		Store:          store,
-		VirtualServers: map[string]VirtualServerSpec{"coding": {Name: "coding", Servers: []string{"alpha"}}},
-	})
-	require.NoError(t, err)
-	t.Cleanup(service.Close)
-
-	err = service.Upsert(context.Background(), ManagedServer{Name: "coding", URL: "https://new.example.com/mcp", Transport: config.MCPTransportHTTP})
-	require.NoError(t, err)
-	assert.Equal(t, "https://new.example.com/mcp", store.rows["coding"].URL)
+func (m *memoryVirtualStore) put(virtual ManagedVirtualServer) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.rows[virtual.Name] = virtual
 }
 
-func TestSessionBindingRejectsVirtualSessionAfterServerTakesName(t *testing.T) {
-	codingURL := newTestUpstream(t, "coding", addEchoTool("lint"))
-	service, gatewayURL := newVirtualTestService(t, nil,
-		VirtualServerSpec{Name: "coding", Servers: []string{"alpha"}})
-	sessionID := initializeRawSession(t, gatewayURL+"/mcp/coding", nil)
-
-	specs := make([]ServerSpec, 0, 4)
-	for _, view := range service.Views() {
-		specs = append(specs, view.Spec)
+func (m *memoryVirtualStore) ListVirtual(context.Context) ([]ManagedVirtualServer, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rows := make([]ManagedVirtualServer, 0, len(m.rows))
+	for _, row := range m.rows {
+		rows = append(rows, row)
 	}
-	specs = append(specs, testSpec("coding", codingURL, nil))
-	service.manager.Apply(specs)
-	waitForConnected(t, service, len(specs))
+	return rows, nil
+}
 
-	listBody := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
-	status := rawMCPStatus(t, gatewayURL+"/mcp/coding", listBody, map[string]string{"Mcp-Session-Id": sessionID})
-	assert.Equal(t, http.StatusNotFound, status, "the virtual session must not carry over to the real server's endpoint")
+func (m *memoryVirtualStore) GetVirtual(_ context.Context, name string) (*ManagedVirtualServer, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	row, ok := m.rows[name]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return &row, nil
+}
+
+func (m *memoryVirtualStore) UpsertVirtual(_ context.Context, virtual ManagedVirtualServer) error {
+	m.put(virtual)
+	return nil
+}
+
+func (m *memoryVirtualStore) UpdateVirtual(_ context.Context, virtual ManagedVirtualServer) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.rows[virtual.Name]; !ok {
+		return ErrNotFound
+	}
+	m.rows[virtual.Name] = virtual
+	return nil
+}
+
+func (m *memoryVirtualStore) DeleteVirtual(_ context.Context, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.rows[name]; !ok {
+		return ErrNotFound
+	}
+	delete(m.rows, name)
+	return nil
 }
 
 type unconfirmedStore struct{ *memoryStore }

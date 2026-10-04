@@ -26,7 +26,10 @@ type MCPServerAdmin interface {
 	Reconnect(ctx context.Context, name string) (mcpgateway.ServerView, error)
 	Catalog(name string) (mcpgateway.CatalogView, bool)
 	IsVirtual(name string) bool
+	IsManagedVirtual(name string) bool
 	VirtualViews() []mcpgateway.VirtualServerView
+	UpsertVirtual(ctx context.Context, virtual mcpgateway.ManagedVirtualServer) (mcpgateway.VirtualServerView, error)
+	DeleteVirtual(ctx context.Context, name string) error
 }
 
 // redactedMCPHeaderValue replaces upstream header values (the credential
