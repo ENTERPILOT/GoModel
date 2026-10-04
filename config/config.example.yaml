@@ -165,6 +165,14 @@ models:
 #       args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
 #       env: # subprocesses inherit only PATH/HOME/TMPDIR/USER/LANG — never the
 #         SOME_TOKEN: "${SOME_TOKEN}" # gateway's API keys; pass extras here explicitly
+#   # env: MCP_VIRTUAL_SERVERS. Each virtual server serves a subset of the servers
+#   # above at /mcp/{name}, with namespaced tool names. Names must not match a
+#   # server slug. It only narrows: every member keeps its user-path and tool rules.
+#   virtual_servers:
+#     coding:
+#       description: Code review tools
+#       servers: [github, linear]
+#       tool_discovery: search # optional; default: mcp.tool_discovery
 
 cache:
   model:
@@ -224,6 +232,10 @@ storage:
   mongodb:
     url: "mongodb://localhost:27017"
     database: "gomodel"
+  # Encrypts dashboard-managed secrets at rest. Prefer GOMODEL_ENCRYPTION_KEY
+  # from a secret manager over writing the key here.
+  # encryption_key: "${GOMODEL_ENCRYPTION_KEY}"
+  # encryption_key_previous: "${GOMODEL_ENCRYPTION_KEY_PREVIOUS}" # only during a key rotation
 
 # Where media files go: audio and images captured for the audit log (see
 # logging.log_audio_bodies / log_image_bodies). Metadata stays in storage

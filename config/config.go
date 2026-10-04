@@ -86,6 +86,9 @@ type LoadResult struct {
 
 	secretsResolved bool
 	secretsErr      error
+
+	keyWrapper          KeyWrapper
+	previousKeyWrappers []KeyWrapper
 }
 
 // DecodeExtension strictly decodes one named extensions: section into target.
@@ -308,6 +311,9 @@ func Load() (*LoadResult, error) {
 		return nil, err
 	}
 	if err := applyMCPEnv(cfg); err != nil {
+		return nil, err
+	}
+	if err := applyMCPVirtualEnv(cfg); err != nil {
 		return nil, err
 	}
 	if err := normalizeMCPConfig(&cfg.MCP); err != nil {

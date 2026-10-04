@@ -279,3 +279,46 @@ func TestMCPGatewaySearchDiscovery(t *testing.T) {
 		map[string]string{mcpgateway.ToolDiscoveryHeader: "off"})
 	assert.Equal(t, []string{"alpha_echo", "beta_fetch", "beta_search"}, e2eToolNames(t, optOut))
 }
+
+// TestMCPGatewayVirtualServer drives a virtual server through the fully wired
+// server: it serves only its members, keeps namespaced names, and unknown
+// names stay a 404.
+func TestMCPGatewayVirtualServer(t *testing.T) {
+	alpha := startMockMCPServer(t, "alpha", "echo")
+	beta := startMockMCPServer(t, "beta", "search", "fetch")
+	gateway := newE2EMCPGatewayWithOptions(t, mcpgateway.Options{
+		ConfigServers: map[string]mcpgateway.ServerSpec{
+			"alpha": e2eMCPSpec("alpha", alpha.URL),
+			"beta":  e2eMCPSpec("beta", beta.URL),
+		},
+		VirtualServers: map[string]mcpgateway.VirtualServerSpec{
+			"research": {Name: "research", Servers: []string{"beta"}},
+		},
+	})
+
+	srv := setupE2EServer(t, e2eServerOptions{masterKey: "sk-e2e-master", mcpGateway: gateway})
+	ts := httptest.NewServer(srv)
+	t.Cleanup(ts.Close)
+
+	session := connectMCPClient(t, ts.URL+"/mcp/research", "sk-e2e-master")
+	assert.Equal(t, []string{"beta_fetch", "beta_search"}, e2eToolNames(t, session))
+
+	result, err := session.CallTool(context.Background(), &sdk.CallToolParams{
+		Name:      "beta_fetch",
+		Arguments: map[string]any{"url": "x"},
+	})
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+	text, ok := result.Content[0].(*sdk.TextContent)
+	require.True(t, ok)
+	assert.Equal(t, `fetch:{"url":"x"}`, text.Text)
+
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/mcp/ghost", strings.NewReader(`{}`))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer sk-e2e-master")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}

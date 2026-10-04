@@ -22,6 +22,9 @@ type Store interface {
 	List(ctx context.Context) ([]ManagedServer, error)
 	Get(ctx context.Context, name string) (*ManagedServer, error)
 	Upsert(ctx context.Context, server ManagedServer) error
+	// Update rewrites an existing row and returns ErrNotFound when the row is
+	// gone, so an edit racing a delete cannot recreate the server.
+	Update(ctx context.Context, server ManagedServer) error
 	Delete(ctx context.Context, name string) error
 	Close() error
 }

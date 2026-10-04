@@ -10,6 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
@@ -48,22 +49,39 @@ func (r *Result) Close() error {
 }
 
 // New creates the MCP gateway subsystem using an existing
-// storage connection.
-func New(ctx context.Context, cfg *config.Config, shared storage.Storage, httpClient *http.Client, usageLogger usage.LoggerInterface) (*Result, error) {
+// storage connection. Header values of managed servers are sealed with box;
+// a nil box stores them in plaintext.
+func New(ctx context.Context, cfg *config.Config, shared storage.Storage, box *encryption.Box, httpClient *http.Client, usageLogger usage.LoggerInterface) (*Result, error) {
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
-	return newResult(ctx, cfg, shared, httpClient, usageLogger)
+	return newResult(ctx, cfg, shared, box, httpClient, usageLogger)
 }
 
-func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage, httpClient *http.Client, usageLogger usage.LoggerInterface) (*Result, error) {
-	store, err := createStore(ctx, storeConn)
+// Reencrypt seals every managed server header that is in plaintext or sealed
+// with a data key other than box's active one.
+func Reencrypt(ctx context.Context, shared storage.Storage, box *encryption.Box) (encryption.Report, error) {
+	store, err := createStore(ctx, shared)
+	if err != nil {
+		return encryption.Report{Entity: "mcp_servers"}, err
+	}
+	defer func() { _ = store.Close() }()
+	swap, ok := store.(headerSwapper)
+	if !ok {
+		return encryption.Report{Entity: "mcp_servers"}, fmt.Errorf("mcp server store %T cannot re-encrypt", store)
+	}
+	return (&sealedStore{Store: store, box: box, swap: swap}).reencrypt(ctx, swap)
+}
+
+func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage, box *encryption.Box, httpClient *http.Client, usageLogger usage.LoggerInterface) (*Result, error) {
+	rawStore, err := createStore(ctx, storeConn)
 	if err != nil {
 		return nil, err
 	}
+	store := sealStore(rawStore, box)
 	if httpClient == nil {
 		httpClient = defaultUpstreamHTTPClient()
 	}
@@ -73,8 +91,14 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 		configSpecs[name] = SpecFromConfig(name, serverCfg)
 	}
 
+	virtualSpecs := make(map[string]VirtualServerSpec, len(cfg.MCP.VirtualServers))
+	for name, virtualCfg := range cfg.MCP.VirtualServers {
+		virtualSpecs[name] = VirtualFromConfig(name, virtualCfg)
+	}
+
 	service, err := NewService(ctx, Options{
 		ConfigServers:  configSpecs,
+		VirtualServers: virtualSpecs,
 		Store:          store,
 		HTTPClient:     httpClient,
 		UsageLogger:    usageLogger,

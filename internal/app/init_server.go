@@ -74,7 +74,7 @@ func (b *bootstrap) initServerDependencies() error {
 
 	// Initialize the MCP gateway (aggregated upstream MCP servers behind /mcp).
 	if appCfg.MCP.Enabled {
-		mcpResult, err := mcpgateway.New(b.ctx, appCfg, app.storage, nil, b.serverUsageLogger)
+		mcpResult, err := mcpgateway.New(b.ctx, appCfg, app.storage, app.secrets, nil, b.serverUsageLogger)
 		if err != nil {
 			return fmt.Errorf("failed to initialize mcp gateway: %w", err)
 		}
@@ -270,6 +270,8 @@ func applyExtensions(serverCfg *server.Config, extensions *ext.Registry) {
 	serverCfg.OuterMiddleware = extensions.OuterMiddleware()
 	serverCfg.ExtraMiddleware = extensions.Middleware()
 	serverCfg.ExtraRoutes = extensions.Routes()
+	serverCfg.ExtraAdminRoutes = extensions.AdminRoutes()
+	serverCfg.HealthCheckers = extensions.HealthCheckers()
 	serverCfg.ExtraAuthSkipPaths = extensions.PublicPaths()
 	serverCfg.RequestAuthenticators = extensions.Authenticators()
 }

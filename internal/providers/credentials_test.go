@@ -9,6 +9,7 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -397,4 +398,24 @@ func TestCredentialsService_ConfiguredProvidersCarryGlobalResilience(t *testing.
 			assert.Empty(t, got, "ConfiguredProviders() after %s = %#v, want empty", tt.name, got)
 		})
 	}
+}
+
+type unconfirmedCredentialStore struct{ *fakeCredentialStore }
+
+func (s unconfirmedCredentialStore) Upsert(ctx context.Context, cred ManagedProviderCredential) error {
+	if err := s.fakeCredentialStore.Upsert(ctx, cred); err != nil {
+		return err
+	}
+	return encryption.ErrSealUnconfirmed
+}
+
+func TestCredentialsService_UpsertAppliesASaveWhoseDataKeyIsUnconfirmed(t *testing.T) {
+	ctx := t.Context()
+	registry := NewModelRegistry()
+	svc, err := NewCredentialsService(ctx, newCredentialsTestFactory(t), registry, unconfirmedCredentialStore{newFakeCredentialStore()}, nil, config.ResilienceConfig{})
+	require.NoError(t, err)
+
+	err = svc.Upsert(ctx, ManagedProviderCredential{Name: "my-openai", Type: "test", APIKeys: []string{"sk-test"}, Enabled: true})
+	require.ErrorIs(t, err, encryption.ErrSealUnconfirmed, "the caller learns the save is not confirmed")
+	assert.True(t, registry.Supports("my-openai/test-model"), "the saved credential is applied like any other save")
 }

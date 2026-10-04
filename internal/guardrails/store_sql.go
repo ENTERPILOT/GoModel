@@ -137,6 +137,18 @@ func (s *SQLStore) Delete(ctx context.Context, name string) error {
 	return nil
 }
 
+// swapConfig replaces a definition's config only while it still equals the
+// one in current, and reports whether it did. Secrets live inside the config,
+// so the whole document is compared; other columns are left alone.
+func (s *SQLStore) swapConfig(ctx context.Context, current, next Definition) (bool, error) {
+	affected, err := s.db.Exec(ctx, `UPDATE guardrail_definitions SET config = ? WHERE name = ? AND config = ?`,
+		string(next.Config), normalizeDefinitionName(current.Name), string(current.Config))
+	if err != nil {
+		return false, fmt.Errorf("swap guardrail config: %w", err)
+	}
+	return affected > 0, nil
+}
+
 func (s *SQLStore) Close() error {
 	return nil
 }

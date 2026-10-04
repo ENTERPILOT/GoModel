@@ -111,6 +111,25 @@ func (s *snapshot) leaves(owner *redirectEntry, target resolvedTarget, catalog C
 	return s.leafTargets(inner, catalog)
 }
 
+// declaredLeaves returns every concrete model declared behind entry,
+// descending enabled chained virtual models, independent of catalog
+// availability. Chains are acyclic by construction (see validateChains), so
+// this terminates.
+func (s *snapshot) declaredLeaves(entry *redirectEntry) []resolvedTarget {
+	out := make([]resolvedTarget, 0, len(entry.targets))
+	for _, target := range entry.targets {
+		inner, ok := s.chained(entry.vm.Source, target)
+		if !ok {
+			out = append(out, target)
+			continue
+		}
+		if inner.vm.Enabled {
+			out = append(out, s.declaredLeaves(inner)...)
+		}
+	}
+	return out
+}
+
 // representativeLeaf returns the first declared concrete model behind entry,
 // descending enabled chains, independent of catalog availability. It gives
 // callers a stable stand-in where no load-balancing state may advance. Chains

@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+
+	"github.com/enterpilot/gomodel/ext"
 )
 
 // readinessProbeTimeout caps each dependency check. It is intentionally shorter
@@ -21,9 +23,14 @@ const (
 	readyStatusDegraded = "degraded"
 	readyStatusNotReady = "not_ready"
 
-	readyComponentOK   = "ok"
-	readyComponentDown = "down"
+	readyComponentOK       = "ok"
+	readyComponentDegraded = "degraded"
+	readyComponentDown     = "down"
 )
+
+// coreReadyComponents are the component keys core reports itself; extension
+// health checkers cannot claim them.
+var coreReadyComponents = []string{"storage", "cache", "models"}
 
 // readinessResponse is the JSON body returned by GET /health/ready.
 type readinessResponse struct {
@@ -43,6 +50,10 @@ type readinessResponse struct {
 //     discovery has not succeeded and nothing is cached), requests fail with
 //     503 until it does. The response is degraded (HTTP 200) so the condition
 //     is visible without taking the instance out of rotation.
+//   - Extension health checkers report under their own name: degraded keeps
+//     HTTP 200, down makes the response not_ready (HTTP 503). They run
+//     concurrently under one shared deadline; one that does not answer in
+//     time reports degraded.
 //
 // Upstream provider reachability is deliberately excluded — a provider outage
 // must not pull a healthy gateway out of rotation. Use GET /health for liveness.
@@ -56,6 +67,10 @@ type readinessResponse struct {
 func (h *Handler) Ready(c *echo.Context) error {
 	components := map[string]string{}
 	status := readyStatusReady
+	// Extension checks run concurrently with the core probes under one shared
+	// deadline, so they add no latency beyond readinessProbeTimeout however
+	// many are registered.
+	waitExtensionHealth := startExtensionHealthChecks(c.Request().Context(), h.healthCheckers)
 
 	if h.storageProbe != nil {
 		if err := pingWithTimeout(c.Request().Context(), h.storageProbe); err != nil {
@@ -87,6 +102,23 @@ func (h *Handler) Ready(c *echo.Context) error {
 			}
 		} else {
 			components["models"] = readyComponentOK
+		}
+	}
+
+	extensionHealth := waitExtensionHealth()
+	for _, hc := range h.healthCheckers {
+		switch extensionHealth[hc.name] {
+		case ext.HealthOK:
+			components[hc.name] = readyComponentOK
+		case ext.HealthDown:
+			components[hc.name] = readyComponentDown
+			status = readyStatusNotReady
+			slog.Warn("readiness: extension reports down", "component", hc.name)
+		default:
+			components[hc.name] = readyComponentDegraded
+			if status == readyStatusReady {
+				status = readyStatusDegraded
+			}
 		}
 	}
 

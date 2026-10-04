@@ -14,6 +14,7 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/pluginapi"
 )
@@ -334,13 +335,16 @@ func (s *Service) commit(ctx context.Context, mutate func(map[string]Definition)
 	if err != nil {
 		return err
 	}
-	if err := persist(); err != nil {
+	// ErrSealUnconfirmed means the rows were written: swap like any other
+	// save, then report the error.
+	persistErr := persist()
+	if persistErr != nil && !errors.Is(persistErr, encryption.ErrSealUnconfirmed) {
 		s.discard(ctx, next)
-		return guardrailServiceError(action, err)
+		return guardrailServiceError(action, persistErr)
 	}
 	s.swap(ctx, next)
 	s.probeHealth(ctx, next)
-	return nil
+	return guardrailServiceError(action, persistErr)
 }
 
 // List returns all cached guardrail definitions sorted by name, secrets

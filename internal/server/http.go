@@ -119,10 +119,12 @@ type Config struct {
 	StorageProbe                    ReadinessProbe                         // Optional: primary storage connectivity check; failure makes /health/ready report not_ready (503)
 	CacheProbe                      ReadinessProbe                         // Optional: Redis cache connectivity check; failure makes /health/ready report degraded (200, non-blocking)
 	ModelInventory                  ModelInventory                         // Optional: model registry; no models with providers configured makes /health/ready report degraded (200, non-blocking)
+	HealthCheckers                  []ext.HealthChecker                    // Optional: extension components reported by /health/ready (degraded: 200, down: 503)
 	RequestRewriters                []ext.RequestRewriter                  // Optional: raw-body rewriters invoked on inference ingress (post-auth, pre-workflow-resolution)
 	OuterMiddleware                 []echo.MiddlewareFunc                  // Optional: extension middleware after sensitive URI redaction, before logging/recovery/limits
 	ExtraMiddleware                 []echo.MiddlewareFunc                  // Optional: extension middleware registered after audit, before gateway auth
 	ExtraRoutes                     []func(*echo.Echo)                     // Optional: extension route registration callbacks invoked after core routes
+	ExtraAdminRoutes                []func(*echo.Group)                    // Optional: extension callbacks mounted on the /admin group behind the admin gate
 	ExtraAuthSkipPaths              []string                               // Optional: extension paths appended to the auth skip list ("/*" suffix matches a prefix)
 	RequestAuthenticators           []ext.RequestAuthenticator             // Optional extension-provided request authentication mechanisms
 	Tagging                         *tagging.Service                       // Optional: request labelling based on configured tagging headers
@@ -228,6 +230,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		handler.storageProbe = cfg.StorageProbe
 		handler.cacheProbe = cfg.CacheProbe
 		handler.modelInventory = cfg.ModelInventory
+		handler.healthCheckers = validHealthCheckers(cfg.HealthCheckers)
 	}
 	if cfg != nil && cfg.EnabledPassthroughProviders != nil {
 		handler.setEnabledPassthroughProviders(cfg.EnabledPassthroughProviders)
@@ -554,7 +557,14 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 				return strings.HasSuffix(c.Request().URL.Path, "/live/logs")
 			},
 		})
-		cfg.AdminHandler.RegisterRoutes(e.Group("/admin", adminGate, adminGzip))
+		adminGroup := e.Group("/admin", adminGate, adminGzip)
+		cfg.AdminHandler.RegisterRoutes(adminGroup)
+		// Extension admin routes share the group, so they get exactly the
+		// built-in admin API's authorization. They are not mirrored onto the
+		// deprecated legacy alias below.
+		for _, register := range cfg.ExtraAdminRoutes {
+			register(adminGroup)
+		}
 
 		// Legacy alias under /admin/api/v1/* — accepted until adminLegacySunset
 		// to give operators a window to migrate. Responses carry Deprecation,

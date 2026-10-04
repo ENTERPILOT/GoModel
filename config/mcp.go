@@ -51,6 +51,11 @@ type MCPConfig struct {
 	// Servers maps stable server slugs to upstream definitions. Slugs become
 	// tool namespaces and URL segments, so they are restricted to [a-z0-9_-].
 	Servers map[string]MCPServerConfig `yaml:"servers"`
+
+	// VirtualServers maps names to curated subsets of Servers, each served at
+	// /mcp/{name}. Names share that path with server slugs, so they must not
+	// match one.
+	VirtualServers map[string]MCPVirtualServerConfig `yaml:"virtual_servers"`
 }
 
 // MCP tool discovery modes accepted in MCPConfig.ToolDiscovery.
@@ -264,6 +269,13 @@ func normalizeMCPConfig(cfg *MCPConfig) error {
 		}
 		cfg.AllowedOrigins = normalized
 	}
+	if err := normalizeMCPServers(cfg); err != nil {
+		return err
+	}
+	return normalizeMCPVirtualServers(cfg)
+}
+
+func normalizeMCPServers(cfg *MCPConfig) error {
 	if len(cfg.Servers) == 0 {
 		return nil
 	}

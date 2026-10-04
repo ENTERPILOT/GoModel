@@ -12,6 +12,7 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/encryption"
 )
 
 // ErrCredentialNotFound indicates a requested admin-managed provider
@@ -269,8 +270,11 @@ func (s *CredentialsService) Upsert(ctx context.Context, cred ManagedProviderCre
 		}
 	}
 
-	if err := s.store.Upsert(ctx, cred); err != nil {
-		return err
+	// ErrSealUnconfirmed means the row was written: apply it like any other
+	// save, then report the error.
+	saveErr := s.store.Upsert(ctx, cred)
+	if saveErr != nil && !errors.Is(saveErr, encryption.ErrSealUnconfirmed) {
+		return saveErr
 	}
 
 	if cred.Enabled {
@@ -287,7 +291,7 @@ func (s *CredentialsService) Upsert(ctx context.Context, cred ManagedProviderCre
 	if err := s.registry.Refresh(ctx); err != nil {
 		slog.Warn("provider credential saved but its model catalog refresh failed", "provider", name, "error", err)
 	}
-	return nil
+	return saveErr
 }
 
 // Delete removes one admin-managed provider credential and unregisters it

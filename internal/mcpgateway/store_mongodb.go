@@ -10,6 +10,8 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
+	"github.com/enterpilot/gomodel/internal/storage"
 )
 
 type mongoMCPServerDocument struct {
@@ -94,20 +96,7 @@ func (s *MongoDBStore) Get(ctx context.Context, name string) (*ManagedServer, er
 func (s *MongoDBStore) Upsert(ctx context.Context, server ManagedServer) error {
 	stampUpsert(&server)
 	update := bson.M{
-		"$set": bson.M{
-			"display_name":          server.DisplayName,
-			"url":                   server.URL,
-			"transport":             server.Transport,
-			"headers":               server.Headers,
-			"description":           server.Description,
-			"enabled":               server.Enabled,
-			"allowed_tools":         server.AllowedTools,
-			"disallowed_tools":      server.DisallowedTools,
-			"user_paths":            server.UserPaths,
-			"disallowed_user_paths": server.DisallowedUserPaths,
-			"tool_timeout_seconds":  server.ToolTimeoutSeconds,
-			"updated_at":            server.UpdatedAt,
-		},
+		"$set": mongoMCPServerFields(server),
 		"$setOnInsert": bson.M{
 			"created_at": server.CreatedAt,
 		},
@@ -119,6 +108,36 @@ func (s *MongoDBStore) Upsert(ctx context.Context, server ManagedServer) error {
 	return nil
 }
 
+func (s *MongoDBStore) Update(ctx context.Context, server ManagedServer) error {
+	stampUpsert(&server)
+	result, err := s.collection.UpdateOne(ctx, mongoMCPServerIDFilter{ID: strings.TrimSpace(server.Name)}, bson.M{"$set": mongoMCPServerFields(server)})
+	if err != nil {
+		return fmt.Errorf("update mcp server: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// mongoMCPServerFields is the $set document for one server's mutable fields.
+func mongoMCPServerFields(server ManagedServer) bson.M {
+	return bson.M{
+		"display_name":          server.DisplayName,
+		"url":                   server.URL,
+		"transport":             server.Transport,
+		"headers":               server.Headers,
+		"description":           server.Description,
+		"enabled":               server.Enabled,
+		"allowed_tools":         server.AllowedTools,
+		"disallowed_tools":      server.DisallowedTools,
+		"user_paths":            server.UserPaths,
+		"disallowed_user_paths": server.DisallowedUserPaths,
+		"tool_timeout_seconds":  server.ToolTimeoutSeconds,
+		"updated_at":            server.UpdatedAt,
+	}
+}
+
 func (s *MongoDBStore) Delete(ctx context.Context, name string) error {
 	result, err := s.collection.DeleteOne(ctx, mongoMCPServerIDFilter{ID: strings.TrimSpace(name)})
 	if err != nil {
@@ -128,6 +147,22 @@ func (s *MongoDBStore) Delete(ctx context.Context, name string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// swapHeaders replaces a server's header values only while they still hold
+// the values in current, and reports whether it did. Headers added since are
+// kept.
+func (s *MongoDBStore) swapHeaders(ctx context.Context, current, next ManagedServer) (bool, error) {
+	if len(current.Headers) == 0 {
+		return false, nil
+	}
+	match, update := storage.MongoSwapSubfields("headers", current.Headers, next.Headers)
+	match["_id"] = strings.TrimSpace(current.Name)
+	result, err := s.collection.UpdateOne(ctx, match, update)
+	if err != nil {
+		return false, fmt.Errorf("swap mcp server headers: %w", err)
+	}
+	return result.MatchedCount > 0, nil
 }
 
 func (s *MongoDBStore) Close() error {

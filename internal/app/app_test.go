@@ -643,12 +643,20 @@ func TestUsagePricingRecalculationConfigured(t *testing.T) {
 	}
 }
 
+type appTestHealthChecker struct{}
+
+func (appTestHealthChecker) Name() string { return "test" }
+
+func (appTestHealthChecker) CheckHealth(context.Context) ext.HealthStatus { return ext.HealthOK }
+
 func TestApplyExtensionsSnapshotsRegistryIntoServerConfig(t *testing.T) {
 	reg := &ext.Registry{}
 	reg.RegisterRewriter(&staticRewriter{name: "r1"})
 	reg.UseOuterMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 	reg.UseMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 	reg.RegisterRoutes(func(_ *echo.Echo) {})
+	reg.RegisterAdminRoutes(func(_ *echo.Group) {})
+	reg.RegisterHealthChecker(appTestHealthChecker{})
 	reg.AddPublicPaths("/sso/callback", "/sso/*")
 	reg.RegisterAuthenticator(&appTestAuthenticator{})
 
@@ -660,6 +668,8 @@ func TestApplyExtensionsSnapshotsRegistryIntoServerConfig(t *testing.T) {
 	assert.Len(t, serverCfg.OuterMiddleware, 1)
 	assert.Len(t, serverCfg.ExtraMiddleware, 1)
 	assert.Len(t, serverCfg.ExtraRoutes, 1)
+	assert.Len(t, serverCfg.ExtraAdminRoutes, 1)
+	assert.Len(t, serverCfg.HealthCheckers, 1)
 	assert.Len(t, serverCfg.ExtraAuthSkipPaths, 2)
 	assert.Len(t, serverCfg.RequestAuthenticators, 1)
 
@@ -670,6 +680,8 @@ func TestApplyExtensionsSnapshotsRegistryIntoServerConfig(t *testing.T) {
 	assert.Nil(t, empty.OuterMiddleware)
 	assert.Nil(t, empty.ExtraMiddleware)
 	assert.Nil(t, empty.ExtraRoutes)
+	assert.Nil(t, empty.ExtraAdminRoutes)
+	assert.Nil(t, empty.HealthCheckers)
 	assert.Nil(t, empty.ExtraAuthSkipPaths)
 	assert.Nil(t, empty.RequestAuthenticators)
 }

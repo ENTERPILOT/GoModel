@@ -133,6 +133,45 @@ allowlists are managed through the [user endpoints](#user-endpoints).
 
 Dashboard access only gates `/admin/*`. Model endpoints and the self-service [`GET /v1/usage`](/advanced/usage-api) endpoint stay available to every managed key.
 
+### Importing keys from LiteLLM
+
+`POST /admin/auth-keys/import` adds a LiteLLM virtual key by the SHA-256 hash
+LiteLLM stores for it, so clients keep sending the same `sk-...` token. GoModel
+never receives the token itself.
+
+```bash
+curl -X POST http://localhost:8080/admin/auth-keys/import \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "search-team",
+    "imported_from": "litellm",
+    "secret_hash": "<64-character hex token column from LiteLLM_VerificationToken>",
+    "redacted_value": "sk-...k6Hd",
+    "user_path": "/acme/search"
+  }'
+```
+
+It takes the same optional fields as `POST /admin/auth-keys` (`description`,
+`user_path`, `labels`, `allowed_models`, `dashboard_access`, `expires_at`) and
+answers `201` with the key, which then shows `"imported_from": "litellm"`.
+`redacted_value` is LiteLLM's `key_name`, such as `sk-...k6Hd`, and defaults to
+`sk-...`. An `allowed_models` entry naming a virtual model is replaced with the
+models it routes to, since LiteLLM key model lists name model groups and
+[allowlists](/features/users#selectors) match the resolved model. The list is
+resolved once: retargeting the virtual model later does not change the key.
+Importing a hash that already exists returns `409` with code
+`auth_key_exists`, so the import is safe to re-run.
+
+Tokens starting with `sk-` are checked only against imported keys, and
+`sk_gom_` tokens only against keys GoModel issued. Without imported keys,
+`sk-` tokens are rejected as before. Deactivate an imported key like any
+other. The import endpoint needs global admin access.
+
+An imported key is exactly as strong as the LiteLLM key. LiteLLM lets you pick
+custom keys such as `sk-1234`; replace those with a new GoModel key instead of
+importing them.
+
 ### Scoped admin access
 
 A managed key's `user_path` also bounds what it can administer. A key with
@@ -167,10 +206,10 @@ For a scoped admin:
 - Only user-path budgets and rate limits are visible and editable; label,
   provider, and model rules are gateway-wide.
 - Gateway-wide endpoints return `403` with code `admin_scope_denied`: provider
-  status and credentials, runtime settings and refresh, tagging settings,
-  virtual models, workflows, guardrails, MCP servers, pricing overrides, cache
-  overview, live logs, token throughput, pricing recalculation, budget and
-  rate-limit reset-all, and budget settings updates. The dashboard hides the
+  status and credentials, runtime settings and refresh, API key import,
+  tagging settings, virtual models, workflows, guardrails, MCP servers, pricing
+  overrides, cache overview, live logs, token throughput, pricing
+  recalculation, budget and rate-limit reset-all, and budget settings updates. The dashboard hides the
   matching pages and actions.
 
 Rows recorded without a user path (for example traffic sent with the master
