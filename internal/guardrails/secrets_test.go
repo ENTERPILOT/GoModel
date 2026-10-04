@@ -175,6 +175,32 @@ func TestServiceSecretWriter(t *testing.T) {
 	assert.Empty(t, recheck.Fields(), "a deleted guardrail is no longer watched")
 }
 
+// A writer-owned reference is only saved to the guardrail whose stored
+// definition holds it.
+func TestServiceUpsertRejectsWriterReferencesTheDefinitionDoesNotHold(t *testing.T) {
+	vault := &guardrailVault{values: map[string]string{}}
+	store := newTestStore()
+	service, secrets := newSecretsService(t, store, vault)
+	writer := &guardrailWriter{vault: vault}
+	secrets.SetWriter(writer)
+	ctx := t.Context()
+	owned := "${vault:written/pii/config.api_key}"
+
+	require.NoError(t, service.Upsert(ctx, secretDefinition("pii", "typed-key")))
+	require.NoError(t, service.Upsert(ctx, secretDefinition("pii", owned)), "the stored definition holds it")
+
+	err := service.Upsert(ctx, secretDefinition("copy", owned))
+	require.ErrorIs(t, err, config.ErrSecretNotHeld)
+	assert.True(t, IsValidationError(err), "%v", err)
+	assert.NotContains(t, store.definitions, "copy")
+
+	require.NoError(t, service.Delete(ctx, "pii"))
+	writer.deleted = nil
+	require.ErrorIs(t, service.Upsert(ctx, secretDefinition("pii", owned)), config.ErrSecretNotHeld)
+	assert.NotContains(t, store.definitions, "pii")
+	assert.Empty(t, writer.deleted)
+}
+
 // Configuration seeding persists the definition as given: a secret reference
 // reaches the database unresolved, and only the built instance sees the value.
 func TestServiceSeedStoresReferencesNotValues(t *testing.T) {

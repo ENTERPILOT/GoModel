@@ -269,3 +269,33 @@ func TestCredentialsService_FailedSaveKeepsReferencesTheStoredRowHolds(t *testin
 	assert.Empty(t, writer.deleted)
 	assert.Equal(t, []string{"${vault:written/w/api_keys[0]}"}, store.rows["w"].APIKeys)
 }
+
+// A writer-owned reference is only saved to the credential whose stored row
+// holds it: a stale form of a deleted credential, or a reference copied from
+// another one, may name a secret that was already released.
+func TestCredentialsService_RejectsWriterReferencesTheRowDoesNotHold(t *testing.T) {
+	vault := &secretVault{values: map[string]string{}}
+	store := newFakeCredentialStore()
+	svc, secrets, _ := newSecretsTestService(t, store, vault)
+	writer := &secretWriterFake{vault: vault}
+	secrets.SetWriter(writer)
+	ctx := t.Context()
+	owned := "${vault:written/w/api_keys[0]}"
+
+	require.NoError(t, svc.Upsert(ctx, ManagedProviderCredential{Name: "w", Type: "test", APIKeys: []string{"sk-typed"}, Enabled: true}))
+	require.NoError(t, svc.Upsert(ctx, ManagedProviderCredential{Name: "w", Type: "test", APIKeys: []string{owned, "sk-more"}, Enabled: true}), "the stored row holds it")
+
+	err := svc.Upsert(ctx, ManagedProviderCredential{Name: "copy", Type: "test", APIKeys: []string{owned}, Enabled: true})
+	require.ErrorIs(t, err, config.ErrSecretNotHeld)
+	fieldErr, ok := errors.AsType[*CredentialFieldError](err)
+	require.True(t, ok, "%v", err)
+	assert.Equal(t, CredentialFieldAPIKeys, fieldErr.Field)
+	assert.NotContains(t, store.rows, "copy")
+
+	require.NoError(t, svc.Delete(ctx, "w"))
+	writer.deleted = nil
+	err = svc.Upsert(ctx, ManagedProviderCredential{Name: "w", Type: "test", APIKeys: []string{owned}, Enabled: true})
+	require.ErrorIs(t, err, config.ErrSecretNotHeld)
+	assert.NotContains(t, store.rows, "w")
+	assert.Empty(t, writer.deleted)
+}

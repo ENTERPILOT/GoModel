@@ -227,7 +227,11 @@ save can still fail after the write.
 When an entity is deleted, or a field's owned reference is replaced, core
 calls `DeleteSecret` for each reference the writer owns, after the database
 commit, best effort (a failure is logged). A save that fails after the write
-deletes what it wrote. Core ships no writer.
+deletes what it wrote. A save is rejected when it holds a reference the
+writer owns that the entity's stored row does not: one read before the row was
+replaced or deleted, or copied from another entity, may name a deleted secret.
+Saves and deletes of one entity kind are serialized from reading the stored
+row through deleting the secrets it held. Core ships no writer.
 
 ### 5. Rotation without restart
 

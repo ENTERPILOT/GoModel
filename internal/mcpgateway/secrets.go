@@ -53,15 +53,16 @@ func (s *Service) resolveServer(ctx context.Context, row ManagedServer) (ServerS
 // storeServerSecrets writes every literal header value of server through the
 // generation's SecretWriter, when one is registered, replacing it with the
 // returned reference. It returns the references it created, which the caller
-// releases if the save then fails. If a write fails, the references already
-// created are released, except those in keep: the values of the row still
-// stored, which a writer that reuses a reference may have returned again.
+// releases if the save then fails. keep holds the values of the row still
+// stored: a writer-owned reference it does not hold is rejected, and if a
+// write fails the references already created are released, except those in
+// keep, which a writer that reuses a reference may have returned again.
 func (s *Service) storeServerSecrets(ctx context.Context, server *ManagedServer, keep []string) ([]string, error) {
 	headers := maps.Clone(server.Headers)
 	var written []string
 	for _, name := range slices.Sorted(maps.Keys(headers)) {
 		key := config.SecretKey{Entity: ServerSecretEntity, ID: server.Name, Field: headerSecretField(name)}
-		stored, err := s.secrets.StoreSecret(ctx, key, headers[name])
+		stored, err := s.secrets.StoreSecret(ctx, key, headers[name], keep)
 		if err != nil {
 			s.releaseSecrets(ctx, server.Name, written, keep)
 			return nil, err

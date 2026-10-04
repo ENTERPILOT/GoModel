@@ -46,7 +46,7 @@ func (w *fakeSecretWriter) OwnsReference(reference string) bool {
 }
 
 func TestStoreSecretWithoutWriterKeepsValue(t *testing.T) {
-	stored, err := NewSecrets().StoreSecret(t.Context(), SecretKey{Entity: "e", ID: "id", Field: "f"}, "sk-literal")
+	stored, err := NewSecrets().StoreSecret(t.Context(), SecretKey{Entity: "e", ID: "id", Field: "f"}, "sk-literal", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "sk-literal", stored)
 }
@@ -57,13 +57,13 @@ func TestStoreSecretWritesLiteralsOnly(t *testing.T) {
 	secrets.SetWriter(writer)
 	key := SecretKey{Entity: "provider_credentials", ID: "openai", Field: "api_keys[0]"}
 
-	stored, err := secrets.StoreSecret(t.Context(), key, "sk-literal")
+	stored, err := secrets.StoreSecret(t.Context(), key, "sk-literal", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "${fake:provider_credentials/openai/api_keys[0]}", stored)
 	assert.Equal(t, []SecretKey{key}, writer.keys)
 
 	for _, value := range []string{"", "${env:KEY}", "Bearer ${env:KEY}"} {
-		stored, err = secrets.StoreSecret(t.Context(), key, value)
+		stored, err = secrets.StoreSecret(t.Context(), key, value, nil)
 		require.NoError(t, err)
 		assert.Equal(t, value, stored)
 	}
@@ -73,13 +73,44 @@ func TestStoreSecretWritesLiteralsOnly(t *testing.T) {
 func TestStoreSecretErrors(t *testing.T) {
 	secrets := NewSecrets()
 	secrets.SetWriter(&fakeSecretWriter{writeErr: errors.New("backend down")})
-	_, err := secrets.StoreSecret(t.Context(), SecretKey{Entity: "e", ID: "id", Field: "f"}, "s3cret")
+	_, err := secrets.StoreSecret(t.Context(), SecretKey{Entity: "e", ID: "id", Field: "f"}, "s3cret", nil)
 	require.ErrorContains(t, err, "backend down")
 	assert.NotContains(t, err.Error(), "s3cret")
 
 	secrets.SetWriter(&fakeSecretWriter{reference: "not-a-reference"})
-	_, err = secrets.StoreSecret(t.Context(), SecretKey{Entity: "e", ID: "id", Field: "f"}, "s3cret")
+	_, err = secrets.StoreSecret(t.Context(), SecretKey{Entity: "e", ID: "id", Field: "f"}, "s3cret", nil)
 	require.ErrorContains(t, err, "did not return")
+}
+
+func TestStoreSecretRejectsOwnedReferencesTheEntityDoesNotHold(t *testing.T) {
+	writer := &fakeSecretWriter{}
+	secrets := NewSecrets()
+	key := SecretKey{Entity: "mcp_servers", ID: "docs", Field: "headers.Authorization"}
+	owned := "${fake:mcp_servers/docs/headers.Authorization}"
+
+	stored, err := secrets.StoreSecret(t.Context(), key, owned, nil)
+	require.NoError(t, err, "without a writer no reference is owned")
+	assert.Equal(t, owned, stored)
+
+	secrets.SetWriter(writer)
+	stored, err = secrets.StoreSecret(t.Context(), key, owned, []string{"literal", owned})
+	require.NoError(t, err, "the stored row still holds it")
+	assert.Equal(t, owned, stored)
+
+	stored, err = secrets.StoreSecret(t.Context(), key, "${env:HAND}", nil)
+	require.NoError(t, err, "a reference the writer does not own is the operator's")
+	assert.Equal(t, "${env:HAND}", stored)
+
+	for _, held := range [][]string{nil, {"${fake:mcp_servers/docs/other}"}} {
+		_, err = secrets.StoreSecret(t.Context(), key, owned, held)
+		require.ErrorIs(t, err, ErrSecretNotHeld)
+		secretErr, ok := errors.AsType[*SecretError](err)
+		require.True(t, ok)
+		assert.Equal(t, "mcp_servers.docs.headers.Authorization", secretErr.Field)
+		assert.Equal(t, "fake", secretErr.Scheme)
+		assert.NotContains(t, err.Error(), "mcp_servers/docs")
+	}
+	assert.Empty(t, writer.keys)
 }
 
 func TestReleaseSecretsDeletesOwnedReplacedReferences(t *testing.T) {

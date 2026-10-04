@@ -297,8 +297,8 @@ func (s *CredentialsService) Delete(ctx context.Context, name string) error {
 		return err
 	}
 	s.remove(name)
-	s.applyMu.Unlock()
 	s.releaseSecrets(ctx, name, credentialSecretValues(previous), nil)
+	s.applyMu.Unlock()
 	// See the matching comment in Upsert: a Refresh failure here reflects a
 	// remaining provider's own health, not whether the delete succeeded.
 	if err := s.registry.Refresh(ctx); err != nil {

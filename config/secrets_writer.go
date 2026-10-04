@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 )
 
 // SecretKey names one secret field of a dashboard-managed entity, for a
@@ -61,14 +63,31 @@ func (s *Secrets) secretWriter() SecretWriter {
 	return s.writer
 }
 
+// ErrSecretNotHeld reports a writer-owned reference saved to an entity whose
+// stored row does not hold it. It was read from a row that has since been
+// replaced or deleted, or it belongs to another entity: either way its secret
+// may already be deleted, or be deleted with that other entity.
+var ErrSecretNotHeld = errors.New("refers to a stored secret this entity no longer holds; reload it and save again")
+
 // StoreSecret returns what to persist for a secret field saved through the
 // admin API. With a writer registered, a non-empty literal value is written
 // through it and the reference it returns is persisted instead. A value that
 // is empty or already holds a reference is returned unchanged, and so is
 // every value when no writer is registered.
-func (s *Secrets) StoreSecret(ctx context.Context, key SecretKey, value string) (string, error) {
+//
+// held lists the values of the entity as currently stored. A reference the
+// writer owns that held does not hold is rejected with a *SecretError
+// wrapping ErrSecretNotHeld, so a save never persists a reference whose
+// secret was released.
+func (s *Secrets) StoreSecret(ctx context.Context, key SecretKey, value string, held []string) (string, error) {
 	w := s.secretWriter()
-	if w == nil || value == "" || HasSecretReference(value) {
+	if w == nil || value == "" {
+		return value, nil
+	}
+	if HasSecretReference(value) {
+		if w.OwnsReference(value) && !slices.Contains(held, value) {
+			return "", &SecretError{Field: key.Entity + "." + key.ID + "." + key.Field, Scheme: referenceScheme(value), Err: ErrSecretNotHeld}
+		}
 		return value, nil
 	}
 	reference, err := w.WriteSecret(ctx, key, value)
@@ -112,4 +131,15 @@ func (s *Secrets) ReleaseSecrets(ctx context.Context, previous, current []string
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// referenceScheme returns the scheme of value, a single ${scheme:reference},
+// or "" when it is not one.
+func referenceScheme(value string) string {
+	inner, ok := strings.CutPrefix(value, "${")
+	if !ok {
+		return ""
+	}
+	scheme, _, _ := parseSecretReference(strings.TrimSuffix(inner, "}"))
+	return scheme
 }

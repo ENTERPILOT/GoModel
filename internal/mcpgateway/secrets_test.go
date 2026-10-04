@@ -3,9 +3,11 @@ package mcpgateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -246,4 +248,107 @@ func TestServiceUpsertReleasesReplacedSecretsWhenApplyFails(t *testing.T) {
 	err := service.Upsert(ctx, disabledServer("github", map[string]string{"X-Other": "${env:HOME}"}))
 	require.ErrorContains(t, err, "saved but not applied")
 	assert.Equal(t, []string{"${vault:written/github/headers.Authorization}"}, writer.deleted)
+}
+
+// A writer-owned reference is only saved to the server whose stored row holds
+// it: one read from a row since replaced or deleted, or copied from another
+// server, may name a secret that was already released.
+func TestServiceUpsertRejectsWriterReferencesTheRowDoesNotHold(t *testing.T) {
+	vault := &mapVault{values: map[string]string{}}
+	store := newMemStore()
+	service, secrets := newSecretsTestService(t, store, vault)
+	writer := &headerWriter{vault: vault}
+	secrets.SetWriter(writer)
+	ctx := t.Context()
+	owned := "${vault:written/github/headers.Authorization}"
+
+	require.NoError(t, service.Upsert(ctx, disabledServer("github", map[string]string{"Authorization": "typed"})))
+	require.NoError(t, service.Upsert(ctx, disabledServer("github", map[string]string{"Authorization": owned, "X-Region": "eu"})), "the stored row holds it")
+
+	err := service.Upsert(ctx, disabledServer("copy", map[string]string{"Authorization": owned}))
+	require.ErrorIs(t, err, config.ErrSecretNotHeld)
+	secretErr, ok := errors.AsType[*config.SecretError](err)
+	require.True(t, ok)
+	assert.Equal(t, "mcp_servers.copy.headers.Authorization", secretErr.Field)
+	assert.NotContains(t, store.rows, "copy")
+
+	require.NoError(t, service.Delete(ctx, "github"))
+	writer.deleted = nil
+	err = service.Upsert(ctx, disabledServer("github", map[string]string{"Authorization": owned}))
+	require.ErrorIs(t, err, config.ErrSecretNotHeld, "the stale form of a deleted server is not saved")
+	assert.NotContains(t, store.rows, "github")
+	assert.Empty(t, writer.deleted)
+}
+
+// gatedDeleteStore blocks Delete until release is closed.
+type gatedDeleteStore struct {
+	*memStore
+	deleting chan struct{}
+	release  chan struct{}
+}
+
+func (s *gatedDeleteStore) Delete(ctx context.Context, name string) error {
+	close(s.deleting)
+	<-s.release
+	return s.memStore.Delete(ctx, name)
+}
+
+// countingWriter returns a distinct reference per write.
+type countingWriter struct {
+	headerWriter
+	mu     sync.Mutex
+	writes int
+}
+
+func (w *countingWriter) WriteSecret(_ context.Context, key config.SecretKey, value string) (string, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.writes++
+	reference := fmt.Sprintf("written/%s/%s@%d", key.ID, key.Field, w.writes)
+	w.vault.set(reference, value)
+	return "${vault:" + reference + "}", nil
+}
+
+func (w *countingWriter) DeleteSecret(_ context.Context, reference string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.deleted = append(w.deleted, reference)
+	return nil
+}
+
+// A save racing a delete never leaves a stored row pointing at a released
+// secret, nor a written secret that no row holds.
+func TestServiceSerializesSavesAndDeletesThroughSecretCleanup(t *testing.T) {
+	vault := &mapVault{values: map[string]string{}}
+	store := &gatedDeleteStore{memStore: newMemStore(), deleting: make(chan struct{}), release: make(chan struct{})}
+	service, secrets := newSecretsTestService(t, store, vault)
+	writer := &countingWriter{vault: vault}
+	secrets.SetWriter(writer)
+	ctx := t.Context()
+	require.NoError(t, service.Upsert(ctx, disabledServer("github", map[string]string{"Authorization": "first"})))
+
+	deleted := make(chan error, 1)
+	go func() { deleted <- service.Delete(ctx, "github") }()
+	<-store.deleting
+
+	saved := make(chan error, 1)
+	go func() {
+		saved <- service.Upsert(ctx, disabledServer("github", map[string]string{"Authorization": "second"}))
+	}()
+	select {
+	case err := <-saved:
+		// Only reachable without serialization; the checks below then fail.
+		saved <- err
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(store.release)
+	require.NoError(t, <-deleted)
+	require.NoError(t, <-saved)
+
+	row, ok := store.rows["github"]
+	require.True(t, ok, "the save follows the delete")
+	assert.Equal(t, "${vault:written/github/headers.Authorization@2}", row.Headers["Authorization"])
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+	assert.Equal(t, []string{"${vault:written/github/headers.Authorization@1}"}, writer.deleted)
 }

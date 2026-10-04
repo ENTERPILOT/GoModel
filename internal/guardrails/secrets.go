@@ -2,6 +2,7 @@ package guardrails
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"maps"
 	"slices"
@@ -53,10 +54,11 @@ func (s *Service) resolveDefinition(ctx context.Context, schema []pluginapi.Fiel
 // storeDefinitionSecrets writes every literal secret of def's config through
 // the generation's SecretWriter, when one is registered, replacing it with
 // the returned reference. It returns the references it created, which the
-// caller releases if the save then fails. If a write fails, the references
-// already created are released, except those in keep: the values of the
-// definition still stored, which a writer that reuses a reference may have
-// returned again.
+// caller releases if the save then fails. keep holds the values of the
+// definition still stored: a writer-owned reference it does not hold is
+// rejected, and if a write fails the references already created are
+// released, except those in keep, which a writer that reuses a reference may
+// have returned again.
 func (s *Service) storeDefinitionSecrets(ctx context.Context, def *Definition, keep []string) ([]string, error) {
 	entry, ok := s.catalog.Lookup(def.Type)
 	if !ok {
@@ -64,7 +66,7 @@ func (s *Service) storeDefinitionSecrets(ctx context.Context, def *Definition, k
 	}
 	var written []string
 	stored, err := plugins.MapSecrets(entry.Manifest.ConfigSchema, def.Config, func(key, value string) (string, error) {
-		reference, err := s.secrets.StoreSecret(ctx, config.SecretKey{Entity: DefinitionSecretEntity, ID: def.Name, Field: configSecretField(key)}, value)
+		reference, err := s.secrets.StoreSecret(ctx, config.SecretKey{Entity: DefinitionSecretEntity, ID: def.Name, Field: configSecretField(key)}, value, keep)
 		if err == nil && reference != value {
 			written = append(written, reference)
 		}
@@ -72,6 +74,9 @@ func (s *Service) storeDefinitionSecrets(ctx context.Context, def *Definition, k
 	})
 	if err != nil {
 		s.releaseSecrets(ctx, def.Name, written, keep)
+		if errors.Is(err, config.ErrSecretNotHeld) {
+			return nil, newValidationError(err.Error(), err)
+		}
 		return nil, err
 	}
 	def.Config = stored

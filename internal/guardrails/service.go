@@ -71,9 +71,14 @@ type Service struct {
 	secrets *config.Secrets
 
 	refreshMu sync.Mutex
-	mu        sync.RWMutex
-	snapshot  serviceSnapshot
-	retired   []retiredInstance
+	// mutateMu serializes admin saves and deletes from reading the stored
+	// definition through releasing the secrets it held, so none releases a
+	// secret another one has just stored, or stores one another has just
+	// released. It is taken before refreshMu.
+	mutateMu sync.Mutex
+	mu       sync.RWMutex
+	snapshot serviceSnapshot
+	retired  []retiredInstance
 	// retireAfter is the delay before a replaced instance is closed.
 	retireAfter time.Duration
 	// now is the clock; tests replace it.
@@ -309,6 +314,9 @@ func (s *Service) Upsert(ctx context.Context, definition Definition) error {
 	if err != nil {
 		return err
 	}
+	s.mutateMu.Lock()
+	defer s.mutateMu.Unlock()
+
 	if stored, ok := s.Get(identity.Name); ok && stored.Type == identity.Type {
 		if entry, ok := s.catalog.Lookup(identity.Type); ok {
 			identity.Config = plugins.MergeSecrets(entry.Manifest.ConfigSchema, identity.Config, s.storedConfig(identity.Name))
@@ -342,6 +350,9 @@ func (s *Service) Delete(ctx context.Context, name string) error {
 	if name == "" {
 		return newValidationError("guardrail name is required", nil)
 	}
+	s.mutateMu.Lock()
+	defer s.mutateMu.Unlock()
+
 	previous := s.storedSecretValues(name)
 	err := s.commit(ctx, func(next map[string]Definition) error {
 		delete(next, name)

@@ -52,6 +52,10 @@ type Service struct {
 	// reloadMu serializes reloads, so a slower one never applies an older
 	// server set over a newer one.
 	reloadMu sync.Mutex
+	// mutateMu serializes admin saves and deletes from reading the stored
+	// row through releasing the secrets it held, so none releases a secret
+	// another one has just stored, or stores one another has just released.
+	mutateMu sync.Mutex
 	// recorded names the admin-managed servers whose references rotation
 	// watches.
 	recorded map[string]struct{}
@@ -252,6 +256,23 @@ func (s *Service) Upsert(ctx context.Context, server ManagedServer) error {
 	if err := server.Validate(); err != nil {
 		return err
 	}
+	if err := s.persist(ctx, &server); err != nil {
+		return err
+	}
+	if err := s.Reload(ctx); err != nil {
+		// The row is persisted; only applying it to the running manager
+		// failed. Say so — a retry or restart picks the row up.
+		return fmt.Errorf("mcp server %q was saved but not applied: %w", server.Name, err)
+	}
+	return nil
+}
+
+// persist stores server in place of the row it replaces and releases the
+// secrets that row held and server no longer does.
+func (s *Service) persist(ctx context.Context, server *ManagedServer) error {
+	s.mutateMu.Lock()
+	defer s.mutateMu.Unlock()
+
 	previous, err := s.store.Get(ctx, server.Name)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return err
@@ -260,12 +281,12 @@ func (s *Service) Upsert(ctx context.Context, server ManagedServer) error {
 	// so the row is stored with references only; then every reference must
 	// resolve before anything is persisted.
 	kept := headerValues(previous)
-	written, err := s.storeServerSecrets(ctx, &server, kept)
+	written, err := s.storeServerSecrets(ctx, server, kept)
 	if err != nil {
 		return err
 	}
-	if _, _, err = s.resolveServer(ctx, server); err == nil {
-		err = s.store.Upsert(ctx, server)
+	if _, _, err = s.resolveServer(ctx, *server); err == nil {
+		err = s.store.Upsert(ctx, *server)
 	}
 	if err != nil {
 		// The stored row is unchanged, so whatever it holds stays.
@@ -274,12 +295,7 @@ func (s *Service) Upsert(ctx context.Context, server ManagedServer) error {
 	}
 	// The new row is committed, so what it replaced is released even if
 	// applying it fails: a later edit only sees the new row.
-	s.releaseSecrets(ctx, server.Name, kept, headerValues(&server))
-	if err := s.Reload(ctx); err != nil {
-		// The row is persisted; only applying it to the running manager
-		// failed. Say so — a retry or restart picks the row up.
-		return fmt.Errorf("mcp server %q was saved but not applied: %w", server.Name, err)
-	}
+	s.releaseSecrets(ctx, server.Name, kept, headerValues(server))
 	return nil
 }
 
@@ -301,6 +317,20 @@ func (s *Service) Delete(ctx context.Context, name string) error {
 	if s.IsManaged(name) {
 		return fmt.Errorf("mcp server %q is managed by config/env and is read-only", name)
 	}
+	if err := s.remove(ctx, name); err != nil {
+		return err
+	}
+	if err := s.Reload(ctx); err != nil {
+		return fmt.Errorf("mcp server %q was deleted but the running set was not updated: %w", name, err)
+	}
+	return nil
+}
+
+// remove deletes the stored row name and releases the secrets it held.
+func (s *Service) remove(ctx context.Context, name string) error {
+	s.mutateMu.Lock()
+	defer s.mutateMu.Unlock()
+
 	previous, err := s.store.Get(ctx, name)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return err
@@ -309,9 +339,6 @@ func (s *Service) Delete(ctx context.Context, name string) error {
 		return err
 	}
 	s.releaseSecrets(ctx, name, headerValues(previous), nil)
-	if err := s.Reload(ctx); err != nil {
-		return fmt.Errorf("mcp server %q was deleted but the running set was not updated: %w", name, err)
-	}
 	return nil
 }
 
