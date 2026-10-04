@@ -141,13 +141,6 @@ func (s *Secrets) Changes() <-chan struct{} {
 	return s.notifier().C()
 }
 
-// ResolveField is Resolve for a value found at field, a configuration path or
-// environment variable name. Errors name the field, and a value that held a
-// reference is remembered so Recheck can notice when it rotates.
-func (s *Secrets) ResolveField(ctx context.Context, field, value string) (string, error) {
-	return s.resolveField(ctx, field, value)
-}
-
 // SecretRecheck is the outcome of re-resolving every recorded reference. It
 // holds the new values of the fields that changed only until it is dropped.
 type SecretRecheck struct {

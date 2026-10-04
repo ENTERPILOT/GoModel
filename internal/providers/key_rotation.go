@@ -11,27 +11,29 @@ import (
 	"github.com/enterpilot/gomodel/config"
 )
 
-// keyRotation keeps what Init resolved its providers from, so a rotated
-// secret is re-applied through the very same resolution (YAML keys, env
-// overlay, normalization, filtering) rather than a second copy of its rules,
-// and the outcome is swapped into the live keyrings.
+// keyRotation keeps the provider map Init built its providers from, after
+// the env overlay and secret resolution, so a rotated key is re-applied
+// through the very same normalization and filtering rather than a second copy
+// of their rules, and the outcome is swapped into the live keyrings.
 //
-// Its inputs hold resolved values, as the provider configs already do; they
-// live for the generation like every other resolved credential.
+// Because references are resolved after the env overlay, every provider key
+// is recorded as providers.<name>.api_key or providers.<name>.api_keys[i],
+// whether config.yaml or an environment variable supplied it.
+//
+// It holds resolved values, as the provider configs already do; they live for
+// the generation like every other resolved credential.
 type keyRotation struct {
 	mu         sync.Mutex
-	raw        map[string]config.RawProviderConfig
-	environ    []string // provider env vars only, references resolved
+	merged     map[string]config.RawProviderConfig
 	discovery  map[string]DiscoveryConfig
 	resilience config.ResilienceConfig
 	providers  map[string]ProviderConfig
 	keyrings   map[string]*Keyring // registered providers only
 }
 
-func newKeyRotation(raw map[string]config.RawProviderConfig, environ []string, discovery map[string]DiscoveryConfig, resilience config.ResilienceConfig, providers map[string]ProviderConfig, keyrings map[string]*Keyring) *keyRotation {
+func newKeyRotation(merged map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig, resilience config.ResilienceConfig, providers map[string]ProviderConfig, keyrings map[string]*Keyring) *keyRotation {
 	return &keyRotation{
-		raw:        cloneRawProviders(raw),
-		environ:    slices.DeleteFunc(slices.Clone(environ), func(entry string) bool { return !isProviderEnvEntry(entry, discovery) }),
+		merged:     cloneRawProviders(merged),
 		discovery:  discovery,
 		resilience: resilience,
 		providers:  maps.Clone(providers),
@@ -43,8 +45,7 @@ func newKeyRotation(raw map[string]config.RawProviderConfig, environ []string, d
 // InitResult.PlanKeyRotation and install it with Apply.
 type KeyRotation struct {
 	state     *keyRotation
-	raw       map[string]config.RawProviderConfig
-	environ   []string
+	merged    map[string]config.RawProviderConfig
 	providers map[string]ProviderConfig
 	swaps     []string
 }
@@ -71,7 +72,7 @@ func (k *KeyRotation) Apply() {
 	for _, name := range k.swaps {
 		s.keyrings[name].Replace(k.providers[name].APIKeys...)
 	}
-	s.raw, s.environ, s.providers = k.raw, k.environ, k.providers
+	s.merged, s.providers = k.merged, k.providers
 }
 
 // PlanKeyRotation works out whether the fields a secret recheck found changed
@@ -80,9 +81,8 @@ func (k *KeyRotation) Apply() {
 // not a provider API key, a provider would gain or lose its last key, or the
 // change alters anything about a provider besides its keys.
 //
-// Provider keys come from providers.<name>.api_key, providers.<name>.api_keys[i],
-// and <PROVIDER>_API_KEY[_<n>] environment variables; the environment overlay
-// decides which provider a variable lands on, exactly as at startup.
+// Provider keys are the fields providers.<name>.api_key and
+// providers.<name>.api_keys[i], wherever their value came from.
 func (r *InitResult) PlanKeyRotation(recheck *config.SecretRecheck) *KeyRotation {
 	if r == nil || r.keys == nil {
 		return nil
@@ -94,21 +94,20 @@ func (s *keyRotation) plan(recheck *config.SecretRecheck) *KeyRotation {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	raw := maps.Clone(s.raw)
-	environ := slices.Clone(s.environ)
+	merged := maps.Clone(s.merged)
 	for _, field := range recheck.Fields() {
 		value, _ := recheck.Value(field)
-		if !setRawProviderKey(raw, field, value) && !s.setEnvProviderKey(environ, field, value) {
+		if !setProviderKey(merged, field, value) {
 			return nil
 		}
 	}
 
-	next, _ := resolveProviders(raw, s.resilience, s.discovery, environ)
+	next, _ := finishProviders(merged, s.resilience, s.discovery)
 	swaps, ok := s.keySwaps(next)
 	if !ok {
 		return nil
 	}
-	return &KeyRotation{state: s, raw: raw, environ: environ, providers: next, swaps: swaps}
+	return &KeyRotation{state: s, merged: merged, providers: next, swaps: swaps}
 }
 
 // keySwaps lists the providers whose keys differ in next, or reports false
@@ -139,9 +138,9 @@ func (s *keyRotation) keySwaps(next map[string]ProviderConfig) ([]string, bool) 
 	return swaps, true
 }
 
-// setRawProviderKey writes value into raw at a providers.<name>.api_key or
+// setProviderKey writes value into raw at a providers.<name>.api_key or
 // providers.<name>.api_keys[i] path, reporting false for any other path.
-func setRawProviderKey(raw map[string]config.RawProviderConfig, field, value string) bool {
+func setProviderKey(raw map[string]config.RawProviderConfig, field, value string) bool {
 	rest, ok := strings.CutPrefix(field, "providers.")
 	if !ok {
 		return false
@@ -168,21 +167,6 @@ func setRawProviderKey(raw map[string]config.RawProviderConfig, field, value str
 	p.APIKeys[i] = value
 	raw[head] = p
 	return true
-}
-
-// setEnvProviderKey replaces the value of the provider API key variable named
-// field, reporting false when field is not one.
-func (s *keyRotation) setEnvProviderKey(environ []string, field, value string) bool {
-	if !isProviderEnvAPIKey(field, s.discovery) {
-		return false
-	}
-	for i, entry := range environ {
-		if key, _, _ := strings.Cut(entry, "="); key == field {
-			environ[i] = field + "=" + value
-			return true
-		}
-	}
-	return false
 }
 
 func cloneRawProviders(raw map[string]config.RawProviderConfig) map[string]config.RawProviderConfig {
