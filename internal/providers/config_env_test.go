@@ -121,7 +121,7 @@ func TestApplyProviderEnvVars_BareTypeEnvVarsAgainstRenamedProviders(t *testing.
 			}
 			logs := captureSlog(t)
 
-			got := applyProviderEnvVars(tt.raw, testDiscoveryConfigs)
+			got, _ := applyProviderEnvVars(tt.raw, testDiscoveryConfigs)
 
 			for name, want := range tt.want {
 				p, ok := got[name]
@@ -154,7 +154,7 @@ func TestApplyProviderEnvVars_ProxyURL(t *testing.T) {
 	t.Setenv("OPENAI_EU_API_KEY", "sk-eu")
 	t.Setenv("OPENAI_EU_PROXY_URL", "socks5://user:pass@10.0.0.1:1080")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{
+	got, _ := applyProviderEnvVars(map[string]config.RawProviderConfig{
 		"anthropic": {Type: "anthropic", APIKey: "sk-ant", ProxyURL: "http://yaml-proxy:3128"},
 	}, testDiscoveryConfigs)
 

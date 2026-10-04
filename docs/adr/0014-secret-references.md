@@ -133,6 +133,11 @@ Resolution order for one generation:
    value that an environment variable replaces, an environment variable the
    merge ignores, and a provider skipped for missing credentials are never
    looked up. Resolved values are data: a secret containing `${` is kept.
+   API keys keep their source through key normalization: a key is resolved
+   and reported under its `config.yaml` path
+   (`providers.openai.api_keys[1]`) or the name of the environment variable
+   that set it (`OPENAI_API_KEY_2`), and identical references are looked up
+   once.
 
 Any reference that is still unresolved after step 3 or 4 stops the
 generation with an error naming the field and the scheme, never the value.
