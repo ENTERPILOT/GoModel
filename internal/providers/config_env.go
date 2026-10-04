@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"log/slog"
 	"maps"
 	"math"
@@ -17,13 +18,21 @@ import (
 // os.Environ-style KEY=value entries, onto the raw YAML map. Env var values
 // always win over YAML values for the same provider name.
 //
+// A setting holding "${" (models, model filters, booleans, backend, ...) is
+// resolved with secrets, under its variable name, only when the overlay
+// applies its group, so a variable the overlay ignores is never looked up.
+// Credentials (see credentialEnvFields) are left for resolveProviders.
+//
 // The second result holds, per provider, the key set env vars supplied, each
 // key labelled with its variable name. A provider without an entry kept its
 // config.yaml keys.
-func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig, environ []string) (map[string]config.RawProviderConfig, map[string][]sourcedKey) {
+func applyProviderEnvVars(ctx context.Context, secrets *config.Secrets, raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig, environ []string) (map[string]config.RawProviderConfig, map[string][]sourcedKey, error) {
 	overlay := &providerOverlay{
 		providers: make(map[string]config.RawProviderConfig, len(raw)),
 		envKeys:   make(map[string][]sourcedKey),
+		resolve: func(name, value string) (string, error) {
+			return resolveSetting(ctx, secrets, name, value)
+		},
 	}
 	maps.Copy(overlay.providers, raw)
 
@@ -33,19 +42,23 @@ func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map
 			envGroups := collectProviderEnvValues(source.Prefix, spec, environ)
 
 			if values, ok := envGroups[""]; ok {
-				applyUnsuffixedProviderEnvVars(overlay, providerType, spec, source, values)
+				if err := applyUnsuffixedProviderEnvVars(overlay, providerType, spec, source, values); err != nil {
+					return nil, nil, err
+				}
 			}
 
 			for _, suffix := range sortedProviderEnvSuffixes(envGroups) {
 				if suffix == "" {
 					continue
 				}
-				applySuffixedProviderEnvVars(overlay, providerType, spec, source, suffix, envGroups[suffix])
+				if err := applySuffixedProviderEnvVars(overlay, providerType, spec, source, suffix, envGroups[suffix]); err != nil {
+					return nil, nil, err
+				}
 			}
 		}
 	}
 
-	return overlay.providers, overlay.envKeys
+	return overlay.providers, overlay.envKeys, nil
 }
 
 // providerOverlay is the provider map being built by applyProviderEnvVars and
@@ -53,15 +66,23 @@ func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map
 type providerOverlay struct {
 	providers map[string]config.RawProviderConfig
 	envKeys   map[string][]sourcedKey
+	// resolve resolves one setting, labelled with its variable name.
+	resolve func(name, value string) (string, error)
 }
 
-// set stores cfg, built from values, under name, and records the env keys
-// values supplied, if any.
-func (o *providerOverlay) set(name string, cfg config.RawProviderConfig, values providerEnvValues) {
-	o.providers[name] = cfg
+// apply resolves the pending settings of values and, unless the group is then
+// empty, stores build(values) under name and records the env keys values
+// supplied, if any.
+func (o *providerOverlay) apply(name string, values providerEnvValues, build func(providerEnvValues) config.RawProviderConfig) error {
+	values, err := values.resolveSettings(o.resolve)
+	if err != nil || values.empty() {
+		return err
+	}
+	o.providers[name] = build(values)
 	if keys := values.sourcedAPIKeys(); len(keys) > 0 {
 		o.envKeys[name] = keys
 	}
+	return nil
 }
 
 type providerEnvField int
@@ -125,6 +146,14 @@ type providerEnvValues struct {
 	ModelFilterMaxPrice      *float64
 	SessionStickyKeys        *bool
 	FairnessFromUserPath     *bool
+	// pending holds the settings whose value contains "${", unparsed, until
+	// resolveSettings resolves them. A pending field counts as set.
+	pending map[providerEnvField]envVar
+}
+
+// envVar is one environment variable.
+type envVar struct {
+	name, value string
 }
 
 // modelFilter assembles the filter this env group declares.
@@ -141,11 +170,13 @@ func (v providerEnvValues) modelFilter() config.ModelFilter {
 // so setting only `_API_KEY` and `_API_KEY_3` yields two keys, and a key
 // repeated across `_API_KEY` and `_API_KEY_1` is de-duplicated to one.
 func (v providerEnvValues) apiKeys() []string {
-	_, keys := keyValues(v.sourcedAPIKeys())
+	_, keys := keyValues(dedupeKeys(v.sourcedAPIKeys(), providerValueSet))
 	return keys
 }
 
-// sourcedAPIKeys is apiKeys with each key labelled by its variable name.
+// sourcedAPIKeys is apiKeys with each key labelled by its variable name, one
+// entry per variable: repeats are kept, so each is resolved under its own
+// name, and collapsed by resolveSecretKeys.
 func (v providerEnvValues) sourcedAPIKeys() []sourcedKey {
 	if strings.TrimSpace(v.APIKey) == "" && len(v.APIKeysByIndex) == 0 {
 		return nil
@@ -170,7 +201,7 @@ func (v providerEnvValues) sourcedAPIKeys() []sourcedKey {
 	for _, index := range indexes {
 		keys = append(keys, byIndex[index])
 	}
-	return dedupeKeys(keys, providerValueSet)
+	return usableKeys(keys)
 }
 
 // hasAPIKey reports whether this env group carries any credential, numbered or
@@ -212,7 +243,8 @@ func (v providerEnvValues) empty() bool {
 		v.SessionStickyKeys == nil &&
 		v.FairnessFromUserPath == nil &&
 		len(v.Models) == 0 &&
-		v.modelFilter().Empty()
+		v.modelFilter().Empty() &&
+		len(v.pending) == 0
 }
 
 func providerEnvSources(providerType string, spec DiscoveryConfig) []providerEnvSource {
@@ -244,69 +276,13 @@ func collectProviderEnvValues(prefix string, spec DiscoveryConfig, environ []str
 		}
 
 		values := groups[suffix]
-		switch field {
-		case providerEnvFieldAPIKey:
-			if index == 0 {
-				values.APIKey = value
-				values.APIKeyVar = key
-				break
+		if strings.Contains(value, "${") && !credentialEnvFields[field] {
+			if values.pending == nil {
+				values.pending = make(map[providerEnvField]envVar)
 			}
-			if values.APIKeysByIndex == nil {
-				values.APIKeysByIndex = make(map[int]string)
-				values.APIKeyVarsByIndex = make(map[int]string)
-			}
-			values.APIKeysByIndex[index] = value
-			values.APIKeyVarsByIndex[index] = key
-		case providerEnvFieldBaseURL:
-			values.BaseURL = normalizeResolvedBaseURL(value)
-		case providerEnvFieldAPIVersion:
-			values.APIVersion = value
-		case providerEnvFieldModels:
-			values.Models = parseCSVEnvList(value)
-		case providerEnvFieldModelFilterInclude:
-			values.ModelFilterInclude = parseCSVEnvList(value)
-		case providerEnvFieldModelFilterExclude:
-			values.ModelFilterExclude = parseCSVEnvList(value)
-		case providerEnvFieldModelFilterMaxPrice:
-			parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
-			if err != nil {
-				// A price cap is a cost control: a malformed value must fail
-				// validation, not quietly leave the cap unset and let every
-				// model through. NaN carries "not a number" to the validator,
-				// which rejects it the same way it rejects a literal NaN.
-				parsed = math.NaN()
-			}
-			values.ModelFilterMaxPrice = &parsed
-		case providerEnvFieldBackend:
-			values.Backend = value
-		case providerEnvFieldAuthType:
-			values.AuthType = value
-		case providerEnvFieldAPIMode:
-			values.APIMode = value
-		case providerEnvFieldVertexProject:
-			values.VertexProject = value
-		case providerEnvFieldVertexLocation:
-			values.VertexLocation = value
-		case providerEnvFieldServiceAccountFile:
-			values.ServiceAccountFile = value
-		case providerEnvFieldServiceAccountJSON:
-			values.ServiceAccountJSON = value
-		case providerEnvFieldServiceAccountJSONBase64:
-			values.ServiceAccountJSONBase64 = value
-		case providerEnvFieldGCPScope:
-			values.GCPScope = value
-		case providerEnvFieldProxyURL:
-			values.ProxyURL = value
-		case providerEnvFieldSessionStickyKeys:
-			if parsed, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil {
-				values.SessionStickyKeys = &parsed
-			}
-		case providerEnvFieldInferenceObjective:
-			values.InferenceObjective = value
-		case providerEnvFieldFairnessFromUserPath:
-			if parsed, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil {
-				values.FairnessFromUserPath = &parsed
-			}
+			values.pending[field] = envVar{name: key, value: value}
+		} else {
+			values.setField(field, index, key, value)
 		}
 		groups[suffix] = values
 	}
@@ -318,6 +294,89 @@ func collectProviderEnvValues(prefix string, spec DiscoveryConfig, environ []str
 	}
 
 	return groups
+}
+
+// setField parses value, read from variable key, into field. index is the
+// rotation slot of an API key (0 for the unsuffixed one).
+func (v *providerEnvValues) setField(field providerEnvField, index int, key, value string) {
+	switch field {
+	case providerEnvFieldAPIKey:
+		if index == 0 {
+			v.APIKey = value
+			v.APIKeyVar = key
+			break
+		}
+		if v.APIKeysByIndex == nil {
+			v.APIKeysByIndex = make(map[int]string)
+			v.APIKeyVarsByIndex = make(map[int]string)
+		}
+		v.APIKeysByIndex[index] = value
+		v.APIKeyVarsByIndex[index] = key
+	case providerEnvFieldBaseURL:
+		v.BaseURL = normalizeResolvedBaseURL(value)
+	case providerEnvFieldAPIVersion:
+		v.APIVersion = value
+	case providerEnvFieldModels:
+		v.Models = parseCSVEnvList(value)
+	case providerEnvFieldModelFilterInclude:
+		v.ModelFilterInclude = parseCSVEnvList(value)
+	case providerEnvFieldModelFilterExclude:
+		v.ModelFilterExclude = parseCSVEnvList(value)
+	case providerEnvFieldModelFilterMaxPrice:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+		if err != nil {
+			// A price cap is a cost control: a malformed value must fail
+			// validation, not quietly leave the cap unset and let every
+			// model through. NaN carries "not a number" to the validator,
+			// which rejects it the same way it rejects a literal NaN.
+			parsed = math.NaN()
+		}
+		v.ModelFilterMaxPrice = &parsed
+	case providerEnvFieldBackend:
+		v.Backend = value
+	case providerEnvFieldAuthType:
+		v.AuthType = value
+	case providerEnvFieldAPIMode:
+		v.APIMode = value
+	case providerEnvFieldVertexProject:
+		v.VertexProject = value
+	case providerEnvFieldVertexLocation:
+		v.VertexLocation = value
+	case providerEnvFieldServiceAccountFile:
+		v.ServiceAccountFile = value
+	case providerEnvFieldServiceAccountJSON:
+		v.ServiceAccountJSON = value
+	case providerEnvFieldServiceAccountJSONBase64:
+		v.ServiceAccountJSONBase64 = value
+	case providerEnvFieldGCPScope:
+		v.GCPScope = value
+	case providerEnvFieldProxyURL:
+		v.ProxyURL = value
+	case providerEnvFieldSessionStickyKeys:
+		if parsed, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil {
+			v.SessionStickyKeys = &parsed
+		}
+	case providerEnvFieldInferenceObjective:
+		v.InferenceObjective = value
+	case providerEnvFieldFairnessFromUserPath:
+		if parsed, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil {
+			v.FairnessFromUserPath = &parsed
+		}
+	}
+}
+
+// resolveSettings resolves the pending settings and parses them into v.
+func (v providerEnvValues) resolveSettings(resolve func(name, value string) (string, error)) (providerEnvValues, error) {
+	for _, field := range slices.Sorted(maps.Keys(v.pending)) {
+		setting := v.pending[field]
+		value, err := resolve(setting.name, setting.value)
+		if err != nil {
+			return v, err
+		}
+		v.setField(field, 0, setting.name, value)
+	}
+	v.pending = nil
+	return v, nil
 }
 
 // parseProviderEnvKey splits a provider env var into the provider-name suffix,
@@ -462,9 +521,9 @@ func sortedProviderEnvSuffixes(groups map[string]providerEnvValues) []string {
 	return suffixes
 }
 
-func applyUnsuffixedProviderEnvVars(overlay *providerOverlay, providerType string, spec DiscoveryConfig, source providerEnvSource, values providerEnvValues) {
+func applyUnsuffixedProviderEnvVars(overlay *providerOverlay, providerType string, spec DiscoveryConfig, source providerEnvSource, values providerEnvValues) error {
 	if values.empty() {
-		return
+		return nil
 	}
 
 	result := overlay.providers
@@ -472,19 +531,24 @@ func applyUnsuffixedProviderEnvVars(overlay *providerOverlay, providerType strin
 	switch len(candidates) {
 	case 0:
 		if spec.RequireBaseURL && values.BaseURL == "" {
-			return
+			return nil
 		}
-		overlay.set(source.DefaultName, values.rawConfig(providerType, spec), values)
+		return overlay.apply(source.DefaultName, values, func(v providerEnvValues) config.RawProviderConfig {
+			return v.rawConfig(providerType, spec)
+		})
 	case 1:
 		targetKey := candidates[0]
+		existing := result[targetKey]
+		overlayExisting := func(v providerEnvValues) config.RawProviderConfig {
+			return overlayProviderEnvValues(existing, v, spec)
+		}
 		if targetKey == source.DefaultName {
-			overlay.set(targetKey, overlayProviderEnvValues(result[targetKey], values, spec), values)
-			return
+			return overlay.apply(targetKey, values, overlayExisting)
 		}
 		// A config provider that merely shares the type may borrow the bare env
 		// values for fields it left empty, but its explicit settings win: a stray
 		// OPENAI_API_KEY must never be sent to whatever base_url "alpha" points at.
-		fill, ignored := values.withoutFieldsSetBy(result[targetKey])
+		fill, ignored := values.withoutFieldsSetBy(existing)
 		if len(ignored) > 0 {
 			slog.Warn("provider env vars ignored: a differently named config provider of this type already sets these fields",
 				"env_prefix", source.Prefix,
@@ -493,7 +557,7 @@ func applyUnsuffixedProviderEnvVars(overlay *providerOverlay, providerType strin
 				"hint", "name the provider after its type or add another instance with "+source.Prefix+"_<SUFFIX>_*")
 		}
 		if !fill.empty() {
-			overlay.set(targetKey, overlayProviderEnvValues(result[targetKey], fill, spec), fill)
+			return overlay.apply(targetKey, fill, overlayExisting)
 		}
 	default:
 		slog.Warn("provider env vars ignored: several config providers share this type and none is named after it",
@@ -501,31 +565,35 @@ func applyUnsuffixedProviderEnvVars(overlay *providerOverlay, providerType strin
 			"providers", candidates,
 			"hint", "name one provider after its type or add another instance with "+source.Prefix+"_<SUFFIX>_*")
 	}
+	return nil
 }
 
-func applySuffixedProviderEnvVars(overlay *providerOverlay, providerType string, spec DiscoveryConfig, source providerEnvSource, suffix string, values providerEnvValues) {
+func applySuffixedProviderEnvVars(overlay *providerOverlay, providerType string, spec DiscoveryConfig, source providerEnvSource, suffix string, values providerEnvValues) error {
 	if values.empty() {
-		return
+		return nil
 	}
 
 	targetKey := providerNameForEnvSuffix(source, suffix)
 	if targetKey == "" {
-		return
+		return nil
 	}
 
 	if existing, ok := overlay.providers[targetKey]; ok {
 		if !rawProviderMatchesType(existing, providerType) {
-			return
+			return nil
 		}
-		overlay.set(targetKey, overlayProviderEnvValues(existing, values, spec), values)
-		return
+		return overlay.apply(targetKey, values, func(v providerEnvValues) config.RawProviderConfig {
+			return overlayProviderEnvValues(existing, v, spec)
+		})
 	}
 
 	if spec.RequireBaseURL && values.BaseURL == "" {
-		return
+		return nil
 	}
 
-	overlay.set(targetKey, values.rawConfig(providerType, spec), values)
+	return overlay.apply(targetKey, values, func(v providerEnvValues) config.RawProviderConfig {
+		return v.rawConfig(providerType, spec)
+	})
 }
 
 func (v providerEnvValues) rawConfig(providerType string, spec DiscoveryConfig) config.RawProviderConfig {
@@ -644,48 +712,54 @@ func overlayProviderEnvValues(existing config.RawProviderConfig, values provider
 // YAML names of the dropped fields for logging; values are never returned.
 func (v providerEnvValues) withoutFieldsSetBy(existing config.RawProviderConfig) (providerEnvValues, []string) {
 	var ignored []string
-	drop := func(name string, envSet, cfgSet bool, clear func()) {
+	v.pending = maps.Clone(v.pending) // shared with the group v was copied from
+	drop := func(name string, field providerEnvField, envSet, cfgSet bool, clear func()) {
+		if _, pending := v.pending[field]; pending {
+			envSet = true
+		}
 		if envSet && cfgSet {
 			clear()
+			delete(v.pending, field)
 			ignored = append(ignored, name)
 		}
 	}
 
-	drop("api_key", v.hasAPIKey(), rawProviderHasAPIKey(existing), func() {
+	drop("api_key", providerEnvFieldAPIKey, v.hasAPIKey(), rawProviderHasAPIKey(existing), func() {
 		v.APIKey, v.APIKeyVar = "", ""
 		v.APIKeysByIndex, v.APIKeyVarsByIndex = nil, nil
 	})
 
 	stringFields := []struct {
-		name string
-		env  *string
-		cfg  string
+		name  string
+		field providerEnvField
+		env   *string
+		cfg   string
 	}{
-		{"base_url", &v.BaseURL, existing.BaseURL},
-		{"api_version", &v.APIVersion, existing.APIVersion},
-		{"backend", &v.Backend, existing.Backend},
-		{"auth_type", &v.AuthType, existing.AuthType},
-		{"api_mode", &v.APIMode, existing.APIMode},
-		{"vertex_project", &v.VertexProject, existing.VertexProject},
-		{"vertex_location", &v.VertexLocation, existing.VertexLocation},
-		{"service_account_file", &v.ServiceAccountFile, existing.ServiceAccountFile},
-		{"service_account_json", &v.ServiceAccountJSON, existing.ServiceAccountJSON},
-		{"service_account_json_base64", &v.ServiceAccountJSONBase64, existing.ServiceAccountJSONBase64},
-		{"gcp_scope", &v.GCPScope, existing.GCPScope},
-		{"proxy_url", &v.ProxyURL, existing.ProxyURL},
-		{"inference_objective", &v.InferenceObjective, existing.InferenceObjective},
+		{"base_url", providerEnvFieldBaseURL, &v.BaseURL, existing.BaseURL},
+		{"api_version", providerEnvFieldAPIVersion, &v.APIVersion, existing.APIVersion},
+		{"backend", providerEnvFieldBackend, &v.Backend, existing.Backend},
+		{"auth_type", providerEnvFieldAuthType, &v.AuthType, existing.AuthType},
+		{"api_mode", providerEnvFieldAPIMode, &v.APIMode, existing.APIMode},
+		{"vertex_project", providerEnvFieldVertexProject, &v.VertexProject, existing.VertexProject},
+		{"vertex_location", providerEnvFieldVertexLocation, &v.VertexLocation, existing.VertexLocation},
+		{"service_account_file", providerEnvFieldServiceAccountFile, &v.ServiceAccountFile, existing.ServiceAccountFile},
+		{"service_account_json", providerEnvFieldServiceAccountJSON, &v.ServiceAccountJSON, existing.ServiceAccountJSON},
+		{"service_account_json_base64", providerEnvFieldServiceAccountJSONBase64, &v.ServiceAccountJSONBase64, existing.ServiceAccountJSONBase64},
+		{"gcp_scope", providerEnvFieldGCPScope, &v.GCPScope, existing.GCPScope},
+		{"proxy_url", providerEnvFieldProxyURL, &v.ProxyURL, existing.ProxyURL},
+		{"inference_objective", providerEnvFieldInferenceObjective, &v.InferenceObjective, existing.InferenceObjective},
 	}
 	for _, f := range stringFields {
 		env := f.env
-		drop(f.name, strings.TrimSpace(*env) != "", providerValueSet(f.cfg), func() { *env = "" })
+		drop(f.name, f.field, strings.TrimSpace(*env) != "", providerValueSet(f.cfg), func() { *env = "" })
 	}
 
-	drop("session_sticky_keys", v.SessionStickyKeys != nil, existing.SessionStickyKeys != nil, func() { v.SessionStickyKeys = nil })
-	drop("fairness_from_user_path", v.FairnessFromUserPath != nil, existing.FairnessFromUserPath != nil, func() { v.FairnessFromUserPath = nil })
-	drop("models", len(v.Models) > 0, rawProviderHasResolvedModel(existing), func() { v.Models = nil })
-	drop("model_filter.include", len(v.ModelFilterInclude) > 0, len(existing.ModelFilter.Include) > 0, func() { v.ModelFilterInclude = nil })
-	drop("model_filter.exclude", len(v.ModelFilterExclude) > 0, len(existing.ModelFilter.Exclude) > 0, func() { v.ModelFilterExclude = nil })
-	drop("model_filter.max_price_per_mtok", v.ModelFilterMaxPrice != nil, existing.ModelFilter.MaxPricePerMtok != nil, func() { v.ModelFilterMaxPrice = nil })
+	drop("session_sticky_keys", providerEnvFieldSessionStickyKeys, v.SessionStickyKeys != nil, existing.SessionStickyKeys != nil, func() { v.SessionStickyKeys = nil })
+	drop("fairness_from_user_path", providerEnvFieldFairnessFromUserPath, v.FairnessFromUserPath != nil, existing.FairnessFromUserPath != nil, func() { v.FairnessFromUserPath = nil })
+	drop("models", providerEnvFieldModels, len(v.Models) > 0, rawProviderHasResolvedModel(existing), func() { v.Models = nil })
+	drop("model_filter.include", providerEnvFieldModelFilterInclude, len(v.ModelFilterInclude) > 0, len(existing.ModelFilter.Include) > 0, func() { v.ModelFilterInclude = nil })
+	drop("model_filter.exclude", providerEnvFieldModelFilterExclude, len(v.ModelFilterExclude) > 0, len(existing.ModelFilter.Exclude) > 0, func() { v.ModelFilterExclude = nil })
+	drop("model_filter.max_price_per_mtok", providerEnvFieldModelFilterMaxPrice, v.ModelFilterMaxPrice != nil, existing.ModelFilter.MaxPricePerMtok != nil, func() { v.ModelFilterMaxPrice = nil })
 
 	return v, ignored
 }

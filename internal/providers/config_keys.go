@@ -12,9 +12,11 @@ import (
 //
 // A source is the YAML path of a config.yaml value ("providers.openai.api_key",
 // "providers.openai.api_keys[1]") or the name of the environment variable that
-// supplied it ("OPENAI_API_KEY_2"). Secret references are resolved, and their
-// errors reported, under Sources[0]. Sources has more than one entry when
-// identical keys were collapsed into one.
+// supplied it ("OPENAI_API_KEY_2"). Until its references are resolved a key
+// has exactly one source, and is resolved, and its errors reported, under it:
+// a resolver may return different values for the same reference in two
+// fields. Sources has more than one entry only after resolution, when keys
+// that resolved to the same value were collapsed into one.
 type sourcedKey struct {
 	Value   string
 	Sources []string
@@ -30,6 +32,23 @@ func yamlAPIKeys(name string, p config.RawProviderConfig) []sourcedKey {
 		keys = append(keys, sourcedKey{Value: key, Sources: []string{prefix + ".api_keys[" + strconv.Itoa(i) + "]"}})
 	}
 	return keys
+}
+
+// usableKeys trims each key and drops the ones that carry no value or still
+// hold a legacy ${VAR} placeholder. Unlike dedupeKeys it keeps repeats, so
+// every source is resolved on its own.
+func usableKeys(keys []sourcedKey) []sourcedKey {
+	result := make([]sourcedKey, 0, len(keys))
+	for _, key := range keys {
+		key.Value = strings.TrimSpace(key.Value)
+		if providerValueSet(key.Value) {
+			result = append(result, key)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 // dedupeKeys trims each key, drops the ones usable rejects, and collapses
@@ -55,9 +74,9 @@ func dedupeKeys(keys []sourcedKey, usable func(string) bool) []sourcedKey {
 	return result
 }
 
-// resolveSecretKeys resolves the secret references in keys, each once and
-// under its first source, then drops empty results and collapses keys that
-// resolved to the same value.
+// resolveSecretKeys resolves the secret references in keys, each under its
+// own source (see usableKeys), then drops empty results and collapses keys
+// that resolved to the same value, keeping every source.
 func resolveSecretKeys(ctx context.Context, secrets *config.Secrets, keys []sourcedKey) ([]sourcedKey, error) {
 	resolved := make([]sourcedKey, len(keys))
 	for i, key := range keys {

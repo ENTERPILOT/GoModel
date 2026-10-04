@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 
 	"github.com/enterpilot/gomodel/config"
@@ -227,11 +228,25 @@ func TestResolveProvidersLabelsKeysWithTheirSource(t *testing.T) {
 			wantLookups: []string{"a"},
 		},
 		{
-			name:        "duplicate references are looked up once",
+			name:        "duplicate references are looked up under each source, then collapse",
 			raw:         map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKey: "${vault:a}", APIKeys: []string{"${vault:a}", "sk-lit"}}},
 			wantKeys:    []string{"sk-a", "sk-lit"},
 			wantSources: [][]string{{"providers.openai.api_key", "providers.openai.api_keys[0]"}, {"providers.openai.api_keys[1]"}},
-			wantLookups: []string{"a"},
+			wantLookups: []string{"a", "a"},
+		},
+		{
+			name:        "duplicate env keys are looked up under each variable, then collapse",
+			env:         map[string]string{"OPENAI_API_KEY": "${vault:a}", "OPENAI_API_KEY_1": "${vault:a}"},
+			wantKeys:    []string{"sk-a"},
+			wantSources: [][]string{{"OPENAI_API_KEY", "OPENAI_API_KEY_1"}},
+			wantLookups: []string{"a", "a"},
+		},
+		{
+			name:        "duplicate literal keys collapse",
+			raw:         map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKey: "sk-lit", APIKeys: []string{" sk-lit "}}},
+			wantKeys:    []string{"sk-lit"},
+			wantSources: [][]string{{"providers.openai.api_key", "providers.openai.api_keys[0]"}},
+			wantLookups: []string{},
 		},
 		{
 			name:        "different references resolving to one value collapse",
@@ -292,6 +307,52 @@ func TestResolveProvidersLabelsKeysWithTheirSource(t *testing.T) {
 	}
 }
 
+// TestResolveProvidersResolvesEachKeySource covers a resolver whose answer
+// depends on the field, not just the reference: equal reference text in two
+// sources must still yield two keys.
+func TestResolveProvidersResolvesEachKeySource(t *testing.T) {
+	tests := []struct {
+		name        string
+		env         map[string]string
+		raw         map[string]config.RawProviderConfig
+		wantSources [][]string
+	}{
+		{
+			name:        "yaml api_key and api_keys",
+			raw:         map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKey: "${vault:shared}", APIKeys: []string{"${vault:shared}"}}},
+			wantSources: [][]string{{"providers.openai.api_key"}, {"providers.openai.api_keys[0]"}},
+		},
+		{
+			name:        "env variables",
+			env:         map[string]string{"OPENAI_API_KEY": "${vault:shared}", "OPENAI_API_KEY_1": "${vault:shared}"},
+			wantSources: [][]string{{"OPENAI_API_KEY"}, {"OPENAI_API_KEY_1"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for key, value := range tt.env {
+				t.Setenv(key, value)
+			}
+			calls := 0
+			secrets := config.NewSecrets()
+			require.NoError(t, secrets.Register("vault", config.SecretResolverFunc(func(context.Context, string) (string, error) {
+				calls++
+				return "sk-" + strconv.Itoa(calls), nil
+			})))
+			raw := tt.raw
+			if raw == nil {
+				raw = map[string]config.RawProviderConfig{}
+			}
+
+			got, _, err := resolveProviders(t.Context(), secrets, raw, config.ResilienceConfig{}, testDiscoveryConfigs)
+			require.NoError(t, err)
+			require.Contains(t, got, "openai")
+			assert.Equal(t, []string{"sk-1", "sk-2"}, got["openai"].APIKeys)
+			assert.Equal(t, tt.wantSources, got["openai"].APIKeySources)
+		})
+	}
+}
+
 func TestResolveProvidersResolvesParsedEnvSettingsFirst(t *testing.T) {
 	values := map[string]string{
 		"models": "model-a, model-b", "include": "gpt-*,o*", "price": "2.5", "sticky": "false", "type": "openai",
@@ -334,4 +395,189 @@ func TestResolveProvidersResolvesParsedEnvSettingsFirst(t *testing.T) {
 		assert.Equal(t, []string{"sk-env"}, got["openai"].APIKeys)
 		assert.Equal(t, "${vault:type}", raw["openai"].Type, "the loaded providers keep their references")
 	})
+}
+
+func TestResolveProvidersResolvesOnlyEnvSettingsTheOverlayUses(t *testing.T) {
+	tests := []struct {
+		name        string
+		env         map[string]string
+		raw         map[string]config.RawProviderConfig
+		check       func(t *testing.T, got map[string]ProviderConfig)
+		wantLookups []string
+	}{
+		{
+			name: "bare settings ignored for several differently named providers",
+			env:  map[string]string{"OPENAI_MODELS": "${vault:missing}", "OPENAI_SESSION_STICKY_KEYS": "${file:/gomodel-test/missing}"},
+			raw: map[string]config.RawProviderConfig{
+				"alpha": {Type: "openai", APIKey: "sk-alpha", BaseURL: "https://alpha.example.com"},
+				"beta":  {Type: "openai", APIKey: "sk-beta", BaseURL: "https://beta.example.com"},
+			},
+			check: func(t *testing.T, got map[string]ProviderConfig) {
+				assert.Empty(t, got["alpha"].Models)
+				assert.Empty(t, got["beta"].Models)
+			},
+			wantLookups: []string{},
+		},
+		{
+			name: "bare setting ignored for a field the config provider sets",
+			env:  map[string]string{"OPENAI_MODELS": "${vault:missing}"},
+			raw: map[string]config.RawProviderConfig{
+				"alpha": {Type: "openai", APIKey: "sk-alpha", BaseURL: "https://alpha.example.com", Models: []config.RawProviderModel{{ID: "yaml-model"}}},
+			},
+			check: func(t *testing.T, got map[string]ProviderConfig) {
+				assert.Equal(t, []string{"yaml-model"}, got["alpha"].Models)
+			},
+			wantLookups: []string{},
+		},
+		{
+			name: "suffixed setting ignored for a provider of another type",
+			env:  map[string]string{"OPENAI_EU_MODELS": "${vault:missing}"},
+			raw:  map[string]config.RawProviderConfig{"openai-eu": {Type: "anthropic", APIKey: "sk-ant"}},
+			check: func(t *testing.T, got map[string]ProviderConfig) {
+				assert.Empty(t, got["openai-eu"].Models)
+			},
+			wantLookups: []string{},
+		},
+		{
+			name: "bare setting fills a field the config provider leaves empty",
+			env:  map[string]string{"OPENAI_MODELS": "${vault:models}"},
+			raw:  map[string]config.RawProviderConfig{"alpha": {Type: "openai", APIKey: "sk-alpha", BaseURL: "https://alpha.example.com"}},
+			check: func(t *testing.T, got map[string]ProviderConfig) {
+				assert.Equal(t, []string{"model-a", "model-b"}, got["alpha"].Models)
+			},
+			wantLookups: []string{"models"},
+		},
+		{
+			name: "a referenced boolean alone is applied",
+			env:  map[string]string{"OPENAI_SESSION_STICKY_KEYS": "${vault:sticky}"},
+			raw:  map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKey: "sk-openai"}},
+			check: func(t *testing.T, got map[string]ProviderConfig) {
+				assert.False(t, got["openai"].SessionStickyKeys)
+			},
+			wantLookups: []string{"sticky"},
+		},
+		{
+			name: "an escaped setting stays literal",
+			env:  map[string]string{"OPENAI_API_KEY": "sk-env", "OPENAI_MODELS": "$${env:GOMODEL_TEST_UNSET}, model-b"},
+			check: func(t *testing.T, got map[string]ProviderConfig) {
+				assert.Equal(t, []string{"${env:GOMODEL_TEST_UNSET}", "model-b"}, got["openai"].Models)
+			},
+			wantLookups: []string{},
+		},
+		{
+			name: "a resolved setting is not scanned again",
+			env:  map[string]string{"OPENAI_API_KEY": "sk-env", "OPENAI_MODELS": "${vault:weird-models}"},
+			check: func(t *testing.T, got map[string]ProviderConfig) {
+				assert.Equal(t, []string{"m-${vault:missing}", "$${x}"}, got["openai"].Models)
+			},
+			wantLookups: []string{"weird-models"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for key, value := range tt.env {
+				t.Setenv(key, value)
+			}
+			secrets, lookups := countingVault(t, map[string]string{
+				"models": "model-a,model-b", "sticky": "false", "weird-models": "m-${vault:missing},$${x}",
+			})
+			raw := tt.raw
+			if raw == nil {
+				raw = map[string]config.RawProviderConfig{}
+			}
+
+			got, _, err := resolveProviders(t.Context(), secrets, raw, config.ResilienceConfig{}, testDiscoveryConfigs)
+			require.NoError(t, err)
+			tt.check(t, got)
+			assert.ElementsMatch(t, tt.wantLookups, *lookups)
+		})
+	}
+}
+
+func TestResolveProvidersResolvesVertexAuthTypeBeforeFiltering(t *testing.T) {
+	vertex := func(authType, serviceAccountJSON string) config.RawProviderConfig {
+		return config.RawProviderConfig{
+			Type: "vertex", VertexProject: "proj", VertexLocation: "us-central1",
+			AuthType: authType, ServiceAccountJSON: serviceAccountJSON,
+		}
+	}
+	tests := []struct {
+		name         string
+		env          map[string]string
+		raw          map[string]config.RawProviderConfig
+		wantAuthType string // empty: the provider is dropped
+		wantSAJSON   string
+		wantLookups  []string
+		wantErr      string
+	}{
+		{
+			name:         "service account auth_type from a reference",
+			raw:          map[string]config.RawProviderConfig{"vertex": vertex("${vault:auth-sa}", "${vault:sa-json}")},
+			wantAuthType: "gcp_service_account",
+			wantSAJSON:   `{"type":"service_account"}`,
+			wantLookups:  []string{"auth-sa", "sa-json"},
+		},
+		{
+			name:         "adc auth_type from a reference",
+			raw:          map[string]config.RawProviderConfig{"vertex": vertex("${vault:auth-adc}", "")},
+			wantAuthType: "gcp_adc",
+			wantLookups:  []string{"auth-adc"},
+		},
+		{
+			name:        "service account auth_type without a service account is dropped",
+			raw:         map[string]config.RawProviderConfig{"vertex": vertex("${vault:auth-sa}", "")},
+			wantLookups: []string{"auth-sa"},
+		},
+		{
+			name:        "unknown auth_type is dropped before other fields are looked up",
+			raw:         map[string]config.RawProviderConfig{"vertex": vertex("${vault:auth-bogus}", "${vault:sa-json}")},
+			wantLookups: []string{"auth-bogus"},
+		},
+		{
+			name:        "provider without an endpoint is never looked up",
+			raw:         map[string]config.RawProviderConfig{"vertex": {Type: "vertex", AuthType: "${vault:auth-sa}", ServiceAccountJSON: "${vault:sa-json}"}},
+			wantLookups: []string{},
+		},
+		{
+			name: "env auth_type replaces a yaml reference, which is never looked up",
+			env:  map[string]string{"VERTEX_AUTH_TYPE": "${vault:auth-sa}", "VERTEX_SERVICE_ACCOUNT_JSON": "${vault:sa-json}"},
+			raw: map[string]config.RawProviderConfig{
+				"vertex": vertex("${vault:missing}", ""),
+			},
+			wantAuthType: "gcp_service_account",
+			wantSAJSON:   `{"type":"service_account"}`,
+			wantLookups:  []string{"auth-sa", "sa-json"},
+		},
+		{
+			name:    "unresolved auth_type is an error",
+			raw:     map[string]config.RawProviderConfig{"vertex": vertex("${vault:missing}", "")},
+			wantErr: "providers.vertex.auth_type: secret reference ${vault:...}: not found",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for key, value := range tt.env {
+				t.Setenv(key, value)
+			}
+			secrets, lookups := countingVault(t, map[string]string{
+				"auth-sa": "gcp_service_account", "auth-adc": "gcp_adc", "auth-bogus": "bogus",
+				"sa-json": `{"type":"service_account"}`,
+			})
+
+			got, _, err := resolveProviders(t.Context(), secrets, tt.raw, config.ResilienceConfig{}, testDiscoveryConfigs)
+			if tt.wantErr != "" {
+				require.EqualError(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			if tt.wantAuthType == "" {
+				assert.NotContains(t, got, "vertex")
+			} else {
+				require.Contains(t, got, "vertex")
+				assert.Equal(t, tt.wantAuthType, got["vertex"].AuthType)
+				assert.Equal(t, tt.wantSAJSON, got["vertex"].ServiceAccountJSON)
+			}
+			assert.ElementsMatch(t, tt.wantLookups, *lookups)
+		})
+	}
 }

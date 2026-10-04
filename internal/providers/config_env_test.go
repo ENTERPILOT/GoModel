@@ -3,7 +3,6 @@ package providers
 import (
 	"bytes"
 	"log/slog"
-	"os"
 	"strings"
 	"testing"
 
@@ -122,7 +121,7 @@ func TestApplyProviderEnvVars_BareTypeEnvVarsAgainstRenamedProviders(t *testing.
 			}
 			logs := captureSlog(t)
 
-			got, _ := applyProviderEnvVars(tt.raw, testDiscoveryConfigs, os.Environ())
+			got, _ := applyEnv(t, tt.raw)
 
 			for name, want := range tt.want {
 				p, ok := got[name]
@@ -155,9 +154,9 @@ func TestApplyProviderEnvVars_ProxyURL(t *testing.T) {
 	t.Setenv("OPENAI_EU_API_KEY", "sk-eu")
 	t.Setenv("OPENAI_EU_PROXY_URL", "socks5://user:pass@10.0.0.1:1080")
 
-	got, _ := applyProviderEnvVars(map[string]config.RawProviderConfig{
+	got, _ := applyEnv(t, map[string]config.RawProviderConfig{
 		"anthropic": {Type: "anthropic", APIKey: "sk-ant", ProxyURL: "http://yaml-proxy:3128"},
-	}, testDiscoveryConfigs, os.Environ())
+	})
 
 	require.Contains(t, got, "openai")
 	assert.Equal(t, "http://proxy.internal:3128", got["openai"].ProxyURL)
