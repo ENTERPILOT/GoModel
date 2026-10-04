@@ -8970,6 +8970,10 @@ const docTemplate = `{
                         "maxLength": 1024
                     },
                     "maxItems": 100
+                },
+                "vision_routing": {
+                    "description": "VisionRouting sends a request that carries images only to targets\nwhose model metadata reports the vision capability. Off by default.",
+                    "type": "boolean"
                 }
             },
             "required": [
@@ -12817,6 +12821,9 @@ const docTemplate = `{
                 },
                 "valid": {
                     "type": "boolean"
+                },
+                "vision_routing": {
+                    "type": "boolean"
                 }
             }
         },
@@ -12882,6 +12889,10 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "vision_routing": {
+                    "description": "VisionRouting sends a request that carries image input only to the\ntargets whose model metadata reports the vision capability. When no\ntarget does, every target stays eligible and the provider answers as\nbefore. Off by default.",
+                    "type": "boolean"
                 }
             }
         },

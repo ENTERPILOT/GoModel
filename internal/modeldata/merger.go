@@ -1,7 +1,9 @@
 package modeldata
 
 import (
+	"maps"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -272,7 +274,7 @@ func buildMetadata(model *ModelEntry, pm *ProviderModelEntry) *core.ModelMetadat
 		meta.Tags = model.Tags
 		meta.ContextWindow = model.ContextWindow
 		meta.MaxOutputTokens = model.MaxOutputTokens
-		meta.Capabilities = model.Capabilities
+		meta.Capabilities = catalogCapabilities(model)
 		meta.Rankings = buildRankings(model.Rankings)
 		meta.Pricing = model.Pricing
 		meta.PricingSources = model.Pricing.FieldSources(core.ModelPricingSourceModelRegistry)
@@ -296,6 +298,22 @@ func buildMetadata(model *ModelEntry, pm *ProviderModelEntry) *core.ModelMetadat
 	}
 
 	return meta
+}
+
+// catalogCapabilities returns the entry's capabilities with vision set when
+// its input modalities list images: the catalog records image input in either
+// place, and routing reads only the capability. An explicit vision flag wins.
+func catalogCapabilities(model *ModelEntry) map[string]bool {
+	if model.Modalities == nil || !slices.Contains(model.Modalities.Input, "image") {
+		return model.Capabilities
+	}
+	if _, set := model.Capabilities["vision"]; set {
+		return model.Capabilities
+	}
+	capabilities := make(map[string]bool, len(model.Capabilities)+1)
+	maps.Copy(capabilities, model.Capabilities)
+	capabilities["vision"] = true
+	return capabilities
 }
 
 func buildRankings(rankings map[string]RankingEntry) map[string]core.ModelRanking {

@@ -632,6 +632,7 @@
   "models_summary_alias_balanced": "Requests for {source} are balanced across {targets} ({strategy}).",
   "models_session_keeping": "Session keeping (route a detected client session to the target that served it)",
   "models_failover_option": "Failover (retry a failed request on the next target)",
+  "models_vision_routing_option": "Vision routing (send requests with images only to targets that accept images)",
   "models_user_paths": "User Paths",
   "models_user_paths_help_label": "User paths help",
   "models_user_paths_help": "Use / to allow every user path. Use a team path to restrict to that subtree, or an unused path to make the selector unavailable.",

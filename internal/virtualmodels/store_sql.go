@@ -24,6 +24,7 @@ var sqlSchema = []string{
 		strategy_config TEXT NOT NULL DEFAULT '{}',
 		session_affinity TEXT NOT NULL DEFAULT '',
 		failover TEXT NOT NULL DEFAULT '',
+		vision_routing ` + sqlx.TypeBool + ` NOT NULL DEFAULT FALSE,
 		provider_name TEXT NOT NULL DEFAULT '',
 		model TEXT NOT NULL DEFAULT '',
 		user_paths TEXT NOT NULL DEFAULT '[]',
@@ -46,19 +47,20 @@ var virtualModelMigrations = []string{
 	"ALTER TABLE virtual_models ADD COLUMN failover TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE virtual_models ADD COLUMN strategy_plugin TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE virtual_models ADD COLUMN strategy_config TEXT NOT NULL DEFAULT '{}'",
+	"ALTER TABLE virtual_models ADD COLUMN vision_routing " + sqlx.TypeBool + " NOT NULL DEFAULT FALSE",
 }
 
 const selectVirtualModelColumns = `
-	SELECT source, targets, strategy, strategy_plugin, strategy_config, session_affinity, failover, provider_name, model, user_paths,
+	SELECT source, targets, strategy, strategy_plugin, strategy_config, session_affinity, failover, vision_routing, provider_name, model, user_paths,
 		description, slowdown, enabled, created_at, updated_at
 	FROM virtual_models
 `
 
 const upsertVirtualModelSQL = `
 	INSERT INTO virtual_models (
-		source, targets, strategy, strategy_plugin, strategy_config, session_affinity, failover, provider_name, model, user_paths, description, slowdown, enabled, created_at, updated_at
+		source, targets, strategy, strategy_plugin, strategy_config, session_affinity, failover, vision_routing, provider_name, model, user_paths, description, slowdown, enabled, created_at, updated_at
 	)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(source) DO UPDATE SET
 		targets = excluded.targets,
 		strategy = excluded.strategy,
@@ -66,6 +68,7 @@ const upsertVirtualModelSQL = `
 		strategy_config = excluded.strategy_config,
 		session_affinity = excluded.session_affinity,
 		failover = excluded.failover,
+		vision_routing = excluded.vision_routing,
 		provider_name = excluded.provider_name,
 		model = excluded.model,
 		user_paths = excluded.user_paths,
@@ -171,6 +174,7 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 		configJSON,
 		encodeTriStateBool(vm.SessionAffinity),
 		encodeTriStateBool(vm.Failover),
+		vm.VisionRouting,
 		vm.ProviderName,
 		vm.Model,
 		pathsJSON,
@@ -195,6 +199,7 @@ func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 		&strategyConfig,
 		&sessionAffinity,
 		&failover,
+		&vm.VisionRouting,
 		&vm.ProviderName,
 		&vm.Model,
 		&userPaths,

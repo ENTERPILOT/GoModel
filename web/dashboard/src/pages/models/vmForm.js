@@ -72,6 +72,7 @@ export function defaultVirtualModelForm() {
     strategy_config: {},
     session_affinity: true,
     failover: true,
+    vision_routing: false,
     user_paths: "",
     description: "",
     slowdown: "",
@@ -440,6 +441,10 @@ export function buildVirtualModelSavePayload(form, originalSource, mode) {
       if (form && form.failover === false) {
         payload.failover = false;
       }
+      // Vision routing is off by default; only the opt-in travels.
+      if (form && form.vision_routing) {
+        payload.vision_routing = true;
+      }
     } else if (targets[0].provider) {
       // Only the targets list can carry an explicit provider.
       payload.targets = [weightless(targets[0])];
@@ -478,6 +483,9 @@ export function buildAliasTogglePayload(alias) {
     }
     if (alias.failover === false) {
       payload.failover = false;
+    }
+    if (alias.vision_routing) {
+      payload.vision_routing = true;
     }
     // Strategies that ignore weight persist weight-less targets — same
     // contract as the editor save path.

@@ -982,6 +982,35 @@ test("failover is on by default and only the opt-out reaches the server", () => 
   assert.equal(toggle.failover, false);
 });
 
+test("vision routing is off by default and only the opt-in reaches the server", () => {
+  const form = defaultVirtualModelForm();
+  form.source = "smart";
+  form.target_model = "openai/gpt-4o";
+  form.targets = [{ model: "groq/llama", weight: 1 }];
+  assert.equal(form.vision_routing, false);
+
+  let { payload } = buildVirtualModelSavePayload(form, "", "create");
+  assert.equal("vision_routing" in payload, false);
+
+  form.vision_routing = true;
+  ({ payload } = buildVirtualModelSavePayload(form, "", "create"));
+  assert.equal(payload.vision_routing, true);
+
+  // The admin view maps through, and toggling an alias keeps the opt-in.
+  const alias = mapRedirectView({
+    source: "smart",
+    targets: [
+      { provider: "openai", model: "gpt-4o" },
+      { provider: "groq", model: "llama" },
+    ],
+    strategy: "failover",
+    vision_routing: true,
+    enabled: true,
+  });
+  assert.equal(alias.vision_routing, true);
+  assert.equal(buildAliasTogglePayload(alias).vision_routing, true);
+});
+
 test("virtualModelTargetOptions lists catalog models and other virtual models", () => {
   const models = [
     { selector: "openai/gpt-4o", provider_name: "openai", model: { id: "gpt-4o" } },

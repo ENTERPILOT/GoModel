@@ -675,3 +675,51 @@ func TestStripRoutingSuffix(t *testing.T) {
 		})
 	}
 }
+
+func TestResolve_ImageInputModalityImpliesVision(t *testing.T) {
+	tests := []struct {
+		name         string
+		entry        ModelEntry
+		wantVision   bool
+		wantPresent  bool
+		wantFunction bool
+	}{
+		{
+			name: "image input without a vision flag",
+			entry: ModelEntry{
+				Modalities:   &Modalities{Input: []string{"text", "image"}},
+				Capabilities: map[string]bool{"function_calling": true},
+			},
+			wantVision: true, wantPresent: true, wantFunction: true,
+		},
+		{
+			name: "explicit vision false wins",
+			entry: ModelEntry{
+				Modalities:   &Modalities{Input: []string{"text", "image"}},
+				Capabilities: map[string]bool{"vision": false},
+			},
+			wantVision: false, wantPresent: true,
+		},
+		{
+			name:  "text only input",
+			entry: ModelEntry{Modalities: &Modalities{Input: []string{"text"}}},
+		},
+		{
+			name:  "no modalities",
+			entry: ModelEntry{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			list := &ModelList{Models: map[string]ModelEntry{"m": tt.entry}}
+			meta := Resolve(list, "openai", "m")
+			require.NotNil(t, meta)
+			vision, present := meta.Capabilities["vision"]
+			assert.Equal(t, tt.wantPresent, present)
+			assert.Equal(t, tt.wantVision, vision)
+			assert.Equal(t, tt.wantFunction, meta.Capabilities["function_calling"])
+			_, mutated := tt.entry.Capabilities["vision"]
+			assert.Equal(t, tt.wantPresent && !tt.wantVision, mutated, "the catalog entry is not modified")
+		})
+	}
+}

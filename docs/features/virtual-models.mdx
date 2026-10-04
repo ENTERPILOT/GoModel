@@ -136,6 +136,39 @@ For example, point `smart` at both `openai/gpt-4o` and `anthropic/claude-sonnet-
 with the round-robin strategy to split load, or at a premium and a budget model
 with the cost strategy to always take the cheaper one.
 
+## Route image requests to vision models
+
+A request with an image sent to a text-only model either fails or is answered
+as if the image were not there. Tick **Vision routing** in the editor (or set
+`vision_routing: true`) and a request that carries an image — a Chat
+Completions `image_url` part, a Responses `input_image`, or an Anthropic
+Messages `image` block — only considers the targets whose model metadata
+reports the `vision` capability. The filter runs before the strategy picks, so
+it works with every strategy; text-only requests route as before. It is off by
+default.
+
+```yaml
+virtual_models:
+  - source: assistant
+    strategy: failover
+    vision_routing: true
+    targets:
+      - { model: groq/llama-3.3-70b } # text-only: serves text requests first
+      - { model: openai/gpt-4o }      # vision: serves requests with images
+```
+
+- A chained virtual model counts as accepting images when any model behind it
+  does, and the decision carries down the chain.
+- A model with no `vision` capability in its metadata counts as text-only.
+  Image input comes from the [model catalog](/advanced/model-metadata) (its
+  `vision` capability or `image` input modality); declare
+  `capabilities: { vision: true }` in a model's `metadata` override when the
+  catalog does not know the model.
+- When no target accepts images, every target stays eligible: the image is
+  never dropped and the provider's own answer reaches the client.
+- Only the target chosen first is filtered; the [failover chain](/features/failover)
+  keeps every remaining target.
+
 ## Reorder targets
 
 The target list is an ordered list, and the editor keeps it editable: drag the
@@ -274,7 +307,9 @@ VIRTUAL_MODELS=[{"source":"smart","strategy":"cost","targets":[{"model":"openai/
 Each entry accepts `source`, a single `target` (shorthand) or a `targets` list,
 `strategy` (`round_robin`, `cost`, or `failover`), `session_affinity` (default `true`; see
 [Session Keeping](/features/session-keeping)), `failover` (default `true`; see
-[Failover](/features/failover)), `user_paths`, `description`,
+[Failover](/features/failover)), `vision_routing` (default `false`; see
+[Route image requests to vision models](#route-image-requests-to-vision-models)),
+`user_paths`, `description`,
 `slowdown` (`0` disables inherited slowdown; active factors range from `0.1` to
 `10`), and `enabled`.
 A target `model` may name another declared virtual model (see

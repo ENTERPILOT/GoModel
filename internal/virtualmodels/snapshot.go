@@ -75,6 +75,10 @@ type snapshot struct {
 	providerWide  map[string]VirtualModel
 	modelWide     map[string]VirtualModel
 	defaultEnable bool
+
+	// visionRouting reports that an enabled redirect routes image requests,
+	// so the request path only inspects bodies when one does.
+	visionRouting bool
 }
 
 func emptySnapshot(defaultEnable bool) snapshot {
@@ -121,6 +125,7 @@ func buildSnapshot(rows []VirtualModel, defaultEnable bool) (snapshot, error) {
 			}
 			next.order = append(next.order, normalized.Source)
 			next.bySource[normalized.Source] = normalized
+			next.visionRouting = next.visionRouting || (normalized.Enabled && normalized.VisionRouting)
 			continue
 		}
 
