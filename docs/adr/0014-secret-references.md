@@ -103,8 +103,9 @@ func (s *Secrets) NotifyChanged() // see section 5
 // Core-side rotation plumbing, also section 5: Changes, Recheck returning a
 // *SecretRecheck (Fields, Value, Commit), and SecretNotifier with SetNotifier.
 
-// The field being resolved ("server.master_key", "providers.openai.api_key")
-// is on the context a resolver receives. Field paths are not secret;
+// The field being resolved ("server.master_key", "providers.openai.api_key",
+// or "OPENAI_API_KEY_2" for an env-provided key) is on the context a resolver
+// receives. Field paths are not secret;
 // resolvers may audit-log them.
 func SecretFieldFromContext(ctx context.Context) (string, bool)
 
@@ -148,9 +149,15 @@ Resolution order for one generation:
    secrets.
 4. `providers.Init` merges the provider environment variables
    (`OPENAI_API_KEY=${vault:prod/llm#openai}`) into `RawProviders` and then
-   resolves the merged result. A `config.yaml` value that an environment
-   variable replaces, or an environment variable the merge ignores, is never
-   looked up.
+   resolves the providers that pass the credential filter. A `config.yaml`
+   value that an environment variable replaces, an environment variable the
+   merge ignores, and a provider skipped for missing credentials are never
+   looked up. Resolved values are data: a secret containing `${` is kept.
+   API keys keep their source through key normalization: a key is resolved
+   and reported under its `config.yaml` path
+   (`providers.openai.api_keys[1]`) or the name of the environment variable
+   that set it (`OPENAI_API_KEY_2`), and identical references are looked up
+   once.
 
 Any reference that is still unresolved after step 3 or 4 stops the
 generation with an error naming the field and the scheme, never the value.
@@ -226,23 +233,23 @@ deletes what it wrote. Core ships no writer.
 
 `Secrets` remembers each field a reference resolved into: its path, the value
 as configured, and an HMAC-SHA256 fingerprint of the resolved value under a
-random per-process key (never the value itself). Fields are recorded by
-path (`server.master_key`, `extensions.vaults.token`,
-`providers.openai.api_keys[1]`). Provider fields are recorded after the
-environment overlay, so a key set by `OPENAI_API_KEY_2` is recorded under the
-provider it landed on, like one written in `config.yaml`.
+random per-process key (never the value itself). Fields are recorded under
+the label resolution reports them by (`server.master_key`,
+`extensions.vaults.token`). A provider API key is recorded under the source
+the operator wrote: its `config.yaml` path (`providers.openai.api_keys[1]`) or
+the environment variable that set it (`OPENAI_API_KEY_2`). Providers dropped
+for missing credentials are never resolved, so they are not tracked.
 
 `NotifyChanged`, called by an extension when its backend reports a new
 version, never blocks, and calls that arrive before the check runs coalesce
 into one. Core then re-resolves every recorded reference with the same
 resolvers and compares fingerprints:
 
-- When only provider API keys (`providers.<name>.api_key` or
-  `providers.<name>.api_keys[i]`) changed, key normalization and credential
-  filtering run again on the new values, exactly as at startup, and the
-  affected providers' keyrings are swapped in place. `Keyring` gains
-  `Replace`, an atomic swap of an immutable key set. Requests in flight finish
-  on the key they started with. Session stickiness is rendezvous hashing over
+- When only provider API keys changed, the changed keys are patched by
+  source, key de-duplication and credential filtering run again, exactly as
+  at startup, and the affected providers' keyrings are swapped in place.
+  `Keyring` gains `Replace`, an atomic swap of an immutable key set. Requests
+  in flight finish on the key they started with. Session stickiness is rendezvous hashing over
   the key set, so sessions on a removed key move, and a new key takes its
   share of the rest.
 - When any other field changed (DSNs, master key, service-account JSON,

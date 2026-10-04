@@ -198,10 +198,11 @@ type secretFieldKey struct{}
 // SecretFieldFromContext returns the field a SecretResolver is resolving
 // for, as passed to ResolveSecret: a configuration path such as
 // "server.master_key", "extensions.vaults.token", or
-// "providers.openai.api_keys[1]". A provider value set by an environment
-// variable is named by the provider field it set. Field paths are not secret,
-// so resolvers may log them for audit. The boolean is false for an anonymous
-// Resolve.
+// "providers.openai.api_keys[1]". A provider API key set by an environment
+// variable is named by the variable ("OPENAI_API_KEY_2"); other provider
+// values an environment variable set are named by the provider field. Field
+// labels are not secret, so resolvers may log them for audit. The boolean is
+// false for an anonymous Resolve.
 func SecretFieldFromContext(ctx context.Context) (string, bool) {
 	if ctx == nil {
 		return "", false
@@ -225,10 +226,26 @@ func withSecretField(ctx context.Context, field string) context.Context {
 // reference, using the same scan as Resolve. An escaped $${...} is not a
 // reference.
 func HasSecretReference(value string) bool {
+	references, _ := scanPlaceholders(value)
+	return references
+}
+
+// HasUnresolvedPlaceholder reports whether value contains a ${...} that is
+// neither a secret reference nor an escaped $${: typically a legacy ${VAR}
+// that environment expansion left in place because VAR is unset. Only
+// meaningful before Resolve; a resolved value is data and is not scanned.
+func HasUnresolvedPlaceholder(value string) bool {
+	_, placeholders := scanPlaceholders(value)
+	return placeholders
+}
+
+// scanPlaceholders reports whether value holds secret references and other
+// ${ text, using the same tokenization as resolveField.
+func scanPlaceholders(value string) (references, placeholders bool) {
 	for rest := value; ; {
 		i := strings.Index(rest, "${")
 		if i < 0 {
-			return false
+			return references, placeholders
 		}
 		if i > 0 && rest[i-1] == '$' {
 			rest = rest[i+2:]
@@ -236,10 +253,12 @@ func HasSecretReference(value string) bool {
 		}
 		end := strings.IndexByte(rest[i:], '}')
 		if end < 0 {
-			return false
+			return references, true
 		}
 		if _, _, ok := parseSecretReference(rest[i+2 : i+end]); ok {
-			return true
+			references = true
+		} else {
+			placeholders = true
 		}
 		rest = rest[i+end+1:]
 	}

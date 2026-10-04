@@ -16,9 +16,16 @@ import (
 
 // applyProviderEnvVars overlays well-known provider env vars onto the raw YAML map.
 // Env var values always win over YAML values for the same provider name.
-func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig) map[string]config.RawProviderConfig {
-	result := make(map[string]config.RawProviderConfig, len(raw))
-	maps.Copy(result, raw)
+//
+// The second result holds, per provider, the key set env vars supplied, each
+// key labelled with its variable name. A provider without an entry kept its
+// config.yaml keys.
+func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig) (map[string]config.RawProviderConfig, map[string][]sourcedKey) {
+	overlay := &providerOverlay{
+		providers: make(map[string]config.RawProviderConfig, len(raw)),
+		envKeys:   make(map[string][]sourcedKey),
+	}
+	maps.Copy(overlay.providers, raw)
 	environ := os.Environ()
 
 	for _, providerType := range sortedDiscoveryTypes(discovery) {
@@ -27,19 +34,35 @@ func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map
 			envGroups := collectProviderEnvValues(source.Prefix, spec, environ)
 
 			if values, ok := envGroups[""]; ok {
-				applyUnsuffixedProviderEnvVars(result, providerType, spec, source, values)
+				applyUnsuffixedProviderEnvVars(overlay, providerType, spec, source, values)
 			}
 
 			for _, suffix := range sortedProviderEnvSuffixes(envGroups) {
 				if suffix == "" {
 					continue
 				}
-				applySuffixedProviderEnvVars(result, providerType, spec, source, suffix, envGroups[suffix])
+				applySuffixedProviderEnvVars(overlay, providerType, spec, source, suffix, envGroups[suffix])
 			}
 		}
 	}
 
-	return result
+	return overlay.providers, overlay.envKeys
+}
+
+// providerOverlay is the provider map being built by applyProviderEnvVars and
+// the env-supplied key sets written into it.
+type providerOverlay struct {
+	providers map[string]config.RawProviderConfig
+	envKeys   map[string][]sourcedKey
+}
+
+// set stores cfg, built from values, under name, and records the env keys
+// values supplied, if any.
+func (o *providerOverlay) set(name string, cfg config.RawProviderConfig, values providerEnvValues) {
+	o.providers[name] = cfg
+	if keys := values.sourcedAPIKeys(); len(keys) > 0 {
+		o.envKeys[name] = keys
+	}
 }
 
 type providerEnvField int
@@ -79,7 +102,11 @@ type providerEnvValues struct {
 	// APIKeysByIndex holds `<PROVIDER>_API_KEY_<n>` values keyed by n. The
 	// unsuffixed `<PROVIDER>_API_KEY` is kept apart in APIKey so it can claim
 	// slot 1 regardless of the order os.Environ happens to return.
-	APIKeysByIndex           map[int]string
+	APIKeysByIndex map[int]string
+	// APIKeyVar and APIKeyVarsByIndex name the variables APIKey and
+	// APIKeysByIndex came from, so errors and audit records can name them.
+	APIKeyVar                string
+	APIKeyVarsByIndex        map[int]string
 	BaseURL                  string
 	APIVersion               string
 	Backend                  string
@@ -115,15 +142,23 @@ func (v providerEnvValues) modelFilter() config.ModelFilter {
 // so setting only `_API_KEY` and `_API_KEY_3` yields two keys, and a key
 // repeated across `_API_KEY` and `_API_KEY_1` is de-duplicated to one.
 func (v providerEnvValues) apiKeys() []string {
+	_, keys := keyValues(v.sourcedAPIKeys())
+	return keys
+}
+
+// sourcedAPIKeys is apiKeys with each key labelled by its variable name.
+func (v providerEnvValues) sourcedAPIKeys() []sourcedKey {
 	if strings.TrimSpace(v.APIKey) == "" && len(v.APIKeysByIndex) == 0 {
 		return nil
 	}
 
 	// The unsuffixed key sorts ahead of every numbered slot, which are 1-based.
-	byIndex := make(map[int]string, len(v.APIKeysByIndex)+1)
-	maps.Copy(byIndex, v.APIKeysByIndex)
+	byIndex := make(map[int]sourcedKey, len(v.APIKeysByIndex)+1)
+	for index, key := range v.APIKeysByIndex {
+		byIndex[index] = sourcedKey{Value: key, Sources: []string{v.APIKeyVarsByIndex[index]}}
+	}
 	if strings.TrimSpace(v.APIKey) != "" {
-		byIndex[0] = v.APIKey
+		byIndex[0] = sourcedKey{Value: v.APIKey, Sources: []string{v.APIKeyVar}}
 	}
 
 	indexes := make([]int, 0, len(byIndex))
@@ -132,11 +167,11 @@ func (v providerEnvValues) apiKeys() []string {
 	}
 	sort.Ints(indexes)
 
-	keys := make([]string, 0, len(indexes))
+	keys := make([]sourcedKey, 0, len(indexes))
 	for _, index := range indexes {
 		keys = append(keys, byIndex[index])
 	}
-	return resolvedAPIKeys(keys)
+	return dedupeKeys(keys, providerValueSet)
 }
 
 // hasAPIKey reports whether this env group carries any credential, numbered or
@@ -214,12 +249,15 @@ func collectProviderEnvValues(prefix string, spec DiscoveryConfig, environ []str
 		case providerEnvFieldAPIKey:
 			if index == 0 {
 				values.APIKey = value
+				values.APIKeyVar = key
 				break
 			}
 			if values.APIKeysByIndex == nil {
 				values.APIKeysByIndex = make(map[int]string)
+				values.APIKeyVarsByIndex = make(map[int]string)
 			}
 			values.APIKeysByIndex[index] = value
+			values.APIKeyVarsByIndex[index] = key
 		case providerEnvFieldBaseURL:
 			values.BaseURL = normalizeResolvedBaseURL(value)
 		case providerEnvFieldAPIVersion:
@@ -425,22 +463,23 @@ func sortedProviderEnvSuffixes(groups map[string]providerEnvValues) []string {
 	return suffixes
 }
 
-func applyUnsuffixedProviderEnvVars(result map[string]config.RawProviderConfig, providerType string, spec DiscoveryConfig, source providerEnvSource, values providerEnvValues) {
+func applyUnsuffixedProviderEnvVars(overlay *providerOverlay, providerType string, spec DiscoveryConfig, source providerEnvSource, values providerEnvValues) {
 	if values.empty() {
 		return
 	}
 
+	result := overlay.providers
 	candidates := envOverlayCandidates(result, providerType, source)
 	switch len(candidates) {
 	case 0:
 		if spec.RequireBaseURL && values.BaseURL == "" {
 			return
 		}
-		result[source.DefaultName] = values.rawConfig(providerType, spec)
+		overlay.set(source.DefaultName, values.rawConfig(providerType, spec), values)
 	case 1:
 		targetKey := candidates[0]
 		if targetKey == source.DefaultName {
-			result[targetKey] = overlayProviderEnvValues(result[targetKey], values, spec)
+			overlay.set(targetKey, overlayProviderEnvValues(result[targetKey], values, spec), values)
 			return
 		}
 		// A config provider that merely shares the type may borrow the bare env
@@ -455,7 +494,7 @@ func applyUnsuffixedProviderEnvVars(result map[string]config.RawProviderConfig, 
 				"hint", "name the provider after its type or add another instance with "+source.Prefix+"_<SUFFIX>_*")
 		}
 		if !fill.empty() {
-			result[targetKey] = overlayProviderEnvValues(result[targetKey], fill, spec)
+			overlay.set(targetKey, overlayProviderEnvValues(result[targetKey], fill, spec), fill)
 		}
 	default:
 		slog.Warn("provider env vars ignored: several config providers share this type and none is named after it",
@@ -465,7 +504,7 @@ func applyUnsuffixedProviderEnvVars(result map[string]config.RawProviderConfig, 
 	}
 }
 
-func applySuffixedProviderEnvVars(result map[string]config.RawProviderConfig, providerType string, spec DiscoveryConfig, source providerEnvSource, suffix string, values providerEnvValues) {
+func applySuffixedProviderEnvVars(overlay *providerOverlay, providerType string, spec DiscoveryConfig, source providerEnvSource, suffix string, values providerEnvValues) {
 	if values.empty() {
 		return
 	}
@@ -475,11 +514,11 @@ func applySuffixedProviderEnvVars(result map[string]config.RawProviderConfig, pr
 		return
 	}
 
-	if existing, ok := result[targetKey]; ok {
+	if existing, ok := overlay.providers[targetKey]; ok {
 		if !rawProviderMatchesType(existing, providerType) {
 			return
 		}
-		result[targetKey] = overlayProviderEnvValues(existing, values, spec)
+		overlay.set(targetKey, overlayProviderEnvValues(existing, values, spec), values)
 		return
 	}
 
@@ -487,7 +526,7 @@ func applySuffixedProviderEnvVars(result map[string]config.RawProviderConfig, pr
 		return
 	}
 
-	result[targetKey] = values.rawConfig(providerType, spec)
+	overlay.set(targetKey, values.rawConfig(providerType, spec), values)
 }
 
 func (v providerEnvValues) rawConfig(providerType string, spec DiscoveryConfig) config.RawProviderConfig {
@@ -614,8 +653,8 @@ func (v providerEnvValues) withoutFieldsSetBy(existing config.RawProviderConfig)
 	}
 
 	drop("api_key", v.hasAPIKey(), rawProviderHasAPIKey(existing), func() {
-		v.APIKey = ""
-		v.APIKeysByIndex = nil
+		v.APIKey, v.APIKeyVar = "", ""
+		v.APIKeysByIndex, v.APIKeyVarsByIndex = nil, nil
 	})
 
 	stringFields := []struct {
