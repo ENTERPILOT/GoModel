@@ -356,3 +356,27 @@ func TestKeyRotationPatchesKeysCollapsedOrDroppedAtStartup(t *testing.T) {
 		})
 	}
 }
+
+func TestKeyRotationSameReferenceUnderTwoLabels(t *testing.T) {
+	// Each label is resolved, and recorded, on its own, so both change.
+	f := newRotationFixture(t, map[string]string{"a": "a-old"},
+		map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKey: "${vault:a}", APIKeys: []string{"${vault:a}", "k1"}}},
+		nil)
+	f.vault.set("a", "a-new")
+	recheck, plan := f.plan(t)
+	assert.Equal(t, []string{"providers.openai.api_key", "providers.openai.api_keys[0]"}, recheck.Fields())
+	require.NotNil(t, plan)
+	plan.Apply()
+	assert.Equal(t, []string{"a-new", "k1"}, ringKeys(f.keyrings["openai"]))
+}
+
+func TestKeyRotationParsedEnvSettingNeedsReload(t *testing.T) {
+	// OPENAI_MODELS is resolved before it is split; a new list is not a key.
+	f := newRotationFixture(t, map[string]string{"m": "model-a,model-b"},
+		map[string]config.RawProviderConfig{},
+		map[string]string{"OPENAI_API_KEY": "k", "OPENAI_MODELS": "${vault:m}"})
+	f.vault.set("m", "model-c")
+	recheck, plan := f.plan(t)
+	assert.Len(t, recheck.Fields(), 1)
+	assert.Nil(t, plan)
+}

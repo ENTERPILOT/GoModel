@@ -317,3 +317,42 @@ func TestDecodeExtensionSecretErrors(t *testing.T) {
 	assert.Equal(t, "extensions.vaults.stores.prod.token", secretErr.Field)
 	assert.ErrorIs(t, err, ErrUnknownSecretScheme)
 }
+
+func TestLoadRejectsReferencesInParsedEnvVars(t *testing.T) {
+	tests := []struct {
+		name    string
+		key     string
+		value   string
+		wantErr bool
+	}{
+		{name: "bool field", key: "LOGGING_ENABLED", value: "${env:X}", wantErr: true},
+		{name: "int field", key: "HTTP_TIMEOUT", value: "${env:X}", wantErr: true},
+		{name: "duration field", key: "RETRY_INITIAL_BACKOFF", value: "${env:X}", wantErr: true},
+		{name: "list field", key: "ENABLED_PASSTHROUGH_PROVIDERS", value: "openai,${env:X}", wantErr: true},
+		{name: "parsed outside the tags", key: "SEMANTIC_CACHE_ENABLED", value: "${file:/x}", wantErr: true},
+		{name: "plugin list", key: "PLUGINS_LOAD", value: "${env:X}", wantErr: true},
+		{name: "limit family", key: "SET_BUDGET_TEAM", value: "${env:X}", wantErr: true},
+		{name: "tagging flag", key: "TAGGING_HEADER_1_DONOTPASS", value: "${env:X}", wantErr: true},
+		{name: "string field", key: "POSTGRES_URL", value: "${file:/run/secrets/pg}"},
+		{name: "escaped is not a reference", key: "LOGGING_ENABLED", value: "$${env:X}"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := rejectParsedEnvReferences([]string{"UNRELATED=${env:Y}", tt.key + "=" + tt.value})
+			if !tt.wantErr {
+				require.NoError(t, err)
+				return
+			}
+			require.EqualError(t, err, tt.key+": secret references are supported only in string settings; this variable is parsed as a number, boolean, duration, or list")
+		})
+	}
+}
+
+func TestLoadFailsOnReferenceInParsedEnvVar(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	t.Setenv("LOGGING_ENABLED", "${env:GOMODEL_TEST_FLAG}")
+	withTempDir(t, func(string) {
+		_, err := Load()
+		require.ErrorContains(t, err, "LOGGING_ENABLED: secret references are supported only in string settings")
+	})
+}

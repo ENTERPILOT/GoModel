@@ -153,11 +153,20 @@ Resolution order for one generation:
    value that an environment variable replaces, an environment variable the
    merge ignores, and a provider skipped for missing credentials are never
    looked up. Resolved values are data: a secret containing `${` is kept.
-   API keys keep their source through key normalization: a key is resolved
-   and reported under its `config.yaml` path
+   API keys keep their source through key normalization: each key is
+   resolved and reported under its `config.yaml` path
    (`providers.openai.api_keys[1]`) or the name of the environment variable
-   that set it (`OPENAI_API_KEY_2`), and identical references are looked up
-   once.
+   that set it (`OPENAI_API_KEY_2`), even when two sources hold the same
+   reference, and keys that resolve to the same value are collapsed
+   afterwards. Provider settings that are parsed or steer the merge or the
+   credential filter (models, model filters, booleans, `type`, `backend`,
+   Vertex `auth_type`) are resolved, once, just before they are read; an
+   environment setting is resolved only when the merge applies it.
+
+`config.Load` parses some environment variables into numbers, booleans,
+durations, and lists before any extension can register a scheme. A
+reference in one of those is rejected with an error naming the variable;
+string settings, and string values inside JSON variables, accept references.
 
 Any reference that is still unresolved after step 3 or 4 stops the
 generation with an error naming the field and the scheme, never the value.
