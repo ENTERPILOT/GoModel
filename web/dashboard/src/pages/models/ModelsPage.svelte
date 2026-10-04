@@ -1,7 +1,7 @@
 <script>
   // Models page — grouped model inventory with virtual models (redirects /
-  // load balancers / access policies), pricing overrides and rate limit
-  // entry points.
+  // load balancers / access policies), pricing and metadata overrides and
+  // rate limit entry points.
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import AuthBanner from "$lib/components/organisms/AuthBanner.svelte";
   import { untrack } from "svelte";
@@ -14,10 +14,12 @@
   import { virtualModels } from "./virtualModels.svelte.js";
   import { virtualModelEditor } from "./virtualModelEditor.svelte.js";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
+  import { metadataOverrides } from "./metadataOverrides.svelte.js";
   import { modelDetailsState } from "./modelDetails.svelte.js";
   import ModelTable from "./ModelTable.svelte";
   import VirtualModelEditor from "./VirtualModelEditor.svelte";
   import PricingOverrideEditor from "./PricingOverrideEditor.svelte";
+  import MetadataOverrideEditor from "./MetadataOverrideEditor.svelte";
   import RateLimitEditor from "$pages/rate-limits/RateLimitEditor.svelte";
   import RateLimitInspector from "$pages/rate-limits/RateLimitInspector.svelte";
   import { rateLimits } from "$pages/rate-limits/rateLimits.svelte.js";
@@ -26,7 +28,7 @@
 
   const PAGE = "models";
 
-  // Page data: virtual models and pricing overrides load on boot/refresh;
+  // Page data: virtual models and pricing/metadata overrides load on boot/refresh;
   // rate limit rules feed the gauge buttons, so they are fetched on entering
   // both the rate-limits and models pages.
   $effect(() => {
@@ -34,6 +36,7 @@
     if (router.page !== PAGE) return;
     virtualModels.fetchVirtualModels();
     pricingOverrides.fetchModelPricingOverrides();
+    metadataOverrides.fetchOverrides();
     rateLimits.fetchRateLimitsPage();
   });
 
@@ -151,6 +154,7 @@
 
   <VirtualModelEditor />
   <PricingOverrideEditor />
+  <MetadataOverrideEditor />
 
   {#if virtualModels.displayModels.length > 0 || modelsStore.filter}
     <ModelTable />
