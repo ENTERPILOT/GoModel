@@ -23,6 +23,8 @@ general_settings:
 
 func writeLiteLLMConfig(t *testing.T) string {
 	t.Helper()
+	// A developer's DATABASE_URL must not make the tests read a database.
+	t.Setenv("DATABASE_URL", "")
 	path := filepath.Join(t.TempDir(), "litellm.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(migrateTestConfig), 0o600))
 	return path
@@ -46,6 +48,7 @@ func TestRunMigrateCommand_Usage(t *testing.T) {
 		{name: "unknown source", args: []string{"portkey"}, wantCode: 2, wantErr: `unknown source "portkey"`},
 		{name: "missing file", args: []string{"litellm"}, wantCode: 2, wantErr: "missing LiteLLM config file argument"},
 		{name: "extra args", args: []string{"litellm", "a.yaml", "b.yaml"}, wantCode: 2, wantErr: "unexpected arguments"},
+		{name: "skip and import", args: []string{"litellm", "--skip-database", "--gomodel-url", "http://gomodel", "a.yaml"}, wantCode: 2, wantErr: "--skip-database cannot be combined"},
 		{name: "help", args: []string{"help"}, wantCode: 0},
 		{name: "litellm help", args: []string{"litellm", "-h"}, wantCode: 0},
 		{name: "file not found", args: []string{"litellm", filepath.Join(t.TempDir(), "nope.yaml")}, wantCode: 1, wantErr: "nope.yaml"},
@@ -71,7 +74,9 @@ func TestRunMigrateCommand_DryRunWritesNothing(t *testing.T) {
 	out := stdout.String()
 	assert.Contains(t, out, "# LiteLLM to GoModel migration report")
 	assert.Contains(t, out, "virtual_models:")
-	assert.Contains(t, out, "Dry run: nothing was written.")
+	assert.Contains(t, out, "No files were written.")
+	assert.Contains(t, out, "`database`: not read: keys, teams, users, and budgets were not migrated. Pass --database-url to import them")
+	assert.NotContains(t, out, "Nothing was imported into GoModel", "no import was planned")
 	assert.NotContains(t, out, "sk-inline-secret", "the dry run never prints secrets")
 	assert.NotContains(t, out, "sk-1234")
 	entries, err := os.ReadDir(filepath.Dir(path))
@@ -125,4 +130,31 @@ func TestRunMigrateCommand_DoesNotFollowSymlinks(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, info.Mode().IsRegular())
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+}
+
+func TestRunMigrateCommand_DatabaseErrors(t *testing.T) {
+	path := writeLiteLLMConfig(t)
+	tests := []struct {
+		name string
+		args []string
+		env  string
+		want string
+	}{
+		{name: "import without a database", args: []string{"--gomodel-url", "http://127.0.0.1:1"}, want: "--gomodel-url imports from the LiteLLM database; pass --database-url"},
+		{name: "unreachable database flag", args: []string{"--database-url", "postgres://user@127.0.0.1:1/litellm?connect_timeout=1"}, want: "pass --skip-database to convert the config only"},
+		{name: "unreachable DATABASE_URL", env: "postgres://user@127.0.0.1:1/litellm?connect_timeout=1", want: "connect to the LiteLLM database"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("DATABASE_URL", tt.env)
+			args := append(append([]string{"litellm"}, tt.args...), path)
+			err := runMigrateCommand("gomodel", args, io.Discard, io.Discard)
+			require.ErrorContains(t, err, tt.want)
+			assert.Equal(t, 1, ExitCode(err))
+		})
+	}
+
+	t.Setenv("DATABASE_URL", "postgres://user@127.0.0.1:1/litellm?connect_timeout=1")
+	require.NoError(t, runMigrateCommand("gomodel", []string{"litellm", "--skip-database", path}, io.Discard, io.Discard),
+		"--skip-database ignores DATABASE_URL")
 }

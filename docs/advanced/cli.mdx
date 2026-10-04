@@ -222,10 +222,16 @@ See [Encryption at Rest](/advanced/encryption-at-rest).
 
 `gomodel migrate litellm` converts a LiteLLM proxy `config.yaml` into a GoModel
 `config.yaml`, a `.env` with the secrets that were inline, and a migration
-report. Without `--out` it is a dry run that writes nothing.
+report. Without `--out` it writes no files.
+
+It also reads keys, teams, users, and budgets from the LiteLLM database when it
+has a URL (`--database-url`, the config's `database_url`, or `DATABASE_URL`),
+and with `--gomodel-url` imports them into a running GoModel. `--skip-database`
+converts the config only.
 
 ```sh
-gomodel migrate litellm [--out DIR] [--force] <litellm-config.yaml>
+gomodel migrate litellm [--out DIR] [--force] [--database-url URL | --skip-database]
+  [--gomodel-url URL] <litellm-config.yaml>
 ```
 
 See [Migrating from LiteLLM](/guides/migrate-from-litellm) for the full
