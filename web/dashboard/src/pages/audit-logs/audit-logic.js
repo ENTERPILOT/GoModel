@@ -6,7 +6,11 @@
 import { formatJSON, formatNumber } from "../../lib/utils/format.js";
 import * as m from "../../lib/paraglide/messages.js";
 import { phaseLabel } from "../../lib/utils/pluginPhases.js";
-import { auditEntryTypeVisible, auditExcludeOperationsQuery } from "./audit-operations.js";
+import {
+  auditEntryTypeVisible,
+  auditExcludeOperationsQuery,
+  auditTypeForPath,
+} from "./audit-operations.js";
 import {
   workflowEntryGuardrails,
   workflowGuardrailActionLabel,
@@ -465,6 +469,36 @@ export function formatDurationNs(ns) {
   if (v < 1000000) return Math.round(v / 1000) + " µs";
   if (v < 1000000000) return (v / 1000000).toFixed(2) + " ms";
   return (v / 1000000000).toFixed(2) + " s";
+}
+
+// Request types whose output tokens are generated text, so output tokens over
+// duration reads as generation speed. Embeddings, images, audio, batches and
+// realtime sessions have no comparable per-request rate.
+const TOKEN_RATE_TYPES = new Set(["chat", "responses", "passthrough"]);
+
+// auditOutputTokensPerSecond is output tokens over the entry's total duration
+// (time to first token included), or null when either is missing or zero or
+// the request does not generate text. Provider attempts carry no usage, so the
+// rate is only known per entry.
+export function auditOutputTokensPerSecond(entry) {
+  if (!entry || !TOKEN_RATE_TYPES.has(auditTypeForPath(entry.path))) return null;
+  const usage = auditUsage(entry);
+  const outputTokens = Number(usage && usage.output_tokens);
+  const durationNs = Number(entry.duration_ns);
+  if (!Number.isFinite(outputTokens) || outputTokens <= 0) return null;
+  if (!Number.isFinite(durationNs) || durationNs <= 0) return null;
+  return outputTokens / (durationNs / 1e9);
+}
+
+// formatTokensPerSecond renders a rate as "42.1 tok/s" (whole numbers from
+// 100 up), or "" when there is no rate.
+export function formatTokensPerSecond(rate) {
+  const v = Number(rate);
+  if (rate == null || !Number.isFinite(v) || v <= 0) return "";
+  const tenths = Math.round(v * 10) / 10;
+  return m.audit_tokens_per_second({
+    rate: tenths >= 100 ? String(Math.round(v)) : tenths.toFixed(1),
+  });
 }
 
 export function statusCodeClass(statusCode) {

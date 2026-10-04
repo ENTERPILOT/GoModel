@@ -264,6 +264,8 @@
   "audit_attempt_succeeded": "成功",
   "audit_attempt_failed_status": "失败",
   "audit_attempt_not_captured": "本次尝试未捕获到响应。",
+  "audit_tokens_per_second": "{rate} Token/秒",
+  "audit_tokens_per_second_title": "输出 Token 数除以请求总耗时（包含首个 Token 的等待时间）",
   "audit_request_not_captured": "未捕获到请求详情。",
   "audit_waiting_request_data": "正在等待请求数据…",
   "audit_request_body_too_large": "请求体过大，无法捕获。",
