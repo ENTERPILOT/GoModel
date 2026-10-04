@@ -270,6 +270,9 @@ func Load() (*LoadResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := rejectParsedEnvReferences(os.Environ()); err != nil {
+		return nil, err
+	}
 
 	rawProviders, masterKeyUnresolved, err := applyYAML(cfg, strict)
 	if err != nil {

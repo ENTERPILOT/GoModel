@@ -45,12 +45,13 @@ func (r *CredentialsResult) Close() error {
 
 // NewCredentialsStore creates the provider-credentials
 // subsystem using an existing storage connection. Secret fields are sealed
-// with box; a nil box stores them in plaintext.
-func NewCredentialsStore(ctx context.Context, shared storage.Storage, box *encryption.Box, factory *ProviderFactory, registry *ModelRegistry, declaredNames []string, resilience config.ResilienceConfig) (*CredentialsResult, error) {
+// with box; a nil box stores them in plaintext. secrets resolves the secret
+// references stored credentials hold.
+func NewCredentialsStore(ctx context.Context, shared storage.Storage, box *encryption.Box, factory *ProviderFactory, registry *ModelRegistry, declaredNames []string, resilience config.ResilienceConfig, secrets *config.Secrets) (*CredentialsResult, error) {
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
-	return newCredentialsResult(ctx, shared, box, factory, registry, declaredNames, resilience)
+	return newCredentialsResult(ctx, shared, box, factory, registry, declaredNames, resilience, secrets)
 }
 
 // ReencryptCredentials seals every provider credential secret that is in
@@ -64,14 +65,14 @@ func ReencryptCredentials(ctx context.Context, shared storage.Storage, box *encr
 	return (&sealedCredentialStore{CredentialStore: store, box: box}).reencrypt(ctx)
 }
 
-func newCredentialsResult(ctx context.Context, storeConn storage.Storage, box *encryption.Box, factory *ProviderFactory, registry *ModelRegistry, declaredNames []string, resilience config.ResilienceConfig) (*CredentialsResult, error) {
+func newCredentialsResult(ctx context.Context, storeConn storage.Storage, box *encryption.Box, factory *ProviderFactory, registry *ModelRegistry, declaredNames []string, resilience config.ResilienceConfig, secrets *config.Secrets) (*CredentialsResult, error) {
 	rawStore, err := createCredentialStore(ctx, storeConn)
 	if err != nil {
 		return nil, err
 	}
 	store := sealCredentialStore(rawStore, box)
 
-	service, err := NewCredentialsService(ctx, factory, registry, store, declaredNames, resilience)
+	service, err := NewCredentialsService(ctx, factory, registry, store, declaredNames, resilience, secrets)
 	if err != nil {
 		_ = store.Close()
 		return nil, err

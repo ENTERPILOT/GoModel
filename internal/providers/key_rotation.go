@@ -4,36 +4,35 @@ import (
 	"maps"
 	"reflect"
 	"slices"
-	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/enterpilot/gomodel/config"
 )
 
-// keyRotation keeps the provider map Init built its providers from, after
-// the env overlay and secret resolution, so a rotated key is re-applied
-// through the very same normalization and filtering rather than a second copy
-// of their rules, and the outcome is swapped into the live keyrings.
+// keyRotation keeps the state Init built its providers from (see
+// providerSources), so a rotated key is re-applied through the very same
+// de-duplication and filtering rather than a second copy of their rules, and
+// the outcome is swapped into the live keyrings.
 //
-// Because references are resolved after the env overlay, every provider key
-// is recorded as providers.<name>.api_key or providers.<name>.api_keys[i],
-// whether config.yaml or an environment variable supplied it.
+// Every API key is recorded under the source the operator wrote: its
+// config.yaml path ("providers.openai.api_keys[1]") or the environment
+// variable that set it ("OPENAI_API_KEY_2"). A changed field is a provider
+// key exactly when it is the source a key was resolved under.
 //
 // It holds resolved values, as the provider configs already do; they live for
 // the generation like every other resolved credential.
 type keyRotation struct {
 	mu         sync.Mutex
-	merged     map[string]config.RawProviderConfig
+	sources    providerSources
 	discovery  map[string]DiscoveryConfig
 	resilience config.ResilienceConfig
 	providers  map[string]ProviderConfig
 	keyrings   map[string]*Keyring // registered providers only
 }
 
-func newKeyRotation(merged map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig, resilience config.ResilienceConfig, providers map[string]ProviderConfig, keyrings map[string]*Keyring) *keyRotation {
+func newKeyRotation(sources providerSources, discovery map[string]DiscoveryConfig, resilience config.ResilienceConfig, providers map[string]ProviderConfig, keyrings map[string]*Keyring) *keyRotation {
 	return &keyRotation{
-		merged:     cloneRawProviders(merged),
+		sources:    providerSources{providers: maps.Clone(sources.providers), keys: cloneKeySources(sources.keys)},
 		discovery:  discovery,
 		resilience: resilience,
 		providers:  maps.Clone(providers),
@@ -45,14 +44,14 @@ func newKeyRotation(merged map[string]config.RawProviderConfig, discovery map[st
 // InitResult.PlanKeyRotation and install it with Apply.
 type KeyRotation struct {
 	state     *keyRotation
-	merged    map[string]config.RawProviderConfig
+	keys      map[string][]sourcedKey
 	providers map[string]ProviderConfig
 	swaps     []string
 }
 
 // Providers returns the names of the providers whose key set changes, sorted.
 // It is empty when the rotated secrets did not change any effective key, for
-// example a YAML key shadowed by an environment variable.
+// example a key that now equals another one of the provider's keys.
 func (k *KeyRotation) Providers() []string {
 	if k == nil {
 		return nil
@@ -72,7 +71,7 @@ func (k *KeyRotation) Apply() {
 	for _, name := range k.swaps {
 		s.keyrings[name].Replace(k.providers[name].APIKeys...)
 	}
-	s.merged, s.providers = k.merged, k.providers
+	s.sources.keys, s.providers = k.keys, k.providers
 }
 
 // PlanKeyRotation works out whether the fields a secret recheck found changed
@@ -80,9 +79,6 @@ func (k *KeyRotation) Apply() {
 // they cannot, and the generation has to be rebuilt instead: a changed field is
 // not a provider API key, a provider would gain or lose its last key, or the
 // change alters anything about a provider besides its keys.
-//
-// Provider keys are the fields providers.<name>.api_key and
-// providers.<name>.api_keys[i], wherever their value came from.
 func (r *InitResult) PlanKeyRotation(recheck *config.SecretRecheck) *KeyRotation {
 	if r == nil || r.keys == nil {
 		return nil
@@ -94,20 +90,20 @@ func (s *keyRotation) plan(recheck *config.SecretRecheck) *KeyRotation {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	merged := maps.Clone(s.merged)
+	keys := cloneKeySources(s.sources.keys)
 	for _, field := range recheck.Fields() {
 		value, _ := recheck.Value(field)
-		if !setProviderKey(merged, field, value) {
+		if !setKeyBySource(keys, field, value) {
 			return nil
 		}
 	}
 
-	next, _ := finishProviders(merged, s.resilience, s.discovery)
+	next, _ := finishProviders(providerSources{providers: s.sources.providers, keys: keys}, s.resilience, s.discovery)
 	swaps, ok := s.keySwaps(next)
 	if !ok {
 		return nil
 	}
-	return &KeyRotation{state: s, merged: merged, providers: next, swaps: swaps}
+	return &KeyRotation{state: s, keys: keys, providers: next, swaps: swaps}
 }
 
 // keySwaps lists the providers whose keys differ in next, or reports false
@@ -128,8 +124,8 @@ func (s *keyRotation) keySwaps(next map[string]ProviderConfig) ([]string, bool) 
 			}
 			swaps = append(swaps, name)
 		}
-		current.APIKey, current.APIKeys = "", nil
-		candidate.APIKey, candidate.APIKeys = "", nil
+		current.APIKey, current.APIKeys, current.APIKeySources = "", nil, nil
+		candidate.APIKey, candidate.APIKeys, candidate.APIKeySources = "", nil, nil
 		if !reflect.DeepEqual(current, candidate) {
 			return nil, false
 		}
@@ -138,42 +134,26 @@ func (s *keyRotation) keySwaps(next map[string]ProviderConfig) ([]string, bool) 
 	return swaps, true
 }
 
-// setProviderKey writes value into raw at a providers.<name>.api_key or
-// providers.<name>.api_keys[i] path, reporting false for any other path.
-func setProviderKey(raw map[string]config.RawProviderConfig, field, value string) bool {
-	rest, ok := strings.CutPrefix(field, "providers.")
-	if !ok {
-		return false
-	}
-	if name, found := strings.CutSuffix(rest, ".api_key"); found {
-		p, exists := raw[name]
-		if !exists {
-			return false
+// setKeyBySource sets the key resolved under source field, reporting false
+// when no key was.
+func setKeyBySource(keys map[string][]sourcedKey, field, value string) bool {
+	for _, sourced := range keys {
+		for i := range sourced {
+			if sourced[i].Sources[0] == field {
+				sourced[i].Value = value
+				return true
+			}
 		}
-		p.APIKey = value
-		raw[name] = p
-		return true
 	}
-	head, index, found := strings.Cut(rest, ".api_keys[")
-	if !found {
-		return false
-	}
-	i, err := strconv.Atoi(strings.TrimSuffix(index, "]"))
-	p, exists := raw[head]
-	if err != nil || !strings.HasSuffix(index, "]") || !exists || i < 0 || i >= len(p.APIKeys) {
-		return false
-	}
-	p.APIKeys = slices.Clone(p.APIKeys)
-	p.APIKeys[i] = value
-	raw[head] = p
-	return true
+	return false
 }
 
-func cloneRawProviders(raw map[string]config.RawProviderConfig) map[string]config.RawProviderConfig {
-	clone := make(map[string]config.RawProviderConfig, len(raw))
-	for name, p := range raw {
-		p.APIKeys = slices.Clone(p.APIKeys)
-		clone[name] = p
+// cloneKeySources copies the key slices, so patching one entry leaves the
+// state it was cloned from intact. Sources are never modified and are shared.
+func cloneKeySources(keys map[string][]sourcedKey) map[string][]sourcedKey {
+	clone := make(map[string][]sourcedKey, len(keys))
+	for name, sourced := range keys {
+		clone[name] = slices.Clone(sourced)
 	}
 	return clone
 }

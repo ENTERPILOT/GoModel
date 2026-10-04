@@ -26,9 +26,9 @@ func sealCredentialStore(store CredentialStore, box *encryption.Box) CredentialS
 	return &sealedCredentialStore{CredentialStore: store, box: box}
 }
 
-// credentialSecretFields points at every secret field of cred. API keys share
+// credentialSealedFields points at every secret field of cred. API keys share
 // one field name: they are interchangeable members of one rotation set.
-func credentialSecretFields(cred *ManagedProviderCredential) []encryption.Field {
+func credentialSealedFields(cred *ManagedProviderCredential) []encryption.Field {
 	fields := []encryption.Field{
 		{Name: "service_account_json", Value: &cred.ServiceAccountJSON},
 		{Name: "service_account_json_base64", Value: &cred.ServiceAccountJSONBase64},
@@ -41,7 +41,7 @@ func credentialSecretFields(cred *ManagedProviderCredential) []encryption.Field 
 }
 
 func (s *sealedCredentialStore) open(cred *ManagedProviderCredential) error {
-	return s.box.OpenFields(credentialSecretKind, normalizeCredentialName(cred.Name), credentialSecretFields(cred)...)
+	return s.box.OpenFields(credentialSecretKind, normalizeCredentialName(cred.Name), credentialSealedFields(cred)...)
 }
 
 func (s *sealedCredentialStore) List(ctx context.Context) ([]ManagedProviderCredential, error) {
@@ -71,7 +71,7 @@ func (s *sealedCredentialStore) Get(ctx context.Context, name string) (*ManagedP
 func (s *sealedCredentialStore) Upsert(ctx context.Context, cred ManagedProviderCredential) error {
 	// The caller's slice must not end up holding ciphertext.
 	cred.APIKeys = slices.Clone(cred.APIKeys)
-	if err := s.box.SealFields(credentialSecretKind, normalizeCredentialName(cred.Name), credentialSecretFields(&cred)...); err != nil {
+	if err := s.box.SealFields(credentialSecretKind, normalizeCredentialName(cred.Name), credentialSealedFields(&cred)...); err != nil {
 		return err
 	}
 	return s.CredentialStore.Upsert(ctx, cred)
@@ -95,7 +95,7 @@ func (s *sealedCredentialStore) reencrypt(ctx context.Context) (encryption.Repor
 		if err != nil {
 			return report, err
 		}
-		if !s.box.NeedsReseal(credentialSecretFields(cred)...) {
+		if !s.box.NeedsReseal(credentialSealedFields(cred)...) {
 			continue
 		}
 		if err := s.open(cred); err != nil {

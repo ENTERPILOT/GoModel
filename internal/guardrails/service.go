@@ -13,6 +13,7 @@ import (
 
 	"github.com/goccy/go-json"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/pluginapi"
@@ -38,6 +39,12 @@ type serviceSnapshot struct {
 	// keys identifies what each instance was built from, so a refresh can
 	// keep instances whose definition did not change.
 	keys map[string]string
+	// resolved is the config each instance was built with: the stored
+	// config with secret references resolved.
+	resolved map[string]json.RawMessage
+	// pending are the secret resolutions of the instances built for this
+	// snapshot, recorded for rotation once it serves.
+	pending []*config.ResolvedEntity
 }
 
 // defaultRetireAfter is how long a replaced instance stays open after the
@@ -59,11 +66,19 @@ type Service struct {
 	catalog *plugins.Catalog
 	deps    plugins.HostDeps
 	chat    *chatCompleterRef
+	// secrets resolves the secret references stored configs hold; nil
+	// resolves the built-in env and file schemes only.
+	secrets *config.Secrets
 
 	refreshMu sync.Mutex
-	mu        sync.RWMutex
-	snapshot  serviceSnapshot
-	retired   []retiredInstance
+	// mutateMu serializes admin saves and deletes from reading the stored
+	// definition through releasing the secrets it held, so none releases a
+	// secret another one has just stored, or stores one another has just
+	// released. It is taken before refreshMu.
+	mutateMu sync.Mutex
+	mu       sync.RWMutex
+	snapshot serviceSnapshot
+	retired  []retiredInstance
 	// retireAfter is the delay before a replaced instance is closed.
 	retireAfter time.Duration
 	// now is the clock; tests replace it.
@@ -117,6 +132,7 @@ func emptySnapshot() serviceSnapshot {
 		instances:   map[string]*plugins.Instance{},
 		summaries:   map[string]string{},
 		keys:        map[string]string{},
+		resolved:    map[string]json.RawMessage{},
 	}
 }
 
@@ -143,7 +159,7 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 	if err != nil {
 		return guardrailServiceError("list guardrails", err)
 	}
-	next, err := s.buildSnapshot(ctx, definitions)
+	next, err := s.buildSnapshot(ctx, definitions, nil)
 	if err != nil {
 		return guardrailServiceError("load guardrails", err)
 	}
@@ -210,6 +226,15 @@ func (s *Service) swap(ctx context.Context, next serviceSnapshot) {
 	s.retired = kept
 	s.mu.Unlock()
 	_ = closeInstances(ctx, due) // failures are logged
+
+	for name := range previous.definitions {
+		if _, ok := next.definitions[name]; !ok {
+			s.secrets.ForgetEntity(definitionSecretEntity(name))
+		}
+	}
+	for _, resolved := range next.pending {
+		resolved.Record()
+	}
 }
 
 // discard closes the instances of a snapshot that never served: those built
@@ -289,6 +314,9 @@ func (s *Service) Upsert(ctx context.Context, definition Definition) error {
 	if err != nil {
 		return err
 	}
+	s.mutateMu.Lock()
+	defer s.mutateMu.Unlock()
+
 	if stored, ok := s.Get(identity.Name); ok && stored.Type == identity.Type {
 		if entry, ok := s.catalog.Lookup(identity.Type); ok {
 			identity.Config = plugins.MergeSecrets(entry.Manifest.ConfigSchema, identity.Config, s.storedConfig(identity.Name))
@@ -298,10 +326,22 @@ func (s *Service) Upsert(ctx context.Context, definition Definition) error {
 	if err != nil {
 		return err
 	}
-	return s.commit(ctx, func(next map[string]Definition) error {
+	previous := s.storedSecretValues(normalized.Name)
+	written, err := s.storeDefinitionSecrets(ctx, &normalized, previous)
+	if err != nil {
+		return guardrailServiceError("upsert guardrail", err)
+	}
+	err = s.commit(ctx, func(next map[string]Definition) error {
 		next[normalized.Name] = normalized
 		return nil
 	}, func() error { return s.store.Upsert(ctx, normalized) }, "upsert guardrail")
+	if err != nil {
+		// The stored definition is unchanged, so whatever it holds stays.
+		s.releaseSecrets(ctx, normalized.Name, written, previous)
+		return err
+	}
+	s.releaseSecrets(ctx, normalized.Name, previous, s.definitionSecretValues(normalized))
+	return nil
 }
 
 // Delete removes a guardrail definition from storage and swaps the snapshot on success.
@@ -310,10 +350,19 @@ func (s *Service) Delete(ctx context.Context, name string) error {
 	if name == "" {
 		return newValidationError("guardrail name is required", nil)
 	}
-	return s.commit(ctx, func(next map[string]Definition) error {
+	s.mutateMu.Lock()
+	defer s.mutateMu.Unlock()
+
+	previous := s.storedSecretValues(name)
+	err := s.commit(ctx, func(next map[string]Definition) error {
 		delete(next, name)
 		return nil
 	}, func() error { return s.store.Delete(ctx, name) }, "delete guardrail")
+	if err != nil {
+		return err
+	}
+	s.releaseSecrets(ctx, name, previous, nil)
+	return nil
 }
 
 // commit applies mutate to the stored definition set, builds the resulting
@@ -330,7 +379,7 @@ func (s *Service) commit(ctx context.Context, mutate func(map[string]Definition)
 	if err := mutate(nextDefinitions); err != nil {
 		return err
 	}
-	next, err := s.buildSnapshot(ctx, definitionsFromMap(nextDefinitions))
+	next, err := s.buildSnapshot(ctx, definitionsFromMap(nextDefinitions), nil)
 	if err != nil {
 		return err
 	}
@@ -424,9 +473,9 @@ func (s *Service) storedConfig(name string) json.RawMessage {
 	return s.snapshot.definitions[name].Config
 }
 
-// InstanceConfig returns the stored (unredacted) config and type of one
-// cached guardrail, for building plugin instances outside this service.
-// Callers must not expose the config to admin clients.
+// InstanceConfig returns the unredacted config, secret references resolved,
+// and type of one cached guardrail, for building plugin instances outside
+// this service. Callers must not expose the config to admin clients.
 func (s *Service) InstanceConfig(name string) (config json.RawMessage, pluginType string, ok bool) {
 	name = normalizeDefinitionName(name)
 	if s == nil || name == "" {
@@ -438,7 +487,7 @@ func (s *Service) InstanceConfig(name string) (config json.RawMessage, pluginTyp
 	if !ok {
 		return nil, "", false
 	}
-	return append(json.RawMessage(nil), definition.Config...), definition.Type, true
+	return append(json.RawMessage(nil), s.snapshot.resolved[name]...), definition.Type, true
 }
 
 // TypeDefinitions returns the guardrail editor schema of every catalog plugin
@@ -558,9 +607,10 @@ func normalize(normalizer Normalizer, config json.RawMessage) (normalized json.R
 }
 
 // buildSnapshot builds the snapshot for definitions, reusing every current
-// instance whose definition is unchanged (see instanceKey). On error the
-// instances built so far are closed.
-func (s *Service) buildSnapshot(ctx context.Context, definitions []Definition) (next serviceSnapshot, err error) {
+// instance whose definition is unchanged (see instanceKey) and that rebuild
+// does not name. Secret references are resolved for each instance built. On
+// error the instances built so far are closed.
+func (s *Service) buildSnapshot(ctx context.Context, definitions []Definition, rebuild func(name string) bool) (next serviceSnapshot, err error) {
 	s.mu.RLock()
 	current := s.snapshot
 	s.mu.RUnlock()
@@ -587,14 +637,22 @@ func (s *Service) buildSnapshot(ctx context.Context, definitions []Definition) (
 		}
 		key := instanceKey(normalized)
 		inst := current.instances[normalized.Name]
-		if inst == nil || current.keys[normalized.Name] != key {
+		resolved := current.resolved[normalized.Name]
+		if inst == nil || current.keys[normalized.Name] != key || (rebuild != nil && rebuild(normalized.Name)) {
+			spec, secrets, err := s.resolveDefinition(ctx, entry.Manifest.ConfigSchema, normalized)
+			if err != nil {
+				return serviceSnapshot{}, newValidationError(fmt.Sprintf("load guardrail %q: %v", normalized.Name, err), err)
+			}
 			host := plugins.NewHost(s.deps, plugins.HostInfo{PluginName: entry.Name, InstanceName: normalized.Name, UserPath: normalized.UserPath})
-			inst, err = plugins.NewInstance(ctx, entry, instanceSpec(normalized), host)
+			inst, err = plugins.NewInstance(ctx, entry, spec, host)
 			if err != nil {
 				return serviceSnapshot{}, newValidationError(fmt.Sprintf("load guardrail %q: %v", normalized.Name, err), err)
 			}
 			built = append(built, inst)
+			resolved = spec.Config
+			next.pending = append(next.pending, secrets)
 		}
+		next.resolved[normalized.Name] = resolved
 		next.definitions[normalized.Name] = normalized
 		next.instances[normalized.Name] = inst
 		next.keys[normalized.Name] = key
