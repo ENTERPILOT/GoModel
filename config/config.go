@@ -2,6 +2,7 @@
 package config
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -77,21 +78,35 @@ type Config struct {
 type LoadResult struct {
 	Config       *Config
 	RawProviders map[string]RawProviderConfig
+
+	// Secrets resolves ${scheme:reference} secret references for this
+	// generation. Load leaves references in place; a distribution may Register
+	// more schemes in its configuration hook before ResolveSecrets runs.
+	Secrets *Secrets
+
+	secretsResolved bool
+	secretsErr      error
 }
 
 // DecodeExtension strictly decodes one named extensions: section into target.
 // It returns false when the section is absent. Core deliberately does not know
 // any extension's schema, while each extension still gets unknown-key safety.
+// Secret references in the section are resolved with the schemes registered
+// on Secrets at the time of the call.
 func (r *LoadResult) DecodeExtension(name string, target any) (bool, error) {
 	if r == nil || r.Config == nil || target == nil {
 		return false, nil
 	}
 	name = strings.TrimSpace(name)
-	node, ok := r.Config.Extensions[name]
+	stored, ok := r.Config.Extensions[name]
 	if !ok {
 		return false, nil
 	}
-	data, err := yaml.Marshal(&node)
+	node := cloneYAMLNode(&stored)
+	if err := r.Secrets.resolveYAMLNode(context.Background(), "extensions."+name, node); err != nil {
+		return false, err
+	}
+	data, err := yaml.Marshal(node)
 	if err != nil {
 		return false, fmt.Errorf("encode extensions.%s: %w", name, err)
 	}
@@ -253,6 +268,9 @@ func Load() (*LoadResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := rejectParsedEnvReferences(os.Environ()); err != nil {
+		return nil, err
+	}
 
 	rawProviders, masterKeyUnresolved, err := applyYAML(cfg, strict)
 	if err != nil {
@@ -375,6 +393,7 @@ func Load() (*LoadResult, error) {
 	return &LoadResult{
 		Config:       cfg,
 		RawProviders: rawProviders,
+		Secrets:      NewSecrets(),
 	}, nil
 }
 

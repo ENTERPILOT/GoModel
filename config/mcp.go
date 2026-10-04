@@ -288,7 +288,7 @@ func normalizeMCPServers(cfg *MCPConfig) error {
 		if _, dup := normalized[canonical]; dup {
 			return fmt.Errorf("mcp.servers: duplicate server slug %q", canonical)
 		}
-		if err := ValidateMCPServerConfig(&server); err != nil {
+		if err := validateMCPServerConfig(&server, true); err != nil {
 			return fmt.Errorf("mcp.servers[%q]: %w", canonical, err)
 		}
 		normalized[canonical] = server
@@ -369,6 +369,25 @@ func DeriveMCPServerSlug(name string) string {
 // ValidateMCPServerConfig validates one server definition and applies
 // defaults in place. It is shared by config loading and the admin API.
 func ValidateMCPServerConfig(server *MCPServerConfig) error {
+	return validateMCPServerConfig(server, false)
+}
+
+// validateResolvedMCPServers finishes the checks normalizeMCPConfig deferred
+// for values holding a secret reference, now that they are resolved.
+func validateResolvedMCPServers(servers map[string]MCPServerConfig) error {
+	for name, server := range servers {
+		if err := ValidateMCPServerConfig(&server); err != nil {
+			return fmt.Errorf("mcp.servers[%q]: %w", name, err)
+		}
+		servers[name] = server
+	}
+	return nil
+}
+
+// validateMCPServerConfig is ValidateMCPServerConfig. With allowReferences, a
+// URL holding a secret reference skips the scheme check, which
+// validateResolvedMCPServers repeats once the reference is resolved.
+func validateMCPServerConfig(server *MCPServerConfig, allowReferences bool) error {
 	server.Transport = strings.ToLower(strings.TrimSpace(server.Transport))
 	server.URL = strings.TrimSpace(server.URL)
 	server.Command = strings.TrimSpace(server.Command)
@@ -384,7 +403,8 @@ func ValidateMCPServerConfig(server *MCPServerConfig) error {
 		if server.URL == "" {
 			return fmt.Errorf("url is required for the %s transport", server.Transport)
 		}
-		if !strings.HasPrefix(server.URL, "http://") && !strings.HasPrefix(server.URL, "https://") {
+		deferred := allowReferences && HasSecretReference(server.URL)
+		if !deferred && !strings.HasPrefix(server.URL, "http://") && !strings.HasPrefix(server.URL, "https://") {
 			return fmt.Errorf("url must start with http:// or https://")
 		}
 		if server.Command != "" {

@@ -132,6 +132,7 @@
                         "pages": [
                             "advanced/configuration",
                             "advanced/config-yaml",
+                            "advanced/secret-references",
                             "advanced/model-metadata",
                             "advanced/cli",
                             "advanced/api-endpoints",
