@@ -50,12 +50,22 @@ func (r *roundRobin) prune(active map[string]*redirectEntry) {
 // installed route selector owns that judgement — it receives the pin and
 // answers with the target to use — because it, and not core, knows whether
 // the pinned target is still healthy. The plugin strategy works the same way
-// with the virtual model's named routing-strategy plugin. It reports false
-// when no target is available.
+// with the virtual model's named routing-strategy plugin. A target model that
+// is disabled, or that this request may not use, is skipped like an
+// unavailable one. It reports false when no target is available.
 func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry *redirectEntry, sessionID string) (core.ModelSelector, bool) {
-	supported := snap.viableTargets(entry, s.catalog)
+	allowed := func(selector core.ModelSelector) bool { return s.allowsIn(ctx, snap, selector) }
+	supported := snap.viableTargets(entry, s.catalog, allowed)
 	if len(supported) == 0 {
-		return core.ModelSelector{}, false
+		// Nothing this request may use: resolve to the first available
+		// target without touching strategy state, so access validation
+		// rejects it with model_access_denied instead of the redirect's own
+		// name falling through to "model not found".
+		available := snap.viableTargets(entry, s.catalog, nil)
+		if len(available) == 0 {
+			return core.ModelSelector{}, false
+		}
+		return s.concreteTarget(ctx, snap, entry, available[0], sessionID)
 	}
 	// Prefer targets with live rate-limit capacity. When every live target is
 	// saturated, fall back to the first declared one: the request then reaches
