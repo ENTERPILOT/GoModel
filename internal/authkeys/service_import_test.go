@@ -101,7 +101,23 @@ func TestServiceImportRejectsADuplicateHash(t *testing.T) {
 		ImportedFrom: ImportedFromLiteLLM,
 		SecretHash:   strings.ToUpper(hashSecret(liteLLMToken)),
 	})
-	require.ErrorIs(t, err, ErrAlreadyImported)
+	require.ErrorIs(t, err, ErrSecretHashExists)
+}
+
+func TestServiceImportReportsAHashAnotherInstanceStored(t *testing.T) {
+	now := time.Now().UTC()
+	store := newTestStore()
+	service, err := NewService(store)
+	require.NoError(t, err)
+	// Another replica imported the key after this one last refreshed.
+	store.keys["elsewhere"] = AuthKey{ID: "elsewhere", Name: "elsewhere", SecretHash: hashSecret(liteLLMToken), ImportedFrom: ImportedFromLiteLLM, Enabled: true, CreatedAt: now, UpdatedAt: now}
+
+	_, err = service.Import(context.Background(), ImportInput{
+		Name:         "again",
+		ImportedFrom: ImportedFromLiteLLM,
+		SecretHash:   hashSecret(liteLLMToken),
+	})
+	require.ErrorIs(t, err, ErrSecretHashExists)
 }
 
 func TestServiceImportNormalizesInput(t *testing.T) {

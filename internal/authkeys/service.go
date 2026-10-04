@@ -206,8 +206,8 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*IssuedKey, er
 }
 
 // Import stores a key another gateway issued, by the hash of its token, so
-// clients keep using that token. It returns ErrAlreadyImported when a key
-// with the same hash exists.
+// clients keep using that token. It returns ErrSecretHashExists when a key
+// with the same hash exists, whether this instance has loaded it or not.
 func (s *Service) Import(ctx context.Context, input ImportInput) (*View, error) {
 	if s == nil {
 		return nil, fmt.Errorf("auth key service is required")
@@ -221,7 +221,7 @@ func (s *Service) Import(ctx context.Context, input ImportInput) (*View, error) 
 	_, exists := s.snapshot.bySecretHash[normalized.SecretHash]
 	s.mu.RUnlock()
 	if exists {
-		return nil, ErrAlreadyImported
+		return nil, ErrSecretHashExists
 	}
 
 	now := time.Now().UTC()
@@ -243,6 +243,9 @@ func (s *Service) Import(ctx context.Context, input ImportInput) (*View, error) 
 	}
 
 	if err := s.store.Create(ctx, key); err != nil {
+		if errors.Is(err, ErrSecretHashExists) {
+			return nil, ErrSecretHashExists
+		}
 		return nil, fmt.Errorf("import auth key: %w", err)
 	}
 	s.applyUpsert(key, now)

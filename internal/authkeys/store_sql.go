@@ -90,13 +90,14 @@ func (s *SQLStore) List(ctx context.Context) ([]AuthKey, error) {
 }
 
 func (s *SQLStore) Create(ctx context.Context, key AuthKey) error {
-	_, err := s.db.Exec(ctx, `
+	affected, err := s.db.Exec(ctx, `
 		INSERT INTO auth_keys (
 			id, name, description, user_path, labels, allowed_models, dashboard_access,
 			redacted_value, secret_hash, imported_from, enabled, expires_at, deactivated_at,
 			created_at, updated_at
 		)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (secret_hash) DO NOTHING
 	`, key.ID, key.Name, key.Description,
 		sqlutil.NullableString(key.UserPath), sqlutil.NullableJSONStrings(key.Labels, key.ID),
 		sqlutil.NullableJSONStrings(key.AllowedModels, key.ID),
@@ -106,6 +107,9 @@ func (s *SQLStore) Create(ctx context.Context, key AuthKey) error {
 		key.CreatedAt.Unix(), key.UpdatedAt.Unix())
 	if err != nil {
 		return fmt.Errorf("create auth key: %w", err)
+	}
+	if affected == 0 {
+		return ErrSecretHashExists
 	}
 	return nil
 }

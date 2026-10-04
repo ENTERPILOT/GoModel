@@ -178,7 +178,7 @@ func (h *Handler) ImportAuthKey(c *echo.Context) error {
 		SecretHash:      req.SecretHash,
 		RedactedValue:   req.RedactedValue,
 	})
-	if errors.Is(err, authkeys.ErrAlreadyImported) {
+	if errors.Is(err, authkeys.ErrSecretHashExists) {
 		return handleError(c, core.NewInvalidRequestErrorWithStatus(http.StatusConflict, err.Error(), err).WithCode("auth_key_exists"))
 	}
 	if err != nil {

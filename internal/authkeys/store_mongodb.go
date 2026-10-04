@@ -96,6 +96,9 @@ func (s *MongoDBStore) Create(ctx context.Context, key AuthKey) error {
 		CreatedAt:       key.CreatedAt.UTC(),
 		UpdatedAt:       key.UpdatedAt.UTC(),
 	})
+	if mongo.IsDuplicateKeyError(err) {
+		return ErrSecretHashExists
+	}
 	if err != nil {
 		return fmt.Errorf("create auth key: %w", err)
 	}

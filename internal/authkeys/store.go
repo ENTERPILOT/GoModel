@@ -22,8 +22,9 @@ var (
 	ErrInactive = errors.New("API key is inactive")
 	// ErrExpired indicates the presented token belongs to an expired key.
 	ErrExpired = errors.New("API key expired")
-	// ErrAlreadyImported indicates a key with the imported token hash exists.
-	ErrAlreadyImported = errors.New("an auth key with this secret_hash already exists")
+	// ErrSecretHashExists indicates a key with the same secret hash is
+	// already stored. Store.Create returns it for a duplicate hash.
+	ErrSecretHashExists = errors.New("an auth key with this secret_hash already exists")
 )
 
 // ValidationError indicates invalid auth key input or state.
@@ -41,6 +42,7 @@ func IsValidationError(err error) bool {
 // Store defines persistence operations for managed auth keys.
 type Store interface {
 	List(ctx context.Context) ([]AuthKey, error)
+	// Create returns ErrSecretHashExists when a key with key.SecretHash exists.
 	Create(ctx context.Context, key AuthKey) error
 	UpdateLabels(ctx context.Context, id string, labels []string, now time.Time) error
 	UpdateAllowedModels(ctx context.Context, id string, allowedModels []string, now time.Time) error

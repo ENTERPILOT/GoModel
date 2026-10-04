@@ -109,26 +109,40 @@ over one team at a time.
 LiteLLM stores each virtual key as a SHA-256 hash in its Postgres database.
 GoModel imports those hashes, so clients keep their `sk-...` keys and GoModel
 never handles the keys themselves. This loop imports every key that is not
-blocked or expired, with its alias, expiry, and model list. A team key becomes
-user path `/<team alias>`:
+blocked or expired, with its alias, expiry, and the models LiteLLM let it call.
+A team key becomes user path `/<team alias>`:
 
 ```bash
 psql "$LITELLM_DATABASE_URL" -At -c "
   SELECT json_build_object(
-    'name', COALESCE(k.key_alias, k.key_name, 'litellm-key'),
+    'name', COALESCE(key_alias, key_name, 'litellm-key'),
     'imported_from', 'litellm',
-    'secret_hash', k.token,
-    'redacted_value', k.key_name,
-    'expires_at', to_char(k.expires, 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),
-    'user_path', '/' || regexp_replace(COALESCE(t.team_alias, t.team_id), '[/:]', '-', 'g'),
-    'allowed_models', (SELECT to_json(m) FROM (SELECT CASE
-        WHEN cardinality(k.models) = 0 OR 'all-team-models' = ANY(k.models) THEN t.models
-        ELSE k.models END AS m) s
-      WHERE cardinality(m) > 0 AND NOT 'all-proxy-models' = ANY(m)))
-  FROM \"LiteLLM_VerificationToken\" k
-  LEFT JOIN \"LiteLLM_TeamTable\" t ON t.team_id = k.team_id
-  WHERE NOT COALESCE(k.blocked, false)
-    AND (k.expires IS NULL OR k.expires > now() AT TIME ZONE 'UTC')" |
+    'secret_hash', token,
+    'redacted_value', key_name,
+    'expires_at', to_char(expires, 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),
+    'user_path', '/' || regexp_replace(team, '[/:]', '-', 'g'),
+    'allowed_models', to_json(models))
+  FROM (
+    SELECT k.token, k.key_name, k.key_alias, k.expires,
+      COALESCE(t.team_alias, t.team_id) AS team,
+      CASE
+        WHEN k.team_id IS NOT NULL THEN COALESCE(km.m, tm.m)
+        WHEN km.m IS NULL OR um.m IS NULL THEN COALESCE(km.m, um.m)
+        ELSE ARRAY(SELECT unnest(km.m) INTERSECT SELECT unnest(um.m))
+      END AS models
+    FROM \"LiteLLM_VerificationToken\" k
+    LEFT JOIN \"LiteLLM_TeamTable\" t ON t.team_id = k.team_id
+    LEFT JOIN \"LiteLLM_UserTable\" u ON u.user_id = k.user_id
+    CROSS JOIN LATERAL (SELECT CASE WHEN cardinality(k.models) = 0
+      OR k.models && '{all-proxy-models,all-team-models}' THEN NULL ELSE k.models END) km(m)
+    CROSS JOIN LATERAL (SELECT CASE WHEN cardinality(t.models) = 0
+      OR 'all-proxy-models' = ANY(t.models) THEN NULL ELSE t.models END) tm(m)
+    CROSS JOIN LATERAL (SELECT CASE WHEN cardinality(u.models) = 0
+      OR 'all-proxy-models' = ANY(u.models) THEN NULL ELSE u.models END) um(m)
+    WHERE NOT COALESCE(k.blocked, false)
+      AND (k.expires IS NULL OR k.expires > now() AT TIME ZONE 'UTC')
+  ) keys
+  WHERE models IS NULL OR cardinality(models) > 0" |
 while read -r key; do
   curl -s -X POST http://localhost:8080/admin/auth-keys/import \
     -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
@@ -141,15 +155,17 @@ Run it against GoModel's address, with `LITELLM_DATABASE_URL` set to the
 `DATABASE_URL` LiteLLM uses. It is safe to re-run: keys already imported answer
 `409 auth_key_exists`.
 
-- A key restricted to some models keeps that list as its
-  [allowed models](/features/users); a key without its own list takes its
-  team's. GoModel checks the model a virtual model resolves to, so the import
-  stores the provider models behind each name, such as `openai/gpt-4o` for
-  `gpt-4o`. Import keys after GoModel runs with the converted config.
+- Model access follows LiteLLM's rules: a team key gets its own model list,
+  else its team's; a personal key gets its own list narrowed by its user's.
+  The result becomes the key's [allowed models](/features/users). A personal
+  key that may call no model is skipped.
+- GoModel checks the model a virtual model resolves to, so the import stores
+  the provider models behind each name, such as `openai/gpt-4o` for `gpt-4o`.
+  Import keys after GoModel runs with the converted config. If you later point
+  a virtual model at other models, update the allowed models of the keys that
+  use it; until then they cannot reach the new models.
 - Keys blocked or expired in LiteLLM are not imported. Block a key in GoModel by
   deactivating it on the **API Keys** page.
-- A LiteLLM user's own model list is not carried over; add it to the key's
-  allowed models.
 
 [`POST /admin/auth-keys/import`](/advanced/admin-endpoints#importing-keys-from-litellm)
 describes the request. Tokens beginning with `sk-` are matched only against

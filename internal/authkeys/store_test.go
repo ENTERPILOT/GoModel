@@ -153,7 +153,7 @@ func TestStore_CreateRejectsDuplicates(t *testing.T) {
 
 		sameSecret := newTestKey("key-two", storeTestNow)
 		sameSecret.SecretHash = key.SecretHash
-		require.Error(t, store.Create(ctx, sameSecret), "duplicate secret hash")
+		require.ErrorIs(t, store.Create(ctx, sameSecret), ErrSecretHashExists)
 
 		keys, err := store.List(ctx)
 		require.NoError(t, err)

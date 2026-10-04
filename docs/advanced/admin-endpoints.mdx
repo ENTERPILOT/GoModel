@@ -158,9 +158,10 @@ answers `201` with the key, which then shows `"imported_from": "litellm"`.
 `redacted_value` is LiteLLM's `key_name`, such as `sk-...k6Hd`, and defaults to
 `sk-...`. An `allowed_models` entry naming a virtual model is replaced with the
 models it routes to, since LiteLLM key model lists name model groups and
-[allowlists](/features/users#selectors) match the resolved model. Importing a
-hash that already exists returns `409` with code `auth_key_exists`, so the
-import is safe to re-run.
+[allowlists](/features/users#selectors) match the resolved model. The list is
+resolved once: retargeting the virtual model later does not change the key.
+Importing a hash that already exists returns `409` with code
+`auth_key_exists`, so the import is safe to re-run.
 
 Tokens starting with `sk-` are checked only against imported keys, and
 `sk_gom_` tokens only against keys GoModel issued. Without imported keys,
