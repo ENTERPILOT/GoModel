@@ -20,6 +20,7 @@ type mongoVirtualModelDocument struct {
 	StrategyConfig  bson.M    `bson:"strategy_config,omitempty"`
 	SessionAffinity *bool     `bson:"session_affinity,omitempty"`
 	Failover        *bool     `bson:"failover,omitempty"`
+	VisionRouting   bool      `bson:"vision_routing,omitempty"`
 	ProviderName    string    `bson:"provider_name,omitempty"`
 	Model           string    `bson:"model,omitempty"`
 	UserPaths       []string  `bson:"user_paths,omitempty"`
@@ -104,6 +105,7 @@ func (s *MongoDBStore) Upsert(ctx context.Context, vm VirtualModel) error {
 			"strategy_config":  vm.StrategyConfig,
 			"session_affinity": vm.SessionAffinity,
 			"failover":         vm.Failover,
+			"vision_routing":   vm.VisionRouting,
 			"provider_name":    vm.ProviderName,
 			"model":            vm.Model,
 			"user_paths":       vm.UserPaths,
@@ -146,6 +148,7 @@ func virtualModelFromMongo(doc mongoVirtualModelDocument) VirtualModel {
 		StrategyConfig:  strategyConfigFromBSON(doc.StrategyConfig),
 		SessionAffinity: doc.SessionAffinity,
 		Failover:        doc.Failover,
+		VisionRouting:   doc.VisionRouting,
 		ProviderName:    doc.ProviderName,
 		Model:           doc.Model,
 		Description:     doc.Description,

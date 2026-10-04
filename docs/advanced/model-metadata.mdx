@@ -80,7 +80,9 @@ data is served by
   the provider serves.
 - **Context window and capabilities** are advertised on `GET /v1/models` (and
   on `GET /v1/models/{model}` for a single model) for clients that pick models
-  dynamically.
+  dynamically. The `vision` capability also drives
+  [vision routing](/features/virtual-models#route-image-requests-to-vision-models);
+  a catalog entry that lists `image` among its input modalities reports it.
 
 ## Offline behavior
 

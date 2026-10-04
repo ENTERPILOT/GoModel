@@ -632,6 +632,7 @@
   "models_summary_alias_balanced": "Anfragen für {source} werden auf {targets} verteilt ({strategy}).",
   "models_session_keeping": "Sitzungsbindung (erkannte Client-Sitzungen werden an das Ziel geroutet, das sie bedient hat)",
   "models_failover_option": "Failover (fehlgeschlagene Anfrage wird am nächsten Ziel wiederholt)",
+  "models_vision_routing_option": "Vision-Routing (Anfragen mit Bildern nur an Ziele senden, die Bilder verarbeiten)",
   "models_user_paths": "Nutzerpfade",
   "models_user_paths_help_label": "Hilfe zu Nutzerpfaden",
   "models_user_paths_help": "Mit / erlaubst du jeden Nutzerpfad. Ein Team-Pfad beschränkt auf diesen Unterbaum; ein ungenutzter Pfad macht den Selektor unzugänglich.",

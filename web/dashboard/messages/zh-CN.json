@@ -596,6 +596,7 @@
   "models_summary_alias_balanced": "{source} 的请求在 {targets} 之间做负载均衡（{strategy}）。",
   "models_session_keeping": "会话保持（将检测到的客户端会话路由到为之提供服务的目标）",
   "models_failover_option": "故障转移（在下一个目标上重试失败的请求）",
+  "models_vision_routing_option": "视觉路由（仅将包含图片的请求发送到支持图片输入的目标）",
   "models_user_paths": "用户路径",
   "models_user_paths_help_label": "用户路径说明",
   "models_user_paths_help": "使用 / 允许所有用户路径。使用团队路径可限制到该子树，或使用未占用的路径使选择器不可用。",
