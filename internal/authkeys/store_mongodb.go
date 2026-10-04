@@ -20,6 +20,7 @@ type mongoAuthKeyDocument struct {
 	DashboardAccess bool       `bson:"dashboard_access,omitempty"`
 	RedactedValue   string     `bson:"redacted_value"`
 	SecretHash      string     `bson:"secret_hash"`
+	ImportedFrom    string     `bson:"imported_from,omitempty"`
 	Enabled         bool       `bson:"enabled"`
 	ExpiresAt       *time.Time `bson:"expires_at,omitempty"`
 	DeactivatedAt   *time.Time `bson:"deactivated_at,omitempty"`
@@ -88,6 +89,7 @@ func (s *MongoDBStore) Create(ctx context.Context, key AuthKey) error {
 		DashboardAccess: key.DashboardAccess,
 		RedactedValue:   key.RedactedValue,
 		SecretHash:      key.SecretHash,
+		ImportedFrom:    key.ImportedFrom,
 		Enabled:         key.Enabled,
 		ExpiresAt:       key.ExpiresAt,
 		DeactivatedAt:   key.DeactivatedAt,
@@ -187,6 +189,7 @@ func authKeyFromMongo(doc mongoAuthKeyDocument) AuthKey {
 		DashboardAccess: doc.DashboardAccess,
 		RedactedValue:   doc.RedactedValue,
 		SecretHash:      doc.SecretHash,
+		ImportedFrom:    doc.ImportedFrom,
 		Enabled:         doc.Enabled,
 		ExpiresAt:       timePtrUTC(doc.ExpiresAt),
 		DeactivatedAt:   timePtrUTC(doc.DeactivatedAt),

@@ -28,6 +28,7 @@ var sqlTable = `CREATE TABLE IF NOT EXISTS auth_keys (
 		dashboard_access ` + sqlx.TypeBool + ` NOT NULL DEFAULT FALSE,
 		redacted_value TEXT NOT NULL,
 		secret_hash TEXT NOT NULL UNIQUE,
+		imported_from TEXT,
 		enabled ` + sqlx.TypeBool + ` NOT NULL DEFAULT TRUE,
 		expires_at ` + sqlx.TypeInt64 + `,
 		deactivated_at ` + sqlx.TypeInt64 + `,
@@ -46,11 +47,12 @@ var sqlMigrations = []string{
 	`ALTER TABLE auth_keys ADD COLUMN labels ` + sqlx.TypeJSON,
 	`ALTER TABLE auth_keys ADD COLUMN dashboard_access ` + sqlx.TypeBool + ` NOT NULL DEFAULT FALSE`,
 	`ALTER TABLE auth_keys ADD COLUMN allowed_models ` + sqlx.TypeJSON,
+	`ALTER TABLE auth_keys ADD COLUMN imported_from TEXT`,
 }
 
 const selectAuthKeyColumns = `
 	SELECT id, name, description, user_path, labels, allowed_models, dashboard_access,
-		redacted_value, secret_hash, enabled, expires_at, deactivated_at,
+		redacted_value, secret_hash, imported_from, enabled, expires_at, deactivated_at,
 		created_at, updated_at
 	FROM auth_keys
 `
@@ -91,14 +93,15 @@ func (s *SQLStore) Create(ctx context.Context, key AuthKey) error {
 	_, err := s.db.Exec(ctx, `
 		INSERT INTO auth_keys (
 			id, name, description, user_path, labels, allowed_models, dashboard_access,
-			redacted_value, secret_hash, enabled, expires_at, deactivated_at,
+			redacted_value, secret_hash, imported_from, enabled, expires_at, deactivated_at,
 			created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, key.ID, key.Name, key.Description,
 		sqlutil.NullableString(key.UserPath), sqlutil.NullableJSONStrings(key.Labels, key.ID),
 		sqlutil.NullableJSONStrings(key.AllowedModels, key.ID),
-		key.DashboardAccess, key.RedactedValue, key.SecretHash, key.Enabled,
+		key.DashboardAccess, key.RedactedValue, key.SecretHash,
+		sqlutil.NullableString(key.ImportedFrom), key.Enabled,
 		sqlutil.UnixOrNil(key.ExpiresAt), sqlutil.UnixOrNil(key.DeactivatedAt),
 		key.CreatedAt.Unix(), key.UpdatedAt.Unix())
 	if err != nil {
@@ -178,7 +181,7 @@ func (s *SQLStore) Close() error {
 
 func scanSQLAuthKey(scanner authKeyScanner) (AuthKey, error) {
 	var key AuthKey
-	var userPath, labelsJSON, allowedModelsJSON *string
+	var userPath, labelsJSON, allowedModelsJSON, importedFrom *string
 	var expiresAt, deactivatedAt *int64
 	var createdAt, updatedAt int64
 	if err := scanner.Scan(
@@ -191,6 +194,7 @@ func scanSQLAuthKey(scanner authKeyScanner) (AuthKey, error) {
 		&key.DashboardAccess,
 		&key.RedactedValue,
 		&key.SecretHash,
+		&importedFrom,
 		&key.Enabled,
 		&expiresAt,
 		&deactivatedAt,
@@ -203,6 +207,7 @@ func scanSQLAuthKey(scanner authKeyScanner) (AuthKey, error) {
 		return AuthKey{}, err
 	}
 	key.UserPath = sqlutil.DerefTrimmed(userPath)
+	key.ImportedFrom = sqlutil.DerefTrimmed(importedFrom)
 	if labelsJSON != nil {
 		key.Labels = sqlutil.StringsFromJSON(*labelsJSON, key.ID)
 	}

@@ -205,6 +205,52 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*IssuedKey, er
 	}, nil
 }
 
+// Import stores a key another gateway issued, by the hash of its token, so
+// clients keep using that token. It returns ErrAlreadyImported when a key
+// with the same hash exists.
+func (s *Service) Import(ctx context.Context, input ImportInput) (*View, error) {
+	if s == nil {
+		return nil, fmt.Errorf("auth key service is required")
+	}
+
+	normalized, err := normalizeImportInput(input)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	_, exists := s.snapshot.bySecretHash[normalized.SecretHash]
+	s.mu.RUnlock()
+	if exists {
+		return nil, ErrAlreadyImported
+	}
+
+	now := time.Now().UTC()
+	key := AuthKey{
+		ID:              uuid.NewString(),
+		Name:            normalized.Name,
+		Description:     normalized.Description,
+		UserPath:        normalized.UserPath,
+		Labels:          normalized.Labels,
+		AllowedModels:   normalized.AllowedModels,
+		DashboardAccess: normalized.DashboardAccess,
+		RedactedValue:   normalized.RedactedValue,
+		SecretHash:      normalized.SecretHash,
+		ImportedFrom:    normalized.ImportedFrom,
+		Enabled:         true,
+		ExpiresAt:       normalized.ExpiresAt,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+
+	if err := s.store.Create(ctx, key); err != nil {
+		return nil, fmt.Errorf("import auth key: %w", err)
+	}
+	s.applyUpsert(key, now)
+	s.refreshBestEffort(ctx, "import")
+
+	return &View{AuthKey: key, Active: key.Active(now)}, nil
+}
+
 // UpdateLabels replaces a managed auth key's labels, updates the in-memory
 // snapshot immediately, best-effort reconciles from storage, and returns the
 // updated admin-facing view. Passing no labels clears them.
@@ -335,22 +381,18 @@ func (s *Service) Authenticate(_ context.Context, token string) (AuthenticationR
 		return AuthenticationResult{}, ErrInvalidToken
 	}
 
-	secret, err := parseTokenSecret(token)
+	secretHash, importedFrom, err := tokenSecretHash(token)
 	if err != nil {
 		return AuthenticationResult{}, err
 	}
-	secretHash := hashSecret(secret)
 	now := time.Now().UTC()
 
 	s.mu.RLock()
-	active, ok := s.snapshot.activeByHash[secretHash]
-	if ok {
-		s.mu.RUnlock()
-		return authenticateKey(active, now)
-	}
 	key, exists := s.snapshot.bySecretHash[secretHash]
 	s.mu.RUnlock()
-	if !exists {
+	// A token only matches keys hashed the way its own format is, so a
+	// GoModel token can never match an imported hash or the other way round.
+	if !exists || key.ImportedFrom != importedFrom {
 		return AuthenticationResult{}, ErrInvalidToken
 	}
 	return authenticateKey(key, now)
@@ -527,16 +569,21 @@ func generateTokenMaterial() (value string, redactedValue string, secretHash str
 	return value, redactTokenValue(value), hashSecret(secret), nil
 }
 
-func parseTokenSecret(token string) (string, error) {
+// tokenSecretHash returns the hash a presented token is stored under and the
+// ImportedFrom value of the keys it may match: GoModel hashes the secret after
+// its prefix, LiteLLM hashes the whole "sk-..." token.
+func tokenSecretHash(token string) (secretHash, importedFrom string, err error) {
 	token = strings.TrimSpace(token)
-	if !strings.HasPrefix(token, TokenPrefix) {
-		return "", ErrInvalidToken
+	if secret, ok := strings.CutPrefix(token, TokenPrefix); ok {
+		if secret == "" {
+			return "", "", ErrInvalidToken
+		}
+		return hashSecret(secret), "", nil
 	}
-	secret := strings.TrimPrefix(token, TokenPrefix)
-	if secret == "" {
-		return "", ErrInvalidToken
+	if len(token) > len(liteLLMTokenPrefix) && strings.HasPrefix(token, liteLLMTokenPrefix) {
+		return hashSecret(token), ImportedFromLiteLLM, nil
 	}
-	return secret, nil
+	return "", "", ErrInvalidToken
 }
 
 func hashSecret(secret string) string {

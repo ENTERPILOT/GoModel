@@ -76,6 +76,22 @@ func (s *Service) ResolveRefreshTarget(requested core.RequestedModelSelector) (c
 	return representative.selector, true, nil
 }
 
+// TargetModels returns the concrete models the virtual model named source
+// routes to, descending chained virtual models, whether or not they are
+// available right now. ok is false when source names no redirecting virtual
+// model.
+func (s *Service) TargetModels(source string) (models []string, ok bool) {
+	snap := s.snapshot()
+	entry, ok := snap.redirects[strings.TrimSpace(source)]
+	if !ok {
+		return nil, false
+	}
+	for _, target := range snap.declaredLeaves(entry) {
+		models = append(models, target.qualified)
+	}
+	return models, true
+}
+
 // ExposedModels returns enabled redirects projected as model-list entries.
 func (s *Service) ExposedModels() []core.Model {
 	return s.exposedModels("", false, nil)

@@ -66,6 +66,7 @@ func TestRequireGlobalScope(t *testing.T) {
 		{name: "scoped credential denied on workflows", method: http.MethodGet, path: "/admin/workflows", scope: scopeAlpha, wantStatus: http.StatusForbidden, wantCode: codeAdminScopeDenied},
 		{name: "scoped credential denied on reset all", method: http.MethodPost, path: "/admin/budgets/reset", scope: scopeAlpha, wantStatus: http.StatusForbidden, wantCode: codeAdminScopeDenied},
 		{name: "scoped credential denied on usage throughput", method: http.MethodGet, path: "/admin/usage/throughput", scope: scopeAlpha, wantStatus: http.StatusForbidden, wantCode: codeAdminScopeDenied},
+		{name: "scoped credential denied on key import", method: http.MethodPost, path: "/admin/auth-keys/import", scope: scopeAlpha, wantStatus: http.StatusForbidden, wantCode: codeAdminScopeDenied},
 		// A zero-value handler answers 503 past the gate: the gate let it through.
 		{name: "global credential passes gateway-wide route", method: http.MethodGet, path: "/admin/workflows", wantStatus: http.StatusServiceUnavailable},
 		{name: "scoped credential reaches tenant route", method: http.MethodGet, path: "/admin/auth-keys", scope: scopeAlpha, wantStatus: http.StatusServiceUnavailable},

@@ -142,6 +142,72 @@ func (h *Handler) CreateAuthKey(c *echo.Context) error {
 	return c.JSON(http.StatusCreated, issued)
 }
 
+type importAuthKeyRequest struct {
+	createAuthKeyRequest
+	ImportedFrom  string `json:"imported_from"`
+	SecretHash    string `json:"secret_hash"`
+	RedactedValue string `json:"redacted_value,omitempty"`
+}
+
+// ImportAuthKey handles POST /admin/auth-keys/import. It stores a key another
+// gateway issued by the hash of its token, so clients keep that token.
+func (h *Handler) ImportAuthKey(c *echo.Context) error {
+	if h.authKeys == nil {
+		return handleError(c, featureUnavailableError("auth keys feature is unavailable"))
+	}
+
+	var req importAuthKeyRequest
+	if err := c.Bind(&req); err != nil {
+		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+
+	allowedModels, err := h.normalizeAllowedModels(h.virtualModelTargets(req.AllowedModels))
+	if err != nil {
+		return handleError(c, err)
+	}
+
+	view, err := h.authKeys.Import(c.Request().Context(), authkeys.ImportInput{
+		Name:            req.Name,
+		Description:     req.Description,
+		UserPath:        req.UserPath,
+		Labels:          req.Labels,
+		AllowedModels:   allowedModels,
+		DashboardAccess: req.DashboardAccess,
+		ExpiresAt:       req.ExpiresAt,
+		ImportedFrom:    req.ImportedFrom,
+		SecretHash:      req.SecretHash,
+		RedactedValue:   req.RedactedValue,
+	})
+	if errors.Is(err, authkeys.ErrAlreadyImported) {
+		return handleError(c, core.NewInvalidRequestErrorWithStatus(http.StatusConflict, err.Error(), err).WithCode("auth_key_exists"))
+	}
+	if err != nil {
+		return handleError(c, authKeyWriteError(err))
+	}
+	return c.JSON(http.StatusCreated, view)
+}
+
+// virtualModelTargets replaces each virtual model name with the concrete
+// models it routes to. A LiteLLM key's model list names model groups, which
+// the config converter turned into virtual models, while allowlists match
+// the model a virtual model resolves to.
+func (h *Handler) virtualModelTargets(selectors []string) []string {
+	if h.virtualModels == nil {
+		return selectors
+	}
+	out := make([]string, 0, len(selectors))
+	for _, selector := range selectors {
+		// A virtual model with no target keeps its name, which matches
+		// nothing, so the key never ends up with an empty, unrestricted list.
+		if targets, ok := h.virtualModels.TargetModels(selector); ok && len(targets) > 0 {
+			out = append(out, targets...)
+			continue
+		}
+		out = append(out, selector)
+	}
+	return out
+}
+
 type updateAuthKeyLabelsRequest struct {
 	Labels []string `json:"labels"`
 }

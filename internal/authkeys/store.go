@@ -2,7 +2,10 @@ package authkeys
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 
@@ -19,6 +22,8 @@ var (
 	ErrInactive = errors.New("API key is inactive")
 	// ErrExpired indicates the presented token belongs to an expired key.
 	ErrExpired = errors.New("API key expired")
+	// ErrAlreadyImported indicates a key with the imported token hash exists.
+	ErrAlreadyImported = errors.New("an auth key with this secret_hash already exists")
 )
 
 // ValidationError indicates invalid auth key input or state.
@@ -76,6 +81,42 @@ func normalizeCreateInput(input CreateInput) (CreateInput, error) {
 		input.ExpiresAt = &expiresAt
 	}
 	return input, nil
+}
+
+// liteLLMRedactedValue matches LiteLLM's abbreviated key_name, such as
+// "sk-...abcd", so a pasted token is never stored where the dashboard shows it.
+var liteLLMRedactedValue = regexp.MustCompile(`^sk-\.\.\.\S{0,8}$`)
+
+func normalizeImportInput(input ImportInput) (ImportInput, error) {
+	createInput, err := normalizeCreateInput(input.CreateInput)
+	if err != nil {
+		return ImportInput{}, err
+	}
+	input.CreateInput = createInput
+	input.ImportedFrom = strings.TrimSpace(input.ImportedFrom)
+	if input.ImportedFrom != ImportedFromLiteLLM {
+		return ImportInput{}, newValidationError(`imported_from must be "`+ImportedFromLiteLLM+`"`, nil)
+	}
+	input.SecretHash = strings.ToLower(strings.TrimSpace(input.SecretHash))
+	if !isSHA256Hex(input.SecretHash) {
+		return ImportInput{}, newValidationError("secret_hash must be the 64-character hex SHA-256 of the token", nil)
+	}
+	input.RedactedValue = strings.TrimSpace(input.RedactedValue)
+	if input.RedactedValue == "" {
+		input.RedactedValue = liteLLMTokenPrefix + "..."
+	}
+	if !liteLLMRedactedValue.MatchString(input.RedactedValue) {
+		return ImportInput{}, newValidationError(`redacted_value must look like "sk-...abcd"`, nil)
+	}
+	return input, nil
+}
+
+func isSHA256Hex(value string) bool {
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }
 
 // NormalizeAllowedModels trims, drops empty entries, and de-duplicates model
