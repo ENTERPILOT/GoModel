@@ -173,6 +173,10 @@ func TestSecretRedaction_MasksValuesMixingLiteralsAndReferences(t *testing.T) {
 	assert.Equal(t, "http://${env:PROXY_HOST}:3128", redactProxyURL("http://${env:PROXY_HOST}:3128"))
 	assert.Equal(t, redactedCredentialValue, redactProxyURL("http://u:hunter2@${env:PROXY_HOST}:3128"))
 	assert.Equal(t, redactedCredentialValue, redactProxyURL("http://u:pre${env:P}@proxy:3128"))
+	// Literal text that looks like a placeholder is still a literal password.
+	assert.Equal(t, redactedCredentialValue, redactProxyURL("http://u:gomodelsecretref0x@${env:PROXY_HOST}:3128"))
+	assert.Equal(t, redactedCredentialValue, redactProxyURL("http://u:gomodelsecretre%660x@${env:PROXY_HOST}:3128"))
+	assert.Equal(t, "http://u:${env:A}${env:B}@proxy:3128", redactProxyURL("http://u:${env:A}${env:B}@proxy:3128"))
 }
 
 func TestUpsertProviderCredential_MixedValueRoundTripsAsMask(t *testing.T) {

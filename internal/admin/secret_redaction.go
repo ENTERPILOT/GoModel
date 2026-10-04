@@ -51,27 +51,55 @@ func redactProxyURL(value string) string {
 
 // proxyPasswordIsReference reports whether the password of a proxy URL that
 // holds references is absent or made of references alone. References are
-// swapped for placeholders first, since their braces are not valid in a URL.
+// swapped for placeholders first, since their braces are not valid in a URL;
+// the placeholders share a prefix that does not occur in value, so no literal
+// text can pass for one. The password is read raw, before percent-decoding,
+// for the same reason.
 func proxyPasswordIsReference(value string) bool {
-	parsable, references := withReferencePlaceholders(value)
-	u, err := url.Parse(parsable)
-	if err != nil {
+	parsable, placeholders := withReferencePlaceholders(value)
+	if _, err := url.Parse(parsable); err != nil {
 		return false
 	}
-	password, set := u.User.Password()
+	authority := parsable
+	if _, after, found := strings.Cut(authority, "://"); found {
+		authority = after
+	}
+	if end := strings.IndexAny(authority, "/?#"); end >= 0 {
+		authority = authority[:end]
+	}
+	at := strings.LastIndex(authority, "@")
+	if at < 0 {
+		return true
+	}
+	_, password, set := strings.Cut(authority[:at], ":")
 	if !set {
 		return true
 	}
-	for placeholder, reference := range references {
-		password = strings.ReplaceAll(password, placeholder, reference)
+	for password != "" {
+		matched := false
+		for _, placeholder := range placeholders {
+			if rest, ok := strings.CutPrefix(password, placeholder); ok {
+				password, matched = rest, true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
 	}
-	return config.OnlySecretReferences(password)
+	return true
 }
 
 // withReferencePlaceholders replaces each secret reference in value with an
-// alphanumeric placeholder and returns the placeholders' references.
-func withReferencePlaceholders(value string) (string, map[string]string) {
-	references := map[string]string{}
+// alphanumeric placeholder and returns the placeholders used. Every
+// placeholder starts with a prefix absent from value and ends in "x", so none
+// is a prefix of another or of any literal text.
+func withReferencePlaceholders(value string) (string, []string) {
+	prefix := "gomodelsecretref"
+	for strings.Contains(value, prefix) {
+		prefix += "q"
+	}
+	var placeholders []string
 	var b strings.Builder
 	for rest := value; rest != ""; {
 		i := strings.Index(rest, "${")
@@ -87,12 +115,11 @@ func withReferencePlaceholders(value string) (string, map[string]string) {
 		escaped := i > 0 && rest[i-1] == '$'
 		b.WriteString(rest[:i])
 		if !escaped && config.OnlySecretReferences(token) {
-			placeholder := "gomodelsecretref" + strconv.Itoa(len(references)) + "x"
-			references[placeholder] = token
-			token = placeholder
+			token = prefix + strconv.Itoa(len(placeholders)) + "x"
+			placeholders = append(placeholders, token)
 		}
 		b.WriteString(token)
 		rest = rest[i+end+1:]
 	}
-	return b.String(), references
+	return b.String(), placeholders
 }
