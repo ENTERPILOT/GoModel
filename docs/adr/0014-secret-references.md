@@ -129,9 +129,10 @@ Resolution order for one generation:
    as the MCP server URL scheme, is repeated on the resolved value.
 4. `providers.Init` merges the provider environment variables
    (`OPENAI_API_KEY=${vault:prod/llm#openai}`) into `RawProviders` and then
-   resolves the merged result. A `config.yaml` value that an environment
-   variable replaces, or an environment variable the merge ignores, is never
-   looked up.
+   resolves the providers that pass the credential filter. A `config.yaml`
+   value that an environment variable replaces, an environment variable the
+   merge ignores, and a provider skipped for missing credentials are never
+   looked up. Resolved values are data: a secret containing `${` is kept.
 
 Any reference that is still unresolved after step 3 or 4 stops the
 generation with an error naming the field and the scheme, never the value.

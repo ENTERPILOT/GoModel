@@ -180,10 +180,26 @@ func (s *Secrets) resolveReference(ctx context.Context, scheme, reference string
 // reference, using the same scan as Resolve. An escaped $${...} is not a
 // reference.
 func HasSecretReference(value string) bool {
+	references, _ := scanPlaceholders(value)
+	return references
+}
+
+// HasUnresolvedPlaceholder reports whether value contains a ${...} that is
+// neither a secret reference nor an escaped $${: typically a legacy ${VAR}
+// that environment expansion left in place because VAR is unset. Only
+// meaningful before Resolve; a resolved value is data and is not scanned.
+func HasUnresolvedPlaceholder(value string) bool {
+	_, placeholders := scanPlaceholders(value)
+	return placeholders
+}
+
+// scanPlaceholders reports whether value holds secret references and other
+// ${ text, using the same tokenization as resolveField.
+func scanPlaceholders(value string) (references, placeholders bool) {
 	for rest := value; ; {
 		i := strings.Index(rest, "${")
 		if i < 0 {
-			return false
+			return references, placeholders
 		}
 		if i > 0 && rest[i-1] == '$' {
 			rest = rest[i+2:]
@@ -191,10 +207,12 @@ func HasSecretReference(value string) bool {
 		}
 		end := strings.IndexByte(rest[i:], '}')
 		if end < 0 {
-			return false
+			return references, true
 		}
 		if _, _, ok := parseSecretReference(rest[i+2 : i+end]); ok {
-			return true
+			references = true
+		} else {
+			placeholders = true
 		}
 		rest = rest[i+end+1:]
 	}

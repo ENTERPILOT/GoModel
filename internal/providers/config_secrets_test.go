@@ -83,6 +83,26 @@ func TestResolveProvidersResolvesSecretReferences(t *testing.T) {
 			wantErr: "providers.openai.api_key: secret reference ${vault:...}: not found",
 		},
 		{
+			name:        "a provider dropped for lack of credentials is never looked up",
+			env:         map[string]string{"ANTHROPIC_API_KEY": "sk-ant"},
+			raw:         map[string]config.RawProviderConfig{"openai": {Type: "openai", ProxyURL: "http://u:${vault:missing}@proxy:3128"}},
+			wantKeys:    map[string][]string{"anthropic": {"sk-ant"}},
+			wantLookups: []string{},
+		},
+		{
+			name:        "a resolved key containing ${ is kept",
+			raw:         map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKey: "${vault:weird}", APIKeys: []string{"$${escaped}"}}},
+			wantKeys:    map[string][]string{"openai": {"sk-${NOT_A_PLACEHOLDER}", "${escaped}"}},
+			wantLookups: []string{"weird"},
+		},
+		{
+			name:        "a key mixing a reference with a legacy placeholder is dropped unresolved",
+			env:         map[string]string{"ANTHROPIC_API_KEY": "sk-ant"},
+			raw:         map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKey: "${vault:openai}-${GOMODEL_TEST_UNSET}"}},
+			wantKeys:    map[string][]string{"anthropic": {"sk-ant"}},
+			wantLookups: []string{},
+		},
+		{
 			name:     "legacy placeholders keep their historical treatment",
 			env:      map[string]string{"ANTHROPIC_API_KEY": "sk-ant"},
 			raw:      map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKey: "${GOMODEL_TEST_UNSET}"}},
@@ -96,6 +116,7 @@ func TestResolveProvidersResolvesSecretReferences(t *testing.T) {
 			}
 			secrets, lookups := countingVault(t, map[string]string{
 				"openai": "sk-openai", "openai2": "sk-openai2", "url": "https://eu.example.com",
+				"weird": "sk-${NOT_A_PLACEHOLDER}",
 			})
 			raw := tt.raw
 			if raw == nil {
