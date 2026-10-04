@@ -51,7 +51,9 @@ func validHealthCheckers(checkers []ext.HealthChecker) []*namedHealthChecker {
 // readinessProbeTimeout deadline and returns a function that waits for their
 // results until that deadline. A checker that has not answered by then, is
 // still busy with an earlier probe, or panics has no status in the result,
-// which readiness reports as degraded; a late answer is discarded.
+// which readiness reports as degraded. Each answer is stamped against the
+// deadline when the checker returns, so a late answer is always discarded and
+// an in-time one is kept even when the caller collects after the deadline.
 func startExtensionHealthChecks(ctx context.Context, checkers []*namedHealthChecker) func() map[string]ext.HealthStatus {
 	if len(checkers) == 0 {
 		return func() map[string]ext.HealthStatus { return nil }
@@ -75,7 +77,10 @@ func startExtensionHealthChecks(ctx context.Context, checkers []*namedHealthChec
 				}
 				results <- result
 			}()
-			result.status = hc.checker.CheckHealth(ctx)
+			status := hc.checker.CheckHealth(ctx)
+			if ctx.Err() == nil {
+				result.status = status
+			}
 		}()
 	}
 
@@ -87,10 +92,27 @@ func startExtensionHealthChecks(ctx context.Context, checkers []*namedHealthChec
 			case r := <-results:
 				statuses[r.name] = r.status
 			case <-ctx.Done():
-				slog.Warn("readiness: extension health checks did not finish before the deadline", "error", ctx.Err())
+				// Keep answers that already arrived: select picks randomly
+				// when both cases are ready.
+				drainExtensionHealthResults(results, statuses)
+				if len(statuses) < started {
+					slog.Warn("readiness: extension health checks did not finish before the deadline", "error", ctx.Err())
+				}
 				return statuses
 			}
 		}
 		return statuses
+	}
+}
+
+// drainExtensionHealthResults records every result already buffered.
+func drainExtensionHealthResults(results <-chan extensionHealthResult, statuses map[string]ext.HealthStatus) {
+	for {
+		select {
+		case r := <-results:
+			statuses[r.name] = r.status
+		default:
+			return
+		}
 	}
 }
