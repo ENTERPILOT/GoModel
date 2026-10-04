@@ -244,3 +244,28 @@ func TestSealedStoreReportsAnUnconfirmedDataKey(t *testing.T) {
 		assert.True(t, encryption.IsSealed(storedConfigValues(t, raw, "pii")["api_key"].(string)), "the row was saved sealed")
 	})
 }
+
+func TestUpsertManyConfirmsEveryRowAfterOneFails(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, raw Store) {
+		ctx := context.Background()
+		box, keys := encryptiontest.NewBox(t)
+		store := &sealedStore{
+			Store: rotateDuringUpsert{Store: raw, rotate: func() {
+				encryptiontest.Rotate(t, keys)
+				// The first row's check, its forced reload, and its retry fail.
+				keys.FailLists(3)
+			}},
+			box:        box,
+			secretKeys: testSecretKeys,
+			swap:       raw.(configSwapper),
+		}
+		err := store.UpsertMany(ctx, []Definition{
+			{Name: "first", Type: "presidio", Config: []byte(`{"api_key":"pk-1"}`)},
+			{Name: "second", Type: "presidio", Config: []byte(`{"api_key":"pk-2"}`)},
+		})
+		require.ErrorIs(t, err, encryption.ErrSealUnconfirmed)
+		assert.Contains(t, err.Error(), `guardrail "first"`)
+		assert.NotContains(t, err.Error(), `guardrail "second"`)
+		assert.Regexp(t, `^enc:v1:2:`, storedConfigValues(t, raw, "second")["api_key"], "a later row is still resealed with the new key")
+	})
+}

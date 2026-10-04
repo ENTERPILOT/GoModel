@@ -3,6 +3,7 @@ package guardrails
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/plugins"
@@ -151,12 +152,15 @@ func (s *sealedStore) UpsertMany(ctx context.Context, definitions []Definition) 
 	if err := s.Store.UpsertMany(ctx, sealed); err != nil {
 		return err
 	}
+	// Every row is confirmed, even after one fails, so a rotation that raced
+	// the save leaves no row under the old key that could have been resealed.
+	var errs []error
 	for i := range definitions {
 		if err := s.confirmKey(ctx, definitions[i], sealed[i]); err != nil {
-			return err
+			errs = append(errs, fmt.Errorf("guardrail %q: %w", sealed[i].Name, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // sealForWrite seals the values of definition that hold a secret: those its

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/pluginload"
 	"github.com/enterpilot/gomodel/internal/plugins"
@@ -108,7 +110,12 @@ func (b *bootstrap) initGuardrails(refreshInterval time.Duration, catalog *plugi
 		return nil, fmt.Errorf("failed to prepare guardrail definitions: %w", err)
 	}
 	if err := result.Service.UpsertDefinitions(b.ctx, b.seedGuardrails); err != nil {
-		return nil, fmt.Errorf("failed to upsert guardrails: %w", err)
+		// The definitions were saved and applied; only the post-save data key
+		// check failed, which `gomodel secrets reencrypt` repairs.
+		if !errors.Is(err, encryption.ErrSealUnconfirmed) {
+			return nil, fmt.Errorf("failed to upsert guardrails: %w", err)
+		}
+		slog.Warn("configured guardrails were saved, but their data key could not be confirmed", "error", err)
 	}
 	return result.Service, nil
 }
