@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"os"
 	"sort"
 	"strings"
 
@@ -80,7 +81,17 @@ type ProviderConfig struct {
 // operator wrote, and ProviderConfig.APIKeySources maps every normalized key
 // back to it.
 func resolveProviders(ctx context.Context, secrets *config.Secrets, raw map[string]config.RawProviderConfig, global config.ResilienceConfig, discovery map[string]DiscoveryConfig) (map[string]ProviderConfig, map[string]config.RawProviderConfig, error) {
-	merged, envKeys := applyProviderEnvVars(raw, discovery)
+	// Settings that are parsed or steer the overlay are resolved before it
+	// reads them; credentials only once a provider is known to use them.
+	environ, err := resolveSettingEnvVars(ctx, secrets, os.Environ(), discovery)
+	if err != nil {
+		return nil, nil, err
+	}
+	raw, err = resolveProviderSelectors(ctx, secrets, raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	merged, envKeys := applyProviderEnvVars(raw, discovery, environ)
 	keys := make(map[string][]sourcedKey, len(merged))
 	for name, p := range merged {
 		sourced, fromEnv := envKeys[name]

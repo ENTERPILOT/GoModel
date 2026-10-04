@@ -137,7 +137,14 @@ Resolution order for one generation:
    and reported under its `config.yaml` path
    (`providers.openai.api_keys[1]`) or the name of the environment variable
    that set it (`OPENAI_API_KEY_2`), and identical references are looked up
-   once.
+   once. Provider settings that are parsed or steer the merge (models,
+   model filters, booleans, `type`, `backend`) are resolved before the merge
+   reads them.
+
+`config.Load` parses some environment variables into numbers, booleans,
+durations, and lists before any extension can register a scheme. A
+reference in one of those is rejected with an error naming the variable;
+string settings, and string values inside JSON variables, accept references.
 
 Any reference that is still unresolved after step 3 or 4 stops the
 generation with an error naming the field and the scheme, never the value.

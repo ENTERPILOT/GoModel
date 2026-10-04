@@ -4,7 +4,6 @@ import (
 	"log/slog"
 	"maps"
 	"math"
-	"os"
 	"slices"
 	"sort"
 	"strconv"
@@ -14,19 +13,19 @@ import (
 	"github.com/enterpilot/gomodel/config"
 )
 
-// applyProviderEnvVars overlays well-known provider env vars onto the raw YAML map.
-// Env var values always win over YAML values for the same provider name.
+// applyProviderEnvVars overlays well-known provider env vars, given as
+// os.Environ-style KEY=value entries, onto the raw YAML map. Env var values
+// always win over YAML values for the same provider name.
 //
 // The second result holds, per provider, the key set env vars supplied, each
 // key labelled with its variable name. A provider without an entry kept its
 // config.yaml keys.
-func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig) (map[string]config.RawProviderConfig, map[string][]sourcedKey) {
+func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig, environ []string) (map[string]config.RawProviderConfig, map[string][]sourcedKey) {
 	overlay := &providerOverlay{
 		providers: make(map[string]config.RawProviderConfig, len(raw)),
 		envKeys:   make(map[string][]sourcedKey),
 	}
 	maps.Copy(overlay.providers, raw)
-	environ := os.Environ()
 
 	for _, providerType := range sortedDiscoveryTypes(discovery) {
 		spec := discovery[providerType]

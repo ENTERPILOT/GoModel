@@ -291,3 +291,47 @@ func TestResolveProvidersLabelsKeysWithTheirSource(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveProvidersResolvesParsedEnvSettingsFirst(t *testing.T) {
+	values := map[string]string{
+		"models": "model-a, model-b", "include": "gpt-*,o*", "price": "2.5", "sticky": "false", "type": "openai",
+	}
+	newSecrets := func(t *testing.T) *config.Secrets {
+		secrets, _ := countingVault(t, values)
+		return secrets
+	}
+
+	t.Run("parsed after resolution", func(t *testing.T) {
+		t.Setenv("OPENAI_API_KEY", "sk-env")
+		t.Setenv("OPENAI_MODELS", "${vault:models}")
+		t.Setenv("OPENAI_MODEL_FILTER_INCLUDE", "${vault:include}")
+		t.Setenv("OPENAI_MODEL_FILTER_MAX_PRICE_PER_MTOK", "${vault:price}")
+		t.Setenv("OPENAI_SESSION_STICKY_KEYS", "${vault:sticky}")
+
+		got, _, err := resolveProviders(t.Context(), newSecrets(t), map[string]config.RawProviderConfig{}, config.ResilienceConfig{}, testDiscoveryConfigs)
+		require.NoError(t, err)
+		cfg := got["openai"]
+		assert.Equal(t, []string{"model-a", "model-b"}, cfg.Models)
+		assert.Equal(t, []string{"gpt-*", "o*"}, cfg.ModelFilter.Include)
+		require.NotNil(t, cfg.ModelFilter.MaxPricePerMtok)
+		assert.InDelta(t, 2.5, *cfg.ModelFilter.MaxPricePerMtok, 0)
+		assert.False(t, cfg.SessionStickyKeys)
+	})
+
+	t.Run("unresolved setting is an error naming the variable", func(t *testing.T) {
+		t.Setenv("OPENAI_API_KEY", "sk-env")
+		t.Setenv("OPENAI_MODELS", "${vault:missing}")
+		_, _, err := resolveProviders(t.Context(), newSecrets(t), map[string]config.RawProviderConfig{}, config.ResilienceConfig{}, testDiscoveryConfigs)
+		require.EqualError(t, err, "OPENAI_MODELS: secret reference ${vault:...}: not found")
+	})
+
+	t.Run("yaml type is resolved before the overlay matches on it", func(t *testing.T) {
+		t.Setenv("OPENAI_API_KEY", "sk-env")
+		raw := map[string]config.RawProviderConfig{"openai": {Type: "${vault:type}"}}
+		got, _, err := resolveProviders(t.Context(), newSecrets(t), raw, config.ResilienceConfig{}, testDiscoveryConfigs)
+		require.NoError(t, err)
+		assert.Equal(t, "openai", got["openai"].Type)
+		assert.Equal(t, []string{"sk-env"}, got["openai"].APIKeys)
+		assert.Equal(t, "${vault:type}", raw["openai"].Type, "the loaded providers keep their references")
+	})
+}
