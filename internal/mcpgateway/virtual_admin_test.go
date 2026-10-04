@@ -203,17 +203,27 @@ func TestBackgroundRefreshPicksUpOtherInstanceWrites(t *testing.T) {
 }
 
 // gatedStore blocks List while armed, standing in for a slow store read that
-// a background refresh is in the middle of when Close runs.
+// a reload is in the middle of when Close runs. honorCtx makes the read
+// return on cancellation, like a real database driver.
 type gatedStore struct {
 	*memoryStore
-	gate    chan struct{}
-	entered chan struct{}
+	gate     chan struct{}
+	entered  chan struct{}
+	honorCtx bool
 }
 
 func (g *gatedStore) List(ctx context.Context) ([]ManagedServer, error) {
 	if g.gate != nil {
 		g.entered <- struct{}{}
-		<-g.gate
+		if g.honorCtx {
+			select {
+			case <-g.gate:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		} else {
+			<-g.gate
+		}
 	}
 	return g.memoryStore.List(ctx)
 }
@@ -256,4 +266,29 @@ func TestCloseWaitsForInFlightReloadAndStopsLaterOnes(t *testing.T) {
 
 	store.gate = nil
 	require.ErrorIs(t, service.Reload(context.Background()), errServiceClosed, "reloads after Close do nothing")
+}
+
+func TestCloseCancelsAdminReloadBlockedOnStore(t *testing.T) {
+	store := &gatedStore{memoryStore: &memoryStore{rows: map[string]ManagedServer{}}, honorCtx: true}
+	service, err := NewService(context.Background(), Options{Store: store})
+	require.NoError(t, err)
+
+	// An admin save's reload, with a request context that never ends, waits
+	// on a slow store read.
+	store.gate, store.entered = make(chan struct{}), make(chan struct{}, 1)
+	reloaded := make(chan error, 1)
+	go func() { reloaded <- service.Reload(context.Background()) }()
+	<-store.entered
+
+	closed := make(chan struct{})
+	go func() {
+		service.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close waited on an admin reload blocked on the store")
+	}
+	require.Error(t, <-reloaded, "the blocked reload is cancelled")
 }

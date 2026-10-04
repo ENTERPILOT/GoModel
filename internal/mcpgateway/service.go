@@ -69,8 +69,8 @@ type Service struct {
 	// into no-ops, so no upstream is dialed after shutdown.
 	reloadMu      sync.Mutex
 	reloadStopped bool
-	// stopCtx is cancelled by Close, so a background refresh blocked on a
-	// store read does not hold up shutdown.
+	// stopCtx is cancelled by Close, so a reload blocked on a store read,
+	// whether background or admin-triggered, does not hold up shutdown.
 	stopCtx    context.Context
 	stopCancel context.CancelFunc
 	// searchDiscovery is the default for sessions that do not send
@@ -200,7 +200,7 @@ func (s *Service) refreshLoop(interval time.Duration) {
 		case <-s.stop:
 			return
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(s.stopCtx, 30*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			if err := s.Reload(ctx); err != nil && !errors.Is(err, errServiceClosed) && s.stopCtx.Err() == nil {
 				slog.Error("failed to refresh mcp servers", "error", err)
 			}
@@ -213,9 +213,15 @@ func (s *Service) refreshLoop(interval time.Duration) {
 // set. Declarative entries shadow store rows with the same name, mirroring
 // the tagging/virtual-models source precedence.
 func (s *Service) Reload(ctx context.Context) error {
+	// Close cancels every reload, not only background ones: an admin save
+	// waiting on a slow store read must not hold shutdown open.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer context.AfterFunc(s.stopCtx, cancel)()
+
 	s.reloadMu.Lock()
 	defer s.reloadMu.Unlock()
-	if s.reloadStopped {
+	if s.reloadStopped || s.stopCtx.Err() != nil {
 		return errServiceClosed
 	}
 	specs := make([]ServerSpec, 0, len(s.configSpecs))
