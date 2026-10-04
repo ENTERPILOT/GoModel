@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -29,7 +31,7 @@ const (
 func migrateUsage(productName string) string {
 	return fmt.Sprintf(`Usage:
   %[1]s migrate litellm [--out DIR] [--force] [--database-url URL | --skip-database]
-      [--gomodel-url URL] <litellm-config.yaml>
+      [--gomodel-url URL [--allow-http]] <litellm-config.yaml>
 
 Converts a LiteLLM proxy config.yaml into a GoModel config.yaml, and reads
 virtual keys, teams, users, budgets, and rate limits from the LiteLLM
@@ -45,8 +47,10 @@ Without a URL, only the config is converted.
 
 --gomodel-url imports what was read into a running GoModel through its
 admin API, authenticating with GOMODEL_MASTER_KEY or else the LiteLLM
-master key. Start GoModel with the converted config first. Re-running is
-safe: existing keys are left alone and the rest is updated in place.
+master key. Start GoModel with the converted config first. Re-running
+updates what an earlier run imported, and deactivates keys LiteLLM has
+since blocked. A --gomodel-url on another machine must use https unless
+--allow-http is passed.
 `, productName)
 }
 
@@ -57,6 +61,7 @@ type migrateOptions struct {
 	DatabaseURL  string
 	SkipDatabase bool
 	GoModelURL   string
+	AllowHTTP    bool
 }
 
 // runMigrateCommand dispatches `gomodel migrate <source> ...`. Usage errors
@@ -103,6 +108,7 @@ func parseMigrateArgs(productName string, args []string, stderr io.Writer) (migr
 	flags.StringVar(&opts.DatabaseURL, "database-url", "", "LiteLLM PostgreSQL URL (default: general_settings.database_url, else DATABASE_URL)")
 	flags.BoolVar(&opts.SkipDatabase, "skip-database", false, "Convert the config only, without reading the LiteLLM database")
 	flags.StringVar(&opts.GoModelURL, "gomodel-url", "", "Import keys, teams, and budgets into the GoModel running at this URL")
+	flags.BoolVar(&opts.AllowHTTP, "allow-http", false, "Send the admin key over plain HTTP to a --gomodel-url that is not on this machine")
 	if err := flags.Parse(args); err != nil {
 		return opts, err
 	}
@@ -119,7 +125,35 @@ func parseMigrateArgs(productName string, args []string, stderr io.Writer) (migr
 	if opts.SkipDatabase && (opts.DatabaseURL != "" || opts.GoModelURL != "") {
 		return opts, errors.New("migrate litellm: --skip-database cannot be combined with --database-url or --gomodel-url")
 	}
+	if opts.GoModelURL != "" {
+		if err := checkGoModelURL(opts.GoModelURL, opts.AllowHTTP); err != nil {
+			return opts, fmt.Errorf("migrate litellm: %w", err)
+		}
+	}
 	return opts, nil
+}
+
+// checkGoModelURL refuses to send the admin key over plain HTTP to another
+// machine unless the operator allows it, as on a private Compose network.
+func checkGoModelURL(raw string, allowHTTP bool) error {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return fmt.Errorf("--gomodel-url %q is not a URL such as http://localhost:8080", raw)
+	}
+	switch parsed.Scheme {
+	case "https":
+		return nil
+	case "http":
+		host := parsed.Hostname()
+		if allowHTTP || host == "localhost" {
+			return nil
+		}
+		if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+			return nil
+		}
+		return fmt.Errorf("--gomodel-url %s would send the admin key unencrypted; use https, or pass --allow-http on a trusted network", raw)
+	}
+	return fmt.Errorf("--gomodel-url %q must use http or https", raw)
 }
 
 type outputFile struct {
@@ -187,8 +221,8 @@ func applyDatabaseImport(opts migrateOptions, result *litellmmigrate.Result, pla
 	if err != nil {
 		return fmt.Errorf("migrate litellm: %w", err)
 	}
-	fmt.Fprintf(stdout, "imported into %s: %d keys (%d already there), %d model policies, %d budgets, %d rate limits\n",
-		opts.GoModelURL, applied.Keys, applied.KeysExisting, applied.Policies, applied.Budgets, applied.RateLimits)
+	fmt.Fprintf(stdout, "imported into %s: %d new keys, %d keys updated, %d model policies, %d budgets, %d rate limits\n",
+		opts.GoModelURL, applied.Keys, applied.KeysUpdated, applied.Policies, applied.Budgets, applied.RateLimits)
 	for _, failure := range applied.Failures {
 		fmt.Fprintf(stdout, "failed: %s\n", failure)
 	}

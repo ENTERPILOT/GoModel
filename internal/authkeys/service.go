@@ -206,42 +206,68 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*IssuedKey, er
 }
 
 // Import stores a key another gateway issued, by the hash of its token, so
-// clients keep using that token. It returns ErrSecretHashExists when a key
-// with the same hash exists, whether this instance has loaded it or not.
-func (s *Service) Import(ctx context.Context, input ImportInput) (*View, error) {
+// clients keep using that token. Importing the same token again updates the
+// earlier import, so re-running a migration carries over later changes; a
+// Disabled input deactivates it. It returns ErrSecretHashExists only when the
+// hash belongs to a key from another source.
+func (s *Service) Import(ctx context.Context, input ImportInput) (*View, ImportOutcome, error) {
 	if s == nil {
-		return nil, fmt.Errorf("auth key service is required")
+		return nil, ImportSkipped, fmt.Errorf("auth key service is required")
 	}
 
 	normalized, err := normalizeImportInput(input)
 	if err != nil {
-		return nil, err
+		return nil, ImportSkipped, err
 	}
-	s.mu.RLock()
-	_, exists := s.snapshot.bySecretHash[normalized.SecretHash]
-	s.mu.RUnlock()
-	if exists {
-		return nil, ErrSecretHashExists
+	existing, exists := s.keyBySecretHash(normalized.SecretHash)
+	if !exists {
+		if normalized.Disabled {
+			return nil, ImportSkipped, nil
+		}
+		view, err := s.createImported(ctx, normalized)
+		if !errors.Is(err, ErrSecretHashExists) {
+			return view, ImportCreated, err
+		}
+		// Another instance imported it first: reload and update that key.
+		if err := s.Refresh(ctx); err != nil {
+			return nil, ImportSkipped, err
+		}
+		if existing, exists = s.keyBySecretHash(normalized.SecretHash); !exists {
+			return nil, ImportSkipped, ErrSecretHashExists
+		}
 	}
+	if existing.ImportedFrom != normalized.ImportedFrom {
+		return nil, ImportSkipped, ErrSecretHashExists
+	}
+	view, err := s.updateImported(ctx, existing, normalized)
+	return view, ImportUpdated, err
+}
 
+func (s *Service) keyBySecretHash(hash string) (AuthKey, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	key, ok := s.snapshot.bySecretHash[hash]
+	return key, ok
+}
+
+func (s *Service) createImported(ctx context.Context, input ImportInput) (*View, error) {
 	now := time.Now().UTC()
 	key := AuthKey{
 		ID:              uuid.NewString(),
-		Name:            normalized.Name,
-		Description:     normalized.Description,
-		UserPath:        normalized.UserPath,
-		Labels:          normalized.Labels,
-		AllowedModels:   normalized.AllowedModels,
-		DashboardAccess: normalized.DashboardAccess,
-		RedactedValue:   normalized.RedactedValue,
-		SecretHash:      normalized.SecretHash,
-		ImportedFrom:    normalized.ImportedFrom,
+		Name:            input.Name,
+		Description:     input.Description,
+		UserPath:        input.UserPath,
+		Labels:          input.Labels,
+		AllowedModels:   input.AllowedModels,
+		DashboardAccess: input.DashboardAccess,
+		RedactedValue:   input.RedactedValue,
+		SecretHash:      input.SecretHash,
+		ImportedFrom:    input.ImportedFrom,
 		Enabled:         true,
-		ExpiresAt:       normalized.ExpiresAt,
+		ExpiresAt:       input.ExpiresAt,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
-
 	if err := s.store.Create(ctx, key); err != nil {
 		if errors.Is(err, ErrSecretHashExists) {
 			return nil, ErrSecretHashExists
@@ -250,8 +276,37 @@ func (s *Service) Import(ctx context.Context, input ImportInput) (*View, error) 
 	}
 	s.applyUpsert(key, now)
 	s.refreshBestEffort(ctx, "import")
-
 	return &View{AuthKey: key, Active: key.Active(now)}, nil
+}
+
+// updateImported brings an earlier import up to date. Dashboard access and a
+// deactivation made in GoModel are kept: the import never widens access an
+// administrator narrowed.
+func (s *Service) updateImported(ctx context.Context, key AuthKey, input ImportInput) (*View, error) {
+	now := time.Now().UTC()
+	key.Name = input.Name
+	key.Description = input.Description
+	key.UserPath = input.UserPath
+	key.Labels = input.Labels
+	key.AllowedModels = input.AllowedModels
+	key.RedactedValue = input.RedactedValue
+	key.ExpiresAt = input.ExpiresAt
+	key.UpdatedAt = now
+	if err := s.store.UpdateImported(ctx, key); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("update imported auth key: %w", err)
+	}
+	s.applyUpsert(key, now)
+	if input.Disabled && key.Enabled && key.DeactivatedAt == nil {
+		if err := s.Deactivate(ctx, key.ID); err != nil {
+			return nil, err
+		}
+	} else {
+		s.refreshBestEffort(ctx, "import")
+	}
+	return s.viewByID(key.ID)
 }
 
 // UpdateLabels replaces a managed auth key's labels, updates the in-memory

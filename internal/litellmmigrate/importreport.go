@@ -7,8 +7,8 @@ import (
 )
 
 func (plan *ImportPlan) writeMarkdown(b *strings.Builder) {
-	fmt.Fprintf(b, "\n## LiteLLM database\n\n%d keys to import (%d skipped), %d model policies, %d budgets, %d rate limits.\n",
-		len(plan.Keys), plan.SkippedKeys, len(plan.Policies), len(plan.Budgets), len(plan.RateLimits))
+	fmt.Fprintf(b, "\n## LiteLLM database\n\n%d keys to import, %d blocked or expired, %d model policies, %d budgets, %d rate limits.\n",
+		len(plan.Keys)-plan.DisabledKeys, plan.DisabledKeys, len(plan.Policies), len(plan.Budgets), len(plan.RateLimits))
 	type row struct{ models, budgets, limits []string }
 	rows := map[string]*row{}
 	at := func(path string) *row {

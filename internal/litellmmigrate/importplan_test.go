@@ -72,7 +72,7 @@ func TestPlanImport_UserPaths(t *testing.T) {
 	}
 	assert.Equal(t, map[string]string{
 		"hash-team":          "/Acme/Search EU-West-1/prod",
-		"hash-team-2":        "/Acme/Search EU-West-1/prod-2",
+		"hash-team-2":        "/Acme/Search EU-West-1/prod-hash-tea",
 		"hash-no-alias-team": "/team-2/sk-...abcd",
 		"hash-personal":      "/users/alice@example.com/laptop",
 		"hash-unknown-user":  "/users/u-gone/ci",
@@ -165,31 +165,82 @@ func TestPlanImport_Keys(t *testing.T) {
 	plan, result := planFor(t, &Database{
 		Teams: []dbTeam{
 			{TeamID: "t", TeamAlias: new("team"), Metadata: map[string]any{"tags": []any{"search", "eu"}}},
-			{TeamID: "t-blocked", TeamAlias: new("frozen"), Blocked: new(true)},
+			{TeamID: "t-blocked", TeamAlias: new("frozen"), Blocked: new(true), Models: []string{"gpt-4o"}},
 		},
 		Keys: []dbKey{
 			{Token: "h1", KeyAlias: new("prod"), KeyName: new("sk-...abcd"), TeamID: new("t"), Expires: &expires,
 				Metadata: map[string]any{"tags": []any{"prod", "search", 7}}},
-			{Token: "h2", KeyAlias: new("blocked"), Blocked: new(true)},
+			{Token: "h2", KeyAlias: new("blocked"), KeyName: new("sk-...bbbb"), Blocked: new(true), Models: []string{"gpt-4o"}},
 			{Token: "h3", KeyAlias: new("expired"), Expires: &expired},
 			{Token: "h4", KeyAlias: new("frozen-key"), TeamID: new("t-blocked")},
 			{Token: "h5", KeyName: new("my custom key name")},
 		},
 	})
 
-	require.Len(t, plan.Keys, 2)
-	assert.Equal(t, 3, plan.SkippedKeys)
-	prod := keyByName(t, plan, "prod")
+	require.Len(t, plan.Keys, 5)
+	assert.Equal(t, 3, plan.DisabledKeys)
 	assert.Equal(t, KeyImport{
 		Name: "prod", ImportedFrom: "litellm", SecretHash: "h1", RedactedValue: "sk-...abcd",
 		UserPath: "/team/prod", Labels: []string{"prod", "search", "eu"}, ExpiresAt: &expires.Time,
-	}, prod)
+	}, keyByName(t, plan, "prod"))
+	assert.Equal(t, KeyImport{
+		Name: "blocked", ImportedFrom: "litellm", SecretHash: "h2", RedactedValue: "sk-...bbbb",
+		UserPath: "/keys/blocked", Enabled: new(false),
+	}, keyByName(t, plan, "blocked"), "a disabled key carries only what identifies it")
+	assert.Equal(t, new(false), keyByName(t, plan, "expired").Enabled)
+	assert.Nil(t, keyByName(t, plan, "expired").ExpiresAt, "a past expiry is not sent")
+	assert.Equal(t, "/frozen/frozen-key", keyByName(t, plan, "frozen-key").UserPath)
+	assert.Equal(t, new(false), keyByName(t, plan, "frozen-key").Enabled)
+	assert.Nil(t, policyAt(plan, "/frozen"), "a blocked team's rules are not imported")
 	assert.Empty(t, keyByName(t, plan, "my custom key name").RedactedValue, "only LiteLLM's abbreviated form is shown")
 
 	skipped := findings(result, SeveritySkipped)
-	assert.Contains(t, skipped, "key blocked: blocked in LiteLLM")
-	assert.Contains(t, skipped, "key expired: expired in LiteLLM")
-	assert.Contains(t, skipped, "team frozen: blocked in LiteLLM; its keys are not imported")
+	assert.Contains(t, skipped, "key blocked: blocked in LiteLLM; deactivated in GoModel if it was imported before, not created otherwise")
+	assert.Contains(t, skipped, "key expired: expired in LiteLLM; deactivated in GoModel if it was imported before, not created otherwise")
+	assert.Contains(t, skipped, "key frozen-key: its team is blocked in LiteLLM; deactivated in GoModel if it was imported before, not created otherwise")
+	assert.Contains(t, skipped, "team frozen: blocked in LiteLLM; its keys are imported deactivated")
+}
+
+func TestPlanImport_PathsAreStableAndSeparate(t *testing.T) {
+	older, newer := dbTime{importTestNow.Add(-2 * time.Hour)}, dbTime{importTestNow.Add(-time.Hour)}
+	db := func(keys ...dbKey) *Database {
+		return &Database{
+			Teams: []dbTeam{{TeamID: "team-users", TeamAlias: new("users"), Models: []string{"gpt-4o"}}},
+			Users: []dbUser{{UserID: "alice"}},
+			Keys:  keys,
+		}
+	}
+	first := dbKey{Token: "zzz-old", KeyAlias: new("ci"), CreatedAt: &older}
+	plan, _ := planFor(t, db(first))
+	assert.Equal(t, "/keys/ci", keyByName(t, plan, "ci").UserPath)
+	assert.Equal(t, []string{"openai/gpt-4o"}, policyAt(plan, "/users-team-use"),
+		"a team named users does not become the parent of personal keys")
+
+	// A newer key with the same alias, read first, does not take the path.
+	plan, _ = planFor(t, db(dbKey{Token: "aaa-new", KeyAlias: new("ci"), CreatedAt: &newer}, first))
+	paths := map[string]string{}
+	for _, key := range plan.Keys {
+		paths[key.SecretHash] = key.UserPath
+	}
+	assert.Equal(t, map[string]string{"zzz-old": "/keys/ci", "aaa-new": "/keys/ci-aaa-new"}, paths)
+}
+
+func TestPlanImport_UsersWithoutPersonalKeys(t *testing.T) {
+	plan, _ := planFor(t, &Database{Users: []dbUser{
+		{UserID: "bob", Models: []string{"gpt-4o"}, RPMLimit: new(int64(5))},
+		{UserID: "default_user_id"},
+	}})
+	assert.Equal(t, []string{"openai/gpt-4o"}, policyAt(plan, "/users/bob"))
+	assert.Equal(t, []RateLimitImport{{UserPath: "/users/bob", Period: "minute", MaxRequests: new(int64(5))}}, plan.RateLimits)
+	assert.Len(t, plan.Policies, 1, "a user without limits adds nothing")
+}
+
+func TestPlanImport_KeyBudgetTakesItsDurationFromTheBudgetRow(t *testing.T) {
+	plan, _ := planFor(t, &Database{
+		Budgets: []dbBudget{{BudgetID: "b", MaxBudget: new(100.0), BudgetDuration: new("1d")}},
+		Keys:    []dbKey{{Token: "h", KeyAlias: new("k"), BudgetID: new("b"), MaxBudget: new(5.0)}},
+	})
+	assert.Equal(t, []BudgetImport{{UserPath: "/keys/k", Period: "daily", Amount: 5}}, plan.Budgets)
 }
 
 func TestPlanImport_ReportSection(t *testing.T) {
@@ -199,7 +250,7 @@ func TestPlanImport_ReportSection(t *testing.T) {
 		Keys: []dbKey{{Token: "h", KeyAlias: new("k"), TeamID: new("t")}},
 	})
 	report := result.Report.Markdown()
-	assert.Contains(t, report, "1 keys to import (0 skipped), 1 model policies, 1 budgets, 1 rate limits.")
+	assert.Contains(t, report, "1 keys to import, 0 blocked or expired, 1 model policies, 1 budgets, 1 rate limits.")
 	assert.Contains(t, report, "| `/team` | `openai/gpt-4o` | $10 every 12h (LiteLLM spent $3.20) | 2 concurrent requests |")
 }
 

@@ -158,3 +158,31 @@ func TestRunMigrateCommand_DatabaseErrors(t *testing.T) {
 	require.NoError(t, runMigrateCommand("gomodel", []string{"litellm", "--skip-database", path}, io.Discard, io.Discard),
 		"--skip-database ignores DATABASE_URL")
 }
+
+func TestCheckGoModelURL(t *testing.T) {
+	tests := []struct {
+		url       string
+		allowHTTP bool
+		wantErr   string
+	}{
+		{url: "https://gomodel.example.com"},
+		{url: "http://localhost:8080"},
+		{url: "http://127.0.0.1:8080"},
+		{url: "http://[::1]:8080"},
+		{url: "http://gomodel:8080", wantErr: "would send the admin key unencrypted"},
+		{url: "http://gomodel:8080", allowHTTP: true},
+		{url: "ftp://gomodel", wantErr: "must use http or https"},
+		{url: "localhost:8080", wantErr: "is not a URL"},
+	}
+	for _, tt := range tests {
+		err := checkGoModelURL(tt.url, tt.allowHTTP)
+		if tt.wantErr == "" {
+			require.NoError(t, err, tt.url)
+			continue
+		}
+		require.ErrorContains(t, err, tt.wantErr, tt.url)
+	}
+
+	err := runMigrateCommand("gomodel", []string{"litellm", "--gomodel-url", "http://gomodel:8080", "a.yaml"}, io.Discard, io.Discard)
+	assert.Equal(t, 2, ExitCode(err), "a remote http URL is a usage error")
+}

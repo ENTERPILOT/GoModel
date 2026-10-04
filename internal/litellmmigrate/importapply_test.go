@@ -63,7 +63,7 @@ func applyTestPlan() *ImportPlan {
 func TestApply_WritesPlanInOrder(t *testing.T) {
 	admin := &fakeAdmin{reply: func(call adminCall, w http.ResponseWriter) {
 		if call.Path == "/admin/auth-keys/import" && call.Body["secret_hash"] == "h-old" {
-			w.WriteHeader(http.StatusConflict)
+			w.WriteHeader(http.StatusOK)
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
@@ -73,7 +73,7 @@ func TestApply_WritesPlanInOrder(t *testing.T) {
 
 	result, err := Apply(context.Background(), server.Client(), server.URL+"/", "sk-admin", applyTestPlan())
 	require.NoError(t, err)
-	assert.Equal(t, ApplyResult{Policies: 1, Budgets: 2, RateLimits: 1, Keys: 1, KeysExisting: 1}, result)
+	assert.Equal(t, ApplyResult{Policies: 1, Budgets: 2, RateLimits: 1, Keys: 1, KeysUpdated: 1}, result)
 
 	require.Len(t, admin.calls, 6)
 	order := make([]string, len(admin.calls))
@@ -92,26 +92,36 @@ func TestApply_WritesPlanInOrder(t *testing.T) {
 	assert.Equal(t, map[string]any{"name": "new", "imported_from": "litellm", "secret_hash": "h-new", "user_path": "/team/k"}, admin.calls[4].Body)
 }
 
-func TestApply_RecordsRejectedWritesAndContinues(t *testing.T) {
+func TestApply_HoldsBackKeysWhoseRulesFailed(t *testing.T) {
 	admin := &fakeAdmin{reply: func(call adminCall, w http.ResponseWriter) {
-		if call.Path == "/admin/budgets" {
+		if call.Path == "/admin/budgets" && call.Body["subject"] == "/team/k" {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = io.WriteString(w, `{"error":{"message":"budgets feature is unavailable"}}`)
 			return
 		}
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusCreated)
 	}}
 	server := httptest.NewServer(admin)
 	defer server.Close()
+	plan := applyTestPlan()
+	plan.Keys = append(plan.Keys, KeyImport{Name: "blocked", SecretHash: "h-blocked", UserPath: "/team/k/blocked", Enabled: new(false)})
 
-	result, err := Apply(context.Background(), server.Client(), server.URL, "sk-admin", applyTestPlan())
+	result, err := Apply(context.Background(), server.Client(), server.URL, "sk-admin", plan)
 	require.NoError(t, err)
-	assert.Equal(t, 0, result.Budgets)
-	assert.Equal(t, 2, result.Keys)
+	assert.Equal(t, 1, result.Budgets)
+	assert.Equal(t, 1, result.RateLimits, "the other writes continue")
 	assert.Equal(t, []string{
-		"budget /team: PUT /budgets: 503 budgets feature is unavailable",
 		"budget /team/k: PUT /budgets: 503 budgets feature is unavailable",
+		"key new: not imported because a rule on /team/k was rejected",
 	}, result.Failures)
+
+	var imported []any
+	for _, call := range admin.calls {
+		if call.Path == "/admin/auth-keys/import" {
+			imported = append(imported, call.Body["secret_hash"])
+		}
+	}
+	assert.Equal(t, []any{"h-old", "h-blocked"}, imported, "a key outside the failed path, and a deactivation, still go through")
 }
 
 func TestApply_ChecksTheAdminKeyBeforeWriting(t *testing.T) {

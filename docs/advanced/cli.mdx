@@ -226,12 +226,13 @@ report. Without `--out` it writes no files.
 
 It also reads keys, teams, users, and budgets from the LiteLLM database when it
 has a URL (`--database-url`, the config's `database_url`, or `DATABASE_URL`),
-and with `--gomodel-url` imports them into a running GoModel. `--skip-database`
-converts the config only.
+and with `--gomodel-url` imports them into a running GoModel. Re-running brings
+GoModel up to date. A `--gomodel-url` on another machine must use `https` unless
+you pass `--allow-http`. `--skip-database` converts the config only.
 
 ```sh
 gomodel migrate litellm [--out DIR] [--force] [--database-url URL | --skip-database]
-  [--gomodel-url URL] <litellm-config.yaml>
+  [--gomodel-url URL [--allow-http]] <litellm-config.yaml>
 ```
 
 See [Migrating from LiteLLM](/guides/migrate-from-litellm) for the full

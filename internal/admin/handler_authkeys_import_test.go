@@ -41,8 +41,14 @@ func TestImportAuthKey(t *testing.T) {
 
 	c, rec = echotest.Post(t, "/admin/auth-keys/import", body)
 	require.NoError(t, h.ImportAuthKey(c))
-	assert.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
-	assert.Equal(t, "auth_key_exists", errorCode(t, rec))
+	assert.Equal(t, http.StatusOK, rec.Code, "importing the same token again updates it: %s", rec.Body.String())
+	assert.Equal(t, view["id"], echotest.Decode[map[string]any](t, rec)["id"])
+
+	disabled := `{"name":"gone","imported_from":"litellm","enabled":false,"secret_hash":"` + hexOf("never imported") + `"}`
+	c, rec = echotest.Post(t, "/admin/auth-keys/import", disabled)
+	require.NoError(t, h.ImportAuthKey(c))
+	assert.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	assert.Equal(t, 1, service.Total())
 }
 
 func TestImportAuthKeyAllowsTheModelsBehindVirtualModels(t *testing.T) {

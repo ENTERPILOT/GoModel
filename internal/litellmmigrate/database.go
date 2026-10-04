@@ -44,6 +44,7 @@ type dbKey struct {
 	BudgetID       *string        `json:"budget_id"`
 	Blocked        *bool          `json:"blocked"`
 	Metadata       map[string]any `json:"metadata"`
+	CreatedAt      *dbTime        `json:"created_at"`
 }
 
 type dbTeam struct {
@@ -55,6 +56,7 @@ type dbTeam struct {
 	Models         []string       `json:"models"`
 	Blocked        *bool          `json:"blocked"`
 	Metadata       map[string]any `json:"metadata"`
+	CreatedAt      *dbTime        `json:"created_at"`
 }
 
 type dbUser struct {
@@ -64,6 +66,7 @@ type dbUser struct {
 	UserEmail *string  `json:"user_email"`
 	Spend     float64  `json:"spend"`
 	Models    []string `json:"models"`
+	CreatedAt *dbTime  `json:"created_at"`
 }
 
 type dbOrganization struct {
@@ -72,6 +75,7 @@ type dbOrganization struct {
 	BudgetID          *string  `json:"budget_id"`
 	Spend             float64  `json:"spend"`
 	Models            []string `json:"models"`
+	CreatedAt         *dbTime  `json:"created_at"`
 }
 
 type dbBudget struct {

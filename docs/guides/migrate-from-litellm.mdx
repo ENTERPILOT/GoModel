@@ -121,8 +121,16 @@ gomodel migrate litellm --database-url "$LITELLM_DATABASE_URL" \
 ```
 
 The command authenticates with `GOMODEL_MASTER_KEY`, else the LiteLLM master
-key. Without `--gomodel-url` it only lists the import in the report. Re-running
-is safe: keys already imported are left alone and the rest is updated in place.
+key, and needs `https` for a GoModel on another machine (`--allow-http` on a
+trusted network, such as a Compose network). Without `--gomodel-url` it only
+lists the import in the report.
+
+Run it again while both gateways run side by side: it brings GoModel up to date
+with LiteLLM. Keys get their current path, labels, allowed models, and expiry,
+and keys LiteLLM has since blocked or expired are deactivated. Dashboard access
+granted and keys deactivated in GoModel stay as they are. Rules for a path are
+written before its keys; if one is rejected, those keys are held back and the
+command exits with an error.
 
 Each key keeps its `sk-...` value: LiteLLM stores only a SHA-256 hash of it,
 and GoModel [imports that hash](/advanced/admin-endpoints#importing-keys-from-litellm),
@@ -156,7 +164,8 @@ point a virtual model at other models, update the allowed models that named it.
 `1mo` both become `monthly`, which resets on calendar months), and other
 durations to a fixed window. Not imported, and listed in the report:
 
-- blocked or expired keys, and keys of blocked teams;
+- blocked or expired keys, and keys of blocked teams (deactivated if an
+  earlier run imported them);
 - budgets without `budget_duration`: GoModel budgets reset every period;
 - spend: budgets start from zero, and the report shows LiteLLM's current spend
   next to each one;

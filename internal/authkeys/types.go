@@ -73,7 +73,23 @@ type ImportInput struct {
 	ImportedFrom  string
 	SecretHash    string
 	RedactedValue string
+	// Disabled marks a key the source gateway blocked or expired: an
+	// existing import is deactivated, and a missing one is not created.
+	Disabled bool
 }
+
+// ImportOutcome reports what Import did with a key.
+type ImportOutcome int
+
+const (
+	// ImportCreated means the key was new and is now stored.
+	ImportCreated ImportOutcome = iota
+	// ImportUpdated means an earlier import of the key was brought up to date.
+	ImportUpdated
+	// ImportSkipped means a disabled key had never been imported, so nothing
+	// was stored.
+	ImportSkipped
+)
 
 // Active reports whether the key can currently authenticate requests.
 func (k AuthKey) Active(now time.Time) bool {

@@ -18,8 +18,9 @@ type ImportPlan struct {
 	Budgets    []BudgetImport
 	RateLimits []RateLimitImport
 	Keys       []KeyImport
-	// SkippedKeys counts keys that are blocked, expired, or in a blocked team.
-	SkippedKeys int
+	// DisabledKeys counts keys that are blocked, expired, or in a blocked
+	// team. They are sent disabled, so an earlier import is deactivated.
+	DisabledKeys int
 }
 
 // PolicyImport is a user-path model allowlist (PUT /admin/users).
@@ -58,6 +59,8 @@ type KeyImport struct {
 	Labels        []string   `json:"labels,omitempty"`
 	AllowedModels []string   `json:"allowed_models,omitempty"`
 	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+	// Enabled is false for a key LiteLLM blocked or expired.
+	Enabled *bool `json:"enabled,omitempty"`
 }
 
 // LiteLLM's special model list entries.
@@ -105,11 +108,23 @@ func PlanImport(db *Database, result *Result, now time.Time) *ImportPlan {
 		used:    map[string]bool{},
 	}
 	p.index()
+	// The groups personal and unassigned keys live under; an organization or
+	// team with one of these names gets a suffix instead.
+	p.used["/users"], p.used["/keys"] = true, true
+	// Rows come in no fixed order. Oldest first keeps the paths of objects
+	// sharing a name stable across runs as new ones are added.
+	sortByCreation(db.Organizations, func(o dbOrganization) (*dbTime, string) { return o.CreatedAt, o.OrganizationID })
+	sortByCreation(db.Teams, func(t dbTeam) (*dbTime, string) { return t.CreatedAt, t.TeamID })
+	sortByCreation(db.Users, func(u dbUser) (*dbTime, string) { return u.CreatedAt, u.UserID })
+	sortByCreation(db.Keys, func(k dbKey) (*dbTime, string) { return k.CreatedAt, k.Token })
 	for _, org := range db.Organizations {
 		p.addOrganization(org)
 	}
 	for _, team := range db.Teams {
 		p.addTeam(team)
+	}
+	for _, user := range db.Users {
+		p.userPath(user.UserID)
 	}
 	for _, key := range db.Keys {
 		p.addKey(key)
@@ -159,11 +174,11 @@ func (p *planner) addOrganization(org dbOrganization) {
 
 func (p *planner) addTeam(team dbTeam) {
 	subject := "team " + label(team.TeamAlias, team.TeamID)
+	path := p.teamPath(team.TeamID)
 	if isTrue(team.Blocked) {
-		p.report.skip(subject, "blocked in LiteLLM; its keys are not imported")
+		p.report.skip(subject, "blocked in LiteLLM; its keys are imported deactivated")
 		return
 	}
-	path := p.teamPath(team.TeamID)
 	p.addPolicy(path, team.Models, subject)
 	p.addLimits(path, team.dbLimits, team.Spend, subject)
 }
@@ -171,30 +186,38 @@ func (p *planner) addTeam(team dbTeam) {
 func (p *planner) addKey(key dbKey) {
 	name := label(key.KeyAlias, label(key.KeyName, "litellm-key"))
 	subject := "key " + name
-	if isTrue(key.Blocked) {
-		p.report.skip(subject, "blocked in LiteLLM")
-		p.plan.SkippedKeys++
-		return
-	}
-	if key.Expires != nil && !key.Expires.After(p.now) {
-		p.report.skip(subject, "expired in LiteLLM")
-		p.plan.SkippedKeys++
-		return
+	disabled := ""
+	switch {
+	case isTrue(key.Blocked):
+		disabled = "blocked in LiteLLM"
+	case key.Expires != nil && !key.Expires.After(p.now):
+		disabled = "expired in LiteLLM"
+	case key.TeamID != nil && isTrue(p.teams[*key.TeamID].Blocked):
+		disabled = "its team is blocked in LiteLLM"
 	}
 	var parent string
 	switch {
 	case key.TeamID != nil && *key.TeamID != "":
-		if team, ok := p.teams[*key.TeamID]; ok && isTrue(team.Blocked) {
-			p.plan.SkippedKeys++
-			return
-		}
 		parent = p.teamPath(*key.TeamID)
 	case key.UserID != nil && *key.UserID != "":
 		parent = p.userPath(*key.UserID)
 	default:
 		parent = "/keys"
 	}
-	path := p.unique(parent + "/" + segment(name, key.Token[:min(8, len(key.Token))]))
+	path := p.unique(parent+"/"+segment(name, shortID(key.Token)), shortID(key.Token))
+	if disabled != "" {
+		p.report.skip(subject, disabled+"; deactivated in GoModel if it was imported before, not created otherwise")
+		p.plan.DisabledKeys++
+		p.plan.Keys = append(p.plan.Keys, KeyImport{
+			Name:          name,
+			ImportedFrom:  authkeys.ImportedFromLiteLLM,
+			SecretHash:    key.Token,
+			RedactedValue: redactedValue(key.KeyName),
+			UserPath:      path,
+			Enabled:       new(false),
+		})
+		return
+	}
 
 	limits := key.dbLimits
 	if key.BudgetID != nil {
@@ -206,7 +229,7 @@ func (p *planner) addKey(key dbKey) {
 		Name:          name,
 		ImportedFrom:  authkeys.ImportedFromLiteLLM,
 		SecretHash:    key.Token,
-		RedactedValue: deref(key.KeyName),
+		RedactedValue: redactedValue(key.KeyName),
 		UserPath:      path,
 		Labels:        tags(key.Metadata),
 	}
@@ -219,9 +242,6 @@ func (p *planner) addKey(key dbKey) {
 	if key.Expires != nil {
 		expires := key.Expires.Time
 		item.ExpiresAt = &expires
-	}
-	if !isLiteLLMKeyName(item.RedactedValue) {
-		item.RedactedValue = ""
 	}
 	p.plan.Keys = append(p.plan.Keys, item)
 }
@@ -354,7 +374,7 @@ func parseBudgetDuration(value string) (seconds int64, months int, ok bool) {
 }
 
 func (p *planner) orgPath(id string) string {
-	return p.pathFor("org:"+id, "/"+segment(label(p.orgs[id].OrganizationAlias, id), id))
+	return p.pathFor("org:"+id, "/"+segment(label(p.orgs[id].OrganizationAlias, id), id), shortID(id))
 }
 
 func (p *planner) teamPath(id string) string {
@@ -363,7 +383,7 @@ func (p *planner) teamPath(id string) string {
 	if team.OrganizationID != nil && *team.OrganizationID != "" {
 		parent = p.orgPath(*team.OrganizationID)
 	}
-	return p.pathFor("team:"+id, parent+"/"+segment(label(team.TeamAlias, id), id))
+	return p.pathFor("team:"+id, parent+"/"+segment(label(team.TeamAlias, id), id), shortID(id))
 }
 
 // userPath is a personal key's parent. The user's own model list, budget,
@@ -378,7 +398,7 @@ func (p *planner) userPath(id string) string {
 	if ok {
 		name = label(user.UserAlias, label(user.UserEmail, id))
 	}
-	path := p.pathFor("user:"+id, "/users/"+segment(name, id))
+	path := p.pathFor("user:"+id, "/users/"+segment(name, id), shortID(id))
 	if ok {
 		subject := "user " + name
 		p.addPolicy(path, user.Models, subject)
@@ -389,22 +409,51 @@ func (p *planner) userPath(id string) string {
 
 // pathFor returns the path assigned to entity, assigning want (made unique)
 // the first time.
-func (p *planner) pathFor(entity, want string) string {
+func (p *planner) pathFor(entity, want, id string) string {
 	if path, ok := p.paths[entity]; ok {
 		return path
 	}
-	path := p.unique(want)
+	path := p.unique(want, id)
 	p.paths[entity] = path
 	return path
 }
 
-func (p *planner) unique(path string) string {
+// unique returns path, or when it is taken, path with a suffix from the
+// object's own id, so the suffix does not depend on which other objects exist.
+func (p *planner) unique(path, id string) string {
 	candidate := path
+	if p.used[candidate] {
+		candidate = path + "-" + id
+	}
 	for n := 2; p.used[candidate]; n++ {
-		candidate = path + "-" + strconv.Itoa(n)
+		candidate = path + "-" + id + "-" + strconv.Itoa(n)
 	}
 	p.used[candidate] = true
 	return candidate
+}
+
+// shortID is the start of a LiteLLM id or key hash, enough to tell objects
+// that share a name apart.
+func shortID(id string) string {
+	return segment(id[:min(8, len(id))], "id")
+}
+
+func sortByCreation[T any](items []T, key func(T) (*dbTime, string)) {
+	slices.SortStableFunc(items, func(a, b T) int {
+		createdA, idA := key(a)
+		createdB, idB := key(b)
+		switch {
+		case createdA != nil && createdB != nil && !createdA.Equal(createdB.Time):
+			return createdA.Compare(createdB.Time)
+		case (createdA == nil) != (createdB == nil):
+			// Rows without a timestamp go last.
+			if createdA == nil {
+				return 1
+			}
+			return -1
+		}
+		return strings.Compare(idA, idB)
+	})
 }
 
 // segment makes name one user path segment: "/" and ":" become "-", and a
@@ -422,7 +471,10 @@ func segment(name, id string) string {
 
 func mergeLimits(own, fallback dbLimits) dbLimits {
 	if own.MaxBudget == nil {
-		own.MaxBudget, own.BudgetDuration = fallback.MaxBudget, fallback.BudgetDuration
+		own.MaxBudget = fallback.MaxBudget
+	}
+	if own.BudgetDuration == nil {
+		own.BudgetDuration = fallback.BudgetDuration
 	}
 	if own.TPMLimit == nil {
 		own.TPMLimit = fallback.TPMLimit
@@ -464,11 +516,14 @@ func dedupe(values []string) []string {
 	return out
 }
 
-// isLiteLLMKeyName reports whether name is LiteLLM's abbreviated key_name,
-// the only shape GoModel accepts as an imported key's redacted value.
-func isLiteLLMKeyName(name string) bool {
-	rest, ok := strings.CutPrefix(name, "sk-...")
-	return ok && len(rest) <= 8 && !strings.ContainsAny(rest, " \t\n")
+// redactedValue returns LiteLLM's abbreviated key_name, such as "sk-...abcd",
+// or "" when it has another shape, which GoModel would reject.
+func redactedValue(keyName *string) string {
+	rest, ok := strings.CutPrefix(deref(keyName), "sk-...")
+	if !ok || len(rest) > 8 || strings.ContainsAny(rest, " \t\n") {
+		return ""
+	}
+	return "sk-..." + rest
 }
 
 func label(preferred *string, fallback string) string {

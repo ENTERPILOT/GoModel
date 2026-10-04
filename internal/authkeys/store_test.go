@@ -283,3 +283,46 @@ func TestStore_Deactivate(t *testing.T) {
 		require.True(t, got.UpdatedAt.Equal(second), "UpdatedAt = %v, want %v", got.UpdatedAt, second)
 	})
 }
+
+func TestStore_UpdateImported(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		ctx := context.Background()
+		expires := storeTestNow.Add(24 * time.Hour)
+		key := newTestKey("key-imported", storeTestNow)
+		key.ImportedFrom = ImportedFromLiteLLM
+		key.Description = "old"
+		key.UserPath = "/old"
+		key.Labels = []string{"a"}
+		key.AllowedModels = []string{"openai/gpt-4o"}
+		key.DashboardAccess = true
+		key.ExpiresAt = &expires
+		require.NoError(t, store.Create(ctx, key))
+
+		updated := key
+		updated.Name = "renamed"
+		updated.Description = ""
+		updated.UserPath = "/new"
+		updated.Labels = nil
+		updated.AllowedModels = []string{"openai/gpt-4o-mini"}
+		updated.RedactedValue = "sk-...wxyz"
+		updated.ExpiresAt = nil
+		updated.DashboardAccess = false
+		updated.UpdatedAt = storeTestNow.Add(time.Hour)
+		require.NoError(t, store.UpdateImported(ctx, updated))
+
+		got := listByID(t, store)["key-imported"]
+		require.Equal(t, "renamed", got.Name)
+		require.Empty(t, got.Description)
+		require.Equal(t, "/new", got.UserPath)
+		require.Nil(t, got.Labels)
+		require.Equal(t, []string{"openai/gpt-4o-mini"}, got.AllowedModels)
+		require.Equal(t, "sk-...wxyz", got.RedactedValue)
+		require.Nil(t, got.ExpiresAt)
+		require.True(t, got.DashboardAccess, "dashboard access is not an import field")
+		require.Equal(t, key.SecretHash, got.SecretHash)
+		require.True(t, got.UpdatedAt.Equal(updated.UpdatedAt))
+
+		missing := newTestKey("missing", storeTestNow)
+		require.ErrorIs(t, store.UpdateImported(ctx, missing), ErrNotFound)
+	})
+}

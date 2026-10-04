@@ -44,6 +44,10 @@ type Store interface {
 	List(ctx context.Context) ([]AuthKey, error)
 	// Create returns ErrSecretHashExists when a key with key.SecretHash exists.
 	Create(ctx context.Context, key AuthKey) error
+	// UpdateImported replaces the fields an import sets on the key with
+	// key.ID: name, description, user path, labels, allowed models, redacted
+	// value, and expiry.
+	UpdateImported(ctx context.Context, key AuthKey) error
 	UpdateLabels(ctx context.Context, id string, labels []string, now time.Time) error
 	UpdateAllowedModels(ctx context.Context, id string, allowedModels []string, now time.Time) error
 	UpdateDashboardAccess(ctx context.Context, id string, allowed bool, now time.Time) error

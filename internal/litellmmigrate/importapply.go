@@ -15,28 +15,33 @@ type ApplyResult struct {
 	Policies   int
 	Budgets    int
 	RateLimits int
-	Keys       int
-	// KeysExisting counts keys GoModel had imported already.
-	KeysExisting int
+	// Keys counts newly imported keys, KeysUpdated earlier imports brought up
+	// to date (including deactivations).
+	Keys        int
+	KeysUpdated int
 	// Failures describes each write GoModel rejected.
 	Failures []string
 }
 
 // Apply writes plan to the GoModel admin API at baseURL, authenticating with
-// adminKey. Policies go first, so a key is never less restricted than in
-// LiteLLM, even for a moment. Every write is an upsert or a conflict-safe
-// import, so Apply can be re-run. It first checks that adminKey is a global
-// admin credential and fails without writing anything if not; after that, a
-// rejected write is recorded and the rest continue.
+// adminKey. Policies, budgets, and rate limits go first, and a key whose
+// path or an ancestor's rule was rejected is held back, so no key is ever
+// less restricted than in LiteLLM. Every write is an upsert, so Apply can be
+// re-run. It first checks that adminKey is a global admin credential and
+// fails without writing anything if not; after that, a rejected write is
+// recorded and the rest continue.
 func Apply(ctx context.Context, client *http.Client, baseURL, adminKey string, plan *ImportPlan) (ApplyResult, error) {
 	a := applier{ctx: ctx, client: client, base: strings.TrimRight(baseURL, "/") + "/admin", key: adminKey}
 	var result ApplyResult
 	if err := a.checkAccess(); err != nil {
 		return result, err
 	}
+	failedPaths := map[string]bool{}
 	for _, policy := range plan.Policies {
 		if a.send(http.MethodPut, "/users", policy, "policy "+policy.UserPath, &result) {
 			result.Policies++
+		} else {
+			failedPaths[policy.UserPath] = true
 		}
 	}
 	for _, budget := range plan.Budgets {
@@ -48,6 +53,8 @@ func Apply(ctx context.Context, client *http.Client, baseURL, adminKey string, p
 		}
 		if a.send(http.MethodPut, "/budgets", body, "budget "+budget.UserPath, &result) {
 			result.Budgets++
+		} else {
+			failedPaths[budget.UserPath] = true
 		}
 	}
 	for _, limit := range plan.RateLimits {
@@ -60,17 +67,24 @@ func Apply(ctx context.Context, client *http.Client, baseURL, adminKey string, p
 		}
 		if a.send(http.MethodPut, "/rate-limits", body, "rate limit "+limit.UserPath, &result) {
 			result.RateLimits++
+		} else {
+			failedPaths[limit.UserPath] = true
 		}
 	}
 	for _, key := range plan.Keys {
+		enabled := key.Enabled == nil || *key.Enabled
+		if failed := failedAncestor(failedPaths, key.UserPath); enabled && failed != "" {
+			result.Failures = append(result.Failures, fmt.Sprintf("key %s: not imported because a rule on %s was rejected", key.Name, failed))
+			continue
+		}
 		status, err := a.do(http.MethodPost, "/auth-keys/import", key)
 		switch {
 		case err != nil:
 			result.Failures = append(result.Failures, fmt.Sprintf("key %s: %v", key.Name, err))
-		case status == http.StatusConflict:
-			result.KeysExisting++
-		default:
+		case status == http.StatusCreated:
 			result.Keys++
+		case status == http.StatusOK:
+			result.KeysUpdated++
 		}
 	}
 	return result, nil
@@ -106,6 +120,17 @@ func (a applier) checkAccess() error {
 	return nil
 }
 
+// failedAncestor returns the path or the nearest ancestor of path whose rule
+// write failed, or "".
+func failedAncestor(failed map[string]bool, path string) string {
+	for candidate := path; candidate != ""; candidate = candidate[:strings.LastIndex(candidate, "/")] {
+		if failed[candidate] {
+			return candidate
+		}
+	}
+	return ""
+}
+
 func periodKey(period string, seconds int64) map[string]any {
 	if period != "" {
 		return map[string]any{"period": period}
@@ -128,8 +153,8 @@ func (a applier) send(method, path string, body any, what string, result *ApplyR
 	return true
 }
 
-// do sends one admin request. A 409 is returned as a status, not an error,
-// because it means an import already happened.
+// do sends one admin request and returns its status, or an error for a
+// rejected request.
 func (a applier) do(method, path string, body any) (int, error) {
 	data, err := json.Marshal(body)
 	if err != nil {
@@ -148,7 +173,7 @@ func (a applier) do(method, path string, body any) (int, error) {
 		return 0, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode < 300 || resp.StatusCode == http.StatusConflict {
+	if resp.StatusCode < 300 {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		return resp.StatusCode, nil
 	}

@@ -160,8 +160,12 @@ answers `201` with the key, which then shows `"imported_from": "litellm"`.
 models it routes to, since LiteLLM key model lists name model groups and
 [allowlists](/features/users#selectors) match the resolved model. The list is
 resolved once: retargeting the virtual model later does not change the key.
-Importing a hash that already exists returns `409` with code
-`auth_key_exists`, so the import is safe to re-run.
+Importing a token that was imported before updates that key instead and
+answers `200`: its name, path, labels, allowed models, and expiry. Dashboard
+access and a deactivation stay as they are. `"enabled": false` marks a key the
+source blocked: an earlier import is deactivated, and a key never imported is
+not created (`204`). A hash that belongs to a key GoModel issued answers `409`
+with code `auth_key_exists`.
 
 Tokens starting with `sk-` are checked only against imported keys, and
 `sk_gom_` tokens only against keys GoModel issued. Without imported keys,
