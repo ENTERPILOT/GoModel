@@ -10,6 +10,8 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
+	"github.com/enterpilot/gomodel/internal/storage"
 )
 
 type mongoMCPServerDocument struct {
@@ -145,6 +147,22 @@ func (s *MongoDBStore) Delete(ctx context.Context, name string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// swapHeaders replaces a server's header values only while they still hold
+// the values in current, and reports whether it did. Headers added since are
+// kept.
+func (s *MongoDBStore) swapHeaders(ctx context.Context, current, next ManagedServer) (bool, error) {
+	if len(current.Headers) == 0 {
+		return false, nil
+	}
+	match, update := storage.MongoSwapSubfields("headers", current.Headers, next.Headers)
+	match["_id"] = strings.TrimSpace(current.Name)
+	result, err := s.collection.UpdateOne(ctx, match, update)
+	if err != nil {
+		return false, fmt.Errorf("swap mcp server headers: %w", err)
+	}
+	return result.MatchedCount > 0, nil
 }
 
 func (s *MongoDBStore) Close() error {

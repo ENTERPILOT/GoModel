@@ -13,6 +13,7 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/encryption"
 )
 
 // newVirtualTestService serves alpha, beta, and gamma upstreams plus the
@@ -253,4 +254,25 @@ func TestSessionBindingRejectsVirtualSessionAfterServerTakesName(t *testing.T) {
 	listBody := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
 	status := rawMCPStatus(t, gatewayURL+"/mcp/coding", listBody, map[string]string{"Mcp-Session-Id": sessionID})
 	assert.Equal(t, http.StatusNotFound, status, "the virtual session must not carry over to the real server's endpoint")
+}
+
+type unconfirmedStore struct{ *memoryStore }
+
+func (s unconfirmedStore) Upsert(ctx context.Context, server ManagedServer) error {
+	if err := s.memoryStore.Upsert(ctx, server); err != nil {
+		return err
+	}
+	return encryption.ErrSealUnconfirmed
+}
+
+func TestUpsertAppliesASaveWhoseDataKeyIsUnconfirmed(t *testing.T) {
+	store := unconfirmedStore{&memoryStore{rows: map[string]ManagedServer{}}}
+	service, err := NewService(context.Background(), Options{Store: store})
+	require.NoError(t, err)
+	t.Cleanup(service.Close)
+
+	err = service.Upsert(context.Background(), ManagedServer{Name: "fresh", URL: "https://example.com/mcp", Transport: config.MCPTransportHTTP})
+	require.ErrorIs(t, err, encryption.ErrSealUnconfirmed, "the caller learns the save is not confirmed")
+	_, applied := service.manager.get("fresh")
+	assert.True(t, applied, "the saved row is applied like any other save")
 }

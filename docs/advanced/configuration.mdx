@@ -218,6 +218,8 @@ Storage is shared by audit logging, usage tracking, and future features like IAM
 | `POSTGRES_MAX_CONNS` | PostgreSQL connection pool size               | `10`              |
 | `MONGODB_URL`        | MongoDB connection string; a database named in its path is used | _(empty)_ |
 | `MONGODB_DATABASE`   | MongoDB database name; overrides the URL path | `gomodel`         |
+| `GOMODEL_ENCRYPTION_KEY` | Encrypts dashboard-managed secrets at rest; see [Encryption at Rest](/advanced/encryption-at-rest) | _(empty)_ |
+| `GOMODEL_ENCRYPTION_KEY_PREVIOUS` | Previous key during a key rotation | _(empty)_ |
 
 <Warning>
   **Upgrading a PostgreSQL deployment past v0.1.59.** The `workflow_versions`

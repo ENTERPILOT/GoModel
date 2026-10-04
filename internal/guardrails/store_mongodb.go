@@ -14,6 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/storage"
 )
 
 type mongoDefinitionDocument struct {
@@ -210,6 +211,40 @@ func (s *MongoDBStore) Delete(ctx context.Context, name string) error {
 
 func (s *MongoDBStore) Close() error {
 	return nil
+}
+
+// swapConfig replaces the config string values that differ between current
+// and next only while they still hold current's values, and reports whether it
+// did. Other config values are left as stored.
+func (s *MongoDBStore) swapConfig(ctx context.Context, current, next Definition) (bool, error) {
+	before, err := mongoConfigFromRaw(current.Config)
+	if err != nil {
+		return false, err
+	}
+	after, err := mongoConfigFromRaw(next.Config)
+	if err != nil {
+		return false, err
+	}
+	// Sealing only rewrites string values; lists and objects need no swap.
+	old, changed := map[string]string{}, map[string]string{}
+	for key, value := range after {
+		sealed, isString := value.(string)
+		prev, wasString := before[key].(string)
+		if !isString || !wasString || prev == sealed {
+			continue
+		}
+		old[key], changed[key] = prev, sealed
+	}
+	if len(changed) == 0 {
+		return false, nil
+	}
+	match, update := storage.MongoSwapSubfields("config", old, changed)
+	match["_id"] = normalizeDefinitionName(current.Name)
+	result, err := s.collection.UpdateOne(ctx, match, update)
+	if err != nil {
+		return false, fmt.Errorf("swap guardrail config: %w", err)
+	}
+	return result.MatchedCount > 0, nil
 }
 
 func mongoConfigFromRaw(raw json.RawMessage) (bson.M, error) {

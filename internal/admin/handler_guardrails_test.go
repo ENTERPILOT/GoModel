@@ -14,6 +14,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/plugins/builtin"
@@ -386,4 +387,42 @@ func TestUpsertGuardrailRejectsRetypeUsedInUnsupportedPhase(t *testing.T) {
 	// The same type with a new config keeps the phase and is accepted.
 	rec = upsert(`{"name":"redact","type":"string_replace","config":{"rules":"ACME => [x]"}}`)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+}
+
+// unconfirmedGuardrailStore saves like guardrailTestStore but reports that
+// the saved row's data key could not be confirmed.
+type unconfirmedGuardrailStore struct{ *guardrailTestStore }
+
+func (s unconfirmedGuardrailStore) Upsert(ctx context.Context, definition guardrails.Definition) error {
+	if err := s.guardrailTestStore.Upsert(ctx, definition); err != nil {
+		return err
+	}
+	return encryption.ErrSealUnconfirmed
+}
+
+func TestUpsertGuardrailRefreshesWorkflowsWhenTheDataKeyIsUnconfirmed(t *testing.T) {
+	catalog := plugins.NewCatalog()
+	for _, factory := range builtin.All() {
+		require.NoError(t, catalog.Register(factory, plugins.SourceBuiltin))
+	}
+	guardrailService, err := guardrails.NewService(unconfirmedGuardrailStore{newGuardrailTestStore()}, catalog, plugins.HostDeps{})
+	require.NoError(t, err)
+	require.NoError(t, guardrailService.Refresh(context.Background()))
+	// The workflow service is not refreshed yet, so it matches nothing until
+	// the handler refreshes it after the save.
+	planStore := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
+	planService, err := workflows.NewService(planStore, workflows.NewCompilerWithFeatureCaps(guardrailService, core.DefaultWorkflowFeatures()))
+	require.NoError(t, err)
+	_, err = planService.Match(core.WorkflowSelector{})
+	require.Error(t, err)
+	h := NewHandler(nil, nil, WithGuardrailService(guardrailService), WithWorkflows(planService))
+
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/guardrails", `{"name":"policy-system","type":"system_prompt","config":{"mode":"inject","content":"be precise"}}`)
+	require.NoError(t, h.UpsertGuardrail(c))
+	assert.Equal(t, http.StatusBadGateway, rec.Code, "the save is reported as unconfirmed, not as a clean save")
+	assert.Contains(t, rec.Body.String(), "could not be confirmed")
+	_, applied := guardrailService.Get("policy-system")
+	assert.True(t, applied)
+	_, err = planService.Match(core.WorkflowSelector{})
+	assert.NoError(t, err, "workflows are refreshed after a saved but unconfirmed guardrail")
 }
