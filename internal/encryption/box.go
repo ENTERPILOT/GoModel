@@ -56,9 +56,11 @@ type Box struct {
 	// for a Box that is not backed by a key store.
 	reload   func() (*Box, error)
 	activeID func() (string, error)
-	// reloadMu serializes reloads and guards lastReload.
-	reloadMu   sync.Mutex
-	lastReload time.Time
+	// reloadMu serializes reloads and guards lastReload, when the last
+	// reload finished, and lastSuccess, when the last successful one did.
+	reloadMu    sync.Mutex
+	lastReload  time.Time
+	lastSuccess time.Time
 
 	plaintextOnce sync.Once
 }

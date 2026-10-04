@@ -297,3 +297,93 @@ func TestQueuedReloadsReuseTheOneInProgress(t *testing.T) {
 	}
 	assert.Equal(t, int32(1), reloads.Load(), "saves queued behind a reload reuse it")
 }
+
+func TestRotatedSinceSealReportsActiveKeyFailures(t *testing.T) {
+	box := testBox(t, "1")
+	sealed, err := box.Seal(AAD("k", "id", "f"), "v")
+	require.NoError(t, err)
+	field := Field{Name: "f", Value: &sealed}
+
+	box.activeID = func() (string, error) { return "", errors.New("key store unavailable") }
+	_, err = box.RotatedSinceSeal(field)
+	require.Error(t, err, "a failed check is not reported as no rotation")
+
+	box.activeID = func() (string, error) { return "2", nil }
+	rotated, err := box.RotatedSinceSeal(field)
+	require.NoError(t, err)
+	assert.True(t, rotated)
+}
+
+func TestConfirmSeal(t *testing.T) {
+	stale := testBox(t, "1")
+	sealed, err := stale.Seal(AAD("k", "id", "f"), "v")
+	require.NoError(t, err)
+	field := Field{Name: "f", Value: &sealed}
+
+	t.Run("retries once after a forced reload", func(t *testing.T) {
+		box := testBox(t, "1")
+		failures, reloads := 1, 0
+		box.activeID = func() (string, error) {
+			if failures > 0 {
+				failures--
+				return "", errors.New("key store unavailable")
+			}
+			return "1", nil
+		}
+		box.reload = func() (*Box, error) {
+			reloads++
+			return testBox(t, "1"), nil
+		}
+		resealed := false
+		require.NoError(t, box.ConfirmSeal(func() error { resealed = true; return nil }, field))
+		assert.Equal(t, 1, reloads)
+		assert.False(t, resealed, "the key did not change")
+	})
+
+	t.Run("reports a check that keeps failing", func(t *testing.T) {
+		box := testBox(t, "1")
+		box.activeID = func() (string, error) { return "", errors.New("key store unavailable") }
+		box.reload = func() (*Box, error) { return nil, errors.New("key store unavailable") }
+		err := box.ConfirmSeal(func() error { return nil }, field)
+		require.ErrorIs(t, err, ErrSealUnconfirmed)
+		assert.NotContains(t, err.Error(), sealed)
+	})
+
+	t.Run("reseals after a rotation and reports a failed reseal", func(t *testing.T) {
+		box := testBox(t, "1")
+		box.activeID = func() (string, error) { return "2", nil }
+		calls := 0
+		require.NoError(t, box.ConfirmSeal(func() error { calls++; return nil }, field))
+		assert.Equal(t, 1, calls)
+		err := box.ConfirmSeal(func() error { return errors.New("swap failed") }, field)
+		require.ErrorIs(t, err, ErrSealUnconfirmed)
+	})
+}
+
+func TestQueuedReloadsDoNotReuseAFailedOne(t *testing.T) {
+	stale := testBox(t, "1")
+	fresh := testBox(t, "2", "1")
+	started, release := make(chan struct{}), make(chan struct{})
+	var reloads atomic.Int32
+	stale.reload = func() (*Box, error) {
+		if reloads.Add(1) == 1 {
+			close(started)
+			<-release
+			return nil, errors.New("key store unavailable")
+		}
+		return fresh, nil
+	}
+
+	first := make(chan bool)
+	go func() { first <- stale.reloadKeys(true) }()
+	<-started
+	queued := make(chan bool)
+	go func() { queued <- stale.reloadKeys(true) }()
+	time.Sleep(50 * time.Millisecond) // let it queue behind the first
+	close(release)
+	assert.False(t, <-first)
+	assert.True(t, <-queued, "a caller queued behind a failed reload reloads itself")
+	assert.Equal(t, int32(2), reloads.Load())
+	assert.Equal(t, "2", stale.ActiveKeyID())
+	assert.False(t, stale.reloadKeys(false), "failures and successes still rate-limit unforced reloads")
+}

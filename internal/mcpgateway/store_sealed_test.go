@@ -170,3 +170,22 @@ func TestReencryptHeadersWithDottedNames(t *testing.T) {
 		assert.Equal(t, headers, got.Headers)
 	})
 }
+
+func TestSealedStoreReportsAnUnconfirmedDataKey(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, raw Store) {
+		ctx := context.Background()
+		box, keys := encryptiontest.NewBox(t)
+		store := &sealedStore{
+			Store: rotateDuringUpsert{Store: raw, rotate: func() { keys.FailLists(3) }},
+			box:   box,
+			swap:  raw.(headerSwapper),
+		}
+		err := store.Upsert(ctx, sealedTestServer("github", map[string]string{"Authorization": "Bearer unconfirmed"}))
+		require.ErrorIs(t, err, encryption.ErrSealUnconfirmed)
+		assert.NotContains(t, err.Error(), "Bearer unconfirmed")
+
+		stored, err := raw.Get(ctx, "github")
+		require.NoError(t, err)
+		assert.True(t, encryption.IsSealed(stored.Headers["Authorization"]), "the row was saved sealed")
+	})
+}

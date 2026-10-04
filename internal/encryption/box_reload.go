@@ -2,6 +2,7 @@ package encryption
 
 import (
 	"crypto/cipher"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -63,7 +64,9 @@ func (b *Box) openingKey(id string) (cipher.AEAD, bool) {
 
 // reloadKeys adopts the key store's current keys and active key, at most once
 // per minReloadInterval unless force is set. It reports whether the keys were
-// reloaded, by this call or by one that finished while it waited.
+// reloaded, by this call or by one that succeeded while it waited. A failed
+// reload still counts against the interval, but a caller queued behind it
+// does not take it for a reload: a forced caller tries again itself.
 //
 // The key store is read without holding mu: a reload lists keys and may run
 // Argon2id or call a KMS, and reads and seals of keys the Box already holds
@@ -75,7 +78,7 @@ func (b *Box) reloadKeys(force bool) bool {
 	requested := time.Now()
 	b.reloadMu.Lock()
 	defer b.reloadMu.Unlock()
-	if b.lastReload.After(requested) {
+	if b.lastSuccess.After(requested) {
 		return true
 	}
 	if !force && time.Since(b.lastReload) < minReloadInterval {
@@ -99,9 +102,15 @@ func (b *Box) reloadKeys(force bool) bool {
 	b.mu.Lock()
 	b.keys, b.active = keys, active
 	b.mu.Unlock()
+	b.lastSuccess = b.lastReload
 	slog.Info("reloaded encryption keys", "active_key_id", active)
 	return true
 }
+
+// ErrSealUnconfirmed reports a save that was written but whose data key
+// could not be confirmed as current afterwards, so it may still be sealed
+// with a key a rotation replaced. The stored value stays readable.
+var ErrSealUnconfirmed = errors.New("the secret was saved, but its data key could not be confirmed; save it again or run `gomodel secrets reencrypt`")
 
 // RotatedSinceSeal reports whether the data key that sealed fields is no
 // longer active, according to the key store. Stores call it right after
@@ -109,11 +118,11 @@ func (b *Box) reloadKeys(force bool) bool {
 // rotation: if the key is still active, any rotation activates after the
 // write, so the rotation's re-encryption pass will read the row; if it is not,
 // the store re-seals the row itself. A Box without a key store, or fields with
-// nothing sealed, never report a rotation. A failed check is logged and
-// reported as no rotation: the row stays readable either way.
-func (b *Box) RotatedSinceSeal(fields ...Field) bool {
+// nothing sealed, never report a rotation. It fails when the key store cannot
+// say which key is active.
+func (b *Box) RotatedSinceSeal(fields ...Field) (bool, error) {
 	if b == nil || b.activeID == nil {
-		return false
+		return false, nil
 	}
 	sealedWith := ""
 	for _, field := range fields {
@@ -123,12 +132,32 @@ func (b *Box) RotatedSinceSeal(fields ...Field) bool {
 		}
 	}
 	if sealedWith == "" {
-		return false
+		return false, nil
 	}
 	active, err := b.activeID()
 	if err != nil {
-		slog.Warn("could not confirm the active data key after a save", "error", err)
-		return false
+		return false, fmt.Errorf("check the active data key: %w", err)
 	}
-	return active != sealedWith
+	return active != sealedWith, nil
+}
+
+// ConfirmSeal is what a store runs right after writing freshly sealed fields:
+// when RotatedSinceSeal reports a rotation, it calls reseal to rewrite the row
+// with the new key. A failed check is retried once after a forced key reload.
+// Any remaining failure wraps ErrSealUnconfirmed: the row is written, so the
+// caller must not treat the save as lost, but it must not report a clean
+// save either.
+func (b *Box) ConfirmSeal(reseal func() error, fields ...Field) error {
+	rotated, err := b.RotatedSinceSeal(fields...)
+	if err != nil {
+		b.reloadKeys(true)
+		rotated, err = b.RotatedSinceSeal(fields...)
+	}
+	if err == nil && rotated {
+		err = reseal()
+	}
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrSealUnconfirmed, err)
+	}
+	return nil
 }

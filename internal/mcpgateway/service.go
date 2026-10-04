@@ -17,6 +17,7 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/usage"
 	"github.com/enterpilot/gomodel/internal/version"
 )
@@ -216,18 +217,21 @@ func (s *Service) Upsert(ctx context.Context, server ManagedServer) error {
 		// recreate it under the virtual server's name.
 		write = s.store.Update
 	}
-	if err := write(ctx, server); err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return VirtualNameTakenError(server.Name)
-		}
-		return err
+	// ErrSealUnconfirmed means the row was written: apply it like any other
+	// save, then report the error.
+	saveErr := write(ctx, server)
+	if errors.Is(saveErr, ErrNotFound) {
+		return VirtualNameTakenError(server.Name)
+	}
+	if saveErr != nil && !errors.Is(saveErr, encryption.ErrSealUnconfirmed) {
+		return saveErr
 	}
 	if err := s.Reload(ctx); err != nil {
 		// The row is persisted; only applying it to the running manager
 		// failed. Say so — a retry or restart picks the row up.
-		return fmt.Errorf("mcp server %q was saved but not applied: %w", server.Name, err)
+		return errors.Join(saveErr, fmt.Errorf("mcp server %q was saved but not applied: %w", server.Name, err))
 	}
-	return nil
+	return saveErr
 }
 
 // GetManaged returns one admin-managed server row from the store. Config-

@@ -203,3 +203,44 @@ func TestSwapConfigWithDottedKeys(t *testing.T) {
 		assertJSONEqual(t, got.Config, string(next.Config))
 	})
 }
+
+func TestSealedStoreKeepsSealedKeysTheSchemaNoLongerMarksSecret(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, raw Store) {
+		ctx := context.Background()
+		box, _ := encryptiontest.NewBox(t)
+		require.NoError(t, sealStore(raw, box, testSecretKeys).Upsert(ctx, Definition{Name: "pii", Type: "presidio", Config: []byte(`{"api_key":"pk-secret"}`)}))
+		require.NoError(t, sealStore(raw, box, testSecretKeys).UpsertMany(ctx, []Definition{{Name: "pii-2", Type: "presidio", Config: []byte(`{"api_key":"pk-two"}`)}}))
+
+		// The plugin keeps api_key but stops marking it secret, so reads
+		// return its plaintext and an admin edit sends that back.
+		noSchema := func(string) map[string]bool { return nil }
+		store := sealStore(raw, box, noSchema)
+		require.NoError(t, store.Upsert(ctx, Definition{Name: "pii", Type: "presidio", Config: []byte(`{"api_key":"pk-secret","url":"https://presidio.internal"}`)}))
+		require.NoError(t, store.UpsertMany(ctx, []Definition{{Name: "pii-2", Type: "presidio", Config: []byte(`{"api_key":"pk-two"}`)}}))
+
+		values := storedConfigValues(t, raw, "pii")
+		assert.True(t, encryption.IsSealed(values["api_key"].(string)), "a sealed secret is not rewritten as plaintext")
+		assert.Equal(t, "https://presidio.internal", values["url"])
+		assert.True(t, encryption.IsSealed(storedConfigValues(t, raw, "pii-2")["api_key"].(string)))
+		got, err := store.Get(ctx, "pii")
+		require.NoError(t, err)
+		assertJSONEqual(t, got.Config, `{"api_key":"pk-secret","url":"https://presidio.internal"}`)
+	})
+}
+
+func TestSealedStoreReportsAnUnconfirmedDataKey(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, raw Store) {
+		ctx := context.Background()
+		box, keys := encryptiontest.NewBox(t)
+		store := &sealedStore{
+			Store:      rotateDuringUpsert{Store: raw, rotate: func() { keys.FailLists(3) }},
+			box:        box,
+			secretKeys: testSecretKeys,
+			swap:       raw.(configSwapper),
+		}
+		err := store.Upsert(ctx, Definition{Name: "pii", Type: "presidio", Config: []byte(`{"api_key":"pk-unconfirmed"}`)})
+		require.ErrorIs(t, err, encryption.ErrSealUnconfirmed)
+		assert.NotContains(t, err.Error(), "pk-unconfirmed")
+		assert.True(t, encryption.IsSealed(storedConfigValues(t, raw, "pii")["api_key"].(string)), "the row was saved sealed")
+	})
+}

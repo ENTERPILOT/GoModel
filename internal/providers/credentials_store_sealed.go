@@ -90,18 +90,20 @@ func (s *sealedCredentialStore) seal(cred ManagedProviderCredential) (ManagedPro
 }
 
 // confirmKey re-seals a just-written row when a data key rotation activated a
-// new key while the save was in flight (see Box.RotatedSinceSeal). The swap is
+// new key while the save was in flight (see Box.ConfirmSeal). The swap is
 // conditional, so a newer save of the same row is never overwritten.
 func (s *sealedCredentialStore) confirmKey(ctx context.Context, plain, written ManagedProviderCredential) error {
-	if s.swap == nil || !s.box.RotatedSinceSeal(credentialSecretFields(&written)...) {
+	if s.swap == nil {
 		return nil
 	}
-	resealed, err := s.seal(plain)
-	if err != nil {
+	return s.box.ConfirmSeal(func() error {
+		resealed, err := s.seal(plain)
+		if err != nil {
+			return err
+		}
+		_, err = s.swap.swapSecrets(ctx, written, resealed)
 		return err
-	}
-	_, err = s.swap.swapSecrets(ctx, written, resealed)
-	return err
+	}, credentialSecretFields(&written)...)
 }
 
 // credentialSwapper replaces a credential's secret fields only while they

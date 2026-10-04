@@ -104,18 +104,20 @@ func (s *sealedStore) seal(server ManagedServer) (ManagedServer, error) {
 }
 
 // confirmKey re-seals a just-written row when a data key rotation activated a
-// new key while the save was in flight (see Box.RotatedSinceSeal). The swap is
+// new key while the save was in flight (see Box.ConfirmSeal). The swap is
 // conditional, so a newer save of the same row is never overwritten.
 func (s *sealedStore) confirmKey(ctx context.Context, plain, written ManagedServer) error {
-	if s.swap == nil || !s.box.RotatedSinceSeal(headerSecretFields(written.Headers)...) {
+	if s.swap == nil {
 		return nil
 	}
-	resealed, err := s.seal(plain)
-	if err != nil {
+	return s.box.ConfirmSeal(func() error {
+		resealed, err := s.seal(plain)
+		if err != nil {
+			return err
+		}
+		_, err = s.swap.swapHeaders(ctx, written, resealed)
 		return err
-	}
-	_, err = s.swap.swapHeaders(ctx, written, resealed)
-	return err
+	}, headerSecretFields(written.Headers)...)
 }
 
 // headerSwapper replaces a server's headers only while they still hold the

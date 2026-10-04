@@ -93,7 +93,9 @@ This creates a new data key and re-encrypts every secret with it. Values under
 older data keys stay readable throughout. A running gateway checks which data
 key is active before it saves a secret, so it switches to the new key without
 a restart, and checks again after the save: a save that was already in flight
-when the key changed re-encrypts itself with the new key.
+when the key changed re-encrypts itself with the new key. If that second check
+cannot reach the key store, the secret is still saved, but the save returns an
+error asking you to save it again or run `gomodel secrets reencrypt`.
 
 ## How it works
 

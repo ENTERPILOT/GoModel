@@ -4,6 +4,7 @@ package encryptiontest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -16,8 +17,9 @@ import (
 
 // KeyStore is an in-memory encryption.KeyStore.
 type KeyStore struct {
-	mu   sync.Mutex
-	keys []encryption.Key
+	mu        sync.Mutex
+	keys      []encryption.Key
+	failLists int
 }
 
 // NewKeyStore returns an empty in-memory key store.
@@ -25,10 +27,24 @@ func NewKeyStore() *KeyStore {
 	return &KeyStore{}
 }
 
+// ErrListFailed is what List returns while FailLists is in effect.
+var ErrListFailed = errors.New("encryption_keys is unavailable")
+
 func (s *KeyStore) List(context.Context) ([]encryption.Key, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.failLists > 0 {
+		s.failLists--
+		return nil, ErrListFailed
+	}
 	return slices.Clone(s.keys), nil
+}
+
+// FailLists makes the next n calls to List fail with ErrListFailed.
+func (s *KeyStore) FailLists(n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failLists = n
 }
 
 func (s *KeyStore) Insert(_ context.Context, key encryption.Key) (bool, error) {

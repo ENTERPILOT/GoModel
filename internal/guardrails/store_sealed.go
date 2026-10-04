@@ -65,10 +65,6 @@ func (s *sealedStore) open(definition *Definition) error {
 	return nil
 }
 
-func (s *sealedStore) seal(definition *Definition) error {
-	return s.sealKeys(definition, s.secretKeys(definition.Type))
-}
-
 // sealKeys seals the config values under the given keys.
 func (s *sealedStore) sealKeys(definition *Definition, secret map[string]bool) error {
 	if len(secret) == 0 {
@@ -120,9 +116,14 @@ func (s *sealedStore) Get(ctx context.Context, name string) (*Definition, error)
 	return definition, nil
 }
 
+// Upsert seals the definition's secret values (see sealForWrite).
 func (s *sealedStore) Upsert(ctx context.Context, definition Definition) error {
+	stored, err := s.Store.Get(ctx, definition.Name)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
 	sealed := definition
-	if err := s.seal(&sealed); err != nil {
+	if err := s.sealForWrite(&sealed, stored); err != nil {
 		return err
 	}
 	if err := s.Store.Upsert(ctx, sealed); err != nil {
@@ -132,9 +133,17 @@ func (s *sealedStore) Upsert(ctx context.Context, definition Definition) error {
 }
 
 func (s *sealedStore) UpsertMany(ctx context.Context, definitions []Definition) error {
+	listed, err := s.Store.List(ctx)
+	if err != nil {
+		return err
+	}
+	stored := make(map[string]*Definition, len(listed))
+	for i := range listed {
+		stored[normalizeDefinitionName(listed[i].Name)] = &listed[i]
+	}
 	sealed := make([]Definition, len(definitions))
 	for i, definition := range definitions {
-		if err := s.seal(&definition); err != nil {
+		if err := s.sealForWrite(&definition, stored[normalizeDefinitionName(definition.Name)]); err != nil {
 			return err
 		}
 		sealed[i] = definition
@@ -150,23 +159,49 @@ func (s *sealedStore) UpsertMany(ctx context.Context, definitions []Definition) 
 	return nil
 }
 
+// sealForWrite seals the values of definition that hold a secret: those its
+// plugin schema marks secret, plus any that stored, the row it replaces, holds
+// sealed. The second set keeps a plugin that stops marking a field secret from
+// turning the stored secret into plaintext when the admin API sends the
+// opened value back.
+func (s *sealedStore) sealForWrite(definition *Definition, stored *Definition) error {
+	keys := map[string]bool{}
+	for key := range s.secretKeys(definition.Type) {
+		keys[key] = true
+	}
+	if stored != nil {
+		_, err := plugins.MapConfigStrings(stored.Config, func(key, value string) (string, error) {
+			if encryption.IsSealed(value) {
+				keys[key] = true
+			}
+			return value, nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return s.sealKeys(definition, keys)
+}
+
 // confirmKey re-seals a just-written row when a data key rotation activated a
-// new key while the save was in flight (see Box.RotatedSinceSeal). The swap is
+// new key while the save was in flight (see Box.ConfirmSeal). The swap is
 // conditional, so a newer save of the same row is never overwritten.
 func (s *sealedStore) confirmKey(ctx context.Context, plain, written Definition) error {
 	if s.swap == nil {
 		return nil
 	}
-	_, fields, err := s.storedSecretKeys(written)
-	if err != nil || !s.box.RotatedSinceSeal(fields...) {
+	keys, fields, err := s.storedSecretKeys(written)
+	if err != nil {
 		return err
 	}
-	resealed := plain
-	if err := s.seal(&resealed); err != nil {
+	return s.box.ConfirmSeal(func() error {
+		resealed := plain
+		if err := s.sealKeys(&resealed, keys); err != nil {
+			return err
+		}
+		_, err := s.swap.swapConfig(ctx, written, resealed)
 		return err
-	}
-	_, err = s.swap.swapConfig(ctx, written, resealed)
-	return err
+	}, fields...)
 }
 
 // storedSecretKeys returns the keys of a stored definition that hold a secret:

@@ -271,3 +271,30 @@ func TestSealedCredentialStoreResealsSaveThatRacedARotation(t *testing.T) {
 		assert.Equal(t, []string{"sk-late"}, got.APIKeys)
 	})
 }
+
+func TestSealedCredentialStoreReportsAnUnconfirmedDataKey(t *testing.T) {
+	runCredentialStoreSuite(t, func(t *testing.T, raw CredentialStore) {
+		ctx := context.Background()
+		box, keys := encryptiontest.NewBox(t)
+		failLists := 0
+		store := &sealedCredentialStore{
+			CredentialStore: rotateDuringUpsert{CredentialStore: raw, rotate: func() { keys.FailLists(failLists) }},
+			box:             box,
+			swap:            raw.(credentialSwapper),
+		}
+		cred := ManagedProviderCredential{Name: "row", Type: "openai", APIKeys: []string{"sk-unconfirmed"}, Enabled: true}
+
+		// One failed check is retried after a forced key reload.
+		failLists = 1
+		require.NoError(t, store.Upsert(ctx, cred))
+
+		// A check that keeps failing is an error, though the row is saved.
+		failLists = 3
+		err := store.Upsert(ctx, cred)
+		require.ErrorIs(t, err, encryption.ErrSealUnconfirmed)
+		assert.NotContains(t, err.Error(), "sk-unconfirmed")
+		got, err := sealCredentialStore(raw, box).Get(ctx, "row")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"sk-unconfirmed"}, got.APIKeys)
+	})
+}
