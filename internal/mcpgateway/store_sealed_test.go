@@ -2,11 +2,13 @@ package mcpgateway
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/encryption/encryptiontest"
 )
@@ -132,6 +134,11 @@ func (s rotateDuringUpsert) Upsert(ctx context.Context, server ManagedServer) er
 	return s.Store.Upsert(ctx, server)
 }
 
+func (s rotateDuringUpsert) Update(ctx context.Context, server ManagedServer) error {
+	s.rotate()
+	return s.Store.Update(ctx, server)
+}
+
 func TestSealedStoreResealsSaveThatRacedARotation(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, raw Store) {
 		ctx := context.Background()
@@ -187,5 +194,91 @@ func TestSealedStoreReportsAnUnconfirmedDataKey(t *testing.T) {
 		stored, err := raw.Get(ctx, "github")
 		require.NoError(t, err)
 		assert.True(t, encryption.IsSealed(stored.Headers["Authorization"]), "the row was saved sealed")
+	})
+}
+
+func TestSealedStoreUpdateSealsHeaders(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, raw Store) {
+		ctx := context.Background()
+		box, _ := encryptiontest.NewBox(t)
+		store := sealStore(raw, box)
+		require.ErrorIs(t, store.Update(ctx, sealedTestServer("github", map[string]string{"Authorization": "Bearer new"})), ErrNotFound)
+
+		require.NoError(t, store.Upsert(ctx, sealedTestServer("github", map[string]string{"Authorization": "Bearer old"})))
+		require.NoError(t, store.Update(ctx, sealedTestServer("github", map[string]string{"Authorization": "Bearer new"})))
+
+		stored, err := raw.Get(ctx, "github")
+		require.NoError(t, err)
+		assert.True(t, encryption.IsSealed(stored.Headers["Authorization"]), "Update does not write headers in plaintext")
+		got, err := store.Get(ctx, "github")
+		require.NoError(t, err)
+		assert.Equal(t, "Bearer new", got.Headers["Authorization"])
+	})
+}
+
+func assertHeadersSealed(t *testing.T, raw Store, name string) {
+	t.Helper()
+	stored, err := raw.Get(context.Background(), name)
+	require.NoError(t, err)
+	require.NotEmpty(t, stored.Headers)
+	for header, value := range stored.Headers {
+		assert.True(t, encryption.IsSealed(value), "header %s of %s is stored in plaintext", header, name)
+	}
+}
+
+func TestNoWritePathStoresPlaintextHeaders(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, raw Store) {
+		ctx := context.Background()
+		box, keys := encryptiontest.NewBox(t)
+		racing := &sealedStore{
+			Store: rotateDuringUpsert{Store: raw, rotate: func() { encryptiontest.Rotate(t, keys) }},
+			box:   box,
+			swap:  raw.(headerSwapper),
+		}
+		store := sealStore(raw, box)
+		headers := func(i int) map[string]string {
+			return map[string]string{"Authorization": fmt.Sprintf("Bearer %d", i), "X.Dotted": "d"}
+		}
+		writes := map[string]func(name string) error{
+			"upsert": func(name string) error { return store.Upsert(ctx, sealedTestServer(name, headers(1))) },
+			"update": func(name string) error {
+				require.NoError(t, raw.Upsert(ctx, sealedTestServer(name, map[string]string{"Authorization": "Bearer legacy"})))
+				return store.Update(ctx, sealedTestServer(name, headers(2)))
+			},
+			"upsert-racing-rotation": func(name string) error { return racing.Upsert(ctx, sealedTestServer(name, headers(3))) },
+			"update-racing-rotation": func(name string) error {
+				require.NoError(t, raw.Upsert(ctx, sealedTestServer(name, nil)))
+				return racing.Update(ctx, sealedTestServer(name, headers(4)))
+			},
+		}
+		for name, write := range writes {
+			require.NoError(t, write(name), name)
+			stored, err := raw.Get(ctx, name)
+			require.NoError(t, err)
+			assert.True(t, box.IsCurrent(stored.Headers["Authorization"]), "%s ends up under the data key active after the save", name)
+		}
+		for name := range writes {
+			assertHeadersSealed(t, raw, name)
+		}
+	})
+}
+
+func TestServiceEditOfVirtualNamedServerSealsHeaders(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, raw Store) {
+		ctx := context.Background()
+		box, _ := encryptiontest.NewBox(t)
+		// The row predates the virtual server, so the edit goes through Update.
+		require.NoError(t, raw.Upsert(ctx, sealedTestServer("coding", map[string]string{"Authorization": "Bearer legacy"})))
+		service, err := NewService(ctx, Options{
+			Store:          sealStore(raw, box),
+			VirtualServers: map[string]VirtualServerSpec{"coding": {Name: "coding", Servers: []string{"alpha"}}},
+		})
+		require.NoError(t, err)
+		t.Cleanup(service.Close)
+
+		server := sealedTestServer("coding", map[string]string{"Authorization": "Bearer edited"})
+		server.Transport = config.MCPTransportHTTP
+		require.NoError(t, service.Upsert(ctx, server))
+		assertHeadersSealed(t, raw, "coding")
 	})
 }

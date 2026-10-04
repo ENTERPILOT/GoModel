@@ -95,6 +95,18 @@ func (s *sealedStore) Upsert(ctx context.Context, server ManagedServer) error {
 	return s.confirmKey(ctx, server, sealed)
 }
 
+// Update seals like Upsert; it rewrites only an existing row.
+func (s *sealedStore) Update(ctx context.Context, server ManagedServer) error {
+	sealed, err := s.seal(server)
+	if err != nil {
+		return err
+	}
+	if err := s.Store.Update(ctx, sealed); err != nil {
+		return err
+	}
+	return s.confirmKey(ctx, server, sealed)
+}
+
 // seal returns a copy of server with its header values sealed.
 func (s *sealedStore) seal(server ManagedServer) (ManagedServer, error) {
 	err := transformHeaders(&server, func(id string, fields ...encryption.Field) error {
