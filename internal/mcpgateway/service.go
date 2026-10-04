@@ -116,6 +116,8 @@ type sessionBinding struct {
 	// unambiguous bare name resolves to.
 	discovery   bool
 	toolAliases map[string]string
+	// server hosts the session; closeEndpointSessions closes it through it.
+	server *mcp.Server
 }
 
 // Options configures NewService.
@@ -526,7 +528,10 @@ func (s *Service) getServer(r *http.Request) *mcp.Server {
 	// returns, so the binding sees the final map.
 	var aliases map[string]string
 
-	server := mcp.NewServer(&mcp.Implementation{
+	// Declared first so GetSessionID can bind the session to the server that
+	// hosts it; deleting a virtual server closes its sessions through it.
+	var server *mcp.Server
+	server = mcp.NewServer(&mcp.Implementation{
 		Name:    "gomodel",
 		Title:   "GoModel MCP Gateway",
 		Version: version.Version,
@@ -542,7 +547,7 @@ func (s *Service) getServer(r *http.Request) *mcp.Server {
 		},
 		GetSessionID: func() string {
 			id := rand.Text()
-			s.bindSession(id, scope.authKeyID, scope.userPath, scope.bindingEndpoint(), scope.discovery, aliases)
+			s.bindSession(id, scope.authKeyID, scope.userPath, scope.bindingEndpoint(), scope.discovery, aliases, server)
 			return id
 		},
 	})
@@ -866,7 +871,7 @@ func (s *Service) authorizeSessionID(sessionID, upstreamName string) error {
 }
 
 // bindSession records the principal a new session was initialized under.
-func (s *Service) bindSession(sessionID, authKeyID, userPath, endpoint string, discovery bool, toolAliases map[string]string) {
+func (s *Service) bindSession(sessionID, authKeyID, userPath, endpoint string, discovery bool, toolAliases map[string]string, server *mcp.Server) {
 	s.bindMu.Lock()
 	s.bindings[sessionID] = sessionBinding{
 		authKeyID:   authKeyID,
@@ -875,8 +880,33 @@ func (s *Service) bindSession(sessionID, authKeyID, userPath, endpoint string, d
 		lastSeen:    time.Now(),
 		discovery:   discovery,
 		toolAliases: toolAliases,
+		server:      server,
 	}
 	s.bindMu.Unlock()
+}
+
+// closeEndpointSessions ends every session bound to endpoint (see
+// sessionBinding.endpoint) and drops their bindings, so an endpoint that no
+// longer exists does not keep idle sessions until the idle timeout. Closing
+// waits for in-flight requests to drain, so it runs in the background.
+func (s *Service) closeEndpointSessions(endpoint string) {
+	var servers []*mcp.Server
+	s.bindMu.Lock()
+	for id, binding := range s.bindings {
+		if binding.endpoint != endpoint {
+			continue
+		}
+		delete(s.bindings, id)
+		if binding.server != nil {
+			servers = append(servers, binding.server)
+		}
+	}
+	s.bindMu.Unlock()
+	for _, server := range servers {
+		for session := range server.Sessions() {
+			go func() { _ = session.Close() }()
+		}
+	}
 }
 
 // ToolCallLabel names the tool a session's tools/call runs, matching its

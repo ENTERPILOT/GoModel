@@ -564,9 +564,9 @@ func TestAuthorizeSessionFailsClosedWithoutBinding(t *testing.T) {
 	err := service.authorizeSessionID("deleted-session", "alpha")
 	require.ErrorIs(t, err, ErrServerNotVisible)
 
-	service.bindSession("live", "", "/staff", "", false, nil)
+	service.bindSession("live", "", "/staff", "", false, nil, nil)
 	require.NoError(t, service.authorizeSessionID("live", "alpha"))
-	service.bindSession("contractor", "", "/contractors/acme", "", false, nil)
+	service.bindSession("contractor", "", "/contractors/acme", "", false, nil, nil)
 	require.ErrorIs(t, service.authorizeSessionID("contractor", "alpha"), ErrServerNotVisible)
 }
 
@@ -661,7 +661,7 @@ func TestUpstreamHeadersStayOnConfiguredOrigin(t *testing.T) {
 		Name: "headers", URL: origin.URL, Transport: "http", Enabled: true,
 		Headers: map[string]string{"Authorization": "Bearer upstream-secret"},
 	}, http.DefaultClient)
-	client := u.dialClient(&connectProbe{})
+	client := u.dialClient(&connectProbe{}, context.Background())
 	resp, err := client.Get(origin.URL + "/same-origin")
 	require.NoError(t, err)
 

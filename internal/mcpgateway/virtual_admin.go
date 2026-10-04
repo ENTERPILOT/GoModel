@@ -76,5 +76,6 @@ func (s *Service) DeleteVirtual(ctx context.Context, name string) error {
 	if err := s.Reload(ctx); err != nil {
 		return fmt.Errorf("mcp virtual server %q was deleted but the running set was not updated: %w", name, err)
 	}
+	s.closeEndpointSessions(virtualBindingPrefix + name)
 	return nil
 }

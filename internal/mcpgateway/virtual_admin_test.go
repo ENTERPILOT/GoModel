@@ -2,7 +2,10 @@ package mcpgateway
 
 import (
 	"context"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
@@ -149,10 +152,22 @@ func TestDeleteVirtualEndsItsEndpoint(t *testing.T) {
 		ManagedVirtualServer{Name: "coding", Servers: []string{"alpha"}},
 	)
 	sessionID := initializeRawSession(t, gatewayURL+"/mcp/coding", nil)
+	service.bindMu.Lock()
+	host := service.bindings[sessionID].server
+	service.bindMu.Unlock()
+	require.NotNil(t, host)
+	require.NotEmpty(t, slices.Collect(host.Sessions()))
 
 	require.NoError(t, service.DeleteVirtual(context.Background(), " Coding "), "names are normalized like on save")
 	assert.Empty(t, virtualStore.rows)
 	assert.False(t, service.IsVirtual("coding"))
+
+	// The session is closed and unbound now, not at the idle timeout.
+	service.bindMu.Lock()
+	_, bound := service.bindings[sessionID]
+	service.bindMu.Unlock()
+	assert.False(t, bound)
+	assert.Eventually(t, func() bool { return len(slices.Collect(host.Sessions())) == 0 }, 5*time.Second, 10*time.Millisecond)
 
 	listBody := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
 	status := rawMCPStatus(t, gatewayURL+"/mcp/coding", listBody, map[string]string{"Mcp-Session-Id": sessionID})
@@ -291,4 +306,76 @@ func TestCloseCancelsAdminReloadBlockedOnStore(t *testing.T) {
 		t.Fatal("Close waited on an admin reload blocked on the store")
 	}
 	require.Error(t, <-reloaded, "the blocked reload is cancelled")
+}
+
+func TestManagerCloseCancelsInFlightConnect(t *testing.T) {
+	entered := make(chan struct{}, 1)
+	cancelled := make(chan struct{})
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	// An upstream that never answers its first request, so the connect hangs.
+	hanging := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The server notices a client hang-up only once the body is read.
+		_, _ = io.Copy(io.Discard, r.Body)
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		select {
+		case <-r.Context().Done():
+			select {
+			case <-cancelled:
+			default:
+				close(cancelled)
+			}
+		case <-release:
+		}
+	}))
+	t.Cleanup(hanging.Close)
+
+	manager := NewManager(http.DefaultClient)
+	manager.Apply([]ServerSpec{testSpec("slow", hanging.URL, nil)})
+	<-entered
+
+	manager.Close()
+	select {
+	case <-cancelled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not cancel the in-flight upstream connect")
+	}
+}
+
+func TestCancelledDialEndsConnectToUnresponsiveUpstream(t *testing.T) {
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	entered := make(chan struct{}, 1)
+	hanging := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	t.Cleanup(hanging.Close)
+
+	u := newUpstream(testSpec("slow", hanging.URL, nil), http.DefaultClient)
+	t.Cleanup(u.close)
+	ctx, cancel := context.WithCancel(context.Background())
+	refreshed := make(chan error, 1)
+	go func() { refreshed <- u.refresh(ctx) }()
+	<-entered
+
+	// The SDK waits for in-flight requests when a handshake fails, so this
+	// returns only because the dial's HTTP requests are cancelled with it.
+	cancel()
+	select {
+	case err := <-refreshed:
+		require.Error(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("a cancelled dial kept waiting on an unresponsive upstream")
+	}
 }

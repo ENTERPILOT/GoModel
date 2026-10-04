@@ -30,14 +30,21 @@ type Manager struct {
 
 	stopOnce sync.Once
 	stop     chan struct{}
+	// stopCtx bounds the background connects Apply and the re-probe loop
+	// start; Close cancels it, so no dial outlives shutdown.
+	stopCtx    context.Context
+	stopCancel context.CancelFunc
 }
 
 // NewManager creates an empty manager. Apply installs the initial specs.
 func NewManager(httpClient *http.Client) *Manager {
+	stopCtx, stopCancel := context.WithCancel(context.Background())
 	m := &Manager{
 		httpClient: httpClient,
 		upstreams:  make(map[string]*upstream),
 		stop:       make(chan struct{}),
+		stopCtx:    stopCtx,
+		stopCancel: stopCancel,
 	}
 	go m.maintain()
 	return m
@@ -90,7 +97,10 @@ func (m *Manager) Apply(specs []ServerSpec) {
 	}
 	for _, u := range toRefresh {
 		go func(u *upstream) {
-			if err := u.refresh(context.Background()); err != nil {
+			if err := u.refresh(m.stopCtx); err != nil {
+				if m.stopCtx.Err() != nil {
+					return
+				}
 				slog.Warn("mcp server initial connect failed; will re-probe",
 					"server", u.spec.Name, "error", err)
 			} else {
@@ -134,7 +144,7 @@ func (m *Manager) refreshWhere(match func(ServerStatus) bool) {
 			continue
 		}
 		go func(u *upstream) {
-			if err := u.refresh(context.Background()); err != nil {
+			if err := u.refresh(m.stopCtx); err != nil {
 				slog.Debug("mcp server refresh failed", "server", u.spec.Name, "error", err)
 			}
 		}(u)
@@ -214,7 +224,10 @@ func (m *Manager) ReadResource(ctx context.Context, server string, params *mcp.R
 
 // Close terminates the maintenance loop and every upstream session.
 func (m *Manager) Close() {
-	m.stopOnce.Do(func() { close(m.stop) })
+	m.stopOnce.Do(func() {
+		m.stopCancel()
+		close(m.stop)
+	})
 	for _, u := range m.list() {
 		u.close()
 	}
