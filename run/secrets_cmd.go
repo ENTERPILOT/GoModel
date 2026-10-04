@@ -86,6 +86,10 @@ func runSecretsReencrypt(ctx context.Context, opts Options, secretsOpts secretsO
 	if err := configHooks(ctx, opts)(result); err != nil {
 		return err
 	}
+	// As at gateway start: after the hook, so schemes it registered resolve.
+	if err := result.ResolveSecrets(ctx); err != nil {
+		return fmt.Errorf("failed to resolve secret references: %w", err)
+	}
 	outcome, err := app.ReencryptSecrets(ctx, app.ReencryptOptions{
 		Config:        result,
 		Extensions:    opts.Extensions,

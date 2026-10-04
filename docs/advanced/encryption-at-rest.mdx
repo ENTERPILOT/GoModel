@@ -40,7 +40,9 @@ GOMODEL_ENCRYPTION_KEY=<generated value>
 An empty value leaves encryption off. Any other string works, but the
 key-encryption key is derived from it, so a short or guessable value weakens
 the encryption: use 32 random bytes as above. Deliver it the way you deliver
-other secrets, from a secret manager at runtime, not from a committed file.
+other secrets, from a secret manager at runtime, not from a committed file. A
+[secret reference](/advanced/secret-references) such as
+`GOMODEL_ENCRYPTION_KEY=${file:/run/secrets/gomodel-encryption-key}` works too.
 
 <Warning>
   Losing the key makes the encrypted secrets unrecoverable. Store it as
@@ -90,8 +92,8 @@ gomodel secrets reencrypt --rotate-data-key
 This creates a new data key and re-encrypts every secret with it. Values under
 older data keys stay readable throughout. A running gateway checks which data
 key is active before it saves a secret, so it switches to the new key without
-a restart, and the command makes a second pass for saves that were already in
-flight when the key changed.
+a restart, and checks again after the save: a save that was already in flight
+when the key changed re-encrypts itself with the new key.
 
 ## How it works
 

@@ -102,7 +102,7 @@ func Reencrypt(ctx context.Context, shared storage.Storage, box *encryption.Box,
 	if !ok {
 		return encryption.Report{Entity: "guardrail_definitions"}, fmt.Errorf("guardrail store %T cannot re-encrypt", store)
 	}
-	return (&sealedStore{Store: store, box: box, secretKeys: catalogSecretKeys(catalog)}).reencrypt(ctx, swap)
+	return (&sealedStore{Store: store, box: box, secretKeys: catalogSecretKeys(catalog), swap: swap}).reencrypt(ctx, swap)
 }
 
 func createStore(ctx context.Context, store storage.Storage) (Store, error) {

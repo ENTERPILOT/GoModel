@@ -124,3 +124,20 @@ func TestConfigHooksCarryKeyWrapperAcrossGenerations(t *testing.T) {
 	reloadSets = false
 	assert.Equal(t, second, generation().KeyWrapper())
 }
+
+func TestRunSecretsReencryptResolvesSecretReferences(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("STORAGE_TYPE", "sqlite")
+	t.Setenv("SQLITE_PATH", filepath.Join(t.TempDir(), "secrets.db"))
+	t.Setenv("REENCRYPT_TEST_KEY", "resolved-key")
+	t.Setenv("GOMODEL_ENCRYPTION_KEY", "${env:REENCRYPT_TEST_KEY}")
+
+	var stderr bytes.Buffer
+	err := Run(context.Background(), Options{Args: []string{"secrets", "reencrypt"}, Stdout: io.Discard, Stderr: &stderr})
+	require.NoError(t, err, stderr.String())
+
+	// The data key was wrapped with the resolved value, not the reference.
+	t.Setenv("GOMODEL_ENCRYPTION_KEY", "resolved-key")
+	err = Run(context.Background(), Options{Args: []string{"secrets", "reencrypt"}, Stdout: io.Discard, Stderr: &stderr})
+	require.NoError(t, err, stderr.String())
+}

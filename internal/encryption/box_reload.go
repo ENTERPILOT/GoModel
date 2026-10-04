@@ -81,8 +81,11 @@ func (b *Box) reloadKeys(force bool) bool {
 	if !force && time.Since(b.lastReload) < minReloadInterval {
 		return false
 	}
-	b.lastReload = time.Now()
 	next, err := b.reload()
+	// Stamped when the reload finishes, so callers that queued behind it
+	// see it as newer than their request and reuse it instead of repeating
+	// the key-store and KMS work.
+	b.lastReload = time.Now()
 	if err != nil {
 		slog.Warn("could not reload encryption keys", "error", err)
 		return false
@@ -98,4 +101,34 @@ func (b *Box) reloadKeys(force bool) bool {
 	b.mu.Unlock()
 	slog.Info("reloaded encryption keys", "active_key_id", active)
 	return true
+}
+
+// RotatedSinceSeal reports whether the data key that sealed fields is no
+// longer active, according to the key store. Stores call it right after
+// writing freshly sealed values, which closes the race with a data key
+// rotation: if the key is still active, any rotation activates after the
+// write, so the rotation's re-encryption pass will read the row; if it is not,
+// the store re-seals the row itself. A Box without a key store, or fields with
+// nothing sealed, never report a rotation. A failed check is logged and
+// reported as no rotation: the row stays readable either way.
+func (b *Box) RotatedSinceSeal(fields ...Field) bool {
+	if b == nil || b.activeID == nil {
+		return false
+	}
+	sealedWith := ""
+	for _, field := range fields {
+		if keyID, _, ok := splitSealed(*field.Value); ok {
+			sealedWith = keyID
+			break
+		}
+	}
+	if sealedWith == "" {
+		return false
+	}
+	active, err := b.activeID()
+	if err != nil {
+		slog.Warn("could not confirm the active data key after a save", "error", err)
+		return false
+	}
+	return active != sealedWith
 }

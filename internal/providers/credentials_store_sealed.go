@@ -16,14 +16,16 @@ const credentialSecretKind = "provider_credential"
 // API (which masks them) only ever see plaintext.
 type sealedCredentialStore struct {
 	CredentialStore
-	box *encryption.Box
+	box  *encryption.Box
+	swap credentialSwapper // nil when the store cannot swap; see confirmKey
 }
 
 func sealCredentialStore(store CredentialStore, box *encryption.Box) CredentialStore {
 	if box == nil {
 		return store
 	}
-	return &sealedCredentialStore{CredentialStore: store, box: box}
+	swap, _ := store.(credentialSwapper)
+	return &sealedCredentialStore{CredentialStore: store, box: box, swap: swap}
 }
 
 // credentialSecretFields points at every secret field of cred. API keys share
@@ -69,12 +71,37 @@ func (s *sealedCredentialStore) Get(ctx context.Context, name string) (*ManagedP
 }
 
 func (s *sealedCredentialStore) Upsert(ctx context.Context, cred ManagedProviderCredential) error {
-	// The caller's slice must not end up holding ciphertext.
-	cred.APIKeys = slices.Clone(cred.APIKeys)
-	if err := s.box.SealFields(credentialSecretKind, normalizeCredentialName(cred.Name), credentialSecretFields(&cred)...); err != nil {
+	sealed, err := s.seal(cred)
+	if err != nil {
 		return err
 	}
-	return s.CredentialStore.Upsert(ctx, cred)
+	if err := s.CredentialStore.Upsert(ctx, sealed); err != nil {
+		return err
+	}
+	return s.confirmKey(ctx, cred, sealed)
+}
+
+// seal returns a copy of cred with its secrets sealed; the caller's slice
+// never ends up holding ciphertext.
+func (s *sealedCredentialStore) seal(cred ManagedProviderCredential) (ManagedProviderCredential, error) {
+	cred.APIKeys = slices.Clone(cred.APIKeys)
+	err := s.box.SealFields(credentialSecretKind, normalizeCredentialName(cred.Name), credentialSecretFields(&cred)...)
+	return cred, err
+}
+
+// confirmKey re-seals a just-written row when a data key rotation activated a
+// new key while the save was in flight (see Box.RotatedSinceSeal). The swap is
+// conditional, so a newer save of the same row is never overwritten.
+func (s *sealedCredentialStore) confirmKey(ctx context.Context, plain, written ManagedProviderCredential) error {
+	if s.swap == nil || !s.box.RotatedSinceSeal(credentialSecretFields(&written)...) {
+		return nil
+	}
+	resealed, err := s.seal(plain)
+	if err != nil {
+		return err
+	}
+	_, err = s.swap.swapSecrets(ctx, written, resealed)
+	return err
 }
 
 // credentialSwapper replaces a credential's secret fields only while they
@@ -112,12 +139,13 @@ func (s *sealedCredentialStore) reencryptRow(ctx context.Context, swap credentia
 	if !s.box.NeedsReseal(credentialSecretFields(current)...) {
 		return encryption.RowUnchanged, nil
 	}
-	next := *current
-	next.APIKeys = slices.Clone(current.APIKeys)
-	if err := s.open(&next); err != nil {
+	plain := *current
+	plain.APIKeys = slices.Clone(current.APIKeys)
+	if err := s.open(&plain); err != nil {
 		return 0, err
 	}
-	if err := s.box.SealFields(credentialSecretKind, normalizeCredentialName(next.Name), credentialSecretFields(&next)...); err != nil {
+	next, err := s.seal(plain)
+	if err != nil {
 		return 0, err
 	}
 	swapped, err := swap.swapSecrets(ctx, *current, next)

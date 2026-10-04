@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -230,6 +231,11 @@ func TestBoxReloadDoesNotBlockKnownKeys(t *testing.T) {
 	require.NoError(t, err)
 
 	started, release := make(chan struct{}), make(chan struct{})
+	var activeChecks atomic.Int32
+	box.activeID = func() (string, error) {
+		activeChecks.Add(1)
+		return "1", nil
+	}
 	box.reload = func() (*Box, error) {
 		close(started)
 		<-release
@@ -260,4 +266,34 @@ func TestBoxReloadDoesNotBlockKnownKeys(t *testing.T) {
 	}
 	close(release)
 	<-reloadDone
+	assert.Positive(t, activeChecks.Load(), "the seal went through the key-store active-key check")
+}
+
+func TestQueuedReloadsReuseTheOneInProgress(t *testing.T) {
+	stale := testBox(t, "1")
+	fresh := testBox(t, "2", "1")
+	started, release := make(chan struct{}), make(chan struct{})
+	var reloads atomic.Int32
+	stale.reload = func() (*Box, error) {
+		if reloads.Add(1) == 1 {
+			close(started)
+			<-release
+		}
+		return fresh, nil
+	}
+
+	first := make(chan bool)
+	go func() { first <- stale.reloadKeys(true) }()
+	<-started
+	queued := make(chan bool, 5)
+	for range 5 {
+		go func() { queued <- stale.reloadKeys(true) }()
+	}
+	time.Sleep(50 * time.Millisecond) // let them queue behind the first
+	close(release)
+	assert.True(t, <-first)
+	for range 5 {
+		assert.True(t, <-queued)
+	}
+	assert.Equal(t, int32(1), reloads.Load(), "saves queued behind a reload reuse it")
 }

@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/ext"
@@ -66,6 +65,10 @@ func ReencryptSecrets(ctx context.Context, opts ReencryptOptions) (ReencryptResu
 	if opts.Config == nil || opts.Config.Config == nil {
 		return result, fmt.Errorf("config is required")
 	}
+	// Idempotent: the CLI has already resolved them, an embedder may not.
+	if err := opts.Config.ResolveSecrets(ctx); err != nil {
+		return result, fmt.Errorf("failed to resolve secret references: %w", err)
+	}
 	encOpts := encryptionOptions(opts.Config)
 	if encOpts.Key == "" && encOpts.Wrapper == nil {
 		return result, fmt.Errorf("GOMODEL_ENCRYPTION_KEY is not set; there is nothing to encrypt with")
@@ -100,50 +103,14 @@ func ReencryptSecrets(ctx context.Context, opts ReencryptOptions) (ReencryptResu
 		func() (encryption.Report, error) { return mcpgateway.Reencrypt(ctx, shared, box) },
 		func() (encryption.Report, error) { return guardrails.Reencrypt(ctx, shared, box, catalog) },
 	}
-	rounds := 1
-	if opts.RotateDataKey {
-		// Running gateways check the active key before every seal, but a
-		// save that checked just before the rotation can still land after
-		// the first round passed its row. A second round, after those
-		// in-flight saves have settled, moves such a row to the new key.
-		rounds = 2
-	}
-	for round := range rounds {
-		if round > 0 {
-			select {
-			case <-time.After(rotationSettle):
-			case <-ctx.Done():
-				return result, ctx.Err()
-			}
-		}
-		for i, pass := range passes {
-			report, err := pass()
-			// Only passes that ran get a report: a failure in the first
-			// round must not leave blank entries that print as empty passes.
-			if round == 0 {
-				result.Reports = append(result.Reports, report)
-			} else {
-				result.Reports[i] = mergeReports(result.Reports[i], report)
-			}
-			if err != nil {
-				return result, fmt.Errorf("%s: %w", report.Entity, err)
-			}
+	for _, pass := range passes {
+		report, err := pass()
+		result.Reports = append(result.Reports, report)
+		if err != nil {
+			return result, fmt.Errorf("%s: %w", report.Entity, err)
 		}
 	}
 	return result, nil
-}
-
-// rotationSettle is how long a rotating pass waits before its second round:
-// far longer than one admin save takes from sealing to writing.
-var rotationSettle = 2 * time.Second
-
-// mergeReports adds a later round's rewrites to the first round's report. Rows
-// and skips come from the latest round: a row skipped once and rewritten
-// later is not skipped.
-func mergeReports(total, round encryption.Report) encryption.Report {
-	total.Reencrypted += round.Reencrypted
-	total.Rows, total.Skipped = round.Rows, round.Skipped
-	return total
 }
 
 // reencryptCatalog builds the plugin catalog the gateway would, so plaintext

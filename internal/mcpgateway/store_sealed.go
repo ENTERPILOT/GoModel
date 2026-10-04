@@ -15,14 +15,16 @@ const mcpSecretKind = "mcp_server"
 // them on the way out. Header names stay readable.
 type sealedStore struct {
 	Store
-	box *encryption.Box
+	box  *encryption.Box
+	swap headerSwapper // nil when the store cannot swap; see confirmKey
 }
 
 func sealStore(store Store, box *encryption.Box) Store {
 	if box == nil {
 		return store
 	}
-	return &sealedStore{Store: store, box: box}
+	swap, _ := store.(headerSwapper)
+	return &sealedStore{Store: store, box: box, swap: swap}
 }
 
 func headerSecretFields(headers map[string]string) []encryption.Field {
@@ -83,12 +85,37 @@ func (s *sealedStore) Get(ctx context.Context, name string) (*ManagedServer, err
 
 // Upsert seals a copy of the headers; the caller's map is left untouched.
 func (s *sealedStore) Upsert(ctx context.Context, server ManagedServer) error {
-	if err := transformHeaders(&server, func(id string, fields ...encryption.Field) error {
-		return s.box.SealFields(mcpSecretKind, id, fields...)
-	}); err != nil {
+	sealed, err := s.seal(server)
+	if err != nil {
 		return err
 	}
-	return s.Store.Upsert(ctx, server)
+	if err := s.Store.Upsert(ctx, sealed); err != nil {
+		return err
+	}
+	return s.confirmKey(ctx, server, sealed)
+}
+
+// seal returns a copy of server with its header values sealed.
+func (s *sealedStore) seal(server ManagedServer) (ManagedServer, error) {
+	err := transformHeaders(&server, func(id string, fields ...encryption.Field) error {
+		return s.box.SealFields(mcpSecretKind, id, fields...)
+	})
+	return server, err
+}
+
+// confirmKey re-seals a just-written row when a data key rotation activated a
+// new key while the save was in flight (see Box.RotatedSinceSeal). The swap is
+// conditional, so a newer save of the same row is never overwritten.
+func (s *sealedStore) confirmKey(ctx context.Context, plain, written ManagedServer) error {
+	if s.swap == nil || !s.box.RotatedSinceSeal(headerSecretFields(written.Headers)...) {
+		return nil
+	}
+	resealed, err := s.seal(plain)
+	if err != nil {
+		return err
+	}
+	_, err = s.swap.swapHeaders(ctx, written, resealed)
+	return err
 }
 
 // headerSwapper replaces a server's headers only while they still hold the
@@ -126,13 +153,12 @@ func (s *sealedStore) reencryptRow(ctx context.Context, swap headerSwapper, name
 	if !s.box.NeedsReseal(headerSecretFields(current.Headers)...) {
 		return encryption.RowUnchanged, nil
 	}
-	next := *current
-	if err := s.open(&next); err != nil {
+	plain := *current
+	if err := s.open(&plain); err != nil {
 		return 0, err
 	}
-	if err := transformHeaders(&next, func(id string, fields ...encryption.Field) error {
-		return s.box.SealFields(mcpSecretKind, id, fields...)
-	}); err != nil {
+	next, err := s.seal(plain)
+	if err != nil {
 		return 0, err
 	}
 	swapped, err := swap.swapHeaders(ctx, *current, next)

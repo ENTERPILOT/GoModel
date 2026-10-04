@@ -121,3 +121,52 @@ func TestSwapHeadersIsConditional(t *testing.T) {
 		assert.False(t, swapped, "a stale read does not match")
 	})
 }
+
+type rotateDuringUpsert struct {
+	Store
+	rotate func()
+}
+
+func (s rotateDuringUpsert) Upsert(ctx context.Context, server ManagedServer) error {
+	s.rotate()
+	return s.Store.Upsert(ctx, server)
+}
+
+func TestSealedStoreResealsSaveThatRacedARotation(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, raw Store) {
+		ctx := context.Background()
+		box, keys := encryptiontest.NewBox(t)
+		store := &sealedStore{
+			Store: rotateDuringUpsert{Store: raw, rotate: func() { encryptiontest.Rotate(t, keys) }},
+			box:   box,
+			swap:  raw.(headerSwapper),
+		}
+		require.NoError(t, store.Upsert(ctx, sealedTestServer("github", map[string]string{"Authorization": "Bearer late"})))
+
+		stored, err := raw.Get(ctx, "github")
+		require.NoError(t, err)
+		assert.Regexp(t, `^enc:v1:2:`, stored.Headers["Authorization"])
+	})
+}
+
+func TestReencryptHeadersWithDottedNames(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, raw Store) {
+		ctx := context.Background()
+		headers := map[string]string{"X.Api.Key": "k", "$Odd": "o", "Authorization": "Bearer a"}
+		require.NoError(t, raw.Upsert(ctx, sealedTestServer("dotted", headers)))
+
+		box, _ := encryptiontest.NewBox(t)
+		report, err := (&sealedStore{Store: raw, box: box}).reencrypt(ctx, raw.(headerSwapper))
+		require.NoError(t, err)
+		assert.Equal(t, encryption.Report{Entity: "mcp_servers", Rows: 1, Reencrypted: 1}, report)
+
+		stored, err := raw.Get(ctx, "dotted")
+		require.NoError(t, err)
+		for name, value := range stored.Headers {
+			assert.True(t, box.IsCurrent(value), "header %s is sealed", name)
+		}
+		got, err := sealStore(raw, box).Get(ctx, "dotted")
+		require.NoError(t, err)
+		assert.Equal(t, headers, got.Headers)
+	})
+}

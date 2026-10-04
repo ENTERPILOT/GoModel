@@ -154,3 +154,52 @@ func TestSwapConfigIsConditional(t *testing.T) {
 		assert.False(t, swapped, "a stale read does not match")
 	})
 }
+
+type rotateDuringUpsert struct {
+	Store
+	rotate func()
+}
+
+func (s rotateDuringUpsert) Upsert(ctx context.Context, definition Definition) error {
+	s.rotate()
+	return s.Store.Upsert(ctx, definition)
+}
+
+func (s rotateDuringUpsert) UpsertMany(ctx context.Context, definitions []Definition) error {
+	s.rotate()
+	return s.Store.UpsertMany(ctx, definitions)
+}
+
+func TestSealedStoreResealsSavesThatRacedARotation(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, raw Store) {
+		ctx := context.Background()
+		box, keys := encryptiontest.NewBox(t)
+		store := &sealedStore{
+			Store:      rotateDuringUpsert{Store: raw, rotate: func() { encryptiontest.Rotate(t, keys) }},
+			box:        box,
+			secretKeys: testSecretKeys,
+			swap:       raw.(configSwapper),
+		}
+		require.NoError(t, store.Upsert(ctx, Definition{Name: "one", Type: "presidio", Config: []byte(`{"api_key":"pk-1"}`)}))
+		assert.Regexp(t, `^enc:v1:2:`, storedConfigValues(t, raw, "one")["api_key"])
+		require.NoError(t, store.UpsertMany(ctx, []Definition{{Name: "two", Type: "presidio", Config: []byte(`{"api_key":"pk-2"}`)}}))
+		assert.Regexp(t, `^enc:v1:3:`, storedConfigValues(t, raw, "two")["api_key"])
+	})
+}
+
+func TestSwapConfigWithDottedKeys(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, raw Store) {
+		ctx := context.Background()
+		require.NoError(t, raw.Upsert(ctx, Definition{Name: "d", Type: "custom", Config: []byte(`{"api.key":"a","$k":"b"}`)}))
+		current, err := raw.Get(ctx, "d")
+		require.NoError(t, err)
+		next := *current
+		next.Config = []byte(`{"api.key":"a2","$k":"b2"}`)
+		swapped, err := raw.(configSwapper).swapConfig(ctx, *current, next)
+		require.NoError(t, err)
+		assert.True(t, swapped)
+		got, err := raw.Get(ctx, "d")
+		require.NoError(t, err)
+		assertJSONEqual(t, got.Config, string(next.Config))
+	})
+}

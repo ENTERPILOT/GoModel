@@ -38,13 +38,15 @@ type sealedStore struct {
 	Store
 	box        *encryption.Box
 	secretKeys secretKeysFunc
+	swap       configSwapper // nil when the store cannot swap; see confirmKey
 }
 
 func sealStore(store Store, box *encryption.Box, secretKeys secretKeysFunc) Store {
 	if box == nil {
 		return store
 	}
-	return &sealedStore{Store: store, box: box, secretKeys: secretKeys}
+	swap, _ := store.(configSwapper)
+	return &sealedStore{Store: store, box: box, secretKeys: secretKeys, swap: swap}
 }
 
 func (s *sealedStore) open(definition *Definition) error {
@@ -119,10 +121,14 @@ func (s *sealedStore) Get(ctx context.Context, name string) (*Definition, error)
 }
 
 func (s *sealedStore) Upsert(ctx context.Context, definition Definition) error {
-	if err := s.seal(&definition); err != nil {
+	sealed := definition
+	if err := s.seal(&sealed); err != nil {
 		return err
 	}
-	return s.Store.Upsert(ctx, definition)
+	if err := s.Store.Upsert(ctx, sealed); err != nil {
+		return err
+	}
+	return s.confirmKey(ctx, definition, sealed)
 }
 
 func (s *sealedStore) UpsertMany(ctx context.Context, definitions []Definition) error {
@@ -133,7 +139,34 @@ func (s *sealedStore) UpsertMany(ctx context.Context, definitions []Definition) 
 		}
 		sealed[i] = definition
 	}
-	return s.Store.UpsertMany(ctx, sealed)
+	if err := s.Store.UpsertMany(ctx, sealed); err != nil {
+		return err
+	}
+	for i := range definitions {
+		if err := s.confirmKey(ctx, definitions[i], sealed[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// confirmKey re-seals a just-written row when a data key rotation activated a
+// new key while the save was in flight (see Box.RotatedSinceSeal). The swap is
+// conditional, so a newer save of the same row is never overwritten.
+func (s *sealedStore) confirmKey(ctx context.Context, plain, written Definition) error {
+	if s.swap == nil {
+		return nil
+	}
+	_, fields, err := s.storedSecretKeys(written)
+	if err != nil || !s.box.RotatedSinceSeal(fields...) {
+		return err
+	}
+	resealed := plain
+	if err := s.seal(&resealed); err != nil {
+		return err
+	}
+	_, err = s.swap.swapConfig(ctx, written, resealed)
+	return err
 }
 
 // storedSecretKeys returns the keys of a stored definition that hold a secret:

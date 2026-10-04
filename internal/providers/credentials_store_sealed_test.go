@@ -237,3 +237,37 @@ func TestSwapSecretsLeavesOtherColumnsAlone(t *testing.T) {
 		assert.False(t, swapped, "a stale read does not match")
 	})
 }
+
+// rotateDuringUpsert rotates the data key after the row was sealed but before
+// it is written: a save in flight while `secrets reencrypt --rotate-data-key`
+// activates a new key.
+type rotateDuringUpsert struct {
+	CredentialStore
+	rotate func()
+}
+
+func (s rotateDuringUpsert) Upsert(ctx context.Context, cred ManagedProviderCredential) error {
+	s.rotate()
+	return s.CredentialStore.Upsert(ctx, cred)
+}
+
+func TestSealedCredentialStoreResealsSaveThatRacedARotation(t *testing.T) {
+	runCredentialStoreSuite(t, func(t *testing.T, raw CredentialStore) {
+		ctx := context.Background()
+		box, keys := encryptiontest.NewBox(t)
+		store := &sealedCredentialStore{
+			CredentialStore: rotateDuringUpsert{CredentialStore: raw, rotate: func() { encryptiontest.Rotate(t, keys) }},
+			box:             box,
+			swap:            raw.(credentialSwapper),
+		}
+		require.NoError(t, store.Upsert(ctx, ManagedProviderCredential{Name: "row", Type: "openai", APIKeys: []string{"sk-late"}, ProxyURL: "http://u:p@proxy", Enabled: true}))
+
+		stored, err := raw.Get(ctx, "row")
+		require.NoError(t, err)
+		assert.Regexp(t, `^enc:v1:2:`, stored.APIKeys[0], "the late save ends up under the new data key")
+		assert.Regexp(t, `^enc:v1:2:`, stored.ProxyURL)
+		got, err := sealCredentialStore(raw, box).Get(ctx, "row")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"sk-late"}, got.APIKeys)
+	})
+}
