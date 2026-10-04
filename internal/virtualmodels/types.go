@@ -61,6 +61,13 @@ type VirtualModel struct {
 	Slowdown *float64 `json:"slowdown,omitempty" bson:"slowdown,omitempty"`
 	Enabled  bool     `json:"enabled" bson:"enabled"`
 
+	// ContextWindow and MaxOutputTokens are the token limits /v1/models lists
+	// for a redirect. Nil derives each from the targets: the smallest value
+	// any target reports, so a client sizing to it fits whichever target
+	// serves the request.
+	ContextWindow   *int `json:"context_window,omitempty" bson:"context_window,omitempty"`
+	MaxOutputTokens *int `json:"max_output_tokens,omitempty" bson:"max_output_tokens,omitempty"`
+
 	// SessionAffinity keeps requests of one detected session on the target that
 	// served it before, while that target stays available. Tri-state: nil means
 	// enabled (the default); explicit false restores stateless balancing.
@@ -159,7 +166,17 @@ func (v VirtualModel) clone() VirtualModel {
 		failover := *v.Failover
 		v.Failover = &failover
 	}
+	v.ContextWindow = cloneInt(v.ContextWindow)
+	v.MaxOutputTokens = cloneInt(v.MaxOutputTokens)
 	return v
+}
+
+func cloneInt(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 // cloneStrategyConfig deep-copies a strategy config so snapshot consumers and
@@ -214,15 +231,19 @@ type View struct {
 	UserPaths       []string       `json:"user_paths,omitempty"`
 	Description     string         `json:"description,omitempty"`
 	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it.
-	Slowdown      *float64  `json:"slowdown,omitempty"`
-	Enabled       bool      `json:"enabled"`
-	Managed       bool      `json:"managed,omitempty"`
-	ResolvedModel string    `json:"resolved_model,omitempty"`
-	ProviderType  string    `json:"provider_type,omitempty"`
-	Valid         bool      `json:"valid,omitempty"`
-	ScopeKind     string    `json:"scope_kind,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	Slowdown *float64 `json:"slowdown,omitempty"`
+	// ContextWindow and MaxOutputTokens are the explicitly configured token
+	// limits; nil means /v1/models derives them from the targets.
+	ContextWindow   *int      `json:"context_window,omitempty"`
+	MaxOutputTokens *int      `json:"max_output_tokens,omitempty"`
+	Enabled         bool      `json:"enabled"`
+	Managed         bool      `json:"managed,omitempty"`
+	ResolvedModel   string    `json:"resolved_model,omitempty"`
+	ProviderType    string    `json:"provider_type,omitempty"`
+	Valid           bool      `json:"valid,omitempty"`
+	ScopeKind       string    `json:"scope_kind,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // Resolution captures the requested selector and the concrete selector chosen

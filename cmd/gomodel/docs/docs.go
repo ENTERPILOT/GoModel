@@ -8919,6 +8919,10 @@ const docTemplate = `{
         "admin.upsertVirtualModelRequest": {
             "type": "object",
             "properties": {
+                "context_window": {
+                    "description": "ContextWindow and MaxOutputTokens set the token limits /v1/models lists\nfor a redirect. Omitted means the smallest value any target reports.",
+                    "type": "integer"
+                },
                 "description": {
                     "type": "string"
                 },
@@ -8928,6 +8932,9 @@ const docTemplate = `{
                 "failover": {
                     "description": "Failover retries a failed request on the remaining targets. Omitted\nmeans enabled; false serves the chosen target only.",
                     "type": "boolean"
+                },
+                "max_output_tokens": {
+                    "type": "integer"
                 },
                 "old_source": {
                     "type": "string"
@@ -12747,6 +12754,10 @@ const docTemplate = `{
         "virtualmodels.View": {
             "type": "object",
             "properties": {
+                "context_window": {
+                    "description": "ContextWindow and MaxOutputTokens are the explicitly configured token\nlimits; nil means /v1/models derives them from the targets.",
+                    "type": "integer"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -12764,6 +12775,9 @@ const docTemplate = `{
                 },
                 "managed": {
                     "type": "boolean"
+                },
+                "max_output_tokens": {
+                    "type": "integer"
                 },
                 "model": {
                     "type": "string"
@@ -12823,6 +12837,10 @@ const docTemplate = `{
         "virtualmodels.VirtualModel": {
             "type": "object",
             "properties": {
+                "context_window": {
+                    "description": "ContextWindow and MaxOutputTokens are the token limits /v1/models lists\nfor a redirect. Nil derives each from the targets: the smallest value\nany target reports, so a client sizing to it fits whichever target\nserves the request.",
+                    "type": "integer"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -12839,6 +12857,9 @@ const docTemplate = `{
                 "managed": {
                     "description": "Managed marks a virtual model supplied declaratively through config.yaml or\nthe VIRTUAL_MODELS env var rather than the admin store. It is an in-memory\nflag only: stores never read or write it. Managed rows override store rows\nof the same Source and are read-only to the admin API.",
                     "type": "boolean"
+                },
+                "max_output_tokens": {
+                    "type": "integer"
                 },
                 "model": {
                     "type": "string"

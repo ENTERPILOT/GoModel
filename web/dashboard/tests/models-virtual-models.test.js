@@ -545,6 +545,58 @@ test("save payload sends a policy body when target_model is empty", () => {
   });
 });
 
+test("save payload carries configured token limits on a redirect only", () => {
+  const configured = buildVirtualModelSavePayload(
+    {
+      source: "smart",
+      target_model: "openai/gpt-4o",
+      targets: [],
+      context_window: 128000,
+      max_output_tokens: "",
+      enabled: true,
+    },
+    "",
+    "create",
+  );
+  assert.equal(configured.payload.context_window, 128000);
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(configured.payload, "max_output_tokens"),
+    false,
+  );
+
+  const derived = buildVirtualModelSavePayload(
+    { source: "smart", target_model: "openai/gpt-4o", targets: [], context_window: null, enabled: true },
+    "",
+    "create",
+  );
+  assert.equal(Object.prototype.hasOwnProperty.call(derived.payload, "context_window"), false);
+
+  const policy = buildVirtualModelSavePayload(
+    { source: "openai/gpt-4o", target_model: "", targets: [], context_window: 1000, enabled: true },
+    "openai/gpt-4o",
+    "edit",
+  );
+  assert.equal(policy.isRedirect, false);
+  assert.equal(Object.prototype.hasOwnProperty.call(policy.payload, "context_window"), false);
+});
+
+test("buildAliasTogglePayload preserves configured token limits", () => {
+  const [alias] = splitVirtualModelViews([
+    {
+      source: "smart",
+      kind: "redirect",
+      targets: [{ model: "openai/gpt-4o" }],
+      context_window: 128000,
+      max_output_tokens: 16000,
+      enabled: true,
+    },
+  ]).aliases;
+  const payload = buildAliasTogglePayload(alias);
+  assert.equal(payload.context_window, 128000);
+  assert.equal(payload.max_output_tokens, 16000);
+  assert.equal(payload.enabled, false);
+});
+
 test("save payload distinguishes configured slowdown, explicit zero, and inherited slowdown", () => {
   const configured = buildVirtualModelSavePayload(
     { source: "slow", target_model: "openai/gpt-4o", targets: [], slowdown: 2.5, enabled: true },

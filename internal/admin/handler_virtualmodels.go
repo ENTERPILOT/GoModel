@@ -40,7 +40,11 @@ type upsertVirtualModelRequest struct {
 	Description string   `json:"description,omitempty"`
 	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it.
 	Slowdown *float64 `json:"slowdown,omitempty"`
-	Enabled  *bool    `json:"enabled,omitempty"`
+	// ContextWindow and MaxOutputTokens set the token limits /v1/models lists
+	// for a redirect. Omitted means the smallest value any target reports.
+	ContextWindow   *int  `json:"context_window,omitempty"`
+	MaxOutputTokens *int  `json:"max_output_tokens,omitempty"`
+	Enabled         *bool `json:"enabled,omitempty"`
 }
 
 // virtualModelTargetRequest is one load-balancing destination. Model may be a
@@ -180,6 +184,8 @@ func (h *Handler) buildVirtualModelUpsert(source string, req upsertVirtualModelR
 		UserPaths:       req.UserPaths,
 		Description:     strings.TrimSpace(req.Description),
 		Slowdown:        req.Slowdown,
+		ContextWindow:   req.ContextWindow,
+		MaxOutputTokens: req.MaxOutputTokens,
 		Enabled:         h.virtualModels.ResolveUpsertEnabled(source, req.OldSource, req.Enabled),
 	}
 
