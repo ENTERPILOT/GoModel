@@ -26,17 +26,27 @@ import {
   normalizeRole,
   playgroundUserPathHeader,
 } from "./playgroundLogic.js";
+import { normalizeMode } from "./playgroundMedia.js";
 
 const STORAGE = {
+  mode: "gomodel_playground_mode",
   endpoint: "gomodel_playground_endpoint",
   model: "gomodel_playground_model",
   stream: "gomodel_playground_stream",
   panel: "gomodel_playground_json_panel",
 };
 
+// Each mode remembers its own model: chat keeps the original key, media modes
+// (see playgroundMedia.js) get a suffixed one.
+function modelStorageKey(mode) {
+  return mode === "chat" ? STORAGE.model : STORAGE.model + "_" + mode;
+}
+
 class PlaygroundStore {
+  // "chat" (the conversation below) or a media mode run by playgroundMedia.
+  mode = $state(normalizeMode(readStored(STORAGE.mode, "")));
   endpoint = $state(normalizeEndpoint(readStored(STORAGE.endpoint, "")));
-  model = $state(readStored(STORAGE.model, "") || "");
+  model = $state(readStored(modelStorageKey(this.mode), "") || "");
   // Session-only: the user path to send on the user-path header (see
   // userPathHeaderName). Defaults to the selected model's first allowed path
   // when setModel picks a restricted model; never persisted to localStorage.
@@ -87,6 +97,17 @@ class PlaygroundStore {
     return effectiveUserPathHeaderName(runtimeConfig.userPathHeader());
   }
 
+  // Switches mode and restores the model last used in it; an empty model lets
+  // the page pick the first one the new mode's picker offers.
+  setMode(id) {
+    const mode = normalizeMode(id);
+    if (mode === this.mode) return;
+    this.mode = mode;
+    writeStored(STORAGE.mode, mode);
+    this.model = readStored(modelStorageKey(mode), "") || "";
+    this.userPath = defaultUserPathForModel(modelsStore.models, this.model.trim());
+  }
+
   setEndpoint(id) {
     this.endpoint = normalizeEndpoint(id);
     writeStored(STORAGE.endpoint, this.endpoint);
@@ -94,7 +115,7 @@ class PlaygroundStore {
 
   setModel(model) {
     this.model = String(model || "");
-    writeStored(STORAGE.model, this.model);
+    writeStored(modelStorageKey(this.mode), this.model);
     this.userPath = defaultUserPathForModel(modelsStore.models, this.model.trim());
   }
 

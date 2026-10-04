@@ -22,10 +22,13 @@ export function apiHeaders() {
 
 // apiFetch performs a raw fetch with auth headers against an app path.
 export function apiFetch(path, options = {}) {
-  return fetch(gomodelPath(path), {
-    ...options,
-    headers: { ...apiHeaders(), ...(options.headers || {}) },
-  });
+  const headers = { ...apiHeaders(), ...(options.headers || {}) };
+  // A FormData body needs the browser's multipart Content-Type (it carries
+  // the boundary), so the JSON default must not override it.
+  if (typeof FormData !== "undefined" && options.body instanceof FormData) {
+    delete headers["Content-Type"];
+  }
+  return fetch(gomodelPath(path), { ...options, headers });
 }
 
 async function request(path, options, { label = path, parse = true } = {}) {
