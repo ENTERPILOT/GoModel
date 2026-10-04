@@ -64,8 +64,15 @@ type Service struct {
 	virtualMu     sync.RWMutex
 	virtualSpecs  map[string]VirtualServerSpec
 	// reloadMu serializes Reload, so an older store read can never publish
-	// after a newer one.
-	reloadMu sync.Mutex
+	// after a newer one. Close takes it too: an in-flight Reload finishes
+	// before the upstreams are closed, and reloadStopped turns later ones
+	// into no-ops, so no upstream is dialed after shutdown.
+	reloadMu      sync.Mutex
+	reloadStopped bool
+	// stopCtx is cancelled by Close, so a background refresh blocked on a
+	// store read does not hold up shutdown.
+	stopCtx    context.Context
+	stopCancel context.CancelFunc
 	// searchDiscovery is the default for sessions that do not send
 	// ToolDiscoveryHeader: serve search_tools/call_tool instead of the catalog.
 	searchDiscovery bool
@@ -84,6 +91,9 @@ type Service struct {
 	stopOnce sync.Once
 	stop     chan struct{}
 }
+
+// errServiceClosed rejects a reload after Close.
+var errServiceClosed = errors.New("mcp gateway is shut down")
 
 // ErrServerNotVisible rejects a call from a session whose user path may no
 // longer use the server.
@@ -152,6 +162,7 @@ func NewService(ctx context.Context, opts Options) (*Service, error) {
 		requestCancels:  make(map[uint64]context.CancelFunc),
 		stop:            make(chan struct{}),
 	}
+	s.stopCtx, s.stopCancel = context.WithCancel(context.Background())
 	guard, err := newOriginGuard(opts.AllowedOrigins)
 	if err != nil {
 		return nil, fmt.Errorf("mcp allowed origins: %w", err)
@@ -189,8 +200,8 @@ func (s *Service) refreshLoop(interval time.Duration) {
 		case <-s.stop:
 			return
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			if err := s.Reload(ctx); err != nil {
+			ctx, cancel := context.WithTimeout(s.stopCtx, 30*time.Second)
+			if err := s.Reload(ctx); err != nil && !errors.Is(err, errServiceClosed) && s.stopCtx.Err() == nil {
 				slog.Error("failed to refresh mcp servers", "error", err)
 			}
 			cancel()
@@ -204,6 +215,9 @@ func (s *Service) refreshLoop(interval time.Duration) {
 func (s *Service) Reload(ctx context.Context) error {
 	s.reloadMu.Lock()
 	defer s.reloadMu.Unlock()
+	if s.reloadStopped {
+		return errServiceClosed
+	}
 	specs := make([]ServerSpec, 0, len(s.configSpecs))
 	seen := make(map[string]struct{}, len(s.configSpecs))
 	for name, spec := range s.configSpecs {
@@ -353,6 +367,13 @@ func (s *Service) Close() {
 		for _, cancel := range cancels {
 			cancel()
 		}
+
+		// Wait out an in-flight Reload, then stop later ones, before closing
+		// the upstreams, so none is added after this point.
+		s.stopCancel()
+		s.reloadMu.Lock()
+		s.reloadStopped = true
+		s.reloadMu.Unlock()
 
 		s.manager.Close()
 	})

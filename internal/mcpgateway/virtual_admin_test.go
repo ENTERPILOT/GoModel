@@ -201,3 +201,59 @@ func TestBackgroundRefreshPicksUpOtherInstanceWrites(t *testing.T) {
 	virtualStore.put(ManagedVirtualServer{Name: "coding", Servers: []string{"alpha"}})
 	require.Eventually(t, func() bool { return service.IsVirtual("coding") }, 5*time.Second, 10*time.Millisecond)
 }
+
+// gatedStore blocks List while armed, standing in for a slow store read that
+// a background refresh is in the middle of when Close runs.
+type gatedStore struct {
+	*memoryStore
+	gate    chan struct{}
+	entered chan struct{}
+}
+
+func (g *gatedStore) List(ctx context.Context) ([]ManagedServer, error) {
+	if g.gate != nil {
+		g.entered <- struct{}{}
+		<-g.gate
+	}
+	return g.memoryStore.List(ctx)
+}
+
+func TestCloseWaitsForInFlightReloadAndStopsLaterOnes(t *testing.T) {
+	lateURL := newTestUpstream(t, "late", addEchoTool("echo"))
+	store := &gatedStore{memoryStore: &memoryStore{rows: map[string]ManagedServer{}}}
+	service, err := NewService(context.Background(), Options{Store: store})
+	require.NoError(t, err)
+	t.Cleanup(service.Close)
+
+	// A server saved on another instance, read by a refresh that is slow.
+	store.rows["late"] = ManagedServer{Name: "late", URL: lateURL, Transport: config.MCPTransportHTTP, Enabled: true}
+	store.gate, store.entered = make(chan struct{}), make(chan struct{}, 1)
+	reloaded := make(chan error, 1)
+	go func() { reloaded <- service.Reload(context.Background()) }()
+	<-store.entered
+
+	closed := make(chan struct{})
+	go func() {
+		service.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+		t.Fatal("Close returned while a reload was still applying")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(store.gate)
+	<-closed
+	require.NoError(t, <-reloaded)
+
+	late, ok := service.manager.get("late")
+	require.True(t, ok, "the in-flight reload applied before Close")
+	late.stateMu.Lock()
+	lateClosed := late.closed
+	late.stateMu.Unlock()
+	assert.True(t, lateClosed, "an upstream added by the in-flight reload is closed by Close")
+
+	store.gate = nil
+	require.ErrorIs(t, service.Reload(context.Background()), errServiceClosed, "reloads after Close do nothing")
+}
