@@ -128,21 +128,9 @@ func (s *Service) logVirtualServerIssues() {
 		if view.Conflict != "" {
 			slog.Error("virtual mcp server is not served", "virtual_server", view.Spec.Name, "reason", view.Conflict)
 		}
-		var missing, nested []string
-		for _, member := range view.MissingServers {
-			if s.IsVirtual(member) {
-				nested = append(nested, member)
-			} else {
-				missing = append(missing, member)
-			}
-		}
-		if len(missing) > 0 {
+		if len(view.MissingServers) > 0 {
 			slog.Warn("virtual mcp server members match no mcp server; they are skipped",
-				"virtual_server", view.Spec.Name, "missing", missing)
-		}
-		if len(nested) > 0 {
-			slog.Warn("virtual mcp server members are virtual servers; virtual servers can only include MCP servers, so they are skipped",
-				"virtual_server", view.Spec.Name, "members", nested)
+				"virtual_server", view.Spec.Name, "missing", view.MissingServers)
 		}
 	}
 }

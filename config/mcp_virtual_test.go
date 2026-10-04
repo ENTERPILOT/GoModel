@@ -27,17 +27,6 @@ func TestNormalizeMCPVirtualServers(t *testing.T) {
 	assert.Equal(t, MCPToolDiscoverySearch, coding.ToolDiscovery)
 }
 
-func TestNormalizeMCPVirtualServersAcceptsMemberNamedLikeAVirtualServer(t *testing.T) {
-	// A dashboard server may own the slug "coding", and a server wins
-	// /mcp/{name} over a virtual server, so the member resolves at runtime.
-	cfg := MCPConfig{VirtualServers: map[string]MCPVirtualServerConfig{
-		"all":    {Servers: []string{"coding"}},
-		"coding": {Servers: []string{"github"}},
-	}}
-	require.NoError(t, normalizeMCPConfig(&cfg))
-	assert.Equal(t, []string{"coding"}, cfg.VirtualServers["all"].Servers)
-}
-
 func TestNormalizeMCPVirtualServersRejectsInvalid(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -50,6 +39,14 @@ func TestNormalizeMCPVirtualServersRejectsInvalid(t *testing.T) {
 			servers:  map[string]MCPServerConfig{"github": {URL: "https://example.com/mcp"}},
 			virtuals: map[string]MCPVirtualServerConfig{"GitHub": {Servers: []string{"github"}}},
 			wantErr:  `mcp.virtual_servers["github"]: name clashes with mcp.servers["github"]; virtual server names and server slugs share /mcp/{name}`,
+		},
+		{
+			name: "nests a virtual server",
+			virtuals: map[string]MCPVirtualServerConfig{
+				"all":    {Servers: []string{"coding"}},
+				"coding": {Servers: []string{"github"}},
+			},
+			wantErr: `mcp.virtual_servers["all"]: member "coding" is a virtual server; virtual servers can only include MCP servers`,
 		},
 		{
 			name:     "no members",

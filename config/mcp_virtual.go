@@ -74,10 +74,8 @@ func applyMCPVirtualEnv(cfg *Config) error {
 // normalizeMCPVirtualServers canonicalizes virtual server names and members
 // and rejects definitions that cannot be served. Virtual server names share
 // /mcp/{name} with server slugs, so a clash with a declared server fails
-// startup. Members are not checked here: admin-managed servers live in the
-// store, so the gateway resolves members at runtime instead. That includes a
-// member named like another virtual server, which a dashboard server with
-// that slug may own.
+// startup. Members are not checked for existence here: admin-managed servers
+// live in the store, so the gateway resolves members at runtime instead.
 func normalizeMCPVirtualServers(cfg *MCPConfig) error {
 	if len(cfg.VirtualServers) == 0 {
 		return nil
@@ -101,7 +99,7 @@ func normalizeMCPVirtualServers(cfg *MCPConfig) error {
 	sort.Strings(names)
 	for _, name := range names {
 		virtual := normalized[name]
-		if err := normalizeMCPVirtualServer(&virtual); err != nil {
+		if err := normalizeMCPVirtualServer(&virtual, normalized); err != nil {
 			return fmt.Errorf("mcp.virtual_servers[%q]: %w", name, err)
 		}
 		normalized[name] = virtual
@@ -126,7 +124,7 @@ func validateMCPVirtualServerName(name string) error {
 	return nil
 }
 
-func normalizeMCPVirtualServer(virtual *MCPVirtualServerConfig) error {
+func normalizeMCPVirtualServer(virtual *MCPVirtualServerConfig, virtuals map[string]MCPVirtualServerConfig) error {
 	virtual.Description = strings.TrimSpace(virtual.Description)
 	switch mode := strings.ToLower(strings.TrimSpace(virtual.ToolDiscovery)); mode {
 	case "", MCPToolDiscoveryOff, MCPToolDiscoverySearch:
@@ -142,6 +140,9 @@ func normalizeMCPVirtualServer(virtual *MCPVirtualServerConfig) error {
 		}
 		if err := ValidateMCPServerSlug(member); err != nil {
 			return fmt.Errorf("member %q: %w", raw, err)
+		}
+		if _, nested := virtuals[member]; nested {
+			return fmt.Errorf("member %q is a virtual server; virtual servers can only include MCP servers", member)
 		}
 		if !slices.Contains(members, member) {
 			members = append(members, member)

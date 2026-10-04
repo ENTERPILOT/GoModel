@@ -104,8 +104,7 @@ func TestVirtualServerYieldsToServerWithSameName(t *testing.T) {
 	// Started before the service so cleanup closes the service first.
 	codingURL := newTestUpstream(t, "coding", addEchoTool("lint"))
 	service, gatewayURL := newVirtualTestService(t, nil,
-		VirtualServerSpec{Name: "coding", Servers: []string{"alpha"}},
-		VirtualServerSpec{Name: "all", Servers: []string{"coding", "beta"}})
+		VirtualServerSpec{Name: "coding", Servers: []string{"alpha"}})
 
 	// An admin-managed server claims the name after the virtual server exists.
 	specs := make([]ServerSpec, 0, 4)
@@ -120,13 +119,9 @@ func TestVirtualServerYieldsToServerWithSameName(t *testing.T) {
 
 	session := connectClient(t, gatewayURL+"/mcp/coding", nil)
 	assert.Equal(t, []string{"lint"}, listToolNames(t, session), "the real server keeps its endpoint")
-	session = connectClient(t, gatewayURL+"/mcp/all", nil)
-	assert.Equal(t, []string{"beta_search", "coding_lint"}, listToolNames(t, session), "a member named like a virtual server resolves to the server that owns the slug")
 
 	views := service.VirtualViews()
-	require.Len(t, views, 2)
-	assert.Empty(t, views[0].MissingServers)
-	views = views[1:]
+	require.Len(t, views, 1)
 	assert.Equal(t, `virtual MCP server "coding" is not served: MCP server "coding" uses the same name; rename one of them`, views[0].Conflict)
 }
 
