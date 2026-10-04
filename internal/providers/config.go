@@ -1,6 +1,8 @@
 package providers
 
 import (
+	"context"
+	"os"
 	"sort"
 	"strings"
 
@@ -23,7 +25,12 @@ type ProviderConfig struct {
 	// APIKeys is the provider's full, ordered, de-duplicated key set. Identified
 	// sessions stay on one key when SessionStickyKeys is true; sessionless
 	// traffic rotates round robin.
-	APIKeys                  []string
+	APIKeys []string
+	// APIKeySources[i] lists where APIKeys[i] was configured: config.yaml
+	// paths ("providers.openai.api_keys[1]") or environment variable names
+	// ("OPENAI_API_KEY_2"); more than one when identical keys were collapsed.
+	// Set by configuration resolution; nil elsewhere.
+	APIKeySources            [][]string
 	SessionStickyKeys        bool
 	BaseURL                  string
 	APIVersion               string
@@ -54,15 +61,76 @@ type ProviderConfig struct {
 	Resilience  config.ResilienceConfig
 }
 
-// resolveProviders applies env var overrides to the raw YAML provider map, filters
-// out entries with invalid credentials, and merges each entry with the global
-// ResilienceConfig. The second return value is the credential-filtered raw map
-// (same keys as the first); use it for auxiliary clients that need the same
-// API keys and base URLs as the live router (e.g. semantic-cache embeddings).
-func resolveProviders(raw map[string]config.RawProviderConfig, global config.ResilienceConfig, discovery map[string]DiscoveryConfig) (map[string]ProviderConfig, map[string]config.RawProviderConfig) {
-	merged := normalizeProviderAPIKeys(applyProviderEnvVars(raw, discovery))
-	filtered := filterEmptyProviders(merged, discovery)
-	return buildProviderConfigs(filtered, global), filtered
+// resolveProviders applies env var overrides to the raw YAML provider map,
+// resolves secret references, filters out entries with invalid credentials,
+// and merges each entry with the global ResilienceConfig. The second return
+// value is the credential-filtered raw map (same keys as the first); use it for
+// auxiliary clients that need the same API keys and base URLs as the live
+// router (e.g. semantic-cache embeddings).
+//
+// References are resolved only for providers that survive the env overlay and
+// the credential filter, so a YAML value an env var replaces, an env var the
+// overlay ignores, and a provider dropped for lack of credentials are never
+// looked up. Settings that are parsed or steer the overlay or the filter
+// (type, backend, env models, model filters, booleans, Vertex auth_type) are
+// resolved just before they are read, each once. A used reference that cannot
+// be resolved is an error, never a value that is dropped or sent upstream.
+// Legacy ${VAR} placeholders are dropped before resolution; resolved values
+// are data, so a secret that happens to contain "${" is kept.
+//
+// API keys keep their source through normalization (see sourcedKey): each key
+// is resolved, and reported, under the YAML path or env var the operator
+// wrote, and only then are equal values collapsed, so
+// ProviderConfig.APIKeySources maps every normalized key back to all of them.
+func resolveProviders(ctx context.Context, secrets *config.Secrets, raw map[string]config.RawProviderConfig, global config.ResilienceConfig, discovery map[string]DiscoveryConfig) (map[string]ProviderConfig, map[string]config.RawProviderConfig, error) {
+	raw, err := resolveProviderSelectors(ctx, secrets, raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	merged, envKeys, err := applyProviderEnvVars(ctx, secrets, raw, discovery, os.Environ())
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := resolveFilterSettings(ctx, secrets, merged); err != nil {
+		return nil, nil, err
+	}
+	keys := make(map[string][]sourcedKey, len(merged))
+	for name, p := range merged {
+		sourced, fromEnv := envKeys[name]
+		if !fromEnv {
+			sourced = usableKeys(yamlAPIKeys(name, p))
+		}
+		keys[name] = sourced
+		p.APIKey, p.APIKeys = keyValues(sourced)
+		merged[name] = p
+	}
+
+	candidates := filterProviders(merged, discovery, providerValueSet)
+	for name, p := range candidates {
+		// Keys are resolved below, under their own sources.
+		p.APIKey, p.APIKeys = "", nil
+		candidates[name] = p
+	}
+	if err := secrets.ResolveFields(ctx, "providers", &candidates); err != nil {
+		return nil, nil, err
+	}
+	for name, p := range candidates {
+		resolved, err := resolveSecretKeys(ctx, secrets, keys[name])
+		if err != nil {
+			return nil, nil, err
+		}
+		keys[name] = resolved
+		p.APIKey, p.APIKeys = keyValues(resolved)
+		candidates[name] = p
+	}
+
+	filtered := filterProviders(candidates, discovery, resolvedValueSet)
+	providers := buildProviderConfigs(filtered, global)
+	for name, p := range providers {
+		p.APIKeySources = keySources(keys[name])
+		providers[name] = p
+	}
+	return providers, filtered, nil
 }
 
 // normalizeProviderAPIKeys collapses each provider's `api_key` and `api_keys`
@@ -141,6 +209,12 @@ func skippedProviderNames(declared, resolved map[string]config.RawProviderConfig
 
 // filterEmptyProviders removes providers without valid credentials.
 func filterEmptyProviders(raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig) map[string]config.RawProviderConfig {
+	return filterProviders(raw, discovery, HasResolvedProviderValue)
+}
+
+// filterProviders is filterEmptyProviders with set deciding whether a
+// credential field carries a value.
+func filterProviders(raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig, set func(string) bool) map[string]config.RawProviderConfig {
 	result := make(map[string]config.RawProviderConfig, len(raw))
 	for name, p := range raw {
 		providerType := normalizeProviderType(p)
@@ -150,7 +224,7 @@ func filterEmptyProviders(raw map[string]config.RawProviderConfig, discovery map
 		}
 		if isVertexProviderConfig(p) {
 			p.Type = providerType
-			if validVertexProviderConfig(p) {
+			if validVertexProviderConfig(p, set) {
 				result[name] = p
 			}
 			continue
@@ -159,7 +233,7 @@ func filterEmptyProviders(raw map[string]config.RawProviderConfig, discovery map
 			result[name] = p
 			continue
 		}
-		if p.APIKey != "" && !strings.Contains(p.APIKey, "${") {
+		if set(p.APIKey) {
 			result[name] = p
 		}
 	}
@@ -171,9 +245,8 @@ func isVertexProviderConfig(p config.RawProviderConfig) bool {
 		(strings.EqualFold(strings.TrimSpace(p.Type), "gemini") && strings.EqualFold(strings.TrimSpace(p.Backend), "vertex"))
 }
 
-func validVertexProviderConfig(p config.RawProviderConfig) bool {
-	if !HasResolvedProviderValue(p.BaseURL) &&
-		(!HasResolvedProviderValue(p.VertexProject) || !HasResolvedProviderValue(p.VertexLocation)) {
+func validVertexProviderConfig(p config.RawProviderConfig, set func(string) bool) bool {
+	if !vertexHasEndpoint(p, set) {
 		return false
 	}
 	authType := strings.ToLower(strings.TrimSpace(p.AuthType))
@@ -181,12 +254,16 @@ func validVertexProviderConfig(p config.RawProviderConfig) bool {
 	case "", "gcp_adc", "adc", "google_adc":
 		return true
 	case "gcp_service_account", "service_account":
-		return HasResolvedProviderValue(p.ServiceAccountFile) ||
-			HasResolvedProviderValue(p.ServiceAccountJSON) ||
-			HasResolvedProviderValue(p.ServiceAccountJSONBase64)
+		return set(p.ServiceAccountFile) || set(p.ServiceAccountJSON) || set(p.ServiceAccountJSONBase64)
 	default:
 		return false
 	}
+}
+
+// vertexHasEndpoint reports whether a Vertex provider sets a base URL or both
+// a project and a location.
+func vertexHasEndpoint(p config.RawProviderConfig, set func(string) bool) bool {
+	return set(p.BaseURL) || (set(p.VertexProject) && set(p.VertexLocation))
 }
 
 // HasResolvedProviderValue reports whether a provider-config field carries a
@@ -198,6 +275,19 @@ func validVertexProviderConfig(p config.RawProviderConfig) bool {
 func HasResolvedProviderValue(value string) bool {
 	value = strings.TrimSpace(value)
 	return value != "" && !strings.Contains(value, "${")
+}
+
+// providerValueSet is HasResolvedProviderValue for values that have not been
+// resolved yet: a secret reference counts as set, because it is resolved or
+// fails later, while a legacy ${VAR} placeholder still does not.
+func providerValueSet(value string) bool {
+	return strings.TrimSpace(value) != "" && !config.HasUnresolvedPlaceholder(value)
+}
+
+// resolvedValueSet reports whether a resolved provider field carries a value.
+// Resolved secrets are data, so "${" in one is not a placeholder.
+func resolvedValueSet(value string) bool {
+	return strings.TrimSpace(value) != ""
 }
 
 // buildProviderConfigs merges each raw provider config with the global ResilienceConfig,

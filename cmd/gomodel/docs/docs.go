@@ -1280,6 +1280,46 @@ const docTemplate = `{
                 ]
             }
         },
+        "/admin/mcp-virtual-servers": {
+            "get": {
+                "description": "Each virtual server serves a subset of the MCP servers at /mcp/{name}. missing_servers lists members no server matches; conflict explains why a virtual server is not served.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "List virtual MCP servers (config-declared, read-only)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/admin.mcpVirtualServerResponse"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/media/{id}": {
             "get": {
                 "description": "Streams the bytes of an audio or image object the audit log\nreferences by media_id, with its content type. Range requests\nare honored so browser players can seek. An object outside the\ncaller's user-path scope is reported as missing.",
@@ -7831,6 +7871,10 @@ const docTemplate = `{
                 "MCP_ENABLED": {
                     "type": "string"
                 },
+                "MCP_TOOL_DISCOVERY": {
+                    "description": "MCPToolDiscovery is the gateway's default MCP tool discovery mode\n(\"off\" or \"search\"), so the dashboard can show how clients see tools.",
+                    "type": "string"
+                },
                 "PER_CHILD_QUOTAS_ENABLED": {
                     "type": "string"
                 },
@@ -8257,6 +8301,35 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "admin.mcpVirtualServerResponse": {
+            "type": "object",
+            "properties": {
+                "conflict": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "missing_servers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "servers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "tool_discovery": {
+                    "type": "string"
                 }
             }
         },

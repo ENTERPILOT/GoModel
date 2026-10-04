@@ -91,8 +91,14 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 		configSpecs[name] = SpecFromConfig(name, serverCfg)
 	}
 
+	virtualSpecs := make(map[string]VirtualServerSpec, len(cfg.MCP.VirtualServers))
+	for name, virtualCfg := range cfg.MCP.VirtualServers {
+		virtualSpecs[name] = VirtualFromConfig(name, virtualCfg)
+	}
+
 	service, err := NewService(ctx, Options{
 		ConfigServers:  configSpecs,
+		VirtualServers: virtualSpecs,
 		Store:          store,
 		HTTPClient:     httpClient,
 		UsageLogger:    usageLogger,

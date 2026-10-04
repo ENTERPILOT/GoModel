@@ -94,20 +94,7 @@ func (s *MongoDBStore) Get(ctx context.Context, name string) (*ManagedServer, er
 func (s *MongoDBStore) Upsert(ctx context.Context, server ManagedServer) error {
 	stampUpsert(&server)
 	update := bson.M{
-		"$set": bson.M{
-			"display_name":          server.DisplayName,
-			"url":                   server.URL,
-			"transport":             server.Transport,
-			"headers":               server.Headers,
-			"description":           server.Description,
-			"enabled":               server.Enabled,
-			"allowed_tools":         server.AllowedTools,
-			"disallowed_tools":      server.DisallowedTools,
-			"user_paths":            server.UserPaths,
-			"disallowed_user_paths": server.DisallowedUserPaths,
-			"tool_timeout_seconds":  server.ToolTimeoutSeconds,
-			"updated_at":            server.UpdatedAt,
-		},
+		"$set": mongoMCPServerFields(server),
 		"$setOnInsert": bson.M{
 			"created_at": server.CreatedAt,
 		},
@@ -117,6 +104,36 @@ func (s *MongoDBStore) Upsert(ctx context.Context, server ManagedServer) error {
 		return fmt.Errorf("upsert mcp server: %w", err)
 	}
 	return nil
+}
+
+func (s *MongoDBStore) Update(ctx context.Context, server ManagedServer) error {
+	stampUpsert(&server)
+	result, err := s.collection.UpdateOne(ctx, mongoMCPServerIDFilter{ID: strings.TrimSpace(server.Name)}, bson.M{"$set": mongoMCPServerFields(server)})
+	if err != nil {
+		return fmt.Errorf("update mcp server: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// mongoMCPServerFields is the $set document for one server's mutable fields.
+func mongoMCPServerFields(server ManagedServer) bson.M {
+	return bson.M{
+		"display_name":          server.DisplayName,
+		"url":                   server.URL,
+		"transport":             server.Transport,
+		"headers":               server.Headers,
+		"description":           server.Description,
+		"enabled":               server.Enabled,
+		"allowed_tools":         server.AllowedTools,
+		"disallowed_tools":      server.DisallowedTools,
+		"user_paths":            server.UserPaths,
+		"disallowed_user_paths": server.DisallowedUserPaths,
+		"tool_timeout_seconds":  server.ToolTimeoutSeconds,
+		"updated_at":            server.UpdatedAt,
+	}
 }
 
 func (s *MongoDBStore) Delete(ctx context.Context, name string) error {

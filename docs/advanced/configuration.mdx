@@ -166,6 +166,7 @@ See [MCP Gateway](/features/mcp-gateway) for the full feature guide.
 | `MCP_SERVERS` | JSON object of upstream MCP servers, merged over the `mcp.servers` YAML map per name (entries are read-only in the dashboard)     | _(none)_           |
 | `MCP_ALLOWED_ORIGINS` | Comma-separated browser origins (`scheme://host[:port]`) allowed to call `/mcp`; the default trusts none, which is what blocks DNS rebinding. `*` disables the check | _(none)_           |
 | `MCP_TOOL_DISCOVERY` | `off` lists every tool; `search` serves `search_tools` and `call_tool` instead, so large catalogs stop filling model context. Clients override it per session with `X-MCP-Tool-Discovery` | `off` |
+| `MCP_VIRTUAL_SERVERS` | JSON object of virtual servers, merged over the `mcp.virtual_servers` YAML map per name. Each serves a subset of the MCP servers at `/mcp/{name}` | _(none)_ |
 
 #### Logging
 
@@ -573,6 +574,10 @@ providers:
     type: openai
     api_key: "${OPENAI_API_KEY}"
 ```
+
+To read a value from a mounted file, or to fail startup when a variable is
+unset, use a [secret reference](/advanced/secret-references):
+`${file:/run/secrets/openai}` or `${env:OPENAI_API_KEY}`.
 
 <Tip>
   The YAML file is entirely optional. Any setting you can put in YAML can also

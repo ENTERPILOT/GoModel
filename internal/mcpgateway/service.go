@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -39,6 +40,14 @@ const labelsHeader = "X-Gomodel-Mcp-Labels"
 // context into per-session server construction.
 type pinnedServerKey struct{}
 
+// virtualServerKey carries the /mcp/{name} virtual server the same way.
+type virtualServerKey struct{}
+
+// virtualBindingPrefix marks a session bound to a virtual server, so a session
+// opened on /mcp/{name} stops matching if a real server takes that path. "/"
+// never occurs in a slug, so the two kinds cannot collide.
+const virtualBindingPrefix = "virtual/"
+
 // Service is the MCP gateway: it merges declarative and admin-store server
 // specs into the upstream manager and serves the downstream MCP endpoints.
 type Service struct {
@@ -47,6 +56,7 @@ type Service struct {
 	usageLogger    usage.LoggerInterface
 	userPathHeader string
 	configSpecs    map[string]ServerSpec
+	virtualSpecs   map[string]VirtualServerSpec
 	// searchDiscovery is the default for sessions that do not send
 	// ToolDiscoveryHeader: serve search_tools/call_tool instead of the catalog.
 	searchDiscovery bool
@@ -77,8 +87,11 @@ var ErrServerNotVisible = errors.New("server is not available for this user path
 type sessionBinding struct {
 	authKeyID string
 	userPath  string
-	pinned    string
-	lastSeen  time.Time
+	// endpoint identifies the endpoint the session was opened on: a pinned
+	// server slug, virtualBindingPrefix plus a virtual server name, or "" for
+	// the aggregated endpoint.
+	endpoint string
+	lastSeen time.Time
 	// discovery and toolAliases let request logs name the tool a call runs:
 	// a discovery session's call_tool target, and the namespaced name an
 	// unambiguous bare name resolves to.
@@ -90,6 +103,8 @@ type sessionBinding struct {
 type Options struct {
 	// ConfigServers are the declarative servers from config.yaml / MCP_SERVERS.
 	ConfigServers map[string]ServerSpec
+	// VirtualServers are the declarative virtual servers, keyed by name.
+	VirtualServers map[string]VirtualServerSpec
 	// Store persists admin-managed servers. Optional.
 	Store Store
 	// HTTPClient is the shared outbound HTTP client for http/sse upstreams.
@@ -115,6 +130,7 @@ func NewService(ctx context.Context, opts Options) (*Service, error) {
 		usageLogger:     opts.UsageLogger,
 		userPathHeader:  core.UserPathHeaderName(opts.UserPathHeader),
 		configSpecs:     opts.ConfigServers,
+		virtualSpecs:    opts.VirtualServers,
 		searchDiscovery: opts.ToolDiscovery == config.MCPToolDiscoverySearch,
 		bindings:        make(map[string]sessionBinding),
 		requestCancels:  make(map[uint64]context.CancelFunc),
@@ -164,6 +180,7 @@ func (s *Service) Reload(ctx context.Context) error {
 		}
 	}
 	s.manager.Apply(specs)
+	s.logVirtualServerIssues()
 	return nil
 }
 
@@ -191,7 +208,18 @@ func (s *Service) Upsert(ctx context.Context, server ManagedServer) error {
 	if err := server.Validate(); err != nil {
 		return err
 	}
-	if err := s.store.Upsert(ctx, server); err != nil {
+	write := s.store.Upsert
+	if s.IsVirtual(server.Name) {
+		// Only a new server is refused: one stored before the virtual server
+		// was declared keeps its endpoint and stays editable. Update fails
+		// atomically if the row is gone, so an edit racing a delete cannot
+		// recreate it under the virtual server's name.
+		write = s.store.Update
+	}
+	if err := write(ctx, server); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return VirtualNameTakenError(server.Name)
+		}
 		return err
 	}
 	if err := s.Reload(ctx); err != nil {
@@ -258,7 +286,8 @@ func (s *Service) Close() {
 }
 
 // ServeHTTP handles one downstream MCP HTTP exchange. pinnedServer is the
-// /mcp/{server} path segment ("" for the aggregated endpoint). Gateway
+// /mcp/{server} path segment ("" for the aggregated endpoint): a server slug
+// or a virtual server name; a server wins over a virtual server. Gateway
 // authentication has already run; this layer enforces session-to-principal
 // binding and stamps the internal identity headers tool handlers read.
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer string) error {
@@ -290,18 +319,25 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 	userPath := core.UserPathFromContext(r.Context())
 	authKeyID := core.GetAuthKeyID(r.Context())
 
-	if pinnedServer != "" {
+	virtual := ""
+	if s.servedVirtual(pinnedServer) {
+		virtual = pinnedServer
+	} else if pinnedServer != "" {
 		view, ok := s.findVisibleServer(pinnedServer, userPath)
 		if !ok {
-			return core.NewNotFoundError("unknown mcp server: " + pinnedServer)
+			return core.NewNotFoundError("unknown MCP server or virtual server: " + pinnedServer)
 		}
 		if !view.Spec.Enabled {
 			return core.NewNotFoundError("mcp server is disabled: " + pinnedServer)
 		}
 	}
 
+	bindingEndpoint := pinnedServer
+	if virtual != "" {
+		bindingEndpoint = virtualBindingPrefix + virtual
+	}
 	if sessionID := strings.TrimSpace(r.Header.Get("Mcp-Session-Id")); sessionID != "" {
-		if !s.touchBinding(sessionID, authKeyID, userPath, pinnedServer, r.Method == http.MethodDelete) {
+		if !s.touchBinding(sessionID, authKeyID, userPath, bindingEndpoint, r.Method == http.MethodDelete) {
 			// A different principal presented this session ID. Report the
 			// session as gone (404 per the transport spec) so the legitimate
 			// client's session stays unaffected and this caller re-initializes.
@@ -315,7 +351,13 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 		r.Header.Set(labelsHeader, strings.Join(labels, ","))
 	}
 
-	r = r.WithContext(context.WithValue(r.Context(), pinnedServerKey{}, pinnedServer))
+	ctx := r.Context()
+	if virtual != "" {
+		ctx = context.WithValue(ctx, virtualServerKey{}, virtual)
+	} else {
+		ctx = context.WithValue(ctx, pinnedServerKey{}, pinnedServer)
+	}
+	r = r.WithContext(ctx)
 	s.handler.ServeHTTP(w, r)
 	return nil
 }
@@ -325,19 +367,43 @@ type requestScope struct {
 	authKeyID string
 	userPath  string
 	pinned    string
+	// virtual names the virtual server whose members bound the view.
+	virtual   string
 	include   map[string]struct{}
 	discovery bool
+}
+
+// endpoint is the /mcp/{name} segment the scope was opened on.
+func (scope requestScope) endpoint() string {
+	if scope.virtual != "" {
+		return scope.virtual
+	}
+	return scope.pinned
+}
+
+// bindingEndpoint is the endpoint identity a session is bound to; see
+// sessionBinding.endpoint.
+func (scope requestScope) bindingEndpoint() string {
+	if scope.virtual != "" {
+		return virtualBindingPrefix + scope.virtual
+	}
+	return scope.pinned
 }
 
 func (s *Service) scopeFromRequest(r *http.Request) requestScope {
 	scope := requestScope{
 		authKeyID: core.GetAuthKeyID(r.Context()),
 		userPath:  core.UserPathFromContext(r.Context()),
-		discovery: s.discoveryMode(r),
 	}
 	if pinned, ok := r.Context().Value(pinnedServerKey{}).(string); ok {
 		scope.pinned = pinned
 	}
+	defaultDiscovery := s.searchDiscovery
+	if virtual, ok := r.Context().Value(virtualServerKey{}).(string); ok {
+		scope.virtual = virtual
+		defaultDiscovery = s.virtualDiscovery(virtual)
+	}
+	scope.discovery = discoveryMode(r, defaultDiscovery)
 	if raw := r.Header.Get(ScopeHeader); raw != "" {
 		scope.include = make(map[string]struct{})
 		for name := range strings.SplitSeq(raw, ",") {
@@ -376,16 +442,16 @@ func (s *Service) getServer(r *http.Request) *mcp.Server {
 		},
 		GetSessionID: func() string {
 			id := rand.Text()
-			s.bindSession(id, scope.authKeyID, scope.userPath, scope.pinned, scope.discovery, aliases)
+			s.bindSession(id, scope.authKeyID, scope.userPath, scope.bindingEndpoint(), scope.discovery, aliases)
 			return id
 		},
 	})
 
 	endpoint := "/mcp"
-	prefixNames := scope.pinned == ""
-	if !prefixNames {
-		endpoint = "/mcp/" + scope.pinned
+	if name := scope.endpoint(); name != "" {
+		endpoint = "/mcp/" + name
 	}
+	prefixNames := scope.pinned == ""
 
 	var index *toolIndex
 	if scope.discovery {
@@ -467,7 +533,8 @@ func (s *Service) upstreamCatalog(name string) (*catalog, ServerStatus) {
 }
 
 // visibleServers filters the upstream set down to one request's view:
-// enabled, allowed for the user path, and inside the pin/header scope.
+// enabled, allowed for the user path, and inside the pin, virtual server,
+// and header scopes. A virtual server only narrows the view.
 func (s *Service) visibleServers(scope requestScope) []ServerView {
 	views := s.manager.Views()
 	visible := make([]ServerView, 0, len(views))
@@ -476,6 +543,9 @@ func (s *Service) visibleServers(scope requestScope) []ServerView {
 			continue
 		}
 		if scope.pinned != "" && view.Spec.Name != scope.pinned {
+			continue
+		}
+		if scope.virtual != "" && !slices.Contains(s.virtualSpecs[scope.virtual].Servers, view.Spec.Name) {
 			continue
 		}
 		if scope.include != nil {
@@ -514,8 +584,16 @@ func (s *Service) composeInstructions(scope requestScope, views []ServerView) st
 			names = append(names, view.Spec.Name)
 		}
 		sort.Strings(names)
-		fmt.Fprintf(&b, "GoModel MCP gateway aggregating %d server(s): %s. Tools and prompts are namespaced as {server}%s{name}.",
+		if scope.virtual != "" {
+			fmt.Fprintf(&b, "GoModel MCP virtual server %q", scope.virtual)
+		} else {
+			b.WriteString("GoModel MCP gateway")
+		}
+		fmt.Fprintf(&b, " aggregating %d server(s): %s. Tools and prompts are namespaced as {server}%s{name}.",
 			len(names), strings.Join(names, ", "), namespaceSeparator)
+		if scope.virtual != "" && len(names) == 0 {
+			b.WriteString(" None of its member servers is available for this API key.")
+		}
 	}
 	if scope.discovery {
 		if b.Len() > 0 {
@@ -678,12 +756,12 @@ func (s *Service) authorizeSessionID(sessionID, upstreamName string) error {
 }
 
 // bindSession records the principal a new session was initialized under.
-func (s *Service) bindSession(sessionID, authKeyID, userPath, pinned string, discovery bool, toolAliases map[string]string) {
+func (s *Service) bindSession(sessionID, authKeyID, userPath, endpoint string, discovery bool, toolAliases map[string]string) {
 	s.bindMu.Lock()
 	s.bindings[sessionID] = sessionBinding{
 		authKeyID:   authKeyID,
 		userPath:    userPath,
-		pinned:      pinned,
+		endpoint:    endpoint,
 		lastSeen:    time.Now(),
 		discovery:   discovery,
 		toolAliases: toolAliases,
@@ -714,14 +792,14 @@ func (s *Service) ToolCallLabel(sessionID, name, target string) string {
 // caller's authenticated identity, user path, and endpoint pin match it.
 // Unknown session IDs pass through: the SDK rejects them itself, and bindings
 // do not survive restarts.
-func (s *Service) touchBinding(sessionID, authKeyID, userPath, pinned string, remove bool) bool {
+func (s *Service) touchBinding(sessionID, authKeyID, userPath, endpoint string, remove bool) bool {
 	s.bindMu.Lock()
 	defer s.bindMu.Unlock()
 	binding, ok := s.bindings[sessionID]
 	if !ok {
 		return true
 	}
-	if binding.authKeyID != authKeyID || binding.userPath != userPath || binding.pinned != pinned {
+	if binding.authKeyID != authKeyID || binding.userPath != userPath || binding.endpoint != endpoint {
 		return false
 	}
 	if remove {

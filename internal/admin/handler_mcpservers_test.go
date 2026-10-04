@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -24,6 +25,7 @@ type mcpAdminFake struct {
 	managed      map[string]struct{}
 	stored       map[string]mcpgateway.ManagedServer
 	catalogs     map[string]mcpgateway.CatalogView
+	virtuals     []mcpgateway.VirtualServerView
 	upsertErr    error
 	deleteErr    error
 	reconnectErr error
@@ -134,6 +136,12 @@ func (f *mcpAdminFake) Catalog(name string) (mcpgateway.CatalogView, bool) {
 	return catalog, true
 }
 
+func (f *mcpAdminFake) IsVirtual(name string) bool {
+	return slices.ContainsFunc(f.virtuals, func(view mcpgateway.VirtualServerView) bool { return view.Spec.Name == name })
+}
+
+func (f *mcpAdminFake) VirtualViews() []mcpgateway.VirtualServerView { return f.virtuals }
+
 func newMCPHandler(fake *mcpAdminFake) *Handler {
 	return NewHandler(nil, nil, WithMCPServers(fake))
 }
@@ -208,6 +216,9 @@ func TestMCPServerEndpointsReturn503WhenUnavailable(t *testing.T) {
 
 	listCtx, listRec := echotest.Get(t, "/admin/mcp-servers")
 	assertUnavailable("ListMCPServers", h.ListMCPServers(listCtx), listRec)
+
+	virtualCtx, virtualRec := echotest.Get(t, "/admin/mcp-virtual-servers")
+	assertUnavailable("ListMCPVirtualServers", h.ListMCPVirtualServers(virtualCtx), virtualRec)
 
 	putCtx, putRec := echotest.Request(t, http.MethodPut, "/admin/mcp-servers", `{"name":"notion","url":"https://mcp.notion.com/mcp"}`)
 	assertUnavailable("UpsertMCPServer", h.UpsertMCPServer(putCtx), putRec)
@@ -290,8 +301,9 @@ func TestUpsertMCPServer_AllowsUnicodeDisplayNameAndKeepsSlug(t *testing.T) {
 
 func TestUpsertMCPServer_Rejections(t *testing.T) {
 	tests := []struct {
-		name string
-		body string
+		name    string
+		body    string
+		wantErr string
 	}{
 		{
 			name: "stdio transport",
@@ -321,6 +333,11 @@ func TestUpsertMCPServer_Rejections(t *testing.T) {
 			name: "redacted header without stored value",
 			body: `{"name":"fresh","url":"https://mcp.example.com/mcp","headers":{"Authorization":"***"}}`,
 		},
+		{
+			name:    "slug used by a virtual server",
+			body:    `{"name":"Coding","url":"https://mcp.example.com/mcp"}`,
+			wantErr: `slug \"coding\" is used by virtual MCP server \"coding\" (declared in config); choose another slug`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -329,6 +346,7 @@ func TestUpsertMCPServer_Rejections(t *testing.T) {
 			fake.addManaged(mcpgateway.ServerView{
 				Spec: mcpgateway.ServerSpec{Name: "github", URL: "https://api.githubcopilot.com/mcp/", Transport: "http", Enabled: true},
 			})
+			fake.virtuals = []mcpgateway.VirtualServerView{{Spec: mcpgateway.VirtualServerSpec{Name: "coding", Servers: []string{"github"}}}}
 			h := newMCPHandler(fake)
 
 			c, rec := echotest.Request(t, http.MethodPut, "/admin/mcp-servers", tt.body)
@@ -336,6 +354,7 @@ func TestUpsertMCPServer_Rejections(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 			assert.Contains(t, rec.Body.String(), "invalid_request_error")
+			assert.Contains(t, rec.Body.String(), tt.wantErr)
 			assert.Empty(t, fake.stored)
 		})
 	}
@@ -486,4 +505,57 @@ func TestMCPServerCatalog(t *testing.T) {
 		assert.Len(t, catalog.Prompts, 1)
 		assert.Len(t, catalog.Resources, 1)
 	})
+}
+
+func TestListMCPVirtualServers(t *testing.T) {
+	fake := newMCPAdminFake()
+	fake.virtuals = []mcpgateway.VirtualServerView{
+		{
+			Spec:           mcpgateway.VirtualServerSpec{Name: "coding", Description: "code tools", Servers: []string{"github", "ghost"}},
+			ToolDiscovery:  "search",
+			MissingServers: []string{"ghost"},
+		},
+		{
+			Spec:          mcpgateway.VirtualServerSpec{Name: "notion", Servers: []string{"github"}},
+			ToolDiscovery: "off",
+			Conflict:      `virtual MCP server "notion" is not served`,
+		},
+	}
+	h := newMCPHandler(fake)
+
+	c, rec := echotest.Get(t, "/admin/mcp-virtual-servers")
+	require.NoError(t, h.ListMCPVirtualServers(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	got := echotest.Decode[[]mcpVirtualServerResponse](t, rec)
+	assert.Equal(t, []mcpVirtualServerResponse{
+		{Name: "coding", Description: "code tools", Servers: []string{"github", "ghost"}, MissingServers: []string{"ghost"}, ToolDiscovery: "search"},
+		{Name: "notion", Servers: []string{"github"}, ToolDiscovery: "off", Conflict: `virtual MCP server "notion" is not served`},
+	}, got)
+}
+
+func TestUpsertMCPServer_DeletedDuringEditOfVirtualNameIsBadRequest(t *testing.T) {
+	fake := newMCPAdminFake()
+	fake.addStored(mcpgateway.ManagedServer{Name: "coding", URL: "https://old.example.com/mcp", Transport: "http", Enabled: true}, mcpgateway.StatusConnected)
+	fake.virtuals = []mcpgateway.VirtualServerView{{Spec: mcpgateway.VirtualServerSpec{Name: "coding", Servers: []string{"github"}}}}
+	// The row passes the handler's check, then a concurrent delete wins.
+	fake.upsertErr = mcpgateway.VirtualNameTakenError("coding")
+	h := newMCPHandler(fake)
+
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/mcp-servers", `{"name":"coding","url":"https://new.example.com/mcp"}`)
+	require.NoError(t, h.UpsertMCPServer(c))
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), `is used by virtual MCP server`)
+}
+
+func TestUpsertMCPServer_EditsServerStoredBeforeVirtualServer(t *testing.T) {
+	fake := newMCPAdminFake()
+	fake.addStored(mcpgateway.ManagedServer{Name: "coding", URL: "https://old.example.com/mcp", Transport: "http", Enabled: true}, mcpgateway.StatusConnected)
+	fake.virtuals = []mcpgateway.VirtualServerView{{Spec: mcpgateway.VirtualServerSpec{Name: "coding", Servers: []string{"github"}}}}
+	h := newMCPHandler(fake)
+
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/mcp-servers", `{"name":"coding","url":"https://new.example.com/mcp"}`)
+	require.NoError(t, h.UpsertMCPServer(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, "https://new.example.com/mcp", fake.stored["coding"].URL)
 }

@@ -161,3 +161,30 @@ func TestManagedServerSpecDefaultsTimeout(t *testing.T) {
 	require.Greater(t, spec.ToolTimeout, time.Duration(0))
 	require.False(t, spec.Managed)
 }
+
+func TestStoreUpdateRequiresExistingRow(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		ctx := context.Background()
+		server := ManagedServer{Name: "coding", URL: "https://old.example.com/mcp", Transport: "http", Enabled: true}
+
+		require.ErrorIs(t, store.Update(ctx, server), ErrNotFound, "update must not create a missing row")
+		_, err := store.Get(ctx, "coding")
+		require.ErrorIs(t, err, ErrNotFound)
+
+		require.NoError(t, store.Upsert(ctx, server))
+		created, err := store.Get(ctx, "coding")
+		require.NoError(t, err)
+
+		server.URL = "https://new.example.com/mcp"
+		server.UserPaths = []string{"/team"}
+		require.NoError(t, store.Update(ctx, server))
+		got, err := store.Get(ctx, "coding")
+		require.NoError(t, err)
+		require.Equal(t, "https://new.example.com/mcp", got.URL)
+		require.Equal(t, []string{"/team"}, got.UserPaths)
+		require.Equal(t, created.CreatedAt.Unix(), got.CreatedAt.Unix(), "update keeps created_at")
+
+		require.NoError(t, store.Delete(ctx, "coding"))
+		require.ErrorIs(t, store.Update(ctx, server), ErrNotFound, "an edit after a delete must not recreate the row")
+	})
+}
