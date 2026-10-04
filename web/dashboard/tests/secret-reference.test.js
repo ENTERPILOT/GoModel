@@ -4,7 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { hasSecretReference } from "../src/lib/utils/secretReference.js";
+import { hasSecretReference, onlySecretReferences } from "../src/lib/utils/secretReference.js";
 
 test("hasSecretReference matches the gateway's ${scheme:reference} rule", () => {
   assert.equal(hasSecretReference("${vault:prod/llm#openai}"), true);
@@ -18,4 +18,13 @@ test("hasSecretReference matches the gateway's ${scheme:reference} rule", () => 
   assert.equal(hasSecretReference("${Env:NAME}"), false);
   assert.equal(hasSecretReference(""), false);
   assert.equal(hasSecretReference(undefined), false);
+});
+
+test("onlySecretReferences rejects values with literal text", () => {
+  assert.equal(onlySecretReferences("${vault:a}"), true);
+  assert.equal(onlySecretReferences("${vault:a}${env:B}"), true);
+  assert.equal(onlySecretReferences("sk-literal-${env:TAIL}"), false);
+  assert.equal(onlySecretReferences("Bearer ${env:T}"), false);
+  assert.equal(onlySecretReferences("$${env:A}"), false);
+  assert.equal(onlySecretReferences(""), false);
 });

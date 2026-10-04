@@ -72,8 +72,9 @@ func ValidateConfig(schema []pluginapi.Field, raw json.RawMessage, scope plugina
 }
 
 // RedactSecrets replaces every non-empty secret value with SecretMask. A
-// value holding a secret reference (${scheme:reference}) is kept: it names
-// where the secret lives and is not secret itself.
+// value made of secret references alone (${scheme:reference}) is kept: it
+// names where the secret lives and is not secret itself. A value mixing
+// literal text with a reference is masked, as it may hold a literal secret.
 func RedactSecrets(schema []pluginapi.Field, raw json.RawMessage) json.RawMessage {
 	values, err := decodeConfigObject(raw)
 	if err != nil {
@@ -84,7 +85,7 @@ func RedactSecrets(schema []pluginapi.Field, raw json.RawMessage) json.RawMessag
 		if field.Input != pluginapi.InputSecret {
 			continue
 		}
-		if s, ok := values[field.Key].(string); ok && s != "" && !config.HasSecretReference(s) {
+		if s, ok := values[field.Key].(string); ok && s != "" && !config.OnlySecretReferences(s) {
 			values[field.Key] = SecretMask
 			changed = true
 		}

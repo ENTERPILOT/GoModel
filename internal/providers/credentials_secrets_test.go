@@ -250,3 +250,22 @@ func TestCredentialsService_SecretWriter(t *testing.T) {
 	require.NoError(t, svc.Delete(ctx, "w"))
 	assert.Equal(t, []string{"${vault:written/w/api_keys[0]}"}, writer.deleted)
 }
+
+// A writer may hand back the reference the stored row already holds. A save
+// that fails afterwards must not delete it: the stored row still uses it.
+func TestCredentialsService_FailedSaveKeepsReferencesTheStoredRowHolds(t *testing.T) {
+	vault := &secretVault{values: map[string]string{}}
+	store := newFakeCredentialStore()
+	svc, secrets, _ := newSecretsTestService(t, store, vault)
+	writer := &secretWriterFake{vault: vault}
+	secrets.SetWriter(writer)
+	ctx := t.Context()
+
+	require.NoError(t, svc.Upsert(ctx, ManagedProviderCredential{Name: "w", Type: "test", APIKeys: []string{"sk-1"}, Enabled: true}))
+	require.Equal(t, []string{"${vault:written/w/api_keys[0]}"}, store.rows["w"].APIKeys)
+
+	err := svc.Upsert(ctx, ManagedProviderCredential{Name: "w", Type: "test", APIKeys: []string{"sk-2", "${vault:missing}"}, Enabled: true})
+	require.Error(t, err)
+	assert.Empty(t, writer.deleted)
+	assert.Equal(t, []string{"${vault:written/w/api_keys[0]}"}, store.rows["w"].APIKeys)
+}

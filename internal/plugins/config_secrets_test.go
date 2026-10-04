@@ -46,3 +46,8 @@ func TestSecretValuesAndMapSecrets(t *testing.T) {
 	_, err = MapSecrets(secretSchema, raw, func(string, string) (string, error) { return "", errors.New("boom") })
 	require.EqualError(t, err, "boom")
 }
+
+func TestRedactSecretsMasksMixedValues(t *testing.T) {
+	raw := json.RawMessage(`{"api_key":"sk-literal-${env:TAIL}"}`)
+	assert.JSONEq(t, `{"api_key":"********"}`, string(RedactSecrets(secretSchema, raw)))
+}

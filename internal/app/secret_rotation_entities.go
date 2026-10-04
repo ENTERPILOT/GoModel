@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"slices"
 	"strings"
@@ -59,4 +60,27 @@ func (w *secretRotation) rotateEntities(ctx context.Context, recheck *config.Sec
 		}
 	}
 	return recheck.Select(func(field string) bool { return !owned(field) })
+}
+
+// configFailed reports whether a recheck error names a field of the
+// configuration rather than of a dashboard-managed entity. An error that
+// names no field counts as the configuration's.
+func (w *secretRotation) configFailed(err error) bool {
+	w.mu.Lock()
+	entities := slices.Clone(w.entities)
+	w.mu.Unlock()
+
+	var errs []error
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		errs = joined.Unwrap()
+	} else {
+		errs = []error{err}
+	}
+	for _, e := range errs {
+		secretErr, ok := errors.AsType[*config.SecretError](e)
+		if !ok || !slices.ContainsFunc(entities, func(r entityRotation) bool { return strings.HasPrefix(secretErr.Field, r.prefix) }) {
+			return true
+		}
+	}
+	return false
 }

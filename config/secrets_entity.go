@@ -4,6 +4,7 @@ import (
 	"context"
 	"maps"
 	"slices"
+	"strings"
 )
 
 // ResolvedEntity holds the resolved secret fields of one dashboard-managed
@@ -98,4 +99,28 @@ func (rot *rotation) forgetLocked(entity string) {
 		delete(rot.uses, field)
 	}
 	delete(rot.owned, entity)
+}
+
+// OnlySecretReferences reports whether value is made of secret references
+// alone, one or more, with no literal text around or between them. The admin
+// API shows such a value as stored; a value that mixes literal text with a
+// reference may carry a literal secret and is masked like one.
+func OnlySecretReferences(value string) bool {
+	if value == "" {
+		return false
+	}
+	for rest := value; rest != ""; {
+		if !strings.HasPrefix(rest, "${") {
+			return false
+		}
+		end := strings.IndexByte(rest, '}')
+		if end < 0 {
+			return false
+		}
+		if _, _, ok := parseSecretReference(rest[2:end]); !ok {
+			return false
+		}
+		rest = rest[end+1:]
+	}
+	return true
 }

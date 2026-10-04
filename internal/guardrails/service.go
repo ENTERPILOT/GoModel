@@ -319,7 +319,7 @@ func (s *Service) Upsert(ctx context.Context, definition Definition) error {
 		return err
 	}
 	previous := s.storedSecretValues(normalized.Name)
-	written, err := s.storeDefinitionSecrets(ctx, &normalized)
+	written, err := s.storeDefinitionSecrets(ctx, &normalized, previous)
 	if err != nil {
 		return guardrailServiceError("upsert guardrail", err)
 	}
@@ -328,7 +328,8 @@ func (s *Service) Upsert(ctx context.Context, definition Definition) error {
 		return nil
 	}, func() error { return s.store.Upsert(ctx, normalized) }, "upsert guardrail")
 	if err != nil {
-		s.releaseSecrets(ctx, normalized.Name, written, nil)
+		// The stored definition is unchanged, so whatever it holds stays.
+		s.releaseSecrets(ctx, normalized.Name, written, previous)
 		return err
 	}
 	s.releaseSecrets(ctx, normalized.Name, previous, s.definitionSecretValues(normalized))

@@ -259,7 +259,8 @@ func (s *Service) Upsert(ctx context.Context, server ManagedServer) error {
 	// Literal headers go to the secret writer first, when one is registered,
 	// so the row is stored with references only; then every reference must
 	// resolve before anything is persisted.
-	written, err := s.storeServerSecrets(ctx, &server)
+	kept := headerValues(previous)
+	written, err := s.storeServerSecrets(ctx, &server, kept)
 	if err != nil {
 		return err
 	}
@@ -267,15 +268,18 @@ func (s *Service) Upsert(ctx context.Context, server ManagedServer) error {
 		err = s.store.Upsert(ctx, server)
 	}
 	if err != nil {
-		s.releaseSecrets(ctx, server.Name, written, nil)
+		// The stored row is unchanged, so whatever it holds stays.
+		s.releaseSecrets(ctx, server.Name, written, kept)
 		return err
 	}
+	// The new row is committed, so what it replaced is released even if
+	// applying it fails: a later edit only sees the new row.
+	s.releaseSecrets(ctx, server.Name, kept, headerValues(&server))
 	if err := s.Reload(ctx); err != nil {
 		// The row is persisted; only applying it to the running manager
 		// failed. Say so — a retry or restart picks the row up.
 		return fmt.Errorf("mcp server %q was saved but not applied: %w", server.Name, err)
 	}
-	s.releaseSecrets(ctx, server.Name, headerValues(previous), headerValues(&server))
 	return nil
 }
 

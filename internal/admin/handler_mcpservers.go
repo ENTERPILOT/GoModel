@@ -30,8 +30,9 @@ type MCPServerAdmin interface {
 // redactedMCPHeaderValue replaces upstream header values (the credential
 // boundary) in admin views. An upsert that sends the placeholder back keeps
 // the currently stored value, so the dashboard can round-trip a server
-// definition without ever seeing its secrets. A header holding a secret
-// reference is shown as stored instead: the reference is not secret.
+// definition without ever seeing its secrets. A header made of secret
+// references alone, optionally after an auth scheme ("Bearer ${env:TOKEN}"),
+// is shown as stored instead: the reference is not secret.
 const redactedMCPHeaderValue = "***"
 
 // upsertMCPServerRequest is the admin upsert contract for one MCP server.
@@ -337,7 +338,7 @@ func (h *Handler) mcpServerView(view mcpgateway.ServerView) mcpServerViewRespons
 
 // redactMCPHeaders keeps header names but replaces every literal value, so
 // views can show which headers are configured without exposing upstream
-// credentials. Headers holding a secret reference show the reference.
+// credentials. Headers made of references show them (see mcpHeaderShown).
 func redactMCPHeaders(spec mcpgateway.ServerSpec) map[string]string {
 	if len(spec.Headers) == 0 {
 		return nil
@@ -345,7 +346,7 @@ func redactMCPHeaders(spec mcpgateway.ServerSpec) map[string]string {
 	redacted := make(map[string]string, len(spec.Headers))
 	for name := range spec.Headers {
 		redacted[name] = redactedMCPHeaderValue
-		if reference, ok := spec.HeaderReferences[name]; ok {
+		if reference, ok := spec.HeaderReferences[name]; ok && mcpHeaderShown(reference) {
 			redacted[name] = reference
 		}
 	}

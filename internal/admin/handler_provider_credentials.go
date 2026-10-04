@@ -11,9 +11,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
 
@@ -35,9 +33,9 @@ type ProviderCredentialsAdmin interface {
 // redactedCredentialValue replaces secret values (API keys, service account
 // JSON) in admin views. An all-asterisk value of at least three characters is
 // accepted on upsert to keep the currently stored value, so older dashboard
-// clients that send "***" remain compatible. A value holding a secret
-// reference (${scheme:reference}) is shown as stored: it names where the
-// secret lives and is not secret itself.
+// clients that send "***" remain compatible. A value made of secret
+// references alone (${scheme:reference}) is shown as stored: it names where
+// the secret lives and is not secret itself.
 const redactedCredentialValue = "***********"
 
 // upsertProviderCredentialRequest is the admin upsert contract for one
@@ -407,7 +405,7 @@ func mergeRedactedValue(field, incoming, stored string) (string, error) {
 // another field never strips the proxy password. Any other value replaces it.
 func mergeRedactedProxyURL(incoming, stored string) string {
 	incoming = strings.TrimSpace(incoming)
-	if incoming != "" && stored != "" && incoming == httpclient.RedactProxyURL(stored) {
+	if incoming != "" && stored != "" && incoming == redactProxyURL(stored) {
 		return stored
 	}
 	return incoming
@@ -450,23 +448,13 @@ func (h *Handler) providerCredentialView(cred providers.ManagedProviderCredentia
 	return resp
 }
 
-// redactCredentialValue masks a literal secret and keeps a secret reference,
-// which is not secret. Empty stays empty.
+// redactCredentialValue masks a secret field unless it is made of secret
+// references alone (see secretValueShown). Empty stays empty.
 func redactCredentialValue(value string) string {
-	if value == "" || config.HasSecretReference(value) {
+	if value == "" || secretValueShown(value) {
 		return value
 	}
 	return redactedCredentialValue
-}
-
-// redactProxyURL masks the password of a literal proxy URL. A proxy URL
-// holding a secret reference is shown as stored: its password is the
-// reference, not the secret.
-func redactProxyURL(value string) string {
-	if config.HasSecretReference(value) {
-		return value
-	}
-	return httpclient.RedactProxyURL(value)
 }
 
 // declaredProviderCredentialView builds a read-only view row for one

@@ -53,8 +53,11 @@ func (s *Service) resolveDefinition(ctx context.Context, schema []pluginapi.Fiel
 // storeDefinitionSecrets writes every literal secret of def's config through
 // the generation's SecretWriter, when one is registered, replacing it with
 // the returned reference. It returns the references it created, which the
-// caller releases if the save then fails.
-func (s *Service) storeDefinitionSecrets(ctx context.Context, def *Definition) ([]string, error) {
+// caller releases if the save then fails. If a write fails, the references
+// already created are released, except those in keep: the values of the
+// definition still stored, which a writer that reuses a reference may have
+// returned again.
+func (s *Service) storeDefinitionSecrets(ctx context.Context, def *Definition, keep []string) ([]string, error) {
 	entry, ok := s.catalog.Lookup(def.Type)
 	if !ok {
 		return nil, nil
@@ -68,7 +71,7 @@ func (s *Service) storeDefinitionSecrets(ctx context.Context, def *Definition) (
 		return reference, err
 	})
 	if err != nil {
-		s.releaseSecrets(ctx, def.Name, written, nil)
+		s.releaseSecrets(ctx, def.Name, written, keep)
 		return nil, err
 	}
 	def.Config = stored

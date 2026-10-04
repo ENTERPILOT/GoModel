@@ -15,8 +15,9 @@ import (
 
 // memStore is an in-memory Store.
 type memStore struct {
-	mu   sync.Mutex
-	rows map[string]ManagedServer
+	mu      sync.Mutex
+	rows    map[string]ManagedServer
+	listErr error
 }
 
 func newMemStore(rows ...ManagedServer) *memStore {
@@ -30,6 +31,9 @@ func newMemStore(rows ...ManagedServer) *memStore {
 func (s *memStore) List(context.Context) ([]ManagedServer, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
 	rows := make([]ManagedServer, 0, len(s.rows))
 	for _, row := range s.rows {
 		rows = append(rows, row)
@@ -222,4 +226,24 @@ func TestServiceSecretWriter(t *testing.T) {
 	recheck, err := secrets.Recheck(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, recheck.Fields(), "a deleted server is no longer watched")
+}
+
+// The replaced headers are released once the new row is stored, even when
+// applying it to the running set fails afterwards.
+func TestServiceUpsertReleasesReplacedSecretsWhenApplyFails(t *testing.T) {
+	vault := &mapVault{values: map[string]string{}}
+	store := newMemStore()
+	service, secrets := newSecretsTestService(t, store, vault)
+	writer := &headerWriter{vault: vault}
+	secrets.SetWriter(writer)
+	ctx := t.Context()
+
+	require.NoError(t, service.Upsert(ctx, disabledServer("github", map[string]string{"Authorization": "first"})))
+	store.mu.Lock()
+	store.listErr = errors.New("store unavailable")
+	store.mu.Unlock()
+
+	err := service.Upsert(ctx, disabledServer("github", map[string]string{"X-Other": "${env:HOME}"}))
+	require.ErrorContains(t, err, "saved but not applied")
+	assert.Equal(t, []string{"${vault:written/github/headers.Authorization}"}, writer.deleted)
 }

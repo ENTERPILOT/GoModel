@@ -140,19 +140,29 @@ func (w *secretRotation) check(generation context.Context) {
 		w.secrets.NotifyChanged()
 		return
 	}
+	// A reference that failed keeps its current value and stays pending; the
+	// recheck holds only the fields that did resolve.
+	configFailed := false
 	if err != nil {
-		slog.Warn("secret references could not be re-resolved; keeping the current values", "error", err)
-		return
+		slog.Warn("secret references could not be re-resolved; they keep their current values", "error", err)
+		configFailed = w.configFailed(err)
 	}
 	if len(recheck.Fields()) == 0 {
 		slog.Debug("secret change notification: no referenced value changed")
 		return
 	}
-	// Dashboard-managed entities reinstall themselves; only what is left
-	// belongs to the configuration.
+	// Dashboard-managed entities reinstall themselves, each on its own, so a
+	// failure elsewhere does not hold them back. Only what is left belongs to
+	// the configuration.
 	recheck = w.rotateEntities(ctx, recheck)
 	fields := recheck.Fields()
 	if len(fields) == 0 {
+		return
+	}
+	if configFailed {
+		// A swap would apply part of the configuration's change and a reload
+		// would fail on the reference that did not resolve.
+		slog.Warn("referenced configuration secrets changed, but others could not be re-resolved; keeping the current configuration", "fields", fields)
 		return
 	}
 

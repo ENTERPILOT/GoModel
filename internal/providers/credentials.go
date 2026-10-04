@@ -325,7 +325,8 @@ func (s *CredentialsService) apply(ctx context.Context, cred ManagedProviderCred
 	if err != nil && !errors.Is(err, ErrCredentialNotFound) {
 		return err
 	}
-	written, err := s.storeCredentialSecrets(ctx, &cred)
+	kept := credentialSecretValues(previous)
+	written, err := s.storeCredentialSecrets(ctx, &cred, kept)
 	if err != nil {
 		return err
 	}
@@ -334,7 +335,8 @@ func (s *CredentialsService) apply(ctx context.Context, cred ManagedProviderCred
 		err = s.store.Upsert(ctx, cred)
 	}
 	if err != nil {
-		s.releaseSecrets(ctx, cred.Name, written, nil)
+		// The stored row is unchanged, so whatever it holds stays.
+		s.releaseSecrets(ctx, cred.Name, written, kept)
 		return err
 	}
 
@@ -343,7 +345,7 @@ func (s *CredentialsService) apply(ctx context.Context, cred ManagedProviderCred
 	} else {
 		s.remove(cred.Name)
 	}
-	s.releaseSecrets(ctx, cred.Name, credentialSecretValues(previous), credentialSecretValues(&cred))
+	s.releaseSecrets(ctx, cred.Name, kept, credentialSecretValues(&cred))
 	return nil
 }
 

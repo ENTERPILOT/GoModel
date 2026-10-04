@@ -400,7 +400,10 @@ func failoverResolver(cfg *config.Config, vm *virtualmodels.Service) server.Requ
 
 // guardrailSecrets rotates guardrail secrets and recompiles the workflows, so
 // requests move to the rebuilt instances at once rather than on the next
-// periodic refresh.
+// periodic refresh. The rebuilt instance is installed and its secrets recorded
+// either way: if this recompile fails, the workflows' background refresh
+// (every workflows.refresh_interval) recompiles onto it, and the replaced
+// instance stays open until then (see guardrails.Service retireAfter).
 type guardrailSecrets struct {
 	guardrails *guardrails.Service
 	workflows  *workflows.Service

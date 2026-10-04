@@ -26,8 +26,12 @@ type SecretKey struct {
 // Implementations must be safe for concurrent use and must never include a
 // secret value in an error.
 type SecretWriter interface {
-	// WriteSecret stores value and returns the ${scheme:reference} that
-	// resolves to it.
+	// WriteSecret stores value as a new secret and returns the
+	// ${scheme:reference} that resolves to it. It must not change what an
+	// existing reference resolves to: a save can still fail after the write,
+	// and the stored entity then keeps using its old reference. Return a
+	// distinct reference per write, for example one pinned to the version
+	// written. Core never deletes a reference the stored entity still holds.
 	WriteSecret(ctx context.Context, key SecretKey, value string) (reference string, err error)
 	// DeleteSecret removes a secret WriteSecret created.
 	DeleteSecret(ctx context.Context, reference string) error

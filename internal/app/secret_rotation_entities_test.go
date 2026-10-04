@@ -72,3 +72,44 @@ func TestSecretRotationEntityFailureDoesNotBlockTheConfiguration(t *testing.T) {
 	assert.Len(t, guardrails.calls, 1)
 	assert.Equal(t, int32(1), h.swap.applied.Load())
 }
+
+// One entity secret that no longer resolves must not hold back the rotation
+// of every other entity or of the configuration.
+func TestSecretRotationEntityLookupFailureDoesNotBlockOthers(t *testing.T) {
+	h := newRotationHarness(t, &fakeKeySwap{providers: []string{"openai"}})
+	credentials := &fakeEntitySecrets{}
+	h.rotation.watchEntities("provider_credentials.", credentials)
+	recordEntityField(t, h, "provider_credentials.gone.api_keys[0]", "gone", "g1")
+	recordEntityField(t, h, "provider_credentials.live.api_keys[0]", "live", "l1")
+
+	h.vault.mu.Lock()
+	delete(h.vault.values, "gone")
+	h.vault.mu.Unlock()
+	h.vault.set("live", "l2")
+	h.vault.set("openai", "k2")
+	h.rotation.check(t.Context())
+
+	assert.Equal(t, [][]string{{"provider_credentials.live.api_keys[0]"}}, credentials.calls)
+	assert.Equal(t, int32(1), h.swap.applied.Load())
+}
+
+// A configuration secret that no longer resolves still keeps the whole
+// configuration as it is, but entities rotate.
+func TestSecretRotationConfigLookupFailureStillRotatesEntities(t *testing.T) {
+	h := newRotationHarness(t, &fakeKeySwap{providers: []string{"openai"}})
+	credentials := &fakeEntitySecrets{}
+	h.rotation.watchEntities("provider_credentials.", credentials)
+	recordEntityField(t, h, "provider_credentials.live.api_keys[0]", "live", "l1")
+	recordEntityField(t, h, "server.master_key", "master", "m1")
+
+	h.vault.mu.Lock()
+	delete(h.vault.values, "master")
+	h.vault.mu.Unlock()
+	h.vault.set("live", "l2")
+	h.vault.set("openai", "k2")
+	h.rotation.check(t.Context())
+
+	assert.Len(t, credentials.calls, 1)
+	assert.Zero(t, h.planned.Load())
+	assert.Empty(t, h.reloads)
+}

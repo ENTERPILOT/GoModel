@@ -169,7 +169,10 @@ references when they are saved. Admin-managed MCP servers have no
 environment: stdio servers are declarative only, and their `env` values are
 configuration, resolved in step 3. The admin API stores the reference and
 returns it unmasked: a reference names where a secret lives and is not itself
-secret. Literal values keep today's masking and merge-on-PUT behaviour; the
+secret. Only a value made of references alone is unmasked (an MCP header may
+also start with an HTTP auth scheme, `Bearer ${env:TOKEN}`, and a proxy URL is
+shown when its password is made of references); a value that mixes literal
+text with a reference may carry a literal secret and is masked like one. Literal values keep today's masking and merge-on-PUT behaviour; the
 mask sent back keeps the stored value, literal or reference. The database
 holds the reference as typed; references are resolved by the service when it
 builds the provider, MCP connection, or guardrail instance, never in the
@@ -211,7 +214,9 @@ type SecretWriter interface {
 ```
 
 When a writer is registered, a literal secret saved through the admin API is
-written to the external store and only the returned reference is persisted.
+written to the external store and only the returned reference is persisted. `WriteSecret` must create a new secret and return a distinct reference
+each time, never changing what an existing reference resolves to, because a
+save can still fail after the write.
 When an entity is deleted, or a field's owned reference is replaced, core
 calls `DeleteSecret` for each reference the writer owns, after the database
 commit, best effort (a failure is logged). A save that fails after the write
@@ -257,7 +262,9 @@ resolvers and compares fingerprints:
   redialed, and a guardrail instance is rebuilt and the workflows recompiled.
   Their fields never trigger a generation reload. An entity whose references
   cannot be re-resolved keeps its current values, and its change stays
-  pending.
+  pending. A failed entity reference does not hold back other entities or
+  the configuration; a failed configuration reference holds back only the
+  configuration's own swap or reload.
 
 Each change is logged at info with the action and the field paths, never
 values.

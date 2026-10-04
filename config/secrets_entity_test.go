@@ -105,3 +105,19 @@ func TestSecretRecheckSelectCommitsOnlySelected(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"y"}, recheck.Fields())
 }
+
+func TestOnlySecretReferences(t *testing.T) {
+	for value, want := range map[string]bool{
+		"${vault:a}":             true,
+		"${vault:a}${env:B}":     true,
+		"":                       false,
+		"literal":                false,
+		"Bearer ${env:TOKEN}":    false,
+		"sk-literal-${env:TAIL}": false,
+		"${env:A} ":              false,
+		"$${env:A}":              false,
+		"${LEGACY}":              false,
+	} {
+		assert.Equal(t, want, OnlySecretReferences(value), value)
+	}
+}

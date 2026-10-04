@@ -158,3 +158,60 @@ func TestUpsertMCPServer_UnresolvableReferenceIs400(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, http.StatusBadGateway, gatewayErr.HTTPStatusCode(), "other failures stay 502")
 }
+
+func TestSecretRedaction_MasksValuesMixingLiteralsAndReferences(t *testing.T) {
+	assert.Equal(t, "${vault:a}${env:B}", redactCredentialValue("${vault:a}${env:B}"))
+	assert.Equal(t, redactedCredentialValue, redactCredentialValue("sk-live-${env:TAIL}"))
+	assert.Equal(t, redactedCredentialValue, redactCredentialValue("${env:HEAD}-sk-live"))
+
+	assert.True(t, mcpHeaderShown("Bearer ${env:TOKEN}"))
+	assert.True(t, mcpHeaderShown("${env:TOKEN}"))
+	assert.False(t, mcpHeaderShown("Bearer sk-literal-${env:SUFFIX}"))
+	assert.False(t, mcpHeaderShown("sk-literal ${env:SUFFIX}"))
+
+	assert.Equal(t, "http://u:${file:/run/secrets/p}@proxy:3128", redactProxyURL("http://u:${file:/run/secrets/p}@proxy:3128"))
+	assert.Equal(t, "http://${env:PROXY_HOST}:3128", redactProxyURL("http://${env:PROXY_HOST}:3128"))
+	assert.Equal(t, redactedCredentialValue, redactProxyURL("http://u:hunter2@${env:PROXY_HOST}:3128"))
+	assert.Equal(t, redactedCredentialValue, redactProxyURL("http://u:pre${env:P}@proxy:3128"))
+}
+
+func TestUpsertProviderCredential_MixedValueRoundTripsAsMask(t *testing.T) {
+	fake := newProviderCredentialsAdminFake()
+	fake.rows["openai"] = providers.ManagedProviderCredential{
+		Name:     "openai",
+		Type:     "openai",
+		APIKeys:  []string{"sk-live-${env:TAIL}"},
+		ProxyURL: "http://u:hunter2@${env:PROXY_HOST}:3128",
+		Enabled:  true,
+	}
+	h := newProviderCredentialsHandler(fake)
+
+	c, rec := echotest.Get(t, "/admin/provider-credentials")
+	require.NoError(t, h.ListProviderCredentials(c))
+	assert.NotContains(t, rec.Body.String(), "sk-live")
+	assert.NotContains(t, rec.Body.String(), "hunter2")
+
+	body := `{"name":"openai","type":"openai","api_keys":["***********"],"proxy_url":"***********"}`
+	c, rec = echotest.Request(t, http.MethodPut, "/admin/provider-credentials", body)
+	require.NoError(t, h.UpsertProviderCredential(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"sk-live-${env:TAIL}"}, fake.rows["openai"].APIKeys)
+	assert.Equal(t, "http://u:hunter2@${env:PROXY_HOST}:3128", fake.rows["openai"].ProxyURL)
+}
+
+func TestMCPServerView_MasksHeaderMixingLiteralAndReference(t *testing.T) {
+	fake := newMCPAdminFake()
+	fake.addStored(mcpgateway.ManagedServer{Name: "github", URL: "https://mcp.example.com/mcp", Transport: "http", Enabled: true}, mcpgateway.StatusConnected)
+	view := fake.views["github"]
+	view.Spec.Headers = map[string]string{"Authorization": "Bearer sk-literal-tail"}
+	view.Spec.HeaderReferences = map[string]string{"Authorization": "Bearer sk-literal-${env:SUFFIX}"}
+	fake.views["github"] = view
+	h := newMCPHandler(fake)
+
+	c, rec := echotest.Get(t, "/admin/mcp-servers")
+	require.NoError(t, h.ListMCPServers(c))
+	assert.NotContains(t, rec.Body.String(), "sk-literal")
+	views := echotest.Decode[[]mcpServerViewResponse](t, rec)
+	require.Len(t, views, 1)
+	assert.Equal(t, redactedMCPHeaderValue, views[0].Headers["Authorization"])
+}

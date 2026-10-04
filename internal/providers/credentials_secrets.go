@@ -105,15 +105,17 @@ func credentialSecretError(entity string, err error) error {
 // storeCredentialSecrets writes every literal secret of cred through the
 // generation's SecretWriter, when one is registered, replacing it with the
 // returned reference. It returns the references it created, which the caller
-// releases if the save then fails.
-func (s *CredentialsService) storeCredentialSecrets(ctx context.Context, cred *ManagedProviderCredential) ([]string, error) {
+// releases if the save then fails. If a write fails, the references already
+// created are released, except those in keep: the values of the row still
+// stored, which a writer that reuses a reference may have returned again.
+func (s *CredentialsService) storeCredentialSecrets(ctx context.Context, cred *ManagedProviderCredential, keep []string) ([]string, error) {
 	cred.APIKeys = slices.Clone(cred.APIKeys)
 	var written []string
 	for _, field := range credentialSecretFields(cred) {
 		key := config.SecretKey{Entity: CredentialSecretEntity, ID: cred.Name, Field: field.name}
 		stored, err := s.secrets.StoreSecret(ctx, key, *field.value)
 		if err != nil {
-			s.releaseSecrets(ctx, cred.Name, written, nil)
+			s.releaseSecrets(ctx, cred.Name, written, keep)
 			return nil, err
 		}
 		if stored != *field.value {
