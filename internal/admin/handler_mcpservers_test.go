@@ -149,13 +149,14 @@ func (f *mcpAdminFake) IsManagedVirtual(name string) bool {
 	})
 }
 
-func (f *mcpAdminFake) UpsertVirtual(_ context.Context, virtual mcpgateway.ManagedVirtualServer) error {
+func (f *mcpAdminFake) UpsertVirtual(_ context.Context, virtual mcpgateway.ManagedVirtualServer) (mcpgateway.VirtualServerView, error) {
 	if f.virtualErr != nil {
-		return f.virtualErr
+		return mcpgateway.VirtualServerView{}, f.virtualErr
 	}
-	f.virtuals = slices.DeleteFunc(f.virtuals, func(view mcpgateway.VirtualServerView) bool { return view.Spec.Name == virtual.Name })
-	f.virtuals = append(f.virtuals, mcpgateway.VirtualServerView{Spec: virtual.Spec(), ToolDiscovery: "off"})
-	return nil
+	view := mcpgateway.VirtualServerView{Spec: virtual.Spec(), ToolDiscovery: "off"}
+	f.virtuals = slices.DeleteFunc(f.virtuals, func(existing mcpgateway.VirtualServerView) bool { return existing.Spec.Name == virtual.Name })
+	f.virtuals = append(f.virtuals, view)
+	return view, nil
 }
 
 func (f *mcpAdminFake) DeleteVirtual(_ context.Context, name string) error {

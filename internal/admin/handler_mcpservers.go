@@ -28,7 +28,7 @@ type MCPServerAdmin interface {
 	IsVirtual(name string) bool
 	IsManagedVirtual(name string) bool
 	VirtualViews() []mcpgateway.VirtualServerView
-	UpsertVirtual(ctx context.Context, virtual mcpgateway.ManagedVirtualServer) error
+	UpsertVirtual(ctx context.Context, virtual mcpgateway.ManagedVirtualServer) (mcpgateway.VirtualServerView, error)
 	DeleteVirtual(ctx context.Context, name string) error
 }
 

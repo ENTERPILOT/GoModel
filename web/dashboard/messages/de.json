@@ -770,6 +770,7 @@
   "mcp_virtual_name_in_use": "Der virtuelle Server „{name}“ existiert bereits.",
   "mcp_virtual_name_used_by_server": "Der Name „{name}“ ist ein MCP-Server-Slug. Wähle einen anderen Namen.",
   "mcp_virtual_servers_required": "Wähle mindestens einen MCP-Server.",
+  "mcp_virtual_load_failed": "Virtuelle Server konnten nicht geladen werden.",
   "mcp_virtual_save_failed": "Virtueller Server konnte nicht gespeichert werden.",
   "mcp_virtual_saved": "Virtueller Server „{name}“ gespeichert.",
   "mcp_virtual_delete_confirm": "Virtuellen Server „{name}“ löschen? Clients, die /mcp/{name} nutzen, verlieren sofort den Zugriff.",

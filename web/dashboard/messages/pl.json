@@ -778,6 +778,7 @@
   "mcp_virtual_name_in_use": "Serwer wirtualny „{name}” już istnieje.",
   "mcp_virtual_name_used_by_server": "Nazwa „{name}” jest slugiem serwera MCP. Wybierz inną nazwę.",
   "mcp_virtual_servers_required": "Wybierz co najmniej jeden serwer MCP.",
+  "mcp_virtual_load_failed": "Nie udało się wczytać serwerów wirtualnych.",
   "mcp_virtual_save_failed": "Nie udało się zapisać serwera wirtualnego.",
   "mcp_virtual_saved": "Zapisano serwer wirtualny „{name}”.",
   "mcp_virtual_delete_confirm": "Usunąć serwer wirtualny „{name}”? Klienci korzystający z /mcp/{name} natychmiast utracą dostęp.",

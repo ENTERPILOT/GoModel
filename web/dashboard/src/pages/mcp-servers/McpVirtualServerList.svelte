@@ -42,8 +42,13 @@
       <span>{m.mcp_virtual_add()}</span>
     </button>
   </div>
+  {#if mcpServers.virtualError}
+    <p class="form-error" role="alert">{mcpServers.virtualError}</p>
+  {/if}
   {#if mcpServers.virtualServers.length === 0}
-    <p class="empty-state">{m.mcp_virtual_empty()}</p>
+    {#if !mcpServers.virtualError}
+      <p class="empty-state">{m.mcp_virtual_empty()}</p>
+    {/if}
   {:else}
   <div class="table-wrapper">
     <table class="data-table">

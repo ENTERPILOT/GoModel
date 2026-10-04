@@ -4,6 +4,9 @@ import (
 	"context"
 	"net/http"
 	"testing"
+	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,7 +37,7 @@ func newVirtualAdminTestService(t *testing.T, configVirtuals map[string]VirtualS
 func TestUpsertVirtualServesImmediately(t *testing.T) {
 	service, virtualStore, gatewayURL := newVirtualAdminTestService(t, nil)
 
-	err := service.UpsertVirtual(context.Background(), ManagedVirtualServer{
+	view, err := service.UpsertVirtual(context.Background(), ManagedVirtualServer{
 		Name:          " Coding ",
 		Description:   "code tools",
 		Servers:       []string{"beta", "alpha"},
@@ -42,6 +45,8 @@ func TestUpsertVirtualServesImmediately(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Contains(t, virtualStore.rows, "coding", "the name is normalized before it is stored")
+	assert.Equal(t, "coding", view.Spec.Name, "the saved definition is returned")
+	assert.Equal(t, config.MCPToolDiscoverySearch, view.ToolDiscovery)
 
 	views := service.VirtualViews()
 	require.Len(t, views, 1)
@@ -99,7 +104,7 @@ func TestUpsertVirtualRejections(t *testing.T) {
 	})
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := service.UpsertVirtual(context.Background(), tt.virtual)
+			_, err := service.UpsertVirtual(context.Background(), tt.virtual)
 			require.ErrorIs(t, err, ErrInvalidVirtualServer)
 			assert.Contains(t, err.Error(), tt.wantErr)
 			assert.Empty(t, virtualStore.rows)
@@ -113,14 +118,14 @@ func TestUpsertVirtualKeepsRowStoredBeforeServerEditable(t *testing.T) {
 		ManagedVirtualServer{Name: "alpha", Servers: []string{"beta"}})
 	require.NotEmpty(t, service.VirtualViews()[0].Conflict)
 
-	err := service.UpsertVirtual(context.Background(), ManagedVirtualServer{Name: "alpha", Description: "renamed soon", Servers: []string{"beta"}})
+	_, err := service.UpsertVirtual(context.Background(), ManagedVirtualServer{Name: "alpha", Description: "renamed soon", Servers: []string{"beta"}})
 	require.NoError(t, err)
 	assert.Equal(t, "renamed soon", virtualStore.rows["alpha"].Description)
 
 	// If the row is deleted while the edit is in flight, the edit must not
 	// recreate it under the server's slug.
 	delete(virtualStore.rows, "alpha")
-	err = service.UpsertVirtual(context.Background(), ManagedVirtualServer{Name: "alpha", Servers: []string{"beta"}})
+	_, err = service.UpsertVirtual(context.Background(), ManagedVirtualServer{Name: "alpha", Servers: []string{"beta"}})
 	require.ErrorIs(t, err, ErrInvalidVirtualServer)
 	assert.Empty(t, virtualStore.rows)
 }
@@ -145,7 +150,7 @@ func TestDeleteVirtualEndsItsEndpoint(t *testing.T) {
 	)
 	sessionID := initializeRawSession(t, gatewayURL+"/mcp/coding", nil)
 
-	require.NoError(t, service.DeleteVirtual(context.Background(), "coding"))
+	require.NoError(t, service.DeleteVirtual(context.Background(), " Coding "), "names are normalized like on save")
 	assert.Empty(t, virtualStore.rows)
 	assert.False(t, service.IsVirtual("coding"))
 
@@ -154,8 +159,8 @@ func TestDeleteVirtualEndsItsEndpoint(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, status, "a session on a deleted virtual server ends")
 
 	require.ErrorIs(t, service.DeleteVirtual(context.Background(), "coding"), ErrNotFound)
-	err := service.DeleteVirtual(context.Background(), "research")
-	require.ErrorIs(t, err, ErrInvalidVirtualServer, "config-declared virtual servers are read-only")
+	err := service.DeleteVirtual(context.Background(), "Research")
+	require.ErrorIs(t, err, ErrInvalidVirtualServer, "config-declared virtual servers are read-only, whatever the case")
 }
 
 func TestUpsertServerRejectsStoredVirtualName(t *testing.T) {
@@ -165,4 +170,34 @@ func TestUpsertServerRejectsStoredVirtualName(t *testing.T) {
 	err := service.Upsert(context.Background(), ManagedServer{Name: "coding", URL: "https://example.com/mcp", Transport: config.MCPTransportHTTP})
 	require.ErrorIs(t, err, ErrVirtualNameTaken)
 	assert.Equal(t, `slug "coding" is used by virtual MCP server "coding"; choose another slug`, err.Error())
+}
+
+func TestVirtualMemberRemovalReachesOpenSessions(t *testing.T) {
+	service, _, gatewayURL := newVirtualAdminTestService(t, nil,
+		ManagedVirtualServer{Name: "coding", Servers: []string{"alpha", "beta"}})
+	session := connectClient(t, gatewayURL+"/mcp/coding", nil)
+	require.Equal(t, []string{"alpha_echo", "beta_search"}, listToolNames(t, session))
+
+	_, err := service.UpsertVirtual(context.Background(), ManagedVirtualServer{Name: "coding", Servers: []string{"alpha"}})
+	require.NoError(t, err)
+
+	_, err = session.CallTool(context.Background(), &mcp.CallToolParams{Name: "beta_search"})
+	require.Error(t, err, "a removed member must not stay callable from an open session")
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "alpha_echo"})
+	require.NoError(t, err)
+	assert.False(t, result.IsError, "remaining members keep working")
+}
+
+func TestBackgroundRefreshPicksUpOtherInstanceWrites(t *testing.T) {
+	virtualStore := &memoryVirtualStore{rows: map[string]ManagedVirtualServer{}}
+	service, _ := newTestServiceWithOptions(t, Options{
+		ConfigServers:   map[string]ServerSpec{"alpha": testSpec("alpha", newTestUpstream(t, "alpha", addEchoTool("echo")), nil)},
+		Store:           &memoryStore{rows: map[string]ManagedServer{}},
+		VirtualStore:    virtualStore,
+		RefreshInterval: 20 * time.Millisecond,
+	})
+
+	// Another gateway instance sharing the database saves a virtual server.
+	virtualStore.put(ManagedVirtualServer{Name: "coding", Servers: []string{"alpha"}})
+	require.Eventually(t, func() bool { return service.IsVirtual("coding") }, 5*time.Second, 10*time.Millisecond)
 }

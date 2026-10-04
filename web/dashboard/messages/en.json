@@ -770,6 +770,7 @@
   "mcp_virtual_name_in_use": "Virtual server \"{name}\" already exists.",
   "mcp_virtual_name_used_by_server": "Name \"{name}\" is an MCP server slug. Choose another name.",
   "mcp_virtual_servers_required": "Pick at least one MCP server.",
+  "mcp_virtual_load_failed": "Failed to load virtual servers.",
   "mcp_virtual_save_failed": "Failed to save virtual server.",
   "mcp_virtual_saved": "Virtual server \"{name}\" saved.",
   "mcp_virtual_delete_confirm": "Delete virtual server \"{name}\"? Clients using /mcp/{name} lose access immediately.",

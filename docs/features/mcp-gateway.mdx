@@ -106,6 +106,11 @@ as on `/mcp` (`github_create_issue`). The same map works as JSON in
 The **Connect a client** panel can build the client config for each virtual
 server.
 
+With several gateway instances on one database, a dashboard change applies at
+once on the instance that saved it. The others pick it up on their next
+background refresh (`CACHE_REFRESH_INTERVAL`, default 1 hour) or a runtime
+refresh from the dashboard. Dashboard-added MCP servers propagate the same way.
+
 ## Search tools instead of listing them
 
 Every tool in `tools/list` is sent to the model on every turn. With a few

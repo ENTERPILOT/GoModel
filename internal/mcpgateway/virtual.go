@@ -81,23 +81,17 @@ func (s *Service) VirtualViews() []VirtualServerView {
 
 	views := make([]VirtualServerView, 0, len(specs))
 	for _, spec := range specs {
-		view := VirtualServerView{
-			Spec:          spec,
-			ToolDiscovery: config.MCPToolDiscoveryOff,
-			Conflict:      s.virtualConflict(spec.Name),
-		}
-		if s.virtualDiscovery(spec.Name) {
-			view.ToolDiscovery = config.MCPToolDiscoverySearch
-		}
-		for _, member := range spec.Servers {
-			if _, ok := s.manager.get(member); !ok {
-				view.MissingServers = append(view.MissingServers, member)
-			}
-		}
-		views = append(views, view)
+		views = append(views, s.virtualView(spec))
 	}
 	sort.Slice(views, func(i, j int) bool { return views[i].Spec.Name < views[j].Spec.Name })
 	return views
+}
+
+// virtualServes reports whether virtual is still served and still lists
+// member as one of its servers.
+func (s *Service) virtualServes(virtual, member string) bool {
+	spec, ok := s.virtualSpec(virtual)
+	return ok && s.virtualConflict(virtual) == "" && slices.Contains(spec.Servers, member)
 }
 
 // servedVirtual reports whether /mcp/{name} serves a virtual server. A server
@@ -117,10 +111,32 @@ func (s *Service) virtualConflict(name string) string {
 	return fmt.Sprintf("virtual MCP server %q is not served: MCP server %q uses the same name; rename one of them", name, name)
 }
 
+// virtualView is the admin snapshot of one virtual server spec.
+func (s *Service) virtualView(spec VirtualServerSpec) VirtualServerView {
+	view := VirtualServerView{
+		Spec:          spec,
+		ToolDiscovery: config.MCPToolDiscoveryOff,
+		Conflict:      s.virtualConflict(spec.Name),
+	}
+	if s.discoveryDefault(spec) {
+		view.ToolDiscovery = config.MCPToolDiscoverySearch
+	}
+	for _, member := range spec.Servers {
+		if _, ok := s.manager.get(member); !ok {
+			view.MissingServers = append(view.MissingServers, member)
+		}
+	}
+	return view
+}
+
 // virtualDiscovery is the default discovery mode for sessions on a virtual
 // server that do not send ToolDiscoveryHeader.
 func (s *Service) virtualDiscovery(name string) bool {
 	spec, _ := s.virtualSpec(name)
+	return s.discoveryDefault(spec)
+}
+
+func (s *Service) discoveryDefault(spec VirtualServerSpec) bool {
 	switch spec.ToolDiscovery {
 	case config.MCPToolDiscoverySearch:
 		return true

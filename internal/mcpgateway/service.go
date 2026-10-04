@@ -63,6 +63,9 @@ type Service struct {
 	virtualStore  VirtualStore
 	virtualMu     sync.RWMutex
 	virtualSpecs  map[string]VirtualServerSpec
+	// reloadMu serializes Reload, so an older store read can never publish
+	// after a newer one.
+	reloadMu sync.Mutex
 	// searchDiscovery is the default for sessions that do not send
 	// ToolDiscoveryHeader: serve search_tools/call_tool instead of the catalog.
 	searchDiscovery bool
@@ -113,6 +116,10 @@ type Options struct {
 	VirtualServers map[string]VirtualServerSpec
 	// VirtualStore persists admin-managed virtual servers. Optional.
 	VirtualStore VirtualStore
+	// RefreshInterval re-reads the stores in the background, so admin edits
+	// made on another gateway instance sharing the database reach this one.
+	// Zero disables it.
+	RefreshInterval time.Duration
 	// Store persists admin-managed servers. Optional.
 	Store Store
 	// HTTPClient is the shared outbound HTTP client for http/sse upstreams.
@@ -162,13 +169,41 @@ func NewService(ctx context.Context, opts Options) (*Service, error) {
 		return nil, err
 	}
 	go s.sweepBindings()
+	if opts.RefreshInterval > 0 && (s.store != nil || s.virtualStore != nil) {
+		go s.refreshLoop(opts.RefreshInterval)
+	}
 	return s, nil
+}
+
+// Refresh re-reads the stores and reconciles; the admin runtime refresh calls
+// it, as does the background loop.
+func (s *Service) Refresh(ctx context.Context) error {
+	return s.Reload(ctx)
+}
+
+func (s *Service) refreshLoop(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stop:
+			return
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			if err := s.Reload(ctx); err != nil {
+				slog.Error("failed to refresh mcp servers", "error", err)
+			}
+			cancel()
+		}
+	}
 }
 
 // Reload re-merges declarative and store specs and reconciles the upstream
 // set. Declarative entries shadow store rows with the same name, mirroring
 // the tagging/virtual-models source precedence.
 func (s *Service) Reload(ctx context.Context) error {
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
 	specs := make([]ServerSpec, 0, len(s.configSpecs))
 	seen := make(map[string]struct{}, len(s.configSpecs))
 	for name, spec := range s.configSpecs {
@@ -776,7 +811,9 @@ func (s *Service) registerResources(server *mcp.Server, upstreamName string, sna
 // disallowed_user_paths entry would not reach sessions that are already open.
 // A session without a binding is rejected: bindings live as long as the
 // session, so a missing one means it was deleted or expired mid-call, and
-// guessing a user path could slip past disallowed_user_paths.
+// guessing a user path could slip past disallowed_user_paths. A session on a
+// virtual server is also held to the virtual server's current members, so
+// removing a member or the virtual server reaches open sessions too.
 func (s *Service) authorizeSession(session *mcp.ServerSession, upstreamName string) error {
 	sessionID := ""
 	if session != nil {
@@ -793,6 +830,9 @@ func (s *Service) authorizeSessionID(sessionID, upstreamName string) error {
 		return fmt.Errorf("mcp server %q: %w", upstreamName, ErrServerNotVisible)
 	}
 	if _, visible := s.findVisibleServer(upstreamName, binding.userPath); !visible {
+		return fmt.Errorf("mcp server %q: %w", upstreamName, ErrServerNotVisible)
+	}
+	if virtual, ok := strings.CutPrefix(binding.endpoint, virtualBindingPrefix); ok && !s.virtualServes(virtual, upstreamName) {
 		return fmt.Errorf("mcp server %q: %w", upstreamName, ErrServerNotVisible)
 	}
 	return nil

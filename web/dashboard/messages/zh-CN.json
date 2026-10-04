@@ -734,6 +734,7 @@
   "mcp_virtual_name_in_use": "虚拟服务器 \"{name}\" 已存在。",
   "mcp_virtual_name_used_by_server": "名称 \"{name}\" 是 MCP 服务器标识，请换一个名称。",
   "mcp_virtual_servers_required": "请至少选择一个 MCP 服务器。",
+  "mcp_virtual_load_failed": "加载虚拟服务器失败。",
   "mcp_virtual_save_failed": "保存虚拟服务器失败。",
   "mcp_virtual_saved": "已保存虚拟服务器 \"{name}\"。",
   "mcp_virtual_delete_confirm": "确定删除虚拟服务器 \"{name}\" 吗？使用 /mcp/{name} 的客户端将立即失去访问权限。",

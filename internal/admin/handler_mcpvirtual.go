@@ -90,15 +90,11 @@ func (h *Handler) UpsertMCPVirtualServer(c *echo.Context) error {
 		Servers:       req.Servers,
 		ToolDiscovery: req.ToolDiscovery,
 	}
-	if err := h.mcpServers.UpsertVirtual(c.Request().Context(), virtual); err != nil {
+	view, err := h.mcpServers.UpsertVirtual(c.Request().Context(), virtual)
+	if err != nil {
 		return handleError(c, mcpVirtualServerWriteError(err))
 	}
-	for _, view := range h.mcpServers.VirtualViews() {
-		if view.Spec.Name == virtual.Name {
-			return c.JSON(http.StatusOK, mcpVirtualServerView(view))
-		}
-	}
-	return c.NoContent(http.StatusNoContent)
+	return c.JSON(http.StatusOK, mcpVirtualServerView(view))
 }
 
 // DeleteMCPVirtualServer handles DELETE /admin/mcp-virtual-servers/:name.

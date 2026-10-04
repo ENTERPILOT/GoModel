@@ -765,3 +765,21 @@ test("mcpVirtualServerFormFromVirtual keeps the stored discovery setting, not th
   const form = mcpVirtualServerFormFromVirtual({ name: "coding", servers: ["github"], tool_discovery: "search", configured_tool_discovery: "" });
   assert.deepEqual(form, { name: "coding", description: "", servers: ["github"], tool_discovery: "" });
 });
+
+// Regression: a failed virtual-server load cleared the rows, so the section
+// claimed there were no virtual servers.
+test("a failed virtual-server load is reported, not shown as an empty list", () => {
+  const SRC = fileURLToPath(new URL("../src", import.meta.url));
+  const store = readFileSync(join(SRC, "pages/mcp-servers/mcpServers.svelte.js"), "utf8");
+  const list = readFileSync(join(SRC, "pages/mcp-servers/McpVirtualServerList.svelte"), "utf8");
+
+  const fetchVirtual = (store.match(/async fetchVirtualServers\(\) \{[\s\S]*?\n  \}/) || [""])[0];
+  const errorBranch = fetchVirtual.match(/if \(outcome\.status === "error"\) \{[\s\S]*?\n    \}/);
+  assert.ok(errorBranch, "fetchVirtualServers must handle a failed load");
+  assert.match(errorBranch[0], /this\.virtualError = /);
+  assert.match(errorBranch[0], /return;/);
+  assert.equal(errorBranch[0].includes("this.virtualServers ="), false, "a failed load keeps the last known list");
+
+  assert.match(list, /\{#if mcpServers\.virtualError\}/, "the section shows the load error");
+  assert.match(list, /\{#if !mcpServers\.virtualError\}\s*<p class="empty-state">/, "the empty state is hidden while the load failed");
+});

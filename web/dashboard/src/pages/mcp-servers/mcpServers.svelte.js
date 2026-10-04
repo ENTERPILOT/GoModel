@@ -35,6 +35,9 @@ class McpServersState {
   // Virtual servers, each served at /mcp/{name}. Config-declared ones are
   // read-only (managed); the rest are edited here.
   virtualServers = $state([]);
+  // Set when the virtual-server list failed to load, so the section shows the
+  // failure instead of an empty list.
+  virtualError = $state("");
   virtualFormOpen = $state(false);
   virtualFormMode = $state("create");
   virtualForm = $state(defaultMcpVirtualServerForm());
@@ -173,18 +176,24 @@ class McpServersState {
     }
   }
 
-  // Virtual servers change only with config, so they load with the list and
-  // skip the connect poll. A failure leaves the section hidden: the server
-  // list above already reports gateway errors.
+  // Virtual servers load with the list and after their own edits; they skip
+  // the connect poll. A failed load keeps the last known list and reports the
+  // failure, so it never reads as "no virtual servers".
   async fetchVirtualServers() {
     const seq = ++this.#virtualSeq;
     const outcome = await loadAdminList("/admin/mcp-virtual-servers", {
       label: "mcp virtual servers",
+      errorFallback: m.mcp_virtual_load_failed(),
       unavailableStatuses: [503, 404],
     });
     if (outcome.status === "stale" || seq !== this.#virtualSeq) {
       return;
     }
+    if (outcome.status === "error") {
+      this.virtualError = outcome.error || m.mcp_virtual_load_failed();
+      return;
+    }
+    this.virtualError = "";
     this.virtualServers = outcome.status === "ok" ? outcome.items : [];
   }
 
@@ -193,6 +202,7 @@ class McpServersState {
   #clearVirtualServers() {
     this.#virtualSeq += 1;
     this.virtualServers = [];
+    this.virtualError = "";
   }
 
   // --- connect poll ------------------------------------------------------
