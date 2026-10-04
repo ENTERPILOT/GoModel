@@ -87,11 +87,11 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 	}
 
 	discovery := factory.discoveryConfigsSnapshot()
-	merged, err := mergeProviderSources(ctx, result.Secrets, result.RawProviders, discovery)
+	sources, err := mergeProviderSources(ctx, result.Secrets, result.RawProviders, discovery)
 	if err != nil {
 		return nil, err
 	}
-	providerMap, credentialResolved := finishProviders(merged, result.Config.Resilience, discovery)
+	providerMap, credentialResolved := finishProviders(sources, result.Config.Resilience, discovery)
 	// Validated after the env overlay so one rule covers both sources: a bad
 	// price cap must not start the gateway with a cost control that silently
 	// admits everything.
@@ -202,7 +202,7 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 		Cache:                       modelCache,
 		Factory:                     factory,
 		CredentialResolvedProviders: credentialResolved,
-		keys:                        newKeyRotation(merged, discovery, result.Config.Resilience, providerMap, keyrings),
+		keys:                        newKeyRotation(sources, discovery, result.Config.Resilience, providerMap, keyrings),
 		stopRefresh:                 stopRefresh,
 	}, nil
 }

@@ -24,7 +24,12 @@ type ProviderConfig struct {
 	// APIKeys is the provider's full, ordered, de-duplicated key set. Identified
 	// sessions stay on one key when SessionStickyKeys is true; sessionless
 	// traffic rotates round robin.
-	APIKeys                  []string
+	APIKeys []string
+	// APIKeySources[i] lists where APIKeys[i] was configured: config.yaml
+	// paths ("providers.openai.api_keys[1]") or environment variable names
+	// ("OPENAI_API_KEY_2"); more than one when identical keys were collapsed.
+	// Set by configuration resolution; nil elsewhere.
+	APIKeySources            [][]string
 	SessionStickyKeys        bool
 	BaseURL                  string
 	APIVersion               string
@@ -69,43 +74,83 @@ type ProviderConfig struct {
 // value that is dropped or sent upstream. Legacy ${VAR} placeholders are
 // dropped before resolution; resolved values are data, so a secret that
 // happens to contain "${" is kept.
+//
+// API keys keep their source through normalization (see sourcedKey), so a
+// reference is resolved, and reported, under the YAML path or env var the
+// operator wrote, and ProviderConfig.APIKeySources maps every normalized key
+// back to it.
 func resolveProviders(ctx context.Context, secrets *config.Secrets, raw map[string]config.RawProviderConfig, global config.ResilienceConfig, discovery map[string]DiscoveryConfig) (map[string]ProviderConfig, map[string]config.RawProviderConfig, error) {
-	merged, err := mergeProviderSources(ctx, secrets, raw, discovery)
+	sources, err := mergeProviderSources(ctx, secrets, raw, discovery)
 	if err != nil {
 		return nil, nil, err
 	}
-	providers, filtered := finishProviders(merged, global, discovery)
+	providers, filtered := finishProviders(sources, global, discovery)
 	return providers, filtered, nil
 }
 
-// mergeProviderSources is the first half of resolveProviders: the env overlay,
-// the pre-resolution credential filter, and secret resolution. Its result is
-// what key rotation patches (see keyRotation), so references are recorded
-// under providers.<name>.<field> whether YAML or an env var supplied them:
-// the primary key as api_key, the others as api_keys[i].
-func mergeProviderSources(ctx context.Context, secrets *config.Secrets, raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig) (map[string]config.RawProviderConfig, error) {
-	merged := normalizeAPIKeys(applyProviderEnvVars(raw, discovery), providerValueSet)
-	candidates := filterProviders(merged, discovery, providerValueSet)
-	for name, p := range candidates {
-		// APIKeys[0] repeats APIKey; drop the copy so each key is looked up
-		// once. finishProviders puts it back.
-		if len(p.APIKeys) > 0 {
-			p.APIKeys = p.APIKeys[1:]
-			candidates[name] = p
-		}
-	}
-	if err := secrets.ResolveFields(ctx, "providers", &candidates); err != nil {
-		return nil, err
-	}
-	return candidates, nil
+// providerSources is resolution's state before API keys are collapsed: the
+// candidate providers with every field but the keys resolved, and each
+// provider's keys, one entry per source, resolved but not yet de-duplicated.
+// Key rotation patches the keys by source and runs finishProviders again (see
+// keyRotation).
+type providerSources struct {
+	providers map[string]config.RawProviderConfig
+	keys      map[string][]sourcedKey
 }
 
-// finishProviders is the second half of resolveProviders: key normalization,
-// credential filtering, and resilience merging over resolved values.
-func finishProviders(merged map[string]config.RawProviderConfig, global config.ResilienceConfig, discovery map[string]DiscoveryConfig) (map[string]ProviderConfig, map[string]config.RawProviderConfig) {
-	resolved := normalizeAPIKeys(merged, resolvedValueSet)
-	filtered := filterProviders(resolved, discovery, resolvedValueSet)
-	return buildProviderConfigs(filtered, global), filtered
+// mergeProviderSources is the first half of resolveProviders: the env overlay,
+// the pre-resolution credential filter, and secret resolution.
+func mergeProviderSources(ctx context.Context, secrets *config.Secrets, raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig) (providerSources, error) {
+	merged, envKeys := applyProviderEnvVars(raw, discovery)
+	keys := make(map[string][]sourcedKey, len(merged))
+	for name, p := range merged {
+		sourced, fromEnv := envKeys[name]
+		if !fromEnv {
+			sourced = dedupeKeys(yamlAPIKeys(name, p), providerValueSet)
+		}
+		keys[name] = sourced
+		p.APIKey, p.APIKeys = keyValues(sourced)
+		merged[name] = p
+	}
+
+	candidates := filterProviders(merged, discovery, providerValueSet)
+	for name, p := range candidates {
+		// Keys are resolved below, under their own sources.
+		p.APIKey, p.APIKeys = "", nil
+		candidates[name] = p
+	}
+	if err := secrets.ResolveFields(ctx, "providers", &candidates); err != nil {
+		return providerSources{}, err
+	}
+	resolvedKeys := make(map[string][]sourcedKey, len(candidates))
+	for name := range candidates {
+		resolved, err := resolveKeySources(ctx, secrets, keys[name])
+		if err != nil {
+			return providerSources{}, err
+		}
+		resolvedKeys[name] = resolved
+	}
+	return providerSources{providers: candidates, keys: resolvedKeys}, nil
+}
+
+// finishProviders is the second half of resolveProviders: key
+// de-duplication, credential filtering, and resilience merging over resolved
+// values.
+func finishProviders(sources providerSources, global config.ResilienceConfig, discovery map[string]DiscoveryConfig) (map[string]ProviderConfig, map[string]config.RawProviderConfig) {
+	candidates := make(map[string]config.RawProviderConfig, len(sources.providers))
+	keys := make(map[string][]sourcedKey, len(sources.providers))
+	for name, p := range sources.providers {
+		keys[name] = dedupeKeys(sources.keys[name], resolvedValueSet)
+		p.APIKey, p.APIKeys = keyValues(keys[name])
+		candidates[name] = p
+	}
+	filtered := filterProviders(candidates, discovery, resolvedValueSet)
+	providers := buildProviderConfigs(filtered, global)
+	for name, p := range providers {
+		p.APIKeySources = keySources(keys[name])
+		providers[name] = p
+	}
+	return providers, filtered
 }
 
 // normalizeProviderAPIKeys collapses each provider's `api_key` and `api_keys`
@@ -115,15 +160,9 @@ func finishProviders(merged map[string]config.RawProviderConfig, global config.R
 // to resolve ends up keyless and is then dropped by filterEmptyProviders --
 // the same outcome as before rotation existed.
 func normalizeProviderAPIKeys(raw map[string]config.RawProviderConfig) map[string]config.RawProviderConfig {
-	return normalizeAPIKeys(raw, HasResolvedProviderValue)
-}
-
-// normalizeAPIKeys is normalizeProviderAPIKeys keeping the keys usable reports
-// as set.
-func normalizeAPIKeys(raw map[string]config.RawProviderConfig, usable func(string) bool) map[string]config.RawProviderConfig {
 	result := make(map[string]config.RawProviderConfig, len(raw))
 	for name, p := range raw {
-		keys := resolvedAPIKeys(append([]string{p.APIKey}, p.APIKeys...), usable)
+		keys := resolvedAPIKeys(append([]string{p.APIKey}, p.APIKeys...))
 		p.APIKeys = keys
 		p.APIKey = ""
 		if len(keys) > 0 {
@@ -134,14 +173,14 @@ func normalizeAPIKeys(raw map[string]config.RawProviderConfig, usable func(strin
 	return result
 }
 
-// resolvedAPIKeys trims, drops the entries usable rejects, and de-duplicates
+// resolvedAPIKeys trims, drops unresolved and empty entries, and de-duplicates
 // while preserving order.
-func resolvedAPIKeys(keys []string, usable func(string) bool) []string {
+func resolvedAPIKeys(keys []string) []string {
 	resolved := make([]string, 0, len(keys))
 	seen := make(map[string]struct{}, len(keys))
 	for _, key := range keys {
 		key = strings.TrimSpace(key)
-		if !usable(key) {
+		if !HasResolvedProviderValue(key) {
 			continue
 		}
 		if _, dup := seen[key]; dup {

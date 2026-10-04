@@ -52,9 +52,9 @@ func newRotationFixture(t *testing.T, values map[string]string, raw map[string]c
 	vault := &rotationVault{values: values}
 	secrets := config.NewSecrets()
 	require.NoError(t, secrets.Register("vault", vault))
-	merged, err := mergeProviderSources(t.Context(), secrets, raw, testDiscoveryConfigs)
+	sources, err := mergeProviderSources(t.Context(), secrets, raw, testDiscoveryConfigs)
 	require.NoError(t, err)
-	providerMap, _ := finishProviders(merged, config.ResilienceConfig{}, testDiscoveryConfigs)
+	providerMap, _ := finishProviders(sources, config.ResilienceConfig{}, testDiscoveryConfigs)
 	keyrings := make(map[string]*Keyring, len(providerMap))
 	for name, p := range providerMap {
 		keyrings[name] = NewKeyringWithSessionStickiness(p.SessionStickyKeys, p.APIKeys...)
@@ -62,7 +62,7 @@ func newRotationFixture(t *testing.T, values map[string]string, raw map[string]c
 	return &rotationFixture{
 		secrets:  secrets,
 		vault:    vault,
-		rotation: newKeyRotation(merged, testDiscoveryConfigs, config.ResilienceConfig{}, providerMap, keyrings),
+		rotation: newKeyRotation(sources, testDiscoveryConfigs, config.ResilienceConfig{}, providerMap, keyrings),
 		keyrings: keyrings,
 	}
 }
@@ -102,10 +102,8 @@ func TestKeyRotationSwapsProviderKeys(t *testing.T) {
 			raw:      map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKeys: []string{"literal", "${vault:a}"}}},
 			rotate:   "a",
 			provider: "openai",
-			// Paths index the normalized key set: the first key is the
-			// primary api_key, the rest are api_keys[0..].
-			fields: []string{"providers.openai.api_keys[0]"},
-			want:   []string{"literal", "a-new"},
+			fields:   []string{"providers.openai.api_keys[1]"},
+			want:     []string{"literal", "a-new"},
 		},
 		{
 			name:     "numbered env var",
@@ -113,7 +111,7 @@ func TestKeyRotationSwapsProviderKeys(t *testing.T) {
 			env:      map[string]string{"OPENAI_API_KEY": "literal", "OPENAI_API_KEY_2": "${vault:a}"},
 			rotate:   "a",
 			provider: "openai",
-			fields:   []string{"providers.openai.api_keys[0]"},
+			fields:   []string{"OPENAI_API_KEY_2"},
 			want:     []string{"literal", "a-new"},
 		},
 		{
@@ -122,7 +120,7 @@ func TestKeyRotationSwapsProviderKeys(t *testing.T) {
 			env:      map[string]string{"OPENAI_API_KEY": "other", "OPENAI_EU_API_KEY": "${vault:a}"},
 			rotate:   "a",
 			provider: "openai-eu",
-			fields:   []string{"providers.openai-eu.api_key"},
+			fields:   []string{"OPENAI_EU_API_KEY"},
 			want:     []string{"a-new"},
 		},
 		{
@@ -131,7 +129,7 @@ func TestKeyRotationSwapsProviderKeys(t *testing.T) {
 			env:      map[string]string{"OPENAI_API_KEY": "${vault:a}"},
 			rotate:   "a",
 			provider: "primary",
-			fields:   []string{"providers.primary.api_key"},
+			fields:   []string{"OPENAI_API_KEY"},
 			want:     []string{"a-new"},
 		},
 	}
@@ -260,7 +258,7 @@ func TestInitResultPlanKeyRotation(t *testing.T) {
 	vault.set("test", "sk-2")
 	recheck, err := secrets.Recheck(t.Context())
 	require.NoError(t, err)
-	assert.Equal(t, []string{"providers.test.api_key"}, recheck.Fields())
+	assert.Equal(t, []string{"TEST_API_KEY"}, recheck.Fields())
 	plan := result.PlanKeyRotation(recheck)
 	require.NotNil(t, plan)
 	assert.Equal(t, []string{"test"}, plan.Providers())
@@ -268,7 +266,7 @@ func TestInitResultPlanKeyRotation(t *testing.T) {
 	assert.Equal(t, "sk-2", keys.Primary(), "the provider's own keyring is swapped")
 }
 
-func TestProviderSecretFieldIsTheProviderPath(t *testing.T) {
+func TestProviderSecretFieldIsTheSourceTheOperatorWrote(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "literal")
 	t.Setenv("OPENAI_API_KEY_2", "${vault:a}")
 	var fields []string
@@ -280,7 +278,7 @@ func TestProviderSecretFieldIsTheProviderPath(t *testing.T) {
 	})))
 	_, err := mergeProviderSources(t.Context(), secrets, nil, testDiscoveryConfigs)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"providers.openai.api_keys[0]"}, fields, "a resolver sees the provider field an env var set, not the variable")
+	assert.Equal(t, []string{"OPENAI_API_KEY_2"}, fields, "a resolver sees the variable the operator set")
 }
 
 func TestKeyRotationKeepsKeyOrder(t *testing.T) {
@@ -289,7 +287,7 @@ func TestKeyRotationKeepsKeyOrder(t *testing.T) {
 		nil)
 	f.vault.set("b", "b-new")
 	recheck, plan := f.plan(t)
-	assert.Equal(t, []string{"providers.openai.api_keys[1]"}, recheck.Fields())
+	assert.Equal(t, []string{"providers.openai.api_keys[1]"}, recheck.Fields(), "the operator's YAML index")
 	require.NotNil(t, plan)
 	plan.Apply()
 	assert.Equal(t, []string{"k0", "k1", "b-new", "k3"}, ringKeys(f.keyrings["openai"]))
@@ -321,4 +319,40 @@ func TestKeyRotationIgnoresProvidersSkippedForMissingCredentials(t *testing.T) {
 	assert.Equal(t, []string{"providers.openai.api_key"}, recheck.Fields())
 	require.NotNil(t, plan)
 	assert.Equal(t, []string{"openai"}, plan.Providers())
+}
+
+func TestKeyRotationPatchesKeysCollapsedOrDroppedAtStartup(t *testing.T) {
+	tests := []struct {
+		name   string
+		values map[string]string
+		raw    config.RawProviderConfig
+		rotate string
+		want   []string
+	}{
+		{
+			name:   "two references that resolved to one key split apart",
+			values: map[string]string{"a": "same", "b": "same"},
+			raw:    config.RawProviderConfig{Type: "openai", APIKey: "${vault:a}", APIKeys: []string{"${vault:b}"}},
+			rotate: "b",
+			want:   []string{"same", "b-new"},
+		},
+		{
+			name:   "a reference that resolved empty gains a value",
+			values: map[string]string{"b": ""},
+			raw:    config.RawProviderConfig{Type: "openai", APIKey: "k0", APIKeys: []string{"${vault:b}"}},
+			rotate: "b",
+			want:   []string{"k0", "b-new"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newRotationFixture(t, tt.values, map[string]config.RawProviderConfig{"openai": tt.raw}, nil)
+			f.vault.set(tt.rotate, "b-new")
+			recheck, plan := f.plan(t)
+			assert.Equal(t, []string{"providers.openai.api_keys[0]"}, recheck.Fields())
+			require.NotNil(t, plan)
+			plan.Apply()
+			assert.Equal(t, tt.want, ringKeys(f.keyrings["openai"]))
+		})
+	}
 }
