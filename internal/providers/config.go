@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"os"
 	"sort"
 	"strings"
 
@@ -70,15 +71,17 @@ type ProviderConfig struct {
 // References are resolved only for providers that survive the env overlay and
 // the credential filter, so a YAML value an env var replaces, an env var the
 // overlay ignores, and a provider dropped for lack of credentials are never
-// looked up. A used reference that cannot be resolved is an error, never a
-// value that is dropped or sent upstream. Legacy ${VAR} placeholders are
-// dropped before resolution; resolved values are data, so a secret that
-// happens to contain "${" is kept.
+// looked up. Settings that are parsed or steer the overlay or the filter
+// (type, backend, env models, model filters, booleans, Vertex auth_type) are
+// resolved just before they are read, each once. A used reference that cannot
+// be resolved is an error, never a value that is dropped or sent upstream.
+// Legacy ${VAR} placeholders are dropped before resolution; resolved values
+// are data, so a secret that happens to contain "${" is kept.
 //
-// API keys keep their source through normalization (see sourcedKey), so a
-// reference is resolved, and reported, under the YAML path or env var the
-// operator wrote, and ProviderConfig.APIKeySources maps every normalized key
-// back to it.
+// API keys keep their source through normalization (see sourcedKey): each key
+// is resolved, and reported, under the YAML path or env var the operator
+// wrote, and only then are equal values collapsed, so
+// ProviderConfig.APIKeySources maps every normalized key back to all of them.
 func resolveProviders(ctx context.Context, secrets *config.Secrets, raw map[string]config.RawProviderConfig, global config.ResilienceConfig, discovery map[string]DiscoveryConfig) (map[string]ProviderConfig, map[string]config.RawProviderConfig, error) {
 	sources, err := mergeProviderSources(ctx, secrets, raw, discovery)
 	if err != nil {
@@ -90,23 +93,34 @@ func resolveProviders(ctx context.Context, secrets *config.Secrets, raw map[stri
 
 // providerSources is resolution's state before API keys are collapsed: the
 // candidate providers with every field but the keys resolved, and each
-// provider's keys, one entry per source, resolved but not yet de-duplicated.
-// Key rotation patches the keys by source and runs finishProviders again (see
-// keyRotation).
+// provider's keys, one entry per source label, resolved but not yet
+// de-duplicated. Key rotation patches the keys by label and runs
+// finishProviders again (see keyRotation).
 type providerSources struct {
 	providers map[string]config.RawProviderConfig
 	keys      map[string][]sourcedKey
 }
 
-// mergeProviderSources is the first half of resolveProviders: the env overlay,
-// the pre-resolution credential filter, and secret resolution.
+// mergeProviderSources is the first half of resolveProviders: settings that
+// steer the overlay, the env overlay, the pre-resolution credential filter,
+// and secret resolution.
 func mergeProviderSources(ctx context.Context, secrets *config.Secrets, raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig) (providerSources, error) {
-	merged, envKeys := applyProviderEnvVars(raw, discovery)
+	raw, err := resolveProviderSelectors(ctx, secrets, raw)
+	if err != nil {
+		return providerSources{}, err
+	}
+	merged, envKeys, err := applyProviderEnvVars(ctx, secrets, raw, discovery, os.Environ())
+	if err != nil {
+		return providerSources{}, err
+	}
+	if err := resolveFilterSettings(ctx, secrets, merged); err != nil {
+		return providerSources{}, err
+	}
 	keys := make(map[string][]sourcedKey, len(merged))
 	for name, p := range merged {
 		sourced, fromEnv := envKeys[name]
 		if !fromEnv {
-			sourced = dedupeKeys(yamlAPIKeys(name, p), providerValueSet)
+			sourced = usableKeys(yamlAPIKeys(name, p))
 		}
 		keys[name] = sourced
 		p.APIKey, p.APIKeys = keyValues(sourced)
@@ -266,7 +280,7 @@ func isVertexProviderConfig(p config.RawProviderConfig) bool {
 }
 
 func validVertexProviderConfig(p config.RawProviderConfig, set func(string) bool) bool {
-	if !set(p.BaseURL) && (!set(p.VertexProject) || !set(p.VertexLocation)) {
+	if !vertexHasEndpoint(p, set) {
 		return false
 	}
 	authType := strings.ToLower(strings.TrimSpace(p.AuthType))
@@ -278,6 +292,12 @@ func validVertexProviderConfig(p config.RawProviderConfig, set func(string) bool
 	default:
 		return false
 	}
+}
+
+// vertexHasEndpoint reports whether a Vertex provider sets a base URL or both
+// a project and a location.
+func vertexHasEndpoint(p config.RawProviderConfig, set func(string) bool) bool {
+	return set(p.BaseURL) || (set(p.VertexProject) && set(p.VertexLocation))
 }
 
 // HasResolvedProviderValue reports whether a provider-config field carries a
