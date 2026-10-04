@@ -102,8 +102,10 @@ func TestKeyRotationSwapsProviderKeys(t *testing.T) {
 			raw:      map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKeys: []string{"literal", "${vault:a}"}}},
 			rotate:   "a",
 			provider: "openai",
-			fields:   []string{"providers.openai.api_keys[1]"},
-			want:     []string{"literal", "a-new"},
+			// Paths index the normalized key set: the first key is the
+			// primary api_key, the rest are api_keys[0..].
+			fields: []string{"providers.openai.api_keys[0]"},
+			want:   []string{"literal", "a-new"},
 		},
 		{
 			name:     "numbered env var",
@@ -111,7 +113,7 @@ func TestKeyRotationSwapsProviderKeys(t *testing.T) {
 			env:      map[string]string{"OPENAI_API_KEY": "literal", "OPENAI_API_KEY_2": "${vault:a}"},
 			rotate:   "a",
 			provider: "openai",
-			fields:   []string{"providers.openai.api_keys[1]"},
+			fields:   []string{"providers.openai.api_keys[0]"},
 			want:     []string{"literal", "a-new"},
 		},
 		{
@@ -120,7 +122,7 @@ func TestKeyRotationSwapsProviderKeys(t *testing.T) {
 			env:      map[string]string{"OPENAI_API_KEY": "other", "OPENAI_EU_API_KEY": "${vault:a}"},
 			rotate:   "a",
 			provider: "openai-eu",
-			fields:   []string{"providers.openai-eu.api_key", "providers.openai-eu.api_keys[0]"},
+			fields:   []string{"providers.openai-eu.api_key"},
 			want:     []string{"a-new"},
 		},
 		{
@@ -129,7 +131,7 @@ func TestKeyRotationSwapsProviderKeys(t *testing.T) {
 			env:      map[string]string{"OPENAI_API_KEY": "${vault:a}"},
 			rotate:   "a",
 			provider: "primary",
-			fields:   []string{"providers.primary.api_key", "providers.primary.api_keys[0]"},
+			fields:   []string{"providers.primary.api_key"},
 			want:     []string{"a-new"},
 		},
 	}
@@ -258,7 +260,7 @@ func TestInitResultPlanKeyRotation(t *testing.T) {
 	vault.set("test", "sk-2")
 	recheck, err := secrets.Recheck(t.Context())
 	require.NoError(t, err)
-	assert.Equal(t, []string{"providers.test.api_key", "providers.test.api_keys[0]"}, recheck.Fields())
+	assert.Equal(t, []string{"providers.test.api_key"}, recheck.Fields())
 	plan := result.PlanKeyRotation(recheck)
 	require.NotNil(t, plan)
 	assert.Equal(t, []string{"test"}, plan.Providers())
@@ -278,5 +280,45 @@ func TestProviderSecretFieldIsTheProviderPath(t *testing.T) {
 	})))
 	_, err := mergeProviderSources(t.Context(), secrets, nil, testDiscoveryConfigs)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"providers.openai.api_keys[1]"}, fields, "a resolver sees the provider field an env var set, not the variable")
+	assert.Equal(t, []string{"providers.openai.api_keys[0]"}, fields, "a resolver sees the provider field an env var set, not the variable")
+}
+
+func TestKeyRotationKeepsKeyOrder(t *testing.T) {
+	f := newRotationFixture(t, map[string]string{"b": "b-old"},
+		map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKey: "k0", APIKeys: []string{"k1", "${vault:b}", "k3"}}},
+		nil)
+	f.vault.set("b", "b-new")
+	recheck, plan := f.plan(t)
+	assert.Equal(t, []string{"providers.openai.api_keys[1]"}, recheck.Fields())
+	require.NotNil(t, plan)
+	plan.Apply()
+	assert.Equal(t, []string{"k0", "k1", "b-new", "k3"}, ringKeys(f.keyrings["openai"]))
+}
+
+func TestKeyRotationKeepsResolvedKeysContainingPlaceholderText(t *testing.T) {
+	f := newRotationFixture(t, map[string]string{"a": "a-old"},
+		map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKey: "${vault:a}"}},
+		nil)
+	f.vault.set("a", "sk-${not-a-placeholder}")
+	_, plan := f.plan(t)
+	require.NotNil(t, plan, "a resolved secret is data, not a placeholder")
+	plan.Apply()
+	assert.Equal(t, []string{"sk-${not-a-placeholder}"}, ringKeys(f.keyrings["openai"]))
+}
+
+func TestKeyRotationIgnoresProvidersSkippedForMissingCredentials(t *testing.T) {
+	// A provider whose only key is an unset legacy ${VAR} is dropped before
+	// resolution, so its other references are never looked up or tracked.
+	f := newRotationFixture(t, map[string]string{"a": "a-old", "url": "https://a.test/v1"},
+		map[string]config.RawProviderConfig{
+			"openai":  {Type: "openai", APIKey: "${vault:a}"},
+			"skipped": {Type: "openai", APIKey: "${GOMODEL_TEST_UNSET_KEY}", BaseURL: "${vault:url}"},
+		},
+		nil)
+	f.vault.set("url", "https://b.test/v1")
+	f.vault.set("a", "a-new")
+	recheck, plan := f.plan(t)
+	assert.Equal(t, []string{"providers.openai.api_key"}, recheck.Fields())
+	require.NotNil(t, plan)
+	assert.Equal(t, []string{"openai"}, plan.Providers())
 }

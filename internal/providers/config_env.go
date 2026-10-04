@@ -136,7 +136,7 @@ func (v providerEnvValues) apiKeys() []string {
 	for _, index := range indexes {
 		keys = append(keys, byIndex[index])
 	}
-	return resolvedAPIKeys(keys)
+	return resolvedAPIKeys(keys, providerValueSet)
 }
 
 // hasAPIKey reports whether this env group carries any credential, numbered or

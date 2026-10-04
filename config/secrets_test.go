@@ -46,6 +46,28 @@ func TestSecretsHasReference(t *testing.T) {
 	}
 }
 
+func TestHasUnresolvedPlaceholder(t *testing.T) {
+	tests := []struct {
+		value string
+		want  bool
+	}{
+		{"", false},
+		{"plain", false},
+		{"${env:TOKEN}", false},
+		{"Bearer ${env:TOKEN}", false},
+		{"$${VAR}", false},
+		{"${VAR}", true},
+		{"${VAR:-default}", true},
+		{"${env:TOKEN}-${VAR}", true},
+		{"a${env:X", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			assert.Equal(t, tt.want, HasUnresolvedPlaceholder(tt.value))
+		})
+	}
+}
+
 func TestSecretsResolve(t *testing.T) {
 	dir := t.TempDir()
 	passFile := filepath.Join(dir, "pass")

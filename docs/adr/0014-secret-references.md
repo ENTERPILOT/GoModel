@@ -136,9 +136,10 @@ Resolution order for one generation:
    as the MCP server URL scheme, is repeated on the resolved value.
 4. `providers.Init` merges the provider environment variables
    (`OPENAI_API_KEY=${vault:prod/llm#openai}`) into `RawProviders` and then
-   resolves the merged result. A `config.yaml` value that an environment
-   variable replaces, or an environment variable the merge ignores, is never
-   looked up.
+   resolves the providers that pass the credential filter. A `config.yaml`
+   value that an environment variable replaces, an environment variable the
+   merge ignores, and a provider skipped for missing credentials are never
+   looked up. Resolved values are data: a secret containing `${` is kept.
 
 Any reference that is still unresolved after step 3 or 4 stops the
 generation with an error naming the field and the scheme, never the value.
@@ -179,8 +180,11 @@ as configured, and an HMAC-SHA256 fingerprint of the resolved value under a
 random per-process key (never the value itself). Fields are recorded by
 path (`server.master_key`, `extensions.vaults.token`,
 `providers.openai.api_keys[1]`). Provider fields are recorded after the
-environment overlay, so a key set by `OPENAI_API_KEY_2` is recorded under the
-provider it landed on, like one written in `config.yaml`.
+environment overlay and key normalization, so a key set by
+`OPENAI_API_KEY_2` is recorded under the provider it landed on, like one
+written in `config.yaml`: the provider's first key as `api_key`, the others
+as `api_keys[i]` in order. Providers dropped for missing credentials are
+never resolved, so they are not tracked.
 
 `NotifyChanged`, called by an extension when its backend reports a new
 version, never blocks, and calls that arrive before the check runs coalesce
