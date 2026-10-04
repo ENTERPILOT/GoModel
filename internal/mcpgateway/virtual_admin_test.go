@@ -312,7 +312,6 @@ func TestManagerCloseCancelsInFlightConnect(t *testing.T) {
 	entered := make(chan struct{}, 1)
 	cancelled := make(chan struct{})
 	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
 	// An upstream that never answers its first request, so the connect hangs.
 	hanging := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// The server notices a client hang-up only once the body is read.
@@ -332,6 +331,9 @@ func TestManagerCloseCancelsInFlightConnect(t *testing.T) {
 		}
 	}))
 	t.Cleanup(hanging.Close)
+	// Registered after hanging.Close so it runs first: a still-blocked handler
+	// is released before Close waits for it, even when the test fails.
+	t.Cleanup(func() { close(release) })
 
 	manager := NewManager(http.DefaultClient)
 	manager.Apply([]ServerSpec{testSpec("slow", hanging.URL, nil)})
@@ -347,7 +349,6 @@ func TestManagerCloseCancelsInFlightConnect(t *testing.T) {
 
 func TestCancelledDialEndsConnectToUnresponsiveUpstream(t *testing.T) {
 	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
 	entered := make(chan struct{}, 1)
 	hanging := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
@@ -361,6 +362,9 @@ func TestCancelledDialEndsConnectToUnresponsiveUpstream(t *testing.T) {
 		}
 	}))
 	t.Cleanup(hanging.Close)
+	// Registered after hanging.Close so it runs first: a still-blocked handler
+	// is released before Close waits for it, even when the test fails.
+	t.Cleanup(func() { close(release) })
 
 	u := newUpstream(testSpec("slow", hanging.URL, nil), http.DefaultClient)
 	t.Cleanup(u.close)
@@ -378,4 +382,30 @@ func TestCancelledDialEndsConnectToUnresponsiveUpstream(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("a cancelled dial kept waiting on an unresponsive upstream")
 	}
+}
+
+func TestStaleVirtualSessionClosesOnNextRequest(t *testing.T) {
+	service, _, gatewayURL := newVirtualAdminTestService(t, nil,
+		ManagedVirtualServer{Name: "coding", Servers: []string{"alpha"}})
+	sessionID := initializeRawSession(t, gatewayURL+"/mcp/coding", nil)
+	service.bindMu.Lock()
+	host := service.bindings[sessionID].server
+	service.bindMu.Unlock()
+	require.NotNil(t, host)
+
+	// The session registered after a delete's scan: the virtual server is
+	// gone, but its binding and SDK session are still there.
+	service.virtualMu.Lock()
+	delete(service.virtualSpecs, "coding")
+	service.virtualMu.Unlock()
+
+	listBody := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
+	status := rawMCPStatus(t, gatewayURL+"/mcp/coding", listBody, map[string]string{"Mcp-Session-Id": sessionID})
+	assert.Equal(t, http.StatusNotFound, status)
+
+	service.bindMu.Lock()
+	_, bound := service.bindings[sessionID]
+	service.bindMu.Unlock()
+	assert.False(t, bound, "the stale binding is dropped")
+	assert.Eventually(t, func() bool { return len(slices.Collect(host.Sessions())) == 0 }, 5*time.Second, 10*time.Millisecond, "the stale session is closed")
 }

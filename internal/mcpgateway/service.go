@@ -425,6 +425,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 	if s.servedVirtual(pinnedServer) {
 		virtual = pinnedServer
 	} else if pinnedServer != "" {
+		s.closeStaleVirtualSessions(r, pinnedServer)
 		view, ok := s.findVisibleServer(pinnedServer, userPath)
 		if !ok {
 			return core.NewNotFoundError("unknown MCP server or virtual server: " + pinnedServer)
@@ -883,6 +884,25 @@ func (s *Service) bindSession(sessionID, authKeyID, userPath, endpoint string, d
 		server:      server,
 	}
 	s.bindMu.Unlock()
+}
+
+// closeStaleVirtualSessions closes the sessions of a virtual server that is no
+// longer served when one of them sends a request. DeleteVirtual closes the
+// sessions it finds, but one still initializing during the delete registers
+// afterwards; this catches it on its next request instead of at the idle
+// timeout.
+func (s *Service) closeStaleVirtualSessions(r *http.Request, name string) {
+	sessionID := strings.TrimSpace(r.Header.Get("Mcp-Session-Id"))
+	if sessionID == "" {
+		return
+	}
+	endpoint := virtualBindingPrefix + name
+	s.bindMu.Lock()
+	binding, ok := s.bindings[sessionID]
+	s.bindMu.Unlock()
+	if ok && binding.endpoint == endpoint {
+		s.closeEndpointSessions(endpoint)
+	}
 }
 
 // closeEndpointSessions ends every session bound to endpoint (see
