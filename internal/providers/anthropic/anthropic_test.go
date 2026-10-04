@@ -431,11 +431,13 @@ data: {"type":"message_stop"}
 	raw, err := io.ReadAll(body)
 	require.NoError(t, err)
 
+	// prompt_tokens covers the cache reads, as OpenAI counts it.
 	responseStr := string(raw)
-	require.Contains(t, responseStr, `"prompt_tokens":10`)
-	require.Contains(t, responseStr, `"completion_tokens":2`)
-	require.Contains(t, responseStr, `"total_tokens":12`)
-	require.Contains(t, responseStr, `"cache_read_input_tokens":6`)
+	assert.Contains(t, responseStr, `"prompt_tokens":16`)
+	assert.Contains(t, responseStr, `"completion_tokens":2`)
+	assert.Contains(t, responseStr, `"total_tokens":18`)
+	assert.Contains(t, responseStr, `"prompt_tokens_details":{"cached_tokens":6,`)
+	assert.NotContains(t, responseStr, `cache_read_input_tokens`)
 }
 
 func TestStreamChatCompletion_WithToolCalls(t *testing.T) {
@@ -2298,9 +2300,12 @@ func TestConvertFromAnthropicResponse_WithCacheFields(t *testing.T) {
 
 	result := convertFromAnthropicResponse(resp)
 
-	require.NotNil(t, result.Usage.RawUsage)
-	assert.Equal(t, 50, result.Usage.RawUsage["cache_creation_input_tokens"])
-	assert.Equal(t, 30, result.Usage.RawUsage["cache_read_input_tokens"])
+	// Anthropic's input_tokens excludes the cache; OpenAI's prompt_tokens
+	// includes it and itemizes it in the details.
+	assert.Equal(t, 180, result.Usage.PromptTokens)
+	assert.Equal(t, 200, result.Usage.TotalTokens)
+	assert.Equal(t, &core.PromptTokensDetails{CachedTokens: 30, CacheWriteTokens: 50}, result.Usage.PromptTokensDetails)
+	assert.Nil(t, result.Usage.RawUsage)
 }
 
 func TestConvertFromAnthropicResponse_WithThinkingTokens(t *testing.T) {
@@ -2403,9 +2408,10 @@ func TestConvertAnthropicResponseToResponses_WithCacheFields(t *testing.T) {
 	result := convertAnthropicResponseToResponses(resp, "claude-sonnet-4-5-20250929")
 
 	require.NotNil(t, result.Usage)
-	require.NotNil(t, result.Usage.RawUsage)
-	assert.Equal(t, 40, result.Usage.RawUsage["cache_creation_input_tokens"])
-	assert.Equal(t, 60, result.Usage.RawUsage["cache_read_input_tokens"])
+	assert.Equal(t, 200, result.Usage.InputTokens)
+	assert.Equal(t, 220, result.Usage.TotalTokens)
+	assert.Equal(t, &core.PromptTokensDetails{CachedTokens: 60, CacheWriteTokens: 40}, result.Usage.PromptTokensDetails)
+	assert.Nil(t, result.Usage.RawUsage)
 }
 
 func TestConvertFromAnthropicResponse_WithThinkingBlocks(t *testing.T) {
@@ -2825,10 +2831,11 @@ data: {"type":"message_stop"}
 
 	responseStr := string(raw)
 	require.Contains(t, responseStr, `"type":"response.completed"`)
-	require.Contains(t, responseStr, `"input_tokens":10`)
-	require.Contains(t, responseStr, `"output_tokens":2`)
-	require.Contains(t, responseStr, `"total_tokens":12`)
-	require.Contains(t, responseStr, `"cache_creation_input_tokens":4`)
+	assert.Contains(t, responseStr, `"input_tokens":14`)
+	assert.Contains(t, responseStr, `"output_tokens":2`)
+	assert.Contains(t, responseStr, `"total_tokens":16`)
+	assert.Contains(t, responseStr, `"cache_write_tokens":4`)
+	assert.NotContains(t, responseStr, `cache_creation_input_tokens`)
 }
 
 func TestStreamResponses_WithToolCalls(t *testing.T) {

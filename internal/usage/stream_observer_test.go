@@ -449,6 +449,35 @@ func TestStreamUsageObserverAnthropicCacheFields(t *testing.T) {
 	require.Equal(t, 4, entry.RawData["cache_creation_input_tokens"])
 }
 
+// A translated Claude stream reports its cache in the OpenAI shape, inside
+// prompt_tokens; the recorded row splits back into the same parts.
+func TestStreamUsageObserverAnthropicOpenAIShapedCache(t *testing.T) {
+	logger := &trackingLogger{enabled: true}
+	observer := NewStreamUsageObserver(logger, "claude-sonnet-4-5", "anthropic", "req-anthropic", "/v1/chat/completions", nil)
+	observer.OnJSONEvent(map[string]any{
+		"id": "msg-123",
+		"usage": map[string]any{
+			"prompt_tokens":     float64(20),
+			"completion_tokens": float64(2),
+			"total_tokens":      float64(22),
+			"prompt_tokens_details": map[string]any{
+				"cached_tokens":      float64(6),
+				"cache_write_tokens": float64(4),
+			},
+		},
+	})
+	observer.OnStreamClose()
+
+	entries := logger.getEntries()
+	require.Len(t, entries, 1)
+	entry := entries[0]
+	assert.Equal(t, 20, entry.InputTokens)
+	assert.Equal(t, map[string]any{"prompt_cached_tokens": 6, "prompt_cache_write_tokens": 4}, entry.RawData)
+
+	uncached, cached, cacheWrite := EntryInputSegments(UsageLogEntry{Provider: entry.Provider, InputTokens: entry.InputTokens, RawData: entry.RawData})
+	assert.Equal(t, []int64{10, 6, 4}, []int64{uncached, cached, cacheWrite})
+}
+
 func TestStreamUsageObserverLargeResponsesDone(t *testing.T) {
 	largeText := strings.Repeat("This is a long response from the model. ", 300)
 	streamData := `event: response.created

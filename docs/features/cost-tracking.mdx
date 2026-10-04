@@ -30,6 +30,13 @@ When a provider returns an exact cost (OpenRouter credits, xAI `cost_in_usd_tick
   `cached_input_per_mtok` rate. Without it, they are priced at the full input rate.
 </Note>
 
+<Note>
+  Claude usage from earlier releases, recorded on `/v1/chat/completions` and
+  `/v1/responses`, counts input tokens without the prompt cache; newer rows
+  include it, as OpenAI does. Costs and the cached/uncached input breakdown read
+  both, so only the plain input token total rises for cache-heavy Claude traffic.
+</Note>
+
 ## Time-of-day pricing
 
 Some providers charge different rates depending on when a request runs. DeepSeek, for example, bills its off-peak hours at half the peak rates and treats weekends as off-peak. The catalog publishes the standard (peak) rates as a model's base prices and lists the discounted periods under `pricing.time_windows`:

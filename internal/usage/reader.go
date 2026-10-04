@@ -32,8 +32,9 @@ type UsageQueryParams struct {
 // The *_input_tokens split fields (uncached/cached/cache-write) are the
 // provider prompt-cache breakdown of the input, summed per row via
 // addInputSegments which reuses EntryInputSegments. Their sum is the
-// provider-side "input parts" total; for additive-accounting providers
-// (Anthropic) it exceeds TotalInput, which only sums the input_tokens column.
+// provider-side "input parts" total; for rows whose cache counts come on top
+// of input_tokens (Anthropic-named counts, see EntryInputSegments) it exceeds
+// TotalInput, which only sums the input_tokens column.
 // Storage layers populate them by streaming rows; they are zero when the
 // reader is disabled.
 type UsageSummary struct {

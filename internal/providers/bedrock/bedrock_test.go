@@ -720,98 +720,48 @@ func TestCachePointFallbackIsNarrowAndLossless(t *testing.T) {
 	require.True(t, partsHaveCachePoints(parts))
 }
 
-func TestStreamConverter_FormatChunkForwardsCacheUsage(t *testing.T) {
+// Converse's InputTokens leaves out the cache reads and writes; the usage the
+// gateway reports counts them in prompt_tokens, as OpenAI does, and itemizes
+// them in prompt_tokens_details.
+func TestBedrockUsage(t *testing.T) {
 	cases := []struct {
-		name       string
-		read       *int32
-		write      *int32
-		wantRead   int // -1 means the key must be absent
-		wantCreate int
+		name        string
+		read, write *int32
+		wantPrompt  int
+		wantDetails *core.PromptTokensDetails
 	}{
-		{"both present", awssdk.Int32(5000), awssdk.Int32(1200), 5000, 1200},
-		{"read only", awssdk.Int32(5000), nil, 5000, -1},
-		{"write only", nil, awssdk.Int32(1200), -1, 1200},
-		{"both absent", nil, nil, -1, -1},
+		{"both present", awssdk.Int32(5000), awssdk.Int32(1200), 6203, &core.PromptTokensDetails{CachedTokens: 5000, CacheWriteTokens: 1200}},
+		{"read only", awssdk.Int32(5000), nil, 5003, &core.PromptTokensDetails{CachedTokens: 5000}},
+		{"write only", nil, awssdk.Int32(1200), 1203, &core.PromptTokensDetails{CacheWriteTokens: 1200}},
+		{"both absent", nil, nil, 3, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			sc := newOpenAIStream(nil, "test-model")
-			chunk := sc.formatChunk(map[string]any{}, "stop", &brtypes.TokenUsage{
+			tokens := &brtypes.TokenUsage{
 				InputTokens:           awssdk.Int32(3),
 				OutputTokens:          awssdk.Int32(7),
 				TotalTokens:           awssdk.Int32(10),
 				CacheReadInputTokens:  tc.read,
 				CacheWriteInputTokens: tc.write,
-			})
-			payload := strings.TrimSuffix(strings.TrimPrefix(chunk, "data: "), "\n\n")
-			var parsed map[string]any
-			err := json.Unmarshal([]byte(payload), &parsed)
+			}
+
+			usage := bedrockUsage(tokens)
+			assert.Equal(t, tc.wantPrompt, usage.PromptTokens)
+			assert.Equal(t, 7, usage.CompletionTokens)
+			assert.Equal(t, tc.wantPrompt+7, usage.TotalTokens)
+			assert.Equal(t, tc.wantDetails, usage.PromptTokensDetails)
+			assert.Nil(t, usage.RawUsage)
+
+			chunk := newOpenAIStream(nil, "test-model").formatChunk(map[string]any{}, "stop", tokens)
+			var parsed struct {
+				Usage map[string]any `json:"usage"`
+			}
+			err := json.Unmarshal([]byte(strings.TrimSuffix(strings.TrimPrefix(chunk, "data: "), "\n\n")), &parsed)
 			require.NoError(t, err)
-
-			usage, ok := parsed["usage"].(map[string]any)
-			require.True(t, ok, "usage missing: %v", parsed)
-
-			assertCacheKey(t, usage, "cache_read_input_tokens", tc.wantRead)
-			assertCacheKey(t, usage, "cache_creation_input_tokens", tc.wantCreate)
-		})
-	}
-}
-
-// assertCacheKey checks a JSON-decoded usage map: want < 0 asserts the key is
-// absent, otherwise the key must be present with that value.
-func assertCacheKey(t *testing.T, usage map[string]any, key string, want int) {
-	t.Helper()
-	if want < 0 {
-		assert.NotContains(t, usage, key)
-		return
-	}
-	assert.Equal(t, float64(want), usage[key], "%s", key)
-}
-
-func TestBedrockUsageExtrasCacheKeys(t *testing.T) {
-	cases := []struct {
-		name       string
-		read       *int32
-		write      *int32
-		wantKeys   map[string]int
-		absentKeys []string
-	}{
-		{
-			name:     "both present",
-			read:     awssdk.Int32(5000),
-			write:    awssdk.Int32(1200),
-			wantKeys: map[string]int{"cache_read_input_tokens": 5000, "cache_creation_input_tokens": 1200, "cache_write_input_tokens": 1200},
-		},
-		{
-			name:       "read only",
-			read:       awssdk.Int32(5000),
-			wantKeys:   map[string]int{"cache_read_input_tokens": 5000},
-			absentKeys: []string{"cache_creation_input_tokens", "cache_write_input_tokens"},
-		},
-		{
-			name:       "write only",
-			write:      awssdk.Int32(1200),
-			wantKeys:   map[string]int{"cache_creation_input_tokens": 1200, "cache_write_input_tokens": 1200},
-			absentKeys: []string{"cache_read_input_tokens"},
-		},
-		{name: "both absent"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			out := bedrockUsageExtras(&brtypes.TokenUsage{
-				CacheReadInputTokens:  tc.read,
-				CacheWriteInputTokens: tc.write,
-			})
-			if len(tc.wantKeys) == 0 {
-				require.Nil(t, out)
-				return
-			}
-			for key, want := range tc.wantKeys {
-				assert.Equal(t, want, out[key])
-			}
-			for _, key := range tc.absentKeys {
-				assert.NotContains(t, out, key)
-			}
+			assert.InDelta(t, tc.wantPrompt, parsed.Usage["prompt_tokens"], 0)
+			assert.InDelta(t, tc.wantPrompt+7, parsed.Usage["total_tokens"], 0)
+			assert.Equal(t, tc.wantDetails != nil, parsed.Usage["prompt_tokens_details"] != nil)
+			assert.NotContains(t, parsed.Usage, "cache_read_input_tokens")
 		})
 	}
 }
