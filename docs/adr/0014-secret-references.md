@@ -132,8 +132,20 @@ Resolution order for one generation:
    in the decoded section with the schemes registered at that moment, so an
    extension's own section can use them.
 3. `run` resolves every string in `Config` (except `extensions`, which are
-   decoded on demand). A load-time check that has to accept a reference, such
-   as the MCP server URL scheme, is repeated on the resolved value.
+   decoded on demand, and `guardrails.rules[].config`, see below). A
+   load-time check that has to accept a reference, such as the MCP server URL
+   scheme, is repeated on the resolved value.
+
+   Guardrail rules are seeded into the guardrail store, so resolving their
+   plugin config here would write resolved secrets to the database. Their
+   `config` block is tagged `secrets:"deferred"` and skipped: the seeder
+   resolves the fields that are not `InputSecret` fields of the plugin
+   (`guardrails.rules[<i>].config.<key>`), and stores the secret fields with
+   their references, which the guardrail service resolves once when it builds
+   the instance (section 4). No other configuration section is copied into a
+   store with secret values: MCP servers, users, tagging rules, and virtual
+   models stay in memory, and the seeded rate-limit and budget rules hold no
+   secrets.
 4. `providers.Init` merges the provider environment variables
    (`OPENAI_API_KEY=${vault:prod/llm#openai}`) into `RawProviders` and then
    resolves the merged result. A `config.yaml` value that an environment

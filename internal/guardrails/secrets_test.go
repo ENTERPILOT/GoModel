@@ -13,6 +13,8 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/plugins"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
 
 // guardrailVault resolves ${vault:...} from a mutable map.
@@ -171,4 +173,24 @@ func TestServiceSecretWriter(t *testing.T) {
 	recheck, err := secrets.Recheck(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, recheck.Fields(), "a deleted guardrail is no longer watched")
+}
+
+// Configuration seeding persists the definition as given: a secret reference
+// reaches the database unresolved, and only the built instance sees the value.
+func TestServiceSeedStoresReferencesNotValues(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := t.Context()
+		store, err := NewSQLStore(ctx, db)
+		require.NoError(t, err)
+		vault := &guardrailVault{values: map[string]string{"pii": "resolved-key"}}
+		service, _ := newSecretsService(t, store, vault)
+
+		require.NoError(t, service.UpsertDefinitions(ctx, []Definition{secretDefinition("pii", "${vault:pii}")}))
+
+		row, err := store.Get(ctx, "pii")
+		require.NoError(t, err)
+		assert.Contains(t, string(row.Config), "${vault:pii}")
+		assert.NotContains(t, string(row.Config), "resolved-key")
+		assert.Equal(t, "resolved-key", instanceAPIKey(t, service, "pii"))
+	})
 }

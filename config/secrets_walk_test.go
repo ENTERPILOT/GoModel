@@ -74,8 +74,10 @@ func TestLoadResultResolveSecretsWalksEveryString(t *testing.T) {
 	assert.Equal(t, "postgres://u:p@db/gomodel", cfg.Storage.PostgreSQL.URL)
 	assert.Equal(t, "redis://:r@cache:6379", cfg.Cache.Model.Redis.URL)
 	assert.Equal(t, "Bearer gh-token", cfg.MCP.Servers["github"].Headers["Authorization"])
-	assert.Equal(t, "plugin-secret", cfg.Guardrails.Rules[0].Config["api_key"])
-	assert.Equal(t, []any{"plugin-secret", 3}, cfg.Guardrails.Rules[0].Config["nested"].(map[string]any)["list"])
+	// Guardrail plugin configs are seeded into the database with their
+	// references; the seeder and the guardrail build resolve them.
+	assert.Equal(t, "${vault:plugin}", cfg.Guardrails.Rules[0].Config["api_key"])
+	assert.Equal(t, []any{"${vault:plugin}", 3}, cfg.Guardrails.Rules[0].Config["nested"].(map[string]any)["list"])
 	assert.Equal(t, "otel-key", cfg.OpenTelemetry.Headers["x-api-key"])
 	assert.Equal(t, []string{"literal ${not-a-ref}"}, cfg.Server.EnabledPassthroughProviders)
 
@@ -182,14 +184,6 @@ func TestLoadResultResolveSecretsErrorsNameTheField(t *testing.T) {
 			}}}},
 			wantField: "mcp.servers.github.headers.Authorization",
 			wantText:  "unknown secret scheme",
-		},
-		{
-			name: "guardrail plugin config",
-			result: &LoadResult{Config: &Config{Guardrails: GuardrailsConfig{Rules: []GuardrailRuleConfig{{
-				Config: map[string]any{"auth": map[string]any{"token": "${env:GOMODEL_TEST_UNSET}"}},
-			}}}}},
-			wantField: "guardrails.rules[0].config.auth.token",
-			wantText:  "GOMODEL_TEST_UNSET",
 		},
 	}
 	for _, tt := range tests {

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"maps"
 	"log/slog"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/server"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
 	"github.com/enterpilot/gomodel/internal/workflows"
+	"github.com/enterpilot/gomodel/pluginapi"
 )
 
 // initWorkflows builds guardrails, the workflows that reference them, and
@@ -107,7 +109,7 @@ func (b *bootstrap) initGuardrails(refreshInterval time.Duration, catalog *plugi
 	app.guardrails = result
 	app.register(subsystemGuardrails, ownedByShutdown, app.guardrails.Close)
 
-	b.seedGuardrails, err = configGuardrailDefinitions(b.appCfg.Guardrails, catalog)
+	b.seedGuardrails, err = configGuardrailDefinitions(b.ctx, b.appCfg.Guardrails, catalog, b.cfg.AppConfig.Secrets)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare guardrail definitions: %w", err)
 	}
@@ -161,7 +163,12 @@ func buildPluginCatalog(appCfg *config.Config, extensions *ext.Registry) (*plugi
 // definitions. The typed system_prompt and llm_based_altering blocks are
 // folded into the generic config; a catalog, when given, rejects unknown
 // types early.
-func configGuardrailDefinitions(cfg config.GuardrailsConfig, catalog *plugins.Catalog) ([]guardrails.Definition, error) {
+//
+// The generic config block reaches here with its secret references in place
+// (see config.GuardrailRuleConfig.Config). Secret fields keep them, so the
+// guardrail store holds references and the guardrail service resolves them
+// when it builds the instance; every other field is resolved here.
+func configGuardrailDefinitions(ctx context.Context, cfg config.GuardrailsConfig, catalog *plugins.Catalog, secrets *config.Secrets) ([]guardrails.Definition, error) {
 	if !cfg.Enabled {
 		return nil, nil
 	}
@@ -176,12 +183,19 @@ func configGuardrailDefinitions(cfg config.GuardrailsConfig, catalog *plugins.Ca
 		if ruleType == "" {
 			return nil, fmt.Errorf("guardrail rule #%d (%q): type is required", i, name)
 		}
+		var schema []pluginapi.Field
 		if catalog != nil {
-			if _, ok := catalog.Lookup(ruleType); !ok {
+			entry, ok := catalog.Lookup(ruleType)
+			if !ok {
 				return nil, fmt.Errorf("guardrail rule #%d (%q): unsupported type %q", i, name, ruleType)
 			}
+			schema = entry.Manifest.ConfigSchema
 		}
-		rawConfig, err := json.Marshal(guardrailRuleConfig(rule, ruleType))
+		ruleConfig, err := resolveGuardrailRuleConfig(ctx, secrets, schema, i, guardrailRuleConfig(rule, ruleType))
+		if err != nil {
+			return nil, fmt.Errorf("guardrail rule #%d (%q): %w", i, name, err)
+		}
+		rawConfig, err := json.Marshal(ruleConfig)
 		if err != nil {
 			return nil, fmt.Errorf("guardrail rule #%d (%q): marshal config: %w", i, name, err)
 		}
@@ -206,6 +220,33 @@ func normalizeGuardrailRuleType(raw string) string {
 		return "system_prompt"
 	}
 	return strings.TrimPrefix(ruleType, "plugin:")
+}
+
+// resolveGuardrailRuleConfig resolves the secret references in the fields of
+// rule i's config that are not secret fields of its plugin, as
+// guardrails.rules[i].config.<key>, and keeps secret fields as configured.
+// With no schema, every field is resolved.
+func resolveGuardrailRuleConfig(ctx context.Context, secrets *config.Secrets, schema []pluginapi.Field, i int, ruleConfig map[string]any) (map[string]any, error) {
+	secretKeys := make(map[string]struct{})
+	for _, field := range schema {
+		if field.Input == pluginapi.InputSecret {
+			secretKeys[field.Key] = struct{}{}
+		}
+	}
+	plain := make(map[string]any, len(ruleConfig))
+	resolved := make(map[string]any, len(ruleConfig))
+	for key, value := range ruleConfig {
+		if _, secret := secretKeys[key]; secret {
+			resolved[key] = value
+			continue
+		}
+		plain[key] = value
+	}
+	if err := secrets.ResolveFields(ctx, fmt.Sprintf("guardrails.rules[%d].config", i), &plain); err != nil {
+		return nil, err
+	}
+	maps.Copy(resolved, plain)
+	return resolved, nil
 }
 
 // guardrailRuleConfig returns the plugin config of a rule: the generic
