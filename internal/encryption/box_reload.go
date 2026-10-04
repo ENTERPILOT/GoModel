@@ -62,12 +62,23 @@ func (b *Box) openingKey(id string) (cipher.AEAD, bool) {
 }
 
 // reloadKeys adopts the key store's current keys and active key, at most once
-// per minReloadInterval unless force is set. It reports whether a reload
-// happened.
+// per minReloadInterval unless force is set. It reports whether the keys were
+// reloaded, by this call or by one that finished while it waited.
+//
+// The key store is read without holding mu: a reload lists keys and may run
+// Argon2id or call a KMS, and reads and seals of keys the Box already holds
+// must not wait for that. reloadMu only serializes reloads.
 func (b *Box) reloadKeys(force bool) bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.reload == nil || (!force && time.Since(b.lastReload) < minReloadInterval) {
+	if b.reload == nil {
+		return false
+	}
+	requested := time.Now()
+	b.reloadMu.Lock()
+	defer b.reloadMu.Unlock()
+	if b.lastReload.After(requested) {
+		return true
+	}
+	if !force && time.Since(b.lastReload) < minReloadInterval {
 		return false
 	}
 	b.lastReload = time.Now()
@@ -80,8 +91,11 @@ func (b *Box) reloadKeys(force bool) bool {
 		return false
 	}
 	next.mu.RLock()
-	defer next.mu.RUnlock()
-	b.keys, b.active = next.keys, next.active
-	slog.Info("reloaded encryption keys", "active_key_id", b.active)
+	keys, active := next.keys, next.active
+	next.mu.RUnlock()
+	b.mu.Lock()
+	b.keys, b.active = keys, active
+	b.mu.Unlock()
+	slog.Info("reloaded encryption keys", "active_key_id", active)
 	return true
 }

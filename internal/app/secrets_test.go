@@ -203,3 +203,23 @@ func TestOpenSecretBoxUsesKeyWrapperFromLoadResult(t *testing.T) {
 	require.Len(t, stored, 1)
 	assert.Equal(t, "kms:test", stored[0].WrapperID)
 }
+
+func TestReencryptSecretsReportsOnlyPassesThatRan(t *testing.T) {
+	loaded := secretsTestConfig(t, "test-key")
+	ctx := context.Background()
+	_, err := ReencryptSecrets(ctx, ReencryptOptions{Config: loaded})
+	require.NoError(t, err)
+	withSQL(t, loaded, func(db sqlx.DB) {
+		seedPlaintextSecrets(t, db)
+		// A value under a data key the database does not have makes the
+		// first pass fail.
+		_, err := db.Exec(ctx, `UPDATE provider_credentials SET api_keys = ? WHERE name = 'openai'`,
+			`["enc:v1:9:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"]`)
+		require.NoError(t, err)
+	})
+
+	result, err := ReencryptSecrets(ctx, ReencryptOptions{Config: loaded})
+	require.Error(t, err)
+	require.Len(t, result.Reports, 1, "passes that did not run have no report")
+	assert.Equal(t, "provider_credentials", result.Reports[0].Entity)
+}

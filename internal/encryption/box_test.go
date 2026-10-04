@@ -3,9 +3,11 @@ package encryption
 import (
 	"bytes"
 	"crypto/rand"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -220,4 +222,42 @@ func TestReencryptRows(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, Report{Entity: "t", Rows: 4, Reencrypted: 2, Skipped: 1}, report)
 	assert.Equal(t, 3, attempts["stuck"], "a row in conflict is retried a bounded number of times")
+}
+
+func TestBoxReloadDoesNotBlockKnownKeys(t *testing.T) {
+	box := testBox(t, "1")
+	known, err := box.Seal(AAD("k", "id", "f"), "v")
+	require.NoError(t, err)
+
+	started, release := make(chan struct{}), make(chan struct{})
+	box.reload = func() (*Box, error) {
+		close(started)
+		<-release
+		return nil, errors.New("key store unavailable")
+	}
+	reloadDone := make(chan struct{})
+	go func() {
+		defer close(reloadDone)
+		_, err := box.Open(AAD("k", "id", "f"), strings.Replace(known, "enc:v1:1:", "enc:v1:9:", 1))
+		assert.ErrorIs(t, err, errUnknownKey)
+	}()
+	<-started
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		opened, err := box.Open(AAD("k", "id", "f"), known)
+		assert.NoError(t, err)
+		assert.Equal(t, "v", opened)
+		_, err = box.Seal(AAD("k", "id", "f"), "w")
+		assert.NoError(t, err)
+		assert.Equal(t, "1", box.ActiveKeyID())
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		assert.Fail(t, "reads and seals waited for a slow key-store reload")
+	}
+	close(release)
+	<-reloadDone
 }

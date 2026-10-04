@@ -108,7 +108,6 @@ func ReencryptSecrets(ctx context.Context, opts ReencryptOptions) (ReencryptResu
 		// in-flight saves have settled, moves such a row to the new key.
 		rounds = 2
 	}
-	result.Reports = make([]encryption.Report, len(passes))
 	for round := range rounds {
 		if round > 0 {
 			select {
@@ -119,7 +118,13 @@ func ReencryptSecrets(ctx context.Context, opts ReencryptOptions) (ReencryptResu
 		}
 		for i, pass := range passes {
 			report, err := pass()
-			result.Reports[i] = mergeReports(result.Reports[i], report, round == 0)
+			// Only passes that ran get a report: a failure in the first
+			// round must not leave blank entries that print as empty passes.
+			if round == 0 {
+				result.Reports = append(result.Reports, report)
+			} else {
+				result.Reports[i] = mergeReports(result.Reports[i], report)
+			}
 			if err != nil {
 				return result, fmt.Errorf("%s: %w", report.Entity, err)
 			}
@@ -135,10 +140,7 @@ var rotationSettle = 2 * time.Second
 // mergeReports adds a later round's rewrites to the first round's report. Rows
 // and skips come from the latest round: a row skipped once and rewritten
 // later is not skipped.
-func mergeReports(total, round encryption.Report, first bool) encryption.Report {
-	if first {
-		return round
-	}
+func mergeReports(total, round encryption.Report) encryption.Report {
 	total.Reencrypted += round.Reencrypted
 	total.Rows, total.Skipped = round.Rows, round.Skipped
 	return total

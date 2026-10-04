@@ -54,8 +54,10 @@ type Box struct {
 	// active. A running gateway uses them to follow a data key rotation done
 	// by `secrets reencrypt --rotate-data-key` after it started. Both are nil
 	// for a Box that is not backed by a key store.
-	reload     func() (*Box, error)
-	activeID   func() (string, error)
+	reload   func() (*Box, error)
+	activeID func() (string, error)
+	// reloadMu serializes reloads and guards lastReload.
+	reloadMu   sync.Mutex
 	lastReload time.Time
 
 	plaintextOnce sync.Once
