@@ -334,3 +334,20 @@ func TestOpenMovesDataKeyBetweenExtensionWrappers(t *testing.T) {
 		assertOpens(t, open(t, store, encryption.Options{Wrapper: newKMS}), sealed, "sk-one")
 	})
 }
+
+func TestRunningBoxSealsWithRotatedKeyBeforeAnyRead(t *testing.T) {
+	runKeyStoreSuite(t, func(t *testing.T, store encryption.KeyStore) {
+		opts := encryption.Options{Key: "k1"}
+		running := open(t, store, opts)
+		_, err := encryption.RotateDataKey(context.Background(), store, opts)
+		require.NoError(t, err)
+
+		sealed := seal(t, running, "sk-new")
+		assert.Regexp(t, `^enc:v1:2:`, sealed, "a gateway that outlived the rotation seals with the new key")
+
+		a, b := "x", "y"
+		require.NoError(t, running.SealFields("kind", "id", encryption.Field{Name: "a", Value: &a}, encryption.Field{Name: "b", Value: &b}))
+		assert.Regexp(t, `^enc:v1:2:`, a)
+		assert.Regexp(t, `^enc:v1:2:`, b)
+	})
+}

@@ -91,35 +91,56 @@ func (s *sealedStore) Upsert(ctx context.Context, server ManagedServer) error {
 	return s.Store.Upsert(ctx, server)
 }
 
+// headerSwapper replaces a server's headers only while they still hold the
+// values read earlier. Both store backends implement it.
+type headerSwapper interface {
+	swapHeaders(ctx context.Context, current, next ManagedServer) (bool, error)
+}
+
 // reencrypt rewrites every server holding a plaintext header or one sealed
-// with an older data key. Each row is re-read just before it is rewritten, so
-// an edit or delete made since the listing is not overwritten with the listed
-// copy.
-func (s *sealedStore) reencrypt(ctx context.Context) (encryption.Report, error) {
-	report := encryption.Report{Entity: "mcp_servers"}
+// with an older data key. Each write is conditional on the headers still being
+// what was read, so a concurrent admin edit is never overwritten: the row is
+// read again and retried.
+func (s *sealedStore) reencrypt(ctx context.Context, swap headerSwapper) (encryption.Report, error) {
 	listed, err := s.Store.List(ctx)
 	if err != nil {
-		return report, err
+		return encryption.Report{Entity: "mcp_servers"}, err
 	}
-	report.Rows = len(listed)
-	for _, row := range listed {
-		server, err := s.Store.Get(ctx, row.Name)
-		if errors.Is(err, ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return report, err
-		}
-		if !s.box.NeedsReseal(headerSecretFields(server.Headers)...) {
-			continue
-		}
-		if err := s.open(server); err != nil {
-			return report, err
-		}
-		if err := s.Upsert(ctx, *server); err != nil {
-			return report, err
-		}
-		report.Reencrypted++
+	names := make([]string, len(listed))
+	for i, row := range listed {
+		names[i] = row.Name
 	}
-	return report, nil
+	return encryption.ReencryptRows("mcp_servers", names, func(name string) (encryption.RowOutcome, error) {
+		return s.reencryptRow(ctx, swap, name)
+	})
+}
+
+func (s *sealedStore) reencryptRow(ctx context.Context, swap headerSwapper, name string) (encryption.RowOutcome, error) {
+	current, err := s.Store.Get(ctx, name)
+	if errors.Is(err, ErrNotFound) {
+		return encryption.RowUnchanged, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if !s.box.NeedsReseal(headerSecretFields(current.Headers)...) {
+		return encryption.RowUnchanged, nil
+	}
+	next := *current
+	if err := s.open(&next); err != nil {
+		return 0, err
+	}
+	if err := transformHeaders(&next, func(id string, fields ...encryption.Field) error {
+		return s.box.SealFields(mcpSecretKind, id, fields...)
+	}); err != nil {
+		return 0, err
+	}
+	swapped, err := swap.swapHeaders(ctx, *current, next)
+	if err != nil {
+		return 0, err
+	}
+	if !swapped {
+		return encryption.RowConflict, nil
+	}
+	return encryption.RowRewritten, nil
 }

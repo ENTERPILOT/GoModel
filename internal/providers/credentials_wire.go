@@ -61,7 +61,11 @@ func ReencryptCredentials(ctx context.Context, shared storage.Storage, box *encr
 		return encryption.Report{Entity: "provider_credentials"}, err
 	}
 	defer func() { _ = store.Close() }()
-	return (&sealedCredentialStore{CredentialStore: store, box: box}).reencrypt(ctx)
+	swap, ok := store.(credentialSwapper)
+	if !ok {
+		return encryption.Report{Entity: "provider_credentials"}, fmt.Errorf("credential store %T cannot re-encrypt", store)
+	}
+	return (&sealedCredentialStore{CredentialStore: store, box: box}).reencrypt(ctx, swap)
 }
 
 func newCredentialsResult(ctx context.Context, storeConn storage.Storage, box *encryption.Box, factory *ProviderFactory, registry *ModelRegistry, declaredNames []string, resilience config.ResilienceConfig) (*CredentialsResult, error) {

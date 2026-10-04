@@ -92,7 +92,7 @@ func TestReencryptGuardrailSecrets(t *testing.T) {
 		require.NoError(t, raw.Upsert(ctx, Definition{Name: "prompt", Type: "system_prompt", Config: []byte(`{"content":"hello"}`)}))
 
 		sealed := &sealedStore{Store: raw, box: encryptiontest.Rotate(t, keys), secretKeys: testSecretKeys}
-		report, err := sealed.reencrypt(ctx)
+		report, err := sealed.reencrypt(ctx, raw.(configSwapper))
 		require.NoError(t, err)
 		assert.Equal(t, encryption.Report{Entity: "guardrail_definitions", Rows: 3, Reencrypted: 2}, report)
 
@@ -103,7 +103,7 @@ func TestReencryptGuardrailSecrets(t *testing.T) {
 			assertJSONEqual(t, got.Config, `{"api_key":"`+want+`"}`)
 		}
 
-		again, err := sealed.reencrypt(ctx)
+		again, err := sealed.reencrypt(ctx, raw.(configSwapper))
 		require.NoError(t, err)
 		assert.Equal(t, 0, again.Reencrypted)
 	})
@@ -118,7 +118,7 @@ func TestReencryptKeepsSealedSecretsOfUnknownPlugins(t *testing.T) {
 		// The plugin is no longer in the catalog when the pass runs.
 		noSchema := func(string) map[string]bool { return nil }
 		sealed := &sealedStore{Store: raw, box: encryptiontest.Rotate(t, keys), secretKeys: noSchema}
-		report, err := sealed.reencrypt(ctx)
+		report, err := sealed.reencrypt(ctx, raw.(configSwapper))
 		require.NoError(t, err)
 		assert.Equal(t, 1, report.Reencrypted)
 
@@ -127,5 +127,30 @@ func TestReencryptKeepsSealedSecretsOfUnknownPlugins(t *testing.T) {
 		got, err := sealed.Get(ctx, "pii")
 		require.NoError(t, err)
 		assertJSONEqual(t, got.Config, `{"api_key":"pk-old"}`)
+	})
+}
+
+func TestSwapConfigIsConditional(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, raw Store) {
+		ctx := context.Background()
+		require.NoError(t, raw.Upsert(ctx, Definition{Name: "pii", Type: "presidio", Description: "d", Config: []byte(`{"api_key":"a","entities":["EMAIL"],"threshold":0.5}`)}))
+		current, err := raw.Get(ctx, "pii")
+		require.NoError(t, err)
+
+		swap := raw.(configSwapper)
+		next := *current
+		next.Config = []byte(`{"api_key":"b","entities":["EMAIL"],"threshold":0.5}`)
+		next.Description = "ignored"
+		swapped, err := swap.swapConfig(ctx, *current, next)
+		require.NoError(t, err)
+		assert.True(t, swapped)
+		got, err := raw.Get(ctx, "pii")
+		require.NoError(t, err)
+		assertJSONEqual(t, got.Config, string(next.Config))
+		assert.Equal(t, "d", got.Description)
+
+		swapped, err = swap.swapConfig(ctx, *current, next)
+		require.NoError(t, err)
+		assert.False(t, swapped, "a stale read does not match")
 	})
 }

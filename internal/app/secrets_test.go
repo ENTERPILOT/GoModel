@@ -86,6 +86,9 @@ func readStoredSecrets(t *testing.T, db sqlx.DB) storedSecrets {
 }
 
 func TestReencryptSecrets(t *testing.T) {
+	previousSettle := rotationSettle
+	rotationSettle = 0
+	t.Cleanup(func() { rotationSettle = previousSettle })
 	loaded := secretsTestConfig(t, "test-key")
 	withSQL(t, loaded, func(db sqlx.DB) { seedPlaintextSecrets(t, db) })
 	ctx := context.Background()

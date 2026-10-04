@@ -78,7 +78,7 @@ func TestReencryptHeaders(t *testing.T) {
 		require.NoError(t, raw.Upsert(ctx, sealedTestServer("no-headers", nil)))
 
 		sealed := &sealedStore{Store: raw, box: encryptiontest.Rotate(t, keys)}
-		report, err := sealed.reencrypt(ctx)
+		report, err := sealed.reencrypt(ctx, raw.(headerSwapper))
 		require.NoError(t, err)
 		assert.Equal(t, encryption.Report{Entity: "mcp_servers", Rows: 3, Reencrypted: 2}, report)
 
@@ -91,8 +91,33 @@ func TestReencryptHeaders(t *testing.T) {
 			assert.Equal(t, want, got.Headers["Authorization"])
 		}
 
-		again, err := sealed.reencrypt(ctx)
+		again, err := sealed.reencrypt(ctx, raw.(headerSwapper))
 		require.NoError(t, err)
 		assert.Equal(t, 0, again.Reencrypted)
+	})
+}
+
+func TestSwapHeadersIsConditional(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, raw Store) {
+		ctx := context.Background()
+		require.NoError(t, raw.Upsert(ctx, sealedTestServer("github", map[string]string{"Authorization": "a", "X-Team": "t"})))
+		current, err := raw.Get(ctx, "github")
+		require.NoError(t, err)
+
+		swap := raw.(headerSwapper)
+		next := *current
+		next.Headers = map[string]string{"Authorization": "b", "X-Team": "t2"}
+		next.Description = "ignored"
+		swapped, err := swap.swapHeaders(ctx, *current, next)
+		require.NoError(t, err)
+		assert.True(t, swapped)
+		got, err := raw.Get(ctx, "github")
+		require.NoError(t, err)
+		assert.Equal(t, next.Headers, got.Headers)
+		assert.Empty(t, got.Description)
+
+		swapped, err = swap.swapHeaders(ctx, *current, next)
+		require.NoError(t, err)
+		assert.False(t, swapped, "a stale read does not match")
 	})
 }

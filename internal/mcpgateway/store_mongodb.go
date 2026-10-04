@@ -130,6 +130,35 @@ func (s *MongoDBStore) Delete(ctx context.Context, name string) error {
 	return nil
 }
 
+// swapHeaders replaces a server's header values only while they still hold
+// the values in current, and reports whether it did. Headers are compared
+// and set one path at a time: a stored subdocument's key order is not
+// stable, so comparing the whole map would miss.
+func (s *MongoDBStore) swapHeaders(ctx context.Context, current, next ManagedServer) (bool, error) {
+	filter := bson.M{"_id": strings.TrimSpace(current.Name)}
+	set := bson.M{}
+	for name, value := range current.Headers {
+		if !mongoSafeKey(name) {
+			return false, nil
+		}
+		filter["headers."+name] = value
+		set["headers."+name] = next.Headers[name]
+	}
+	if len(set) == 0 {
+		return false, nil
+	}
+	result, err := s.collection.UpdateOne(ctx, filter, bson.M{"$set": set})
+	if err != nil {
+		return false, fmt.Errorf("swap mcp server headers: %w", err)
+	}
+	return result.MatchedCount > 0, nil
+}
+
+// mongoSafeKey reports whether name can be used in a dotted field path.
+func mongoSafeKey(name string) bool {
+	return name != "" && !strings.ContainsAny(name, ".") && !strings.HasPrefix(name, "$")
+}
+
 func (s *MongoDBStore) Close() error {
 	return nil
 }

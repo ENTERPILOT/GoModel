@@ -21,14 +21,14 @@ func secretsUsage(productName string) string {
 Encrypts every dashboard-managed secret (provider credentials, MCP server
 headers, guardrail secrets) that is still stored in plaintext, and re-encrypts
 values sealed with an older data key under the active one. Safe to run more
-than once, and while the gateway is running; avoid editing entries while it
-runs.
+than once, and while the gateway is running: an entry edited during the run
+is re-read rather than overwritten.
 
 Reads the same configuration and environment as the gateway, and needs
 GOMODEL_ENCRYPTION_KEY (or a key wrapper registered by the distribution).
 
   --rotate-data-key   create a new data key and move every secret to it;
-                      running gateways load the new key on first use
+                      running gateways switch to it on their next save
 `, productName)
 }
 
@@ -92,7 +92,11 @@ func runSecretsReencrypt(ctx context.Context, opts Options, secretsOpts secretsO
 		RotateDataKey: secretsOpts.RotateDataKey,
 	})
 	for _, report := range outcome.Reports {
-		fmt.Fprintf(opts.Stdout, "%s: %d rows, %d re-encrypted\n", report.Entity, report.Rows, report.Reencrypted)
+		fmt.Fprintf(opts.Stdout, "%s: %d rows, %d re-encrypted", report.Entity, report.Rows, report.Reencrypted)
+		if report.Skipped > 0 {
+			fmt.Fprintf(opts.Stdout, ", %d skipped (kept changing; run again)", report.Skipped)
+		}
+		fmt.Fprintln(opts.Stdout)
 	}
 	if err != nil {
 		return fmt.Errorf("secrets reencrypt: %w", err)

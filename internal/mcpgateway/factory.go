@@ -69,7 +69,11 @@ func Reencrypt(ctx context.Context, shared storage.Storage, box *encryption.Box)
 		return encryption.Report{Entity: "mcp_servers"}, err
 	}
 	defer func() { _ = store.Close() }()
-	return (&sealedStore{Store: store, box: box}).reencrypt(ctx)
+	swap, ok := store.(headerSwapper)
+	if !ok {
+		return encryption.Report{Entity: "mcp_servers"}, fmt.Errorf("mcp server store %T cannot re-encrypt", store)
+	}
+	return (&sealedStore{Store: store, box: box}).reencrypt(ctx, swap)
 }
 
 func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage, box *encryption.Box, httpClient *http.Client, usageLogger usage.LoggerInterface) (*Result, error) {

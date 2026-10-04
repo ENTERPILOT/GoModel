@@ -177,6 +177,26 @@ func (s *SQLStore) Delete(ctx context.Context, name string) error {
 	return nil
 }
 
+// swapHeaders replaces a server's headers only while they still hold the
+// values in current, and reports whether it did. Other columns are left
+// alone, so a concurrent edit to them is never lost either.
+func (s *SQLStore) swapHeaders(ctx context.Context, current, next ManagedServer) (bool, error) {
+	currentJSON, err := encodeJSONMap(current.Headers)
+	if err != nil {
+		return false, err
+	}
+	nextJSON, err := encodeJSONMap(next.Headers)
+	if err != nil {
+		return false, err
+	}
+	affected, err := s.db.Exec(ctx, `UPDATE mcp_servers SET headers = ? WHERE name = ? AND headers = ?`,
+		nextJSON, strings.TrimSpace(current.Name), currentJSON)
+	if err != nil {
+		return false, fmt.Errorf("swap mcp server headers: %w", err)
+	}
+	return affected > 0, nil
+}
+
 func (s *SQLStore) Close() error {
 	return nil
 }

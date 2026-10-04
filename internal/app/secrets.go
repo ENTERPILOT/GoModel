@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/ext"
@@ -99,14 +100,48 @@ func ReencryptSecrets(ctx context.Context, opts ReencryptOptions) (ReencryptResu
 		func() (encryption.Report, error) { return mcpgateway.Reencrypt(ctx, shared, box) },
 		func() (encryption.Report, error) { return guardrails.Reencrypt(ctx, shared, box, catalog) },
 	}
-	for _, pass := range passes {
-		report, err := pass()
-		result.Reports = append(result.Reports, report)
-		if err != nil {
-			return result, fmt.Errorf("%s: %w", report.Entity, err)
+	rounds := 1
+	if opts.RotateDataKey {
+		// Running gateways check the active key before every seal, but a
+		// save that checked just before the rotation can still land after
+		// the first round passed its row. A second round, after those
+		// in-flight saves have settled, moves such a row to the new key.
+		rounds = 2
+	}
+	result.Reports = make([]encryption.Report, len(passes))
+	for round := range rounds {
+		if round > 0 {
+			select {
+			case <-time.After(rotationSettle):
+			case <-ctx.Done():
+				return result, ctx.Err()
+			}
+		}
+		for i, pass := range passes {
+			report, err := pass()
+			result.Reports[i] = mergeReports(result.Reports[i], report, round == 0)
+			if err != nil {
+				return result, fmt.Errorf("%s: %w", report.Entity, err)
+			}
 		}
 	}
 	return result, nil
+}
+
+// rotationSettle is how long a rotating pass waits before its second round:
+// far longer than one admin save takes from sealing to writing.
+var rotationSettle = 2 * time.Second
+
+// mergeReports adds a later round's rewrites to the first round's report. Rows
+// and skips come from the latest round: a row skipped once and rewritten
+// later is not skipped.
+func mergeReports(total, round encryption.Report, first bool) encryption.Report {
+	if first {
+		return round
+	}
+	total.Reencrypted += round.Reencrypted
+	total.Rows, total.Skipped = round.Rows, round.Skipped
+	return total
 }
 
 // reencryptCatalog builds the plugin catalog the gateway would, so plaintext

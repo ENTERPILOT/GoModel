@@ -203,3 +203,21 @@ func TestBoxReloadsKeysForUnknownKeyID(t *testing.T) {
 	require.ErrorIs(t, err, errUnknownKey)
 	assert.Equal(t, 1, reloads, "reloads are rate limited")
 }
+
+func TestReencryptRows(t *testing.T) {
+	attempts := map[string]int{}
+	outcomes := map[string][]RowOutcome{
+		"rewritten": {RowRewritten},
+		"unchanged": {RowUnchanged},
+		"retried":   {RowConflict, RowRewritten},
+		"stuck":     {RowConflict, RowConflict, RowConflict, RowRewritten},
+	}
+	report, err := ReencryptRows("t", []string{"rewritten", "unchanged", "retried", "stuck"}, func(name string) (RowOutcome, error) {
+		outcome := outcomes[name][attempts[name]]
+		attempts[name]++
+		return outcome, nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, Report{Entity: "t", Rows: 4, Reencrypted: 2, Skipped: 1}, report)
+	assert.Equal(t, 3, attempts["stuck"], "a row in conflict is retried a bounded number of times")
+}

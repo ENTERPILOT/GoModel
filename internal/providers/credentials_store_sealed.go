@@ -77,34 +77,55 @@ func (s *sealedCredentialStore) Upsert(ctx context.Context, cred ManagedProvider
 	return s.CredentialStore.Upsert(ctx, cred)
 }
 
+// credentialSwapper replaces a credential's secret fields only while they
+// still hold the values read earlier. Both store backends implement it.
+type credentialSwapper interface {
+	swapSecrets(ctx context.Context, current, next ManagedProviderCredential) (bool, error)
+}
+
 // reencrypt rewrites every row holding plaintext or a value sealed with an
-// older data key. Each row is re-read just before it is rewritten, so an edit
-// or delete made since the listing is not overwritten with the listed copy.
-func (s *sealedCredentialStore) reencrypt(ctx context.Context) (encryption.Report, error) {
-	report := encryption.Report{Entity: "provider_credentials"}
+// older data key. Each write is conditional on the secrets still being what
+// was read, so a concurrent admin edit is never overwritten: the row is read
+// again and retried.
+func (s *sealedCredentialStore) reencrypt(ctx context.Context, swap credentialSwapper) (encryption.Report, error) {
 	listed, err := s.CredentialStore.List(ctx)
 	if err != nil {
-		return report, err
+		return encryption.Report{Entity: "provider_credentials"}, err
 	}
-	report.Rows = len(listed)
-	for _, row := range listed {
-		cred, err := s.CredentialStore.Get(ctx, row.Name)
-		if errors.Is(err, ErrCredentialNotFound) {
-			continue
-		}
-		if err != nil {
-			return report, err
-		}
-		if !s.box.NeedsReseal(credentialSecretFields(cred)...) {
-			continue
-		}
-		if err := s.open(cred); err != nil {
-			return report, err
-		}
-		if err := s.Upsert(ctx, *cred); err != nil {
-			return report, err
-		}
-		report.Reencrypted++
+	names := make([]string, len(listed))
+	for i, row := range listed {
+		names[i] = row.Name
 	}
-	return report, nil
+	return encryption.ReencryptRows("provider_credentials", names, func(name string) (encryption.RowOutcome, error) {
+		return s.reencryptRow(ctx, swap, name)
+	})
+}
+
+func (s *sealedCredentialStore) reencryptRow(ctx context.Context, swap credentialSwapper, name string) (encryption.RowOutcome, error) {
+	current, err := s.CredentialStore.Get(ctx, name)
+	if errors.Is(err, ErrCredentialNotFound) {
+		return encryption.RowUnchanged, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if !s.box.NeedsReseal(credentialSecretFields(current)...) {
+		return encryption.RowUnchanged, nil
+	}
+	next := *current
+	next.APIKeys = slices.Clone(current.APIKeys)
+	if err := s.open(&next); err != nil {
+		return 0, err
+	}
+	if err := s.box.SealFields(credentialSecretKind, normalizeCredentialName(next.Name), credentialSecretFields(&next)...); err != nil {
+		return 0, err
+	}
+	swapped, err := swap.swapSecrets(ctx, *current, next)
+	if err != nil {
+		return 0, err
+	}
+	if !swapped {
+		return encryption.RowConflict, nil
+	}
+	return encryption.RowRewritten, nil
 }

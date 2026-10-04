@@ -104,6 +104,15 @@ func Open(ctx context.Context, store KeyStore, opts Options) (*Box, error) {
 		defer cancel()
 		return Open(ctx, store, opts)
 	}
+	box.activeID = func() (string, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), reloadTimeout)
+		defer cancel()
+		keys, err := store.List(ctx)
+		if err != nil {
+			return "", err
+		}
+		return activeKeyID(keys)
+	}
 	return box, nil
 }
 

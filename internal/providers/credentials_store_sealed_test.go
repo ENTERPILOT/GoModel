@@ -123,7 +123,7 @@ func TestReencryptCredentials(t *testing.T) {
 		rotated := encryptiontest.Rotate(t, keys)
 		sealed := &sealedCredentialStore{CredentialStore: raw, box: rotated}
 
-		report, err := sealed.reencrypt(ctx)
+		report, err := sealed.reencrypt(ctx, raw.(credentialSwapper))
 		require.NoError(t, err)
 		assert.Equal(t, encryption.Report{Entity: "provider_credentials", Rows: 3, Reencrypted: 2}, report)
 
@@ -136,46 +136,104 @@ func TestReencryptCredentials(t *testing.T) {
 			assert.Equal(t, []string{want}, got.APIKeys)
 		}
 
-		again, err := sealed.reencrypt(ctx)
+		again, err := sealed.reencrypt(ctx, raw.(credentialSwapper))
 		require.NoError(t, err)
 		assert.Equal(t, 0, again.Reencrypted, "a second pass rewrites nothing")
 	})
 }
 
-// editAfterList runs edit right after List returns, standing in for an admin
-// change that lands while a re-encryption pass is running.
-type editAfterList struct {
+// editAfterGet runs edit once, right after the first Get returns: an admin
+// change landing between a re-encryption pass's read and its write.
+type editAfterGet struct {
 	CredentialStore
 	edit func()
+	done *bool
 }
 
-func (s editAfterList) List(ctx context.Context) ([]ManagedProviderCredential, error) {
-	rows, err := s.CredentialStore.List(ctx)
-	s.edit()
-	return rows, err
+func (s editAfterGet) Get(ctx context.Context, name string) (*ManagedProviderCredential, error) {
+	cred, err := s.CredentialStore.Get(ctx, name)
+	if !*s.done {
+		*s.done = true
+		s.edit()
+	}
+	return cred, err
 }
 
-func TestReencryptCredentialsKeepsConcurrentChanges(t *testing.T) {
+func TestReencryptCredentialsNeverOverwritesConcurrentEdits(t *testing.T) {
+	tests := []struct {
+		name       string
+		edit       func(t *testing.T, raw CredentialStore)
+		want       []string
+		wantReport encryption.Report
+	}{
+		{
+			name: "edited",
+			edit: func(t *testing.T, raw CredentialStore) {
+				require.NoError(t, raw.Upsert(context.Background(), ManagedProviderCredential{Name: "row", Type: "openai", APIKeys: []string{"sk-new"}, Enabled: false}))
+			},
+			want:       []string{"sk-new"},
+			wantReport: encryption.Report{Entity: "provider_credentials", Rows: 1, Reencrypted: 1},
+		},
+		{
+			name: "deleted",
+			edit: func(t *testing.T, raw CredentialStore) {
+				require.NoError(t, raw.Delete(context.Background(), "row"))
+			},
+			wantReport: encryption.Report{Entity: "provider_credentials", Rows: 1},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runCredentialStoreSuite(t, func(t *testing.T, raw CredentialStore) {
+				ctx := context.Background()
+				box, _ := encryptiontest.NewBox(t)
+				require.NoError(t, raw.Upsert(ctx, ManagedProviderCredential{Name: "row", Type: "openai", APIKeys: []string{"sk-old"}, Enabled: true}))
+
+				done := false
+				store := editAfterGet{CredentialStore: raw, done: &done, edit: func() { tt.edit(t, raw) }}
+				sealed := &sealedCredentialStore{CredentialStore: store, box: box}
+				report, err := sealed.reencrypt(ctx, raw.(credentialSwapper))
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantReport, report)
+
+				got, err := sealCredentialStore(raw, box).Get(ctx, "row")
+				if tt.want == nil {
+					require.ErrorIs(t, err, ErrCredentialNotFound, "a deleted row is not recreated")
+					return
+				}
+				require.NoError(t, err)
+				assert.Equal(t, tt.want, got.APIKeys, "the edit is not overwritten with the earlier read")
+				assert.False(t, got.Enabled)
+				stored, err := raw.Get(ctx, "row")
+				require.NoError(t, err)
+				assert.True(t, box.IsCurrent(stored.APIKeys[0]), "the edited value is encrypted on the retry")
+			})
+		})
+	}
+}
+
+func TestSwapSecretsLeavesOtherColumnsAlone(t *testing.T) {
 	runCredentialStoreSuite(t, func(t *testing.T, raw CredentialStore) {
 		ctx := context.Background()
-		box, _ := encryptiontest.NewBox(t)
-		require.NoError(t, raw.Upsert(ctx, ManagedProviderCredential{Name: "edited", Type: "openai", APIKeys: []string{"sk-old"}, Enabled: true}))
-		require.NoError(t, raw.Upsert(ctx, ManagedProviderCredential{Name: "deleted", Type: "openai", APIKeys: []string{"sk-gone"}, Enabled: true}))
-
-		store := editAfterList{CredentialStore: raw, edit: func() {
-			require.NoError(t, raw.Upsert(ctx, ManagedProviderCredential{Name: "edited", Type: "openai", APIKeys: []string{"sk-new"}, Enabled: false}))
-			require.NoError(t, raw.Delete(ctx, "deleted"))
-		}}
-		sealed := &sealedCredentialStore{CredentialStore: store, box: box}
-		report, err := sealed.reencrypt(ctx)
+		require.NoError(t, raw.Upsert(ctx, ManagedProviderCredential{Name: "row", Type: "openai", APIKeys: []string{"a"}, BaseURL: "https://one", Enabled: true}))
+		current, err := raw.Get(ctx, "row")
 		require.NoError(t, err)
-		assert.Equal(t, 1, report.Reencrypted)
 
-		got, err := sealed.Get(ctx, "edited")
+		swap := raw.(credentialSwapper)
+		next := *current
+		next.APIKeys, next.BaseURL = []string{"b"}, "https://ignored"
+		swapped, err := swap.swapSecrets(ctx, *current, next)
 		require.NoError(t, err)
-		assert.Equal(t, []string{"sk-new"}, got.APIKeys, "the edit is not overwritten with the listed copy")
-		assert.False(t, got.Enabled)
-		_, err = raw.Get(ctx, "deleted")
-		require.ErrorIs(t, err, ErrCredentialNotFound, "a deleted row is not recreated")
+		assert.True(t, swapped)
+
+		got, err := raw.Get(ctx, "row")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"b"}, got.APIKeys)
+		assert.Equal(t, "https://one", got.BaseURL)
+		assert.True(t, got.UpdatedAt.Equal(current.UpdatedAt), "re-encryption does not touch updated_at")
+
+		swapped, err = swap.swapSecrets(ctx, *current, next)
+		require.NoError(t, err)
+		assert.False(t, swapped, "a stale read does not match")
 	})
 }

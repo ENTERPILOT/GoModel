@@ -159,42 +159,58 @@ func (s *sealedStore) storedSecretKeys(definition Definition) (map[string]bool, 
 	return keys, fields, err
 }
 
+// configSwapper replaces a definition's config only while it still holds
+// the values read earlier. Both store backends implement it.
+type configSwapper interface {
+	swapConfig(ctx context.Context, current, next Definition) (bool, error)
+}
+
 // reencrypt rewrites every definition holding a plaintext secret or a value
-// sealed with an older data key. Each row is re-read just before it is
-// rewritten, so an edit or delete made since the listing is not overwritten
-// with the listed copy.
-func (s *sealedStore) reencrypt(ctx context.Context) (encryption.Report, error) {
-	report := encryption.Report{Entity: "guardrail_definitions"}
+// sealed with an older data key. Each write is conditional on the config
+// still being what was read, so a concurrent admin edit is never overwritten:
+// the row is read again and retried.
+func (s *sealedStore) reencrypt(ctx context.Context, swap configSwapper) (encryption.Report, error) {
 	listed, err := s.Store.List(ctx)
 	if err != nil {
-		return report, err
+		return encryption.Report{Entity: "guardrail_definitions"}, err
 	}
-	report.Rows = len(listed)
-	for _, row := range listed {
-		definition, err := s.Store.Get(ctx, row.Name)
-		if errors.Is(err, ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return report, err
-		}
-		keys, fields, err := s.storedSecretKeys(*definition)
-		if err != nil {
-			return report, err
-		}
-		if !s.box.NeedsReseal(fields...) {
-			continue
-		}
-		if err := s.open(definition); err != nil {
-			return report, err
-		}
-		if err := s.sealKeys(definition, keys); err != nil {
-			return report, err
-		}
-		if err := s.Store.Upsert(ctx, *definition); err != nil {
-			return report, err
-		}
-		report.Reencrypted++
+	names := make([]string, len(listed))
+	for i, row := range listed {
+		names[i] = row.Name
 	}
-	return report, nil
+	return encryption.ReencryptRows("guardrail_definitions", names, func(name string) (encryption.RowOutcome, error) {
+		return s.reencryptRow(ctx, swap, name)
+	})
+}
+
+func (s *sealedStore) reencryptRow(ctx context.Context, swap configSwapper, name string) (encryption.RowOutcome, error) {
+	current, err := s.Store.Get(ctx, name)
+	if errors.Is(err, ErrNotFound) {
+		return encryption.RowUnchanged, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	keys, fields, err := s.storedSecretKeys(*current)
+	if err != nil {
+		return 0, err
+	}
+	if !s.box.NeedsReseal(fields...) {
+		return encryption.RowUnchanged, nil
+	}
+	next := *current
+	if err := s.open(&next); err != nil {
+		return 0, err
+	}
+	if err := s.sealKeys(&next, keys); err != nil {
+		return 0, err
+	}
+	swapped, err := swap.swapConfig(ctx, *current, next)
+	if err != nil {
+		return 0, err
+	}
+	if !swapped {
+		return encryption.RowConflict, nil
+	}
+	return encryption.RowRewritten, nil
 }

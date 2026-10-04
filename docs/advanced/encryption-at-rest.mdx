@@ -61,9 +61,10 @@ gomodel secrets reencrypt
 
 It uses the same configuration and environment as the gateway, prints counts
 per table (never values), and is safe to run repeatedly and while the gateway
-is running. Each entry is re-read just before it is rewritten, so an edit or
-delete made during the run is kept, but avoid editing entries while it runs:
-an edit landing in that same instant can still be overwritten.
+is running. Each rewrite only succeeds if the entry's secrets are still what
+the command read, so an edit or delete made during the run is never
+overwritten; the command re-reads the entry instead. An entry that keeps
+changing is reported as skipped, and the next run picks it up.
 
 ## Rotate the key
 
@@ -87,8 +88,10 @@ gomodel secrets reencrypt --rotate-data-key
 ```
 
 This creates a new data key and re-encrypts every secret with it. Values under
-older data keys stay readable throughout, and a running gateway loads the new
-key from the database the first time it reads a value sealed with it.
+older data keys stay readable throughout. A running gateway checks which data
+key is active before it saves a secret, so it switches to the new key without
+a restart, and the command makes a second pass for saves that were already in
+flight when the key changed.
 
 ## How it works
 

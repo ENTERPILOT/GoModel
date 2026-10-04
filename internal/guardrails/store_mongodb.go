@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -210,6 +211,44 @@ func (s *MongoDBStore) Delete(ctx context.Context, name string) error {
 
 func (s *MongoDBStore) Close() error {
 	return nil
+}
+
+// swapConfig replaces the config values that differ between current and next
+// only while they still hold current's values, and reports whether it did.
+// Values are compared one path at a time: a stored subdocument's key order is
+// not stable, so comparing the whole document would miss.
+func (s *MongoDBStore) swapConfig(ctx context.Context, current, next Definition) (bool, error) {
+	before, err := mongoConfigFromRaw(current.Config)
+	if err != nil {
+		return false, err
+	}
+	after, err := mongoConfigFromRaw(next.Config)
+	if err != nil {
+		return false, err
+	}
+	filter := bson.M{"_id": normalizeDefinitionName(current.Name)}
+	set := bson.M{}
+	for key, value := range after {
+		// Sealing only rewrites string values; other values (lists,
+		// objects) are left as stored and need no comparison.
+		sealed, isString := value.(string)
+		if old, ok := before[key].(string); !isString || (ok && old == sealed) {
+			continue
+		}
+		if key == "" || strings.Contains(key, ".") || strings.HasPrefix(key, "$") {
+			return false, nil
+		}
+		filter["config."+key] = before[key]
+		set["config."+key] = value
+	}
+	if len(set) == 0 {
+		return false, nil
+	}
+	result, err := s.collection.UpdateOne(ctx, filter, bson.M{"$set": set})
+	if err != nil {
+		return false, fmt.Errorf("swap guardrail config: %w", err)
+	}
+	return result.MatchedCount > 0, nil
 }
 
 func mongoConfigFromRaw(raw json.RawMessage) (bson.M, error) {

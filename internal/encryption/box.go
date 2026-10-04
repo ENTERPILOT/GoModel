@@ -40,11 +40,6 @@ var ErrKeyRequired = errors.New("value is encrypted but GOMODEL_ENCRYPTION_KEY i
 // the stored value, and errors from this package must not echo stored data.
 var errUnknownKey = errors.New("value is encrypted with a data key that is not in encryption_keys")
 
-// minReloadInterval bounds how often a Box re-reads encryption_keys after
-// meeting an unknown key id, so a corrupt row cannot turn every read into a
-// key-store round trip and an Argon2id derivation.
-const minReloadInterval = 10 * time.Second
-
 // Box seals and opens secret field values. A Box without keys (Disabled, or a
 // nil *Box) passes plaintext through unchanged, which is the behaviour of a
 // deployment without GOMODEL_ENCRYPTION_KEY.
@@ -55,10 +50,12 @@ type Box struct {
 	active string
 	keys   map[string]cipher.AEAD
 
-	// reload re-reads the key store. A running gateway uses it to pick up a
-	// data key that `secrets reencrypt --rotate-data-key` created after the
-	// gateway started. Nil for a Box that cannot reload.
+	// reload re-reads the key store, and activeID reads only which key is
+	// active. A running gateway uses them to follow a data key rotation done
+	// by `secrets reencrypt --rotate-data-key` after it started. Both are nil
+	// for a Box that is not backed by a key store.
 	reload     func() (*Box, error)
+	activeID   func() (string, error)
 	lastReload time.Time
 
 	plaintextOnce sync.Once
@@ -115,54 +112,6 @@ func (b *Box) ActiveKeyID() string {
 	return b.active
 }
 
-// sealingKey returns the active key and its id.
-func (b *Box) sealingKey() (string, cipher.AEAD) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	return b.active, b.keys[b.active]
-}
-
-// openingKey returns the data key with id, re-reading the key store once if
-// this Box does not hold it yet.
-func (b *Box) openingKey(id string) (cipher.AEAD, bool) {
-	b.mu.RLock()
-	aead, ok := b.keys[id]
-	b.mu.RUnlock()
-	if ok {
-		return aead, true
-	}
-	if b.reloadKeys() {
-		b.mu.RLock()
-		aead, ok = b.keys[id]
-		b.mu.RUnlock()
-	}
-	return aead, ok
-}
-
-// reloadKeys adopts the key store's current keys and active key. It reports
-// whether a reload happened.
-func (b *Box) reloadKeys() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.reload == nil || time.Since(b.lastReload) < minReloadInterval {
-		return false
-	}
-	b.lastReload = time.Now()
-	next, err := b.reload()
-	if err != nil {
-		slog.Warn("could not reload encryption keys", "error", err)
-		return false
-	}
-	if !next.Enabled() {
-		return false
-	}
-	next.mu.RLock()
-	defer next.mu.RUnlock()
-	b.keys, b.active = next.keys, next.active
-	slog.Info("reloaded encryption keys", "active_key_id", b.active)
-	return true
-}
-
 // AAD builds the additional authenticated data for one secret field.
 func AAD(kind, id, field string) []byte {
 	return []byte(kind + "\x00" + id + "\x00" + field)
@@ -182,11 +131,22 @@ func (b *Box) IsCurrent(value string) bool {
 
 // Seal encrypts plaintext under the active data key. Empty values and every
 // value of a disabled Box are returned unchanged.
+//
+// A Box backed by a key store first checks which data key is active, so a
+// gateway that outlived a data key rotation never seals with the replaced
+// key. Seals only happen on admin writes, so the extra read is cheap.
 func (b *Box) Seal(aad []byte, plaintext string) (string, error) {
 	if plaintext == "" || !b.Enabled() {
 		return plaintext, nil
 	}
-	active, aead := b.sealingKey()
+	active, aead, err := b.currentSealingKey()
+	if err != nil {
+		return "", err
+	}
+	return sealWith(active, aead, aad, plaintext)
+}
+
+func sealWith(active string, aead cipher.AEAD, aad []byte, plaintext string) (string, error) {
 	nonce := make([]byte, aead.NonceSize(), aead.NonceSize()+len(plaintext)+aead.Overhead())
 	if _, err := rand.Read(nonce); err != nil {
 		return "", fmt.Errorf("generate nonce: %w", err)

@@ -9,16 +9,36 @@ type Field struct {
 	Value *string
 }
 
-// SealFields seals every field of one entity in place.
+// SealFields seals every field of one entity in place, all with the same
+// data key: the active one is looked up once per entity, not per field.
 func (b *Box) SealFields(kind, id string, fields ...Field) error {
+	if !b.Enabled() || !hasValue(fields) {
+		return nil
+	}
+	active, aead, err := b.currentSealingKey()
+	if err != nil {
+		return fmt.Errorf("encrypt %s %q: %w", kind, id, err)
+	}
 	for _, field := range fields {
-		sealed, err := b.Seal(AAD(kind, id, field.Name), *field.Value)
+		if *field.Value == "" {
+			continue
+		}
+		sealed, err := sealWith(active, aead, AAD(kind, id, field.Name), *field.Value)
 		if err != nil {
 			return fmt.Errorf("encrypt %s %q field %s: %w", kind, id, field.Name, err)
 		}
 		*field.Value = sealed
 	}
 	return nil
+}
+
+func hasValue(fields []Field) bool {
+	for _, field := range fields {
+		if *field.Value != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // OpenFields opens every field of one entity in place.
@@ -57,4 +77,46 @@ type Report struct {
 	Rows int
 	// Reencrypted is how many rows were rewritten.
 	Reencrypted int
+	// Skipped is how many rows kept changing under the pass and were left
+	// for the next run.
+	Skipped int
+}
+
+// maxRowAttempts bounds how often a re-encryption pass re-reads a row whose
+// secrets changed between its read and its conditional write.
+const maxRowAttempts = 3
+
+// RowOutcome is what re-encrypting one row did.
+type RowOutcome int
+
+const (
+	// RowUnchanged: the row needed no rewrite, or no longer exists.
+	RowUnchanged RowOutcome = iota
+	// RowRewritten: the row's secrets were re-sealed.
+	RowRewritten
+	// RowConflict: the row's secrets changed between the read and the
+	// conditional write, so nothing was written.
+	RowConflict
+)
+
+// ReencryptRows runs rewrite for each row and tallies the outcomes. A row in
+// conflict is re-read and retried a few times, then counted as skipped.
+func ReencryptRows(entity string, names []string, rewrite func(name string) (RowOutcome, error)) (Report, error) {
+	report := Report{Entity: entity, Rows: len(names)}
+	for _, name := range names {
+		outcome := RowConflict
+		for attempt := 0; attempt < maxRowAttempts && outcome == RowConflict; attempt++ {
+			var err error
+			if outcome, err = rewrite(name); err != nil {
+				return report, err
+			}
+		}
+		switch outcome {
+		case RowRewritten:
+			report.Reencrypted++
+		case RowConflict:
+			report.Skipped++
+		}
+	}
+	return report, nil
 }
