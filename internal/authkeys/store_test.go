@@ -53,6 +53,7 @@ func TestStore_RoundTrip(t *testing.T) {
 			DashboardAccess: true,
 			RedactedValue:   TokenPrefix + "...full",
 			SecretHash:      "hash-full",
+			ImportedFrom:    ImportedFromLiteLLM,
 			Enabled:         false,
 			ExpiresAt:       &expires,
 			DeactivatedAt:   &deactivated,
@@ -85,6 +86,7 @@ func TestStore_RoundTrip(t *testing.T) {
 		require.True(t, got.DashboardAccess)
 		require.Equal(t, full.RedactedValue, got.RedactedValue)
 		require.Equal(t, full.SecretHash, got.SecretHash)
+		require.Equal(t, ImportedFromLiteLLM, got.ImportedFrom)
 		require.False(t, got.Enabled)
 		require.NotNil(t, got.ExpiresAt)
 		require.True(t, got.ExpiresAt.Equal(expires), "ExpiresAt = %v, want %v", got.ExpiresAt, expires)
@@ -100,6 +102,7 @@ func TestStore_RoundTrip(t *testing.T) {
 			require.Nil(t, got.Labels, "%s: Labels = %#v, want nil", got.ID, got.Labels)
 			require.Nil(t, got.AllowedModels, "%s: AllowedModels = %#v, want nil", got.ID, got.AllowedModels)
 			require.False(t, got.DashboardAccess)
+			require.Empty(t, got.ImportedFrom)
 			require.True(t, got.Enabled)
 			require.Nil(t, got.ExpiresAt)
 			require.Nil(t, got.DeactivatedAt)
@@ -150,7 +153,7 @@ func TestStore_CreateRejectsDuplicates(t *testing.T) {
 
 		sameSecret := newTestKey("key-two", storeTestNow)
 		sameSecret.SecretHash = key.SecretHash
-		require.Error(t, store.Create(ctx, sameSecret), "duplicate secret hash")
+		require.ErrorIs(t, store.Create(ctx, sameSecret), ErrSecretHashExists)
 
 		keys, err := store.List(ctx)
 		require.NoError(t, err)

@@ -299,3 +299,23 @@ func TestChain_MutualMigratedFailoverRulesLoad(t *testing.T) {
 	err = validateChains(&snap)
 	require.NoError(t, err)
 }
+
+func TestChain_TargetModelsListsDeclaredLeaves(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	upsertRedirect(t, svc, "cheap", StrategyRoundRobin, "groq/llama", "local/mistral")
+	upsertRedirect(t, svc, "smart", StrategyRoundRobin, "cheap", "openai/gpt-4o")
+
+	models, ok := svc.TargetModels(" smart ")
+	require.True(t, ok)
+	require.Equal(t, []string{"groq/llama", "local/mistral", "openai/gpt-4o"}, models)
+
+	err := svc.Upsert(context.Background(), VirtualModel{Source: "cheap", Targets: []Target{{Model: "groq/llama"}}, Enabled: false})
+	require.NoError(t, err)
+	models, ok = svc.TargetModels("smart")
+	require.True(t, ok)
+	require.Equal(t, []string{"openai/gpt-4o"}, models, "a disabled inner leg is not a target")
+
+	_, ok = svc.TargetModels("openai/gpt-4o")
+	require.False(t, ok)
+}

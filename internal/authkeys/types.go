@@ -6,6 +6,12 @@ const (
 	// TokenPrefix is the managed API key prefix returned to clients.
 	TokenPrefix = "sk_gom_"
 	secretBytes = 32
+
+	// ImportedFromLiteLLM marks a key imported from a LiteLLM proxy. Its
+	// SecretHash is the SHA-256 of the whole "sk-..." token, as LiteLLM stores
+	// it, so the old token keeps working without GoModel ever seeing it.
+	ImportedFromLiteLLM = "litellm"
+	liteLLMTokenPrefix  = "sk-"
 )
 
 // AuthKey is the persisted auth key record.
@@ -29,6 +35,9 @@ type AuthKey struct {
 	DeactivatedAt   *time.Time `json:"deactivated_at,omitempty" bson:"deactivated_at,omitempty"`
 	CreatedAt       time.Time  `json:"created_at" bson:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at" bson:"updated_at"`
+	// ImportedFrom names the gateway an imported key came from, such as
+	// ImportedFromLiteLLM. Empty for keys GoModel issued.
+	ImportedFrom string `json:"imported_from,omitempty" bson:"imported_from,omitempty"`
 }
 
 // View is the admin-facing representation of a managed auth key.
@@ -55,6 +64,15 @@ type CreateInput struct {
 	AllowedModels   []string
 	DashboardAccess bool
 	ExpiresAt       *time.Time
+}
+
+// ImportInput captures the admin request for importing a key another gateway
+// issued. Only the token's hash is imported, never the token.
+type ImportInput struct {
+	CreateInput
+	ImportedFrom  string
+	SecretHash    string
+	RedactedValue string
 }
 
 // Active reports whether the key can currently authenticate requests.

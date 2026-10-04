@@ -2,7 +2,10 @@ package authkeys
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 
@@ -19,6 +22,9 @@ var (
 	ErrInactive = errors.New("API key is inactive")
 	// ErrExpired indicates the presented token belongs to an expired key.
 	ErrExpired = errors.New("API key expired")
+	// ErrSecretHashExists indicates a key with the same secret hash is
+	// already stored. Store.Create returns it for a duplicate hash.
+	ErrSecretHashExists = errors.New("an auth key with this secret_hash already exists")
 )
 
 // ValidationError indicates invalid auth key input or state.
@@ -36,6 +42,7 @@ func IsValidationError(err error) bool {
 // Store defines persistence operations for managed auth keys.
 type Store interface {
 	List(ctx context.Context) ([]AuthKey, error)
+	// Create returns ErrSecretHashExists when a key with key.SecretHash exists.
 	Create(ctx context.Context, key AuthKey) error
 	UpdateLabels(ctx context.Context, id string, labels []string, now time.Time) error
 	UpdateAllowedModels(ctx context.Context, id string, allowedModels []string, now time.Time) error
@@ -76,6 +83,42 @@ func normalizeCreateInput(input CreateInput) (CreateInput, error) {
 		input.ExpiresAt = &expiresAt
 	}
 	return input, nil
+}
+
+// liteLLMRedactedValue matches LiteLLM's abbreviated key_name, such as
+// "sk-...abcd", so a pasted token is never stored where the dashboard shows it.
+var liteLLMRedactedValue = regexp.MustCompile(`^sk-\.\.\.\S{0,8}$`)
+
+func normalizeImportInput(input ImportInput) (ImportInput, error) {
+	createInput, err := normalizeCreateInput(input.CreateInput)
+	if err != nil {
+		return ImportInput{}, err
+	}
+	input.CreateInput = createInput
+	input.ImportedFrom = strings.TrimSpace(input.ImportedFrom)
+	if input.ImportedFrom != ImportedFromLiteLLM {
+		return ImportInput{}, newValidationError(`imported_from must be "`+ImportedFromLiteLLM+`"`, nil)
+	}
+	input.SecretHash = strings.ToLower(strings.TrimSpace(input.SecretHash))
+	if !isSHA256Hex(input.SecretHash) {
+		return ImportInput{}, newValidationError("secret_hash must be the 64-character hex SHA-256 of the token", nil)
+	}
+	input.RedactedValue = strings.TrimSpace(input.RedactedValue)
+	if input.RedactedValue == "" {
+		input.RedactedValue = liteLLMTokenPrefix + "..."
+	}
+	if !liteLLMRedactedValue.MatchString(input.RedactedValue) {
+		return ImportInput{}, newValidationError(`redacted_value must look like "sk-...abcd"`, nil)
+	}
+	return input, nil
+}
+
+func isSHA256Hex(value string) bool {
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }
 
 // NormalizeAllowedModels trims, drops empty entries, and de-duplicates model
