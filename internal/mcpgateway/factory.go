@@ -81,6 +81,7 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 	service, err := NewService(ctx, Options{
 		ConfigServers:  configSpecs,
 		VirtualServers: virtualSpecs,
+		VirtualStore:   virtualStoreOf(store),
 		Store:          store,
 		HTTPClient:     httpClient,
 		UsageLogger:    usageLogger,
@@ -115,4 +116,11 @@ func createStore(ctx context.Context, store storage.Storage) (Store, error) {
 		func(db sqlx.DB) (Store, error) { return NewSQLStore(ctx, db) },
 		func(db *mongo.Database) (Store, error) { return NewMongoDBStore(db) },
 	)
+}
+
+// virtualStoreOf returns the store's virtual-server persistence; both
+// backends provide it.
+func virtualStoreOf(store Store) VirtualStore {
+	virtualStore, _ := store.(VirtualStore)
+	return virtualStore
 }

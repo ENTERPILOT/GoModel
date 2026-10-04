@@ -228,7 +228,7 @@ export function mcpServerFormFromServer(server) {
 // buildMcpServerPayload validates the editor form and produces the PUT
 // /admin/mcp-servers payload. Returns { error } on validation failure or
 // { payload } when the form is valid.
-export function buildMcpServerPayload(form, mode, servers) {
+export function buildMcpServerPayload(form, mode, servers, virtualServers = []) {
   const name = String(form.name || "").trim();
   const slug = String(form.slug || deriveMcpServerSlug(name))
     .trim()
@@ -249,6 +249,9 @@ export function buildMcpServerPayload(form, mode, servers) {
     (servers || []).some((server) => mcpServerSlug(server) === slug)
   ) {
     return { error: m.mcp_slug_in_use({ slug }) };
+  }
+  if (mode === "create" && (virtualServers || []).some((virtual) => virtual?.name === slug)) {
+    return { error: m.mcp_slug_used_by_virtual({ slug }) };
   }
   if (!url) {
     return { error: m.mcp_url_required() };
@@ -582,4 +585,78 @@ export function mcpClientConfig(endpoint, mode, defaultMode, virtualName = "") {
   const entry = virtualName ? `gomodel-${virtualName}` : "gomodel";
   const config = { mcpServers: { [entry]: { type: "http", url: endpoint, headers } } };
   return JSON.stringify(config, null, 2);
+}
+
+// --- virtual server editor ------------------------------------------------
+
+export function defaultMcpVirtualServerForm() {
+  return { name: "", description: "", servers: [], tool_discovery: "" };
+}
+
+export function mcpVirtualServerFormFromVirtual(virtual) {
+  return {
+    name: String(virtual?.name || ""),
+    description: String(virtual?.description || ""),
+    servers: [...(virtual?.servers || [])],
+    // The stored setting, not the effective mode: "" keeps following the
+    // gateway default.
+    tool_discovery: String(virtual?.configured_tool_discovery || ""),
+  };
+}
+
+// mcpVirtualMemberOptions lists every server as a pickable member, plus any
+// selected member that no longer matches a server, so the editor can show
+// and remove it.
+export function mcpVirtualMemberOptions(servers, selected) {
+  const options = (servers || []).map((server) => ({
+    slug: mcpServerSlug(server),
+    name: String(server?.name || mcpServerSlug(server)),
+    missing: false,
+  }));
+  const known = new Set(options.map((option) => option.slug));
+  for (const slug of selected || []) {
+    if (!known.has(slug)) {
+      options.push({ slug, name: slug, missing: true });
+    }
+  }
+  return options;
+}
+
+export function toggleMcpVirtualMember(selected, slug) {
+  const current = selected || [];
+  return current.includes(slug) ? current.filter((item) => item !== slug) : [...current, slug];
+}
+
+// buildMcpVirtualServerPayload validates the editor form the way the gateway
+// will, so the common mistakes are caught before the request.
+export function buildMcpVirtualServerPayload(form, mode, virtualServers, servers) {
+  const name = String(form?.name || "").trim().toLowerCase();
+  if (!name) {
+    return { error: m.mcp_virtual_name_required() };
+  }
+  if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(name)) {
+    return { error: m.mcp_virtual_name_invalid() };
+  }
+  if (mode === "create") {
+    if ((virtualServers || []).some((virtual) => virtual?.name === name)) {
+      return { error: m.mcp_virtual_name_in_use({ name }) };
+    }
+    if ((servers || []).some((server) => mcpServerSlug(server) === name)) {
+      return { error: m.mcp_virtual_name_used_by_server({ name }) };
+    }
+  }
+  const members = [...new Set((form?.servers || []).map((slug) => String(slug).trim()).filter(Boolean))];
+  if (members.length === 0) {
+    return { error: m.mcp_virtual_servers_required() };
+  }
+  const discovery = String(form?.tool_discovery || "");
+  return {
+    payload: {
+      name,
+      description: String(form?.description || "").trim(),
+      servers: members,
+      tool_discovery:
+        discovery === MCP_TOOL_DISCOVERY_OFF || discovery === MCP_TOOL_DISCOVERY_SEARCH ? discovery : "",
+    },
+  };
 }

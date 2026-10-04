@@ -69,7 +69,11 @@ Four ways to narrow what a client sees:
 
 A virtual server serves a fixed subset of your MCP servers at its own URL. Use
 one for clients that accept only a URL and no custom headers, or to hand each
-team or agent a curated set:
+team or agent a curated set.
+
+Create one on the **MCP Servers** page with **Add Virtual Server**: pick a
+name, the member servers, and optionally the tool list mode. Changes apply
+immediately. To manage them as code, declare them in config instead:
 
 ```yaml
 mcp:
@@ -88,16 +92,19 @@ as on `/mcp` (`github_create_issue`). The same map works as JSON in
   a key that cannot see `github` does not see it through `coding` either.
   `X-MCP-Servers` narrows a virtual server further.
 - **Names share `/mcp/{name}` with server slugs.** Startup fails if a virtual
-  server is named after a server declared in config, and the dashboard rejects
-  a new server whose slug a virtual server uses. If a dashboard server already
-  had the name, the server keeps its URL and the virtual server is not served;
-  the log and the dashboard say so.
-- **Unknown members are skipped** with a warning, since dashboard servers can
-  be added later.
+  server in config is named after a server in config, and the dashboard
+  rejects a new server or virtual server whose name the other already uses. If
+  a server and a virtual server end up with the same name anyway (for example,
+  config added after a dashboard entry), the server keeps the URL and the
+  virtual server is not served; the log and the dashboard say so.
+- **Config entries win.** A virtual server declared in config hides a
+  dashboard one with the same name and is read-only in the dashboard.
+- **Missing members are skipped.** The dashboard only offers existing servers,
+  but a member deleted later, or one named in config before it exists, is
+  skipped with a warning and flagged on the **MCP Servers** page.
 
-Virtual servers are read-only in the dashboard, which lists them on the
-**MCP Servers** page. The **Connect a client** panel can build the client
-config for each one.
+The **Connect a client** panel can build the client config for each virtual
+server.
 
 ## Search tools instead of listing them
 

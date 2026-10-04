@@ -1,7 +1,10 @@
 <script>
-  // Virtual servers table: config-declared, read-only subsets of the MCP
-  // servers, each served at /mcp/{name}. Flags members that match no server
-  // and virtual servers a same-named server keeps from being served.
+  // Virtual servers section: named subsets of the MCP servers, each served at
+  // /mcp/{name}. Config-declared rows are read-only; the rest can be edited
+  // and deleted here. Flags members that match no server and virtual servers
+  // a same-named server keeps from being served.
+  import Icon from "$lib/components/atoms/Icon.svelte";
+  import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import { basePath } from "$lib/api/paths.js";
   import { mcpServers } from "./mcpServers.svelte.js";
   import {
@@ -9,6 +12,7 @@
     mcpGatewayEndpoint,
     mcpVirtualServerEndpoint,
   } from "./mcp-servers.js";
+  import { Pencil, Plus, X } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   const gatewayEndpoint = mcpGatewayEndpoint(
@@ -22,8 +26,25 @@
 </script>
 
 <section class="mcp-virtual-servers" aria-labelledby="mcp-virtual-servers-title">
-  <h3 id="mcp-virtual-servers-title" class="mcp-virtual-title">{m.mcp_virtual_title()}</h3>
-  <p class="form-hint">{m.mcp_virtual_hint()}</p>
+  <div class="mcp-virtual-header">
+    <div>
+      <h3 id="mcp-virtual-servers-title" class="mcp-virtual-title">{m.mcp_virtual_title()}</h3>
+      <p class="form-hint">{m.mcp_virtual_hint()}</p>
+    </div>
+    <button
+      type="button"
+      class="btn btn-with-icon"
+      disabled={mcpServers.servers.length === 0 || mcpServers.virtualFormSubmitting}
+      title={mcpServers.servers.length === 0 ? m.mcp_virtual_needs_servers() : undefined}
+      onclick={() => mcpServers.openVirtualCreate()}
+    >
+      <Icon icon={Plus} class="form-action-icon" />
+      <span>{m.mcp_virtual_add()}</span>
+    </button>
+  </div>
+  {#if mcpServers.virtualServers.length === 0}
+    <p class="empty-state">{m.mcp_virtual_empty()}</p>
+  {:else}
   <div class="table-wrapper">
     <table class="data-table">
       <thead>
@@ -32,6 +53,7 @@
           <th>{m.mcp_column_endpoint()}</th>
           <th>{m.mcp_virtual_column_servers()}</th>
           <th>{m.mcp_connect_mode_label()}</th>
+          <th class="col-actions">{m.mcp_column_actions()}</th>
         </tr>
       </thead>
       <tbody>
@@ -39,7 +61,9 @@
           <tr>
             <td>
               <span class="font-size-md">{virtual.name}</span>
-              <span class="alias-kind-badge" title={m.mcp_virtual_managed()}>{m.common_config()}</span>
+              {#if virtual.managed}
+                <span class="alias-kind-badge" title={m.mcp_virtual_managed()}>{m.common_config()}</span>
+              {/if}
               {#if virtual.description}
                 <div class="mcp-virtual-sub">{virtual.description}</div>
               {/if}
@@ -68,16 +92,47 @@
                 ? m.mcp_connect_mode_search()
                 : m.mcp_connect_mode_all()}
             </td>
+            <td class="col-actions">
+              {#if !virtual.managed}
+                <div class="alias-actions-cell model-list-actions">
+                  <TableActionButton
+                    label={m.mcp_virtual_edit_action({ name: virtual.name })}
+                    class="table-icon-btn"
+                    onclick={() => mcpServers.openVirtualEdit(virtual)}
+                  >
+                    <Icon icon={Pencil} class="table-icon-svg" />
+                  </TableActionButton>
+                  <TableActionButton
+                    label={m.mcp_virtual_delete_action({ name: virtual.name })}
+                    class="table-action-btn-danger table-icon-btn"
+                    onclick={() => mcpServers.deleteVirtualServer(virtual)}
+                    disabled={mcpServers.deletingVirtualName === virtual.name}
+                  >
+                    <Icon icon={X} class="table-icon-svg" />
+                  </TableActionButton>
+                </div>
+              {/if}
+            </td>
           </tr>
         {/each}
       </tbody>
     </table>
   </div>
+  {/if}
 </section>
 
 <style>
   .mcp-virtual-servers {
     margin-top: var(--space-stack);
+  }
+
+  .mcp-virtual-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
   }
 
   .mcp-virtual-title {
@@ -86,7 +141,7 @@
   }
 
   .mcp-virtual-servers .form-hint {
-    margin: 0 0 10px;
+    margin: 0;
   }
 
   .mcp-virtual-sub {

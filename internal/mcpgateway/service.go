@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"slices"
 	"sort"
@@ -56,7 +57,12 @@ type Service struct {
 	usageLogger    usage.LoggerInterface
 	userPathHeader string
 	configSpecs    map[string]ServerSpec
-	virtualSpecs   map[string]VirtualServerSpec
+	// virtualConfig holds the declarative virtual servers; virtualStore the
+	// admin-managed ones. virtualSpecs is their merge, rebuilt on Reload.
+	virtualConfig map[string]VirtualServerSpec
+	virtualStore  VirtualStore
+	virtualMu     sync.RWMutex
+	virtualSpecs  map[string]VirtualServerSpec
 	// searchDiscovery is the default for sessions that do not send
 	// ToolDiscoveryHeader: serve search_tools/call_tool instead of the catalog.
 	searchDiscovery bool
@@ -105,6 +111,8 @@ type Options struct {
 	ConfigServers map[string]ServerSpec
 	// VirtualServers are the declarative virtual servers, keyed by name.
 	VirtualServers map[string]VirtualServerSpec
+	// VirtualStore persists admin-managed virtual servers. Optional.
+	VirtualStore VirtualStore
 	// Store persists admin-managed servers. Optional.
 	Store Store
 	// HTTPClient is the shared outbound HTTP client for http/sse upstreams.
@@ -130,7 +138,8 @@ func NewService(ctx context.Context, opts Options) (*Service, error) {
 		usageLogger:     opts.UsageLogger,
 		userPathHeader:  core.UserPathHeaderName(opts.UserPathHeader),
 		configSpecs:     opts.ConfigServers,
-		virtualSpecs:    opts.VirtualServers,
+		virtualConfig:   opts.VirtualServers,
+		virtualStore:    opts.VirtualStore,
 		searchDiscovery: opts.ToolDiscovery == config.MCPToolDiscoverySearch,
 		bindings:        make(map[string]sessionBinding),
 		requestCancels:  make(map[uint64]context.CancelFunc),
@@ -179,9 +188,38 @@ func (s *Service) Reload(ctx context.Context) error {
 			specs = append(specs, row.Spec())
 		}
 	}
+	virtuals, err := s.mergedVirtualSpecs(ctx)
+	if err != nil {
+		return err
+	}
+	s.virtualMu.Lock()
+	s.virtualSpecs = virtuals
+	s.virtualMu.Unlock()
 	s.manager.Apply(specs)
 	s.logVirtualServerIssues()
 	return nil
+}
+
+// mergedVirtualSpecs merges declarative and store virtual servers. Config
+// entries shadow store rows with the same name, like servers.
+func (s *Service) mergedVirtualSpecs(ctx context.Context) (map[string]VirtualServerSpec, error) {
+	merged := make(map[string]VirtualServerSpec, len(s.virtualConfig))
+	maps.Copy(merged, s.virtualConfig)
+	if s.virtualStore == nil {
+		return merged, nil
+	}
+	rows, err := s.virtualStore.ListVirtual(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list managed mcp virtual servers: %w", err)
+	}
+	for _, row := range rows {
+		if _, shadowed := merged[row.Name]; shadowed {
+			slog.Warn("mcp virtual server from admin store is shadowed by config", "virtual_server", row.Name)
+			continue
+		}
+		merged[row.Name] = row.Spec()
+	}
+	return merged, nil
 }
 
 // Views returns the current admin snapshot of all servers.
@@ -536,6 +574,11 @@ func (s *Service) upstreamCatalog(name string) (*catalog, ServerStatus) {
 // enabled, allowed for the user path, and inside the pin, virtual server,
 // and header scopes. A virtual server only narrows the view.
 func (s *Service) visibleServers(scope requestScope) []ServerView {
+	var virtualMembers []string
+	if scope.virtual != "" {
+		spec, _ := s.virtualSpec(scope.virtual)
+		virtualMembers = spec.Servers
+	}
 	views := s.manager.Views()
 	visible := make([]ServerView, 0, len(views))
 	for _, view := range views {
@@ -545,7 +588,7 @@ func (s *Service) visibleServers(scope requestScope) []ServerView {
 		if scope.pinned != "" && view.Spec.Name != scope.pinned {
 			continue
 		}
-		if scope.virtual != "" && !slices.Contains(s.virtualSpecs[scope.virtual].Servers, view.Spec.Name) {
+		if scope.virtual != "" && !slices.Contains(virtualMembers, view.Spec.Name) {
 			continue
 		}
 		if scope.include != nil {

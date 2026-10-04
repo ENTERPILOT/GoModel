@@ -33,9 +33,10 @@ type mongoMCPServerIDFilter struct {
 	ID string `bson:"_id"`
 }
 
-// MongoDBStore stores managed MCP servers in MongoDB.
+// MongoDBStore stores managed MCP servers and virtual servers in MongoDB.
 type MongoDBStore struct {
 	collection *mongo.Collection
+	virtuals   *mongo.Collection
 }
 
 // NewMongoDBStore creates collection indexes if needed.
@@ -54,26 +55,31 @@ func NewMongoDBStore(database *mongo.Database) (*MongoDBStore, error) {
 	if _, err := coll.Indexes().CreateMany(ctx, indexes); err != nil {
 		return nil, fmt.Errorf("create mcp_servers indexes: %w", err)
 	}
-	return &MongoDBStore{collection: coll}, nil
+	return &MongoDBStore{collection: coll, virtuals: database.Collection("mcp_virtual_servers")}, nil
 }
 
 func (s *MongoDBStore) List(ctx context.Context) ([]ManagedServer, error) {
-	cursor, err := s.collection.Find(ctx, bson.M{}, options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}))
+	return listMongo(ctx, s.collection, "mcp servers", managedServerFromMongo)
+}
+
+// listMongo reads a whole collection sorted by _id, converting each document.
+func listMongo[D, T any](ctx context.Context, coll *mongo.Collection, label string, convert func(D) T) ([]T, error) {
+	cursor, err := coll.Find(ctx, bson.M{}, options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}))
 	if err != nil {
-		return nil, fmt.Errorf("list mcp servers: %w", err)
+		return nil, fmt.Errorf("list %s: %w", label, err)
 	}
 	defer cursor.Close(ctx)
 
-	result := make([]ManagedServer, 0)
+	result := make([]T, 0)
 	for cursor.Next(ctx) {
-		var doc mongoMCPServerDocument
+		var doc D
 		if err := cursor.Decode(&doc); err != nil {
-			return nil, fmt.Errorf("decode mcp server: %w", err)
+			return nil, fmt.Errorf("decode %s: %w", label, err)
 		}
-		result = append(result, managedServerFromMongo(doc))
+		result = append(result, convert(doc))
 	}
 	if err := cursor.Err(); err != nil {
-		return nil, fmt.Errorf("iterate mcp servers: %w", err)
+		return nil, fmt.Errorf("iterate %s: %w", label, err)
 	}
 	return result, nil
 }

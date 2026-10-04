@@ -40,6 +40,10 @@ import {
   mcpGatewayEndpoint,
   mcpServedVirtualServers,
   mcpVirtualServerEndpoint,
+  buildMcpVirtualServerPayload,
+  mcpVirtualMemberOptions,
+  mcpVirtualServerFormFromVirtual,
+  toggleMcpVirtualMember,
   normalizeMcpToolDiscovery,
 } from "../src/pages/mcp-servers/mcp-servers.js";
 
@@ -721,4 +725,43 @@ test("a stale virtual-server response cannot restore the list", () => {
     /if \(!background && generation === this\.#pollGeneration\) \{\s*\n\s*void this\.fetchVirtualServers\(\);/,
     "fetchVirtualServers must only start for the current page generation",
   );
+});
+
+test("buildMcpVirtualServerPayload validates and normalizes the form", () => {
+  const servers = [{ slug: "github", name: "GitHub" }, { slug: "jira", name: "Jira" }];
+  const virtuals = [{ name: "research", servers: ["jira"] }];
+  const build = (form, mode = "create") => buildMcpVirtualServerPayload(form, mode, virtuals, servers);
+
+  assert.deepEqual(build({ name: " Coding ", description: " tools ", servers: ["github", "github", "jira"], tool_discovery: "search" }), {
+    payload: { name: "coding", description: "tools", servers: ["github", "jira"], tool_discovery: "search" },
+  });
+  assert.equal(build({ name: "coding", servers: ["github"], tool_discovery: "bogus" }).payload.tool_discovery, "");
+
+  assert.ok(build({ name: "", servers: ["github"] }).error, "name is required");
+  assert.ok(build({ name: "my tools", servers: ["github"] }).error, "name must be a slug");
+  assert.ok(build({ name: "research", servers: ["github"] }).error, "an existing virtual server name is taken on create");
+  assert.ok(build({ name: "github", servers: ["jira"] }).error, "a server slug is taken");
+  assert.ok(build({ name: "coding", servers: [] }).error, "at least one member is required");
+  assert.equal(build({ name: "research", servers: ["github"] }, "edit").error, undefined, "editing keeps the name");
+});
+
+test("buildMcpServerPayload rejects a new slug a virtual server uses", () => {
+  const form = { name: "Coding", slug: "coding", url: "https://mcp.example.com/mcp", headers: [], tool_names: [] };
+  assert.ok(buildMcpServerPayload(form, "create", [], [{ name: "coding" }]).error);
+  assert.equal(buildMcpServerPayload(form, "edit", [], [{ name: "coding" }]).error, undefined);
+});
+
+test("virtual member options keep a selected member that no longer matches a server", () => {
+  const options = mcpVirtualMemberOptions([{ slug: "github", name: "GitHub" }], ["github", "gone"]);
+  assert.deepEqual(options, [
+    { slug: "github", name: "GitHub", missing: false },
+    { slug: "gone", name: "gone", missing: true },
+  ]);
+  assert.deepEqual(toggleMcpVirtualMember(["github"], "jira"), ["github", "jira"]);
+  assert.deepEqual(toggleMcpVirtualMember(["github", "jira"], "github"), ["jira"]);
+});
+
+test("mcpVirtualServerFormFromVirtual keeps the stored discovery setting, not the effective one", () => {
+  const form = mcpVirtualServerFormFromVirtual({ name: "coding", servers: ["github"], tool_discovery: "search", configured_tool_discovery: "" });
+  assert.deepEqual(form, { name: "coding", description: "", servers: ["github"], tool_discovery: "" });
 });

@@ -9,6 +9,10 @@ import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
 import {
   buildMcpServerPayload,
+  buildMcpVirtualServerPayload,
+  defaultMcpVirtualServerForm,
+  mcpVirtualServerFormFromVirtual,
+  toggleMcpVirtualMember,
   defaultMcpCatalog,
   defaultMcpServerForm,
   deriveMcpServerSlug,
@@ -28,8 +32,15 @@ import {
 
 class McpServersState {
   servers = $state([]);
-  // Config-declared virtual servers (read-only), each served at /mcp/{name}.
+  // Virtual servers, each served at /mcp/{name}. Config-declared ones are
+  // read-only (managed); the rest are edited here.
   virtualServers = $state([]);
+  virtualFormOpen = $state(false);
+  virtualFormMode = $state("create");
+  virtualForm = $state(defaultMcpVirtualServerForm());
+  virtualFormSubmitting = $state(false);
+  virtualFormError = $state("");
+  deletingVirtualName = $state("");
   available = $state(true);
   loading = $state(false);
   // Load and in-form errors only; row-action feedback goes through the
@@ -325,7 +336,7 @@ class McpServersState {
   }
 
   async submitForm() {
-    const built = buildMcpServerPayload(this.form, this.formMode, this.servers);
+    const built = buildMcpServerPayload(this.form, this.formMode, this.servers, this.virtualServers);
     if (built.error) {
       this.error = built.error;
       return;
@@ -363,6 +374,117 @@ class McpServersState {
       void this.fetchServers();
     } finally {
       this.formSubmitting = false;
+    }
+  }
+
+  // --- virtual server editor ----------------------------------------------
+
+  openVirtualCreate() {
+    this.virtualFormMode = "create";
+    this.virtualFormError = "";
+    this.virtualForm = defaultMcpVirtualServerForm();
+    this.virtualFormOpen = true;
+  }
+
+  openVirtualEdit(virtual) {
+    if (!virtual || virtual.managed) {
+      return;
+    }
+    this.virtualFormMode = "edit";
+    this.virtualFormError = "";
+    this.virtualForm = mcpVirtualServerFormFromVirtual(virtual);
+    this.virtualFormOpen = true;
+  }
+
+  closeVirtualForm() {
+    this.virtualFormOpen = false;
+    this.virtualFormMode = "create";
+    this.virtualFormError = "";
+    this.virtualForm = defaultMcpVirtualServerForm();
+  }
+
+  toggleVirtualMember(slug) {
+    this.virtualForm.servers = toggleMcpVirtualMember(this.virtualForm.servers, slug);
+  }
+
+  async submitVirtualForm() {
+    const built = buildMcpVirtualServerPayload(
+      this.virtualForm,
+      this.virtualFormMode,
+      this.virtualServers,
+      this.servers,
+    );
+    if (built.error) {
+      this.virtualFormError = built.error;
+      return;
+    }
+    this.virtualFormError = "";
+    this.virtualFormSubmitting = true;
+    try {
+      const outcome = await sendAdminMutation("/admin/mcp-virtual-servers", "PUT", built.payload, {
+        label: "save mcp virtual server",
+        errorFallback: m.mcp_virtual_save_failed(),
+        unavailableMessage: m.mcp_unavailable(),
+      });
+      if (outcome.status === "stale") {
+        return;
+      }
+      if (outcome.status === "unavailable") {
+        this.available = false;
+        this.virtualFormError = outcome.error;
+        return;
+      }
+      if (outcome.status === "error") {
+        this.virtualFormError = outcome.error;
+        return;
+      }
+      flash.success(m.mcp_virtual_saved({ name: built.payload.name }));
+      this.closeVirtualForm();
+      void this.fetchVirtualServers();
+    } finally {
+      this.virtualFormSubmitting = false;
+    }
+  }
+
+  async deleteVirtualServer(virtual) {
+    const name = String(virtual?.name || "");
+    if (!name || this.deletingVirtualName || virtual.managed) {
+      return;
+    }
+    if (!confirm(m.mcp_virtual_delete_confirm({ name }))) {
+      return;
+    }
+    this.deletingVirtualName = name;
+    try {
+      const outcome = await sendAdminMutation(
+        "/admin/mcp-virtual-servers/" + encodeURIComponent(name),
+        "DELETE",
+        undefined,
+        {
+          label: "delete mcp virtual server",
+          errorFallback: m.mcp_virtual_delete_failed(),
+          unavailableMessage: m.mcp_unavailable(),
+        },
+      );
+      if (outcome.status === "stale") {
+        return;
+      }
+      if (outcome.status === "unavailable") {
+        this.available = false;
+        flash.error(outcome.error);
+        return;
+      }
+      if (outcome.status === "error") {
+        flash.error(outcome.error);
+        return;
+      }
+      flash.success(m.mcp_virtual_deleted({ name }));
+      if (this.virtualFormOpen && this.virtualForm.name === name) {
+        this.closeVirtualForm();
+      }
+      void this.fetchVirtualServers();
+    } finally {
+      this.deletingVirtualName = "";
     }
   }
 

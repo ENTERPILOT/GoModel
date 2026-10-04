@@ -21,6 +21,10 @@ type VirtualServerSpec struct {
 	// ToolDiscovery is the session default for this endpoint: "off",
 	// "search", or "" to inherit the gateway default.
 	ToolDiscovery string
+	// Managed marks virtual servers declared in config.yaml or
+	// MCP_VIRTUAL_SERVERS. They override admin-store rows with the same name
+	// and are read-only in the dashboard.
+	Managed bool
 }
 
 // VirtualFromConfig converts one declarative entry into a runtime spec.
@@ -30,6 +34,7 @@ func VirtualFromConfig(name string, cfg config.MCPVirtualServerConfig) VirtualSe
 		Description:   cfg.Description,
 		Servers:       slices.Clone(cfg.Servers),
 		ToolDiscovery: cfg.ToolDiscovery,
+		Managed:       true,
 	}
 }
 
@@ -44,17 +49,38 @@ type VirtualServerView struct {
 	Conflict string
 }
 
-// IsVirtual reports whether name is a declared virtual server, which reserves
-// /mcp/{name} for it.
+// IsVirtual reports whether name is a virtual server, from config or the
+// admin store, which reserves /mcp/{name} for it.
 func (s *Service) IsVirtual(name string) bool {
-	_, ok := s.virtualSpecs[name]
+	_, ok := s.virtualSpec(name)
 	return ok
+}
+
+// IsManagedVirtual reports whether name is a virtual server declared in
+// config/env, which is read-only.
+func (s *Service) IsManagedVirtual(name string) bool {
+	_, ok := s.virtualConfig[name]
+	return ok
+}
+
+func (s *Service) virtualSpec(name string) (VirtualServerSpec, bool) {
+	s.virtualMu.RLock()
+	defer s.virtualMu.RUnlock()
+	spec, ok := s.virtualSpecs[name]
+	return spec, ok
 }
 
 // VirtualViews returns every virtual server sorted by name.
 func (s *Service) VirtualViews() []VirtualServerView {
-	views := make([]VirtualServerView, 0, len(s.virtualSpecs))
+	s.virtualMu.RLock()
+	specs := make([]VirtualServerSpec, 0, len(s.virtualSpecs))
 	for _, spec := range s.virtualSpecs {
+		specs = append(specs, spec)
+	}
+	s.virtualMu.RUnlock()
+
+	views := make([]VirtualServerView, 0, len(specs))
+	for _, spec := range specs {
 		view := VirtualServerView{
 			Spec:          spec,
 			ToolDiscovery: config.MCPToolDiscoveryOff,
@@ -81,8 +107,9 @@ func (s *Service) servedVirtual(name string) bool {
 }
 
 // virtualConflict explains why a declared virtual server is not served, or
-// returns "" when it is. Config validation already rejects clashes with
-// declared servers, so only an admin-managed server can claim the name.
+// returns "" when it is. Config validation and the admin API reject new
+// clashes, so this covers a server and virtual server that predate each other
+// across sources (config versus store).
 func (s *Service) virtualConflict(name string) string {
 	if _, taken := s.manager.get(name); !taken {
 		return ""
@@ -93,7 +120,8 @@ func (s *Service) virtualConflict(name string) string {
 // virtualDiscovery is the default discovery mode for sessions on a virtual
 // server that do not send ToolDiscoveryHeader.
 func (s *Service) virtualDiscovery(name string) bool {
-	switch s.virtualSpecs[name].ToolDiscovery {
+	spec, _ := s.virtualSpec(name)
+	switch spec.ToolDiscovery {
 	case config.MCPToolDiscoverySearch:
 		return true
 	case config.MCPToolDiscoveryOff:
@@ -115,7 +143,7 @@ func VirtualNameTakenError(name string) error {
 type virtualNameTakenError struct{ name string }
 
 func (e virtualNameTakenError) Error() string {
-	return fmt.Sprintf("slug %q is used by virtual MCP server %q (declared in config); choose another slug", e.name, e.name)
+	return fmt.Sprintf("slug %q is used by virtual MCP server %q; choose another slug", e.name, e.name)
 }
 
 func (e virtualNameTakenError) Is(target error) bool { return target == ErrVirtualNameTaken }

@@ -204,6 +204,46 @@ func (m *memoryStore) Delete(_ context.Context, name string) error {
 
 func (m *memoryStore) Close() error { return nil }
 
+// memoryVirtualStore is a minimal in-process VirtualStore.
+type memoryVirtualStore struct{ rows map[string]ManagedVirtualServer }
+
+func (m *memoryVirtualStore) ListVirtual(context.Context) ([]ManagedVirtualServer, error) {
+	rows := make([]ManagedVirtualServer, 0, len(m.rows))
+	for _, row := range m.rows {
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
+func (m *memoryVirtualStore) GetVirtual(_ context.Context, name string) (*ManagedVirtualServer, error) {
+	row, ok := m.rows[name]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return &row, nil
+}
+
+func (m *memoryVirtualStore) UpsertVirtual(_ context.Context, virtual ManagedVirtualServer) error {
+	m.rows[virtual.Name] = virtual
+	return nil
+}
+
+func (m *memoryVirtualStore) UpdateVirtual(_ context.Context, virtual ManagedVirtualServer) error {
+	if _, ok := m.rows[virtual.Name]; !ok {
+		return ErrNotFound
+	}
+	m.rows[virtual.Name] = virtual
+	return nil
+}
+
+func (m *memoryVirtualStore) DeleteVirtual(_ context.Context, name string) error {
+	if _, ok := m.rows[name]; !ok {
+		return ErrNotFound
+	}
+	delete(m.rows, name)
+	return nil
+}
+
 func TestUpsertRejectsVirtualServerName(t *testing.T) {
 	store := &memoryStore{rows: map[string]ManagedServer{}}
 	service, err := NewService(context.Background(), Options{
@@ -215,7 +255,7 @@ func TestUpsertRejectsVirtualServerName(t *testing.T) {
 
 	err = service.Upsert(context.Background(), ManagedServer{Name: "coding", URL: "https://example.com/mcp", Transport: config.MCPTransportHTTP})
 	require.ErrorIs(t, err, ErrVirtualNameTaken)
-	assert.Equal(t, `slug "coding" is used by virtual MCP server "coding" (declared in config); choose another slug`, err.Error())
+	assert.Equal(t, `slug "coding" is used by virtual MCP server "coding"; choose another slug`, err.Error())
 	assert.Empty(t, store.rows, "nothing is persisted, including by an edit whose row was deleted meanwhile")
 }
 

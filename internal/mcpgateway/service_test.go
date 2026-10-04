@@ -96,10 +96,17 @@ func newTestService(t *testing.T, usageLogger usage.LoggerInterface, specs ...Se
 	for _, spec := range specs {
 		configServers[spec.Name] = spec
 	}
-	service, err := NewService(context.Background(), Options{
+	return newTestServiceWithOptions(t, Options{
 		ConfigServers: configServers,
 		UsageLogger:   usageLogger,
 	})
+}
+
+// newTestServiceWithOptions is newTestService for callers that also need
+// stores or virtual servers; the config servers come from opts.
+func newTestServiceWithOptions(t *testing.T, opts Options) (*Service, string) {
+	t.Helper()
+	service, err := NewService(context.Background(), opts)
 	require.NoError(t, err)
 
 	t.Cleanup(service.Close)
@@ -125,7 +132,7 @@ func newTestService(t *testing.T, usageLogger usage.LoggerInterface, specs ...Se
 	}))
 	t.Cleanup(gateway.Close)
 
-	waitForConnected(t, service, len(specs))
+	waitForConnected(t, service, len(service.Views()))
 	return service, gateway.URL
 }
 
