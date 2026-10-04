@@ -44,7 +44,11 @@ type secretRotation struct {
 	pinned []string
 	reload func(reason string)
 
-	mu     sync.Mutex
+	mu sync.Mutex
+	// entities re-resolve the references of dashboard-managed entities,
+	// each owning the fields under its prefix.
+	entities []entityRotation
+
 	closed bool
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -115,9 +119,15 @@ func (w *secretRotation) check(ctx context.Context) {
 		}
 		return
 	}
+	if len(recheck.Fields()) == 0 {
+		slog.Debug("secret change notification: no referenced value changed")
+		return
+	}
+	// Dashboard-managed entities reinstall themselves; only what is left
+	// belongs to the configuration.
+	recheck = w.rotateEntities(ctx, recheck)
 	fields := recheck.Fields()
 	if len(fields) == 0 {
-		slog.Debug("secret change notification: no referenced value changed")
 		return
 	}
 

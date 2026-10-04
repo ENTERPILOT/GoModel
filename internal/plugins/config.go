@@ -9,6 +9,7 @@ import (
 
 	"github.com/goccy/go-json"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/pluginapi"
 )
 
@@ -70,7 +71,9 @@ func ValidateConfig(schema []pluginapi.Field, raw json.RawMessage, scope plugina
 	return marshalCanonical(out)
 }
 
-// RedactSecrets replaces every non-empty secret value with SecretMask.
+// RedactSecrets replaces every non-empty secret value with SecretMask. A
+// value holding a secret reference (${scheme:reference}) is kept: it names
+// where the secret lives and is not secret itself.
 func RedactSecrets(schema []pluginapi.Field, raw json.RawMessage) json.RawMessage {
 	values, err := decodeConfigObject(raw)
 	if err != nil {
@@ -81,7 +84,7 @@ func RedactSecrets(schema []pluginapi.Field, raw json.RawMessage) json.RawMessag
 		if field.Input != pluginapi.InputSecret {
 			continue
 		}
-		if s, ok := values[field.Key].(string); ok && s != "" {
+		if s, ok := values[field.Key].(string); ok && s != "" && !config.HasSecretReference(s) {
 			values[field.Key] = SecretMask
 			changed = true
 		}

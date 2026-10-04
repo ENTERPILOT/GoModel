@@ -40,8 +40,11 @@ type secretUse struct {
 
 // rotation is the bookkeeping that lets a Secrets notice rotated values.
 type rotation struct {
-	mu       sync.Mutex
-	uses     map[string]secretUse
+	mu   sync.Mutex
+	uses map[string]secretUse
+	// owned lists the fields each dashboard-managed entity recorded through
+	// ResolvedEntity.Record, so a rebuild or delete drops exactly those.
+	owned    map[string][]string
 	notifier *SecretNotifier
 }
 
@@ -178,6 +181,21 @@ func (r *SecretRecheck) Value(field string) (string, bool) {
 	}
 	f, ok := r.changed[field]
 	return f.value, ok
+}
+
+// Select returns the part of the recheck whose fields keep reports true.
+// Committing it commits only those fields.
+func (r *SecretRecheck) Select(keep func(field string) bool) *SecretRecheck {
+	if r == nil {
+		return nil
+	}
+	selected := &SecretRecheck{secrets: r.secrets, changed: make(map[string]recheckedField, len(r.changed))}
+	for field, f := range r.changed {
+		if keep(field) {
+			selected.changed[field] = f
+		}
+	}
+	return selected
 }
 
 // Commit records the new values as the ones in use, so the next Recheck

@@ -44,20 +44,21 @@ func (r *CredentialsResult) Close() error {
 
 // NewCredentialsStore creates the provider-credentials
 // subsystem using an existing storage connection.
-func NewCredentialsStore(ctx context.Context, shared storage.Storage, factory *ProviderFactory, registry *ModelRegistry, declaredNames []string, resilience config.ResilienceConfig) (*CredentialsResult, error) {
+// secrets resolves the secret references stored credentials hold.
+func NewCredentialsStore(ctx context.Context, shared storage.Storage, factory *ProviderFactory, registry *ModelRegistry, declaredNames []string, resilience config.ResilienceConfig, secrets *config.Secrets) (*CredentialsResult, error) {
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
-	return newCredentialsResult(ctx, shared, factory, registry, declaredNames, resilience)
+	return newCredentialsResult(ctx, shared, factory, registry, declaredNames, resilience, secrets)
 }
 
-func newCredentialsResult(ctx context.Context, storeConn storage.Storage, factory *ProviderFactory, registry *ModelRegistry, declaredNames []string, resilience config.ResilienceConfig) (*CredentialsResult, error) {
+func newCredentialsResult(ctx context.Context, storeConn storage.Storage, factory *ProviderFactory, registry *ModelRegistry, declaredNames []string, resilience config.ResilienceConfig, secrets *config.Secrets) (*CredentialsResult, error) {
 	store, err := createCredentialStore(ctx, storeConn)
 	if err != nil {
 		return nil, err
 	}
 
-	service, err := NewCredentialsService(ctx, factory, registry, store, declaredNames, resilience)
+	service, err := NewCredentialsService(ctx, factory, registry, store, declaredNames, resilience, secrets)
 	if err != nil {
 		_ = store.Close()
 		return nil, err

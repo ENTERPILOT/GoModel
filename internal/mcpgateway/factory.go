@@ -48,18 +48,19 @@ func (r *Result) Close() error {
 }
 
 // New creates the MCP gateway subsystem using an existing
-// storage connection.
-func New(ctx context.Context, cfg *config.Config, shared storage.Storage, httpClient *http.Client, usageLogger usage.LoggerInterface) (*Result, error) {
+// storage connection. secrets resolves the secret references admin-managed
+// servers hold.
+func New(ctx context.Context, cfg *config.Config, shared storage.Storage, httpClient *http.Client, usageLogger usage.LoggerInterface, secrets *config.Secrets) (*Result, error) {
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
-	return newResult(ctx, cfg, shared, httpClient, usageLogger)
+	return newResult(ctx, cfg, shared, httpClient, usageLogger, secrets)
 }
 
-func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage, httpClient *http.Client, usageLogger usage.LoggerInterface) (*Result, error) {
+func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage, httpClient *http.Client, usageLogger usage.LoggerInterface, secrets *config.Secrets) (*Result, error) {
 	store, err := createStore(ctx, storeConn)
 	if err != nil {
 		return nil, err
@@ -81,6 +82,7 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 		UserPathHeader: cfg.Server.UserPathHeader,
 		AllowedOrigins: cfg.MCP.AllowedOrigins,
 		ToolDiscovery:  cfg.MCP.ToolDiscovery,
+		Secrets:        secrets,
 	})
 	if err != nil {
 		return nil, err

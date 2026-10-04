@@ -11,6 +11,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -34,7 +35,9 @@ type ProviderCredentialsAdmin interface {
 // redactedCredentialValue replaces secret values (API keys, service account
 // JSON) in admin views. An all-asterisk value of at least three characters is
 // accepted on upsert to keep the currently stored value, so older dashboard
-// clients that send "***" remain compatible.
+// clients that send "***" remain compatible. A value holding a secret
+// reference (${scheme:reference}) is shown as stored: it names where the
+// secret lives and is not secret itself.
 const redactedCredentialValue = "***********"
 
 // upsertProviderCredentialRequest is the admin upsert contract for one
@@ -435,20 +438,35 @@ func (h *Handler) providerCredentialView(cred providers.ManagedProviderCredentia
 		VertexLocation:     cred.VertexLocation,
 		ServiceAccountFile: cred.ServiceAccountFile,
 		GCPScope:           cred.GCPScope,
-		ProxyURL:           httpclient.RedactProxyURL(cred.ProxyURL),
+		ProxyURL:           redactProxyURL(cred.ProxyURL),
 		Models:             cred.Models,
 		Enabled:            cred.Enabled,
 		Managed:            h.providerCredentials.IsManaged(cred.Name),
 		CreatedAt:          nonZeroTime(cred.CreatedAt),
 		UpdatedAt:          nonZeroTime(cred.UpdatedAt),
 	}
-	if cred.ServiceAccountJSON != "" {
-		resp.ServiceAccountJSON = redactedCredentialValue
-	}
-	if cred.ServiceAccountJSONBase64 != "" {
-		resp.ServiceAccountJSONBase64 = redactedCredentialValue
-	}
+	resp.ServiceAccountJSON = redactCredentialValue(cred.ServiceAccountJSON)
+	resp.ServiceAccountJSONBase64 = redactCredentialValue(cred.ServiceAccountJSONBase64)
 	return resp
+}
+
+// redactCredentialValue masks a literal secret and keeps a secret reference,
+// which is not secret. Empty stays empty.
+func redactCredentialValue(value string) string {
+	if value == "" || config.HasSecretReference(value) {
+		return value
+	}
+	return redactedCredentialValue
+}
+
+// redactProxyURL masks the password of a literal proxy URL. A proxy URL
+// holding a secret reference is shown as stored: its password is the
+// reference, not the secret.
+func redactProxyURL(value string) string {
+	if config.HasSecretReference(value) {
+		return value
+	}
+	return httpclient.RedactProxyURL(value)
 }
 
 // declaredProviderCredentialView builds a read-only view row for one
@@ -481,14 +499,14 @@ func nonZeroTime(t time.Time) *time.Time {
 }
 
 // redactList keeps the entry count (so operators can see how many keys are
-// configured) but replaces every value.
+// configured) but masks every literal value; secret references are kept.
 func redactList(values []string) []string {
 	if len(values) == 0 {
 		return nil
 	}
 	redacted := make([]string, len(values))
-	for i := range values {
-		redacted[i] = redactedCredentialValue
+	for i, value := range values {
+		redacted[i] = redactCredentialValue(value)
 	}
 	return redacted
 }

@@ -11,6 +11,7 @@
   import SearchSelect from "./SearchSelect.svelte";
   import { modelsStore } from "$lib/stores/models.svelte.js";
   import { modelPickerOptions } from "$lib/utils/modelSelectors.js";
+  import { hasSecretReference } from "$lib/utils/secretReference.js";
   import {
     isSecretPlaceholder,
     schemaArrayFieldSelected,
@@ -50,7 +51,8 @@
       case "number":
         return "number";
       case "secret":
-        return "password";
+        // A secret reference is not secret: show it so it can be edited.
+        return hasSecretReference(schemaFieldValue(config, field)) ? "text" : "password";
       default:
         return "text";
     }

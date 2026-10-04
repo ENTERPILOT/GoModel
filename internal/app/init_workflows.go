@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -75,6 +76,9 @@ func (b *bootstrap) initWorkflows() error {
 		return fmt.Errorf("failed to load workflows: %w", err)
 	}
 	app.workflows = workflowResult
+	if app.guardrails != nil && app.guardrails.Service != nil {
+		app.secretRotation.watchEntities(guardrails.DefinitionSecretEntity+".", guardrailSecrets{guardrails: app.guardrails.Service, workflows: workflowResult.Service})
+	}
 
 	authKeyResult, err := authkeys.New(b.ctx, app.storage)
 	if err != nil {
@@ -96,7 +100,7 @@ func (b *bootstrap) initGuardrails(refreshInterval time.Duration, catalog *plugi
 	result, err := guardrails.New(b.ctx, app.storage, refreshInterval, catalog, plugins.HostDeps{
 		Logger: slog.Default(),
 		Chat:   executor,
-	})
+	}, b.cfg.AppConfig.Secrets)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize guardrails: %w", err)
 	}
@@ -351,4 +355,19 @@ func failoverResolver(cfg *config.Config, vm *virtualmodels.Service) server.Requ
 		return nil
 	}
 	return vm
+}
+
+// guardrailSecrets rotates guardrail secrets and recompiles the workflows, so
+// requests move to the rebuilt instances at once rather than on the next
+// periodic refresh.
+type guardrailSecrets struct {
+	guardrails *guardrails.Service
+	workflows  *workflows.Service
+}
+
+func (g guardrailSecrets) RotateSecrets(ctx context.Context, fields []string) error {
+	if err := g.guardrails.RotateSecrets(ctx, fields); err != nil {
+		return err
+	}
+	return g.workflows.Refresh(ctx)
 }

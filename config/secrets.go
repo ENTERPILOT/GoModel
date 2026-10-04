@@ -66,6 +66,7 @@ var builtinSecretResolvers = map[string]SecretResolver{
 type Secrets struct {
 	mu        sync.RWMutex
 	resolvers map[string]SecretResolver
+	writer    SecretWriter
 
 	rotation rotation
 }
