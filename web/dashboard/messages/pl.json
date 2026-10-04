@@ -587,6 +587,8 @@
   "models_empty": "Nie zarejestrowano modeli.",
   "models_empty_category": "Brak modeli w tej kategorii.",
   "models_no_match": "Żaden model nie pasuje do filtra.",
+  "models_status_all": "Wszystkie",
+  "models_status_filter_label": "Filtruj modele według statusu",
   "models_column_model": "Model",
   "models_enabled": "Włączony",
   "models_disabled": "Wyłączony",
