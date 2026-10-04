@@ -88,9 +88,9 @@ func TestSecretRecheckSelectCommitsOnlySelected(t *testing.T) {
 	secrets := NewSecrets()
 	require.NoError(t, secrets.Register("vault", vault))
 	ctx := t.Context()
-	_, err := secrets.ResolveField(ctx, "x", "${vault:a}")
+	_, err := secrets.resolveField(ctx, "x", "${vault:a}")
 	require.NoError(t, err)
-	_, err = secrets.ResolveField(ctx, "y", "${vault:b}")
+	_, err = secrets.resolveField(ctx, "y", "${vault:b}")
 	require.NoError(t, err)
 
 	vault.set("a", "a2")

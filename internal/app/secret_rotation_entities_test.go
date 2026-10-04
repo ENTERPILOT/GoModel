@@ -26,8 +26,8 @@ func (f *fakeEntitySecrets) RotateSecrets(_ context.Context, fields []string) er
 func recordEntityField(t *testing.T, h *rotationHarness, field, reference, value string) {
 	t.Helper()
 	h.vault.set(reference, value)
-	_, err := h.rotation.secrets.ResolveField(t.Context(), field, "${vault:"+reference+"}")
-	require.NoError(t, err)
+	stored := "${vault:" + reference + "}"
+	require.NoError(t, h.rotation.secrets.ResolveFields(t.Context(), field, &stored))
 }
 
 func TestSecretRotationHandsEntityFieldsToTheirOwners(t *testing.T) {

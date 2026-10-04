@@ -6,15 +6,6 @@ import (
 	"slices"
 )
 
-// HasSecretReference reports whether value contains at least one
-// ${scheme:reference} secret reference. An escaped $${...} is not one.
-//
-// The admin API uses it to tell a reference, which names where a secret lives
-// and is shown as is, from a literal secret, which it masks.
-func HasSecretReference(value string) bool {
-	return hasSecretReference(value)
-}
-
 // ResolvedEntity holds the resolved secret fields of one dashboard-managed
 // entity (a provider credential, an MCP server, a guardrail), as returned by
 // ResolveEntity. Nothing is recorded for rotation until Record is called.
@@ -28,7 +19,7 @@ type ResolvedEntity struct {
 // ResolveEntity resolves the secret fields of one dashboard-managed entity as
 // a unit. entity identifies it ("provider_credentials.openai"); fields maps
 // each field path ("provider_credentials.openai.api_keys[0]") to its stored
-// value. Resolvers see the field path, as with ResolveField.
+// value. Resolvers see the field path, as with ResolveFields.
 //
 // The first field that fails returns its *SecretError, naming the field and
 // scheme, and nothing is recorded. On success, call Record once the entity is

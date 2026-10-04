@@ -64,14 +64,14 @@ func (s *Secrets) secretWriter() SecretWriter {
 // every value when no writer is registered.
 func (s *Secrets) StoreSecret(ctx context.Context, key SecretKey, value string) (string, error) {
 	w := s.secretWriter()
-	if w == nil || value == "" || hasSecretReference(value) {
+	if w == nil || value == "" || HasSecretReference(value) {
 		return value, nil
 	}
 	reference, err := w.WriteSecret(ctx, key, value)
 	if err != nil {
 		return "", fmt.Errorf("%s.%s: write secret: %w", key.Entity, key.Field, err)
 	}
-	if !hasSecretReference(reference) {
+	if !HasSecretReference(reference) {
 		// Persisting it would store whatever the writer returned in place of
 		// the secret, possibly the secret itself.
 		return "", fmt.Errorf("%s.%s: secret writer did not return a ${scheme:reference}", key.Entity, key.Field)
