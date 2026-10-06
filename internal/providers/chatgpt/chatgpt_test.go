@@ -233,19 +233,49 @@ func TestListModels(t *testing.T) {
 	}
 }
 
+// TestChatCompletionsDelegateToResponsesAdapter locks the wiring: chat
+// requests run through the Chat-to-Responses translation, which rejects
+// parameters with no Responses equivalent before any upstream call. A
+// revert to unsupported() would fail this test.
+func TestChatCompletionsDelegateToResponsesAdapter(t *testing.T) {
+	srv, capture := providertest.SSEServer(t, codexSSE)
+	provider := newTestProvider("token", srv.URL, srv.Client(), llmclient.Hooks{})
+	req := &core.ChatRequest{
+		Model:    "gpt-5.6-terra",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"seed": json.RawMessage(`42`),
+		}),
+	}
+
+	t.Run("ChatCompletion", func(t *testing.T) {
+		resp, err := provider.ChatCompletion(context.Background(), req)
+		require.Nil(t, resp)
+		require.Error(t, err)
+
+		var gatewayErr *core.GatewayError
+		require.ErrorAs(t, err, &gatewayErr)
+		assert.Equal(t, http.StatusBadRequest, gatewayErr.StatusCode)
+		assert.Contains(t, gatewayErr.Message, `"seed"`)
+	})
+
+	t.Run("StreamChatCompletion", func(t *testing.T) {
+		stream, err := provider.StreamChatCompletion(context.Background(), req)
+		require.Nil(t, stream)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `"seed"`)
+	})
+
+	assert.Zero(t, capture.Count(), "rejected chat requests must not reach the upstream")
+}
+
 // TestUnsupportedSurfaces checks that surfaces the Codex backend does not
 // implement report a capability gap (501) rather than a malformed request.
+// Chat completions are translated onto the Responses API, so only embeddings
+// remain unsupported.
 func TestUnsupportedSurfaces(t *testing.T) {
 	provider := New(providers.ProviderConfig{APIKey: "token"}, providers.ProviderOptions{})
 	calls := map[string]func() error{
-		"ChatCompletion": func() error {
-			_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{Model: "gpt-5.6-terra"})
-			return err
-		},
-		"StreamChatCompletion": func() error {
-			_, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{Model: "gpt-5.6-terra"})
-			return err
-		},
 		"Embeddings": func() error {
 			_, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{Model: "gpt-5.6-terra"})
 			return err
