@@ -208,8 +208,8 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*IssuedKey, er
 // Import stores a key another gateway issued, by the hash of its token, so
 // clients keep using that token. Importing the same token again updates the
 // earlier import, so re-running a migration carries over later changes; a
-// Disabled input deactivates it. It returns ErrSecretHashExists only when the
-// hash belongs to a key from another source.
+// Disabled input only deactivates it. It returns ErrSecretHashExists only
+// when the hash belongs to a key from another source.
 func (s *Service) Import(ctx context.Context, input ImportInput) (*View, ImportOutcome, error) {
 	if s == nil {
 		return nil, ImportSkipped, fmt.Errorf("auth key service is required")
@@ -220,10 +220,17 @@ func (s *Service) Import(ctx context.Context, input ImportInput) (*View, ImportO
 		return nil, ImportSkipped, err
 	}
 	existing, exists := s.keyBySecretHash(normalized.SecretHash)
-	if !exists {
-		if normalized.Disabled {
+	if !exists && normalized.Disabled {
+		// Another instance may have imported it since this one last loaded
+		// keys; check storage before deciding there is nothing to deactivate.
+		if err := s.Refresh(ctx); err != nil {
+			return nil, ImportSkipped, err
+		}
+		if existing, exists = s.keyBySecretHash(normalized.SecretHash); !exists {
 			return nil, ImportSkipped, nil
 		}
+	}
+	if !exists {
 		view, err := s.createImported(ctx, normalized)
 		if !errors.Is(err, ErrSecretHashExists) {
 			return view, ImportCreated, err
@@ -238,6 +245,17 @@ func (s *Service) Import(ctx context.Context, input ImportInput) (*View, ImportO
 	}
 	if existing.ImportedFrom != normalized.ImportedFrom {
 		return nil, ImportSkipped, ErrSecretHashExists
+	}
+	if normalized.Disabled {
+		// Only deactivate: the key's other fields, its expiry included, stay
+		// as they were, so it is never briefly less restricted.
+		if existing.Enabled && existing.DeactivatedAt == nil {
+			if err := s.Deactivate(ctx, existing.ID); err != nil {
+				return nil, ImportSkipped, err
+			}
+		}
+		view, err := s.viewByID(existing.ID)
+		return view, ImportUpdated, err
 	}
 	view, err := s.updateImported(ctx, existing, normalized)
 	return view, ImportUpdated, err
@@ -299,13 +317,7 @@ func (s *Service) updateImported(ctx context.Context, key AuthKey, input ImportI
 		return nil, fmt.Errorf("update imported auth key: %w", err)
 	}
 	s.applyUpsert(key, now)
-	if input.Disabled && key.Enabled && key.DeactivatedAt == nil {
-		if err := s.Deactivate(ctx, key.ID); err != nil {
-			return nil, err
-		}
-	} else {
-		s.refreshBestEffort(ctx, "import")
-	}
+	s.refreshBestEffort(ctx, "import")
 	return s.viewByID(key.ID)
 }
 

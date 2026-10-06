@@ -146,6 +146,44 @@ func TestServiceImportDisabledKey(t *testing.T) {
 	assert.False(t, view.Active, "a re-import never reactivates a deactivated key")
 }
 
+func TestServiceImportDisabledKeyAnotherInstanceStored(t *testing.T) {
+	now := time.Now().UTC()
+	store := newTestStore()
+	service, err := NewService(store)
+	require.NoError(t, err)
+	// Another replica imported the key after this one last refreshed.
+	store.keys["elsewhere"] = AuthKey{ID: "elsewhere", Name: "elsewhere", SecretHash: hashSecret(liteLLMToken), ImportedFrom: ImportedFromLiteLLM, Enabled: true, CreatedAt: now, UpdatedAt: now}
+
+	view, outcome, err := service.Import(context.Background(), ImportInput{
+		Name: "k", ImportedFrom: ImportedFromLiteLLM, SecretHash: hashSecret(liteLLMToken), Disabled: true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, ImportUpdated, outcome)
+	assert.False(t, view.Active)
+	assert.False(t, store.keys["elsewhere"].Enabled, "the deactivation is stored")
+}
+
+func TestServiceImportDisabledKeyKeepsItsFields(t *testing.T) {
+	ctx := context.Background()
+	service, err := NewService(newTestStore())
+	require.NoError(t, err)
+	expires := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	first := importLiteLLMKey(t, service, ImportInput{
+		Name: "k", UserPath: "/team/k", AllowedModels: []string{"gpt-4o"}, ExpiresAt: &expires})
+
+	view, _, err := service.Import(ctx, ImportInput{
+		Name: "renamed", UserPath: "/elsewhere", ImportedFrom: ImportedFromLiteLLM,
+		SecretHash: hashSecret(liteLLMToken), Disabled: true,
+	})
+	require.NoError(t, err)
+	assert.False(t, view.Active)
+	assert.Equal(t, first.Name, view.Name)
+	assert.Equal(t, "/team/k", view.UserPath)
+	assert.Equal(t, []string{"gpt-4o"}, view.AllowedModels)
+	require.NotNil(t, view.ExpiresAt)
+	assert.True(t, view.ExpiresAt.Equal(expires), "a disabled import never clears the expiry")
+}
+
 func TestServiceImportUpdatesAKeyAnotherInstanceStored(t *testing.T) {
 	now := time.Now().UTC()
 	store := newTestStore()
