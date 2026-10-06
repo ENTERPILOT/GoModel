@@ -23,7 +23,7 @@ func importLiteLLMKey(t *testing.T, service *Service, input ImportInput) *View {
 	if input.SecretHash == "" {
 		input.SecretHash = hashSecret(liteLLMToken)
 	}
-	view, err := service.Import(context.Background(), input)
+	view, _, err := service.Import(context.Background(), input)
 	require.NoError(t, err)
 	require.NotNil(t, view)
 	return view
@@ -91,20 +91,62 @@ func TestServiceImportedKeyCanBeDeactivated(t *testing.T) {
 	require.ErrorIs(t, err, ErrInactive)
 }
 
-func TestServiceImportRejectsADuplicateHash(t *testing.T) {
+func TestServiceImportUpdatesAnEarlierImport(t *testing.T) {
+	ctx := context.Background()
 	service, err := NewService(newTestStore())
 	require.NoError(t, err)
-	importLiteLLMKey(t, service, ImportInput{})
+	first := importLiteLLMKey(t, service, ImportInput{
+		Name: "old", UserPath: "/old", Labels: []string{"a"}, AllowedModels: []string{"gpt-4o", "smart"}})
+	_, err = service.UpdateDashboardAccess(ctx, first.ID, true)
+	require.NoError(t, err)
 
-	_, err = service.Import(context.Background(), ImportInput{
-		Name:         "again",
+	view, outcome, err := service.Import(ctx, ImportInput{
+		Name: "new", UserPath: "/new", AllowedModels: []string{"gpt-4o"},
 		ImportedFrom: ImportedFromLiteLLM,
 		SecretHash:   strings.ToUpper(hashSecret(liteLLMToken)),
 	})
-	require.ErrorIs(t, err, ErrSecretHashExists)
+	require.NoError(t, err)
+	assert.Equal(t, ImportUpdated, outcome)
+	assert.Equal(t, first.ID, view.ID)
+	assert.Equal(t, "new", view.Name)
+	assert.Equal(t, "/new", view.UserPath)
+	assert.Nil(t, view.Labels)
+	assert.Equal(t, []string{"gpt-4o"}, view.AllowedModels, "a model LiteLLM removed is removed here too")
+	assert.True(t, view.DashboardAccess, "dashboard access granted in GoModel is kept")
+	assert.Equal(t, 1, service.Total())
+
+	require.NoError(t, service.Refresh(ctx))
+	got, err := service.Authenticate(ctx, liteLLMToken)
+	require.NoError(t, err)
+	assert.Equal(t, "/new", got.UserPath, "the update is stored, not only cached")
 }
 
-func TestServiceImportReportsAHashAnotherInstanceStored(t *testing.T) {
+func TestServiceImportDisabledKey(t *testing.T) {
+	ctx := context.Background()
+	service, err := NewService(newTestStore())
+	require.NoError(t, err)
+	disabled := ImportInput{Name: "k", ImportedFrom: ImportedFromLiteLLM, SecretHash: hashSecret(liteLLMToken), Disabled: true}
+
+	view, outcome, err := service.Import(ctx, disabled)
+	require.NoError(t, err)
+	assert.Equal(t, ImportSkipped, outcome)
+	assert.Nil(t, view)
+	assert.Zero(t, service.Total(), "a key that was never imported is not created just to be disabled")
+
+	importLiteLLMKey(t, service, ImportInput{})
+	view, outcome, err = service.Import(ctx, disabled)
+	require.NoError(t, err)
+	assert.Equal(t, ImportUpdated, outcome)
+	assert.False(t, view.Active)
+	_, err = service.Authenticate(ctx, liteLLMToken)
+	require.ErrorIs(t, err, ErrInactive)
+
+	view, _, err = service.Import(ctx, ImportInput{Name: "k", ImportedFrom: ImportedFromLiteLLM, SecretHash: hashSecret(liteLLMToken)})
+	require.NoError(t, err)
+	assert.False(t, view.Active, "a re-import never reactivates a deactivated key")
+}
+
+func TestServiceImportDisabledKeyAnotherInstanceStored(t *testing.T) {
 	now := time.Now().UTC()
 	store := newTestStore()
 	service, err := NewService(store)
@@ -112,12 +154,71 @@ func TestServiceImportReportsAHashAnotherInstanceStored(t *testing.T) {
 	// Another replica imported the key after this one last refreshed.
 	store.keys["elsewhere"] = AuthKey{ID: "elsewhere", Name: "elsewhere", SecretHash: hashSecret(liteLLMToken), ImportedFrom: ImportedFromLiteLLM, Enabled: true, CreatedAt: now, UpdatedAt: now}
 
-	_, err = service.Import(context.Background(), ImportInput{
+	view, outcome, err := service.Import(context.Background(), ImportInput{
+		Name: "k", ImportedFrom: ImportedFromLiteLLM, SecretHash: hashSecret(liteLLMToken), Disabled: true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, ImportUpdated, outcome)
+	assert.False(t, view.Active)
+	assert.False(t, store.keys["elsewhere"].Enabled, "the deactivation is stored")
+}
+
+func TestServiceImportDisabledKeyKeepsItsFields(t *testing.T) {
+	ctx := context.Background()
+	service, err := NewService(newTestStore())
+	require.NoError(t, err)
+	expires := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	first := importLiteLLMKey(t, service, ImportInput{
+		Name: "k", UserPath: "/team/k", AllowedModels: []string{"gpt-4o"}, ExpiresAt: &expires})
+
+	view, _, err := service.Import(ctx, ImportInput{
+		Name: "renamed", UserPath: "/elsewhere", ImportedFrom: ImportedFromLiteLLM,
+		SecretHash: hashSecret(liteLLMToken), Disabled: true,
+	})
+	require.NoError(t, err)
+	assert.False(t, view.Active)
+	assert.Equal(t, first.Name, view.Name)
+	assert.Equal(t, "/team/k", view.UserPath)
+	assert.Equal(t, []string{"gpt-4o"}, view.AllowedModels)
+	require.NotNil(t, view.ExpiresAt)
+	assert.True(t, view.ExpiresAt.Equal(expires), "a disabled import never clears the expiry")
+}
+
+func TestServiceImportUpdatesAKeyAnotherInstanceStored(t *testing.T) {
+	now := time.Now().UTC()
+	store := newTestStore()
+	service, err := NewService(store)
+	require.NoError(t, err)
+	// Another replica imported the key after this one last refreshed.
+	store.keys["elsewhere"] = AuthKey{ID: "elsewhere", Name: "elsewhere", SecretHash: hashSecret(liteLLMToken), ImportedFrom: ImportedFromLiteLLM, Enabled: true, CreatedAt: now, UpdatedAt: now}
+
+	view, outcome, err := service.Import(context.Background(), ImportInput{
+		Name:         "again",
+		ImportedFrom: ImportedFromLiteLLM,
+		SecretHash:   hashSecret(liteLLMToken),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, ImportUpdated, outcome)
+	assert.Equal(t, "elsewhere", view.ID)
+	assert.Equal(t, "again", view.Name)
+}
+
+func TestServiceImportNeverTakesOverAKeyFromAnotherSource(t *testing.T) {
+	now := time.Now().UTC()
+	native := AuthKey{ID: "native", Name: "native", SecretHash: hashSecret(liteLLMToken), Enabled: true, CreatedAt: now, UpdatedAt: now}
+	service, err := NewService(newTestStore(native))
+	require.NoError(t, err)
+	require.NoError(t, service.Refresh(context.Background()))
+
+	_, _, err = service.Import(context.Background(), ImportInput{
 		Name:         "again",
 		ImportedFrom: ImportedFromLiteLLM,
 		SecretHash:   hashSecret(liteLLMToken),
 	})
 	require.ErrorIs(t, err, ErrSecretHashExists)
+	view, err := service.View("native")
+	require.NoError(t, err)
+	assert.Equal(t, "native", view.Name)
 }
 
 func TestServiceImportNormalizesInput(t *testing.T) {
@@ -162,7 +263,7 @@ func TestServiceImportValidatesInput(t *testing.T) {
 			input := valid
 			tt.mutate(&input)
 
-			_, err = service.Import(context.Background(), input)
+			_, _, err = service.Import(context.Background(), input)
 			require.Error(t, err)
 			assert.True(t, IsValidationError(err), "error %v is not a validation error", err)
 			assert.Contains(t, err.Error(), tt.want)

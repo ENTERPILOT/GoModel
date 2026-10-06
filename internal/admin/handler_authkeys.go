@@ -147,10 +147,15 @@ type importAuthKeyRequest struct {
 	ImportedFrom  string `json:"imported_from"`
 	SecretHash    string `json:"secret_hash"`
 	RedactedValue string `json:"redacted_value,omitempty"`
+	// Enabled false marks a key the source blocked or expired. Omitted means
+	// true.
+	Enabled *bool `json:"enabled,omitempty"`
 }
 
 // ImportAuthKey handles POST /admin/auth-keys/import. It stores a key another
-// gateway issued by the hash of its token, so clients keep that token.
+// gateway issued by the hash of its token, so clients keep that token, and
+// answers 201. Importing the same token again updates that key and answers
+// 200; a disabled key that was never imported answers 204.
 func (h *Handler) ImportAuthKey(c *echo.Context) error {
 	if h.authKeys == nil {
 		return handleError(c, featureUnavailableError("auth keys feature is unavailable"))
@@ -166,7 +171,7 @@ func (h *Handler) ImportAuthKey(c *echo.Context) error {
 		return handleError(c, err)
 	}
 
-	view, err := h.authKeys.Import(c.Request().Context(), authkeys.ImportInput{
+	view, outcome, err := h.authKeys.Import(c.Request().Context(), authkeys.ImportInput{
 		Name:            req.Name,
 		Description:     req.Description,
 		UserPath:        req.UserPath,
@@ -177,12 +182,19 @@ func (h *Handler) ImportAuthKey(c *echo.Context) error {
 		ImportedFrom:    req.ImportedFrom,
 		SecretHash:      req.SecretHash,
 		RedactedValue:   req.RedactedValue,
+		Disabled:        req.Enabled != nil && !*req.Enabled,
 	})
 	if errors.Is(err, authkeys.ErrSecretHashExists) {
 		return handleError(c, core.NewInvalidRequestErrorWithStatus(http.StatusConflict, err.Error(), err).WithCode("auth_key_exists"))
 	}
 	if err != nil {
 		return handleError(c, authKeyWriteError(err))
+	}
+	switch outcome {
+	case authkeys.ImportSkipped:
+		return c.NoContent(http.StatusNoContent)
+	case authkeys.ImportUpdated:
+		return c.JSON(http.StatusOK, view)
 	}
 	return c.JSON(http.StatusCreated, view)
 }
