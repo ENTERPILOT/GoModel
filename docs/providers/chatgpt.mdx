@@ -92,9 +92,9 @@ same `prompt_cache_key` on every turn. GoModel forwards the client's key and
 sends the detected [session](/features/session-keeping) as the `session-id`
 header, as the Codex CLI does. When the client sends no key, the session id
 stands in for it if it fits the 64-character key limit. If GoModel detects no
-session (for example, with automatic detection turned off), the backend gets
-neither signal: send `prompt_cache_key` or a session header such as
-`X-Session-Id` to keep cache hits.
+session, the backend gets neither signal. Send `prompt_cache_key` to keep
+cache hits; a session header such as `X-Session-Id` also works unless
+`SESSION_KEEPING_ENABLED=false`, which turns session detection off.
 
 ## Reported cost is not real spend
 
