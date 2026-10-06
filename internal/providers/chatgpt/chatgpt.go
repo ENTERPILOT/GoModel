@@ -24,6 +24,10 @@ import (
 // with CHATGPT_BASE_URL.
 const defaultBaseURL = "https://chatgpt.com/backend-api/codex"
 
+// sessionHeader carries the conversation id, as the Codex CLI sends it, so the
+// backend keeps one conversation on the same prompt cache.
+const sessionHeader = "session-id"
+
 // defaultModels lists the models a ChatGPT subscription may call through the
 // Codex backend. The backend exposes no /models endpoint, so the inventory is
 // declared here and overridden with CHATGPT_MODELS when a plan serves a
@@ -116,13 +120,16 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 	if req == nil {
 		return nil, core.NewInvalidRequestError("responses request is required", nil)
 	}
-	body, err := newUpstreamRequest(req)
+	body, err := newUpstreamRequest(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	headers, err := authHeaders(p.keys.NextForContext(ctx))
 	if err != nil {
 		return nil, err
+	}
+	if id := core.SessionIDFromContext(ctx); id != "" {
+		headers.Set(sessionHeader, id)
 	}
 	stream, err := p.client.DoStream(ctx, llmclient.Request{
 		Method:    http.MethodPost,
