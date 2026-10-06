@@ -128,9 +128,13 @@ lists the import in the report.
 Run it again while both gateways run side by side: it brings GoModel up to date
 with LiteLLM. Keys get their current path, labels, allowed models, and expiry,
 and keys LiteLLM has since blocked or expired are deactivated. Dashboard access
-granted and keys deactivated in GoModel stay as they are. Rules for a path are
-written before its keys; if one is rejected, those keys are held back and the
-command exits with an error.
+granted and keys deactivated in GoModel stay as they are.
+
+Before writing anything, the command checks that GoModel has the features the
+import needs turned on, such as budgets (which need usage tracking) and rate
+limits, and stops if one is off. Rules for a path are written before its keys;
+if one is rejected, those keys are held back and the command exits with an
+error.
 
 Each key keeps its `sk-...` value: LiteLLM stores only a SHA-256 hash of it,
 and GoModel [imports that hash](/advanced/admin-endpoints#importing-keys-from-litellm),
@@ -159,6 +163,10 @@ personal keys, not the team keys they hold, because only personal keys sit
 under `/users/<user>`. Model names resolve to the provider models behind them,
 because GoModel checks the model a virtual model resolves to; if you later
 point a virtual model at other models, update the allowed models that named it.
+
+A `max_budget` or rate limit of `0` rejects every request in LiteLLM. GoModel
+limits must be positive, so that path gets a model policy no model matches
+instead.
 
 `budget_duration` maps to `hourly`, `daily`, `weekly`, or `monthly` (`30d` and
 `1mo` both become `monthly`, which resets on calendar months), and other

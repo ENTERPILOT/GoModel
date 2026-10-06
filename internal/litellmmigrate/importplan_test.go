@@ -254,6 +254,23 @@ func TestPlanImport_ReportSection(t *testing.T) {
 	assert.Contains(t, report, "| `/team` | `openai/gpt-4o` | $10 every 12h (LiteLLM spent $3.20) | 2 concurrent requests |")
 }
 
+func TestPlanImport_ZeroLimitsBlockThePath(t *testing.T) {
+	plan, result := planFor(t, &Database{
+		Teams: []dbTeam{{TeamID: "t", TeamAlias: new("frozen"), Models: []string{"gpt-4o"},
+			MaxBudget: new(0.0), BudgetDuration: new("1d"), RPMLimit: new(int64(10))}},
+		Keys: []dbKey{
+			{Token: "h1", KeyAlias: new("in-team"), TeamID: new("t")},
+			{Token: "h2", KeyAlias: new("no-requests"), RPMLimit: new(int64(0)), TPMLimit: new(int64(100))},
+		},
+	})
+	assert.Equal(t, []string{blockedModel}, policyAt(plan, "/frozen"), "the team's model list is replaced, not kept")
+	assert.Equal(t, []string{blockedModel}, policyAt(plan, "/keys/no-requests"))
+	assert.Len(t, plan.Policies, 2)
+	assert.Empty(t, plan.Budgets, "GoModel rejects a zero budget, so none is sent")
+	assert.Empty(t, plan.RateLimits)
+	assert.Contains(t, findings(result, SeverityWarning), "team frozen max_budget: 0 rejects every request in LiteLLM; GoModel limits must be positive, so /frozen may call no model instead")
+}
+
 func TestParseBudgetDuration(t *testing.T) {
 	tests := []struct {
 		in      string

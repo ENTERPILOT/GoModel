@@ -259,6 +259,42 @@ func (p *planner) addPolicy(path string, models []string, subject string) {
 	})
 }
 
+// blockedModel is the allowlist entry that blocks a path: it names no model,
+// so nothing under the path may call any.
+const blockedModel = "litellm-zero-limit"
+
+// zeroLimit names a limit set to zero or less. LiteLLM then rejects every
+// request; GoModel only accepts positive limits.
+func zeroLimit(limits dbLimits) string {
+	switch {
+	case limits.MaxBudget != nil && *limits.MaxBudget <= 0:
+		return "max_budget"
+	case limits.RPMLimit != nil && *limits.RPMLimit <= 0:
+		return "rpm_limit"
+	case limits.TPMLimit != nil && *limits.TPMLimit <= 0:
+		return "tpm_limit"
+	case limits.TPDLimit != nil && *limits.TPDLimit <= 0:
+		return "tpd_limit"
+	case limits.MaxParallelRequests != nil && *limits.MaxParallelRequests <= 0:
+		return "max_parallel_requests"
+	}
+	return ""
+}
+
+// blockAll replaces path's model policy with one no model matches, the
+// closest GoModel equivalent of a LiteLLM limit of zero.
+func (p *planner) blockAll(path, subject, field string) {
+	p.report.warn(subject+" "+field, fmt.Sprintf("0 rejects every request in LiteLLM; GoModel limits must be positive, so %s may call no model instead", path))
+	policy := PolicyImport{UserPath: path, AllowedModels: []string{blockedModel}, Description: "Migrated from LiteLLM " + subject + ": " + field + " is 0"}
+	for i := range p.plan.Policies {
+		if p.plan.Policies[i].UserPath == path {
+			p.plan.Policies[i] = policy
+			return
+		}
+	}
+	p.plan.Policies = append(p.plan.Policies, policy)
+}
+
 // allowedModels resolves a LiteLLM model list to GoModel selectors. An empty
 // list, all-proxy-models, and on a key all-team-models leave access
 // unrestricted at that level. Names of virtual models resolve to the models
@@ -302,6 +338,10 @@ func (p *planner) resolve(name string, depth int) []string {
 }
 
 func (p *planner) addLimits(path string, limits dbLimits, spend float64, subject string) {
+	if field := zeroLimit(limits); field != "" {
+		p.blockAll(path, subject, field)
+		return
+	}
 	if limits.MaxBudget != nil {
 		p.addBudget(path, *limits.MaxBudget, deref(limits.BudgetDuration), spend, subject)
 	}

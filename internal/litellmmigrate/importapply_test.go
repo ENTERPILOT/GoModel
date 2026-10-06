@@ -25,6 +25,9 @@ type fakeAdmin struct {
 	calls  []adminCall
 	access func(w http.ResponseWriter)
 	reply  func(call adminCall, w http.ResponseWriter)
+	// off lists admin paths whose feature is turned off; GETs of the others
+	// succeed and are not recorded.
+	off map[string]bool
 }
 
 func (f *fakeAdmin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -34,6 +37,15 @@ func (f *fakeAdmin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, _ = io.WriteString(w, `{"scope":"global"}`)
+		return
+	}
+	if r.Method == http.MethodGet {
+		if f.off[r.URL.Path] {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, `{"error":{"message":"budgets feature is unavailable"}}`)
+			return
+		}
+		_, _ = io.WriteString(w, `[]`)
 		return
 	}
 	call := adminCall{Method: r.Method, Path: r.URL.Path, Auth: r.Header.Get("Authorization")}
@@ -149,4 +161,19 @@ func TestApply_ChecksTheAdminKeyBeforeWriting(t *testing.T) {
 			assert.Empty(t, admin.calls, "nothing is written")
 		})
 	}
+}
+
+func TestApply_StopsBeforeWritingWhenAFeatureIsOff(t *testing.T) {
+	admin := &fakeAdmin{off: map[string]bool{"/admin/budgets": true}}
+	server := httptest.NewServer(admin)
+	defer server.Close()
+
+	_, err := Apply(context.Background(), server.Client(), server.URL, "sk-admin", applyTestPlan())
+	require.ErrorContains(t, err, "nothing was written; turn these features on and run again: budgets (2 to import): 503 budgets feature is unavailable")
+	assert.Empty(t, admin.calls, "no policy, limit, or key is written")
+
+	plan := applyTestPlan()
+	plan.Budgets = nil
+	_, err = Apply(context.Background(), server.Client(), server.URL, "sk-admin", plan)
+	require.NoError(t, err, "a feature the plan does not use may be off")
 }

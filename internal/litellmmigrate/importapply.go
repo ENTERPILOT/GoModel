@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,12 +29,16 @@ type ApplyResult struct {
 // path or an ancestor's rule was rejected is held back, so no key is ever
 // less restricted than in LiteLLM. Every write is an upsert, so Apply can be
 // re-run. It first checks that adminKey is a global admin credential and
-// fails without writing anything if not; after that, a rejected write is
-// recorded and the rest continue.
+// that GoModel has every feature the plan needs, and fails without writing
+// anything if not; after that, a rejected write is recorded and the rest
+// continue.
 func Apply(ctx context.Context, client *http.Client, baseURL, adminKey string, plan *ImportPlan) (ApplyResult, error) {
 	a := applier{ctx: ctx, client: client, base: strings.TrimRight(baseURL, "/") + "/admin", key: adminKey}
 	var result ApplyResult
 	if err := a.checkAccess(); err != nil {
+		return result, err
+	}
+	if err := a.checkFeatures(plan); err != nil {
 		return result, err
 	}
 	failedPaths := map[string]bool{}
@@ -129,6 +134,55 @@ func failedAncestor(failed map[string]bool, path string) string {
 		}
 	}
 	return ""
+}
+
+// checkFeatures confirms GoModel serves every admin endpoint the plan writes
+// to. A feature that is off, such as budgets without usage tracking, would
+// otherwise reject every write of that kind on every run and hold the keys
+// back.
+func (a applier) checkFeatures(plan *ImportPlan) error {
+	needed := []struct {
+		name, path string
+		count      int
+	}{
+		{"model policies", "/users", len(plan.Policies)},
+		{"budgets", "/budgets", len(plan.Budgets)},
+		{"rate limits", "/rate-limits", len(plan.RateLimits)},
+		{"API keys", "/auth-keys", len(plan.Keys)},
+	}
+	var missing []string
+	for _, feature := range needed {
+		if feature.count == 0 {
+			continue
+		}
+		if err := a.get(feature.path); err != nil {
+			missing = append(missing, fmt.Sprintf("%s (%d to import): %v", feature.name, feature.count, err))
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("GoModel cannot take this import, so nothing was written; turn these features on and run again: %s", strings.Join(missing, "; "))
+	}
+	return nil
+}
+
+func (a applier) get(path string) error {
+	req, err := http.NewRequestWithContext(a.ctx, http.MethodGet, a.base+path, nil)
+	if err != nil {
+		return err
+	}
+	if a.key != "" {
+		req.Header.Set("Authorization", "Bearer "+a.key)
+	}
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return errors.New(errorMessage(resp))
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return nil
 }
 
 func periodKey(period string, seconds int64) map[string]any {
