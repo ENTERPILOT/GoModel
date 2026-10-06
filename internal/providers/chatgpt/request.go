@@ -59,14 +59,14 @@ func newUpstreamRequest(ctx context.Context, req *core.ResponsesRequest) (*core.
 	}, nil
 }
 
-// passthroughExtras keeps the allowlisted untyped fields. When the client sent
-// no prompt_cache_key, the session GoModel detected stands in for it — the
+// passthroughExtras keeps the allowlisted untyped fields; an explicit null
+// counts as absent. When the client sent no prompt_cache_key, the session GoModel detected stands in for it — the
 // Codex CLI uses its session id as the key too — so clients that send none
 // still get cache affinity.
 func passthroughExtras(ctx context.Context, fields core.UnknownJSONFields) core.UnknownJSONFields {
 	kept := make(map[string]json.RawMessage, len(passthroughFields))
 	for _, name := range passthroughFields {
-		if raw := fields.Lookup(name); len(raw) > 0 {
+		if raw := fields.Lookup(name); !core.IsJSONNull(raw) {
 			kept[name] = raw
 		}
 	}

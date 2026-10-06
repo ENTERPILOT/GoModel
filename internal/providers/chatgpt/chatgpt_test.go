@@ -138,6 +138,13 @@ func TestStreamResponses_ForwardsPromptCacheAffinity(t *testing.T) {
 			wantHeader: "sess-1",
 		},
 		{
+			name:       "null key counts as missing",
+			session:    "sess-1",
+			extras:     map[string]json.RawMessage{"prompt_cache_key": json.RawMessage(`null`)},
+			wantKey:    "sess-1",
+			wantHeader: "sess-1",
+		},
+		{
 			name:       "session too long for a key is sent only as a header",
 			session:    longSession,
 			wantHeader: longSession,

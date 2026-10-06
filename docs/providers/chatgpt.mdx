@@ -91,8 +91,10 @@ The backend keeps one conversation on a warm prefix cache when it sees the
 same `prompt_cache_key` on every turn. GoModel forwards the client's key and
 sends the detected [session](/features/session-keeping) as the `session-id`
 header, as the Codex CLI does. When the client sends no key, the session id
-stands in for it (if it fits the 64-character key limit), so clients that send
-neither still get cache hits.
+stands in for it if it fits the 64-character key limit. If GoModel detects no
+session (for example, with automatic detection turned off), the backend gets
+neither signal: send `prompt_cache_key` or a session header such as
+`X-Session-Id` to keep cache hits.
 
 ## Reported cost is not real spend
 
