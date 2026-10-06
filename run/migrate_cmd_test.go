@@ -2,13 +2,19 @@ package run
 
 import (
 	"bytes"
+	"context"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/enterpilot/gomodel/internal/litellmmigrate"
 )
 
 const migrateTestConfig = `
@@ -185,4 +191,24 @@ func TestCheckGoModelURL(t *testing.T) {
 
 	err := runMigrateCommand("gomodel", []string{"litellm", "--gomodel-url", "http://gomodel:8080", "a.yaml"}, io.Discard, io.Discard)
 	assert.Equal(t, 2, ExitCode(err), "a remote http URL is a usage error")
+}
+
+func TestAdminClientRefusesRedirectsToHTTP(t *testing.T) {
+	var leaked atomic.Bool
+	plain := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			leaked.Store(true)
+		}
+	}))
+	defer plain.Close()
+	secure := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, plain.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	defer secure.Close()
+
+	client := adminClient()
+	client.Transport = secure.Client().Transport
+	_, err := litellmmigrate.Apply(context.Background(), client, secure.URL, "sk-admin", &litellmmigrate.ImportPlan{})
+	require.ErrorContains(t, err, "it would send the admin key unencrypted")
+	assert.False(t, leaked.Load(), "the admin key never reaches the http server")
 }

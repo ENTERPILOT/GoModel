@@ -216,8 +216,7 @@ func planDatabaseImport(opts migrateOptions, result *litellmmigrate.Result) (*li
 
 func applyDatabaseImport(opts migrateOptions, result *litellmmigrate.Result, plan *litellmmigrate.ImportPlan, stdout io.Writer) error {
 	adminKey := cmp.Or(os.Getenv("GOMODEL_MASTER_KEY"), result.MasterKey)
-	client := &http.Client{Timeout: 30 * time.Second}
-	applied, err := litellmmigrate.Apply(context.Background(), client, opts.GoModelURL, adminKey, plan)
+	applied, err := litellmmigrate.Apply(context.Background(), adminClient(), opts.GoModelURL, adminKey, plan)
 	if err != nil {
 		return fmt.Errorf("migrate litellm: %w", err)
 	}
@@ -230,6 +229,24 @@ func applyDatabaseImport(opts migrateOptions, result *litellmmigrate.Result, pla
 		return fmt.Errorf("migrate litellm: %d imports failed; fix the cause and run again", len(applied.Failures))
 	}
 	return nil
+}
+
+// adminClient is the HTTP client that carries the admin key. It never
+// follows a redirect from https to http: Go keeps the Authorization header
+// on a same-host redirect, so that would send the key unencrypted.
+func adminClient() *http.Client {
+	return &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			if via[0].URL.Scheme == "https" && req.URL.Scheme != "https" {
+				return fmt.Errorf("refusing a redirect to %s: it would send the admin key unencrypted", req.URL.Redacted())
+			}
+			return nil
+		},
+	}
 }
 
 func writeMigratedFiles(opts migrateOptions, result *litellmmigrate.Result, stdout io.Writer) error {
