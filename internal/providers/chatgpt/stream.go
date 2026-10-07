@@ -64,7 +64,7 @@ func collapseResponsesStream(stream io.Reader) (*core.ResponsesResponse, error) 
 			if event.Response == nil {
 				return nil, core.NewEmptyProviderResponseError("chatgpt")
 			}
-			if len(event.Response.Output) == 0 {
+			if len(event.Response.Output) == 0 && len(items) > 0 {
 				event.Response.Output = streamedOutput(items)
 			}
 			return event.Response, nil
@@ -91,12 +91,8 @@ type indexedOutputItem struct {
 	item  core.ResponsesOutputItem
 }
 
-// streamedOutput orders the streamed output items by their output_index. It
-// returns nil when the stream carried none.
+// streamedOutput orders the streamed output items by their output_index.
 func streamedOutput(items []indexedOutputItem) []core.ResponsesOutputItem {
-	if len(items) == 0 {
-		return nil
-	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].index < items[j].index })
 	output := make([]core.ResponsesOutputItem, len(items))
 	for i, entry := range items {

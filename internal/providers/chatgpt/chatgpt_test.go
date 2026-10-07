@@ -259,6 +259,22 @@ func TestResponses_FillsOutputFromStreamedItems(t *testing.T) {
 	assert.Contains(t, string(body), `"encrypted_content":"gAAA"`)
 }
 
+// TestResponses_KeepsEmptyOutputArray keeps a response with no output items
+// serialized as "output":[], not null, so clients can iterate it.
+func TestResponses_KeepsEmptyOutputArray(t *testing.T) {
+	sse := "event: response.completed\n" +
+		`data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","model":"gpt-5.6-luna","output":[]}}` + "\n\n" +
+		"data: [DONE]\n\n"
+	srv, _ := providertest.SSEServer(t, sse)
+	provider := newTestProvider("token", srv.URL, srv.Client(), llmclient.Hooks{})
+
+	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{Model: "gpt-5.6-luna", Input: "hi"})
+	require.NoError(t, err)
+	body, err := json.Marshal(resp)
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `"output":[]`)
+}
+
 // TestResponses_ReportsCachedTokens keeps the backend's prompt-cache hits
 // visible: usage records and the dashboard read cached_tokens from the
 // collapsed response, so dropping it would hide a cache regression.
