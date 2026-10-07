@@ -23,11 +23,17 @@ func (s *Service) EffectiveState(selector core.ModelSelector) EffectiveState {
 
 // AllowsModel reports whether selector is available for the effective request user path.
 func (s *Service) AllowsModel(ctx context.Context, selector core.ModelSelector) bool {
-	state := s.EffectiveState(selector)
-	if !state.Enabled {
+	return s.allowsIn(ctx, s.snapshot(), selector)
+}
+
+// allowsIn is AllowsModel against one snapshot, so a resolution checks every
+// target against the same access rows it routes with.
+func (s *Service) allowsIn(ctx context.Context, snap *snapshot, selector core.ModelSelector) bool {
+	enabled, userPaths := snap.access(selector)
+	if !enabled {
 		return false
 	}
-	if len(state.UserPaths) > 0 && !userPathAllowed(core.UserPathFromContext(ctx), state.UserPaths) {
+	if len(userPaths) > 0 && !userPathAllowed(core.UserPathFromContext(ctx), userPaths) {
 		return false
 	}
 	return s.subjectAllows(ctx, selector)

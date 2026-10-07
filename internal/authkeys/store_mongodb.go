@@ -105,6 +105,40 @@ func (s *MongoDBStore) Create(ctx context.Context, key AuthKey) error {
 	return nil
 }
 
+func (s *MongoDBStore) UpdateImported(ctx context.Context, key AuthKey) error {
+	set := bson.D{
+		{Key: "name", Value: key.Name},
+		{Key: "redacted_value", Value: key.RedactedValue},
+		{Key: "updated_at", Value: key.UpdatedAt.UTC()},
+	}
+	var unset bson.D
+	optional := func(field string, value any, empty bool) {
+		if empty {
+			unset = append(unset, bson.E{Key: field, Value: ""})
+			return
+		}
+		set = append(set, bson.E{Key: field, Value: value})
+	}
+	// Empty values are removed, matching the insert path's omitempty fields.
+	optional("description", key.Description, key.Description == "")
+	optional("user_path", key.UserPath, key.UserPath == "")
+	optional("labels", key.Labels, len(key.Labels) == 0)
+	optional("allowed_models", key.AllowedModels, len(key.AllowedModels) == 0)
+	optional("expires_at", timePtrUTC(key.ExpiresAt), key.ExpiresAt == nil)
+	update := bson.D{{Key: "$set", Value: set}}
+	if len(unset) > 0 {
+		update = append(update, bson.E{Key: "$unset", Value: unset})
+	}
+	result, err := s.collection.UpdateOne(ctx, mongoAuthKeyIDFilter{ID: normalizeID(key.ID)}, update)
+	if err != nil {
+		return fmt.Errorf("update imported auth key: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *MongoDBStore) UpdateLabels(ctx context.Context, id string, labels []string, now time.Time) error {
 	if err := s.updateStringList(ctx, id, "labels", labels, now); err != nil {
 		return fmt.Errorf("update auth key labels: %w", err)

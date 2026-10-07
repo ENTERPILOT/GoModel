@@ -114,6 +114,30 @@ func (s *SQLStore) Create(ctx context.Context, key AuthKey) error {
 	return nil
 }
 
+func (s *SQLStore) UpdateImported(ctx context.Context, key AuthKey) error {
+	affected, err := s.db.Exec(ctx, `
+		UPDATE auth_keys
+		SET name = ?,
+			description = ?,
+			user_path = ?,
+			labels = ?,
+			allowed_models = ?,
+			redacted_value = ?,
+			expires_at = ?,
+			updated_at = ?
+		WHERE id = ?
+	`, key.Name, key.Description, sqlutil.NullableString(key.UserPath),
+		sqlutil.NullableJSONStrings(key.Labels, key.ID), sqlutil.NullableJSONStrings(key.AllowedModels, key.ID),
+		key.RedactedValue, sqlutil.UnixOrNil(key.ExpiresAt), key.UpdatedAt.Unix(), normalizeID(key.ID))
+	if err != nil {
+		return fmt.Errorf("update imported auth key: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *SQLStore) UpdateLabels(ctx context.Context, id string, labels []string, now time.Time) error {
 	affected, err := s.db.Exec(ctx, `
 		UPDATE auth_keys

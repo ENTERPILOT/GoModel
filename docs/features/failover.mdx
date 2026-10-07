@@ -100,6 +100,10 @@ It applies to translated `/v1/chat/completions`, `/v1/responses`, and
 `/v1/messages` requests. The request log shows every attempt, so a served
 failover is visible in the audit trail and priced at the model that answered.
 
+A target model that is disabled, or that the request's API key or
+`user_path` may not use, is never tried: it is skipped both when the first
+target is chosen and in the failover chain, without counting as an attempt.
+
 A request that names its provider in the `provider` field bypasses virtual
 models and reaches the concrete model directly. It still gets the chain of a
 virtual model that shadows exactly that model and lists it as a target (the

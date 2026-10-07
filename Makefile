@@ -1,4 +1,4 @@
-.PHONY: all build run demo clean tidy mod-check frontend frontend-check frontend-stub test test-race test-dashboard test-e2e test-integration test-contract test-all lint lint-fix fix fix-check record-api swagger docs-openapi helm-lint install-tools perf-check perf-bench infra image seed-demo-data build-plugins image-plugins example-plugins
+.PHONY: all build run demo clean tidy mod-check frontend frontend-check frontend-stub test test-race test-dashboard test-e2e test-integration test-contract test-live test-all lint lint-fix fix fix-check record-api swagger docs-openapi helm-lint install-tools perf-check perf-bench infra image seed-demo-data build-plugins image-plugins example-plugins
 
 all: frontend build
 
@@ -11,8 +11,9 @@ LOG_LEVEL ?= debug
 SWAGGER_ENABLED ?= true
 
 # Build tags covering every file the linter and fixers must see. Without these,
-# tag-gated files (tests/e2e, tests/integration, tests/contract) are skipped.
-BUILD_TAGS ?= swagger,e2e,integration,contract
+# tag-gated files (tests/e2e, tests/integration, tests/contract, live provider
+# tests) are skipped.
+BUILD_TAGS ?= swagger,e2e,integration,contract,live
 GOLANGCI_LINT_VERSION := 2.13.1
 GOLANGCI_LINT ?= $(shell go env GOPATH)/bin/golangci-lint
 
@@ -151,6 +152,11 @@ test-integration:
 # Run contract tests (validates API response structures against golden files)
 test-contract:
 	go test -v -tags=contract -timeout=5m ./tests/contract/...
+
+# Live provider tests call real upstreams and spend quota. Each one skips unless
+# its credential is set, e.g. CHATGPT_API_KEY for the ChatGPT prompt-cache check.
+test-live:
+	go test -count=1 -v -tags=live -timeout=10m -run TestLive ./internal/providers/...
 
 # Run all tests including dashboard, e2e, integration, and contract tests
 test-all: test test-dashboard test-e2e test-integration test-contract
