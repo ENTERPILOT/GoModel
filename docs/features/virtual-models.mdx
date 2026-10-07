@@ -319,7 +319,9 @@ access rule (`enabled: true`, optionally with `user_paths`). Unavailable
 models fail requests with `400 model_access_denied` and stay out of
 `GET /v1/models`. A redirect resolves by its own `enabled` flag, but its
 target is validated like a direct call: with the default off, give the
-target model its own access entry too.
+target model its own access entry too. When that target is also the source
+of another redirect, use a provider-wide or model-wide policy instead: an
+access entry at that source replaces a dashboard-managed redirect there.
 
 This is not the reverse of [exposing only redirects](#expose-only-redirects):
 that setting only changes what `GET /v1/models` lists, while the availability
