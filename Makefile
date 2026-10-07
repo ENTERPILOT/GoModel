@@ -156,7 +156,7 @@ test-contract:
 # Live provider tests call real upstreams and spend quota. Each one skips unless
 # its credential is set, e.g. CHATGPT_API_KEY for the ChatGPT prompt-cache check.
 test-live:
-	go test -v -tags=live -timeout=10m -run TestLive ./internal/providers/...
+	go test -count=1 -v -tags=live -timeout=10m -run TestLive ./internal/providers/...
 
 # Run all tests including dashboard, e2e, integration, and contract tests
 test-all: test test-dashboard test-e2e test-integration test-contract
