@@ -77,7 +77,8 @@ Responses API:
 | `stream`, `store` | Pinned to `true` / `false` — the backend rejects anything else |
 | `input` as a string | Wrapped into the message list the backend requires |
 | `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `reasoning`, `text`, `include`, `prompt_cache_key` | Forwarded |
-| `temperature`, `top_p`, `max_output_tokens`, `previous_response_id`, `truncation`, `metadata`, `user`, `service_tier`, `top_logprobs`, `prompt_cache_retention`, `prompt_cache_options` | Dropped — unsupported upstream |
+| `temperature`, `top_p`, `max_output_tokens`, `previous_response_id`, `truncation`, `metadata`, `user`, `service_tier`, `top_logprobs` | Dropped — unsupported upstream |
+| `prompt_cache_retention`, `prompt_cache_options` | Dropped — the Codex CLI never sends them, so backend support is unverified |
 
 Because the backend streams only, a non-streaming `POST /v1/responses` is
 served by streaming upstream and returning the final response object. Clients
