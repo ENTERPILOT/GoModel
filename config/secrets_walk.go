@@ -40,7 +40,7 @@ func (r *LoadResult) resolveSecrets(ctx context.Context) error {
 	if err := r.Secrets.ResolveFields(ctx, "", r.Config); err != nil {
 		return err
 	}
-	return validateResolvedMCPServers(r.Config.MCP.Servers)
+	return validateResolvedMCP(&r.Config.MCP)
 }
 
 // ResolveFields resolves the secret references in every string reachable from

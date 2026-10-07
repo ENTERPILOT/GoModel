@@ -76,7 +76,9 @@ func applyMCPVirtualEnv(cfg *Config) error {
 // /mcp/{name} with server slugs, so a clash with a declared server fails
 // startup. Members are not checked for existence here: admin-managed servers
 // live in the store, so the gateway resolves members at runtime instead.
-func normalizeMCPVirtualServers(cfg *MCPConfig) error {
+// With allowReferences, members and tool_discovery holding a secret reference
+// keep their text; validateResolvedMCP checks them once resolved.
+func normalizeMCPVirtualServers(cfg *MCPConfig, allowReferences bool) error {
 	if len(cfg.VirtualServers) == 0 {
 		return nil
 	}
@@ -99,7 +101,7 @@ func normalizeMCPVirtualServers(cfg *MCPConfig) error {
 	sort.Strings(names)
 	for _, name := range names {
 		virtual := normalized[name]
-		if err := normalizeMCPVirtualServer(&virtual, normalized); err != nil {
+		if err := normalizeMCPVirtualServer(&virtual, normalized, allowReferences); err != nil {
 			return fmt.Errorf("mcp.virtual_servers[%q]: %w", name, err)
 		}
 		normalized[name] = virtual
@@ -124,16 +126,27 @@ func validateMCPVirtualServerName(name string) error {
 	return nil
 }
 
-func normalizeMCPVirtualServer(virtual *MCPVirtualServerConfig, virtuals map[string]MCPVirtualServerConfig) error {
+func normalizeMCPVirtualServer(virtual *MCPVirtualServerConfig, virtuals map[string]MCPVirtualServerConfig, allowReferences bool) error {
 	virtual.Description = strings.TrimSpace(virtual.Description)
-	switch mode := strings.ToLower(strings.TrimSpace(virtual.ToolDiscovery)); mode {
-	case "", MCPToolDiscoveryOff, MCPToolDiscoverySearch:
-		virtual.ToolDiscovery = mode
-	default:
-		return fmt.Errorf("tool_discovery must be %q or %q, got %q", MCPToolDiscoveryOff, MCPToolDiscoverySearch, virtual.ToolDiscovery)
+	if allowReferences && HasSecretReference(virtual.ToolDiscovery) {
+		virtual.ToolDiscovery = strings.TrimSpace(virtual.ToolDiscovery)
+	} else {
+		switch mode := strings.ToLower(strings.TrimSpace(virtual.ToolDiscovery)); mode {
+		case "", MCPToolDiscoveryOff, MCPToolDiscoverySearch:
+			virtual.ToolDiscovery = mode
+		default:
+			return fmt.Errorf("tool_discovery must be %q or %q, got %q", MCPToolDiscoveryOff, MCPToolDiscoverySearch, virtual.ToolDiscovery)
+		}
 	}
 	members := make([]string, 0, len(virtual.Servers))
 	for _, raw := range virtual.Servers {
+		if allowReferences && HasSecretReference(raw) {
+			// Canonicalizing would lowercase the reference itself.
+			if member := strings.TrimSpace(raw); !slices.Contains(members, member) {
+				members = append(members, member)
+			}
+			continue
+		}
 		member := canonicalTextKey(raw)
 		if member == "" {
 			continue

@@ -239,15 +239,43 @@ func expandMCPServerEnv(server *MCPServerConfig) {
 
 // normalizeMCPConfig canonicalizes server slugs, applies defaults, and rejects
 // invalid entries. It runs at load time so a bad declaration fails startup
-// loudly instead of silently dropping the server.
+// loudly instead of silently dropping the server. Values holding a secret
+// reference keep their text; validateResolvedMCP checks them once resolved.
 func normalizeMCPConfig(cfg *MCPConfig) error {
-	switch mode := strings.ToLower(strings.TrimSpace(cfg.ToolDiscovery)); mode {
-	case "":
-		cfg.ToolDiscovery = MCPToolDiscoveryOff
-	case MCPToolDiscoveryOff, MCPToolDiscoverySearch:
-		cfg.ToolDiscovery = mode
-	default:
-		return fmt.Errorf("mcp.tool_discovery must be %q or %q, got %q", MCPToolDiscoveryOff, MCPToolDiscoverySearch, cfg.ToolDiscovery)
+	if err := normalizeMCPSettings(cfg, true); err != nil {
+		return err
+	}
+	if err := normalizeMCPServers(cfg); err != nil {
+		return err
+	}
+	return normalizeMCPVirtualServers(cfg, true)
+}
+
+// validateResolvedMCP finishes the checks normalizeMCPConfig deferred for
+// values holding a secret reference, now that they are resolved.
+func validateResolvedMCP(cfg *MCPConfig) error {
+	if err := normalizeMCPSettings(cfg, false); err != nil {
+		return err
+	}
+	if err := validateResolvedMCPServers(cfg.Servers); err != nil {
+		return err
+	}
+	return normalizeMCPVirtualServers(cfg, false)
+}
+
+// normalizeMCPSettings normalizes the gateway-wide MCP settings. With
+// allowReferences, a value holding a secret reference is left for
+// validateResolvedMCP.
+func normalizeMCPSettings(cfg *MCPConfig, allowReferences bool) error {
+	if !allowReferences || !HasSecretReference(cfg.ToolDiscovery) {
+		switch mode := strings.ToLower(strings.TrimSpace(cfg.ToolDiscovery)); mode {
+		case "":
+			cfg.ToolDiscovery = MCPToolDiscoveryOff
+		case MCPToolDiscoveryOff, MCPToolDiscoverySearch:
+			cfg.ToolDiscovery = mode
+		default:
+			return fmt.Errorf("mcp.tool_discovery must be %q or %q, got %q", MCPToolDiscoveryOff, MCPToolDiscoverySearch, cfg.ToolDiscovery)
+		}
 	}
 	if len(cfg.AllowedOrigins) > 0 {
 		normalized := make([]string, 0, len(cfg.AllowedOrigins))
@@ -256,7 +284,8 @@ func normalizeMCPConfig(cfg *MCPConfig) error {
 			if entry == "" {
 				continue
 			}
-			if entry != TrustAnyOrigin {
+			deferred := allowReferences && HasSecretReference(entry)
+			if entry != TrustAnyOrigin && !deferred {
 				canonical, err := NormalizeAllowedOrigin(entry)
 				if err != nil {
 					return fmt.Errorf("mcp.allowed_origins: %w", err)
@@ -269,10 +298,7 @@ func normalizeMCPConfig(cfg *MCPConfig) error {
 		}
 		cfg.AllowedOrigins = normalized
 	}
-	if err := normalizeMCPServers(cfg); err != nil {
-		return err
-	}
-	return normalizeMCPVirtualServers(cfg)
+	return nil
 }
 
 func normalizeMCPServers(cfg *MCPConfig) error {

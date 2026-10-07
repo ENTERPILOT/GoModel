@@ -149,6 +149,67 @@ func TestLoadResultResolveSecretsChecksReferencedMCPURLs(t *testing.T) {
 	require.EqualError(t, err, "url must start with http:// or https://")
 }
 
+func TestLoadResultResolveSecretsChecksReferencedMCPSettings(t *testing.T) {
+	const yaml = `mcp:
+  tool_discovery: ${env:GOMODEL_TEST_MCP_MODE}
+  allowed_origins: ["${env:GOMODEL_TEST_MCP_ORIGIN}"]
+  servers:
+    github:
+      url: https://mcp.example.com/mcp
+  virtual_servers:
+    coding:
+      tool_discovery: ${env:GOMODEL_TEST_MCP_MODE}
+      servers: ["${env:GOMODEL_TEST_MCP_MEMBER}", github]
+`
+	tests := []struct {
+		name    string
+		env     map[string]string
+		wantErr string
+	}{
+		{
+			name: "valid",
+			env:  map[string]string{"GOMODEL_TEST_MCP_MODE": "Search", "GOMODEL_TEST_MCP_ORIGIN": "https://App.example.com", "GOMODEL_TEST_MCP_MEMBER": "Linear"},
+		},
+		{
+			name:    "invalid tool discovery after resolution",
+			env:     map[string]string{"GOMODEL_TEST_MCP_MODE": "always", "GOMODEL_TEST_MCP_ORIGIN": "https://app.example.com", "GOMODEL_TEST_MCP_MEMBER": "linear"},
+			wantErr: `mcp.tool_discovery must be "off" or "search", got "always"`,
+		},
+		{
+			name:    "invalid member after resolution",
+			env:     map[string]string{"GOMODEL_TEST_MCP_MODE": "search", "GOMODEL_TEST_MCP_ORIGIN": "https://app.example.com", "GOMODEL_TEST_MCP_MEMBER": "not a slug"},
+			wantErr: `mcp.virtual_servers["coding"]: member "not a slug": server slug "not a slug" must match ^[a-z0-9][a-z0-9_-]*$`,
+		},
+		{
+			name:    "member resolves to a virtual server",
+			env:     map[string]string{"GOMODEL_TEST_MCP_MODE": "search", "GOMODEL_TEST_MCP_ORIGIN": "https://app.example.com", "GOMODEL_TEST_MCP_MEMBER": "coding"},
+			wantErr: `mcp.virtual_servers["coding"]: member "coding" is a virtual server; virtual servers can only include MCP servers`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			for key, value := range tt.env {
+				t.Setenv(key, value)
+			}
+			withTempDir(t, func(dir string) {
+				result := loadConfigYAML(t, dir, yaml)
+				err := result.ResolveSecrets(t.Context())
+				if tt.wantErr != "" {
+					require.EqualError(t, err, tt.wantErr)
+					return
+				}
+				require.NoError(t, err)
+				mcp := result.Config.MCP
+				assert.Equal(t, MCPToolDiscoverySearch, mcp.ToolDiscovery)
+				assert.Equal(t, []string{"https://app.example.com"}, mcp.AllowedOrigins)
+				assert.Equal(t, MCPToolDiscoverySearch, mcp.VirtualServers["coding"].ToolDiscovery)
+				assert.Equal(t, []string{"linear", "github"}, mcp.VirtualServers["coding"].Servers)
+			})
+		})
+	}
+}
+
 func TestLoadResultResolveSecretsErrorsNameTheField(t *testing.T) {
 	tests := []struct {
 		name      string
