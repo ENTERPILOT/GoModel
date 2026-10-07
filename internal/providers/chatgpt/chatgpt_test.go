@@ -114,7 +114,8 @@ func TestStreamResponses_SendsCodexDialect(t *testing.T) {
 
 // TestStreamResponses_ForwardsPromptCacheAffinity covers the cache signals the
 // Codex CLI sends: prompt_cache_key in the body and the session-id header.
-// Without them every turn lands on a cold backend prefix cache.
+// The backend routes its cache on the header, so a client key without a
+// detected session must reach the header too.
 func TestStreamResponses_ForwardsPromptCacheAffinity(t *testing.T) {
 	longSession := strings.Repeat("s", maxPromptCacheKeyLength+1)
 	tests := []struct {
@@ -150,6 +151,17 @@ func TestStreamResponses_ForwardsPromptCacheAffinity(t *testing.T) {
 			wantHeader: longSession,
 		},
 		{
+			name:       "client key without a session is also the header",
+			extras:     map[string]json.RawMessage{"prompt_cache_key": json.RawMessage(`"pck_client"`)},
+			wantKey:    "pck_client",
+			wantHeader: "pck_client",
+		},
+		{
+			name:    "client key with a line break stays out of the header",
+			extras:  map[string]json.RawMessage{"prompt_cache_key": json.RawMessage(`"pck\r\nX-Injected: 1"`)},
+			wantKey: "pck\r\nX-Injected: 1",
+		},
+		{
 			name: "no key and no session sends neither",
 		},
 		{
@@ -160,7 +172,8 @@ func TestStreamResponses_ForwardsPromptCacheAffinity(t *testing.T) {
 				"some_future_param":       json.RawMessage(`true`),
 				"prompt_cache_breakpoint": json.RawMessage(`{"mode":"explicit"}`),
 			},
-			wantKey: "pck_client",
+			wantKey:    "pck_client",
+			wantHeader: "pck_client",
 		},
 	}
 	for _, tt := range tests {
@@ -214,6 +227,24 @@ func TestResponses_CollapsesUpstreamStream(t *testing.T) {
 	assert.Equal(t, "ok", resp.Output[0].Content[0].Text)
 	require.NotNil(t, resp.Usage)
 	assert.Equal(t, 5, resp.Usage.TotalTokens)
+}
+
+// TestResponses_ReportsCachedTokens keeps the backend's prompt-cache hits
+// visible: usage records and the dashboard read cached_tokens from the
+// collapsed response, so dropping it would hide a cache regression.
+func TestResponses_ReportsCachedTokens(t *testing.T) {
+	sse := "event: response.completed\n" +
+		`data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","model":"gpt-5.6-terra","output":[],"usage":{"input_tokens":19228,"input_tokens_details":{"cached_tokens":18176},"output_tokens":1,"total_tokens":19229}}}` + "\n\n" +
+		"data: [DONE]\n\n"
+	srv, _ := providertest.SSEServer(t, sse)
+	provider := newTestProvider("token", srv.URL, srv.Client(), llmclient.Hooks{})
+
+	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{Model: "gpt-5.6-terra", Input: "hi"})
+	require.NoError(t, err)
+	require.NotNil(t, resp.Usage)
+	require.NotNil(t, resp.Usage.PromptTokensDetails)
+	assert.Equal(t, 19228, resp.Usage.InputTokens)
+	assert.Equal(t, 18176, resp.Usage.PromptTokensDetails.CachedTokens)
 }
 
 // TestResponses_TruncatedStreamIsAnError guards the non-streaming path against

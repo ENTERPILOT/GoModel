@@ -88,15 +88,24 @@ gateway's Responses surface behaves across providers.
 
 ## Prompt caching
 
-The backend keeps one conversation on a warm prefix cache when it sees the
-same `prompt_cache_key` on every turn. GoModel forwards the client's key and
-sends the detected [session](/features/session-keeping) as the `session-id`
-header, as the Codex CLI does. When the client sends no key, the session id
-stands in for it if it fits the 64-character key limit. If the client sends no
-key and GoModel detects no session, the backend gets neither signal. Send
-`prompt_cache_key` to keep cache hits; a session header such as
-`X-Session-Id` also works unless `SESSION_KEEPING_ENABLED=false`, which turns
-session detection off.
+The backend keeps one conversation on a warm prefix cache when every turn
+carries the same `session-id` header; `prompt_cache_key` alone gets no cache
+hits. GoModel sends the detected [session](/features/session-keeping) as
+`session-id`, or the client's `prompt_cache_key` when no session is detected,
+and forwards the key in the body too, as the Codex CLI does. When the client
+sends no key, the session id stands in for it if it fits the 64-character key
+limit.
+
+If the client sends no key and GoModel detects no session, the backend gets
+neither signal. Send `prompt_cache_key` to keep cache hits; a session header
+such as `X-Session-Id` also works unless `SESSION_KEEPING_ENABLED=false`, which
+turns session detection off.
+
+To check hit rates against the real backend, run the opt-in live test:
+
+```bash
+CHATGPT_API_KEY=$(jq -r .tokens.access_token ~/.codex/auth.json) make test-live
+```
 
 ## Reported cost is not real spend
 
