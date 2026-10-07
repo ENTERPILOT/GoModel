@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted. Sections 1–3 are implemented; sections 4–6 are planned and land in
-separate pull requests.
+Accepted. Sections 1–3 and 5 are implemented; sections 4 and 6 are planned
+and land in separate pull requests.
 
 ## Context
 
@@ -99,7 +99,15 @@ func (s *Secrets) Resolve(ctx context.Context, value string) (string, error)
 func (s *Secrets) HasReference(value string) bool
 func (s *Secrets) ResolveFields(ctx context.Context, path string, target any) error
 func HasSecretReference(value string) bool
-func (s *Secrets) NotifyChanged() // planned, see section 5
+func (s *Secrets) NotifyChanged() // see section 5
+// Core-side rotation plumbing, also section 5: Changes, Recheck returning a
+// *SecretRecheck (Fields, Value, Commit), and SecretNotifier with SetNotifier.
+
+// The field being resolved ("server.master_key", "providers.openai.api_key",
+// or "OPENAI_API_KEY_2" for an env-provided key) is on the context a resolver
+// receives. Field paths are not secret;
+// resolvers may audit-log them.
+func SecretFieldFromContext(ctx context.Context) (string, bool)
 
 // LoadResult.Secrets is set by Load. ResolveSecrets is step 3 below; it runs
 // once per generation, and a retry returns the first result, so a resolved
@@ -182,20 +190,53 @@ is persisted. Core ships no writer.
 
 ### 5. Rotation without restart
 
-`Secrets` remembers which field each reference resolved into, and a keyed
-fingerprint of the value (never the value itself). `NotifyChanged` (called
-by an extension when its backend reports a new version) re-resolves every recorded reference and compares fingerprints:
+`Secrets` remembers each field a reference resolved into: its path, the value
+as configured, and an HMAC-SHA256 fingerprint of the resolved value under a
+random per-process key (never the value itself). Fields are recorded under
+the label resolution reports them by (`server.master_key`,
+`extensions.vaults.token`). A provider API key is recorded under the source
+the operator wrote: its `config.yaml` path (`providers.openai.api_keys[1]`) or
+the environment variable that set it (`OPENAI_API_KEY_2`). Providers dropped
+for missing credentials are never resolved, so they are not tracked.
 
-- When only provider API keys changed, the affected providers' keyrings are
-  swapped in place. `Keyring` gains `Replace`, an atomic swap. Requests in
-  flight finish on the key they started with.
+`NotifyChanged`, called by an extension when its backend reports a new
+version, never blocks, and calls that arrive before the check runs coalesce
+into one. Core then re-resolves every recorded reference with the same
+resolvers and compares fingerprints:
+
+- When only provider API keys changed, the changed keys are patched by
+  source, key de-duplication and credential filtering run again, exactly as
+  at startup, and the affected providers' keyrings are swapped in place.
+  `Keyring` gains `Replace`, an atomic swap of an immutable key set. Requests
+  in flight finish on the key they started with. Session stickiness is rendezvous hashing over
+  the key set, so sessions on a removed key move, and a new key takes its
+  share of the rest.
 - When any other field changed (DSNs, master key, service-account JSON,
-  proxy URLs), core starts the same in-process generation reload that
-  `SIGHUP` triggers. A failed reload keeps the running generation, exactly
-  as today.
+  proxy URLs), a provider would lose its last key, or the changed key is also
+  copied elsewhere (the semantic cache embedder), core starts the same
+  in-process generation reload that `SIGHUP` triggers. A failed reload keeps
+  the running generation, exactly as today, and the change stays pending, so
+  the next notification retries it.
+- When a reference cannot be re-resolved, core logs a warning naming the
+  field and scheme, keeps every current value, and does not reload. A failed
+  lookup is not evidence that the running credential is stale; the extension
+  that notified decides that.
 - Dashboard-managed entities re-resolve their own references and reinstall
   the affected provider, MCP server, or guardrail through the existing
   install path.
+
+Each change is logged at info with the action and the field paths, never
+values.
+
+Every generation has its own `Secrets`, and an extension holds the one it saw
+last, which may belong to a reload that was rejected. So the process shares
+one `SecretNotifier` between all generations' `Secrets`, and only the
+generation that is serving listens: its watcher starts when its server starts
+and stops with it. A notification sent through any generation's `Secrets`
+reaches the serving one, which re-checks with its own `Secrets`. Stopping a
+watcher waits only briefly for a resolver; a check that outlives its
+generation takes no action and passes the notification on to the next one. `env` and
+`file` references are not polled; they rotate with a reload.
 
 Rotating `server.master_key` also changes the derived anonymous install ID,
 as it does today.

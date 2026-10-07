@@ -237,28 +237,84 @@ func expandMCPServerEnv(server *MCPServerConfig) {
 	}
 }
 
+// mcpPass is the MCP validation pass that is running.
+type mcpPass int
+
+const (
+	// mcpLoadPass runs in Load. A value holding a secret reference keeps its
+	// text and is checked by mcpResolvedPass.
+	mcpLoadPass mcpPass = iota
+	// mcpResolvedPass runs once references are resolved. Values without a
+	// reference already passed mcpLoadPass, so anything that fails here came
+	// from a reference and may be a secret: errors name the field, never the
+	// value.
+	mcpResolvedPass
+)
+
+// deferred reports whether value is left for the resolved pass.
+func (p mcpPass) deferred(value string) bool {
+	return p == mcpLoadPass && HasSecretReference(value)
+}
+
+// resolvedValueError is the error for a resolved value that fails a check.
+func resolvedValueError(field, want string) error {
+	return fmt.Errorf("%s: the value resolved from its secret reference %s", field, want)
+}
+
 // normalizeMCPConfig canonicalizes server slugs, applies defaults, and rejects
 // invalid entries. It runs at load time so a bad declaration fails startup
-// loudly instead of silently dropping the server.
+// loudly instead of silently dropping the server. Values holding a secret
+// reference keep their text; validateResolvedMCP checks them once resolved.
 func normalizeMCPConfig(cfg *MCPConfig) error {
-	switch mode := strings.ToLower(strings.TrimSpace(cfg.ToolDiscovery)); mode {
-	case "":
-		cfg.ToolDiscovery = MCPToolDiscoveryOff
-	case MCPToolDiscoveryOff, MCPToolDiscoverySearch:
-		cfg.ToolDiscovery = mode
-	default:
-		return fmt.Errorf("mcp.tool_discovery must be %q or %q, got %q", MCPToolDiscoveryOff, MCPToolDiscoverySearch, cfg.ToolDiscovery)
+	if err := normalizeMCPSettings(cfg, mcpLoadPass); err != nil {
+		return err
+	}
+	if err := normalizeMCPServers(cfg); err != nil {
+		return err
+	}
+	return normalizeMCPVirtualServers(cfg, mcpLoadPass)
+}
+
+// validateResolvedMCP finishes the checks normalizeMCPConfig deferred for
+// values holding a secret reference, now that they are resolved.
+func validateResolvedMCP(cfg *MCPConfig) error {
+	if err := normalizeMCPSettings(cfg, mcpResolvedPass); err != nil {
+		return err
+	}
+	if err := validateResolvedMCPServers(cfg.Servers); err != nil {
+		return err
+	}
+	return normalizeMCPVirtualServers(cfg, mcpResolvedPass)
+}
+
+// normalizeMCPSettings normalizes the gateway-wide MCP settings.
+func normalizeMCPSettings(cfg *MCPConfig, pass mcpPass) error {
+	if !pass.deferred(cfg.ToolDiscovery) {
+		switch mode := strings.ToLower(strings.TrimSpace(cfg.ToolDiscovery)); mode {
+		case "":
+			cfg.ToolDiscovery = MCPToolDiscoveryOff
+		case MCPToolDiscoveryOff, MCPToolDiscoverySearch:
+			cfg.ToolDiscovery = mode
+		default:
+			if pass == mcpResolvedPass {
+				return resolvedValueError("mcp.tool_discovery", fmt.Sprintf("must be %q or %q", MCPToolDiscoveryOff, MCPToolDiscoverySearch))
+			}
+			return fmt.Errorf("mcp.tool_discovery must be %q or %q, got %q", MCPToolDiscoveryOff, MCPToolDiscoverySearch, cfg.ToolDiscovery)
+		}
 	}
 	if len(cfg.AllowedOrigins) > 0 {
 		normalized := make([]string, 0, len(cfg.AllowedOrigins))
-		for _, raw := range cfg.AllowedOrigins {
+		for i, raw := range cfg.AllowedOrigins {
 			entry := strings.TrimSpace(raw)
 			if entry == "" {
 				continue
 			}
-			if entry != TrustAnyOrigin {
+			if entry != TrustAnyOrigin && !pass.deferred(entry) {
 				canonical, err := NormalizeAllowedOrigin(entry)
 				if err != nil {
+					if pass == mcpResolvedPass {
+						return resolvedValueError(fmt.Sprintf("mcp.allowed_origins[%d]", i), "is not a valid origin (want scheme://host[:port])")
+					}
 					return fmt.Errorf("mcp.allowed_origins: %w", err)
 				}
 				entry = canonical
@@ -269,10 +325,7 @@ func normalizeMCPConfig(cfg *MCPConfig) error {
 		}
 		cfg.AllowedOrigins = normalized
 	}
-	if err := normalizeMCPServers(cfg); err != nil {
-		return err
-	}
-	return normalizeMCPVirtualServers(cfg)
+	return nil
 }
 
 func normalizeMCPServers(cfg *MCPConfig) error {

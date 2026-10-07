@@ -66,6 +66,8 @@ var builtinSecretResolvers = map[string]SecretResolver{
 type Secrets struct {
 	mu        sync.RWMutex
 	resolvers map[string]SecretResolver
+
+	rotation rotation
 }
 
 // NewSecrets returns a Secrets with only the built-in schemes registered.
@@ -115,11 +117,27 @@ func (s *Secrets) Resolve(ctx context.Context, value string) (string, error) {
 }
 
 // resolveField is Resolve for a value found at field. Every resolution goes
-// through here, so per-field bookkeeping has one place to live.
+// through here, so a field that held a reference is recorded for rotation
+// (see Recheck). An empty field is not recorded.
 func (s *Secrets) resolveField(ctx context.Context, field, value string) (string, error) {
-	if !strings.Contains(value, "${") {
-		return value, nil
+	resolved, referenced, err := s.resolveValue(ctx, field, value)
+	if err != nil {
+		return "", err
 	}
+	if referenced {
+		s.record(field, value, resolved)
+	}
+	return resolved, nil
+}
+
+// resolveValue resolves value without recording it, reporting whether it held
+// at least one reference.
+func (s *Secrets) resolveValue(ctx context.Context, field, value string) (string, bool, error) {
+	if !strings.Contains(value, "${") {
+		return value, false, nil
+	}
+	ctx = withSecretField(ctx, field)
+	referenced := false
 	var b strings.Builder
 	b.Grow(len(value))
 	for rest := value; rest != ""; {
@@ -150,11 +168,12 @@ func (s *Secrets) resolveField(ctx context.Context, field, value string) (string
 		}
 		resolved, err := s.resolveReference(ctx, scheme, reference)
 		if err != nil {
-			return "", &SecretError{Field: field, Scheme: scheme, Err: err}
+			return "", false, &SecretError{Field: field, Scheme: scheme, Err: err}
 		}
+		referenced = true
 		b.WriteString(resolved)
 	}
-	return b.String(), nil
+	return b.String(), referenced, nil
 }
 
 func (s *Secrets) resolveReference(ctx context.Context, scheme, reference string) (string, error) {
@@ -170,10 +189,36 @@ func (s *Secrets) resolveReference(ctx context.Context, scheme, reference string
 		}
 		return "", fmt.Errorf("%w %q: the built-in schemes are env and file; other schemes are registered by extensions", ErrUnknownSecretScheme, scheme)
 	}
+	return r.ResolveSecret(ctx, reference)
+}
+
+type secretFieldKey struct{}
+
+// SecretFieldFromContext returns the field a SecretResolver is resolving
+// for, as passed to ResolveSecret: a configuration path such as
+// "server.master_key", "extensions.vaults.token", or
+// "providers.openai.api_keys[1]". A provider API key set by an environment
+// variable is named by the variable ("OPENAI_API_KEY_2"); other provider
+// values an environment variable set are named by the provider field. Field
+// labels are not secret, so resolvers may log them for audit. The boolean is
+// false for an anonymous Resolve.
+func SecretFieldFromContext(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	field, ok := ctx.Value(secretFieldKey{}).(string)
+	return field, ok
+}
+
+// withSecretField returns the context resolvers are called with.
+func withSecretField(ctx context.Context, field string) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return r.ResolveSecret(ctx, reference)
+	if field == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, secretFieldKey{}, field)
 }
 
 // HasSecretReference reports whether value contains at least one secret

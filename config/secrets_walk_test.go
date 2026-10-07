@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"testing"
@@ -147,6 +148,83 @@ func TestLoadResultResolveSecretsChecksReferencedMCPURLs(t *testing.T) {
 	// The admin API path stays strict: it does not resolve references.
 	err := ValidateMCPServerConfig(&MCPServerConfig{URL: "${env:GOMODEL_TEST_MCP_URL}"})
 	require.EqualError(t, err, "url must start with http:// or https://")
+}
+
+func TestLoadResultResolveSecretsChecksReferencedMCPSettings(t *testing.T) {
+	const mcpYAML = `mcp:
+  tool_discovery: ${env:GOMODEL_TEST_MCP_MODE}
+  allowed_origins: ["${env:GOMODEL_TEST_MCP_ORIGIN}"]
+  servers:
+    github:
+      url: https://mcp.example.com/mcp
+  virtual_servers:
+    coding:
+      tool_discovery: ${env:GOMODEL_TEST_MCP_MODE}
+      servers: ["${env:GOMODEL_TEST_MCP_MEMBER}", github]
+`
+	valid := map[string]string{
+		"GOMODEL_TEST_MCP_MODE":   "Search",
+		"GOMODEL_TEST_MCP_ORIGIN": "https://App.example.com",
+		"GOMODEL_TEST_MCP_MEMBER": "Linear",
+	}
+	with := func(key, value string) map[string]string {
+		env := maps.Clone(valid)
+		env[key] = value
+		return env
+	}
+	// A mistyped reference can resolve to a real credential, so errors about
+	// resolved values name the field and never print the value.
+	const secret = "sk-live-0123456789"
+	tests := []struct {
+		name    string
+		env     map[string]string
+		wantErr string
+	}{
+		{name: "valid", env: valid},
+		{
+			name:    "invalid tool discovery after resolution",
+			env:     with("GOMODEL_TEST_MCP_MODE", secret),
+			wantErr: `mcp.tool_discovery: the value resolved from its secret reference must be "off" or "search"`,
+		},
+		{
+			name:    "invalid origin after resolution",
+			env:     with("GOMODEL_TEST_MCP_ORIGIN", secret),
+			wantErr: `mcp.allowed_origins[0]: the value resolved from its secret reference is not a valid origin (want scheme://host[:port])`,
+		},
+		{
+			name:    "invalid member after resolution",
+			env:     with("GOMODEL_TEST_MCP_MEMBER", secret+" x"),
+			wantErr: `mcp.virtual_servers["coding"]: servers[0]: the value resolved from its secret reference is not a valid server slug (at most 64 characters matching ^[a-z0-9][a-z0-9_-]*$)`,
+		},
+		{
+			name:    "member resolves to a virtual server",
+			env:     with("GOMODEL_TEST_MCP_MEMBER", "coding"),
+			wantErr: `mcp.virtual_servers["coding"]: servers[0]: the value resolved from its secret reference names a virtual server; virtual servers can only include MCP servers`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			for key, value := range tt.env {
+				t.Setenv(key, value)
+			}
+			withTempDir(t, func(dir string) {
+				result := loadConfigYAML(t, dir, mcpYAML)
+				err := result.ResolveSecrets(t.Context())
+				if tt.wantErr != "" {
+					require.EqualError(t, err, tt.wantErr)
+					assert.NotContains(t, err.Error(), secret)
+					return
+				}
+				require.NoError(t, err)
+				mcp := result.Config.MCP
+				assert.Equal(t, MCPToolDiscoverySearch, mcp.ToolDiscovery)
+				assert.Equal(t, []string{"https://app.example.com"}, mcp.AllowedOrigins)
+				assert.Equal(t, MCPToolDiscoverySearch, mcp.VirtualServers["coding"].ToolDiscovery)
+				assert.Equal(t, []string{"linear", "github"}, mcp.VirtualServers["coding"].Servers)
+			})
+		})
+	}
 }
 
 func TestLoadResultResolveSecretsErrorsNameTheField(t *testing.T) {

@@ -360,3 +360,56 @@ func TestSendReloadSignal(t *testing.T) {
 		})
 	}
 }
+
+// A reload requested from inside the process (a rotated secret) takes the same
+// path as SIGHUP.
+func TestReloadRequesterReplacesGeneration(t *testing.T) {
+	socket := testSocket(t)
+	first := newFakeGeneration()
+	second := newFakeGeneration()
+	rebuilt := make(chan struct{}, 1)
+	rebuild := func() (lifecycleApp, error) {
+		rebuilt <- struct{}{}
+		return second, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reload := make(chan os.Signal, 1)
+	served := make(chan error, 1)
+	go func() { served <- serveUntilShutdown(ctx, reload, socket, first, rebuild) }()
+
+	<-first.started
+	reloadRequester(reload)("secret references changed: storage.postgresql.url")
+	<-rebuilt
+	<-second.started
+	assert.Equal(t, int32(1), first.shutdowns.Load())
+
+	cancel()
+	select {
+	case err := <-served:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("serveUntilShutdown did not return after cancellation")
+	}
+}
+
+// Requests coalesce instead of blocking the caller while a reload is pending.
+func TestReloadRequesterDoesNotBlock(t *testing.T) {
+	reload := make(chan os.Signal, 1)
+	request := reloadRequester(reload)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 10 {
+			request("rotated")
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("reload requests blocked")
+	}
+	require.Len(t, reload, 1)
+	assert.Equal(t, os.Signal(reloadSignal), <-reload)
+}

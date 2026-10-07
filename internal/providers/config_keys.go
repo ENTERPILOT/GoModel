@@ -74,10 +74,11 @@ func dedupeKeys(keys []sourcedKey, usable func(string) bool) []sourcedKey {
 	return result
 }
 
-// resolveSecretKeys resolves the secret references in keys, each under its
-// own source (see usableKeys), then drops empty results and collapses keys
-// that resolved to the same value, keeping every source.
-func resolveSecretKeys(ctx context.Context, secrets *config.Secrets, keys []sourcedKey) ([]sourcedKey, error) {
+// resolveKeySources resolves the secret references in keys, each under its
+// own source (see usableKeys), keeping one entry per source. Empty results
+// and keys that resolved to the same value are collapsed later, by dedupeKeys
+// in finishProviders, so key rotation can patch an entry by its source.
+func resolveKeySources(ctx context.Context, secrets *config.Secrets, keys []sourcedKey) ([]sourcedKey, error) {
 	resolved := make([]sourcedKey, len(keys))
 	for i, key := range keys {
 		value := key.Value
@@ -86,7 +87,7 @@ func resolveSecretKeys(ctx context.Context, secrets *config.Secrets, keys []sour
 		}
 		resolved[i] = sourcedKey{Value: value, Sources: key.Sources}
 	}
-	return dedupeKeys(resolved, resolvedValueSet), nil
+	return resolved, nil
 }
 
 // keyValues returns the primary key and the full ordered key set.

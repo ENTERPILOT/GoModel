@@ -19,11 +19,17 @@ import (
 // shared by all of a provider's HTTP clients, so the rotation is even across
 // every endpoint that provider serves.
 //
+// The key set can be swapped at runtime with Replace when a referenced secret
+// rotates. Each call reads the set once, so a request keeps the key it was
+// handed even if the set changes while it is in flight.
+//
 // The zero value is not useful; build one with NewKeyring. A nil *Keyring is
 // safe to call and behaves as an empty ring, which lets keyless providers
 // (Ollama, vLLM) and direct test constructors skip it entirely.
 type Keyring struct {
-	keys          []string
+	// keys points at an immutable, de-duplicated, non-empty key slice. It is
+	// swapped whole, never mutated, so readers need no lock.
+	keys          atomic.Pointer[[]string]
 	next          atomic.Uint64
 	sessionSticky bool
 }
@@ -41,6 +47,39 @@ func NewKeyring(keys ...string) *Keyring {
 // deterministically select one credential. Sessionless traffic always keeps
 // the historical round-robin behavior.
 func NewKeyringWithSessionStickiness(sessionSticky bool, keys ...string) *Keyring {
+	unique := uniqueKeys(keys)
+	if len(unique) == 0 {
+		return nil
+	}
+	k := &Keyring{sessionSticky: sessionSticky}
+	k.keys.Store(&unique)
+	return k
+}
+
+// Replace atomically swaps the key set, applying the same rules as NewKeyring:
+// order is kept, empty and duplicate keys are dropped. It reports false and
+// leaves the ring unchanged when no usable key remains or k is nil, because a
+// provider cannot be left without the credentials it was built with; dropping
+// every key needs a rebuild, not a swap.
+//
+// Requests already holding a key finish on it. The round-robin position
+// carries over. Identified sessions are pinned by rendezvous hashing over the
+// key set, so a session stays on its key unless that key was removed or a new
+// key now scores higher for it; with one key replaced, roughly the sessions
+// on the old key, plus a 1/N share taken by the new key, move.
+func (k *Keyring) Replace(keys ...string) bool {
+	if k == nil {
+		return false
+	}
+	unique := uniqueKeys(keys)
+	if len(unique) == 0 {
+		return false
+	}
+	k.keys.Store(&unique)
+	return true
+}
+
+func uniqueKeys(keys []string) []string {
 	unique := make([]string, 0, len(keys))
 	seen := make(map[string]struct{}, len(keys))
 	for _, key := range keys {
@@ -53,10 +92,18 @@ func NewKeyringWithSessionStickiness(sessionSticky bool, keys ...string) *Keyrin
 		seen[key] = struct{}{}
 		unique = append(unique, key)
 	}
-	if len(unique) == 0 {
+	return unique
+}
+
+// load returns the current key set; nil or empty for an empty ring.
+func (k *Keyring) load() []string {
+	if k == nil {
 		return nil
 	}
-	return &Keyring{keys: unique, sessionSticky: sessionSticky}
+	if keys := k.keys.Load(); keys != nil {
+		return *keys
+	}
+	return nil
 }
 
 // Next returns the key to authenticate the next outbound request, advancing
@@ -68,14 +115,19 @@ func NewKeyringWithSessionStickiness(sessionSticky bool, keys ...string) *Keyrin
 // request retried after a 429 is re-sent under the next key rather than
 // hammering the one that was just throttled.
 func (k *Keyring) Next() string {
-	if k == nil || len(k.keys) == 0 {
+	keys := k.load()
+	if len(keys) == 0 {
 		return ""
 	}
-	if len(k.keys) == 1 {
-		return k.keys[0]
+	return k.nextOf(keys)
+}
+
+func (k *Keyring) nextOf(keys []string) string {
+	if len(keys) == 1 {
+		return keys[0]
 	}
 	i := k.next.Add(1) - 1
-	return k.keys[i%uint64(len(k.keys))]
+	return keys[i%uint64(len(keys))]
 }
 
 // NextForContext returns the key pinned to the request's GoModel session. When
@@ -90,17 +142,18 @@ func (k *Keyring) NextForContext(ctx context.Context) string {
 // context has no stable credential affinity, so callers must not persist
 // credential-scoped provider resources for later reuse.
 func (k *Keyring) StableForContext(ctx context.Context) (string, bool) {
-	if k == nil || len(k.keys) == 0 {
+	keys := k.load()
+	if len(keys) == 0 {
 		return "", false
 	}
-	if len(k.keys) == 1 {
-		return k.keys[0], true
+	if len(keys) == 1 {
+		return keys[0], true
 	}
 	sessionID := core.SessionIDFromContext(ctx)
 	if !k.sessionSticky || sessionID == "" {
 		return "", false
 	}
-	return k.stickyKey(sessionID), true
+	return stickyKey(keys, sessionID), true
 }
 
 // NextForSession deterministically maps one non-empty session to one key using
@@ -108,22 +161,23 @@ func (k *Keyring) StableForContext(ctx context.Context) (string, bool) {
 // assigned to the changed key, rather than invalidating every warm cache. The
 // digest and credential material remain in-process and are never exposed.
 func (k *Keyring) NextForSession(sessionID string) string {
-	if k == nil || len(k.keys) == 0 {
+	keys := k.load()
+	if len(keys) == 0 {
 		return ""
 	}
-	if len(k.keys) == 1 {
-		return k.keys[0]
+	if len(keys) == 1 {
+		return keys[0]
 	}
 	if !k.sessionSticky || sessionID == "" {
-		return k.Next()
+		return k.nextOf(keys)
 	}
-	return k.stickyKey(sessionID)
+	return stickyKey(keys, sessionID)
 }
 
-func (k *Keyring) stickyKey(sessionID string) string {
-	selected := k.keys[0]
+func stickyKey(keys []string, sessionID string) string {
+	selected := keys[0]
 	best := rendezvousKeyScore(sessionID, selected)
-	for _, key := range k.keys[1:] {
+	for _, key := range keys[1:] {
 		score := rendezvousKeyScore(sessionID, key)
 		if bytes.Compare(score[:], best[:]) > 0 {
 			selected = key
@@ -148,18 +202,16 @@ func rendezvousKeyScore(sessionID, key string) [sha256.Size]byte {
 // It is the key to use where a stable identity matters more than spreading
 // load, and where an empty ring must stay empty.
 func (k *Keyring) Primary() string {
-	if k == nil || len(k.keys) == 0 {
+	keys := k.load()
+	if len(keys) == 0 {
 		return ""
 	}
-	return k.keys[0]
+	return keys[0]
 }
 
 // Len reports how many distinct keys back the rotation.
 func (k *Keyring) Len() int {
-	if k == nil {
-		return 0
-	}
-	return len(k.keys)
+	return len(k.load())
 }
 
 // Rotates reports whether more than one key is configured. Identified sessions
