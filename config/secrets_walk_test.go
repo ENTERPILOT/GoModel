@@ -159,13 +159,14 @@ func TestLoadResultResolveSecretsChecksReferencedMCPSettings(t *testing.T) {
       url: https://mcp.example.com/mcp
   virtual_servers:
     coding:
-      tool_discovery: ${env:GOMODEL_TEST_MCP_MODE}
+      tool_discovery: ${env:GOMODEL_TEST_MCP_VIRTUAL_MODE}
       servers: ["${env:GOMODEL_TEST_MCP_MEMBER}", github]
 `
 	valid := map[string]string{
-		"GOMODEL_TEST_MCP_MODE":   "Search",
-		"GOMODEL_TEST_MCP_ORIGIN": "https://App.example.com",
-		"GOMODEL_TEST_MCP_MEMBER": "Linear",
+		"GOMODEL_TEST_MCP_MODE":         "Search",
+		"GOMODEL_TEST_MCP_VIRTUAL_MODE": "SEARCH",
+		"GOMODEL_TEST_MCP_ORIGIN":       "https://App.example.com",
+		"GOMODEL_TEST_MCP_MEMBER":       "Linear",
 	}
 	with := func(key, value string) map[string]string {
 		env := maps.Clone(valid)
@@ -185,6 +186,11 @@ func TestLoadResultResolveSecretsChecksReferencedMCPSettings(t *testing.T) {
 			name:    "invalid tool discovery after resolution",
 			env:     with("GOMODEL_TEST_MCP_MODE", secret),
 			wantErr: `mcp.tool_discovery: the value resolved from its secret reference must be "off" or "search"`,
+		},
+		{
+			name:    "invalid virtual server tool discovery after resolution",
+			env:     with("GOMODEL_TEST_MCP_VIRTUAL_MODE", secret),
+			wantErr: `mcp.virtual_servers["coding"]: tool_discovery: the value resolved from its secret reference must be "off" or "search"`,
 		},
 		{
 			name:    "invalid origin after resolution",

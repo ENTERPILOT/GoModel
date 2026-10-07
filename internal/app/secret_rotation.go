@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/enterpilot/gomodel/config"
@@ -53,6 +54,18 @@ type secretRotation struct {
 	closed bool
 	cancel context.CancelFunc
 	done   chan struct{}
+
+	// stranded is set while a re-check abandoned after secretRecheckTimeout
+	// is still waiting on its resolver; retry records a notification that
+	// arrived meanwhile, re-sent once the stranded re-check returns.
+	stranded atomic.Bool
+	retry    atomic.Bool
+}
+
+// recheckOutcome is the result of one re-resolution of every reference.
+type recheckOutcome struct {
+	recheck *config.SecretRecheck
+	err     error
 }
 
 // providerKeyPlanner adapts providers.InitResult to secretRotation.
@@ -127,15 +140,46 @@ func (w *secretRotation) Close() error {
 // serving generation's context: once it ends, a check that was still
 // resolving drops its result and hands the notification on, so the next
 // generation re-checks with its own resolvers.
+//
+// The re-resolution runs on its own goroutine, and check stops waiting for it
+// after secretRecheckTimeout: a resolver that ignores its context must not
+// wedge the watcher. Its late result is discarded. Until it returns, further
+// notifications are held instead of starting another re-check the same
+// resolver would block, and one is re-sent once it does.
 func (w *secretRotation) check(generation context.Context) {
+	if w.stranded.Load() {
+		w.retry.Store(true)
+		// Checked again after retry is set: a stranded re-check that returned
+		// in between has already looked at retry, so check now instead.
+		if w.stranded.Load() {
+			slog.Warn("a secret re-check is still waiting on a resolver that did not return; this change is checked once it does")
+			return
+		}
+	}
 	ctx, cancel := context.WithTimeout(generation, secretRecheckTimeout)
 	defer cancel()
 
-	recheck, err := w.secrets.Recheck(ctx)
+	result := make(chan recheckOutcome, 1) // buffered: an abandoned re-check never blocks on send
+	go func() {
+		recheck, err := w.secrets.Recheck(ctx)
+		result <- recheckOutcome{recheck, err}
+	}()
+	var out recheckOutcome
+	select {
+	case out = <-result:
+	case <-ctx.Done():
+		if generation.Err() == nil {
+			slog.Warn("secret references were not re-resolved in time; keeping the current values",
+				"timeout", secretRecheckTimeout)
+			w.strand(result)
+			return
+		}
+	}
 	if generation.Err() != nil {
 		w.secrets.NotifyChanged()
 		return
 	}
+	recheck, err := out.recheck, out.err
 	if err != nil {
 		slog.Warn("secret references could not be re-resolved; keeping the current values", "error", err)
 		return
@@ -163,6 +207,20 @@ func (w *secretRotation) check(generation context.Context) {
 	}
 	slog.Info("referenced secrets changed; reloading the configuration", "fields", fields)
 	w.reload("secret references changed: " + strings.Join(fields, ", "))
+}
+
+// strand records a re-check that outlived secretRecheckTimeout. Once it
+// returns, its result is dropped and a notification held meanwhile is sent
+// again.
+func (w *secretRotation) strand(result <-chan recheckOutcome) {
+	w.stranded.Store(true)
+	go func() {
+		<-result
+		w.stranded.Store(false)
+		if w.retry.Swap(false) {
+			w.secrets.NotifyChanged()
+		}
+	}()
 }
 
 func (w *secretRotation) touchesPinned(names []string) bool {

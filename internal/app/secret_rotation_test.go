@@ -249,3 +249,61 @@ func TestSecretRotationCloseDoesNotWaitForAStuckResolver(t *testing.T) {
 	}
 	assert.Empty(t, reloads, "a check outliving its generation must not act")
 }
+
+// A resolver that ignores its context must not wedge the serving watcher:
+// the check gives up after secretRecheckTimeout, later notifications are held
+// without starting another re-check the resolver would block, and the change
+// is applied once the resolver returns.
+func TestSecretRotationRecheckTimeoutDoesNotWedgeTheWatcher(t *testing.T) {
+	previous := secretRecheckTimeout
+	secretRecheckTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { secretRecheckTimeout = previous })
+
+	var calls atomic.Int32
+	var hang atomic.Bool
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	secrets := config.NewSecrets()
+	require.NoError(t, secrets.Register("vault", config.SecretResolverFunc(func(context.Context, string) (string, error) {
+		if !hang.Load() {
+			return "d1", nil
+		}
+		if calls.Add(1) == 1 {
+			close(entered)
+			<-release // ignores its context
+		}
+		return "d2", nil
+	})))
+	fields := map[string]string{"storage.postgresql.url": "${vault:dsn}"}
+	require.NoError(t, secrets.ResolveFields(t.Context(), "", &fields))
+
+	reloads := make(chan string, 4)
+	rotation := &secretRotation{
+		secrets:  secrets,
+		planKeys: func(*config.SecretRecheck) keySwap { return nil },
+		reload:   func(reason string) { reloads <- reason },
+	}
+	rotation.start(t.Context())
+	t.Cleanup(func() { assert.NoError(t, rotation.Close()) })
+
+	hang.Store(true)
+	secrets.NotifyChanged()
+	<-entered
+	require.Eventually(t, rotation.stranded.Load, 5*time.Second, 5*time.Millisecond,
+		"the check did not give up on the hung resolver")
+
+	// The watcher is free again: this notice is held, not stacked on the
+	// resolver that is still hung.
+	secrets.NotifyChanged()
+	require.Eventually(t, rotation.retry.Load, 5*time.Second, 5*time.Millisecond)
+	assert.Equal(t, int32(1), calls.Load(), "no second re-check while the first is stranded")
+	assert.Empty(t, reloads, "a timed-out re-check must not act")
+
+	close(release)
+	select {
+	case reason := <-reloads:
+		assert.Contains(t, reason, "storage.postgresql.url")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the held notification was not checked once the resolver returned")
+	}
+}
