@@ -71,7 +71,7 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 	// saturated, fall back to the first declared one: the request then reaches
 	// admission and receives an honest 429 with Retry-After (or defers to
 	// failover) instead of the all-targets-down error path.
-	pool := s.targetsWithCapacity(snap, entry, supported)
+	pool := s.targetsWithCapacity(snap, entry, supported, allowed)
 	if len(pool) == 0 {
 		// This target is selected only to reach admission and produce the 429.
 		// Do not run affinity resolution: a transient capacity burst must not
@@ -114,7 +114,7 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 			// primary; the legs below it are the failover chain.
 			return pool[0]
 		case StrategyCost:
-			return s.cheapestTarget(snap, entry, pool)
+			return s.cheapestTarget(snap, entry, pool, allowed)
 		default:
 			// Round robin, and adaptive or plugin whose selector had no
 			// usable answer.
@@ -215,15 +215,16 @@ func poolTarget(pool []resolvedTarget, qualified string) (resolvedTarget, bool) 
 
 // targetsWithCapacity filters targets through the optional rate-limit capacity
 // probe. Without a probe every target has capacity. A chained target has
-// capacity while any concrete model behind it does.
-func (s *Service) targetsWithCapacity(snap *snapshot, entry *redirectEntry, targets []resolvedTarget) []resolvedTarget {
+// capacity while any concrete model behind it that allow permits does: a
+// disabled or denied leaf with room never serves this request.
+func (s *Service) targetsWithCapacity(snap *snapshot, entry *redirectEntry, targets []resolvedTarget, allow func(core.ModelSelector) bool) []resolvedTarget {
 	if s.targetCapacity == nil {
 		return targets
 	}
 	out := make([]resolvedTarget, 0, len(targets))
 	for _, target := range targets {
 		for _, leaf := range snap.leaves(entry, target, s.catalog) {
-			if s.targetCapacity(leaf.qualified) {
+			if allow(leaf.selector) && s.targetCapacity(leaf.qualified) {
 				out = append(out, target)
 				break
 			}
@@ -275,15 +276,16 @@ func normalizeWeight(weight float64) int {
 // Targets with no registry pricing are skipped while any priced target exists;
 // when none are priced it falls back to the first supported target so the cost
 // strategy stays deterministic. Ties keep the earlier target in support order.
-// A chained target is priced at the cheapest concrete model behind it.
-func (s *Service) cheapestTarget(snap *snapshot, entry *redirectEntry, supported []resolvedTarget) resolvedTarget {
+// A chained target is priced at the cheapest concrete model behind it that
+// allow permits.
+func (s *Service) cheapestTarget(snap *snapshot, entry *redirectEntry, supported []resolvedTarget, allow func(core.ModelSelector) bool) resolvedTarget {
 	// One timestamp per decision so every candidate is priced in the same
 	// time-of-day pricing window.
 	now := time.Now()
 	best := supported[0]
-	bestCost, bestPriced := s.legCost(snap, entry, best, now)
+	bestCost, bestPriced := s.legCost(snap, entry, best, now, allow)
 	for _, target := range supported[1:] {
-		cost, priced := s.legCost(snap, entry, target, now)
+		cost, priced := s.legCost(snap, entry, target, now, allow)
 		if !priced {
 			continue
 		}
@@ -295,13 +297,17 @@ func (s *Service) cheapestTarget(snap *snapshot, entry *redirectEntry, supported
 }
 
 // legCost prices one leg of a strategy: a concrete target's own price, or the
-// lowest price among the available concrete models behind a chained target.
-func (s *Service) legCost(snap *snapshot, entry *redirectEntry, target resolvedTarget, now time.Time) (float64, bool) {
+// lowest price among the available concrete models behind a chained target
+// that allow permits.
+func (s *Service) legCost(snap *snapshot, entry *redirectEntry, target resolvedTarget, now time.Time, allow func(core.ModelSelector) bool) (float64, bool) {
 	if _, ok := snap.chained(entry.vm.Source, target); !ok {
 		return s.targetCost(target, now)
 	}
 	bestCost, priced := 0.0, false
 	for _, leaf := range snap.leaves(entry, target, s.catalog) {
+		if !allow(leaf.selector) {
+			continue
+		}
 		if cost, ok := s.targetCost(leaf, now); ok && (!priced || cost < bestCost) {
 			bestCost, priced = cost, true
 		}

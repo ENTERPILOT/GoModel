@@ -224,3 +224,31 @@ func TestService_DirectRequestForDisabledModelStillFails(t *testing.T) {
 	require.False(t, changed)
 	assert.Error(t, svc.ValidateModelAccess(ctx, sel))
 }
+
+func TestChain_DisabledLeafIgnoredForRouting(t *testing.T) {
+	t.Parallel()
+	t.Run("capacity", func(t *testing.T) {
+		t.Parallel()
+		svc := newBalancingService(t)
+		// Only the disabled leaf behind "pool" has room; the leg must not
+		// count as having capacity, or the request reaches a 429.
+		svc.SetTargetCapacity(func(qualified string) bool { return qualified != "anthropic/claude" })
+		upsertRedirect(t, svc, "pool", StrategyFailover, "groq/llama", "anthropic/claude")
+		upsertRedirect(t, svc, "smart", StrategyFailover, "pool", "openai/gpt-4o")
+		disableModel(t, svc, "groq/llama")
+
+		assert.Equal(t, "openai/gpt-4o", resolveForRequest(t, context.Background(), svc, "smart"))
+	})
+
+	t.Run("cost", func(t *testing.T) {
+		t.Parallel()
+		svc := newBalancingService(t)
+		// The disabled groq/llama is the cheapest leaf behind "budget"; the
+		// leg must be priced at anthropic/claude, which is dearer than gpt-4o.
+		upsertRedirect(t, svc, "budget", StrategyCost, "anthropic/claude", "groq/llama")
+		upsertRedirect(t, svc, "frugal", StrategyCost, "budget", "openai/gpt-4o")
+		disableModel(t, svc, "groq/llama")
+
+		assert.Equal(t, "openai/gpt-4o", resolveForRequest(t, context.Background(), svc, "frugal"))
+	})
+}
