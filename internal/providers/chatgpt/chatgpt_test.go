@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/goccy/go-json"
@@ -57,17 +58,18 @@ func TestStreamResponses_SendsCodexDialect(t *testing.T) {
 	temperature := 0.7
 	maxTokens := 128
 	stream, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
-		Model:              "gpt-5.6-terra",
-		Input:              "Reply with exactly ok",
-		Instructions:       "You are Codex.",
-		Temperature:        &temperature,
-		MaxOutputTokens:    &maxTokens,
-		PreviousResponseID: "resp_prev",
-		Truncation:         "auto",
-		User:               "someone",
-		Metadata:           map[string]string{"a": "b"},
-		Include:            []string{"reasoning.encrypted_content"},
-		Reasoning:          &core.Reasoning{Effort: "low"},
+		Model:                "gpt-5.6-terra",
+		Input:                "Reply with exactly ok",
+		Instructions:         "You are Codex.",
+		Temperature:          &temperature,
+		MaxOutputTokens:      &maxTokens,
+		PreviousResponseID:   "resp_prev",
+		Truncation:           "auto",
+		User:                 "someone",
+		PromptCacheRetention: "24h",
+		Metadata:             map[string]string{"a": "b"},
+		Include:              []string{"reasoning.encrypted_content"},
+		Reasoning:            &core.Reasoning{Effort: "low"},
 	})
 	require.NoError(t, err)
 
@@ -88,7 +90,7 @@ func TestStreamResponses_SendsCodexDialect(t *testing.T) {
 	assert.False(t, stored)
 	assert.Equal(t, "You are Codex.", gotBody["instructions"])
 
-	for _, field := range []string{"temperature", "max_output_tokens", "previous_response_id", "truncation", "user", "metadata", "top_p", "service_tier"} {
+	for _, field := range []string{"temperature", "max_output_tokens", "previous_response_id", "truncation", "user", "metadata", "top_p", "service_tier", "prompt_cache_retention"} {
 		assert.NotContains(t, gotBody, field, "%s must not be sent to the Codex backend", field)
 	}
 	input, ok := gotBody["input"].([]any)
@@ -108,6 +110,91 @@ func TestStreamResponses_SendsCodexDialect(t *testing.T) {
 	part, _ := parts[0].(map[string]any)
 	assert.Equal(t, "input_text", part["type"])
 	assert.Equal(t, "Reply with exactly ok", part["text"])
+}
+
+// TestStreamResponses_ForwardsPromptCacheAffinity covers the cache signals the
+// Codex CLI sends: prompt_cache_key in the body and the session-id header.
+// Without them every turn lands on a cold backend prefix cache.
+func TestStreamResponses_ForwardsPromptCacheAffinity(t *testing.T) {
+	longSession := strings.Repeat("s", maxPromptCacheKeyLength+1)
+	tests := []struct {
+		name       string
+		session    string
+		extras     map[string]json.RawMessage
+		wantKey    string
+		wantHeader string
+	}{
+		{
+			name:       "client key wins over the session",
+			session:    "sess-1",
+			extras:     map[string]json.RawMessage{"prompt_cache_key": json.RawMessage(`"pck_client"`)},
+			wantKey:    "pck_client",
+			wantHeader: "sess-1",
+		},
+		{
+			name:       "session stands in for a missing key",
+			session:    "sess-1",
+			wantKey:    "sess-1",
+			wantHeader: "sess-1",
+		},
+		{
+			name:       "null key counts as missing",
+			session:    "sess-1",
+			extras:     map[string]json.RawMessage{"prompt_cache_key": json.RawMessage(`null`)},
+			wantKey:    "sess-1",
+			wantHeader: "sess-1",
+		},
+		{
+			name:       "session too long for a key is sent only as a header",
+			session:    longSession,
+			wantHeader: longSession,
+		},
+		{
+			name: "no key and no session sends neither",
+		},
+		{
+			name: "unlisted extras stay dropped",
+			extras: map[string]json.RawMessage{
+				"prompt_cache_key":        json.RawMessage(`"pck_client"`),
+				"prompt_cache_options":    json.RawMessage(`{"mode":"explicit"}`),
+				"some_future_param":       json.RawMessage(`true`),
+				"prompt_cache_breakpoint": json.RawMessage(`{"mode":"explicit"}`),
+			},
+			wantKey: "pck_client",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, capture := providertest.SSEServer(t, codexSSE)
+			provider := newTestProvider(tokenWithAccount(t, "acct-123"), srv.URL, srv.Client(), llmclient.Hooks{})
+
+			ctx := context.Background()
+			if tt.session != "" {
+				ctx = core.WithSessionID(ctx, tt.session)
+			}
+			stream, err := provider.StreamResponses(ctx, &core.ResponsesRequest{
+				Model:       "gpt-5.6-terra",
+				Input:       "hi",
+				ExtraFields: core.UnknownJSONFieldsFromMap(tt.extras),
+			})
+			require.NoError(t, err)
+			defer func() { _ = stream.Close() }()
+			_, err = io.ReadAll(stream)
+			require.NoError(t, err)
+
+			sent := capture.Last(t)
+			assert.Equal(t, tt.wantHeader, sent.Header.Get(sessionHeader))
+			body := sent.JSON(t)
+			if tt.wantKey == "" {
+				assert.NotContains(t, body, "prompt_cache_key")
+			} else {
+				assert.Equal(t, tt.wantKey, body["prompt_cache_key"])
+			}
+			for _, field := range []string{"prompt_cache_options", "prompt_cache_breakpoint", "some_future_param"} {
+				assert.NotContains(t, body, field)
+			}
+		})
+	}
 }
 
 // TestResponses_CollapsesUpstreamStream covers the non-streaming path: the
