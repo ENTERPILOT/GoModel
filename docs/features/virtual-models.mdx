@@ -107,7 +107,16 @@ them. Add more than one target in the editor (**Add target**) and pick a
 
 Targets that the gateway cannot currently serve (unknown model, provider down)
 are skipped automatically, so a redirect keeps working as long as one target is
-available. A redirect with a single target behaves exactly like a plain alias.
+available. The same goes for a target model you have **disabled**, or one the
+request's API key or `user_path` may not use: every strategy routes around it,
+so disabling a model (for example while its provider's quota is exhausted)
+moves its traffic to the other targets until you re-enable it. When every
+available target is disabled or denied, the request fails with
+`model_access_denied`; when no target is available at all (unknown model,
+provider down), the name is resolved like any other model name, usually
+ending in a model-not-found error. A request that names a disabled model
+directly still fails.
+A redirect with a single target behaves exactly like a plain alias.
 
 Whatever the strategy, the remaining targets are the redirect's **failover
 chain**: when the chosen target fails with a retryable error, the request is

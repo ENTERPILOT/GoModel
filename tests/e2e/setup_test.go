@@ -36,10 +36,11 @@ type e2eServerOptions struct {
 	// share it with collaborators built around the same catalog (virtual
 	// models, rate-limit capacity probes).
 	registry *providers.ModelRegistry
-	// modelResolver and failoverResolver mirror the app wiring for alias
-	// resolution and translated-route failover.
+	// modelResolver, failoverResolver and modelAuthorizer mirror the app
+	// wiring for alias resolution, translated-route failover and model access.
 	modelResolver    server.RequestModelResolver
 	failoverResolver server.RequestFailoverResolver
+	modelAuthorizer  server.RequestModelAuthorizer
 	// mcpGateway enables the /mcp routes when set.
 	mcpGateway *mcpgateway.Service
 	// workflowPolicyResolver, translatedRequestPatcher and pluginChains wire
@@ -105,6 +106,7 @@ func setupE2EServer(t *testing.T, opts e2eServerOptions) *server.Server {
 		PricingResolver:       opts.pricingResolver,
 		ModelResolver:         opts.modelResolver,
 		FailoverResolver:      opts.failoverResolver,
+		ModelAuthorizer:       opts.modelAuthorizer,
 		AdminEndpointsEnabled: opts.adminEndpointsEnabled,
 	}
 	if opts.workflowPolicyResolver != nil {
