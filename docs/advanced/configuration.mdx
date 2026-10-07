@@ -476,6 +476,17 @@ registered one) is listed. Pin a name to a specific provider with a
 [virtual model](/features/virtual-models#list-bare-model-ids), for example
 `source: gpt-5` with `target: azure/gpt-5`.
 
+Every provider model is available by default. Set
+`MODELS_ENABLED_BY_DEFAULT=false` (YAML: `models.enabled_by_default`) to
+require an explicit allow entry in
+[virtual models](/features/virtual-models#model-availability-by-default)
+instead: requests for other models then fail with `400 model_access_denied`,
+and the models stay out of `GET /v1/models`. To hide provider models from
+`GET /v1/models` while keeping them routable, set
+`KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT=true`
+(YAML: `models.keep_only_aliases_at_models_endpoint`); the endpoint then lists
+only enabled virtual model redirects.
+
 To narrow a provider's inventory instead of listing it model by model, use
 `<PROVIDER>_MODEL_FILTER_INCLUDE`, `<PROVIDER>_MODEL_FILTER_EXCLUDE`, and
 `<PROVIDER>_MODEL_FILTER_MAX_PRICE_PER_MTOK` (YAML:
