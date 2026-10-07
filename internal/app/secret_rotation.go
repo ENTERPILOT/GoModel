@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/enterpilot/gomodel/config"
@@ -55,11 +54,14 @@ type secretRotation struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 
-	// stranded is set while a re-check abandoned after secretRecheckTimeout
-	// is still waiting on its resolver; retry records a notification that
-	// arrived meanwhile, re-sent once the stranded re-check returns.
-	stranded atomic.Bool
-	retry    atomic.Bool
+	// handoff guards stranded and held. stranded is set while a re-check
+	// abandoned after secretRecheckTimeout still waits on its resolver; held
+	// records a notification that arrived meanwhile. One lock makes the
+	// handoff exclusive: a notification either runs a check now or is held
+	// and re-sent once, never both.
+	handoff  sync.Mutex
+	stranded bool
+	held     bool
 }
 
 // recheckOutcome is the result of one re-resolution of every reference.
@@ -95,6 +97,9 @@ func (w *secretRotation) start(ctx context.Context) {
 	w.done = make(chan struct{})
 	go func() {
 		defer close(w.done)
+		// A notification held for a stranded re-check must not die with this
+		// watcher: the generation serving next has to see it.
+		defer w.forwardHeld()
 		for {
 			select {
 			case <-ctx.Done():
@@ -147,14 +152,9 @@ func (w *secretRotation) Close() error {
 // notifications are held instead of starting another re-check the same
 // resolver would block, and one is re-sent once it does.
 func (w *secretRotation) check(generation context.Context) {
-	if w.stranded.Load() {
-		w.retry.Store(true)
-		// Checked again after retry is set: a stranded re-check that returned
-		// in between has already looked at retry, so check now instead.
-		if w.stranded.Load() {
-			slog.Warn("a secret re-check is still waiting on a resolver that did not return; this change is checked once it does")
-			return
-		}
+	if w.holdIfStranded() {
+		slog.Warn("a secret re-check is still waiting on a resolver that did not return; this change is checked once it does")
+		return
 	}
 	ctx, cancel := context.WithTimeout(generation, secretRecheckTimeout)
 	defer cancel()
@@ -213,14 +213,38 @@ func (w *secretRotation) check(generation context.Context) {
 // returns, its result is dropped and a notification held meanwhile is sent
 // again.
 func (w *secretRotation) strand(result <-chan recheckOutcome) {
-	w.stranded.Store(true)
+	w.handoff.Lock()
+	w.stranded = true
+	w.handoff.Unlock()
 	go func() {
 		<-result
-		w.stranded.Store(false)
-		if w.retry.Swap(false) {
-			w.secrets.NotifyChanged()
-		}
+		w.handoff.Lock()
+		w.stranded = false
+		w.handoff.Unlock()
+		w.forwardHeld()
 	}()
+}
+
+// holdIfStranded reports whether a stranded re-check is still running and, if
+// so, holds the current notification for it to re-send.
+func (w *secretRotation) holdIfStranded() bool {
+	w.handoff.Lock()
+	defer w.handoff.Unlock()
+	if w.stranded {
+		w.held = true
+	}
+	return w.stranded
+}
+
+// forwardHeld re-sends a held notification, at most once.
+func (w *secretRotation) forwardHeld() {
+	w.handoff.Lock()
+	resend := w.held
+	w.held = false
+	w.handoff.Unlock()
+	if resend {
+		w.secrets.NotifyChanged()
+	}
 }
 
 func (w *secretRotation) touchesPinned(names []string) bool {
