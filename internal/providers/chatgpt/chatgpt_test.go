@@ -229,6 +229,36 @@ func TestResponses_CollapsesUpstreamStream(t *testing.T) {
 	assert.Equal(t, 5, resp.Usage.TotalTokens)
 }
 
+// TestResponses_FillsOutputFromStreamedItems covers the backend's real shape:
+// response.completed carries an empty output list and the items arrive only as
+// response.output_item.done events, which the collapsed response must keep in
+// output_index order.
+func TestResponses_FillsOutputFromStreamedItems(t *testing.T) {
+	sse := "event: response.output_item.done\n" +
+		`data: {"type":"response.output_item.done","output_index":1,"item":{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","annotations":[],"text":"QA_OK"}]}}` + "\n\n" +
+		"event: response.output_item.done\n" +
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[],"encrypted_content":"gAAA"}}` + "\n\n" +
+		"event: response.completed\n" +
+		`data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","model":"gpt-5.6-luna","output":[],"usage":{"input_tokens":13,"output_tokens":8,"total_tokens":21}}}` + "\n\n" +
+		"data: [DONE]\n\n"
+	srv, _ := providertest.SSEServer(t, sse)
+	provider := newTestProvider("token", srv.URL, srv.Client(), llmclient.Hooks{})
+
+	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{Model: "gpt-5.6-luna", Input: "hi"})
+	require.NoError(t, err)
+	require.Len(t, resp.Output, 2)
+	assert.Equal(t, "reasoning", resp.Output[0].Type)
+	assert.Equal(t, "message", resp.Output[1].Type)
+	require.Len(t, resp.Output[1].Content, 1)
+	assert.Equal(t, "QA_OK", resp.Output[1].Content[0].Text)
+	require.NotNil(t, resp.Usage)
+	assert.Equal(t, 21, resp.Usage.TotalTokens)
+
+	body, err := json.Marshal(resp.Output[0])
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `"encrypted_content":"gAAA"`)
+}
+
 // TestResponses_ReportsCachedTokens keeps the backend's prompt-cache hits
 // visible: usage records and the dashboard read cached_tokens from the
 // collapsed response, so dropping it would hide a cache regression.
