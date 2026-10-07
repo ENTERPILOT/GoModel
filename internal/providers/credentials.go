@@ -113,6 +113,13 @@ type CredentialsService struct {
 
 	managedNames map[string]struct{}
 	resilience   config.ResilienceConfig
+	// secrets resolves the secret references stored credentials hold, with
+	// the schemes of the generation this service belongs to.
+	secrets *config.Secrets
+
+	// applyMu serializes saves, deletes, and secret rotation, each of which
+	// builds from the stored row and then installs the result.
+	applyMu sync.Mutex
 
 	// configs holds the effective ProviderConfig of every credential that is
 	// currently installed in the registry, so the admin status endpoint can
@@ -120,11 +127,16 @@ type CredentialsService struct {
 	// providers that it reports for config.yaml/env ones.
 	mu      sync.RWMutex
 	configs map[string]ProviderConfig
+	// keyrings holds each installed provider's keyring, so a rotated API key
+	// is swapped in place rather than rebuilding the provider.
+	keyrings map[string]*Keyring
 }
 
 // NewCredentialsService builds the service and applies every currently
 // stored, enabled, non-shadowed credential to the registry before returning.
-func NewCredentialsService(ctx context.Context, factory *ProviderFactory, registry *ModelRegistry, store CredentialStore, declaredNames []string, resilience config.ResilienceConfig) (*CredentialsService, error) {
+// secrets resolves the secret references credentials hold; nil resolves the
+// built-in env and file schemes only.
+func NewCredentialsService(ctx context.Context, factory *ProviderFactory, registry *ModelRegistry, store CredentialStore, declaredNames []string, resilience config.ResilienceConfig, secrets *config.Secrets) (*CredentialsService, error) {
 	if factory == nil {
 		return nil, fmt.Errorf("provider factory is required")
 	}
@@ -149,7 +161,9 @@ func NewCredentialsService(ctx context.Context, factory *ProviderFactory, regist
 		store:        store,
 		managedNames: managed,
 		resilience:   resilience,
+		secrets:      secrets,
 		configs:      make(map[string]ProviderConfig),
+		keyrings:     make(map[string]*Keyring),
 	}
 	if err := s.Reload(ctx); err != nil {
 		return nil, err
@@ -204,7 +218,7 @@ func (s *CredentialsService) Reload(ctx context.Context) error {
 		if !row.Enabled {
 			continue
 		}
-		if err := s.register(row); err != nil {
+		if err := s.register(ctx, row); err != nil {
 			slog.Error("failed to apply stored provider credential", "provider", row.Name, "error", err)
 			continue
 		}
@@ -251,36 +265,11 @@ func (s *CredentialsService) Upsert(ctx context.Context, cred ManagedProviderCre
 		return &CredentialFieldError{Field: "type", Message: "unknown provider type: " + cred.Type}
 	}
 	cred.Name = name
-	if err := validateCredential(cred, s.CredentialSchema(cred.Type)); err != nil {
-		return err
-	}
-
-	// Resolve and construct the adapter before persisting or touching the
-	// registry: an unresolvable row is not worth storing, and if this is an
-	// edit, whatever is currently registered under this name -- possibly a
-	// working provider actively serving traffic -- must keep serving rather
-	// than being unregistered out from under a failed edit.
-	var provider core.Provider
-	var cfg ProviderConfig
-	if cred.Enabled {
-		var err error
-		provider, cfg, err = s.buildProvider(cred)
-		if err != nil {
-			return unappliableCredentialError(cred, s.CredentialSchema(cred.Type), err)
-		}
-	}
-
-	// ErrSealUnconfirmed means the row was written: apply it like any other
-	// save, then report the error.
-	saveErr := s.store.Upsert(ctx, cred)
+	// ErrSealUnconfirmed means the row was written and applied: refresh like
+	// any other save, then report the error.
+	saveErr := s.apply(ctx, cred)
 	if saveErr != nil && !errors.Is(saveErr, encryption.ErrSealUnconfirmed) {
 		return saveErr
-	}
-
-	if cred.Enabled {
-		s.install(name, provider, cfg)
-	} else {
-		s.remove(name)
 	}
 	// A Refresh error here means the provider's /models call itself failed
 	// (bad key, unreachable host, ...) -- registration still succeeded, and
@@ -301,10 +290,9 @@ func (s *CredentialsService) Delete(ctx context.Context, name string) error {
 	if s.IsManaged(name) {
 		return fmt.Errorf("provider %q is managed by config/env and is read-only", name)
 	}
-	if err := s.store.Delete(ctx, name); err != nil {
+	if err := s.deleteStored(ctx, name); err != nil {
 		return err
 	}
-	s.remove(name)
 	// See the matching comment in Upsert: a Refresh failure here reflects a
 	// remaining provider's own health, not whether the delete succeeded.
 	if err := s.registry.Refresh(ctx); err != nil {
@@ -313,51 +301,165 @@ func (s *CredentialsService) Delete(ctx context.Context, name string) error {
 	return nil
 }
 
-// register resolves one credential row through the same pipeline declarative
-// providers use (env-placeholder rejection, API key de-duplication, resilience
-// merge) and registers the resulting adapter into the registry. It does not
-// refresh the model inventory; callers batch that after registering. Only
-// used by Reload (initial population), where there is no previously-live
-// provider to protect, so build-then-install in one step is safe.
-func (s *CredentialsService) register(row ManagedProviderCredential) error {
-	provider, cfg, err := s.buildProvider(row)
-	if err != nil {
+// deleteStored deletes the stored row name, unregisters it, and releases the
+// secrets it held.
+func (s *CredentialsService) deleteStored(ctx context.Context, name string) error {
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
+
+	previous, err := s.store.Get(ctx, name)
+	if err != nil && !errors.Is(err, ErrCredentialNotFound) {
 		return err
 	}
-	s.install(strings.TrimSpace(row.Name), provider, cfg)
+	if err := s.store.Delete(ctx, name); err != nil {
+		return err
+	}
+	s.remove(name)
+	s.releaseSecrets(ctx, name, credentialSecretValues(previous), nil)
 	return nil
 }
 
-// buildProvider resolves one credential row through the same pipeline
+// apply validates, persists, and installs one credential row: the part of
+// Upsert that touches the store and the registry.
+//
+// Literal secrets are written through the generation's SecretWriter first,
+// when one is registered, so the row is stored with references only. The row
+// is then resolved and its adapter constructed before anything is persisted
+// or the registry touched: an unresolvable row is not worth storing, and if
+// this is an edit, whatever is currently registered under this name --
+// possibly a working provider actively serving traffic -- must keep serving
+// rather than being unregistered out from under a failed edit.
+func (s *CredentialsService) apply(ctx context.Context, cred ManagedProviderCredential) error {
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
+
+	previous, err := s.store.Get(ctx, cred.Name)
+	if err != nil && !errors.Is(err, ErrCredentialNotFound) {
+		return err
+	}
+	kept := credentialSecretValues(previous)
+	written, err := s.storeCredentialSecrets(ctx, &cred, kept)
+	if err != nil {
+		return err
+	}
+	built, err := s.buildCredential(ctx, cred)
+	if err != nil {
+		// Nothing was stored, so whatever the stored row holds stays.
+		s.releaseSecrets(ctx, cred.Name, written, kept)
+		return err
+	}
+	// ErrSealUnconfirmed means the row was written: apply it like any other
+	// save, then report the error.
+	saveErr := s.store.Upsert(ctx, cred)
+	if saveErr != nil && !errors.Is(saveErr, encryption.ErrSealUnconfirmed) {
+		// The stored row is unchanged, so whatever it holds stays.
+		s.releaseSecrets(ctx, cred.Name, written, kept)
+		return saveErr
+	}
+
+	if cred.Enabled {
+		s.install(cred.Name, built)
+	} else {
+		s.remove(cred.Name)
+	}
+	s.releaseSecrets(ctx, cred.Name, kept, credentialSecretValues(&cred))
+	return saveErr
+}
+
+// builtCredential is a credential row resolved and constructed, ready to
+// install. provider is nil for a disabled row.
+type builtCredential struct {
+	provider core.Provider
+	cfg      ProviderConfig
+	keys     *Keyring
+	secrets  *config.ResolvedEntity
+}
+
+// buildCredential resolves the row's secret references, validates the result
+// against the type's credential form, and constructs the adapter when the row
+// is enabled. A disabled row is still resolved, so a reference that cannot be
+// resolved is rejected when it is saved rather than when it is enabled.
+func (s *CredentialsService) buildCredential(ctx context.Context, cred ManagedProviderCredential) (builtCredential, error) {
+	resolved, secrets, err := s.resolveCredential(ctx, cred)
+	if err != nil {
+		return builtCredential{}, err
+	}
+	schema := s.CredentialSchema(cred.Type)
+	if err := validateCredential(resolved, schema); err != nil {
+		return builtCredential{}, err
+	}
+	if !cred.Enabled {
+		return builtCredential{}, nil
+	}
+	built, err := s.buildProvider(resolved)
+	if err != nil {
+		return builtCredential{}, unappliableCredentialError(cred, schema, err)
+	}
+	built.secrets = secrets
+	return built, nil
+}
+
+// register resolves one stored credential row and registers the resulting
+// adapter into the registry. It does not refresh the model inventory; callers
+// batch that after registering. Only used by Reload (initial population),
+// where there is no previously-live provider to protect, so build-then-install
+// in one step is safe.
+func (s *CredentialsService) register(ctx context.Context, row ManagedProviderCredential) error {
+	row.Name = strings.TrimSpace(row.Name)
+	resolved, secrets, err := s.resolveCredential(ctx, row)
+	if err != nil {
+		return err
+	}
+	built, err := s.buildProvider(resolved)
+	if err != nil {
+		return err
+	}
+	built.secrets = secrets
+	s.install(row.Name, built)
+	return nil
+}
+
+// buildProvider runs one resolved credential row through the same pipeline
 // declarative providers use (env-placeholder rejection, API key
 // de-duplication, resilience merge) and constructs the adapter, without
 // touching the registry. Callers that already have something live registered
 // under this name must build+validate first and only call install on
 // success, so a bad edit never displaces a working provider.
-func (s *CredentialsService) buildProvider(row ManagedProviderCredential) (core.Provider, ProviderConfig, error) {
+func (s *CredentialsService) buildProvider(row ManagedProviderCredential) (builtCredential, error) {
+	cfg, err := s.providerConfig(row)
+	if err != nil {
+		return builtCredential{}, err
+	}
+	keys := NewKeyringWithSessionStickiness(cfg.SessionStickyKeys, cfg.APIKeys...)
+	provider, err := s.factory.create(cfg, keys)
+	if err != nil {
+		return builtCredential{}, err
+	}
+	return builtCredential{provider: provider, cfg: cfg, keys: keys}, nil
+}
+
+// providerConfig resolves one row, secret references already resolved, into
+// the effective configuration of its provider.
+func (s *CredentialsService) providerConfig(row ManagedProviderCredential) (ProviderConfig, error) {
 	name := strings.TrimSpace(row.Name)
 	raw := map[string]config.RawProviderConfig{name: row.toRawProviderConfig()}
 	resolved := filterEmptyProviders(normalizeProviderAPIKeys(raw), s.factory.discoveryConfigsSnapshot())
 	rawCfg, ok := resolved[name]
 	if !ok {
-		return nil, ProviderConfig{}, fmt.Errorf("credentials did not resolve (missing API key or required fields)")
+		return ProviderConfig{}, fmt.Errorf("credentials did not resolve (missing API key or required fields)")
 	}
-
 	cfg := buildProviderConfig(rawCfg, s.resilience)
 	cfg.Name = name
-	provider, err := s.factory.Create(cfg)
-	if err != nil {
-		return nil, ProviderConfig{}, err
-	}
-	return provider, cfg, nil
+	return cfg, nil
 }
 
 // install unregisters whatever is currently registered under name (a no-op
-// if nothing is), registers provider in its place, and records cfg as the
-// provider's effective configuration.
-func (s *CredentialsService) install(name string, provider core.Provider, cfg ProviderConfig) {
+// if nothing is), registers the built provider in its place, records its
+// effective configuration, and records its secret references for rotation.
+func (s *CredentialsService) install(name string, built builtCredential) {
+	cfg := built.cfg
 	s.registry.UnregisterProvider(name)
-	s.registry.RegisterProviderWithNameAndType(provider, name, cfg.Type)
+	s.registry.RegisterProviderWithNameAndType(built.provider, name, cfg.Type)
 	if len(cfg.Models) > 0 {
 		s.registry.SetProviderConfiguredModels(name, cfg.Models)
 	}
@@ -368,17 +470,21 @@ func (s *CredentialsService) install(name string, provider core.Provider, cfg Pr
 
 	s.mu.Lock()
 	s.configs[name] = cfg
+	s.keyrings[name] = built.keys
 	s.mu.Unlock()
+	built.secrets.Record()
 }
 
 // remove unregisters name from the registry and forgets its effective
-// configuration.
+// configuration and secret references.
 func (s *CredentialsService) remove(name string) {
 	s.registry.UnregisterProvider(name)
 
 	s.mu.Lock()
 	delete(s.configs, name)
+	delete(s.keyrings, name)
 	s.mu.Unlock()
+	s.secrets.ForgetEntity(credentialSecretEntity(name))
 }
 
 // ConfiguredProviders returns the admin-safe effective configuration of every

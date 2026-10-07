@@ -9,6 +9,7 @@
 // land on the input that caused it.
 
 import { splitCommaList } from "../../lib/utils/format.js";
+import { hasSecretReference } from "../../lib/utils/secretReference.js";
 import * as m from "../../lib/paraglide/messages.js";
 
 export { splitCommaList };
@@ -449,7 +450,11 @@ function validateProviderCredentialField(form, field) {
   if (field.name === FIELD_BASE_URL && !value.includes("://") && /[./]/.test(value)) {
     return m.providers_url_scheme({ value });
   }
-  if (field.name === FIELD_SERVICE_ACCOUNT_JSON && !isRedactedCredentialValue(value)) {
+  if (
+    field.name === FIELD_SERVICE_ACCOUNT_JSON &&
+    !isRedactedCredentialValue(value) &&
+    !hasSecretReference(value)
+  ) {
     try {
       JSON.parse(value);
     } catch {
