@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // ServerSecretEntity is the SecretKey.Entity of admin-managed MCP servers and
@@ -80,7 +81,7 @@ func (s *Service) storeServerSecrets(ctx context.Context, server *ManagedServer,
 // no longer holds. It is best effort: the change it follows is committed.
 func (s *Service) releaseSecrets(ctx context.Context, name string, previous, current []string) {
 	if err := s.secrets.ReleaseSecrets(ctx, previous, current); err != nil {
-		slog.Warn("failed to delete secrets of an mcp server from the secret store", "server", name, "error", err)
+		slog.Warn("failed to delete secrets of an mcp server from the secret store", "server", core.LogText(name), "error", err)
 	}
 }
 

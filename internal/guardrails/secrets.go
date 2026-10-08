@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/pluginapi"
 )
@@ -128,7 +129,7 @@ func (s *Service) storedSecretValues(stored *Definition) []string {
 // no longer holds. It is best effort: the change it follows is committed.
 func (s *Service) releaseSecrets(ctx context.Context, name string, previous, current []string) {
 	if err := s.secrets.ReleaseSecrets(ctx, previous, current); err != nil {
-		slog.Warn("failed to delete secrets of a guardrail from the secret store", "guardrail", name, "error", err)
+		slog.Warn("failed to delete secrets of a guardrail from the secret store", "guardrail", core.LogText(name), "error", err)
 	}
 }
 

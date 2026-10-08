@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // CredentialSecretEntity is the SecretKey.Entity of dashboard-managed provider
@@ -132,6 +133,6 @@ func (s *CredentialsService) storeCredentialSecrets(ctx context.Context, cred *M
 // no longer holds. It is best effort: the change it follows is committed.
 func (s *CredentialsService) releaseSecrets(ctx context.Context, name string, previous, current []string) {
 	if err := s.secrets.ReleaseSecrets(ctx, previous, current); err != nil {
-		slog.Warn("failed to delete secrets of a provider credential from the secret store", "provider", name, "error", err)
+		slog.Warn("failed to delete secrets of a provider credential from the secret store", "provider", core.LogText(name), "error", err)
 	}
 }
