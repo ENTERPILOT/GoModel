@@ -675,3 +675,98 @@ func TestStripRoutingSuffix(t *testing.T) {
 		})
 	}
 }
+
+func TestResolve_CapabilitiesFromInputModalities(t *testing.T) {
+	tests := []struct {
+		name           string
+		capabilities   map[string]bool
+		input          []string
+		pmCapabilities map[string]bool
+		want           map[string]bool
+	}{
+		{
+			name:  "modalities only",
+			input: []string{"text", "image", "audio", "video", "pdf"},
+			want: map[string]bool{
+				"vision":      true,
+				"audio_input": true,
+				"video_input": true,
+				"pdf_input":   true,
+			},
+		},
+		{
+			name:         "merged with catalog capabilities",
+			capabilities: map[string]bool{"function_calling": true},
+			input:        []string{" Image "},
+			want:         map[string]bool{"function_calling": true, "vision": true},
+		},
+		{
+			name:         "explicit false wins",
+			capabilities: map[string]bool{"vision": false},
+			input:        []string{"image"},
+			want:         map[string]bool{"vision": false},
+		},
+		{
+			name:  "text only",
+			input: []string{"text"},
+			want:  nil,
+		},
+		{
+			name:           "provider model override keeps modality capabilities",
+			capabilities:   map[string]bool{"function_calling": true},
+			input:          []string{"image"},
+			pmCapabilities: map[string]bool{"reasoning": true},
+			want:           map[string]bool{"reasoning": true, "vision": true},
+		},
+		{
+			name:           "provider model override false wins",
+			input:          []string{"image"},
+			pmCapabilities: map[string]bool{"vision": false},
+			want:           map[string]bool{"vision": false},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			list := &ModelList{
+				Models: map[string]ModelEntry{
+					"mimo": {
+						DisplayName:  "Mimo",
+						Capabilities: tt.capabilities,
+						Modalities:   &Modalities{Input: tt.input},
+					},
+				},
+				ProviderModels: map[string]ProviderModelEntry{},
+			}
+			if tt.pmCapabilities != nil {
+				list.ProviderModels["xiaomi/mimo"] = ProviderModelEntry{
+					ModelRef:     "mimo",
+					Enabled:      true,
+					Capabilities: tt.pmCapabilities,
+				}
+			}
+
+			meta := Resolve(list, "xiaomi", "mimo")
+			require.NotNil(t, meta)
+			assert.Equal(t, tt.want, meta.Capabilities)
+		})
+	}
+}
+
+func TestResolve_ModalityCapabilitiesDoNotModifyCatalog(t *testing.T) {
+	catalogCapabilities := map[string]bool{"function_calling": true}
+	list := &ModelList{
+		Models: map[string]ModelEntry{
+			"mimo": {
+				DisplayName:  "Mimo",
+				Capabilities: catalogCapabilities,
+				Modalities:   &Modalities{Input: []string{"image"}},
+			},
+		},
+	}
+
+	meta := Resolve(list, "xiaomi", "mimo")
+	require.NotNil(t, meta)
+	assert.True(t, meta.Capabilities["vision"])
+	assert.Equal(t, map[string]bool{"function_calling": true}, catalogCapabilities)
+}

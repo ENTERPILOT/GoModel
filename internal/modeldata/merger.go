@@ -1,6 +1,7 @@
 package modeldata
 
 import (
+	"maps"
 	"regexp"
 	"strings"
 
@@ -295,7 +296,42 @@ func buildMetadata(model *ModelEntry, pm *ProviderModelEntry) *core.ModelMetadat
 		}
 	}
 
+	// Input modalities describe the model itself, so they also fill gaps in
+	// a provider_model capabilities override.
+	if model != nil {
+		meta.Capabilities = withModalityCapabilities(meta.Capabilities, model.Modalities)
+	}
+
 	return meta
+}
+
+// withModalityCapabilities adds the capabilities a catalog entry expresses
+// only through modalities.input. Explicit keys win, including false. The
+// input map is copied, not modified, because it belongs to the shared
+// catalog.
+func withModalityCapabilities(capabilities map[string]bool, modalities *Modalities) map[string]bool {
+	if modalities == nil {
+		return capabilities
+	}
+	var out map[string]bool
+	for _, modality := range modalities.Input {
+		key, ok := InputModalityCapability(modality)
+		if !ok {
+			continue
+		}
+		if _, set := capabilities[key]; set {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]bool, len(capabilities)+len(modalities.Input))
+			maps.Copy(out, capabilities)
+		}
+		out[key] = true
+	}
+	if out == nil {
+		return capabilities
+	}
+	return out
 }
 
 func buildRankings(rankings map[string]RankingEntry) map[string]core.ModelRanking {
