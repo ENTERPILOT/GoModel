@@ -223,6 +223,51 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --verify-tag
 
+  discord-notify:
+    name: Announce release on Discord
+    runs-on: ubuntu-latest
+    needs: github-release
+    # Best-effort: a Discord outage must not fail the release.
+    continue-on-error: true
+    steps:
+      - name: Post release embed to Discord
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          # Webhook secret optional: forks without it simply skip the announce.
+          if [[ -z "$DISCORD_WEBHOOK_URL" ]]; then
+            echo "DISCORD_WEBHOOK_URL not set, skipping Discord announcement"
+            exit 0
+          fi
+
+          release_json="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json tagName,name,body,url)"
+          body="$(jq -r '.body // ""' <<< "$release_json")"
+          # Discord embed descriptions cap at 4096 characters.
+          if [[ "${#body}" -gt 4000 ]]; then
+            body="${body:0:3997}..."
+          fi
+
+          jq -n \
+            --arg title "$(jq -r '.name // .tagName' <<< "$release_json")" \
+            --arg url "$(jq -r '.url' <<< "$release_json")" \
+            --arg description "$body" \
+            '{
+              embeds: [{
+                title: $title,
+                url: $url,
+                description: $description,
+                color: 5814783,
+                footer: { text: "GitHub Release" }
+              }]
+            }' > discord-payload.json
+
+          curl -fsS --connect-timeout 10 --max-time 20 \
+            -H "Content-Type: application/json" \
+            -d @discord-payload.json \
+            "$DISCORD_WEBHOOK_URL"
+
   deploy-demo:
     name: Update demo.enterpilot.io
     runs-on: ubuntu-latest
