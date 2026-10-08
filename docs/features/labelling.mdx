@@ -190,6 +190,30 @@ rejected as tagging sources.
 `do_not_pass` strips the header before forwarding on passthrough and realtime
 routes; translated routes never forward client headers anyway.
 
+## LiteLLM tags
+
+Clients written for LiteLLM keep their tags with no configuration. GoModel
+reads them as labels from:
+
+- the `x-litellm-tags` header (comma-separated);
+- a `tags` field in the body of `/v1/chat/completions`, `/v1/responses`,
+  `/v1/messages`, and `/v1/embeddings`;
+- `metadata.tags` in those bodies, when it is a list.
+
+```json
+{
+  "model": "gpt-4o",
+  "messages": [{"role": "user", "content": "Hello"}],
+  "metadata": {"tags": ["search-team", "prod"]}
+}
+```
+
+GoModel removes them before the request reaches the provider, which would
+reject them: OpenAI has no `tags` parameter, and its `metadata` values must be
+strings. Other `metadata` keys pass through, and a string `metadata.tags` is
+left alone as ordinary OpenAI metadata. Audit logs keep the body as the client
+sent it.
+
 ## Where labels show up
 
 - **Usage dashboard** — the usage page shows a by-label breakdown
@@ -206,4 +230,4 @@ routes; translated routes never forward client headers anyway.
 ## Defaults
 
 Labelling is on by default and costs nothing until you configure a tagging
-rule or create a labelled key. Requests without labels are tracked as before.
+rule, create a labelled key, or a client sends LiteLLM tags. Requests without labels are tracked as before.
