@@ -1,6 +1,10 @@
 package core
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 func TestLogText(t *testing.T) {
 	tests := map[string]string{
@@ -10,8 +14,6 @@ func TestLogText(t *testing.T) {
 		"docs\r\nlevel=ERROR msg=forged": "docslevel=ERROR msg=forged",
 	}
 	for in, want := range tests {
-		if got := LogText(in); got != want {
-			t.Errorf("LogText(%q) = %q, want %q", in, got, want)
-		}
+		assert.Equal(t, want, LogText(in), in)
 	}
 }
