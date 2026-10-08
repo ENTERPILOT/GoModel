@@ -31,6 +31,8 @@ func TestTakeBodyTags(t *testing.T) {
 		{name: "metadata holding only tags", body: `{"model":"m","metadata":{"tags":["a"]}}`, wantBody: `{"model":"m"}`, wantLabels: []string{"a"}, wantChanged: true},
 		{name: "both", body: `{"model":"m","tags":["a"],"metadata":{"tags":["b"]}}`, wantBody: `{"model":"m"}`, wantLabels: []string{"a", "b"}, wantChanged: true},
 		{name: "string metadata.tags is valid OpenAI metadata", body: `{"model":"m","metadata":{"tags":"a,b"}}`, wantBody: `{"model":"m","metadata":{"tags":"a,b"}}`},
+		{name: "repeated metadata.tags keeps the last value", body: `{"model":"m","metadata":{"tags":["old"],"tags":"keep","env":"prod"}}`, wantBody: `{"model":"m","metadata":{"tags":["old"],"tags":"keep","env":"prod"}}`},
+		{name: "repeated metadata.tags ending in a list", body: `{"model":"m","metadata":{"tags":"old","tags":["new"]}}`, wantBody: `{"model":"m"}`, wantLabels: []string{"new"}, wantChanged: true},
 		{name: "not an object", body: `[{"tags":["a"]}]`, wantBody: `[{"tags":["a"]}]`},
 		{name: "values kept byte for byte", body: `{"messages":[{"content":"<b>&</b>"}],"tags":["a"]}`, wantBody: `{"messages":[{"content":"<b>&</b>"}]}`, wantLabels: []string{"a"}, wantChanged: true},
 	}

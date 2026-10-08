@@ -80,35 +80,40 @@ func LiteLLMTags(auditLogger auditlog.LoggerInterface) echo.MiddlewareFunc {
 // returns their values. changed is false, and body is returned as is, when
 // the body carries none or is not a JSON object.
 func takeBodyTags(body []byte) (cleaned []byte, labels []string, changed bool) {
-	top := gjson.GetBytes(body, "tags")
-	meta := gjson.GetBytes(body, "metadata.tags")
-	if !top.Exists() && !meta.IsArray() {
+	// A cheap scan first: most bodies carry no tags and are never decoded.
+	if !gjson.GetBytes(body, "tags").Exists() && !gjson.GetBytes(body, "metadata.tags").Exists() {
 		return body, nil, false
 	}
+	// Values are read from the same decoded maps they are removed from, so a
+	// repeated key is judged by the value that is actually kept.
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(body, &fields); err != nil {
 		return body, nil, false
 	}
-	if top.Exists() {
-		labels = append(labels, tagValues(top)...)
+	if top, ok := fields["tags"]; ok {
+		labels = append(labels, tagValues(gjson.ParseBytes(top))...)
 		delete(fields, "tags")
+		changed = true
 	}
-	if meta.IsArray() {
-		var metadata map[string]json.RawMessage
-		if err := json.Unmarshal(fields["metadata"], &metadata); err != nil {
-			return body, nil, false
-		}
-		labels = append(labels, tagValues(meta)...)
-		delete(metadata, "tags")
-		if len(metadata) == 0 {
-			delete(fields, "metadata")
-		} else {
-			encoded, err := encodeJSON(metadata)
-			if err != nil {
-				return body, nil, false
+	var metadata map[string]json.RawMessage
+	if json.Unmarshal(fields["metadata"], &metadata) == nil {
+		if tags := gjson.ParseBytes(metadata["tags"]); tags.IsArray() {
+			labels = append(labels, tagValues(tags)...)
+			delete(metadata, "tags")
+			changed = true
+			if len(metadata) == 0 {
+				delete(fields, "metadata")
+			} else {
+				encoded, err := encodeJSON(metadata)
+				if err != nil {
+					return body, nil, false
+				}
+				fields["metadata"] = encoded
 			}
-			fields["metadata"] = encoded
 		}
+	}
+	if !changed {
+		return body, nil, false
 	}
 	cleaned, err := encodeJSON(fields)
 	if err != nil {
