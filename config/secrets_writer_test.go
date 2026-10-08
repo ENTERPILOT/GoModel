@@ -77,9 +77,44 @@ func TestStoreSecretErrors(t *testing.T) {
 	require.ErrorContains(t, err, "backend down")
 	assert.NotContains(t, err.Error(), "s3cret")
 
-	secrets.SetWriter(&fakeSecretWriter{reference: "not-a-reference"})
-	_, err = secrets.StoreSecret(t.Context(), SecretKey{Entity: "e", ID: "id", Field: "f"}, "s3cret", nil)
-	require.ErrorContains(t, err, "did not return")
+	for _, reference := range []string{
+		"not-a-reference",
+		"s3cret ${fake:a}",
+		"${fake:a} s3cret",
+		"${fake:a}${fake:b}",
+		"$${fake:a}",
+		"${fake:a",
+		"${:a}",
+	} {
+		secrets.SetWriter(&fakeSecretWriter{reference: reference})
+		_, err = secrets.StoreSecret(t.Context(), SecretKey{Entity: "e", ID: "id", Field: "f"}, "s3cret", nil)
+		require.ErrorContains(t, err, "did not return a single ${scheme:reference}", reference)
+		assert.NotContains(t, err.Error(), "s3cret")
+	}
+}
+
+// The writer stores what the field would resolve to without one, so an
+// escaped ${ reaches it unescaped.
+func TestStoreSecretWritesTheResolvedLiteral(t *testing.T) {
+	tests := map[string]string{
+		"sk-$${abc}":             "sk-${abc}",
+		"$$${x}":                 "$${x}",
+		"${x$${":                 "${x$${",
+		"plain":                  "plain",
+		"pre $${a} $${b:c} post": "pre ${a} ${b:c} post",
+	}
+	for value, want := range tests {
+		writer := &fakeSecretWriter{}
+		secrets := NewSecrets()
+		secrets.SetWriter(writer)
+		stored, err := secrets.StoreSecret(t.Context(), SecretKey{Entity: "e", ID: "id", Field: "f"}, value, nil)
+		require.NoError(t, err, value)
+		assert.Equal(t, want, writer.written[stored], value)
+
+		withoutWriter, err := NewSecrets().Resolve(t.Context(), value)
+		require.NoError(t, err)
+		assert.Equal(t, withoutWriter, writer.written[stored], "a writer must not change what %q resolves to", value)
+	}
 }
 
 func TestStoreSecretRejectsOwnedReferencesTheEntityDoesNotHold(t *testing.T) {

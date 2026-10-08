@@ -72,9 +72,12 @@ var ErrSecretNotHeld = errors.New("refers to a stored secret this entity no long
 
 // StoreSecret returns what to persist for a secret field saved through the
 // admin API. With a writer registered, a non-empty literal value is written
-// through it and the reference it returns is persisted instead. A value that
-// is empty or already holds a reference is returned unchanged, and so is
-// every value when no writer is registered.
+// through it and the reference it returns is persisted instead. The writer
+// receives the value the field would resolve to without one: each $${ escape
+// is already turned into ${, since a resolved value is never scanned again. A
+// value that is empty or already holds a reference is returned unchanged, and
+// so is every value when no writer is registered. The writer must return
+// exactly one ${scheme:reference} and nothing else.
 //
 // held lists the values of the entity as currently stored. A reference the
 // writer owns, alone or inside a longer value, that no value of held contains
@@ -94,14 +97,19 @@ func (s *Secrets) StoreSecret(ctx context.Context, key SecretKey, value string, 
 		}
 		return value, nil
 	}
-	reference, err := w.WriteSecret(ctx, key, value)
+	// No references, so this only applies the $${ escapes, as Resolve would.
+	literal, _, err := s.resolveValue(ctx, "", value)
+	if err != nil {
+		return "", err
+	}
+	reference, err := w.WriteSecret(ctx, key, literal)
 	if err != nil {
 		return "", fmt.Errorf("%s.%s: write secret: %w", key.Entity, key.Field, err)
 	}
-	if !HasSecretReference(reference) {
+	if _, ok := singleSecretReference(reference); !ok {
 		// Persisting it would store whatever the writer returned in place of
-		// the secret, possibly the secret itself.
-		return "", fmt.Errorf("%s.%s: secret writer did not return a ${scheme:reference}", key.Entity, key.Field)
+		// the secret, possibly the secret itself or text around a reference.
+		return "", fmt.Errorf("%s.%s: secret writer did not return a single ${scheme:reference}", key.Entity, key.Field)
 	}
 	return reference, nil
 }
@@ -133,12 +141,25 @@ func (s *Secrets) ReleaseSecrets(ctx context.Context, previous, current []string
 // referenceScheme returns the scheme of value, a single ${scheme:reference},
 // or "" when it is not one.
 func referenceScheme(value string) string {
+	scheme, _ := singleSecretReference(value)
+	return scheme
+}
+
+// singleSecretReference reports whether value is exactly one
+// ${scheme:reference}, with no text around it, and returns its scheme.
+func singleSecretReference(value string) (string, bool) {
 	inner, ok := strings.CutPrefix(value, "${")
 	if !ok {
-		return ""
+		return "", false
 	}
-	scheme, _, _ := parseSecretReference(strings.TrimSuffix(inner, "}"))
-	return scheme
+	inner, ok = strings.CutSuffix(inner, "}")
+	if !ok {
+		return "", false
+	}
+	// parseSecretReference rejects braces in the reference, so a value
+	// holding two references does not parse as one.
+	scheme, _, ok := parseSecretReference(inner)
+	return scheme, ok
 }
 
 // secretReferenceSet returns every secret reference the values contain.
