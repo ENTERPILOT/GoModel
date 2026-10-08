@@ -151,6 +151,54 @@ func TestServiceRotateSecretsRebuildsOnlyTheAffectedInstance(t *testing.T) {
 	assert.Equal(t, "a2", instanceAPIKey(t, service, "first"), "a failed lookup keeps the instance")
 }
 
+func TestServiceRotateSecretsAppliesHealthyRotationsWhenOneFails(t *testing.T) {
+	vault := &guardrailVault{values: map[string]string{"a": "a1", "b": "b1"}}
+	store := newTestStore(secretDefinition("first", "${vault:a}"), secretDefinition("second", "${vault:b}"))
+	service, secrets := newSecretsService(t, store, vault)
+	ctx := t.Context()
+
+	vault.set("a", "a2")
+	delete(vault.values, "b")
+	err := service.RotateSecrets(ctx, []string{
+		"guardrail_definitions.first.config.api_key",
+		"guardrail_definitions.second.config.api_key",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"second"`)
+	assert.NotContains(t, err.Error(), `"first"`)
+	assert.Equal(t, "a2", instanceAPIKey(t, service, "first"), "a healthy rotation applies")
+	assert.Equal(t, "b1", instanceAPIKey(t, service, "second"), "the failed guardrail keeps its values")
+
+	// The failed guardrail's change stays pending; the applied one is done.
+	vault.set("b", "b2")
+	recheck, err := secrets.Recheck(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"guardrail_definitions.second.config.api_key"}, recheck.Fields())
+	require.NoError(t, service.RotateSecrets(ctx, recheck.Fields()))
+	assert.Equal(t, "b2", instanceAPIKey(t, service, "second"))
+}
+
+func TestServiceRotateSecretsMatchesDottedNamesExactly(t *testing.T) {
+	vault := &guardrailVault{values: map[string]string{"pii": "p1", "team": "t1"}}
+	store := newTestStore(secretDefinition("pii", "${vault:pii}"), secretDefinition("pii.team", "${vault:team}"))
+	service, secrets := newSecretsService(t, store, vault)
+	ctx := t.Context()
+	service.mu.RLock()
+	piiBefore := service.snapshot.instances["pii"]
+	service.mu.RUnlock()
+
+	vault.set("team", "t2")
+	recheck, err := secrets.Recheck(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []string{"guardrail_definitions.pii.team.config.api_key"}, recheck.Fields())
+	require.NoError(t, service.RotateSecrets(ctx, recheck.Fields()))
+
+	assert.Equal(t, "t2", instanceAPIKey(t, service, "pii.team"))
+	service.mu.RLock()
+	assert.Same(t, piiBefore, service.snapshot.instances["pii"], "pii does not own the fields of pii.team")
+	service.mu.RUnlock()
+}
+
 func TestServiceSecretWriter(t *testing.T) {
 	vault := &guardrailVault{values: map[string]string{}}
 	store := newTestStore()

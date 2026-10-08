@@ -417,8 +417,8 @@ type guardrailSecrets struct {
 }
 
 func (g guardrailSecrets) RotateSecrets(ctx context.Context, fields []string) error {
-	if err := g.guardrails.RotateSecrets(ctx, fields); err != nil {
-		return err
-	}
-	return g.workflows.Refresh(ctx)
+	// A guardrail that failed keeps its instance while the others were
+	// rebuilt, so the workflows are recompiled either way.
+	err := g.guardrails.RotateSecrets(ctx, fields)
+	return errors.Join(err, g.workflows.Refresh(ctx))
 }

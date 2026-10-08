@@ -121,3 +121,25 @@ func TestOnlySecretReferences(t *testing.T) {
 		assert.Equal(t, want, OnlySecretReferences(value), value)
 	}
 }
+
+func TestEntityOwnsAnyMatchesExactFields(t *testing.T) {
+	secrets := NewSecrets()
+	require.NoError(t, secrets.Register("vault", newFakeVault(map[string]string{"a": "1", "b": "2"})))
+	for entity, field := range map[string]string{
+		"guardrail_definitions.pii":      "guardrail_definitions.pii.config.api_key",
+		"guardrail_definitions.pii.team": "guardrail_definitions.pii.team.config.api_key",
+	} {
+		resolved, err := secrets.ResolveEntity(t.Context(), entity, map[string]string{field: "${vault:a}"})
+		require.NoError(t, err)
+		resolved.Record()
+	}
+
+	team := []string{"guardrail_definitions.pii.team.config.api_key"}
+	assert.True(t, secrets.EntityOwnsAny("guardrail_definitions.pii.team", team))
+	assert.False(t, secrets.EntityOwnsAny("guardrail_definitions.pii", team))
+	assert.False(t, secrets.EntityOwnsAny("guardrail_definitions.pii", nil))
+	assert.False(t, (*Secrets)(nil).EntityOwnsAny("guardrail_definitions.pii", team))
+
+	secrets.ForgetEntity("guardrail_definitions.pii.team")
+	assert.False(t, secrets.EntityOwnsAny("guardrail_definitions.pii.team", team))
+}

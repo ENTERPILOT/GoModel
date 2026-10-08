@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
-	"strings"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -135,8 +134,10 @@ func (s *Service) releaseSecrets(ctx context.Context, name string, previous, cur
 
 // RotateSecrets rebuilds the guardrail instances owning fields, as reported
 // by a secret recheck, with their references resolved again (ADR-0014 §5).
-// Every other instance is kept. When a reference cannot be re-resolved, or an
-// instance no longer builds, every instance keeps running as it is.
+// Every other instance is kept. A guardrail whose references cannot be
+// re-resolved, or whose instance no longer builds, keeps running as it is and
+// its change stays pending; the others are still rebuilt, and the returned
+// error names each one that failed.
 //
 // Compiled workflows pick the new instances up on their next refresh; the
 // replaced ones stay open until then.
@@ -145,18 +146,18 @@ func (s *Service) RotateSecrets(ctx context.Context, fields []string) error {
 	defer s.refreshMu.Unlock()
 
 	rotated := func(name string) bool {
-		prefix := definitionSecretEntity(name) + "."
-		return slices.ContainsFunc(fields, func(field string) bool { return strings.HasPrefix(field, prefix) })
+		return s.secrets.EntityOwnsAny(definitionSecretEntity(name), fields)
 	}
 	definitions, err := s.store.List(ctx)
 	if err != nil {
 		return guardrailServiceError("list guardrails", err)
 	}
-	next, err := s.buildSnapshot(ctx, definitions, rotated)
+	var failed []error
+	next, err := s.buildSnapshot(ctx, definitions, rotated, &failed)
 	if err != nil {
 		return guardrailServiceError("rebuild guardrails for rotated secrets", err)
 	}
 	s.swap(ctx, next)
 	s.probeHealth(ctx, next)
-	return nil
+	return errors.Join(failed...)
 }

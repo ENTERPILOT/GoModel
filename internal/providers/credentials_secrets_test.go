@@ -219,6 +219,32 @@ func TestCredentialsService_RotateSecretsSwapsKeysOrRebuilds(t *testing.T) {
 	assert.Equal(t, untouchedBuilds+1, built.count())
 }
 
+func TestCredentialsService_RotateSecretsMatchesDottedNamesExactly(t *testing.T) {
+	vault := &secretVault{values: map[string]string{"us": "sk-us", "eu": "sk-eu1"}}
+	store := newFakeCredentialStore()
+	svc, secrets, _ := newSecretsTestService(t, store, vault)
+	ctx := t.Context()
+	require.NoError(t, svc.Upsert(ctx, ManagedProviderCredential{Name: "openai", Type: "test", APIKeys: []string{"${vault:us}"}, Enabled: true}))
+	require.NoError(t, svc.Upsert(ctx, ManagedProviderCredential{Name: "openai.eu", Type: "test", APIKeys: []string{"${vault:eu}"}, Enabled: true}))
+
+	vault.set("eu", "sk-eu2")
+	recheck, err := secrets.Recheck(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []string{"provider_credentials.openai.eu.api_keys[0]"}, recheck.Fields())
+	vault.mu.Lock()
+	vault.fields = nil
+	vault.mu.Unlock()
+	require.NoError(t, svc.RotateSecrets(ctx, recheck.Fields()))
+
+	vault.mu.Lock()
+	assert.Equal(t, []string{"provider_credentials.openai.eu.api_keys[0]"}, vault.fields, "openai does not own the fields of openai.eu")
+	vault.mu.Unlock()
+	svc.mu.RLock()
+	assert.Equal(t, "sk-eu2", svc.keyrings["openai.eu"].Primary())
+	assert.Equal(t, "sk-us", svc.keyrings["openai"].Primary())
+	svc.mu.RUnlock()
+}
+
 func TestCredentialsService_SecretWriter(t *testing.T) {
 	vault := &secretVault{values: map[string]string{"hand": "sk-hand"}}
 	store := newFakeCredentialStore()

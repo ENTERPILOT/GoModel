@@ -94,6 +94,21 @@ func (s *Secrets) ForgetEntity(entity string) {
 	s.rotation.forgetLocked(entity)
 }
 
+// EntityOwnsAny reports whether entity recorded any of fields for rotation
+// (see Record). It matches exact field paths, so the entity "pii" never owns
+// a field of "pii.team" although its paths share the prefix
+// "guardrail_definitions.pii.".
+func (s *Secrets) EntityOwnsAny(entity string, fields []string) bool {
+	if s == nil || len(fields) == 0 {
+		return false
+	}
+	s.rotation.mu.Lock()
+	defer s.rotation.mu.Unlock()
+	return slices.ContainsFunc(s.rotation.owned[entity], func(owned string) bool {
+		return slices.Contains(fields, owned)
+	})
+}
+
 func (rot *rotation) forgetLocked(entity string) {
 	for _, field := range rot.owned[entity] {
 		delete(rot.uses, field)

@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
-	"strings"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -98,7 +97,6 @@ func headerValues(server *ManagedServer) []string {
 // server whose references cannot be re-resolved keeps its current headers.
 func (s *Service) RotateSecrets(ctx context.Context, fields []string) error {
 	return s.reload(ctx, func(name string) bool {
-		prefix := serverSecretEntity(name) + "."
-		return slices.ContainsFunc(fields, func(field string) bool { return strings.HasPrefix(field, prefix) })
+		return s.secrets.EntityOwnsAny(serverSecretEntity(name), fields)
 	})
 }

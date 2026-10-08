@@ -160,7 +160,7 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 	if err != nil {
 		return guardrailServiceError("list guardrails", err)
 	}
-	next, err := s.buildSnapshot(ctx, definitions, nil)
+	next, err := s.buildSnapshot(ctx, definitions, nil, nil)
 	if err != nil {
 		return guardrailServiceError("load guardrails", err)
 	}
@@ -392,7 +392,7 @@ func (s *Service) commit(ctx context.Context, mutate func(map[string]Definition)
 	if err := mutate(nextDefinitions); err != nil {
 		return err
 	}
-	next, err := s.buildSnapshot(ctx, definitionsFromMap(nextDefinitions), nil)
+	next, err := s.buildSnapshot(ctx, definitionsFromMap(nextDefinitions), nil, nil)
 	if err != nil {
 		return err
 	}
@@ -620,7 +620,7 @@ func normalize(normalizer Normalizer, config json.RawMessage) (normalized json.R
 // instance whose definition is unchanged (see instanceKey) and that rebuild
 // does not name. Secret references are resolved for each instance built. On
 // error the instances built so far are closed.
-func (s *Service) buildSnapshot(ctx context.Context, definitions []Definition, rebuild func(name string) bool) (next serviceSnapshot, err error) {
+func (s *Service) buildSnapshot(ctx context.Context, definitions []Definition, rebuild func(name string) bool, failed *[]error) (next serviceSnapshot, err error) {
 	s.mu.RLock()
 	current := s.snapshot
 	s.mu.RUnlock()
@@ -649,16 +649,21 @@ func (s *Service) buildSnapshot(ctx context.Context, definitions []Definition, r
 		inst := current.instances[normalized.Name]
 		resolved := current.resolved[normalized.Name]
 		if inst == nil || current.keys[normalized.Name] != key || (rebuild != nil && rebuild(normalized.Name)) {
-			spec, secrets, err := s.resolveDefinition(ctx, entry.Manifest.ConfigSchema, normalized)
+			rebuilt, spec, secrets, err := s.buildInstance(ctx, entry, normalized)
 			if err != nil {
-				return serviceSnapshot{}, newValidationError(fmt.Sprintf("load guardrail %q: %v", normalized.Name, err), err)
+				if failed == nil {
+					return serviceSnapshot{}, err
+				}
+				// Keep what serves now, if anything, and its recorded
+				// secrets, so the change stays pending for this guardrail.
+				*failed = append(*failed, err)
+				if inst != nil {
+					next.keepCurrent(current, normalized.Name)
+				}
+				continue
 			}
-			host := plugins.NewHost(s.deps, plugins.HostInfo{PluginName: entry.Name, InstanceName: normalized.Name, UserPath: normalized.UserPath})
-			inst, err = plugins.NewInstance(ctx, entry, spec, host)
-			if err != nil {
-				return serviceSnapshot{}, newValidationError(fmt.Sprintf("load guardrail %q: %v", normalized.Name, err), err)
-			}
-			built = append(built, inst)
+			built = append(built, rebuilt)
+			inst = rebuilt
 			resolved = spec.Config
 			next.pending = append(next.pending, secrets)
 		}
@@ -671,6 +676,32 @@ func (s *Service) buildSnapshot(ctx context.Context, definitions []Definition, r
 	}
 	sort.Strings(next.order)
 	return next, nil
+}
+
+// buildInstance resolves one definition's secret references and builds its
+// instance.
+func (s *Service) buildInstance(ctx context.Context, entry plugins.Entry, def Definition) (*plugins.Instance, plugins.InstanceSpec, *config.ResolvedEntity, error) {
+	spec, secrets, err := s.resolveDefinition(ctx, entry.Manifest.ConfigSchema, def)
+	if err != nil {
+		return nil, plugins.InstanceSpec{}, nil, newValidationError(fmt.Sprintf("load guardrail %q: %v", def.Name, err), err)
+	}
+	host := plugins.NewHost(s.deps, plugins.HostInfo{PluginName: entry.Name, InstanceName: def.Name, UserPath: def.UserPath})
+	inst, err := plugins.NewInstance(ctx, entry, spec, host)
+	if err != nil {
+		return nil, plugins.InstanceSpec{}, nil, newValidationError(fmt.Sprintf("load guardrail %q: %v", def.Name, err), err)
+	}
+	return inst, spec, secrets, nil
+}
+
+// keepCurrent copies the entry name serves under in current into next
+// unchanged.
+func (next *serviceSnapshot) keepCurrent(current serviceSnapshot, name string) {
+	next.resolved[name] = current.resolved[name]
+	next.definitions[name] = current.definitions[name]
+	next.instances[name] = current.instances[name]
+	next.keys[name] = current.keys[name]
+	next.summaries[name] = current.summaries[name]
+	next.order = append(next.order, name)
 }
 
 // instanceKey captures everything an instance is built from; a definition

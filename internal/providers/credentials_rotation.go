@@ -8,7 +8,6 @@ import (
 	"maps"
 	"reflect"
 	"slices"
-	"strings"
 )
 
 // RotateSecrets re-resolves the dashboard-managed credentials whose secret
@@ -55,8 +54,9 @@ func (s *CredentialsService) rotatedCredentials(fields []string) []string {
 	defer s.mu.RUnlock()
 	var names []string
 	for _, name := range slices.Sorted(maps.Keys(s.configs)) {
-		prefix := credentialSecretEntity(name) + "."
-		if slices.ContainsFunc(fields, func(field string) bool { return strings.HasPrefix(field, prefix) }) {
+		// Exact fields, not a prefix: names may contain dots, and
+		// "provider_credentials.openai." prefixes the fields of "openai.eu".
+		if s.secrets.EntityOwnsAny(credentialSecretEntity(name), fields) {
 			names = append(names, name)
 		}
 	}
