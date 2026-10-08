@@ -23,6 +23,10 @@ const CredentialSecretEntity = "provider_credentials"
 type credentialReferenceField struct {
 	name  string // within the entity: "api_keys[0]", "proxy_url"
 	value *string
+	// unused marks an API key that holds a legacy ${VAR} placeholder. Such a
+	// key is dropped before resolution, as providers.Init drops it from
+	// config.yaml, so it is neither resolved nor written to a SecretWriter.
+	unused bool
 }
 
 // credentialReferenceFields returns the secret fields of cred, pointing into it.
@@ -30,7 +34,11 @@ type credentialReferenceField struct {
 func credentialReferenceFields(cred *ManagedProviderCredential) []credentialReferenceField {
 	fields := make([]credentialReferenceField, 0, len(cred.APIKeys)+3)
 	for i := range cred.APIKeys {
-		fields = append(fields, credentialReferenceField{name: CredentialFieldAPIKeys + "[" + strconv.Itoa(i) + "]", value: &cred.APIKeys[i]})
+		fields = append(fields, credentialReferenceField{
+			name:   CredentialFieldAPIKeys + "[" + strconv.Itoa(i) + "]",
+			value:  &cred.APIKeys[i],
+			unused: config.HasUnresolvedPlaceholder(cred.APIKeys[i]),
+		})
 	}
 	return append(fields,
 		credentialReferenceField{name: CredentialFieldServiceAccountJSON, value: &cred.ServiceAccountJSON},
@@ -74,7 +82,7 @@ func (s *CredentialsService) resolveCredential(ctx context.Context, cred Managed
 	fields := credentialReferenceFields(&resolved)
 	values := make(map[string]string, len(fields))
 	for _, field := range fields {
-		if *field.value != "" {
+		if *field.value != "" && !field.unused {
 			values[entity+"."+field.name] = *field.value
 		}
 	}
@@ -83,7 +91,7 @@ func (s *CredentialsService) resolveCredential(ctx context.Context, cred Managed
 		return ManagedProviderCredential{}, nil, credentialSecretError(entity, err)
 	}
 	for _, field := range fields {
-		if *field.value != "" {
+		if *field.value != "" && !field.unused {
 			*field.value = result.Value(entity + "." + field.name)
 		}
 	}
@@ -115,6 +123,9 @@ func (s *CredentialsService) storeCredentialSecrets(ctx context.Context, cred *M
 	cred.APIKeys = slices.Clone(cred.APIKeys)
 	var written []string
 	for _, field := range credentialReferenceFields(cred) {
+		if field.unused {
+			continue
+		}
 		key := config.SecretKey{Entity: CredentialSecretEntity, ID: cred.Name, Field: field.name}
 		stored, err := s.secrets.StoreSecret(ctx, key, *field.value, keep)
 		if err != nil {

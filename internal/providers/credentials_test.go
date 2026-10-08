@@ -111,12 +111,13 @@ func TestCredentialsService_BuildProviderPreservesManagedHookIdentity(t *testing
 	service, err := NewCredentialsService(t.Context(), factory, NewModelRegistry(), newFakeCredentialStore(), nil, config.ResilienceConfig{}, nil)
 	require.NoError(t, err)
 
-	_, err = service.buildProvider(ManagedProviderCredential{
+	row := ManagedProviderCredential{
 		Name:    "managed-eu",
 		Type:    "test",
 		APIKeys: []string{"sk-test"},
 		Enabled: true,
-	})
+	}
+	_, err = service.buildProvider(row, row)
 	require.NoError(t, err)
 
 	providerHooks.OnRequestStart(t.Context(), llmclient.RequestInfo{})

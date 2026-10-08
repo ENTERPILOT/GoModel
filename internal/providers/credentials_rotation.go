@@ -77,7 +77,7 @@ func (s *CredentialsService) rotateCredential(ctx context.Context, name string) 
 	if err != nil {
 		return false, err
 	}
-	next, err := s.providerConfig(resolved)
+	next, err := s.providerConfig(*row, resolved)
 	if err != nil {
 		return false, err
 	}
@@ -95,7 +95,7 @@ func (s *CredentialsService) rotateCredential(ctx context.Context, name string) 
 	}
 	s.mu.Unlock()
 
-	built, err := s.buildProvider(resolved)
+	built, err := s.buildProvider(*row, resolved)
 	if err != nil {
 		return false, err
 	}

@@ -159,6 +159,52 @@ func TestCredentialsService_UnresolvableReferenceIsAFieldError(t *testing.T) {
 	}
 }
 
+// Keys are filtered as providers.Init filters config.yaml: a legacy ${VAR}
+// placeholder is dropped before resolution, while a resolved value is data
+// and keeps any "${" it contains.
+func TestCredentialsService_KeepsResolvedKeysContainingPlaceholderText(t *testing.T) {
+	vault := &secretVault{values: map[string]string{"odd": "sk-${literal}", "plain": "sk-plain", "mixed": "never"}}
+	store := newFakeCredentialStore()
+	svc, secrets, built := newSecretsTestService(t, store, vault)
+	ctx := t.Context()
+
+	require.NoError(t, svc.Upsert(ctx, ManagedProviderCredential{
+		Name:    "p",
+		Type:    "test",
+		APIKeys: []string{"${vault:odd}", "${UNSET_LEGACY}", "${UNSET_LEGACY}-${vault:mixed}", "sk-$${escaped}", "${vault:plain}", "${vault:plain}"},
+		Enabled: true,
+	}))
+	cfg, keys := built.last()
+	assert.Equal(t, []string{"sk-${literal}", "sk-${escaped}", "sk-plain"}, cfg.APIKeys)
+	assert.Equal(t, "sk-${literal}", keys.Primary())
+	vault.mu.Lock()
+	assert.NotContains(t, vault.fields, "provider_credentials.p.api_keys[2]", "a key with a legacy placeholder is not resolved")
+	vault.mu.Unlock()
+
+	// Rotation filters the same way.
+	vault.set("odd", "sk-${rotated}")
+	recheck, err := secrets.Recheck(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []string{"provider_credentials.p.api_keys[0]"}, recheck.Fields())
+	require.NoError(t, svc.RotateSecrets(ctx, recheck.Fields()))
+	svc.mu.RLock()
+	assert.Equal(t, "sk-${rotated}", svc.keyrings["p"].Primary())
+	svc.mu.RUnlock()
+
+	// A row whose only key is a legacy placeholder still has no credentials.
+	err = svc.Upsert(ctx, ManagedProviderCredential{Name: "q", Type: "test", APIKeys: []string{"${UNSET_LEGACY}"}, Enabled: true})
+	require.ErrorContains(t, err, "credentials did not resolve")
+
+	// A writer is not handed a key that is dropped anyway.
+	writer := &secretWriterFake{vault: vault}
+	secrets.SetWriter(writer)
+	require.NoError(t, svc.Upsert(ctx, ManagedProviderCredential{Name: "w", Type: "test", APIKeys: []string{"sk-typed", "sk-${UNSET_LEGACY}"}, Enabled: true}))
+	assert.Equal(t, []config.SecretKey{{Entity: CredentialSecretEntity, ID: "w", Field: "api_keys[0]"}}, writer.keys)
+	assert.Equal(t, []string{"${vault:written/w/api_keys[0]}", "sk-${UNSET_LEGACY}"}, store.rows["w"].APIKeys)
+	cfg, _ = built.last()
+	assert.Equal(t, []string{"sk-typed"}, cfg.APIKeys)
+}
+
 func TestCredentialsService_ReloadSkipsRowsWhoseReferencesFail(t *testing.T) {
 	vault := &secretVault{values: map[string]string{"good": "sk-good"}}
 	store := newFakeCredentialStore()

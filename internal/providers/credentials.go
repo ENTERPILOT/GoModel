@@ -65,8 +65,7 @@ type ManagedProviderCredential struct {
 
 // toRawProviderConfig converts the admin row into the same shape config.yaml
 // providers resolve from, so it can run through the existing credential
-// resolution pipeline (normalizeProviderAPIKeys, filterEmptyProviders,
-// buildProviderConfig) unmodified.
+// pipeline (filterProviders, buildProviderConfig) unmodified.
 func (m ManagedProviderCredential) toRawProviderConfig() config.RawProviderConfig {
 	raw := config.RawProviderConfig{
 		Type:                     m.Type,
@@ -391,7 +390,7 @@ func (s *CredentialsService) buildCredential(ctx context.Context, cred ManagedPr
 	if !cred.Enabled {
 		return builtCredential{}, nil
 	}
-	built, err := s.buildProvider(resolved)
+	built, err := s.buildProvider(cred, resolved)
 	if err != nil {
 		return builtCredential{}, unappliableCredentialError(cred, schema, err)
 	}
@@ -410,7 +409,7 @@ func (s *CredentialsService) register(ctx context.Context, row ManagedProviderCr
 	if err != nil {
 		return err
 	}
-	built, err := s.buildProvider(resolved)
+	built, err := s.buildProvider(row, resolved)
 	if err != nil {
 		return err
 	}
@@ -419,14 +418,15 @@ func (s *CredentialsService) register(ctx context.Context, row ManagedProviderCr
 	return nil
 }
 
-// buildProvider runs one resolved credential row through the same pipeline
-// declarative providers use (env-placeholder rejection, API key
-// de-duplication, resilience merge) and constructs the adapter, without
-// touching the registry. Callers that already have something live registered
-// under this name must build+validate first and only call install on
-// success, so a bad edit never displaces a working provider.
-func (s *CredentialsService) buildProvider(row ManagedProviderCredential) (builtCredential, error) {
-	cfg, err := s.providerConfig(row)
+// buildProvider runs one credential row, as stored and with its references
+// resolved, through the same pipeline declarative providers use
+// (env-placeholder rejection, API key de-duplication, resilience merge) and
+// constructs the adapter, without touching the registry. Callers that already
+// have something live registered under this name must build+validate first
+// and only call install on success, so a bad edit never displaces a working
+// provider.
+func (s *CredentialsService) buildProvider(stored, resolved ManagedProviderCredential) (builtCredential, error) {
+	cfg, err := s.providerConfig(stored, resolved)
 	if err != nil {
 		return builtCredential{}, err
 	}
@@ -438,19 +438,60 @@ func (s *CredentialsService) buildProvider(row ManagedProviderCredential) (built
 	return builtCredential{provider: provider, cfg: cfg, keys: keys}, nil
 }
 
-// providerConfig resolves one row, secret references already resolved, into
-// the effective configuration of its provider.
-func (s *CredentialsService) providerConfig(row ManagedProviderCredential) (ProviderConfig, error) {
-	name := strings.TrimSpace(row.Name)
-	raw := map[string]config.RawProviderConfig{name: row.toRawProviderConfig()}
-	resolved := filterEmptyProviders(normalizeProviderAPIKeys(raw), s.factory.discoveryConfigsSnapshot())
-	rawCfg, ok := resolved[name]
+// providerConfig turns one row into the effective configuration of its
+// provider, filtering credentials the way providers.Init does for config.yaml:
+// the stored values are checked before resolution, where a legacy ${VAR}
+// placeholder does not count as set and an API key holding one is dropped,
+// and the resolved values only have to be non-empty, because a resolved
+// secret is data and may contain "${". resolved is stored with its references
+// resolved by resolveCredential, key for key.
+func (s *CredentialsService) providerConfig(stored, resolved ManagedProviderCredential) (ProviderConfig, error) {
+	name := strings.TrimSpace(resolved.Name)
+	discovery := s.factory.discoveryConfigsSnapshot()
+	var storedKeys, resolvedKeys []string
+	for i, key := range stored.APIKeys {
+		if providerValueSet(key) && i < len(resolved.APIKeys) {
+			storedKeys = append(storedKeys, key)
+			resolvedKeys = append(resolvedKeys, resolved.APIKeys[i])
+		}
+	}
+
+	before := stored.toRawProviderConfig()
+	before.APIKey, before.APIKeys = firstAndAll(storedKeys)
+	if _, ok := filterProviders(map[string]config.RawProviderConfig{name: before}, discovery, providerValueSet)[name]; !ok {
+		return ProviderConfig{}, errCredentialsDidNotResolve
+	}
+	after := resolved.toRawProviderConfig()
+	after.APIKey, after.APIKeys = firstAndAll(dedupeResolvedKeys(resolvedKeys))
+	rawCfg, ok := filterProviders(map[string]config.RawProviderConfig{name: after}, discovery, resolvedValueSet)[name]
 	if !ok {
-		return ProviderConfig{}, fmt.Errorf("credentials did not resolve (missing API key or required fields)")
+		return ProviderConfig{}, errCredentialsDidNotResolve
 	}
 	cfg := buildProviderConfig(rawCfg, s.resilience)
 	cfg.Name = name
 	return cfg, nil
+}
+
+var errCredentialsDidNotResolve = errors.New("credentials did not resolve (missing API key or required fields)")
+
+// dedupeResolvedKeys trims resolved API keys, drops empty ones, and collapses
+// repeats into the first occurrence. A "${" in a resolved key is kept.
+func dedupeResolvedKeys(keys []string) []string {
+	sourced := make([]sourcedKey, len(keys))
+	for i, key := range keys {
+		sourced[i] = sourcedKey{Value: key}
+	}
+	_, values := keyValues(dedupeKeys(sourced, resolvedValueSet))
+	return values
+}
+
+// firstAndAll returns keys as RawProviderConfig holds them: the first in
+// APIKey, every one in APIKeys.
+func firstAndAll(keys []string) (string, []string) {
+	if len(keys) == 0 {
+		return "", nil
+	}
+	return keys[0], keys
 }
 
 // install unregisters whatever is currently registered under name (a no-op
