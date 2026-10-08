@@ -276,7 +276,7 @@ func TestLoadResultResolveSecretsErrorsNameTheField(t *testing.T) {
 			secretErr, ok := errors.AsType[*SecretError](err)
 			require.True(t, ok, "error %v is not a *SecretError", err)
 			assert.Equal(t, tt.wantField, secretErr.Field)
-			assert.Contains(t, err.Error(), tt.wantField+": secret reference ${")
+			assert.Contains(t, err.Error(), tt.wantField+": secret reference")
 			assert.Contains(t, err.Error(), tt.wantText)
 		})
 	}

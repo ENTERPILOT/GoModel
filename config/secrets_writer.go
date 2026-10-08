@@ -89,7 +89,7 @@ func (s *Secrets) StoreSecret(ctx context.Context, key SecretKey, value string, 
 		heldReferences := secretReferenceSet(held)
 		for _, reference := range references {
 			if _, ok := heldReferences[reference]; !ok && w.OwnsReference(reference) {
-				return "", &SecretError{Field: key.Entity + "." + key.ID + "." + key.Field, Scheme: referenceScheme(reference), Err: ErrSecretNotHeld}
+				return "", &SecretError{Field: key.Entity + "." + key.ID + "." + key.Field, Scheme: s.schemeName(referenceScheme(reference)), Err: ErrSecretNotHeld}
 			}
 		}
 		return value, nil

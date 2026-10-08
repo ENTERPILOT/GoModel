@@ -32,13 +32,20 @@ var ErrUnknownSecretScheme = errors.New("unknown secret scheme")
 type SecretError struct {
 	// Field is the configuration path or environment variable holding the
 	// reference, for example "providers.openai.api_key". It may be empty.
-	Field  string
+	Field string
+	// Scheme is the reference's scheme when GoModel knows it: a built-in
+	// scheme, one an extension registered, or one it has a hint for. It is
+	// empty for any other scheme, whose name is text taken from the value,
+	// which may be a literal secret that only looks like a reference.
 	Scheme string
 	Err    error
 }
 
 func (e *SecretError) Error() string {
-	msg := fmt.Sprintf("secret reference ${%s:...}: %v", e.Scheme, e.Err)
+	msg := fmt.Sprintf("secret reference: %v", e.Err)
+	if e.Scheme != "" {
+		msg = fmt.Sprintf("secret reference ${%s:...}: %v", e.Scheme, e.Err)
+	}
 	if e.Field == "" {
 		return msg
 	}
@@ -169,7 +176,7 @@ func (s *Secrets) resolveValue(ctx context.Context, field, value string) (string
 		}
 		resolved, err := s.resolveReference(ctx, scheme, reference)
 		if err != nil {
-			return "", false, &SecretError{Field: field, Scheme: scheme, Err: err}
+			return "", false, &SecretError{Field: field, Scheme: s.schemeName(scheme), Err: err}
 		}
 		referenced = true
 		b.WriteString(resolved)
@@ -185,12 +192,43 @@ func (s *Secrets) resolveReference(ctx context.Context, scheme, reference string
 		s.mu.RUnlock()
 	}
 	if !ok {
-		if hint, found := schemeHints[scheme]; found {
-			return "", fmt.Errorf("%w %q: %s", ErrUnknownSecretScheme, scheme, hint)
+		// The hint's own key is quoted rather than scheme: see schemeName.
+		for name, hint := range schemeHints {
+			if name == scheme {
+				return "", fmt.Errorf("%w %q: %s", ErrUnknownSecretScheme, name, hint)
+			}
 		}
-		return "", fmt.Errorf("%w %q: the built-in schemes are env and file; other schemes are registered by extensions", ErrUnknownSecretScheme, scheme)
+		return "", fmt.Errorf("%w: the built-in schemes are env and file; other schemes are registered by extensions", ErrUnknownSecretScheme)
 	}
 	return r.ResolveSecret(ctx, reference)
+}
+
+// schemeName returns scheme as GoModel names it: a built-in scheme, one
+// registered with s, or one schemeHints describes. Any other scheme returns
+// "": its name is text cut from a configured value, which may be a literal
+// secret that only looks like a reference, so errors never repeat it.
+func (s *Secrets) schemeName(scheme string) string {
+	for name := range builtinSecretResolvers {
+		if name == scheme {
+			return name
+		}
+	}
+	for name := range schemeHints {
+		if name == scheme {
+			return name
+		}
+	}
+	if s == nil {
+		return ""
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for name := range s.resolvers {
+		if name == scheme {
+			return name
+		}
+	}
+	return ""
 }
 
 type secretFieldKey struct{}

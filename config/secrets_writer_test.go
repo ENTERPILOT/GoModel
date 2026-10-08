@@ -85,6 +85,8 @@ func TestStoreSecretErrors(t *testing.T) {
 func TestStoreSecretRejectsOwnedReferencesTheEntityDoesNotHold(t *testing.T) {
 	writer := &fakeSecretWriter{}
 	secrets := NewSecrets()
+	// A writer's scheme is registered with it, so errors can name it.
+	require.NoError(t, secrets.Register("fake", SecretResolverFunc(func(context.Context, string) (string, error) { return "", nil })))
 	key := SecretKey{Entity: "mcp_servers", ID: "docs", Field: "headers.Authorization"}
 	owned := "${fake:mcp_servers/docs/headers.Authorization}"
 
