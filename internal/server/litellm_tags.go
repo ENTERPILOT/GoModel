@@ -117,15 +117,16 @@ func takeBodyTags(body []byte) (cleaned []byte, labels []string, changed bool) {
 	return cleaned, labels, true
 }
 
-// tagValues reads a list of tags, or one comma-separated string.
+// tagValues reads a list of tags, each one label as in LiteLLM, or one
+// comma-separated string.
 func tagValues(value gjson.Result) []string {
 	if value.Type == gjson.String {
 		return splitTags(value.Str)
 	}
 	var out []string
 	for _, item := range value.Array() {
-		if item.Type == gjson.String {
-			out = append(out, splitTags(item.Str)...)
+		if tag := strings.TrimSpace(item.Str); item.Type == gjson.String && tag != "" {
+			out = append(out, tag)
 		}
 	}
 	return out

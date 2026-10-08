@@ -188,7 +188,7 @@ durations to a fixed window. Not imported, and listed in the report:
 | `model_name` aliases | Unchanged |
 | `/health/liveliness`, `/health/readiness` | [`/health` and `/health/ready`](/advanced/cli#health-probe) |
 | Pass-through `/anthropic/*`, `/gemini/*`, `/vertex_ai/*` | [`/p/{provider}/*`](/features/passthrough-api); Anthropic SDKs can also use `/v1/messages` directly |
-| `metadata.tags` or `tags` in the request body, `x-litellm-tags` header | Unchanged: they become [labels](/features/labelling#litellm-tags) |
+| `tags` or a list in `metadata.tags` in the request body, `x-litellm-tags` header | Unchanged: they become [labels](/features/labelling#litellm-tags) |
 | `x-litellm-*` response headers, `/key/*`, `/team/*` management API | GoModel's [admin API](/advanced/admin-endpoints) and [usage API](/advanced/usage-api) |
 
 ## How settings map

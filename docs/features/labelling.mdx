@@ -195,7 +195,7 @@ routes; translated routes never forward client headers anyway.
 Clients written for LiteLLM keep their tags with no configuration. GoModel
 reads them as labels from:
 
-- the `x-litellm-tags` header (comma-separated);
+- the `x-litellm-tags` header (comma-separated, as is a `tags` string);
 - a `tags` field in the body of `/v1/chat/completions`, `/v1/responses`,
   `/v1/messages`, and `/v1/embeddings`;
 - `metadata.tags` in those bodies, when it is a list.

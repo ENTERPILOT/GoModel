@@ -25,6 +25,7 @@ func TestTakeBodyTags(t *testing.T) {
 	}{
 		{name: "no tags", body: `{"model":"m","metadata":{"env":"x"}}`, wantBody: `{"model":"m","metadata":{"env":"x"}}`},
 		{name: "top-level list", body: `{"model":"m","tags":["a"," b ",3]}`, wantBody: `{"model":"m"}`, wantLabels: []string{"a", "b"}, wantChanged: true},
+		{name: "list items are never split", body: `{"model":"m","tags":["team,west",""]}`, wantBody: `{"model":"m"}`, wantLabels: []string{"team,west"}, wantChanged: true},
 		{name: "top-level string", body: `{"model":"m","tags":"a, b"}`, wantBody: `{"model":"m"}`, wantLabels: []string{"a", "b"}, wantChanged: true},
 		{name: "metadata list beside other keys", body: `{"metadata":{"tags":["a"],"env":"x"},"model":"m"}`, wantBody: `{"metadata":{"env":"x"},"model":"m"}`, wantLabels: []string{"a"}, wantChanged: true},
 		{name: "metadata holding only tags", body: `{"model":"m","metadata":{"tags":["a"]}}`, wantBody: `{"model":"m"}`, wantLabels: []string{"a"}, wantChanged: true},
