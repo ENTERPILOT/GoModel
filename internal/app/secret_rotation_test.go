@@ -37,7 +37,11 @@ func (v *rotationTestVault) ResolveSecret(_ context.Context, reference string) (
 	if v.err != nil {
 		return "", v.err
 	}
-	return v.values[reference], nil
+	value, ok := v.values[reference]
+	if !ok {
+		return "", errors.New("secret not found")
+	}
+	return value, nil
 }
 
 type fakeKeySwap struct {

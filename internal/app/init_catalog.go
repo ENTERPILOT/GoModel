@@ -57,12 +57,13 @@ func (b *bootstrap) initModelCatalog() error {
 	}
 	b.managedProviderNames = managedProviderNames
 
-	providerCredentialsResult, err := providers.NewCredentialsStore(b.ctx, app.storage, app.secrets, providerResult.Factory, providerResult.Registry, managedProviderNames, b.appCfg.Resilience)
+	providerCredentialsResult, err := providers.NewCredentialsStore(b.ctx, app.storage, app.secrets, providerResult.Factory, providerResult.Registry, managedProviderNames, b.appCfg.Resilience, b.cfg.AppConfig.Secrets)
 	if err != nil {
 		return fmt.Errorf("failed to initialize provider credentials store: %w", err)
 	}
 	app.providerCredentials = providerCredentialsResult
 	app.register(subsystemProviderCredentials, ownedByShutdown, app.providerCredentials.Close)
+	app.secretRotation.watchEntities(providers.CredentialSecretEntity+".", providerCredentialsResult.Service)
 
 	// The routing-strategy resolver was built with the provider hooks in
 	// initProviders; virtual models consult it for the plugin strategy. It
