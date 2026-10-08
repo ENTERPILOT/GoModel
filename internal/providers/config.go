@@ -167,48 +167,6 @@ func finishProviders(sources providerSources, global config.ResilienceConfig, di
 	return providers, filtered
 }
 
-// normalizeProviderAPIKeys collapses each provider's `api_key` and `api_keys`
-// into one canonical ordered set: APIKeys holds every usable key and APIKey
-// holds the first. Unresolved `${VAR}` placeholders are dropped here rather
-// than forwarded as literal credentials, so a provider whose only key failed
-// to resolve ends up keyless and is then dropped by filterEmptyProviders --
-// the same outcome as before rotation existed.
-func normalizeProviderAPIKeys(raw map[string]config.RawProviderConfig) map[string]config.RawProviderConfig {
-	result := make(map[string]config.RawProviderConfig, len(raw))
-	for name, p := range raw {
-		keys := resolvedAPIKeys(append([]string{p.APIKey}, p.APIKeys...))
-		p.APIKeys = keys
-		p.APIKey = ""
-		if len(keys) > 0 {
-			p.APIKey = keys[0]
-		}
-		result[name] = p
-	}
-	return result
-}
-
-// resolvedAPIKeys trims, drops unresolved and empty entries, and de-duplicates
-// while preserving order.
-func resolvedAPIKeys(keys []string) []string {
-	resolved := make([]string, 0, len(keys))
-	seen := make(map[string]struct{}, len(keys))
-	for _, key := range keys {
-		key = strings.TrimSpace(key)
-		if !HasResolvedProviderValue(key) {
-			continue
-		}
-		if _, dup := seen[key]; dup {
-			continue
-		}
-		seen[key] = struct{}{}
-		resolved = append(resolved, key)
-	}
-	if len(resolved) == 0 {
-		return nil
-	}
-	return resolved
-}
-
 // providerOrigins splits the resolved provider names by where they were declared:
 // the config file, or environment-variable discovery. A provider named in the
 // config file counts as fromFile even when env vars overlay its fields. Operators

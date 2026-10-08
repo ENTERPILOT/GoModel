@@ -133,8 +133,20 @@ Resolution order for one generation:
    in the decoded section with the schemes registered at that moment, so an
    extension's own section can use them.
 3. `run` resolves every string in `Config` (except `extensions`, which are
-   decoded on demand). A load-time check that has to accept a reference, such
-   as the MCP server URL scheme, is repeated on the resolved value.
+   decoded on demand, and `guardrails.rules[].config`, see below). A
+   load-time check that has to accept a reference, such as the MCP server URL
+   scheme, is repeated on the resolved value.
+
+   Guardrail rules are seeded into the guardrail store, so resolving their
+   plugin config here would write resolved secrets to the database. Their
+   `config` block is tagged `secrets:"deferred"` and skipped: the seeder
+   resolves the fields that are not `InputSecret` fields of the plugin
+   (`guardrails.rules[<i>].config.<key>`), and stores the secret fields with
+   their references, which the guardrail service resolves once when it builds
+   the instance (section 4). No other configuration section is copied into a
+   store with secret values: MCP servers, users, tagging rules, and virtual
+   models stay in memory, and the seeded rate-limit and budget rules hold no
+   secrets.
 4. `providers.Init` merges the provider environment variables
    (`OPENAI_API_KEY=${vault:prod/llm#openai}`) into `RawProviders` and then
    resolves the providers that pass the credential filter. A `config.yaml`
@@ -159,7 +171,9 @@ string settings, and string values inside JSON variables, accept references.
 Any reference that is still unresolved after step 3 or 4 stops the
 generation with an error naming the field and the scheme, never the value.
 The error message for an unknown scheme says which extension usually
-provides it. A first start fails, and a reload keeps the running generation.
+provides it. A scheme GoModel knows nothing of (not built in, registered,
+or hinted) is not repeated: its name is text taken from the value, which
+may be a literal secret that only looks like a reference. A first start fails, and a reload keeps the running generation.
 A literal `${vault:...}` string is therefore never sent upstream as a
 credential. This replaces the old silent dropping of unresolved `${`
 provider values for references. Plain `${VAR}` keeps its historical
@@ -167,26 +181,79 @@ behaviour.
 
 ### 4. Dashboard-managed entities accept references
 
-Provider credentials, MCP server headers and environment, and guardrail
-`InputSecret` fields accept references when they are saved. The admin API
-stores the reference and returns it unmasked: a reference names where a
-secret lives and is not itself secret. Literal values keep today's masking
-and merge-on-PUT behaviour. The entity is resolved when the service builds
-it. A reference that cannot be resolved at save time is rejected with a
-validation error.
+Provider credentials (API keys, service-account JSON and base64 JSON, proxy
+URL), MCP server headers, and guardrail `InputSecret` fields accept
+references when they are saved. Admin-managed MCP servers have no
+environment: stdio servers are declarative only, and their `env` values are
+configuration, resolved in step 3. The admin API stores the reference and
+returns it unmasked: a reference names where a secret lives and is not itself
+secret. Only a value made of references alone is unmasked (an MCP header may
+also start with an HTTP auth scheme, `Bearer ${env:TOKEN}`, and a proxy URL is
+shown when its password is made of references); a value that mixes literal
+text with a reference may carry a literal secret and is masked like one. Literal values keep today's masking and merge-on-PUT behaviour; the
+mask sent back keeps the stored value, literal or reference. The database
+holds the reference as typed; references are resolved by the service when it
+builds the provider, MCP connection, or guardrail instance, never in the
+store layer. A reference that cannot be resolved at save time is rejected
+with a validation error naming the field and scheme.
 
-An extension may also implement an optional writer on its resolver:
+Resolvers see field paths rooted at the entity: `provider_credentials.<name>.api_keys[<i>]`
+(also `.service_account_json`, `.service_account_json_base64`, `.proxy_url`),
+`mcp_servers.<slug>.headers.<Header>`, and
+`guardrail_definitions.<name>.config.<key>`. The guardrail root is not
+`guardrails` so it cannot collide with the `guardrails` section of
+`config.yaml`.
+
+These paths are deliberately not the identifiers encryption at rest
+(section 6) binds ciphertexts to. Its additional authenticated data uses the
+normalized credential name (`normalizeCredentialName`) and the field
+`api_keys` for every key, so reordering a credential's keys never breaks
+decryption. Reference paths use the name as saved and index each key
+(`api_keys[<i>]`), so rotation reports the key that changed. Do not unify the
+two.
+
+`Secrets.ResolveEntity` resolves one entity's fields as a unit and records
+them for rotation (section 5) only once the entity is installed, replacing
+whatever that entity recorded before; `Secrets.ForgetEntity` drops the
+records of a deleted entity.
+
+A stored entity whose references fail when it is loaded is handled like any
+other invalid stored row of its kind: a provider credential or MCP server is
+logged and skipped, and a running MCP server keeps its current headers;
+guardrails load as a set, so a failure fails the guardrail load (startup
+fails, a reload keeps the running generation, a periodic refresh keeps the
+current instances), which keeps guardrails failing closed.
+
+An extension may also register an optional writer, per generation like
+`Register`, with `Secrets.SetWriter`:
 
 ```go
+type SecretKey struct{ Entity, ID, Field string } // "provider_credentials", "openai", "api_keys[0]"
+
 type SecretWriter interface {
     WriteSecret(ctx context.Context, key SecretKey, value string) (reference string, err error)
     DeleteSecret(ctx context.Context, reference string) error
+    // OwnsReference reports whether WriteSecret created reference, so core
+    // never deletes a secret an operator referenced by hand.
+    OwnsReference(reference string) bool
 }
 ```
 
-When a writer is registered and enabled, a literal secret saved through the
-dashboard is written to the external store and only the returned reference
-is persisted. Core ships no writer.
+When a writer is registered, a literal secret saved through the admin API is
+written to the external store and only the returned reference is persisted.
+The writer receives the value the field would resolve to without one (each
+`$${` escape already turned into `${`) and must return exactly one
+`${scheme:reference}` with nothing around it. `WriteSecret` must create a new secret and return a distinct reference
+each time, never changing what an existing reference resolves to, because a
+save can still fail after the write.
+When an entity is deleted, or a field's owned reference is replaced, core
+calls `DeleteSecret` for each reference the writer owns, after the database
+commit, best effort (a failure is logged). A save that fails after the write
+deletes what it wrote. A save is rejected when it holds a reference the
+writer owns that the entity's stored row does not: one read before the row was
+replaced or deleted, or copied from another entity, may name a deleted secret.
+Saves and deletes of one entity kind are serialized from reading the stored
+row through deleting the secrets it held. Core ships no writer.
 
 ### 5. Rotation without restart
 
@@ -223,7 +290,14 @@ resolvers and compares fingerprints:
   that notified decides that.
 - Dashboard-managed entities re-resolve their own references and reinstall
   the affected provider, MCP server, or guardrail through the existing
-  install path.
+  install path: a provider whose API keys alone changed has its keyring
+  swapped, any other provider change rebuilds that provider, an MCP server is
+  redialed, and a guardrail instance is rebuilt and the workflows recompiled.
+  Their fields never trigger a generation reload. An entity whose references
+  cannot be re-resolved keeps its current values, and its change stays
+  pending. A failed entity reference does not hold back other entities or
+  the configuration; a failed configuration reference holds back only the
+  configuration's own swap or reload.
 
 Each change is logged at info with the action and the field paths, never
 values.
