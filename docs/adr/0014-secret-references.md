@@ -171,7 +171,9 @@ string settings, and string values inside JSON variables, accept references.
 Any reference that is still unresolved after step 3 or 4 stops the
 generation with an error naming the field and the scheme, never the value.
 The error message for an unknown scheme says which extension usually
-provides it. A first start fails, and a reload keeps the running generation.
+provides it. A scheme GoModel knows nothing of (not built in, registered,
+or hinted) is not repeated: its name is text taken from the value, which
+may be a literal secret that only looks like a reference. A first start fails, and a reload keeps the running generation.
 A literal `${vault:...}` string is therefore never sent upstream as a
 credential. This replaces the old silent dropping of unresolved `${`
 provider values for references. Plain `${VAR}` keeps its historical
@@ -238,7 +240,10 @@ type SecretWriter interface {
 ```
 
 When a writer is registered, a literal secret saved through the admin API is
-written to the external store and only the returned reference is persisted. `WriteSecret` must create a new secret and return a distinct reference
+written to the external store and only the returned reference is persisted.
+The writer receives the value the field would resolve to without one (each
+`$${` escape already turned into `${`) and must return exactly one
+`${scheme:reference}` with nothing around it. `WriteSecret` must create a new secret and return a distinct reference
 each time, never changing what an existing reference resolves to, because a
 save can still fail after the write.
 When an entity is deleted, or a field's owned reference is replaced, core
