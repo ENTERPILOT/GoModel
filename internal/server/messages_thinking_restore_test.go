@@ -159,3 +159,20 @@ func TestMessagesStreamRestoreKeepsSignedThinking(t *testing.T) {
 		}
 	}
 }
+
+// A response edit may move a reasoning part (ReplaceText puts a new text part
+// first when the choice had none); its original text still comes back.
+func TestKeepReasoningFollowsMovedParts(t *testing.T) {
+	completion := &pluginapi.Completion{Choices: []pluginapi.Choice{{Message: pluginapi.Message{Role: pluginapi.RoleAssistant, Parts: []pluginapi.Part{
+		{Kind: pluginapi.PartReasoning, Text: "User <PERSON_1>"},
+	}}}}}
+	original := completion.ReasoningTargets()
+	require.NoError(t, completion.ReplaceText(0, "answer"))
+	require.NoError(t, completion.SetReasoning(0, 1, "User Ann Lee"))
+
+	keepReasoning(completion, original)
+	assert.Equal(t, []pluginapi.Part{
+		{Kind: pluginapi.PartText, Text: "answer"},
+		{Kind: pluginapi.PartReasoning, Text: "User <PERSON_1>"},
+	}, completion.Choices[0].Message.Parts)
+}

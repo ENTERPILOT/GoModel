@@ -101,16 +101,20 @@ func messagesStreamDialect(signedReasoning bool) streamDialect {
 	return dialect
 }
 
-// keepReasoning puts the reasoning parts listed in original back to the text
-// they had there.
+// keepReasoning puts each choice's reasoning parts back to the text they
+// had in original. Parts are paired in order, not by index: an edit such as
+// ReplaceText may move a part, but none adds, drops, or reorders reasoning.
 func keepReasoning(completion *pluginapi.Completion, original []pluginapi.TextTarget) {
+	texts := map[int][]string{}
 	for _, t := range original {
-		if t.Choice >= len(completion.Choices) {
-			continue
-		}
-		parts := completion.Choices[t.Choice].Message.Parts
-		if t.Part < len(parts) && parts[t.Part].Kind == pluginapi.PartReasoning && parts[t.Part].Text != t.Text {
-			_ = completion.SetReasoning(t.Choice, t.Part, t.Text)
+		texts[t.Choice] = append(texts[t.Choice], t.Text)
+	}
+	seen := map[int]int{}
+	for _, t := range completion.ReasoningTargets() {
+		i := seen[t.Choice]
+		seen[t.Choice]++
+		if want := texts[t.Choice]; i < len(want) && t.Text != want[i] {
+			_ = completion.SetTargetText(t, want[i])
 		}
 	}
 }
