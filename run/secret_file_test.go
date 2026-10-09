@@ -91,11 +91,22 @@ func TestRunReloadRejectsAnEmptiedMasterKeyFile(t *testing.T) {
 	logs := &syncBuffer{}
 
 	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
 	served := make(chan error, 1)
 	go func() {
 		served <- Run(ctx, Options{Args: []string{}, Stdout: io.Discard, Stderr: logs})
 	}()
+	// Registered after setupSecretFileGateway's cleanups, so it runs first:
+	// the gateway stops before the environment, working directory and temp
+	// files it uses are restored, even when a check below fails.
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-served:
+			assert.NoError(t, err)
+		case <-time.After(30 * time.Second):
+			t.Error("Run did not stop")
+		}
+	})
 
 	adminURL := "http://127.0.0.1:" + port + "/admin/provider-credentials"
 	status := func(key string) int {
@@ -136,12 +147,4 @@ func TestRunReloadRejectsAnEmptiedMasterKeyFile(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnauthorized, status(""))
 	assert.Equal(t, http.StatusOK, status("mk"))
-
-	cancel()
-	select {
-	case err := <-served:
-		require.NoError(t, err)
-	case <-time.After(30 * time.Second):
-		t.Fatal("Run did not stop")
-	}
 }
