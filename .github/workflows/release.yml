@@ -249,8 +249,12 @@ jobs:
           # characters, not bytes, so multibyte notes stay within the limit.
           body="$(jq -r '(.body // "") | if length > 4000 then .[0:3997] + "..." else . end' <<< "$release_json")"
 
+          # Discord embed titles cap at 256 characters — a release with a
+          # long name must not lose the whole announce to an HTTP 400.
+          title="$(jq -r '(.name // .tagName) | if length > 256 then .[0:253] + "..." else . end' <<< "$release_json")"
+
           jq -n \
-            --arg title "$(jq -r '.name // .tagName' <<< "$release_json")" \
+            --arg title "$title" \
             --arg url "$release_url" \
             --arg description "$body" \
             '{
@@ -263,9 +267,11 @@ jobs:
               }]
             }' > discord-payload.json
 
-          # Retry only on network-level failures (DNS/connect/timeout — curl
-          # exit 6/7/28), where the POST never happened. Any HTTP response is
-          # final: the message may already be posted, retrying would duplicate.
+          # Retry only on DNS/connect failures (curl exit 6/7), where the
+          # POST never happened. A --max-time timeout (exit 28) is not
+          # retried: --connect-timeout bounds the connect phase, so 28 means
+          # the request was already sent and retrying would risk a duplicate
+          # announce. Any HTTP response is final for the same reason.
           rc=0
           for attempt in 1 2 3; do
             if curl -fsS --connect-timeout 10 --max-time 20 \
@@ -277,7 +283,7 @@ jobs:
             fi
             rc=$?
             case $rc in
-              6|7|28) sleep 5 ;;
+              6|7) sleep 5 ;;
               *) break ;;
             esac
           done
