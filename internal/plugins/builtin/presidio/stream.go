@@ -22,8 +22,8 @@ func (p *Plugin) StreamPolicy() pluginapi.StreamPolicy {
 // OnStreamEvent analyzes each text or tool-call argument window, rewrites
 // it for anonymize, puts restorable values back, and cuts the stream when a
 // blocking entity type appears. Reasoning windows are not analyzed: they
-// only get values back. Under a buffering policy every event passes;
-// OnResponse decides.
+// only get values back, unless signed, which keeps them as they are. Under a
+// buffering policy every event passes; OnResponse decides.
 func (p *Plugin) OnStreamEvent(ctx context.Context, x *pluginapi.Exchange, ev *pluginapi.StreamEvent) (pluginapi.StreamDecision, error) {
 	if ev == nil || x == nil || ev.Text == "" {
 		return pluginapi.Pass(), nil
@@ -38,7 +38,7 @@ func (p *Plugin) OnStreamEvent(ctx context.Context, x *pluginapi.Exchange, ev *p
 	var spans []span
 	switch ev.Kind {
 	case pluginapi.EventReasoningDelta:
-		if !restore {
+		if !restore || ev.Signed {
 			return pluginapi.Pass(), nil
 		}
 	case pluginapi.EventToolCallDelta, pluginapi.EventTextDelta:
