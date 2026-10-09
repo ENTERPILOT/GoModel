@@ -8,7 +8,9 @@
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
   import {
     auditEntryLiveInProgress,
+    auditOutputTokensPerSecond,
     formatDurationNs,
+    formatTokensPerSecond,
     statusCodeClass,
   } from "./audit-logic.js";
   import { ChartNoAxesColumnIncreasing, ChevronDown, ChevronLeft, ChevronRight } from "lucide";
@@ -28,6 +30,9 @@
     hidePath = false,
   } = $props();
 
+  const tokensPerSecond = $derived(
+    formatTokensPerSecond(auditOutputTokensPerSecond(entry)),
+  );
   const timestamp = $derived(timezone.formatTimestamp(entry.timestamp));
   const timestampTime = $derived(
     timestamp === "-" ? timestamp : timestamp.slice(timestamp.lastIndexOf(" ") + 1),
@@ -146,6 +151,11 @@
       <span class="audit-timestamp-time" aria-hidden="true">{timestampTime}</span>
     </span>
     <span class="mono font-size-md">{formatDurationNs(entry.duration_ns)}</span>
+    {#if tokensPerSecond}
+      <span class="mono font-size-md" title={m.audit_tokens_per_second_title()}
+        >{tokensPerSecond}</span
+      >
+    {/if}
     {#if conversationDrawer.canShowConversation(entry)}
       <button
         type="button"

@@ -297,6 +297,8 @@
   "audit_attempt_succeeded": "powodzenie",
   "audit_attempt_failed_status": "niepowodzenie",
   "audit_attempt_not_captured": "Nie zapisano odpowiedzi dla tej próby.",
+  "audit_tokens_per_second": "{rate} tok/s",
+  "audit_tokens_per_second_title": "Tokeny wyjściowe podzielone przez całkowity czas żądania, łącznie z czasem do pierwszego tokenu",
   "audit_request_not_captured": "Nie zapisano szczegółów Requestu.",
   "audit_waiting_request_data": "Oczekiwanie na dane Requestu…",
   "audit_request_body_too_large": "Treść Requestu była zbyt duża, aby ją zapisać.",

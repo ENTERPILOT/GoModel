@@ -291,6 +291,8 @@
   "audit_attempt_succeeded": "erfolgreich",
   "audit_attempt_failed_status": "fehlgeschlagen",
   "audit_attempt_not_captured": "Für diesen Versuch wurde keine Antwort aufgezeichnet.",
+  "audit_tokens_per_second": "{rate} Tok./s",
+  "audit_tokens_per_second_title": "Ausgabe-Tokens geteilt durch die gesamte Anfragedauer, einschließlich der Zeit bis zum ersten Token",
   "audit_request_not_captured": "Anfragedetails wurden nicht aufgezeichnet.",
   "audit_waiting_request_data": "Warte auf Anfragedaten…",
   "audit_request_body_too_large": "Der Anfrage-Body war zu groß zum Aufzeichnen.",

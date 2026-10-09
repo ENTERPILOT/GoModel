@@ -41,8 +41,10 @@ import {
   buildAuditSessionQuery,
   pruneThreadMap,
   toggleExpandedThread,
+  auditOutputTokensPerSecond,
   formatDurationNs,
   formatJSON,
+  formatTokensPerSecond,
   toggleExpandedEntry,
   mergeAuditThreadChildren,
   pruneExpandedEntries,
@@ -288,6 +290,43 @@ test("formatDurationNs rejects non-finite values", () => {
   assert.equal(formatDurationNs(0), "pending");
   assert.equal(formatDurationNs("1500"), "2 µs");
   assert.equal(formatDurationNs(1230000000), "1.23 s");
+});
+
+test("auditOutputTokensPerSecond divides output tokens by total duration", () => {
+  const entry = (fields) => ({
+    path: "/v1/chat/completions",
+    duration_ns: 2000000000,
+    usage: { output_tokens: 84 },
+    ...fields,
+  });
+  const cases = [
+    { name: "chat", entry: entry({}), want: 42 },
+    { name: "responses", entry: entry({ path: "/v1/responses" }), want: 42 },
+    { name: "anthropic messages", entry: entry({ path: "/v1/messages" }), want: 42 },
+    { name: "passthrough", entry: entry({ path: "/p/openai/chat/completions" }), want: 42 },
+    { name: "string fields", entry: entry({ duration_ns: "500000000", usage: { output_tokens: "10" } }), want: 20 },
+    { name: "embeddings", entry: entry({ path: "/v1/embeddings" }), want: null },
+    { name: "images", entry: entry({ path: "/v1/images/generations" }), want: null },
+    { name: "unknown path", entry: entry({ path: "/admin/x" }), want: null },
+    { name: "no usage", entry: entry({ usage: undefined }), want: null },
+    { name: "zero output tokens", entry: entry({ usage: { output_tokens: 0 } }), want: null },
+    { name: "pending duration", entry: entry({ duration_ns: 0 }), want: null },
+    { name: "missing duration", entry: entry({ duration_ns: undefined }), want: null },
+    { name: "null entry", entry: null, want: null },
+  ];
+  for (const c of cases) {
+    assert.equal(auditOutputTokensPerSecond(c.entry), c.want, c.name);
+  }
+});
+
+test("formatTokensPerSecond keeps one decimal below 100", () => {
+  assert.equal(formatTokensPerSecond(42.06), "42.1 tok/s");
+  assert.equal(formatTokensPerSecond(7), "7.0 tok/s");
+  assert.equal(formatTokensPerSecond(99.96), "100 tok/s");
+  assert.equal(formatTokensPerSecond(123.6), "124 tok/s");
+  assert.equal(formatTokensPerSecond(null), "");
+  assert.equal(formatTokensPerSecond(0), "");
+  assert.equal(formatTokensPerSecond(Number.NaN), "");
 });
 
 test("auditResponsePane surfaces error message from captured error body", () => {

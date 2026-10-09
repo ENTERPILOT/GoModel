@@ -291,6 +291,8 @@
   "audit_attempt_succeeded": "succeeded",
   "audit_attempt_failed_status": "failed",
   "audit_attempt_not_captured": "No response was captured for this attempt.",
+  "audit_tokens_per_second": "{rate} tok/s",
+  "audit_tokens_per_second_title": "Output tokens divided by the total request duration, including time to first token",
   "audit_request_not_captured": "Request details were not captured.",
   "audit_waiting_request_data": "Waiting for request data…",
   "audit_request_body_too_large": "Request body was too large to capture.",
