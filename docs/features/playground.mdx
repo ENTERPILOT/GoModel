@@ -2,7 +2,7 @@
 title: "Playground"
 description: "Try any model through the gateway from the dashboard and inspect the exact request and response JSON."
 icon: "flask-conical"
-keywords: ["playground", "dashboard", "chat completions", "responses", "messages", "streaming"]
+keywords: ["playground", "dashboard", "chat completions", "responses", "messages", "streaming", "images", "text-to-speech", "transcription"]
 ---
 
 The **Playground** page (`/admin/dashboard/playground`) sends requests through the
@@ -16,6 +16,26 @@ as you edit) and the last response with its status, latency, and token usage —
 streamed responses are assembled into the same shape a non-streaming call returns.
 Requests are subject to the same budgets, rate limits, guardrails, and audit logging
 as any other client of the gateway.
+
+## Image, speech, and transcription
+
+The **Mode** switch above the model picker tests media models too. Each mode
+calls the gateway's OpenAI-compatible endpoint and lists models whose metadata
+advertises that mode first; you can still type any model or alias.
+
+| Mode | Endpoint | Input | Result |
+| --- | --- | --- | --- |
+| Chat | as picked under **Endpoint** | conversation | assistant message |
+| Image | `POST /v1/images/generations` | prompt, size, image count (1–4) | generated images (URL or `b64_json`) |
+| Speech | `POST /v1/audio/speech` | text, voice, format (`mp3`, `wav`, `opus`, `aac`, `flac`) | audio player |
+| Transcription | `POST /v1/audio/transcriptions` | audio file, optional language and prompt | transcript text |
+
+Size, count, and format are sent only when they differ from the provider
+default (`mp3` for speech). The JSON panel shows the request body; a
+transcription is sent as `multipart/form-data`, so its preview describes the
+file part instead of carrying the bytes. Inline `b64_json` images are shortened
+in the response JSON to keep it readable, and speech responses are summarized
+as their content type and size.
 
 ## User path scoping
 

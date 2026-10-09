@@ -1,8 +1,9 @@
 <script>
-  // Playground: try any model through the gateway's public API. Endpoint and
-  // model selection plus "add message" controls sit on top, the editable
-  // conversation in the middle, the composer at the bottom, and a slidable
-  // request/response JSON panel on the right.
+  // Playground: try any model through the gateway's public API. Mode, endpoint
+  // and model selection plus "add message" controls sit on top, the editable
+  // conversation (or a media mode's result) in the middle, the composer (or
+  // the media form) at the bottom, and a slidable request/response JSON panel
+  // on the right.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { router } from "$lib/stores/router.svelte.js";
   import { modelsStore } from "$lib/stores/models.svelte.js";
@@ -13,12 +14,17 @@
   import PlaygroundMessage from "./PlaygroundMessage.svelte";
   import PlaygroundComposer from "./PlaygroundComposer.svelte";
   import PlaygroundJsonPanel from "./PlaygroundJsonPanel.svelte";
+  import PlaygroundMediaForm from "./PlaygroundMediaForm.svelte";
+  import PlaygroundMediaResult from "./PlaygroundMediaResult.svelte";
   import { playgroundStore as store } from "./playground.svelte.js";
-  import { playgroundModelOptions, defaultUserPathForModel } from "./playgroundLogic.js";
+  import { playgroundMediaStore as media } from "./playgroundMedia.svelte.js";
+  import { defaultUserPathForModel } from "./playgroundLogic.js";
+  import { modeModelOptions } from "./playgroundMedia.js";
 
   const PAGE = "playground";
 
-  const modelOptions = $derived(playgroundModelOptions(modelsStore.models));
+  const modelOptions = $derived(modeModelOptions(modelsStore.models, store.mode));
+  const error = $derived(store.mode === "chat" ? store.error : media.error);
 
   // Pick the first inventory model once, when nothing has been chosen yet.
   // If a model is already set (restored from storage), prefill the user path
@@ -65,25 +71,30 @@
 
     <PlaygroundToolbar {modelOptions} />
 
-    {#if store.error}
-      <div class="alert alert-warning playground-error" role="alert">{store.error}</div>
+    {#if error}
+      <div class="alert alert-warning playground-error" role="alert">{error}</div>
     {/if}
 
-    <div
-      class="playground-history"
-      bind:this={historyEl}
-      {@attach sortableList({ onreorder: (from, to) => store.moveMessage(from, to) })}
-    >
-      {#if store.messages.length === 0}
-        <p class="empty-state">{m.playground_empty()}</p>
-      {:else}
-        {#each store.messages as message (message.id)}
-          <PlaygroundMessage {message} />
-        {/each}
-      {/if}
-    </div>
+    {#if store.mode !== "chat"}
+      <PlaygroundMediaResult />
+      <PlaygroundMediaForm />
+    {:else}
+      <div
+        class="playground-history"
+        bind:this={historyEl}
+        {@attach sortableList({ onreorder: (from, to) => store.moveMessage(from, to) })}
+      >
+        {#if store.messages.length === 0}
+          <p class="empty-state">{m.playground_empty()}</p>
+        {:else}
+          {#each store.messages as message (message.id)}
+            <PlaygroundMessage {message} />
+          {/each}
+        {/if}
+      </div>
 
-    <PlaygroundComposer />
+      <PlaygroundComposer />
+    {/if}
   </section>
 
   <PlaygroundJsonPanel />
