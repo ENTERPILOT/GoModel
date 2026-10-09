@@ -116,7 +116,9 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 		"CREATE INDEX IF NOT EXISTS idx_usage_session_id ON usage(session_id)",
 		"CREATE INDEX IF NOT EXISTS idx_usage_user_path_normalized ON usage(COALESCE(NULLIF(TRIM(user_path), ''), '/'))",
 		"CREATE INDEX IF NOT EXISTS idx_usage_cache_type ON usage(cache_type)",
-		"CREATE INDEX IF NOT EXISTS idx_usage_raw_data_gin ON usage USING GIN (raw_data)",
+		// No query filters on raw_data contents, so its GIN index only slowed
+		// inserts; the drop retires it on databases that created it.
+		"DROP INDEX IF EXISTS idx_usage_raw_data_gin",
 	}
 	for _, idx := range indexes {
 		if err := schema.Schema(ctx, idx); err != nil {
