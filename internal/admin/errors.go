@@ -8,6 +8,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -58,10 +59,30 @@ func validationWriter(isValidation func(error) bool) func(error) error {
 }
 
 var (
-	workflowWriteError  = validationWriter(workflows.IsValidationError)
-	authKeyWriteError   = validationWriter(authkeys.IsValidationError)
-	guardrailWriteError = validationWriter(guardrails.IsValidationError)
+	workflowWriteError = validationWriter(workflows.IsValidationError)
+	authKeyWriteError  = validationWriter(authkeys.IsValidationError)
 )
+
+func guardrailWriteError(err error) error {
+	if restricted := secretReferenceRestrictedError(err); restricted != nil {
+		return restricted
+	}
+	return validationWriter(guardrails.IsValidationError)(err)
+}
+
+const codeSecretReferenceRequiresMasterKey = "secret_reference_requires_master_key"
+
+// secretReferenceRestrictedError turns a save refused for adding or changing
+// a secret reference without the master key (config.ErrSecretReferenceRestricted)
+// into a 403 naming the field and scheme, never the value. It returns nil for
+// any other error.
+func secretReferenceRestrictedError(err error) error {
+	secretErr, ok := errors.AsType[*config.SecretError](err)
+	if !ok || !errors.Is(secretErr, config.ErrSecretReferenceRestricted) {
+		return nil
+	}
+	return core.NewPermissionError(secretErr.Error()).WithCode(codeSecretReferenceRequiresMasterKey)
+}
 
 // virtualModelWriteError surfaces validation errors as 400 and other failures
 // as 502 so the dashboard distinguishes store/provider failures from input issues.

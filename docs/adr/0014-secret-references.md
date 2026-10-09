@@ -197,6 +197,15 @@ builds the provider, MCP connection, or guardrail instance, never in the
 store layer. A reference that cannot be resolved at save time is rejected
 with a validation error naming the field and scheme.
 
+A reference resolves on the gateway host, so whoever adds one can read any
+environment variable or file the gateway can, the master key included. When a
+master key is configured, only it may add or change a reference: for every
+other credential, authentication marks the request with
+`config.RestrictSecretReferences`, and `Secrets.StoreSecret` then rejects any
+reference the entity's stored row does not already hold with a 403
+(`secret_reference_requires_master_key`). Literals, the mask, and unchanged
+references still save.
+
 Resolvers see field paths rooted at the entity: `provider_credentials.<name>.api_keys[<i>]`
 (also `.service_account_json`, `.service_account_json_base64`, `.proxy_url`),
 `mcp_servers.<slug>.headers.<Header>`, and

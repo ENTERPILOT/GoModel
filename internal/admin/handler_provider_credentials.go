@@ -507,6 +507,9 @@ func providerCredentialWriteError(err error) error {
 	if err == nil {
 		return nil
 	}
+	if restricted := secretReferenceRestrictedError(err); restricted != nil {
+		return restricted
+	}
 	if fieldErr, ok := errors.AsType[*providers.CredentialFieldError](err); ok {
 		invalid := core.NewInvalidRequestError(fieldErr.Message, err)
 		if fieldErr.Field == "" {

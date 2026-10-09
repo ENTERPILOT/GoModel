@@ -117,6 +117,59 @@ func TestStoreSecretWritesTheResolvedLiteral(t *testing.T) {
 	}
 }
 
+func TestStoreSecretRestrictedAcceptsOnlyHeldReferences(t *testing.T) {
+	key := SecretKey{Entity: "mcp_servers", ID: "docs", Field: "headers.Authorization"}
+	held := []string{"Bearer ${env:HELD}", "sk-${file:/run/secrets/tail}"}
+	tests := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{name: "held reference", value: "${env:HELD}"},
+		{name: "held reference in other text", value: "Token ${env:HELD}"},
+		{name: "two held references", value: "${env:HELD}${file:/run/secrets/tail}"},
+		{name: "literal", value: "sk-literal"},
+		{name: "escaped reference", value: "$${env:GOMODEL_MASTER_KEY}"},
+		{name: "legacy placeholder", value: "${GOMODEL_MASTER_KEY}"},
+		{name: "new reference", value: "${env:GOMODEL_MASTER_KEY}", wantErr: true},
+		{name: "new reference in other text", value: "Bearer ${file:/etc/passwd}", wantErr: true},
+		{name: "new reference beside a held one", value: "${env:HELD}${env:OTHER}", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := RestrictSecretReferences(t.Context())
+			stored, err := NewSecrets().StoreSecret(ctx, key, tt.value, held)
+			if !tt.wantErr {
+				require.NoError(t, err)
+				assert.Equal(t, tt.value, stored)
+				return
+			}
+			require.ErrorIs(t, err, ErrSecretReferenceRestricted)
+			secretErr, ok := errors.AsType[*SecretError](err)
+			require.True(t, ok)
+			assert.Equal(t, "mcp_servers.docs.headers.Authorization", secretErr.Field)
+			assert.NotContains(t, err.Error(), "GOMODEL_MASTER_KEY")
+			assert.NotContains(t, err.Error(), "/etc/passwd")
+
+			stored, err = NewSecrets().StoreSecret(t.Context(), key, tt.value, held)
+			require.NoError(t, err, "an unrestricted context saves any reference")
+			assert.Equal(t, tt.value, stored)
+		})
+	}
+}
+
+func TestStoreSecretRestrictedStillWritesLiterals(t *testing.T) {
+	writer := &fakeSecretWriter{}
+	secrets := NewSecrets()
+	secrets.SetWriter(writer)
+	key := SecretKey{Entity: "provider_credentials", ID: "openai", Field: "api_keys[0]"}
+
+	stored, err := secrets.StoreSecret(RestrictSecretReferences(t.Context()), key, "sk-literal", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "${fake:provider_credentials/openai/api_keys[0]}", stored)
+	assert.Equal(t, "sk-literal", writer.written[stored])
+}
+
 func TestStoreSecretRejectsOwnedReferencesTheEntityDoesNotHold(t *testing.T) {
 	writer := &fakeSecretWriter{}
 	secrets := NewSecrets()
