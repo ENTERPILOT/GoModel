@@ -201,38 +201,15 @@ func TestSQLStoreMigratesPreScopeTable(t *testing.T) {
 // (json_each on SQLite, jsonb_exists on PostgreSQL), so testing only one of
 // them would leave the other free to silently match nothing.
 func TestSQLStoreSumSpendHonorsSubjectBoundaryAndCacheType(t *testing.T) {
-	t.Run("sqlite", func(t *testing.T) {
-		db, err := sql.Open("sqlite", ":memory:")
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		usageStore, err := usage.NewSQLStore(context.Background(), db, 0)
 		require.NoError(t, err)
 
-		defer db.Close()
-
-		usageStore, err := usage.NewSQLiteStore(db, 0)
-		require.NoError(t, err)
-
-		wrapped, err := sqlx.NewSQLite(db)
-		require.NoError(t, err)
-
-		assertSumSpendMatchesSubjects(t, usageStore, wrapped)
-	})
-
-	t.Run("postgresql", func(t *testing.T) {
-		pool := sqlxtest.NewPostgresPool(t)
-		if pool == nil {
-			return // already skipped
-		}
-		usageStore, err := usage.NewPostgreSQLStore(pool, 0)
-		require.NoError(t, err)
-
-		wrapped, err := sqlx.NewPostgreSQL(pool)
-		require.NoError(t, err)
-
-		assertSumSpendMatchesSubjects(t, usageStore, wrapped)
+		assertSumSpendMatchesSubjects(t, usageStore, db)
 	})
 }
 
-// usageWriter is the slice of a usage store this test needs, satisfied by both
-// backend implementations.
+// usageWriter is the slice of a usage store this test needs.
 type usageWriter interface {
 	WriteBatch(ctx context.Context, entries []*usage.UsageEntry) error
 }
@@ -300,10 +277,10 @@ func TestSQLStoreSumSpendChunksLargeBatches(t *testing.T) {
 
 	defer db.Close()
 
-	usageStore, err := usage.NewSQLiteStore(db, 0)
+	wrapped, err := sqlx.NewSQLite(db)
 	require.NoError(t, err)
 
-	wrapped, err := sqlx.NewSQLite(db)
+	usageStore, err := usage.NewSQLStore(ctx, wrapped, 0)
 	require.NoError(t, err)
 
 	store, err := NewSQLStore(ctx, wrapped)
