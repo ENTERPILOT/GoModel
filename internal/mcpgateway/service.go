@@ -265,10 +265,11 @@ func (s *Service) Skipped() map[string]error {
 	return maps.Clone(s.skipped)
 }
 
-// Running reports whether the server name is in the running upstream set.
+// Running reports whether the server name is enabled in the running upstream
+// set. A disabled server is kept there for the admin view but serves nothing.
 func (s *Service) Running(name string) bool {
-	_, ok := s.manager.spec(name)
-	return ok
+	spec, ok := s.manager.spec(name)
+	return ok && spec.Enabled
 }
 
 // Views returns the current admin snapshot of all servers.

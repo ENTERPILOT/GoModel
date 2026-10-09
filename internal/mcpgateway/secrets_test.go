@@ -165,7 +165,7 @@ func TestServiceResolvesHeaderReferences(t *testing.T) {
 	assert.Contains(t, vault.fields, "mcp_servers.github.headers.Authorization")
 
 	assert.False(t, service.Running("broken"), "a row whose references fail at startup is skipped")
-	assert.True(t, service.Running("github"))
+	assert.False(t, service.Running("github"), "a disabled server serves nothing, so it never blocks a reload")
 	skipped := service.Skipped()
 	require.Len(t, skipped, 1)
 	assert.ErrorContains(t, skipped["broken"], "mcp_servers.broken.headers.Authorization")
