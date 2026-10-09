@@ -3,7 +3,6 @@ package exchange
 import (
 	"bytes"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -15,8 +14,9 @@ import (
 // FromResponsesResponse builds the unified completion for a Responses
 // response: one choice whose parts follow the output items in order.
 // output_text content becomes text, refusal content a refusal part,
-// function_call items tool calls, reasoning items reasoning parts (summary
-// text), and everything else opaque parts. The finish reason is derived:
+// function_call items tool calls, reasoning items one reasoning part per
+// reasoning_text content and summary entry (one empty part when they have
+// neither), and everything else opaque parts. The finish reason is derived:
 // "tool_calls" when a function call is present, else "stop" for a completed
 // response, "length" for an incomplete one, otherwise the status.
 func FromResponsesResponse(resp *core.ResponsesResponse) (*pluginapi.Completion, error) {
@@ -51,7 +51,9 @@ func FromResponsesResponse(resp *core.ResponsesResponse) (*pluginapi.Completion,
 				Arguments: argumentsFromString(item.Arguments),
 			}})
 		case "reasoning":
-			msg.Parts = append(msg.Parts, pluginapi.Part{Kind: pluginapi.PartReasoning, Text: reasoningSummary(item)})
+			for _, segment := range reasoningSegments(item) {
+				msg.Parts = append(msg.Parts, pluginapi.Part{Kind: pluginapi.PartReasoning, Text: segment.text})
+			}
 		default:
 			msg.Parts = append(msg.Parts, opaquePart(item))
 		}
@@ -59,26 +61,6 @@ func FromResponsesResponse(resp *core.ResponsesResponse) (*pluginapi.Completion,
 	c.Choices = []pluginapi.Choice{{Index: 0, Message: msg, FinishReason: responsesFinishReason(resp.Status, hasToolCall)}}
 	c.Reset()
 	return c, nil
-}
-
-func reasoningSummary(item core.ResponsesOutputItem) string {
-	raw := item.ExtraFields.Lookup("summary")
-	if raw == nil {
-		return ""
-	}
-	var summary []struct {
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal(raw, &summary); err != nil {
-		return ""
-	}
-	texts := make([]string, 0, len(summary))
-	for _, s := range summary {
-		if s.Text != "" {
-			texts = append(texts, s.Text)
-		}
-	}
-	return strings.Join(texts, "\n")
 }
 
 func responsesFinishReason(status string, hasToolCall bool) string {
@@ -106,21 +88,28 @@ func usageFromResponses(u *core.ResponsesUsage) pluginapi.Usage {
 }
 
 // partLocation says which output item and content index a unified part came
-// from; content is -1 for item-level parts.
+// from; content is -1 for item-level parts. For a reasoning segment,
+// summary says content indexes the item's summary rather than its content.
 type partLocation struct {
 	item, content int
+	summary       bool
 }
 
 func responsesPartLocations(resp *core.ResponsesResponse) []partLocation {
 	var locs []partLocation
 	for i, item := range resp.Output {
-		if item.Type == "message" {
+		switch item.Type {
+		case "message":
 			for j := range item.Content {
 				locs = append(locs, partLocation{item: i, content: j})
 			}
-			continue
+		case "reasoning":
+			for _, segment := range reasoningSegments(item) {
+				locs = append(locs, partLocation{item: i, content: segment.index, summary: segment.summary})
+			}
+		default:
+			locs = append(locs, partLocation{item: i, content: -1})
 		}
-		locs = append(locs, partLocation{item: i, content: -1})
 	}
 	return locs
 }
@@ -154,8 +143,15 @@ func ApplyToResponsesResponse(original *core.ResponsesResponse, c *pluginapi.Com
 			return nil, fmt.Errorf("exchange: choice parts changed structurally (%d parts, %d output entries); use ReplaceText", len(parts), len(locs))
 		}
 		for i, part := range parts {
-			if part.Kind == pluginapi.PartText && locs[i].content >= 0 {
-				result.Output[locs[i].item].Content[locs[i].content].Text = part.Text
+			loc := locs[i]
+			switch {
+			case loc.content < 0:
+			case part.Kind == pluginapi.PartText:
+				result.Output[loc.item].Content[loc.content].Text = part.Text
+			case part.Kind == pluginapi.PartReasoning:
+				if err := setReasoningSegment(&result.Output[loc.item], loc, part.Text); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}

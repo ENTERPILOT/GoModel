@@ -42,7 +42,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
-          # v2.13+ supports Go 1.27 and bundles a compatible staticcheck.
+          # v2.14+ reads Go 1.27.2 export data and bundles a compatible staticcheck.
           version: v2.14.0
           # The shared analysis cache went bad once (2026-08-25: staticcheck
           # lost t.Fatal no-return facts and flagged SA5011 false positives in

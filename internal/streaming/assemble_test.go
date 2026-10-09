@@ -316,3 +316,22 @@ func TestAssembleChatResponse_KeepsReplayState(t *testing.T) {
 	reasoning := resp.Choices[0].Message.ExtraFields.Lookup("reasoning_content")
 	assert.Equal(t, `"hm"`, string(reasoning))
 }
+
+// A buffered replay keeps reasoning under the member it came in.
+func TestSynthesizeChatStream_VendorReasoningMember(t *testing.T) {
+	resp := &core.ChatResponse{
+		ID: "chatcmpl-4",
+		Choices: []core.Choice{{
+			Message: core.ResponseMessage{
+				Role:        "assistant",
+				Content:     "done",
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"reasoning": json.RawMessage(`"hm"`)}),
+			},
+			FinishReason: "stop",
+		}},
+	}
+	assembled, err := AssembleChatResponse(decodeChatEvents(t, SynthesizeChatStream(resp, false)))
+	require.NoError(t, err)
+	assert.Equal(t, `"hm"`, string(assembled.Choices[0].Message.ExtraFields.Lookup("reasoning")))
+	assert.Nil(t, assembled.Choices[0].Message.ExtraFields.Lookup("reasoning_content"))
+}

@@ -2,7 +2,8 @@
 // completion text to a Presidio analyzer sidecar, and anonymizes, flags, or
 // blocks the personal data it finds. Anonymization happens in GoModel with
 // numbered placeholders ("<PERSON_1>"), so the original values can be put
-// back into the response, and no anonymizer service is needed.
+// back into the response (answer, reasoning, and tool-call arguments), and
+// no anonymizer service is needed.
 package presidio
 
 import (
@@ -98,7 +99,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 			},
 			{
 				Key: "operator", Label: "Operator", Input: pluginapi.InputSelect, Default: OperatorReplace,
-				Help: "How anonymize rewrites a value. Replace writes a numbered placeholder such as <PERSON_1>, the same one for every occurrence of that value in the request. Mask writes one * per character, redact removes the value, hash writes its SHA-256.",
+				Help: "How anonymize rewrites a value. Replace writes a numbered placeholder such as <PERSON_1> (see placeholder format), the same one for every occurrence of that value in the request. Mask writes one * per character, redact removes the value, hash writes its SHA-256.",
 				Options: []pluginapi.Option{
 					{Value: OperatorReplace, Label: "Replace with <TYPE_n>"},
 					{Value: OperatorMask, Label: "Mask with *"},
@@ -107,8 +108,28 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 				},
 			},
 			{
+				Key: "placeholder_format", Label: "Placeholder format", Input: pluginapi.InputText, Default: DefaultPlaceholderFormat,
+				Help:        "How replace writes a placeholder: {entity} is the entity type, {n} its number. Use [{entity}_{n}] when the client renders Markdown and hides <...> as HTML. It must start and end with a punctuation character and separate {entity} from {n}. Instances that handle one request share the format of the first one that runs.",
+				Placeholder: DefaultPlaceholderFormat,
+			},
+			{
 				Key: "restore", Label: "Restore values in the response", Input: pluginapi.InputBool, Default: false,
-				Help: "Put the original values back where the model repeats a placeholder, so the client sees its own data while the provider never does. Values from system and developer messages are never put back. Needs operator replace, and an instance with restore in the response or stream phase as well as in the prompt phase. Such responses are kept out of the response cache.",
+				Help: "Put the original values back where the model repeats a placeholder, in the answer, the reasoning, and tool-call arguments, so the client sees its own data while the provider never does. Placeholders are found in any letter case and when Markdown- or HTML-escaped. Needs operator replace, and an instance with restore in the response or stream phase as well as in the prompt phase. Such responses are kept out of the response cache.",
+			},
+			{
+				Key: "restore_roles", Label: "Restore roles", Input: pluginapi.InputCheckboxes, Default: []string{"user", "assistant", "tool"},
+				Help:    "Prompt roles whose values are put back. System is off by default, so a model repeating a placeholder cannot disclose the system prompt's data; add it when the system message carries the user's own data (a chat frontend's user name or memories) and anyone who can use the deployment may see it.",
+				Options: pluginapi.RoleOptions(),
+			},
+			{
+				Key: "restore_tools", Label: "Restore in tools", Input: pluginapi.InputList,
+				Help:        "Tools, by function name, whose call arguments get the values back, one per line. Empty restores them for every tool. Others keep the placeholders: leave out client-run tools that send their arguments to third parties, such as web search.",
+				Placeholder: "knowledge_search\nask_user",
+			},
+			{
+				Key: "restore_tools_exclude", Label: "Keep placeholders in tools", Input: pluginapi.InputList,
+				Help:        "Tools, by function name, whose call arguments keep the placeholders even when restore in tools would select them, one per line.",
+				Placeholder: "web_search",
 			},
 			{
 				Key: "message", Label: "Message", Input: pluginapi.InputText, Default: DefaultMessage,

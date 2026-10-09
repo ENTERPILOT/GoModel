@@ -138,6 +138,63 @@ func TestPlugins_Presidio_E2E(t *testing.T) {
 		assert.True(t, chunks[len(chunks)-1].Done)
 	})
 
+	t.Run("streamed reasoning is restored and excluded tools keep placeholders", func(t *testing.T) {
+		t.Cleanup(func() { fx.reset(t) })
+		scriptMockDeltas(t, []map[string]any{
+			{"reasoning_content": "Greet <PERS"},
+			{"reasoning_content": "ON_1> now."},
+			{"tool_calls": []any{map[string]any{"index": 0, "id": "call_1", "type": "function", "function": map[string]any{"name": "web_search", "arguments": `{"q":"<PERSON_1>"}`}}}},
+			{"tool_calls": []any{map[string]any{"index": 1, "id": "call_2", "type": "function", "function": map[string]any{"name": "ask_user", "arguments": `{"q":"<PERS`}}}},
+			{"tool_calls": []any{map[string]any{"index": 1, "function": map[string]any{"arguments": `ON_1>"}`}}}},
+		})
+		fx.mustPutGuardrail(t, guardrailDef("pii-in", "presidio", presidioConfig(analyzer.URL, nil), nil))
+		fx.mustPutGuardrail(t, guardrailDef("pii-out", "presidio", presidioConfig(analyzer.URL, map[string]any{"stream_lookbehind": 16, "restore_tools_exclude": []string{"web_search"}}), nil))
+		fx.activate(t, workflowStep{Ref: "pii-in", Phase: "prompt", Step: 1}, workflowStep{Ref: "pii-out", Phase: "stream", Step: 1})
+
+		resp := fx.chat(t, userText, true)
+		defer closeBody(resp)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		var reasoning strings.Builder
+		args := map[float64]string{}
+		for _, chunk := range readStreamingResponse(t, resp.Body) {
+			for _, choice := range chunk.Choices {
+				delta, _ := choice["delta"].(map[string]any)
+				text, _ := delta["reasoning_content"].(string)
+				reasoning.WriteString(text)
+				calls, _ := delta["tool_calls"].([]any)
+				for _, c := range calls {
+					call, _ := c.(map[string]any)
+					fn, _ := call["function"].(map[string]any)
+					v, _ := fn["arguments"].(string)
+					args[call["index"].(float64)] += v
+				}
+			}
+		}
+		assert.Equal(t, "Greet Ann Lee now.", reasoning.String())
+		assert.Equal(t, `{"q":"<PERSON_1>"}`, args[0], "web_search keeps the placeholder")
+		assert.Equal(t, `{"q":"Ann Lee"}`, args[1])
+	})
+
+	t.Run("replayed reasoning is anonymized for the provider", func(t *testing.T) {
+		t.Cleanup(func() { fx.reset(t) })
+		fx.mustPutGuardrail(t, guardrailDef("pii-in", "presidio", presidioConfig(analyzer.URL, nil), nil))
+		fx.activate(t, workflowStep{Ref: "pii-in", Phase: "prompt", Step: 1})
+
+		mockServer.ResetRequests()
+		body := map[string]any{"model": "gpt-4", "messages": []any{
+			map[string]any{"role": "user", "content": userText},
+			map[string]any{"role": "assistant", "content": nil, "reasoning_content": "Ann Lee wants a greeting.", "tool_calls": []any{
+				map[string]any{"id": "call_1", "type": "function", "function": map[string]any{"name": "ask_user", "arguments": `{"q":"Ann Lee?"}`}},
+			}},
+			map[string]any{"role": "tool", "tool_call_id": "call_1", "content": "yes"},
+		}}
+		readChat(t, fx.do(t, http.MethodPost, chatCompletionsPath, body, nil))
+
+		upstream := lastUpstreamChat(t)
+		require.Len(t, upstream.Messages, 3)
+		assert.JSONEq(t, `"<PERSON_1> wants a greeting."`, string(upstream.Messages[1].ExtraFields.Lookup("reasoning_content")))
+	})
+
 	t.Run("blocking entity rejects the prompt", func(t *testing.T) {
 		t.Cleanup(func() { fx.reset(t) })
 		fx.mustPutGuardrail(t, guardrailDef("pii-in", "presidio", presidioConfig(analyzer.URL, map[string]any{"block_entities": []string{"EMAIL_ADDRESS"}, "message": "no e-mail addresses"}), nil))
@@ -195,6 +252,31 @@ func scriptMockToolStream(t *testing.T, name string, argChunks []string) {
 			if flusher != nil {
 				flusher.Flush()
 			}
+		}
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		return true
+	})
+	t.Cleanup(resetMock)
+}
+
+// scriptMockDeltas makes the shared mock answer streaming chat completions
+// with one chunk per delta, the last finishing with tool_calls.
+func scriptMockDeltas(t *testing.T, deltas []map[string]any) {
+	t.Helper()
+	mockServer.SetCustomHandler(func(w http.ResponseWriter, r *http.Request) bool {
+		req, ok := decodeMockChat(r)
+		if !ok || !req.Stream {
+			return false
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		for i, delta := range deltas {
+			choice := map[string]any{"index": 0, "delta": delta, "finish_reason": nil}
+			if i == len(deltas)-1 {
+				choice["finish_reason"] = "tool_calls"
+			}
+			data, _ := json.Marshal(map[string]any{"id": "chatcmpl-deltas", "object": "chat.completion.chunk", "model": req.Model, "created": 1, "choices": []any{choice}})
+			_, _ = w.Write([]byte("data: " + string(data) + "\n\n"))
 		}
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 		return true
