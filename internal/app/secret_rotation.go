@@ -57,6 +57,21 @@ type secretRotation struct {
 	closed bool
 	cancel context.CancelFunc
 	done   chan struct{}
+
+	// handoff guards stranded and held. stranded is set while a re-check
+	// abandoned after secretRecheckTimeout still waits on its resolver; held
+	// records a notification that arrived meanwhile. One lock makes the
+	// handoff exclusive: a notification either runs a check now or is held
+	// and re-sent once, never both.
+	handoff  sync.Mutex
+	stranded bool
+	held     bool
+}
+
+// recheckOutcome is the result of one re-resolution of every reference.
+type recheckOutcome struct {
+	recheck *config.SecretRecheck
+	err     error
 }
 
 // providerKeyPlanner adapts providers.InitResult to secretRotation.
@@ -86,6 +101,9 @@ func (w *secretRotation) start(ctx context.Context) {
 	w.done = make(chan struct{})
 	go func() {
 		defer close(w.done)
+		// A notification held for a stranded re-check must not die with this
+		// watcher: the generation serving next has to see it.
+		defer w.forwardHeld()
 		for {
 			select {
 			case <-ctx.Done():
@@ -131,15 +149,41 @@ func (w *secretRotation) Close() error {
 // serving generation's context: once it ends, a check that was still
 // resolving drops its result and hands the notification on, so the next
 // generation re-checks with its own resolvers.
+//
+// The re-resolution runs on its own goroutine, and check stops waiting for it
+// after secretRecheckTimeout: a resolver that ignores its context must not
+// wedge the watcher. Its late result is discarded. Until it returns, further
+// notifications are held instead of starting another re-check the same
+// resolver would block, and one is re-sent once it does.
 func (w *secretRotation) check(generation context.Context) {
+	if w.holdIfStranded() {
+		slog.Warn("a secret re-check is still waiting on a resolver that did not return; this change is checked once it does")
+		return
+	}
 	ctx, cancel := context.WithTimeout(generation, secretRecheckTimeout)
 	defer cancel()
 
-	recheck, err := w.secrets.Recheck(ctx)
+	result := make(chan recheckOutcome, 1) // buffered: an abandoned re-check never blocks on send
+	go func() {
+		recheck, err := w.secrets.Recheck(ctx)
+		result <- recheckOutcome{recheck, err}
+	}()
+	var out recheckOutcome
+	select {
+	case out = <-result:
+	case <-ctx.Done():
+		if generation.Err() == nil {
+			slog.Warn("secret references were not re-resolved in time; keeping the current values",
+				"timeout", secretRecheckTimeout)
+			w.strand(result)
+			return
+		}
+	}
 	if generation.Err() != nil {
 		w.secrets.NotifyChanged()
 		return
 	}
+	recheck, err := out.recheck, out.err
 	// A reference that failed keeps its current value and stays pending; the
 	// recheck holds only the fields that did resolve.
 	configFailed := false
@@ -183,6 +227,44 @@ func (w *secretRotation) check(generation context.Context) {
 	}
 	slog.Info("referenced secrets changed; reloading the configuration", "fields", fields)
 	w.reload("secret references changed: " + strings.Join(fields, ", "))
+}
+
+// strand records a re-check that outlived secretRecheckTimeout. Once it
+// returns, its result is dropped and a notification held meanwhile is sent
+// again.
+func (w *secretRotation) strand(result <-chan recheckOutcome) {
+	w.handoff.Lock()
+	w.stranded = true
+	w.handoff.Unlock()
+	go func() {
+		<-result
+		w.handoff.Lock()
+		w.stranded = false
+		w.handoff.Unlock()
+		w.forwardHeld()
+	}()
+}
+
+// holdIfStranded reports whether a stranded re-check is still running and, if
+// so, holds the current notification for it to re-send.
+func (w *secretRotation) holdIfStranded() bool {
+	w.handoff.Lock()
+	defer w.handoff.Unlock()
+	if w.stranded {
+		w.held = true
+	}
+	return w.stranded
+}
+
+// forwardHeld re-sends a held notification, at most once.
+func (w *secretRotation) forwardHeld() {
+	w.handoff.Lock()
+	resend := w.held
+	w.held = false
+	w.handoff.Unlock()
+	if resend {
+		w.secrets.NotifyChanged()
+	}
 }
 
 func (w *secretRotation) touchesPinned(names []string) bool {

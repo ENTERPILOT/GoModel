@@ -253,3 +253,123 @@ func TestSecretRotationCloseDoesNotWaitForAStuckResolver(t *testing.T) {
 	}
 	assert.Empty(t, reloads, "a check outliving its generation must not act")
 }
+
+func (w *secretRotation) handoffState() (stranded, held bool) {
+	w.handoff.Lock()
+	defer w.handoff.Unlock()
+	return w.stranded, w.held
+}
+
+// hangingRotation is a serving watcher whose resolver, once hang is set,
+// blocks its first call until release, ignoring its context.
+type hangingRotation struct {
+	rotation *secretRotation
+	secrets  *config.Secrets
+	notifier *config.SecretNotifier
+	calls    atomic.Int32
+	hang     atomic.Bool
+	entered  chan struct{}
+	release  func()
+	reloads  chan string
+}
+
+func newHangingRotation(t *testing.T) *hangingRotation {
+	t.Helper()
+	previous := secretRecheckTimeout
+	secretRecheckTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { secretRecheckTimeout = previous })
+
+	h := &hangingRotation{
+		secrets:  config.NewSecrets(),
+		notifier: config.NewSecretNotifier(),
+		entered:  make(chan struct{}),
+		reloads:  make(chan string, 4),
+	}
+	released := make(chan struct{})
+	var once sync.Once
+	h.release = func() { once.Do(func() { close(released) }) }
+	// Registered first, so it runs last: a failing test never leaves the
+	// resolver blocked.
+	t.Cleanup(h.release)
+
+	h.secrets.SetNotifier(h.notifier)
+	require.NoError(t, h.secrets.Register("vault", config.SecretResolverFunc(func(context.Context, string) (string, error) {
+		if !h.hang.Load() {
+			return "d1", nil
+		}
+		if h.calls.Add(1) == 1 {
+			close(h.entered)
+			<-released // ignores its context
+		}
+		return "d2", nil
+	})))
+	fields := map[string]string{"storage.postgresql.url": "${vault:dsn}"}
+	require.NoError(t, h.secrets.ResolveFields(t.Context(), "", &fields))
+
+	h.rotation = &secretRotation{
+		secrets:  h.secrets,
+		planKeys: func(*config.SecretRecheck) keySwap { return nil },
+		reload:   func(reason string) { h.reloads <- reason },
+	}
+	h.rotation.start(t.Context())
+	t.Cleanup(func() { assert.NoError(t, h.rotation.Close()) })
+	return h
+}
+
+// strandAndHold hangs the resolver, lets the check give up on it, and sends
+// a second notification that the watcher holds.
+func (h *hangingRotation) strandAndHold(t *testing.T) {
+	t.Helper()
+	h.hang.Store(true)
+	h.secrets.NotifyChanged()
+	select {
+	case <-h.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the watcher did not start a re-check")
+	}
+	require.Eventually(t, func() bool { stranded, _ := h.rotation.handoffState(); return stranded },
+		5*time.Second, 5*time.Millisecond, "the check did not give up on the hung resolver")
+
+	// The watcher is free again: this notice is held, not stacked on the
+	// resolver that is still hung.
+	h.secrets.NotifyChanged()
+	require.Eventually(t, func() bool { _, held := h.rotation.handoffState(); return held },
+		5*time.Second, 5*time.Millisecond, "the second notification was not held")
+	assert.Equal(t, int32(1), h.calls.Load(), "no second re-check while the first is stranded")
+	assert.Empty(t, h.reloads, "a timed-out re-check must not act")
+}
+
+// A resolver that ignores its context must not wedge the serving watcher:
+// the check gives up after secretRecheckTimeout, later notifications are held
+// without starting another re-check the resolver would block, and the change
+// is applied once the resolver returns.
+func TestSecretRotationRecheckTimeoutDoesNotWedgeTheWatcher(t *testing.T) {
+	h := newHangingRotation(t)
+	h.strandAndHold(t)
+
+	h.release()
+	select {
+	case reason := <-h.reloads:
+		assert.Contains(t, reason, "storage.postgresql.url")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the held notification was not checked once the resolver returned")
+	}
+}
+
+// A notification held for a stranded re-check is forwarded when the watcher
+// stops, without waiting for the resolver: the generation serving next must
+// re-check, or it keeps the old credential with nothing pending.
+func TestSecretRotationForwardsAHeldNoticeWhenItStops(t *testing.T) {
+	h := newHangingRotation(t)
+	h.strandAndHold(t)
+
+	require.NoError(t, h.rotation.Close())
+	select {
+	case <-h.notifier.C():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the held notification died with the watcher")
+	}
+	_, held := h.rotation.handoffState()
+	assert.False(t, held, "the notice is forwarded once, not again when the resolver returns")
+	assert.Empty(t, h.reloads, "the stopped watcher must not act")
+}
