@@ -613,10 +613,12 @@ the response-phase instance restores them. Reasoning is only restored, not
 analyzed. Restored reasoning a chat client sends back on the next turn
 (`reasoning_content`, which DeepSeek requires with tool calls) is anonymized
 again in the prompt phase, like the rest of the history. Signed Anthropic
-thinking blocks travel separately and are never edited. Reasoning items of a
-`/v1/responses` output (summaries and reasoning text) keep the placeholders:
-clients replay them in `input` as they are, so restored values would reach
-the provider on the next turn.
+thinking blocks travel separately and are never edited; on `/v1/messages`,
+where the client sends the thinking text back with its signature, Anthropic
+thinking keeps its placeholders. Reasoning items of a `/v1/responses` output
+(summaries and reasoning text) keep the placeholders too: clients replay them
+in `input` as they are, so restored values would reach the provider on the
+next turn.
 
 The prompt-phase instance needs `restore` to record the values; the
 restoring instance reads `restore_tools` and `restore_tools_exclude`.

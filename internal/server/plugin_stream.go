@@ -23,6 +23,10 @@ import (
 type streamDialect struct {
 	codec  func() streaming.Codec
 	finish func(events []streaming.Event, run func(*pluginapi.Completion) (plugins.Outcome, error)) ([]byte, error)
+	// signedReasoning marks the reasoning of the stream as signed: the
+	// client replays it verbatim with the provider's signature, so plugins
+	// must not edit it.
+	signedReasoning bool
 }
 
 func chatStreamDialect(includeUsage bool) streamDialect {
@@ -69,6 +73,45 @@ func chatStreamDialect(includeUsage bool) streamDialect {
 			}
 			return streaming.SynthesizeChatStream(applied, includeUsage), nil
 		},
+	}
+}
+
+// messagesStreamDialect is the chat dialect behind a streamed /v1/messages
+// response. A Messages client replays a thinking block verbatim with its
+// signature, so when the provider signs its reasoning no plugin may edit it:
+// in-flight events carry Signed, and a buffered run's reasoning edits are
+// undone before the stream is synthesized again.
+func messagesStreamDialect(signedReasoning bool) streamDialect {
+	dialect := chatStreamDialect(false)
+	if !signedReasoning {
+		return dialect
+	}
+	dialect.signedReasoning = true
+	finish := dialect.finish
+	dialect.finish = func(events []streaming.Event, run func(*pluginapi.Completion) (plugins.Outcome, error)) ([]byte, error) {
+		return finish(events, func(completion *pluginapi.Completion) (plugins.Outcome, error) {
+			original := completion.ReasoningTargets()
+			outcome, err := run(completion)
+			if err == nil {
+				keepReasoning(completion, original)
+			}
+			return outcome, err
+		})
+	}
+	return dialect
+}
+
+// keepReasoning puts the reasoning parts listed in original back to the text
+// they had there.
+func keepReasoning(completion *pluginapi.Completion, original []pluginapi.TextTarget) {
+	for _, t := range original {
+		if t.Choice >= len(completion.Choices) {
+			continue
+		}
+		parts := completion.Choices[t.Choice].Message.Parts
+		if t.Part < len(parts) && parts[t.Part].Kind == pluginapi.PartReasoning && parts[t.Part].Text != t.Text {
+			_ = completion.SetReasoning(t.Choice, t.Part, t.Text)
+		}
 	}
 }
 
@@ -156,7 +199,7 @@ func (s *translatedInferenceService) wrapPluginStream(ctx context.Context, workf
 		x.Prompt = prompt()
 	}
 	x.Stream = &pluginapi.StreamState{}
-	ps := &pluginStream{ctx: ctx, chains: chains, state: state, x: x, requestID: x.Meta.RequestID}
+	ps := &pluginStream{ctx: ctx, chains: chains, state: state, x: x, requestID: x.Meta.RequestID, signedReasoning: dialect.signedReasoning}
 
 	// One buffer serves every buffered instance and the response chain. Its
 	// cap is the largest one asked for, and the host default as soon as any
@@ -240,6 +283,8 @@ type pluginStream struct {
 	inFlight   []inFlightInstance
 	lookbehind int
 	minChunk   int
+	// signedReasoning marks every reasoning event Signed.
+	signedReasoning bool
 	// replaced and dropped count, per in-flight instance, the events it
 	// rewrote or withheld; eventTime is the time its event hook took over
 	// the stream and failedOpen its first event failure the chain carried on
@@ -371,6 +416,7 @@ func instanceNames(instances []*plugins.Instance) []string {
 // text that way rather than the original.
 func (ps *pluginStream) OnEvent(ev *streaming.Event) (streaming.Decision, error) {
 	pev := &pluginapi.StreamEvent{Seq: ev.Seq + 1, Kind: pluginEventKind(ev.Kind), Choice: ev.Choice, Call: ev.Call, Tool: ev.Tool, Text: ev.Text, Overlap: ev.Overlap, Final: ev.Final, Raw: ev.Data}
+	pev.Signed = ps.signedReasoning && pev.Kind == pluginapi.EventReasoningDelta
 	result := streaming.Decision{Action: streaming.ActionPass}
 	for _, entry := range ps.inFlight {
 		inst, observe := entry.inst, entry.observe
@@ -401,14 +447,14 @@ func (ps *pluginStream) OnEvent(ev *streaming.Event) (streaming.Decision, error)
 			ps.state.Record(ps.streamRecord(inst, plugins.DecisionRecord{Decision: term}))
 			return streaming.Decision{Action: streaming.ActionTerminate, Terminate: terminationFor(term)}, nil
 		case pluginapi.StreamDrop:
-			if observe {
+			if observe || pev.Signed {
 				continue
 			}
 			ps.countEdit(&ps.dropped, inst.Name)
 			ps.x.Stream.ReplaceTail(pev, ev.Overlap, "")
 			return streaming.Decision{Action: streaming.ActionDrop}, nil
 		case pluginapi.StreamReplace:
-			if observe || !replaceable(pev.Kind) {
+			if observe || pev.Signed || !replaceable(pev.Kind) {
 				continue
 			}
 			ps.countEdit(&ps.replaced, inst.Name)

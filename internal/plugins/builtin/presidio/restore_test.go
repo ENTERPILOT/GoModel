@@ -179,6 +179,23 @@ func TestStreamRestoresReasoning(t *testing.T) {
 	}
 }
 
+func TestStreamKeepsSignedReasoning(t *testing.T) {
+	a := newAnalyzer(t, "Ann Lee")
+	in := newPlugin(t, a, `{"restore": true}`)
+	out := newPlugin(t, a, `{"restore": true}`)
+	x := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", "I am Ann Lee.")), nil)
+	_, err := in.OnPrompt(context.Background(), x)
+	require.NoError(t, err)
+
+	d, err := out.OnStreamEvent(context.Background(), x, &pluginapi.StreamEvent{Kind: pluginapi.EventReasoningDelta, Text: "User <PERSON_1>", Signed: true})
+	require.NoError(t, err)
+	assert.Equal(t, pluginapi.Pass(), d, "signed reasoning keeps its placeholders")
+
+	d, err = out.OnStreamEvent(context.Background(), x, &pluginapi.StreamEvent{Kind: pluginapi.EventReasoningDelta, Text: "User <PERSON_1>"})
+	require.NoError(t, err)
+	assert.Equal(t, pluginapi.Replace("User Ann Lee"), d, "unsigned reasoning is restored")
+}
+
 func TestRestoreTools(t *testing.T) {
 	tests := []struct {
 		name string
