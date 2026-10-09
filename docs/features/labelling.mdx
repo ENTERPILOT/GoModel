@@ -214,6 +214,32 @@ strings. Other `metadata` keys pass through, and a string `metadata.tags` is
 left alone as ordinary OpenAI metadata. Audit logs keep the body as the client
 sent it.
 
+One request contributes at most **32** distinct tags, counted across the
+header and both body fields in that order; the rest are dropped. Tags longer
+than **128** characters are dropped, not truncated. Dropped tags are still
+removed before the provider.
+
+<Warning>
+  Clients choose their own tags, so any client can charge a label budget by
+  naming its label. When label budgets must hold per team, turn LiteLLM tags
+  off and label traffic with [API key labels](#api-key-labels) or tagging
+  headers your proxy sets.
+</Warning>
+
+LiteLLM tags are on by default. Turn them off with:
+
+```bash
+LITELLM_TAGS_ENABLED=false
+```
+
+```yaml config.yaml
+tagging:
+  litellm_tags_enabled: false
+```
+
+When off, GoModel neither reads nor removes tags: requests reach the provider
+as the client sent them, so a provider that rejects `tags` returns its error.
+
 ## Where labels show up
 
 - **Usage dashboard** — the usage page shows a by-label breakdown
@@ -231,3 +257,7 @@ sent it.
 
 Labelling is on by default and costs nothing until you configure a tagging
 rule, create a labelled key, or a client sends LiteLLM tags. Requests without labels are tracked as before.
+
+| Setting | Default | Change it when |
+| --- | --- | --- |
+| `LITELLM_TAGS_ENABLED` / `tagging.litellm_tags_enabled` | `true` | Label budgets must not be chargeable by client-chosen tags. |

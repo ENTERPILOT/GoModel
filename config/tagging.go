@@ -20,6 +20,14 @@ const DefaultTaggingDelimiter = ","
 // are read-only in the dashboard.
 type TaggingConfig struct {
 	Headers []TaggingHeaderConfig `yaml:"headers"`
+
+	// LiteLLMTagsEnabled turns the tags LiteLLM clients send (the
+	// x-litellm-tags header, a body "tags" field, and a list metadata.tags)
+	// into request labels and strips them before the request goes upstream.
+	// Clients choose these tags, so they can charge any label budget they
+	// name; turn this off when label budgets must hold per team.
+	// Default: true.
+	LiteLLMTagsEnabled bool `yaml:"litellm_tags_enabled" env:"LITELLM_TAGS_ENABLED"`
 }
 
 // TaggingHeaderConfig declares one header to extract labels from.
