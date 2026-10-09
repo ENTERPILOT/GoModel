@@ -232,8 +232,10 @@ records of a deleted entity.
 
 A stored entity whose references fail when it is loaded is handled like any
 other invalid stored row of its kind: a provider credential or MCP server is
-logged and skipped, and a running MCP server keeps its current headers;
-guardrails load as a set, so a failure fails the guardrail load (startup
+logged and skipped, and a running MCP server keeps its current headers. A
+reload whose replacement would skip one the serving generation runs fails
+instead, so the serving generation keeps it, as for a `config.yaml`
+reference; guardrails load as a set, so a failure fails the guardrail load (startup
 fails, a reload keeps the running generation, a periodic refresh keeps the
 current instances), which keeps guardrails failing closed.
 

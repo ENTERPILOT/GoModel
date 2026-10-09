@@ -122,6 +122,12 @@ type Config struct {
 	// must not block. The app calls it when a referenced secret other than a
 	// provider API key rotates. Nil leaves such a change to a manual reload.
 	RequestReload func(reason string)
+
+	// Replaces is the serving generation a reload builds this one to replace,
+	// nil at startup. A provider credential or MCP server it runs whose
+	// stored secret references no longer resolve fails the build, so the
+	// serving generation keeps running it instead of the reload dropping it.
+	Replaces *App
 }
 
 // New creates a new App with all dependencies initialized.

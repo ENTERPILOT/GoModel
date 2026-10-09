@@ -63,6 +63,11 @@ func (b *bootstrap) initModelCatalog() error {
 	}
 	app.providerCredentials = providerCredentialsResult
 	app.register(subsystemProviderCredentials, ownedByShutdown, app.providerCredentials.Close)
+	if previous := b.cfg.Replaces; previous != nil && previous.providerCredentials != nil {
+		if err := keepServingEntities("provider credentials", providerCredentialsResult.Service.Skipped(), previous.providerCredentials.Service.Installed); err != nil {
+			return err
+		}
+	}
 	app.secretRotation.watchEntities(providers.CredentialSecretEntity+".", providerCredentialsResult.Service)
 
 	// The routing-strategy resolver was built with the provider hooks in

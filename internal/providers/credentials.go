@@ -113,6 +113,9 @@ type CredentialsService struct {
 
 	managedNames map[string]struct{}
 	resilience   config.ResilienceConfig
+	// skipped holds, by name, why Reload left out stored credentials that
+	// did not build. Guarded by mu.
+	skipped map[string]error
 	// secrets resolves the secret references stored credentials hold, with
 	// the schemes of the generation this service belongs to.
 	secrets *config.Secrets
@@ -216,6 +219,7 @@ func (s *CredentialsService) Reload(ctx context.Context) error {
 	}
 
 	registeredAny := false
+	skipped := make(map[string]error)
 	for _, row := range rows {
 		if s.IsManaged(row.Name) {
 			slog.Warn("provider credential from admin store is shadowed by config/env", "provider", row.Name)
@@ -226,14 +230,35 @@ func (s *CredentialsService) Reload(ctx context.Context) error {
 		}
 		if err := s.register(ctx, row); err != nil {
 			slog.Error("failed to apply stored provider credential", "provider", row.Name, "error", err)
+			skipped[strings.TrimSpace(row.Name)] = err
 			continue
 		}
 		registeredAny = true
 	}
+	s.mu.Lock()
+	s.skipped = skipped
+	s.mu.Unlock()
 	if registeredAny {
 		s.registry.InitializeAsync(ctx)
 	}
 	return nil
+}
+
+// Skipped returns, by name, why the last Reload left out stored credentials
+// that did not build: a secret reference that did not resolve, a resolved
+// value that is not usable, such as an empty key, or any other reason.
+func (s *CredentialsService) Skipped() map[string]error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return maps.Clone(s.skipped)
+}
+
+// Installed reports whether the credential name is installed in the registry.
+func (s *CredentialsService) Installed(name string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.configs[name]
+	return ok
 }
 
 // List returns every admin-managed credential row (secrets included; callers
