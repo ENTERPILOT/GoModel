@@ -85,6 +85,14 @@ func TestNumberFirstPlaceholderFormat(t *testing.T) {
 	got, _ = m.restore("Hi [1-PERSON-x] [1-PERSON]")
 	assert.Equal(t, "Hi [1-PERSON-x] Ann", got, "the separator is not part of the type")
 
+	// Punctuation between the number and the type may be part of the type.
+	dotted, err := parsePlaceholderFormat("[{n}.{entity}]")
+	require.NoError(t, err)
+	d := newMapping(dotted)
+	assert.Equal(t, "[1.ZIP.CODE]", d.placeholder("ZIP.CODE", "10115", true))
+	got, _ = d.restore("Zip [1.zip.code], [[1.ZIP.CODE]], not [1.ZIP.CODE.x]")
+	assert.Equal(t, "Zip 10115, [10115], not [1.ZIP.CODE.x]", got)
+
 	m.reserve("[1-email_address]")
 	assert.Equal(t, "[2-EMAIL_ADDRESS]", m.placeholder("EMAIL_ADDRESS", "a@b", true), "a reserved number was reused")
 }

@@ -105,17 +105,21 @@ func (f *placeholderFormat) pattern(mode patternMode) string {
 
 // entityClass matches one character of an entity type. Ad hoc recognizers
 // may name types with any characters, so it takes everything but
-// whitespace, the characters escapes start with, and the punctuation of the
-// format, which marks where the type ends.
+// whitespace, the characters escapes start with, and the punctuation that
+// can mark where the type starts or ends: the format's prefix and what
+// follows {entity}. Punctuation only between {n} and {entity}, such as the
+// "." of "[{n}.{entity}]", may occur in the type: the number bounds it.
 func (f *placeholderFormat) entityClass() string {
+	entity, number := strings.Index(f.format, entityToken), strings.Index(f.format, numberToken)
+	edges := f.format[:min(entity, number)] + f.format[entity+len(entityToken):]
+	edges = strings.Replace(edges, numberToken, "", 1)
 	var b strings.Builder
 	b.WriteString(`[^\s\\"&;`)
-	literal := strings.NewReplacer(entityToken, "", numberToken, "").Replace(f.format)
-	for i := 0; i < len(literal); i++ {
-		if punct(literal[i]) {
+	for i := 0; i < len(edges); i++ {
+		if punct(edges[i]) {
 			// Escaped, so "-" cannot form a range.
 			b.WriteByte('\\')
-			b.WriteByte(literal[i])
+			b.WriteByte(edges[i])
 		}
 	}
 	b.WriteString("]")
