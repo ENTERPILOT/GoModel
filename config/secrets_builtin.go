@@ -28,7 +28,9 @@ func resolveEnvSecret(_ context.Context, name string) (string, error) {
 
 // resolveFileSecret implements ${file:/absolute/path}, the shape Docker and
 // Kubernetes secret mounts take. One trailing newline is removed, because
-// editors and `echo` add one.
+// editors and `echo` add one. Like an empty ${env:NAME}, a file that is empty
+// after that is an error: an emptied master key file must not turn
+// authentication off.
 func resolveFileSecret(_ context.Context, path string) (string, error) {
 	if !filepath.IsAbs(path) {
 		return "", fmt.Errorf("file path %s must be absolute", path)
@@ -45,9 +47,12 @@ func resolveFileSecret(_ context.Context, path string) (string, error) {
 	if len(data) > maxSecretFileSize {
 		return "", fmt.Errorf("file %s is larger than 1 MiB", path)
 	}
-	value := string(data)
-	if trimmed, ok := strings.CutSuffix(value, "\r\n"); ok {
-		return trimmed, nil
+	value, ok := strings.CutSuffix(string(data), "\r\n")
+	if !ok {
+		value = strings.TrimSuffix(value, "\n")
 	}
-	return strings.TrimSuffix(value, "\n"), nil
+	if value == "" {
+		return "", fmt.Errorf("file %s is empty", path)
+	}
+	return value, nil
 }
