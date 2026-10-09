@@ -245,14 +245,6 @@ jobs:
           release_json="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json tagName,name,body,url)"
           release_url="$(jq -r '.url' <<< "$release_json")"
 
-          # De-dupe: a re-run of this workflow must not post the announcement
-          # twice. Webhook messages are readable via the webhook URL itself.
-          if curl -fsS --connect-timeout 10 --max-time 20 "${DISCORD_WEBHOOK_URL}/messages?limit=50" \
-              | jq -e --arg url "$release_url" '[.[].embeds[]? | select(.url == $url)] | length > 0' > /dev/null; then
-            echo "Release announcement already posted, skipping"
-            exit 0
-          fi
-
           # Discord embed descriptions cap at 4096 characters — jq counts
           # characters, not bytes, so multibyte notes stay within the limit.
           body="$(jq -r '(.body // "") | if length > 4000 then .[0:3997] + "..." else . end' <<< "$release_json")"
