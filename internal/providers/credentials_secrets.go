@@ -47,6 +47,24 @@ func credentialReferenceFields(cred *ManagedProviderCredential) []credentialRefe
 	)
 }
 
+// credentialDestinations lists the fields of cred that decide where it sends
+// its secrets, against previous, the row it replaces, for
+// config.CheckSecretDestinations: the type, whose adapter has its own default
+// host; the base URL, which also carries the host-forming region or endpoint
+// of Azure and Bedrock; the backend, which switches Gemini between hosts; and
+// the outbound proxy. A new credential has none.
+func credentialDestinations(previous, cred *ManagedProviderCredential) []config.SecretDestination {
+	if previous == nil {
+		return nil
+	}
+	return []config.SecretDestination{
+		{Field: "type", Stored: strings.ToLower(previous.Type), Saved: strings.ToLower(cred.Type)},
+		{Field: CredentialFieldBaseURL, Stored: previous.BaseURL, Saved: cred.BaseURL},
+		{Field: CredentialFieldBackend, Stored: previous.Backend, Saved: cred.Backend},
+		{Field: CredentialFieldProxyURL, Stored: previous.ProxyURL, Saved: cred.ProxyURL},
+	}
+}
+
 // credentialSecretValues lists the non-empty secret values of cred, for
 // releasing writer-owned references it no longer holds.
 func credentialSecretValues(cred *ManagedProviderCredential) []string {

@@ -311,6 +311,9 @@ func (s *Service) persist(ctx context.Context, server *ManagedServer) error {
 		}
 		write = s.store.Update
 	}
+	if err := config.CheckSecretDestinations(ctx, ServerSecretEntity, server.Name, serverDestinations(previous, server), headerValues(server)); err != nil {
+		return err
+	}
 	// Literal headers go to the secret writer first, when one is registered,
 	// so the row is stored with references only; then every reference must
 	// resolve before anything is persisted.

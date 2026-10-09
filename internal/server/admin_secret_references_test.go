@@ -43,6 +43,13 @@ type secretRefCarrier struct {
 	mask string
 	// stored reads the secret field as persisted.
 	stored func(t *testing.T) string
+	// edit is body with a field changed that does not decide where the
+	// entity sends its secrets.
+	edit func(secret string) string
+	// repoints are body with one destination field changed, by field.
+	repoints map[string]func(secret string) string
+	// destination reads the destination fields as persisted.
+	destination func(t *testing.T) string
 }
 
 // newSecretRefServer wires the admin API over real MCP, provider-credential,
@@ -59,12 +66,14 @@ func newSecretRefServer(t *testing.T, masterKey string) (*Server, []secretRefCar
 	t.Cleanup(mcpService.Close)
 
 	factory := providers.NewProviderFactory()
-	factory.Add(providers.Registration{
-		Type: "openai",
-		New: func(providers.ProviderConfig, providers.ProviderOptions) core.Provider {
-			return &mockProvider{modelsResponse: &core.ModelsResponse{Object: "list", Data: []core.Model{{ID: "gpt-test", Object: "model"}}}}
-		},
-	})
+	for _, providerType := range []string{"openai", "anthropic"} {
+		factory.Add(providers.Registration{
+			Type: providerType,
+			New: func(providers.ProviderConfig, providers.ProviderOptions) core.Provider {
+				return &mockProvider{modelsResponse: &core.ModelsResponse{Object: "list", Data: []core.Model{{ID: "gpt-test", Object: "model"}}}}
+			},
+		})
+	}
 	credentialStore, err := providers.NewSQLCredentialStore(ctx, db)
 	require.NoError(t, err)
 	credentials, err := providers.NewCredentialsService(ctx, factory, providers.NewModelRegistry(), credentialStore, nil, config.ResilienceConfig{}, nil)
@@ -108,6 +117,19 @@ func newSecretRefServer(t *testing.T, masterKey string) (*Server, []secretRefCar
 				require.NoError(t, err)
 				return row.Headers["Authorization"]
 			},
+			edit: func(secret string) string {
+				return `{"name":"docs","url":"http://127.0.0.1:1/mcp","description":"edited","headers":{"Authorization":` + strconv.Quote(secret) + `}}`
+			},
+			repoints: map[string]func(string) string{
+				"url": func(secret string) string {
+					return `{"name":"docs","url":"http://localhost:2/other","headers":{"Authorization":` + strconv.Quote(secret) + `}}`
+				},
+			},
+			destination: func(t *testing.T) string {
+				row, err := mcpStore.Get(t.Context(), "docs")
+				require.NoError(t, err)
+				return row.URL
+			},
 		},
 		{
 			name: "provider credential api key",
@@ -122,6 +144,28 @@ func newSecretRefServer(t *testing.T, masterKey string) (*Server, []secretRefCar
 				require.Len(t, row.APIKeys, 1)
 				return row.APIKeys[0]
 			},
+			edit: func(secret string) string {
+				return `{"name":"acme","type":"openai","api_keys":[` + strconv.Quote(secret) + `],"models":["gpt-test"]}`
+			},
+			repoints: map[string]func(string) string{
+				"type": func(secret string) string {
+					return `{"name":"acme","type":"anthropic","api_keys":[` + strconv.Quote(secret) + `]}`
+				},
+				"base_url": func(secret string) string {
+					return `{"name":"acme","type":"openai","base_url":"http://127.0.0.1:2/v1","api_keys":[` + strconv.Quote(secret) + `]}`
+				},
+				"backend": func(secret string) string {
+					return `{"name":"acme","type":"openai","backend":"aistudio","api_keys":[` + strconv.Quote(secret) + `]}`
+				},
+				"proxy_url": func(secret string) string {
+					return `{"name":"acme","type":"openai","proxy_url":"http://127.0.0.1:3","api_keys":[` + strconv.Quote(secret) + `]}`
+				},
+			},
+			destination: func(t *testing.T) string {
+				row, err := credentialStore.Get(t.Context(), "acme")
+				require.NoError(t, err)
+				return strings.Join([]string{row.Type, row.BaseURL, row.Backend, row.ProxyURL}, " ")
+			},
 		},
 		{
 			name: "guardrail secret",
@@ -134,6 +178,19 @@ func newSecretRefServer(t *testing.T, masterKey string) (*Server, []secretRefCar
 				row, err := guardrailStore.Get(t.Context(), "pii")
 				require.NoError(t, err)
 				return plugins.SecretValues(catalogSchema(t, catalog, "presidio"), row.Config)["api_key"]
+			},
+			edit: func(secret string) string {
+				return `{"name":"pii","type":"presidio","config":{"analyzer_url":"http://127.0.0.1:1","score_threshold":0.5,"api_key":` + strconv.Quote(secret) + `}}`
+			},
+			repoints: map[string]func(string) string{
+				"config.analyzer_url": func(secret string) string {
+					return `{"name":"pii","type":"presidio","config":{"analyzer_url":"http://localhost:2","api_key":` + strconv.Quote(secret) + `}}`
+				},
+			},
+			destination: func(t *testing.T) string {
+				row, err := guardrailStore.Get(t.Context(), "pii")
+				require.NoError(t, err)
+				return row.Type + " " + string(row.Config)
 			},
 		},
 	}
@@ -199,6 +256,70 @@ func TestAdminSecretReferences_DashboardKeyCannotAddOrChangeReferences(t *testin
 			require.Equal(t, http.StatusOK, rec.Code, "the master key changes a reference: %s", rec.Body.String())
 			assert.Equal(t, "${env:SECRETREF_OTHER}", carrier.stored(t))
 		})
+	}
+}
+
+func TestAdminSecretReferences_DashboardKeyCannotRepointHeldReferences(t *testing.T) {
+	t.Setenv("SECRETREF_SEED", "seed-value")
+	const seed = "${env:SECRETREF_SEED}"
+
+	srv, carriers := newSecretRefServer(t, secretRefMasterKey)
+	for _, carrier := range carriers {
+		for field, repoint := range carrier.repoints {
+			t.Run(carrier.name+"/"+field, func(t *testing.T) {
+				rec := putAdmin(t, srv, carrier.path, secretRefMasterKey, carrier.body(seed))
+				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+				destination := carrier.destination(t)
+
+				// The reference is unchanged, but the entity would send what it
+				// resolves to somewhere else.
+				rec = putAdmin(t, srv, carrier.path, secretRefDashboard, repoint(seed))
+				assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+				assert.Contains(t, rec.Body.String(), "secret_reference_requires_master_key")
+				assert.Contains(t, rec.Body.String(), field)
+				assert.NotContains(t, rec.Body.String(), "SECRETREF_SEED", "the error never repeats the value")
+				assert.Equal(t, destination, carrier.destination(t), "a refused save leaves the stored entity unchanged")
+				assert.Equal(t, seed, carrier.stored(t))
+
+				rec = putAdmin(t, srv, carrier.path, secretRefDashboard, carrier.edit(seed))
+				require.Equal(t, http.StatusOK, rec.Code, "a dashboard key edits other fields: %s", rec.Body.String())
+				assert.Equal(t, seed, carrier.stored(t))
+
+				rec = putAdmin(t, srv, carrier.path, secretRefMasterKey, repoint(seed))
+				require.Equal(t, http.StatusOK, rec.Code, "the master key repoints: %s", rec.Body.String())
+				assert.NotEqual(t, destination, carrier.destination(t))
+
+				// Back to the start, then without a reference a dashboard key
+				// repoints as before, a literal secret included.
+				rec = putAdmin(t, srv, carrier.path, secretRefMasterKey, carrier.body(seed))
+				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+				rec = putAdmin(t, srv, carrier.path, secretRefDashboard, carrier.body("sk-literal"))
+				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+				rec = putAdmin(t, srv, carrier.path, secretRefDashboard, repoint("sk-literal"))
+				require.Equal(t, http.StatusOK, rec.Code, "a dashboard key repoints an entity without references: %s", rec.Body.String())
+				assert.NotEqual(t, destination, carrier.destination(t))
+			})
+		}
+	}
+}
+
+func TestAdminSecretReferences_DashboardKeyRepointsWithoutMasterKey(t *testing.T) {
+	t.Setenv("SECRETREF_SEED", "seed-value")
+	const seed = "${env:SECRETREF_SEED}"
+
+	srv, carriers := newSecretRefServer(t, "")
+	for _, carrier := range carriers {
+		for field, repoint := range carrier.repoints {
+			t.Run(carrier.name+"/"+field, func(t *testing.T) {
+				rec := putAdmin(t, srv, carrier.path, secretRefDashboard, carrier.body(seed))
+				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+				destination := carrier.destination(t)
+
+				rec = putAdmin(t, srv, carrier.path, secretRefDashboard, repoint(seed))
+				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+				assert.NotEqual(t, destination, carrier.destination(t))
+			})
+		}
 	}
 }
 
