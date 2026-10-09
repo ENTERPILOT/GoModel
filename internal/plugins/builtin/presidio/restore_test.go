@@ -40,9 +40,9 @@ func TestPlaceholderFormatErrors(t *testing.T) {
 // finds it, and never a placeholder of another number.
 func TestRestoreFindsPlaceholderVariants(t *testing.T) {
 	m := defaultMapping(t)
-	m.placeholder("PERSON", "Ann", true)
-	m.placeholder("EMAIL_ADDRESS", `a"b@x.io`, true)
-	m.placeholder("ZIP.CODE", "10115", true)
+	m.placeholder("PERSON", "Ann", userGrant)
+	m.placeholder("EMAIL_ADDRESS", `a"b@x.io`, userGrant)
+	m.placeholder("ZIP.CODE", "10115", userGrant)
 
 	tests := []struct {
 		name string
@@ -60,14 +60,14 @@ func TestRestoreFindsPlaceholderVariants(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _ := m.restore(tt.in)
+			got, _ := m.restore(tt.in, defaultRoles)
 			assert.Equal(t, tt.want, got)
 		})
 	}
 
 	// In raw JSON: \u-escaped and Markdown-escaped punctuation, values
 	// written JSON-escaped.
-	got, n := m.restoreJSON(`{"a":"<PERSON_1>","b":"\\<EMAIL_ADDRESS_1\\>","c":"&lt;person_1&gt;","d":"<EMAIL_ADDRESS_1>"}`)
+	got, n := m.restoreJSON(`{"a":"<PERSON_1>","b":"\\<EMAIL_ADDRESS_1\\>","c":"&lt;person_1&gt;","d":"<EMAIL_ADDRESS_1>"}`, defaultRoles)
 	assert.Equal(t, `{"a":"Ann","b":"a\"b@x.io","c":"Ann","d":"a\"b@x.io"}`, got)
 	assert.Equal(t, 4, n)
 }
@@ -77,24 +77,24 @@ func TestNumberFirstPlaceholderFormat(t *testing.T) {
 	format, err := parsePlaceholderFormat("[{n}-{entity}]")
 	require.NoError(t, err)
 	m := newMapping(format)
-	assert.Equal(t, "[1-PERSON]", m.placeholder("PERSON", "Ann", true))
-	got, n := m.restore(`Hi [1-person] and \[1-PERSON\], not [2-PERSON].`)
+	assert.Equal(t, "[1-PERSON]", m.placeholder("PERSON", "Ann", userGrant))
+	got, n := m.restore(`Hi [1-person] and \[1-PERSON\], not [2-PERSON].`, defaultRoles)
 	assert.Equal(t, "Hi Ann and Ann, not [2-PERSON].", got)
 	assert.Equal(t, 2, n)
 
-	got, _ = m.restore("Hi [1-PERSON-x] [1-PERSON]")
+	got, _ = m.restore("Hi [1-PERSON-x] [1-PERSON]", defaultRoles)
 	assert.Equal(t, "Hi [1-PERSON-x] Ann", got, "the separator is not part of the type")
 
 	// Punctuation between the number and the type may be part of the type.
 	dotted, err := parsePlaceholderFormat("[{n}.{entity}]")
 	require.NoError(t, err)
 	d := newMapping(dotted)
-	assert.Equal(t, "[1.ZIP.CODE]", d.placeholder("ZIP.CODE", "10115", true))
-	got, _ = d.restore("Zip [1.zip.code], [[1.ZIP.CODE]], not [1.ZIP.CODE.x]")
+	assert.Equal(t, "[1.ZIP.CODE]", d.placeholder("ZIP.CODE", "10115", userGrant))
+	got, _ = d.restore("Zip [1.zip.code], [[1.ZIP.CODE]], not [1.ZIP.CODE.x]", defaultRoles)
 	assert.Equal(t, "Zip 10115, [10115], not [1.ZIP.CODE.x]", got)
 
 	m.reserve("[1-email_address]")
-	assert.Equal(t, "[2-EMAIL_ADDRESS]", m.placeholder("EMAIL_ADDRESS", "a@b", true), "a reserved number was reused")
+	assert.Equal(t, "[2-EMAIL_ADDRESS]", m.placeholder("EMAIL_ADDRESS", "a@b", userGrant), "a reserved number was reused")
 }
 
 func TestCustomPlaceholderFormat(t *testing.T) {
@@ -268,4 +268,103 @@ func TestRestoreDefaults(t *testing.T) {
 	assert.Nil(t, p.keepTools)
 	assert.True(t, p.restoresTool("anything"))
 	assert.True(t, p.restoresTool(""))
+}
+
+// A Responses client replays reasoning items as they are, and the prompt
+// phase does not anonymize them, so their text keeps the placeholders: a
+// restored value would reach the provider on the next turn.
+func TestResponsesReasoningKeepsPlaceholders(t *testing.T) {
+	a := newAnalyzer(t, "Ann Lee")
+	p := newPlugin(t, a, `{"restore": true, "stream_lookbehind": 12, "stream_chunk": 0}`)
+	x := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", "I am Ann Lee.")), nil)
+	x.Meta.Operation = "responses"
+	_, err := p.OnPrompt(context.Background(), x)
+	require.NoError(t, err)
+
+	x.Response = plugintest.Completion("Hi <PERSON_1>.")
+	x.Response.Choices[0].Message.Parts = append([]pluginapi.Part{{Kind: pluginapi.PartReasoning, Text: "Greet <PERSON_1>."}}, x.Response.Choices[0].Message.Parts...)
+	_, err = p.OnResponse(context.Background(), x)
+	require.NoError(t, err)
+	assert.Equal(t, "Greet <PERSON_1>.", x.Response.Choices[0].Message.Parts[0].Text)
+	assert.Equal(t, "Hi Ann Lee.", x.Response.Text(0))
+
+	res, err := plugintest.RunStream(context.Background(), p, x, []*pluginapi.StreamEvent{
+		{Kind: pluginapi.EventReasoningDelta, Text: "Greet <PERSON_1>."},
+		plugintest.TextDelta("Hi <PERSON_1>."),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "Greet <PERSON_1>.", res.Reasoning[0])
+	assert.Equal(t, "Hi Ann Lee.", res.Text[0])
+}
+
+// restore_roles is honored on whichever instance sets it: a value comes
+// back only when its role is in every list that is set, or in the default
+// list when none is.
+func TestRestoreRolesAcrossInstances(t *testing.T) {
+	const roles = `"roles": ["system", "user", "assistant"]`
+	tests := []struct {
+		name    string
+		in, out string
+		want    string
+	}{
+		{"neither set", `{"restore": true, ` + roles + `}`, `{"restore": true}`, "Ann Lee asked Bob Ray; ops is <PERSON_3>."},
+		{"restoring instance narrows", `{"restore": true, ` + roles + `}`, `{"restore": true, "restore_roles": ["assistant"]}`, "<PERSON_1> asked Bob Ray; ops is <PERSON_3>."},
+		{"prompt instance narrows", `{"restore": true, "restore_roles": ["assistant"], ` + roles + `}`, `{"restore": true}`, "<PERSON_1> asked Bob Ray; ops is <PERSON_3>."},
+		{"restoring instance widens", `{"restore": true, ` + roles + `}`, `{"restore": true, "restore_roles": ["system", "user"]}`, "Ann Lee asked <PERSON_2>; ops is Sam Ops."},
+		{"prompt instance widens", `{"restore": true, "restore_roles": ["system"], ` + roles + `}`, `{"restore": true}`, "<PERSON_1> asked <PERSON_2>; ops is Sam Ops."},
+		{"both set", `{"restore": true, "restore_roles": ["system", "user"], ` + roles + `}`, `{"restore": true, "restore_roles": ["user", "assistant"]}`, "Ann Lee asked <PERSON_2>; ops is <PERSON_3>."},
+		{"prompt instance does not restore", `{` + roles + `}`, `{"restore": true}`, "<PERSON_1> asked <PERSON_2>; ops is <PERSON_3>."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := newAnalyzer(t, "Ann Lee", "Bob Ray", "Sam Ops")
+			in, out := newPlugin(t, a, tt.in), newPlugin(t, a, tt.out)
+			x := plugintest.Exchange(plugintest.Prompt(
+				plugintest.Text(pluginapi.RoleUser, "m1", "I am Ann Lee."),
+				plugintest.Text(pluginapi.RoleAssistant, "m2", "Bob Ray called."),
+				plugintest.Text(pluginapi.RoleSystem, "m3", "Ops: Sam Ops."),
+			), nil)
+			_, err := in.OnPrompt(context.Background(), x)
+			require.NoError(t, err)
+
+			const reply = "<PERSON_1> asked <PERSON_2>; ops is <PERSON_3>."
+			x.Response = plugintest.Completion(reply)
+			_, err = out.OnResponse(context.Background(), x)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, x.Response.Text(0))
+
+			res, err := plugintest.RunStream(context.Background(), out, x, []*pluginapi.StreamEvent{plugintest.TextDelta(reply)})
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, res.Text[0])
+		})
+	}
+}
+
+// Entity types differing only in case never share a placeholder: restoring
+// one must not put back the value of the other.
+func TestPlaceholdersOfCaseVariantTypesDoNotCollide(t *testing.T) {
+	m := defaultMapping(t)
+	ann := m.placeholder("PERSON", "Ann", userGrant)
+	secret := m.placeholder("Person", "SysSecret", grant{})
+	assert.NotEqual(t, m.format.key(ann), m.format.key(secret))
+	got, n := m.restore(ann+" "+secret, defaultRoles)
+	assert.Equal(t, "Ann "+secret, got)
+	assert.Equal(t, 1, n)
+}
+
+// An entity type holding the punctuation that ends it in the format still
+// gets a placeholder restore finds.
+func TestPlaceholderEntityWithFormatPunctuation(t *testing.T) {
+	format, err := parsePlaceholderFormat("<{entity}-{n}>")
+	require.NoError(t, err)
+	m := newMapping(format)
+	p := m.placeholder("ZIP-CODE", "94110", userGrant)
+	got, n := m.restore("Ship to "+p+".", defaultRoles)
+	assert.Equal(t, "Ship to 94110.", got)
+	assert.Equal(t, 1, n)
+}
+
+func TestStreamLookbehindMaximum(t *testing.T) {
+	err := New().Init(context.Background(), json.RawMessage(`{"stream_lookbehind": 100000}`), plugintest.NewHost())
+	require.ErrorContains(t, err, "stream_lookbehind")
 }

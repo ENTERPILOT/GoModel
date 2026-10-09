@@ -42,9 +42,9 @@ type job struct {
 	inputs  []string
 	spans   [][]span
 	outputs []string
-	// restorable marks the placeholders allocated for the job's values
+	// grant makes the placeholders allocated for the job's values
 	// restorable (prompt phase).
-	restorable bool
+	grant grant
 	// restoreOnly skips analysis: the job only gets values back (response
 	// reasoning).
 	restoreOnly bool
@@ -128,7 +128,7 @@ func (p *Plugin) OnPrompt(ctx context.Context, x *pluginapi.Exchange) (pluginapi
 	var jobs []job
 	for _, t := range x.Prompt.TextTargets() {
 		if p.roles[t.Role] {
-			jobs = append(jobs, textJob(t, p.restorable(t.Role), x.Prompt.SetTargetText))
+			jobs = append(jobs, textJob(t, p.grant(t.Role), x.Prompt.SetTargetText))
 		} else {
 			// Not analyzed, but the model reads it: its placeholder-shaped
 			// text must not collide with a new placeholder either.
@@ -143,7 +143,7 @@ func (p *Plugin) OnPrompt(ctx context.Context, x *pluginapi.Exchange) (pluginapi
 			continue
 		}
 		msgID, callID := ref.MessageID, ref.Call.ID
-		if j, ok := argsJob(unit{message: msgID}, ref.Call.Arguments, p.restorable(pluginapi.RoleAssistant), func(args json.RawMessage) error {
+		if j, ok := argsJob(unit{message: msgID}, ref.Call.Arguments, p.grant(pluginapi.RoleAssistant), func(args json.RawMessage) error {
 			return x.Prompt.SetToolArguments(msgID, callID, args)
 		}); ok {
 			jobs = append(jobs, j)
@@ -153,7 +153,7 @@ func (p *Plugin) OnPrompt(ctx context.Context, x *pluginapi.Exchange) (pluginapi
 	// next turn (DeepSeek requires it with tool calls).
 	for _, t := range x.Prompt.ReasoningTargets() {
 		if p.roles[t.Role] {
-			jobs = append(jobs, textJob(t, p.restorable(t.Role), x.Prompt.SetTargetText))
+			jobs = append(jobs, textJob(t, p.grant(t.Role), x.Prompt.SetTargetText))
 		} else {
 			m.reserve(t.Text)
 		}
@@ -170,7 +170,8 @@ func (p *Plugin) OnPrompt(ctx context.Context, x *pluginapi.Exchange) (pluginapi
 }
 
 // OnResponse analyzes the assistant text and tool-call arguments of every
-// choice and puts restorable values back, in reasoning too. Reasoning is not
+// choice and puts restorable values back, in reasoning too unless the
+// client replays it as it is (see restoresReasoning). Reasoning is not
 // analyzed: it only gets values back.
 func (p *Plugin) OnResponse(ctx context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
 	if x == nil || x.Response == nil {
@@ -179,7 +180,7 @@ func (p *Plugin) OnResponse(ctx context.Context, x *pluginapi.Exchange) (plugina
 	m := p.mapping(x)
 	var jobs []job
 	for _, t := range x.Response.TextTargets() {
-		jobs = append(jobs, textJob(t, false, x.Response.SetTargetText))
+		jobs = append(jobs, textJob(t, grant{}, x.Response.SetTargetText))
 	}
 	for i, choice := range x.Response.Choices {
 		for _, part := range choice.Message.Parts {
@@ -188,7 +189,7 @@ func (p *Plugin) OnResponse(ctx context.Context, x *pluginapi.Exchange) (plugina
 			}
 			callID := part.ToolCall.ID
 			reserveArgs(m, part.ToolCall.Arguments)
-			if j, ok := argsJob(unit{choice: i}, part.ToolCall.Arguments, false, func(args json.RawMessage) error {
+			if j, ok := argsJob(unit{choice: i}, part.ToolCall.Arguments, grant{}, func(args json.RawMessage) error {
 				return x.Response.SetToolArguments(i, callID, args)
 			}); ok {
 				j.keep = !p.restoresTool(part.ToolCall.Name)
@@ -196,10 +197,12 @@ func (p *Plugin) OnResponse(ctx context.Context, x *pluginapi.Exchange) (plugina
 			}
 		}
 	}
-	for _, t := range x.Response.ReasoningTargets() {
-		j := textJob(t, false, x.Response.SetTargetText)
-		j.restoreOnly = true
-		jobs = append(jobs, j)
+	if restoresReasoning(x) {
+		for _, t := range x.Response.ReasoningTargets() {
+			j := textJob(t, grant{}, x.Response.SetTargetText)
+			j.restoreOnly = true
+			jobs = append(jobs, j)
+		}
 	}
 	rep := newReport()
 	if err := p.run(ctx, jobs, m, rep, pass{restore: p.restore, requestID: x.Meta.RequestID}); err != nil {
@@ -208,30 +211,51 @@ func (p *Plugin) OnResponse(ctx context.Context, x *pluginapi.Exchange) (plugina
 	return p.decide(rep), nil
 }
 
-// restorable reports whether values of a prompt role may be put back into
-// the response: when this instance restores and restore_roles has the role.
-func (p *Plugin) restorable(role pluginapi.Role) bool {
-	return p.restore && p.restoreRoles[role]
+// grant returns how values of a prompt role become restorable: not at all
+// unless this instance restores, and only for its restore_roles when it sets
+// them. Without restore_roles here the restoring instance decides.
+func (p *Plugin) grant(role pluginapi.Role) grant {
+	if !p.restore || (p.restoreRolesSet && !p.restoreRoles[role]) {
+		return grant{}
+	}
+	return grant{role: role, chosen: p.restoreRolesSet}
 }
 
-func textJob(t pluginapi.TextTarget, restorable bool, set func(pluginapi.TextTarget, string) error) job {
+// roleFilter is this instance's restore_roles as a restoring instance.
+func (p *Plugin) roleFilter() roleFilter {
+	return roleFilter{roles: p.restoreRoles, set: p.restoreRolesSet}
+}
+
+// operationResponses is the [pluginapi.Meta] Operation of /v1/responses.
+const operationResponses = "responses"
+
+// restoresReasoning reports whether response reasoning gets values back. A
+// Responses client replays reasoning items (summaries included) as they
+// are, and the prompt phase cannot anonymize them, so restored values would
+// reach the provider on the next turn: they keep the placeholders. Chat
+// reasoning a client sends back is anonymized again.
+func restoresReasoning(x *pluginapi.Exchange) bool {
+	return x.Meta.Operation != operationResponses
+}
+
+func textJob(t pluginapi.TextTarget, g grant, set func(pluginapi.TextTarget, string) error) job {
 	return job{
-		unit:       unit{message: t.MessageID, choice: t.Choice},
-		inputs:     []string{t.Text},
-		restorable: restorable,
-		apply:      func(out []string) error { return set(t, out[0]) },
+		unit:   unit{message: t.MessageID, choice: t.Choice},
+		inputs: []string{t.Text},
+		grant:  g,
+		apply:  func(out []string) error { return set(t, out[0]) },
 	}
 }
 
-func argsJob(u unit, args json.RawMessage, restorable bool, set func(json.RawMessage) error) (job, bool) {
+func argsJob(u unit, args json.RawMessage, g grant, set func(json.RawMessage) error) (job, bool) {
 	tree, inputs, ok := argStrings(args)
 	if !ok || len(inputs) == 0 {
 		return job{}, false
 	}
 	return job{
-		unit:       u,
-		inputs:     inputs,
-		restorable: restorable,
+		unit:   u,
+		inputs: inputs,
+		grant:  g,
 		apply: func(out []string) error {
 			encoded, err := withArgStrings(tree, out)
 			if err != nil {
@@ -264,7 +288,7 @@ func (p *Plugin) run(ctx context.Context, jobs []job, m *mapping, rep *report, p
 		j := &jobs[i]
 		j.outputs = make([]string, len(j.inputs))
 		for k, text := range j.inputs {
-			j.outputs[k] = p.rewriteOne(text, j.spans[k], j.unit, j.restorable, ps.restore && !j.keep, m, rep, ps)
+			j.outputs[k] = p.rewriteOne(text, j.spans[k], j.unit, j.grant, ps.restore && !j.keep, m, rep, ps)
 		}
 	}
 	if rep.blocked != "" || (p.action != ActionAnonymize && !ps.restore) {
@@ -338,15 +362,18 @@ func (p *Plugin) analyze(ctx context.Context, text string, skip int, requestID s
 
 // rewriteOne records the spans of one string and returns it rewritten:
 // anonymized when the action is anonymize, then with restorable values put
-// back when restore is set.
-func (p *Plugin) rewriteOne(text string, spans []span, u unit, restorable, restore bool, m *mapping, rep *report, ps pass) string {
+// back when restore is set. g applies in the prompt phase only.
+func (p *Plugin) rewriteOne(text string, spans []span, u unit, g grant, restore bool, m *mapping, rep *report, ps pass) string {
 	out := text
 	if len(spans) > 0 {
 		rep.record(u, spans, p.blockEntities)
 		if p.action == ActionAnonymize {
 			out = rewrite(text, spans, func(s span, value string) string {
 				if p.operator == OperatorReplace {
-					return m.placeholder(s.entity, value, ps.prompt && restorable)
+					if !ps.prompt {
+						g = grant{}
+					}
+					return m.placeholder(s.entity, value, g)
 				}
 				return staticReplacement(p.operator, value)
 			})
@@ -356,9 +383,9 @@ func (p *Plugin) rewriteOne(text string, spans []span, u unit, restorable, resto
 	if restore {
 		var n int
 		if ps.json {
-			out, n = m.restoreJSON(out)
+			out, n = m.restoreJSON(out, p.roleFilter())
 		} else {
-			out, n = m.restore(out)
+			out, n = m.restore(out, p.roleFilter())
 		}
 		rep.add(0, n)
 	}

@@ -28,6 +28,9 @@ func (p *Plugin) OnStreamEvent(ctx context.Context, x *pluginapi.Exchange, ev *p
 	if ev == nil || x == nil || ev.Text == "" {
 		return pluginapi.Pass(), nil
 	}
+	if ev.Kind == pluginapi.EventReasoningDelta && !restoresReasoning(x) {
+		return pluginapi.Pass(), nil
+	}
 	if p.action == ActionBlock || p.action == ActionRespond {
 		return pluginapi.Pass(), nil
 	}
@@ -52,7 +55,7 @@ func (p *Plugin) OnStreamEvent(ctx context.Context, x *pluginapi.Exchange, ev *p
 	rep := p.streamReport(x)
 	m := p.mapping(x)
 	m.reserve(ev.Text)
-	out := p.rewriteOne(ev.Text, spans, unit{choice: ev.Choice}, false, restore, m, rep, pass{json: ev.Kind == pluginapi.EventToolCallDelta, requestID: x.Meta.RequestID})
+	out := p.rewriteOne(ev.Text, spans, unit{choice: ev.Choice}, grant{}, restore, m, rep, pass{json: ev.Kind == pluginapi.EventToolCallDelta, requestID: x.Meta.RequestID})
 	if rep.blocked != "" {
 		return pluginapi.Terminate(p.enforcement.Reject(CodeBlocked, rep.detail())), nil
 	}

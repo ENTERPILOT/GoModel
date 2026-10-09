@@ -118,7 +118,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 			},
 			{
 				Key: "restore_roles", Label: "Restore roles", Input: pluginapi.InputCheckboxes, Default: []string{"user", "assistant", "tool"},
-				Help:    "Prompt roles whose values are put back. System is off by default, so a model repeating a placeholder cannot disclose the system prompt's data; add it when the system message carries the user's own data (a chat frontend's user name or memories) and anyone who can use the deployment may see it.",
+				Help:    "Prompt roles whose values are put back. Honored on whichever instance (prompt or response phase) sets it; set on both, a role must be in both. System is off by default, so a model repeating a placeholder cannot disclose the system prompt's data; add it when the system message carries the user's own data (a chat frontend's user name or memories) and anyone who can use the deployment may see it.",
 				Options: pluginapi.RoleOptions(),
 			},
 			{
