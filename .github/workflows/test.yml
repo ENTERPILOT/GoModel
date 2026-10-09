@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: "1.27.1"
+  GO_VERSION: "1.27.2"
   # Pull requests run the suites in -short mode: it skips the plugin fixture
   # builds (`go build -buildmode=plugin` of the whole gateway) and the e2e
   # shared-object round trip, which together cost about a minute of runner
@@ -42,8 +42,8 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
-          # v2.13+ supports Go 1.27 and bundles a compatible staticcheck.
-          version: v2.13.1
+          # v2.14+ reads Go 1.27.2 export data and bundles a compatible staticcheck.
+          version: v2.14.0
           # The shared analysis cache went bad once (2026-08-25: staticcheck
           # lost t.Fatal no-return facts and flagged SA5011 false positives in
           # untouched files). Rotating the cache key daily bounds how long a

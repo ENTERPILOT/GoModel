@@ -592,3 +592,19 @@ test("proxy_url round-trips through the form and is trimmed in the payload", () 
   const blank = { ...defaultProviderCredentialForm(), name: "x", type: "openai" };
   assert.equal("proxy_url" in buildProviderCredentialPayload(blank, OPENAI_SCHEMA), false);
 });
+
+test("a service-account JSON secret reference is not parsed as JSON", () => {
+  const form = {
+    ...defaultProviderCredentialForm(),
+    name: "vertex",
+    type: "vertex",
+    service_account_json: "${file:/run/secrets/vertex.json}",
+  };
+  assert.deepEqual(validateProviderCredentialForm(form, "create", [], VERTEX_SCHEMA), {});
+
+  const invalid = { ...form, service_account_json: "{not json" };
+  assert.equal(
+    validateProviderCredentialForm(invalid, "create", [], VERTEX_SCHEMA).service_account_json,
+    "Paste the service account JSON file's contents — this is not valid JSON.",
+  );
+});
