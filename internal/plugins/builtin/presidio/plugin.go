@@ -109,7 +109,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 			},
 			{
 				Key: "placeholder_format", Label: "Placeholder format", Input: pluginapi.InputText, Default: DefaultPlaceholderFormat,
-				Help:        "How replace writes a placeholder: {entity} is the entity type, {n} its number. Use [{entity}_{n}] when the client renders Markdown and hides <...> as HTML. It must start and end with a punctuation character. Instances that handle one request share the format of the first one that runs.",
+				Help:        "How replace writes a placeholder: {entity} is the entity type, {n} its number. Use [{entity}_{n}] when the client renders Markdown and hides <...> as HTML. It must start and end with a punctuation character and separate {entity} from {n}. Instances that handle one request share the format of the first one that runs.",
 				Placeholder: DefaultPlaceholderFormat,
 			},
 			{

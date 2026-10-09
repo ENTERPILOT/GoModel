@@ -19,6 +19,8 @@ func TestPlaceholderFormatErrors(t *testing.T) {
 	}{
 		{"no entity", "<{n}>", "must contain {entity} and {n} once each"},
 		{"twice", "<{entity}_{n}_{n}>", "must contain {entity} and {n} once each"},
+		{"adjacent", "[{entity}{n}]", "must separate {entity} and {n}"},
+		{"adjacent number first", "[{n}{entity}]", "must separate {entity} and {n}"},
 		{"letter edge", "P{entity}_{n}>", "must start and end with a punctuation character"},
 		{"token edge", "{entity}_{n}", "must start and end with a punctuation character"},
 		{"backslash", `<{entity}\{n}>`, "printable ASCII"},
@@ -40,6 +42,7 @@ func TestRestoreFindsPlaceholderVariants(t *testing.T) {
 	m := defaultMapping(t)
 	m.placeholder("PERSON", "Ann", true)
 	m.placeholder("EMAIL_ADDRESS", `a"b@x.io`, true)
+	m.placeholder("ZIP.CODE", "10115", true)
 
 	tests := []struct {
 		name string
@@ -52,6 +55,8 @@ func TestRestoreFindsPlaceholderVariants(t *testing.T) {
 		{"html", "Hi &lt;PERSON_1&gt;.", "Hi Ann."},
 		{"other number", "Hi <PERSON_12> and <PERSON_2>.", "Hi <PERSON_12> and <PERSON_2>."},
 		{"not a placeholder", "a < b and c > d", "a < b and c > d"},
+		{"stray brackets first", "a <b, <<PERSON_1>> and x<PERSON_1>", "a <b, <Ann> and xAnn"},
+		{"custom entity type", "Zip <ZIP.CODE_1>, <zip.code_1>.", "Zip 10115, 10115."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -76,6 +81,9 @@ func TestNumberFirstPlaceholderFormat(t *testing.T) {
 	got, n := m.restore(`Hi [1-person] and \[1-PERSON\], not [2-PERSON].`)
 	assert.Equal(t, "Hi Ann and Ann, not [2-PERSON].", got)
 	assert.Equal(t, 2, n)
+
+	got, _ = m.restore("Hi [1-PERSON-x] [1-PERSON]")
+	assert.Equal(t, "Hi [1-PERSON-x] Ann", got, "the separator is not part of the type")
 
 	m.reserve("[1-email_address]")
 	assert.Equal(t, "[2-EMAIL_ADDRESS]", m.placeholder("EMAIL_ADDRESS", "a@b", true), "a reserved number was reused")

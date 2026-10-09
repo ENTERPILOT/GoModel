@@ -566,7 +566,7 @@ docker run -d -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer:latest
 | `roles` | No | `["user", "assistant", "tool"]` | Prompt messages analyzed, tool-result text, tool-call arguments, and the reasoning of replayed assistant turns included. In the response phase the assistant text and tool-call arguments are always analyzed. |
 | `action` | No | `anonymize` | `anonymize` rewrites the values; `block` rejects with an error; `respond` answers with `message` as an assistant reply; `warn` continues and records the entity types. |
 | `operator` | No | `replace` | How `anonymize` rewrites a value: `replace` with a numbered placeholder (`<PERSON_1>`, the same one for every occurrence of that value in the request), `mask` with `*` per character, `redact` (removed), `hash` (SHA-256). |
-| `placeholder_format` | No | `<{entity}_{n}>` | How `replace` writes a placeholder. `{entity}` is the entity type, `{n}` its number; it must start and end with a punctuation character. |
+| `placeholder_format` | No | `<{entity}_{n}>` | How `replace` writes a placeholder. `{entity}` is the entity type, `{n}` its number; it must start and end with a punctuation character and put something between the two. |
 | `restore` | No | `false` | Put the original values back where the model repeats a placeholder. Needs `operator: replace`; see below. |
 | `restore_roles` | No | `["user", "assistant", "tool"]` | Prompt roles whose values are put back. |
 | `restore_tools` | No | all | Tools (function names) whose call arguments get the values back. The others keep the placeholders. |

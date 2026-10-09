@@ -44,12 +44,17 @@ const (
 // placeholder format may use.
 var htmlEntities = map[byte]string{'<': "&lt;", '>': "&gt;", '&': "&amp;"}
 
-// parsePlaceholderFormat validates format: one {entity} and one {n}, the
-// rest printable ASCII other than \, ", { and }, starting and ending with a
-// punctuation character so a placeholder has clear edges.
+// parsePlaceholderFormat validates format: one {entity} and one {n} with
+// something between them, the rest printable ASCII other than \, ", { and },
+// starting and ending with a punctuation character so a placeholder has
+// clear edges.
 func parsePlaceholderFormat(format string) (*placeholderFormat, error) {
 	if strings.Count(format, entityToken) != 1 || strings.Count(format, numberToken) != 1 {
 		return nil, fmt.Errorf("must contain %s and %s once each", entityToken, numberToken)
+	}
+	// Adjacent, PERSON1 number 1 and PERSON number 11 would look the same.
+	if strings.Contains(format, entityToken+numberToken) || strings.Contains(format, numberToken+entityToken) {
+		return nil, fmt.Errorf("must separate %s and %s, such as %s", entityToken, numberToken, DefaultPlaceholderFormat)
 	}
 	literal := strings.NewReplacer(entityToken, "", numberToken, "").Replace(format)
 	for i := 0; i < len(literal); i++ {
@@ -85,7 +90,7 @@ func (f *placeholderFormat) pattern(mode patternMode) string {
 		switch {
 		case strings.HasPrefix(rest, entityToken):
 			// Underscores inside the type may be Markdown-escaped too.
-			fmt.Fprintf(&b, "([a-z](?:[a-z0-9]|%s)*)", literalPattern('_', mode))
+			fmt.Fprintf(&b, "((?:%s|%s)+)", f.entityClass(), literalPattern('_', mode))
 			rest = rest[len(entityToken):]
 		case strings.HasPrefix(rest, numberToken):
 			b.WriteString("([0-9]+)")
@@ -95,6 +100,25 @@ func (f *placeholderFormat) pattern(mode patternMode) string {
 			rest = rest[1:]
 		}
 	}
+	return b.String()
+}
+
+// entityClass matches one character of an entity type. Ad hoc recognizers
+// may name types with any characters, so it takes everything but
+// whitespace, the characters escapes start with, and the punctuation of the
+// format, which marks where the type ends.
+func (f *placeholderFormat) entityClass() string {
+	var b strings.Builder
+	b.WriteString(`[^\s\\"&;`)
+	literal := strings.NewReplacer(entityToken, "", numberToken, "").Replace(f.format)
+	for i := 0; i < len(literal); i++ {
+		if punct(literal[i]) {
+			// Escaped, so "-" cannot form a range.
+			b.WriteByte('\\')
+			b.WriteByte(literal[i])
+		}
+	}
+	b.WriteString("]")
 	return b.String()
 }
 
