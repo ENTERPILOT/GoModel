@@ -8,6 +8,8 @@ import (
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
+	"github.com/enterpilot/gomodel/egress"
 )
 
 // DefaultMongoDatabase is the database used when neither the explicit Database
@@ -29,7 +31,7 @@ func NewMongoDB(ctx context.Context, cfg MongoDBConfig) (MongoDBStorage, error) 
 	dbName := resolveMongoDatabase(cfg)
 
 	// Create client options
-	clientOpts := options.Client().ApplyURI(cfg.URL)
+	clientOpts := options.Client().ApplyURI(cfg.URL).SetDialer(egress.Dialer{})
 
 	// Connect to MongoDB
 	client, err := mongo.Connect(clientOpts)
