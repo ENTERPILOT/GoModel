@@ -21,23 +21,38 @@ func (p *Plugin) StreamPolicy() pluginapi.StreamPolicy {
 
 // OnStreamEvent analyzes each text or tool-call argument window, rewrites
 // it for anonymize, puts restorable values back, and cuts the stream when a
-// blocking entity type appears. Under a buffering policy every event
-// passes; OnResponse decides.
+// blocking entity type appears. Reasoning windows are not analyzed: they
+// only get values back. Under a buffering policy every event passes;
+// OnResponse decides.
 func (p *Plugin) OnStreamEvent(ctx context.Context, x *pluginapi.Exchange, ev *pluginapi.StreamEvent) (pluginapi.StreamDecision, error) {
-	if ev == nil || x == nil || ev.Text == "" || (ev.Kind != pluginapi.EventTextDelta && ev.Kind != pluginapi.EventToolCallDelta) {
+	if ev == nil || x == nil || ev.Text == "" {
 		return pluginapi.Pass(), nil
 	}
 	if p.action == ActionBlock || p.action == ActionRespond {
 		return pluginapi.Pass(), nil
 	}
-	rep := p.streamReport(x)
-	spans, err := p.analyze(ctx, ev.Text, runeBytes(ev.Text, ev.Overlap), x.Meta.RequestID)
-	if err != nil {
-		return pluginapi.StreamDecision{}, err
+	restore := p.restore
+	var spans []span
+	switch ev.Kind {
+	case pluginapi.EventReasoningDelta:
+		if !restore {
+			return pluginapi.Pass(), nil
+		}
+	case pluginapi.EventToolCallDelta, pluginapi.EventTextDelta:
+		if ev.Kind == pluginapi.EventToolCallDelta {
+			restore = restore && p.restoresTool(ev.Tool)
+		}
+		var err error
+		if spans, err = p.analyze(ctx, ev.Text, runeBytes(ev.Text, ev.Overlap), x.Meta.RequestID); err != nil {
+			return pluginapi.StreamDecision{}, err
+		}
+	default:
+		return pluginapi.Pass(), nil
 	}
+	rep := p.streamReport(x)
 	m := p.mapping(x)
 	m.reserve(ev.Text)
-	out := p.rewriteOne(ev.Text, spans, unit{choice: ev.Choice}, false, m, rep, pass{restore: p.restore, json: ev.Kind == pluginapi.EventToolCallDelta, requestID: x.Meta.RequestID})
+	out := p.rewriteOne(ev.Text, spans, unit{choice: ev.Choice}, false, restore, m, rep, pass{json: ev.Kind == pluginapi.EventToolCallDelta, requestID: x.Meta.RequestID})
 	if rep.blocked != "" {
 		return pluginapi.Terminate(p.enforcement.Reject(CodeBlocked, rep.detail())), nil
 	}

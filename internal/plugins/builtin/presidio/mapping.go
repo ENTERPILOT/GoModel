@@ -2,9 +2,6 @@ package presidio
 
 import (
 	"encoding/json"
-	"fmt"
-	"regexp"
-	"sort"
 	"strings"
 	"sync"
 )
@@ -13,52 +10,51 @@ import (
 // value of one entity type gets the same placeholder everywhere in the
 // request ("<PERSON_1>" for every "John Smith"), so the model sees a
 // coherent conversation, and restore can put the values back. It lives in
-// Exchange.Values from OnPrompt to the end of the stream.
+// Exchange.Values from OnPrompt to the end of the stream. Placeholders are
+// keyed by [placeholderFormat.key], so every spelling of one finds it.
 type mapping struct {
 	mu sync.Mutex
+	// format renders and finds the placeholders: the format of the
+	// instance that created the table.
+	format *placeholderFormat
 	// seq counts placeholders per entity type.
 	seq map[string]int
 	// byValue maps entity type + "\x00" + value to its placeholder.
 	byValue map[string]string
-	// byPlaceholder maps a placeholder to the original value.
+	// byPlaceholder maps a placeholder key to the original value.
 	byPlaceholder map[string]string
-	// restorable holds the placeholders that came from the prompt: only
-	// those go back into the response, so a value the model produced
-	// itself and that was anonymized on the way out stays anonymized.
+	// restorable holds the keys of the placeholders that came from the
+	// prompt roles restore covers: only those go back into the response, so
+	// a value the model produced itself and that was anonymized on the way
+	// out stays anonymized.
 	restorable map[string]bool
-	// taken holds placeholder-shaped text already present in the request,
-	// whose numbers are never allocated (see reserve).
+	// taken holds the keys of placeholder-shaped text already present in
+	// the request, whose numbers are never allocated (see reserve).
 	taken map[string]bool
 }
 
-// placeholderPattern matches text shaped like a placeholder this plugin
-// allocates ("<PERSON_1>", "<EMAIL_ADDRESS_12>"), also with its angle
-// brackets JSON-escaped ("\u003cPERSON_1\u003e"), as Gemini writes them in
-// the tool-call arguments it returns. The name is group 1 (escaped) or
-// group 2.
-var placeholderPattern = regexp.MustCompile(`\\u003[cC]([A-Z][A-Z0-9_]*_[0-9]+)\\u003[eE]|<([A-Z][A-Z0-9_]*_[0-9]+)>`)
-
-func newMapping() *mapping {
-	return &mapping{seq: map[string]int{}, byValue: map[string]string{}, byPlaceholder: map[string]string{}, restorable: map[string]bool{}, taken: map[string]bool{}}
+func newMapping(format *placeholderFormat) *mapping {
+	return &mapping{format: format, seq: map[string]int{}, byValue: map[string]string{}, byPlaceholder: map[string]string{}, restorable: map[string]bool{}, taken: map[string]bool{}}
 }
 
-// reserve marks the placeholder-shaped tokens in text as taken so allocation
-// skips their numbers. Without it a literal "<PERSON_2>" (typed by the user,
-// or a placeholder an earlier response carried back unrestored) would share
-// its placeholder with a new value, the model would see two people as one,
-// and restore would put that value in place of the literal.
+// reserve marks the placeholder-shaped tokens in text, in any spelling, as
+// taken so allocation skips their numbers. Without it a literal
+// "<PERSON_2>" (typed by the user, or a placeholder an earlier response
+// carried back unrestored) would share its placeholder with a new value,
+// the model would see two people as one, and restore would put that value
+// in place of the literal.
 func (m *mapping) reserve(text string) {
-	if !strings.Contains(text, "<") && !strings.Contains(text, `\u003`) {
+	if !m.format.mayContain(text) {
 		return
 	}
-	matches := placeholderPattern.FindAllStringSubmatch(text, -1)
+	matches := m.format.any.FindAllStringSubmatchIndex(text, -1)
 	if len(matches) == 0 {
 		return
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for _, match := range matches {
-		m.taken["<"+match[1]+match[2]+">"] = true
+	for _, loc := range matches {
+		m.taken[m.format.matchKey(text, loc)] = true
 	}
 }
 
@@ -74,64 +70,42 @@ func (m *mapping) placeholder(entity, value string, restorable bool) string {
 	if !ok {
 		for {
 			m.seq[entity]++
-			p = fmt.Sprintf("<%s_%d>", entity, m.seq[entity])
-			if !m.taken[p] {
+			p = m.format.render(entity, m.seq[entity])
+			if !m.taken[m.format.key(p)] {
 				break
 			}
 		}
 		m.byValue[key] = p
-		m.byPlaceholder[p] = value
+		m.byPlaceholder[m.format.key(p)] = value
 	}
 	if restorable {
-		m.restorable[p] = true
+		m.restorable[m.format.key(p)] = true
 	}
 	return p
 }
 
 // restore puts the original values back in place of the restorable
-// placeholders in text and reports how many it replaced. Longer
-// placeholders are replaced first so "<PERSON_1>" never matches inside
-// "<PERSON_12>".
+// placeholders in text, in any spelling, and reports how many it replaced.
 func (m *mapping) restore(text string) (string, int) {
-	if m == nil || !strings.Contains(text, "<") {
-		return text, 0
-	}
-	m.mu.Lock()
-	keys := make([]string, 0, len(m.restorable))
-	for p := range m.restorable {
-		if strings.Contains(text, p) {
-			keys = append(keys, p)
-		}
-	}
-	values := make(map[string]string, len(keys))
-	for _, p := range keys {
-		values[p] = m.byPlaceholder[p]
-	}
-	m.mu.Unlock()
-	if len(keys) == 0 {
-		return text, 0
-	}
-	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
-	n := 0
-	for _, p := range keys {
-		c := strings.Count(text, p)
-		if c == 0 {
-			continue
-		}
-		text = strings.ReplaceAll(text, p, values[p])
-		n += c
-	}
-	return text, n
+	return m.restoreWith(text, false)
 }
 
 // restoreJSON is restore for raw JSON text (streamed tool-call arguments):
-// it also finds placeholders whose angle brackets are escaped, and writes
+// it also finds placeholders whose punctuation is \u-escaped, and writes
 // each value JSON-escaped so the arguments stay valid JSON.
 func (m *mapping) restoreJSON(text string) (string, int) {
-	if m == nil || (!strings.Contains(text, "<") && !strings.Contains(text, `\u003`)) {
+	return m.restoreWith(text, true)
+}
+
+func (m *mapping) restoreWith(text string, raw bool) (string, int) {
+	if m == nil || !m.format.mayContain(text) {
 		return text, 0
 	}
-	matches := placeholderPattern.FindAllStringSubmatchIndex(text, -1)
+	pattern := m.format.text
+	if raw {
+		pattern = m.format.json
+	}
+	matches := pattern.FindAllStringSubmatchIndex(text, -1)
 	if len(matches) == 0 {
 		return text, 0
 	}
@@ -140,25 +114,25 @@ func (m *mapping) restoreJSON(text string) (string, int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, loc := range matches {
-		escaped := loc[2] >= 0
-		var name string
-		if escaped {
-			name = text[loc[2]:loc[3]]
-		} else {
-			name = text[loc[4]:loc[5]]
-		}
-		p := "<" + name + ">"
-		// An escaped form preceded by an odd run of backslashes is the
-		// literal text "\u003c...", not an escaped bracket.
-		if !m.restorable[p] || (escaped && escapedAt(text, loc[0])) {
+		key := m.format.matchKey(text, loc)
+		if !m.restorable[key] {
 			continue
 		}
-		value, err := json.Marshal(m.byPlaceholder[p])
-		if err != nil {
+		// In JSON, a match starting with a backslash that is itself
+		// escaped is literal text ("\\u003c..."), not an escape.
+		if raw && text[loc[0]] == '\\' && escapedAt(text, loc[0]) {
 			continue
+		}
+		value := m.byPlaceholder[key]
+		if raw {
+			encoded, err := json.Marshal(value)
+			if err != nil {
+				continue
+			}
+			value = string(encoded[1 : len(encoded)-1])
 		}
 		b.WriteString(text[last:loc[0]])
-		b.Write(value[1 : len(value)-1])
+		b.WriteString(value)
 		last = loc[1]
 		n++
 	}

@@ -28,6 +28,9 @@ type Event struct {
 	// delta's tool_calls[].index in a chat stream, the output_index of the
 	// function_call item in a Responses stream. 0 for other kinds.
 	Call int
+	// Tool is the name of the tool a tool-call delta belongs to, once the
+	// stream has announced it. Empty for other kinds.
+	Tool string
 	// Text is the delta text for text and reasoning deltas, and the arguments
 	// fragment carried by a tool call delta. Empty for other kinds.
 	Text string

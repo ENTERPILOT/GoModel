@@ -14,7 +14,7 @@ SWAGGER_ENABLED ?= true
 # tag-gated files (tests/e2e, tests/integration, tests/contract, live provider
 # tests) are skipped.
 BUILD_TAGS ?= swagger,e2e,integration,contract,live
-GOLANGCI_LINT_VERSION := 2.13.1
+GOLANGCI_LINT_VERSION := 2.14.0
 GOLANGCI_LINT ?= $(shell go env GOPATH)/bin/golangci-lint
 
 # Linker flags to inject version info

@@ -12,8 +12,8 @@ import (
 )
 
 // FromChatResponse builds the unified completion for a chat response. Each
-// choice's parts are, in order: reasoning_content, content text, refusal,
-// tool calls. Choice messages get the ID "choice:<index>".
+// choice's parts are, in order: reasoning (reasoning_content, or the vendor
+// reasoning member), content text, refusal, tool calls. Choice messages get the ID "choice:<index>".
 func FromChatResponse(resp *core.ChatResponse) (*pluginapi.Completion, error) {
 	if resp == nil {
 		return nil, fmt.Errorf("exchange: nil chat response")
@@ -30,10 +30,7 @@ func FromChatResponse(resp *core.ChatResponse) (*pluginapi.Completion, error) {
 			return nil, fmt.Errorf("exchange: choice %d: %w", i, err)
 		}
 		msg := pluginapi.Message{ID: choiceKey(i), Role: pluginapi.RoleAssistant}
-		if reasoning := lookupString(ch.Message.ExtraFields, "reasoning_content"); reasoning != "" {
-			msg.Parts = append(msg.Parts, pluginapi.Part{Kind: pluginapi.PartReasoning, Text: reasoning})
-		}
-		msg.Parts = append(msg.Parts, parts...)
+		msg.Parts = reasoningParts(ch.Message.ExtraFields, parts)
 		if refusal := lookupString(ch.Message.ExtraFields, "refusal"); refusal != "" {
 			msg.Parts = append(msg.Parts, pluginapi.Part{Kind: pluginapi.PartRefusal, Text: refusal})
 		}
@@ -59,9 +56,9 @@ func usageFromChat(u core.Usage) pluginapi.Usage {
 }
 
 // ApplyToChatResponse returns a copy of original with the completion's edits
-// applied. Edited choices have their text rewritten in place and their
-// finish reason updated; replaced choices get a plain string content. Extra
-// fields (reasoning_content, refusal) are kept.
+// applied. Edited choices have their text and reasoning rewritten in place
+// and their finish reason updated; replaced choices get a plain string
+// content. Other extra fields (refusal) are kept.
 func ApplyToChatResponse(original *core.ChatResponse, c *pluginapi.Completion) (*core.ChatResponse, error) {
 	if original == nil || c == nil {
 		return nil, fmt.Errorf("exchange: nil chat response or completion")
@@ -92,6 +89,11 @@ func ApplyToChatResponse(original *core.ChatResponse, c *pluginapi.Completion) (
 			}
 			target.Message.Content = rewritten
 		}
+		fields, err := patchChatReasoning(target.Message.ExtraFields, unified.Message)
+		if err != nil {
+			return nil, fmt.Errorf("exchange: choice %d: %w", idx, err)
+		}
+		target.Message.ExtraFields = fields
 		applyToolArguments(target.Message.ToolCalls, calls)
 	}
 	return &result, nil

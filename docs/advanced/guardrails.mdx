@@ -563,10 +563,14 @@ docker run -d -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer:latest
 | `score_threshold` | No | analyzer default | Minimum confidence, 0 to 1. Raise it when common words are taken for names or dates. |
 | `allow_list` | No | | Exact words never treated as personal data: product names, your company. |
 | `ad_hoc_recognizers` | No | | JSON array of Presidio pattern recognizers (`supported_entity` plus `patterns` or `deny_list`) for identifiers of your own. |
-| `roles` | No | `["user", "assistant", "tool"]` | Prompt messages analyzed, tool-result text and tool-call arguments included. In the response phase the assistant text and tool-call arguments are always analyzed. |
+| `roles` | No | `["user", "assistant", "tool"]` | Prompt messages analyzed, tool-result text, tool-call arguments, and the reasoning of replayed assistant turns included. In the response phase the assistant text and tool-call arguments are always analyzed. |
 | `action` | No | `anonymize` | `anonymize` rewrites the values; `block` rejects with an error; `respond` answers with `message` as an assistant reply; `warn` continues and records the entity types. |
 | `operator` | No | `replace` | How `anonymize` rewrites a value: `replace` with a numbered placeholder (`<PERSON_1>`, the same one for every occurrence of that value in the request), `mask` with `*` per character, `redact` (removed), `hash` (SHA-256). |
+| `placeholder_format` | No | `<{entity}_{n}>` | How `replace` writes a placeholder. `{entity}` is the entity type, `{n}` its number; it must start and end with a punctuation character and put something between the two. |
 | `restore` | No | `false` | Put the original values back where the model repeats a placeholder. Needs `operator: replace`; see below. |
+| `restore_roles` | No | `["user", "assistant", "tool"]` | Prompt roles whose values are put back. |
+| `restore_tools` | No | all | Tools (function names) whose call arguments get the values back. The others keep the placeholders. |
+| `restore_tools_exclude` | No | | Tools whose call arguments keep the placeholders even when `restore_tools` selects them. |
 | `message` | No | `Request blocked: it contains personal data` | Error message for `block`, assistant reply for `respond`, audit note for `warn`. |
 | `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`. Empty means 400 when the prompt is blocked, 502 when the response is blocked. |
 | `stream_chunk` | No | `256` | Characters of streamed text (or tool-call arguments) collected before the analyzer runs on them, so it sees whole sentences and runs once per chunk. The client waits for at most this much text at a time. |
@@ -601,22 +605,46 @@ leaks before the decision.
 
 With `restore: true` the prompt phase replaces values with numbered
 placeholders and remembers them for the request; the response or stream
-phase puts the values back where the model repeats a placeholder, in text
-and in tool-call arguments, so the client sees its own data while the
-provider never does. Set `restore` on the instances in both phases: the
-prompt-phase instance records the values, the response-phase instance
-restores them. Only values from user messages, earlier assistant turns, and
-tool results are put back; a value from a system or developer message stays
-a placeholder, so a user cannot make the model reveal it. A value the model
+phase puts the values back where the model repeats a placeholder, in text,
+reasoning (`reasoning_content` or `reasoning`), and tool-call arguments, so
+the client sees its own data while the provider never does. Set `restore` on
+the instances in both phases: the prompt-phase instance records the values,
+the response-phase instance restores them. Reasoning is only restored, not
+analyzed. Restored reasoning a chat client sends back on the next turn
+(`reasoning_content`, which DeepSeek requires with tool calls) is anonymized
+again in the prompt phase, like the rest of the history. Signed Anthropic
+thinking blocks travel separately and are never edited. Reasoning items in a
+Responses `input` pass through as they are.
+
+Only values from the `restore_roles` (user messages, earlier assistant turns,
+and tool results by default) are put back; a value from a system or developer
+message stays a placeholder, so a user cannot make the model reveal it. Add
+`system` when the system message carries the user's own data (a chat
+frontend's user name or memories) and anyone who can use the deployment may
+see it. A value the model
 produced on its own is still anonymized on the way out. Such responses are
 kept out of the [response cache](/features/cache). Placeholder-shaped text
 already in the conversation, such as a `<PERSON_2>` an earlier reply carried
 back, is left as it is and its number is never reused for a new value.
 
-Streamed tool-call arguments are restored in flight as well, each call's
-arguments as a window of its own under `stream_lookbehind`, including
-placeholders whose angle brackets the provider escaped (Gemini returns
+Placeholders are found in any letter case (`<Person_1>`) and when Markdown-
+or HTML-escaped (`\<PERSON\_1\>`, `&lt;PERSON_1&gt;`). Streamed text,
+reasoning, and each call's tool-call arguments are restored in flight, each
+as a window of its own under `stream_lookbehind`, including placeholders
+whose angle brackets the provider escaped (Gemini returns
 `\u003cPERSON_1\u003e`).
+
+Tool-call arguments are restored for every tool by default. A client-run tool
+that sends its arguments to a third party, such as web search, should keep
+the placeholders: list it in `restore_tools_exclude`, or list only the tools
+that need the values (knowledge search, asking the user, document generation)
+in `restore_tools`.
+
+A Markdown renderer that sanitizes HTML can hide a placeholder left in the
+reply (one the model made up, or one from the system prompt). Set
+`placeholder_format: "[{entity}_{n}]"` to keep them visible. The instances
+working on one request share the placeholders, in the format of the first
+instance that runs, so give them the same format.
 
 #### Example
 
@@ -639,6 +667,7 @@ placeholders whose angle brackets the provider escaped (Gemini returns
   config:
     entities: ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
     restore: true
+    restore_tools_exclude: ["web_search"]
 ```
 
 ## Examples
