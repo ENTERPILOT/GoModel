@@ -568,13 +568,13 @@ docker run -d -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer:latest
 | `operator` | No | `replace` | How `anonymize` rewrites a value: `replace` with a numbered placeholder (`<PERSON_1>`, the same one for every occurrence of that value in the request), `mask` with `*` per character, `redact` (removed), `hash` (SHA-256). |
 | `placeholder_format` | No | `<{entity}_{n}>` | How `replace` writes a placeholder. `{entity}` is the entity type, `{n}` its number; it must start and end with a punctuation character and put something between the two. |
 | `restore` | No | `false` | Put the original values back where the model repeats a placeholder. Needs `operator: replace`; see below. |
-| `restore_roles` | No | `["user", "assistant", "tool"]` | Prompt roles whose values are put back. |
+| `restore_roles` | No | `["user", "assistant", "tool"]` | Prompt roles whose values are put back. Honored on whichever instance (prompt or response phase) sets it; set on both, a role must be in both lists. |
 | `restore_tools` | No | all | Tools (function names) whose call arguments get the values back. The others keep the placeholders. |
 | `restore_tools_exclude` | No | | Tools whose call arguments keep the placeholders even when `restore_tools` selects them. |
 | `message` | No | `Request blocked: it contains personal data` | Error message for `block`, assistant reply for `respond`, audit note for `warn`. |
 | `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`. Empty means 400 when the prompt is blocked, 502 when the response is blocked. |
 | `stream_chunk` | No | `256` | Characters of streamed text (or tool-call arguments) collected before the analyzer runs on them, so it sees whole sentences and runs once per chunk. The client waits for at most this much text at a time. |
-| `stream_lookbehind` | No | `64` | Characters of streamed text (or tool-call arguments) held back so a value or placeholder split across two chunks is still handled. |
+| `stream_lookbehind` | No | `64` | Characters of streamed text (or tool-call arguments) held back so a value or placeholder split across two chunks is still handled. At most 4096. |
 
 Every text part is analyzed on its own (one analyzer call each, up to eight
 in flight), so the analyzer never sees the whole conversation as one text and
@@ -613,8 +613,16 @@ the response-phase instance restores them. Reasoning is only restored, not
 analyzed. Restored reasoning a chat client sends back on the next turn
 (`reasoning_content`, which DeepSeek requires with tool calls) is anonymized
 again in the prompt phase, like the rest of the history. Signed Anthropic
-thinking blocks travel separately and are never edited. Reasoning items in a
-Responses `input` pass through as they are.
+thinking blocks travel separately and are never edited. Reasoning items of a
+`/v1/responses` output (summaries and reasoning text) keep the placeholders:
+clients replay them in `input` as they are, so restored values would reach
+the provider on the next turn.
+
+The prompt-phase instance needs `restore` to record the values; the
+restoring instance reads `restore_tools` and `restore_tools_exclude`.
+`restore_roles` is read by both: a role's values come back when every
+instance that sets `restore_roles` lists the role, or, when neither sets it,
+when the default list does.
 
 Only values from the `restore_roles` (user messages, earlier assistant turns,
 and tool results by default) are put back; a value from a system or developer

@@ -122,6 +122,20 @@ func TestCodec_RewriteText(t *testing.T) {
 			want:  `{"choices":[{"index":0,"delta":{"reasoning":"b"}}]}`,
 		},
 		{
+			name:  "chat reasoning in both members",
+			codec: ChatCodec(),
+			data:  `{"choices":[{"index":0,"delta":{"reasoning_content":"a","reasoning":"a"}}]}`,
+			text:  "b",
+			want:  `{"choices":[{"index":0,"delta":{"reasoning_content":"b","reasoning":"b"}}]}`,
+		},
+		{
+			name:  "chat reasoning beside empty reasoning_content",
+			codec: ChatCodec(),
+			data:  `{"choices":[{"index":0,"delta":{"reasoning_content":"","reasoning":"a"}}]}`,
+			text:  "b",
+			want:  `{"choices":[{"index":0,"delta":{"reasoning_content":"","reasoning":"b"}}]}`,
+		},
+		{
 			name:  "responses delta",
 			codec: ResponsesCodec(),
 			data:  `{"type":"response.output_text.delta","sequence_number":4,"item_id":"m","output_index":0,"content_index":0,"delta":"secret","logprobs":[]}`,
