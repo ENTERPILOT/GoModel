@@ -265,6 +265,10 @@ func Run(ctx context.Context, opts Options) error {
 	// a reload re-read every configuration value rather than a hand-picked
 	// subset — everything except what is fixed for the life of the process (see
 	// warnAboutStartupOnlySettings).
+	//
+	// serving is the generation built last: the one serving, or about to,
+	// which the next build replaces. Builds run one at a time.
+	var serving *app.App
 	build := func() (*app.App, *config.Config, error) {
 		result, err := config.Load()
 		if err != nil {
@@ -289,10 +293,12 @@ func Run(ctx context.Context, opts Options) error {
 			DemoMode:      demoMode,
 			ProductName:   opts.ProductName,
 			RequestReload: requestReload,
+			Replaces:      serving,
 		})
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize application: %w", err)
 		}
+		serving = application
 		return application, result.Config, nil
 	}
 

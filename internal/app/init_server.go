@@ -80,6 +80,11 @@ func (b *bootstrap) initServerDependencies() error {
 		}
 		app.mcpGateway = mcpResult
 		app.register(subsystemMCPGateway, ownedByShutdown, app.mcpGateway.Close)
+		if previous := b.cfg.Replaces; previous != nil && previous.mcpGateway != nil {
+			if err := keepServingEntities("mcp servers", mcpResult.Service.UnresolvedSecrets(), previous.mcpGateway.Service.Running); err != nil {
+				return err
+			}
+		}
 		app.secretRotation.watchEntities(mcpgateway.ServerSecretEntity+".", mcpResult.Service)
 		slog.Info("mcp gateway enabled",
 			"path", config.JoinBasePath(appCfg.Server.BasePath, "/mcp"),

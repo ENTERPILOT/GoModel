@@ -164,8 +164,11 @@ func TestServiceResolvesHeaderReferences(t *testing.T) {
 	assert.Equal(t, map[string]string{"Authorization": "Bearer ${vault:gh}"}, spec.HeaderReferences)
 	assert.Contains(t, vault.fields, "mcp_servers.github.headers.Authorization")
 
-	_, running := service.manager.spec("broken")
-	assert.False(t, running, "a row whose references fail at startup is skipped")
+	assert.False(t, service.Running("broken"), "a row whose references fail at startup is skipped")
+	assert.True(t, service.Running("github"))
+	unresolved := service.UnresolvedSecrets()
+	require.Len(t, unresolved, 1)
+	assert.ErrorContains(t, unresolved["broken"], "mcp_servers.broken.headers.Authorization")
 }
 
 func TestServiceUpsertRejectsUnresolvableReference(t *testing.T) {

@@ -129,6 +129,9 @@ type CredentialsService struct {
 	// keyrings holds each installed provider's keyring, so a rotated API key
 	// is swapped in place rather than rebuilding the provider.
 	keyrings map[string]*Keyring
+	// unresolved holds, by name, why Reload skipped stored credentials whose
+	// secret references did not resolve.
+	unresolved map[string]error
 }
 
 // NewCredentialsService builds the service and applies every currently
@@ -209,6 +212,7 @@ func (s *CredentialsService) Reload(ctx context.Context) error {
 	}
 
 	registeredAny := false
+	unresolved := make(map[string]error)
 	for _, row := range rows {
 		if s.IsManaged(row.Name) {
 			slog.Warn("provider credential from admin store is shadowed by config/env", "provider", row.Name)
@@ -219,14 +223,36 @@ func (s *CredentialsService) Reload(ctx context.Context) error {
 		}
 		if err := s.register(ctx, row); err != nil {
 			slog.Error("failed to apply stored provider credential", "provider", row.Name, "error", err)
+			if _, ok := errors.AsType[*config.SecretError](err); ok {
+				unresolved[strings.TrimSpace(row.Name)] = err
+			}
 			continue
 		}
 		registeredAny = true
 	}
+	s.mu.Lock()
+	s.unresolved = unresolved
+	s.mu.Unlock()
 	if registeredAny {
 		s.registry.InitializeAsync(ctx)
 	}
 	return nil
+}
+
+// UnresolvedSecrets returns, by name, why the last Reload skipped stored
+// credentials whose secret references did not resolve.
+func (s *CredentialsService) UnresolvedSecrets() map[string]error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return maps.Clone(s.unresolved)
+}
+
+// Installed reports whether the credential name is installed in the registry.
+func (s *CredentialsService) Installed(name string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.configs[name]
+	return ok
 }
 
 // List returns every admin-managed credential row (secrets included; callers

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"slices"
 	"sort"
@@ -70,6 +71,9 @@ type Service struct {
 	// recorded names the admin-managed servers whose references rotation
 	// watches.
 	recorded map[string]struct{}
+	// unresolved holds, by name, why the last full reload left out stored
+	// servers whose references did not resolve. Guarded by reloadMu.
+	unresolved map[string]error
 	// searchDiscovery is the default for sessions that do not send
 	// ToolDiscoveryHeader: serve search_tools/call_tool instead of the catalog.
 	searchDiscovery bool
@@ -200,6 +204,7 @@ func (s *Service) reload(ctx context.Context, rotated func(name string) bool) er
 	}
 	var resolved []*config.ResolvedEntity
 	stored := make(map[string]struct{})
+	skipped := make(map[string]error)
 	var errs []error
 	if s.store != nil {
 		rows, err := s.store.List(ctx)
@@ -225,6 +230,7 @@ func (s *Service) reload(ctx context.Context, rotated func(name string) bool) er
 					specs = append(specs, current)
 				} else {
 					slog.Error("mcp server secret references could not be resolved; server skipped", "server", row.Name, "error", err)
+					skipped[row.Name] = err
 				}
 				continue
 			}
@@ -247,7 +253,22 @@ func (s *Service) reload(ctx context.Context, rotated func(name string) bool) er
 	if rotated != nil {
 		return errors.Join(errs...)
 	}
+	s.unresolved = skipped
 	return nil
+}
+
+// UnresolvedSecrets returns, by name, why the last full reload left out
+// stored servers whose secret references did not resolve.
+func (s *Service) UnresolvedSecrets() map[string]error {
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+	return maps.Clone(s.unresolved)
+}
+
+// Running reports whether the server name is in the running upstream set.
+func (s *Service) Running(name string) bool {
+	_, ok := s.manager.spec(name)
+	return ok
 }
 
 // Views returns the current admin snapshot of all servers.
