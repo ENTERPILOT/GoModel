@@ -299,17 +299,18 @@ func buildMetadata(model *ModelEntry, pm *ProviderModelEntry) *core.ModelMetadat
 	// Input modalities describe the model itself, so they also fill gaps in
 	// a provider_model capabilities override.
 	if model != nil {
-		meta.Capabilities = withModalityCapabilities(meta.Capabilities, model.Modalities)
+		meta.Capabilities = withModalityCapabilities(meta.Capabilities, model.Capabilities, model.Modalities)
 	}
 
 	return meta
 }
 
 // withModalityCapabilities adds the capabilities a catalog entry expresses
-// only through modalities.input. Explicit keys win, including false. The
-// input map is copied, not modified, because it belongs to the shared
-// catalog.
-func withModalityCapabilities(capabilities map[string]bool, modalities *Modalities) map[string]bool {
+// only through modalities.input. A key set in capabilities or in the model's
+// own explicit map wins, including false, even when a provider_model
+// override replaced the model's map. The input map is copied, not modified,
+// because it belongs to the shared catalog.
+func withModalityCapabilities(capabilities, explicit map[string]bool, modalities *Modalities) map[string]bool {
 	if modalities == nil {
 		return capabilities
 	}
@@ -320,6 +321,9 @@ func withModalityCapabilities(capabilities map[string]bool, modalities *Modaliti
 			continue
 		}
 		if _, set := capabilities[key]; set {
+			continue
+		}
+		if _, set := explicit[key]; set {
 			continue
 		}
 		if out == nil {

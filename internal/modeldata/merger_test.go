@@ -719,6 +719,13 @@ func TestResolve_CapabilitiesFromInputModalities(t *testing.T) {
 			want:           map[string]bool{"reasoning": true, "vision": true},
 		},
 		{
+			name:           "model false survives provider model override",
+			capabilities:   map[string]bool{"vision": false},
+			input:          []string{"image"},
+			pmCapabilities: map[string]bool{"reasoning": true},
+			want:           map[string]bool{"reasoning": true},
+		},
+		{
 			name:           "provider model override false wins",
 			input:          []string{"image"},
 			pmCapabilities: map[string]bool{"vision": false},
