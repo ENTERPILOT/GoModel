@@ -176,6 +176,24 @@ func (p *Prompt) SetText(msgID string, partIdx int, text string) error {
 	return nil
 }
 
+// SetReasoning replaces the text of part partIdx of message msgID. The part
+// must be a reasoning part: the reasoning a replayed assistant turn carries.
+func (p *Prompt) SetReasoning(msgID string, partIdx int, text string) error {
+	m := p.Message(msgID)
+	if m == nil {
+		return unknownMessage(msgID)
+	}
+	if partIdx < 0 || partIdx >= len(m.Parts) {
+		return fmt.Errorf("pluginapi: message %q has no part %d", msgID, partIdx)
+	}
+	if m.Parts[partIdx].Kind != PartReasoning {
+		return fmt.Errorf("pluginapi: part %d of message %q is %s, not reasoning", partIdx, msgID, m.Parts[partIdx].Kind)
+	}
+	m.Parts[partIdx].Text = text
+	p.changes.mark(msgID, ChangeEdited)
+	return nil
+}
+
 // SetToolArguments replaces the arguments of tool call callID in message
 // msgID. args must be valid JSON.
 func (p *Prompt) SetToolArguments(msgID, callID string, args json.RawMessage) error {
