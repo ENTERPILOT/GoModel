@@ -62,9 +62,23 @@ func TestRestoreFindsPlaceholderVariants(t *testing.T) {
 
 	// In raw JSON: \u-escaped and Markdown-escaped punctuation, values
 	// written JSON-escaped.
-	got, n := m.restoreJSON(`{"a":"<PERSON_1>","b":"\\<EMAIL_ADDRESS_1\\>","c":"&lt;person_1&gt;"}`)
-	assert.Equal(t, `{"a":"Ann","b":"a\"b@x.io","c":"Ann"}`, got)
-	assert.Equal(t, 3, n)
+	got, n := m.restoreJSON(`{"a":"<PERSON_1>","b":"\\<EMAIL_ADDRESS_1\\>","c":"&lt;person_1&gt;","d":"<EMAIL_ADDRESS_1>"}`)
+	assert.Equal(t, `{"a":"Ann","b":"a\"b@x.io","c":"Ann","d":"a\"b@x.io"}`, got)
+	assert.Equal(t, 4, n)
+}
+
+// A format may name the number first.
+func TestNumberFirstPlaceholderFormat(t *testing.T) {
+	format, err := parsePlaceholderFormat("[{n}-{entity}]")
+	require.NoError(t, err)
+	m := newMapping(format)
+	assert.Equal(t, "[1-PERSON]", m.placeholder("PERSON", "Ann", true))
+	got, n := m.restore(`Hi [1-person] and \[1-PERSON\], not [2-PERSON].`)
+	assert.Equal(t, "Hi Ann and Ann, not [2-PERSON].", got)
+	assert.Equal(t, 2, n)
+
+	m.reserve("[1-email_address]")
+	assert.Equal(t, "[2-EMAIL_ADDRESS]", m.placeholder("EMAIL_ADDRESS", "a@b", true), "a reserved number was reused")
 }
 
 func TestCustomPlaceholderFormat(t *testing.T) {

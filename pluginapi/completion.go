@@ -58,25 +58,19 @@ func (c *Completion) Text(choice int) string {
 // SetText replaces the text of part partIdx of the given choice. The part
 // must be a text part.
 func (c *Completion) SetText(choice, partIdx int, text string) error {
-	ch, err := c.choice(choice)
-	if err != nil {
-		return err
-	}
-	if partIdx < 0 || partIdx >= len(ch.Message.Parts) {
-		return fmt.Errorf("pluginapi: choice %d has no part %d", choice, partIdx)
-	}
-	if ch.Message.Parts[partIdx].Kind != PartText {
-		return fmt.Errorf("pluginapi: part %d of choice %d is %s, not text", partIdx, choice, ch.Message.Parts[partIdx].Kind)
-	}
-	ch.Message.Parts[partIdx].Text = text
-	c.changes.mark(choiceKey(choice), ChangeEdited)
-	return nil
+	return c.setPartText(choice, partIdx, PartText, text)
 }
 
 // SetReasoning replaces the text of part partIdx of the given choice. The
 // part must be a reasoning part. Plugins that restore values use it so the
 // client's reasoning view matches the answer.
 func (c *Completion) SetReasoning(choice, partIdx int, text string) error {
+	return c.setPartText(choice, partIdx, PartReasoning, text)
+}
+
+// setPartText replaces the text of part partIdx of the given choice, which
+// must be of the given kind.
+func (c *Completion) setPartText(choice, partIdx int, kind PartKind, text string) error {
 	ch, err := c.choice(choice)
 	if err != nil {
 		return err
@@ -84,8 +78,8 @@ func (c *Completion) SetReasoning(choice, partIdx int, text string) error {
 	if partIdx < 0 || partIdx >= len(ch.Message.Parts) {
 		return fmt.Errorf("pluginapi: choice %d has no part %d", choice, partIdx)
 	}
-	if ch.Message.Parts[partIdx].Kind != PartReasoning {
-		return fmt.Errorf("pluginapi: part %d of choice %d is %s, not reasoning", partIdx, choice, ch.Message.Parts[partIdx].Kind)
+	if ch.Message.Parts[partIdx].Kind != kind {
+		return fmt.Errorf("pluginapi: part %d of choice %d is %s, not %s", partIdx, choice, ch.Message.Parts[partIdx].Kind, kind)
 	}
 	ch.Message.Parts[partIdx].Text = text
 	c.changes.mark(choiceKey(choice), ChangeEdited)

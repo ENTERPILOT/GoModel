@@ -161,24 +161,18 @@ func (p *Prompt) Message(id string) *Message {
 // SetText replaces the text of part partIdx of message msgID. The part must
 // be a text part.
 func (p *Prompt) SetText(msgID string, partIdx int, text string) error {
-	m := p.Message(msgID)
-	if m == nil {
-		return unknownMessage(msgID)
-	}
-	if partIdx < 0 || partIdx >= len(m.Parts) {
-		return fmt.Errorf("pluginapi: message %q has no part %d", msgID, partIdx)
-	}
-	if m.Parts[partIdx].Kind != PartText {
-		return fmt.Errorf("pluginapi: part %d of message %q is %s, not text", partIdx, msgID, m.Parts[partIdx].Kind)
-	}
-	m.Parts[partIdx].Text = text
-	p.changes.mark(msgID, ChangeEdited)
-	return nil
+	return p.setPartText(msgID, partIdx, PartText, text)
 }
 
 // SetReasoning replaces the text of part partIdx of message msgID. The part
 // must be a reasoning part: the reasoning a replayed assistant turn carries.
 func (p *Prompt) SetReasoning(msgID string, partIdx int, text string) error {
+	return p.setPartText(msgID, partIdx, PartReasoning, text)
+}
+
+// setPartText replaces the text of part partIdx of message msgID, which
+// must be of the given kind.
+func (p *Prompt) setPartText(msgID string, partIdx int, kind PartKind, text string) error {
 	m := p.Message(msgID)
 	if m == nil {
 		return unknownMessage(msgID)
@@ -186,8 +180,8 @@ func (p *Prompt) SetReasoning(msgID string, partIdx int, text string) error {
 	if partIdx < 0 || partIdx >= len(m.Parts) {
 		return fmt.Errorf("pluginapi: message %q has no part %d", msgID, partIdx)
 	}
-	if m.Parts[partIdx].Kind != PartReasoning {
-		return fmt.Errorf("pluginapi: part %d of message %q is %s, not reasoning", partIdx, msgID, m.Parts[partIdx].Kind)
+	if m.Parts[partIdx].Kind != kind {
+		return fmt.Errorf("pluginapi: part %d of message %q is %s, not %s", partIdx, msgID, m.Parts[partIdx].Kind, kind)
 	}
 	m.Parts[partIdx].Text = text
 	p.changes.mark(msgID, ChangeEdited)

@@ -24,8 +24,10 @@ type placeholderFormat struct {
 	format string
 	// text finds placeholders in plain text, json in raw JSON text
 	// (streamed tool-call arguments), and any in either, for reserving.
-	// The entity type is group 1 and the number group 2.
+	// The groups capture the entity type and the number, in the order
+	// the format names them (numberFirst).
 	text, json, any *regexp.Regexp
+	numberFirst     bool
 	// hints holds bytes one of which every match contains.
 	hints string
 }
@@ -61,7 +63,7 @@ func parsePlaceholderFormat(format string) (*placeholderFormat, error) {
 	if !punct(first) || !punct(last) || first == '{' || last == '}' {
 		return nil, fmt.Errorf("must start and end with a punctuation character, such as <...> or [...]")
 	}
-	f := &placeholderFormat{format: format, hints: string(format[0]) + `\&`}
+	f := &placeholderFormat{format: format, hints: string(format[0]) + `\&`, numberFirst: strings.Index(format, numberToken) < strings.Index(format, entityToken)}
 	f.text = regexp.MustCompile(f.pattern(modeText))
 	f.json = regexp.MustCompile(f.pattern(modeJSON))
 	f.any = regexp.MustCompile(f.pattern(modeAny))
@@ -133,10 +135,17 @@ func (f *placeholderFormat) key(placeholder string) string {
 	return strings.ToUpper(placeholder)
 }
 
+// unescapeEntity undoes the escapes an entity type may carry in a match:
+// "\u005f" for an underscore in JSON, and Markdown backslashes.
+var unescapeEntity = strings.NewReplacer(`\u005f`, "_", `\u005F`, "_", `\U005f`, "_", `\U005F`, "_", `\`, "")
+
 // matchKey is the lookup key of a match of one of the format's patterns.
 func (f *placeholderFormat) matchKey(text string, loc []int) string {
-	entity := strings.ReplaceAll(text[loc[2]:loc[3]], `\`, "")
-	return strings.ToUpper(strings.NewReplacer(entityToken, entity, numberToken, text[loc[4]:loc[5]]).Replace(f.format))
+	entity, number := text[loc[2]:loc[3]], text[loc[4]:loc[5]]
+	if f.numberFirst {
+		number, entity = entity, number
+	}
+	return strings.ToUpper(strings.NewReplacer(entityToken, unescapeEntity.Replace(entity), numberToken, number).Replace(f.format))
 }
 
 // mayContain reports whether text may hold a placeholder, cheaply.
