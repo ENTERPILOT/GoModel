@@ -579,6 +579,8 @@
   "models_empty": "No models registered.",
   "models_empty_category": "No models in this category.",
   "models_no_match": "No models match your filter.",
+  "models_status_all": "All",
+  "models_status_filter_label": "Filter models by status",
   "models_column_model": "Model",
   "models_enabled": "Enabled",
   "models_disabled": "Disabled",

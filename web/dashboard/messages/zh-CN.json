@@ -543,6 +543,8 @@
   "models_empty": "尚未注册任何模型。",
   "models_empty_category": "该分类下暂无模型。",
   "models_no_match": "没有符合筛选条件的模型。",
+  "models_status_all": "全部",
+  "models_status_filter_label": "按状态筛选模型",
   "models_column_model": "模型",
   "models_enabled": "已启用",
   "models_disabled": "已禁用",
