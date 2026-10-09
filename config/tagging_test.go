@@ -119,3 +119,33 @@ tagging:
 		require.Equal(t, "cc-", headers[2].Prefix, "env entry wrong: %#v", headers[2])
 	})
 }
+
+func TestLoad_LiteLLMTagsEnabled(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		env  string
+		want bool
+	}{
+		{name: "default", want: true},
+		{name: "yaml off", yaml: "tagging:\n  litellm_tags_enabled: false\n", want: false},
+		{name: "env off", env: "false", want: false},
+		{name: "env wins over yaml", yaml: "tagging:\n  litellm_tags_enabled: false\n", env: "true", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			withTempDir(t, func(dir string) {
+				if tt.yaml != "" {
+					writeConfigYAML(t, dir, tt.yaml)
+				}
+				if tt.env != "" {
+					t.Setenv("LITELLM_TAGS_ENABLED", tt.env)
+				}
+				result, err := Load()
+				require.NoError(t, err)
+				require.Equal(t, tt.want, result.Config.Tagging.LiteLLMTagsEnabled)
+			})
+		})
+	}
+}

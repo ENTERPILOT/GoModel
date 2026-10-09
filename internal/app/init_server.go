@@ -151,6 +151,7 @@ func (b *bootstrap) initServerConfig() error {
 		ConversationStore:               app.conversations.Store,
 		LogOnlyModelInteractions:        appCfg.Logging.OnlyModelInteractions,
 		DisablePassthroughRoutes:        !appCfg.Server.EnablePassthroughRoutes,
+		DisableLiteLLMTags:              !appCfg.Tagging.LiteLLMTagsEnabled,
 		EnabledPassthroughProviders:     appCfg.Server.EnabledPassthroughProviders,
 		RealtimeEnabled:                 appCfg.Server.RealtimeEnabled,
 		AuthVerifyEnabled:               appCfg.Server.AuthVerifyEnabled,
