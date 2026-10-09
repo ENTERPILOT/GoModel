@@ -12,6 +12,7 @@
   import { virtualModelEditor } from "./virtualModelEditor.svelte.js";
   import {
     vmFormHasPrimaryTarget,
+    vmFormIsRedirect,
     vmFormShowBalancingOptions,
     vmFormStrategyPending,
     vmFormSupportsSlowdown,
@@ -242,6 +243,40 @@
         {m.models_slowdown_help()}
       </span>
     </FormField>
+  {/if}
+
+  {#if vmFormIsRedirect(vm.vmForm)}
+    <div class="form-field">
+      <div class="form-grid">
+        <FormField id="virtual-model-context-window" label={m.models_context_window_field()}>
+          <input
+            id="virtual-model-context-window"
+            type="number"
+            min="1"
+            step="1"
+            class="mono"
+            placeholder={m.models_token_limit_from_targets()}
+            bind:value={vm.vmForm.context_window}
+            disabled={vm.vmFormManaged}
+          />
+        </FormField>
+        <FormField id="virtual-model-max-output-tokens" label={m.models_max_output_tokens_field()}>
+          <input
+            id="virtual-model-max-output-tokens"
+            type="number"
+            min="1"
+            step="1"
+            class="mono"
+            placeholder={m.models_token_limit_from_targets()}
+            bind:value={vm.vmForm.max_output_tokens}
+            disabled={vm.vmFormManaged}
+          />
+        </FormField>
+      </div>
+      <span class="form-hint">
+        {m.models_token_limits_help()}
+      </span>
+    </div>
   {/if}
 
   <div class="vm-status-row">

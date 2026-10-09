@@ -62,6 +62,12 @@ type VirtualModelConfig struct {
 	// nil leaves the setting unspecified.
 	Slowdown *float64 `yaml:"slowdown,omitempty" json:"slowdown,omitempty"`
 
+	// ContextWindow and MaxOutputTokens set the token limits GET /v1/models
+	// lists for a redirect. When omitted, each is the smallest value any
+	// target reports. Not allowed on access policies.
+	ContextWindow   *int `yaml:"context_window,omitempty" json:"context_window,omitempty"`
+	MaxOutputTokens *int `yaml:"max_output_tokens,omitempty" json:"max_output_tokens,omitempty"`
+
 	// Enabled toggles the entry. It defaults to true when omitted.
 	Enabled *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 }

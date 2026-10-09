@@ -22,6 +22,8 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 			Slowdown:        new(0.4),
 			SessionAffinity: new(false),
 			Failover:        new(false),
+			ContextWindow:   new(128000),
+			MaxOutputTokens: new(16000),
 			Enabled:         true,
 		}
 		policy := VirtualModel{
@@ -62,6 +64,8 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 		require.False(t, *gotRedirect.SessionAffinity, "Get(fast).SessionAffinity: want explicit false")
 		require.NotNil(t, gotRedirect.Failover)
 		require.False(t, *gotRedirect.Failover, "Get(fast).Failover: want explicit false")
+		assert.Equal(t, new(128000), gotRedirect.ContextWindow)
+		assert.Equal(t, new(16000), gotRedirect.MaxOutputTokens)
 
 		gotPolicy, err := store.Get(ctx, "openai/gpt-4o")
 		require.NoError(t, err)
@@ -72,6 +76,8 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 		require.Equal(t, 0.2, *gotPolicy.Slowdown)
 		require.Nil(t, gotPolicy.SessionAffinity)
 		require.Nil(t, gotPolicy.Failover)
+		assert.Nil(t, gotPolicy.ContextWindow)
+		assert.Nil(t, gotPolicy.MaxOutputTokens)
 
 		gotDisabled, err := store.Get(ctx, "no-slowdown")
 		require.NoError(t, err)

@@ -36,6 +36,9 @@ func normalizeRedirect(vm VirtualModel) (VirtualModel, []core.ModelSelector, err
 	if err := validateSlowdown(vm.Slowdown); err != nil {
 		return VirtualModel{}, nil, err
 	}
+	if err := validateTokenLimits(vm); err != nil {
+		return VirtualModel{}, nil, err
+	}
 
 	if vm.Source == "" {
 		return VirtualModel{}, nil, newValidationError("source is required", nil)
@@ -104,6 +107,9 @@ func normalizePolicyInput(catalog Catalog, vm VirtualModel) (VirtualModel, error
 	if err := validateSlowdown(vm.Slowdown); err != nil {
 		return VirtualModel{}, err
 	}
+	if err := rejectPolicyTokenLimits(vm); err != nil {
+		return VirtualModel{}, err
+	}
 	parts, err := modelselectors.NormalizeInput(catalog, vm.Source)
 	if err != nil {
 		return VirtualModel{}, err
@@ -127,6 +133,9 @@ func normalizePolicyInput(catalog Catalog, vm VirtualModel) (VirtualModel, error
 // normalizeStoredPolicy normalizes a policy row loaded from storage.
 func normalizeStoredPolicy(vm VirtualModel) (VirtualModel, error) {
 	if err := validateSlowdown(vm.Slowdown); err != nil {
+		return VirtualModel{}, err
+	}
+	if err := rejectPolicyTokenLimits(vm); err != nil {
 		return VirtualModel{}, err
 	}
 	parts, err := modelselectors.NormalizeStored(vm.Source, vm.ProviderName, vm.Model)
@@ -155,6 +164,26 @@ func validateSlowdown(configured *float64) error {
 	factor := *configured
 	if math.IsNaN(factor) || math.IsInf(factor, 0) || factor < MinSlowdownFactor || factor > MaxSlowdownFactor {
 		return newValidationError(fmt.Sprintf("slowdown must be 0 (disabled) or between %.1f and %.0f", MinSlowdownFactor, MaxSlowdownFactor), nil)
+	}
+	return nil
+}
+
+// validateTokenLimits rejects a configured token limit that is not positive.
+func validateTokenLimits(vm VirtualModel) error {
+	if vm.ContextWindow != nil && *vm.ContextWindow <= 0 {
+		return newValidationError("context_window must be a positive number of tokens", nil)
+	}
+	if vm.MaxOutputTokens != nil && *vm.MaxOutputTokens <= 0 {
+		return newValidationError("max_output_tokens must be a positive number of tokens", nil)
+	}
+	return nil
+}
+
+// rejectPolicyTokenLimits rejects token limits on an access policy: only a
+// redirect is listed as a model of its own, so only it can carry them.
+func rejectPolicyTokenLimits(vm VirtualModel) error {
+	if vm.ContextWindow != nil || vm.MaxOutputTokens != nil {
+		return newValidationError("context_window and max_output_tokens can only be configured for a redirect", nil)
 	}
 	return nil
 }

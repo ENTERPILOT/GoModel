@@ -59,6 +59,34 @@ to load-balanced virtual models after a target is selected.
 
 The rest of this page covers redirects.
 
+## Context window and max output tokens
+
+Clients such as coding agents read `metadata.context_window` and
+`metadata.max_output_tokens` from `GET /v1/models` to size prompts. A redirect
+lists, for each of the two, the **smallest value any of its targets reports**,
+descending chained virtual models. Any target may serve a request — load
+balancing, failover, or a session moving — so sizing to the smallest one never
+overflows the target that gets the request. Targets that report no value are
+ignored; if none does, the field is omitted.
+
+Set **Context window** or **Max output tokens** on a redirect to list your own
+value instead, for example when a large-context target only serves as a rare
+fallback. An explicit value wins over the derived one, and a chained virtual
+model applies its own explicit values before an outer one takes the minimum.
+
+```yaml
+virtual_models:
+  - source: smart
+    context_window: 128000 # omit to use the smallest target value
+    max_output_tokens: 16000
+    targets:
+      - { model: openai/gpt-4o }
+      - { model: anthropic/claude-sonnet-4-6 }
+```
+
+These values are listing metadata only: GoModel does not enforce them on
+requests. Access policies cannot carry them.
+
 ## Use stable names
 
 You can expose names like `regular` and `smarter` instead of provider-specific
@@ -199,7 +227,9 @@ keeping pins at every level, so a session stays on the same concrete model.
   request; the inner one's scope is not consulted when it is reached through a
   chain.
 - `/v1/models` lists a chained redirect with the metadata of its first
-  available concrete model.
+  available concrete model, except for the
+  [token limits](#context-window-and-max-output-tokens), which take every
+  target into account.
 
 A target written as one name is matched by name wherever it is declared —
 `config.yaml`, the dashboard, or the admin API — so `team/cheap` reaches the
@@ -285,7 +315,9 @@ Each entry accepts `source`, a single `target` (shorthand) or a `targets` list,
 [Session Keeping](/features/session-keeping)), `failover` (default `true`; see
 [Failover](/features/failover)), `user_paths`, `description`,
 `slowdown` (`0` disables inherited slowdown; active factors range from `0.1` to
-`10`), and `enabled`.
+`10`), `context_window` and `max_output_tokens` (see
+[Context window and max output tokens](#context-window-and-max-output-tokens)),
+and `enabled`.
 A target `model` may name another declared virtual model (see
 [Chain virtual models](#chain-virtual-models)).
 Leave the targets empty to declare an access policy on the `source` selector. An

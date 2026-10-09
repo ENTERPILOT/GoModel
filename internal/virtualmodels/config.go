@@ -36,6 +36,8 @@ func configModel(entry config.VirtualModelConfig) VirtualModel {
 		UserPaths:       entry.UserPaths,
 		Description:     entry.Description,
 		Slowdown:        entry.Slowdown,
+		ContextWindow:   entry.ContextWindow,
+		MaxOutputTokens: entry.MaxOutputTokens,
 		Enabled:         enabled,
 		Managed:         true,
 	}
