@@ -555,3 +555,38 @@ func assertInvalidRequest(t *testing.T, err error) {
 	require.ErrorAs(t, err, &gatewayErr)
 	assert.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
 }
+
+func TestToCohereTools_AllowedToolsNarrowsDeclaredTools(t *testing.T) {
+	tool := func(name string) map[string]any {
+		return map[string]any{"type": "function", "function": map[string]any{"name": name}}
+	}
+	tools := []map[string]any{tool("tool_a"), tool("tool_b"), tool("tool_c")}
+	allowed := func(mode string, names ...string) map[string]any {
+		entries := make([]any, 0, len(names))
+		for _, name := range names {
+			entries = append(entries, map[string]any{"type": "function", "function": map[string]any{"name": name}})
+		}
+		return map[string]any{"type": "allowed_tools", "allowed_tools": map[string]any{"mode": mode, "tools": entries}}
+	}
+	names := func(converted []map[string]any) []string {
+		var out []string
+		for _, tool := range converted {
+			out = append(out, tool["function"].(map[string]any)["name"].(string))
+		}
+		return out
+	}
+
+	converted, choice, err := toCohereTools(tools, allowed("required", "tool_c", "tool_a"))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"tool_a", "tool_c"}, names(converted))
+	assert.Equal(t, "REQUIRED", choice)
+
+	converted, choice, err = toCohereTools(tools, allowed("auto", "tool_b"))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"tool_b"}, names(converted))
+	assert.Empty(t, choice)
+
+	_, _, err = toCohereTools(tools, allowed("required", "unknown"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tool_choice.allowed_tools.tools")
+}

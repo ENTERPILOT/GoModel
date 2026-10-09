@@ -430,13 +430,18 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 		applyReasoning(anthropicReq, req.Model, effort)
 	}
 
-	tools, err := convertOpenAIToolsToAnthropic(req.Tools)
+	// Anthropic has no subset choice: declare only the allowed functions.
+	reqTools, reqToolChoice, err := core.NarrowToAllowedTools(req.Tools, req.ToolChoice)
+	if err != nil {
+		return nil, err
+	}
+	tools, err := convertOpenAIToolsToAnthropic(reqTools)
 	if err != nil {
 		return nil, err
 	}
 	anthropicReq.Tools = tools
 	var forcedToolInstruction string
-	if toolChoice, disableTools, err := convertOpenAIToolChoiceToAnthropic(req.ToolChoice); err != nil {
+	if toolChoice, disableTools, err := convertOpenAIToolChoiceToAnthropic(reqToolChoice); err != nil {
 		return nil, err
 	} else if err := validateAnthropicToolChoice(toolChoice, anthropicReq.Tools, disableTools); err != nil {
 		return nil, err

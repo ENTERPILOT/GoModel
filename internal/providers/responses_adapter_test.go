@@ -1397,3 +1397,138 @@ func TestConvertResponsesRequestToChat_DropsReplayedItemIDs(t *testing.T) {
 		})
 	}
 }
+
+func TestConvertResponsesRequestToChat_TranslatesAllowedToolsChoice(t *testing.T) {
+	functionTools := []map[string]any{
+		{"type": "function", "name": "tool_a", "parameters": map[string]any{"type": "object"}},
+		{"type": "function", "name": "tool_b", "parameters": map[string]any{"type": "object"}},
+	}
+	chatAllowed := func(mode any, names ...string) map[string]any {
+		tools := make([]any, 0, len(names))
+		for _, name := range names {
+			tools = append(tools, map[string]any{"type": "function", "function": map[string]any{"name": name}})
+		}
+		spec := map[string]any{"tools": tools}
+		if mode != nil {
+			spec["mode"] = mode
+		}
+		return map[string]any{"type": "allowed_tools", "allowed_tools": spec}
+	}
+
+	tests := []struct {
+		name   string
+		choice any
+		want   any
+	}{
+		{
+			name: "responses shape, required",
+			choice: map[string]any{
+				"type":  "allowed_tools",
+				"mode":  "required",
+				"tools": []any{map[string]any{"type": "function", "name": "tool_b"}},
+			},
+			want: chatAllowed("required", "tool_b"),
+		},
+		{
+			name: "responses shape, auto, function-form entry",
+			choice: map[string]any{
+				"type": "allowed_tools",
+				"mode": "auto",
+				"tools": []any{
+					map[string]any{"type": "function", "name": "tool_a"},
+					map[string]any{"type": "function", "function": map[string]any{"name": "tool_b"}},
+				},
+			},
+			want: chatAllowed("auto", "tool_a", "tool_b"),
+		},
+		{
+			// Hosted tools have no chat equivalent; the function subset stays
+			// restricted instead of the whole choice being dropped.
+			name: "hosted entries are left out",
+			choice: map[string]any{
+				"type": "allowed_tools",
+				"mode": "required",
+				"tools": []any{
+					map[string]any{"type": "web_search"},
+					map[string]any{"type": "function", "name": "tool_a"},
+				},
+			},
+			want: chatAllowed("required", "tool_a"),
+		},
+		{
+			name: "mode omitted",
+			choice: map[string]any{
+				"type":  "allowed_tools",
+				"tools": []any{map[string]any{"type": "function", "name": "tool_a"}},
+			},
+			want: chatAllowed(nil, "tool_a"),
+		},
+		{
+			name: "nameless and blank entries are skipped",
+			choice: map[string]any{
+				"type": "allowed_tools",
+				"mode": "auto",
+				"tools": []any{
+					map[string]any{"type": "function"},
+					map[string]any{"type": "function", "name": "  "},
+					"not an object",
+					map[string]any{"type": "function", "name": "tool_b"},
+				},
+			},
+			want: chatAllowed("auto", "tool_b"),
+		},
+		{
+			name:   "chat shape passes through",
+			choice: chatAllowed("auto", "tool_a"),
+			want:   chatAllowed("auto", "tool_a"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chatReq, err := ConvertResponsesRequestToChat(&core.ResponsesRequest{
+				Model:      "test-model",
+				Input:      "Hello",
+				Tools:      functionTools,
+				ToolChoice: tt.choice,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, chatReq.ToolChoice)
+		})
+	}
+}
+
+// An allowed_tools choice with no function tool left cannot be honored by any
+// chat-backed provider. It is rejected instead of being cleared (when only
+// hosted tools are declared) or forwarded as an empty subset.
+func TestConvertResponsesRequestToChat_RejectsEmptyAllowedTools(t *testing.T) {
+	functionTool := map[string]any{"type": "function", "name": "tool_a", "parameters": map[string]any{"type": "object"}}
+	hostedTool := map[string]any{"type": "web_search"}
+	hostedOnly := map[string]any{
+		"type":  "allowed_tools",
+		"mode":  "required",
+		"tools": []any{map[string]any{"type": "web_search"}},
+	}
+
+	tests := []struct {
+		name   string
+		tools  []map[string]any
+		choice any
+	}{
+		{name: "hosted entries, function tools declared", tools: []map[string]any{functionTool, hostedTool}, choice: hostedOnly},
+		{name: "hosted entries, only hosted tools declared", tools: []map[string]any{hostedTool}, choice: hostedOnly},
+		{name: "tools field missing", tools: []map[string]any{functionTool}, choice: map[string]any{"type": "allowed_tools", "mode": "auto"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ConvertResponsesRequestToChat(&core.ResponsesRequest{
+				Model:      "test-model",
+				Input:      "Hello",
+				Tools:      tt.tools,
+				ToolChoice: tt.choice,
+			})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "tool_choice.allowed_tools.tools")
+		})
+	}
+}

@@ -32,6 +32,11 @@ func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatReques
 	}
 	tools := normalizeResponsesToolsForChat(req.Tools)
 	toolChoice := normalizeResponsesToolChoiceForChat(req.ToolChoice)
+	// Checked before the cleanup below, which clears the choice when no
+	// function tool is declared: a required subset must fail, not vanish.
+	if names, _, ok := core.AllowedToolsChoice(toolChoice); ok && len(names) == 0 {
+		return nil, core.NewInvalidRequestError("tool_choice.allowed_tools.tools must list at least one function tool", nil)
+	}
 	parallelToolCalls := req.ParallelToolCalls
 	if len(req.Tools) > 0 {
 		if len(tools) == 0 {
@@ -310,6 +315,8 @@ func normalizeResponsesToolChoiceForChat(choice any) any {
 		return choiceType
 	case "function":
 		// Function choices stay object-shaped, with legacy name-form normalized below.
+	case "allowed_tools":
+		return normalizeResponsesAllowedToolsForChat(choiceMap)
 	default:
 		// A hosted-tool choice cannot be honored by Chat Completions. Dropping
 		// the choice lets the downstream model use any translatable function
@@ -329,6 +336,43 @@ func normalizeResponsesToolChoiceForChat(choice any) any {
 	delete(normalized, "name")
 	normalized["function"] = map[string]any{"name": name}
 	return normalized
+}
+
+// normalizeResponsesAllowedToolsForChat converts a Responses allowed_tools
+// choice, {"type": "allowed_tools", "mode": ..., "tools": [{"type": "function",
+// "name": ...}]}, to the Chat Completions shape {"type": "allowed_tools",
+// "allowed_tools": {"mode": ..., "tools": [{"type": "function", "function":
+// {"name": ...}}]}}. Entries for hosted tools have no chat equivalent and are
+// left out; ConvertResponsesRequestToChat rejects a choice with no function
+// left, and each adapter honors or rejects the rest, so the choice is never
+// dropped and the model never gets every declared tool.
+func normalizeResponsesAllowedToolsForChat(choice map[string]any) map[string]any {
+	if _, ok := choice["allowed_tools"].(map[string]any); ok {
+		return cloneStringAnyMap(choice)
+	}
+
+	entries, _ := choice["tools"].([]any)
+	tools := make([]any, 0, len(entries))
+	for _, raw := range entries {
+		entry, _ := raw.(map[string]any)
+		if entryType, _ := entry["type"].(string); strings.TrimSpace(entryType) != "function" {
+			continue
+		}
+		name, _ := entry["name"].(string)
+		if fn, ok := entry["function"].(map[string]any); ok && name == "" {
+			name, _ = fn["name"].(string)
+		}
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		tools = append(tools, map[string]any{"type": "function", "function": map[string]any{"name": name}})
+	}
+
+	spec := map[string]any{"tools": tools}
+	if mode, ok := choice["mode"]; ok {
+		spec["mode"] = mode
+	}
+	return map[string]any{"type": "allowed_tools", "allowed_tools": spec}
 }
 
 func dropUnavailableResponsesToolChoice(choice any, tools []map[string]any) any {

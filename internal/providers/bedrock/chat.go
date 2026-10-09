@@ -325,6 +325,11 @@ func convertTools(tools []map[string]any, toolChoice any) (*brtypes.ToolConfigur
 	if isToolChoiceNone(toolChoice) {
 		return nil, nil
 	}
+	// Bedrock has no subset choice: declare only the allowed functions.
+	tools, toolChoice, err := core.NarrowToAllowedTools(tools, toolChoice)
+	if err != nil {
+		return nil, err
+	}
 	out := &brtypes.ToolConfiguration{Tools: make([]brtypes.Tool, 0, len(tools))}
 	for _, tool := range tools {
 		toolType, _ := tool["type"].(string)
