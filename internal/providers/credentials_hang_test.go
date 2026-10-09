@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -80,29 +81,90 @@ func TestCredentialsService_SaveWaitingOnAReferenceDoesNotBlockRotation(t *testi
 	assert.Equal(t, []string{"sk-2"}, svc.configs["rotating"].APIKeys)
 }
 
-// A save or delete that lands while rotation resolves wins: rotation does not
-// install values resolved from the row it replaced.
-func TestCredentialsService_RotationSkipsACredentialSavedMeanwhile(t *testing.T) {
-	vault := &secretVault{values: map[string]string{"key": "sk-1", "new": "sk-new"}}
-	store := newFakeCredentialStore()
-	svc, secrets, _ := newSecretsTestService(t, store, vault)
-	ctx := t.Context()
-	// The second key's resolver replaces the stored row mid-rotation.
-	hooked := false
-	require.NoError(t, secrets.Register("hook", config.SecretResolverFunc(func(context.Context, string) (string, error) {
-		if hooked {
-			hooked = false
-			assert.NoError(t, store.Upsert(ctx, ManagedProviderCredential{Name: "rotating", Type: "test", APIKeys: []string{"${vault:new}"}, Enabled: true}))
+// gate is a ${gate:...} resolver that, once armed, blocks its next call
+// until opened, so a test can interleave a save with a rotation.
+type gate struct {
+	armed   atomic.Bool
+	entered chan struct{}
+	opened  chan struct{}
+	once    sync.Once
+}
+
+// open lets the blocked call return.
+func (g *gate) open() { g.once.Do(func() { close(g.opened) }) }
+
+func newGate(t *testing.T, secrets *config.Secrets) *gate {
+	t.Helper()
+	g := &gate{entered: make(chan struct{}), opened: make(chan struct{})}
+	t.Cleanup(g.open)
+	require.NoError(t, secrets.Register("gate", config.SecretResolverFunc(func(context.Context, string) (string, error) {
+		if g.armed.CompareAndSwap(true, false) {
+			close(g.entered)
+			<-g.opened
 		}
-		return "sk-hook", nil
+		return "sk-gate", nil
 	})))
-	require.NoError(t, svc.Upsert(ctx, ManagedProviderCredential{Name: "rotating", Type: "test", APIKeys: []string{"${vault:key}", "${hook:x}"}, Enabled: true}))
+	return g
+}
+
+// waitEntered returns once the armed call is blocked.
+func (g *gate) waitEntered(t *testing.T) {
+	t.Helper()
+	select {
+	case <-g.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the gated resolution never started")
+	}
+}
+
+// The save resolves the old key and then waits on another field while
+// rotation installs the new key. Committing then must not restore the old
+// key, which may already be revoked.
+func TestCredentialsService_SaveDoesNotRestoreAKeyRotatedMeanwhile(t *testing.T) {
+	vault := &secretVault{values: map[string]string{"key": "sk-1"}}
+	svc, secrets, _ := newSecretsTestService(t, newFakeCredentialStore(), vault)
+	g := newGate(t, secrets)
+	ctx := t.Context()
+	cred := ManagedProviderCredential{Name: "rotating", Type: "test", APIKeys: []string{"${vault:key}", "${gate:x}"}, Enabled: true}
+	require.NoError(t, svc.Upsert(ctx, cred))
+
+	g.armed.Store(true)
+	saved := make(chan error, 1)
+	go func() { saved <- svc.Upsert(ctx, cred) }()
+	g.waitEntered(t)
 
 	vault.set("key", "sk-2")
-	hooked = true
 	require.NoError(t, svc.RotateSecrets(ctx, []string{"provider_credentials.rotating.api_keys[0]"}))
+	g.open()
+	require.NoError(t, <-saved)
 
 	svc.mu.RLock()
 	defer svc.mu.RUnlock()
-	assert.Equal(t, []string{"sk-1", "sk-hook"}, svc.configs["rotating"].APIKeys, "rotation must not install values resolved from a replaced row")
+	assert.Equal(t, []string{"sk-2", "sk-gate"}, svc.configs["rotating"].APIKeys)
+}
+
+// Rotation resolves and then waits while a save installs newer values.
+// Rotation must not replace them with what it resolved before.
+func TestCredentialsService_RotationDoesNotReplaceValuesSavedMeanwhile(t *testing.T) {
+	vault := &secretVault{values: map[string]string{"key": "sk-1"}}
+	svc, secrets, _ := newSecretsTestService(t, newFakeCredentialStore(), vault)
+	g := newGate(t, secrets)
+	ctx := t.Context()
+	cred := ManagedProviderCredential{Name: "rotating", Type: "test", APIKeys: []string{"${vault:key}", "${gate:x}"}, Enabled: true}
+	require.NoError(t, svc.Upsert(ctx, cred))
+
+	vault.set("key", "sk-2")
+	g.armed.Store(true)
+	rotated := make(chan error, 1)
+	go func() { rotated <- svc.RotateSecrets(ctx, []string{"provider_credentials.rotating.api_keys[0]"}) }()
+	g.waitEntered(t)
+
+	vault.set("key", "sk-3")
+	require.NoError(t, svc.Upsert(ctx, cred))
+	g.open()
+	require.NoError(t, <-rotated)
+
+	svc.mu.RLock()
+	defer svc.mu.RUnlock()
+	assert.Equal(t, []string{"sk-3", "sk-gate"}, svc.configs["rotating"].APIKeys)
 }

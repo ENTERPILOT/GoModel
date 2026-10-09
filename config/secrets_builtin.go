@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // maxSecretFileSize bounds a ${file:...} read. Secrets are short; a larger
@@ -70,21 +72,22 @@ func resolveFileSecret(_ context.Context, path string) (string, error) {
 
 // cancellable stops waiting for resolve once ctx ends, for a resolver whose
 // I/O cannot observe ctx: reading a file on a stalled network mount blocks in
-// the kernel. The abandoned call finishes in the background.
+// the kernel. The abandoned call finishes in the background, and calls for a
+// reference whose call is still running share it, so a stalled mount does
+// not pile up blocked reads.
 func cancellable(resolve SecretResolverFunc) SecretResolverFunc {
-	type result struct {
-		value string
-		err   error
-	}
+	var calls singleflight.Group
 	return func(ctx context.Context, reference string) (string, error) {
-		done := make(chan result, 1) // buffered: an abandoned call never blocks on send
-		go func() {
-			value, err := resolve(ctx, reference)
-			done <- result{value, err}
-		}()
+		// Without cancellation: the call is shared, so one caller giving up
+		// must not fail it for the others.
+		shared := context.WithoutCancel(ctx)
+		result := calls.DoChan(reference, func() (any, error) {
+			return resolve(shared, reference)
+		})
 		select {
-		case r := <-done:
-			return r.value, r.err
+		case r := <-result:
+			value, _ := r.Val.(string)
+			return value, r.Err
 		case <-ctx.Done():
 			return "", ctx.Err()
 		}

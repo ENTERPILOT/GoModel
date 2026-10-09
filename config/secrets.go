@@ -11,7 +11,9 @@ import (
 
 // SecretResolver resolves the reference part of ${scheme:reference}.
 // Implementations must be safe for concurrent use and must never include the
-// resolved value in an error.
+// resolved value in an error. ResolveSecret must return once ctx is done:
+// each call gets a deadline, and one that ignores it holds up whatever is
+// resolving, such as startup, a reload, or a dashboard save.
 type SecretResolver interface {
 	ResolveSecret(ctx context.Context, reference string) (string, error)
 }

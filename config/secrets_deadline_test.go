@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -42,28 +43,34 @@ func TestResolveGivesUpAfterTheResolveTimeout(t *testing.T) {
 }
 
 // A file read that blocks in the kernel, as on a stalled network mount,
-// cannot observe its context; the caller stops waiting for it instead.
+// cannot observe its context; the caller stops waiting for it instead, and
+// later callers share the blocked read rather than start another.
 func TestCancellableResolverReturnsWhenItsContextEnds(t *testing.T) {
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })
+	var calls atomic.Int32
 	resolve := cancellable(func(context.Context, string) (string, error) {
+		calls.Add(1)
 		<-release // ignores its context
 		return "late", nil
 	})
 
-	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
-	defer cancel()
-	done := make(chan error, 1)
-	go func() {
-		_, err := resolve(ctx, "/mnt/stalled/key")
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		require.ErrorIs(t, err, context.DeadlineExceeded)
-	case <-time.After(5 * time.Second):
-		t.Fatal("the resolver call was waited on past its context")
+	for range 3 {
+		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+		done := make(chan error, 1)
+		go func() {
+			_, err := resolve(ctx, "/mnt/stalled/key")
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+		case <-time.After(5 * time.Second):
+			t.Fatal("the resolver call was waited on past its context")
+		}
+		cancel()
 	}
+	assert.Equal(t, int32(1), calls.Load(), "callers share the blocked read")
 
 	value, err := cancellable(func(context.Context, string) (string, error) { return "v", nil })(t.Context(), "x")
 	require.NoError(t, err)
