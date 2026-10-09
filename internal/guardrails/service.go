@@ -333,6 +333,9 @@ func (s *Service) Upsert(ctx context.Context, definition Definition) error {
 	if err != nil {
 		return err
 	}
+	if err := config.CheckSecretDestinations(ctx, DefinitionSecretEntity, normalized.Name, s.definitionDestinations(stored, normalized), s.definitionSecretValues(normalized)); err != nil {
+		return err
+	}
 	previous := s.storedSecretValues(stored)
 	written, err := s.storeDefinitionSecrets(ctx, &normalized, previous)
 	if err != nil {

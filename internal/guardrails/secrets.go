@@ -86,6 +86,26 @@ func (s *Service) storeDefinitionSecrets(ctx context.Context, def *Definition, k
 	return written, nil
 }
 
+// definitionDestinations lists the fields of def that decide where it sends
+// its secrets, against stored, the definition it replaces, for
+// config.CheckSecretDestinations: the type and the fields its plugin marks as
+// destinations (pluginapi.Field.Destination). A new definition has none.
+func (s *Service) definitionDestinations(stored *Definition, def Definition) []config.SecretDestination {
+	if stored == nil {
+		return nil
+	}
+	destinations := []config.SecretDestination{{Field: "type", Stored: normalizeDefinitionType(stored.Type), Saved: def.Type}}
+	schema, _ := s.configSchema(def.Type)
+	before := plugins.DestinationValues(schema, stored.Config)
+	after := plugins.DestinationValues(schema, def.Config)
+	for _, field := range schema {
+		if field.Destination {
+			destinations = append(destinations, config.SecretDestination{Field: configSecretField(field.Key), Stored: before[field.Key], Saved: after[field.Key]})
+		}
+	}
+	return destinations
+}
+
 // definitionSecretValues lists the secret values of def's config.
 func (s *Service) definitionSecretValues(def Definition) []string {
 	schema, ok := s.configSchema(def.Type)

@@ -73,12 +73,13 @@ func guardrailWriteError(err error) error {
 const codeSecretReferenceRequiresMasterKey = "secret_reference_requires_master_key"
 
 // secretReferenceRestrictedError turns a save refused for adding or changing
-// a secret reference without the master key (config.ErrSecretReferenceRestricted)
+// a secret reference, or changing where one is sent, without the master key
+// (config.ErrSecretReferenceRestricted, config.ErrSecretDestinationRestricted)
 // into a 403 naming the field and scheme, never the value. It returns nil for
 // any other error.
 func secretReferenceRestrictedError(err error) error {
 	secretErr, ok := errors.AsType[*config.SecretError](err)
-	if !ok || !errors.Is(secretErr, config.ErrSecretReferenceRestricted) {
+	if !ok || !errors.Is(secretErr, config.ErrSecretReferenceRestricted) && !errors.Is(secretErr, config.ErrSecretDestinationRestricted) {
 		return nil
 	}
 	return core.NewPermissionError(secretErr.Error()).WithCode(codeSecretReferenceRequiresMasterKey)

@@ -44,7 +44,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 		Guardrail:   true,
 		ConfigSchema: []pluginapi.Field{
 			{
-				Key: "analyzer_url", Label: "Analyzer URL", Input: pluginapi.InputText, Default: DefaultAnalyzerURL,
+				Key: "analyzer_url", Label: "Analyzer URL", Input: pluginapi.InputText, Default: DefaultAnalyzerURL, Destination: true,
 				Help:        "Base URL of the Presidio analyzer service (its /analyze endpoint is appended). No anonymizer service is needed.",
 				Placeholder: DefaultAnalyzerURL,
 			},

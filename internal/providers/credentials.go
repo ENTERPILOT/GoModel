@@ -336,6 +336,9 @@ func (s *CredentialsService) apply(ctx context.Context, cred ManagedProviderCred
 	if err != nil && !errors.Is(err, ErrCredentialNotFound) {
 		return err
 	}
+	if err := config.CheckSecretDestinations(ctx, CredentialSecretEntity, cred.Name, credentialDestinations(previous, &cred), credentialSecretValues(&cred)); err != nil {
+		return err
+	}
 	kept := credentialSecretValues(previous)
 	written, err := s.storeCredentialSecrets(ctx, &cred, kept)
 	if err != nil {
