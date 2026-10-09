@@ -9,6 +9,7 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/metadataoverrides"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -162,8 +163,9 @@ func routeOutcome(source string, info llmclient.ResponseInfo) pluginapi.RouteOut
 	}
 }
 
-// initPricing builds request tagging and the model pricing overrides that
-// refine the registry's pricing for usage cost attribution.
+// initPricing builds request tagging, the model pricing overrides that
+// refine the registry's pricing for usage cost attribution, and the model
+// metadata overrides layered onto the registry's metadata.
 func (b *bootstrap) initPricing() error {
 	app := b.app
 
@@ -181,6 +183,16 @@ func (b *bootstrap) initPricing() error {
 	}
 	app.pricingOverrides = pricingOverrideResult
 	app.register(subsystemPricingOverrides, ownedByShutdown, app.pricingOverrides.Close)
+
+	// Dashboard-managed metadata overrides layer onto the registry's
+	// enrichment, so loading them here re-enriches the catalog once.
+	metadataOverrideResult, err := metadataoverrides.New(b.ctx, b.appCfg, app.storage, registry)
+	if err != nil {
+		return fmt.Errorf("failed to initialize model metadata overrides: %w", err)
+	}
+	app.metadataOverrides = metadataOverrideResult
+	app.register(subsystemMetadataOverrides, ownedByShutdown, app.metadataOverrides.Close)
+
 	b.pricingResolver = usage.PricingResolver(registry)
 	if app.pricingOverrides != nil && app.pricingOverrides.Service != nil {
 		b.pricingResolver = app.pricingOverrides.Service

@@ -4,6 +4,8 @@ import "github.com/enterpilot/gomodel/internal/core"
 
 // Layer names reported by MetadataSources.
 const (
+	// MetadataSourceDashboard is a dashboard-managed metadata override.
+	MetadataSourceDashboard = "dashboard"
 	// MetadataSourceConfig is a config.yaml metadata override.
 	MetadataSourceConfig = "config"
 	// MetadataSourceProvider is what the provider reported in its own listing.
@@ -16,12 +18,12 @@ const (
 )
 
 // MetadataSources names, for every field set on effective, the layer that
-// supplied it. Precedence mirrors enrichment: config over provider over
-// catalog, with modes and categories inferred from the ID when no layer set
+// supplied it. Precedence mirrors enrichment: dashboard over config over
+// provider over catalog, with modes and categories inferred from the ID when no layer set
 // them. Keys are the JSON field names; capabilities and rankings are reported
 // per key ("capabilities.vision"). Pricing is left out: PricingSources
 // already records it per price field.
-func MetadataSources(effective, provider, catalog, config *core.ModelMetadata) map[string]string {
+func MetadataSources(effective, provider, catalog, config, dashboard *core.ModelMetadata) map[string]string {
 	if effective == nil {
 		return nil
 	}
@@ -29,6 +31,7 @@ func MetadataSources(effective, provider, catalog, config *core.ModelMetadata) m
 		name string
 		meta *core.ModelMetadata
 	}{
+		{MetadataSourceDashboard, dashboard},
 		{MetadataSourceConfig, config},
 		{MetadataSourceProvider, provider},
 		{MetadataSourceCatalog, catalog},

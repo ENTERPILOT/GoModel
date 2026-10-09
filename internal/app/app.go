@@ -27,6 +27,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
 	"github.com/enterpilot/gomodel/internal/mediastore"
+	"github.com/enterpilot/gomodel/internal/metadataoverrides"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -65,6 +66,7 @@ type App struct {
 	mcpGateway          *mcpgateway.Result
 	providerCredentials *providers.CredentialsResult
 	pricingOverrides    *pricingoverrides.Result
+	metadataOverrides   *metadataoverrides.Result
 	authKeys            *authkeys.Result
 	users               *users.Result
 	guardrails          *guardrails.Result

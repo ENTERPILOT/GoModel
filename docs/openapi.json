@@ -1909,6 +1909,228 @@
         }
       }
     },
+    "/admin/model-metadata-overrides": {
+      "get": {
+        "description": "Lists dashboard-managed per-model metadata overrides (categories, input capabilities, context window, max output tokens). Selectors are exact \"provider/model\".",
+        "tags": [
+          "admin"
+        ],
+        "summary": "List model metadata overrides",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/metadataoverrides.Override"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/model-metadata-overrides",
+            "title": "List model metadata overrides",
+            "description": "GoModel API reference for GET /admin/model-metadata-overrides: List model metadata overrides."
+          }
+        }
+      },
+      "put": {
+        "description": "Replaces the override for one \"provider/model\" selector. Set fields win over config.yaml metadata, provider discovery and the model catalog; unset fields inherit. Applies without a restart.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create or replace one model metadata override",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/admin.upsertModelMetadataOverrideRequest"
+              }
+            }
+          },
+          "description": "Selector and metadata override",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/metadataoverrides.Override"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/model-metadata-overrides",
+            "title": "Create or replace one model metadata override",
+            "description": "GoModel API reference for PUT /admin/model-metadata-overrides: Create or replace one model metadata override."
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete one model metadata override",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/admin.deleteModelMetadataOverrideRequest"
+              }
+            }
+          },
+          "description": "Selector to remove",
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/model-metadata-overrides",
+            "title": "Delete one model metadata override",
+            "description": "GoModel API reference for DELETE /admin/model-metadata-overrides: Delete one model metadata override."
+          }
+        }
+      }
+    },
     "/admin/model-pricing-overrides": {
       "get": {
         "description": "Lists persisted USD pricing overrides. Selectors support global \"/\", provider-wide \"provider/\", model-wide \"model\", and exact \"provider/model\" scopes.",
@@ -12063,6 +12285,14 @@
           "budget_key"
         ]
       },
+      "admin.deleteModelMetadataOverrideRequest": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string"
+          }
+        }
+      },
       "admin.deleteModelPricingOverrideRequest": {
         "type": "object",
         "properties": {
@@ -12695,6 +12925,17 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "admin.upsertModelMetadataOverrideRequest": {
+        "type": "object",
+        "properties": {
+          "metadata": {
+            "$ref": "#/components/schemas/metadataoverrides.Metadata"
+          },
+          "selector": {
+            "type": "string"
           }
         }
       },
@@ -15679,6 +15920,52 @@
           "StatusDegraded"
         ]
       },
+      "metadataoverrides.Metadata": {
+        "type": "object",
+        "properties": {
+          "capabilities": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/core.ModelCategory"
+            }
+          },
+          "context_window": {
+            "type": "integer"
+          },
+          "max_output_tokens": {
+            "type": "integer"
+          }
+        }
+      },
+      "metadataoverrides.Override": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/metadataoverrides.Metadata"
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "selector": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
       "pricingoverrides.Pricing": {
         "type": "object",
         "properties": {
@@ -15829,6 +16116,15 @@
           },
           "config": {
             "description": "Config is the config.yaml metadata override.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/core.ModelMetadata"
+              }
+            ],
+            "nullable": true
+          },
+          "dashboard": {
+            "description": "Dashboard is the dashboard-managed metadata override.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/core.ModelMetadata"

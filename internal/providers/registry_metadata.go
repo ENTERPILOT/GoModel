@@ -55,8 +55,11 @@ func (r *ModelRegistry) enrichModelsLocked() metadataEnrichmentStats {
 	stats := metadataEnrichmentStats{}
 	if r.modelList != nil {
 		stats = enrichProviderModelMaps(r.modelList, providerTypes, r.discoveredByProvider, replacements)
+	} else {
+		resetToDiscoveredMetadata(r.discoveredByProvider, replacements)
 	}
-	stats.Enriched += applyConfigMetadataOverrides(r.configMetadataOverrides, r.discoveredByProvider, replacements)
+	overrides := metadataOverrideLayers{config: r.configMetadataOverrides, dashboard: r.dashboardMetadataOverrides}
+	stats.Enriched += overrides.apply(r.discoveredByProvider, replacements)
 	stats.Enriched += applyInferredModelMetadata(r.discoveredByProvider, replacements)
 	// This pass can change the pricing a cap is evaluated against in either
 	// direction, so the routable catalog is rebuilt rather than patched.
@@ -242,25 +245,6 @@ func (r *ModelRegistry) snapshotProviderTypes() map[core.Provider]string {
 	m := make(map[core.Provider]string, len(r.providerTypes))
 	maps.Copy(m, r.providerTypes)
 	return m
-}
-
-// snapshotConfigOverrides returns a copy of the configMetadataOverrides outer
-// and inner maps for use outside the lock. The inner *core.ModelMetadata
-// pointers are shared, which is safe because SetProviderMetadataOverrides
-// deep-clones on insertion and the registry never hands those values back out.
-func (r *ModelRegistry) snapshotConfigOverrides() map[string]map[string]*core.ModelMetadata {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if len(r.configMetadataOverrides) == 0 {
-		return nil
-	}
-	out := make(map[string]map[string]*core.ModelMetadata, len(r.configMetadataOverrides))
-	for provider, inner := range r.configMetadataOverrides {
-		innerCopy := make(map[string]*core.ModelMetadata, len(inner))
-		maps.Copy(innerCopy, inner)
-		out[provider] = innerCopy
-	}
-	return out
 }
 
 func (r *ModelRegistry) snapshotConfiguredProviderModels() (map[string][]string, config.ConfiguredProviderModelsMode) {

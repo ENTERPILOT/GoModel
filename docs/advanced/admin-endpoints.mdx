@@ -575,10 +575,11 @@ This differs from the standard `/v1/models` endpoint: the admin version includes
 Returns where one model's metadata comes from: the merged metadata the gateway
 serves (`effective`) and each layer it was merged from. `provider` is what the
 provider reported in its own model listing, `catalog` the
-[ai-model-list](https://github.com/ENTERPILOT/ai-model-list) entry, and
-`config` the `config.yaml` metadata override; a `null` layer knows nothing
-about the model. `sources` names the winning layer per effective field
-(`config`, `provider`, `catalog`, or `inferred` for modes guessed from the
+[ai-model-list](https://github.com/ENTERPILOT/ai-model-list) entry,
+`config` the `config.yaml` metadata override, and `dashboard` the
+dashboard-managed metadata override; a `null` layer knows nothing about the
+model. `sources` names the winning layer per effective field (`dashboard`,
+`config`, `provider`, `catalog`, or `inferred` for modes guessed from the
 model ID). See [Model metadata](/advanced/model-metadata) for the precedence.
 
 The dashboard's **Models** page fetches this when a row is expanded. Nothing
@@ -599,6 +600,7 @@ is resolved on demand.
   "provider": { "context_window": 4096 },
   "catalog": { "display_name": "Gemma 3 4B IT", "modes": ["chat"], "context_window": 131072 },
   "config": { "display_name": "Gemma (local)" },
+  "dashboard": null,
   "sources": {
     "display_name": "config",
     "context_window": "provider",
@@ -610,6 +612,19 @@ is resolved on demand.
 
 Returns `400` when a parameter is missing and `404` when the model is not
 registered.
+
+### Model metadata override endpoints
+
+| Method | Path | Description |
+| ------ | ---- | ----------- |
+| `GET` | `/admin/model-metadata-overrides` | Every stored override |
+| `PUT` | `/admin/model-metadata-overrides` | Create or replace the override for one `provider/model` selector |
+| `DELETE` | `/admin/model-metadata-overrides` | Remove one override (`{"selector": "..."}`) |
+
+`metadata` accepts `categories`, `capabilities` (`vision`, `audio_input`,
+`video_input`, `pdf_input`), `context_window` and `max_output_tokens`; a `PUT`
+must set at least one. See
+[Model metadata](/advanced/model-metadata#override-metadata-from-the-dashboard).
 
 ### Plugin, guardrail, and workflow endpoints
 

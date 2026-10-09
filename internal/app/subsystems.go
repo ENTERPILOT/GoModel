@@ -65,6 +65,7 @@ const (
 	subsystemVirtualModels       = "virtual models"
 	subsystemTagging             = "tagging"
 	subsystemPricingOverrides    = "model pricing overrides"
+	subsystemMetadataOverrides   = "model metadata overrides"
 	subsystemGuardrails          = "guardrails"
 	subsystemWorkflows           = "workflows"
 	subsystemAuthKeys            = "auth keys"
@@ -128,6 +129,7 @@ func (a *App) shutdownOrder() []registeredSubsystem {
 		{name: subsystemTagging, close: closerOf(a.tagging)},
 		{name: subsystemWorkflows, close: closerOf(a.workflows)},
 		{name: subsystemPricingOverrides, close: closerOf(a.pricingOverrides)},
+		{name: subsystemMetadataOverrides, close: closerOf(a.metadataOverrides)},
 		{name: subsystemGuardrails, close: closerOf(a.guardrails)},
 		{name: subsystemAuthKeys, close: closerOf(a.authKeys)},
 		{name: subsystemUsers, close: closerOf(a.users)},

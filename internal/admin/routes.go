@@ -90,6 +90,10 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.PUT("/model-pricing-overrides", h.UpsertModelPricingOverride, global)
 	g.DELETE("/model-pricing-overrides", h.DeleteModelPricingOverride, global)
 
+	g.GET("/model-metadata-overrides", h.ListModelMetadataOverrides, global)
+	g.PUT("/model-metadata-overrides", h.UpsertModelMetadataOverride, global)
+	g.DELETE("/model-metadata-overrides", h.DeleteModelMetadataOverride, global)
+
 	g.GET("/auth-keys", h.ListAuthKeys)
 	g.POST("/auth-keys", h.CreateAuthKey)
 	g.POST("/auth-keys/import", h.ImportAuthKey, global)
