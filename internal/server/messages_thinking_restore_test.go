@@ -176,3 +176,47 @@ func TestKeepReasoningFollowsMovedParts(t *testing.T) {
 		{Kind: pluginapi.PartReasoning, Text: "User <PERSON_1>"},
 	}, completion.Choices[0].Message.Parts)
 }
+
+// The host ignores replace and drop on signed reasoning whatever plugin asks
+// for them; unsigned reasoning stays editable.
+func TestMessagesStreamIgnoresEditsOfSignedThinking(t *testing.T) {
+	tests := []struct {
+		name         string
+		mode         string
+		providerType string
+		signature    string
+		wantKept     bool
+	}{
+		{"replace signed", "replace_reasoning", "anthropic", "SIG", true},
+		{"replace unsigned", "replace_reasoning", "openai", "", false},
+		{"drop signed", "drop_reasoning", "anthropic", "SIG", true},
+		{"drop unsigned", "drop_reasoning", "openai", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inner := &capturingProvider{
+				supportedModels: []string{"claude-test"},
+				providerTypes:   map[string]string{"claude-test": tt.providerType},
+				streamData:      thinkingStream(tt.signature),
+			}
+			chains := phaseChains(t, map[string]string{"stream": tt.mode, "text": "edited"}, guardrails.StepReference{Ref: "phase", Phase: pluginapi.KindStream, Step: 1})
+			body := `{"model":"claude-test","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"hi"}]}`
+			c, rec := echotest.Post(t, "/v1/messages", body)
+			err := phaseHandler(t, inner, chains).Messages(c)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+			var thinking string
+			for _, block := range messagesBlocks(t, rec.Body.String()) {
+				if block["type"] == "thinking" {
+					thinking += block["thinking"].(string)
+				}
+			}
+			if tt.wantKept {
+				assert.Equal(t, "User <PERSON_1>", thinking)
+			} else {
+				assert.NotContains(t, thinking, "User")
+			}
+		})
+	}
+}
