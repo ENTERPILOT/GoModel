@@ -158,6 +158,15 @@ func (m *Manager) get(name string) (*upstream, bool) {
 	return u, ok
 }
 
+// spec returns the spec the named upstream currently runs with.
+func (m *Manager) spec(name string) (ServerSpec, bool) {
+	u, ok := m.get(name)
+	if !ok {
+		return ServerSpec{}, false
+	}
+	return u.currentSpec(), true
+}
+
 // Views returns admin snapshots of every upstream, sorted by name.
 func (m *Manager) Views() []ServerView {
 	upstreams := m.list()

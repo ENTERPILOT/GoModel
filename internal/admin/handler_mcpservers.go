@@ -32,7 +32,9 @@ type MCPServerAdmin interface {
 // redactedMCPHeaderValue replaces upstream header values (the credential
 // boundary) in admin views. An upsert that sends the placeholder back keeps
 // the currently stored value, so the dashboard can round-trip a server
-// definition without ever seeing its secrets.
+// definition without ever seeing its secrets. A header made of secret
+// references alone, optionally after an auth scheme ("Bearer ${env:TOKEN}"),
+// is shown as stored instead: the reference is not secret.
 const redactedMCPHeaderValue = "***"
 
 // upsertMCPServerRequest is the admin upsert contract for one MCP server.
@@ -330,7 +332,7 @@ func (h *Handler) mcpServerView(view mcpgateway.ServerView) mcpServerViewRespons
 		UserPaths:           spec.UserPaths,
 		DisallowedUserPaths: spec.DisallowedUserPaths,
 		ToolTimeoutSeconds:  int(spec.ToolTimeout / time.Second),
-		Headers:             redactMCPHeaders(spec.Headers),
+		Headers:             redactMCPHeaders(spec),
 		Managed:             h.mcpServers.IsManaged(spec.Name),
 		Status:              string(view.Status),
 		LastError:           view.LastError,
@@ -346,15 +348,19 @@ func (h *Handler) mcpServerView(view mcpgateway.ServerView) mcpServerViewRespons
 	return resp
 }
 
-// redactMCPHeaders keeps header names but replaces every value, so views can
-// show which headers are configured without exposing upstream credentials.
-func redactMCPHeaders(headers map[string]string) map[string]string {
-	if len(headers) == 0 {
+// redactMCPHeaders keeps header names but replaces every literal value, so
+// views can show which headers are configured without exposing upstream
+// credentials. Headers made of references show them (see mcpHeaderShown).
+func redactMCPHeaders(spec mcpgateway.ServerSpec) map[string]string {
+	if len(spec.Headers) == 0 {
 		return nil
 	}
-	redacted := make(map[string]string, len(headers))
-	for name := range headers {
+	redacted := make(map[string]string, len(spec.Headers))
+	for name := range spec.Headers {
 		redacted[name] = redactedMCPHeaderValue
+		if reference, ok := spec.HeaderReferences[name]; ok && mcpHeaderShown(reference) {
+			redacted[name] = reference
+		}
 	}
 	return redacted
 }
@@ -372,10 +378,14 @@ func (h *Handler) findMCPServerView(name string) (mcpServerViewResponse, bool) {
 
 // mcpServerWriteError surfaces gateway store/reload failures as 502, mirroring
 // virtualModelWriteError. Validation runs in the handler before the service
-// call, so remaining errors are infrastructure failures, not input issues.
+// call, so remaining errors are infrastructure failures, not input issues,
+// except a header secret reference that does not resolve: that is a 400.
 func mcpServerWriteError(err error) error {
 	if err == nil {
 		return nil
+	}
+	if _, ok := errors.AsType[*config.SecretError](err); ok {
+		return core.NewInvalidRequestError(err.Error(), err).WithParam("headers")
 	}
 	return core.NewProviderError("mcp_servers", http.StatusBadGateway, err.Error(), err)
 }

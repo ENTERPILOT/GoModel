@@ -123,3 +123,31 @@ func TestCompletionTextTargets(t *testing.T) {
 	require.Error(t, c.SetTargetText(TextTarget{Choice: 1, Part: 0}, "x"))
 	require.Error(t, c.SetTargetText(TextTarget{Choice: 7}, "x"))
 }
+
+func TestReasoningTargets(t *testing.T) {
+	p := &Prompt{Messages: []Message{
+		{ID: "m0", Role: RoleUser, Parts: []Part{{Kind: PartText, Text: "hi"}}},
+		{ID: "m1", Role: RoleAssistant, Parts: []Part{{Kind: PartReasoning, Text: "hmm"}, {Kind: PartText, Text: "hello"}}},
+	}}
+	got := p.ReasoningTargets()
+	require.Equal(t, []TextTarget{{MessageID: "m1", Role: RoleAssistant, Part: 0, Reasoning: true, Text: "hmm"}}, got)
+	require.Empty(t, p.ReasoningTargets(RoleUser))
+	err := p.SetTargetText(got[0], "HMM")
+	require.NoError(t, err)
+	require.Equal(t, "HMM", p.Messages[1].Parts[0].Text)
+	require.Equal(t, ChangeEdited, p.Changes().Messages["m1"])
+	require.Error(t, p.SetReasoning("m1", 1, "x"), "text part set as reasoning")
+	require.Error(t, p.SetReasoning("m1", 5, "x"))
+	require.Error(t, p.SetReasoning("nope", 0, "x"))
+
+	c := &Completion{Choices: []Choice{{Message: Message{Parts: []Part{{Kind: PartText, Text: "a"}, {Kind: PartReasoning, Text: "b"}}}}}}
+	targets := c.ReasoningTargets()
+	require.Equal(t, []TextTarget{{Role: RoleAssistant, Part: 1, Reasoning: true, Text: "b"}}, targets)
+	err = c.SetTargetText(targets[0], "B")
+	require.NoError(t, err)
+	require.Equal(t, "B", c.Choices[0].Message.Parts[1].Text)
+	require.Equal(t, "a", c.Text(0), "reasoning leaked into text")
+	require.Equal(t, ChangeEdited, c.Changes().Messages["choice:0"])
+	require.Error(t, c.SetReasoning(0, 0, "x"), "text part set as reasoning")
+	require.Error(t, c.SetReasoning(3, 0, "x"))
+}

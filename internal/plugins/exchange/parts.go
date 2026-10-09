@@ -285,9 +285,11 @@ func dataURIMediaType(s string) string {
 }
 
 // splitParts separates a message's content parts from its tool calls.
+// Reasoning is in neither: it travels in a member of its own.
 func splitParts(m pluginapi.Message) (content []pluginapi.Part, calls []pluginapi.ToolCall) {
 	for _, part := range m.Parts {
 		switch part.Kind {
+		case pluginapi.PartReasoning:
 		case pluginapi.PartToolCall:
 			if part.ToolCall != nil {
 				calls = append(calls, *part.ToolCall)

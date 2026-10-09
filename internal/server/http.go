@@ -424,6 +424,11 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		e.Use(sessionCapture(cfg.SessionDetector, cfg.AuditReader, !authMiddlewareRegistered))
 	}
 
+	// LiteLLM tags become labels post-auth (only authenticated bodies are
+	// read) and before request rewriters and workflow resolution, which see
+	// the body without them.
+	e.Use(LiteLLMTags(auditLogger))
+
 	// Request rewriters run post-auth (rewriters only see authenticated
 	// traffic) and pre-workflow-resolution (body rewrites, including "model",
 	// affect routing, failover, guardrails, budgets, and caching). Not

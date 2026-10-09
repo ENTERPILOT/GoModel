@@ -38,9 +38,14 @@ type chatDeltaView struct {
 type chatToolCallView struct {
 	Index    *int `json:"index"`
 	Function *struct {
+		Name      string `json:"name"`
 		Arguments string `json:"arguments"`
 	} `json:"function"`
 }
+
+// chatCallKey identifies a tool call of a chat stream: its choice and its
+// tool_calls[].index.
+type chatCallKey struct{ choice, call int }
 
 // reasoningText returns the delta's reasoning text and the member carrying
 // it ("reasoning_content" or "reasoning").
@@ -59,11 +64,14 @@ type chatCodec struct {
 	created                          int64
 	choices                          []int
 	finished                         map[int]bool
+	// tools holds the name each tool call was announced with, which only
+	// its first delta carries.
+	tools map[chatCallKey]string
 }
 
 // ChatCodec returns a codec for OpenAI chat.completion.chunk streams.
 func ChatCodec() Codec {
-	return &chatCodec{finished: make(map[int]bool)}
+	return &chatCodec{finished: make(map[int]bool), tools: make(map[chatCallKey]string)}
 }
 
 func (c *chatCodec) Decode(raw RawEvent, seq int) Event {
@@ -101,9 +109,14 @@ func (c *chatCodec) Decode(raw RawEvent, seq int) Event {
 				if idx := delta.ToolCalls[0].Index; idx != nil {
 					ev.Call = *idx
 				}
+				key := chatCallKey{choice: ev.Choice, call: ev.Call}
 				if fn := delta.ToolCalls[0].Function; fn != nil {
 					ev.Text = fn.Arguments
+					if fn.Name != "" {
+						c.tools[key] = fn.Name
+					}
 				}
+				ev.Tool = c.tools[key]
 				return ev
 			}
 		}

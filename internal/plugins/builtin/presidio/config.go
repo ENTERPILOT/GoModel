@@ -42,10 +42,16 @@ type settings struct {
 	roles            map[pluginapi.Role]bool
 	action           string
 	operator         string
+	placeholders     *placeholderFormat
 	restore          bool
-	enforcement      pluginapi.Enforcement
-	streamChunk      int
-	lookbehind       int
+	restoreRoles     map[pluginapi.Role]bool
+	// restoreTools, when set, are the only tools whose call arguments get
+	// values back; keepTools never get them.
+	restoreTools map[string]bool
+	keepTools    map[string]bool
+	enforcement  pluginapi.Enforcement
+	streamChunk  int
+	lookbehind   int
 }
 
 func decodeConfig(raw json.RawMessage) (settings, error) {
@@ -64,6 +70,9 @@ func decodeConfig(raw json.RawMessage) (settings, error) {
 		action:         cfg.Choice("action", ActionAnonymize, ActionAnonymize, ActionBlock, ActionRespond, ActionWarn),
 		operator:       cfg.Choice("operator", OperatorReplace, OperatorReplace, OperatorMask, OperatorRedact, OperatorHash),
 		restore:        cfg.Bool("restore"),
+		restoreRoles:   cfg.Roles("restore_roles", pluginapi.RoleUser, pluginapi.RoleAssistant, pluginapi.RoleTool),
+		restoreTools:   nameSet(cfg.List("restore_tools")),
+		keepTools:      nameSet(cfg.List("restore_tools_exclude")),
 		streamChunk:    cfg.Int("stream_chunk", DefaultStreamChunk, 0, 16384),
 		lookbehind:     cfg.Int("stream_lookbehind", DefaultStreamLookbehind, 0, 1<<20),
 	}
@@ -73,11 +82,18 @@ func decodeConfig(raw json.RawMessage) (settings, error) {
 		BlockStatus: cfg.BlockStatus("block_status"),
 	}
 	blocked := entityTypes(cfg.List("block_entities"))
+	format := strings.TrimSpace(cfg.String("placeholder_format", DefaultPlaceholderFormat))
+	if format == "" {
+		format = DefaultPlaceholderFormat
+	}
 	if s.adHocRecognizers, err = parseJSONArray("ad_hoc_recognizers", cfg.Raw("ad_hoc_recognizers")); err != nil {
 		return settings{}, err
 	}
 	if err := cfg.Err(); err != nil {
 		return settings{}, err
+	}
+	if s.placeholders, err = parsePlaceholderFormat(format); err != nil {
+		return settings{}, fmt.Errorf("%s: placeholder_format %w", Name, err)
 	}
 	if s.analyzerURL == "" {
 		s.analyzerURL = DefaultAnalyzerURL
@@ -117,6 +133,29 @@ func entityTypes(items []string) []string {
 		}
 	}
 	return out
+}
+
+// nameSet turns a list of tool names into a set; an empty list is nil.
+func nameSet(items []string) map[string]bool {
+	if len(items) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(items))
+	for _, item := range items {
+		set[item] = true
+	}
+	return set
+}
+
+// restoresTool reports whether the arguments of a call to the named tool
+// get restored values: when restore_tools is empty or names it, and
+// restore_tools_exclude does not. A call whose name is unknown only gets
+// them when restore_tools is empty.
+func (s *settings) restoresTool(name string) bool {
+	if s.keepTools[name] {
+		return false
+	}
+	return s.restoreTools == nil || s.restoreTools[name]
 }
 
 // loopbackURL reports whether the URL points at this host.

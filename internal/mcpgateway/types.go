@@ -35,17 +35,22 @@ type ServerSpec struct {
 	Name        string
 	DisplayName string
 
-	URL             string
-	Transport       string
-	Headers         map[string]string
-	Command         string
-	Args            []string
-	Env             map[string]string
-	Description     string
-	Enabled         bool
-	AllowedTools    []string
-	DisallowedTools []string
-	UserPaths       []string
+	URL       string
+	Transport string
+	// Headers are sent to the upstream, secret references resolved.
+	Headers map[string]string
+	// HeaderReferences holds the stored value of each header of an
+	// admin-managed server that holds a secret reference, so the admin API
+	// can show the reference instead of masking the header.
+	HeaderReferences map[string]string
+	Command          string
+	Args             []string
+	Env              map[string]string
+	Description      string
+	Enabled          bool
+	AllowedTools     []string
+	DisallowedTools  []string
+	UserPaths        []string
 	// DisallowedUserPaths hides the server from these subtrees; it wins over
 	// UserPaths.
 	DisallowedUserPaths []string
@@ -86,6 +91,7 @@ func (s ServerSpec) equal(other ServerSpec) bool {
 		s.URL == other.URL &&
 		s.Transport == other.Transport &&
 		maps.Equal(s.Headers, other.Headers) &&
+		maps.Equal(s.HeaderReferences, other.HeaderReferences) &&
 		s.Command == other.Command &&
 		slices.Equal(s.Args, other.Args) &&
 		maps.Equal(s.Env, other.Env) &&

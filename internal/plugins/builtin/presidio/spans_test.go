@@ -39,8 +39,16 @@ func TestByteSpans(t *testing.T) {
 	assert.Equal(t, 0, runeBytes(text, 0))
 }
 
+// defaultMapping returns a placeholder table in the default format.
+func defaultMapping(t *testing.T) *mapping {
+	t.Helper()
+	format, err := parsePlaceholderFormat(DefaultPlaceholderFormat)
+	require.NoError(t, err)
+	return newMapping(format)
+}
+
 func TestMapping(t *testing.T) {
-	m := newMapping()
+	m := defaultMapping(t)
 	assert.Equal(t, "<PERSON_1>", m.placeholder("PERSON", "Ann", true))
 	assert.Equal(t, "<PERSON_2>", m.placeholder("PERSON", "Bob", true))
 	assert.Equal(t, "<PERSON_1>", m.placeholder("PERSON", "Ann", false))
@@ -57,7 +65,7 @@ func TestMapping(t *testing.T) {
 	assert.Equal(t, "nothing here", got)
 	assert.Equal(t, 0, n)
 	assert.True(t, m.hasRestorable())
-	assert.False(t, newMapping().hasRestorable())
+	assert.False(t, defaultMapping(t).hasRestorable())
 
 	var nilMap *mapping
 	got, _ = nilMap.restore("<PERSON_1>")
