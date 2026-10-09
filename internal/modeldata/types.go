@@ -193,6 +193,22 @@ type Modalities struct {
 	Output []string `json:"output"`
 }
 
+// InputModalityCapability returns the capability key that advertises support
+// for an input modality. Text is not a capability.
+func InputModalityCapability(modality string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(modality)) {
+	case "image":
+		return "vision", true
+	case "audio":
+		return "audio_input", true
+	case "video":
+		return "video_input", true
+	case "file", "pdf", "document":
+		return "pdf_input", true
+	}
+	return "", false
+}
+
 // RateLimits holds rate limit information.
 type RateLimits struct {
 	RPM *int `json:"rpm"`
