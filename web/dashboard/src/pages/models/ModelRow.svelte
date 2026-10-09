@@ -26,7 +26,21 @@ import {
   import ModelDetails from "./ModelDetails.svelte";
   import { modelDetailsState } from "./modelDetails.svelte.js";
   import { rowHasModelDetails } from "./modelDetails.js";
-  import { ChevronRight, CircleDollarSign, Gauge, Pencil, ShieldCheck, Split, Trash2 } from "lucide";
+  import Spinner from "$lib/components/atoms/Spinner.svelte";
+  import { modelTestState } from "./modelTest.svelte.js";
+  import { rowCanTestModel } from "./modelTest.js";
+  import {
+    ChevronRight,
+    CircleAlert,
+    CircleCheck,
+    CircleDollarSign,
+    Gauge,
+    Pencil,
+    Play,
+    ShieldCheck,
+    Split,
+    Trash2,
+  } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   // columns: the active category's column spec from categoryColumns.js
@@ -92,6 +106,10 @@ import {
         ? m.models_removing_balancing({ model: row.display_name })
         : m.models_removing_redirect({ model: row.display_name }),
   );
+
+  const testable = $derived(rowCanTestModel(row));
+  const testResult = $derived(modelTestState.result(row));
+  const testRunning = $derived(testResult?.state === "running");
 
   const slowdown = $derived(
     Number(configuredSlowdown == null ? 0 : configuredSlowdown),
@@ -171,6 +189,41 @@ import {
           {m.models_slowdown()} <span class="mono font-size-md">{m.models_inference_time({ value: slowdown })}</span>
         </div>
       {/if}
+      {#if testResult}
+        <div class="model-name-secondary model-test-result" class:is-error={testResult.state === "error"} role="status">
+          {#if testRunning}
+            {m.models_test_running()}
+          {:else if testResult.state === "ok"}
+            <Icon icon={CircleCheck} class="model-test-result-icon" />
+            <span>
+              {m.models_test_ok({ seconds: (testResult.durationMs / 1000).toFixed(2) })} ·
+              {#if testResult.reply}
+                <span class="mono">“{testResult.reply}”</span>
+              {:else if testResult.finishReason}
+                {m.models_test_ok_empty_reason({ reason: testResult.finishReason })}
+              {:else}
+                {m.models_test_ok_empty()}
+              {/if}
+            </span>
+          {:else}
+            <Icon icon={CircleAlert} class="model-test-result-icon" />
+            <span>
+              {testResult.status
+                ? m.models_test_failed_status({ status: testResult.status, message: testResult.message })
+                : m.models_test_failed({ message: testResult.message })}
+            </span>
+          {/if}
+          {#if !testRunning}
+            <button
+              type="button"
+              class="model-test-dismiss-btn mono"
+              aria-label={m.models_test_dismiss({ name: row.display_name })}
+              title={m.models_test_dismiss({ name: row.display_name })}
+              onclick={() => modelTestState.dismiss(row)}
+            >[{m.models_test_dismiss_short()}]</button>
+          {/if}
+        </div>
+      {/if}
     </div>
   </td>
   {#each columns as col, i (i)}
@@ -183,6 +236,9 @@ import {
     {#if row.is_alias}
       <div class="alias-actions-cell model-list-actions">
         <AccessToggle {row} />
+        {#if testable}
+          {@render testButton()}
+        {/if}
         {#if virtualModels.virtualModelsAvailable && aliasRowCanRemove(row)}
           <TableActionButton
             label={virtualModels.rowDeletingKey === row.key
@@ -208,6 +264,9 @@ import {
     {:else}
       <div class="alias-actions-cell model-list-actions">
         <AccessToggle {row} />
+        {#if testable}
+          {@render testButton()}
+        {/if}
         {#if pricingOverrides.modelPricingOverridesAvailable}
           <TableActionButton
             label={pricingOverrides.modelPricingButtonLabel(m.models_model_pricing_for({ name: row.display_name }), pricingOverrides.hasModelPricingOverride(row))}
@@ -248,6 +307,22 @@ import {
     {/if}
   </td>
 </tr>
+{#snippet testButton()}
+  <TableActionButton
+    label={testRunning
+      ? m.models_testing_model({ name: row.display_name })
+      : m.models_test_model({ name: row.display_name })}
+    class="table-icon-btn"
+    onclick={() => modelTestState.run(row)}
+    disabled={testRunning}
+  >
+    {#if testRunning}
+      <Spinner size={14} label={m.models_testing_model({ name: row.display_name })} />
+    {:else}
+      <Icon icon={Play} class="table-icon-svg" />
+    {/if}
+  </TableActionButton>
+{/snippet}
 {#if expanded}
   <ModelDetails {row} {colspan} id={detailsID} />
 {/if}
@@ -327,6 +402,45 @@ import {
   .model-redirect-remove-btn:disabled {
     opacity: 0.45;
     cursor: default;
+  }
+
+  .model-test-result {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    max-width: 72ch;
+    overflow-wrap: anywhere;
+  }
+
+  .model-test-result.is-error {
+    color: var(--danger);
+  }
+
+  /* :global so the rule reaches the SVG rendered by the Icon component. */
+  .model-test-result :global(.model-test-result-icon) {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    margin-top: 1px;
+  }
+
+  .model-test-result:not(.is-error) :global(.model-test-result-icon) {
+    color: var(--success);
+  }
+
+  .model-test-dismiss-btn {
+    appearance: none;
+    flex: 0 0 auto;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-muted);
+    font-size: 11px;
+    cursor: pointer;
+  }
+
+  .model-test-dismiss-btn:hover {
+    text-decoration: underline;
   }
 
   .model-kind-icon {
