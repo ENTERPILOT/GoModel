@@ -100,7 +100,10 @@ func validateResponsesRequestForChatTranslation(req *core.ResponsesRequest) erro
 	if req.Prompt != nil {
 		return unsupportedResponsesChatTranslationField("prompt")
 	}
-	if strings.TrimSpace(req.Truncation) != "" {
+	// "disabled" is OpenAI's default and asks for nothing, so it is honored by
+	// doing nothing. Only "auto", which asks the provider to drop input that
+	// does not fit, cannot be translated.
+	if truncation := strings.TrimSpace(req.Truncation); truncation != "" && truncation != "disabled" {
 		return unsupportedResponsesChatTranslationField("truncation")
 	}
 	if strings.TrimSpace(req.PromptCacheRetention) != "" {
@@ -225,7 +228,7 @@ func unsupportedResponsesChatTranslationField(field string) error {
 	return core.NewInvalidRequestError(
 		fmt.Sprintf("responses field %q is only supported by native Responses providers; use an OpenAI-compatible provider or passthrough for this request", field),
 		nil,
-	)
+	).WithParam(field)
 }
 
 func cloneStreamOptions(src *core.StreamOptions) *core.StreamOptions {
@@ -378,7 +381,9 @@ func ResponsesViaChat(ctx context.Context, p ChatProvider, req *core.ResponsesRe
 		return nil, core.NewNoChoicesProviderError(providerName)
 	}
 
-	return ConvertChatResponseToResponses(chatResp), nil
+	resp := ConvertChatResponseToResponses(chatResp)
+	ApplyResponsesRequestEcho(resp, req)
+	return resp, nil
 }
 
 // StreamResponsesViaChat implements streaming Responses API by converting to/from Chat format.
@@ -399,5 +404,5 @@ func StreamResponsesViaChat(ctx context.Context, p ChatProvider, req *core.Respo
 		return nil, err
 	}
 
-	return NewOpenAIResponsesStreamConverter(stream, req.Model, providerName), nil
+	return NewOpenAIResponsesStreamConverter(stream, req.Model, providerName).WithRequestEcho(req), nil
 }
