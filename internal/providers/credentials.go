@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -116,8 +117,9 @@ type CredentialsService struct {
 	// the schemes of the generation this service belongs to.
 	secrets *config.Secrets
 
-	// applyMu serializes saves, deletes, and secret rotation, each of which
-	// builds from the stored row and then installs the result.
+	// applyMu serializes how saves, deletes, and secret rotation commit.
+	// Saves and rotation resolve and build without it, then, holding it,
+	// check that the stored row is still the one they built from.
 	applyMu sync.Mutex
 
 	// configs holds the effective ProviderConfig of every credential that is
@@ -328,12 +330,14 @@ func (s *CredentialsService) deleteStored(ctx context.Context, name string) erro
 // this is an edit, whatever is currently registered under this name --
 // possibly a working provider actively serving traffic -- must keep serving
 // rather than being unregistered out from under a failed edit.
+//
+// Resolving waits on secret backends, so it runs before applyMu is taken: a
+// save stuck on one reference must not hold up other saves, deletes, or
+// rotation. Under the lock, the stored row must still be the one the save
+// started from, or the secrets it keeps may already be released.
 func (s *CredentialsService) apply(ctx context.Context, cred ManagedProviderCredential) error {
-	s.applyMu.Lock()
-	defer s.applyMu.Unlock()
-
-	previous, err := s.store.Get(ctx, cred.Name)
-	if err != nil && !errors.Is(err, ErrCredentialNotFound) {
+	previous, err := s.storedCredential(ctx, cred.Name)
+	if err != nil {
 		return err
 	}
 	kept := credentialSecretValues(previous)
@@ -344,6 +348,17 @@ func (s *CredentialsService) apply(ctx context.Context, cred ManagedProviderCred
 	built, err := s.buildCredential(ctx, cred)
 	if err != nil {
 		// Nothing was stored, so whatever the stored row holds stays.
+		s.releaseSecrets(ctx, cred.Name, written, kept)
+		return err
+	}
+
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
+	current, err := s.storedCredential(ctx, cred.Name)
+	if err == nil && !sameStoredCredential(previous, current) {
+		err = &CredentialFieldError{Message: fmt.Sprintf("provider %q was changed while this save was in progress; reload it and save again", cred.Name)}
+	}
+	if err != nil {
 		s.releaseSecrets(ctx, cred.Name, written, kept)
 		return err
 	}
@@ -363,6 +378,27 @@ func (s *CredentialsService) apply(ctx context.Context, cred ManagedProviderCred
 	}
 	s.releaseSecrets(ctx, cred.Name, kept, credentialSecretValues(&cred))
 	return saveErr
+}
+
+// storedCredential returns the stored row name, or nil when there is none.
+func (s *CredentialsService) storedCredential(ctx context.Context, name string) (*ManagedProviderCredential, error) {
+	row, err := s.store.Get(ctx, name)
+	if errors.Is(err, ErrCredentialNotFound) {
+		return nil, nil
+	}
+	return row, err
+}
+
+// sameStoredCredential reports whether two reads of one stored row hold the
+// same credential, ignoring timestamps.
+func sameStoredCredential(a, b *ManagedProviderCredential) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	x, y := *a, *b
+	x.CreatedAt, x.UpdatedAt = time.Time{}, time.Time{}
+	y.CreatedAt, y.UpdatedAt = time.Time{}, time.Time{}
+	return reflect.DeepEqual(x, y)
 }
 
 // builtCredential is a credential row resolved and constructed, ready to

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 // maxSecretFileSize bounds a ${file:...} read. Secrets are short; a larger
@@ -35,11 +36,21 @@ func resolveFileSecret(_ context.Context, path string) (string, error) {
 	if !filepath.IsAbs(path) {
 		return "", fmt.Errorf("file path %s must be absolute", path)
 	}
-	f, err := os.Open(path)
+	// Non-blocking, so a FIFO with no writer does not hang open. A pipe could
+	// not be re-read on reload or rotation anyway, so only regular files
+	// count; symlinks to them, as Kubernetes mounts secrets, are followed.
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("read %s: not a regular file", path)
+	}
 	data, err := io.ReadAll(io.LimitReader(f, maxSecretFileSize+1))
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", path, err)
@@ -55,4 +66,27 @@ func resolveFileSecret(_ context.Context, path string) (string, error) {
 		return "", fmt.Errorf("file %s is empty", path)
 	}
 	return value, nil
+}
+
+// cancellable stops waiting for resolve once ctx ends, for a resolver whose
+// I/O cannot observe ctx: reading a file on a stalled network mount blocks in
+// the kernel. The abandoned call finishes in the background.
+func cancellable(resolve SecretResolverFunc) SecretResolverFunc {
+	type result struct {
+		value string
+		err   error
+	}
+	return func(ctx context.Context, reference string) (string, error) {
+		done := make(chan result, 1) // buffered: an abandoned call never blocks on send
+		go func() {
+			value, err := resolve(ctx, reference)
+			done <- result{value, err}
+		}()
+		select {
+		case r := <-done:
+			return r.value, r.err
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
 }

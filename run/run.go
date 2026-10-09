@@ -425,7 +425,7 @@ func serveUntilShutdown(ctx context.Context, reload <-chan os.Signal, socket *bo
 		startErr := serveGeneration(generationCtx, application, listener)
 		endGeneration()
 
-		next := <-replacement
+		next := awaitReplacement(replacement, startErr != nil || ctx.Err() != nil)
 		switch {
 		case next == nil:
 			return startErr
@@ -437,6 +437,28 @@ func serveUntilShutdown(ctx context.Context, reload <-chan os.Signal, socket *bo
 		}
 		application = next
 		slog.Info("configuration reloaded")
+	}
+}
+
+// awaitReplacement returns the replacement watchForReload yields. When the
+// gateway is stopping, a reload still building it is waited on for at most
+// shutdownTimeout: one stuck on a resolver that never returns must not keep
+// the process from exiting.
+func awaitReplacement(replacement <-chan lifecycleApp, stopping bool) lifecycleApp {
+	if !stopping {
+		return <-replacement
+	}
+	select {
+	case next := <-replacement:
+		return next
+	case <-time.After(shutdownTimeout):
+		slog.Warn("a configuration reload was still running at shutdown; abandoning it", "waited", shutdownTimeout)
+		go func() {
+			if next := <-replacement; next != nil {
+				_ = shutdownApplicationWithTimeout(next)
+			}
+		}()
+		return nil
 	}
 }
 

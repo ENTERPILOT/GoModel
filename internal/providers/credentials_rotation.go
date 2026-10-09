@@ -32,9 +32,6 @@ func (s *CredentialsService) RotateSecrets(ctx context.Context, fields []string)
 // rotateCredentials applies the current secret values to every installed
 // credential owning any of fields, reporting whether one was rebuilt.
 func (s *CredentialsService) rotateCredentials(ctx context.Context, fields []string) (bool, error) {
-	s.applyMu.Lock()
-	defer s.applyMu.Unlock()
-
 	var errs []error
 	rebuilt := false
 	for _, name := range s.rotatedCredentials(fields) {
@@ -64,7 +61,9 @@ func (s *CredentialsService) rotatedCredentials(fields []string) []string {
 }
 
 // rotateCredential applies the current secret values to one installed
-// credential, reporting whether the provider was rebuilt.
+// credential, reporting whether the provider was rebuilt. Like a save, it
+// resolves before taking applyMu, and leaves alone a credential saved or
+// deleted meanwhile: that change installed values of its own.
 func (s *CredentialsService) rotateCredential(ctx context.Context, name string) (bool, error) {
 	row, err := s.store.Get(ctx, name)
 	if err != nil {
@@ -79,6 +78,13 @@ func (s *CredentialsService) rotateCredential(ctx context.Context, name string) 
 	}
 	next, err := s.providerConfig(*row, resolved)
 	if err != nil {
+		return false, err
+	}
+
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
+	stored, err := s.storedCredential(ctx, name)
+	if err != nil || !sameStoredCredential(row, stored) {
 		return false, err
 	}
 
