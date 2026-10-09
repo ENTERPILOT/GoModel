@@ -6,6 +6,7 @@ import {
   filterSearchOptions,
   moveActiveIndex,
   normalizeSearchOption,
+  popoverPlacement,
   selectedFirst,
   splitSearchValues,
   toggleSearchValue,
@@ -105,4 +106,46 @@ test("selectedFirst lists selected options first, sorted by label, and keeps the
     ["openai/gpt-4o", "plain", "anthropic/claude-sonnet", "ollama/qwen2.5:0.5b"],
   );
   assert.deepEqual(selectedFirst(rows, []).map((o) => o.value), rows.map((o) => o.value));
+});
+
+const rect = (top, height = 32, left = 20, width = 300) => ({
+  top,
+  bottom: top + height,
+  left,
+  width,
+});
+
+test("popoverPlacement opens below the trigger when there is room", () => {
+  assert.equal(
+    popoverPlacement(rect(100), { top: 0, height: 800, width: 390 }),
+    "top:138px;max-height:654px;left:8px;min-width:300px;max-width:374px;",
+  );
+});
+
+test("popoverPlacement flips above, anchored by its bottom edge", () => {
+  assert.equal(
+    popoverPlacement(rect(600), { top: 0, height: 800, width: 1200 }),
+    "top:594px;transform:translateY(-100%);max-height:586px;left:20px;min-width:300px;max-width:480px;",
+  );
+});
+
+test("popoverPlacement fits the visual viewport left above a phone keyboard", () => {
+  // Keyboard open: the visible area is the top 400px of the layout viewport,
+  // so a trigger at 300 has more room above than below.
+  assert.match(
+    popoverPlacement(rect(300), { top: 0, height: 400, width: 390 }),
+    /^top:294px;transform:translateY\(-100%\);max-height:286px;/,
+  );
+  // Panned visual viewport: room is measured from its offset, not from 0.
+  assert.match(
+    popoverPlacement(rect(260), { top: 200, height: 400, width: 390 }),
+    /^top:298px;max-height:294px;/,
+  );
+});
+
+test("popoverPlacement closes once the trigger leaves the visible area", () => {
+  assert.equal(popoverPlacement(rect(-40), { top: 0, height: 800, width: 390 }), null);
+  assert.equal(popoverPlacement(rect(800), { top: 0, height: 800, width: 390 }), null);
+  assert.equal(popoverPlacement(rect(150), { top: 200, height: 400, width: 390 }), null);
+  assert.notEqual(popoverPlacement(rect(-20), { top: 0, height: 800, width: 390 }), null);
 });

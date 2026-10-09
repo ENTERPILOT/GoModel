@@ -334,3 +334,15 @@ textarea:focus {
   flex-wrap: wrap;
   gap: 8px;
 }
+
+/* iOS Safari zooms the page into any focused field whose text is smaller
+   than 16px and does not zoom back out, which leaves forms cropped and
+   pannable. Touch devices therefore get 16px fields. This overrides every
+   component's denser size (including scoped ones), hence !important. */
+@media (pointer: coarse) {
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}

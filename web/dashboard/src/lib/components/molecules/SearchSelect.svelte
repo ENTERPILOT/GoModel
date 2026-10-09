@@ -18,7 +18,7 @@
   //   values       selected values in multiple mode (bindable)
   //   disabled, mono (monospace option values), class (trigger wrapper)
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { closeOnScroll, dismissOnOutside, marqueeOnOverflow } from "$lib/utils/attachments.js";
+  import { dismissOnOutside, followViewport, marqueeOnOverflow } from "$lib/utils/attachments.js";
   import { Check, ChevronDown, Search } from "lucide";
   import { tick } from "svelte";
   import * as m from "$lib/paraglide/messages.js";
@@ -27,6 +27,7 @@
     filterSearchOptions,
     moveActiveIndex,
     normalizeSearchOption,
+    popoverPlacement,
     selectedFirst,
     splitSearchValues,
     toggleSearchValue,
@@ -106,27 +107,26 @@
     return filtered[index]?.value;
   }
 
-  // The popover's natural height (search box plus the list's max-height);
-  // below that it flips above the trigger when there is more room there.
-  const POPOVER_HEIGHT = 340;
-  const POPOVER_GAP = 6;
-  const VIEWPORT_MARGIN = 8;
+  // The visible area the popover must fit in. On phones the visual viewport
+  // is what is left above the on-screen keyboard; window.innerHeight still
+  // measures the full layout viewport.
+  function visibleViewport() {
+    const vv = window.visualViewport;
+    return vv
+      ? { top: vv.offsetTop, height: vv.height, width: window.innerWidth }
+      : { top: 0, height: window.innerHeight, width: window.innerWidth };
+  }
 
-  // Keep the fixed popover inside the viewport: it cannot be scrolled into
-  // view (closeOnScroll dismisses it), so it opens on the side with more
-  // room, shrinks to that room, and never runs past the right edge.
+  // Re-run on every scroll and viewport change while open (followViewport),
+  // so the popover tracks its trigger instead of closing when a phone
+  // keyboard opens for the search box; it closes only once the trigger has
+  // left the visible area.
   function placePopover() {
     const rect = rootEl?.getBoundingClientRect();
     if (!rect) return;
-    const below = window.innerHeight - rect.bottom - POPOVER_GAP - VIEWPORT_MARGIN;
-    const above = rect.top - POPOVER_GAP - VIEWPORT_MARGIN;
-    const flip = below < POPOVER_HEIGHT && above > below;
-    const vertical = flip
-      ? `bottom:${window.innerHeight - rect.top + POPOVER_GAP}px;max-height:${above}px;`
-      : `top:${rect.bottom + POPOVER_GAP}px;max-height:${below}px;`;
-    const maxWidth = Math.min(480, window.innerWidth - 2 * VIEWPORT_MARGIN);
-    const left = Math.max(VIEWPORT_MARGIN, Math.min(rect.left, window.innerWidth - maxWidth - VIEWPORT_MARGIN));
-    popoverStyle = `${vertical}left:${left}px;min-width:${Math.min(rect.width, maxWidth)}px;max-width:${maxWidth}px;`;
+    const style = popoverPlacement(rect, visibleViewport());
+    if (style === null) close();
+    else popoverStyle = style;
   }
 
   async function openList() {
@@ -241,7 +241,7 @@
   class:search-select-open={open}
   bind:this={rootEl}
   {@attach open ? dismissOnOutside(close) : undefined}
-  {@attach open ? closeOnScroll(close) : undefined}
+  {@attach open ? followViewport(placePopover) : undefined}
 >
   <button
     type="button"

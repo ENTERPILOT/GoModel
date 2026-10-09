@@ -8,25 +8,54 @@
 // Attach a falsy value to disable one: `{@attach open ? dismissOnOutside(close) : undefined}`.
 
 /**
- * Close a fixed-positioned popup when anything scrolls or the window resizes,
- * since its viewport coordinates were computed at open time. Scrolling inside
- * the element itself (its own list) is ignored.
+ * Keep a fixed-positioned popup next to its anchor: `reposition` runs when
+ * anything scrolls or the viewport changes, since the popup's coordinates
+ * were computed from the anchor's rect. Visual-viewport events cover phones,
+ * where opening the on-screen keyboard resizes and pans the visual viewport
+ * (and may scroll the page) — closing on those would dismiss the popup the
+ * moment its own search box is focused. Scrolling inside the element itself
+ * (its own list) is ignored.
  *
- * @param {() => void} onclose
+ * @param {() => void} reposition
  */
-export function closeOnScroll(onclose) {
+export function followViewport(reposition) {
   return (/** @type {Element} */ node) => {
     const onScroll = (/** @type {Event} */ event) => {
       if (event.target instanceof Node && node.contains(event.target)) return;
-      onclose();
+      reposition();
     };
+    const viewport = window.visualViewport;
     window.addEventListener("scroll", onScroll, true);
-    window.addEventListener("resize", onclose);
+    window.addEventListener("resize", reposition);
+    viewport?.addEventListener("resize", reposition);
+    viewport?.addEventListener("scroll", reposition);
     return () => {
       window.removeEventListener("scroll", onScroll, true);
-      window.removeEventListener("resize", onclose);
+      window.removeEventListener("resize", reposition);
+      viewport?.removeEventListener("resize", reposition);
+      viewport?.removeEventListener("scroll", reposition);
     };
   };
+}
+
+/**
+ * Move the element to the end of document.body while it is mounted, so a
+ * fixed-position overlay escapes every ancestor's stacking context and
+ * clipping. iOS Safari makes the scrolling content column its own stacking
+ * context, which otherwise paints the sidebar over any dialog rendered
+ * inside the page. Place it on the single root element of an `{#if}` block:
+ * Svelte then removes the element itself wherever it lives.
+ *
+ * Moving a node blurs whatever was focused inside it (a descendant's
+ * autofocus attachment may already have run), so that focus is restored.
+ */
+export function portal(/** @type {Element} */ node) {
+  const focused = document.activeElement;
+  document.body.appendChild(node);
+  if (focused instanceof HTMLElement && node.contains(focused) && document.activeElement !== focused) {
+    focused.focus();
+  }
+  return () => node.remove();
 }
 
 /**
