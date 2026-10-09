@@ -32,9 +32,6 @@ func (s *CredentialsService) RotateSecrets(ctx context.Context, fields []string)
 // rotateCredentials applies the current secret values to every installed
 // credential owning any of fields, reporting whether one was rebuilt.
 func (s *CredentialsService) rotateCredentials(ctx context.Context, fields []string) (bool, error) {
-	s.applyMu.Lock()
-	defer s.applyMu.Unlock()
-
 	var errs []error
 	rebuilt := false
 	for _, name := range s.rotatedCredentials(fields) {
@@ -64,45 +61,65 @@ func (s *CredentialsService) rotatedCredentials(fields []string) []string {
 }
 
 // rotateCredential applies the current secret values to one installed
-// credential, reporting whether the provider was rebuilt.
+// credential, reporting whether the provider was rebuilt. Like a save, it
+// resolves before taking applyMu. If the credential was installed meanwhile,
+// by a save or an earlier rotation, it resolves again rather than replace
+// newer values; a credential deleted or disabled meanwhile is left alone.
 func (s *CredentialsService) rotateCredential(ctx context.Context, name string) (bool, error) {
-	row, err := s.store.Get(ctx, name)
-	if err != nil {
-		return false, err
+	for {
+		rebuilt, retry, err := s.rotateCredentialOnce(ctx, name)
+		if !retry {
+			return rebuilt, err
+		}
 	}
-	if !row.Enabled || s.IsManaged(name) {
-		return false, nil
+}
+
+// rotateCredentialOnce is one attempt of rotateCredential. It reports retry,
+// changing nothing, when name was installed, removed, or swapped while it
+// resolved.
+func (s *CredentialsService) rotateCredentialOnce(ctx context.Context, name string) (rebuilt, retry bool, err error) {
+	revision := s.revision(name)
+	row, err := s.storedCredential(ctx, name)
+	if err != nil || row == nil || !row.Enabled || s.IsManaged(name) {
+		return false, false, err
 	}
 	resolved, secrets, err := s.resolveCredential(ctx, *row)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	next, err := s.providerConfig(*row, resolved)
 	if err != nil {
-		return false, err
+		return false, false, err
+	}
+
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
+	if s.revision(name) != revision {
+		return false, true, nil
 	}
 
 	s.mu.Lock()
 	current, keys := s.configs[name], s.keyrings[name]
 	if sameExceptKeys(current, next) && keys.Replace(next.APIKeys...) {
 		s.configs[name] = next
+		s.revisions[name]++
 		s.mu.Unlock()
 		secrets.Record()
 		if !slices.Equal(current.APIKeys, next.APIKeys) {
 			slog.Info("rotated provider API keys in place", "provider", name)
 		}
-		return false, nil
+		return false, false, nil
 	}
 	s.mu.Unlock()
 
 	built, err := s.buildProvider(*row, resolved)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	built.secrets = secrets
 	s.install(name, built)
 	slog.Info("rebuilt provider for a rotated secret", "provider", name)
-	return true, nil
+	return true, false, nil
 }
 
 // sameExceptKeys reports whether two configurations of one provider differ in

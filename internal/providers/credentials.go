@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -116,8 +117,9 @@ type CredentialsService struct {
 	// the schemes of the generation this service belongs to.
 	secrets *config.Secrets
 
-	// applyMu serializes saves, deletes, and secret rotation, each of which
-	// builds from the stored row and then installs the result.
+	// applyMu serializes how saves, deletes, and secret rotation commit.
+	// Saves and rotation resolve and build without it, then, holding it,
+	// check that nothing was installed under that name meanwhile.
 	applyMu sync.Mutex
 
 	// configs holds the effective ProviderConfig of every credential that is
@@ -129,6 +131,10 @@ type CredentialsService struct {
 	// keyrings holds each installed provider's keyring, so a rotated API key
 	// is swapped in place rather than rebuilding the provider.
 	keyrings map[string]*Keyring
+	// revisions counts, by name, every install, removal, and in-place key
+	// swap, so work resolved before one of them can tell. Never reset, so a
+	// count cannot repeat.
+	revisions map[string]uint64
 }
 
 // NewCredentialsService builds the service and applies every currently
@@ -163,6 +169,7 @@ func NewCredentialsService(ctx context.Context, factory *ProviderFactory, regist
 		secrets:      secrets,
 		configs:      make(map[string]ProviderConfig),
 		keyrings:     make(map[string]*Keyring),
+		revisions:    make(map[string]uint64),
 	}
 	if err := s.Reload(ctx); err != nil {
 		return nil, err
@@ -328,12 +335,14 @@ func (s *CredentialsService) deleteStored(ctx context.Context, name string) erro
 // this is an edit, whatever is currently registered under this name --
 // possibly a working provider actively serving traffic -- must keep serving
 // rather than being unregistered out from under a failed edit.
+//
+// Resolving waits on secret backends, so it runs before applyMu is taken: a
+// save stuck on one reference must not hold up other saves, deletes, or
+// rotation. Under the lock, the stored row must still be the one the save
+// started from, or the secrets it keeps may already be released.
 func (s *CredentialsService) apply(ctx context.Context, cred ManagedProviderCredential) error {
-	s.applyMu.Lock()
-	defer s.applyMu.Unlock()
-
-	previous, err := s.store.Get(ctx, cred.Name)
-	if err != nil && !errors.Is(err, ErrCredentialNotFound) {
+	previous, err := s.storedCredential(ctx, cred.Name)
+	if err != nil {
 		return err
 	}
 	if err := config.CheckSecretDestinations(ctx, CredentialSecretEntity, cred.Name, credentialDestinations(previous, &cred), credentialSecretValues(&cred)); err != nil {
@@ -344,9 +353,29 @@ func (s *CredentialsService) apply(ctx context.Context, cred ManagedProviderCred
 	if err != nil {
 		return err
 	}
-	built, err := s.buildCredential(ctx, cred)
+	var built builtCredential
+	for {
+		revision := s.revision(cred.Name)
+		built, err = s.buildCredential(ctx, cred)
+		if err != nil {
+			// Nothing was stored, so whatever the stored row holds stays.
+			s.releaseSecrets(ctx, cred.Name, written, kept)
+			return err
+		}
+		s.applyMu.Lock()
+		if s.revision(cred.Name) == revision {
+			break
+		}
+		// Rotation or another save installed this credential while it was
+		// resolving: resolve again rather than replace newer values.
+		s.applyMu.Unlock()
+	}
+	defer s.applyMu.Unlock()
+	current, err := s.storedCredential(ctx, cred.Name)
+	if err == nil && !sameStoredCredential(previous, current) {
+		err = &CredentialFieldError{Message: fmt.Sprintf("provider %q was changed while this save was in progress; reload it and save again", cred.Name)}
+	}
 	if err != nil {
-		// Nothing was stored, so whatever the stored row holds stays.
 		s.releaseSecrets(ctx, cred.Name, written, kept)
 		return err
 	}
@@ -366,6 +395,35 @@ func (s *CredentialsService) apply(ctx context.Context, cred ManagedProviderCred
 	}
 	s.releaseSecrets(ctx, cred.Name, kept, credentialSecretValues(&cred))
 	return saveErr
+}
+
+// revision returns how often name was installed, removed, or had its keys
+// swapped.
+func (s *CredentialsService) revision(name string) uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.revisions[name]
+}
+
+// storedCredential returns the stored row name, or nil when there is none.
+func (s *CredentialsService) storedCredential(ctx context.Context, name string) (*ManagedProviderCredential, error) {
+	row, err := s.store.Get(ctx, name)
+	if errors.Is(err, ErrCredentialNotFound) {
+		return nil, nil
+	}
+	return row, err
+}
+
+// sameStoredCredential reports whether two reads of one stored row hold the
+// same credential, ignoring timestamps.
+func sameStoredCredential(a, b *ManagedProviderCredential) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	x, y := *a, *b
+	x.CreatedAt, x.UpdatedAt = time.Time{}, time.Time{}
+	y.CreatedAt, y.UpdatedAt = time.Time{}, time.Time{}
+	return reflect.DeepEqual(x, y)
 }
 
 // builtCredential is a credential row resolved and constructed, ready to
@@ -515,6 +573,7 @@ func (s *CredentialsService) install(name string, built builtCredential) {
 	s.mu.Lock()
 	s.configs[name] = cfg
 	s.keyrings[name] = built.keys
+	s.revisions[name]++
 	s.mu.Unlock()
 	built.secrets.Record()
 }
@@ -527,6 +586,7 @@ func (s *CredentialsService) remove(name string) {
 	s.mu.Lock()
 	delete(s.configs, name)
 	delete(s.keyrings, name)
+	s.revisions[name]++
 	s.mu.Unlock()
 	s.secrets.ForgetEntity(credentialSecretEntity(name))
 }

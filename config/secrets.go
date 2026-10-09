@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 )
 
 // SecretResolver resolves the reference part of ${scheme:reference}.
 // Implementations must be safe for concurrent use and must never include the
-// resolved value in an error.
+// resolved value in an error. ResolveSecret must return once ctx is done:
+// each call gets a deadline, and one that ignores it holds up whatever is
+// resolving, such as startup, a reload, or a dashboard save.
 type SecretResolver interface {
 	ResolveSecret(ctx context.Context, reference string) (string, error)
 }
@@ -60,10 +63,15 @@ var schemeHints = map[string]string{
 	"vault": "the vault scheme is provided by GoModel Pro vaults (extensions.vaults)",
 }
 
+// secretResolveTimeout bounds the resolution of one reference, so a backend
+// that never answers fails that field instead of wedging startup, a reload,
+// or an admin save.
+var secretResolveTimeout = 30 * time.Second
+
 // builtinSecretResolvers are available in every Secrets and cannot be replaced.
 var builtinSecretResolvers = map[string]SecretResolver{
 	"env":  SecretResolverFunc(resolveEnvSecret),
-	"file": SecretResolverFunc(resolveFileSecret),
+	"file": cancellable(resolveFileSecret),
 }
 
 // Secrets resolves ${scheme:reference} secret references for one configuration
@@ -200,6 +208,8 @@ func (s *Secrets) resolveReference(ctx context.Context, scheme, reference string
 		}
 		return "", fmt.Errorf("%w: the built-in schemes are env and file; other schemes are registered by extensions", ErrUnknownSecretScheme)
 	}
+	ctx, cancel := context.WithTimeout(ctx, secretResolveTimeout)
+	defer cancel()
 	return r.ResolveSecret(ctx, reference)
 }
 
