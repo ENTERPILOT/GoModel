@@ -71,9 +71,9 @@ type Service struct {
 	// recorded names the admin-managed servers whose references rotation
 	// watches.
 	recorded map[string]struct{}
-	// unresolved holds, by name, why the last full reload left out stored
+	// skipped holds, by name, why the last full reload left out stored
 	// servers whose references did not resolve. Guarded by reloadMu.
-	unresolved map[string]error
+	skipped map[string]error
 	// searchDiscovery is the default for sessions that do not send
 	// ToolDiscoveryHeader: serve search_tools/call_tool instead of the catalog.
 	searchDiscovery bool
@@ -253,16 +253,16 @@ func (s *Service) reload(ctx context.Context, rotated func(name string) bool) er
 	if rotated != nil {
 		return errors.Join(errs...)
 	}
-	s.unresolved = skipped
+	s.skipped = skipped
 	return nil
 }
 
-// UnresolvedSecrets returns, by name, why the last full reload left out
-// stored servers whose secret references did not resolve.
-func (s *Service) UnresolvedSecrets() map[string]error {
+// Skipped returns, by name, why the last full reload left out stored
+// servers whose secret references did not resolve.
+func (s *Service) Skipped() map[string]error {
 	s.reloadMu.Lock()
 	defer s.reloadMu.Unlock()
-	return maps.Clone(s.unresolved)
+	return maps.Clone(s.skipped)
 }
 
 // Running reports whether the server name is in the running upstream set.

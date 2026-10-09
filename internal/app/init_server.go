@@ -81,7 +81,7 @@ func (b *bootstrap) initServerDependencies() error {
 		app.mcpGateway = mcpResult
 		app.register(subsystemMCPGateway, ownedByShutdown, app.mcpGateway.Close)
 		if previous := b.cfg.Replaces; previous != nil && previous.mcpGateway != nil {
-			if err := keepServingEntities("mcp servers", mcpResult.Service.UnresolvedSecrets(), previous.mcpGateway.Service.Running); err != nil {
+			if err := keepServingEntities("mcp servers", mcpResult.Service.Skipped(), previous.mcpGateway.Service.Running); err != nil {
 				return err
 			}
 		}

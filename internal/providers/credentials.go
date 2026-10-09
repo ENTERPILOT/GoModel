@@ -112,6 +112,9 @@ type CredentialsService struct {
 
 	managedNames map[string]struct{}
 	resilience   config.ResilienceConfig
+	// skipped holds, by name, why Reload left out stored credentials that
+	// did not build. Guarded by mu.
+	skipped map[string]error
 	// secrets resolves the secret references stored credentials hold, with
 	// the schemes of the generation this service belongs to.
 	secrets *config.Secrets
@@ -129,9 +132,6 @@ type CredentialsService struct {
 	// keyrings holds each installed provider's keyring, so a rotated API key
 	// is swapped in place rather than rebuilding the provider.
 	keyrings map[string]*Keyring
-	// unresolved holds, by name, why Reload skipped stored credentials whose
-	// secret references did not resolve.
-	unresolved map[string]error
 }
 
 // NewCredentialsService builds the service and applies every currently
@@ -212,7 +212,7 @@ func (s *CredentialsService) Reload(ctx context.Context) error {
 	}
 
 	registeredAny := false
-	unresolved := make(map[string]error)
+	skipped := make(map[string]error)
 	for _, row := range rows {
 		if s.IsManaged(row.Name) {
 			slog.Warn("provider credential from admin store is shadowed by config/env", "provider", row.Name)
@@ -223,15 +223,13 @@ func (s *CredentialsService) Reload(ctx context.Context) error {
 		}
 		if err := s.register(ctx, row); err != nil {
 			slog.Error("failed to apply stored provider credential", "provider", row.Name, "error", err)
-			if _, ok := errors.AsType[*config.SecretError](err); ok {
-				unresolved[strings.TrimSpace(row.Name)] = err
-			}
+			skipped[strings.TrimSpace(row.Name)] = err
 			continue
 		}
 		registeredAny = true
 	}
 	s.mu.Lock()
-	s.unresolved = unresolved
+	s.skipped = skipped
 	s.mu.Unlock()
 	if registeredAny {
 		s.registry.InitializeAsync(ctx)
@@ -239,12 +237,13 @@ func (s *CredentialsService) Reload(ctx context.Context) error {
 	return nil
 }
 
-// UnresolvedSecrets returns, by name, why the last Reload skipped stored
-// credentials whose secret references did not resolve.
-func (s *CredentialsService) UnresolvedSecrets() map[string]error {
+// Skipped returns, by name, why the last Reload left out stored credentials
+// that did not build: a secret reference that did not resolve, a resolved
+// value that is not usable, such as an empty key, or any other reason.
+func (s *CredentialsService) Skipped() map[string]error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return maps.Clone(s.unresolved)
+	return maps.Clone(s.skipped)
 }
 
 // Installed reports whether the credential name is installed in the registry.

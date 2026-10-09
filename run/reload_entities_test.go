@@ -1,7 +1,6 @@
 package run
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -20,24 +19,6 @@ import (
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
-
-// syncBuffer is a bytes.Buffer safe for the logger and the test to share.
-type syncBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (b *syncBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *syncBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
-}
 
 // A reload must not drop a dashboard-managed provider credential or MCP
 // server that is serving because one of its references stopped resolving.
@@ -137,11 +118,17 @@ func TestReloadKeepsServingEntitiesWhoseReferencesFail(t *testing.T) {
 	rejected := waitForLog("reload failed; keeping the running configuration", 1)
 	assert.Contains(t, rejected, "provider_credentials.served.api_keys[0]")
 
+	// It resolves, but to a blank key the provider cannot use.
+	set("served", "  ")
+	secrets.NotifyChanged()
+	rejected = waitForLog("reload failed; keeping the running configuration", 2)
+	assert.Contains(t, rejected, `\"served\": credentials did not resolve`)
+
 	// Then the serving MCP server's header.
 	set("served", "sk-served")
 	set("header", "")
 	secrets.NotifyChanged()
-	rejected = waitForLog("reload failed; keeping the running configuration", 2)
+	rejected = waitForLog("reload failed; keeping the running configuration", 3)
 	assert.Contains(t, rejected, "mcp_servers.github.headers.Authorization")
 	assert.NotContains(t, logs.String(), "configuration reloaded")
 

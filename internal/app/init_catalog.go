@@ -64,7 +64,7 @@ func (b *bootstrap) initModelCatalog() error {
 	app.providerCredentials = providerCredentialsResult
 	app.register(subsystemProviderCredentials, ownedByShutdown, app.providerCredentials.Close)
 	if previous := b.cfg.Replaces; previous != nil && previous.providerCredentials != nil {
-		if err := keepServingEntities("provider credentials", providerCredentialsResult.Service.UnresolvedSecrets(), previous.providerCredentials.Service.Installed); err != nil {
+		if err := keepServingEntities("provider credentials", providerCredentialsResult.Service.Skipped(), previous.providerCredentials.Service.Installed); err != nil {
 			return err
 		}
 	}

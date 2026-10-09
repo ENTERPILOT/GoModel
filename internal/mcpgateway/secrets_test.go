@@ -166,9 +166,9 @@ func TestServiceResolvesHeaderReferences(t *testing.T) {
 
 	assert.False(t, service.Running("broken"), "a row whose references fail at startup is skipped")
 	assert.True(t, service.Running("github"))
-	unresolved := service.UnresolvedSecrets()
-	require.Len(t, unresolved, 1)
-	assert.ErrorContains(t, unresolved["broken"], "mcp_servers.broken.headers.Authorization")
+	skipped := service.Skipped()
+	require.Len(t, skipped, 1)
+	assert.ErrorContains(t, skipped["broken"], "mcp_servers.broken.headers.Authorization")
 }
 
 func TestServiceUpsertRejectsUnresolvableReference(t *testing.T) {
