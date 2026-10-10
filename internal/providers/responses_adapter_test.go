@@ -1518,6 +1518,11 @@ func TestConvertResponsesRequestToChat_RejectsEmptyAllowedTools(t *testing.T) {
 		{name: "hosted entries, function tools declared", tools: []map[string]any{functionTool, hostedTool}, choice: hostedOnly},
 		{name: "hosted entries, only hosted tools declared", tools: []map[string]any{hostedTool}, choice: hostedOnly},
 		{name: "tools field missing", tools: []map[string]any{functionTool}, choice: map[string]any{"type": "allowed_tools", "mode": "auto"}},
+		{name: "function entries, only hosted tools declared", tools: []map[string]any{hostedTool}, choice: map[string]any{
+			"type":  "allowed_tools",
+			"mode":  "required",
+			"tools": []any{map[string]any{"type": "function", "name": "tool_a"}},
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
