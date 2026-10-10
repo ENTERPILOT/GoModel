@@ -2,7 +2,6 @@ package usage
 
 import (
 	"context"
-	"strings"
 )
 
 const estimatedCharactersPerToken int64 = 4
@@ -89,38 +88,36 @@ func SummarizeRequestUsage(entries []UsageLogEntry) *RequestUsageSummary {
 // request summaries, the admin usage log, and the live SSE preview — stay in
 // sync. The various provider field names are coalesced via max:
 //   - cached reads: cache_read_input_tokens (Anthropic, Bedrock),
-//     prompt_cached_tokens (OpenAI, DeepSeek), cached_tokens (Gemini)
+//     prompt_cached_tokens (OpenAI shape), cached_tokens (Gemini)
 //   - cache writes: cache_creation_input_tokens (Anthropic),
-//     cache_write_input_tokens (Bedrock Converse)
+//     cache_write_input_tokens (Bedrock Converse),
+//     prompt_cache_write_tokens (OpenAI shape)
+//
+// The Anthropic-named counts come on top of input_tokens; every other name is
+// part of it. A row's names therefore say how to split it: Claude rows recorded
+// from translated traffic before input_tokens included the cache, and rows from
+// native Anthropic traffic, carry the Anthropic names.
 func EntryInputSegments(entry UsageLogEntry) (uncachedInput, cachedInput, cacheWriteInput int64) {
-	cacheReadTopLevel := int64(extractInt(entry.RawData, "cache_read_input_tokens"))
-	cacheReadNormalized := int64(extractInt(entry.RawData, "prompt_cached_tokens"))
-	cacheReadGeneric := int64(extractInt(entry.RawData, "cached_tokens"))
-	cacheWriteCreation := int64(extractInt(entry.RawData, "cache_creation_input_tokens"))
-	cacheWriteGeneric := int64(extractInt(entry.RawData, "cache_write_input_tokens"))
-	cacheWriteInput = maxInt64(cacheWriteCreation, cacheWriteGeneric)
-
-	cachedInput = maxInt64(cacheReadTopLevel, cacheReadNormalized, cacheReadGeneric)
+	cacheReadAnthropic := int64(extractInt(entry.RawData, "cache_read_input_tokens"))
+	cacheWriteAnthropic := maxInt64(
+		int64(extractInt(entry.RawData, "cache_creation_input_tokens")),
+		int64(extractInt(entry.RawData, "cache_write_input_tokens")),
+	)
+	cachedInput = maxInt64(
+		cacheReadAnthropic,
+		int64(extractInt(entry.RawData, "prompt_cached_tokens")),
+		int64(extractInt(entry.RawData, "cached_tokens")),
+	)
 	baseInput := int64(entry.InputTokens)
 
-	if entryUsesSplitPromptCacheAccounting(entry, cacheReadTopLevel, cacheWriteInput) {
-		return baseInput, cachedInput, cacheWriteInput
-	}
+	cacheWriteInput = int64(extractInt(entry.RawData, "prompt_cache_write_tokens"))
 
-	if cachedInput > baseInput {
-		cachedInput = baseInput
+	// A cache count larger than input_tokens cannot be part of it (a Claude
+	// Responses body cached before input_tokens included the cache).
+	if cacheReadAnthropic > 0 || cacheWriteAnthropic > 0 || cachedInput+cacheWriteInput > baseInput {
+		return baseInput, cachedInput, maxInt64(cacheWriteAnthropic, cacheWriteInput)
 	}
-	uncachedInput = baseInput - cachedInput
-	return uncachedInput, cachedInput, cacheWriteInput
-}
-
-func entryUsesSplitPromptCacheAccounting(entry UsageLogEntry, cacheReadInput, cacheWriteInput int64) bool {
-	if cacheReadInput > 0 || cacheWriteInput > 0 {
-		return true
-	}
-	// Anthropic reports input_tokens as uncached prompt input; prompt-cache
-	// reads and writes are separate fields when present.
-	return strings.EqualFold(strings.TrimSpace(entry.Provider), "anthropic")
+	return baseInput - cachedInput - cacheWriteInput, cachedInput, cacheWriteInput
 }
 
 func maxInt64(values ...int64) int64 {

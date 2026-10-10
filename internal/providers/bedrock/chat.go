@@ -507,14 +507,7 @@ func convertConverseOutput(model string, out *bedrockruntime.ConverseOutput) *co
 	}}
 
 	if out.Usage != nil {
-		resp.Usage = core.Usage{
-			PromptTokens:     int(awssdk.ToInt32(out.Usage.InputTokens)),
-			CompletionTokens: int(awssdk.ToInt32(out.Usage.OutputTokens)),
-			TotalTokens:      int(awssdk.ToInt32(out.Usage.TotalTokens)),
-		}
-		if raw := bedrockUsageExtras(out.Usage); len(raw) > 0 {
-			resp.Usage.RawUsage = raw
-		}
+		resp.Usage = bedrockUsage(out.Usage)
 	}
 
 	return resp
@@ -560,23 +553,18 @@ func mapStopReason(sr brtypes.StopReason, hasToolCalls bool) string {
 	}
 }
 
-func bedrockUsageExtras(u *brtypes.TokenUsage) map[string]any {
-	if u == nil {
-		return nil
+// bedrockUsage renders Converse token usage the way OpenAI counts it. Bedrock's
+// InputTokens leaves out the prompt-cache reads and writes, which OpenAI's
+// prompt_tokens includes and itemizes under prompt_tokens_details, so they are
+// added back. Usage records and cost read the same shape.
+func bedrockUsage(u *brtypes.TokenUsage) core.Usage {
+	read := int(awssdk.ToInt32(u.CacheReadInputTokens))
+	write := int(awssdk.ToInt32(u.CacheWriteInputTokens))
+	prompt := int(awssdk.ToInt32(u.InputTokens)) + read + write
+	output := int(awssdk.ToInt32(u.OutputTokens))
+	usage := core.Usage{PromptTokens: prompt, CompletionTokens: output, TotalTokens: prompt + output}
+	if read > 0 || write > 0 {
+		usage.PromptTokensDetails = &core.PromptTokensDetails{CachedTokens: read, CacheWriteTokens: write}
 	}
-	out := make(map[string]any)
-	if u.CacheReadInputTokens != nil {
-		out["cache_read_input_tokens"] = int(*u.CacheReadInputTokens)
-	}
-	if u.CacheWriteInputTokens != nil {
-		// cache_creation_input_tokens is the canonical key the Anthropic
-		// mappers read (and what the anthropic provider emits); keep the
-		// legacy write key for external consumers of RawUsage.
-		out["cache_creation_input_tokens"] = int(*u.CacheWriteInputTokens)
-		out["cache_write_input_tokens"] = int(*u.CacheWriteInputTokens)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
+	return usage
 }

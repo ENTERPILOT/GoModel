@@ -457,15 +457,27 @@ func extractToolCalls(blocks []anthropicContent) []core.ToolCall {
 	return out
 }
 
-// buildAnthropicRawUsage extracts token details from anthropicUsage into a RawData map.
+// promptTokens is the whole prompt the way OpenAI counts it. Anthropic's
+// input_tokens leaves out the prompt-cache reads and writes, which OpenAI's
+// prompt_tokens (and Responses input_tokens) includes.
+func (u anthropicUsage) promptTokens() int {
+	return u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+}
+
+// promptDetails itemizes the cache reads and writes inside promptTokens, or
+// returns nil when the prompt used no cache.
+func (u anthropicUsage) promptDetails() *core.PromptTokensDetails {
+	if u.CacheReadInputTokens == 0 && u.CacheCreationInputTokens == 0 {
+		return nil
+	}
+	return &core.PromptTokensDetails{CachedTokens: u.CacheReadInputTokens, CacheWriteTokens: u.CacheCreationInputTokens}
+}
+
+// buildAnthropicRawUsage extracts the token details that have no typed usage
+// field into a RawData map. The cache reads and writes are typed: they are part
+// of the prompt count and itemized in its details (see promptTokens).
 func buildAnthropicRawUsage(u anthropicUsage) map[string]any {
 	raw := make(map[string]any)
-	if u.CacheCreationInputTokens > 0 {
-		raw["cache_creation_input_tokens"] = u.CacheCreationInputTokens
-	}
-	if u.CacheReadInputTokens > 0 {
-		raw["cache_read_input_tokens"] = u.CacheReadInputTokens
-	}
 	if u.OutputTokensDetails.ThinkingTokens > 0 {
 		raw["completion_reasoning_tokens"] = u.OutputTokensDetails.ThinkingTokens
 	}
@@ -475,12 +487,11 @@ func buildAnthropicRawUsage(u anthropicUsage) map[string]any {
 	return raw
 }
 
-func addAnthropicUsagePayloadDetails(payload map[string]any, usage *anthropicUsage, outputDetailsKey string) {
-	if usage.CacheReadInputTokens > 0 {
-		payload["cache_read_input_tokens"] = usage.CacheReadInputTokens
-	}
-	if usage.CacheCreationInputTokens > 0 {
-		payload["cache_creation_input_tokens"] = usage.CacheCreationInputTokens
+// addAnthropicUsagePayloadDetails adds the prompt-cache and reasoning token
+// details to a streamed usage payload under the given detail keys.
+func addAnthropicUsagePayloadDetails(payload map[string]any, usage *anthropicUsage, inputDetailsKey, outputDetailsKey string) {
+	if details := usage.promptDetails(); details != nil {
+		payload[inputDetailsKey] = details
 	}
 	if usage.OutputTokensDetails.ThinkingTokens > 0 {
 		payload[outputDetailsKey] = map[string]any{

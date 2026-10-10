@@ -281,6 +281,11 @@ forwards everything else exactly as the provider sent it.
   `choices[].message` and on streamed `choices[].delta`. Groq returns it as
   `reasoning`; GoModel renames it, so the same client code reads the chain of
   thought from Groq, DeepSeek, Anthropic, Cohere and vLLM alike.
+- **Prompt token counts include the prompt cache.** Anthropic and Bedrock count
+  cache reads and writes outside `input_tokens`; GoModel adds them back, so
+  `usage.prompt_tokens` (`input_tokens` on `/v1/responses`) is the whole prompt,
+  as on OpenAI, with the cache itemized in
+  `usage.prompt_tokens_details.cached_tokens` and `cache_write_tokens`.
 - **Vendor members are not stripped.** Groq's `x_groq` and its
   `queue_time` / `prompt_time` / `completion_time` usage timings, and
   DeepSeek's `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`, reach the

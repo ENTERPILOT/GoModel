@@ -250,17 +250,14 @@ func (s *streamConverter) flushFinish() {
 func (s *streamConverter) formatChunk(delta map[string]any, finishReason any, usage *brtypes.TokenUsage) string {
 	var usagePayload map[string]any
 	if usage != nil {
+		converted := bedrockUsage(usage)
 		usagePayload = map[string]any{
-			"prompt_tokens":     int(awssdk.ToInt32(usage.InputTokens)),
-			"completion_tokens": int(awssdk.ToInt32(usage.OutputTokens)),
-			"total_tokens":      int(awssdk.ToInt32(usage.TotalTokens)),
+			"prompt_tokens":     converted.PromptTokens,
+			"completion_tokens": converted.CompletionTokens,
+			"total_tokens":      converted.TotalTokens,
 		}
-		// Bedrock's CacheWriteInputTokens is Anthropic's cache_creation_input_tokens.
-		if usage.CacheReadInputTokens != nil {
-			usagePayload["cache_read_input_tokens"] = int(awssdk.ToInt32(usage.CacheReadInputTokens))
-		}
-		if usage.CacheWriteInputTokens != nil {
-			usagePayload["cache_creation_input_tokens"] = int(awssdk.ToInt32(usage.CacheWriteInputTokens))
+		if converted.PromptTokensDetails != nil {
+			usagePayload["prompt_tokens_details"] = converted.PromptTokensDetails
 		}
 	}
 	return providers.FormatChatChunkSSE(s.id, s.created, s.model, providerName, delta, finishReason, usagePayload)
