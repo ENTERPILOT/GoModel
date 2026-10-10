@@ -851,4 +851,8 @@ func TestConvertTools_AllowedToolsNarrowsDeclaredTools(t *testing.T) {
 	_, err = convertTools(tools, allowed("required", "unknown"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "tool_choice.allowed_tools.tools")
+
+	_, err = convertTools(nil, allowed("required", "tool_a"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tool_choice.allowed_tools.tools")
 }

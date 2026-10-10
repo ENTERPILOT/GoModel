@@ -316,6 +316,13 @@ func convertToolResultMessage(msg core.Message) (brtypes.ContentBlock, error) {
 }
 
 func convertTools(tools []map[string]any, toolChoice any) (*brtypes.ToolConfiguration, error) {
+	// Bedrock has no subset choice: declare only the allowed functions.
+	// Narrow before the empty check so a subset with no declared tools is
+	// rejected rather than sent without tools.
+	tools, toolChoice, err := core.NarrowToAllowedTools(tools, toolChoice)
+	if err != nil {
+		return nil, err
+	}
 	if len(tools) == 0 {
 		return nil, nil
 	}
@@ -324,11 +331,6 @@ func convertTools(tools []map[string]any, toolChoice any) (*brtypes.ToolConfigur
 	// entirely, matching OpenAI semantics.
 	if isToolChoiceNone(toolChoice) {
 		return nil, nil
-	}
-	// Bedrock has no subset choice: declare only the allowed functions.
-	tools, toolChoice, err := core.NarrowToAllowedTools(tools, toolChoice)
-	if err != nil {
-		return nil, err
 	}
 	out := &brtypes.ToolConfiguration{Tools: make([]brtypes.Tool, 0, len(tools))}
 	for _, tool := range tools {
