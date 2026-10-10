@@ -272,12 +272,14 @@ jobs:
           # retried: --connect-timeout bounds the connect phase, so 28 means
           # the request was already sent and retrying would risk a duplicate
           # announce. Any HTTP response is final for the same reason.
+          # wait=true: Discord answers 200 with the saved message instead of
+          # queueing blindly (204), so curl success confirms the announce.
           rc=0
           for attempt in 1 2 3; do
             if curl -fsS --connect-timeout 10 --max-time 20 \
                 -H "Content-Type: application/json" \
                 -d @discord-payload.json \
-                "$DISCORD_WEBHOOK_URL"; then
+                "$DISCORD_WEBHOOK_URL?wait=true"; then
               rc=0
               break
             else
