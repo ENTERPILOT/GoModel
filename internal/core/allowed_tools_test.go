@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAllowedToolsChoice(t *testing.T) {
@@ -48,20 +49,20 @@ func TestNarrowToAllowedTools(t *testing.T) {
 	}
 
 	narrowed, choice, err := NarrowToAllowedTools(tools, allowed("required", "tool_c", "tool_a"))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, []map[string]any{tool("tool_a"), tool("tool_c")}, narrowed)
 	assert.Equal(t, "required", choice)
 
 	narrowed, choice, err = NarrowToAllowedTools(tools, allowed("auto", "tool_b"))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, []map[string]any{tool("tool_b")}, narrowed)
 	assert.Equal(t, "auto", choice)
 
 	_, _, err = NarrowToAllowedTools(tools, allowed("required", "unknown"))
-	assert.ErrorContains(t, err, "tool_choice.allowed_tools.tools")
+	require.ErrorContains(t, err, "tool_choice.allowed_tools.tools")
 
 	narrowed, choice, err = NarrowToAllowedTools(tools, "required")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, tools, narrowed)
 	assert.Equal(t, "required", choice)
 }
