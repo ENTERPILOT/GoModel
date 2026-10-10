@@ -280,8 +280,9 @@ jobs:
                 "$DISCORD_WEBHOOK_URL"; then
               rc=0
               break
+            else
+              rc=$?
             fi
-            rc=$?
             case $rc in
               6|7) sleep 5 ;;
               *) break ;;
