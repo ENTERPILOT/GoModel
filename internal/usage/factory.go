@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -40,6 +41,13 @@ func (r *Result) Close() error {
 func New(ctx context.Context, cfg *config.Config, store storage.Storage) (*Result, error) {
 	// Return noop if usage tracking is disabled
 	if !cfg.Usage.Enabled {
+		// The usage reader still serves history recorded while tracking was
+		// on, so keep the schema current even though nothing new is written.
+		if store != nil {
+			if err := ensureSchema(ctx, store); err != nil {
+				slog.Warn("usage schema update skipped while usage tracking is disabled", "error", err)
+			}
+		}
 		return &Result{
 			Logger: NewNoopLogger(buildLoggerConfig(cfg.Usage)),
 		}, nil
@@ -107,6 +115,20 @@ func NewPricingRecalculator(store storage.Storage) (PricingRecalculator, error) 
 }
 
 // createUsageStore creates the appropriate UsageStore for the given storage backend.
+// ensureSchema brings the SQL usage table up to date without creating a
+// store; MongoDB needs no migration.
+func ensureSchema(ctx context.Context, store storage.Storage) error {
+	_, err := storage.ResolveBackend[struct{}](
+		store,
+		func(db *sql.DB) (struct{}, error) { return struct{}{}, ensureSQLiteSchema(db) },
+		func(pool *pgxpool.Pool) (struct{}, error) {
+			return struct{}{}, ensurePostgreSQLSchema(ctx, pool)
+		},
+		func(*mongo.Database) (struct{}, error) { return struct{}{}, nil },
+	)
+	return err
+}
+
 func createUsageStore(store storage.Storage, retentionDays int) (UsageStore, error) {
 	return storage.ResolveBackend[UsageStore](
 		store,

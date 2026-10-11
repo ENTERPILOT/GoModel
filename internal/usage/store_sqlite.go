@@ -39,8 +39,28 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database connection is required")
 	}
+	if err := ensureSQLiteSchema(db); err != nil {
+		return nil, err
+	}
 
-	// Create table for usage tracking
+	store := &SQLiteStore{
+		db:                     db,
+		retentionDays:          retentionDays,
+		recalculationBatchSize: defaultSQLiteRecalculationBatchSize,
+		stopCleanup:            make(chan struct{}),
+	}
+
+	// Start background cleanup if retention is configured
+	if retentionDays > 0 {
+		go storage.RunCleanupLoop(store.stopCleanup, CleanupInterval, store.cleanup)
+	}
+
+	return store, nil
+}
+
+// ensureSQLiteSchema creates the usage table and brings an existing one up to
+// the current columns and indexes. It is idempotent.
+func ensureSQLiteSchema(db *sql.DB) error {
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS usage (
 			id TEXT PRIMARY KEY,
@@ -64,7 +84,7 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 		)
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create usage table: %w", err)
+		return fmt.Errorf("failed to create usage table: %w", err)
 	}
 
 	// Add cost columns (idempotent: SQLite lacks IF NOT EXISTS for ALTER TABLE ADD COLUMN)
@@ -87,7 +107,7 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 		if _, err := db.Exec(migration); err != nil {
 			// "duplicate column name" means the column already exists — safe to ignore
 			if !strings.Contains(err.Error(), "duplicate column") {
-				return nil, fmt.Errorf("failed to run migration %q: %w", migration, err)
+				return fmt.Errorf("failed to run migration %q: %w", migration, err)
 			}
 		}
 	}
@@ -112,20 +132,7 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 			slog.Warn("failed to create index", "error", err)
 		}
 	}
-
-	store := &SQLiteStore{
-		db:                     db,
-		retentionDays:          retentionDays,
-		recalculationBatchSize: defaultSQLiteRecalculationBatchSize,
-		stopCleanup:            make(chan struct{}),
-	}
-
-	// Start background cleanup if retention is configured
-	if retentionDays > 0 {
-		go storage.RunCleanupLoop(store.stopCleanup, CleanupInterval, store.cleanup)
-	}
-
-	return store, nil
+	return nil
 }
 
 // WriteBatch writes multiple usage entries to SQLite using batch insert.

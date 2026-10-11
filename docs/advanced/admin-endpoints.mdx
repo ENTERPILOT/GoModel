@@ -274,9 +274,10 @@ Returns aggregate token usage statistics over a configurable time window.
 Use `start_date`/`end_date` for explicit ranges or `days` as a shorthand. When both are provided, `start_date`/`end_date` take priority.
 
 Every usage row records the managed auth key that made the request, so
-`auth_key_id` answers "how much did this key spend?". Every `/admin/usage/*`
-endpoint except `throughput` accepts it, and `/admin/usage/log` entries include
-it. Requests made with the master key, and rows recorded before this field
+`auth_key_id` answers "how much did this key spend?". Every reporting endpoint
+under `/admin/usage/*` except `throughput` accepts it, and `/admin/usage/log`
+entries include it. `/admin/usage/recalculate-pricing` does not accept this
+filter. Requests made with the master key, and rows recorded before this field
 existed, have no key id.
 
 ```bash

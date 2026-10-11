@@ -3,13 +3,25 @@ package usage
 import (
 	"context"
 	"database/sql"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
+
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/storage"
 )
+
+// legacyUsageTable is a usage table from before the auth_key_id column.
+const legacyUsageTable = `CREATE TABLE usage (
+	id TEXT PRIMARY KEY, request_id TEXT NOT NULL, provider_id TEXT NOT NULL,
+	timestamp DATETIME NOT NULL, model TEXT NOT NULL, provider TEXT NOT NULL,
+	endpoint TEXT NOT NULL, input_tokens INTEGER NOT NULL DEFAULT 0,
+	output_tokens INTEGER NOT NULL DEFAULT 0, total_tokens INTEGER NOT NULL DEFAULT 0,
+	raw_data JSON)`
 
 func TestSQLiteUsageAuthKeyIDRoundTripAndFilter(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
@@ -17,12 +29,7 @@ func TestSQLiteUsageAuthKeyIDRoundTripAndFilter(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	// A table created before auth_key_id existed gains the column on startup.
-	_, err = db.Exec(`CREATE TABLE usage (
-		id TEXT PRIMARY KEY, request_id TEXT NOT NULL, provider_id TEXT NOT NULL,
-		timestamp DATETIME NOT NULL, model TEXT NOT NULL, provider TEXT NOT NULL,
-		endpoint TEXT NOT NULL, input_tokens INTEGER NOT NULL DEFAULT 0,
-		output_tokens INTEGER NOT NULL DEFAULT 0, total_tokens INTEGER NOT NULL DEFAULT 0,
-		raw_data JSON)`)
+	_, err = db.Exec(legacyUsageTable)
 	require.NoError(t, err)
 	_, err = db.Exec(`INSERT INTO usage (id, request_id, provider_id, timestamp, model, provider, endpoint, total_tokens)
 		VALUES ('legacy', 'r-legacy', 'p-legacy', '2026-08-08T11:00:00Z', 'gpt-5', 'openai', '/v1/chat/completions', 1)`)
@@ -80,4 +87,24 @@ func TestSQLiteUsageAuthKeyIDRoundTripAndFilter(t *testing.T) {
 	assert.Equal(t, "key-a", byRequest["r1"][0].AuthKeyID, "stored key id is trimmed")
 	require.Len(t, byRequest["r-legacy"], 1)
 	assert.Empty(t, byRequest["r-legacy"][0].AuthKeyID, "legacy rows read back without a key")
+}
+
+func TestNewMigratesSchemaWhenUsageDisabled(t *testing.T) {
+	store, err := storage.NewSQLite(storage.SQLiteConfig{Path: filepath.Join(t.TempDir(), "gomodel.db")})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	_, err = store.DB().Exec(legacyUsageTable)
+	require.NoError(t, err)
+
+	cfg := &config.Config{}
+	cfg.Usage.Enabled = false
+	result, err := New(context.Background(), cfg, store)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = result.Close() })
+
+	// History recorded while tracking was on stays readable after an upgrade.
+	reader, err := NewReader(store)
+	require.NoError(t, err)
+	_, err = reader.GetUsageLog(context.Background(), UsageLogParams{})
+	require.NoError(t, err)
 }
