@@ -17,6 +17,16 @@ var secretSchema = []pluginapi.Field{
 	{Key: "endpoint", Input: pluginapi.InputText},
 }
 
+func TestDestinationValues(t *testing.T) {
+	schema := []pluginapi.Field{
+		{Key: "url", Input: pluginapi.InputText, Default: "http://default", Destination: true},
+		{Key: "host", Input: pluginapi.InputText, Destination: true},
+		{Key: "language", Input: pluginapi.InputText, Default: "en"},
+	}
+	assert.Equal(t, map[string]string{"url": "http://default"}, DestinationValues(schema, json.RawMessage(`{"language":"de"}`)))
+	assert.Equal(t, map[string]string{"url": "http://x", "host": "y"}, DestinationValues(schema, json.RawMessage(`{"url":"http://x","host":"y"}`)))
+}
+
 func TestRedactSecretsKeepsReferences(t *testing.T) {
 	raw := json.RawMessage(`{"api_key":"${vault:pii#key}","endpoint":"https://x","token":"literal"}`)
 	redacted := RedactSecrets(secretSchema, raw)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
@@ -123,6 +124,7 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 					authResult, err := authenticator.Authenticate(c.Request().Context(), token)
 					if err == nil {
 						applyAuthKeyResult(c, authResult, userPathHeaderName)
+						restrictSecretReferences(c, masterKey)
 						return next(c)
 					}
 
@@ -150,6 +152,7 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 				if err := applyExtensionAuthResult(c, result, userPathHeaderName); err != nil {
 					return writeGatewayError(c, extensionAuthenticationError(c))
 				}
+				restrictSecretReferences(c, masterKey)
 				return next(c)
 			}
 
@@ -271,6 +274,18 @@ func AdminAccessMiddleware() echo.MiddlewareFunc {
 			return next(c)
 		}
 	}
+}
+
+// restrictSecretReferences keeps a credential other than the master key from
+// adding or changing secret references in admin-saved entities while a master
+// key is configured (see config.RestrictSecretReferences). Without a master
+// key, dashboard credentials are the gateway's top credentials and keep
+// saving references.
+func restrictSecretReferences(c *echo.Context, masterKey string) {
+	if masterKey == "" {
+		return
+	}
+	c.SetRequest(c.Request().WithContext(config.RestrictSecretReferences(c.Request().Context())))
 }
 
 func extensionAuthenticationError(c *echo.Context) *core.GatewayError {

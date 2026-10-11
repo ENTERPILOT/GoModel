@@ -379,3 +379,22 @@ func TestServiceUnconfirmedSaveKeepsWhatItWrote(t *testing.T) {
 	assert.JSONEq(t, `{"api_key":"`+written+`","threshold":0.5}`, string(store.definitions["pii"].Config))
 	assert.Equal(t, "again", instanceAPIKey(t, service, "pii"))
 }
+
+func TestServiceUpsertRestrictedKeepsTheDestinationOfHeldReferences(t *testing.T) {
+	vault := &guardrailVault{values: map[string]string{"pii": "resolved-key"}}
+	store := newTestStore(secretDefinition("pii", "${vault:pii}"))
+	service, _ := newSecretsService(t, store, vault)
+	ctx := config.RestrictSecretReferences(t.Context())
+
+	// Another type sends the same api_key to its own service.
+	retyped := Definition{Name: "pii", Type: "presidio", Config: json.RawMessage(`{"api_key":"${vault:pii}"}`)}
+	err := service.Upsert(ctx, retyped)
+	require.ErrorIs(t, err, config.ErrSecretDestinationRestricted)
+	assert.Contains(t, err.Error(), "guardrail_definitions.pii.type")
+	assert.Equal(t, "secret_check", store.definitions["pii"].Type)
+
+	// A field that is not a destination still saves.
+	edited := secretDefinition("pii", "${vault:pii}")
+	edited.Config = json.RawMessage(`{"api_key":"${vault:pii}","threshold":0.9}`)
+	require.NoError(t, service.Upsert(ctx, edited))
+}

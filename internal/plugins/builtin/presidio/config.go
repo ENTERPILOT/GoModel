@@ -27,6 +27,10 @@ const (
 	DefaultMessage          = "Request blocked: it contains personal data"
 	DefaultStreamChunk      = 256
 	DefaultStreamLookbehind = 64
+	// MaxStreamLookbehind bounds stream_lookbehind: far longer than any
+	// value or placeholder, short enough that the client is not kept
+	// waiting on held-back text.
+	MaxStreamLookbehind = 4096
 )
 
 // settings is the validated configuration.
@@ -44,7 +48,10 @@ type settings struct {
 	operator         string
 	placeholders     *placeholderFormat
 	restore          bool
-	restoreRoles     map[pluginapi.Role]bool
+	// restoreRoles are the prompt roles whose values come back; the default
+	// list unless restoreRolesSet. See [roleFilter].
+	restoreRoles    map[pluginapi.Role]bool
+	restoreRolesSet bool
 	// restoreTools, when set, are the only tools whose call arguments get
 	// values back; keepTools never get them.
 	restoreTools map[string]bool
@@ -74,8 +81,9 @@ func decodeConfig(raw json.RawMessage) (settings, error) {
 		restoreTools:   nameSet(cfg.List("restore_tools")),
 		keepTools:      nameSet(cfg.List("restore_tools_exclude")),
 		streamChunk:    cfg.Int("stream_chunk", DefaultStreamChunk, 0, 16384),
-		lookbehind:     cfg.Int("stream_lookbehind", DefaultStreamLookbehind, 0, 1<<20),
+		lookbehind:     cfg.Int("stream_lookbehind", DefaultStreamLookbehind, 0, MaxStreamLookbehind),
 	}
+	s.restoreRolesSet = cfg.List("restore_roles") != nil
 	s.enforcement = pluginapi.Enforcement{
 		Action:      pluginapi.Action(s.action),
 		Message:     cfg.String("message", DefaultMessage),

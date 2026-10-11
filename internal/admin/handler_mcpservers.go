@@ -384,6 +384,9 @@ func mcpServerWriteError(err error) error {
 	if err == nil {
 		return nil
 	}
+	if restricted := secretReferenceRestrictedError(err); restricted != nil {
+		return restricted
+	}
 	if _, ok := errors.AsType[*config.SecretError](err); ok {
 		return core.NewInvalidRequestError(err.Error(), err).WithParam("headers")
 	}

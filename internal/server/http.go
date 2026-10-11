@@ -101,6 +101,7 @@ type Config struct {
 	ConversationStore               conversationstore.Store                // Optional: Conversations lifecycle persistence store
 	LogOnlyModelInteractions        bool                                   // Only log AI model endpoints (default: true)
 	DisablePassthroughRoutes        bool                                   // Disable /p/{provider}/{endpoint} route registration
+	DisableLiteLLMTags              bool                                   // Leave LiteLLM tags alone: no labels from them and no stripping
 	RealtimeEnabled                 bool                                   // Enable the realtime websocket routes (/v1/realtime, /v1/realtime/translations) and passthrough upgrades
 	AuthVerifyEnabled               bool                                   // Enable the credential check route (GET /v1/auth/verify); off by default
 	MCPEnabled                      bool                                   // Enable the MCP gateway routes /mcp and /mcp/{server}
@@ -426,8 +427,10 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 
 	// LiteLLM tags become labels post-auth (only authenticated bodies are
 	// read) and before request rewriters and workflow resolution, which see
-	// the body without them.
-	e.Use(LiteLLMTags(auditLogger))
+	// the body without them. Turned off, requests keep their tags untouched.
+	if cfg == nil || !cfg.DisableLiteLLMTags {
+		e.Use(LiteLLMTags(auditLogger))
+	}
 
 	// Request rewriters run post-auth (rewriters only see authenticated
 	// traffic) and pre-workflow-resolution (body rewrites, including "model",

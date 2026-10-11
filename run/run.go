@@ -265,6 +265,10 @@ func Run(ctx context.Context, opts Options) error {
 	// a reload re-read every configuration value rather than a hand-picked
 	// subset — everything except what is fixed for the life of the process (see
 	// warnAboutStartupOnlySettings).
+	//
+	// serving is the generation built last: the one serving, or about to,
+	// which the next build replaces. Builds run one at a time.
+	var serving *app.App
 	build := func() (*app.App, *config.Config, error) {
 		result, err := config.Load()
 		if err != nil {
@@ -289,10 +293,12 @@ func Run(ctx context.Context, opts Options) error {
 			DemoMode:      demoMode,
 			ProductName:   opts.ProductName,
 			RequestReload: requestReload,
+			Replaces:      serving,
 		})
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize application: %w", err)
 		}
+		serving = application
 		return application, result.Config, nil
 	}
 
@@ -425,7 +431,7 @@ func serveUntilShutdown(ctx context.Context, reload <-chan os.Signal, socket *bo
 		startErr := serveGeneration(generationCtx, application, listener)
 		endGeneration()
 
-		next := <-replacement
+		next := awaitReplacement(replacement, startErr != nil || ctx.Err() != nil)
 		switch {
 		case next == nil:
 			return startErr
@@ -437,6 +443,28 @@ func serveUntilShutdown(ctx context.Context, reload <-chan os.Signal, socket *bo
 		}
 		application = next
 		slog.Info("configuration reloaded")
+	}
+}
+
+// awaitReplacement returns the replacement watchForReload yields. When the
+// gateway is stopping, a reload still building it is waited on for at most
+// shutdownTimeout: one stuck on a resolver that never returns must not keep
+// the process from exiting.
+func awaitReplacement(replacement <-chan lifecycleApp, stopping bool) lifecycleApp {
+	if !stopping {
+		return <-replacement
+	}
+	select {
+	case next := <-replacement:
+		return next
+	case <-time.After(shutdownTimeout):
+		slog.Warn("a configuration reload was still running at shutdown; abandoning it", "waited", shutdownTimeout)
+		go func() {
+			if next := <-replacement; next != nil {
+				_ = shutdownApplicationWithTimeout(next)
+			}
+		}()
+		return nil
 	}
 }
 

@@ -1,6 +1,8 @@
 package plugins
 
 import (
+	"fmt"
+
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/pluginapi"
@@ -55,4 +57,24 @@ func MapSecrets(schema []pluginapi.Field, raw json.RawMessage, fn func(key, valu
 		return raw, nil
 	}
 	return marshalCanonical(values)
+}
+
+// DestinationValues returns the value of every destination field of raw (see
+// pluginapi.Field.Destination), by config key, its default when unset.
+func DestinationValues(schema []pluginapi.Field, raw json.RawMessage) map[string]string {
+	values, _ := decodeConfigObject(raw)
+	destinations := make(map[string]string)
+	for _, field := range schema {
+		if !field.Destination {
+			continue
+		}
+		value, ok := values[field.Key]
+		if !ok || value == nil {
+			value = field.Default
+		}
+		if value != nil {
+			destinations[field.Key] = fmt.Sprint(value)
+		}
+	}
+	return destinations
 }

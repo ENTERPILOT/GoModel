@@ -30,6 +30,9 @@ type placeholderFormat struct {
 	numberFirst     bool
 	// hints holds bytes one of which every match contains.
 	hints string
+	// edges holds the punctuation that bounds the entity type, which the
+	// type itself cannot contain (see entityClass).
+	edges string
 }
 
 type patternMode int
@@ -69,6 +72,7 @@ func parsePlaceholderFormat(format string) (*placeholderFormat, error) {
 		return nil, fmt.Errorf("must start and end with a punctuation character, such as <...> or [...]")
 	}
 	f := &placeholderFormat{format: format, hints: string(format[0]) + `\&`, numberFirst: strings.Index(format, numberToken) < strings.Index(format, entityToken)}
+	f.edges = f.entityEdges()
 	f.text = regexp.MustCompile(f.pattern(modeText))
 	f.json = regexp.MustCompile(f.pattern(modeJSON))
 	f.any = regexp.MustCompile(f.pattern(modeAny))
@@ -110,20 +114,29 @@ func (f *placeholderFormat) pattern(mode patternMode) string {
 // follows {entity}. Punctuation only between {n} and {entity}, such as the
 // "." of "[{n}.{entity}]", may occur in the type: the number bounds it.
 func (f *placeholderFormat) entityClass() string {
-	entity, number := strings.Index(f.format, entityToken), strings.Index(f.format, numberToken)
-	edges := f.format[:min(entity, number)] + f.format[entity+len(entityToken):]
-	edges = strings.Replace(edges, numberToken, "", 1)
 	var b strings.Builder
 	b.WriteString(`[^\s\\"&;`)
-	for i := 0; i < len(edges); i++ {
-		if punct(edges[i]) {
-			// Escaped, so "-" cannot form a range.
-			b.WriteByte('\\')
-			b.WriteByte(edges[i])
-		}
+	for i := 0; i < len(f.edges); i++ {
+		// Escaped, so "-" cannot form a range.
+		b.WriteByte('\\')
+		b.WriteByte(f.edges[i])
 	}
 	b.WriteString("]")
 	return b.String()
+}
+
+// entityEdges returns the punctuation entityClass leaves out.
+func (f *placeholderFormat) entityEdges() string {
+	entity, number := strings.Index(f.format, entityToken), strings.Index(f.format, numberToken)
+	edges := f.format[:min(entity, number)] + f.format[entity+len(entityToken):]
+	edges = strings.Replace(edges, numberToken, "", 1)
+	var out []byte
+	for i := 0; i < len(edges); i++ {
+		if punct(edges[i]) {
+			out = append(out, edges[i])
+		}
+	}
+	return string(out)
 }
 
 // literalPattern matches one literal character of the format and the
@@ -152,8 +165,17 @@ func literalPattern(c byte, mode patternMode) string {
 	return "(?:" + strings.Join(alts, "|") + ")"
 }
 
-// render writes the placeholder for number n of entity.
+// render writes the placeholder for number n of entity. A character the
+// patterns cannot find in a type (whitespace, \, ", &, ; and the edge
+// punctuation, such as the "-" of "ZIP-CODE" in "<{entity}-{n}>") is
+// written as an underscore, which a type may always hold.
 func (f *placeholderFormat) render(entity string, n int) string {
+	entity = strings.Map(func(r rune) rune {
+		if r != '_' && strings.ContainsRune(" \t\n\f\r\\\"&;"+f.edges, r) {
+			return '_'
+		}
+		return r
+	}, entity)
 	return strings.NewReplacer(entityToken, entity, numberToken, strconv.Itoa(n)).Replace(f.format)
 }
 

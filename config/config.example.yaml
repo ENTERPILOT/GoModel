@@ -61,6 +61,11 @@ models:
 #     - header: X-Internal-Routing
 #       do_not_pass: true # stripped before forwarding to the provider
 #       delimiter: ";"
+#   # LiteLLM tags (x-litellm-tags header, body "tags", list metadata.tags) become
+#   # labels and are stripped before the provider; at most 32 per request, tags
+#   # over 128 characters are dropped. Clients choose them, so they can charge any
+#   # label budget they name: set false when label budgets must hold per team.
+#   litellm_tags_enabled: true # env: LITELLM_TAGS_ENABLED
 
 # Session keeping: identify which requests belong to one client session, for
 # sticky virtual-model load balancing and audit-log session grouping. Everything

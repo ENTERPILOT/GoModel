@@ -64,6 +64,61 @@ func TestChatResponseVendorReasoningMember(t *testing.T) {
 	assert.NotContains(t, got, "reasoning_content")
 }
 
+// A message carrying both reasoning members exposes the text of each, so
+// neither reaches the provider (or the client) unedited. Equal text is one
+// part, written back to both.
+func TestChatReasoningBothMembers(t *testing.T) {
+	tests := []struct {
+		name      string
+		content   string
+		reasoning string
+		want      []string
+	}{
+		{"different", "think", "ponder", []string{"think", "ponder"}},
+		{"equal", "think", "think", []string{"think"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := decodeChat(t, `{"model":"m","messages":[
+				{"role":"user","content":"hi"},
+				{"role":"assistant","content":"hello","reasoning_content":"`+tt.content+`","reasoning":"`+tt.reasoning+`"}
+			]}`)
+			p, err := FromChatRequest(req)
+			require.NoError(t, err)
+			var texts []string
+			for _, target := range p.ReasoningTargets() {
+				texts = append(texts, target.Text)
+				err := p.SetTargetText(target, target.Text+"!")
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tt.want, texts)
+			applied, err := ApplyToChatRequest(req, p)
+			require.NoError(t, err)
+			got := messageJSON(t, applied.Messages[1])
+			assert.Contains(t, got, `"reasoning_content":"`+tt.content+`!"`)
+			assert.Contains(t, got, `"reasoning":"`+tt.reasoning+`!"`)
+
+			var resp core.ChatResponse
+			err = json.Unmarshal([]byte(`{"id":"r","object":"chat.completion","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"hi","reasoning_content":"`+tt.content+`","reasoning":"`+tt.reasoning+`"},"finish_reason":"stop"}]}`), &resp)
+			require.NoError(t, err)
+			c, err := FromChatResponse(&resp)
+			require.NoError(t, err)
+			texts = nil
+			for _, target := range c.ReasoningTargets() {
+				texts = append(texts, target.Text)
+				err := c.SetTargetText(target, target.Text+"!")
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tt.want, texts)
+			out, err := ApplyToChatResponse(&resp, c)
+			require.NoError(t, err)
+			got = string(mustJSON(t, out.Choices[0].Message))
+			assert.Contains(t, got, `"reasoning_content":"`+tt.content+`!"`)
+			assert.Contains(t, got, `"reasoning":"`+tt.reasoning+`!"`)
+		})
+	}
+}
+
 // A reasoning item lists its reasoning_text content and its summary entries
 // as parts of their own, each written back in place.
 func TestResponsesReasoningSegments(t *testing.T) {

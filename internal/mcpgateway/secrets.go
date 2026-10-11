@@ -24,6 +24,16 @@ func headerSecretField(name string) string {
 	return "headers." + name
 }
 
+// serverDestinations lists the fields of server that decide where it sends
+// its headers, against previous, the row it replaces, for
+// config.CheckSecretDestinations: only the URL. A new server has none.
+func serverDestinations(previous, server *ManagedServer) []config.SecretDestination {
+	if previous == nil {
+		return nil
+	}
+	return []config.SecretDestination{{Field: "url", Stored: previous.URL, Saved: server.URL}}
+}
+
 // resolveServer converts a stored row into the spec the upstream runs with,
 // header references resolved, and returns the resolution to record once the
 // spec is applied. Errors are *config.SecretError values naming the header.

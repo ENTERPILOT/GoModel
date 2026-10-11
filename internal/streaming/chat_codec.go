@@ -59,6 +59,26 @@ func (d *chatDeltaView) reasoningText() (string, string) {
 	return "", ""
 }
 
+// reasoningMembers returns the members of a chat delta that carry its
+// reasoning text: the one reasoningText reads, and the other as well when a
+// provider sends the same text in both.
+func reasoningMembers(delta map[string]json.RawMessage) []string {
+	var out []string
+	var text string
+	for _, key := range []string{"reasoning_content", "reasoning"} {
+		s, ok := jsonStringOf(delta[key])
+		if !ok || s == "" || (len(out) > 0 && s != text) {
+			continue
+		}
+		text = s
+		out = append(out, key)
+	}
+	if len(out) == 0 {
+		return []string{"reasoning_content"}
+	}
+	return out
+}
+
 type chatCodec struct {
 	id, model, provider, fingerprint string
 	created                          int64
@@ -195,13 +215,9 @@ func (c *chatCodec) RewriteText(ev Event, text string) (Event, error) {
 			return ev, err
 		}
 	case KindReasoningDelta:
-		key := "reasoning_content"
-		if _, ok := delta["reasoning_content"]; !ok {
-			if _, ok := delta["reasoning"]; ok {
-				key = "reasoning"
-			}
+		for _, key := range reasoningMembers(delta) {
+			delta[key] = encoded
 		}
-		delta[key] = encoded
 	default:
 		delta["content"] = encoded
 	}

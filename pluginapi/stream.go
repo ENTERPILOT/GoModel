@@ -95,6 +95,12 @@ type StreamEvent struct {
 	// of another kind closed it): nothing is withheld after it, so an edit
 	// a plugin put off because the text could still grow is due now.
 	Final bool
+	// Signed marks a reasoning delta the client replays verbatim together
+	// with the provider's signature (Anthropic thinking on /v1/messages):
+	// edited text would fail the signature check on the next turn, so it
+	// reaches the client as it is. Replace and drop decisions on it are
+	// ignored.
+	Signed bool
 	// Raw is the event as received. Read-only.
 	Raw json.RawMessage
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/labstack/echo/v5"
 	"github.com/tidwall/gjson"
@@ -16,6 +17,15 @@ import (
 // liteLLMTagsHeader is the header LiteLLM clients send tags in, separated by
 // commas.
 const liteLLMTagsHeader = "X-Litellm-Tags"
+
+// Clients choose their own tags, so one request contributes at most
+// maxLiteLLMTags distinct labels, each at most maxLiteLLMTagLength
+// characters. Longer tags are dropped rather than truncated, so a cut tag
+// never lands on another label's name.
+const (
+	maxLiteLLMTags      = 32
+	maxLiteLLMTagLength = 128
+)
 
 // liteLLMTagEndpoints are the inference endpoints whose JSON body may carry
 // LiteLLM tags.
@@ -33,7 +43,7 @@ var liteLLMTagEndpoints = map[string]bool{
 // providers reject them, since "tags" is no OpenAI parameter and OpenAI
 // metadata values are strings. A string metadata.tags is valid OpenAI
 // metadata and is left alone. The audit entry keeps the body the client
-// sent.
+// sent. Tags past the caps are dropped as labels but still stripped.
 //
 // It runs after authentication, so only authenticated requests are read, and
 // before request rewriters and workflow resolution, which see the cleaned
@@ -58,6 +68,7 @@ func LiteLLMTags(auditLogger auditlog.LoggerInterface) echo.MiddlewareFunc {
 				}
 			}
 
+			labels = capTags(labels)
 			ctx := c.Request().Context()
 			changed := false
 			if len(labels) > 0 {
@@ -131,6 +142,21 @@ func tagValues(value gjson.Result) []string {
 	var out []string
 	for _, item := range value.Array() {
 		if tag := strings.TrimSpace(item.Str); item.Type == gjson.String && tag != "" {
+			out = append(out, tag)
+		}
+	}
+	return out
+}
+
+// capTags keeps the first maxLiteLLMTags distinct tags of at most
+// maxLiteLLMTagLength characters.
+func capTags(tags []string) []string {
+	var out []string
+	for _, tag := range core.MergeLabels(tags) {
+		if len(out) == maxLiteLLMTags {
+			break
+		}
+		if utf8.RuneCountInString(tag) <= maxLiteLLMTagLength {
 			out = append(out, tag)
 		}
 	}

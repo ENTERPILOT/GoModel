@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/enterpilot/gomodel/pluginapi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -47,28 +48,35 @@ func defaultMapping(t *testing.T) *mapping {
 	return newMapping(format)
 }
 
+// userGrant makes a placeholder restorable as a user value; defaultRoles is
+// a restoring instance without restore_roles.
+var (
+	userGrant    = grant{role: pluginapi.RoleUser}
+	defaultRoles = roleFilter{roles: map[pluginapi.Role]bool{pluginapi.RoleUser: true, pluginapi.RoleAssistant: true, pluginapi.RoleTool: true}}
+)
+
 func TestMapping(t *testing.T) {
 	m := defaultMapping(t)
-	assert.Equal(t, "<PERSON_1>", m.placeholder("PERSON", "Ann", true))
-	assert.Equal(t, "<PERSON_2>", m.placeholder("PERSON", "Bob", true))
-	assert.Equal(t, "<PERSON_1>", m.placeholder("PERSON", "Ann", false))
-	assert.Equal(t, "<EMAIL_ADDRESS_1>", m.placeholder("EMAIL_ADDRESS", "a@b", false), "placeholders = %v", m.byPlaceholder)
+	assert.Equal(t, "<PERSON_1>", m.placeholder("PERSON", "Ann", userGrant))
+	assert.Equal(t, "<PERSON_2>", m.placeholder("PERSON", "Bob", userGrant))
+	assert.Equal(t, "<PERSON_1>", m.placeholder("PERSON", "Ann", grant{}))
+	assert.Equal(t, "<EMAIL_ADDRESS_1>", m.placeholder("EMAIL_ADDRESS", "a@b", grant{}), "placeholders = %v", m.byPlaceholder)
 
 	for i := 3; i <= 12; i++ {
-		m.placeholder("PERSON", "P"+string(rune('0'+i%10))+string(rune('a'+i)), true)
+		m.placeholder("PERSON", "P"+string(rune('0'+i%10))+string(rune('a'+i)), userGrant)
 	}
 	text := "<PERSON_12> and <PERSON_1> and <EMAIL_ADDRESS_1> and <PERSON_99>"
-	got, n := m.restore(text)
+	got, n := m.restore(text, defaultRoles)
 	assert.Equal(t, "P2m and Ann and <EMAIL_ADDRESS_1> and <PERSON_99>", got)
 	assert.Equal(t, 2, n)
-	got, n = m.restore("nothing here")
+	got, n = m.restore("nothing here", defaultRoles)
 	assert.Equal(t, "nothing here", got)
 	assert.Equal(t, 0, n)
 	assert.True(t, m.hasRestorable())
 	assert.False(t, defaultMapping(t).hasRestorable())
 
 	var nilMap *mapping
-	got, _ = nilMap.restore("<PERSON_1>")
+	got, _ = nilMap.restore("<PERSON_1>", defaultRoles)
 	assert.Equal(t, "<PERSON_1>", got)
 }
 

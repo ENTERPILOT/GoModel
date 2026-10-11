@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"sync"
+
+	"github.com/enterpilot/gomodel/pluginapi"
 )
 
 // mapping is the per-request table of numbered placeholders. The same
@@ -23,18 +25,43 @@ type mapping struct {
 	byValue map[string]string
 	// byPlaceholder maps a placeholder key to the original value.
 	byPlaceholder map[string]string
-	// restorable holds the keys of the placeholders that came from the
-	// prompt roles restore covers: only those go back into the response, so
-	// a value the model produced itself and that was anonymized on the way
-	// out stays anonymized.
-	restorable map[string]bool
+	// restorable maps the keys of the placeholders that came from the
+	// prompt of an instance with restore on to the roles of the messages
+	// holding their value, each with the grant's chosen flag. Only those go
+	// back into the response, and only for the roles the restoring instance
+	// allows, so a value the model produced itself and that was anonymized
+	// on the way out stays anonymized.
+	restorable map[string]map[pluginapi.Role]bool
 	// taken holds the keys of placeholder-shaped text already present in
 	// the request, whose numbers are never allocated (see reserve).
 	taken map[string]bool
 }
 
 func newMapping(format *placeholderFormat) *mapping {
-	return &mapping{format: format, seq: map[string]int{}, byValue: map[string]string{}, byPlaceholder: map[string]string{}, restorable: map[string]bool{}, taken: map[string]bool{}}
+	return &mapping{format: format, seq: map[string]int{}, byValue: map[string]string{}, byPlaceholder: map[string]string{}, restorable: map[string]map[pluginapi.Role]bool{}, taken: map[string]bool{}}
+}
+
+// grant makes the placeholders of one prompt role's values restorable. role
+// is empty for values that are never restored. chosen marks a role the
+// restore_roles of the prompt instance names; without restore_roles there,
+// the restoring instance alone decides.
+type grant struct {
+	role   pluginapi.Role
+	chosen bool
+}
+
+// roleFilter is the restore_roles of a restoring instance: its roles (the
+// default list when it sets none) and whether it sets them.
+type roleFilter struct {
+	roles map[pluginapi.Role]bool
+	set   bool
+}
+
+// allows reports whether a value granted for role comes back: restore_roles
+// is honored on whichever instance sets it, the default list applies when
+// neither does.
+func (f roleFilter) allows(role pluginapi.Role, chosen bool) bool {
+	return f.roles[role] || (chosen && !f.set)
 }
 
 // reserve marks the placeholder-shaped tokens in text, in any spelling, as
@@ -59,10 +86,12 @@ func (m *mapping) reserve(text string) {
 }
 
 // placeholder returns the placeholder for value as entity, allocating the
-// next number of the type on first sight. restorable marks it so; a value
-// first seen where it is not restorable (a system message) becomes
-// restorable once the user sends it too.
-func (m *mapping) placeholder(entity, value string, restorable bool) string {
+// next free number of the type on first sight: one neither taken nor
+// already standing for another value, which a type differing only in case
+// would otherwise share. g makes it restorable for its role; a value first
+// seen where it is not restorable (a system message) becomes restorable
+// once the user sends it too.
+func (m *mapping) placeholder(entity, value string, g grant) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := entity + "\x00" + value
@@ -71,33 +100,50 @@ func (m *mapping) placeholder(entity, value string, restorable bool) string {
 		for {
 			m.seq[entity]++
 			p = m.format.render(entity, m.seq[entity])
-			if !m.taken[m.format.key(p)] {
+			_, used := m.byPlaceholder[m.format.key(p)]
+			if !used && !m.taken[m.format.key(p)] {
 				break
 			}
 		}
 		m.byValue[key] = p
 		m.byPlaceholder[m.format.key(p)] = value
 	}
-	if restorable {
-		m.restorable[m.format.key(p)] = true
+	if g.role != "" {
+		k := m.format.key(p)
+		if m.restorable[k] == nil {
+			m.restorable[k] = map[pluginapi.Role]bool{}
+		}
+		m.restorable[k][g.role] = m.restorable[k][g.role] || g.chosen
 	}
 	return p
 }
 
-// restore puts the original values back in place of the restorable
-// placeholders in text, in any spelling, and reports how many it replaced.
-func (m *mapping) restore(text string) (string, int) {
-	return m.restoreWith(text, false)
+// restorableFor reports whether the placeholder key comes back under f.
+// The caller holds m.mu.
+func (m *mapping) restorableFor(key string, f roleFilter) bool {
+	for role, chosen := range m.restorable[key] {
+		if f.allows(role, chosen) {
+			return true
+		}
+	}
+	return false
+}
+
+// restore puts the original values back in place of the placeholders in
+// text, in any spelling, that are restorable under f, and reports how many
+// it replaced.
+func (m *mapping) restore(text string, f roleFilter) (string, int) {
+	return m.restoreWith(text, f, false)
 }
 
 // restoreJSON is restore for raw JSON text (streamed tool-call arguments):
 // it also finds placeholders whose punctuation is \u-escaped, and writes
 // each value JSON-escaped so the arguments stay valid JSON.
-func (m *mapping) restoreJSON(text string) (string, int) {
-	return m.restoreWith(text, true)
+func (m *mapping) restoreJSON(text string, f roleFilter) (string, int) {
+	return m.restoreWith(text, f, true)
 }
 
-func (m *mapping) restoreWith(text string, raw bool) (string, int) {
+func (m *mapping) restoreWith(text string, f roleFilter, raw bool) (string, int) {
 	if m == nil || !m.format.mayContain(text) {
 		return text, 0
 	}
@@ -115,7 +161,7 @@ func (m *mapping) restoreWith(text string, raw bool) (string, int) {
 	defer m.mu.Unlock()
 	for _, loc := range matches {
 		key := m.format.matchKey(text, loc)
-		if !m.restorable[key] {
+		if !m.restorableFor(key, f) {
 			continue
 		}
 		// In JSON, a match starting with a backslash that is itself

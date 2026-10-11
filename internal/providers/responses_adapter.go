@@ -38,18 +38,19 @@ func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatReques
 		return nil, core.NewInvalidRequestError("tool_choice.allowed_tools.tools must list at least one function tool", nil)
 	}
 	parallelToolCalls := req.ParallelToolCalls
-	if len(req.Tools) > 0 {
-		if len(tools) == 0 {
-			// Only hosted tools are declared, so no function the subset
-			// names can be sent.
-			if _, _, ok := core.AllowedToolsChoice(toolChoice); ok {
-				return nil, core.NewInvalidRequestError("tool_choice.allowed_tools.tools must list at least one declared function", nil)
-			}
-			toolChoice = nil
-			parallelToolCalls = nil
-		} else {
-			toolChoice = dropUnavailableResponsesToolChoice(toolChoice, tools)
+	// Chat Completions providers reject tool_choice and parallel_tool_calls
+	// without tools, so drop them whenever no translatable tool remains,
+	// including when the caller sent none at all.
+	if len(tools) == 0 {
+		// An allowed_tools subset is rejected instead of dropped: no function
+		// it names can be sent, and dropping it would widen the choice.
+		if _, _, ok := core.AllowedToolsChoice(toolChoice); ok {
+			return nil, core.NewInvalidRequestError("tool_choice.allowed_tools.tools must list at least one declared function", nil)
 		}
+		toolChoice = nil
+		parallelToolCalls = nil
+	} else {
+		toolChoice = dropUnavailableResponsesToolChoice(toolChoice, tools)
 	}
 
 	chatReq := &core.ChatRequest{

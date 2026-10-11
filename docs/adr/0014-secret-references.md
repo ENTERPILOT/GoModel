@@ -197,6 +197,19 @@ builds the provider, MCP connection, or guardrail instance, never in the
 store layer. A reference that cannot be resolved at save time is rejected
 with a validation error naming the field and scheme.
 
+A reference resolves on the gateway host, so whoever adds one can read any
+environment variable or file the gateway can, the master key included. When a
+master key is configured, only it may add or change a reference: for every
+other credential, authentication marks the request with
+`config.RestrictSecretReferences`, and `Secrets.StoreSecret` then rejects any
+reference the entity's stored row does not already hold with a 403
+(`secret_reference_requires_master_key`). Literals, the mask, and unchanged
+references still save. Repointing an entity sends it what its references
+resolve to, so `config.CheckSecretDestinations` refuses the same credentials
+a change to a destination field (MCP `url`; provider `type`, `base_url`,
+`backend`, `proxy_url`; guardrail type and plugin fields marked
+`pluginapi.Field.Destination`) while the saved entity holds a reference.
+
 Resolvers see field paths rooted at the entity: `provider_credentials.<name>.api_keys[<i>]`
 (also `.service_account_json`, `.service_account_json_base64`, `.proxy_url`),
 `mcp_servers.<slug>.headers.<Header>`, and
@@ -219,8 +232,10 @@ records of a deleted entity.
 
 A stored entity whose references fail when it is loaded is handled like any
 other invalid stored row of its kind: a provider credential or MCP server is
-logged and skipped, and a running MCP server keeps its current headers;
-guardrails load as a set, so a failure fails the guardrail load (startup
+logged and skipped, and a running MCP server keeps its current headers. A
+reload whose replacement would skip one the serving generation runs fails
+instead, so the serving generation keeps it, as for a `config.yaml`
+reference; guardrails load as a set, so a failure fails the guardrail load (startup
 fails, a reload keeps the running generation, a periodic refresh keeps the
 current instances), which keeps guardrails failing closed.
 

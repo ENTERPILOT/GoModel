@@ -70,6 +70,30 @@ func (s *Secrets) secretWriter() SecretWriter {
 // may already be deleted, or be deleted with that other entity.
 var ErrSecretNotHeld = errors.New("refers to a stored secret this entity no longer holds; reload it and save again")
 
+// ErrSecretReferenceRestricted reports a secret reference saved, in a context
+// from RestrictSecretReferences, to an entity that does not already hold it.
+var ErrSecretReferenceRestricted = errors.New("only the master key can add or change a secret reference")
+
+type secretReferencesRestrictedKey struct{}
+
+// RestrictSecretReferences returns a context in which StoreSecret accepts
+// only the secret references the stored entity already holds. Authentication
+// applies it to every credential other than the master key, when one is
+// configured: a reference resolves on the gateway host, so whoever can add
+// one can read any environment variable or file the gateway can, the master
+// key included.
+func RestrictSecretReferences(ctx context.Context) context.Context {
+	return context.WithValue(ctx, secretReferencesRestrictedKey{}, true)
+}
+
+func secretReferencesRestricted(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	restricted, _ := ctx.Value(secretReferencesRestrictedKey{}).(bool)
+	return restricted
+}
+
 // StoreSecret returns what to persist for a secret field saved through the
 // admin API. With a writer registered, a non-empty literal value is written
 // through it and the reference it returns is persisted instead. The writer
@@ -83,18 +107,33 @@ var ErrSecretNotHeld = errors.New("refers to a stored secret this entity no long
 // writer owns, alone or inside a longer value, that no value of held contains
 // is rejected with a *SecretError wrapping ErrSecretNotHeld, so a save never
 // persists a reference whose secret was released.
+//
+// In a context from RestrictSecretReferences, any reference no value of held
+// contains is rejected with a *SecretError wrapping ErrSecretReferenceRestricted.
 func (s *Secrets) StoreSecret(ctx context.Context, key SecretKey, value string, held []string) (string, error) {
-	w := s.secretWriter()
-	if w == nil || value == "" {
+	if value == "" {
 		return value, nil
 	}
+	w := s.secretWriter()
 	if references := secretReferences(value); len(references) > 0 {
 		heldReferences := secretReferenceSet(held)
+		restricted := secretReferencesRestricted(ctx)
 		for _, reference := range references {
-			if _, ok := heldReferences[reference]; !ok && w.OwnsReference(reference) {
-				return "", &SecretError{Field: key.Entity + "." + key.ID + "." + key.Field, Scheme: s.schemeName(referenceScheme(reference)), Err: ErrSecretNotHeld}
+			if _, ok := heldReferences[reference]; ok {
+				continue
+			}
+			field := key.Entity + "." + key.ID + "." + key.Field
+			scheme := s.schemeName(referenceScheme(reference))
+			if restricted {
+				return "", &SecretError{Field: field, Scheme: scheme, Err: ErrSecretReferenceRestricted}
+			}
+			if w != nil && w.OwnsReference(reference) {
+				return "", &SecretError{Field: field, Scheme: scheme, Err: ErrSecretNotHeld}
 			}
 		}
+		return value, nil
+	}
+	if w == nil {
 		return value, nil
 	}
 	// No references, so this only applies the $${ escapes, as Resolve would.

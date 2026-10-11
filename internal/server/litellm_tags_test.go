@@ -5,6 +5,8 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -118,4 +120,86 @@ func TestLiteLLMTags_LeavesOtherRequestsAlone(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(forwarded), `"metadata":{"tags":"a,b"}`, "string metadata is OpenAI's and passes through")
 	assert.Empty(t, core.TaggingStripHeadersFromContext(provider.capturedChatCtx))
+}
+
+func TestLiteLLMTags_Disabled(t *testing.T) {
+	provider := newRewriteTestProvider()
+	srv := New(provider, &Config{DisableLiteLLMTags: true})
+
+	body := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"tags":["finance"]}`
+	rec := postWithHeaders(t, srv, "/v1/chat/completions", body, http.Header{"X-Litellm-Tags": {"finance"}})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	require.NotNil(t, provider.capturedChatReq)
+	assert.Empty(t, core.RequestLabelsFromContext(provider.capturedChatCtx))
+	assert.Empty(t, core.TaggingStripHeadersFromContext(provider.capturedChatCtx))
+	forwarded, err := json.Marshal(provider.capturedChatReq)
+	require.NoError(t, err)
+	assert.Contains(t, string(forwarded), `"tags":["finance"]`, "the body passes through unchanged: %s", forwarded)
+}
+
+func TestLiteLLMTags_Caps(t *testing.T) {
+	numbered := func(prefix string, n int) []string {
+		out := make([]string, n)
+		for i := range out {
+			out[i] = prefix + strconv.Itoa(i)
+		}
+		return out
+	}
+	longest := strings.Repeat("x", maxLiteLLMTagLength)
+	tooLong := strings.Repeat("y", maxLiteLLMTagLength+1)
+	header := numbered("h", 20)
+
+	tests := []struct {
+		name         string
+		header       []string
+		bodyTags     []string
+		metadataTags []string
+		want         []string
+	}{
+		{name: "header alone", header: numbered("h", 40), want: numbered("h", maxLiteLLMTags)},
+		{name: "body alone", bodyTags: numbered("b", 40), want: numbered("b", maxLiteLLMTags)},
+		{name: "metadata alone", metadataTags: numbered("m", 40), want: numbered("m", maxLiteLLMTags)},
+		{
+			name:   "all sources combined",
+			header: header, bodyTags: numbered("b", 20), metadataTags: numbered("m", 20),
+			want: append(slices.Clone(header), numbered("b", maxLiteLLMTags-len(header))...),
+		},
+		{
+			name:   "duplicates count once",
+			header: append(slices.Repeat([]string{"a"}, 40), numbered("h", 31)...),
+			want:   append([]string{"a"}, numbered("h", 31)...),
+		},
+		{name: "over-long tags are dropped", header: []string{tooLong, "a"}, bodyTags: []string{longest, tooLong}, want: []string{"a", longest}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := newRewriteTestProvider()
+			srv := New(provider, &Config{})
+
+			fields := map[string]any{
+				"model":    "gpt-4o-mini",
+				"messages": []map[string]string{{"role": "user", "content": "hi"}},
+			}
+			if tt.bodyTags != nil {
+				fields["tags"] = tt.bodyTags
+			}
+			if tt.metadataTags != nil {
+				fields["metadata"] = map[string]any{"tags": tt.metadataTags}
+			}
+			body, err := json.Marshal(fields)
+			require.NoError(t, err)
+			headers := http.Header{}
+			if tt.header != nil {
+				headers.Set("X-Litellm-Tags", strings.Join(tt.header, ","))
+			}
+			rec := postWithHeaders(t, srv, "/v1/chat/completions", string(body), headers)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+			assert.Equal(t, tt.want, core.RequestLabelsFromContext(provider.capturedChatCtx))
+			forwarded, err := json.Marshal(provider.capturedChatReq)
+			require.NoError(t, err)
+			assert.NotContains(t, string(forwarded), `"tags"`, "dropped tags are still stripped: %s", forwarded)
+		})
+	}
 }

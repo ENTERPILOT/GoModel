@@ -127,4 +127,9 @@ type Field struct {
 	Options []Option
 	// Scope selects the editor; see [FieldScope].
 	Scope FieldScope
+	// Destination marks a field that decides where the plugin sends its
+	// [InputSecret] fields, such as a service URL. While a secret field holds
+	// a secret reference, only the master key can change it through the
+	// admin API, so no other credential can redirect the resolved secret.
+	Destination bool
 }

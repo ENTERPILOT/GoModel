@@ -222,6 +222,12 @@ among the transform instances of a stream applies to all of them, capped at
 16384 characters. `0`, the
 default, presents deltas as they arrive.
 
+**Signed reasoning**: on `/v1/messages`, Anthropic thinking reaches the
+client as the provider signed it, since the client sends it back with the
+signature. Its reasoning events carry `StreamEvent.Signed`; GoModel ignores
+`replace` and `drop` on them and undoes edits to that reasoning made on the
+assembled response (`buffer` plugins and the response phase).
+
 **Chat chunks with several choices** are split into one chunk per choice
 before plugins see them, so every choice is inspected; provider `usage`
 stays on the last of them.
