@@ -269,8 +269,21 @@ Returns aggregate token usage statistics over a configurable time window.
 | `end_date`   | string | Range end in `YYYY-MM-DD` format                         | Today                |
 | `days`       | int    | Shorthand for look-back window (ignored if dates are set) | `30`                |
 | `cache_mode` | string | Which requests to count: `uncached`, `cached`, `all` (see [Cache mode](#cache-mode)) | `uncached` |
+| `auth_key_id` | string | Exact managed auth key id that authenticated the requests | —                  |
 
 Use `start_date`/`end_date` for explicit ranges or `days` as a shorthand. When both are provided, `start_date`/`end_date` take priority.
+
+Every usage row records the managed auth key that made the request, so
+`auth_key_id` answers "how much did this key spend?". Every reporting endpoint
+under `/admin/usage/*` except `throughput` accepts it, and `/admin/usage/log`
+entries include it. `/admin/usage/recalculate-pricing` does not accept this
+filter. Requests made with the master key, and rows recorded before this field
+existed, have no key id.
+
+```bash
+curl "http://localhost:8080/admin/usage/summary?auth_key_id=$KEY_ID" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
 
 **Response:**
 
@@ -341,6 +354,7 @@ provider-bound requests only, so avoided cache cost is not reported as spend.
 | `start_date` | string | Start date (`YYYY-MM-DD`)                        | —       |
 | `end_date`   | string | End date (`YYYY-MM-DD`)                          | —       |
 | `session_id` | string | Exact detected session id                        | —       |
+| `auth_key_id` | string | Exact managed auth key id                       | —       |
 | `user_path`  | string | Tracked user-path subtree                        | —       |
 | `model`      | string | Exact model name                                 | —       |
 | `provider`   | string | Provider name or type                            | —       |

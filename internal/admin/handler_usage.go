@@ -41,6 +41,7 @@ const (
 // @Param        provider    query     string  false  "Filter by provider name or provider type"
 // @Param        label       query     string  false  "Filter by request label (exact match)"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
+// @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Success      200  {object}  usage.UsageSummary
@@ -111,6 +112,7 @@ func usageSliceResponse[T any](
 // @Param        provider    query     string  false  "Filter by provider name or provider type"
 // @Param        label       query     string  false  "Filter by request label (exact match)"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
+// @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Success      200  {array}   usage.DailyUsage
@@ -137,6 +139,7 @@ func (h *Handler) DailyUsage(c *echo.Context) error {
 // @Param        provider    query     string  false  "Filter by provider name or provider type"
 // @Param        label       query     string  false  "Filter by request label (exact match)"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
+// @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Success      200  {array}   usage.ModelUsage
@@ -167,6 +170,7 @@ func (h *Handler) UsageByModel(c *echo.Context) error {
 // @Param        provider    query     string  false  "Filter by provider name or provider type"
 // @Param        label       query     string  false  "Filter by request label (exact match)"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
+// @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Success      200  {array}   usage.UserPathUsage
@@ -200,6 +204,7 @@ func (h *Handler) UsageByUserPath(c *echo.Context) error {
 // @Param        provider    query     string  false  "Filter by provider name or provider type"
 // @Param        label       query     string  false  "Filter by request label (exact match)"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
+// @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Success      200  {array}   usage.LabelUsage
@@ -234,6 +239,7 @@ func (h *Handler) UsageByLabel(c *echo.Context) error {
 // @Param        provider    query     string  false  "Filter by provider name or provider type"
 // @Param        label       query     string  false  "Filter by request label (exact match)"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
+// @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        limit       query     int     false  "Page size (default 50, max 200)"
 // @Param        offset      query     int     false  "Offset for pagination"
@@ -302,6 +308,7 @@ func (h *Handler) UsageBySession(c *echo.Context) error {
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
+// @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
 // @Param        search      query     string  false  "Search across model, provider, request_id, provider_id, session_id"
 // @Param        limit       query     int     false  "Page size (default 50, max 200)"
 // @Param        offset      query     int     false  "Offset for pagination"
@@ -439,6 +446,7 @@ func (h *Handler) RecalculateUsagePricing(c *echo.Context) error {
 // @Param        provider    query     string  false  "Filter by provider name or provider type"
 // @Param        label       query     string  false  "Filter by request label (exact match)"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
+// @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (cache overview always uses cached mode)"
 // @Success      200  {object}  usage.CacheOverview

@@ -251,6 +251,7 @@ func TestStreamUsageObserverIncludesUserPath(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
 	observer := NewStreamUsageObserver(logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil, "/team/alpha")
 	observer.SetSessionID(" scoped-session ")
+	observer.SetAuthKeyID(" key-a ")
 	observer.OnJSONEvent(chatUsageEvent())
 	observer.OnStreamClose()
 
@@ -258,6 +259,7 @@ func TestStreamUsageObserverIncludesUserPath(t *testing.T) {
 	require.Len(t, entries, 1)
 	require.Equal(t, "/team/alpha", entries[0].UserPath)
 	require.Equal(t, "scoped-session", entries[0].SessionID)
+	require.Equal(t, "key-a", entries[0].AuthKeyID)
 }
 
 func TestStreamUsageObserverNoUserPath(t *testing.T) {

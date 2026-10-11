@@ -50,6 +50,7 @@ export function usageFilterQueryStr(filters, excludeFacet) {
     ["label", filters && filters.label],
     ["user_path", filters && filters.user_path],
     ["session_id", filters && filters.session_id],
+    ["auth_key_id", filters && filters.auth_key_id],
   ];
   let qs = "";
   for (const [facet, value] of pairs) {
@@ -78,6 +79,41 @@ export function facetOptionList(values, activeValue) {
   const set = new Set(values || []);
   if (activeValue) set.add(activeValue);
   return [...set].sort();
+}
+
+// Maps managed auth key ids to their names from an /admin/auth-keys response.
+export function authKeyNameMap(keys) {
+  const names = {};
+  for (const key of keys || []) {
+    const id = String((key && key.id) || "").trim();
+    if (id) names[id] = String(key.name || "").trim() || id;
+  }
+  return names;
+}
+
+// Usage rows store the key id; show the key's name when it is known (a key
+// outside the caller's scope or since deleted falls back to a short id).
+export function authKeyDisplayName(id, names) {
+  const keyID = String(id || "").trim();
+  if (!keyID) return "-";
+  return (names && names[keyID]) || shortSessionID(keyID);
+}
+
+// API key filter choices sorted by name. The active key stays listed even
+// when it is no longer known, so the select never silently shows "All".
+export function authKeyOptionList(names, activeID) {
+  const options = Object.entries(names || {}).map(([id, name]) => ({ id, name }));
+  if (activeID && !(names && names[activeID])) {
+    options.push({ id: activeID, name: authKeyDisplayName(activeID, names) });
+  }
+  return options.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+}
+
+// The request log shows its API key column only when there is something to
+// show: an entry made with a managed key, or an active key filter.
+export function usageLogHasAuthKeys(filterAuthKey, logEntries) {
+  if (filterAuthKey) return true;
+  return (logEntries || []).some((entry) => entry && entry.auth_key_id);
 }
 
 // --- Stat cards (filtered summaries) ---

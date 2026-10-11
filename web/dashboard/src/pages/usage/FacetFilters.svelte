@@ -51,6 +51,19 @@
       {/each}
     </select>
   {/if}
+  {#if usagePage.usageFilterAuthKeyOptions().length > 0}
+    <select
+      bind:value={usagePage.usageFilterAuthKey}
+      onchange={() => usagePage.onUsageFilterChanged()}
+      class="usage-log-select"
+      aria-label={m.usage_filter_auth_key()}
+    >
+      <option value="">{m.usage_all_auth_keys()}</option>
+      {#each usagePage.usageFilterAuthKeyOptions() as key (key.id)}
+        <option value={key.id}>{key.name}</option>
+      {/each}
+    </select>
+  {/if}
   <!-- A scoped key's server-side default is its scope root: show it as the
        placeholder so an empty filter reads as that subtree. -->
   <FilterInput

@@ -303,7 +303,7 @@ func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (
 	// Fetch page
 	dataQuery := `SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels,
 		input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost, COALESCE(cost_source, ''), raw_data, COALESCE(costs_calculation_caveat, ''),
-		COALESCE(rewrite_tokens_saved, 0), rewrite_cost_saved
+		COALESCE(rewrite_tokens_saved, 0), rewrite_cost_saved, COALESCE(auth_key_id, '')
 		FROM usage` + where + ` ORDER BY ` + sqliteTimestampEpochExpr() + ` DESC, id DESC LIMIT ? OFFSET ?`
 	dataArgs := append(append([]any(nil), args...), limit, offset)
 
@@ -345,7 +345,7 @@ func (r *SQLiteReader) GetUsageByRequestIDs(ctx context.Context, requestIDs []st
 
 	query := `SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels,
 		input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost, COALESCE(cost_source, ''), raw_data, COALESCE(costs_calculation_caveat, ''),
-		COALESCE(rewrite_tokens_saved, 0), rewrite_cost_saved
+		COALESCE(rewrite_tokens_saved, 0), rewrite_cost_saved, COALESCE(auth_key_id, '')
 		FROM usage WHERE request_id IN (` + placeholders + `) ORDER BY ` + sqliteTimestampEpochExpr() + ` DESC, id DESC`
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
@@ -383,7 +383,7 @@ func scanSQLiteUsageLogEntries(rows *sql.Rows) ([]UsageLogEntry, error) {
 		var labelsJSON *string
 		if err := rows.Scan(&e.ID, &e.RequestID, &e.ProviderID, &ts, &e.Model, &e.Provider, &providerName, &e.Endpoint, &userPath, &sessionID, &cacheType, &labelsJSON,
 			&e.InputTokens, &e.OutputTokens, &e.TotalTokens, &e.InputCost, &e.OutputCost, &e.TotalCost, &e.CostSource, &rawDataJSON, &caveat,
-			&e.RewriteTokensSaved, &e.RewriteCostSaved); err != nil {
+			&e.RewriteTokensSaved, &e.RewriteCostSaved, &e.AuthKeyID); err != nil {
 			return nil, fmt.Errorf("failed to scan usage log row: %w", err)
 		}
 		if labelsJSON != nil {
@@ -666,6 +666,10 @@ func sqliteUsageConditionsWithUserPathExpr(params UsageQueryParams, userPathExpr
 	if params.SessionID != "" {
 		conditions = append(conditions, "session_id = ?")
 		args = append(args, params.SessionID)
+	}
+	if params.AuthKeyID != "" {
+		conditions = append(conditions, "auth_key_id = ?")
+		args = append(args, params.AuthKeyID)
 	}
 	if params.Provider != "" {
 		conditions = append(conditions, "(provider = ? OR provider_name = ?)")

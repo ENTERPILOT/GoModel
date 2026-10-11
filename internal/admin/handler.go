@@ -500,6 +500,7 @@ func parseUsageParams(c *echo.Context) (usage.UsageQueryParams, error) {
 	params.Provider = strings.TrimSpace(c.QueryParam("provider"))
 	params.Label = strings.TrimSpace(c.QueryParam("label"))
 	params.SessionID = strings.TrimSpace(c.QueryParam("session_id"))
+	params.AuthKeyID = strings.TrimSpace(c.QueryParam("auth_key_id"))
 
 	userPath, err := scopedUserPath(c, "user_path", c.QueryParam("user_path"))
 	if err != nil {
