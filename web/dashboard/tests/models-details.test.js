@@ -71,7 +71,7 @@ test("buildModelDetails lists every section in display order", () => {
     input_per_mtok: "config.yaml",
   });
   assert.equal(details.has_metadata, true);
-  assert.deepEqual(sectionKeys(details), ["listing", "properties", "capabilities", "rankings", "pricing"]);
+  assert.deepEqual(sectionKeys(details), ["listing", "properties", "input", "capabilities", "rankings", "pricing"]);
 });
 
 test("provider listing shows the id, owner and created date", () => {
@@ -110,11 +110,21 @@ test("properties format lists and token counts and skip empty fields", () => {
 
 test("capabilities are sorted chips carrying their enabled flag", () => {
   const details = buildModelDetails(modelRow(), {}, {});
-  assert.deepEqual(section(details, "capabilities").chips, [
-    { label: "audio_input", enabled: false, source: "" },
-    { label: "tools", enabled: true, source: "" },
-    { label: "vision", enabled: true, source: "" },
+  assert.deepEqual(section(details, "capabilities").chips, [{ label: "tools", enabled: true, source: "" }]);
+});
+
+test("the effective view lists every input type, unknown when no layer reports it", () => {
+  const details = buildModelDetails(modelRow(), {}, {});
+  assert.deepEqual(section(details, "input").chips, [
+    { label: m.models_input_images(), enabled: true, unknown: false, source: "" },
+    { label: m.models_input_audio(), enabled: false, unknown: false, source: "" },
+    { label: m.models_input_video(), enabled: false, unknown: true, source: "" },
+    { label: m.models_input_pdf(), enabled: false, unknown: true, source: "" },
   ]);
+
+  const bare = buildModelDetails(modelRow({ model: { id: "local-llm" } }), {}, {});
+  assert.deepEqual(sectionKeys(bare), ["listing", "input"]);
+  assert.ok(section(bare, "input").chips.every((chip) => chip.unknown));
 });
 
 test("rankings join elo, rank and date", () => {
@@ -168,7 +178,7 @@ test("pricing hints at time-of-day windows for a field", () => {
 test("a model without metadata only lists what the provider reported", () => {
   const details = buildModelDetails(modelRow({ model: { id: "local-llm", owned_by: "library" } }), {}, {});
   assert.equal(details.has_metadata, false);
-  assert.deepEqual(sectionKeys(details), ["listing"]);
+  assert.deepEqual(sectionKeys(details), ["listing", "input"]);
 });
 
 // ---- Metadata layers and views ----
@@ -193,7 +203,7 @@ function layersFixture(overrides = {}) {
   };
 }
 
-test("metadataViewOptions offers config only when an override exists", () => {
+test("metadataViewOptions offers the override views only when they exist", () => {
   assert.deepEqual(
     metadataViewOptions(layersFixture()).map((option) => option.value),
     ["effective", "provider", "catalog"],
@@ -201,6 +211,10 @@ test("metadataViewOptions offers config only when an override exists", () => {
   assert.deepEqual(
     metadataViewOptions(layersFixture({ config: { display_name: "x" } })).map((option) => option.value),
     ["effective", "provider", "catalog", "config"],
+  );
+  assert.deepEqual(
+    metadataViewOptions(layersFixture({ dashboard: { context_window: 1 } })).map((option) => option.value),
+    ["effective", "provider", "catalog", "dashboard"],
   );
   assert.deepEqual(metadataViewOptions(null), []);
 });
@@ -223,6 +237,7 @@ test("metadataSourceLabel names every layer and ignores unknown ones", () => {
   assert.equal(metadataSourceLabel("provider"), m.models_details_source_provider());
   assert.equal(metadataSourceLabel("catalog"), m.models_details_source_catalog());
   assert.equal(metadataSourceLabel("config"), m.models_details_source_config());
+  assert.equal(metadataSourceLabel("dashboard"), m.models_details_source_dashboard());
   assert.equal(metadataSourceLabel("inferred"), m.models_details_source_inferred());
   assert.equal(metadataSourceLabel(""), "");
   assert.equal(metadataSourceLabel("bogus"), "");
@@ -238,8 +253,9 @@ test("the effective view labels each field with its source layer", () => {
   assert.equal(byLabel[m.models_details_tags()], "");
   assert.deepEqual(
     section(details, "capabilities").chips.map((chip) => chip.source),
-    ["", m.models_details_source_provider(), m.models_details_source_catalog()],
+    [m.models_details_source_provider()],
   );
+  assert.equal(section(details, "input").chips[0].source, m.models_details_source_catalog());
   assert.equal(section(details, "rankings").items[0].source, m.models_details_source_catalog());
 });
 
@@ -256,6 +272,7 @@ test("layer views render only that layer, with its own pricing", () => {
   assert.equal(provider.view, "provider");
   assert.equal(provider.has_metadata, true);
   assert.deepEqual(sectionKeys(provider), ["listing", "properties", "capabilities"]);
+  assert.equal(section(provider, "input"), undefined);
   assert.equal(
     itemValue(provider, "properties", m.models_details_context_window()),
     m.models_details_tokens({ value: formatNumber(4096) }),

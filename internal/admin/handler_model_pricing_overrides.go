@@ -69,7 +69,7 @@ func (h *Handler) UpsertModelPricingOverride(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	selector, err := normalizeModelPricingOverrideSelector(req.Selector)
+	selector, err := normalizeModelOverrideSelector("model pricing override", req.Selector)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -115,7 +115,7 @@ func (h *Handler) DeleteModelPricingOverride(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	selector, err := normalizeModelPricingOverrideSelector(req.Selector)
+	selector, err := normalizeModelOverrideSelector("model pricing override", req.Selector)
 	if err != nil {
 		return handleError(c, err)
 	}
