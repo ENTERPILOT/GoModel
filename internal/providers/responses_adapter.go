@@ -33,13 +33,14 @@ func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatReques
 	tools := normalizeResponsesToolsForChat(req.Tools)
 	toolChoice := normalizeResponsesToolChoiceForChat(req.ToolChoice)
 	parallelToolCalls := req.ParallelToolCalls
-	if len(req.Tools) > 0 {
-		if len(tools) == 0 {
-			toolChoice = nil
-			parallelToolCalls = nil
-		} else {
-			toolChoice = dropUnavailableResponsesToolChoice(toolChoice, tools)
-		}
+	// Chat Completions providers reject tool_choice and parallel_tool_calls
+	// without tools, so drop them whenever no translatable tool remains,
+	// including when the caller sent none at all.
+	if len(tools) == 0 {
+		toolChoice = nil
+		parallelToolCalls = nil
+	} else {
+		toolChoice = dropUnavailableResponsesToolChoice(toolChoice, tools)
 	}
 
 	chatReq := &core.ChatRequest{

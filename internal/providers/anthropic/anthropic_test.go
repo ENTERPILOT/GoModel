@@ -3569,18 +3569,15 @@ func TestConvertResponsesRequestToAnthropic_RejectsTrailingToolArgumentContent(t
 	require.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
 }
 
-func TestConvertResponsesRequestToAnthropic_ToolChoiceRequiresTools(t *testing.T) {
-	_, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
+func TestConvertResponsesRequestToAnthropic_DropsToolChoiceWithoutTools(t *testing.T) {
+	anthropicReq, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
 		Model:      "claude-sonnet-4-5-20250929",
 		Input:      "Hello",
 		ToolChoice: "auto",
 	})
-	require.Error(t, err)
-
-	var gatewayErr *core.GatewayError
-	require.ErrorAs(t, err, &gatewayErr)
-	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
-	require.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
+	require.NoError(t, err)
+	assert.Nil(t, anthropicReq.Tools)
+	assert.Nil(t, anthropicReq.ToolChoice)
 }
 
 func TestBuildAnthropicBatchCreateRequest_PreservesGatewayErrorDetails(t *testing.T) {
