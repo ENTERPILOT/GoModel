@@ -223,6 +223,82 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --verify-tag
 
+  discord-notify:
+    name: Announce release on Discord
+    runs-on: ubuntu-latest
+    needs: github-release
+    # Best-effort: a Discord outage must not fail the release.
+    continue-on-error: true
+    steps:
+      - name: Post release embed to Discord
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          # Webhook secret optional: forks without it simply skip the announce.
+          if [[ -z "$DISCORD_WEBHOOK_URL" ]]; then
+            echo "DISCORD_WEBHOOK_URL not set, skipping Discord announcement"
+            exit 0
+          fi
+
+          release_json="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json tagName,name,body,url)"
+          release_url="$(jq -r '.url' <<< "$release_json")"
+
+          # Discord embed descriptions cap at 4096 characters — jq counts
+          # characters, not bytes, so multibyte notes stay within the limit.
+          body="$(jq -r '(.body // "") | if length > 4000 then .[0:3997] + "..." else . end' <<< "$release_json")"
+
+          # Discord embed titles cap at 256 characters — a release with a
+          # long name must not lose the whole announce to an HTTP 400.
+          title="$(jq -r '(.name // .tagName) | if length > 256 then .[0:253] + "..." else . end' <<< "$release_json")"
+
+          jq -n \
+            --arg title "$title" \
+            --arg url "$release_url" \
+            --arg description "$body" \
+            '{
+              embeds: [{
+                title: $title,
+                url: $url,
+                description: $description,
+                color: 5814783,
+                footer: { text: "GitHub Release" }
+              }]
+            }' > discord-payload.json
+
+          # Retry only on DNS/connect failures (curl exit 6/7), where the
+          # POST never happened. A --max-time timeout (exit 28) is not
+          # retried: --connect-timeout bounds the connect phase, so 28 means
+          # the request was already sent and retrying would risk a duplicate
+          # announce. Any HTTP response is final for the same reason.
+          # wait=true: Discord answers 200 with the saved message instead of
+          # queueing blindly (204), so curl success confirms the announce.
+          # The webhook URL may already carry query params (e.g. thread_id),
+          # so append wait=true with the right separator.
+          separator='?'
+          if [[ "$DISCORD_WEBHOOK_URL" == *\?* ]]; then
+            separator='&'
+          fi
+
+          rc=0
+          for attempt in 1 2 3; do
+            if curl -fsS --connect-timeout 10 --max-time 20 \
+                -H "Content-Type: application/json" \
+                -d @discord-payload.json \
+                "${DISCORD_WEBHOOK_URL}${separator}wait=true"; then
+              rc=0
+              break
+            else
+              rc=$?
+            fi
+            case $rc in
+              6|7) sleep 5 ;;
+              *) break ;;
+            esac
+          done
+          exit "$rc"
+
   deploy-demo:
     name: Update demo.enterpilot.io
     runs-on: ubuntu-latest
