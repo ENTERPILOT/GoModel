@@ -40,18 +40,12 @@ type usageBatchExecutor interface {
 
 // PostgreSQLStore implements UsageStore for PostgreSQL databases.
 type PostgreSQLStore struct {
-	pool             *pgxpool.Pool
-	retentionDays    int
-	stopCleanup      chan struct{}
-	closeOnce        sync.Once
-	cancelIndexBuild context.CancelFunc
-	indexBuild       sync.WaitGroup
+	pool           *pgxpool.Pool
+	retentionDays  int
+	stopCleanup    chan struct{}
+	closeOnce      sync.Once
+	stopIndexBuild func()
 }
-
-// authKeyIndex serves the auth_key_id filter. It is added to tables that
-// already hold usage history, so it is built CONCURRENTLY off the startup
-// path instead of in ensurePostgreSQLSchema.
-const authKeyIndex = "idx_usage_auth_key_id"
 
 // NewPostgreSQLStore creates a new PostgreSQL usage store.
 // It creates the usage table if it doesn't exist and starts
@@ -69,11 +63,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 		retentionDays: retentionDays,
 		stopCleanup:   make(chan struct{}),
 	}
-	buildCtx, cancel := context.WithCancel(context.Background())
-	store.cancelIndexBuild = cancel
-	store.indexBuild.Go(func() {
-		ensureAuthKeyIndex(buildCtx, pool)
-	})
+	store.stopIndexBuild = startAuthKeyIndexBuild(pool)
 
 	// Start background cleanup if retention is configured
 	if retentionDays > 0 {
@@ -156,33 +146,6 @@ func ensurePostgreSQLSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		}
 	}
 	return nil
-}
-
-// ensureAuthKeyIndex builds authKeyIndex CONCURRENTLY so a large existing
-// usage table keeps accepting writes while it builds. A build interrupted
-// midway leaves an invalid index, which is dropped and rebuilt; the drop is
-// CONCURRENTLY too, so it never queues an exclusive lock in front of inserts.
-func ensureAuthKeyIndex(ctx context.Context, pool *pgxpool.Pool) {
-	var valid *bool
-	err := pool.QueryRow(ctx, `SELECT i.indisvalid FROM pg_index i WHERE i.indexrelid = to_regclass($1)`, authKeyIndex).Scan(&valid)
-	if err == nil && valid != nil {
-		if *valid {
-			return
-		}
-		slog.Warn("usage: rebuilding interrupted auth key index")
-		if _, err := pool.Exec(ctx, "DROP INDEX CONCURRENTLY IF EXISTS "+authKeyIndex); err != nil {
-			slog.Warn("usage: failed to drop invalid auth key index", "error", err)
-			return
-		}
-	}
-	started := time.Now()
-	if _, err := pool.Exec(ctx, "CREATE INDEX CONCURRENTLY IF NOT EXISTS "+authKeyIndex+" ON usage(auth_key_id)"); err != nil {
-		if ctx.Err() == nil {
-			slog.Warn("usage: failed to create auth key index", "error", err)
-		}
-		return
-	}
-	slog.Info("usage: auth key index ready", "duration", time.Since(started).Round(time.Millisecond))
 }
 
 // WriteBatch writes multiple usage entries to PostgreSQL using batch insert.
@@ -306,9 +269,8 @@ func (s *PostgreSQLStore) Flush(_ context.Context) error {
 // Note: We don't close the pool here as it's managed by the storage layer.
 // Safe to call multiple times.
 func (s *PostgreSQLStore) Close() error {
-	if s.cancelIndexBuild != nil {
-		s.cancelIndexBuild()
-		s.indexBuild.Wait()
+	if s.stopIndexBuild != nil {
+		s.stopIndexBuild()
 	}
 	if s.retentionDays > 0 && s.stopCleanup != nil {
 		s.closeOnce.Do(func() {
