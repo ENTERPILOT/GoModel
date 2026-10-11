@@ -38,6 +38,10 @@ const ScopeHeader = "X-MCP-Servers"
 // strips any client-sent value before stamping its own.
 const labelsHeader = "X-Gomodel-Mcp-Labels"
 
+// authKeyIDHeader carries the managed auth key id into tool handlers so MCP
+// usage rows can be attributed per key. Internal like labelsHeader.
+const authKeyIDHeader = "X-Gomodel-Mcp-Auth-Key-Id"
+
 // pinnedServerKey carries the /mcp/{server} path pin through the request
 // context into per-session server construction.
 type pinnedServerKey struct{}
@@ -501,6 +505,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 	r.Header.Del(labelsHeader)
 	if labels := core.RequestLabelsFromContext(r.Context()); len(labels) > 0 {
 		r.Header.Set(labelsHeader, strings.Join(labels, ","))
+	}
+	r.Header.Del(authKeyIDHeader)
+	if authKeyID != "" {
+		r.Header.Set(authKeyIDHeader, authKeyID)
 	}
 
 	ctx := r.Context()

@@ -1,4 +1,4 @@
-// Usage page state: page-level facet filters, filtered summaries backing the
+// Usage page state: page-level facet filters (including the API key), filtered summaries backing the
 // stat cards, per-model / per-user-path / per-label / per-session breakdowns, and the
 // request log. The shared window comes from the dateRange store and the
 // shared cache overview lives in usageData (this page passes its filter
@@ -13,6 +13,8 @@ import { providerDisplayValue } from "$lib/utils/format.js";
 import * as m from "$lib/paraglide/messages.js";
 import { liveLogs } from "../audit-logs/liveLogs.svelte.js";
 import {
+  authKeyNameMap,
+  authKeyOptionList,
   emptyUsageLog,
   emptyUsagePageSummary,
   emptySessionUsage,
@@ -59,7 +61,16 @@ class UsagePageState {
   set usageFilterSession(value) {
     liveLogs.usageFilterSession = value;
   }
+  get usageFilterAuthKey() {
+    return liveLogs.usageFilterAuthKey;
+  }
+  set usageFilterAuthKey(value) {
+    liveLogs.usageFilterAuthKey = value;
+  }
   usageFacetOptions = $state({ models: [], providers: [], labels: [] });
+  // Managed auth key names by id, so the API key filter and log column can
+  // show names instead of ids. Empty when auth keys are unavailable.
+  authKeyNames = $state({});
 
   // Filtered summaries backing the stat cards, fetched in both cache modes:
   // uncached carries real provider spend (cached rows store the avoided
@@ -130,6 +141,7 @@ class UsagePageState {
         label: this.usageFilterLabel,
         user_path: this.usageFilterUserPath,
         session_id: this.usageFilterSession,
+        auth_key_id: this.usageFilterAuthKey,
       },
       excludeFacet,
     );
@@ -146,10 +158,18 @@ class UsagePageState {
     this.onUsageFilterChanged();
   }
 
+  // Chip click: filter the whole page by the API key, or clear the filter
+  // when the chip's key is already active.
+  toggleUsageAuthKeyFilter(authKeyID) {
+    this.usageFilterAuthKey = this.usageFilterAuthKey === authKeyID ? "" : authKeyID;
+    this.onUsageFilterChanged();
+  }
+
   filterBySession(sessionID, userPath = "") {
     this.usageFilterModel = "";
     this.usageFilterProvider = "";
     this.usageFilterLabel = "";
+    this.usageFilterAuthKey = "";
     this.usageFilterUserPath = String(userPath || "").trim();
     this.usageFilterSession = String(sessionID || "").trim();
     this.usageLogSearch = "";
@@ -189,6 +209,30 @@ class UsagePageState {
 
   usageFilterLabelOptions() {
     return facetOptionList(this.usageFacetOptions.labels, this.usageFilterLabel);
+  }
+
+  usageFilterAuthKeyOptions() {
+    return authKeyOptionList(this.authKeyNames, this.usageFilterAuthKey);
+  }
+
+  // Key names change rarely, so they load when the page opens rather than on
+  // every filter change. The list is already scoped to the caller.
+  async fetchAuthKeyNames() {
+    const controller = this.#startRequest("authKeys");
+    try {
+      const result = await getJSON("/admin/auth-keys", {
+        label: "usage auth key names",
+        signal: controller.signal,
+      });
+      if (result.stale || controller.signal.aborted) return;
+      this.authKeyNames = result.ok && Array.isArray(result.data) ? authKeyNameMap(result.data) : {};
+    } catch (e) {
+      if (isAbortError(e)) return;
+      console.error("Failed to fetch auth key names:", e);
+      this.authKeyNames = {};
+    } finally {
+      this.#clearRequest("authKeys", controller);
+    }
   }
 
   // Refetch everything the page shows for the current window + filters.

@@ -78,6 +78,7 @@ class LiveLogsStore {
   usageFilterLabel = $state("");
   usageFilterUserPath = $state("");
   usageFilterSession = $state("");
+  usageFilterAuthKey = $state("");
   usageLogHideCached = $state(false);
 
   // True while the stream body is being consumed; drives the audit page's

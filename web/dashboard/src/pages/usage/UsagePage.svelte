@@ -22,6 +22,7 @@
     void auth.refreshTick;
     if (router.page === PAGE) {
       usagePage.fetchUsagePage();
+      usagePage.fetchAuthKeyNames();
       liveLogs.ensureLiveLogs();
     }
   });

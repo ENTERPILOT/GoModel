@@ -962,6 +962,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by tracked user path subtree",
                         "name": "user_path",
                         "in": "query"
@@ -2353,6 +2359,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by tracked user path subtree",
                         "name": "user_path",
                         "in": "query"
@@ -2451,6 +2463,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -2568,6 +2586,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Search across model, provider, request_id, provider_id, session_id",
                         "name": "search",
                         "in": "query"
@@ -2668,6 +2692,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -2842,6 +2872,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by tracked user path subtree",
                         "name": "user_path",
                         "in": "query"
@@ -2942,6 +2978,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -3092,6 +3134,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -12510,6 +12558,9 @@ const docTemplate = `{
         "usage.UsageLogEntry": {
             "type": "object",
             "properties": {
+                "auth_key_id": {
+                    "type": "string"
+                },
                 "cache_type": {
                     "type": "string"
                 },

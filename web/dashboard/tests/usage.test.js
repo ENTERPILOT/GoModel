@@ -6,6 +6,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  authKeyDisplayName,
+  authKeyNameMap,
+  authKeyOptionList,
   cachedCostTitle,
   chartWrapHeight,
   costSourceTooltip,
@@ -30,6 +33,7 @@ import {
   usageEntryCached,
   usageEntryCacheLabel,
   usageFilterQueryStr,
+  usageLogHasAuthKeys,
   usageLogHasLabels,
   usageLogQueryParams,
   usagePageCostTitle,
@@ -130,8 +134,12 @@ test("usageFilterQueryStr includes every active filter, URL-encoded", () => {
     label: "env:prod",
     user_path: "/team",
     session_id: "session/a",
+    auth_key_id: "key-a",
   });
-  assert.equal(qs, "&model=gpt-5&provider=openai&label=env%3Aprod&user_path=%2Fteam&session_id=session%2Fa");
+  assert.equal(
+    qs,
+    "&model=gpt-5&provider=openai&label=env%3Aprod&user_path=%2Fteam&session_id=session%2Fa&auth_key_id=key-a",
+  );
 });
 
 test("usageFilterQueryStr skips empty filters", () => {
@@ -167,6 +175,45 @@ test("usageFilterQueryStr honors every filter except the excluded facet", () => 
   assert.match(withoutSession, /provider=openai/);
   assert.match(withoutSession, /label=env%3Aprod/);
   assert.match(withoutSession, /user_path=%2Fteam/);
+});
+
+// --- API key filter and column ---
+
+test("authKeyNameMap maps ids to names, falling back to the id", () => {
+  assert.deepEqual(
+    authKeyNameMap([{ id: "k1", name: "CI" }, { id: "k2", name: " " }, { name: "no id" }, null]),
+    { k1: "CI", k2: "k2" },
+  );
+  assert.deepEqual(authKeyNameMap(null), {});
+});
+
+test("authKeyDisplayName prefers the key name, then a short id", () => {
+  const names = { k1: "CI" };
+  assert.equal(authKeyDisplayName("k1", names), "CI");
+  assert.equal(
+    authKeyDisplayName("0f8b2c1e-5d4a-4b7e-9c3f-8a6d2e1b7c90", names),
+    shortSessionID("0f8b2c1e-5d4a-4b7e-9c3f-8a6d2e1b7c90"),
+  );
+  assert.equal(authKeyDisplayName("", names), "-");
+});
+
+test("authKeyOptionList sorts by name and keeps an unknown active key", () => {
+  const names = { k2: "Zeta", k1: "Alpha" };
+  assert.deepEqual(authKeyOptionList(names, ""), [
+    { id: "k1", name: "Alpha" },
+    { id: "k2", name: "Zeta" },
+  ]);
+  assert.deepEqual(
+    authKeyOptionList(names, "gone").map((option) => option.id),
+    ["k1", "gone", "k2"],
+  );
+  assert.deepEqual(authKeyOptionList({}, ""), []);
+});
+
+test("usageLogHasAuthKeys shows the column for keyed entries or an active filter", () => {
+  assert.equal(usageLogHasAuthKeys("", [{ id: "u1" }]), false);
+  assert.equal(usageLogHasAuthKeys("", [{ id: "u1", auth_key_id: "k1" }]), true);
+  assert.equal(usageLogHasAuthKeys("k1", []), true);
 });
 
 test("usageLogQueryParams includes cache_mode=all by default so cached records are returned", () => {
