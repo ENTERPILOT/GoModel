@@ -92,6 +92,7 @@ func TestMongoUsageMatchFiltersDataFilters(t *testing.T) {
 		Model:     "gpt-5",
 		Provider:  "openai",
 		Label:     "team-alpha",
+		AuthKeyID: "key-a",
 	})
 	require.NoError(t, err)
 
@@ -100,6 +101,7 @@ func TestMongoUsageMatchFiltersDataFilters(t *testing.T) {
 	want := bson.D{{Key: "$and", Value: bson.A{
 		bson.D{
 			{Key: "model", Value: "gpt-5"},
+			{Key: "auth_key_id", Value: "key-a"},
 			{Key: "labels", Value: "team-alpha"},
 		},
 		bson.D{{Key: "$or", Value: bson.A{

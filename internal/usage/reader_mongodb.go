@@ -27,6 +27,7 @@ type mongoUsageLogRow struct {
 	Endpoint               string         `bson:"endpoint"`
 	UserPath               string         `bson:"user_path"`
 	SessionID              string         `bson:"session_id"`
+	AuthKeyID              string         `bson:"auth_key_id"`
 	CacheType              string         `bson:"cache_type"`
 	Labels                 []string       `bson:"labels"`
 	InputTokens            int            `bson:"input_tokens"`
@@ -73,6 +74,7 @@ func (row mongoUsageLogRow) toUsageLogEntry() UsageLogEntry {
 		Endpoint:               row.Endpoint,
 		UserPath:               row.UserPath,
 		SessionID:              row.SessionID,
+		AuthKeyID:              row.AuthKeyID,
 		CacheType:              normalizeCacheType(row.CacheType),
 		Labels:                 row.Labels,
 		InputTokens:            row.InputTokens,
@@ -1214,6 +1216,9 @@ func mongoUsageMatchFilters(params UsageQueryParams) (bson.D, error) {
 	}
 	if params.SessionID != "" {
 		matchFilters = append(matchFilters, bson.E{Key: "session_id", Value: params.SessionID})
+	}
+	if params.AuthKeyID != "" {
+		matchFilters = append(matchFilters, bson.E{Key: "auth_key_id", Value: params.AuthKeyID})
 	}
 	if params.Label != "" {
 		// Matching a scalar against an array field matches documents whose

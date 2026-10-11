@@ -1306,6 +1306,14 @@
             }
           },
           {
+            "description": "Filter by exact managed auth key ID",
+            "name": "auth_key_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Filter by tracked user path subtree",
             "name": "user_path",
             "in": "query",
@@ -3244,6 +3252,14 @@
             }
           },
           {
+            "description": "Filter by exact managed auth key ID",
+            "name": "auth_key_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Filter by tracked user path subtree",
             "name": "user_path",
             "in": "query",
@@ -3378,6 +3394,14 @@
           {
             "description": "Filter by exact detected session ID",
             "name": "session_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by exact managed auth key ID",
+            "name": "auth_key_id",
             "in": "query",
             "schema": {
               "type": "string"
@@ -3539,6 +3563,14 @@
             }
           },
           {
+            "description": "Filter by exact managed auth key ID",
+            "name": "auth_key_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Search across model, provider, request_id, provider_id, session_id",
             "name": "search",
             "in": "query",
@@ -3677,6 +3709,14 @@
           {
             "description": "Filter by exact detected session ID",
             "name": "session_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by exact managed auth key ID",
+            "name": "auth_key_id",
             "in": "query",
             "schema": {
               "type": "string"
@@ -3916,6 +3956,14 @@
             }
           },
           {
+            "description": "Filter by exact managed auth key ID",
+            "name": "auth_key_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Filter by tracked user path subtree",
             "name": "user_path",
             "in": "query",
@@ -4054,6 +4102,14 @@
           {
             "description": "Filter by exact detected session ID",
             "name": "session_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by exact managed auth key ID",
+            "name": "auth_key_id",
             "in": "query",
             "schema": {
               "type": "string"
@@ -4264,6 +4320,14 @@
           {
             "description": "Filter by exact detected session ID",
             "name": "session_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by exact managed auth key ID",
+            "name": "auth_key_id",
             "in": "query",
             "schema": {
               "type": "string"
@@ -16452,6 +16516,9 @@
       "usage.UsageLogEntry": {
         "type": "object",
         "properties": {
+          "auth_key_id": {
+            "type": "string"
+          },
           "cache_type": {
             "type": "string"
           },

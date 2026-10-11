@@ -706,12 +706,13 @@ func TestUsageLog_WithFilters(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := echotest.Get(t, "/admin/usage/log?model=gpt-4&provider=openai&user_path=/team&label=team-alpha&session_id=scoped-session&search=test&limit=10&offset=5")
+	c, rec := echotest.Get(t, "/admin/usage/log?model=gpt-4&provider=openai&user_path=/team&label=team-alpha&session_id=scoped-session&auth_key_id=key-a&search=test&limit=10&offset=5")
 	require.NoError(t, h.UsageLog(c))
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "/team", reader.lastUsageLog.UserPath)
 	assert.Equal(t, "team-alpha", reader.lastUsageLog.Label)
 	assert.Equal(t, "scoped-session", reader.lastUsageLog.SessionID)
+	assert.Equal(t, "key-a", reader.lastUsageLog.AuthKeyID)
 }
 
 func TestUsageBySession_Success(t *testing.T) {

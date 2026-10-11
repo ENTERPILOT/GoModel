@@ -184,6 +184,7 @@ sqlite3 "$db_path" "ALTER TABLE usage ADD COLUMN labels JSON;" 2>/dev/null || tr
 sqlite3 "$db_path" "ALTER TABLE usage ADD COLUMN rewrite_tokens_saved INTEGER NOT NULL DEFAULT 0;" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE usage ADD COLUMN rewrite_cost_saved REAL;" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE usage ADD COLUMN session_id TEXT;" 2>/dev/null || true
+sqlite3 "$db_path" "ALTER TABLE usage ADD COLUMN auth_key_id TEXT;" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE mcp_servers ADD COLUMN display_name TEXT NOT NULL DEFAULT '';" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE auth_keys ADD COLUMN user_path TEXT;" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE auth_keys ADD COLUMN labels JSON;" 2>/dev/null || true
@@ -281,6 +282,7 @@ CREATE TABLE IF NOT EXISTS usage (
   endpoint TEXT NOT NULL,
   user_path TEXT,
   session_id TEXT,
+  auth_key_id TEXT,
   cache_type TEXT,
   labels JSON,
   input_tokens INTEGER NOT NULL DEFAULT 0,
@@ -894,7 +896,7 @@ INSERT INTO usage (
   id, request_id, provider_id, timestamp, model, provider, provider_name,
   endpoint, user_path, session_id, cache_type, labels, input_tokens, output_tokens, total_tokens,
   rewrite_tokens_saved, rewrite_cost_saved, raw_data,
-  input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat
+  input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat, auth_key_id
 )
 SELECT
   usage_id,
@@ -982,7 +984,14 @@ SELECT
     WHEN prompt_cache_hit = 1 THEN 'demo_prompt_cache'
     ELSE 'demo_model_pricing'
   END AS cost_source,
-  ''
+  '',
+  -- Same key attribution as the audit rows below.
+  CASE
+    WHEN user_path GLOB '/agents/team1*' THEN '${prefix}-key-team1'
+    WHEN user_path GLOB '/engineering/ai*' THEN '${prefix}-key-engineering'
+    WHEN user_path GLOB '/sales/john*' AND provider = 'openai' THEN '${prefix}-key-sales'
+    ELSE NULL
+  END
 -- Requests stopped by a budget or a prompt guardrail never reach a provider,
 -- so they are audited without a usage row.
 FROM demo_generated

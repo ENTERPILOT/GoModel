@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	usageInsertColumnCount     = 23
+	usageInsertColumnCount     = 24
 	postgresMaxBindParameters  = 65535
 	usageInsertMaxRowsPerQuery = postgresMaxBindParameters / usageInsertColumnCount
 )
@@ -27,7 +27,7 @@ const usageInsertPrefix = `
 		INSERT INTO usage (id, request_id, provider_id, timestamp, model, provider, provider_name,
 			endpoint, user_path, session_id, cache_type, labels, input_tokens, output_tokens, total_tokens,
 			rewrite_tokens_saved, rewrite_cost_saved, raw_data,
-			input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat)
+			input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat, auth_key_id)
 		VALUES `
 
 const usageInsertSuffix = `
@@ -75,6 +75,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 			endpoint TEXT NOT NULL,
 			user_path TEXT,
 			session_id TEXT,
+			auth_key_id TEXT,
 			cache_type TEXT,
 			input_tokens INTEGER NOT NULL DEFAULT 0,
 			output_tokens INTEGER NOT NULL DEFAULT 0,
@@ -99,6 +100,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS labels JSONB",
 		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS rewrite_tokens_saved INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS rewrite_cost_saved DOUBLE PRECISION",
+		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS auth_key_id TEXT",
 	}
 	if err := schema.Schema(ctx, append([]string{createTable}, costMigrations...)...); err != nil {
 		return nil, fmt.Errorf("failed to create usage table: %w", err)
@@ -114,6 +116,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 		"CREATE INDEX IF NOT EXISTS idx_usage_provider_name ON usage(provider_name)",
 		"CREATE INDEX IF NOT EXISTS idx_usage_user_path ON usage(user_path)",
 		"CREATE INDEX IF NOT EXISTS idx_usage_session_id ON usage(session_id)",
+		"CREATE INDEX IF NOT EXISTS idx_usage_auth_key_id ON usage(auth_key_id)",
 		"CREATE INDEX IF NOT EXISTS idx_usage_user_path_normalized ON usage(COALESCE(NULLIF(TRIM(user_path), ''), '/'))",
 		"CREATE INDEX IF NOT EXISTS idx_usage_cache_type ON usage(cache_type)",
 		"CREATE INDEX IF NOT EXISTS idx_usage_raw_data_gin ON usage USING GIN (raw_data)",
@@ -242,6 +245,7 @@ func buildUsageInsert(entries []*UsageEntry) (string, []any) {
 			entry.TotalCost,
 			entry.CostSource,
 			entry.CostsCalculationCaveat,
+			entry.AuthKeyID,
 		)
 	}
 
