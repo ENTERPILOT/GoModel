@@ -67,9 +67,12 @@ func tryBuildAuthKeyIndex(ctx context.Context, pool *pgxpool.Pool) bool {
 	}
 	defer func() {
 		// A pooled connection must not keep the session lock; drop it when
-		// the unlock cannot be confirmed.
-		if _, err := conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, authKeyIndexLockKey); err != nil {
-			_ = conn.Conn().Close(context.Background())
+		// the unlock cannot be confirmed. Bounded so a broken connection
+		// cannot stall shutdown, which waits for this goroutine.
+		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := conn.Exec(unlockCtx, `SELECT pg_advisory_unlock($1)`, authKeyIndexLockKey); err != nil {
+			_ = conn.Conn().Close(unlockCtx)
 		}
 	}()
 
