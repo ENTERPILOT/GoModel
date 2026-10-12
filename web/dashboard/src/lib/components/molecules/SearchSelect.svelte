@@ -409,7 +409,6 @@
   /* Multi-select triggers grow with the selection so every value stays
      readable instead of clipping to one line. */
   .search-select-trigger-multiple {
-    align-items: flex-start;
     height: auto;
   }
 

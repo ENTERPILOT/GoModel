@@ -115,8 +115,10 @@
     margin-bottom: 20px;
   }
 
+  /* White like the endpoint picker beside them, not the page background. */
   .usage-page-filters :global(.usage-log-select) {
     flex: 0 1 auto;
+    background-color: var(--bg-surface);
   }
 
   /* The modifier class rides on FilterInput's own wrapper, so it has to be
