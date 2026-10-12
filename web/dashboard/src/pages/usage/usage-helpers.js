@@ -503,6 +503,18 @@ export function usageEndpointOptions(rows) {
     .map(([endpoint, type]) => ({ value: endpoint, label: endpoint, description: usageTypeLabel(type) }));
 }
 
+// endpointOptionsWithSelection keeps every selected endpoint listed, even one
+// without traffic under the other filters, so the dropdown can still uncheck
+// it — the endpoint counterpart of facetOptionList.
+export function endpointOptionsWithSelection(options, selected) {
+  const list = Array.isArray(options) ? options : [];
+  const listed = new Set(list.map((option) => option.value));
+  const missing = (selected || [])
+    .filter((endpoint) => endpoint && !listed.has(endpoint))
+    .map((endpoint) => ({ value: endpoint, label: endpoint }));
+  return list.concat(missing);
+}
+
 // toggleEndpointSelection adds the endpoints to the selection, or removes
 // them when every one is already selected — one chip click toggles a whole
 // request type.

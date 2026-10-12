@@ -15,6 +15,7 @@ import {
   divergingDataFrom,
   emptySessionUsage,
   endpointListSummary,
+  endpointOptionsWithSelection,
   endpointsSelected,
   endpointUsageRows,
   foldEndpointUsageByType,
@@ -217,6 +218,18 @@ test("usageEndpointOptions orders endpoints by request type and describes each",
   );
   assert.equal(options[0].label, "/v1/chat/completions");
   assert.deepEqual(usageEndpointOptions(undefined), []);
+});
+
+test("endpointOptionsWithSelection keeps selected endpoints without traffic listed", () => {
+  const options = [{ value: "/v1/messages", label: "/v1/messages", description: "Chat" }];
+  assert.deepEqual(endpointOptionsWithSelection(options, ["/v1/messages", "/v1/embeddings"]), [
+    { value: "/v1/messages", label: "/v1/messages", description: "Chat" },
+    { value: "/v1/embeddings", label: "/v1/embeddings" },
+  ]);
+  assert.deepEqual(endpointOptionsWithSelection(options, []), options);
+  assert.deepEqual(endpointOptionsWithSelection(undefined, ["/v1/responses"]), [
+    { value: "/v1/responses", label: "/v1/responses" },
+  ]);
 });
 
 test("toggleEndpointSelection adds missing endpoints and removes a fully selected group", () => {

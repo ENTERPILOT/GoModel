@@ -20,6 +20,7 @@ import {
   emptyUsagePageSummary,
   emptySessionUsage,
   facetOptionList,
+  endpointOptionsWithSelection,
   endpointsSelected,
   endpointUsageRows,
   foldEndpointUsageByType,
@@ -257,7 +258,7 @@ class UsagePageState {
   }
 
   usageFilterEndpointOptions() {
-    return this.usageFacetOptions.endpoints;
+    return endpointOptionsWithSelection(this.usageFacetOptions.endpoints, this.usageFilterEndpoints);
   }
 
   // Key names change rarely, so they load when the page opens rather than on

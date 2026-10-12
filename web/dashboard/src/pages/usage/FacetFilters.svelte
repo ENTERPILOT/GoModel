@@ -56,7 +56,7 @@
       {/each}
     </select>
   {/if}
-  {#if usagePage.usageFilterEndpointOptions().length > 0 || usagePage.usageFilterEndpoints.length > 0}
+  {#if usagePage.usageFilterEndpointOptions().length > 0}
     <SearchSelect
       class="usage-page-filters-endpoints"
       options={usagePage.usageFilterEndpointOptions()}
