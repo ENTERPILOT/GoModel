@@ -131,7 +131,7 @@ func (r *SQLiteReader) usageCacheStats(ctx context.Context, params UsageQueryPar
 	conditions = append(conditions, extraConditions...)
 	where := sqlutil.BuildWhereClause(conditions)
 
-	rows, err := r.db.QueryContext(ctx, `SELECT model, provider, provider_name, user_path, labels, cache_type, input_tokens, output_tokens, raw_data, timestamp FROM usage`+where, args...)
+	rows, err := r.db.QueryContext(ctx, `SELECT model, provider, provider_name, user_path, endpoint, labels, cache_type, input_tokens, output_tokens, raw_data, timestamp FROM usage`+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query usage cache stats: %w", err)
 	}
@@ -225,6 +225,45 @@ func (r *SQLiteReader) GetUsageByLabel(ctx context.Context, params UsageQueryPar
 	return result, nil
 }
 
+// GetUsageByEndpoint returns request, token, and cost totals grouped by
+// request endpoint, each tagged with its operation.
+func (r *SQLiteReader) GetUsageByEndpoint(ctx context.Context, params UsageQueryParams) ([]EndpointUsage, error) {
+	conditions, args, err := sqliteUsageConditions(params)
+	if err != nil {
+		return nil, err
+	}
+	where := sqlutil.BuildWhereClause(conditions)
+
+	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
+	query := `SELECT endpoint, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + costCols + `
+			FROM usage` + where + ` GROUP BY endpoint ORDER BY endpoint`
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query usage by endpoint: %w", err)
+	}
+	defer rows.Close()
+
+	result := make([]EndpointUsage, 0)
+	for rows.Next() {
+		var e EndpointUsage
+		if err := rows.Scan(&e.Endpoint, &e.Requests, &e.InputTokens, &e.OutputTokens, &e.TotalTokens, &e.InputCost, &e.OutputCost, &e.TotalCost); err != nil {
+			return nil, fmt.Errorf("failed to scan usage by endpoint row: %w", err)
+		}
+		result = append(result, e)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating usage by endpoint rows: %w", err)
+	}
+
+	stats, err := r.usageCacheStats(ctx, params, "user_path", nil, endpointGroupKeys)
+	if err != nil {
+		return nil, err
+	}
+	return applyEndpointCacheStats(result, stats), nil
+}
+
 // GetUsageBySession returns request, token, and cost totals grouped by the
 // detected session id and its tracked user path. Legacy rows without a session
 // id are omitted.
@@ -286,9 +325,9 @@ func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (
 	}
 
 	if params.Search != "" {
-		conditions = append(conditions, "(model LIKE ? ESCAPE '\\' OR provider LIKE ? ESCAPE '\\' OR provider_name LIKE ? ESCAPE '\\' OR request_id LIKE ? ESCAPE '\\' OR provider_id LIKE ? ESCAPE '\\' OR session_id LIKE ? ESCAPE '\\')")
+		conditions = append(conditions, "(model LIKE ? ESCAPE '\\' OR provider LIKE ? ESCAPE '\\' OR provider_name LIKE ? ESCAPE '\\' OR endpoint LIKE ? ESCAPE '\\' OR request_id LIKE ? ESCAPE '\\' OR provider_id LIKE ? ESCAPE '\\' OR session_id LIKE ? ESCAPE '\\')")
 		s := "%" + sqlutil.EscapeLikeWildcards(params.Search) + "%"
-		args = append(args, s, s, s, s, s, s)
+		args = append(args, s, s, s, s, s, s, s)
 	}
 
 	where := sqlutil.BuildWhereClause(conditions)
@@ -678,6 +717,17 @@ func sqliteUsageConditionsWithUserPathExpr(params UsageQueryParams, userPathExpr
 	if params.Label != "" {
 		conditions = append(conditions, "(labels IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(usage.labels) WHERE json_each.value = ?))")
 		args = append(args, params.Label)
+	}
+	if len(params.Endpoints) > 0 {
+		conditions = append(conditions, "endpoint IN ("+strings.TrimSuffix(strings.Repeat("?,", len(params.Endpoints)), ",")+")")
+		for _, endpoint := range params.Endpoints {
+			args = append(args, endpoint)
+		}
+	}
+	if len(params.Operations) > 0 {
+		condition, opArgs := sqliteOperationCondition(params.Operations)
+		conditions = append(conditions, condition)
+		args = append(args, opArgs...)
 	}
 	if condition := sqliteCacheModeCondition(params.CacheMode); condition != "" {
 		conditions = append(conditions, condition)

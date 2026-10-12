@@ -7,6 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
+
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 func TestMongoSessionUsagePipelinesArePagedAndExcludeCachedCost(t *testing.T) {
@@ -66,6 +68,7 @@ func TestMongoUsageLogMatchFiltersAndSearchWithCacheMode(t *testing.T) {
 			bson.D{{Key: "model", Value: regex}},
 			bson.D{{Key: "provider", Value: regex}},
 			bson.D{{Key: "provider_name", Value: regex}},
+			bson.D{{Key: "endpoint", Value: regex}},
 			bson.D{{Key: "request_id", Value: regex}},
 			bson.D{{Key: "provider_id", Value: regex}},
 			bson.D{{Key: "session_id", Value: regex}},
@@ -113,6 +116,29 @@ func TestMongoUsageMatchFiltersDataFilters(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
+func TestMongoUsageMatchFiltersEndpointAndOperation(t *testing.T) {
+	got, err := mongoUsageMatchFilters(UsageQueryParams{
+		CacheMode:  CacheModeAll,
+		Endpoints:  []string{"/v1/messages", "/v1/responses"},
+		Operations: []core.Operation{core.OperationChatCompletions, core.OperationMCP},
+	})
+	require.NoError(t, err)
+
+	want := bson.D{{Key: "$and", Value: bson.A{
+		bson.D{{Key: "endpoint", Value: bson.D{{Key: "$in", Value: []string{"/v1/messages", "/v1/responses"}}}}},
+		bson.D{{Key: "$or", Value: bson.A{
+			bson.D{{Key: "endpoint", Value: bson.D{{Key: "$in", Value: []string{
+				"/v1/chat/completions", "/v1/chat/completions/",
+				"/v1/messages", "/v1/messages/",
+				"/v1/messages/count_tokens", "/v1/messages/count_tokens/",
+				"/mcp",
+			}}}}},
+			bson.D{{Key: "endpoint", Value: bson.D{{Key: "$regex", Value: "^/mcp/"}}}},
+		}}},
+	}}}
+	require.Equal(t, want, got)
+}
+
 func TestMongoUsageLogMatchFiltersEscapesSearchRegex(t *testing.T) {
 	got, err := mongoUsageLogMatchFilters(UsageLogParams{
 		CacheMode: CacheModeAll,
@@ -125,6 +151,7 @@ func TestMongoUsageLogMatchFiltersEscapesSearchRegex(t *testing.T) {
 		bson.D{{Key: "model", Value: regex}},
 		bson.D{{Key: "provider", Value: regex}},
 		bson.D{{Key: "provider_name", Value: regex}},
+		bson.D{{Key: "endpoint", Value: regex}},
 		bson.D{{Key: "request_id", Value: regex}},
 		bson.D{{Key: "provider_id", Value: regex}},
 		bson.D{{Key: "session_id", Value: regex}},

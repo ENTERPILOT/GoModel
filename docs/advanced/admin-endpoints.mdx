@@ -383,6 +383,79 @@ provider-bound requests only, so avoided cache cost is not reported as spend.
 }
 ```
 
+### GET /admin/usage/endpoints
+
+Returns usage grouped by request endpoint, so you can see what chat, audio, or
+embeddings cost. Each row carries the `operation` its endpoint belongs to;
+endpoints that mean the same thing share one, so `/v1/chat/completions` and
+`/v1/messages` are both `chat_completions`. Sum rows by `operation` for a
+per-operation view. `operation` is omitted for endpoints the gateway does not
+classify.
+
+It accepts the date range parameters (`days`, `start_date`, `end_date`) and the
+data filters `model`, `provider`, `label`, `user_path`, `session_id`,
+`auth_key_id`, `endpoint`, `operation`, and `cache_mode`.
+
+```json
+[
+  {
+    "endpoint": "/v1/audio/transcriptions",
+    "operation": "audio_transcriptions",
+    "requests": 42,
+    "input_tokens": 0,
+    "output_tokens": 18000,
+    "total_tokens": 18000,
+    "input_cost": 0,
+    "output_cost": 1.26,
+    "total_cost": 1.26
+  },
+  {
+    "endpoint": "/v1/messages",
+    "operation": "chat_completions",
+    "requests": 310,
+    "input_tokens": 920000,
+    "output_tokens": 140000,
+    "total_tokens": 1060000,
+    "input_cost": 2.76,
+    "output_cost": 2.1,
+    "total_cost": 4.86
+  }
+]
+```
+
+### Endpoint and operation filters
+
+Every reporting endpoint under `/admin/usage/*` except `throughput`, plus
+`/admin/cache/overview`, accepts two endpoint filters:
+
+| Parameter   | Description                                                        |
+| ----------- | ------------------------------------------------------------------ |
+| `endpoint`  | Comma-separated exact request endpoints, e.g. `/v1/chat/completions,/v1/messages` |
+| `operation` | Comma-separated operations; a row matches if its endpoint belongs to any of them |
+
+Operations: `chat_completions`, `responses`, `conversations`, `embeddings`,
+`batches`, `files`, `audio_speech`, `audio_transcriptions`,
+`audio_translations`, `image_generations`, `image_edits`, `realtime`, `mcp`,
+`systemone`, and `provider_passthrough`. An unknown operation returns `400`.
+Provider passthrough traffic (`/p/{provider}/...`) counts as
+`provider_passthrough`, whatever endpoint it reaches upstream.
+
+```bash
+# What did audio cost in the last 30 days?
+curl "http://localhost:8080/admin/usage/summary?operation=audio_speech,audio_transcriptions,audio_translations" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+Both take lists, so you can compare dialects or add them up:
+
+```bash
+# Chat Completions, Responses, and Messages together
+curl "http://localhost:8080/admin/usage/summary?endpoint=/v1/chat/completions,/v1/responses,/v1/messages" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+`/admin/usage/log` also matches its `search` text against the endpoint.
+
 ### Cache mode
 
 Every [response-cache](/features/cache) hit is recorded as a usage entry, with
@@ -402,7 +475,8 @@ curl "http://localhost:8080/admin/usage/summary?user_path=/team/alpha&cache_mode
 ```
 
 Accepted by `/admin/usage/summary`, `/admin/usage/daily`, `/admin/usage/log`,
-`/admin/usage/models`, `/admin/usage/labels`, `/admin/usage/user-paths`, and
+`/admin/usage/models`, `/admin/usage/labels`, `/admin/usage/user-paths`,
+`/admin/usage/endpoints`, and
 `/v1/usage` (see the [usage API](/advanced/usage-api#cache-mode)). Unrecognized
 values fall back to `uncached`. `/admin/usage/sessions` ignores it: session
 request and token totals always include cache hits, while its cost fields stay

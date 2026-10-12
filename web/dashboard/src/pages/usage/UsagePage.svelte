@@ -65,6 +65,7 @@
     <UsageBreakdownChart kind="model" />
     <UsageBreakdownChart kind="userPath" />
     <UsageBreakdownChart kind="label" />
+    <UsageBreakdownChart kind="type" />
   </div>
 
   <!-- Session cardinality and identifiers need the full page width. -->

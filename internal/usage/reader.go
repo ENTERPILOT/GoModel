@@ -8,10 +8,13 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
+
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // UsageQueryParams specifies the query parameters for usage data retrieval.
-// The optional filters (UserPath, SessionID, AuthKeyID, Model, Provider, Label) apply uniformly to
+// The optional filters (UserPath, SessionID, AuthKeyID, Model, Provider, Label,
+// Endpoints, Operations) apply uniformly to
 // every reader method, so summaries, breakdowns, and the request log all
 // describe the same filtered slice of traffic.
 type UsageQueryParams struct {
@@ -25,7 +28,14 @@ type UsageQueryParams struct {
 	Model     string    // filter by exact model name (optional)
 	Provider  string    // filter by provider name or provider type (optional)
 	Label     string    // filter by request label, exact match (optional)
-	CacheMode string    // "uncached" (default), "cached", or "all"
+	// Endpoints keeps rows whose endpoint equals any of these, e.g.
+	// /v1/messages (optional).
+	Endpoints []string
+	// Operations keeps rows whose endpoint belongs to any of these gateway
+	// operations (core.DescribeEndpointPath), so /v1/chat/completions and
+	// /v1/messages both match chat_completions (optional).
+	Operations []core.Operation
+	CacheMode  string // "uncached" (default), "cached", or "all"
 }
 
 // UsageSummary holds aggregated usage statistics over a time period.
@@ -325,11 +335,11 @@ func applyDailyInputSplit(daily []DailyUsage, splits map[string]periodInputSplit
 }
 
 // UsageLogParams specifies query parameters for paginated usage log retrieval.
-// Data filters (model, provider, label, user path, session id, auth key id) live on the embedded
+// Data filters (model, provider, label, endpoint, operation, user path, session id, auth key id) live on the embedded
 // UsageQueryParams; only the log-specific view options are declared here.
 type UsageLogParams struct {
 	UsageQueryParams        // embed date range and data filters
-	Search           string // free-text search on model/provider/request/session ids
+	Search           string // free-text search on model/provider/endpoint/request/session ids
 	Limit            int    // page size (default 50, max 200)
 	Offset           int    // pagination offset
 }
@@ -464,6 +474,10 @@ type UsageReader interface {
 	// date range. Unlabelled entries are omitted; entries with several labels
 	// count once per label.
 	GetUsageByLabel(ctx context.Context, params UsageQueryParams) ([]LabelUsage, error)
+
+	// GetUsageByEndpoint returns per-endpoint token usage aggregates for the
+	// given date range, each tagged with the operation its endpoint belongs to.
+	GetUsageByEndpoint(ctx context.Context, params UsageQueryParams) ([]EndpointUsage, error)
 
 	// GetUsageBySession returns a bounded page of per-session aggregates.
 	// Usage rows without a detected session are omitted. Request and token

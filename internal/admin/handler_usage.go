@@ -40,6 +40,8 @@ const (
 // @Param        model       query     string  false  "Filter by exact model name"
 // @Param        provider    query     string  false  "Filter by provider name or provider type"
 // @Param        label       query     string  false  "Filter by request label (exact match)"
+// @Param        endpoint    query     string  false  "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages"
+// @Param        operation   query     string  false  "Filter by comma-separated operations, e.g. chat_completions,embeddings"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
 // @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
@@ -111,6 +113,8 @@ func usageSliceResponse[T any](
 // @Param        model       query     string  false  "Filter by exact model name"
 // @Param        provider    query     string  false  "Filter by provider name or provider type"
 // @Param        label       query     string  false  "Filter by request label (exact match)"
+// @Param        endpoint    query     string  false  "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages"
+// @Param        operation   query     string  false  "Filter by comma-separated operations, e.g. chat_completions,embeddings"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
 // @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
@@ -138,6 +142,8 @@ func (h *Handler) DailyUsage(c *echo.Context) error {
 // @Param        model       query     string  false  "Filter by exact model name"
 // @Param        provider    query     string  false  "Filter by provider name or provider type"
 // @Param        label       query     string  false  "Filter by request label (exact match)"
+// @Param        endpoint    query     string  false  "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages"
+// @Param        operation   query     string  false  "Filter by comma-separated operations, e.g. chat_completions,embeddings"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
 // @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
@@ -169,6 +175,8 @@ func (h *Handler) UsageByModel(c *echo.Context) error {
 // @Param        model       query     string  false  "Filter by exact model name"
 // @Param        provider    query     string  false  "Filter by provider name or provider type"
 // @Param        label       query     string  false  "Filter by request label (exact match)"
+// @Param        endpoint    query     string  false  "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages"
+// @Param        operation   query     string  false  "Filter by comma-separated operations, e.g. chat_completions,embeddings"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
 // @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
@@ -203,6 +211,8 @@ func (h *Handler) UsageByUserPath(c *echo.Context) error {
 // @Param        model       query     string  false  "Filter by exact model name"
 // @Param        provider    query     string  false  "Filter by provider name or provider type"
 // @Param        label       query     string  false  "Filter by request label (exact match)"
+// @Param        endpoint    query     string  false  "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages"
+// @Param        operation   query     string  false  "Filter by comma-separated operations, e.g. chat_completions,embeddings"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
 // @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
@@ -215,6 +225,43 @@ func (h *Handler) UsageByUserPath(c *echo.Context) error {
 func (h *Handler) UsageByLabel(c *echo.Context) error {
 	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, params usage.UsageQueryParams) ([]usage.LabelUsage, error) {
 		rows, err := h.usageReader.GetUsageByLabel(ctx, params)
+		for i := range rows {
+			rows[i].CachedInputCost = usage.EstimateCachedInputCost(rows[i].CachedTokensByPricing, h.pricingResolver)
+		}
+		return rows, err
+	})
+}
+
+// UsageByEndpoint handles GET /admin/usage/endpoints
+//
+// @Summary      Get usage breakdown by request endpoint
+// @Description  Returns per-endpoint token and cost aggregates. Each row names
+// @Description  the operation its endpoint belongs to, so endpoints that mean
+// @Description  the same thing can be folded: /v1/chat/completions and
+// @Description  /v1/messages are both chat_completions.
+// @Tags         admin
+// @Produce      json
+// @Security     BearerAuth
+// @Param        days        query     int     false  "Number of days (default 30)"
+// @Param        start_date  query     string  false  "Start date (YYYY-MM-DD)"
+// @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
+// @Param        model       query     string  false  "Filter by exact model name"
+// @Param        provider    query     string  false  "Filter by provider name or provider type"
+// @Param        label       query     string  false  "Filter by request label (exact match)"
+// @Param        endpoint    query     string  false  "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages"
+// @Param        operation   query     string  false  "Filter by comma-separated operations, e.g. chat_completions,embeddings"
+// @Param        session_id  query     string  false  "Filter by exact detected session ID"
+// @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
+// @Param        user_path   query     string  false  "Filter by tracked user path subtree"
+// @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
+// @Success      200  {array}   usage.EndpointUsage
+// @Failure      400  {object}  core.GatewayError
+// @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
+// @Router       /admin/usage/endpoints [get]
+func (h *Handler) UsageByEndpoint(c *echo.Context) error {
+	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, params usage.UsageQueryParams) ([]usage.EndpointUsage, error) {
+		rows, err := h.usageReader.GetUsageByEndpoint(ctx, params)
 		for i := range rows {
 			rows[i].CachedInputCost = usage.EstimateCachedInputCost(rows[i].CachedTokensByPricing, h.pricingResolver)
 		}
@@ -238,6 +285,8 @@ func (h *Handler) UsageByLabel(c *echo.Context) error {
 // @Param        model       query     string  false  "Filter by exact model name"
 // @Param        provider    query     string  false  "Filter by provider name or provider type"
 // @Param        label       query     string  false  "Filter by request label (exact match)"
+// @Param        endpoint    query     string  false  "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages"
+// @Param        operation   query     string  false  "Filter by comma-separated operations, e.g. chat_completions,embeddings"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
 // @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
@@ -305,11 +354,13 @@ func (h *Handler) UsageBySession(c *echo.Context) error {
 // @Param        model       query     string  false  "Filter by exact model name"
 // @Param        provider    query     string  false  "Filter by provider name or provider type"
 // @Param        label       query     string  false  "Filter by request label (exact match)"
+// @Param        endpoint    query     string  false  "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages"
+// @Param        operation   query     string  false  "Filter by comma-separated operations, e.g. chat_completions,embeddings"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
 // @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
-// @Param        search      query     string  false  "Search across model, provider, request_id, provider_id, session_id"
+// @Param        search      query     string  false  "Search across model, provider, endpoint, request_id, provider_id, session_id"
 // @Param        limit       query     int     false  "Page size (default 50, max 200)"
 // @Param        offset      query     int     false  "Offset for pagination"
 // @Success      200  {object}  usage.UsageLogResult
@@ -445,6 +496,8 @@ func (h *Handler) RecalculateUsagePricing(c *echo.Context) error {
 // @Param        model       query     string  false  "Filter by exact model name"
 // @Param        provider    query     string  false  "Filter by provider name or provider type"
 // @Param        label       query     string  false  "Filter by request label (exact match)"
+// @Param        endpoint    query     string  false  "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages"
+// @Param        operation   query     string  false  "Filter by comma-separated operations, e.g. chat_completions,embeddings"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
 // @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
