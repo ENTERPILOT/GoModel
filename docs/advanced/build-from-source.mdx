@@ -40,7 +40,10 @@ CGO_ENABLED=0 go build \
 
 Package recipes can pin the archive's SHA-256 next to the source checksum.
 
-## Option 2: Build the dashboard (Node 22+)
+## Option 2: Build the dashboard with Node
+
+Use Node 22.12 or later in the 22.x line, or Node 24+. Node 23 is not supported
+by the dashboard's build tools.
 
 ```bash
 make build   # runs make frontend (npm ci + vite build), then writes bin/gomodel
