@@ -136,6 +136,7 @@
                             "advanced/encryption-at-rest",
                             "advanced/model-metadata",
                             "advanced/cli",
+                            "advanced/build-from-source",
                             "advanced/api-endpoints",
                             "advanced/swagger-ui",
                             "advanced/resilience",
