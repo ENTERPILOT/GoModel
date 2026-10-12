@@ -14,6 +14,11 @@ import {
   costSourceTooltip,
   divergingDataFrom,
   emptySessionUsage,
+  endpointListSummary,
+  endpointOptionsWithSelection,
+  endpointsSelected,
+  endpointUsageRows,
+  foldEndpointUsageByType,
   emptyUsagePageSummary,
   facetOptionList,
   hasProviderCache,
@@ -41,6 +46,9 @@ import {
   usagePageTotalRequests,
   usageRowsBySelectedValue,
   usageRowTotalTokens,
+  toggleEndpointSelection,
+  usageEndpointOptions,
+  usageTypeForOperation,
   userPathUsageChartVisible,
   usesResponseCostPricing,
 } from "../src/pages/usage/usage-helpers.js";
@@ -135,10 +143,12 @@ test("usageFilterQueryStr includes every active filter, URL-encoded", () => {
     user_path: "/team",
     session_id: "session/a",
     auth_key_id: "key-a",
+    endpoint: "/v1/chat/completions,/v1/messages",
   });
   assert.equal(
     qs,
-    "&model=gpt-5&provider=openai&label=env%3Aprod&user_path=%2Fteam&session_id=session%2Fa&auth_key_id=key-a",
+    "&model=gpt-5&provider=openai&label=env%3Aprod&user_path=%2Fteam&session_id=session%2Fa&auth_key_id=key-a" +
+      "&endpoint=%2Fv1%2Fchat%2Fcompletions%2C%2Fv1%2Fmessages",
   );
 });
 
@@ -175,6 +185,111 @@ test("usageFilterQueryStr honors every filter except the excluded facet", () => 
   assert.match(withoutSession, /provider=openai/);
   assert.match(withoutSession, /label=env%3Aprod/);
   assert.match(withoutSession, /user_path=%2Fteam/);
+});
+
+// --- Request types ---
+
+test("usageTypeForOperation folds operations into the audit log's request types", () => {
+  assert.equal(usageTypeForOperation("chat_completions"), "chat");
+  assert.equal(usageTypeForOperation("audio_transcriptions"), "audio");
+  assert.equal(usageTypeForOperation("conversations"), "responses");
+  assert.equal(usageTypeForOperation("files"), "batches");
+  assert.equal(usageTypeForOperation(""), "other");
+  assert.equal(usageTypeForOperation(undefined), "other");
+});
+
+test("usageEndpointOptions orders endpoints by request type and describes each", () => {
+  const options = usageEndpointOptions([
+    { endpoint: "/legacy" },
+    { endpoint: "/v1/responses", operation: "responses" },
+    { endpoint: "/v1/messages", operation: "chat_completions" },
+    { endpoint: "/v1/chat/completions", operation: "chat_completions" },
+    { endpoint: "/v1/messages", operation: "chat_completions" },
+    null,
+  ]);
+  assert.deepEqual(
+    options.map((option) => [option.value, option.description]),
+    [
+      ["/v1/chat/completions", "Chat"],
+      ["/v1/messages", "Chat"],
+      ["/v1/responses", "Responses"],
+      ["/legacy", "Other"],
+    ],
+  );
+  assert.equal(options[0].label, "/v1/chat/completions");
+  assert.deepEqual(usageEndpointOptions(undefined), []);
+});
+
+test("endpointOptionsWithSelection keeps selected endpoints without traffic listed", () => {
+  const options = [{ value: "/v1/messages", label: "/v1/messages", description: "Chat" }];
+  assert.deepEqual(endpointOptionsWithSelection(options, ["/v1/messages", "/v1/embeddings"]), [
+    { value: "/v1/messages", label: "/v1/messages", description: "Chat" },
+    { value: "/v1/embeddings", label: "/v1/embeddings" },
+  ]);
+  assert.deepEqual(endpointOptionsWithSelection(options, []), options);
+  assert.deepEqual(endpointOptionsWithSelection(undefined, ["/v1/responses"]), [
+    { value: "/v1/responses", label: "/v1/responses" },
+  ]);
+});
+
+test("toggleEndpointSelection adds missing endpoints and removes a fully selected group", () => {
+  const chat = ["/v1/chat/completions", "/v1/messages"];
+  assert.deepEqual(toggleEndpointSelection([], chat), chat);
+  assert.deepEqual(toggleEndpointSelection(["/v1/messages", "/v1/responses"], chat), [
+    "/v1/messages",
+    "/v1/responses",
+    "/v1/chat/completions",
+  ]);
+  assert.deepEqual(toggleEndpointSelection([...chat, "/v1/responses"], chat), ["/v1/responses"]);
+  assert.deepEqual(toggleEndpointSelection(["/v1/responses"], ["/v1/responses"]), []);
+  assert.deepEqual(toggleEndpointSelection(undefined, []), []);
+
+  assert.equal(endpointsSelected(["/v1/messages"], chat), false);
+  assert.equal(endpointsSelected([...chat], chat), true);
+  assert.equal(endpointsSelected(chat, []), false);
+});
+
+test("endpointUsageRows keeps each endpoint separate and tags its type", () => {
+  const rows = endpointUsageRows([
+    { endpoint: "/v1/messages", operation: "chat_completions", requests: 2 },
+    { endpoint: "/v1/chat/completions", operation: "chat_completions", requests: 1 },
+    null,
+  ]);
+  assert.deepEqual(
+    rows.map((row) => [row.label, row.type, row.type_label, row.requests]),
+    [
+      ["/v1/messages", "chat", "Chat", 2],
+      ["/v1/chat/completions", "chat", "Chat", 1],
+    ],
+  );
+});
+
+test("foldEndpointUsageByType sums endpoint rows per request type", () => {
+  const folded = foldEndpointUsageByType([
+    { endpoint: "/v1/messages", operation: "chat_completions", requests: 2, input_tokens: 20, output_tokens: 5, total_tokens: 25, total_cost: null },
+    { endpoint: "/v1/chat/completions", operation: "chat_completions", requests: 1, input_tokens: 10, output_tokens: 5, total_tokens: 15, total_cost: 0.5, cached_input_tokens: 4 },
+    { endpoint: "/v1/audio/speech", operation: "audio_speech", requests: 3, input_tokens: 0, output_tokens: 9, total_tokens: 9, total_cost: null },
+    { endpoint: "/legacy", requests: 1, total_tokens: 1 },
+    null,
+  ]);
+  const byType = Object.fromEntries(folded.map((row) => [row.type, row]));
+
+  assert.deepEqual(Object.keys(byType), ["chat", "audio", "other"]);
+  assert.deepEqual(byType.chat.endpoints, ["/v1/chat/completions", "/v1/messages"]);
+  assert.equal(byType.chat.label, "Chat");
+  assert.equal(byType.chat.requests, 3);
+  assert.equal(byType.chat.total_tokens, 40);
+  assert.equal(byType.chat.cached_input_tokens, 4);
+  assert.equal(byType.chat.total_cost, 0.5, "a null cost does not erase priced rows");
+  assert.equal(byType.audio.total_cost, null, "all-unpriced types stay unpriced");
+  assert.equal(byType.other.label, "Other");
+  assert.deepEqual(foldEndpointUsageByType(undefined), []);
+});
+
+test("endpointListSummary caps the visible endpoints", () => {
+  assert.equal(endpointListSummary([]), "-");
+  assert.equal(endpointListSummary(["/a", "/b"]), "/a, /b");
+  assert.equal(endpointListSummary(["/a", "/b", "/c", "/d", "/e"]), "/a, /b, /c +2");
 });
 
 // --- API key filter and column ---

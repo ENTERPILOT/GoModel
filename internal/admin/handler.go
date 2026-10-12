@@ -501,6 +501,14 @@ func parseUsageParams(c *echo.Context) (usage.UsageQueryParams, error) {
 	params.Label = strings.TrimSpace(c.QueryParam("label"))
 	params.SessionID = strings.TrimSpace(c.QueryParam("session_id"))
 	params.AuthKeyID = strings.TrimSpace(c.QueryParam("auth_key_id"))
+	params.Endpoints = parseCommaList(c.QueryParam("endpoint"))
+	if raw := c.QueryParam("operation"); raw != "" {
+		ops, unknown, ok := core.ParseOperations(raw)
+		if !ok {
+			return params, core.NewInvalidRequestError("invalid operation: "+unknown, nil)
+		}
+		params.Operations = ops
+	}
 
 	userPath, err := scopedUserPath(c, "user_path", c.QueryParam("user_path"))
 	if err != nil {
@@ -509,6 +517,22 @@ func parseUsageParams(c *echo.Context) (usage.UsageQueryParams, error) {
 	params.UserPath = userPath
 
 	return params, nil
+}
+
+// parseCommaList splits a comma-separated query value, trimming entries and
+// dropping blanks and duplicates.
+func parseCommaList(raw string) []string {
+	var values []string
+	seen := map[string]bool{}
+	for part := range strings.SplitSeq(raw, ",") {
+		value := strings.TrimSpace(part)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		values = append(values, value)
+	}
+	return values
 }
 
 func normalizeUserPathQueryParam(fieldName, raw string) (string, error) {
