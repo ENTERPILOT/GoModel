@@ -29,6 +29,18 @@ archives:
     format_overrides:
       - goos: windows
         formats: ['zip']
+  # The prebuilt admin dashboard, for building from source without Node.
+  # Paths are relative to the repository root: unpack it there before `go build`.
+  - id: dashboard
+    meta: true
+    formats: ['tar.gz']
+    name_template: "{{ .ProjectName }}_{{ .Version }}_dashboard"
+    files:
+      - src: internal/admin/dashboard/static/dist
+        info:
+          owner: root
+          group: root
+          mtime: "{{ .CommitDate }}"
 
 checksum:
   name_template: "checksums.txt"
