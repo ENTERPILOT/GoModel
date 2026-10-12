@@ -65,7 +65,9 @@ func applyEndpointCacheStats(rows []EndpointUsage, stats map[string]*GroupCacheS
 // operationEndpoints lists the endpoint values the operations cover: exact
 // values compare by equality and each prefix also matches anything under
 // "prefix/". Exact paths also match with one trailing slash, as
-// core.DescribeEndpointPath does.
+// core.DescribeEndpointPath does. Prefixes are listed in exact too, so exact
+// is empty only when no operation has paths; the builders below then match
+// nothing.
 func operationEndpoints(ops []core.Operation) (exact, prefixes []string) {
 	for _, op := range ops {
 		paths, _ := core.PathsForOperation(op)
@@ -83,13 +85,13 @@ func operationEndpoints(ops []core.Operation) (exact, prefixes []string) {
 // sqliteOperationCondition matches rows whose endpoint belongs to any of ops.
 func sqliteOperationCondition(ops []core.Operation) (string, []any) {
 	exact, prefixes := operationEndpoints(ops)
-	clauses := make([]string, 0, 1+len(prefixes))
+	if len(exact) == 0 {
+		return "1 = 0", nil
+	}
+	clauses := []string{"endpoint IN (" + strings.TrimSuffix(strings.Repeat("?,", len(exact)), ",") + ")"}
 	args := make([]any, 0, len(exact)+len(prefixes))
-	if len(exact) > 0 {
-		clauses = append(clauses, "endpoint IN ("+strings.TrimSuffix(strings.Repeat("?,", len(exact)), ",")+")")
-		for _, path := range exact {
-			args = append(args, path)
-		}
+	for _, path := range exact {
+		args = append(args, path)
 	}
 	for _, prefix := range prefixes {
 		clauses = append(clauses, "endpoint LIKE ? ESCAPE '\\'")
@@ -102,13 +104,12 @@ func sqliteOperationCondition(ops []core.Operation) (string, []any) {
 // numbering placeholders from argIdx.
 func pgOperationCondition(ops []core.Operation, argIdx int) (string, []any, int) {
 	exact, prefixes := operationEndpoints(ops)
-	clauses := make([]string, 0, 1+len(prefixes))
-	args := make([]any, 0, 1+len(prefixes))
-	if len(exact) > 0 {
-		clauses = append(clauses, fmt.Sprintf("endpoint = ANY($%d)", argIdx))
-		args = append(args, exact)
-		argIdx++
+	if len(exact) == 0 {
+		return "1 = 0", nil, argIdx
 	}
+	clauses := []string{fmt.Sprintf("endpoint = ANY($%d)", argIdx)}
+	args := []any{exact}
+	argIdx++
 	for _, prefix := range prefixes {
 		clauses = append(clauses, fmt.Sprintf("endpoint LIKE $%d ESCAPE '\\'", argIdx))
 		args = append(args, sqlutil.EscapeLikeWildcards(prefix)+"/%")
@@ -120,6 +121,10 @@ func pgOperationCondition(ops []core.Operation, argIdx int) (string, []any, int)
 // mongoOperationFilter matches documents whose endpoint belongs to any of ops.
 func mongoOperationFilter(ops []core.Operation) bson.D {
 	exact, prefixes := operationEndpoints(ops)
+	if len(exact) == 0 {
+		// A nil slice would encode as BSON null, which $in rejects.
+		return bson.D{{Key: "endpoint", Value: bson.D{{Key: "$in", Value: bson.A{}}}}}
+	}
 	clauses := bson.A{bson.D{{Key: "endpoint", Value: bson.D{{Key: "$in", Value: exact}}}}}
 	for _, prefix := range prefixes {
 		clauses = append(clauses, bson.D{{Key: "endpoint", Value: bson.D{

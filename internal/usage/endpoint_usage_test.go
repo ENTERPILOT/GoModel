@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -158,6 +159,26 @@ func TestSQLiteUsageLogSearchMatchesEndpoint(t *testing.T) {
 	require.Equal(t, 1, log.Total)
 	require.Len(t, log.Entries, 1)
 	assert.Equal(t, "/v1/audio/speech", log.Entries[0].Endpoint)
+}
+
+func TestOperationFiltersWithoutPathsMatchNothing(t *testing.T) {
+	unknown := []core.Operation{"unknown"}
+
+	condition, args := sqliteOperationCondition(unknown)
+	assert.Equal(t, "1 = 0", condition)
+	assert.Empty(t, args)
+
+	condition, args, next := pgOperationCondition(unknown, 4)
+	assert.Equal(t, "1 = 0", condition)
+	assert.Empty(t, args)
+	assert.Equal(t, 4, next)
+
+	assert.Equal(t, bson.D{{Key: "endpoint", Value: bson.D{{Key: "$in", Value: bson.A{}}}}}, mongoOperationFilter(unknown))
+
+	reader, ctx := seedEndpointUsageFixture(t)
+	summary, err := reader.GetSummary(ctx, UsageQueryParams{Operations: unknown})
+	require.NoError(t, err)
+	assert.Equal(t, 0, summary.TotalRequests)
 }
 
 func TestPgOperationCondition(t *testing.T) {
