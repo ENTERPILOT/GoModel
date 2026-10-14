@@ -35,10 +35,17 @@ jobs:
           # the token in .git/config exposes it to everything that runs
           # afterwards, npm install scripts included.
           persist-credentials: false
+      # Type-checking reads the Go build cache. setup-go's own cache only
+      # saves on a go.sum change, so it went stale and every run rebuilt most
+      # packages; go-cache keeps it current.
+      - name: Restore Go caches
+        uses: ./.github/actions/go-cache
+        with:
+          key: lint
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: true
+          cache: false
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:

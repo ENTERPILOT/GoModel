@@ -32,7 +32,11 @@ updates:
           - "*"
 
   - package-ecosystem: "github-actions"
-    directory: "/"
+    # "/" covers .github/workflows only; local composite actions are listed
+    # separately or their pinned actions never get updated.
+    directories:
+      - "/"
+      - "/.github/actions/*"
     schedule:
       interval: "weekly"
     cooldown:
