@@ -6371,14 +6371,20 @@ jq -e '
 ' "$MODELS_FILE" >/dev/null
 
 STATUS_FILE="$QA_RUN_DIR/s229.status.json"
-curl -fsS "$BASE_URL/admin/providers/status" > "$STATUS_FILE"
 # jev-down turns degraded once failover scenarios have sent it traffic (its
-# 529s count against request health), so it only has to be registered.
-jq -e '
-  [.. | objects | select(.type? == "jev" and has("status")) | {name, status}] | sort_by(.name) as $s
-  | ($s | map(.name)) == ["jev","jev-down","jev-kev"]
-    and all($s[]; if .name == "jev-down" then (.status | IN("healthy","degraded")) else .status == "healthy" end)
-' "$STATUS_FILE" >/dev/null
+# 529s count against request health), so it only has to be registered. S227
+# reloads this gateway just before, and every provider reports degraded while
+# the reload's model refresh runs, so poll until it finishes.
+for attempt in $(seq 1 30); do
+  curl -fsS "$BASE_URL/admin/providers/status" > "$STATUS_FILE"
+  jq -e '
+    [.. | objects | select(.type? == "jev" and has("status")) | {name, status}] | sort_by(.name) as $s
+    | ($s | map(.name)) == ["jev","jev-down","jev-kev"]
+      and all($s[]; if .name == "jev-down" then (.status | IN("healthy","degraded")) else .status == "healthy" end)
+  ' "$STATUS_FILE" >/dev/null && break
+  [ "$attempt" -lt 30 ] || exit 1
+  sleep 1
+done
 
 # Passthrough lists models in each upstream's own shape.
 curl -fsS "$BASE_URL/p/jev/v1/models" \
