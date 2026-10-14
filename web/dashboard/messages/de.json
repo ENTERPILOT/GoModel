@@ -1600,6 +1600,7 @@
   "models_price_output": "Ausgabe $/MTok",
   "models_price_cached_input": "Gecachte Eingabe $/MTok",
   "models_price_cache_write": "Cache-Write $/MTok",
+  "models_price_cache_write_1h": "Cache-Write (1 h) $/MTok",
   "models_price_reasoning_output": "Reasoning-Ausgabe $/MTok",
   "models_price_batch_input": "Batch-Eingabe $/MTok",
   "models_price_batch_output": "Batch-Ausgabe $/MTok",

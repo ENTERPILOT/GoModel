@@ -1471,6 +1471,7 @@
   "models_price_output": "输出 $/MTok",
   "models_price_cached_input": "缓存输入 $/MTok",
   "models_price_cache_write": "缓存写入 $/MTok",
+  "models_price_cache_write_1h": "缓存写入（1 小时）$/MTok",
   "models_price_reasoning_output": "推理输出 $/MTok",
   "models_price_batch_input": "批量输入 $/MTok",
   "models_price_batch_output": "批量输出 $/MTok",

@@ -10,6 +10,7 @@ func clonePricing(p Pricing) Pricing {
 	out.OutputPerMtok = cloneFloatPtr(p.OutputPerMtok)
 	out.CachedInputPerMtok = cloneFloatPtr(p.CachedInputPerMtok)
 	out.CacheWritePerMtok = cloneFloatPtr(p.CacheWritePerMtok)
+	out.CacheWrite1hPerMtok = cloneFloatPtr(p.CacheWrite1hPerMtok)
 	out.ReasoningOutputPerMtok = cloneFloatPtr(p.ReasoningOutputPerMtok)
 	out.BatchInputPerMtok = cloneFloatPtr(p.BatchInputPerMtok)
 	out.BatchOutputPerMtok = cloneFloatPtr(p.BatchOutputPerMtok)
@@ -44,6 +45,7 @@ func pricingEmpty(p Pricing) bool {
 		p.OutputPerMtok != nil ||
 		p.CachedInputPerMtok != nil ||
 		p.CacheWritePerMtok != nil ||
+		p.CacheWrite1hPerMtok != nil ||
 		p.ReasoningOutputPerMtok != nil ||
 		p.BatchInputPerMtok != nil ||
 		p.BatchOutputPerMtok != nil ||
@@ -82,6 +84,7 @@ func pricingToCore(p Pricing) *core.ModelPricing {
 		OutputPerMtok:          cloneFloatPtr(p.OutputPerMtok),
 		CachedInputPerMtok:     cloneFloatPtr(p.CachedInputPerMtok),
 		CacheWritePerMtok:      cloneFloatPtr(p.CacheWritePerMtok),
+		CacheWrite1hPerMtok:    cloneFloatPtr(p.CacheWrite1hPerMtok),
 		ReasoningOutputPerMtok: cloneFloatPtr(p.ReasoningOutputPerMtok),
 		BatchInputPerMtok:      cloneFloatPtr(p.BatchInputPerMtok),
 		BatchOutputPerMtok:     cloneFloatPtr(p.BatchOutputPerMtok),
@@ -124,6 +127,7 @@ func mergePricing(base *core.ModelPricing, override Pricing) *core.ModelPricing 
 	applyFloatOverride(&out.OutputPerMtok, overlay.OutputPerMtok)
 	applyFloatOverride(&out.CachedInputPerMtok, overlay.CachedInputPerMtok)
 	applyFloatOverride(&out.CacheWritePerMtok, overlay.CacheWritePerMtok)
+	applyFloatOverride(&out.CacheWrite1hPerMtok, overlay.CacheWrite1hPerMtok)
 	applyFloatOverride(&out.ReasoningOutputPerMtok, overlay.ReasoningOutputPerMtok)
 	applyFloatOverride(&out.BatchInputPerMtok, overlay.BatchInputPerMtok)
 	applyFloatOverride(&out.BatchOutputPerMtok, overlay.BatchOutputPerMtok)

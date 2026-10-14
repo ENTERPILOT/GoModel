@@ -54,6 +54,7 @@ func mergeConfigPricing(base, override *core.ModelPricing) *core.ModelPricing {
 	applyPricingOverride(&merged.OutputPerMtok, override.OutputPerMtok)
 	applyPricingOverride(&merged.CachedInputPerMtok, override.CachedInputPerMtok)
 	applyPricingOverride(&merged.CacheWritePerMtok, override.CacheWritePerMtok)
+	applyPricingOverride(&merged.CacheWrite1hPerMtok, override.CacheWrite1hPerMtok)
 	applyPricingOverride(&merged.ReasoningOutputPerMtok, override.ReasoningOutputPerMtok)
 	applyPricingOverride(&merged.BatchInputPerMtok, override.BatchInputPerMtok)
 	applyPricingOverride(&merged.BatchOutputPerMtok, override.BatchOutputPerMtok)
