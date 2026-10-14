@@ -599,13 +599,20 @@ func TestStreamUsageObserverAnthropicNativeEvents(t *testing.T) {
 				"output_tokens":               float64(3),
 				"cache_creation_input_tokens": float64(100),
 				"cache_read_input_tokens":     float64(200),
+				"cache_creation": map[string]any{
+					"ephemeral_5m_input_tokens": float64(40),
+					"ephemeral_1h_input_tokens": float64(60),
+				},
 			},
 		},
 	})
 	observer.OnJSONEvent(map[string]any{
 		"type":  "message_delta",
 		"delta": map[string]any{"stop_reason": "end_turn"},
-		"usage": map[string]any{"output_tokens": float64(31)},
+		"usage": map[string]any{
+			"output_tokens":         float64(31),
+			"output_tokens_details": map[string]any{"thinking_tokens": float64(12)},
+		},
 	})
 	observer.OnStreamClose()
 
@@ -619,6 +626,9 @@ func TestStreamUsageObserverAnthropicNativeEvents(t *testing.T) {
 	assert.Equal(t, "msg_native", entry.ProviderID)
 	assert.Equal(t, 100, entry.RawData["cache_creation_input_tokens"])
 	assert.Equal(t, 200, entry.RawData["cache_read_input_tokens"])
+	assert.Equal(t, 40, entry.RawData["cache_creation_ephemeral_5m_input_tokens"])
+	assert.Equal(t, 60, entry.RawData["cache_creation_ephemeral_1h_input_tokens"])
+	assert.Equal(t, 12, entry.RawData["completion_thinking_tokens"])
 }
 
 // Eden AI reports its per-request charge at the chunk root rather than inside

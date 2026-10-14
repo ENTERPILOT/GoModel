@@ -266,6 +266,7 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 	copyUsageDetailsFields(rawData, usageMap["input_tokens_details"], "prompt_")
 	copyUsageDetailsFields(rawData, usageMap["completion_tokens_details"], "completion_")
 	copyUsageDetailsFields(rawData, usageMap["output_tokens_details"], "completion_")
+	copyUsageDetailsFields(rawData, usageMap["cache_creation"], "cache_creation_")
 
 	if inputTokens == 0 && outputTokens == 0 && totalTokens == 0 {
 		return nil

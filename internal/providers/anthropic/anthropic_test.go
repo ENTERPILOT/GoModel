@@ -2293,6 +2293,10 @@ func TestConvertFromAnthropicResponse_WithCacheFields(t *testing.T) {
 			OutputTokens:             20,
 			CacheCreationInputTokens: 50,
 			CacheReadInputTokens:     30,
+			CacheCreation: anthropicCacheCreation{
+				Ephemeral5mInputTokens: 20,
+				Ephemeral1hInputTokens: 30,
+			},
 		},
 	}
 
@@ -2301,6 +2305,27 @@ func TestConvertFromAnthropicResponse_WithCacheFields(t *testing.T) {
 	require.NotNil(t, result.Usage.RawUsage)
 	assert.Equal(t, 50, result.Usage.RawUsage["cache_creation_input_tokens"])
 	assert.Equal(t, 30, result.Usage.RawUsage["cache_read_input_tokens"])
+	assert.Equal(t, 20, result.Usage.RawUsage["cache_creation_ephemeral_5m_input_tokens"])
+	assert.Equal(t, 30, result.Usage.RawUsage["cache_creation_ephemeral_1h_input_tokens"])
+}
+
+func TestMergeAnthropicUsage_WithCacheCreationTTL(t *testing.T) {
+	dst := anthropicUsage{}
+	src := anthropicUsage{
+		CacheCreationInputTokens: 50,
+		CacheCreation:            anthropicCacheCreation{Ephemeral1hInputTokens: 50},
+	}
+
+	require.True(t, mergeAnthropicUsage(&dst, &src))
+	require.Equal(t, 50, dst.CacheCreation.Ephemeral1hInputTokens)
+
+	for name, payload := range map[string]map[string]any{
+		"chat":      anthropicChatUsagePayload(&dst),
+		"responses": anthropicResponsesUsagePayload(&dst),
+	} {
+		assert.Equal(t, 50, payload["cache_creation_ephemeral_1h_input_tokens"], name)
+		assert.NotContains(t, payload, "cache_creation_ephemeral_5m_input_tokens", name)
+	}
 }
 
 func TestConvertFromAnthropicResponse_WithThinkingTokens(t *testing.T) {

@@ -1628,6 +1628,7 @@
   "models_price_output": "Wyjście $/MTok",
   "models_price_cached_input": "Wejście z cache $/MTok",
   "models_price_cache_write": "Zapis cache $/MTok",
+  "models_price_cache_write_1h": "Zapis cache (1 h) $/MTok",
   "models_price_reasoning_output": "Wyjście reasoning $/MTok",
   "models_price_batch_input": "Wejście Batch $/MTok",
   "models_price_batch_output": "Wyjście Batch $/MTok",

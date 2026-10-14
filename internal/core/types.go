@@ -287,6 +287,7 @@ type ModelPricing struct {
 	OutputPerMtok          *float64 `json:"output_per_mtok,omitempty" yaml:"output_per_mtok,omitempty"`
 	CachedInputPerMtok     *float64 `json:"cached_input_per_mtok,omitempty" yaml:"cached_input_per_mtok,omitempty"`
 	CacheWritePerMtok      *float64 `json:"cache_write_per_mtok,omitempty" yaml:"cache_write_per_mtok,omitempty"`
+	CacheWrite1hPerMtok    *float64 `json:"cache_write_1h_per_mtok,omitempty" yaml:"cache_write_1h_per_mtok,omitempty"` // Anthropic 1-hour TTL cache writes; cache_write_per_mtok prices the default 5-minute ones
 	ReasoningOutputPerMtok *float64 `json:"reasoning_output_per_mtok,omitempty" yaml:"reasoning_output_per_mtok,omitempty"`
 	BatchInputPerMtok      *float64 `json:"batch_input_per_mtok,omitempty" yaml:"batch_input_per_mtok,omitempty"`
 	BatchOutputPerMtok     *float64 `json:"batch_output_per_mtok,omitempty" yaml:"batch_output_per_mtok,omitempty"`
@@ -340,6 +341,7 @@ func (p *ModelPricing) FieldSources(source string) map[string]string {
 	add("output_per_mtok", p.OutputPerMtok)
 	add("cached_input_per_mtok", p.CachedInputPerMtok)
 	add("cache_write_per_mtok", p.CacheWritePerMtok)
+	add("cache_write_1h_per_mtok", p.CacheWrite1hPerMtok)
 	add("reasoning_output_per_mtok", p.ReasoningOutputPerMtok)
 	add("batch_input_per_mtok", p.BatchInputPerMtok)
 	add("batch_output_per_mtok", p.BatchOutputPerMtok)
@@ -411,6 +413,7 @@ func (p *ModelPricing) Clone() *ModelPricing {
 	out.OutputPerMtok = cloneFloatPtr(p.OutputPerMtok)
 	out.CachedInputPerMtok = cloneFloatPtr(p.CachedInputPerMtok)
 	out.CacheWritePerMtok = cloneFloatPtr(p.CacheWritePerMtok)
+	out.CacheWrite1hPerMtok = cloneFloatPtr(p.CacheWrite1hPerMtok)
 	out.ReasoningOutputPerMtok = cloneFloatPtr(p.ReasoningOutputPerMtok)
 	out.BatchInputPerMtok = cloneFloatPtr(p.BatchInputPerMtok)
 	out.BatchOutputPerMtok = cloneFloatPtr(p.BatchOutputPerMtok)

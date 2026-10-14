@@ -11042,6 +11042,10 @@ const docTemplate = `{
                 "batch_output_per_mtok": {
                     "type": "number"
                 },
+                "cache_write_1h_per_mtok": {
+                    "description": "Anthropic 1-hour TTL cache writes; cache_write_per_mtok prices the default 5-minute ones",
+                    "type": "number"
+                },
                 "cache_write_per_mtok": {
                     "type": "number"
                 },
@@ -12016,6 +12020,9 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "batch_output_per_mtok": {
+                    "type": "number"
+                },
+                "cache_write_1h_per_mtok": {
                     "type": "number"
                 },
                 "cache_write_per_mtok": {
