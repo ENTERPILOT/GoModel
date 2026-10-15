@@ -60,7 +60,8 @@ type Options struct {
 	// Default: version.AppCore ("GoModel").
 	AppName string
 	// Extensions is the extension registry snapshotted at server
-	// construction. Default: ext.Default.
+	// construction. Its log handler wrappers are read earlier, when Run
+	// starts. Default: ext.Default.
 	Extensions *ext.Registry
 	// Args are the CLI arguments (without the program name). Default: os.Args[1:].
 	Args []string
@@ -75,7 +76,8 @@ type Options struct {
 	// gateway — after CLI parsing, --version/--health/--ready
 	// short-circuits, dotenv loading, and logging configuration, but before
 	// config loading. Register extensions here so operator tooling modes
-	// stay silent. A returned error aborts startup.
+	// stay silent; log handler wrappers are the exception and must be
+	// registered before Run. A returned error aborts startup.
 	Setup func(ctx context.Context) error
 	// SetupConfig runs once after the initial configuration has been loaded and
 	// before the application is constructed. It lets custom distributions
@@ -218,7 +220,10 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 
-	if err := configureLogging(opts.Stderr); err != nil {
+	// Read once, before the first logger is built: every generation's logger
+	// gets the same wrappers.
+	logWrappers := opts.Extensions.LogHandlerWrappers()
+	if err := configureLogging(opts.Stderr, logWrappers); err != nil {
 		fmt.Fprintf(opts.Stderr, "failed to configure logging: %v\n", err)
 		return err
 	}
@@ -347,7 +352,7 @@ func Run(ctx context.Context, opts Options) error {
 			undoEnv()
 		}
 
-		if err := configureLogging(opts.Stderr); err != nil {
+		if err := configureLogging(opts.Stderr, logWrappers); err != nil {
 			rollback()
 			return nil, err
 		}

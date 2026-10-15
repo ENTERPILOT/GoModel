@@ -179,6 +179,15 @@ credential. This replaces the old silent dropping of unresolved `${`
 provider values for references. Plain `${VAR}` keeps its historical
 behaviour.
 
+Core never logs a resolved value. An extension that wants defence in depth
+(GoModel Pro scrubs resolved vault values from log records) registers a
+`func(slog.Handler) slog.Handler` with `ext.Registry.WrapLogHandler`. Core
+applies it to every slog handler it builds: the startup logger and the one
+each reload installs before step 1, so what `config.Load` logs is covered
+too. Unlike the resolver, the wrapper is process-wide: `run.Run` reads the
+registered wrappers once, before it builds its first logger, and applies them
+in registration order to every generation.
+
 ### 4. Dashboard-managed entities accept references
 
 Provider credentials (API keys, service-account JSON and base64 JSON, proxy
@@ -380,8 +389,9 @@ Vault keys, Vault Transit). The incorrect "stored encrypted" claim in
   once an encryption key is set. Losing the key makes those fields
   unrecoverable, which the documentation states plainly.
 - The open-core boundary is explicit: references, `env`, `file`, rotation,
-  and local encryption are core. External secret managers, write-back, and
-  KMS key wrapping are GoModel Pro, plugged in through `Secrets.Register`,
-  `SecretWriter`, and `KeyWrapper`.
+  and local encryption are core. External secret managers, write-back, KMS
+  key wrapping, and log scrubbing are GoModel Pro, plugged in through
+  `Secrets.Register`, `SecretWriter`, `KeyWrapper`, and
+  `ext.Registry.WrapLogHandler`.
 - Resolved values live in process memory for the life of a generation. Go
   gives no reliable way to zero them, and this ADR does not claim otherwise.
