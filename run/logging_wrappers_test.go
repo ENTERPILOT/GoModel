@@ -200,9 +200,21 @@ func TestRunWrapsTheLoggerOfEveryGeneration(t *testing.T) {
 	reloads := make(chan observed, 1)
 
 	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
 	served := make(chan error, 1)
+	stopped := make(chan struct{})
+	// Registered after the environment, working directory, and logger
+	// cleanups, so it runs first: even a failed test stops Run before they
+	// are restored under it.
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-stopped:
+		case <-time.After(30 * time.Second):
+			t.Error("Run did not stop")
+		}
+	})
 	go func() {
+		defer close(stopped)
 		served <- Run(ctx, Options{
 			Args:       []string{},
 			Stdout:     io.Discard,
