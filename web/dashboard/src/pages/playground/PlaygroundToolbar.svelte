@@ -1,12 +1,14 @@
 <script>
-  // Top controls: endpoint, model, streaming, and the "add a message" buttons
-  // that grow the editable conversation history.
+  // Top controls: mode, endpoint, model, streaming, and the "add a message"
+  // buttons that grow the editable conversation history. Media modes keep
+  // only the mode, model and user-path pickers.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import SegmentedControl from "$lib/components/atoms/SegmentedControl.svelte";
   import SearchSelect from "$lib/components/molecules/SearchSelect.svelte";
   import { Eraser, Plus } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
   import { playgroundStore as store } from "./playground.svelte.js";
+  import { playgroundMediaStore as media } from "./playgroundMedia.svelte.js";
   import { playgroundUserPathOptions, ROLES } from "./playgroundLogic.js";
   import { modelsStore } from "$lib/stores/models.svelte.js";
 
@@ -21,6 +23,13 @@
   );
 
   const userPathOptions = $derived(playgroundUserPathOptions(modelsStore.models, store.model));
+
+  const modeOptions = $derived([
+    { value: "chat", label: m.playground_mode_chat() },
+    { value: "image", label: m.playground_mode_image() },
+    { value: "speech", label: m.playground_mode_speech() },
+    { value: "transcription", label: m.playground_mode_transcription() },
+  ]);
 
   const endpointOptions = $derived([
     { value: "chat", label: m.playground_endpoint_chat() },
@@ -38,14 +47,26 @@
 <div class="playground-toolbar">
   <div class="playground-toolbar-row">
     <label class="playground-field">
-      <span class="playground-field-label">{m.playground_endpoint_label()}</span>
+      <span class="playground-field-label">{m.playground_mode_label()}</span>
       <SegmentedControl
-        options={endpointOptions}
-        value={store.endpoint}
-        ariaLabel={m.playground_endpoint_label()}
-        onchange={(value) => store.setEndpoint(value)}
+        options={modeOptions}
+        value={store.mode}
+        ariaLabel={m.playground_mode_label()}
+        disabled={store.sending || media.sending}
+        onchange={(value) => media.switchMode(value)}
       />
     </label>
+    {#if store.mode === "chat"}
+      <label class="playground-field">
+        <span class="playground-field-label">{m.playground_endpoint_label()}</span>
+        <SegmentedControl
+          options={endpointOptions}
+          value={store.endpoint}
+          ariaLabel={m.playground_endpoint_label()}
+          onchange={(value) => store.setEndpoint(value)}
+        />
+      </label>
+    {/if}
     <div class="playground-field playground-field-model">
       <label class="playground-field-label" for="playground-model">{m.playground_model_label()}</label>
       <SearchSelect
@@ -77,41 +98,43 @@
     </div>
   </div>
 
-  <div class="playground-toolbar-row playground-toolbar-messages">
-    <span class="playground-field-label">{m.playground_add_message()}</span>
-    <div class="playground-add-buttons" role="group" aria-label={m.playground_add_message()}>
-      {#each ROLES as role (role)}
-        <button
-          type="button"
-          class={["btn", "btn-with-icon", "playground-add-btn", "playground-role-" + role]}
-          onclick={() => store.addMessage(role)}
-        >
-          <Icon icon={Plus} class="table-icon-svg" />
-          <span>{roleLabels[role]()}</span>
-        </button>
-      {/each}
+  {#if store.mode === "chat"}
+    <div class="playground-toolbar-row playground-toolbar-messages">
+      <span class="playground-field-label">{m.playground_add_message()}</span>
+      <div class="playground-add-buttons" role="group" aria-label={m.playground_add_message()}>
+        {#each ROLES as role (role)}
+          <button
+            type="button"
+            class={["btn", "btn-with-icon", "playground-add-btn", "playground-role-" + role]}
+            onclick={() => store.addMessage(role)}
+          >
+            <Icon icon={Plus} class="table-icon-svg" />
+            <span>{roleLabels[role]()}</span>
+          </button>
+        {/each}
+      </div>
+      <span class="playground-endpoint-path mono" title={m.playground_help()}>
+        POST {store.endpointPath}
+      </span>
+      <label class="playground-stream-toggle">
+        <input
+          type="checkbox"
+          checked={store.stream}
+          onchange={(event) => store.setStream(event.currentTarget.checked)}
+        />
+        <span>{m.playground_stream_label()}</span>
+      </label>
+      <button
+        type="button"
+        class="btn btn-with-icon"
+        disabled={store.messages.length === 0 && !store.response && !store.error}
+        onclick={() => store.clear()}
+      >
+        <Icon icon={Eraser} class="table-icon-svg" />
+        <span>{m.playground_clear()}</span>
+      </button>
     </div>
-    <span class="playground-endpoint-path mono" title={m.playground_help()}>
-      POST {store.endpointPath}
-    </span>
-    <label class="playground-stream-toggle">
-      <input
-        type="checkbox"
-        checked={store.stream}
-        onchange={(event) => store.setStream(event.currentTarget.checked)}
-      />
-      <span>{m.playground_stream_label()}</span>
-    </label>
-    <button
-      type="button"
-      class="btn btn-with-icon"
-      disabled={store.messages.length === 0 && !store.response && !store.error}
-      onclick={() => store.clear()}
-    >
-      <Icon icon={Eraser} class="table-icon-svg" />
-      <span>{m.playground_clear()}</span>
-    </button>
-  </div>
+  {/if}
 </div>
 
 <style>
