@@ -245,9 +245,36 @@ jobs:
           release_json="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json tagName,name,body,url)"
           release_url="$(jq -r '.url' <<< "$release_json")"
 
+          # GoReleaser changelog lines look like:
+          #   * 1e4ecfb8f194af0e843f64d7dc694e3a01bef1dc feat(scope): msg (#1191)
+          # In the embed the verbatim SHA is noise and bare (#NNNN) is not
+          # clickable. Strip the leading commit SHA entirely and link #NNNN
+          # references to the official repository.
+          body="$(jq -r '.body // ""' <<< "$release_json" \
+            | sed -E -e 's/^(\s*[*-]\s+)[0-9a-f]{7,40}\s+/\1/' \
+                     -e 's/\(#([0-9]+)\)/([#\1](https:\/\/github.com\/ENTERPILOT\/GoModel\/pull\/\1))/g')"
+
           # Discord embed descriptions cap at 4096 characters — jq counts
-          # characters, not bytes, so multibyte notes stay within the limit.
-          body="$(jq -r '(.body // "") | if length > 4000 then .[0:3997] + "..." else . end' <<< "$release_json")"
+          # characters, not bytes, so multibyte release notes stay within the
+          # limit. Oversized bodies are cut at the last complete changelog
+          # line and get a link to the full release notes instead of a
+          # mid-line ellipsis that could slice a Markdown link in half.
+          body="$(jq -nr --arg body "$body" --arg url "$release_url" '
+            $body
+            | if length <= 4000 then .
+              else "([Truncated](\($url)))" as $suffix
+                | (4000 - 1 - ($suffix | length)) as $budget
+                | (split("\n")) as $lines
+                | (reduce $lines[] as $line ({out: "", done: false};
+                    if .done then .
+                    else (.out | if . == "" then 0 else length + 1 end) as $cur
+                      | if $cur + ($line | length) <= $budget
+                        then {out: (if $cur == 0 then $line else .out + "\n" + $line end), done: false}
+                        else {out: .out, done: true}
+                        end
+                    end)) as $r
+                | if $r.out == "" then $suffix else $r.out + "\n" + $suffix end
+              end')"
 
           # Discord embed titles cap at 256 characters — a release with a
           # long name must not lose the whole announce to an HTTP 400.
