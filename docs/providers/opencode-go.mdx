@@ -146,6 +146,45 @@ present, and `json_schema` structured output follows
 `DEEPSEEK_JSON_SCHEMA_MODE`. See
 [DeepSeek](/providers/deepseek#structured-outputs) for details.
 
+## R-Mem with local embeddings
+
+[R-Mem](https://github.com/Adaimade/R-Mem) can use GoModel for LLM extraction
+while keeping its SQLite store and embedding model local. Configure the
+`opencode_go` provider above, then use this `rustmem.toml` for a GoModel
+instance listening on port `8080`:
+
+```toml
+[llm]
+provider = "openai"
+base_url = "http://127.0.0.1:8080"
+model = "opencode_go/deepseek-v4.1-flash"
+
+[embedding]
+provider = "openai"
+base_url = "http://127.0.0.1:1234"
+model = "text-embedding-nomic-embed-text-v1.5"
+dimensions = 768
+```
+
+R-Mem appends `/v1/chat/completions` itself: its `base_url` must **not** end
+in `/v1`. The embedding example uses LM Studio; load the named embedding model
+there before adding or searching memories.
+
+If GoModel requires a gateway key, supply that key to R-Mem through
+`RUSTMEM__LLM__API_KEY`. Keep `OPENCODE_GO_API_KEY` on the GoModel side.
+Avoid `OPENAI_API_KEY` for this split setup: R-Mem applies that variable to
+both its LLM and embedding clients.
+
+Check the selected model in GoModel's `/v1/models` and its supported protocol.
+R-Mem sends temperature `0.1`, so models requiring a different value need
+additional configuration or gateway adaptation. GoModel supplies session
+handling and client identification as described above; when the caller can
+send a session header, preserve the real coding-conversation ID.
+
+The LLM requests leave the machine even though the store and embeddings remain
+local. Follow the [Go usage requirements](https://opencode.ai/docs/go/#where-can-i-use-it);
+do not treat the subscription as unrestricted historical backfill or batch compute.
+
 ## Not supported
 
 - Embeddings (returns `invalid_request_error`).
