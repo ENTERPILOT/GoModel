@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"net/http"
 	"slices"
 	"sync"
@@ -29,6 +30,9 @@ type RequestState struct {
 	requestHeaders  http.Header
 	originalHeaders http.Header
 	promptEdits     []PromptEdit
+	// upstreamHeaders are the headers plugins wrote to
+	// Exchange.Headers.Upstream; the provider client applies them.
+	upstreamHeaders http.Header
 }
 
 // PromptEdit is one instance's edit of the prompt, kept for the audit
@@ -337,18 +341,37 @@ func (s *RequestState) ApplyRequestHeaders(dst http.Header) []string {
 }
 
 // Finish folds an exchange back into the state after a chain ran: upstream
-// headers are logged (not applied in this version).
+// headers are kept so the provider client can apply them to the outgoing
+// call.
 func (s *RequestState) Finish(x *pluginapi.Exchange) {
 	if s == nil || x == nil || x.Headers == nil || len(x.Headers.Upstream) == 0 {
 		return
 	}
 	s.mu.Lock()
+	if s.upstreamHeaders == nil {
+		s.upstreamHeaders = http.Header{}
+	}
+	maps.Copy(s.upstreamHeaders, x.Headers.Upstream)
 	logged := s.upstreamLogged
 	s.upstreamLogged = true
 	s.mu.Unlock()
 	if !logged {
-		slog.Debug("plugin set upstream headers; not applied in this version", "request_id", x.Meta.RequestID, "count", len(x.Headers.Upstream))
+		slog.Debug("plugin set upstream headers", "request_id", x.Meta.RequestID, "count", len(x.Headers.Upstream))
 	}
+}
+
+// UpstreamHeaders returns the headers plugins asked to add to provider calls,
+// or nil when none were set. The caller gets a copy.
+func (s *RequestState) UpstreamHeaders() http.Header {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.upstreamHeaders) == 0 {
+		return nil
+	}
+	return s.upstreamHeaders.Clone()
 }
 
 // credentialHeaders are never exposed to plugins.
