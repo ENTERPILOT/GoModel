@@ -284,8 +284,10 @@ func (c *Client) buildRequest(ctx context.Context, req Request) (*http.Request, 
 		c.headerSetter(httpReq)
 	}
 
-	// Apply request-specific headers
-	for key, values := range req.Headers {
+	// Apply request-specific headers, including the ones prompt-phase plugins
+	// asked to add. Plugin headers may not override provider credentials or
+	// transport-controlled headers: the provider always wins.
+	for key, values := range requestHeadersWithPluginOverrides(ctx, req.Headers) {
 		httpReq.Header.Del(key)
 		for _, value := range values {
 			httpReq.Header.Add(key, value)
@@ -303,6 +305,40 @@ func (c *Client) buildRequest(ctx context.Context, req Request) (*http.Request, 
 	}
 
 	return httpReq, nil
+}
+
+// pluginDeniedUpstreamHeaders are never taken from a plugin: they carry
+// provider credentials or control the transport, so a plugin must not be able
+// to override what the provider client sets.
+var pluginDeniedUpstreamHeaders = map[string]struct{}{
+	"Authorization":  {},
+	"X-Goog-Api-Key": {},
+	"X-Api-Key":      {},
+	"Cookie":         {},
+	"Host":           {},
+	"Content-Length": {},
+}
+
+// requestHeadersWithPluginOverrides merges the headers plugins wrote to
+// Exchange.Headers.Upstream into the request headers. It returns reqHeaders
+// unchanged when no plugin set any header.
+func requestHeadersWithPluginOverrides(ctx context.Context, reqHeaders http.Header) http.Header {
+	extra := core.PluginUpstreamHeaders(ctx)
+	if len(extra) == 0 {
+		return reqHeaders
+	}
+	merged := reqHeaders.Clone()
+	if merged == nil {
+		merged = http.Header{}
+	}
+	for key, values := range extra {
+		canonical := http.CanonicalHeaderKey(key)
+		if _, denied := pluginDeniedUpstreamHeaders[canonical]; denied {
+			continue
+		}
+		merged[canonical] = append([]string(nil), values...)
+	}
+	return merged
 }
 
 func providerErrorStatusCode(err error) int {
