@@ -715,3 +715,87 @@ func TestStreamChatViaResponses(t *testing.T) {
 		assert.Nil(t, provider.capturedReq)
 	})
 }
+
+func TestIsZeroJSONValue(t *testing.T) {
+	// The validator tolerates only the JSON zero values false and 0 for the
+	// zero-tolerated extra fields; everything else still rejects.
+	assert.False(t, isZeroJSONValue(json.RawMessage(`{`)), "invalid JSON is not a zero value")
+	assert.False(t, isZeroJSONValue(json.RawMessage(`true`)), "true is not zero")
+	assert.True(t, isZeroJSONValue(json.RawMessage(`false`)), "false is the bool zero value")
+	assert.True(t, isZeroJSONValue(json.RawMessage(`0`)), "0 is the numeric zero value")
+	assert.True(t, isZeroJSONValue(json.RawMessage(`0.0`)), "0.0 decodes to float64 zero")
+	assert.False(t, isZeroJSONValue(json.RawMessage(`1`)), "1 is not zero")
+	assert.False(t, isZeroJSONValue(json.RawMessage(`"0"`)), "a string is not a zero value")
+	assert.False(t, isZeroJSONValue(json.RawMessage(`null`)), "null decodes to nil, not zero")
+	assert.False(t, isZeroJSONValue(json.RawMessage(`[]`)), "an array is not a zero value")
+}
+
+func TestFlattenChatToolForResponses(t *testing.T) {
+	t.Run("empty map passes through unchanged", func(t *testing.T) {
+		// Defensive path: flattenChatToolsForResponses never forwards an
+		// empty tool, but the helper stays total on its own.
+		tool := map[string]any{}
+		assert.Equal(t, tool, flattenChatToolForResponses(tool))
+	})
+
+	t.Run("custom tool flattens its nested payload", func(t *testing.T) {
+		flattened := flattenChatToolForResponses(map[string]any{
+			"type": "custom",
+			"custom": map[string]any{
+				"name":        "code_exec",
+				"description": "Run code.",
+				"format":      map[string]any{"type": "grammar", "syntax": "lark"},
+			},
+		})
+		assert.Equal(t, map[string]any{
+			"type":        "custom",
+			"name":        "code_exec",
+			"description": "Run code.",
+			"format":      map[string]any{"type": "grammar", "syntax": "lark"},
+		}, flattened)
+	})
+
+	t.Run("flat function tool passes through as a clone", func(t *testing.T) {
+		tool := map[string]any{"type": "function", "name": "fn", "parameters": map[string]any{"type": "object"}}
+		flattened := flattenChatToolForResponses(tool)
+		assert.Equal(t, tool, flattened)
+		flattened["name"] = "mutated"
+		assert.Equal(t, "fn", tool["name"], "the pass-through must be a detached clone")
+	})
+
+	t.Run("type with surrounding whitespace flattens as function", func(t *testing.T) {
+		flattened := flattenChatToolForResponses(map[string]any{
+			"type":     " function ",
+			"function": map[string]any{"name": "fn"},
+		})
+		assert.Equal(t, map[string]any{"type": " function ", "name": "fn"}, flattened)
+	})
+}
+
+func TestConvertChatRequestToResponses_ToleratedZeroValueEdgeCases(t *testing.T) {
+	t.Run("tolerated field with invalid JSON extra rejected", func(t *testing.T) {
+		// isZeroJSONValue cannot decide on undecodable data, so the field
+		// falls through to rejection like any non-zero value.
+		_, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+			ExtraFields: chatViaResponsesExtras(map[string]string{
+				"frequency_penalty": `{`,
+			}),
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "frequency_penalty")
+	})
+
+	t.Run("tolerated field with non-zero value rejected", func(t *testing.T) {
+		_, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+			ExtraFields: chatViaResponsesExtras(map[string]string{
+				"presence_penalty": `0.5`,
+			}),
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "presence_penalty")
+	})
+}

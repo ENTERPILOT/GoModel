@@ -565,3 +565,48 @@ func TestConvertMessagesToResponsesInput_NormalizesEmptyToolCallArguments(t *tes
 		})
 	}
 }
+
+func TestConvertMessagesToResponsesInput_DynamicContentEdgeCases(t *testing.T) {
+	tests := []struct {
+		name        string
+		content     core.MessageContent
+		wantContent any
+	}{
+		{
+			name:        "null JSON part fails normalization and becomes empty",
+			content:     []any{nil},
+			wantContent: "",
+		},
+		{
+			name:        "unmarshalable dynamic part fails normalization and becomes empty",
+			content:     []any{map[string]any{"type": "text", "text": func() {}}},
+			wantContent: "",
+		},
+		{
+			name:        "unknown dynamic part type fails normalization and becomes empty",
+			content:     []any{map[string]any{"type": "thumbnail"}},
+			wantContent: "",
+		},
+		{
+			name:        "typed nil content in interface form becomes empty",
+			content:     []core.ContentPart(nil),
+			wantContent: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input, _, err := ConvertMessagesToResponsesInput([]core.Message{
+				{Role: "user", Content: tt.content},
+			})
+			if tt.wantContent == nil {
+				require.Error(t, err)
+				assert.Nil(t, input)
+				return
+			}
+			require.NoError(t, err)
+			items := responsesInputItems(t, input)
+			require.Len(t, items, 1)
+			assert.Equal(t, tt.wantContent, items[0].Content)
+		})
+	}
+}

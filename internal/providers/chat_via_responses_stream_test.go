@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -1083,4 +1084,329 @@ func TestOpenAIChatStreamConverter_ArgumentsDeltaWithoutItemIDSkipped(t *testing
 	require.Len(t, events, 3)
 	assert.Equal(t, "stop", chatChunkFinishReason(t, events[1].Payload))
 	assert.True(t, events[2].Done)
+}
+
+func TestOpenAIChatStreamConverter_InternalStateEdgeCases(t *testing.T) {
+	t.Run("empty arguments delta emits start chunk without arguments fragment", func(t *testing.T) {
+		// A known function_call item whose delta is the empty string: the
+		// start chunk is still owed, but no arguments fragment goes out.
+		stream := chatViaResponsesStreamOf(
+			chatViaResponsesCreated,
+			`{"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_a","name":"fn_a","arguments":""}}`,
+			`{"type":"response.function_call_arguments.delta","sequence_number":3,"item_id":"fc_1","output_index":0,"delta":""}`,
+			`{"type":"response.completed","sequence_number":4,"response":{"id":"resp_abc123","status":"completed","output":[{"id":"fc_1","type":"function_call","call_id":"call_a","name":"fn_a","arguments":""}]}}`,
+		)
+
+		events, raw, err := readChatViaResponsesStream(t, stream, false)
+		require.NoError(t, err)
+		// role + start chunk + finish + [DONE]; no arguments fragment chunk.
+		require.Len(t, events, 4)
+
+		start := chatChunkToolCalls(t, events[1].Payload)[0].(map[string]any)
+		function, ok := start["function"].(map[string]any)
+		require.True(t, ok)
+		assert.Empty(t, function["arguments"])
+
+		assert.Equal(t, "tool_calls", chatChunkFinishReason(t, events[2].Payload))
+		assert.True(t, events[3].Done)
+		assert.Equal(t, 2, strings.Count(raw, "tool_calls"), "only the start chunk carries tool_calls")
+	})
+
+	t.Run("arguments delta for added message item ignored", func(t *testing.T) {
+		// A message item already registered under the output_index has no
+		// tool index; arguments deltas against it are dropped, not minted
+		// as a tool call.
+		stream := chatViaResponsesStreamOf(
+			chatViaResponsesCreated,
+			chatViaResponsesMessage,
+			`{"type":"response.function_call_arguments.delta","sequence_number":3,"item_id":"msg_1","output_index":0,"delta":"{}"}`,
+			`{"type":"response.output_text.delta","sequence_number":4,"item_id":"msg_1","output_index":0,"content_index":0,"delta":"hi"}`,
+			`{"type":"response.completed","sequence_number":5,"response":{"id":"resp_abc123","status":"completed","output":[{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"hi","annotations":[]}]}]}}`,
+		)
+
+		events, _, err := readChatViaResponsesStream(t, stream, false)
+		require.NoError(t, err)
+		// role + content + finish + [DONE]; the arguments delta was dropped.
+		require.Len(t, events, 4)
+		assert.Equal(t, "hi", chatChunkDelta(t, events[1].Payload)["content"])
+		assert.Equal(t, "stop", chatChunkFinishReason(t, events[2].Payload))
+		assert.True(t, events[3].Done)
+	})
+
+	t.Run("output item done without replay state emits nothing", func(t *testing.T) {
+		// A done event whose payload carries no extra_content is a no-op
+		// for replay relaying.
+		stream := chatViaResponsesStreamOf(
+			chatViaResponsesCreated,
+			chatViaResponsesMessage,
+			`{"type":"response.output_text.delta","sequence_number":3,"item_id":"msg_1","output_index":0,"content_index":0,"delta":"hi"}`,
+			`{"type":"response.output_item.done","sequence_number":4,"output_index":0,"item":{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"hi","annotations":[]}]}}`,
+			`{"type":"response.completed","sequence_number":5,"response":{"id":"resp_abc123","status":"completed","output":[{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"hi","annotations":[]}]}]}}`,
+		)
+
+		events, _, err := readChatViaResponsesStream(t, stream, false)
+		require.NoError(t, err)
+		// role + content + finish + [DONE]; no replay chunk.
+		require.Len(t, events, 4)
+		assert.Nil(t, chatChunkDelta(t, events[1].Payload)["extra_content"])
+	})
+
+	t.Run("done without identity and unknown output index fails closed", func(t *testing.T) {
+		// A delta-first function_call whose done event arrives at an
+		// unknown output_index (a second delta re-registered the item):
+		// the done payload lacks identity, so the stream fails truncated.
+		stream := chatViaResponsesStreamOf(
+			chatViaResponsesCreated,
+			`{"type":"response.function_call_arguments.delta","sequence_number":2,"item_id":"fc_1","output_index":0,"delta":"{\"a\":1}"}`,
+			`{"type":"response.function_call_arguments.delta","sequence_number":3,"item_id":"fc_1","output_index":7,"delta":"}"}`,
+			`{"type":"response.output_item.done","sequence_number":4,"output_index":7,"item":{"id":"fc_1","type":"function_call","arguments":"{\"a\":1}"}}`,
+			`{"type":"response.completed","sequence_number":5,"response":{"id":"resp_abc123","status":"completed","output":[]}}`,
+		)
+
+		events, raw, err := readChatViaResponsesStream(t, stream, false)
+		require.Error(t, err)
+		require.ErrorIs(t, err, streaming.ErrStreamIncomplete)
+		// role + in-band truncation error: no finish chunk, no [DONE].
+		require.Len(t, events, 2)
+		errorPayload, ok := events[1].Payload["error"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "stream_incomplete", errorPayload["code"])
+		assert.NotContains(t, raw, "[DONE]")
+	})
+
+	t.Run("delta-first done without identity fails closed", func(t *testing.T) {
+		// A delta-first function_call whose done event carries no call id
+		// or name: the identity stays unrecoverable from the done payload,
+		// so the stream fails truncated right there.
+		stream := chatViaResponsesStreamOf(
+			chatViaResponsesCreated,
+			`{"type":"response.function_call_arguments.delta","sequence_number":2,"item_id":"fc_1","output_index":0,"delta":"{\"a\":1}"}`,
+			`{"type":"response.output_item.done","sequence_number":3,"output_index":0,"item":{"id":"fc_1","type":"function_call","arguments":"{\"a\":1}"}}`,
+			`{"type":"response.completed","sequence_number":4,"response":{"id":"resp_abc123","status":"completed","output":[]}}`,
+		)
+
+		events, raw, err := readChatViaResponsesStream(t, stream, false)
+		require.Error(t, err)
+		require.ErrorIs(t, err, streaming.ErrStreamIncomplete)
+		// role + in-band truncation error: no start chunk without identity,
+		// no finish chunk, no [DONE].
+		require.Len(t, events, 2)
+		errorPayload, ok := events[1].Payload["error"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "stream_incomplete", errorPayload["code"])
+		assert.NotContains(t, raw, "tool_calls")
+		assert.NotContains(t, raw, "[DONE]")
+	})
+
+	t.Run("function call extra content without registered item skipped", func(t *testing.T) {
+		// A function_call done event whose item the stream never
+		// registered (not even via a delta) has no dense tool index: the
+		// replay state has nowhere to ride, so it is skipped.
+		stream := chatViaResponsesStreamOf(
+			chatViaResponsesCreated,
+			`{"type":"response.output_item.done","sequence_number":2,"output_index":0,"item":{"id":"fc_9","type":"function_call","call_id":"call_a","name":"fn_a","arguments":"{}","extra_content":{"openai":{"item_reference":"fc_9"}}}}`,
+			chatViaResponsesMessage,
+			`{"type":"response.output_text.delta","sequence_number":3,"item_id":"msg_1","output_index":1,"content_index":0,"delta":"hi"}`,
+			`{"type":"response.completed","sequence_number":4,"response":{"id":"resp_abc123","status":"completed","output":[{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"hi","annotations":[]}]}]}}`,
+		)
+
+		events, _, err := readChatViaResponsesStream(t, stream, false)
+		require.NoError(t, err)
+		// role + content + finish + [DONE]; no replay chunk for the
+		// unregistered function_call item.
+		require.Len(t, events, 4)
+		assert.Nil(t, chatChunkDelta(t, events[1].Payload)["extra_content"])
+		assert.Equal(t, "stop", chatChunkFinishReason(t, events[2].Payload))
+		assert.True(t, events[3].Done)
+	})
+
+	t.Run("terminal output relays extra content only once", func(t *testing.T) {
+		// The same message id appears at two output indexes in the
+		// terminal response: the relay is keyed by id, so the second
+		// occurrence is skipped.
+		stream := chatViaResponsesStreamOf(
+			chatViaResponsesCreated,
+			`{"type":"response.output_item.done","sequence_number":2,"output_index":0,"item":{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[],"extra_content":{"google":{"thought_signature":"sig"}}}}`,
+			`{"type":"response.completed","sequence_number":3,"response":{"id":"resp_abc123","status":"completed","output":[{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[]},{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[],"extra_content":{"google":{"thought_signature":"sig"}}}]}}`,
+		)
+
+		events, _, err := readChatViaResponsesStream(t, stream, false)
+		require.NoError(t, err)
+		// role + replay chunk + finish + [DONE]; the duplicate relay is
+		// skipped.
+		require.Len(t, events, 4)
+		assert.Equal(t, map[string]any{"google": map[string]any{"thought_signature": "sig"}},
+			chatChunkDelta(t, events[1].Payload)["extra_content"])
+		assert.Equal(t, "stop", chatChunkFinishReason(t, events[2].Payload))
+		assert.True(t, events[3].Done)
+	})
+}
+
+func TestOpenAIChatStreamConverter_ReadEdgeCases(t *testing.T) {
+	t.Run("multiple reads after terminal event hit EOF", func(t *testing.T) {
+		// After the terminal event drained, subsequent reads must hit the
+		// finished branch and close with io.EOF rather than loop forever.
+		stream := chatViaResponsesStreamOf(
+			`{"type":"response.completed","sequence_number":1,"response":{"id":"resp_abc123","status":"completed","output":[]}}`,
+		)
+		reader := io.NopCloser(strings.NewReader(stream))
+		converter := NewOpenAIChatStreamConverter(reader, "m", "p", false)
+		defer func() { _ = converter.Close() }()
+
+		_, err := io.ReadAll(converter)
+		require.NoError(t, err)
+
+		// The finished branch: one more read returns (0, io.EOF) without
+		// touching the upstream reader.
+		n, err := converter.Read(make([]byte, 1))
+		assert.Equal(t, 0, n)
+		require.ErrorIs(t, err, io.EOF)
+	})
+
+	t.Run("zero byte read after buffer drained retries without data", func(t *testing.T) {
+		// With the buffer drained, the converter may read from upstream
+		// and still have nothing to emit yet: Read must return (0, nil)
+		// and let the caller retry instead of blocking.
+		converter := NewOpenAIChatStreamConverter(io.NopCloser(&blockingEmptyReader{}), "m", "p", false)
+		defer func() { _ = converter.Close() }()
+
+		n, err := converter.Read(make([]byte, 8))
+		assert.Equal(t, 0, n)
+		require.NoError(t, err)
+	})
+}
+
+// blockingEmptyReader yields no bytes and no error, so the converter's Read
+// reaches the no-data-yet retry path.
+type blockingEmptyReader struct{}
+
+func (r *blockingEmptyReader) Read([]byte) (int, error) { return 0, nil }
+func (r *blockingEmptyReader) Close() error             { return nil }
+
+func TestOpenAIChatStreamConverter_InternalHelpers(t *testing.T) {
+	t.Run("emit chunk defends against a nil delta", func(t *testing.T) {
+		converter := NewOpenAIChatStreamConverter(io.NopCloser(strings.NewReader("")), "m", "p", false)
+		converter.(*OpenAIChatStreamConverter).emitChunk(nil, nil)
+		assert.Positive(t, converter.(*OpenAIChatStreamConverter).buffer.Len())
+		_ = converter.Close()
+	})
+
+	t.Run("terminal output item falls back to output index and beyond range", func(t *testing.T) {
+		output := []responsesTerminalOutputItem{
+			{ID: "msg_9", Type: "message"},
+			{ID: "msg_2", Type: "message"},
+		}
+		item := terminalOutputItem(output, "msg_2", 5)
+		require.NotNil(t, item)
+		assert.Equal(t, "msg_2", item.ID)
+
+		item = terminalOutputItem(output, "unknown", 1)
+		require.NotNil(t, item)
+		assert.Equal(t, "msg_2", item.ID, "index fallback returns the item at outputIndex")
+
+		assert.Nil(t, terminalOutputItem(output, "unknown", -1), "negative index has no fallback")
+		assert.Nil(t, terminalOutputItem(output, "unknown", 9), "out-of-range index has no fallback")
+		assert.Nil(t, terminalOutputItem(nil, "unknown", 0), "empty output yields nothing")
+	})
+
+	t.Run("fail helpers are no-ops once finished", func(t *testing.T) {
+		converter := NewOpenAIChatStreamConverter(io.NopCloser(strings.NewReader("")), "m", "p", false)
+		defer func() { _ = converter.Close() }()
+		sc := converter.(*OpenAIChatStreamConverter)
+
+		sc.finished = true
+		sc.failUpstream("", "")
+		assert.False(t, sc.failed, "failUpstream is a no-op once finished")
+		require.NoError(t, sc.endErr)
+
+		sc.finished = false
+		sc.failed = true
+		sc.failTruncated(errors.New("late truncation"))
+		assert.NoError(t, sc.endErr, "failTruncated is a no-op once failed")
+	})
+}
+
+func TestOpenAIChatStreamConverter_DefensiveHelperPaths(t *testing.T) {
+	t.Run("emit payload with unmarshalable value is a no-op", func(t *testing.T) {
+		// Defensive: every real payload is marshalable; a value that is
+		// not must drop silently rather than corrupt the SSE buffer.
+		converter := NewOpenAIChatStreamConverter(io.NopCloser(strings.NewReader("")), "m", "p", false)
+		defer func() { _ = converter.Close() }()
+		sc := converter.(*OpenAIChatStreamConverter)
+
+		sc.emitPayload(map[string]any{"bad": func() {}})
+		assert.Equal(t, 0, sc.buffer.Len(), "unmarshalable payloads append nothing")
+	})
+
+	t.Run("end error without buffered bytes returns the error directly", func(t *testing.T) {
+		// Defensive: every path that sets finished or failed appends to
+		// the buffer; when nothing buffered, Read still ends with the
+		// recorded error.
+		converter := NewOpenAIChatStreamConverter(io.NopCloser(strings.NewReader("")), "m", "p", false)
+		sc := converter.(*OpenAIChatStreamConverter)
+
+		sentinel := errors.New("forced end")
+		sc.endErr = sentinel
+		n, err := sc.Read(make([]byte, 8))
+		assert.Equal(t, 0, n)
+		require.ErrorIs(t, err, sentinel)
+
+		// A read after that close is a plain EOF.
+		n, err = sc.Read(make([]byte, 8))
+		assert.Equal(t, 0, n)
+		require.ErrorIs(t, err, io.EOF)
+	})
+
+	t.Run("forced failure with empty buffer ends with io EOF", func(t *testing.T) {
+		converter := NewOpenAIChatStreamConverter(io.NopCloser(strings.NewReader("")), "m", "p", false)
+		sc := converter.(*OpenAIChatStreamConverter)
+
+		sc.failed = true
+		n, err := sc.Read(make([]byte, 8))
+		assert.Equal(t, 0, n)
+		require.ErrorIs(t, err, io.EOF, "no recorded error falls back to io.EOF")
+		_ = sc.Close()
+	})
+}
+
+type flakyFailReader struct {
+	reads int
+}
+
+func (r *flakyFailReader) Read(p []byte) (int, error) {
+	r.reads++
+	return 0, errors.New("upstream gone")
+}
+func (r *flakyFailReader) Close() error { return nil }
+
+func TestOpenAIChatStreamConverter_ReadDefensiveEndPaths(t *testing.T) {
+	t.Run("finished with empty buffer ends with io EOF", func(t *testing.T) {
+		converter := NewOpenAIChatStreamConverter(&flakyFailReader{}, "m", "p", false)
+		sc := converter.(*OpenAIChatStreamConverter)
+		defer func() { _ = sc.Close() }()
+
+		sc.finished = true
+		n, err := sc.Read(make([]byte, 8))
+		assert.Equal(t, 0, n)
+		require.ErrorIs(t, err, io.EOF, "a finished stream with no recorded error ends with io.EOF")
+	})
+}
+
+func TestOpenAIChatStreamConverter_ReadDrainsErrorAfterEndErrorSet(t *testing.T) {
+	// Defensive ordering: endErr set with the upstream failing underneath;
+	// the upstream-error branch must still return the recorded end error
+	// when nothing got buffered.
+	converter := NewOpenAIChatStreamConverter(&flakyFailReader{}, "m", "p", false)
+	sc := converter.(*OpenAIChatStreamConverter)
+
+	sentinel := errors.New("forced end")
+	sc.endErr = sentinel
+	n, err := sc.Read(make([]byte, 8))
+	assert.Equal(t, 0, n)
+	require.ErrorIs(t, err, sentinel)
+
+	n, err = sc.Read(make([]byte, 8))
+	assert.Equal(t, 0, n)
+	require.ErrorIs(t, err, io.EOF)
+	_ = sc.Close()
 }
