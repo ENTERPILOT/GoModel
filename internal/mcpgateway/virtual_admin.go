@@ -45,20 +45,71 @@ func (s *Service) UpsertVirtual(ctx context.Context, virtual ManagedVirtualServe
 		}
 	}
 
-	write := s.virtualStore.UpsertVirtual
-	if _, taken := s.manager.get(virtual.Name); taken {
-		write = s.virtualStore.UpdateVirtual
-	}
-	if err := write(ctx, virtual); err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return VirtualServerView{}, invalidVirtual("name %q is used by MCP server %q; choose another name", virtual.Name, virtual.Name)
-		}
+	if err := s.persistVirtual(ctx, virtual); err != nil {
 		return VirtualServerView{}, err
 	}
 	if err := s.Reload(ctx); err != nil {
 		return VirtualServerView{}, fmt.Errorf("mcp virtual server %q was saved but not applied: %w", virtual.Name, err)
 	}
 	return s.virtualView(virtual.Spec()), nil
+}
+
+// persistVirtual stores virtual unless an MCP server holds its name. It holds
+// mutateMu, which server saves hold too, and checks stored rows rather than
+// the loaded lists, so neither an overlapping save on this instance nor one
+// another instance made before this one refreshed can claim the same name.
+func (s *Service) persistVirtual(ctx context.Context, virtual ManagedVirtualServer) error {
+	s.mutateMu.Lock()
+	defer s.mutateMu.Unlock()
+
+	taken, err := s.serverNameTaken(ctx, virtual.Name)
+	if err != nil {
+		return err
+	}
+	write := s.virtualStore.UpsertVirtual
+	if taken {
+		// Only an existing row stays editable; Update fails rather than
+		// recreating it if a delete wins the race.
+		write = s.virtualStore.UpdateVirtual
+	}
+	if err := write(ctx, virtual); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return invalidVirtual("name %q is used by MCP server %q; choose another name", virtual.Name, virtual.Name)
+		}
+		return err
+	}
+	return nil
+}
+
+// serverNameTaken reports whether a config-declared or stored MCP server
+// holds name. It reads the store, so a server another instance saved counts
+// before this instance reloads it.
+func (s *Service) serverNameTaken(ctx context.Context, name string) (bool, error) {
+	if s.IsManaged(name) {
+		return true, nil
+	}
+	if s.store == nil {
+		return false, nil
+	}
+	return storedRowExists(s.store.Get(ctx, name))
+}
+
+// virtualNameTaken is serverNameTaken for virtual servers.
+func (s *Service) virtualNameTaken(ctx context.Context, name string) (bool, error) {
+	if s.IsManagedVirtual(name) {
+		return true, nil
+	}
+	if s.virtualStore == nil {
+		return false, nil
+	}
+	return storedRowExists(s.virtualStore.GetVirtual(ctx, name))
+}
+
+func storedRowExists[T any](_ *T, err error) (bool, error) {
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // DeleteVirtual removes one admin-managed virtual server, then reconciles.

@@ -420,3 +420,37 @@ func TestStaleVirtualSessionClosesOnNextRequest(t *testing.T) {
 	assert.False(t, bound, "the stale binding is dropped")
 	assert.Eventually(t, func() bool { return len(slices.Collect(host.Sessions())) == 0 }, 5*time.Second, 10*time.Millisecond, "the stale session is closed")
 }
+
+// Another instance sharing the database saved a row this one has not loaded
+// yet. Name checks read stored rows, so the clash is still refused.
+func TestNameChecksSeeRowsAnotherInstanceSaved(t *testing.T) {
+	t.Run("virtual server after a stored server", func(t *testing.T) {
+		store := &memoryStore{rows: map[string]ManagedServer{}}
+		virtualStore := &memoryVirtualStore{rows: map[string]ManagedVirtualServer{}}
+		service, _ := newTestServiceWithOptions(t, Options{
+			ConfigServers: map[string]ServerSpec{"alpha": testSpec("alpha", newTestUpstream(t, "alpha", addEchoTool("echo")), nil)},
+			Store:         store,
+			VirtualStore:  virtualStore,
+		})
+		store.rows["coding"] = ManagedServer{Name: "coding", URL: "https://example.com/mcp", Transport: config.MCPTransportHTTP, Enabled: true}
+
+		_, err := service.UpsertVirtual(context.Background(), ManagedVirtualServer{Name: "coding", Servers: []string{"alpha"}})
+		require.ErrorIs(t, err, ErrInvalidVirtualServer)
+		assert.Contains(t, err.Error(), `name "coding" is used by MCP server "coding"`)
+		assert.Empty(t, virtualStore.rows)
+	})
+
+	t.Run("server after a stored virtual server", func(t *testing.T) {
+		store := &memoryStore{rows: map[string]ManagedServer{}}
+		virtualStore := &memoryVirtualStore{rows: map[string]ManagedVirtualServer{}}
+		service, err := NewService(context.Background(), Options{Store: store, VirtualStore: virtualStore})
+		require.NoError(t, err)
+		t.Cleanup(service.Close)
+		virtualStore.put(ManagedVirtualServer{Name: "coding", Servers: []string{"alpha"}})
+		require.False(t, service.IsVirtual("coding"), "this instance has not loaded it yet")
+
+		err = service.Upsert(context.Background(), ManagedServer{Name: "coding", URL: "https://example.com/mcp", Transport: config.MCPTransportHTTP})
+		require.ErrorIs(t, err, ErrVirtualNameTaken)
+		assert.Empty(t, store.rows)
+	})
+}

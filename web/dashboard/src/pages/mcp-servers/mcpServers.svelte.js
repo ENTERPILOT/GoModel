@@ -90,6 +90,10 @@ class McpServersState {
   // delete just removed, or replace the timer the newer one scheduled.
   #listSeq = 0;
   #virtualSeq = 0;
+  // Bumped whenever the virtual-server editor opens or closes, so a save
+  // that finishes after the operator moved on cannot close or overwrite the
+  // editor they are using now.
+  #virtualFormSeq = 0;
 
   // --- server list -------------------------------------------------------
 
@@ -390,6 +394,7 @@ class McpServersState {
   // --- virtual server editor ----------------------------------------------
 
   openVirtualCreate() {
+    this.#virtualFormSeq += 1;
     this.virtualFormMode = "create";
     this.virtualFormError = "";
     this.virtualForm = defaultMcpVirtualServerForm();
@@ -400,6 +405,7 @@ class McpServersState {
     if (!virtual || virtual.managed) {
       return;
     }
+    this.#virtualFormSeq += 1;
     this.virtualFormMode = "edit";
     this.virtualFormError = "";
     this.virtualForm = mcpVirtualServerFormFromVirtual(virtual);
@@ -407,6 +413,7 @@ class McpServersState {
   }
 
   closeVirtualForm() {
+    this.#virtualFormSeq += 1;
     this.virtualFormOpen = false;
     this.virtualFormMode = "create";
     this.virtualFormError = "";
@@ -430,6 +437,7 @@ class McpServersState {
     }
     this.virtualFormError = "";
     this.virtualFormSubmitting = true;
+    const formSeq = this.#virtualFormSeq;
     try {
       const outcome = await sendAdminMutation("/admin/mcp-virtual-servers", "PUT", built.payload, {
         label: "save mcp virtual server",
@@ -439,17 +447,30 @@ class McpServersState {
       if (outcome.status === "stale") {
         return;
       }
+      // The editor that submitted may be gone: report the outcome without
+      // touching the one open now.
+      const sameEditor = formSeq === this.#virtualFormSeq;
       if (outcome.status === "unavailable") {
         this.available = false;
-        this.virtualFormError = outcome.error;
+        if (sameEditor) {
+          this.virtualFormError = outcome.error;
+        } else {
+          flash.error(outcome.error);
+        }
         return;
       }
       if (outcome.status === "error") {
-        this.virtualFormError = outcome.error;
+        if (sameEditor) {
+          this.virtualFormError = outcome.error;
+        } else {
+          flash.error(outcome.error);
+        }
         return;
       }
       flash.success(m.mcp_virtual_saved({ name: built.payload.name }));
-      this.closeVirtualForm();
+      if (sameEditor) {
+        this.closeVirtualForm();
+      }
       void this.fetchVirtualServers();
     } finally {
       this.virtualFormSubmitting = false;

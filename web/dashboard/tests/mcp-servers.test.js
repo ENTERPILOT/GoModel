@@ -783,3 +783,22 @@ test("a failed virtual-server load is reported, not shown as an empty list", () 
   assert.match(list, /\{#if mcpServers\.virtualError\}/, "the section shows the load error");
   assert.match(list, /\{#if !mcpServers\.virtualError\}\s*<p class="empty-state">/, "the empty state is hidden while the load failed");
 });
+
+// Regression: a slow virtual-server save closed whatever editor was open when
+// it finished, discarding edits the operator had started since.
+test("a virtual-server save only closes the editor that submitted it", () => {
+  const SRC = fileURLToPath(new URL("../src", import.meta.url));
+  const store = readFileSync(join(SRC, "pages/mcp-servers/mcpServers.svelte.js"), "utf8");
+  const method = (name) => (store.match(new RegExp(`\\n  ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n  \\}`)) || [""])[0];
+
+  for (const name of ["openVirtualCreate", "openVirtualEdit", "closeVirtualForm"]) {
+    assert.match(method(name), /this\.#virtualFormSeq \+= 1;/, `${name} must start a new editor session`);
+  }
+
+  const submit = (store.match(/async submitVirtualForm\(\) \{[\s\S]*?\n  \}/) || [""])[0];
+  const capture = submit.indexOf("const formSeq = this.#virtualFormSeq;");
+  assert.ok(capture >= 0 && capture < submit.indexOf("await "), "the session is captured before the request");
+  assert.match(submit, /const sameEditor = formSeq === this\.#virtualFormSeq;/);
+  assert.match(submit, /if \(sameEditor\) \{\s*\n\s*this\.closeVirtualForm\(\);/, "only the submitting editor is closed");
+  assert.equal(/\n      this\.closeVirtualForm\(\);/.test(submit), false, "no unconditional close remains");
+});

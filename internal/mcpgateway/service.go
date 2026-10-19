@@ -417,7 +417,14 @@ func (s *Service) persist(ctx context.Context, server *ManagedServer) error {
 		return err
 	}
 	write := s.store.Upsert
-	if s.IsVirtual(server.Name) {
+	// Stored rows, not the loaded list: a virtual server another instance
+	// saved counts before this one refreshes. mutateMu, which virtual saves
+	// hold too, keeps an overlapping save on this instance from slipping in.
+	virtualTaken, err := s.virtualNameTaken(ctx, server.Name)
+	if err != nil {
+		return err
+	}
+	if virtualTaken {
 		// Only a new server is refused: one stored before the virtual server
 		// was declared keeps its endpoint and stays editable. Update fails
 		// atomically if the row is gone, so an edit racing a delete cannot
