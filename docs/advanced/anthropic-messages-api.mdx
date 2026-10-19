@@ -248,7 +248,15 @@ features that have no canonical equivalent are not preserved end to end:
   (`source.type: "content"`) degrades to text.
 - **`search_result` blocks** degrade to text (title, source URL, and content);
   citation metadata is dropped.
-- **Other content blocks** (`container_upload`, `tool_reference`, …) are rejected
+- **Deferred tool loading** is accepted. A tool marked `defer_loading: true` is
+  an ordinary custom tool whose schema the API loads on demand; the marker has
+  no canonical equivalent and is dropped, so the tool is sent like any other.
+  A `tool_reference` (the tool search's match) degrades to the tool name as
+  text, because no provider behind the translated pipeline loads tool schemas
+  by reference. A server-side `tool_search_tool_result` block degrades the same
+  way into the user turn. This is what lets Claude Code run with
+  `ENABLE_TOOL_SEARCH` through the gateway against a non-Anthropic model.
+- **Other content blocks** (`container_upload`, …) are rejected
   with a clear `400` error rather than silently dropped.
 - **`stop_sequences`** are honored on every provider. Providers that report the
   matched sequence natively (Anthropic) get the full contract back:
