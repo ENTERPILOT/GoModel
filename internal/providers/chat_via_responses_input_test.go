@@ -651,7 +651,7 @@ func TestConvertMessagesToResponsesInput_RefusalBadJSONDropped(t *testing.T) {
 	require.NoError(t, err)
 	items := responsesInputItems(t, input)
 	require.Len(t, items, 1)
-	assert.Equal(t, "", items[0].Content, "a malformed refusal must not produce a content part")
+	assert.Empty(t, items[0].Content, "a malformed refusal must not produce a content part")
 }
 
 func TestConvertMessagesToResponsesInput_RebuildsEncryptedReasoning(t *testing.T) {
