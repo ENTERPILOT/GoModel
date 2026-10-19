@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -152,6 +153,10 @@ type responsesStreamItemView struct {
 	Name   string `json:"name"`
 	// ExtraContent is the item's replay state, relayed on completion.
 	ExtraContent json.RawMessage `json:"extra_content"`
+	// EncryptedContent is the ChatGPT backend's reasoning.encrypted_content
+	// member; relayed under the chat "reasoning.encrypted_content" key so
+	// the next request can rebuild the native Responses member.
+	EncryptedContent json.RawMessage `json:"encrypted_content"`
 }
 
 // responsesStreamErrorView decodes the error member of a failed terminal
@@ -185,6 +190,10 @@ type responsesTerminalOutputItem struct {
 	Name         string          `json:"name"`
 	Arguments    string          `json:"arguments"`
 	ExtraContent json.RawMessage `json:"extra_content"`
+	// EncryptedContent is the ChatGPT backend's reasoning.encrypted_content
+	// for reasoning items; relayed under the chat "reasoning.encrypted_content"
+	// key when the stream did not deliver an output_item.done for the item.
+	EncryptedContent json.RawMessage `json:"encrypted_content"`
 }
 
 // responsesTerminalUsageView decodes the usage object of a terminal
@@ -400,15 +409,18 @@ func (sc *OpenAIChatStreamConverter) handleItemDone(outputIndex int, raw json.Ra
 		}
 		sc.deliverPendingIdentity(state, item.CallID, item.Name)
 	}
-	sc.emitItemExtraContent(item.ID, outputIndex, item.Type, item.ExtraContent)
+	sc.emitItemExtraContent(item.ID, outputIndex, item.Type, item.ExtraContent, item.EncryptedContent)
 }
 
 // emitItemExtraContent emits one chunk carrying the item's extra_content,
 // once per item. Reasoning and message state rides the delta's extra_content
 // member, function_call state the tool call's extra_content — the same
 // convention the inverse converter (OpenAIResponsesStreamConverter) reads.
-func (sc *OpenAIChatStreamConverter) emitItemExtraContent(itemID string, outputIndex int, itemType string, extra json.RawMessage) {
-	if core.IsJSONNull(extra) || (itemID != "" && sc.extraContentSent[itemID]) {
+// For reasoning items, the ChatGPT backend's reasoning.encrypted_content
+// is also relayed under the chat "reasoning.encrypted_content" key so the
+// next translated request can rebuild the native Responses member.
+func (sc *OpenAIChatStreamConverter) emitItemExtraContent(itemID string, outputIndex int, itemType string, extra, encrypted json.RawMessage) {
+	if (core.IsJSONNull(extra) && (core.IsJSONNull(encrypted) || itemType != "reasoning")) || (itemID != "" && sc.extraContentSent[itemID]) {
 		return
 	}
 	switch itemType {
@@ -424,6 +436,18 @@ func (sc *OpenAIChatStreamConverter) emitItemExtraContent(itemID string, outputI
 			"index":                state.toolIndex,
 			core.ExtraContentField: extra,
 		}}})
+	case "reasoning":
+		// Always emit at least one chunk for a reasoning item, even when
+		// only encrypted_content is present, so the chat round-trip
+		// carries the model's encrypted state into the next request.
+		payload := map[string]any{}
+		if !core.IsJSONNull(extra) {
+			payload[core.ExtraContentField] = extra
+		}
+		if !core.IsJSONNull(encrypted) {
+			payload["reasoning.encrypted_content"] = encrypted
+		}
+		sc.emitDelta(payload)
 	default:
 		sc.emitDelta(map[string]any{core.ExtraContentField: extra})
 	}
@@ -532,7 +556,13 @@ func (sc *OpenAIChatStreamConverter) handleTerminal(eventType string, raw json.R
 	// fallback) and deliver the start chunk and buffered arguments. Only an
 	// item absent from the output or still lacking identity is
 	// unrecoverable: fail closed rather than reporting a successful finish.
-	for itemID, state := range sc.items {
+	// Iterate identity-pending items in ascending toolIndex order so the
+	// emitted chunks are stable across runs (Go map order is randomized).
+	for _, itemID := range sortedPendingToolCallIDs(sc.items) {
+		state := sc.items[itemID]
+		if state == nil {
+			continue
+		}
 		if !state.identityPending {
 			continue
 		}
@@ -557,7 +587,7 @@ func (sc *OpenAIChatStreamConverter) handleTerminal(eventType string, raw json.R
 	// The terminal response's output still owes the client any replay state
 	// (extra_content) its items carry when no output_item.done delivered it.
 	for outputIndex, item := range response.Output {
-		sc.emitItemExtraContent(item.ID, outputIndex, item.Type, item.ExtraContent)
+		sc.emitItemExtraContent(item.ID, outputIndex, item.Type, item.ExtraContent, item.EncryptedContent)
 	}
 	sc.finished = true
 	sc.emitChunk(map[string]any{}, terminalFinishReason(&response, sc.nextToolCallIdx > 0))
@@ -565,6 +595,23 @@ func (sc *OpenAIChatStreamConverter) handleTerminal(eventType string, raw json.R
 		sc.emitUsage(response.Usage)
 	}
 	sc.buffer.AppendString("data: [DONE]\n\n")
+}
+
+// sortedPendingToolCallIDs returns the identity-pending item IDs in
+// ascending toolIndex order. The stream converter iterates them in this
+// order at terminal time so the start-chunk and buffered-argument
+// sequence is stable across runs (Go map iteration order is randomized).
+func sortedPendingToolCallIDs(items map[string]*chatStreamItemState) []string {
+	pending := make([]string, 0, len(items))
+	for itemID, state := range items {
+		if state != nil && state.identityPending {
+			pending = append(pending, itemID)
+		}
+	}
+	sort.Slice(pending, func(i, j int) bool {
+		return items[pending[i]].toolIndex < items[pending[j]].toolIndex
+	})
+	return pending
 }
 
 // terminalOutputItem finds itemID in a terminal response's output, falling

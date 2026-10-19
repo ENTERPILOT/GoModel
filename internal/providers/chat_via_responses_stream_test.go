@@ -1410,3 +1410,102 @@ func TestOpenAIChatStreamConverter_ReadDrainsErrorAfterEndErrorSet(t *testing.T)
 	require.ErrorIs(t, err, io.EOF)
 	_ = sc.Close()
 }
+
+func TestOpenAIChatStreamConverter_PendingToolCallsRecoveredInToolIndexOrder(t *testing.T) {
+	// Two delta-first tool calls whose identities arrive only in the
+	// terminal response's output must be recovered and emitted in
+	// ascending toolIndex order. The terminal's data array is fed with
+	// fc_b first, fc_a second; the stream must still emit fc_a's start
+	// chunk before fc_b's because fc_a was registered at output_index 0
+	// (its chat toolIndex is therefore 0) and fc_b at output_index 1.
+	stream := chatViaResponsesStreamOf(
+		chatViaResponsesCreated,
+		// Two deltas register two function_call items before any
+		// output_item.added event arrives; their identities stay pending.
+		`{"type":"response.function_call_arguments.delta","sequence_number":2,"item_id":"fc_b","output_index":1,"delta":"{\"b\":1}"}`,
+		`{"type":"response.function_call_arguments.delta","sequence_number":3,"item_id":"fc_a","output_index":0,"delta":"{\"a\":1}"}`,
+		// Terminal response carries the identity (and full arguments) for
+		// both items; ordering in the output array is irrelevant to the
+		// chat toolIndex because the converter tracks each item by its
+		// output_index.
+		`{"type":"response.completed","sequence_number":4,"response":{"id":"resp_abc123","status":"completed","output":[{"id":"fc_b","type":"function_call","call_id":"call_b","name":"fn_b","arguments":"{\"b\":1}"},{"id":"fc_a","type":"function_call","call_id":"call_a","name":"fn_a","arguments":"{\"a\":1}"}]}}`,
+	)
+
+	events, _, err := readChatViaResponsesStream(t, stream, false)
+	require.NoError(t, err)
+	// Walk the chunks for tool_call start chunks with their chat index.
+	indices := []int{}
+	for _, event := range events {
+		if event.Done || len(event.Payload) == 0 {
+			continue
+		}
+		delta := chatChunkDelta(t, event.Payload)
+		raw, ok := delta["tool_calls"].([]any)
+		if !ok {
+			continue
+		}
+		for _, call := range raw {
+			callMap, ok := call.(map[string]any)
+			if !ok {
+				continue
+			}
+			id, _ := callMap["id"].(string)
+			if id == "" {
+				continue
+			}
+			idx, _ := callMap["index"].(float64)
+			indices = append(indices, int(idx))
+		}
+	}
+	require.GreaterOrEqual(t, len(indices), 2, "expected start chunks for both recovered tool calls")
+	assert.Less(t, indices[0], indices[1],
+		"recovered tool calls must be emitted in ascending toolIndex order, got %d before %d", indices[0], indices[1])
+}
+
+func TestOpenAIChatStreamConverter_ItemDoneInvalidJSONIgnored(t *testing.T) {
+	// A valid outer event with an item payload that fails to decode is
+	// dropped rather than failing the stream; the converter only consumes
+	// the call id and name from the item, so a malformed item cannot
+	// deliver them.
+	stream := chatViaResponsesStreamOf(
+		chatViaResponsesCreated,
+		// Top-level event is valid JSON; the `item` field is a string
+		// instead of an object, so json.Unmarshal into
+		// responsesStreamItemView fails and the converter bails early.
+		`{"type":"response.output_item.done","sequence_number":2,"output_index":0,"item":"not-an-object"}`,
+		`{"type":"response.completed","sequence_number":3,"response":{"id":"resp_abc123","status":"completed","output":[]}}`,
+	)
+
+	events, _, err := readChatViaResponsesStream(t, stream, false)
+	require.NoError(t, err)
+	// role + finish + [DONE]
+	require.GreaterOrEqual(t, len(events), 3)
+}
+
+func TestOpenAIChatStreamConverter_ReasoningEncryptedContentRelayed(t *testing.T) {
+	// A reasoning item whose only relayed member is encrypted_content
+	// (no extra_content) still surfaces on the chat surface so the next
+	// translated request can rebuild the native Responses member.
+	stream := chatViaResponsesStreamOf(
+		chatViaResponsesCreated,
+		`{"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[]}}`,
+		`{"type":"response.output_item.done","sequence_number":3,"output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[],"encrypted_content":"opaque"}}`,
+		`{"type":"response.completed","sequence_number":4,"response":{"id":"resp_abc123","status":"completed","output":[{"id":"rs_1","type":"reasoning","encrypted_content":"opaque"}]}}`,
+	)
+
+	events, _, err := readChatViaResponsesStream(t, stream, false)
+	require.NoError(t, err)
+	found := false
+	for _, event := range events {
+		if event.Done || len(event.Payload) == 0 {
+			continue
+		}
+		delta := chatChunkDelta(t, event.Payload)
+		raw, ok := delta["reasoning.encrypted_content"].(string)
+		if ok && raw == "opaque" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "reasoning.encrypted_content must reach the chat surface for round-trip replay")
+}

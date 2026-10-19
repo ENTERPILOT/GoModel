@@ -106,6 +106,12 @@ func chatMessageToResponsesItem(msg core.Message, textType string) (core.Respons
 		Role:        msg.Role,
 		ExtraFields: chatMessageExtraFieldsForResponses(msg.ExtraFields),
 	}
+	// A refusal travels as a Responses content part of type "refusal", not
+	// as an unknown member on the message item. Pull it off extras so the
+	// round-trip preserves the model's explanation.
+	if refusal := chatMessageRefusalText(msg); refusal != "" {
+		blocks = append(blocks, map[string]any{"type": "refusal", "refusal": refusal})
+	}
 	// An empty message carries an empty string, not an empty part: OpenAI
 	// never emits an empty text block.
 	if len(blocks) == 0 {
@@ -159,6 +165,11 @@ func normalizeChatToolCallArguments(arguments string) string {
 // chatToolMessageToResponsesItem converts a tool-role message into a
 // function_call_output item. Non-string content is stringified via JSON,
 // mirroring stringifyResponsesInputValueWithError on the inbound path.
+// Structured attachments (image, audio, file) on a tool result have no
+// stringified equivalent that the upstream Responses API accepts today:
+// the OpenAI Responses function_call_output field is typed as a string,
+// so this path accepts text results only. A future schema bump to
+// []any (string-or-array) is tracked as a follow-up.
 func chatToolMessageToResponsesItem(msg core.Message) (core.ResponsesInputElement, error) {
 	if strings.TrimSpace(msg.ToolCallID) == "" {
 		return core.ResponsesInputElement{}, core.NewInvalidRequestError(
@@ -199,6 +210,13 @@ func chatReasoningReplayItem(msg core.Message) (core.ResponsesInputElement, bool
 		"summary":              json.RawMessage(`[]`),
 		core.ExtraContentField: replayState,
 	}
+	if enc := msg.ExtraFields.Lookup("reasoning.encrypted_content"); !core.IsJSONNull(enc) {
+		// The output side relays the ChatGPT backend's encrypted reasoning
+		// under "reasoning.encrypted_content"; rebuild the native member
+		// here so the next request reaches the upstream with the same
+		// shape Responses expects, not an extra wrapper.
+		extra["encrypted_content"] = enc
+	}
 	if text := chatMessageReasoningText(msg); text != "" {
 		content, err := json.Marshal([]map[string]string{{"type": "reasoning_text", "text": text}})
 		if err == nil {
@@ -228,16 +246,33 @@ func chatMessageReasoningText(msg core.Message) string {
 	return ""
 }
 
+// chatMessageRefusalText returns the refusal explanation recorded on a
+// request message, accepting the same member spelling the output side
+// emits ("refusal"). An assistant turn carrying this on a chat history
+// message is the round-trip of a Responses refusal.
+func chatMessageRefusalText(msg core.Message) string {
+	raw := msg.ExtraFields.Lookup("refusal")
+	if len(raw) == 0 {
+		return ""
+	}
+	var content string
+	if err := json.Unmarshal(raw, &content); err != nil {
+		return ""
+	}
+	return content
+}
+
 // chatMessageExtraFieldsForResponses strips the chat-only members consumed
 // by the translation from a message's unknown fields; every other extension
 // travels onto the Responses item unchanged. Stripped are the reasoning
 // members (the reasoning replay item carries them), extra_content (same),
 // "refusal" (an assistant refusal is content on a Responses item, not a
-// member — replaying the chat member would leak a wrong-shape field), and
-// the chat-only "name" (strict upstream allowlists such as Codex reject
-// unknown members).
+// member — replaying the chat member would leak a wrong-shape field), the
+// relay key "reasoning.encrypted_content" (the reasoning replay item
+// rebuilds the native member), and the chat-only "name" (strict upstream
+// allowlists such as Codex reject unknown members).
 func chatMessageExtraFieldsForResponses(fields core.UnknownJSONFields) core.UnknownJSONFields {
-	return fields.Without("reasoning_content", "reasoning", "refusal", "name", core.ExtraContentField)
+	return fields.Without("reasoning_content", "reasoning", "refusal", "name", core.ExtraContentField, "reasoning.encrypted_content")
 }
 
 // chatContentToResponsesBlocks converts chat message content into Responses
@@ -317,7 +352,8 @@ func chatPartsToResponsesBlocks(parts []core.ContentPart, textType string) ([]an
 				continue
 			}
 			block := map[string]any{"type": "input_file"}
-			if fileData := strings.TrimSpace(part.File.FileData); fileData != "" {
+			fileData := strings.TrimSpace(part.File.FileData)
+			if fileData != "" {
 				block["file_data"] = fileData
 			}
 			if fileURL := strings.TrimSpace(part.File.FileURL); fileURL != "" {
@@ -326,7 +362,14 @@ func chatPartsToResponsesBlocks(parts []core.ContentPart, textType string) ([]an
 			if fileID := strings.TrimSpace(part.File.FileID); fileID != "" {
 				block["file_id"] = fileID
 			}
-			if filename := strings.TrimSpace(part.File.Filename); filename != "" {
+			// OpenAI requires a filename alongside inline file data; without
+			// one the request fails upstream. Fall back to the default
+			// filename for the data kind, matching the existing adapter.
+			filename := strings.TrimSpace(part.File.Filename)
+			if filename == "" && fileData != "" {
+				filename = core.DefaultFilename(fileData)
+			}
+			if filename != "" {
 				block["filename"] = filename
 			}
 			blocks = append(blocks, block)

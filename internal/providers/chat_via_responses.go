@@ -58,6 +58,38 @@ func ConvertChatRequestToResponses(req *core.ChatRequest) (*core.ResponsesReques
 		// emits a client-facing usage chunk.
 	}
 
+	// Flat chat fields that have no typed slot on ChatRequest but have a
+	// typed slot on ResponsesRequest land here. A typed value already set
+	// by the caller wins; a flat field fills the typed slot only when it
+	// is still empty. Once lifted onto the typed field, the flat key is
+	// stripped so it does not travel upstream as an unknown member.
+	if raw := responsesReq.ExtraFields.Lookup("reasoning_effort"); !core.IsJSONNull(raw) {
+		var effort string
+		if err := json.Unmarshal(raw, &effort); err == nil && strings.TrimSpace(effort) != "" {
+			if responsesReq.Reasoning == nil {
+				responsesReq.Reasoning = &core.Reasoning{}
+			}
+			if strings.TrimSpace(responsesReq.Reasoning.Effort) == "" {
+				responsesReq.Reasoning.Effort = effort
+			}
+		}
+		responsesReq.ExtraFields = responsesReq.ExtraFields.Without("reasoning_effort")
+	}
+	if raw := responsesReq.ExtraFields.Lookup("verbosity"); !core.IsJSONNull(raw) {
+		var verbosity string
+		if err := json.Unmarshal(raw, &verbosity); err == nil && strings.TrimSpace(verbosity) != "" {
+			existing, _ := responsesReq.Text.(map[string]any)
+			if existing == nil {
+				existing = map[string]any{}
+			}
+			if _, set := existing["verbosity"]; !set {
+				existing["verbosity"] = verbosity
+			}
+			responsesReq.Text = existing
+		}
+		responsesReq.ExtraFields = responsesReq.ExtraFields.Without("verbosity")
+	}
+
 	// prediction and n have no Responses equivalent: prediction is a pure
 	// speed hint and a validated n=1 is a no-op, so neither is rejected —
 	// but both are stripped from the translated request rather than leaking
@@ -231,10 +263,11 @@ func chatResponseFormatToResponsesText(raw json.RawMessage) (any, error) {
 }
 
 // flattenChatToolsForResponses flattens chat function tools
-// ({type:"function", function:{...}}) and custom tools
-// ({type:"custom", custom:{...}}) into the flat Responses shape, the inverse
-// of normalizeResponsesToolForChat. Other tool types have no meaning on a
-// chat request and are rejected.
+// ({type:"function", function:{...}}) into the flat Responses shape, the
+// inverse of normalizeResponsesToolForChat. Other tool types (including
+// "custom") have no streaming or history representation on this path yet,
+// so they are rejected before any upstream call to avoid silently dropping
+// output the chat client cannot round-trip.
 func flattenChatToolsForResponses(tools []map[string]any) ([]map[string]any, error) {
 	if len(tools) == 0 {
 		return nil, nil
@@ -244,7 +277,7 @@ func flattenChatToolsForResponses(tools []map[string]any) ([]map[string]any, err
 	for _, tool := range tools {
 		toolType, _ := tool["type"].(string)
 		switch strings.TrimSpace(toolType) {
-		case "function", "custom":
+		case "function":
 		default:
 			return nil, unsupportedChatResponsesTranslationField("tools")
 		}
@@ -253,25 +286,29 @@ func flattenChatToolsForResponses(tools []map[string]any) ([]map[string]any, err
 	return flattened, nil
 }
 
-// flattenChatToolForResponses flattens one chat tool: its nested member
-// ("function" or "custom", keyed by the type) dissolves into the flat
-// Responses shape. A tool that is already flat passes through unchanged.
+// flattenChatToolForResponses flattens one chat tool: its nested "function"
+// member dissolves into the flat Responses shape. A tool that is already
+// flat passes through unchanged. When the caller did not choose a value
+// for "strict", Responses defaults to strict tools, which makes optional
+// arguments required; preserve Chat Completions' non-strict default by
+// setting strict:false explicitly, matching the existing OpenAI adapter.
 func flattenChatToolForResponses(tool map[string]any) map[string]any {
 	if len(tool) == 0 {
 		// Unreachable: flattenChatToolsForResponses only forwards tools whose
-		// type is "function" or "custom", so the map always has that member.
+		// type is "function", so the map always has that member.
 		return tool
 	}
 
 	nestedKey, payloadKeys := "function", []string{"name", "description", "parameters", "strict"}
-	if toolType, _ := tool["type"].(string); strings.TrimSpace(toolType) == "custom" {
-		nestedKey, payloadKeys = "custom", []string{"name", "description", "format"}
-	}
 
 	nested, ok := tool[nestedKey].(map[string]any)
 	if !ok {
 		// Already flat (Responses-shaped); pass through unchanged.
-		return cloneStringAnyMap(tool)
+		flat := cloneStringAnyMap(tool)
+		if _, hasStrict := flat["strict"]; !hasStrict {
+			flat["strict"] = false
+		}
+		return flat
 	}
 
 	flattened := cloneStringAnyMap(tool)
@@ -281,6 +318,9 @@ func flattenChatToolForResponses(tool map[string]any) map[string]any {
 		if value, ok := nested[key]; ok {
 			flattened[key] = value
 		}
+	}
+	if _, hasStrict := flattened["strict"]; !hasStrict {
+		flattened["strict"] = false
 	}
 	return flattened
 }

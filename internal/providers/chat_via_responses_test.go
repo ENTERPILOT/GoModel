@@ -246,11 +246,12 @@ func TestConvertChatRequestToResponses_FlattensTools(t *testing.T) {
 			"type":       "function",
 			"name":       "exec_command",
 			"parameters": parameters,
+			"strict":     false,
 		}, responsesReq.Tools[0])
 	})
 
-	t.Run("nested chat custom tool flattens", func(t *testing.T) {
-		responsesReq, err := ConvertChatRequestToResponses(&core.ChatRequest{
+	t.Run("nested chat custom tool rejected", func(t *testing.T) {
+		_, err := ConvertChatRequestToResponses(&core.ChatRequest{
 			Model:    "m",
 			Messages: []core.Message{{Role: "user", Content: "hi"}},
 			Tools: []map[string]any{
@@ -264,28 +265,18 @@ func TestConvertChatRequestToResponses_FlattensTools(t *testing.T) {
 				},
 			},
 		})
-		require.NoError(t, err)
-		require.Len(t, responsesReq.Tools, 1)
-		assert.Equal(t, map[string]any{
-			"type":        "custom",
-			"name":        "exec_command",
-			"description": "Run a command.",
-			"format":      map[string]any{"type": "grammar", "syntax": "lark"},
-		}, responsesReq.Tools[0])
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "tools")
 	})
 
-	t.Run("already flat custom tool passes through", func(t *testing.T) {
-		responsesReq, err := ConvertChatRequestToResponses(&core.ChatRequest{
+	t.Run("already flat custom tool rejected", func(t *testing.T) {
+		_, err := ConvertChatRequestToResponses(&core.ChatRequest{
 			Model:    "m",
 			Messages: []core.Message{{Role: "user", Content: "hi"}},
 			Tools:    []map[string]any{{"type": "custom", "name": "exec_command"}},
 		})
-		require.NoError(t, err)
-		require.Len(t, responsesReq.Tools, 1)
-		assert.Equal(t, map[string]any{
-			"type": "custom",
-			"name": "exec_command",
-		}, responsesReq.Tools[0])
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "tools")
 	})
 
 	t.Run("unknown tool type rejected", func(t *testing.T) {
@@ -544,6 +535,61 @@ func chatViaResponsesCompletedResponse() *core.ResponsesResponse {
 	}
 }
 
+func TestConvertChatRequestToResponses_LiftsFlatReasoningAndVerbosity(t *testing.T) {
+	chatViaResponsesExtrasFor := func(values map[string]string) core.UnknownJSONFields {
+		raw := make(map[string]json.RawMessage, len(values))
+		for k, v := range values {
+			raw[k] = json.RawMessage(v)
+		}
+		return core.UnknownJSONFieldsFromMap(raw)
+	}
+
+	t.Run("flat reasoning_effort fills empty Reasoning.Effort", func(t *testing.T) {
+		req, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+			ExtraFields: chatViaResponsesExtrasFor(map[string]string{
+				"reasoning_effort": `"high"`,
+			}),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, req.Reasoning)
+		assert.Equal(t, "high", req.Reasoning.Effort)
+		assert.False(t, req.ExtraFields.HasAny("reasoning_effort"),
+			"lifted reasoning_effort must not travel upstream as an unknown field")
+	})
+
+	t.Run("flat reasoning_effort does not override a typed value", func(t *testing.T) {
+		req, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:     "m",
+			Messages:  []core.Message{{Role: "user", Content: "hi"}},
+			Reasoning: &core.Reasoning{Effort: "low"},
+			ExtraFields: chatViaResponsesExtrasFor(map[string]string{
+				"reasoning_effort": `"high"`,
+			}),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, req.Reasoning)
+		assert.Equal(t, "low", req.Reasoning.Effort, "typed Reasoning.Effort wins over a flat duplicate")
+	})
+
+	t.Run("flat verbosity fills Text.verbosity", func(t *testing.T) {
+		req, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+			ExtraFields: chatViaResponsesExtrasFor(map[string]string{
+				"verbosity": `"low"`,
+			}),
+		})
+		require.NoError(t, err)
+		text, ok := req.Text.(map[string]any)
+		require.True(t, ok, "Text must become a map to carry verbosity")
+		assert.Equal(t, "low", text["verbosity"])
+		assert.False(t, req.ExtraFields.HasAny("verbosity"),
+			"lifted verbosity must not travel upstream as an unknown field")
+	})
+}
+
 func TestChatViaResponses(t *testing.T) {
 	t.Run("converts request and response", func(t *testing.T) {
 		provider := &stubChatViaResponsesProvider{resp: chatViaResponsesCompletedResponse()}
@@ -738,29 +784,26 @@ func TestFlattenChatToolForResponses(t *testing.T) {
 		assert.Equal(t, tool, flattenChatToolForResponses(tool))
 	})
 
-	t.Run("custom tool flattens its nested payload", func(t *testing.T) {
-		flattened := flattenChatToolForResponses(map[string]any{
-			"type": "custom",
-			"custom": map[string]any{
-				"name":        "code_exec",
-				"description": "Run code.",
-				"format":      map[string]any{"type": "grammar", "syntax": "lark"},
-			},
-		})
-		assert.Equal(t, map[string]any{
-			"type":        "custom",
-			"name":        "code_exec",
-			"description": "Run code.",
-			"format":      map[string]any{"type": "grammar", "syntax": "lark"},
-		}, flattened)
-	})
-
-	t.Run("flat function tool passes through as a clone", func(t *testing.T) {
+	t.Run("flat function tool passes through as a clone with strict default", func(t *testing.T) {
 		tool := map[string]any{"type": "function", "name": "fn", "parameters": map[string]any{"type": "object"}}
 		flattened := flattenChatToolForResponses(tool)
-		assert.Equal(t, tool, flattened)
+		// Responses defaults to strict tools, which makes optional
+		// arguments required; the chat adapter sets strict:false
+		// explicitly to preserve the chat default.
+		assert.Equal(t, map[string]any{
+			"type":       "function",
+			"name":       "fn",
+			"parameters": map[string]any{"type": "object"},
+			"strict":     false,
+		}, flattened)
 		flattened["name"] = "mutated"
 		assert.Equal(t, "fn", tool["name"], "the pass-through must be a detached clone")
+	})
+
+	t.Run("flat function tool with explicit strict preserved", func(t *testing.T) {
+		tool := map[string]any{"type": "function", "name": "fn", "strict": true}
+		flattened := flattenChatToolForResponses(tool)
+		assert.Equal(t, true, flattened["strict"], "an explicit strict:true must not be overridden")
 	})
 
 	t.Run("type with surrounding whitespace flattens as function", func(t *testing.T) {
@@ -768,8 +811,24 @@ func TestFlattenChatToolForResponses(t *testing.T) {
 			"type":     " function ",
 			"function": map[string]any{"name": "fn"},
 		})
-		assert.Equal(t, map[string]any{"type": " function ", "name": "fn"}, flattened)
+		assert.Equal(t, map[string]any{"type": " function ", "name": "fn", "strict": false}, flattened)
 	})
+}
+
+func TestFlattenChatToolsForResponses_RejectsCustom(t *testing.T) {
+	// Custom tools have no Responses-native streaming or history mapping on
+	// this path yet; they are rejected before any upstream call to avoid
+	// silently dropping output the chat client cannot round-trip.
+	_, err := flattenChatToolsForResponses([]map[string]any{{
+		"type": "custom",
+		"custom": map[string]any{
+			"name":        "code_exec",
+			"description": "Run code.",
+			"format":      map[string]any{"type": "grammar", "syntax": "lark"},
+		},
+	}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tools")
 }
 
 func TestConvertChatRequestToResponses_ToleratedZeroValueEdgeCases(t *testing.T) {

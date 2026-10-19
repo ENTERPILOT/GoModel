@@ -220,32 +220,92 @@ func TestConvertResponsesResponseToChat_ReasoningSummaryFallback(t *testing.T) {
 }
 
 func TestConvertResponsesResponseToChat_Refusal(t *testing.T) {
+	t.Run("reads part.Refusal when present", func(t *testing.T) {
+		resp := &core.ResponsesResponse{
+			ID:     "resp_upstream",
+			Status: "completed",
+			Output: []core.ResponsesOutputItem{
+				{
+					ID:     "msg_1",
+					Type:   "message",
+					Role:   "assistant",
+					Status: "completed",
+					Content: []core.ResponsesContentItem{
+						// A real Responses refusal carries its explanation
+						// in part.Refusal; part.Text is empty on a
+						// refusal-only part.
+						{Type: "refusal", Refusal: "I cannot help with that."},
+					},
+				},
+			},
+		}
+
+		chat := ConvertResponsesResponseToChat(resp)
+		require.Len(t, chat.Choices, 1)
+		message := chat.Choices[0].Message
+
+		assert.Empty(t, message.Content)
+		raw := message.ExtraFields.Lookup("refusal")
+		require.NotEmpty(t, raw, "refusal part must surface as the message refusal member")
+		var refusal string
+		require.NoError(t, json.Unmarshal(raw, &refusal))
+		assert.Equal(t, "I cannot help with that.", refusal)
+	})
+
+	t.Run("falls back to part.Text when Refusal is empty", func(t *testing.T) {
+		// Legacy payloads that put the explanation under Text must still
+		// surface the refusal rather than silently dropping it.
+		resp := &core.ResponsesResponse{
+			ID:     "resp_upstream",
+			Status: "completed",
+			Output: []core.ResponsesOutputItem{
+				{
+					ID:     "msg_1",
+					Type:   "message",
+					Role:   "assistant",
+					Status: "completed",
+					Content: []core.ResponsesContentItem{
+						{Type: "refusal", Text: "Legacy refusal text."},
+					},
+				},
+			},
+		}
+
+		chat := ConvertResponsesResponseToChat(resp)
+		require.Len(t, chat.Choices, 1)
+		raw := chat.Choices[0].Message.ExtraFields.Lookup("refusal")
+		require.NotEmpty(t, raw, "refusal text must surface even when Refusal is empty")
+		var refusal string
+		require.NoError(t, json.Unmarshal(raw, &refusal))
+		assert.Equal(t, "Legacy refusal text.", refusal)
+	})
+}
+
+func TestConvertResponsesResponseToChat_PreservesEncryptedReasoning(t *testing.T) {
+	// The ChatGPT backend returns reasoning.encrypted_content directly on
+	// the item; the chat output must carry it under the same key the input
+	// converter rebuilds into the native Responses member.
 	resp := &core.ResponsesResponse{
 		ID:     "resp_upstream",
 		Status: "completed",
 		Output: []core.ResponsesOutputItem{
 			{
-				ID:     "msg_1",
-				Type:   "message",
-				Role:   "assistant",
-				Status: "completed",
-				Content: []core.ResponsesContentItem{
-					{Type: "refusal", Text: "I cannot help with that."},
-				},
+				ID:   "rs_1",
+				Type: "reasoning",
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					"encrypted_content": json.RawMessage(`"opaque-blob"`),
+				}),
 			},
 		},
 	}
 
 	chat := ConvertResponsesResponseToChat(resp)
 	require.Len(t, chat.Choices, 1)
-	message := chat.Choices[0].Message
-
-	assert.Empty(t, message.Content)
-	raw := message.ExtraFields.Lookup("refusal")
-	require.NotEmpty(t, raw, "refusal part must surface as the message refusal member")
-	var refusal string
-	require.NoError(t, json.Unmarshal(raw, &refusal))
-	assert.Equal(t, "I cannot help with that.", refusal)
+	raw := chat.Choices[0].Message.ExtraFields.Lookup("reasoning.encrypted_content")
+	require.NotEmpty(t, raw, "encrypted reasoning must survive the round-trip")
+	var blob string
+	require.NoError(t, json.Unmarshal(raw, &blob))
+	assert.Equal(t, "opaque-blob", blob)
 }
 
 func TestConvertResponsesResponseToChat_FinishReason(t *testing.T) {

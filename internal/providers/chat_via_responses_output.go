@@ -40,7 +40,16 @@ func ConvertResponsesResponseToChat(resp *core.ResponsesResponse) *core.ChatResp
 				case "output_text":
 					texts = append(texts, part.Text)
 				case "refusal":
-					refusals = append(refusals, part.Text)
+					// A real Responses refusal carries its explanation in
+					// part.Refusal; part.Text is empty on a refusal-only part.
+					// Fall back to part.Text for legacy payloads that put the
+					// explanation under Text, so a refusal is never silently
+					// dropped.
+					if text := part.Refusal; text != "" {
+						refusals = append(refusals, text)
+					} else {
+						refusals = append(refusals, part.Text)
+					}
 				}
 			}
 		case "function_call":
@@ -65,6 +74,13 @@ func ConvertResponsesResponseToChat(resp *core.ResponsesResponse) *core.ChatResp
 				// final reasoning item is the state the next translated
 				// request must echo back.
 				extra[core.ExtraContentField] = replay
+			}
+			if enc := item.ExtraFields.Lookup("encrypted_content"); !core.IsJSONNull(enc) {
+				// The ChatGPT backend returns reasoning.encrypted_content
+				// directly on the item; extra_content alone is opaque to
+				// the next request without it, so relay it under a
+				// Responses-shaped key the input converter can rebuild.
+				extra["reasoning.encrypted_content"] = enc
 			}
 		}
 	}

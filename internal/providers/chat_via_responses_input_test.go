@@ -610,3 +610,125 @@ func TestConvertMessagesToResponsesInput_DynamicContentEdgeCases(t *testing.T) {
 		})
 	}
 }
+
+func TestConvertMessagesToResponsesInput_RefusalRebuildsAsContentPart(t *testing.T) {
+	// An assistant chat message carrying a "refusal" extra is the
+	// round-trip of a Responses refusal; the input converter must rebuild
+	// it as a Responses content part of type "refusal" rather than strip
+	// the member or pass it through as an unknown field.
+	msg := core.Message{
+		Role:    "assistant",
+		Content: "",
+		ExtraFields: chatViaResponsesExtras(map[string]string{
+			"refusal": `"I cannot help with that."`,
+		}),
+	}
+	input, _, err := ConvertMessagesToResponsesInput([]core.Message{msg})
+	require.NoError(t, err)
+	items := responsesInputItems(t, input)
+	require.Len(t, items, 1)
+	blocks, ok := items[0].Content.([]any)
+	require.True(t, ok, "refusal-bearing message must emit a content-part array")
+	require.Len(t, blocks, 1)
+	block, ok := blocks[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "refusal", block["type"])
+	assert.Equal(t, "I cannot help with that.", block["refusal"])
+	assert.False(t, items[0].ExtraFields.HasAny("refusal"),
+		"refusal must move out of extras into the content part")
+}
+
+func TestConvertMessagesToResponsesInput_RefusalBadJSONDropped(t *testing.T) {
+	// A refusal extra that is not a JSON string is dropped rather than
+	// turning the message into an invalid Responses item.
+	msg := core.Message{
+		Role: "assistant",
+		ExtraFields: chatViaResponsesExtras(map[string]string{
+			"refusal": `{"not":"a string"}`,
+		}),
+	}
+	input, _, err := ConvertMessagesToResponsesInput([]core.Message{msg})
+	require.NoError(t, err)
+	items := responsesInputItems(t, input)
+	require.Len(t, items, 1)
+	assert.Equal(t, "", items[0].Content, "a malformed refusal must not produce a content part")
+}
+
+func TestConvertMessagesToResponsesInput_RebuildsEncryptedReasoning(t *testing.T) {
+	// The output side relays reasoning.encrypted_content under the same
+	// key; the input converter must rebuild the native Responses member
+	// on the replay reasoning item and strip the chat-side wrapper.
+	msg := core.Message{
+		Role: "assistant",
+		ExtraFields: chatViaResponsesExtras(map[string]string{
+			core.ExtraContentField:        `{"o":"v"}`,
+			"reasoning.encrypted_content": `"opaque-blob"`,
+		}),
+	}
+	input, _, err := ConvertMessagesToResponsesInput([]core.Message{msg})
+	require.NoError(t, err)
+	items := responsesInputItems(t, input)
+	require.NotEmpty(t, items)
+	first := items[0]
+	assert.Equal(t, "reasoning", first.Type)
+	raw := first.ExtraFields.Lookup("encrypted_content")
+	require.NotEmpty(t, raw, "encrypted_content must be rebuilt under the native Responses key")
+	var blob string
+	require.NoError(t, json.Unmarshal(raw, &blob))
+	assert.Equal(t, "opaque-blob", blob)
+	assert.False(t, first.ExtraFields.HasAny("reasoning.encrypted_content"),
+		"chat-side wrapper must not travel onto the replay item")
+}
+
+func TestChatPartsToResponsesBlocks_DefaultFilenameForUnnamedFileData(t *testing.T) {
+	// Inline file data without a filename would fail upstream; the
+	// converter must fall back to the data-kind default, matching the
+	// existing adapter.
+	parts := []core.ContentPart{{
+		Type: "file",
+		File: &core.FileContent{FileData: "data:text/plain;base64,SGk="},
+	}}
+	input, _, err := ConvertMessagesToResponsesInput([]core.Message{{
+		Role:    "user",
+		Content: parts,
+	}})
+	require.NoError(t, err)
+	items := responsesInputItems(t, input)
+	require.Len(t, items, 1)
+	blocks, ok := items[0].Content.([]any)
+	require.True(t, ok)
+	require.Len(t, blocks, 1)
+	block, ok := blocks[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "input_file", block["type"])
+	require.NotEmpty(t, block["filename"], "unnamed file data must inherit the default filename")
+}
+
+func TestConvertMessagesToResponsesInput_RejectsEmptyRole(t *testing.T) {
+	// A chat message with an empty role is rejected before any
+	// translation happens.
+	_, _, err := ConvertMessagesToResponsesInput([]core.Message{
+		{Role: "", Content: "hi"},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "role is required")
+}
+
+func TestConvertMessagesToResponsesInput_RejectsMidConversationSystemUnknownPart(t *testing.T) {
+	// A system/developer message after the first turn is no global
+	// instruction; it travels as a Responses input item. When its
+	// content part is of an unsupported type, the conversion error
+	// surfaces here rather than being silently dropped.
+	_, _, err := ConvertMessagesToResponsesInput([]core.Message{
+		{Role: "user", Content: "hi"},
+		{
+			Role: "system",
+			Content: []core.ContentPart{
+				{Type: "image_url", ImageURL: &core.ImageURLContent{URL: "http://x/y.png"}},
+				{Type: "totally_unknown_part"},
+			},
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "totally_unknown_part")
+}
