@@ -680,6 +680,33 @@ func TestConvertMessagesToResponsesInput_RebuildsEncryptedReasoning(t *testing.T
 		"chat-side wrapper must not travel onto the replay item")
 }
 
+func TestConvertMessagesToResponsesInput_RebuildsEncryptedOnlyReasoning(t *testing.T) {
+	// The ChatGPT backend can return encrypted_content without extra_content.
+	// The replay item must still be emitted so the encrypted reasoning state
+	// survives the next turn.
+	msg := core.Message{
+		Role: "assistant",
+		ExtraFields: chatViaResponsesExtras(map[string]string{
+			"reasoning.encrypted_content": `"opaque-blob"`,
+		}),
+	}
+	input, _, err := ConvertMessagesToResponsesInput([]core.Message{msg})
+	require.NoError(t, err)
+	items := responsesInputItems(t, input)
+	require.NotEmpty(t, items)
+	first := items[0]
+	assert.Equal(t, "reasoning", first.Type)
+	raw := first.ExtraFields.Lookup("encrypted_content")
+	require.NotEmpty(t, raw, "encrypted_content must be rebuilt under the native Responses key")
+	var blob string
+	require.NoError(t, json.Unmarshal(raw, &blob))
+	assert.Equal(t, "opaque-blob", blob)
+	assert.False(t, first.ExtraFields.HasAny(core.ExtraContentField),
+		"no extra_content on the message means no extra_content member on the item")
+	assert.False(t, first.ExtraFields.HasAny("reasoning.encrypted_content"),
+		"chat-side wrapper must not travel onto the replay item")
+}
+
 func TestChatPartsToResponsesBlocks_DefaultFilenameForUnnamedFileData(t *testing.T) {
 	// Inline file data without a filename would fail upstream; the
 	// converter must fall back to the data-kind default, matching the

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -127,13 +128,22 @@ func ConvertChatRequestToResponses(req *core.ChatRequest) (*core.ResponsesReques
 	}
 
 	// response_format becomes text.format, the exact inverse of
-	// responsesTextFormatToChatResponseFormat.
+	// responsesTextFormatToChatResponseFormat. Merge into the existing Text
+	// map so a lifted verbosity survives; a "text" format carries no
+	// settings and leaves the map untouched.
 	if raw := responsesReq.ExtraFields.Lookup("response_format"); raw != nil {
 		text, err := chatResponseFormatToResponsesText(raw)
 		if err != nil {
 			return nil, err
 		}
-		responsesReq.Text = text
+		if format, _ := text.(map[string]any); format != nil {
+			existing, _ := responsesReq.Text.(map[string]any)
+			if existing == nil {
+				existing = map[string]any{}
+			}
+			maps.Copy(existing, format)
+			responsesReq.Text = existing
+		}
 		responsesReq.ExtraFields = responsesReq.ExtraFields.Without("response_format")
 	}
 

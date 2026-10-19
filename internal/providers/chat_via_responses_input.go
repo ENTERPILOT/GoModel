@@ -196,21 +196,25 @@ func chatToolMessageToResponsesItem(msg core.Message) (core.ResponsesInputElemen
 
 // chatReasoningReplayItem rebuilds the Responses reasoning item of an
 // assistant turn when the message carries replay state in extra_content
-// (attached by ConvertResponsesInputToMessages on the way in). Reasoning text
-// alone is not replayable, so without replay state the turn emits no
+// (attached by ConvertResponsesInputToMessages on the way in) or
+// reasoning.encrypted_content (relayed by both chat output paths). Reasoning
+// text alone is not replayable, so without replay state the turn emits no
 // reasoning item. The item is emitted even when there is no readable
 // reasoning text, because a redacted or encrypted reasoning block has none
 // and still has to reach the upstream.
 func chatReasoningReplayItem(msg core.Message) (core.ResponsesInputElement, bool) {
 	replayState := msg.ExtraFields.Lookup(core.ExtraContentField)
-	if core.IsJSONNull(replayState) {
+	enc := msg.ExtraFields.Lookup("reasoning.encrypted_content")
+	if core.IsJSONNull(replayState) && core.IsJSONNull(enc) {
 		return core.ResponsesInputElement{}, false
 	}
 	extra := map[string]json.RawMessage{
-		"summary":              json.RawMessage(`[]`),
-		core.ExtraContentField: replayState,
+		"summary": json.RawMessage(`[]`),
 	}
-	if enc := msg.ExtraFields.Lookup("reasoning.encrypted_content"); !core.IsJSONNull(enc) {
+	if !core.IsJSONNull(replayState) {
+		extra[core.ExtraContentField] = replayState
+	}
+	if !core.IsJSONNull(enc) {
 		// The output side relays the ChatGPT backend's encrypted reasoning
 		// under "reasoning.encrypted_content"; rebuild the native member
 		// here so the next request reaches the upstream with the same

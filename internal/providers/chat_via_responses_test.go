@@ -590,6 +590,34 @@ func TestConvertChatRequestToResponses_LiftsFlatReasoningAndVerbosity(t *testing
 	})
 }
 
+func TestConvertChatRequestToResponses_ResponseFormatKeepsVerbosity(t *testing.T) {
+	newRequest := func(responseFormat string) *core.ChatRequest {
+		return &core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+			ExtraFields: chatViaResponsesExtras(map[string]string{
+				"verbosity":       `"low"`,
+				"response_format": responseFormat,
+			}),
+		}
+	}
+
+	t.Run("json_object merges with verbosity", func(t *testing.T) {
+		responsesReq, err := ConvertChatRequestToResponses(newRequest(`{"type":"json_object"}`))
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{
+			"verbosity": "low",
+			"format":    map[string]any{"type": "json_object"},
+		}, responsesReq.Text)
+	})
+
+	t.Run("text format keeps verbosity", func(t *testing.T) {
+		responsesReq, err := ConvertChatRequestToResponses(newRequest(`{"type":"text"}`))
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"verbosity": "low"}, responsesReq.Text)
+	})
+}
+
 func TestChatViaResponses(t *testing.T) {
 	t.Run("converts request and response", func(t *testing.T) {
 		provider := &stubChatViaResponsesProvider{resp: chatViaResponsesCompletedResponse()}
