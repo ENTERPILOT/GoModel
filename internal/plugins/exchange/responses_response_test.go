@@ -60,6 +60,11 @@ func TestApplyToResponsesResponse(t *testing.T) {
 			from: `"text":" world"`, to: `"text":" there"`,
 		},
 		{
+			name: "set reasoning summary",
+			edit: func(c *pluginapi.Completion) error { return c.SetReasoning(0, 0, "thought") },
+			from: `"text":"thinking"`, to: `"text":"thought"`,
+		},
+		{
 			name: "finish reason leaves status alone",
 			edit: func(c *pluginapi.Completion) error { return c.SetFinishReason(0, "content_filter") },
 		},

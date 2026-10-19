@@ -101,6 +101,17 @@ func TestUpsertVirtualRejections(t *testing.T) {
 			virtual: ManagedVirtualServer{Name: "coding", Servers: []string{"alpha"}, ToolDiscovery: "semantic"},
 			wantErr: `tool_discovery must be "off" or "search"`,
 		},
+		{
+			// Admin input is literal: a reference is checked, not stored.
+			name:    "secret reference in tool discovery",
+			virtual: ManagedVirtualServer{Name: "coding", Servers: []string{"alpha"}, ToolDiscovery: "${env:MODE}"},
+			wantErr: `tool_discovery must be "off" or "search", got "${env:MODE}"`,
+		},
+		{
+			name:    "secret reference as a member",
+			virtual: ManagedVirtualServer{Name: "coding", Servers: []string{"${env:MEMBER}"}},
+			wantErr: `member "${env:MEMBER}"`,
+		},
 	}
 	service, virtualStore, _ := newVirtualAdminTestService(t, map[string]VirtualServerSpec{
 		"research": {Name: "research", Servers: []string{"beta"}, Managed: true},

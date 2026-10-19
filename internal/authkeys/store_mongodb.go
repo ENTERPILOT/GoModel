@@ -20,6 +20,7 @@ type mongoAuthKeyDocument struct {
 	DashboardAccess bool       `bson:"dashboard_access,omitempty"`
 	RedactedValue   string     `bson:"redacted_value"`
 	SecretHash      string     `bson:"secret_hash"`
+	ImportedFrom    string     `bson:"imported_from,omitempty"`
 	Enabled         bool       `bson:"enabled"`
 	ExpiresAt       *time.Time `bson:"expires_at,omitempty"`
 	DeactivatedAt   *time.Time `bson:"deactivated_at,omitempty"`
@@ -88,14 +89,52 @@ func (s *MongoDBStore) Create(ctx context.Context, key AuthKey) error {
 		DashboardAccess: key.DashboardAccess,
 		RedactedValue:   key.RedactedValue,
 		SecretHash:      key.SecretHash,
+		ImportedFrom:    key.ImportedFrom,
 		Enabled:         key.Enabled,
 		ExpiresAt:       key.ExpiresAt,
 		DeactivatedAt:   key.DeactivatedAt,
 		CreatedAt:       key.CreatedAt.UTC(),
 		UpdatedAt:       key.UpdatedAt.UTC(),
 	})
+	if mongo.IsDuplicateKeyError(err) {
+		return ErrSecretHashExists
+	}
 	if err != nil {
 		return fmt.Errorf("create auth key: %w", err)
+	}
+	return nil
+}
+
+func (s *MongoDBStore) UpdateImported(ctx context.Context, key AuthKey) error {
+	set := bson.D{
+		{Key: "name", Value: key.Name},
+		{Key: "redacted_value", Value: key.RedactedValue},
+		{Key: "updated_at", Value: key.UpdatedAt.UTC()},
+	}
+	var unset bson.D
+	optional := func(field string, value any, empty bool) {
+		if empty {
+			unset = append(unset, bson.E{Key: field, Value: ""})
+			return
+		}
+		set = append(set, bson.E{Key: field, Value: value})
+	}
+	// Empty values are removed, matching the insert path's omitempty fields.
+	optional("description", key.Description, key.Description == "")
+	optional("user_path", key.UserPath, key.UserPath == "")
+	optional("labels", key.Labels, len(key.Labels) == 0)
+	optional("allowed_models", key.AllowedModels, len(key.AllowedModels) == 0)
+	optional("expires_at", timePtrUTC(key.ExpiresAt), key.ExpiresAt == nil)
+	update := bson.D{{Key: "$set", Value: set}}
+	if len(unset) > 0 {
+		update = append(update, bson.E{Key: "$unset", Value: unset})
+	}
+	result, err := s.collection.UpdateOne(ctx, mongoAuthKeyIDFilter{ID: normalizeID(key.ID)}, update)
+	if err != nil {
+		return fmt.Errorf("update imported auth key: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNotFound
 	}
 	return nil
 }
@@ -187,6 +226,7 @@ func authKeyFromMongo(doc mongoAuthKeyDocument) AuthKey {
 		DashboardAccess: doc.DashboardAccess,
 		RedactedValue:   doc.RedactedValue,
 		SecretHash:      doc.SecretHash,
+		ImportedFrom:    doc.ImportedFrom,
 		Enabled:         doc.Enabled,
 		ExpiresAt:       timePtrUTC(doc.ExpiresAt),
 		DeactivatedAt:   timePtrUTC(doc.DeactivatedAt),

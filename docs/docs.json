@@ -132,8 +132,11 @@
                         "pages": [
                             "advanced/configuration",
                             "advanced/config-yaml",
+                            "advanced/secret-references",
+                            "advanced/encryption-at-rest",
                             "advanced/model-metadata",
                             "advanced/cli",
+                            "advanced/build-from-source",
                             "advanced/api-endpoints",
                             "advanced/swagger-ui",
                             "advanced/resilience",

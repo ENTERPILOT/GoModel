@@ -74,12 +74,18 @@ func (b *bootstrap) initServerDependencies() error {
 
 	// Initialize the MCP gateway (aggregated upstream MCP servers behind /mcp).
 	if appCfg.MCP.Enabled {
-		mcpResult, err := mcpgateway.New(b.ctx, appCfg, app.storage, nil, b.serverUsageLogger)
+		mcpResult, err := mcpgateway.New(b.ctx, appCfg, app.storage, app.secrets, nil, b.serverUsageLogger, b.cfg.AppConfig.Secrets)
 		if err != nil {
 			return fmt.Errorf("failed to initialize mcp gateway: %w", err)
 		}
 		app.mcpGateway = mcpResult
 		app.register(subsystemMCPGateway, ownedByShutdown, app.mcpGateway.Close)
+		if previous := b.cfg.Replaces; previous != nil && previous.mcpGateway != nil {
+			if err := keepServingEntities("mcp servers", mcpResult.Service.Skipped(), previous.mcpGateway.Service.Running); err != nil {
+				return err
+			}
+		}
+		app.secretRotation.watchEntities(mcpgateway.ServerSecretEntity+".", mcpResult.Service)
 		slog.Info("mcp gateway enabled",
 			"path", config.JoinBasePath(appCfg.Server.BasePath, "/mcp"),
 			"configured_servers", len(appCfg.MCP.Servers))
@@ -150,6 +156,7 @@ func (b *bootstrap) initServerConfig() error {
 		ConversationStore:               app.conversations.Store,
 		LogOnlyModelInteractions:        appCfg.Logging.OnlyModelInteractions,
 		DisablePassthroughRoutes:        !appCfg.Server.EnablePassthroughRoutes,
+		DisableLiteLLMTags:              !appCfg.Tagging.LiteLLMTagsEnabled,
 		EnabledPassthroughProviders:     appCfg.Server.EnabledPassthroughProviders,
 		RealtimeEnabled:                 appCfg.Server.RealtimeEnabled,
 		AuthVerifyEnabled:               appCfg.Server.AuthVerifyEnabled,
@@ -270,6 +277,8 @@ func applyExtensions(serverCfg *server.Config, extensions *ext.Registry) {
 	serverCfg.OuterMiddleware = extensions.OuterMiddleware()
 	serverCfg.ExtraMiddleware = extensions.Middleware()
 	serverCfg.ExtraRoutes = extensions.Routes()
+	serverCfg.ExtraAdminRoutes = extensions.AdminRoutes()
+	serverCfg.HealthCheckers = extensions.HealthCheckers()
 	serverCfg.ExtraAuthSkipPaths = extensions.PublicPaths()
 	serverCfg.RequestAuthenticators = extensions.Authenticators()
 }

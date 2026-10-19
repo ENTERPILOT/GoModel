@@ -5,6 +5,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 3
     labels:
       - "dependencies"
     ignore:
@@ -20,6 +22,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 3
     labels:
       - "dependencies"
     groups:
@@ -28,9 +32,15 @@ updates:
           - "*"
 
   - package-ecosystem: "github-actions"
-    directory: "/"
+    # "/" covers .github/workflows only; local composite actions are listed
+    # separately or their pinned actions never get updated.
+    directories:
+      - "/"
+      - "/.github/actions/*"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 3
     labels:
       - "dependencies"
     groups:

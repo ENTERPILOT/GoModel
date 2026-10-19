@@ -203,6 +203,7 @@ func (o *BatchOrchestrator) Create(ctx context.Context, req *core.BatchRequest, 
 			RequestID:                 strings.TrimSpace(meta.RequestID),
 			UserPath:                  core.UserPathFromContext(ctx),
 			SessionID:                 core.SessionIDFromContext(ctx),
+			AuthKeyID:                 core.GetAuthKeyID(ctx),
 			WorkflowVersionID:         workflowVersionID(workflow),
 			UsageEnabled:              new(workflow == nil || workflow.UsageEnabled()),
 		}

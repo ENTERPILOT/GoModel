@@ -39,6 +39,19 @@ func (s *testStore) Create(_ context.Context, key AuthKey) error {
 	if s.createErr != nil {
 		return s.createErr
 	}
+	for _, existing := range s.keys {
+		if existing.SecretHash == key.SecretHash {
+			return ErrSecretHashExists
+		}
+	}
+	s.keys[key.ID] = key
+	return nil
+}
+
+func (s *testStore) UpdateImported(_ context.Context, key AuthKey) error {
+	if _, ok := s.keys[key.ID]; !ok {
+		return ErrNotFound
+	}
 	s.keys[key.ID] = key
 	return nil
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/filestore"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
@@ -49,6 +50,7 @@ type App struct {
 	config              *config.Config
 	telemetry           *telemetry.Service // nil unless OpenTelemetry export is enabled
 	providers           *providers.InitResult
+	secretRotation      *secretRotation
 	audit               *auditlog.Result
 	usage               *usage.Result
 	budgets             *budget.Result
@@ -72,6 +74,7 @@ type App struct {
 	live                *live.Broker
 	server              *server.Server
 	storage             storage.Storage
+	secrets             *encryption.Box
 	runtimeSettings     *runtimesettings.Service
 	versionCheck        *versioncheck.Checker
 	extensionAuth       bool
@@ -113,6 +116,18 @@ type Config struct {
 	// and becomes the default OpenTelemetry service.name. Empty means
 	// "gomodel".
 	ProductName string
+
+	// RequestReload asks the process to replace this generation with one built
+	// from the configuration as it stands now, the reload SIGHUP triggers. It
+	// must not block. The app calls it when a referenced secret other than a
+	// provider API key rotates. Nil leaves such a change to a manual reload.
+	RequestReload func(reason string)
+
+	// Replaces is the serving generation a reload builds this one to replace,
+	// nil at startup. A provider credential or MCP server it runs whose
+	// stored secret references no longer resolve fails the build, so the
+	// serving generation keeps running it instead of the reload dropping it.
+	Replaces *App
 }
 
 // New creates a new App with all dependencies initialized.
@@ -233,6 +248,9 @@ func (a *App) startServer(ctx context.Context, address string, start func(contex
 	if a.versionCheck.Enabled() {
 		go a.versionCheck.Run(serverCtx)
 	}
+	// Rotated secrets apply only to the generation that serves; see
+	// secretRotation.start.
+	a.secretRotation.start(serverCtx)
 
 	slog.Info("starting server", "address", address)
 	err := start(serverCtx)

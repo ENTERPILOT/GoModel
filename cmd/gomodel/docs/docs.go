@@ -956,8 +956,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -2468,8 +2486,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -2492,6 +2528,126 @@ const docTemplate = `{
                             "type": "array",
                             "items": {
                                 "$ref": "#/definitions/usage.DailyUsage"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/usage/endpoints": {
+            "get": {
+                "description": "Returns per-endpoint token and cost aggregates. Each row names\nthe operation its endpoint belongs to, so endpoints that mean\nthe same thing can be folded: /v1/chat/completions and\n/v1/messages are both chat_completions.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get usage breakdown by request endpoint",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Number of days (default 30)",
+                        "name": "days",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date (YYYY-MM-DD)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (YYYY-MM-DD)",
+                        "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact model name",
+                        "name": "model",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by provider name or provider type",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by request label (exact match)",
+                        "name": "label",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact detected session ID",
+                        "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by tracked user path subtree",
+                        "name": "user_path",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Cache mode filter: uncached, cached, all (default uncached)",
+                        "name": "cache_mode",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/usage.EndpointUsage"
                             }
                         }
                     },
@@ -2570,8 +2726,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -2671,6 +2845,18 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by tracked user path subtree",
                         "name": "user_path",
                         "in": "query"
@@ -2689,7 +2875,13 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Search across model, provider, request_id, provider_id, session_id",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Search across model, provider, endpoint, request_id, provider_id, session_id",
                         "name": "search",
                         "in": "query"
                     },
@@ -2787,8 +2979,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -2957,8 +3167,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -3061,8 +3289,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -3211,8 +3457,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -10926,6 +11190,10 @@ const docTemplate = `{
                 "batch_output_per_mtok": {
                     "type": "number"
                 },
+                "cache_write_1h_per_mtok": {
+                    "description": "Anthropic 1-hour TTL cache writes; cache_write_per_mtok prices the default 5-minute ones",
+                    "type": "number"
+                },
                 "cache_write_per_mtok": {
                     "type": "number"
                 },
@@ -11902,6 +12170,9 @@ const docTemplate = `{
                 "batch_output_per_mtok": {
                     "type": "number"
                 },
+                "cache_write_1h_per_mtok": {
+                    "type": "number"
+                },
                 "cache_write_per_mtok": {
                     "type": "number"
                 },
@@ -12406,6 +12677,60 @@ const docTemplate = `{
                 }
             }
         },
+        "usage.EndpointUsage": {
+            "type": "object",
+            "properties": {
+                "cache_write_input_tokens": {
+                    "type": "integer"
+                },
+                "cached_input_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "cached_input_tokens": {
+                    "type": "integer"
+                },
+                "endpoint": {
+                    "type": "string"
+                },
+                "input_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "local_cached_input_tokens": {
+                    "type": "integer"
+                },
+                "local_cached_output_tokens": {
+                    "type": "integer"
+                },
+                "operation": {
+                    "type": "string"
+                },
+                "output_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "output_tokens": {
+                    "type": "integer"
+                },
+                "requests": {
+                    "type": "integer"
+                },
+                "total_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "total_tokens": {
+                    "type": "integer"
+                },
+                "uncached_input_tokens": {
+                    "type": "integer"
+                }
+            }
+        },
         "usage.LabelUsage": {
             "type": "object",
             "properties": {
@@ -12658,6 +12983,9 @@ const docTemplate = `{
         "usage.UsageLogEntry": {
             "type": "object",
             "properties": {
+                "auth_key_id": {
+                    "type": "string"
+                },
                 "cache_type": {
                     "type": "string"
                 },

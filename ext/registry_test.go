@@ -2,6 +2,7 @@ package ext
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"sync"
@@ -75,10 +76,30 @@ func TestRegistryCollectsMiddlewareAndRoutes(t *testing.T) {
 	reg.UseOuterMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 	reg.UseMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 	reg.RegisterRoutes(func(_ *echo.Echo) {})
+	reg.RegisterAdminRoutes(func(_ *echo.Group) {})
 
 	assert.Len(t, reg.OuterMiddleware(), 1)
 	assert.Len(t, reg.Middleware(), 1)
 	assert.Len(t, reg.Routes(), 1)
+	assert.Len(t, reg.AdminRoutes(), 1)
+}
+
+type namedHealthChecker struct{ name string }
+
+func (c namedHealthChecker) Name() string { return c.name }
+
+func (namedHealthChecker) CheckHealth(context.Context) HealthStatus { return HealthOK }
+
+func TestRegistryCollectsHealthCheckers(t *testing.T) {
+	reg := &Registry{}
+	reg.RegisterHealthChecker(namedHealthChecker{name: "vaults"})
+
+	snapshot := reg.HealthCheckers()
+	require.Len(t, snapshot, 1)
+	assert.Equal(t, "vaults", snapshot[0].Name())
+	reg.RegisterHealthChecker(namedHealthChecker{name: "other"})
+	assert.Len(t, snapshot, 1, "earlier snapshot must not grow")
+	assert.Len(t, reg.HealthCheckers(), 2)
 }
 
 func TestRegistryCollectsRequestAuthenticators(t *testing.T) {
@@ -126,7 +147,9 @@ func TestRegistryConcurrentRegistration(t *testing.T) {
 			reg.UseMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 			reg.AddPublicPaths("/p")
 			reg.EnableCapability(CapabilityQuotaTemplates)
+			reg.WrapLogHandler(func(h slog.Handler) slog.Handler { return h })
 			_ = reg.Rewriters()
+			_ = reg.LogHandlerWrappers()
 			_ = reg.HasCapability(CapabilityQuotaTemplates)
 		})
 	}
@@ -136,6 +159,7 @@ func TestRegistryConcurrentRegistration(t *testing.T) {
 	assert.Len(t, reg.OuterMiddleware(), workers)
 	assert.Len(t, reg.Middleware(), workers)
 	assert.Len(t, reg.PublicPaths(), workers)
+	assert.Len(t, reg.LogHandlerWrappers(), workers)
 	assert.True(t, reg.HasCapability(CapabilityQuotaTemplates))
 }
 

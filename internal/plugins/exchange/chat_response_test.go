@@ -61,6 +61,11 @@ func TestApplyToChatResponse(t *testing.T) {
 			from: `"content":"hello world"`, to: `"content":"bye"`,
 		},
 		{
+			name: "set reasoning",
+			edit: func(c *pluginapi.Completion) error { return c.SetReasoning(0, 0, "thought") },
+			from: `"reasoning_content":"think"`, to: `"reasoning_content":"thought"`,
+		},
+		{
 			name: "finish reason",
 			edit: func(c *pluginapi.Completion) error { return c.SetFinishReason(0, "content_filter") },
 			from: `"finish_reason":"tool_calls"`, to: `"finish_reason":"content_filter"`,

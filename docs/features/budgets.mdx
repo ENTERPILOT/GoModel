@@ -175,9 +175,12 @@ Label budgets match a label exactly, with no subtree or case folding:
 - request labels `["mobile-app-ios"]`
 - result: budget does not apply
 
-Labels come from the tagging rules and from labels attached to the managed API
-key that authenticated the request; see [Labelling](/features/labelling). A
-request carrying several labels is charged against every matching label budget.
+Labels come from the tagging rules, from labels attached to the managed API
+key that authenticated the request, and from LiteLLM tags the client sends;
+see [Labelling](/features/labelling). A request carrying several labels is
+charged against every matching label budget. Clients choose LiteLLM tags, so
+set `LITELLM_TAGS_ENABLED=false` when a client must not charge another team's
+label budget.
 
 If multiple budgets match a request, GoModel checks all matching limits in one
 lookup. The request is rejected if any matching limit is exhausted.

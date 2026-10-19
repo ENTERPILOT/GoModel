@@ -169,6 +169,32 @@ func (s *SQLCredentialStore) Delete(ctx context.Context, name string) error {
 	return nil
 }
 
+// swapSecrets replaces a credential's secret columns only while they still
+// hold the values in current, and reports whether it did. Other columns are
+// left alone, so a concurrent edit to them is never lost either.
+func (s *SQLCredentialStore) swapSecrets(ctx context.Context, current, next ManagedProviderCredential) (bool, error) {
+	currentKeys, err := encodeCredentialList(current.APIKeys)
+	if err != nil {
+		return false, err
+	}
+	nextKeys, err := encodeCredentialList(next.APIKeys)
+	if err != nil {
+		return false, err
+	}
+	affected, err := s.db.Exec(ctx, `
+		UPDATE provider_credentials
+		SET api_keys = ?, service_account_json = ?, service_account_json_base64 = ?, proxy_url = ?
+		WHERE name = ? AND api_keys = ? AND service_account_json = ? AND service_account_json_base64 = ? AND proxy_url = ?
+	`,
+		nextKeys, next.ServiceAccountJSON, next.ServiceAccountJSONBase64, next.ProxyURL,
+		normalizeCredentialName(current.Name), currentKeys, current.ServiceAccountJSON, current.ServiceAccountJSONBase64, current.ProxyURL,
+	)
+	if err != nil {
+		return false, fmt.Errorf("swap provider credential secrets: %w", err)
+	}
+	return affected > 0, nil
+}
+
 func (s *SQLCredentialStore) Close() error {
 	return nil
 }

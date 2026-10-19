@@ -232,8 +232,9 @@ func TestAggregatedEndpointNamespacesAndRelays(t *testing.T) {
 	)
 
 	session := connectClient(t, gatewayURL+"/mcp", map[string]string{
-		core.UserPathHeader: "/team-a",
-		"X-Request-ID":      "req-123",
+		core.UserPathHeader:  "/team-a",
+		"X-Request-ID":       "req-123",
+		"X-Test-Auth-Key-ID": "key-a",
 	})
 
 	names := listToolNames(t, session)
@@ -267,6 +268,7 @@ func TestAggregatedEndpointNamespacesAndRelays(t *testing.T) {
 	require.Equal(t, "alpha_echo", entry.Model)
 	require.Equal(t, "/team-a", entry.UserPath)
 	require.Equal(t, "req-123", entry.RequestID)
+	require.Equal(t, "key-a", entry.AuthKeyID)
 }
 
 func TestAggregatedEndpointAcceptsUniqueBareToolName(t *testing.T) {

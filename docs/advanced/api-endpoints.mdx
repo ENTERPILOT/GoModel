@@ -187,6 +187,6 @@ Admin REST and dashboard routes (`/admin/*`) are covered in
 | Endpoint              | Method | Description                                                                        |
 | --------------------- | ------ | ---------------------------------------------------------------------------------- |
 | `/health`             | GET    | Liveness check (always 200 while the process serves)                               |
-| `/health/ready`       | GET    | Readiness check: pings storage (503 if down); Redis cache down or no models loaded yet report degraded (still 200) |
+| `/health/ready`       | GET    | Readiness check: pings storage (503 if down); Redis cache down or no models loaded yet report degraded (still 200). Extension components (for example GoModel Pro vaults) appear under their own name: `degraded` keeps 200, `down` returns 503 |
 | `/metrics`            | GET    | Prometheus metrics (experimental, when enabled)                                    |
 | `/swagger/index.html` | GET    | [Swagger UI](/advanced/swagger-ui) (when built with `-tags=swagger` and enabled)    |

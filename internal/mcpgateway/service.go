@@ -18,6 +18,7 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/usage"
 	"github.com/enterpilot/gomodel/internal/version"
 )
@@ -36,6 +37,10 @@ const ScopeHeader = "X-MCP-Servers"
 // only see per-message HTTP headers. It is internal: the HTTP entrypoint
 // strips any client-sent value before stamping its own.
 const labelsHeader = "X-Gomodel-Mcp-Labels"
+
+// authKeyIDHeader carries the managed auth key id into tool handlers so MCP
+// usage rows can be attributed per key. Internal like labelsHeader.
+const authKeyIDHeader = "X-Gomodel-Mcp-Auth-Key-Id"
 
 // pinnedServerKey carries the /mcp/{server} path pin through the request
 // context into per-session server construction.
@@ -58,21 +63,34 @@ type Service struct {
 	userPathHeader string
 	configSpecs    map[string]ServerSpec
 	// virtualConfig holds the declarative virtual servers; virtualStore the
-	// admin-managed ones. virtualSpecs is their merge, rebuilt on Reload.
+	// admin-managed ones. virtualSpecs is their merge, rebuilt on reload.
 	virtualConfig map[string]VirtualServerSpec
 	virtualStore  VirtualStore
 	virtualMu     sync.RWMutex
 	virtualSpecs  map[string]VirtualServerSpec
-	// reloadMu serializes Reload, so an older store read can never publish
-	// after a newer one. Close takes it too: an in-flight Reload finishes
-	// before the upstreams are closed, and reloadStopped turns later ones
-	// into no-ops, so no upstream is dialed after shutdown.
+	// secrets resolves the secret references admin-managed headers hold.
+	secrets *config.Secrets
+	// reloadMu serializes reloads, so a slower one never applies an older
+	// server set over a newer one. Close takes it too: an in-flight reload
+	// finishes before the upstreams are closed, and reloadStopped turns later
+	// ones into no-ops, so no upstream is dialed after shutdown.
 	reloadMu      sync.Mutex
 	reloadStopped bool
 	// stopCtx is cancelled by Close, so a reload blocked on a store read,
-	// whether background or admin-triggered, does not hold up shutdown.
+	// whether background, admin-triggered, or a secret rotation, does not
+	// hold up shutdown.
 	stopCtx    context.Context
 	stopCancel context.CancelFunc
+	// mutateMu serializes admin saves and deletes from reading the stored
+	// row through releasing the secrets it held, so none releases a secret
+	// another one has just stored, or stores one another has just released.
+	mutateMu sync.Mutex
+	// recorded names the admin-managed servers whose references rotation
+	// watches.
+	recorded map[string]struct{}
+	// skipped holds, by name, why the last full reload left out stored
+	// servers whose references did not resolve. Guarded by reloadMu.
+	skipped map[string]error
 	// searchDiscovery is the default for sessions that do not send
 	// ToolDiscoveryHeader: serve search_tools/call_tool instead of the catalog.
 	searchDiscovery bool
@@ -146,6 +164,9 @@ type Options struct {
 	// ToolDiscovery is the default discovery mode, config.MCPToolDiscoveryOff
 	// or config.MCPToolDiscoverySearch.
 	ToolDiscovery string
+	// Secrets resolves secret references in admin-managed header values.
+	// Nil resolves the built-in env and file schemes only.
+	Secrets *config.Secrets
 }
 
 // NewService builds the gateway service and starts connecting to the merged
@@ -159,6 +180,8 @@ func NewService(ctx context.Context, opts Options) (*Service, error) {
 		configSpecs:     opts.ConfigServers,
 		virtualConfig:   opts.VirtualServers,
 		virtualStore:    opts.VirtualStore,
+		secrets:         opts.Secrets,
+		recorded:        make(map[string]struct{}),
 		searchDiscovery: opts.ToolDiscovery == config.MCPToolDiscoverySearch,
 		bindings:        make(map[string]sessionBinding),
 		requestCancels:  make(map[uint64]context.CancelFunc),
@@ -214,9 +237,20 @@ func (s *Service) refreshLoop(interval time.Duration) {
 // Reload re-merges declarative and store specs and reconciles the upstream
 // set. Declarative entries shadow store rows with the same name, mirroring
 // the tagging/virtual-models source precedence.
+//
+// Secret references in stored headers are resolved here. A row whose
+// references do not resolve is logged and left out at startup; once its
+// server runs, it keeps its current headers instead, so a secret backend
+// outage never disconnects a working upstream.
 func (s *Service) Reload(ctx context.Context) error {
+	return s.reload(ctx, nil)
+}
+
+// reload is Reload resolving only the rows rotated reports true for; every
+// other running server keeps its current spec. A nil rotated resolves all.
+func (s *Service) reload(ctx context.Context, rotated func(name string) bool) error {
 	// Close cancels every reload, not only background ones: an admin save
-	// waiting on a slow store read must not hold shutdown open.
+	// or a rotation waiting on a slow store read must not hold shutdown open.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer context.AfterFunc(s.stopCtx, cancel)()
@@ -226,12 +260,17 @@ func (s *Service) Reload(ctx context.Context) error {
 	if s.reloadStopped || s.stopCtx.Err() != nil {
 		return errServiceClosed
 	}
+
 	specs := make([]ServerSpec, 0, len(s.configSpecs))
 	seen := make(map[string]struct{}, len(s.configSpecs))
 	for name, spec := range s.configSpecs {
 		specs = append(specs, spec)
 		seen[name] = struct{}{}
 	}
+	var resolved []*config.ResolvedEntity
+	stored := make(map[string]struct{})
+	skipped := make(map[string]error)
+	var errs []error
 	if s.store != nil {
 		rows, err := s.store.List(ctx)
 		if err != nil {
@@ -242,7 +281,26 @@ func (s *Service) Reload(ctx context.Context) error {
 				slog.Warn("mcp server from admin store is shadowed by config", "server", row.Name)
 				continue
 			}
-			specs = append(specs, row.Spec())
+			stored[row.Name] = struct{}{}
+			current, running := s.manager.spec(row.Name)
+			if running && rotated != nil && !rotated(row.Name) {
+				specs = append(specs, current)
+				continue
+			}
+			spec, secrets, err := s.resolveServer(ctx, row)
+			if err != nil {
+				errs = append(errs, err)
+				if running {
+					slog.Warn("mcp server secret references could not be resolved; keeping its current headers", "server", row.Name, "error", err)
+					specs = append(specs, current)
+				} else {
+					slog.Error("mcp server secret references could not be resolved; server skipped", "server", row.Name, "error", err)
+					skipped[row.Name] = err
+				}
+				continue
+			}
+			specs = append(specs, spec)
+			resolved = append(resolved, secrets)
 		}
 	}
 	virtuals, err := s.mergedVirtualSpecs(ctx)
@@ -254,6 +312,20 @@ func (s *Service) Reload(ctx context.Context) error {
 	s.virtualMu.Unlock()
 	s.manager.Apply(specs)
 	s.logVirtualServerIssues()
+
+	for _, secrets := range resolved {
+		secrets.Record()
+	}
+	for name := range s.recorded {
+		if _, ok := stored[name]; !ok {
+			s.secrets.ForgetEntity(serverSecretEntity(name))
+		}
+	}
+	s.recorded = stored
+	if rotated != nil {
+		return errors.Join(errs...)
+	}
+	s.skipped = skipped
 	return nil
 }
 
@@ -277,6 +349,21 @@ func (s *Service) mergedVirtualSpecs(ctx context.Context) (map[string]VirtualSer
 		merged[row.Name] = row.Spec()
 	}
 	return merged, nil
+}
+
+// Skipped returns, by name, why the last full reload left out stored
+// servers whose secret references did not resolve.
+func (s *Service) Skipped() map[string]error {
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+	return maps.Clone(s.skipped)
+}
+
+// Running reports whether the server name is enabled in the running upstream
+// set. A disabled server is kept there for the admin view but serves nothing.
+func (s *Service) Running(name string) bool {
+	spec, ok := s.manager.spec(name)
+	return ok && spec.Enabled
 }
 
 // Views returns the current admin snapshot of all servers.
@@ -303,26 +390,74 @@ func (s *Service) Upsert(ctx context.Context, server ManagedServer) error {
 	if err := server.Validate(); err != nil {
 		return err
 	}
+	// ErrSealUnconfirmed means the row was written: apply it like any other
+	// save, then report the error.
+	saveErr := s.persist(ctx, &server)
+	if saveErr != nil && !errors.Is(saveErr, encryption.ErrSealUnconfirmed) {
+		return saveErr
+	}
+	if err := s.Reload(ctx); err != nil {
+		// The row is persisted; only applying it to the running manager
+		// failed. Say so — a retry or restart picks the row up.
+		return errors.Join(saveErr, fmt.Errorf("mcp server %q was saved but not applied: %w", server.Name, err))
+	}
+	return saveErr
+}
+
+// persist stores server in place of the row it replaces and releases the
+// secrets that row held and server no longer does. A name a virtual server
+// takes is refused with VirtualNameTakenError unless the row already exists.
+// An error wrapping encryption.ErrSealUnconfirmed means the row was written.
+func (s *Service) persist(ctx context.Context, server *ManagedServer) error {
+	s.mutateMu.Lock()
+	defer s.mutateMu.Unlock()
+
+	previous, err := s.store.Get(ctx, server.Name)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
 	write := s.store.Upsert
 	if s.IsVirtual(server.Name) {
 		// Only a new server is refused: one stored before the virtual server
 		// was declared keeps its endpoint and stays editable. Update fails
 		// atomically if the row is gone, so an edit racing a delete cannot
 		// recreate it under the virtual server's name.
-		write = s.store.Update
-	}
-	if err := write(ctx, server); err != nil {
-		if errors.Is(err, ErrNotFound) {
+		if previous == nil {
 			return VirtualNameTakenError(server.Name)
 		}
+		write = s.store.Update
+	}
+	if err := config.CheckSecretDestinations(ctx, ServerSecretEntity, server.Name, serverDestinations(previous, server), headerValues(server)); err != nil {
 		return err
 	}
-	if err := s.Reload(ctx); err != nil {
-		// The row is persisted; only applying it to the running manager
-		// failed. Say so — a retry or restart picks the row up.
-		return fmt.Errorf("mcp server %q was saved but not applied: %w", server.Name, err)
+	// Literal headers go to the secret writer first, when one is registered,
+	// so the row is stored with references only; then every reference must
+	// resolve before anything is persisted.
+	kept := headerValues(previous)
+	written, err := s.storeServerSecrets(ctx, server, kept)
+	if err != nil {
+		return err
 	}
-	return nil
+	if _, _, err := s.resolveServer(ctx, *server); err != nil {
+		// Nothing was stored, so whatever the stored row holds stays.
+		s.releaseSecrets(ctx, server.Name, written, kept)
+		return err
+	}
+	// ErrSealUnconfirmed means the row was written: treat it like any other
+	// save, then report the error.
+	saveErr := write(ctx, *server)
+	if saveErr != nil && !errors.Is(saveErr, encryption.ErrSealUnconfirmed) {
+		// The stored row is unchanged, so whatever it holds stays.
+		s.releaseSecrets(ctx, server.Name, written, kept)
+		if errors.Is(saveErr, ErrNotFound) {
+			return VirtualNameTakenError(server.Name)
+		}
+		return saveErr
+	}
+	// The new row is committed, so what it replaced is released even if
+	// applying it fails: a later edit only sees the new row.
+	s.releaseSecrets(ctx, server.Name, kept, headerValues(server))
+	return saveErr
 }
 
 // GetManaged returns one admin-managed server row from the store. Config-
@@ -343,12 +478,28 @@ func (s *Service) Delete(ctx context.Context, name string) error {
 	if s.IsManaged(name) {
 		return fmt.Errorf("mcp server %q is managed by config/env and is read-only", name)
 	}
-	if err := s.store.Delete(ctx, name); err != nil {
+	if err := s.remove(ctx, name); err != nil {
 		return err
 	}
 	if err := s.Reload(ctx); err != nil {
 		return fmt.Errorf("mcp server %q was deleted but the running set was not updated: %w", name, err)
 	}
+	return nil
+}
+
+// remove deletes the stored row name and releases the secrets it held.
+func (s *Service) remove(ctx context.Context, name string) error {
+	s.mutateMu.Lock()
+	defer s.mutateMu.Unlock()
+
+	previous, err := s.store.Get(ctx, name)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if err := s.store.Delete(ctx, name); err != nil {
+		return err
+	}
+	s.releaseSecrets(ctx, name, headerValues(previous), nil)
 	return nil
 }
 
@@ -452,6 +603,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 	r.Header.Del(labelsHeader)
 	if labels := core.RequestLabelsFromContext(r.Context()); len(labels) > 0 {
 		r.Header.Set(labelsHeader, strings.Join(labels, ","))
+	}
+	r.Header.Del(authKeyIDHeader)
+	if authKeyID != "" {
+		r.Header.Set(authKeyIDHeader, authKeyID)
 	}
 
 	ctx := r.Context()

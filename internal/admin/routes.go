@@ -34,6 +34,7 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/usage/models", h.UsageByModel)
 	g.GET("/usage/user-paths", h.UsageByUserPath)
 	g.GET("/usage/labels", h.UsageByLabel)
+	g.GET("/usage/endpoints", h.UsageByEndpoint)
 	g.GET("/usage/sessions", h.UsageBySession)
 	g.GET("/usage/log", h.UsageLog)
 	g.GET("/usage/throughput", h.TokenThroughput, global)
@@ -94,6 +95,7 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 
 	g.GET("/auth-keys", h.ListAuthKeys)
 	g.POST("/auth-keys", h.CreateAuthKey)
+	g.POST("/auth-keys/import", h.ImportAuthKey, global)
 	g.PUT("/auth-keys/:id/labels", h.UpdateAuthKeyLabels)
 	g.PUT("/auth-keys/:id/allowed-models", h.UpdateAuthKeyAllowedModels)
 	g.PUT("/auth-keys/:id/dashboard-access", h.UpdateAuthKeyDashboardAccess)

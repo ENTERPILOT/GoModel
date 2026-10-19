@@ -37,6 +37,9 @@ type Report struct {
 	// WrittenEnv lists variables written to the generated .env file.
 	WrittenEnv []string
 	Findings   []Finding
+	// Import is the plan read from the LiteLLM database, nil when the
+	// database was not read.
+	Import *ImportPlan
 }
 
 type providerRow struct {
@@ -109,6 +112,9 @@ func (r *Report) Markdown() string {
 			fmt.Fprintf(&b, "Inline values from the LiteLLM config were moved to `.env`: %s\n", codeList(r.WrittenEnv))
 		}
 	}
+	if r.Import != nil {
+		r.Import.writeMarkdown(&b)
+	}
 	r.writeFindings(&b, SeverityWarning, "Review before switching traffic")
 	r.writeFindings(&b, SeveritySkipped, "Not migrated")
 	r.writeFindings(&b, SeverityInfo, "Behavior changes")
@@ -135,8 +141,8 @@ const nextSteps = `
 2. Start GoModel next to LiteLLM with the generated files and send a few test requests.
 3. Point clients at GoModel. The base URL must end in ` + "`/v1`" + `
    (for example ` + "`http://gomodel:8080/v1`" + `).
-4. Recreate API keys, teams, and budgets: they live in the LiteLLM database,
-   not in config.yaml.
+4. Import keys, teams, and budgets from the LiteLLM database once GoModel
+   runs with this config: run the migration again with ` + "`--gomodel-url`" + `.
 
 Guide: https://gomodel.enterpilot.io/docs/guides/migrate-from-litellm
 `

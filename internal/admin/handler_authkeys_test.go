@@ -41,6 +41,14 @@ func (s *authKeyTestStore) Create(_ context.Context, key authkeys.AuthKey) error
 	return nil
 }
 
+func (s *authKeyTestStore) UpdateImported(_ context.Context, key authkeys.AuthKey) error {
+	if _, ok := s.keys[key.ID]; !ok {
+		return authkeys.ErrNotFound
+	}
+	s.keys[key.ID] = key
+	return nil
+}
+
 func (s *authKeyTestStore) UpdateLabels(_ context.Context, id string, labels []string, now time.Time) error {
 	key, ok := s.keys[id]
 	if !ok {

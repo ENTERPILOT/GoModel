@@ -53,6 +53,7 @@ func TestStore_RoundTrip(t *testing.T) {
 			DashboardAccess: true,
 			RedactedValue:   TokenPrefix + "...full",
 			SecretHash:      "hash-full",
+			ImportedFrom:    ImportedFromLiteLLM,
 			Enabled:         false,
 			ExpiresAt:       &expires,
 			DeactivatedAt:   &deactivated,
@@ -85,6 +86,7 @@ func TestStore_RoundTrip(t *testing.T) {
 		require.True(t, got.DashboardAccess)
 		require.Equal(t, full.RedactedValue, got.RedactedValue)
 		require.Equal(t, full.SecretHash, got.SecretHash)
+		require.Equal(t, ImportedFromLiteLLM, got.ImportedFrom)
 		require.False(t, got.Enabled)
 		require.NotNil(t, got.ExpiresAt)
 		require.True(t, got.ExpiresAt.Equal(expires), "ExpiresAt = %v, want %v", got.ExpiresAt, expires)
@@ -100,6 +102,7 @@ func TestStore_RoundTrip(t *testing.T) {
 			require.Nil(t, got.Labels, "%s: Labels = %#v, want nil", got.ID, got.Labels)
 			require.Nil(t, got.AllowedModels, "%s: AllowedModels = %#v, want nil", got.ID, got.AllowedModels)
 			require.False(t, got.DashboardAccess)
+			require.Empty(t, got.ImportedFrom)
 			require.True(t, got.Enabled)
 			require.Nil(t, got.ExpiresAt)
 			require.Nil(t, got.DeactivatedAt)
@@ -150,7 +153,7 @@ func TestStore_CreateRejectsDuplicates(t *testing.T) {
 
 		sameSecret := newTestKey("key-two", storeTestNow)
 		sameSecret.SecretHash = key.SecretHash
-		require.Error(t, store.Create(ctx, sameSecret), "duplicate secret hash")
+		require.ErrorIs(t, store.Create(ctx, sameSecret), ErrSecretHashExists)
 
 		keys, err := store.List(ctx)
 		require.NoError(t, err)
@@ -278,5 +281,48 @@ func TestStore_Deactivate(t *testing.T) {
 		require.False(t, got.Enabled)
 		require.True(t, got.DeactivatedAt.Equal(first), "DeactivatedAt = %v, want first deactivation %v", got.DeactivatedAt, first)
 		require.True(t, got.UpdatedAt.Equal(second), "UpdatedAt = %v, want %v", got.UpdatedAt, second)
+	})
+}
+
+func TestStore_UpdateImported(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		ctx := context.Background()
+		expires := storeTestNow.Add(24 * time.Hour)
+		key := newTestKey("key-imported", storeTestNow)
+		key.ImportedFrom = ImportedFromLiteLLM
+		key.Description = "old"
+		key.UserPath = "/old"
+		key.Labels = []string{"a"}
+		key.AllowedModels = []string{"openai/gpt-4o"}
+		key.DashboardAccess = true
+		key.ExpiresAt = &expires
+		require.NoError(t, store.Create(ctx, key))
+
+		updated := key
+		updated.Name = "renamed"
+		updated.Description = ""
+		updated.UserPath = "/new"
+		updated.Labels = nil
+		updated.AllowedModels = []string{"openai/gpt-4o-mini"}
+		updated.RedactedValue = "sk-...wxyz"
+		updated.ExpiresAt = nil
+		updated.DashboardAccess = false
+		updated.UpdatedAt = storeTestNow.Add(time.Hour)
+		require.NoError(t, store.UpdateImported(ctx, updated))
+
+		got := listByID(t, store)["key-imported"]
+		require.Equal(t, "renamed", got.Name)
+		require.Empty(t, got.Description)
+		require.Equal(t, "/new", got.UserPath)
+		require.Nil(t, got.Labels)
+		require.Equal(t, []string{"openai/gpt-4o-mini"}, got.AllowedModels)
+		require.Equal(t, "sk-...wxyz", got.RedactedValue)
+		require.Nil(t, got.ExpiresAt)
+		require.True(t, got.DashboardAccess, "dashboard access is not an import field")
+		require.Equal(t, key.SecretHash, got.SecretHash)
+		require.True(t, got.UpdatedAt.Equal(updated.UpdatedAt))
+
+		missing := newTestKey("missing", storeTestNow)
+		require.ErrorIs(t, store.UpdateImported(ctx, missing), ErrNotFound)
 	})
 }

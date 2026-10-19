@@ -367,7 +367,9 @@ is_parallel_safe() {
     || (number >= 229 && number <= 236) \
     || (number >= 238 && number <= 239) \
     || number == 241 \
-    || (number >= 245 && number <= 246) ))
+    || (number >= 245 && number <= 246) \
+    || number == 248 \
+    || (number >= 250 && number <= 255) ))
 }
 
 if (( JOBS > 1 )); then

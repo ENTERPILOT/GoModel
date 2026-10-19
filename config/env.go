@@ -240,7 +240,10 @@ func applyEnvOverridesValue(v reflect.Value) error {
 }
 
 // expandString expands environment variable references like ${VAR} or ${VAR:-default} in a string.
-// A reference it cannot resolve stays in the result verbatim.
+// A reference it cannot resolve stays in the result verbatim. Secret
+// references (${env:NAME}, ${file:/path}, ...) and "$$" are left untouched:
+// they are resolved, and the $${ escape is unescaped, field by field after
+// decoding (see Secrets).
 func expandString(s string) string {
 	return expandWith(s, func(key string) string { return "${" + key + "}" })
 }
@@ -252,6 +255,14 @@ func expandWith(s string, unresolved func(key string) string) string {
 		return s
 	}
 	return os.Expand(s, func(key string) string {
+		if key == "$" {
+			// os.Expand reads "$$" as the special variable $. Writing it back
+			// keeps the $${ escape intact for the field-level pass.
+			return "$$"
+		}
+		if _, _, ok := parseSecretReference(key); ok {
+			return "${" + key + "}"
+		}
 		name, defaultValue, hasDefault := strings.Cut(key, ":-")
 		if value := os.Getenv(name); value != "" {
 			return value

@@ -2,7 +2,7 @@
 title: "Migrating from LiteLLM"
 description: "Convert a LiteLLM proxy config.yaml to GoModel with one command, run both gateways side by side, and move clients over without changing model names."
 icon: "arrow-right-left"
-keywords: ["LiteLLM", "migration", "migrate", "LiteLLM alternative", "config.yaml", "model_list", "router_settings", "virtual keys", "fallbacks"]
+keywords: ["LiteLLM", "migration", "migrate", "LiteLLM alternative", "config.yaml", "model_list", "router_settings", "virtual keys", "teams", "budgets", "fallbacks"]
 ---
 
 GoModel speaks the same OpenAI-compatible API as the LiteLLM proxy, so most
@@ -14,7 +14,9 @@ config, and `gomodel migrate litellm` does most of it.
 | `model_list`, `router_settings`, `litellm_settings`, `general_settings` | Converted by `gomodel migrate litellm` |
 | Model names clients call | Kept: every `model_name` becomes a [virtual model](/features/virtual-models) |
 | Master key | Kept |
-| Virtual keys, teams, users, budgets, spend | Live in the LiteLLM database: recreate them in GoModel ([below](#4-recreate-keys-teams-and-budgets)) |
+| Virtual keys, teams, users, organizations | Imported from the LiteLLM database; clients keep their `sk-...` keys ([below](#4-import-keys-teams-and-budgets)) |
+| Model access, budgets, rate limits | Imported onto GoModel [user paths](/features/user-path) |
+| Spend | Not carried over: budgets start from zero |
 
 ## 1. Convert the config
 
@@ -103,34 +105,90 @@ curl -s http://localhost:8080/v1/chat/completions \
 `GET /v1/models` lists the same model names LiteLLM did. Then move clients
 over one team at a time.
 
-## 4. Recreate keys, teams, and budgets
+## 4. Import keys, teams, and budgets
 
-LiteLLM keeps virtual keys, teams, users, budgets, and spend in its Postgres
-database, so `config.yaml` does not carry them. GoModel models the same ideas
-with a [user path](/features/user-path) hierarchy:
+LiteLLM keeps virtual keys, teams, users, organizations, and their budgets in
+its PostgreSQL database. The same command reads them when it knows the
+database: `--database-url`, else the config's `general_settings.database_url`,
+else `DATABASE_URL`. It only reads, inside a read-only transaction. Without a
+database URL it converts the config alone.
 
-| LiteLLM | GoModel |
+Once GoModel runs with the converted config, import into it:
+
+```bash
+gomodel migrate litellm --database-url "$LITELLM_DATABASE_URL" \
+  --gomodel-url http://localhost:8080 litellm_config.yaml
+```
+
+The command authenticates with `GOMODEL_MASTER_KEY`, else the LiteLLM master
+key, and needs `https` for a GoModel on another machine (`--allow-http` on a
+trusted network, such as a Compose network). Without `--gomodel-url` it only
+lists the import in the report.
+
+Run it again while both gateways run side by side: it brings GoModel up to date
+with LiteLLM. Keys get their current path, labels, allowed models, and expiry,
+and keys LiteLLM has since blocked or expired are deactivated. Dashboard access
+granted and keys deactivated in GoModel stay as they are.
+
+Before writing anything, the command checks that GoModel has the features the
+import needs turned on, such as budgets (which need usage tracking) and rate
+limits, and stops if one is off. Rules for a path are written before its keys;
+if one is rejected, those keys are held back and the command exits with an
+error.
+
+Each key keeps its `sk-...` value: LiteLLM stores only a SHA-256 hash of it,
+and GoModel [imports that hash](/advanced/admin-endpoints#importing-keys-from-litellm),
+so GoModel never handles the key itself. Everything else lands on a
+[user path](/features/user-path):
+
+| LiteLLM | GoModel user path |
 | --- | --- |
-| Organization / team / user | User path, such as `/acme/search-team/alice` |
-| Virtual key | [API key](/features/user-path#api-keys) bound to a user path |
-| Key or team `models` | [Allowed models](/features/users) on the user path or key |
-| `max_budget` + `budget_duration` | [Budget](/features/budgets) on the user path (hourly, daily, weekly, monthly) |
-| `tpm_limit` / `rpm_limit` | [Rate limit](/features/rate-limits) on the user path |
-| `metadata.tags` | [Labels](/features/labelling) |
+| Organization | `/<organization>` |
+| Team | `/<organization>/<team>`, or `/<team>` without one |
+| Team key | `/<organization>/<team>/<key alias>` |
+| Personal key | `/users/<user>/<key alias>` |
+| Key with no team or user | `/keys/<key alias>` |
 
-Create them in the dashboard or with the [admin API](/advanced/admin-endpoints).
-Clients get new `sk_gom_...` keys.
+| LiteLLM setting | GoModel |
+| --- | --- |
+| `models` on an organization, team, or user | [Allowed models](/features/users) on its path |
+| `models` on a key | The key's allowed models |
+| `max_budget` + `budget_duration` | [Budget](/features/budgets) on the path |
+| `rpm_limit` / `tpm_limit`, `tpd_limit`, `max_parallel_requests` | [Rate limits](/features/rate-limits) per minute, per day, and concurrent |
+| Key and team `metadata.tags` | Key [labels](/features/labelling) |
+| `expires` | Key expiry |
+
+Model access follows LiteLLM's rules. A user's model list binds that user's
+personal keys, not the team keys they hold, because only personal keys sit
+under `/users/<user>`. Model names resolve to the provider models behind them,
+because GoModel checks the model a virtual model resolves to; if you later
+point a virtual model at other models, update the allowed models that named it.
+
+A `max_budget` or rate limit of `0` rejects every request in LiteLLM. GoModel
+limits must be positive, so that path gets a model policy no model matches
+instead.
+
+`budget_duration` maps to `hourly`, `daily`, `weekly`, or `monthly` (`30d` and
+`1mo` both become `monthly`, which resets on calendar months), and other
+durations to a fixed window. Not imported, and listed in the report:
+
+- blocked or expired keys, and keys of blocked teams (deactivated if an
+  earlier run imported them);
+- budgets without `budget_duration`: GoModel budgets reset every period;
+- spend: budgets start from zero, and the report shows LiteLLM's current spend
+  next to each one;
+- team member budgets and per-model budgets and limits.
 
 ## What changes for clients
 
 | LiteLLM | GoModel |
 | --- | --- |
 | Base URL `http://litellm:4000` or `http://litellm:4000/v1` | Base URL must end in `/v1`: `http://gomodel:8080/v1` |
-| Virtual key `sk-...` | GoModel API key `sk_gom_...`; the master key is unchanged |
+| Virtual key `sk-...` | Unchanged once [imported](#4-import-keys-teams-and-budgets); new keys are `sk_gom_...` |
 | `model_name` aliases | Unchanged |
 | `/health/liveliness`, `/health/readiness` | [`/health` and `/health/ready`](/advanced/cli#health-probe) |
 | Pass-through `/anthropic/*`, `/gemini/*`, `/vertex_ai/*` | [`/p/{provider}/*`](/features/passthrough-api); Anthropic SDKs can also use `/v1/messages` directly |
-| `metadata.tags` in the request body | A tagging header, such as `X-My-Tags`; see [Labelling](/features/labelling) |
+| `tags` or a list in `metadata.tags` in the request body, `x-litellm-tags` header | Unchanged: they become [labels](/features/labelling#litellm-tags) |
 | `x-litellm-*` response headers, `/key/*`, `/team/*` management API | GoModel's [admin API](/advanced/admin-endpoints) and [usage API](/advanced/usage-api) |
 
 ## How settings map
@@ -152,7 +210,7 @@ Clients get new `sk_gom_...` keys.
 | `callbacks: prometheus` / `otel` | `metrics.enabled` / `opentelemetry.enabled` |
 | `callbacks: langfuse` | [Langfuse over OpenTelemetry](/guides/langfuse) |
 | `master_key` | `GOMODEL_MASTER_KEY` (or `server.master_key`) |
-| `database_url` | Not reused; GoModel uses its own [storage](/guides/production) |
+| `database_url` | Read for the import; GoModel uses its own [storage](/guides/production) |
 
 Provider names follow GoModel's environment conventions: a deployment using
 LiteLLM's default key variable (`OPENAI_API_KEY`) becomes provider `openai`,

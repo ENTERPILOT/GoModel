@@ -205,6 +205,122 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*IssuedKey, er
 	}, nil
 }
 
+// Import stores a key another gateway issued, by the hash of its token, so
+// clients keep using that token. Importing the same token again updates the
+// earlier import, so re-running a migration carries over later changes; a
+// Disabled input only deactivates it. It returns ErrSecretHashExists only
+// when the hash belongs to a key from another source.
+func (s *Service) Import(ctx context.Context, input ImportInput) (*View, ImportOutcome, error) {
+	if s == nil {
+		return nil, ImportSkipped, fmt.Errorf("auth key service is required")
+	}
+
+	normalized, err := normalizeImportInput(input)
+	if err != nil {
+		return nil, ImportSkipped, err
+	}
+	existing, exists := s.keyBySecretHash(normalized.SecretHash)
+	if !exists && normalized.Disabled {
+		// Another instance may have imported it since this one last loaded
+		// keys; check storage before deciding there is nothing to deactivate.
+		if err := s.Refresh(ctx); err != nil {
+			return nil, ImportSkipped, err
+		}
+		if existing, exists = s.keyBySecretHash(normalized.SecretHash); !exists {
+			return nil, ImportSkipped, nil
+		}
+	}
+	if !exists {
+		view, err := s.createImported(ctx, normalized)
+		if !errors.Is(err, ErrSecretHashExists) {
+			return view, ImportCreated, err
+		}
+		// Another instance imported it first: reload and update that key.
+		if err := s.Refresh(ctx); err != nil {
+			return nil, ImportSkipped, err
+		}
+		if existing, exists = s.keyBySecretHash(normalized.SecretHash); !exists {
+			return nil, ImportSkipped, ErrSecretHashExists
+		}
+	}
+	if existing.ImportedFrom != normalized.ImportedFrom {
+		return nil, ImportSkipped, ErrSecretHashExists
+	}
+	if normalized.Disabled {
+		// Only deactivate: the key's other fields, its expiry included, stay
+		// as they were, so it is never briefly less restricted.
+		if existing.Enabled && existing.DeactivatedAt == nil {
+			if err := s.Deactivate(ctx, existing.ID); err != nil {
+				return nil, ImportSkipped, err
+			}
+		}
+		view, err := s.viewByID(existing.ID)
+		return view, ImportUpdated, err
+	}
+	view, err := s.updateImported(ctx, existing, normalized)
+	return view, ImportUpdated, err
+}
+
+func (s *Service) keyBySecretHash(hash string) (AuthKey, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	key, ok := s.snapshot.bySecretHash[hash]
+	return key, ok
+}
+
+func (s *Service) createImported(ctx context.Context, input ImportInput) (*View, error) {
+	now := time.Now().UTC()
+	key := AuthKey{
+		ID:              uuid.NewString(),
+		Name:            input.Name,
+		Description:     input.Description,
+		UserPath:        input.UserPath,
+		Labels:          input.Labels,
+		AllowedModels:   input.AllowedModels,
+		DashboardAccess: input.DashboardAccess,
+		RedactedValue:   input.RedactedValue,
+		SecretHash:      input.SecretHash,
+		ImportedFrom:    input.ImportedFrom,
+		Enabled:         true,
+		ExpiresAt:       input.ExpiresAt,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := s.store.Create(ctx, key); err != nil {
+		if errors.Is(err, ErrSecretHashExists) {
+			return nil, ErrSecretHashExists
+		}
+		return nil, fmt.Errorf("import auth key: %w", err)
+	}
+	s.applyUpsert(key, now)
+	s.refreshBestEffort(ctx, "import")
+	return &View{AuthKey: key, Active: key.Active(now)}, nil
+}
+
+// updateImported brings an earlier import up to date. Dashboard access and a
+// deactivation made in GoModel are kept: the import never widens access an
+// administrator narrowed.
+func (s *Service) updateImported(ctx context.Context, key AuthKey, input ImportInput) (*View, error) {
+	now := time.Now().UTC()
+	key.Name = input.Name
+	key.Description = input.Description
+	key.UserPath = input.UserPath
+	key.Labels = input.Labels
+	key.AllowedModels = input.AllowedModels
+	key.RedactedValue = input.RedactedValue
+	key.ExpiresAt = input.ExpiresAt
+	key.UpdatedAt = now
+	if err := s.store.UpdateImported(ctx, key); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("update imported auth key: %w", err)
+	}
+	s.applyUpsert(key, now)
+	s.refreshBestEffort(ctx, "import")
+	return s.viewByID(key.ID)
+}
+
 // UpdateLabels replaces a managed auth key's labels, updates the in-memory
 // snapshot immediately, best-effort reconciles from storage, and returns the
 // updated admin-facing view. Passing no labels clears them.
@@ -335,22 +451,18 @@ func (s *Service) Authenticate(_ context.Context, token string) (AuthenticationR
 		return AuthenticationResult{}, ErrInvalidToken
 	}
 
-	secret, err := parseTokenSecret(token)
+	secretHash, importedFrom, err := tokenSecretHash(token)
 	if err != nil {
 		return AuthenticationResult{}, err
 	}
-	secretHash := hashSecret(secret)
 	now := time.Now().UTC()
 
 	s.mu.RLock()
-	active, ok := s.snapshot.activeByHash[secretHash]
-	if ok {
-		s.mu.RUnlock()
-		return authenticateKey(active, now)
-	}
 	key, exists := s.snapshot.bySecretHash[secretHash]
 	s.mu.RUnlock()
-	if !exists {
+	// A token only matches keys hashed the way its own format is, so a
+	// GoModel token can never match an imported hash or the other way round.
+	if !exists || key.ImportedFrom != importedFrom {
 		return AuthenticationResult{}, ErrInvalidToken
 	}
 	return authenticateKey(key, now)
@@ -527,16 +639,21 @@ func generateTokenMaterial() (value string, redactedValue string, secretHash str
 	return value, redactTokenValue(value), hashSecret(secret), nil
 }
 
-func parseTokenSecret(token string) (string, error) {
+// tokenSecretHash returns the hash a presented token is stored under and the
+// ImportedFrom value of the keys it may match: GoModel hashes the secret after
+// its prefix, LiteLLM hashes the whole "sk-..." token.
+func tokenSecretHash(token string) (secretHash, importedFrom string, err error) {
 	token = strings.TrimSpace(token)
-	if !strings.HasPrefix(token, TokenPrefix) {
-		return "", ErrInvalidToken
+	if secret, ok := strings.CutPrefix(token, TokenPrefix); ok {
+		if secret == "" {
+			return "", "", ErrInvalidToken
+		}
+		return hashSecret(secret), "", nil
 	}
-	secret := strings.TrimPrefix(token, TokenPrefix)
-	if secret == "" {
-		return "", ErrInvalidToken
+	if len(token) > len(liteLLMTokenPrefix) && strings.HasPrefix(token, liteLLMTokenPrefix) {
+		return hashSecret(token), ImportedFromLiteLLM, nil
 	}
-	return secret, nil
+	return "", "", ErrInvalidToken
 }
 
 func hashSecret(secret string) string {
