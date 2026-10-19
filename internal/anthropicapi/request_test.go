@@ -458,13 +458,16 @@ func TestToChatRequestDeferredToolDeclarations(t *testing.T) {
 func TestToChatRequestServerToolSearchResult(t *testing.T) {
 	// The server-side tool search answers without a client tool call, so its
 	// result cannot become a role:"tool" message; it degrades to user text.
+	// The matched tools sit in the nested content object, as Anthropic
+	// documents, not on the outer block.
 	chat, err := ToChatRequest(mustDecode(t, `{
 		"model":"m","max_tokens":10,
 		"messages":[{"role":"user","content":[
 			{"type":"text","text":"search my tools"},
-			{"type":"tool_search_tool_result","tool_use_id":"srv_1","tool_references":[
-				{"type":"tool_reference","tool_name":"WebSearch"}
-			]}
+			{"type":"tool_search_tool_result","tool_use_id":"srv_1","content":{
+				"type":"tool_search_tool_search_result",
+				"tool_references":[{"type":"tool_reference","tool_name":"WebSearch"}]
+			}}
 		]}]
 	}`))
 	require.NoError(t, err)

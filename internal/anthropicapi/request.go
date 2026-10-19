@@ -259,7 +259,7 @@ func convertBlockMessage(role string, blocks []ContentBlock, lenient bool) ([]co
 			// become a role:"tool" message. Its matched tools degrade to text
 			// in the user turn: no provider behind the translated pipeline
 			// can resolve a tool_reference.
-			if text := toolReferencesText(block.ToolReferences); text != "" {
+			if text := toolReferencesText(block.References()); text != "" {
 				parts = append(parts, core.ContentPart{Type: "text", Text: text, ExtraFields: extra})
 			}
 		case "thinking", "redacted_thinking":
@@ -549,6 +549,25 @@ func decodeSource(raw json.RawMessage) (*Source, error) {
 	return &source, nil
 }
 
+// decodeSearchResult decodes the nested content object of a
+// tool_search_tool_result block, which holds the tools the server-side search
+// matched. Other block types leave SearchResult nil.
+func (block *ContentBlock) decodeSearchResult() error {
+	if block.Type != "tool_search_tool_result" {
+		return nil
+	}
+	trimmed := bytes.TrimSpace(block.Content)
+	if len(trimmed) == 0 || core.IsJSONNull(trimmed) {
+		return nil
+	}
+	var result ToolSearchResult
+	if err := json.Unmarshal(trimmed, &result); err != nil {
+		return fmt.Errorf("tool_search_tool_result content: %v", err)
+	}
+	block.SearchResult = &result
+	return nil
+}
+
 // collapseParts reduces content parts to a plain string when they are all text,
 // and otherwise returns the typed part slice. It returns nil when there is no
 // content at all.
@@ -591,6 +610,11 @@ func parseContent(raw json.RawMessage) (text string, blocks []ContentBlock, err 
 		decoded := []ContentBlock{}
 		if err := json.Unmarshal(trimmed, &decoded); err != nil {
 			return "", nil, err
+		}
+		for i := range decoded {
+			if err := decoded[i].decodeSearchResult(); err != nil {
+				return "", nil, err
+			}
 		}
 		return "", decoded, nil
 	default:

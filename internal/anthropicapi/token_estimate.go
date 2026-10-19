@@ -107,7 +107,7 @@ func contentBlockTokens(block ContentBlock) float64 {
 		result, _ := toolResultContent(block.Content, true)
 		return toolBlockOverhead + partsTokens(result)
 	case "tool_search_tool_result":
-		return toolBlockOverhead + textTokens(toolReferencesText(block.ToolReferences))
+		return toolBlockOverhead + textTokens(toolReferencesText(block.References()))
 	case "tool_reference":
 		return textTokens(textBlockText(block))
 	case "search_result":

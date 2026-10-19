@@ -71,10 +71,11 @@ type ContentBlock struct {
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   json.RawMessage `json:"content,omitempty" swaggertype:"object"`
 	IsError   bool            `json:"is_error,omitempty"`
-	// tool_search_tool_result: the server-side tool search's matches.
-	ToolReferences []ToolReference `json:"tool_references,omitempty"`
 	// tool_reference: the name of a tool a tool search matched.
 	ToolName string `json:"tool_name,omitempty"`
+	// tool_search_tool_result: the search's matches, in a nested
+	// tool_search_tool_search_result object under Content.
+	SearchResult *ToolSearchResult `json:"-" swaggerignore:"true"`
 	// CacheControl preserves Anthropic prompt-cache breakpoints through the
 	// canonical chat representation when the request is routed back to Claude.
 	CacheControl json.RawMessage `json:"cache_control,omitempty" swaggertype:"object"`
@@ -91,6 +92,22 @@ type ContentBlock struct {
 type ToolReference struct {
 	Type     string `json:"type"`
 	ToolName string `json:"tool_name"`
+}
+
+// ToolSearchResult is the content object of a tool_search_tool_result block.
+type ToolSearchResult struct {
+	Type           string          `json:"type"`
+	ToolReferences []ToolReference `json:"tool_references"`
+}
+
+// References returns the tools a tool_search_tool_result block matched. The
+// search keeps its matches in the nested content object; a block that carries
+// none has no result to report.
+func (block ContentBlock) References() []ToolReference {
+	if block.SearchResult == nil {
+		return nil
+	}
+	return block.SearchResult.ToolReferences
 }
 
 // Source describes an Anthropic image or document source: base64 inline
