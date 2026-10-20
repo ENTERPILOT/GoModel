@@ -210,6 +210,31 @@ func TestTryFailoverSkipsOverBudgetProviders(t *testing.T) {
 	})
 }
 
+// A workflow with budgets disabled skips budget checks at admission, so
+// failover must not gate targets on provider budgets either.
+func TestTryFailoverIgnoresBudgetsWhenWorkflowDisablesThem(t *testing.T) {
+	o, workflow := failoverTestFixture()
+	o.provider = namedRouteProvider{}
+	o.budgetGate = overBudgetGate{exhausted: map[string]bool{"openai": true}}
+	workflow.Policy = &core.ResolvedWorkflowPolicy{
+		VersionID: "workflow-v1",
+		Features:  core.WorkflowFeatures{Failover: true, Budget: false},
+	}
+
+	primaryErr := core.NewProviderError("openai", http.StatusInternalServerError, "primary boom", nil)
+	var attempted []string
+	call := func(selector core.ModelSelector, _, _ string) (string, string, error) {
+		attempted = append(attempted, selector.QualifiedModel())
+		return "ok", "openai", nil
+	}
+
+	_, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, nil, call)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"openai/gpt-5"}, attempted)
+	require.True(t, meta.UsedFailover)
+}
+
 func TestTryFailoverStreamSkipsWhenContextCanceled(t *testing.T) {
 	o, workflow := failoverTestFixture()
 
