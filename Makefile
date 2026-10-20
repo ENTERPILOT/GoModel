@@ -54,9 +54,12 @@ run:
 # delete two thirds of the demo audit log on the first startup sweep.
 # Exported so the seeder reads the same window as the retention settings: a
 # maintainer changing this default must not leave them out of step.
+# The allowlist mode serves the seeded providers' model lists without calling
+# upstream /models with their placeholder keys.
 export DEMO_DAYS ?= 90
 demo: seed-demo-data
 	$(MAKE) run GOMODEL_DEMO_MODE=true GUARDRAILS_ENABLED=true \
+		CONFIGURED_PROVIDER_MODELS_MODE=allowlist \
 		LOGGING_RETENTION_DAYS=$(DEMO_DAYS) USAGE_RETENTION_DAYS=$(DEMO_DAYS)
 
 # Clean build artifacts
