@@ -131,11 +131,21 @@ type multipartImage struct {
 }
 
 // format returns the asset's image format: the one the asset states, or,
-// with none, the part's content type, or the format its bytes show.
+// with none, the part's content type, or the format its bytes show. A stated
+// format must be one TypeSafe accepts, as a detected one is.
 func (i multipartImage) format(stated json.RawMessage) (string, error) {
-	var format string
-	if len(stated) > 0 && json.Unmarshal(stated, &format) == nil && format != "" {
-		return format, nil
+	if len(stated) > 0 && !bytes.Equal(bytes.TrimSpace(stated), []byte("null")) {
+		var format string
+		if err := json.Unmarshal(stated, &format); err != nil {
+			return "", errors.New("format must be a string")
+		}
+		switch format {
+		case "png", "jpg", "jpeg":
+			return format, nil
+		case "":
+		default:
+			return "", fmt.Errorf("format must be png, jpg, or jpeg, not %q", format)
+		}
 	}
 	mediaType, _, _ := mime.ParseMediaType(i.contentType)
 	switch mediaType {

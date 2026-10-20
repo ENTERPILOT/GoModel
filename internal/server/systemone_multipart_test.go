@@ -104,6 +104,8 @@ func TestSystemOneMultipartToJSON_RejectsMalformedForms(t *testing.T) {
 		{name: "gif part", request: multipartRequest, parts: []formPart{{name: "door-photo", contentType: "image/gif", data: []byte("GIF89a")}}, want: "PNG or JPEG"},
 		{name: "unknown bytes", request: multipartRequest, parts: []formPart{{name: "door-photo", data: []byte("hello")}}, want: "not a PNG or JPEG"},
 		{name: "request part not JSON", request: `not json`, want: "not a JSON request"},
+		{name: "stated gif format", request: `{"model":"m","state":"a","assets":{"a":{"part":"door-photo","format":"gif"}},"questions":{}}`, parts: []formPart{{name: "door-photo", contentType: "image/gif", data: []byte("GIF89a")}}, want: "png, jpg, or jpeg"},
+		{name: "format not a string", request: `{"model":"m","state":"a","assets":{"a":{"part":"door-photo","format":1}},"questions":{}}`, parts: []formPart{png}, want: "format must be a string"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -154,4 +156,13 @@ func TestSystemOne_RejectsMalformedMultipartRequests(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "invalid multipart request")
 	assert.Nil(t, provider.lastPassthroughReq)
+}
+
+// A stated format TypeSafe accepts is kept as stated.
+func TestSystemOneMultipartToJSON_KeepsAStatedFormat(t *testing.T) {
+	contentType, body := systemOneForm(t, `{"model":"m","state":"a","assets":{"a":{"part":"p","format":"jpeg"}},"questions":{}}`,
+		formPart{name: "p", contentType: "image/png", data: pngBytes})
+	got, err := systemOneMultipartToJSON(contentType, body)
+	require.NoError(t, err)
+	assert.Contains(t, string(got), `"format":"jpeg"`)
 }
