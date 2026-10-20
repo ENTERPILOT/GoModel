@@ -59,6 +59,12 @@ type SystemOneRequestPatcher interface {
 	PatchSystemOneRequest(ctx context.Context, req *core.SystemOneRequest) (*core.SystemOneRequest, error)
 }
 
+// DecisionRequestPatcher is an optional TranslatedRequestPatcher capability:
+// it runs the prompt phase over an OpenAI Decisions request's input.
+type DecisionRequestPatcher interface {
+	PatchDecisionRequest(ctx context.Context, req *core.DecisionRequest) (*core.DecisionRequest, error)
+}
+
 // PromptContentEditor is an optional TranslatedRequestPatcher capability: it
 // reports whether the prompt phase may rewrite the content of this request.
 // Only a rewriting prompt phase (anonymization, redaction) needs the replayed

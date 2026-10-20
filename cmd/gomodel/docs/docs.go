@@ -5802,6 +5802,75 @@ const docTemplate = `{
                 ]
             }
         },
+        "/v1/decisions": {
+            "post": {
+                "description": "Available when an openai or jev provider is configured. OpenAI models answer natively; jev models (Jev, Kev) answer through System One, translated both ways, and read text input only.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "decisions"
+                ],
+                "summary": "Answer typed questions about an input (OpenAI Decisions)",
+                "parameters": [
+                    {
+                        "description": "Decisions request: model, input, and questions",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Decision: answers in question order, model, and usage",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/v1/embeddings": {
             "post": {
                 "consumes": [
@@ -9746,6 +9815,10 @@ const docTemplate = `{
             "properties": {
                 "cache_control": {
                     "type": "object"
+                },
+                "defer_loading": {
+                    "description": "DeferLoading marks a tool whose schema the API loads only when tool\nsearch matches it. It is an ordinary custom tool that declares itself\ndeferred, so the translated pipeline sends it like any other and drops\nthe marker (see convertTools).",
+                    "type": "boolean"
                 },
                 "description": {
                     "type": "string"

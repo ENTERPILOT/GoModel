@@ -34,6 +34,7 @@ const (
 	OperationProviderPassthrough Operation = "provider_passthrough"
 	OperationMCP                 Operation = "mcp"
 	OperationSystemOne           Operation = "systemone"
+	OperationDecisions           Operation = "decisions"
 )
 
 // EndpointDescriptor centralizes the transport-facing classification of model and provider routes.
@@ -181,6 +182,16 @@ func describeEndpointPath(path string) EndpointDescriptor {
 			Dialect:          "systemone",
 			Operation:        OperationSystemOne,
 		}
+	case path == "/v1/decisions":
+		// OpenAI's Decisions API. The body is forwarded unchanged apart from
+		// the routed model and guardrail edits to the input; providers with
+		// another decision API (Jev's System One) translate it themselves.
+		return EndpointDescriptor{
+			ModelInteraction: true,
+			IngressManaged:   true,
+			Dialect:          "openai_compat",
+			Operation:        OperationDecisions,
+		}
 	case isRealtimePath(path):
 		// The realtime endpoints relay the provider's schema verbatim: /v1/realtime
 		// upgrades to a websocket, /v1/realtime/calls exchanges WebRTC SDP, and
@@ -250,7 +261,7 @@ func bodyModeForEndpoint(method, path string, operation Operation) BodyMode {
 			return BodyModeMultipart
 		}
 		return BodyModeNone
-	case OperationAudioSpeech, OperationImageGenerations, OperationSystemOne:
+	case OperationAudioSpeech, OperationImageGenerations, OperationSystemOne, OperationDecisions:
 		return BodyModeJSON
 	case OperationAudioTranscriptions, OperationAudioTranslations, OperationImageEdits:
 		return BodyModeMultipart

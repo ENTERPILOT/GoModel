@@ -64,7 +64,7 @@ support, not every individual model capability exposed by an upstream provider.
 | Xiaomi MiMo | `XIAOMI_API_KEY` (`XIAOMI_BASE_URL` optional) | `mimo-v2.5-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [Xiaomi MiMo](/providers/xiaomi) |
 | ElevenLabs (voice only) | `ELEVENLABS_API_KEY` (`ELEVENLABS_BASE_URL` optional) | `eleven_multilingual_v2` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [ElevenLabs](/providers/elevenlabs) |
 | audio.cpp (audio only) | `AUDIOCPP_BASE_URL` (`AUDIOCPP_API_KEY` optional) | `pocket-tts` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [audio.cpp](/providers/audiocpp) |
-| Jev / Kev (System One only) | `JEV_API_KEY` (`JEV_BASE_URL` optional) | `jev-latest` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [Jev](/providers/jev) |
+| Jev / Kev (decisions only) | `JEV_API_KEY` (`JEV_BASE_URL` optional) | `jev-latest` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [Jev](/providers/jev) |
 | OpenCode Go | `OPENCODE_GO_API_KEY` (`OPENCODE_GO_BASE_URL` optional) | `glm-5.1` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [OpenCode Go](/providers/opencode-go) |
 | Kimi Code | `KIMICODE_API_KEY` | `kimi-for-coding` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Kimi Code](/providers/kimicode) |
 | Hetzner (experimental) | `HETZNER_API_KEY` (`HETZNER_BASE_URL` optional) | `Qwen/Qwen3.6-35B-A3B-FP8` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [Hetzner](/providers/hetzner) |
@@ -240,10 +240,11 @@ support, not every individual model capability exposed by an upstream provider.
   to it, and its detail, alignment, and live-streaming routes are reachable
   through passthrough. See [audio.cpp](/providers/audiocpp).
 - **Jev / Kev** — TypeSafe's System One API is a decision API (state plus
-  typed questions in, calibrated probabilities out) with no OpenAI-compatible
-  surface, so GoModel forwards it natively, untranslated, at
-  `POST /v1/systemone` (with virtual models, guardrails, audit, and usage) and
-  through passthrough at `/p/jev/...`. The endpoint is available once a `jev`
+  typed questions in, calibrated probabilities out). GoModel forwards it
+  natively, untranslated, at `POST /v1/systemone` (with virtual models,
+  guardrails, audit, and usage) and through passthrough at `/p/jev/...`, and
+  answers OpenAI's [Decisions API](/advanced/decisions-api) at
+  `POST /v1/decisions` with it by translating both ways. The endpoint is available once a `jev`
   or `openrouter` provider is configured; OpenRouter serves Jev natively, and
   its decision models are listed as utility models.
   `JEV_API_KEY` configures the hosted API; for a self-hosted Kev server, which

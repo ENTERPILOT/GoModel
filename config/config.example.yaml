@@ -642,10 +642,11 @@ providers:
     type: jev
     api_key: "${JEV_API_KEY}"
     # base_url defaults to "https://api.typesafe.ai". TypeSafe's System One
-    # API is a decision API with no OpenAI-compatible surface: configuring
-    # this provider (or openrouter, which serves Jev natively) enables
-    # POST /v1/systemone, which forwards requests natively (point the
-    # TypeSafe SDK at the gateway root). A self-hosted Kev
+    # API is a decision API: configuring this provider enables
+    # POST /v1/decisions, which answers OpenAI Decisions requests by
+    # translating them to System One, and POST /v1/systemone (also enabled
+    # by openrouter, which serves Jev natively), which forwards System One
+    # requests natively (point the TypeSafe SDK at the gateway root). A self-hosted Kev
     # server speaks the same API without authentication: set base_url
     # (e.g. "http://localhost:8009") and omit api_key. Name it "kev" to see
     # that name in logs and usage; no separate provider type is needed.

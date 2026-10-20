@@ -8733,6 +8733,100 @@
         }
       }
     },
+    "/v1/decisions": {
+      "post": {
+        "description": "Available when an openai or jev provider is configured. OpenAI models answer natively; jev models (Jev, Kev) answer through System One, translated both ways, and read text input only.",
+        "tags": [
+          "decisions"
+        ],
+        "summary": "Answer typed questions about an input (OpenAI Decisions)",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "description": "Decisions request: model, input, and questions",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Decision: answers in question order, model, and usage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/decisions",
+            "title": "Answer typed questions about an input (OpenAI Decisions)",
+            "description": "GoModel API reference for POST /v1/decisions: Answer typed questions about an input (OpenAI Decisions)."
+          }
+        }
+      }
+    },
     "/v1/embeddings": {
       "post": {
         "tags": [
@@ -13786,6 +13880,10 @@
         "properties": {
           "cache_control": {
             "type": "object"
+          },
+          "defer_loading": {
+            "description": "DeferLoading marks a tool whose schema the API loads only when tool\nsearch matches it. It is an ordinary custom tool that declares itself\ndeferred, so the translated pipeline sends it like any other and drops\nthe marker (see convertTools).",
+            "type": "boolean"
           },
           "description": {
             "type": "string"

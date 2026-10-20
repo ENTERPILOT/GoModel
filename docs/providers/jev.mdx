@@ -3,7 +3,7 @@ title: "Jev / Kev (TypeSafe System One)"
 sidebarTitle: "Jev / Kev"
 description: "Route TypeSafe System One decision requests through GoModel, to the hosted Jev API or a self-hosted Kev server."
 icon: "scale"
-keywords: ["Jev", "Kev", "TypeSafe", "System One", "decision model", "classification", "noul", "choice", "score", "self-hosted"]
+keywords: ["Jev", "Kev", "TypeSafe", "System One", "decision model", "Decisions API", "classification", "noul", "choice", "score", "self-hosted"]
 ---
 
 [Jev](https://docs.typesafe.ai/introduction) is TypeSafe's System One model: a
@@ -21,12 +21,19 @@ There are three question types:
 | `choice` | Pick one option from a set you define | `choice`, plus `probabilities` and `confidence` |
 | `score` | Rate against ordered levels | `score`, plus `legend`, `probabilities` and `confidence` |
 
-The API is not OpenAI-compatible, and its answers have no chat equivalent, so
-GoModel forwards it natively instead of translating it: `POST /v1/systemone`
-is available as soon as a `jev` or `openrouter` provider is configured, and
-[passthrough](/features/passthrough-api) at `/p/jev/...` reaches every other
-upstream route. Chat, `/responses`, and `/v1/embeddings` return
-`invalid_request_error` for `jev` models, pointing at `/v1/systemone`.
+GoModel serves `jev` models two ways:
+
+- **OpenAI's [Decisions API](/advanced/decisions-api)** at `POST /v1/decisions`,
+  which asks the same three kinds of question (`predicate` for `noul`). GoModel
+  translates the request to System One and the answer back, so OpenAI SDKs
+  and clients written for `gpt-6-luna` work with Jev and Kev unchanged.
+- **System One itself** at `POST /v1/systemone`, forwarded natively without
+  translation, for the TypeSafe SDKs; it is also available with only an
+  `openrouter` provider. [Passthrough](/features/passthrough-api) at
+  `/p/jev/...` reaches every other upstream route.
+
+Chat, `/responses`, and `/v1/embeddings` return `invalid_request_error` for
+`jev` models, pointing at both decision endpoints.
 
 ## Configure
 
@@ -95,6 +102,31 @@ Use `kev-latest` as the model on a Kev server; it also answers to
 `jev-latest`. The same request works at `/p/jev/v1/systemone`, but that
 passthrough route skips virtual models and guardrails; see
 [the native endpoint](#the-native-endpoint).
+
+The same question through the Decisions API, with an OpenAI SDK or `curl`:
+
+```bash
+curl -s http://localhost:8080/v1/decisions \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "jev-latest",
+    "input": "Shoes arrived two weeks late and in the wrong size. Also I see two charges on my card.",
+    "questions": [{"type": "predicate", "name": "escalate", "instructions": "Does this need urgent human attention?"}]
+  }'
+```
+
+```json
+{
+  "model": "jev-1.13.0",
+  "answers": [{"name": "escalate", "type": "predicate", "probability": 0.93}],
+  "usage": {"input_tokens": 101, "input_tokens_details": {"cache_write_tokens": 0, "cached_tokens": 0},
+            "output_tokens": 161, "output_tokens_details": {"reasoning_tokens": 0}, "total_tokens": 262}
+}
+```
+
+Images are rejected, since System One reads text only; see
+[Jev and Kev](/advanced/decisions-api#jev-and-kev) for the full mapping.
 
 ## Using the TypeSafe SDKs
 
