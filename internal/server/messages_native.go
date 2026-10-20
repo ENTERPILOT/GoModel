@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"context"
 	// encoding/json rather than goccy (ADR-0015): replaceTopLevelMember
-	// splices a value in place at the decoder's InputOffset, and stdlib
-	// documents that offset as the end of the last token read. goccy also has
-	// InputOffset, but it reports its stream's TotalOffset, whose position
-	// relative to the last token is not specified.
+	// splices a value in place at the decoder's InputOffset and relies on
+	// the standard library's documented offset contract.
 	"encoding/json"
 	"errors"
 	"io"
