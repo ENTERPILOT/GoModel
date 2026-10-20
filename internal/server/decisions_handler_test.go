@@ -34,8 +34,16 @@ type scriptedDecisionsProvider struct {
 	// default.
 	statuses map[string]int
 	catalog  map[string]core.Model
-	calls    []string
-	bodies   []map[string]any
+	// imageReaders records what each provider instance says about reading
+	// images; an instance it does not list says nothing.
+	imageReaders map[string]bool
+	calls        []string
+	bodies       []map[string]any
+}
+
+func (p *scriptedDecisionsProvider) DecisionsReadImages(providerName string) (bool, bool) {
+	reads, known := p.imageReaders[providerName]
+	return reads, known
 }
 
 func (p *scriptedDecisionsProvider) LookupModel(model string) (*core.Model, bool) {
@@ -396,4 +404,26 @@ func TestDecisions_ImagesSkipTargetsTheCallerMayNotUse(t *testing.T) {
 	require.NoError(t, handler.Decisions(c))
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.Equal(t, []string{"openai-b openai gpt-6-luna"}, provider.calls)
+}
+
+// A Kev provider whose models carry no capabilities, as with models_mode:
+// allowlist, still says it reads no images, so an image request skips it
+// before dispatch instead of failing there with a 400 that stops failover.
+func TestDecisions_ProviderSaysWhetherItReadsImages(t *testing.T) {
+	provider := newVisionDecisionsProvider()
+	delete(provider.catalog, "kev/kev-latest")
+	provider.imageReaders = map[string]bool{"kev": false, "jev": true}
+	failovers := failoverResolverStub{selectors: []core.ModelSelector{{Provider: "openai", Model: "gpt-6-luna"}}}
+	handler := newHandler(provider, nil, nil, nil, nil, nil, failovers, nil)
+
+	c, rec := echotest.Post(t, "/v1/decisions", fmt.Sprintf(decisionImageBody, "kev/kev-latest"))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"openai openai gpt-6-luna"}, provider.calls)
+
+	handler = NewHandler(provider, nil, nil, nil)
+	c, rec = echotest.Post(t, "/v1/decisions", fmt.Sprintf(decisionImageBody, "kev/kev-latest"))
+	require.NoError(t, handler.Decisions(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "does not read images")
 }

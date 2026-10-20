@@ -17,7 +17,10 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
-var _ core.DecisionsProvider = (*Provider)(nil)
+var (
+	_ core.DecisionsProvider   = (*Provider)(nil)
+	_ core.DecisionImageReader = (*Provider)(nil)
+)
 
 // decisionsRequest asks one question of each type, the score unnamed, with a
 // boolean choice value and prompt caching System One has no place for.
@@ -329,7 +332,11 @@ func TestHostedTypeSafe(t *testing.T) {
 	for base, want := range map[string]bool{
 		"https://api.typesafe.ai":         true,
 		"https://api.typesafe.ai/v1":      true,
-		"https://TypeSafe.AI":             true,
+		"https://API.TypeSafe.AI":         true,
+		"http://api.typesafe.ai":          false,
+		"https://typesafe.ai":             false,
+		"https://docs.typesafe.ai":        false,
+		"https://api.typesafe.ai:8443":    false,
 		"http://localhost:8009":           false,
 		"https://me--kev-api.modal.run":   false,
 		"https://typesafe.ai.example.com": false,

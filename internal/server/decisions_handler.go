@@ -148,16 +148,29 @@ type decisionImages struct {
 	links bool
 }
 
-// readsImages reports whether the model may read the input's images. A model
-// the catalog explicitly marks as not reading images (a Kev server) reads
-// none, and jev providers take images inline only, so a link is refused
-// there; any other model gets the benefit of the doubt.
+// decisionImageReaders reports whether a provider instance reads images in a
+// Decisions input; the provider router implements it.
+type decisionImageReaders interface {
+	DecisionsReadImages(providerName string) (readsImages, known bool)
+}
+
+// readsImages reports whether the model may read the input's images. A
+// provider that says it reads none (a jev provider pointing at a Kev server)
+// is refused first, since models configured without listing carry no
+// capabilities to check; then a model the catalog explicitly marks as not
+// reading images. jev providers take images inline only, so a link is
+// refused there. Any other model gets the benefit of the doubt.
 func (s *translatedInferenceService) readsImages(selector core.ModelSelector, providerType string, images decisionImages) bool {
 	if !images.any {
 		return true
 	}
 	if images.links && strings.TrimSpace(providerType) == jevProviderType {
 		return false
+	}
+	if readers, ok := s.provider.(decisionImageReaders); ok {
+		if reads, known := readers.DecisionsReadImages(gateway.ResolvedProviderName(s.provider, selector, "")); known && !reads {
+			return false
+		}
 	}
 	catalog, ok := s.provider.(modelCatalog)
 	if !ok {
