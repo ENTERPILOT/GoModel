@@ -93,6 +93,7 @@ type Config struct {
 	BatchRequestPreparer            BatchRequestPreparer                   // Optional: batch request preparer before native provider submission
 	ExposedModelLister              ExposedModelLister                     // Optional: additional public models to merge into GET /v1/models
 	KeepOnlyAliasesAtModelsEndpoint bool                                   // Whether GET /v1/models should hide concrete provider models
+	VLLMDiscoveryCompat             bool                                   // Whether GET /v1/models should advertise models the way a vLLM runtime does
 	PassthroughSemanticEnrichers    []core.PassthroughSemanticEnricher     // Optional: provider-owned passthrough semantic enrichers before workflow resolution
 	BatchStore                      batchstore.Store                       // Optional: Batch lifecycle persistence store
 	FileStore                       filestore.Store                        // Optional: File provider mapping persistence store
@@ -226,6 +227,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		handler.pluginChains = cfg.PluginChainsResolver
 		handler.exposedModelLister = cfg.ExposedModelLister
 		handler.keepOnlyAliasesAtModelsEndpoint = cfg.KeepOnlyAliasesAtModelsEndpoint
+		handler.vllmDiscoveryCompat = cfg.VLLMDiscoveryCompat
 		handler.responseCache = cfg.ResponseCacheMiddleware
 		handler.guardrailsHash = cfg.GuardrailsHash
 		handler.storageProbe = cfg.StorageProbe

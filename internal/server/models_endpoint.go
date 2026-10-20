@@ -72,8 +72,41 @@ func (h *Handler) visibleModels(c *echo.Context) (*core.ModelsResponse, error) {
 			resp = mergeExposedModelsResponse(resp, exposed)
 		}
 	}
+	if h.vllmDiscoveryCompat {
+		applyVLLMDiscoveryCompat(resp)
+	}
 	return resp, nil
 }
+
+// applyVLLMDiscoveryCompat rewrites a model listing into the shape a vLLM
+// runtime advertises: owned_by "vllm" and a max_model_len taken from the
+// model's context window.
+//
+// Clients whose model discovery only understands a vLLM runtime (OpenCode
+// probes /health and /v1/models) drop every entry that does not look like one,
+// so a gateway that reports its real owners and no context field stays
+// invisible to them. This keeps that compatibility a per-deployment choice:
+// owned_by is metadata, but claiming to be vLLM is still a lie a deployment may
+// not want to tell.
+func applyVLLMDiscoveryCompat(resp *core.ModelsResponse) {
+	if resp == nil {
+		return
+	}
+	for i := range resp.Data {
+		model := &resp.Data[i]
+		model.OwnedBy = vllmDiscoveryOwner
+		if model.Metadata == nil || model.Metadata.ContextWindow == nil {
+			continue
+		}
+		if window := *model.Metadata.ContextWindow; window > 0 {
+			model.MaxModelLen = &window
+		}
+	}
+}
+
+// vllmDiscoveryOwner is the value a vLLM runtime reports in owned_by and the
+// only one its discovery accepts.
+const vllmDiscoveryOwner = "vllm"
 
 // RetrieveModel handles GET /v1/models/{model}
 //

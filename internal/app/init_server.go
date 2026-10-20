@@ -148,6 +148,7 @@ func (b *bootstrap) initServerConfig() error {
 		BatchRequestPreparer:            b.batchRequestPreparer,
 		ExposedModelLister:              vm,
 		KeepOnlyAliasesAtModelsEndpoint: appCfg.Models.KeepOnlyAliasesAtModelsEndpoint,
+		VLLMDiscoveryCompat:             appCfg.Models.VLLMDiscoveryCompat,
 		PassthroughSemanticEnrichers:    b.cfg.Factory.PassthroughSemanticEnrichers(),
 		BatchStore:                      app.batch.Store,
 		FileStore:                       app.fileStore.Store,
