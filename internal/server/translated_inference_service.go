@@ -104,6 +104,9 @@ func (s *translatedInferenceService) newInferenceOrchestrator() *gateway.Inferen
 	if s.rateLimiter != nil {
 		cfg.RouteGate = s.rateLimiter
 	}
+	if gate, ok := s.budgetChecker.(gateway.BudgetGate); ok {
+		cfg.BudgetGate = gate
+	}
 	return gateway.NewInferenceOrchestrator(cfg)
 }
 

@@ -97,6 +97,14 @@ func tryFailoverResponse[T any](
 			)
 			continue
 		}
+		if o.budgetGate != nil && !o.budgetGate.ProviderWithinBudget(ctx, providerName) {
+			slog.Info("skipping over-budget failover target",
+				"request_id", requestID,
+				"to", qualified,
+				"provider", providerName,
+			)
+			continue
+		}
 		slog.Warn("primary model attempt failed, trying failover",
 			"request_id", requestID,
 			"from", primaryModel,
@@ -224,6 +232,14 @@ func tryFailoverStream(
 		providerName := ResolvedProviderName(o.provider, selector, ProviderNameFromWorkflow(workflow))
 		if o.routeGate != nil && !o.routeGate.RouteAvailable(providerName, qualified) {
 			slog.Info("skipping rate-limited failover target",
+				"request_id", requestID,
+				"to", qualified,
+				"provider", providerName,
+			)
+			continue
+		}
+		if o.budgetGate != nil && !o.budgetGate.ProviderWithinBudget(ctx, providerName) {
+			slog.Info("skipping over-budget failover target",
 				"request_id", requestID,
 				"to", qualified,
 				"provider", providerName,

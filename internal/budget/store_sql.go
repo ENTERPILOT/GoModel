@@ -322,6 +322,15 @@ func (s *SQLStore) sumSpendChunk(ctx context.Context, windows []SpendWindow) ([]
 
 // spendSubjectMatch renders the usage-row predicate for one budget subject.
 func spendSubjectMatch(window SpendWindow, sqlite bool) (string, []any, error) {
+	if window.Scope == ScopeProvider {
+		subject, err := NormalizeSubject(ScopeProvider, window.Subject)
+		if err != nil {
+			return "", nil, err
+		}
+		// Rows written before provider_name existed carry only the provider
+		// type, which is also the default instance name.
+		return `LOWER(COALESCE(NULLIF(TRIM(provider_name), ''), provider)) = ?`, []any{subject}, nil
+	}
 	if window.Scope == ScopeLabel {
 		subject, err := NormalizeSubject(ScopeLabel, window.Subject)
 		if err != nil {

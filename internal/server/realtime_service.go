@@ -220,7 +220,8 @@ func (s *realtimeService) prepare(c *echo.Context, model, providerHint string) (
 			return nil, realtimeRoute{}, err
 		}
 	}
-	if err := enforceBudget(c, s.budgetChecker); err != nil {
+	providerName := selectorProviderName(s.provider, selector)
+	if err := enforceBudget(c, s.budgetChecker, rateLimitRoute{provider: providerName}); err != nil {
 		return nil, realtimeRoute{}, err
 	}
 	auditlog.EnrichEntry(c, selector.Model, "")
@@ -233,17 +234,12 @@ func (s *realtimeService) prepare(c *echo.Context, model, providerHint string) (
 		selector:     selector,
 		model:        selector.Model,
 		providerType: s.provider.GetProviderType(qualified),
-		providerName: selector.Provider,
+		providerName: providerName,
 		requestID:    requestID,
 		userPath:     core.UserPathFromContext(ctx),
 		sessionID:    core.SessionIDFromContext(ctx),
 		authKeyID:    core.GetAuthKeyID(ctx),
 		labels:       core.RequestLabelsFromContext(ctx),
-	}
-	if resolver, ok := s.provider.(core.ProviderNameResolver); ok {
-		if name := resolver.GetProviderName(qualified); name != "" {
-			route.providerName = name
-		}
 	}
 	return ctx, route, nil
 }

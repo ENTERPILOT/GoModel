@@ -1,22 +1,23 @@
 ---
 title: "Budgets"
-description: "Set spend limits per user path or request label and enforce them through workflow budget controls."
+description: "Set spend limits per user path, request label, or provider and enforce them through workflow budget controls."
 icon: "wallet"
-keywords: ["budgets", "spend limits", "cost controls", "user path", "labels"]
+keywords: ["budgets", "spend limits", "cost controls", "user path", "labels", "providers"]
 ---
 
 ## Overview
 
-Budgets let you set spend limits for a `user_path` subtree or a request
-[label](/features/labelling). GoModel evaluates them from tracked usage cost
+Budgets let you set spend limits for a `user_path` subtree, a request
+[label](/features/labelling), or a provider. GoModel evaluates them from tracked usage cost
 records and blocks matching requests when a limit has already been spent.
 
 Every budget has a **scope** that names what it limits:
 
-| Scope       | Subject                    | Matches                                              |
-| ----------- | -------------------------- | ---------------------------------------------------- |
-| `user_path` | A user path (`/team/alpha`) | That path and every path below it                    |
-| `label`     | A label (`Mobile-App-iOS`) | Every request carrying that label                    |
+| Scope       | Subject                         | Matches                                        |
+| ----------- | ------------------------------- | ---------------------------------------------- |
+| `user_path` | A user path (`/team/alpha`)     | That path and every path below it              |
+| `label`     | A label (`Mobile-App-iOS`)      | Every request carrying that label              |
+| `provider`  | A provider name (`openai-prod`) | Every request routed to that provider instance |
 
 Use budgets when you want limits such as:
 
@@ -24,6 +25,7 @@ Use budgets when you want limits such as:
 - `/team/alpha` can spend `$50` per week
 - `/` has a global monthly limit
 - everything labelled `Mobile-App-iOS` can spend `$500` per month
+- the `openai-prod` provider can spend `$100` per day, across every user
 
 <Info>
   Budget enforcement runs only when budgets are globally enabled and the active
@@ -64,11 +66,11 @@ Budgets -> Create Budget
   className="rounded-lg"
 />
 
-Set the **scope**, **subject** (a user path or a label), **period**, and
+Set the **scope**, **subject** (a user path, label, or provider), **period**, and
 **amount** in the form. Each row on the Budgets page then shows spend as a
 percentage of the limit, the amount spent versus the cap, and the remaining
-balance for the current period. Label budgets carry a `label` chip next to the
-period. Dashboard-created budgets are marked as `manual`. Budgets loaded from
+balance for the current period. Label and provider budgets carry a `label` or
+`provider` chip next to the period. Dashboard-created budgets are marked as `manual`. Budgets loaded from
 YAML or environment variables are marked as `config`.
 
 You can also seed budgets from YAML:
@@ -98,6 +100,11 @@ budgets:
       limits:
         - period: "monthly"
           amount: 500.00
+  providers:
+    - name: "openai-prod"
+      limits:
+        - period: "daily"
+          amount: 100.00
 ```
 
 Or use environment variables:
@@ -107,6 +114,7 @@ SET_BUDGET_TEAM__ALPHA="daily=10,weekly=50"
 SET_BUDGET_="monthly=500"
 # GoModel Pro (quota_templates entitlement):
 SET_BUDGET_CUSTOMERS='[{"period":"daily","amount":5,"per_child":true}]'
+SET_PROVIDER_BUDGET_OPENAI_PROD="daily=100"
 ```
 
 The suffix after `SET_BUDGET_` becomes a user path. Use double underscores
@@ -118,6 +126,10 @@ The suffix after `SET_BUDGET_` becomes a user path. Use double underscores
 
 There is no escape for a literal double underscore inside a path segment. Use
 YAML or the dashboard for paths that need a `__` segment value.
+
+Provider budgets use their own prefix, `SET_PROVIDER_BUDGET_<NAME>`, like
+`SET_PROVIDER_RATE_LIMIT_<NAME>`. Underscores in the suffix become hyphens, so
+`SET_PROVIDER_BUDGET_OPENAI_PROD` limits the `openai-prod` provider.
 
 <Note>
   Label budgets have no environment-variable form. Labels are matched verbatim,
@@ -182,8 +194,23 @@ charged against every matching label budget. Clients choose LiteLLM tags, so
 set `LITELLM_TAGS_ENABLED=false` when a client must not charge another team's
 label budget.
 
+Provider budgets match the configured provider instance that serves the
+request, case-insensitively. A provider budget caps that provider's total
+spend across every user path and label; it does not narrow a user-path or
+label budget. Requests whose provider is not known at admission, such as batch
+submissions and MCP calls, are not checked against provider budgets.
+
 If multiple budgets match a request, GoModel checks all matching limits in one
 lookup. The request is rejected if any matching limit is exhausted.
+
+### Provider budgets and failover
+
+When a provider budget is exhausted and the request has
+[failover](/features/failover) targets, GoModel skips the exhausted provider
+and tries the failover targets instead of rejecting the request. Failover also
+skips any target whose own provider budget is exhausted. If no target is left,
+the client receives the original `budget_exceeded` error. User-path and label
+budgets always reject: switching providers cannot relieve them.
 
 ### Dynamic per-child budgets
 
@@ -360,7 +387,8 @@ console.log(budget);
 
 </CodeGroup>
 
-The same call for a label budget:
+The same call for a label budget (use `"scope": "provider"` with a provider
+name as the subject for a provider budget):
 
 <CodeGroup>
 
