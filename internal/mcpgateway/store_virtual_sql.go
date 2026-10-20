@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
@@ -55,11 +56,7 @@ func (s *SQLStore) GetVirtual(ctx context.Context, name string) (*ManagedVirtual
 
 func (s *SQLStore) UpsertVirtual(ctx context.Context, virtual ManagedVirtualServer) error {
 	stampVirtualUpsert(&virtual)
-	servers, err := encodeJSONList(virtual.Servers)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.Exec(ctx, `
+	_, err := s.db.Exec(ctx, `
 		INSERT INTO mcp_virtual_servers (name, description, servers, tool_discovery, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(name) DO UPDATE SET
@@ -70,7 +67,7 @@ func (s *SQLStore) UpsertVirtual(ctx context.Context, virtual ManagedVirtualServ
 	`,
 		strings.TrimSpace(virtual.Name),
 		virtual.Description,
-		servers,
+		sqlutil.JSONStrings(virtual.Servers),
 		virtual.ToolDiscovery,
 		virtual.CreatedAt.Unix(),
 		virtual.UpdatedAt.Unix(),
@@ -83,16 +80,12 @@ func (s *SQLStore) UpsertVirtual(ctx context.Context, virtual ManagedVirtualServ
 
 func (s *SQLStore) UpdateVirtual(ctx context.Context, virtual ManagedVirtualServer) error {
 	stampVirtualUpsert(&virtual)
-	servers, err := encodeJSONList(virtual.Servers)
-	if err != nil {
-		return err
-	}
 	affected, err := s.db.Exec(ctx, `
 		UPDATE mcp_virtual_servers SET description = ?, servers = ?, tool_discovery = ?, updated_at = ?
 		WHERE name = ?
 	`,
 		virtual.Description,
-		servers,
+		sqlutil.JSONStrings(virtual.Servers),
 		virtual.ToolDiscovery,
 		virtual.UpdatedAt.Unix(),
 		strings.TrimSpace(virtual.Name),
@@ -125,8 +118,8 @@ func scanSQLMCPVirtual(scanner sqlx.Row) (ManagedVirtualServer, error) {
 		return ManagedVirtualServer{}, err
 	}
 	var err error
-	if virtual.Servers, err = decodeJSONList(servers); err != nil {
-		return ManagedVirtualServer{}, err
+	if virtual.Servers, err = sqlutil.DecodeJSONStrings(servers); err != nil {
+		return ManagedVirtualServer{}, fmt.Errorf("decode servers: %w", err)
 	}
 	virtual.CreatedAt = time.Unix(createdAt, 0).UTC()
 	virtual.UpdatedAt = time.Unix(updatedAt, 0).UTC()

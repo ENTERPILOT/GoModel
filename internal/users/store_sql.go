@@ -65,18 +65,14 @@ func (s *SQLStore) List(ctx context.Context) ([]User, error) {
 }
 
 func (s *SQLStore) Upsert(ctx context.Context, user User) error {
-	allowedJSON, err := sqlutil.JSONStrings(user.AllowedModels)
-	if err != nil {
-		return fmt.Errorf("encode allowed_models: %w", err)
-	}
-	_, err = s.db.Exec(ctx, `
+	_, err := s.db.Exec(ctx, `
 		INSERT INTO users (user_path, allowed_models, description, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(user_path) DO UPDATE SET
 			allowed_models = excluded.allowed_models,
 			description = excluded.description,
 			updated_at = excluded.updated_at
-	`, user.UserPath, allowedJSON, user.Description, user.CreatedAt.Unix(), user.UpdatedAt.Unix())
+	`, user.UserPath, sqlutil.JSONStrings(user.AllowedModels), user.Description, user.CreatedAt.Unix(), user.UpdatedAt.Unix())
 	if err != nil {
 		return fmt.Errorf("upsert user: %w", err)
 	}

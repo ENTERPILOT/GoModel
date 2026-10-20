@@ -99,16 +99,13 @@ func NullableString(value string) any {
 }
 
 // JSONStrings marshals values to a JSON array for a NOT NULL JSON column;
-// nil and empty both persist as "[]".
-func JSONStrings(values []string) (string, error) {
+// nil and empty both persist as "[]". Marshaling a []string cannot fail.
+func JSONStrings(values []string) string {
 	if values == nil {
 		values = []string{}
 	}
-	data, err := json.Marshal(values)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
+	data, _ := json.Marshal(values)
+	return string(data)
 }
 
 // DecodeJSONStrings parses a JSON array column written by JSONStrings. Empty

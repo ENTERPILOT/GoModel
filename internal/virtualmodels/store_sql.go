@@ -155,10 +155,6 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	pathsJSON, err := sqlutil.JSONStrings(vm.UserPaths)
-	if err != nil {
-		return nil, fmt.Errorf("encode user_paths: %w", err)
-	}
 	configJSON, err := encodeStrategyConfig(vm.StrategyConfig)
 	if err != nil {
 		return nil, err
@@ -173,7 +169,7 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 		encodeTriStateBool(vm.Failover),
 		vm.ProviderName,
 		vm.Model,
-		pathsJSON,
+		sqlutil.JSONStrings(vm.UserPaths),
 		vm.Description,
 		vm.Slowdown,
 		vm.Enabled,
