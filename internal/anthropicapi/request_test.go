@@ -265,16 +265,49 @@ func TestToChatRequestToolStrict(t *testing.T) {
 }
 
 func TestToChatRequestRejectsServerTool(t *testing.T) {
-	_, err := ToChatRequest(mustDecode(t, `{
-		"model":"m","max_tokens":10,
-		"messages":[{"role":"user","content":"hi"}],
-		"tools":[{"type":"web_search_20250305","name":"web_search"}]
-	}`))
-	require.Error(t, err)
+	tests := []struct {
+		name string
+		tool string
+	}{
+		{name: "web search", tool: `{"type":"web_search_20250305","name":"web_search"}`},
+		// Only the regex and BM25 tool search variants are dropped.
+		{name: "unknown tool search variant", tool: `{"type":"tool_search_tool_regxe_20251119","name":"tool_search_tool_regxe"}`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ToChatRequest(mustDecode(t, `{
+				"model":"m","max_tokens":10,
+				"messages":[{"role":"user","content":"hi"}],
+				"tools":[`+tc.tool+`]
+			}`))
+			require.Error(t, err)
 
-	gatewayErr, ok := err.(*core.GatewayError)
-	require.True(t, ok)
-	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
+			gatewayErr, ok := err.(*core.GatewayError)
+			require.True(t, ok)
+			require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
+		})
+	}
+}
+
+func TestIsToolSearchTool(t *testing.T) {
+	tests := []struct {
+		value string
+		want  bool
+	}{
+		{value: "tool_search_tool_regex", want: true},
+		{value: "tool_search_tool_bm25", want: true},
+		{value: " tool_search_tool_regex_20251119 ", want: true},
+		{value: "tool_search_tool_bm25_20260101", want: true},
+		{value: "tool_search_tool_regxe_20251119", want: false},
+		{value: "tool_search_tool_regexp", want: false},
+		{value: "tool_search_tool_", want: false},
+		{value: "web_search", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.value, func(t *testing.T) {
+			assert.Equal(t, tc.want, isToolSearchTool(tc.value))
+		})
+	}
 }
 
 func TestToChatRequestToolChoiceMapping(t *testing.T) {
@@ -475,6 +508,103 @@ func TestToChatRequestServerToolSearchResult(t *testing.T) {
 
 	assert.Equal(t, "user", chat.Messages[0].Role)
 	assert.Equal(t, "search my tools\nTools found: WebSearch", chat.Messages[0].Content, "message = %+v", chat.Messages[0])
+}
+
+func TestToChatRequestReplaysServerToolSearch(t *testing.T) {
+	// A conversation that ran Anthropic's server-side tool search and is
+	// continued on another model replays the search in the assistant turn:
+	// the tool search tool definition, then server_tool_use and its
+	// tool_search_tool_result, as Anthropic returned them.
+	tests := []struct {
+		name     string
+		toolType string
+		toolName string
+		input    string
+		want     string
+	}{
+		{
+			name:     "regex",
+			toolType: "tool_search_tool_regex_20251119",
+			toolName: "tool_search_tool_regex",
+			input:    `{"pattern":"weather","limit":10}`,
+			want:     "Tool search: weather\nTools found: get_weather\nChecking the weather.",
+		},
+		{
+			name:     "bm25",
+			toolType: "tool_search_tool_bm25_20251119",
+			toolName: "tool_search_tool_bm25",
+			input:    `{"query":"weather in Paris","limit":5}`,
+			want:     "Tool search: weather in Paris\nTools found: get_weather\nChecking the weather.",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			chat, err := ToChatRequest(mustDecode(t, `{
+				"model":"m","max_tokens":10,
+				"tools":[
+					{"type":"`+tc.toolType+`","name":"`+tc.toolName+`"},
+					{"name":"get_weather","input_schema":{"type":"object"},"defer_loading":true}
+				],
+				"messages":[
+					{"role":"user","content":"Weather in Paris?"},
+					{"role":"assistant","content":[
+						{"type":"server_tool_use","id":"srvtoolu_1","name":"`+tc.toolName+`","input":`+tc.input+`},
+						{"type":"tool_search_tool_result","tool_use_id":"srvtoolu_1","content":{
+							"type":"tool_search_tool_search_result",
+							"tool_references":[{"type":"tool_reference","tool_name":"get_weather"}]
+						}},
+						{"type":"text","text":"Checking the weather."},
+						{"type":"tool_use","id":"toolu_1","name":"get_weather","input":{"city":"Paris"}}
+					]},
+					{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"18C"}]}
+				]
+			}`))
+			require.NoError(t, err)
+
+			require.Len(t, chat.Tools, 1, "the tool search tool is dropped; deferred tools are sent in full")
+			fn, ok := chat.Tools[0]["function"].(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, "get_weather", fn["name"])
+
+			require.Len(t, chat.Messages, 3)
+			assistant := chat.Messages[1]
+			assert.Equal(t, "assistant", assistant.Role)
+			assert.Equal(t, tc.want, assistant.Content, "assistant = %+v", assistant)
+			require.Len(t, assistant.ToolCalls, 1)
+			assert.Equal(t, "get_weather", assistant.ToolCalls[0].Function.Name)
+		})
+	}
+}
+
+func TestToChatRequestRejectsOtherServerToolUse(t *testing.T) {
+	// Only the tool search degrades to text; other server tools carry
+	// results the translated pipeline cannot reproduce.
+	_, err := ToChatRequest(mustDecode(t, `{
+		"model":"m","max_tokens":10,
+		"messages":[
+			{"role":"user","content":"search"},
+			{"role":"assistant","content":[
+				{"type":"server_tool_use","id":"srv_1","name":"web_search","input":{"query":"q"}},
+				{"type":"text","text":"found"}
+			]},
+			{"role":"user","content":"thanks"}
+		]
+	}`))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unsupported content block type "server_tool_use"`)
+
+	_, err = ToChatRequest(mustDecode(t, `{
+		"model":"m","max_tokens":10,
+		"messages":[
+			{"role":"user","content":"search"},
+			{"role":"assistant","content":[
+				{"type":"server_tool_use","id":"srv_1","name":"tool_search_tool_regxe","input":{"pattern":"q"}},
+				{"type":"text","text":"found"}
+			]},
+			{"role":"user","content":"thanks"}
+		]
+	}`))
+	require.Error(t, err, "an unknown tool search variant is not degraded")
 }
 
 func TestToChatRequestPreservesAnthropicCacheControls(t *testing.T) {
