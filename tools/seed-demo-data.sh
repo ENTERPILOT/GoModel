@@ -2108,8 +2108,10 @@ VALUES
   );
 
 -- Providers named after their real types, so the Models page prices each
--- model from the catalog. Bedrock authenticates through the AWS credential
--- chain and takes no key. INSERT OR IGNORE keeps an operator's own provider
+-- model from the catalog. Bedrock takes no key: it signs with the host's AWS
+-- credential chain, so its fixture endpoint is a .invalid host that never
+-- resolves and demo traffic cannot run paid inference on a real account.
+-- INSERT OR IGNORE keeps an operator's own provider
 -- of the same name, and config/env providers shadow these rows anyway.
 INSERT OR IGNORE INTO provider_credentials (
   name, type, api_keys, base_url, models, enabled, created_at, updated_at
@@ -2230,7 +2232,8 @@ next to plain user-path limits.
 
 The Providers and Models pages list OpenAI, Anthropic, Bedrock, DeepSeek,
 Gemini, Groq, Bailian, and xAI with their real model lists and catalog prices.
-Their keys are placeholders, so requests to them fail upstream; a provider of
+Their keys are placeholders and Bedrock points at an unresolvable endpoint, so
+requests to them fail upstream without spending anything; a provider of
 the same name in config, env, or the store keeps its own settings.
 
 Rate-limit counters are live process state and start at zero when GoModel starts.

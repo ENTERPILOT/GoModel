@@ -167,7 +167,7 @@
   {
     "name": "bedrock",
     "type": "bedrock",
-    "base_url": "us-east-1",
+    "base_url": "https://bedrock-runtime.us-east-1.demo.invalid",
     "models": [
       "claude-fable-5",
       "claude-haiku-4-5-20251001",
