@@ -98,7 +98,9 @@ Some parts of a request translate with limits:
   not fetch image links for Jev, so an `https` image URL returns `400`; `detail`
   is ignored. TypeSafe marks image support as experimental and limits each
   image to 280–1568 pixels per side. A Kev server reads text only, so an image
-  request to a Kev model returns `400`.
+  request to a Kev model returns `400`: GoModel treats a `jev` provider as a
+  Kev server unless its base URL is TypeSafe's hosted API
+  (`https://api.typesafe.ai`).
 - **Choice values** are strings or booleans; a boolean is sent as `"true"` or
   `"false"` and comes back as the boolean. A string `"true"` and a boolean
   `true` in one question collide and are rejected.

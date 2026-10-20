@@ -77,14 +77,9 @@ func (s *translatedInferenceService) serveDecisions(c *echo.Context) error {
 	}
 	images := decisionInputImages(req.Input)
 	if !s.readsImages(resolution.ResolvedSelector, resolution.ProviderType, images) {
-		promoted, ok := s.imageReadingFailover(router, workflow, images)
+		promoted, ok := s.imageReadingFailover(c.Request().Context(), router, workflow, images)
 		if !ok {
 			return handleError(c, unreadableImagesError(resolution, images))
-		}
-		if s.modelAuthorizer != nil {
-			if err := s.modelAuthorizer.ValidateModelAccess(c.Request().Context(), promoted.Resolution.ResolvedSelector); err != nil {
-				return handleError(c, err)
-			}
 		}
 		workflow = promoted
 		storeWorkflow(c, workflow)
@@ -110,13 +105,18 @@ func (s *translatedInferenceService) serveDecisions(c *echo.Context) error {
 // imageReadingFailover returns workflow routed to the first target of its
 // failover chain that serves Decisions and reads images, for a request with
 // images whose resolved model reads text only. A chain such as [kev, openai]
-// then sends text to Kev and images to OpenAI. The rest of the chain still
-// applies, and targets that cannot read images are skipped there too.
-func (s *translatedInferenceService) imageReadingFailover(router core.RoutableDecisions, workflow *core.Workflow, images decisionImages) (*core.Workflow, bool) {
+// then sends text to Kev and images to OpenAI. A target the caller may not
+// use is passed over like one that cannot read the images. The rest of the
+// chain still applies, and targets that cannot read images are skipped there
+// too.
+func (s *translatedInferenceService) imageReadingFailover(ctx context.Context, router core.RoutableDecisions, workflow *core.Workflow, images decisionImages) (*core.Workflow, bool) {
 	inference := s.inference()
 	for _, selector := range inference.FailoverSelectors(workflow) {
 		providerType := inference.ProviderTypeForSelector(selector, "")
 		if !servesDecisions(router, providerType) || !s.readsImages(selector, providerType, images) {
+			continue
+		}
+		if s.modelAuthorizer != nil && s.modelAuthorizer.ValidateModelAccess(ctx, selector) != nil {
 			continue
 		}
 		slog.Debug("decision request with images starts at the first failover target that reads them",

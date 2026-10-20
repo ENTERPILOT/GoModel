@@ -49,6 +49,13 @@ func (p *Provider) Decisions(ctx context.Context, req *core.PassthroughRequest) 
 	if err != nil {
 		return nil, err
 	}
+	// The gateway refuses images for models it knows to be text only, but a
+	// model configured without listing (models_mode: allowlist) carries no
+	// capability, so the provider checks too: a Kev server would read the
+	// image references as text.
+	if len(plan.request.Assets) > 0 && !p.hosted.Load() {
+		return nil, core.NewInvalidRequestError("this jev provider points at a Kev server, which reads text only; send images to TypeSafe's hosted API (api.typesafe.ai) or another model that reads images", nil).WithParam("input")
+	}
 	body, err := json.Marshal(plan.request)
 	if err != nil {
 		return nil, core.NewInvalidRequestError("failed to encode System One request", err)

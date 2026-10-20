@@ -194,9 +194,10 @@ on. TypeSafe lists its aliases (`jev-latest`, `jev-preview`); a Kev server
 lists its checkpoint (`kev-latest`) and the aliases it answers to. Versioned
 IDs such as `jev-1.13.0` are accepted by the `model` field whether or not they
 are listed. The models are categorized as utility models with no generation
-mode: they answer `/v1/decisions` and `/v1/systemone`, not chat. Hosted Jev
-models report the `vision` capability; models on a Kev server report
-`vision: false`, which is how GoModel refuses image requests to them.
+mode: they answer `/v1/decisions` and `/v1/systemone`, not chat. A provider
+whose base URL is TypeSafe's hosted API reports the `vision` capability for
+its models; any other base URL is taken to be a Kev server, whose models
+report `vision: false`, and GoModel refuses image requests to them.
 
 Every System One request names its model, so both `/v1/systemone` and the
 passthrough surface apply the caller's [model allowlist](/features/users) to

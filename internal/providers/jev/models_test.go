@@ -35,6 +35,7 @@ const kevModelsJSON = `{
 func TestListModels_ReadsTheHostedCatalog(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, typesafeModelsJSON)
 	provider := newTestProvider("ts-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider.hosted.Store(true) // the test server stands in for api.typesafe.ai
 
 	resp, err := provider.ListModels(context.Background())
 	require.NoError(t, err)

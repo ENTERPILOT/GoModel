@@ -13,6 +13,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
@@ -262,6 +263,7 @@ func TestDecisions_KeepsQuestionAndOptionOrder(t *testing.T) {
 func TestDecisions_TranslatesImagesToAssets(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"model":"jev-1.14.0","answers":{"damaged":{"type":"noul","noul":0.9}},"usage":{"input_tokens":900,"output_tokens":1}}`)
 	provider := newTestProvider("ts-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider.hosted.Store(true) // the test server stands in for api.typesafe.ai
 
 	resp, err := decide(t, provider, `{"model":"jev-latest","input":[{"role":"user","content":[
 	  {"type":"input_text","text":"Delivery photo:"},
@@ -307,4 +309,36 @@ func TestDecisions_TextOnlyRequestsSendNoImageHeader(t *testing.T) {
 	defer resp.Body.Close()
 	assert.Empty(t, capture.Last(t).Header.Get("TypeSafe-Danger-Zone-Images"))
 	assert.NotContains(t, string(capture.Last(t).Body), "assets")
+}
+
+// Only TypeSafe's hosted API reads images. A jev provider pointing anywhere
+// else is a Kev server, and refuses images itself, without the catalog:
+// models configured without listing carry no vision capability for the
+// gateway to check.
+func TestDecisions_KevServersRefuseImages(t *testing.T) {
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{}`)
+	provider := newTestProvider("", server.URL, server.Client(), llmclient.Hooks{})
+
+	_, err := decide(t, provider, `{"model":"kev-latest","input":[{"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,iVBORw0KGgo="}]}],"questions":[{"type":"predicate","instructions":"?"}]}`)
+	providertest.AssertUnsupported(t, err)
+	assert.Contains(t, err.Error(), "Kev server, which reads text only")
+	assert.Zero(t, capture.Count())
+}
+
+func TestHostedTypeSafe(t *testing.T) {
+	for base, want := range map[string]bool{
+		"https://api.typesafe.ai":         true,
+		"https://api.typesafe.ai/v1":      true,
+		"https://TypeSafe.AI":             true,
+		"http://localhost:8009":           false,
+		"https://me--kev-api.modal.run":   false,
+		"https://typesafe.ai.example.com": false,
+		"https://nottypesafe.ai":          false,
+	} {
+		assert.Equal(t, want, hostedTypeSafe(base), base)
+	}
+	provider := New(providers.ProviderConfig{}, providers.ProviderOptions{}).(*Provider)
+	assert.True(t, provider.hosted.Load(), "the default base URL is the hosted API")
+	provider.SetBaseURL("http://localhost:8009")
+	assert.False(t, provider.hosted.Load())
 }

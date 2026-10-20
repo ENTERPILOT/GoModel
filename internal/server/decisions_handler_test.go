@@ -359,3 +359,41 @@ func TestDecisions_ImageLinksToJevAskForInlineData(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "not a link")
 	assert.Empty(t, provider.calls)
 }
+
+// denyingAuthorizer denies the listed models and allows the rest.
+type denyingAuthorizer map[string]bool
+
+func (a denyingAuthorizer) ValidateModelAccess(_ context.Context, selector core.ModelSelector) error {
+	if a[selector.QualifiedModel()] {
+		return core.NewAuthenticationError("", "model "+selector.QualifiedModel()+" is not allowed")
+	}
+	return nil
+}
+
+func (a denyingAuthorizer) AllowsModel(_ context.Context, selector core.ModelSelector) bool {
+	return !a[selector.QualifiedModel()]
+}
+
+func (denyingAuthorizer) FilterPublicModels(_ context.Context, models []core.Model) []core.Model {
+	return models
+}
+
+// A target the caller may not use is passed over when choosing where an
+// image request starts, as failover passes over it, rather than ending the
+// search with an access error.
+func TestDecisions_ImagesSkipTargetsTheCallerMayNotUse(t *testing.T) {
+	provider := newVisionDecisionsProvider()
+	provider.supportedModels = append(provider.supportedModels, "gpt-6-luna")
+	provider.providerTypes["openai-b/gpt-6-luna"] = "openai"
+	provider.providerNames["openai-b/gpt-6-luna"] = "openai-b"
+	failovers := failoverResolverStub{selectors: []core.ModelSelector{
+		{Provider: "openai", Model: "gpt-6-luna"},
+		{Provider: "openai-b", Model: "gpt-6-luna"},
+	}}
+	handler := newHandlerWithAuthorizer(provider, nil, nil, nil, nil, denyingAuthorizer{"openai/gpt-6-luna": true}, nil, failovers, nil)
+
+	c, rec := echotest.Post(t, "/v1/decisions", fmt.Sprintf(decisionImageBody, "kev/kev-latest"))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"openai-b openai gpt-6-luna"}, provider.calls)
+}
