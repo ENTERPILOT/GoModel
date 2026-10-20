@@ -188,6 +188,11 @@ type Model struct {
 	Object  string `json:"object"`
 	OwnedBy string `json:"owned_by"`
 	Created int64  `json:"created"`
+	// MaxModelLen is the context limit a vLLM runtime reports per model. It is
+	// populated only when the deployment advertises vLLM discovery
+	// compatibility (models.vllm_discovery_compat), because clients whose
+	// discovery speaks vLLM read this field and skip entries without it.
+	MaxModelLen *int `json:"max_model_len,omitempty"`
 	// Metadata holds optional enrichment data (display name, pricing, capabilities, etc.).
 	// May be nil if the model was not found in the external registry.
 	Metadata *ModelMetadata `json:"metadata,omitempty"`

@@ -154,6 +154,7 @@ func buildDefaultConfig() *Config {
 		Models: ModelsConfig{
 			EnabledByDefault:                    true,
 			KeepOnlyAliasesAtModelsEndpoint:     false,
+			VLLMDiscoveryCompat:                 false,
 			UnqualifiedModelIDsAtModelsEndpoint: false,
 			ConfiguredProviderModelsMode:        ConfiguredProviderModelsModeFallback,
 		},

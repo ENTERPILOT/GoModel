@@ -507,6 +507,16 @@ To narrow a provider's inventory instead of listing it model by model, use
 `providers.<name>.model_filter`). See
 [Filtering a provider's models](/advanced/config-yaml#filtering-a-providers-models).
 
+Set `MODELS_VLLM_DISCOVERY_COMPAT=true` (YAML:
+`models.vllm_discovery_compat`) when a client discovers models only from a
+vLLM runtime — OpenCode's `vllm` provider is one: it probes `/health` and
+`/v1/models` and drops every entry whose `owned_by` is not `vllm` or that lacks
+`max_model_len`. With the setting on, `GET /v1/models` reports `owned_by` as
+`vllm` and fills `max_model_len` from each model's context window, so the
+client picks the gateway's models up with no hand-written list. It is a lie
+about the owner, so it stays off by default and is meant for gateways whose
+consumers need it.
+
 For OpenRouter, GoModel also sends default attribution headers unless the request already sets them. Override those defaults with `OPENROUTER_SITE_URL` and `OPENROUTER_APP_NAME`.
 
 ### 2. `.env` File
