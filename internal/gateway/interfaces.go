@@ -37,6 +37,9 @@ type FailoverResolver interface {
 // ModelAuthorizer validates request-scoped access to concrete models.
 type ModelAuthorizer interface {
 	ValidateModelAccess(ctx context.Context, selector core.ModelSelector) error
+	// ValidateProviderAccess checks a request that names a provider but no
+	// model against the caller's allowlists.
+	ValidateProviderAccess(ctx context.Context, provider string) error
 	AllowsModel(ctx context.Context, selector core.ModelSelector) bool
 	FilterPublicModels(ctx context.Context, models []core.Model) []core.Model
 }

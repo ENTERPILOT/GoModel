@@ -16,13 +16,14 @@ import (
 )
 
 type createAuthKeyRequest struct {
-	Name            string     `json:"name"`
-	Description     string     `json:"description,omitempty"`
-	UserPath        string     `json:"user_path,omitempty"`
-	Labels          []string   `json:"labels,omitempty"`
-	AllowedModels   []string   `json:"allowed_models,omitempty"`
-	DashboardAccess bool       `json:"dashboard_access,omitempty"`
-	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
+	Name              string     `json:"name"`
+	Description       string     `json:"description,omitempty"`
+	UserPath          string     `json:"user_path,omitempty"`
+	Labels            []string   `json:"labels,omitempty"`
+	AllowedModels     []string   `json:"allowed_models,omitempty"`
+	DashboardAccess   bool       `json:"dashboard_access,omitempty"`
+	PassthroughAccess bool       `json:"passthrough_access,omitempty"`
+	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
 }
 
 // authKeyResponse is one API key row plus the model access it resolves to.
@@ -119,13 +120,14 @@ func (h *Handler) CreateAuthKey(c *echo.Context) error {
 	}
 
 	issued, err := h.authKeys.Create(c.Request().Context(), authkeys.CreateInput{
-		Name:            req.Name,
-		Description:     req.Description,
-		UserPath:        userPath,
-		Labels:          req.Labels,
-		AllowedModels:   allowedModels,
-		DashboardAccess: req.DashboardAccess,
-		ExpiresAt:       req.ExpiresAt,
+		Name:              req.Name,
+		Description:       req.Description,
+		UserPath:          userPath,
+		Labels:            req.Labels,
+		AllowedModels:     allowedModels,
+		DashboardAccess:   req.DashboardAccess,
+		PassthroughAccess: req.PassthroughAccess,
+		ExpiresAt:         req.ExpiresAt,
 	})
 	if err != nil {
 		return handleError(c, authKeyWriteError(err))
@@ -172,17 +174,18 @@ func (h *Handler) ImportAuthKey(c *echo.Context) error {
 	}
 
 	view, outcome, err := h.authKeys.Import(c.Request().Context(), authkeys.ImportInput{
-		Name:            req.Name,
-		Description:     req.Description,
-		UserPath:        req.UserPath,
-		Labels:          req.Labels,
-		AllowedModels:   allowedModels,
-		DashboardAccess: req.DashboardAccess,
-		ExpiresAt:       req.ExpiresAt,
-		ImportedFrom:    req.ImportedFrom,
-		SecretHash:      req.SecretHash,
-		RedactedValue:   req.RedactedValue,
-		Disabled:        req.Enabled != nil && !*req.Enabled,
+		Name:              req.Name,
+		Description:       req.Description,
+		UserPath:          req.UserPath,
+		Labels:            req.Labels,
+		AllowedModels:     allowedModels,
+		DashboardAccess:   req.DashboardAccess,
+		PassthroughAccess: req.PassthroughAccess,
+		ExpiresAt:         req.ExpiresAt,
+		ImportedFrom:      req.ImportedFrom,
+		SecretHash:        req.SecretHash,
+		RedactedValue:     req.RedactedValue,
+		Disabled:          req.Enabled != nil && !*req.Enabled,
 	})
 	if errors.Is(err, authkeys.ErrSecretHashExists) {
 		return handleError(c, core.NewInvalidRequestErrorWithStatus(http.StatusConflict, err.Error(), err).WithCode("auth_key_exists"))
@@ -284,6 +287,25 @@ func (h *Handler) UpdateAuthKeyDashboardAccess(c *echo.Context) error {
 			return nil, validation.NewError("dashboard_access is required", nil)
 		}
 		return h.authKeys.UpdateDashboardAccess(ctx, id, *req.DashboardAccess)
+	})
+}
+
+type updateAuthKeyPassthroughAccessRequest struct {
+	// Pointer so an omitted or null value is rejected instead of being
+	// treated as an implicit revoke.
+	PassthroughAccess *bool `json:"passthrough_access"`
+}
+
+// UpdateAuthKeyPassthroughAccess handles PUT
+// /admin/auth-keys/:id/passthrough-access. It grants or revokes the key's
+// access to the provider passthrough routes.
+func (h *Handler) UpdateAuthKeyPassthroughAccess(c *echo.Context) error {
+	var req updateAuthKeyPassthroughAccessRequest
+	return h.updateAuthKey(c, &req, func(ctx context.Context, id string) (*authkeys.View, error) {
+		if req.PassthroughAccess == nil {
+			return nil, validation.NewError("passthrough_access is required", nil)
+		}
+		return h.authKeys.UpdatePassthroughAccess(ctx, id, *req.PassthroughAccess)
 	})
 }
 

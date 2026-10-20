@@ -2,8 +2,10 @@ package virtualmodels
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -66,6 +68,23 @@ func (s *Service) ValidateModelAccess(ctx context.Context, selector core.ModelSe
 	return core.NewInvalidRequestErrorWithStatus(
 		http.StatusBadRequest,
 		"requested model is not available for this API key",
+		nil,
+	).WithCode("model_access_denied")
+}
+
+// ValidateProviderAccess checks a request that names a provider but no model,
+// such as a passthrough call to a model-less endpoint, which acts on the
+// whole provider account. Only the caller's allowlists apply: the key and
+// every user-path policy must grant the whole provider ("provider/" or "/").
+// Model-side rows describe single models, so they do not apply here.
+func (s *Service) ValidateProviderAccess(ctx context.Context, provider string) error {
+	provider = strings.TrimSpace(provider)
+	if s.subjectAllows(ctx, core.ModelSelector{Provider: provider}) {
+		return nil
+	}
+	return core.NewInvalidRequestErrorWithStatus(
+		http.StatusBadRequest,
+		fmt.Sprintf("this API key needs all of provider %q (%q) to call endpoints that name no model", provider, provider+"/"),
 		nil,
 	).WithCode("model_access_denied")
 }
