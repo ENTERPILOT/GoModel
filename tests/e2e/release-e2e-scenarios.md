@@ -201,6 +201,9 @@ Stateful note:
   LiteLLM database in the local PostgreSQL. `S255` reads the Codex sign-in
   from `~/.codex/auth.json`, spends a little ChatGPT subscription quota, and
   prints `SKIPPED:` without a valid token
+- `S256` replays a Claude server-side tool search turn (regex and BM25) on
+  OpenAI and Gemini through `/v1/messages`; read-only and rerunnable in any
+  order
 - `S218` exercises Gemini's native `batchEmbedContents` path (batch input,
   `dimensions`); read-only and rerunnable in any order
 - `S219` asserts the effective resilience configuration on
@@ -8010,4 +8013,75 @@ done
 # response.completed event carries an empty output list.
 jq -e '[.output[]? | select(.type == "message") | .content[]?.text] | join("") | contains("QA_CHATGPT_OK")' \
   "$DIR/turn-1.json" >/dev/null
+```
+
+## 39. Anthropic server-side tool search on translated models
+
+A conversation that ran Anthropic's server-side tool search on Claude can
+continue on another model through `/v1/messages`: the tool search tool is
+dropped and its history (`server_tool_use`, `tool_search_tool_result`)
+degrades to text.
+
+### S256 A Claude tool-search turn continues on OpenAI and Gemini
+
+Claude runs the real regex and BM25 searches over a deferred tool. Its turn is
+replayed unchanged, with the tool result, on `gpt-6-luna` and
+`gemini-3.5-flash-lite`, non-streaming, streaming, and through `count_tokens`.
+A web search `server_tool_use` stays rejected.
+
+```bash
+H=(-H 'Content-Type: application/json' -H 'anthropic-version: 2023-06-01')
+for KIND in regex bm25; do
+  BODY=$(jq -nc --arg k "$KIND" '{
+    model: "claude-haiku-4-5-20251001", max_tokens: 400,
+    tools: [
+      {type: ("tool_search_tool_" + $k + "_20251119"), name: ("tool_search_tool_" + $k)},
+      {name: "get_weather", description: "Get the current weather for a city",
+       input_schema: {type: "object", properties: {city: {type: "string"}}, required: ["city"]},
+       defer_loading: true}
+    ],
+    messages: [{role: "user", content: "What is the weather in Paris? Use your tools."}]}')
+
+  # Claude sometimes answers without calling the tool it found; retry until
+  # the turn has both the search and the tool call to replay.
+  F="$QA_RUN_DIR/s256.$KIND.claude.json"
+  for _ in 1 2 3 4; do
+    curl -fsS "$BASE_URL/v1/messages" "${H[@]}" -d "$BODY" > "$F"
+    if jq -e 'any(.content[]; .type == "server_tool_use") and any(.content[]; .type == "tool_use")' "$F" >/dev/null; then
+      break
+    fi
+  done
+  jq -e 'any(.content[]; .type == "tool_search_tool_result") and any(.content[]; .type == "tool_use" and .name == "get_weather")' "$F" >/dev/null
+
+  NEXT=$(jq -c --argjson body "$BODY" '
+    ([.content[] | select(.type == "tool_use")][0].id) as $id
+    | $body + {messages: ($body.messages + [
+        {role: "assistant", content: .content},
+        {role: "user", content: [{type: "tool_result", tool_use_id: $id, content: "18C and sunny"}]}])}' "$F")
+
+  for MODEL in gpt-6-luna gemini-3.5-flash-lite; do
+    OUT="$QA_RUN_DIR/s256.$KIND.$MODEL.json"
+    CODE=$(curl -sS -o "$OUT" -w '%{http_code}' "$BASE_URL/v1/messages" "${H[@]}" -d "$(jq -c --arg m "$MODEL" '.model = $m' <<<"$NEXT")")
+    assert_http_status 200 "$CODE" "$OUT"
+    jq -e '.type == "message" and ([.content[] | select(.type == "text") | .text] | join(" ") | test("18"))' "$OUT" >/dev/null
+
+    CODE=$(curl -sS -o "$OUT.sse" -w '%{http_code}' "$BASE_URL/v1/messages" "${H[@]}" -d "$(jq -c --arg m "$MODEL" '.model = $m | .stream = true' <<<"$NEXT")")
+    assert_http_status 200 "$CODE" "$OUT.sse"
+    grep -q '^event: message_stop' "$OUT.sse"
+
+    CODE=$(curl -sS -o "$OUT.count" -w '%{http_code}' "$BASE_URL/v1/messages/count_tokens" "${H[@]}" -d "$(jq -c --arg m "$MODEL" '.model = $m | del(.max_tokens)' <<<"$NEXT")")
+    assert_http_status 200 "$CODE" "$OUT.count"
+    jq -e '.input_tokens > 0' "$OUT.count" >/dev/null
+  done
+done
+
+OUT="$QA_RUN_DIR/s256.web-search.json"
+CODE=$(curl -sS -o "$OUT" -w '%{http_code}' "$BASE_URL/v1/messages" "${H[@]}" -d '{
+  "model":"gpt-6-luna","max_tokens":20,
+  "messages":[
+    {"role":"user","content":"search the web"},
+    {"role":"assistant","content":[{"type":"server_tool_use","id":"srvtoolu_qa","name":"web_search","input":{"query":"q"}},{"type":"text","text":"found"}]},
+    {"role":"user","content":"thanks"}]}')
+assert_http_status 400 "$CODE" "$OUT"
+jq -e '.type == "error" and (.error.message | contains("server_tool_use"))' "$OUT" >/dev/null
 ```
