@@ -409,6 +409,74 @@ func TestToChatRequestToolResultTextOnlyStaysString(t *testing.T) {
 	assert.Equal(t, "a\nb", got)
 }
 
+func TestToChatRequestToolReferencesDegradeToText(t *testing.T) {
+	// Claude Code running with deferred tool loading (ENABLE_TOOL_SEARCH)
+	// returns the tools a search matched as tool_reference blocks. Providers
+	// behind the translated pipeline cannot resolve those schemas, so the
+	// names travel as text and the tool result stays deliverable.
+	chat, err := ToChatRequest(mustDecode(t, `{
+		"model":"m","max_tokens":10,
+		"messages":[
+			{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"ToolSearch","input":{"query":"select:WebSearch"}}]},
+			{"role":"user","content":[
+				{"type":"tool_result","tool_use_id":"tu_1","content":[
+					{"type":"tool_reference","tool_name":"WebSearch"},
+					{"type":"tool_reference","tool_name":"WebFetch"}
+				]}
+			]}
+		]
+	}`))
+	require.NoError(t, err)
+	require.Len(t, chat.Messages, 2)
+
+	tool := chat.Messages[1]
+	require.Equal(t, "tool", tool.Role)
+	assert.Equal(t, "tu_1", tool.ToolCallID)
+	assert.Equal(t, "WebSearch\nWebFetch", tool.Content, "tool message = %+v", tool)
+}
+
+func TestToChatRequestDeferredToolDeclarations(t *testing.T) {
+	// A deferred tool is a standard custom tool plus defer_loading: the
+	// marker has no canonical equivalent and is dropped, not rejected.
+	chat, err := ToChatRequest(mustDecode(t, `{
+		"model":"m","max_tokens":10,
+		"messages":[{"role":"user","content":"hi"}],
+		"tools":[
+			{"name":"WebSearch","description":"search","input_schema":{"type":"object"},"defer_loading":true},
+			{"name":"Read","input_schema":{"type":"object"}}
+		]
+	}`))
+	require.NoError(t, err)
+	require.Len(t, chat.Tools, 2)
+
+	fn, ok := chat.Tools[0]["function"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "WebSearch", fn["name"])
+	assert.NotContains(t, fn, "defer_loading")
+}
+
+func TestToChatRequestServerToolSearchResult(t *testing.T) {
+	// The server-side tool search answers without a client tool call, so its
+	// result cannot become a role:"tool" message; it degrades to user text.
+	// The matched tools sit in the nested content object, as Anthropic
+	// documents, not on the outer block.
+	chat, err := ToChatRequest(mustDecode(t, `{
+		"model":"m","max_tokens":10,
+		"messages":[{"role":"user","content":[
+			{"type":"text","text":"search my tools"},
+			{"type":"tool_search_tool_result","tool_use_id":"srv_1","content":{
+				"type":"tool_search_tool_search_result",
+				"tool_references":[{"type":"tool_reference","tool_name":"WebSearch"}]
+			}}
+		]}]
+	}`))
+	require.NoError(t, err)
+	require.Len(t, chat.Messages, 1)
+
+	assert.Equal(t, "user", chat.Messages[0].Role)
+	assert.Equal(t, "search my tools\nTools found: WebSearch", chat.Messages[0].Content, "message = %+v", chat.Messages[0])
+}
+
 func TestToChatRequestPreservesAnthropicCacheControls(t *testing.T) {
 	chat, err := ToChatRequest(mustDecode(t, `{
 		"model":"claude-test","max_tokens":64,

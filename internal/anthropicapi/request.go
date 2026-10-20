@@ -216,6 +216,10 @@ func convertBlockMessage(role string, blocks []ContentBlock, lenient bool) ([]co
 			if ok {
 				parts = append(parts, part)
 			}
+		case "tool_reference":
+			if text := textBlockText(block); text != "" {
+				parts = append(parts, core.ContentPart{Type: "text", Text: text, ExtraFields: extra})
+			}
 		case "tool_use":
 			if strings.TrimSpace(block.Name) == "" {
 				return nil, fmt.Errorf("tool_use block is missing name")
@@ -249,6 +253,15 @@ func convertBlockMessage(role string, blocks []ContentBlock, lenient bool) ([]co
 				Content:     content,
 				ExtraFields: extra,
 			})
+		case "tool_search_tool_result":
+			// The server-side tool search is answered by Anthropic, not the
+			// client, so no assistant tool call precedes it and it cannot
+			// become a role:"tool" message. Its matched tools degrade to text
+			// in the user turn: no provider behind the translated pipeline
+			// can resolve a tool_reference.
+			if text := toolReferencesText(block.References()); text != "" {
+				parts = append(parts, core.ContentPart{Type: "text", Text: text, ExtraFields: extra})
+			}
 		case "thinking", "redacted_thinking":
 			// Only assistant turns carry thinking; anywhere else it is an
 			// artifact with nothing to replay.
@@ -426,6 +439,31 @@ func searchResultText(block ContentBlock) (string, error) {
 	return strings.Join(lines, "\n"), nil
 }
 
+// toolReferencesText renders the tools a server-side tool search matched as the
+// text a provider without tool_reference support reads.
+func toolReferencesText(refs []ToolReference) string {
+	names := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if name := strings.TrimSpace(ref.ToolName); name != "" {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return "Tools found: " + strings.Join(names, ", ")
+}
+
+// textBlockText returns a text block's text, or the name a tool_reference
+// carries: Anthropic lets a tool_reference appear anywhere a text block can,
+// and outside a tool_result there is no tool message to hold it.
+func textBlockText(block ContentBlock) string {
+	if block.Type == "tool_reference" {
+		return strings.TrimSpace(block.ToolName)
+	}
+	return block.Text
+}
+
 // textBlocksText joins the text of a string-or-text-block-array content value.
 func textBlocksText(raw json.RawMessage) (string, error) {
 	text, blocks, err := parseContent(raw)
@@ -437,11 +475,11 @@ func textBlocksText(raw json.RawMessage) (string, error) {
 	}
 	parts := make([]string, 0, len(blocks))
 	for _, block := range blocks {
-		if block.Type != "text" {
+		if block.Type != "text" && block.Type != "tool_reference" {
 			return "", fmt.Errorf("block type %q is not supported; only text is allowed", block.Type)
 		}
-		if block.Text != "" {
-			parts = append(parts, block.Text)
+		if text := textBlockText(block); text != "" {
+			parts = append(parts, text)
 		}
 	}
 	return strings.Join(parts, "\n"), nil
@@ -511,6 +549,25 @@ func decodeSource(raw json.RawMessage) (*Source, error) {
 	return &source, nil
 }
 
+// decodeSearchResult decodes the nested content object of a
+// tool_search_tool_result block, which holds the tools the server-side search
+// matched. Other block types leave SearchResult nil.
+func (block *ContentBlock) decodeSearchResult() error {
+	if block.Type != "tool_search_tool_result" {
+		return nil
+	}
+	trimmed := bytes.TrimSpace(block.Content)
+	if len(trimmed) == 0 || core.IsJSONNull(trimmed) {
+		return nil
+	}
+	var result ToolSearchResult
+	if err := json.Unmarshal(trimmed, &result); err != nil {
+		return fmt.Errorf("tool_search_tool_result content: %v", err)
+	}
+	block.SearchResult = &result
+	return nil
+}
+
 // collapseParts reduces content parts to a plain string when they are all text,
 // and otherwise returns the typed part slice. It returns nil when there is no
 // content at all.
@@ -553,6 +610,11 @@ func parseContent(raw json.RawMessage) (text string, blocks []ContentBlock, err 
 		decoded := []ContentBlock{}
 		if err := json.Unmarshal(trimmed, &decoded); err != nil {
 			return "", nil, err
+		}
+		for i := range decoded {
+			if err := decoded[i].decodeSearchResult(); err != nil {
+				return "", nil, err
+			}
 		}
 		return "", decoded, nil
 	default:
@@ -651,14 +713,14 @@ func validatedCacheControlJSON(raw json.RawMessage) (json.RawMessage, error) {
 }
 
 // toolResultContent converts a tool_result block content, which itself may be
-// a string or an array of text, image, document, and search_result blocks,
-// into canonical message content. Text-only results collapse to a plain
-// string; results carrying attachments (Claude Code returns screenshots and
-// read image/PDF files this way) keep the structured part list so the egress
-// translator can forward them. A present but malformed or otherwise
-// unsupported tool_result content is an error rather than silently dropped:
-// the downstream provider must not receive an empty or truncated tool
-// response.
+// a string or an array of text, image, document, search_result, and
+// tool_reference blocks, into canonical message content. Text-only results
+// collapse to a plain string; results carrying attachments (Claude Code returns
+// screenshots and read image/PDF files this way) keep the structured part list
+// so the egress translator can forward them. A tool_reference degrades to the
+// tool name as text. A present but malformed or otherwise unsupported
+// tool_result content is an error rather than silently dropped: the downstream
+// provider must not receive an empty or truncated tool response.
 func toolResultContent(raw json.RawMessage, lenient bool) (core.MessageContent, error) {
 	text, blocks, err := parseContent(raw)
 	if err != nil {
@@ -681,6 +743,14 @@ func toolResultContent(raw json.RawMessage, lenient bool) (core.MessageContent, 
 			}
 			if ok {
 				parts = append(parts, part)
+			}
+		case "tool_reference":
+			// Claude Code returns the tools a deferred-loading search matched
+			// as tool_reference blocks. No provider behind the translated
+			// pipeline resolves those schemas, so the names travel as text
+			// instead of making the whole tool result undeliverable.
+			if text := textBlockText(block); text != "" {
+				parts = append(parts, core.ContentPart{Type: "text", Text: text, ExtraFields: extra})
 			}
 		default:
 			if lenient {
