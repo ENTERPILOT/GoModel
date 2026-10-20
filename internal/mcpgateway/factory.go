@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
@@ -100,13 +101,20 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 	service, err := NewService(ctx, Options{
 		ConfigServers:  configSpecs,
 		VirtualServers: virtualSpecs,
-		Store:          store,
-		HTTPClient:     httpClient,
-		UsageLogger:    usageLogger,
-		UserPathHeader: cfg.Server.UserPathHeader,
-		AllowedOrigins: cfg.MCP.AllowedOrigins,
-		ToolDiscovery:  cfg.MCP.ToolDiscovery,
-		Secrets:        secrets,
+		// Virtual server rows hold no secrets, so they use the unsealed store;
+		// the sealing wrapper only implements Store.
+		VirtualStore: virtualStoreOf(rawStore),
+		// Admin-managed servers and virtual servers share the model-config
+		// refresh cadence, like virtual models; operators tune
+		// CACHE_REFRESH_INTERVAL for faster cross-instance propagation.
+		RefreshInterval: time.Duration(cfg.Cache.Model.RefreshInterval) * time.Second,
+		Store:           store,
+		HTTPClient:      httpClient,
+		UsageLogger:     usageLogger,
+		UserPathHeader:  cfg.Server.UserPathHeader,
+		AllowedOrigins:  cfg.MCP.AllowedOrigins,
+		ToolDiscovery:   cfg.MCP.ToolDiscovery,
+		Secrets:         secrets,
 	})
 	if err != nil {
 		return nil, err
@@ -135,4 +143,11 @@ func createStore(ctx context.Context, store storage.Storage) (Store, error) {
 		func(db sqlx.DB) (Store, error) { return NewSQLStore(ctx, db) },
 		func(db *mongo.Database) (Store, error) { return NewMongoDBStore(db) },
 	)
+}
+
+// virtualStoreOf returns the store's virtual-server persistence; both
+// backends provide it.
+func virtualStoreOf(store Store) VirtualStore {
+	virtualStore, _ := store.(VirtualStore)
+	return virtualStore
 }

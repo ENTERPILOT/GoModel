@@ -212,6 +212,11 @@ func TestRefreshRuntime_SkipsDisabledVirtualModels(t *testing.T) {
 	step := runtimeRefreshStepByName(report.Steps, "virtual_models")
 	require.NotNil(t, step, "virtual_models step missing: %+v", report.Steps)
 	require.Equal(t, admin.RuntimeRefreshStatusSkipped, step.Status, "virtual_models step status = %q, want skipped; step=%+v", step.Status, *step)
+
+	// The MCP gateway is nil too, so its step is listed and skipped.
+	mcpStep := runtimeRefreshStepByName(report.Steps, "mcp_servers")
+	require.NotNil(t, mcpStep, "mcp_servers step missing: %+v", report.Steps)
+	require.Equal(t, admin.RuntimeRefreshStatusSkipped, mcpStep.Status)
 }
 
 func TestRefreshRuntime_ReturnsGatewayErrorWhenContextCanceledBeforeAcquire(t *testing.T) {

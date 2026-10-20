@@ -86,7 +86,7 @@ func normalizeMCPVirtualServers(cfg *MCPConfig, pass mcpPass) error {
 	normalized := make(map[string]MCPVirtualServerConfig, len(cfg.VirtualServers))
 	for name, virtual := range cfg.VirtualServers {
 		canonical := canonicalTextKey(name)
-		if err := validateMCPVirtualServerName(canonical); err != nil {
+		if err := ValidateMCPVirtualServerName(canonical); err != nil {
 			return fmt.Errorf("mcp.virtual_servers[%q]: %w", name, err)
 		}
 		if _, dup := normalized[canonical]; dup {
@@ -110,10 +110,11 @@ func normalizeMCPVirtualServers(cfg *MCPConfig, pass mcpPass) error {
 	return nil
 }
 
-// validateMCPVirtualServerName applies the server slug rules: the name is a
+// ValidateMCPVirtualServerName applies the server slug rules: the name is a
 // /mcp/{name} URL segment and prefixes nothing, but sharing the rules keeps
-// one alphabet for that path segment.
-func validateMCPVirtualServerName(name string) error {
+// one alphabet for that path segment. Shared by config loading and the admin
+// API.
+func ValidateMCPVirtualServerName(name string) error {
 	if name == "" {
 		return fmt.Errorf("virtual server name is required")
 	}
@@ -124,6 +125,14 @@ func validateMCPVirtualServerName(name string) error {
 		return fmt.Errorf("virtual server name %q must match %s", name, mcpServerSlugRegex.String())
 	}
 	return nil
+}
+
+// NormalizeMCPVirtualServer validates one admin-supplied definition and
+// normalizes it in place: description, members, and tool_discovery. Admin
+// input is literal, so nothing is left for secret resolution. The admin API
+// checks nesting and member existence itself.
+func NormalizeMCPVirtualServer(virtual *MCPVirtualServerConfig) error {
+	return normalizeMCPVirtualServer(virtual, nil, mcpLiteralPass)
 }
 
 func normalizeMCPVirtualServer(virtual *MCPVirtualServerConfig, virtuals map[string]MCPVirtualServerConfig, pass mcpPass) error {

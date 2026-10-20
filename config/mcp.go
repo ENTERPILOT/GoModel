@@ -249,6 +249,10 @@ const (
 	// from a reference and may be a secret: errors name the field, never the
 	// value.
 	mcpResolvedPass
+	// mcpLiteralPass validates values the admin API supplies. They are
+	// literal, so nothing is deferred, and errors name the value the caller
+	// just sent.
+	mcpLiteralPass
 )
 
 // deferred reports whether value is left for the resolved pass.
