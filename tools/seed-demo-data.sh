@@ -123,6 +123,13 @@ demo_key_redacted_sales="sk_gom_...${demo_key_secret_sales: -4}"
 demo_audio_mp3_base64="$(tr -d '\r\n' < "$script_dir/fixtures/demo-prompt-caching.mp3.base64")"
 demo_audio_mp3_bytes="$(printf '%s' "$demo_audio_mp3_base64" | openssl base64 -d -A | wc -c | awk '{print $1}')"
 
+# Real provider types and names with the model lists those providers
+# returned, so the Models page shows catalog pricing. Keys are placeholders;
+# make demo sets CONFIGURED_PROVIDER_MODELS_MODE=allowlist so the gateway
+# serves these lists without calling the upstream /models endpoints.
+demo_providers_json="$(tr -d '\r\n' < "$script_dir/fixtures/demo-providers.json")"
+demo_providers_json="${demo_providers_json//\'/\'\'}"
+
 # Guardrail instances (plugin configurations) referenced by the seeded
 # workflows below. Each config is written exactly as the matching built-in
 # plugin parses it: the plugins reject unknown keys, so the demo doubles as a
@@ -200,6 +207,8 @@ sqlite3 "$db_path" "ALTER TABLE guardrail_definitions ADD COLUMN fail_mode TEXT 
 sqlite3 "$db_path" "ALTER TABLE guardrail_definitions ADD COLUMN timeout_ms INTEGER NOT NULL DEFAULT 0;" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE workflow_versions ADD COLUMN scope_user_path TEXT;" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE workflow_versions ADD COLUMN managed_default INTEGER NOT NULL DEFAULT FALSE;" 2>/dev/null || true
+sqlite3 "$db_path" "ALTER TABLE provider_credentials ADD COLUMN session_sticky_keys INTEGER NOT NULL DEFAULT TRUE;" 2>/dev/null || true
+sqlite3 "$db_path" "ALTER TABLE provider_credentials ADD COLUMN proxy_url TEXT NOT NULL DEFAULT '';" 2>/dev/null || true
 
 # make demo seeds before app startup, so migrate the rate-limit table here
 # when the database predates scoped user-path/provider/model rules.
@@ -387,6 +396,29 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
   disallowed_tools TEXT NOT NULL DEFAULT '[]',
   user_paths TEXT NOT NULL DEFAULT '[]',
   tool_timeout_seconds INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS provider_credentials (
+  name TEXT PRIMARY KEY,
+  type TEXT NOT NULL,
+  api_keys TEXT NOT NULL DEFAULT '[]',
+  session_sticky_keys INTEGER NOT NULL DEFAULT TRUE,
+  base_url TEXT NOT NULL DEFAULT '',
+  api_version TEXT NOT NULL DEFAULT '',
+  backend TEXT NOT NULL DEFAULT '',
+  auth_type TEXT NOT NULL DEFAULT '',
+  api_mode TEXT NOT NULL DEFAULT '',
+  vertex_project TEXT NOT NULL DEFAULT '',
+  vertex_location TEXT NOT NULL DEFAULT '',
+  service_account_file TEXT NOT NULL DEFAULT '',
+  service_account_json TEXT NOT NULL DEFAULT '',
+  service_account_json_base64 TEXT NOT NULL DEFAULT '',
+  gcp_scope TEXT NOT NULL DEFAULT '',
+  proxy_url TEXT NOT NULL DEFAULT '',
+  models TEXT NOT NULL DEFAULT '[]',
+  enabled INTEGER NOT NULL DEFAULT TRUE,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -2075,6 +2107,25 @@ VALUES
     1, strftime('%s', 'now'), strftime('%s', 'now')
   );
 
+-- Providers named after their real types, so the Models page prices each
+-- model from the catalog. Bedrock authenticates through the AWS credential
+-- chain and takes no key. INSERT OR IGNORE keeps an operator's own provider
+-- of the same name, and config/env providers shadow these rows anyway.
+INSERT OR IGNORE INTO provider_credentials (
+  name, type, api_keys, base_url, models, enabled, created_at, updated_at
+)
+SELECT
+  json_extract(value, '$.name'),
+  json_extract(value, '$.type'),
+  CASE json_extract(value, '$.type')
+    WHEN 'bedrock' THEN '[]'
+    ELSE json_array('demo-placeholder-key')
+  END,
+  coalesce(json_extract(value, '$.base_url'), ''),
+  json_extract(value, '$.models'),
+  1, strftime('%s', 'now'), strftime('%s', 'now')
+FROM json_each('${demo_providers_json}');
+
 COMMIT;
 
 SELECT 'seed_prefix', '${prefix}';
@@ -2099,6 +2150,7 @@ SELECT 'mcp_server_rows', count(*) FROM mcp_servers
 WHERE name GLOB 'demo-' || substr(lower(replace('${prefix}', '.', '-')), 1, 44) || '-*';
 SELECT 'auth_key_rows', count(*) FROM auth_keys WHERE id GLOB '${prefix}-key-*';
 SELECT 'virtual_model_rows', count(*) FROM virtual_models WHERE description GLOB '${prefix}:*';
+SELECT 'provider_rows', name, type, json_array_length(models) FROM provider_credentials ORDER BY name;
 SELECT 'guardrail_rows', count(*) FROM guardrail_definitions WHERE description GLOB '${prefix}:*';
 SELECT 'guardrail_types', type, count(*) FROM guardrail_definitions
 WHERE description GLOB '${prefix}:*' GROUP BY 2 ORDER BY 2;
@@ -2175,6 +2227,11 @@ subtrees; /agents/team1/research and /engineering/ai/bot/batch narrow their
 groups), and the Sales key carries a per-key allowlist on top of the /sales
 policy. Budgets include label-scoped examples (env:prod, experiment:rag-v2)
 next to plain user-path limits.
+
+The Providers and Models pages list OpenAI, Anthropic, Bedrock, DeepSeek,
+Gemini, Groq, Bailian, and xAI with their real model lists and catalog prices.
+Their keys are placeholders, so requests to them fail upstream; a provider of
+the same name in config, env, or the store keeps its own settings.
 
 Rate-limit counters are live process state and start at zero when GoModel starts.
 Use the generated API keys to make requests and populate those counters.
