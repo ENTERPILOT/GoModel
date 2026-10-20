@@ -10,19 +10,16 @@
 #   mongo-replset.sh wait    block until the container runs, initiate the
 #                            replica set, and wait for a primary
 #
-# Anonymous pulls from public.ecr.aws are metered per second, and the job's
-# PostgreSQL service container pulls from the same registry moments earlier,
-# so a single pull regularly fails with "toomanyrequests: Rate exceeded". The
-# pull is retried with a linear backoff; `start` records the outcome in a state
-# file and `wait` fails only on that outcome, not on a transient error line.
+# The image comes from tools/ci/pull-image.sh, which falls over between
+# registries and backs off between rounds (IMAGE_PULL_* there). `start` records
+# the outcome in a state file and `wait` fails only on that outcome, not on a
+# transient error line.
 #
 # The server has no authentication, so the port is published on loopback only.
 # Environment (defaults in brackets):
 #   MONGO_PORT                  published port [27017]
 #   MONGO_WAIT_SECONDS          bound on `wait` [180]
-#   MONGO_PULL_ATTEMPTS         pull attempts [6]
-#   MONGO_PULL_BACKOFF_SECONDS  backoff step, attempt n waits n*step [5]
-#   MONGO_IMAGE                 image [public.ecr.aws/docker/library/mongo:7]
+#   MONGO_IMAGE                 library image [mongo:7]
 #   MONGO_STATE_DIR             where the start log and state file go [/tmp]
 #
 # The suites read MONGO_TEST_DSN; the workflow sets it to
@@ -30,14 +27,12 @@
 set -eu
 
 name=gomodel-mongo
-image=${MONGO_IMAGE:-public.ecr.aws/docker/library/mongo:7}
+image=${MONGO_IMAGE:-mongo:7}
 state_dir=${MONGO_STATE_DIR:-/tmp}
 log=$state_dir/gomodel-mongo-start.log
 state=$state_dir/gomodel-mongo-start.state
 deadline_seconds=${MONGO_WAIT_SECONDS:-180}
 port=${MONGO_PORT:-27017}
-attempts=${MONGO_PULL_ATTEMPTS:-6}
-backoff=${MONGO_PULL_BACKOFF_SECONDS:-5}
 
 mongosh() {
 	docker exec "$name" mongosh --quiet --eval "$1"
@@ -46,18 +41,11 @@ mongosh() {
 # pull_and_run is the background half of `start`. It writes "started" or
 # "failed" to the state file when it finishes.
 pull_and_run() {
-	attempt=1
-	until docker pull --quiet "$image"; do
-		if [ "$attempt" -ge "$attempts" ]; then
-			echo "mongo-replset: pull of $image failed after $attempts attempts"
-			echo failed >"$state"
-			return 1
-		fi
-		echo "mongo-replset: pull attempt $attempt/$attempts failed, retrying in $((attempt * backoff))s"
-		sleep $((attempt * backoff))
-		attempt=$((attempt + 1))
-	done
-	if ! docker run -d --rm --name "$name" -p "127.0.0.1:$port:27017" "$image" --replSet rs --bind_ip_all; then
+	if ! ref=$(sh "$(dirname "$0")/pull-image.sh" "$image"); then
+		echo failed >"$state"
+		return 1
+	fi
+	if ! docker run -d --rm --name "$name" -p "127.0.0.1:$port:27017" "$ref" --replSet rs --bind_ip_all; then
 		echo failed >"$state"
 		return 1
 	fi
