@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -32,8 +33,14 @@ type scriptedDecisionsProvider struct {
 	// statuses maps a forwarded model to the status it answers with; 200 by
 	// default.
 	statuses map[string]int
+	catalog  map[string]core.Model
 	calls    []string
 	bodies   []map[string]any
+}
+
+func (p *scriptedDecisionsProvider) LookupModel(model string) (*core.Model, bool) {
+	found, ok := p.catalog[model]
+	return &found, ok
 }
 
 func newScriptedDecisionsProvider(models map[string]string, types ...string) *scriptedDecisionsProvider {
@@ -253,4 +260,102 @@ func TestDecisions_ThroughServer(t *testing.T) {
 		assert.Equal(t, "/v1/decisions", usageLogger.entries[0].Endpoint)
 		assert.Equal(t, entry.RequestID, usageLogger.entries[0].RequestID)
 	})
+}
+
+const decisionImageBody = `{"model":"%s","input":[{"role":"user","content":[` +
+	`{"type":"input_text","text":"Is the box damaged?"},{"type":"input_image","image_url":"data:image/png;base64,iVBORw0KGgo="}]}],` +
+	`"questions":[{"type":"predicate","name":"damaged","instructions":"Damaged?"}]}`
+
+// newVisionDecisionsProvider adds hosted Jev, which reads images, next to a
+// text-only Kev server, as the jev provider catalogs them.
+func newVisionDecisionsProvider() *scriptedDecisionsProvider {
+	provider := newScriptedDecisionsProvider(map[string]string{
+		"openai/gpt-6-luna": "openai",
+		"jev/jev-latest":    "jev",
+		"kev/kev-latest":    "jev",
+	}, "openai", "jev")
+	provider.catalog = map[string]core.Model{
+		"jev/jev-latest":    {ID: "jev-latest", Metadata: &core.ModelMetadata{Capabilities: map[string]bool{"vision": true}}},
+		"kev/kev-latest":    {ID: "kev-latest", Metadata: &core.ModelMetadata{Capabilities: map[string]bool{"vision": false}}},
+		"openai/gpt-6-luna": {ID: "gpt-6-luna", Metadata: &core.ModelMetadata{Capabilities: map[string]bool{"vision": true}}},
+	}
+	return provider
+}
+
+// An image request to a model that reads text only is refused before it is
+// sent: a Kev server would read the image references as text.
+func TestDecisions_RefusesImagesForTextOnlyModels(t *testing.T) {
+	provider := newVisionDecisionsProvider()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	c, rec := echotest.Post(t, "/v1/decisions", fmt.Sprintf(decisionImageBody, "kev/kev-latest"))
+	require.NoError(t, handler.Decisions(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "does not read images")
+	assert.Empty(t, provider.calls)
+
+	c, rec = echotest.Post(t, "/v1/decisions", fmt.Sprintf(decisionImageBody, "jev/jev-latest"))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"jev jev jev-latest"}, provider.calls)
+}
+
+// Failover skips a target that cannot read the input: a request with images
+// moves past the text-only Kev server to the next target that reads images,
+// while a text request may still use it.
+func TestDecisions_FailoverSkipsTargetsThatCannotReadImages(t *testing.T) {
+	failovers := failoverResolverStub{selectors: []core.ModelSelector{
+		{Provider: "kev", Model: "kev-latest"},
+		{Provider: "openai", Model: "gpt-6-luna"},
+	}}
+
+	provider := newVisionDecisionsProvider()
+	provider.statuses["jev-latest"] = http.StatusServiceUnavailable
+	handler := newHandler(provider, nil, nil, nil, nil, nil, failovers, nil)
+	c, rec := echotest.Post(t, "/v1/decisions", fmt.Sprintf(decisionImageBody, "jev/jev-latest"))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"jev jev jev-latest", "openai openai gpt-6-luna"}, provider.calls)
+
+	provider = newVisionDecisionsProvider()
+	provider.statuses["jev-latest"] = http.StatusServiceUnavailable
+	handler = newHandler(provider, nil, nil, nil, nil, nil, failovers, nil)
+	c, rec = echotest.Post(t, "/v1/decisions", decisionBody("jev/jev-latest"))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"jev jev jev-latest", "kev jev kev-latest"}, provider.calls)
+}
+
+// A chain whose first target reads text only still serves images: the
+// request starts at the first failover target that reads them, while text
+// requests keep the first target. The promoted target is the one audited.
+func TestDecisions_ImagesStartAtTheFirstTargetThatReadsThem(t *testing.T) {
+	failovers := failoverResolverStub{selectors: []core.ModelSelector{{Provider: "openai", Model: "gpt-6-luna"}}}
+
+	provider := newVisionDecisionsProvider()
+	handler := newHandler(provider, nil, nil, nil, nil, nil, failovers, nil)
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	c, rec := echotest.Post(t, "/v1/decisions", fmt.Sprintf(decisionImageBody, "kev/kev-latest"), echotest.WithValue(string(auditlog.LogEntryKey), entry))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"openai openai gpt-6-luna"}, provider.calls)
+	assert.Equal(t, "openai/gpt-6-luna", entry.ResolvedModel)
+
+	c, rec = echotest.Post(t, "/v1/decisions", decisionBody("kev/kev-latest"))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"openai openai gpt-6-luna", "kev jev kev-latest"}, provider.calls)
+}
+
+// An image link sent to a jev model, which takes images inline only, says so.
+func TestDecisions_ImageLinksToJevAskForInlineData(t *testing.T) {
+	provider := newVisionDecisionsProvider()
+	handler := NewHandler(provider, nil, nil, nil)
+	body := `{"model":"jev/jev-latest","input":[{"role":"user","content":[{"type":"input_image","image_url":"https://example.com/a.png"}]}],"questions":[{"type":"predicate","instructions":"?"}]}`
+
+	c, rec := echotest.Post(t, "/v1/decisions", body)
+	require.NoError(t, handler.Decisions(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "not a link")
+	assert.Empty(t, provider.calls)
 }

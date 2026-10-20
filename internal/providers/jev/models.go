@@ -75,15 +75,21 @@ func (e modelEntry) ids() []string {
 
 // toCore describes one name from the entry. System One models are decision
 // models with no generation mode the gateway could route an OpenAI request
-// to, so they are categorized as utility models and claim no mode.
+// to, so they are categorized as utility models and claim no mode. Hosted
+// Jev reads images; a Kev server, which lists its checkpoint by "id" rather
+// than "name", reads text only. The vision capability records which, so the
+// gateway can refuse an image request to Kev, or skip Kev in a failover chain,
+// instead of sending Kev image references it would read as text.
 func (e modelEntry) toCore(id string) core.Model {
+	kevServer := strings.TrimSpace(e.Name) == "" && strings.TrimSpace(e.ID) != ""
 	return core.Model{
 		ID:      id,
 		Object:  "model",
 		Created: releaseTimestamp(e.ReleaseDate),
 		Metadata: &core.ModelMetadata{
-			Description: strings.TrimSpace(e.Description),
-			Categories:  []core.ModelCategory{core.CategoryUtility},
+			Description:  strings.TrimSpace(e.Description),
+			Categories:   []core.ModelCategory{core.CategoryUtility},
+			Capabilities: map[string]bool{"vision": !kevServer},
 		},
 	}
 }

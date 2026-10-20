@@ -16,7 +16,7 @@ is configured. Without one, it answers `404`.
 | Provider | How it answers |
 | --- | --- |
 | `openai` | Natively: the body reaches `/v1/decisions` as sent |
-| `jev` (hosted Jev, self-hosted Kev) | Through [System One](/advanced/systemone-api), translated both ways; text input only |
+| `jev` (hosted Jev, self-hosted Kev) | Through [System One](/advanced/systemone-api), translated both ways; images on hosted Jev only |
 
 Either way the answer is OpenAI's shape, so the OpenAI SDKs work unchanged.
 
@@ -89,9 +89,16 @@ without changing client code.
 | `levels[].label` and `description` | `criteria` levels, in order |
 | Answer `probabilities` lists | Answer `probabilities` maps |
 
-Some requests have no System One equivalent:
+Some parts of a request translate with limits:
 
-- **Images** are rejected with `400`: System One reads text only.
+- **Images** work on hosted Jev, sent as base64 PNG or JPEG data URLs
+  (`data:image/png;base64,...`). Each one becomes a System One image asset,
+  placed in the state where it stood in the input, and GoModel adds the
+  `TypeSafe-Danger-Zone-Images: true` header TypeSafe requires. GoModel does
+  not fetch image links for Jev, so an `https` image URL returns `400`; `detail`
+  is ignored. TypeSafe marks image support as experimental and limits each
+  image to 280–1568 pixels per side. A Kev server reads text only, so an image
+  request to a Kev model returns `400`.
 - **Choice values** are strings or booleans; a boolean is sent as `"true"` or
   `"false"` and comes back as the boolean. A string `"true"` and a boolean
   `true` in one question collide and are rejected.
@@ -124,8 +131,11 @@ Edits a decision request has no place for, such as an injected system prompt,
 are dropped with a warning.
 
 A failover chain may mix providers: every target receives the request in its
-own form, and a target on a provider without a Decisions API is skipped
-without using an attempt.
+own form, and a target on a provider without a Decisions API, or one that
+cannot read the request's images (a Kev server, or a `jev` model given an image
+link), is skipped without using an attempt. When the chain's first target
+cannot read the images, the request starts at the first target that can, so
+the chain below sends text to Kev and images to OpenAI.
 
 ```yaml
 virtual_models:
@@ -133,7 +143,7 @@ virtual_models:
     strategy: failover
     targets:
       - { model: kev/kev-latest }     # local Kev first
-      - { model: openai/gpt-6-luna }  # OpenAI when Kev is down
+      - { model: openai/gpt-6-luna }  # OpenAI when Kev is down, and for images
 ```
 
 ## Errors
@@ -143,5 +153,5 @@ virtual_models:
 | No `openai` or `jev` provider configured | `404` |
 | `model` missing | `400` |
 | Model on a provider without a Decisions API (including through a virtual model) | `400 invalid_request_error`; the gateway logs a warning |
-| An image, or a request System One cannot express, sent to a `jev` model | `400 invalid_request_error` naming the field |
+| An image sent to a text-only model (Kev), an image link or a non-PNG/JPEG image sent to a `jev` model, or another request System One cannot express | `400 invalid_request_error` naming the field |
 | Upstream error | The provider's status, with its message |

@@ -125,7 +125,8 @@ curl -s http://localhost:8080/v1/decisions \
 }
 ```
 
-Images are rejected, since System One reads text only; see
+Hosted Jev also reads images sent as base64 PNG or JPEG data URLs, which
+GoModel sends as System One image assets; Kev servers read text only. See
 [Jev and Kev](/advanced/decisions-api#jev-and-kev) for the full mapping.
 
 ## Using the TypeSafe SDKs
@@ -193,7 +194,9 @@ on. TypeSafe lists its aliases (`jev-latest`, `jev-preview`); a Kev server
 lists its checkpoint (`kev-latest`) and the aliases it answers to. Versioned
 IDs such as `jev-1.13.0` are accepted by the `model` field whether or not they
 are listed. The models are categorized as utility models with no generation
-mode, since there is no OpenAI endpoint to route them to.
+mode: they answer `/v1/decisions` and `/v1/systemone`, not chat. Hosted Jev
+models report the `vision` capability; models on a Kev server report
+`vision: false`, which is how GoModel refuses image requests to them.
 
 Every System One request names its model, so both `/v1/systemone` and the
 passthrough surface apply the caller's [model allowlist](/features/users) to

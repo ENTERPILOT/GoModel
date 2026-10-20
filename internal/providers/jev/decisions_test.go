@@ -154,7 +154,10 @@ func TestDecisions_RejectsUntranslatableRequests(t *testing.T) {
 		body string
 		want string
 	}{
-		{name: "image input", body: `{"model":"jev-latest","input":[{"role":"user","content":[{"type":"input_image","image_url":"https://example.com/a.png"}]}],"questions":[{"type":"predicate","instructions":"?"}]}`, want: "read text only"},
+		{name: "image link", body: `{"model":"jev-latest","input":[{"role":"user","content":[{"type":"input_image","image_url":"https://example.com/a.png"}]}],"questions":[{"type":"predicate","instructions":"?"}]}`, want: "not a link"},
+		{name: "webp image", body: `{"model":"jev-latest","input":[{"role":"user","content":[{"type":"input_image","image_url":"data:image/webp;base64,UklGRg=="}]}],"questions":[{"type":"predicate","instructions":"?"}]}`, want: "PNG and JPEG"},
+		{name: "image not base64", body: `{"model":"jev-latest","input":[{"role":"user","content":[{"type":"input_image","image_url":"data:image/png,raw"}]}],"questions":[{"type":"predicate","instructions":"?"}]}`, want: "base64 data URL"},
+		{name: "file part", body: `{"model":"jev-latest","input":[{"role":"user","content":[{"type":"input_file","file_id":"file-1"}]}],"questions":[{"type":"predicate","instructions":"?"}]}`, want: "read text and images only"},
 		{name: "missing input", body: `{"model":"jev-latest","questions":[{"type":"predicate","instructions":"?"}]}`, want: "input is required"},
 		{name: "no questions", body: `{"model":"jev-latest","input":"x","questions":[]}`, want: "at least one question"},
 		{name: "unknown question type", body: `{"model":"jev-latest","input":"x","questions":[{"type":"rank","instructions":"?"}]}`, want: `"rank" is not a decision question type`},
@@ -251,4 +254,57 @@ func TestDecisions_KeepsQuestionAndOptionOrder(t *testing.T) {
 	assert.Equal(t, `{"model":"jev-latest","state":"x","questions":{`+
 		`"zz_first":{"type":"choice","instructions":"?","criteria":{"zebra":null,"mango":null,"apple":"fallback, keep last"}},`+
 		`"aa_second":{"type":"noul","instructions":"?"}}}`, string(capture.Last(t).Body))
+}
+
+// Images become System One image assets: the state lists the text parts and
+// image references in input order, each image is listed once in assets under
+// its reference, and the request opts in to images with TypeSafe's header.
+func TestDecisions_TranslatesImagesToAssets(t *testing.T) {
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"model":"jev-1.14.0","answers":{"damaged":{"type":"noul","noul":0.9}},"usage":{"input_tokens":900,"output_tokens":1}}`)
+	provider := newTestProvider("ts-key", server.URL, server.Client(), llmclient.Hooks{})
+
+	resp, err := decide(t, provider, `{"model":"jev-latest","input":[{"role":"user","content":[
+	  {"type":"input_text","text":"Delivery photo:"},
+	  {"type":"input_image","image_url":"data:image/png;base64,iVBORw0KGgo=","detail":"high"},
+	  {"type":"input_image","image_url":"data:image/jpeg;base64,/9j/4AAQ"}]}],
+	  "questions":[{"type":"predicate","name":"damaged","instructions":"Is the box damaged?"}]}`)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	sent := capture.Last(t)
+	assert.Equal(t, "true", sent.Header.Get("TypeSafe-Danger-Zone-Images"))
+	var body struct {
+		State  []string `json:"state"`
+		Assets map[string]struct {
+			Type       string `json:"type"`
+			Format     string `json:"format"`
+			DataBase64 string `json:"data_base64"`
+		} `json:"assets"`
+	}
+	require.NoError(t, json.Unmarshal(sent.Body, &body))
+	require.Len(t, body.State, 3)
+	assert.Equal(t, "Delivery photo:", body.State[0])
+	require.Len(t, body.Assets, 2)
+	png, jpg := body.Assets[body.State[1]], body.Assets[body.State[2]]
+	assert.Equal(t, "image", png.Type)
+	assert.Equal(t, "png", png.Format)
+	assert.Equal(t, "iVBORw0KGgo=", png.DataBase64)
+	assert.Equal(t, "jpg", jpg.Format)
+	assert.NotEqual(t, body.State[1], body.State[2], "each image has its own reference")
+
+	got, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Contains(t, string(got), `"probability":0.9`)
+}
+
+// Text-only requests keep a plain string state and send no image opt-in.
+func TestDecisions_TextOnlyRequestsSendNoImageHeader(t *testing.T) {
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"model":"jev-1.13.0","answers":{},"usage":{}}`)
+	provider := newTestProvider("", server.URL, server.Client(), llmclient.Hooks{})
+
+	resp, err := decide(t, provider, `{"model":"jev-latest","input":"x","questions":[{"type":"predicate","instructions":"?"}]}`)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Empty(t, capture.Last(t).Header.Get("TypeSafe-Danger-Zone-Images"))
+	assert.NotContains(t, string(capture.Last(t).Body), "assets")
 }
