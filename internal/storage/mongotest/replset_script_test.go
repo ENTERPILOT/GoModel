@@ -146,6 +146,13 @@ func TestReplsetScriptPullStates(t *testing.T) {
 			wantRun:   gcr,
 		},
 		{
+			name:      "a registry-qualified image is pulled as-is",
+			env:       map[string]string{"MONGO_IMAGE": ecr, "FAKE_PULL_FAILURES": "1", "IMAGE_PULL_ROUNDS": "2"},
+			wantState: "started",
+			wantPulls: []string{ecr, ecr},
+			wantRun:   ecr,
+		},
+		{
 			name:      "exhausted rounds fail without running",
 			env:       map[string]string{"FAKE_PULL_FAILURES": "9", "IMAGE_PULL_ROUNDS": "2"},
 			wantErr:   true,

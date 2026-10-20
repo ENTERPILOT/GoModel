@@ -19,7 +19,8 @@
 # Environment (defaults in brackets):
 #   MONGO_PORT                  published port [27017]
 #   MONGO_WAIT_SECONDS          bound on `wait` [180]
-#   MONGO_IMAGE                 library image [mongo:7]
+#   MONGO_IMAGE                 library image, or a registry-qualified
+#                               reference pulled as-is [mongo:7]
 #   MONGO_STATE_DIR             where the start log and state file go [/tmp]
 #
 # The suites read MONGO_TEST_DSN; the workflow sets it to
