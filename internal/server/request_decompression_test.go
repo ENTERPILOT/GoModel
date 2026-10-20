@@ -101,11 +101,13 @@ func TestRequestDecompression_RejectsUnsupportedAndMalformedBodies(t *testing.T)
 	tests := []struct {
 		name     string
 		encoding string
+		extra    string // a second Content-Encoding header field
 		body     []byte
 		want     int
 	}{
 		{name: "brotli", encoding: "br", body: []byte("x"), want: http.StatusUnsupportedMediaType},
 		{name: "two layers", encoding: "gzip, zstd", body: []byte("x"), want: http.StatusUnsupportedMediaType},
+		{name: "two header fields", encoding: "gzip", extra: "identity", body: gzipBytes(t, "{}"), want: http.StatusUnsupportedMediaType},
 		{name: "malformed gzip", encoding: "gzip", body: []byte("not gzip"), want: http.StatusBadRequest},
 	}
 	for _, tt := range tests {
@@ -113,9 +115,37 @@ func TestRequestDecompression_RejectsUnsupportedAndMalformedBodies(t *testing.T)
 			provider := newSystemOneProvider(systemOneAnswer)
 			srv := New(provider, &Config{})
 
-			rec := postEncoded(t, srv, "/v1/systemone", tt.encoding, tt.body)
+			req := httptest.NewRequest(http.MethodPost, "/v1/systemone", bytes.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Content-Encoding", tt.encoding)
+			if tt.extra != "" {
+				req.Header.Add("Content-Encoding", tt.extra)
+			}
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
 			assert.Equal(t, tt.want, rec.Code, rec.Body.String())
 			assert.Nil(t, provider.lastPassthroughReq)
 		})
 	}
+}
+
+// A gzip header larger than the limit fails while the reader is created, and
+// is still reported as too large rather than as broken gzip.
+func TestRequestDecompression_OversizedGzipHeaderIs413(t *testing.T) {
+	provider := newSystemOneProvider(systemOneAnswer)
+	srv := New(provider, &Config{BodySizeLimit: "1K"})
+	var buf bytes.Buffer
+	w := gzip.NewWriter(&buf)
+	w.Extra = bytes.Repeat([]byte("x"), 4096)
+	_, err := w.Write([]byte("{}"))
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/systemone", bytes.NewReader(buf.Bytes()))
+	req.ContentLength = -1
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code, rec.Body.String())
 }

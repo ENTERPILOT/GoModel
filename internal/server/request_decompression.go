@@ -30,14 +30,23 @@ func requestDecompression(limit int64) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			req := c.Request()
-			encoding := strings.ToLower(strings.TrimSpace(req.Header.Get("Content-Encoding")))
+			encoding, layers := requestContentEncoding(req.Header)
+			if layers > 1 {
+				return handleError(c, core.NewInvalidRequestErrorWithStatus(http.StatusUnsupportedMediaType,
+					"request bodies may use one Content-Encoding layer; send gzip, zstd, or an uncompressed body", nil))
+			}
 			if encoding == "" || encoding == "identity" || req.Body == nil || req.Body == http.NoBody {
 				return next(c)
 			}
 			var decoded io.ReadCloser
 			switch encoding {
 			case "gzip", "x-gzip":
+				// The gzip header is read here, so an oversized body can
+				// already fail the body limit.
 				reader, err := gzip.NewReader(req.Body)
+				if errors.Is(err, echo.ErrStatusRequestEntityTooLarge) {
+					return handleError(c, requestBodyTooLarge())
+				}
 				if err != nil {
 					return handleError(c, core.NewInvalidRequestError("invalid gzip request body: "+err.Error(), err))
 				}
@@ -62,8 +71,7 @@ func requestDecompression(limit int64) echo.MiddlewareFunc {
 				return handleError(c, core.NewInvalidRequestError("invalid "+encoding+" request body: "+err.Error(), err))
 			}
 			if err != nil || int64(len(body)) > limit {
-				return handleError(c, core.NewInvalidRequestErrorWithStatus(http.StatusRequestEntityTooLarge,
-					"request body exceeds the body size limit", nil))
+				return handleError(c, requestBodyTooLarge())
 			}
 			req.Body = io.NopCloser(bytes.NewReader(body))
 			req.ContentLength = int64(len(body))
@@ -72,4 +80,26 @@ func requestDecompression(limit int64) echo.MiddlewareFunc {
 			return next(c)
 		}
 	}
+}
+
+// requestContentEncoding returns the request's lowercased Content-Encoding
+// and how many encoding layers it names. Every header field counts, not only
+// the first, so "gzip" in one field and "identity" in another is two layers.
+func requestContentEncoding(header http.Header) (string, int) {
+	var encodings []string
+	for _, value := range header.Values("Content-Encoding") {
+		for encoding := range strings.SplitSeq(value, ",") {
+			if encoding = strings.ToLower(strings.TrimSpace(encoding)); encoding != "" {
+				encodings = append(encodings, encoding)
+			}
+		}
+	}
+	if len(encodings) == 0 {
+		return "", 0
+	}
+	return encodings[0], len(encodings)
+}
+
+func requestBodyTooLarge() error {
+	return core.NewInvalidRequestErrorWithStatus(http.StatusRequestEntityTooLarge, "request body exceeds the body size limit", nil)
 }

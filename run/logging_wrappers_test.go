@@ -184,8 +184,11 @@ func TestRunWrapsTheLoggerOfEveryGeneration(t *testing.T) {
 	master.Store("m1")
 	var resolved atomic.Int32
 	vault := config.SecretResolverFunc(func(context.Context, string) (string, error) {
+		// Load before counting, so a rotation the test makes once it sees
+		// the count cannot reach this first resolution.
+		value := master.Load().(string)
 		resolved.Add(1)
-		return master.Load().(string), nil
+		return value, nil
 	})
 
 	// What each generation's hook observed when it ran.
