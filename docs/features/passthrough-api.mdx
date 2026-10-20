@@ -92,10 +92,13 @@ credential, including routes the gateway cannot scope to a caller, such as
   `GET /p/anthropic/v1/models`.
 
 Grant passthrough access when you create a key (`"passthrough_access": true`
-on `POST /admin/auth-keys`), on the dashboard's API Keys page, or later:
+on `POST /admin/auth-keys`), on the dashboard's API Keys page, or later.
+Only a global admin credential (the master key or a dashboard key without a
+user path) can grant it, because a passthrough key reaches beyond any user
+path; a user-path scoped admin gets `403 admin_scope_denied` but can revoke it.
 
 ```bash
-curl -X PUT http://localhost:8080/admin/auth-keys/<key-id>/passthrough-access \
+curl -X PUT "http://localhost:8080/admin/auth-keys/${KEY_ID}/passthrough-access" \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"passthrough_access": true}'

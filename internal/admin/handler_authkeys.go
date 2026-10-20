@@ -118,6 +118,9 @@ func (h *Handler) CreateAuthKey(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	if err := requirePassthroughGrantScope(c, req.PassthroughAccess); err != nil {
+		return handleError(c, err)
+	}
 
 	issued, err := h.authKeys.Create(c.Request().Context(), authkeys.CreateInput{
 		Name:              req.Name,
@@ -305,8 +308,21 @@ func (h *Handler) UpdateAuthKeyPassthroughAccess(c *echo.Context) error {
 		if req.PassthroughAccess == nil {
 			return nil, validation.NewError("passthrough_access is required", nil)
 		}
+		if err := requirePassthroughGrantScope(c, *req.PassthroughAccess); err != nil {
+			return nil, err
+		}
 		return h.authKeys.UpdatePassthroughAccess(ctx, id, *req.PassthroughAccess)
 	})
+}
+
+// requirePassthroughGrantScope lets only global credentials grant passthrough
+// access: a passthrough key reaches the whole shared provider account, past
+// any user-path scope. Scoped credentials may still revoke it.
+func requirePassthroughGrantScope(c *echo.Context, grant bool) error {
+	if grant && !requestScope(c).Global() {
+		return scopeDeniedError()
+	}
+	return nil
 }
 
 // updateAuthKey handles the shared shape of the PUT /admin/auth-keys/:id/*
