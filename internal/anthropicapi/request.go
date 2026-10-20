@@ -2,6 +2,7 @@ package anthropicapi
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -253,12 +254,27 @@ func convertBlockMessage(role string, blocks []ContentBlock, lenient bool) ([]co
 				Content:     content,
 				ExtraFields: extra,
 			})
+		case "server_tool_use":
+			// Anthropic runs the server-side tool search itself and replays it
+			// in the assistant turn as this call plus its
+			// tool_search_tool_result. No client executes it, so it cannot
+			// become a tool call; the search degrades to text like its result.
+			// Other server tools (web search, code execution) carry results
+			// the translated pipeline cannot reproduce and stay rejected.
+			if !isToolSearchTool(block.Name) {
+				if lenient {
+					continue
+				}
+				return nil, unsupportedBlockError(block.Type)
+			}
+			if text := toolSearchCallText(block.Input); text != "" {
+				parts = append(parts, core.ContentPart{Type: "text", Text: text, ExtraFields: extra})
+			}
 		case "tool_search_tool_result":
 			// The server-side tool search is answered by Anthropic, not the
-			// client, so no assistant tool call precedes it and it cannot
-			// become a role:"tool" message. Its matched tools degrade to text
-			// in the user turn: no provider behind the translated pipeline
-			// can resolve a tool_reference.
+			// client, so it cannot become a role:"tool" message. Its matched
+			// tools degrade to text in the turn that carries it: no provider
+			// behind the translated pipeline can resolve a tool_reference.
 			if text := toolReferencesText(block.References()); text != "" {
 				parts = append(parts, core.ContentPart{Type: "text", Text: text, ExtraFields: extra})
 			}
@@ -276,7 +292,7 @@ func convertBlockMessage(role string, blocks []ContentBlock, lenient bool) ([]co
 			// container uploads, …) have no canonical chat equivalent. Reject
 			// them rather than silently dropping the data, which would make
 			// the model answer as if the content were never sent.
-			return nil, fmt.Errorf("unsupported content block type %q; use the /p/anthropic/v1/messages passthrough for provider-native features", block.Type)
+			return nil, unsupportedBlockError(block.Type)
 		}
 	}
 
@@ -452,6 +468,34 @@ func toolReferencesText(refs []ToolReference) string {
 		return ""
 	}
 	return "Tools found: " + strings.Join(names, ", ")
+}
+
+func unsupportedBlockError(blockType string) error {
+	return fmt.Errorf("unsupported content block type %q; use the /p/anthropic/v1/messages passthrough for provider-native features", blockType)
+}
+
+// isToolSearchTool reports whether a server tool name or type is Anthropic's
+// tool search (tool_search_tool_regex, tool_search_tool_bm25, and their
+// versioned tool types).
+func isToolSearchTool(nameOrType string) bool {
+	return strings.HasPrefix(strings.TrimSpace(nameOrType), "tool_search_tool_")
+}
+
+// toolSearchCallText renders a server-side tool search call as text. The regex
+// variant sends its search as "pattern", the BM25 variant as "query".
+func toolSearchCallText(input json.RawMessage) string {
+	var args struct {
+		Pattern string `json:"pattern"`
+		Query   string `json:"query"`
+	}
+	if err := json.Unmarshal(input, &args); err != nil {
+		return ""
+	}
+	search := strings.TrimSpace(cmp.Or(args.Query, args.Pattern))
+	if search == "" {
+		return ""
+	}
+	return "Tool search: " + search
 }
 
 // textBlockText returns a text block's text, or the name a tool_reference
@@ -811,7 +855,10 @@ func convertTools(tools []Tool, lenient bool) ([]map[string]any, error) {
 		// canonical chat equivalent; reject them rather than mistranslating
 		// them into a phantom custom function the gateway cannot execute.
 		if t := strings.TrimSpace(tool.Type); t != "" && t != "custom" {
-			if lenient {
+			// The tool search only picks among deferred tools, which are
+			// sent in full like any other tool, so it is dropped rather
+			// than rejected.
+			if lenient || isToolSearchTool(t) {
 				continue
 			}
 			return nil, core.NewInvalidRequestError(fmt.Sprintf("tools[%d]: server tool type %q is not supported; use the /p/anthropic/v1/messages passthrough for provider-native tools", i, tool.Type), nil)
