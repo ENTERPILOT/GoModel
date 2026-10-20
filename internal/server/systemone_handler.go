@@ -50,7 +50,7 @@ var systemOneProviderTypes = []string{jevProviderType, "openrouter"}
 // @Summary      Evaluate a System One decision request (Jev / Kev)
 // @Description  Available when a jev or openrouter provider is configured. The request and answer follow TypeSafe's System One API; models on providers without that API are rejected rather than translated.
 // @Tags         systemone
-// @Accept       json
+// @Accept       json,mpfd
 // @Produce      json
 // @Security     BearerAuth
 // @Param        request  body      object  true  "System One request: model, state, and questions"
@@ -70,7 +70,7 @@ func (h *Handler) SystemOne(c *echo.Context) error {
 // @Summary      Run one Choice question with several option orders (Kev)
 // @Description  A Kev server diagnostic: the request is a System One request, and n_perm (1 to 64, default 6) sets how many option orders run. Only jev providers pointing at a Kev server serve it.
 // @Tags         systemone
-// @Accept       json
+// @Accept       json,mpfd
 // @Produce      json
 // @Security     BearerAuth
 // @Param        request  body      object  true  "System One request with one Choice question"
@@ -90,7 +90,7 @@ func (h *Handler) SystemOnePermute(c *echo.Context) error {
 // @Summary      Run each System One question in its own forward pass (Kev)
 // @Description  A Kev server diagnostic that answers each question separately. Only jev providers pointing at a Kev server serve it.
 // @Tags         systemone
-// @Accept       json
+// @Accept       json,mpfd
 // @Produce      json
 // @Security     BearerAuth
 // @Param        request  body      object  true  "System One request: model, state, and questions"
@@ -113,6 +113,11 @@ func (s *translatedInferenceService) serveSystemOne(c *echo.Context, route syste
 	body, err := requestBodyBytes(c)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+	if isMultipartFormData(c.Request().Header.Get("Content-Type")) {
+		if body, err = systemOneMultipartToJSON(c.Request().Header.Get("Content-Type"), body); err != nil {
+			return handleError(c, core.NewInvalidRequestError("invalid multipart request: "+err.Error(), err))
+		}
 	}
 	var req core.SystemOneRequest
 	if err := json.Unmarshal(body, &req); err != nil {

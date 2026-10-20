@@ -43,6 +43,12 @@ func sendSystemOne(
 	if err != nil {
 		return nil, core.NewInvalidRequestError("invalid request body: "+err.Error(), err)
 	}
+	// The body is always JSON here, also when the client sent a multipart
+	// form, which the handler has turned into JSON.
+	if headers == nil {
+		headers = http.Header{}
+	}
+	headers.Set("Content-Type", "application/json")
 	resp, err := passthroughProvider.Passthrough(ctx, providerType, &core.PassthroughRequest{
 		Method:       http.MethodPost,
 		Endpoint:     route.endpoint,

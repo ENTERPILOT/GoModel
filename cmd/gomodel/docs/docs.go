@@ -8002,7 +8002,8 @@ const docTemplate = `{
             "post": {
                 "description": "Available when a jev or openrouter provider is configured. The request and answer follow TypeSafe's System One API; models on providers without that API are rejected rather than translated.",
                 "consumes": [
-                    "application/json"
+                    "application/json",
+                    "multipart/form-data"
                 ],
                 "produces": [
                     "application/json"
@@ -8071,7 +8072,8 @@ const docTemplate = `{
             "post": {
                 "description": "A Kev server diagnostic: the request is a System One request, and n_perm (1 to 64, default 6) sets how many option orders run. Only jev providers pointing at a Kev server serve it.",
                 "consumes": [
-                    "application/json"
+                    "application/json",
+                    "multipart/form-data"
                 ],
                 "produces": [
                     "application/json"
@@ -8140,7 +8142,8 @@ const docTemplate = `{
             "post": {
                 "description": "A Kev server diagnostic that answers each question separately. Only jev providers pointing at a Kev server serve it.",
                 "consumes": [
-                    "application/json"
+                    "application/json",
+                    "multipart/form-data"
                 ],
                 "produces": [
                     "application/json"
