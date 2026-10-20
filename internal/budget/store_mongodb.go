@@ -514,6 +514,16 @@ func mongoSpendCondition(window SpendWindow) (bson.D, error) {
 }
 
 func mongoSubjectMatch(window SpendWindow) (bson.D, error) {
+	if window.Scope == ScopeProvider {
+		subject, err := NormalizeSubject(ScopeProvider, window.Subject)
+		if err != nil {
+			return nil, err
+		}
+		// Blank provider names fall back to the provider type, matching the
+		// SQL stores.
+		name := mongoTrimmedOr("$provider_name", "$provider")
+		return bson.D{{Key: "$eq", Value: bson.A{bson.D{{Key: "$toLower", Value: name}}, subject}}}, nil
+	}
 	if window.Scope == ScopeLabel {
 		subject, err := NormalizeSubject(ScopeLabel, window.Subject)
 		if err != nil {
@@ -526,18 +536,23 @@ func mongoSubjectMatch(window SpendWindow) (bson.D, error) {
 		return nil, err
 	}
 	// Missing and blank user paths count as the root, matching the SQL stores.
-	normalized := bson.D{{Key: "$let", Value: bson.D{
-		{Key: "vars", Value: bson.D{{Key: "path", Value: bson.D{{Key: "$trim", Value: bson.D{
-			{Key: "input", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$user_path", ""}}}},
-		}}}}}},
-		{Key: "in", Value: bson.D{{Key: "$cond", Value: bson.A{
-			bson.D{{Key: "$eq", Value: bson.A{"$$path", ""}}}, "/", "$$path",
-		}}}},
-	}}}
 	return bson.D{{Key: "$regexMatch", Value: bson.D{
-		{Key: "input", Value: normalized},
+		{Key: "input", Value: mongoTrimmedOr("$user_path", "/")},
 		{Key: "regex", Value: usagePathRegex(userPath)},
 	}}}, nil
+}
+
+// mongoTrimmedOr renders a field trimmed of whitespace, or fallback when the
+// field is missing or blank.
+func mongoTrimmedOr(field string, fallback any) bson.D {
+	return bson.D{{Key: "$let", Value: bson.D{
+		{Key: "vars", Value: bson.D{{Key: "value", Value: bson.D{{Key: "$trim", Value: bson.D{
+			{Key: "input", Value: bson.D{{Key: "$ifNull", Value: bson.A{field, ""}}}},
+		}}}}}},
+		{Key: "in", Value: bson.D{{Key: "$cond", Value: bson.A{
+			bson.D{{Key: "$eq", Value: bson.A{"$$value", ""}}}, fallback, "$$value",
+		}}}},
+	}}}
 }
 
 func (s *MongoDBStore) Close() error {

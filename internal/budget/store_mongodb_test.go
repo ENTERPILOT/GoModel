@@ -213,3 +213,34 @@ func TestMongoDBStoreMigratesPreScopeDocuments(t *testing.T) {
 		require.NoError(t, err)
 	})
 }
+
+func TestMongoDBStoreSumSpendMatchesProvider(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		ctx := context.Background()
+		store, err := NewMongoDBStore(ctx, db)
+		require.NoError(t, err)
+
+		now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
+		_, err = db.Collection("usage").InsertMany(ctx, []any{
+			bson.D{{Key: "timestamp", Value: now}, {Key: "provider", Value: "openai"}, {Key: "provider_name", Value: "OpenAI-Prod"}, {Key: "total_cost", Value: 2.0}},
+			bson.D{{Key: "timestamp", Value: now}, {Key: "provider", Value: "openai"}, {Key: "provider_name", Value: "openai-free"}, {Key: "total_cost", Value: 4.0}},
+			// Written before provider_name existed: only the provider type is set.
+			bson.D{{Key: "timestamp", Value: now}, {Key: "provider", Value: "openai"}, {Key: "total_cost", Value: 3.0}},
+			bson.D{{Key: "timestamp", Value: now}, {Key: "provider", Value: "openai"}, {Key: "provider_name", Value: "openai-prod"}, {Key: "cache_type", Value: "exact"}, {Key: "total_cost", Value: 10.0}},
+		})
+		require.NoError(t, err)
+
+		start, end := now.Add(-time.Hour), now.Add(time.Hour)
+		got, err := store.SumSpend(ctx, []SpendWindow{
+			{Scope: ScopeProvider, Subject: "openai-prod", Start: start, End: end},
+			{Scope: ScopeProvider, Subject: "openai", Start: start, End: end},
+			{Scope: ScopeProvider, Subject: "anthropic", Start: start, End: end},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []Spend{
+			{Total: 2, HasUsage: true}, // case-insensitive, cached row excluded
+			{Total: 3, HasUsage: true}, // only the row without a provider name
+			{},
+		}, got)
+	})
+}

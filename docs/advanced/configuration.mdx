@@ -355,10 +355,11 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
 Budgets use tracked usage cost records. If usage tracking is disabled, GoModel
 starts with budget management disabled and logs a warning.
 
-| Variable            | Description                                             | Default |
-| ------------------- | ------------------------------------------------------- | ------- |
-| `BUDGETS_ENABLED`   | Enable budget management and workflow budget checks when usage tracking is enabled | `true`  |
-| `SET_BUDGET_<PATH>` | Seed budget limits for a user path, such as `daily=10` | _(empty)_ |
+| Variable                     | Description                                                                        | Default   |
+| ---------------------------- | ---------------------------------------------------------------------------------- | --------- |
+| `BUDGETS_ENABLED`            | Enable budget management and workflow budget checks when usage tracking is enabled | `true`    |
+| `SET_BUDGET_<PATH>`          | Seed budget limits for a user path, such as `daily=10`                             | _(empty)_ |
+| `SET_PROVIDER_BUDGET_<NAME>` | Seed budget limits for a provider instance, such as `daily=100`                    | _(empty)_ |
 
 `SET_BUDGET_<PATH>` supports the standard periods `hourly`, `daily`, `weekly`,
 and `monthly`. The `<PATH>` suffix is lowercased; use double underscores
@@ -366,7 +367,9 @@ and `monthly`. The `<PATH>` suffix is lowercased; use double underscores
 For example, `SET_BUDGET_TEAM__ALPHA__SERVICE="daily=10"` configures
 `/team/alpha/service`, and `SET_BUDGET_TEAM_ALPHA="daily=10"` configures
 `/team_alpha`. This differs from provider `<SUFFIX>` variables below, which
-convert underscores to hyphens in provider names.
+convert underscores to hyphens in provider names; `SET_PROVIDER_BUDGET_<NAME>`
+follows the provider convention, so `SET_PROVIDER_BUDGET_OPENAI_PROD` limits
+`openai-prod`.
 
 `SET_BUDGET_="monthly=500"` means a literal environment variable named
 `SET_BUDGET_`, which configures the root path `/`. POSIX permits that name, but

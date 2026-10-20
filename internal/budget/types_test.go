@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -164,4 +165,67 @@ func TestCheckResultPeriodRatio(t *testing.T) {
 	require.Equal(t, float64(1), got)
 	got = (CheckResult{PeriodStart: start, PeriodEnd: start}).PeriodRatio(start)
 	require.Equal(t, float64(0), got)
+}
+
+func TestNormalizeProviderBudget(t *testing.T) {
+	tests := []struct {
+		name    string
+		subject string
+		want    string
+		wantErr string
+	}{
+		{name: "lowercased and trimmed", subject: "  OpenAI-Prod ", want: "openai-prod"},
+		{name: "empty", subject: "  ", wantErr: "provider budget subject is required"},
+		{name: "qualified model", subject: "openai/gpt-4o", wantErr: "without slashes or spaces"},
+		{name: "inner space", subject: "open ai", wantErr: "without slashes or spaces"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := NormalizeBudget(Budget{
+				Scope:         "Provider",
+				Subject:       tt.subject,
+				PeriodSeconds: PeriodDailySeconds,
+				Amount:        10,
+			})
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, ScopeProvider, got.Scope)
+			require.Equal(t, tt.want, got.Subject)
+		})
+	}
+}
+
+func TestNormalizeProviderBudgetRejectsPerChild(t *testing.T) {
+	_, err := NormalizeBudget(Budget{
+		Scope:         ScopeProvider,
+		Subject:       "openai",
+		PerChild:      true,
+		PeriodSeconds: PeriodDailySeconds,
+		Amount:        10,
+	})
+	require.ErrorContains(t, err, "per_child is only valid for user_path budgets")
+}
+
+func TestProviderBudgetAppliesTo(t *testing.T) {
+	b := Budget{Scope: ScopeProvider, Subject: "openai-prod"}
+	tests := []struct {
+		name     string
+		subjects Subjects
+		want     bool
+	}{
+		{name: "same provider", subjects: Subjects{UserPath: "/team", Provider: "openai-prod"}, want: true},
+		{name: "case-insensitive", subjects: Subjects{UserPath: "/", Provider: "OpenAI-Prod"}, want: true},
+		{name: "other provider", subjects: Subjects{UserPath: "/", Provider: "openai-free"}, want: false},
+		{name: "route unknown", subjects: Subjects{UserPath: "/"}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, b.appliesTo(tt.subjects))
+		})
+	}
 }

@@ -80,7 +80,7 @@ func seedConfiguredBudgets(ctx context.Context, service *Service, cfg config.Bud
 	if service == nil {
 		return nil
 	}
-	budgets := make([]Budget, 0, len(cfg.UserPaths)+len(cfg.Labels))
+	budgets := make([]Budget, 0, len(cfg.UserPaths)+len(cfg.Labels)+len(cfg.Providers))
 	for _, entry := range cfg.UserPaths {
 		seeded, err := seedBudgets(ScopeUserPath, entry.Path, entry.PerChild, entry.Limits)
 		if err != nil {
@@ -90,6 +90,13 @@ func seedConfiguredBudgets(ctx context.Context, service *Service, cfg config.Bud
 	}
 	for _, entry := range cfg.Labels {
 		seeded, err := seedBudgets(ScopeLabel, entry.Label, false, entry.Limits)
+		if err != nil {
+			return err
+		}
+		budgets = append(budgets, seeded...)
+	}
+	for _, entry := range cfg.Providers {
+		seeded, err := seedBudgets(ScopeProvider, entry.Name, false, entry.Limits)
 		if err != nil {
 			return err
 		}
