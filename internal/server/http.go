@@ -361,7 +361,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	if cfg != nil && cfg.BodySizeLimit != "" {
 		bodySizeLimit = cfg.BodySizeLimit
 	}
-	e.Use(middleware.BodyLimit(parseBodySizeLimitBytes(bodySizeLimit)))
+	bodyLimitBytes := parseBodySizeLimitBytes(bodySizeLimit)
+	e.Use(middleware.BodyLimit(bodyLimitBytes))
+	e.Use(requestDecompression(bodyLimitBytes))
 
 	e.Use(modelInteractionWriteDeadlineMiddleware(streamStallTimeout(cfg)))
 
