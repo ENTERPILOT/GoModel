@@ -2,7 +2,6 @@ package users
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
@@ -52,8 +51,8 @@ func (s *SQLStore) List(ctx context.Context) ([]User, error) {
 		if err := rows.Scan(&user.UserPath, &allowedJSON, &user.Description, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan user: %w", err)
 		}
-		if user.AllowedModels, err = decodeAllowedModels(allowedJSON); err != nil {
-			return nil, err
+		if user.AllowedModels, err = sqlutil.DecodeJSONStrings([]byte(allowedJSON)); err != nil {
+			return nil, fmt.Errorf("decode allowed_models: %w", err)
 		}
 		user.CreatedAt = sqlutil.TimeFromUnix(createdAt)
 		user.UpdatedAt = sqlutil.TimeFromUnix(updatedAt)
@@ -66,9 +65,9 @@ func (s *SQLStore) List(ctx context.Context) ([]User, error) {
 }
 
 func (s *SQLStore) Upsert(ctx context.Context, user User) error {
-	allowedJSON, err := encodeAllowedModels(user.AllowedModels)
+	allowedJSON, err := sqlutil.JSONStrings(user.AllowedModels)
 	if err != nil {
-		return err
+		return fmt.Errorf("encode allowed_models: %w", err)
 	}
 	_, err = s.db.Exec(ctx, `
 		INSERT INTO users (user_path, allowed_models, description, created_at, updated_at)
@@ -97,29 +96,4 @@ func (s *SQLStore) Delete(ctx context.Context, userPath string) error {
 
 func (s *SQLStore) Close() error {
 	return nil
-}
-
-func encodeAllowedModels(values []string) (string, error) {
-	if values == nil {
-		values = []string{}
-	}
-	data, err := json.Marshal(values)
-	if err != nil {
-		return "", fmt.Errorf("encode allowed_models: %w", err)
-	}
-	return string(data), nil
-}
-
-func decodeAllowedModels(raw string) ([]string, error) {
-	if raw == "" {
-		return nil, nil
-	}
-	var values []string
-	if err := json.Unmarshal([]byte(raw), &values); err != nil {
-		return nil, fmt.Errorf("decode allowed_models: %w", err)
-	}
-	if len(values) == 0 {
-		return nil, nil
-	}
-	return values, nil
 }

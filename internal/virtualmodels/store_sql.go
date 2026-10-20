@@ -155,9 +155,9 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	pathsJSON, err := encodeUserPaths(vm.UserPaths)
+	pathsJSON, err := sqlutil.JSONStrings(vm.UserPaths)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("encode user_paths: %w", err)
 	}
 	configJSON, err := encodeStrategyConfig(vm.StrategyConfig)
 	if err != nil {
@@ -210,8 +210,8 @@ func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 	if vm.Targets, err = decodeTargets(targets); err != nil {
 		return VirtualModel{}, err
 	}
-	if vm.UserPaths, err = decodeUserPaths(userPaths); err != nil {
-		return VirtualModel{}, err
+	if vm.UserPaths, err = sqlutil.DecodeJSONStrings(userPaths); err != nil {
+		return VirtualModel{}, fmt.Errorf("decode user_paths: %w", err)
 	}
 	if vm.StrategyConfig, err = decodeStrategyConfig(strategyConfig); err != nil {
 		return VirtualModel{}, err
