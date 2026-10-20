@@ -265,16 +265,49 @@ func TestToChatRequestToolStrict(t *testing.T) {
 }
 
 func TestToChatRequestRejectsServerTool(t *testing.T) {
-	_, err := ToChatRequest(mustDecode(t, `{
-		"model":"m","max_tokens":10,
-		"messages":[{"role":"user","content":"hi"}],
-		"tools":[{"type":"web_search_20250305","name":"web_search"}]
-	}`))
-	require.Error(t, err)
+	tests := []struct {
+		name string
+		tool string
+	}{
+		{name: "web search", tool: `{"type":"web_search_20250305","name":"web_search"}`},
+		// Only the regex and BM25 tool search variants are dropped.
+		{name: "unknown tool search variant", tool: `{"type":"tool_search_tool_regxe_20251119","name":"tool_search_tool_regxe"}`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ToChatRequest(mustDecode(t, `{
+				"model":"m","max_tokens":10,
+				"messages":[{"role":"user","content":"hi"}],
+				"tools":[`+tc.tool+`]
+			}`))
+			require.Error(t, err)
 
-	gatewayErr, ok := err.(*core.GatewayError)
-	require.True(t, ok)
-	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
+			gatewayErr, ok := err.(*core.GatewayError)
+			require.True(t, ok)
+			require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
+		})
+	}
+}
+
+func TestIsToolSearchTool(t *testing.T) {
+	tests := []struct {
+		value string
+		want  bool
+	}{
+		{value: "tool_search_tool_regex", want: true},
+		{value: "tool_search_tool_bm25", want: true},
+		{value: " tool_search_tool_regex_20251119 ", want: true},
+		{value: "tool_search_tool_bm25_20260101", want: true},
+		{value: "tool_search_tool_regxe_20251119", want: false},
+		{value: "tool_search_tool_regexp", want: false},
+		{value: "tool_search_tool_", want: false},
+		{value: "web_search", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.value, func(t *testing.T) {
+			assert.Equal(t, tc.want, isToolSearchTool(tc.value))
+		})
+	}
 }
 
 func TestToChatRequestToolChoiceMapping(t *testing.T) {
@@ -559,6 +592,19 @@ func TestToChatRequestRejectsOtherServerToolUse(t *testing.T) {
 	}`))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `unsupported content block type "server_tool_use"`)
+
+	_, err = ToChatRequest(mustDecode(t, `{
+		"model":"m","max_tokens":10,
+		"messages":[
+			{"role":"user","content":"search"},
+			{"role":"assistant","content":[
+				{"type":"server_tool_use","id":"srv_1","name":"tool_search_tool_regxe","input":{"pattern":"q"}},
+				{"type":"text","text":"found"}
+			]},
+			{"role":"user","content":"thanks"}
+		]
+	}`))
+	require.Error(t, err, "an unknown tool search variant is not degraded")
 }
 
 func TestToChatRequestPreservesAnthropicCacheControls(t *testing.T) {

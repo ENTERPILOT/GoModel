@@ -475,10 +475,17 @@ func unsupportedBlockError(blockType string) error {
 }
 
 // isToolSearchTool reports whether a server tool name or type is Anthropic's
-// tool search (tool_search_tool_regex, tool_search_tool_bm25, and their
-// versioned tool types).
+// tool search: the tool_search_tool_regex and tool_search_tool_bm25 names and
+// their versioned types (tool_search_tool_regex_20251119). Any version
+// suffix is accepted so a new release keeps working; other variants are not.
 func isToolSearchTool(nameOrType string) bool {
-	return strings.HasPrefix(strings.TrimSpace(nameOrType), "tool_search_tool_")
+	value := strings.TrimSpace(nameOrType)
+	for _, base := range []string{"tool_search_tool_regex", "tool_search_tool_bm25"} {
+		if value == base || strings.HasPrefix(value, base+"_") {
+			return true
+		}
+	}
+	return false
 }
 
 // toolSearchCallText renders a server-side tool search call as text. The regex
