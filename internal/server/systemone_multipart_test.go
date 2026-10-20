@@ -14,8 +14,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// pngBytes starts with the PNG signature, which is what content sniffing reads.
-var pngBytes = []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+// pngBytes and jpegBytes start with their format's signature, which is what
+// content sniffing reads.
+var (
+	pngBytes  = []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+	jpegBytes = []byte("\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+)
 
 type formPart struct {
 	name, contentType string
@@ -61,16 +65,17 @@ func TestSystemOneMultipartToJSON_InlinesImageParts(t *testing.T) {
 	tests := []struct {
 		name        string
 		contentType string
+		data        []byte
 		wantFormat  string
 	}{
-		{name: "png content type", contentType: "image/png", wantFormat: "png"},
-		{name: "jpeg content type", contentType: "image/jpeg", wantFormat: "jpg"},
-		{name: "sniffed", contentType: "application/octet-stream", wantFormat: "png"},
-		{name: "no content type", contentType: "", wantFormat: "png"},
+		{name: "png", contentType: "image/png", data: pngBytes, wantFormat: "png"},
+		{name: "jpeg", contentType: "image/jpeg", data: jpegBytes, wantFormat: "jpg"},
+		{name: "octet stream", contentType: "application/octet-stream", data: pngBytes, wantFormat: "png"},
+		{name: "no content type", contentType: "", data: jpegBytes, wantFormat: "jpg"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			contentType, body := systemOneForm(t, multipartRequest, formPart{name: "door-photo", contentType: tt.contentType, data: pngBytes})
+			contentType, body := systemOneForm(t, multipartRequest, formPart{name: "door-photo", contentType: tt.contentType, data: tt.data})
 
 			got, err := systemOneMultipartToJSON(contentType, body)
 			require.NoError(t, err)
@@ -82,7 +87,7 @@ func TestSystemOneMultipartToJSON_InlinesImageParts(t *testing.T) {
 			assert.Equal(t, map[string]string{
 				"type":        "image",
 				"format":      tt.wantFormat,
-				"data_base64": base64.StdEncoding.EncodeToString(pngBytes),
+				"data_base64": base64.StdEncoding.EncodeToString(tt.data),
 			}, parsed.Assets["ref-door"])
 		})
 	}
@@ -103,6 +108,8 @@ func TestSystemOneMultipartToJSON_RejectsMalformedForms(t *testing.T) {
 		{name: "shared part", request: `{"model":"m","state":"a b","assets":{"a":{"part":"door-photo"},"b":{"part":"door-photo"}},"questions":{}}`, parts: []formPart{png}, want: "more than one asset"},
 		{name: "gif part", request: multipartRequest, parts: []formPart{{name: "door-photo", contentType: "image/gif", data: []byte("GIF89a")}}, want: "PNG or JPEG"},
 		{name: "unknown bytes", request: multipartRequest, parts: []formPart{{name: "door-photo", data: []byte("hello")}}, want: "not a PNG or JPEG"},
+		{name: "png content type with other bytes", request: multipartRequest, parts: []formPart{{name: "door-photo", contentType: "image/png", data: []byte("GIF89a")}}, want: "not a PNG or JPEG"},
+		{name: "stated png with gif bytes", request: `{"model":"m","state":"a","assets":{"a":{"part":"door-photo","format":"png"}},"questions":{}}`, parts: []formPart{{name: "door-photo", data: []byte("GIF89a")}}, want: "not a PNG or JPEG"},
 		{name: "request part not JSON", request: `not json`, want: "not a JSON request"},
 		{name: "stated gif format", request: `{"model":"m","state":"a","assets":{"a":{"part":"door-photo","format":"gif"}},"questions":{}}`, parts: []formPart{{name: "door-photo", contentType: "image/gif", data: []byte("GIF89a")}}, want: "png, jpg, or jpeg"},
 		{name: "format not a string", request: `{"model":"m","state":"a","assets":{"a":{"part":"door-photo","format":1}},"questions":{}}`, parts: []formPart{png}, want: "format must be a string"},

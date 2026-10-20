@@ -131,37 +131,38 @@ type multipartImage struct {
 }
 
 // format returns the asset's image format: the one the asset states, or,
-// with none, the part's content type, or the format its bytes show. A stated
-// format must be one TypeSafe accepts, as a detected one is.
+// with none, the one the image's bytes show. The stated format, the part's
+// content type, and the bytes are all checked, so anything but a PNG or JPEG
+// image is refused here rather than by the provider.
 func (i multipartImage) format(stated json.RawMessage) (string, error) {
+	var statedFormat string
 	if len(stated) > 0 && !bytes.Equal(bytes.TrimSpace(stated), []byte("null")) {
-		var format string
-		if err := json.Unmarshal(stated, &format); err != nil {
+		if err := json.Unmarshal(stated, &statedFormat); err != nil {
 			return "", errors.New("format must be a string")
 		}
-		switch format {
-		case "png", "jpg", "jpeg":
-			return format, nil
-		case "":
+		switch statedFormat {
+		case "", "png", "jpg", "jpeg":
 		default:
-			return "", fmt.Errorf("format must be png, jpg, or jpeg, not %q", format)
+			return "", fmt.Errorf("format must be png, jpg, or jpeg, not %q", statedFormat)
 		}
 	}
 	mediaType, _, _ := mime.ParseMediaType(i.contentType)
 	switch mediaType {
-	case "image/png":
-		return "png", nil
-	case "image/jpeg", "image/jpg":
-		return "jpg", nil
-	case "", "application/octet-stream":
+	case "", "application/octet-stream", "image/png", "image/jpeg", "image/jpg":
 	default:
 		return "", fmt.Errorf("image parts must be PNG or JPEG, not %s", mediaType)
 	}
+	var detected string
 	switch http.DetectContentType(i.data) {
 	case "image/png":
-		return "png", nil
+		detected = "png"
 	case "image/jpeg":
-		return "jpg", nil
+		detected = "jpg"
+	default:
+		return "", errors.New("image part is not a PNG or JPEG image")
 	}
-	return "", errors.New("image part is not a PNG or JPEG image")
+	if statedFormat != "" {
+		return statedFormat, nil
+	}
+	return detected, nil
 }
