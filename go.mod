@@ -18,7 +18,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/joho/godotenv v1.5.1
-	github.com/klauspost/compress v1.20.1
+	github.com/klauspost/compress v1.20.3
 	github.com/labstack/echo-opentelemetry v0.0.4
 	github.com/labstack/echo/v5 v5.4.0
 	github.com/lmittmann/tint v1.2.1
