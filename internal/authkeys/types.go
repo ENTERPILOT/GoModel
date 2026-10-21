@@ -27,14 +27,18 @@ type AuthKey struct {
 	AllowedModels []string `json:"allowed_models,omitempty" bson:"allowed_models,omitempty"`
 	// DashboardAccess grants the key access to the admin API and dashboard.
 	// Keys without it can still call every model endpoint and /v1/usage.
-	DashboardAccess bool       `json:"dashboard_access" bson:"dashboard_access,omitempty"`
-	RedactedValue   string     `json:"redacted_value" bson:"redacted_value"`
-	SecretHash      string     `json:"-" bson:"secret_hash"`
-	Enabled         bool       `json:"enabled" bson:"enabled"`
-	ExpiresAt       *time.Time `json:"expires_at,omitempty" bson:"expires_at,omitempty"`
-	DeactivatedAt   *time.Time `json:"deactivated_at,omitempty" bson:"deactivated_at,omitempty"`
-	CreatedAt       time.Time  `json:"created_at" bson:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at" bson:"updated_at"`
+	DashboardAccess bool `json:"dashboard_access" bson:"dashboard_access,omitempty"`
+	// PassthroughAccess lets the key call the provider passthrough routes
+	// (/p/{provider}/...), which reach the provider account directly. Keys
+	// issued before the flag existed keep it; new keys start without it.
+	PassthroughAccess bool       `json:"passthrough_access" bson:"passthrough_access"`
+	RedactedValue     string     `json:"redacted_value" bson:"redacted_value"`
+	SecretHash        string     `json:"-" bson:"secret_hash"`
+	Enabled           bool       `json:"enabled" bson:"enabled"`
+	ExpiresAt         *time.Time `json:"expires_at,omitempty" bson:"expires_at,omitempty"`
+	DeactivatedAt     *time.Time `json:"deactivated_at,omitempty" bson:"deactivated_at,omitempty"`
+	CreatedAt         time.Time  `json:"created_at" bson:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at" bson:"updated_at"`
 	// ImportedFrom names the gateway an imported key came from, such as
 	// ImportedFromLiteLLM. Empty for keys GoModel issued.
 	ImportedFrom string `json:"imported_from,omitempty" bson:"imported_from,omitempty"`
@@ -57,13 +61,14 @@ type IssuedKey struct {
 
 // CreateInput captures the admin request for issuing a new auth key.
 type CreateInput struct {
-	Name            string
-	Description     string
-	UserPath        string
-	Labels          []string
-	AllowedModels   []string
-	DashboardAccess bool
-	ExpiresAt       *time.Time
+	Name              string
+	Description       string
+	UserPath          string
+	Labels            []string
+	AllowedModels     []string
+	DashboardAccess   bool
+	PassthroughAccess bool
+	ExpiresAt         *time.Time
 }
 
 // ImportInput captures the admin request for importing a key another gateway

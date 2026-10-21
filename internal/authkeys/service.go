@@ -31,11 +31,12 @@ type snapshot struct {
 
 // AuthenticationResult describes one successful managed auth key lookup.
 type AuthenticationResult struct {
-	ID              string
-	UserPath        string
-	Labels          []string
-	AllowedModels   []string
-	DashboardAccess bool
+	ID                string
+	UserPath          string
+	Labels            []string
+	AllowedModels     []string
+	DashboardAccess   bool
+	PassthroughAccess bool
 }
 
 // Service keeps managed auth keys cached in memory for request authentication.
@@ -177,19 +178,20 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*IssuedKey, er
 
 	now := time.Now().UTC()
 	key := AuthKey{
-		ID:              uuid.NewString(),
-		Name:            normalized.Name,
-		Description:     normalized.Description,
-		UserPath:        normalized.UserPath,
-		Labels:          normalized.Labels,
-		AllowedModels:   normalized.AllowedModels,
-		DashboardAccess: normalized.DashboardAccess,
-		RedactedValue:   redactedValue,
-		SecretHash:      secretHash,
-		Enabled:         true,
-		ExpiresAt:       normalized.ExpiresAt,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		ID:                uuid.NewString(),
+		Name:              normalized.Name,
+		Description:       normalized.Description,
+		UserPath:          normalized.UserPath,
+		Labels:            normalized.Labels,
+		AllowedModels:     normalized.AllowedModels,
+		DashboardAccess:   normalized.DashboardAccess,
+		PassthroughAccess: normalized.PassthroughAccess,
+		RedactedValue:     redactedValue,
+		SecretHash:        secretHash,
+		Enabled:           true,
+		ExpiresAt:         normalized.ExpiresAt,
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 
 	if err := s.store.Create(ctx, key); err != nil {
@@ -271,20 +273,21 @@ func (s *Service) keyBySecretHash(hash string) (AuthKey, bool) {
 func (s *Service) createImported(ctx context.Context, input ImportInput) (*View, error) {
 	now := time.Now().UTC()
 	key := AuthKey{
-		ID:              uuid.NewString(),
-		Name:            input.Name,
-		Description:     input.Description,
-		UserPath:        input.UserPath,
-		Labels:          input.Labels,
-		AllowedModels:   input.AllowedModels,
-		DashboardAccess: input.DashboardAccess,
-		RedactedValue:   input.RedactedValue,
-		SecretHash:      input.SecretHash,
-		ImportedFrom:    input.ImportedFrom,
-		Enabled:         true,
-		ExpiresAt:       input.ExpiresAt,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		ID:                uuid.NewString(),
+		Name:              input.Name,
+		Description:       input.Description,
+		UserPath:          input.UserPath,
+		Labels:            input.Labels,
+		AllowedModels:     input.AllowedModels,
+		DashboardAccess:   input.DashboardAccess,
+		PassthroughAccess: input.PassthroughAccess,
+		RedactedValue:     input.RedactedValue,
+		SecretHash:        input.SecretHash,
+		ImportedFrom:      input.ImportedFrom,
+		Enabled:           true,
+		ExpiresAt:         input.ExpiresAt,
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 	if err := s.store.Create(ctx, key); err != nil {
 		if errors.Is(err, ErrSecretHashExists) {
@@ -297,8 +300,8 @@ func (s *Service) createImported(ctx context.Context, input ImportInput) (*View,
 	return &View{AuthKey: key, Active: key.Active(now)}, nil
 }
 
-// updateImported brings an earlier import up to date. Dashboard access and a
-// deactivation made in GoModel are kept: the import never widens access an
+// updateImported brings an earlier import up to date. Dashboard access,
+// passthrough access, and a deactivation made in GoModel are kept: the import never widens access an
 // administrator narrowed.
 func (s *Service) updateImported(ctx context.Context, key AuthKey, input ImportInput) (*View, error) {
 	now := time.Now().UTC()
@@ -383,22 +386,47 @@ func (s *Service) UpdateDashboardAccess(ctx context.Context, id string, allowed 
 	if s == nil {
 		return nil, fmt.Errorf("auth key service is required")
 	}
+	return s.updateAccess(ctx, id, "dashboard access", allowed, s.store.UpdateDashboardAccess, func(key *AuthKey) {
+		key.DashboardAccess = allowed
+	})
+}
+
+// UpdatePassthroughAccess grants or revokes a managed auth key's access to the
+// provider passthrough routes, the same way UpdateDashboardAccess does for
+// dashboard access.
+func (s *Service) UpdatePassthroughAccess(ctx context.Context, id string, allowed bool) (*View, error) {
+	if s == nil {
+		return nil, fmt.Errorf("auth key service is required")
+	}
+	return s.updateAccess(ctx, id, "passthrough access", allowed, s.store.UpdatePassthroughAccess, func(key *AuthKey) {
+		key.PassthroughAccess = allowed
+	})
+}
+
+// updateAccess persists one access flag with save, mirrors it into the cached
+// key with apply, best-effort reconciles from storage, and returns the
+// updated view. name labels errors and the reconcile operation.
+func (s *Service) updateAccess(
+	ctx context.Context,
+	id, name string,
+	allowed bool,
+	save func(ctx context.Context, id string, allowed bool, now time.Time) error,
+	apply func(*AuthKey),
+) (*View, error) {
 	id = normalizeID(id)
 	if id == "" {
 		return nil, newValidationError("auth key id is required", nil)
 	}
 
 	now := time.Now().UTC()
-	if err := s.store.UpdateDashboardAccess(ctx, id, allowed, now); err != nil {
+	if err := save(ctx, id, allowed, now); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, ErrNotFound
 		}
-		return nil, fmt.Errorf("update auth key dashboard access: %w", err)
+		return nil, fmt.Errorf("update auth key %s: %w", name, err)
 	}
-	s.applyKeyUpdate(id, now, func(key *AuthKey) {
-		key.DashboardAccess = allowed
-	})
-	s.refreshBestEffort(ctx, "update-dashboard-access")
+	s.applyKeyUpdate(id, now, apply)
+	s.refreshBestEffort(ctx, "update-"+strings.ReplaceAll(name, " ", "-"))
 	return s.viewByID(id)
 }
 
@@ -513,11 +541,12 @@ func authenticateKey(key AuthKey, now time.Time) (AuthenticationResult, error) {
 		return AuthenticationResult{}, ErrInvalidToken
 	}
 	return AuthenticationResult{
-		ID:              key.ID,
-		UserPath:        strings.TrimSpace(key.UserPath),
-		Labels:          key.Labels,
-		AllowedModels:   key.AllowedModels,
-		DashboardAccess: key.DashboardAccess,
+		ID:                key.ID,
+		UserPath:          strings.TrimSpace(key.UserPath),
+		Labels:            key.Labels,
+		AllowedModels:     key.AllowedModels,
+		DashboardAccess:   key.DashboardAccess,
+		PassthroughAccess: key.PassthroughAccess,
 	}, nil
 }
 

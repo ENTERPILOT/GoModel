@@ -82,6 +82,17 @@ func (s *authKeyTestStore) UpdateDashboardAccess(_ context.Context, id string, a
 	return nil
 }
 
+func (s *authKeyTestStore) UpdatePassthroughAccess(_ context.Context, id string, allowed bool, now time.Time) error {
+	key, ok := s.keys[id]
+	if !ok {
+		return authkeys.ErrNotFound
+	}
+	key.PassthroughAccess = allowed
+	key.UpdatedAt = now.UTC()
+	s.keys[id] = key
+	return nil
+}
+
 func (s *authKeyTestStore) Deactivate(_ context.Context, id string, now time.Time) error {
 	key, ok := s.keys[id]
 	if !ok {
@@ -200,6 +211,32 @@ func TestUpdateAuthKeyDashboardAccess(t *testing.T) {
 
 	// Omitted or null values must be rejected, not treated as a revoke.
 	for _, body := range []string{`{}`, `{"dashboard_access":null}`} {
+		rec = updateAccess(issued.ID, body)
+		assert.Equal(t, http.StatusBadRequest, rec.Code, body)
+	}
+}
+
+func TestUpdateAuthKeyPassthroughAccess(t *testing.T) {
+	h := newAuthKeyHandler(t, newAuthKeyTestStore())
+	assert.False(t, createAuthKey(t, h, `{"name":"plain"}`).PassthroughAccess, "new keys start without passthrough")
+	issued := createAuthKey(t, h, `{"name":"proxy","passthrough_access":true}`)
+	require.True(t, issued.PassthroughAccess)
+
+	updateAccess := func(id, body string) *httptest.ResponseRecorder {
+		c, rec := echotest.Request(t, http.MethodPut, "/admin/auth-keys/"+id+"/passthrough-access", body, echotest.WithPathValue("id", id))
+		require.NoError(t, h.UpdateAuthKeyPassthroughAccess(c))
+		return rec
+	}
+
+	rec := updateAccess(issued.ID, `{"passthrough_access":false}`)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.False(t, echotest.Decode[authkeys.View](t, rec).PassthroughAccess)
+
+	rec = updateAccess("missing", `{"passthrough_access":true}`)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+
+	// Omitted or null values must be rejected, not treated as a revoke.
+	for _, body := range []string{`{}`, `{"passthrough_access":null}`} {
 		rec = updateAccess(issued.ID, body)
 		assert.Equal(t, http.StatusBadRequest, rec.Code, body)
 	}

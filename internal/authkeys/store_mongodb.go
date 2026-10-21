@@ -11,21 +11,24 @@ import (
 )
 
 type mongoAuthKeyDocument struct {
-	ID              string     `bson:"_id"`
-	Name            string     `bson:"name"`
-	Description     string     `bson:"description,omitempty"`
-	UserPath        string     `bson:"user_path,omitempty"`
-	Labels          []string   `bson:"labels,omitempty"`
-	AllowedModels   []string   `bson:"allowed_models,omitempty"`
-	DashboardAccess bool       `bson:"dashboard_access,omitempty"`
-	RedactedValue   string     `bson:"redacted_value"`
-	SecretHash      string     `bson:"secret_hash"`
-	ImportedFrom    string     `bson:"imported_from,omitempty"`
-	Enabled         bool       `bson:"enabled"`
-	ExpiresAt       *time.Time `bson:"expires_at,omitempty"`
-	DeactivatedAt   *time.Time `bson:"deactivated_at,omitempty"`
-	CreatedAt       time.Time  `bson:"created_at"`
-	UpdatedAt       time.Time  `bson:"updated_at"`
+	ID              string   `bson:"_id"`
+	Name            string   `bson:"name"`
+	Description     string   `bson:"description,omitempty"`
+	UserPath        string   `bson:"user_path,omitempty"`
+	Labels          []string `bson:"labels,omitempty"`
+	AllowedModels   []string `bson:"allowed_models,omitempty"`
+	DashboardAccess bool     `bson:"dashboard_access,omitempty"`
+	// Not omitempty: a missing field marks a key issued before the flag
+	// existed, which NewMongoDBStore backfills to true.
+	PassthroughAccess bool       `bson:"passthrough_access"`
+	RedactedValue     string     `bson:"redacted_value"`
+	SecretHash        string     `bson:"secret_hash"`
+	ImportedFrom      string     `bson:"imported_from,omitempty"`
+	Enabled           bool       `bson:"enabled"`
+	ExpiresAt         *time.Time `bson:"expires_at,omitempty"`
+	DeactivatedAt     *time.Time `bson:"deactivated_at,omitempty"`
+	CreatedAt         time.Time  `bson:"created_at"`
+	UpdatedAt         time.Time  `bson:"updated_at"`
 }
 
 type mongoAuthKeyIDFilter struct {
@@ -54,6 +57,14 @@ func NewMongoDBStore(database *mongo.Database) (*MongoDBStore, error) {
 	if _, err := coll.Indexes().CreateMany(ctx, indexes); err != nil {
 		return nil, fmt.Errorf("create auth_keys indexes: %w", err)
 	}
+	// Keys issued before passthrough_access existed keep passthrough, as the
+	// SQL column default does for SQL stores.
+	if _, err := coll.UpdateMany(ctx,
+		bson.D{{Key: "passthrough_access", Value: bson.D{{Key: "$exists", Value: false}}}},
+		bson.D{{Key: "$set", Value: bson.D{{Key: "passthrough_access", Value: true}}}},
+	); err != nil {
+		return nil, fmt.Errorf("backfill auth_keys passthrough_access: %w", err)
+	}
 	return &MongoDBStore{collection: coll}, nil
 }
 
@@ -80,21 +91,22 @@ func (s *MongoDBStore) List(ctx context.Context) ([]AuthKey, error) {
 
 func (s *MongoDBStore) Create(ctx context.Context, key AuthKey) error {
 	_, err := s.collection.InsertOne(ctx, mongoAuthKeyDocument{
-		ID:              key.ID,
-		Name:            key.Name,
-		Description:     key.Description,
-		UserPath:        key.UserPath,
-		Labels:          key.Labels,
-		AllowedModels:   key.AllowedModels,
-		DashboardAccess: key.DashboardAccess,
-		RedactedValue:   key.RedactedValue,
-		SecretHash:      key.SecretHash,
-		ImportedFrom:    key.ImportedFrom,
-		Enabled:         key.Enabled,
-		ExpiresAt:       key.ExpiresAt,
-		DeactivatedAt:   key.DeactivatedAt,
-		CreatedAt:       key.CreatedAt.UTC(),
-		UpdatedAt:       key.UpdatedAt.UTC(),
+		ID:                key.ID,
+		Name:              key.Name,
+		Description:       key.Description,
+		UserPath:          key.UserPath,
+		Labels:            key.Labels,
+		AllowedModels:     key.AllowedModels,
+		DashboardAccess:   key.DashboardAccess,
+		PassthroughAccess: key.PassthroughAccess,
+		RedactedValue:     key.RedactedValue,
+		SecretHash:        key.SecretHash,
+		ImportedFrom:      key.ImportedFrom,
+		Enabled:           key.Enabled,
+		ExpiresAt:         key.ExpiresAt,
+		DeactivatedAt:     key.DeactivatedAt,
+		CreatedAt:         key.CreatedAt.UTC(),
+		UpdatedAt:         key.UpdatedAt.UTC(),
 	})
 	if mongo.IsDuplicateKeyError(err) {
 		return ErrSecretHashExists
@@ -176,13 +188,27 @@ func (s *MongoDBStore) updateStringList(ctx context.Context, id, field string, v
 }
 
 func (s *MongoDBStore) UpdateDashboardAccess(ctx context.Context, id string, allowed bool, now time.Time) error {
+	if err := s.updateBool(ctx, id, "dashboard_access", allowed, now); err != nil {
+		return fmt.Errorf("update auth key dashboard access: %w", err)
+	}
+	return nil
+}
+
+func (s *MongoDBStore) UpdatePassthroughAccess(ctx context.Context, id string, allowed bool, now time.Time) error {
+	if err := s.updateBool(ctx, id, "passthrough_access", allowed, now); err != nil {
+		return fmt.Errorf("update auth key passthrough access: %w", err)
+	}
+	return nil
+}
+
+func (s *MongoDBStore) updateBool(ctx context.Context, id, field string, value bool, now time.Time) error {
 	update := bson.D{{Key: "$set", Value: bson.D{
-		{Key: "dashboard_access", Value: allowed},
+		{Key: field, Value: value},
 		{Key: "updated_at", Value: now.UTC()},
 	}}}
 	result, err := s.collection.UpdateOne(ctx, mongoAuthKeyIDFilter{ID: normalizeID(id)}, update)
 	if err != nil {
-		return fmt.Errorf("update auth key dashboard access: %w", err)
+		return err
 	}
 	if result.MatchedCount == 0 {
 		return ErrNotFound
@@ -217,21 +243,22 @@ func (s *MongoDBStore) Close() error {
 
 func authKeyFromMongo(doc mongoAuthKeyDocument) AuthKey {
 	return AuthKey{
-		ID:              doc.ID,
-		Name:            doc.Name,
-		Description:     doc.Description,
-		UserPath:        doc.UserPath,
-		Labels:          doc.Labels,
-		AllowedModels:   doc.AllowedModels,
-		DashboardAccess: doc.DashboardAccess,
-		RedactedValue:   doc.RedactedValue,
-		SecretHash:      doc.SecretHash,
-		ImportedFrom:    doc.ImportedFrom,
-		Enabled:         doc.Enabled,
-		ExpiresAt:       timePtrUTC(doc.ExpiresAt),
-		DeactivatedAt:   timePtrUTC(doc.DeactivatedAt),
-		CreatedAt:       doc.CreatedAt.UTC(),
-		UpdatedAt:       doc.UpdatedAt.UTC(),
+		ID:                doc.ID,
+		Name:              doc.Name,
+		Description:       doc.Description,
+		UserPath:          doc.UserPath,
+		Labels:            doc.Labels,
+		AllowedModels:     doc.AllowedModels,
+		DashboardAccess:   doc.DashboardAccess,
+		PassthroughAccess: doc.PassthroughAccess,
+		RedactedValue:     doc.RedactedValue,
+		SecretHash:        doc.SecretHash,
+		ImportedFrom:      doc.ImportedFrom,
+		Enabled:           doc.Enabled,
+		ExpiresAt:         timePtrUTC(doc.ExpiresAt),
+		DeactivatedAt:     timePtrUTC(doc.DeactivatedAt),
+		CreatedAt:         doc.CreatedAt.UTC(),
+		UpdatedAt:         doc.UpdatedAt.UTC(),
 	}
 }
 
