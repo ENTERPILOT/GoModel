@@ -70,6 +70,10 @@ jobs:
             grep -qxF "$ref $oid" branches.txt || continue
             if [ "$DRY_RUN" = "true" ]; then
               echo "would delete $ref"
+            elif [ "$(gh api -X GET "repos/$REPO/pulls" -f state=open -f head="${REPO%%/*}:$ref" --jq length)" != "0" ]; then
+              # A PR may have opened since open.txt was written; a failed check also keeps the branch.
+              echo "kept $ref: it has an open pull request"
+              continue
             elif gh api graphql -f query="$delete_ref" -f repo="$repo_id" -f ref="refs/heads/$ref" -f oid="$oid" --silent; then
               echo "deleted $ref"
               sleep 1 # stay under the secondary rate limit for writes
