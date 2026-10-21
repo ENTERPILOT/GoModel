@@ -148,7 +148,7 @@ func (s *translatedInferenceService) serveSystemOne(c *echo.Context, route syste
 	if err != nil {
 		return handleError(c, err)
 	}
-	return s.dispatchNativeJSONWithCache(c, workflow, body, func() error {
+	return s.dispatchNativeJSONWithCache(c, route.nativeJSONRoute, workflow, body, func() error {
 		return s.dispatchSystemOne(c, route, workflow, body)
 	})
 }

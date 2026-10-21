@@ -92,7 +92,7 @@ func (s *translatedInferenceService) serveDecisions(c *echo.Context) error {
 		workflow = promoted
 		storeWorkflow(c, workflow)
 	}
-	return s.dispatchNativeJSONWithCache(c, workflow, body, func() error {
+	return s.dispatchNativeJSONWithCache(c, decisionsRoute, workflow, body, func() error {
 		// A target that cannot read the input, such as a text-only Kev
 		// server for a request with images, is skipped rather than tried.
 		eligible := func(selector core.ModelSelector, providerType string) bool {

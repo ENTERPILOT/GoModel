@@ -45,6 +45,7 @@ func TestDecisions_TranslatesThroughOpenRoutersSystemOneRoute(t *testing.T) {
 	got, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	assert.Contains(t, string(got), `{"name":"refund","type":"predicate","probability":0.9}`)
+	assert.Contains(t, string(got), `"cost":0.00001`, "OpenRouter's reported charge survives translation, for usage accounting")
 }
 
 // Images are refused before the upstream: OpenRouter's System One route is

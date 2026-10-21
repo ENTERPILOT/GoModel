@@ -209,6 +209,11 @@ func systemOneQuestionFor(index int, q decisionQuestion) (systemOneQuestion, map
 // choiceKey is the System One option name for a choice value: the string
 // itself, or "true"/"false" for a boolean.
 func choiceKey(value json.RawMessage) (string, error) {
+	// A null decodes into either type without error, so it is refused first;
+	// it would otherwise become an option with an empty name.
+	if trimmed := bytes.TrimSpace(value); len(trimmed) == 0 || core.IsJSONNull(trimmed) {
+		return "", errors.New("value must be a string or a boolean, not null")
+	}
 	var text string
 	if err := json.Unmarshal(value, &text); err == nil {
 		return text, nil
@@ -336,6 +341,8 @@ type systemOneAnswer struct {
 	Usage   struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
+		// Cost is what OpenRouter reports charging; TypeSafe reports none.
+		Cost json.RawMessage `json:"cost"`
 	} `json:"usage"`
 }
 
@@ -365,6 +372,11 @@ type decisionUsage struct {
 		ReasoningTokens int `json:"reasoning_tokens"`
 	} `json:"output_tokens_details"`
 	TotalTokens int `json:"total_tokens"`
+	// Cost carries a charge the upstream reported (OpenRouter's usage.cost)
+	// through translation, so usage records what was charged rather than a
+	// price computed from model rates. OpenAI's shape has no such member;
+	// clients ignore it.
+	Cost json.RawMessage `json:"cost,omitempty"`
 }
 
 type predicateAnswer struct {
@@ -422,6 +434,9 @@ func (p *systemOnePlan) decision(body []byte) ([]byte, error) {
 	out.Usage.InputTokens = answer.Usage.InputTokens
 	out.Usage.OutputTokens = answer.Usage.OutputTokens
 	out.Usage.TotalTokens = answer.Usage.InputTokens + answer.Usage.OutputTokens
+	if cost := bytes.TrimSpace(answer.Usage.Cost); len(cost) > 0 && !core.IsJSONNull(cost) {
+		out.Usage.Cost = cost
+	}
 	return json.Marshal(out)
 }
 

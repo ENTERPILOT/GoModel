@@ -167,6 +167,7 @@ func TestDecisions_RejectsUntranslatableRequests(t *testing.T) {
 		{name: "unknown question type", body: `{"model":"jev-latest","input":"x","questions":[{"type":"rank","instructions":"?"}]}`, want: `"rank" is not a decision question type`},
 		{name: "duplicate name", body: `{"model":"jev-latest","input":"x","questions":[{"type":"predicate","name":"a","instructions":"?"},{"type":"predicate","name":"a","instructions":"?"}]}`, want: "not unique"},
 		{name: "string and boolean collide", body: `{"model":"jev-latest","input":"x","questions":[{"type":"choice","instructions":"?","choices":[{"value":"true"},{"value":true}]}]}`, want: "collide"},
+		{name: "null choice", body: `{"model":"jev-latest","input":"x","questions":[{"type":"choice","instructions":"?","choices":[{"value":null},{"value":"a"}]}]}`, want: "not null"},
 		{name: "numeric choice", body: `{"model":"jev-latest","input":"x","questions":[{"type":"choice","instructions":"?","choices":[{"value":1},{"value":2}]}]}`, want: "string or a boolean"},
 		{name: "malformed body", body: `{"model":`, want: "invalid request body"},
 	}
