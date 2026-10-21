@@ -24,6 +24,16 @@ func (t *UsageTap) Write(entry *usage.UsageEntry) {
 	t.inner.Write(entry)
 }
 
+// SetLivePublisher forwards the dashboard publisher to the wrapped logger, so
+// wrapping it never silences live usage events.
+func (t *UsageTap) SetLivePublisher(p usage.LiveEventPublisher) {
+	if logger, ok := t.inner.(interface {
+		SetLivePublisher(usage.LiveEventPublisher)
+	}); ok {
+		logger.SetLivePublisher(p)
+	}
+}
+
 func (t *UsageTap) Config() usage.Config {
 	return t.inner.Config()
 }

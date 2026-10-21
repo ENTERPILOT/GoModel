@@ -113,6 +113,36 @@ func TestApplyBilledCost(t *testing.T) {
 	}
 }
 
+func TestApplyPrefersRoutedModel(t *testing.T) {
+	svc, err := New(config.PricingConfig{Markups: map[string]float64{
+		"/":                        5,
+		"openai/":                  10,
+		"openai/gpt-4o-mini":       20,
+		"gpt-4o-mini-2024-07-18":   30,
+		"openai/gpt-4o-2024-08-06": 40,
+	}}, testCatalog)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name         string
+		routed       string
+		answered     string
+		wantSelector string
+	}{
+		{name: "routed model rule beats answered model rule", routed: "gpt-4o-mini", answered: "gpt-4o-mini-2024-07-18", wantSelector: "openai/gpt-4o-mini"},
+		{name: "answered model rule when routed has none", routed: "gpt-4o", answered: "gpt-4o-2024-08-06", wantSelector: "openai/gpt-4o-2024-08-06"},
+		{name: "provider rule when neither model has one", routed: "o3", answered: "o3-2025-04-16", wantSelector: "openai/"},
+		{name: "answered model alone", answered: "gpt-4o-mini-2024-07-18", wantSelector: "gpt-4o-mini-2024-07-18"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := &usage.UsageEntry{ProviderName: "openai", Provider: "openai", RoutedModel: tt.routed, Model: tt.answered, TotalCost: new(1.0)}
+			svc.Apply(entry)
+			assert.Equal(t, tt.wantSelector, entry.MarkupSelector)
+		})
+	}
+}
+
 func TestApplyResetsMarkupWhenNoRuleMatches(t *testing.T) {
 	svc, err := New(config.PricingConfig{Markups: map[string]float64{"anthropic/": 20}}, testCatalog)
 	require.NoError(t, err)

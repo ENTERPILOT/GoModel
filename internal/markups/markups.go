@@ -76,7 +76,7 @@ func (s *Service) Apply(entry *usage.UsageEntry) {
 	}
 	entry.MarkupPercent = nil
 	entry.MarkupSelector = ""
-	if r, ok := s.match(entryProvider(entry), entry.Model); ok {
+	if r, ok := s.match(entryProvider(entry), entry.RoutedModel, entry.Model); ok {
 		percent := r.percent
 		entry.MarkupPercent = &percent
 		entry.MarkupSelector = r.selector
@@ -91,17 +91,24 @@ func (s *Service) BillCacheHits() bool {
 
 // match returns the most specific rule: provider/model, then model, then
 // provider, then global — the same precedence as model pricing overrides.
-func (s *Service) match(providerName, model string) (rule, bool) {
+// Model rules are tried for each model in order, so a rule for the routed
+// model wins over one for the answering model, as in usage pricing.
+func (s *Service) match(providerName string, models ...string) (rule, bool) {
 	providerName = strings.TrimSpace(providerName)
-	model = strings.TrimSpace(model)
-	if providerName != "" {
-		model = strings.TrimPrefix(model, providerName+"/")
-	}
-	if r, ok := s.exact[modelselectors.ExactMatchKey(providerName, model)]; ok {
-		return r, true
-	}
-	if r, ok := s.modelWide[model]; ok && model != "" {
-		return r, true
+	for _, model := range models {
+		model = strings.TrimSpace(model)
+		if providerName != "" {
+			model = strings.TrimPrefix(model, providerName+"/")
+		}
+		if model == "" {
+			continue
+		}
+		if r, ok := s.exact[modelselectors.ExactMatchKey(providerName, model)]; ok {
+			return r, true
+		}
+		if r, ok := s.modelWide[model]; ok {
+			return r, true
+		}
 	}
 	if r, ok := s.providerWide[providerName]; ok && providerName != "" {
 		return r, true

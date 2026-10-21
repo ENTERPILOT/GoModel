@@ -87,6 +87,11 @@ type UsageEntry struct {
 	// Empty means all token types were fully mapped to pricing data.
 	CostsCalculationCaveat string `json:"costs_calculation_caveat,omitempty" bson:"costs_calculation_caveat,omitempty"`
 
+	// RoutedModel is the model the request was routed to when it differs from
+	// the answering Model (e.g. gpt-4o-mini answered as gpt-4o-mini-2024-07-18).
+	// Markup selection prefers it, as pricing does. Not persisted.
+	RoutedModel string `json:"-" bson:"-"`
+
 	// MarkupPercent is the pricing.markups percentage applied on top of
 	// TotalCost, and MarkupSelector the selector it came from (nil and empty
 	// when no markup rule matched).

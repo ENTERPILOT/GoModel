@@ -124,6 +124,7 @@ func (s *modelCallService) logUsage(ctx context.Context, route modelCallRoute, e
 		return
 	}
 	entry.ProviderName = strings.TrimSpace(route.providerName)
+	entry.RoutedModel = strings.TrimSpace(route.model)
 	entry.UserPath = core.UserPathFromContext(ctx)
 	entry.SessionID = core.SessionIDFromContext(ctx)
 	entry.AuthKeyID = core.GetAuthKeyID(ctx)

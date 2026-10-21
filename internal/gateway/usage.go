@@ -33,6 +33,7 @@ func (o *InferenceOrchestrator) logUsage(
 	}
 	if entry := extractFn(pricing); entry != nil {
 		entry.ProviderName = strings.TrimSpace(providerName)
+		entry.RoutedModel = strings.TrimSpace(model)
 		entry.UserPath = core.UserPathFromContext(ctx)
 		entry.SessionID = core.SessionIDFromContext(ctx)
 		entry.AuthKeyID = core.GetAuthKeyID(ctx)

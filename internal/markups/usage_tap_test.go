@@ -3,6 +3,7 @@ package markups
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/config"
@@ -39,4 +40,32 @@ func TestUsageTapStampsBilledCostAndDelegates(t *testing.T) {
 func TestNewUsageTapWithoutServiceReturnsLogger(t *testing.T) {
 	inner := &recordingLogger{}
 	require.Same(t, inner, NewUsageTap(inner, nil))
+}
+
+type publishingLogger struct {
+	recordingLogger
+	publisher usage.LiveEventPublisher
+}
+
+func (l *publishingLogger) SetLivePublisher(p usage.LiveEventPublisher) { l.publisher = p }
+
+type nopPublisher struct{}
+
+func (nopPublisher) PublishUsageEvent(string, *usage.UsageEntry) {}
+
+func TestUsageTapForwardsLivePublisher(t *testing.T) {
+	svc, err := New(config.PricingConfig{}, testCatalog)
+	require.NoError(t, err)
+	inner := &publishingLogger{}
+	tap := NewUsageTap(inner, svc)
+
+	publisherSetter, ok := tap.(interface {
+		SetLivePublisher(usage.LiveEventPublisher)
+	})
+	require.True(t, ok, "tap must expose SetLivePublisher so live dashboard events keep flowing")
+	publisherSetter.SetLivePublisher(nopPublisher{})
+	assert.Equal(t, nopPublisher{}, inner.publisher)
+
+	// A wrapped logger without live support is left alone.
+	NewUsageTap(&recordingLogger{}, svc).(*UsageTap).SetLivePublisher(nopPublisher{})
 }

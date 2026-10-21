@@ -116,7 +116,7 @@ pricing:
 
 The most specific selector wins, in this order: provider/model, model, provider, global. Markups never stack. A provider selector names the configured instance (the key under `providers`), and an unknown provider fails startup. A 20% markup bills $1.20 for $1.00 of provider cost: a 16.7% margin.
 
-`bill_cache_hits` decides how responses served from GoModel's response cache are billed. `true` bills them like the original call, markup included; `false` bills them at $0. Provider prompt caching (cached input tokens) is a real provider cost and is always billed.
+`bill_cache_hits` decides how responses served from GoModel's response cache are billed. `true` bills each hit at what the same call would cost when the hit is served — current pricing and time-of-day rates — plus markup; `false` bills them at $0. Provider prompt caching (cached input tokens) is a real provider cost and is always billed.
 
 Each usage row also stores the markup it was billed at (`markup_percent`, `markup_selector`), so changing markups never rewrites past bills.
 

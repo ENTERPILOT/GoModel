@@ -19,9 +19,9 @@ type PricingConfig struct {
 	Markups map[string]float64 `yaml:"markups"`
 
 	// BillCacheHits controls whether responses served from the gateway
-	// response cache are billed at the price of the original call plus
-	// markup. False bills them at zero. Provider prompt caching is unaffected:
-	// its cached-token cost is always billed.
+	// response cache are billed at what the same call would cost when the hit
+	// is served, plus markup. False bills them at zero. Provider prompt caching
+	// is unaffected: its cached-token cost is always billed.
 	// Default: true
 	BillCacheHits bool `yaml:"bill_cache_hits" env:"PRICING_BILL_CACHE_HITS"`
 }

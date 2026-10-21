@@ -55,6 +55,7 @@ func newUsageHitRecorder(logger usage.LoggerInterface, pricingResolver usage.Pri
 			return
 		}
 		entry.ProviderName = providerName
+		entry.RoutedModel = model
 		entry.UserPath = core.UserPathFromContext(ctx)
 		entry.SessionID = core.SessionIDFromContext(ctx)
 		entry.AuthKeyID = core.GetAuthKeyID(ctx)
