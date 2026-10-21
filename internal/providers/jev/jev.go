@@ -2,9 +2,10 @@
 // gateway, and covers the self-hosted Kev servers that implement the same
 // API. System One is a decision API rather than a text-generation one: a
 // request carries a state and a map of typed questions (noul, choice, score)
-// and the answer is a calibrated probability per question. It has no
-// OpenAI-compatible surface, so the gateway forwards it natively, at
-// POST /v1/systemone or through passthrough at /p/jev/systemone.
+// and the answer is a calibrated probability per question. The gateway
+// forwards it natively, at POST /v1/systemone or through passthrough at
+// /p/jev/systemone, and answers OpenAI's Decisions API (POST /v1/decisions)
+// with it by translating both ways (see decisions.go).
 package jev
 
 import (
@@ -115,7 +116,7 @@ func (p *Provider) Embeddings(_ context.Context, _ *core.EmbeddingRequest) (*cor
 }
 
 func unsupported(surface string) error {
-	return core.NewInvalidRequestError("jev does not support "+surface+"; it answers System One decision requests, which GoModel does not translate: send them to POST /v1/systemone", nil)
+	return core.NewInvalidRequestError("jev does not support "+surface+"; it answers decision requests: send them to POST /v1/decisions in OpenAI's format, or to POST /v1/systemone in System One's", nil)
 }
 
 // Passthrough forwards a System One request as the client wrote it. Both

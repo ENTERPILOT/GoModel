@@ -46,7 +46,7 @@ The most common way to configure GoModel. Set any of the variables below to over
 | `GOMODEL_MASTER_KEY` | Authentication key for securing the gateway           | _(empty, unsafe mode)_ |
 | `MASTER_KEY_DISABLED` | Turn off master key authentication, leaving [managed keys](/features/users) and authentication extensions as the only credentials | `false`                |
 | `GOMODEL_DEMO_MODE`  | Enable public demo warnings in logs and the dashboard  | `false`                |
-| `BODY_SIZE_LIMIT`    | Max request body size (e.g., `10M`, `1024K`, `500KB`) | _(no limit)_           |
+| `BODY_SIZE_LIMIT`    | Max request body size (e.g., `10M`, `1024K`, `500KB`), compressed and decompressed | `10M`                  |
 | `STREAM_STALL_TIMEOUT` | Seconds one response write on a model route may wait for the client to read it; `0` disables | `60`                   |
 | `USER_PATH_HEADER`   | Header used to read/write request `user_path` values  | `X-GoModel-User-Path`  |
 | `SERVER_TRUSTED_PROXIES` | Networks your own proxies sit on; enables header-based client addresses | _(empty)_ |
@@ -55,6 +55,13 @@ The most common way to configure GoModel. Set any of the variables below to over
 | `SWAGGER_ENABLED`    | Expose [Swagger UI](/advanced/swagger-ui); needs a `-tags=swagger` build | `false`                |
 | `AUTH_VERIFY_ENABLED` | Expose [`GET /v1/auth/verify`](/advanced/api-endpoints#key-verification), which reports whether the API key a request carries is valid | `false`                |
 | `PID_FILE`           | Where the running gateway records its process id for `gomodel --reload`. Changing it needs a restart | `data/gomodel.pid` next to a `./data` directory, otherwise the per-user data directory |
+
+Request bodies may be compressed with `Content-Encoding: gzip` (or `x-gzip`)
+or `zstd`; the TypeSafe SDKs zstd-compress bodies of 1 KiB or more by
+default. The gateway decodes them before routing, so guardrails, audit, and
+providers see the plain body, and `BODY_SIZE_LIMIT` applies to both the
+compressed and the decoded size (`413` when either is over). Other encodings
+return `415`.
 
 `STREAM_STALL_TIMEOUT` (`server.stream_stall_timeout` in YAML) protects the
 gateway from clients that open a streaming response and stop reading it. Each
