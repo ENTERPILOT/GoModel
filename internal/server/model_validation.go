@@ -103,11 +103,11 @@ func deriveWorkflowWithPolicy(
 		}
 		return workflow, nil
 
-	case core.OperationSystemOne:
-		// The System One handler resolves the model itself: only it knows
-		// whether the endpoint is available (answering 404 before any model
-		// error) and when an unlisted pinned version may still route to a
-		// jev provider.
+	case core.OperationSystemOne, core.OperationDecisions:
+		// The System One and Decisions handlers resolve the model
+		// themselves: only they know whether the endpoint is available
+		// (answering 404 before any model error) and when an unlisted pinned
+		// version may still route to a jev provider.
 		return nil, nil
 
 	case core.OperationChatCompletions, core.OperationResponses, core.OperationEmbeddings:

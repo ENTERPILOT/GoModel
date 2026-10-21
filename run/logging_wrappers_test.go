@@ -182,8 +182,13 @@ func TestRunWrapsTheLoggerOfEveryGeneration(t *testing.T) {
 
 	var master atomic.Value
 	master.Store("m1")
+	var resolved atomic.Int32
 	vault := config.SecretResolverFunc(func(context.Context, string) (string, error) {
-		return master.Load().(string), nil
+		// Load before counting, so a rotation the test makes once it sees
+		// the count cannot reach this first resolution.
+		value := master.Load().(string)
+		resolved.Add(1)
+		return value, nil
 	})
 
 	// What each generation's hook observed when it ran.
@@ -249,7 +254,11 @@ func TestRunWrapsTheLoggerOfEveryGeneration(t *testing.T) {
 	assert.Equal(t, 1, first.configLoads)
 	assert.Equal(t, 1, records.count("wrapped:starting gomodel"))
 
-	// A rotated master key reloads the generation.
+	// A rotated master key reloads the generation. SetupConfig runs before
+	// the generation resolves its references, so rotating before that first
+	// resolution would start the generation with m2, and the re-check would
+	// find nothing to reload.
+	require.Eventually(t, func() bool { return resolved.Load() > 0 }, 30*time.Second, time.Millisecond)
 	master.Store("m2")
 	first.secrets.NotifyChanged()
 	reloaded := waitFor(reloads, "the reload")

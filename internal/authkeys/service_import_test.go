@@ -99,6 +99,8 @@ func TestServiceImportUpdatesAnEarlierImport(t *testing.T) {
 		Name: "old", UserPath: "/old", Labels: []string{"a"}, AllowedModels: []string{"gpt-4o", "smart"}})
 	_, err = service.UpdateDashboardAccess(ctx, first.ID, true)
 	require.NoError(t, err)
+	_, err = service.UpdatePassthroughAccess(ctx, first.ID, true)
+	require.NoError(t, err)
 
 	view, outcome, err := service.Import(ctx, ImportInput{
 		Name: "new", UserPath: "/new", AllowedModels: []string{"gpt-4o"},
@@ -113,6 +115,7 @@ func TestServiceImportUpdatesAnEarlierImport(t *testing.T) {
 	assert.Nil(t, view.Labels)
 	assert.Equal(t, []string{"gpt-4o"}, view.AllowedModels, "a model LiteLLM removed is removed here too")
 	assert.True(t, view.DashboardAccess, "dashboard access granted in GoModel is kept")
+	assert.True(t, view.PassthroughAccess, "passthrough access granted in GoModel is kept")
 	assert.Equal(t, 1, service.Total())
 
 	require.NoError(t, service.Refresh(ctx))

@@ -5900,6 +5900,26 @@
               }
             }
           },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
           "502": {
             "description": "Bad Gateway",
             "content": {
@@ -6072,6 +6092,26 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
             "content": {
               "application/json": {
                 "schema": {
@@ -6280,6 +6320,26 @@
               }
             }
           },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
           "502": {
             "description": "Bad Gateway",
             "content": {
@@ -6452,6 +6512,26 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
             "content": {
               "application/json": {
                 "schema": {
@@ -6660,6 +6740,26 @@
               }
             }
           },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
           "502": {
             "description": "Bad Gateway",
             "content": {
@@ -6850,6 +6950,26 @@
               }
             }
           },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
           "502": {
             "description": "Bad Gateway",
             "content": {
@@ -7022,6 +7142,26 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
             "content": {
               "application/json": {
                 "schema": {
@@ -8729,6 +8869,100 @@
             "sidebarTitle": "/v1/conversations/{id}/items/{item_id}",
             "title": "Delete a conversation item",
             "description": "GoModel API reference for DELETE /v1/conversations/{id}/items/{item_id}: Delete a conversation item."
+          }
+        }
+      }
+    },
+    "/v1/decisions": {
+      "post": {
+        "description": "Available when an openai or jev provider is configured. OpenAI models answer natively; jev models (Jev, Kev) answer through System One, translated both ways. Hosted Jev reads images sent as base64 data URLs; Kev reads text only.",
+        "tags": [
+          "decisions"
+        ],
+        "summary": "Answer typed questions about an input (OpenAI Decisions)",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "description": "Decisions request: model, input, and questions",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Decision: answers in question order, model, and usage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/decisions",
+            "title": "Answer typed questions about an input (OpenAI Decisions)",
+            "description": "GoModel API reference for POST /v1/decisions: Answer typed questions about an input (OpenAI Decisions)."
           }
         }
       }
@@ -11872,6 +12106,11 @@
               "schema": {
                 "type": "object"
               }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object"
+              }
             }
           },
           "description": "System One request with one Choice question",
@@ -12194,6 +12433,22 @@
         "description": "SDP offer (raw application/sdp body), or a multipart form with sdp and session (JSON) fields",
         "required": true
       },
+      "Request2": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "multipart/form-data": {
+            "schema": {
+              "type": "object"
+            }
+          }
+        },
+        "description": "System One request: model, state, and questions",
+        "required": true
+      },
       "anthropicapi.MessagesRequest": {
         "content": {
           "application/json": {
@@ -12203,17 +12458,6 @@
           }
         },
         "description": "Anthropic Messages request",
-        "required": true
-      },
-      "Request2": {
-        "content": {
-          "application/json": {
-            "schema": {
-              "type": "object"
-            }
-          }
-        },
-        "description": "System One request: model, state, and questions",
         "required": true
       }
     },
@@ -13786,6 +14030,10 @@
         "properties": {
           "cache_control": {
             "type": "object"
+          },
+          "defer_loading": {
+            "description": "DeferLoading marks a tool whose schema the API loads only when tool\nsearch matches it. It is an ordinary custom tool that declares itself\ndeferred, so the translated pipeline sends it like any other and drops\nthe marker (see convertTools).",
+            "type": "boolean"
           },
           "description": {
             "type": "string"
