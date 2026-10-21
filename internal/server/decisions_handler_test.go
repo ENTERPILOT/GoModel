@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -32,8 +33,22 @@ type scriptedDecisionsProvider struct {
 	// statuses maps a forwarded model to the status it answers with; 200 by
 	// default.
 	statuses map[string]int
-	calls    []string
-	bodies   []map[string]any
+	catalog  map[string]core.Model
+	// imageReaders records what each provider instance says about reading
+	// images; an instance it does not list says nothing.
+	imageReaders map[string]bool
+	calls        []string
+	bodies       []map[string]any
+}
+
+func (p *scriptedDecisionsProvider) DecisionsReadImages(providerName string) (bool, bool) {
+	reads, known := p.imageReaders[providerName]
+	return reads, known
+}
+
+func (p *scriptedDecisionsProvider) LookupModel(model string) (*core.Model, bool) {
+	found, ok := p.catalog[model]
+	return &found, ok
 }
 
 func newScriptedDecisionsProvider(models map[string]string, types ...string) *scriptedDecisionsProvider {
@@ -253,4 +268,189 @@ func TestDecisions_ThroughServer(t *testing.T) {
 		assert.Equal(t, "/v1/decisions", usageLogger.entries[0].Endpoint)
 		assert.Equal(t, entry.RequestID, usageLogger.entries[0].RequestID)
 	})
+}
+
+const decisionImageBody = `{"model":"%s","input":[{"role":"user","content":[` +
+	`{"type":"input_text","text":"Is the box damaged?"},{"type":"input_image","image_url":"data:image/png;base64,iVBORw0KGgo="}]}],` +
+	`"questions":[{"type":"predicate","name":"damaged","instructions":"Damaged?"}]}`
+
+// newVisionDecisionsProvider adds hosted Jev, which reads images, next to a
+// text-only Kev server, as the jev provider catalogs them.
+func newVisionDecisionsProvider() *scriptedDecisionsProvider {
+	provider := newScriptedDecisionsProvider(map[string]string{
+		"openai/gpt-6-luna": "openai",
+		"jev/jev-latest":    "jev",
+		"kev/kev-latest":    "jev",
+	}, "openai", "jev")
+	provider.catalog = map[string]core.Model{
+		"jev/jev-latest":    {ID: "jev-latest", Metadata: &core.ModelMetadata{Capabilities: map[string]bool{"vision": true}}},
+		"kev/kev-latest":    {ID: "kev-latest", Metadata: &core.ModelMetadata{Capabilities: map[string]bool{"vision": false}}},
+		"openai/gpt-6-luna": {ID: "gpt-6-luna", Metadata: &core.ModelMetadata{Capabilities: map[string]bool{"vision": true}}},
+	}
+	return provider
+}
+
+// An image request to a model that reads text only is refused before it is
+// sent: a Kev server would read the image references as text.
+func TestDecisions_RefusesImagesForTextOnlyModels(t *testing.T) {
+	provider := newVisionDecisionsProvider()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	c, rec := echotest.Post(t, "/v1/decisions", fmt.Sprintf(decisionImageBody, "kev/kev-latest"))
+	require.NoError(t, handler.Decisions(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "does not read images")
+	assert.Empty(t, provider.calls)
+
+	c, rec = echotest.Post(t, "/v1/decisions", fmt.Sprintf(decisionImageBody, "jev/jev-latest"))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"jev jev jev-latest"}, provider.calls)
+}
+
+// Failover skips a target that cannot read the input: a request with images
+// moves past the text-only Kev server to the next target that reads images,
+// while a text request may still use it.
+func TestDecisions_FailoverSkipsTargetsThatCannotReadImages(t *testing.T) {
+	failovers := failoverResolverStub{selectors: []core.ModelSelector{
+		{Provider: "kev", Model: "kev-latest"},
+		{Provider: "openai", Model: "gpt-6-luna"},
+	}}
+
+	provider := newVisionDecisionsProvider()
+	provider.statuses["jev-latest"] = http.StatusServiceUnavailable
+	handler := newHandler(provider, nil, nil, nil, nil, nil, failovers, nil)
+	c, rec := echotest.Post(t, "/v1/decisions", fmt.Sprintf(decisionImageBody, "jev/jev-latest"))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"jev jev jev-latest", "openai openai gpt-6-luna"}, provider.calls)
+
+	provider = newVisionDecisionsProvider()
+	provider.statuses["jev-latest"] = http.StatusServiceUnavailable
+	handler = newHandler(provider, nil, nil, nil, nil, nil, failovers, nil)
+	c, rec = echotest.Post(t, "/v1/decisions", decisionBody("jev/jev-latest"))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"jev jev jev-latest", "kev jev kev-latest"}, provider.calls)
+}
+
+// A chain whose first target reads text only still serves images: the
+// request starts at the first failover target that reads them, while text
+// requests keep the first target. The promoted target is the one audited.
+func TestDecisions_ImagesStartAtTheFirstTargetThatReadsThem(t *testing.T) {
+	failovers := failoverResolverStub{selectors: []core.ModelSelector{{Provider: "openai", Model: "gpt-6-luna"}}}
+
+	provider := newVisionDecisionsProvider()
+	handler := newHandler(provider, nil, nil, nil, nil, nil, failovers, nil)
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	c, rec := echotest.Post(t, "/v1/decisions", fmt.Sprintf(decisionImageBody, "kev/kev-latest"), echotest.WithValue(string(auditlog.LogEntryKey), entry))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"openai openai gpt-6-luna"}, provider.calls)
+	assert.Equal(t, "openai/gpt-6-luna", entry.ResolvedModel)
+
+	c, rec = echotest.Post(t, "/v1/decisions", decisionBody("kev/kev-latest"))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"openai openai gpt-6-luna", "kev jev kev-latest"}, provider.calls)
+}
+
+// An image link sent to a jev model, which takes images inline only, says so.
+func TestDecisions_ImageLinksToJevAskForInlineData(t *testing.T) {
+	provider := newVisionDecisionsProvider()
+	handler := NewHandler(provider, nil, nil, nil)
+	body := `{"model":"jev/jev-latest","input":[{"role":"user","content":[{"type":"input_image","image_url":"https://example.com/a.png"}]}],"questions":[{"type":"predicate","instructions":"?"}]}`
+
+	c, rec := echotest.Post(t, "/v1/decisions", body)
+	require.NoError(t, handler.Decisions(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "not a link")
+	assert.Empty(t, provider.calls)
+}
+
+// denyingAuthorizer denies the listed models and allows the rest.
+type denyingAuthorizer map[string]bool
+
+func (a denyingAuthorizer) ValidateModelAccess(_ context.Context, selector core.ModelSelector) error {
+	if a[selector.QualifiedModel()] {
+		return core.NewAuthenticationError("", "model "+selector.QualifiedModel()+" is not allowed")
+	}
+	return nil
+}
+
+func (a denyingAuthorizer) AllowsModel(_ context.Context, selector core.ModelSelector) bool {
+	return !a[selector.QualifiedModel()]
+}
+
+func (denyingAuthorizer) FilterPublicModels(_ context.Context, models []core.Model) []core.Model {
+	return models
+}
+
+// A target the caller may not use is passed over when choosing where an
+// image request starts, as failover passes over it, rather than ending the
+// search with an access error.
+func TestDecisions_ImagesSkipTargetsTheCallerMayNotUse(t *testing.T) {
+	provider := newVisionDecisionsProvider()
+	provider.supportedModels = append(provider.supportedModels, "gpt-6-luna")
+	provider.providerTypes["openai-b/gpt-6-luna"] = "openai"
+	provider.providerNames["openai-b/gpt-6-luna"] = "openai-b"
+	failovers := failoverResolverStub{selectors: []core.ModelSelector{
+		{Provider: "openai", Model: "gpt-6-luna"},
+		{Provider: "openai-b", Model: "gpt-6-luna"},
+	}}
+	handler := newHandlerWithAuthorizer(provider, nil, nil, nil, nil, denyingAuthorizer{"openai/gpt-6-luna": true}, nil, failovers, nil)
+
+	c, rec := echotest.Post(t, "/v1/decisions", fmt.Sprintf(decisionImageBody, "kev/kev-latest"))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"openai-b openai gpt-6-luna"}, provider.calls)
+}
+
+// A Kev provider whose models carry no capabilities, as with models_mode:
+// allowlist, still says it reads no images, so an image request skips it
+// before dispatch instead of failing there with a 400 that stops failover.
+func TestDecisions_ProviderSaysWhetherItReadsImages(t *testing.T) {
+	provider := newVisionDecisionsProvider()
+	delete(provider.catalog, "kev/kev-latest")
+	provider.imageReaders = map[string]bool{"kev": false, "jev": true}
+	failovers := failoverResolverStub{selectors: []core.ModelSelector{{Provider: "openai", Model: "gpt-6-luna"}}}
+	handler := newHandler(provider, nil, nil, nil, nil, nil, failovers, nil)
+
+	c, rec := echotest.Post(t, "/v1/decisions", fmt.Sprintf(decisionImageBody, "kev/kev-latest"))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"openai openai gpt-6-luna"}, provider.calls)
+
+	handler = NewHandler(provider, nil, nil, nil)
+	c, rec = echotest.Post(t, "/v1/decisions", fmt.Sprintf(decisionImageBody, "kev/kev-latest"))
+	require.NoError(t, handler.Decisions(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "does not read images")
+}
+
+// imageRemovingPatcher stands in for a guardrail that strips images from the
+// input. It returns a copy, leaving the request it was given untouched.
+type imageRemovingPatcher struct{ stateRedactingPatcher }
+
+func (imageRemovingPatcher) PatchDecisionRequest(_ context.Context, req *core.DecisionRequest) (*core.DecisionRequest, error) {
+	patched := *req
+	patched.Input = json.RawMessage(`[{"role":"user","content":[{"type":"input_text","text":"Is the box damaged?"}]}]`)
+	return &patched, nil
+}
+
+// Routing reads the images the guarded input still holds: once a guardrail
+// has removed them, a text-only model answers the request instead of being
+// refused or skipped for images it will never receive.
+func TestDecisions_RoutesOnTheGuardedInput(t *testing.T) {
+	provider := newVisionDecisionsProvider()
+	failovers := failoverResolverStub{selectors: []core.ModelSelector{{Provider: "openai", Model: "gpt-6-luna"}}}
+	handler := newHandler(provider, nil, nil, nil, nil, nil, failovers, imageRemovingPatcher{})
+
+	c, rec := echotest.Post(t, "/v1/decisions", fmt.Sprintf(decisionImageBody, "kev/kev-latest"))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"kev jev kev-latest"}, provider.calls)
+	forwarded, err := json.Marshal(provider.bodies[0]["input"])
+	require.NoError(t, err)
+	assert.NotContains(t, string(forwarded), "input_image")
 }

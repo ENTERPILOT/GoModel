@@ -12,7 +12,9 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
+	"sync/atomic"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
@@ -40,6 +42,9 @@ var Registration = providers.Registration{
 type Provider struct {
 	client *llmclient.Client
 	keys   *providers.Keyring
+	// hosted records whether the base URL is TypeSafe's hosted API, the
+	// only System One server that reads images; see readsImages.
+	hosted atomic.Bool
 }
 
 var (
@@ -63,6 +68,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
 	p.client = llmclient.NewWithOptionalHTTPClient(opts.HTTPClient, clientCfg, p.setHeaders)
+	p.hosted.Store(hostedTypeSafe(clientCfg.BaseURL))
 	return p
 }
 
@@ -72,7 +78,28 @@ func (p *Provider) AcceptsUnlistedModels() bool { return true }
 
 // SetBaseURL allows configuring a custom base URL for the provider.
 func (p *Provider) SetBaseURL(url string) {
-	p.client.SetBaseURL(baseURL(url))
+	resolved := baseURL(url)
+	p.client.SetBaseURL(resolved)
+	p.hosted.Store(hostedTypeSafe(resolved))
+}
+
+// hostedTypeSafe reports whether a base URL addresses TypeSafe's hosted API,
+// https://api.typesafe.ai. Every other System One server a jev provider
+// points at is taken to be a Kev server, which reads text only.
+func hostedTypeSafe(base string) bool {
+	parsed, err := url.Parse(base)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(parsed.Scheme, "https") && strings.EqualFold(parsed.Host, "api.typesafe.ai")
+}
+
+// DecisionsReadImages reports whether this provider reads images: only
+// TypeSafe's hosted API does. It is what the gateway checks before choosing
+// a jev target for an image request, so a Kev server is skipped even when
+// its models carry no capabilities, as with models_mode: allowlist.
+func (p *Provider) DecisionsReadImages() bool {
+	return p.hosted.Load()
 }
 
 func baseURL(configured string) string {

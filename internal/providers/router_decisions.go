@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -24,6 +25,17 @@ func (r *Router) Decisions(ctx context.Context, providerType string, req *core.P
 		return nil, err
 	}
 	return dp.Decisions(ctx, req)
+}
+
+// DecisionsReadImages reports whether the named provider instance can answer
+// a Decisions request with images. known is false when the provider does not
+// say, which callers treat as reading them.
+func (r *Router) DecisionsReadImages(providerName string) (readsImages, known bool) {
+	reader, ok := r.providerByNameRegistry(strings.TrimSpace(providerName)).(core.DecisionImageReader)
+	if !ok {
+		return false, false
+	}
+	return reader.DecisionsReadImages(), true
 }
 
 // DecisionsProviderTypes returns the registered provider types that answer

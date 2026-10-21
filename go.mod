@@ -1,6 +1,6 @@
 module github.com/enterpilot/gomodel
 
-go 1.27.2
+go 1.27.3
 
 // Unauthenticated access to the aggregated MCP tool surface via browser DNS
 // rebinding: the /mcp endpoint's origin check could not detect a rebind.

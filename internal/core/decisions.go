@@ -24,6 +24,13 @@ type DecisionsProvider interface {
 	Decisions(ctx context.Context, req *PassthroughRequest) (*PassthroughResponse, error)
 }
 
+// DecisionImageReader is an optional DecisionsProvider capability: whether
+// the provider can answer a Decisions request whose input holds images. A
+// provider that does not implement it is assumed to read them.
+type DecisionImageReader interface {
+	DecisionsReadImages() bool
+}
+
 // RoutableDecisions routes a Decisions request by provider type, preferring
 // req.ProviderName when set, and lists the provider types that serve it.
 type RoutableDecisions interface {

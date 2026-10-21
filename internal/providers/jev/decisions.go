@@ -3,6 +3,7 @@ package jev
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/goccy/go-json"
+	"github.com/google/uuid"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -27,8 +29,10 @@ const maxSystemOneAnswerBytes = 8 << 20
 // and choice and score keep their names. The request is translated to a
 // System One request, sent to /v1/systemone, and the answer translated back,
 // so the caller sees OpenAI's shapes. Members System One has no place for
-// (prompt caching, safety_identifier) are dropped. System One reads text
-// only, so an image in the input is rejected.
+// (prompt caching, safety_identifier) are dropped. Images become System One
+// image assets, which TypeSafe serves only with the
+// TypeSafe-Danger-Zone-Images header; the gateway does not fetch images, so
+// they must arrive inline as base64 data URLs.
 func (p *Provider) Decisions(ctx context.Context, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
 	if req == nil || req.Body == nil {
 		return nil, core.NewInvalidRequestError("decisions request is required", nil)
@@ -45,6 +49,13 @@ func (p *Provider) Decisions(ctx context.Context, req *core.PassthroughRequest) 
 	if err != nil {
 		return nil, err
 	}
+	// The gateway refuses images for models it knows to be text only, but a
+	// model configured without listing (models_mode: allowlist) carries no
+	// capability, so the provider checks too: a Kev server would read the
+	// image references as text.
+	if len(plan.request.Assets) > 0 && !p.hosted.Load() {
+		return nil, core.NewInvalidRequestError("this jev provider points at a Kev server, which reads text only; send images to TypeSafe's hosted API (api.typesafe.ai) or another model that reads images", nil).WithParam("input")
+	}
 	body, err := json.Marshal(plan.request)
 	if err != nil {
 		return nil, core.NewInvalidRequestError("failed to encode System One request", err)
@@ -56,7 +67,7 @@ func (p *Provider) Decisions(ctx context.Context, req *core.PassthroughRequest) 
 		Operation:    req.Operation,
 		Model:        req.Model,
 		Body:         io.NopCloser(bytes.NewReader(body)),
-		Headers:      req.Headers,
+		Headers:      systemOneHeaders(req.Headers, len(plan.request.Assets) > 0),
 		ProviderName: req.ProviderName,
 	})
 	if err != nil || resp == nil || resp.StatusCode >= http.StatusBadRequest {
@@ -127,13 +138,17 @@ type decisionInputMessage struct {
 }
 
 type decisionInputPart struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type     string `json:"type"`
+	Text     string `json:"text"`
+	ImageURL string `json:"image_url"`
 }
 
 type systemOneRequest struct {
-	Model     string                       `json:"model"`
-	State     string                       `json:"state"`
+	Model string `json:"model"`
+	// State is the input's text, or, when the input holds images, its text
+	// and image references in order.
+	State     any           `json:"state"`
+	Assets    orderedObject `json:"assets,omitempty"`
 	Questions orderedObject `json:"questions"`
 }
 
@@ -189,7 +204,7 @@ type systemOnePlan struct {
 }
 
 func planSystemOne(req *decisionRequest) (*systemOnePlan, error) {
-	state, err := systemOneState(req.Input)
+	state, assets, err := systemOneState(req.Input)
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +212,7 @@ func planSystemOne(req *decisionRequest) (*systemOnePlan, error) {
 		return nil, core.NewInvalidRequestError("questions must hold at least one question", nil).WithParam("questions")
 	}
 	plan := &systemOnePlan{
-		request:    systemOneRequest{Model: req.Model, State: state, Questions: make(orderedObject, 0, len(req.Questions))},
+		request:    systemOneRequest{Model: req.Model, State: state, Assets: assets, Questions: make(orderedObject, 0, len(req.Questions))},
 		keys:       make([]string, len(req.Questions)),
 		questions:  req.Questions,
 		choiceKeys: make([]map[string]json.RawMessage, len(req.Questions)),
@@ -295,48 +310,114 @@ func choiceKey(value json.RawMessage) (string, error) {
 	return "", fmt.Errorf("value %s must be a string or a boolean", strings.TrimSpace(string(value)))
 }
 
-// systemOneState joins the input's text into the single state System One
-// evaluates: a string input as is, messages' text parts separated by blank
-// lines.
-func systemOneState(input json.RawMessage) (string, error) {
+// systemOneState builds the state System One evaluates from the input: a
+// string input as is, and messages' text parts joined by blank lines. When
+// the input holds images, the state is instead a list of the text parts and
+// image references in input order, with each image listed once in assets
+// under its reference; System One puts the image wherever its reference
+// stands.
+func systemOneState(input json.RawMessage) (any, orderedObject, error) {
 	trimmed := bytes.TrimSpace(input)
 	if len(trimmed) == 0 || core.IsJSONNull(trimmed) {
-		return "", core.NewInvalidRequestError("input is required", nil).WithParam("input")
+		return nil, nil, core.NewInvalidRequestError("input is required", nil).WithParam("input")
 	}
 	if trimmed[0] == '"' {
 		var text string
 		if err := json.Unmarshal(trimmed, &text); err != nil {
-			return "", core.NewInvalidRequestError("invalid input: "+err.Error(), err).WithParam("input")
+			return nil, nil, core.NewInvalidRequestError("invalid input: "+err.Error(), err).WithParam("input")
 		}
-		return text, nil
+		return text, nil, nil
 	}
 	var messages []decisionInputMessage
 	if err := json.Unmarshal(trimmed, &messages); err != nil {
-		return "", core.NewInvalidRequestError("input must be a string or a list of user messages", err).WithParam("input")
+		return nil, nil, core.NewInvalidRequestError("input must be a string or a list of user messages", err).WithParam("input")
 	}
-	texts := make([]string, 0, len(messages))
+	var (
+		items  []any
+		texts  []string
+		assets orderedObject
+	)
 	for i, msg := range messages {
 		content := bytes.TrimSpace(msg.Content)
 		if len(content) > 0 && content[0] == '"' {
 			var text string
 			if err := json.Unmarshal(content, &text); err != nil {
-				return "", core.NewInvalidRequestError(fmt.Sprintf("invalid input[%d].content: %v", i, err), err).WithParam("input")
+				return nil, nil, core.NewInvalidRequestError(fmt.Sprintf("invalid input[%d].content: %v", i, err), err).WithParam("input")
 			}
-			texts = append(texts, text)
+			items, texts = append(items, text), append(texts, text)
 			continue
 		}
 		var parts []decisionInputPart
 		if err := json.Unmarshal(content, &parts); err != nil {
-			return "", core.NewInvalidRequestError(fmt.Sprintf("input[%d].content must be a string or a list of parts", i), err).WithParam("input")
+			return nil, nil, core.NewInvalidRequestError(fmt.Sprintf("input[%d].content must be a string or a list of parts", i), err).WithParam("input")
 		}
-		for _, part := range parts {
-			if part.Type != "input_text" {
-				return "", core.NewInvalidRequestError(fmt.Sprintf("input[%d] holds an %s part; models served by jev read text only", i, part.Type), nil).WithParam("input")
+		for j, part := range parts {
+			switch part.Type {
+			case "input_text":
+				items, texts = append(items, part.Text), append(texts, part.Text)
+			case "input_image":
+				asset, err := imageAsset(part.ImageURL)
+				if err != nil {
+					return nil, nil, core.NewInvalidRequestError(fmt.Sprintf("input[%d].content[%d]: %v", i, j, err), err).WithParam("input")
+				}
+				ref := "image-" + uuid.NewString()
+				items = append(items, ref)
+				assets = append(assets, orderedMember{key: ref, value: asset})
+			default:
+				return nil, nil, core.NewInvalidRequestError(fmt.Sprintf("input[%d] holds an %s part; models served by jev read text and images only", i, part.Type), nil).WithParam("input")
 			}
-			texts = append(texts, part.Text)
 		}
 	}
-	return strings.Join(texts, "\n\n"), nil
+	if len(assets) == 0 {
+		return strings.Join(texts, "\n\n"), nil, nil
+	}
+	return items, assets, nil
+}
+
+// systemOneImage is a System One image asset sent inline.
+type systemOneImage struct {
+	Type       string `json:"type"`
+	Format     string `json:"format"`
+	DataBase64 string `json:"data_base64"`
+}
+
+// imageAsset turns an input_image URL into a System One image asset. System
+// One takes PNG or JPEG bytes, and the gateway does not fetch remote images,
+// so only a base64 data URL of one of those types is accepted.
+func imageAsset(imageURL string) (systemOneImage, error) {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(imageURL), "data:")
+	if !ok {
+		return systemOneImage{}, errors.New("models served by jev take images inline: send a base64 data URL (data:image/png;base64,...), not a link")
+	}
+	meta, data, ok := strings.Cut(rest, ",")
+	mediaType, encoding, _ := strings.Cut(meta, ";")
+	if !ok || !strings.EqualFold(encoding, "base64") || data == "" {
+		return systemOneImage{}, errors.New("image_url must be a base64 data URL (data:image/png;base64,...)")
+	}
+	var format string
+	switch strings.ToLower(mediaType) {
+	case "image/png":
+		format = "png"
+	case "image/jpeg", "image/jpg":
+		format = "jpg"
+	default:
+		return systemOneImage{}, fmt.Errorf("models served by jev read PNG and JPEG images, not %s", mediaType)
+	}
+	return systemOneImage{Type: "image", Format: format, DataBase64: data}, nil
+}
+
+// systemOneHeaders returns the headers to send upstream: the caller's, plus
+// the opt-in TypeSafe requires for a request carrying images.
+func systemOneHeaders(headers http.Header, images bool) http.Header {
+	if !images {
+		return headers
+	}
+	out := headers.Clone()
+	if out == nil {
+		out = http.Header{}
+	}
+	out.Set("TypeSafe-Danger-Zone-Images", "true")
+	return out
 }
 
 type systemOneAnswer struct {
