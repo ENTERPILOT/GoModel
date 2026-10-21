@@ -94,6 +94,9 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	"edenai": {
 		DefaultBaseURL: "https://api.edenai.run/v3",
 	},
+	"cheaperinference": {
+		DefaultBaseURL: "https://api.cheaperinference.com/v1",
+	},
 }
 
 // --- buildProviderConfig ---
@@ -1509,6 +1512,35 @@ func TestBuildProviderConfig_EdenAI_BaseURLOverride(t *testing.T) {
 	p, exists := got["edenai"]
 	require.True(t, exists, "edenai not discovered by config parser")
 	assert.Equal(t, "https://eden.internal.example/v3", p.BaseURL)
+}
+
+// TestBuildProviderConfig_CheaperInference_ResolvesBaseURL asserts that
+// CHEAPERINFERENCE_API_KEY alone registers the provider and resolves the
+// default endpoint. The env prefix is derived from the registered type
+// "cheaperinference", so this also pins the spelling.
+func TestBuildProviderConfig_CheaperInference_ResolvesBaseURL(t *testing.T) {
+	t.Setenv("CHEAPERINFERENCE_API_KEY", "cheaperinference-test-key")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	p, exists := got["cheaperinference"]
+	require.True(t, exists, "cheaperinference not discovered by config parser")
+	assert.Equal(t, "cheaperinference", p.Type)
+	assert.Equal(t, "cheaperinference-test-key", p.APIKey)
+	assert.Equal(t, "https://api.cheaperinference.com/v1", p.BaseURL)
+}
+
+// TestBuildProviderConfig_CheaperInference_BaseURLOverride asserts
+// CHEAPERINFERENCE_BASE_URL wins over the registered default.
+func TestBuildProviderConfig_CheaperInference_BaseURLOverride(t *testing.T) {
+	t.Setenv("CHEAPERINFERENCE_API_KEY", "cheaperinference-test-key")
+	t.Setenv("CHEAPERINFERENCE_BASE_URL", "https://ci.internal.example/v1")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	p, exists := got["cheaperinference"]
+	require.True(t, exists, "cheaperinference not discovered by config parser")
+	assert.Equal(t, "https://ci.internal.example/v1", p.BaseURL)
 }
 
 func TestApplyProviderEnvVars_ModelFilter(t *testing.T) {

@@ -623,6 +623,15 @@ providers:
     #   - id: "openai/gpt-4"
     #   - id: "anthropic/claude-sonnet-latest"
 
+  cheaperinference:
+    type: cheaperinference
+    api_key: "${CHEAPERINFERENCE_API_KEY}"
+    # base_url defaults to "https://api.cheaperinference.com/v1".
+    # OpenAI-compatible gateway: model IDs pass through unchanged.
+    # models:
+    #   - id: "gpt-5.4-mini"
+    #   - id: "claude-sonnet-5"
+
   elevenlabs:
     type: elevenlabs
     api_key: "${ELEVENLABS_API_KEY}"

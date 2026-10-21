@@ -36,6 +36,7 @@ test("providerDocsUrl links every documented provider to its own page", () => {
     "bedrock",
     "bedrock-mantle",
     "chatgpt",
+    "cheaperinference",
     "cohere",
     "deepseek",
     "edenai",

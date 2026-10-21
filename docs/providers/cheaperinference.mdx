@@ -1,0 +1,58 @@
+---
+title: "Cheaper Inference"
+description: "Configure the Cheaper Inference OpenAI-compatible gateway in GoModel."
+icon: "server"
+keywords: ["Cheaper Inference", "gateway", "OpenAI-compatible", "provider setup"]
+---
+
+Cheaper Inference is an OpenAI-compatible LLM gateway served at
+`https://api.cheaperinference.com/v1`. GoModel routes chat, model listing, and
+passthrough requests through the shared OpenAI adapter. The `/v1/responses` endpoint is
+translated through chat completions. Files, batches, and embeddings are not supported.
+Embedding requests fail fast with a typed "not supported" error; no upstream call is made.
+
+<Note>
+  `cheaperinference` is in the default `ENABLED_PASSTHROUGH_PROVIDERS` allowlist, so
+  `/p/cheaperinference/...` routes work without operator opt-in.
+</Note>
+
+## Configure
+
+Create an API key at [cheaperinference.com](https://cheaperinference.com/signup) and set:
+
+```bash
+CHEAPERINFERENCE_API_KEY=ci_live_...
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  cheaperinference:
+    type: cheaperinference
+    base_url: "https://api.cheaperinference.com/v1"
+    api_key: "${CHEAPERINFERENCE_API_KEY}"
+```
+
+You can also override the base URL and model list with:
+
+```bash
+CHEAPERINFERENCE_BASE_URL=https://api.cheaperinference.com/v1
+CHEAPERINFERENCE_MODELS=gpt-5.4-mini,claude-sonnet-5
+```
+
+## Models
+
+Model IDs are bare (for example, `gpt-5.4-mini` or `claude-sonnet-5`) and are forwarded
+unchanged. Query the live list instead of relying on documentation snapshots:
+
+```bash
+curl -s https://api.cheaperinference.com/v1/models \
+  -H "Authorization: Bearer $CHEAPERINFERENCE_API_KEY"
+```
+
+GoModel also exposes this list through its own `/v1/models` endpoint once the provider
+is configured. When another configured provider exposes the same raw model ID, select
+Cheaper Inference explicitly with `cheaperinference/gpt-5.4-mini`.
+
+See the [Cheaper Inference docs](https://cheaperinference.com/docs) for details.
