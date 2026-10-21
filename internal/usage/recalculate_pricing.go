@@ -18,6 +18,10 @@ import (
 // UsageQueryParams, sharing the readers' filter semantics.
 type RecalculatePricingParams struct {
 	UsageQueryParams
+
+	// BillCacheHits mirrors pricing.bill_cache_hits: whether recalculated
+	// response-cache hit rows are billed or billed at zero.
+	BillCacheHits bool
 }
 
 // RecalculatePricingResult summarizes a pricing recalculation run.
@@ -48,6 +52,13 @@ type recalculationEntry struct {
 	RewriteTokensSaved int
 	RawData            map[string]any
 	Caveat             string
+
+	// CacheType and MarkupPercent are the stored row values; the billed cost
+	// is recomputed from the new total cost with the markup the row was
+	// billed at, so changed markup rules never rewrite past bills.
+	CacheType     string
+	MarkupPercent *float64
+	BillCacheHits bool
 }
 
 type recalculationUpdate struct {
@@ -56,6 +67,7 @@ type recalculationUpdate struct {
 	OutputCost       *float64
 	TotalCost        *float64
 	RewriteCostSaved *float64
+	BilledCost       *float64
 	CostSource       string
 	Caveat           string
 	HasPricing       bool
@@ -99,6 +111,7 @@ func recalculateEntryCosts(entry recalculationEntry, resolver PricingResolver) r
 			effectivePricing,
 			entry.RewriteTokensSaved,
 		),
+		BilledCost: BilledCost(result.TotalCost, entry.MarkupPercent, entry.CacheType != "", entry.BillCacheHits),
 		CostSource: result.Source,
 		Caveat:     caveat,
 		HasPricing: result.TotalCost != nil || result.InputCost != nil || result.OutputCost != nil,

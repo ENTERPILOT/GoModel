@@ -40,6 +40,7 @@ type Handler struct {
 	auditReader         auditlog.Reader
 	registry            *providers.ModelRegistry
 	pricingResolver     usage.PricingResolver
+	billCacheHits       bool
 	authKeys            *authkeys.Service
 	users               *users.Service
 	virtualModels       *virtualmodels.Service
@@ -251,6 +252,14 @@ func WithPricingResolver(resolver usage.PricingResolver) Option {
 	}
 }
 
+// WithBillCacheHits sets whether pricing recalculation bills response-cache
+// hits, mirroring pricing.bill_cache_hits. Default: true.
+func WithBillCacheHits(bill bool) Option {
+	return func(h *Handler) {
+		h.billCacheHits = bill
+	}
+}
+
 // WithVirtualModels enables unified virtual model administration endpoints.
 func WithVirtualModels(service *virtualmodels.Service) Option {
 	return func(h *Handler) {
@@ -410,6 +419,7 @@ func NewHandler(reader usage.UsageReader, registry *providers.ModelRegistry, opt
 		usageReader:   reader,
 		registry:      registry,
 		runtimeConfig: DashboardConfigResponse{},
+		billCacheHits: true,
 	}
 	if registry != nil {
 		h.pricingResolver = registry

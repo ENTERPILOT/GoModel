@@ -27,7 +27,7 @@ func (s *SQLiteStore) RecalculatePricing(ctx context.Context, params Recalculate
 
 	stmt, err := tx.PrepareContext(ctx, `
 		UPDATE usage
-		SET input_cost = ?, output_cost = ?, total_cost = ?, rewrite_cost_saved = ?, cost_source = ?, costs_calculation_caveat = ?
+		SET input_cost = ?, output_cost = ?, total_cost = ?, rewrite_cost_saved = ?, billed_cost = ?, cost_source = ?, costs_calculation_caveat = ?
 		WHERE id = ?
 	`)
 	if err != nil {
@@ -53,6 +53,7 @@ func (s *SQLiteStore) RecalculatePricing(ctx context.Context, params Recalculate
 				nullableFloat(update.OutputCost),
 				nullableFloat(update.TotalCost),
 				nullableFloat(update.RewriteCostSaved),
+				nullableFloat(update.BilledCost),
 				update.CostSource,
 				update.Caveat,
 				update.ID,
@@ -89,7 +90,7 @@ func (s *SQLiteStore) sqliteRecalculationEntries(ctx context.Context, tx *sql.Tx
 	args = append(args, limit)
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, timestamp, model, provider, provider_name, endpoint, input_tokens, output_tokens, rewrite_tokens_saved, raw_data, COALESCE(costs_calculation_caveat, '')
+		SELECT id, timestamp, model, provider, provider_name, endpoint, input_tokens, output_tokens, rewrite_tokens_saved, raw_data, COALESCE(costs_calculation_caveat, ''), COALESCE(cache_type, ''), markup_percent
 		FROM usage`+sqlutil.BuildWhereClause(conditions)+`
 		ORDER BY id
 		LIMIT ?`, args...)
@@ -100,8 +101,9 @@ func (s *SQLiteStore) sqliteRecalculationEntries(ctx context.Context, tx *sql.Tx
 
 	entries := make([]recalculationEntry, 0)
 	for rows.Next() {
-		var entry recalculationEntry
+		entry := recalculationEntry{BillCacheHits: params.BillCacheHits}
 		var timestamp string
+		var markupPercent sql.NullFloat64
 		var providerName sql.NullString
 		var rawData sql.NullString
 		if err := rows.Scan(
@@ -116,6 +118,8 @@ func (s *SQLiteStore) sqliteRecalculationEntries(ctx context.Context, tx *sql.Tx
 			&entry.RewriteTokensSaved,
 			&rawData,
 			&entry.Caveat,
+			&entry.CacheType,
+			&markupPercent,
 		); err != nil {
 			return nil, fmt.Errorf("scan sqlite usage cost row: %w", err)
 		}
@@ -129,6 +133,9 @@ func (s *SQLiteStore) sqliteRecalculationEntries(ctx context.Context, tx *sql.Tx
 		}
 		if rawData.Valid {
 			entry.RawData = rawDataFromJSON(rawData.String, entry.ID)
+		}
+		if markupPercent.Valid {
+			entry.MarkupPercent = &markupPercent.Float64
 		}
 		entries = append(entries, entry)
 	}

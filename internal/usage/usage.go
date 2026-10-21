@@ -87,6 +87,17 @@ type UsageEntry struct {
 	// Empty means all token types were fully mapped to pricing data.
 	CostsCalculationCaveat string `json:"costs_calculation_caveat,omitempty" bson:"costs_calculation_caveat,omitempty"`
 
+	// MarkupPercent is the pricing.markups percentage applied on top of
+	// TotalCost, and MarkupSelector the selector it came from (nil and empty
+	// when no markup rule matched).
+	MarkupPercent  *float64 `json:"markup_percent,omitempty" bson:"markup_percent,omitempty"`
+	MarkupSelector string   `json:"markup_selector,omitempty" bson:"markup_selector,omitempty"`
+
+	// BilledCost is what the caller is billed for this request: TotalCost plus
+	// markup, or zero for a response-cache hit when cache hits are not billed
+	// (nil = cost unknown, or the row predates billing).
+	BilledCost *float64 `json:"billed_cost,omitempty" bson:"billed_cost,omitempty"`
+
 	// RewriteTokensSaved is the prompt tokens that request rewriters (ext
 	// extensions, e.g. token compression) estimate they removed from this
 	// request before it reached the provider. Zero when no rewriter reported

@@ -48,7 +48,7 @@ func TestMongoDBStoreRecalculatePricingTransactionFlow(t *testing.T) {
 		startPricingSession: func() (mongoPricingSession, error) {
 			return session, nil
 		},
-		recalculatePricingDocuments: func(ctx context.Context, filter bson.D, _ PricingResolver) (RecalculatePricingResult, error) {
+		recalculatePricingDocuments: func(ctx context.Context, filter bson.D, _ PricingResolver, _ bool) (RecalculatePricingResult, error) {
 			recalculateCalls++
 			require.Equal(t, "transaction", ctx.Value(mongoPricingTestContextKey{}))
 			require.True(t, mongoFilterHasProviderSelector(filter, "primary-openai"), "filter = %#v, want provider/provider_name selector", filter)
@@ -84,7 +84,7 @@ func TestMongoDBStoreRecalculatePricingFallsBackWhenTransactionsUnavailable(t *t
 		startPricingSession: func() (mongoPricingSession, error) {
 			return session, nil
 		},
-		recalculatePricingDocuments: func(ctx context.Context, _ bson.D, _ PricingResolver) (RecalculatePricingResult, error) {
+		recalculatePricingDocuments: func(ctx context.Context, _ bson.D, _ PricingResolver, _ bool) (RecalculatePricingResult, error) {
 			recalculateCalls++
 			got := ctx.Value(mongoPricingTestContextKey{})
 			require.Nil(t, got)
@@ -112,7 +112,7 @@ func TestMongoDBStoreRecalculatePricingFallsBackWhenTransactionBodyReportsCapabi
 		startPricingSession: func() (mongoPricingSession, error) {
 			return session, nil
 		},
-		recalculatePricingDocuments: func(ctx context.Context, _ bson.D, _ PricingResolver) (RecalculatePricingResult, error) {
+		recalculatePricingDocuments: func(ctx context.Context, _ bson.D, _ PricingResolver, _ bool) (RecalculatePricingResult, error) {
 			recalculateCalls++
 			switch recalculateCalls {
 			case 1:
@@ -152,7 +152,7 @@ func TestMongoDBStoreRecalculatePricingUsesProviderNameForPricing(t *testing.T) 
 		startPricingSession: func() (mongoPricingSession, error) {
 			return session, nil
 		},
-		recalculatePricingDocuments: func(_ context.Context, filter bson.D, resolver PricingResolver) (RecalculatePricingResult, error) {
+		recalculatePricingDocuments: func(_ context.Context, filter bson.D, resolver PricingResolver, _ bool) (RecalculatePricingResult, error) {
 			capturedFilter = filter
 			update := recalculateEntryCosts(recalculationEntry{
 				ID:           "usage-1",

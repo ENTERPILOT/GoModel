@@ -2,7 +2,7 @@
 title: "Cost tracking"
 description: "How GoModel estimates request costs, where pricing comes from, how to override it, and how to recalculate stored costs."
 icon: "calculator"
-keywords: ["cost tracking", "LLM cost", "token pricing", "spend", "pricing override", "cost estimate"]
+keywords: ["cost tracking", "LLM cost", "token pricing", "spend", "pricing override", "cost estimate", "markup", "chargeback", "billed cost"]
 ---
 
 GoModel estimates the cost of every tracked request from model pricing and shows the totals on the dashboard.
@@ -98,6 +98,28 @@ Override pricing when the catalog price is wrong, missing, or differs from your 
 
 Overrides apply to new requests. To re-cost requests that already ran, recalculate them.
 
+## Markups and billed cost
+
+Add a markup when you resell model access, for example to recharge customers for the tokens they use. GoModel records each request's **billed cost** (`billed_cost` on the usage row): the provider cost plus the markup. The provider cost itself never changes, so budgets, dashboard totals, and savings keep measuring what you pay upstream.
+
+Markups are percentages set in `config.yaml`. With none configured (the default), billed cost equals provider cost.
+
+```yaml
+pricing:
+  bill_cache_hits: true # env: PRICING_BILL_CACHE_HITS; default true
+  markups:
+    "/": 15                         # every model
+    "openai/": 10                   # one provider instance
+    "gpt-5": 20                     # a model on any provider
+    "anthropic/claude-opus-4-1": 25 # one model on one provider
+```
+
+The most specific selector wins, in this order: provider/model, model, provider, global. Markups never stack. A provider selector names the configured instance (the key under `providers`), and an unknown provider fails startup. A 20% markup bills $1.20 for $1.00 of provider cost: a 16.7% margin.
+
+`bill_cache_hits` decides how responses served from GoModel's response cache are billed. `true` bills them like the original call, markup included; `false` bills them at $0. Provider prompt caching (cached input tokens) is a real provider cost and is always billed.
+
+Each usage row also stores the markup it was billed at (`markup_percent`, `markup_selector`), so changing markups never rewrites past bills.
+
 ## Dashboard totals
 
 - **Estimated Cost** — spend on live provider requests; cache hits are excluded.
@@ -108,6 +130,8 @@ A `---` value means the cost is unknown because no pricing was available, which 
 ## Recalculate stored costs
 
 Recalculating recomputes the stored cost of matching usage rows from current pricing. Use it after changing an override, or when pricing was unavailable at the time a request ran. The action is enabled by default (`USAGE_PRICING_RECALCULATION_ENABLED`); on the usage view, choose **Recalculate**, then type `recalculate` to confirm. It is scoped to the selected date range, provider or model, and user path.
+
+Recalculation reprices billed cost with the markup each row was billed at, and bills cache hits according to the current `bill_cache_hits`. Rows recorded before markups existed are billed at their provider cost.
 
 <Warning>
   Recalculation **overwrites** the cost fields of every matching row, and

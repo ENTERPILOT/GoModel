@@ -50,7 +50,7 @@ func (s *MongoDBStore) RecalculatePricing(ctx context.Context, params Recalculat
 
 	var result RecalculatePricingResult
 	_, err = session.WithTransaction(ctx, func(txCtx context.Context) (any, error) {
-		next, err := s.recalculatePricingDocumentsInContext(txCtx, filter, resolver)
+		next, err := s.recalculatePricingDocumentsInContext(txCtx, filter, resolver, params.BillCacheHits)
 		if err != nil {
 			if isMongoTransactionCapabilityError(err) {
 				return nil, &mongoTransactionFallbackError{err: err}
@@ -66,7 +66,7 @@ func (s *MongoDBStore) RecalculatePricing(ctx context.Context, params Recalculat
 				fallbackErr = err
 			}
 			slog.Warn("MongoDB transactions unavailable for pricing recalculation; falling back to non-transactional update", "error", fallbackErr)
-			result, err := s.recalculatePricingDocumentsInContext(ctx, filter, resolver)
+			result, err := s.recalculatePricingDocumentsInContext(ctx, filter, resolver, params.BillCacheHits)
 			if err != nil {
 				return RecalculatePricingResult{}, fmt.Errorf("recalculate mongodb usage costs without transaction: %w", errors.Join(fallbackErr, err))
 			}
@@ -91,11 +91,11 @@ func (s *MongoDBStore) startMongoPricingSession() (mongoPricingSession, error) {
 	return mongoDriverPricingSession{session: session}, nil
 }
 
-func (s *MongoDBStore) recalculatePricingDocumentsInContext(ctx context.Context, filter bson.D, resolver PricingResolver) (RecalculatePricingResult, error) {
+func (s *MongoDBStore) recalculatePricingDocumentsInContext(ctx context.Context, filter bson.D, resolver PricingResolver, billCacheHits bool) (RecalculatePricingResult, error) {
 	if s.recalculatePricingDocuments != nil {
-		return s.recalculatePricingDocuments(ctx, filter, resolver)
+		return s.recalculatePricingDocuments(ctx, filter, resolver, billCacheHits)
 	}
-	return s.recalculatePricingInMongoTransaction(ctx, filter, resolver)
+	return s.recalculatePricingInMongoTransaction(ctx, filter, resolver, billCacheHits)
 }
 
 type mongoTransactionFallbackError struct {
@@ -136,7 +136,7 @@ func isMongoTransactionCapabilityError(err error) bool {
 	return strings.Contains(message, "transaction numbers are only allowed on a replica set member or mongos")
 }
 
-func (s *MongoDBStore) recalculatePricingInMongoTransaction(ctx context.Context, filter bson.D, resolver PricingResolver) (RecalculatePricingResult, error) {
+func (s *MongoDBStore) recalculatePricingInMongoTransaction(ctx context.Context, filter bson.D, resolver PricingResolver, billCacheHits bool) (RecalculatePricingResult, error) {
 	cursor, err := s.collection.Find(ctx, filter)
 	if err != nil {
 		return RecalculatePricingResult{}, fmt.Errorf("query mongodb usage costs for recalculation: %w", err)
@@ -157,6 +157,8 @@ func (s *MongoDBStore) recalculatePricingInMongoTransaction(ctx context.Context,
 			RewriteTokensSaved int            `bson:"rewrite_tokens_saved"`
 			RawData            map[string]any `bson:"raw_data"`
 			Caveat             string         `bson:"costs_calculation_caveat"`
+			CacheType          string         `bson:"cache_type"`
+			MarkupPercent      *float64       `bson:"markup_percent"`
 		}
 		if err := cursor.Decode(&row); err != nil {
 			return RecalculatePricingResult{}, fmt.Errorf("scan mongodb usage cost row: %w", err)
@@ -174,6 +176,9 @@ func (s *MongoDBStore) recalculatePricingInMongoTransaction(ctx context.Context,
 			RewriteTokensSaved: row.RewriteTokensSaved,
 			RawData:            row.RawData,
 			Caveat:             row.Caveat,
+			CacheType:          row.CacheType,
+			MarkupPercent:      row.MarkupPercent,
+			BillCacheHits:      billCacheHits,
 		}, resolver)
 
 		if _, err := s.collection.UpdateByID(ctx, update.ID, mongoRecalculationUpdate(update)); err != nil {
@@ -214,6 +219,11 @@ func mongoRecalculationUpdate(update recalculationUpdate) bson.D {
 		set = append(set, bson.E{Key: "rewrite_cost_saved", Value: *update.RewriteCostSaved})
 	} else {
 		unset = append(unset, bson.E{Key: "rewrite_cost_saved", Value: ""})
+	}
+	if update.BilledCost != nil {
+		set = append(set, bson.E{Key: "billed_cost", Value: *update.BilledCost})
+	} else {
+		unset = append(unset, bson.E{Key: "billed_cost", Value: ""})
 	}
 	if strings.TrimSpace(update.CostSource) != "" {
 		set = append(set, bson.E{Key: "cost_source", Value: strings.TrimSpace(update.CostSource)})

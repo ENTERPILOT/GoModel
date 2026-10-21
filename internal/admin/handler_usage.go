@@ -625,7 +625,7 @@ func (h *Handler) recalculatePricingParams(c *echo.Context, req recalculatePrici
 	baseParams.Provider = provider
 	baseParams.Model = model
 
-	return usage.RecalculatePricingParams{UsageQueryParams: baseParams}, nil
+	return usage.RecalculatePricingParams{UsageQueryParams: baseParams, BillCacheHits: h.billCacheHits}, nil
 }
 
 func recalculatePricingDateParams(c *echo.Context, req recalculatePricingRequest) (usage.UsageQueryParams, error) {

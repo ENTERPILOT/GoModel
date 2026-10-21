@@ -48,7 +48,7 @@ type MongoDBStore struct {
 	collection                  *mongo.Collection
 	retentionDays               int
 	startPricingSession         func() (mongoPricingSession, error)
-	recalculatePricingDocuments func(context.Context, bson.D, PricingResolver) (RecalculatePricingResult, error)
+	recalculatePricingDocuments func(context.Context, bson.D, PricingResolver, bool) (RecalculatePricingResult, error)
 }
 
 // NewMongoDBStore creates a new MongoDB usage store.

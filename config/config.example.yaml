@@ -276,6 +276,16 @@ usage:
   flush_interval: 5
   retention_days: 90
 
+# Billed cost = provider cost + markup, recorded per usage row. Provider cost,
+# budgets, and dashboard totals are unaffected. Markups are YAML-only.
+pricing:
+  bill_cache_hits: true # env: PRICING_BILL_CACHE_HITS; false bills response-cache hits at $0
+  markups: {} # selector -> percent; most specific wins: "provider/model", "model", "provider/", "/"
+  # markups:
+  #   "/": 15
+  #   "openai/": 10
+  #   "anthropic/claude-opus-4-1": 25
+
 budgets:
   enabled: true # env: BUDGETS_ENABLED; with no configured budgets this has no effect
   user_paths:

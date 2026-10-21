@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	usageInsertColumnCount     = 24
+	usageInsertColumnCount     = 27
 	postgresMaxBindParameters  = 65535
 	usageInsertMaxRowsPerQuery = postgresMaxBindParameters / usageInsertColumnCount
 )
@@ -27,7 +27,8 @@ const usageInsertPrefix = `
 		INSERT INTO usage (id, request_id, provider_id, timestamp, model, provider, provider_name,
 			endpoint, user_path, session_id, cache_type, labels, input_tokens, output_tokens, total_tokens,
 			rewrite_tokens_saved, rewrite_cost_saved, raw_data,
-			input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat, auth_key_id)
+			input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat, auth_key_id,
+			markup_percent, markup_selector, billed_cost)
 		VALUES `
 
 const usageInsertSuffix = `
@@ -121,6 +122,9 @@ func ensurePostgreSQLSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS rewrite_tokens_saved INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS rewrite_cost_saved DOUBLE PRECISION",
 		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS auth_key_id TEXT",
+		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS markup_percent DOUBLE PRECISION",
+		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS markup_selector TEXT DEFAULT ''",
+		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS billed_cost DOUBLE PRECISION",
 	}
 	if err := schema.Schema(ctx, append([]string{createTable}, costMigrations...)...); err != nil {
 		return fmt.Errorf("failed to create usage table: %w", err)
@@ -253,6 +257,9 @@ func buildUsageInsert(entries []*UsageEntry) (string, []any) {
 			entry.CostSource,
 			entry.CostsCalculationCaveat,
 			entry.AuthKeyID,
+			entry.MarkupPercent,
+			entry.MarkupSelector,
+			entry.BilledCost,
 		)
 	}
 
