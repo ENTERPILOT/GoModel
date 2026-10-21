@@ -2,34 +2,56 @@ package app
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
 
-// pluginChatModels checks the models plugins send inference to against the
-// catalog: virtual models are resolved first, then the resolved model's
-// catalog entry decides (see core.ChatUnsupportedReason).
+// pluginChatModels checks a plugin's model field when a guardrail is saved: a
+// model the catalog describes as unable to chat is refused (see
+// core.ChatUnsupportedReason). A virtual model is not resolved here, since
+// resolving one picks a target and would advance its load balancing;
+// chatModelGuard checks the model each call resolves to instead.
 type pluginChatModels struct {
-	router   *providers.Router
-	resolver gateway.ModelResolver
+	router *providers.Router
 }
 
 var _ plugins.ChatModelChecker = pluginChatModels{}
 
-func (m pluginChatModels) ChatUnsupportedReason(ctx context.Context, model string) string {
+func (m pluginChatModels) ChatUnsupportedReason(_ context.Context, model string) string {
 	if m.router == nil {
 		return ""
 	}
-	selector, _, err := gateway.ResolveExecutionSelector(ctx, m.router, m.resolver, core.NewRequestedModelSelector(model, ""))
-	if err != nil || selector.Model == "" {
-		return ""
-	}
-	info, ok := m.router.LookupModel(selector.QualifiedModel())
+	return chatUnsupportedReason(m.router, model)
+}
+
+func chatUnsupportedReason(router *providers.Router, model string) string {
+	info, ok := router.LookupModel(model)
 	if !ok || info == nil {
 		return ""
 	}
 	return core.ChatUnsupportedReason(info.Metadata)
+}
+
+// chatModelGuard is the router plugin inference reaches once virtual models
+// are resolved, so it sees the concrete model each call resolved to, under
+// the plugin call's own user path, and adds no selection of its own. It
+// refuses a model that cannot chat, such as a decision model behind a
+// virtual model, before the provider call: that provider would fail every
+// call, and the instance's fail mode would then allow or block all traffic.
+type chatModelGuard struct {
+	*providers.Router
+}
+
+func (g chatModelGuard) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
+	if req != nil {
+		model := core.ModelSelector{Provider: req.Provider, Model: req.Model}.QualifiedModel()
+		if reason := chatUnsupportedReason(g.Router, model); reason != "" {
+			return nil, core.NewInvalidRequestError(fmt.Sprintf(
+				"model %q %s; plugin inference sends chat completions, so choose a chat model", model, reason), nil).WithParam("model")
+		}
+	}
+	return g.Router.ChatCompletion(ctx, req)
 }

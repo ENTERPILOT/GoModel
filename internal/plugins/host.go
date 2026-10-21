@@ -34,7 +34,8 @@ type HostDeps struct {
 	Logger *slog.Logger
 	// Chat may be nil; Inference().Complete then fails with a clear error.
 	Chat ChatCompleter
-	// ChatModels may be nil; models are then not checked before inference.
+	// ChatModels may be nil; model fields are then not checked when a
+	// guardrail is saved.
 	ChatModels ChatModelChecker
 	// Metrics may be nil; a no-op sink is used.
 	Metrics MetricsSink
@@ -130,9 +131,6 @@ func (h *host) Complete(ctx context.Context, req pluginapi.InferenceRequest) (*p
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := checkChatModel(ctx, h.deps.ChatModels, req.Model); err != nil {
-		return nil, err
-	}
 	userPath, err := h.inferenceUserPath(ctx, req.UserPath)
 	if err != nil {
 		return nil, err
@@ -222,9 +220,7 @@ func sanitizeMetricName(name string) string {
 }
 
 // checkChatModel refuses a model that cannot answer a chat completion, such
-// as a decision model (Jev, Kev) picked as an LLM judge, before the call: the
-// provider would fail every request, and the instance's fail mode would then
-// allow or block all traffic.
+// as a decision model (Jev, Kev) picked as an LLM judge.
 func checkChatModel(ctx context.Context, checker ChatModelChecker, model string) error {
 	if checker == nil {
 		return nil

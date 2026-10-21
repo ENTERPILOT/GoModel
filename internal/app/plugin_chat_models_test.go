@@ -11,36 +11,63 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers"
 )
 
-// aliasResolver maps virtual model names to concrete selectors.
-type aliasResolver map[string]core.ModelSelector
-
-func (r aliasResolver) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
-	if selector, ok := r[requested.RequestedQualifiedModel()]; ok {
-		return selector, true, nil
-	}
-	selector, err := requested.Normalize()
-	return selector, false, err
+// countingChatProvider counts the chat completions that reach it.
+type countingChatProvider struct {
+	runtimeRefreshMockProvider
+	calls int
 }
 
-// The checker reads the catalog entry of the model a plugin names, after
-// resolving virtual models: a decision model, directly or behind a virtual
-// model, cannot answer plugin inference, while chat and uncatalogued models
-// pass.
-func TestPluginChatModels_RefusesModelsThatCannotChat(t *testing.T) {
-	registry := providers.NewModelRegistry()
-	registry.RegisterProviderWithNameAndType(&runtimeRefreshMockProvider{models: &core.ModelsResponse{Object: "list", Data: []core.Model{
+func (p *countingChatProvider) ChatCompletion(context.Context, *core.ChatRequest) (*core.ChatResponse, error) {
+	p.calls++
+	return &core.ChatResponse{}, nil
+}
+
+// newChatModelsRouter lists a Jev decision model and an OpenAI chat model,
+// as their providers catalog them.
+func newChatModelsRouter(t *testing.T) (*providers.Router, *countingChatProvider, *countingChatProvider) {
+	t.Helper()
+	jev := &countingChatProvider{models: &core.ModelsResponse{Object: "list", Data: []core.Model{
 		{ID: "jev-latest", Object: "model", Metadata: &core.ModelMetadata{Categories: []core.ModelCategory{core.CategoryUtility}}},
-	}}}, "jev", "jev")
-	registry.RegisterProviderWithNameAndType(&runtimeRefreshMockProvider{models: &core.ModelsResponse{Object: "list", Data: []core.Model{
+	}}}
+	openai := &countingChatProvider{models: &core.ModelsResponse{Object: "list", Data: []core.Model{
 		{ID: "gpt-6-luna", Object: "model", Metadata: &core.ModelMetadata{Modes: []string{"chat", "responses"}}},
-	}}}, "openai", "openai")
+	}}}
+	registry := providers.NewModelRegistry()
+	registry.RegisterProviderWithNameAndType(jev, "jev", "jev")
+	registry.RegisterProviderWithNameAndType(openai, "openai", "openai")
 	require.NoError(t, registry.Initialize(context.Background()))
 	router, err := providers.NewRouter(registry)
 	require.NoError(t, err)
+	return router, jev, openai
+}
 
-	checker := pluginChatModels{router: router, resolver: aliasResolver{"decider": {Provider: "jev", Model: "jev-latest"}}}
+// A guardrail's model field is checked as named when the guardrail is saved:
+// a decision model is refused, a chat or uncatalogued model passes, and a
+// virtual model is left to chatModelGuard, since resolving it here would
+// pick a target and advance its load balancing.
+func TestPluginChatModels_ChecksTheModelAsNamed(t *testing.T) {
+	router, _, _ := newChatModelsRouter(t)
+	checker := pluginChatModels{router: router}
+
 	assert.Contains(t, checker.ChatUnsupportedReason(context.Background(), "jev/jev-latest"), "is a decision model")
-	assert.Contains(t, checker.ChatUnsupportedReason(context.Background(), "decider"), "is a decision model", "a virtual model is resolved first")
 	assert.Empty(t, checker.ChatUnsupportedReason(context.Background(), "openai/gpt-6-luna"))
-	assert.Empty(t, checker.ChatUnsupportedReason(context.Background(), "nowhere/unknown"), "an unknown model is accepted")
+	assert.Empty(t, checker.ChatUnsupportedReason(context.Background(), "nowhere/unknown"))
+	assert.Empty(t, checker.ChatUnsupportedReason(context.Background(), "decider"), "a virtual model is not resolved at save time")
+}
+
+// The guard sees the concrete model a plugin call resolved to and refuses a
+// decision model before its provider is called, while chat models pass.
+func TestChatModelGuard_RefusesResolvedModelsThatCannotChat(t *testing.T) {
+	router, jev, openai := newChatModelsRouter(t)
+	guard := chatModelGuard{Router: router}
+
+	_, err := guard.ChatCompletion(context.Background(), &core.ChatRequest{Provider: "jev", Model: "jev-latest"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `model "jev/jev-latest" is a decision model`)
+	assert.Contains(t, err.Error(), "choose a chat model")
+	assert.Zero(t, jev.calls)
+
+	_, err = guard.ChatCompletion(context.Background(), &core.ChatRequest{Provider: "openai", Model: "gpt-6-luna"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, openai.calls)
 }
