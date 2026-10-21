@@ -34,6 +34,8 @@ type HostDeps struct {
 	Logger *slog.Logger
 	// Chat may be nil; Inference().Complete then fails with a clear error.
 	Chat ChatCompleter
+	// ChatModels may be nil; models are then not checked before inference.
+	ChatModels ChatModelChecker
 	// Metrics may be nil; a no-op sink is used.
 	Metrics MetricsSink
 	// HTTP is the client handed to plugins for external calls. Nil selects
@@ -56,6 +58,15 @@ var DefaultHTTPClient = sync.OnceValue(func() *http.Client {
 	cfg.ResponseHeaderTimeout = PluginHTTPTimeout
 	return httpclient.NewHTTPClient(&cfg)
 })
+
+// ChatModelChecker tells whether a model can answer the chat completions
+// plugin inference sends. A plugin's model field may name any model the
+// gateway lists, decision and embedding models included.
+type ChatModelChecker interface {
+	// ChatUnsupportedReason explains why model cannot answer a chat
+	// completion, or returns "" when it can or the gateway cannot tell.
+	ChatUnsupportedReason(ctx context.Context, model string) string
+}
 
 // HostInfo identifies the instance a Host serves.
 type HostInfo struct {
@@ -118,6 +129,9 @@ func (h *host) Complete(ctx context.Context, req pluginapi.InferenceRequest) (*p
 	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := checkChatModel(ctx, h.deps.ChatModels, req.Model); err != nil {
+		return nil, err
 	}
 	userPath, err := h.inferenceUserPath(ctx, req.UserPath)
 	if err != nil {
@@ -205,4 +219,27 @@ func sanitizeMetricName(name string) string {
 		}
 	}
 	return b.String()
+}
+
+// checkChatModel refuses a model that cannot answer a chat completion, such
+// as a decision model (Jev, Kev) picked as an LLM judge, before the call: the
+// provider would fail every request, and the instance's fail mode would then
+// allow or block all traffic.
+func checkChatModel(ctx context.Context, checker ChatModelChecker, model string) error {
+	if checker == nil {
+		return nil
+	}
+	if reason := checker.ChatUnsupportedReason(ctx, model); reason != "" {
+		return fmt.Errorf("plugins: model %q %s; plugin inference sends chat completions, so choose a chat model", model, reason)
+	}
+	return nil
+}
+
+// CheckChatModel reports whether model can answer the chat completions plugin
+// inference sends, for validating a plugin's model field before it is used.
+func CheckChatModel(ctx context.Context, deps HostDeps, model string) error {
+	if strings.TrimSpace(model) == "" {
+		return nil
+	}
+	return checkChatModel(ctx, deps.ChatModels, model)
 }

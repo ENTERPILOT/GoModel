@@ -10,6 +10,8 @@
 //   extractResponseText      response body -> assistant text (non-streaming)
 //   createStreamAccumulator  SSE events    -> assistant text + assembled body
 
+import { chatCapableModel } from "../../lib/utils/modelSelectors.js";
+
 export const ENDPOINTS = [
   { id: "chat", path: "/v1/chat/completions" },
   { id: "responses", path: "/v1/responses" },
@@ -21,9 +23,6 @@ export const ROLES = ["system", "user", "assistant"];
 // Anthropic's Messages API requires max_tokens; the other endpoints leave it
 // to the provider default unless the user sets one.
 export const DEFAULT_MAX_TOKENS = 1024;
-// Modes advertised by /admin/models metadata that mean "talks text".
-const TEXT_MODES = new Set(["chat", "responses", "messages"]);
-
 export function endpointById(id) {
   return ENDPOINTS.find((endpoint) => endpoint.id === id) || null;
 }
@@ -304,8 +303,9 @@ export function createStreamAccumulator(endpointID) {
 
 // --- Model picker ------------------------------------------------------------
 
-// /admin/models inventory -> [{id, label, provider}] of text-capable, enabled
-// models, deduplicated by public selector and sorted. `label` drops a
+// /admin/models inventory -> [{id, label, provider}] of chat-capable, enabled
+// models (see chatCapableModel; decision models such as Jev are left out),
+// deduplicated by public selector and sorted. `label` drops a
 // "provider/" prefix that merely repeats the provider name, so a picker can
 // show the provider once, as a tag; `id` stays the full selector to send.
 export function playgroundModelOptions(inventory) {
@@ -314,10 +314,7 @@ export function playgroundModelOptions(inventory) {
     const id = String(entry?.selector || entry?.model?.id || "").trim();
     if (!id || seen.has(id)) continue;
     if (entry?.access && entry.access.effective_enabled === false) continue;
-    const modes = entry?.model?.metadata?.modes;
-    if (Array.isArray(modes) && modes.length && !modes.some((mode) => TEXT_MODES.has(mode))) {
-      continue;
-    }
+    if (!chatCapableModel(entry)) continue;
     const provider = String(entry?.provider_name || "");
     const prefix = provider ? provider.toLowerCase() + "/" : "";
     const label = prefix && id.toLowerCase().startsWith(prefix) && id.length > prefix.length

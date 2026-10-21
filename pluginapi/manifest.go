@@ -76,8 +76,11 @@ const (
 	// value, only a mask; the value is encrypted at rest when
 	// GOMODEL_ENCRYPTION_KEY is set, and stored in plaintext otherwise.
 	InputSecret Input = "secret"
-	// InputModel is a model picker listing the gateway's models; the value
-	// is a "provider/model" selector, an alias, or a virtual model.
+	// InputModel is a model picker listing the gateway's chat models; the
+	// value is a "provider/model" selector, an alias, or a virtual model.
+	// Plugins call it through [Host.Inference], which sends chat
+	// completions, so GoModel refuses a model that cannot chat (a decision
+	// or embedding model) when the instance is saved.
 	InputModel Input = "model"
 	// InputBool is an on/off toggle. The value is stored as a JSON boolean;
 	// configuration files may also write true/false as text.

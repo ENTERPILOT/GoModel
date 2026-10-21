@@ -101,9 +101,14 @@ func (b *bootstrap) initWorkflows() error {
 // seeds the instances declared in the configuration.
 func (b *bootstrap) initGuardrails(refreshInterval time.Duration, catalog *plugins.Catalog, executor plugins.ChatCompleter) (*guardrails.Service, error) {
 	app := b.app
+	chatModels := pluginChatModels{router: app.providers.Router}
+	if vm := app.virtualModels.Service; vm != nil {
+		chatModels.resolver = vm
+	}
 	result, err := guardrails.New(b.ctx, app.storage, app.secrets, refreshInterval, catalog, plugins.HostDeps{
-		Logger: slog.Default(),
-		Chat:   executor,
+		Logger:     slog.Default(),
+		Chat:       executor,
+		ChatModels: chatModels,
 	}, b.cfg.AppConfig.Secrets)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize guardrails: %w", err)

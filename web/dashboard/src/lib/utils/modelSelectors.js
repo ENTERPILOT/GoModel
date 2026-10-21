@@ -54,16 +54,34 @@ export function modelSelectorOptions(models, describeProvider = () => "") {
   ];
 }
 
+// CHAT_MODES are the catalog modes whose models answer chat.
+const CHAT_MODES = new Set(["chat", "responses", "messages"]);
+
+// chatCapableModel reports whether an /admin/models entry can answer chat:
+// a model whose catalog lists only other modes (embeddings, images, audio)
+// cannot, nor can a decision model (Jev, Kev: a utility model with no mode),
+// which answers /v1/decisions and /v1/systemone only. A model the catalog
+// does not describe is offered.
+export function chatCapableModel(entry) {
+  const metadata = entry?.model?.metadata;
+  const modes = metadata?.modes;
+  if (Array.isArray(modes) && modes.length) return modes.some((mode) => CHAT_MODES.has(mode));
+  const categories = metadata?.categories;
+  return !(Array.isArray(categories) && categories.includes("utility"));
+}
+
 // modelPickerOptions builds SearchSelect options for a single-model field
-// (a plugin's `model` input): every enabled selector from the shared
-// inventory, sorted, described by its provider. Aliases and virtual models
-// are typed in through the picker's custom entry.
+// (a plugin's `model` input): every enabled chat-capable selector from the
+// shared inventory, sorted, described by its provider. Plugins call their
+// model with chat completions, so models that cannot chat are left out.
+// Aliases and virtual models are typed in through the picker's custom entry.
 export function modelPickerOptions(models) {
   const seen = new Map();
   for (const entry of Array.isArray(models) ? models : []) {
     const value = String(entry?.selector || entry?.model?.id || "").trim();
     if (!value || seen.has(value)) continue;
     if (entry?.access && entry.access.effective_enabled === false) continue;
+    if (!chatCapableModel(entry)) continue;
     seen.set(value, { value, label: value, description: String(entry?.provider_name || "") });
   }
   return [...seen.values()].sort((a, b) => a.value.localeCompare(b.value));

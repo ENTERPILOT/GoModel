@@ -605,8 +605,38 @@ func (s *Service) normalizeDefinition(def Definition) (Definition, error) {
 			return Definition{}, newValidationError("invalid "+def.Type+" config: "+err.Error(), err)
 		}
 	}
+	if err := s.checkModelFields(entry.Manifest.ConfigSchema, config); err != nil {
+		return Definition{}, newValidationError("invalid "+def.Type+" config: "+err.Error(), err)
+	}
 	def.Config = config
 	return def, nil
+}
+
+// checkModelFields refuses a model field naming a model that cannot answer
+// the chat completions plugin inference sends, such as a decision model (Jev,
+// Kev) picked as an LLM judge. Caught here, the operator sees it when saving
+// the guardrail; otherwise every request would fail the inference call and
+// the instance's fail mode would allow or block all traffic. A model the
+// gateway cannot describe yet, such as one whose provider has not listed its
+// models, is accepted, and the host checks it again before each call.
+func (s *Service) checkModelFields(schema []pluginapi.Field, config json.RawMessage) error {
+	var values map[string]json.RawMessage
+	if len(config) == 0 || json.Unmarshal(config, &values) != nil {
+		return nil
+	}
+	for _, field := range schema {
+		if field.Input != pluginapi.InputModel {
+			continue
+		}
+		var model string
+		if json.Unmarshal(values[field.Key], &model) != nil {
+			continue
+		}
+		if err := plugins.CheckChatModel(context.Background(), s.deps, model); err != nil {
+			return fmt.Errorf("%s: %w", field.Key, err)
+		}
+	}
+	return nil
 }
 
 // normalize calls a plugin's Normalize with panic recovery.

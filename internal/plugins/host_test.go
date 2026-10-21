@@ -8,6 +8,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -174,4 +175,31 @@ func TestHostHTTPClient(t *testing.T) {
 	custom := &http.Client{Timeout: time.Second}
 	h = NewHost(HostDeps{HTTP: custom}, HostInfo{PluginName: "presidio", InstanceName: "pii"})
 	require.Same(t, custom, h.HTTPClient())
+}
+
+// staticChatModels refuses every model with one reason.
+type staticChatModels string
+
+func (r staticChatModels) ChatUnsupportedReason(context.Context, string) string { return string(r) }
+
+// A model that cannot answer chat, such as a decision model behind a virtual
+// model that resolved only at request time, is refused before the call.
+func TestHostInferenceRefusesModelsThatCannotChat(t *testing.T) {
+	calls := 0
+	h := NewHost(HostDeps{
+		Chat: chatFunc(func(context.Context, *core.ChatRequest) (*core.ChatResponse, error) {
+			calls++
+			return nil, nil
+		}),
+		ChatModels: staticChatModels("is a decision model (it answers /v1/decisions or /v1/systemone), not a chat model"),
+	}, HostInfo{PluginName: "llm_judge", InstanceName: "judge"})
+
+	_, err := h.Inference().Complete(context.Background(), pluginapi.InferenceRequest{
+		Model:    "jev/jev-latest",
+		Messages: []pluginapi.Message{pluginapi.TextMessage(pluginapi.RoleUser, "hi")},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `model "jev/jev-latest" is a decision model`)
+	assert.Contains(t, err.Error(), "choose a chat model")
+	assert.Zero(t, calls)
 }

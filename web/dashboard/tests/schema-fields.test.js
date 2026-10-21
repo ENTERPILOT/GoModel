@@ -13,7 +13,7 @@ import {
   schemaFieldValue,
   setSchemaFieldValue,
 } from "../src/lib/utils/schemaFields.js";
-import { modelPickerOptions } from "../src/lib/utils/modelSelectors.js";
+import { chatCapableModel, modelPickerOptions } from "../src/lib/utils/modelSelectors.js";
 
 const FIELDS = [
   { key: "api_key", input: "secret" },
@@ -98,6 +98,8 @@ test("modelPickerOptions lists enabled selectors sorted with their provider", ()
     { selector: "anthropic/claude-haiku-4-5", provider_name: "anthropic" },
     { selector: "openai/gpt-4o-mini", provider_name: "openai" },
     { selector: "openai/o1", provider_name: "openai", access: { effective_enabled: false } },
+    { selector: "jev/jev-latest", provider_name: "jev", model: { id: "jev-latest", metadata: { categories: ["utility"] } } },
+    { selector: "openai/text-embedding-3", provider_name: "openai", model: { id: "text-embedding-3", metadata: { modes: ["embedding"] } } },
     { model: { id: "gemini/flash" }, provider_name: "gemini" },
     { selector: "", provider_name: "empty" },
   ];
@@ -107,4 +109,13 @@ test("modelPickerOptions lists enabled selectors sorted with their provider", ()
     { value: "openai/gpt-4o-mini", label: "openai/gpt-4o-mini", description: "openai" },
   ]);
   assert.deepEqual(modelPickerOptions(undefined), []);
+});
+
+test("chatCapableModel leaves out models that cannot answer chat", () => {
+  assert.equal(chatCapableModel({ model: { metadata: { modes: ["chat", "responses"] } } }), true);
+  assert.equal(chatCapableModel({ model: { metadata: { modes: ["messages"] } } }), true);
+  assert.equal(chatCapableModel({ model: { metadata: { modes: ["embedding"] } } }), false);
+  assert.equal(chatCapableModel({ model: { metadata: { categories: ["utility"] } } }), false, "a decision model such as Jev");
+  assert.equal(chatCapableModel({ model: { id: "custom" } }), true, "an undescribed model is offered");
+  assert.equal(chatCapableModel(undefined), true);
 });

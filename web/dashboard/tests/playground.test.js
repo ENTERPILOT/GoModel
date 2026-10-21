@@ -282,6 +282,7 @@ test("playgroundModelOptions keeps enabled text models, deduplicated and sorted"
   const options = playgroundModelOptions([
     { selector: "zeta", provider_name: "openai", model: { id: "zeta", metadata: { modes: ["chat"] } } },
     { selector: "embed", provider_name: "openai", model: { id: "embed", metadata: { modes: ["embedding"] } } },
+    { selector: "jev/jev-latest", provider_name: "jev", model: { id: "jev-latest", metadata: { categories: ["utility"] } } },
     { selector: "alpha", provider_name: "anthropic", model: { id: "alpha", metadata: { modes: ["messages", "chat"] } } },
     { selector: "alpha", provider_name: "mirror", model: { id: "alpha" } },
     { selector: "off", provider_name: "x", model: { id: "off" }, access: { effective_enabled: false } },
