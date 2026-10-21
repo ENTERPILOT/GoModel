@@ -382,6 +382,10 @@ func (a denyingAuthorizer) AllowsModel(_ context.Context, selector core.ModelSel
 	return !a[selector.QualifiedModel()]
 }
 
+func (denyingAuthorizer) ValidateProviderAccess(context.Context, string) error {
+	return nil
+}
+
 func (denyingAuthorizer) FilterPublicModels(_ context.Context, models []core.Model) []core.Model {
 	return models
 }
