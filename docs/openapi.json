@@ -11966,6 +11966,11 @@
               "schema": {
                 "type": "object"
               }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object"
+              }
             }
           },
           "description": "System One request with one Choice question",
@@ -12288,6 +12293,22 @@
         "description": "SDP offer (raw application/sdp body), or a multipart form with sdp and session (JSON) fields",
         "required": true
       },
+      "Request2": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "multipart/form-data": {
+            "schema": {
+              "type": "object"
+            }
+          }
+        },
+        "description": "System One request: model, state, and questions",
+        "required": true
+      },
       "anthropicapi.MessagesRequest": {
         "content": {
           "application/json": {
@@ -12297,17 +12318,6 @@
           }
         },
         "description": "Anthropic Messages request",
-        "required": true
-      },
-      "Request2": {
-        "content": {
-          "application/json": {
-            "schema": {
-              "type": "object"
-            }
-          }
-        },
-        "description": "System One request: model, state, and questions",
         "required": true
       }
     },

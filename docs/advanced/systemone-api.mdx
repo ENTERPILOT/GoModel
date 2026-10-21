@@ -85,6 +85,31 @@ returns its own `404` for them.
 5. Relays the answer unchanged and records it in the audit log (request type
    **Decisions**) and in usage.
 
+## Images
+
+TypeSafe's [image](https://docs.typesafe.ai/images) requests work as sent:
+`assets` in the JSON body, or TypeSafe's `multipart/form-data` form, with the
+JSON request as the first part, named `request`, and each image as a file part
+an asset names with `part`. The TypeSafe SDKs send that form for `Image`
+objects. GoModel inlines each image part into its asset as `data_base64` and
+forwards one JSON request, so guardrails, the cache, and failover handle both
+forms the same way. The image must be a PNG or JPEG; the asset's `format` is
+kept when it states one, and otherwise comes from the image's bytes. A form
+TypeSafe would reject, such as a part no asset uses, an asset naming a
+missing part, or an image that is not a PNG or JPEG, returns `400`. Send the
+`TypeSafe-Danger-Zone-Images: true` header as TypeSafe requires; the gateway
+forwards it. Kev servers read text only.
+
+```bash
+curl -s http://localhost:8080/v1/systemone \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "TypeSafe-Danger-Zone-Images: true" \
+  -F 'request={"model": "jev-latest", "state": {"door": "ref-door"},
+    "assets": {"ref-door": {"type": "image", "part": "door-photo"}},
+    "questions": {"person": {"type": "noul", "instructions": "Is there a person in `door`?"}}};type=application/json' \
+  -F 'door-photo=@door.png;type=image/png'
+```
+
 ## Models
 
 | Provider | Model names |
