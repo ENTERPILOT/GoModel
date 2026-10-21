@@ -19,13 +19,20 @@ updates:
           - "*"
 
   - package-ecosystem: "docker"
-    directory: "/"
+    # .oss-scanner holds the image for Anthropic's OSS Scanner; it pins the same Go.
+    directories:
+      - "/"
+      - "/.oss-scanner"
     schedule:
       interval: "weekly"
     cooldown:
       default-days: 3
     labels:
       - "dependencies"
+    ignore:
+      # Node stays on the major version CI uses (node-version in .github/workflows).
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
     groups:
       docker:
         patterns:
