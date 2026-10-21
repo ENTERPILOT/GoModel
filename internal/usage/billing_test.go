@@ -33,7 +33,8 @@ func TestBilledCost(t *testing.T) {
 		{name: "zero markup", totalCost: new(2.0), markupPercent: new(0.0), want: new(2.0)},
 		{name: "billed cache hit", totalCost: new(2.0), markupPercent: new(50.0), cacheHit: true, billCacheHits: true, want: new(3.0)},
 		{name: "unbilled cache hit", totalCost: new(2.0), markupPercent: new(50.0), cacheHit: true, want: new(0.0)},
-		{name: "unbilled cache hit with unknown cost", cacheHit: true},
+		{name: "unbilled cache hit with unknown cost", cacheHit: true, want: new(0.0)},
+		{name: "billed cache hit with unknown cost", cacheHit: true, billCacheHits: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
