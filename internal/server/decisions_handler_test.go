@@ -427,3 +427,30 @@ func TestDecisions_ProviderSaysWhetherItReadsImages(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "does not read images")
 }
+
+// imageRemovingPatcher stands in for a guardrail that strips images from the
+// input. It returns a copy, leaving the request it was given untouched.
+type imageRemovingPatcher struct{ stateRedactingPatcher }
+
+func (imageRemovingPatcher) PatchDecisionRequest(_ context.Context, req *core.DecisionRequest) (*core.DecisionRequest, error) {
+	patched := *req
+	patched.Input = json.RawMessage(`[{"role":"user","content":[{"type":"input_text","text":"Is the box damaged?"}]}]`)
+	return &patched, nil
+}
+
+// Routing reads the images the guarded input still holds: once a guardrail
+// has removed them, a text-only model answers the request instead of being
+// refused or skipped for images it will never receive.
+func TestDecisions_RoutesOnTheGuardedInput(t *testing.T) {
+	provider := newVisionDecisionsProvider()
+	failovers := failoverResolverStub{selectors: []core.ModelSelector{{Provider: "openai", Model: "gpt-6-luna"}}}
+	handler := newHandler(provider, nil, nil, nil, nil, nil, failovers, imageRemovingPatcher{})
+
+	c, rec := echotest.Post(t, "/v1/decisions", fmt.Sprintf(decisionImageBody, "kev/kev-latest"))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"kev jev kev-latest"}, provider.calls)
+	forwarded, err := json.Marshal(provider.bodies[0]["input"])
+	require.NoError(t, err)
+	assert.NotContains(t, string(forwarded), "input_image")
+}

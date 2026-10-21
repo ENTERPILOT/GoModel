@@ -75,7 +75,15 @@ func (s *translatedInferenceService) serveDecisions(c *echo.Context) error {
 	if !servesDecisions(router, resolution.ProviderType) {
 		return handleError(c, decisionsUnsupportedModelError(c, resolution))
 	}
-	images := decisionInputImages(req.Input)
+
+	body, err = s.guardDecisionInput(c, workflow, &req, body)
+	if err != nil {
+		return handleError(c, err)
+	}
+	// Images are read from the guarded body, the one every target receives:
+	// a guardrail may have removed them, and the patcher may have returned a
+	// copy of the request rather than editing it.
+	images := decisionBodyImages(body)
 	if !s.readsImages(resolution.ResolvedSelector, resolution.ProviderType, images) {
 		promoted, ok := s.imageReadingFailover(c.Request().Context(), router, workflow, images)
 		if !ok {
@@ -83,11 +91,6 @@ func (s *translatedInferenceService) serveDecisions(c *echo.Context) error {
 		}
 		workflow = promoted
 		storeWorkflow(c, workflow)
-	}
-
-	body, err = s.guardDecisionInput(c, workflow, &req, body)
-	if err != nil {
-		return handleError(c, err)
 	}
 	return s.dispatchNativeJSONWithCache(c, workflow, body, func() error {
 		// A target that cannot read the input, such as a text-only Kev
@@ -182,6 +185,18 @@ func (s *translatedInferenceService) readsImages(selector core.ModelSelector, pr
 	}
 	vision, known := model.Metadata.Capabilities["vision"]
 	return !known || vision
+}
+
+// decisionBodyImages reports which images a Decisions request body's input
+// holds.
+func decisionBodyImages(body []byte) decisionImages {
+	var req struct {
+		Input json.RawMessage `json:"input"`
+	}
+	if json.Unmarshal(body, &req) != nil {
+		return decisionImages{}
+	}
+	return decisionInputImages(req.Input)
 }
 
 // decisionInputImages reports which images a Decisions input holds.
