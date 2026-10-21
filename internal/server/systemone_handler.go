@@ -31,13 +31,16 @@ var (
 	systemOneSeparate = systemOneRoute{path: "/v1/systemone/separate", endpoint: "systemone/separate", operation: "systemone_separate", kevOnly: true}
 )
 
-const jevProviderType = "jev"
+const (
+	jevProviderType        = "jev"
+	openRouterProviderType = "openrouter"
+)
 
 // systemOneProviderTypes are the provider types that serve the System One API
 // natively: jev (TypeSafe's hosted Jev and self-hosted Kev servers) and
 // OpenRouter, which serves Jev and Kev at the same path with the same request
 // and answer shapes. Configuring either makes /v1/systemone available.
-var systemOneProviderTypes = []string{jevProviderType, "openrouter"}
+var systemOneProviderTypes = []string{jevProviderType, openRouterProviderType}
 
 // SystemOne handles POST /v1/systemone.
 //

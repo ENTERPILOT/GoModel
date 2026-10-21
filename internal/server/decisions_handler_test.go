@@ -114,7 +114,7 @@ func TestDecisions_UnavailableWithoutDecisionsProvider(t *testing.T) {
 	require.NoError(t, handler.Decisions(c))
 
 	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Contains(t, rec.Body.String(), "openai or jev provider")
+	assert.Contains(t, rec.Body.String(), "openai, jev, or openrouter provider")
 	assert.Empty(t, provider.calls)
 }
 
@@ -378,6 +378,10 @@ func (a denyingAuthorizer) ValidateModelAccess(_ context.Context, selector core.
 	return nil
 }
 
+func (denyingAuthorizer) ValidateProviderAccess(context.Context, string) error {
+	return nil
+}
+
 func (a denyingAuthorizer) AllowsModel(_ context.Context, selector core.ModelSelector) bool {
 	return !a[selector.QualifiedModel()]
 }
@@ -453,4 +457,56 @@ func TestDecisions_RoutesOnTheGuardedInput(t *testing.T) {
 	forwarded, err := json.Marshal(provider.bodies[0]["input"])
 	require.NoError(t, err)
 	assert.NotContains(t, string(forwarded), "input_image")
+}
+
+// newOpenRouterDecisionsProvider configures OpenRouter, which serves chat
+// models and System One decision models from one provider, next to OpenAI.
+func newOpenRouterDecisionsProvider() *scriptedDecisionsProvider {
+	provider := newScriptedDecisionsProvider(map[string]string{
+		"openrouter/typesafe/jev-1.13":  "openrouter",
+		"openrouter/openai/gpt-4o-mini": "openrouter",
+		"openai/gpt-6-luna":             "openai",
+	}, "openai", "openrouter")
+	provider.catalog = map[string]core.Model{
+		"openrouter/typesafe/jev-1.13": {ID: "typesafe/jev-1.13", Metadata: &core.ModelMetadata{
+			Categories: []core.ModelCategory{core.CategoryUtility},
+		}},
+		"openrouter/openai/gpt-4o-mini": {ID: "openai/gpt-4o-mini", Metadata: &core.ModelMetadata{
+			Modes: []string{"chat"}, Categories: []core.ModelCategory{core.CategoryTextGeneration},
+		}},
+	}
+	return provider
+}
+
+// OpenRouter answers Decisions with its System One decision models; its chat
+// models are refused with the reason, as /v1/systemone refuses them.
+func TestDecisions_OpenRouterServesOnlyDecisionModels(t *testing.T) {
+	provider := newOpenRouterDecisionsProvider()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	c, rec := echotest.Post(t, "/v1/decisions", decisionBody("openrouter/typesafe/jev-1.13"))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"openrouter openrouter typesafe/jev-1.13"}, provider.calls)
+
+	c, rec = echotest.Post(t, "/v1/decisions", decisionBody("openrouter/openai/gpt-4o-mini"))
+	require.NoError(t, handler.Decisions(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "is a chat model, not a System One model")
+	assert.Len(t, provider.calls, 1, "the chat model must not be called")
+}
+
+// Failover skips OpenRouter's chat models, which have no Decisions API.
+func TestDecisions_FailoverSkipsOpenRouterChatModels(t *testing.T) {
+	provider := newOpenRouterDecisionsProvider()
+	provider.statuses["gpt-6-luna"] = http.StatusServiceUnavailable
+	handler := newHandler(provider, nil, nil, nil, nil, nil, failoverResolverStub{selectors: []core.ModelSelector{
+		{Provider: "openrouter", Model: "openai/gpt-4o-mini"},
+		{Provider: "openrouter", Model: "typesafe/jev-1.13"},
+	}}, nil)
+
+	c, rec := echotest.Post(t, "/v1/decisions", decisionBody("openai/gpt-6-luna"))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"openai openai gpt-6-luna", "openrouter openrouter typesafe/jev-1.13"}, provider.calls)
 }

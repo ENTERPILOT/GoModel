@@ -59,6 +59,7 @@ func (s *translatedInferenceService) dispatchNativeJSON(
 	eligible func(selector core.ModelSelector, providerType string) bool,
 	send nativeJSONSender,
 ) error {
+	s.warnSkippedResponsePlugins(c.Request().Context(), route)
 	// Record each provider attempt so the audit entry shows a failed primary
 	// and the failover that answered, as it does for chat.
 	c.SetRequest(c.Request().WithContext(gateway.WithAttemptRecorder(c.Request().Context())))
