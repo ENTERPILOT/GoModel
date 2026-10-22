@@ -211,6 +211,10 @@ Stateful note:
   gzip/zstd request bodies. The `jev` checks print `SKIPPED:` when the mock is
   down; `S258` and `S259` call the real `openai/gpt-6-luna`. They delete their
   own `$QA_SUFFIX`-scoped virtual models and are rerunnable in any order
+- `S263` exercises per-key passthrough access on the auth gateway (new keys
+  start without it, the grant endpoint, provider-wide grants for model-less
+  calls, global-admin-only grants); it creates and deactivates its own
+  `$QA_SUFFIX`-scoped keys and is rerunnable in any order
 - `S218` exercises Gemini's native `batchEmbedContents` path (batch input,
   `dimensions`); read-only and rerunnable in any order
 - `S219` asserts the effective resilience configuration on
@@ -6980,9 +6984,10 @@ jq -e '.mock.received_state == "card 4111 1111 1111 1234"' "$F" >/dev/null
 
 ### S241 Managed-key model allowlists cover System One and its passthrough
 
-Runs on the auth gateway with a key allowed only `jev-kev/kev-latest`. Other
-System One models are refused on `/v1/systemone` and on passthrough, including
-a passthrough body larger than the 64 KiB peek window whose `model` comes last.
+Runs on the auth gateway with a key allowed only `jev-kev/kev-latest` and
+granted passthrough access. Other System One models are refused on
+`/v1/systemone` and on passthrough, including a passthrough body larger than
+the 64 KiB peek window whose `model` comes last.
 
 ```bash
 systemone_require_mock "$AUTH_BASE_URL" -H "$ADMIN_AUTH_HEADER"
@@ -6995,7 +7000,7 @@ cleanup_s241() {
 }
 trap cleanup_s241 EXIT
 curl -fsS -X POST "$AUTH_BASE_URL/admin/auth-keys" -H "$ADMIN_AUTH_HEADER" -H 'Content-Type: application/json' \
-  -d "{\"name\":\"qa-s1-allowlist-$QA_SUFFIX\",\"user_path\":\"/qa/systemone/allowlist\",\"allowed_models\":[\"jev-kev/kev-latest\"]}" \
+  -d "{\"name\":\"qa-s1-allowlist-$QA_SUFFIX\",\"user_path\":\"/qa/systemone/allowlist\",\"allowed_models\":[\"jev-kev/kev-latest\"],\"passthrough_access\":true}" \
   > "$KEY_FILE"
 chmod 600 "$KEY_FILE"
 KEY=$(jq -er '.value' "$KEY_FILE")
@@ -8324,4 +8329,105 @@ F="$QA_RUN_DIR/s262.br.json"
 CODE=$(printf '%s' "$BODY" | curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone" \
   -H 'Content-Type: application/json' -H 'Content-Encoding: br' --data-binary @-)
 assert_http_status 415 "$CODE" "$F"
+```
+
+## 41. Passthrough access for managed keys
+
+### S263 Managed keys need passthrough access, and model-less calls a provider-wide grant
+
+Runs on the auth gateway. A new managed key starts without passthrough access
+and is refused with `403 passthrough_access_denied`. Once granted, a body that
+names an allowlisted model goes through, but a call that names no model needs
+the whole provider on the allowlist. Only a global admin can grant access; a
+user-path scoped dashboard key can still revoke it.
+
+```bash
+systemone_require_mock "$AUTH_BASE_URL" -H "$ADMIN_AUTH_HEADER"
+
+KEYS_DIR="$QA_RUN_DIR/s263.keys"
+mkdir -p "$KEYS_DIR"
+chmod 700 "$KEYS_DIR"
+cleanup_s263() {
+  for f in "$KEYS_DIR"/*.json; do
+    [ -s "$f" ] || continue
+    curl -sS -o /dev/null -X POST "$AUTH_BASE_URL/admin/auth-keys/$(jq -r '.id' "$f")/deactivate" -H "$ADMIN_AUTH_HEADER" || true
+  done
+}
+trap cleanup_s263 EXIT
+
+create_key() {
+  curl -fsS -X POST "$AUTH_BASE_URL/admin/auth-keys" -H "$ADMIN_AUTH_HEADER" -H 'Content-Type: application/json' \
+    -d "$2" > "$KEYS_DIR/$1.json"
+}
+call() {
+  local key="$1" out="$2" path="$3"
+  shift 3
+  curl -sS -o "$out" -w '%{http_code}' "$AUTH_BASE_URL$path" -H "Authorization: Bearer $key" "$@"
+}
+set_passthrough() {
+  curl -sS -o "$3" -w '%{http_code}' -X PUT "$AUTH_BASE_URL/admin/auth-keys/$1/passthrough-access" \
+    -H "Authorization: Bearer $2" -H 'Content-Type: application/json' -d "$4"
+}
+SYSTEMONE_BODY="{\"model\":\"jev-latest\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}"
+
+create_key model "{\"name\":\"qa-pt-model-$QA_SUFFIX\",\"user_path\":\"/qa/passthrough/model\",\"allowed_models\":[\"jev/jev-latest\"]}"
+jq -e '.passthrough_access == false' "$KEYS_DIR/model.json" >/dev/null
+MODEL_ID=$(jq -er '.id' "$KEYS_DIR/model.json")
+MODEL_KEY=$(jq -er '.value' "$KEYS_DIR/model.json")
+
+F="$QA_RUN_DIR/s263.default-denied.json"
+CODE=$(call "$MODEL_KEY" "$F" /p/jev/v1/systemone -H 'Content-Type: application/json' -d "$SYSTEMONE_BODY")
+assert_http_status 403 "$CODE" "$F"
+jq -e '.error.code == "passthrough_access_denied"' "$F" >/dev/null
+
+# The same key still reaches the translated route; only passthrough is gated.
+F="$QA_RUN_DIR/s263.translated.json"
+CODE=$(call "$MODEL_KEY" "$F" /v1/systemone -H 'Content-Type: application/json' \
+  -d "{\"model\":\"jev/jev-latest\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}")
+assert_http_status 200 "$CODE" "$F"
+
+F="$QA_RUN_DIR/s263.grant-missing.json"
+CODE=$(set_passthrough "$MODEL_ID" "$GOMODEL_MASTER_KEY" "$F" '{}')
+assert_http_status 400 "$CODE" "$F"
+
+F="$QA_RUN_DIR/s263.grant.json"
+CODE=$(set_passthrough "$MODEL_ID" "$GOMODEL_MASTER_KEY" "$F" '{"passthrough_access":true}')
+assert_http_status 200 "$CODE" "$F"
+jq -e '.passthrough_access == true' "$F" >/dev/null
+curl -fsS "$AUTH_BASE_URL/admin/auth-keys" -H "$ADMIN_AUTH_HEADER" \
+  | jq -e --arg id "$MODEL_ID" '[.[] | select(.id == $id)][0].passthrough_access == true' >/dev/null
+
+F="$QA_RUN_DIR/s263.granted.json"
+CODE=$(call "$MODEL_KEY" "$F" /p/jev/v1/systemone -H 'Content-Type: application/json' -d "$SYSTEMONE_BODY")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.mock.upstream == "jev"' "$F" >/dev/null
+
+# A model-less call acts on the whole provider account.
+F="$QA_RUN_DIR/s263.modelless-denied.json"
+CODE=$(call "$MODEL_KEY" "$F" /p/jev/v1/models)
+assert_http_status 400 "$CODE" "$F"
+jq -e '.error.code == "model_access_denied" and (.error.message | contains("jev/"))' "$F" >/dev/null
+
+create_key provider "{\"name\":\"qa-pt-provider-$QA_SUFFIX\",\"user_path\":\"/qa/passthrough/provider\",\"allowed_models\":[\"jev/\"],\"passthrough_access\":true}"
+jq -e '.passthrough_access == true' "$KEYS_DIR/provider.json" >/dev/null
+F="$QA_RUN_DIR/s263.modelless-provider.json"
+CODE=$(call "$(jq -er '.value' "$KEYS_DIR/provider.json")" "$F" /p/jev/v1/models)
+assert_http_status 200 "$CODE" "$F"
+
+# A user-path scoped admin may revoke passthrough access but not grant it.
+create_key admin "{\"name\":\"qa-pt-admin-$QA_SUFFIX\",\"user_path\":\"/qa/passthrough\",\"dashboard_access\":true}"
+ADMIN_KEY=$(jq -er '.value' "$KEYS_DIR/admin.json")
+F="$QA_RUN_DIR/s263.scoped-revoke.json"
+CODE=$(set_passthrough "$MODEL_ID" "$ADMIN_KEY" "$F" '{"passthrough_access":false}')
+assert_http_status 200 "$CODE" "$F"
+jq -e '.passthrough_access == false' "$F" >/dev/null
+F="$QA_RUN_DIR/s263.scoped-grant.json"
+CODE=$(set_passthrough "$MODEL_ID" "$ADMIN_KEY" "$F" '{"passthrough_access":true}')
+assert_http_status 403 "$CODE" "$F"
+jq -e '.error.code == "admin_scope_denied"' "$F" >/dev/null
+
+F="$QA_RUN_DIR/s263.revoked.json"
+CODE=$(call "$MODEL_KEY" "$F" /p/jev/v1/systemone -H 'Content-Type: application/json' -d "$SYSTEMONE_BODY")
+assert_http_status 403 "$CODE" "$F"
+jq -e '.error.code == "passthrough_access_denied"' "$F" >/dev/null
 ```
