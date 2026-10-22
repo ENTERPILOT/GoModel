@@ -98,6 +98,33 @@ func NullableString(value string) any {
 	return value
 }
 
+// JSONStrings marshals values to a JSON array for a NOT NULL JSON column;
+// nil and empty both persist as "[]". Marshaling a []string cannot fail.
+func JSONStrings(values []string) string {
+	if values == nil {
+		values = []string{}
+	}
+	data, _ := json.Marshal(values)
+	return string(data)
+}
+
+// DecodeJSONStrings parses a JSON array column written by JSONStrings. Empty
+// input and an empty array both decode to nil. Unlike StringsFromJSON, a
+// malformed value is returned as an error.
+func DecodeJSONStrings(raw []byte) ([]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var values []string
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return nil, err
+	}
+	if len(values) == 0 {
+		return nil, nil
+	}
+	return values, nil
+}
+
 // NullableJSONStrings marshals values to a JSON array for binding to a JSON
 // column. Returns nil (SQL NULL) when values is empty or marshaling fails;
 // failures are logged with ref identifying the row.

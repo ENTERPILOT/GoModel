@@ -139,31 +139,6 @@ func decodeJSONMap(data []byte) (map[string]string, error) {
 	return value, nil
 }
 
-func encodeJSONList(value []string) (string, error) {
-	if value == nil {
-		value = []string{}
-	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return "", fmt.Errorf("encode list: %w", err)
-	}
-	return string(data), nil
-}
-
-func decodeJSONList(data []byte) ([]string, error) {
-	if len(data) == 0 {
-		return nil, nil
-	}
-	var value []string
-	if err := json.Unmarshal(data, &value); err != nil {
-		return nil, fmt.Errorf("decode list: %w", err)
-	}
-	if len(value) == 0 {
-		return nil, nil
-	}
-	return value, nil
-}
-
 // stampUpsert sets timestamps: CreatedAt on insert, UpdatedAt always.
 func stampUpsert(server *ManagedServer) {
 	if strings.TrimSpace(server.DisplayName) == "" {

@@ -47,6 +47,49 @@ func TestStringsFromJSON(t *testing.T) {
 	}
 }
 
+func TestJSONStrings(t *testing.T) {
+	tests := []struct {
+		name   string
+		values []string
+		want   string
+	}{
+		{name: "nil persists as empty array", values: nil, want: "[]"},
+		{name: "empty persists as empty array", values: []string{}, want: "[]"},
+		{name: "values marshal", values: []string{"team-a", "batch"}, want: `["team-a","batch"]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, JSONStrings(tt.values))
+		})
+	}
+}
+
+func TestDecodeJSONStrings(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    []string
+		wantErr bool
+	}{
+		{name: "empty column yields nil", raw: "", want: nil},
+		{name: "empty array yields nil", raw: "[]", want: nil},
+		{name: "array parses", raw: `["team-a","batch"]`, want: []string{"team-a", "batch"}},
+		{name: "malformed value errors", raw: "{not-json", wantErr: true},
+		{name: "wrong JSON type errors", raw: `{"a":1}`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := DecodeJSONStrings([]byte(tt.raw))
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestTimeFromUnix(t *testing.T) {
 	tests := []struct {
 		name  string

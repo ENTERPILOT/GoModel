@@ -32,17 +32,6 @@ func encodeTargets(targets []Target) (string, error) {
 	return string(data), nil
 }
 
-func encodeUserPaths(paths []string) (string, error) {
-	if paths == nil {
-		paths = []string{}
-	}
-	data, err := json.Marshal(paths)
-	if err != nil {
-		return "", fmt.Errorf("encode user_paths: %w", err)
-	}
-	return string(data), nil
-}
-
 // encodeStrategyConfig stores a strategy config as a JSON object; nil and
 // empty both persist as "{}".
 func encodeStrategyConfig(config map[string]any) (string, error) {
@@ -84,20 +73,6 @@ func decodeTargets(data []byte) ([]Target, error) {
 		return nil, nil
 	}
 	return targets, nil
-}
-
-func decodeUserPaths(data []byte) ([]string, error) {
-	if len(data) == 0 {
-		return nil, nil
-	}
-	var paths []string
-	if err := json.Unmarshal(data, &paths); err != nil {
-		return nil, fmt.Errorf("decode user_paths: %w", err)
-	}
-	if len(paths) == 0 {
-		return nil, nil
-	}
-	return paths, nil
 }
 
 // stampUpsert sets CreatedAt on insert and UpdatedAt on every write.
