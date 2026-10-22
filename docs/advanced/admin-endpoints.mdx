@@ -212,8 +212,9 @@ For a scoped admin:
   allowed models can only give the keys it creates or edits models it is
   allowed itself: `openai/*` can grant `openai/gpt-4o-mini`, but not
   `anthropic/*` or an unrestricted key (`403 allowed_models_out_of_scope`).
-  These rules apply to global keys too, which also cannot re-import their
-  own token or import a key with broader models.
+  These rules apply to global keys too, which also cannot import a key with
+  broader models or re-import their own token, except with
+  `"enabled": false` to deactivate it.
 - Only user-path budgets and rate limits are visible and editable; label,
   provider, and model rules are gateway-wide.
 - Gateway-wide endpoints return `403` with code `admin_scope_denied`: provider
