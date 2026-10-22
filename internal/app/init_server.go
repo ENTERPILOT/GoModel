@@ -228,7 +228,9 @@ func (b *bootstrap) initResponseCache() error {
 	}
 
 	vm := app.virtualModels.Service
-	internalGuardrailExecutor := server.NewInternalChatCompletionExecutor(b.provider, server.InternalChatCompletionExecutorConfig{
+	// The guard sees every attempt's resolved model, failover alternates
+	// included, and refuses one that cannot chat before it goes upstream.
+	internalGuardrailExecutor := server.NewInternalChatCompletionExecutor(chatModelGuard{Router: app.providers.Router}, server.InternalChatCompletionExecutorConfig{
 		ModelResolver:          vm,
 		ModelAuthorizer:        vm,
 		WorkflowPolicyResolver: app.workflows.Service,

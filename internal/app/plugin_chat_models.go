@@ -36,7 +36,8 @@ func chatUnsupportedReason(router *providers.Router, model string) string {
 }
 
 // chatModelGuard is the router plugin inference reaches once virtual models
-// are resolved, so it sees the concrete model each call resolved to, under
+// are resolved: the internal chat executor's provider, and the startup
+// executor's before that. It sees the concrete model of each attempt, under
 // the plugin call's own user path, and adds no selection of its own. It
 // refuses a model that cannot chat, such as a decision model behind a
 // virtual model, before the provider call: that provider would fail every
