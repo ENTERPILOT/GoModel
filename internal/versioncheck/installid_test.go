@@ -76,15 +76,17 @@ func (s *fakeStore) SetDefault(_ context.Context, key, value string) (string, er
 	return value, nil
 }
 
-func (s *fakeStore) Set(_ context.Context, key, value string) error {
+func (s *fakeStore) Replace(_ context.Context, key, old, value string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sets++
 	if s.setErr != nil {
-		return s.setErr
+		return "", s.setErr
 	}
-	s.values[key] = value
-	return nil
+	if s.values[key] == old {
+		s.values[key] = value
+	}
+	return s.values[key], nil
 }
 
 func (s *fakeStore) fail(get, set error) {
@@ -317,29 +319,54 @@ func TestResolveInstallIDReplacesDerivedID(t *testing.T) {
 	}
 }
 
-// Replicas that upgrade together each replace the derived id; after one more
-// check they all report the replacement the database kept.
+// Replicas that upgrade together each try to replace the derived id; all of
+// them end up reporting the one replacement the database kept.
 func TestIdentityConvergesWhenReplicasReplaceDerivedID(t *testing.T) {
 	useTempDataDir(t)
 	store := newFakeStore()
 	store.values[InstallIDKey] = derivedID
 
 	const replicas = 8
-	identities := make([]*Identity, replicas)
+	ids := make([]string, replicas)
 	var wg sync.WaitGroup
 	for r := range replicas {
-		identities[r] = NewIdentity(store)
-		wg.Go(func() { identities[r].ID(context.Background()) })
+		wg.Go(func() { ids[r] = NewIdentity(store).ID(context.Background()) })
 	}
 	wg.Wait()
 
 	winner := store.value(InstallIDKey)
 	require.False(t, derivedFromSecret(winner))
-	for r, identity := range identities {
-		id, source := identity.Resolve(context.Background())
+	for r, id := range ids {
 		assert.Equal(t, winner, id, "replica %d", r)
-		assert.Equal(t, SourceDatabase, source, "replica %d", r)
 	}
+}
+
+// staleReadStore answers Get with the value it saw before another replica
+// wrote, as a replica does when it reads just before that write.
+type staleReadStore struct {
+	*fakeStore
+	stale string
+}
+
+func (s staleReadStore) Get(context.Context, string) (string, bool, error) {
+	return s.stale, true, nil
+}
+
+// A replica that read the derived id just before another replica replaced it
+// must adopt that replacement instead of overwriting it.
+func TestIdentityAdoptsReplacementWrittenAfterItsRead(t *testing.T) {
+	useTempDataDir(t)
+	store := newFakeStore()
+	store.values[InstallIDKey] = derivedID
+
+	first, _ := NewIdentity(store).Resolve(context.Background())
+	require.Equal(t, first, store.value(InstallIDKey))
+
+	useTempDataDir(t) // replicas share the database, not the data directory
+	second, source := NewIdentity(staleReadStore{fakeStore: store, stale: derivedID}).Resolve(context.Background())
+	assert.Equal(t, first, second)
+	assert.Equal(t, SourceDatabase, source)
+	assert.Equal(t, first, store.value(InstallIDKey))
 }
 
 func TestDerivedFromSecret(t *testing.T) {

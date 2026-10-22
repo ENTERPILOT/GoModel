@@ -26,12 +26,13 @@ const InstallIDKey = "install_id"
 // like a runtime setting, so it shares the table.
 type Store interface {
 	Get(ctx context.Context, key string) (value string, found bool, err error)
-	// Set overwrites the stored value. It is used only to replace an id that
-	// was derived from the master key.
-	Set(ctx context.Context, key, value string) error
 	// SetDefault stores value only when key has no value yet, and returns
 	// whatever is stored afterwards. It must be atomic across instances.
 	SetDefault(ctx context.Context, key, value string) (string, error)
+	// Replace stores value only when key still holds old, and returns
+	// whatever is stored afterwards. It must be atomic across instances. It
+	// is used only to replace an id that was derived from the master key.
+	Replace(ctx context.Context, key, old, value string) (string, error)
 }
 
 // InstallIDSource names where a resolved identifier came from, for the
@@ -117,7 +118,7 @@ func (i *Identity) Resolve(ctx context.Context) (string, InstallIDSource) {
 	}
 
 	storeUsable := i.store != nil
-	storedDerived := false
+	derivedStored := "" // the exact stored value, for the conditional replace
 	if storeUsable {
 		stored, found, err := i.store.Get(ctx, InstallIDKey)
 		switch {
@@ -125,7 +126,7 @@ func (i *Identity) Resolve(ctx context.Context) (string, InstallIDSource) {
 			i.warnStoreOnce("install id database unavailable; using the local copy until it answers", err)
 			storeUsable = false
 		case found && derivedFromSecret(stored):
-			storedDerived = true
+			derivedStored = stored
 		case found && strings.TrimSpace(stored) != "":
 			i.adopt(strings.TrimSpace(stored), SourceDatabase, true)
 			if i.id != fileID {
@@ -147,12 +148,18 @@ func (i *Identity) Resolve(ctx context.Context) (string, InstallIDSource) {
 	}
 
 	switch {
-	case storeUsable && storedDerived:
-		// SetDefault would keep the derived id, so overwrite it. Stay
-		// unsettled: the next call reads back whichever replacement the
-		// database kept, so replicas upgrading together converge on one id.
-		if err := i.store.Set(ctx, InstallIDKey, i.id); err != nil {
+	case storeUsable && derivedStored != "":
+		// SetDefault would keep the derived id, so replace it, but only while
+		// it is still there: a replica upgrading at the same time may have
+		// replaced it first, and then its id is the deployment's.
+		stored, err := i.store.Replace(ctx, InstallIDKey, derivedStored, i.id)
+		switch {
+		case err != nil:
 			i.warnStoreOnce("install id could not be replaced in the database; it stays in the data directory until it can", err)
+		case stored == i.id:
+			i.settled = true
+		case strings.TrimSpace(stored) != "" && !derivedFromSecret(stored):
+			i.adopt(strings.TrimSpace(stored), SourceDatabase, true)
 		}
 	case storeUsable:
 		stored, err := i.store.SetDefault(ctx, InstallIDKey, i.id)
