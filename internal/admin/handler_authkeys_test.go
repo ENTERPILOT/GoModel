@@ -399,6 +399,10 @@ func TestAuthKeyAllowedModelsMustStayWithinCaller(t *testing.T) {
 		{name: "empty list is unrestricted", callerModels: []string{"openai/gpt-4o-mini"}, body: `[]`, wantStatus: http.StatusForbidden},
 		{name: "model outside the caller's list", callerModels: []string{"openai/gpt-4o-mini"}, body: `["openai/gpt-4o"]`, wantStatus: http.StatusForbidden},
 		{name: "unrestricted caller", body: `[]`, wantStatus: http.StatusOK},
+		{name: "provider-wide caller grants one model", callerModels: []string{"openai/"}, body: `["openai/gpt-4o-mini"]`, wantStatus: http.StatusOK},
+		{name: "provider-wide caller grants another provider", callerModels: []string{"openai/"}, body: `["anthropic/claude-sonnet-4-6"]`, wantStatus: http.StatusForbidden},
+		{name: "global selector caller grants unrestricted", callerModels: []string{"/"}, body: `[]`, wantStatus: http.StatusOK},
+		{name: "bare name caller grants that model on one provider", callerModels: []string{"gpt-4o-mini"}, body: `["openai/gpt-4o-mini"]`, wantStatus: http.StatusOK},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name+"/create", func(t *testing.T) {

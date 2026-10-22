@@ -139,35 +139,24 @@ func NewHTTPClient(config *ClientConfig) *http.Client {
 	return &http.Client{
 		Transport:     transport,
 		Timeout:       config.Timeout,
-		CheckRedirect: dropCredentialsOnCrossOriginRedirect,
+		CheckRedirect: stopCrossOriginRedirects,
 	}
 }
 
-// credentialHeaders are the request headers providers send credentials in.
-var credentialHeaders = []string{
-	"Authorization",
-	"Proxy-Authorization",
-	"Cookie",
-	"X-Api-Key",
-	"Api-Key",
-	"X-Goog-Api-Key",
-	"X-Amz-Security-Token",
-}
-
-// dropCredentialsOnCrossOriginRedirect follows redirects like net/http's
-// default policy, but removes every credential header once a hop leaves the
-// original scheme, host, and port. net/http removes only Authorization and
-// cookies, and keeps them for subdomains and other ports, so a key sent as
-// X-Api-Key, Api-Key, or X-Goog-Api-Key would follow a redirect to any host.
-func dropCredentialsOnCrossOriginRedirect(req *http.Request, via []*http.Request) error {
+// stopCrossOriginRedirects follows redirects like net/http's default policy
+// while they stay on the original scheme, host, and port, and hands any other
+// redirect back to the caller unfollowed. Following one would resend the
+// request to another host: provider credentials that net/http does not strip
+// (X-Api-Key, Api-Key, X-Goog-Api-Key, xi-api-key, ...), tokens a wrapping
+// transport adds on every hop (Google OAuth), and, for 307 and 308, the
+// request body.
+func stopCrossOriginRedirects(req *http.Request, via []*http.Request) error {
 	if len(via) >= maxRedirects {
 		return fmt.Errorf("stopped after %d redirects", maxRedirects)
 	}
 	origin := via[0].URL
 	if req.URL.Scheme != origin.Scheme || !strings.EqualFold(req.URL.Host, origin.Host) {
-		for _, name := range credentialHeaders {
-			req.Header.Del(name)
-		}
+		return http.ErrUseLastResponse
 	}
 	return nil
 }

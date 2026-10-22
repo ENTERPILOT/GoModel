@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -202,15 +204,24 @@ func TestDefaultConfigTimeoutPrecedence(t *testing.T) {
 	require.Equal(t, 600*time.Second, got)
 }
 
-// A redirect to another origin must not carry the provider credential along,
-// whichever header the provider sends it in.
-func TestNewHTTPClientDropsCredentialsOnCrossOriginRedirect(t *testing.T) {
-	credentials := map[string]string{
-		"Authorization":  "Bearer sk-openai",
-		"X-Api-Key":      "sk-ant",
-		"Api-Key":        "azure-key",
-		"X-Goog-Api-Key": "goog-key",
-	}
+// tokenTransport adds a credential on every round trip, as the Google OAuth
+// transport does, so stripping headers in CheckRedirect could not stop it.
+type tokenTransport struct{ base http.RoundTripper }
+
+func (t tokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	req.Header.Set("Authorization", "Bearer ya29.token")
+	return t.base.RoundTrip(req)
+}
+
+// A redirect to another origin is handed back unfollowed, so neither the
+// provider credential, a token a wrapping transport adds, nor the request
+// body reaches the other host. Same-origin redirects are still followed.
+func TestNewHTTPClientDoesNotFollowCrossOriginRedirects(t *testing.T) {
+	var otherHits atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { otherHits.Add(1) }))
+	defer other.Close()
+
 	received := make(chan http.Header, 1)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/next", func(w http.ResponseWriter, r *http.Request) { received <- r.Header.Clone() })
@@ -218,35 +229,78 @@ func TestNewHTTPClientDropsCredentialsOnCrossOriginRedirect(t *testing.T) {
 	defer server.Close()
 	serverURL, err := url.Parse(server.URL)
 	require.NoError(t, err)
-	// localhost reaches the same listener as 127.0.0.1 but is another origin.
-	mux.Handle("/cross-origin", http.RedirectHandler("http://localhost:"+serverURL.Port()+"/next", http.StatusTemporaryRedirect))
+	// localhost reaches the same listener as 127.0.0.1 but is another host.
+	mux.Handle("/other-host", http.RedirectHandler("http://localhost:"+serverURL.Port()+"/next", http.StatusTemporaryRedirect))
+	mux.Handle("/other-port", http.RedirectHandler(other.URL+"/next", http.StatusPermanentRedirect))
 	mux.Handle("/same-origin", http.RedirectHandler("/next", http.StatusTemporaryRedirect))
 
 	tests := []struct {
-		path            string
-		wantCredentials bool
+		name       string
+		method     string
+		path       string
+		transport  func(http.RoundTripper) http.RoundTripper
+		wantStatus int
 	}{
-		{path: "/cross-origin", wantCredentials: false},
-		{path: "/same-origin", wantCredentials: true},
+		{name: "other host", method: http.MethodGet, path: "/other-host", wantStatus: http.StatusTemporaryRedirect},
+		{name: "other port with body", method: http.MethodPost, path: "/other-port", wantStatus: http.StatusPermanentRedirect},
+		{
+			name: "token-adding transport", method: http.MethodPost, path: "/other-port", wantStatus: http.StatusPermanentRedirect,
+			transport: func(base http.RoundTripper) http.RoundTripper { return tokenTransport{base: base} },
+		},
+		{name: "same origin", method: http.MethodGet, path: "/same-origin", wantStatus: http.StatusOK},
 	}
 	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+tt.path, nil)
-			require.NoError(t, err)
-			for name, value := range credentials {
-				req.Header.Set(name, value)
+		t.Run(tt.name, func(t *testing.T) {
+			otherHits.Store(0)
+			client := NewHTTPClient(nil)
+			if tt.transport != nil {
+				client.Transport = tt.transport(client.Transport)
 			}
-			resp, err := NewHTTPClient(nil).Do(req)
+			req, err := http.NewRequestWithContext(t.Context(), tt.method, server.URL+tt.path, strings.NewReader(`{"prompt":"secret"}`))
+			require.NoError(t, err)
+			req.Header.Set("X-Api-Key", "sk-ant")
+
+			resp, err := client.Do(req)
 			require.NoError(t, err)
 			require.NoError(t, resp.Body.Close())
+			assert.Equal(t, tt.wantStatus, resp.StatusCode)
 
-			got := <-received
-			for name, value := range credentials {
-				if tt.wantCredentials {
-					assert.Equal(t, value, got.Get(name), name)
-				} else {
-					assert.Empty(t, got.Get(name), name)
-				}
+			if tt.wantStatus == http.StatusOK {
+				got := <-received
+				assert.Equal(t, "sk-ant", got.Get("X-Api-Key"), "same-origin redirect keeps the credential")
+				return
+			}
+			assert.Zero(t, otherHits.Load(), "cross-origin target was contacted")
+			select {
+			case <-received:
+				t.Fatal("cross-origin redirect was followed")
+			default:
+			}
+		})
+	}
+}
+
+func TestStopCrossOriginRedirects(t *testing.T) {
+	tests := []struct {
+		from, to string
+		wantStop bool
+	}{
+		{from: "https://api.example.com/v1/x", to: "https://api.example.com/v1/y"},
+		{from: "https://api.example.com/v1/x", to: "https://API.example.com/v1/y"},
+		{from: "https://api.example.com/v1/x", to: "http://api.example.com/v1/y", wantStop: true},
+		{from: "https://api.example.com/v1/x", to: "https://api.example.com:8443/v1/y", wantStop: true},
+		{from: "https://api.example.com/v1/x", to: "https://files.example.com/v1/y", wantStop: true},
+		{from: "https://api.example.com/v1/x", to: "https://evil.test/", wantStop: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.to, func(t *testing.T) {
+			from := httptest.NewRequest(http.MethodGet, tt.from, nil)
+			to := httptest.NewRequest(http.MethodGet, tt.to, nil)
+			err := stopCrossOriginRedirects(to, []*http.Request{from})
+			if tt.wantStop {
+				assert.ErrorIs(t, err, http.ErrUseLastResponse)
+			} else {
+				assert.NoError(t, err)
 			}
 		})
 	}

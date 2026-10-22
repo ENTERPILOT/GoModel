@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -106,4 +107,43 @@ func TestImportAuthKeyReturns503WhenServiceUnavailable(t *testing.T) {
 func hexOf(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
+}
+
+// Import must not let a key widen its own access, or issue a token broader
+// than its own allowlist.
+func TestImportAuthKeyHonorsCallerRestrictions(t *testing.T) {
+	service, err := authkeys.NewService(newAuthKeyTestStore())
+	require.NoError(t, err)
+	h := NewHandler(nil, nil, WithAuthKeys(service))
+
+	importAs := func(callerID string, callerModels []string, body string) *httptest.ResponseRecorder {
+		c, rec := echotest.Post(t, "/admin/auth-keys/import", body)
+		if callerID != "" {
+			asManagedKey(c, callerID, "", callerModels...)
+		}
+		require.NoError(t, h.ImportAuthKey(c))
+		return rec
+	}
+	body := func(token, models string) string {
+		return `{"name":"imported","imported_from":"litellm","secret_hash":"` + hexOf(token) + `","redacted_value":"sk-...` + token[len(token)-4:] + `","allowed_models":` + models + `}`
+	}
+
+	rec := importAs("", nil, body("sk-own-token-abcd", `["openai/gpt-4o-mini"]`))
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	own := echotest.Decode[authkeys.View](t, rec)
+
+	t.Run("broader allowlist", func(t *testing.T) {
+		rec := importAs("caller", []string{"openai/gpt-4o-mini"}, body("sk-other-token-wxyz", `[]`))
+		assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+		assert.Contains(t, rec.Body.String(), codeAllowedModelsOutOfScope)
+	})
+	t.Run("re-importing its own token", func(t *testing.T) {
+		rec := importAs(own.ID, []string{"openai/gpt-4o-mini"}, body("sk-own-token-abcd", `["openai/gpt-4o-mini"]`))
+		assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+		assert.Contains(t, rec.Body.String(), codeAuthKeySelfUpdate)
+	})
+	t.Run("narrower allowlist", func(t *testing.T) {
+		rec := importAs("caller", []string{"openai/"}, body("sk-third-token-qrst", `["openai/gpt-4o-mini"]`))
+		assert.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	})
 }

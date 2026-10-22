@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/users"
 	"github.com/enterpilot/gomodel/internal/validation"
 )
 
@@ -179,6 +179,16 @@ func (h *Handler) ImportAuthKey(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	if err := requireAllowedModelsWithinCaller(c, allowedModels); err != nil {
+		return handleError(c, err)
+	}
+	// Importing a token again updates the key stored under its hash, so the
+	// key itself must not be the one importing it.
+	if id, ok := h.authKeys.IDBySecretHash(req.SecretHash); ok {
+		if err := requireNotOwnAuthKey(c, id); err != nil {
+			return handleError(c, err)
+		}
+	}
 
 	view, outcome, err := h.authKeys.Import(c.Request().Context(), authkeys.ImportInput{
 		Name:              req.Name,
@@ -333,18 +343,21 @@ func requirePassthroughGrantScope(c *echo.Context, grant bool) error {
 }
 
 // requireAllowedModelsWithinCaller keeps a credential that is itself limited
-// to a model allowlist from issuing broader keys: the target allowlist must be
-// non-empty, since empty means unrestricted, and drawn from the caller's own.
+// to a model allowlist from issuing broader keys: every selector in the
+// target allowlist must permit only models the caller's own allowlist
+// permits, and an empty target allowlist counts as every model.
 func requireAllowedModelsWithinCaller(c *echo.Context, allowedModels []string) error {
 	callerModels := core.GetCredentialAllowedModels(c.Request().Context())
 	if len(callerModels) == 0 {
 		return nil
 	}
 	if len(allowedModels) == 0 {
-		return allowedModelsOutOfScopeError()
+		// An empty allowlist is unrestricted: only a caller allowed every
+		// model may grant it.
+		allowedModels = []string{"/"}
 	}
 	for _, model := range allowedModels {
-		if !slices.Contains(callerModels, model) {
+		if !users.Covers(callerModels, model) {
 			return allowedModelsOutOfScopeError()
 		}
 	}
@@ -352,7 +365,7 @@ func requireAllowedModelsWithinCaller(c *echo.Context, allowedModels []string) e
 }
 
 func allowedModelsOutOfScopeError() error {
-	return core.NewPermissionError("allowed_models must be a non-empty subset of the credential's own allowed models").
+	return core.NewPermissionError("allowed_models must not permit models outside the credential's own allowed models").
 		WithCode(codeAllowedModelsOutOfScope)
 }
 
