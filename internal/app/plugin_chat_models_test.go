@@ -56,6 +56,25 @@ func TestPluginChatModels_ChecksTheModelAsNamed(t *testing.T) {
 	assert.Empty(t, checker.ChatUnsupportedReason(context.Background(), "decider"), "a virtual model is not resolved at save time")
 }
 
+// A selector may name a provider by its type; the check canonicalizes it
+// before reading the catalog, so a decision model addressed that way is
+// still refused when the guardrail is saved.
+func TestPluginChatModels_ResolvesProviderTypeSelectors(t *testing.T) {
+	kev := &countingChatProvider{models: &core.ModelsResponse{Object: "list", Data: []core.Model{
+		{ID: "kev-latest", Object: "model", Metadata: &core.ModelMetadata{Categories: []core.ModelCategory{core.CategoryUtility}}},
+	}}}
+	registry := providers.NewModelRegistry()
+	registry.RegisterProviderWithNameAndType(kev, "kev", "jev")
+	require.NoError(t, registry.Initialize(context.Background()))
+	router, err := providers.NewRouter(registry)
+	require.NoError(t, err)
+	checker := pluginChatModels{router: router}
+
+	assert.Contains(t, checker.ChatUnsupportedReason(context.Background(), "kev/kev-latest"), "is a decision model")
+	assert.Contains(t, checker.ChatUnsupportedReason(context.Background(), "jev/kev-latest"), "is a decision model")
+	assert.Contains(t, checker.ChatUnsupportedReason(context.Background(), "kev-latest"), "is a decision model")
+}
+
 // The guard sees the concrete model a plugin call resolved to and refuses a
 // decision model before its provider is called, while chat models pass.
 func TestChatModelGuard_RefusesResolvedModelsThatCannotChat(t *testing.T) {

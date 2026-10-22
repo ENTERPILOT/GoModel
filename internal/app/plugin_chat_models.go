@@ -27,7 +27,14 @@ func (m pluginChatModels) ChatUnsupportedReason(_ context.Context, model string)
 	return chatUnsupportedReason(m.router, model)
 }
 
+// chatUnsupportedReason canonicalizes model through the router first, so a
+// selector naming a provider type ("jev/kev-latest" for a provider named
+// "kev") finds its catalog entry. The router resolves concrete selectors
+// only, never virtual models.
 func chatUnsupportedReason(router *providers.Router, model string) string {
+	if selector, _, err := router.ResolveModel(core.NewRequestedModelSelector(model, "")); err == nil {
+		model = selector.QualifiedModel()
+	}
 	info, ok := router.LookupModel(model)
 	if !ok || info == nil {
 		return ""
