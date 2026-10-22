@@ -27,6 +27,7 @@ const PROVIDER_DOC_SLUGS = new Set([
   "bedrock",
   "bedrock-mantle",
   "chatgpt",
+  "cheaperinference",
   "cohere",
   "deepseek",
   "edenai",

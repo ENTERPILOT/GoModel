@@ -239,6 +239,17 @@ func TestMain_EdenAIProviderRegistration(t *testing.T) {
 	require.NotNil(t, provider, "factory.Create(edenai) returned nil provider")
 }
 
+func TestMain_CheaperInferenceProviderRegistration(t *testing.T) {
+	factory := defaultProviderFactory(&config.Config{})
+
+	registered := factory.RegisteredTypes()
+	require.Contains(t, registered, "cheaperinference", "cheaperinference not in RegisteredTypes() = %v", registered)
+
+	provider, err := factory.Create(providers.ProviderConfig{Type: "cheaperinference", APIKey: "test"})
+	require.NoError(t, err, "factory.Create(cheaperinference)")
+	require.NotNil(t, provider, "factory.Create(cheaperinference) returned nil provider")
+}
+
 func TestMain_HetznerProviderRegistration(t *testing.T) {
 	factory := defaultProviderFactory(&config.Config{})
 

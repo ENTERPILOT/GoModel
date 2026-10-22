@@ -148,6 +148,7 @@ func buildDefaultConfig() *Config {
 				"llmd",
 				"deepseek",
 				"edenai",
+				"cheaperinference",
 				"jev",
 			},
 		},

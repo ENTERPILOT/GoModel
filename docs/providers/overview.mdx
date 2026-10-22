@@ -57,6 +57,7 @@ support, not every individual model capability exposed by an upstream provider.
 | OpenRouter | `OPENROUTER_API_KEY` | `google/gemini-2.5-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | Kilo AI | `KILO_API_KEY` (`KILO_BASE_URL` optional) | `anthropic/claude-sonnet-4.5` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
 | Eden AI | `EDENAI_API_KEY` (`EDENAI_BASE_URL` optional) | `openai/gpt-4` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Eden AI](/providers/edenai) |
+| Cheaper Inference | `CHEAPERINFERENCE_API_KEY` (`CHEAPERINFERENCE_BASE_URL` optional) | `gpt-5.4-mini` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [Cheaper Inference](/providers/cheaperinference) |
 | Z.ai | `ZAI_API_KEY` (`ZAI_BASE_URL` optional) | `glm-5.1` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
 | xAI (Grok) | `XAI_API_KEY` | `grok-4.6` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | [xAI (Grok)](/providers/xai) |
 | Alibaba Cloud Model Studio (Bailian) | `BAILIAN_API_KEY` (`BAILIAN_BASE_URL` optional) | `qwen3-max` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Alibaba Cloud Model Studio](/providers/bailian) |
@@ -164,6 +165,11 @@ support, not every individual model capability exposed by an upstream provider.
   math. GoModel serves `/v1/responses` by translating it to Eden's
   chat-completions endpoint — Eden's own `/v3/responses` is a different API
   and is never used. See the [Eden AI guide](/providers/edenai).
+- **Cheaper Inference** — model IDs are bare (for example, `gpt-5.4-mini`)
+  and are forwarded unchanged; select it explicitly with
+  `cheaperinference/gpt-5.4-mini` when another configured provider exposes the
+  same raw ID. GoModel translates `/v1/responses` requests to chat
+  completions. See the [Cheaper Inference guide](/providers/cheaperinference).
 - **Xiaomi MiMo** — TTS (`mimo-v2.5-tts*`) and ASR (`mimo-v2.5-asr`) are served
   through `/v1/audio/speech` and `/v1/audio/transcriptions` (translated to
   MiMo's chat-completions audio dialect) as well as directly via chat

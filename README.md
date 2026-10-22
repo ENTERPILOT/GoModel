@@ -121,6 +121,7 @@ The official SDKs therefore work unchanged. Configure their base URLs as follows
 - Alibaba Cloud Model Studio (Bailian)
 - Kilo AI
 - Eden AI
+- Cheaper Inference
 - MiniMax
 - Xiaomi MiMo
 - OpenCode Go

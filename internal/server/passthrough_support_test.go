@@ -52,6 +52,13 @@ func TestDefaultEnabledPassthroughProvidersIncludesEdenAI(t *testing.T) {
 	require.Contains(t, defaultEnabledPassthroughProviders, "edenai", "defaultEnabledPassthroughProviders = %v, want edenai included", defaultEnabledPassthroughProviders)
 }
 
+// TestDefaultEnabledPassthroughProvidersIncludesCheaperInference asserts that
+// the default allowlist contains cheaperinference, which the provider matrix
+// marks as passthrough-capable.
+func TestDefaultEnabledPassthroughProvidersIncludesCheaperInference(t *testing.T) {
+	require.Contains(t, defaultEnabledPassthroughProviders, "cheaperinference", "defaultEnabledPassthroughProviders = %v, want cheaperinference included", defaultEnabledPassthroughProviders)
+}
+
 // A successful non-streaming JSON passthrough response must produce a usage
 // entry from its usage member — the same accounting SSE streams get from the
 // stream usage observer. Covers the /p/{provider} surface directly.

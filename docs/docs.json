@@ -232,6 +232,7 @@
                     "providers/kimicode",
                     "providers/hetzner",
                     "providers/edenai",
+                    "providers/cheaperinference",
                     {
                         "group": "Cloud Platforms",
                         "icon": "cloud",
