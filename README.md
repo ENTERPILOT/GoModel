@@ -161,6 +161,16 @@ docker compose --profile app up -d
 
 ---
 
+## One-Click Deploy
+
+<a href="https://repocloud.io/details/GoModel/"><img src="https://d16t0pc4846x52.cloudfront.net/deploylobe.svg" alt="Deploy on RepoCloud" height="42"></a>
+<a href="https://railway.com/deploy/gomodel"><img src="https://railway.com/button.svg" alt="Deploy on Railway" height="42"></a>
+
+- RepoCloud: One-click template, no other instructions required.
+- Railway: After deploying, open the dashboard and sign in with the `GOMODEL_MASTER_KEY` value from the service's Variables tab ([template page](https://railway.com/deploy/gomodel)).
+
+---
+
 ## API docs
 
 - [API Endpoints](https://gomodel.enterpilot.io/docs/advanced/api-endpoints?utm_source=readme)
