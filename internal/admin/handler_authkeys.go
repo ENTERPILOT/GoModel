@@ -179,14 +179,18 @@ func (h *Handler) ImportAuthKey(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	if err := requireAllowedModelsWithinCaller(c, allowedModels); err != nil {
-		return handleError(c, err)
-	}
-	// Importing a token again updates the key stored under its hash, so the
-	// key itself must not be the one importing it.
-	if id, ok := h.authKeys.IDBySecretHash(req.SecretHash); ok {
-		if err := requireNotOwnAuthKey(c, id); err != nil {
+	// A disabled import only deactivates an existing key, which any key may
+	// do, itself included. Any other import creates or rewrites a key: it
+	// must stay within the caller's models, and since importing a token again
+	// updates the key stored under its hash, that key must not be the caller.
+	if req.Enabled == nil || *req.Enabled {
+		if err := requireAllowedModelsWithinCaller(c, allowedModels); err != nil {
 			return handleError(c, err)
+		}
+		if id, ok := h.authKeys.IDBySecretHash(req.SecretHash); ok {
+			if err := requireNotOwnAuthKey(c, id); err != nil {
+				return handleError(c, err)
+			}
 		}
 	}
 

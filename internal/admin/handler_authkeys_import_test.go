@@ -142,6 +142,15 @@ func TestImportAuthKeyHonorsCallerRestrictions(t *testing.T) {
 		assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
 		assert.Contains(t, rec.Body.String(), codeAuthKeySelfUpdate)
 	})
+	t.Run("disabled import only deactivates", func(t *testing.T) {
+		disable := `{"name":"imported","imported_from":"litellm","enabled":false,"secret_hash":"` + hexOf("sk-own-token-abcd") + `","allowed_models":[]}`
+		rec := importAs(own.ID, []string{"openai/gpt-4o-mini"}, disable)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		view, err := service.View(own.ID)
+		require.NoError(t, err)
+		assert.False(t, view.Active)
+		assert.Equal(t, []string{"openai/gpt-4o-mini"}, view.AllowedModels)
+	})
 	t.Run("narrower allowlist", func(t *testing.T) {
 		rec := importAs("caller", []string{"openai/"}, body("sk-third-token-qrst", `["openai/gpt-4o-mini"]`))
 		assert.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())

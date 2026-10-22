@@ -207,12 +207,13 @@ For a scoped admin:
 - New API keys and user policies default to the scope root and cannot be
   created outside it. Keys with dashboard access created this way are scoped
   admins of that subtree in turn.
-- A key cannot change its own labels, allowed models, or access flags, or
-  re-import its own token (`403 auth_key_self_update`); it can still
-  deactivate itself. A key with allowed models can only give the keys it
-  creates, edits, or imports models it is allowed itself: `openai/*` can grant
-  `openai/gpt-4o-mini`, but not `anthropic/*` or an unrestricted key
-  (`403 allowed_models_out_of_scope`). These rules apply to global keys too.
+- A key cannot change its own labels, allowed models, or access flags
+  (`403 auth_key_self_update`); it can still deactivate itself. A key with
+  allowed models can only give the keys it creates or edits models it is
+  allowed itself: `openai/*` can grant `openai/gpt-4o-mini`, but not
+  `anthropic/*` or an unrestricted key (`403 allowed_models_out_of_scope`).
+  These rules apply to global keys too, which also cannot re-import their
+  own token or import a key with broader models.
 - Only user-path budgets and rate limits are visible and editable; label,
   provider, and model rules are gateway-wide.
 - Gateway-wide endpoints return `403` with code `admin_scope_denied`: provider
