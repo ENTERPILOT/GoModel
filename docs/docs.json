@@ -57,6 +57,70 @@
         {
             "source": "/pro",
             "destination": "/pro/overview"
+        },
+        {
+            "source": "/errors",
+            "destination": "/advanced/provider-failure-modes"
+        },
+        {
+            "source": "/rate-limits",
+            "destination": "/features/rate-limits"
+        },
+        {
+            "source": "/advanced/resilienc",
+            "destination": "/advanced/resilience"
+        },
+        {
+            "source": "/api-reference/admin/create-or-update-one-virtual-model",
+            "destination": "/api-reference/admin/create-update-or-rename-one-virtual-model"
+        },
+        {
+            "source": "/api-reference/admin/get-conversation-thread-around-an-audit-log-entry",
+            "destination": "/api-reference/admin/get-the-interaction-session-containing-an-audit-log-entry"
+        },
+        {
+            "source": "/api-reference/admin/get-dashboard-runtime-configuration",
+            "destination": "/api-reference/admin/get-admin-runtime-configuration"
+        },
+        {
+            "source": "/api-reference/admin/list-provider-types-the-gateway-can-construct",
+            "destination": "/api-reference/admin/list-provider-types-the-gateway-can-construct-with-their-credential-forms"
+        },
+        {
+            "source": "/api-reference/admin/list-virtual-mcp-servers-config-declared-read-only",
+            "destination": "/api-reference/admin/list-virtual-mcp-servers-config-declared-and-admin-managed"
+        },
+        {
+            "source": "/api-reference/admin/list-model-access-overrides",
+            "destination": "/features/virtual-models"
+        },
+        {
+            "source": "/api-reference/admin/create-or-update-one-model-access-override",
+            "destination": "/features/virtual-models"
+        },
+        {
+            "source": "/api-reference/admin/delete-one-model-access-override",
+            "destination": "/features/virtual-models"
+        },
+        {
+            "source": "/api-reference/admin/list-failover-mappings",
+            "destination": "/features/failover"
+        },
+        {
+            "source": "/api-reference/admin/create-or-update-one-failover-mapping",
+            "destination": "/features/failover"
+        },
+        {
+            "source": "/api-reference/admin/delete-one-failover-mapping",
+            "destination": "/features/failover"
+        },
+        {
+            "source": "/api-reference/admin/generate-failover-mapping-suggestions",
+            "destination": "/features/failover"
+        },
+        {
+            "source": "/api-reference/admin/reset-dashboard-managed-failover-mappings",
+            "destination": "/features/failover"
         }
     ],
     "navbar": {
