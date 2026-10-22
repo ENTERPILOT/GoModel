@@ -386,6 +386,14 @@ func (a *App) logStartupInfo() {
 		slog.Info("authentication enabled", "mode", "master_key+managed_keys", "managed_key_total", a.authKeys.Service.Total(), "managed_key_active", a.authKeys.Service.ActiveCount())
 	case managedKeysConfigured:
 		slog.Info("authentication enabled", "mode", "managed_keys", "managed_key_total", a.authKeys.Service.Total(), "managed_key_active", a.authKeys.Service.ActiveCount())
+		if !cfg.Server.MasterKeyDisabled && cfg.Admin.EndpointsEnabled {
+			// Without a master key the admin API stays open for bootstrap
+			// (see server.New), even though model endpoints now require a
+			// managed key.
+			slog.Warn("SECURITY WARNING: admin API is reachable without authentication",
+				"security_risk", "any caller that can reach this port can create API keys and change providers",
+				"recommendation", "set GOMODEL_MASTER_KEY, or set MASTER_KEY_DISABLED=true once a managed key with dashboard access exists")
+		}
 	case cfg.Server.MasterKeyDisabled:
 		// Reported above; no master key means no authentication only when one
 		// could have been configured.

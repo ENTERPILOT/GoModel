@@ -522,14 +522,16 @@ func mongoSubjectMatch(window SpendWindow) (bson.D, error) {
 		// Blank provider names fall back to the provider type, matching the
 		// SQL stores.
 		name := mongoTrimmedOr("$provider_name", "$provider")
-		return bson.D{{Key: "$eq", Value: bson.A{bson.D{{Key: "$toLower", Value: name}}, subject}}}, nil
+		// $literal keeps a subject that starts with "$" from being read as a
+		// field path; the SQL stores compare it as plain text.
+		return bson.D{{Key: "$eq", Value: bson.A{bson.D{{Key: "$toLower", Value: name}}, bson.D{{Key: "$literal", Value: subject}}}}}, nil
 	}
 	if window.Scope == ScopeLabel {
 		subject, err := NormalizeSubject(ScopeLabel, window.Subject)
 		if err != nil {
 			return nil, err
 		}
-		return bson.D{{Key: "$in", Value: bson.A{subject, bson.D{{Key: "$ifNull", Value: bson.A{"$labels", bson.A{}}}}}}}, nil
+		return bson.D{{Key: "$in", Value: bson.A{bson.D{{Key: "$literal", Value: subject}}, bson.D{{Key: "$ifNull", Value: bson.A{"$labels", bson.A{}}}}}}}, nil
 	}
 	userPath, err := NormalizeUserPath(window.Subject)
 	if err != nil {
