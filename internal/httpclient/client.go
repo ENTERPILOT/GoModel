@@ -2,11 +2,13 @@
 package httpclient
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -135,10 +137,43 @@ func NewHTTPClient(config *ClientConfig) *http.Client {
 	}
 
 	return &http.Client{
-		Transport: transport,
-		Timeout:   config.Timeout,
+		Transport:     transport,
+		Timeout:       config.Timeout,
+		CheckRedirect: dropCredentialsOnCrossOriginRedirect,
 	}
 }
+
+// credentialHeaders are the request headers providers send credentials in.
+var credentialHeaders = []string{
+	"Authorization",
+	"Proxy-Authorization",
+	"Cookie",
+	"X-Api-Key",
+	"Api-Key",
+	"X-Goog-Api-Key",
+	"X-Amz-Security-Token",
+}
+
+// dropCredentialsOnCrossOriginRedirect follows redirects like net/http's
+// default policy, but removes every credential header once a hop leaves the
+// original scheme, host, and port. net/http removes only Authorization and
+// cookies, and keeps them for subdomains and other ports, so a key sent as
+// X-Api-Key, Api-Key, or X-Goog-Api-Key would follow a redirect to any host.
+func dropCredentialsOnCrossOriginRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxRedirects)
+	}
+	origin := via[0].URL
+	if req.URL.Scheme != origin.Scheme || !strings.EqualFold(req.URL.Host, origin.Host) {
+		for _, name := range credentialHeaders {
+			req.Header.Del(name)
+		}
+	}
+	return nil
+}
+
+// maxRedirects matches net/http's default redirect limit.
+const maxRedirects = 10
 
 // NewDefaultHTTPClient creates a new HTTP client with default configuration.
 // This is a convenience function equivalent to NewHTTPClient(nil).

@@ -104,3 +104,42 @@ func okPassthroughResponse() *core.PassthroughResponse {
 		Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
 	}
 }
+
+// The passthrough endpoint is the decoded request path, so encoded dot
+// segments, "?" and "#" would otherwise reshape the upstream URL.
+func TestProviderPassthroughRoute_RejectsEndpointsThatEscapeTheBasePath(t *testing.T) {
+	tests := []struct {
+		name         string
+		target       string
+		wantStatus   int
+		wantEndpoint string
+	}{
+		{name: "plain endpoint", target: "/p/openai/files/abc", wantStatus: http.StatusOK, wantEndpoint: "files/abc"},
+		{name: "real query string is kept", target: "/p/openai/files?limit=1", wantStatus: http.StatusOK, wantEndpoint: "files?limit=1"},
+		{name: "dotted name is not a dot segment", target: "/p/openai/files/a..b", wantStatus: http.StatusOK, wantEndpoint: "files/a..b"},
+		{name: "encoded dot-dot segments", target: "/p/openai/%2e%2e/%2e%2e/admin", wantStatus: http.StatusBadRequest},
+		{name: "encoded slashes around dot-dot", target: "/p/openai/..%2f..%2fadmin", wantStatus: http.StatusBadRequest},
+		{name: "encoded single dot segment", target: "/p/openai/files/%2e/abc", wantStatus: http.StatusBadRequest},
+		{name: "dot-dot after v1 alias", target: "/p/openai/v1/%2e%2e/admin", wantStatus: http.StatusBadRequest},
+		{name: "encoded question mark", target: "/p/openai/files/x%3Finjected=1", wantStatus: http.StatusBadRequest},
+		{name: "encoded hash", target: "/p/openai/files/x%23frag", wantStatus: http.StatusBadRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockProvider{passthroughResponse: okPassthroughResponse()}
+			srv := New(mock, &Config{})
+
+			req := httptest.NewRequest(http.MethodGet, tt.target, nil)
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+			if tt.wantStatus != http.StatusOK {
+				assert.Nil(t, mock.lastPassthroughReq, "rejected endpoint reached the provider")
+				return
+			}
+			require.NotNil(t, mock.lastPassthroughReq)
+			assert.Equal(t, tt.wantEndpoint, mock.lastPassthroughReq.Endpoint)
+		})
+	}
+}

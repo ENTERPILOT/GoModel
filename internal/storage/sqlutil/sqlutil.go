@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/goccy/go-json"
 )
@@ -17,6 +18,20 @@ func EscapeLikeWildcards(s string) string {
 	s = strings.ReplaceAll(s, `%`, `\%`)
 	s = strings.ReplaceAll(s, `_`, `\_`)
 	return s
+}
+
+// UserPathSubtreeCondition matches column against userPath itself and every
+// path below it, binding its own arguments. The LIKE term keeps the prefix
+// index-friendly; the substr term repeats the prefix test case-sensitively,
+// because SQLite's LIKE ignores ASCII case while user paths do not. column
+// may be an expression; it is repeated in the predicate.
+func UserPathSubtreeCondition(column, userPath string) (string, []any) {
+	prefix := userPath + "/"
+	if userPath == "/" {
+		prefix = "/"
+	}
+	condition := "(" + column + " = ? OR (" + column + " LIKE ? ESCAPE '\\' AND substr(" + column + ", 1, ?) = ?))"
+	return condition, []any{userPath, EscapeLikeWildcards(prefix) + "%", utf8.RuneCountInString(prefix), prefix}
 }
 
 // BuildWhereClause joins condition strings into a SQL WHERE clause.

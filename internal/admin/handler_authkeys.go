@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -116,6 +117,9 @@ func (h *Handler) CreateAuthKey(c *echo.Context) error {
 
 	allowedModels, err := h.normalizeAllowedModels(req.AllowedModels)
 	if err != nil {
+		return handleError(c, err)
+	}
+	if err := requireAllowedModelsWithinCaller(c, allowedModels); err != nil {
 		return handleError(c, err)
 	}
 	if err := requirePassthroughGrantScope(c, req.PassthroughAccess); err != nil {
@@ -258,6 +262,9 @@ func (h *Handler) UpdateAuthKeyAllowedModels(c *echo.Context) error {
 		if err != nil {
 			return nil, err
 		}
+		if err := requireAllowedModelsWithinCaller(c, allowedModels); err != nil {
+			return nil, err
+		}
 		return h.authKeys.UpdateAllowedModels(ctx, id, allowedModels)
 	})
 }
@@ -325,6 +332,40 @@ func requirePassthroughGrantScope(c *echo.Context, grant bool) error {
 	return nil
 }
 
+// requireAllowedModelsWithinCaller keeps a credential that is itself limited
+// to a model allowlist from issuing broader keys: the target allowlist must be
+// non-empty, since empty means unrestricted, and drawn from the caller's own.
+func requireAllowedModelsWithinCaller(c *echo.Context, allowedModels []string) error {
+	callerModels := core.GetCredentialAllowedModels(c.Request().Context())
+	if len(callerModels) == 0 {
+		return nil
+	}
+	if len(allowedModels) == 0 {
+		return allowedModelsOutOfScopeError()
+	}
+	for _, model := range allowedModels {
+		if !slices.Contains(callerModels, model) {
+			return allowedModelsOutOfScopeError()
+		}
+	}
+	return nil
+}
+
+func allowedModelsOutOfScopeError() error {
+	return core.NewPermissionError("allowed_models must be a non-empty subset of the credential's own allowed models").
+		WithCode(codeAllowedModelsOutOfScope)
+}
+
+// requireNotOwnAuthKey stops a managed key from changing its own labels,
+// model allowlist, or access flags, so it cannot lift restrictions placed on
+// it. Deactivating itself stays allowed.
+func requireNotOwnAuthKey(c *echo.Context, id string) error {
+	if own := core.GetAuthKeyID(c.Request().Context()); own != "" && own == id {
+		return core.NewPermissionError("an API key cannot change its own settings").WithCode(codeAuthKeySelfUpdate)
+	}
+	return nil
+}
+
 // updateAuthKey handles the shared shape of the PUT /admin/auth-keys/:id/*
 // endpoints: bind the request into req, run the update, and render the
 // updated view.
@@ -342,6 +383,9 @@ func (h *Handler) updateAuthKey(c *echo.Context, req any, update func(ctx contex
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 	if err := h.requireAuthKeyInScope(c, id); err != nil {
+		return handleError(c, err)
+	}
+	if err := requireNotOwnAuthKey(c, id); err != nil {
 		return handleError(c, err)
 	}
 

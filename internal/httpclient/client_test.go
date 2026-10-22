@@ -2,6 +2,8 @@ package httpclient
 
 import (
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -198,4 +200,65 @@ func TestDefaultConfigTimeoutPrecedence(t *testing.T) {
 	SetConfiguredTimeouts(-1, 0)
 	got = DefaultConfig().Timeout
 	require.Equal(t, 600*time.Second, got)
+}
+
+// A redirect to another origin must not carry the provider credential along,
+// whichever header the provider sends it in.
+func TestNewHTTPClientDropsCredentialsOnCrossOriginRedirect(t *testing.T) {
+	credentials := map[string]string{
+		"Authorization":  "Bearer sk-openai",
+		"X-Api-Key":      "sk-ant",
+		"Api-Key":        "azure-key",
+		"X-Goog-Api-Key": "goog-key",
+	}
+	received := make(chan http.Header, 1)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/next", func(w http.ResponseWriter, r *http.Request) { received <- r.Header.Clone() })
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	serverURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	// localhost reaches the same listener as 127.0.0.1 but is another origin.
+	mux.Handle("/cross-origin", http.RedirectHandler("http://localhost:"+serverURL.Port()+"/next", http.StatusTemporaryRedirect))
+	mux.Handle("/same-origin", http.RedirectHandler("/next", http.StatusTemporaryRedirect))
+
+	tests := []struct {
+		path            string
+		wantCredentials bool
+	}{
+		{path: "/cross-origin", wantCredentials: false},
+		{path: "/same-origin", wantCredentials: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+tt.path, nil)
+			require.NoError(t, err)
+			for name, value := range credentials {
+				req.Header.Set(name, value)
+			}
+			resp, err := NewHTTPClient(nil).Do(req)
+			require.NoError(t, err)
+			require.NoError(t, resp.Body.Close())
+
+			got := <-received
+			for name, value := range credentials {
+				if tt.wantCredentials {
+					assert.Equal(t, value, got.Get(name), name)
+				} else {
+					assert.Empty(t, got.Get(name), name)
+				}
+			}
+		})
+	}
+}
+
+func TestNewHTTPClientStopsAfterTenRedirects(t *testing.T) {
+	server := httptest.NewServer(http.RedirectHandler("/loop", http.StatusFound))
+	defer server.Close()
+
+	resp, err := NewHTTPClient(nil).Get(server.URL + "/loop")
+	if resp != nil {
+		require.NoError(t, resp.Body.Close())
+	}
+	require.ErrorContains(t, err, "stopped after 10 redirects")
 }

@@ -83,8 +83,9 @@ func (s *SQLStore) List(ctx context.Context, filter ListFilter, limit int, after
 	case "/":
 		conditions = append(conditions, "user_path <> ''")
 	default:
-		conditions = append(conditions, "(user_path = ? OR user_path LIKE ? ESCAPE '\\')")
-		args = append(args, filter.UserPath, sqlutil.EscapeLikeWildcards(filter.UserPath)+"/%")
+		condition, conditionArgs := sqlutil.UserPathSubtreeCondition("user_path", filter.UserPath)
+		conditions = append(conditions, condition)
+		args = append(args, conditionArgs...)
 	}
 	if filter.ProviderType != "" {
 		conditions = append(conditions, "provider_type = ?")

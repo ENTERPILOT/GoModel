@@ -8,11 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
@@ -326,4 +328,97 @@ func TestListAuthKeysWorksWithoutLastUsedData(t *testing.T) {
 	assert.False(t, ok)
 	_, ok = body[0]["last_used_available"]
 	assert.False(t, ok)
+}
+
+// asManagedKey makes c look like a request authenticated with the managed key
+// id, bound to userPath and limited to allowedModels.
+func asManagedKey(c *echo.Context, id, userPath string, allowedModels ...string) {
+	ctx := core.WithAuthKeyID(c.Request().Context(), id)
+	ctx = core.WithAccessScope(ctx, core.AccessScope{UserPath: userPath})
+	ctx = core.WithCredentialAllowedModels(ctx, allowedModels)
+	c.SetRequest(c.Request().WithContext(ctx))
+}
+
+// A key must not lift restrictions placed on it by editing itself.
+func TestAuthKeyCannotUpdateItself(t *testing.T) {
+	h := newAuthKeyHandler(t, newAuthKeyTestStore())
+	lead := createAuthKey(t, h, `{"name":"lead","user_path":"/team/a","dashboard_access":true,"allowed_models":["openai/gpt-4o-mini"],"labels":["team-a"]}`)
+	member := createAuthKey(t, h, `{"name":"member","user_path":"/team/a/svc","allowed_models":["openai/gpt-4o-mini"]}`)
+
+	tests := []struct {
+		name    string
+		path    string
+		body    string
+		handler func(*echo.Context) error
+	}{
+		{name: "labels", path: "labels", body: `{"labels":[]}`, handler: h.UpdateAuthKeyLabels},
+		{name: "allowed models", path: "allowed-models", body: `{"allowed_models":["openai/gpt-4o-mini"]}`, handler: h.UpdateAuthKeyAllowedModels},
+		{name: "dashboard access", path: "dashboard-access", body: `{"dashboard_access":true}`, handler: h.UpdateAuthKeyDashboardAccess},
+		{name: "passthrough access", path: "passthrough-access", body: `{"passthrough_access":false}`, handler: h.UpdateAuthKeyPassthroughAccess},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			update := func(id string) *httptest.ResponseRecorder {
+				c, rec := echotest.Request(t, http.MethodPut, "/admin/auth-keys/"+id+"/"+tt.path, tt.body, echotest.WithPathValue("id", id))
+				asManagedKey(c, lead.ID, "/team/a", "openai/gpt-4o-mini")
+				require.NoError(t, tt.handler(c))
+				return rec
+			}
+
+			rec := update(lead.ID)
+			require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+			assert.Contains(t, rec.Body.String(), codeAuthKeySelfUpdate)
+
+			rec = update(member.ID)
+			assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		})
+	}
+
+	view, err := h.authKeys.View(lead.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"openai/gpt-4o-mini"}, view.AllowedModels)
+	assert.Equal(t, []string{"team-a"}, view.Labels)
+
+	// Deactivating itself stays allowed.
+	c, rec := echotest.Post(t, "/admin/auth-keys/"+lead.ID+"/deactivate", nil, echotest.WithPathValue("id", lead.ID))
+	asManagedKey(c, lead.ID, "/team/a", "openai/gpt-4o-mini")
+	require.NoError(t, h.DeactivateAuthKey(c))
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+}
+
+// A key limited to a model allowlist must not issue keys broader than itself.
+func TestAuthKeyAllowedModelsMustStayWithinCaller(t *testing.T) {
+	tests := []struct {
+		name         string
+		callerModels []string
+		body         string
+		wantStatus   int
+	}{
+		{name: "subset", callerModels: []string{"openai/gpt-4o-mini", "openai/gpt-4o"}, body: `["openai/gpt-4o-mini"]`, wantStatus: http.StatusOK},
+		{name: "same list", callerModels: []string{"openai/gpt-4o-mini"}, body: `["openai/gpt-4o-mini"]`, wantStatus: http.StatusOK},
+		{name: "empty list is unrestricted", callerModels: []string{"openai/gpt-4o-mini"}, body: `[]`, wantStatus: http.StatusForbidden},
+		{name: "model outside the caller's list", callerModels: []string{"openai/gpt-4o-mini"}, body: `["openai/gpt-4o"]`, wantStatus: http.StatusForbidden},
+		{name: "unrestricted caller", body: `[]`, wantStatus: http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name+"/create", func(t *testing.T) {
+			h := newAuthKeyHandler(t, newAuthKeyTestStore())
+			c, rec := echotest.Post(t, "/admin/auth-keys", `{"name":"child","allowed_models":`+tt.body+`}`)
+			asManagedKey(c, "caller", "/team/a", tt.callerModels...)
+			require.NoError(t, h.CreateAuthKey(c))
+			wantStatus := tt.wantStatus
+			if wantStatus == http.StatusOK {
+				wantStatus = http.StatusCreated
+			}
+			assert.Equal(t, wantStatus, rec.Code, rec.Body.String())
+		})
+		t.Run(tt.name+"/update", func(t *testing.T) {
+			h := newAuthKeyHandler(t, newAuthKeyTestStore())
+			child := createAuthKey(t, h, `{"name":"child","user_path":"/team/a/svc","allowed_models":["openai/gpt-4o-mini"]}`)
+			c, rec := echotest.Request(t, http.MethodPut, "/admin/auth-keys/"+child.ID+"/allowed-models", `{"allowed_models":`+tt.body+`}`, echotest.WithPathValue("id", child.ID))
+			asManagedKey(c, "caller", "/team/a", tt.callerModels...)
+			require.NoError(t, h.UpdateAuthKeyAllowedModels(c))
+			assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+		})
+	}
 }
