@@ -76,6 +76,17 @@ func (s *fakeStore) SetDefault(_ context.Context, key, value string) (string, er
 	return value, nil
 }
 
+func (s *fakeStore) Set(_ context.Context, key, value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sets++
+	if s.setErr != nil {
+		return s.setErr
+	}
+	s.values[key] = value
+	return nil
+}
+
 func (s *fakeStore) fail(get, set error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -91,6 +102,9 @@ func (s *fakeStore) value(key string) string {
 const (
 	existingID = "3f2a0000-0000-4000-8000-000000000001"
 	freshID    = "ffffffff-0000-4000-8000-0000000000ff"
+	// derivedID has the version-8 shape of an id that earlier releases
+	// derived from the master key.
+	derivedID = "3f2a0000-0000-8000-8000-000000000002"
 )
 
 // resolveInstallID resolves once with a fresh Identity, the way a gateway
@@ -262,4 +276,77 @@ func TestResolveInstallIDWithoutStoreUsesFile(t *testing.T) {
 	again, source := resolveInstallID(context.Background(), nil)
 	assert.Equal(t, id, again)
 	assert.Equal(t, SourceFile, source)
+}
+
+// An upgraded deployment may still hold an id derived from the master key, in
+// the database, the file, or both. It must be replaced everywhere rather than
+// sent again.
+func TestResolveInstallIDReplacesDerivedID(t *testing.T) {
+	tests := []struct {
+		name    string
+		inStore bool
+		inFile  bool
+	}{
+		{name: "database and file", inStore: true, inFile: true},
+		{name: "database only", inStore: true},
+		{name: "file only", inFile: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := useTempDataDir(t)
+			store := newFakeStore()
+			if tt.inStore {
+				store.values[InstallIDKey] = derivedID
+			}
+			if tt.inFile {
+				writeFile(t, path, derivedID)
+			}
+			identity := NewIdentity(store)
+
+			id, source := identity.Resolve(context.Background())
+			require.Equal(t, SourceGenerated, source)
+			require.NotEqual(t, derivedID, id)
+			require.False(t, derivedFromSecret(id), "replacement %q is still version 8", id)
+			assert.Equal(t, id, store.value(InstallIDKey))
+			assert.Equal(t, id+"\n", readFile(t, path))
+
+			// The next check confirms the replacement from the database.
+			again, _ := identity.Resolve(context.Background())
+			assert.Equal(t, id, again)
+		})
+	}
+}
+
+// Replicas that upgrade together each replace the derived id; after one more
+// check they all report the replacement the database kept.
+func TestIdentityConvergesWhenReplicasReplaceDerivedID(t *testing.T) {
+	useTempDataDir(t)
+	store := newFakeStore()
+	store.values[InstallIDKey] = derivedID
+
+	const replicas = 8
+	identities := make([]*Identity, replicas)
+	var wg sync.WaitGroup
+	for r := range replicas {
+		identities[r] = NewIdentity(store)
+		wg.Go(func() { identities[r].ID(context.Background()) })
+	}
+	wg.Wait()
+
+	winner := store.value(InstallIDKey)
+	require.False(t, derivedFromSecret(winner))
+	for r, identity := range identities {
+		id, source := identity.Resolve(context.Background())
+		assert.Equal(t, winner, id, "replica %d", r)
+		assert.Equal(t, SourceDatabase, source, "replica %d", r)
+	}
+}
+
+func TestDerivedFromSecret(t *testing.T) {
+	assert.True(t, derivedFromSecret(derivedID))
+	assert.True(t, derivedFromSecret(" "+derivedID+"\n"))
+	assert.False(t, derivedFromSecret(existingID))
+	assert.False(t, derivedFromSecret(uuid.NewString()))
+	assert.False(t, derivedFromSecret(""))
+	assert.False(t, derivedFromSecret("not-a-uuid"))
 }

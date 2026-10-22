@@ -26,6 +26,9 @@ const InstallIDKey = "install_id"
 // like a runtime setting, so it shares the table.
 type Store interface {
 	Get(ctx context.Context, key string) (value string, found bool, err error)
+	// Set overwrites the stored value. It is used only to replace an id that
+	// was derived from the master key.
+	Set(ctx context.Context, key, value string) error
 	// SetDefault stores value only when key has no value yet, and returns
 	// whatever is stored afterwards. It must be atomic across instances.
 	SetDefault(ctx context.Context, key, value string) (string, error)
@@ -109,14 +112,20 @@ func (i *Identity) Resolve(ctx context.Context) (string, InstallIDSource) {
 
 	path := platformdir.DataFile(installIDFile)
 	fileID := readInstallIDFile(path)
+	if derivedFromSecret(fileID) {
+		fileID = "" // replaced, and the file rewritten, below
+	}
 
 	storeUsable := i.store != nil
+	storedDerived := false
 	if storeUsable {
 		stored, found, err := i.store.Get(ctx, InstallIDKey)
 		switch {
 		case err != nil:
 			i.warnStoreOnce("install id database unavailable; using the local copy until it answers", err)
 			storeUsable = false
+		case found && derivedFromSecret(stored):
+			storedDerived = true
 		case found && strings.TrimSpace(stored) != "":
 			i.adopt(strings.TrimSpace(stored), SourceDatabase, true)
 			if i.id != fileID {
@@ -137,7 +146,15 @@ func (i *Identity) Resolve(ctx context.Context) (string, InstallIDSource) {
 		}
 	}
 
-	if storeUsable {
+	switch {
+	case storeUsable && storedDerived:
+		// SetDefault would keep the derived id, so overwrite it. Stay
+		// unsettled: the next call reads back whichever replacement the
+		// database kept, so replicas upgrading together converge on one id.
+		if err := i.store.Set(ctx, InstallIDKey, i.id); err != nil {
+			i.warnStoreOnce("install id could not be replaced in the database; it stays in the data directory until it can", err)
+		}
+	case storeUsable:
 		stored, err := i.store.SetDefault(ctx, InstallIDKey, i.id)
 		switch {
 		case err != nil:
@@ -151,7 +168,7 @@ func (i *Identity) Resolve(ctx context.Context) (string, InstallIDSource) {
 			// become the deployment's id. Either way this id is final.
 			i.settled = true
 		}
-	} else if i.store == nil {
+	case i.store == nil:
 		i.settled = true
 	}
 
@@ -159,6 +176,16 @@ func (i *Identity) Resolve(ctx context.Context) (string, InstallIDSource) {
 		writeInstallIDFile(path, i.id)
 	}
 	return i.id, i.source
+}
+
+// derivedFromSecret reports whether id came from the HMAC of the master key
+// that earlier releases used as a fallback. Those ids, and only those, are
+// version-8 UUIDs; every other id is a random version-4 one. They are
+// replaced, because sending one would let a weak master key be guessed
+// offline.
+func derivedFromSecret(id string) bool {
+	parsed, err := uuid.Parse(strings.TrimSpace(id))
+	return err == nil && parsed.Version() == 8
 }
 
 func (i *Identity) adopt(id string, source InstallIDSource, settled bool) {

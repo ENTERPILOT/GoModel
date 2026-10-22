@@ -101,6 +101,11 @@ When neither copy exists — a container recreated without a volume, running
 SQLite — a fresh random id is generated, and the recreated container reads as a
 new deployment. Mount a volume for the data directory to keep the same id.
 
+Earlier releases derived the identifier from `GOMODEL_MASTER_KEY` in that
+situation. An id saved that way is replaced with a random one, in both the
+database and the file, the first time this release starts, so the deployment
+reports as new once.
+
 ## Turning it off if you don't want to get the updates
 
 ```bash
