@@ -37,6 +37,8 @@ Guardrails work across all text-based endpoints:
 - `/v1/chat/completions`
 - `/v1/responses`
 - `/v1/messages`
+- `/v1/decisions` and `/v1/systemone`, prompt phase only (see
+  [How It Works With Different Endpoints](#how-it-works-with-different-endpoints))
 
 <Note>
   Guardrails for images, TTS, STT, and video models are planned as a separate
@@ -820,11 +822,18 @@ Guardrails operate on a unified message format internally. The adaptation betwee
 | `/v1/chat/completions` | `messages` with `role: "system"` | `messages` array |
 | `/v1/responses` | `instructions` field | `input` field |
 | `/v1/messages` | `system` field | `messages` array |
+| `/v1/decisions` | — | `input` (text and image parts) |
+| `/v1/systemone` | — | `state` |
 
 <Tip>
   You don't need to think about which endpoint your users call. A single
   guardrail rule works identically for all supported text endpoints.
 </Tip>
+
+`/v1/decisions` and `/v1/systemone` run the prompt phase only: their answers are
+typed values rather than completions, so response and stream phase guardrails
+are skipped there, with one warning per guardrail. Edits they cannot carry,
+such as an injected system prompt, are dropped.
 
 For `/v1/messages`, a request that runs any guardrail takes the translated
 path (the native passthrough is skipped). A response cut by a guardrail is

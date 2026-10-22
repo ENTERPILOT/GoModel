@@ -245,7 +245,7 @@ support, not every individual model capability exposed by an upstream provider.
   guardrails, audit, and usage) and through passthrough at `/p/jev/...`, and
   answers OpenAI's [Decisions API](/advanced/decisions-api) at
   `POST /v1/decisions` with it by translating both ways. `/v1/decisions` is
-  available once an `openai` or `jev` provider is configured, and
+  available once an `openai`, `jev`, or `openrouter` provider is configured, and
   `/v1/systemone` once a `jev` or `openrouter` provider is; OpenRouter serves
   Jev natively, and its decision models are listed as utility models.
   `JEV_API_KEY` configures the hosted API; for a self-hosted Kev server, which

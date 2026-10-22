@@ -183,6 +183,11 @@ warning per kind of dropped edit, then logs repeats at debug level. A
 guardrail that would answer the request itself blocks it instead, since System
 One callers expect typed answers, not text.
 
+Only the prompt phase applies. The answer is typed values, not a completion,
+so response and stream phase guardrails do not run on it and it is relayed
+unchanged; a workflow that selects them for a System One request logs one
+warning per guardrail.
+
 ## Errors and misuse
 
 The endpoint never translates, and it says so when a request cannot work:

@@ -524,7 +524,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.POST("/v1/systemone", handler.SystemOne)
 	e.POST("/v1/systemone/permute", handler.SystemOnePermute)
 	e.POST("/v1/systemone/separate", handler.SystemOneSeparate)
-	// OpenAI Decisions. The handler answers 404 until an openai or jev
+	// OpenAI Decisions. The handler answers 404 until an openai, jev, or openrouter
 	// provider is configured.
 	e.POST("/v1/decisions", handler.Decisions)
 	if cfg == nil || cfg.RealtimeEnabled {

@@ -34,6 +34,8 @@ type scriptedDecisionsProvider struct {
 	// default.
 	statuses map[string]int
 	catalog  map[string]core.Model
+	// cost, when set, is reported as usage.cost, as OpenRouter does.
+	cost string
 	// imageReaders records what each provider instance says about reading
 	// images; an instance it does not list says nothing.
 	imageReaders map[string]bool
@@ -82,13 +84,21 @@ func (p *scriptedDecisionsProvider) Decisions(_ context.Context, providerType st
 	if status == 0 {
 		status = http.StatusOK
 		body = `{"answers":[{"name":"refund","type":"predicate","probability":0.98}],"model":"` + model + `-answered",` +
-			`"usage":{"input_tokens":40,"input_tokens_details":{"cache_write_tokens":0,"cached_tokens":0},"output_tokens":0,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":40}}`
+			`"usage":{"input_tokens":40,"input_tokens_details":{"cache_write_tokens":0,"cached_tokens":0},"output_tokens":0,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":40` +
+			p.costMember() + `}}`
 	}
 	return &core.PassthroughResponse{
 		StatusCode: status,
 		Headers:    map[string][]string{"Content-Type": {"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(body)),
 	}, nil
+}
+
+func (p *scriptedDecisionsProvider) costMember() string {
+	if p.cost == "" {
+		return ""
+	}
+	return `,"cost":` + p.cost
 }
 
 func newDecisionsTestProvider() *scriptedDecisionsProvider {
@@ -114,7 +124,7 @@ func TestDecisions_UnavailableWithoutDecisionsProvider(t *testing.T) {
 	require.NoError(t, handler.Decisions(c))
 
 	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Contains(t, rec.Body.String(), "openai or jev provider")
+	assert.Contains(t, rec.Body.String(), "openai, jev, or openrouter provider")
 	assert.Empty(t, provider.calls)
 }
 
@@ -378,6 +388,10 @@ func (a denyingAuthorizer) ValidateModelAccess(_ context.Context, selector core.
 	return nil
 }
 
+func (denyingAuthorizer) ValidateProviderAccess(context.Context, string) error {
+	return nil
+}
+
 func (a denyingAuthorizer) AllowsModel(_ context.Context, selector core.ModelSelector) bool {
 	return !a[selector.QualifiedModel()]
 }
@@ -457,4 +471,71 @@ func TestDecisions_RoutesOnTheGuardedInput(t *testing.T) {
 	forwarded, err := json.Marshal(provider.bodies[0]["input"])
 	require.NoError(t, err)
 	assert.NotContains(t, string(forwarded), "input_image")
+}
+
+// newOpenRouterDecisionsProvider configures OpenRouter, which serves chat
+// models and System One decision models from one provider, next to OpenAI.
+func newOpenRouterDecisionsProvider() *scriptedDecisionsProvider {
+	provider := newScriptedDecisionsProvider(map[string]string{
+		"openrouter/typesafe/jev-1.13":  "openrouter",
+		"openrouter/openai/gpt-4o-mini": "openrouter",
+		"openai/gpt-6-luna":             "openai",
+	}, "openai", "openrouter")
+	provider.catalog = map[string]core.Model{
+		"openrouter/typesafe/jev-1.13": {ID: "typesafe/jev-1.13", Metadata: &core.ModelMetadata{
+			Categories: []core.ModelCategory{core.CategoryUtility},
+		}},
+		"openrouter/openai/gpt-4o-mini": {ID: "openai/gpt-4o-mini", Metadata: &core.ModelMetadata{
+			Modes: []string{"chat"}, Categories: []core.ModelCategory{core.CategoryTextGeneration},
+		}},
+	}
+	return provider
+}
+
+// OpenRouter answers Decisions with its System One decision models; its chat
+// models are refused with the reason, as /v1/systemone refuses them.
+func TestDecisions_OpenRouterServesOnlyDecisionModels(t *testing.T) {
+	provider := newOpenRouterDecisionsProvider()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	c, rec := echotest.Post(t, "/v1/decisions", decisionBody("openrouter/typesafe/jev-1.13"))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"openrouter openrouter typesafe/jev-1.13"}, provider.calls)
+
+	c, rec = echotest.Post(t, "/v1/decisions", decisionBody("openrouter/openai/gpt-4o-mini"))
+	require.NoError(t, handler.Decisions(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "is a chat model, not a System One model")
+	assert.Len(t, provider.calls, 1, "the chat model must not be called")
+}
+
+// Failover skips OpenRouter's chat models, which have no Decisions API.
+func TestDecisions_FailoverSkipsOpenRouterChatModels(t *testing.T) {
+	provider := newOpenRouterDecisionsProvider()
+	provider.statuses["gpt-6-luna"] = http.StatusServiceUnavailable
+	handler := newHandler(provider, nil, nil, nil, nil, nil, failoverResolverStub{selectors: []core.ModelSelector{
+		{Provider: "openrouter", Model: "openai/gpt-4o-mini"},
+		{Provider: "openrouter", Model: "typesafe/jev-1.13"},
+	}}, nil)
+
+	c, rec := echotest.Post(t, "/v1/decisions", decisionBody("openai/gpt-6-luna"))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"openai openai gpt-6-luna", "openrouter openrouter typesafe/jev-1.13"}, provider.calls)
+}
+
+// OpenRouter reports what it charged as usage.cost; the translated answer
+// carries it, so usage records the charge rather than a price from rates.
+func TestDecisions_RecordsOpenRoutersReportedCost(t *testing.T) {
+	provider := newOpenRouterDecisionsProvider()
+	provider.cost = "0.00003"
+	usageLogger := &collectingUsageLogger{config: usage.Config{Enabled: true}}
+	handler := newHandlerWithAuthorizer(provider, nil, usageLogger, nil, nil, nil, nil, nil, nil)
+
+	c, rec := echotest.Post(t, "/v1/decisions", decisionBody("openrouter/typesafe/jev-1.13"))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Len(t, usageLogger.entries, 1)
+	assert.InDelta(t, 0.00003, usageLogger.entries[0].RawData["cost"], 1e-12)
 }

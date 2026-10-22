@@ -27,7 +27,7 @@ var decisionsRoute = nativeJSONRoute{path: "/v1/decisions", endpoint: "decisions
 // and back, so the answer is always OpenAI's shape.
 //
 // @Summary      Answer typed questions about an input (OpenAI Decisions)
-// @Description  Available when an openai or jev provider is configured. OpenAI models answer natively; jev models (Jev, Kev) answer through System One, translated both ways. Hosted Jev reads images sent as base64 data URLs; Kev reads text only.
+// @Description  Available when an openai, jev, or openrouter provider is configured. OpenAI models answer natively; jev models (Jev, Kev) and OpenRouter's decision models answer through System One, translated both ways. Hosted Jev reads images sent as base64 data URLs; Kev and OpenRouter read text only.
 // @Tags         decisions
 // @Accept       json
 // @Produce      json
@@ -48,7 +48,7 @@ func (h *Handler) Decisions(c *echo.Context) error {
 func (s *translatedInferenceService) serveDecisions(c *echo.Context) error {
 	router, ok := s.provider.(core.RoutableDecisions)
 	if !ok || len(router.DecisionsProviderTypes()) == 0 {
-		return handleError(c, core.NewNotFoundError("POST "+decisionsRoute.path+" is available only when an openai or jev provider is configured"))
+		return handleError(c, core.NewNotFoundError("POST "+decisionsRoute.path+" is available only when an openai, jev, or openrouter provider is configured"))
 	}
 	body, err := requestBodyBytes(c)
 	if err != nil {
@@ -72,8 +72,8 @@ func (s *translatedInferenceService) serveDecisions(c *echo.Context) error {
 			return handleError(c, err)
 		}
 	}
-	if !servesDecisions(router, resolution.ProviderType) {
-		return handleError(c, decisionsUnsupportedModelError(c, resolution))
+	if reason := s.decisionsUnsupportedReason(router, resolution.ResolvedSelector, resolution.ProviderType); reason != "" {
+		return handleError(c, decisionsUnsupportedModelError(c, resolution, reason))
 	}
 
 	body, err = s.guardDecisionInput(c, workflow, &req, body)
@@ -92,11 +92,11 @@ func (s *translatedInferenceService) serveDecisions(c *echo.Context) error {
 		workflow = promoted
 		storeWorkflow(c, workflow)
 	}
-	return s.dispatchNativeJSONWithCache(c, workflow, body, func() error {
+	return s.dispatchNativeJSONWithCache(c, decisionsRoute, workflow, body, func() error {
 		// A target that cannot read the input, such as a text-only Kev
 		// server for a request with images, is skipped rather than tried.
 		eligible := func(selector core.ModelSelector, providerType string) bool {
-			return servesDecisions(router, providerType) && s.readsImages(selector, providerType, images)
+			return s.decisionsUnsupportedReason(router, selector, providerType) == "" && s.readsImages(selector, providerType, images)
 		}
 		return s.dispatchNativeJSON(c, decisionsRoute, workflow, eligible,
 			func(ctx context.Context, selector core.ModelSelector, providerType, providerName string, headers http.Header) (*core.PassthroughResponse, error) {
@@ -116,7 +116,7 @@ func (s *translatedInferenceService) imageReadingFailover(ctx context.Context, r
 	inference := s.inference()
 	for _, selector := range inference.FailoverSelectors(workflow) {
 		providerType := inference.ProviderTypeForSelector(selector, "")
-		if !servesDecisions(router, providerType) || !s.readsImages(selector, providerType, images) {
+		if s.decisionsUnsupportedReason(router, selector, providerType) != "" || !s.readsImages(selector, providerType, images) {
 			continue
 		}
 		if s.modelAuthorizer != nil && s.modelAuthorizer.ValidateModelAccess(ctx, selector) != nil {
@@ -229,8 +229,19 @@ func decisionInputImages(input json.RawMessage) decisionImages {
 	return images
 }
 
-func servesDecisions(router core.RoutableDecisions, providerType string) bool {
-	return slices.Contains(router.DecisionsProviderTypes(), strings.TrimSpace(providerType))
+// decisionsUnsupportedReason explains why a model cannot answer a Decisions
+// request, or returns "" when it can. Its provider must serve Decisions, and
+// since OpenRouter also serves chat models, an OpenRouter model must be one of
+// its System One decision models, by the rule /v1/systemone applies.
+func (s *translatedInferenceService) decisionsUnsupportedReason(router core.RoutableDecisions, selector core.ModelSelector, providerType string) string {
+	providerType = strings.TrimSpace(providerType)
+	if !slices.Contains(router.DecisionsProviderTypes(), providerType) {
+		return fmt.Sprintf("is served by provider type %s, which has no decisions API", providerType)
+	}
+	if providerType == openRouterProviderType {
+		return s.systemOneUnsupportedReason(systemOneEvaluate, selector, providerType)
+	}
+	return ""
 }
 
 // sendDecisions sends the body to one target under its own model name.
@@ -258,25 +269,26 @@ func sendDecisions(
 	return nativeJSONResult(providerType, resp, err)
 }
 
-// decisionsUnsupportedModelError explains a request whose model's provider
-// has no Decisions API. It is also logged: a virtual model that sends
-// decisions to such a provider is an operator mistake the caller cannot fix.
-func decisionsUnsupportedModelError(c *echo.Context, resolution *core.RequestModelResolution) error {
+// decisionsUnsupportedModelError explains a request whose model cannot
+// answer Decisions. It is also logged: a virtual model that sends decisions
+// to such a model is an operator mistake the caller cannot fix.
+func decisionsUnsupportedModelError(c *echo.Context, resolution *core.RequestModelResolution, reason string) error {
 	requested := resolution.RequestedQualifiedModel()
 	resolved := resolution.ResolvedQualifiedModel()
-	slog.Warn("decisions request routed to a provider without a decisions API",
+	slog.Warn("decisions request routed to a model without a decisions API",
 		"request_id", requestIDFromContextOrHeader(c.Request()),
 		"requested_model", requested,
 		"resolved_model", resolved,
 		"provider_type", resolution.ProviderType,
+		"reason", reason,
 	)
 	target := fmt.Sprintf("%q", requested)
 	if resolved != requested {
 		target += fmt.Sprintf(" (resolved to %q)", resolved)
 	}
 	return core.NewInvalidRequestError(fmt.Sprintf(
-		"model %s is served by provider type %s, which has no decisions API; use a decision model such as openai/gpt-6-luna or a jev model",
-		target, resolution.ProviderType,
+		"model %s %s; use a decision model such as openai/gpt-6-luna, a jev model, or one of OpenRouter's decision models",
+		target, reason,
 	), nil).WithParam("model")
 }
 

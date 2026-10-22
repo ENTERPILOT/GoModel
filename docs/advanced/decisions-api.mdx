@@ -1,8 +1,8 @@
 ---
 title: "Decisions API"
-description: "Ask typed predicate, choice, and score questions through GoModel with OpenAI's Decisions API, answered by OpenAI or by Jev / Kev."
+description: "Ask typed predicate, choice, and score questions through GoModel with OpenAI's Decisions API, answered by OpenAI, Jev / Kev, or OpenRouter's decision models."
 icon: "list-check"
-keywords: ["Decisions", "decisions API", "gpt-6-luna", "predicate", "choice", "score", "classification", "Jev", "Kev", "System One"]
+keywords: ["Decisions", "decisions API", "gpt-6-luna", "predicate", "choice", "score", "classification", "Jev", "Kev", "System One", "OpenRouter"]
 ---
 
 `POST /v1/decisions` serves [OpenAI's Decisions API](https://developers.openai.com/api/docs/guides/decisions):
@@ -10,13 +10,14 @@ a request carries an `input` (text, or user messages of text and images) and a
 list of typed questions, and each answer is a probability, a choice, or a
 score instead of free text.
 
-The endpoint is available once an `openai` or [`jev`](/providers/jev) provider
-is configured. Without one, it answers `404`.
+The endpoint is available once an `openai`, [`jev`](/providers/jev), or
+`openrouter` provider is configured. Without one, it answers `404`.
 
 | Provider | How it answers |
 | --- | --- |
 | `openai` | Natively: the body reaches `/v1/decisions` as sent |
 | `jev` (hosted Jev, self-hosted Kev) | Through [System One](/advanced/systemone-api), translated both ways; images on hosted Jev only |
+| `openrouter` | Its System One decision models (`openrouter/typesafe/jev-1.13`, `openrouter/~typesafe/jev-latest`, Kev), translated the same way; text only. OpenRouter's chat models do not answer it |
 
 Either way the answer is OpenAI's shape, so the OpenAI SDKs work unchanged.
 
@@ -125,12 +126,18 @@ request type.
 Usage on `/v1/decisions` is costed for input tokens only, every one at the
 model's input rate, as OpenAI bills the Decisions API: output, cache-read, and
 cache-write tokens are free there, even for a model such as `gpt-6-luna` whose
-catalog pricing has chat rates. Long-context tiers still set the input rate.
+catalog pricing has chat rates. Long-context tiers still set the input rate. OpenRouter
+reports what it charged as `usage.cost`; the translated answer keeps it, and
+usage records it as the request's cost.
 
 Guardrails see each input message as a user message, with its text and image
 parts; edits reach the provider, and untouched parts keep their exact JSON.
 Edits a decision request has no place for, such as an injected system prompt,
-are dropped with a warning.
+are dropped with a warning. Only the prompt phase applies: the answer is typed
+values (probabilities, choices, scores), not a completion, so response and
+stream phase guardrails do not run on it and it is relayed unchanged. A
+workflow that selects such guardrails for a Decisions request logs one warning
+per guardrail.
 
 A failover chain may mix providers: every target receives the request in its
 own form, and a target on a provider without a Decisions API, or one that
@@ -152,7 +159,8 @@ virtual_models:
 
 | Situation | Result |
 | --- | --- |
-| No `openai` or `jev` provider configured | `404` |
+| No `openai`, `jev`, or `openrouter` provider configured | `404` |
+| A chat model on OpenRouter | `400 invalid_request_error`: only its decision models answer Decisions |
 | `model` missing | `400` |
 | Model on a provider without a Decisions API (including through a virtual model) | `400 invalid_request_error`; the gateway logs a warning |
 | An image sent to a text-only model (Kev), an image link or a non-PNG/JPEG image sent to a `jev` model, or another request System One cannot express | `400 invalid_request_error` naming the field |

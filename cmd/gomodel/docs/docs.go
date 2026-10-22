@@ -5846,7 +5846,7 @@ const docTemplate = `{
         },
         "/v1/decisions": {
             "post": {
-                "description": "Available when an openai or jev provider is configured. OpenAI models answer natively; jev models (Jev, Kev) answer through System One, translated both ways. Hosted Jev reads images sent as base64 data URLs; Kev reads text only.",
+                "description": "Available when an openai, jev, or openrouter provider is configured. OpenAI models answer natively; jev models (Jev, Kev) and OpenRouter's decision models answer through System One, translated both ways. Hosted Jev reads images sent as base64 data URLs; Kev and OpenRouter read text only.",
                 "consumes": [
                     "application/json"
                 ],

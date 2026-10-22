@@ -204,6 +204,13 @@ Stateful note:
 - `S256` replays a Claude server-side tool search turn (regex and BM25) on
   OpenAI and Gemini through `/v1/messages`; read-only and rerunnable in any
   order
+- `S257`-`S262` exercise the OpenAI Decisions API (`/v1/decisions` translated
+  to System One on the mock `jev` upstreams, Kev image refusals and image
+  routing to OpenAI, native OpenAI answers costed for input only, OpenRouter
+  chat-model refusals), TypeSafe's multipart image form on `/v1/systemone`, and
+  gzip/zstd request bodies. The `jev` checks print `SKIPPED:` when the mock is
+  down; `S258` and `S259` call the real `openai/gpt-6-luna`. They delete their
+  own `$QA_SUFFIX`-scoped virtual models and are rerunnable in any order
 - `S218` exercises Gemini's native `batchEmbedContents` path (batch input,
   `dimensions`); read-only and rerunnable in any order
 - `S219` asserts the effective resilience configuration on
@@ -8084,4 +8091,237 @@ CODE=$(curl -sS -o "$OUT" -w '%{http_code}' "$BASE_URL/v1/messages" "${H[@]}" -d
     {"role":"user","content":"thanks"}]}')
 assert_http_status 400 "$CODE" "$OUT"
 jq -e '.type == "error" and (.error.message | contains("server_tool_use"))' "$OUT" >/dev/null
+```
+
+## 40. OpenAI Decisions API
+
+`POST /v1/decisions` answers OpenAI's Decisions API: natively on `openai`, and
+on `jev` providers (and OpenRouter's decision models) by translating to System
+One and back. The `jev` scenarios run against the mockjev upstreams from
+section 35. Its answers are translated, so they carry no `mock` echo; the mock's
+`GET /<prefix>/v1/_last` returns the last System One request it received
+instead. The mock providers are not at `https://api.typesafe.ai`, so the
+gateway treats every one of them as a Kev server that reads text only.
+
+### S257 `/v1/decisions` translates to System One on Jev and back
+
+Question and option order survive translation, an unnamed question gets a
+generated key and comes back as `name: null`, a boolean choice comes back as a
+boolean, OpenAI-only members are dropped, and usage has the Responses shape.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+RID="qa-dec-jev-$QA_SUFFIX"
+F="$QA_RUN_DIR/s257.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/decisions" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $RID" -d '{
+  "model":"jev/jev-latest",
+  "input":[{"role":"user","content":[{"type":"input_text","text":"Shoes arrived late."},{"type":"input_text","text":"I see two charges."}]}],
+  "questions":[
+    {"type":"choice","name":"zz_department","instructions":"Which team?","choices":[{"value":"shipping"},{"value":"billing","description":"Charges"},{"value":"other"}]},
+    {"type":"predicate","name":"aa_escalate","instructions":"Urgent?"},
+    {"type":"choice","name":"is_refund","instructions":"Refund?","choices":[{"value":true},{"value":false}]},
+    {"type":"score","instructions":"How frustrated?","levels":[{"label":"Calm"},{"label":"Angry","description":"Threats to leave"}]}],
+  "prompt_cache_key":"qa","safety_identifier":"qa-user"}')
+assert_http_status 200 "$CODE" "$F"
+jq -c '{model, answers: [.answers[] | {name, type, choice, probability, score}], usage}' "$F"
+jq -e '
+  .model == "jev-1.13.0"
+  and ([.answers[].name] == ["zz_department","aa_escalate","is_refund",null])
+  and ([.answers[].type] == ["choice","predicate","choice","score"])
+  and ([.answers[0].probabilities[].value] == ["shipping","billing","other"])
+  and (.answers[2].choice | type == "boolean")
+  and ([.answers[3].probabilities[].label] == ["Calm","Angry"])
+  and .usage.total_tokens == (.usage.input_tokens + .usage.output_tokens)
+  and .usage.output_tokens_details.reasoning_tokens == 0
+' "$F" >/dev/null
+
+LAST="$QA_RUN_DIR/s257.last.json"
+curl -fsS "$JEV_MOCK_BASE/jev/v1/_last" > "$LAST"
+jq -c '.body' "$LAST"
+jq -e --arg rid "$RID" '
+  .request_id == $rid
+  and (.body.questions | keys_unsorted) == ["zz_department","aa_escalate","is_refund","question_4"]
+  and (.body.questions.zz_department.criteria | keys_unsorted) == ["shipping","billing","other"]
+  and .body.questions.aa_escalate.type == "noul"
+  and .body.state == "Shoes arrived late.\n\nI see two charges."
+  and (.body | has("prompt_cache_key") | not) and (.body | has("safety_identifier") | not)
+' "$LAST" >/dev/null
+```
+
+### S258 Images are refused on Kev and routed to a target that reads them
+
+A text-only Kev target refuses an image request, a `jev` target refuses an
+image link, and a failover chain whose first target is Kev sends text to Kev
+and images to OpenAI.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+CHAIN="qa-dec-images-$QA_SUFFIX"
+cleanup_s258() {
+  curl -sS -o /dev/null -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+    -d "{\"source\":\"$CHAIN\"}" || true
+}
+trap cleanup_s258 EXIT
+
+PNG="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+image_body() {
+  jq -nc --arg model "$1" --arg url "$2" '{model: $model,
+    input: [{role: "user", content: [{type: "input_text", text: "Is the box damaged?"}, {type: "input_image", image_url: $url}]}],
+    questions: [{type: "predicate", name: "damaged", instructions: "Is there visible damage?"}]}'
+}
+
+F="$QA_RUN_DIR/s258.kev.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/decisions" -H 'Content-Type: application/json' \
+  -d "$(image_body jev-kev/kev-latest "$PNG")")
+assert_http_status 400 "$CODE" "$F"
+jq -e '.error.type == "invalid_request_error" and (.error.message | contains("does not read images"))' "$F" >/dev/null
+
+F="$QA_RUN_DIR/s258.link.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/decisions" -H 'Content-Type: application/json' \
+  -d "$(image_body jev/jev-latest https://example.com/box.png)")
+assert_http_status 400 "$CODE" "$F"
+jq -e '.error.message | contains("not a link")' "$F" >/dev/null
+
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$CHAIN\",\"strategy\":\"failover\",\"targets\":[{\"model\":\"jev-kev/kev-latest\"},{\"model\":\"openai/gpt-6-luna\"}]}" >/dev/null
+
+F="$QA_RUN_DIR/s258.chain-text.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/decisions" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$CHAIN\",\"input\":\"text only\",\"questions\":[{\"type\":\"predicate\",\"name\":\"damaged\",\"instructions\":\"Damaged?\"}]}")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.model == "kev-4b-e2e" and .answers[0].type == "predicate"' "$F" >/dev/null
+
+F="$QA_RUN_DIR/s258.chain-image.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/decisions" -H 'Content-Type: application/json' \
+  -d "$(image_body "$CHAIN" "$PNG")")
+assert_http_status 200 "$CODE" "$F"
+jq -c '{model, answers}' "$F"
+jq -e '(.model | startswith("gpt-6-luna")) and (.answers[0].type | IN("predicate","refusal"))' "$F" >/dev/null
+```
+
+### S259 OpenAI answers Decisions natively and is costed for input only
+
+The body reaches OpenAI as sent, text and an inline image included. Usage on
+`/v1/decisions` is costed for input tokens only, as OpenAI bills the API.
+
+```bash
+RID="qa-dec-openai-$QA_SUFFIX"
+PNG="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+F="$QA_RUN_DIR/s259.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/decisions" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $RID" -d "$(jq -nc --arg url "$PNG" '{model: "openai/gpt-6-luna",
+    input: [{role: "user", content: [{type: "input_text", text: "I was charged twice. Here is the receipt."}, {type: "input_image", image_url: $url}]}],
+    questions: [
+      {type: "predicate", name: "billing", instructions: "Is this about billing?"},
+      {type: "choice", name: "team", instructions: "Which team?", choices: [{value: "billing"}, {value: "shipping"}, {value: "other"}]},
+      {type: "score", name: "urgency", instructions: "How urgent?", levels: [{label: "Low"}, {label: "Medium"}, {label: "High"}]}]}')")
+assert_http_status 200 "$CODE" "$F"
+jq -c '{model, answers: [.answers[] | {name, type}], usage}' "$F"
+jq -e '
+  (.model | startswith("gpt-6-luna"))
+  and ([.answers[].name] == ["billing","team","urgency"])
+  and all(.answers[]; .type | IN("predicate","choice","score","refusal"))
+  and .usage.input_tokens > 0
+' "$F" >/dev/null
+
+USAGE_FILE="$QA_RUN_DIR/s259.usage.json"
+wait_log_entry "$BASE_URL" usage "$RID" "$USAGE_FILE"
+jq -c --arg rid "$RID" '.entries[] | select(.request_id == $rid) | {endpoint, model, input_tokens, output_tokens, input_cost, output_cost}' "$USAGE_FILE"
+jq -e --arg rid "$RID" '
+  any(.entries[]; .request_id == $rid and .endpoint == "/v1/decisions"
+    and ((.output_cost // 0) == 0) and ((.input_cost // 0) >= 0))
+' "$USAGE_FILE" >/dev/null
+```
+
+### S260 OpenRouter's chat models do not answer Decisions
+
+OpenRouter answers Decisions only with its System One decision models; a chat
+model is refused with the reason. The release matrix lists only OpenRouter's
+free models, which hold no decision model, so only the refusal is checked.
+
+```bash
+OPENROUTER_MODEL=$(curl -fsS "$BASE_URL/v1/models" | jq -r '[.data[] | select((.id | startswith("openrouter/")) and ((.metadata.modes // []) | index("chat")))][0].id // empty')
+if [ -z "$OPENROUTER_MODEL" ]; then
+  echo "SKIPPED: no OpenRouter chat model is listed"
+  exit 0
+fi
+F="$QA_RUN_DIR/s260.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/decisions" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$OPENROUTER_MODEL\",\"input\":\"x\",\"questions\":[{\"type\":\"predicate\",\"instructions\":\"?\"}]}")
+assert_http_status 400 "$CODE" "$F"
+jq -e '.error.message | contains("not a System One model")' "$F" >/dev/null
+```
+
+### S261 `/v1/systemone` accepts TypeSafe's multipart image form
+
+The TypeSafe SDKs send images as `multipart/form-data`: the JSON request as the
+`request` part and each image as a file part an asset names. The upstream
+receives one JSON request with the image inlined as `data_base64`.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+IMG="$QA_RUN_DIR/s261.png"
+printf '\211PNG\r\n\032\n\000\000\000\rIHDRqa-e2e' > "$IMG"
+REF="ref-door-$QA_SUFFIX"
+F="$QA_RUN_DIR/s261.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone" \
+  -H 'TypeSafe-Danger-Zone-Images: true' \
+  -F "request={\"model\":\"jev/jev-latest\",\"state\":{\"door\":\"$REF\"},\"assets\":{\"$REF\":{\"type\":\"image\",\"part\":\"door-photo\"}},\"questions\":$QA_SYSTEMONE_CHOICE};type=application/json" \
+  -F "door-photo=@$IMG;type=image/png")
+assert_http_status 200 "$CODE" "$F"
+jq -e --arg ref "$REF" '.mock.received_state.door == $ref and .mock.extra.assets[$ref].format == "png"' "$F" >/dev/null
+
+LAST="$QA_RUN_DIR/s261.last.json"
+curl -fsS "$JEV_MOCK_BASE/jev/v1/_last" > "$LAST"
+WANT=$(base64 < "$IMG" | tr -d '\n')
+jq -e --arg ref "$REF" --arg want "$WANT" '
+  .content_type == "application/json" and .images == "true"
+  and .body.assets[$ref].data_base64 == $want
+  and (.body.assets[$ref] | has("part") | not)
+' "$LAST" >/dev/null
+
+# A form TypeSafe would reject is rejected before routing.
+F="$QA_RUN_DIR/s261.unused.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone" \
+  -F "request={\"model\":\"jev/jev-latest\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE};type=application/json" \
+  -F "stray=@$IMG;type=image/png")
+assert_http_status 400 "$CODE" "$F"
+jq -e '.error.message | contains("not used by any asset")' "$F" >/dev/null
+```
+
+### S262 Compressed request bodies are decoded
+
+The TypeSafe SDKs zstd-compress bodies of 1 KiB or more. gzip and zstd bodies
+are decoded before routing; an unsupported encoding returns `415`.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+BODY="{\"model\":\"jev-kev/kev-latest\",\"state\":\"$(printf 'Charged twice. %.0s' $(seq 1 120))\",\"questions\":$QA_SYSTEMONE_CHOICE}"
+F="$QA_RUN_DIR/s262.gzip.json"
+CODE=$(printf '%s' "$BODY" | gzip -c | curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone" \
+  -H 'Content-Type: application/json' -H 'Content-Encoding: gzip' --data-binary @-)
+assert_http_status 200 "$CODE" "$F"
+jq -e '.mock.upstream == "kev" and (.mock.received_state | startswith("Charged twice."))' "$F" >/dev/null
+
+if command -v zstd >/dev/null 2>&1; then
+  F="$QA_RUN_DIR/s262.zstd.json"
+  CODE=$(jq -nc --arg s "$(printf 'Charged twice. %.0s' $(seq 1 120))" \
+      '{model: "jev-kev/kev-latest", input: $s, questions: [{type: "predicate", name: "billing", instructions: "Billing?"}]}' \
+    | zstd -q -c | curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/decisions" \
+      -H 'Content-Type: application/json' -H 'Content-Encoding: zstd' --data-binary @-)
+  assert_http_status 200 "$CODE" "$F"
+  jq -e '.answers[0].name == "billing"' "$F" >/dev/null
+else
+  echo "zstd not installed; checked gzip only"
+fi
+
+F="$QA_RUN_DIR/s262.br.json"
+CODE=$(printf '%s' "$BODY" | curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone" \
+  -H 'Content-Type: application/json' -H 'Content-Encoding: br' --data-binary @-)
+assert_http_status 415 "$CODE" "$F"
 ```

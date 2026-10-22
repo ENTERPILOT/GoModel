@@ -36,7 +36,10 @@ type nativeJSONSender func(ctx context.Context, selector core.ModelSelector, pro
 // exact layer applies: the key covers the route, the resolved model, the
 // guardrail chain, and the forwarded body, and the semantic layer never
 // serves these paths, since a similar input is not the same decision.
-func (s *translatedInferenceService) dispatchNativeJSONWithCache(c *echo.Context, workflow *core.Workflow, body []byte, dispatch func() error) error {
+func (s *translatedInferenceService) dispatchNativeJSONWithCache(c *echo.Context, route nativeJSONRoute, workflow *core.Workflow, body []byte, dispatch func() error) error {
+	// Before the cache: an answer replayed from a warm shared cache skips the
+	// selected response guardrails as much as a live one does.
+	s.warnSkippedResponsePlugins(c.Request().Context(), route)
 	if s.responseCache == nil || !workflow.CacheEnabled() {
 		return dispatch()
 	}
