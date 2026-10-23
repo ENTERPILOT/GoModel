@@ -47,3 +47,41 @@ func TestNativeChatResponse_TextOnlyStaysString(t *testing.T) {
 	require.Len(t, resp.Choices, 1)
 	assert.Equal(t, "hi", resp.Choices[0].Message.Content)
 }
+
+func TestNativeChatResponse_ImageThoughtSignaturesRoundTrip(t *testing.T) {
+	var geminiResp geminiGenerateContentResponse
+	err := json.Unmarshal([]byte(`{"candidates":[{"content":{"role":"model","parts":[
+		{"inlineData":{"mimeType":"image/png","data":"aW1n"},"thoughtSignature":"sig-a"},
+		{"inlineData":{"mimeType":"image/jpeg","data":"anBn"},"thoughtSignature":"sig-b"}
+	]},"finishReason":"STOP"}]}`), &geminiResp)
+	require.NoError(t, err)
+
+	resp, err := nativeChatResponse(&core.ChatRequest{Model: "gemini-3-pro-image-preview"}, &geminiResp, "gemini")
+	require.NoError(t, err)
+	require.Len(t, resp.Choices, 1)
+
+	// Echo the assistant turn back through the public JSON shape.
+	encoded, err := json.Marshal(resp.Choices[0].Message)
+	require.NoError(t, err)
+	var assistant core.Message
+	require.NoError(t, json.Unmarshal(encoded, &assistant))
+
+	req, err := convertChatRequestToGemini(&core.ChatRequest{
+		Model: "gemini-3-pro-image-preview",
+		Messages: []core.Message{
+			{Role: "user", Content: "draw two"},
+			assistant,
+			{Role: "user", Content: "make them blue"},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, req.Contents, 3)
+	parts := req.Contents[1].Parts
+	require.Len(t, parts, 2)
+	require.NotNil(t, parts[0].InlineData)
+	require.NotNil(t, parts[1].InlineData)
+	assert.Equal(t, "aW1n", parts[0].InlineData.Data)
+	assert.Equal(t, "sig-a", parts[0].ThoughtSignature)
+	assert.Equal(t, "anBn", parts[1].InlineData.Data)
+	assert.Equal(t, "sig-b", parts[1].ThoughtSignature)
+}

@@ -411,6 +411,8 @@ func geminiPartsFromContentParts(parts []core.ContentPart) ([]geminiPart, error)
 			if err != nil {
 				return nil, err
 			}
+			// A replayed generated image keeps its own signature.
+			geminiPart.ThoughtSignature = thoughtSignatureFromExtraFields(part.ExtraFields)
 			out = append(out, geminiPart)
 		case "input_audio":
 			if part.InputAudio == nil {
@@ -1023,7 +1025,8 @@ func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContent
 }
 
 // imagePartsFromGeminiParts returns generated images (inline image blobs) as
-// OpenAI image_url content parts carrying base64 data URLs.
+// OpenAI image_url content parts carrying base64 data URLs and each image's
+// thought signature, which Gemini needs back to edit the image in a later turn.
 func imagePartsFromGeminiParts(parts []geminiPart) []core.ContentPart {
 	var images []core.ContentPart
 	for _, part := range parts {
@@ -1039,8 +1042,9 @@ func imagePartsFromGeminiParts(parts []geminiPart) []core.ContentPart {
 			continue
 		}
 		images = append(images, core.ContentPart{
-			Type:     "image_url",
-			ImageURL: &core.ImageURLContent{URL: "data:" + mimeType + ";base64," + blob.Data},
+			Type:        "image_url",
+			ImageURL:    &core.ImageURLContent{URL: "data:" + mimeType + ";base64," + blob.Data},
+			ExtraFields: thoughtSignatureExtraFields(part.ThoughtSignature),
 		})
 	}
 	return images
