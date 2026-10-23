@@ -85,3 +85,67 @@ func TestNativeChatResponse_ImageThoughtSignaturesRoundTrip(t *testing.T) {
 	assert.Equal(t, "anBn", parts[1].InlineData.Data)
 	assert.Equal(t, "sig-b", parts[1].ThoughtSignature)
 }
+
+func TestNativeChatResponse_ImageThenSignedTextKeepsEachSignature(t *testing.T) {
+	var geminiResp geminiGenerateContentResponse
+	err := json.Unmarshal([]byte(`{"candidates":[{"content":{"role":"model","parts":[
+		{"inlineData":{"mimeType":"image/png","data":"aW1n"},"thoughtSignature":"sig-image"},
+		{"text":"Here it is.","thoughtSignature":"sig-text"}
+	]},"finishReason":"STOP"}]}`), &geminiResp)
+	require.NoError(t, err)
+
+	resp, err := nativeChatResponse(&core.ChatRequest{Model: "gemini-3-pro-image-preview"}, &geminiResp, "gemini")
+	require.NoError(t, err)
+	require.Len(t, resp.Choices, 1)
+
+	encoded, err := json.Marshal(resp.Choices[0].Message)
+	require.NoError(t, err)
+	var assistant core.Message
+	require.NoError(t, json.Unmarshal(encoded, &assistant))
+
+	req, err := convertChatRequestToGemini(&core.ChatRequest{
+		Model:    "gemini-3-pro-image-preview",
+		Messages: []core.Message{{Role: "user", Content: "draw"}, assistant, {Role: "user", Content: "again"}},
+	})
+	require.NoError(t, err)
+	require.Len(t, req.Contents, 3)
+	parts := req.Contents[1].Parts
+	require.Len(t, parts, 2)
+	assert.Equal(t, "Here it is.", parts[0].Text)
+	assert.Equal(t, "sig-text", parts[0].ThoughtSignature)
+	require.NotNil(t, parts[1].InlineData)
+	assert.Equal(t, "sig-image", parts[1].ThoughtSignature)
+}
+
+func TestNativeChatResponse_ImageSignatureRoundTripsThroughResponses(t *testing.T) {
+	var geminiResp geminiGenerateContentResponse
+	err := json.Unmarshal([]byte(`{"candidates":[{"content":{"role":"model","parts":[
+		{"inlineData":{"mimeType":"image/png","data":"aW1n"},"thoughtSignature":"sig-image"},
+		{"text":"Here it is.","thoughtSignature":"sig-text"}
+	]},"finishReason":"STOP"}]}`), &geminiResp)
+	require.NoError(t, err)
+
+	resp, err := nativeChatResponse(&core.ChatRequest{Model: "gemini-3-pro-image-preview"}, &geminiResp, "gemini")
+	require.NoError(t, err)
+
+	// Echo the Responses output item back as Responses input.
+	output := providers.ConvertChatResponseToResponses(resp).Output
+	encoded, err := json.Marshal(output)
+	require.NoError(t, err)
+	var items []any
+	require.NoError(t, json.Unmarshal(encoded, &items))
+	input := append([]any{map[string]any{"role": "user", "content": "draw"}}, items...)
+	input = append(input, map[string]any{"role": "user", "content": "again"})
+
+	chatReq, err := providers.ConvertResponsesRequestToChat(&core.ResponsesRequest{Model: "gemini-3-pro-image-preview", Input: input})
+	require.NoError(t, err)
+	req, err := convertChatRequestToGemini(chatReq)
+	require.NoError(t, err)
+	require.Len(t, req.Contents, 3)
+	parts := req.Contents[1].Parts
+	require.Len(t, parts, 2)
+	assert.Equal(t, "Here it is.", parts[0].Text)
+	assert.Equal(t, "sig-text", parts[0].ThoughtSignature)
+	require.NotNil(t, parts[1].InlineData)
+	assert.Equal(t, "sig-image", parts[1].ThoughtSignature)
+}

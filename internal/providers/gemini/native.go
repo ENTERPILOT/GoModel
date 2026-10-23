@@ -77,7 +77,8 @@ type geminiFileData struct {
 // Thought signatures cross the OpenAI-compatible API the way Google's own
 // OpenAI-compatible endpoint exposes them: a functionCall part's signature as
 // tool_calls[].extra_content.google.thought_signature and a text part's as
-// message.extra_content.google.thought_signature. Gemini 3 rejects (HTTP 400)
+// message.extra_content.google.thought_signature. A generated image's rides on
+// image_url.extra_content.google.thought_signature. Gemini 3 rejects (HTTP 400)
 // any functionCall in the history that comes back without its signature.
 // skipThoughtSignatureValidator is the placeholder Google documents for
 // function calls that never had a signature: a history transferred from
@@ -327,13 +328,21 @@ func geminiPartsFromToolCallMessage(msg core.Message, signatureRequired bool) []
 	return parts
 }
 
-// withThoughtSignature attaches a text turn's signature to its last part, the
-// position Gemini returned it in.
+// withThoughtSignature attaches a text turn's signature to its last text part,
+// the position Gemini returned it in. Replayed images keep their own signature.
 func withThoughtSignature(parts []geminiPart, signature string) []geminiPart {
 	if signature == "" || len(parts) == 0 {
 		return parts
 	}
-	parts[len(parts)-1].ThoughtSignature = signature
+	for i := len(parts) - 1; i >= 0; i-- {
+		if parts[i].Text != "" {
+			parts[i].ThoughtSignature = signature
+			return parts
+		}
+	}
+	if last := &parts[len(parts)-1]; last.ThoughtSignature == "" {
+		last.ThoughtSignature = signature
+	}
 	return parts
 }
 
@@ -411,8 +420,12 @@ func geminiPartsFromContentParts(parts []core.ContentPart) ([]geminiPart, error)
 			if err != nil {
 				return nil, err
 			}
-			// A replayed generated image keeps its own signature.
-			geminiPart.ThoughtSignature = thoughtSignatureFromExtraFields(part.ExtraFields)
+			// A replayed generated image keeps its own signature, emitted on
+			// image_url so it also survives the Responses API.
+			geminiPart.ThoughtSignature = thoughtSignatureFromExtraFields(part.ImageURL.ExtraFields)
+			if geminiPart.ThoughtSignature == "" {
+				geminiPart.ThoughtSignature = thoughtSignatureFromExtraFields(part.ExtraFields)
+			}
 			out = append(out, geminiPart)
 		case "input_audio":
 			if part.InputAudio == nil {
@@ -1042,9 +1055,11 @@ func imagePartsFromGeminiParts(parts []geminiPart) []core.ContentPart {
 			continue
 		}
 		images = append(images, core.ContentPart{
-			Type:        "image_url",
-			ImageURL:    &core.ImageURLContent{URL: "data:" + mimeType + ";base64," + blob.Data},
-			ExtraFields: thoughtSignatureExtraFields(part.ThoughtSignature),
+			Type: "image_url",
+			ImageURL: &core.ImageURLContent{
+				URL:         "data:" + mimeType + ";base64," + blob.Data,
+				ExtraFields: thoughtSignatureExtraFields(part.ThoughtSignature),
+			},
 		})
 	}
 	return images
@@ -1101,7 +1116,8 @@ func openAIMessageFromGeminiParts(parts []geminiPart) (string, []core.ToolCall, 
 			text.WriteString(part.Text)
 		}
 		call := part.functionCall()
-		if call == nil && part.ThoughtSignature != "" {
+		// Image signatures ride on their image_url part instead.
+		if call == nil && part.inlineData() == nil && part.ThoughtSignature != "" {
 			signature = part.ThoughtSignature
 		}
 		if call != nil {
