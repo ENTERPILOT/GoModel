@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
@@ -334,6 +335,45 @@ func TestFinishRequestDecompression_RecordsAnUncapturedBody(t *testing.T) {
 			require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
 			require.True(t, seen)
 			assert.Equal(t, tt.want, notCaptured)
+		})
+	}
+}
+
+// The audit entry of a compressed body decoded after auth says why its body
+// is missing, as it does for an uncompressed body of the same length.
+func TestRequestDecompression_AuditsAnUncapturedBody(t *testing.T) {
+	tests := []struct {
+		name     string
+		size     int
+		compress bool
+		want     bool
+	}{
+		{name: "compressed within the audit capture", size: 100 << 10, compress: true},
+		{name: "compressed over the audit capture", size: 2 << 20, compress: true, want: true},
+		{name: "uncompressed over the audit capture", size: 2 << 20, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: true, LogBodies: true}}
+			srv := New(&mockProvider{passthroughResponse: okPassthroughResponse()}, &Config{MasterKey: "master", AuditLogger: auditLogger})
+			body := []byte(`{"model":"gpt-4o-mini","padding":"` + strings.Repeat("a", tt.size) + `"}`)
+			if tt.compress {
+				body = gzipBytes(t, string(body))
+			}
+			req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer master")
+			req.Header.Set("Content-Type", "application/json")
+			if tt.compress {
+				req.Header.Set("Content-Encoding", "gzip")
+			}
+			rec := httptest.NewRecorder()
+
+			srv.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.Len(t, auditLogger.entries, 1)
+			require.NotNil(t, auditLogger.entries[0].Data)
+			assert.Equal(t, tt.want, auditLogger.entries[0].Data.RequestBodyTooBigToHandle)
 		})
 	}
 }

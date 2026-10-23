@@ -48,6 +48,19 @@ func populateRequestBodyFromSnapshot(entry *LogEntry, snapshot *core.RequestSnap
 	}
 }
 
+// populateRequestBodyTooBig records a body too large to capture when only a
+// snapshot taken later in the chain knows it, such as a compressed body that is
+// decoded, and so measured, after authentication. The body itself still comes
+// from the ingress snapshot, so a rewritten body is never logged in its place.
+func populateRequestBodyTooBig(entry *LogEntry, snapshot *core.RequestSnapshot) {
+	if entry == nil || snapshot == nil || !snapshot.BodyNotCaptured {
+		return
+	}
+	if data := ensureLogData(entry); data.RequestBody == nil {
+		data.RequestBodyTooBigToHandle = true
+	}
+}
+
 // PopulateRequestHeaders copies redacted request headers into the log entry.
 func PopulateRequestHeaders(entry *LogEntry, headers http.Header) {
 	if entry == nil || headers == nil {

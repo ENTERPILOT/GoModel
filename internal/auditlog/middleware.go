@@ -138,6 +138,9 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 			// Request capture is deferred until after next so a later-resolved
 			// Audit=false workflow can skip it entirely.
 			PopulateRequestData(entry, req, cfg)
+			if cfg.LogBodies {
+				populateRequestBodyTooBig(entry, core.GetRequestSnapshot(c.Request().Context()))
+			}
 
 			// Log response headers if enabled
 			if cfg.LogHeaders {
