@@ -14,6 +14,15 @@ type ModelsConfig struct {
 	// Default: false.
 	KeepOnlyAliasesAtModelsEndpoint bool `yaml:"keep_only_aliases_at_models_endpoint" env:"KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT"`
 
+	// VLLMDiscoveryCompat makes GET /v1/models advertise every model the way a
+	// vLLM runtime does, so a client whose model discovery only understands
+	// vLLM picks the gateway's models up instead of requiring a hand-written
+	// list: owned_by becomes "vllm" and each entry carries max_model_len read
+	// from the model's context window. It is a lie about the owner, so it stays
+	// opt-in and only for deployments whose consumers need it.
+	// Default: false.
+	VLLMDiscoveryCompat bool `yaml:"vllm_discovery_compat" env:"MODELS_VLLM_DISCOVERY_COMPAT"`
+
 	// UnqualifiedModelIDsAtModelsEndpoint controls whether GET /v1/models
 	// returns bare model IDs (gpt-5) instead of provider-qualified ones
 	// (openai/gpt-5). When two providers expose the same model ID, only the
