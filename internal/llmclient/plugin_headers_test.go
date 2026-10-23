@@ -31,15 +31,21 @@ func TestBuildRequestPluginHeadersCannotOverrideCredentials(t *testing.T) {
 	client := New(DefaultConfig("test", "http://upstream.test"), func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer provider")
 		req.Header.Set("X-Goog-Api-Key", "provider-key")
+		req.Header.Set("api-key", "azure-provider-key")
 	})
 	ctx := core.WithPluginUpstreamHeaders(context.Background(), http.Header{
-		"Authorization":    {"Bearer plugin"},
-		"X-Goog-Api-Key":   {"plugin-key"},
-		"X-Api-Key":        {"plugin-key"},
-		"Cookie":           {"session=plugin"},
-		"Host":             {"evil.test"},
-		"Content-Length":   {"999"},
-		"X-Allowed-Header": {"allowed"},
+		"Authorization":       {"Bearer plugin"},
+		"Proxy-Authorization": {"Basic plugin"},
+		"X-Goog-Api-Key":      {"plugin-key"},
+		"X-Api-Key":           {"plugin-key"},
+		"Api-Key":             {"plugin-key"},
+		"X-Anthropic-Api-Key": {"plugin-key"},
+		"Cookie":              {"session=plugin"},
+		"Set-Cookie":          {"session=plugin"},
+		"Host":                {"evil.test"},
+		"Content-Length":      {"999"},
+		"Transfer-Encoding":   {"chunked"},
+		"X-Allowed-Header":    {"allowed"},
 	})
 
 	req, err := client.buildRequest(ctx, Request{Method: http.MethodGet, Endpoint: "/v1/models"})
@@ -47,10 +53,15 @@ func TestBuildRequestPluginHeadersCannotOverrideCredentials(t *testing.T) {
 
 	assert.Equal(t, "Bearer provider", req.Header.Get("Authorization"))
 	assert.Equal(t, "provider-key", req.Header.Get("X-Goog-Api-Key"))
+	assert.Equal(t, "azure-provider-key", req.Header.Get("Api-Key"))
+	assert.Empty(t, req.Header.Get("Proxy-Authorization"))
 	assert.Empty(t, req.Header.Get("X-Api-Key"))
+	assert.Empty(t, req.Header.Get("X-Anthropic-Api-Key"))
 	assert.Empty(t, req.Header.Get("Cookie"))
+	assert.Empty(t, req.Header.Get("Set-Cookie"))
 	assert.Equal(t, "upstream.test", req.Host)
 	assert.Empty(t, req.Header.Get("Content-Length"))
+	assert.Empty(t, req.Header.Get("Transfer-Encoding"))
 	assert.Equal(t, "allowed", req.Header.Get("X-Allowed-Header"))
 }
 
