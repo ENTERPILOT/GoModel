@@ -84,12 +84,21 @@ export function routeSchemaFields(fields) {
 }
 
 // schemaFieldDefaults collects each field's `default` into a config object.
-// Fields without a default are left out so a `defaults` object can fill them.
+// Fields without a default are left out so a `defaults` object can fill them,
+// except a slider: it always displays a value, so its lower bound is seeded to
+// keep the displayed and the submitted value the same (an untouched required
+// range would otherwise be rejected on save).
 export function schemaFieldDefaults(fields) {
   const config = {};
   for (const field of Array.isArray(fields) ? fields : []) {
     if (!field || !field.key) continue;
-    if (field.default === undefined || field.default === null) continue;
+    if (field.default === undefined || field.default === null) {
+      if (field.input === "range") {
+        const lower = Number(field.min);
+        config[field.key] = Number.isFinite(lower) ? lower : 0;
+      }
+      continue;
+    }
     try {
       config[field.key] = JSON.parse(JSON.stringify(field.default));
     } catch {
@@ -115,9 +124,44 @@ export function schemaFieldValue(config, field) {
       return normalizeSchemaListValue(value);
     case "bool":
       return normalizeSchemaBoolValue(value);
+    case "range": {
+      // A slider cannot render an empty value: fall back to the field's
+      // default, then to its lower bound.
+      const stored = Number(value);
+      if (Number.isFinite(stored)) return stored;
+      const fallback = Number(field.default);
+      if (Number.isFinite(fallback)) return fallback;
+      const lower = Number(field.min);
+      return Number.isFinite(lower) ? lower : 0;
+    }
     default:
       return value === null || value === undefined ? "" : value;
   }
+}
+
+// schemaFieldRangeBounds returns the bounds a range field renders with. A
+// missing or zero maximum falls back to 1, the same default the server applies
+// to a range that declares none.
+export function schemaFieldRangeBounds(field) {
+  const min = Number(field && field.min);
+  const max = Number(field && field.max);
+  const step = Number(field && field.step);
+  return {
+    min: Number.isFinite(min) ? min : 0,
+    max: Number.isFinite(max) && max > 0 ? max : 1,
+    step: Number.isFinite(step) && step > 0 ? step : 0.01,
+  };
+}
+
+// schemaFieldRangeValue returns the number a range field displays, clamped to
+// its bounds. A stored value outside the bounds stays in the config until the
+// operator moves the slider; only the display is clamped so the number and the
+// thumb agree.
+export function schemaFieldRangeValue(config, field) {
+  const { min, max } = schemaFieldRangeBounds(field);
+  const stored = Number(schemaFieldValue(config, field));
+  if (!Number.isFinite(stored)) return min;
+  return Math.min(Math.max(stored, min), max);
 }
 
 // setSchemaFieldValue returns the next config with a field updated: numbers
@@ -130,7 +174,7 @@ export function setSchemaFieldValue(config, field, value) {
     return config;
   }
   const nextConfig = cloneSchemaConfig(config);
-  if (field.input === "number") {
+  if (field.input === "number" || field.input === "range") {
     const trimmed = String(value ?? "").trim();
     if (trimmed === "") {
       delete nextConfig[field.key];

@@ -189,7 +189,10 @@ func SchemaDefaults(schema []pluginapi.Field) json.RawMessage {
 			out[field.Key] = []string{}
 		case pluginapi.InputBool:
 			out[field.Key] = false
-		case pluginapi.InputNumber, pluginapi.InputSelect:
+		case pluginapi.InputNumber, pluginapi.InputRange, pluginapi.InputSelect:
+			if field.Input == pluginapi.InputRange && field.Default == nil {
+				out[field.Key] = field.Min
+			}
 		default:
 			out[field.Key] = ""
 		}
@@ -271,7 +274,7 @@ func marshalCanonical(values map[string]any) (json.RawMessage, error) {
 
 func coerceField(field pluginapi.Field, value any) (any, error) {
 	switch field.Input {
-	case pluginapi.InputNumber:
+	case pluginapi.InputNumber, pluginapi.InputRange:
 		return coerceNumber(value)
 	case pluginapi.InputCheckboxes:
 		return coerceCheckboxes(field, value)
