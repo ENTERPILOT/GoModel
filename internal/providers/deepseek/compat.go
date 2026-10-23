@@ -62,10 +62,7 @@ func AdaptCompatibility(req *core.ChatRequest, providerName string, mode JSONSch
 	if err != nil {
 		return nil, err
 	}
-	adapted, err = adaptFileParts(adapted)
-	if err != nil {
-		return nil, err
-	}
+	adapted = adaptFileParts(adapted)
 	return adaptJSONSchemaResponseFormat(adapted, providerName, mode)
 }
 
@@ -81,7 +78,7 @@ const inlineFilePlaceholder = "[Attached file not passed to the model: DeepSeek 
 // reaches the model, so the part becomes a note naming the file; the bytes
 // cannot be sent, and the note keeps the model aware of the attachment. A PDF
 // read by a Claude Code tool arrives this way.
-func adaptFileParts(req *core.ChatRequest) (*core.ChatRequest, error) {
+func adaptFileParts(req *core.ChatRequest) *core.ChatRequest {
 	var adapted *core.ChatRequest
 	for i, message := range req.Messages {
 		parts, ok := message.Content.([]core.ContentPart)
@@ -117,9 +114,9 @@ func adaptFileParts(req *core.ChatRequest) (*core.ChatRequest, error) {
 		adapted.Messages[i].Content = rewritten
 	}
 	if adapted == nil {
-		return req, nil
+		return req
 	}
-	return adapted, nil
+	return adapted
 }
 
 // inlineFilePlaceholderText heads the placeholder with the file's name and

@@ -91,8 +91,7 @@ func TestAdaptFileParts_LeavesRequestsWithoutFilesAlone(t *testing.T) {
 		"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}]
 	}`), &req))
 
-	adapted, err := adaptFileParts(&req)
-	require.NoError(t, err)
+	adapted := adaptFileParts(&req)
 	assert.Same(t, &req, adapted)
 }
 
