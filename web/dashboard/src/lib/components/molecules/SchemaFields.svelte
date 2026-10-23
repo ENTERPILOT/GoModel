@@ -248,8 +248,16 @@
     gap: 12px;
   }
 
+  .schema-range input[type="range"] {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
   .schema-range-value {
     color: var(--text-muted);
+    flex: 0 0 auto;
+    font: inherit;
+    font-size: 13px;
     font-variant-numeric: tabular-nums;
     min-width: 4ch;
     text-align: right;
