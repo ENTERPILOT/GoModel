@@ -209,6 +209,9 @@ func (s *nativeResponseService) CountResponseInputTokens(c *echo.Context) error 
 	if err != nil {
 		return handleError(c, err)
 	}
+	// utilityRequest may have replaced the request with one carrying the
+	// plugin headers, so the provider call reads the context from it.
+	ctx = c.Request().Context()
 	auditResponseEntry(c, providerType)
 
 	router, ok := s.provider.(core.NativeResponseUtilityRoutableProvider)
@@ -239,6 +242,9 @@ func (s *nativeResponseService) CompactResponse(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	// utilityRequest may have replaced the request with one carrying the
+	// plugin headers, so the provider call reads the context from it.
+	ctx = c.Request().Context()
 	auditResponseEntry(c, providerType)
 
 	router, ok := s.provider.(core.NativeResponseUtilityRoutableProvider)
@@ -284,6 +290,12 @@ func (s *nativeResponseService) utilityRequest(c *echo.Context) (*core.Responses
 			return nil, "", err
 		}
 	}
+
+	// The prompt chain above may have added headers to the provider call
+	// (Exchange.Headers.Upstream). Attach them to the live request like the
+	// inference paths do, so token counting and compaction reach a provider
+	// behind an authenticating proxy as well.
+	applyPluginRequestHeaders(c)
 
 	providerType := ""
 	if workflow != nil {
