@@ -178,3 +178,19 @@ func TestSchemaDefaultsAndConfigHash(t *testing.T) {
 	require.Len(t, a, 16)
 	require.NotEqual(t, a, ConfigHash(json.RawMessage(`{"a":3}`)))
 }
+
+func TestCoerceFieldRangeStoresNumber(t *testing.T) {
+	field := pluginapi.Field{Key: "weight", Input: pluginapi.InputRange, Min: 0, Max: 1, Step: 0.05, Default: 0.35}
+
+	got, err := coerceField(field, "0.7")
+	require.NoError(t, err)
+	require.Equal(t, 0.7, got, "a range value is stored as a number, not a string")
+
+	_, err = coerceField(field, "heavy")
+	require.Error(t, err, "a range rejects a non-numeric value")
+}
+
+func TestSchemaDefaultsRangeHasNoEmptyString(t *testing.T) {
+	defaults := SchemaDefaults([]pluginapi.Field{{Key: "weight", Input: pluginapi.InputRange}})
+	require.Equal(t, `{}`, string(defaults), "a range without a default emits no placeholder string")
+}
