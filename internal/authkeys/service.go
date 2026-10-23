@@ -263,6 +263,13 @@ func (s *Service) Import(ctx context.Context, input ImportInput) (*View, ImportO
 	return view, ImportUpdated, err
 }
 
+// IDBySecretHash returns the id of the key stored under hash, the SHA-256 of
+// its token, which is the key an import of that token would update.
+func (s *Service) IDBySecretHash(hash string) (string, bool) {
+	key, ok := s.keyBySecretHash(strings.ToLower(strings.TrimSpace(hash)))
+	return key.ID, ok
+}
+
 func (s *Service) keyBySecretHash(hash string) (AuthKey, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

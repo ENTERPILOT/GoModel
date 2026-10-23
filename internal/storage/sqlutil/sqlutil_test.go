@@ -127,3 +127,22 @@ func TestTimeFromUnixPtr(t *testing.T) {
 	require.NotNil(t, got)
 	require.True(t, got.IsZero())
 }
+
+func TestUserPathSubtreeCondition(t *testing.T) {
+	tests := []struct {
+		userPath string
+		wantArgs []any
+	}{
+		{userPath: "/team", wantArgs: []any{"/team", "/team/%", 6, "/team/"}},
+		{userPath: "/", wantArgs: []any{"/", "/%", 1, "/"}},
+		{userPath: "/a_b%", wantArgs: []any{"/a_b%", `/a\_b\%/%`, 6, "/a_b%/"}},
+		{userPath: "/zespół", wantArgs: []any{"/zespół", "/zespół/%", 8, "/zespół/"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.userPath, func(t *testing.T) {
+			condition, args := UserPathSubtreeCondition("user_path", tt.userPath)
+			assert.Equal(t, `(user_path = ? OR (user_path LIKE ? ESCAPE '\' AND substr(user_path, 1, ?) = ?))`, condition)
+			assert.Equal(t, tt.wantArgs, args)
+		})
+	}
+}

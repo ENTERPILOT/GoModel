@@ -71,6 +71,9 @@ func (s *passthroughService) unsupportedPassthroughProviderError(providerType st
 
 func normalizePassthroughEndpoint(endpoint string, enabled bool) (string, error) {
 	endpoint = strings.TrimSpace(endpoint)
+	if err := validatePassthroughEndpoint(endpoint); err != nil {
+		return "", err
+	}
 	switch {
 	case endpoint == "v1":
 		if !enabled {
@@ -85,6 +88,23 @@ func normalizePassthroughEndpoint(endpoint string, enabled bool) (string, error)
 	default:
 		return endpoint, nil
 	}
+}
+
+// validatePassthroughEndpoint rejects endpoints that would not stay where the
+// provider's base URL points. The endpoint is the already-decoded request
+// path, so an encoded "." or ".." segment would climb out of the base path,
+// and an encoded "?" or "#" would start a query or fragment the client never
+// sent as one. The request's real query string is appended separately.
+func validatePassthroughEndpoint(endpoint string) error {
+	if strings.ContainsAny(endpoint, "?#") {
+		return core.NewInvalidRequestError("provider passthrough endpoint cannot contain '?' or '#'", nil)
+	}
+	for segment := range strings.SplitSeq(endpoint, "/") {
+		if segment == "." || segment == ".." {
+			return core.NewInvalidRequestError("provider passthrough endpoint cannot contain '.' or '..' segments", nil)
+		}
+	}
+	return nil
 }
 
 func buildPassthroughHeaders(ctx context.Context, src http.Header) http.Header {

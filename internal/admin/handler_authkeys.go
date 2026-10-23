@@ -12,6 +12,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/users"
 	"github.com/enterpilot/gomodel/internal/validation"
 )
 
@@ -118,6 +119,9 @@ func (h *Handler) CreateAuthKey(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	if err := requireAllowedModelsWithinCaller(c, allowedModels); err != nil {
+		return handleError(c, err)
+	}
 	if err := requirePassthroughGrantScope(c, req.PassthroughAccess); err != nil {
 		return handleError(c, err)
 	}
@@ -174,6 +178,20 @@ func (h *Handler) ImportAuthKey(c *echo.Context) error {
 	allowedModels, err := h.normalizeAllowedModels(h.virtualModelTargets(req.AllowedModels))
 	if err != nil {
 		return handleError(c, err)
+	}
+	// A disabled import only deactivates an existing key, which any key may
+	// do, itself included. Any other import creates or rewrites a key: it
+	// must stay within the caller's models, and since importing a token again
+	// updates the key stored under its hash, that key must not be the caller.
+	if req.Enabled == nil || *req.Enabled {
+		if err := requireAllowedModelsWithinCaller(c, allowedModels); err != nil {
+			return handleError(c, err)
+		}
+		if id, ok := h.authKeys.IDBySecretHash(req.SecretHash); ok {
+			if err := requireNotOwnAuthKey(c, id); err != nil {
+				return handleError(c, err)
+			}
+		}
 	}
 
 	view, outcome, err := h.authKeys.Import(c.Request().Context(), authkeys.ImportInput{
@@ -258,6 +276,9 @@ func (h *Handler) UpdateAuthKeyAllowedModels(c *echo.Context) error {
 		if err != nil {
 			return nil, err
 		}
+		if err := requireAllowedModelsWithinCaller(c, allowedModels); err != nil {
+			return nil, err
+		}
 		return h.authKeys.UpdateAllowedModels(ctx, id, allowedModels)
 	})
 }
@@ -325,6 +346,43 @@ func requirePassthroughGrantScope(c *echo.Context, grant bool) error {
 	return nil
 }
 
+// requireAllowedModelsWithinCaller keeps a credential that is itself limited
+// to a model allowlist from issuing broader keys: every selector in the
+// target allowlist must permit only models the caller's own allowlist
+// permits, and an empty target allowlist counts as every model.
+func requireAllowedModelsWithinCaller(c *echo.Context, allowedModels []string) error {
+	callerModels := core.GetCredentialAllowedModels(c.Request().Context())
+	if len(callerModels) == 0 {
+		return nil
+	}
+	if len(allowedModels) == 0 {
+		// An empty allowlist is unrestricted: only a caller allowed every
+		// model may grant it.
+		allowedModels = []string{"/"}
+	}
+	for _, model := range allowedModels {
+		if !users.Covers(callerModels, model) {
+			return allowedModelsOutOfScopeError()
+		}
+	}
+	return nil
+}
+
+func allowedModelsOutOfScopeError() error {
+	return core.NewPermissionError("allowed_models must not permit models outside the credential's own allowed models").
+		WithCode(codeAllowedModelsOutOfScope)
+}
+
+// requireNotOwnAuthKey stops a managed key from changing its own labels,
+// model allowlist, or access flags, so it cannot lift restrictions placed on
+// it. Deactivating itself stays allowed.
+func requireNotOwnAuthKey(c *echo.Context, id string) error {
+	if own := core.GetAuthKeyID(c.Request().Context()); own != "" && own == id {
+		return core.NewPermissionError("an API key cannot change its own settings").WithCode(codeAuthKeySelfUpdate)
+	}
+	return nil
+}
+
 // updateAuthKey handles the shared shape of the PUT /admin/auth-keys/:id/*
 // endpoints: bind the request into req, run the update, and render the
 // updated view.
@@ -342,6 +400,9 @@ func (h *Handler) updateAuthKey(c *echo.Context, req any, update func(ctx contex
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 	if err := h.requireAuthKeyInScope(c, id); err != nil {
+		return handleError(c, err)
+	}
+	if err := requireNotOwnAuthKey(c, id); err != nil {
 		return handleError(c, err)
 	}
 

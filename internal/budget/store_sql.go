@@ -348,29 +348,14 @@ func spendSubjectMatch(window SpendWindow, sqlite bool) (string, []any, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	pathExpr := usagePathMatchesBudgetExpr("user_path")
-	return `(` + pathExpr + ` = ? OR ` + pathExpr + ` LIKE ? ESCAPE '\')`,
-		[]any{userPath, usagePathLikePattern(userPath)}, nil
+	condition, args := sqlutil.UserPathSubtreeCondition(usagePathMatchesBudgetExpr("user_path"), userPath)
+	return condition, args, nil
 }
 
 // usagePathMatchesBudgetExpr normalizes a stored user path the way budget
 // matching expects: missing and blank paths count as the root.
 func usagePathMatchesBudgetExpr(column string) string {
 	return "COALESCE(NULLIF(TRIM(" + column + "), ''), '/')"
-}
-
-func usagePathLikePattern(userPath string) string {
-	if userPath == "/" {
-		return "/%"
-	}
-	return escapeLikeWildcards(userPath) + "/%"
-}
-
-func escapeLikeWildcards(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `%`, `\%`)
-	s = strings.ReplaceAll(s, `_`, `\_`)
-	return s
 }
 
 func (s *SQLStore) Close() error {
