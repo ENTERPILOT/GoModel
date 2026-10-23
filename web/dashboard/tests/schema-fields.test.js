@@ -119,3 +119,9 @@ test("range fields read a bounded number and store a number", () => {
   assert.deepEqual(setSchemaFieldValue({}, field, "0.5"), { weight: 0.5 });
   assert.deepEqual(setSchemaFieldValue({ weight: 0.5 }, field, ""), {});
 });
+
+test("a range without a default seeds the value the slider shows", () => {
+  const fields = [{ key: "cut", input: "range", min: 0.2 }];
+  assert.deepEqual(schemaFieldDefaults(fields), { cut: 0.2 });
+  assert.equal(schemaFieldValue(schemaFieldDefaults(fields), fields[0]), 0.2);
+});

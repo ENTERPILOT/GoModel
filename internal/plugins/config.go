@@ -190,6 +190,9 @@ func SchemaDefaults(schema []pluginapi.Field) json.RawMessage {
 		case pluginapi.InputBool:
 			out[field.Key] = false
 		case pluginapi.InputNumber, pluginapi.InputRange, pluginapi.InputSelect:
+			if field.Input == pluginapi.InputRange && field.Default == nil {
+				out[field.Key] = field.Min
+			}
 		default:
 			out[field.Key] = ""
 		}
