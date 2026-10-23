@@ -307,16 +307,14 @@ func (c *Client) buildRequest(ctx context.Context, req Request) (*http.Request, 
 	return httpReq, nil
 }
 
-// pluginDeniedUpstreamHeaders are never taken from a plugin: they carry
-// provider credentials or control the transport, so a plugin must not be able
-// to override what the provider client sets.
-var pluginDeniedUpstreamHeaders = map[string]struct{}{
-	"Authorization":  {},
-	"X-Goog-Api-Key": {},
-	"X-Api-Key":      {},
-	"Cookie":         {},
-	"Host":           {},
-	"Content-Length": {},
+// pluginTransportHeaders control the transport rather than the provider call,
+// so a plugin must not set them. Credential headers are refused separately, by
+// the shared list in core, so the host, the request state and this merge cannot
+// drift apart.
+var pluginTransportHeaders = map[string]struct{}{
+	"Host":              {},
+	"Content-Length":    {},
+	"Transfer-Encoding": {},
 }
 
 // requestHeadersWithPluginOverrides merges the headers plugins wrote to
@@ -333,7 +331,7 @@ func requestHeadersWithPluginOverrides(ctx context.Context, reqHeaders http.Head
 	}
 	for key, values := range extra {
 		canonical := http.CanonicalHeaderKey(key)
-		if _, denied := pluginDeniedUpstreamHeaders[canonical]; denied {
+		if _, transport := pluginTransportHeaders[canonical]; transport || core.IsCredentialHeader(canonical) {
 			continue
 		}
 		merged[canonical] = append([]string(nil), values...)

@@ -317,7 +317,7 @@ func (s *RequestState) ApplyRequestHeaders(dst http.Header) []string {
 	var changed []string
 	for key, values := range s.requestHeaders {
 		canonical := http.CanonicalHeaderKey(key)
-		if _, secret := credentialHeaders[canonical]; secret || slices.Equal(values, s.originalHeaders[canonical]) {
+		if core.IsCredentialHeader(canonical) || slices.Equal(values, s.originalHeaders[canonical]) {
 			continue
 		}
 		if slices.Contains(values, "[redacted]") {
@@ -327,7 +327,7 @@ func (s *RequestState) ApplyRequestHeaders(dst http.Header) []string {
 		changed = append(changed, canonical)
 	}
 	for key := range s.originalHeaders {
-		if _, secret := credentialHeaders[key]; secret {
+		if core.IsCredentialHeader(key) {
 			continue
 		}
 		if _, still := s.requestHeaders[key]; !still {
@@ -378,14 +378,6 @@ func (s *RequestState) UpstreamHeaders() http.Header {
 	return s.upstreamHeaders.Clone()
 }
 
-// credentialHeaders are never exposed to plugins.
-var credentialHeaders = map[string]struct{}{
-	"Authorization":       {},
-	"X-Api-Key":           {},
-	"Proxy-Authorization": {},
-	"Cookie":              {},
-}
-
 func inboundHeaders(ctx context.Context) http.Header {
 	snapshot := core.GetRequestSnapshot(ctx)
 	if snapshot == nil {
@@ -395,7 +387,7 @@ func inboundHeaders(ctx context.Context) http.Header {
 	out := make(http.Header, len(source))
 	for key, values := range source {
 		canonical := http.CanonicalHeaderKey(key)
-		if _, secret := credentialHeaders[canonical]; secret {
+		if core.IsCredentialHeader(canonical) {
 			out[canonical] = []string{"[redacted]"}
 			continue
 		}
