@@ -228,7 +228,7 @@ func (b *bootstrap) initResponseCache() error {
 	}
 
 	vm := app.virtualModels.Service
-	internalGuardrailExecutor := server.NewInternalChatCompletionExecutor(b.provider, server.InternalChatCompletionExecutorConfig{
+	internalCfg := server.InternalChatCompletionExecutorConfig{
 		ModelResolver:          vm,
 		ModelAuthorizer:        vm,
 		WorkflowPolicyResolver: app.workflows.Service,
@@ -240,10 +240,16 @@ func (b *bootstrap) initResponseCache() error {
 		UsageLogger:     b.serverUsageLogger,
 		PricingResolver: b.pricingResolver,
 		ResponseCache:   rcm,
-	})
-	// Instances pick the executor up on their next call; no rebuild needed.
+	}
+	internalGuardrailExecutor := server.NewInternalChatCompletionExecutor(b.provider, internalCfg)
+	// Instances pick the executors up on their next call; no rebuild needed.
 	if app.guardrails != nil && app.guardrails.Service != nil {
 		app.guardrails.Service.SetChatCompleter(internalGuardrailExecutor)
+		app.guardrails.Service.SetDecider(pluginDecider{
+			InternalDecisionsExecutor: server.NewInternalDecisionsExecutor(b.provider, internalCfg),
+			router:                    app.providers.Router,
+			virtualModels:             vm,
+		})
 	}
 	return nil
 }

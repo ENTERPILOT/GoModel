@@ -591,6 +591,25 @@ Notes for authors:
   backstop; build requests with `http.NewRequestWithContext` so the
   instance `timeout_ms` bounds each call. `History()` returns an error in
   this release.
+- The host also implements the optional `pluginapi.DecisionsHost`. Assert it
+  on the `Host`, then call `Decisions().Decide(ctx, req)` to ask a decision
+  model typed questions about an input, the way `POST /v1/decisions` does. A
+  question is a predicate (probability of yes), a choice, or a score. The call
+  is scoped and accounted like `Inference().Complete`.
+  `Decisions().DecisionModel(model)` reports whether a model answers decisions
+  only, such as any `jev` model. `llm_judge` uses both to block on a
+  probability instead of parsing a chat verdict:
+
+  ```go
+  if dh, ok := host.(pluginapi.DecisionsHost); ok {
+  	result, err := dh.Decisions().Decide(ctx, pluginapi.DecisionRequest{
+  		Model:     "jev/jev-latest",
+  		Input:     []pluginapi.Message{pluginapi.TextMessage(pluginapi.RoleUser, text)},
+  		Questions: []pluginapi.Question{{Type: pluginapi.QuestionPredicate, Name: "spam", Instructions: "Is this spam?"}},
+  	})
+  	// result.Answers[0].Probability, unless result.Answers[0].Refused()
+  }
+  ```
 - Add `Summarize(config json.RawMessage) string` to render a one-line summary
   in the guardrails list, and `Normalize(config) (json.RawMessage, error)` to
   canonicalize a config before it is stored. Both are optional.
@@ -627,7 +646,9 @@ Notes for authors:
 `pluginapi/plugintest` tests a plugin without GoModel:
 
 - `plugintest.NewHost(replies...)` is a fake `Host`: scripted inference
-  replies (or a `Reply` function, or an `Err`), recorded `Requests()`,
+  replies (or a `Reply` function, or an `Err`), decisions answered by an
+  `Answer` function (every question refused without one), `DecisionModels`
+  for `DecisionModel`, recorded `Requests()` and `DecisionRequests()`,
   recorded `Recorded()` metrics, and a settable HTTP client for a fake
   sidecar started with `httptest`.
 - `plugintest.Init`, `Text`, `Prompt`, `Completion`, and `Exchange` build

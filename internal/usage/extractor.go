@@ -368,6 +368,13 @@ func extractFromCachedSSEBody(
 // extractFromCachedJSONBody reads usage from a cached JSON body of an
 // endpoint without a typed response, such as a native /v1/systemone answer,
 // the same way a live passthrough response is read.
+// ExtractFromJSONBody creates a UsageEntry from a complete JSON response body
+// whose usage member the stream observer reads, such as a Decision. It
+// returns nil when the body is not a JSON object.
+func ExtractFromJSONBody(body []byte, requestID, model, provider, endpoint string, pricing ...*core.ModelPricing) *UsageEntry {
+	return extractFromCachedJSONBody(body, requestID, model, provider, endpoint, pricing...)
+}
+
 func extractFromCachedJSONBody(
 	body []byte,
 	requestID, model, provider, endpoint string,

@@ -67,6 +67,7 @@ type Service struct {
 	catalog *plugins.Catalog
 	deps    plugins.HostDeps
 	chat    *chatCompleterRef
+	decider *deciderRef
 	// secrets resolves the secret references stored configs hold; nil
 	// resolves the built-in env and file schemes only.
 	secrets *config.Secrets
@@ -103,6 +104,32 @@ func (r *chatCompleterRef) ChatCompletion(ctx context.Context, req *core.ChatReq
 	return chat.ChatCompletion(ctx, req)
 }
 
+// deciderRef lets the internal Decisions executor be swapped after instances
+// are built without rebuilding them.
+type deciderRef struct {
+	mu      sync.RWMutex
+	decider plugins.Decider
+}
+
+func (r *deciderRef) current() plugins.Decider {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.decider
+}
+
+func (r *deciderRef) Decide(ctx context.Context, body []byte) ([]byte, error) {
+	decider := r.current()
+	if decider == nil {
+		return nil, plugins.ErrDecisionsUnavailable
+	}
+	return decider.Decide(ctx, body)
+}
+
+func (r *deciderRef) DecisionModel(model string) bool {
+	decider := r.current()
+	return decider != nil && decider.DecisionModel(model)
+}
+
 // NewService creates a guardrail service backed by the provided store. The
 // catalog supplies the plugin types instances are built from; deps are the
 // gateway services exposed to plugins.
@@ -115,11 +142,14 @@ func NewService(store Store, catalog *plugins.Catalog, deps plugins.HostDeps) (*
 	}
 	chat := &chatCompleterRef{chat: deps.Chat}
 	deps.Chat = chat
+	decider := &deciderRef{decider: deps.Decisions}
+	deps.Decisions = decider
 	return &Service{
 		store:       store,
 		catalog:     catalog,
 		deps:        deps,
 		chat:        chat,
+		decider:     decider,
 		snapshot:    emptySnapshot(),
 		retireAfter: defaultRetireAfter,
 		now:         time.Now,
@@ -146,6 +176,17 @@ func (s *Service) SetChatCompleter(chat plugins.ChatCompleter) {
 	s.chat.mu.Lock()
 	s.chat.chat = chat
 	s.chat.mu.Unlock()
+}
+
+// SetDecider swaps the gateway-internal Decisions executor plugins use to
+// ask decision models. Instances see the new executor on their next call.
+func (s *Service) SetDecider(decider plugins.Decider) {
+	if s == nil {
+		return
+	}
+	s.decider.mu.Lock()
+	s.decider.decider = decider
+	s.decider.mu.Unlock()
 }
 
 // Refresh reloads guardrails from storage and atomically swaps the in-memory snapshot.

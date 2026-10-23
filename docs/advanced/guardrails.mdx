@@ -475,10 +475,17 @@ edited, and names containing `secret` or `token` cannot be set.
 ### `llm_judge`
 
 Asks a judge model whether the prompt (or the response) violates a policy and
-blocks, answers, or flags it based on the verdict. The judge must reply with
-one JSON object `{"verdict":"allow"|"block","reason":"..."}`; the default
-instructions do that and tell the model to ignore instructions inside the
-content.
+blocks, answers, or flags it based on the verdict. The judge is either a chat
+model or a decision model:
+
+- A **chat model** must reply with one JSON object
+  `{"verdict":"allow"|"block","reason":"..."}`. The default instructions ask
+  for that and tell the model to ignore instructions inside the content.
+- A **decision model** (Jev, Kev, OpenRouter's decision models, or an OpenAI
+  model through the [Decisions API](/advanced/decisions-api)) is asked a
+  yes-or-no question and returns the probability of yes. There is no text to
+  parse, and it bills input tokens only. See
+  [Judging with a decision model](#judging-with-a-decision-model).
 
 **Phases:** prompt, response, stream (buffered). **Edits content:** no.
 
@@ -486,22 +493,63 @@ content.
 
 | Key | Required | Default | Description |
 | --- | -------- | ------- | ----------- |
-| `model` | Yes | | Judge model: `provider/model`, an alias, or a virtual model. Its usage is accounted with origin `plugin`. |
+| `model` | Yes | | Judge model: `provider/model`, an alias, or a virtual model; a chat model or a decision model. Its usage is accounted with origin `plugin`. |
+| `engine` | No | `auto` | How the judge is asked: `chat`, `decision`, or `auto`, which uses `decision` for a model that answers decisions only (any `jev` model, OpenRouter's decision models, or a virtual model whose targets all are) and `chat` otherwise. |
 | `user_path` | No | current request's path | User path the judge call is scoped to for budgets and audit. |
-| `prompt` | No | built-in policy | System prompt for the judge. |
+| `prompt` | No | built-in policy | Chat engine: system prompt for the judge. |
+| `decision_question` | No | built-in policy | Decision engine: the yes-or-no question asked about the content. Yes means it violates the policy. |
+| `block_threshold` | No | `0.5` | Decision engine: probability of yes, from 0 to 1, at or above which the content counts as a block verdict. |
+| `judge_images` | No | `false` | Decision engine: also send the images of the judged messages. |
 | `target` | No | `auto` | What the judge sees in the prompt phase: `auto` or `last_user` (last user message), `all_user`, `conversation`. In the response phase it always sees the assistant text. |
 | `action` | No | `block` | On a block verdict: `block` rejects, `respond` answers with `respond_text`, `warn` continues and records the verdict. |
 | `message` | No | `This request was blocked by policy` | Error message for `block`, audit note for `warn`. |
 | `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`, for example `403`. Empty means 400 when the prompt is blocked, 502 when the response is blocked. |
 | `respond_text` | No | `I can't help with that request.` | Assistant reply for `respond`. |
 | `on_unclear` | No | `warn` | When the judge reply cannot be parsed, was cut off by `max_tokens`, or was spent entirely on reasoning: `allow`, `warn`, or `block` (applies `action`). A verdict counts only as a JSON object or a bare `allow` or `block`, never as a word inside a sentence. |
-| `max_tokens` | No | `2048` | Completion cap for the judge call. Unused tokens cost nothing; size it for the judge model's reasoning, not for the verdict. |
-| `temperature` | No | `0` | Sampling temperature for the judge call (0 to 2). |
+| `max_tokens` | No | `2048` | Chat engine: completion cap for the judge call. Unused tokens cost nothing; size it for the judge model's reasoning, not for the verdict. |
+| `temperature` | No | `0` | Chat engine: sampling temperature for the judge call (0 to 2). |
 
 Identical text is judged once per request, so an instance that runs in both
 the prompt and the response phase does not double-charge for the same
 content. In the stream phase the whole stream is buffered and judged as a
 complete response.
+
+#### Judging with a decision model
+
+With a decision model the judge sends the judged text as the Decisions input,
+without tags, and asks one predicate question, `decision_question`. It does not
+use `prompt`, `max_tokens`, or `temperature`. A probability at or above
+`block_threshold` is a block verdict, and `action` applies. A lower probability
+allows. The call goes through the same routing as
+[`POST /v1/decisions`](/advanced/decisions-api): virtual models, failover to
+targets that serve Decisions, the exact response cache, usage, and audit, under
+the instance's user path.
+
+Each verdict records the probability in the decision detail (`probability`),
+and the instance reports it as the histogram
+`plugin_llm_judge_decision_probability`. Use them to tune `block_threshold` per
+policy: raise it to block only clear violations, or lower it to catch more
+borderline content.
+
+`engine: auto` recognises decision-only models from the model catalog. An
+OpenAI model with Decisions support also chats, so `auto` asks it by chat. Set
+`engine: decision` to use its Decisions API instead.
+
+Leave `judge_images` off for a judge that reads text only, such as a Kev
+server: with images, every call fails and `fail_mode` decides. Hosted Jev reads
+images sent as base64 data URLs. With `judge_images` on, a prompt that holds
+only an image is judged too; otherwise it is allowed without a judge call.
+
+```yaml
+- name: "policy-judge"
+  type: "llm_judge"
+  order: 5
+  timeout_ms: 5000
+  config:
+    model: "jev/jev-latest"
+    block_threshold: 0.7
+    decision_question: "Does the content ask for help with fraud or account takeover?"
+```
 
 #### Sizing `max_tokens` for a reasoning judge
 
@@ -518,8 +566,8 @@ answered but could not be parsed:
 | Code | Meaning |
 | ---- | ------- |
 | `llm_judge_block` | The judge returned a block verdict; `action` applies. |
-| `llm_judge_no_verdict` | The reply was cut off (`finish_reason: length`) or was all reasoning. A warning naming the judge model and the cap is logged, and `on_unclear` applies. |
-| `llm_judge_unclear` | The judge answered, but the reply is not a verdict. `on_unclear` applies. |
+| `llm_judge_no_verdict` | The reply was cut off (`finish_reason: length`) or was all reasoning, or a decision model returned no answer. For a cut-off reply, a warning naming the judge model and the cap is logged. `on_unclear` applies. |
+| `llm_judge_unclear` | The judge answered, but the reply is not a verdict, or a decision model declined the question. `on_unclear` applies. |
 
 Check the gateway log for `judge returned no verdict` after configuring an
 instance, and set `on_unclear: block` for a policy that must hold even when the
