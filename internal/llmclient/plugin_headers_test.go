@@ -92,9 +92,11 @@ func TestBuildRequestWithoutPluginHeadersIsUnchanged(t *testing.T) {
 }
 
 func TestDoAppliesPluginUpstreamHeaders(t *testing.T) {
-	var received http.Header
+	received := make(chan http.Header, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		received = r.Header.Clone()
+		// Hand the headers over through a channel: the handler runs in
+		// another goroutine, and a shared variable would be a data race.
+		received <- r.Header.Clone()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
@@ -111,6 +113,7 @@ func TestDoAppliesPluginUpstreamHeaders(t *testing.T) {
 	var result map[string]any
 	err := client.Do(ctx, Request{Method: http.MethodGet, Endpoint: "/v1/models"}, &result)
 	require.NoError(t, err)
-	assert.Equal(t, "edge-token", received.Get("X-Edge-Proxy-Token"))
-	assert.Equal(t, "Bearer provider", received.Get("Authorization"))
+	got := <-received
+	assert.Equal(t, "edge-token", got.Get("X-Edge-Proxy-Token"))
+	assert.Equal(t, "Bearer provider", got.Get("Authorization"))
 }
