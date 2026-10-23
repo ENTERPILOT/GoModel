@@ -83,6 +83,7 @@ func TestInitErrors(t *testing.T) {
 		{"temperature type", `{"model": "a/b", "temperature": true}`, "temperature must be a number"},
 		{"bad engine", `{"model": "a/b", "engine": "magic"}`, "engine must be one of auto, chat, decision"},
 		{"threshold high", `{"model": "a/b", "block_threshold": 1.5}`, "block_threshold must be between 0 and 1"},
+		{"threshold NaN", `{"model": "a/b", "block_threshold": "NaN"}`, "block_threshold must be a number"},
 		{"judge_images type", `{"model": "a/b", "judge_images": "maybe"}`, "judge_images"},
 	}
 	for _, tt := range tests {
