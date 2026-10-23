@@ -417,6 +417,12 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		}))
 	}
 
+	// Work a caller without credentials must not be able to cost the gateway
+	// runs after auth: the rest of a compressed body is decoded, and an opaque
+	// passthrough body is read in full for its model.
+	e.Use(finishRequestDecompression(bodyLimitBytes))
+	e.Use(opaqueSelectorHints())
+
 	// Session identification runs after auth so session ids are scoped by the
 	// EFFECTIVE user path (a managed key's bound path, not the ingress header)
 	// and before workflow resolution, which consumes the id for sticky

@@ -85,8 +85,12 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 			if semantics := core.DeriveWhiteBoxPrompt(snapshot); semantics != nil {
 				if bodyCaptured {
 					verifyCapturedOpaqueSelectorHints(desc.BodyMode, bodyBytes, semantics)
-				} else if err := seedRequestBodySelectorHints(req, desc.BodyMode, semantics); err != nil {
-					return handleError(c, requestBodyReadError(err))
+				} else if desc.BodyMode != core.BodyModeOpaque {
+					// An uncaptured opaque body is read in full for its model,
+					// which waits for authentication (opaqueSelectorHints).
+					if err := seedRequestBodySelectorHints(req, desc.BodyMode, semantics); err != nil {
+						return handleError(c, requestBodyReadError(err))
+					}
 				}
 				ctx = core.WithWhiteBoxPrompt(ctx, semantics)
 			}

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/goccy/go-json"
+	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -69,6 +70,29 @@ func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env
 		core.MarkPassthroughStreamUncertain(env)
 	}
 	return nil
+}
+
+// opaqueSelectorHints seeds the selector hints of an opaque body the request
+// snapshot did not capture. Its model is taken only from the whole body,
+// buffered in full, so this runs after authentication: a caller without
+// credentials must not make the gateway buffer the full body limit.
+func opaqueSelectorHints() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			req := c.Request()
+			env := core.GetWhiteBoxPrompt(req.Context())
+			snapshot := core.GetRequestSnapshot(req.Context())
+			if env == nil || snapshot == nil || snapshot.CapturedBodyView() != nil {
+				return next(c)
+			}
+			if bodyMode := core.DescribeEndpoint(req.Method, req.URL.Path).BodyMode; bodyMode == core.BodyModeOpaque {
+				if err := seedRequestBodySelectorHints(req, bodyMode, env); err != nil {
+					return handleError(c, requestBodyReadError(err))
+				}
+			}
+			return next(c)
+		}
+	}
 }
 
 func shouldPeekRequestBodySelectors(req *http.Request, bodyMode core.BodyMode, env *core.WhiteBoxPrompt) bool {
