@@ -517,6 +517,16 @@ client picks the gateway's models up with no hand-written list. It is a lie
 about the owner, so it stays off by default and is meant for gateways whose
 consumers need it.
 
+`max_model_len` comes from the model's `metadata.context_window`, so the mode
+only makes a model discoverable when that value is present and positive. A
+model the catalog does not know, served by a runtime that does not report its
+limit, is still advertised with `owned_by: "vllm"` but without `max_model_len`,
+and the client drops it: declare `context_window` for it under
+`providers.<name>.models` metadata (see
+[Model metadata](/advanced/model-metadata)), or point the provider at a runtime
+that reports the limit itself (vLLM, SGLang, llm-d and OpenAI-compatible
+servers that return `max_model_len` all do).
+
 For OpenRouter, GoModel also sends default attribution headers unless the request already sets them. Override those defaults with `OPENROUTER_SITE_URL` and `OPENROUTER_APP_NAME`.
 
 ### 2. `.env` File
