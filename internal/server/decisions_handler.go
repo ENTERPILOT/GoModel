@@ -73,7 +73,7 @@ func (s *translatedInferenceService) serveDecisions(c *echo.Context) error {
 		}
 	}
 	if reason := s.decisionsUnsupportedReason(router, resolution.ResolvedSelector, resolution.ProviderType); reason != "" {
-		return handleError(c, decisionsUnsupportedModelError(c, resolution, reason))
+		return handleError(c, decisionsUnsupportedModelError(requestIDFromContextOrHeader(c.Request()), resolution, reason))
 	}
 
 	body, err = s.guardDecisionInput(c, workflow, &req, body)
@@ -272,11 +272,11 @@ func sendDecisions(
 // decisionsUnsupportedModelError explains a request whose model cannot
 // answer Decisions. It is also logged: a virtual model that sends decisions
 // to such a model is an operator mistake the caller cannot fix.
-func decisionsUnsupportedModelError(c *echo.Context, resolution *core.RequestModelResolution, reason string) error {
+func decisionsUnsupportedModelError(requestID string, resolution *core.RequestModelResolution, reason string) error {
 	requested := resolution.RequestedQualifiedModel()
 	resolved := resolution.ResolvedQualifiedModel()
 	slog.Warn("decisions request routed to a model without a decisions API",
-		"request_id", requestIDFromContextOrHeader(c.Request()),
+		"request_id", requestID,
 		"requested_model", requested,
 		"resolved_model", resolved,
 		"provider_type", resolution.ProviderType,

@@ -33,7 +33,7 @@ func (p *Plugin) OnPrompt(ctx context.Context, x *pluginapi.Exchange) (pluginapi
 	if x.Prompt == nil {
 		return pluginapi.Allow(), nil
 	}
-	return p.judge(ctx, x, p.promptContent(x.Prompt))
+	return p.judge(ctx, x, p.promptInput(x.Prompt))
 }
 
 // OnResponse judges the assistant text of the completion.
@@ -41,7 +41,7 @@ func (p *Plugin) OnResponse(ctx context.Context, x *pluginapi.Exchange) (plugina
 	if x.Response == nil {
 		return pluginapi.Allow(), nil
 	}
-	return p.judge(ctx, x, responseContent(x.Response))
+	return p.judge(ctx, x, judged{text: responseContent(x.Response)})
 }
 
 // StreamPolicy buffers the stream so the host runs OnResponse on the
@@ -92,27 +92,40 @@ func responseContent(c *pluginapi.Completion) string {
 
 // judge asks the model about content, remembering the verdict in
 // Exchange.Values so identical text is judged once per request.
-func (p *Plugin) judge(ctx context.Context, x *pluginapi.Exchange, content string) (pluginapi.Decision, error) {
-	if strings.TrimSpace(content) == "" {
+func (p *Plugin) judge(ctx context.Context, x *pluginapi.Exchange, in judged) (pluginapi.Decision, error) {
+	decisions := p.decisions()
+	if decisions == nil {
+		// A chat judge reads text only.
+		in.images = nil
+	}
+	if strings.TrimSpace(in.text) == "" && len(in.images) == 0 {
 		return p.decide(verdict{Verdict: VerdictAllow, Reason: "no text to judge"}, false), nil
 	}
-	key := p.key + ":" + contentHash(content)
+	key := p.key + ":" + in.hash()
 	if v, ok := x.Values.Get(key); ok {
 		if cached, ok := v.(verdict); ok {
 			return p.decide(cached, true), nil
 		}
 	}
-	reply, err := p.ask(ctx, content)
-	if err != nil {
-		return pluginapi.Decision{}, err
-	}
-	v := parseVerdict(reply.text)
-	// A reply the model did not finish (max_tokens reached, a filter cut
-	// it) is not a verdict even when its visible part reads like one, and
-	// neither is a completion the judge spent entirely on reasoning.
-	if reason := reply.noVerdictReason(); reason != "" {
-		v = verdict{Verdict: VerdictUnclear, Reason: reason, NoVerdict: true}
-		p.logNoVerdict(reason)
+	var v verdict
+	if decisions != nil {
+		var err error
+		if v, err = p.askDecision(ctx, decisions, in); err != nil {
+			return pluginapi.Decision{}, err
+		}
+	} else {
+		reply, err := p.ask(ctx, in.text)
+		if err != nil {
+			return pluginapi.Decision{}, err
+		}
+		v = parseVerdict(reply.text)
+		// A reply the model did not finish (max_tokens reached, a filter cut
+		// it) is not a verdict even when its visible part reads like one, and
+		// neither is a completion the judge spent entirely on reasoning.
+		if reason := reply.noVerdictReason(); reason != "" {
+			v = verdict{Verdict: VerdictUnclear, Reason: reason, NoVerdict: true}
+			p.logNoVerdict(reason)
+		}
 	}
 	if x.Values != nil {
 		x.Values.Set(key, v)
@@ -202,14 +215,62 @@ func wrapContent(content string) string {
 	return "<CONTENT>\n" + content + "\n</CONTENT>"
 }
 
-func contentHash(content string) string {
-	sum := sha256.Sum256([]byte(content))
-	return hex.EncodeToString(sum[:8])
+// judged is what the judge is shown: text, plus image URLs for a decision
+// model when judge_images is on.
+type judged struct {
+	text   string
+	images []string
+}
+
+// hash keys the verdict cache of one exchange.
+func (in judged) hash() string {
+	h := sha256.New()
+	h.Write([]byte(in.text))
+	for _, image := range in.images {
+		h.Write([]byte{0})
+		h.Write([]byte(image))
+	}
+	return hex.EncodeToString(h.Sum(nil)[:8])
+}
+
+// promptInput is what the judge sees of the prompt: the target's text, and
+// the images of the same messages when judge_images is on.
+func (p *Plugin) promptInput(prompt *pluginapi.Prompt) judged {
+	in := judged{text: p.promptContent(prompt)}
+	if !p.images {
+		return in
+	}
+	var messages []pluginapi.Message
+	switch p.target {
+	case TargetAllUser:
+		for _, m := range prompt.Messages {
+			if m.Role == pluginapi.RoleUser {
+				messages = append(messages, m)
+			}
+		}
+	case TargetConversation:
+		messages = prompt.Messages
+	default:
+		if m := prompt.LastUser(); m != nil {
+			messages = []pluginapi.Message{*m}
+		}
+	}
+	for _, m := range messages {
+		for _, part := range m.Parts {
+			if part.Kind == pluginapi.PartImage && strings.TrimSpace(part.URL) != "" {
+				in.images = append(in.images, part.URL)
+			}
+		}
+	}
+	return in
 }
 
 // decide maps a verdict to the configured decision.
 func (p *Plugin) decide(v verdict, cached bool) pluginapi.Decision {
 	detail := map[string]any{"verdict": v.Verdict, "reason": v.Reason, "judge_model": p.model}
+	if v.Probability != nil {
+		detail["probability"] = *v.Probability
+	}
 	if cached {
 		detail["cached"] = true
 	}

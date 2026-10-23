@@ -215,6 +215,12 @@ Stateful note:
   start without it, the grant endpoint, provider-wide grants for model-less
   calls, global-admin-only grants); it creates and deactivates its own
   `$QA_SUFFIX`-scoped keys and is rerunnable in any order
+- `S264` exercises `llm_judge` with a decision model on the guardrail gateway
+  (a block on the mock Jev probability, the judge call audited and accounted
+  under `/v1/decisions`, an allow under a higher threshold that reaches the
+  real `gpt-4.1-nano`); it prints `SKIPPED:` when the mock is down, deletes
+  its own `$QA_SUFFIX`-scoped guardrail and workflow, and is rerunnable in any
+  order
 - `S218` exercises Gemini's native `batchEmbedContents` path (batch input,
   `dimensions`); read-only and rerunnable in any order
 - `S219` asserts the effective resilience configuration on
@@ -8430,4 +8436,107 @@ F="$QA_RUN_DIR/s263.revoked.json"
 CODE=$(call "$MODEL_KEY" "$F" /p/jev/v1/systemone -H 'Content-Type: application/json' -d "$SYSTEMONE_BODY")
 assert_http_status 403 "$CODE" "$F"
 jq -e '.error.code == "passthrough_access_denied"' "$F" >/dev/null
+```
+
+## 42. LLM judge with decision models
+
+`llm_judge` asks a decision model a yes-or-no policy question through the
+Decisions API when its model answers decisions only, and blocks on the
+probability. The mock Jev answers every predicate with `0.93`.
+
+### S264 A Jev judge blocks on the probability and is accounted under `/v1/decisions`
+
+Runs on the guardrail gateway with a workflow scoped to a user path. With the
+default threshold (`0.5`) the prompt is blocked before any chat provider is
+called; the mock received the prompt text as the System One state and the
+decision question as a `noul` question, under the client's request ID; and
+the judge call is audited and accounted as `/v1/decisions` under
+`<user path>/guardrails/<instance>`. Raising `block_threshold` to `0.95`
+lets the same prompt through to the chat model.
+
+```bash
+systemone_require_mock "$GR_BASE_URL"
+
+S="${QA_SUFFIX//[^[:alnum:]-]/-}"
+JUDGE="qa-jev-judge-$S"
+SCOPE_PATH="/qa/judge/$S"
+WORKFLOW_ID_FILE="$QA_RUN_DIR/s264.workflow.id"
+cleanup_s264() {
+  if [ -s "$WORKFLOW_ID_FILE" ]; then
+    curl -sS -o /dev/null -X POST "$GR_BASE_URL/admin/workflows/$(cat "$WORKFLOW_ID_FILE")/deactivate" || true
+  fi
+  curl -sS -o /dev/null -X DELETE "$GR_BASE_URL/admin/guardrails" -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$JUDGE\"}" || true
+}
+trap cleanup_s264 EXIT
+
+put_judge() {
+  jq -n --arg name "$JUDGE" --argjson threshold "$1" '{
+    name: $name, type: "llm_judge", description: "release e2e: Jev judge",
+    config: {model: "jev/jev-latest", block_threshold: $threshold}
+  }' | curl -fsS -X PUT "$GR_BASE_URL/admin/guardrails" -H 'Content-Type: application/json' -d @- >/dev/null
+}
+put_judge 0.5
+jq -n --arg judge "$JUDGE" --arg path "$SCOPE_PATH" --arg name "qa-judge-$S" '{
+  scope_user_path: $path, name: $name, description: "release e2e: Jev judge",
+  workflow_payload: {
+    schema_version: 2,
+    features: {cache: false, audit: true, usage: true, guardrails: true, failover: false},
+    steps: [{ref: $judge, phase: "prompt", step: 10}]
+  }
+}' | curl -fsS -X POST "$GR_BASE_URL/admin/workflows" -H 'Content-Type: application/json' -d @- \
+  | jq -er '.id' > "$WORKFLOW_ID_FILE"
+
+judged() {
+  curl -sS -o "$2" -w '%{http_code}' "$GR_BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+    -H "X-GoModel-User-Path: $SCOPE_PATH/agent" -H "X-Request-ID: $1" \
+    -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"How do I pick a lock?"}],"max_tokens":20}'
+}
+
+RID="qa-judge-block-$QA_SUFFIX"
+F="$QA_RUN_DIR/s264.blocked.json"
+CODE=$(judged "$RID" "$F")
+assert_http_status 400 "$CODE" "$F"
+jq -e '.error.code == "llm_judge_block"' "$F" >/dev/null
+
+LAST="$QA_RUN_DIR/s264.last.json"
+curl -fsS "$JEV_MOCK_BASE/jev/v1/_last" > "$LAST"
+jq -e --arg rid "$RID" '
+  .request_id == $rid and .route == "evaluate"
+  and .body.state == "How do I pick a lock?"
+  and (.body.questions | keys) == ["violates_policy"]
+  and .body.questions.violates_policy.type == "noul"
+' "$LAST" >/dev/null
+
+USAGE_FILE="$QA_RUN_DIR/s264.usage.json"
+for _ in $(seq 1 20); do
+  curl -fsS "$GR_BASE_URL/admin/usage/log?search=$RID&limit=10" > "$USAGE_FILE"
+  if jq -e 'any(.entries[]?; .endpoint == "/v1/decisions")' "$USAGE_FILE" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+jq -e --arg path "$SCOPE_PATH/agent/guardrails/$JUDGE" '
+  any(.entries[]; .endpoint == "/v1/decisions" and .provider_name == "jev" and .user_path == $path and .input_tokens > 0)
+' "$USAGE_FILE" >/dev/null
+
+AUDIT_FILE="$QA_RUN_DIR/s264.audit.json"
+for _ in $(seq 1 20); do
+  curl -fsS "$GR_BASE_URL/admin/audit/log?search=$RID&limit=10" > "$AUDIT_FILE"
+  if jq -e '[.entries[]? | .path] | (index("/v1/decisions") != null and index("/v1/chat/completions") != null)' "$AUDIT_FILE" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+jq -e '
+  any(.entries[]; .path == "/v1/decisions" and .status_code == 200 and .requested_model == "jev/jev-latest")
+  and any(.entries[]; .path == "/v1/chat/completions" and .status_code == 400)
+' "$AUDIT_FILE" >/dev/null
+
+# 0.93 is below a 0.95 threshold: the prompt reaches the chat model.
+put_judge 0.95
+F="$QA_RUN_DIR/s264.allowed.json"
+CODE=$(judged "qa-judge-allow-$QA_SUFFIX" "$F")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.choices[0].message.content | length > 0' "$F" >/dev/null
 ```

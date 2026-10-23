@@ -139,6 +139,12 @@ stream phase guardrails do not run on it and it is relayed unchanged. A
 workflow that selects such guardrails for a Decisions request logs one warning
 per guardrail.
 
+Decision models can also judge other traffic: an
+[`llm_judge`](/advanced/guardrails#judging-with-a-decision-model) guardrail
+with a decision model asks it a yes-or-no policy question about each chat or
+Responses prompt, and blocks on the probability. That call takes the same path
+as this endpoint, under the guardrail's user path.
+
 A failover chain may mix providers: every target receives the request in its
 own form, and a target on a provider without a Decisions API, or one that
 cannot read the request's images (a Kev server, or a `jev` model given an image
