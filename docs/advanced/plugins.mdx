@@ -634,6 +634,11 @@ Notes for authors:
   Use `bool` for a switch and `list` for an open-ended list of strings
   (entity types, an allow list) instead of encoding them in a `select` or a
   `textarea`.
+- `InputRange` renders a slider bounded by `Min`, `Max` and `Step` on the
+  field; a zero `Max` means 1 with a 0.01 step. Use it for a bounded number
+  (a weight, a threshold) instead of a free-text `number` the operator can set
+  out of range. The bounds are advisory: the server stores whatever the config
+  declares, so a value set in YAML is not rejected.
 - Add `Scope: pluginapi.ScopeRoute` to fields that belong to a virtual model
   rather than to the instance (routing strategies only).
 
@@ -793,8 +798,8 @@ hook, in the shape the guardrail editor renders:
 
 `phases`, `source`, `mutates`, and `guardrail` are new (instance views from
 `GET /admin/guardrails` carry `guardrail` as well); `fields[].input` may now be
-`secret`, `model`, `bool`, or `list`, and `fields[].scope` is `""` (instance)
-or `"route"`.
+`secret`, `model`, `bool`, `list`, or `range` (a slider bounded by `min`,
+`max` and `step`), and `fields[].scope` is `""` (instance) or `"route"`.
 
 ### GET, PUT, DELETE /admin/guardrails
 
