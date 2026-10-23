@@ -84,12 +84,21 @@ export function routeSchemaFields(fields) {
 }
 
 // schemaFieldDefaults collects each field's `default` into a config object.
-// Fields without a default are left out so a `defaults` object can fill them.
+// Fields without a default are left out so a `defaults` object can fill them,
+// except a slider: it always displays a value, so its lower bound is seeded to
+// keep the displayed and the submitted value the same (an untouched required
+// range would otherwise be rejected on save).
 export function schemaFieldDefaults(fields) {
   const config = {};
   for (const field of Array.isArray(fields) ? fields : []) {
     if (!field || !field.key) continue;
-    if (field.default === undefined || field.default === null) continue;
+    if (field.default === undefined || field.default === null) {
+      if (field.input === "range") {
+        const lower = Number(field.min);
+        config[field.key] = Number.isFinite(lower) ? lower : 0;
+      }
+      continue;
+    }
     try {
       config[field.key] = JSON.parse(JSON.stringify(field.default));
     } catch {

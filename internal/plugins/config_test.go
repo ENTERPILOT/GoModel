@@ -190,7 +190,10 @@ func TestCoerceFieldRangeStoresNumber(t *testing.T) {
 	require.Error(t, err, "a range rejects a non-numeric value")
 }
 
-func TestSchemaDefaultsRangeHasNoEmptyString(t *testing.T) {
-	defaults := SchemaDefaults([]pluginapi.Field{{Key: "weight", Input: pluginapi.InputRange}})
-	require.Equal(t, `{}`, string(defaults), "a range without a default emits no placeholder string")
+func TestSchemaDefaultsRangeSeedsLowerBound(t *testing.T) {
+	defaults := SchemaDefaults([]pluginapi.Field{{Key: "weight", Input: pluginapi.InputRange, Min: 0.2}})
+	require.Equal(t, `{"weight":0.2}`, string(defaults), "a range without a default starts at its lower bound")
+
+	explicit := SchemaDefaults([]pluginapi.Field{{Key: "weight", Input: pluginapi.InputRange, Min: 0.2, Default: 0.35}})
+	require.Equal(t, `{"weight":0.35}`, string(explicit), "an explicit default wins over the lower bound")
 }
