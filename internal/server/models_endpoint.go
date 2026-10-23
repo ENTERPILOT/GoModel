@@ -74,8 +74,24 @@ func (h *Handler) visibleModels(c *echo.Context) (*core.ModelsResponse, error) {
 	}
 	if h.vllmDiscoveryCompat {
 		applyVLLMDiscoveryCompat(resp)
+	} else {
+		stripVLLMDiscoveryFields(resp)
 	}
 	return resp, nil
+}
+
+// stripVLLMDiscoveryFields drops a max_model_len that a provider reported on
+// its own (a custom OpenAI-compatible server may return the field). The model
+// type carries it for the compatibility mode, so without this the field would
+// appear in /v1/models even with models.vllm_discovery_compat off and change a
+// response the setting promises not to touch.
+func stripVLLMDiscoveryFields(resp *core.ModelsResponse) {
+	if resp == nil {
+		return
+	}
+	for i := range resp.Data {
+		resp.Data[i].MaxModelLen = nil
+	}
 }
 
 // applyVLLMDiscoveryCompat rewrites a model listing into the shape a vLLM
