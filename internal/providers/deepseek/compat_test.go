@@ -44,9 +44,9 @@ func TestAdaptCompatibility_PadsEveryAssistantTurnWhenToolsPresent(t *testing.T)
 }
 
 func TestAdaptCompatibility_ReplacesFilePartsWithText(t *testing.T) {
-	// DeepSeek rejects the file part type outright, so a PDF read by a tool
-	// (Claude Code returns one this way) must become text or the whole turn
-	// fails upstream.
+	// DeepSeek's file input is images only, so a PDF read by a tool (Claude
+	// Code returns one this way) must become text or the whole turn fails
+	// upstream.
 	var req core.ChatRequest
 	err := json.Unmarshal([]byte(`{
 		"model":"deepseek-flash",
@@ -73,6 +73,7 @@ func TestAdaptCompatibility_ReplacesFilePartsWithText(t *testing.T) {
 	assert.Contains(t, parts[1].Text, "card.pdf")
 	assert.NotContains(t, parts[1].Text, "JVBERi0=")
 
+	// A file_id is not a URL DeepSeek can resolve from a chat request.
 	unnamed, ok := adapted.Messages[2].Content.([]core.ContentPart)
 	require.True(t, ok, "content = %T", adapted.Messages[2].Content)
 	require.Len(t, unnamed, 1)
@@ -82,6 +83,43 @@ func TestAdaptCompatibility_ReplacesFilePartsWithText(t *testing.T) {
 	original, ok := req.Messages[1].Content.([]core.ContentPart)
 	require.True(t, ok)
 	assert.Equal(t, "file", original[1].Type)
+}
+
+func TestAdaptFileParts_KeepsImagesDeepSeekCanRead(t *testing.T) {
+	// DeepSeek's vision input reads an image from an image_url part, so an
+	// image attachment must survive the adaptation rather than being
+	// replaced by a note.
+	var req core.ChatRequest
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"model":"deepseek-flash",
+		"messages":[{"role":"user","content":[
+			{"type":"text","text":"What color?"},
+			{"type":"file","file":{"file_data":"data:image/png;base64,iVBORw0KGgo=","filename":"x.png"}},
+			{"type":"file","file":{"file_url":"https://example.com/a.jpg"}},
+			{"type":"file","file":{"file_data":"data:image/svg+xml;base64,PHN2Zz4=","filename":"x.svg"}},
+			{"type":"file","file":{"file_data":"data:image/png;base64,iVBORw0KGgo=","filename":"x.png","file_id":"file-api-1"}}
+		]}]
+	}`), &req))
+
+	adapted := adaptFileParts(&req)
+	parts, ok := adapted.Messages[0].Content.([]core.ContentPart)
+	require.True(t, ok, "content = %T", adapted.Messages[0].Content)
+	require.Len(t, parts, 5)
+
+	assert.Equal(t, "image_url", parts[1].Type)
+	require.NotNil(t, parts[1].ImageURL)
+	assert.Equal(t, "data:image/png;base64,iVBORw0KGgo=", parts[1].ImageURL.URL)
+
+	assert.Equal(t, "image_url", parts[2].Type)
+	require.NotNil(t, parts[2].ImageURL)
+	assert.Equal(t, "https://example.com/a.jpg", parts[2].ImageURL.URL)
+
+	// A format the vision input does not accept becomes a note.
+	assert.Equal(t, "text", parts[3].Type)
+	assert.Contains(t, parts[3].Text, "x.svg")
+
+	// A file_id cannot be resolved from a chat request, even beside image data.
+	assert.Equal(t, "image_url", parts[4].Type)
 }
 
 func TestAdaptFileParts_LeavesRequestsWithoutFilesAlone(t *testing.T) {
