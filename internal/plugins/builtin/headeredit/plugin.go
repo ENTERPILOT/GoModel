@@ -68,7 +68,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 			},
 			{
 				Key: "upstream_set", Label: "Upstream headers to set", Input: pluginapi.InputTextarea, Default: "",
-				Help:        "One \"Name: value\" per line. Adds static headers to the provider call. Host support is limited in this version: providers that do not accept extra headers ignore the field.",
+				Help:        "One \"Name: value\" per line. Adds static headers to every provider call of the request, failover attempts included. Credential headers are refused.",
 				Placeholder: "X-Tenant: acme",
 			},
 		},
