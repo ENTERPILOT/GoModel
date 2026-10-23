@@ -332,6 +332,39 @@ func TestListModels_AnthropicPaging(t *testing.T) {
 	require.Equal(t, "error", body["type"], "Anthropic error envelope")
 }
 
+func TestListModelsMaxModelLenFollowsTheCompatSetting(t *testing.T) {
+	window := 4096
+	provider := func() *mockProvider {
+		return &mockProvider{modelsResponse: &core.ModelsResponse{Object: "list", Data: []core.Model{
+			{ID: "local/custom", Object: "model", OwnedBy: "openai", MaxModelLen: &window},
+		}}}
+	}
+
+	t.Run("off drops the field the provider reported", func(t *testing.T) {
+		srv := New(provider(), &Config{})
+		req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		rec := httptest.NewRecorder()
+
+		srv.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.NotContains(t, rec.Body.String(), "max_model_len")
+		require.Contains(t, rec.Body.String(), `"owned_by":"openai"`)
+	})
+
+	t.Run("on advertises the field and the vllm owner", func(t *testing.T) {
+		srv := New(provider(), &Config{VLLMDiscoveryCompat: true})
+		req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		rec := httptest.NewRecorder()
+
+		srv.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.Contains(t, rec.Body.String(), `"max_model_len":4096`)
+		require.Contains(t, rec.Body.String(), `"owned_by":"vllm"`)
+	})
+}
+
 func TestApplyVLLMDiscoveryCompat(t *testing.T) {
 	t.Run("nil response stays nil", func(t *testing.T) {
 		applyVLLMDiscoveryCompat(nil)
@@ -378,6 +411,18 @@ func TestApplyVLLMDiscoveryCompat(t *testing.T) {
 		applyVLLMDiscoveryCompat(resp)
 
 		require.Nil(t, resp.Data[0].MaxModelLen)
+	})
+
+	t.Run("a provider-reported max_model_len is dropped when the setting is off", func(t *testing.T) {
+		window := 4096
+		resp := &core.ModelsResponse{Data: []core.Model{
+			{ID: "local/custom", Object: "model", OwnedBy: "openai", MaxModelLen: &window},
+		}}
+
+		stripVLLMDiscoveryFields(resp)
+
+		require.Nil(t, resp.Data[0].MaxModelLen)
+		require.Equal(t, "openai", resp.Data[0].OwnedBy, "the owner is left alone")
 	})
 
 	t.Run("the transform keeps the rest of the entry", func(t *testing.T) {
