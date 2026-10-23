@@ -496,7 +496,7 @@ type mockProvider struct {
 	responseCancelCalls         []responseCall
 	responseDeleteCalls         []responseCall
 	capturedResponseUtilityReqs []*core.ResponsesRequest
-	capturedUtilityHeaders     []http.Header
+	capturedUtilityHeaders      []http.Header
 	capturedResponseUtility     []responseUtilityCall
 }
 
