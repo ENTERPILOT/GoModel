@@ -273,7 +273,7 @@ func TestNewHTTPClientDoesNotFollowCrossOriginRedirects(t *testing.T) {
 			assert.Zero(t, otherHits.Load(), "cross-origin target was contacted")
 			select {
 			case <-received:
-				t.Fatal("cross-origin redirect was followed")
+				assert.Fail(t, "cross-origin redirect was followed")
 			default:
 			}
 		})
