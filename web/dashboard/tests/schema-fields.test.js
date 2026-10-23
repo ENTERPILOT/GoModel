@@ -10,6 +10,8 @@ import {
   isSecretPlaceholder,
   routeSchemaFields,
   schemaFieldDefaults,
+  schemaFieldRangeBounds,
+  schemaFieldRangeValue,
   schemaFieldValue,
   setSchemaFieldValue,
 } from "../src/lib/utils/schemaFields.js";
@@ -124,4 +126,20 @@ test("a range without a default seeds the value the slider shows", () => {
   const fields = [{ key: "cut", input: "range", min: 0.2 }];
   assert.deepEqual(schemaFieldDefaults(fields), { cut: 0.2 });
   assert.equal(schemaFieldValue(schemaFieldDefaults(fields), fields[0]), 0.2);
+});
+
+test("a range clamps the displayed value and keeps the stored one", () => {
+  const field = { key: "weight", input: "range", min: 0, max: 1, step: 0.05 };
+  const stored = { weight: 2 };
+
+  assert.equal(schemaFieldRangeValue(stored, field), 1, "the slider and its output show the upper bound");
+  assert.equal(stored.weight, 2, "the config keeps the out-of-range value until the operator moves the slider");
+  assert.equal(schemaFieldRangeValue({ weight: -1 }, field), 0);
+  assert.equal(schemaFieldRangeValue({}, field), 0, "an empty range displays its lower bound");
+
+  assert.deepEqual(schemaFieldRangeBounds({ key: "w", input: "range" }), { min: 0, max: 1, step: 0.01 });
+  assert.deepEqual(
+    schemaFieldRangeBounds({ key: "w", input: "range", min: 0.2, max: 0.9, step: 0.05 }),
+    { min: 0.2, max: 0.9, step: 0.05 },
+  );
 });

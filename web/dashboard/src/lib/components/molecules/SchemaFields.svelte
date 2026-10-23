@@ -15,6 +15,8 @@
   import {
     isSecretPlaceholder,
     schemaArrayFieldSelected,
+    schemaFieldRangeBounds,
+    schemaFieldRangeValue,
     schemaFieldValue,
     setSchemaFieldValue,
     toggleSchemaArrayValue,
@@ -95,20 +97,22 @@
         {/snippet}
       </InlineHelpSection>
       {#if field.input === "range"}
+        {@const bounds = schemaFieldRangeBounds(field)}
+        {@const shown = schemaFieldRangeValue(config, field)}
         <div class="schema-range">
           <input
             id={idPrefix + "-" + field.key}
             type="range"
-            min={field.min || 0}
-            max={field.max || 1}
-            step={field.step || 0.01}
-            value={schemaFieldValue(config, field)}
+            min={bounds.min}
+            max={bounds.max}
+            step={bounds.step}
+            value={shown}
             aria-describedby={helpId(field)}
             {disabled}
             oninput={(event) => set(field, event.currentTarget.value)}
           />
           <output class="schema-range-value" for={idPrefix + "-" + field.key}
-            >{schemaFieldValue(config, field)}</output
+            >{shown}</output
           >
         </div>
       {:else if field.input === "select"}

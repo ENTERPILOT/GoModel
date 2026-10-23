@@ -139,6 +139,31 @@ export function schemaFieldValue(config, field) {
   }
 }
 
+// schemaFieldRangeBounds returns the bounds a range field renders with. A
+// missing or zero maximum falls back to 1, the same default the server applies
+// to a range that declares none.
+export function schemaFieldRangeBounds(field) {
+  const min = Number(field && field.min);
+  const max = Number(field && field.max);
+  const step = Number(field && field.step);
+  return {
+    min: Number.isFinite(min) ? min : 0,
+    max: Number.isFinite(max) && max > 0 ? max : 1,
+    step: Number.isFinite(step) && step > 0 ? step : 0.01,
+  };
+}
+
+// schemaFieldRangeValue returns the number a range field displays, clamped to
+// its bounds. A stored value outside the bounds stays in the config until the
+// operator moves the slider; only the display is clamped so the number and the
+// thumb agree.
+export function schemaFieldRangeValue(config, field) {
+  const { min, max } = schemaFieldRangeBounds(field);
+  const stored = Number(schemaFieldValue(config, field));
+  if (!Number.isFinite(stored)) return min;
+  return Math.min(Math.max(stored, min), max);
+}
+
 // setSchemaFieldValue returns the next config with a field updated: numbers
 // are parsed (empty clears the key, non-numeric input is kept as the trimmed
 // string so the server can reject it), checkbox groups and lists normalize
