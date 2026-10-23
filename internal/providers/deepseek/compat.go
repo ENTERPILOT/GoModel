@@ -69,17 +69,20 @@ func AdaptCompatibility(req *core.ChatRequest, providerName string, mode JSONSch
 	return adaptJSONSchemaResponseFormat(adapted, providerName, mode)
 }
 
-// inlineFilePlaceholder names an inline file that DeepSeek cannot accept. A
+// inlineFilePlaceholder names an inline file that DeepSeek cannot use. A
 // short stand-in keeps the turn deliverable: the whole tool result, including
 // any text beside the file, would otherwise be rejected upstream.
 const inlineFilePlaceholder = "[Attached file not passed to the model: DeepSeek does not accept file attachments]"
 
 // adaptFileParts replaces file content parts with text. DeepSeek has no file
-// input: it rejects the part type outright ("file must have a file_id or
-// file_data"), even for inline data with a filename or a file id. A PDF read
-// by a Claude Code tool arrives this way, so the part becomes a note naming
-// the file — the attachment's bytes cannot be sent, and dropping the part
-// silently would leave the model unaware of it.
+// input. Most models reject the part type outright ("file must have a file_id
+// or file_data"), even for inline data with a filename or a file id. The
+// exception is a model that accepts the part and drops its contents: a 221KB
+// PDF costs the same handful of prompt tokens as the text without it, so the
+// document never reaches the model and it answers as though nothing was
+// attached. The part becomes a note naming the file instead: the bytes cannot
+// be sent either way, and the note keeps the model aware of the attachment.
+// A PDF read by a Claude Code tool arrives this way.
 func adaptFileParts(req *core.ChatRequest) (*core.ChatRequest, error) {
 	var adapted *core.ChatRequest
 	for i, message := range req.Messages {

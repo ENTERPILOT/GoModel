@@ -96,6 +96,32 @@ func TestAdaptFileParts_LeavesRequestsWithoutFilesAlone(t *testing.T) {
 	assert.Same(t, &req, adapted)
 }
 
+func TestAdaptFileParts_AppliesToEveryDeepSeekModel(t *testing.T) {
+	// Every model is covered, including one that accepts the part without
+	// using it: an accepted-and-ignored file is worse than a rejection,
+	// because the model then answers as though it read the document.
+	for _, model := range []string{"deepseek-flash", "deepseek-chat", "deepseek-reasoner", "deepseek-v4-pro"} {
+		t.Run(model, func(t *testing.T) {
+			var req core.ChatRequest
+			require.NoError(t, json.Unmarshal([]byte(`{
+				"model":"`+model+`",
+				"messages":[{"role":"user","content":[
+					{"type":"file","file":{"file_data":"data:application/pdf;base64,JVBERi0=","filename":"card.pdf"}}
+				]}]
+			}`), &req))
+
+			adapted, err := AdaptCompatibility(&req, "deepseek", JSONSchemaDowngrade)
+			require.NoError(t, err)
+
+			parts, ok := adapted.Messages[0].Content.([]core.ContentPart)
+			require.True(t, ok, "content = %T", adapted.Messages[0].Content)
+			require.Len(t, parts, 1)
+			assert.Equal(t, "text", parts[0].Type)
+			assert.Contains(t, parts[0].Text, "card.pdf")
+		})
+	}
+}
+
 func TestAdaptCompatibility_JSONSchemaResponseFormat(t *testing.T) {
 	schemaFormat := `{"type":"json_schema","json_schema":{"name":"weather","description":"Current weather","strict":true,"schema":{"type": "object", "properties": {"city": {"type": "string"}}}}}`
 
