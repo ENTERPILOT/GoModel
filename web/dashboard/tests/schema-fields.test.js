@@ -108,3 +108,14 @@ test("modelPickerOptions lists enabled selectors sorted with their provider", ()
   ]);
   assert.deepEqual(modelPickerOptions(undefined), []);
 });
+
+test("range fields read a bounded number and store a number", () => {
+  const field = { key: "weight", input: "range", min: 0, max: 1, step: 0.05, default: 0.35 };
+
+  assert.equal(schemaFieldValue({}, field), 0.35);
+  assert.equal(schemaFieldValue({ weight: 0.7 }, field), 0.7);
+  assert.equal(schemaFieldValue({ weight: "0.7" }, field), 0.7);
+  assert.equal(schemaFieldValue({}, { key: "cut", input: "range", min: 0.2 }), 0.2);
+  assert.deepEqual(setSchemaFieldValue({}, field, "0.5"), { weight: 0.5 });
+  assert.deepEqual(setSchemaFieldValue({ weight: 0.5 }, field, ""), {});
+});
