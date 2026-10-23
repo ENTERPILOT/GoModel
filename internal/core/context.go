@@ -1,6 +1,9 @@
 package core
 
-import "context"
+import (
+	"context"
+	"net/http"
+)
 
 // contextKey is a custom type for context keys to avoid collisions.
 type contextKey string
@@ -69,6 +72,11 @@ const (
 	// credentialAllowedModelsKey stores the model allowlist bound to the
 	// authenticated credential (a managed auth key). Empty means unrestricted.
 	credentialAllowedModelsKey contextKey = "credential-allowed-models"
+
+	// pluginUpstreamHeadersKey stores the headers prompt-phase plugins wrote
+	// to Exchange.Headers.Upstream. The provider client merges them into every
+	// outgoing call, minus credential headers the provider itself sets.
+	pluginUpstreamHeadersKey contextKey = "plugin-upstream-headers"
 )
 
 // RequestOrigin identifies whether a request came from an external caller or an
@@ -395,4 +403,24 @@ func GetRequestOrigin(ctx context.Context) RequestOrigin {
 		}
 	}
 	return RequestOriginExternal
+}
+
+// WithPluginUpstreamHeaders returns a new context carrying the headers that
+// prompt-phase plugins asked to add to provider calls. The headers are copied,
+// so later edits to the source do not leak into the request.
+func WithPluginUpstreamHeaders(ctx context.Context, headers http.Header) context.Context {
+	if len(headers) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, pluginUpstreamHeadersKey, headers.Clone())
+}
+
+// PluginUpstreamHeaders returns the headers plugins asked to add to provider
+// calls, or nil when no plugin set any.
+func PluginUpstreamHeaders(ctx context.Context) http.Header {
+	if ctx == nil {
+		return nil
+	}
+	headers, _ := ctx.Value(pluginUpstreamHeadersKey).(http.Header)
+	return headers
 }

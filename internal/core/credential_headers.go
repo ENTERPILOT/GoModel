@@ -13,6 +13,7 @@ var credentialHeaders = map[string]struct{}{
 	"x-api-key":           {},
 	"api-key":             {}, // Azure OpenAI credential header
 	"x-goog-api-key":      {}, // Google Gemini / Vertex credential header
+	"x-anthropic-api-key": {},
 	"x-auth-token":        {},
 	"x-access-token":      {},
 	"x-gomodel-key":       {},
