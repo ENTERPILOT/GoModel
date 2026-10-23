@@ -3,6 +3,7 @@ package llmjudge
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -257,12 +258,27 @@ func (p *Plugin) promptInput(prompt *pluginapi.Prompt) judged {
 	}
 	for _, m := range messages {
 		for _, part := range m.Parts {
-			if part.Kind == pluginapi.PartImage && strings.TrimSpace(part.URL) != "" {
-				in.images = append(in.images, part.URL)
+			if url := imageURL(part); url != "" {
+				in.images = append(in.images, url)
 			}
 		}
 	}
 	return in
+}
+
+// imageURL is an image part's URL, or a data URL of its inline bytes, or ""
+// for a part that is not an image or has neither.
+func imageURL(part pluginapi.Part) string {
+	if part.Kind != pluginapi.PartImage {
+		return ""
+	}
+	if url := strings.TrimSpace(part.URL); url != "" {
+		return url
+	}
+	if len(part.Data) == 0 {
+		return ""
+	}
+	return "data:" + part.MediaType + ";base64," + base64.StdEncoding.EncodeToString(part.Data)
 }
 
 // decide maps a verdict to the configured decision.

@@ -169,6 +169,15 @@ func TestDecisionEngineJudgesImagesWhenAsked(t *testing.T) {
 	assert.Equal(t, pluginapi.ActionBlock, d.Action)
 	assert.Len(t, host.DecisionRequests(), 2)
 
+	// An image given as inline bytes is sent as a data URL.
+	inline := plugintest.Prompt(pluginapi.Message{ID: "m0", Role: pluginapi.RoleUser, Parts: []pluginapi.Part{
+		{Kind: pluginapi.PartImage, MediaType: "image/png", Data: []byte{0x89, 'P', 'N', 'G'}},
+	}})
+	_, err = p.OnPrompt(context.Background(), plugintest.Exchange(inline, nil))
+	require.NoError(t, err)
+	require.Len(t, host.DecisionRequests(), 3)
+	assert.Equal(t, "data:image/png;base64,iVBORw==", host.DecisionRequests()[2].Input[0].Parts[0].URL)
+
 	for _, cfg := range []string{`{"model": "jev/jev-latest"}`, `{"model": "jev/jev-latest", "engine": "chat", "judge_images": true}`} {
 		host := decisionHost(0.9)
 		p := newPlugin(t, cfg, host)

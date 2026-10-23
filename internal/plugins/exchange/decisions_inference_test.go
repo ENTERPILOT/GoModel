@@ -79,3 +79,35 @@ func TestFromDecisionBody(t *testing.T) {
 	_, err = FromDecisionBody([]byte(`not json`))
 	require.Error(t, err)
 }
+
+// An image given as inline bytes is sent as a data URL, as the chat encoder
+// sends it.
+func TestDecisionRequestBodyEncodesInlineImages(t *testing.T) {
+	body, err := DecisionRequestBody(pluginapi.DecisionRequest{
+		Model: "jev/jev-latest",
+		Input: []pluginapi.Message{{Role: pluginapi.RoleUser, Parts: []pluginapi.Part{
+			{Kind: pluginapi.PartImage, MediaType: "image/png", Data: []byte{0x89, 'P', 'N', 'G'}},
+		}}},
+		Questions: []pluginapi.Question{{Type: pluginapi.QuestionPredicate, Instructions: "?"}},
+	})
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `{"type":"input_image","image_url":"data:image/png;base64,iVBORw=="}`)
+}
+
+// A predicate answer without a probability, or with one outside 0 to 1, is
+// an error rather than a probability of zero.
+func TestFromDecisionBodyRejectsPredicatesWithoutProbability(t *testing.T) {
+	for _, answer := range []string{
+		`{"type":"predicate"}`,
+		`{"type":"predicate","probability":null}`,
+		`{"type":"predicate","probability":1.5}`,
+		`{"type":"predicate","probability":-0.1}`,
+	} {
+		_, err := FromDecisionBody([]byte(`{"answers":[` + answer + `]}`))
+		require.ErrorContains(t, err, "without a probability between 0 and 1", answer)
+	}
+	result, err := FromDecisionBody([]byte(`{"answers":[{"type":"predicate","probability":0},{"type":"refusal"}]}`))
+	require.NoError(t, err)
+	assert.Zero(t, result.Answers[0].Probability)
+	assert.True(t, result.Answers[1].Refused())
+}

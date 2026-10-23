@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"strings"
 
@@ -60,7 +61,7 @@ func DecisionRequestBody(req pluginapi.DecisionRequest) ([]byte, error) {
 					parts = append(parts, decisionPart{Type: "input_text", Text: part.Text})
 				}
 			case pluginapi.PartImage:
-				if url := strings.TrimSpace(part.URL); url != "" {
+				if url := imagePartURL(part); url != "" {
 					parts = append(parts, decisionPart{Type: "input_image", ImageURL: url})
 				}
 			}
@@ -88,6 +89,18 @@ func DecisionRequestBody(req pluginapi.DecisionRequest) ([]byte, error) {
 	return json.Marshal(body)
 }
 
+// imagePartURL is an image part's URL, or a data URL of its inline bytes,
+// or "" when it has neither.
+func imagePartURL(part pluginapi.Part) string {
+	if url := strings.TrimSpace(part.URL); url != "" {
+		return url
+	}
+	if len(part.Data) == 0 {
+		return ""
+	}
+	return "data:" + part.MediaType + ";base64," + base64.StdEncoding.EncodeToString(part.Data)
+}
+
 type decisionReply struct {
 	Model   string                `json:"model"`
 	Answers []decisionReplyAnswer `json:"answers"`
@@ -96,7 +109,7 @@ type decisionReply struct {
 type decisionReplyAnswer struct {
 	Name          *string                    `json:"name"`
 	Type          string                     `json:"type"`
-	Probability   float64                    `json:"probability"`
+	Probability   *float64                   `json:"probability"`
 	Choice        json.RawMessage            `json:"choice"`
 	Score         float64                    `json:"score"`
 	Confidence    float64                    `json:"confidence"`
@@ -111,7 +124,8 @@ type decisionReplyProbability struct {
 
 // FromDecisionBody decodes an OpenAI Decision. A choice value is reported
 // as text, so a boolean choice reads "true" or "false", and a score level by
-// its label.
+// its label. A predicate answer without a probability between 0 and 1 is an
+// error, so it never reads as a probability of zero.
 func FromDecisionBody(body []byte) (*pluginapi.DecisionResult, error) {
 	var reply decisionReply
 	if err := json.Unmarshal(body, &reply); err != nil {
@@ -119,15 +133,20 @@ func FromDecisionBody(body []byte) (*pluginapi.DecisionResult, error) {
 	}
 	out := &pluginapi.DecisionResult{Model: reply.Model, Answers: make([]pluginapi.Answer, len(reply.Answers))}
 	for i, a := range reply.Answers {
+		if a.Type == string(pluginapi.QuestionPredicate) && (a.Probability == nil || *a.Probability < 0 || *a.Probability > 1) {
+			return nil, fmt.Errorf("exchange: decision answer %d is a predicate without a probability between 0 and 1", i)
+		}
 		answer := pluginapi.Answer{
 			Type:        a.Type,
-			Probability: a.Probability,
 			Choice:      choiceText(a.Choice),
 			Score:       a.Score,
 			Confidence:  a.Confidence,
 		}
 		if a.Name != nil {
 			answer.Name = *a.Name
+		}
+		if a.Probability != nil {
+			answer.Probability = *a.Probability
 		}
 		for _, p := range a.Probabilities {
 			value := p.Label

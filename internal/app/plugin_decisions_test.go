@@ -62,6 +62,8 @@ func TestPluginDecider_DecisionModel(t *testing.T) {
 		{Source: "judge", Enabled: true, Targets: []virtualmodels.Target{{Provider: "kev", Model: "kev-latest"}, {Provider: "openrouter", Model: "typesafe/jev-1.13"}}},
 		{Source: "mixed", Enabled: true, Targets: []virtualmodels.Target{{Provider: "kev", Model: "kev-latest"}, {Provider: "openai", Model: "gpt-6-luna"}}},
 		{Source: "off", Enabled: false, Targets: []virtualmodels.Target{{Provider: "kev", Model: "kev-latest"}}},
+		{Source: "policy-judge", Enabled: true, Targets: []virtualmodels.Target{{Model: "judge"}}},
+		{Source: "mixed-chain", Enabled: true, Targets: []virtualmodels.Target{{Model: "judge"}, {Model: "mixed"}}},
 	}, registry, true)
 	require.NoError(t, err)
 	require.NoError(t, vms.Refresh(context.Background()))
@@ -80,6 +82,8 @@ func TestPluginDecider_DecisionModel(t *testing.T) {
 		"judge":                        true,
 		"mixed":                        false,
 		"off":                          false,
+		"policy-judge":                 true,
+		"mixed-chain":                  false,
 	} {
 		assert.Equal(t, want, decider.DecisionModel(model), model)
 	}

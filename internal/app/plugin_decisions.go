@@ -28,8 +28,9 @@ type pluginDecider struct {
 var _ plugins.Decider = pluginDecider{}
 
 // DecisionModel reports whether model answers decisions only. A redirect is
-// one when every target is; it is read from its definition rather than
-// resolved, since resolving picks a target and advances load balancing.
+// one when every concrete model behind it is, chained redirects followed; it
+// is read from the definitions rather than resolved, since resolving picks a
+// target and advances load balancing.
 func (d pluginDecider) DecisionModel(model string) bool {
 	model = strings.TrimSpace(model)
 	if model == "" || d.router == nil {
@@ -37,11 +38,12 @@ func (d pluginDecider) DecisionModel(model string) bool {
 	}
 	if d.virtualModels != nil {
 		if vm, ok := d.virtualModels.Get(model); ok && vm.IsRedirect() {
-			if !vm.Enabled {
+			leaves, _ := d.virtualModels.TargetModels(vm.Source)
+			if !vm.Enabled || len(leaves) == 0 {
 				return false
 			}
-			for _, target := range vm.Targets {
-				if !d.concreteDecisionModel(core.ModelSelector{Provider: target.Provider, Model: target.Model}.QualifiedModel()) {
+			for _, leaf := range leaves {
+				if !d.concreteDecisionModel(leaf) {
 					return false
 				}
 			}
