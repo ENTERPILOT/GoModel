@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"maps"
 	"net/http"
 	"slices"
 	"sync"
@@ -351,7 +350,12 @@ func (s *RequestState) Finish(x *pluginapi.Exchange) {
 	if s.upstreamHeaders == nil {
 		s.upstreamHeaders = http.Header{}
 	}
-	maps.Copy(s.upstreamHeaders, x.Headers.Upstream)
+	// Canonicalize on the way in: two exchanges writing "x-foo" and "X-Foo"
+	// must replace each other instead of racing on map iteration order when
+	// the provider call is built.
+	for key, values := range x.Headers.Upstream {
+		s.upstreamHeaders[http.CanonicalHeaderKey(key)] = append([]string(nil), values...)
+	}
 	logged := s.upstreamLogged
 	s.upstreamLogged = true
 	s.mu.Unlock()
