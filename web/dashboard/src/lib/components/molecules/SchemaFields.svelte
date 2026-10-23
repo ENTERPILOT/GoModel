@@ -94,7 +94,24 @@
           >
         {/snippet}
       </InlineHelpSection>
-      {#if field.input === "select"}
+      {#if field.input === "range"}
+        <div class="schema-range">
+          <input
+            id={idPrefix + "-" + field.key}
+            type="range"
+            min={field.min || 0}
+            max={field.max || 1}
+            step={field.step || 0.01}
+            value={schemaFieldValue(config, field)}
+            aria-describedby={helpId(field)}
+            {disabled}
+            oninput={(event) => set(field, event.currentTarget.value)}
+          />
+          <output class="schema-range-value" for={idPrefix + "-" + field.key}
+            >{schemaFieldValue(config, field)}</output
+          >
+        </div>
+      {:else if field.input === "select"}
         <select
           class="form-select settings-select"
           id={idPrefix + "-" + field.key}
@@ -223,5 +240,18 @@
   .schema-field-required {
     margin-left: 3px;
     color: var(--danger);
+  }
+
+  .schema-range {
+    align-items: center;
+    display: flex;
+    gap: 12px;
+  }
+
+  .schema-range-value {
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    min-width: 4ch;
+    text-align: right;
   }
 </style>

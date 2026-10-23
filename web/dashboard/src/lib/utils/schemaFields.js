@@ -115,6 +115,16 @@ export function schemaFieldValue(config, field) {
       return normalizeSchemaListValue(value);
     case "bool":
       return normalizeSchemaBoolValue(value);
+    case "range": {
+      // A slider cannot render an empty value: fall back to the field's
+      // default, then to its lower bound.
+      const stored = Number(value);
+      if (Number.isFinite(stored)) return stored;
+      const fallback = Number(field.default);
+      if (Number.isFinite(fallback)) return fallback;
+      const lower = Number(field.min);
+      return Number.isFinite(lower) ? lower : 0;
+    }
     default:
       return value === null || value === undefined ? "" : value;
   }
@@ -130,7 +140,7 @@ export function setSchemaFieldValue(config, field, value) {
     return config;
   }
   const nextConfig = cloneSchemaConfig(config);
-  if (field.input === "number") {
+  if (field.input === "number" || field.input === "range") {
     const trimmed = String(value ?? "").trim();
     if (trimmed === "") {
       delete nextConfig[field.key];
