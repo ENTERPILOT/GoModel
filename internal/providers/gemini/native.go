@@ -1005,6 +1005,9 @@ func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContent
 		if content == "" && len(toolCalls) > 0 {
 			messageContent = nil
 		}
+		if images := imagePartsFromGeminiParts(candidate.Content.Parts); len(images) > 0 {
+			messageContent = withLeadingText(content, images)
+		}
 		resp.Choices = append(resp.Choices, core.Choice{
 			Index: index,
 			Message: core.ResponseMessage{
@@ -1017,6 +1020,37 @@ func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContent
 		})
 	}
 	return resp, nil
+}
+
+// imagePartsFromGeminiParts returns generated images (inline image blobs) as
+// OpenAI image_url content parts carrying base64 data URLs.
+func imagePartsFromGeminiParts(parts []geminiPart) []core.ContentPart {
+	var images []core.ContentPart
+	for _, part := range parts {
+		blob := part.inlineData()
+		if blob == nil || blob.Data == "" || part.Thought {
+			continue
+		}
+		mimeType := blob.MimeType
+		if mimeType == "" {
+			mimeType = blob.MimeTypeAlt
+		}
+		if !strings.HasPrefix(mimeType, "image/") {
+			continue
+		}
+		images = append(images, core.ContentPart{
+			Type:     "image_url",
+			ImageURL: &core.ImageURLContent{URL: "data:" + mimeType + ";base64," + blob.Data},
+		})
+	}
+	return images
+}
+
+func withLeadingText(text string, parts []core.ContentPart) []core.ContentPart {
+	if text == "" {
+		return parts
+	}
+	return append([]core.ContentPart{{Type: "text", Text: text}}, parts...)
 }
 
 func geminiBlockedPromptError(resp *geminiGenerateContentResponse, providerName string) *core.GatewayError {
