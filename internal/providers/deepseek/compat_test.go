@@ -97,9 +97,9 @@ func TestAdaptFileParts_LeavesRequestsWithoutFilesAlone(t *testing.T) {
 }
 
 func TestAdaptFileParts_AppliesToEveryDeepSeekModel(t *testing.T) {
-	// Every model is covered, including one that accepts the part without
-	// using it: an accepted-and-ignored file is worse than a rejection,
-	// because the model then answers as though it read the document.
+	// Every model is covered, including one that may accept the part without
+	// using it: a document the model silently ignores is worse than one it
+	// refuses, because the model then answers as though it read it.
 	for _, model := range []string{"deepseek-flash", "deepseek-chat", "deepseek-reasoner", "deepseek-v4-pro"} {
 		t.Run(model, func(t *testing.T) {
 			var req core.ChatRequest
