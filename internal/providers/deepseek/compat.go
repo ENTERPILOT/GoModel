@@ -62,7 +62,73 @@ func AdaptCompatibility(req *core.ChatRequest, providerName string, mode JSONSch
 	if err != nil {
 		return nil, err
 	}
+	adapted, err = adaptFileParts(adapted)
+	if err != nil {
+		return nil, err
+	}
 	return adaptJSONSchemaResponseFormat(adapted, providerName, mode)
+}
+
+// inlineFilePlaceholder names an inline file that DeepSeek cannot accept. A
+// short stand-in keeps the turn deliverable: the whole tool result, including
+// any text beside the file, would otherwise be rejected upstream.
+const inlineFilePlaceholder = "[Attached file not passed to the model: DeepSeek does not accept file attachments]"
+
+// adaptFileParts replaces file content parts with text. DeepSeek has no file
+// input: it rejects the part type outright ("file must have a file_id or
+// file_data"), even for inline data with a filename or a file id. A PDF read
+// by a Claude Code tool arrives this way, so the part becomes a note naming
+// the file — the attachment's bytes cannot be sent, and dropping the part
+// silently would leave the model unaware of it.
+func adaptFileParts(req *core.ChatRequest) (*core.ChatRequest, error) {
+	var adapted *core.ChatRequest
+	for i, message := range req.Messages {
+		parts, ok := message.Content.([]core.ContentPart)
+		if !ok {
+			continue
+		}
+		replaced := false
+		rewritten := parts
+		for j, part := range parts {
+			if part.Type != "file" || part.File == nil {
+				continue
+			}
+			if !replaced {
+				rewritten = append([]core.ContentPart(nil), parts...)
+				replaced = true
+			}
+			// The caller's cache_control breakpoints keep their place, so
+			// the note inherits the file part's framing.
+			rewritten[j] = core.ContentPart{
+				Type:        "text",
+				Text:        inlineFilePlaceholderText(part.File),
+				ExtraFields: part.ExtraFields,
+			}
+		}
+		if !replaced {
+			continue
+		}
+		if adapted == nil {
+			copy := *req
+			copy.Messages = append([]core.Message(nil), req.Messages...)
+			adapted = &copy
+		}
+		adapted.Messages[i].Content = rewritten
+	}
+	if adapted == nil {
+		return req, nil
+	}
+	return adapted, nil
+}
+
+// inlineFilePlaceholderText heads the placeholder with the file's name and
+// media type when the caller supplied them, so the model still learns what
+// was attached.
+func inlineFilePlaceholderText(file *core.FileContent) string {
+	if name := strings.TrimSpace(file.Filename); name != "" {
+		return inlineFilePlaceholder + " (" + name + ")"
+	}
+	return inlineFilePlaceholder
 }
 
 // padMissingReasoningContent satisfies DeepSeek's thinking-mode rule that a

@@ -239,7 +239,10 @@ features that have no canonical equivalent are not preserved end to end:
   translate to the OpenAI-style `file` content part (`file_data` for inline
   content, `file_url` for remote URLs, `file_id` for uploads). Anthropic gets the
   document back natively with its `title`; Gemini receives inline data only;
-  OpenAI-compatible providers receive the `file` part as-is. On OpenAI, an
+  OpenAI-compatible providers receive the `file` part as-is. DeepSeek is the
+  exception: it rejects the `file` part type outright, so the part becomes a
+  short text note naming the file and the attachment's contents are not sent.
+  On OpenAI, an
   untitled PDF gets a filename (`document.pdf`), and URL documents go through
   the Responses API. A plain-text document on a request that stays on Chat
   Completions is sent as text (headed by its `title`), because only PDF file

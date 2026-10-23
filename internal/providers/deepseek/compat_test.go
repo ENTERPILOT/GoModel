@@ -43,6 +43,59 @@ func TestAdaptCompatibility_PadsEveryAssistantTurnWhenToolsPresent(t *testing.T)
 	require.Nil(t, req.Messages[1].ExtraFields.Lookup("reasoning_content"))
 }
 
+func TestAdaptCompatibility_ReplacesFilePartsWithText(t *testing.T) {
+	// DeepSeek rejects the file part type outright, so a PDF read by a tool
+	// (Claude Code returns one this way) must become text or the whole turn
+	// fails upstream.
+	var req core.ChatRequest
+	err := json.Unmarshal([]byte(`{
+		"model":"deepseek-flash",
+		"messages":[
+			{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"Read","arguments":"{}"}}]},
+			{"role":"tool","tool_call_id":"call_1","content":[
+				{"type":"text","text":"PDF file read: card.pdf"},
+				{"type":"file","file":{"file_data":"data:application/pdf;base64,JVBERi0=","filename":"card.pdf"}}
+			]},
+			{"role":"user","content":[{"type":"file","file":{"file_id":"file-abc"}}]}
+		]
+	}`), &req)
+	require.NoError(t, err)
+
+	adapted, err := AdaptCompatibility(&req, "deepseek", JSONSchemaDowngrade)
+	require.NoError(t, err)
+
+	parts, ok := adapted.Messages[1].Content.([]core.ContentPart)
+	require.True(t, ok, "content = %T", adapted.Messages[1].Content)
+	require.Len(t, parts, 2)
+	assert.Equal(t, "text", parts[0].Type)
+	assert.Equal(t, "PDF file read: card.pdf", parts[0].Text)
+	assert.Equal(t, "text", parts[1].Type)
+	assert.Contains(t, parts[1].Text, "card.pdf")
+	assert.NotContains(t, parts[1].Text, "JVBERi0=")
+
+	unnamed, ok := adapted.Messages[2].Content.([]core.ContentPart)
+	require.True(t, ok, "content = %T", adapted.Messages[2].Content)
+	require.Len(t, unnamed, 1)
+	assert.Equal(t, inlineFilePlaceholder, unnamed[0].Text)
+
+	// The caller's request keeps its file parts.
+	original, ok := req.Messages[1].Content.([]core.ContentPart)
+	require.True(t, ok)
+	assert.Equal(t, "file", original[1].Type)
+}
+
+func TestAdaptFileParts_LeavesRequestsWithoutFilesAlone(t *testing.T) {
+	var req core.ChatRequest
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"model":"deepseek-flash",
+		"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}]
+	}`), &req))
+
+	adapted, err := adaptFileParts(&req)
+	require.NoError(t, err)
+	assert.Same(t, &req, adapted)
+}
+
 func TestAdaptCompatibility_JSONSchemaResponseFormat(t *testing.T) {
 	schemaFormat := `{"type":"json_schema","json_schema":{"name":"weather","description":"Current weather","strict":true,"schema":{"type": "object", "properties": {"city": {"type": "string"}}}}}`
 
