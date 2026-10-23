@@ -17,6 +17,7 @@ import (
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/admin"
+	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
@@ -25,6 +26,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/plugins/builtin"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/server"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
 
 type routeObservationSelector struct {
@@ -746,6 +748,47 @@ func TestLogStartupInfoTreatsExtensionAuthenticatorAsEffectiveAuth(t *testing.T)
 	require.NotContains(t, output, "UNSAFE MODE")
 	require.NotContains(t, output, "unauthenticated access allowed", "extension-authenticated startup emitted unsafe warning: %s", output)
 	require.Contains(t, output, `mode=extension`)
+}
+
+func TestLogStartupInfoWarnsWhenManagedKeysLeaveAdminOpen(t *testing.T) {
+	tests := []struct {
+		name     string
+		server   config.ServerConfig
+		admin    config.AdminConfig
+		wantWarn bool
+	}{
+		{name: "admin endpoints without master key", admin: config.AdminConfig{EndpointsEnabled: true}, wantWarn: true},
+		{name: "master key disabled", server: config.ServerConfig{MasterKeyDisabled: true}, admin: config.AdminConfig{EndpointsEnabled: true}},
+		{name: "admin endpoints disabled"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store, err := authkeys.NewSQLStore(t.Context(), sqlxtest.NewSQLite(t))
+			require.NoError(t, err)
+			service, err := authkeys.NewService(store)
+			require.NoError(t, err)
+			_, err = service.Create(t.Context(), authkeys.CreateInput{Name: "team"})
+			require.NoError(t, err)
+
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+
+			app := &App{
+				config:   &config.Config{Server: tt.server, Admin: tt.admin},
+				authKeys: &authkeys.Result{Service: service},
+			}
+			app.logStartupInfo()
+			output := logs.String()
+			assert.Contains(t, output, "mode=managed_keys")
+			if tt.wantWarn {
+				assert.Contains(t, output, "admin API is reachable without authentication")
+			} else {
+				assert.NotContains(t, output, "admin API is reachable without authentication")
+			}
+		})
+	}
 }
 
 type staticRewriter struct{ name string }

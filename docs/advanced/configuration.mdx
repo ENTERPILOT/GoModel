@@ -157,7 +157,11 @@ an error, which is what makes the switch safe to flip ahead of removing it.
 
 Disabling is not the same as leaving `GOMODEL_MASTER_KEY` empty, which runs the
 gateway unauthenticated and opens `/admin/*` so the dashboard can bootstrap its
-first managed key. A disabled master key fails closed instead: every request
+first managed key. Unless an authentication extension is configured,
+`/admin/*` stays open even after managed keys exist, and GoModel logs a
+security warning at startup while it does, so set a master key or disable it
+as soon as the first key with dashboard access is issued. A disabled master
+key fails closed instead: every request
 needs a credential, and the admin API stays behind one carrying dashboard
 access. Issue that credential before flipping the switch — with no master key,
 no managed key, and no authentication extension, the gateway rejects every
