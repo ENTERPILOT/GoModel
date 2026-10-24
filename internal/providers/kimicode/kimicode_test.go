@@ -23,7 +23,7 @@ func TestChatCompatibleContract(t *testing.T) {
 	providertest.AssertChatCompatible(t, providertest.ChatCompatible{
 		Registration:   Registration,
 		Type:           "kimicode",
-		DefaultBaseURL: "https://api.kimi.com/coding/v1",
+		DefaultBaseURL: "https://api.kimi.ai/coding/v1",
 		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
 			opts := providertest.Options(hooks)
 			opts.HTTPClient = client

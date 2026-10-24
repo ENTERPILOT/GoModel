@@ -17,7 +17,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 )
 
-const defaultBaseURL = "https://api.kimi.com/coding/v1"
+const defaultBaseURL = "https://api.kimi.ai/coding/v1"
 
 // Registration provides factory registration for the Kimi Code provider.
 var Registration = providers.Registration{
