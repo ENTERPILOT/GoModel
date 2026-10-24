@@ -1,9 +1,11 @@
 package users
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -75,6 +77,34 @@ func TestMatches(t *testing.T) {
 			t.Parallel()
 			got := Matches(tc.allowed, tc.selector)
 			require.Equal(t, tc.want, got, "Matches(%v, %s) = %v, want %v", tc.allowed, tc.selector.QualifiedModel(), got, tc.want)
+		})
+	}
+}
+
+func TestCovers(t *testing.T) {
+	tests := []struct {
+		allowed []string
+		entry   string
+		want    bool
+	}{
+		{allowed: nil, entry: "/", want: true},
+		{allowed: []string{"/"}, entry: "/", want: true},
+		{allowed: []string{"/"}, entry: "openai/gpt-4o", want: true},
+		{allowed: []string{"openai/"}, entry: "openai/gpt-4o", want: true},
+		{allowed: []string{"openai/"}, entry: "openai/", want: true},
+		{allowed: []string{"openai/"}, entry: "/", want: false},
+		{allowed: []string{"openai/"}, entry: "anthropic/claude", want: false},
+		{allowed: []string{"openai/"}, entry: "gpt-4o", want: false},
+		{allowed: []string{"openai/gpt-4o"}, entry: "openai/gpt-4o", want: true},
+		{allowed: []string{"openai/gpt-4o"}, entry: "openai/", want: false},
+		{allowed: []string{"openai/gpt-4o"}, entry: "gpt-4o", want: false},
+		{allowed: []string{"gpt-4o"}, entry: "gpt-4o", want: true},
+		{allowed: []string{"gpt-4o"}, entry: "openai/gpt-4o", want: true},
+		{allowed: []string{"gpt-4o"}, entry: "openai/gpt-4o-mini", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(strings.Join(tt.allowed, ",")+" covers "+tt.entry, func(t *testing.T) {
+			assert.Equal(t, tt.want, Covers(tt.allowed, tt.entry))
 		})
 	}
 }

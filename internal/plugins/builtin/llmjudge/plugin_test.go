@@ -39,7 +39,7 @@ func TestManifest(t *testing.T) {
 	require.True(t, m.Guardrail)
 	assert.Equal(t, []pluginapi.Kind{pluginapi.KindPrompt, pluginapi.KindResponse, pluginapi.KindStream}, m.Kinds)
 
-	want := []string{"model", "user_path", "prompt", "target", "action", "message", "block_status", "respond_text", "on_unclear", "max_tokens", "temperature"}
+	want := []string{"model", "engine", "user_path", "prompt", "decision_question", "block_threshold", "judge_images", "target", "action", "message", "block_status", "respond_text", "on_unclear", "max_tokens", "temperature"}
 	var keys []string
 	for _, f := range m.ConfigSchema {
 		keys = append(keys, f.Key)
@@ -81,6 +81,10 @@ func TestInitErrors(t *testing.T) {
 		{"max_tokens fraction", `{"model": "a/b", "max_tokens": 1.5}`, "max_tokens must be a whole number"},
 		{"temperature high", `{"model": "a/b", "temperature": 3}`, "temperature must be between 0 and 2"},
 		{"temperature type", `{"model": "a/b", "temperature": true}`, "temperature must be a number"},
+		{"bad engine", `{"model": "a/b", "engine": "magic"}`, "engine must be one of auto, chat, decision"},
+		{"threshold high", `{"model": "a/b", "block_threshold": 1.5}`, "block_threshold must be between 0 and 1"},
+		{"threshold NaN", `{"model": "a/b", "block_threshold": "NaN"}`, "block_threshold must be a number"},
+		{"judge_images type", `{"model": "a/b", "judge_images": "maybe"}`, "judge_images"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -90,7 +94,12 @@ func TestInitErrors(t *testing.T) {
 	}
 	err := New().Init(context.Background(), json.RawMessage(`{"model": "a/b"}`), nil)
 	require.ErrorContains(t, err, "host is required")
+	err = New().Init(context.Background(), json.RawMessage(`{"model": "a/b", "engine": "decision"}`), chatOnlyHost{plugintest.NewHost()})
+	require.ErrorContains(t, err, "engine decision needs a host that supports decisions")
 }
+
+// chatOnlyHost is a host without decisions, as an older host is.
+type chatOnlyHost struct{ pluginapi.Host }
 
 func TestDefaults(t *testing.T) {
 	p := newPlugin(t, `{"model": " openai/gpt-4o-mini "}`, plugintest.NewHost())
@@ -98,6 +107,7 @@ func TestDefaults(t *testing.T) {
 		model: "openai/gpt-4o-mini", prompt: DefaultPrompt, target: TargetAuto,
 		enforcement: pluginapi.Enforcement{Action: pluginapi.ActionBlock, Message: DefaultMessage, RespondText: DefaultRespondText},
 		onUnclear:   UnclearWarn, maxTokens: DefaultMaxTokens, temperature: 0,
+		engine: EngineAuto, question: DefaultDecisionQuestion, threshold: DefaultBlockThreshold,
 	}
 	assert.Equal(t, want, p.settings)
 

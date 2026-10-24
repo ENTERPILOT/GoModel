@@ -57,7 +57,7 @@ func CapabilitiesForEndpoint(desc EndpointDescriptor) CapabilitySet {
 		return CapabilitySet{
 			SemanticExtraction: true,
 		}
-	case OperationSystemOne:
+	case OperationSystemOne, OperationDecisions:
 		return CapabilitySet{
 			AliasResolution: true,
 			Guardrails:      true,

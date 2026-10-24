@@ -19,30 +19,31 @@ type BudgetChecker interface {
 }
 
 // budgetSubjectsFromContext reads the dimensions a request can be budgeted by:
-// its user path and the labels tagging extracted at ingress.
-func budgetSubjectsFromContext(ctx context.Context) budget.Subjects {
+// its user path, the labels tagging extracted at ingress, and the routed
+// provider. A zero route leaves provider budgets out of the check.
+func budgetSubjectsFromContext(ctx context.Context, route rateLimitRoute) budget.Subjects {
 	userPath := core.UserPathFromContext(ctx)
 	if userPath == "" {
 		userPath = "/"
 	}
-	return budget.Subjects{UserPath: userPath, Labels: core.RequestLabelsFromContext(ctx)}
+	return budget.Subjects{UserPath: userPath, Labels: core.RequestLabelsFromContext(ctx), Provider: route.provider}
 }
 
-func enforceBudget(c *echo.Context, checker BudgetChecker) error {
+func enforceBudget(c *echo.Context, checker BudgetChecker, route rateLimitRoute) error {
 	if checker == nil || c == nil || c.Request() == nil {
 		return nil
 	}
-	return enforceBudgetForContext(c.Request().Context(), checker)
+	return enforceBudgetForContext(c.Request().Context(), checker, route)
 }
 
-func enforceBudgetForContext(ctx context.Context, checker BudgetChecker) error {
+func enforceBudgetForContext(ctx context.Context, checker BudgetChecker, route rateLimitRoute) error {
 	if checker == nil || ctx == nil {
 		return nil
 	}
 	if workflow := core.GetWorkflow(ctx); workflow != nil && !workflow.BudgetEnabled() {
 		return nil
 	}
-	if err := checker.Check(ctx, budgetSubjectsFromContext(ctx), time.Now().UTC()); err != nil {
+	if err := checker.Check(ctx, budgetSubjectsFromContext(ctx, route), time.Now().UTC()); err != nil {
 		return budgetCheckError(err)
 	}
 	return nil
@@ -55,6 +56,10 @@ func budgetCheckError(err error) error {
 			message = "budget exceeded"
 		}
 		gatewayErr := core.NewRateLimitError("budget", message).WithCode("budget_exceeded")
+		// Keep the breach in the chain (Err is never serialized): admission
+		// inspects the exhausted budget's scope to decide whether the request
+		// may defer to failover.
+		gatewayErr.Err = exceeded
 		if retryAfter := budgetRetryAfterHeader(exceeded.Result.PeriodEnd, time.Now().UTC()); retryAfter != "" {
 			return &gatewayErrorWithResponseHeaders{
 				GatewayError: gatewayErr,

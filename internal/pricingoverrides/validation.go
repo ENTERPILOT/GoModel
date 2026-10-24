@@ -45,6 +45,7 @@ func pricingScalarFields(p Pricing) []pricingField {
 		{"output_per_mtok", p.OutputPerMtok},
 		{"cached_input_per_mtok", p.CachedInputPerMtok},
 		{"cache_write_per_mtok", p.CacheWritePerMtok},
+		{"cache_write_1h_per_mtok", p.CacheWrite1hPerMtok},
 		{"reasoning_output_per_mtok", p.ReasoningOutputPerMtok},
 		{"batch_input_per_mtok", p.BatchInputPerMtok},
 		{"batch_output_per_mtok", p.BatchOutputPerMtok},

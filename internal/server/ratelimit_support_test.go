@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
@@ -293,4 +295,55 @@ func TestEnforceAdmissionNeverDefersConsumerBreaches(t *testing.T) {
 	var gatewayErr *core.GatewayError
 	require.ErrorAs(t, err, &gatewayErr)
 	require.Equal(t, http.StatusTooManyRequests, gatewayErr.HTTPStatusCode())
+}
+
+// exceededBudgetChecker reports one exhausted budget of the given scope.
+type exceededBudgetChecker struct {
+	scope budget.Scope
+}
+
+func (c exceededBudgetChecker) Check(context.Context, budget.Subjects, time.Time) error {
+	return &budget.ExceededError{Result: budget.CheckResult{
+		Budget:    budget.Budget{Scope: c.scope, Subject: "openai", PeriodSeconds: budget.PeriodDailySeconds, Amount: 1},
+		PeriodEnd: time.Now().UTC().Add(time.Hour),
+		Spent:     2,
+		HasUsage:  true,
+	}}
+}
+
+// An exhausted provider budget defers to failover like a saturated route; a
+// consumer budget, or a request with no failover targets, still rejects.
+func TestEnforceAdmissionBudgetBreaches(t *testing.T) {
+	tests := []struct {
+		name      string
+		scope     budget.Scope
+		failovers int
+		wantDefer bool
+	}{
+		{name: "provider budget with failovers defers", scope: budget.ScopeProvider, failovers: 1, wantDefer: true},
+		{name: "provider budget without failovers rejects", scope: budget.ScopeProvider},
+		{name: "user path budget never defers", scope: budget.ScopeUserPath, failovers: 2},
+		{name: "label budget never defers", scope: budget.ScopeLabel, failovers: 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := newRateLimitTestContext(t, "/team")
+			route := rateLimitRoute{provider: "openai", model: "openai/gpt-4o"}.withFailovers(tt.failovers)
+			adm, err := enforceAdmission(c, nil, exceededBudgetChecker{scope: tt.scope}, route)
+			if !tt.wantDefer {
+				require.Error(t, err)
+				var gatewayErr *core.GatewayError
+				require.ErrorAs(t, err, &gatewayErr)
+				assert.Equal(t, http.StatusTooManyRequests, gatewayErr.HTTPStatusCode())
+				return
+			}
+			require.NoError(t, err)
+			defer adm.release()
+			saturated := core.PrimaryRouteSaturated(adm.dispatchContext(context.Background()))
+			require.Error(t, saturated)
+			var exceeded *budget.ExceededError
+			assert.ErrorAs(t, saturated, &exceeded)
+		})
+	}
 }

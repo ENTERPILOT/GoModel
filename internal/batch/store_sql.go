@@ -161,8 +161,9 @@ func (s *SQLStore) List(ctx context.Context, limit int, after, userPath string) 
 		// Root admits every tracked path, never the legacy rows without one.
 		conditions = append(conditions, "user_path <> ''")
 	default:
-		conditions = append(conditions, "(user_path = ? OR user_path LIKE ? ESCAPE '\\')")
-		args = append(args, userPath, sqlutil.EscapeLikeWildcards(userPath)+"/%")
+		condition, conditionArgs := sqlutil.UserPathSubtreeCondition("user_path", userPath)
+		conditions = append(conditions, condition)
+		args = append(args, conditionArgs...)
 	}
 	if after != "" {
 		var cursorCreatedAt int64

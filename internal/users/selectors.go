@@ -77,6 +77,37 @@ func Matches(allowed []string, selector core.ModelSelector) bool {
 	return false
 }
 
+// Covers reports whether every model that the canonical entry permits is
+// also permitted by allowed, so a credential limited to allowed may grant
+// entry to another key. An empty allowlist covers everything.
+func Covers(allowed []string, entry string) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	entry = strings.TrimSpace(entry)
+	for _, candidate := range allowed {
+		candidate = strings.TrimSpace(candidate)
+		switch {
+		case candidate == "":
+			continue
+		case modelselectors.IsGlobal(candidate), candidate == entry:
+			return true
+		}
+	}
+	switch {
+	case entry == "", modelselectors.IsGlobal(entry), strings.HasSuffix(entry, "/"):
+		// Only the global selector or the same provider-wide one covers these.
+		return false
+	}
+	entryProvider, entryModel := modelselectors.ParseStoredParts(entry)
+	if entryProvider == "" {
+		// A bare name permits the model on every provider; only the same bare
+		// name or the global selector covers it.
+		return false
+	}
+	return Matches(allowed, core.ModelSelector{Provider: entryProvider, Model: entryModel})
+}
+
 // matchesEntry interprets one canonical selector: "/" is global, a trailing
 // slash is provider-wide, a "provider/model" pair is exact, and a bare name is
 // model-wide across providers.

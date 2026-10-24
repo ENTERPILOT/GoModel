@@ -1,6 +1,7 @@
 package ext
 
 import (
+	"log/slog"
 	"slices"
 	"sync"
 
@@ -36,6 +37,8 @@ type Registry struct {
 	authenticators  []RequestAuthenticator
 	capabilities    map[Capability]struct{}
 	plugins         []PluginFactory
+
+	logHandlerWrappers []func(slog.Handler) slog.Handler
 }
 
 // EnableCapability unlocks an optional core behavior for this registry.

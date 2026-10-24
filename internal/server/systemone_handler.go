@@ -19,12 +19,7 @@ import (
 
 // systemOneRoute is one System One route the gateway serves natively.
 type systemOneRoute struct {
-	// path is the gateway route; endpoint is the same route as a provider's
-	// passthrough spells it, without the /v1 prefix.
-	path     string
-	endpoint string
-	// operation names the call in provider metrics and logs.
-	operation string
+	nativeJSONRoute
 	// kevOnly marks the diagnostic routes only Kev servers implement; the
 	// hosted API and OpenRouter serve the evaluation route alone.
 	kevOnly bool
@@ -36,13 +31,16 @@ var (
 	systemOneSeparate = systemOneRoute{path: "/v1/systemone/separate", endpoint: "systemone/separate", operation: "systemone_separate", kevOnly: true}
 )
 
-const jevProviderType = "jev"
+const (
+	jevProviderType        = "jev"
+	openRouterProviderType = "openrouter"
+)
 
 // systemOneProviderTypes are the provider types that serve the System One API
 // natively: jev (TypeSafe's hosted Jev and self-hosted Kev servers) and
 // OpenRouter, which serves Jev and Kev at the same path with the same request
 // and answer shapes. Configuring either makes /v1/systemone available.
-var systemOneProviderTypes = []string{jevProviderType, "openrouter"}
+var systemOneProviderTypes = []string{jevProviderType, openRouterProviderType}
 
 // SystemOne handles POST /v1/systemone.
 //
@@ -55,7 +53,7 @@ var systemOneProviderTypes = []string{jevProviderType, "openrouter"}
 // @Summary      Evaluate a System One decision request (Jev / Kev)
 // @Description  Available when a jev or openrouter provider is configured. The request and answer follow TypeSafe's System One API; models on providers without that API are rejected rather than translated.
 // @Tags         systemone
-// @Accept       json
+// @Accept       json,mpfd
 // @Produce      json
 // @Security     BearerAuth
 // @Param        request  body      object  true  "System One request: model, state, and questions"
@@ -75,7 +73,7 @@ func (h *Handler) SystemOne(c *echo.Context) error {
 // @Summary      Run one Choice question with several option orders (Kev)
 // @Description  A Kev server diagnostic: the request is a System One request, and n_perm (1 to 64, default 6) sets how many option orders run. Only jev providers pointing at a Kev server serve it.
 // @Tags         systemone
-// @Accept       json
+// @Accept       json,mpfd
 // @Produce      json
 // @Security     BearerAuth
 // @Param        request  body      object  true  "System One request with one Choice question"
@@ -95,7 +93,7 @@ func (h *Handler) SystemOnePermute(c *echo.Context) error {
 // @Summary      Run each System One question in its own forward pass (Kev)
 // @Description  A Kev server diagnostic that answers each question separately. Only jev providers pointing at a Kev server serve it.
 // @Tags         systemone
-// @Accept       json
+// @Accept       json,mpfd
 // @Produce      json
 // @Security     BearerAuth
 // @Param        request  body      object  true  "System One request: model, state, and questions"
@@ -119,6 +117,11 @@ func (s *translatedInferenceService) serveSystemOne(c *echo.Context, route syste
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
+	if isMultipartFormData(c.Request().Header.Get("Content-Type")) {
+		if body, err = systemOneMultipartToJSON(c.Request().Header.Get("Content-Type"), body); err != nil {
+			return handleError(c, core.NewInvalidRequestError("invalid multipart request: "+err.Error(), err))
+		}
+	}
 	var req core.SystemOneRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
@@ -127,7 +130,7 @@ func (s *translatedInferenceService) serveSystemOne(c *echo.Context, route syste
 		return handleError(c, core.NewInvalidRequestError("model is required", nil).WithParam("model"))
 	}
 
-	workflow, err := s.systemOneWorkflow(c, req.Model)
+	workflow, err := s.decisionWorkflow(c, req.Model)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -145,7 +148,9 @@ func (s *translatedInferenceService) serveSystemOne(c *echo.Context, route syste
 	if err != nil {
 		return handleError(c, err)
 	}
-	return s.dispatchSystemOneWithCache(c, route, workflow, body)
+	return s.dispatchNativeJSONWithCache(c, route.nativeJSONRoute, workflow, body, func() error {
+		return s.dispatchSystemOne(c, route, workflow, body)
+	})
 }
 
 // systemOneAvailable reports whether a provider that serves System One is
@@ -164,10 +169,11 @@ func systemOneAvailable(provider core.RoutableProvider) bool {
 	return false
 }
 
-// systemOneWorkflow resolves the request's model (virtual models first, then
-// the catalog) and builds its workflow. A model the catalog does not list may
-// still be a pinned version a jev provider accepts; see unlistedJevResolution.
-func (s *translatedInferenceService) systemOneWorkflow(c *echo.Context, model string) (*core.Workflow, error) {
+// decisionWorkflow resolves the model of a System One or Decisions request
+// (virtual models first, then the catalog) and builds its workflow. A model
+// the catalog does not list may still be a pinned version a jev provider
+// accepts; see unlistedJevResolution.
+func (s *translatedInferenceService) decisionWorkflow(c *echo.Context, model string) (*core.Workflow, error) {
 	if workflow := core.GetWorkflow(c.Request().Context()); workflow != nil && workflow.Resolution != nil {
 		return workflow, nil
 	}
@@ -295,8 +301,8 @@ func systemOneOnlyModel(provider core.RoutableProvider, resolution *core.Request
 func systemOneOnlyModelError(operation core.Operation, resolution *core.RequestModelResolution) error {
 	surface := strings.ReplaceAll(string(operation), "_", " ")
 	return core.NewInvalidRequestError(fmt.Sprintf(
-		"model %q is a System One decision model and does not support %s; it answers decision requests, which GoModel does not translate: send them to POST %s",
-		resolution.RequestedQualifiedModel(), surface, systemOneEvaluate.path,
+		"model %q is a System One decision model and does not support %s; it answers decision requests: send them to POST %s in OpenAI's format, or to POST %s in System One's",
+		resolution.RequestedQualifiedModel(), surface, decisionsRoute.path, systemOneEvaluate.path,
 	), nil).WithParam("model")
 }
 
@@ -325,18 +331,38 @@ func systemOneUnsupportedModelError(c *echo.Context, route systemOneRoute, resol
 }
 
 // guardSystemOneState runs the workflow's prompt guardrails over the state
-// and returns the body carrying their edits. A guardrail that answers the
-// request itself blocks it instead: its answer is chat text, and a System
-// One caller expects typed answers.
+// and returns the body carrying their edits.
 func (s *translatedInferenceService) guardSystemOneState(c *echo.Context, workflow *core.Workflow, req *core.SystemOneRequest, body []byte) ([]byte, error) {
 	patcher, ok := s.translatedRequestPatcher.(gateway.SystemOneRequestPatcher)
-	if !ok || !workflow.GuardrailsEnabled() {
+	if !ok {
 		return body, nil
 	}
-	// Compare against a copy: a patcher may redact the state in place and
+	return guardNativeMember(s, c, workflow, body, "state", req, patcher.PatchSystemOneRequest,
+		func(r *core.SystemOneRequest) json.RawMessage { return r.State })
+}
+
+// guardNativeMember runs the workflow's prompt guardrails over one top-level
+// member of a native body (System One's state, Decisions' input) through
+// patch, and returns the body carrying the edit. A guardrail that answers
+// the request itself blocks it instead: its answer is chat text, and a
+// decision caller expects typed answers.
+func guardNativeMember[Req any](
+	s *translatedInferenceService,
+	c *echo.Context,
+	workflow *core.Workflow,
+	body []byte,
+	member string,
+	req *Req,
+	patch func(context.Context, *Req) (*Req, error),
+	valueOf func(*Req) json.RawMessage,
+) ([]byte, error) {
+	if !workflow.GuardrailsEnabled() {
+		return body, nil
+	}
+	// Compare against a copy: a patcher may redact the member in place and
 	// return the same request, and that edit must still reach the body.
-	original := bytes.Clone(req.State)
-	patched, err := patcher.PatchSystemOneRequest(c.Request().Context(), req)
+	original := bytes.Clone(valueOf(req))
+	patched, err := patch(c.Request().Context(), req)
 	s.recordGuardrailOutcomes(c)
 	if err != nil {
 		if short := shortCircuitOf(err); short != nil {
@@ -344,10 +370,10 @@ func (s *translatedInferenceService) guardSystemOneState(c *echo.Context, workfl
 		}
 		return nil, err
 	}
-	if patched == nil || bytes.Equal(patched.State, original) {
+	if patched == nil || bytes.Equal(valueOf(patched), original) {
 		return body, nil
 	}
-	rewritten, err := replaceTopLevelMember(body, "state", patched.State)
+	rewritten, err := replaceTopLevelMember(body, member, valueOf(patched))
 	if err != nil {
 		return nil, core.NewInvalidRequestError("invalid request body: "+err.Error(), err)
 	}
