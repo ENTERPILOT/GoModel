@@ -7,6 +7,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,7 +29,7 @@ func TestListModels_PreservesChutesMetadata(t *testing.T) {
 		}]
 	}`)
 
-	provider := NewWithHTTPClient("cpk_test", server.URL, server.Client(), llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{APIKey: "cpk_test", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 	resp, err := provider.ListModels(context.Background())
 	require.NoError(t, err)
 
@@ -46,7 +47,9 @@ func TestListModels_PreservesChutesMetadata(t *testing.T) {
 	assert.Equal(t, 262144, *model.Metadata.ContextWindow)
 	require.NotNil(t, model.Metadata.MaxOutputTokens)
 	assert.Equal(t, 65536, *model.Metadata.MaxOutputTokens)
-	assert.True(t, model.Metadata.Capabilities["tools"])
+	assert.True(t, model.Metadata.Capabilities["function_calling"], "tools maps onto the catalog's key")
+	assert.True(t, model.Metadata.Capabilities["structured_output"])
+	assert.True(t, model.Metadata.Capabilities["reasoning"])
 	assert.True(t, model.Metadata.Capabilities["vision"])
 	assert.True(t, model.Metadata.Capabilities["confidential_compute"])
 
@@ -69,7 +72,7 @@ func TestListModels_FiltersBlankIDsAndKeepsMinimalModels(t *testing.T) {
 		]
 	}`)
 
-	provider := NewWithHTTPClient("cpk_test", server.URL, server.Client(), llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{APIKey: "cpk_test", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 	resp, err := provider.ListModels(context.Background())
 	require.NoError(t, err)
 	require.Len(t, resp.Data, 1)
@@ -87,7 +90,7 @@ func TestListModels_FiltersBlankIDsAndKeepsMinimalModels(t *testing.T) {
 func TestListModels_ReturnsUpstreamError(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusServiceUnavailable, `{"error":{"message":"catalog unavailable"}}`)
 
-	provider := NewWithHTTPClient("cpk_test", server.URL, server.Client(), llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{APIKey: "cpk_test", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 	_, err := provider.ListModels(context.Background())
 	require.Error(t, err)
 
@@ -102,8 +105,8 @@ func TestModelCapabilities_MapsOptionalModalities(t *testing.T) {
 		InputModalities:   []string{"audio", "video", "unknown"},
 	})
 	assert.True(t, capabilities["json_mode"])
-	assert.True(t, capabilities["audio"])
-	assert.True(t, capabilities["video"])
+	assert.True(t, capabilities["audio_input"], "modalities use the catalog's capability keys")
+	assert.True(t, capabilities["video_input"])
 }
 
 func TestModelPricing_HandlesNilAndPartialPrices(t *testing.T) {

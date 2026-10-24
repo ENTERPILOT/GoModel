@@ -179,6 +179,36 @@ func TestSeedConfiguredRulesCarriesPerChild(t *testing.T) {
 	require.Equal(t, "/users", rules[0].Subject)
 }
 
+// Provider and model subjects are matched case-insensitively, so configuration
+// seeds the folded subject as the key while keeping the configured spelling for
+// listings and breach messages.
+func TestSeedConfiguredRulesKeepsConfiguredSpelling(t *testing.T) {
+	store := &memStore{}
+	service, err := NewService(context.Background(), store)
+	require.NoError(t, err)
+
+	limits := []config.RateLimitRuleConfig{{Period: "minute", MaxRequests: new(int64(10))}}
+	err = seedConfiguredRules(context.Background(), service, config.RateLimitsConfig{
+		Providers: []config.RateLimitProviderConfig{{Name: "mockA", Limits: limits}},
+		Models:    []config.RateLimitModelConfig{{Model: "GPT-4.1-Mini", Limits: limits}},
+	})
+	require.NoError(t, err)
+
+	bySubject := make(map[string]Rule)
+	for _, rule := range service.Rules() {
+		bySubject[rule.Subject] = rule
+	}
+	require.Len(t, bySubject, 2, "seeded rules = %+v", service.Rules())
+
+	provider, ok := bySubject["mocka"]
+	require.True(t, ok, "seeded rules = %+v, want the folded provider subject", service.Rules())
+	require.Equal(t, "mockA", provider.DisplaySubject())
+
+	model, ok := bySubject["gpt-4.1-mini"]
+	require.True(t, ok, "seeded rules = %+v, want the folded model subject", service.Rules())
+	require.Equal(t, "GPT-4.1-Mini", model.DisplaySubject())
+}
+
 // windowBase is aligned to every supported period, keeping sliding-window
 // math in tests exact.
 var windowBase = time.Unix(1_000_000_200, 0).UTC() // 1_000_000_200 % 600 == 0

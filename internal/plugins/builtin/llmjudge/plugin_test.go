@@ -39,7 +39,7 @@ func TestManifest(t *testing.T) {
 	require.True(t, m.Guardrail)
 	assert.Equal(t, []pluginapi.Kind{pluginapi.KindPrompt, pluginapi.KindResponse, pluginapi.KindStream}, m.Kinds)
 
-	want := []string{"model", "user_path", "prompt", "target", "action", "message", "block_status", "respond_text", "on_unclear", "max_tokens", "temperature"}
+	want := []string{"model", "engine", "user_path", "prompt", "decision_question", "block_threshold", "judge_images", "target", "action", "message", "block_status", "respond_text", "on_unclear", "max_tokens", "temperature"}
 	var keys []string
 	for _, f := range m.ConfigSchema {
 		keys = append(keys, f.Key)
@@ -81,6 +81,10 @@ func TestInitErrors(t *testing.T) {
 		{"max_tokens fraction", `{"model": "a/b", "max_tokens": 1.5}`, "max_tokens must be a whole number"},
 		{"temperature high", `{"model": "a/b", "temperature": 3}`, "temperature must be between 0 and 2"},
 		{"temperature type", `{"model": "a/b", "temperature": true}`, "temperature must be a number"},
+		{"bad engine", `{"model": "a/b", "engine": "magic"}`, "engine must be one of auto, chat, decision"},
+		{"threshold high", `{"model": "a/b", "block_threshold": 1.5}`, "block_threshold must be between 0 and 1"},
+		{"threshold NaN", `{"model": "a/b", "block_threshold": "NaN"}`, "block_threshold must be a number"},
+		{"judge_images type", `{"model": "a/b", "judge_images": "maybe"}`, "judge_images"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -90,7 +94,12 @@ func TestInitErrors(t *testing.T) {
 	}
 	err := New().Init(context.Background(), json.RawMessage(`{"model": "a/b"}`), nil)
 	require.ErrorContains(t, err, "host is required")
+	err = New().Init(context.Background(), json.RawMessage(`{"model": "a/b", "engine": "decision"}`), chatOnlyHost{plugintest.NewHost()})
+	require.ErrorContains(t, err, "engine decision needs a host that supports decisions")
 }
+
+// chatOnlyHost is a host without decisions, as an older host is.
+type chatOnlyHost struct{ pluginapi.Host }
 
 func TestDefaults(t *testing.T) {
 	p := newPlugin(t, `{"model": " openai/gpt-4o-mini "}`, plugintest.NewHost())
@@ -98,6 +107,7 @@ func TestDefaults(t *testing.T) {
 		model: "openai/gpt-4o-mini", prompt: DefaultPrompt, target: TargetAuto,
 		enforcement: pluginapi.Enforcement{Action: pluginapi.ActionBlock, Message: DefaultMessage, RespondText: DefaultRespondText},
 		onUnclear:   UnclearWarn, maxTokens: DefaultMaxTokens, temperature: 0,
+		engine: EngineAuto, question: DefaultDecisionQuestion, threshold: DefaultBlockThreshold,
 	}
 	assert.Equal(t, want, p.settings)
 
@@ -244,7 +254,7 @@ func TestNoJudgeReplyChoices(t *testing.T) {
 	host := plugintest.NewHost() // returns a completion without choices
 	p := newPlugin(t, `{"model": "a/b", "on_unclear": "block"}`, host)
 	d, err := p.OnPrompt(context.Background(), plugintest.Exchange(prompt(), nil))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, pluginapi.ActionBlock, d.Action)
 	assert.Equal(t, CodeUnclear, d.Code)
 }
@@ -355,7 +365,7 @@ func TestInferenceError(t *testing.T) {
 	boom := errors.New("provider down")
 	p := newPlugin(t, `{"model": "a/b"}`, &plugintest.Host{Err: boom})
 	_, err := p.OnPrompt(context.Background(), plugintest.Exchange(prompt(), nil))
-	assert.ErrorIs(t, err, boom)
+	require.ErrorIs(t, err, boom)
 	assert.Contains(t, err.Error(), "judge call failed")
 }
 
@@ -380,7 +390,7 @@ func TestEmptyContentSkipsJudge(t *testing.T) {
 			} else {
 				d, err = p.OnPrompt(context.Background(), tt.x)
 			}
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, pluginapi.ActionAllow, d.Action)
 		})
 	}
@@ -439,7 +449,7 @@ func TestNilValues(t *testing.T) {
 	host := &plugintest.Host{Replies: []string{`{"verdict":"allow"}`}}
 	p := newPlugin(t, `{"model": "a/b"}`, host)
 	d, err := p.OnPrompt(context.Background(), &pluginapi.Exchange{Prompt: prompt()})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, pluginapi.ActionAllow, d.Action)
 }
 
@@ -450,7 +460,7 @@ func TestStream(t *testing.T) {
 
 	x := plugintest.Exchange(nil, nil)
 	d, err := p.OnStreamEvent(context.Background(), x, &pluginapi.StreamEvent{Kind: pluginapi.EventTextDelta, Text: "x"})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, pluginapi.StreamPass, d.Action)
 
 	d2, err := p.OnStreamEnd(context.Background(), x)

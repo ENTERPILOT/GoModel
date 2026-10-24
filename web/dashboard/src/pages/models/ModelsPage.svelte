@@ -14,6 +14,7 @@
   import { virtualModels } from "./virtualModels.svelte.js";
   import { virtualModelEditor } from "./virtualModelEditor.svelte.js";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
+  import { modelDetailsState } from "./modelDetails.svelte.js";
   import ModelTable from "./ModelTable.svelte";
   import VirtualModelEditor from "./VirtualModelEditor.svelte";
   import PricingOverrideEditor from "./PricingOverrideEditor.svelte";
@@ -45,6 +46,13 @@
   // Rows read FAILOVER_ENABLED to describe a virtual model's routing.
   $effect(() => {
     runtimeConfig.ensureLoaded();
+  });
+
+  // A refetched inventory means the registry may have re-enriched, so the
+  // metadata layers cached for open detail panels are stale.
+  $effect(() => {
+    void modelsStore.models;
+    untrack(() => modelDetailsState.clearLayers());
   });
 
   $effect(() => {

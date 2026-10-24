@@ -27,7 +27,7 @@ const chatCompletionJSON = `{
 
 // newTestProvider points a provider at the given upstream base URL.
 func newTestProvider(client *http.Client, baseURL string) *Provider {
-	provider := NewWithHTTPClient("test-api-key", client, llmclient.Hooks{})
+	provider := newHTTPTestProvider("test-api-key", client, llmclient.Hooks{})
 	provider.SetBaseURL(baseURL)
 	return provider
 }

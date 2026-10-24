@@ -10,11 +10,13 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
 	"github.com/enterpilot/gomodel/internal/server"
 	"github.com/enterpilot/gomodel/internal/session"
 	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/stretchr/testify/require"
 )
 
 // benchRateLimitStore is a minimal in-memory ratelimit.Store carrying one
@@ -62,9 +64,8 @@ func newBenchRateLimiter(tb testing.TB) *ratelimit.Service {
 		MaxRequests:   &maxRequests,
 	}}}
 	service, err := ratelimit.NewService(context.Background(), store)
-	if err != nil {
-		tb.Fatalf("new rate limit service: %v", err)
-	}
+	require.NoError(tb, err)
+
 	tb.Cleanup(service.Close)
 	return service
 }
@@ -113,15 +114,78 @@ func newBenchRouter(tb testing.TB, modelCount int) *providers.Router {
 
 	registry := providers.NewModelRegistry()
 	registry.RegisterProviderWithNameAndType(&benchProvider{models: models}, "mock", "mock")
-	if err := registry.Initialize(context.Background()); err != nil {
-		tb.Fatalf("registry initialize: %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(tb, err)
 
 	router, err := providers.NewRouter(registry)
-	if err != nil {
-		tb.Fatalf("new router: %v", err)
-	}
+	require.NoError(tb, err)
+
 	return router
+}
+
+// benchLiveAuditLogger is the bench audit logger with the live broker a
+// dashboard subscribes to. The audit middleware publishes lifecycle events
+// through whichever logger implements auditlog.LiveEventEmitter, so this is
+// what a default deployment pays on every request — the broker runs whether or
+// not anyone is watching, which is the case the benchmark measures.
+type benchLiveAuditLogger struct {
+	cfg    auditlog.Config
+	broker *live.Broker
+}
+
+func (l benchLiveAuditLogger) Write(entry *auditlog.LogEntry) {
+	// The real logger publishes the terminal event as it persists the entry.
+	l.broker.PublishAuditEvent(auditlog.LiveEventAuditFlushed, entry)
+}
+
+func (l benchLiveAuditLogger) Config() auditlog.Config { return l.cfg }
+func (l benchLiveAuditLogger) Close() error            { return nil }
+
+func (l benchLiveAuditLogger) PublishLiveEvent(eventType string, entry *auditlog.LogEntry) {
+	l.broker.PublishAuditEvent(eventType, entry)
+}
+
+// BenchmarkGatewayHotPathProductionShapeLiveBroker is the production shape with
+// live logs enabled and no dashboard connected — the default configuration of a
+// running gateway. The broker builds and retains an event for every lifecycle
+// step of every request, which the stub audit logger in the other benchmarks
+// never exercises.
+func BenchmarkGatewayHotPathProductionShapeLiveBroker(b *testing.B) {
+	srv := newLiveBrokerBenchServer(b, routedCatalogSize)
+	body := []byte(sampleChatRequest)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer bench-master-key")
+
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+
+		require.Equal(b, http.StatusOK, rec.Code, "body = %s", rec.Body.String())
+	}
+}
+
+func newLiveBrokerBenchServer(tb testing.TB, modelCount int) *server.Server {
+	tb.Helper()
+
+	broker := live.NewBroker(live.Config{Enabled: true})
+	tb.Cleanup(broker.Close)
+
+	return server.New(newBenchRouter(tb, modelCount), &server.Config{
+		LogOnlyModelInteractions: true,
+		MasterKey:                "bench-master-key",
+		AuditLogger: benchLiveAuditLogger{
+			cfg:    auditlog.Config{Enabled: true, LogBodies: true, LogHeaders: true},
+			broker: broker,
+		},
+		UsageLogger:     benchUsageLogger{cfg: usage.Config{Enabled: true}},
+		SessionDetector: session.NewDetector(session.BuiltinRules(), true),
+		RateLimiter:     newBenchRateLimiter(tb),
+	})
 }
 
 func newProductionBenchServer(tb testing.TB, modelCount int) *server.Server {

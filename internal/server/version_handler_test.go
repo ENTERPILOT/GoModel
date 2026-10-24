@@ -112,7 +112,7 @@ func TestVersionEndpointChecksOnFirstVisit(t *testing.T) {
 	assert.Equal(t, "Mozilla/5.0 (X11; Linux x86_64)", headers().Get("User-Agent"))
 
 	date, id := versioncheck.SplitVisit(visitCookie(t, rec))
-	require.Equal(t, time.Now().Format(time.DateOnly), date)
+	require.Equal(t, time.Now().UTC().Format(time.DateOnly), date)
 	require.NotEmpty(t, id)
 	assert.Equal(t, headers().Get("X-GoModel-Date"), visitCookie(t, rec))
 	cache := rec.Header().Get("Cache-Control")
@@ -143,14 +143,14 @@ func TestVersionEndpointRechecksOnANewDay(t *testing.T) {
 	srv, calls, _ := versionTestServer(t, manifestOK)
 
 	req := httptest.NewRequest(http.MethodGet, "/version", nil)
-	yesterday := time.Now().AddDate(0, 0, -1).Format(time.DateOnly)
+	yesterday := time.Now().UTC().AddDate(0, 0, -1).Format(time.DateOnly)
 	req.AddCookie(&http.Cookie{Name: versioncheck.CookieName, Value: yesterday + "-3f2504e0-4f89-11d3-9a0c-0305e82c3301"})
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
 	awaitChecks(t, calls, 1)
 	date, id := versioncheck.SplitVisit(visitCookie(t, rec))
-	assert.Equal(t, time.Now().Format(time.DateOnly), date)
+	assert.Equal(t, time.Now().UTC().Format(time.DateOnly), date)
 	assert.Equal(t, "3f2504e0-4f89-11d3-9a0c-0305e82c3301", id)
 }
 
@@ -171,7 +171,7 @@ func TestVersionEndpointNeverForwardsCredentials(t *testing.T) {
 		assert.Empty(t, value, "%s leaked to the release host as %q", forbidden, value)
 	}
 	for _, value := range headers() {
-		assert.False(t, strings.Contains(strings.Join(value, " "), "sk-"), "a credential-shaped value reached the release host: %v", value)
+		assert.NotContains(t, strings.Join(value, " "), "sk-", "a credential-shaped value reached the release host: %v", value)
 	}
 }
 
@@ -289,11 +289,11 @@ func TestVersionEndpointRejectsAForgedVisitID(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 	awaitChecks(t, calls, 1)
 	sent := headers().Get("X-GoModel-Date")
-	assert.False(t, strings.Contains(sent, "injected"))
+	assert.NotContains(t, sent, "injected")
 	assert.NotContains(t, sent, "AAAA", "X-GoModel-Date should discard the forged id")
 
 	issued := visitCookie(t, rec)
-	assert.False(t, strings.Contains(issued, "injected"))
+	assert.NotContains(t, issued, "injected")
 	assert.NotContains(t, issued, "AAAA", "Set-Cookie should discard the forged id")
 
 	date, id := versioncheck.SplitVisit(issued)

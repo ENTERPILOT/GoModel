@@ -2,6 +2,7 @@ package responsecache
 
 import (
 	"bytes"
+	"github.com/enterpilot/gomodel/internal/streaming"
 
 	"github.com/goccy/go-json"
 )
@@ -38,7 +39,7 @@ func validateCacheableSSE(raw []byte) bool {
 
 	for len(raw) > 0 {
 		remaining := raw
-		idx, sepLen := nextCacheEventBoundary(raw)
+		idx, sepLen := streaming.NextEventBoundary(raw)
 		event := remaining
 		raw = nil
 		if idx != -1 {
@@ -76,7 +77,7 @@ func sseEventPayload(event []byte) ([]byte, bool) {
 	lines := bytes.Split(event, []byte("\n"))
 	payloadLines := make([][]byte, 0, len(lines))
 	for _, line := range lines {
-		data, ok := parseCacheDataLine(line)
+		data, ok := streaming.ParseDataLine(line)
 		if !ok {
 			continue
 		}

@@ -20,6 +20,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/anthropic"
 	"github.com/enterpilot/gomodel/internal/providers/gemini"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
 // newCapturingJSONClient answers every request with the JSON fixture and
@@ -54,7 +55,9 @@ func TestGeminiThoughtSignatureRoundTrip(t *testing.T) {
 	const model = "gemini-3.5-flash"
 	t.Setenv("USE_GOOGLE_GEMINI_NATIVE_API", "true")
 	client, captured := newCapturingJSONClient(t, "gemini/native_tool_call_signed.json")
-	provider := gemini.NewWithHTTPClient("test-api-key", client, llmclient.Hooks{})
+	opts := providertest.Options(llmclient.Hooks{})
+	opts.HTTPClient = client
+	provider := gemini.New(providers.ProviderConfig{APIKey: "test-api-key"}, opts).(*gemini.Provider)
 	provider.SetBaseURL("https://replay.local")
 
 	user := core.Message{Role: "user", Content: "What is the weather in Paris?"}
@@ -132,7 +135,9 @@ func anthropicHistory(t *testing.T, resp *core.ChatResponse, callID string) []co
 
 func TestAnthropicThinkingBlocksReplay(t *testing.T) {
 	client, captured := newCapturingJSONClient(t, "anthropic/messages.json")
-	provider := anthropic.NewWithHTTPClient("sk-ant-test", client, llmclient.Hooks{})
+	opts := providertest.Options(llmclient.Hooks{})
+	opts.HTTPClient = client
+	provider := anthropic.New(providers.ProviderConfig{APIKey: "sk-ant-test"}, opts).(*anthropic.Provider)
 	provider.SetBaseURL("https://replay.local")
 
 	thinking := `{"type":"thinking","thinking":"","signature":"sig1"}`
@@ -186,7 +191,9 @@ const (
 func TestAnthropicThinkingSignatureRoundTrip(t *testing.T) {
 	const model = "claude-sonnet-4-5"
 	client, captured := newCapturingJSONClient(t, "anthropic/messages_thinking_tool_use.json")
-	provider := anthropic.NewWithHTTPClient("sk-ant-test", client, llmclient.Hooks{})
+	opts := providertest.Options(llmclient.Hooks{})
+	opts.HTTPClient = client
+	provider := anthropic.New(providers.ProviderConfig{APIKey: "sk-ant-test"}, opts).(*anthropic.Provider)
 	provider.SetBaseURL("https://replay.local")
 
 	user := core.Message{Role: "user", Content: "What is the weather in Paris?"}
@@ -240,7 +247,9 @@ func TestAnthropicThinkingSignatureRoundTrip(t *testing.T) {
 // thinking block; it must not leak into the Anthropic response shape.
 func TestAnthropicThinkingSignatureSurvivesMessagesDialect(t *testing.T) {
 	client, _ := newCapturingJSONClient(t, "anthropic/messages_thinking_tool_use.json")
-	provider := anthropic.NewWithHTTPClient("sk-ant-test", client, llmclient.Hooks{})
+	opts := providertest.Options(llmclient.Hooks{})
+	opts.HTTPClient = client
+	provider := anthropic.New(providers.ProviderConfig{APIKey: "sk-ant-test"}, opts).(*anthropic.Provider)
 	provider.SetBaseURL("https://replay.local")
 
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{

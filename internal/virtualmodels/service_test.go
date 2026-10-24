@@ -181,7 +181,6 @@ func TestService_DisabledRedirectDoesNotResolveOrExpose(t *testing.T) {
 	require.NoError(t, err)
 	_, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("fast", ""))
 	require.False(t, changed)
-	require.False(t, svc.Supports("fast"))
 	exposed := svc.ExposedModels()
 	require.Empty(t, exposed)
 }

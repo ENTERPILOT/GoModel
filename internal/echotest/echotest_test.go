@@ -59,3 +59,17 @@ func TestRequest_SendsRawBodyFormsVerbatim(t *testing.T) {
 		})
 	}
 }
+
+// TestRequest_WithResponseWriterWrapsRecorder verifies the handler writes
+// through the supplied wrapper while the returned recorder still records.
+func TestRequest_WithResponseWriterWrapsRecorder(t *testing.T) {
+	var wrapped bool
+	c, rec := Request(t, http.MethodGet, "/x", nil, WithResponseWriter(func(w http.ResponseWriter) http.ResponseWriter {
+		wrapped = true
+		return w
+	}))
+	require.True(t, wrapped, "wrapper not applied")
+	require.NoError(t, c.String(http.StatusTeapot, "hi"))
+	assert.Equal(t, http.StatusTeapot, rec.Code)
+	assert.Equal(t, "hi", rec.Body.String())
+}

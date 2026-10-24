@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -54,7 +55,7 @@ func tokenServer(t *testing.T, accessToken string) (string, *providertest.Captur
 }
 
 func TestProviderDoesNotExposeFilesOrBatches(t *testing.T) {
-	provider := newProvider(testConfig(), providers.ProviderOptions{}, authedTestClient(http.DefaultClient))
+	provider := newProvider(testConfig(), providers.ProviderOptions{}, authedTestClient(http.DefaultClient), true)
 	_, ok := any(provider).(core.NativeFileProvider)
 	assert.False(t, ok, "provider should not implement core.NativeFileProvider")
 	_, ok = any(provider).(core.NativeBatchProvider)
@@ -78,7 +79,7 @@ func TestEmbeddingsUsesNativePrediction(t *testing.T) {
 			operation = info.Operation
 			return ctx
 		},
-	}}, authedTestClient(server.Client()))
+	}}, authedTestClient(server.Client()), true)
 
 	resp, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
 		Model:      "google/text-embedding-005",
@@ -107,7 +108,7 @@ func TestEmbeddingsUsesNativePrediction(t *testing.T) {
 }
 
 func TestEmbeddingsRejectsEmptyStringInBatch(t *testing.T) {
-	provider := newProvider(testConfig(), providers.ProviderOptions{}, authedTestClient(http.DefaultClient))
+	provider := newProvider(testConfig(), providers.ProviderOptions{}, authedTestClient(http.DefaultClient), true)
 
 	_, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
 		Model: "google/text-embedding-005",
@@ -152,7 +153,7 @@ func TestNewAcceptsBaseURLWithoutProjectLocation(t *testing.T) {
 		Type:     "vertex",
 		AuthType: "gcp_adc",
 		BaseURL:  "https://proxy.example.com" + nativeBasePath,
-	}, providers.ProviderOptions{}, authedTestClient(http.DefaultClient))
+	}, providers.ProviderOptions{}, authedTestClient(http.DefaultClient), true)
 	require.NoError(t, provider.ready())
 }
 
@@ -161,7 +162,7 @@ func TestNewRejectsUnsupportedAuthType(t *testing.T) {
 		Type:     "vertex",
 		AuthType: "api_key",
 		BaseURL:  "https://proxy.example.com" + nativeBasePath,
-	}, providers.ProviderOptions{}, authedTestClient(http.DefaultClient))
+	}, providers.ProviderOptions{}, authedTestClient(http.DefaultClient), true)
 
 	err := provider.ready()
 	require.Error(t, err)
@@ -412,7 +413,7 @@ func TestCreateImageDelegatesToGeminiPredict(t *testing.T) {
 
 	cfg := testConfig()
 	cfg.BaseURL = server.URL + nativeBasePath
-	provider := newProvider(cfg, providers.ProviderOptions{}, authedTestClient(server.Client()))
+	provider := newProvider(cfg, providers.ProviderOptions{}, authedTestClient(server.Client()), true)
 
 	resp, err := provider.CreateImage(context.Background(), &core.ImageGenerationRequest{
 		Model:  "google/imagen-4.0-generate-001",
@@ -426,4 +427,49 @@ func TestCreateImageDelegatesToGeminiPredict(t *testing.T) {
 	require.Len(t, resp.Data, 1)
 	assert.Equal(t, "aW1n", resp.Data[0].B64JSON)
 	assert.Equal(t, "vertex", resp.Provider)
+}
+
+// countingRoundTripper records how many requests travelled through it, so the
+// test can tell a configured transport that carried the request from one that
+// was replaced.
+type countingRoundTripper struct {
+	base  http.RoundTripper
+	calls atomic.Int64
+}
+
+func (t *countingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.calls.Add(1)
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return base.RoundTrip(req)
+}
+
+// A configured HTTP client is a transport override, not a credential: Vertex
+// layers its Google credentials over that transport. Using it as supplied would
+// send requests with no ADC or service-account token, since Vertex's own
+// headers add only the request ID.
+func TestNewAppliesCredentialsOverConfiguredHTTPClient(t *testing.T) {
+	tokenURL, _ := tokenServer(t, "adc-token")
+	upstream, upstreamCapture := providertest.JSONServer(t, http.StatusOK, generateContentJSON)
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", vertexADCCredentialsFile(t, tokenURL))
+
+	cfg := testConfig()
+	cfg.APIMode = "native"
+	cfg.BaseURL = upstream.URL + nativeBasePath
+
+	counted := &countingRoundTripper{base: upstream.Client().Transport}
+	provider := New(cfg, providers.ProviderOptions{HTTPClient: &http.Client{Transport: counted}})
+
+	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "google/gemini-2.5-flash",
+		Messages: []core.Message{{Role: "user", Content: "Hello"}},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	req := upstreamCapture.Last(t)
+	assert.Equal(t, "Bearer adc-token", req.Header.Get("Authorization"), "the configured transport must not bypass Vertex credentials")
+	assert.Positive(t, counted.calls.Load(), "the configured transport must still carry the request")
 }

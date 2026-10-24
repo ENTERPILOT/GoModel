@@ -54,7 +54,8 @@ func normalizedUsageEntryForStorage(entry *UsageEntry) *UsageEntry {
 	costSource := strings.TrimSpace(entry.CostSource)
 	userPath := normalizeUsageEntryUserPath(entry.UserPath)
 	sessionID := strings.TrimSpace(entry.SessionID)
-	if normalized == entry.CacheType && providerName == entry.ProviderName && costSource == entry.CostSource && userPath == entry.UserPath && sessionID == entry.SessionID {
+	authKeyID := strings.TrimSpace(entry.AuthKeyID)
+	if normalized == entry.CacheType && providerName == entry.ProviderName && costSource == entry.CostSource && userPath == entry.UserPath && sessionID == entry.SessionID && authKeyID == entry.AuthKeyID {
 		return entry
 	}
 
@@ -64,6 +65,7 @@ func normalizedUsageEntryForStorage(entry *UsageEntry) *UsageEntry {
 	cloned.CostSource = costSource
 	cloned.UserPath = userPath
 	cloned.SessionID = sessionID
+	cloned.AuthKeyID = authKeyID
 	return &cloned
 }
 

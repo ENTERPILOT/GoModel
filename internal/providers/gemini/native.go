@@ -264,7 +264,10 @@ func convertChatRequestToGemini(req *core.ChatRequest) (*geminiGenerateContentRe
 		return nil, err
 	}
 	out.Tools = tools
-	out.ToolConfig = geminiToolConfigFromOpenAI(req.ToolChoice)
+	out.ToolConfig, err = geminiToolConfigFromOpenAI(req.ToolChoice, hasStrictTool(req.Tools))
+	if err != nil {
+		return nil, err
+	}
 	out.GenerationConfig = geminiGenerationConfig(req)
 	out.SafetySettings = geminiSafetySettings(req)
 	out.CachedContent = geminiCachedContent(req)
@@ -417,7 +420,16 @@ func geminiPartsFromContentParts(parts []core.ContentPart) ([]geminiPart, error)
 				MimeType: mimeTypeForAudioFormat(part.InputAudio.Format),
 				Data:     part.InputAudio.Data,
 			}})
-		case "file":
+		case "video_url":
+			if part.VideoURL == nil || strings.TrimSpace(part.VideoURL.URL) == "" {
+				return nil, core.NewInvalidRequestError("gemini native video content requires video_url.url", nil)
+			}
+			videoPart, err := geminiPartFromVideoURL(part.VideoURL)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, videoPart)
+		case "file", "input_file":
 			if part.File == nil {
 				continue
 			}
@@ -433,9 +445,61 @@ func geminiPartsFromContentParts(parts []core.ContentPart) ([]geminiPart, error)
 				return nil, err
 			}
 			out = append(out, geminiPart{InlineData: &geminiBlob{MimeType: mimeType, Data: data}})
+		default:
+			return nil, core.NewInvalidRequestError("unsupported gemini native content part type: "+part.Type, nil)
 		}
 	}
 	return out, nil
+}
+
+// geminiPartFromVideoURL projects a video_url part onto a Gemini part: inline
+// data: payloads become inline_data, while YouTube links and Gemini Files API
+// URIs become file_data. Gemini does not fetch arbitrary remote URLs, so those
+// are rejected rather than silently dropped.
+func geminiPartFromVideoURL(video *core.VideoURLContent) (geminiPart, error) {
+	rawURL := strings.TrimSpace(video.URL)
+	if strings.HasPrefix(rawURL, "data:") {
+		mimeType, data, err := parseDataURL(rawURL, "video_url")
+		if err != nil {
+			return geminiPart{}, err
+		}
+		if mimeType == "" {
+			mimeType = "video/mp4"
+		}
+		return geminiPart{InlineData: &geminiBlob{MimeType: mimeType, Data: data}}, nil
+	}
+
+	if isGeminiFileURI(rawURL) {
+		return geminiPart{FileData: &geminiFileData{FileURI: rawURL}}, nil
+	}
+
+	return geminiPart{}, core.NewInvalidRequestError(
+		"gemini native video_url supports only data: URLs, YouTube links, and Gemini Files API URIs; other remote URLs must be uploaded via the Gemini Files API",
+		nil,
+	)
+}
+
+// isGeminiFileURI reports whether a URL is one Gemini resolves server-side: a
+// YouTube video, a Files API resource, or a Cloud Storage object. The host is
+// matched exactly after parsing so a lookalike such as
+// https://example.com/generativelanguage.googleapis.com/v1beta/files/clip.mp4
+// is rejected rather than forwarded as a file reference.
+func isGeminiFileURI(rawURL string) bool {
+	if strings.HasPrefix(strings.ToLower(rawURL), "gs://") {
+		return true
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil || !strings.EqualFold(parsed.Scheme, "https") {
+		return false
+	}
+	switch strings.ToLower(parsed.Hostname()) {
+	case "generativelanguage.googleapis.com":
+		return strings.Contains(parsed.EscapedPath(), "/files/")
+	case "www.youtube.com", "youtube.com", "m.youtube.com", "youtu.be":
+		return true
+	default:
+		return false
+	}
 }
 
 func geminiPartFromImageURL(image *core.ImageURLContent) (geminiPart, error) {
@@ -581,7 +645,11 @@ func validateGeminiParametersJSONSchema(encoded json.RawMessage) (json.RawMessag
 	return stripped, nil
 }
 
-func geminiToolConfigFromOpenAI(choice any) *geminiToolConfig {
+// geminiToolConfigFromOpenAI maps tool_choice onto functionCallingConfig. With
+// strict set (any tool declared strict: true), the free-choice mode becomes
+// VALIDATED, Gemini's AUTO with schema-adherent function calls; ANY already
+// guarantees schema adherence.
+func geminiToolConfigFromOpenAI(choice any, strict bool) (*geminiToolConfig, error) {
 	mode := ""
 	var allowed []string
 
@@ -597,23 +665,62 @@ func geminiToolConfigFromOpenAI(choice any) *geminiToolConfig {
 		}
 	case map[string]any:
 		choiceType, _ := value["type"].(string)
-		if strings.TrimSpace(choiceType) == "function" {
+		switch strings.TrimSpace(choiceType) {
+		case "function":
 			mode = "ANY"
 			if fn, ok := value["function"].(map[string]any); ok {
 				if name, _ := fn["name"].(string); name != "" {
 					allowed = []string{name}
 				}
 			}
+		case "allowed_tools":
+			var err error
+			mode, allowed, err = geminiAllowedToolsConfig(value)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
+	if strict && (mode == "" || mode == "AUTO") {
+		mode = "VALIDATED"
+	}
 	if mode == "" {
-		return nil
+		return nil, nil
 	}
 	return &geminiToolConfig{FunctionCallingConfig: geminiFunctionCallingConfig{
 		Mode:                 mode,
 		AllowedFunctionNames: allowed,
-	}}
+	}}, nil
+}
+
+// geminiAllowedToolsConfig maps an allowed_tools choice onto a mode and the
+// allowedFunctionNames subset. Gemini accepts allowedFunctionNames only with
+// ANY or VALIDATED, so "auto" becomes VALIDATED: the model may still answer in
+// text, but any call is limited to the subset. An empty subset is rejected, as
+// OpenAI does, rather than widened to every declared tool.
+func geminiAllowedToolsConfig(choice map[string]any) (string, []string, error) {
+	names, required, _ := core.AllowedToolsChoice(choice)
+	if len(names) == 0 {
+		return "", nil, core.NewInvalidRequestError("tool_choice.allowed_tools.tools must list at least one function", nil)
+	}
+	if required {
+		return "ANY", names, nil
+	}
+	return "VALIDATED", names, nil
+}
+
+// hasStrictTool reports whether any function tool asks for strict schema
+// adherence.
+func hasStrictTool(tools []map[string]any) bool {
+	for _, tool := range tools {
+		if fn, ok := tool["function"].(map[string]any); ok {
+			if strict, _ := fn["strict"].(bool); strict {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func geminiGenerationConfig(req *core.ChatRequest) map[string]any {

@@ -1,9 +1,12 @@
 package dashboard
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -160,4 +163,49 @@ func TestIndex_HasNoExternalResources(t *testing.T) {
 	} {
 		assert.NotContains(t, body, marker)
 	}
+}
+
+// The dashboard holds an admin credential, so it ships browser hardening
+// headers, and its CSP must still admit the one inline script it injects.
+func TestIndex_SetsSecurityHeaders(t *testing.T) {
+	tests := []struct {
+		name     string
+		basePath string
+		demoMode bool
+	}{
+		{name: "root", basePath: "/"},
+		{name: "base path and demo mode", basePath: "/gw", demoMode: true},
+	}
+	inlineScript := regexp.MustCompile(`<script>([^<]*)</script>`)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, err := NewWithDemoMode(tt.basePath, tt.demoMode)
+			require.NoError(t, err)
+
+			rec := serveIndex(t, h, "/admin/dashboard")
+
+			assert.Equal(t, "DENY", rec.Header().Get("X-Frame-Options"))
+			assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+			assert.Equal(t, "no-referrer", rec.Header().Get("Referrer-Policy"))
+
+			csp := rec.Header().Get("Content-Security-Policy")
+			directives := strings.Split(csp, "; ")
+			assert.Contains(t, directives, "frame-ancestors 'none'")
+			assert.Contains(t, directives, "object-src 'none'")
+
+			// Scripts run only from the bundle and the hashed runtime globals.
+			scripts := inlineScript.FindAllStringSubmatch(rec.Body.String(), -1)
+			require.Len(t, scripts, 1, "the runtime globals should be the only inline script")
+			sum := sha256.Sum256([]byte(scripts[0][1]))
+			assert.Contains(t, directives, "script-src 'self' 'sha256-"+base64.StdEncoding.EncodeToString(sum[:])+"'")
+		})
+	}
+}
+
+func TestStatic_SetsNoSniff(t *testing.T) {
+	h, err := NewWithBasePath("/")
+	require.NoError(t, err)
+
+	rec := serveStatic(t, h, "/admin/static/favicon.svg")
+	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
 }

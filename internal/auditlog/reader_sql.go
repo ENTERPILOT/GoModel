@@ -12,6 +12,7 @@ import (
 
 	"github.com/goccy/go-json"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
@@ -242,6 +243,10 @@ func (r *SQLReader) logFilters(ctx context.Context, params LogQueryParams) ([]st
 	}
 	if params.Stream != nil {
 		add("stream = ?", *params.Stream)
+	}
+	if len(params.ExcludeOperations) > 0 {
+		condition, values := excludeOperationsSQLFilter(params.ExcludeOperations)
+		add(condition, values...)
 	}
 	if params.Search != "" {
 		condition, values := r.searchFilter(params.Search, r.searchIsIndexed(ctx))
@@ -559,4 +564,24 @@ func isMissingAuditAttemptsTable(err error) bool {
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "audit_log_attempts") &&
 		(strings.Contains(message, "no such table") || strings.Contains(message, "does not exist"))
+}
+
+// excludeOperationsSQLFilter drops paths belonging to any of the operations.
+// Exact paths also match with one trailing slash, as DescribeEndpoint does.
+// The prefixes hold no LIKE wildcards, so they need no escaping.
+func excludeOperationsSQLFilter(ops []core.Operation) (string, []any) {
+	var clauses []string
+	var args []any
+	for _, op := range ops {
+		paths, _ := core.PathsForOperation(op)
+		for _, exact := range paths.Exact {
+			clauses = append(clauses, "path = ?", "path = ?")
+			args = append(args, exact, exact+"/")
+		}
+		for _, prefix := range paths.Prefixes {
+			clauses = append(clauses, "path = ?", "path LIKE ?")
+			args = append(args, prefix, prefix+"/%")
+		}
+	}
+	return "(path IS NULL OR NOT (" + strings.Join(clauses, " OR ") + "))", args
 }

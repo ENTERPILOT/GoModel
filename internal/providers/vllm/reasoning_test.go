@@ -36,7 +36,7 @@ func TestChatCompletion_RenamesLegacyReasoningContentOnAssistantMessages(t *test
 	}`), &req)
 	require.NoError(t, err)
 
-	provider := NewWithHTTPClient("", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("", server.URL, server.Client(), llmclient.Hooks{})
 	_, err = provider.ChatCompletion(context.Background(), &req)
 	require.NoError(t, err)
 
@@ -60,7 +60,7 @@ func TestChatCompletion_DoesNotOverrideExistingReasoningField(t *testing.T) {
 	}`), &req)
 	require.NoError(t, err)
 
-	provider := NewWithHTTPClient("", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("", server.URL, server.Client(), llmclient.Hooks{})
 	_, err = provider.ChatCompletion(context.Background(), &req)
 	require.NoError(t, err)
 
@@ -129,13 +129,12 @@ func TestChatCompletion_AppliesAdaptChatRequestThroughStandardConstructor(t *tes
 
 // TestAdaptChatRequest_SkipsMalformedReasoningContentWithoutError documents
 // that a syntactically invalid reasoning_content value is never seen by
-// adaptChatRequest at all: UnknownJSONFields.Lookup decodes each value with
-// a streaming json.Decoder, so a malformed value fails to decode and Lookup
-// returns nil (see UnknownJSONFields.Lookup) rather than surfacing invalid
-// bytes. adaptChatRequest then treats the field as absent. There is no
-// reachable path back into core.MergeUnknownJSONFields with invalid JSON
-// here, since Lookup only ever returns bytes it has already decoded
-// successfully, so this request is left unmodified rather than erroring.
+// adaptChatRequest at all: UnknownJSONFields.Lookup reports a member whose
+// value does not parse as absent rather than surfacing invalid bytes, so
+// adaptChatRequest treats the field as missing. There is no reachable path
+// back into core.MergeUnknownJSONFields with invalid JSON here, since Lookup
+// only ever returns bytes that parsed, so this request is left unmodified
+// rather than erroring.
 func TestAdaptChatRequest_SkipsMalformedReasoningContentWithoutError(t *testing.T) {
 	req := &core.ChatRequest{
 		Messages: []core.Message{{Role: "assistant", Content: "hi"}},

@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	_ "github.com/enterpilot/gomodel/cmd/gomodel/docs"
 )
 
 func TestSwaggerEndpoint_Enabled(t *testing.T) {

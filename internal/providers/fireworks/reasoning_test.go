@@ -24,7 +24,7 @@ func TestChatCompletion_MapsReasoningToReasoningEffort(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
-			provider := NewWithHTTPClient("test-api-key", server.URL, nil, llmclient.Hooks{})
+			provider := newTestProvider("test-api-key", server.URL, nil, llmclient.Hooks{})
 
 			_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 				Model:     "accounts/fireworks/models/glm-5p2",

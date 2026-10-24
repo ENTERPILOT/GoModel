@@ -66,6 +66,11 @@
           </td>
           <td>
             <span>{formatNumber(server.tool_count || 0)}</span>
+            {#if server.excluded_tool_count > 0}
+              <span class="mcp-server-excluded-count"
+                >{m.mcp_tools_excluded_count({ count: formatNumber(server.excluded_tool_count) })}</span
+              >
+            {/if}
             <div class="mcp-server-sub-counts">{mcpServerSubCountsLabel(server)}</div>
           </td>
           <td>
@@ -138,12 +143,15 @@
     white-space: nowrap;
   }
 
-  /* The server table has seven information-dense columns. Preserve readable
-     cells on narrow screens and let the table scroll instead of clipping it. */
-  .mcp-server-table-wrapper {
-    overflow-x: auto;
+  .mcp-server-excluded-count {
+    margin-left: 6px;
+    color: var(--text-muted);
+    font-size: 12px;
   }
 
+  /* The server table has seven information-dense columns. Preserve readable
+     cells on narrow screens and let the wrapper scroll instead of squeezing
+     them. */
   .mcp-server-table-wrapper :global(.data-table) {
     min-width: 860px;
   }

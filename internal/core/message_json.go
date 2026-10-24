@@ -199,7 +199,7 @@ func marshalMessageContent(raw MessageContent, toolCalls []ToolCall) (any, error
 	if len(toolCalls) > 0 && isNullEquivalentContent(raw) {
 		content = nil
 	} else {
-		content, err = NormalizeMessageContent(raw)
+		content, err = messageContentForMarshal(raw)
 		if err != nil {
 			return nil, err
 		}

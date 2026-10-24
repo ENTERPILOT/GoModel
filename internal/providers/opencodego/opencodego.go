@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/anthropic"
 	"github.com/enterpilot/gomodel/internal/providers/deepseek"
@@ -85,23 +84,6 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 	if native, ok := messages.(*anthropic.Provider); ok {
 		native.SetRequestHeaders(headers)
 	}
-	return &Provider{
-		ChatCompatible: chat,
-		messages:       messages,
-		messagesModels: loadMessagesModels(),
-		headers:        headers,
-	}
-}
-
-// NewWithHTTPClient creates a new OpenCode Go provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	resolved := providers.ResolveBaseURL(baseURL, defaultBaseURL)
-	headers := requestHeaders(loadSessionHeaderEnabled())
-	chat := openai.NewChatCompatibleWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(resolved, headers))
-	messages := anthropic.NewWithHTTPClient(apiKey, httpClient, hooks)
-	messages.SetBaseURL(resolved)
-	messages.SetRequestHeaders(headers)
 	return &Provider{
 		ChatCompatible: chat,
 		messages:       messages,

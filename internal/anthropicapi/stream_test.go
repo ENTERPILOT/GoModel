@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
 // drainConverter runs the SSE converter over chatStream and returns the parsed
@@ -149,6 +151,65 @@ func TestStreamConverterEmptyStream(t *testing.T) {
 	got := eventTypes(events)
 	want := []string{"message_start", "message_delta", "message_stop"}
 	require.Equal(t, want, got)
+}
+
+// failingReader serves body, then fails with err instead of io.EOF.
+type failingReader struct {
+	body *strings.Reader
+	err  error
+}
+
+func (r *failingReader) Read(p []byte) (int, error) {
+	if r.body.Len() > 0 {
+		return r.body.Read(p)
+	}
+	return 0, r.err
+}
+
+func TestStreamConverterStoppedEarlyEndsWithErrorEvent(t *testing.T) {
+	partial := strings.Join([]string{
+		`data: {"id":"chatcmpl-9","model":"gpt","choices":[{"delta":{"content":"one"},"finish_reason":null}]}`,
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"f","arguments":"{\"ci"}}]}}]}`,
+		"",
+	}, "\n\n")
+	tests := []struct {
+		name    string
+		readErr error
+		wantErr error
+	}{
+		{name: "EOF before finish", readErr: io.EOF, wantErr: io.ErrUnexpectedEOF},
+		{name: "connection reset", readErr: io.ErrClosedPipe, wantErr: io.ErrClosedPipe},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := &failingReader{body: strings.NewReader(partial), err: tt.readErr}
+			conv := NewStreamConverter(io.NopCloser(body), "m", 0)
+			out, err := io.ReadAll(conv)
+			require.ErrorIs(t, err, tt.wantErr)
+
+			stream := string(out)
+			assert.NotContains(t, stream, "message_stop")
+			require.True(t, strings.HasSuffix(stream, "event: error\ndata: {\"error\":{\"message\":\"provider stream ended before completion\",\"type\":\"api_error\"},\"type\":\"error\"}\n\n"), "stream = %q", stream)
+		})
+	}
+}
+
+func TestStreamConverterFinishWithoutDoneEndsCleanly(t *testing.T) {
+	chatStream := `data: {"id":"chatcmpl-2","choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}]}` + "\n\n"
+	got := eventTypes(drainConverter(t, chatStream))
+	assert.Equal(t, "message_stop", got[len(got)-1])
+}
+
+func TestStreamConverterFinishedTurnSurvivesTrailingReadError(t *testing.T) {
+	finished := `data: {"id":"chatcmpl-3","choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}]}` + "\n\n"
+	body := &failingReader{body: strings.NewReader(finished), err: io.ErrClosedPipe}
+	conv := NewStreamConverter(io.NopCloser(body), "m", 0)
+
+	out, err := io.ReadAll(conv)
+	require.NoError(t, err)
+	assert.Contains(t, string(out), "event: message_stop")
+	assert.NotContains(t, string(out), "event: error")
 }
 
 func TestStreamConverterStopSequence(t *testing.T) {
@@ -407,4 +468,63 @@ func TestStreamConverterVendorReasoningMember(t *testing.T) {
 			assert.Equal(t, tt.want, strings.Join(thinking, ""))
 		})
 	}
+}
+
+// An error the upstream reports mid-stream reaches the client with its own
+// message and the nearest Anthropic error type, instead of the generic
+// incomplete-stream error.
+func TestStreamConverterRelaysUpstreamError(t *testing.T) {
+	start := `data: {"id":"chatcmpl-1","model":"gpt","choices":[{"index":0,"delta":{"content":"Hel"},"finish_reason":null}]}`
+	tests := []struct {
+		name     string
+		tail     []string
+		wantType string
+		wantMsg  string
+	}{
+		{name: "server error then EOF", tail: []string{`data: {"error":{"message":"The server had an error processing your request.","type":"server_error"}}`},
+			wantType: "api_error", wantMsg: "The server had an error processing your request."},
+		{name: "rate limit then [DONE]", tail: []string{`data: {"error":{"message":"Rate limit reached","type":"rate_limit_exceeded"}}`, `data: [DONE]`},
+			wantType: "rate_limit_error", wantMsg: "Rate limit reached"},
+		{name: "no upstream detail", tail: nil,
+			wantType: "api_error", wantMsg: streaming.ErrStreamIncomplete.Error()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stream := strings.Join(append([]string{start}, tt.tail...), "\n\n") + "\n\n"
+			conv := NewStreamConverter(io.NopCloser(strings.NewReader(stream)), "fallback-model", 0)
+			defer conv.Close() //nolint:errcheck
+
+			out, err := io.ReadAll(conv)
+			require.ErrorIs(t, err, streaming.ErrStreamIncomplete)
+
+			var last map[string]any
+			for line := range strings.SplitSeq(string(out), "\n") {
+				if data, ok := strings.CutPrefix(line, "data: "); ok {
+					require.NoError(t, json.Unmarshal([]byte(data), &last))
+				}
+			}
+			assert.Equal(t, "error", last["type"])
+			assert.Equal(t, map[string]any{"type": tt.wantType, "message": tt.wantMsg}, last["error"])
+			assert.NotContains(t, string(out), "message_stop")
+		})
+	}
+}
+
+// An upstream error after the finish chunk still fails the turn: the stream
+// broke, so it must not end with message_stop.
+func TestStreamConverterUpstreamErrorAfterFinish(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-1","model":"gpt","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		`data: {"error":{"message":"The server had an error processing your request.","type":"server_error"}}`,
+		`data: [DONE]`,
+		"",
+	}, "\n\n")
+	conv := NewStreamConverter(io.NopCloser(strings.NewReader(stream)), "fallback-model", 0)
+	defer conv.Close() //nolint:errcheck
+
+	out, err := io.ReadAll(conv)
+	require.ErrorIs(t, err, streaming.ErrStreamIncomplete)
+	assert.NotContains(t, string(out), "message_stop")
+	assert.Contains(t, string(out), "The server had an error processing your request.")
 }

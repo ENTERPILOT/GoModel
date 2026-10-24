@@ -205,3 +205,35 @@ version, stamps a `GoModelBuildInfo` variable into the plugin, and refuses an
 output built with a different Go version. Loading needs a cgo build of
 GoModel (`make build-plugins` or the `gomodel:<version>-plugins` image).
 `gomodel --version` prints the Go and `pluginapi` versions plugins must match.
+
+## Encrypting stored secrets
+
+`gomodel secrets reencrypt` encrypts every dashboard-managed secret that is
+still in plaintext and moves values under older data keys to the active one.
+It needs `GOMODEL_ENCRYPTION_KEY`, prints counts only, and is idempotent.
+
+```bash
+gomodel secrets reencrypt [--rotate-data-key]
+```
+
+See [Encryption at Rest](/advanced/encryption-at-rest).
+
+## Migrating from LiteLLM
+
+`gomodel migrate litellm` converts a LiteLLM proxy `config.yaml` into a GoModel
+`config.yaml`, a `.env` with the secrets that were inline, and a migration
+report. Without `--out` it writes no files.
+
+It also reads keys, teams, users, and budgets from the LiteLLM database when it
+has a URL (`--database-url`, the config's `database_url`, or `DATABASE_URL`),
+and with `--gomodel-url` imports them into a running GoModel. Re-running brings
+GoModel up to date. A `--gomodel-url` on another machine must use `https` unless
+you pass `--allow-http`. `--skip-database` converts the config only.
+
+```sh
+gomodel migrate litellm [--out DIR] [--force] [--database-url URL | --skip-database]
+  [--gomodel-url URL [--allow-http]] <litellm-config.yaml>
+```
+
+See [Migrating from LiteLLM](/guides/migrate-from-litellm) for the full
+walkthrough.

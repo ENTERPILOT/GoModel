@@ -8,6 +8,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 // modelsResponse mirrors llama-server's /v1/models payload. It restates the
@@ -156,26 +157,22 @@ func (e modelEntry) contextWindow(props *serverProps) int {
 	return 0
 }
 
-// modalityCapabilities maps llama-server's multimodal flags onto GoModel
-// capability keys. Only the modalities that have an established capability name
-// are published — an unrecognized key llama.cpp adds later would otherwise
-// become a public capability nobody can interpret. Unsupported modalities are
-// omitted rather than recorded as false, so a later metadata layer can still
-// claim them.
+// modalityCapabilities maps llama-server's multimodal flags onto the catalog's
+// capability keys (vision, video_input, audio_input). Only the modalities that
+// have an established capability name are published — an unrecognized key
+// llama.cpp adds later would otherwise become a public capability nobody can
+// interpret. Unsupported modalities are omitted rather than recorded as
+// false, so a later metadata layer can still claim them.
 func modalityCapabilities(modalities map[string]bool) map[string]bool {
-	capabilities := make(map[string]bool, len(modalities))
+	var capabilities map[string]bool
 	for modality, supported := range modalities {
-		name := strings.ToLower(strings.TrimSpace(modality))
 		if !supported {
 			continue
 		}
-		switch name {
+		switch strings.ToLower(strings.TrimSpace(modality)) {
 		case "vision", "video", "audio":
-			capabilities[name] = true
+			capabilities = providers.SetCapability(capabilities, modality, true)
 		}
-	}
-	if len(capabilities) == 0 {
-		return nil
 	}
 	return capabilities
 }

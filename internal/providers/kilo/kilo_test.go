@@ -8,6 +8,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,10 +24,12 @@ func TestChatCompatibleContract(t *testing.T) {
 		Type:           "kilo",
 		DefaultBaseURL: "https://api.kilo.ai/api/gateway",
 		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
-			return NewWithHTTPClient(apiKey, baseURL, client, hooks)
+			opts := providertest.Options(hooks)
+			opts.HTTPClient = client
+			return New(providers.ProviderConfig{APIKey: apiKey, BaseURL: baseURL}, opts)
 		},
 	})
-	providertest.AssertNoNativeSurfaces(t, NewWithHTTPClient("kilo-key", "", nil, llmclient.Hooks{}))
+	providertest.AssertNoNativeSurfaces(t, New(providers.ProviderConfig{APIKey: "kilo-key"}, providers.ProviderOptions{}))
 }
 
 func TestChatCompletion_PreservesToolsAndToolChoice(t *testing.T) {
@@ -38,7 +41,7 @@ func TestChatCompletion_PreservesToolsAndToolChoice(t *testing.T) {
 		"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}
 	}`)
 
-	provider := NewWithHTTPClient("kilo-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("kilo-key", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model:    "anthropic/claude-sonnet-4.5",
 		Messages: []core.Message{{Role: "user", Content: "Use the tool"}},
@@ -64,7 +67,7 @@ func TestChatCompletion_PreservesToolsAndToolChoice(t *testing.T) {
 func TestStreamChatCompletion_PreservesStreamOptions(t *testing.T) {
 	server, capture := providertest.SSEServer(t, "data: {\"id\":\"chatcmpl-kilo\",\"object\":\"chat.completion.chunk\",\"choices\":[]}\n\ndata: [DONE]\n\n")
 
-	provider := NewWithHTTPClient("kilo-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("kilo-key", server.URL, server.Client(), llmclient.Hooks{})
 	stream, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
 		Model:         "openai/gpt-5.5",
 		Messages:      []core.Message{{Role: "user", Content: "hi"}},

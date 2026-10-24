@@ -225,8 +225,8 @@ data: [DONE]
 			sawSummaryEvent = true
 		case "response.output_text.delta":
 			// Assistant text must only stream after the reasoning item closed.
-			if reasoningItemID != "" && activeItems[reasoningItemID] {
-				t.Fatalf("response.output_text.delta arrived while the reasoning item was still open")
+			if reasoningItemID != "" {
+				require.False(t, activeItems[reasoningItemID], "response.output_text.delta arrived while the reasoning item was still open")
 			}
 		}
 	}
@@ -258,8 +258,8 @@ data: [DONE]
 			continue
 		}
 		item, _ := event.Payload["item"].(map[string]any)
-		if item["type"] == "message" && event.Payload["output_index"] != float64(0) {
-			t.Fatalf("assistant %s output_index = %#v, want 0", event.Name, event.Payload["output_index"])
+		if item["type"] == "message" {
+			require.Equal(t, float64(0), event.Payload["output_index"], "assistant %s output_index", event.Name)
 		}
 	}
 }

@@ -14,7 +14,6 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 )
@@ -52,13 +51,6 @@ type Provider struct {
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	compat := openai.NewCompatibleProvider(providerCfg.APIKey, opts, compatibleConfig(providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL)))
 	return newProvider(compat, opts.Keyring(providerCfg.APIKey))
-}
-
-// NewWithHTTPClient creates a new xAI provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	compat := openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(defaultBaseURL))
-	return newProvider(compat, providers.NewKeyring(apiKey))
 }
 
 func newProvider(compat *openai.CompatibleProvider, keys *providers.Keyring) *Provider {
@@ -274,11 +266,6 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 // StreamChatCompletion returns a raw response body for streaming (caller must close)
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
 	return p.compat.StreamChatCompletion(ctx, req)
-}
-
-// ListModels retrieves the list of available models from xAI
-func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
-	return p.compat.ListModels(ctx)
 }
 
 // adaptResponsesRequest drops Responses members xAI's native /responses

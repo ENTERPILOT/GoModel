@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -29,6 +30,18 @@ func (r *ModelRegistry) probeAvailability(ctx context.Context, provider core.Pro
 	defer cancel()
 
 	err := checker.CheckAvailability(probeCtx)
+	if modelListingUnsupported(err) && r.hasConfiguredProviderModels(providerName) {
+		// Probes that list models (Ollama, Bedrock Mantle) fail on servers
+		// without a /models endpoint. The server answered, and its configured
+		// models are the inventory, so it is reachable.
+		err = nil
+	}
 	r.RecordAvailabilityCheck(providerName, err)
 	return err
+}
+
+func (r *ModelRegistry) hasConfiguredProviderModels(providerName string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.configuredProviderModels[strings.TrimSpace(providerName)]) > 0
 }

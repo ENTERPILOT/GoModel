@@ -152,7 +152,7 @@ func TestCaptureInternalJSONExchange_PreservesHeadersWhenBodyMarshalFails(t *tes
 		responseBody, ok := entry.Data.ResponseBody.(string)
 		require.True(t, ok, "ResponseBody = %T, want truncated string payload", entry.Data.ResponseBody)
 		require.NotEmpty(t, responseBody)
-		require.False(t, strings.Contains(responseBody, `"`+large+`"`))
+		require.NotContains(t, responseBody, `"`+large+`"`)
 	})
 }
 

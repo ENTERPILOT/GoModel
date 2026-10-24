@@ -85,8 +85,7 @@ func TestGetBatchResults(t *testing.T) {
 			`{"custom_id":"err-1","result":{"type":"errored","error":{"type":"invalid_request_error","message":"bad request"}}}`,
 	)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 	provider.setBatchResultEndpoints("batch_1", map[string]string{
 		"ok-1":  "/v1/responses",
 		"err-1": "/v1/chat/completions",
@@ -108,8 +107,7 @@ func TestGetBatchResultsWithHints(t *testing.T) {
 		`{"custom_id":"ok-1","result":{"type":"succeeded","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}}}`,
 	)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	resp, err := provider.GetBatchResultsWithHints(context.Background(), "batch_1", map[string]string{
 		"ok-1": "/v1/responses",
@@ -125,8 +123,7 @@ func TestGetBatchResultsWithHints_ExplicitEmptyHintsDoNotUseTransientHints(t *te
 		`{"custom_id":"ok-1","result":{"type":"succeeded","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}}}`,
 	)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 	provider.setBatchResultEndpoints("batch_1", map[string]string{
 		"ok-1": "/v1/responses",
 	})
@@ -239,8 +236,7 @@ func TestChatCompletion(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, tt.statusCode, tt.responseBody)
 
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 			req := &core.ChatRequest{
 				Model: "claude-sonnet-4-5-20250929",
@@ -373,8 +369,7 @@ data: {"type":"message_stop"}
 				_, _ = io.WriteString(w, tt.responseBody)
 			})
 
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 			req := &core.ChatRequest{
 				Model: "claude-sonnet-4-5-20250929",
@@ -421,8 +416,7 @@ event: message_stop
 data: {"type":"message_stop"}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -467,8 +461,7 @@ event: message_stop
 data: {"type":"message_stop"}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -558,8 +551,7 @@ event: message_stop
 data: {"type":"message_stop"}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -628,8 +620,7 @@ event: message_stop
 data: {"type":"message_stop"}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -690,8 +681,7 @@ event: content_block_delta
 data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"broken"}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -764,15 +754,18 @@ func parseTestSSEEvents(t *testing.T, raw string) []testSSEEvent {
 func TestListModels(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{
 		"data": [
-			{"id": "claude-sonnet-4-5-20250929", "type": "model", "created_at": "2025-09-29T00:00:00Z", "display_name": "Claude Sonnet 4.5"},
+			{"id": "claude-sonnet-4-5-20250929", "type": "model", "created_at": "2025-09-29T00:00:00Z", "display_name": "Claude Sonnet 4.5",
+			 "max_input_tokens": 1000000, "max_tokens": 64000,
+			 "capabilities": {"image_input": {"supported": true}, "pdf_input": {"supported": true}, "structured_outputs": {"supported": true},
+			                  "thinking": {"supported": true, "types": {"adaptive": {"supported": false}}}, "effort": {"supported": false, "low": {"supported": false}},
+			                  "batch": {"supported": true}, "mystery": {}}},
 			{"id": "claude-opus-4-5-20251101", "type": "model", "created_at": "2025-11-01T00:00:00Z", "display_name": "Claude Opus 4.5"},
 			{"id": "claude-3-haiku-20240307", "type": "model", "created_at": "2024-03-07T00:00:00Z", "display_name": "Claude 3 Haiku"}
 		],
 		"has_more": false
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	resp, err := provider.ListModels(context.Background())
 	require.NoError(t, err)
@@ -783,7 +776,6 @@ func TestListModels(t *testing.T) {
 	assert.Equal(t, "1000", sent.Query.Get("limit"))
 	assert.NotEmpty(t, sent.Header.Get("x-api-key"))
 	assert.Equal(t, anthropicAPIVersion, sent.Header.Get("anthropic-version"))
-
 	assert.Equal(t, "list", resp.Object)
 	assert.Len(t, resp.Data, 3)
 
@@ -821,12 +813,43 @@ func TestListModels(t *testing.T) {
 			assert.Equal(t, expected, model.Created)
 		}
 	}
+
+	// The listing's limits and capability flags survive under the catalog's keys.
+	var sonnet, haiku core.Model
+	for _, model := range resp.Data {
+		switch model.ID {
+		case "claude-sonnet-4-5-20250929":
+			sonnet = model
+		case "claude-3-haiku-20240307":
+			haiku = model
+		}
+	}
+	require.NotNil(t, sonnet.Metadata)
+	assert.Equal(t, "Claude Sonnet 4.5", sonnet.Metadata.DisplayName)
+	assert.Equal(t, []string{"chat"}, sonnet.Metadata.Modes)
+	require.NotNil(t, sonnet.Metadata.ContextWindow)
+	assert.Equal(t, 1000000, *sonnet.Metadata.ContextWindow)
+	require.NotNil(t, sonnet.Metadata.MaxOutputTokens)
+	assert.Equal(t, 64000, *sonnet.Metadata.MaxOutputTokens)
+	assert.Equal(t, map[string]bool{
+		"vision":            true,
+		"pdf_input":         true,
+		"structured_output": true,
+		"reasoning":         true,
+		"effort":            false,
+		"batch":             true,
+	}, sonnet.Metadata.Capabilities, "a capability without a supported flag is skipped")
+
+	require.NotNil(t, haiku.Metadata)
+	assert.Equal(t, "Claude 3 Haiku", haiku.Metadata.DisplayName)
+	assert.Nil(t, haiku.Metadata.ContextWindow, "missing limits are not reported as zero")
+	assert.Nil(t, haiku.Metadata.Capabilities)
 }
 
 func TestListModels_APIError(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusUnauthorized, `{"type": "error", "error": {"type": "authentication_error", "message": "Invalid API key"}}`)
 
-	provider := NewWithHTTPClient("invalid-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("invalid-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	_, err := provider.ListModels(context.Background())
@@ -871,8 +894,7 @@ func TestChatCompletionWithContext(t *testing.T) {
 		w.WriteHeader(http.StatusRequestTimeout)
 	})
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
@@ -926,6 +948,21 @@ func TestConvertToAnthropicRequest(t *testing.T) {
 			checkFn: func(t *testing.T, req *anthropicRequest) {
 				assert.Equal(t, "You are a helpful assistant", req.System)
 				assert.Len(t, req.Messages, 1)
+			},
+		},
+		{
+			name: "developer message becomes system",
+			input: &core.ChatRequest{
+				Model: "claude-haiku-4-5-20251001",
+				Messages: []core.Message{
+					{Role: "developer", Content: "You are a helpful assistant"},
+					{Role: "user", Content: "Hello"},
+				},
+			},
+			checkFn: func(t *testing.T, req *anthropicRequest) {
+				assert.Equal(t, "You are a helpful assistant", req.System)
+				require.Len(t, req.Messages, 1)
+				assert.Equal(t, "user", req.Messages[0].Role)
 			},
 		},
 		{
@@ -1084,21 +1121,26 @@ func TestConvertToAnthropicRequest_MapsStopSequences(t *testing.T) {
 	}
 }
 
-func TestConvertToAnthropicRequest_RejectsUnsupportedChatExtras(t *testing.T) {
+func TestConvertToAnthropicRequest_RejectsUnsupportedResponseFormat(t *testing.T) {
 	tests := []struct {
 		name  string
-		field string
 		value json.RawMessage
+		want  string
 	}{
 		{
-			name:  "response format",
-			field: "response_format",
-			value: json.RawMessage(`{"type":"json_schema","json_schema":{"name":"answer"}}`),
+			name:  "unknown type",
+			value: json.RawMessage(`{"type":"xml"}`),
+			want:  "unsupported response_format type",
 		},
 		{
-			name:  "verbosity",
-			field: "verbosity",
-			value: json.RawMessage(`"low"`),
+			name:  "not an object",
+			value: json.RawMessage(`"json_object"`),
+			want:  "response_format must be an object",
+		},
+		{
+			name:  "json_schema without json_schema member",
+			value: json.RawMessage(`{"type":"json_schema"}`),
+			want:  "response_format.json_schema is required",
 		},
 	}
 
@@ -1108,7 +1150,7 @@ func TestConvertToAnthropicRequest_RejectsUnsupportedChatExtras(t *testing.T) {
 				Model:    "claude-sonnet-4-5-20250929",
 				Messages: []core.Message{{Role: "user", Content: "hi"}},
 				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
-					tt.field: tt.value,
+					"response_format": tt.value,
 				}),
 			})
 			require.Error(t, err)
@@ -1117,9 +1159,225 @@ func TestConvertToAnthropicRequest_RejectsUnsupportedChatExtras(t *testing.T) {
 			require.ErrorAs(t, err, &gatewayErr)
 			require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
 			require.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
-			require.Contains(t, gatewayErr.Message, tt.field)
+			require.Contains(t, gatewayErr.Message, tt.want)
 		})
 	}
+}
+
+func TestConvertToAnthropicRequest_ResponseFormat(t *testing.T) {
+	tests := []struct {
+		name           string
+		responseFormat json.RawMessage
+		wantSchema     map[string]any
+		wantJSONPrompt bool
+	}{
+		{
+			name:           "json_object adds a system instruction",
+			responseFormat: json.RawMessage(`{"type":"json_object"}`),
+			wantJSONPrompt: true,
+		},
+		{
+			name:           "empty json_schema falls back to the instruction",
+			responseFormat: json.RawMessage(`{"type":"json_schema","json_schema":{"name":"answer","schema":{}}}`),
+			wantJSONPrompt: true,
+		},
+		{
+			name:           "text stays a no-op",
+			responseFormat: json.RawMessage(`{"type":"text"}`),
+		},
+		{
+			name: "strict json_schema is sent natively",
+			responseFormat: json.RawMessage(`{"type":"json_schema","json_schema":{"name":"answer","strict":true,` +
+				`"schema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"],"additionalProperties":false}}}`),
+			wantSchema: map[string]any{
+				"type":                 "object",
+				"properties":           map[string]any{"city": map[string]any{"type": "string"}},
+				"required":             []any{"city"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			name: "non-strict json_schema gains additionalProperties",
+			responseFormat: json.RawMessage(`{"type":"json_schema","json_schema":{"name":"answer",` +
+				`"schema":{"type":"object","properties":{"city":{"type":"string"}}}}}`),
+			wantSchema: map[string]any{
+				"type":                 "object",
+				"properties":           map[string]any{"city": map[string]any{"type": "string"}},
+				"additionalProperties": false,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := convertToAnthropicRequest(&core.ChatRequest{
+				Model:    "claude-haiku-4-5-20251001",
+				Messages: []core.Message{{Role: "user", Content: "hi"}},
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					"response_format": tt.responseFormat,
+				}),
+			})
+			require.NoError(t, err)
+
+			system, _ := result.System.(string)
+			got := strings.Contains(system, "single valid JSON object")
+			assert.Equal(t, tt.wantJSONPrompt, got, "system instruction present = %v, want %v (system = %q)", got, tt.wantJSONPrompt, system)
+
+			if tt.wantSchema == nil {
+				if result.OutputConfig != nil {
+					require.Nil(t, result.OutputConfig.Format, "OutputConfig.Format")
+				}
+				return
+			}
+			require.NotNil(t, result.OutputConfig)
+			require.NotNil(t, result.OutputConfig.Format)
+			assert.Equal(t, "json_schema", result.OutputConfig.Format.Type)
+
+			assertJSONEqual(t, result.OutputConfig.Format.Schema, tt.wantSchema)
+		})
+	}
+}
+
+func TestConvertToAnthropicRequest_ResponseFormatKeepsTools(t *testing.T) {
+	result, err := convertToAnthropicRequest(&core.ChatRequest{
+		Model:    "claude-haiku-4-5-20251001",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Tools: []map[string]any{{
+			"type": "function",
+			"function": map[string]any{
+				"name":       "get_weather",
+				"parameters": map[string]any{"type": "object", "properties": map[string]any{}},
+			},
+		}},
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"response_format": json.RawMessage(`{"type":"json_schema","json_schema":{"name":"answer",` +
+				`"schema":{"type":"object","properties":{"answer":{"type":"string"}}}}}`),
+		}),
+	})
+	require.NoError(t, err)
+	require.Len(t, result.Tools, 1)
+	require.NotNil(t, result.OutputConfig)
+	require.NotNil(t, result.OutputConfig.Format)
+}
+
+func TestConvertToAnthropicRequest_ResponseFormatKeepsEffort(t *testing.T) {
+	result, err := convertToAnthropicRequest(&core.ChatRequest{
+		Model:     "claude-opus-4-8",
+		Messages:  []core.Message{{Role: "user", Content: "hi"}},
+		Reasoning: &core.Reasoning{Effort: "high"},
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"response_format": json.RawMessage(`{"type":"json_schema","json_schema":{"name":"answer",` +
+				`"schema":{"type":"object","properties":{"answer":{"type":"string"}}}}}`),
+		}),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result.OutputConfig)
+	assert.Equal(t, "high", result.OutputConfig.Effort)
+	assert.NotNil(t, result.OutputConfig.Format)
+}
+
+func TestSanitizeAnthropicSchema(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "drops numeric and array constraints",
+			input: `{"type":"object","properties":{"n":{"type":"integer","minimum":1,"maximum":9,"multipleOf":3},"a":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":2,"uniqueItems":true}},"required":["n","a"]}`,
+			want:  `{"type":"object","properties":{"n":{"type":"integer"},"a":{"type":"array","items":{"type":"string"},"minItems":1}},"required":["n","a"],"additionalProperties":false}`,
+		},
+		{
+			name:  "keeps minItems 0 and 1 but drops other values",
+			input: `{"type":"object","properties":{"a":{"type":"array","items":{"type":"string"},"minItems":0},"b":{"type":"array","items":{"type":"string"},"minItems":1},"c":{"type":"array","items":{"type":"string"},"minItems":2}}}`,
+			want:  `{"type":"object","properties":{"a":{"type":"array","items":{"type":"string"},"minItems":0},"b":{"type":"array","items":{"type":"string"},"minItems":1},"c":{"type":"array","items":{"type":"string"}}},"additionalProperties":false}`,
+		},
+		{
+			name:  "drops oneOf that cannot be merged with a sibling anyOf",
+			input: `{"type":"object","properties":{"v":{"anyOf":[{"type":"string"},{"type":"number"}],"oneOf":[{"type":"string"},{"type":"boolean"}]}}}`,
+			want:  `{"type":"object","properties":{"v":{"anyOf":[{"type":"string"},{"type":"number"}]}},"additionalProperties":false}`,
+		},
+		{
+			name:  "closes every allOf branch and leaves the composition intact",
+			input: `{"allOf":[{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]},{"type":"object","properties":{"b":{"type":"string","minLength":2}},"required":["b"]}]}`,
+			want:  `{"allOf":[{"type":"object","properties":{"a":{"type":"string"}},"required":["a"],"additionalProperties":false},{"type":"object","properties":{"b":{"type":"string"}},"required":["b"],"additionalProperties":false}]}`,
+		},
+		{
+			name:  "drops patterns Anthropic's regex engine rejects",
+			input: `{"type":"object","properties":{"a":{"type":"string","pattern":"^(?=.*P).*$"},"b":{"type":"string","pattern":"^(a)\\1$"},"c":{"type":"string","pattern":"\\bParis\\b"},"d":{"type":"string","pattern":"^P[a-z]+$"}}}`,
+			want:  `{"type":"object","properties":{"a":{"type":"string"},"b":{"type":"string"},"c":{"type":"string"},"d":{"type":"string","pattern":"^P[a-z]+$"}},"additionalProperties":false}`,
+		},
+		{
+			name:  "leaves optional properties out of required",
+			input: `{"type":"object","properties":{"city":{"type":"string"},"nickname":{"type":"string"}},"required":["city"]}`,
+			want:  `{"type":"object","properties":{"city":{"type":"string"},"nickname":{"type":"string"}},"required":["city"],"additionalProperties":false}`,
+		},
+		{
+			name:  "forces additionalProperties false on nested objects",
+			input: `{"type":"object","properties":{"inner":{"type":"object","properties":{"b":{"type":"string"}},"additionalProperties":true}}}`,
+			want:  `{"type":"object","properties":{"inner":{"type":"object","properties":{"b":{"type":"string"}},"additionalProperties":false}},"additionalProperties":false}`,
+		},
+		{
+			name:  "relaxes oneOf to anyOf",
+			input: `{"type":"object","properties":{"v":{"oneOf":[{"type":"string"},{"type":"object","properties":{"x":{"type":"string"}}}]}}}`,
+			want:  `{"type":"object","properties":{"v":{"anyOf":[{"type":"string"},{"type":"object","properties":{"x":{"type":"string"}},"additionalProperties":false}]}},"additionalProperties":false}`,
+		},
+		{
+			name:  "keeps supported string formats and drops unknown ones",
+			input: `{"type":"object","properties":{"when":{"type":"string","format":"date-time"},"what":{"type":"string","format":"sku"}}}`,
+			want:  `{"type":"object","properties":{"when":{"type":"string","format":"date-time"},"what":{"type":"string"}},"additionalProperties":false}`,
+		},
+		{
+			name:  "sanitizes $defs referenced by $ref",
+			input: `{"type":"object","properties":{"l":{"$ref":"#/$defs/landmark"}},"$defs":{"landmark":{"type":"object","properties":{"year":{"type":"integer","minimum":0}}}},"$schema":"https://json-schema.org/draft/2020-12/schema"}`,
+			want:  `{"type":"object","properties":{"l":{"$ref":"#/$defs/landmark"}},"$defs":{"landmark":{"type":"object","properties":{"year":{"type":"integer"}},"additionalProperties":false}},"additionalProperties":false}`,
+		},
+		{
+			name:  "keeps a property named like a dropped keyword",
+			input: `{"type":"object","properties":{"minimum":{"type":"number"},"not":{"type":"string"}},"required":["minimum"]}`,
+			want:  `{"type":"object","properties":{"minimum":{"type":"number"},"not":{"type":"string"}},"required":["minimum"],"additionalProperties":false}`,
+		},
+		{
+			name:  "drops string length bounds but keeps pattern",
+			input: `{"type":"object","properties":{"s":{"type":"string","minLength":1,"maxLength":8,"pattern":"^P"}}}`,
+			want:  `{"type":"object","properties":{"s":{"type":"string","pattern":"^P"}},"additionalProperties":false}`,
+		},
+		{
+			name:  "keeps enums and nullable unions",
+			input: `{"type":"object","properties":{"c":{"type":"string","enum":["a","b"]},"d":{"type":["string","null"]}}}`,
+			want:  `{"type":"object","properties":{"c":{"type":"string","enum":["a","b"]},"d":{"type":["string","null"]}},"additionalProperties":false}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var input map[string]any
+			err := json.Unmarshal([]byte(tt.input), &input)
+			require.NoError(t, err)
+
+			var want map[string]any
+			err = json.Unmarshal([]byte(tt.want), &want)
+			require.NoError(t, err)
+
+			assertJSONEqual(t, sanitizeAnthropicSchema(input), want)
+		})
+	}
+}
+
+func assertJSONEqual(t *testing.T, got, want any) {
+	t.Helper()
+	gotJSON, err := json.Marshal(got)
+	require.NoError(t, err)
+
+	wantJSON, err := json.Marshal(want)
+	require.NoError(t, err)
+
+	var gotAny, wantAny any
+	err = json.Unmarshal(gotJSON, &gotAny)
+	require.NoError(t, err)
+	err = json.Unmarshal(wantJSON, &wantAny)
+	require.NoError(t, err)
+	assert.Equal(t, wantAny, gotAny, "got %s, want %s", gotJSON, wantJSON)
 }
 
 func TestConvertToAnthropicRequest_IgnoresNoopChatExtras(t *testing.T) {
@@ -1142,6 +1400,13 @@ func TestConvertToAnthropicRequest_IgnoresNoopChatExtras(t *testing.T) {
 			name:  "null verbosity",
 			field: "verbosity",
 			value: json.RawMessage(`null`),
+		},
+		{
+			// Anthropic has no verbosity knob; the hint is dropped with a
+			// warning rather than failing the request.
+			name:  "verbosity",
+			field: "verbosity",
+			value: json.RawMessage(`"low"`),
 		},
 	}
 
@@ -1338,7 +1603,6 @@ func TestConvertToAnthropicRequest_RejectsTrailingToolArgumentContent(t *testing
 	require.ErrorAs(t, err, &gatewayErr)
 	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
 	require.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
-
 	assert.True(t,
 		strings.Contains(gatewayErr.Message, "invalid character") || strings.Contains(gatewayErr.Message, "exactly one JSON object"),
 		"error message = %q, want trailing content validation", gatewayErr.Message)
@@ -1431,6 +1695,56 @@ func TestConvertOpenAIToolsToAnthropic(t *testing.T) {
 			},
 		},
 		{
+			name: "strict tool keeps strict and sanitizes schema",
+			tools: []map[string]any{
+				{
+					"type": "function",
+					"function": map[string]any{
+						"name":   "lookup_weather",
+						"strict": true,
+						"parameters": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"city": map[string]any{"type": "string", "minLength": 1},
+							},
+						},
+					},
+				},
+			},
+			wantLen: 1,
+			checkFn: func(t *testing.T, tools []anthropicTool) {
+				assert.True(t, tools[0].Strict)
+				assert.Equal(t, false, tools[0].InputSchema["additionalProperties"])
+				properties, ok := tools[0].InputSchema["properties"].(map[string]any)
+				require.True(t, ok)
+				city, ok := properties["city"].(map[string]any)
+				require.True(t, ok)
+				assert.NotContains(t, city, "minLength")
+			},
+		},
+		{
+			name: "non strict tool keeps schema as sent",
+			tools: []map[string]any{
+				{
+					"type": "function",
+					"function": map[string]any{
+						"name": "lookup_weather",
+						"parameters": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"city": map[string]any{"type": "string", "minLength": 1},
+							},
+						},
+					},
+				},
+			},
+			wantLen: 1,
+			checkFn: func(t *testing.T, tools []anthropicTool) {
+				assert.False(t, tools[0].Strict)
+				assert.NotContains(t, tools[0].InputSchema, "additionalProperties")
+			},
+		},
+		{
 			name: "unsupported tool type returns error",
 			tools: []map[string]any{
 				{
@@ -1511,7 +1825,7 @@ func TestConvertOpenAIToolsToAnthropic(t *testing.T) {
 
 				return
 			}
-			require.Equal(t, tt.wantLen, len(result))
+			require.Len(t, result, tt.wantLen)
 
 			if tt.checkFn != nil {
 				tt.checkFn(t, result)
@@ -1634,7 +1948,7 @@ func TestConvertToAnthropicRequest_FilePartsBecomeDocuments(t *testing.T) {
 			{Type: "file", File: &core.FileContent{FileData: "data:image/png;base64,aGVsbG8="}},
 		}}},
 	})
-	assert.Error(t, err)
+	require.Error(t, err)
 
 	for _, file := range []core.FileContent{
 		{FileURL: "ftp://example.com/a.pdf"},
@@ -1979,6 +2293,10 @@ func TestConvertFromAnthropicResponse_WithCacheFields(t *testing.T) {
 			OutputTokens:             20,
 			CacheCreationInputTokens: 50,
 			CacheReadInputTokens:     30,
+			CacheCreation: anthropicCacheCreation{
+				Ephemeral5mInputTokens: 20,
+				Ephemeral1hInputTokens: 30,
+			},
 		},
 	}
 
@@ -1987,6 +2305,27 @@ func TestConvertFromAnthropicResponse_WithCacheFields(t *testing.T) {
 	require.NotNil(t, result.Usage.RawUsage)
 	assert.Equal(t, 50, result.Usage.RawUsage["cache_creation_input_tokens"])
 	assert.Equal(t, 30, result.Usage.RawUsage["cache_read_input_tokens"])
+	assert.Equal(t, 20, result.Usage.RawUsage["cache_creation_ephemeral_5m_input_tokens"])
+	assert.Equal(t, 30, result.Usage.RawUsage["cache_creation_ephemeral_1h_input_tokens"])
+}
+
+func TestMergeAnthropicUsage_WithCacheCreationTTL(t *testing.T) {
+	dst := anthropicUsage{}
+	src := anthropicUsage{
+		CacheCreationInputTokens: 50,
+		CacheCreation:            anthropicCacheCreation{Ephemeral1hInputTokens: 50},
+	}
+
+	require.True(t, mergeAnthropicUsage(&dst, &src))
+	require.Equal(t, 50, dst.CacheCreation.Ephemeral1hInputTokens)
+
+	for name, payload := range map[string]map[string]any{
+		"chat":      anthropicChatUsagePayload(&dst),
+		"responses": anthropicResponsesUsagePayload(&dst),
+	} {
+		assert.Equal(t, 50, payload["cache_creation_ephemeral_1h_input_tokens"], name)
+		assert.NotContains(t, payload, "cache_creation_ephemeral_5m_input_tokens", name)
+	}
 }
 
 func TestConvertFromAnthropicResponse_WithThinkingTokens(t *testing.T) {
@@ -2286,8 +2625,7 @@ func TestResponses(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, tt.statusCode, tt.responseBody)
 
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 			req := &core.ResponsesRequest{
 				Model: "claude-sonnet-4-5-20250929",
@@ -2327,8 +2665,7 @@ func TestResponsesWithArrayInput(t *testing.T) {
 		"usage": {"input_tokens": 10, "output_tokens": 5}
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	req := &core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -2367,8 +2704,7 @@ func TestResponsesWithInstructions(t *testing.T) {
 		"usage": {"input_tokens": 10, "output_tokens": 5}
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	req := &core.ResponsesRequest{
 		Model:        "claude-sonnet-4-5-20250929",
@@ -2454,8 +2790,7 @@ data: {"type":"message_stop"}
 				_, _ = io.WriteString(w, tt.responseBody)
 			})
 
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 			req := &core.ResponsesRequest{
 				Model: "claude-sonnet-4-5-20250929",
@@ -2500,8 +2835,7 @@ event: message_stop
 data: {"type":"message_stop"}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -2554,8 +2888,7 @@ event: message_stop
 data: {"type":"message_stop"}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -2663,8 +2996,7 @@ event: message_stop
 data: {"type":"message_stop"}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -2722,8 +3054,7 @@ event: content_block_delta
 data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"city\":\"War"}}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -2856,8 +3187,7 @@ event: message_delta
 data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -2912,8 +3242,7 @@ event: message_stop
 data: {"type":"message_stop"}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -2970,8 +3299,7 @@ event: message_stop
 data: {"type":"message_stop"}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -3031,8 +3359,7 @@ event: content_block_delta
 data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"broken"}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -3060,8 +3387,7 @@ func TestResponsesWithContext(t *testing.T) {
 		w.WriteHeader(http.StatusRequestTimeout)
 	})
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
@@ -3268,18 +3594,15 @@ func TestConvertResponsesRequestToAnthropic_RejectsTrailingToolArgumentContent(t
 	require.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
 }
 
-func TestConvertResponsesRequestToAnthropic_ToolChoiceRequiresTools(t *testing.T) {
-	_, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
+func TestConvertResponsesRequestToAnthropic_DropsToolChoiceWithoutTools(t *testing.T) {
+	anthropicReq, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
 		Model:      "claude-sonnet-4-5-20250929",
 		Input:      "Hello",
 		ToolChoice: "auto",
 	})
-	require.Error(t, err)
-
-	var gatewayErr *core.GatewayError
-	require.ErrorAs(t, err, &gatewayErr)
-	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
-	require.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
+	require.NoError(t, err)
+	assert.Nil(t, anthropicReq.Tools)
+	assert.Nil(t, anthropicReq.ToolChoice)
 }
 
 func TestBuildAnthropicBatchCreateRequest_PreservesGatewayErrorDetails(t *testing.T) {
@@ -4697,7 +5020,7 @@ func TestConvertToAnthropicRequest_NormalizesInputTextType(t *testing.T) {
 func TestPassthrough(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusBadRequest, `{"error":{"message":"bad request"}}`)
 
-	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
@@ -4790,7 +5113,7 @@ func TestPassthroughOAuthToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, http.StatusOK, `{}`)
 
-			provider := NewWithHTTPClient("sk-ant-oat01-abc", server.Client(), llmclient.Hooks{})
+			provider := newTestProvider("sk-ant-oat01-abc", server.Client(), llmclient.Hooks{})
 			provider.SetBaseURL(server.URL)
 
 			headers := http.Header{"Content-Type": {"application/json"}}
@@ -5922,4 +6245,79 @@ func TestStreamResponses_CutBeforeMessageStartStillOpens(t *testing.T) {
 		require.Equal(t, i, int(seq), "event %s sequence_number", event.Name)
 	}
 	require.Equal(t, want, got, "event order")
+}
+
+// The registry recognizes a provider on its type's default base URL through
+// GetBaseURL (for the model catalog fallback).
+func TestGetBaseURL(t *testing.T) {
+	assert.Equal(t, defaultBaseURL, New(providers.ProviderConfig{APIKey: "k"}, providertest.Options(llmclient.Hooks{})).(*Provider).GetBaseURL())
+	assert.Equal(t, "https://proxy.example.com/v1",
+		New(providers.ProviderConfig{APIKey: "k", BaseURL: "https://proxy.example.com/v1"}, providertest.Options(llmclient.Hooks{})).(*Provider).GetBaseURL())
+}
+
+func TestConvertToAnthropicRequest_AllowedToolsNarrowsDeclaredTools(t *testing.T) {
+	tool := func(name string) map[string]any {
+		return map[string]any{"type": "function", "function": map[string]any{
+			"name": name, "parameters": map[string]any{"type": "object"},
+		}}
+	}
+	allowed := func(mode string, names ...string) map[string]any {
+		entries := make([]any, 0, len(names))
+		for _, name := range names {
+			entries = append(entries, map[string]any{"type": "function", "function": map[string]any{"name": name}})
+		}
+		return map[string]any{"type": "allowed_tools", "allowed_tools": map[string]any{"mode": mode, "tools": entries}}
+	}
+	request := func(choice any) *core.ChatRequest {
+		return &core.ChatRequest{
+			Model:      "claude-sonnet-4-5-20250929",
+			Messages:   []core.Message{{Role: "user", Content: "Hello"}},
+			Tools:      []map[string]any{tool("tool_a"), tool("tool_b"), tool("tool_c")},
+			ToolChoice: choice,
+		}
+	}
+	names := func(req *anthropicRequest) []string {
+		var out []string
+		for _, tool := range req.Tools {
+			out = append(out, tool.Name)
+		}
+		return out
+	}
+
+	req, err := convertToAnthropicRequest(request(allowed("required", "tool_b", "tool_c")))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"tool_b", "tool_c"}, names(req))
+	require.NotNil(t, req.ToolChoice)
+	assert.Equal(t, "any", req.ToolChoice.Type)
+
+	req, err = convertToAnthropicRequest(request(allowed("auto", "tool_a")))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"tool_a"}, names(req))
+	require.NotNil(t, req.ToolChoice)
+	assert.Equal(t, "auto", req.ToolChoice.Type)
+
+	_, err = convertToAnthropicRequest(request(allowed("required", "unknown")))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tool_choice.allowed_tools.tools")
+}
+
+func TestConvertResponsesRequestToAnthropic_AllowedToolsNarrowsDeclaredTools(t *testing.T) {
+	req, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Input: "Hello",
+		Tools: []map[string]any{
+			{"type": "function", "name": "tool_a", "parameters": map[string]any{"type": "object"}},
+			{"type": "function", "name": "tool_b", "parameters": map[string]any{"type": "object"}},
+		},
+		ToolChoice: map[string]any{
+			"type":  "allowed_tools",
+			"mode":  "required",
+			"tools": []any{map[string]any{"type": "function", "name": "tool_b"}},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, req.Tools, 1)
+	assert.Equal(t, "tool_b", req.Tools[0].Name)
+	require.NotNil(t, req.ToolChoice)
+	assert.Equal(t, "any", req.ToolChoice.Type)
 }

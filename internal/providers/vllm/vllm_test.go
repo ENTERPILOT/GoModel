@@ -9,6 +9,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -16,57 +17,24 @@ import (
 
 var _ core.PassthroughProvider = (*Provider)(nil)
 
-func TestChatCompletion_UsesOptionalBearerAuthAndChatEndpoint(t *testing.T) {
-	tests := []struct {
-		name     string
-		apiKey   string
-		wantAuth string
-	}{
-		{name: "with api key", apiKey: "vllm-key", wantAuth: "Bearer vllm-key"},
-		{name: "without api key"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
-
-			provider := NewWithHTTPClient(tt.apiKey, server.URL, server.Client(), llmclient.Hooks{})
-			resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
-				Model:    providertest.Model,
-				Messages: []core.Message{{Role: "user", Content: "hi"}},
-			})
-			require.NoError(t, err)
-			assert.Equal(t, providertest.Model, resp.Model)
-
-			req := capture.Last(t)
-			assert.Equal(t, "/chat/completions", req.Path)
-			assert.Equal(t, tt.wantAuth, req.Header.Get("Authorization"))
-		})
-	}
-}
-
-func TestEmbeddings_DelegatesToCompatibleProvider(t *testing.T) {
-	server, capture := providertest.JSONServer(t, http.StatusOK, `{
-		"object":"list",
-		"model":"BAAI/bge-small-en-v1.5",
-		"data":[{"object":"embedding","embedding":[0.1,0.2],"index":0}],
-		"usage":{"prompt_tokens":3,"total_tokens":3}
-	}`)
-
-	provider := NewWithHTTPClient("", server.URL, server.Client(), llmclient.Hooks{})
-	resp, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
-		Model: "BAAI/bge-small-en-v1.5",
-		Input: "hello",
+// vLLM serves the OpenAI-compatible surface natively, including Responses and
+// embeddings, and may run without an API key. It must not advertise native
+// batch, file, audio, or response-lifecycle support.
+func TestChatCompatibleContract(t *testing.T) {
+	providertest.AssertChatCompatible(t, providertest.ChatCompatible{
+		Registration:    Registration,
+		Type:            "vllm",
+		DefaultBaseURL:  "http://localhost:8000/v1",
+		NativeResponses: true,
+		Embeddings:      true,
+		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
+			opts := providertest.Options(hooks)
+			opts.HTTPClient = client
+			return New(providers.ProviderConfig{APIKey: apiKey, BaseURL: baseURL}, opts)
+		},
 	})
-	require.NoError(t, err)
-	assert.Equal(t, "BAAI/bge-small-en-v1.5", resp.Model)
-	assert.Equal(t, "/embeddings", capture.Last(t).Path)
-}
 
-// vLLM serves passthrough and the OpenAI-compatible surface, but nothing
-// that would need native batch, file, audio, or response-lifecycle support.
-func TestProvider_DoesNotExposeOptionalNativeInterfaces(t *testing.T) {
-	provider := NewWithHTTPClient("", "", nil, llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{APIKey: ""}, providers.ProviderOptions{})
 	providertest.AssertNoNativeSurfaces(t, provider)
 	_, ok := any(provider).(core.NativeResponseLifecycleProvider)
 	assert.False(t, ok, "provider should not implement core.NativeResponseLifecycleProvider")
@@ -75,7 +43,7 @@ func TestProvider_DoesNotExposeOptionalNativeInterfaces(t *testing.T) {
 func TestPassthrough_ForwardsProviderNativeEndpoint(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"tokens":[1,2,3]}`)
 
-	provider := NewWithHTTPClient("vllm-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("vllm-key", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 		Method:   http.MethodPost,
 		Endpoint: "tokenize",
@@ -104,13 +72,17 @@ func TestPassthrough_RoutesByEndpointWhenBaseURLIncludesV1(t *testing.T) {
 			body:     `{"model":"Qwen/Qwen2.5-0.5B-Instruct","messages":[{"role":"user","content":"hi"}]}`,
 			wantPath: "/v1/chat/completions",
 		},
+		// The server appends the request's raw query to the endpoint, so the
+		// path has to be classified with the query removed.
+		{name: "query string keeps /v1", endpoint: "models?limit=10", body: "{}", wantPath: "/v1/models"},
+		{name: "query string keeps a root path", endpoint: "tokenize?fast=1", body: "{}", wantPath: "/tokenize"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, http.StatusOK, `{}`)
 
-			provider := NewWithHTTPClient("", server.URL+"/v1", server.Client(), llmclient.Hooks{})
+			provider := newTestProvider("", server.URL+"/v1", server.Client(), llmclient.Hooks{})
 			resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 				Method:   http.MethodPost,
 				Endpoint: tt.endpoint,
@@ -122,4 +94,26 @@ func TestPassthrough_RoutesByEndpointWhenBaseURLIncludesV1(t *testing.T) {
 			assert.Equal(t, tt.wantPath, capture.Last(t).Path)
 		})
 	}
+}
+
+// Native passthrough authenticates from the provider's keyring, so a key
+// swapped in at runtime (secret rotation) reaches it too.
+func TestPassthrough_UsesRotatedKey(t *testing.T) {
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"tokens":[1]}`)
+	keys := providers.NewKeyring("old-key")
+	opts := providertest.Options(llmclient.Hooks{})
+	opts.HTTPClient = server.Client()
+	opts.Keys = keys
+	provider := New(providers.ProviderConfig{APIKey: "old-key", BaseURL: server.URL}, opts).(*Provider)
+
+	require.True(t, keys.Replace("new-key"))
+	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
+		Method:   http.MethodPost,
+		Endpoint: "tokenize",
+		Body:     io.NopCloser(strings.NewReader("{}")),
+		Headers:  http.Header{"Content-Type": []string{"application/json"}},
+	})
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, "Bearer new-key", capture.Last(t).Header.Get("Authorization"))
 }

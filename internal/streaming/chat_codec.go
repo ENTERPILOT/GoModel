@@ -38,9 +38,14 @@ type chatDeltaView struct {
 type chatToolCallView struct {
 	Index    *int `json:"index"`
 	Function *struct {
+		Name      string `json:"name"`
 		Arguments string `json:"arguments"`
 	} `json:"function"`
 }
+
+// chatCallKey identifies a tool call of a chat stream: its choice and its
+// tool_calls[].index.
+type chatCallKey struct{ choice, call int }
 
 // reasoningText returns the delta's reasoning text and the member carrying
 // it ("reasoning_content" or "reasoning").
@@ -54,16 +59,39 @@ func (d *chatDeltaView) reasoningText() (string, string) {
 	return "", ""
 }
 
+// reasoningMembers returns the members of a chat delta that carry its
+// reasoning text: the one reasoningText reads, and the other as well when a
+// provider sends the same text in both.
+func reasoningMembers(delta map[string]json.RawMessage) []string {
+	var out []string
+	var text string
+	for _, key := range []string{"reasoning_content", "reasoning"} {
+		s, ok := jsonStringOf(delta[key])
+		if !ok || s == "" || (len(out) > 0 && s != text) {
+			continue
+		}
+		text = s
+		out = append(out, key)
+	}
+	if len(out) == 0 {
+		return []string{"reasoning_content"}
+	}
+	return out
+}
+
 type chatCodec struct {
 	id, model, provider, fingerprint string
 	created                          int64
 	choices                          []int
 	finished                         map[int]bool
+	// tools holds the name each tool call was announced with, which only
+	// its first delta carries.
+	tools map[chatCallKey]string
 }
 
 // ChatCodec returns a codec for OpenAI chat.completion.chunk streams.
 func ChatCodec() Codec {
-	return &chatCodec{finished: make(map[int]bool)}
+	return &chatCodec{finished: make(map[int]bool), tools: make(map[chatCallKey]string)}
 }
 
 func (c *chatCodec) Decode(raw RawEvent, seq int) Event {
@@ -101,9 +129,14 @@ func (c *chatCodec) Decode(raw RawEvent, seq int) Event {
 				if idx := delta.ToolCalls[0].Index; idx != nil {
 					ev.Call = *idx
 				}
+				key := chatCallKey{choice: ev.Choice, call: ev.Call}
 				if fn := delta.ToolCalls[0].Function; fn != nil {
 					ev.Text = fn.Arguments
+					if fn.Name != "" {
+						c.tools[key] = fn.Name
+					}
 				}
+				ev.Tool = c.tools[key]
 				return ev
 			}
 		}
@@ -182,13 +215,9 @@ func (c *chatCodec) RewriteText(ev Event, text string) (Event, error) {
 			return ev, err
 		}
 	case KindReasoningDelta:
-		key := "reasoning_content"
-		if _, ok := delta["reasoning_content"]; !ok {
-			if _, ok := delta["reasoning"]; ok {
-				key = "reasoning"
-			}
+		for _, key := range reasoningMembers(delta) {
+			delta[key] = encoded
 		}
-		delta[key] = encoded
 	default:
 		delta["content"] = encoded
 	}

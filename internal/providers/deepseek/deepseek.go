@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 )
@@ -39,14 +38,6 @@ var _ core.Provider = (*Provider)(nil)
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	return &Provider{
 		ChatCompatible: openai.NewChatCompatible(cfg.APIKey, opts, compatibleConfig(providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL))),
-	}
-}
-
-// NewWithHTTPClient creates a new DeepSeek provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	return &Provider{
-		ChatCompatible: openai.NewChatCompatibleWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(providers.ResolveBaseURL(baseURL, defaultBaseURL))),
 	}
 }
 

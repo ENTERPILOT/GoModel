@@ -61,6 +61,11 @@ func TestApplyToChatResponse(t *testing.T) {
 			from: `"content":"hello world"`, to: `"content":"bye"`,
 		},
 		{
+			name: "set reasoning",
+			edit: func(c *pluginapi.Completion) error { return c.SetReasoning(0, 0, "thought") },
+			from: `"reasoning_content":"think"`, to: `"reasoning_content":"thought"`,
+		},
+		{
 			name: "finish reason",
 			edit: func(c *pluginapi.Completion) error { return c.SetFinishReason(0, "content_filter") },
 			from: `"finish_reason":"tool_calls"`, to: `"finish_reason":"content_filter"`,
@@ -107,7 +112,7 @@ func TestCompletionToChatResponse(t *testing.T) {
 	assert.Equal(t, "assistant", resp.Choices[0].Message.Role)
 	assert.Equal(t, 0, resp.Usage.TotalTokens)
 	_, err := json.Marshal(resp)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	empty := CompletionToChatResponse(nil, "m")
 	assert.Len(t, empty.Choices, 1)
@@ -143,6 +148,6 @@ func TestApplyToChatResponseToolArguments(t *testing.T) {
 		assert.Equal(t, `{"to":"a@b.c"}`, applied.Choices[0].Message.ToolCalls[0].Function.Arguments)
 		assert.Equal(t, "[x]", core.ExtractTextContent(applied.Choices[0].Message.Content), "%s first: %+v", first, applied.Choices[0].Message)
 	}
-	assert.Error(t, c.SetToolArguments(0, "nope", json.RawMessage(`{}`)))
+	require.Error(t, c.SetToolArguments(0, "nope", json.RawMessage(`{}`)))
 	assert.Error(t, c.SetToolArguments(0, "c1", json.RawMessage(`{`)))
 }

@@ -285,7 +285,8 @@ func TestImageGenerations_AuditsResponseImages(t *testing.T) {
 				Data:    []core.ImageData{{B64JSON: "aGVsbG8="}, {URL: "https://img/2.png"}},
 				Usage:   &core.ImageUsage{TotalTokens: 300},
 			}
-			svc := &imageService{provider: mock, logBodies: tt.logBodies, logImageOutputs: tt.logImageOutputs}
+			media, store := newTestMediaCapturer(t)
+			svc := &imageService{provider: mock, logBodies: tt.logBodies, logImageOutputs: tt.logImageOutputs, media: media}
 			c, rec := echotest.Post(t, "/v1/images/generations", `{"model":"dall-e-3","prompt":"a cat"}`)
 			entry := &auditlog.LogEntry{}
 			c.Set(string(auditlog.LogEntryKey), entry)
@@ -308,10 +309,12 @@ func TestImageGenerations_AuditsResponseImages(t *testing.T) {
 			require.Len(t, body.Items, 2)
 
 			b64, hosted := body.Items[0], body.Items[1]
-			assert.Equal(t, 5, b64.Bytes)
+			assert.Equal(t, int64(5), b64.Bytes)
 			assert.Equal(t, tt.logImageOutputs, b64.Stored)
 			if tt.logImageOutputs {
-				assert.Equal(t, "aGVsbG8=", b64.Data)
+				assert.Equal(t, "hello", string(readTestMedia(t, store, b64.MediaID)), "the stored object holds the decoded image")
+			} else {
+				assert.Empty(t, b64.MediaID)
 			}
 			assert.Equal(t, "https://img/2.png", hosted.URL)
 		})

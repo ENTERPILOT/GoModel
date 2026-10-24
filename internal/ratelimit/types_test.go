@@ -137,6 +137,67 @@ func TestExceededErrorMessages(t *testing.T) {
 	}
 }
 
+// Provider and model subjects are case-folded to stay the match key, but the
+// spelling the rule was written with is what clients and logs must see: the
+// folded form can name no configured provider at all.
+func TestRuleDisplaySubject(t *testing.T) {
+	tests := []struct {
+		name        string
+		rule        Rule
+		wantSubject string
+		wantDisplay string
+		wantLabel   string
+	}{
+		{
+			name:        "provider keeps the written spelling",
+			rule:        Rule{Scope: ScopeProvider, Subject: "mockA", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(1))},
+			wantSubject: "mocka",
+			wantDisplay: "mockA",
+			wantLabel:   "provider mockA",
+		},
+		{
+			name:        "model keeps the written spelling",
+			rule:        Rule{Scope: ScopeModel, Subject: "OpenAI/GPT-4o", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: new(int64(10))},
+			wantSubject: "openai/gpt-4o",
+			wantDisplay: "OpenAI/GPT-4o",
+			wantLabel:   "model OpenAI/GPT-4o",
+		},
+		{
+			name:        "already folded stores no display form",
+			rule:        Rule{Scope: ScopeProvider, Subject: "openai", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(1))},
+			wantSubject: "openai",
+			wantDisplay: "",
+			wantLabel:   "provider openai",
+		},
+		{
+			name:        "user path is not folded",
+			rule:        Rule{Scope: ScopeUserPath, Subject: "/Team/Alpha", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(1))},
+			wantSubject: "/Team/Alpha",
+			wantDisplay: "",
+			wantLabel:   "/Team/Alpha",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			normalized, err := NormalizeRule(tt.rule)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantSubject, normalized.Subject)
+			require.Equal(t, tt.wantDisplay, normalized.SubjectDisplay)
+			require.Equal(t, tt.wantLabel, normalized.SubjectLabel())
+			breach := &ExceededError{Rule: normalized, Scope: ScopeRequests, Limit: 1}
+			require.ErrorContains(t, breach, tt.wantLabel)
+		})
+	}
+}
+
+// Rules stored before the display form existed carry none; they degrade to
+// the folded subject instead of reporting nothing.
+func TestRuleDisplaySubjectFallsBackToStoredSubject(t *testing.T) {
+	rule := Rule{Scope: ScopeProvider, Subject: "mocka"}
+	require.Equal(t, "mocka", rule.DisplaySubject())
+	require.Equal(t, "provider mocka", rule.SubjectLabel())
+}
+
 func TestRuleAppliesToPath(t *testing.T) {
 	tests := []struct {
 		rulePath    string

@@ -29,6 +29,29 @@ func (s *Service) ResolvePricing(model, providerName string) *core.ModelPricing 
 	return cloneBasePricing(basePricing)
 }
 
+// HasModelPricing reports whether pricing is declared for exactly this model:
+// catalog pricing, or an override scoped to the model rather than to its
+// provider or to every model.
+func (s *Service) HasModelPricing(model, providerName string) bool {
+	if s == nil {
+		return false
+	}
+	providerName = strings.TrimSpace(providerName)
+	rawModel := strings.TrimSpace(model)
+	model = modelIDFromSelector(rawModel, providerName)
+	if model == "" {
+		return false
+	}
+	if s.snapshot().hasModelScopedOverride(providerName, model) {
+		return true
+	}
+	if s.base == nil {
+		return false
+	}
+	return s.base.ResolvePricing(model, providerName) != nil ||
+		(rawModel != model && s.base.ResolvePricing(rawModel, providerName) != nil)
+}
+
 func cloneBasePricing(base *core.ModelPricing) *core.ModelPricing {
 	if base == nil {
 		return nil

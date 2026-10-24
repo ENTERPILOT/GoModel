@@ -1,16 +1,11 @@
 # Build stage — run on the build host's native arch for speed, cross-compile for target
-FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine3.24 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine3.24 AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
 ARG TARGETVARIANT
 
 WORKDIR /app
-
-# Install ca-certificates for HTTPS requests.
-# Do not pin the apk revision here: Alpine rotates package revisions
-# within a release branch, which breaks Docker builds over time.
-RUN apk add --no-cache ca-certificates
 
 # Download dependencies first for better layer caching
 COPY go.mod go.sum ./

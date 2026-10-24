@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // raceEnabled is set by race_test.go when the test binary is built with
@@ -60,9 +62,8 @@ func fixtureSO(t *testing.T, name string) string {
 	defer fixtures.Unlock()
 	if fixtures.dir == "" {
 		dir, err := os.MkdirTemp("", "pluginload-fixtures-")
-		if err != nil {
-			t.Fatalf("MkdirTemp: %v", err)
-		}
+		require.NoError(t, err)
+
 		fixtures.dir = dir
 		fixtures.built = map[string]string{}
 	}
@@ -72,9 +73,9 @@ func fixtureSO(t *testing.T, name string) string {
 	out := filepath.Join(fixtures.dir, name+".so")
 	cmd := exec.Command("go", "build", "-buildmode=plugin", "-o", out, "./testdata/"+name)
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=1")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("building fixture %s: %v\n%s", name, err, output)
-	}
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, "building fixture %s: %v\n%s", name, err, output)
+
 	fixtures.built[name] = out
 	return out
 }

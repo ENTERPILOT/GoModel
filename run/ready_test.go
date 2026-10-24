@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/stretchr/testify/require"
 )
 
 func TestReadyProbeURL(t *testing.T) {
@@ -37,9 +37,7 @@ func TestReadyProbeURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := probeURL(tt.server, "/health/ready")
-			if got != tt.expected {
-				t.Fatalf("probeURL() = %q, want %q", got, tt.expected)
-			}
+			require.Equal(t, tt.expected, got)
 		})
 	}
 }
@@ -91,14 +89,12 @@ func TestCheckReadyEndpoint(t *testing.T) {
 
 			err := checkReadyEndpoint(context.Background(), server.Client(), server.URL)
 			if tt.wantErr == "" {
-				if err != nil {
-					t.Fatalf("checkReadyEndpoint() error = %v, want nil", err)
-				}
+				require.NoError(t, err)
+
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-				t.Fatalf("checkReadyEndpoint() error = %v, want substring %q", err, tt.wantErr)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
 }

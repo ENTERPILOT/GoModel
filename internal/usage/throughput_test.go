@@ -27,12 +27,10 @@ func TestParseThroughputGranularity(t *testing.T) {
 	for name, tc := range cases {
 		gran, err := ParseThroughputGranularity(name)
 		if tc.wantErr {
-			assert.Error(t, err, "granularity %q", name)
+			require.Error(t, err, "granularity %q", name)
 			continue
 		}
-		if !assert.NoError(t, err, "granularity %q", name) {
-			continue
-		}
+		require.NoError(t, err, "granularity %q", name)
 		assert.Equal(t, tc.wantWindow, gran.WindowCount, "granularity %q", name)
 		assert.Equal(t, tc.wantBucket, gran.BucketSize, "granularity %q", name)
 	}

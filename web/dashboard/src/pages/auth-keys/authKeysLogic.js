@@ -11,6 +11,7 @@ export function defaultAuthKeyForm() {
     labels: "",
     allowed_models: [],
     dashboard_access: false,
+    passthrough_access: false,
     expires_at: "",
   };
 }
@@ -112,6 +113,7 @@ export function buildCreateAuthKeyPayload(form) {
     labels: labels.length ? labels : undefined,
     allowed_models: allowedModels.length ? allowedModels : undefined,
     dashboard_access: source.dashboard_access ? true : undefined,
+    passthrough_access: source.passthrough_access ? true : undefined,
   };
   if (source.expires_at) {
     payload.expires_at = source.expires_at + "T23:59:59Z";
@@ -257,3 +259,28 @@ export function countInactiveAuthKeys(keys, now = Date.now()) {
 
 // Label chips share the dashboard-wide palette and chip styling.
 export { labelChipStyle, labelColor } from "../../lib/utils/chartTheme.js";
+
+// lastUsedCellState picks the Last used column's state for one key. A key
+// with an audit entry shows its timestamp; an unavailable lookup yields
+// "unavailable"; a successful lookup (even empty) with retention disabled
+// (0 days = keep audit data forever) means the key was never used; with a
+// retention window the entry may have been purged; with a known lookup but
+// unknown window the state is "no_records".
+export function lastUsedCellState(lastUsedAt, retentionDays, lastUsedAvailable) {
+  if (lastUsedAt) return "used";
+  if (!lastUsedAvailable) return "unavailable";
+  if (retentionDays === 0) return "never";
+  if (retentionDays > 0) return "outside";
+  return "no_records";
+}
+
+// retentionDaysFromConfig parses the audit retention window from the runtime
+// config's LOGGING_RETENTION_DAYS value. Unknown or invalid values yield null;
+// 0 is meaningful — retention is disabled and audit data is kept forever.
+export function retentionDaysFromConfig(value) {
+  const n = Math.trunc(Number(value));
+  if (value === undefined || value === null || value === "" || !Number.isFinite(n) || n < 0) {
+    return null;
+  }
+  return n;
+}

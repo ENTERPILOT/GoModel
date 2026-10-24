@@ -59,13 +59,10 @@ func TestSQLReaderGetLogs_IncludesFractionalStartBoundaryAndExcludesFractionalEn
 	})
 }
 
-func TestSQLReaderGetLogs_SearchMatchesUserPath(t *testing.T) {
-	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
-		store, err := newSQLStoreForTest(t, db, 0)
-		require.NoError(t, err)
-
+func TestReaderGetLogs_SearchMatchesUserPath(t *testing.T) {
+	runReaderSuite(t, func(t *testing.T, store LogStore, reader Reader) {
 		ctx := context.Background()
-		err = store.WriteBatch(ctx, []*LogEntry{
+		err := store.WriteBatch(ctx, []*LogEntry{
 			{
 				ID:             "team-match",
 				Timestamp:      time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC),
@@ -83,9 +80,6 @@ func TestSQLReaderGetLogs_SearchMatchesUserPath(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		reader, err := NewSQLReader(db)
-		require.NoError(t, err)
-
 		result, err := reader.GetLogs(ctx, LogQueryParams{
 			Search: "team/alpha",
 			Limit:  10,
@@ -100,15 +94,12 @@ func TestSQLReaderGetLogs_SearchMatchesUserPath(t *testing.T) {
 // A full canonical UUID takes the indexed-identifier fast path: equality on
 // id/request_id/auth_key_id/session_id, case-insensitively — and deliberately
 // no longer the LIKE sweep over the free-text columns.
-func TestSQLReaderGetLogs_SearchUUIDMatchesIdentifierColumns(t *testing.T) {
-	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+func TestReaderGetLogs_SearchUUIDMatchesIdentifierColumns(t *testing.T) {
+	runReaderSuite(t, func(t *testing.T, store LogStore, reader Reader) {
 		const searchUUID = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
 
-		store, err := newSQLStoreForTest(t, db, 0)
-		require.NoError(t, err)
-
 		ctx := context.Background()
-		err = store.WriteBatch(ctx, []*LogEntry{
+		err := store.WriteBatch(ctx, []*LogEntry{
 			{
 				ID:             "request-id-match",
 				Timestamp:      time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC),
@@ -136,9 +127,6 @@ func TestSQLReaderGetLogs_SearchUUIDMatchesIdentifierColumns(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		reader, err := NewSQLReader(db)
-		require.NoError(t, err)
-
 		// Uppercase paste must still find the lowercase stored identifiers.
 		result, err := reader.GetLogs(ctx, LogQueryParams{
 			Search: strings.ToUpper(searchUUID),
@@ -152,13 +140,10 @@ func TestSQLReaderGetLogs_SearchUUIDMatchesIdentifierColumns(t *testing.T) {
 	})
 }
 
-func TestSQLReaderGetLogs_SearchMatchesErrorMessage(t *testing.T) {
-	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
-		store, err := newSQLStoreForTest(t, db, 0)
-		require.NoError(t, err)
-
+func TestReaderGetLogs_SearchMatchesErrorMessage(t *testing.T) {
+	runReaderSuite(t, func(t *testing.T, store LogStore, reader Reader) {
 		ctx := context.Background()
-		err = store.WriteBatch(ctx, []*LogEntry{
+		err := store.WriteBatch(ctx, []*LogEntry{
 			{
 				ID:             "timeout-match",
 				Timestamp:      time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC),
@@ -180,9 +165,6 @@ func TestSQLReaderGetLogs_SearchMatchesErrorMessage(t *testing.T) {
 				},
 			},
 		})
-		require.NoError(t, err)
-
-		reader, err := NewSQLReader(db)
 		require.NoError(t, err)
 
 		result, err := reader.GetLogs(ctx, LogQueryParams{

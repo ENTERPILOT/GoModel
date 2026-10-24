@@ -7,7 +7,6 @@ import (
 	"net/http"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 )
@@ -42,12 +41,6 @@ type Provider struct {
 // New creates a new Groq provider.
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	return newProvider(openai.NewCompatibleProvider(providerCfg.APIKey, opts, compatibleConfig(providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL))))
-}
-
-// NewWithHTTPClient creates a new Groq provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	return newProvider(openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(defaultBaseURL)))
 }
 
 func newProvider(compat *openai.CompatibleProvider) *Provider {
@@ -100,11 +93,6 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 		return nil, err
 	}
 	return normalizeChatStream(stream), nil
-}
-
-// ListModels retrieves the list of available models from Groq
-func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
-	return p.compat.ListModels(ctx)
 }
 
 // Responses sends a Responses API request to Groq (converted to chat format)

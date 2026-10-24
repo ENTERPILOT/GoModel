@@ -59,7 +59,7 @@ func (s *translatedInferenceService) writeChatShortCircuit(
 	}
 	includeUsage := req.StreamOptions != nil && req.StreamOptions.IncludeUsage
 	stream := io.NopCloser(bytes.NewReader(streaming.SynthesizeChatStream(resp, includeUsage)))
-	return s.handleStreamingReadCloser(c, workflow, syntheticMeta(workflow, model), stream, outerWrap)
+	return s.handleStreamingReadCloser(c, workflow, syntheticMeta(workflow, model), stream, nil, outerWrap)
 }
 
 // writeResponsesShortCircuit renders a plugin's completion as a Responses
@@ -75,7 +75,7 @@ func (s *translatedInferenceService) writeResponsesShortCircuit(c *echo.Context,
 		return c.JSON(http.StatusOK, resp)
 	}
 	stream := io.NopCloser(bytes.NewReader(streaming.SynthesizeResponsesStream(resp)))
-	return s.handleStreamingReadCloser(c, workflow, syntheticMeta(workflow, model), stream, nil)
+	return s.handleStreamingReadCloser(c, workflow, syntheticMeta(workflow, model), stream, nil, nil)
 }
 
 // messagesOuterWrap converts a canonical chat stream into the Anthropic

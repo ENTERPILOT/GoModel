@@ -59,10 +59,10 @@ func TestParseFailoverRetryErrors(t *testing.T) {
 	assert.True(t, phrases[2].Statuses[499], "phrase 2 must cover the 4xx class")
 	assert.False(t, phrases[2].Statuses[500], "phrase 2 must not cover 500")
 	defaults, err := parseFailoverRetryErrors(nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Len(t, defaults, len(DefaultFailoverRetryErrors))
 	_, err = parseFailoverRetryErrors([]string{"404"})
-	assert.Error(t, err)
+	require.Error(t, err)
 	_, err = parseFailoverRetryErrors([]string{"  "})
 	assert.Error(t, err)
 }
@@ -78,7 +78,7 @@ func TestLoadFailoverConfig_Policy(t *testing.T) {
 
 	cfg = FailoverConfig{Enabled: true, MaxAttempts: -1}
 	err = loadFailoverConfig(&cfg)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "max_attempts")
 
 	cfg = FailoverConfig{Enabled: true, RetryOnStatuses: []string{"503"}, RetryOnErrors: []string{"overloaded"}}

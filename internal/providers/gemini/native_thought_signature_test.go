@@ -205,7 +205,7 @@ func TestChatCompletion_NativeThoughtSignatureRoundTrip(t *testing.T) {
 		_, _ = w.Write([]byte(`{"candidates":[{"content":{"role":"model","parts":[{"text":"Sunny."}]},"finishReason":"STOP"}]}`))
 	})
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
 
 	first, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -253,7 +253,7 @@ data: {"candidates":[{"content":{"role":"model","parts":[{"text":"","thoughtSign
 
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
 
 	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{

@@ -17,6 +17,7 @@ const (
 	CostSourceModelPricing      = "model_pricing"
 	CostSourceOpenRouterCredits = "openrouter_credits"
 	CostSourceXAITicks          = "xai_cost_in_usd_ticks"
+	CostSourceEdenAICost        = "edenai_cost"
 )
 
 // xAI reports usage.cost_in_usd_ticks as USD-denominated ticks, where 10^10
@@ -166,6 +167,9 @@ type tokenCostMapping struct {
 	side           costSide
 	unit           costUnit
 	includedInBase bool
+	// includedIn returns the rate another mapping already charged these
+	// tokens at, so only the difference is added.
+	includedIn func(p *core.ModelPricing) *float64
 }
 
 var openAICompatibleTokenCostMappings = []tokenCostMapping{
@@ -177,6 +181,10 @@ var openAICompatibleTokenCostMappings = []tokenCostMapping{
 	// Treat it as a cached-input alias; the miss count needs no rate (the base
 	// input rate already covers it) and is listed in informationalFields.
 	{rawDataKey: "prompt_cache_hit_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
+	// OpenAI GPT-5.6+ reports prompt-cache writes as
+	// prompt_tokens_details.cache_write_tokens, part of prompt_tokens and
+	// billed at the cache-write rate instead of the base input rate.
+	{rawDataKey: "prompt_cache_write_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CacheWritePerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
 	{rawDataKey: "reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
 	{rawDataKey: "completion_reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
 	{rawDataKey: "prompt_audio_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.AudioInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
@@ -202,7 +210,14 @@ var providerMappings = map[string][]tokenCostMapping{
 		// a cache hit replayed from a stored response body keeps its rate.
 		{rawDataKey: "prompt_cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok},
 		{rawDataKey: "cache_creation_input_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CacheWritePerMtok }, side: sideInput, unit: unitPerMtok},
+		// usage.cache_creation splits cache_creation_input_tokens by TTL.
+		// 1-hour writes cost more than the 5-minute writes the total was
+		// already priced at, so only the surcharge is added here.
+		{rawDataKey: "cache_creation_ephemeral_1h_input_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CacheWrite1hPerMtok }, side: sideInput, unit: unitPerMtok, includedIn: func(p *core.ModelPricing) *float64 { return p.CacheWritePerMtok }},
 		{rawDataKey: "completion_reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
+		// Native Messages streams report output_tokens_details.thinking_tokens,
+		// which the stream observer records under this name.
+		{rawDataKey: "completion_thinking_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
 	},
 	"gemini": {
 		{rawDataKey: "cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
@@ -244,6 +259,9 @@ var informationalFields = map[string]struct{}{
 	"tool_use_prompt_token_count":           {},
 	"completion_accepted_prediction_tokens": {},
 	"completion_rejected_prediction_tokens": {},
+	// Anthropic's 5-minute share of cache_creation_input_tokens, already
+	// priced at the cache-write rate.
+	"cache_creation_ephemeral_5m_input_tokens": {},
 }
 
 // CalculateGranularCost computes input, output, and total costs from token counts,
@@ -303,6 +321,11 @@ func CalculateGranularCost(inputTokens, outputTokens int, rawData map[string]any
 		if m.includedInBase && m.unit == unitPerMtok {
 			if baseRate := baseRateForSide(pricing, m.side); baseRate != nil {
 				effectiveRate -= *baseRate
+			}
+		}
+		if m.includedIn != nil {
+			if paidRate := m.includedIn(pricing); paidRate != nil {
+				effectiveRate -= *paidRate
 			}
 		}
 
@@ -455,6 +478,9 @@ func pricingForTokenCount(pricing *core.ModelPricing, inputTokens int) *core.Mod
 	if tier.InputPerMtok != nil {
 		effective.InputPerMtok = tier.InputPerMtok
 	}
+	if tier.CachedInputPerMtok != nil {
+		effective.CachedInputPerMtok = tier.CachedInputPerMtok
+	}
 	if tier.OutputPerMtok != nil {
 		effective.OutputPerMtok = tier.OutputPerMtok
 	}
@@ -564,6 +590,9 @@ func CalculateUsageCost(inputTokens, outputTokens int, rawData map[string]any, p
 	if result, ok := xaiTicksCost(rawData, providerType); ok {
 		return result
 	}
+	if result, ok := edenAICost(rawData, providerType); ok {
+		return result
+	}
 	return CalculateGranularCost(inputTokens, outputTokens, rawData, providerType, pricing)
 }
 
@@ -611,6 +640,48 @@ func xaiTicksCost(rawData map[string]any, providerType string) (CostResult, bool
 
 func isXAIProvider(providerType string) bool {
 	return strings.EqualFold(strings.TrimSpace(providerType), "xai")
+}
+
+// edenAICost uses Eden AI's own per-request charge instead of recomputing cost
+// from token counts. Eden is a multi-provider gateway that reprices upstreams
+// automatically and applies per-account discounts, so the figure it returns is
+// authoritative in a way a rate-card reconstruction cannot be.
+//
+// Eden publishes cost at the response root rather than inside usage; the Eden
+// provider moves it into RawUsage so it arrives here on the same path as
+// OpenRouter's and xAI's. Eden reports no input/output split, so only the
+// total is set — the same shape xaiTicksCost produces.
+func edenAICost(rawData map[string]any, providerType string) (CostResult, bool) {
+	if !isEdenAIProvider(providerType) {
+		return CostResult{}, false
+	}
+	total, ok := extractFloat(rawData, "cost")
+	if !ok || !isFiniteCost(total) || total < 0 {
+		return CostResult{}, false
+	}
+
+	return CostResult{
+		TotalCost: &total,
+		Source:    CostSourceEdenAICost,
+	}, true
+}
+
+func isEdenAIProvider(providerType string) bool {
+	return strings.EqualFold(strings.TrimSpace(providerType), "edenai")
+}
+
+// isProviderReportedCostSource reports whether a CostSource names a charge the
+// provider itself returned, rather than one reconstructed from token counts and
+// a rate card. Callers use it to suppress caveats that only make sense for a
+// rate-card reconstruction: a provider-reported total is authoritative no
+// matter what token counts came with it.
+func isProviderReportedCostSource(source string) bool {
+	switch strings.TrimSpace(source) {
+	case CostSourceOpenRouterCredits, CostSourceXAITicks, CostSourceEdenAICost:
+		return true
+	default:
+		return false
+	}
 }
 
 func openRouterCreditCostSplit(rawData map[string]any, total float64) (float64, float64, bool) {

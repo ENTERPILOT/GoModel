@@ -60,16 +60,16 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 			BaseURL:      baseURL,
 			SetHeaders:   setHeaders,
 		}),
-		rootClient: llmclient.New(llmclient.Config{
+		rootClient: llmclient.NewWithOptionalHTTPClient(opts.HTTPClient, llmclient.Config{
 			ProviderName:   opts.ClientName("llamacpp"),
-			BaseURL:        passthroughBaseURL(baseURL),
+			BaseURL:        providers.PassthroughBaseURL(baseURL),
 			Retry:          opts.Resilience.Retry,
 			Hooks:          opts.Hooks,
 			CircuitBreaker: opts.Resilience.CircuitBreaker,
 		}, func(req *http.Request) {
 			setHeaders(req, keys.NextForContext(req.Context()))
 		}),
-		propsClient: newPropsClient(opts.ClientName("llamacpp"), baseURL, opts.Hooks, func(req *http.Request) {
+		propsClient: newPropsClient(opts.ClientName("llamacpp"), baseURL, opts.Hooks, opts.HTTPClient, func(req *http.Request) {
 			setHeaders(req, keys.NextForContext(req.Context()))
 		}),
 	}
@@ -78,44 +78,19 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 // newPropsClient builds the client used for optional /props enrichment: no
 // retries and no circuit breaker, so a failing /props costs one request and
 // leaves the shared native-route budget untouched.
-func newPropsClient(providerName, baseURL string, hooks llmclient.Hooks, setHeader llmclient.HeaderSetter) *llmclient.Client {
-	return llmclient.New(llmclient.Config{
+func newPropsClient(providerName, baseURL string, hooks llmclient.Hooks, httpClient *http.Client, setHeader llmclient.HeaderSetter) *llmclient.Client {
+	return llmclient.NewWithOptionalHTTPClient(httpClient, llmclient.Config{
 		ProviderName: providerName,
-		BaseURL:      passthroughBaseURL(baseURL),
+		BaseURL:      providers.PassthroughBaseURL(baseURL),
 		Hooks:        hooks,
 	}, setHeader)
-}
-
-// NewWithHTTPClient creates a new llama.cpp provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	resolvedBaseURL := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	rootClientCfg := llmclient.DefaultConfig("llamacpp", passthroughBaseURL(resolvedBaseURL))
-	rootClientCfg.Hooks = hooks
-	return &Provider{
-		compatible: openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, openai.CompatibleProviderConfig{
-			ProviderName: "llamacpp",
-			BaseURL:      resolvedBaseURL,
-			SetHeaders:   setHeaders,
-		}),
-		rootClient: llmclient.NewWithHTTPClient(httpClient, rootClientCfg, func(req *http.Request) {
-			setHeaders(req, apiKey)
-		}),
-		propsClient: llmclient.NewWithHTTPClient(httpClient, llmclient.Config{
-			ProviderName: "llamacpp",
-			BaseURL:      passthroughBaseURL(resolvedBaseURL),
-			Hooks:        hooks,
-		}, func(req *http.Request) {
-			setHeaders(req, apiKey)
-		}),
-	}
 }
 
 // SetBaseURL allows configuring a custom base URL for the provider.
 func (p *Provider) SetBaseURL(url string) {
 	p.compatible.SetBaseURL(url)
-	p.rootClient.SetBaseURL(passthroughBaseURL(url))
-	p.propsClient.SetBaseURL(passthroughBaseURL(url))
+	p.rootClient.SetBaseURL(providers.PassthroughBaseURL(url))
+	p.propsClient.SetBaseURL(providers.PassthroughBaseURL(url))
 }
 
 func setHeaders(req *http.Request, apiKey string) {
@@ -161,7 +136,7 @@ func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest
 		return nil, core.NewInvalidRequestError("passthrough request is required", nil)
 	}
 	endpoint := providers.PassthroughEndpoint(req.Endpoint)
-	if !usesV1PassthroughBase(endpoint) {
+	if !providers.UsesV1PassthroughBase(endpoint, v1PassthroughPrefixes) {
 		resp, err := p.rootClient.DoPassthrough(ctx, llmclient.Request{
 			Method:          req.Method,
 			Endpoint:        endpoint,
@@ -184,34 +159,12 @@ func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest
 	return p.compatible.Passthrough(ctx, req)
 }
 
-func passthroughBaseURL(baseURL string) string {
-	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if before, ok := strings.CutSuffix(trimmed, "/v1"); ok {
-		return before
-	}
-	return trimmed
-}
-
-func usesV1PassthroughBase(endpoint string) bool {
-	endpoint = providers.PassthroughEndpoint(endpoint)
-	// Classify by path only; the server appends the request's query string to
-	// the endpoint before it reaches the provider.
-	endpoint, _, _ = strings.Cut(endpoint, "?")
-	if strings.HasPrefix(endpoint, "/v1/") {
-		return false
-	}
-
-	v1Prefixes := []string{
-		"/models",
-		"/chat/completions",
-		"/responses",
-		"/completions",
-		"/embeddings",
-	}
-	for _, prefix := range v1Prefixes {
-		if endpoint == prefix || strings.HasPrefix(endpoint, prefix+"/") {
-			return true
-		}
-	}
-	return false
+// v1PassthroughPrefixes are the paths llamacpp serves from its
+// OpenAI-compatible /v1 surface; everything else goes to its root paths.
+var v1PassthroughPrefixes = []string{
+	"/models",
+	"/chat/completions",
+	"/responses",
+	"/completions",
+	"/embeddings",
 }

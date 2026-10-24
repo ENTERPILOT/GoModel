@@ -2,6 +2,7 @@ package anthropicapi
 
 import (
 	"encoding/json"
+	"net/http"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -113,7 +114,7 @@ func TestFromChatResponseStopReasons(t *testing.T) {
 		{name: "stop", finish: "stop", want: "end_turn"},
 		{name: "length", finish: "length", want: "max_tokens"},
 		{name: "tool_calls", finish: "tool_calls", want: "tool_use"},
-		{name: "content_filter", finish: "content_filter", want: "end_turn"},
+		{name: "content_filter", finish: "content_filter", want: "refusal"},
 		{name: "empty", finish: "", want: "end_turn"},
 		// A response carrying tool calls always reports "tool_use". OpenAI-family
 		// providers report finish_reason "stop" alongside tool calls when a tool
@@ -272,5 +273,54 @@ func TestFromChatResponseThinkingBlocks(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, string(got))
 		})
+	}
+}
+
+func TestFromModelsPage(t *testing.T) {
+	models := []core.Model{{ID: "a"}, {ID: "b"}, {ID: "c"}, {ID: "d"}, {ID: "e"}}
+	ids := func(list *ModelsList) []string {
+		out := []string{}
+		for _, m := range list.Data {
+			out = append(out, m.ID)
+		}
+		return out
+	}
+	tests := []struct {
+		name     string
+		page     ModelsPage
+		want     []string
+		wantMore bool
+	}{
+		{name: "no paging returns everything", page: ModelsPage{}, want: []string{"a", "b", "c", "d", "e"}},
+		{name: "first page", page: ModelsPage{Limit: 2}, want: []string{"a", "b"}, wantMore: true},
+		{name: "after_id", page: ModelsPage{Limit: 2, AfterID: "b"}, want: []string{"c", "d"}, wantMore: true},
+		{name: "last page", page: ModelsPage{Limit: 2, AfterID: "d"}, want: []string{"e"}},
+		{name: "before_id", page: ModelsPage{Limit: 2, BeforeID: "e"}, want: []string{"c", "d"}, wantMore: true},
+		{name: "before_id reaching the start", page: ModelsPage{Limit: 5, BeforeID: "c"}, want: []string{"a", "b"}},
+		{name: "after_id without limit", page: ModelsPage{AfterID: "c"}, want: []string{"d", "e"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := FromModelsPage(models, tt.page)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, ids(got))
+			assert.Equal(t, tt.wantMore, got.HasMore)
+			if len(tt.want) > 0 {
+				assert.Equal(t, tt.want[0], *got.FirstID)
+				assert.Equal(t, tt.want[len(tt.want)-1], *got.LastID)
+			}
+		})
+	}
+}
+
+// A cursor that names no listed model (removed by a refresh between pages) is
+// a 400, never an empty last page that would end the client's paging early.
+func TestFromModelsPage_UnknownCursor(t *testing.T) {
+	models := []core.Model{{ID: "a"}, {ID: "b"}}
+	for _, page := range []ModelsPage{{Limit: 1, AfterID: "gone"}, {Limit: 1, BeforeID: "gone"}} {
+		_, err := FromModelsPage(models, page)
+		var gwErr *core.GatewayError
+		require.ErrorAs(t, err, &gwErr)
+		assert.Equal(t, http.StatusBadRequest, gwErr.HTTPStatusCode())
 	}
 }
