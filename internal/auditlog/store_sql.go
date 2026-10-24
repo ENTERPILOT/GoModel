@@ -457,7 +457,7 @@ func auditColumns(ctx context.Context, db sqlx.DB, table string) (map[string]boo
 	switch db.Dialect() {
 	case sqlx.SQLite:
 		query = fmt.Sprintf(`SELECT name FROM pragma_table_info('%s')`, table)
-	case sqlx.PostgreSQL:
+	case sqlx.PostgreSQL, sqlx.DuckDB:
 		query = `SELECT column_name FROM information_schema.columns
 			WHERE table_schema = current_schema() AND table_name = ?`
 		args = []any{table}

@@ -55,7 +55,7 @@ func rateLimitColumns(ctx context.Context, db sqlx.DB) (map[string]bool, error) 
 	switch db.Dialect() {
 	case sqlx.SQLite:
 		query = `SELECT name FROM pragma_table_info('rate_limits')`
-	case sqlx.PostgreSQL:
+	case sqlx.PostgreSQL, sqlx.DuckDB:
 		query = `SELECT column_name FROM information_schema.columns
 			WHERE table_schema = current_schema() AND table_name = ?`
 		args = []any{"rate_limits"}
