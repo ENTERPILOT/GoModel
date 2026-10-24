@@ -99,6 +99,15 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
   `/v1/responses` und gibt eine normale Chat Completion bzw. einen normalen Chunk-Stream zurück. Ein
   Request mit einem Feld, für das die Responses API keine Entsprechung hat (zum Beispiel `n` oder
   `logprobs`), bleibt bei Chat Completions.
+- **Allowed Tools bei OpenAI-kompatiblen Providern** – ein `tool_choice` vom Typ
+  `allowed_tools` erreicht OpenAI, Azure OpenAI und Fireworks unverändert, da
+  sie ihn beachten. Andere OpenAI-kompatible Provider (xAI, Groq, OpenRouter,
+  vLLM, Ollama und die übrigen) erhalten nur die erlaubten Funktionen, mit
+  `tool_choice: "required"` beim Modus `required` und sonst `"auto"`: Manche
+  von ihnen ignorieren die Auswahl und würden dem Modell jedes deklarierte
+  Tool erlauben. Die eingeschränkte Tool-Liste kann Prompt-Cache-Treffer
+  kosten, wenn sich die Teilmenge zwischen Turns ändert. Eine Teilmenge, die
+  keine deklarierte Funktion nennt, wird mit 400 abgelehnt.
 - **llm-d** – richten Sie `LLMD_BASE_URL` auf den Router/EPP-Service aus und deklarieren Sie
   `LLMD_MODELS`, wenn die Route `/v1/models` nicht bedient. Der dedizierte Provider fügt
   vertrauenswürdige Header für Inference-Objective und User-Path-Fairness ein.

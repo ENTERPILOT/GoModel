@@ -93,6 +93,10 @@ type ChatCompatible struct {
 	// default to Authorization and "Bearer ".
 	AuthHeader string
 	AuthPrefix string
+	// ForwardsAllowedTools reports whether an allowed_tools tool_choice
+	// reaches the upstream unchanged. When false the helper expects the
+	// declared tools narrowed to the allowed subset.
+	ForwardsAllowedTools bool
 }
 
 // countingTransport records how many requests travelled through it, so the
@@ -259,6 +263,12 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 		created := responseCreated(t, body)
 		checkStreamID(t, fmt.Sprint(created["id"]))
 		assert.Equal(t, Model, created["model"], "response.created model")
+	})
+
+	t.Run("allowed_tools tool_choice", func(t *testing.T) {
+		AssertAllowedTools(t, p.ForwardsAllowedTools, func(baseURL string, client *http.Client) core.Provider {
+			return p.New(apiKey, baseURL, client, llmclient.Hooks{})
+		})
 	})
 
 	if p.SkipEmbeddings {

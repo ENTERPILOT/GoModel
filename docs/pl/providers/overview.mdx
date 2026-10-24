@@ -106,6 +106,15 @@ przez providera upstream.
   z `store: false` i zwraca zwykłe chat completion lub stream chunków. Request z
   polem, które nie ma odpowiednika w Responses API (na przykład `n` lub
   `logprobs`), pozostaje w Chat Completions.
+- **Dozwolone narzędzia u providerów zgodnych z OpenAI** – `tool_choice` typu
+  `allowed_tools` trafia bez zmian do OpenAI, Azure OpenAI i Fireworks, które
+  go respektują. Pozostali providerzy zgodni z OpenAI (xAI, Groq, OpenRouter,
+  vLLM, Ollama i inni) dostają tylko dozwolone funkcje, z
+  `tool_choice: "required"`, gdy tryb to `required`, a w przeciwnym razie z
+  `"auto"`: część z nich ignoruje ten wybór i pozwoliłaby modelowi wywołać
+  dowolne zadeklarowane narzędzie. Zawężona lista narzędzi może kosztować
+  trafienia w prompt cache, gdy podzbiór zmienia się między turami. Podzbiór,
+  który nie wskazuje żadnej zadeklarowanej funkcji, jest odrzucany z błędem 400.
 - **llm-d** – skieruj `LLMD_BASE_URL` na usługę Router/EPP i zadeklaruj
   `LLMD_MODELS`, gdy trasa nie obsługuje `/v1/models`. Dedykowany provider
   wstrzykuje zaufane nagłówki inference-objective i fairness według ścieżki

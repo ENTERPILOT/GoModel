@@ -41,6 +41,12 @@ type CompatibleProviderConfig struct {
 	// context and body (e.g. conversation affinity headers). Nil results are
 	// ignored.
 	ChatRequestHeaders func(context.Context, *core.ChatRequest) http.Header
+	// ForwardAllowedTools sends an allowed_tools tool_choice upstream
+	// unchanged. Set it only for upstreams documented to honor the choice.
+	// When unset, the declared tools are narrowed to the allowed subset
+	// (core.NarrowToAllowedTools), so an upstream that ignores or rejects the
+	// unknown choice type cannot call a tool outside it.
+	ForwardAllowedTools bool
 }
 
 // CompatibleProvider is the single transport engine for every
@@ -71,20 +77,22 @@ type CompatibleProvider struct {
 	// keys resolves the credential for each outbound request. Providers in this
 	// package read it directly (see realtime.go) so a websocket dial picks up
 	// the same rotation as the HTTP endpoints.
-	keys               *providers.Keyring
-	providerName       string
-	requestMutator     RequestMutator
-	adaptChatRequest   func(*core.ChatRequest) (*core.ChatRequest, error)
-	chatRequestHeaders func(context.Context, *core.ChatRequest) http.Header
+	keys                *providers.Keyring
+	providerName        string
+	requestMutator      RequestMutator
+	adaptChatRequest    func(*core.ChatRequest) (*core.ChatRequest, error)
+	chatRequestHeaders  func(context.Context, *core.ChatRequest) http.Header
+	forwardAllowedTools bool
 }
 
 func NewCompatibleProvider(apiKey string, opts providers.ProviderOptions, cfg CompatibleProviderConfig) *CompatibleProvider {
 	p := &CompatibleProvider{
-		keys:               opts.Keyring(apiKey),
-		providerName:       cfg.ProviderName,
-		requestMutator:     cfg.RequestMutator,
-		adaptChatRequest:   cfg.AdaptChatRequest,
-		chatRequestHeaders: cfg.ChatRequestHeaders,
+		keys:                opts.Keyring(apiKey),
+		providerName:        cfg.ProviderName,
+		requestMutator:      cfg.RequestMutator,
+		adaptChatRequest:    cfg.AdaptChatRequest,
+		chatRequestHeaders:  cfg.ChatRequestHeaders,
+		forwardAllowedTools: cfg.ForwardAllowedTools,
 	}
 	clientCfg := llmclient.Config{
 		ProviderName:   opts.ClientName(cfg.ProviderName),
@@ -200,10 +208,35 @@ func (p *CompatibleProvider) StreamChatCompletion(ctx context.Context, req *core
 }
 
 func (p *CompatibleProvider) adaptedChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
-	if p.adaptChatRequest == nil {
+	if p.adaptChatRequest != nil {
+		adapted, err := p.adaptChatRequest(req)
+		if err != nil {
+			return nil, err
+		}
+		req = adapted
+	}
+	if p.forwardAllowedTools {
 		return req, nil
 	}
-	return p.adaptChatRequest(req)
+	return narrowAllowedTools(req)
+}
+
+// narrowAllowedTools rewrites an allowed_tools tool_choice for an upstream not
+// known to honor it, so it cannot widen the choice to every declared tool. It
+// returns req itself when there is nothing to rewrite and a shallow copy
+// otherwise.
+func narrowAllowedTools(req *core.ChatRequest) (*core.ChatRequest, error) {
+	if _, _, ok := core.AllowedToolsChoice(req.ToolChoice); !ok {
+		return req, nil
+	}
+	tools, choice, err := core.NarrowToAllowedTools(req.Tools, req.ToolChoice)
+	if err != nil {
+		return nil, err
+	}
+	narrowed := *req
+	narrowed.Tools = tools
+	narrowed.ToolChoice = choice
+	return &narrowed, nil
 }
 
 func (p *CompatibleProvider) chatHeaders(ctx context.Context, req *core.ChatRequest) http.Header {
