@@ -1,0 +1,628 @@
+---
+title: "插件"
+description: "护栏、响应与流过滤器、Header 编辑和路由策略共用同一套插件契约：可以是内置插件、编译进二进制的插件，或从 .so 文件加载的插件。"
+icon: "puzzle"
+keywords: ["插件", "护栏", "共享对象", "路由策略", "流式传输", "plugins", "pluginapi", "guardrails", "shared object", "routing strategy", "streaming"]
+---
+
+## 概览
+
+插件是一个实现了 `pluginapi.Plugin` 以及一个或多个可选 Hook 接口的 Go 值。每个 [护栏](/zh/advanced/guardrails) 都是某个插件的实例，
+[虚拟模型](/zh/features/virtual-models) 的自定义路由策略也是如此。插件契约只有一套，位于
+`github.com/enterpilot/gomodel/pluginapi` 包中，交付插件的方式有三种：
+
+| 方式 | 适用场景 | 注册方式 |
+| --- | --- | --- |
+| **内置** | 随 GoModel 一起提供：`system_prompt`、`llm_based_altering`、`string_replace`、`tag_replace`、`header_edit`、`llm_judge`，以及 `cheapest_healthy` 路由策略 | 无需任何操作 |
+| **编译进二进制** | 您基于 `run` 包构建自己的二进制文件 | 在 `run.Run` 之前调用 `ext.RegisterPlugin(func() pluginapi.Plugin { ... })` |
+| **共享对象**（`.so`） | 您运行官方二进制文件，并希望在启动时加入代码 | 在 `config.yaml` 中配置 `plugins.load`（需要 cgo 构建版本，请参阅 [共享对象插件](#共享对象插件)） |
+
+无论以哪种方式提供，插件类型都会以其 manifest 名称显示在控制台的 Guardrails 页面、`GET /admin/plugins` 中，
+并可作为 `guardrails.rules` 中的 `type` 使用。
+
+`pluginapi` 仅依赖标准库。插件只需导入它，无需导入 GoModel 的任何其他内容。
+
+## 阶段
+
+插件在 `Manifest.Kinds` 中声明其实现了哪些 Hook。GoModel 按匹配到的 [工作流](/zh/advanced/workflows) 运行各内容阶段：
+
+| 阶段 | Hook | 运行时机 | 可见内容 |
+| --- | --- | --- | --- |
+| `prompt` | `PromptHook.OnPrompt` | 路由之后、调用提供商之前 | `Prompt`，以及 `Meta` 中已解析的提供商和模型 |
+| `response` | `ResponseHook.OnResponse` | 在完整的非流式响应上，或在缓冲流组装后的响应上 | `Prompt`、`Response`、`Meta.Attempts` |
+| `stream` | `StreamHook.OnStreamEvent` / `OnStreamEnd` | 每个流式事件运行一次，结束时再运行一次 | `Prompt`、`Stream`（目前为止的文本）、每个事件 |
+
+哪个实例在哪个阶段运行、以什么顺序运行，由工作流决定
+（`steps[].phase` 和 `steps[].step`）。同一个实例在每个阶段最多出现一次。
+
+契约中还有另外两种 Hook 类型，但当前版本不会运行它们：
+`request`（模型解析之前）和 `complete`（客户端响应写出之后）。manifest 可以声明它们；GoModel
+会校验相应接口是否已实现，但在运行时忽略它们。`route` 类型供虚拟模型使用，请参阅 [路由策略插件](#路由策略插件)。
+
+阶段适用于 `/v1/chat/completions`、`/v1/responses` 和 `/v1/messages`。
+Anthropic 请求会在任何 Hook 运行之前被转换为 chat 格式，因此插件看到的只有一种结构；必要时可通过
+`Meta.Dialect` 判断，其值为 `anthropic_messages`。当启用
+`guardrails.enable_for_batch_processing` 时，内联的 `/v1/batches` 条目会经过 `prompt` 阶段。
+
+## 链式执行
+
+在同一阶段内，实例按 `step` 分组：
+
+- 各步骤按升序运行。后面的步骤可以看到前面步骤所做的修改。
+- 在同一步骤内，manifest 声明为 `Mutates: false` 的实例会在交互（exchange）的浅拷贝上**并发**运行
+  （其 `Values` 和响应头会被合并回来）。每个步骤**最多只能有一个**
+  `Mutates: true` 的实例，它在只读实例之后运行。同一步骤中出现两个修改型实例属于配置错误。
+- 同一步骤的决策按严重程度合并：`block` > `respond` > `warn` >
+  `allow`。第一个阻断决策会在其所在步骤结束后终止整个链。
+
+## 决策
+
+每个 Hook 都返回一个 `pluginapi.Decision`：
+
+| 动作 | 效果 | 默认值 |
+| --- | --- | --- |
+| `allow` | 带着已对交互所做的修改继续执行 | `Decision` 的零值 |
+| `block` | 以端点原生的错误格式返回 `Status`、`Code` 和 `Message` 并拒绝请求 | `Status` 在 prompt 阶段为 400，在 response 和 stream 阶段为 502；`Code` 为 `guardrail_blocked` |
+| `respond` | 以 `Response` 作为普通的助手回复来响应请求，返回 HTTP 200（流式请求会合成一个单轮的流）；在 response 和 stream 阶段，由于推理已经执行，回复中会保留提供商的 `usage` | `pluginapi.Respond(text)` 会构建一个单选项的补全结果 |
+| `warn` | 继续执行；在审计记录中记录 `Code`、`Message` 和 `Detail`，并在客户端响应中添加 `X-GoModel-Guardrail: warn; code=<code>` | `Code` 为 `guardrail_warning` |
+
+`respond` 就是大多数护栏产品提供的“用安全消息代替阻断”：
+Agent 循环可以继续运行，而不会收到 4xx 错误。如果调用方应当看到错误，请使用 `block`。
+
+`Detail` 会存储在审计记录中，不得包含 Secret。
+
+任何决策上设置 `NoStore` 都会使响应不进入
+[响应缓存](/zh/features/cache)（包括精确缓存和语义缓存），因此下一个具有相同或相似请求体的请求会重新运行插件，而不是重放已存储的回答。
+当回复中包含插件在输出时还原的请求特定数据时，请设置该标志，例如将调用方的 PII 放回助手文本的去匿名化插件：
+缓存的副本会把这些文本交给下一个发送匹配提示词的人。无论合并后的决策是什么，只要请求的任一阶段、任一实例设置了该标志，都会生效。
+
+### 审计记录
+
+每个运行过的实例都会在审计条目的
+`data.guardrails` 列表中留下一条结果，按 prompt、response 和
+stream 各阶段的执行顺序排列，静默放行的结果也包含在内：
+
+| 字段 | 含义 |
+| --- | --- |
+| `phase`、`step`、`instance`、`type` | 实例的运行位置：工作流阶段和步骤、实例名称（工作流中的 `ref`）及其插件类型。 |
+| `action` | `allow`、`warn`、`block`、`respond`，或在 Hook 出错而未做出决策时为 `failure`。 |
+| `code`、`message`、`detail` | 决策的各字段。控制台列表和实时视图会省略 `detail`；条目详情中包含该字段。 |
+| `error`、`fail_mode` | 当结果为 `failure` 时：错误文本，以及链是继续执行（`open`）还是请求失败（`closed`）。 |
+| `edited`、`target` | 实例是否修改了 `request`（prompt 阶段）或 `response`（response 和 stream 阶段）。 |
+| `replaced_events`、`dropped_events` | 对于流式过程中的实例，表示其改写或扣留了多少个事件。 |
+| `duration_ns` | Hook 的运行时长。 |
+
+已配置但没有结果的步骤表示它没有运行：之前的阻断或回答已结束请求，或者缓存命中跳过了模型调用。控制台会根据此列表为审计条目的工作流图着色，
+其 "Guardrails" 标签页会列出这些结果。该列表记录的是决策轨迹；下文的请求修订记录的是请求体轨迹。
+
+prompt 阶段的决策还会追加到请求的修订链中（与记录请求改写的位置相同），按步骤顺序每个实例一条。
+修改了提示词的实例会生成一条已变更的修订，其中包含该步骤刚结束时的请求（包括大小），因此一连串的修改可以逐步查看，最后一条就是实际转发的请求；
+请求体的存储受与请求改写相同的 `LOGGING_LOG_BODIES` 和 `LOGGING_LOG_REVISION_BODIES` 开关控制。
+每个修改步骤在请求路径上只留下提示词的一份副本；将这些副本应用到请求以及对请求体编码的工作会在之后与提供商调用同时进行。
+设置 `LOGGING_LOG_GUARDRAIL_STEPS=false` 会跳过这些逐步修订，将整条链的修改记录为一条包含实际转发请求的修订。
+没有修改的警告、阻断、回答或失败会记录为一条携带决策的无变更条目；静默放行不会留下修订。response 和
+stream 阶段的决策仅记录在 `data.guardrails` 中，其中的异议（objection）会连同请求 ID 一起写入日志。
+
+## 失败模式与超时
+
+每个实例都有 `fail_mode` 和 `timeout_ms`：
+
+| 设置 | 取值 | 默认值 |
+| --- | --- | --- |
+| `fail_mode` | `closed`：出错、panic 或超时时以 HTTP 500 和错误码 `plugin_failure` 拒绝请求；`open`：记录日志并按该实例放行的情况继续执行 | `prompt`、`response` 和 `stream` 均为 `closed` |
+| `timeout_ms` | 该实例每次 Hook 调用的上限 | `0`（不设实例级超时） |
+
+失败即拒绝（fail closed）时，出错实例的名称只会写入日志和审计记录，绝不会返回给客户端。插件内部的 panic 会被恢复并视为错误。
+
+**超时在截止时刻强制执行。** Hook 收到的 context 会在 `timeout_ms` 到期时（以及客户端断开连接时）结束；无论 Hook 是否已返回，
+GoModel 都会在此时停止等待。忽略其 context 的 Hook 会在后台继续运行，但不会影响请求，因此请在所有可能阻塞的操作中遵循 `ctx.Done()`。
+被放弃的 Hook 计为失败。只有当它无法影响请求后续使用的内容时，才会按失败即放行（fail open）处理：非修改型 Hook 在自己的交互副本上运行，该副本会被丢弃。
+修改型 Hook 或流式过程中的 Hook 如果超过截止时间，即使设置了
+`fail_mode: open` 也总会使请求失败，因为其修改已不再可信。`Init` 有固定的 10 s 截止时间，处理方式相同：到期仍未返回的 `Init` 会使该实例失败。
+
+请保留默认值。仅当实例是一个缺失也可接受的观察者时（例如打 Header 标签的插件、只发出警告的分类器），才将其切换为 `open`。
+
+## 实例生命周期
+
+GoModel 为每个护栏定义构建一个插件值，并调用一次 `Init`。定义会定期从存储中重新加载
+（`workflows.refresh_interval`，默认 1 分钟），每次管理变更时也会重新加载；
+类型、配置、`user_path`、`fail_mode` 和 `timeout_ms` 均未变化的实例会在重新加载后保留，因此插件累积的状态（计数器、缓存、连接）也会保留。
+被替换或删除的实例会被停用，并在稍后关闭：最早在停用后两个刷新间隔，且仅在没有任何对象再持有它时关闭。
+已编译的工作流会持有其实例，直到工作流快照将其移除；请求会在一个阶段的持续时间内（包括长时间的流）持有其实例。
+`Close` 之后绝不会再调用 Hook；到达已关闭实例的调用会按该实例的 `fail_mode` 失败。关闭服务时会关闭所有实例。
+
+## 流式传输
+
+已经发送给客户端的字节无法撤回，因此流式插件需要在 `StreamHook.StreamPolicy()` 中选择以下三种模式之一：
+
+| 模式 | 插件可执行的操作 | 延迟代价 |
+| --- | --- | --- |
+| `observe` | 读取每个事件；除 `terminate` 外的决策都会被忽略 | 无 |
+| `transform` | 对每个事件执行 `pass`、`drop`、`replace`（文本、推理和工具调用参数的增量）或 `terminate` | 每个窗口延迟 `LookbehindChars` 个字符，收集一段内容时额外最多延迟 `MinChunkChars` 个字符 |
+| `buffer` | 不逐事件处理；GoModel 收集整个流，并在组装后的补全结果上运行插件的 `OnResponse`（`buffer` 插件必须实现 `ResponseHook`，否则加载失败） | 首 Token 时间变为末 Token 时间 |
+
+**回看（Lookbehind）**（仅限 `transform`）：GoModel 会在每个窗口中扣留最后 `LookbehindChars`
+个字符，并将每个增量与该尾部一起呈现，因此跨越两个分块的模式（电话号码、API 密钥）在任何部分到达客户端之前，就能在同一个事件中被看到。
+一个选项（choice）的文本是一个窗口，其每个工具调用（`StreamEvent.Call`）的参数是另一个窗口，因此被拆分在两个参数增量中的占位符也会以同样的方式被改写。
+同一选项中另一种类型的增量会先冲刷该选项其他类型的窗口，因此文本和工具调用保持顺序，而并行的工具调用则各自独立流式传输。
+长度不超过 `LookbehindChars + 1` 个字符的模式总能被捕获。设置为 `0` 则禁用回看。尾部返回时已带有插件之前所做的修改，
+`StreamEvent.Overlap` 表示它覆盖了开头的多少个字符：插件只应修改延伸到 `Overlap` 之后的匹配，因为位于其中的匹配在上一次已经处理过
+（内置的 `string_replace` 就是这样做的，因此像 `a => aa` 这样的规则只会应用一次，而不会作用于自己的输出）。
+触及窗口末尾的匹配可能会随下一个增量继续变长，因此插件可以暂不修改它：下一次尾部会再次显示它。`StreamEvent.Final`
+标记一个窗口的最后一个事件（流已结束，或被另一种类型的增量冲刷），此后不再扣留任何内容，因此以这种方式推迟的修改此时必须完成。
+`string_replace` 对能放入其回看范围的匹配就是这样处理的，因此开放式模式可以覆盖整个密钥。
+同时携带文本和 `finish_reason` 或 `usage` 的 chat 分块也会被重新分段；这些成员只发送一次，随该分块的最后一段文本一起发送，
+或者在插件删除了该文本时随一个空文本分块发送。
+
+**合并（Coalescing）**（仅限 `transform`）：单次调用成本较高的 Hook（例如调用 sidecar 的分类器或命名实体识别器）无法承受每个 Token 调用一次。
+`MinChunkChars` 让 GoModel 收集一个选项的文本增量，直到至少积累了这么多新字符，再将其作为一个文本事件呈现；
+非文本事件和流结束会冲刷较短的片段。它可以与回看组合使用：扣留的尾部位于窗口开头，且
+`Overlap` 仍会将其计入，因此适用相同的修改约定。客户端每次最多等待 `MinChunkChars` 个字符，
+一个流中所有 transform 实例的最大值适用于全部实例，上限为 16384 个字符。默认值 `0` 表示增量到达即呈现。
+
+**签名推理**：在 `/v1/messages` 上，Anthropic 的思考内容会按提供商签名后的原样到达客户端，因为客户端会连同签名一起将其发回。
+这类推理事件带有 `StreamEvent.Signed`；GoModel 会忽略对其执行的
+`replace` 和 `drop`，并撤销在组装后的响应上对该推理所做的修改（`buffer` 插件和 response 阶段）。
+
+**包含多个选项的 chat 分块**会在插件看到之前被拆分为每个选项一个分块，因此每个选项都会被检查；提供商的 `usage`
+保留在最后一个分块上。
+
+**重述文本**（Responses API）：当某个增量被替换或丢弃后，重复某部分完整文本的事件（`response.output_text.done`、
+`response.content_part.done`、`response.output_item.done`，以及最终的
+`response.completed`）会被改写为实际发出的文本，因此读取完整结果而非增量的客户端看到的结果也一致。
+
+**事件大小**（`transform` 和 `observe`）：大于 4 MiB 的单个 SSE 事件无法在传输过程中检查，因此流会以错误码
+`event_too_large` 失败即拒绝（fail closed）方式结束，而不会绕过插件将其转发。注释行和 keep-alive 行不受影响。
+
+**缓冲**：上游内容会被读入一个有界缓冲区
+（`MaxBufferBytes`，默认 4 MiB；超出时以错误码
+`response_too_large` 失败即拒绝）。该缓冲区由所有缓冲该流的插件以及 response 链共享，因此适用所请求的最大上限；
+只要 response 链运行，或某个插件未设置上限，就会使用默认值。读取期间，GoModel 每 15 s 发送一次 SSE 注释
+`: gomodel-buffering`，以免代理和客户端超时；SDK 会忽略注释行。response 链运行后，原始字节会被原样重放（`allow`、`warn`），
+或根据修改后的补全结果合成一个流（带修改的 `allow`、`respond`），或者发送一个错误分块（`block`）。
+
+**混合链**：如果任一 stream 实例要求 `buffer`，或者工作流中存在任何 `response` 步骤，则整个流都会被缓冲，`transform` 实例在重放过程中运行。
+
+**流上的警告**：当 response 或 stream 插件运行时，GoModel 会在发送响应体的第一批字节时才提交 HTTP 头，而不是提前提交，因此只要缓冲在第一个
+keep-alive 注释（15 s）之前完成，针对缓冲响应做出的 `warn` 就会以
+`X-GoModel-Guardrail` 响应头的形式到达客户端。之后做出的警告（在
+`transform` 流的 `OnStreamEnd` 中，或在发出 keep-alive 之后）无法更改已发送的响应头；但它仍会记录在审计记录和日志中。
+
+**截断流**：`transform` 模式下的 `terminate` 决策，或 `OnStreamEnd` 返回的
+`block`/`respond`，会以
+`finish_reason: "content_filter"`（Anthropic 为 `stop_reason: "end_turn"`）结束流，随后发送 `[DONE]`。
+客户端会保留已经收到的内容。如果在做出决策之前不允许泄露任何内容，插件必须使用 `buffer` 模式；内置的
+`string_replace` 和 `llm_judge` 对 `block` 和 `respond` 正是这样处理的。
+
+## Exchange 对象
+
+每个 Hook 都会收到一个 `*pluginapi.Exchange`，在一个请求的各个阶段中都是同一个对象：
+
+| 字段 | 类型 | 内容 |
+| --- | --- | --- |
+| `Meta` | `Meta` | 只读的请求信息：请求 ID、协议（dialect）、端点、用户路径、密钥 ID、标签、会话 ID、请求的模型和解析后的模型、提供商、工作流版本和功能、`Stream`、提供商 `Attempts`（response 阶段）、提示词缓存规划 |
+| `Prompt` | `*Prompt` | 对话（带稳定 ID 和类型化 `Parts` 的 `Messages`：文本、图像、音频、文件、工具调用、工具结果、推理、拒答、不透明内容）、`Tools`、`Params`、原始请求体。通过 `SetText`、`SetMedia`、`SetToolArguments`、`SetToolResult`、`Insert`、`Append`、`Remove`、`SetParam` 进行修改；`TextTargets(roles...)` 列出所有文本部分（包括工具结果中的文本），`SetTargetText` 将修改写回其中之一 |
+| `Response` | `*Completion` | 响应，在 response 阶段之前为 `nil`：使用相同 `Part` 模型的 `Choices`、`Usage`、原始响应体。通过 `SetText`、`ReplaceText`、`SetFinishReason`、`SetToolArguments` 进行修改；`TextTargets` 和 `SetTargetText` 的用法与 `Prompt` 上相同 |
+| `Stream` | `*StreamState` | 每个选项目前为止累积的文本和事件计数；非流式请求为 `nil` |
+| `Headers` | `*Headers` | `Request`（入站请求头，凭据已脱敏；prompt 阶段的修改会作用于实时请求，供后续插件和请求日志使用，但不会作用于提供商调用）、`Response`（应用于客户端响应；设置为空字符串的 Header 会被删除，包括网关添加的 Header，例如 `X-Request-Id`）、`Upstream`（会被记录，但当前版本不会转发） |
+| `Values` | `Values` | 请求内所有 Hook 共享的键值集合；键名请以插件名称作为前缀 |
+
+修改需要通过方法进行，而不是直接给字段赋值，这样 GoModel 只会重新编码发生变化的部分，未被修改的消息会保留所有提供商特定的字段
+（`cache_control`、多部分内容、额外字段）。删除一条带有工具调用、但其结果仍然存在的消息（或反之）会返回一个
+`DanglingToolError`，指明对应的配对消息；如果该配对仍处于断开状态，请求会被拒绝。
+
+扫描或改写文本的插件无需自行遍历各部分：
+`Prompt.TextTargets(roles...)` 会为每个文本部分（纯文本以及工具结果中的文本）返回一个 `TextTarget`，其中包含消息 ID、角色、部分索引和当前文本，
+`Prompt.SetTargetText(target, text)` 会将修改写回。`Completion.TextTargets()` 和 `Completion.SetTargetText` 对响应中的选项执行同样的操作。
+内置的 `string_replace` 和
+`llm_based_altering` 就是这样编写的。
+
+媒体也可以修改。`Part.DecodeMedia()` 返回以 data URI 形式发送的图像或 chat 输入音频的内联字节和媒体类型，
+`Prompt.SetMedia(msgID, partIdx, mediaType, data)` 会替换图像或音频部分的负载：该部分会以 data URI（图像）或 base64
+输入音频的形式重新发出，传输格式中该部分的其他成员（例如图像的
+`detail`）会被保留。通过 URL 引用的图像没有可解码的内联内容；需要对其脱敏的插件需自行获取该图像。工具结果中的媒体使用 `SetToolResult` 替换。
+
+`Meta.Cache.PlannedPrefixMessages` 告诉 prompt 插件，提供商缓存规划器会将开头的多少条消息标记为缓存前缀。
+在末尾追加内容会保留缓存；修改前缀内的内容会使该会话的缓存失效。
+
+## 配置
+
+### 启用插件系统
+
+```yaml
+plugins:
+  enabled: true    # PLUGINS_ENABLED；默认值：false
+```
+
+插件系统默认关闭。关闭时，与插件相关的一切都不存在：没有内置或已加载的插件类型，不加载 `.so`，没有护栏，
+也没有路由策略插件（使用 `strategy: plugin` 的虚拟模型会被拒绝）。`GET /admin/plugins` 和 `/admin/guardrails` 端点会返回
+`503` 及错误码 `feature_unavailable`，控制台也会隐藏 Plugins & Guardrails
+页面。护栏是插件实例，因此 `GUARDRAILS_ENABLED=true` 会隐式开启插件系统；如果要使用路由策略插件，
+或者只管理护栏定义而不运行它们，请单独设置 `PLUGINS_ENABLED=true`。
+
+### 实例
+
+实例可以在 `guardrails.rules` 中声明，也可以在控制台中创建；两者存储在同一个位置。各类型的设置请参阅 [护栏](/zh/advanced/guardrails)。
+
+```yaml
+guardrails:
+  enabled: true
+  rules:
+    - name: "mask-keys"
+      type: "string_replace"      # 内置插件，或已加载插件的 manifest 名称
+      phase: "response"           # prompt（默认）| response | stream
+      order: 10                   # 阶段内的步骤
+      fail_mode: "open"           # closed（默认）| open
+      timeout_ms: 500             # 0 = 不设实例级超时（默认）
+      config:                     # 根据插件的 ConfigSchema 进行校验
+        mode: "regex"
+        rules: |
+          sk-[A-Za-z0-9]{20,} => [redacted]
+```
+
+`config.yaml` 中的规则会按 `phase` 中的 `order` 写入托管的默认工作流。`type` 可以带有可选的 `plugin:` 前缀。
+
+### 加载 `.so` 文件
+
+```yaml
+plugins:
+  search_paths: ["/etc/gomodel/plugins"]   # PLUGINS_SEARCH_PATHS，逗号分隔；默认值：空
+  load:
+    - file: acme_guard.so                  # 相对于某个搜索路径，或使用绝对路径
+      sha256: "3b1f..."                    # 可选的摘要固定；不匹配时启动失败
+```
+
+相对路径的 `file` 必须解析到某个 `search_paths` 之内（会跟随并检查符号链接）。无法解析、校验或打开的文件会导致启动错误，错误信息中会指明该文件。
+
+没有 `config.yaml` 的部署可以通过环境变量列出相同的条目：`PLUGINS_LOAD` 是以逗号分隔的 `file` 值列表，每一项都可以写成
+`file=sha256` 以固定摘要。只有最后一个 `=` 且其后紧跟恰好 64 个十六进制字符时，才会被视为摘要固定；其他条目都视为文件名。
+该变量非空时，会替换
+`config.yaml` 中的 `plugins.load` 列表（环境变量 > 配置文件，与其他所有可通过环境变量配置的值一致）。
+
+`GUARDRAILS_ENABLED` 仍然是决定已配置实例是否作用于流量的开关。
+
+## 控制台
+
+- **Plugins & Guardrails 页面**：*Create Guardrail* 会列出所有实现了
+  `prompt`、`response` 或 `stream` Hook 的插件。表单根据插件的 `ConfigSchema` 生成：`text`、`textarea`、`number`、`select`、
+  `checkboxes`、`bool`（开关）、`list`（自由文本条目，每行一个，以字符串数组存储）、`secret`（掩码显示；`GET` 返回 `********`，
+  将该字面值原样发回会保留已存储的值），以及 `model`（与 Playground 和虚拟模型编辑器相同的可搜索模型选择器，列出网关的模型；别名或虚拟模型需手动输入）。
+  **Advanced** 部分包含 *Fail mode*（Default、Closed、Open）
+  和 *Timeout (ms)*；它们作用于所有引用该实例的工作流中的该实例。
+- **插件列表**：位于 Plugins & Guardrails 页面底部，列出每个已加载的插件类型及其标题和名称（先是 `Header Edit`，然后是
+  `header_edit`，配置中引用的是名称）、版本、Hook、来源（内置、注册，或 `.so` 路径）以及健康状态。护栏插件（其实例会对提示词、响应或流应用策略）
+  带有盾牌标识并排在最前面；路由策略也是插件，但不属于护栏。加载失败的插件会连同其错误一起列出。只要插件系统开启，该页面就会显示。
+- **Workflows 页面**：每个步骤都有一个 *Phase* 选择器；实例下拉列表只提供其插件实现了该阶段的实例。
+
+## 共享对象插件
+
+规则由 Go 的 `plugin` 包决定，而且非常严格：
+
+- **平台**：Linux、macOS 和 FreeBSD，且仅适用于使用
+  `CGO_ENABLED=1` 构建的二进制文件。默认的 GoModel 二进制文件和镜像是静态链接的，会拒绝 `.so` 文件并给出相应的错误提示。
+  请使用 `make build-plugins`
+  （`bin/gomodel-plugins`）或 `gomodel:<version>-plugins` 镜像
+  （`make image-plugins`，基于 `Dockerfile.plugins` 构建，glibc 运行时）。
+- **完全一致的工具链**：插件必须使用**相同的 Go 版本**、**相同的构建参数**（`-trimpath`、`-race`、`-tags`）以及**所有共享包完全相同的源码**进行构建。
+  只有标准库和 `pluginapi` 是共享的，因此 GoModel 的内部变更永远不会影响插件，
+  但每个 GoModel 版本和每次 Go 工具链更新（包括补丁版本）都需要重新构建。请将其作为 CI 步骤。
+- **无法卸载**：`.so` 会一直保持加载状态，直到重启。修改已加载的文件需要重启才能生效；
+  编辑实例的配置则会在新的值上重新运行 `Init`，无需重启。
+- **受信任的代码**：加载 `.so` 等同于修改二进制文件。在生产环境中，请确保
+  `search_paths` 归 root 所有，并固定 `sha256`。
+
+### 构建与检查
+
+```sh
+gomodel plugin build ./docs/example_plugins/keywordblock -o plugins/keyword_block.so
+gomodel plugin inspect plugins/keyword_block.so
+shasum -a 256 plugins/keyword_block.so     # 用作 plugins.load[].sha256 的值
+```
+
+`plugin build` 会使用运行它的 `gomodel` 二进制文件中记录的构建参数运行 `go build -buildmode=plugin`，强制设置 `CGO_ENABLED=1`，
+将 `GOTOOLCHAIN` 固定为主机的 Go 版本，在插件中写入 `GoModelBuildInfo` 变量，并拒绝 Go 版本与主机不同的输出。
+请始终使用将要加载该插件的二进制文件来构建插件。`plugin inspect`
+会打开文件并打印其 manifest、配置 schema 和构建信息。加载被拒绝时，错误信息会同时列出双方的信息：
+
+```
+plugin file /app/plugins/x.so was built with a different toolchain, flags, or
+pluginapi sources: it was built with go1.27.3, gomodel v0.1.90, flags -trimpath;
+this binary was built with go1.27.3, gomodel v0.1.91, flags (none). Rebuild it
+with `gomodel plugin build` from this GoModel version
+```
+
+在 Docker 中，请构建 `Dockerfile.plugins` 的 `plugin-builder` 目标，并针对您的插件目录运行它：
+
+```sh
+docker build -f Dockerfile.plugins --target plugin-builder -t gomodel-plugin-builder .
+docker run --rm -v "$PWD/my-plugin:/src" -v "$PWD/plugins:/out" \
+  gomodel-plugin-builder -o /out/my-plugin.so /src
+```
+
+`gomodel --version` 会打印二进制文件的 Go 版本和 `pluginapi` 版本。
+`docs/example_plugins/README.md` 介绍了如何在独立的 Go 模块中构建插件。
+
+## 编写插件
+
+导出 `func GoModelPlugin() pluginapi.Plugin` 的 `package main` 就是一个共享对象插件；用 `ext.RegisterPlugin` 注册的同一类型则是编译进二进制的插件。
+下面的插件会在最后一条用户消息包含已配置的词语时阻断请求：
+
+```go
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+
+	"github.com/enterpilot/gomodel/pluginapi"
+)
+
+type wordBlock struct {
+	words   []string
+	enforce pluginapi.Enforcement
+}
+
+func (p *wordBlock) Manifest() pluginapi.Manifest {
+	return pluginapi.Manifest{
+		Name:      "word_block",
+		Version:   "1.0.0",
+		Kinds:     []pluginapi.Kind{pluginapi.KindPrompt},
+		Guardrail: true,
+		ConfigSchema: []pluginapi.Field{
+			{
+				Key: "words", Label: "Blocked words", Input: pluginapi.InputList,
+				Required: true, Help: "One word per line.",
+			},
+			{
+				Key: "action", Label: "On match", Input: pluginapi.InputSelect, Default: "block",
+				Help: "Block rejects, respond answers with the message, warn records the match.",
+				Options: []pluginapi.Option{{Value: "block", Label: "Block"}, {Value: "respond", Label: "Respond"}, {Value: "warn", Label: "Warn"}},
+			},
+			{Key: "message", Label: "Message", Input: pluginapi.InputText, Default: "request blocked by policy", Help: "Error, reply, or audit note."},
+			pluginapi.BlockStatusField(),
+		},
+	}
+}
+
+func (p *wordBlock) Init(_ context.Context, raw json.RawMessage, _ pluginapi.Host) error {
+	cfg, err := pluginapi.ParseConfig("word_block", p.Manifest().ConfigSchema, raw)
+	if err != nil {
+		return err
+	}
+	for _, w := range cfg.List("words") {
+		p.words = append(p.words, strings.ToLower(w))
+	}
+	p.enforce = pluginapi.Enforcement{
+		Action:      pluginapi.Action(cfg.Choice("action", "block", "block", "respond", "warn")),
+		Message:     cfg.String("message", "request blocked by policy"),
+		BlockStatus: cfg.BlockStatus("block_status"),
+	}
+	return cfg.Err()
+}
+
+func (p *wordBlock) Close(context.Context) error { return nil }
+
+func (p *wordBlock) OnPrompt(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+	if x.Prompt == nil || x.Prompt.LastUser() == nil {
+		return pluginapi.Allow(), nil
+	}
+	text := strings.ToLower(x.Prompt.LastUser().Text())
+	for _, w := range p.words {
+		if strings.Contains(text, w) {
+			return p.enforce.Enforce("word_block", map[string]any{"word": w}), nil
+		}
+	}
+	return pluginapi.Allow(), nil
+}
+
+func GoModelPlugin() pluginapi.Plugin { return &wordBlock{} }
+
+func main() {}
+```
+
+编写插件的注意事项：
+
+- `Init` 收到的配置已根据 `ConfigSchema` 校验：已应用默认值，数字、布尔值和列表已完成类型转换，未知键会被拒绝，必填键已检查。
+  面向行的 `textarea` 字段既接受 YAML 字符串列表，也接受块标量；`list` 字段接受列表或一行逗号分隔的内容，并以 JSON 数组形式传入；`bool`
+  字段接受布尔值或文本形式的 `true`/`false`，并以 JSON 布尔值传入。每个已配置的实例都会调用一次该方法，编辑实例时会再次调用。
+- 请使用 `pluginapi.ParseConfig` 及其类型化读取器
+  （`String`、`Choice`、`Bool`、`Int`、`Float`、`OptionalFloat`、`List`、
+  `Lines`、`Roles`、`BlockStatus`）读取配置，而不是使用结构体：每个读取器都会执行控制台和 config.yaml 所需的相同类型转换，
+  出现问题时返回其默认值，`Err()` 会报告第一个问题并指明对应的键，因此解码器只需一串赋值语句加一次检查。
+  `RoleOptions()` 是 `Roles` 可识别的复选框列表。
+- 通过 `pluginapi.Enforcement` 输出检测结果：将 `action`、
+  `message`、`block_status` 以及可选的 `respond_text` 读入其中，然后
+  `Enforce(code, detail)` 会给出阻断错误、respond 补全结果或警告，而 `Reject(code, detail)` 即使在动作为 warn 时也会给出 block 或 respond
+  （用于绝不能放行的检测结果）。`BlockStatusField()`
+  是约定俗成的 `block_status` 字段。内置护栏都共用这套机制，因此它们的 block、respond 和 warn 行为一致。
+- 导出一个**构造函数**（`func GoModelPlugin() pluginapi.Plugin`），这样一个文件就可以支持多个实例。`var GoModelPlugin pluginapi.Plugin`
+  也可以使用，但会将该文件限制为单个实例。
+- 当插件会修改 `Prompt`、`Response` 或流时，请设置 `Mutates: true`。非修改型插件可以共享同一步骤并发运行。
+- 当插件的实例属于护栏时，请设置 `Guardrail: true`：护栏是应用于提示词、响应或流的策略，无论其作用是阻断、回答、警告还是改写。
+  所有内置的流量插件都设置了该标志（`llm_judge`、
+  `string_replace`、`tag_replace`、`header_edit`、`system_prompt`、
+  `llm_based_altering`）；
+  像 `cheapest_healthy` 这样的路由策略从不接触流量，因此保持为 false。运行时会忽略该标志；控制台会用盾牌标识护栏插件及其实例，并将其排在最前面。
+- 传给 `Init` 的 `Host` 提供 `Logger()`（已预先标记插件和实例）、`Inference().Complete(...)`（通过网关进行的聊天补全，来源为 `plugin`，
+  在预算和审计中归属于 `<user path>/guardrails/<instance>`）、`Metrics()`（名称以 `plugin_<name>_` 为前缀），以及
+  `HTTPClient()`，用于调用分类器或 PII 检测器等外部服务。该客户端由所有实例共享，使用网关的代理环境和连接池，并以 60 s 超时作为兜底；
+  请使用 `http.NewRequestWithContext` 构建请求，以便实例的 `timeout_ms` 限制每次调用。在当前版本中，`History()` 会返回错误。
+- 宿主还实现了可选的 `pluginapi.DecisionsHost`。请在 `Host` 上对其进行类型断言，然后调用 `Decisions().Decide(ctx, req)`，
+  像 `POST /v1/decisions` 那样向决策模型提出关于某个输入的类型化问题。问题可以是谓词（“是”的概率）、选择或评分。该调用的作用域和用量计算方式与 `Inference().Complete` 相同。
+  `Decisions().DecisionModel(model)` 用于判断某个模型是否只回答决策（例如任何 `jev` 模型）。`llm_judge` 同时使用这两者，
+  依据概率进行拦截，而不是解析聊天裁决：
+
+  ```go
+  if dh, ok := host.(pluginapi.DecisionsHost); ok {
+  	result, err := dh.Decisions().Decide(ctx, pluginapi.DecisionRequest{
+  		Model:     "jev/jev-latest",
+  		Input:     []pluginapi.Message{pluginapi.TextMessage(pluginapi.RoleUser, text)},
+  		Questions: []pluginapi.Question{{Type: pluginapi.QuestionPredicate, Name: "spam", Instructions: "Is this spam?"}},
+  	})
+  	// result.Answers[0].Probability, unless result.Answers[0].Refused()
+  }
+  ```
+- 添加 `Summarize(config json.RawMessage) string` 可在护栏列表中显示一行摘要，添加 `Normalize(config) (json.RawMessage, error)`
+  可在存储配置之前将其规范化。两者都是可选的。
+- 当实例依赖进程外部的组件（例如分类器 sidecar）时，请实现 `pluginapi.HealthChecker`（`Health(ctx) error`）。
+  GoModel 会在请求路径之外对其进行探测：实例构建完成时探测一次，之后每次护栏刷新时（`workflows.refresh_interval`，默认一分钟）再探测，
+  截止时间为 5 s。探测失败会在 `GET /admin/guardrails` 和控制台中将该实例标记为
+  `degraded`，并以错误作为原因，每次状态切换时记录一次日志；错误文本不得包含 Secret，且会被截断为 256 个字符。健康状态仅供参考：
+  流量仍会按该实例的 `fail_mode` 经过它。
+- 当声明了 `Mutates` 的插件可以被配置为不修改内容时（例如设置为仅标记而不改写的检测器），请实现 `pluginapi.ContentEditor`（`EditsContent() bool`）。
+  GoModel 在执行仅针对修改型插件的工作之前会询问已配置的实例，即重放链式 Responses 请求的已存储历史，而不是让提供商自行解析
+  `previous_response_id`。它从不改变 Hook 的运行方式，未实现该接口的修改型插件会被视为会修改内容。
+- 字段输入类型 `secret` 和 `model` 分别用于外部分类器的 API 密钥和模型选择器；`secret` 值在所有管理响应中都会被掩码处理。
+  开关请使用 `bool`，开放式字符串列表（实体类型、允许列表）请使用 `list`，而不要将它们编码在 `select` 或
+  `textarea` 中。
+- 对属于虚拟模型而非实例的字段，请添加 `Scope: pluginapi.ScopeRoute`（仅限路由策略）。
+
+`docs/example_plugins/keywordblock/main.go` 是一个更完整、带注释的示例，包含
+`prompt` 和 `response` Hook；`internal/plugins/builtin/` 下的内置插件则是每种 Hook 类型的参考实现。
+
+### 测试插件
+
+`pluginapi/plugintest` 可以在不依赖 GoModel 的情况下测试插件：
+
+- `plugintest.NewHost(replies...)` 是一个模拟的 `Host`：提供预设的推理回复（或 `Reply` 函数，或 `Err`）、由
+  `Answer` 函数作答的决策（未提供该函数时，所有问题都会被拒绝回答）、用于 `DecisionModel` 的 `DecisionModels`、记录的 `Requests()` 和 `DecisionRequests()`、
+  记录的 `Recorded()` 指标，以及一个可设置的 HTTP 客户端，用于通过 `httptest` 启动的模拟 sidecar。
+- `plugintest.Init`、`Text`、`Prompt`、`Completion` 和 `Exchange` 用于构建 Hook 调用所需的测试数据，带有干净的变更跟踪和一个 Values 集合。
+- `plugintest.RunStream(ctx, hook, x, events)` 会按照宿主在其 `StreamPolicy` 下的方式驱动 `StreamHook`：分块合并、通过 `Overlap` 再次呈现扣留的回看尾部、
+  对整个窗口应用 pass、replace、drop 和 terminate，以及在缓冲模式下为 `OnResponse` 组装补全结果。结果中包含客户端在每个选项上会收到的文本、
+  已投递的事件、terminate 决策以及结束决策。
+
+以下示例来自 `string_replace` 的测试，其中 `New` 是该插件的构造函数：
+
+```go
+p := plugintest.Init(t, New, `{"rules": "secret => [x]", "stream_lookbehind": 4}`, nil)
+res, err := plugintest.RunStream(ctx, p.(pluginapi.StreamHook), plugintest.Exchange(nil, nil), []*pluginapi.StreamEvent{
+	plugintest.TextDelta("my se"), plugintest.TextDelta("cret is safe"),
+})
+// res.Text[0] == "my [x] is safe"：被拆分在两个增量中的匹配只被改写了一次。
+```
+
+缓冲模式仅根据文本和推理增量组装补全结果；如果 Hook 需要看到工具调用、用量或结束原因，请在调用 `RunStream` 之前自行设置 `x.Response`。
+
+## 路由策略插件
+
+实现了 `pluginapi.RouteStrategy` 的插件就是 [虚拟模型](/zh/features/virtual-models#在多个模型之间进行负载均衡) 的一种负载均衡策略：
+
+```go
+type RouteStrategy interface {
+	Select(ctx context.Context, req RouteRequest) (RouteChoice, error)
+	OnAttemptEnd(outcome RouteOutcome)
+}
+```
+
+`RouteRequest` 包含虚拟模型的 `Source`、按配置顺序排列的 `Candidates`（提供商、模型、`provider/model`、权重，以及已知时的每百万 Token 价格）、
+会话 ID 和会话保持的 `SessionTarget`、
+`Meta`，以及 JSON 格式的虚拟模型 `strategy_config`（在当前版本中 `Prompt` 为 `nil`）。`Select` 返回所选的 `Qualified` 目标和一个可选的
+`Reason`（仅用于调试日志）；`OnAttemptEnd` 报告成功与否、状态、延迟和超时，以便策略进行调整。故障转移链、容量探测和会话固定仍由 GoModel 负责。
+
+在虚拟模型上选择该策略：
+
+```yaml
+virtual_models:
+  - source: smart-router
+    strategy: plugin                    # round_robin | cost | failover | adaptive | plugin
+    strategy_plugin: cheapest_healthy   # 插件名称；使用 strategy: plugin 时必填
+    strategy_config:                    # 插件中 Scope: route 的字段；省略时使用默认值
+      prefer: cheapest                  # cheapest | fastest
+      max_error_rate: 0.2
+    targets:
+      - openai/gpt-4o-mini
+      - anthropic/claude-haiku-4-5
+```
+
+- `strategy_config` 会根据插件的路由作用域字段（`GET /admin/plugins` 中的 `route_fields`）进行校验。使用 `strategy: plugin` 但未设置
+  `strategy_plugin` 属于校验错误，`PUT /admin/virtual-models`
+  也会拒绝不是已加载且带有 `route` Hook 的插件名称。
+- 在插件策略下，目标的 `weight` 会被忽略。
+- 路由插件的实例作用域字段（端点、API 密钥）来自一个**名称和类型都等于插件名称**的护栏定义；如果没有这样的定义，插件会以 `{}` 初始化。
+  目前，实例作用域的 `secret` 值传给路由插件时是脱敏后的。保存该定义会重建实例；之前的实例会在其进行中的 `Select` 调用返回后关闭。
+- 当插件缺失、不是路由插件、初始化失败、`strategy_config` 无效，或者 `Select` 出错、panic、耗时超过 250 ms、
+  或返回的目标不在可用池中时，GoModel 会回退到加权轮询，并为每个虚拟模型记录一条警告。
+
+在控制台中，虚拟模型编辑器的策略下拉列表会为每个已加载的路由插件列出一个
+`plugin:<name>` 条目（运行时配置中的 `VIRTUAL_MODEL_STRATEGIES` 为 `round_robin,cost,failover[,adaptive],plugin:<name>,...`）；
+选择后，会在目标表格下方显示该插件的路由字段。
+
+`cheapest_healthy` 是内置的参考策略
+（`internal/plugins/builtin/routeexample`）。它为每个目标保留最近 50 次结果，并在错误率不高于
+`max_error_rate`（默认 `0.2`）的目标中，选择最便宜的（`prefer: cheapest`，默认）或中位延迟最低的（`prefer: fastest`）目标；
+它会保留健康的 `SessionTarget`，当没有健康目标时会考虑所有候选目标。
+
+## 管理端点
+
+所有端点都需要与 `/admin` 其他部分相同的管理员凭据。
+
+### GET /admin/plugins
+
+返回网关已知的所有插件类型，包括加载失败的插件：
+
+```json
+[
+  {
+    "name": "string_replace",
+    "label": "String Replace",
+    "version": "1.0.0",
+    "description": "Replaces, flags, or blocks text matching literal or regex rules in prompts, responses, and streams.",
+    "kinds": ["prompt", "response", "stream"],
+    "mutates": true,
+    "guardrail": true,
+    "source": "builtin",
+    "fields": [{ "key": "rules", "label": "Rules", "input": "textarea", "required": true }],
+    "route_fields": [],
+    "health": "ok",
+    "error": ""
+  }
+]
+```
+
+`source` 为 `builtin`、`registered`（通过 `ext` 编译进二进制）或 `.so` 的绝对路径。`fields` 是实例作用域的 schema 字段，
+`route_fields` 是路由作用域的字段。使用 `gomodel plugin
+build` 构建的 `.so` 还会报告 `built_with`（Go 和 `pluginapi` 版本）。
+
+### GET /admin/guardrails/types
+
+每个实现了 `prompt`、`response` 或 `stream` Hook 的插件对应一个条目，其结构与护栏编辑器渲染的格式一致：
+
+```json
+{
+  "type": "llm_judge",
+  "label": "LLM Judge",
+  "description": "Asks a judge model whether prompts and responses violate a policy, then blocks, answers, or flags them.",
+  "defaults": { "action": "block", "max_tokens": 256, "target": "auto" },
+  "fields": [{ "key": "model", "label": "Judge model", "input": "model", "required": true }],
+  "phases": ["prompt", "response", "stream"],
+  "source": "builtin",
+  "mutates": false,
+  "guardrail": true
+}
+```
+
+`phases`、`source`、`mutates` 和 `guardrail` 是新增字段（`GET /admin/guardrails` 返回的实例视图同样包含 `guardrail`）；`fields[].input` 现在可以是
+`secret`、`model`、`bool` 或 `list`，`fields[].scope` 为 `""`（实例）或 `"route"`。
+
+### GET, PUT, DELETE /admin/guardrails
+
+定义新增了 `fail_mode`（`closed` | `open`，留空表示使用阶段默认值）
+和 `timeout_ms`（`0` 表示不设超时）；视图还额外包含 `phases`（来自插件 manifest）、`summary` 和 `health`（`ok` | `degraded`；对于实现了健康探测的插件，还包含
+`health_error` 和 `health_checked_at`）。`PUT` 接受这两个新字段。已存储的
+`secret` 值会以 `********` 返回；原样发回即可保留，发送 `""` 则清除。
+
+### GET /admin/workflows/guardrails
+
+返回工作流步骤可用的实例，以及每个实例支持的阶段：
+
+```json
+[{ "name": "pii-redact", "type": "llm_based_altering", "phases": ["prompt", "response"], "summary": "openai/gpt-4o-mini • user • default prompt" }]
+```
+
+### 工作流负载版本 2
+
+`POST /admin/workflows` 接受 `schema_version: 2`，其中 `steps[]` 带有
+`phase`；版本 1 的负载（`guardrails: [{ref, step}]`）仍然有效，并会原样返回。工作流视图通过
+`chain_hashes` 公开各阶段的链哈希。请参阅 [工作流](/zh/advanced/workflows#护栏步骤)。

@@ -1,0 +1,222 @@
+---
+title: "llm-d"
+description: "Kieruj requesty GoModel przez llm-d Inference Gateway i wstrzykuj zaufane metadane schedulingu."
+icon: "route"
+keywords: ["llm-d", "Inference Gateway", "EPP", "Kubernetes", "inference scheduling", "scheduling inferencji"]
+---
+
+Provider `llmd` w GoModel wysyła requesty kompatybilne z OpenAI do
+[llm-d Router](https://llm-d.ai/docs/dev/architecture/core/router) i dodaje
+zaufane metadane schedulingu dla Endpoint Pickera (EPP). Używaj tego providera,
+gdy GoModel jest uwierzytelniającym API gatewayem przed llm-d.
+
+## Wymagania wstępne
+
+- Działające wdrożenie llm-d z HTTPRoute, który prowadzi do Routera/EPP.
+- Nazwa modelu udostępnianego przez tę trasę.
+- Dostęp sieciowy z GoModel do usługi Routera.
+
+[Quickstart llm-d](https://llm-d.ai/docs/dev/getting-started/quickstart)
+tworzy usługę EPP nazwaną na podstawie release'u z przewodnika. Użyj nazwy usługi z
+własnego wdrożenia.
+
+## Konfiguracja za pomocą zmiennych środowiskowych
+
+```bash
+LLMD_BASE_URL=http://quickstart-epp.llm-d.svc.cluster.local/v1
+LLMD_MODELS=Qwen/Qwen2.5-0.5B-Instruct
+GOMODEL_MASTER_KEY=change-me
+
+# Opcjonalne ustawienia
+LLMD_INFERENCE_OBJECTIVE=standard-traffic
+LLMD_FAIRNESS_FROM_USER_PATH=true
+# LLMD_API_KEY=router-token
+```
+
+`LLMD_BASE_URL` jest wymagany i powinien zawierać `/v1`. `LLMD_API_KEY` jest
+opcjonalny; ustaw go, gdy Gateway przed llm-d wymaga uwierzytelniania
+bearer.
+
+Gdy `LLMD_INFERENCE_OBJECTIVE` jest pominięty, GoModel nie wysyła nagłówka inference
+objective. Ustaw go, gdy wdrożenie llm-d definiuje wiele inference
+objectives, a ten provider GoModel powinien wybrać jeden z nich.
+
+Zadeklaruj `LLMD_MODELS`, gdy Twoja trasa nie obsługuje `GET /v1/models`. GoModel
+używa tej listy jako inwentarza modeli providera.
+
+## Konfiguracja za pomocą YAML
+
+```yaml
+providers:
+  llmd:
+    type: llmd
+    base_url: "http://quickstart-epp.llm-d.svc.cluster.local/v1"
+    inference_objective: "standard-traffic"
+    fairness_from_user_path: true
+    models:
+      - id: "Qwen/Qwen2.5-0.5B-Instruct"
+```
+
+`fairness_from_user_path` ma domyślnie wartość `true`. GoModel wyznacza fairness ID
+z efektywnego [`user_path`](/pl/features/user-path), po zastosowaniu uwierzytelniania
+i polityki klucza. Ustaw `false`, jeśli metadane fairness ustawia inna zaufana
+warstwa.
+
+<Note>
+  Surowy nagłówek `X-GoModel-User-Path` przesłany przez klienta nie wystarcza do ustawienia
+  fairness ID. Przypisz ścieżkę do zarządzanego klucza uwierzytelniającego lub tożsamości z rozszerzenia, żeby
+  GoModel mógł traktować ją jako efektywną, uwierzytelnioną ścieżkę.
+</Note>
+
+<Warning>
+  Nie przekazuj dalej nagłówków schedulingu llm-d przesłanych przez klienta z niezaufanego
+  brzegu sieci. W przeciwnym razie klient mógłby wybrać inny objective lub inną grupę fairness.
+  Dedykowany provider usuwa nagłówki sterujące llm-d i Gateway API Inference Extension
+  z requestów passthrough, a następnie wstrzykuje skonfigurowane wartości.
+</Warning>
+
+Dla objective i fairness ID GoModel wysyła zarówno aktualne nagłówki `x-llm-d-*`,
+jak i przestarzałe aliasy `x-gateway-*` z tymi samymi zaufanymi wartościami.
+Dzięki temu obsługiwane są stabilne wdrożenia llm-d 0.8, a jednocześnie używane są kanoniczne nazwy
+rozpoznawane przez llm-d 0.9 i nowsze.
+
+Gdy flow control w EPP zwróci `429` na tłumaczonej trasie inferencji, GoModel
+zachowuje nagłówek odpowiedzi `x-llm-d-request-dropped-reason`, żeby klienci mogli
+odróżnić odrzucenie od usunięcia requestu po jego wysłaniu.
+
+## Weryfikacja
+
+Najpierw utwórz w dashboardzie zarządzany klucz API GoModel, przypisz jego `user_path`
+do `/team/alpha` i przypisz zwróconą wartość do `TEAM_ALPHA_GOMODEL_KEY`.
+To przypisanie klucza, a nie nagłówek deklarowany przez klienta, ustala fairness
+ID używane przez ten request.
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer ${TEAM_ALPHA_GOMODEL_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llmd/Qwen/Qwen2.5-0.5B-Instruct",
+    "messages": [{"role": "user", "content": "Reply with exactly ok."}]
+  }'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["TEAM_ALPHA_GOMODEL_KEY"],
+)
+
+completion = client.chat.completions.create(
+    model="llmd/Qwen/Qwen2.5-0.5B-Instruct",
+    messages=[{"role": "user", "content": "Reply with exactly ok."}],
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.TEAM_ALPHA_GOMODEL_KEY,
+});
+
+const completion = await client.chat.completions.create({
+  model: "llmd/Qwen/Qwen2.5-0.5B-Instruct",
+  messages: [{ role: "user", content: "Reply with exactly ok." }],
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
+
+GoModel usuwa zewnętrzny kwalifikator routingu `llmd/` przed wysłaniem nazwy modelu
+do upstreamu. Identyfikatory modeli Hugging Face zawierające ukośnik pozostają nienaruszone.
+
+## Obsługiwane trasy
+
+Provider implementuje chat completions, Responses, embeddingi i listowanie
+modeli przez API kompatybilne z OpenAI. Passthrough jest domyślnie włączony
+dla pozostałych tras z
+[dokumentacji referencyjnej HTTP API llm-d](https://llm-d.ai/docs/dev/api-reference/epp-http-apis),
+w tym OpenAI completions, Anthropic Messages i vLLM Generate:
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/p/llmd/completions \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen/Qwen2.5-0.5B-Instruct",
+    "prompt": "Hello"
+  }'
+```
+
+```python Python
+import httpx
+
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="change-me")
+completion = client.post(
+    "/p/llmd/completions",
+    cast_to=httpx.Response,
+    body={
+        "model": "Qwen/Qwen2.5-0.5B-Instruct",
+        "prompt": "Hello",
+    },
+)
+
+print(completion.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "change-me",
+});
+
+const completion = await client.post("/p/llmd/completions", {
+  body: {
+    model: "Qwen/Qwen2.5-0.5B-Instruct",
+    prompt: "Hello",
+  },
+});
+
+console.log(completion);
+```
+
+</CodeGroup>
+
+Osobny llm-d Batch Gateway nie jest udostępniany jako natywne batch API GoModel.
+Ten provider nie udostępnia też endpointów plików, audio ani pomocniczych endpointów
+cyklu życia Responses.
+
+## Wiele tras llm-d
+
+Użyj zmiennych z sufiksem, żeby zarejestrować niezależne usługi Routera:
+
+```bash
+LLMD_PROD_BASE_URL=http://prod-epp.llm-d.svc.cluster.local/v1
+LLMD_PROD_MODELS=Qwen/Qwen3-32B
+LLMD_PROD_INFERENCE_OBJECTIVE=production
+
+LLMD_DEV_BASE_URL=http://dev-epp.llm-d.svc.cluster.local/v1
+LLMD_DEV_MODELS=Qwen/Qwen2.5-0.5B-Instruct
+LLMD_DEV_INFERENCE_OBJECTIVE=development
+```
+
+Te zmienne rejestrują `llmd-prod` i `llmd-dev`. Wybierasz je nazwami modeli,
+takimi jak `llmd-dev/Qwen/Qwen2.5-0.5B-Instruct`.

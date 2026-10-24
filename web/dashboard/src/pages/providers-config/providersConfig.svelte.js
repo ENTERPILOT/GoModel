@@ -23,6 +23,7 @@ import {
   validateProviderCredentialForm,
   buildProviderCredentialPayload,
 } from "./providersConfigLogic.js";
+import { modelRowsToText, modelsTextToRows } from "./providerModels.js";
 import { Trash2 } from "lucide";
 
 class ProvidersConfigState {
@@ -40,6 +41,10 @@ class ProvidersConfigState {
   formMode = $state("create");
   advancedOpen = $state(false);
   form = $state(defaultProviderCredentialForm());
+  // The custom models control shows one row per model ("list") or a text box
+  // for pasting many at once ("text"); modelsText is that box's content.
+  modelsView = $state("list");
+  modelsText = $state("");
   // Per-field validation messages keyed by credential field name, from local
   // checks or from a rejected save's `param`. focusField names the input the
   // editor should move to; it is cleared once the editor has done so.
@@ -138,6 +143,8 @@ class ProvidersConfigState {
   #resetForm(mode, form) {
     this.formMode = mode;
     this.form = form;
+    this.modelsView = "list";
+    this.modelsText = "";
     this.advancedOpen = false;
     this.error = "";
     this.fieldErrors = {};
@@ -181,6 +188,7 @@ class ProvidersConfigState {
     const fields = this.formFields;
     if (this.formMode === "create") {
       this.form = resetProviderCredentialFields(this.form, fields);
+      this.modelsText = modelRowsToText(this.form.models);
     }
     const apiKeys = fields.primary.find((field) => field.name === "api_keys");
     if (apiKeys && apiKeys.required && this.form.api_keys.length === 0) {
@@ -206,6 +214,35 @@ class ProvidersConfigState {
   removeApiKeyRow(index) {
     this.form.api_keys.splice(index, 1);
     this.clearFieldError("api_keys");
+  }
+
+  // addModelRow inserts a blank model row at the given position (the end by
+  // default) and returns where it went, so the editor can focus it.
+  addModelRow(at = this.form.models.length) {
+    this.form.models.splice(at, 0, { value: "" });
+    this.clearFieldError("models");
+    return at;
+  }
+
+  removeModelRow(index) {
+    this.form.models.splice(index, 1);
+    this.clearFieldError("models");
+  }
+
+  // setModelsView switches the models control between one row per model and
+  // free text. form.models stays the source of truth in both: the text view
+  // starts from the rows and writes every edit straight back to them.
+  setModelsView(view) {
+    if (view === "text") {
+      this.modelsText = modelRowsToText(this.form.models);
+    }
+    this.modelsView = view;
+  }
+
+  setModelsText(text) {
+    this.modelsText = text;
+    this.form.models = modelsTextToRows(text);
+    this.clearFieldError("models");
   }
 
   // #reportSaveError routes a rejected save to the input that caused it. The

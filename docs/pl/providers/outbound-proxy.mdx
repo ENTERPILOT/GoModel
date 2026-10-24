@@ -1,0 +1,96 @@
+---
+title: "Proxy wychodzące"
+description: "Wysyłaj ruch jednego providera przez proxy HTTP, HTTPS lub SOCKS5, podczas gdy pozostali korzystają z ustawień proxy całego gatewaya."
+icon: "route"
+keywords: ["proxy", "proxy wychodzące", "SOCKS5", "HTTP proxy", "egress", "ruch wychodzący", "HTTPS_PROXY", "ograniczenia geograficzne", "geo-restricted", "stały adres IP", "static IP"]
+---
+
+Domyślnie GoModel łączy się z każdym providerem bezpośrednio, respektując standardowe
+zmienne `HTTP_PROXY`, `HTTPS_PROXY` i `NO_PROXY` dla całego procesu. To wystarcza
+w przypadku firmowego proxy wychodzącego, przez które musi przechodzić cały ruch.
+
+Ustaw `proxy_url` w providerze, gdy proxy potrzebują tylko **niektórzy** providerzy
+albo różni providerzy potrzebują różnych proxy: aby dotrzeć do providera
+zablokowanego w Twoim regionie, nadać jednemu providerowi stały wychodzący adres IP
+dla jego allowlisty lub podglądać ruch jednego providera, podczas gdy reszta idzie
+bezpośrednio.
+
+## Konfiguracja
+
+Providerzy konfigurowani wyłącznie przez środowisko używają prefiksu providera
+i opcjonalnego sufiksu instancji, tak jak każde inne ustawienie providera:
+
+```bash
+OPENAI_API_KEY=sk-...
+OPENAI_PROXY_URL=socks5://user:pass@10.0.0.1:1080
+
+# Druga instancja tego samego typu, z własnym proxy
+OPENAI_EU_API_KEY=sk-...
+OPENAI_EU_PROXY_URL=http://egress-eu.internal:3128
+
+# Modele lokalne łączą się bezpośrednio: bez proxy_url
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+Albo w `config.yaml`:
+
+```yaml
+providers:
+  openai:
+    type: openai
+    api_key: "${OPENAI_API_KEY}"
+    proxy_url: "${OPENAI_PROXY_URL}"
+  anthropic:
+    type: anthropic
+    api_key: "${ANTHROPIC_API_KEY}"
+    proxy_url: "http://egress.internal:3128"
+```
+
+To samo ustawienie to pole **Outbound proxy URL** w edytorze providera w dashboardzie,
+wśród pól zaawansowanych. Po zapisaniu hasło jest maskowane; edycja innego pola
+ponownie wysyła zamaskowaną wartość, a gateway zachowuje zapisaną.
+
+## Obsługiwane proxy
+
+| Schemat | Typ proxy |
+| --- | --- |
+| `http://` | Proxy HTTP CONNECT (upstreamy HTTPS są tunelowane) |
+| `https://` | Proxy HTTP CONNECT osiągane przez TLS |
+| `socks5://` | SOCKS5, z opcjonalnym uwierzytelnianiem `user:pass@` |
+| `socks5h://` | To samo co `socks5://` |
+
+Nazwy hostów są zawsze rozwiązywane na proxy, więc `socks5://` i `socks5h://`
+działają identycznie. URL składa się ze schematu, hosta, opcjonalnego portu
+(domyślnie 80, 443 lub 1080) i opcjonalnych danych uwierzytelniających: ścieżka,
+query lub fragment są odrzucane przy starcie i w dashboardzie.
+
+## Zasady
+
+- `proxy_url` providera dotyczy wszystkiego, co ten provider wysyła: wykrywania
+  modeli, inferencji, streamingu, plików i batchy.
+- Provider z `proxy_url` ignoruje `HTTP_PROXY`, `HTTPS_PROXY` i `NO_PROXY`.
+  Provider bez niego zachowuje zachowanie obowiązujące dla całego procesu.
+- Nieprawidłowy `proxy_url` to błąd konfiguracji: provider jest pomijany przy
+  starcie z wpisem w logu podającym jego nazwę, a dashboard odrzuca zapis.
+- Dane uwierzytelniające proxy nigdy nie trafiają do logów. Admin API i status
+  providera pokazują URL z hasłem zastąpionym przez `xxxxx`.
+- Połączenia są poolowane per provider, więc każdy provider utrzymuje własne
+  połączenia keep-alive do swojego proxy.
+
+## Weryfikacja
+
+Endpoint statusu providerów raportuje zamaskowane proxy dla każdego providera:
+
+```bash
+curl -s -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  http://localhost:8080/admin/providers/status | jq '.providers[] | {name, proxy_url: .config.proxy_url}'
+```
+
+Następnie wyślij jeden request i potwierdź, że pojawia się w logu dostępu proxy,
+a z własnego adresu IP gatewaya nic nie trafia do providera.
+
+<Note>
+  Pule proxy z health checkami, automatyczny failover między proxy i reguły
+  przypisania obejmujące wielu providerów naraz to
+  [funkcja GoModel Pro](/pl/pro/egress).
+</Note>

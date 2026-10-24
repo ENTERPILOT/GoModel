@@ -1,0 +1,76 @@
+---
+title: "DeepSeek"
+description: "在 GoModel 中配置 DeepSeek V4，并了解推理强度如何映射到 DeepSeek 的 reasoning_effort 字段。"
+icon: "brain"
+keywords: ["DeepSeek", "推理强度", "提供商配置", "reasoning effort", "provider setup"]
+---
+
+DeepSeek 不提供原生的 Responses API，因此 GoModel 会自动将
+`/v1/responses` 转换为 `/chat/completions`。它还会将 OpenAI 风格的推理级别重新映射为 DeepSeek 接受的两个级别。
+
+## 配置
+
+```bash
+DEEPSEEK_API_KEY=...
+```
+
+或者在 `config.yaml` 中配置：
+
+```yaml
+providers:
+  deepseek:
+    type: deepseek
+    base_url: "https://api.deepseek.com"
+    api_key: "${DEEPSEEK_API_KEY}"
+```
+
+<Note>
+  如果您之前将 DeepSeek 配置为 `type: openai`，请切换为
+  `type: deepseek`。通用的 OpenAI 提供商不会转换 `/responses`，也不会重新映射推理强度。
+</Note>
+
+## 推理强度映射
+
+DeepSeek V4 推理模型接受顶层字符串字段 `reasoning_effort`，允许的级别有两个：`high` 和 `max`。
+
+| 客户端发送 | DeepSeek 收到 |
+| ------------ | ----------------- |
+| `low` / `medium` / `high` | `high` |
+| `xhigh` / `max` | `max` |
+| 其他任何值 | GoModel 原样透传，随后被 DeepSeek 拒绝 |
+
+GoModel 会将 OpenAI 格式的 `"reasoning": {"effort": "..."}` 改写为
+DeepSeek 的顶层 `reasoning_effort`，客户端无需任何修改。在调用 GoModel 之前，请将自定义的客户端取值校验或规范化为 `high` 或 `max`。
+如需禁用推理，请完全省略 `reasoning` 字段；只要提供了任何
+`reasoning.effort`（包括 `low`），都会被映射并启用推理。
+
+## 工具调用与推理
+
+在思考模式下，只要请求中包含 `tools`，DeepSeek 就要求之前的每一轮助手消息都带有 `reasoning_content`，即使是没有工具调用的轮次也不例外。
+GoModel 会保留客户端发送的值，缺失时则填入一个空格，因此不知道请求由 DeepSeek 处理的客户端（例如通过虚拟模型调用）也能正常工作。
+
+## 结构化输出
+
+DeepSeek 接受 `response_format: {"type": "json_object"}`，但不接受
+`json_schema`。对于 `json_schema` 请求（包括 `/v1/responses` 上的 `text.format`），GoModel 会按照 `DEEPSEEK_JSON_SCHEMA_MODE` 处理：
+
+| 值 | 行为 |
+| ----- | -------- |
+| `downgrade`（默认） | 发送 `json_object`，并将 schema 作为一条 system 消息添加到对话中。 |
+| `error` | 返回 `invalid_request_error`，并指明提供商和模型。 |
+
+```bash
+DEEPSEEK_JSON_SCHEMA_MODE=error
+```
+
+<Note>
+  降级后的输出是以该 schema 为目标的有效 JSON，但 DeepSeek 并不会强制保证符合 schema。
+  如果您依赖确切的结构，请对结果进行校验；如果客户端绝不能收到未经强制约束的输出，请设置为 `error`。
+</Note>
+
+以上两条规则同样适用于由
+[OpenCode Go](/zh/providers/opencode-go) 提供的 DeepSeek 模型。
+
+## DeepSeek 不支持的功能
+
+- 嵌入（返回 `invalid_request_error`）。

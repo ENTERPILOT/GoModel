@@ -1,0 +1,243 @@
+---
+title: "Cache"
+description: "So funktioniert das Response-Caching in GoModel, so aktivieren Sie den exakten und den semantischen Cache, und das fließt in den Schlüssel des exakten Caches ein."
+icon: "database"
+keywords: ["Response-Cache", "response cache", "semantischer Cache", "semantic cache", "exakter Cache", "exact cache", "Cache-Schlüssel", "cache key", "Redis"]
+---
+
+## Übersicht
+
+GoModel bringt zwei Response-Cache-Ebenen für Streaming- und Nicht-Streaming-Requests
+auf folgenden Endpunkten mit:
+
+- `/v1/chat/completions`
+- `/v1/responses`
+- `/v1/messages`
+- `/v1/embeddings`
+- `/v1/systemone` (sowie Kevs `/permute` und `/separate`)
+
+Streaming- und Nicht-Streaming-Varianten desselben Requests werden unabhängig
+voneinander gecacht: Ein Streaming-Miss speichert die rohen SSE-Bytes, und ein
+Streaming-Hit spielt sie unverändert als `text/event-stream` wieder ab.
+
+Der Exact-Match-Cache liefert byte-identische Responses mit:
+
+```http
+X-Cache: HIT (exact)
+```
+
+Der semantische Cache nutzt Embeddings und Vektorsuche, sodass bedeutungsgleiche
+Prompts eine gespeicherte Response wiederverwenden können:
+
+```http
+X-Cache: HIT (semantic)
+```
+
+<Note>
+  `/v1/embeddings` nimmt nur am exakten Cache teil. Ein Embedding muss genau den
+  Text repräsentieren, für den es angefordert wurde; den Vektor einer lediglich
+  ähnlichen Eingabe wiederzugeben, wäre also eine falsche statt einer gleichwertigen
+  Antwort. Embeddings-Requests werden außerdem nie gestreamt, daher wird nur die
+  JSON-Response gecacht. Dasselbe gilt für Entscheidungen von
+  [System One](/de/advanced/systemone-api#caching): Ein ähnlicher Zustand ist nicht
+  dieselbe Entscheidung.
+</Note>
+
+## Exakten Cache aktivieren
+
+Richten Sie das Response-Caching auf Redis aus:
+
+```yaml
+cache:
+  response:
+    simple:
+      redis:
+        url: redis://localhost:6379
+        ttl: 3600
+```
+
+Sie können es auch mit Umgebungsvariablen konfigurieren:
+
+- `REDIS_URL`
+- `REDIS_KEY_RESPONSES`
+- `REDIS_TTL_RESPONSES`
+
+## Semantisches Caching aktivieren
+
+Fügen Sie einen `semantic`-Block mit einem Embedder-Provider und einem Vector Store
+hinzu:
+
+```yaml
+cache:
+  response:
+    semantic:
+      enabled: true
+      embedder:
+        provider: openai
+      vector_store:
+        type: qdrant
+        qdrant:
+          url: http://localhost:6333
+          collection: gomodel_semantic
+```
+
+Unterstützte Vector Stores:
+
+- `qdrant`
+- `pgvector`
+- `pinecone`
+- `weaviate`
+
+Beide Cache-Ebenen laufen nach dem Patching durch Workflows und Guardrails und
+arbeiten daher auf dem endgültigen Request, der upstream gesendet wird. Verwenden
+Sie `Cache-Control: no-cache` oder `Cache-Control: no-store`, um das Caching pro
+Request zu umgehen. Ein [Plugin](/de/advanced/plugins#entscheidungen) kann eine einzelne
+Response auch mit `NoStore` in seiner Entscheidung aus beiden Ebenen heraushalten;
+das nutzt eine Guardrail, die request-spezifische Daten in die Antwort
+zurückschreibt, damit der wiederhergestellte Text nie an einen anderen Aufrufer
+ausgespielt wird. Ein Request mit `background: true` auf
+[`/v1/responses`](/de/advanced/responses-api#hintergrund-responses) umgeht ebenfalls
+beide Ebenen: Sein `queued`-Body enthält eine ID, die zur Response eines einzelnen
+Aufrufers gehört.
+
+Das vollständige Design des semantischen Caches und die Speicheroptionen finden Sie
+in [ADR-0006](/adr/0006-semantic-response-cache).
+
+## Woraus der Schlüssel des exakten Caches besteht
+
+Der exakte Cache bildet einen Hash über:
+
+- den Request-Pfad
+- den aufgelösten Workflow-Kontext, der für die Ausführung verwendet wird,
+  konkret Ausführungsmodus, Provider-Typ und aufgelöstes Modell
+- die Guardrail-Kette, zu der der Request aufgelöst wird, über die Phasen Prompt,
+  Response und Stream hinweg
+- den endgültigen Request-Body
+
+Guardrails und Workflows beeinflussen die Cache-Schlüssel also, wenn sie den
+aufgelösten Workflow oder den endgültigen Body ändern, der durch die Ausführung
+läuft.
+
+Ein Cache-Hit spielt die gespeicherte Response ab, ohne die Guardrail-Ketten für
+Response und Stream erneut auszuführen; ein Eintrag wird daher nur an einen Request
+ausgeliefert, dessen Kette mit der übereinstimmt, die ihn erzeugt hat. Wird ein
+Guardrail-Schritt bearbeitet, hinzugefügt oder entfernt — oder gibt es einen zweiten
+Workflow mit einer anderen Kette —, ergibt sich ein Miss statt einer Antwort, die
+diese Guardrails nie gesehen haben. Eine Änderung der Guardrail-Konfiguration
+invalidiert somit die unter der alten Kette gespeicherten Einträge.
+
+Die Reihenfolge der Mitglieder von JSON-Objekten und bedeutungsloser Leerraum werden
+vor dem Hashen kanonisiert. Requests, die sich nur in der Formatierung
+unterscheiden, teilen sich daher einen exakten Eintrag. Gleichzeitige identische
+Misses werden zudem prozessintern zusammengeführt: Ein Request erreicht den
+Provider, und die wartenden Requests spielen dessen Response ab. Fehlgeschlagene
+oder anderweitig nicht cachebare Responses werden nie an mehrere Wartende verteilt.
+
+## Planung des Provider-Prompt-Caches
+
+Nachdem das Routing den konkreten Provider und das Modell aufgelöst hat, fügt
+GoModel einen Cache-Plan hinzu, wenn das stabile Präfix die Mindestgröße dieses
+Providers erreicht und der Client nicht bereits selbst eine Cache-Direktive
+mitgeliefert hat:
+
+- OpenAI erhält einen stabilen `prompt_cache_key`; Modelle, die explizites Caching
+  unterstützen, erhalten zusätzlich einen Breakpoint und den expliziten Cache-Modus.
+- Anthropic erhält automatisches ephemeres Caching auf oberster Ebene.
+- Amazon Bedrock Converse erhält einen Cache-Point nach dem stabilen Präfix.
+- Natives Gemini AI Studio erstellt ein Cached-Content-Objekt mit fünf Minuten
+  Lebensdauer und verwendet es wieder; gleichzeitige Erstellungen werden pro Präfix
+  und stabilem Zugangsdatum zusammengeführt.
+
+Der Plan wird nach dem Routing angewendet, sodass provider-spezifische Felder nicht
+über einen Fallback an ein anderes Backend durchsickern können. Cache-Schlüssel
+enthalten die konkrete Provider-Instanz und das Modell, und vom Aufrufer
+mitgelieferte Cache-Steuerungen haben immer Vorrang.
+
+Die Planung des Provider-Prompt-Caches ist standardmäßig aktiviert. Um die
+automatische Planung von GoModel zu deaktivieren und kompatible Cache-Direktiven
+des Clients weiterhin durchzureichen, setzen Sie:
+
+```bash
+PROVIDER_PROMPT_CACHE_PLANNER_ENABLED=false
+```
+
+Das Flag akzeptiert boolesche Werte im Go-Format. Fehlende, leere oder ungültige
+Werte behalten den sicheren Standardwert (`true`) bei, und ein ungültiger Wert
+erzeugt beim Start eine Warnung.
+
+## Verhalten von `user_path`
+
+Beim exakten Cache wird `user_path` nicht von sich aus in den Cache-Schlüssel
+aufgenommen.
+
+Das ist beabsichtigt. Haben zwei Requests am Ende denselben Pfad, denselben
+aufgelösten Workflow und denselben endgültigen Request-Body, können sie sich
+denselben Eintrag im exakten Cache teilen, selbst wenn sie von unterschiedlichen
+`user_path`-Werten stammen.
+
+<Note>
+  Wenn Sie Cache-Verhalten pro Tenant oder Pfad benötigen, verwenden Sie einen
+  Scoped Workflow oder sorgen Sie auf andere Weise dafür, dass sich der endgültige
+  Request für diesen Scope unterscheidet. `user_path` allein ist kein
+  Partitionsschlüssel des exakten Caches.
+</Note>
+
+Gängige Muster:
+
+- den Cache in einem Scoped Workflow deaktivieren
+- unterschiedliche Scoped Workflows für unterschiedliche `user_path`-Werte verwenden
+- scope-spezifischen Kontext einfügen, sodass sich der endgültige Request-Body
+  unterscheidet
+
+## Über Failover bediente Responses werden nicht gecacht
+
+Wird ein Request von einem [Failover](/de/features/failover)-Ziel beantwortet statt
+von dem Ziel, das das Routing zuerst gewählt hat, wird die Response nicht
+gespeichert. Der Schlüssel des exakten Caches wird aus der Auflösung vor dem
+Failover gebildet; die Antwort des Ersatzziels zu speichern, würde sie also unter dem
+Schlüssel des primären Ziels ausliefern, sobald dieses wieder verfügbar ist.
+
+Die praktische Folge: Ein virtuelles Modell, dessen erstes Ziel dauerhaft ausfällt,
+sammelt so lange keine Cache-Einträge mehr an, wie der Ausfall andauert — jeder
+Request mit Miss wechselt per Failover und wird frisch bedient, und nichts davon wird
+gespeichert. Einträge, die vor dem Ausfall geschrieben wurden, werden weiterhin
+ausgeliefert, bis ihre TTL abläuft: Der Lookup läuft vor der Weiterleitung, sodass
+ein Hit zurückgegeben wird, ohne eines der Ziele zu berühren. Wenn ein Ziel für
+längere Zeit nicht verfügbar sein wird, ändern Sie die Reihenfolge der Kette (oder
+richten Sie das virtuelle Modell auf ein funktionierendes Ziel aus), damit die
+Responses, die es beantworten, wieder cachebar sind.
+
+Retries innerhalb eines Ziels sind nicht betroffen: Nur eine Response, die erzeugt
+wurde, nachdem der Durchlauf zu einem anderen Ziel gewechselt ist, wird beiden
+Cache-Ebenen vorenthalten.
+
+## Cache-Analysen
+
+Sind Response-Caching und Nutzungserfassung aktiviert, stellt die Admin API eine
+Übersicht nur für gecachte Requests bereit unter:
+
+```text
+/admin/cache/overview
+```
+
+Cache-Hits werden außerdem als Nutzungseinträge erfasst, mit dem `user_path` des
+Aufrufers und einem `cache_type` von `exact` oder `semantic`. Die Nutzungs-Endpunkte
+(`/admin/usage/*` und `/v1/usage`) lassen sie standardmäßig weg, damit Summen und
+Kosten die Provider-Ausgaben abbilden; übergeben Sie `cache_mode=all`, um sie
+einzuschließen, oder `cache_mode=cached`, um nur die Hits zu sehen.
+`/admin/usage/sessions` ist die Ausnahme: Die Request- und Token-Summen pro Session
+enthalten immer Cache-Hits, während die Kostenfelder dort nur Provider-Kosten
+abbilden.
+
+```bash
+# nur Requests, die an Provider gehen (Standard)
+curl "http://localhost:8080/admin/usage/summary?user_path=/team/alpha" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+
+# einschließlich lokaler Cache-Hits
+curl "http://localhost:8080/admin/usage/summary?user_path=/team/alpha&cache_mode=all" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+Siehe [Admin-Endpunkte](/de/advanced/admin-endpoints#cache-modus) und die
+[Usage API](/de/advanced/usage-api#cache-modus).

@@ -1,0 +1,197 @@
+---
+title: "Inteligentny routing"
+description: "Kieruj każdy request do łatwego lub trudnego poziomu modeli na podstawie jego treści, a następnie wybieraj najzdrowszego i najtańszego providera w ramach tego poziomu."
+icon: "route"
+tag: "Pro · Beta"
+keywords: ["GoModel Pro", "inteligentny routing", "intelligent routing", "smart routing", "poziomy modeli", "model tiers", "adaptive routing", "routing adaptacyjny", "load balancing", "optymalizacja kosztów", "cost optimization"]
+---
+
+<Warning>
+  Inteligentny routing jest w wersji beta. Sygnały oceny, wartości domyślne i
+  zakres konfiguracji mogą się zmieniać między wydaniami; nagłówki odpowiedzi
+  i metryki pozwalają zweryfikować każdą podjętą decyzję.
+</Warning>
+
+## Przegląd
+
+Inteligentny routing składa się z dwóch licencjonowanych rozszerzeń, które współpracują z
+[modelami wirtualnymi](/pl/features/virtual-models) z Core:
+
+- **Smart tier routing** odpowiada na pytanie: *na jaki poziom jakości zasługuje ten
+  request?* Klasyfikuje skonfigurowany alias modelu do poziomu `easy` lub `hard`
+  przed wyborem providera, więc krótki czat trafia do taniego modelu, a
+  praca wymagająca intensywnego rozumowania, kodu lub narzędzi – do mocnego.
+- **Adaptive routing** odpowiada na pytanie: *który provider w ramach tego poziomu?* Wybiera
+  cel upstream z puli modelu wirtualnego na podstawie obserwowanych opóźnień,
+  błędów, okresów cooldownu i skonfigurowanego celu kosztowego lub opóźnieniowego.
+
+Oba mechanizmy się nakładają: request o `model: "normal"` jest przepisywany na `normal-easy` lub
+`normal-hard`, a jeśli którykolwiek z nich jest modelem wirtualnym ze strategią `adaptive`,
+selektor wybiera dla niego najlepszego providera.
+
+## Smart tier routing
+
+Skonfiguruj alias z poziomami, używając zwykłych nazw modeli GoModel. Celami poziomów mogą
+być konkretne modele lub modele wirtualne:
+
+```bash
+PRO_SMART_ROUTING_ROUTES='{"normal":{"easy":"normal-easy","hard":"normal-hard"}}'
+```
+
+Przepisywane są tylko aliasy wymienione w `PRO_SMART_ROUTING_ROUTES`; każda inna
+nazwa modelu przechodzi bez zmian. Bez skonfigurowanych tras funkcja jest
+bezczynna, a logi startowe wyświetlają podpowiedź.
+
+### Jak oceniany jest request
+
+Klasyfikacja jest deterministyczna, działa w procesie i nie wywołuje żadnego modelu.
+Request, który jawnie prosi o reasoning (`reasoning_effort` medium lub
+wyższy albo blok `thinking` Anthropic), trafia od razu do poziomu hard.
+W przeciwnym razie request zbiera punkty, a wynik równy lub wyższy od
+`PRO_SMART_ROUTING_THRESHOLD` (domyślnie `4`) wybiera poziom hard:
+
+| Sygnał | Punkty |
+| --- | --- |
+| Słowa kluczowe wysiłku w ostatniej wiadomości użytkownika (`think hard`, `step by step`, `root cause`, …) | +4 |
+| Kod lub diagnostyka (blok kodu w ogrodzeniu, `diff --git`, tracebacki, `panic:`) | +3 |
+| Zadeklarowane narzędzia | +2 i kolejne +2 przy 5 lub więcej narzędziach |
+| Structured output (schemat JSON / response format) | +2 |
+| Załączniki (obrazy, pliki) | +2 |
+| Rozmiar kontekstu | +1 przy 2k znaków, kolejne +2 przy 8k, kolejne +3 przy 32k |
+| Głębokość wątku 7 lub więcej wiadomości | +1 |
+
+Przy wartościach domyślnych sam krótki fragment kodu (3) pozostaje na poziomie easy, a
+kod plus 2k znaków kontekstu (4) eskaluje. Obniż próg, aby wysyłać
+więcej ruchu na poziom hard, lub podnieś go, aby chronić tani poziom.
+
+### Przypinanie sesji
+
+Wybrany poziom jest przypinany per kierowany alias i wykryta sesja (zobacz
+[Utrzymywanie sesji](/pl/features/session-keeping)). Przypięcie działa **tylko w górę**:
+rozmowa może przejść z easy na hard, gdy przypięcie jest aktywne, ale nigdy
+nie zostaje po cichu zdegradowana, więc kolejna wiadomość w rodzaju „thanks!” nie może przerzucić trudnej
+rozmowy na tani poziom ani unieważnić prompt cache jej providera.
+Przypięcie wygasa po `PRO_SMART_ROUTING_SESSION_TTL` bezczynności.
+
+### Konfiguracja smart tier routing
+
+| Zmienna środowiskowa | Wartość domyślna | Przeznaczenie |
+| --- | --- | --- |
+| `PRO_SMART_ROUTING_ENABLED` | `true` | Włącza smart tier routing. |
+| `PRO_SMART_ROUTING_ROUTES` | — | Mapa JSON z żądanych aliasów na modele `easy` i `hard`. Bez tras funkcja pozostaje bezczynna. |
+| `PRO_SMART_ROUTING_THRESHOLD` | `4` | Wynik równy tej wartości lub wyższy wybiera poziom hard. |
+| `PRO_SMART_ROUTING_SESSION_TTL` | `30m` | Przesuwany czas życia przypięcia sesji działającego tylko w górę. |
+
+### Nadpisywanie i podgląd decyzji
+
+Wyślij `X-GoModel-Smart-Routing: off`, aby pominąć klasyfikację dla jednego requestu,
+lub `X-GoModel-Tier: easy` albo `X-GoModel-Tier: hard`, aby wymusić jego poziom bez
+zmiany przypięcia sesji.
+
+Każda kierowana odpowiedź raportuje decyzję:
+
+```http
+X-GoModel-Pro-Tier: hard
+X-GoModel-Pro-Tier-Target: normal-hard
+X-GoModel-Pro-Tier-Score: 5
+```
+
+Ten sam werdykt i jego uzasadnienie są zapisywane w szczegółach rewizji audytu.
+Prometheus udostępnia metryki requestów, eskalacji i wyników pod
+prefiksem `gomodel_pro_smartroute_`; histogram wyników służy do strojenia
+progu na podstawie rzeczywistego ruchu.
+
+## Adaptive routing
+
+Adaptive routing zastępuje strategie `round_robin` i `cost` z Core
+selektorem uwzględniającym stan zdrowia celów. Jest rejestrowany raz przy starcie dla całego
+gatewaya, ale **używają go tylko modele wirtualne skonfigurowane ze `strategy: adaptive`**
+– każdy inny model wirtualny zachowuje swoją strategię.
+
+```yaml
+virtual_models:
+  - source: normal-hard
+    strategy: adaptive
+    targets:
+      - { model: anthropic/claude-opus-4-6 }
+      - { model: bedrock/anthropic.claude-opus-4-6 }
+      - { model: vertex/claude-opus-4-6 }
+```
+
+W dashboardzie `adaptive` pojawia się na liście strategii modelu wirtualnego
+tylko wtedy, gdy działa build Pro z uprawnieniem `routing`. W buildzie
+open source model wirtualny ze `strategy: adaptive` wraca do
+round-robin.
+
+### Jak wybierany jest cel
+
+Wybór działa metodą power-of-two-choices: losowane są dwa kandydaty proporcjonalnie do
+ich wag, a wygrywa ten z mniejszym chwilowym obciążeniem (szacowane opóźnienie
+× requesty w toku). Wagi są przeliczane dla każdego requestu na podstawie stanu w procesie
+– na ścieżce requestu nie ma zewnętrznego magazynu.
+
+- **Opóźnienie** – każdy cel utrzymuje szacunek opóźnienia peak-EWMA (czas do pierwszego
+  bajtu dla streamów), zasilany przez każdą próbę do upstreamu, w tym retry i
+  failovery.
+- **Cooldowny** – `429` uruchamia cooldown o długości `PRO_ROUTING_COOLDOWN_BASE`,
+  który podwaja się przy każdym kolejnym wyzwoleniu aż do `PRO_ROUTING_COOLDOWN_MAX`;
+  `401`, `403` i `404` od razu dostają maksymalny cooldown; powtarzające się błędy 5xx
+  lub sieciowe uruchamiają cooldown po trzech z rzędu. Cele w cooldownie są
+  pomijane, dopóki dostępny jest jakikolwiek inny cel.
+- **Minimalna waga** – każdy cel poza cooldownem zachowuje co najmniej
+  `PRO_ROUTING_MIN_WEIGHT_FRACTION` wagi najcięższego kandydata, więc
+  wolny lub dochodzący do siebie cel nadal otrzymuje strużkę ruchu, a jego
+  powrót do sprawności jest potwierdzany na prawdziwych requestach.
+- **Ciepły prompt cache** – provider, który ostatnio obsłużył wykrytą sesję,
+  dostaje wzmocnienie `PRO_ROUTING_WARM_CACHE_WEIGHT` na czas `PRO_ROUTING_WARM_CACHE_TTL`,
+  więc rozmowa pozostaje przy tych samych danych uwierzytelniających, endpoincie i regionie, dopóki
+  jej prompt cache jest prawdopodobnie ciepły. Cel w cooldownie traci to wzmocnienie.
+
+Cel optymalizacji decyduje, jak cena wpływa na wagę:
+
+| `PRO_ROUTING_OBJECTIVE` | Zachowanie |
+| --- | --- |
+| `latency` | Waży cele tylko według obserwowanego opóźnienia i stanu zdrowia. |
+| `cost` | Dodatkowo waży według odwrotności kwadratu ceny: cel o cenie dwukrotnie wyższej od najtańszej dostaje jedną czwartą jego udziału. W przeciwieństwie do strategii `cost` z Core niezdrowy tani cel nadal oddaje ruch. |
+| `balanced` | Łączy ważenie według opóźnienia i ceny. Wartość domyślna. |
+
+### Konfiguracja adaptive routing
+
+| Zmienna środowiskowa | Wartość domyślna | Przeznaczenie |
+| --- | --- | --- |
+| `PRO_ROUTING_ENABLED` | `true` | Rejestruje selektor adaptacyjny. |
+| `PRO_ROUTING_OBJECTIVE` | `balanced` | `latency`, `cost` lub `balanced`. |
+| `PRO_ROUTING_MIN_WEIGHT_FRACTION` | `0.05` | Minimalna waga celów poza cooldownem jako ułamek wagi najcięższego kandydata (`0`–`0.5`). |
+| `PRO_ROUTING_COOLDOWN_BASE` | `30s` | Pierwszy cooldown po `429` lub powtarzających się błędach upstreamu; podwaja się przy kolejnych wyzwoleniach. |
+| `PRO_ROUTING_COOLDOWN_MAX` | `5m` | Górny limit cooldownu; także natychmiastowy cooldown dla `401`, `403` i `404`. |
+| `PRO_ROUTING_WARM_CACHE_WEIGHT` | `8` | Mnożnik wagi dla providera, który ostatnio obsłużył sesję. |
+| `PRO_ROUTING_WARM_CACHE_TTL` | `10m` | Jak długo zakłada się, że prompt cache sesji jest ciepły. |
+
+### Utrzymywanie sesji i stan zdrowia
+
+Przy włączonym [utrzymywaniu sesji](/pl/features/session-keeping) (domyślnie)
+gateway przekazuje selektorowi cel, który już obsługuje daną sesję, i pozwala
+mu decydować, request po requeście, czy sesja go zachowa – zawsze, gdy
+dostępny jest więcej niż jeden cel. (Przy jednym dostępnym celu nie ma
+wyboru, więc selektor jest pomijany). Przypięcie trwa,
+dopóki cel jest zdrowy – przeniesienie sesji przekreśla prompt cache providera,
+który przypięcie ma chronić, więc nawet znacznie tańsza lub znacznie szybsza
+alternatywa go nie przejmie. Przypięcie jest zwalniane tylko wtedy, gdy jego cel wchodzi w
+cooldown, a sesja zostaje wtedy przypięta do celu wybranego przez selektor.
+
+To jedyna ocena, której gateway nie może dokonać samodzielnie: cel, który
+zwraca `429` lub przekracza timeouty, nadal jest skonfigurowanym, obsługiwanym przez katalog
+celem, więc przechodzi każdą kontrolę stosowaną przez przypięcie w Core. Bez selektora
+na ścieżce sesja agenta – jedno id sesji, tysiące requestów – przypina się
+przy pierwszym requeście i jedzie na zawodnym celu przez cały czas życia przypięcia,
+co widać jedynie jako opóźnienia i zmarnowane wydatki w upstreamie, bo failover nadal
+zwraca klientowi `200`.
+
+`gomodel_pro_routing_session_affinity_total{outcome}` zlicza przypięcia `honored`
+i przypięcia `released` z powodu cooldownu, więc to zachowanie jest widoczne w Prometheusie,
+a nie tylko na fakturze od providera.
+
+Metryki Prometheus używają prefiksu `gomodel_pro_routing_` (wybory,
+odrzucenia, wyniki, cooldowny, powinowactwo sesji i gauge szacowanego
+opóźnienia). Stan oceny jest per węzeł; repliki uczą się niezależnie i niczego
+nie współdzielą.

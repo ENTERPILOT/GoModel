@@ -1,0 +1,294 @@
+---
+title: "Responses API"
+description: "Nutzen Sie über GoModel OpenAI-kompatible Endpunkte zum Erstellen von Responses, für ihren Lebenszyklus, Input-Items und Hilfsfunktionen."
+icon: "messages-square"
+keywords: ["Responses API", "/v1/responses", "OpenAI Responses", "Agents", "agents"]
+---
+
+## Übersicht
+
+GoModel stellt OpenAI-kompatible Endpunkte der Responses API unter `/v1/responses` bereit.
+
+Create-Requests durchlaufen die Pipeline für übersetztes Modell-Routing, sodass
+virtuelle Modelle, Workflows, Guardrails, Failover, Nutzungs-Logging und
+Response-Caching weiterhin greifen. Lebenszyklus- und Hilfsendpunkte nutzen
+native Provider-Funktionen, sofern verfügbar, und geben explizite
+Kompatibilitätsfehler zurück, wenn der gewählte Provider die angeforderte
+Operation nicht unterstützt.
+
+Das Verhalten einzelner Features, einschließlich gehosteter Tools und
+Chat-übersetzter Provider, beschreibt
+[Responses-Kompatibilität](/de/advanced/responses-compatibility).
+
+## Unterstützte Endpunkte
+
+| Endpunkt | Verhalten |
+| --- | --- |
+| `POST /v1/responses` | Erstellt eine Response über übersetztes Modell-Routing. Responses werden für den späteren Abruf gespeichert. |
+| `GET /v1/responses/{id}` | Gibt eine gespeicherte Gateway-Response zurück, sofern vorhanden. Andernfalls wird an eine native Provider-Abfrage weitergeleitet, sofern unterstützt. |
+| `GET /v1/responses/{id}/input_items` | Gibt die normalisierten Input-Items aus dem ursprünglichen Create-Request zurück, sofern vorhanden. Andernfalls wird an eine native Provider-Abfrage weitergeleitet, sofern unterstützt. |
+| `POST /v1/responses/{id}/cancel` | Bricht die Response über den nativen Provider ab, sofern unterstützt. |
+| `DELETE /v1/responses/{id}` | Löscht die gespeicherte Gateway-Response. Unterstützt der Provider natives Löschen, leitet GoModel den Lösch-Request zusätzlich an den Upstream weiter. |
+| `POST /v1/responses/input_tokens` | Zählt Input-Tokens über den nativen Hilfsendpunkt des Providers, sofern unterstützt. |
+| `POST /v1/responses/compact` | Kompaktiert den Input einer Response über den nativen Hilfsendpunkt des Providers, sofern unterstützt. |
+
+## Gespeicherte Responses
+
+Bei Aufrufen von `POST /v1/responses` speichert GoModel – sofern der Request
+nicht `store: false` setzt – den normalisierten Response-Body sowie die
+normalisierten Input-Items des Requests so, wie der Client sie gesendet hat
+(bevor Guardrails sie bearbeiten und ohne den Verlauf, den eine
+`previous_response_id` oder `conversation` hinzugefügt hat). Eine gestreamte
+Response wird anhand ihres abschließenden Events gespeichert
+(`response.completed`, `response.incomplete` oder `response.failed`). Der
+Snapshot wird im Hintergrund geschrieben, nachdem die Response zurückgegeben
+wurde, sodass die Speicherlatenz den Client nie verzögert. Ein
+`GET /v1/responses/{id}`, der unmittelbar nach dem `POST` abgesetzt wird, kann
+ankommen, bevor der Snapshot gespeichert ist. Ein geordnetes Herunterfahren
+wartet auf ausstehende Snapshot-Schreibvorgänge, ein harter Prozessabbruch kann
+jedoch einen noch nicht abgeschlossenen verlieren. Ein fehlgeschlagener
+Snapshot-Schreibvorgang wird protokolliert und in der Metrik
+`gomodel_response_snapshot_store_failures_total` gezählt.
+
+Das ermöglicht:
+
+- `GET /v1/responses/{id}` für Responses, die über GoModel erstellt wurden.
+- `GET /v1/responses/{id}/input_items` für den ursprünglichen normalisierten Input.
+- `DELETE /v1/responses/{id}`, auch wenn der Provider kein natives Löschen von
+  Responses anbietet.
+- `previous_response_id` bei Chat-übersetzten Providern wie Anthropic und
+  Gemini: GoModel folgt der gespeicherten Response und jeder Response, aus der
+  sie verkettet wurde, und stellt deren Input-Items und Output dem neuen Input
+  voran, sodass der Provider in jedem Turn die gesamte Kette erhält. Die
+  Response nennt ihren Vorgänger in `previous_response_id`, ob gestreamt oder
+  nicht. Bei diesen Providern liefert eine ID, die nicht gespeichert ist (die
+  vorherige Response wurde mit `store: false` gesendet) oder zu einem anderen
+  Tenant gehört, 404. Native Responses-Provider erhalten die ID selbst und lösen
+  sie auf ihrer Seite auf; sie benötigen also keinen GoModel-Snapshot. Eine ID,
+  die GoModel für einen Chat-übersetzten Provider vergeben hat, wird auch für
+  sie wiedergegeben, sodass eine Kette mitten im Gespräch von Gemini oder
+  Anthropic zu OpenAI wechseln kann. Die Eigentümerschaft wird bei jedem
+  Provider durchgesetzt: Eine ID, deren gespeicherte Response zu einem anderen
+  [User Path](/de/features/user-path#objekteigentum) gehört, liefert 404,
+  statt im Upstream aufgelöst zu werden, während eine ID, die GoModel nie
+  gespeichert hat, weiterhin weitergeleitet wird.
+
+Der wiedergegebene Verlauf wird – wie die Items einer vom Gateway verwalteten
+`conversation` – in den Input übernommen, bevor die
+[Guardrails](/de/advanced/guardrails) der Prompt-Phase laufen. Sie prüfen und
+überarbeiten ihn also wie jeden anderen Input: Eine gespeicherte Response
+enthält das, was ihr Client gesehen hat, und eine
+[presidio](/de/advanced/guardrails#presidio)-Guardrail anonymisiert die dort
+wiederhergestellten Werte erneut, bevor der nächste Turn den Provider erreicht.
+Auch ein nativer primärer Provider erhält statt der ID den wiedergegebenen
+Verlauf, wenn auf dem Prompt eine Guardrail läuft, die Inhalte umschreibt (eine
+Instanz, die nur markiert oder blockiert, zählt nicht), oder wenn ein
+Failover-Ziel Chat-übersetzt ist. Ohne eine solche Guardrail wird die ID
+unverändert weitergeleitet, sodass der Provider die Kette weiterhin aus seinem
+eigenen Zustand bedient.
+
+## Hintergrund-Responses
+
+`background: true` kehrt sofort mit einem `queued`-Snapshot zurück. Da dieser
+Snapshot nicht endgültig ist, liest `GET /v1/responses/{id}` ihn bei jeder
+Abfrage erneut von dem Provider, der ihn erstellt hat, und speichert das
+Ergebnis, sobald die Response einen abschließenden Status erreicht
+(`completed`, `incomplete`, `failed` oder `cancelled`). Die übliche SDK-Schleife
+– abfragen, bis der Status abschließend ist, dann `output` lesen – funktioniert
+daher über das Gateway. Abschließende Snapshots werden ohne Upstream-Aufruf aus
+dem Speicher bedient. Schlägt die Aktualisierung fehl, wird der gespeicherte
+Snapshot unverändert zurückgegeben.
+
+Hintergrund-Creates werden nie aus dem
+[Response-Cache](/de/features/cache) bedient: Ein `queued`-Body enthält eine ID,
+die zur Response eines einzelnen Aufrufers gehört.
+
+## Native Provider-Abfrage
+
+Wurde eine Response nicht über den aktuellen GoModel-Prozess oder den
+Response-Speicher erstellt, können Lebenszyklus-Endpunkte dennoch eine native
+Provider-Abfrage nutzen.
+
+Geben Sie den Provider an, wenn die Response-ID nicht lokal gespeichert ist:
+
+```http
+GET /v1/responses/resp_abc123?provider=openai
+```
+
+Ohne gespeicherte Response oder Provider-Hinweis prüft GoModel die Provider,
+die native Lebenszyklus-Unterstützung für Responses bieten. Ist kein
+Lebenszyklus-Routing verfügbar, gibt GoModel einen Kompatibilitätsfehler
+zurück. Ist Lebenszyklus-Routing verfügbar, kann aber kein Provider die
+Response liefern, gibt GoModel einen normalen Not-Found-Fehler zurück.
+
+## Input-Items
+
+GoModel normalisiert gespeicherten Input in OpenAI-kompatible Input-Items für
+Responses. Ein String-Input wird zu einer Benutzernachricht mit einem
+`input_text`-Content-Item:
+
+```json
+{
+  "type": "message",
+  "role": "user",
+  "content": [
+    {
+      "type": "input_text",
+      "text": "hello"
+    }
+  ]
+}
+```
+
+Strukturierte Input-Arrays behalten Nachrichten-, Function-Call- und
+Function-Call-Output-Items nach Möglichkeit bei.
+
+## Kompatibilitätsfehler
+
+Manche Provider unterstützen nicht jeden Lebenszyklus- oder Hilfsendpunkt der
+Responses API. Kann der gewählte Provider eine Operation nicht ausführen, gibt
+GoModel einen OpenAI-kompatiblen Fehler zurück:
+
+```json
+{
+  "error": {
+    "type": "invalid_request_error",
+    "message": "response compaction is not supported by this provider",
+    "param": null,
+    "code": "unsupported_response_operation"
+  }
+}
+```
+
+GoModel verwendet für nicht unterstützte Operationen OpenAIs Typ
+`invalid_request_error`, damit die Menge der öffentlichen Fehlertypen
+geschlossen bleibt. Der Code `unsupported_response_operation` kennzeichnet die
+nicht unterstützte Operation und wird mit HTTP `501 Not Implemented`
+zurückgegeben.
+
+## Beispiel
+
+Eine Response erstellen:
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/responses \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-5-mini",
+    "input": "Write one short sentence about reliable gateways."
+  }'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+response = client.responses.create(
+    model="gpt-5-mini",
+    input="Write one short sentence about reliable gateways.",
+)
+
+print(response.output_text)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const response = await client.responses.create({
+  model: "gpt-5-mini",
+  input: "Write one short sentence about reliable gateways.",
+});
+
+console.log(response.output_text);
+```
+
+</CodeGroup>
+
+Später abrufen:
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/responses/resp_abc123 \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+response = client.responses.retrieve("resp_abc123")
+print(response.output_text)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const response = await client.responses.retrieve("resp_abc123");
+console.log(response.output_text);
+```
+
+</CodeGroup>
+
+Die gespeicherten Input-Items auflisten:
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/responses/resp_abc123/input_items \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+for item in client.responses.input_items.list("resp_abc123"):
+    print(item)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+for await (const item of client.responses.inputItems.list("resp_abc123")) {
+  console.log(item);
+}
+```
+
+</CodeGroup>

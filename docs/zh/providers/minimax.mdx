@@ -1,0 +1,146 @@
+---
+title: "MiniMax"
+description: "在 GoModel 中配置 MiniMax：聊天模型、temperature 处理，以及通过标准音频端点使用原生文字转语音。"
+icon: "audio-waveform"
+keywords: ["MiniMax", "文字转语音", "语音合成", "text-to-speech", "TTS", "t2a_v2", "提供商配置", "provider setup"]
+---
+
+MiniMax 提供兼容 OpenAI 的聊天 API，因此聊天模型开箱即用。不过，文字转语音使用的是 MiniMax 自己的 `t2a_v2` API，GoModel 会为您将标准的 `/v1/audio/speech` 端点转换为该格式。
+
+## 配置
+
+```bash
+MINIMAX_API_KEY=...
+```
+
+或在 `config.yaml` 中配置：
+
+```yaml
+providers:
+  minimax:
+    type: minimax
+    base_url: "https://api.minimax.io/v1"
+    api_key: "${MINIMAX_API_KEY}"
+```
+
+`MINIMAX_BASE_URL` 用于覆盖端点（默认为 `https://api.minimax.io/v1`）；中国区平台的账户应将其设置为 `https://api.minimaxi.com/v1`。
+
+## 视频输入
+
+在 `/v1/chat/completions`（包括流式请求）上，可配合 `MiniMax-M3` 使用 `video_url` 消息内容部分进行视频输入：
+
+```json
+{"type":"video_url","video_url":{"url":"mm_file://your-file-id","detail":"high","fps":2}}
+```
+
+网关会保留视频 URL 和处理设置。您可以提供 URL、base64 data URL，或已有的 MiniMax 文件引用。较大的视频请先通过 MiniMax 的 Files API 上传；网关不会替您上传视频。关于支持的格式和大小限制，请参阅 [MiniMax 视频输入参考](https://platform.minimax.io/docs/api-reference/text-openai-api#multimodal-input)。
+
+## Temperature
+
+MiniMax 要求 `temperature` 位于 `(0.0, 1.0]` 区间内，并拒绝零值。GoModel 会将零或负数的 temperature 修正为 `1.0`，使固定 `temperature: 0` 的 OpenAI 风格请求能够继续正常工作。
+
+## 推理
+
+`MiniMax-M3`、`MiniMax-M2.7`、`MiniMax-M2.7-highspeed`、`MiniMax-M2.5`、`MiniMax-M2.5-highspeed` 和 `MiniMax-M2` 会将思维链与答案分开输出。GoModel 会在这些请求上设置 `reasoning_split: true`（仅当请求尚未携带该标志时，因此调用方提供的 `reasoning_split: false` 仍然生效），思考内容会以原生方式出现在 `reasoning_content` 中（而不是作为 `content` 内的内联 `<think>` 标签），并被原样转发。在流式响应中，MiniMax 还会发送一个 `reasoning_details` 数组，与每个 `reasoning_content` 增量重复；网关会从 `choices[].delta` 中移除这个冗余成员。其他所有 MiniMax 模型均原样透传。
+
+## 文字转语音
+
+`POST /v1/audio/speech` 会被转换为 MiniMax 的同步 [`t2a_v2`](https://platform.minimax.io/docs/api-reference/speech-t2a-v2) API，并将十六进制编码的音频解码回二进制：
+
+<CodeGroup>
+
+```bash curl
+curl https://your-gateway/v1/audio/speech \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "speech-2.6-hd",
+    "input": "Hello from GoModel.",
+    "voice": "English_expressive_narrator",
+    "response_format": "mp3"
+  }' \
+  --output speech.mp3
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://your-gateway/v1",
+    api_key=os.environ["GOMODEL_KEY"],
+)
+
+speech = client.audio.speech.create(
+    model="speech-2.6-hd",
+    input="Hello from GoModel.",
+    voice="English_expressive_narrator",
+    response_format="mp3",
+)
+speech.write_to_file("speech.mp3")
+```
+
+```javascript JavaScript
+import { writeFile } from "node:fs/promises";
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "https://your-gateway/v1",
+  apiKey: process.env.GOMODEL_KEY,
+});
+
+const speech = await client.audio.speech.create({
+  model: "speech-2.6-hd",
+  input: "Hello from GoModel.",
+  voice: "English_expressive_narrator",
+  response_format: "mp3",
+});
+
+await writeFile("speech.mp3", Buffer.from(await speech.arrayBuffer()));
+```
+
+</CodeGroup>
+
+- `voice` 接受 **MiniMax 音色 ID**（例如 `English_expressive_narrator`），而不是 `alloy` 这样的 OpenAI 音色名称。
+- `response_format` 支持 `mp3`（默认）、`wav`、`flac` 和 `pcm`。
+- `speed` 支持 `0.5`–`2.0`（默认 `1.0`）。
+
+MiniMax 的 `/models` 列表通常不会返回语音模型，因此请将它们添加到配置的模型列表中，使其可被路由：
+
+```bash
+MINIMAX_MODELS=speech-2.6-hd,speech-2.6-turbo
+```
+
+MiniMax 以 HTTP 200 加原生状态码的形式报告失败；GoModel 会将常见错误映射为真实的错误（无效参数和被拦截的内容 → 400，认证 → 401，余额不足 → 402，速率限制 → 429），而不是作为含义不明的网关错误转发。
+
+## MiniMax 不支持的功能
+
+以下所有情况都会返回 `invalid_request_error`，而不会静默丢弃该选项：
+
+- 语音的 `instructions`（请选择与所需风格相匹配的音色 ID）。
+- 除 `mp3`/`wav`/`flac`/`pcm` 以外的语音 `response_format` 值，以及超出 `0.5`–`2.0` 范围的 `speed`。
+- 语音转文字：MiniMax 没有转写 API，因此 `/v1/audio/transcriptions` 会被拒绝。
+- 实时语音对语音：MiniMax 的对话式实时 Schema 不兼容 OpenAI，因此不会在 `/v1/realtime` 暴露。
+
+## 图生图
+
+向 `/v1/images/edits` 发送一个 multipart 请求，其中包含 `model=image-01` 或 `model=image-01-live`、一个 `prompt` 以及上传的 `image` 文件。MiniMax 会将这些图片用作人物肖像参考；它不执行基于蒙版的编辑。请使用 JPEG 或 PNG 格式的正面肖像，每张小于 10 MB。
+
+适配器会使用配置的区域 Base URL，将肖像以 data URL 的形式放在 `subject_reference` 中发送到 MiniMax 的 `/v1/image_generation` 端点。`size=WIDTHxHEIGHT` 映射为 `width` 和 `height`。自定义尺寸仅适用于 `image-01`：对于使用 `aspect_ratio` 控制尺寸的 `image-01-live`，`size`、`width` 和 `height` 会被拒绝。还支持原生的 `aspect_ratio`、`seed`、`n` 和 `prompt_optimizer` 字段。`response_format=b64_json` 映射为 MiniMax 的 `base64` 格式并返回 `data[].b64_json`；默认返回 `data[].url`（链接在 24 小时后过期）。蒙版和不支持的编辑字段会返回校验错误。原生的 HTTP 200 失败会以与图片生成相同的方式映射为对应的 OpenAI 错误状态，详见下文。
+
+关于各模型的参数限制，请参阅 [MiniMax 图生图 API](https://platform.minimax.io/docs/api-reference/image-generation-i2i)。
+
+## 图片生成
+
+将 `image-01` 或 `image-01-live` 与 `/v1/images/generations` 配合使用。GoModel 会使用配置的 Base URL 将请求转换为 MiniMax 的原生 `/v1/image_generation` 端点，并在 `data` 中返回生成的图片。
+
+```json
+{"model":"image-01","provider":"minimax","prompt":"A lighthouse at sunrise","aspect_ratio":"16:9","n":1}
+```
+
+默认响应格式为 `url`；URL 在 24 小时后过期。如需内联图片，请使用 `response_format: "b64_json"`。也接受原生的 `base64`。`size: "1024x1024"` 映射为 `width` 和 `height`；提供原生尺寸或 `aspect_ratio` 时请省略 `size`。`seed` 和 `prompt_optimizer` 等原生选项会被透传。不支持 `quality` 和流式传输。
+
+MiniMax 以 HTTP 200 加非零 `base_resp.status_code` 的形式报告图片、图片编辑和语音的失败。GoModel 会将该代码映射为对应的 OpenAI 错误状态（速率和用量限制为 429，认证为 401，余额为 402，无效或被拒绝的输入为 400，其他情况为 502），并将 MiniMax 自己的 `base_resp.status_msg` 追加到错误消息中，以免丢失上游的诊断信息。
+
+关于各模型的限制，请参阅 [MiniMax 图片 API 参考](https://platform.minimax.io/docs/api-reference/image-generation-t2i)。

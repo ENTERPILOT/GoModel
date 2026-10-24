@@ -1,0 +1,59 @@
+---
+title: "OIDC Single Sign-On"
+sidebarTitle: "OIDC SSO"
+description: "Chroń GoModel Dashboard za pomocą swojego dostawcy tożsamości OIDC, korzystając z Authorization Code flow z PKCE."
+icon: "key-round"
+tag: "Pro"
+keywords: ["GoModel Pro", "OIDC", "SSO", "single sign-on", "jednokrotne logowanie", "PKCE", "uwierzytelnianie dashboardu", "dashboard authentication"]
+---
+
+## Przegląd
+
+OIDC SSO chroni Dashboard i obsługuje Authorization Code flow z PKCE,
+walidację state i nonce, discovery oraz podpisane sesje `HttpOnly`,
+`SameSite=Lax`.
+
+W odróżnieniu od innych funkcji Pro jawnie włączona konfiguracja SSO
+blokuje w razie błędu (fail closed): uruchamianie zostaje przerwane, gdy brakuje
+uprawnienia licencyjnego `sso` lub konfiguracja jest nieprawidłowa, dzięki czemu
+granica uwierzytelniania nie może po cichu zniknąć.
+
+## Skonfiguruj SSO
+
+Skonfiguruj je w sekcji `extensions.sso` głównej konfiguracji YAML GoModel:
+
+```yaml
+extensions:
+  sso:
+    enabled: true
+    issuer_url: https://login.example.com
+    client_id: gomodel
+    client_secret: ${PRO_SSO_CLIENT_SECRET}
+    redirect_url: https://gomodel.example.com/sso/callback
+    session_secret: ${PRO_SSO_SESSION_SECRET}
+    admin_groups: [gomodel-admins]
+```
+
+Zmienne środowiskowe `PRO_SSO_*` nadpisują wartości z YAML. Redirect URL
+musi kończyć się na `/sso/callback` (łącznie ze skonfigurowanym `BASE_PATH`),
+a HTTPS jest wymagany z wyjątkiem deweloperskich adresów loopback. Domyślnie
+wymagana jest co najmniej jedna grupa administratorów; ustaw
+`PRO_SSO_ALLOW_ALL_ADMINS=true` tylko dla celowo nieograniczonego klienta OIDC.
+
+<Warning>
+  Unieważnianie sesji SSO działa lokalnie w obrębie procesu. Wdrażaj SSO na
+  dokładnie jednej aktywnej replice GoModel Pro, dopóki nie będzie dostępny
+  współdzielony magazyn sesji lub unieważnień.
+</Warning>
+
+## Audyt i kontrola dostępu
+
+Udane logowania, odrzucenia przez polityki i wylogowania są zapisywane jako
+oczyszczone zdarzenia audytowe. Tokeny, kody autoryzacyjne, ciasteczka, surowe
+claimy ani szczegóły błędów providera nie są przechowywane.
+
+Sesja SSO niesie `user_path` tak samo jak zarządzany klucz API, więc listy
+dozwolonych modeli na poziomie grup i użytkowników ze strony
+[Użytkownicy](/pl/features/users) obowiązują dla requestów wykonywanych w jej
+ramach. `allowed_models` per klucz to ustawienie zarządzanego klucza API i nie
+dotyczy sesji SSO.

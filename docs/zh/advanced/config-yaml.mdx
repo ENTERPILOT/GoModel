@@ -1,0 +1,220 @@
+---
+title: "config.yaml"
+description: "何时使用 config.yaml、何时不使用，以及它与环境变量和 Docker 的配合方式。"
+icon: "file-cog"
+keywords: ["config.yaml", "YAML 配置", "YAML configuration", "Docker", "环境变量", "environment variables"]
+---
+
+GoModel 的目标是尽可能让 `config.yaml` 成为可选项。
+对于常规部署、CI、容器以及 Secret（密钥）注入，建议优先使用环境变量。
+
+当您需要环境变量难以清晰表达的结构时，再使用 `config.yaml`，尤其是：
+
+- 按提供商覆盖弹性与容错设置
+- 自定义提供商实例名称，且无法套用环境变量自动生成的
+  `<provider-type>-<suffix>` 命名
+- 更丰富、便于审阅的提供商模型列表，尤其是在使用 allowlist 模式时
+- 按 `user_path` 设置、便于审阅的预算限额
+- 较大的嵌套配置，放在一个文件中更便于审阅
+
+对于多个提供商实例，环境变量支持
+`<PROVIDER>_<SUFFIX>_API_KEY`、`<PROVIDER>_<SUFFIX>_BASE_URL` 和
+`<PROVIDER>_<SUFFIX>_MODELS`。后缀会转换为以连字符连接的提供商名称：
+`OPENAI_EAST_API_KEY` 注册 `openai-east`，
+`OLLAMA_A_BASE_URL` 注册 `ollama-a`。Azure 还支持
+`<PROVIDER>_<SUFFIX>_API_VERSION`。
+
+Google Vertex AI 遵循相同的后缀命名规则（`VERTEX_US_PROJECT`
+注册 `vertex-us`）。每个实例的 Vertex 项目、区域及其他 Vertex 设置都必须使用相同的后缀：
+例如，应将 `VERTEX_US_PROJECT` 与 `VERTEX_US_LOCATION` 搭配使用，而不是通用的
+`VERTEX_PROJECT` 或 `VERTEX_LOCATION`。`VERTEX_AUTH_TYPE` 默认为
+`gcp_adc`。
+
+已配置的提供商模型列表可以通过 `<PROVIDER>_MODELS` 保留在环境变量中，例如
+`OPENROUTER_MODELS`、`ORACLE_MODELS`、`AZURE_MODELS`、`SGLANG_MODELS`、
+`VLLM_MODELS` 或 `LLMD_MODELS`。llm-d 实例还接受带后缀的
+`LLMD_<SUFFIX>_INFERENCE_OBJECTIVE` 和
+`LLMD_<SUFFIX>_FAIRNESS_FROM_USER_PATH` 控制项。
+设置 `CONFIGURED_PROVIDER_MODELS_MODE=fallback`（默认）时，仅在上游 `/models` 失败或返回为空时使用这些列表；设置为
+`allowlist` 时，对定义了列表的提供商只暴露已配置的模型，并跳过其上游
+`/models` 调用；设置为 `merge` 时，会在发现的模型清单之上追加已配置的模型——适用于提供商实际提供、却未列在其
+`/models` 列表中的模型。
+
+## 过滤提供商的模型
+
+`model_filter` 会将提供商的模型清单收窄到您真正希望可路由的模型。当提供商的模型目录远大于您想暴露的范围时可以使用它——例如使用 OpenRouter 的免费套餐做实验，而由另一个提供商承载生产环境流量。
+
+```yaml
+providers:
+  openrouter:
+    type: openrouter
+    api_key: "${OPENROUTER_API_KEY}"
+    model_filter:
+      include: ["*:free"]
+      exclude: ["*-preview:free"]
+      max_price_per_mtok: 0
+```
+
+| 字段 | 默认值 | 行为 |
+| --- | --- | --- |
+| `include` | 空（全部保留） | 仅保留至少匹配一个模式的模型。 |
+| `exclude` | 空 | 丢弃匹配任一模式的模型。在 `include` 之后应用。 |
+| `max_price_per_mtok` | 未设置（无上限） | 丢弃每百万 Token 最高单价（取输入与输出中较大者）超过上限的模型。 |
+
+模式为 glob，与提供商的原始模型 ID 进行不区分大小写的匹配。
+`*` 匹配任意长度的字符序列，**包括 `/`**，因此 `*:free` 可匹配
+`deepseek/deepseek-r1:free`；`?` 恰好匹配一个字符。
+
+设置了 `max_price_per_mtok` 时，定价未知的模型会被丢弃：放行未知价格模型的价格上限算不上上限。价格来自模型注册表以及提供商自身的报告——OpenRouter 会公布自己的费率，因此其模型目录（包括 `:free` 变体）无需额外配置即可获得定价。本地提供商通常完全不报告定价，因此应按模式而不是按价格过滤它们。
+
+`max_price_per_mtok` 必须是大于或等于 0 的有限数。负数、`NaN` 或无穷大的上限会导致启动失败，而不是静默拒绝所有模型或禁用上限；环境变量值根本不是数字时同样如此——运维人员以为已生效的成本控制，绝不能悄无声息地缺失。
+
+过滤作用于最终的模型清单，即在
+`configured_provider_models_mode` 解析完成之后，因此它也会收窄通过
+`models` 添加的模型。被过滤的模型会完全离开可路由目录：它们不再出现在
+`GET /v1/models` 中，对它们的请求会返回 "model not found"。
+
+过滤只是提供商所提供模型的一个视图，而不是删除。网关会在内存和模型缓存中保留未过滤的清单，因此放宽过滤条件——或者某个模型降价到可以通过价格上限——会在下一次元数据刷新时恢复该模型，无需等待上游 `/models` 调用成功。
+
+同样的过滤器也可以通过环境变量按提供商配置：
+
+```bash
+OPENROUTER_MODEL_FILTER_INCLUDE="*:free"
+OPENROUTER_MODEL_FILTER_EXCLUDE="*-preview:free"
+OPENROUTER_MODEL_FILTER_MAX_PRICE_PER_MTOK=0
+```
+
+每条规则独立叠加，因此环境变量中的价格上限可以收窄 YAML 中的模式过滤，而无需重复声明模式。带后缀的实例与其他提供商环境变量使用相同的规则：`OPENROUTER_EU_MODEL_FILTER_INCLUDE` 配置的是
+`openrouter-eu`。
+
+## 优先级顺序
+
+实际生效的优先级为：
+
+1. 环境变量
+2. 可选的 `config/config.yaml` 或 `config.yaml`
+3. 代码中的内置默认值
+
+`.env` 并不是单独的优先级层。它只是在启动前加载环境变量的一种便捷方式。
+
+每一层都叠加在前一层之上，因此在 `config.yaml` 中声明、再由环境变量覆盖的提供商，仍被视为来自配置文件。
+
+## 启动校验
+
+声明式配置采用严格解析：未知键会导致启动错误，而不是被静默忽略。这可以捕获拼写错误（如把 `port:` 写成 `prot:`），更重要的是能捕获缩进错误的配置段——参见下文的注意事项。
+
+这同时适用于 `config.yaml` 以及以 JSON 声明相同结构的环境变量：`VIRTUAL_MODELS`、`SET_RATE_LIMIT_*` 和 `SET_BUDGET_*`。
+由于环境变量条目会覆盖 YAML 条目，否则其中的拼写错误会悄无声息地压过正确的 YAML 条目。
+
+默认采用严格模式，是因为 `providers`、`rate_limits`、`budgets`
+或 `guardrails` 条目一旦被丢弃，就会静默改变路由、成本或安全行为——一个从未生效的成本上限，看起来和一个正在生效的成本上限毫无二致。
+
+设置 `CONFIG_STRICT=false` 可将未知键降级为警告，并在忽略这些键的情况下启动。此选项用于在较新的配置文件下回滚二进制文件，不适合日常使用：
+
+```text
+WARN  unknown config key ignored; it has no effect path=config.yaml line=23 field=uranium-geryon-9b
+INFO  providers resolved total=1 from_config_file=0 from_env=1
+```
+
+`CONFIG_STRICT` 放宽的是接受哪些*键*，从不放宽*值*是否合理的检查。格式错误的值（`port: [9999, 8080]`）在两种模式下都会中止启动。
+实体级校验同样仍然适用：如果某个虚拟模型的目标指向一个不存在的提供商，即使本应声明该提供商的键已被作为警告忽略，启动也会失败。
+
+为确认提供商来自哪一层，GoModel 会在启动时输出一行日志：
+
+```json
+{"msg":"providers resolved","total":5,"from_config_file":4,"from_env":1,
+ "config_file_providers":["plutonium-qwen-dflash","uranium-gemma-embedding"],
+ "env_providers":["opencode-go"]}
+```
+
+已加载文件但 `from_config_file: 0`，表示该文件未提供任何提供商。GoModel 还会输出包含解析后路径的 `config file loaded`，或包含已搜索路径的
+`no config file found`。
+
+## 当前 Schema
+
+当前的权威来源位于主代码库中：
+
+- [config/config.go](https://github.com/ENTERPILOT/GoModel/blob/main/config/config.go)
+- [config/config.example.yaml](https://github.com/ENTERPILOT/GoModel/blob/main/config/config.example.yaml)
+
+如果部署挂载在域名根路径之下，请设置 `server.base_path` 或
+`BASE_PATH`。例如，`BASE_PATH=/g` 会在 `/g/v1/...`、
+`/g/admin/...` 和 `/g/health` 下提供网关服务。
+
+如需更改入站用户路径请求头，请设置 `server.user_path_header` 或
+`USER_PATH_HEADER`。默认值仍为 `X-GoModel-User-Path`。
+
+对此文件的修改可通过 `gomodel --reload` 应用到正在运行的网关，
+该命令会重新读取文件和环境变量，并原地重建网关——
+参见 [CLI 操作](/zh/advanced/cli#配置重新加载)。如果新文件加载失败，则不会发生任何变化。`server.port` 和 `server.pid_file` 是例外：
+两者在进程生命周期内固定不变，因此重载时会输出警告，并保留当前运行值，直到网关重启。
+
+## Docker
+
+GoModel 会先读取 `config/config.yaml`，然后读取 `config.yaml`。
+
+使用 `docker run` 时，您可以在主机上保留名为 `config.yml` 的文件，并将其挂载到 GoModel 期望的容器内路径：
+
+```bash
+docker run --rm -p 8080:8080 \
+  -v "$PWD/config.yml:/app/config/config.yaml:ro" \
+  enterpilot/gomodel:latest
+```
+
+使用 Docker Compose：
+
+```yaml
+services:
+  gomodel:
+    image: enterpilot/gomodel:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yml:/app/config/config.yaml:ro
+```
+
+<Tip>
+  如果环境变量和 YAML 定义了同一项设置，以环境变量为准。
+</Tip>
+
+如果挂载路径存在但无法读取——最常见的情况是本应挂载文件的位置绑定挂载了一个目录——启动会失败，而不是静默回退到默认值。
+
+## 注意事项
+
+### 未解析的 `${VAR}` 占位符会导致提供商被丢弃
+
+如果 YAML 中出现了 `${OPENAI_API_KEY}`，但该环境变量实际并未设置，字面字符串 `${OPENAI_API_KEY}` 就会成为 API 密钥的值。凭据过滤器检测到 `${` 子串后，会将该提供商整个移除。如果 `${VAR}` 出现在值的中间（例如
+`prefix-${OPENAI_API_KEY}`），同样如此。启动进程前请务必确认环境变量已导出，或者提供默认值：`${OPENAI_API_KEY:-}`。如果希望改为中止启动，请使用严格的
+[Secret 引用](/zh/advanced/secret-references) `${env:OPENAI_API_KEY}`。
+
+### 缩进错误的 `providers:` 配置段会被拒绝
+
+YAML 会将下面的内容解析为一个空的 `providers:` 配置段加上两个无关的顶层键，而不是两个提供商：
+
+```yaml
+providers:
+uranium-geryon-9b:          # 未缩进到 providers: 下
+  type: vllm
+  base_url: "http://uranium-geryon-9b:8000/v1"
+uranium-gemma-embedding:    # 同上
+  type: vllm
+  base_url: "http://uranium-gemma-embedding:8000/v1"
+```
+
+严格解析会在启动时拒绝它，并指出每一个出错的行：
+
+```text
+failed to parse config.yaml: line 2: field uranium-geryon-9b not found; line 5: field uranium-gemma-embedding not found
+```
+
+请将提供商条目在 `providers:` 下缩进两个空格。在引入严格解析之前，这种配置会以零个 YAML 提供商启动，且不报任何错误。使用 `CONFIG_STRICT=false` 时，它会以零个 YAML 提供商启动，并为每个未缩进的键输出一条警告。
+
+### 按提供商的弹性与容错设置只能来自 YAML
+
+环境变量覆盖遍历会跳过 `map` 字段。`RETRY_MAX_RETRIES` 会更改所有提供商的全局默认值，但无法针对单个提供商。
+按提供商调整需要在 `config.yaml` 中使用 `providers.<name>.resilience:` 块。
+
+### 部分 YAML 会让其余字段保持默认值
+
+YAML 会被反序列化到一个已填充内置默认值的结构体上。只有文件中出现的字段才会被写入。在 `resilience.retry` 中省略
+`max_backoff` 时，它会保持内置默认值；对满意的默认值，您无需重复声明。

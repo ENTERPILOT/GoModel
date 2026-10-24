@@ -1,0 +1,172 @@
+---
+title: "故障转移"
+description: "在虚拟模型的多个目标之间进行故障转移，并通过故障转移策略将目标列表设为严格的优先级顺序。"
+icon: "shuffle"
+keywords: ["故障转移", "failover", "回退", "fallback", "提供商故障", "provider outage", "自动重试", "高可用", "优先级路由"]
+---
+
+## 概览
+
+故障转移是[虚拟模型](/zh/features/virtual-models)的一部分。每个包含两个或更多目标的重定向都会在目标之间进行故障转移：
+当请求所发往的目标返回可触发故障转移的错误时，GoModel 会按声明顺序，在该重定向剩余的可用目标上重试请求，并在第一次成功时停止。
+
+重定向的**负载均衡策略**只决定首先尝试哪个目标：
+
+| 策略 | 首个目标 | 之后 |
+| --- | --- | --- |
+| Round-robin | 在各目标之间轮换（按权重） | 其他目标，按声明顺序 |
+| Lowest cost | 成本最低的可用目标 | 其他目标，按声明顺序 |
+| **Failover** | 始终为第一个可用目标 | 后续目标，按声明顺序 |
+
+当目标列表代表优先级顺序时，请选择 **Failover**——始终使用最佳模型，除非它不可用，此时才依次降级到备用模型。
+
+对于其他策略，编辑器会显示一个 **Failover** 复选框，默认处于勾选状态。当重定向只需负载均衡、失败的请求应直接返回错误时，
+请取消勾选（或在代码中设置 `failover: false`），例如目标之间不可互换且客户端自行处理重试的情况。Failover 策略始终会进行故障转移，
+因此该策略下不提供此复选框。
+
+## 配置故障转移链
+
+在控制台中打开 **Models**，编辑您要保护的模型：该模型已被固定为第一个目标，因此只需按优先级顺序在其下方添加回退模型并保存——
+策略默认为 **Failover**。如果希望以新名称进行故障转移，请创建一个虚拟模型，按优先级顺序列出目标，并在
+**Load-balancing strategy** 下拉菜单中选择 **Failover**。权重和会话保持不适用于此策略，因此编辑器会将它们隐藏。
+删除被固定的那一行会使该条目变为普通重定向：对该模型的请求将改为发往剩余的目标。
+
+以代码方式配置（`config.yaml` 或 `VIRTUAL_MODELS` 环境变量）：
+
+```yaml
+virtual_models:
+  # 一个始终优先使用第一个目标的新名称。
+  - source: resilient-chat
+    strategy: failover
+    targets:
+      - { model: kimicode/kimi-k2 }
+      - { model: openai/gpt-4o }
+      - { model: ollama/qwen3:8b }
+
+  # 为真实模型配置故障转移：该重定向覆盖 `gpt-4o`，先尝试它，
+  # 然后按顺序尝试回退模型。将 source 本身列为第一个目标，
+  # 表示它所覆盖的具体模型。
+  - source: gpt-4o
+    strategy: failover
+    targets:
+      - { model: gpt-4o }
+      - { model: azure/gpt-4o }
+      - { model: gemini/gemini-2.5-pro }
+```
+
+目标也可以指向另一个虚拟模型（[链式调用](/zh/features/virtual-models#链式虚拟模型)）；此时遍历会尝试其背后的每一个具体模型。
+有一个例外使相互保护成为可能：当一个覆盖真实模型的链列出了另一个以同样方式被覆盖的模型时，该回退只会到达那个模型本身——
+不会继续遍历它的回退模型——正因如此，`gpt-4o` 可以回退到 `claude-sonnet-4-6`，同时 `claude-sonnet-4-6` 也可以回退到 `gpt-4o`。
+任何其他列出受保护模型的重定向（别名、使用新名称的虚拟模型）则会遍历该模型的回退模型。
+
+对于非流式请求，提供商重试会在故障转移之前执行。如需对 Cloudflare `522`/`524` 响应进行重试，然后在同一提供商上切换模型，
+请使用[带有按模型熔断器的弹性与容错设置](/zh/advanced/resilience#重试-cloudflare-超时，然后切换模型)。
+
+故障转移针对的是失败的尝试，而不是缓慢的尝试。如需将流量从仍有响应但耗时过长的提供商上转移走，请在其熔断器上设置
+[慢调用阈值](/zh/advanced/resilience#从慢速提供商故障转移)。
+
+## 触发时机
+
+只有在某次尝试返回以下结果后，才会尝试故障转移：
+
+- `5xx`
+- `429`，包括 GoModel 自身对该目标执行的速率限制——当其他目标仍有余量时，已饱和的目标会被跳过
+- 模型不可用、不受支持或未找到之类的错误
+- 以 `4xx` 状态转发的上游失败消息（OpenCode Zen 等聚合类提供商可能会将其自身上游的临时故障报告为
+  `400 "Upstream request failed"`）
+
+它适用于经过翻译的 `/v1/chat/completions`、`/v1/responses` 和 `/v1/messages` 请求。请求日志会显示每一次尝试，
+因此发生的故障转移在审计记录中清晰可见，并按实际作答的模型计价。
+
+已禁用的目标模型，或请求的 API 密钥或 `user_path` 无权使用的目标模型，永远不会被尝试：无论是选择首个目标时还是在故障转移链中，
+它都会被跳过，且不计为一次尝试。
+
+在 `provider` 字段中指定提供商的请求会绕过虚拟模型，直接到达具体模型。但如果有一个虚拟模型恰好覆盖了该模型并将其列为目标
+（即 Models 页面为真实模型创建的形式），该请求仍会使用这个虚拟模型的链，因为该虚拟模型是为模型增加故障转移，而不是替换它。
+
+<Note>
+  由故障转移目标生成的响应不会写入[响应缓存](/zh/features/cache#通过故障转移返回的响应不会被缓存)：
+  缓存键是根据故障转移之前的解析结果计算哈希的，否则备用模型的回答会以主模型的键被重放。因此，在首个目标不可用期间，
+  该链不会再新增缓存条目；故障发生前写入的条目在其 TTL 到期之前仍会继续提供服务。
+</Note>
+
+设置 `FAILOVER_ENABLED=false`（或 `failover.enabled: false`）可全局关闭遍历；[工作流](/zh/advanced/workflows)也可以在其作用域内关闭它。
+此时仍会使用所选目标提供服务，但不会重试。
+
+## 调整故障转移策略
+
+上述默认值适合大多数部署。`failover` 下的三个设置（或对应的环境变量）可对其进行调整：
+
+| 设置 | 环境变量 | 默认值 | 含义 |
+| --- | --- | --- | --- |
+| `max_attempts` | `FAILOVER_MAX_ATTEMPTS` | `0`（所有剩余目标） | 在首次尝试失败后，单个请求最多可尝试多少个故障转移目标。未发出调用而被跳过的目标（速率限制已饱和）不计入。 |
+| `retry_on_statuses` | `FAILOVER_RETRY_ON_STATUSES` | `[429, 5xx]` | 触发故障转移的上游 HTTP 状态码：可以是精确状态码（`408`），也可以是整个类别（`5xx`）。 |
+| `retry_on_errors` | `FAILOVER_RETRY_ON_ERRORS` | 见下文 | 无论状态码如何都会触发故障转移的错误短语。 |
+
+非空列表会**替换**其默认值，因此请重复列出您希望保留的默认项；空列表或省略列表则保留默认值（如需关闭故障转移，请使用 `enabled: false`）。
+在环境变量中，请使用逗号分隔各条目。
+
+当 `retry_on_errors` 短语中的每个词都出现在错误码或错误消息中时（不区分大小写，子串匹配），即视为匹配：`model not found`
+可匹配 `The model 'gpt-9' was not found`。数字形式的词——`404` 或 `4xx`——约束的是 HTTP 状态码而不是文本，因此 `404 deprecated`
+只匹配消息中提到 “deprecated” 的 404 响应。默认列表为：
+
+```yaml
+retry_on_errors:
+  - model not found
+  - model does not exist
+  - model unsupported
+  - model unavailable
+  - model not available
+  - model deprecated
+  - model retired
+  - model disabled
+  - upstream failed
+  - upstream error
+  - upstream unavailable
+  - upstream timed out
+  - upstream timeout
+  - 404 unsupported
+  - 404 unavailable
+  - 404 not available
+  - 404 deprecated
+  - 404 retired
+  - 404 disabled
+```
+
+返回 `200` 但 `choices` 数组为空的非流式 Chat Completion 会被视为 `502`（`provider returned no choices`），因此在默认的 `5xx`
+状态规则下会触发故障转移。每次此类尝试还会被记录日志，并计入 `gomodel_empty_responses_total`。
+
+流式请求在任何字节到达客户端之前也会以同样方式进行检查。未产生任何事件就结束的 `200` 流会被视为 `502`
+（`provider returned an empty stream`）；第一个事件为 `{"error": ...}` 载荷的流会以该载荷携带的状态码失败（例如带内的 `429`），
+如果载荷未携带状态码，则为 `502`。在默认规则下，这两种情况都会触发故障转移。响应头会等到第一个事件到达后才发送。
+
+[提供商故障模式](/zh/advanced/provider-failure-modes)列出了所有此类情况，以及其中哪些会触发故障转移。
+
+示例：最多尝试一个备用目标，将超时视为可触发故障转移，但仍将 `429` 响应返回给客户端，并添加一条特定于提供商的过载消息：
+
+```yaml
+failover:
+  max_attempts: 1
+  retry_on_statuses: [408, 5xx]
+  retry_on_errors:
+    - model not found
+    - model does not exist
+    - upstream failed
+    - overloaded
+```
+
+客户端收到的是最后一个尝试目标的错误，因此在 `max_attempts: 1` 时，用尽尝试次数的请求报告的是备用目标的失败，而不是主目标的失败。
+
+## 从故障转移规则迁移
+
+早期版本将故障转移作为单独的按模型映射进行管理（Models 页面上的 shuffle 图标以及 `failover.rules` 配置）。两者都会自动转换：
+
+- 控制台管理的映射会转换为使用故障转移策略、覆盖其主模型的虚拟模型。转换在启动时运行一次，随后删除旧的 `failover_rules`
+  存储（包括其所有历史格式）。当主模型已有普通的按模型设置（在 Models 页面设置的降速或描述）时，映射会合并到该设置中，并保留该设置。
+  如果主模型已有重定向、路径作用域设置或已被禁用，则会记录日志并跳过，存储也会被保留，直到问题解决——请将其回退模型作为使用故障转移策略的
+  该虚拟模型的目标添加，然后删除这一行。如果某个映射的回退模型指向一个会路由回其主模型的虚拟模型，该映射也会以同样方式保留，
+  因为转换它会形成链式循环——请调整或删除该虚拟模型，然后重启。列在 `disabled_models` 中的主模型会转换为已禁用的虚拟模型：
+  其回退模型会被保留，但在您从 Models 页面启用它之前不会生效。
+- `failover.rules`、`manual_rules_path`、`FAILOVER_RULES_JSON` 和 `disabled_models` 仍然会被加载，并在每次启动时转换为由配置管理的虚拟模型，
+  同时给出弃用警告。如果某条规则的主模型在控制台中已有虚拟模型，该规则会被跳过并给出警告，因此它永远不会替换该虚拟模型的路由。
+  请在方便时将这些规则迁移到 `virtual_models` 下。

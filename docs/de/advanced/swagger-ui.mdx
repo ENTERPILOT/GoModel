@@ -1,0 +1,70 @@
+---
+title: "Swagger UI"
+description: "Stellen Sie eine interaktive Swagger UI für die API von GoModel aus einem Binary bereit, das mit dem Build-Tag swagger gebaut wurde."
+icon: "file-code"
+keywords: ["Swagger", "Swagger UI", "OpenAPI", "Build-Tag", "build tag", "API-Explorer", "API explorer"]
+---
+
+GoModel kann unter `/swagger/index.html` eine interaktive Swagger UI
+bereitstellen. Sie muss auf zwei Ebenen aktiviert werden: Das Binary muss mit
+dem Build-Tag `swagger` kompiliert sein, und `SWAGGER_ENABLED` muss zur
+Laufzeit gesetzt sein.
+
+## Warum sie nicht im Standard-Build enthalten ist
+
+Release-Binarys und das offizielle Docker-Image werden **ohne** das Tag
+`swagger` gebaut. Die eingebettete Spezifikation und die UI-Assets vergrößern
+das Binary um mehr als 30 MB (bei einem nicht gestrippten Build etwa von 55 MB
+auf 88 MB) und damit auch das Image, und der Endpunkt wird im Produktivbetrieb
+selten benötigt. Ohne sie bleiben die Artefakte klein und die exponierte
+Angriffsfläche minimal.
+
+Wenn Sie nur die API-Spezifikation benötigen, verwenden Sie stattdessen die
+eingecheckte
+[`docs/openapi.json`](https://github.com/ENTERPILOT/GoModel/blob/main/docs/openapi.json)
+in einem beliebigen OpenAPI-Viewer.
+
+## Mit Swagger bauen
+
+```bash
+go build -tags=swagger -o bin/gomodel ./cmd/gomodel
+```
+
+`make run` baut mit dem Tag und aktiviert die UI für die lokale Entwicklung
+automatisch.
+
+## Zur Laufzeit aktivieren
+
+| Einstellung                  | Standardwert | Beschreibung                                    |
+| ------------------------ | ------- | ---------------------------------------------- |
+| `SWAGGER_ENABLED`        | `false` | Stellt die Swagger UI unter `/swagger/index.html` bereit |
+
+```bash
+SWAGGER_ENABLED=true ./bin/gomodel
+```
+
+Oder in `config.yaml`:
+
+```yaml
+server:
+  swagger_enabled: true
+```
+
+<Warning>
+`/swagger/*` umgeht `GOMODEL_MASTER_KEY` und die Authentifizierung per
+Gateway-API-Key. Wenn Sie den Endpunkt aktivieren, veröffentlichen Sie also
+eine interaktive API-Dokumentation für jeden, der den Server erreichen kann.
+Aktivieren Sie ihn nur in Entwicklungs- oder vertrauenswürdigen Umgebungen,
+oder schränken Sie den Pfad auf Netzwerkebene ein.
+</Warning>
+
+Die UI berücksichtigt `BASE_PATH`. Ist `SWAGGER_ENABLED=true` bei einem Binary
+gesetzt, das ohne das Tag gebaut wurde, protokolliert GoModel beim Start eine
+Warnung und liefert unter `/swagger/*` nichts aus.
+
+## Spezifikation neu generieren
+
+Führen Sie nach Änderungen an API-Annotationen `make swagger` aus, um das
+eingebettete docs-Paket und `docs/openapi.json` neu zu generieren. Details
+finden Sie in
+[DEVELOPMENT.md](https://github.com/ENTERPILOT/GoModel/blob/main/docs/DEVELOPMENT.md).

@@ -1,0 +1,82 @@
+---
+title: "Warum Go"
+description: "Warum GoModel in Go und nicht in Python oder Rust geschrieben ist: ein Laufzeitverhalten, das zu einem Gateway passt, eine Sprache, der Unternehmen bereits vertrauen, und ein Pool an Fachkräften, der das Projekt wartbar hält."
+icon: "code"
+keywords: ["Go", "Golang", "Rust", "Python", "Wahl der Programmiersprache", "language choice", "Performance"]
+---
+
+GoModel ist in Go geschrieben. Wir haben auch Rust ernsthaft in Betracht gezogen.
+Diese Seite erklärt, warum Go gewonnen hat, damit Sie beurteilen können, ob unsere
+Überlegungen zu Ihren eigenen Prioritäten passen.
+
+## Ein Gateway ist ein Laufzeitproblem
+
+Ein AI-Gateway erledigt eine einzige Aufgabe tausende Male pro Sekunde: einen
+Request annehmen, ihn übersetzen, die Response eines Providers zurückstreamen und
+dann aus dem Weg gehen. Die Sprache, in der Sie es schreiben, entscheidet darüber,
+wie viel Ihres Latenzbudgets das Gateway selbst verbraucht.
+
+Go passt gut zu diesem Profil:
+
+- **Goroutinen machen Streaming günstig.** Jede offene Verbindung zu einem
+  Provider ist eine leichtgewichtige Goroutine, sodass langlebige Streaming-Responses
+  keine Threads blockieren und der gesamten Codebasis kein Async-Framework
+  aufgezwungen wird.
+- **Ein einziges statisches Binary.** GoModel wird als eine Datei ausgeliefert –
+  ohne Interpreter, ohne virtuelle Umgebung und ohne Abhängigkeitsbaum, der beim
+  Deployment installiert werden muss. Das Container-Image ist klein und startet
+  in deutlich unter einer Sekunde.
+- **Vorhersagbarer Speicherverbrauch.** Der Garbage Collector von Go ist auf
+  kurze Pausenzeiten optimiert, und das Gateway hält pro Request nur sehr wenig
+  Zustand. Der Speicherverbrauch bleibt daher unter Last konstant, statt mit der
+  Anzahl der Worker zu wachsen.
+
+Die Seite [Benchmarks](/de/about/benchmarks) zeigt, wie das in der Praxis im
+Vergleich zu Gateways aussieht, die in Python und TypeScript geschrieben sind.
+
+## Warum nicht Rust
+
+Rust hätte uns dasselbe Deployment-Profil und auf manchen Pfaden einen geringeren
+Overhead gegeben. Wir haben uns trotzdem für Go entschieden, aus Gründen, die wenig
+mit der Sprache selbst zu tun haben:
+
+1. **Go ist weitaus verbreiteter.** In jeder Entwicklerumfrage und jedem
+   Sprachranking, das wir uns angesehen haben, liegt Go bei der Verbreitung
+   deutlich vor Rust. Ein Grund dafür ist die flachere Lernkurve: Wer in einer
+   anderen Sprache produktiv ist, kann eine Go-Codebasis innerhalb weniger Tage
+   lesen und dazu beitragen.
+2. **Mitwirkende sind leichter zu finden.** Ein größerer Pool an Entwicklern,
+   die Go bereits beherrschen, bedeutet, dass mehr Menschen GoModel reviewen,
+   erweitern und warten können. Zudem bleiben die Einstellungskosten für die
+   Unternehmen, die es betreiben, angemessen.
+3. **Unternehmen wechseln bereits zu Go.** Viele Organisationen, die für
+   Backend-Services auf Java standardisiert haben, betrachten Go inzwischen als
+   ihren nächsten etablierten Standardweg für neue Infrastruktur. Ein Gateway in
+   Go passt zu den Tools, Sicherheitsprüfungen und Betriebsgewohnheiten, die
+   diese Teams bereits haben.
+4. **Go wächst weiter.** Der Anteil neuer Infrastrukturprojekte, die in Go
+   geschrieben werden, ist Jahr für Jahr gestiegen. Wer auf die Sprache setzt,
+   die Plattformteams übernehmen, sorgt dafür, dass GoModel langfristig einfach
+   zu betreiben und einfach mitzugestalten bleibt.
+
+Rust bleibt eine hervorragende Sprache. Für ein Projekt, dessen Erfolg von einer
+breiten Basis an Mitwirkenden und Betreibern abhängt, war die Reichweite von Go
+wichtiger als die letzten paar Prozent Durchsatz.
+
+## Warum nicht Python
+
+Python ist der Standard für KI-Tooling, und die meisten Gateways haben dort
+angefangen. Es ist eine gute Sprache zum Experimentieren und eine schlechte für
+einen Netzwerk-Hop, der vor jedem Modellaufruf sitzt. Die Abwägungen werden in
+[Unsere Werte](/de/about/values) behandelt und auf der Seite
+[Benchmarks](/de/about/benchmarks) gemessen.
+
+## Was das für Sie bedeutet
+
+- **Betreiber** erhalten einen kleinen, schnellen, statisch gelinkten Service,
+  der sich in Docker, Kubernetes und auf Bare Metal gleich verhält.
+- **Mitwirkende** erhalten eine Codebasis in einer Sprache, die sie
+  wahrscheinlich bereits kennen, mit einer Standard-Toolchain und ohne Framework,
+  das sie zuerst lernen müssen.
+- **Unternehmen** erhalten ein Gateway, das in einer Sprache geschrieben ist,
+  die ihre Plattform- und Sicherheitsteams bereits freigeben und unterstützen.

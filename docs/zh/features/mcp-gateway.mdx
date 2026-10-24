@@ -1,0 +1,295 @@
+---
+title: "MCP 网关"
+description: "将您的 MCP 服务器聚合到一个经过认证的 GoModel 端点之后，并按密钥控制工具可见性、追踪用量和设置速率限制。"
+icon: "plug"
+keywords: ["MCP 网关", "MCP 服务器", "工具聚合", "MCP 代理", "MCP gateway", "Model Context Protocol", "MCP servers", "tool aggregation", "MCP proxy"]
+---
+
+## MCP 网关的作用
+
+GoModel 可以位于您的智能体客户端（Claude Code、Claude Desktop、Cursor、VS Code 等）与它们所使用的 MCP（Model Context Protocol）服务器之间，就像它已经位于您的应用与模型提供商之间一样：
+
+- **一个端点，一个密钥。** 客户端使用 GoModel API 密钥连接到 `https://your-gateway/mcp`。客户端从不持有上游 MCP 凭据；网关会自行注入每个服务器的请求头。
+- **带命名空间的聚合。** 所有已配置服务器的工具和提示词会以 `{slug}_{name}` 的形式（例如 `github_create_issue`）出现在同一个目录中，顺序稳定且确定。
+- **最小权限发现。** 可以将服务器的可见范围限定到 `user_paths`，并通过 `disallowed_user_paths` 排除部分调用方；被隐藏的调用方不只是收到错误，这些工具根本不会出现在它们的 `tools/list` 中。运维人员级别的 `allowed_tools` / `disallowed_tools` 过滤器可以精简工具繁杂的服务器，从而保持智能体上下文精简。
+- **可观测性。** 每次工具调用都会成为一条用量条目（服务器、工具、耗时、大小、错误标志、标签、用户路径），MCP 请求也会像其他模型流量一样出现在审计日志和请求日志中，并标注 JSON-RPC 方法；对于调用，还会标注工具或提示词名称，因此 `tools/call` 这一行显示的是 `github_create_issue`，而不是一个单纯的路径。设置 `LOGGING_LOG_BODIES=true` 时，JSON-RPC 请求帧和响应帧也会记录在审计条目中（包括工具参数和结果），并与其他端点一样受 1 MB 捕获上限的限制。用户路径的速率限制和预算同样会管控 MCP 请求。
+
+## 连接客户端
+
+将任意支持 Streamable HTTP 的 MCP 客户端指向网关，并以 Bearer Token 的形式传入您的 GoModel 密钥：
+
+```json
+{
+  "mcpServers": {
+    "gomodel": {
+      "type": "http",
+      "url": "https://your-gateway/mcp",
+      "headers": {
+        "Authorization": "Bearer sk-your-gomodel-key"
+      }
+    }
+  }
+}
+```
+
+控制台的 **MCP Servers** 页面有一个 **Connect a client** 面板，其中提供端点 URL 和可直接复制的客户端配置。
+
+有关特定客户端的命令、基于环境变量的认证以及验证步骤，请参阅[连接 Claude Code 和 Codex](/zh/mcp-proxy/claude-code-and-codex)。
+
+有四种方式可以缩小客户端能看到的范围：
+
+- `/mcp`：该密钥的用户路径可见的所有内容，带命名空间。
+- `/mcp/{slug}`：单个服务器，使用其**原始**工具名称。
+- `/mcp/{name}`：一个[虚拟服务器](#将服务器分组为虚拟服务器)，即一组具名的服务器子集，带命名空间。
+- `X-MCP-Servers: github,jira` 请求头：在 `/mcp` 上指定一个以逗号分隔的子集。
+
+## 将服务器分组为虚拟服务器
+
+虚拟服务器在自己的 URL 上提供一组固定的 MCP 服务器子集。对于只接受 URL、不支持自定义请求头的客户端，或者需要为每个团队或智能体提供一组精选服务器时，可以使用虚拟服务器。
+
+在 **MCP Servers** 页面上点击 **Add Virtual Server** 创建：选择名称、成员服务器，以及可选的工具列表模式。更改会立即生效。如果希望以代码方式管理，也可以在配置中声明：
+
+```yaml
+mcp:
+  virtual_servers:
+    coding:
+      description: Code review tools
+      servers: [github, linear, sentry]
+      tool_discovery: search # 可选；默认值：mcp.tool_discovery
+```
+
+客户端连接到 `https://your-gateway/mcp/coding`，看到的工具命名空间与 `/mcp` 上相同（`github_create_issue`）。同样的映射也可以以 JSON 形式写入 `MCP_VIRTUAL_SERVERS`。
+
+- **它只会缩小范围。** 每个成员都保留其 `user_paths` 和工具过滤器，因此无法看到 `github` 的密钥，通过 `coding` 也同样看不到它。`X-MCP-Servers` 可以进一步缩小虚拟服务器的范围。
+- **名称与服务器 slug 共用 `/mcp/{name}`。** 如果配置中的某个虚拟服务器与配置中的某个服务器同名，启动会失败；控制台也会拒绝名称已被对方使用的新服务器或新虚拟服务器。如果服务器和虚拟服务器最终仍然同名（例如在控制台条目之后添加了配置），则服务器保留该 URL，虚拟服务器不会提供服务；日志和控制台中会对此进行说明。
+- **配置条目优先。** 在配置中声明的虚拟服务器会隐藏控制台中的同名虚拟服务器，并且在控制台中为只读。
+- **缺失的成员会被跳过。** 控制台只提供已存在的服务器供选择，但之后被删除的成员，或在配置中引用但尚不存在的成员，会被跳过并记录警告，同时在 **MCP Servers** 页面上标记出来。
+
+**Connect a client** 面板可以为每个虚拟服务器生成客户端配置。
+
+当多个网关实例共用一个数据库时，控制台中的更改会立即在保存该更改的实例上生效。其他实例会在下一次后台刷新（`CACHE_REFRESH_INTERVAL`，默认 1 小时）或从控制台触发的运行时刷新时获取该更改。通过控制台添加的 MCP 服务器也以同样方式同步。
+
+## 搜索工具而不是列出工具
+
+`tools/list` 中的每个工具都会在每一轮对话中发送给模型。如果有几个大型服务器，这可能多达数万个 Token。搜索发现模式会用两个工具替代该列表：
+
+- `search_tools` 接受关键字（或确切的工具名称），返回匹配的工具及其描述和输入 schema。
+- `call_tool` 通过 `name` 和 `arguments` 运行找到的工具。
+
+该功能默认关闭。为所有客户端开启：
+
+```yaml
+mcp:
+  tool_discovery: search # 环境变量：MCP_TOOL_DISCOVERY；默认值：off
+```
+
+也可以针对单个客户端，通过请求头覆盖该会话的默认值。**Connect a client** 面板会显示网关默认值；只有当您选择的模式与该默认值不同时，其配置片段才会添加该请求头：
+
+```json
+{
+  "mcpServers": {
+    "gomodel": {
+      "type": "http",
+      "url": "https://your-gateway/mcp",
+      "headers": {
+        "Authorization": "Bearer sk-your-gomodel-key",
+        "X-MCP-Tool-Discovery": "search"
+      }
+    }
+  }
+}
+```
+
+对于会将所有工具发送给模型的客户端（例如自定义智能体和 SDK 循环），请使用该功能。对于自带工具搜索的客户端（例如 Claude Code），请保持关闭：它们已经会延迟加载工具，并且只有在工具被直接列出时，才能获得逐工具的权限确认提示以及只读/破坏性提示。通过 `call_tool` 调用时，在客户端看来每次调用都是同一个工具。
+
+搜索结果和调用都会遵守用户路径和工具过滤器。失败情况（例如未知名称或无法访问的服务器）会以模型可读取并据此恢复的工具错误返回。用量条目和请求日志记录的是真实的工具名称，而不是 `call_tool`。如果目录庞大只是因为包含了无人使用的工具，那么使用[工具过滤器](#选择每个服务器公开哪些工具)或 `X-MCP-Servers` 进行精简会更简单，并且工具仍会被直接列出。
+
+## 声明服务器
+
+服务器可以在控制台（**MCP Servers** 页面）中管理，也可以以基础设施即代码的方式声明。声明式条目会覆盖控制台中相同 slug 的行，并且在控制台中为只读：
+
+<img
+  src="/features/mcp-servers.png"
+  alt="GoModel 控制台的 MCP Servers 页面，列出两个服务器及其传输方式、端点、状态、工具数量和启用开关"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+### 从控制台添加服务器
+
+打开 **MCP Servers**，点击 **Add MCP Server**。填写以下内容：
+
+- **Name**：面向用户的名称，之后可以重命名。
+- **Transport**：`http`（Streamable HTTP，默认）或 `sse`（旧版）。
+- **URL**：上游 MCP 端点。
+- **Headers**：上游凭据（例如 `Authorization: Bearer …`）；保存后的值会以脱敏形式显示。
+- **Tools**：勾选客户端可以使用的工具；参阅[选择每个服务器公开哪些工具](#选择每个服务器公开哪些工具)。
+- 可选：**Advanced** 下的 **user paths** 和 **excluded user paths**；参阅[限制谁可以看到服务器](#限制谁可以看到服务器)。
+
+保存后会立即连接。使用行上的刷新图标可强制执行 **Reconnect**，列表图标可打开目录检查器，铅笔图标可进行编辑。以这种方式添加的行可以编辑和删除；来自 `config.yaml` 或 `MCP_SERVERS` 的行在此处显示为只读。
+
+控制台管理的服务器有两个标识符：
+
+- **Name** 面向用户，支持 Unicode，之后可以编辑。
+- **Slug** 默认由名称派生。它使用小写 ASCII 字母、数字、连字符和下划线，可以在创建服务器时调整。创建后不可更改，因为它用于 `/mcp/{slug}`、`X-MCP-Servers` 和聚合后的工具名称。
+
+对于声明式服务器，`mcp.servers` 映射的键就是 slug，同时也作为名称显示在控制台中。
+
+```yaml
+mcp:
+  enabled: true # 默认值；MCP_ENABLED=false 会禁用这些端点
+  servers:
+    github:
+      url: https://api.githubcopilot.com/mcp
+      headers:
+        Authorization: "Bearer ${GITHUB_PAT}"
+      user_paths: ["/engineering"] # 可选的可见范围
+      disallowed_user_paths: ["/engineering/contractors"] # 排除项；优先于 user_paths
+      disallowed_tools: ["delete_repo"]
+    local-files:
+      transport: stdio # 仅支持声明式；参阅安全说明
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+```
+
+或者通过 `MCP_SERVERS` 环境变量（一个 JSON 对象，按名称合并覆盖 YAML 配置）：
+
+```bash
+MCP_SERVERS='{"github":{"url":"https://api.githubcopilot.com/mcp","headers":{"Authorization":"Bearer ${GITHUB_PAT}"}}}'
+```
+
+每个服务器的字段：
+
+| 字段 | 默认值 | 含义 |
+| --- | --- | --- |
+| `url` | — | `http`（Streamable HTTP）和 `sse` 传输方式的端点 |
+| `transport` | `http` | `http`、`sse`（旧版）或 `stdio`（仅限配置文件） |
+| `headers` | — | 原样发送到上游；值支持 `${ENV}` |
+| `command`、`args`、`env` | — | stdio 子进程定义 |
+| `enabled` | `true` | 无需删除即可启用或禁用 |
+| `allowed_tools` | 全部 | 上游工具名称的允许列表 |
+| `disallowed_tools` | 无 | 阻止列表，在允许列表之后应用 |
+| `user_paths` | 所有人 | 可见的子树，与虚拟模型相同 |
+| `disallowed_user_paths` | 无 | 永远看不到该服务器的子树；优先于 `user_paths` |
+| `tool_timeout` | `30s` | 单次 `tools/call` 的时间上限 |
+
+无效的声明（错误的 slug、缺少 `url`/`command`、未知的传输方式）会使启动中止并给出明确的错误，而不是静默丢弃该服务器。
+
+### 使用 Docker 运行 stdio 服务器
+
+官方镜像只包含 GoModel 二进制文件，没有 shell、Node 或 Python，因此无法在其中启动 `npx` 和 `uvx` 命令。以静态二进制文件发布的 stdio 服务器可以使用：挂载该二进制文件，并将 `command` 指向它。
+
+对于其他情况，请在单独的容器中运行 stdio 服务器，并在其前面放置一个 stdio 转 HTTP 的桥接（例如 [supergateway](https://github.com/supercorp-ai/supergateway)），然后将其声明为普通的 `http` 服务器：
+
+```yaml
+services:
+  mcp-files:
+    image: supercorp/supergateway
+    command:
+      - --stdio
+      - npx -y @modelcontextprotocol/server-filesystem /data
+      - --outputTransport
+      - streamableHttp
+      - --port
+      - "8000"
+    volumes:
+      - ./files:/data
+
+  gomodel:
+    image: enterpilot/gomodel
+    ports: ["8080:8080"]
+    environment:
+      GOMODEL_MASTER_KEY: change-me
+      MCP_SERVERS: '{"files":{"url":"http://mcp-files:8000/mcp"}}'
+    depends_on: [mcp-files]
+```
+
+这样可以将 MCP 服务器的运行时和依赖项隔离在网关容器之外。该桥接没有认证，因此请不要发布其端口，只让它在 Compose 内部网络中可访问。
+
+如果要由网关本身启动子进程，请构建您自己的镜像。该二进制文件是静态链接的，因此可以在任何基础镜像上运行：
+
+```dockerfile
+FROM node:22-slim
+COPY --from=enterpilot/gomodel /gomodel /gomodel
+COPY --from=enterpilot/gomodel /app /app
+RUN chown -R node:node /app
+USER node
+WORKDIR /app
+EXPOSE 8080
+ENTRYPOINT ["/gomodel"]
+```
+
+此后，该镜像的更新和安全补丁需要由您自行负责。
+
+## 健康状态与生命周期
+
+控制台会将每个服务器显示为 **connected**、**degraded**、**connecting** 或 **disabled**，并显示工具数量和最近一次错误；只要配置了服务器，Overview 页面就会汇总 MCP 服务器的健康状态。列出工具失败的服务器会保留其之前的目录（标记为 degraded），并每 60 秒重新探测一次；健康的目录每 5 分钟重新列出一次，并在上游发送 `list_changed` 通知时立即刷新。控制台上的 **Reconnect**（或 `POST /admin/mcp-servers/{slug}/reconnect`）会强制重新连接。
+
+从控制台保存的服务器初始状态为 **connecting**：首次连接在后台进行，因此保存操作永远不会因上游 IO 而阻塞。控制台每隔几秒重新检查一次，直到该行稳定为 connected 或 degraded，因此无需重新加载页面。
+
+最近一次错误为 `no MCP endpoint at that path` 表示该 URL 以 HTTP 404 响应了握手：该地址上有服务在监听，但该路径上不是 MCP 端点。不同服务器将其端点挂载在不同路径下，因此 `url` 必须包含该路径，例如 mcp-devtools 为 `http://localhost:18080/http`，自托管的 Firecrawl 为 `http://localhost:3000/v2/mcp`。如果最近一次错误提到 HTTP 405，则表示该路径存在但拒绝了握手所用的方法；当 `transport` 为 `sse` 时 Streamable HTTP 端点会这样响应（反之，当其为 `http` 时 SSE 端点也会这样响应）：请先修正 `transport`，再修正路径。无状态服务器（没有 `Mcp-Session-Id`）无需额外配置。
+
+如果最近一次错误提到 `x509: certificate signed by unknown authority`，表示该服务器的 TLS 证书由容器不信任的 CA 签发。参阅[私有 CA 证书](/zh/guides/production#私有-ca-签发的上游证书)。
+
+## 选择每个服务器公开哪些工具
+
+默认情况下，服务器报告的每个工具都会被公开。精简服务器的工具可以保持智能体上下文精简，并让删除、合并等有风险的工具远离客户端。
+
+在控制台中编辑服务器，并使用其 **Tools** 部分。该部分列出服务器报告的每个工具，每个工具都有一个复选框，此外还有一个筛选框，以及针对筛选结果的 **Expose all** / **Exclude all**。服务器标注为 `read-only` 或 `destructive` 的工具会带有徽标。这些提示来自上游；GoModel 不会对其进行验证。
+
+**Tools the server adds later** 控制上游新增工具时的行为：
+
+| 选项 | 保存为 | 上游新增的工具 |
+| --- | --- | --- |
+| **Expose automatically**（默认） | `disallowed_tools`：未勾选的工具 | 公开 |
+| **Keep hidden** | `allowed_tools`：已勾选的工具 | 隐藏，直到您勾选它们 |
+
+对于不受您控制的服务器，请选择 **Keep hidden**，这样任何新工具都无法未经审核就到达客户端。
+
+您也可以按名称添加工具，例如在服务器首次连接之前。服务器未报告的名称会保留在列表中，并标记为 **Not reported by the server**，因此拼写错误和已移除的工具仍然可见。
+
+更改工具过滤器会立即生效，无需重新连接服务器。该更改同样适用于已经打开的 MCP 会话：被排除的工具即使在更改之前已被某个客户端列出，调用时也会返回错误。
+
+在 `config.yaml` 中，同样的过滤器使用原始的、不带前缀的工具名称：
+
+```yaml
+mcp:
+  servers:
+    github:
+      url: https://api.githubcopilot.com/mcp
+      disallowed_tools: ["delete_repository", "merge_pull_request"]
+```
+
+## 限制谁可以看到服务器
+
+`user_paths` 列出可以看到某个服务器的调用方；`disallowed_user_paths` 用于排除调用方。两者都按子树匹配，因此 `/contractors` 也涵盖 `/contractors/acme`，并且排除项优先于允许的路径。
+
+| 目标 | 配置 |
+| --- | --- |
+| 所有人 | 两者都留空（默认） |
+| 仅工程团队 | `user_paths: ["/engineering"]` |
+| 除外包人员以外的所有人 | `disallowed_user_paths: ["/contractors"]` |
+| 工程团队中除外包人员以外的人 | 同时使用以上两项，并限定在 `/engineering` 下 |
+
+如果调用方的 API 密钥带有用户路径，则用户路径取自该密钥。否则（包括使用主密钥时），用户路径取自 `X-GoModel-User-Path` 请求头（或 `USER_PATH_HEADER` 指定的请求头），这也是快速检查某个子树能看到哪些内容的方法。
+
+被隐藏的服务器不会出现在 `tools/list` 中，`/mcp/{slug}` 对它们返回 404。与工具过滤器一样，可见性的修改无需重新连接服务器即可生效，并在每次调用时检查，因此同样适用于已经打开的 MCP 会话。
+
+## 查看服务器的目录
+
+控制台的目录检查器（或 `GET /admin/mcp-servers/{slug}/catalog`）会列出某个服务器当前通过网关公开的内容：经过 `allowed_tools` / `disallowed_tools` 过滤后的工具、提示词、资源和资源模板，以及它们的描述。服务器报告了但被过滤器隐藏的工具，会单独列在 `excluded_tools` 下。名称是上游的原始名称；聚合的 `/mcp` 端点会以 `{slug}_{name}` 的形式提供它们。
+
+## 安全说明
+
+- **凭据边界。** MCP 规范禁止 Token 透传；GoModel 会终结客户端的 Bearer Token，并从配置中注入每个服务器的凭据。客户端密钥永远不会到达上游，并且所配置的上游请求头不会在跨源重定向时被发送。
+- **默认拒绝浏览器来源。** MCP 客户端不是网页，因此 `/mcp` 会拒绝任何携带浏览器 fetch 元数据（`Origin` 或 `Sec-Fetch-Site`）的请求，除非它来自 `mcp.allowed_origins`（`MCP_ALLOWED_ORIGINS`）中列出的来源。请按浏览器序列化的格式填写条目，例如 `https://console.example.com`，不带末尾斜杠，默认端口可省略。允许列表中的来源可以使用完整会话，包括浏览器在发送时不带 `Origin` 请求头的 `GET` 通知流。这正是阻止基于浏览器的 DNS 重绑定攻击的机制：重绑定只会改变主机名解析到的地址，因此被重绑定页面的 `Origin` 和 `Host` 仍然彼此一致，浏览器也仍会报告 `Sec-Fetch-Site: same-origin`。比较它们无法证明任何事情，只有显式的允许列表才能区分您的来源和攻击者的来源。仅当您从已知来源提供 MCP Web 客户端时才设置 `allowed_origins`；`"*"` 会信任所有来源并禁用该防护，启动时会对此发出警告。
+- **stdio 仅支持声明式配置。** stdio 服务器会在网关主机上启动子进程，因此只能在 `config.yaml` / `MCP_SERVERS` 中声明。Admin API 和控制台会拒绝它们：控制台登录权限绝不能等同于在网关上执行代码的权限。
+- **stdio 子进程只获得最小化的环境。** 只会继承 `PATH`、`HOME`、`TMPDIR`、`USER` 和 `LANG`，绝不会继承网关的提供商 API 密钥或主密钥。其他内容请通过服务器的 `env:` 映射显式传入（值支持 `${VAR}`）。
+- **控制台管理的凭据存储在网关数据库中。** 通过管理接口创建的服务器，其请求头存储在所配置的存储后端中（仅在 API/UI 层脱敏）。如果您的威胁模型不允许数据库中存在 Secret，请改为在 `config.yaml` / `MCP_SERVERS` 中声明这些服务器：`${ENV}` 引用会将 Secret 保留在环境中，并且声明式服务器从不接触存储。
+- **远程 URL 属于服务端出站流量。** 控制台管理的 HTTP/SSE 服务器有意支持私有和回环端点。请保护管理写入权限，并执行部署的出站策略，以防不受信任的运维人员利用网关探测内部服务。
+- **会话不等于认证。** 每个请求都经过 Bearer 认证，并且会话还会额外绑定到初始化它的托管认证密钥身份、用户路径和固定端点；以其他身份出示泄露的会话 ID 会返回 404。
+- Secret 请求头值在 Admin API 和控制台中以脱敏形式（`***`）显示；保存包含 `***` 的表单会保留已存储的 Secret。
+
+## 协议覆盖范围
+
+工具、提示词、资源和资源模板会被聚合并转发。有效的 schema 和所有结果都保持不变；格式错误的工具 schema 会被规范化为安全的对象 schema，而不会导致下游会话崩溃。上游的 `instructions` 会合并到网关的 `initialize` 响应中。此版本不协商服务端发起的功能（sampling、elicitation、roots）和资源订阅，下游客户端会透明地处理这一点。

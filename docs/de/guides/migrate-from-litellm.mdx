@@ -1,0 +1,235 @@
+---
+title: "Migration von LiteLLM"
+description: "Konvertieren Sie eine config.yaml des LiteLLM-Proxys mit einem Befehl in GoModel, betreiben Sie beide Gateways parallel und stellen Sie Clients um, ohne Modellnamen zu ändern."
+icon: "arrow-right-left"
+keywords: ["LiteLLM", "Migration", "migration", "migrieren", "LiteLLM-Alternative", "LiteLLM alternative", "config.yaml", "model_list", "router_settings", "Virtual Keys", "Teams", "Budgets", "Fallbacks"]
+---
+
+GoModel spricht dieselbe OpenAI-kompatible API wie der LiteLLM-Proxy, sodass die
+meisten Anwendungen nur eine neue Basis-URL und einen neuen Key benötigen. Die
+eigentliche Arbeit steckt in der Gateway-Konfiguration, und
+`gomodel migrate litellm` erledigt den Großteil davon.
+
+| Was | Wie es übertragen wird |
+| --- | --- |
+| `model_list`, `router_settings`, `litellm_settings`, `general_settings` | Konvertiert durch `gomodel migrate litellm` |
+| Modellnamen, die Clients aufrufen | Beibehalten: Jeder `model_name` wird zu einem [virtuellen Modell](/de/features/virtual-models) |
+| Master-Key | Beibehalten |
+| Virtual Keys, Teams, Benutzer, Organisationen | Aus der LiteLLM-Datenbank importiert; Clients behalten ihre `sk-...`-Keys ([siehe unten](/de/guides/migrate-from-litellm#4-keys-teams-und-budgets-importieren)) |
+| Modellzugriff, Budgets, Rate-Limits | Auf [User Paths](/de/features/user-path) in GoModel importiert |
+| Ausgaben | Nicht übernommen: Budgets starten bei null |
+
+## 1. Die Konfiguration konvertieren
+
+Führen Sie zuerst einen Probelauf (Dry Run) durch. Er gibt den Migrationsbericht
+und die erzeugte Konfiguration aus und schreibt nichts:
+
+```bash
+gomodel migrate litellm litellm_config.yaml
+```
+
+Schreiben Sie dann die Dateien:
+
+```bash
+gomodel migrate litellm --out ./gomodel litellm_config.yaml
+```
+
+Mit Docker (das Image läuft als Benutzer ohne Root-Rechte, übergeben Sie daher
+Ihren eigenen Benutzer, um in das gemountete Verzeichnis schreiben zu können):
+
+```bash
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work \
+  enterpilot/gomodel migrate litellm --out /work/gomodel /work/litellm_config.yaml
+```
+
+`--out` schreibt drei Dateien und verweigert das Überschreiben, sofern Sie nicht
+`--force` übergeben:
+
+| Datei | Inhalt |
+| --- | --- |
+| `config.yaml` | Provider, virtuelle Modelle, Retries, Timeouts und Observability-Einstellungen |
+| `.env` | Secrets, die direkt in der LiteLLM-Konfiguration standen (API-Keys, Master-Key). Wird mit Modus `0600` erstellt; halten Sie die Datei aus der Versionskontrolle heraus |
+| `MIGRATION_REPORT.md` | Erstellte Provider und virtuelle Modelle, zu setzende Umgebungsvariablen sowie jede geänderte oder nicht übernommene Einstellung |
+
+`os.environ/NAME`-Referenzen werden zu `${NAME}`, sodass die Umgebung, mit der
+Sie LiteLLM bereits betreiben, weiterhin funktioniert. `include:`-Dateien werden
+mitverarbeitet.
+
+## 2. Den Bericht prüfen
+
+Lesen Sie `MIGRATION_REPORT.md`, bevor Sie Traffic senden. Der Bericht enthält
+drei Listen:
+
+- **Review before switching traffic**: Dinge, die Sie abschließen müssen, etwa
+  Guardrails, Model Access Groups oder einen Langfuse-Callback. Guardrails in
+  GoModel sind deaktiviert, bis Sie sie konfigurieren.
+- **Not migrated**: Einstellungen ohne Entsprechung in GoModel, einzeln
+  aufgeführt. Nichts wird stillschweigend verworfen.
+- **Behavior changes**: Einstellungen, die konvertiert wurden, sich aber etwas
+  anders verhalten, etwa Routing-Strategien.
+
+## 3. GoModel neben LiteLLM betreiben
+
+Starten Sie GoModel mit den erzeugten Dateien auf einem anderen Port. Fügen Sie
+die im Bericht unter **Environment** aufgeführten Variablen (diejenigen, die
+LiteLLM bereits mit `os.environ/` gelesen hat) zu `.env` hinzu und legen Sie die
+Datei an, falls der Konverter keine geschrieben hat. GoModel verweigert den
+Start, solange die Variable, die `server.master_key` liest, nicht gesetzt ist.
+Senden Sie dann einige Test-Requests mit den Modellen, die Ihre Clients
+verwenden:
+
+```yaml compose.yaml
+services:
+  gomodel:
+    image: enterpilot/gomodel
+    ports: ["8080:8080"]
+    env_file: .env
+    volumes:
+      - ./config.yaml:/app/config/config.yaml:ro
+```
+
+```bash
+cd gomodel
+docker compose up
+```
+
+Laden Sie `.env` über `env_file` in Compose (oder über den eigenen `.env`-Loader
+von GoModel, wenn Sie das Binary aus diesem Verzeichnis starten).
+`docker run --env-file` liest Werte wörtlich und würde daher die
+Anführungszeichen beibehalten, die `.env` um Werte wie Inline-JSON-Zugangsdaten
+setzt. Wenn Sie das Binary direkt ausführen, hat eine bereits in Ihrer Shell
+exportierte Variable wie `OPENAI_API_KEY` Vorrang vor demselben Namen in `.env`.
+
+```bash
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gpt-4o", "messages": [{"role": "user", "content": "ok?"}]}'
+```
+
+`GET /v1/models` listet dieselben Modellnamen auf wie LiteLLM. Stellen Sie dann
+die Clients Team für Team um.
+
+## 4. Keys, Teams und Budgets importieren
+
+LiteLLM speichert Virtual Keys, Teams, Benutzer, Organisationen und deren Budgets
+in seiner PostgreSQL-Datenbank. Derselbe Befehl liest sie ein, wenn er die
+Datenbank kennt: `--database-url`, andernfalls `general_settings.database_url`
+aus der Konfiguration, andernfalls `DATABASE_URL`. Er liest nur, und zwar
+innerhalb einer schreibgeschützten Transaktion. Ohne Datenbank-URL konvertiert
+er nur die Konfiguration.
+
+Sobald GoModel mit der konvertierten Konfiguration läuft, importieren Sie in die
+laufende Instanz:
+
+```bash
+gomodel migrate litellm --database-url "$LITELLM_DATABASE_URL" \
+  --gomodel-url http://localhost:8080 litellm_config.yaml
+```
+
+Der Befehl authentifiziert sich mit `GOMODEL_MASTER_KEY`, andernfalls mit dem
+Master-Key von LiteLLM, und benötigt `https` für ein GoModel auf einem anderen
+Rechner (`--allow-http` in einem vertrauenswürdigen Netzwerk, etwa einem
+Compose-Netzwerk). Ohne `--gomodel-url` führt er den Import nur im Bericht auf.
+
+Führen Sie ihn erneut aus, während beide Gateways parallel laufen: Er bringt
+GoModel auf den aktuellen Stand von LiteLLM. Keys erhalten ihren aktuellen Pfad,
+ihre Labels, erlaubten Modelle und ihr Ablaufdatum, und Keys, die LiteLLM
+inzwischen gesperrt hat oder die abgelaufen sind, werden deaktiviert. In GoModel
+gewährter Dashboard-Zugriff und dort deaktivierte Keys bleiben unverändert.
+
+Bevor der Befehl etwas schreibt, prüft er, ob in GoModel die für den Import
+benötigten Features aktiviert sind, etwa Budgets (die die Nutzungserfassung
+voraussetzen) und Rate-Limits, und bricht ab, wenn eines davon ausgeschaltet
+ist. Regeln für einen Pfad werden vor dessen Keys geschrieben; wird eine Regel
+abgelehnt, werden diese Keys zurückgehalten, und der Befehl endet mit einem
+Fehler.
+
+Jeder Key behält seinen `sk-...`-Wert: LiteLLM speichert davon nur einen
+SHA-256-Hash, und GoModel
+[importiert diesen Hash](/de/advanced/admin-endpoints#keys-aus-litellm-importieren),
+sodass GoModel den Key selbst nie verarbeitet. Alles andere landet auf einem
+[User Path](/de/features/user-path):
+
+| LiteLLM | GoModel-User-Path |
+| --- | --- |
+| Organisation | `/<organization>` |
+| Team | `/<organization>/<team>` oder `/<team>` ohne Organisation |
+| Team-Key | `/<organization>/<team>/<key alias>` |
+| Persönlicher Key | `/users/<user>/<key alias>` |
+| Key ohne Team oder Benutzer | `/keys/<key alias>` |
+
+| LiteLLM-Einstellung | GoModel |
+| --- | --- |
+| `models` bei einer Organisation, einem Team oder Benutzer | [Erlaubte Modelle](/de/features/users) auf dessen Pfad |
+| `models` bei einem Key | Die erlaubten Modelle des Keys |
+| `max_budget` + `budget_duration` | [Budget](/de/features/budgets) auf dem Pfad |
+| `rpm_limit` / `tpm_limit`, `tpd_limit`, `max_parallel_requests` | [Rate-Limits](/de/features/rate-limits) pro Minute, pro Tag und für gleichzeitige Requests |
+| `metadata.tags` von Key und Team | [Labels](/de/features/labelling) des Keys |
+| `expires` | Ablaufdatum des Keys |
+
+Der Modellzugriff folgt den Regeln von LiteLLM. Die Modellliste eines Benutzers
+gilt für dessen persönliche Keys, nicht für die Team-Keys, die er besitzt, da nur
+persönliche Keys unter `/users/<user>` liegen. Modellnamen werden in die
+dahinterliegenden Provider-Modelle aufgelöst, da GoModel das Modell prüft, in das
+ein virtuelles Modell aufgelöst wird; wenn Sie ein virtuelles Modell später auf
+andere Modelle richten, aktualisieren Sie die erlaubten Modelle, die es genannt
+haben.
+
+Ein `max_budget` oder Rate-Limit von `0` lehnt in LiteLLM jeden Request ab.
+Limits in GoModel müssen positiv sein, daher erhält dieser Pfad stattdessen eine
+Modellrichtlinie, auf die kein Modell passt.
+
+`budget_duration` wird auf `hourly`, `daily`, `weekly` oder `monthly` abgebildet
+(`30d` und `1mo` werden beide zu `monthly`, das nach Kalendermonaten
+zurückgesetzt wird), andere Dauern auf ein festes Zeitfenster. Nicht importiert
+und im Bericht aufgeführt werden:
+
+- gesperrte oder abgelaufene Keys sowie Keys gesperrter Teams (deaktiviert, falls
+  ein früherer Lauf sie importiert hat);
+- Budgets ohne `budget_duration`: Budgets in GoModel werden in jedem Zeitraum
+  zurückgesetzt;
+- Ausgaben: Budgets starten bei null, und der Bericht zeigt die aktuellen
+  Ausgaben aus LiteLLM neben jedem Budget an;
+- Budgets von Teammitgliedern sowie Budgets und Limits pro Modell.
+
+## Was sich für Clients ändert
+
+| LiteLLM | GoModel |
+| --- | --- |
+| Basis-URL `http://litellm:4000` oder `http://litellm:4000/v1` | Basis-URL muss auf `/v1` enden: `http://gomodel:8080/v1` |
+| Virtual Key `sk-...` | Unverändert, sobald [importiert](/de/guides/migrate-from-litellm#4-keys-teams-und-budgets-importieren); neue Keys haben das Format `sk_gom_...` |
+| `model_name`-Aliase | Unverändert |
+| `/health/liveliness`, `/health/readiness` | [`/health` und `/health/ready`](/de/advanced/cli#health-abfrage) |
+| Pass-through `/anthropic/*`, `/gemini/*`, `/vertex_ai/*` | [`/p/{provider}/*`](/de/features/passthrough-api); Anthropic SDKs können auch direkt `/v1/messages` verwenden |
+| `tags` oder eine Liste in `metadata.tags` im Request-Body, Header `x-litellm-tags` | Unverändert: Sie werden zu [Labels](/de/features/labelling#litellm-tags) |
+| `x-litellm-*`-Response-Header, Management-API `/key/*`, `/team/*` | [Admin API](/de/advanced/admin-endpoints) und [Usage API](/de/advanced/usage-api) von GoModel |
+
+## Zuordnung der Einstellungen
+
+| LiteLLM | GoModel |
+| --- | --- |
+| `litellm_params.model: provider/model` | Ein Provider in `providers` und das Modell in dessen `models`-Liste |
+| Deployments mit gemeinsamem `model_name` | Ein virtuelles Modell mit `round_robin`, gewichtet nach `weight`, andernfalls `rpm`, andernfalls `tpm` |
+| `routing_strategy: cost-based-routing` | Virtuelles Modell mit `strategy: cost` |
+| Andere Routing-Strategien | `round_robin` mit Failover (im Bericht vermerkt) |
+| `fallbacks`, `default_fallbacks` | Ein virtuelles Modell mit `failover`, das die Gruppe und dann ihre Fallbacks versucht |
+| `context_window_fallbacks`, `content_policy_fallbacks` | Nicht konvertiert; fügen Sie Fehlerformulierungen zu [`failover.retry_on_errors`](/de/features/failover) hinzu |
+| `model_group_alias` | Ein virtuelles Modell, das auf die Gruppe zeigt |
+| `openai/*`-Wildcards | Der Provider stellt seinen gesamten Katalog bereit; partielle Wildcards werden zu einem [`model_filter`](/de/advanced/config-yaml#modelle-eines-providers-filtern) |
+| `input_cost_per_token`, `output_cost_per_token`, `max_input_tokens` | `metadata.pricing` des Modells (pro Million Token) und `context_window` |
+| Deployment-`rpm` / -`tpm` bei nutzungsbasiertem Routing | [Modell-Rate-Limits](/de/features/rate-limits) |
+| `num_retries`, `timeout` | `resilience.retry.max_retries`, `http.timeout` |
+| `allowed_fails`, `cooldown_time` | Circuit Breaker `failure_threshold`, `timeout` |
+| `callbacks: prometheus` / `otel` | `metrics.enabled` / `opentelemetry.enabled` |
+| `callbacks: langfuse` | [Langfuse über OpenTelemetry](/de/guides/langfuse) |
+| `master_key` | `GOMODEL_MASTER_KEY` (oder `server.master_key`) |
+| `database_url` | Wird für den Import gelesen; GoModel verwendet seinen eigenen [Speicher](/de/guides/production) |
+
+Provider-Namen folgen den Umgebungskonventionen von GoModel: Ein Deployment, das
+die Standard-Key-Variable von LiteLLM (`OPENAI_API_KEY`) verwendet, wird zum
+Provider `openai`, eines, das `OPENAI_EU_API_KEY` liest, wird zu `openai-eu`, und
+jedes Azure-Deployment wird zu einem eigenen Provider, etwa `azure-gpt-4o-prod`.
+
+Provider, die GoModel noch nicht unterstützt, etwa Replicate oder SageMaker,
+werden im Bericht unter **Not migrated** aufgeführt.

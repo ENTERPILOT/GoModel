@@ -1,0 +1,790 @@
+---
+title: "Plugins"
+description: "Ein Plugin-Vertrag für Guardrails, Response- und Stream-Filter, Header-Änderungen und Routing-Strategien: eingebaut, einkompiliert oder aus einer .so-Datei geladen."
+icon: "puzzle"
+keywords: ["Plugins", "plugins", "pluginapi", "Guardrails", "Shared Object", "shared object", "Routing-Strategie", "routing strategy", "Streaming"]
+---
+
+## Übersicht
+
+Ein Plugin ist ein Go-Wert, der `pluginapi.Plugin` sowie ein oder mehrere optionale
+Hook-Interfaces implementiert. Jede [Guardrail](/de/advanced/guardrails) ist eine Instanz eines
+Plugins, ebenso wie eine benutzerdefinierte Routing-Strategie für ein
+[virtuelles Modell](/de/features/virtual-models). Es gibt einen einzigen Vertrag im Paket
+`github.com/enterpilot/gomodel/pluginapi` und drei Wege, ein Plugin auszuliefern:
+
+| Weg | Wann Sie ihn verwenden | Registriert durch |
+| --- | --- | --- |
+| **Eingebaut** | Wird mit GoModel ausgeliefert: `system_prompt`, `llm_based_altering`, `string_replace`, `tag_replace`, `header_edit`, `llm_judge` und die Routing-Strategie `cheapest_healthy` | nichts zu tun |
+| **Einkompiliert** | Sie bauen Ihr eigenes Binary aus dem Paket `run` | `ext.RegisterPlugin(func() pluginapi.Plugin { ... })` vor `run.Run` |
+| **Shared Object** (`.so`) | Sie betreiben das Standard-Binary und möchten beim Start Code hinzufügen | `plugins.load` in `config.yaml` (erfordert den cgo-Build, siehe [Shared-Object-Plugins](/de/advanced/plugins#shared-object-plugins)) |
+
+Unabhängig vom Weg erscheint ein Plugin-Typ unter seinem Manifest-Namen auf der Seite Guardrails
+im Dashboard, in `GET /admin/plugins` und als `type` in `guardrails.rules`.
+
+`pluginapi` hängt ausschließlich von der Standardbibliothek ab. Ein Plugin importiert dieses Paket
+und sonst nichts aus GoModel.
+
+## Phasen
+
+Ein Plugin deklariert in `Manifest.Kinds`, welche Hooks es implementiert. GoModel führt die
+Inhaltsphasen aus dem passenden [Workflow](/de/advanced/workflows) aus:
+
+| Phase | Hook | Läuft | Sieht |
+| --- | --- | --- | --- |
+| `prompt` | `PromptHook.OnPrompt` | nach dem Routing, vor dem Provider-Aufruf | `Prompt`, aufgelösten Provider und aufgelöstes Modell in `Meta` |
+| `response` | `ResponseHook.OnResponse` | bei einer vollständigen Response ohne Streaming oder bei der zusammengesetzten Response eines gepufferten Streams | `Prompt`, `Response`, `Meta.Attempts` |
+| `stream` | `StreamHook.OnStreamEvent` / `OnStreamEnd` | pro gestreamtem Event, dann einmal am Ende | `Prompt`, `Stream` (bisheriger Text), jedes Event |
+
+Welche Instanz in welcher Phase und in welcher Reihenfolge läuft, ist eine Entscheidung des
+Workflows (`steps[].phase` und `steps[].step`). Dieselbe Instanz darf einmal pro Phase vorkommen.
+
+Zwei weitere Hook-Arten existieren im Vertrag, werden in diesem Release aber nicht ausgeführt:
+`request` (vor der Modellauflösung) und `complete` (nachdem die Client-Response geschrieben wurde).
+Ein Manifest darf sie deklarieren; GoModel prüft, ob die Interfaces implementiert sind, und
+ignoriert sie zur Laufzeit. Die Art `route` wird von virtuellen Modellen verwendet, siehe
+[Routing-Strategie-Plugins](/de/advanced/plugins#routing-strategie-plugins).
+
+Die Phasen gelten für `/v1/chat/completions`, `/v1/responses` und `/v1/messages`.
+Anthropic-Requests werden vor jedem Hook in die Chat-Form übersetzt, sodass ein Plugin nur eine
+Struktur sieht; `Meta.Dialect` meldet `anthropic_messages`, wenn das relevant ist. Inline-Items von
+`/v1/batches` durchlaufen die Phase `prompt`, wenn `guardrails.enable_for_batch_processing`
+aktiviert ist.
+
+## Ausführung der Kette
+
+Innerhalb einer Phase werden Instanzen nach `step` gruppiert:
+
+- Steps laufen in aufsteigender Reihenfolge. Ein späterer Step sieht die Änderungen eines früheren.
+- Innerhalb eines Steps laufen Instanzen, deren Manifest `Mutates: false` angibt, **parallel** auf
+  einer flachen Kopie des Exchange (ihre `Values` und Response-Header werden zurückgeführt). Der
+  Step darf **höchstens eine** Instanz mit `Mutates: true` enthalten, die nach den lesenden
+  Instanzen läuft. Zwei mutierende Instanzen im selben Step sind ein Konfigurationsfehler.
+- Die Entscheidungen eines Steps werden nach Schweregrad zusammengeführt: `block` > `respond` >
+  `warn` > `allow`. Die erste blockierende Entscheidung beendet die Kette nach ihrem Step.
+
+## Entscheidungen
+
+Jeder Hook gibt eine `pluginapi.Decision` zurück:
+
+| Aktion | Wirkung | Standardwerte |
+| --- | --- | --- |
+| `allow` | mit den bereits am Exchange vorgenommenen Änderungen fortfahren | Nullwert von `Decision` |
+| `block` | mit `Status`, `Code` und `Message` im nativen Fehlerformat des Endpunkts ablehnen | `Status` 400 in der Phase `prompt`, 502 in den Phasen `response` und `stream`; `Code` `guardrail_blocked` |
+| `respond` | den Request mit `Response` als gewöhnlichen Assistant-Turn beantworten, HTTP 200 (ein synthetisierter Stream mit einem Turn bei Streaming-Requests); in den Phasen `response` und `stream` bleibt die `usage` des Providers in der Antwort erhalten, da die Inferenz bereits ausgeführt wurde | `pluginapi.Respond(text)` erzeugt eine Completion mit einer Choice |
+| `warn` | fortfahren; `Code`, `Message` und `Detail` im Audit-Trail festhalten und `X-GoModel-Guardrail: warn; code=<code>` zur Client-Response hinzufügen | `Code` `guardrail_warning` |
+
+`respond` ist das „Blockieren mit einer sicheren Nachricht“, das die meisten Guardrail-Produkte
+anbieten: Agent-Schleifen laufen weiter, statt einen 4xx-Fehler auszulösen. Verwenden Sie `block`,
+wenn der Aufrufer einen Fehler sehen soll.
+
+`Detail` wird im Audit-Eintrag gespeichert und darf keine Secrets enthalten.
+
+`NoStore` bei einer beliebigen Entscheidung hält die Response aus dem
+[Response-Cache](/de/features/cache) heraus, sowohl exakt als auch semantisch, sodass der nächste
+Request mit gleichem oder ähnlichem Body die Plugins erneut durchläuft, statt eine gespeicherte
+Antwort wiederzugeben. Setzen Sie es, wenn die Antwort Request-spezifische Daten enthält, die ein
+Plugin auf dem Rückweg wiederherstellt, zum Beispiel ein De-Anonymisierer, der die
+personenbezogenen Daten des Aufrufers wieder in den Assistant-Text einsetzt: Eine gecachte Kopie
+würde diesen Text an jeden weitergeben, der als Nächstes einen passenden Prompt sendet. Es wird aus
+jeder Phase und jeder Instanz des Requests berücksichtigt, unabhängig von der zusammengeführten
+Entscheidung.
+
+### Audit-Trail
+
+Jede ausgeführte Instanz hinterlässt ein Ergebnis in der Liste `data.guardrails` des
+Audit-Eintrags, in Ausführungsreihenfolge über die Phasen `prompt`, `response` und `stream`
+hinweg, stille `allow`-Entscheidungen eingeschlossen:
+
+| Feld | Bedeutung |
+| --- | --- |
+| `phase`, `step`, `instance`, `type` | Wo die Instanz lief: Phase und Step des Workflows, der Instanzname (der `ref` des Workflows) und ihr Plugin-Typ. |
+| `action` | `allow`, `warn`, `block`, `respond` oder `failure`, wenn der Hook einen Fehler ausgelöst hat, statt zu entscheiden. |
+| `code`, `message`, `detail` | Die Felder der Entscheidung. Die Liste und die Live-Ansichten im Dashboard lassen `detail` weg; die Detailansicht des Eintrags enthält es. |
+| `error`, `fail_mode` | Bei `failure`: der Fehlertext und ob die Kette fortgesetzt wurde (`open`) oder der Request fehlschlug (`closed`). |
+| `edited`, `target` | Ob die Instanz den `request` (Phase `prompt`) oder die `response` (Phasen `response` und `stream`) geändert hat. |
+| `replaced_events`, `dropped_events` | Bei einer Stream-Instanz im laufenden Stream: wie viele Events sie umgeschrieben oder zurückgehalten hat. |
+| `duration_ns` | Die Laufzeit des Hooks. |
+
+Ein konfigurierter Step ohne Ergebnis ist nicht gelaufen: Ein früherer Block oder eine frühere
+Antwort hat den Request beendet, oder ein Cache-Treffer hat den Modellaufruf übersprungen. Das
+Dashboard färbt das Workflow-Diagramm eines Audit-Eintrags anhand dieser Liste ein, und sein Tab
+„Guardrails“ listet die Ergebnisse auf. Die Liste ist die Spur der Entscheidungen; die
+nachfolgend beschriebenen Request-Revisionen sind die Spur der Bodys.
+
+Entscheidungen der Phase `prompt` werden außerdem an die Revisionskette des Requests angehängt
+(dieselbe Stelle, an der Request-Umschreibungen festgehalten werden), ein Eintrag pro Instanz in
+Step-Reihenfolge. Eine Instanz, die den Prompt bearbeitet hat, ist eine geänderte Revision, die den
+Request so enthält, wie er direkt nach diesem Step aussah, einschließlich der Größen. So lässt sich
+eine Kette von Änderungen Step für Step nachvollziehen, und die letzte ist das, was weitergeleitet
+wurde. Die Request-Bodys werden unter denselben Schaltern `LOGGING_LOG_BODIES` und
+`LOGGING_LOG_REVISION_BODIES` gespeichert wie Request-Umschreibungen. Jeder bearbeitende Step
+hinterlässt auf dem Request-Pfad nur eine Kopie des Prompts; das Anwenden dieser Kopien auf den
+Request und das Kodieren der Bodys erfolgt danach, parallel zum Provider-Aufruf.
+`LOGGING_LOG_GUARDRAIL_STEPS=false` überspringt sie und hält die Änderungen einer Kette als eine
+einzige Revision fest, die den Request in der weitergeleiteten Form enthält. Eine Warnung, ein
+Block, eine Antwort oder ein Fehler ohne Änderung ist ein Eintrag ohne Änderung, der die
+Entscheidung enthält; ein stilles `allow` hinterlässt keine Revision. Entscheidungen der Phasen
+`response` und `stream` werden nur in `data.guardrails` festgehalten, und die Beanstandungen
+darunter werden mit der Request-ID geloggt.
+
+## Fehlermodi und Timeouts
+
+Jede Instanz hat einen `fail_mode` und einen `timeout_ms`:
+
+| Einstellung | Werte | Standardwert |
+| --- | --- | --- |
+| `fail_mode` | `closed`: Ein Fehler, ein Panic oder ein Timeout lehnt den Request mit HTTP 500 und dem Code `plugin_failure` ab; `open`: loggen und fortfahren, als hätte die Instanz `allow` zurückgegeben | `closed` für `prompt`, `response` und `stream` |
+| `timeout_ms` | Obergrenze für jeden Hook-Aufruf der Instanz | `0` (kein Timeout pro Instanz) |
+
+Der Instanzname eines Fehlers im Modus `closed` landet in den Logs und im Audit-Eintrag, aber nie
+beim Client. Panics innerhalb eines Plugins werden abgefangen und als Fehler behandelt.
+
+**Timeouts werden zum Fristende durchgesetzt.** Ein Hook erhält einen Context, der bei
+`timeout_ms` endet (und wenn der Client die Verbindung trennt); GoModel hört in diesem Moment auf
+zu warten, unabhängig davon, ob der Hook zurückgekehrt ist. Ein Hook, der seinen Context
+ignoriert, läuft im Hintergrund weiter, ohne Auswirkung auf den Request – berücksichtigen Sie daher
+`ctx.Done()` in allem, was blockiert. Ein aufgegebener Hook zählt als Fehler. Er schlägt nur dann
+im Modus `open` fehl, wenn er nichts von dem berühren konnte, womit der Request fortfährt: Ein
+nicht mutierender Hook läuft auf seiner eigenen Kopie des Exchange, die verworfen wird. Ein
+mutierender Hook oder ein Stream-Hook im laufenden Stream, der seine Frist überschreitet, lässt den
+Request immer fehlschlagen, selbst mit `fail_mode: open`, weil seinen Änderungen nicht mehr
+vertraut werden kann. `Init` hat eine feste Frist von 10 s, die genauso behandelt wird: Ein `Init`,
+das bis dahin nicht zurückgekehrt ist, lässt die Instanz fehlschlagen.
+
+Behalten Sie den Standardwert bei. Stellen Sie eine Instanz nur dann auf `open` um, wenn sie ein
+Beobachter ist, dessen Ausfall akzeptabel ist (ein Header-Tagger, ein Klassifikator, der nur
+warnt).
+
+## Lebenszyklus von Instanzen
+
+GoModel erzeugt pro Guardrail-Definition einen Plugin-Wert und ruft `Init` einmal auf.
+Definitionen werden regelmäßig aus dem Speicher neu geladen (`workflows.refresh_interval`,
+Standardwert 1 Minute) sowie bei jeder Admin-Änderung; eine Instanz, deren Typ, Konfiguration,
+`user_path`, `fail_mode` und `timeout_ms` unverändert sind, übersteht das Neuladen, sodass Zustand,
+den ein Plugin ansammelt (Zähler, Caches, Verbindungen), erhalten bleibt. Eine ersetzte oder
+gelöschte Instanz wird stillgelegt und später geschlossen, frühestens zwei Refresh-Intervalle nach
+der Stilllegung und erst dann, wenn nichts sie mehr hält: Kompilierte Workflows halten ihre
+Instanzen, bis der Workflow-Snapshot sie verwirft, und Requests halten ihre Instanzen für die Dauer
+einer Phase (einschließlich eines langen Streams). Ein Hook wird nach `Close` nie aufgerufen; ein
+Aufruf, der eine geschlossene Instanz erreicht, schlägt stattdessen gemäß dem `fail_mode` der
+Instanz fehl. Beim Herunterfahren wird jede Instanz geschlossen.
+
+## Streaming
+
+Bereits an den Client gesendete Bytes lassen sich nicht zurückholen, daher wählt ein
+Stream-Plugin in `StreamHook.StreamPolicy()` einen von drei Modi:
+
+| Modus | Was das Plugin tun kann | Latenzkosten |
+| --- | --- | --- |
+| `observe` | jedes Event lesen; Entscheidungen werden außer `terminate` ignoriert | keine |
+| `transform` | jedes Event mit `pass`, `drop`, `replace` (Deltas von Text, Reasoning und Tool-Call-Argumenten) oder `terminate` behandeln | `LookbehindChars` Zeichen Verzögerung pro Fenster, plus bis zu `MinChunkChars`, während ein Lauf gesammelt wird |
+| `buffer` | nichts pro Event; GoModel sammelt den gesamten Stream und führt `OnResponse` des Plugins auf der zusammengesetzten Completion aus (ein `buffer`-Plugin muss `ResponseHook` implementieren, sonst schlägt das Laden fehl) | Time-to-First-Token wird zu Time-to-Last-Token |
+
+**Lookbehind** (nur `transform`): GoModel hält pro Fenster die letzten `LookbehindChars` Zeichen
+zurück und präsentiert jedes Delta zusammen mit diesem Rest, sodass ein Muster, das sich über zwei
+Chunks erstreckt (eine Telefonnummer, ein API-Key), in einem Event sichtbar ist, bevor ein Teil
+davon den Client erreicht. Der Text einer Choice ist ein Fenster, die Argumente jedes ihrer Tool
+Calls (`StreamEvent.Call`) jeweils ein weiteres, sodass ein Platzhalter, der auf zwei
+Argument-Deltas aufgeteilt ist, auf dieselbe Weise umgeschrieben wird. Ein Delta einer anderen Art
+für dieselbe Choice leert zuerst die Fenster der anderen Arten dieser Choice, sodass Text und Tool
+Calls ihre Reihenfolge behalten, während parallele Tool Calls unabhängig voneinander streamen. Ein
+Muster von bis zu `LookbehindChars + 1` Zeichen wird immer erkannt. `0` deaktiviert die Funktion.
+Der Rest kommt bereits mit den früheren Änderungen des Plugins zurück, und `StreamEvent.Overlap`
+gibt an, wie viele führende Zeichen er umfasst: Ein Plugin darf nur Treffer bearbeiten, die über
+`Overlap` hinausreichen, da ein Treffer innerhalb davon bereits beim vorherigen Mal behandelt
+wurde (das eingebaute `string_replace` macht das so, sodass eine Regel wie `a => aa` einmal
+angewendet wird und nicht auf ihre eigene Ausgabe). Ein Treffer, der das Ende des Fensters
+berührt, kann mit dem nächsten Delta noch wachsen, daher darf ein Plugin ihn unbearbeitet lassen:
+Der Rest zeigt ihn beim nächsten Mal erneut. `StreamEvent.Final` markiert das letzte Event eines
+Fensters (der Stream endete oder ein Delta einer anderen Art hat es geleert), nach dem nichts mehr
+zurückgehalten wird; eine so aufgeschobene Änderung ist dann fällig. `string_replace` macht das bei
+Treffern, die in seinen Lookbehind passen, sodass ein offenes Muster den gesamten Key abdeckt. Ein
+Chat-Chunk, der Text zusammen mit `finish_reason` oder `usage` enthält, wird ebenfalls neu
+segmentiert; diese Felder werden einmal gesendet, mit dem letzten Text des Chunks oder in einem
+Chunk mit leerem Text, wenn das Plugin diesen Text entfernt hat.
+
+**Zusammenfassen** (nur `transform`): Ein Hook mit hohen Kosten pro Aufruf, etwa ein Klassifikator
+oder ein Named-Entity-Detektor, der einen Sidecar aufruft, kann sich keinen Aufruf pro Token
+leisten. Mit `MinChunkChars` sammelt GoModel die Text-Deltas einer Choice, bis mindestens so viele
+neue Zeichen ausstehen, und präsentiert sie als ein Text-Event; ein Nicht-Text-Event und das Ende
+des Streams leeren einen kürzeren Lauf. Das lässt sich mit Lookbehind kombinieren: Der
+zurückgehaltene Rest steht am Anfang des Fensters und wird weiterhin von `Overlap` gezählt, sodass
+derselbe Bearbeitungsvertrag gilt. Der Client wartet jeweils auf bis zu `MinChunkChars` Zeichen,
+und der größte Wert unter den `transform`-Instanzen eines Streams gilt für alle, begrenzt auf
+16384 Zeichen. `0`, der Standardwert, präsentiert Deltas so, wie sie eintreffen.
+
+**Signiertes Reasoning**: Auf `/v1/messages` erreicht Anthropic-Thinking den Client so, wie der
+Provider es signiert hat, da der Client es mit der Signatur zurücksendet. Seine Reasoning-Events
+tragen `StreamEvent.Signed`; GoModel ignoriert `replace` und `drop` bei ihnen und macht Änderungen
+an diesem Reasoning rückgängig, die an der zusammengesetzten Response vorgenommen wurden
+(`buffer`-Plugins und die Phase `response`).
+
+**Chat-Chunks mit mehreren Choices** werden in einen Chunk pro Choice aufgeteilt, bevor Plugins sie
+sehen, sodass jede Choice geprüft wird; die `usage` des Providers bleibt am letzten davon.
+
+**Wiederholter Text** (Responses API): Nachdem ein Delta ersetzt oder verworfen wurde, werden die
+Events, die den vollständigen Text eines Teils wiederholen (`response.output_text.done`,
+`response.content_part.done`, `response.output_item.done` und das abschließende
+`response.completed`), auf den tatsächlich ausgegebenen Text umgeschrieben, sodass Clients, die
+statt der Deltas die Completion lesen, dasselbe Ergebnis sehen.
+
+**Event-Größe** (`transform` und `observe`): Ein einzelnes SSE-Event, das größer als 4 MiB ist,
+kann im laufenden Stream nicht geprüft werden. Der Stream endet daher im Modus `closed` mit dem
+Code `event_too_large`, statt das Event an den Plugins vorbei weiterzuleiten. Kommentare und
+Keep-Alive-Zeilen sind nie betroffen.
+
+**Puffern**: Der Upstream wird in einen begrenzten Puffer gelesen (`MaxBufferBytes`, Standardwert
+4 MiB; bei Überschreitung schlägt der Request im Modus `closed` mit dem Code `response_too_large`
+fehl). Der Puffer wird von allen Plugins, die den Stream puffern, und von der Response-Kette
+gemeinsam genutzt, daher gilt die größte angeforderte Obergrenze – und der Standardwert, sobald die
+Response-Kette läuft oder ein Plugin keine Obergrenze setzt. Während des Lesens sendet GoModel alle
+15 s den SSE-Kommentar `: gomodel-buffering`, damit Proxys und Clients nicht in einen Timeout
+laufen; SDKs ignorieren Kommentarzeilen. Nachdem die Response-Kette gelaufen ist, werden die
+ursprünglichen Bytes unverändert wiedergegeben (`allow`, `warn`), aus der bearbeiteten Completion
+wird ein Stream synthetisiert (`allow` mit Änderungen, `respond`) oder es wird ein einzelner
+Fehler-Chunk gesendet (`block`).
+
+**Gemischte Ketten**: Wenn eine Stream-Instanz `buffer` anfordert oder der Workflow einen
+`response`-Step enthält, wird der gesamte Stream gepuffert, und `transform`-Instanzen laufen über
+die Wiedergabe.
+
+**Warnungen bei Streams**: Wenn Response- oder Stream-Plugins laufen, sendet GoModel die
+HTTP-Header erst mit den ersten Bytes des Bodys statt vorab. Ein `warn`, das über einer gepufferten
+Response entschieden wird, erreicht den Client daher als Header `X-GoModel-Guardrail`, sofern das
+Puffern vor dem ersten Keep-Alive-Kommentar (15 s) abgeschlossen war. Ein später entschiedenes
+`warn` (in `OnStreamEnd` eines `transform`-Streams oder nachdem ein Keep-Alive gesendet wurde) kann
+bereits gesendete Header nicht mehr ändern; es wird trotzdem im Audit-Trail und in den Logs
+festgehalten.
+
+**Abbrechen eines Streams**: Eine `terminate`-Entscheidung im Modus `transform` oder ein
+`block`/`respond` aus `OnStreamEnd` beendet den Stream mit `finish_reason: "content_filter"`
+(`stop_reason: "end_turn"` bei Anthropic), gefolgt von `[DONE]`. Der Client behält, was er bereits
+empfangen hat. Wenn vor der Entscheidung nichts nach außen gelangen darf, muss das Plugin den Modus
+`buffer` verwenden; die eingebauten `string_replace` und `llm_judge` tun genau das für `block` und
+`respond`.
+
+## Der Exchange
+
+Jeder Hook erhält einen `*pluginapi.Exchange`, in jeder Phase eines Requests dasselbe Objekt:
+
+| Feld | Typ | Inhalt |
+| --- | --- | --- |
+| `Meta` | `Meta` | schreibgeschützte Fakten zum Request: Request-ID, Dialekt, Endpunkt, User Path, Key-ID, Labels, Session-ID, angefordertes und aufgelöstes Modell, Provider, Workflow-Version und -Features, `Stream`, Provider-`Attempts` (Response-Phasen), Planung des Prompt-Caches |
+| `Prompt` | `*Prompt` | die Konversation (`Messages` mit stabilen IDs und typisierten `Parts`: Text, Bild, Audio, Datei, Tool Call, Tool-Ergebnis, Reasoning, Refusal, opak), `Tools`, `Params`, Roh-Body. Bearbeitung über `SetText`, `SetMedia`, `SetToolArguments`, `SetToolResult`, `Insert`, `Append`, `Remove`, `SetParam`; `TextTargets(roles...)` listet jeden Textteil auf, einschließlich Text in Tool-Ergebnissen, und `SetTargetText` schreibt einen davon zurück |
+| `Response` | `*Completion` | die Response, `nil` bis zur Phase `response`: `Choices` mit demselben `Part`-Modell, `Usage`, Roh-Body. Bearbeitung über `SetText`, `ReplaceText`, `SetFinishReason`, `SetToolArguments`; `TextTargets` und `SetTargetText` funktionieren wie bei `Prompt` |
+| `Stream` | `*StreamState` | bisher angesammelter Text pro Choice und die Anzahl der Events; `nil` bei Requests ohne Streaming |
+| `Headers` | `*Headers` | `Request` (eingehend, Zugangsdaten geschwärzt; Änderungen in der Phase `prompt` gelten für den laufenden Request bei späteren Plugins und beim Request-Logging, nicht für den Provider-Aufruf), `Response` (wird auf die Client-Response angewendet; ein auf den leeren String gesetzter Header wird entfernt, einschließlich solcher, die das Gateway hinzufügt, wie `X-Request-Id`), `Upstream` (wird festgehalten, in diesem Release aber nicht weitergeleitet) |
+| `Values` | `Values` | Request-bezogener Speicher, den alle Hooks des Requests gemeinsam nutzen; stellen Sie Keys den Plugin-Namen voran |
+
+Änderungen erfolgen über Methoden, nicht über Feldzuweisungen, sodass GoModel nur das neu kodiert,
+was sich geändert hat, und unberührte Nachrichten jedes Provider-spezifische Feld behalten
+(`cache_control`, mehrteiliger Inhalt, zusätzliche Felder). Das Entfernen einer Nachricht, die
+einen Tool Call enthält, dessen Ergebnis noch vorhanden ist (oder umgekehrt), gibt einen
+`DanglingToolError` zurück, der die Partnernachricht nennt; der Request wird abgelehnt, wenn das
+Paar getrennt bleibt.
+
+Ein Plugin, das Text durchsucht oder umschreibt, muss die Teile nicht selbst durchlaufen:
+`Prompt.TextTargets(roles...)` gibt ein `TextTarget` pro Textteil zurück (reiner Text sowie Text in
+Tool-Ergebnissen) mit Nachrichten-ID, Rolle, Teil-Indizes und aktuellem Text, und
+`Prompt.SetTargetText(target, text)` schreibt die Änderung zurück. `Completion.TextTargets()` und
+`Completion.SetTargetText` tun dasselbe für die Choices einer Response. Die eingebauten
+`string_replace` und `llm_based_altering` sind auf diese Weise geschrieben.
+
+Auch Medien lassen sich bearbeiten. `Part.DecodeMedia()` gibt die Inline-Bytes und den Medientyp
+eines als Data-URI gesendeten Bilds oder von Chat-Input-Audio zurück, und
+`Prompt.SetMedia(msgID, partIdx, mediaType, data)` ersetzt den Payload eines Bild- oder
+Audio-Teils: Der Teil wird wieder als Data-URI (Bilder) bzw. als base64-Input-Audio ausgegeben,
+und die übrigen Felder des Wire-Teils, etwa `detail` eines Bilds, bleiben erhalten. Ein per URL
+referenziertes Bild hat keine Inline-Daten zum Dekodieren; ein Plugin, das es schwärzen möchte,
+ruft es selbst ab. Medien innerhalb eines Tool-Ergebnisses werden mit `SetToolResult` ersetzt.
+
+`Meta.Cache.PlannedPrefixMessages` teilt einem Prompt-Plugin mit, wie viele führende Nachrichten
+der Cache-Planer des Providers als gecachtes Präfix markieren wird. Anhängen erhält den Cache;
+Bearbeitungen innerhalb des Präfixes machen ihn für die Session ungültig.
+
+## Konfiguration
+
+### Das Plugin-System aktivieren
+
+```yaml
+plugins:
+  enabled: true    # PLUGINS_ENABLED; Standardwert: false
+```
+
+Das Plugin-System ist standardmäßig deaktiviert. Ist es deaktiviert, existiert nichts, was mit
+Plugins zu tun hat: keine eingebauten oder geladenen Plugin-Typen, kein Laden von `.so`-Dateien,
+keine Guardrails und keine Routing-Strategie-Plugins (ein virtuelles Modell mit
+`strategy: plugin` wird abgelehnt). `GET /admin/plugins` und die Endpunkte unter
+`/admin/guardrails` antworten mit `503` und dem Code `feature_unavailable`, und das Dashboard
+blendet die Seite Plugins & Guardrails aus. Guardrails sind Plugin-Instanzen, daher schaltet
+`GUARDRAILS_ENABLED=true` das Plugin-System implizit ein; setzen Sie `PLUGINS_ENABLED=true` allein,
+um Routing-Strategie-Plugins zu verwenden oder Guardrail-Definitionen zu verwalten, ohne sie
+auszuführen.
+
+### Instanzen
+
+Instanzen werden in `guardrails.rules` deklariert oder im Dashboard erstellt; beide landen im
+selben Speicher. Die Einstellungen der einzelnen Typen finden Sie unter
+[Guardrails](/de/advanced/guardrails).
+
+```yaml
+guardrails:
+  enabled: true
+  rules:
+    - name: "mask-keys"
+      type: "string_replace"      # ein eingebautes Plugin oder der Manifest-Name eines geladenen Plugins
+      phase: "response"           # prompt (Standard) | response | stream
+      order: 10                   # Step innerhalb der Phase
+      fail_mode: "open"           # closed (Standard) | open
+      timeout_ms: 500             # 0 = kein Timeout pro Instanz (Standard)
+      config:                     # wird gegen das ConfigSchema des Plugins validiert
+        mode: "regex"
+        rules: |
+          sk-[A-Za-z0-9]{20,} => [redacted]
+```
+
+Regeln aus `config.yaml` werden in den verwalteten Standard-Workflow an der Position `order` in
+`phase` übernommen. `type` akzeptiert ein optionales Präfix `plugin:`.
+
+### `.so`-Dateien laden
+
+```yaml
+plugins:
+  search_paths: ["/etc/gomodel/plugins"]   # PLUGINS_SEARCH_PATHS, kommagetrennt; Standardwert: leer
+  load:
+    - file: acme_guard.so                  # relativ zu einem Suchpfad oder absolut
+      sha256: "3b1f..."                    # optionale Fixierung; eine Abweichung lässt den Start fehlschlagen
+```
+
+Ein relativer `file`-Wert muss innerhalb eines der `search_paths` aufgelöst werden (symbolischen
+Links wird gefolgt, und sie werden geprüft). Eine Datei, die nicht aufgelöst, verifiziert oder
+geöffnet werden kann, führt zu einem Startfehler, der die Datei nennt.
+
+Installationen ohne `config.yaml` können dieselben Einträge über die Umgebung angeben:
+`PLUGINS_LOAD` ist eine kommagetrennte Liste von `file`-Werten, jeweils optional als `file=sha256`,
+um den Digest zu fixieren. Nur das letzte `=`, gefolgt von genau 64 Hexadezimalzeichen, leitet eine
+Digest-Fixierung ein; jeder andere Eintrag ist ein Dateiname. Ist die Variable nicht leer, ersetzt
+sie die Liste `plugins.load` aus `config.yaml` (Umgebung > Konfiguration, wie bei jedem anderen
+über die Umgebung konfigurierbaren Wert).
+
+`GUARDRAILS_ENABLED` bleibt der Schalter, der entscheidet, ob konfigurierte Instanzen auf den
+Traffic angewendet werden.
+
+## Dashboard
+
+- **Seite Plugins & Guardrails**: *Create Guardrail* listet jedes Plugin auf, das einen Hook für
+  `prompt`, `response` oder `stream` implementiert. Das Formular wird aus dem `ConfigSchema` des
+  Plugins erzeugt: `text`, `textarea`, `number`, `select`, `checkboxes`, `bool` (ein Schalter),
+  `list` (Freitext-Einträge, einer pro Zeile, gespeichert als String-Array), `secret` (maskiert;
+  `GET` gibt `********` zurück, und das Zurücksenden genau dieses Literals behält den gespeicherten
+  Wert bei) und `model` (dieselbe durchsuchbare Modellauswahl wie im Playground und in den Editoren
+  für virtuelle Modelle, die die Modelle des Gateways auflistet; ein Alias oder ein virtuelles
+  Modell wird eingetippt). Der Abschnitt **Advanced** enthält *Fail mode* (Default, Closed, Open)
+  und *Timeout (ms)*; diese gelten für die Instanz in jedem Workflow, der sie referenziert.
+- **Plugin-Liste**: Unten auf der Seite Plugins & Guardrails steht jeder geladene Plugin-Typ mit
+  Titel und Namen (`Header Edit`, dann `header_edit` – der Name ist das, worauf sich die
+  Konfiguration bezieht), Version, Hooks, Quelle (eingebaut, registriert oder der Pfad der `.so`)
+  und Zustand. Guardrail-Plugins (deren Instanzen eine Richtlinie auf Prompts, Responses oder
+  Streams anwenden) tragen ein Schild-Symbol und werden zuerst aufgeführt; Routing-Strategien sind
+  ebenfalls Plugins, aber keine Guardrails. Ein Plugin, das nicht geladen werden konnte, wird mit
+  seinem Fehler aufgeführt. Die Seite wird angezeigt, sobald das Plugin-System aktiviert ist.
+- **Seite Workflows**: Jeder Step hat eine Auswahl *Phase*; das Dropdown für Instanzen bietet nur
+  Instanzen an, deren Plugin diese Phase implementiert.
+
+## Shared-Object-Plugins
+
+Das Go-Paket `plugin` gibt die Regeln vor, und sie sind streng:
+
+- **Plattform**: Linux, macOS und FreeBSD, und nur in einem Binary, das mit `CGO_ENABLED=1` gebaut
+  wurde. Das Standard-Binary und das Standard-Image von GoModel sind statisch und lehnen
+  `.so`-Dateien mit einer entsprechenden Fehlermeldung ab. Verwenden Sie `make build-plugins`
+  (`bin/gomodel-plugins`) oder das Image `gomodel:<version>-plugins` (`make image-plugins`,
+  gebaut aus `Dockerfile.plugins`, glibc-Laufzeit).
+- **Exakte Toolchain**: Das Plugin muss mit **derselben Go-Version**, **denselben Build-Flags**
+  (`-trimpath`, `-race`, `-tags`) und **identischen Quellen jedes gemeinsam genutzten Pakets**
+  gebaut werden. Nur die Standardbibliothek und `pluginapi` werden gemeinsam genutzt, daher
+  wirken sich interne Änderungen an GoModel nie auf ein Plugin aus, aber jedes GoModel-Release und
+  jedes Update der Go-Toolchain (einschließlich Patch-Releases) erfordert einen Neubau. Machen Sie
+  daraus einen CI-Schritt.
+- **Kein Entladen**: Eine `.so` bleibt bis zum Neustart geladen. Änderungen an einer geladenen Datei
+  werden beim Neustart wirksam; das Bearbeiten der Konfiguration einer Instanz führt `Init` ohne
+  Neustart erneut auf einem frischen Wert aus.
+- **Vertrauenswürdiger Code**: Das Laden einer `.so` ist gleichbedeutend mit einer Änderung des
+  Binarys. Lassen Sie `search_paths` im Besitz von root und fixieren Sie im Produktivbetrieb
+  `sha256`.
+
+### Bauen und prüfen
+
+```sh
+gomodel plugin build ./docs/example_plugins/keywordblock -o plugins/keyword_block.so
+gomodel plugin inspect plugins/keyword_block.so
+shasum -a 256 plugins/keyword_block.so     # Wert für plugins.load[].sha256
+```
+
+`plugin build` führt `go build -buildmode=plugin` mit den Flags aus, die im ausführenden
+`gomodel`-Binary hinterlegt sind, erzwingt `CGO_ENABLED=1`, fixiert `GOTOOLCHAIN` auf die Go-Version
+des Hosts, prägt eine Variable `GoModelBuildInfo` in das Plugin ein und lehnt eine Ausgabe ab,
+deren Go-Version von der des Hosts abweicht. Bauen Sie immer mit dem Binary, das das Plugin laden
+wird. `plugin inspect` öffnet die Datei und gibt ihr Manifest, ihr Konfigurationsschema und ihre
+Build-Informationen aus. Ein abgelehnter Ladevorgang nennt beide Seiten:
+
+```
+plugin file /app/plugins/x.so was built with a different toolchain, flags, or
+pluginapi sources: it was built with go1.27.3, gomodel v0.1.90, flags -trimpath;
+this binary was built with go1.27.3, gomodel v0.1.91, flags (none). Rebuild it
+with `gomodel plugin build` from this GoModel version
+```
+
+Bauen Sie in Docker das Target `plugin-builder` von `Dockerfile.plugins` und führen Sie es gegen
+Ihr Plugin-Verzeichnis aus:
+
+```sh
+docker build -f Dockerfile.plugins --target plugin-builder -t gomodel-plugin-builder .
+docker run --rm -v "$PWD/my-plugin:/src" -v "$PWD/plugins:/out" \
+  gomodel-plugin-builder -o /out/my-plugin.so /src
+```
+
+`gomodel --version` gibt die Go- und `pluginapi`-Versionen des Binarys aus.
+`docs/example_plugins/README.md` beschreibt, wie Sie ein Plugin in einem eigenen Go-Modul bauen.
+
+## Ein Plugin schreiben
+
+Ein `package main`, das `func GoModelPlugin() pluginapi.Plugin` exportiert, ist ein
+Shared-Object-Plugin; derselbe Typ, registriert mit `ext.RegisterPlugin`, ist ein einkompiliertes
+Plugin. Dieses Beispiel blockiert einen Request, wenn die letzte Benutzernachricht ein
+konfiguriertes Wort enthält:
+
+```go
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+
+	"github.com/enterpilot/gomodel/pluginapi"
+)
+
+type wordBlock struct {
+	words   []string
+	enforce pluginapi.Enforcement
+}
+
+func (p *wordBlock) Manifest() pluginapi.Manifest {
+	return pluginapi.Manifest{
+		Name:      "word_block",
+		Version:   "1.0.0",
+		Kinds:     []pluginapi.Kind{pluginapi.KindPrompt},
+		Guardrail: true,
+		ConfigSchema: []pluginapi.Field{
+			{
+				Key: "words", Label: "Blocked words", Input: pluginapi.InputList,
+				Required: true, Help: "One word per line.",
+			},
+			{
+				Key: "action", Label: "On match", Input: pluginapi.InputSelect, Default: "block",
+				Help: "Block rejects, respond answers with the message, warn records the match.",
+				Options: []pluginapi.Option{{Value: "block", Label: "Block"}, {Value: "respond", Label: "Respond"}, {Value: "warn", Label: "Warn"}},
+			},
+			{Key: "message", Label: "Message", Input: pluginapi.InputText, Default: "request blocked by policy", Help: "Error, reply, or audit note."},
+			pluginapi.BlockStatusField(),
+		},
+	}
+}
+
+func (p *wordBlock) Init(_ context.Context, raw json.RawMessage, _ pluginapi.Host) error {
+	cfg, err := pluginapi.ParseConfig("word_block", p.Manifest().ConfigSchema, raw)
+	if err != nil {
+		return err
+	}
+	for _, w := range cfg.List("words") {
+		p.words = append(p.words, strings.ToLower(w))
+	}
+	p.enforce = pluginapi.Enforcement{
+		Action:      pluginapi.Action(cfg.Choice("action", "block", "block", "respond", "warn")),
+		Message:     cfg.String("message", "request blocked by policy"),
+		BlockStatus: cfg.BlockStatus("block_status"),
+	}
+	return cfg.Err()
+}
+
+func (p *wordBlock) Close(context.Context) error { return nil }
+
+func (p *wordBlock) OnPrompt(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+	if x.Prompt == nil || x.Prompt.LastUser() == nil {
+		return pluginapi.Allow(), nil
+	}
+	text := strings.ToLower(x.Prompt.LastUser().Text())
+	for _, w := range p.words {
+		if strings.Contains(text, w) {
+			return p.enforce.Enforce("word_block", map[string]any{"word": w}), nil
+		}
+	}
+	return pluginapi.Allow(), nil
+}
+
+func GoModelPlugin() pluginapi.Plugin { return &wordBlock{} }
+
+func main() {}
+```
+
+Hinweise für Autoren:
+
+- `Init` erhält die Konfiguration nach der Validierung gegen `ConfigSchema`: Standardwerte
+  angewendet, Zahlen, Booleans und Listen konvertiert, unbekannte Keys abgelehnt, erforderliche
+  Keys geprüft. Zeilenorientierte `textarea`-Felder akzeptieren sowohl eine YAML-Liste von Strings
+  als auch einen Block-Skalar; `list`-Felder akzeptieren eine Liste oder eine kommagetrennte Zeile
+  und kommen als JSON-Array an; `bool`-Felder akzeptieren `true`/`false` als Boolean oder Text und
+  kommen als JSON-Boolean an. `Init` wird einmal pro konfigurierter Instanz aufgerufen und erneut,
+  wenn die Instanz bearbeitet wird.
+- Lesen Sie die Konfiguration mit `pluginapi.ParseConfig` und dessen typisierten Lesemethoden
+  (`String`, `Choice`, `Bool`, `Int`, `Float`, `OptionalFloat`, `List`, `Lines`, `Roles`,
+  `BlockStatus`) statt mit einem Struct: Jede Lesemethode wendet dieselben Konvertierungen an, die
+  das Dashboard und config.yaml benötigen, gibt bei einem Problem ihren Standardwert zurück, und
+  `Err()` meldet das erste Problem mit dem betroffenen Key. Ein Decoder ist so eine einfache Liste
+  von Zuweisungen plus eine Prüfung. `RoleOptions()` ist die Checkbox-Liste, die `Roles` versteht.
+- Geben Sie Befunde über `pluginapi.Enforcement` aus: Lesen Sie `action`, `message`,
+  `block_status` und optional `respond_text` darin ein; anschließend liefert `Enforce(code, detail)`
+  den Block-Fehler, die Respond-Completion oder die Warnung, und `Reject(code, detail)` liefert
+  Block oder Respond, selbst wenn die Aktion `warn` ist (für einen Befund, der nicht durchgelassen
+  werden darf). `BlockStatusField()` ist das übliche Feld `block_status`. Die eingebauten
+  Guardrails nutzen dies gemeinsam, sodass sich ihr Block, Respond und Warn gleich verhalten.
+- Exportieren Sie einen **Konstruktor** (`func GoModelPlugin() pluginapi.Plugin`), damit eine Datei
+  mehrere Instanzen bedienen kann. Ein `var GoModelPlugin pluginapi.Plugin` funktioniert ebenfalls,
+  beschränkt die Datei aber auf eine einzige Instanz.
+- Setzen Sie `Mutates: true`, wenn das Plugin `Prompt`, `Response` oder den Stream bearbeitet. Nicht
+  mutierende Plugins dürfen sich einen Step teilen und laufen parallel.
+- Setzen Sie `Guardrail: true`, wenn die Instanzen des Plugins Guardrails sind: Richtlinien, die
+  auf Prompts, Responses oder Streams angewendet werden, unabhängig davon, ob sie blockieren,
+  antworten, warnen oder umschreiben. Jedes eingebaute Traffic-Plugin setzt es (`llm_judge`,
+  `string_replace`, `tag_replace`, `header_edit`, `system_prompt`, `llm_based_altering`);
+  eine Routing-Strategie wie `cheapest_healthy` berührt nie den Traffic und lässt es auf false. Die
+  Laufzeit ignoriert das Flag; das Dashboard markiert Guardrail-Plugins und ihre Instanzen mit
+  einem Schild-Symbol und führt sie zuerst auf.
+- Der an `Init` übergebene `Host` bietet `Logger()` (vorab mit Plugin und Instanz getaggt),
+  `Inference().Complete(...)` (eine Chat Completion über das Gateway mit Ursprung `plugin`, für
+  Budgets und Audit auf `<user path>/guardrails/<instance>` begrenzt), `Metrics()` (Namen mit dem
+  Präfix `plugin_<name>_`) und `HTTPClient()` für Aufrufe externer Dienste wie eines Klassifikators
+  oder eines Detektors für personenbezogene Daten. Der Client wird von allen Instanzen gemeinsam
+  genutzt, verwendet die Proxy-Umgebung und den Verbindungspool des Gateways und hat als
+  Absicherung einen Timeout von 60 s; erstellen Sie Requests mit `http.NewRequestWithContext`,
+  damit `timeout_ms` der Instanz jeden Aufruf begrenzt. `History()` gibt in diesem Release einen
+  Fehler zurück.
+- Der Host implementiert außerdem das optionale `pluginapi.DecisionsHost`. Prüfen Sie es per
+  Type Assertion auf dem `Host` und rufen Sie dann `Decisions().Decide(ctx, req)` auf, um einem
+  Decision-Modell typisierte Fragen zu einem Input zu stellen, so wie es `POST /v1/decisions` tut.
+  Eine Frage ist ein Prädikat (Wahrscheinlichkeit für Ja), eine Auswahl oder eine Bewertung. Der
+  Aufruf wird wie `Inference().Complete` eingegrenzt und erfasst.
+  `Decisions().DecisionModel(model)` meldet, ob ein Modell ausschließlich Decisions beantwortet,
+  etwa jedes `jev`-Modell. `llm_judge` nutzt beides, um anhand einer Wahrscheinlichkeit zu
+  blockieren, statt ein Chat-Urteil zu parsen:
+
+  ```go
+  if dh, ok := host.(pluginapi.DecisionsHost); ok {
+  	result, err := dh.Decisions().Decide(ctx, pluginapi.DecisionRequest{
+  		Model:     "jev/jev-latest",
+  		Input:     []pluginapi.Message{pluginapi.TextMessage(pluginapi.RoleUser, text)},
+  		Questions: []pluginapi.Question{{Type: pluginapi.QuestionPredicate, Name: "spam", Instructions: "Is this spam?"}},
+  	})
+  	// result.Answers[0].Probability, außer wenn result.Answers[0].Refused()
+  }
+  ```
+- Fügen Sie `Summarize(config json.RawMessage) string` hinzu, um in der Guardrail-Liste eine
+  einzeilige Zusammenfassung darzustellen, und `Normalize(config) (json.RawMessage, error)`, um
+  eine Konfiguration vor dem Speichern zu kanonisieren. Beides ist optional.
+- Implementieren Sie `pluginapi.HealthChecker` (`Health(ctx) error`), wenn eine Instanz von etwas
+  außerhalb des Prozesses abhängt, etwa einem Klassifikator-Sidecar. GoModel prüft dies außerhalb
+  des Request-Pfads, sobald die Instanz erstellt ist, und bei jeder Guardrail-Aktualisierung
+  (`workflows.refresh_interval`, standardmäßig eine Minute), mit einer Frist von 5 s. Eine
+  fehlschlagende Prüfung markiert die Instanz in `GET /admin/guardrails` und im Dashboard als
+  `degraded`, mit dem Fehler als Begründung, und wird einmal pro Zustandswechsel geloggt; der
+  Fehlertext darf keine Secrets enthalten und wird auf 256 Zeichen gekürzt. Der Zustand dient nur
+  der Information: Der Traffic läuft weiterhin gemäß ihrem `fail_mode` durch die Instanz.
+- Implementieren Sie `pluginapi.ContentEditor` (`EditsContent() bool`), wenn ein Plugin, das
+  `Mutates` deklariert, so konfiguriert werden kann, dass es nicht bearbeitet, etwa ein Detektor,
+  der markiert statt umzuschreiben. GoModel fragt eine konfigurierte Instanz vor Arbeiten, die es
+  nur für bearbeitende Plugins ausführt – dem Wiedergeben des gespeicherten Verlaufs eines
+  verketteten Responses-Requests, statt den Provider `previous_response_id` selbst auflösen zu
+  lassen. Es ändert nie, wie ein Hook läuft, und bei einem mutierenden Plugin ohne diese Methode
+  wird davon ausgegangen, dass es bearbeitet.
+- Die Feld-Inputs `secret` und `model` gibt es für API-Keys externer Klassifikatoren und für
+  Modellauswahlen; ein `secret`-Wert wird in jeder Admin-Response maskiert. Verwenden Sie `bool`
+  für einen Schalter und `list` für eine offene Liste von Strings (Entitätstypen, eine Allowlist),
+  statt diese in einem `select` oder einem `textarea` zu kodieren.
+- Fügen Sie Feldern, die zu einem virtuellen Modell statt zur Instanz gehören,
+  `Scope: pluginapi.ScopeRoute` hinzu (nur bei Routing-Strategien).
+
+`docs/example_plugins/keywordblock/main.go` ist ein ausführlicheres, kommentiertes Beispiel mit
+Hooks für `prompt` und `response`, und die eingebauten Plugins unter `internal/plugins/builtin/`
+sind Referenzimplementierungen jeder Hook-Art.
+
+### Ein Plugin testen
+
+`pluginapi/plugintest` testet ein Plugin ohne GoModel:
+
+- `plugintest.NewHost(replies...)` ist ein Fake-`Host`: vorgegebene Inferenz-Antworten (oder eine
+  `Reply`-Funktion oder ein `Err`), Decisions, die von einer `Answer`-Funktion beantwortet werden
+  (ohne sie wird jede Frage abgelehnt), `DecisionModels` für `DecisionModel`, aufgezeichnete
+  `Requests()` und `DecisionRequests()`, aufgezeichnete `Recorded()`-Metriken
+  und ein einstellbarer HTTP-Client für einen Fake-Sidecar, der mit `httptest` gestartet wird.
+- `plugintest.Init`, `Text`, `Prompt`, `Completion` und `Exchange` erstellen die Fixtures, die ein
+  Hook-Aufruf benötigt, mit sauberer Änderungsverfolgung und einem `Values`-Speicher.
+- `plugintest.RunStream(ctx, hook, x, events)` steuert einen `StreamHook` so, wie es der Host unter
+  dessen `StreamPolicy` tut: Zusammenfassen von Chunks, der zurückgehaltene Lookbehind-Rest wird mit
+  `Overlap` erneut gezeigt, `pass`, `replace`, `drop` und `terminate` werden auf das gesamte Fenster
+  angewendet, und im gepufferten Modus wird die Completion für `OnResponse` zusammengesetzt. Das
+  Ergebnis enthält den Text, den ein Client pro Choice erhalten hätte, die zugestellten Events, die
+  `terminate`-Entscheidung und die End-Entscheidung.
+
+Aus den Tests von `string_replace`, wobei `New` der Konstruktor dieses Plugins ist:
+
+```go
+p := plugintest.Init(t, New, `{"rules": "secret => [x]", "stream_lookbehind": 4}`, nil)
+res, err := plugintest.RunStream(ctx, p.(pluginapi.StreamHook), plugintest.Exchange(nil, nil), []*pluginapi.StreamEvent{
+	plugintest.TextDelta("my se"), plugintest.TextDelta("cret is safe"),
+})
+// res.Text[0] == "my [x] is safe": Der auf zwei Deltas aufgeteilte Treffer wurde einmal umgeschrieben.
+```
+
+Der gepufferte Modus setzt die Completion nur aus den Text- und Reasoning-Deltas zusammen; setzen
+Sie `x.Response` selbst, bevor Sie `RunStream` aufrufen, wenn der Hook Tool Calls, Nutzung oder
+einen Finish-Reason sehen muss.
+
+## Routing-Strategie-Plugins
+
+Ein Plugin, das `pluginapi.RouteStrategy` implementiert, ist eine Load-Balancing-Strategie für
+[virtuelle Modelle](/de/features/virtual-models#load-balancing-über-mehrere-modelle):
+
+```go
+type RouteStrategy interface {
+	Select(ctx context.Context, req RouteRequest) (RouteChoice, error)
+	OnAttemptEnd(outcome RouteOutcome)
+}
+```
+
+`RouteRequest` enthält die `Source` des virtuellen Modells, die `Candidates` in konfigurierter
+Reihenfolge (Provider, Modell, `provider/model`, Gewichtung und Preise pro Million Tokens, sofern
+bekannt), die Session-ID und das Sticky-`SessionTarget`, `Meta` sowie die `strategy_config` des
+virtuellen Modells als JSON (`Prompt` ist in diesem Release `nil`). `Select` gibt das gewählte Ziel
+`Qualified` und einen optionalen `Reason` zurück (nur für Debug-Logs); `OnAttemptEnd` meldet
+Erfolg, Status, Latenz und Timeouts, damit sich die Strategie anpassen kann. Failover-Ketten,
+Kapazitätsprüfungen und das Festlegen von Sessions bleiben Aufgabe von GoModel.
+
+Wählen Sie die Strategie am virtuellen Modell aus:
+
+```yaml
+virtual_models:
+  - source: smart-router
+    strategy: plugin                    # round_robin | cost | failover | adaptive | plugin
+    strategy_plugin: cheapest_healthy   # Plugin-Name; erforderlich bei strategy: plugin
+    strategy_config:                    # die Felder des Plugins mit Scope: route; ohne Angabe gelten die Standardwerte
+      prefer: cheapest                  # cheapest | fastest
+      max_error_rate: 0.2
+    targets:
+      - openai/gpt-4o-mini
+      - anthropic/claude-haiku-4-5
+```
+
+- `strategy_config` wird gegen die routenbezogenen Felder des Plugins validiert (`route_fields` in
+  `GET /admin/plugins`). `strategy: plugin` ohne `strategy_plugin` ist ein Validierungsfehler, und
+  `PUT /admin/virtual-models` lehnt einen Namen ab, der kein geladenes Plugin mit `route`-Hook ist.
+- Die `weight` der Ziele wird bei der Plugin-Strategie ignoriert.
+- Instanzbezogene Felder eines Route-Plugins (ein Endpunkt, ein API-Key) stammen aus einer
+  Guardrail-Definition, deren **Name und Typ beide dem Plugin-Namen entsprechen**; ohne eine solche
+  Definition wird das Plugin mit `{}` initialisiert. Instanzbezogene `secret`-Werte erreichen ein
+  Route-Plugin derzeit geschwärzt. Das Speichern dieser Definition baut die Instanz neu auf; die
+  vorherige wird geschlossen, sobald ihre laufenden `Select`-Aufrufe zurückgekehrt sind.
+- GoModel greift auf gewichtetes Round Robin zurück und loggt eine Warnung pro virtuellem Modell,
+  wenn das Plugin fehlt, kein Route-Plugin ist, nicht initialisiert werden konnte, die
+  `strategy_config` ungültig ist oder `Select` einen Fehler liefert, einen Panic auslöst, länger als
+  250 ms braucht oder ein Ziel außerhalb des verfügbaren Pools zurückgibt.
+
+Im Dashboard listet das Strategie-Dropdown des Editors für virtuelle Modelle einen Eintrag
+`plugin:<name>` pro geladenem Route-Plugin auf (`VIRTUAL_MODEL_STRATEGIES` in der
+Laufzeitkonfiguration ist `round_robin,cost,failover[,adaptive],plugin:<name>,...`); wird er
+ausgewählt, erscheinen die Route-Felder des Plugins unter der Zieltabelle.
+
+`cheapest_healthy` ist die eingebaute Referenzstrategie (`internal/plugins/builtin/routeexample`).
+Sie speichert die letzten 50 Ergebnisse pro Ziel und wählt das günstigste (`prefer: cheapest`, der
+Standardwert) oder das Ziel mit der niedrigsten Median-Latenz (`prefer: fastest`), dessen
+Fehlerrate höchstens `max_error_rate` beträgt (Standardwert `0.2`). Ein gesundes `SessionTarget`
+behält sie bei, und wenn kein Ziel gesund ist, berücksichtigt sie alle Kandidaten.
+
+## Admin-Endpunkte
+
+Alle Endpunkte erfordern dieselben Admin-Zugangsdaten wie der Rest von `/admin`.
+
+### GET /admin/plugins
+
+Jeder dem Gateway bekannte Plugin-Typ, einschließlich solcher, die nicht geladen werden konnten:
+
+```json
+[
+  {
+    "name": "string_replace",
+    "label": "String Replace",
+    "version": "1.0.0",
+    "description": "Replaces, flags, or blocks text matching literal or regex rules in prompts, responses, and streams.",
+    "kinds": ["prompt", "response", "stream"],
+    "mutates": true,
+    "guardrail": true,
+    "source": "builtin",
+    "fields": [{ "key": "rules", "label": "Rules", "input": "textarea", "required": true }],
+    "route_fields": [],
+    "health": "ok",
+    "error": ""
+  }
+]
+```
+
+`source` ist `builtin`, `registered` (über `ext` einkompiliert) oder der absolute Pfad der `.so`.
+`fields` sind die instanzbezogenen Schemafelder, `route_fields` die routenbezogenen. Eine mit
+`gomodel plugin build` gebaute `.so` meldet zusätzlich `built_with` (Go- und `pluginapi`-Versionen).
+
+### GET /admin/guardrails/types
+
+Ein Eintrag pro Plugin, das einen Hook für `prompt`, `response` oder `stream` implementiert, in der
+Form, die der Guardrail-Editor darstellt:
+
+```json
+{
+  "type": "llm_judge",
+  "label": "LLM Judge",
+  "description": "Asks a judge model whether prompts and responses violate a policy, then blocks, answers, or flags them.",
+  "defaults": { "action": "block", "max_tokens": 256, "target": "auto" },
+  "fields": [{ "key": "model", "label": "Judge model", "input": "model", "required": true }],
+  "phases": ["prompt", "response", "stream"],
+  "source": "builtin",
+  "mutates": false,
+  "guardrail": true
+}
+```
+
+`phases`, `source`, `mutates` und `guardrail` sind neu (auch die Instanzansichten von
+`GET /admin/guardrails` enthalten `guardrail`); `fields[].input` kann jetzt `secret`, `model`,
+`bool` oder `list` sein, und `fields[].scope` ist `""` (Instanz) oder `"route"`.
+
+### GET, PUT, DELETE /admin/guardrails
+
+Definitionen erhalten `fail_mode` (`closed` | `open`, leer für den Standardwert der Phase) und
+`timeout_ms` (`0` für keinen); Ansichten enthalten zusätzlich `phases` (aus dem Plugin-Manifest),
+`summary` und `health` (`ok` | `degraded`, mit `health_error` und `health_checked_at` bei Plugins,
+die eine Zustandsprüfung implementieren). `PUT` akzeptiert beide neuen Felder. Ein gespeicherter
+`secret`-Wert wird als `********` zurückgegeben; senden Sie ihn unverändert zurück, um ihn zu
+behalten, oder `""`, um ihn zu löschen.
+
+### GET /admin/workflows/guardrails
+
+Die für Workflow-Steps verfügbaren Instanzen mit den jeweils unterstützten Phasen:
+
+```json
+[{ "name": "pii-redact", "type": "llm_based_altering", "phases": ["prompt", "response"], "summary": "openai/gpt-4o-mini • user • default prompt" }]
+```
+
+### Workflow-Payload Version 2
+
+`POST /admin/workflows` akzeptiert `schema_version: 2` mit `steps[]`, die jeweils eine `phase`
+enthalten; Payloads der Version 1 (`guardrails: [{ref, step}]`) bleiben gültig und werden
+unverändert zurückgegeben. Workflow-Ansichten stellen die Ketten-Hashes pro Phase als
+`chain_hashes` bereit. Siehe [Workflows](/de/advanced/workflows#guardrail-steps).

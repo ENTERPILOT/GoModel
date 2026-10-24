@@ -1,0 +1,182 @@
+---
+title: "GoModel 与 Kimi Code CLI"
+description: "无需 api.json 注册表 URL 即可让 Kimi Code CLI 经由 GoModel 路由，配置模型 Profile，并验证提示词和工具调用。"
+icon: "terminal"
+keywords: ["Kimi Code", "Kimi Code CLI", "Kimi CLI", "api.json", "编程智能体", "coding agent", "配置指南", "setup guide"]
+---
+
+Kimi Code CLI 可以将 GoModel 作为兼容 OpenAI 的提供商使用。您需要在 Kimi 的 `~/.kimi/config.toml` 文件中配置 GoModel 的 Base URL、一个专用的托管 API 密钥以及至少一个模型。
+
+流程：
+
+`Kimi Code CLI -> GoModel -> upstream model provider`
+
+## 您不需要 `api.json` URL
+
+Kimi 的 **Custom registry (`api.json`)** 选项用于导入 models.dev 格式的提供商目录。它是可选的，并不是常规的兼容 OpenAI 配置方式。
+
+GoModel 在 `/v1/models` 暴露其模型目录，但该响应使用的是 OpenAI 模型列表格式，而不是 Kimi 的自定义注册表格式。请不要将 `http://localhost:8080/v1/models` 粘贴到 Kimi 的 `api.json` 提示中。请退出该提示，改用下面的直接配置方式。
+
+<Note>
+  如果您搜索的是 `pi.json`，Kimi 显示的文件名其实是 `api.json`。本配置不需要这两个文件中的任何一个。
+</Note>
+
+## 开始之前
+
+- 安装 [Kimi Code CLI](https://moonshotai.github.io/kimi-cli/en/guides/getting-started.html)。
+- 为网关管理选择一个 GoModel 主密钥，例如 `change-me`。
+- 确保 GoModel 拥有您要使用的模型的上游凭据。
+
+## 1. 运行 GoModel
+
+使用主密钥和至少一个上游提供商启动 GoModel。本示例使用 OpenAI：
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e OPENAI_API_KEY="sk-..." \
+  enterpilot/gomodel
+```
+
+`GOMODEL_MASTER_KEY` 是网关的引导和管理员凭据。请不要将它写入 Kimi 的持久化配置中。`OPENAI_API_KEY` 属于 GoModel，仅用于上游请求。
+
+## 2. 为 Kimi 创建专用 API 密钥
+
+打开 GoModel 控制台 [http://localhost:8080/admin/dashboard](http://localhost:8080/admin/dashboard)，并使用 `GOMODEL_MASTER_KEY` 登录。进入 `API Keys -> Create API Key`，然后：
+
+1. 将密钥命名为 `kimi-code`。
+2. 将 **User Path** 设置为 `/agents/kimi`。
+3. 保持 **Dashboard access** 为禁用状态。
+4. 创建密钥并复制 `sk_gom_...` 值。该值仅显示一次。
+
+绑定的用户路径为 Kimi 提供独立的用量和审计范围。托管密钥直接绑定到用户路径，而模型限制则作为网关级的[模型访问策略](/zh/features/user-path#模型访问)单独配置。如果您使用这些策略，请只为 `/agents/kimi` 允许 Kimi 需要的选择器。
+
+<Warning>
+  请在 Kimi 中使用此托管密钥，而不是 `GOMODEL_MASTER_KEY`。没有控制台访问权限的托管密钥可以调用模型端点，但无法读取审计日志、创建密钥或修改网关设置。主密钥会绕过这一限制。
+</Warning>
+
+## 3. 选择模型
+
+列出通过 GoModel 可见的模型：
+
+```bash
+curl -s http://localhost:8080/v1/models \
+  -H "Authorization: Bearer sk_gom_..." \
+  | jq '.data[] | {
+      id,
+      context_window: .metadata.context_window,
+      max_output_tokens: .metadata.max_output_tokens
+    }'
+```
+
+本指南使用 `openai/gpt-5-mini`，其上下文窗口为 400,000 Token，输出上限为 128,000 Token。建议使用该响应中带提供商前缀的 ID，以便 GoModel 将请求路由到预期的提供商。
+
+## 4. 配置 Kimi Code CLI
+
+打开 `~/.kimi/config.toml` 并添加：
+
+```toml
+default_model = "gomodel/gpt-5-mini"
+default_thinking = true
+
+[providers.gomodel]
+type = "openai_legacy"
+base_url = "http://localhost:8080/v1"
+api_key = "sk_gom_..."
+
+[models."gomodel/gpt-5-mini"]
+provider = "gomodel"
+model = "openai/gpt-5-mini"
+max_context_size = 400000
+capabilities = ["thinking", "image_in"]
+```
+
+别名 `gomodel/gpt-5-mini` 仅在 Kimi 本地有效。`model` 的值是 Kimi 发送给 GoModel 的确切选择器。
+
+<Warning>
+  对于持久化的提供商，Kimi 不会自动从您的 shell 中读取 `OPENAI_API_KEY` 等普通提供商凭据。在此文件中，`api_key` 必须填写专用的 GoModel 托管密钥，而不是主密钥或上游提供商密钥。请使用 `chmod 600 ~/.kimi/config.toml` 限制访问权限。
+</Warning>
+
+配置其他模型时，请将 GoModel 返回的 `context_window` 值用作 `max_context_size`。`thinking` 能力和 `default_thinking = true` 与此处使用的推理模型相匹配。如果使用其他模型，请相应调整 Kimi 的 capabilities。
+
+如果 GoModel 运行在其他主机上，请替换 `localhost:8080`。Base URL 中请保留 `/v1`，不要追加 `/chat/completions`。
+
+## 5. 验证配置
+
+检查已安装的 Kimi 版本：
+
+```bash
+kimi --version
+```
+
+然后运行一个简单的提示词：
+
+```bash
+kimi --quiet -p 'Reply with exactly ok and no punctuation.'
+```
+
+预期的模型响应为：
+
+```text
+ok
+```
+
+您还可以验证工具调用：
+
+```bash
+kimi --quiet -p 'Use the Shell tool to run pwd. After it succeeds, reply with exactly tool-ok and no punctuation.'
+```
+
+最终的模型响应应为：
+
+```text
+tool-ok
+```
+
+## 6. 在 GoModel 中检查流量
+
+打开 GoModel 控制台的审计日志：
+
+[http://localhost:8080/admin/dashboard/audit](http://localhost:8080/admin/dashboard/audit)
+
+通过审计记录确认 Kimi 正在向 `POST /v1/chat/completions` 发送流式请求，并且 GoModel 将其路由到了所选的提供商。请使用主密钥或另一个具有控制台访问权限的托管密钥登录；Kimi 的密钥被有意设置为无法打开此页面。
+
+## 故障排查
+
+### Kimi 要求提供 `api.json` URL
+
+您选择了 Kimi 的自定义注册表导入流程。请取消该流程，并按上文所示编辑 `~/.kimi/config.toml`。Kimi 正常工作并不需要 GoModel 提供注册表端点。
+
+### `401 Unauthorized`
+
+请确保 Kimi 的 `api_key` 与为 Kimi 创建的、处于有效状态的 `sk_gom_...` 托管密钥一致。不要将主密钥或上游提供商密钥写入 Kimi 的配置。
+
+### `reasoning_effort` 被拒绝
+
+请使用支持推理强度（reasoning effort）的模型，声明 `thinking` 能力并启用 `default_thinking`，如经过测试的示例所示。Kimi CLI 1.49.0 会通过 `openai_legacy` 发送显式的 `reasoning_effort` 值；非推理模型可能会拒绝该参数。
+
+### 找不到模型
+
+请从 `/v1/models` 复制确切的模型 ID。如果有多个提供商暴露同一模型，请使用带提供商前缀的 ID，例如 `openai/gpt-5-mini`。
+
+## 参考
+
+- Kimi Code CLI：[Getting started](https://moonshotai.github.io/kimi-cli/en/guides/getting-started.html)
+- Kimi Code CLI：[Providers and models](https://moonshotai.github.io/kimi-cli/en/configuration/providers.html)
+- Kimi Code CLI：[Configuration files](https://moonshotai.github.io/kimi-cli/en/configuration/config-files.html)
+
+## 已于 2026 年 8 月 8 日验证
+
+本指南已在以下环境中验证：
+
+- 运行在 `http://localhost:8080` 上的本地 GoModel 实例
+- Kimi Code CLI `1.49.0`
+- 通过 GoModel 兼容 OpenAI 的 Chat Completions API 调用 `openai/gpt-5-mini`
+
+本地验证确认：
+
+- Kimi 接受了文档中的 TOML 配置，所用专用托管密钥的用户路径为 `/agents/kimi`，且没有控制台访问权限
+- `kimi --quiet -p` 通过 `Kimi Code CLI -> GoModel -> OpenAI` 返回了 `ok`
+- Kimi 调用了其 Shell 工具，并通过相同路径返回了 `tool-ok`
+- Kimi 密钥可以列出和调用模型，但访问 Admin API 时收到 `403`
+- 无需修改 GoModel 应用，也无需 `api.json` 端点

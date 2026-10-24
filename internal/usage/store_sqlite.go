@@ -19,8 +19,8 @@ import (
 // maxEntriesPerBatch derives from maxSQLiteParams / columnsPerUsageEntry.
 const (
 	maxSQLiteParams      = 999
-	columnsPerUsageEntry = 24
-	maxEntriesPerBatch   = maxSQLiteParams / columnsPerUsageEntry // 41 entries
+	columnsPerUsageEntry = 27
+	maxEntriesPerBatch   = maxSQLiteParams / columnsPerUsageEntry // 37 entries
 )
 
 // SQLiteStore implements UsageStore for SQLite databases.
@@ -102,6 +102,9 @@ func ensureSQLiteSchema(db *sql.DB) error {
 		"ALTER TABLE usage ADD COLUMN rewrite_tokens_saved INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE usage ADD COLUMN rewrite_cost_saved REAL",
 		"ALTER TABLE usage ADD COLUMN auth_key_id TEXT",
+		"ALTER TABLE usage ADD COLUMN markup_percent REAL",
+		"ALTER TABLE usage ADD COLUMN markup_selector TEXT DEFAULT ''",
+		"ALTER TABLE usage ADD COLUMN billed_cost REAL",
 	}
 	for _, migration := range costMigrations {
 		if _, err := db.Exec(migration); err != nil {
@@ -153,7 +156,7 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*UsageEntry) err
 
 		for j, e := range chunk {
 			e = normalizedUsageEntryForStorage(e)
-			placeholders[j] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+			placeholders[j] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
 			rawDataJSON := marshalRawData(e.RawData, e.ID)
 
@@ -188,12 +191,16 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*UsageEntry) err
 				e.CostSource,
 				e.CostsCalculationCaveat,
 				e.AuthKeyID,
+				e.MarkupPercent,
+				e.MarkupSelector,
+				e.BilledCost,
 			)
 		}
 
 		query := `INSERT OR IGNORE INTO usage (id, request_id, provider_id, timestamp, model, provider, provider_name,
 			endpoint, user_path, session_id, cache_type, labels, input_tokens, output_tokens, total_tokens, rewrite_tokens_saved, rewrite_cost_saved, raw_data,
-			input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat, auth_key_id) VALUES ` +
+			input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat, auth_key_id,
+			markup_percent, markup_selector, billed_cost) VALUES ` +
 			strings.Join(placeholders, ",")
 
 		_, err := s.db.ExecContext(ctx, query, values...)

@@ -1,0 +1,60 @@
+---
+title: "OIDC Single Sign-On"
+sidebarTitle: "OIDC SSO"
+description: "Schützen Sie das GoModel Dashboard mit Ihrem OIDC-Identity-Provider über den Authorization Code Flow mit PKCE."
+icon: "key-round"
+tag: "Pro"
+keywords: ["GoModel Pro", "OIDC", "SSO", "Single Sign-On", "PKCE", "Dashboard-Authentifizierung", "dashboard authentication"]
+---
+
+## Übersicht
+
+OIDC SSO schützt das Dashboard und unterstützt den Authorization Code Flow mit
+PKCE, die Validierung von State und Nonce, Discovery sowie signierte
+`HttpOnly`-, `SameSite=Lax`-Sessions.
+
+Anders als andere Pro-Features schlägt eine explizit aktivierte
+SSO-Konfiguration geschlossen fehl (fail closed): Der Start wird abgebrochen,
+wenn das `sso`-Entitlement fehlt oder die Konfiguration ungültig ist. So kann
+eine Authentifizierungsgrenze nicht unbemerkt verschwinden.
+
+## SSO konfigurieren
+
+Konfigurieren Sie SSO unter `extensions.sso` in der zentralen YAML-Konfiguration von GoModel:
+
+```yaml
+extensions:
+  sso:
+    enabled: true
+    issuer_url: https://login.example.com
+    client_id: gomodel
+    client_secret: ${PRO_SSO_CLIENT_SECRET}
+    redirect_url: https://gomodel.example.com/sso/callback
+    session_secret: ${PRO_SSO_SESSION_SECRET}
+    admin_groups: [gomodel-admins]
+```
+
+Umgebungsvariablen vom Typ `PRO_SSO_*` überschreiben die YAML-Werte. Die
+Redirect-URL muss auf `/sso/callback` enden (einschließlich eines ggf.
+konfigurierten `BASE_PATH`), und HTTPS ist erforderlich, außer bei
+Loopback-URLs für die Entwicklung. Standardmäßig ist mindestens eine
+Administratorgruppe erforderlich; setzen Sie `PRO_SSO_ALLOW_ALL_ADMINS=true`
+nur für einen bewusst uneingeschränkten OIDC-Client.
+
+<Warning>
+  Der Widerruf von SSO-Sessions erfolgt prozesslokal. Betreiben Sie SSO auf
+  genau einer aktiven GoModel-Pro-Replica, bis ein gemeinsamer Session- oder
+  Widerrufsspeicher verfügbar ist.
+</Warning>
+
+## Audit und Zugriffskontrolle
+
+Erfolgreiche Anmeldungen, abgelehnte Richtlinien und Abmeldungen werden als
+bereinigte Audit-Events erfasst. Tokens, Autorisierungscodes, Cookies,
+Roh-Claims und Fehlerdetails des Identity-Providers werden nicht gespeichert.
+
+Eine SSO-Session trägt wie ein verwalteter API-Key einen `user_path`. Daher
+gelten die Modell-Allowlists auf Gruppen- und Benutzerebene von der Seite
+[Benutzer](/de/features/users) auch für Requests, die über sie gestellt
+werden. Die `allowed_models` pro Key sind eine Einstellung verwalteter API-Keys
+und gelten nicht für SSO-Sessions.
