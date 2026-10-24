@@ -32,6 +32,9 @@ func patchChatMessage(original core.Message, m pluginapi.Message) (core.Message,
 	if err != nil {
 		return core.Message{}, err
 	}
+	if fields, err = patchChatReasoning(fields, m); err != nil {
+		return core.Message{}, err
+	}
 	out.ExtraFields = fields
 	return out, nil
 }

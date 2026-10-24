@@ -30,6 +30,8 @@ When a provider returns an exact cost (OpenRouter credits, xAI `cost_in_usd_tick
   `cached_input_per_mtok` rate. Without it, they are priced at the full input rate.
 </Note>
 
+Anthropic bills cache writes by TTL: the default 5-minute writes at `cache_write_per_mtok` and 1-hour writes (`"ttl": "1h"`) at `cache_write_1h_per_mtok`. GoModel prices each share at its own rate from the `usage.cache_creation` split. Without a `cache_write_1h_per_mtok` rate, 1-hour writes are priced at `cache_write_per_mtok`.
+
 <Note>
   Claude usage from earlier releases, recorded on `/v1/chat/completions` and
   `/v1/responses`, counts input tokens without the prompt cache; newer rows

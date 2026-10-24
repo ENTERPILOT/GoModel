@@ -74,7 +74,7 @@ func (s *Service) Refresh(ctx context.Context) error {
 	}
 	slices.SortStableFunc(budgets, func(a, b Budget) int {
 		if order := cmp.Or(
-			cmp.Compare(a.Scope, b.Scope),
+			cmp.Compare(scopeRank(a.Scope), scopeRank(b.Scope)),
 			cmp.Compare(a.Subject, b.Subject),
 		); order != 0 {
 			return order
@@ -86,6 +86,20 @@ func (s *Service) Refresh(ctx context.Context) error {
 	s.settings = settings
 	s.mu.Unlock()
 	return nil
+}
+
+// scopeRank orders budgets for evaluation. Provider budgets come last so that,
+// when CheckWithResults stops at the first exhausted budget, a consumer breach
+// (which failover cannot relieve) is the one reported.
+func scopeRank(scope Scope) int {
+	switch scope {
+	case ScopeLabel:
+		return 0
+	case ScopeUserPath:
+		return 1
+	default:
+		return 2
+	}
 }
 
 func (s *Service) UpsertBudgets(ctx context.Context, budgets []Budget) error {
@@ -259,6 +273,43 @@ func (s *Service) CheckWithResults(ctx context.Context, subjects Subjects, now t
 	return results, nil
 }
 
+// ProviderWithinBudget reports whether no provider budget for providerName is
+// exhausted. Failover uses it to skip targets whose provider budget is spent;
+// consumer budgets are deliberately ignored because switching targets cannot
+// relieve them. A store failure counts as exhausted, matching admission, which
+// refuses a request when the budget check fails.
+func (s *Service) ProviderWithinBudget(ctx context.Context, providerName string) bool {
+	if s == nil || s.store == nil || providerName == "" {
+		return true
+	}
+	now := time.Now().UTC()
+	s.mu.RLock()
+	budgets := s.budgets
+	settings := s.settings
+	s.mu.RUnlock()
+
+	subjects := Subjects{Provider: providerName}
+	var matching []Budget
+	for _, budget := range budgets {
+		if budget.Scope == ScopeProvider && budget.appliesTo(subjects) {
+			matching = append(matching, budget)
+		}
+	}
+	if len(matching) == 0 {
+		return true
+	}
+	results, err := s.evaluate(ctx, matching, now, settings)
+	if err != nil {
+		return false
+	}
+	for _, result := range results {
+		if result.HasUsage && result.Spent >= result.Budget.Amount {
+			return false
+		}
+	}
+	return true
+}
+
 // match snapshots the budgets covering subjects — or all of them when subjects
 // is nil — along with the reset settings and the normalized evaluation time.
 func (s *Service) match(subjects *Subjects, now time.Time) ([]Budget, Settings, time.Time, error) {
@@ -282,7 +333,7 @@ func (s *Service) match(subjects *Subjects, now time.Time) ([]Budget, Settings, 
 	if err != nil {
 		return nil, settings, now, err
 	}
-	resolved := Subjects{UserPath: userPath, Labels: subjects.Labels}
+	resolved := Subjects{UserPath: userPath, Labels: subjects.Labels, Provider: subjects.Provider}
 
 	matching := make([]Budget, 0, len(budgets))
 	for _, budget := range budgets {

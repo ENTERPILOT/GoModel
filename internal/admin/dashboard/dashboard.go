@@ -10,7 +10,9 @@ package dashboard
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"embed"
+	"encoding/base64"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -32,6 +34,7 @@ var content embed.FS
 // Handler serves the admin dashboard UI.
 type Handler struct {
 	indexHTML []byte
+	csp       string
 	staticFS  http.Handler
 	basePath  string
 }
@@ -58,6 +61,7 @@ func NewWithDemoMode(basePath string, demoMode bool) (*Handler, error) {
 
 	return &Handler{
 		indexHTML: indexHTML,
+		csp:       contentSecurityPolicy(runtimeGlobals(basePath, demoMode)),
 		staticFS: http.StripPrefix(
 			"/admin/static/",
 			http.FileServer(http.FS(staticSub)),
@@ -85,10 +89,7 @@ func buildIndexHTML(assets fs.FS, basePath string, demoMode bool) ([]byte, error
 		html = strings.ReplaceAll(html, `"/admin/static/`, `"`+prefixed)
 	}
 
-	globals := fmt.Sprintf(
-		`<script>window.GOMODEL_BASE_PATH=%q;window.GOMODEL_VERSION=%q;window.GOMODEL_DEMO_MODE=%t;</script>`,
-		basePath, version.Info(), demoMode,
-	)
+	globals := "<script>" + runtimeGlobals(basePath, demoMode) + "</script>"
 	if !strings.Contains(html, "<head>") {
 		return nil, fmt.Errorf("dashboard index.html has no <head> element")
 	}
@@ -97,12 +98,49 @@ func buildIndexHTML(assets fs.FS, basePath string, demoMode bool) ([]byte, error
 	return []byte(html), nil
 }
 
+// runtimeGlobals is the inline script that hands the SPA its runtime
+// settings. It is the page's only inline script, so the Content-Security-Policy
+// allows it by hash.
+func runtimeGlobals(basePath string, demoMode bool) string {
+	return fmt.Sprintf(
+		`window.GOMODEL_BASE_PATH=%q;window.GOMODEL_VERSION=%q;window.GOMODEL_DEMO_MODE=%t;`,
+		basePath, version.Info(), demoMode,
+	)
+}
+
+// contentSecurityPolicy limits the dashboard to its own origin. Scripts run
+// only from the bundle and the runtime globals; the dashboard holds an admin
+// credential, so an injected script must not run. Styles allow inline
+// attributes, which the SPA templates use. Audit previews render media as
+// data: and blob: URLs. The page cannot be framed.
+func contentSecurityPolicy(inlineScript string) string {
+	sum := sha256.Sum256([]byte(inlineScript))
+	return strings.Join([]string{
+		"default-src 'self'",
+		"script-src 'self' 'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'",
+		"style-src 'self' 'unsafe-inline'",
+		"img-src 'self' data: blob:",
+		"media-src 'self' data: blob:",
+		"font-src 'self'",
+		"connect-src 'self'",
+		"object-src 'none'",
+		"base-uri 'none'",
+		"form-action 'self'",
+		"frame-ancestors 'none'",
+	}, "; ")
+}
+
 // Index serves GET /admin/dashboard and every /admin/dashboard/* route — the
 // SPA handles routing client-side.
 func (h *Handler) Index(c *echo.Context) error {
-	c.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
+	header := c.Response().Header()
+	header.Set("Content-Type", "text/html; charset=utf-8")
 	// The entry point references hashed assets; it must always be fresh.
-	c.Response().Header().Set("Cache-Control", "no-cache")
+	header.Set("Cache-Control", "no-cache")
+	header.Set("Content-Security-Policy", h.csp)
+	header.Set("X-Frame-Options", "DENY")
+	header.Set("X-Content-Type-Options", "nosniff")
+	header.Set("Referrer-Policy", "no-referrer")
 	c.Response().WriteHeader(http.StatusOK)
 	_, err := bytes.NewReader(h.indexHTML).WriteTo(c.Response())
 	if err != nil {
@@ -113,6 +151,7 @@ func (h *Handler) Index(c *echo.Context) error {
 
 // Static serves GET /admin/static/* — embedded SPA assets.
 func (h *Handler) Static(c *echo.Context) error {
+	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
 	// Vite emits content-hashed filenames under assets/, safe to cache hard.
 	if strings.Contains(c.Request().URL.Path, "/assets/") {
 		c.Response().Header().Set("Cache-Control", "public, max-age=31536000, immutable")

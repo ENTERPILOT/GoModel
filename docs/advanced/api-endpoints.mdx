@@ -13,7 +13,8 @@ For request and response details, see the dedicated guides:
 [Responses API](/advanced/responses-api), [Conversations API](/advanced/conversations-api),
 [Anthropic Messages API](/advanced/anthropic-messages-api),
 [Audio API](/advanced/audio-api), [Images API](/advanced/images-api),
-[System One API](/advanced/systemone-api), and [Usage API](/advanced/usage-api).
+[Decisions API](/advanced/decisions-api), [System One API](/advanced/systemone-api),
+and [Usage API](/advanced/usage-api).
 
 ## OpenAI-Compatible API
 
@@ -110,6 +111,15 @@ metered.
 | --------------------------- | ------ | ----------------------------------------------------------------------------- |
 | `/v1/messages`              | POST   | Anthropic Messages API through translated model routing (streaming supported) |
 | `/v1/messages/count_tokens` | POST   | Heuristic Anthropic Messages input token estimate                             |
+
+## Decisions API
+
+Available when an `openai`, `jev`, or `openrouter` provider is configured; see
+[Decisions API](/advanced/decisions-api).
+
+| Endpoint        | Method | Description                                                                           |
+| --------------- | ------ | ------------------------------------------------------------------------------------- |
+| `/v1/decisions` | POST   | Answer typed questions about an input (OpenAI natively, Jev / Kev through System One) |
 
 ## System One API
 

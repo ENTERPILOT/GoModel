@@ -30,6 +30,7 @@ import (
 // @Success      204       {string}  string  "No Content passthrough response"
 // @Failure      400       {object}  core.OpenAIErrorEnvelope
 // @Failure      401       {object}  core.OpenAIErrorEnvelope
+// @Failure      403       {object}  core.OpenAIErrorEnvelope
 // @Failure      502       {object}  core.OpenAIErrorEnvelope
 // @Router       /p/{provider}/{endpoint} [get]
 // @Router       /p/{provider}/{endpoint} [post]
@@ -39,6 +40,11 @@ import (
 // @Router       /p/{provider}/{endpoint} [head]
 // @Router       /p/{provider}/{endpoint} [options]
 func (h *Handler) ProviderPassthrough(c *echo.Context) error {
+	// Passthrough reaches the provider account directly, beyond what the
+	// gateway can scope, so a managed key needs it granted explicitly.
+	if allowed, isManagedKey := managedPassthroughAccess(c.Request().Context()); isManagedKey && !allowed {
+		return handleError(c, core.NewPermissionError("this API key does not have passthrough access").WithCode("passthrough_access_denied"))
+	}
 	// A websocket upgrade on a passthrough route is a realtime session, not an
 	// HTTP proxy request; relay it through the realtime service instead.
 	if isWebSocketUpgrade(c.Request()) {

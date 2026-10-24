@@ -316,7 +316,10 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 		if result.Meta.UsedFailover {
 			markRequestFailoverUsed(c)
 		}
-		stream := s.wrapPluginStream(ctx, workflow, chatStreamDialect(false), chatPromptOf(req), result.Stream)
+		// Anthropic signs its thinking, and the client sends each block back
+		// with the signature, so the thinking it receives must stay as signed.
+		signed := strings.TrimSpace(result.Meta.ProviderType) == anthropicProviderType
+		stream := s.wrapPluginStream(ctx, workflow, messagesStreamDialect(signed), chatPromptOf(req), result.Stream)
 		return s.handleStreamingReadCloser(c, workflow, result.Meta, stream, result.GenerationObserver(), func(stream io.ReadCloser) io.ReadCloser {
 			converted := anthropicapi.NewStreamConverter(stream, result.Meta.Model, anthropicapi.EstimateChatInputTokens(req))
 			return result.WrapDeliveryStream(ctx, converted)

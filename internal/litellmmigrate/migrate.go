@@ -17,6 +17,12 @@ type Result struct {
 	Env []byte
 	// Report lists what was converted, changed, and left behind.
 	Report *Report
+	// DatabaseURL is general_settings.database_url with any os.environ/
+	// reference resolved, or "" when the config sets none.
+	DatabaseURL string
+	// MasterKey is general_settings.master_key resolved the same way. It is
+	// the admin key of the migrated GoModel.
+	MasterKey string
 }
 
 // ConvertFile converts the LiteLLM proxy config at path, following its
@@ -51,5 +57,11 @@ func convert(src *liteLLMConfig, source string) (*Result, error) {
 		}
 	}
 	c.report.WrittenEnv = c.env.names
-	return &Result{Config: body.Bytes(), Env: c.env.render(), Report: &c.report}, nil
+	return &Result{
+		Config:      body.Bytes(),
+		Env:         c.env.render(),
+		Report:      &c.report,
+		DatabaseURL: c.setting("database_url"),
+		MasterKey:   c.setting("master_key"),
+	}, nil
 }

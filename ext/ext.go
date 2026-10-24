@@ -1,9 +1,10 @@
 // Package ext is the public extension API for building custom gateway
 // binaries on top of GoModel. External modules register request rewriters,
 // HTTP middleware, extra and admin routes, runtime settings, readiness health
-// checkers, upstream observers, and a route selector on a Registry (usually
-// ext.Default) before startup. Core consumes an immutable snapshot at server
-// construction; an empty registry adds zero request overhead.
+// checkers, upstream observers, a route selector, and log handler wrappers on
+// a Registry (usually ext.Default) before startup. Core consumes an immutable
+// snapshot at server construction; an empty registry adds zero request
+// overhead.
 package ext
 
 import (

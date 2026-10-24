@@ -167,6 +167,9 @@ type tokenCostMapping struct {
 	side           costSide
 	unit           costUnit
 	includedInBase bool
+	// includedIn returns the rate another mapping already charged these
+	// tokens at, so only the difference is added.
+	includedIn func(p *core.ModelPricing) *float64
 }
 
 var openAICompatibleTokenCostMappings = []tokenCostMapping{
@@ -201,8 +204,15 @@ var anthropicCacheTokenCostMappings = []tokenCostMapping{
 	{rawDataKey: "cache_write_input_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CacheWritePerMtok }, side: sideInput, unit: unitPerMtok},
 	{rawDataKey: "prompt_cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
 	{rawDataKey: "prompt_cache_write_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CacheWritePerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
+	// usage.cache_creation splits the cache writes by TTL. 1-hour writes cost
+	// more than the 5-minute writes the total was already priced at, so only
+	// the surcharge is added here.
+	{rawDataKey: "cache_creation_ephemeral_1h_input_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CacheWrite1hPerMtok }, side: sideInput, unit: unitPerMtok, includedIn: func(p *core.ModelPricing) *float64 { return p.CacheWritePerMtok }},
 	{rawDataKey: "reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
 	{rawDataKey: "completion_reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
+	// Native Messages streams report output_tokens_details.thinking_tokens,
+	// which the stream observer records under this name.
+	{rawDataKey: "completion_thinking_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
 }
 
 // providerMappings defines the per-provider RawData key to pricing field
@@ -258,6 +268,9 @@ var informationalFields = map[string]struct{}{
 	"tool_use_prompt_token_count":           {},
 	"completion_accepted_prediction_tokens": {},
 	"completion_rejected_prediction_tokens": {},
+	// Anthropic's 5-minute share of cache_creation_input_tokens, already
+	// priced at the cache-write rate.
+	"cache_creation_ephemeral_5m_input_tokens": {},
 }
 
 // CalculateGranularCost computes input, output, and total costs from token counts,
@@ -321,6 +334,11 @@ func CalculateGranularCost(inputTokens, outputTokens int, rawData map[string]any
 		if includedInBase && m.unit == unitPerMtok {
 			if baseRate := baseRateForSide(pricing, m.side); baseRate != nil {
 				effectiveRate -= *baseRate
+			}
+		}
+		if m.includedIn != nil {
+			if paidRate := m.includedIn(pricing); paidRate != nil {
+				effectiveRate -= *paidRate
 			}
 		}
 

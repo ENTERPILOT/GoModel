@@ -51,22 +51,44 @@ func (p *WorkflowRequestPatcher) PatchSystemOneRequest(ctx context.Context, req 
 	return processGuarded(ctx, p.chain(ctx), req, "System One", exchange.FromSystemOneRequest, applySystemOneEdits)
 }
 
-// systemOneDropsWarned records the kinds of dropped guardrail edits already
+// decisionDropsWarned records the kinds of dropped guardrail edits already
 // logged at warning level. A guardrail scoped to every model edits every
-// System One request the same way, so the misconfiguration is reported once
-// per kind; repeats are logged at debug level.
-var systemOneDropsWarned sync.Map
+// System One or Decisions request the same way, so the misconfiguration is
+// reported once per kind; repeats are logged at debug level.
+var decisionDropsWarned sync.Map
 
 func applySystemOneEdits(req *core.SystemOneRequest, prompt *pluginapi.Prompt) (*core.SystemOneRequest, error) {
 	if dropped := exchange.SystemOneUncarriedEdits(prompt); len(dropped) > 0 {
-		const message = "guardrail edits a System One request cannot carry were dropped; only the state is guarded"
-		if _, repeated := systemOneDropsWarned.LoadOrStore(strings.Join(dropped, ","), struct{}{}); repeated {
-			slog.Debug(message, "model", req.Model, "dropped", dropped)
-		} else {
-			slog.Warn(message+" (repeats are logged at debug level)", "model", req.Model, "dropped", dropped)
-		}
+		warnDroppedDecisionEdits("guardrail edits a System One request cannot carry were dropped; only the state is guarded", req.Model, dropped)
 	}
 	return exchange.ApplyToSystemOneRequest(req, prompt)
+}
+
+// warnDroppedDecisionEdits logs dropped edits once per message and kind at
+// warning level, and repeats at debug level.
+func warnDroppedDecisionEdits(message, model string, dropped []string) {
+	if _, repeated := decisionDropsWarned.LoadOrStore(message+"|"+strings.Join(dropped, ","), struct{}{}); repeated {
+		slog.Debug(message, "model", model, "dropped", dropped)
+	} else {
+		slog.Warn(message+" (repeats are logged at debug level)", "model", model, "dropped", dropped)
+	}
+}
+
+// PatchDecisionRequest runs the prompt chain over a Decisions request's
+// input. As with System One, edits a decision request has no place for are
+// dropped with a warning rather than failing the request.
+func (p *WorkflowRequestPatcher) PatchDecisionRequest(ctx context.Context, req *core.DecisionRequest) (*core.DecisionRequest, error) {
+	if req == nil {
+		return nil, nil
+	}
+	return processGuarded(ctx, p.chain(ctx), req, "decision", exchange.FromDecisionRequest, applyDecisionEdits)
+}
+
+func applyDecisionEdits(req *core.DecisionRequest, prompt *pluginapi.Prompt) (*core.DecisionRequest, error) {
+	if dropped := exchange.DecisionUncarriedEdits(prompt); len(dropped) > 0 {
+		warnDroppedDecisionEdits("guardrail edits a decision request cannot carry were dropped; only the input is guarded", req.Model, dropped)
+	}
+	return exchange.ApplyToDecisionRequest(req, prompt)
 }
 
 // EditsPromptContent reports whether the request's prompt chain holds an

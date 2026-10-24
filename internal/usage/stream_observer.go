@@ -20,6 +20,7 @@ type StreamUsageObserver struct {
 	endpoint        string
 	userPath        string
 	sessionID       string
+	authKeyID       string
 	labels          []string
 	rewriteSaved    int
 	closed          bool
@@ -64,6 +65,14 @@ func (o *StreamUsageObserver) SetSessionID(sessionID string) {
 		return
 	}
 	o.sessionID = strings.TrimSpace(sessionID)
+}
+
+// SetAuthKeyID attaches the managed auth key that authenticated the request.
+func (o *StreamUsageObserver) SetAuthKeyID(authKeyID string) {
+	if o == nil {
+		return
+	}
+	o.authKeyID = strings.TrimSpace(authKeyID)
 }
 
 // SetLabels attaches the request labels extracted from tagging headers.
@@ -257,6 +266,7 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 	copyUsageDetailsFields(rawData, usageMap["input_tokens_details"], "prompt_")
 	copyUsageDetailsFields(rawData, usageMap["completion_tokens_details"], "completion_")
 	copyUsageDetailsFields(rawData, usageMap["output_tokens_details"], "completion_")
+	copyUsageDetailsFields(rawData, usageMap["cache_creation"], "cache_creation_")
 
 	if inputTokens == 0 && outputTokens == 0 && totalTokens == 0 {
 		return nil
@@ -281,6 +291,7 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 		entry.ProviderName = o.providerName
 		entry.UserPath = o.userPath
 		entry.SessionID = o.sessionID
+		entry.AuthKeyID = o.authKeyID
 		entry.Labels = o.labels
 		var pricing *core.ModelPricing
 		if len(pricingArgs) > 0 {
