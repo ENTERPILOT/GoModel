@@ -463,6 +463,7 @@
   "overview_none_healthy": "Keiner fehlerfrei",
   "overview_automatic": "Automatisch",
   "overview_last_error": "Letzter Fehler: {error}",
+  "overview_last_error_breaker_open": "{error} — Circuit Breaker offen",
   "overview_all_mcp_connected": "Alle MCP-Server verbunden",
   "overview_cache_share": "Anteil der Eingabe-Tokens im gewählten Zeitraum",
   "overview_no_usage": "Noch keine Nutzung im gewählten Zeitraum",

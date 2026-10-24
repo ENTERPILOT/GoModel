@@ -436,6 +436,7 @@
   "overview_none_healthy": "均不正常",
   "overview_automatic": "自动",
   "overview_last_error": "最近错误：{error}",
+  "overview_last_error_breaker_open": "{error} — 熔断器已打开",
   "overview_all_mcp_connected": "所有 MCP 服务器均已连接",
   "overview_cache_share": "所选时段内各类输入 Token 的占比",
   "overview_no_usage": "所选时段内尚无用量",
