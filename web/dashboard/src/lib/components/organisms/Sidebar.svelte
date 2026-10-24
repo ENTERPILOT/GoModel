@@ -14,6 +14,7 @@
   import { gomodelPath } from "$lib/api/paths.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { licenseIndicator } from "$lib/utils/licenseIndicator.js";
+  import { classOnOverflow } from "$lib/utils/attachments.js";
   import * as m from "$lib/paraglide/messages.js";
   import { NAV_ITEMS } from "./navigation.js";
   import { LockKeyhole, LogOut, Route, UserRound } from "lucide";
@@ -115,7 +116,13 @@
   class:sidebar-collapsed={sidebar.collapsed}
   class:sidebar-resizing={resizePointerID !== null}
 >
-  <div class="sidebar-header" title={licenseChip?.title}>
+  <!-- The license labels give way to the dot whenever they do not fit beside
+       the name: at any sidebar width and in any language. -->
+  <div
+    class="sidebar-header"
+    title={licenseChip?.title}
+    {@attach license ? classOnOverflow("license-compact") : undefined}
+  >
     <div class="sidebar-logo">
       <GoModelLogo />
       {#if licenseChip}
@@ -316,8 +323,8 @@
     color: var(--danger);
   }
 
-/* Stands in for the badge and chip when the sidebar is too narrow for
-   them; the header's title carries the text. */
+/* Stands in for the badge and chip when the header has no room for them;
+   the header's title carries the text. */
 .license-dot {
     display: none;
     position: absolute;
@@ -336,6 +343,16 @@
 
 .license-dot.license-danger {
     background: var(--danger);
+  }
+
+/* Set by classOnOverflow at runtime, so it never carries the scope hash. */
+.sidebar-header:global(.license-compact) .license-badge,
+.sidebar-header:global(.license-compact) .license-chip {
+    display: none;
+  }
+
+.sidebar-header:global(.license-compact) .license-dot {
+    display: block;
   }
 
 .sidebar-header :global(h1) {
