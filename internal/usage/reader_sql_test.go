@@ -211,6 +211,37 @@ func TestSQLReaderSessionsAndLog(t *testing.T) {
 	})
 }
 
+func TestSQLReaderLogPagesEqualTimestampsByID(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := context.Background()
+		store, err := NewSQLStore(ctx, db, 0)
+		require.NoError(t, err)
+		reader, err := NewSQLReader(db)
+		require.NoError(t, err)
+
+		ts := time.Date(2026, 3, 30, 12, 0, 0, 0, time.UTC)
+		entries := make([]*UsageEntry, 3)
+		for i := range entries {
+			entries[i] = &UsageEntry{
+				ID:        fmt.Sprintf("6f1c3a52-0000-4000-a000-%012d", i+1),
+				RequestID: fmt.Sprintf("tie-%d", i+1), ProviderID: "tie", Timestamp: ts,
+				Model: "gpt-5", Provider: "openai", Endpoint: "/v1/chat/completions",
+			}
+		}
+		require.NoError(t, store.WriteBatch(ctx, entries))
+
+		var got []string
+		for _, offset := range []int{0, 2} {
+			page, err := reader.GetUsageLog(ctx, UsageLogParams{UsageQueryParams: sqlReaderFixtureRange, Limit: 2, Offset: offset})
+			require.NoError(t, err)
+			for _, entry := range page.Entries {
+				got = append(got, entry.RequestID)
+			}
+		}
+		assert.Equal(t, []string{"tie-3", "tie-2", "tie-1"}, got, "equal timestamps page by id DESC")
+	})
+}
+
 func TestSQLReaderGroupsPeriodsAcrossDaylightSavingChange(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
