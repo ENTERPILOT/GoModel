@@ -1,0 +1,52 @@
+---
+title: "从源码构建"
+description: "基于某个 Release 的源码构建 GoModel 二进制文件，可使用预构建的管理控制台或通过 Node 构建控制台，并支持面向软件包维护者的完全离线构建。"
+icon: "hammer"
+keywords: ["从源码构建", "打包", "离线构建", "build from source", "packaging", "offline build", "Nix", "Homebrew", "dashboard", "控制台", "可复现构建", "reproducible"]
+---
+
+大多数用户应通过[快速开始](/zh/getting-started/quickstart)中的脚本、Docker，或
+[GitHub Releases](https://github.com/ENTERPILOT/GoModel/releases) 中的二进制文件进行安装。
+如果您要为某个发行版打包 GoModel，或需要自定义构建，请从源码构建。
+
+管理控制台是一个 Svelte 应用，在编译时嵌入到二进制文件中。它的构建产物不在代码仓库中，因此在源码检出目录中直接执行 `go build`，得到的二进制文件会禁用 UI。网关和 Admin API 仍可正常工作，日志会提示 UI 已禁用。请在执行 `go build` 之前，通过以下两种方式之一加入控制台。
+
+## 方式 1：使用预构建的控制台（无需 Node）
+
+每个 Release 都包含 `gomodel_<version>_dashboard.tar.gz`，并列在该 Release 的 `checksums.txt` 中。它包含的控制台与该 Release 的二进制文件和 Docker 镜像中嵌入的完全一致。压缩包中的路径相对于仓库根目录，因此请在根目录下解压：
+
+```bash
+VERSION=0.1.102
+git clone --depth 1 --branch "v${VERSION}" https://github.com/ENTERPILOT/GoModel.git
+cd GoModel
+
+curl -fsSLO "https://github.com/ENTERPILOT/GoModel/releases/download/v${VERSION}/gomodel_${VERSION}_dashboard.tar.gz"
+curl -fsSLO "https://github.com/ENTERPILOT/GoModel/releases/download/v${VERSION}/checksums.txt"
+grep " gomodel_${VERSION}_dashboard.tar.gz\$" checksums.txt | sha256sum -c -
+tar -xzf "gomodel_${VERSION}_dashboard.tar.gz"
+
+CGO_ENABLED=0 go build \
+  -ldflags "-s -w -X github.com/enterpilot/gomodel/internal/version.Version=${VERSION}" \
+  -o gomodel ./cmd/gomodel
+```
+
+打包配方可以在源码校验和旁边固定该压缩包的 SHA-256。
+
+## 方式 2：使用 Node 构建控制台
+
+请使用 22.x 系列中 22.12 或更高版本的 Node，或 Node 24 及以上版本。控制台的构建工具不支持 Node 23。
+
+```bash
+make build   # 先运行 make frontend（npm ci + vite build），再生成 bin/gomodel
+```
+
+控制台构建下载的每个文件都在 `web/dashboard/package-lock.json` 中通过完整性哈希固定，因此只要按 lockfile 获取了 npm 依赖，构建即可离线运行：
+
+```bash
+cd web/dashboard
+npm ci --offline --ignore-scripts && npm run build
+```
+
+## 版本标记
+
+如上所示，通过 `-ldflags` 设置 `internal/version.Version`。如果不设置，二进制文件会报告版本为 `dev`，且[更新检查](/zh/advanced/version-awareness)永远不会提示有更新的 Release。

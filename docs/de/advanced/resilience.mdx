@@ -1,0 +1,449 @@
+---
+title: "Ausfallsicherheit"
+description: "Passen Sie Retries und den Circuit Breaker pro Provider an und erfahren Sie, wann Sie stattdessen auf modellübergreifendes Failover setzen sollten."
+icon: "shield-check"
+keywords: ["Ausfallsicherheit", "resilience", "Retries", "Circuit Breaker", "Backoff", "Fehlertoleranz", "fault tolerance"]
+---
+
+GoModel umgibt jeden Aufruf eines Upstream-Providers mit zwei Schichten der
+Ausfallsicherheit:
+
+1. **Retry mit exponentiellem Backoff** – wiederholt einen fehlgeschlagenen
+   Request gegen denselben Provider mit wachsenden Wartezeiten.
+2. **Circuit Breaker** – unterbindet Aufrufe an einen Provider, der wiederholt
+   fehlschlägt, und sendet nach Ablauf des Timeouts einen Probe-Request.
+
+Retries gelten für das ausgewählte Ziel. Circuit Breaker gelten standardmäßig pro
+Provider oder mit `scope: model` pro Modell. Bei einem Fehler wechseln sie nicht
+zu einem anderen Modell oder Provider. Für modellübergreifendes Failover siehe
+[Failover](/de/features/failover).
+
+Diese Seite behandelt die Stellschrauben. Was GoModel tut, wenn ein Provider die
+Form seiner Response ändert, mit `200` ohne verwertbaren Inhalt antwortet oder
+mitten im Stream abbricht, erfahren Sie unter
+[Fehlermodi von Providern](/de/advanced/provider-failure-modes).
+
+## Standardwerte
+
+Die Standardwerte sind so abgestimmt, dass sie für die meisten Deployments sicher
+sind. Überschreiben Sie nur, was Sie wirklich brauchen.
+
+| Einstellung         | Standardwert | Hinweise                                  |
+| ------------------- | ------- | ---------------------------------------------- |
+| `retry_on_statuses` | `[429, 502, 503, 504, 522, 524]` | HTTP-Status, die Retries auslösen |
+| `failure_on_statuses` | `[429, 5xx]` | HTTP-Status, die als Breaker-Fehler zählen |
+| `scope` | `provider` | Isolation des Breakers: `provider` oder `model` |
+| `max_retries`       | `3`     | Maximale Anzahl an Retries pro Request         |
+| `initial_backoff`   | `1s`    | Wartezeit vor dem ersten Retry                 |
+| `max_backoff`       | `30s`   | Obergrenze der Wartezeit zwischen Retries      |
+| `backoff_factor`    | `2.0`   | Exponentieller Multiplikator zwischen Retries  |
+| `jitter_factor`     | `0.1`   | Zufälliger Jitter als Anteil des Backoffs      |
+| `enabled`           | `true`  | Schaltet den Circuit Breaker ein oder aus      |
+| `failure_threshold` | `5`     | Aufeinanderfolgende Fehler, bis der Circuit öffnet |
+| `success_threshold` | `2`     | Aufeinanderfolgende Erfolge, um ihn wieder zu schließen |
+| `timeout`           | `30s`   | Wie lange der Circuit offen bleibt, bevor geprobt wird |
+| `slow_call_threshold` | `0` (aus) | Antworten, die langsamer sind, zählen als Breaker-Fehler |
+
+Um Retries zu deaktivieren, setzen Sie `max_retries: 0` – jeder Request erhält
+dann genau einen Versuch. Um den Circuit Breaker zu deaktivieren, setzen Sie
+`circuit_breaker.enabled: false` (oder `CIRCUIT_BREAKER_ENABLED=false`); die
+Schwellenwerte bleiben erhalten, werden aber nie ausgewertet. Wenn Sie ihn wieder
+einschalten, gilt Ihre bisherige Abstimmung wieder. Auch
+`failure_threshold: 0` deaktiviert den Breaker. Beide Schalter funktionieren
+global oder pro Provider, und ein `enabled: true` pro Provider aktiviert den
+Breaker für diesen Provider wieder, wenn er global ausgeschaltet ist.
+
+Schalten Sie den Breaker aus, wenn bereits etwas vor dem Provider Last abwirft
+(ein providerseitiger Load Balancer, ein Service Mesh) oder wenn eine kurze Folge
+von `5xx`-Responses den Traffic zu diesem Provider niemals pausieren darf.
+Lassen Sie ihn ansonsten eingeschaltet: Er verhindert, dass ein ausgefallener
+Upstream jeden Request für die volle Timeout-Dauer blockiert.
+
+## Was als Fehler zählt
+
+**Retries** werden bei Transportfehlern (Verbindung abgelehnt, Resets,
+DNS-Fehler) und standardmäßig bei den Responses `429`, `502`, `503`, `504`,
+`522` und `524` ausgelöst. Andere Status – einschließlich `500` – werden ohne
+Retry an den Aufrufer zurückgegeben. Die folgenden Pfade führen weniger Retries
+durch, als die Tabelle vermuten lässt:
+
+- **Lokale Timeouts des HTTP-Clients** kehren sofort ohne Retry zurück. Ein
+  abgelaufener Kontext des gesamten Requests verhindert ebenfalls weitere
+  Versuche.
+
+- **Streaming**-Requests werden nach dem Absenden nie wiederholt, da bereits
+  Teildaten gesendet worden sein können.
+- **Passthrough**-Requests werden nur wiederholt, wenn sie sicher erneut
+  gesendet werden können: `GET`, `HEAD`, `OPTIONS`, `PUT` oder jeder Request mit
+  einem `Idempotency-Key`-Header.
+
+**Idempotency-Keys** erreichen den Provider. Wenn ein Client einen
+`Idempotency-Key`-Header sendet, leitet GoModel ihn unverändert an den
+Provider-Aufruf für diesen Request und an jeden Retry dieses Aufrufs weiter.
+Ein Provider, der anhand des Keys dedupliziert, kann so einen wiederholten
+Request erkennen. Ein Failover-Versuch zu einem anderen Ziel sendet einen anderen
+Request-Body und geht daher ohne den Key hinaus, ebenso wie Gateway-interne
+Aufrufe wie Guardrail-Prüfungen. Keys müssen aus sichtbaren ASCII-Zeichen
+bestehen und dürfen höchstens 255 Zeichen lang sein; jeder andere Wert wird
+ignoriert.
+
+**Hinter HTTP 200 versteckte Fehler** werden aufgedeckt, bevor irgendetwas
+davon greift. Manche Provider (am bekanntesten ist OpenRouter) antworten mit
+`200 OK` und einem reinen `{"error": ...}`-JSON-Body. GoModel erkennt solche
+Payloads und behandelt sie als den Fehler, der sie tatsächlich sind: Ein in
+`error.code` eingebetteter Status bleibt erhalten (ein versteckter `429` verhält
+sich also wie ein echter), alles andere wird auf `502` abgebildet. Der
+abgebildete Status steuert dann Retries, den Circuit Breaker und Failover genau
+wie ein echter Fehlerstatus, und die Response wird nie als Erfolg gecacht.
+Passthrough-Endpunkte sind ausgenommen: Sie leiten die Response des Providers
+Byte für Byte weiter.
+
+**Vorzeitig endende Streams** schließen mit einem expliziten Fehler statt mit
+einem stillen EOF. Wenn ein Provider-Stream vor seinem abschließenden Event
+schließt oder fehlschlägt (`data: [DONE]` oder ein `finish_reason` bei Chat
+Completions, ein abschließendes `response.*`-Event bei `/v1/responses`,
+`message_stop` bei `/v1/messages`), reicht GoModel alles bisher Empfangene
+weiter und sendet dann ein Fehler-Event im Format des Endpunkts:
+
+- Chat Completions: `data: {"error":{"code":"stream_incomplete",...}}`
+- `/v1/responses`: ein `error`-Event mit `"code":"stream_incomplete"`
+- `/v1/messages`: ein Anthropic-`error`-Event mit `error.type` auf
+  `api_error`
+
+Das deckt fehlerhafte Chunks, eine mitten in einem Tool Call abgebrochene
+Verbindung und ähnliche Abbrüche ab, sodass ein Client eine unvollständige
+Antwort nie für eine vollständige hält. Ein Stream, der sein abschließendes Event
+bereits gesendet hat, bleibt vollständig, auch wenn die Verbindung danach
+fehlschlägt. Das Request-Log erfasst einen abgeschnittenen Stream als
+`stream_error`.
+
+**Der Circuit Breaker** zählt Transportfehler und standardmäßig `429` sowie alle
+`5xx`-Responses als Fehler. Eine ausgeschöpfte Retry-Sequenz zählt als ein
+Fehler; einzelne HTTP-Retries erhöhen den Zähler des Breakers nicht. Eine
+erfolgreiche Sequenz wird als Erfolg erfasst. Ein Abbruch durch den Client wird
+ignoriert; lokale Client-Timeouts zählen als Fehler.
+
+Setzen Sie `retry.retry_on_statuses` und `circuit_breaker.failure_on_statuses`
+unabhängig voneinander. Beide akzeptieren exakte Codes und Klassen wie `5xx`.
+Weggelassene Listen verwenden die Standardwerte; explizite Listen ersetzen sie;
+`[]` deaktiviert statusbasierte Auslöser, die Behandlung von Transportfehlern
+bleibt aber erhalten. Zum Beispiel schließt `failure_on_statuses: [5xx]`
+Rate-Limits von den Breaker-Fehlern aus, auch während Recovery-Probes. Ungültige
+Codes oder Scopes lassen das Laden der Konfiguration fehlschlagen.
+
+**Anhaltende Latenz** kann den Circuit ebenfalls öffnen. Setzen Sie
+`circuit_breaker.slow_call_threshold` (oder
+`CIRCUIT_BREAKER_SLOW_CALL_THRESHOLD`), und jeder Aufruf, den der Provider
+langsamer beantwortet, zählt als Breaker-Fehler, genau wie ein `5xx`. Die
+langsame Antwort wird trotzdem an ihren Aufrufer zurückgegeben; nach
+`failure_threshold` aufeinanderfolgenden langsamen oder fehlgeschlagenen
+Aufrufen öffnet sich der Circuit, spätere Requests schlagen sofort mit einem
+für Failover geeigneten `503` fehl, und eine langsame Recovery-Probe öffnet ihn
+erneut. Siehe
+[Failover weg von einem langsamen Provider](/de/advanced/resilience#failover-weg-von-einem-langsamen-provider).
+
+Die Zeitmessung umfasst den gesamten Aufruf einschließlich Retries. Bei
+Streaming-Requests endet sie beim ersten Daten-Event, sodass der Schwellenwert
+die Zeit bis zum ersten Token begrenzt und nicht die Länge des Streams.
+
+Standardmäßig ist die Option deaktiviert, weil die normale Latenz von der
+Workload abhängt: Ein Reasoning-Aufruf ohne Streaming kann legitimerweise
+Minuten dauern. Wählen Sie einen Wert deutlich über Ihrem langsamsten gesunden
+Request und überschreiben Sie ihn pro Provider, wenn sich die Workloads
+unterscheiden. Der Schwellenwert bricht nie einen Request ab – das ist die
+Aufgabe von `HTTP_TIMEOUT`, und ein Aufruf, der diesen erreicht, zählt bereits
+als Fehler.
+
+Der Standardwert schließt jetzt `429` als Breaker-Fehler ein. Deployments, die
+bisher darauf angewiesen waren, dass Rate-Limits den Breaker geschlossen lassen,
+können `failure_on_statuses: [5xx]` setzen, um dieses Verhalten beizubehalten.
+
+Solange der Circuit offen ist, schlagen Requests sofort mit einem `503` und der
+Meldung `circuit breaker is open - provider <name> temporarily unavailable`
+fehl, wobei `<name>` der konfigurierte Provider-Name ist (`openai-eu`, nicht sein
+Typ). Nach Ablauf von `timeout` wird ein einzelner Probe-Request durchgelassen,
+während gleichzeitige Requests weiterhin sofort fehlschlagen; `success_threshold`
+aufeinanderfolgende erfolgreiche Probes schließen den Circuit, und ein Fehler,
+der der Breaker-Richtlinie entspricht, öffnet ihn erneut. Probes führen nur
+einen HTTP-Versuch durch, ohne Retries.
+
+Der Circuit Breaker liegt im Arbeitsspeicher und gilt pro Gateway-Prozess:
+Standardmäßig erhält jeder Provider einen eigenen Breaker. Mit `scope: model`
+erhält jedes Modell innerhalb einer Provider-Instanz einen unabhängigen Breaker;
+Requests ohne Modell, etwa Discovery, verwenden einen separaten
+Provider-Breaker. Multipart-Audio-Uploads verwenden ihre expliziten
+Modellnamen.
+
+Jeder Provider hält höchstens 1.024 Modell-Breaker vor. Inaktive geschlossene
+Einträge laufen nach 10 Minuten ab, sobald ein neues Modell nachgeschlagen wird;
+der älteste inaktive geschlossene Eintrag wird früher verdrängt, wenn das Limit
+erreicht ist. Aktive und offene Breaker bleiben erhalten. Sind alle Plätze
+geschützt, erhält ein neues Modell ein für Failover geeignetes `503`, bis ein
+Platz frei wird.
+
+Der Zustand wird bei einem Neustart zurückgesetzt,
+und zwischen Replikaten wird nichts geteilt.
+
+## Umgebungsvariablen
+
+Diese legen die globalen Standardwerte fest, die für jeden Provider gelten,
+sofern sie nicht in YAML überschrieben werden.
+
+### Retry
+
+| Variable                 | Typ      | Standardwert | Beschreibung                          |
+| ------------------------ | -------- | ------- | ------------------------------------------ |
+| `RETRY_ON_STATUSES` | kommagetrennte Liste | `429,502,503,504,522,524` | HTTP-Status, die Retries auslösen |
+| `RETRY_MAX_RETRIES`      | int      | `3`     | Maximale Anzahl an Retries pro Request     |
+| `RETRY_INITIAL_BACKOFF`  | duration | `1s`    | Wartezeit vor dem ersten Retry (z. B. `500ms`, `2s`) |
+| `RETRY_MAX_BACKOFF`      | duration | `30s`   | Obergrenze der Wartezeit zwischen Retries  |
+| `RETRY_BACKOFF_FACTOR`   | float    | `2.0`   | Exponentieller Multiplikator zwischen Retries |
+| `RETRY_JITTER_FACTOR`    | float    | `0.1`   | Zufälliger Jitter als Anteil des Backoffs  |
+
+### Circuit Breaker
+
+| Variable                            | Typ      | Standardwert | Beschreibung                             |
+| ----------------------------------- | -------- | ------- | --------------------------------------------- |
+| `CIRCUIT_BREAKER_FAILURE_ON_STATUSES` | kommagetrennte Liste | `429,5xx` | HTTP-Status, die als Fehler zählen |
+| `CIRCUIT_BREAKER_SCOPE` | string | `provider` | Isolation nach `provider` oder `model` |
+| `CIRCUIT_BREAKER_ENABLED`           | bool     | `true`  | Auf `false` setzen, um den Circuit Breaker auszuschalten |
+| `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | int      | `5`     | Aufeinanderfolgende Fehler bis zum Öffnen     |
+| `CIRCUIT_BREAKER_SUCCESS_THRESHOLD` | int      | `2`     | Aufeinanderfolgende Erfolge bis zum erneuten Schließen |
+| `CIRCUIT_BREAKER_TIMEOUT`           | duration | `30s`   | Wie lange der Circuit offen bleibt, bevor geprobt wird |
+| `CIRCUIT_BREAKER_SLOW_CALL_THRESHOLD` | duration | `0`   | Antworten, die langsamer sind, zählen als Fehler; `0` deaktiviert |
+
+## YAML
+
+Dieselben Felder stehen im globalen Block `resilience:` zur Verfügung und können
+pro Provider überschrieben werden:
+
+```yaml
+resilience:
+  retry:
+    max_retries: 2
+    initial_backoff: 500ms
+    max_backoff: 10s
+    backoff_factor: 1.5
+    jitter_factor: 0.05
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 3
+    success_threshold: 1
+    timeout: 15s
+
+providers:
+  anthropic:
+    type: anthropic
+    api_key: ${ANTHROPIC_API_KEY}
+    resilience:
+      retry:
+        max_retries: 5 # Anthropic unterstützt lange Requests – mehr Retries erlauben
+
+  ollama:
+    type: ollama
+    base_url: ${OLLAMA_BASE_URL:-http://localhost:11434/v1}
+    resilience:
+      circuit_breaker:
+        failure_threshold: 10 # lokaler Service – mehr vorübergehende Fehler tolerieren
+        timeout: 5s
+
+  vllm:
+    type: vllm
+    base_url: ${VLLM_BASE_URL:-http://localhost:8000/v1}
+    resilience:
+      circuit_breaker:
+        enabled: false # hinter eigenem Load Balancer – nie sofort fehlschlagen
+```
+
+Nur Felder, die im `resilience:`-Block eines Providers explizit aufgeführt sind,
+werden überschrieben. Alles andere wird vom globalen Abschnitt geerbt, der
+seinerseits von den eingebauten Standardwerten erbt.
+
+<Note>
+  Die Abstimmung pro Provider **muss** aus YAML kommen. Umgebungsvariablen legen
+  nur globale Standardwerte fest – `RETRY_MAX_RETRIES` kann nicht auf einen
+  einzelnen Provider zielen. Siehe
+  [Fallstricke bei config.yaml](/de/advanced/config-yaml#stolpersteine).
+</Note>
+
+### Durchgerechnetes Beispiel
+
+Mit dem obigen YAML ergeben sich folgende effektive Einstellungen pro Provider:
+
+| Provider  | max_retries      | cb enabled           | failure_threshold | cb timeout        |
+| --------- | ---------------- | -------------------- | ----------------- | ----------------- |
+| openai    | 2 (global)       | true (global)        | 3 (global)        | 15s (global)      |
+| anthropic | **5** (überschrieben) | true (global)   | 3 (global)        | 15s (global)      |
+| ollama    | 2 (global)       | true (global)        | **10** (überschrieben) | **5s** (überschrieben) |
+| vllm      | 2 (global)       | **false** (überschrieben) | 3 (global, ungenutzt)| 15s (global, ungenutzt) |
+
+`anthropic`, `ollama` und `vllm` erben jedes Feld, das sie nicht explizit
+überschrieben haben. Bei deaktiviertem Breaker meldet `vllm` außerdem weder im
+Dashboard noch in der Metrik `gomodel_circuit_breaker_state` einen
+Breaker-Zustand.
+
+## Circuit Breaker und Provider-Status im Dashboard
+
+Der [Provider-Status](/de/providers/overview#provider-status) im Dashboard
+kombiniert zwei unabhängige Signale:
+
+- **Modellerkennung** – ob der Modellbestand des Providers zuletzt abgerufen
+  werden konnte (Details unten).
+- **Request-Zustand** – ein gleitendes 10-Minuten-Fenster der tatsächlichen
+  Request-Ergebnisse pro Provider und Modell, einschließlich des aktuellen
+  Zustands des Circuit Breakers.
+
+Der Zustand des Circuit Breakers wird auf jeder Provider-Karte angezeigt: Wenn
+Sie eine Karte aufklappen, erscheint ein **Breaker State**-Chip, ein offener
+Breaker setzt die Status-Pill des Providers auf `Circuit Open`, und ein
+halb offener Breaker zeigt `Recovering`. Mit `scope: model` spiegeln Anzeige und
+Metrik des Breakers auf Provider-Ebene den Breaker des zuletzt abgeschlossenen
+Requests wider, nicht eine Zusammenfassung aller Modell-Breaker. Ein Modell,
+dessen jüngste Requests weiterhin fehlschlagen (mindestens 3 Fehler, die die
+Hälfte oder mehr seiner Requests im Fenster ausmachen), markiert den Provider als
+`Degraded`, selbst wenn die Modellerkennung weiterhin gelingt. So werden
+Upstreams erkannt, die Modelle problemlos auflisten, bei echten Aufrufen aber
+fehlschlagen, z. B. mit falsch gemeldeten `4xx`-Fehlern, die den Breaker bewusst
+nie auslösen.
+
+Signale zum Request-Zustand verschlechtern den auf der Discovery basierenden
+Status immer nur, sie verbessern ihn nie, und die Erfassung liegt pro
+Gateway-Prozess im Arbeitsspeicher. Der Breaker erholt sich trotzdem
+selbstständig innerhalb von `timeout` (Standardwert 30s), sobald der Provider
+wieder erreichbar ist; wenn [Metriken](/de/advanced/configuration#metriken)
+aktiviert sind, wird sein Zustand außerdem als Gauge
+`gomodel_circuit_breaker_state` exportiert (0 = geschlossen, 1 = halb offen,
+2 = offen).
+
+Die Modellerkennung wird erneut geprüft:
+
+- beim Start,
+- bei jeder Aktualisierung der Modell-Registry, gesteuert über
+  `CACHE_REFRESH_INTERVAL` (Sekunden, Standardwert `3600` – stündlich),
+- in der schnellen Recheck-Schleife, die **nur** Provider erneut prüft, deren
+  letzte Aktualisierung fehlgeschlagen ist, gesteuert über
+  `PROVIDER_RECHECK_INTERVAL` (`cache.model.recheck_interval` in `config.yaml`;
+  Sekunden, Standardwert `60`; `0` deaktiviert), und
+- bei Bedarf, wenn ein Request ein Provider-qualifiziertes Modell
+  (`provider/model`) anfordert, das in der Registry fehlt.
+
+## Was passiert, während ein Provider ausgefallen ist
+
+Wenn die Aktualisierung eines Providers fehlschlägt, werden seine zuvor
+erkannten Modelle als veraltet markiert, und das Dashboard zeigt den Provider
+als Offline an:
+
+- **Modelllisten** (`GET /v1/models` und die Modellliste im Dashboard) blenden
+  die Modelle des Providers aus, bis er sich erholt hat. Clients werden so keine
+  Modelle angeboten, die derzeit nicht bedient werden können.
+- **Direkte Requests** an seine Modelle (`provider/model`) werden weiterhin
+  aufgelöst und an den Provider gesendet. Aufrufer erhalten so ein ehrliches
+  `502`/`503` (und die Failover-Kette eines überlagernden virtuellen Modells kann
+  greifen) statt eines irreführenden „model not found“.
+- **Redirects virtueller Modelle** überspringen die Ziele des
+  Providers, sodass eine per Load Balancing verteilte Weiterleitung über ihre
+  gesunden Ziele weiter funktioniert.
+
+Ausnahme: Wenn **alle** Provider gleichzeitig fehlschlagen (zum Beispiel bei
+einem Ausfall nur der Control Plane, bei dem die Modellerkennung nicht erreichbar
+ist, die Inferenz aber weiterhin funktioniert), bleibt der bisherige Bestand
+unverändert erhalten und weiterhin gelistet – alles auszublenden würde
+Provider-Fehler nur in „model not found“ verwandeln.
+
+Die schnelle Recheck-Schleife prüft den Provider alle
+`PROVIDER_RECHECK_INTERVAL` Sekunden erneut, aktualisiert „Last checked“ und
+stellt das normale Routing typischerweise innerhalb einer Minute wieder her,
+nachdem der Provider wieder verfügbar ist. Ein Provider, der bereits beim Start
+ausgefallen war (noch nichts erkannt), wird bis zu seinem ersten erfolgreichen
+Abruf als Unhealthy angezeigt.
+
+## Failover vs. Ausfallsicherheit
+
+Retries bleiben beim ausgewählten Ziel; der Circuit Breaker überwacht den
+konfigurierten Provider- oder Modell-Scope. Wenn GoModel außerdem ein anderes
+Modell oder einen anderen Provider versuchen soll, wenn das primäre Ziel
+weiterhin fehlschlägt, geben Sie dem Modell ein virtuelles Modell mit mehr als
+einem Ziel – die übrigen Ziele bilden seine Failover-Kette. Siehe
+[Failover](/de/features/failover).
+
+## Cloudflare-Timeouts wiederholen, dann Modell wechseln
+
+Kombinieren Sie bei übersetzten Requests ohne Streaming Retries mit einem
+virtuellen Failover-Modell. Übernehmen Sie die folgenden Einstellungen in Ihre
+bestehende Konfiguration und verwenden Sie dabei Ihre konfigurierten Provider-
+und Modellnamen:
+
+```yaml
+providers:
+  cloudflare:
+    # Behalten Sie hier Ihren bestehenden type, base_url und Ihre Zugangsdaten bei.
+    resilience:
+      retry:
+        max_retries: 2
+        retry_on_statuses: [429, 502, 503, 504, 522, 524]
+      circuit_breaker:
+        scope: model
+        failure_on_statuses: [429, 5xx]
+        failure_threshold: 5
+
+virtual_models:
+  - source: resilient-chat
+    strategy: failover
+    targets:
+      - model: cloudflare/model1
+      - model: cloudflare/model2
+
+failover:
+  enabled: true
+  retry_on_statuses: [429, 5xx]
+```
+
+Senden Sie `model: resilient-chat`. Solange der Breaker von model1 geschlossen
+ist, löst eine `524`-Response bis zu zwei Retries gegen model1 aus. Schlagen alle
+drei Versuche fehl, versucht GoModel model2 mit dessen eigenem Retry-Budget. Der
+offene Breaker von model1 überspringt dessen Upstream-Aufrufe, ohne model2 zu
+blockieren. Mit dem Standardwert `scope: provider` teilen sich beide Modelle
+stattdessen einen Breaker.
+
+Die Deadline des Aufrufers muss genug Zeit für die Versuche und den Backoff
+lassen. Streaming-Requests erhalten diese Retry-Sequenz nicht; eine teilweise
+ausgelieferte Response lässt sich nicht transparent neu starten.
+
+## Failover weg von einem langsamen Provider
+
+Ein Provider, der zwar noch antwortet, dafür aber Minuten braucht, erzeugt nie
+die Fehler, die den Circuit öffnen. `slow_call_threshold` sorgt dafür, dass
+Latenz zählt:
+
+```yaml
+providers:
+  opencode:
+    # Behalten Sie hier Ihren bestehenden type, base_url und Ihre Zugangsdaten bei.
+    resilience:
+      circuit_breaker:
+        scope: model # ein langsames Modell darf nicht den ganzen Provider pausieren
+        slow_call_threshold: 60s
+        failure_threshold: 3
+
+virtual_models:
+  - source: resilient-chat
+    strategy: failover
+    targets:
+      - model: opencode/deepseek-v3
+      - model: openai/gpt-4o-mini
+
+failover:
+  enabled: true
+```
+
+Sobald drei Aufrufe in Folge an `opencode/deepseek-v3` länger als 60 Sekunden
+dauern (oder fehlschlagen), öffnet sich sein Circuit, und Requests an
+`resilient-chat` gehen ohne Wartezeit direkt an `openai/gpt-4o-mini`. Alle
+`timeout` (Standardwert 30s) versucht ein Probe-Request erneut das primäre Ziel;
+der Traffic kehrt zurück, sobald die Probes innerhalb des Schwellenwerts
+antworten.
+
+Eine schnelle Antwort zwischendurch setzt den Zähler zurück, sodass gelegentliche
+langsame Aufrufe den Circuit nie öffnen. Bevorzugen Sie hier `scope: model`: Mit
+dem Standardwert `scope: provider` setzen schnelle Modelle desselben Providers
+den Zähler für das langsame Modell ständig zurück.

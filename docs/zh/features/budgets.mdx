@@ -1,0 +1,457 @@
+---
+title: "预算"
+description: "按用户路径、请求标签或提供商设置支出上限，并通过工作流预算控制强制执行。"
+icon: "wallet"
+keywords: ["预算", "支出上限", "成本控制", "用户路径", "标签", "提供商", "budgets", "spend limits", "cost controls", "user path", "labels", "providers"]
+---
+
+## 概览
+
+预算可让您为某个 `user_path` 子树、某个请求[标签](/zh/features/labelling)或某个提供商设置支出上限。GoModel 根据已追踪的用量成本记录评估预算，当某个上限已经用尽时，会拦截匹配的请求。
+
+每个预算都有一个**作用域**，用于指明其限制的对象：
+
+| 作用域       | 对象                         | 匹配                                        |
+| ----------- | ------------------------------- | ---------------------------------------------- |
+| `user_path` | 用户路径（`/team/alpha`）     | 该路径及其下的所有路径            |
+| `label`     | 标签（`Mobile-App-iOS`）      | 携带该标签的所有请求              |
+| `provider`  | 提供商名称（`openai-prod`） | 路由到该提供商实例的所有请求 |
+
+当您需要以下这类上限时，可以使用预算：
+
+- `/team/alpha` 每天可支出 `$10`
+- `/team/alpha` 每周可支出 `$50`
+- `/` 设置全局月度上限
+- 所有带 `Mobile-App-iOS` 标签的请求每月可支出 `$500`
+- `openai-prod` 提供商在所有用户范围内每天可支出 `$100`
+
+<Info>
+  只有在全局启用预算且当前工作流启用了 Budget 时，才会执行预算控制。全局预算功能开启时，工作流中的 Budget 控制默认启用。
+</Info>
+
+## 启用预算
+
+预算默认启用：
+
+```env
+BUDGETS_ENABLED=true
+```
+
+预算依赖用量追踪，因为支出是根据用量成本记录计算的：
+
+```env
+USAGE_ENABLED=true
+```
+
+如果禁用了用量追踪，GoModel 启动时会禁用预算管理，并记录一条警告日志。
+
+## 创建预算
+
+您可以在控制台中创建预算：
+
+```text
+Budgets -> Create Budget
+```
+
+<img
+  src="/features/budgets.png"
+  alt="GoModel 控制台的 Budgets 页面，列出按用户路径设置的月度、每周和每日预算，并显示支出进度条和剩余金额"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+在表单中设置**作用域**、**对象**（用户路径、标签或提供商）、**周期**和**金额**。之后，Budgets 页面上的每一行都会显示支出占上限的百分比、已支出金额与上限的对比，以及当前周期的剩余额度。标签和提供商预算会在周期旁显示 `label` 或 `provider` 标记。在控制台中创建的预算标记为 `manual`，从 YAML 或环境变量加载的预算标记为 `config`。
+
+您也可以通过 YAML 预置预算：
+
+```yaml
+budgets:
+  enabled: true
+  user_paths:
+    - path: "/team/alpha"
+      limits:
+        - period: "daily"
+          amount: 10.00
+        - period: "weekly"
+          amount: 50.00
+    - path: "/customers"
+      # GoModel Pro：需要 quota_templates 授权。
+      per_child: true
+      limits:
+        - period: "daily"
+          amount: 5.00
+    - path: "/"
+      limits:
+        - period: "monthly"
+          amount: 500.00
+  labels:
+    - label: "Mobile-App-iOS"
+      limits:
+        - period: "monthly"
+          amount: 500.00
+  providers:
+    - name: "openai-prod"
+      limits:
+        - period: "daily"
+          amount: 100.00
+```
+
+或者使用环境变量：
+
+```env
+SET_BUDGET_TEAM__ALPHA="daily=10,weekly=50"
+SET_BUDGET_="monthly=500"
+# GoModel Pro（quota_templates 授权）：
+SET_BUDGET_CUSTOMERS='[{"period":"daily","amount":5,"per_child":true}]'
+SET_PROVIDER_BUDGET_OPENAI_PROD="daily=100"
+```
+
+`SET_BUDGET_` 之后的后缀会成为用户路径。路径段之间使用双下划线（`__`）分隔；单下划线仍属于路径段的一部分：
+
+- `SET_BUDGET_TEAM__ALPHA` -> `/team/alpha`
+- `SET_BUDGET_USER_123` -> `/user_123`
+- `SET_BUDGET_` -> `/`
+
+路径段中的字面量双下划线无法转义。对于需要包含 `__` 的路径段，请使用 YAML 或控制台。
+
+提供商预算使用自己的前缀 `SET_PROVIDER_BUDGET_<NAME>`，与 `SET_PROVIDER_RATE_LIMIT_<NAME>` 类似。后缀中的下划线会转换为连字符，因此 `SET_PROVIDER_BUDGET_OPENAI_PROD` 限制的是 `openai-prod` 提供商。
+
+<Note>
+  标签预算没有环境变量形式。标签按原样匹配（包括大小写），并且可能包含环境变量名无法表示的字符。请在 YAML 的 `budgets.labels` 下声明，或通过控制台或 Admin API 创建。
+</Note>
+
+支持的标准周期如下：
+
+| 周期    | 秒数   |
+| --------- | --------- |
+| `hourly`  | `3600`    |
+| `daily`   | `86400`   |
+| `weekly`  | `604800`  |
+| `monthly` | `2592000` |
+
+秒数列是内部的周期标识符。标准周期使用所配置的重置锚点逻辑；例如，`monthly` 以 `2592000` 存储，但会在日历月锚点重置，并在较短的月份中将重置日调整到该月最后一天。只有自定义的 `period_seconds` 值才会作为固定秒数的时间窗口。
+
+如需自定义时间窗口，请在 YAML 中设置 `period_seconds`：
+
+```yaml
+budgets:
+  user_paths:
+    - path: "/team/alpha"
+      limits:
+        - period_seconds: 7200
+          amount: 5.00
+```
+
+## 匹配规则
+
+预算路径适用于所配置的路径及其后代路径：
+
+- 预算路径 `/team`
+- 请求路径 `/team/app`
+- 结果：预算适用
+
+同级路径不匹配：
+
+- 预算路径 `/team`
+- 请求路径 `/team-alpha`
+- 结果：预算不适用
+
+标签预算精确匹配标签，不进行子树匹配，也不忽略大小写：
+
+- 预算标签 `Mobile-App-iOS`
+- 请求标签 `["Mobile-App-iOS", "prod"]`
+- 结果：预算适用
+
+- 预算标签 `Mobile-App-iOS`
+- 请求标签 `["mobile-app-ios"]`
+- 结果：预算不适用
+
+标签来自打标签规则、附加在认证该请求的托管 API 密钥上的标签，以及客户端发送的 LiteLLM tag；参阅[标签](/zh/features/labelling)。携带多个标签的请求会计入所有匹配的标签预算。LiteLLM tag 由客户端自行选择，因此当某个客户端不应计入其他团队的标签预算时，请设置 `LITELLM_TAGS_ENABLED=false`。
+
+提供商预算匹配处理该请求的已配置提供商实例，不区分大小写。提供商预算限制的是该提供商在所有用户路径和标签范围内的总支出；它不会收窄用户路径或标签预算。准入时尚不知道提供商的请求（例如批处理提交和 MCP 调用）不会检查提供商预算。
+
+如果有多个预算匹配同一请求，GoModel 会在一次查找中检查所有匹配的上限。只要任一匹配的上限已用尽，请求就会被拒绝。
+
+### 提供商预算与故障转移
+
+当某个提供商预算已用尽且请求配置了[故障转移](/zh/features/failover)目标时，GoModel 会跳过该已用尽的提供商并尝试故障转移目标，而不是拒绝请求。故障转移也会跳过自身提供商预算已用尽的任何目标。如果没有剩余目标，客户端会收到原始的 `budget_exceeded` 错误。用户路径和标签预算始终直接拒绝：切换提供商无法缓解这类预算。
+
+### 动态的子路径预算
+
+<Info>
+  动态的子路径预算在 GoModel Pro 中提供，需要 `quota_templates` 许可证授权。没有该授权时，Admin API 写入会被拒绝并返回 403 `quota_templates_not_entitled`，配置中的 `per_child: true` 会导致启动中止。GoModel 绝不会静默回退为一个共享的子树预算，因为那会改变执行语义。
+</Info>
+
+当某个用户路径条目的上限应作为其直接子路径的模板，而不是一个共享的子树预算时，请在该条目上设置 `per_child: true`。以 `/customers` 上的模板为例：
+
+- `/customers/alice` 和 `/customers/alice/app` 从 Alice 的预算中支出
+- `/customers/bob` 从独立的 Bob 预算中支出
+- `/customers` 本身不匹配该模板，因为它没有子路径
+
+控制台会将该定义显示为 `per child` 模板，而不会虚构一个汇总用量值。使用 `GET /v1/usage` 并传入某个子路径的有效用户路径，即可查看该子路径解析后的预算。重置该模板会为其所有子路径开始一个新周期。
+
+## 工作流控制
+
+当前工作流决定是否对某个请求执行预算检查。
+
+在工作流负载中：
+
+```json
+{
+  "schema_version": 1,
+  "features": {
+    "budget": true,
+    "cache": true,
+    "audit": true,
+    "usage": true,
+    "guardrails": true,
+    "failover": true
+  }
+}
+```
+
+使用带作用域的工作流，可以针对某个提供商、模型或 `user_path` 子树开启或关闭预算控制。匹配优先级请参阅[工作流](/zh/advanced/workflows)。
+
+<Note>
+  响应缓存命中可能在预算控制之前返回。如果存在缓存的响应，GoModel 可以直接返回它，而不会产生额外的提供商费用。
+</Note>
+
+## 重置窗口
+
+预算重置锚点在控制台的以下位置配置：
+
+```text
+Settings -> Budget Resets
+```
+
+重置设置按 UTC 时间计算。
+
+对于月度预算，如果所配置的日期在某个月中不存在，则在该月最后一天重置。例如，月度重置日设为 `31` 时，会在 4 月 30 日以及 2 月 28 日或 29 日重置。
+
+编辑预算会更改上限，但不会重置当前周期。使用行级的 Reset 操作可为单个预算开始新周期，使用 `Settings -> Reset All Budgets` 可重置所有预算。
+
+## Admin API
+
+预算管理也可以通过 Admin API 进行：
+
+<CodeGroup>
+
+```bash curl
+curl -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  http://localhost:8080/admin/budgets
+```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+budgets = client.get("/admin/budgets", cast_to=httpx.Response)
+
+print(budgets.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const budgets = await client.get("/admin/budgets");
+console.log(budgets);
+```
+
+</CodeGroup>
+
+创建或更新预算。预算由其 `scope`、`subject` 和周期唯一标识；对于用户路径预算，可以使用 `user_path` 作为 subject 的简写形式：
+
+<CodeGroup>
+
+```bash curl
+curl -X PUT http://localhost:8080/admin/budgets \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": "user_path",
+    "subject": "/team/alpha",
+    "per_child": false,
+    "budget_key": { "period": "daily" },
+    "amount": 10.00
+  }'
+```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+budget = client.put(
+    "/admin/budgets",
+    cast_to=httpx.Response,
+    body={
+        "scope": "user_path",
+        "subject": "/team/alpha",
+        "budget_key": {"period": "daily"},
+        "amount": 10.00,
+    },
+)
+
+print(budget.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const budget = await client.put("/admin/budgets", {
+  body: {
+    scope: "user_path",
+    subject: "/team/alpha",
+    budget_key: { period: "daily" },
+    amount: 10.0,
+  },
+});
+
+console.log(budget);
+```
+
+</CodeGroup>
+
+为标签预算执行同样的调用（对于提供商预算，请使用 `"scope": "provider"`，并以提供商名称作为 subject）：
+
+<CodeGroup>
+
+```bash curl
+curl -X PUT http://localhost:8080/admin/budgets \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": "label",
+    "subject": "Mobile-App-iOS",
+    "budget_key": { "period": "monthly" },
+    "amount": 500.00
+  }'
+```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+budget = client.put(
+    "/admin/budgets",
+    cast_to=httpx.Response,
+    body={
+        "scope": "label",
+        "subject": "Mobile-App-iOS",
+        "budget_key": {"period": "monthly"},
+        "amount": 500.00,
+    },
+)
+
+print(budget.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const budget = await client.put("/admin/budgets", {
+  body: {
+    scope: "label",
+    subject: "Mobile-App-iOS",
+    budget_key: { period: "monthly" },
+    amount: 500.0,
+  },
+});
+
+console.log(budget);
+```
+
+</CodeGroup>
+
+删除预算：
+
+<CodeGroup>
+
+```bash curl
+curl -X DELETE http://localhost:8080/admin/budgets \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": "label",
+    "subject": "Mobile-App-iOS",
+    "budget_key": { "period": "monthly" }
+  }'
+```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+deleted = client.delete(
+    "/admin/budgets",
+    cast_to=httpx.Response,
+    body={
+        "scope": "label",
+        "subject": "Mobile-App-iOS",
+        "budget_key": {"period": "monthly"},
+    },
+)
+
+print(deleted.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const deleted = await client.delete("/admin/budgets", {
+  body: {
+    scope: "label",
+    subject: "Mobile-App-iOS",
+    budget_key: { period: "monthly" },
+  },
+});
+
+console.log(deleted);
+```
+
+</CodeGroup>
+
+端点列表请参阅 [Admin 端点](/zh/advanced/admin-endpoints)。

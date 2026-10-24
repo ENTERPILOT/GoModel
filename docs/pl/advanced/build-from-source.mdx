@@ -1,0 +1,65 @@
+---
+title: "Budowanie ze źródeł"
+description: "Zbuduj binarkę GoModel ze źródeł wybranego release’u, z gotowym dashboardem administracyjnym albo przy użyciu Node, w tym w pełni offline – dla maintainerów pakietów."
+icon: "hammer"
+keywords: ["budowanie ze źródeł", "build from source", "pakietowanie", "packaging", "build offline", "offline build", "Nix", "Homebrew", "dashboard", "powtarzalny build", "reproducible"]
+---
+
+Większość użytkowników powinna instalować GoModel skryptem z [Szybkiego startu](/pl/getting-started/quickstart),
+przez Dockera albo z binarki z
+[GitHub Releases](https://github.com/ENTERPILOT/GoModel/releases). Buduj ze
+źródeł, gdy pakietujesz GoModel dla dystrybucji albo potrzebujesz własnego buildu.
+
+Dashboard administracyjny to aplikacja Svelte osadzana w binarce podczas kompilacji.
+Jego wynik builda nie jest przechowywany w repozytorium, więc zwykły `go build` na
+checkoucie źródeł tworzy binarkę z wyłączonym UI. Gateway i Admin API nadal
+działają, a w logu pojawia się informacja, że UI jest wyłączone. Przed `go build`
+dodaj dashboard na jeden z dwóch sposobów.
+
+## Opcja 1: Użyj gotowego dashboardu (bez Node)
+
+Każdy release zawiera plik `gomodel_<version>_dashboard.tar.gz`, wymieniony w
+`checksums.txt` danego release’u. Zawiera dokładnie ten dashboard, który jest
+osadzony w binarkach release’u i w obrazie Dockera. Ścieżki w archiwum są względne
+względem katalogu głównego repozytorium, więc rozpakuj je właśnie tam:
+
+```bash
+VERSION=0.1.102
+git clone --depth 1 --branch "v${VERSION}" https://github.com/ENTERPILOT/GoModel.git
+cd GoModel
+
+curl -fsSLO "https://github.com/ENTERPILOT/GoModel/releases/download/v${VERSION}/gomodel_${VERSION}_dashboard.tar.gz"
+curl -fsSLO "https://github.com/ENTERPILOT/GoModel/releases/download/v${VERSION}/checksums.txt"
+grep " gomodel_${VERSION}_dashboard.tar.gz\$" checksums.txt | sha256sum -c -
+tar -xzf "gomodel_${VERSION}_dashboard.tar.gz"
+
+CGO_ENABLED=0 go build \
+  -ldflags "-s -w -X github.com/enterpilot/gomodel/internal/version.Version=${VERSION}" \
+  -o gomodel ./cmd/gomodel
+```
+
+Receptury pakietów mogą przypiąć SHA-256 archiwum obok sumy kontrolnej źródeł.
+
+## Opcja 2: Zbuduj dashboard przy użyciu Node
+
+Użyj Node 22.12 lub nowszego z linii 22.x albo Node 24+. Node 23 nie jest
+obsługiwany przez narzędzia buildowe dashboardu.
+
+```bash
+make build   # uruchamia make frontend (npm ci + vite build), a następnie zapisuje bin/gomodel
+```
+
+Każdy plik pobierany przez build dashboardu jest przypięty hashem integralności w
+`web/dashboard/package-lock.json`, więc po pobraniu zależności npm z lockfile’a
+build działa offline:
+
+```bash
+cd web/dashboard
+npm ci --offline --ignore-scripts && npm run build
+```
+
+## Oznaczenie wersji
+
+Ustaw `internal/version.Version` przez `-ldflags`, jak pokazano wyżej. Bez tego
+binarka zgłasza wersję `dev`, a [sprawdzanie aktualizacji](/pl/advanced/version-awareness) nigdy
+nie zgłosi nowszego release’u.
