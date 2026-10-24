@@ -124,7 +124,7 @@ func (s *Service) exposedModels(userPath string, enforceUserPaths bool, allow fu
 		}
 		// Expose a load-balanced redirect when at least one concrete model behind
 		// it (descending chains) is both catalog-supported and permitted, listing
-		// it with that model's metadata.
+		// it with that model's metadata and the redirect's own token limits.
 		chosen, ok := representativeExposedTarget(snap.leafTargets(entry, s.catalog), allow)
 		if !ok {
 			continue
@@ -135,6 +135,8 @@ func (s *Service) exposedModels(userPath string, enforceUserPaths bool, allow fu
 		}
 		cloned := *model
 		cloned.ID = entry.vm.Source
+		contextWindow, maxOutput := snap.tokenLimits(entry, s.catalog)
+		applyTokenLimits(&cloned, contextWindow, maxOutput)
 		result = append(result, cloned)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })

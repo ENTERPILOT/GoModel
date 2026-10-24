@@ -130,3 +130,25 @@ virtual_models:
 	require.Equal(t, "latency_aware", vm.StrategyPlugin)
 	require.Equal(t, map[string]any{"p95_window": "5m"}, vm.StrategyConfig, "env entry = %+v, want env to override plugin fields", vm)
 }
+
+func TestVirtualModelConfig_TokenLimitsFromYAMLAndEnv(t *testing.T) {
+	var cfg Config
+	err := yaml.Unmarshal([]byte(`
+virtual_models:
+  - source: smart
+    context_window: 128000
+    max_output_tokens: 16000
+    targets:
+      - { model: openai/gpt-4o }
+`), &cfg)
+	require.NoError(t, err)
+	require.Len(t, cfg.VirtualModels, 1)
+	require.Equal(t, new(128000), cfg.VirtualModels[0].ContextWindow)
+	require.Equal(t, new(16000), cfg.VirtualModels[0].MaxOutputTokens)
+
+	t.Setenv(envVirtualModels, `[{"source":"smart","context_window":64000,"targets":[{"model":"openai/gpt-4o"}]}]`)
+	err = applyVirtualModelsEnv(&cfg, true)
+	require.NoError(t, err)
+	require.Equal(t, new(64000), cfg.VirtualModels[0].ContextWindow)
+	require.Nil(t, cfg.VirtualModels[0].MaxOutputTokens, "env entry replaces the YAML entry whole")
+}

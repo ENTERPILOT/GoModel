@@ -92,6 +92,8 @@ models:
 #     targets:
 #       - { model: openai/gpt-4o, weight: 2 }
 #       - { model: anthropic/claude-sonnet-4-6 }
+#     # context_window: 128000 # /v1/models token limits; default: the smallest value any target reports
+#     # max_output_tokens: 16000
 #     # session_affinity: true # keep a detected client session on the target that served it
 #     # failover: true # retry a failed request on the remaining targets; false returns the error instead
 #   - source: cheap # always route to the cheapest available target

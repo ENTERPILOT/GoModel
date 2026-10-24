@@ -75,6 +75,10 @@ export function defaultVirtualModelForm() {
     user_paths: "",
     description: "",
     slowdown: "",
+    // Token limits /v1/models lists for a redirect; empty derives each from
+    // the targets (the smallest value any of them reports).
+    context_window: "",
+    max_output_tokens: "",
     enabled: true,
   };
 }
@@ -375,6 +379,22 @@ function weightless(target) {
     : { model: target.model };
 }
 
+// tokenLimitFields returns the configured token limits to persist on a
+// redirect; an empty value is omitted so the backend derives it from the
+// targets.
+function tokenLimitFields(source) {
+  const fields = {};
+  for (const key of ["context_window", "max_output_tokens"]) {
+    const raw = source && source[key];
+    if (raw === "" || raw == null) continue;
+    const value = Number(raw);
+    if (Number.isFinite(value)) {
+      fields[key] = value;
+    }
+  }
+  return fields;
+}
+
 export function normalizeUserPaths(raw) {
   return String(raw || "")
     .split(/\r?\n|,/)
@@ -414,6 +434,7 @@ export function buildVirtualModelSavePayload(form, originalSource, mode) {
     payload.old_source = original;
   }
   if (isRedirect) {
+    Object.assign(payload, tokenLimitFields(form));
     const targets = [];
     if (primaryTarget) {
       targets.push(
@@ -467,6 +488,7 @@ export function buildAliasTogglePayload(alias) {
       payload.slowdown = slowdown;
     }
   }
+  Object.assign(payload, tokenLimitFields(alias));
   const lbTargets = Array.isArray(alias.targets) ? alias.targets : [];
   if (lbTargets.length > 1) {
     payload.strategy = alias.strategy || "round_robin";

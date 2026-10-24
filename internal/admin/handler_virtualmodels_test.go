@@ -335,6 +335,57 @@ func TestUpsertVirtualModelValidatesSlowdown(t *testing.T) {
 	}
 }
 
+func TestUpsertVirtualModelTokenLimits(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        string
+		wantStatus  int
+		wantContext *int
+		wantOutput  *int
+	}{
+		{
+			name:        "redirect with both limits",
+			body:        `{"source":"vm","target_model":"openai/gpt-4o","context_window":128000,"max_output_tokens":16000}`,
+			wantStatus:  http.StatusOK,
+			wantContext: new(128000),
+			wantOutput:  new(16000),
+		},
+		{
+			name:       "redirect deriving limits",
+			body:       `{"source":"vm","target_model":"openai/gpt-4o"}`,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "non-positive limit",
+			body:       `{"source":"vm","target_model":"openai/gpt-4o","context_window":0}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "access policy",
+			body:       `{"source":"openai/gpt-4o","max_output_tokens":1000}`,
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newVMHandler(t)
+			c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", tt.body)
+			err := h.UpsertVirtualModel(c)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+
+			if tt.wantStatus != http.StatusOK {
+				return
+			}
+
+			view := echotest.Decode[virtualmodels.View](t, rec)
+			assert.Equal(t, tt.wantContext, view.ContextWindow)
+			assert.Equal(t, tt.wantOutput, view.MaxOutputTokens)
+		})
+	}
+}
+
 func TestUpsertRedirectVirtualModelReplacesAccessPolicy(t *testing.T) {
 	h := newVMHandler(t, virtualmodels.VirtualModel{
 		Source:       "openai/gpt-4o",
