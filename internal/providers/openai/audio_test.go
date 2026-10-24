@@ -82,8 +82,10 @@ func TestCreateSpeech_Voice(t *testing.T) {
 		want   any // nil => voice omitted upstream
 	}{
 		{name: "native fills default", native: true, voice: "", want: DefaultSpeechVoice},
+		{name: "native fills whitespace voice", native: true, voice: "  ", want: DefaultSpeechVoice},
 		{name: "native keeps voice", native: true, voice: "nova", want: "nova"},
 		{name: "compatible omits blank voice", native: false, voice: "", want: nil},
+		{name: "compatible omits whitespace voice", native: false, voice: "  ", want: nil},
 		{name: "compatible keeps voice", native: false, voice: "Vivian", want: "Vivian"},
 	}
 	for _, tt := range tests {

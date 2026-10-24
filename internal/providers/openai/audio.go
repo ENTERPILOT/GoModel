@@ -49,6 +49,12 @@ func (p *CompatibleProvider) CreateSpeech(ctx context.Context, req *core.AudioSp
 	}
 	// A blank voice is omitted so OpenAI-compatible providers apply their own
 	// default speaker; native OpenAI fills one in first (WithDefaultSpeechVoice).
+	// omitempty drops only "", so clear a whitespace-only voice on a copy.
+	if req.Voice != "" && strings.TrimSpace(req.Voice) == "" {
+		withoutVoice := *req
+		withoutVoice.Voice = ""
+		req = &withoutVoice
+	}
 
 	raw, err := p.client.DoStreamResponse(ctx, p.prepareRequest(llmclient.Request{
 		Method:   http.MethodPost,
