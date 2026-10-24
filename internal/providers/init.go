@@ -33,6 +33,10 @@ type InitResult struct {
 	// map (same keys as Router). Keys match top-level providers YAML names.
 	CredentialResolvedProviders map[string]config.RawProviderConfig
 
+	// apiKeySources lists, per provider, where each of its API keys in
+	// CredentialResolvedProviders was configured; see ExportProviders.
+	apiKeySources map[string][][]string
+
 	// keys swaps rotated API keys into the registered providers; see
 	// PlanKeyRotation.
 	keys *keyRotation
@@ -202,6 +206,7 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 		Cache:                       modelCache,
 		Factory:                     factory,
 		CredentialResolvedProviders: credentialResolved,
+		apiKeySources:               keySourcesByName(providerMap),
 		keys:                        newKeyRotation(sources, discovery, result.Config.Resilience, providerMap, keyrings),
 		stopRefresh:                 stopRefresh,
 	}, nil

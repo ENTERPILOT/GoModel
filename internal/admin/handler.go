@@ -61,6 +61,7 @@ type Handler struct {
 	providerCredentials ProviderCredentialsAdmin
 	requestHealth       RequestHealthSource
 	media               *mediastore.Service
+	configExport        *ConfigExportSource
 	quotaTemplates      bool
 
 	mutationMu sync.Mutex

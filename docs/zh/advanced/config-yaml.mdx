@@ -149,6 +149,48 @@ INFO  providers resolved total=1 from_config_file=0 from_env=1
 参见 [CLI 操作](/zh/advanced/cli#配置重新加载)。如果新文件加载失败，则不会发生任何变化。`server.port` 和 `server.pid_file` 是例外：
 两者在进程生命周期内固定不变，因此重载时会输出警告，并保留当前运行值，直到网关重启。
 
+## 导出生效配置
+
+在控制台中点击 **设置 → 导出配置 → 下载 config.yaml**，即可将所有生效的设置下载为一个
+`config.yaml`，便于审阅、备份或在另一个实例上加载。管理 API 提供同一个文件：
+
+```bash
+curl -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -o gomodel-config.yaml http://localhost:8080/admin/config/export
+```
+
+该文件合并了内置默认值、`config.yaml`、环境变量以及在控制台中管理的对象：提供商、虚拟模型、
+用户、MCP 服务器、预算、速率限制和标签请求头。作为 `config.yaml` 加载后，这些控制台对象会像其他
+声明的对象一样在控制台中变为只读。
+
+文件中绝不会写入任何密钥。每个密钥都以其来源的形式出现：
+
+| 配置方式 | 导出为 |
+| -------- | ------ |
+| [密钥引用](/zh/advanced/secret-references)（`${file:/run/secrets/openai}`、`${vault:...}`） | 相同的引用 |
+| 环境变量（`OPENAI_API_KEY=sk-...`） | `${env:OPENAI_API_KEY}` |
+| 字面值（写在 `config.yaml` 中或在控制台中输入） | `${env:NAME}`，并附带 `# secret not exported: set NAME` 注释 |
+
+```yaml
+server:
+  master_key: "${env:GOMODEL_MASTER_KEY}"
+providers:
+  groq:
+    type: groq
+    api_key: "${env:GOMODEL_PROVIDERS_GROQ_API_KEY}" # secret not exported: set GOMODEL_PROVIDERS_GROQ_API_KEY
+```
+
+带有此类注释的文件在设置该变量之前无法启动，因此绝不会以空的主密钥或凭据运行。密钥包括 API 密钥、
+主密钥和加密密钥、MCP 与 OpenTelemetry 请求头、URL 中的密码，以及插件标记为机密的插件设置。在
+`extensions:` 和插件设置中，任何位于表示凭据的键（`token`、`api_key`、`password` 等）下的字符串
+也视为密钥。
+
+以下内容没有 `config.yaml` 形式，会在文件头部列为未导出：托管 API 密钥、工作流、模型价格覆盖、
+运行时设置、已禁用的控制台提供商，以及在控制台中创建的护栏（它们只在引用它们的工作流中运行，而
+`guardrails.rules` 会把每条规则添加到默认工作流）。
+
+导出需要不受范围限制的管理员凭据。
+
 ## Docker
 
 GoModel 会先读取 `config/config.yaml`，然后读取 `config.yaml`。

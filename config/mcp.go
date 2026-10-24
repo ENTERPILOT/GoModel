@@ -116,7 +116,7 @@ func OriginHost(normalizedOrigin string) string {
 // MCPServerConfig declares one upstream MCP server.
 type MCPServerConfig struct {
 	// URL is the upstream MCP endpoint for http/sse transports.
-	URL string `yaml:"url,omitempty" json:"url,omitempty"`
+	URL string `yaml:"url,omitempty" json:"url,omitempty" export:"url"`
 
 	// Transport selects the upstream transport: "http" (streamable HTTP,
 	// default), "sse" (legacy HTTP+SSE), or "stdio" (spawned subprocess).
@@ -125,7 +125,7 @@ type MCPServerConfig struct {
 	// Headers are sent verbatim on every upstream request (http/sse). Values
 	// support ${ENV} expansion via the standard config pipeline. This is the
 	// credential boundary: client bearer tokens are never forwarded upstream.
-	Headers map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+	Headers map[string]string `yaml:"headers,omitempty" json:"headers,omitempty" export:"secret"`
 
 	// Command, Args, and Env launch a stdio server as a subprocess. Stdio
 	// servers are deliberately declarative-only: the admin API and dashboard
@@ -133,7 +133,7 @@ type MCPServerConfig struct {
 	// code execution vector.
 	Command string            `yaml:"command,omitempty" json:"command,omitempty"`
 	Args    []string          `yaml:"args,omitempty" json:"args,omitempty"`
-	Env     map[string]string `yaml:"env,omitempty" json:"env,omitempty"`
+	Env     map[string]string `yaml:"env,omitempty" json:"env,omitempty" export:"secret"`
 
 	// Description is an optional human-readable note.
 	Description string `yaml:"description,omitempty" json:"description,omitempty"`

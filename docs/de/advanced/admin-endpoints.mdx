@@ -706,6 +706,13 @@ wird bei Bedarf aufgelöst.
 Gibt `400` zurück, wenn ein Parameter fehlt, und `404`, wenn das Modell nicht
 registriert ist.
 
+### GET /admin/config/export
+
+Gibt die effektive Konfiguration als `config.yaml`-Download
+(`gomodel-config.yaml`) zurück, jedes Secret als Referenz statt als Wert. Siehe
+[Effektive Konfiguration exportieren](/de/advanced/config-yaml#effektive-konfiguration-exportieren).
+Erfordert eine Zugangsangabe ohne Scope.
+
 ### Plugin-, Guardrail- und Workflow-Endpunkte
 
 | Methode | Pfad | Beschreibung |

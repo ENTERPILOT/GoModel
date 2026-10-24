@@ -26,6 +26,7 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/runtime/config", h.DashboardConfig)
 	g.GET("/runtime/settings", h.RuntimeSettings, global)
 	g.PUT("/runtime/settings/:key", h.UpdateRuntimeSetting, global)
+	g.GET("/config/export", h.ExportConfig, global)
 	g.GET("/cache/overview", h.CacheOverview, global)
 	g.GET("/live/logs", h.LiveLogs, global)
 

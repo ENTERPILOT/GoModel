@@ -118,6 +118,12 @@
   gap: 10px;
 }
 
+.config-export-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+
 .settings-refresh-section h3 {
   font-size: 18px;
 }

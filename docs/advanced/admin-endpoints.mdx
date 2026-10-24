@@ -707,6 +707,13 @@ is resolved on demand.
 Returns `400` when a parameter is missing and `404` when the model is not
 registered.
 
+### GET /admin/config/export
+
+Returns the effective configuration as a `config.yaml` download
+(`gomodel-config.yaml`), with every secret written as a reference instead of its
+value. See [Exporting the effective configuration](/advanced/config-yaml#exporting-the-effective-configuration).
+Requires an unscoped credential.
+
 ### Plugin, guardrail, and workflow endpoints
 
 | Method | Path | Description |

@@ -208,6 +208,57 @@ Ausnahmen: Beide sind für die Lebensdauer des Prozesses festgelegt, daher
 protokolliert ein Reload eine Warnung und behält die laufenden Werte bei, bis
 das Gateway neu gestartet wird.
 
+## Effektive Konfiguration exportieren
+
+**Einstellungen → Konfigurationsexport → config.yaml herunterladen** im
+Dashboard lädt jede aktive Einstellung als eine `config.yaml` herunter, bereit
+zum Prüfen, Sichern oder Laden auf einer anderen Instanz. Die Admin-API liefert
+dieselbe Datei:
+
+```bash
+curl -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -o gomodel-config.yaml http://localhost:8080/admin/config/export
+```
+
+Die Datei vereint eingebaute Standardwerte, `config.yaml`, Umgebungsvariablen
+und die im Dashboard verwalteten Objekte: Provider, virtuelle Modelle, Benutzer,
+MCP-Server, Budgets, Rate Limits und Tagging-Header. Als `config.yaml` geladen,
+sind diese Dashboard-Objekte im Dashboard schreibgeschützt, wie jedes andere
+deklarierte Objekt.
+
+Kein Secret wird je geschrieben. Jedes erscheint als seine Herkunft:
+
+| Konfiguriert als | Exportiert als |
+| ---------------- | -------------- |
+| Eine [Secret-Referenz](/de/advanced/secret-references) (`${file:/run/secrets/openai}`, `${vault:...}`) | Dieselbe Referenz |
+| Eine Umgebungsvariable (`OPENAI_API_KEY=sk-...`) | `${env:OPENAI_API_KEY}` |
+| Ein Literalwert (in `config.yaml` oder im Dashboard eingegeben) | `${env:NAME}` mit einem Kommentar `# secret not exported: set NAME` |
+
+```yaml
+server:
+  master_key: "${env:GOMODEL_MASTER_KEY}"
+providers:
+  groq:
+    type: groq
+    api_key: "${env:GOMODEL_PROVIDERS_GROQ_API_KEY}" # secret not exported: set GOMODEL_PROVIDERS_GROQ_API_KEY
+```
+
+Eine Datei mit einem solchen Kommentar startet erst, wenn die Variable gesetzt
+ist, und läuft so nie mit leerem Master-Key oder leerer Zugangsangabe. Secrets
+sind API-Keys, Master- und Verschlüsselungsschlüssel, MCP- und
+OpenTelemetry-Header, Passwörter in URLs und Plugin-Einstellungen, die das
+Plugin als geheim markiert. In `extensions:` und Plugin-Einstellungen zählt
+außerdem jeder String unter einem Schlüssel, der eine Zugangsangabe benennt
+(`token`, `api_key`, `password`, ...).
+
+Ohne `config.yaml`-Form und daher im Dateikopf als nicht exportiert aufgeführt:
+verwaltete API-Keys, Workflows, Modellpreis-Overrides, Laufzeiteinstellungen,
+deaktivierte Dashboard-Provider und im Dashboard erstellte Guardrails (sie
+laufen nur in den Workflows, die sie nennen, während `guardrails.rules` jede
+Regel dem Standard-Workflow hinzufügt).
+
+Der Export erfordert eine Admin-Zugangsangabe ohne Scope.
+
 ## Docker
 
 GoModel liest zuerst `config/config.yaml`, dann `config.yaml`.

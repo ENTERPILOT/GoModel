@@ -36,12 +36,12 @@ type LocalCacheConfig struct {
 // ModelListConfig holds configuration for fetching the external model metadata registry.
 type ModelListConfig struct {
 	// URL is the HTTP(S) URL to fetch models.json from (empty = disabled)
-	URL string `yaml:"url" env:"MODEL_LIST_URL"`
+	URL string `yaml:"url" env:"MODEL_LIST_URL" export:"url"`
 }
 
 // RedisModelConfig holds Redis connection configuration for the model registry cache.
 type RedisModelConfig struct {
-	URL string `yaml:"url" env:"REDIS_URL"`
+	URL string `yaml:"url" env:"REDIS_URL" export:"url"`
 	Key string `yaml:"key" env:"REDIS_KEY_MODELS"`
 	TTL int    `yaml:"ttl" env:"REDIS_TTL_MODELS"`
 }
@@ -53,7 +53,7 @@ type RedisModelConfig struct {
 // Env vars are applied in Load via applyResponseSimpleEnv, only when cache.response.simple is present
 // (see RESPONSE_CACHE_SIMPLE_ENABLED for env-only opt-in without YAML).
 type RedisResponseConfig struct {
-	URL string `yaml:"url"`
+	URL string `yaml:"url" export:"url"`
 	Key string `yaml:"key"`
 	TTL int    `yaml:"ttl"`
 }
@@ -108,31 +108,31 @@ type VectorStoreConfig struct {
 
 // QdrantConfig holds connection configuration for the Qdrant vector store.
 type QdrantConfig struct {
-	URL        string `yaml:"url"`
+	URL        string `yaml:"url" export:"url"`
 	Collection string `yaml:"collection"`
-	APIKey     string `yaml:"api_key"`
+	APIKey     string `yaml:"api_key" export:"secret"`
 }
 
 // PGVectorConfig holds connection configuration for the pgvector vector store.
 type PGVectorConfig struct {
-	URL       string `yaml:"url"`
+	URL       string `yaml:"url" export:"url"`
 	Table     string `yaml:"table"`
 	Dimension int    `yaml:"dimension"`
 }
 
 // PineconeConfig holds connection configuration for Pinecone (data-plane HTTP API).
 type PineconeConfig struct {
-	Host      string `yaml:"host"`
-	APIKey    string `yaml:"api_key"`
+	Host      string `yaml:"host" export:"url"`
+	APIKey    string `yaml:"api_key" export:"secret"`
 	Namespace string `yaml:"namespace"`
 	Dimension int    `yaml:"dimension"`
 }
 
 // WeaviateConfig holds connection configuration for Weaviate.
 type WeaviateConfig struct {
-	URL    string `yaml:"url"`
+	URL    string `yaml:"url" export:"url"`
 	Class  string `yaml:"class"`
-	APIKey string `yaml:"api_key"`
+	APIKey string `yaml:"api_key" export:"secret"`
 }
 
 // ValidateCacheConfig validates the cache configuration in c.

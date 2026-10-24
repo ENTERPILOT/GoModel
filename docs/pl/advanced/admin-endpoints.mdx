@@ -705,6 +705,13 @@ jest rozwiązywany na żądanie.
 Zwraca `400`, gdy brakuje parametru, i `404`, gdy model nie jest
 zarejestrowany.
 
+### GET /admin/config/export
+
+Zwraca efektywną konfigurację jako plik `config.yaml` do pobrania
+(`gomodel-config.yaml`), z każdym sekretem zapisanym jako referencja zamiast
+wartości. Zobacz [Eksport efektywnej konfiguracji](/pl/advanced/config-yaml#eksport-efektywnej-konfiguracji).
+Wymaga poświadczenia bez zakresu (scope).
+
 ### Endpointy pluginów, guardrails i workflow
 
 | Metoda | Ścieżka | Opis |

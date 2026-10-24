@@ -1412,6 +1412,89 @@
         }
       }
     },
+    "/admin/config/export": {
+      "get": {
+        "description": "Returns every setting in effect, from defaults, config.yaml, environment variables, and objects managed in the dashboard, as a config.yaml document. No secret is included: a secret is written as the reference it was configured with (${env:...}, ${file:...}, ${vault:...}) or as ${env:NAME}, with a comment naming the variable to set.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Export the effective configuration as config.yaml",
+        "responses": {
+          "200": {
+            "description": "config.yaml document",
+            "content": {
+              "application/yaml": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/config/export",
+            "title": "Export the effective configuration as config.yaml",
+            "description": "GoModel API reference for GET /admin/config/export: Export the effective configuration as config.yaml."
+          }
+        }
+      }
+    },
     "/admin/mcp-servers": {
       "get": {
         "tags": [
