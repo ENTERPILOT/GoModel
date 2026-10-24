@@ -9462,6 +9462,10 @@ const docTemplate = `{
                 "old_source": {
                     "type": "string"
                 },
+                "reasoning_effort": {
+                    "description": "ReasoningEffort forces the reasoning effort sent upstream (\"none\",\n\"minimal\", \"low\", \"medium\", \"high\", \"xhigh\", or \"max\"); empty keeps the\nclient's value.",
+                    "type": "string"
+                },
                 "session_affinity": {
                     "description": "SessionAffinity keeps a detected session on the target that served it\nbefore. Omitted means enabled; false restores stateless balancing.",
                     "type": "boolean"
@@ -13403,6 +13407,9 @@ const docTemplate = `{
                 "provider_type": {
                     "type": "string"
                 },
+                "reasoning_effort": {
+                    "type": "string"
+                },
                 "resolved_model": {
                     "type": "string"
                 },
@@ -13473,6 +13480,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "provider_name": {
+                    "type": "string"
+                },
+                "reasoning_effort": {
+                    "description": "ReasoningEffort, when set, replaces the reasoning effort of every\nrequest sent upstream through this redirect or to this model, whatever\nthe client asked for. Empty leaves the client's value untouched.",
                     "type": "string"
                 },
                 "session_affinity": {

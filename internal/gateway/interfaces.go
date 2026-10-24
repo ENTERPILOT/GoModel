@@ -28,6 +28,14 @@ type ModelSlowdownResolver interface {
 	ResolveSlowdown(context.Context, core.RequestedModelSelector, core.ModelSelector) float64
 }
 
+// ModelReasoningEffortResolver optionally resolves an operator-forced
+// reasoning effort for one provider attempt: requested is the client's
+// selector and attempt the concrete model the attempt goes to. An empty result
+// keeps the client's value. The context carries the effective user path.
+type ModelReasoningEffortResolver interface {
+	ResolveReasoningEffort(ctx context.Context, requested core.RequestedModelSelector, attempt core.ModelSelector) string
+}
+
 // FailoverResolver resolves alternate concrete model selectors for a translated
 // request after the primary selector has already been resolved.
 type FailoverResolver interface {

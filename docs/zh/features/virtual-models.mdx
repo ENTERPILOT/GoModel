@@ -25,7 +25,7 @@ keywords: ["虚拟模型", "模型别名", "负载均衡", "模型路由", "模�
 即创建重定向；留空则在 **Source** 选择器上创建访问策略。
 
 无论是从控制台还是通过 Admin API 保存，GoModel 都不会持久化空的、无效的访问策略。如果一条已保存的
-策略没有目标、用户路径、描述或减速设置，且其启用状态与继承的或默认的访问状态一致，GoModel 会删除
+策略没有目标、用户路径、描述、减速或推理强度设置，且其启用状态与继承的或默认的访问状态一致，GoModel 会删除
 所存储的记录。如果某条原本为空的策略仍然覆盖了被禁用的默认值或继承的用户路径限制，GoModel 会保留它。
 
 ## 添加人为的模型延迟
@@ -41,6 +41,25 @@ GoModel 会在后台读取上游数据，并按缩放后的时间线释放读取
 
 当别名及其具体目标都设置了减速时，以别名的值为准。没有自己的值的别名会继承所选目标模型的减速；
 将别名设置为 `0` 可覆盖这种继承。这同样适用于选定目标之后的负载均衡虚拟模型。
+
+## 强制推理强度
+
+在具体模型或重定向上设置 **Reasoning effort override**，即可无论客户端请求什么，都向上游发送该推理强度。当模型只接受部分级别（例如拒绝 `high` 的自托管模型），或需要固定某个模型的成本和延迟时使用。可选值为 `none`、`minimal`、`low`、`medium`、`high`、`xhigh` 和 `max`；留空（默认）则保留客户端的值。
+
+```yaml
+virtual_models:
+  - source: hetzner/qwen3.8 # 具体模型
+    reasoning_effort: medium
+  - source: team-model # 负载均衡器
+    reasoning_effort: high
+    targets:
+      - { model: openai/gpt-5.2 }
+      - { model: hetzner/qwen3.8 }
+```
+
+该覆盖会同时替换 `reasoning.effort` 和扁平的 `reasoning_effort` 字段，即使客户端未发送推理强度也会生效。随后 GoModel 会像处理客户端的值一样，将其转换为各提供商自己的推理参数。
+
+每次尝试都以配置最深的值为准。具体模型的覆盖优先于其上方的任何重定向，内层[链式](#链式虚拟模型)虚拟模型优先于外层。在上面的示例中，`team-model` 向 `openai/gpt-5.2` 发送 `high`，向 `hetzner/qwen3.8` 发送 `medium`，即使通过故障转移到达也是如此。该功能适用于 Chat Completions、Responses API 和 Anthropic Messages API；批处理和提供商直通不会被改写。
 
 本页其余部分介绍重定向。
 
@@ -213,7 +232,7 @@ VIRTUAL_MODELS=[{"source":"smart","strategy":"cost","targets":[{"model":"openai/
 每个条目接受 `source`、单个 `target`（简写）或 `targets` 列表、`strategy`（`round_robin`、`cost` 或
 `failover`）、`session_affinity`（默认 `true`；参见[会话保持](/zh/features/session-keeping)）、
 `failover`（默认 `true`；参见[故障转移](/zh/features/failover)）、`user_paths`、`description`、
-`slowdown`（`0` 表示禁用继承的减速；有效系数范围为 `0.1` 到 `10`）以及 `enabled`。
+`slowdown`（`0` 表示禁用继承的减速；有效系数范围为 `0.1` 到 `10`）、`reasoning_effort`（参见[强制推理强度](#强制推理强度)）以及 `enabled`。
 目标的 `model` 可以指定另一个已声明的虚拟模型（参见[链式虚拟模型](#链式虚拟模型)）。
 将目标留空即可在 `source` 选择器上声明访问策略。无效的声明（未知策略、缺失或自引用的目标、链中存在循环或链深度
 超过 8 个虚拟模型，或目标的 `provider` 与任何已配置的提供商都不匹配，即拼写错误）会导致启动失败，
