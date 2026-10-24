@@ -60,6 +60,14 @@ und [Usage API](/de/advanced/usage-api).
 | `/v1/batches/{id}/cancel`         | POST   | Einen ausstehenden Batch abbrechen                                                                                       |
 | `/v1/batches/{id}/results`        | GET    | Native Batch-Ergebnisse abrufen, sofern verfügbar                                                                 |
 
+Jedes Batch-Item, ob inline oder als Zeile der Eingabedatei, muss per `POST`
+an `/v1/chat/completions`, `/v1/responses` oder `/v1/embeddings` gehen (die
+unversionierten Azure-Formen wie `/chat/completions` funktionieren ebenfalls),
+damit das Gateway Modellzugriff und Guardrails prüfen kann, bevor der Provider
+es ausführt. Jedes andere Item wird mit `400` abgelehnt, ebenso ein Item, dessen
+JSON einen Schlüssel wiederholt oder dessen Body Schlüssel auf oberster Ebene
+enthält, die sich nur in der Groß-/Kleinschreibung unterscheiden.
+
 ### Realtime-Übersetzungs-Sessions
 
 Sprachübersetzungsmodelle (OpenAI `gpt-realtime-translate`) laufen auf einer eigenen

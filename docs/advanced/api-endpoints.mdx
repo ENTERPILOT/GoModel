@@ -60,6 +60,13 @@ and [Usage API](/advanced/usage-api).
 | `/v1/batches/{id}/cancel`         | POST   | Cancel a pending batch                                                                                       |
 | `/v1/batches/{id}/results`        | GET    | Retrieve native batch results when available                                                                 |
 
+Every batch item, inline or a line of the input file, must `POST` to
+`/v1/chat/completions`, `/v1/responses`, or `/v1/embeddings` (the unversioned
+Azure forms such as `/chat/completions` work too), so the gateway can check
+its model access and guardrails before the provider runs it. Any other item is
+rejected with `400`, as is an item whose JSON repeats a key or whose body has
+top-level keys that differ only in case.
+
 ### Realtime translation sessions
 
 Speech translation models (OpenAI `gpt-realtime-translate`) run on their own
