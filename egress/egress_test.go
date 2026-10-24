@@ -5,13 +5,14 @@ import (
 	"errors"
 	"net"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDialContextUsesTheInstalledHook(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer listener.Close()
 	// Cleanup goes through the handles the test holds, the way any other
 	// owner removes a hook - never by reaching into the package's state.
@@ -24,13 +25,9 @@ func TestDialContextUsesTheInstalledHook(t *testing.T) {
 
 	// Without a hook the default dialer connects.
 	conn, err := DialContext(context.Background(), "tcp", listener.Addr().String())
-	if err != nil {
-		t.Fatalf("default dialer: %v", err)
-	}
+	require.NoError(t, err, "default dialer")
 	conn.Close()
-	if Installed() {
-		t.Fatal("no hook is installed yet")
-	}
+	require.False(t, Installed(), "no hook is installed yet")
 
 	// With one, every connection goes through it - including the ones opened
 	// through the Dialer adapter.
@@ -40,56 +37,37 @@ func TestDialContextUsesTheInstalledHook(t *testing.T) {
 		dialed = append(dialed, address)
 		return nil, refused
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	held = append(held, hook)
-	if !Installed() {
-		t.Fatal("Installed must report the hook")
-	}
-	if _, err := DialContext(context.Background(), "tcp", "db.example.com:5432"); !errors.Is(err, refused) {
-		t.Fatalf("hook error = %v, want the hook's refusal", err)
-	}
-	if _, err := (Dialer{}).DialContext(context.Background(), "tcp", "cache.example.com:6379"); !errors.Is(err, refused) {
-		t.Fatalf("adapter error = %v, want the hook's refusal", err)
-	}
-	if len(dialed) != 2 || dialed[0] != "db.example.com:5432" || dialed[1] != "cache.example.com:6379" {
-		t.Fatalf("hook saw %v", dialed)
-	}
+	require.True(t, Installed(), "Installed must report the hook")
+	_, err = DialContext(context.Background(), "tcp", "db.example.com:5432")
+	require.ErrorIs(t, err, refused, "hook error must be the hook's refusal")
+	_, err = (Dialer{}).DialContext(context.Background(), "tcp", "cache.example.com:6379")
+	require.ErrorIs(t, err, refused, "adapter error must be the hook's refusal")
+	require.Equal(t, []string{"db.example.com:5432", "cache.example.com:6379"}, dialed)
 
 	// A second hook is refused rather than silently replacing the first: the
 	// policy belongs to whoever composed the process.
-	if _, err := Install(func(context.Context, string, string) (net.Conn, error) { return nil, nil }); err == nil {
-		t.Fatal("installing over an existing hook must be an error")
-	}
-	if _, err := DialContext(context.Background(), "tcp", "db.example.com:5432"); !errors.Is(err, refused) {
-		t.Fatalf("the first hook must still be in force, got %v", err)
-	}
-	if _, err := Install(nil); err == nil {
-		t.Fatal("a nil dial must be an error; the handle removes a hook")
-	}
+	_, err = Install(func(context.Context, string, string) (net.Conn, error) { return nil, nil })
+	require.Error(t, err, "installing over an existing hook must be an error")
+	_, err = DialContext(context.Background(), "tcp", "db.example.com:5432")
+	require.ErrorIs(t, err, refused, "the first hook must still be in force")
+	_, err = Install(nil)
+	require.Error(t, err, "a nil dial must be an error; the handle removes a hook")
 
 	// The handle its owner holds restores the default dialer, and says so
 	// only once: a stale handle must not remove a policy someone else
 	// installed afterwards.
 	hook.Uninstall()
-	if Installed() {
-		t.Fatal("the handle must remove the hook")
-	}
+	require.False(t, Installed(), "the handle must remove the hook")
 	replacement, err := Install(func(context.Context, string, string) (net.Conn, error) { return nil, refused })
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	held = append(held, replacement)
 	hook.Uninstall()
-	if !Installed() {
-		t.Fatal("a stale handle must not remove the current hook")
-	}
+	require.True(t, Installed(), "a stale handle must not remove the current hook")
 	replacement.Uninstall()
 	conn, err = DialContext(context.Background(), "tcp", listener.Addr().String())
-	if err != nil {
-		t.Fatalf("default dialer after removal: %v", err)
-	}
+	require.NoError(t, err, "default dialer after removal")
 	conn.Close()
 }
 
@@ -103,24 +81,14 @@ func TestLookupFollowsTheHookAtCallTime(t *testing.T) {
 
 	// A client constructed with no hook installed.
 	got, err := Lookup(context.Background(), "db.internal", resolve)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 || got[0] != "10.0.0.4" {
-		t.Fatalf("without a hook the client's own resolver answers, got %v", got)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, []string{"10.0.0.4"}, got, "without a hook the client's own resolver answers")
 
 	// The hook arrives afterwards; the same client must now hand it the name.
 	hook, err := Install(func(context.Context, string, string) (net.Conn, error) { return nil, nil })
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	t.Cleanup(hook.Uninstall)
 	got, err = Lookup(context.Background(), "db.internal", resolve)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 || got[0] != "db.internal" {
-		t.Fatalf("a hook installed later must still see the hostname, got %v", got)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, []string{"db.internal"}, got, "a hook installed later must still see the hostname")
 }

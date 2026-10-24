@@ -6,6 +6,9 @@ import (
 	"net"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/enterpilot/gomodel/egress"
 )
 
@@ -15,13 +18,10 @@ import (
 // asked at all, and with the address the URL names.
 func TestPostgreSQLDialsThroughTheEgressHook(t *testing.T) {
 	address, restore := recordDials(t)
-	if _, err := NewPostgreSQL(context.Background(), PostgreSQLConfig{URL: "postgres://user:pw@db.example.com:5432/gomodel"}); err == nil {
-		t.Fatal("expected the refused dial to fail the connection")
-	}
+	_, err := NewPostgreSQL(context.Background(), PostgreSQLConfig{URL: "postgres://user:pw@db.example.com:5432/gomodel"})
 	restore()
-	if *address != "db.example.com:5432" {
-		t.Fatalf("hook saw %q, want the configured database address", *address)
-	}
+	require.Error(t, err, "expected the refused dial to fail the connection")
+	assert.Equal(t, "db.example.com:5432", *address, "hook must see the configured database address")
 }
 
 func TestMongoDBDialsThroughTheEgressHook(t *testing.T) {
@@ -30,12 +30,8 @@ func TestMongoDBDialsThroughTheEgressHook(t *testing.T) {
 		URL: "mongodb://db.example.com:27017/gomodel?serverSelectionTimeoutMS=200&connectTimeoutMS=200",
 	})
 	restore()
-	if err == nil {
-		t.Fatal("expected the refused dial to fail the connection")
-	}
-	if *address != "db.example.com:27017" {
-		t.Fatalf("hook saw %q, want the configured database address", *address)
-	}
+	require.Error(t, err, "expected the refused dial to fail the connection")
+	assert.Equal(t, "db.example.com:27017", *address, "hook must see the configured database address")
 }
 
 // recordDials installs a hook that refuses every connection and records the
@@ -49,9 +45,7 @@ func recordDials(t *testing.T) (*string, func()) {
 		address = addr
 		return nil, errors.New("refused by the test hook")
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	removed := false
 	remove := func() {
 		if !removed {

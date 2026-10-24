@@ -6,6 +6,9 @@ import (
 	"net"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/egress"
 )
@@ -20,18 +23,13 @@ func TestPGVectorStoreDialsThroughTheEgressHook(t *testing.T) {
 		address = addr
 		return nil, errors.New("refused by the test hook")
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer hook.Uninstall()
 
-	if _, err := newPGVectorStore(config.PGVectorConfig{
+	_, err = newPGVectorStore(config.PGVectorConfig{
 		URL:       "postgres://user:pw@vectors.example.com:5432/gomodel",
 		Dimension: 8,
-	}); err == nil {
-		t.Fatal("expected the refused dial to fail the store")
-	}
-	if address != "vectors.example.com:5432" {
-		t.Fatalf("hook saw %q, want the configured vector store address", address)
-	}
+	})
+	require.Error(t, err, "expected the refused dial to fail the store")
+	assert.Equal(t, "vectors.example.com:5432", address, "hook must see the configured vector store address")
 }

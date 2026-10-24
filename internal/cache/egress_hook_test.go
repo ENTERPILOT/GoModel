@@ -6,6 +6,9 @@ import (
 	"net"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/enterpilot/gomodel/egress"
 )
 
@@ -19,15 +22,10 @@ func TestRedisStoreDialsThroughTheEgressHook(t *testing.T) {
 		address = addr
 		return nil, errors.New("refused by the test hook")
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer hook.Uninstall()
 
-	if _, err := NewRedisStore(RedisStoreConfig{URL: "redis://cache.example.com:6379/0"}); err == nil {
-		t.Fatal("expected the refused dial to fail the connection")
-	}
-	if address != "cache.example.com:6379" {
-		t.Fatalf("hook saw %q, want the configured cache address", address)
-	}
+	_, err = NewRedisStore(RedisStoreConfig{URL: "redis://cache.example.com:6379/0"})
+	require.Error(t, err, "expected the refused dial to fail the connection")
+	assert.Equal(t, "cache.example.com:6379", address, "hook must see the configured cache address")
 }
