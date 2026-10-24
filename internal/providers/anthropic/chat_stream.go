@@ -83,11 +83,11 @@ func anthropicChatUsagePayload(usage *anthropicUsage) map[string]any {
 	}
 
 	payload := map[string]any{
-		"prompt_tokens":     usage.InputTokens,
+		"prompt_tokens":     usage.promptTokens(),
 		"completion_tokens": usage.OutputTokens,
-		"total_tokens":      usage.InputTokens + usage.OutputTokens,
+		"total_tokens":      usage.promptTokens() + usage.OutputTokens,
 	}
-	addAnthropicUsagePayloadDetails(payload, usage, "completion_tokens_details")
+	addAnthropicUsagePayloadDetails(payload, usage, "prompt_tokens_details", "completion_tokens_details")
 	return payload
 }
 
