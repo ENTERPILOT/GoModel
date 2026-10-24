@@ -2,7 +2,7 @@
 title: "Kostenerfassung"
 description: "Wie GoModel die Kosten von Requests schätzt, woher die Preise stammen, wie Sie sie überschreiben und wie Sie gespeicherte Kosten neu berechnen."
 icon: "calculator"
-keywords: ["Kostenerfassung", "cost tracking", "LLM-Kosten", "LLM cost", "Token-Preise", "token pricing", "Ausgaben", "spend", "Preis-Override", "Kostenschätzung"]
+keywords: ["Kostenerfassung", "cost tracking", "LLM-Kosten", "LLM cost", "Token-Preise", "token pricing", "Ausgaben", "spend", "Preis-Override", "Kostenschätzung", "Aufschlag", "markup", "Weiterberechnung", "chargeback", "abgerechnete Kosten", "billed cost"]
 ---
 
 GoModel schätzt die Kosten jedes erfassten Requests anhand der Modellpreise und zeigt die Summen im Dashboard an.
@@ -101,6 +101,28 @@ Die Preise sind ein Teil einer umfassenderen Metadaten-Pipeline, die auch Kontex
 
 Overrides gelten für neue Requests. Um bereits ausgeführte Requests neu zu bepreisen, berechnen Sie sie neu.
 
+## Aufschläge und abgerechnete Kosten
+
+Legen Sie einen Aufschlag fest, wenn Sie Modellzugriff weiterverkaufen, zum Beispiel um Kunden die von ihnen verbrauchten Tokens weiterzuberechnen. GoModel erfasst für jeden Request die **abgerechneten Kosten** (`billed_cost` in der Nutzungszeile): die Provider-Kosten plus Aufschlag. Die Provider-Kosten selbst ändern sich nie, sodass Budgets, Dashboard-Summen und Einsparungen weiterhin messen, was Sie upstream bezahlen.
+
+Aufschläge sind Prozentwerte, die in `config.yaml` festgelegt werden. Ohne konfigurierte Aufschläge (Standard) entsprechen die abgerechneten Kosten den Provider-Kosten.
+
+```yaml
+pricing:
+  bill_cache_hits: true # env: PRICING_BILL_CACHE_HITS; Standard true
+  markups:
+    "/": 15                         # alle Modelle
+    "openai/": 10                   # eine Provider-Instanz
+    "gpt-5": 20                     # ein Modell bei jedem Provider
+    "anthropic/claude-opus-4-1": 25 # ein Modell bei einem Provider
+```
+
+Der spezifischste Selektor gewinnt, in dieser Reihenfolge: Provider/Modell, Modell, Provider, global. Aufschläge werden nie addiert. Ein Provider-Selektor benennt die konfigurierte Instanz (den Schlüssel unter `providers`); ein unbekannter Provider lässt den Start fehlschlagen. Ein Aufschlag von 20 % berechnet $1.20 für $1.00 Provider-Kosten – eine Marge von 16.7 %.
+
+`bill_cache_hits` legt fest, wie Antworten aus dem Response-Cache von GoModel abgerechnet werden. `true` berechnet jeden Cache-Treffer zu dem, was derselbe Aufruf zum Zeitpunkt des Treffers kosten würde – aktuelle Preise und tageszeitabhängige Tarife – plus Aufschlag; `false` berechnet sie mit $0, auch wenn ihre Kosten unbekannt sind. Provider-Prompt-Caching (gecachte Input-Tokens) ist echter Provider-Aufwand und wird immer abgerechnet.
+
+Jede Nutzungszeile speichert außerdem den Aufschlag, zu dem sie abgerechnet wurde (`markup_percent`, `markup_selector`), sodass geänderte Aufschläge vergangene Abrechnungen nie umschreiben.
+
 ## Summen im Dashboard
 
 - **Estimated Cost** – Ausgaben für Live-Requests an Provider; Cache-Treffer sind ausgenommen.
@@ -111,6 +133,8 @@ Ein Wert `---` bedeutet, dass die Kosten unbekannt sind, weil keine Preise verf�
 ## Gespeicherte Kosten neu berechnen
 
 Die Neuberechnung ermittelt die gespeicherten Kosten der passenden Nutzungszeilen anhand der aktuellen Preise neu. Verwenden Sie sie nach der Änderung eines Overrides oder wenn zum Zeitpunkt eines Requests keine Preise verfügbar waren. Die Aktion ist standardmäßig aktiviert (`USAGE_PRICING_RECALCULATION_ENABLED`); wählen Sie in der Nutzungsansicht **Recalculate** und geben Sie dann zur Bestätigung `recalculate` ein. Sie ist auf den ausgewählten Datumsbereich, Provider oder das Modell sowie den User Path beschränkt.
+
+Die Neuberechnung bepreist die abgerechneten Kosten mit dem Aufschlag neu, zu dem jede Zeile abgerechnet wurde, und rechnet Cache-Treffer gemäß dem aktuellen `bill_cache_hits` ab. Zeilen, die vor der Einführung von Aufschlägen erfasst wurden, werden zu ihren Provider-Kosten abgerechnet.
 
 <Warning>
   Die Neuberechnung **überschreibt** die Kostenfelder jeder passenden Zeile und

@@ -2,7 +2,7 @@
 title: "Śledzenie kosztów"
 description: "Jak GoModel szacuje koszty requestów, skąd pochodzi cennik, jak go nadpisać i jak przeliczyć zapisane koszty."
 icon: "calculator"
-keywords: ["śledzenie kosztów", "koszt LLM", "cennik tokenów", "wydatki", "nadpisanie cennika", "szacowanie kosztów", "cost tracking", "LLM cost", "token pricing", "spend", "pricing override", "cost estimate"]
+keywords: ["śledzenie kosztów", "koszt LLM", "cennik tokenów", "wydatki", "nadpisanie cennika", "szacowanie kosztów", "cost tracking", "LLM cost", "token pricing", "spend", "pricing override", "cost estimate", "narzut", "refakturowanie", "koszt rozliczeniowy", "markup", "chargeback", "billed cost"]
 ---
 
 GoModel szacuje koszt każdego śledzonego requestu na podstawie cennika modelu i pokazuje sumy w dashboardzie.
@@ -98,6 +98,28 @@ Nadpisz cennik, gdy cena z katalogu jest błędna, jej brakuje albo różni się
 
 Nadpisania dotyczą nowych requestów. Aby ponownie wycenić requesty, które już zostały wykonane, przelicz je.
 
+## Narzuty i koszt rozliczeniowy
+
+Ustaw narzut, gdy odsprzedajesz dostęp do modeli, na przykład żeby refakturować klientom zużyte przez nich tokeny. GoModel zapisuje dla każdego requestu **koszt rozliczeniowy** (`billed_cost` w wierszu użycia): koszt providera plus narzut. Sam koszt providera nigdy się nie zmienia, więc budżety, sumy w dashboardzie i oszczędności nadal mierzą to, co płacisz upstream.
+
+Narzuty to wartości procentowe ustawiane w `config.yaml`. Bez skonfigurowanych narzutów (domyślnie) koszt rozliczeniowy jest równy kosztowi providera.
+
+```yaml
+pricing:
+  bill_cache_hits: true # env: PRICING_BILL_CACHE_HITS; domyślnie true
+  markups:
+    "/": 15                         # wszystkie modele
+    "openai/": 10                   # jedna instancja providera
+    "gpt-5": 20                     # model u dowolnego providera
+    "anthropic/claude-opus-4-1": 25 # jeden model u jednego providera
+```
+
+Wygrywa najbardziej szczegółowy selektor, w kolejności: provider/model, model, provider, globalny. Narzuty nigdy się nie sumują. Selektor providera wskazuje skonfigurowaną instancję (klucz w `providers`), a nieznany provider kończy start błędem. Narzut 20% rozlicza $1.20 za $1.00 kosztu providera – to marża 16.7%.
+
+`bill_cache_hits` określa, jak rozliczane są odpowiedzi serwowane z cache’u odpowiedzi GoModel. `true` rozlicza każdy cache hit według tego, ile ten sam request kosztowałby w chwili obsłużenia hitu – po bieżącym cenniku i stawkach zależnych od pory dnia – plus narzut; `false` rozlicza je na $0, nawet gdy ich koszt jest nieznany. Prompt caching u providera (tokeny z cache’u na wejściu) to rzeczywisty koszt providera i jest zawsze rozliczany.
+
+Każdy wiersz użycia zapisuje też narzut, z jakim został rozliczony (`markup_percent`, `markup_selector`), więc zmiana narzutów nigdy nie przepisuje wcześniejszych rozliczeń.
+
 ## Sumy w dashboardzie
 
 - **Estimated Cost** – wydatki na rzeczywiste requesty do providerów; cache hity są wykluczone.
@@ -108,6 +130,8 @@ Wartość `---` oznacza, że koszt jest nieznany, ponieważ cennik nie był dost
 ## Przeliczanie zapisanych kosztów
 
 Przeliczanie ponownie oblicza zapisany koszt pasujących wierszy użycia według bieżącego cennika. Użyj go po zmianie nadpisania albo gdy cennik nie był dostępny w momencie wykonania requestu. Akcja jest domyślnie włączona (`USAGE_PRICING_RECALCULATION_ENABLED`); w widoku użycia wybierz **Recalculate**, a następnie wpisz `recalculate`, aby potwierdzić. Zakres przeliczenia obejmuje wybrany przedział dat, providera lub model oraz ścieżkę użytkownika.
+
+Przeliczanie ponownie wycenia koszt rozliczeniowy z narzutem, z jakim rozliczono każdy wiersz, a cache hity rozlicza zgodnie z bieżącym `bill_cache_hits`. Wiersze zapisane przed wprowadzeniem narzutów są rozliczane według kosztu providera.
 
 <Warning>
   Przeliczanie **nadpisuje** pola kosztów każdego pasującego wiersza i **czyści**
