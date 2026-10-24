@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/admin"
 	"github.com/enterpilot/gomodel/internal/admin/dashboard"
 	"github.com/enterpilot/gomodel/internal/auditlog"
@@ -54,6 +56,11 @@ func (b *bootstrap) initAdmin() error {
 		adminRuntimeConfig := dashboardRuntimeConfig(appCfg, usageEnabledForDashboard, b.cfg.DemoMode, b.routeSelector != nil)
 		adminRuntimeConfig.VirtualModelStrategies = dashboardVirtualModelStrategies(b.routeSelector != nil, plugins.RoutePluginNames(app.pluginCatalog))
 		adminRuntimeConfig.QuotaTemplatesEnabled = dashboardEnabledValue(b.quotaTemplatesEnabled)
+		if b.cfg.Extensions != nil {
+			if license, ok := b.cfg.Extensions.License(); ok {
+				setDashboardLicense(&adminRuntimeConfig, license)
+			}
+		}
 		adminHandler, dashHandler, auditReader, adminErr := newAdminHandlers(
 			b.usageReader,
 			app.storage,
@@ -254,6 +261,24 @@ func dashboardRuntimeConfig(cfg *config.Config, usageEnabled, demoMode, adaptive
 		VirtualModelStrategies: dashboardVirtualModelStrategies(adaptiveRouting, nil),
 		UserPathHeader:         dashboardUserPathHeader(cfg),
 	}
+}
+
+// setDashboardLicense copies the license a distribution registered into the
+// dashboard config. A zero time is left out, which hides the countdown.
+func setDashboardLicense(values *admin.DashboardConfigResponse, license ext.License) {
+	values.LicenseBadge = license.Badge
+	if license.Trial {
+		values.LicenseTrial = "on"
+	}
+	values.LicenseExpiresAt = dashboardTime(license.ExpiresAt)
+	values.LicenseValidUntil = dashboardTime(license.ValidUntil)
+}
+
+func dashboardTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 // dashboardMCPToolDiscovery is the default MCP tool discovery mode. Loaded

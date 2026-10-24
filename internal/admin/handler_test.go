@@ -1810,6 +1810,10 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 		MCPEnabled:             "off",
 		VirtualModelStrategies: "round_robin,cost,adaptive",
 		UserPathHeader:         " X-Tenant-Path ",
+		LicenseBadge:           "PRO",
+		LicenseTrial:           "on",
+		LicenseExpiresAt:       "2026-11-15T00:00:00Z",
+		LicenseValidUntil:      "2026-11-15T00:00:00Z",
 	}
 	h := NewHandler(nil, nil, WithDashboardRuntimeConfig(cfg))
 	c, rec := echotest.Get(t, "/admin/runtime/config")
