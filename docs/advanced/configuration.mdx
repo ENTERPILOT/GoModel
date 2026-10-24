@@ -61,7 +61,9 @@ or `zstd`; the TypeSafe SDKs zstd-compress bodies of 1 KiB or more by
 default. The gateway decodes them before routing, so guardrails, audit, and
 providers see the plain body, and `BODY_SIZE_LIMIT` applies to both the
 compressed and the decoded size (`413` when either is over). Other encodings
-return `415`.
+return `415`. A body is read and decoded only after the request is
+authenticated: a request without valid credentials gets `401` before any of
+its body is read, and its audit entry has no request body.
 
 `STREAM_STALL_TIMEOUT` (`server.stream_stall_timeout` in YAML) protects the
 gateway from clients that open a streaming response and stop reading it. Each
