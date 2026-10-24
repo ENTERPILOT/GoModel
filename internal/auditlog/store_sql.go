@@ -35,7 +35,7 @@ type SQLStore struct {
 	stopCleanup   chan struct{}
 	closeOnce     sync.Once
 
-	// indexBuild tracks the background trigram search index build, so tests
+	// indexBuild tracks the background PostgreSQL index builds, so tests
 	// can wait for it; production never blocks on it. Close cancels a build
 	// still in flight rather than holding shutdown for it — the interrupted
 	// index is dropped and rebuilt on the next start.
@@ -123,7 +123,6 @@ var sqlIndexes = []string{
 	"CREATE INDEX IF NOT EXISTS idx_audit_workflow_version_id ON audit_logs(workflow_version_id)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_request_id ON audit_logs(request_id)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_principal_id ON audit_logs(principal_id)",
-	"CREATE INDEX IF NOT EXISTS idx_audit_auth_key_id ON audit_logs(auth_key_id)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_client_ip ON audit_logs(client_ip)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_path ON audit_logs(path)",
 	// Composite: serves both the session_id equality filter and its per-thread
@@ -176,18 +175,21 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 			slog.Warn("failed to create index", "error", err)
 		}
 	}
+	ensureSQLiteAuthKeyIndex(ctx, db)
 
 	store := &SQLStore{
 		db:            db,
 		retentionDays: retentionDays,
 		stopCleanup:   make(chan struct{}),
 	}
-	// The trigram search index can take minutes to build on a large existing
-	// table, so it is built off the startup path (and CONCURRENTLY, so writes
-	// keep flowing); readers pick it up as soon as it exists.
+	// The auth-key and trigram search indexes can take minutes to build on a
+	// large existing table, so they are built off the startup path (and
+	// CONCURRENTLY, so writes keep flowing); readers pick them up as soon as
+	// they exist.
 	buildCtx, cancel := context.WithCancel(context.Background())
 	store.cancelIndexBuild = cancel
 	store.indexBuild.Go(func() {
+		ensureAuthKeyTimestampIndex(buildCtx, db)
 		ensureTrigramSearchIndex(buildCtx, db, postgresErrorMessage)
 	})
 	if retentionDays > 0 {
