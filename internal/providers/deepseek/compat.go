@@ -62,7 +62,117 @@ func AdaptCompatibility(req *core.ChatRequest, providerName string, mode JSONSch
 	if err != nil {
 		return nil, err
 	}
+	adapted = adaptFileParts(adapted)
 	return adaptJSONSchemaResponseFormat(adapted, providerName, mode)
+}
+
+// inlineFilePlaceholder names an attachment DeepSeek cannot take. A short
+// stand-in keeps the turn deliverable: the whole tool result, including any
+// text beside the file, would otherwise be rejected upstream.
+const inlineFilePlaceholder = "[Attached file not passed to the model: DeepSeek accepts only image attachments]"
+
+// adaptFileParts rewrites file content parts into something DeepSeek accepts.
+//
+// DeepSeek's file input is images only (webp, png, jpeg, gif; its Files API
+// rejects anything else), and it takes an image as an image_url part. A file
+// part carrying an image becomes one, so the model still sees it. Anything
+// else becomes a text note naming the file: a PDF read by a Claude Code tool
+// arrives this way, and there is no form of it DeepSeek would read, so the
+// note keeps the model aware of the attachment instead of failing the turn.
+func adaptFileParts(req *core.ChatRequest) *core.ChatRequest {
+	var adapted *core.ChatRequest
+	for i, message := range req.Messages {
+		parts, ok := message.Content.([]core.ContentPart)
+		if !ok {
+			continue
+		}
+		replaced := false
+		rewritten := parts
+		for j, part := range parts {
+			if part.Type != "file" || part.File == nil {
+				continue
+			}
+			if !replaced {
+				rewritten = append([]core.ContentPart(nil), parts...)
+				replaced = true
+			}
+			// The caller's cache_control breakpoints keep their place, so
+			// the replacement inherits the file part's framing.
+			rewritten[j] = adaptedFilePart(part)
+		}
+		if !replaced {
+			continue
+		}
+		if adapted == nil {
+			copy := *req
+			copy.Messages = append([]core.Message(nil), req.Messages...)
+			adapted = &copy
+		}
+		adapted.Messages[i].Content = rewritten
+	}
+	if adapted == nil {
+		return req
+	}
+	return adapted
+}
+
+// adaptedFilePart maps one file part onto the image_url DeepSeek reads images
+// with, or onto a text note for an attachment it cannot take.
+func adaptedFilePart(part core.ContentPart) core.ContentPart {
+	if url, ok := imageFileURL(part.File); ok {
+		return core.ContentPart{
+			Type:        "image_url",
+			ImageURL:    &core.ImageURLContent{URL: url},
+			ExtraFields: part.ExtraFields,
+		}
+	}
+	return core.ContentPart{
+		Type:        "text",
+		Text:        inlineFilePlaceholderText(part.File),
+		ExtraFields: part.ExtraFields,
+	}
+}
+
+// imageFileURL returns the URL of a file part whose payload is an image
+// DeepSeek supports: inline image data or an http(s) URL, in one of the four
+// formats its vision input accepts. An uploaded file_id is not a URL DeepSeek
+// can resolve from a chat request, so it takes the text path.
+func imageFileURL(file *core.FileContent) (string, bool) {
+	if data := strings.TrimSpace(file.FileData); data != "" {
+		if isSupportedImageDataURL(data) {
+			return data, true
+		}
+		return "", false
+	}
+	url := strings.TrimSpace(file.FileURL)
+	if strings.HasPrefix(strings.ToLower(url), "https://") || strings.HasPrefix(strings.ToLower(url), "http://") {
+		return url, true
+	}
+	return "", false
+}
+
+// isSupportedImageDataURL reports whether data is a base64 data URL of one of
+// the image formats DeepSeek's vision input accepts.
+func isSupportedImageDataURL(data string) bool {
+	meta, payload, ok := strings.Cut(strings.TrimPrefix(strings.ToLower(data), "data:"), ",")
+	if !ok || payload == "" || !strings.HasSuffix(meta, ";base64") {
+		return false
+	}
+	mediaType, _, _ := strings.Cut(meta, ";")
+	switch mediaType {
+	case "image/webp", "image/png", "image/jpeg", "image/gif":
+		return true
+	}
+	return false
+}
+
+// inlineFilePlaceholderText heads the placeholder with the file's name when
+// the caller supplied one, so the model still learns what was attached.
+func inlineFilePlaceholderText(file *core.FileContent) string {
+	if name := strings.TrimSpace(file.Filename); name != "" {
+		return inlineFilePlaceholder + " (" + name + ")"
+	}
+	return inlineFilePlaceholder
 }
 
 // padMissingReasoningContent satisfies DeepSeek's thinking-mode rule that a
