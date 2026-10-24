@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 
 	"github.com/goccy/go-json"
@@ -190,6 +191,14 @@ func (b *bootstrap) initPricing() error {
 	b.pricingResolver = usage.PricingResolver(registry)
 	if app.pricingOverrides != nil && app.pricingOverrides.Service != nil {
 		b.pricingResolver = app.pricingOverrides.Service
+	}
+
+	if !b.appCfg.Pricing.MarkupsEnabled {
+		if len(b.appCfg.Pricing.Markups) > 0 {
+			slog.Warn("pricing.markups is set but markups are disabled; no billed cost is recorded",
+				"hint", "set PRICING_MARKUPS_ENABLED=true (pricing.markups_enabled) to apply markups")
+		}
+		return nil
 	}
 
 	// Every usage writer takes the logger from here on, so wrapping it once

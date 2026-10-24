@@ -102,10 +102,11 @@ Overrides apply to new requests. To re-cost requests that already ran, recalcula
 
 Add a markup when you resell model access, for example to recharge customers for the tokens they use. GoModel records each request's **billed cost** (`billed_cost` on the usage row): the provider cost plus the markup. The provider cost itself never changes, so budgets, dashboard totals, and savings keep measuring what you pay upstream.
 
-Markups are percentages set in `config.yaml`. With none configured (the default), billed cost equals provider cost.
+Markups are off by default. Turn them on with `markups_enabled: true` (env `PRICING_MARKUPS_ENABLED=true`), then set percentages in `config.yaml`. With markups on but no rule matching a request, its billed cost equals its provider cost. With markups off, GoModel records no billed cost and ignores `markups` and `bill_cache_hits`, logging a warning at startup if `markups` is set.
 
 ```yaml
 pricing:
+  markups_enabled: true # env: PRICING_MARKUPS_ENABLED; default false
   bill_cache_hits: true # env: PRICING_BILL_CACHE_HITS; default true
   markups:
     "/": 15                         # every model
@@ -120,13 +121,13 @@ The most specific selector wins, in this order: provider/model, model, provider,
 
 Each usage row also stores the markup it was billed at (`markup_percent`, `markup_selector`), so changing markups never rewrites past bills.
 
-Once markups are configured, the usage page shows billed cost next to provider cost: a **Billed** card, a column in the model, user path, and label breakdowns, and a column in the request log whose tooltip names the markup each row was billed at. The admin API reports it as `total_billed_cost` on `/admin/usage/summary`, `billed_cost` on `/admin/usage/models`, `/admin/usage/user-paths`, and `/admin/usage/labels`, and `billed_cost`, `markup_percent`, and `markup_selector` on `/admin/usage/log` entries. Billed totals include billed cache hits even though the other cost figures exclude them, so per-user-path billed cost is what to charge each customer.
+Once markups are enabled, the usage page shows billed cost next to provider cost: a **Billed** card, a column in the model, user path, and label breakdowns, and a column in the request log whose tooltip names the markup each row was billed at. The admin API reports it as `total_billed_cost` on `/admin/usage/summary`, `billed_cost` on `/admin/usage/models`, `/admin/usage/user-paths`, and `/admin/usage/labels`, and `billed_cost`, `markup_percent`, and `markup_selector` on `/admin/usage/log` entries. Billed totals include billed cache hits even though the other cost figures exclude them, so per-user-path billed cost is what to charge each customer.
 
 ## Dashboard totals
 
 - **Estimated Cost** — spend on live provider requests; cache hits are excluded.
 - **Saved Cost** — what requests served from the cache would otherwise have cost.
-- **Billed** — shown when markups are configured: provider cost plus markup, including billed cache hits.
+- **Billed** — shown when markups are enabled: provider cost plus markup, including billed cache hits.
 
 A `---` value means the cost is unknown because no pricing was available, which is not the same as `$0`.
 
@@ -134,7 +135,7 @@ A `---` value means the cost is unknown because no pricing was available, which 
 
 Recalculating recomputes the stored cost of matching usage rows from current pricing. Use it after changing an override, or when pricing was unavailable at the time a request ran. The action is enabled by default (`USAGE_PRICING_RECALCULATION_ENABLED`); on the usage view, choose **Recalculate**, then type `recalculate` to confirm. It is scoped to the selected date range, provider or model, and user path.
 
-Recalculation reprices billed cost with the markup each row was billed at, and bills cache hits according to the current `bill_cache_hits`. Rows recorded before markups existed are billed at their provider cost.
+Recalculation reprices billed cost with the markup each row was billed at, and bills cache hits according to the current `bill_cache_hits`. Rows recorded before markups existed are billed at their provider cost. While markups are disabled, recalculation leaves billed cost unchanged.
 
 <Warning>
   Recalculation **overwrites** the cost fields of every matching row, and

@@ -50,7 +50,7 @@ func (s *MongoDBStore) RecalculatePricing(ctx context.Context, params Recalculat
 
 	var result RecalculatePricingResult
 	_, err = session.WithTransaction(ctx, func(txCtx context.Context) (any, error) {
-		next, err := s.recalculatePricingDocumentsInContext(txCtx, filter, resolver, params.BillCacheHits)
+		next, err := s.recalculatePricingDocumentsInContext(txCtx, filter, resolver, params.Billing)
 		if err != nil {
 			if isMongoTransactionCapabilityError(err) {
 				return nil, &mongoTransactionFallbackError{err: err}
@@ -66,7 +66,7 @@ func (s *MongoDBStore) RecalculatePricing(ctx context.Context, params Recalculat
 				fallbackErr = err
 			}
 			slog.Warn("MongoDB transactions unavailable for pricing recalculation; falling back to non-transactional update", "error", fallbackErr)
-			result, err := s.recalculatePricingDocumentsInContext(ctx, filter, resolver, params.BillCacheHits)
+			result, err := s.recalculatePricingDocumentsInContext(ctx, filter, resolver, params.Billing)
 			if err != nil {
 				return RecalculatePricingResult{}, fmt.Errorf("recalculate mongodb usage costs without transaction: %w", errors.Join(fallbackErr, err))
 			}
@@ -91,11 +91,11 @@ func (s *MongoDBStore) startMongoPricingSession() (mongoPricingSession, error) {
 	return mongoDriverPricingSession{session: session}, nil
 }
 
-func (s *MongoDBStore) recalculatePricingDocumentsInContext(ctx context.Context, filter bson.D, resolver PricingResolver, billCacheHits bool) (RecalculatePricingResult, error) {
+func (s *MongoDBStore) recalculatePricingDocumentsInContext(ctx context.Context, filter bson.D, resolver PricingResolver, billing Billing) (RecalculatePricingResult, error) {
 	if s.recalculatePricingDocuments != nil {
-		return s.recalculatePricingDocuments(ctx, filter, resolver, billCacheHits)
+		return s.recalculatePricingDocuments(ctx, filter, resolver, billing)
 	}
-	return s.recalculatePricingInMongoTransaction(ctx, filter, resolver, billCacheHits)
+	return s.recalculatePricingInMongoTransaction(ctx, filter, resolver, billing)
 }
 
 type mongoTransactionFallbackError struct {
@@ -136,7 +136,7 @@ func isMongoTransactionCapabilityError(err error) bool {
 	return strings.Contains(message, "transaction numbers are only allowed on a replica set member or mongos")
 }
 
-func (s *MongoDBStore) recalculatePricingInMongoTransaction(ctx context.Context, filter bson.D, resolver PricingResolver, billCacheHits bool) (RecalculatePricingResult, error) {
+func (s *MongoDBStore) recalculatePricingInMongoTransaction(ctx context.Context, filter bson.D, resolver PricingResolver, billing Billing) (RecalculatePricingResult, error) {
 	cursor, err := s.collection.Find(ctx, filter)
 	if err != nil {
 		return RecalculatePricingResult{}, fmt.Errorf("query mongodb usage costs for recalculation: %w", err)
@@ -178,7 +178,7 @@ func (s *MongoDBStore) recalculatePricingInMongoTransaction(ctx context.Context,
 			Caveat:             row.Caveat,
 			CacheType:          row.CacheType,
 			MarkupPercent:      row.MarkupPercent,
-			BillCacheHits:      billCacheHits,
+			Billing:            billing,
 		}, resolver)
 
 		if _, err := s.collection.UpdateByID(ctx, update.ID, mongoRecalculationUpdate(update)); err != nil {
@@ -220,9 +220,11 @@ func mongoRecalculationUpdate(update recalculationUpdate) bson.D {
 	} else {
 		unset = append(unset, bson.E{Key: "rewrite_cost_saved", Value: ""})
 	}
-	if update.BilledCost != nil {
+	switch {
+	case update.KeepBilledCost:
+	case update.BilledCost != nil:
 		set = append(set, bson.E{Key: "billed_cost", Value: *update.BilledCost})
-	} else {
+	default:
 		unset = append(unset, bson.E{Key: "billed_cost", Value: ""})
 	}
 	if strings.TrimSpace(update.CostSource) != "" {

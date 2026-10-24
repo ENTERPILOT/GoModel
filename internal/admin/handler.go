@@ -40,7 +40,7 @@ type Handler struct {
 	auditReader         auditlog.Reader
 	registry            *providers.ModelRegistry
 	pricingResolver     usage.PricingResolver
-	billCacheHits       bool
+	billing             usage.Billing
 	authKeys            *authkeys.Service
 	users               *users.Service
 	virtualModels       *virtualmodels.Service
@@ -112,8 +112,8 @@ type DashboardConfigResponse struct {
 	RedisURL              string `json:"REDIS_URL,omitempty"`
 	SemanticCacheEnabled  string `json:"SEMANTIC_CACHE_ENABLED,omitempty"`
 	PricingRecalculation  string `json:"USAGE_PRICING_RECALCULATION_ENABLED,omitempty"`
-	// PricingMarkups is "on" when pricing.markups declares at least one rule,
-	// so the dashboard shows billed cost only where it differs from cost.
+	// PricingMarkups mirrors pricing.markups_enabled, so the dashboard shows
+	// billed cost only when the markup feature is on.
 	PricingMarkups  string `json:"PRICING_MARKUPS_ENABLED,omitempty"`
 	LiveLogsEnabled string `json:"DASHBOARD_LIVE_LOGS_ENABLED,omitempty"`
 	MCPEnabled      string `json:"MCP_ENABLED,omitempty"`
@@ -256,11 +256,12 @@ func WithPricingResolver(resolver usage.PricingResolver) Option {
 	}
 }
 
-// WithBillCacheHits sets whether pricing recalculation bills response-cache
-// hits, mirroring pricing.bill_cache_hits. Default: true.
-func WithBillCacheHits(bill bool) Option {
+// WithBilling sets how pricing recalculation treats billed cost, mirroring
+// pricing.markups_enabled and pricing.bill_cache_hits. Default: billing off,
+// so recalculation leaves billed cost unchanged.
+func WithBilling(billing usage.Billing) Option {
 	return func(h *Handler) {
-		h.billCacheHits = bill
+		h.billing = billing
 	}
 }
 
@@ -423,7 +424,6 @@ func NewHandler(reader usage.UsageReader, registry *providers.ModelRegistry, opt
 		usageReader:   reader,
 		registry:      registry,
 		runtimeConfig: DashboardConfigResponse{},
-		billCacheHits: true,
 	}
 	if registry != nil {
 		h.pricingResolver = registry
