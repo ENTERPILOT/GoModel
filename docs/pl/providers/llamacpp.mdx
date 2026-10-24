@@ -1,0 +1,132 @@
+---
+title: "Serwer llama.cpp: podłączenie do gatewaya LLM"
+sidebarTitle: "llama.cpp"
+description: "Kieruj requesty GoModel kompatybilne z OpenAI do instancji llama-server z llama.cpp (ten sam typ providera działa z LM Studio)."
+icon: "server"
+keywords: ["llama.cpp", "llama-server", "llama.cpp router mode", "tryb routera llama.cpp", "LM Studio", "modele lokalne", "local models", "self-hosted", "serwer kompatybilny z OpenAI", "OpenAI-compatible server"]
+---
+
+`llama-server` z llama.cpp obsługuje bezpośrednio API OpenAI, a GoModel ma dla
+niego dedykowany typ providera `llamacpp`: klucz API jest opcjonalny
+(llama-server zwykle działa bez klucza), a natywne endpointy providera, takie jak
+`/health` i `/rerank`, są dostępne przez passthrough. **Nie** rejestruj llama.cpp
+jako providera `ollama`: ten typ używa natywnego API Ollamy, którego llama.cpp nie
+implementuje.
+
+Ten sam typ providera pasuje do LM Studio i każdego innego zwykłego lokalnego
+serwera kompatybilnego z OpenAI.
+
+Najpierw uruchom llama-server. Bez `--alias` ID modelu w `/v1/models` to ścieżka
+do pliku modelu – ustaw alias, aby requesty mogły używać czytelnej nazwy:
+
+```bash
+llama-server -hf ggml-org/gemma-3-4b-it-GGUF --alias gemma-3-4b-it --port 8081
+# dodaj --api-key token-abc123, jeśli llama-server ma wymagać uwierzytelniania bearer
+```
+
+## Konfiguracja
+
+Base URL jest wymagany i rejestruje providera – domyślny port llama-server (8080)
+koliduje z portem samego GoModel, więc nie ma wartości domyślnej:
+
+```bash
+LLAMACPP_BASE_URL=http://host.docker.internal:8081/v1   # dołącz /v1
+# LLAMACPP_API_KEY=token-abc123                         # tylko jeśli llama-server uruchomiono z --api-key
+GOMODEL_MASTER_KEY=change-me
+```
+
+<Note>
+  Te przykłady zakładają, że GoModel działa w Dockerze, a llama-server na hoście
+  pod `localhost:8081` – stąd `host.docker.internal`. Jeśli GoModel działa
+  bezpośrednio na hoście, użyj `http://localhost:8081/v1`. Uruchamiasz kilka
+  instancji llama-server? Zarejestruj każdą pod nazwą z sufiksem:
+  `LLAMACPP_STUDIO_BASE_URL=...` tworzy providera `llamacpp-studio`.
+</Note>
+
+## Weryfikacja
+
+```bash
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llamacpp/gemma-3-4b-it",
+    "messages": [{"role": "user", "content": "Reply with exactly ok."}]
+  }'
+```
+
+`GET /v1/models` zwraca ID modeli llama-server poprzedzone nazwą providera.
+
+## Embeddingi
+
+`/v1/embeddings` działa przez GoModel, o ile llama-server potrafi go obsłużyć:
+załadowany model musi używać typu poolingu innego niż `none`. Dedykowane pliki
+GGUF do embeddingów zwykle deklarują pooling w metadanych; w przeciwnym razie
+przekaż `--pooling mean` (lub `cls`/`last`). Flaga `--embeddings` jest opcjonalna –
+ogranicza serwer wyłącznie do embeddingów:
+
+```bash
+llama-server -hf nomic-ai/nomic-embed-text-v1.5-GGUF --embeddings --alias nomic-embed-text-v1.5 --port 8081
+```
+
+```bash
+curl -s http://localhost:8080/v1/embeddings \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "llamacpp/nomic-embed-text-v1.5", "input": "hello"}'
+```
+
+## Metadane modeli
+
+Lokalnych plików GGUF nie ma w katalogu modeli upstream, więc GoModel odczytuje,
+co się da, z samego llama-server i zwraca to w `GET /v1/models`:
+
+- **Okno kontekstu** – `n_ctx` na slot raportowane przez llama-server dla modelu,
+  czyli kontekst, z którym model *działa* (`--ctx-size` podzielone między sloty
+  `--parallel`), a nie ten, na którym trenowano GGUF. Nowsze buildy raportują je
+  jako `meta.n_ctx` bezpośrednio na liście; starsze są o nie odpytywane przez
+  `/props`. Jeśli żadne z nich nie odpowiada – LM Studio albo proxy, które ukrywa
+  `/props` – używane jest treningowe `n_ctx_train` modelu, które jest tylko
+  górnym limitem i może przekraczać to, co serwer zaakceptuje.
+- **Modalności** – serwer multimodalny (uruchomiony z `--mmproj`) raportuje
+  `vision`, `video` i `audio` w `/props`; obsługiwane modalności stają się
+  możliwościami modelu.
+
+`/props` opisuje jeden model załadowany przez serwer, więc jest odpytywane tylko
+przy liście zawierającej jeden wpis. W [trybie
+routera](https://github.com/ggml-org/llama.cpp/tree/master/tools/server), w którym
+jeden proces obsługuje kilka modeli, każdy model ma własne `meta.n_ctx` i w ogóle
+nie potrzebuje `/props`.
+
+Obie wartości to ustawienia domyślne, a nie ostateczne decyzje: wszystko, co
+zadeklarujesz w metadanych modeli providera, ma pierwszeństwo – zobacz
+[Metadane modeli](/pl/advanced/model-metadata).
+
+## Klasyfikacja modeli
+
+llama-server nie raportuje niczego, co odróżniałoby model chat od modelu do
+embeddingów, więc GoModel klasyfikuje jego modele po ID: nazwy zawierające
+`embed` lub pasujące do znanych rodzin modeli embeddingowych (`bge`, `e5`, `gte`,
+`minilm`) są kategoryzowane jako modele do embeddingów, a nazwy zawierające
+`rerank` – jako modele do rerankingu; w przypadku ID z przestrzenią nazw
+sprawdzany jest ostatni segment ścieżki. Dla modeli, które pozostają
+niesklasyfikowane, zadeklaruj `modes` w metadanych modeli providera. Kategorie
+wpływają tylko na grupowanie w dashboardzie; `/v1/embeddings` kieruje requesty do
+dowolnego modelu obsługiwanego przez providera niezależnie od kategorii.
+
+## Poza chatem i embeddingami
+
+- **Wejście multimodalne** – *wejście* w postaci obrazów i audio w wiadomościach
+  chatu działa z modelami multimodalnymi, gdy llama-server jest uruchomiony z
+  projektorem (`--mmproj`, ładowany automatycznie z `-hf`, gdy jest dostępny).
+  Takie requesty przechodzą normalnie przez `/v1/chat/completions`.
+- **Natywne endpointy** – natywne trasy llama-server są dostępne przez
+  [passthrough](/pl/features/passthrough-api) pod `/p/llamacpp/...`: ścieżki w
+  stylu OpenAI (`chat/completions`, `embeddings`, ...) są obsługiwane z bazy `/v1`,
+  a wszystko inne (`/health`, `/props`, `/tokenize`, `/infill`, ...) z katalogu
+  głównego serwera. W konfiguracji z sufiksem użyj nazwy instancji, np.
+  `/p/llamacpp-studio/health`.
+- **Reranking** – llama-server obsługuje reranking (uruchom go z modelem
+  rerankera i `--rerank --embedding --pooling rank`), ale GoModel nie ma
+  endpointu rerank; skorzystaj z niego przez passthrough: `POST /p/llamacpp/rerank`
+  (lub `/p/llamacpp/v1/rerank`).

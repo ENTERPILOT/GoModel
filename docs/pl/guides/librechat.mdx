@@ -1,0 +1,231 @@
+---
+title: "GoModel i LibreChat"
+description: "Daj LibreChat jeden własny endpoint do wszystkich providerów przez GoModel i uzyskaj logi audytowe, śledzenie kosztów per użytkownik oraz metryki dla każdego czatu."
+icon: "message-circle"
+keywords: ["LibreChat", "librechat.yaml", "własny endpoint", "custom endpoint", "czat self-hosted", "self-hosted chat", "koszty per użytkownik", "per-user costs", "obserwowalność LLM", "LLM observability", "przewodnik konfiguracji", "setup guide"]
+---
+
+## Przegląd
+
+LibreChat to self-hosted interfejs czatu, który komunikuje się z API kompatybilnymi z OpenAI
+przez własne endpointy (custom endpoints). Skierowanie jednego własnego endpointu na GoModel daje
+każdemu użytkownikowi LibreChat dostęp do wszystkich Twoich providerów przez jedno połączenie,
+a każdy czat jest logowany, wyceniany i przypisywany w GoModel do zalogowanego użytkownika LibreChat.
+
+Przepływ:
+
+`LibreChat chat -> LibreChat backend -> GoModel -> OpenAI/Anthropic/Gemini/...`
+
+Co zyskujesz:
+
+- Pełne treści requestów i odpowiedzi każdego czatu w logu audytowym GoModel.
+- Koszt per użytkownik LibreChat dzięki szablonom nagłówków i
+  [etykietom](/pl/features/labelling).
+- Wszystkich providerów za jednym własnym endpointem, bez konfiguracji poszczególnych providerów
+  w LibreChat.
+- Metryki Prometheus i trace'y OpenTelemetry dla ruchu z czatu, gdy włączysz
+  te eksportery (zobacz [Uwagi](#uwagi)).
+- Failover, limity żądań, budżety i cache odpowiedzi stosowane do ruchu z czatu,
+  gdy skonfigurujesz je w GoModel.
+
+## 1. Uruchom GoModel obok LibreChat
+
+LibreChat odczytuje własne endpointy z `librechat.yaml`. Utwórz ten plik obok
+pliku compose:
+
+```yaml librechat.yaml
+version: 1.3.13
+cache: true
+endpoints:
+  custom:
+    - name: "GoModel"
+      apiKey: "${GOMODEL_API_KEY}"
+      baseURL: "http://gomodel:8080/v1"
+      headers:
+        X-LibreChat-User-Email: "{{LIBRECHAT_USER_EMAIL}}"
+      models:
+        default: ["openai/gpt-5-mini"]
+        fetch: true
+      titleConvo: true
+      titleModel: "openai/gpt-5-mini"
+      modelDisplayLabel: "GoModel"
+```
+
+Następnie uruchom GoModel, LibreChat i MongoDB w jednej sieci Dockera, aby LibreChat
+mógł połączyć się z GoModel po nazwie kontenera:
+
+```yaml docker-compose.yml
+services:
+  gomodel:
+    image: enterpilot/gomodel
+    environment:
+      GOMODEL_MASTER_KEY: change-me
+      OPENAI_API_KEY: sk-...
+      ANTHROPIC_API_KEY: sk-ant-...
+      TAGGING_HEADER_1: X-LibreChat-User-Email
+      TAGGING_HEADER_1_DONOTPASS: "true"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - gomodel_data:/app/data
+
+  librechat:
+    image: ghcr.io/danny-avila/librechat:v0.8.7
+    depends_on:
+      - mongodb
+    environment:
+      HOST: 0.0.0.0
+      MONGO_URI: mongodb://mongodb:27017/LibreChat
+      GOMODEL_API_KEY: change-me
+      ALLOW_REGISTRATION: "true"
+      SEARCH: "false"
+      JWT_SECRET: ${JWT_SECRET:?generate with openssl rand -hex 32}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?generate with openssl rand -hex 32}
+      CREDS_KEY: ${CREDS_KEY:?generate with openssl rand -hex 32}
+      CREDS_IV: ${CREDS_IV:?generate with openssl rand -hex 16}
+    ports:
+      - "127.0.0.1:3080:3080"
+    volumes:
+      - ./librechat.yaml:/app/librechat.yaml
+      - librechat_uploads:/app/uploads
+
+  mongodb:
+    image: mongo:8
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  gomodel_data:
+  librechat_uploads:
+  mongo_data:
+```
+
+| Ustawienie | Dlaczego |
+| --- | --- |
+| `baseURL` | Kieruje ruch endpointu do GoModel. Zachowaj sufiks `/v1`. |
+| `apiKey` / `GOMODEL_API_KEY` | Klucz API GoModel (albo `GOMODEL_MASTER_KEY`), a nie prawdziwy klucz providera. |
+| `headers` | Dodaje e-mail zalogowanego użytkownika do każdego wywołania modelu przez szablon LibreChat `{{LIBRECHAT_USER_EMAIL}}`, który GoModel zamienia na etykiety opisane niżej. |
+| `models.fetch` | Wypełnia selektor modeli na podstawie `GET /v1/models` z GoModel zamiast zakodowanej na sztywno listy `default`. |
+| `titleModel` | LibreChat domyślnie nadaje tytuły konwersacjom za pomocą `gpt-3.5-turbo`, którego GoModel nie udostępnia. Ustaw id modelu obsługiwanego przez GoModel. |
+| `TAGGING_HEADER_1` | Każe GoModel zapisywać wartość tego nagłówka jako etykietę każdego requestu. |
+| `TAGGING_HEADER_1_DONOTPASS` | Zachowuje etykietę, ale usuwa nagłówek przed przekazaniem dalej, więc e-maile użytkowników nigdy nie trafiają do providera na trasach [passthrough](/pl/features/passthrough-api). Trasy tłumaczone nigdy nie przekazują nagłówków klienta. |
+| `ALLOW_REGISTRATION` | Bez zamontowanego `.env` LibreChat domyślnie odrzuca nowe rejestracje. Pierwsze zarejestrowane konto zostaje administratorem, więc trzymaj port powiązany z loopbackiem (jak wyżej), dopóki to konto nie powstanie, i wyłącz rejestrację ponownie, gdy Twoi użytkownicy będą mieli konta. |
+| `SEARCH` | Wyłącza wyszukiwanie czatów Meilisearch, więc nie jest potrzebny dodatkowy kontener. |
+| `JWT_SECRET`, `CREDS_KEY`, ... | Sekrety sesji i szyfrowania LibreChat. Składnia `${VAR:?...}` sprawia, że Compose odmawia startu, dopóki nie podasz prawdziwych wartości – wygeneruj każdą przez `openssl rand -hex 32` (`-hex 16` dla `CREDS_IV`) i umieść je w pliku `.env` obok pliku compose. |
+
+Otwórz `http://localhost:3080`, zarejestruj pierwsze konto (zostanie
+administratorem LibreChat), a endpoint `GoModel` pojawi się w selektorze modeli z każdym modelem udostępnianym przez GoModel –
+łącznie z modelami Anthropic i Gemini oraz wszystkimi
+[modelami wirtualnymi](/pl/features/virtual-models).
+
+<Tip>
+  Utwórz dedykowany klucz API dla LibreChat w dashboardzie GoModel
+  (`API Keys -> Create API Key`) zamiast używać klucza głównego. Klucze mają
+  etykiety, budżety i limity żądań, więc wydatki na czat są widoczne osobno w
+  dashboardzie.
+</Tip>
+
+## 2. Czatuj i oglądaj każde wywołanie w GoModel
+
+Wybierz dowolny model – `openai/gpt-5-mini`, `anthropic/claude-haiku-4-5-20251001`,
+`gemini/gemini-2.5-flash` – i czatuj. Odpowiedzi streamowane oraz generowanie tytułu,
+które LibreChat uruchamia po pierwszej wymianie, przechodzą przez GoModel.
+Każde wywołanie pojawia się w logu audytowym z pełnym promptem, odpowiedzią, tokenami,
+kosztem i nagłówkiem identyfikującym użytkownika.
+
+<Note>
+  Zweryfikowane z LibreChat v0.8.7: pobieranie modeli, czat i generowanie tytułów
+  z modelami OpenAI, Anthropic i Gemini, etykiety per użytkownik oraz embedding plików
+  dla RAG – wszystko kierowane przez GoModel.
+</Note>
+
+### Śledzenie kosztów per użytkownik
+
+Dzięki szablonowi `headers` z kroku 1 każdy request zawiera
+`X-LibreChat-User-Email`, a GoModel zapisuje jego wartość jako etykietę. Widok
+użycia według etykiet w dashboardzie pokazuje wtedy requesty, tokeny i koszt dla każdej
+osoby. Jeśli e-maile nie powinny pojawiać się w danych o użyciu, użyj w szablonie
+`"{{LIBRECHAT_USER_ID}}"`, zachowując
+`TAGGING_HEADER_1_DONOTPASS`. Nie wyłączaj `TAGGING_HEADER_1_DONOTPASS`: zwykłe
+kierowane requesty nigdy nie przekazują nagłówków klienta, ale
+requesty [passthrough](/pl/features/passthrough-api) w przeciwnym razie przekazałyby
+nagłówek z e-mailem do providera. Prefiksy i inne opcje nagłówków opisuje strona
+[Etykietowanie](/pl/features/labelling).
+
+### Dopasuj selektor modeli
+
+GoModel może udostępniać setki modeli, a `fetch: true` wyświetla je wszystkie.
+Aby zamiast tego oferować stałe menu, ustaw `fetch: false` i wypisz modele, które
+mają widzieć Twoi użytkownicy:
+
+```yaml
+models:
+  default:
+    - "openai/gpt-5-mini"
+    - "anthropic/claude-haiku-4-5-20251001"
+    - "gemini/gemini-2.5-flash"
+  fetch: false
+```
+
+Możesz też udostępnić mniej providerów w GoModel; `fetch: true` odzwierciedla `GET /v1/models`.
+
+## Embeddingi i RAG
+
+Pliki przesyłane do LibreChat są przetwarzane na embeddingi przez osobne RAG API, które obsługuje
+API embeddingów OpenAI i również może wskazywać na GoModel. Dodaj do pliku
+compose:
+
+```yaml
+  rag_api:
+    image: ghcr.io/danny-avila/librechat-rag-api-dev-lite:latest
+    depends_on:
+      - vectordb
+    environment:
+      DB_HOST: vectordb
+      POSTGRES_DB: librechat_rag
+      POSTGRES_USER: librechat
+      POSTGRES_PASSWORD: change-me
+      RAG_OPENAI_BASEURL: http://gomodel:8080/v1
+      RAG_OPENAI_API_KEY: change-me
+      EMBEDDINGS_PROVIDER: openai
+      EMBEDDINGS_MODEL: openai/text-embedding-3-small
+
+  vectordb:
+    image: pgvector/pgvector:pg15
+    environment:
+      POSTGRES_DB: librechat_rag
+      POSTGRES_USER: librechat
+      POSTGRES_PASSWORD: change-me
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+```
+
+Dodaj `RAG_API_URL: http://rag_api:8000` do usługi `librechat` i
+`pg_data:` do listy wolumenów. Każdy przesłany dokument jest dzielony na fragmenty i
+przetwarzany przez `/v1/embeddings` w GoModel, więc użycie embeddingów jest logowane
+i wyceniane jak każde inne wywołanie. Routing czatu działa bez problemu bez tej
+sekcji.
+
+## Rozwiązywanie problemów
+
+| Objaw | Rozwiązanie |
+| --- | --- |
+| „Registration is not allowed.” | Ustaw `ALLOW_REGISTRATION: "true"` w usłudze `librechat` (krok 1) i utwórz kontener ponownie. |
+| Brak endpointu w selektorze modeli | `librechat.yaml` nie jest zamontowany w `/app/librechat.yaml` albo ma błąd składni. Sprawdź w logach startowych LibreChat komunikat „Custom config file loaded”. |
+| Selektor modeli pokazuje tylko listę `default` | `fetch: true` nie mogło połączyć się z GoModel albo klucz został odrzucony. Użyj w `baseURL` nazwy usługi Dockera (`gomodel`), a nie `localhost`, i sprawdź w logach GoModel błędy `401`. |
+| Ostrzeżenie „Outdated Config version” przy starcie | Zwiększ wartość pola `version:` w `librechat.yaml` do wersji sugerowanej w ostrzeżeniu. |
+| Konwersacje mają ciągle tytuł „New Chat”, a w logach GoModel są błędy `404` | `titleModel` nie jest ustawione, więc LibreChat prosi o `gpt-3.5-turbo`. Ustaw `titleModel` na model udostępniany przez GoModel. |
+| Brak etykiet per użytkownik w danych o użyciu | W endpoincie brakuje bloku `headers` albo w GoModel nie ustawiono `TAGGING_HEADER_1`. Potrzebne są oba. |
+| Przesyłanie plików się nie udaje | `RAG_API_URL` nie jest ustawione albo RAG API nie działa. Zobacz [Embeddingi i RAG](#embeddingi-i-rag). |
+| Ta sama odpowiedź powtarza się dla identycznych promptów | [Cache odpowiedzi](/pl/features/cache) w GoModel odtwarza identyczne requesty. Zwykle o to chodzi; jeśli nie, wyłącz cache. |
+
+## Uwagi
+
+- [Failover](/pl/features/failover) i [budżety](/pl/features/budgets) w GoModel
+  działają automatycznie dla ruchu z czatu; budżet per klucz ogranicza wydatki całej
+  instancji LibreChat.
+- Agenci, wyszukiwanie w sieci i generowanie obrazów w LibreChat mają
+  własne ustawienia providerów i nie były częścią weryfikacji.
+- Dashboardy i alerty opisują strony
+  [Metryki Prometheus](/pl/guides/prometheus-metrics) i
+  [OpenTelemetry](/pl/guides/opentelemetry).

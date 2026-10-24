@@ -1,0 +1,220 @@
+---
+title: "Session Keeping"
+description: "Requests einer Client-Session für Sticky Load Balancing und gruppierte Audit-Logs zusammenfassen"
+icon: "pin"
+---
+
+Coding-Agents und Chat-Apps senden viele Requests, die zu einer logischen
+Session gehören – einer Unterhaltung, einer Agent-Aufgabe. GoModel erkennt diese
+Session und nutzt sie durchgängig für Routing und Observability:
+
+- **Sticky Load Balancing** – ein virtuelles Modell mit Load Balancing routet
+  jeden Request einer Session an das Ziel, das sie zuerst bedient hat. Das hält
+  die Prompt-Caches des Providers warm und das Modellverhalten innerhalb einer
+  Unterhaltung konsistent.
+- **Sticky API-Key-Auswahl** – hat ein Provider mehrere Keys, verwendet jeder
+  Request einer erkannten Session denselben Key, wodurch die
+  Prompt-Cache-Affinität beim Provider erhalten bleibt.
+- **Gruppierte Audit-Logs** – die Seite „Audit Logs“ im Dashboard fasst die
+  Requests einer Session zu einem Thread zusammen: Der neueste Request bildet
+  die Zeile, und ein Aufklapp-Element zeigt die älteren Requests darunter an.
+- **Nutzung und Kosten pro Session** – Nutzungsdatensätze tragen dieselbe
+  gescopte Session-ID, sodass Dashboard und Admin API die Requests, Tokens und
+  Provider-Ausgaben für eine Unterhaltung oder Agent-Aufgabe ausweisen können.
+
+Session Keeping funktioniert ohne jede Konfiguration. Die Standardwerte passen
+für die meisten Setups; die unten beschriebenen Optionen gibt es für die
+seltenen Fälle, in denen das nicht so ist.
+
+## Wie eine Session identifiziert wird
+
+Das erste zutreffende Signal gewinnt:
+
+1. **Session-Header** – eine eingebaute Registry deckt die Header ab, die
+   bekannte Tools senden, sowie Gateway-Konventionen:
+
+   | Header | Gesendet von |
+   |---|---|
+   | `X-Session-Id` | OpenCode, Kilo Code, generische Clients |
+   | `X-Opencode-Session` | OpenCode, pi und andere Clients, die den Dialekt von OpenCode Zen sprechen |
+   | `X-Claude-Code-Session-Id` | Claude Code (für Gateways dokumentiert) |
+   | `Session-Id` / `Session_id` | Codex CLI (aktuell / älter), Roo Code |
+   | `X-Litellm-Session-Id` | LiteLLM-Konvention |
+   | `Helicone-Session-Id` | Helicone-Konvention |
+   | `Agent-Session-Id` | Goose |
+
+2. **Body-Felder** – für Clients, die Sessions im Request-Body kennzeichnen:
+   Anthropic `metadata.user_id` (Claude Code bettet dort seine Session-UUID
+   ein; sowohl das aktuelle als auch das ältere Format werden geparst),
+   `session_id` (OpenRouter-Konvention), `litellm_session_id`,
+   `prompt_cache_key` (Zed und andere OpenAI-Clients, die pro Unterhaltung
+   einen Cache-Key wiederverwenden) sowie `conversation`-Referenzen in
+   `/v1/responses`.
+
+3. **Automatische Erkennung** – Chat- und Responses-Requests ohne explizites
+   Signal werden anhand ihres Unterhaltungsbeginns gruppiert: Modell,
+   Systemkontext, Tools und die Nachrichten bis einschließlich des ersten
+   User-Turns. Folge-Requests senden dieses Präfix unverändert erneut, daher
+   erhält ein Agent, der einfach seinen Verlauf wiederholt (Aider, Cline,
+   Continue, …), ohne Änderungen am Client trotzdem eine stabile Session-ID
+   (`auto-…`).
+
+Body-basierte Signale und die automatische Erkennung lesen den vollständigen
+JSON-Body von Chat-, Responses- und Messages-Requests (auch bei Chunked
+Requests), sodass eine lange Unterhaltung ihre Session-ID behält, während ihr
+Kontext wächst. Nur bei Provider-Passthrough-Bodies werden höchstens 1 MiB
+eingelesen; größere Passthrough-Bodies fallen auf Header-Signale zurück.
+
+Vom Client gelieferte Session-IDs werden per [User Path](/de/features/user-path)
+gescopt, auch UUID-förmige Werte, sodass ein Tenant nicht mit einem anderen
+kollidieren kann, indem er dieselbe ID wiederverwendet.
+
+## Sticky Load Balancing
+
+Wenn ein Request eine Session trägt und über ein
+[virtuelles Modell](/de/features/virtual-models) mit mehreren Zielen aufgelöst
+wird, wählt der erste Request ein Ziel über die Strategie der Weiterleitung
+(`round_robin` oder `cost`), und spätere Requests bleiben bei diesem Ziel. Wird
+das gepinnte Ziel nicht verfügbar oder ausgelastet, wählt die Strategie neu und
+die Session wird neu gepinnt – eine Session klebt nie an einem toten Ziel, und
+das ehrliche 429-Verhalten bei vollständiger Auslastung aller Ziele bleibt
+unverändert.
+
+Bei der Strategie `adaptive` wird der Pin an den Route-Selector übergeben, der
+bei jedem Request entscheidet, ob die Session ihn behält – sofern mehr als ein
+Ziel infrage kommt. (Bei nur einem infrage kommenden Ziel gibt es nichts zu
+wählen, daher wird der Selector übersprungen, und die Weiterleitung verhält sich
+wie ein einfacher Alias.) „Nicht verfügbar“ umfasst dann auch ein Ziel, das der
+Selector zurückgestellt hat – eines, das 429 liefert oder wiederholt
+fehlschlägt –, das in der Zielliste bleibt und für die oben genannten Prüfungen
+daher unauffällig wirkt. Die Session wechselt zu einem gesunden Ziel und wird
+dort neu gepinnt. Ein Ziel, das lediglich *langsam* ist, behält seine Session
+dennoch: Ein Wechsel würde den Prompt-Cache des Providers verwerfen, den der Pin
+schützen soll. Siehe [Intelligentes Routing](/de/pro/intelligent-routing).
+
+Die Affinität ist standardmäßig aktiviert und kann pro Weiterleitung deaktiviert
+werden:
+
+```yaml
+virtual_models:
+  - source: "smart"
+    strategy: round_robin
+    session_affinity: false   # Standard: true
+    targets:
+      - model: "openai/gpt-4o"
+      - model: "anthropic/claude-sonnet-5"
+```
+
+Dieselbe Option gibt es im Editor für virtuelle Modelle im Dashboard („Session
+keeping“) und in der Admin API (`session_affinity` bei
+`PUT /admin/virtual-models`).
+
+Pins werden pro Instanz im Arbeitsspeicher gehalten (wie Rate-Limit-Zähler):
+Nach einem Neustart oder auf einer anderen Replica wird der nächste Request
+einer Session einfach neu gepinnt. Inaktive Sessions laufen nach 6 Stunden ab.
+
+Die API-Key-Affinität ist deterministisch statt gespeichert, daher wählt
+dieselbe geordnete Key-Menge über Replicas und Neustarts hinweg denselben Key.
+Deaktivieren Sie sie pro Provider mit `session_sticky_keys: false`,
+`<PROVIDER>[_SUFFIX]_SESSION_STICKY_KEYS=false` oder über das Kontrollkästchen
+**Session-sticky API keys** im Dashboard. Requests ohne erkannte Session werden
+weiterhin per Round Robin verteilt.
+
+## Gruppierte Audit-Logs
+
+Audit-Einträge speichern die Session-ID (`session_id`), und die Seite „Audit
+Logs“ gruppiert sie standardmäßig danach (Schalter „Group by session“). Jeder
+Thread zeigt seinen neuesten Request mit einem Zähler-Badge; das
+Aufklapp-Element links zeigt die älteren Requests an. Das Badge zählt die
+vollständige Session. Filter bestimmen, welche Sessions erscheinen und welcher
+passende Request jeden Thread repräsentiert.
+`GET /admin/audit/sessions` liefert für jeden Thread `request_count` und den
+neuesten passenden Audit-Log-Eintrag. `GET /admin/audit/log?session_id=…`
+liefert alle Requests einer aufgeklappten Session.
+
+Jeder gruppierte Thread hat außerdem eine Aktion für das Nutzungsdiagramm. Sie
+öffnet „Usage Analytics“ mit der ausgewählten Session; beim Aufklappen eines
+einzelnen Requests steht dieselbe Aktion an dessen Session-Badge zur Verfügung.
+
+## Nutzung und Kosten pro Session
+
+„Usage Analytics“ enthält eine Tabelle **Usage by Recent Session** in voller
+Breite. Jede Zeile steht für eine erkannte, per User Path gescopte Session und
+zeigt die Anzahl der Requests, Eingabe-/Ausgabe-/Gesamt-Tokens sowie
+Eingabe-/Ausgabe-/Gesamtkosten. Session-Chips in dieser Tabelle und im
+Request-Log filtern die gesamte Nutzungsseite.
+
+Die Admin API stellt denselben begrenzten Bericht bereit:
+
+```bash
+curl -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  "http://localhost:8080/admin/usage/sessions?days=7&limit=50&offset=0"
+```
+
+```json
+{
+  "entries": [
+    {
+      "session_id": "scoped-0123456789abcdef0123456789abcdef",
+      "user_path": "/team/alpha",
+      "requests": 8,
+      "input_tokens": 24000,
+      "output_tokens": 4100,
+      "total_tokens": 28100,
+      "input_cost": 0.42,
+      "output_cost": 0.16,
+      "total_cost": 0.58
+    }
+  ],
+  "total": 1,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+Requests und Tokens umfassen auch Responses, die aus dem lokalen
+Response-Cache von GoModel bedient wurden. Die Kostenfelder enthalten nur
+Requests, die an den Provider gingen, denn die bei einem lokalen Cache-Treffer
+gespeicherten Kosten sind vermiedene Kosten, kein tatsächlich ausgegebenes Geld.
+Die Ergebnisse sind nach der letzten Session-Aktivität sortiert; `limit` ist
+standardmäßig 50 und auf 200 begrenzt. Die üblichen Nutzungsfilter
+(`session_id`, `user_path`, `model`, `provider`, `label` und Zeitraum) gelten.
+
+## Konfiguration
+
+Alles ist standardmäßig aktiviert.
+
+```bash
+# Hauptschalter für die Session-Identifikation
+SESSION_KEEPING_ENABLED=true
+# Inhaltsbasierte Erkennung für Requests ohne explizites Signal
+SESSION_AUTO_DETECT=true
+# Die eingebaute Registry für Header/Body-Felder
+SESSION_BUILTIN_RULES=true
+# Zusätzliche Session-Header (ab 1 nummeriert), über die eingebauten gelegt.
+# Die optionale Transformation "session-uuid" extrahiert einen session_<uuid>-Wert.
+SESSION_HEADER_1=X-My-Session
+SESSION_HEADER_1_TRANSFORM=
+```
+
+Oder in `config.yaml`:
+
+```yaml
+session:
+  enabled: true
+  auto_detect: true
+  builtin_rules: true
+  headers:
+    - header: X-My-Session
+```
+
+Header mit Zugangsdaten (`Authorization`, API-Key-Header, …) werden als
+Session-Quellen abgelehnt, da die Session-ID in Audit- und Nutzungsdatensätzen
+gespeichert wird.
+
+**Wann Sie die Standardwerte ändern sollten:** Setzen Sie
+`SESSION_AUTO_DETECT=false`, wenn nur explizit gekennzeichnete Sessions
+gruppiert werden sollen; setzen Sie `session_affinity: false` bei einer
+Weiterleitung, wenn Ihnen eine strikte Lastverteilung wichtiger ist als
+Cache-Affinität (zum Beispiel reines Round-Robin-Kapazitäts-Balancing über
+identische Deployments).
