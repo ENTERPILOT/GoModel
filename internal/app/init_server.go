@@ -74,12 +74,18 @@ func (b *bootstrap) initServerDependencies() error {
 
 	// Initialize the MCP gateway (aggregated upstream MCP servers behind /mcp).
 	if appCfg.MCP.Enabled {
-		mcpResult, err := mcpgateway.New(b.ctx, appCfg, app.storage, nil, b.serverUsageLogger)
+		mcpResult, err := mcpgateway.New(b.ctx, appCfg, app.storage, app.secrets, nil, b.serverUsageLogger, b.cfg.AppConfig.Secrets)
 		if err != nil {
 			return fmt.Errorf("failed to initialize mcp gateway: %w", err)
 		}
 		app.mcpGateway = mcpResult
 		app.register(subsystemMCPGateway, ownedByShutdown, app.mcpGateway.Close)
+		if previous := b.cfg.Replaces; previous != nil && previous.mcpGateway != nil {
+			if err := keepServingEntities("mcp servers", mcpResult.Service.Skipped(), previous.mcpGateway.Service.Running); err != nil {
+				return err
+			}
+		}
+		app.secretRotation.watchEntities(mcpgateway.ServerSecretEntity+".", mcpResult.Service)
 		slog.Info("mcp gateway enabled",
 			"path", config.JoinBasePath(appCfg.Server.BasePath, "/mcp"),
 			"configured_servers", len(appCfg.MCP.Servers))
@@ -103,7 +109,7 @@ func (b *bootstrap) initServerDependencies() error {
 	// The update check owns the only outbound connection core makes that is
 	// not a provider call. It is constructed even when disabled so GET
 	// /version keeps reporting the local build.
-	app.versionCheck = newVersionChecker(b.ctx, appCfg.VersionCheck, app.storage, appCfg.Server.MasterKey)
+	app.versionCheck = newVersionChecker(b.ctx, appCfg.VersionCheck, app.storage)
 	warnIfDataDirEphemeral(appCfg.Storage.BackendConfig())
 	warnIfMediaDirEphemeral(appCfg)
 	return nil
@@ -150,6 +156,7 @@ func (b *bootstrap) initServerConfig() error {
 		ConversationStore:               app.conversations.Store,
 		LogOnlyModelInteractions:        appCfg.Logging.OnlyModelInteractions,
 		DisablePassthroughRoutes:        !appCfg.Server.EnablePassthroughRoutes,
+		DisableLiteLLMTags:              !appCfg.Tagging.LiteLLMTagsEnabled,
 		EnabledPassthroughProviders:     appCfg.Server.EnabledPassthroughProviders,
 		RealtimeEnabled:                 appCfg.Server.RealtimeEnabled,
 		AuthVerifyEnabled:               appCfg.Server.AuthVerifyEnabled,
@@ -187,6 +194,11 @@ func (b *bootstrap) initServerConfig() error {
 	if hc, ok := app.storage.(storage.HealthChecker); ok {
 		serverCfg.StorageProbe = hc
 	}
+	// The model registry is reported but never blocks traffic: see
+	// server.ModelInventory.
+	if app.providers.Registry != nil {
+		serverCfg.ModelInventory = app.providers.Registry
+	}
 	b.serverCfg = serverCfg
 	return nil
 }
@@ -216,7 +228,7 @@ func (b *bootstrap) initResponseCache() error {
 	}
 
 	vm := app.virtualModels.Service
-	internalGuardrailExecutor := server.NewInternalChatCompletionExecutor(b.provider, server.InternalChatCompletionExecutorConfig{
+	internalCfg := server.InternalChatCompletionExecutorConfig{
 		ModelResolver:          vm,
 		ModelAuthorizer:        vm,
 		WorkflowPolicyResolver: app.workflows.Service,
@@ -228,10 +240,16 @@ func (b *bootstrap) initResponseCache() error {
 		UsageLogger:     b.serverUsageLogger,
 		PricingResolver: b.pricingResolver,
 		ResponseCache:   rcm,
-	})
-	// Instances pick the executor up on their next call; no rebuild needed.
+	}
+	internalGuardrailExecutor := server.NewInternalChatCompletionExecutor(b.provider, internalCfg)
+	// Instances pick the executors up on their next call; no rebuild needed.
 	if app.guardrails != nil && app.guardrails.Service != nil {
 		app.guardrails.Service.SetChatCompleter(internalGuardrailExecutor)
+		app.guardrails.Service.SetDecider(pluginDecider{
+			InternalDecisionsExecutor: server.NewInternalDecisionsExecutor(b.provider, internalCfg),
+			router:                    app.providers.Router,
+			virtualModels:             vm,
+		})
 	}
 	return nil
 }
@@ -265,6 +283,8 @@ func applyExtensions(serverCfg *server.Config, extensions *ext.Registry) {
 	serverCfg.OuterMiddleware = extensions.OuterMiddleware()
 	serverCfg.ExtraMiddleware = extensions.Middleware()
 	serverCfg.ExtraRoutes = extensions.Routes()
+	serverCfg.ExtraAdminRoutes = extensions.AdminRoutes()
+	serverCfg.HealthCheckers = extensions.HealthCheckers()
 	serverCfg.ExtraAuthSkipPaths = extensions.PublicPaths()
 	serverCfg.RequestAuthenticators = extensions.Authenticators()
 }

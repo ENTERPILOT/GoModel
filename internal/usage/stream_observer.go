@@ -20,6 +20,7 @@ type StreamUsageObserver struct {
 	endpoint        string
 	userPath        string
 	sessionID       string
+	authKeyID       string
 	labels          []string
 	rewriteSaved    int
 	closed          bool
@@ -64,6 +65,14 @@ func (o *StreamUsageObserver) SetSessionID(sessionID string) {
 		return
 	}
 	o.sessionID = strings.TrimSpace(sessionID)
+}
+
+// SetAuthKeyID attaches the managed auth key that authenticated the request.
+func (o *StreamUsageObserver) SetAuthKeyID(authKeyID string) {
+	if o == nil {
+		return
+	}
+	o.authKeyID = strings.TrimSpace(authKeyID)
 }
 
 // SetLabels attaches the request labels extracted from tagging headers.
@@ -169,10 +178,8 @@ func (o *StreamUsageObserver) mergeWithCachedEntry(entry *UsageEntry) *UsageEntr
 		entry.TotalTokens = entry.InputTokens + entry.OutputTokens
 	}
 	var pricingArgs []*core.ModelPricing
-	if o.pricingResolver != nil {
-		if p := o.pricingResolver.ResolvePricing(o.pricingModel(entry.Model), o.pricingProvider()); p != nil {
-			pricingArgs = append(pricingArgs, p)
-		}
+	if p := o.resolvePricing(entry.Model); p != nil {
+		pricingArgs = append(pricingArgs, p)
 	}
 	applyUsageCosts(entry, o.provider, o.endpoint, pricingArgs...)
 	return entry
@@ -254,10 +261,12 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 	}
 
 	copyExtendedUsageFields(rawData, usageMap)
+	copyRootLevelCost(rawData, chunk)
 	copyUsageDetailsFields(rawData, usageMap["prompt_tokens_details"], "prompt_")
 	copyUsageDetailsFields(rawData, usageMap["input_tokens_details"], "prompt_")
 	copyUsageDetailsFields(rawData, usageMap["completion_tokens_details"], "completion_")
 	copyUsageDetailsFields(rawData, usageMap["output_tokens_details"], "completion_")
+	copyUsageDetailsFields(rawData, usageMap["cache_creation"], "cache_creation_")
 
 	if inputTokens == 0 && outputTokens == 0 && totalTokens == 0 {
 		return nil
@@ -267,10 +276,8 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 	}
 
 	var pricingArgs []*core.ModelPricing
-	if o.pricingResolver != nil {
-		if p := o.pricingResolver.ResolvePricing(o.pricingModel(model), o.pricingProvider()); p != nil {
-			pricingArgs = append(pricingArgs, p)
-		}
+	if p := o.resolvePricing(model); p != nil {
+		pricingArgs = append(pricingArgs, p)
 	}
 
 	entry := ExtractFromSSEUsage(
@@ -284,6 +291,7 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 		entry.ProviderName = o.providerName
 		entry.UserPath = o.userPath
 		entry.SessionID = o.sessionID
+		entry.AuthKeyID = o.authKeyID
 		entry.Labels = o.labels
 		var pricing *core.ModelPricing
 		if len(pricingArgs) > 0 {
@@ -304,6 +312,16 @@ func (o *StreamUsageObserver) pricingModel(responseModel string) string {
 	return strings.TrimSpace(responseModel)
 }
 
+// resolvePricing prices the routed model or, when only it carries pricing,
+// the model that answered; see ResolveServedModelPricing.
+func (o *StreamUsageObserver) resolvePricing(responseModel string) *core.ModelPricing {
+	if o == nil {
+		return nil
+	}
+	return ResolveServedModelPricing(o.pricingResolver, o.pricingModel(responseModel), o.pricingProvider(),
+		func() string { return responseModel })
+}
+
 func (o *StreamUsageObserver) pricingProvider() string {
 	if o == nil {
 		return ""
@@ -312,6 +330,27 @@ func (o *StreamUsageObserver) pricingProvider() string {
 		return providerName
 	}
 	return strings.TrimSpace(o.provider)
+}
+
+// copyRootLevelCost picks up a provider-reported per-request charge published
+// at the chunk root rather than inside usage. Eden AI reports cost there, and
+// a streamed chunk reaches the observer as raw JSON, so unlike the
+// non-streaming path the provider has no opportunity to relocate it first.
+//
+// A usage-level cost stays authoritative: it is the conventional location, so
+// a provider that reports both is taken at its more specific word. The value
+// is only ever interpreted as USD for providers that CalculateUsageCost gates
+// on, so harvesting it for everyone adds a raw-usage member without changing
+// any other provider's cost math.
+func copyRootLevelCost(rawData map[string]any, chunk map[string]any) {
+	if _, exists := rawData["cost"]; exists {
+		return
+	}
+	// A NaN fails this comparison and is dropped, matching how
+	// copyExtendedUsageFields screens the usage-level member.
+	if value, ok := numericFloat(chunk["cost"]); ok && value >= 0 {
+		rawData["cost"] = value
+	}
 }
 
 func copyExtendedUsageFields(rawData map[string]any, usageMap map[string]any) {

@@ -611,7 +611,7 @@ func TestModelValidation_RegistryNotInitializedReturnsGatewayError(t *testing.T)
 	err := handler(c)
 	require.NoError(t, err)
 	assert.False(t, handlerCalled)
-	assert.Equal(t, http.StatusBadGateway, rec.Code)
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	assert.Contains(t, rec.Body.String(), "model registry not initialized")
 }
 

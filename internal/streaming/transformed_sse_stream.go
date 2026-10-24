@@ -41,13 +41,13 @@ type Transformer interface {
 
 // TransformOptions tunes NewTransformedSSEStream.
 type TransformOptions struct {
-	// LookbehindChars withholds this many trailing characters of text per
-	// choice so a pattern that spans two chunks is visible to the transformer
-	// in one event. 0 disables re-segmentation. See NewTransformedSSEStream.
+	// LookbehindChars withholds this many trailing characters of each window
+	// (a choice's text, its reasoning, a tool call's arguments) so a pattern
+	// that spans two chunks is visible to the transformer in one event. 0 disables re-segmentation. See NewTransformedSSEStream.
 	LookbehindChars int
-	// MinChunkChars collects the text deltas of a choice until at least this
+	// MinChunkChars collects the deltas of a window until at least this
 	// many new characters (runes) are pending and presents them to the
-	// transformer as one text event. 0 presents deltas as they arrive; values
+	// transformer as one event. 0 presents deltas as they arrive; values
 	// above MaxMinChunkChars are clamped to it. See NewTransformedSSEStream.
 	MinChunkChars int
 	// MaxEventBytes bounds one SSE event. A larger event cannot be inspected
@@ -88,10 +88,10 @@ const MaxMinChunkChars = 16 * 1024
 // "event_too_large" for oversized events), closes upstream, and makes later
 // Reads return io.EOF.
 //
-// Lookbehind re-segmentation (LookbehindChars = N > 0) applies to text
-// deltas and to tool-call argument deltas, each kind in its own window: a
-// choice's text is one window and each of its tool calls' arguments
-// (Event.Call) another, with a withheld tail of at most N characters
+// Lookbehind re-segmentation (LookbehindChars = N > 0) applies to text,
+// reasoning, and tool-call argument deltas, each kind in its own window: a
+// choice's text is one window, its reasoning another, and each of its tool
+// calls' arguments (Event.Call) another, with a withheld tail of at most N characters
 // (runes), initially empty:
 //
 //  1. When a delta arrives, t sees one event of its kind whose Text is the
@@ -100,10 +100,11 @@ const MaxMinChunkChars = 16 * 1024
 //     Decision.Text for it, drop discards it (tail included).
 //  2. Of the resulting window, everything but the last N characters is
 //     emitted to the client; the last N become the new tail.
-//  3. An event that is not held (reasoning, finish, usage, other, a tool
-//     call announced with empty arguments) first flushes every window, a
-//     delta of another kind for the same choice flushes that choice's
-//     windows of other kinds (its text before its first tool call), and
+//  3. An event that is not held (finish, usage, other, a tool call
+//     announced with empty arguments) first flushes every window, a delta
+//     of another kind for the same choice flushes that choice's windows of
+//     other kinds (its reasoning before its text, its text before its
+//     first tool call), and
 //     the upstream end flushes them all before OnEnd: t sees the tail once
 //     more (Overlap equal to its length) and the result is emitted in
 //     full. Windows of one kind (parallel tool calls) are independent and
@@ -118,7 +119,7 @@ const MaxMinChunkChars = 16 * 1024
 // one event before any of its characters reaches the client, at the cost of
 // N characters of delay.
 //
-// Coalescing (MinChunkChars = M > 0) collects the text deltas of a choice
+// Coalescing (MinChunkChars = M > 0) collects the deltas of a window
 // until at least M new characters are pending and only then runs step 1 on
 // the window tail+pending, so t sees runs of at least M characters (the
 // final run at a flush may be shorter). Both work together: the tail is
@@ -196,11 +197,18 @@ func keyOf(ev Event) pendingKey {
 	return key
 }
 
-// held reports whether ev is re-segmented rather than relayed: text deltas
-// and tool-call deltas carrying arguments. A tool call announced with
-// empty arguments passes through, so its id and name are relayed at once.
+// held reports whether ev is re-segmented rather than relayed: text and
+// reasoning deltas, and tool-call deltas carrying arguments. A tool call
+// announced with empty arguments passes through, so its id and name are
+// relayed at once.
 func held(ev Event) bool {
-	return ev.Kind == KindTextDelta || (ev.Kind == KindToolCallDelta && ev.Text != "")
+	switch ev.Kind {
+	case KindTextDelta, KindReasoningDelta:
+		return true
+	case KindToolCallDelta:
+		return ev.Text != ""
+	}
+	return false
 }
 
 // pendingText is the withheld text of one window: the lookbehind tail the

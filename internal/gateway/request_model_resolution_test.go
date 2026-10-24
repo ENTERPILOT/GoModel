@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,6 +19,7 @@ type requestRefreshProvider struct {
 	refreshErr          error
 	resolveErrWhenEmpty bool
 	refreshCalls        int
+	resolveErr          error
 }
 
 func newRequestRefreshProvider(modelCount int) *requestRefreshProvider {
@@ -47,6 +49,9 @@ func (p *requestRefreshProvider) RefreshProviderModels(_ context.Context, provid
 }
 
 func (p *requestRefreshProvider) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	if p.resolveErr != nil {
+		return core.ModelSelector{}, false, p.resolveErr
+	}
 	if p.resolveErrWhenEmpty && p.modelCount == 0 {
 		return core.ModelSelector{}, false, core.NewProviderError("", http.StatusServiceUnavailable, "model registry not initialized", nil)
 	}
@@ -291,4 +296,65 @@ func TestResolveRequestModelReturnsRefreshError(t *testing.T) {
 	require.ErrorAs(t, err, &gatewayErr)
 	require.Equal(t, http.StatusServiceUnavailable, gatewayErr.HTTPStatusCode())
 	require.Equal(t, core.ErrorTypeProvider, gatewayErr.Type)
+}
+
+// nonRefreshingProvider hides RefreshProviderModels, for a provider whose
+// models cannot be refreshed at request time.
+type nonRefreshingProvider struct {
+	core.RoutableProvider
+	inner *requestRefreshProvider
+}
+
+func (p nonRefreshingProvider) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	return p.inner.ResolveModel(requested)
+}
+
+func (p nonRefreshingProvider) ModelCount() int { return p.inner.ModelCount() }
+
+// A resolver's typed gateway error keeps its status: while the model registry
+// is still empty the router answers 503 so clients retry, and that must not be
+// rewritten into a 400 that blames the request.
+func TestResolveRequestModelKeepsResolverErrorStatus(t *testing.T) {
+	tests := []struct {
+		name         string
+		modelCount   int
+		resolveEmpty bool  // the resolver itself reports the empty registry
+		resolveErr   error // a plain resolver error
+		noRefresh    bool
+		wantStatus   int
+		wantType     core.ErrorType
+	}{
+		{name: "registry not ready", resolveEmpty: true,
+			wantStatus: http.StatusServiceUnavailable, wantType: core.ErrorTypeProvider},
+		{name: "registry not ready without refresh", resolveEmpty: true, noRefresh: true,
+			wantStatus: http.StatusServiceUnavailable, wantType: core.ErrorTypeProvider},
+		{name: "empty registry with a resolving selector",
+			wantStatus: http.StatusServiceUnavailable, wantType: core.ErrorTypeProvider},
+		{name: "plain resolver error", modelCount: 1, resolveErr: errors.New("unknown alias"),
+			wantStatus: http.StatusBadRequest, wantType: core.ErrorTypeInvalidRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inner := newRequestRefreshProvider(tt.modelCount)
+			inner.resolveErrWhenEmpty = tt.resolveEmpty
+			inner.resolveErr = tt.resolveErr
+			var provider core.RoutableProvider = inner
+			if tt.noRefresh {
+				provider = nonRefreshingProvider{RoutableProvider: inner, inner: inner}
+			}
+
+			_, err := ResolveRequestModelWithAuthorizer(
+				context.Background(),
+				provider,
+				nil,
+				nil,
+				core.NewRequestedModelSelector("openai/gpt-4o", ""),
+			)
+
+			var gatewayErr *core.GatewayError
+			require.ErrorAs(t, err, &gatewayErr)
+			assert.Equal(t, tt.wantStatus, gatewayErr.HTTPStatusCode())
+			assert.Equal(t, tt.wantType, gatewayErr.Type)
+		})
+	}
 }

@@ -56,14 +56,14 @@ function pushSection(sections, key, title, items) {
   }
 }
 
-// rowHasModelDetails reports whether the accordion has anything to show. A
-// virtual model whose target is not in the inventory only carries a stub
-// model ({ id, object }), so it gets no toggle.
+// rowHasModelDetails reports whether the accordion has anything to show.
+// Virtual-model rows get no toggle: their model is only the first resolvable
+// target's, which its own row already details and which misdescribes a
+// virtual model spreading requests over several targets.
 export function rowHasModelDetails(row) {
   const model = row && row.model;
-  if (!model) return false;
-  if (!row.is_alias) return Boolean(text(model.id));
-  return Boolean(model.metadata || text(model.owned_by) || createdDate(model.created));
+  if (!model || row.is_alias) return false;
+  return Boolean(text(model.id));
 }
 
 // ---- Layers and views ----

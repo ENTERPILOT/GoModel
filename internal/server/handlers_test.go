@@ -518,12 +518,18 @@ type fileListCall struct {
 
 type recordingModelAuthorizer struct {
 	lastSelector core.ModelSelector
+	lastProvider string
 	err          error
 	allow        func(core.ModelSelector) bool
 }
 
 func (a *recordingModelAuthorizer) ValidateModelAccess(_ context.Context, selector core.ModelSelector) error {
 	a.lastSelector = selector
+	return a.err
+}
+
+func (a *recordingModelAuthorizer) ValidateProviderAccess(_ context.Context, provider string) error {
+	a.lastProvider = provider
 	return a.err
 }
 
@@ -5939,7 +5945,7 @@ func TestProviderPassthrough_RejectsUnsupportedProvider(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Contains(t, rec.Body.String(), `provider passthrough for \"groq\" is not enabled`)
-	require.Contains(t, rec.Body.String(), "anthropic, deepseek, hetzner, jev, kilo, llamacpp, llmd, openai, openrouter, sglang, vllm, zai")
+	require.Contains(t, rec.Body.String(), "anthropic, deepseek, edenai, hetzner, jev, kilo, llamacpp, llmd, openai, openrouter, sglang, vllm, zai")
 }
 
 func TestProviderPassthrough_ChutesRequiresExplicitOptIn(t *testing.T) {
@@ -6090,6 +6096,10 @@ func (a *userPathModelAuthorizer) ValidateModelAccess(ctx context.Context, selec
 		return core.NewInvalidRequestError("denied", nil)
 	}
 	return nil
+}
+
+func (a *userPathModelAuthorizer) ValidateProviderAccess(ctx context.Context, provider string) error {
+	return a.ValidateModelAccess(ctx, core.ModelSelector{Provider: provider})
 }
 
 func (a *userPathModelAuthorizer) AllowsModel(ctx context.Context, selector core.ModelSelector) bool {

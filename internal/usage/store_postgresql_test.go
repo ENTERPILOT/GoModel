@@ -26,6 +26,7 @@ func TestBuildUsageInsert(t *testing.T) {
 			ProviderName:           "primary-openai",
 			Endpoint:               "/v1/chat/completions",
 			SessionID:              "session-1",
+			AuthKeyID:              "key-1",
 			CacheType:              CacheTypeExact,
 			Labels:                 []string{"alpha", "prod"},
 			InputTokens:            10,
@@ -61,26 +62,28 @@ func TestBuildUsageInsert(t *testing.T) {
 	})
 
 	normalized := strings.Join(strings.Fields(query), " ")
-	wantQuery := "INSERT INTO usage (id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels, input_tokens, output_tokens, total_tokens, rewrite_tokens_saved, rewrite_cost_saved, raw_data, input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23), ($24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46) ON CONFLICT (id) DO NOTHING"
+	wantQuery := "INSERT INTO usage (id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels, input_tokens, output_tokens, total_tokens, rewrite_tokens_saved, rewrite_cost_saved, raw_data, input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat, auth_key_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24), ($25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48) ON CONFLICT (id) DO NOTHING"
 	require.Equal(t, wantQuery, normalized)
 
-	require.Len(t, args, 46)
+	require.Len(t, args, 48)
 	require.Equal(t, "usage-1", args[0])
 	require.Equal(t, "primary-openai", args[6])
 	require.Equal(t, CostSourceModelPricing, args[21])
-	require.Equal(t, "usage-2", args[23])
+	require.Equal(t, "key-1", args[23])
+	require.Equal(t, "usage-2", args[24])
 	require.Equal(t, "session-1", args[9])
 	require.Equal(t, CacheTypeExact, args[10])
 	require.Equal(t, `["alpha","prod"]`, args[11])
 	require.Equal(t, 42, args[15])
 	require.Equal(t, &rewriteCostSaved, args[16])
 	require.JSONEq(t, `{"cached_tokens":3}`, string(args[17].([]byte)))
-	require.Nil(t, args[33])
 	require.Nil(t, args[34])
-	require.Equal(t, 0, args[38])
-	require.Nil(t, args[39].(*float64), "rewrite_cost_saved")
-	rawData, ok := args[40].([]byte)
-	require.True(t, ok, "args[40] has type %T, want []byte", args[40])
+	require.Nil(t, args[35])
+	require.Equal(t, 0, args[39])
+	require.Nil(t, args[40].(*float64), "rewrite_cost_saved")
+	rawData, ok := args[41].([]byte)
+	require.True(t, ok, "args[41] has type %T, want []byte", args[41])
+	require.Empty(t, args[47], "auth_key_id")
 	require.Nil(t, rawData)
 }
 

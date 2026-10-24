@@ -32,6 +32,21 @@ type FileContent struct {
 	ExtraFields UnknownJSONFields `json:"-" swaggerignore:"true"`
 }
 
+// DefaultFilename names inline file data that arrived without a filename,
+// which OpenAI requires alongside file_data: "document" with the extension of
+// the data URL's media type when it is a known document type.
+func DefaultFilename(fileData string) string {
+	mediaType, _, _ := strings.Cut(strings.TrimPrefix(strings.TrimSpace(fileData), "data:"), ";")
+	switch strings.ToLower(mediaType) {
+	case "application/pdf":
+		return "document.pdf"
+	case "text/plain":
+		return "document.txt"
+	default:
+		return "document"
+	}
+}
+
 // ValidFilePayload reports whether a file part carries an attachment: inline
 // file_data, a remote file_url, or a provider file_id.
 func ValidFilePayload(file *FileContent) bool {

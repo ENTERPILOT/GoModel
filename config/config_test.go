@@ -76,7 +76,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"SEMANTIC_CACHE_PINECONE_HOST", "SEMANTIC_CACHE_PINECONE_API_KEY", "SEMANTIC_CACHE_PINECONE_NAMESPACE", "SEMANTIC_CACHE_PINECONE_DIMENSION",
 		"SEMANTIC_CACHE_WEAVIATE_URL", "SEMANTIC_CACHE_WEAVIATE_CLASS", "SEMANTIC_CACHE_WEAVIATE_API_KEY",
 		"STORAGE_TYPE", "SQLITE_PATH", "POSTGRES_URL", "POSTGRES_MAX_CONNS",
-		"MONGODB_URL", "MONGODB_DATABASE",
+		"MONGODB_URL", "MONGODB_DATABASE", "GOMODEL_ENCRYPTION_KEY", "GOMODEL_ENCRYPTION_KEY_PREVIOUS",
 		"METRICS_ENABLED", "METRICS_ENDPOINT",
 		"LOGGING_ENABLED", "LOGGING_LOG_BODIES", "LOGGING_LOG_REVISION_BODIES", "LOGGING_LOG_GUARDRAIL_STEPS", "LOGGING_LOG_HEADERS",
 		"LOGGING_LOG_AUDIO_BODIES", "LOGGING_LOG_IMAGE_BODIES", "LOGGING_LOG_IMAGE_BODIES_SCOPE",
@@ -89,18 +89,19 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"RATE_LIMITS_ENABLED", "RATE_LIMITS_FLUSH_INTERVAL",
 		"DASHBOARD_LIVE_LOGS_ENABLED", "DASHBOARD_LIVE_LOGS_BUFFER_SIZE",
 		"DASHBOARD_LIVE_LOGS_REPLAY_LIMIT", "DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS",
-		"GUARDRAILS_ENABLED", "ENABLE_GUARDRAILS_FOR_BATCH_PROCESSING", "PLUGINS_ENABLED",
+		"GUARDRAILS_ENABLED", "ENABLE_GUARDRAILS_FOR_BATCH_PROCESSING", "PLUGINS_ENABLED", "PLUGINS_LOAD",
 		"FAILOVER_MODE", "FAILOVER_MANUAL_RULES_PATH", "FAILOVER_ENABLED", "FAILOVER_RULES_JSON", "FAILOVER_DISABLED_MODELS", "FAILOVER_DISABLED_MODELS_JSON",
 		"MODELS_ENABLED_BY_DEFAULT", "KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT", "UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT", "CONFIGURED_PROVIDER_MODELS_MODE",
 		"HTTP_TIMEOUT", "HTTP_RESPONSE_HEADER_TIMEOUT",
 		"WORKFLOW_REFRESH_INTERVAL",
+		"LITELLM_TAGS_ENABLED",
 	} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
 	}
 	for _, item := range os.Environ() {
 		key, _, _ := strings.Cut(item, "=")
-		if strings.HasPrefix(key, "SET_BUDGET_") || strings.HasPrefix(key, "SET_RATE_LIMIT_") || strings.HasPrefix(key, "SET_PROVIDER_RATE_LIMIT_") || strings.HasPrefix(key, "TAGGING_HEADER_") {
+		if strings.HasPrefix(key, "SET_BUDGET_") || strings.HasPrefix(key, "SET_RATE_LIMIT_") || strings.HasPrefix(key, "SET_PROVIDER_RATE_LIMIT_") || strings.HasPrefix(key, "SET_PROVIDER_BUDGET_") || strings.HasPrefix(key, "TAGGING_HEADER_") {
 			t.Setenv(key, "")
 			os.Unsetenv(key)
 		}
@@ -132,7 +133,7 @@ func TestBuildDefaultConfig(t *testing.T) {
 	assert.Equal(t, DefaultStreamStallTimeoutSeconds, cfg.Server.StreamStallTimeout)
 	assert.True(t, cfg.Server.EnablePassthroughRoutes)
 	assert.True(t, cfg.Server.AllowPassthroughV1Alias)
-	assert.Equal(t, []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "jev"}, cfg.Server.EnabledPassthroughProviders)
+	assert.Equal(t, []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "edenai", "jev"}, cfg.Server.EnabledPassthroughProviders)
 	assert.Equal(t, ConfiguredProviderModelsModeFallback, cfg.Models.ConfiguredProviderModelsMode)
 	assert.Nil(t, cfg.Cache.Model.Local)
 	assert.Equal(t, 3600, cfg.Cache.Model.RefreshInterval)
@@ -261,6 +262,61 @@ func TestLoadBudgetEnvUserPath(t *testing.T) {
 		assert.Equal(t, 12.5, entries[0].Limits[0].Amount)
 		assert.Equal(t, int64(604800), entries[0].Limits[1].PeriodSeconds)
 		assert.Equal(t, 50.0, entries[0].Limits[1].Amount)
+	})
+}
+
+func TestLoadProviderBudgets(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		writeConfigYAML(t, dir, `
+budgets:
+  providers:
+    - name: OpenAI-Prod
+      limits:
+        - period: daily
+          amount: 100
+    - name: anthropic
+      limits:
+        - period: monthly
+          amount: 500
+`)
+		// The env entry replaces the YAML entry with the same provider, and
+		// underscores map to hyphens like provider-instance env vars.
+		t.Setenv("SET_PROVIDER_BUDGET_OPENAI_PROD", "daily=50,monthly=1000")
+		t.Setenv("SET_PROVIDER_BUDGET_GROQ", "hourly=2")
+
+		result, err := Load()
+		require.NoError(t, err)
+
+		byName := map[string]BudgetProviderConfig{}
+		for _, entry := range result.Config.Budgets.Providers {
+			byName[entry.Name] = entry
+		}
+		require.Len(t, byName, 3)
+		assert.Len(t, byName["openai-prod"].Limits, 2)
+		assert.Equal(t, 50.0, byName["openai-prod"].Limits[0].Amount)
+		assert.Equal(t, int64(2592000), byName["anthropic"].Limits[0].PeriodSeconds)
+		assert.Equal(t, int64(3600), byName["groq"].Limits[0].PeriodSeconds)
+		// Provider budgets stay out of the SET_BUDGET_* user-path space.
+		assert.Empty(t, result.Config.Budgets.UserPaths)
+	})
+}
+
+func TestLoadProviderBudgetRejectsQualifiedModel(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		writeConfigYAML(t, dir, `
+budgets:
+  providers:
+    - name: openai/gpt-4o
+      limits:
+        - period: daily
+          amount: 100
+`)
+		_, err := Load()
+		require.ErrorContains(t, err, "budgets.providers[0].name must be a provider name without slashes or spaces")
 	})
 }
 
@@ -1725,6 +1781,53 @@ server:
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "server.stream_stall_timeout")
 	})
+}
+
+func TestLoadRejectsMasterKeyFromUnsetVariable(t *testing.T) {
+	const unset = "server.master_key reads an environment variable that is not set"
+	tests := []struct {
+		name      string
+		field     string
+		masterKey string
+		env       map[string]string
+		wantKey   string
+		wantErr   string
+	}{
+		{name: "unset variable", masterKey: "${LITELLM_MASTER_KEY}", wantErr: unset},
+		{name: "unset non-identifier name", masterKey: "${LITELLM-MASTER-KEY}", wantErr: unset},
+		{name: "unset bare reference", masterKey: "$LITELLM_MASTER_KEY", wantErr: unset},
+		{name: "unset inside a value", masterKey: "sk-${LITELLM_MASTER_KEY}", wantErr: unset},
+		{name: "set variable", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"LITELLM_MASTER_KEY": "sk-1234"}, wantKey: "sk-1234"},
+		{name: "empty default", masterKey: "${LITELLM_MASTER_KEY:-}", wantKey: ""},
+		{name: "environment override", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"GOMODEL_MASTER_KEY": "sk-env"}, wantKey: "sk-env"},
+		{name: "environment override holding ${", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"GOMODEL_MASTER_KEY": "pa${ss}"}, wantKey: "pa${ss}"},
+		{name: "set variable holding ${", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"LITELLM_MASTER_KEY": "pa${ss}"}, wantKey: "pa${ss}"},
+		{name: "field name from a variable", field: "master_${SUFFIX}", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"SUFFIX": "key"}, wantErr: unset},
+		{name: "disabled master key", masterKey: "${LITELLM_MASTER_KEY}", env: map[string]string{"MASTER_KEY_DISABLED": "true"}, wantKey: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			t.Setenv("LITELLM_MASTER_KEY", "")
+			for name, value := range tt.env {
+				t.Setenv(name, value)
+			}
+			withTempDir(t, func(dir string) {
+				field := tt.field
+				if field == "" {
+					field = "master_key"
+				}
+				writeConfigYAML(t, dir, "server:\n  "+field+": \""+tt.masterKey+"\"\n")
+				result, err := Load()
+				if tt.wantErr != "" {
+					require.ErrorContains(t, err, tt.wantErr)
+					return
+				}
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantKey, result.Config.Server.MasterKey)
+			})
+		})
+	}
 }
 
 func TestLoadMasterKeyDisabledForgetsTheConfiguredKey(t *testing.T) {

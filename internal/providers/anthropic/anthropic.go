@@ -87,6 +87,11 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 	return p
 }
 
+// GetBaseURL returns the provider's current API base URL.
+func (p *Provider) GetBaseURL() string {
+	return p.client.BaseURL()
+}
+
 // SetBaseURL allows configuring a custom base URL for the provider
 func (p *Provider) SetBaseURL(url string) {
 	p.client.SetBaseURL(url)
@@ -461,6 +466,7 @@ func buildAnthropicRawUsage(u anthropicUsage) map[string]any {
 	if u.CacheReadInputTokens > 0 {
 		raw["cache_read_input_tokens"] = u.CacheReadInputTokens
 	}
+	addAnthropicCacheCreationDetails(raw, u.CacheCreation)
 	if u.OutputTokensDetails.ThinkingTokens > 0 {
 		raw["completion_reasoning_tokens"] = u.OutputTokensDetails.ThinkingTokens
 	}
@@ -477,10 +483,23 @@ func addAnthropicUsagePayloadDetails(payload map[string]any, usage *anthropicUsa
 	if usage.CacheCreationInputTokens > 0 {
 		payload["cache_creation_input_tokens"] = usage.CacheCreationInputTokens
 	}
+	addAnthropicCacheCreationDetails(payload, usage.CacheCreation)
 	if usage.OutputTokensDetails.ThinkingTokens > 0 {
 		payload[outputDetailsKey] = map[string]any{
 			"reasoning_tokens": usage.OutputTokensDetails.ThinkingTokens,
 		}
+	}
+}
+
+// addAnthropicCacheCreationDetails records the cache-write TTL split under
+// the flattened keys the stream usage observer derives from usage.cache_creation,
+// so 1-hour writes are priced at their own rate.
+func addAnthropicCacheCreationDetails(dst map[string]any, c anthropicCacheCreation) {
+	if c.Ephemeral5mInputTokens > 0 {
+		dst["cache_creation_ephemeral_5m_input_tokens"] = c.Ephemeral5mInputTokens
+	}
+	if c.Ephemeral1hInputTokens > 0 {
+		dst["cache_creation_ephemeral_1h_input_tokens"] = c.Ephemeral1hInputTokens
 	}
 }
 
@@ -534,6 +553,10 @@ func mergeAnthropicUsage(dst *anthropicUsage, src *anthropicUsage) bool {
 	}
 	if src.CacheReadInputTokens != 0 {
 		dst.CacheReadInputTokens = src.CacheReadInputTokens
+		merged = true
+	}
+	if src.CacheCreation != (anthropicCacheCreation{}) {
+		dst.CacheCreation = src.CacheCreation
 		merged = true
 	}
 	if src.OutputTokensDetails.ThinkingTokens != 0 {

@@ -283,6 +283,9 @@ func mongoLogMatchFilters(params LogQueryParams) (bson.D, error) {
 	if params.Stream != nil {
 		matchFilters = append(matchFilters, bson.E{Key: "stream", Value: *params.Stream})
 	}
+	if len(params.ExcludeOperations) > 0 {
+		matchFilters = append(matchFilters, mongoExcludeOperationsFilter(params.ExcludeOperations))
+	}
 	if params.Search != "" && isCanonicalUUID(params.Search) {
 		// A full canonical UUID is a pasted identifier: match the indexed
 		// identity fields by equality (both spellings — stored ids are
@@ -416,4 +419,26 @@ func (r *MongoDBReader) findConversationEntry(ctx context.Context, filter bson.D
 	}
 
 	return row.toLogEntry(), nil
+}
+
+// mongoExcludeOperationsFilter drops paths belonging to any of the
+// operations; entries without a path stay. Exact paths also match with one
+// trailing slash, as DescribeEndpoint does.
+func mongoExcludeOperationsFilter(ops []core.Operation) bson.E {
+	var exact bson.A
+	var nor bson.A
+	for _, op := range ops {
+		paths, _ := core.PathsForOperation(op)
+		for _, path := range paths.Exact {
+			exact = append(exact, path, path+"/")
+		}
+		for _, prefix := range paths.Prefixes {
+			exact = append(exact, prefix)
+			nor = append(nor, bson.D{{Key: "path", Value: bson.D{
+				{Key: "$regex", Value: "^" + regexp.QuoteMeta(prefix+"/")},
+			}}})
+		}
+	}
+	nor = append(nor, bson.D{{Key: "path", Value: bson.D{{Key: "$in", Value: exact}}}})
+	return bson.E{Key: "$nor", Value: nor}
 }

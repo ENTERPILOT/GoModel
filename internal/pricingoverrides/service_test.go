@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -351,5 +352,37 @@ func TestNormalizedRefreshIntervalClampsBelowRefreshTimeout(t *testing.T) {
 			got := normalizedRefreshInterval(tt.interval)
 			require.Equal(t, tt.want, got, "normalizedRefreshInterval(%s) = %s, want %s", tt.interval, got, tt.want)
 		})
+	}
+}
+
+func TestServiceHasModelPricing(t *testing.T) {
+	baseRate := 1.0
+	service, err := NewService(
+		newTestStore(
+			Override{Selector: "/", Pricing: Pricing{InputPerMtok: new(float64(10))}},
+			Override{Selector: "jev/", Pricing: Pricing{InputPerMtok: new(float64(20))}},
+			Override{Selector: "jev/jev-1.13.0", Pricing: Pricing{InputPerMtok: new(float64(42))}},
+			Override{Selector: "kev-4b", Pricing: Pricing{InputPerMtok: new(float64(0))}},
+		),
+		testCatalog{providerNames: []string{"jev", "openai"}},
+		selectivePricingResolver{"openai/gpt-4o": {InputPerMtok: &baseRate}},
+	)
+	require.NoError(t, err)
+	require.NoError(t, service.Refresh(context.Background()))
+
+	tests := []struct {
+		model, provider string
+		want            bool
+	}{
+		{model: "jev-1.13.0", provider: "jev", want: true},
+		{model: "jev/jev-1.13.0", provider: "jev", want: true},
+		{model: "kev-4b", provider: "kev", want: true},
+		{model: "gpt-4o", provider: "openai", want: true},
+		// Only the provider-wide and global overrides match these.
+		{model: "jev-latest", provider: "jev", want: false},
+		{model: "gpt-9", provider: "openai", want: false},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, service.HasModelPricing(tt.model, tt.provider), "%s/%s", tt.provider, tt.model)
 	}
 }

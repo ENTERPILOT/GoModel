@@ -45,7 +45,7 @@ func TestUnsupportedCapabilities_ReturnInvalidRequestErrors(t *testing.T) {
 
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{Model: "jev-latest"})
 	providertest.AssertUnsupported(t, err)
-	assert.Contains(t, err.Error(), "/p/jev/systemone")
+	assert.Contains(t, err.Error(), "/v1/systemone")
 	_, err = provider.StreamChatCompletion(context.Background(), &core.ChatRequest{Model: "jev-latest"})
 	providertest.AssertUnsupported(t, err)
 	_, err = provider.Responses(context.Background(), &core.ResponsesRequest{Model: "jev-latest"})

@@ -1,0 +1,8 @@
+# Used instead of the root .dockerignore when building .oss-scanner/Dockerfile. The root one is written for the
+# production image and drops tests/, *_test.go, .git and docs, all of which the scanner needs.
+.env
+.env.*
+**/node_modules
+data/
+bin/
+coverage.out

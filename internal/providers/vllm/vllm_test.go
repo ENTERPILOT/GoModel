@@ -95,3 +95,25 @@ func TestPassthrough_RoutesByEndpointWhenBaseURLIncludesV1(t *testing.T) {
 		})
 	}
 }
+
+// Native passthrough authenticates from the provider's keyring, so a key
+// swapped in at runtime (secret rotation) reaches it too.
+func TestPassthrough_UsesRotatedKey(t *testing.T) {
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"tokens":[1]}`)
+	keys := providers.NewKeyring("old-key")
+	opts := providertest.Options(llmclient.Hooks{})
+	opts.HTTPClient = server.Client()
+	opts.Keys = keys
+	provider := New(providers.ProviderConfig{APIKey: "old-key", BaseURL: server.URL}, opts).(*Provider)
+
+	require.True(t, keys.Replace("new-key"))
+	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
+		Method:   http.MethodPost,
+		Endpoint: "tokenize",
+		Body:     io.NopCloser(strings.NewReader("{}")),
+		Headers:  http.Header{"Content-Type": []string{"application/json"}},
+	})
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, "Bearer new-key", capture.Last(t).Header.Get("Authorization"))
+}

@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -67,6 +68,38 @@ func TestCompatibleProvider_ListModels_ReturnsUpstreamError(t *testing.T) {
 	var gatewayErr *core.GatewayError
 	require.ErrorAs(t, err, &gatewayErr)
 	assert.Contains(t, []core.ErrorType{core.ErrorTypeProvider, core.ErrorTypeNotFound}, gatewayErr.Type)
+}
+
+func TestCompatibleProvider_ListModels_MarksMissingModelsEndpoint(t *testing.T) {
+	tests := []struct {
+		name        string
+		status      int
+		unsupported bool
+	}{
+		{name: "404", status: http.StatusNotFound, unsupported: true},
+		{name: "405", status: http.StatusMethodNotAllowed, unsupported: true},
+		{name: "500", status: http.StatusInternalServerError},
+		{name: "401", status: http.StatusUnauthorized},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server, _ := providertest.Server(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tt.status)
+			})
+			provider := NewCompatibleProvider(
+				"test-key",
+				providers.ProviderOptions{HTTPClient: server.Client(), Resilience: providertest.Resilience()},
+				CompatibleProviderConfig{ProviderName: "stt", BaseURL: server.URL},
+			)
+
+			_, err := provider.ListModels(context.Background())
+			require.Error(t, err)
+			assert.Equal(t, tt.unsupported, errors.Is(err, core.ErrModelListingUnsupported))
+			var gatewayErr *core.GatewayError
+			require.ErrorAs(t, err, &gatewayErr)
+			assert.Equal(t, gatewayErr.Error(), err.Error())
+		})
+	}
 }
 
 func TestCompatibleProvider_AdaptChatRequest_RewritesBodyOnChatAndStream(t *testing.T) {

@@ -158,6 +158,10 @@ type PromptTokensDetails struct {
 	AudioTokens  int `json:"audio_tokens"`
 	TextTokens   int `json:"text_tokens"`
 	ImageTokens  int `json:"image_tokens"`
+	// CacheWriteTokens is the part of the prompt written to the prompt cache
+	// (OpenAI GPT-5.6+), billed at the cache-write rate. Omitted when zero
+	// so providers that never report it do not gain the member.
+	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
 }
 
 // CompletionTokensDetails holds extended output token breakdown (OpenAI/xAI).
@@ -283,6 +287,7 @@ type ModelPricing struct {
 	OutputPerMtok          *float64 `json:"output_per_mtok,omitempty" yaml:"output_per_mtok,omitempty"`
 	CachedInputPerMtok     *float64 `json:"cached_input_per_mtok,omitempty" yaml:"cached_input_per_mtok,omitempty"`
 	CacheWritePerMtok      *float64 `json:"cache_write_per_mtok,omitempty" yaml:"cache_write_per_mtok,omitempty"`
+	CacheWrite1hPerMtok    *float64 `json:"cache_write_1h_per_mtok,omitempty" yaml:"cache_write_1h_per_mtok,omitempty"` // Anthropic 1-hour TTL cache writes; cache_write_per_mtok prices the default 5-minute ones
 	ReasoningOutputPerMtok *float64 `json:"reasoning_output_per_mtok,omitempty" yaml:"reasoning_output_per_mtok,omitempty"`
 	BatchInputPerMtok      *float64 `json:"batch_input_per_mtok,omitempty" yaml:"batch_input_per_mtok,omitempty"`
 	BatchOutputPerMtok     *float64 `json:"batch_output_per_mtok,omitempty" yaml:"batch_output_per_mtok,omitempty"`
@@ -336,6 +341,7 @@ func (p *ModelPricing) FieldSources(source string) map[string]string {
 	add("output_per_mtok", p.OutputPerMtok)
 	add("cached_input_per_mtok", p.CachedInputPerMtok)
 	add("cache_write_per_mtok", p.CacheWritePerMtok)
+	add("cache_write_1h_per_mtok", p.CacheWrite1hPerMtok)
 	add("reasoning_output_per_mtok", p.ReasoningOutputPerMtok)
 	add("batch_input_per_mtok", p.BatchInputPerMtok)
 	add("batch_output_per_mtok", p.BatchOutputPerMtok)
@@ -407,6 +413,7 @@ func (p *ModelPricing) Clone() *ModelPricing {
 	out.OutputPerMtok = cloneFloatPtr(p.OutputPerMtok)
 	out.CachedInputPerMtok = cloneFloatPtr(p.CachedInputPerMtok)
 	out.CacheWritePerMtok = cloneFloatPtr(p.CacheWritePerMtok)
+	out.CacheWrite1hPerMtok = cloneFloatPtr(p.CacheWrite1hPerMtok)
 	out.ReasoningOutputPerMtok = cloneFloatPtr(p.ReasoningOutputPerMtok)
 	out.BatchInputPerMtok = cloneFloatPtr(p.BatchInputPerMtok)
 	out.BatchOutputPerMtok = cloneFloatPtr(p.BatchOutputPerMtok)
@@ -530,7 +537,15 @@ type EmbeddingData struct {
 }
 
 // EmbeddingUsage represents token usage information for embeddings.
+//
+// RawUsage carries provider-reported usage members that have no typed field,
+// mirroring Usage.RawUsage on the chat surface. usage.ExtractFromEmbeddingResponse
+// forwards it to the cost pipeline, which is what lets a provider that returns
+// an exact per-request charge (Eden AI reports one as a root-level "cost")
+// have that figure recorded instead of a rate-card reconstruction. Providers
+// that report nothing extra leave it nil.
 type EmbeddingUsage struct {
-	PromptTokens int `json:"prompt_tokens"`
-	TotalTokens  int `json:"total_tokens"`
+	PromptTokens int            `json:"prompt_tokens"`
+	TotalTokens  int            `json:"total_tokens"`
+	RawUsage     map[string]any `json:"raw_usage,omitempty"`
 }

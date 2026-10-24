@@ -39,6 +39,7 @@ type anthropicTool struct {
 	Name         string          `json:"name"`
 	Description  string          `json:"description,omitempty"`
 	InputSchema  map[string]any  `json:"input_schema"`
+	Strict       bool            `json:"strict,omitempty"`
 	CacheControl json.RawMessage `json:"cache_control,omitempty"`
 }
 
@@ -112,7 +113,15 @@ type anthropicUsage struct {
 	OutputTokens             int                          `json:"output_tokens"`
 	CacheCreationInputTokens int                          `json:"cache_creation_input_tokens"`
 	CacheReadInputTokens     int                          `json:"cache_read_input_tokens"`
+	CacheCreation            anthropicCacheCreation       `json:"cache_creation"`
 	OutputTokensDetails      anthropicOutputTokensDetails `json:"output_tokens_details"`
+}
+
+// anthropicCacheCreation splits cache_creation_input_tokens by cache TTL,
+// which Anthropic bills at different rates.
+type anthropicCacheCreation struct {
+	Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens"`
+	Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens"`
 }
 
 type anthropicOutputTokensDetails struct {

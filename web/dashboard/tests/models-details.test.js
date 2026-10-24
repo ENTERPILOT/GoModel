@@ -54,13 +54,13 @@ function itemValue(details, key, label) {
   return entry ? entry.value : undefined;
 }
 
-test("rowHasModelDetails: real models expand, alias stubs do not", () => {
+test("rowHasModelDetails: real models expand, virtual models do not", () => {
   assert.equal(rowHasModelDetails(modelRow()), true);
   assert.equal(rowHasModelDetails(modelRow({ model: { id: "bare" } })), true);
   assert.equal(rowHasModelDetails({ is_alias: true, model: { id: "alias", object: "model" } }), false);
   assert.equal(
-    rowHasModelDetails({ is_alias: true, model: { id: "gpt-4o", owned_by: "openai" } }),
-    true,
+    rowHasModelDetails({ is_alias: true, model: { id: "gpt-4o", owned_by: "openai", metadata: {} } }),
+    false,
   );
   assert.equal(rowHasModelDetails({ is_alias: false, model: null }), false);
   assert.equal(rowHasModelDetails(null), false);

@@ -137,7 +137,7 @@ func (r *PostgreSQLReader) usageCacheStats(ctx context.Context, params UsageQuer
 	conditions = append(conditions, extraConditions...)
 	where := sqlutil.BuildWhereClause(conditions)
 
-	rows, err := r.pool.Query(ctx, `SELECT model, provider, provider_name, user_path, labels::text, cache_type, input_tokens, output_tokens, `+postgresPromptCacheRawDataSQL()+`, timestamp FROM "usage"`+where, args...)
+	rows, err := r.pool.Query(ctx, `SELECT model, provider, provider_name, user_path, endpoint, labels::text, cache_type, input_tokens, output_tokens, `+postgresPromptCacheRawDataSQL()+`, timestamp FROM "usage"`+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query usage cache stats: %w", err)
 	}
@@ -232,6 +232,45 @@ func (r *PostgreSQLReader) GetUsageByLabel(ctx context.Context, params UsageQuer
 	return result, nil
 }
 
+// GetUsageByEndpoint returns request, token, and cost totals grouped by
+// request endpoint, each tagged with its operation.
+func (r *PostgreSQLReader) GetUsageByEndpoint(ctx context.Context, params UsageQueryParams) ([]EndpointUsage, error) {
+	conditions, args, _, err := pgUsageConditions(params, 1)
+	if err != nil {
+		return nil, err
+	}
+	where := sqlutil.BuildWhereClause(conditions)
+
+	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
+	query := `SELECT endpoint, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + costCols + `
+			FROM "usage"` + where + ` GROUP BY endpoint ORDER BY endpoint`
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query usage by endpoint: %w", err)
+	}
+	defer rows.Close()
+
+	result := make([]EndpointUsage, 0)
+	for rows.Next() {
+		var e EndpointUsage
+		if err := rows.Scan(&e.Endpoint, &e.Requests, &e.InputTokens, &e.OutputTokens, &e.TotalTokens, &e.InputCost, &e.OutputCost, &e.TotalCost); err != nil {
+			return nil, fmt.Errorf("failed to scan usage by endpoint row: %w", err)
+		}
+		result = append(result, e)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating usage by endpoint rows: %w", err)
+	}
+
+	stats, err := r.usageCacheStats(ctx, params, "user_path", nil, endpointGroupKeys)
+	if err != nil {
+		return nil, err
+	}
+	return applyEndpointCacheStats(result, stats), nil
+}
+
 // GetUsageBySession returns request, token, and cost totals grouped by the
 // detected session id and its tracked user path. Legacy rows without a session
 // id are omitted.
@@ -304,7 +343,7 @@ func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParam
 
 	if params.Search != "" {
 		s := "%" + sqlutil.EscapeLikeWildcards(params.Search) + "%"
-		conditions = append(conditions, fmt.Sprintf("(model ILIKE $%d ESCAPE '\\' OR provider ILIKE $%d ESCAPE '\\' OR provider_name ILIKE $%d ESCAPE '\\' OR request_id ILIKE $%d ESCAPE '\\' OR provider_id ILIKE $%d ESCAPE '\\' OR session_id ILIKE $%d ESCAPE '\\')", argIdx, argIdx, argIdx, argIdx, argIdx, argIdx))
+		conditions = append(conditions, fmt.Sprintf("(model ILIKE $%d ESCAPE '\\' OR provider ILIKE $%d ESCAPE '\\' OR provider_name ILIKE $%d ESCAPE '\\' OR endpoint ILIKE $%d ESCAPE '\\' OR request_id ILIKE $%d ESCAPE '\\' OR provider_id ILIKE $%d ESCAPE '\\' OR session_id ILIKE $%d ESCAPE '\\')", argIdx, argIdx, argIdx, argIdx, argIdx, argIdx, argIdx))
 		args = append(args, s)
 		argIdx++
 	}
@@ -321,7 +360,7 @@ func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParam
 	// Fetch page
 	dataQuery := fmt.Sprintf(`SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels,
 		input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost, COALESCE(cost_source, ''), raw_data, COALESCE(costs_calculation_caveat, ''),
-		COALESCE(rewrite_tokens_saved, 0), rewrite_cost_saved
+		COALESCE(rewrite_tokens_saved, 0), rewrite_cost_saved, COALESCE(auth_key_id, '')
 		FROM "usage"%s ORDER BY timestamp DESC LIMIT $%d OFFSET $%d`, where, argIdx, argIdx+1)
 	dataArgs := append(append([]any(nil), args...), limit, offset)
 
@@ -364,7 +403,7 @@ func (r *PostgreSQLReader) GetUsageByRequestIDs(ctx context.Context, requestIDs 
 
 	query := fmt.Sprintf(`SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels,
 		input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost, COALESCE(cost_source, ''), raw_data, COALESCE(costs_calculation_caveat, ''),
-		COALESCE(rewrite_tokens_saved, 0), rewrite_cost_saved
+		COALESCE(rewrite_tokens_saved, 0), rewrite_cost_saved, COALESCE(auth_key_id, '')
 		FROM "usage" WHERE request_id IN (%s) ORDER BY timestamp DESC, id DESC`, strings.Join(placeholders, ", "))
 
 	rows, err := r.pool.Query(ctx, query, args...)
@@ -400,7 +439,7 @@ func scanPostgreSQLUsageLogEntries(rows pgxRows) ([]UsageLogEntry, error) {
 		var labelsJSON *string
 		if err := rows.Scan(&e.ID, &e.RequestID, &e.ProviderID, &e.Timestamp, &e.Model, &e.Provider, &providerName, &e.Endpoint, &userPath, &sessionID, &cacheType, &labelsJSON,
 			&e.InputTokens, &e.OutputTokens, &e.TotalTokens, &e.InputCost, &e.OutputCost, &e.TotalCost, &e.CostSource, &rawDataJSON, &e.CostsCalculationCaveat,
-			&e.RewriteTokensSaved, &e.RewriteCostSaved); err != nil {
+			&e.RewriteTokensSaved, &e.RewriteCostSaved, &e.AuthKeyID); err != nil {
 			return nil, fmt.Errorf("failed to scan usage log row: %w", err)
 		}
 		if labelsJSON != nil {
@@ -642,6 +681,11 @@ func pgUsageConditionsWithUserPathExpr(params UsageQueryParams, userPathExpr str
 		args = append(args, params.SessionID)
 		nextIdx++
 	}
+	if params.AuthKeyID != "" {
+		conditions = append(conditions, fmt.Sprintf("auth_key_id = $%d", nextIdx))
+		args = append(args, params.AuthKeyID)
+		nextIdx++
+	}
 	if params.Provider != "" {
 		conditions = append(conditions, fmt.Sprintf("(provider = $%d OR provider_name = $%d)", nextIdx, nextIdx+1))
 		args = append(args, params.Provider, params.Provider)
@@ -653,6 +697,18 @@ func pgUsageConditionsWithUserPathExpr(params UsageQueryParams, userPathExpr str
 		conditions = append(conditions, fmt.Sprintf("jsonb_exists(labels, $%d)", nextIdx))
 		args = append(args, params.Label)
 		nextIdx++
+	}
+	if len(params.Endpoints) > 0 {
+		conditions = append(conditions, fmt.Sprintf("endpoint = ANY($%d)", nextIdx))
+		args = append(args, params.Endpoints)
+		nextIdx++
+	}
+	if len(params.Operations) > 0 {
+		var condition string
+		var opArgs []any
+		condition, opArgs, nextIdx = pgOperationCondition(params.Operations, nextIdx)
+		conditions = append(conditions, condition)
+		args = append(args, opArgs...)
 	}
 	if condition := pgCacheModeCondition(params.CacheMode); condition != "" {
 		conditions = append(conditions, condition)

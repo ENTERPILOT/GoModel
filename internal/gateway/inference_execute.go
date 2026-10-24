@@ -42,8 +42,10 @@ func (o *InferenceOrchestrator) StreamChatCompletion(ctx context.Context, workfl
 	}
 	started := time.Now()
 	streamReq, providerType, providerName, usageModel := o.ResolveChatRoute(workflow, req)
+	ctx, generation := core.StartGenerationTrace(ctx)
 	stream, meta, err := o.streamChatCompletion(ctx, workflow, streamReq, providerType, providerName, usageModel)
 	if err != nil {
+		generation.Finish(core.GenerationOutcome{Request: req})
 		return nil, err
 	}
 	return &StreamResult{
@@ -51,6 +53,7 @@ func (o *InferenceOrchestrator) StreamChatCompletion(ctx context.Context, workfl
 		slowdownFactor:   workflowSlowdown(workflow),
 		inferenceStarted: started,
 		Meta:             meta,
+		generation:       newChatGenerationObserver(generation, req),
 	}, nil
 }
 
@@ -88,8 +91,10 @@ func (o *InferenceOrchestrator) StreamResponses(ctx context.Context, workflow *c
 	if (workflow == nil || workflow.UsageEnabled()) && o.ShouldEnforceReturningUsageData() {
 		ctx = core.WithEnforceReturningUsageData(ctx, true)
 	}
+	ctx, generation := core.StartGenerationTrace(ctx)
 	stream, meta, err := o.streamResponses(ctx, workflow, req, providerType, providerName, usageModel)
 	if err != nil {
+		generation.Finish(core.GenerationOutcome{Request: req})
 		return nil, err
 	}
 	return &StreamResult{
@@ -97,6 +102,7 @@ func (o *InferenceOrchestrator) StreamResponses(ctx context.Context, workflow *c
 		slowdownFactor:   workflowSlowdown(workflow),
 		inferenceStarted: started,
 		Meta:             meta,
+		generation:       newResponsesGenerationObserver(generation, req),
 	}, nil
 }
 
@@ -277,6 +283,7 @@ func executeTranslatedResult[Req any, Resp any, Result any](
 	requestID, endpoint string,
 	spec translatedExecutionSpec[Req, Resp, Result],
 ) (Result, error) {
+	ctx, generation := core.StartGenerationTrace(ctx)
 	resp, meta, err := executeWithUsage(o, ctx, workflow,
 		func() (Resp, ExecutionMeta, error) {
 			return spec.execute(o, ctx, workflow, req)
@@ -287,6 +294,11 @@ func executeTranslatedResult[Req any, Resp any, Result any](
 			return spec.usage(resp, requestID, providerType, endpoint, pricing)
 		},
 	)
+	outcome := core.GenerationOutcome{Request: req}
+	if err == nil {
+		outcome.Response = resp
+	}
+	generation.Finish(outcome)
 	if err != nil {
 		var zero Result
 		return zero, err

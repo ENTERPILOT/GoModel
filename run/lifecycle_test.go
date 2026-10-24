@@ -228,6 +228,17 @@ func TestMain_KimicodeProviderRegistration(t *testing.T) {
 	require.NotNil(t, provider)
 }
 
+func TestMain_EdenAIProviderRegistration(t *testing.T) {
+	factory := defaultProviderFactory(&config.Config{})
+
+	registered := factory.RegisteredTypes()
+	require.Contains(t, registered, "edenai", "edenai not in RegisteredTypes() = %v", registered)
+
+	provider, err := factory.Create(providers.ProviderConfig{Type: "edenai", APIKey: "test"})
+	require.NoError(t, err, "factory.Create(edenai)")
+	require.NotNil(t, provider, "factory.Create(edenai) returned nil provider")
+}
+
 func TestMain_HetznerProviderRegistration(t *testing.T) {
 	factory := defaultProviderFactory(&config.Config{})
 

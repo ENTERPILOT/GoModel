@@ -45,6 +45,7 @@ type usageCacheStatRow struct {
 	Provider     string
 	ProviderName string
 	UserPath     string
+	Endpoint     string
 	Labels       []string
 	CacheType    string
 	InputTokens  int
@@ -152,7 +153,7 @@ func accumulateGroupCacheStats(out map[string]*GroupCacheStats, keysFor groupKey
 }
 
 // foldUsageCacheRows folds streamed SQL rows (model, provider, provider_name,
-// user_path, labels JSON, cache_type, input_tokens, output_tokens, raw_data)
+// user_path, endpoint, labels JSON, cache_type, input_tokens, output_tokens, raw_data)
 // into per-group cache stats. Shared by the SQL backends; MongoDB folds its
 // foldUsageCacheRows aggregates streamed usage cache-stat rows by the keys produced by keysFor.
 // It returns an error if scanning the rows fails or the result set reports an error.
@@ -160,10 +161,10 @@ func foldUsageCacheRows(rows inputSegmentRows, keysFor groupKeysFunc) (map[strin
 	out := map[string]*GroupCacheStats{}
 	for rows.Next() {
 		var model, provider string
-		var providerName, userPath, labelsJSON, cacheType, rawDataJSON *string
+		var providerName, userPath, endpoint, labelsJSON, cacheType, rawDataJSON *string
 		var inputTokens, outputTokens int
 		var timestamp any
-		if err := rows.Scan(&model, &provider, &providerName, &userPath, &labelsJSON, &cacheType, &inputTokens, &outputTokens, &rawDataJSON, &timestamp); err != nil {
+		if err := rows.Scan(&model, &provider, &providerName, &userPath, &endpoint, &labelsJSON, &cacheType, &inputTokens, &outputTokens, &rawDataJSON, &timestamp); err != nil {
 			return nil, fmt.Errorf("failed to scan usage cache stat row: %w", err)
 		}
 		row := usageCacheStatRow{
@@ -178,6 +179,9 @@ func foldUsageCacheRows(rows inputSegmentRows, keysFor groupKeysFunc) (map[strin
 		}
 		if userPath != nil {
 			row.UserPath = *userPath
+		}
+		if endpoint != nil {
+			row.Endpoint = *endpoint
 		}
 		if cacheType != nil {
 			row.CacheType = *cacheType

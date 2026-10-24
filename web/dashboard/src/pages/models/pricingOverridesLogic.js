@@ -7,6 +7,7 @@ export const PRICE_FIELDS = [
   { value: "output_per_mtok", label: m.models_price_output(), group: m.models_price_group_tokens() },
   { value: "cached_input_per_mtok", label: m.models_price_cached_input(), group: m.models_price_group_tokens() },
   { value: "cache_write_per_mtok", label: m.models_price_cache_write(), group: m.models_price_group_tokens() },
+  { value: "cache_write_1h_per_mtok", label: m.models_price_cache_write_1h(), group: m.models_price_group_tokens() },
   { value: "reasoning_output_per_mtok", label: m.models_price_reasoning_output(), group: m.models_price_group_tokens() },
   { value: "batch_input_per_mtok", label: m.models_price_batch_input(), group: m.models_price_group_batch() },
   { value: "batch_output_per_mtok", label: m.models_price_batch_output(), group: m.models_price_group_batch() },

@@ -132,10 +132,18 @@ func convertOpenAIToolsToAnthropic(tools []map[string]any) ([]anthropicTool, err
 		if err != nil {
 			return nil, err
 		}
+		// strict tools are held to the same schema subset as structured
+		// outputs, so the schema gets the same sanitizing.
+		strict, _ := function["strict"].(bool)
+		schema := inputSchema.(map[string]any)
+		if strict {
+			schema = sanitizeAnthropicSchema(schema)
+		}
 		out = append(out, anthropicTool{
 			Name:         name,
 			Description:  description,
-			InputSchema:  inputSchema.(map[string]any),
+			InputSchema:  schema,
+			Strict:       strict,
 			CacheControl: cacheControl,
 		})
 	}
@@ -422,13 +430,18 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 		applyReasoning(anthropicReq, req.Model, effort)
 	}
 
-	tools, err := convertOpenAIToolsToAnthropic(req.Tools)
+	// Anthropic has no subset choice: declare only the allowed functions.
+	reqTools, reqToolChoice, err := core.NarrowToAllowedTools(req.Tools, req.ToolChoice)
+	if err != nil {
+		return nil, err
+	}
+	tools, err := convertOpenAIToolsToAnthropic(reqTools)
 	if err != nil {
 		return nil, err
 	}
 	anthropicReq.Tools = tools
 	var forcedToolInstruction string
-	if toolChoice, disableTools, err := convertOpenAIToolChoiceToAnthropic(req.ToolChoice); err != nil {
+	if toolChoice, disableTools, err := convertOpenAIToolChoiceToAnthropic(reqToolChoice); err != nil {
 		return nil, err
 	} else if err := validateAnthropicToolChoice(toolChoice, anthropicReq.Tools, disableTools); err != nil {
 		return nil, err
@@ -445,7 +458,8 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 
 	conversationStarted := false
 	for _, msg := range req.Messages {
-		if msg.Role == "system" {
+		// "developer" is OpenAI's newer name for "system"; Anthropic rejects it.
+		if msg.Role == "system" || msg.Role == "developer" {
 			systemContent, err := buildAnthropicSystemContent(msg.Content)
 			if err != nil {
 				return nil, err

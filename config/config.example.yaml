@@ -2,6 +2,12 @@
 # Copy to config/config.yaml to customize.
 # Environment variables always override values in this file.
 # All settings have sensible defaults — no config file is required.
+#
+# Any string value can be a secret reference, resolved after the file is read:
+#   ${env:NAME}         the variable's value; unset or empty stops startup
+#   ${file:/abs/path}   the file's contents minus one trailing newline (Docker/Kubernetes secrets)
+# References may sit inside a value ("Bearer ${env:TOKEN}"); write $${ for a literal ${.
+# The plain ${NAME} / ${NAME:-default} form still works and leaves an unset NAME in place.
 
 server:
   port: "8080"
@@ -55,6 +61,11 @@ models:
 #     - header: X-Internal-Routing
 #       do_not_pass: true # stripped before forwarding to the provider
 #       delimiter: ";"
+#   # LiteLLM tags (x-litellm-tags header, body "tags", list metadata.tags) become
+#   # labels and are stripped before the provider; at most 32 per request, tags
+#   # over 128 characters are dropped. Clients choose them, so they can charge any
+#   # label budget they name: set false when label budgets must hold per team.
+#   litellm_tags_enabled: true # env: LITELLM_TAGS_ENABLED
 
 # Session keeping: identify which requests belong to one client session, for
 # sticky virtual-model load balancing and audit-log session grouping. Everything
@@ -137,6 +148,10 @@ models:
 #   # page's Origin and Host agree with each other, so comparing them proves
 #   # nothing). Add an origin only if you serve an MCP web client from it.
 #   allowed_origins: [] # env: MCP_ALLOWED_ORIGINS; "*" disables the check
+#   # off (default) lists every tool; search lists only search_tools and call_tool,
+#   # so large catalogs stop costing model context. Clients override it per session
+#   # with the X-MCP-Tool-Discovery header.
+#   tool_discovery: off # env: MCP_TOOL_DISCOVERY
 #   servers:
 #     github:
 #       url: https://api.githubcopilot.com/mcp
@@ -144,9 +159,10 @@ models:
 #       headers:
 #         Authorization: "Bearer ${GITHUB_PAT}"
 #       description: GitHub tools
-#       allowed_tools: [] # allowlist of upstream tool names; empty = all
-#       disallowed_tools: [] # blocklist, applied after the allowlist
+#       allowed_tools: [] # allowlist of upstream tool names; empty = all (new upstream tools stay hidden when set)
+#       disallowed_tools: [] # tools to exclude, applied after the allowlist; edits apply without a reconnect
 #       user_paths: [] # restrict visibility to these user-path subtrees; empty = everyone
+#       disallowed_user_paths: [] # hide from these subtrees, even inside user_paths
 #       tool_timeout: 30s # per tools/call upper bound
 #     local-files: # stdio servers spawn a subprocess and are declarative-only:
 #       transport: stdio # the admin API and dashboard reject them by design
@@ -154,6 +170,14 @@ models:
 #       args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
 #       env: # subprocesses inherit only PATH/HOME/TMPDIR/USER/LANG — never the
 #         SOME_TOKEN: "${SOME_TOKEN}" # gateway's API keys; pass extras here explicitly
+#   # env: MCP_VIRTUAL_SERVERS. Each virtual server serves a subset of the servers
+#   # above at /mcp/{name}, with namespaced tool names. Names must not match a
+#   # server slug. It only narrows: every member keeps its user-path and tool rules.
+#   virtual_servers:
+#     coding:
+#       description: Code review tools
+#       servers: [github, linear]
+#       tool_discovery: search # optional; default: mcp.tool_discovery
 
 cache:
   model:
@@ -213,6 +237,10 @@ storage:
   mongodb:
     url: "mongodb://localhost:27017"
     database: "gomodel"
+  # Encrypts dashboard-managed secrets at rest. Prefer GOMODEL_ENCRYPTION_KEY
+  # from a secret manager over writing the key here.
+  # encryption_key: "${GOMODEL_ENCRYPTION_KEY}"
+  # encryption_key_previous: "${GOMODEL_ENCRYPTION_KEY_PREVIOUS}" # only during a key rotation
 
 # Where media files go: audio and images captured for the audit log (see
 # logging.log_audio_bodies / log_image_bodies). Metadata stays in storage
@@ -267,6 +295,14 @@ budgets:
       limits:
         - period: "monthly"
           amount: 500.00
+  providers:
+    # Caps one provider instance's spend across every user path and label;
+    # failover skips a provider whose budget is spent.
+    # Env equivalent: SET_PROVIDER_BUDGET_OPENAI="daily=100"
+    - name: "openai"
+      limits:
+        - period: "daily"
+          amount: 100.00
 
 rate_limits:
   enabled: true # env: RATE_LIMITS_ENABLED; with no configured rules this has no effect
@@ -327,6 +363,7 @@ opentelemetry:
   sampler: "parentbased_always_on" # e.g. "parentbased_traceidratio" with sampler_arg "0.1"
   # sampler_arg: "0.1"
   propagators: "tracecontext,baggage" # also b3, b3multi, jaeger, ottrace, none
+  capture_message_content: false # record prompts and completions on provider call spans
 
 http:
   timeout: 600 # seconds (10 minutes)
@@ -485,7 +522,7 @@ failover:
 providers:
   openai:
     type: openai
-    api_key: "sk-..."
+    api_key: "sk-..." # or a secret reference: ${file:/run/secrets/openai}
     # Identified sessions stay on one key by default, preserving provider prompt
     # cache affinity while still spreading different sessions across keys.
     # Equivalent env vars: OPENAI_API_KEY_2, OPENAI_API_KEY_3, ...
@@ -571,6 +608,21 @@ providers:
     # base_url defaults to "https://llm.chutes.ai/v1".
     # Set base_url when using a different compatible endpoint.
 
+  edenai:
+    type: edenai
+    api_key: "${EDENAI_API_KEY}"
+    # base_url defaults to "https://api.edenai.run/v3".
+    # Multi-provider gateway: model IDs use provider/model notation and pass
+    # through unchanged. Models, context windows, capabilities, and per-token
+    # pricing are discovered from Eden's own /v3/models, and per-request cost
+    # comes from the exact USD "cost" Eden returns on each response, so no
+    # pricing metadata needs declaring here.
+    # GoModel's /v1/responses is served by translating to Eden's chat
+    # completions; Eden's own /v3/responses is a different API and is never used.
+    # models:
+    #   - id: "openai/gpt-4"
+    #   - id: "anthropic/claude-sonnet-latest"
+
   elevenlabs:
     type: elevenlabs
     api_key: "${ELEVENLABS_API_KEY}"
@@ -590,10 +642,15 @@ providers:
     type: jev
     api_key: "${JEV_API_KEY}"
     # base_url defaults to "https://api.typesafe.ai". TypeSafe's System One
-    # API is a decision API with no OpenAI-compatible surface: requests go to
-    # POST /p/jev/v1/systemone, or point the TypeSafe SDK at /p/jev. A
-    # self-hosted Kev server speaks the same API without authentication:
-    # set base_url (e.g. "http://localhost:8009") and omit api_key.
+    # API is a decision API: configuring this provider enables
+    # POST /v1/decisions, which answers OpenAI Decisions requests by
+    # translating them to System One, and POST /v1/systemone (also enabled
+    # by openrouter, which serves Jev natively), which forwards System One
+    # requests natively (point the TypeSafe SDK at the gateway root). A self-hosted Kev
+    # server speaks the same API without authentication: set base_url
+    # (e.g. "http://localhost:8009") and omit api_key. Name it "kev" to see
+    # that name in logs and usage; no separate provider type is needed.
+    # Pinned versions such as "jev-1.13.0" route here without being listed.
     # Jev is priced per input token and is not in the upstream model catalog;
     # declare its pricing here to have the gateway cost System One requests.
     # models:

@@ -98,6 +98,11 @@ func TestNormalizeMCPConfigRejectsInvalid(t *testing.T) {
 			servers: map[string]MCPServerConfig{"a": {URL: "https://x/mcp", UserPaths: []string{"/team/../admin"}}},
 			wantErr: "invalid user_paths",
 		},
+		{
+			name:    "invalid disallowed user path",
+			servers: map[string]MCPServerConfig{"a": {URL: "https://x/mcp", DisallowedUserPaths: []string{"/team/../admin"}}},
+			wantErr: "invalid disallowed_user_paths",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -112,8 +117,9 @@ func TestNormalizeMCPConfigRejectsInvalid(t *testing.T) {
 func TestNormalizeMCPConfigCanonicalizesUserPaths(t *testing.T) {
 	cfg := MCPConfig{Servers: map[string]MCPServerConfig{
 		"a": {
-			URL:       "https://x/mcp",
-			UserPaths: []string{" team/a ", "/team/a", "/team/b/"},
+			URL:                 "https://x/mcp",
+			UserPaths:           []string{" team/a ", "/team/a", "/team/b/"},
+			DisallowedUserPaths: []string{"/team/a/contractors/", " team/a/contractors"},
 		},
 	}}
 	err := normalizeMCPConfig(&cfg)
@@ -122,6 +128,7 @@ func TestNormalizeMCPConfigCanonicalizesUserPaths(t *testing.T) {
 	got := cfg.Servers["a"].UserPaths
 	want := []string{"/team/a", "/team/b"}
 	require.Equal(t, want, got)
+	assert.Equal(t, []string{"/team/a/contractors"}, cfg.Servers["a"].DisallowedUserPaths)
 }
 
 func TestApplyMCPEnvMergesOverYAML(t *testing.T) {
@@ -240,6 +247,31 @@ func TestNormalizeMCPAllowedOrigins(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Equal(t, tt.want, cfg.AllowedOrigins)
+		})
+	}
+}
+
+func TestNormalizeMCPToolDiscovery(t *testing.T) {
+	tests := []struct {
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{input: "", want: MCPToolDiscoveryOff},
+		{input: "off", want: MCPToolDiscoveryOff},
+		{input: " Search ", want: MCPToolDiscoverySearch},
+		{input: "semantic", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			cfg := MCPConfig{ToolDiscovery: tt.input}
+			err := normalizeMCPConfig(&cfg)
+			if tt.wantErr {
+				require.ErrorContains(t, err, "mcp.tool_discovery")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, cfg.ToolDiscovery)
 		})
 	}
 }

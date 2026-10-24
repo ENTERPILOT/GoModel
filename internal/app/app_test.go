@@ -17,6 +17,7 @@ import (
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/admin"
+	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
@@ -25,6 +26,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/plugins/builtin"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/server"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
 
 type routeObservationSelector struct {
@@ -212,6 +214,11 @@ func TestRefreshRuntime_SkipsDisabledVirtualModels(t *testing.T) {
 	step := runtimeRefreshStepByName(report.Steps, "virtual_models")
 	require.NotNil(t, step, "virtual_models step missing: %+v", report.Steps)
 	require.Equal(t, admin.RuntimeRefreshStatusSkipped, step.Status, "virtual_models step status = %q, want skipped; step=%+v", step.Status, *step)
+
+	// The MCP gateway is nil too, so its step is listed and skipped.
+	mcpStep := runtimeRefreshStepByName(report.Steps, "mcp_servers")
+	require.NotNil(t, mcpStep, "mcp_servers step missing: %+v", report.Steps)
+	require.Equal(t, admin.RuntimeRefreshStatusSkipped, mcpStep.Status)
 }
 
 func TestRefreshRuntime_ReturnsGatewayErrorWhenContextCanceledBeforeAcquire(t *testing.T) {
@@ -330,7 +337,7 @@ func TestDefaultWorkflowInput_TrimsConfiguredGuardrailRefs(t *testing.T) {
 }
 
 func TestConfigGuardrailDefinitions_DisabledIgnoresInvalidRules(t *testing.T) {
-	definitions, err := configGuardrailDefinitions(config.GuardrailsConfig{
+	definitions, err := configGuardrailDefinitions(t.Context(), config.GuardrailsConfig{
 		Enabled: false,
 		Rules: []config.GuardrailRuleConfig{
 			{
@@ -341,13 +348,13 @@ func TestConfigGuardrailDefinitions_DisabledIgnoresInvalidRules(t *testing.T) {
 				},
 			},
 		},
-	}, testPluginCatalog(t))
+	}, testPluginCatalog(t), nil)
 	require.NoError(t, err)
 	require.Empty(t, definitions)
 }
 
 func TestConfigGuardrailDefinitions_EnabledRejectsUnknownType(t *testing.T) {
-	_, err := configGuardrailDefinitions(config.GuardrailsConfig{
+	_, err := configGuardrailDefinitions(t.Context(), config.GuardrailsConfig{
 		Enabled: true,
 		Rules: []config.GuardrailRuleConfig{
 			{
@@ -355,12 +362,12 @@ func TestConfigGuardrailDefinitions_EnabledRejectsUnknownType(t *testing.T) {
 				Type: "future_guardrail_type",
 			},
 		},
-	}, testPluginCatalog(t))
+	}, testPluginCatalog(t), nil)
 	require.Error(t, err)
 }
 
 func TestConfigGuardrailDefinitions_TrimAndCanonicalizeRuleIdentity(t *testing.T) {
-	definitions, err := configGuardrailDefinitions(config.GuardrailsConfig{
+	definitions, err := configGuardrailDefinitions(t.Context(), config.GuardrailsConfig{
 		Enabled: true,
 		Rules: []config.GuardrailRuleConfig{
 			{
@@ -372,7 +379,7 @@ func TestConfigGuardrailDefinitions_TrimAndCanonicalizeRuleIdentity(t *testing.T
 				},
 			},
 		},
-	}, testPluginCatalog(t))
+	}, testPluginCatalog(t), nil)
 	require.NoError(t, err)
 	require.Len(t, definitions, 1)
 	require.Equal(t, "policy-system", definitions[0].Name)
@@ -380,7 +387,7 @@ func TestConfigGuardrailDefinitions_TrimAndCanonicalizeRuleIdentity(t *testing.T
 }
 
 func TestConfigGuardrailDefinitions_RejectsBlankNameOrType(t *testing.T) {
-	_, err := configGuardrailDefinitions(config.GuardrailsConfig{
+	_, err := configGuardrailDefinitions(t.Context(), config.GuardrailsConfig{
 		Enabled: true,
 		Rules: []config.GuardrailRuleConfig{
 			{
@@ -388,10 +395,10 @@ func TestConfigGuardrailDefinitions_RejectsBlankNameOrType(t *testing.T) {
 				Type: "system_prompt",
 			},
 		},
-	}, testPluginCatalog(t))
+	}, testPluginCatalog(t), nil)
 	require.Error(t, err)
 
-	_, err = configGuardrailDefinitions(config.GuardrailsConfig{
+	_, err = configGuardrailDefinitions(t.Context(), config.GuardrailsConfig{
 		Enabled: true,
 		Rules: []config.GuardrailRuleConfig{
 			{
@@ -399,7 +406,7 @@ func TestConfigGuardrailDefinitions_RejectsBlankNameOrType(t *testing.T) {
 				Type: "   ",
 			},
 		},
-	}, testPluginCatalog(t))
+	}, testPluginCatalog(t), nil)
 	require.Error(t, err)
 }
 
@@ -504,6 +511,15 @@ func TestDashboardRuntimeConfig_ExposesFeatureAvailabilityFlags(t *testing.T) {
 	require.Equal(t, "on", got, "dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigLiveLogsEnabled, got)
 	got = values.MCPEnabled
 	require.Equal(t, "on", got, "dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigMCPEnabled, got)
+	got = values.MCPToolDiscovery
+	require.Equal(t, "off", got, "dashboardRuntimeConfig()[%q] = %q, want off by default", admin.DashboardConfigMCPToolDiscovery, got)
+}
+
+func TestDashboardRuntimeConfig_ExposesMCPToolDiscovery(t *testing.T) {
+	values := dashboardRuntimeConfig(&config.Config{
+		MCP: config.MCPConfig{Enabled: true, ToolDiscovery: config.MCPToolDiscoverySearch},
+	}, false, false, false)
+	require.Equal(t, "search", values.MCPToolDiscovery)
 }
 
 func TestDashboardRuntimeConfig_ExposesIndefiniteLoggingRetention(t *testing.T) {
@@ -634,12 +650,20 @@ func TestUsagePricingRecalculationConfigured(t *testing.T) {
 	}
 }
 
+type appTestHealthChecker struct{}
+
+func (appTestHealthChecker) Name() string { return "test" }
+
+func (appTestHealthChecker) CheckHealth(context.Context) ext.HealthStatus { return ext.HealthOK }
+
 func TestApplyExtensionsSnapshotsRegistryIntoServerConfig(t *testing.T) {
 	reg := &ext.Registry{}
 	reg.RegisterRewriter(&staticRewriter{name: "r1"})
 	reg.UseOuterMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 	reg.UseMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 	reg.RegisterRoutes(func(_ *echo.Echo) {})
+	reg.RegisterAdminRoutes(func(_ *echo.Group) {})
+	reg.RegisterHealthChecker(appTestHealthChecker{})
 	reg.AddPublicPaths("/sso/callback", "/sso/*")
 	reg.RegisterAuthenticator(&appTestAuthenticator{})
 
@@ -651,6 +675,8 @@ func TestApplyExtensionsSnapshotsRegistryIntoServerConfig(t *testing.T) {
 	assert.Len(t, serverCfg.OuterMiddleware, 1)
 	assert.Len(t, serverCfg.ExtraMiddleware, 1)
 	assert.Len(t, serverCfg.ExtraRoutes, 1)
+	assert.Len(t, serverCfg.ExtraAdminRoutes, 1)
+	assert.Len(t, serverCfg.HealthCheckers, 1)
 	assert.Len(t, serverCfg.ExtraAuthSkipPaths, 2)
 	assert.Len(t, serverCfg.RequestAuthenticators, 1)
 
@@ -661,6 +687,8 @@ func TestApplyExtensionsSnapshotsRegistryIntoServerConfig(t *testing.T) {
 	assert.Nil(t, empty.OuterMiddleware)
 	assert.Nil(t, empty.ExtraMiddleware)
 	assert.Nil(t, empty.ExtraRoutes)
+	assert.Nil(t, empty.ExtraAdminRoutes)
+	assert.Nil(t, empty.HealthCheckers)
 	assert.Nil(t, empty.ExtraAuthSkipPaths)
 	assert.Nil(t, empty.RequestAuthenticators)
 }
@@ -722,6 +750,47 @@ func TestLogStartupInfoTreatsExtensionAuthenticatorAsEffectiveAuth(t *testing.T)
 	require.Contains(t, output, `mode=extension`)
 }
 
+func TestLogStartupInfoWarnsWhenManagedKeysLeaveAdminOpen(t *testing.T) {
+	tests := []struct {
+		name     string
+		server   config.ServerConfig
+		admin    config.AdminConfig
+		wantWarn bool
+	}{
+		{name: "admin endpoints without master key", admin: config.AdminConfig{EndpointsEnabled: true}, wantWarn: true},
+		{name: "master key disabled", server: config.ServerConfig{MasterKeyDisabled: true}, admin: config.AdminConfig{EndpointsEnabled: true}},
+		{name: "admin endpoints disabled"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store, err := authkeys.NewSQLStore(t.Context(), sqlxtest.NewSQLite(t))
+			require.NoError(t, err)
+			service, err := authkeys.NewService(store)
+			require.NoError(t, err)
+			_, err = service.Create(t.Context(), authkeys.CreateInput{Name: "team"})
+			require.NoError(t, err)
+
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+
+			app := &App{
+				config:   &config.Config{Server: tt.server, Admin: tt.admin},
+				authKeys: &authkeys.Result{Service: service},
+			}
+			app.logStartupInfo()
+			output := logs.String()
+			assert.Contains(t, output, "mode=managed_keys")
+			if tt.wantWarn {
+				assert.Contains(t, output, "admin API is reachable without authentication")
+			} else {
+				assert.NotContains(t, output, "admin API is reachable without authentication")
+			}
+		})
+	}
+}
+
 type staticRewriter struct{ name string }
 
 func (r *staticRewriter) Name() string { return r.name }
@@ -754,4 +823,49 @@ func TestDashboardRuntimeConfig_PluginsFlag(t *testing.T) {
 		got := dashboardRuntimeConfig(tt.cfg, false, false, false).PluginsEnabled
 		assert.Equal(t, tt.want, got, "%s: PLUGINS_ENABLED = %q, want %q", tt.name, got, tt.want)
 	}
+}
+
+// Config-declared guardrails are seeded into the database. Their secret
+// fields must be stored as the references written in config.yaml, never as
+// resolved values, and are resolved once, when the guardrail is built.
+func TestConfigGuardrailDefinitions_SeedSecretReferencesUnresolved(t *testing.T) {
+	t.Setenv("GOMODEL_TEST_PII_KEY", "resolved-secret")
+	t.Setenv("GOMODEL_TEST_PII_URL", "http://localhost:5002")
+	result := &config.LoadResult{
+		Config: &config.Config{Guardrails: config.GuardrailsConfig{
+			Enabled: true,
+			Rules: []config.GuardrailRuleConfig{{
+				Name: "pii",
+				Type: "presidio",
+				Config: map[string]any{
+					"api_key":      "${env:GOMODEL_TEST_PII_KEY}",
+					"analyzer_url": "${env:GOMODEL_TEST_PII_URL}",
+				},
+			}},
+		}},
+		Secrets: config.NewSecrets(),
+	}
+	require.NoError(t, result.ResolveSecrets(t.Context()))
+
+	definitions, err := configGuardrailDefinitions(t.Context(), result.Config.Guardrails, testPluginCatalog(t), result.Secrets)
+	require.NoError(t, err)
+	require.Len(t, definitions, 1)
+	stored := string(definitions[0].Config)
+	assert.Contains(t, stored, `"api_key":"${env:GOMODEL_TEST_PII_KEY}"`)
+	assert.NotContains(t, stored, "resolved-secret")
+	assert.Contains(t, stored, `"analyzer_url":"http://localhost:5002"`, "non-secret fields are resolved when seeded")
+}
+
+func TestConfigGuardrailDefinitions_UnresolvableFieldNamesTheRulePath(t *testing.T) {
+	_, err := configGuardrailDefinitions(t.Context(), config.GuardrailsConfig{
+		Enabled: true,
+		Rules: []config.GuardrailRuleConfig{{
+			Name:   "pii",
+			Type:   "presidio",
+			Config: map[string]any{"analyzer_url": "${env:GOMODEL_TEST_UNSET_URL}", "api_key": "${env:GOMODEL_TEST_UNSET_KEY}"},
+		}},
+	}, testPluginCatalog(t), config.NewSecrets())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "guardrails.rules[0].config.analyzer_url")
+	assert.NotContains(t, err.Error(), "api_key", "secret fields are resolved by the guardrail build, not here")
 }

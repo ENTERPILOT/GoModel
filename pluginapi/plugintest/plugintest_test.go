@@ -189,17 +189,18 @@ func TestRunStreamMultiChoiceAndOtherEvents(t *testing.T) {
 	for _, ev := range res.Events {
 		kinds = append(kinds, string(ev.Kind)+":"+ev.Text)
 	}
-	// Both pending choices flush, in order of first appearance, before the
-	// reasoning delta; the usage event was dropped; the tail comes last.
-	want := []string{"text_delta:one", "text_delta:zero", "reasoning_delta:think", "text_delta: more"}
+	// The reasoning delta of choice 0 flushes that choice's text; the usage
+	// event flushes the other windows in order of first appearance and was
+	// dropped; the tail comes last.
+	want := []string{"text_delta:zero", "text_delta:one", "reasoning_delta:think", "text_delta: more"}
 	assert.Equal(t, strings.Join(want, ","), strings.Join(kinds, ","), "events = %v, want %v", kinds, want)
 	assert.Equal(t, "zero more", res.Text[0])
 	assert.Equal(t, "one", res.Text[1])
 	assert.Len(t, res.Text, 2)
+	assert.Equal(t, "think", res.Reasoning[0])
 
-	// A dropped event never reached the stream state; the reasoning one did.
+	// A dropped event never reached the stream state.
 	assert.Equal(t, "zero more", l.end.Message)
-	assert.NotEqual(t, 0, res.Events[2].Seq, "end = %+v", l.end)
 }
 
 func TestRunStreamBufferedRespondAndPresetResponse(t *testing.T) {
