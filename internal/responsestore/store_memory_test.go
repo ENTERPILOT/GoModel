@@ -2,12 +2,12 @@ package responsestore
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMemoryStoreExpiresResponses(t *testing.T) {
@@ -18,13 +18,9 @@ func TestMemoryStoreExpiresResponses(t *testing.T) {
 		Response: &core.ResponsesResponse{ID: "resp_old", Object: "response"},
 		StoredAt: time.Now().UTC().Add(-2 * time.Second),
 	})
-	if err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
-
-	if _, err := store.Get(ctx, "resp_old"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Get() error = %v, want ErrNotFound", err)
-	}
+	require.NoError(t, err)
+	_, err = store.Get(ctx, "resp_old")
+	require.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestMemoryStoreMaxEntriesEvictsOldest(t *testing.T) {
@@ -37,30 +33,23 @@ func TestMemoryStoreMaxEntriesEvictsOldest(t *testing.T) {
 		{Response: &core.ResponsesResponse{ID: "resp_2", Object: "response"}, StoredAt: now.Add(-2 * time.Second)},
 		{Response: &core.ResponsesResponse{ID: "resp_3", Object: "response"}, StoredAt: now.Add(-1 * time.Second)},
 	} {
-		if err := store.Create(ctx, response); err != nil {
-			t.Fatalf("Create(%s) error = %v", response.Response.ID, err)
-		}
+		err := store.Create(ctx, response)
+		require.NoError(t, err)
 	}
+	_, err := store.Get(ctx, "resp_1")
+	require.ErrorIs(t, err, ErrNotFound)
 
-	if _, err := store.Get(ctx, "resp_1"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Get(resp_1) error = %v, want ErrNotFound", err)
-	}
 	for _, id := range []string{"resp_2", "resp_3"} {
-		if _, err := store.Get(ctx, id); err != nil {
-			t.Fatalf("Get(%s) error = %v", id, err)
-		}
+		_, err := store.Get(ctx, id)
+		require.NoError(t, err)
 	}
 }
 
 func TestMemoryStoreDefaultRetentionIsBounded(t *testing.T) {
 	store := NewMemoryStore()
 
-	if store.ttl != DefaultMemoryStoreTTL {
-		t.Fatalf("ttl = %s, want %s", store.ttl, DefaultMemoryStoreTTL)
-	}
-	if store.maxEntries != DefaultMemoryStoreMaxEntries {
-		t.Fatalf("maxEntries = %d, want %d", store.maxEntries, DefaultMemoryStoreMaxEntries)
-	}
+	require.Equal(t, DefaultMemoryStoreTTL, store.ttl)
+	require.Equal(t, DefaultMemoryStoreMaxEntries, store.maxEntries)
 }
 
 func TestMemoryStoreCleanupExpiredRunsPeriodically(t *testing.T) {
@@ -74,14 +63,12 @@ func TestMemoryStoreCleanupExpiredRunsPeriodically(t *testing.T) {
 	store.lastCleanup = now
 
 	store.cleanupExpiredLocked(now.Add(time.Second / 2))
-	if _, ok := store.items["resp_expired"]; !ok {
-		t.Fatal("expired response removed before cleanup interval elapsed")
-	}
+	_, ok := store.items["resp_expired"]
+	require.True(t, ok)
 
 	store.cleanupExpiredLocked(now.Add(DefaultMemoryStoreCleanupInterval + time.Second))
-	if _, ok := store.items["resp_expired"]; ok {
-		t.Fatal("expired response retained after cleanup interval elapsed")
-	}
+	_, ok = store.items["resp_expired"]
+	require.False(t, ok)
 }
 
 func TestMemoryStoreAllowsExplicitUnboundedRetention(t *testing.T) {
@@ -92,13 +79,9 @@ func TestMemoryStoreAllowsExplicitUnboundedRetention(t *testing.T) {
 		Response: &core.ResponsesResponse{ID: "resp_old", Object: "response"},
 		StoredAt: time.Now().UTC().Add(-24 * time.Hour),
 	})
-	if err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
-
-	if _, err := store.Get(ctx, "resp_old"); err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
+	require.NoError(t, err)
+	_, err = store.Get(ctx, "resp_old")
+	require.NoError(t, err)
 }
 
 func TestMemoryStoreMaxBytesEvictsOldest(t *testing.T) {
@@ -113,9 +96,9 @@ func TestMemoryStoreMaxBytesEvictsOldest(t *testing.T) {
 
 	// Size one entry via a probe store, then budget for exactly two.
 	probe := NewMemoryStore(WithTTL(0))
-	if err := probe.Create(ctx, large("probe", now)); err != nil {
-		t.Fatalf("Create(probe) error = %v", err)
-	}
+	err := probe.Create(ctx, large("probe", now))
+	require.NoError(t, err)
+
 	budget := 2*probe.totalBytes + 10
 
 	store := NewMemoryStore(WithTTL(0), WithMaxEntries(0), WithMaxBytes(budget))
@@ -124,22 +107,17 @@ func TestMemoryStoreMaxBytesEvictsOldest(t *testing.T) {
 		large("resp_2", now.Add(-2*time.Second)),
 		large("resp_3", now.Add(-1*time.Second)),
 	} {
-		if err := store.Create(ctx, response); err != nil {
-			t.Fatalf("Create(%d) error = %v", i, err)
-		}
+		err := store.Create(ctx, response)
+		require.NoError(t, err, "create response %d", i)
 	}
+	_, err = store.Get(ctx, "resp_1")
+	require.ErrorIs(t, err, ErrNotFound)
 
-	if _, err := store.Get(ctx, "resp_1"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Get(resp_1) error = %v, want ErrNotFound (oldest evicted)", err)
-	}
 	for _, id := range []string{"resp_2", "resp_3"} {
-		if _, err := store.Get(ctx, id); err != nil {
-			t.Fatalf("Get(%s) error = %v, want kept", id, err)
-		}
+		_, err := store.Get(ctx, id)
+		require.NoError(t, err)
 	}
-	if store.totalBytes > budget {
-		t.Fatalf("totalBytes = %d, want <= %d", store.totalBytes, budget)
-	}
+	require.LessOrEqual(t, store.totalBytes, budget)
 }
 
 func TestMemoryStoreRejectsSnapshotOverByteBudget(t *testing.T) {
@@ -148,31 +126,23 @@ func TestMemoryStoreRejectsSnapshotOverByteBudget(t *testing.T) {
 	err := store.Create(ctx, &StoredResponse{
 		Response: &core.ResponsesResponse{ID: "resp_big", Object: "response", Model: strings.Repeat("x", 200)},
 	})
-	if err == nil {
-		t.Fatal("Create() error = nil, want byte budget rejection")
-	}
-	if _, getErr := store.Get(ctx, "resp_big"); !errors.Is(getErr, ErrNotFound) {
-		t.Fatalf("Get() error = %v, want ErrNotFound", getErr)
-	}
+	require.Error(t, err)
+	_, getErr := store.Get(ctx, "resp_big")
+	require.ErrorIs(t, getErr, ErrNotFound)
 }
 
 func TestMemoryStoreDeleteReleasesByteAccounting(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()
-	if err := store.Create(ctx, &StoredResponse{
+	err := store.Create(ctx, &StoredResponse{
 		Response: &core.ResponsesResponse{ID: "resp_1", Object: "response"},
-	}); err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
-	if store.totalBytes == 0 {
-		t.Fatal("totalBytes = 0 after create, want > 0")
-	}
-	if err := store.Delete(ctx, "resp_1"); err != nil {
-		t.Fatalf("Delete() error = %v", err)
-	}
-	if store.totalBytes != 0 || len(store.sizes) != 0 {
-		t.Fatalf("accounting after delete = %d bytes / %d sizes, want 0/0", store.totalBytes, len(store.sizes))
-	}
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, int64(0), store.totalBytes)
+	err = store.Delete(ctx, "resp_1")
+	require.NoError(t, err)
+	require.Equal(t, int64(0), store.totalBytes)
+	require.Empty(t, store.sizes)
 }
 
 func TestMemoryStoreUpdateNeverEvictsUpdatedEntry(t *testing.T) {
@@ -186,33 +156,24 @@ func TestMemoryStoreUpdateNeverEvictsUpdatedEntry(t *testing.T) {
 	}
 
 	probe := NewMemoryStore(WithTTL(0))
-	if err := probe.Create(ctx, sized("probe", now, 600)); err != nil {
-		t.Fatalf("Create(probe) error = %v", err)
-	}
+	err := probe.Create(ctx, sized("probe", now, 600))
+	require.NoError(t, err)
+
 	budget := 2*probe.totalBytes + 10
 
 	store := NewMemoryStore(WithTTL(0), WithMaxEntries(0), WithMaxBytes(budget))
-	// resp_grow is the OLDEST entry — without protection, oldest-first
-	// eviction would drop it right after its own successful update.
-	if err := store.Create(ctx, sized("resp_grow", now.Add(-time.Minute), 10)); err != nil {
-		t.Fatalf("Create(resp_grow) error = %v", err)
-	}
-	if err := store.Create(ctx, sized("resp_new", now, 600)); err != nil {
-		t.Fatalf("Create(resp_new) error = %v", err)
-	}
-
-	if err := store.Update(ctx, sized("resp_grow", now.Add(-time.Minute), 1000)); err != nil {
-		t.Fatalf("Update() error = %v", err)
-	}
+	err = // resp_grow is the OLDEST entry — without protection, oldest-first
+		// eviction would drop it right after its own successful update.
+		store.Create(ctx, sized("resp_grow", now.Add(-time.Minute), 10))
+	require.NoError(t, err)
+	err = store.Create(ctx, sized("resp_new", now, 600))
+	require.NoError(t, err)
+	err = store.Update(ctx, sized("resp_grow", now.Add(-time.Minute), 1000))
+	require.NoError(t, err)
 
 	got, err := store.Get(ctx, "resp_grow")
-	if err != nil {
-		t.Fatalf("Get(resp_grow) error = %v, want protected from self-eviction", err)
-	}
-	if len(got.Response.Model) != 1000 {
-		t.Fatalf("model length = %d, want updated value", len(got.Response.Model))
-	}
-	if _, err := store.Get(ctx, "resp_new"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Get(resp_new) error = %v, want ErrNotFound (evicted instead)", err)
-	}
+	require.NoError(t, err)
+	require.Len(t, got.Response.Model, 1000)
+	_, err = store.Get(ctx, "resp_new")
+	require.ErrorIs(t, err, ErrNotFound)
 }

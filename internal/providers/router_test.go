@@ -361,14 +361,14 @@ func (m *mockBatchProvider) GetFileContent(_ context.Context, id string) (*core.
 func TestNewRouter(t *testing.T) {
 	t.Run("nil lookup returns error", func(t *testing.T) {
 		router, err := NewRouter(nil)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Nil(t, router)
 	})
 
 	t.Run("valid lookup succeeds", func(t *testing.T) {
 		lookup := newMockLookup()
 		router, err := NewRouter(lookup)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.NotNil(t, router)
 	})
 }
@@ -456,7 +456,7 @@ func TestRouterEmptyLookup(t *testing.T) {
 
 	t.Run("ChatCompletion returns error", func(t *testing.T) {
 		_, err := router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "any"})
-		assert.ErrorIs(t, err, ErrRegistryNotInitialized)
+		require.ErrorIs(t, err, ErrRegistryNotInitialized)
 
 		var gwErr *core.GatewayError
 		require.ErrorAs(t, err, &gwErr)
@@ -465,7 +465,7 @@ func TestRouterEmptyLookup(t *testing.T) {
 
 	t.Run("StreamChatCompletion returns error", func(t *testing.T) {
 		_, err := router.StreamChatCompletion(context.Background(), &core.ChatRequest{Model: "any"})
-		assert.ErrorIs(t, err, ErrRegistryNotInitialized)
+		require.ErrorIs(t, err, ErrRegistryNotInitialized)
 
 		var gwErr *core.GatewayError
 		require.ErrorAs(t, err, &gwErr)
@@ -474,7 +474,7 @@ func TestRouterEmptyLookup(t *testing.T) {
 
 	t.Run("ListModels returns error", func(t *testing.T) {
 		_, err := router.ListModels(context.Background())
-		assert.ErrorIs(t, err, ErrRegistryNotInitialized)
+		require.ErrorIs(t, err, ErrRegistryNotInitialized)
 
 		var gwErr *core.GatewayError
 		require.ErrorAs(t, err, &gwErr)
@@ -483,7 +483,7 @@ func TestRouterEmptyLookup(t *testing.T) {
 
 	t.Run("Responses returns error", func(t *testing.T) {
 		_, err := router.Responses(context.Background(), &core.ResponsesRequest{Model: "any"})
-		assert.ErrorIs(t, err, ErrRegistryNotInitialized)
+		require.ErrorIs(t, err, ErrRegistryNotInitialized)
 
 		var gwErr *core.GatewayError
 		require.ErrorAs(t, err, &gwErr)
@@ -492,7 +492,7 @@ func TestRouterEmptyLookup(t *testing.T) {
 
 	t.Run("StreamResponses returns error", func(t *testing.T) {
 		_, err := router.StreamResponses(context.Background(), &core.ResponsesRequest{Model: "any"})
-		assert.ErrorIs(t, err, ErrRegistryNotInitialized)
+		require.ErrorIs(t, err, ErrRegistryNotInitialized)
 
 		var gwErr *core.GatewayError
 		require.ErrorAs(t, err, &gwErr)
@@ -740,11 +740,11 @@ func TestRouterChatCompletion_AdaptsAnthropicCacheControlAfterRouting(t *testing
 			assertFields := func(label string, fields core.UnknownJSONFields, wantCache bool) {
 				t.Helper()
 				gotCache := fields.Lookup("cache_control")
-				if wantCache && !bytes.Equal(gotCache, expectedCache) {
-					t.Errorf("%s cache_control = %s, want %s", label, gotCache, expectedCache)
+				if wantCache {
+					assert.Equal(t, string(expectedCache), string(gotCache), "%s cache_control", label)
 				}
-				if !wantCache && len(gotCache) != 0 {
-					t.Errorf("%s cache_control = %s, want absent", label, gotCache)
+				if !wantCache {
+					assert.Empty(t, gotCache, "%s cache_control", label)
 				}
 				got := string(fields.Lookup("x_keep"))
 				assert.Equal(t, "true", got, "%s x_keep should be preserved", label)
@@ -1052,7 +1052,7 @@ func TestAdaptBatchRequest_StripsForeignExtraContentFromOrdinaryBatches(t *testi
 
 	own := &core.BatchRequest{Endpoint: request.Endpoint, Requests: []core.BatchRequestItem{request.Requests[0], request.Requests[1], request.Requests[3], request.Requests[4]}}
 	got, err := adaptBatchRequest(context.Background(), own, "gemini")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Same(t, own, got)
 }
 
@@ -1642,7 +1642,7 @@ func TestRouterEmbeddings_EmptyLookup(t *testing.T) {
 	router, _ := NewRouter(lookup)
 
 	_, err := router.Embeddings(context.Background(), &core.EmbeddingRequest{Model: "any"})
-	assert.ErrorIs(t, err, ErrRegistryNotInitialized)
+	require.ErrorIs(t, err, ErrRegistryNotInitialized)
 
 	var gwErr *core.GatewayError
 	require.ErrorAs(t, err, &gwErr)
@@ -1820,7 +1820,7 @@ func TestAdaptBatchRequest_RejectsNonChatItemsInAnthropicBatches(t *testing.T) {
 			}
 			for _, providerType := range []string{"anthropic", "openai"} {
 				_, err := adaptBatchRequest(ctx, request, providerType)
-				assert.ErrorContains(t, err, "not a chat completion")
+				require.ErrorContains(t, err, "not a chat completion")
 			}
 			_, err := adaptBatchRequest(context.Background(), request, "openai")
 			assert.NoError(t, err)

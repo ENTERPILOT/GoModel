@@ -93,7 +93,7 @@ func TestBufferedSSEStream_MaxBytesFailsClosed(t *testing.T) {
 	out, err := io.ReadAll(stream)
 	require.NoError(t, err)
 	assert.False(t, finisherCalled)
-	assert.ErrorIs(t, reported, ErrBufferLimit)
+	require.ErrorIs(t, reported, ErrBufferLimit)
 	assert.Contains(t, string(out), `"code":"response_too_large"`)
 	assert.True(t, strings.HasSuffix(string(out), "data: [DONE]\n\n"), "fail-closed replay = %s", out)
 	assert.NotContains(t, string(out), "Hello", "buffered content leaked: %s", out)
@@ -108,7 +108,7 @@ func TestBufferedSSEStream_FinisherErrorFailsClosed(t *testing.T) {
 	}, BufferOptions{OnError: func(err error) { reported = err }})
 	out, err := io.ReadAll(stream)
 	require.NoError(t, err)
-	assert.ErrorIs(t, reported, boom)
+	require.ErrorIs(t, reported, boom)
 	assert.Contains(t, string(out), `"code":"plugin_failure"`)
 	assert.NotContains(t, string(out), "Hello", "fail-closed replay = %s", out)
 }

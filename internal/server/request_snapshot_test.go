@@ -406,7 +406,7 @@ func TestRequestSnapshotCapture_SkipsOversizedBodies(t *testing.T) {
 	require.NotNil(t, capturedFrame)
 	assert.Nil(t, capturedFrame.CapturedBody())
 	assert.True(t, capturedFrame.BodyNotCaptured)
-	assert.Equal(t, len(reqBody), len(downstreamBody))
+	assert.Len(t, downstreamBody, len(reqBody))
 	assert.True(t, strings.HasPrefix(downstreamBody, `{"model":"gpt-5-mini"`))
 	assert.True(t, strings.HasSuffix(downstreamBody, `"}]}`))
 }

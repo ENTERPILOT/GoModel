@@ -77,9 +77,9 @@ func TestScanPostgreSQLUsageLogEntries_CarriesRewriteSavings(t *testing.T) {
 	ts := time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC)
 	rows := &fakePgxRows{rows: [][]any{
 		{"with-savings", "req-saved", "provider-1", ts, "gpt-5", "openai", nil, "/v1/chat/completions", nil, nil, nil, nil,
-			100, 10, 110, nil, nil, nil, "", nil, "", int64(89), &cost},
+			100, 10, 110, nil, nil, nil, "", nil, "", int64(89), &cost, "key-a"},
 		{"without-savings", "req-plain", "provider-2", ts, "gpt-5", "openai", nil, "/v1/chat/completions", nil, nil, nil, nil,
-			50, 10, 60, nil, nil, nil, "", nil, "", int64(0), nil},
+			50, 10, 60, nil, nil, nil, "", nil, "", int64(0), nil, ""},
 	}}
 
 	entries, err := scanPostgreSQLUsageLogEntries(rows)
@@ -90,6 +90,7 @@ func TestScanPostgreSQLUsageLogEntries_CarriesRewriteSavings(t *testing.T) {
 	assert.Equal(t, int64(89), saved.RewriteTokensSaved)
 	require.NotNil(t, saved.RewriteCostSaved)
 	assert.Equal(t, cost, *saved.RewriteCostSaved)
+	assert.Equal(t, "key-a", saved.AuthKeyID)
 
 	plain := entries[1]
 	assert.Equal(t, int64(0), plain.RewriteTokensSaved)

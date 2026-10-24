@@ -29,6 +29,8 @@ type mockUsageReader struct {
 	modelUsage           []usage.ModelUsage
 	userPathUsage        []usage.UserPathUsage
 	labelUsage           []usage.LabelUsage
+	endpointUsage        []usage.EndpointUsage
+	lastEndpointUsage    usage.UsageQueryParams
 	sessionUsage         *usage.SessionUsageResult
 	usageLog             *usage.UsageLogResult
 	usageByRequestID     map[string][]usage.UsageLogEntry
@@ -46,6 +48,7 @@ type mockUsageReader struct {
 	modelUsageErr        error
 	userPathUsageErr     error
 	labelUsageErr        error
+	endpointUsageErr     error
 	sessionUsageErr      error
 	usageLogErr          error
 	usageByRequestErr    error
@@ -68,6 +71,9 @@ type mockAuditReader struct {
 	lastStatsParams     auditlog.RequestStatsParams
 	sessionsResult      *auditlog.SessionListResult
 	sessionsErr         error
+	lastUsed            map[string]time.Time
+	lastUsedErr         error
+	lastUsedKeyIDs      []string
 }
 
 type mockRuntimeRefresher struct {
@@ -114,6 +120,14 @@ func (m *mockUsageReader) GetUsageByLabel(_ context.Context, _ usage.UsageQueryP
 		return nil, m.labelUsageErr
 	}
 	return m.labelUsage, nil
+}
+
+func (m *mockUsageReader) GetUsageByEndpoint(_ context.Context, params usage.UsageQueryParams) ([]usage.EndpointUsage, error) {
+	m.lastEndpointUsage = params
+	if m.endpointUsageErr != nil {
+		return nil, m.endpointUsageErr
+	}
+	return m.endpointUsage, nil
 }
 
 func (m *mockUsageReader) GetUsageBySession(_ context.Context, params usage.SessionUsageParams) (*usage.SessionUsageResult, error) {
@@ -206,6 +220,14 @@ func (m *mockAuditReader) GetConversation(_ context.Context, logID string, limit
 		return nil, m.conversationErr
 	}
 	return m.conversationResult, nil
+}
+
+func (m *mockAuditReader) GetLastUsedByAuthKeys(_ context.Context, keyIDs []string) (map[string]time.Time, error) {
+	m.lastUsedKeyIDs = keyIDs
+	if m.lastUsedErr != nil {
+		return nil, m.lastUsedErr
+	}
+	return m.lastUsed, nil
 }
 
 // handlerMockProvider implements core.Provider for ListModels registry testing.
@@ -598,6 +620,58 @@ func TestUsageByLabel_Error(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
+// --- UsageByEndpoint handler tests ---
+
+func TestUsageByEndpoint_NilReader(t *testing.T) {
+	h := NewHandler(nil, nil)
+	c, rec := echotest.Get(t, "/admin/usage/endpoints")
+	require.NoError(t, h.UsageByEndpoint(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "[]\n", rec.Body.String())
+}
+
+func TestUsageByEndpoint_Success(t *testing.T) {
+	cost := 0.75
+	reader := &mockUsageReader{
+		endpointUsage: []usage.EndpointUsage{
+			{Endpoint: "/v1/messages", Operation: "chat_completions", Requests: 3, InputTokens: 90, OutputTokens: 30, TotalTokens: 120, TotalCost: &cost},
+		},
+	}
+	h := NewHandler(reader, nil)
+	c, rec := echotest.Get(t, "/admin/usage/endpoints?operation=chat_completions,embeddings&endpoint=%20/v1/messages%20,/v1/responses,,/v1/messages")
+	require.NoError(t, h.UsageByEndpoint(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	assert.Equal(t, []core.Operation{core.OperationChatCompletions, core.OperationEmbeddings}, reader.lastEndpointUsage.Operations)
+	assert.Equal(t, []string{"/v1/messages", "/v1/responses"}, reader.lastEndpointUsage.Endpoints)
+	rows := echotest.Decode[[]usage.EndpointUsage](t, rec)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "/v1/messages", rows[0].Endpoint)
+	assert.Equal(t, "chat_completions", rows[0].Operation)
+	assert.Equal(t, 3, rows[0].Requests)
+	require.NotNil(t, rows[0].TotalCost)
+	assert.Equal(t, 0.75, *rows[0].TotalCost)
+}
+
+func TestUsageByEndpoint_Error(t *testing.T) {
+	reader := &mockUsageReader{
+		endpointUsageErr: errors.New("db failure"),
+	}
+	h := NewHandler(reader, nil)
+	c, rec := echotest.Get(t, "/admin/usage/endpoints")
+	require.NoError(t, h.UsageByEndpoint(c))
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+func TestUsageByEndpoint_RejectsUnknownOperation(t *testing.T) {
+	// Validation runs before the disabled-reader fast path.
+	h := NewHandler(nil, nil)
+	c, rec := echotest.Get(t, "/admin/usage/endpoints?operation=chat_completions,bogus")
+	require.NoError(t, h.UsageByEndpoint(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "invalid operation: bogus")
+}
+
 // --- UsageLog handler tests ---
 
 func TestUsageLog_NilReader(t *testing.T) {
@@ -695,12 +769,15 @@ func TestUsageLog_WithFilters(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := echotest.Get(t, "/admin/usage/log?model=gpt-4&provider=openai&user_path=/team&label=team-alpha&session_id=scoped-session&search=test&limit=10&offset=5")
+	c, rec := echotest.Get(t, "/admin/usage/log?model=gpt-4&provider=openai&user_path=/team&label=team-alpha&session_id=scoped-session&auth_key_id=key-a&endpoint=/v1/embeddings&operation=embeddings&search=test&limit=10&offset=5")
 	require.NoError(t, h.UsageLog(c))
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "/team", reader.lastUsageLog.UserPath)
 	assert.Equal(t, "team-alpha", reader.lastUsageLog.Label)
 	assert.Equal(t, "scoped-session", reader.lastUsageLog.SessionID)
+	assert.Equal(t, "key-a", reader.lastUsageLog.AuthKeyID)
+	assert.Equal(t, []string{"/v1/embeddings"}, reader.lastUsageLog.Endpoints)
+	assert.Equal(t, []core.Operation{core.OperationEmbeddings}, reader.lastUsageLog.Operations)
 }
 
 func TestUsageBySession_Success(t *testing.T) {

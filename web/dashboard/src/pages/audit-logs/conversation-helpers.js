@@ -750,13 +750,40 @@ function renderAudioMeta(meta) {
     return '<div class="audit-audio-metadata">' + rows.join('') + '</div>';
 }
 
+// sanitizeMediaId keeps a media_id usable in markup: ids are "med_" plus hex,
+// so anything else is treated as absent rather than interpolated.
+function sanitizeMediaId(value) {
+    const id = String(value || '').trim();
+    return /^[A-Za-z0-9_-]{1,80}$/.test(id) ? id : '';
+}
+
+// mediaUnavailableNote is the hidden note media-loader.js reveals when a
+// stored object cannot be fetched (expired, removed, or the store is down).
+function mediaUnavailableNote() {
+    return '<div class="audit-media-unavailable audit-audio-note" hidden>'
+        + escapeHTML(m.audit_media_unavailable()) + '</div>';
+}
+
 // renderAudioBody renders an audio body as a player when the audio bytes
-// were captured (base64), otherwise a labeled placeholder explaining why.
-// Any attached request metadata is listed below.
+// were captured, otherwise a labeled placeholder explaining why. Stored
+// audio is referenced by media_id and loaded by media-loader.js once the
+// markup is in the DOM (the admin API needs the bearer token, which an
+// <audio src> cannot carry); rows written before media storage existed
+// carry the audio inline as base64. Any attached request metadata is listed
+// below.
 export function renderAudioBody(value) {
     const contentType = sanitizeAudioContentType(value.content_type);
     const metaLabel = escapeHTML(contentType + ' · ' + formatByteSize(value.bytes));
     const metaBlock = renderAudioMeta(value.meta);
+    const mediaId = value.stored ? sanitizeMediaId(value.media_id) : '';
+    if (mediaId) {
+        return '<div class="audit-audio">'
+            + '<audio class="audit-audio-player" controls preload="none" data-media-id="' + mediaId + '"></audio>'
+            + mediaUnavailableNote()
+            + '<div class="audit-audio-meta mono">' + metaLabel + '</div>'
+            + metaBlock
+            + '</div>';
+    }
     if (value.stored && value.encoding === 'base64' && value.data) {
         const b64 = String(value.data).replace(/[^A-Za-z0-9+/=]/g, '');
         const src = 'data:' + contentType + ';base64,' + b64;
@@ -800,7 +827,8 @@ function imageRoleLabel(role) {
 }
 
 // renderImageItem renders one image: an inline preview when the bytes were
-// captured (base64), a link when the provider returned a hosted URL, or a
+// captured (by media_id, or inline base64 on rows written before media
+// storage existed), a link when the provider returned a hosted URL, or a
 // labeled placeholder explaining why no pixels are available.
 function renderImageItem(item) {
     const role = escapeHTML(imageRoleLabel(item.role));
@@ -812,6 +840,13 @@ function renderImageItem(item) {
         ? '<div class="audit-image-note">' + escapeHTML(String(item.revised_prompt)) + '</div>'
         : '';
     const caption = '<div class="audit-image-caption mono">' + role + (details ? ' · ' + details : '') + '</div>';
+    const mediaId = item.stored ? sanitizeMediaId(item.media_id) : '';
+    if (mediaId) {
+        return '<figure class="audit-image">'
+            + '<a data-media-id="' + mediaId + '" target="_blank" rel="noopener">'
+            + '<img class="audit-image-preview" data-media-id="' + mediaId + '" alt="' + role + '" loading="lazy" />'
+            + '</a>' + mediaUnavailableNote() + caption + revised + '</figure>';
+    }
     if (item.stored && item.encoding === 'base64' && item.data) {
         const contentType = sanitizeImageContentType(item.content_type);
         const b64 = String(item.data).replace(/[^A-Za-z0-9+/=]/g, '');

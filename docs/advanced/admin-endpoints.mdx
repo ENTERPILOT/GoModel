@@ -131,7 +131,50 @@ other optional creation field) or later with
 an explicit empty list lifts the key-level restriction; omitting the field is rejected). Group- and user-level
 allowlists are managed through the [user endpoints](#user-endpoints).
 
-Dashboard access only gates `/admin/*`. Model endpoints and the self-service [`GET /v1/usage`](/advanced/usage-api) endpoint stay available to every managed key.
+Dashboard access only gates `/admin/*`. Model endpoints and the self-service [`GET /v1/usage`](/advanced/usage-api) endpoint stay available to every managed key, except the provider passthrough routes (`/p/{provider}/...`): managed keys are created without passthrough access, and you grant it with `"passthrough_access": true` on `POST /admin/auth-keys` or `PUT /admin/auth-keys/<key-id>/passthrough-access` (see [Passthrough access control](/features/passthrough-api#access-control)).
+
+### Importing keys from LiteLLM
+
+`POST /admin/auth-keys/import` adds a LiteLLM virtual key by the SHA-256 hash
+LiteLLM stores for it, so clients keep sending the same `sk-...` token. GoModel
+never receives the token itself.
+
+```bash
+curl -X POST http://localhost:8080/admin/auth-keys/import \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "search-team",
+    "imported_from": "litellm",
+    "secret_hash": "<64-character hex token column from LiteLLM_VerificationToken>",
+    "redacted_value": "sk-...k6Hd",
+    "user_path": "/acme/search"
+  }'
+```
+
+It takes the same optional fields as `POST /admin/auth-keys` (`description`,
+`user_path`, `labels`, `allowed_models`, `dashboard_access`, `expires_at`) and
+answers `201` with the key, which then shows `"imported_from": "litellm"`.
+`redacted_value` is LiteLLM's `key_name`, such as `sk-...k6Hd`, and defaults to
+`sk-...`. An `allowed_models` entry naming a virtual model is replaced with the
+models it routes to, since LiteLLM key model lists name model groups and
+[allowlists](/features/users#selectors) match the resolved model. The list is
+resolved once: retargeting the virtual model later does not change the key.
+Importing a token that was imported before updates that key instead and
+answers `200`: its name, path, labels, allowed models, and expiry. Dashboard
+access and a deactivation stay as they are. `"enabled": false` marks a key the
+source blocked: an earlier import is deactivated and otherwise left unchanged,
+and a key never imported is not created (`204`). A hash that belongs to a key GoModel issued answers `409`
+with code `auth_key_exists`.
+
+Tokens starting with `sk-` are checked only against imported keys, and
+`sk_gom_` tokens only against keys GoModel issued. Without imported keys,
+`sk-` tokens are rejected as before. Deactivate an imported key like any
+other. The import endpoint needs global admin access.
+
+An imported key is exactly as strong as the LiteLLM key. LiteLLM lets you pick
+custom keys such as `sk-1234`; replace those with a new GoModel key instead of
+importing them.
 
 ### Scoped admin access
 
@@ -164,13 +207,21 @@ For a scoped admin:
 - New API keys and user policies default to the scope root and cannot be
   created outside it. Keys with dashboard access created this way are scoped
   admins of that subtree in turn.
+- A key cannot change its own labels, allowed models, or access flags
+  (`403 auth_key_self_update`); it can still deactivate itself. A key with
+  allowed models can only give the keys it creates or edits models it is
+  allowed itself: `openai/*` can grant `openai/gpt-4o-mini`, but not
+  `anthropic/*` or an unrestricted key (`403 allowed_models_out_of_scope`).
+  These rules apply to global keys too, which also cannot import a key with
+  broader models or re-import their own token, except with
+  `"enabled": false` to deactivate it.
 - Only user-path budgets and rate limits are visible and editable; label,
   provider, and model rules are gateway-wide.
 - Gateway-wide endpoints return `403` with code `admin_scope_denied`: provider
-  status and credentials, runtime settings and refresh, tagging settings,
-  virtual models, workflows, guardrails, MCP servers, pricing overrides, cache
-  overview, live logs, token throughput, pricing recalculation, budget and
-  rate-limit reset-all, and budget settings updates. The dashboard hides the
+  status and credentials, runtime settings and refresh, API key import,
+  tagging settings, virtual models, workflows, guardrails, MCP servers, pricing
+  overrides, cache overview, live logs, token throughput, pricing
+  recalculation, budget and rate-limit reset-all, and budget settings updates. The dashboard hides the
   matching pages and actions.
 
 Rows recorded without a user path (for example traffic sent with the master
@@ -226,8 +277,21 @@ Returns aggregate token usage statistics over a configurable time window.
 | `end_date`   | string | Range end in `YYYY-MM-DD` format                         | Today                |
 | `days`       | int    | Shorthand for look-back window (ignored if dates are set) | `30`                |
 | `cache_mode` | string | Which requests to count: `uncached`, `cached`, `all` (see [Cache mode](#cache-mode)) | `uncached` |
+| `auth_key_id` | string | Exact managed auth key id that authenticated the requests | —                  |
 
 Use `start_date`/`end_date` for explicit ranges or `days` as a shorthand. When both are provided, `start_date`/`end_date` take priority.
+
+Every usage row records the managed auth key that made the request, so
+`auth_key_id` answers "how much did this key spend?". Every reporting endpoint
+under `/admin/usage/*` except `throughput` accepts it, and `/admin/usage/log`
+entries include it. `/admin/usage/recalculate-pricing` does not accept this
+filter. Requests made with the master key, and rows recorded before this field
+existed, have no key id.
+
+```bash
+curl "http://localhost:8080/admin/usage/summary?auth_key_id=$KEY_ID" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
 
 **Response:**
 
@@ -298,6 +362,7 @@ provider-bound requests only, so avoided cache cost is not reported as spend.
 | `start_date` | string | Start date (`YYYY-MM-DD`)                        | —       |
 | `end_date`   | string | End date (`YYYY-MM-DD`)                          | —       |
 | `session_id` | string | Exact detected session id                        | —       |
+| `auth_key_id` | string | Exact managed auth key id                       | —       |
 | `user_path`  | string | Tracked user-path subtree                        | —       |
 | `model`      | string | Exact model name                                 | —       |
 | `provider`   | string | Provider name or type                            | —       |
@@ -326,6 +391,79 @@ provider-bound requests only, so avoided cache cost is not reported as spend.
 }
 ```
 
+### GET /admin/usage/endpoints
+
+Returns usage grouped by request endpoint, so you can see what chat, audio, or
+embeddings cost. Each row carries the `operation` its endpoint belongs to;
+endpoints that mean the same thing share one, so `/v1/chat/completions` and
+`/v1/messages` are both `chat_completions`. Sum rows by `operation` for a
+per-operation view. `operation` is omitted for endpoints the gateway does not
+classify.
+
+It accepts the date range parameters (`days`, `start_date`, `end_date`) and the
+data filters `model`, `provider`, `label`, `user_path`, `session_id`,
+`auth_key_id`, `endpoint`, `operation`, and `cache_mode`.
+
+```json
+[
+  {
+    "endpoint": "/v1/audio/transcriptions",
+    "operation": "audio_transcriptions",
+    "requests": 42,
+    "input_tokens": 0,
+    "output_tokens": 18000,
+    "total_tokens": 18000,
+    "input_cost": 0,
+    "output_cost": 1.26,
+    "total_cost": 1.26
+  },
+  {
+    "endpoint": "/v1/messages",
+    "operation": "chat_completions",
+    "requests": 310,
+    "input_tokens": 920000,
+    "output_tokens": 140000,
+    "total_tokens": 1060000,
+    "input_cost": 2.76,
+    "output_cost": 2.1,
+    "total_cost": 4.86
+  }
+]
+```
+
+### Endpoint and operation filters
+
+Every reporting endpoint under `/admin/usage/*` except `throughput`, plus
+`/admin/cache/overview`, accepts two endpoint filters:
+
+| Parameter   | Description                                                        |
+| ----------- | ------------------------------------------------------------------ |
+| `endpoint`  | Comma-separated exact request endpoints, e.g. `/v1/chat/completions,/v1/messages` |
+| `operation` | Comma-separated operations; a row matches if its endpoint belongs to any of them |
+
+Operations: `chat_completions`, `responses`, `conversations`, `embeddings`,
+`batches`, `files`, `audio_speech`, `audio_transcriptions`,
+`audio_translations`, `image_generations`, `image_edits`, `realtime`, `mcp`,
+`systemone`, and `provider_passthrough`. An unknown operation returns `400`.
+Provider passthrough traffic (`/p/{provider}/...`) counts as
+`provider_passthrough`, whatever endpoint it reaches upstream.
+
+```bash
+# What did audio cost in the last 30 days?
+curl "http://localhost:8080/admin/usage/summary?operation=audio_speech,audio_transcriptions,audio_translations" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+Both take lists, so you can compare dialects or add them up:
+
+```bash
+# Chat Completions, Responses, and Messages together
+curl "http://localhost:8080/admin/usage/summary?endpoint=/v1/chat/completions,/v1/responses,/v1/messages" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+`/admin/usage/log` also matches its `search` text against the endpoint.
+
 ### Cache mode
 
 Every [response-cache](/features/cache) hit is recorded as a usage entry, with
@@ -345,7 +483,8 @@ curl "http://localhost:8080/admin/usage/summary?user_path=/team/alpha&cache_mode
 ```
 
 Accepted by `/admin/usage/summary`, `/admin/usage/daily`, `/admin/usage/log`,
-`/admin/usage/models`, `/admin/usage/labels`, `/admin/usage/user-paths`, and
+`/admin/usage/models`, `/admin/usage/labels`, `/admin/usage/user-paths`,
+`/admin/usage/endpoints`, and
 `/v1/usage` (see the [usage API](/advanced/usage-api#cache-mode)). Unrecognized
 values fall back to `uncached`. `/admin/usage/sessions` ignores it: session
 request and token totals always include cache hits, while its cost fields stay
@@ -525,6 +664,48 @@ Returns all registered models with both provider type and configured provider na
 ```
 
 This differs from the standard `/v1/models` endpoint: the admin version includes both `provider_type` and `provider_name` for each model, making it useful for understanding both the provider family and the concrete configured provider instance that serves the model.
+
+
+### GET /admin/models/metadata
+
+Returns where one model's metadata comes from: the merged metadata the gateway
+serves (`effective`) and each layer it was merged from. `provider` is what the
+provider reported in its own model listing, `catalog` the
+[ai-model-list](https://github.com/ENTERPILOT/ai-model-list) entry, and
+`config` the `config.yaml` metadata override; a `null` layer knows nothing
+about the model. `sources` names the winning layer per effective field
+(`config`, `provider`, `catalog`, or `inferred` for modes guessed from the
+model ID). See [Model metadata](/advanced/model-metadata) for the precedence.
+
+The dashboard's **Models** page fetches this when a row is expanded. Nothing
+is stored for it: the layers are already held per model and the catalog entry
+is resolved on demand.
+
+**Query parameters:**
+
+- `provider` (required): provider instance name or provider type
+- `model` (required): raw upstream model ID
+
+**Response:**
+
+```json
+{
+  "selector": "local/gemma-3-4b-it",
+  "effective": { "display_name": "Gemma (local)", "modes": ["chat"], "context_window": 4096 },
+  "provider": { "context_window": 4096 },
+  "catalog": { "display_name": "Gemma 3 4B IT", "modes": ["chat"], "context_window": 131072 },
+  "config": { "display_name": "Gemma (local)" },
+  "sources": {
+    "display_name": "config",
+    "context_window": "provider",
+    "modes": "catalog",
+    "categories": "catalog"
+  }
+}
+```
+
+Returns `400` when a parameter is missing and `404` when the model is not
+registered.
 
 ### Plugin, guardrail, and workflow endpoints
 

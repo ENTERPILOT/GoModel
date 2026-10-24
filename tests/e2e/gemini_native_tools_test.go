@@ -20,6 +20,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/gemini"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
 const geminiToolModel = "gemini-3.5-flash-lite"
@@ -131,7 +132,9 @@ func setupGeminiNativeGateway(t *testing.T) (*httptest.Server, *mockGeminiNative
 	t.Setenv("USE_GOOGLE_GEMINI_NATIVE_API", "true")
 	upstream := newMockGeminiNativeServer(t)
 
-	provider := gemini.NewWithHTTPClient("sk-test-gemini-key", upstream.server.Client(), llmclient.Hooks{})
+	opts := providertest.Options(llmclient.Hooks{})
+	opts.HTTPClient = upstream.server.Client()
+	provider := gemini.New(providers.ProviderConfig{APIKey: "sk-test-gemini-key"}, opts).(*gemini.Provider)
 	provider.SetBaseURL(upstream.server.URL)
 	provider.SetModelsURL(upstream.server.URL)
 

@@ -14,54 +14,6 @@
     },
     {
       "created": 0,
-      "id": "gemini-2.0-flash-exp",
-      "object": "model",
-      "owned_by": "google"
-    },
-    {
-      "created": 0,
-      "id": "gemini-2.0-flash",
-      "object": "model",
-      "owned_by": "google"
-    },
-    {
-      "created": 0,
-      "id": "gemini-2.0-flash-001",
-      "object": "model",
-      "owned_by": "google"
-    },
-    {
-      "created": 0,
-      "id": "gemini-2.0-flash-lite-001",
-      "object": "model",
-      "owned_by": "google"
-    },
-    {
-      "created": 0,
-      "id": "gemini-2.0-flash-lite",
-      "object": "model",
-      "owned_by": "google"
-    },
-    {
-      "created": 0,
-      "id": "gemini-2.0-flash-lite-preview-02-05",
-      "object": "model",
-      "owned_by": "google"
-    },
-    {
-      "created": 0,
-      "id": "gemini-2.0-flash-lite-preview",
-      "object": "model",
-      "owned_by": "google"
-    },
-    {
-      "created": 0,
-      "id": "gemini-exp-1206",
-      "object": "model",
-      "owned_by": "google"
-    },
-    {
-      "created": 0,
       "id": "gemini-2.5-flash-preview-tts",
       "object": "model",
       "owned_by": "google"
@@ -104,25 +56,31 @@
     },
     {
       "created": 0,
-      "id": "gemini-2.5-flash-preview-09-2025",
-      "object": "model",
-      "owned_by": "google"
-    },
-    {
-      "created": 0,
-      "id": "gemini-2.5-flash-lite-preview-09-2025",
-      "object": "model",
-      "owned_by": "google"
-    },
-    {
-      "created": 0,
-      "id": "gemini-3-pro-preview",
-      "object": "model",
-      "owned_by": "google"
-    },
-    {
-      "created": 0,
       "id": "gemini-3-flash-preview",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.1-pro-preview",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.1-pro-preview-customtools",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.1-flash-lite-preview",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.1-flash-lite",
       "object": "model",
       "owned_by": "google"
     },
@@ -134,7 +92,85 @@
     },
     {
       "created": 0,
-      "id": "gemini-robotics-er-1.5-preview",
+      "id": "gemini-3-pro-image",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.1-flash-image-preview",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.1-flash-image",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.1-flash-lite-image",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.5-flash",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.5-flash-lite",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-omni-flash-preview",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-omni-1.1-flash",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.5-transcribe",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.6-flash",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.7-flash",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.8-flash",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.1-flash-tts-preview",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-robotics-er-2-preview",
       "object": "model",
       "owned_by": "google"
     },
@@ -146,55 +182,25 @@
     },
     {
       "created": 0,
-      "id": "text-embedding-004",
-      "object": "model",
-      "owned_by": "google"
-    },
-    {
-      "created": 0,
-      "id": "gemini-embedding-exp-03-07",
-      "object": "model",
-      "owned_by": "google"
-    },
-    {
-      "created": 0,
-      "id": "gemini-embedding-exp",
-      "object": "model",
-      "owned_by": "google"
-    },
-    {
-      "created": 0,
       "id": "gemini-embedding-001",
       "object": "model",
       "owned_by": "google"
     },
     {
       "created": 0,
-      "id": "imagen-4.0-generate-preview-06-06",
+      "id": "gemini-embedding-2-preview",
       "object": "model",
       "owned_by": "google"
     },
     {
       "created": 0,
-      "id": "imagen-4.0-ultra-generate-preview-06-06",
+      "id": "gemini-embedding-2",
       "object": "model",
       "owned_by": "google"
     },
     {
       "created": 0,
-      "id": "imagen-4.0-generate-001",
-      "object": "model",
-      "owned_by": "google"
-    },
-    {
-      "created": 0,
-      "id": "imagen-4.0-ultra-generate-001",
-      "object": "model",
-      "owned_by": "google"
-    },
-    {
-      "created": 0,
-      "id": "imagen-4.0-fast-generate-001",
+      "id": "gemini-3.5-transcribe-live",
       "object": "model",
       "owned_by": "google"
     },
@@ -218,7 +224,31 @@
     },
     {
       "created": 0,
-      "id": "gemini-3.7-flash",
+      "id": "gemini-3.1-flash-live-preview",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.8-live",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.8-live-extended-thinking",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-robotics-er-2-streaming-preview",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemini-3.5-live-translate-preview",
       "object": "model",
       "owned_by": "google"
     }

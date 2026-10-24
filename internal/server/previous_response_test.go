@@ -121,6 +121,57 @@ func TestResponsesWithPreviousResponseID_ChainCarriesFullHistory(t *testing.T) {
 	require.Len(t, second.InputItems, 1)
 }
 
+// TestResponsesWithPreviousResponseID_KimicodeChainReplaysHistory covers the
+// native-Responses kimicode provider chaining through the gateway: kimicode
+// has no Responses lifecycle, so the gateway treats it as translated and,
+// with a response store, replays the stored chain into input instead of
+// forwarding the id. The replayed items — reasoning output included, item
+// ids stripped — are what reaches kimicode's /responses upstream.
+func TestResponsesWithPreviousResponseID_KimicodeChainReplaysHistory(t *testing.T) {
+	provider := previousResponseTestProvider(t, "kimicode")
+	srv := New(provider, nil)
+
+	// A turn the gateway served for kimicode earlier: the snapshot holds the
+	// client's input items and the provider's output, reasoning included.
+	err := srv.handler.currentResponseStore().Create(context.Background(), &responsestore.StoredResponse{
+		Response: &core.ResponsesResponse{
+			ID: "resp_kimi_1", Object: "response", Status: "completed",
+			Output: []core.ResponsesOutputItem{
+				{
+					ID: "rs_1", Type: "reasoning", Status: "completed",
+					ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+						"summary": json.RawMessage(`[{"type":"summary_text","text":"thinking about zebras"}]`),
+					}),
+				},
+				{ID: "msg_1", Type: "message", Role: "assistant", Content: []core.ResponsesContentItem{{Type: "output_text", Text: "the word is zebra"}}},
+			},
+		},
+		InputItems: []json.RawMessage{json.RawMessage(`{"id":"in_1","type":"message","role":"user","content":[{"type":"input_text","text":"remember: zebra"}]}`)},
+		Provider:   "kimicode",
+	})
+	require.NoError(t, err)
+
+	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"what is the word?","previous_response_id":"resp_kimi_1"}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	forwarded := provider.capturedResponsesReq
+	require.NotNil(t, forwarded)
+	require.Empty(t, forwarded.PreviousResponseID, "translated providers get the id stripped before dispatch")
+
+	items := forwardedInputItems(t, provider.capturingProvider)
+	require.Len(t, items, 4)
+	require.Equal(t, "reasoning", items[1]["type"], "stored reasoning output must replay unchanged: %#v", items[1])
+	summary, _ := json.Marshal(items[1]["summary"])
+	require.Contains(t, string(summary), "thinking about zebras")
+	for i, item := range items[:3] {
+		_, hasID := item["id"]
+		require.False(t, hasID, "stored item id must be stripped before dispatch (item %d): %#v", i, item)
+	}
+	text, _ := json.Marshal(items[2]["content"])
+	require.Contains(t, string(text), "the word is zebra")
+	require.Equal(t, "user", items[3]["role"], "the client's own turn is replayed last")
+}
+
 func TestResponsesWithPreviousResponseID_StreamingChainedTurn(t *testing.T) {
 	provider := previousResponseTestProvider(t, "anthropic")
 	provider.streamData = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_s\",\"object\":\"response\",\"status\":\"completed\",\"output\":[]}}\n\ndata: [DONE]\n\n"

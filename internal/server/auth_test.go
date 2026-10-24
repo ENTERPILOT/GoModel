@@ -38,7 +38,9 @@ type mockAuthenticator struct {
 	tokenLabels    map[string][]string
 	tokenAllowed   map[string][]string
 	tokenDashboard map[string]bool
-	err            error
+	// tokenPassthrough lists keys granted passthrough access.
+	tokenPassthrough map[string]bool
+	err              error
 }
 
 func (m mockAuthenticator) Enabled() bool {
@@ -54,11 +56,12 @@ func (m mockAuthenticator) Authenticate(_ context.Context, token string) (authke
 		return authkeys.AuthenticationResult{}, assert.AnError
 	}
 	return authkeys.AuthenticationResult{
-		ID:              id,
-		UserPath:        m.tokenPath[token],
-		Labels:          m.tokenLabels[token],
-		AllowedModels:   m.tokenAllowed[token],
-		DashboardAccess: m.tokenDashboard[token],
+		ID:                id,
+		UserPath:          m.tokenPath[token],
+		Labels:            m.tokenLabels[token],
+		AllowedModels:     m.tokenAllowed[token],
+		DashboardAccess:   m.tokenDashboard[token],
+		PassthroughAccess: m.tokenPassthrough[token],
 	}, nil
 }
 

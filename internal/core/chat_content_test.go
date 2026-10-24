@@ -193,7 +193,7 @@ func TestMessageUnmarshalJSON_AcceptsInputAudioDataURIWithoutFormat(t *testing.T
 	// Re-marshaling must preserve the wire shape: no synthesized format field.
 	out, err := json.Marshal(msg)
 	require.NoError(t, err)
-	require.False(t, strings.Contains(string(out), `"format"`), "marshaled message should not contain format, got: %s", out)
+	require.NotContains(t, string(out), `"format"`, "marshaled message should not contain format, got: %s", out)
 }
 
 func TestMessageUnmarshalJSON_RejectsInputAudioDataURIWithoutMediaType(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -30,6 +31,37 @@ func TestUsageUnmarshalJSON_PreservesExtendedFields(t *testing.T) {
 	require.Equal(t, 12, usage.CompletionTokensDetails.ReasoningTokens)
 	require.Equal(t, float64(969250), usage.RawUsage["cost_in_usd_ticks"])
 	require.Equal(t, float64(2), usage.RawUsage["num_sources_used"])
+}
+
+func TestUsageJSON_RoundTripsCacheWriteTokens(t *testing.T) {
+	tests := []struct {
+		name    string
+		details string
+		want    any // nil means the member must be absent
+	}{
+		{name: "reported", details: `{"cached_tokens":800,"cache_write_tokens":150}`, want: float64(150)},
+		{name: "zero is omitted", details: `{"cached_tokens":800,"cache_write_tokens":0}`},
+		{name: "absent stays absent", details: `{"cached_tokens":800}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var usage Usage
+			require.NoError(t, json.Unmarshal([]byte(`{"prompt_tokens":1000,"prompt_tokens_details":`+tt.details+`}`), &usage))
+			body, err := json.Marshal(usage)
+			require.NoError(t, err)
+
+			var payload struct {
+				PromptTokensDetails map[string]any `json:"prompt_tokens_details"`
+			}
+			require.NoError(t, json.Unmarshal(body, &payload))
+			got, exists := payload.PromptTokensDetails["cache_write_tokens"]
+			if tt.want == nil {
+				assert.False(t, exists, "unexpected cache_write_tokens in %s", body)
+			} else {
+				assert.Equal(t, tt.want, got)
+			}
+		})
+	}
 }
 
 func TestUsageMarshalJSON_MergesRawUsageIntoTopLevelUsage(t *testing.T) {

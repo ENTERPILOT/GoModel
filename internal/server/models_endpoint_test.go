@@ -243,3 +243,91 @@ func TestRetrieveModel_ProviderErrorIsReported(t *testing.T) {
 	require.NotEqual(t, http.StatusNotFound, rec.Code)
 	require.GreaterOrEqual(t, rec.Code, http.StatusInternalServerError)
 }
+
+// resolvingProvider resolves a bare model ID to a provider-qualified one, as
+// the router does for inference.
+type resolvingProvider struct {
+	*mockProvider
+	resolved map[string]string
+}
+
+func (p *resolvingProvider) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	if requested.Model == "not-ready" {
+		return core.ModelSelector{}, false, core.NewProviderError("", http.StatusServiceUnavailable, "model registry not ready", nil)
+	}
+	if qualified, ok := p.resolved[requested.Model]; ok {
+		selector, err := core.ParseModelSelector(qualified, "")
+		return selector, true, err
+	}
+	selector, err := requested.Normalize()
+	return selector, false, err
+}
+
+// An ID that works for inference also retrieves its listed model, in both
+// dialects; one that resolves to nothing listed is still a 404.
+func TestRetrieveModel_ResolvesBareIDs(t *testing.T) {
+	provider := &resolvingProvider{
+		mockProvider: &mockProvider{modelsResponse: retrieveModelCatalog()},
+		resolved:     map[string]string{"gpt-4.1-mini": "openai/gpt-4.1-mini", "gpt-hidden": "openai/gpt-hidden"},
+	}
+	srv := New(provider, &Config{})
+	get := func(path string, anthropic bool) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		if anthropic {
+			req.Header.Set("anthropic-version", "2023-06-01")
+		}
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec
+	}
+
+	for _, anthropic := range []bool{false, true} {
+		rec := get("/v1/models/gpt-4.1-mini", anthropic)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+		require.Equal(t, "openai/gpt-4.1-mini", body["id"])
+	}
+	require.Equal(t, http.StatusNotFound, get("/v1/models/gpt-hidden", false).Code)
+	require.Equal(t, http.StatusNotFound, get("/v1/models/unknown-model", false).Code)
+	require.Equal(t, http.StatusServiceUnavailable, get("/v1/models/not-ready", false).Code,
+		"a resolution error keeps the status inference reports")
+}
+
+// Anthropic SDK clients that page the list get Anthropic paging; without
+// paging parameters the whole catalog comes back in one page.
+func TestListModels_AnthropicPaging(t *testing.T) {
+	srv := New(&mockProvider{modelsResponse: retrieveModelCatalog()}, &Config{})
+	list := func(query string) map[string]any {
+		req := httptest.NewRequest(http.MethodGet, "/v1/models"+query, nil)
+		req.Header.Set("anthropic-version", "2023-06-01")
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+		return body
+	}
+
+	all := list("")
+	require.Len(t, all["data"], 3)
+	require.Equal(t, false, all["has_more"])
+
+	first := list("?limit=1")
+	require.Len(t, first["data"], 1)
+	require.Equal(t, true, first["has_more"])
+	next := list("?limit=5&after_id=" + first["last_id"].(string))
+	require.Len(t, next["data"], 2)
+	require.Equal(t, false, next["has_more"])
+
+	require.Len(t, list("?limit=nonsense")["data"], 3, "an invalid limit is ignored")
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models?limit=1&after_id=removed/model", nil)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Equal(t, "error", body["type"], "Anthropic error envelope")
+}

@@ -15,7 +15,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/andybalholm/brotli"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
@@ -361,7 +360,12 @@ func toValidUTF8String(b []byte) string {
 
 // decompressBody attempts to decompress the response body based on Content-Encoding.
 // Returns original body unchanged if no decompression needed or if decompression fails.
-// Supports gzip, deflate, and brotli (br) encodings.
+//
+// Supports gzip and deflate, which are the encodings a response can actually
+// carry here: the gateway drops a forwarded Accept-Encoding so the transport
+// negotiates gzip itself and hands back decoded bytes, and the only response
+// compression of our own is gzip on the admin routes. Any other encoding is
+// left untouched, as an unreadable one always was.
 func decompressBody(body []byte, contentEncoding string) ([]byte, bool) {
 	if len(body) == 0 || contentEncoding == "" {
 		return body, false
@@ -385,8 +389,6 @@ func decompressBody(body []byte, contentEncoding string) ([]byte, bool) {
 		reader, err = gzip.NewReader(bytes.NewReader(body))
 	case "deflate":
 		reader = flate.NewReader(bytes.NewReader(body))
-	case "br":
-		reader = io.NopCloser(brotli.NewReader(bytes.NewReader(body)))
 	default:
 		return body, false
 	}

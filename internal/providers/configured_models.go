@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -16,8 +17,17 @@ const (
 	configuredProviderModelsAllowlist     configuredProviderModelsApplyReason = "allowlist"
 	configuredProviderModelsMerge         configuredProviderModelsApplyReason = "merge"
 	configuredProviderModelsUpstreamError configuredProviderModelsApplyReason = "upstream_error"
-	configuredProviderModelsUpstreamNil   configuredProviderModelsApplyReason = "upstream_nil"
-	configuredProviderModelsUpstreamEmpty configuredProviderModelsApplyReason = "upstream_empty"
+	// configuredProviderModelsUpstreamUnlisted means the provider has no model
+	// listing endpoint (404/405 on /models). Servers that only expose a single
+	// API, such as speech-to-text servers, are fully described by the
+	// configured list, so it counts as authoritative rather than a fallback.
+	configuredProviderModelsUpstreamUnlisted configuredProviderModelsApplyReason = "upstream_unlisted"
+	configuredProviderModelsUpstreamNil      configuredProviderModelsApplyReason = "upstream_nil"
+	configuredProviderModelsUpstreamEmpty    configuredProviderModelsApplyReason = "upstream_empty"
+	// catalogProviderModelsUpstreamError means the provider's listing failed
+	// and nothing else describes its inventory, so the model catalog's list
+	// for its type stands in until a live listing succeeds.
+	catalogProviderModelsUpstreamError configuredProviderModelsApplyReason = "catalog_upstream_error"
 )
 
 func normalizeConfiguredProviderModels(models []string) []string {
@@ -62,6 +72,9 @@ func applyConfiguredProviderModels(
 		return configuredProviderModelsResponse(providerName, providerType, configuredModels, upstream, fallbackCreated), configuredProviderModelsAllowlist
 	}
 
+	if modelListingUnsupported(upstreamErr) {
+		return configuredProviderModelsResponse(providerName, providerType, configuredModels, upstream, fallbackCreated), configuredProviderModelsUpstreamUnlisted
+	}
 	if upstreamErr != nil {
 		return configuredProviderModelsResponse(providerName, providerType, configuredModels, upstream, fallbackCreated), configuredProviderModelsUpstreamError
 	}
@@ -75,6 +88,14 @@ func applyConfiguredProviderModels(
 		return mergeConfiguredProviderModelsResponse(providerName, providerType, configuredModels, upstream, fallbackCreated), configuredProviderModelsMerge
 	}
 	return upstream, configuredProviderModelsNotApplied
+}
+
+// modelListingUnsupported reports whether err means the upstream has no model
+// listing endpoint at all, as opposed to a listing that failed. Providers mark
+// such errors at the /models call, so a 404 from another API (e.g. the Bedrock
+// control plane) still counts as a failure.
+func modelListingUnsupported(err error) bool {
+	return errors.Is(err, core.ErrModelListingUnsupported)
 }
 
 // configuredModelOwner picks the owned_by value for synthesized entries.

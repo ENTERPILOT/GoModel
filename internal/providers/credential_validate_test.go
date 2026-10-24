@@ -170,14 +170,14 @@ func TestValidateCredential_VertexFieldsNeedAnExplicitBackend(t *testing.T) {
 	explicit := ambiguous
 	explicit.Backend = "vertex"
 	err := validateCredential(explicit, schema)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// With a key the row resolves and runs, so the adapter's own inference
 	// takes it from there.
 	keyed := ambiguous
 	keyed.APIKeys = []string{"AIza-real"}
 	err = validateCredential(keyed, schema)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// A type with no backend field to set is never asked to set one.
 	vertexOnly := credentialSchema("vertex", DiscoveryConfig{
@@ -226,7 +226,7 @@ func TestCredentialsService_UpsertReportsAnUnresolvableRowAgainstAField(t *testi
 	})
 	store := newFakeCredentialStore()
 
-	svc, err := NewCredentialsService(ctx, factory, NewModelRegistry(), store, nil, config.ResilienceConfig{})
+	svc, err := NewCredentialsService(ctx, factory, NewModelRegistry(), store, nil, config.ResilienceConfig{}, nil)
 	require.NoError(t, err)
 
 	err = svc.Upsert(ctx, ManagedProviderCredential{Name: "half-configured", Type: "conditional", Enabled: true})
@@ -241,20 +241,20 @@ func TestCredentialsService_UpsertRejectsAnIncompleteRowWithoutStoringIt(t *test
 	registry := NewModelRegistry()
 	store := newFakeCredentialStore()
 
-	svc, err := NewCredentialsService(ctx, factory, registry, store, nil, config.ResilienceConfig{})
+	svc, err := NewCredentialsService(ctx, factory, registry, store, nil, config.ResilienceConfig{}, nil)
 	require.NoError(t, err)
 
 	err = svc.Upsert(ctx, ManagedProviderCredential{Name: "no-key", Type: "test", Enabled: true})
 	assertCredentialField(t, err, CredentialFieldAPIKeys)
 	_, err = store.Get(ctx, "no-key")
-	assert.ErrorIs(t, err, ErrCredentialNotFound)
+	require.ErrorIs(t, err, ErrCredentialNotFound)
 	assert.Equal(t, 0, registry.ProviderCount())
 }
 
 func TestCredentialsService_UpsertRejectsNameAndTypeByField(t *testing.T) {
 	ctx := t.Context()
 	factory := newCredentialsTestFactory(t)
-	svc, err := NewCredentialsService(ctx, factory, NewModelRegistry(), newFakeCredentialStore(), nil, config.ResilienceConfig{})
+	svc, err := NewCredentialsService(ctx, factory, NewModelRegistry(), newFakeCredentialStore(), nil, config.ResilienceConfig{}, nil)
 	require.NoError(t, err)
 
 	assertCredentialField(t, svc.Upsert(ctx, ManagedProviderCredential{Type: "test"}), "name")
@@ -268,7 +268,7 @@ func TestCredentialsService_UpsertRejectsNameAndTypeByField(t *testing.T) {
 func TestCredentialsService_UpsertValidatesDisabledRows(t *testing.T) {
 	ctx := t.Context()
 	factory := newCredentialsTestFactory(t)
-	svc, err := NewCredentialsService(ctx, factory, NewModelRegistry(), newFakeCredentialStore(), nil, config.ResilienceConfig{})
+	svc, err := NewCredentialsService(ctx, factory, NewModelRegistry(), newFakeCredentialStore(), nil, config.ResilienceConfig{}, nil)
 	require.NoError(t, err)
 
 	assertCredentialField(t,
@@ -284,11 +284,11 @@ func TestCredentialsService_CredentialSchemasCoverEveryRegisteredType(t *testing
 	factory.Add(Registration{Type: "a", New: func(ProviderConfig, ProviderOptions) core.Provider { return &registryMockProvider{} }})
 	factory.Add(Registration{Type: "b", New: func(ProviderConfig, ProviderOptions) core.Provider { return &registryMockProvider{} }})
 
-	svc, err := NewCredentialsService(ctx, factory, NewModelRegistry(), newFakeCredentialStore(), nil, config.ResilienceConfig{})
+	svc, err := NewCredentialsService(ctx, factory, NewModelRegistry(), newFakeCredentialStore(), nil, config.ResilienceConfig{}, nil)
 	require.NoError(t, err)
 
 	schemas := svc.CredentialSchemas()
-	require.Equal(t, len(factory.RegisteredTypes()), len(schemas))
+	require.Len(t, schemas, len(factory.RegisteredTypes()))
 	assert.True(t, svc.CredentialSchema("a").Accepts(CredentialFieldAPIKeys))
 	assert.True(t, svc.CredentialSchema("unknown").Accepts(CredentialFieldModels))
 }

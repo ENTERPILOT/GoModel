@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -572,4 +573,84 @@ func TestServiceCheckIgnoresManualResetOlderThanPeriodStart(t *testing.T) {
 
 	want := time.Date(2026, time.April, 25, 0, 0, 0, 0, time.UTC)
 	require.True(t, store.lastWindows[0].Start.Equal(want), "sum start = %s, want period start %s", store.lastWindows[0].Start, want)
+}
+
+func TestServiceCheckRejectsExceededProviderBudget(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeStore{
+		budgets: []Budget{
+			{Scope: ScopeProvider, Subject: "openai-prod", PeriodSeconds: PeriodDailySeconds, Amount: 100},
+		},
+		sum: func(window SpendWindow) (float64, bool, error) {
+			require.Equal(t, ScopeProvider, window.Scope)
+			require.Equal(t, "openai-prod", window.Subject)
+
+			return 120, true, nil
+		},
+	}
+	service, err := NewService(ctx, store)
+	require.NoError(t, err)
+
+	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
+
+	var exceeded *ExceededError
+	err = service.Check(ctx, Subjects{UserPath: "/team", Provider: "openai-prod"}, now)
+	require.ErrorAs(t, err, &exceeded)
+	require.Contains(t, exceeded.Error(), "provider openai-prod")
+
+	// Traffic routed elsewhere, or not routed yet, is outside the budget.
+	err = service.Check(ctx, Subjects{UserPath: "/team", Provider: "openai-free"}, now)
+	require.NoError(t, err)
+	err = service.Check(ctx, Subjects{UserPath: "/team"}, now)
+	require.NoError(t, err)
+}
+
+// Failover can relieve an exhausted provider budget but not a consumer one, so
+// when both are spent the consumer breach is the one reported.
+func TestServiceCheckReportsConsumerBreachBeforeProviderBreach(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeStore{
+		budgets: []Budget{
+			{Scope: ScopeProvider, Subject: "openai-prod", PeriodSeconds: PeriodDailySeconds, Amount: 10},
+			{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10},
+		},
+		sum: func(SpendWindow) (float64, bool, error) {
+			return 20, true, nil
+		},
+	}
+	service, err := NewService(ctx, store)
+	require.NoError(t, err)
+
+	var exceeded *ExceededError
+	err = service.Check(ctx, Subjects{UserPath: "/team", Provider: "openai-prod"}, time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC))
+	require.ErrorAs(t, err, &exceeded)
+	require.Equal(t, ScopeUserPath, exceeded.Result.Budget.Scope)
+}
+
+func TestServiceProviderWithinBudget(t *testing.T) {
+	ctx := context.Background()
+	spent := map[string]float64{"openai-prod": 120, "openai-free": 5}
+	store := &fakeStore{
+		budgets: []Budget{
+			{Scope: ScopeProvider, Subject: "openai-prod", PeriodSeconds: PeriodDailySeconds, Amount: 100},
+			{Scope: ScopeProvider, Subject: "openai-free", PeriodSeconds: PeriodDailySeconds, Amount: 100},
+			// Consumer budgets never gate a route.
+			{Scope: ScopeUserPath, Subject: "/", PeriodSeconds: PeriodDailySeconds, Amount: 1},
+		},
+		sum: func(window SpendWindow) (float64, bool, error) {
+			require.Equal(t, ScopeProvider, window.Scope)
+			return spent[window.Subject], true, nil
+		},
+	}
+	service, err := NewService(ctx, store)
+	require.NoError(t, err)
+
+	assert.False(t, service.ProviderWithinBudget(ctx, "OpenAI-Prod"))
+	assert.True(t, service.ProviderWithinBudget(ctx, "openai-free"))
+	assert.True(t, service.ProviderWithinBudget(ctx, "anthropic"))
+
+	store.sum = func(SpendWindow) (float64, bool, error) {
+		return 0, false, errors.New("store down")
+	}
+	assert.False(t, service.ProviderWithinBudget(ctx, "openai-free"), "a failed spend lookup must not admit the target")
 }

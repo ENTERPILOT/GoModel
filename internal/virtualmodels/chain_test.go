@@ -31,9 +31,6 @@ func TestChain_ResolvesThroughVirtualModel(t *testing.T) {
 	require.True(t, changed, "ResolveModel() = %v, %v, %v; want change", sel, changed, err)
 	got := sel.QualifiedModel()
 	require.Equal(t, "groq/llama", got)
-	require.True(t, svc.Supports("production"))
-	got = svc.GetProviderType("production")
-	require.Equal(t, "openai", got)
 
 	refresh, ok, _ := svc.ResolveRefreshTarget(core.NewRequestedModelSelector("production", ""))
 	require.True(t, ok)
@@ -87,7 +84,6 @@ func TestChain_DisabledOrUnavailableInnerLegIsSkipped(t *testing.T) {
 	upsertRedirect(t, svc, "only-cheap", "", "cheap")
 	_, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("only-cheap", ""))
 	require.False(t, changed)
-	require.False(t, svc.Supports("only-cheap"))
 }
 
 func TestChain_ExposedModelsProjectLeafMetadata(t *testing.T) {
@@ -302,4 +298,24 @@ func TestChain_MutualMigratedFailoverRulesLoad(t *testing.T) {
 	snap, _ := buildSnapshot([]VirtualModel{a, b}, true)
 	err = validateChains(&snap)
 	require.NoError(t, err)
+}
+
+func TestChain_TargetModelsListsDeclaredLeaves(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	upsertRedirect(t, svc, "cheap", StrategyRoundRobin, "groq/llama", "local/mistral")
+	upsertRedirect(t, svc, "smart", StrategyRoundRobin, "cheap", "openai/gpt-4o")
+
+	models, ok := svc.TargetModels(" smart ")
+	require.True(t, ok)
+	require.Equal(t, []string{"groq/llama", "local/mistral", "openai/gpt-4o"}, models)
+
+	err := svc.Upsert(context.Background(), VirtualModel{Source: "cheap", Targets: []Target{{Model: "groq/llama"}}, Enabled: false})
+	require.NoError(t, err)
+	models, ok = svc.TargetModels("smart")
+	require.True(t, ok)
+	require.Equal(t, []string{"openai/gpt-4o"}, models, "a disabled inner leg is not a target")
+
+	_, ok = svc.TargetModels("openai/gpt-4o")
+	require.False(t, ok)
 }

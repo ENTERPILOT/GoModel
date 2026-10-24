@@ -130,7 +130,7 @@ func TestCodecs_RewriteToolCallArguments(t *testing.T) {
 	require.True(t, ev.ClosesChoice, "decoded = %+v", ev)
 
 	rewritten, err := chat.RewriteText(ev, `{"y"`)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, `{"y"`, rewritten.Text)
 	assert.Contains(t, string(rewritten.Data), `"arguments":"{\"y\""`)
 	assert.Contains(t, string(rewritten.Data), `"name":"f"`, "chat rewrite = %s, %v", rewritten.Data, err)
@@ -147,7 +147,7 @@ func TestCodecs_RewriteToolCallArguments(t *testing.T) {
 	require.Equal(t, 3, ev.Call, "decoded = %+v", ev)
 
 	rewritten, err = responses.RewriteText(ev, "cd")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Contains(t, string(rewritten.Data), `"delta":"cd"`, "responses rewrite = %s, %v", rewritten.Data, err)
 }
 

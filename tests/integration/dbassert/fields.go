@@ -175,7 +175,7 @@ func AssertUsageHasTokens(t *testing.T, entry UsageEntry) {
 	t.Helper()
 
 	// At minimum, total tokens should be non-zero for a valid usage entry
-	assert.Greater(t, entry.TotalTokens, 0, "total tokens should be greater than zero")
+	assert.Positive(t, entry.TotalTokens, "total tokens should be greater than zero")
 }
 
 // AssertUsageTokensConsistent verifies that input + output = total tokens.
@@ -197,7 +197,7 @@ func AssertNoErrorType(t *testing.T, entry AuditLogEntry) {
 // AssertAuditLogDurationPositive verifies that the duration is positive.
 func AssertAuditLogDurationPositive(t *testing.T, entry AuditLogEntry) {
 	t.Helper()
-	assert.Greater(t, entry.DurationNs, int64(0), "duration should be positive")
+	assert.Positive(t, entry.DurationNs, "duration should be positive")
 }
 
 // unmarshalLogData unmarshals JSON bytes to auditlog.LogData.

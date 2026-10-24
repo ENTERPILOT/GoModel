@@ -38,7 +38,7 @@ func TestEnforceBudgetSkipsWhenWorkflowBudgetDisabled(t *testing.T) {
 		},
 	})))
 	checker := &countingBudgetChecker{}
-	err := enforceBudget(c, checker)
+	err := enforceBudget(c, checker, rateLimitRoute{})
 	require.NoError(t, err)
 	require.Equal(t, 0, checker.calls)
 }
@@ -46,7 +46,7 @@ func TestEnforceBudgetSkipsWhenWorkflowBudgetDisabled(t *testing.T) {
 func TestEnforceBudgetDefaultsEnabledWithoutWorkflow(t *testing.T) {
 	c, _ := echotest.Post(t, "/v1/chat/completions", nil)
 	checker := &countingBudgetChecker{}
-	err := enforceBudget(c, checker)
+	err := enforceBudget(c, checker, rateLimitRoute{})
 	require.NoError(t, err)
 	require.Equal(t, 1, checker.calls)
 	require.Equal(t, "/", checker.subjects.UserPath)
@@ -87,12 +87,21 @@ func TestEnforceBudgetPassesRequestLabelsAndUserPath(t *testing.T) {
 			}
 			c.SetRequest(c.Request().WithContext(ctx))
 			checker := &countingBudgetChecker{}
-			err := enforceBudget(c, checker)
+			err := enforceBudget(c, checker, rateLimitRoute{})
 			require.NoError(t, err)
 			require.Equal(t, tt.wantPath, checker.subjects.UserPath)
 			require.True(t, slices.Equal(checker.subjects.Labels, tt.wantLabels), "budget labels = %v, want %v", checker.subjects.Labels, tt.wantLabels)
 		})
 	}
+}
+
+// Provider budgets can only match if the routed provider reaches the checker.
+func TestEnforceBudgetPassesRoutedProvider(t *testing.T) {
+	c, _ := echotest.Post(t, "/v1/chat/completions", nil)
+	checker := &countingBudgetChecker{}
+	err := enforceBudget(c, checker, rateLimitRoute{provider: "openai-prod", model: "openai-prod/gpt-4o"})
+	require.NoError(t, err)
+	require.Equal(t, "openai-prod", checker.subjects.Provider)
 }
 
 func TestBatchBudgetEnforcerUsesResolvedWorkflow(t *testing.T) {
@@ -185,7 +194,7 @@ func TestBudgetExceededResponseIncludesRetryAfter(t *testing.T) {
 
 	seconds, parseErr := strconv.Atoi(retryAfter)
 	require.NoError(t, parseErr, "Retry-After = %q, want delay seconds", retryAfter)
-	require.Greater(t, seconds, 0)
+	require.Positive(t, seconds)
 	require.LessOrEqual(t, seconds, 300)
 }
 

@@ -5,6 +5,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/observability"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/anthropic"
+	"github.com/enterpilot/gomodel/internal/providers/audiocpp"
 	"github.com/enterpilot/gomodel/internal/providers/azure"
 	"github.com/enterpilot/gomodel/internal/providers/bailian"
 	"github.com/enterpilot/gomodel/internal/providers/bedrock"
@@ -13,11 +14,13 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers/chutes"
 	"github.com/enterpilot/gomodel/internal/providers/cohere"
 	"github.com/enterpilot/gomodel/internal/providers/deepseek"
+	"github.com/enterpilot/gomodel/internal/providers/edenai"
 	"github.com/enterpilot/gomodel/internal/providers/elevenlabs"
 	"github.com/enterpilot/gomodel/internal/providers/fireworks"
 	"github.com/enterpilot/gomodel/internal/providers/gemini"
 	"github.com/enterpilot/gomodel/internal/providers/groq"
 	"github.com/enterpilot/gomodel/internal/providers/hetzner"
+	"github.com/enterpilot/gomodel/internal/providers/jev"
 	"github.com/enterpilot/gomodel/internal/providers/kilo"
 	"github.com/enterpilot/gomodel/internal/providers/kimicode"
 	"github.com/enterpilot/gomodel/internal/providers/llamacpp"
@@ -52,18 +55,21 @@ func defaultProviderFactory(cfg *config.Config) *providers.ProviderFactory {
 	factory.Add(bailian.Registration)
 	factory.Add(oracle.Registration)
 	factory.Add(anthropic.Registration)
+	factory.Add(audiocpp.Registration)
 	factory.Add(bedrock.Registration)
 	factory.Add(bedrockmantle.Registration)
 	factory.Add(chatgpt.Registration)
 	factory.Add(chutes.Registration)
 	factory.Add(cohere.Registration)
 	factory.Add(deepseek.Registration)
+	factory.Add(edenai.Registration)
 	factory.Add(elevenlabs.Registration)
 	factory.Add(fireworks.Registration)
 	factory.Add(gemini.Registration)
 	factory.Add(vertex.Registration)
 	factory.Add(groq.Registration)
 	factory.Add(hetzner.Registration)
+	factory.Add(jev.Registration)
 	factory.Add(kilo.Registration)
 	factory.Add(kimicode.Registration)
 	factory.Add(llamacpp.Registration)

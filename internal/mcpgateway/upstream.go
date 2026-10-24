@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -28,6 +29,9 @@ const connectTimeout = 15 * time.Second
 // listTimeout bounds one full catalog listing pass.
 const listTimeout = 30 * time.Second
 
+// ErrToolExcluded rejects a call to a tool the operator filters hide.
+var ErrToolExcluded = errors.New("tool is excluded by the gateway tool filters")
+
 // upstream owns the client session and catalog snapshot for one server. One
 // shared session serves all downstream sessions: v1 forwards no per-user
 // upstream credentials and bridges no server-to-client requests, so
@@ -50,10 +54,15 @@ type upstream struct {
 	// reconcile). A stale background refresh must not redial it and leak an
 	// untracked session.
 	closed bool
+	// life bounds every HTTP request the upstream makes; close cancels it, so
+	// a dial hung on an unresponsive server ends with the upstream.
+	life       context.Context
+	lifeCancel context.CancelFunc
 }
 
 func newUpstream(spec ServerSpec, httpClient *http.Client) *upstream {
 	u := &upstream{spec: spec, httpClient: httpClient, status: StatusConnecting}
+	u.life, u.lifeCancel = context.WithCancel(context.Background())
 	if !spec.Enabled {
 		u.status = StatusDisabled
 	}
@@ -65,14 +74,45 @@ func (u *upstream) view() ServerView {
 	u.stateMu.Lock()
 	defer u.stateMu.Unlock()
 	return ServerView{
-		Spec:          u.spec,
-		Status:        u.status,
-		LastError:     u.lastErr,
-		ToolCount:     u.catalog.toolCount(),
-		PromptCount:   u.catalog.promptCount(),
-		ResourceCount: u.catalog.resourceCount(),
-		ConnectedAt:   u.connectedAt,
+		Spec:              u.spec,
+		Status:            u.status,
+		LastError:         u.lastErr,
+		ToolCount:         u.catalog.toolCount(),
+		ExcludedToolCount: u.catalog.excludedToolCount(),
+		PromptCount:       u.catalog.promptCount(),
+		ResourceCount:     u.catalog.resourceCount(),
+		ConnectedAt:       u.connectedAt,
 	}
+}
+
+// currentSpec returns the spec under the state lock; the access policy can
+// change in place (setAccessPolicy), so readers of it must not race it.
+func (u *upstream) currentSpec() ServerSpec {
+	u.stateMu.Lock()
+	defer u.stateMu.Unlock()
+	return u.spec
+}
+
+// setAccessPolicy swaps the tool filters and user-path scopes from spec and
+// re-filters the cached catalog without touching the upstream session. They
+// are gateway policy, so changing them never needs a redial.
+func (u *upstream) setAccessPolicy(spec ServerSpec) {
+	u.stateMu.Lock()
+	defer u.stateMu.Unlock()
+	u.spec.AllowedTools = spec.AllowedTools
+	u.spec.DisallowedTools = spec.DisallowedTools
+	u.spec.UserPaths = spec.UserPaths
+	u.spec.DisallowedUserPaths = spec.DisallowedUserPaths
+	u.catalog = u.catalog.withToolFilters(spec.AllowedTools, spec.DisallowedTools)
+}
+
+// toolExposed reports whether the current filters expose name. Downstream
+// sessions snapshot their tool list at initialize, so calls re-check here to
+// make an exclusion effective for sessions that are already open.
+func (u *upstream) toolExposed(name string) bool {
+	u.stateMu.Lock()
+	defer u.stateMu.Unlock()
+	return toolAllowed(name, u.spec.AllowedTools, u.spec.DisallowedTools)
 }
 
 // snapshot returns the current catalog (nil when never listed).
@@ -113,7 +153,7 @@ func (u *upstream) refresh(ctx context.Context) error {
 	}
 
 	u.stateMu.Lock()
-	u.catalog = fresh
+	u.catalog = fresh.withToolFilters(u.spec.AllowedTools, u.spec.DisallowedTools)
 	u.status = StatusConnected
 	u.lastErr = ""
 	u.stateMu.Unlock()
@@ -137,8 +177,17 @@ func (u *upstream) ensureSessionLocked(ctx context.Context) (*mcp.ClientSession,
 	dialCtx, cancel := context.WithTimeout(ctx, connectTimeout)
 	defer cancel()
 
-	transport, probe, err := u.transport()
+	// The SDK's Connect closes the session when the handshake fails and waits
+	// for in-flight requests, so cancelling dialCtx alone cannot end a dial
+	// whose server never answers. The dial's HTTP requests are therefore bound
+	// to requests, which the timeout, the caller, and close all cancel. A
+	// connected session keeps it for its own requests until close.
+	requests, abort := context.WithCancel(u.life)
+	stopAbort := context.AfterFunc(dialCtx, abort)
+
+	transport, probe, err := u.transport(requests)
 	if err != nil {
+		abort()
 		return nil, err
 	}
 	client := mcp.NewClient(&mcp.Implementation{
@@ -147,7 +196,14 @@ func (u *upstream) ensureSessionLocked(ctx context.Context) (*mcp.ClientSession,
 		Version: version.Version,
 	}, u.clientOptions())
 	session, err = client.Connect(dialCtx, transport, nil)
+	if !stopAbort() && err == nil {
+		// The dial ended as Connect returned, so its requests may already be
+		// aborted; the session is not trustworthy.
+		_ = session.Close()
+		err = dialCtx.Err()
+	}
 	if err != nil {
+		abort()
 		return nil, u.connectError(err, probe)
 	}
 
@@ -187,19 +243,20 @@ func (u *upstream) clientOptions() *mcp.ClientOptions {
 
 // transport builds a fresh transport for one dial attempt. HTTP transports
 // also return the probe watching that dial (nil for stdio); see connectError.
-func (u *upstream) transport() (mcp.Transport, *connectProbe, error) {
+// transport builds the dial's transport; requests bounds its HTTP requests.
+func (u *upstream) transport(requests context.Context) (mcp.Transport, *connectProbe, error) {
 	switch u.spec.Transport {
 	case "http", "":
 		probe := &connectProbe{method: http.MethodPost}
 		return &mcp.StreamableClientTransport{
 			Endpoint:   u.spec.URL,
-			HTTPClient: u.dialClient(probe),
+			HTTPClient: u.dialClient(probe, requests),
 		}, probe, nil
 	case "sse":
 		probe := &connectProbe{method: http.MethodGet}
 		return &mcp.SSEClientTransport{
 			Endpoint:   u.spec.URL,
-			HTTPClient: u.dialClient(probe),
+			HTTPClient: u.dialClient(probe, requests),
 		}, probe, nil
 	case "stdio":
 		cmd := exec.Command(u.spec.Command, u.spec.Args...)
@@ -230,7 +287,7 @@ func (u *upstream) transport() (mcp.Transport, *connectProbe, error) {
 // the shared HTTP client. The headers carry the upstream credential; the
 // client's own bearer token was terminated at the gateway and is never
 // forwarded.
-func (u *upstream) dialClient(probe *connectProbe) *http.Client {
+func (u *upstream) dialClient(probe *connectProbe, requests context.Context) *http.Client {
 	base := u.httpClient
 	if base == nil {
 		base = http.DefaultClient
@@ -248,8 +305,43 @@ func (u *upstream) dialClient(probe *connectProbe) *http.Client {
 	}
 	probe.base = transport
 	clone := *base
-	clone.Transport = probe
+	clone.Transport = &boundRoundTripper{base: probe, bound: requests}
 	return &clone
+}
+
+// boundRoundTripper cancels each request when bound ends, on top of the
+// request's own context. The binding lasts until the response body closes,
+// so a streamed response is cut off too.
+type boundRoundTripper struct {
+	base  http.RoundTripper
+	bound context.Context
+}
+
+func (t *boundRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	ctx, cancel := context.WithCancel(req.Context())
+	stop := context.AfterFunc(t.bound, cancel)
+	release := func() {
+		stop()
+		cancel()
+	}
+	resp, err := t.base.RoundTrip(req.WithContext(ctx))
+	if err != nil {
+		release()
+		return resp, err
+	}
+	resp.Body = &releasingBody{ReadCloser: resp.Body, release: sync.OnceFunc(release)}
+	return resp, nil
+}
+
+type releasingBody struct {
+	io.ReadCloser
+	release func()
+}
+
+func (b *releasingBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.release()
+	return err
 }
 
 // connectProbe watches one dial and remembers how the URL answered the first
@@ -366,7 +458,8 @@ func requestOrigin(raw string) string {
 
 // list rebuilds the catalog from the upstream's declared capabilities. Valid
 // tool schemas and metadata pass through untouched; malformed schemas are
-// made safe for the stricter downstream SDK.
+// made safe for the stricter downstream SDK. Tool filters are applied by the
+// caller, under the state lock.
 func (u *upstream) list(ctx context.Context, session *mcp.ClientSession) (*catalog, error) {
 	fresh := &catalog{}
 	init := session.InitializeResult()
@@ -384,7 +477,7 @@ func (u *upstream) list(ctx context.Context, session *mcp.ClientSession) (*catal
 			}
 			tools = append(tools, tool)
 		}
-		fresh.tools = filterTools(tools, u.spec.AllowedTools, u.spec.DisallowedTools)
+		fresh.discovered = discoverTools(tools)
 	}
 
 	if caps != nil && caps.Prompts != nil {
@@ -438,6 +531,9 @@ func (u *upstream) list(ctx context.Context, session *mcp.ClientSession) (*catal
 // callTool forwards one tools/call with the original tool name. A session
 // that died since the last call is redialed once, transparently.
 func (u *upstream) callTool(ctx context.Context, name string, args json.RawMessage) (*mcp.CallToolResult, error) {
+	if !u.toolExposed(name) {
+		return nil, fmt.Errorf("%w: %q", ErrToolExcluded, name)
+	}
 	params := &mcp.CallToolParams{Name: name}
 	if len(args) > 0 {
 		params.Arguments = args
@@ -559,6 +655,9 @@ func (u *upstream) close() {
 	session := u.session
 	u.session = nil
 	u.stateMu.Unlock()
+	// Cancel first: it ends requests a dial is stuck on, which the session
+	// close below would otherwise wait for.
+	u.lifeCancel()
 	if session != nil {
 		_ = session.Close()
 	}

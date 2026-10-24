@@ -37,7 +37,8 @@ func (h *Handler) AudioSpeech(c *echo.Context) error {
 // @Param        response_format          formData  string    false  "json, text, srt, verbose_json, or vtt"
 // @Param        temperature              formData  number    false  "Sampling temperature (0-1)"
 // @Param        timestamp_granularities[] formData  []string  false  "Timestamp granularities to populate: word and/or segment"
-// @Success      200                      {object}  map[string]interface{}  "Transcription in the requested response_format: a JSON object for json/verbose_json, or a text/plain body for text/srt/vtt"
+// @Param        stream                   formData  boolean   false  "Relay the transcript as server-sent events while the provider produces it"
+// @Success      200                      {object}  map[string]interface{}  "Transcription in the requested response_format: a JSON object for json/verbose_json, a text/plain body for text/srt/vtt, or a text/event-stream when stream=true"
 // @Failure      400              {object}  core.OpenAIErrorEnvelope
 // @Failure      401              {object}  core.OpenAIErrorEnvelope
 // @Failure      404              {object}  core.OpenAIErrorEnvelope

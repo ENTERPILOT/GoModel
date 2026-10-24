@@ -49,12 +49,6 @@ type View struct {
 	HealthCheckedAt *time.Time `json:"health_checked_at,omitempty"`
 }
 
-// ViewFromDefinition projects one guardrail definition into its admin-facing
-// view without catalog-derived fields (phases, summary).
-func ViewFromDefinition(def Definition) View {
-	return View{Definition: cloneDefinition(def)}
-}
-
 // TypeOption is one allowed option for a typed guardrail config field.
 type TypeOption struct {
 	Value string `json:"value"`

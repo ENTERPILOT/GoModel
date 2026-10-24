@@ -15,7 +15,7 @@ import (
 func TestSetRequestHeaders_AddsHookHeadersToEveryRequest(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
 
-	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 	provider.SetRequestHeaders(func(ctx context.Context) http.Header {
 		return http.Header{

@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"log/slog"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSlogRedisLogger_Printf_RoutesThroughSlogAtWarn(t *testing.T) {
@@ -20,13 +23,9 @@ func TestSlogRedisLogger_Printf_RoutesThroughSlogAtWarn(t *testing.T) {
 		Level   string `json:"level"`
 		Message string `json:"msg"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &entry); err != nil {
-		t.Fatalf("failed to decode log entry %q: %v", buf.String(), err)
-	}
-	if entry.Level != "WARN" {
-		t.Errorf("level = %q, want WARN", entry.Level)
-	}
-	if want := "connection pool: failed after 5 attempts"; entry.Message != want {
-		t.Errorf("msg = %q, want %q", entry.Message, want)
-	}
+	err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &entry)
+	require.NoError(t, err, "failed to decode log entry %q: %v", buf.String(), err)
+	assert.Equal(t, "WARN", entry.Level)
+	want := "connection pool: failed after 5 attempts"
+	assert.Equal(t, want, entry.Message)
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -107,15 +108,16 @@ func TestCredentialsService_BuildProviderPreservesManagedHookIdentity(t *testing
 		},
 	})
 
-	service, err := NewCredentialsService(t.Context(), factory, NewModelRegistry(), newFakeCredentialStore(), nil, config.ResilienceConfig{})
+	service, err := NewCredentialsService(t.Context(), factory, NewModelRegistry(), newFakeCredentialStore(), nil, config.ResilienceConfig{}, nil)
 	require.NoError(t, err)
 
-	_, _, err = service.buildProvider(ManagedProviderCredential{
+	row := ManagedProviderCredential{
 		Name:    "managed-eu",
 		Type:    "test",
 		APIKeys: []string{"sk-test"},
 		Enabled: true,
-	})
+	}
+	_, err = service.buildProvider(row, row)
 	require.NoError(t, err)
 
 	providerHooks.OnRequestStart(t.Context(), llmclient.RequestInfo{})
@@ -135,7 +137,7 @@ func TestCredentialsService_UpsertRegistersAndRoutesImmediately(t *testing.T) {
 	registry := NewModelRegistry()
 	store := newFakeCredentialStore()
 
-	svc, err := NewCredentialsService(ctx, factory, registry, store, nil, config.ResilienceConfig{})
+	svc, err := NewCredentialsService(ctx, factory, registry, store, nil, config.ResilienceConfig{}, nil)
 	require.NoError(t, err)
 
 	err = svc.Upsert(ctx, ManagedProviderCredential{
@@ -171,7 +173,7 @@ func TestCredentialsService_UpsertSucceedsWhenTheProviderRejectsTheKey(t *testin
 	registry := NewModelRegistry()
 	store := newFakeCredentialStore()
 
-	svc, err := NewCredentialsService(ctx, factory, registry, store, nil, config.ResilienceConfig{})
+	svc, err := NewCredentialsService(ctx, factory, registry, store, nil, config.ResilienceConfig{}, nil)
 	require.NoError(t, err)
 
 	err = svc.Upsert(ctx, ManagedProviderCredential{
@@ -195,7 +197,7 @@ func TestCredentialsService_UpsertKeepsThePreviousProviderLiveWhenTheEditIsUnres
 	registry := NewModelRegistry()
 	store := newFakeCredentialStore()
 
-	svc, err := NewCredentialsService(ctx, factory, registry, store, nil, config.ResilienceConfig{})
+	svc, err := NewCredentialsService(ctx, factory, registry, store, nil, config.ResilienceConfig{}, nil)
 	require.NoError(t, err)
 	err = svc.Upsert(ctx, ManagedProviderCredential{Name: "flaky", Type: "test", APIKeys: []string{"sk-good"}, Enabled: true})
 	require.NoError(t, err)
@@ -215,7 +217,7 @@ func TestCredentialsService_UpsertRejectsNameContainingSlash(t *testing.T) {
 	registry := NewModelRegistry()
 	store := newFakeCredentialStore()
 
-	svc, err := NewCredentialsService(ctx, factory, registry, store, nil, config.ResilienceConfig{})
+	svc, err := NewCredentialsService(ctx, factory, registry, store, nil, config.ResilienceConfig{}, nil)
 	require.NoError(t, err)
 
 	err = svc.Upsert(ctx, ManagedProviderCredential{Name: "my/provider", Type: "test", APIKeys: []string{"sk-test"}, Enabled: true})
@@ -229,7 +231,7 @@ func TestCredentialsService_UpsertRejectsUnresolvableCredential(t *testing.T) {
 	registry := NewModelRegistry()
 	store := newFakeCredentialStore()
 
-	svc, err := NewCredentialsService(ctx, factory, registry, store, nil, config.ResilienceConfig{})
+	svc, err := NewCredentialsService(ctx, factory, registry, store, nil, config.ResilienceConfig{}, nil)
 	require.NoError(t, err)
 
 	// No API key and the "test" registration has no AllowAPIKeyless discovery
@@ -249,7 +251,7 @@ func TestCredentialsService_DeleteUnregistersProvider(t *testing.T) {
 	registry := NewModelRegistry()
 	store := newFakeCredentialStore()
 
-	svc, err := NewCredentialsService(ctx, factory, registry, store, nil, config.ResilienceConfig{})
+	svc, err := NewCredentialsService(ctx, factory, registry, store, nil, config.ResilienceConfig{}, nil)
 	require.NoError(t, err)
 	err = svc.Upsert(ctx, ManagedProviderCredential{Name: "gone", Type: "test", APIKeys: []string{"sk-test"}, Enabled: true})
 	require.NoError(t, err)
@@ -267,7 +269,7 @@ func TestCredentialsService_DisablingUnregistersWithoutDeletingTheRow(t *testing
 	registry := NewModelRegistry()
 	store := newFakeCredentialStore()
 
-	svc, err := NewCredentialsService(ctx, factory, registry, store, nil, config.ResilienceConfig{})
+	svc, err := NewCredentialsService(ctx, factory, registry, store, nil, config.ResilienceConfig{}, nil)
 	require.NoError(t, err)
 
 	cred := ManagedProviderCredential{Name: "pausable", Type: "test", APIKeys: []string{"sk-test"}, Enabled: true}
@@ -290,7 +292,7 @@ func TestCredentialsService_DeclaredNamesAreManagedAndReadOnly(t *testing.T) {
 	registry := NewModelRegistry()
 	store := newFakeCredentialStore()
 
-	svc, err := NewCredentialsService(ctx, factory, registry, store, []string{"openai"}, config.ResilienceConfig{})
+	svc, err := NewCredentialsService(ctx, factory, registry, store, []string{"openai"}, config.ResilienceConfig{}, nil)
 	require.NoError(t, err)
 	assert.True(t, svc.IsManaged("openai"))
 	assert.False(t, svc.IsManaged("not-declared"))
@@ -317,7 +319,7 @@ func TestCredentialsService_ReloadSkipsShadowedStoreRowsAndAppliesTheRest(t *tes
 	err = store.Upsert(ctx, ManagedProviderCredential{Name: "disabled", Type: "test", APIKeys: []string{"sk-disabled"}, Enabled: false})
 	require.NoError(t, err)
 
-	svc, err := NewCredentialsService(ctx, factory, registry, store, []string{"openai"}, config.ResilienceConfig{})
+	svc, err := NewCredentialsService(ctx, factory, registry, store, []string{"openai"}, config.ResilienceConfig{}, nil)
 	require.NoError(t, err)
 
 	_ = svc
@@ -358,7 +360,7 @@ func TestCredentialsService_ConfiguredProvidersCarryGlobalResilience(t *testing.
 		"my-openai": {Type: "test", Resilience: global},
 	})[0]
 
-	svc, err := NewCredentialsService(ctx, newCredentialsTestFactory(t), NewModelRegistry(), newFakeCredentialStore(), nil, global)
+	svc, err := NewCredentialsService(ctx, newCredentialsTestFactory(t), NewModelRegistry(), newFakeCredentialStore(), nil, global, nil)
 	require.NoError(t, err)
 	got := svc.ConfiguredProviders()
 	require.Empty(t, got)
@@ -397,4 +399,24 @@ func TestCredentialsService_ConfiguredProvidersCarryGlobalResilience(t *testing.
 			assert.Empty(t, got, "ConfiguredProviders() after %s = %#v, want empty", tt.name, got)
 		})
 	}
+}
+
+type unconfirmedCredentialStore struct{ *fakeCredentialStore }
+
+func (s unconfirmedCredentialStore) Upsert(ctx context.Context, cred ManagedProviderCredential) error {
+	if err := s.fakeCredentialStore.Upsert(ctx, cred); err != nil {
+		return err
+	}
+	return encryption.ErrSealUnconfirmed
+}
+
+func TestCredentialsService_UpsertAppliesASaveWhoseDataKeyIsUnconfirmed(t *testing.T) {
+	ctx := t.Context()
+	registry := NewModelRegistry()
+	svc, err := NewCredentialsService(ctx, newCredentialsTestFactory(t), registry, unconfirmedCredentialStore{newFakeCredentialStore()}, nil, config.ResilienceConfig{}, nil)
+	require.NoError(t, err)
+
+	err = svc.Upsert(ctx, ManagedProviderCredential{Name: "my-openai", Type: "test", APIKeys: []string{"sk-test"}, Enabled: true})
+	require.ErrorIs(t, err, encryption.ErrSealUnconfirmed, "the caller learns the save is not confirmed")
+	assert.True(t, registry.Supports("my-openai/test-model"), "the saved credential is applied like any other save")
 }

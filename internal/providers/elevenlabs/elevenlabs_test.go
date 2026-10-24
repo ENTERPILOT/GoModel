@@ -16,7 +16,7 @@ import (
 func TestSetBaseURL_ChangesRequestTarget(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `[]`)
 
-	provider := NewWithHTTPClient("elk_test", "https://unused.example", server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("elk_test", "https://unused.example", server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 	_, err := provider.ListModels(context.Background())
 	require.NoError(t, err)
@@ -92,7 +92,7 @@ func TestListModels_PropagatesErrorOnceCatalogHasSucceededOnce(t *testing.T) {
 }
 
 func TestUnsupportedCapabilities_ReturnInvalidRequestErrors(t *testing.T) {
-	provider := NewWithHTTPClient("key", "", nil, llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{APIKey: "key"}, providers.ProviderOptions{})
 
 	tests := []struct {
 		name string
@@ -126,7 +126,7 @@ func TestUnsupportedCapabilities_ReturnInvalidRequestErrors(t *testing.T) {
 func TestPassthrough_ForwardsOpaqueRequest(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusAccepted, `{"accepted":true}`)
 
-	provider := NewWithHTTPClient("elk_test", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("elk_test", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 		Method:   http.MethodGet,
 		Endpoint: "voices",

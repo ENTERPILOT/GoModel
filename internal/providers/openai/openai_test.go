@@ -61,13 +61,13 @@ func markMutated(req *llmclient.Request) {
 }
 
 func TestNew(t *testing.T) {
-	provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
+	provider := newHTTPTestProvider(testAPIKey, nil, llmclient.Hooks{})
 	assert.Equal(t, testAPIKey, provider.keys.Primary())
 	assert.NotNil(t, provider.client, "nil http client should fall back to a default")
 }
 
 func TestNilRequests_ReturnInvalidRequestError(t *testing.T) {
-	provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
+	provider := newHTTPTestProvider(testAPIKey, nil, llmclient.Hooks{})
 
 	tests := []struct {
 		name string
@@ -193,7 +193,7 @@ func TestCompatibleProvider_FileHelpersApplyRequestMutator(t *testing.T) {
 				}
 			})
 
-			provider := NewCompatibleProviderWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{}, CompatibleProviderConfig{
+			provider := NewCompatibleProvider(testAPIKey, providers.ProviderOptions{HTTPClient: server.Client()}, CompatibleProviderConfig{
 				ProviderName: "test",
 				BaseURL:      server.URL,
 			})
@@ -219,7 +219,7 @@ func TestCompatibleProvider_GetBatchResultsAppliesRequestMutator(t *testing.T) {
 		},
 	})
 
-	provider := NewCompatibleProviderWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{}, CompatibleProviderConfig{
+	provider := NewCompatibleProvider(testAPIKey, providers.ProviderOptions{HTTPClient: server.Client()}, CompatibleProviderConfig{
 		ProviderName: "test",
 		BaseURL:      server.URL,
 	})
@@ -323,7 +323,7 @@ func TestChatCompletion(t *testing.T) {
 
 func TestChatCompletion_PreservesMultimodalContent(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
-	provider := NewWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{})
+	provider := newHTTPTestProvider(testAPIKey, server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -359,7 +359,7 @@ func TestChatCompletion_PreservesMultimodalContent(t *testing.T) {
 
 func TestChatCompletion_PreservesUnknownTopLevelFields(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
-	provider := NewWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{})
+	provider := newHTTPTestProvider(testAPIKey, server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -386,7 +386,7 @@ func TestChatCompletion_PreservesUnknownTopLevelFields(t *testing.T) {
 
 func TestChatCompletion_PreservesUnknownNestedFields(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
-	provider := NewWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{})
+	provider := newHTTPTestProvider(testAPIKey, server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -419,7 +419,7 @@ func TestChatCompletion_PreservesUnknownNestedFields(t *testing.T) {
 
 func TestChatCompletion_PreservesUnknownTopLevelFieldsForOSeries(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
-	provider := NewWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{})
+	provider := newHTTPTestProvider(testAPIKey, server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	maxTokens := 128
@@ -451,7 +451,7 @@ func TestChatCompletion_PreservesUnknownTopLevelFieldsForOSeries(t *testing.T) {
 }
 
 func TestChatCompletion_OSeriesMarshalErrorReturnsInvalidRequest(t *testing.T) {
-	provider := NewWithHTTPClient(testAPIKey, http.DefaultClient, llmclient.Hooks{})
+	provider := newHTTPTestProvider(testAPIKey, http.DefaultClient, llmclient.Hooks{})
 
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model:    "o3-mini",
@@ -593,7 +593,7 @@ func TestCancelledContextReturnsError(t *testing.T) {
 		Model:    "gpt-4o",
 		Messages: []core.Message{{Role: "user", Content: "Hello"}},
 	})
-	assert.Error(t, err, "ChatCompletion")
+	require.Error(t, err, "ChatCompletion")
 
 	_, err = provider.Responses(ctx, &core.ResponsesRequest{Model: "gpt-4o", Input: "Hello"})
 	assert.Error(t, err, "Responses")
@@ -736,7 +736,7 @@ func TestResponsesUtilitiesForwardResponseContext(t *testing.T) {
 			_, _ = w.Write([]byte(`{"id":"cmp_1","object":"response.compaction","output":[]}`))
 		},
 	})
-	provider := NewWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{})
+	provider := newHTTPTestProvider(testAPIKey, server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	maxOutputTokens := 128
@@ -830,7 +830,7 @@ func TestResponsesWithArrayInput(t *testing.T) {
 
 func TestResponses_PreservesUnknownNestedFields(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, responsesReplyJSON)
-	provider := NewWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{})
+	provider := newHTTPTestProvider(testAPIKey, server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
@@ -974,9 +974,17 @@ func TestIsReasoningChatModel(t *testing.T) {
 		{"gpt-5.6-terra", true},
 		{"gpt-5.6", true},
 		{"GPT-5.6-Terra", true},
+		{"gpt-6-sol", true},
+		{"gpt-6-luna", true},
+		{"gpt-6-astra", true},
+		{"gpt-6.1-sol", true},
+		{"gpt-7", true},
 		{"gpt-4o", false},
 		{"gpt-4.1", false},
-		{"gpt-50", false},
+		{"gpt-5x", false},
+		{"gpt-", false},
+		{"gpt-.5", false},
+		{"gpt-5.x", false},
 		{"claude-sonnet-4-6", false},
 		{"", false},
 	}
@@ -1002,6 +1010,8 @@ func TestChatCompletion_AdaptsTokenParamsByModel(t *testing.T) {
 		{name: "non-reasoning passes max_tokens", model: "gpt-4o"},
 		{name: "o-series stream", model: "o4-mini", stream: true, reasoning: true},
 		{name: "gpt-5 stream", model: "gpt-5-nano", stream: true, reasoning: true},
+		{name: "gpt-6 family", model: "gpt-6-luna", reasoning: true},
+		{name: "gpt-6.1 stream", model: "gpt-6.1-sol", stream: true, reasoning: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1017,7 +1027,7 @@ func TestChatCompletion_AdaptsTokenParamsByModel(t *testing.T) {
 			var sent map[string]any
 			if tt.stream {
 				srv, capture := providertest.SSEServer(t, providertest.ChatChunkSSE)
-				provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
+				provider := newHTTPTestProvider(testAPIKey, nil, llmclient.Hooks{})
 				provider.SetBaseURL(srv.URL)
 
 				body, err := provider.StreamChatCompletion(context.Background(), req)
@@ -1031,7 +1041,7 @@ func TestChatCompletion_AdaptsTokenParamsByModel(t *testing.T) {
 				assert.True(t, stream)
 			} else {
 				srv, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
-				provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
+				provider := newHTTPTestProvider(testAPIKey, nil, llmclient.Hooks{})
 				provider.SetBaseURL(srv.URL)
 
 				resp, err := provider.ChatCompletion(context.Background(), req)
@@ -1129,7 +1139,7 @@ func TestChatCompletion_PreservesToolConfiguration(t *testing.T) {
 
 func TestPassthrough(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusTooManyRequests, `{"error":"rate limited"}`)
-	provider := NewWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{})
+	provider := newHTTPTestProvider(testAPIKey, server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
@@ -1196,6 +1206,72 @@ func TestChatCompletion_MapsReasoningToReasoningEffort(t *testing.T) {
 	}
 }
 
+// From GPT-5.6 on, OpenAI rejects function tools on Chat Completions unless
+// reasoning_effort is "none", so a tool request that asks for no effort gets
+// it. An effort the caller chose is kept. Requests that cannot stay on Chat
+// Completions are routed to the Responses API (chat_via_responses_test.go).
+func TestChatCompletion_ToolsGetNoReasoningEffortWhenRequired(t *testing.T) {
+	tools := []map[string]any{{"type": "function", "function": map[string]any{"name": "get_weather"}}}
+	tests := []struct {
+		name       string
+		model      string
+		tools      []map[string]any
+		reasoning  *core.Reasoning
+		extra      core.UnknownJSONFields
+		stream     bool
+		wantEffort string // "" means the field must be absent
+	}{
+		{name: "gpt-6 tools", model: "gpt-6-luna", tools: tools, wantEffort: "none"},
+		{name: "gpt-5.6 tools", model: "gpt-5.6-terra", tools: tools, wantEffort: "none"},
+		{name: "gpt-6 tools stream", model: "gpt-6-sol", tools: tools, stream: true, wantEffort: "none"},
+		{name: "empty effort", model: "gpt-6-luna", tools: tools, reasoning: &core.Reasoning{}, wantEffort: "none"},
+		{name: "caller effort kept", model: "gpt-5.5", tools: tools, reasoning: &core.Reasoning{Effort: "low"}, wantEffort: "low"},
+		{
+			name: "caller flat effort kept", model: "gpt-5.5", tools: tools, wantEffort: "high",
+			extra: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"reasoning_effort": json.RawMessage(`"high"`)}),
+		},
+		{name: "no tools", model: "gpt-6-luna"},
+		{name: "gpt-5.5 allows tools with reasoning", model: "gpt-5.5", tools: tools},
+		{name: "gpt-6.10 is not gpt-6.1", model: "gpt-6.10-sol", tools: tools, wantEffort: "none"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &core.ChatRequest{
+				Model:       tt.model,
+				Messages:    []core.Message{{Role: "user", Content: "hi"}},
+				Tools:       tt.tools,
+				Reasoning:   tt.reasoning,
+				ExtraFields: tt.extra,
+			}
+
+			var sent map[string]any
+			if tt.stream {
+				server, capture := providertest.SSEServer(t, providertest.ChatChunkSSE)
+				provider := New(providers.ProviderConfig{APIKey: testAPIKey, BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
+				body, err := provider.StreamChatCompletion(context.Background(), req)
+				require.NoError(t, err)
+				defer func() { _ = body.Close() }()
+				_, err = io.ReadAll(body)
+				require.NoError(t, err)
+				sent = capture.Last(t).JSON(t)
+			} else {
+				server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
+				provider := New(providers.ProviderConfig{APIKey: testAPIKey, BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
+				_, err := provider.ChatCompletion(context.Background(), req)
+				require.NoError(t, err)
+				sent = capture.Last(t).JSON(t)
+			}
+
+			assert.NotContains(t, sent, "reasoning")
+			if tt.wantEffort == "" {
+				assert.NotContains(t, sent, "reasoning_effort")
+			} else {
+				assert.Equal(t, tt.wantEffort, sent["reasoning_effort"])
+			}
+		})
+	}
+}
+
 func TestNew_AttributesErrorsToInstanceName(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusBadRequest, `{"error":{"message":"bad request","type":"invalid_request_error"}}`)
 
@@ -1228,12 +1304,8 @@ func TestCompatibleProviders_ReportInstanceName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := NewCompatibleProvider("k", tt.opts, cfg).ProviderName(); got != tt.want {
-				t.Errorf("CompatibleProvider.ProviderName() = %q, want %q", got, tt.want)
-			}
-			if got := NewChatCompatible("k", tt.opts, cfg).ProviderName(); got != tt.want {
-				t.Errorf("ChatCompatible.ProviderName() = %q, want %q", got, tt.want)
-			}
+			assert.Equal(t, tt.want, NewCompatibleProvider("k", tt.opts, cfg).ProviderName(), "CompatibleProvider.ProviderName()")
+			assert.Equal(t, tt.want, NewChatCompatible("k", tt.opts, cfg).ProviderName(), "ChatCompatible.ProviderName()")
 		})
 	}
 }

@@ -497,14 +497,9 @@ func TestSQLStoreAndReader_PreserveCacheType(t *testing.T) {
 	})
 }
 
-func TestSQLReader_GetLogsUserPathSubtreeIsSegmentExact(t *testing.T) {
-	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+func TestReader_GetLogsUserPathSubtreeIsSegmentExact(t *testing.T) {
+	runReaderSuite(t, func(t *testing.T, store LogStore, reader Reader) {
 		ctx := context.Background()
-		store, err := newSQLStoreForTest(t, db, 0)
-		require.NoError(t, err)
-
-		defer store.Close()
-
 		now := time.Now()
 		entries := []*LogEntry{
 			{ID: "self", Timestamp: now, UserPath: "/team"},
@@ -517,10 +512,7 @@ func TestSQLReader_GetLogsUserPathSubtreeIsSegmentExact(t *testing.T) {
 			// User paths are case-preserving, and the filter compares bytes.
 			{ID: "other-case", Timestamp: now, UserPath: "/Team/a"},
 		}
-		err = store.WriteBatch(ctx, entries)
-		require.NoError(t, err)
-
-		reader, err := NewSQLReader(db)
+		err := store.WriteBatch(ctx, entries)
 		require.NoError(t, err)
 
 		ids := func(params LogQueryParams) map[string]bool {

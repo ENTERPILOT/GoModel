@@ -528,3 +528,55 @@ func TestProviderStatus_ReportsCredentialServiceConfigForRuntimeProviders(t *tes
 		})
 	}
 }
+
+func TestListProviderCredentials_MasksProxyPassword(t *testing.T) {
+	fake := newProviderCredentialsAdminFake()
+	fake.rows["proxied"] = providers.ManagedProviderCredential{
+		Name:     "proxied",
+		Type:     "openai",
+		APIKeys:  []string{"sk-one"},
+		ProxyURL: "socks5://egress:proxy-s3cret@10.0.0.1:1080",
+		Enabled:  true,
+	}
+	h := newProviderCredentialsHandlerWithConfigured(fake, []providers.SanitizedProviderConfig{
+		{Name: "declared", Type: "openai", ProxyURL: "http://user:xxxxx@proxy:3128"},
+	})
+
+	c, rec := echotest.Get(t, "/admin/provider-credentials")
+	require.NoError(t, h.ListProviderCredentials(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.NotContains(t, rec.Body.String(), "proxy-s3cret")
+
+	byName := map[string]providerCredentialViewResponse{}
+	for _, v := range echotest.Decode[[]providerCredentialViewResponse](t, rec) {
+		byName[v.Name] = v
+	}
+	assert.Equal(t, "socks5://egress:xxxxx@10.0.0.1:1080", byName["proxied"].ProxyURL)
+	assert.Equal(t, "http://user:xxxxx@proxy:3128", byName["declared"].ProxyURL)
+}
+
+func TestUpsertProviderCredential_ProxyURL(t *testing.T) {
+	const stored = "socks5://egress:proxy-s3cret@10.0.0.1:1080"
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "masked echo keeps the stored proxy", body: `{"name":"proxied","type":"openai","api_keys":["***"],"proxy_url":"socks5://egress:xxxxx@10.0.0.1:1080"}`, want: stored},
+		{name: "new value replaces it", body: `{"name":"proxied","type":"openai","api_keys":["***"],"proxy_url":"http://other:3128"}`, want: "http://other:3128"},
+		{name: "empty clears it", body: `{"name":"proxied","type":"openai","api_keys":["***"]}`, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := newProviderCredentialsAdminFake()
+			fake.rows["proxied"] = providers.ManagedProviderCredential{Name: "proxied", Type: "openai", APIKeys: []string{"sk-one"}, ProxyURL: stored, Enabled: true}
+			h := newProviderCredentialsHandler(fake)
+
+			c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials", tt.body)
+			require.NoError(t, h.UpsertProviderCredential(c))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			assert.NotContains(t, rec.Body.String(), "proxy-s3cret")
+			assert.Equal(t, tt.want, fake.rows["proxied"].ProxyURL)
+		})
+	}
+}

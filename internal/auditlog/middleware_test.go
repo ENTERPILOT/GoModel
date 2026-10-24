@@ -7,8 +7,10 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
@@ -311,4 +313,50 @@ func TestMiddlewarePublishesRemovalWhenHandlerPanics(t *testing.T) {
 	require.Len(t, logger.events, 2)
 	require.Equal(t, LiveEventAuditStarted, logger.events[0].eventType)
 	require.Equal(t, LiveEventAuditRemoved, logger.events[1].eventType)
+}
+
+// TestMiddlewareClientIPTagging checks the audit entry carries whatever address
+// the server resolved for the request, on both a directly exposed gateway and
+// one behind a trusted proxy network.
+func TestMiddlewareClientIPTagging(t *testing.T) {
+	tests := []struct {
+		name    string
+		proxies []string
+		remote  string
+		xff     string
+		wantIP  string
+	}{
+		{
+			name:   "direct exposure records the socket peer",
+			remote: "203.0.113.7:4321",
+			xff:    "198.51.100.8",
+			wantIP: "203.0.113.7",
+		},
+		{
+			name:    "behind a trusted proxy records the forwarded client",
+			proxies: []string{"127.0.0.0/8"},
+			remote:  "127.0.0.1:4321",
+			xff:     "203.0.113.9, 198.51.100.7",
+			wantIP:  "198.51.100.7",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			serverCfg := config.ServerConfig{TrustedProxies: tt.proxies}
+			require.NoError(t, config.ResolveClientIPPolicy(&serverCfg))
+
+			logger := &capturingLogger{cfg: Config{Enabled: true, OnlyModelInteractions: true}}
+			handler := Middleware(logger)(func(*echo.Context) error { return nil })
+
+			c, _ := echotest.Post(t, "/v1/chat/completions", nil,
+				echotest.WithRemoteAddr(tt.remote),
+				echotest.WithHeader("X-Forwarded-For", tt.xff),
+				echotest.WithIPExtractor(serverCfg.ClientIP.Resolve))
+
+			require.NoError(t, handler(c))
+			require.Len(t, logger.entries, 1)
+			assert.Equal(t, tt.wantIP, logger.entries[0].ClientIP)
+		})
+	}
 }

@@ -40,6 +40,9 @@ func validateResilienceConfig(global ResilienceConfig, providers map[string]RawP
 			if cb.Scope != nil {
 				r.CircuitBreaker.Scope = *cb.Scope
 			}
+			if cb.SlowCallThreshold != nil {
+				r.CircuitBreaker.SlowCallThreshold = *cb.SlowCallThreshold
+			}
 		}
 		if err := ValidateResilience(r); err != nil {
 			return fmt.Errorf("providers.%s.resilience: %w", name, err)
@@ -60,6 +63,9 @@ func ValidateResilience(r ResilienceConfig) error {
 	case "", "provider", "model":
 	default:
 		return fmt.Errorf("circuit_breaker.scope must be provider or model")
+	}
+	if r.CircuitBreaker.SlowCallThreshold < 0 {
+		return fmt.Errorf("circuit_breaker.slow_call_threshold must not be negative")
 	}
 	return nil
 }

@@ -26,6 +26,7 @@ type mongoCredentialDocument struct {
 	ServiceAccountJSON       string    `bson:"service_account_json,omitempty"`
 	ServiceAccountJSONBase64 string    `bson:"service_account_json_base64,omitempty"`
 	GCPScope                 string    `bson:"gcp_scope,omitempty"`
+	ProxyURL                 string    `bson:"proxy_url,omitempty"`
 	Models                   []string  `bson:"models,omitempty"`
 	SessionStickyKeys        *bool     `bson:"session_sticky_keys,omitempty"`
 	Enabled                  bool      `bson:"enabled"`
@@ -113,6 +114,7 @@ func (s *MongoDBCredentialStore) Upsert(ctx context.Context, cred ManagedProvide
 			"service_account_json":        cred.ServiceAccountJSON,
 			"service_account_json_base64": cred.ServiceAccountJSONBase64,
 			"gcp_scope":                   cred.GCPScope,
+			"proxy_url":                   cred.ProxyURL,
 			"models":                      cred.Models,
 			"session_sticky_keys":         sessionStickyKeysEnabled(cred.SessionStickyKeys),
 			"enabled":                     cred.Enabled,
@@ -140,6 +142,48 @@ func (s *MongoDBCredentialStore) Delete(ctx context.Context, name string) error 
 	return nil
 }
 
+// swapSecrets replaces a credential's secret fields only while they still
+// hold the values in current, and reports whether it did. Other fields are
+// left alone, so a concurrent edit to them is never lost either.
+func (s *MongoDBCredentialStore) swapSecrets(ctx context.Context, current, next ManagedProviderCredential) (bool, error) {
+	filter := bson.M{
+		"_id":                         normalizeCredentialName(current.Name),
+		"api_keys":                    mongoListMatch(current.APIKeys),
+		"service_account_json":        mongoStringMatch(current.ServiceAccountJSON),
+		"service_account_json_base64": mongoStringMatch(current.ServiceAccountJSONBase64),
+		"proxy_url":                   mongoStringMatch(current.ProxyURL),
+	}
+	update := bson.M{"$set": bson.M{
+		"api_keys":                    next.APIKeys,
+		"service_account_json":        next.ServiceAccountJSON,
+		"service_account_json_base64": next.ServiceAccountJSONBase64,
+		"proxy_url":                   next.ProxyURL,
+	}}
+	result, err := s.collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return false, fmt.Errorf("swap provider credential secrets: %w", err)
+	}
+	return result.MatchedCount > 0, nil
+}
+
+// mongoStringMatch matches a stored string; an empty one may also be stored
+// as a missing field.
+func mongoStringMatch(value string) any {
+	if value == "" {
+		return bson.M{"$in": bson.A{nil, ""}}
+	}
+	return value
+}
+
+// mongoListMatch matches a stored list exactly; an empty one may be stored as
+// null, a missing field, or an empty array.
+func mongoListMatch(values []string) any {
+	if len(values) == 0 {
+		return bson.M{"$in": bson.A{nil, bson.A{}}}
+	}
+	return values
+}
+
 func (s *MongoDBCredentialStore) Close() error {
 	return nil
 }
@@ -159,6 +203,7 @@ func credentialFromMongo(doc mongoCredentialDocument) ManagedProviderCredential 
 		ServiceAccountJSON:       doc.ServiceAccountJSON,
 		ServiceAccountJSONBase64: doc.ServiceAccountJSONBase64,
 		GCPScope:                 doc.GCPScope,
+		ProxyURL:                 doc.ProxyURL,
 		SessionStickyKeys:        doc.SessionStickyKeys,
 		Enabled:                  doc.Enabled,
 		CreatedAt:                doc.CreatedAt.UTC(),

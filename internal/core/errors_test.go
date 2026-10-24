@@ -10,6 +10,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestGatewayError_WithResponseBody(t *testing.T) {
+	err := NewProviderError("minimax", http.StatusBadGateway, "upstream failed", nil).
+		WithResponseBody([]byte(`{"base_resp":{"status_code":2013}}`))
+	assert.Equal(t, `{"base_resp":{"status_code":2013}}`, string(err.ResponseBody))
+
+	assert.Nil(t, NewProviderError("minimax", http.StatusBadGateway, "upstream failed", nil).
+		WithResponseBody(nil).ResponseBody)
+
+	oversized := []byte(strings.Repeat("a", maxGatewayErrorBodyBytes+1024))
+	bounded := NewProviderError("minimax", http.StatusBadGateway, "upstream failed", nil).
+		WithResponseBody(oversized)
+	assert.Len(t, bounded.ResponseBody, maxGatewayErrorBodyBytes)
+}
+
 func TestGatewayError_Error(t *testing.T) {
 	tests := []struct {
 		name     string

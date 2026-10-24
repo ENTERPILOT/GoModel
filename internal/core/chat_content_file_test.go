@@ -42,7 +42,7 @@ func TestContentPartFileRequiresPayload(t *testing.T) {
 		`{"type":"file","file":{"filename":"x.pdf"}}`,
 	} {
 		var part ContentPart
-		assert.Error(t, json.Unmarshal([]byte(raw), &part), "Unmarshal(%s) = nil error, want payload error", raw)
+		require.Error(t, json.Unmarshal([]byte(raw), &part), "Unmarshal(%s) = nil error, want payload error", raw)
 	}
 	var part ContentPart
 	err := json.Unmarshal([]byte(`{"type":"input_file","file":{"file_id":"file_123"}}`), &part)
@@ -91,4 +91,19 @@ func TestContentPartFileURLRoundTrip(t *testing.T) {
 	assert.Equal(t, float64(1), decoded.File["x_file"], "encoded = %s", encoded)
 	_, ok := decoded.File["file_data"]
 	assert.False(t, ok, "encoded emitted empty file_data: %s", encoded)
+}
+
+func TestDefaultFilename(t *testing.T) {
+	tests := map[string]string{
+		"data:application/pdf;base64,JVBERi0=": "document.pdf",
+		"data:APPLICATION/PDF;base64,JVBERi0=": "document.pdf",
+		"data:text/plain;base64,aGVsbG8=":      "document.txt",
+		"data:application/msword;base64,AAAA":  "document",
+		"not a data url":                       "document",
+	}
+	for fileData, want := range tests {
+		t.Run(fileData, func(t *testing.T) {
+			assert.Equal(t, want, DefaultFilename(fileData))
+		})
+	}
 }

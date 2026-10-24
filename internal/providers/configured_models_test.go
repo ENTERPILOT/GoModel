@@ -2,6 +2,8 @@ package providers
 
 import (
 	"errors"
+	"fmt"
+	"net/http"
 	"testing"
 
 	"github.com/enterpilot/gomodel/config"
@@ -89,6 +91,35 @@ func TestApplyConfiguredProviderModels_MergeFallsBackWhenUpstreamFails(t *testin
 			require.NotNil(t, resp)
 			require.Len(t, resp.Data, 1)
 			require.Equal(t, "configured-model", resp.Data[0].ID)
+		})
+	}
+}
+
+func TestApplyConfiguredProviderModels_MissingModelsEndpointIsAuthoritative(t *testing.T) {
+	notFound := core.MarkModelListingUnsupported(core.ParseProviderError("openai", http.StatusNotFound, []byte("<html>404 Not Found</html>"), nil))
+	tests := []struct {
+		name       string
+		mode       config.ConfiguredProviderModelsMode
+		err        error
+		wantReason configuredProviderModelsApplyReason
+	}{
+		{name: "fallback 404", mode: config.ConfiguredProviderModelsModeFallback, err: notFound, wantReason: configuredProviderModelsUpstreamUnlisted},
+		{name: "merge 404", mode: config.ConfiguredProviderModelsModeMerge, err: notFound, wantReason: configuredProviderModelsUpstreamUnlisted},
+		{name: "wrapped 404", mode: config.ConfiguredProviderModelsModeFallback, err: fmt.Errorf("list models: %w", notFound), wantReason: configuredProviderModelsUpstreamUnlisted},
+		{name: "405", mode: config.ConfiguredProviderModelsModeFallback, err: core.MarkModelListingUnsupported(core.ParseProviderError("openai", http.StatusMethodNotAllowed, nil, nil)), wantReason: configuredProviderModelsUpstreamUnlisted},
+		// A 404 from an API other than /models (e.g. the Bedrock control plane) is not marked.
+		{name: "unmarked 404", mode: config.ConfiguredProviderModelsModeFallback, err: core.ParseProviderError("bedrock", http.StatusNotFound, nil, nil), wantReason: configuredProviderModelsUpstreamError},
+		{name: "500", mode: config.ConfiguredProviderModelsModeFallback, err: core.ParseProviderError("openai", http.StatusInternalServerError, nil, nil), wantReason: configuredProviderModelsUpstreamError},
+		{name: "401", mode: config.ConfiguredProviderModelsModeFallback, err: core.ParseProviderError("openai", http.StatusUnauthorized, nil, nil), wantReason: configuredProviderModelsUpstreamError},
+		{name: "plain error", mode: config.ConfiguredProviderModelsModeFallback, err: errors.New("connection refused"), wantReason: configuredProviderModelsUpstreamError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, reason := applyConfiguredProviderModels("stt", "openai", tt.mode, []string{"whisper-1"}, nil, tt.err, 123)
+			require.Equal(t, tt.wantReason, reason)
+			require.NotNil(t, resp)
+			require.Len(t, resp.Data, 1)
+			require.Equal(t, "whisper-1", resp.Data[0].ID)
 		})
 	}
 }

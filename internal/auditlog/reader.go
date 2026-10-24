@@ -3,6 +3,8 @@ package auditlog
 import (
 	"context"
 	"time"
+
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // QueryParams specifies the date range for audit log retrieval.
@@ -24,8 +26,12 @@ type LogQueryParams struct {
 	Search         string
 	StatusCode     *int
 	Stream         *bool
-	Limit          int
-	Offset         int
+	// ExcludeOperations drops entries whose path belongs to one of these
+	// operations. Entries outside every operation (e.g. authentication
+	// events) always stay.
+	ExcludeOperations []core.Operation
+	Limit             int
+	Offset            int
 	// OmitAttempts excludes provider attempts from returned entries. The default is false.
 	OmitAttempts bool
 	// ExactUserPath matches only UserPath instead of its subtree. The default is false.
@@ -108,4 +114,9 @@ type Reader interface {
 	// GetRequestStats returns time-bucketed status-class counts and
 	// per-provider latency aggregates for the dashboard charts.
 	GetRequestStats(ctx context.Context, params RequestStatsParams) (*RequestStats, error)
+
+	// GetLastUsedByAuthKeys returns the newest audit entry timestamp per auth
+	// key id. Keys without audit entries are absent from the result; an empty
+	// keyIDs list returns an empty map without querying.
+	GetLastUsedByAuthKeys(ctx context.Context, keyIDs []string) (map[string]time.Time, error)
 }

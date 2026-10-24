@@ -12,13 +12,14 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
 func TestCreateSpeech_UsesNativeEndpointAndDecodesHex(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"data":{"audio":"000102ff","status":2},"base_resp":{"status_code":0,"status_msg":"success"}}`)
 
-	provider := NewWithHTTPClient("minimax-key", server.URL+"/v1", server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("minimax-key", server.URL+"/v1", server.Client(), llmclient.Hooks{})
 	resp, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 		Model:          "speech-2.8-hd",
 		Input:          "hello",
@@ -48,7 +49,7 @@ func TestCreateSpeech_UsesNativeEndpointAndDecodesHex(t *testing.T) {
 func TestCreateSpeech_DefaultsToMP3AndNormalSpeed(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"data":{"audio":"ff","status":2},"base_resp":{"status_code":0}}`)
 
-	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("key", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 		Model: "speech-2.8-hd",
 		Input: "hello",
@@ -64,7 +65,7 @@ func TestCreateSpeech_DefaultsToMP3AndNormalSpeed(t *testing.T) {
 }
 
 func TestCreateSpeech_ValidatesNativeConstraints(t *testing.T) {
-	provider := NewWithHTTPClient("key", "https://example.invalid/v1", nil, llmclient.Hooks{})
+	provider := newTestProvider("key", "https://example.invalid/v1", nil, llmclient.Hooks{})
 	tests := []struct {
 		name string
 		req  *core.AudioSpeechRequest
@@ -119,7 +120,7 @@ func TestCreateSpeech_MapsNativeStatusCodes(t *testing.T) {
 			require.NoError(t, err)
 			server, _ := providertest.JSONServer(t, http.StatusOK, string(body))
 
-			provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+			provider := newTestProvider("key", server.URL, server.Client(), llmclient.Hooks{})
 			_, err = provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 				Model: "speech-2.8-hd",
 				Input: "hello",
@@ -132,6 +133,7 @@ func TestCreateSpeech_MapsNativeStatusCodes(t *testing.T) {
 			assert.Contains(t, gatewayErr.Message, tt.statusMsg)
 			assert.Contains(t, gatewayErr.Message, strconv.Itoa(tt.nativeStatus))
 			assert.Equal(t, "minimax", gatewayErr.Provider)
+			assert.JSONEq(t, string(body), string(gatewayErr.ResponseBody))
 		})
 	}
 }
@@ -139,7 +141,7 @@ func TestCreateSpeech_MapsNativeStatusCodes(t *testing.T) {
 func TestCreateSpeech_RejectsMalformedAudio(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusOK, `{"data":{"audio":"not-hex","status":2},"base_resp":{"status_code":0}}`)
 
-	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := newTestProvider("key", server.URL, server.Client(), llmclient.Hooks{})
 	_, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 		Model: "speech-2.8-hd",
 		Input: "hello",
@@ -150,7 +152,8 @@ func TestCreateSpeech_RejectsMalformedAudio(t *testing.T) {
 }
 
 func TestCreateTranscription_IsUnsupported(t *testing.T) {
-	provider := NewWithHTTPClient("key", "", nil, llmclient.Hooks{})
+	provider, ok := New(providers.ProviderConfig{APIKey: "key"}, providers.ProviderOptions{}).(core.AudioProvider)
+	require.True(t, ok)
 	_, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "does not support speech-to-text")

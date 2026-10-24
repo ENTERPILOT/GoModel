@@ -2,6 +2,7 @@ package usage
 
 import (
 	"io"
+	"math"
 	"strings"
 	"sync"
 	"testing"
@@ -250,6 +251,7 @@ func TestStreamUsageObserverIncludesUserPath(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
 	observer := NewStreamUsageObserver(logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil, "/team/alpha")
 	observer.SetSessionID(" scoped-session ")
+	observer.SetAuthKeyID(" key-a ")
 	observer.OnJSONEvent(chatUsageEvent())
 	observer.OnStreamClose()
 
@@ -257,6 +259,7 @@ func TestStreamUsageObserverIncludesUserPath(t *testing.T) {
 	require.Len(t, entries, 1)
 	require.Equal(t, "/team/alpha", entries[0].UserPath)
 	require.Equal(t, "scoped-session", entries[0].SessionID)
+	require.Equal(t, "key-a", entries[0].AuthKeyID)
 }
 
 func TestStreamUsageObserverNoUserPath(t *testing.T) {
@@ -596,13 +599,20 @@ func TestStreamUsageObserverAnthropicNativeEvents(t *testing.T) {
 				"output_tokens":               float64(3),
 				"cache_creation_input_tokens": float64(100),
 				"cache_read_input_tokens":     float64(200),
+				"cache_creation": map[string]any{
+					"ephemeral_5m_input_tokens": float64(40),
+					"ephemeral_1h_input_tokens": float64(60),
+				},
 			},
 		},
 	})
 	observer.OnJSONEvent(map[string]any{
 		"type":  "message_delta",
 		"delta": map[string]any{"stop_reason": "end_turn"},
-		"usage": map[string]any{"output_tokens": float64(31)},
+		"usage": map[string]any{
+			"output_tokens":         float64(31),
+			"output_tokens_details": map[string]any{"thinking_tokens": float64(12)},
+		},
 	})
 	observer.OnStreamClose()
 
@@ -616,4 +626,163 @@ func TestStreamUsageObserverAnthropicNativeEvents(t *testing.T) {
 	assert.Equal(t, "msg_native", entry.ProviderID)
 	assert.Equal(t, 100, entry.RawData["cache_creation_input_tokens"])
 	assert.Equal(t, 200, entry.RawData["cache_read_input_tokens"])
+	assert.Equal(t, 40, entry.RawData["cache_creation_ephemeral_5m_input_tokens"])
+	assert.Equal(t, 60, entry.RawData["cache_creation_ephemeral_1h_input_tokens"])
+	assert.Equal(t, 12, entry.RawData["completion_thinking_tokens"])
+}
+
+// Eden AI reports its per-request charge at the chunk root rather than inside
+// usage. A streamed chunk reaches the observer as raw JSON, so unlike the
+// non-streaming path the provider cannot relocate it first — the observer has
+// to harvest it.
+func TestStreamUsageObserverEdenAIRootLevelCost(t *testing.T) {
+	logger := &trackingLogger{enabled: true}
+	observer := NewStreamUsageObserver(logger, "openai/gpt-4o-mini", "edenai", "req-edenai", "/v1/chat/completions", nil)
+	observer.OnJSONEvent(map[string]any{
+		"id":       "chatcmpl-eden",
+		"model":    "gpt-4o-mini-2024-07-18",
+		"cost":     float64(0.0002349),
+		"provider": "openai",
+		"usage": map[string]any{
+			"prompt_tokens":     float64(1170),
+			"completion_tokens": float64(99),
+			"total_tokens":      float64(1269),
+		},
+	})
+	observer.OnStreamClose()
+
+	entries := logger.getEntries()
+	require.Len(t, entries, 1)
+	entry := entries[0]
+	require.NotNil(t, entry.RawData)
+	require.Equal(t, 0.0002349, entry.RawData["cost"], "RawData[cost] should be harvested from the chunk root")
+	require.NotNil(t, entry.TotalCost)
+	require.Equal(t, 0.0002349, *entry.TotalCost)
+	require.Equal(t, CostSourceEdenAICost, entry.CostSource)
+}
+
+// A usage-level cost is the conventional location, so it stays authoritative
+// when a provider reports both.
+func TestStreamUsageObserverUsageCostWinsOverRootLevelCost(t *testing.T) {
+	logger := &trackingLogger{enabled: true}
+	observer := NewStreamUsageObserver(logger, "openai/gpt-4o-mini", "edenai", "req-edenai", "/v1/chat/completions", nil)
+	observer.OnJSONEvent(map[string]any{
+		"id":    "chatcmpl-eden",
+		"model": "gpt-4o-mini",
+		"cost":  float64(9.99),
+		"usage": map[string]any{
+			"prompt_tokens":     float64(10),
+			"completion_tokens": float64(4),
+			"total_tokens":      float64(14),
+			"cost":              float64(0.5),
+		},
+	})
+	observer.OnStreamClose()
+
+	entries := logger.getEntries()
+	require.Len(t, entries, 1)
+	require.Equal(t, 0.5, entries[0].RawData["cost"], "RawData[cost] should keep the usage-level value")
+}
+
+// An unusable root-level cost must not reach rawData, so the entry falls back
+// to token pricing instead of recording a corrupt figure.
+func TestStreamUsageObserverRejectsUnusableRootLevelCost(t *testing.T) {
+	for name, cost := range map[string]any{
+		"negative":     float64(-1),
+		"NaN":          math.NaN(),
+		"not a number": "free",
+	} {
+		t.Run(name, func(t *testing.T) {
+			logger := &trackingLogger{enabled: true}
+			resolver := &streamPricingCaptureResolver{pricing: &core.ModelPricing{
+				InputPerMtok:  new(1.0),
+				OutputPerMtok: new(2.0),
+			}}
+			observer := NewStreamUsageObserver(logger, "openai/gpt-4o-mini", "edenai", "req-edenai", "/v1/chat/completions", resolver)
+			observer.OnJSONEvent(map[string]any{
+				"id":    "chatcmpl-eden",
+				"model": "gpt-4o-mini",
+				"cost":  cost,
+				"usage": map[string]any{
+					"prompt_tokens":     float64(1_000_000),
+					"completion_tokens": float64(500_000),
+					"total_tokens":      float64(1_500_000),
+				},
+			})
+			observer.OnStreamClose()
+
+			entries := logger.getEntries()
+			require.Len(t, entries, 1)
+			entry := entries[0]
+			require.NotContains(t, entry.RawData, "cost", "unusable root-level cost should be dropped")
+			require.Equal(t, CostSourceModelPricing, entry.CostSource)
+			require.NotNil(t, entry.TotalCost)
+			require.InDelta(t, 2.0, *entry.TotalCost, 1e-9, "TotalCost should be token-priced")
+		})
+	}
+}
+
+// Harvesting the root member must not change any other provider's cost math:
+// the value is only ever interpreted as USD for providers CalculateUsageCost
+// gates on.
+func TestStreamUsageObserverRootLevelCostDoesNotRepriceOtherProviders(t *testing.T) {
+	logger := &trackingLogger{enabled: true}
+	resolver := &streamPricingCaptureResolver{pricing: &core.ModelPricing{
+		InputPerMtok:  new(1.0),
+		OutputPerMtok: new(2.0),
+	}}
+	observer := NewStreamUsageObserver(logger, "gpt-4o", "openai", "req-openai", "/v1/chat/completions", resolver)
+	observer.OnJSONEvent(map[string]any{
+		"id":    "chatcmpl-openai",
+		"model": "gpt-4o",
+		"cost":  float64(9.99),
+		"usage": map[string]any{
+			"prompt_tokens":     float64(1_000_000),
+			"completion_tokens": float64(500_000),
+			"total_tokens":      float64(1_500_000),
+		},
+	})
+	observer.OnStreamClose()
+
+	entries := logger.getEntries()
+	require.Len(t, entries, 1)
+	entry := entries[0]
+	require.Equal(t, CostSourceModelPricing, entry.CostSource)
+	require.NotNil(t, entry.TotalCost)
+	require.InDelta(t, 2.0, *entry.TotalCost, 1e-9, "TotalCost should be token-priced")
+}
+
+// A routed alias (jev-latest) is answered by a versioned model (jev-1.13.0);
+// the routed model's price wins, and the answered model's price applies when
+// only it is declared.
+func TestStreamUsageObserverPricesAnsweredModelWhenRoutedHasNone(t *testing.T) {
+	routedRate, answeredRate := 10.0, 42.0
+	routed := &core.ModelPricing{InputPerMtok: &routedRate}
+	answered := &core.ModelPricing{InputPerMtok: &answeredRate}
+
+	tests := []struct {
+		name      string
+		resolver  mapPricingResolver
+		wantInput float64
+	}{
+		{name: "routed model priced", resolver: mapPricingResolver{"jev-latest/jev": routed, "jev-1.13.0/jev": answered}, wantInput: 10},
+		{name: "only answered model priced", resolver: mapPricingResolver{"jev-1.13.0/jev": answered}, wantInput: 42},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger := &trackingLogger{enabled: true}
+			observer := NewStreamUsageObserver(logger, "jev-latest", "jev", "req-s1", "/v1/systemone", tt.resolver)
+			observer.OnJSONEvent(map[string]any{
+				"model": "jev-1.13.0",
+				"usage": map[string]any{"input_tokens": float64(1_000_000), "output_tokens": float64(0)},
+			})
+			observer.OnStreamClose()
+
+			entries := logger.getEntries()
+			require.Len(t, entries, 1)
+			require.NotNil(t, entries[0].InputCost)
+			assert.InDelta(t, tt.wantInput, *entries[0].InputCost, 1e-9)
+			assert.Equal(t, "jev-1.13.0", entries[0].Model)
+		})
+	}
 }

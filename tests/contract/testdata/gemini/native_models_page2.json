@@ -1,0 +1,142 @@
+{
+  "models": [
+    {
+      "name": "models/gemini-2.5-flash-native-audio-latest",
+      "version": "Gemini 2.5 Flash Native Audio Latest",
+      "displayName": "Gemini 2.5 Flash Native Audio Latest",
+      "description": "Latest release of Gemini 2.5 Flash Native Audio",
+      "inputTokenLimit": 131072,
+      "outputTokenLimit": 8192,
+      "supportedGenerationMethods": [
+        "countTokens",
+        "bidiGenerateContent"
+      ],
+      "temperature": 1,
+      "topP": 0.95,
+      "topK": 64,
+      "maxTemperature": 2,
+      "thinking": true
+    },
+    {
+      "name": "models/gemini-2.5-flash-native-audio-preview-09-2025",
+      "version": "gemini-2.5-flash-preview-native-audio-dialog-2025-05-19",
+      "displayName": "Gemini 2.5 Flash Native Audio Preview 09-2025",
+      "description": "Gemini 2.5 Flash Native Audio Preview 09-2025",
+      "inputTokenLimit": 131072,
+      "outputTokenLimit": 8192,
+      "supportedGenerationMethods": [
+        "countTokens",
+        "bidiGenerateContent"
+      ],
+      "temperature": 1,
+      "topP": 0.95,
+      "topK": 64,
+      "maxTemperature": 2,
+      "thinking": true
+    },
+    {
+      "name": "models/gemini-2.5-flash-native-audio-preview-12-2025",
+      "version": "12-2025",
+      "displayName": "Gemini 2.5 Flash Native Audio Preview 12-2025",
+      "description": "Gemini 2.5 Flash Native Audio Preview 12-2025",
+      "inputTokenLimit": 131072,
+      "outputTokenLimit": 8192,
+      "supportedGenerationMethods": [
+        "countTokens",
+        "bidiGenerateContent"
+      ],
+      "temperature": 1,
+      "topP": 0.95,
+      "topK": 64,
+      "maxTemperature": 2,
+      "thinking": true
+    },
+    {
+      "name": "models/gemini-3.1-flash-live-preview",
+      "version": "3.1-flash-live-03-2026",
+      "displayName": "Gemini 3.1 Flash Live Preview",
+      "description": "Gemini 3.1 Flash Live Preview",
+      "inputTokenLimit": 131072,
+      "outputTokenLimit": 65536,
+      "supportedGenerationMethods": [
+        "bidiGenerateContent"
+      ],
+      "temperature": 1,
+      "topP": 0.95,
+      "topK": 64,
+      "maxTemperature": 2
+    },
+    {
+      "name": "models/gemini-3.8-live",
+      "version": "3.1-flash-live-03-2026",
+      "displayName": "Gemini 3.8 Live",
+      "description": "Gemini 3.8 Live",
+      "inputTokenLimit": 131072,
+      "outputTokenLimit": 65536,
+      "supportedGenerationMethods": [
+        "bidiGenerateContent"
+      ],
+      "temperature": 1,
+      "topP": 0.95,
+      "topK": 64,
+      "maxTemperature": 2
+    },
+    {
+      "name": "models/gemini-3.8-live-extended-thinking",
+      "version": "3.1-flash-live-03-2026",
+      "displayName": "Gemini 3.8 Live Extended Thinking",
+      "description": "Gemini 3.8 Live Extended Thinking",
+      "inputTokenLimit": 131072,
+      "outputTokenLimit": 65536,
+      "supportedGenerationMethods": [
+        "bidiGenerateContent"
+      ],
+      "temperature": 1,
+      "topP": 0.95,
+      "topK": 64,
+      "maxTemperature": 2,
+      "thinking": true
+    },
+    {
+      "name": "models/gemini-robotics-er-2-streaming-preview",
+      "version": "2-streaming-preview",
+      "displayName": "Gemini Robotics-ER 2 Streaming Preview",
+      "description": "Gemini Robotics-ER 2 Streaming Preview",
+      "inputTokenLimit": 131072,
+      "outputTokenLimit": 65536,
+      "supportedGenerationMethods": [
+        "bidiGenerateContent"
+      ],
+      "temperature": 1,
+      "topP": 0.95,
+      "topK": 64,
+      "maxTemperature": 2
+    },
+    {
+      "name": "models/gemini-3.5-live-translate-preview",
+      "version": "3.5-live-translate-06-2026",
+      "displayName": "Gemini 3.5 Live Translate Preview",
+      "description": "Gemini 3.5 Live Translate Preview",
+      "inputTokenLimit": 16384,
+      "outputTokenLimit": 32768,
+      "supportedGenerationMethods": [
+        "bidiGenerateContent"
+      ],
+      "temperature": 1,
+      "topP": 0.95,
+      "topK": 64,
+      "maxTemperature": 2
+    },
+    {
+      "name": "models/lyria-realtime-exp",
+      "version": "lyria-realtime-exp",
+      "displayName": "Lyria Realtime Experimental",
+      "description": "Lyria Realtime Experimental",
+      "inputTokenLimit": 1048576,
+      "outputTokenLimit": 65536,
+      "supportedGenerationMethods": [
+        "bidiGenerateMusic"
+      ]
+    }
+  ]
+}

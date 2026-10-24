@@ -167,7 +167,7 @@ func TestRealtimeTargetTranscriptionIntent(t *testing.T) {
 	// The model still gates the request: without one there is nothing to route
 	// or attribute usage to, transcription intent or not.
 	_, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Intent: "transcription"})
-	assert.Error(t, err)
+	require.Error(t, err)
 
 	// Unknown intents keep today's conversation-session behavior.
 	target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime", Intent: "conversation"})

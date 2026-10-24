@@ -350,10 +350,10 @@ func TestOnResponse(t *testing.T) {
 	t.Run("nil exchange parts", func(t *testing.T) {
 		p := newPlugin(t, `{"rules": "ACME => x", "on_match": "block"}`)
 		d, err := p.OnResponse(context.Background(), plugintest.Exchange(nil, nil))
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, pluginapi.ActionAllow, d.Action)
 		d, err = p.OnPrompt(context.Background(), plugintest.Exchange(nil, nil))
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, pluginapi.ActionAllow, d.Action)
 	})
 }
@@ -457,7 +457,7 @@ func TestStreamNilValues(t *testing.T) {
 	_, err := p.OnStreamEvent(context.Background(), x, &pluginapi.StreamEvent{Kind: pluginapi.EventTextDelta, Text: "ACME"})
 	require.NoError(t, err)
 	d, err := p.OnStreamEnd(context.Background(), x)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, pluginapi.ActionAllow, d.Action)
 }
 
@@ -648,7 +648,7 @@ func TestStreamDriver(t *testing.T) {
 
 	p = newPlugin(t, `{"rules": "secret => [x]", "on_match": "block", "message": "leak"}`)
 	res, err = plugintest.RunStream(context.Background(), p, plugintest.Exchange(nil, nil), []*pluginapi.StreamEvent{plugintest.TextDelta("a se"), plugintest.TextDelta("cret")})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, pluginapi.ActionBlock, res.End.Action)
 	assert.Equal(t, "leak", res.End.Message)
 	assert.Empty(t, res.Text)

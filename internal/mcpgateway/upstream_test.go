@@ -5,10 +5,10 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/require"
 )
 
 // TestUpstreamConnectsToStatelessServer covers servers that run streamable
@@ -28,21 +28,19 @@ func TestUpstreamConnectsToStatelessServer(t *testing.T) {
 	t.Cleanup(u.close)
 
 	ctx := context.Background()
-	if err := u.refresh(ctx); err != nil {
-		t.Fatalf("refresh() against stateless upstream error = %v", err)
-	}
+	err := u.refresh(ctx)
+	require.NoError(t, err)
+
 	cat, status := u.snapshot()
-	if status != StatusConnected || cat.toolCount() != 1 {
-		t.Fatalf("status = %v, tools = %d, want connected with 1 tool", status, cat.toolCount())
-	}
+	require.Equal(t, StatusConnected, status)
+	require.Equal(t, 1, cat.toolCount())
+
 	res, err := u.callTool(ctx, "echo", []byte(`{"text":"hi"}`))
-	if err != nil {
-		t.Fatalf("callTool() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	text, ok := res.Content[0].(*mcp.TextContent)
-	if !ok || text.Text != `echo:{"text":"hi"}` {
-		t.Fatalf("callTool() content = %#v, want echoed arguments", res.Content[0])
-	}
+	require.True(t, ok)
+	require.Equal(t, `echo:{"text":"hi"}`, text.Text, "callTool() content = %#v, want echoed arguments", res.Content[0])
 }
 
 // TestUpstreamConnectNamesMissingEndpoint covers a URL whose path serves no
@@ -55,23 +53,17 @@ func TestUpstreamConnectNamesMissingEndpoint(t *testing.T) {
 
 	u := newUpstream(testSpec("alpha", ts.URL+"/path-secret?token=query-secret", nil), ts.Client())
 	err := u.refresh(context.Background())
-	if err == nil {
-		t.Fatalf("refresh() against a non-MCP path should error")
-	}
+	require.Error(t, err)
+
 	for _, want := range []string{`connect to mcp server "alpha"`, ts.URL + " answered HTTP 404 Not Found", "check the url"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error = %q, want it to contain %q", err, want)
-		}
+		require.Contains(t, err.Error(), want)
 	}
 	for _, leak := range []string{"path-secret", "query-secret"} {
-		if strings.Contains(err.Error(), leak) {
-			t.Fatalf("error = %q leaks %q from the URL", err, leak)
-		}
+		require.NotContains(t, err.Error(), leak, "error = %q leaks %q from the URL", err, leak)
 	}
 	view := u.view()
-	if view.Status != StatusDegraded || view.LastError != err.Error() {
-		t.Fatalf("view = %+v, want degraded with the connect error", view)
-	}
+	require.Equal(t, StatusDegraded, view.Status)
+	require.Equal(t, err.Error(), view.LastError, "view = %+v, want degraded with the connect error", view)
 }
 
 // TestUpstreamConnectNamesTransportMismatch covers a 405 on the handshake:
@@ -86,17 +78,12 @@ func TestUpstreamConnectNamesTransportMismatch(t *testing.T) {
 
 	u := newUpstream(testSpec("alpha", ts.URL, func(spec *ServerSpec) { spec.Transport = "sse" }), ts.Client())
 	err := u.refresh(context.Background())
-	if err == nil {
-		t.Fatalf("refresh() with the wrong transport should error")
-	}
+	require.Error(t, err)
+
 	for _, want := range []string{ts.URL + " answered HTTP 405 Method Not Allowed to the sse handshake", "check the transport and the url"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error = %q, want it to contain %q", err, want)
-		}
+		require.Contains(t, err.Error(), want)
 	}
-	if strings.Contains(err.Error(), "no MCP endpoint at that path") {
-		t.Fatalf("error = %q blames the path for a transport mismatch", err)
-	}
+	require.NotContains(t, err.Error(), "no MCP endpoint at that path")
 }
 
 // TestUpstreamConnectKeepsSessionLossDiagnosis covers a stateful server that
@@ -117,15 +104,9 @@ func TestUpstreamConnectKeepsSessionLossDiagnosis(t *testing.T) {
 
 	u := newUpstream(testSpec("alpha", ts.URL, nil), ts.Client())
 	err := u.refresh(context.Background())
-	if err == nil {
-		t.Fatalf("refresh() against a server dropping its session should error")
-	}
-	if strings.Contains(err.Error(), "no MCP endpoint") {
-		t.Fatalf("error = %q misreports a lost session as a missing endpoint", err)
-	}
-	if !strings.Contains(err.Error(), `connect to mcp server "alpha"`) {
-		t.Fatalf("error = %q, want the connect wrapper", err)
-	}
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "no MCP endpoint")
+	require.Contains(t, err.Error(), `connect to mcp server "alpha"`)
 }
 
 // TestUpstreamSSEConnectNamesMissingEndpoint covers the legacy SSE transport,
@@ -136,12 +117,8 @@ func TestUpstreamSSEConnectNamesMissingEndpoint(t *testing.T) {
 
 	u := newUpstream(testSpec("alpha", ts.URL+"/sse", func(spec *ServerSpec) { spec.Transport = "sse" }), ts.Client())
 	err := u.refresh(context.Background())
-	if err == nil {
-		t.Fatalf("refresh() against a non-MCP path should error")
-	}
-	if !strings.Contains(err.Error(), ts.URL+" answered HTTP 404 Not Found") {
-		t.Fatalf("error = %q, want the missing-endpoint hint", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), ts.URL+" answered HTTP 404 Not Found")
 }
 
 // TestUpstreamConnectRedactsTransportFailure covers a dial that never gets
@@ -149,9 +126,8 @@ func TestUpstreamSSEConnectNamesMissingEndpoint(t *testing.T) {
 // but the origin must be stripped before it reaches logs or the dashboard.
 func TestUpstreamConnectRedactsTransportFailure(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("net.Listen() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	addr := listener.Addr().String()
 	_ = listener.Close()
 
@@ -160,20 +136,15 @@ func TestUpstreamConnectRedactsTransportFailure(t *testing.T) {
 			url := "http://user:user-secret@" + addr + "/path-secret?token=query-secret"
 			u := newUpstream(testSpec("alpha", url, func(spec *ServerSpec) { spec.Transport = transport }), nil)
 			err := u.refresh(context.Background())
-			if err == nil {
-				t.Fatalf("refresh() against a closed port should error")
-			}
-			if !strings.Contains(err.Error(), "http://"+addr) {
-				t.Fatalf("error = %q, want the origin kept", err)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "http://"+addr)
+
 			for _, leak := range []string{"user", "path-secret", "query-secret"} {
-				if strings.Contains(err.Error(), leak) {
-					t.Fatalf("error = %q leaks %q from the URL", err, leak)
-				}
+				require.NotContains(t, err.Error(), leak, "error = %q leaks %q from the URL", err, leak)
 			}
-			if view := u.view(); strings.Contains(view.LastError, "secret") {
-				t.Fatalf("LastError = %q leaks the URL", view.LastError)
-			}
+			view := u.view()
+			require.NotContains(t, view.LastError, "secret", "LastError = %q leaks the URL", view.LastError)
+
 		})
 	}
 }

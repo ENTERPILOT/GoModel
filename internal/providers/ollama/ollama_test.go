@@ -48,6 +48,23 @@ func newTestProvider(baseURL string) *Provider {
 	return New(providers.ProviderConfig{BaseURL: baseURL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 }
 
+// Ollama's OpenAI-compatible surface translates Responses to chat completions
+// and may run without an API key. Its embeddings use the native /api/embed
+// endpoint, which the tests below cover.
+func TestChatCompatibleContract(t *testing.T) {
+	providertest.AssertChatCompatible(t, providertest.ChatCompatible{
+		Registration:   Registration,
+		Type:           "ollama",
+		DefaultBaseURL: "http://localhost:11434/v1",
+		SkipEmbeddings: true,
+		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
+			opts := providertest.Options(hooks)
+			opts.HTTPClient = client
+			return New(providers.ProviderConfig{APIKey: apiKey, BaseURL: baseURL}, opts)
+		},
+	})
+}
+
 func TestNew(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -59,7 +76,7 @@ func TestNew(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			provider := NewWithHTTPClient(tt.apiKey, nil, llmclient.Hooks{})
+			provider := newHTTPTestProvider(tt.apiKey, nil, llmclient.Hooks{})
 			assert.Equal(t, tt.apiKey, provider.keys.Primary())
 			assert.NotNil(t, provider.compat)
 			assert.NotNil(t, provider.nativeClient)
@@ -117,31 +134,6 @@ func TestChatCompletion(t *testing.T) {
 			}
 			require.NoError(t, err)
 			tt.checkResponse(t, resp)
-		})
-	}
-}
-
-func TestChatCompletion_AuthorizationHeader(t *testing.T) {
-	tests := []struct {
-		name     string
-		apiKey   string
-		wantAuth string
-	}{
-		{name: "with api key", apiKey: "test-api-key", wantAuth: "Bearer test-api-key"},
-		{name: "without api key"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			server, capture := providertest.JSONServer(t, http.StatusOK, chatCompletionJSON)
-			provider := NewWithHTTPClient(tt.apiKey, nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
-
-			_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
-				Model:    "llama3.2",
-				Messages: []core.Message{{Role: "user", Content: "Hello"}},
-			})
-			require.NoError(t, err)
-			assert.Equal(t, tt.wantAuth, capture.Last(t).Header.Get("Authorization"))
 		})
 	}
 }
@@ -293,7 +285,9 @@ func TestListModels_StampsShowCapabilities(t *testing.T) {
 			case "nomic-embed-text":
 				_, _ = w.Write([]byte(`{"capabilities":["embedding"]}`))
 			case "llama3.2":
-				_, _ = w.Write([]byte(`{"capabilities":["completion","tools"]}`))
+				_, _ = w.Write([]byte(`{"capabilities":["completion","tools","vision","thinking"],
+					"details":{"family":"llama","parameter_size":"3.2B"},
+					"model_info":{"general.architecture":"llama","llama.context_length":131072,"llama.embedding_length":3072}}`))
 			default:
 				w.WriteHeader(http.StatusInternalServerError)
 			}
@@ -317,6 +311,11 @@ func TestListModels_StampsShowCapabilities(t *testing.T) {
 	chat := byID["llama3.2"]
 	require.NotNil(t, chat.Metadata)
 	assert.Equal(t, []string{"chat"}, chat.Metadata.Modes)
+	assert.Equal(t, "llama", chat.Metadata.Family)
+	require.NotNil(t, chat.Metadata.ContextWindow)
+	assert.Equal(t, 131072, *chat.Metadata.ContextWindow)
+	assert.Equal(t, map[string]bool{"function_calling": true, "vision": true, "reasoning": true}, chat.Metadata.Capabilities)
+	assert.Nil(t, embed.Metadata.Capabilities)
 	assert.Nil(t, byID["mystery-model"].Metadata)
 
 	// Second listing: successes served from cache, the failure re-probed.
@@ -350,29 +349,6 @@ func TestChatCompletionWithContext(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestResponses(t *testing.T) {
-	server, capture := providertest.JSONServer(t, http.StatusOK, chatCompletionJSON)
-	provider := newTestProvider(server.URL)
-
-	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
-		Model: "llama3.2",
-		Input: "Hello",
-	})
-	require.NoError(t, err)
-	// Ollama converts Responses to chat completions.
-	assert.Equal(t, "/chat/completions", capture.Last(t).Path)
-	assert.Equal(t, "chatcmpl-123", resp.ID)
-	assert.Equal(t, "response", resp.Object)
-	assert.Equal(t, "llama3.2", resp.Model)
-	assert.Equal(t, "completed", resp.Status)
-	require.Len(t, resp.Output, 1)
-	require.Len(t, resp.Output[0].Content, 1)
-	assert.Equal(t, "Hello! How can I help you today?", resp.Output[0].Content[0].Text)
-	require.NotNil(t, resp.Usage)
-	assert.Equal(t, 10, resp.Usage.InputTokens)
-	assert.Equal(t, 20, resp.Usage.OutputTokens)
-}
-
 func TestResponsesWithArrayInput(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, chatCompletionJSON)
 	provider := newTestProvider(server.URL)
@@ -392,28 +368,6 @@ func TestResponsesWithArrayInput(t *testing.T) {
 	messages, ok := capture.Last(t).JSON(t)["messages"].([]any)
 	require.True(t, ok)
 	assert.Len(t, messages, 3)
-}
-
-func TestStreamResponses(t *testing.T) {
-	server, capture := providertest.SSEServer(t, chatChunkSSE)
-	provider := newTestProvider(server.URL)
-
-	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
-		Model: "llama3.2",
-		Input: "Hello",
-	})
-	require.NoError(t, err)
-	require.NotNil(t, body)
-	defer func() { _ = body.Close() }()
-
-	respBody, err := io.ReadAll(body)
-	require.NoError(t, err)
-	assert.Equal(t, true, capture.Last(t).JSON(t)["stream"])
-
-	responseStr := string(respBody)
-	assert.Contains(t, responseStr, "response.created")
-	assert.Contains(t, responseStr, "response.output_text.delta")
-	assert.Contains(t, responseStr, "[DONE]")
 }
 
 func TestResponsesWithContext(t *testing.T) {

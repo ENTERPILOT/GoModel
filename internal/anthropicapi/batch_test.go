@@ -34,7 +34,7 @@ func TestDecodeBatchCreateRequest(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
-			require.Equal(t, tc.items, len(req.Requests))
+			require.Len(t, req.Requests, tc.items)
 		})
 	}
 }

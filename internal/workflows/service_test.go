@@ -14,6 +14,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/plugins/builtin"
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -892,6 +893,31 @@ func TestServiceListViews_AnnotatesCompileFailuresPerRow(t *testing.T) {
 	require.Equal(t, "compile workflow \"provider-v1\": compile failed for provider-v1", views[1].CompileError)
 	require.Equal(t, "provider", views[1].ScopeType)
 	require.Equal(t, "openai", views[1].ScopeDisplay)
+}
+
+func TestServiceGetView_ReturnsCompileFailureAsView(t *testing.T) {
+	store := &staticStore{
+		versions: []Version{{
+			ID:       "provider-v1",
+			Scope:    Scope{Provider: "openai"},
+			ScopeKey: "provider:openai",
+			Version:  1,
+			Name:     "stale-guardrail",
+			Payload:  Payload{SchemaVersion: 1, Features: FeatureFlags{Audit: true}},
+		}},
+	}
+	service, err := NewService(store, &versionFailingCompiler{
+		delegate: NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()),
+		version:  "provider-v1",
+		err:      errors.New("unknown guardrail ref: sys-tone"),
+	})
+	require.NoError(t, err)
+
+	view, err := service.GetView(context.Background(), "provider-v1")
+	require.NoError(t, err)
+	assert.Equal(t, "provider-v1", view.ID)
+	assert.Equal(t, "provider", view.ScopeType)
+	assert.Equal(t, "compile workflow \"provider-v1\": unknown guardrail ref: sys-tone", view.CompileError)
 }
 
 func TestViewScopeSpecificity_PathExceedsProvider(t *testing.T) {

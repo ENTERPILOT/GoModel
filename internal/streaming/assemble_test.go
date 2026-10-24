@@ -228,7 +228,7 @@ func TestAppendOutputText_BoundsContentIndex(t *testing.T) {
 	require.Equal(t, "neg", item.Content[0].Text)
 
 	appendOutputText(item, 1<<30, "far")
-	require.Equal(t, maxAssembledContentParts, len(item.Content))
+	require.Len(t, item.Content, maxAssembledContentParts)
 	require.Equal(t, "far", item.Content[len(item.Content)-1].Text)
 
 	appendOutputText(item, 1, "one")
@@ -276,8 +276,8 @@ func TestSynthesizeChatStream_CarriesReplayState(t *testing.T) {
 
 	// The Anthropic Messages converter closes the thinking block when the
 	// first text arrives, so a signature that came after it would be dropped.
-	if textAt >= 0 && extraAt > textAt {
-		t.Errorf("extra_content at chunk %d, first content at %d; want the replay state first", extraAt, textAt)
+	if textAt >= 0 {
+		assert.LessOrEqual(t, extraAt, textAt, "extra_content at chunk %d, first content at %d; want the replay state first", extraAt, textAt)
 	}
 	var want, have any
 	err := json.Unmarshal([]byte(replay), &want)
@@ -315,4 +315,23 @@ func TestAssembleChatResponse_KeepsReplayState(t *testing.T) {
 	assert.Equal(t, want, have)
 	reasoning := resp.Choices[0].Message.ExtraFields.Lookup("reasoning_content")
 	assert.Equal(t, `"hm"`, string(reasoning))
+}
+
+// A buffered replay keeps reasoning under the member it came in.
+func TestSynthesizeChatStream_VendorReasoningMember(t *testing.T) {
+	resp := &core.ChatResponse{
+		ID: "chatcmpl-4",
+		Choices: []core.Choice{{
+			Message: core.ResponseMessage{
+				Role:        "assistant",
+				Content:     "done",
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"reasoning": json.RawMessage(`"hm"`)}),
+			},
+			FinishReason: "stop",
+		}},
+	}
+	assembled, err := AssembleChatResponse(decodeChatEvents(t, SynthesizeChatStream(resp, false)))
+	require.NoError(t, err)
+	assert.Equal(t, `"hm"`, string(assembled.Choices[0].Message.ExtraFields.Lookup("reasoning")))
+	assert.Nil(t, assembled.Choices[0].Message.ExtraFields.Lookup("reasoning_content"))
 }

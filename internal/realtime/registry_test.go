@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// newTestRegistry pins the clock and shrinks the capacity: eviction is a
-// full-map scan, so filling the production 10,000 slots makes the capacity
-// tests quadratic.
+// newTestRegistry pins the clock and shrinks the capacity, so the capacity
+// tests do not have to fill the production 10,000 slots to reach it.
 func newTestRegistry(now *time.Time) *CallRegistry {
 	r := NewCallRegistry()
 	r.now = func() time.Time { return *now }
@@ -23,15 +25,11 @@ func TestCallRegistryRegisterAndLookup(t *testing.T) {
 	r.Register("rtc_1", CallRoute{Model: "gpt-realtime", Provider: "openai"})
 
 	route, ok := r.Lookup("rtc_1")
-	if !ok {
-		t.Fatal("expected registered call to be found")
-	}
-	if route.Model != "gpt-realtime" || route.Provider != "openai" {
-		t.Errorf("route = %+v, want registered model and provider", route)
-	}
-	if _, ok := r.Lookup("rtc_unknown"); ok {
-		t.Error("unknown call id must not resolve")
-	}
+	require.True(t, ok)
+	assert.Equal(t, "gpt-realtime", route.Model)
+	assert.Equal(t, "openai", route.Provider, "route = %+v, want registered model and provider", route)
+	_, ok = r.Lookup("rtc_unknown")
+	assert.False(t, ok)
 }
 
 func TestCallRegistryExpiry(t *testing.T) {
@@ -40,25 +38,22 @@ func TestCallRegistryExpiry(t *testing.T) {
 
 	r.Register("rtc_1", CallRoute{Model: "m", Provider: "p"})
 	now = now.Add(DefaultCallTTL + time.Second)
-
-	if _, ok := r.Lookup("rtc_1"); ok {
-		t.Error("expired call must not resolve")
-	}
+	_, ok := r.Lookup("rtc_1")
+	assert.False(t, ok)
 }
 
 func TestCallRegistryIgnoresEmptyAndNil(t *testing.T) {
 	now := time.Unix(1000, 0)
 	r := newTestRegistry(&now)
 	r.Register("  ", CallRoute{Model: "m"})
-	if _, ok := r.Lookup(""); ok {
-		t.Error("empty call id must not resolve")
-	}
+	_, ok := r.Lookup("")
+	assert.False(t, ok)
 
 	var nilRegistry *CallRegistry
-	nilRegistry.Register("rtc_1", CallRoute{}) // must not panic
-	if _, ok := nilRegistry.Lookup("rtc_1"); ok {
-		t.Error("nil registry must not resolve")
-	}
+	nilRegistry.Register("rtc_1", CallRoute{})
+	_, // must not panic
+		ok = nilRegistry.Lookup("rtc_1")
+	assert.False(t, ok)
 }
 
 func TestCallRegistryEvictsAtCapacity(t *testing.T) {
@@ -71,15 +66,11 @@ func TestCallRegistryEvictsAtCapacity(t *testing.T) {
 	}
 	r.Register("rtc_new", CallRoute{Model: "m"})
 
-	if len(r.entries) > r.capacity {
-		t.Errorf("registry grew to %d entries, want capped at %d", len(r.entries), r.capacity)
-	}
-	if _, ok := r.Lookup("rtc_new"); !ok {
-		t.Error("newest call must survive eviction")
-	}
-	if _, ok := r.Lookup("rtc_0"); ok {
-		t.Error("soonest-expiring call should have been evicted")
-	}
+	require.LessOrEqual(t, len(r.entries), r.capacity, "registry grew to %d entries, want capped at %d", len(r.entries), r.capacity)
+	_, ok := r.Lookup("rtc_new")
+	require.True(t, ok, "newest call must survive eviction")
+	_, ok = r.Lookup("rtc_0")
+	require.False(t, ok, "soonest-expiring call should have been evicted")
 }
 
 func TestCallRegistryReRegisterAtCapacityDoesNotEvict(t *testing.T) {
@@ -94,13 +85,106 @@ func TestCallRegistryReRegisterAtCapacityDoesNotEvict(t *testing.T) {
 	// may be evicted to make room.
 	r.Register("rtc_5", CallRoute{Model: "updated"})
 
-	if route, ok := r.Lookup("rtc_5"); !ok || route.Model != "updated" {
-		t.Errorf("route = %+v (found %v), want the entry updated in place", route, ok)
+	route, ok := r.Lookup("rtc_5")
+	require.True(t, ok)
+	require.Equal(t, "updated", route.Model, "route = %+v, want the entry updated in place", route)
+	_, ok = r.Lookup("rtc_0")
+	require.True(t, ok, "re-registering an existing id must not evict an unrelated entry")
+	require.Len(t, r.entries, r.capacity)
+}
+
+// A call re-registered after the expiry index recorded it lives longer than
+// the index thinks, and must not be evicted ahead of calls genuinely closer
+// to expiry.
+func TestCallRegistryReRegisteredCallSurvivesEviction(t *testing.T) {
+	now := time.Unix(1000, 0)
+	r := newTestRegistry(&now)
+
+	for i := range r.capacity {
+		r.Register(fmt.Sprintf("rtc_%d", i), CallRoute{Model: "m"})
+		now = now.Add(time.Millisecond) // strictly ordered expiries
 	}
-	if _, ok := r.Lookup("rtc_0"); !ok {
-		t.Error("re-registering an existing id must not evict an unrelated entry")
+	// rtc_0 expires soonest until it is re-registered, which puts it last.
+	r.Register("rtc_0", CallRoute{Model: "updated"})
+	now = now.Add(time.Millisecond)
+
+	r.Register("rtc_new", CallRoute{Model: "m"})
+
+	require.Len(t, r.entries, r.capacity)
+	route, ok := r.Lookup("rtc_0")
+	require.True(t, ok, "the re-registered call must outlive the eviction")
+	assert.Equal(t, "updated", route.Model)
+	_, ok = r.Lookup("rtc_1")
+	assert.False(t, ok, "the call now closest to expiry should have been evicted")
+}
+
+// Lookup drops an expired call without the expiry index seeing it, so the
+// index must not keep growing with ids that are long gone.
+func TestCallRegistryIndexDoesNotGrowWithExpiredLookups(t *testing.T) {
+	now := time.Unix(1000, 0)
+	r := newTestRegistry(&now)
+
+	for round := range 5 {
+		for i := range r.capacity {
+			r.Register(fmt.Sprintf("rtc_%d_%d", round, i), CallRoute{Model: "m"})
+		}
+		now = now.Add(DefaultCallTTL + time.Minute)
+		for i := range r.capacity {
+			_, ok := r.Lookup(fmt.Sprintf("rtc_%d_%d", round, i))
+			require.False(t, ok, "the call has expired")
+		}
 	}
-	if len(r.entries) != r.capacity {
-		t.Errorf("registry has %d entries, want %d", len(r.entries), r.capacity)
+	// A registration sweeps, which is where dead ids leave the index.
+	r.Register("rtc_last", CallRoute{Model: "m"})
+
+	assert.LessOrEqual(t, r.expiries.Len(), 2*len(r.entries)+16,
+		"expiry index holds %d nodes for %d live calls", r.expiries.Len(), len(r.entries))
+}
+
+// Lookup and the expiry index must agree on what "expired" means: the index
+// treats an entry due at exactly now as expired, so Lookup may not still hand
+// out its route at that instant.
+func TestCallRegistryExpiresAtExactDeadline(t *testing.T) {
+	now := time.Unix(1000, 0)
+	r := newTestRegistry(&now)
+
+	r.Register("rtc_1", CallRoute{Model: "m", Provider: "p"})
+	now = now.Add(DefaultCallTTL - time.Nanosecond)
+	_, ok := r.Lookup("rtc_1")
+	require.True(t, ok, "the call is still live a nanosecond before its deadline")
+
+	now = now.Add(time.Nanosecond)
+	_, ok = r.Lookup("rtc_1")
+	assert.False(t, ok, "the call must expire at its deadline, not after it")
+}
+
+// Every call re-registered since the index tracked it makes eviction walk
+// nothing but stale nodes. Repair is budgeted, so past maxExpiryReconciliations
+// the index is rebuilt once instead; eviction must still drop exactly the call
+// closest to expiry and leave the index matching the map.
+func TestCallRegistryEvictsSoonestAfterEveryCallWasReRegistered(t *testing.T) {
+	now := time.Unix(1000, 0)
+	r := newTestRegistry(&now)
+	require.Greater(t, r.capacity, maxExpiryReconciliations, "the capacity must exceed the repair budget")
+
+	for i := range r.capacity {
+		r.Register(fmt.Sprintf("rtc_%d", i), CallRoute{Model: "m"})
+		now = now.Add(time.Millisecond)
 	}
+	// Re-register every call in the same order: the index now holds a stale
+	// expiry for all of them, and rtc_0 is again the soonest to expire.
+	for i := range r.capacity {
+		r.Register(fmt.Sprintf("rtc_%d", i), CallRoute{Model: "refreshed"})
+		now = now.Add(time.Millisecond)
+	}
+
+	r.Register("rtc_new", CallRoute{Model: "m"})
+
+	require.Len(t, r.entries, r.capacity)
+	_, ok := r.Lookup("rtc_0")
+	assert.False(t, ok, "the call closest to expiry should have been evicted")
+	route, ok := r.Lookup("rtc_1")
+	require.True(t, ok, "no other call may be evicted to make room for one")
+	assert.Equal(t, "refreshed", route.Model)
+	assert.Equal(t, len(r.entries), r.expiries.Len(), "a rebuilt index tracks each live call exactly once")
 }

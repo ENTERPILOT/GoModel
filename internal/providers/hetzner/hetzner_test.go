@@ -6,6 +6,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
@@ -19,8 +20,10 @@ func TestChatCompatibleContract(t *testing.T) {
 		Type:           "hetzner",
 		DefaultBaseURL: "https://inference.hetzner.com/api/v1",
 		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
-			return NewWithHTTPClient(apiKey, baseURL, client, hooks)
+			opts := providertest.Options(hooks)
+			opts.HTTPClient = client
+			return New(providers.ProviderConfig{APIKey: apiKey, BaseURL: baseURL}, opts)
 		},
 	})
-	providertest.AssertNoNativeSurfaces(t, NewWithHTTPClient("hetzner-key", "", nil, llmclient.Hooks{}))
+	providertest.AssertNoNativeSurfaces(t, New(providers.ProviderConfig{APIKey: "hetzner-key"}, providers.ProviderOptions{}))
 }

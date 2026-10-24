@@ -21,15 +21,28 @@ type requestBodySelectorHints struct {
 	streamVerified bool
 	parsed         bool
 	complete       bool
+	// modelAmbiguous reports a complete body that names a model more than
+	// once, so no single value can be trusted.
+	modelAmbiguous bool
 }
 
-func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env *core.WhiteBoxPrompt) {
+// seedRequestBodySelectorHints records the model, provider, and stream hints a
+// JSON request body carries. Managed routes are peeked within the limit, since
+// canonical decode later reads the whole body anyway. Opaque passthrough
+// bodies are forwarded as they are, so their model is the only thing the
+// allowlist can check: it is taken only from a complete body, however large,
+// which is buffered in full when it exceeds the peek limit. The error is a
+// body read failure, including the body-limit 413.
+func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env *core.WhiteBoxPrompt) error {
 	if !shouldPeekRequestBodySelectors(req, bodyMode, env) {
-		return
+		return nil
 	}
 
 	if bodyMode == core.BodyModeOpaque {
-		hints := peekCompleteRequestBodySelectorHints(req, requestSelectorPeekLimit)
+		hints, err := peekCompleteRequestBodySelectorHints(req, requestSelectorPeekLimit)
+		if err != nil {
+			return err
+		}
 		if hints.complete {
 			core.ApplyBodySelectorHints(env, hints.model, hints.provider, hints.stream)
 		} else if hints.streamParsed {
@@ -42,7 +55,10 @@ func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env
 		if !hints.streamParsed {
 			core.MarkPassthroughStreamUncertain(env)
 		}
-		return
+		if hints.modelAmbiguous {
+			core.MarkPassthroughModelAmbiguous(env)
+		}
+		return nil
 	}
 
 	hints := peekRequestBodySelectorHints(req, requestSelectorPeekLimit)
@@ -52,6 +68,7 @@ func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env
 	if !hints.streamParsed {
 		core.MarkPassthroughStreamUncertain(env)
 	}
+	return nil
 }
 
 func shouldPeekRequestBodySelectors(req *http.Request, bodyMode core.BodyMode, env *core.WhiteBoxPrompt) bool {
@@ -91,29 +108,33 @@ func peekRequestBodySelectorHints(req *http.Request, limit int64) requestBodySel
 }
 
 // peekCompleteRequestBodySelectorHints returns authoritative selector hints
-// only when the entire body fits within limit and has no duplicate selector
-// fields. A unique stream hint may be returned independently from a bounded
-// oversized body. The body is restored before returning so passthrough
-// forwarding remains byte-for-byte unchanged.
-func peekCompleteRequestBodySelectorHints(req *http.Request, limit int64) requestBodySelectorHints {
+// from the entire body, which is what makes them safe to authorize on: an
+// opaque body is forwarded byte for byte, so a model field the upstream's
+// parser would see must be seen here too, including a repeat of it after a
+// long value. A body within limit is read once; a larger one is buffered in
+// full, bounded by the body-limit middleware ahead of this peek. The body is
+// restored before returning so forwarding remains unchanged. A read error is
+// returned as is, so the body limit's 413 reaches the client.
+func peekCompleteRequestBodySelectorHints(req *http.Request, limit int64) (requestBodySelectorHints, error) {
 	if req == nil || req.Body == nil || limit <= 0 {
-		return requestBodySelectorHints{}
+		return requestBodySelectorHints{}, nil
 	}
 
 	originalBody := req.Body
 	body, err := io.ReadAll(io.LimitReader(originalBody, limit+1))
+	if err == nil && int64(len(body)) > limit {
+		var rest []byte
+		rest, err = io.ReadAll(originalBody)
+		body = append(body, rest...)
+	}
 	req.Body = &combinedReadCloser{
 		Reader: io.MultiReader(bytes.NewReader(body), originalBody),
 		rc:     originalBody,
 	}
 	if err != nil {
-		return requestBodySelectorHints{}
+		return requestBodySelectorHints{}, err
 	}
-	if int64(len(body)) > limit {
-		hints := decodeCompleteRequestBodySelectorHints(bytes.NewReader(body[:limit]))
-		return hints.independentStreamHint()
-	}
-	return decodeCompleteRequestBodySelectorHints(bytes.NewReader(body))
+	return decodeCompleteRequestBodySelectorHints(bytes.NewReader(body)), nil
 }
 
 func (hints requestBodySelectorHints) independentStreamHint() requestBodySelectorHints {
@@ -228,6 +249,7 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 		if modelAmbiguous || providerAmbiguous {
 			hints.model = ""
 			hints.provider = ""
+			hints.modelAmbiguous = modelAmbiguous
 			return hints
 		}
 	}

@@ -27,7 +27,7 @@ import (
 func TestNew(t *testing.T) {
 	apiKey := "test-api-key"
 	// Use NewWithHTTPClient to get concrete type for internal testing
-	provider := NewWithHTTPClient(apiKey, nil, llmclient.Hooks{})
+	provider := newTestProvider(apiKey, nil, llmclient.Hooks{})
 	got := provider.keys.Primary()
 	assert.Equal(t, apiKey, got)
 	assert.Equal(t, defaultModelsBaseURL, provider.modelsURL)
@@ -37,7 +37,7 @@ func TestNew(t *testing.T) {
 func TestPrepareCachedContentCreatesAndReusesObject(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"name":"cachedContents/session-prefix","expireTime":"2099-01-01T00:00:00Z"}`)
 
-	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
+	p := newTestProvider("key", server.Client(), llmclient.Hooks{})
 	p.SetBaseURL(server.URL)
 	req := &core.ChatRequest{Model: "gemini-2.5-pro", PromptCachePlan: &core.PromptCachePlan{Key: "prefix-key"}}
 	newBody := func() *geminiGenerateContentRequest {
@@ -66,7 +66,7 @@ func TestPrepareCachedContentCreatesAndReusesObject(t *testing.T) {
 
 func TestPrepareCachedContentSupportsSystemOnlyPrefix(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"name":"cachedContents/system-prefix","expireTime":"2099-01-01T00:00:00Z"}`)
-	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
+	p := newTestProvider("key", server.Client(), llmclient.Hooks{})
 	p.SetBaseURL(server.URL)
 	req := &core.ChatRequest{Model: "gemini-2.5-pro", PromptCachePlan: &core.PromptCachePlan{Key: "system"}}
 	body := &geminiGenerateContentRequest{
@@ -82,7 +82,7 @@ func TestPrepareCachedContentSupportsSystemOnlyPrefix(t *testing.T) {
 
 func TestPrepareCachedContentFailureIsBestEffortAndBackedOff(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusBadRequest, `{"error":{"message":"unsupported"}}`)
-	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
+	p := newTestProvider("key", server.Client(), llmclient.Hooks{})
 	p.SetBaseURL(server.URL)
 	req := &core.ChatRequest{Model: "gemini-2.5-pro", PromptCachePlan: &core.PromptCachePlan{Key: "failure"}}
 	newBody := func() *geminiGenerateContentRequest {
@@ -115,7 +115,7 @@ func TestPrepareCachedContentEmptyNameAndExpiringEntry(t *testing.T) {
 		}
 		_, _ = io.WriteString(w, `{"name":"cachedContents/recreated","expireTime":"2099-01-01T00:00:00Z"}`)
 	})
-	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
+	p := newTestProvider("key", server.Client(), llmclient.Hooks{})
 	p.SetBaseURL(server.URL)
 	req := &core.ChatRequest{Model: "gemini-2.5-pro", PromptCachePlan: &core.PromptCachePlan{Key: "expiry"}}
 	newBody := func() *geminiGenerateContentRequest {
@@ -152,7 +152,7 @@ func TestPrepareCachedContentCoalescesConcurrentCreation(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"name":"cachedContents/concurrent","expireTime":"2099-01-01T00:00:00Z"}`)
 	})
-	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
+	p := newTestProvider("key", server.Client(), llmclient.Hooks{})
 	p.SetBaseURL(server.URL)
 	req := &core.ChatRequest{Model: "gemini-2.5-pro", PromptCachePlan: &core.PromptCachePlan{Key: "concurrent"}}
 	bodies := make([]*geminiGenerateContentRequest, callers)
@@ -179,7 +179,7 @@ func TestPrepareCachedContentCoalescesConcurrentCreation(t *testing.T) {
 
 func TestPrepareCachedContentRequiresStableCredentialAndAIStudio(t *testing.T) {
 	server, capture := providertest.Server(t, nil)
-	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
+	p := newTestProvider("key", server.Client(), llmclient.Hooks{})
 	p.SetBaseURL(server.URL)
 	p.keys = providers.NewKeyring("one", "two")
 	req := &core.ChatRequest{PromptCachePlan: &core.PromptCachePlan{Key: "prefix"}}
@@ -444,7 +444,7 @@ func TestSetBaseURLDerivesNativeRouting(t *testing.T) {
 		}]
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL + "/v1beta/openai")
 
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -475,7 +475,7 @@ func TestSetBaseURLDerivesModelsURL(t *testing.T) {
 		}]
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL + "/v1beta/openai")
 
 	require.Equal(t, server.URL+"/v1beta/openai", provider.client.BaseURL())
@@ -501,14 +501,21 @@ func TestListModels_StampsDiscoveredModes(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusOK, `{
 		"models": [{
 			"name": "models/gemini-2.5-flash",
+			"displayName": "Gemini 2.5 Flash",
+			"description": "Stable version of Gemini 2.5 Flash.",
+			"inputTokenLimit": 1048576,
+			"outputTokenLimit": 65536,
+			"thinking": true,
 			"supportedGenerationMethods": ["generateContent", "streamGenerateContent"]
 		}, {
 			"name": "models/text-embedding-004",
+			"inputTokenLimit": 2048,
+			"outputTokenLimit": 1,
 			"supportedGenerationMethods": ["embedContent"]
 		}]
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL + "/v1beta/openai")
 
 	resp, err := provider.ListModels(context.Background())
@@ -534,6 +541,20 @@ func TestListModels_StampsDiscoveredModes(t *testing.T) {
 	assert.Equal(t, "embedding", embed.Metadata.Modes[0])
 	require.Len(t, embed.Metadata.Categories, 1)
 	assert.Equal(t, core.CategoryEmbedding, embed.Metadata.Categories[0])
+
+	// The listing's name, description, token limits and thinking flag are kept.
+	assert.Equal(t, "Gemini 2.5 Flash", chat.Metadata.DisplayName)
+	assert.Equal(t, "Stable version of Gemini 2.5 Flash.", chat.Metadata.Description)
+	require.NotNil(t, chat.Metadata.ContextWindow)
+	assert.Equal(t, 1048576, *chat.Metadata.ContextWindow)
+	require.NotNil(t, chat.Metadata.MaxOutputTokens)
+	assert.Equal(t, 65536, *chat.Metadata.MaxOutputTokens)
+	assert.Equal(t, map[string]bool{"reasoning": true}, chat.Metadata.Capabilities)
+
+	require.NotNil(t, embed.Metadata.ContextWindow)
+	assert.Equal(t, 2048, *embed.Metadata.ContextWindow)
+	assert.Nil(t, embed.Metadata.MaxOutputTokens, "an embedding model's nominal output limit is not a max output")
+	assert.Nil(t, embed.Metadata.Capabilities)
 }
 
 func TestVertexNativeChatUsesOAuthAuthorization(t *testing.T) {
@@ -905,7 +926,7 @@ func TestChatCompletion_UsesNativeGenerateContentByDefault(t *testing.T) {
 		}
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
 
 	maxTokens := 128
@@ -990,7 +1011,7 @@ func TestChatCompletion_NativeUsageMetadata(t *testing.T) {
 		}
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
 
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -1055,7 +1076,7 @@ func TestChatCompletion_NativeBlockedPromptReturnsError(t *testing.T) {
 		}
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
 
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -1074,7 +1095,7 @@ func TestChatCompletion_NativeBlockedPromptReturnsError(t *testing.T) {
 func TestChatCompletion_NativeRejectsRemoteImageURL(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model: "gemini-2.5-flash",
@@ -1110,7 +1131,7 @@ func TestChatCompletion_NativeFunctionCallTranslation(t *testing.T) {
 		}]
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
 
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -1233,7 +1254,7 @@ data: {"responseId":"gemini-stream-123","candidates":[{"content":{"role":"model"
 
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
 
 	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
@@ -1343,7 +1364,7 @@ func TestStreamChatCompletion_NativePerChoiceState(t *testing.T) {
 
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
 
 	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
@@ -1372,7 +1393,7 @@ func TestStreamChatCompletion_NativeBlockedPromptEmitsError(t *testing.T) {
 
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
 
 	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
@@ -1454,7 +1475,7 @@ func TestListModels(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, tt.statusCode, tt.responseBody)
 
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+			provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 			provider.SetModelsURL(server.URL)
 
 			resp, err := provider.ListModels(context.Background())
@@ -1551,7 +1572,7 @@ func TestResponses_Native(t *testing.T) {
 		}
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
 
 	maxOutputTokens := 64
@@ -1651,7 +1672,7 @@ data: {"responseId":"gemini-native-stream-response","candidates":[{"content":{"r
 
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
 
 	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
@@ -1703,4 +1724,88 @@ func TestGeminiModelSupportedMethods_EmptyMethodFallback(t *testing.T) {
 		assert.Equal(t, tt.wantEmbed, gotEmbed, "%s embed", tt.model)
 		assert.Equal(t, tt.wantImage, gotImage, "%s image", tt.model)
 	}
+}
+
+// The native listing pages at 50 models; a listing that stops at the first
+// page silently hides the rest of the catalog.
+func TestListModels_FollowsNativePageTokens(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
+	pages := map[string]string{
+		"":           `{"models":[{"name":"models/gemini-2.5-flash","supportedGenerationMethods":["generateContent"]}],"nextPageToken":"page-two"}`,
+		"page-two":   `{"models":[{"name":"models/gemini-2.5-pro","supportedGenerationMethods":["generateContent"]}],"nextPageToken":"page-three"}`,
+		"page-three": `{"models":[{"name":"models/text-embedding-004","supportedGenerationMethods":["embedContent"]}]}`,
+	}
+	server, capture := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
+		body, ok := pages[r.URL.Query().Get("pageToken")]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, body)
+	})
+
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL + "/v1beta/openai")
+
+	resp, err := provider.ListModels(context.Background())
+	require.NoError(t, err)
+
+	ids := make([]string, 0, len(resp.Data))
+	for _, m := range resp.Data {
+		ids = append(ids, m.ID)
+	}
+	assert.Equal(t, []string{"gemini-2.5-flash", "gemini-2.5-pro", "text-embedding-004"}, ids)
+
+	requests := capture.All()
+	require.Len(t, requests, 3)
+	assert.Empty(t, requests[0].Query.Get("pageToken"))
+	assert.Equal(t, "page-two", requests[1].Query.Get("pageToken"))
+	assert.Equal(t, "page-three", requests[2].Query.Get("pageToken"))
+	for _, req := range requests {
+		assert.Equal(t, "/v1beta/models", req.Path)
+	}
+}
+
+// A failed later page fails the listing: a partial catalog would hide
+// models with no error to explain why, while an error keeps the registry's
+// last known-good inventory.
+func TestListModels_LaterPageFailurePropagates(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
+	server, _ := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("pageToken") != "" {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"error":{"message":"boom"}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"models":[{"name":"models/gemini-2.5-flash","supportedGenerationMethods":["generateContent"]}],"nextPageToken":"page-two"}`)
+	})
+
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL + "/v1beta/openai")
+
+	_, err := provider.ListModels(context.Background())
+	require.Error(t, err)
+}
+
+// A token that repeats would loop forever without the cap and, with it,
+// publish duplicates as a complete catalog; both are reported as errors.
+func TestListModels_RejectsRepeatedPageToken(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
+	server, capture := providertest.Server(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"models":[{"name":"models/gemini-2.5-flash","supportedGenerationMethods":["generateContent"]}],"nextPageToken":"again"}`)
+	})
+
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL + "/v1beta/openai")
+
+	_, err := provider.ListModels(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "repeated page token")
+	assert.Len(t, capture.All(), 2, "the repeat is caught before a third request")
 }

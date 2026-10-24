@@ -100,6 +100,12 @@ var ReservedAudioTranscriptionFormFields = map[string]bool{
 type AudioResponse struct {
 	ContentType string
 	Data        []byte
+	// Stream carries a body the provider is still producing, so the gateway can
+	// relay it as it arrives instead of holding the whole generation: chunked
+	// speech audio and transcription server-sent events both trade badly for
+	// time-to-first-byte when buffered. It is mutually exclusive with Data, and
+	// the caller owns draining and closing it.
+	Stream io.ReadCloser
 }
 
 // DecodeAudioSpeechRequest decodes a JSON text-to-speech request body. The

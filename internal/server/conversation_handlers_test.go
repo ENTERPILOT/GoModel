@@ -36,7 +36,7 @@ func TestConversationCreateReturnsOpenAICompatibleObject(t *testing.T) {
 
 	require.True(t, strings.HasPrefix(conversation.ID, "conv_"), "id = %q, want conv_ prefix", conversation.ID)
 	require.Equal(t, "conversation", conversation.Object)
-	require.Greater(t, conversation.CreatedAt, int64(0))
+	require.Positive(t, conversation.CreatedAt)
 	require.Equal(t, "demo", conversation.Metadata["topic"])
 }
 

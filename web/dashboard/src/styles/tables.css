@@ -44,11 +44,16 @@ textarea:disabled,
   cursor: not-allowed;
 }
 
+/* A table wider than its container scrolls sideways at any viewport width
+   instead of being clipped by the wrapper's rounded corners. overflow-y stays
+   hidden so the corners keep clipping the table's own edges. */
 .table-wrapper {
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 
 .data-table {
@@ -252,16 +257,9 @@ td.col-price {
   flex-shrink: 0;
 }
 
-/* Mobile: a wide table scrolls sideways inside its wrapper instead of being
-   clipped by the wrapper's rounded corners, and the actions column stays
-   pinned to the right edge so row actions are reachable without dragging to
-   the end of every row. */
+/* Mobile: the actions column stays pinned to the right edge so row actions
+   are reachable without dragging to the end of every row. */
 @media (max-width: 768px) {
-  .table-wrapper {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-
   .data-table th.col-actions,
   .data-table td.col-actions {
     position: sticky;

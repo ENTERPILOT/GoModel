@@ -12,6 +12,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/virtualmodels"
 )
 
 type failoverResolverStub struct {
@@ -490,6 +491,83 @@ func TestEmbeddings_DoesNotFailover(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
 	require.Equal(t, []string{"text-embedding-3-small"}, provider.embeddingCalls)
+}
+
+// TestChatCompletion_SingleTargetAliasKeepsSubtreeFailover pins the
+// end-to-end contract through the real virtualmodels.Service: a redirect
+// with one declared target whose target is a chained failover redirect keeps
+// the subtree's alternative leaves as its failover chain. A future change
+// that re-narrows the chain to declared targets only must fail this test.
+func TestChatCompletion_SingleTargetAliasKeepsSubtreeFailover(t *testing.T) {
+	catalog := &aliasesTestCatalog{
+		supported: map[string]bool{
+			"vendor-a/model-x": true,
+			"vendor-b/model-y": true,
+		},
+		providerTypes: map[string]string{
+			"vendor-a/model-x": "vendor-a",
+			"vendor-b/model-y": "vendor-b",
+		},
+	}
+	service, err := virtualmodels.NewService(newAliasesTestStore(
+		virtualmodels.VirtualModel{
+			Source:  "public/model",
+			Targets: []virtualmodels.Target{{Model: "router/main"}},
+			Enabled: true,
+		},
+		virtualmodels.VirtualModel{
+			Source:   "router/main",
+			Strategy: virtualmodels.StrategyFailover,
+			Targets: []virtualmodels.Target{
+				{Model: "vendor-a/model-x"},
+				{Model: "vendor-b/model-y"},
+			},
+			Enabled: true,
+		},
+	), catalog, true)
+	require.NoError(t, err)
+	require.NoError(t, service.Refresh(context.Background()))
+
+	provider := &failoverProvider{
+		chatResponses: map[string]*core.ChatResponse{
+			"vendor-b/model-y": {
+				ID:       "chatcmpl-subtree-failover",
+				Object:   "chat.completion",
+				Model:    "model-y",
+				Provider: "vendor-b",
+				Choices: []core.Choice{{
+					Index:        0,
+					Message:      core.ResponseMessage{Role: "assistant", Content: "subtree failover ok"},
+					FinishReason: "stop",
+				}},
+			},
+		},
+		chatErrors: map[string]error{
+			"vendor-a/model-x": core.NewProviderError("vendor-a", http.StatusServiceUnavailable, "model temporarily unavailable", nil),
+		},
+		supportedModels: map[string]string{
+			"vendor-a/model-x": "vendor-a",
+			"vendor-b/model-y": "vendor-b",
+		},
+	}
+
+	handler := newHandler(provider, nil, nil, nil, service, nil, service, nil)
+
+	c, rec := echotest.Post(t, "/v1/chat/completions", `{"model":"public/model","messages":[{"role":"user","content":"hi"}]}`)
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	c.Set(string(auditlog.LogEntryKey), entry)
+	err = handler.ChatCompletion(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, []string{"vendor-a/model-x", "vendor-b/model-y"}, provider.chatCalls)
+	require.Contains(t, rec.Body.String(), "subtree failover ok")
+	require.NotNil(t, entry.Data)
+	require.Len(t, entry.Data.Attempts, 2)
+	require.Equal(t, auditlog.AttemptKindPrimary, entry.Data.Attempts[0].Kind)
+	require.False(t, entry.Data.Attempts[0].Success)
+	require.Equal(t, auditlog.AttemptKindFailover, entry.Data.Attempts[1].Kind)
+	require.True(t, entry.Data.Attempts[1].Success)
+	require.Equal(t, "vendor-b/model-y", entry.Data.Attempts[1].Model)
 }
 
 func requestSelector(model, provider string) string {

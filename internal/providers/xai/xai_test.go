@@ -63,7 +63,7 @@ func TestNewWithHTTPClient_UsesCustomClient(t *testing.T) {
 			headerVal: customHeaderVal,
 		},
 	}
-	provider := NewWithHTTPClient(testAPIKey, customClient, llmclient.Hooks{})
+	provider := newHTTPTestProvider(testAPIKey, customClient, llmclient.Hooks{})
 	assert.Equal(t, testAPIKey, provider.keys.Primary())
 	provider.SetBaseURL(server.URL)
 

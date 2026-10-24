@@ -29,9 +29,9 @@ func TestChatCompatibleContract(t *testing.T) {
 		Type:           "groq",
 		DefaultBaseURL: "https://api.groq.com/openai/v1",
 		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
-			p := NewWithHTTPClient(apiKey, client, hooks)
-			p.SetBaseURL(baseURL)
-			return p
+			opts := providertest.Options(hooks)
+			opts.HTTPClient = client
+			return New(providers.ProviderConfig{APIKey: apiKey, BaseURL: baseURL}, opts)
 		},
 		Embeddings: true,
 	})
@@ -466,7 +466,7 @@ func TestCreateSpeech(t *testing.T) {
 	assert.Equal(t, "Fritz-PlayAI", body["voice"])
 
 	assert.Equal(t, "audio/mpeg", resp.ContentType)
-	assert.Equal(t, string(audio), string(resp.Data))
+	assert.Equal(t, string(audio), string(providertest.AudioBytes(t, resp)))
 }
 
 func TestCreateTranscription(t *testing.T) {

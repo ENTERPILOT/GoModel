@@ -16,7 +16,7 @@ import (
 
 // newTestProvider builds a provider pointed at baseURL.
 func newTestProvider(baseURL string, client *http.Client) *Provider {
-	provider := NewWithHTTPClient("test-api-key", client, llmclient.Hooks{})
+	provider := newHTTPTestProvider("test-api-key", client, llmclient.Hooks{})
 	provider.SetBaseURL(baseURL)
 	return provider
 }
@@ -43,8 +43,10 @@ func pricingOf(m core.Model) any {
 // tail is categorized without remote-registry entries.
 func TestListModels_StampsArchitectureModalities(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"data":[
-		{"id":"openai/gpt-4o-mini","created":1721260800,"context_length":128000,
-		 "architecture":{"input_modalities":["text","image"],"output_modalities":["text"]}},
+		{"id":"openai/gpt-4o-mini","name":"OpenAI: GPT-4o-mini","description":"Small and fast.","created":1721260800,"context_length":128000,
+		 "architecture":{"input_modalities":["text","image","file"],"output_modalities":["text"]},
+		 "top_provider":{"context_length":128000,"max_completion_tokens":16384,"is_moderated":true},
+		 "supported_parameters":["temperature","tools","tool_choice","response_format","structured_outputs","reasoning","web_search_options"]},
 		{"id":"google/gemini-3-pro-image","created":1721260800,
 		 "architecture":{"input_modalities":["text"],"output_modalities":["image"]}},
 		{"id":"voyageai/voyage-4-lite","created":1721260800,
@@ -57,6 +59,11 @@ func TestListModels_StampsArchitectureModalities(t *testing.T) {
 		 "architecture":{"input_modalities":["text"],"output_modalities":["rerank"]}},
 		{"id":"acme/video-only","created":1721260800,
 		 "architecture":{"input_modalities":["text"],"output_modalities":["video"]}},
+		{"id":"typesafe/jev-1.13","name":"TypeSafe: Jev 1.13","created":1789689684,"context_length":32000,
+		 "architecture":{"input_modalities":["text"],"output_modalities":["decisions"]},
+		 "pricing":{"prompt":"0.000000042","completion":"0"}},
+		{"id":"~typesafe/jev-latest","created":1789689684,
+		 "architecture":{"input_modalities":["text"],"output_modalities":["decisions"]}},
 		{"id":"mystery/no-architecture","created":1721260800}
 	]}`)
 	provider := newTestProvider(server.URL, server.Client())
@@ -70,7 +77,7 @@ func TestListModels_StampsArchitectureModalities(t *testing.T) {
 	// embedding models would never enter the catalog.
 	assert.Equal(t, "all", req.Query.Get("output_modalities"))
 
-	require.Len(t, resp.Data, 6)
+	require.Len(t, resp.Data, 8)
 	byID := modelsByID(resp)
 
 	chat := byID["openai/gpt-4o-mini"]
@@ -78,6 +85,20 @@ func TestListModels_StampsArchitectureModalities(t *testing.T) {
 	assert.Equal(t, []string{"chat"}, chat.Metadata.Modes)
 	require.NotNil(t, chat.Metadata.ContextWindow)
 	assert.Equal(t, 128000, *chat.Metadata.ContextWindow)
+	assert.Equal(t, "OpenAI: GPT-4o-mini", chat.Metadata.DisplayName)
+	assert.Equal(t, "Small and fast.", chat.Metadata.Description)
+	require.NotNil(t, chat.Metadata.MaxOutputTokens)
+	assert.Equal(t, 16384, *chat.Metadata.MaxOutputTokens)
+	assert.Equal(t, map[string]bool{
+		"vision":            true,
+		"pdf_input":         true,
+		"function_calling":  true,
+		"tool_choice":       true,
+		"json_mode":         true,
+		"structured_output": true,
+		"reasoning":         true,
+		"web_search":        true,
+	}, chat.Metadata.Capabilities, "sampling parameters are not capabilities")
 
 	image := byID["google/gemini-3-pro-image"]
 	require.NotNil(t, image.Metadata)
@@ -97,6 +118,17 @@ func TestListModels_StampsArchitectureModalities(t *testing.T) {
 	stt := byID["mistralai/voxtral-mini-3b-2507"]
 	require.NotNil(t, stt.Metadata)
 	assert.Equal(t, []string{"audio_transcription"}, stt.Metadata.Modes)
+
+	// Decision models serve /v1/systemone only: listed, but as utility models
+	// with no mode that would route an OpenAI request to them.
+	for _, id := range []string{"typesafe/jev-1.13", "~typesafe/jev-latest"} {
+		decision := byID[id]
+		require.NotNil(t, decision.Metadata, id)
+		assert.Empty(t, decision.Metadata.Modes, id)
+		assert.Equal(t, []core.ModelCategory{core.CategoryUtility}, decision.Metadata.Categories, id)
+	}
+	require.NotNil(t, byID["typesafe/jev-1.13"].Metadata.Pricing)
+	assert.InDelta(t, 0.042, *byID["typesafe/jev-1.13"].Metadata.Pricing.InputPerMtok, 1e-9)
 
 	assert.NotContains(t, byID, "cohere/rerank-only")
 	assert.NotContains(t, byID, "acme/video-only")
@@ -235,7 +267,7 @@ func TestListModels_StampsPricing(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusOK, `{"data":[
 		{"id":"openai/gpt-4o-mini","context_length":128000,
 		 "architecture":{"output_modalities":["text"]},
-		 "pricing":{"prompt":"0.00000015","completion":"0.0000006"}},
+		 "pricing":{"prompt":"0.00000015","completion":"0.0000006","input_cache_read":"0.000000075","input_cache_write":"0.0000001875","internal_reasoning":"0.0000006","image":"0.002168","web_search":"0.01"}},
 		{"id":"deepseek/deepseek-r1:free",
 		 "architecture":{"output_modalities":["text"]},
 		 "pricing":{"prompt":"0","completion":"0"}},
@@ -260,10 +292,21 @@ func TestListModels_StampsPricing(t *testing.T) {
 	assert.Equal(t, 0.15, *paid.Pricing.InputPerMtok)
 	require.NotNil(t, paid.Pricing.OutputPerMtok)
 	assert.Equal(t, 0.6, *paid.Pricing.OutputPerMtok)
+	require.NotNil(t, paid.Pricing.CachedInputPerMtok)
+	assert.InDelta(t, 0.075, *paid.Pricing.CachedInputPerMtok, 1e-9)
+	require.NotNil(t, paid.Pricing.CacheWritePerMtok)
+	assert.InDelta(t, 0.1875, *paid.Pricing.CacheWritePerMtok, 1e-9)
+	require.NotNil(t, paid.Pricing.ReasoningOutputPerMtok)
+	assert.InDelta(t, 0.6, *paid.Pricing.ReasoningOutputPerMtok, 1e-9)
+	// The image rate is per input image, so it is not scaled to per Mtok.
+	require.NotNil(t, paid.Pricing.InputPerImage)
+	assert.InDelta(t, 0.002168, *paid.Pricing.InputPerImage, 1e-9)
 
 	free := byID["deepseek/deepseek-r1:free"].Metadata
 	require.NotNil(t, free)
 	require.NotNil(t, free.Pricing)
+	assert.Nil(t, free.Pricing.CachedInputPerMtok, "a missing rate is not reported as zero")
+	assert.Nil(t, free.Pricing.InputPerImage)
 	require.NotNil(t, free.Pricing.InputPerMtok)
 	assert.Equal(t, float64(0), *free.Pricing.InputPerMtok)
 	require.NotNil(t, free.Pricing.OutputPerMtok)

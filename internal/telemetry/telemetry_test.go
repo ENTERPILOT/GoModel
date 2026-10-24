@@ -5,12 +5,14 @@ import (
 	"testing"
 
 	echootel "github.com/labstack/echo-opentelemetry"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.39.0"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
@@ -24,6 +26,68 @@ func TestNewBuildsMiddlewareAndHooksWithoutExporters(t *testing.T) {
 	require.NotNil(t, service.Hooks().OnRequestStart)
 	err = service.Close()
 	require.NoError(t, err)
+}
+
+func TestMiddlewareEnablesGenerationTracing(t *testing.T) {
+	t.Setenv("OTEL_TRACES_EXPORTER", "none")
+	t.Setenv("OTEL_METRICS_EXPORTER", "none")
+	t.Setenv(captureContentEnvVar, "SPAN_ONLY")
+
+	service, err := New(t.Context(), config.OpenTelemetryConfig{}, "/metrics", "")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = service.Close() })
+
+	c, _ := echotest.Request(t, http.MethodPost, "/v1/chat/completions", nil)
+	var trace *core.GenerationTrace
+	err = service.Middleware()(func(c *echo.Context) error {
+		_, trace = core.StartGenerationTrace(c.Request().Context())
+		return nil
+	})(c)
+	require.NoError(t, err)
+	require.NotNil(t, trace, "inference calls under the request open generation traces")
+	require.True(t, trace.CapturesContent())
+}
+
+func TestMiddlewareSkipsGenerationTracingForUnsampledRequests(t *testing.T) {
+	t.Setenv("OTEL_TRACES_EXPORTER", "none")
+	t.Setenv("OTEL_METRICS_EXPORTER", "none")
+	t.Setenv("OTEL_TRACES_SAMPLER", "always_off")
+
+	service, err := New(t.Context(), config.OpenTelemetryConfig{}, "/metrics", "")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = service.Close() })
+
+	c, _ := echotest.Request(t, http.MethodPost, "/v1/chat/completions", nil)
+	var trace *core.GenerationTrace
+	err = service.Middleware()(func(c *echo.Context) error {
+		_, trace = core.StartGenerationTrace(c.Request().Context())
+		return nil
+	})(c)
+	require.NoError(t, err)
+	require.Nil(t, trace, "a dropped trace is not rebuilt")
+}
+
+func TestCaptureMessageContent(t *testing.T) {
+	tests := []struct {
+		value string
+		want  bool
+	}{
+		{value: "", want: false},
+		{value: "false", want: false},
+		{value: "true", want: true},
+		{value: "TRUE", want: true},
+		{value: "1", want: true},
+		{value: "span_only", want: true},
+		{value: "SPAN_AND_EVENT", want: true},
+		{value: "EVENT_ONLY", want: false},
+		{value: "NO_CONTENT", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			t.Setenv(captureContentEnvVar, tt.value)
+			require.Equal(t, tt.want, captureMessageContent())
+		})
+	}
 }
 
 func TestNewRejectsUnknownExporter(t *testing.T) {

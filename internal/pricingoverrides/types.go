@@ -15,6 +15,7 @@ type Pricing struct {
 	OutputPerMtok          *float64      `json:"output_per_mtok,omitempty" bson:"output_per_mtok,omitempty"`
 	CachedInputPerMtok     *float64      `json:"cached_input_per_mtok,omitempty" bson:"cached_input_per_mtok,omitempty"`
 	CacheWritePerMtok      *float64      `json:"cache_write_per_mtok,omitempty" bson:"cache_write_per_mtok,omitempty"`
+	CacheWrite1hPerMtok    *float64      `json:"cache_write_1h_per_mtok,omitempty" bson:"cache_write_1h_per_mtok,omitempty"`
 	ReasoningOutputPerMtok *float64      `json:"reasoning_output_per_mtok,omitempty" bson:"reasoning_output_per_mtok,omitempty"`
 	BatchInputPerMtok      *float64      `json:"batch_input_per_mtok,omitempty" bson:"batch_input_per_mtok,omitempty"`
 	BatchOutputPerMtok     *float64      `json:"batch_output_per_mtok,omitempty" bson:"batch_output_per_mtok,omitempty"`

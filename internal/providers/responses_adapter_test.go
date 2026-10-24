@@ -381,7 +381,7 @@ func TestConvertResponsesRequestToChat_AcceptsAnnotationOnlyInclude(t *testing.T
 			require.Len(t, chatReq.Messages, 1)
 			require.Equal(t, "Hello", chatReq.Messages[0].Content)
 			require.True(t, chatReq.ExtraFields.IsEmpty(), "ExtraFields = %#v, want include dropped rather than forwarded", chatReq.ExtraFields)
-			require.Equal(t, len(tt.include), len(req.Include), "req.Include = %#v, want the caller's request left unmutated", req.Include)
+			require.Len(t, req.Include, len(tt.include), "req.Include = %#v, want the caller's request left unmutated", req.Include)
 		})
 	}
 }
@@ -463,37 +463,37 @@ func TestConvertResponsesRequestToChat_NormalizesToolChoiceAliases(t *testing.T)
 	}{
 		{
 			name: "tool_choice none alias",
-			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: map[string]any{"type": "none"}},
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", Tools: functionTools, ToolChoice: map[string]any{"type": "none"}},
 			want: "none",
 		},
 		{
 			name: "tool_choice auto alias",
-			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: map[string]any{"type": "auto"}},
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", Tools: functionTools, ToolChoice: map[string]any{"type": "auto"}},
 			want: "auto",
 		},
 		{
 			name: "tool_choice required alias",
-			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: map[string]any{"type": "required"}},
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", Tools: functionTools, ToolChoice: map[string]any{"type": "required"}},
 			want: "required",
 		},
 		{
 			name: "bare tool_choice none",
-			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: "none"},
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", Tools: functionTools, ToolChoice: "none"},
 			want: "none",
 		},
 		{
 			name: "bare tool_choice auto",
-			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: "auto"},
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", Tools: functionTools, ToolChoice: "auto"},
 			want: "auto",
 		},
 		{
 			name: "bare tool_choice required",
-			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: "required"},
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", Tools: functionTools, ToolChoice: "required"},
 			want: "required",
 		},
 		{
 			name: "unsupported bare tool_choice",
-			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: "web_search"},
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", Tools: functionTools, ToolChoice: "web_search"},
 		},
 		{
 			name: "function choice without function map",
@@ -620,6 +620,42 @@ func TestConvertResponsesRequestToChat_IgnoresOnlyUnsupportedToolsAndChoice(t *t
 	require.Nil(t, chatReq.Tools)
 	require.Nil(t, chatReq.ToolChoice)
 	require.Nil(t, chatReq.ParallelToolCalls)
+}
+
+func TestConvertResponsesRequestToChat_DropsToolChoiceWithoutTools(t *testing.T) {
+	tests := []struct {
+		name       string
+		tools      []map[string]any
+		toolChoice any
+	}{
+		{name: "nil tools with auto", toolChoice: "auto"},
+		{name: "nil tools with none", toolChoice: "none"},
+		{name: "nil tools with required", toolChoice: "required"},
+		{name: "empty tools with auto alias", tools: []map[string]any{}, toolChoice: map[string]any{"type": "auto"}},
+		{name: "nil tools with function", toolChoice: map[string]any{"type": "function", "name": "exec_command"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parallelToolCalls := true
+			chatReq, err := ConvertResponsesRequestToChat(&core.ResponsesRequest{
+				Model:             "test-model",
+				Input:             "Hello",
+				Tools:             tt.tools,
+				ToolChoice:        tt.toolChoice,
+				ParallelToolCalls: &parallelToolCalls,
+			})
+			require.NoError(t, err)
+			assert.Nil(t, chatReq.Tools)
+			assert.Nil(t, chatReq.ToolChoice)
+			assert.Nil(t, chatReq.ParallelToolCalls)
+
+			body, err := json.Marshal(chatReq)
+			require.NoError(t, err)
+			assert.NotContains(t, string(body), "tool_choice")
+			assert.NotContains(t, string(body), "parallel_tool_calls")
+		})
+	}
 }
 
 func TestConvertResponsesRequestToChat_DropsChoiceForOmittedNamespaceChild(t *testing.T) {
@@ -1394,6 +1430,151 @@ func TestConvertResponsesRequestToChat_DropsReplayedItemIDs(t *testing.T) {
 			assert.Equal(t, "call_1", got)
 			assert.NotNil(t, assistant.ExtraFields.Lookup("cache_control"))
 			assert.NotNil(t, tool.ExtraFields.Lookup("cache_control"))
+		})
+	}
+}
+
+func TestConvertResponsesRequestToChat_TranslatesAllowedToolsChoice(t *testing.T) {
+	functionTools := []map[string]any{
+		{"type": "function", "name": "tool_a", "parameters": map[string]any{"type": "object"}},
+		{"type": "function", "name": "tool_b", "parameters": map[string]any{"type": "object"}},
+	}
+	chatAllowed := func(mode any, names ...string) map[string]any {
+		tools := make([]any, 0, len(names))
+		for _, name := range names {
+			tools = append(tools, map[string]any{"type": "function", "function": map[string]any{"name": name}})
+		}
+		spec := map[string]any{"tools": tools}
+		if mode != nil {
+			spec["mode"] = mode
+		}
+		return map[string]any{"type": "allowed_tools", "allowed_tools": spec}
+	}
+
+	tests := []struct {
+		name   string
+		choice any
+		want   any
+	}{
+		{
+			name: "responses shape, required",
+			choice: map[string]any{
+				"type":  "allowed_tools",
+				"mode":  "required",
+				"tools": []any{map[string]any{"type": "function", "name": "tool_b"}},
+			},
+			want: chatAllowed("required", "tool_b"),
+		},
+		{
+			name: "responses shape, auto, function-form entry",
+			choice: map[string]any{
+				"type": "allowed_tools",
+				"mode": "auto",
+				"tools": []any{
+					map[string]any{"type": "function", "name": "tool_a"},
+					map[string]any{"type": "function", "function": map[string]any{"name": "tool_b"}},
+				},
+			},
+			want: chatAllowed("auto", "tool_a", "tool_b"),
+		},
+		{
+			// Hosted tools have no chat equivalent; the function subset stays
+			// restricted instead of the whole choice being dropped.
+			name: "hosted entries are left out",
+			choice: map[string]any{
+				"type": "allowed_tools",
+				"mode": "required",
+				"tools": []any{
+					map[string]any{"type": "web_search"},
+					map[string]any{"type": "function", "name": "tool_a"},
+				},
+			},
+			want: chatAllowed("required", "tool_a"),
+		},
+		{
+			name: "mode omitted",
+			choice: map[string]any{
+				"type":  "allowed_tools",
+				"tools": []any{map[string]any{"type": "function", "name": "tool_a"}},
+			},
+			want: chatAllowed(nil, "tool_a"),
+		},
+		{
+			name: "nameless and blank entries are skipped",
+			choice: map[string]any{
+				"type": "allowed_tools",
+				"mode": "auto",
+				"tools": []any{
+					map[string]any{"type": "function"},
+					map[string]any{"type": "function", "name": "  "},
+					"not an object",
+					map[string]any{"type": "function", "name": "tool_b"},
+				},
+			},
+			want: chatAllowed("auto", "tool_b"),
+		},
+		{
+			name:   "chat shape passes through",
+			choice: chatAllowed("auto", "tool_a"),
+			want:   chatAllowed("auto", "tool_a"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chatReq, err := ConvertResponsesRequestToChat(&core.ResponsesRequest{
+				Model:      "test-model",
+				Input:      "Hello",
+				Tools:      functionTools,
+				ToolChoice: tt.choice,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, chatReq.ToolChoice)
+		})
+	}
+}
+
+// An allowed_tools choice with no function tool left cannot be honored by any
+// chat-backed provider. It is rejected instead of being cleared (when only
+// hosted tools are declared) or forwarded as an empty subset.
+func TestConvertResponsesRequestToChat_RejectsEmptyAllowedTools(t *testing.T) {
+	functionTool := map[string]any{"type": "function", "name": "tool_a", "parameters": map[string]any{"type": "object"}}
+	hostedTool := map[string]any{"type": "web_search"}
+	hostedOnly := map[string]any{
+		"type":  "allowed_tools",
+		"mode":  "required",
+		"tools": []any{map[string]any{"type": "web_search"}},
+	}
+
+	tests := []struct {
+		name   string
+		tools  []map[string]any
+		choice any
+	}{
+		{name: "hosted entries, function tools declared", tools: []map[string]any{functionTool, hostedTool}, choice: hostedOnly},
+		{name: "hosted entries, only hosted tools declared", tools: []map[string]any{hostedTool}, choice: hostedOnly},
+		{name: "tools field missing", tools: []map[string]any{functionTool}, choice: map[string]any{"type": "allowed_tools", "mode": "auto"}},
+		{name: "function entries, only hosted tools declared", tools: []map[string]any{hostedTool}, choice: map[string]any{
+			"type":  "allowed_tools",
+			"mode":  "required",
+			"tools": []any{map[string]any{"type": "function", "name": "tool_a"}},
+		}},
+		{name: "function entries, no tools declared", choice: map[string]any{
+			"type":  "allowed_tools",
+			"mode":  "required",
+			"tools": []any{map[string]any{"type": "function", "name": "tool_a"}},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ConvertResponsesRequestToChat(&core.ResponsesRequest{
+				Model:      "test-model",
+				Input:      "Hello",
+				Tools:      tt.tools,
+				ToolChoice: tt.choice,
+			})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "tool_choice.allowed_tools.tools")
 		})
 	}
 }

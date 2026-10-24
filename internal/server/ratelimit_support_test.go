@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
@@ -127,6 +129,36 @@ func TestEnforceRateLimitBreachReturns429WithHeaders(t *testing.T) {
 	require.LessOrEqual(t, retryAfter, 120, "Retry-After = %q, want 1..120 (sliding-window recovery can pass the boundary)", headers.Get("Retry-After"))
 	require.Equal(t, "0", headers.Get("x-ratelimit-remaining-requests"))
 	require.Equal(t, "1", headers.Get("x-ratelimit-limit-requests"))
+}
+
+// A concurrency breach reports the same limit/remaining headers as a window
+// breach; only the reset header is absent, because an in-flight gauge has no
+// window to reset.
+func TestEnforceRateLimitConcurrencyBreachSendsRequestHeaders(t *testing.T) {
+	maxRequests := int64(1)
+	service := newTestRateLimitService(t, ratelimit.Rule{
+		Subject:       "/team",
+		PeriodSeconds: ratelimit.PeriodConcurrent,
+		MaxRequests:   &maxRequests,
+	})
+
+	c, _ := newRateLimitTestContext(t, "/team/alice")
+	release, err := enforceRateLimit(c, service, rateLimitRoute{})
+	require.NoError(t, err)
+	defer release()
+
+	c2, _ := newRateLimitTestContext(t, "/team/alice")
+	_, err = enforceRateLimit(c2, service, rateLimitRoute{})
+	require.Error(t, err, "second in-flight request admitted, want breach")
+
+	headerErr, ok := err.(*gatewayErrorWithResponseHeaders)
+	require.True(t, ok, "error %T does not carry response headers", err)
+
+	headers := headerErr.ResponseHeaders()
+	require.Equal(t, "1", headers.Get("x-ratelimit-limit-requests"))
+	require.Equal(t, "0", headers.Get("x-ratelimit-remaining-requests"))
+	require.Empty(t, headers.Get("x-ratelimit-reset-requests"), "no reset header for a concurrency breach")
+	require.NotEmpty(t, headers.Get("Retry-After"))
 }
 
 func TestEnforceRateLimitDefaultsToRootPath(t *testing.T) {
@@ -263,4 +295,55 @@ func TestEnforceAdmissionNeverDefersConsumerBreaches(t *testing.T) {
 	var gatewayErr *core.GatewayError
 	require.ErrorAs(t, err, &gatewayErr)
 	require.Equal(t, http.StatusTooManyRequests, gatewayErr.HTTPStatusCode())
+}
+
+// exceededBudgetChecker reports one exhausted budget of the given scope.
+type exceededBudgetChecker struct {
+	scope budget.Scope
+}
+
+func (c exceededBudgetChecker) Check(context.Context, budget.Subjects, time.Time) error {
+	return &budget.ExceededError{Result: budget.CheckResult{
+		Budget:    budget.Budget{Scope: c.scope, Subject: "openai", PeriodSeconds: budget.PeriodDailySeconds, Amount: 1},
+		PeriodEnd: time.Now().UTC().Add(time.Hour),
+		Spent:     2,
+		HasUsage:  true,
+	}}
+}
+
+// An exhausted provider budget defers to failover like a saturated route; a
+// consumer budget, or a request with no failover targets, still rejects.
+func TestEnforceAdmissionBudgetBreaches(t *testing.T) {
+	tests := []struct {
+		name      string
+		scope     budget.Scope
+		failovers int
+		wantDefer bool
+	}{
+		{name: "provider budget with failovers defers", scope: budget.ScopeProvider, failovers: 1, wantDefer: true},
+		{name: "provider budget without failovers rejects", scope: budget.ScopeProvider},
+		{name: "user path budget never defers", scope: budget.ScopeUserPath, failovers: 2},
+		{name: "label budget never defers", scope: budget.ScopeLabel, failovers: 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := newRateLimitTestContext(t, "/team")
+			route := rateLimitRoute{provider: "openai", model: "openai/gpt-4o"}.withFailovers(tt.failovers)
+			adm, err := enforceAdmission(c, nil, exceededBudgetChecker{scope: tt.scope}, route)
+			if !tt.wantDefer {
+				require.Error(t, err)
+				var gatewayErr *core.GatewayError
+				require.ErrorAs(t, err, &gatewayErr)
+				assert.Equal(t, http.StatusTooManyRequests, gatewayErr.HTTPStatusCode())
+				return
+			}
+			require.NoError(t, err)
+			defer adm.release()
+			saturated := core.PrimaryRouteSaturated(adm.dispatchContext(context.Background()))
+			require.Error(t, saturated)
+			var exceeded *budget.ExceededError
+			assert.ErrorAs(t, saturated, &exceeded)
+		})
+	}
 }

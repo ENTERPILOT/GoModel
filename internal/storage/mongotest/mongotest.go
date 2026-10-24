@@ -7,8 +7,10 @@
 // the domain's Store interface can run on every backend, so a domain's
 // behaviour is asserted once and checked everywhere.
 //
-// MongoDB runs only when MONGO_TEST_DSN names a reachable server; otherwise
-// the subtest skips. The variable is deliberately not MONGODB_URL — a suite
+// MongoDB runs only when MONGO_TEST_DSN is set; otherwise the subtest skips.
+// A set but unreachable DSN fails the test rather than skipping: the variable
+// is an explicit opt-in, and CI must not stay green while the server it
+// started is not the one being tested. The variable is deliberately not MONGODB_URL — a suite
 // that creates and drops databases should take a separate, explicit opt-in.
 package mongotest
 
@@ -59,7 +61,7 @@ func New(t *testing.T) *mongo.Database {
 		return nil
 	}
 
-	// Every server call is bounded: an unreachable DSN should skip promptly
+	// Every server call is bounded: an unreachable DSN should fail promptly
 	// rather than stall every opted-in suite, and cleanup must not be able to
 	// hang the test binary.
 	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
@@ -67,12 +69,12 @@ func New(t *testing.T) *mongo.Database {
 
 	client, err := mongo.Connect(options.Client().ApplyURI(dsn))
 	if err != nil {
-		t.Skipf("connect to %s: %v", DSNEnv, err)
+		t.Fatalf("connect to %s: %v", DSNEnv, err)
 		return nil
 	}
 	if err := client.Ping(ctx, nil); err != nil {
 		disconnect(client)
-		t.Skipf("ping %s: %v", DSNEnv, err)
+		t.Fatalf("ping %s: %v", DSNEnv, err)
 		return nil
 	}
 

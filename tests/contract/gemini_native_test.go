@@ -8,6 +8,7 @@ package contract
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -108,8 +109,12 @@ func TestGeminiNativeReplayCreateImageEdit(t *testing.T) {
 }
 
 func TestGeminiNativeReplayListModels(t *testing.T) {
+	// The recorded first page carries a nextPageToken; the second page holds
+	// the rest of the live listing (bidi/live models the adapter does not
+	// expose), and the token is followed exactly as the API issued it.
 	provider := newGeminiNativeReplayProvider(t, map[string]replayRoute{
 		replayKey(http.MethodGet, "/models"): jsonFixtureRoute(t, "gemini/native_models.json"),
+		replayKey(http.MethodGet, "/models?pageToken="+url.QueryEscape("CiFtb2RlbHMvZ2VtaW5pLTMuNS10cmFuc2NyaWJlLWxpdmU=")): jsonFixtureRoute(t, "gemini/native_models_page2.json"),
 	})
 
 	resp, err := provider.ListModels(context.Background())

@@ -43,7 +43,7 @@ func TestFromResponsesResponse(t *testing.T) {
 	assert.Equal(t, "hello world", c.Text(0))
 
 	plain, err := FromResponsesResponse(&core.ResponsesResponse{Status: "incomplete"})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "length", plain.Choices[0].FinishReason)
 }
 
@@ -58,6 +58,11 @@ func TestApplyToResponsesResponse(t *testing.T) {
 			name: "set text in place",
 			edit: func(c *pluginapi.Completion) error { return c.SetText(0, 2, " there") },
 			from: `"text":" world"`, to: `"text":" there"`,
+		},
+		{
+			name: "set reasoning summary",
+			edit: func(c *pluginapi.Completion) error { return c.SetReasoning(0, 0, "thought") },
+			from: `"text":"thinking"`, to: `"text":"thought"`,
 		},
 		{
 			name: "finish reason leaves status alone",
@@ -125,7 +130,7 @@ func TestCompletionToResponsesResponse(t *testing.T) {
 	require.NotNil(t, resp.Usage)
 	assert.Equal(t, 0, resp.Usage.TotalTokens)
 	_, err := json.Marshal(resp)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	empty := CompletionToResponsesResponse(nil, "m")
 	require.Len(t, empty.Output, 1)

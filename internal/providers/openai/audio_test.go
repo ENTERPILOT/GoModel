@@ -7,7 +7,6 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 	"github.com/stretchr/testify/assert"
@@ -19,10 +18,9 @@ import (
 func newTestProvider(t *testing.T, handler http.HandlerFunc) (*CompatibleProvider, *providertest.Capture) {
 	t.Helper()
 	server, capture := providertest.Server(t, handler)
-	provider := NewCompatibleProviderWithHTTPClient(
+	provider := NewCompatibleProvider(
 		"test-key",
-		server.Client(),
-		llmclient.Hooks{},
+		providers.ProviderOptions{HTTPClient: server.Client()},
 		CompatibleProviderConfig{ProviderName: "openai", BaseURL: server.URL},
 	)
 	return provider, capture

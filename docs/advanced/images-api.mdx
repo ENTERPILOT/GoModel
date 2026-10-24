@@ -277,9 +277,12 @@ Image requests appear in the audit log like any other model interaction. When
 
 The pixels themselves are **not** stored unless
 [`LOGGING_LOG_IMAGE_BODIES=true`](/advanced/configuration#audit-logging). With
-it on, uploads and generated images are embedded as base64 (8 MB per entry)
-and the dashboard renders them inline; `LOGGING_LOG_IMAGE_BODIES_SCOPE` limits
-this to `input` (edit uploads) or `output` (results). Without it, each image
-is a sized placeholder (`stored: false`), so the entry stays small and
-complete — it never hits the generic 1 MB body truncation even for large
-`b64_json` results.
+it on, uploads and generated images are written to
+[media storage](/advanced/configuration#media-storage) and each item carries a
+`media_id` the dashboard renders inline through `GET /admin/media/{id}`;
+`LOGGING_LOG_IMAGE_BODIES_SCOPE` limits this to `input` (edit uploads) or
+`output` (results). Without it, each image is a sized placeholder
+(`stored: false`). Either way the entry stays small and complete — it never
+hits the generic 1 MB body truncation even for large `b64_json` results, and
+there is no per-entry cap on stored images. Files are kept as long as the
+audit entries that reference them (`LOGGING_RETENTION_DAYS`).
