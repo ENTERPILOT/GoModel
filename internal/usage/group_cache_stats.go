@@ -29,7 +29,18 @@ type GroupCacheStats struct {
 	LocalCachedInputTokens  int64
 	LocalCachedOutputTokens int64
 	LocalRequests           int
-	CachedTokensByPricing   map[CachedPricingKey]int64
+	// LocalBilledCost sums the billed cost of the group's response-cache
+	// hits, which the uncached aggregates exclude but billed totals include.
+	LocalBilledCost       *float64
+	CachedTokensByPricing map[CachedPricingKey]int64
+}
+
+// localBilledCost returns the group's billed cache-hit cost, nil-safe.
+func (s *GroupCacheStats) localBilledCost() *float64 {
+	if s == nil {
+		return nil
+	}
+	return s.LocalBilledCost
 }
 
 // hasLocalTokens reports whether the group saw any local-cache traffic.
@@ -50,6 +61,7 @@ type usageCacheStatRow struct {
 	CacheType    string
 	InputTokens  int
 	OutputTokens int
+	BilledCost   *float64
 	RawData      map[string]any
 	Timestamp    time.Time
 }
@@ -129,6 +141,7 @@ func accumulateGroupCacheStats(out map[string]*GroupCacheStats, keysFor groupKey
 			stats.LocalCachedInputTokens += int64(row.InputTokens)
 			stats.LocalCachedOutputTokens += int64(row.OutputTokens)
 			stats.LocalRequests++
+			stats.LocalBilledCost = addCost(stats.LocalBilledCost, row.BilledCost)
 			continue
 		}
 		stats.UncachedInputTokens += uncached
@@ -153,7 +166,8 @@ func accumulateGroupCacheStats(out map[string]*GroupCacheStats, keysFor groupKey
 }
 
 // foldUsageCacheRows folds streamed SQL rows (model, provider, provider_name,
-// user_path, endpoint, labels JSON, cache_type, input_tokens, output_tokens, raw_data)
+// user_path, endpoint, labels JSON, cache_type, input_tokens, output_tokens,
+// billed_cost, raw_data, timestamp)
 // into per-group cache stats. Shared by the SQL backends; MongoDB folds its
 // foldUsageCacheRows aggregates streamed usage cache-stat rows by the keys produced by keysFor.
 // It returns an error if scanning the rows fails or the result set reports an error.
@@ -163,8 +177,9 @@ func foldUsageCacheRows(rows inputSegmentRows, keysFor groupKeysFunc) (map[strin
 		var model, provider string
 		var providerName, userPath, endpoint, labelsJSON, cacheType, rawDataJSON *string
 		var inputTokens, outputTokens int
+		var billedCost *float64
 		var timestamp any
-		if err := rows.Scan(&model, &provider, &providerName, &userPath, &endpoint, &labelsJSON, &cacheType, &inputTokens, &outputTokens, &rawDataJSON, &timestamp); err != nil {
+		if err := rows.Scan(&model, &provider, &providerName, &userPath, &endpoint, &labelsJSON, &cacheType, &inputTokens, &outputTokens, &billedCost, &rawDataJSON, &timestamp); err != nil {
 			return nil, fmt.Errorf("failed to scan usage cache stat row: %w", err)
 		}
 		row := usageCacheStatRow{
@@ -172,6 +187,7 @@ func foldUsageCacheRows(rows inputSegmentRows, keysFor groupKeysFunc) (map[strin
 			Provider:     provider,
 			InputTokens:  inputTokens,
 			OutputTokens: outputTokens,
+			BilledCost:   billedCost,
 			Timestamp:    cacheStatTimestamp(timestamp),
 		}
 		if providerName != nil {
@@ -244,12 +260,13 @@ func applyModelCacheStats(rows []ModelUsage, stats map[string]*GroupCacheStats) 
 		key := usageModelGroupKey(rows[i].Model, rows[i].Provider, rows[i].ProviderName)
 		seen[key] = true
 		rows[i].assign(stats[key])
+		rows[i].BilledCost = addCost(rows[i].BilledCost, stats[key].localBilledCost())
 	}
 	for key, s := range stats {
 		if seen[key] || !s.hasLocalTokens() {
 			continue
 		}
-		row := ModelUsage{Model: s.Model, Provider: s.Provider, ProviderName: s.ProviderName}
+		row := ModelUsage{Model: s.Model, Provider: s.Provider, ProviderName: s.ProviderName, BilledCost: s.LocalBilledCost}
 		row.assign(s)
 		rows = append(rows, row)
 	}
@@ -264,12 +281,13 @@ func applyUserPathCacheStats(rows []UserPathUsage, stats map[string]*GroupCacheS
 		key := usageUserPathGroupKey(rows[i].UserPath)
 		seen[key] = true
 		rows[i].assign(stats[key])
+		rows[i].BilledCost = addCost(rows[i].BilledCost, stats[key].localBilledCost())
 	}
 	for key, s := range stats {
 		if seen[key] || !s.hasLocalTokens() {
 			continue
 		}
-		row := UserPathUsage{UserPath: s.UserPath}
+		row := UserPathUsage{UserPath: s.UserPath, BilledCost: s.LocalBilledCost}
 		row.assign(s)
 		rows = append(rows, row)
 	}
@@ -285,12 +303,13 @@ func applyLabelCacheStats(rows []LabelUsage, stats map[string]*GroupCacheStats) 
 	for i := range rows {
 		seen[rows[i].Label] = true
 		rows[i].assign(stats[rows[i].Label])
+		rows[i].BilledCost = addCost(rows[i].BilledCost, stats[rows[i].Label].localBilledCost())
 	}
 	for key, s := range stats {
 		if seen[key] || !s.hasLocalTokens() {
 			continue
 		}
-		row := LabelUsage{Label: key, Requests: s.LocalRequests}
+		row := LabelUsage{Label: key, Requests: s.LocalRequests, BilledCost: s.LocalBilledCost}
 		row.assign(s)
 		rows = append(rows, row)
 	}

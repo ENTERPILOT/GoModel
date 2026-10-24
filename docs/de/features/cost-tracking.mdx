@@ -123,10 +123,13 @@ Der spezifischste Selektor gewinnt, in dieser Reihenfolge: Provider/Modell, Mode
 
 Jede Nutzungszeile speichert außerdem den Aufschlag, zu dem sie abgerechnet wurde (`markup_percent`, `markup_selector`), sodass geänderte Aufschläge vergangene Abrechnungen nie umschreiben.
 
+Sobald Aufschläge konfiguriert sind, zeigt die Nutzungsseite die abgerechneten Kosten neben den Provider-Kosten: eine Karte **Billed**, eine Spalte in den Aufschlüsselungen nach Modell, User Path und Label sowie eine Spalte im Request-Log, deren Tooltip den Aufschlag jeder Zeile nennt. Die Admin-API liefert sie als `total_billed_cost` in `/admin/usage/summary`, als `billed_cost` in `/admin/usage/models`, `/admin/usage/user-paths` und `/admin/usage/labels` sowie als `billed_cost`, `markup_percent` und `markup_selector` in den Einträgen von `/admin/usage/log`. Abgerechnete Summen enthalten abgerechnete Cache-Treffer, obwohl die übrigen Kostenwerte sie ausnehmen; die abgerechneten Kosten pro User Path sind daher der Betrag, den Sie jedem Kunden berechnen.
+
 ## Summen im Dashboard
 
 - **Estimated Cost** – Ausgaben für Live-Requests an Provider; Cache-Treffer sind ausgenommen.
 - **Saved Cost** – was aus dem Cache bediente Requests andernfalls gekostet hätten.
+- **Billed** – sichtbar, wenn Aufschläge konfiguriert sind: Provider-Kosten plus Aufschlag, einschließlich abgerechneter Cache-Treffer.
 
 Ein Wert `---` bedeutet, dass die Kosten unbekannt sind, weil keine Preise verfügbar waren. Das ist nicht dasselbe wie `$0`.
 

@@ -85,6 +85,7 @@ const (
 	DashboardConfigRedisURL             = "REDIS_URL"
 	DashboardConfigSemanticCacheEnabled = "SEMANTIC_CACHE_ENABLED"
 	DashboardConfigPricingRecalculation = "USAGE_PRICING_RECALCULATION_ENABLED"
+	DashboardConfigPricingMarkups       = "PRICING_MARKUPS_ENABLED"
 	DashboardConfigLiveLogsEnabled      = "DASHBOARD_LIVE_LOGS_ENABLED"
 	DashboardConfigMCPEnabled           = "MCP_ENABLED"
 	DashboardConfigMCPToolDiscovery     = "MCP_TOOL_DISCOVERY"
@@ -111,8 +112,11 @@ type DashboardConfigResponse struct {
 	RedisURL              string `json:"REDIS_URL,omitempty"`
 	SemanticCacheEnabled  string `json:"SEMANTIC_CACHE_ENABLED,omitempty"`
 	PricingRecalculation  string `json:"USAGE_PRICING_RECALCULATION_ENABLED,omitempty"`
-	LiveLogsEnabled       string `json:"DASHBOARD_LIVE_LOGS_ENABLED,omitempty"`
-	MCPEnabled            string `json:"MCP_ENABLED,omitempty"`
+	// PricingMarkups is "on" when pricing.markups declares at least one rule,
+	// so the dashboard shows billed cost only where it differs from cost.
+	PricingMarkups  string `json:"PRICING_MARKUPS_ENABLED,omitempty"`
+	LiveLogsEnabled string `json:"DASHBOARD_LIVE_LOGS_ENABLED,omitempty"`
+	MCPEnabled      string `json:"MCP_ENABLED,omitempty"`
 	// MCPToolDiscovery is the gateway's default MCP tool discovery mode
 	// ("off" or "search"), so the dashboard can show how clients see tools.
 	MCPToolDiscovery string `json:"MCP_TOOL_DISCOVERY,omitempty"`
@@ -450,6 +454,7 @@ func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardCo
 		RedisURL:               strings.TrimSpace(values.RedisURL),
 		SemanticCacheEnabled:   strings.TrimSpace(values.SemanticCacheEnabled),
 		PricingRecalculation:   strings.TrimSpace(values.PricingRecalculation),
+		PricingMarkups:         strings.TrimSpace(values.PricingMarkups),
 		LiveLogsEnabled:        strings.TrimSpace(values.LiveLogsEnabled),
 		MCPEnabled:             strings.TrimSpace(values.MCPEnabled),
 		MCPToolDiscovery:       strings.TrimSpace(values.MCPToolDiscovery),
