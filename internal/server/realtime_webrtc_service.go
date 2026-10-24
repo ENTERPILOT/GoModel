@@ -311,7 +311,7 @@ func (s *realtimeService) observeCall(ctx context.Context, route realtimeRoute, 
 	}
 	t := realtime.Target{URL: target.URL, Headers: target.Headers, Subprotocols: target.Subprotocols}
 
-	go func() {
+	go func() { //nolint:gosec // The observer outlives the request on purpose; see below.
 		// The observer outlives the signaling request: it runs for the call
 		// lifetime, ended by the provider closing the sideband socket. The
 		// registry TTL caps runaway sessions.

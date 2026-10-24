@@ -13,7 +13,7 @@ const (
 	CredentialFieldBackend                  = "backend"
 	CredentialFieldAuthType                 = "auth_type"
 	CredentialFieldAPIMode                  = "api_mode"
-	CredentialFieldVertexProject            = "vertex_project"
+	CredentialFieldVertexProject            = "vertex_project" //nolint:gosec // G101: field name, not a credential.
 	CredentialFieldVertexLocation           = "vertex_location"
 	CredentialFieldServiceAccountFile       = "service_account_file"
 	CredentialFieldServiceAccountJSON       = "service_account_json"

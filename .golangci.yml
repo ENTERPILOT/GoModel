@@ -3,6 +3,7 @@ linters:
   enable:
     - dupl
     - errcheck
+    - gosec
     - govet
     - ineffassign
     - staticcheck
@@ -28,6 +29,28 @@ linters:
       - linters:
           - dupl
         path: tests/
+      # Tests use fixture credentials, temp files, and local HTTP servers.
+      - linters:
+          - gosec
+        path: _test\.go
+      - linters:
+          - gosec
+        path: tests/
+      # Developer tool: fetches the configured provider and writes golden
+      # files into the repository.
+      - linters:
+          - gosec
+        path: cmd/recordapi/
+      # Developer benchmark tool: runs ps against the benchmarked process.
+      - linters:
+          - gosec
+        path: docs/about/benchmark-tools/
+      # WHERE clauses are joined from constant fragments; every value is a
+      # bound parameter.
+      - linters:
+          - gosec
+        path: internal/usage/
+        text: G202
     generated: lax
     presets:
       - comments
