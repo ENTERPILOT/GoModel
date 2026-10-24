@@ -137,3 +137,47 @@ func TestModelMetadataLayers_NotFound(t *testing.T) {
 	_, ok = NewModelRegistry().ModelMetadataLayers("local", "gemma-3-4b-it")
 	assert.False(t, ok)
 }
+
+func TestListModels_AdvertisesCatalogInputModalities(t *testing.T) {
+	registry := NewModelRegistry()
+	mock := &registryMockProvider{
+		name: "openai",
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data:   []core.Model{{ID: "mimo-v2.6-flash", Object: "model", OwnedBy: "xiaomi"}},
+		},
+	}
+	registry.RegisterProviderWithNameAndType(mock, "xiaomi", "openai")
+	require.NoError(t, registry.Initialize(context.Background()))
+
+	raw := []byte(`{
+		"version": 1,
+		"updated_at": "2026-01-01T00:00:00Z",
+		"models": {
+			"mimo-v2.6-flash": {
+				"display_name": "Xiaomi Mimo V2.6 Flash",
+				"modes": ["chat"],
+				"capabilities": {"function_calling": true, "video_input": false},
+				"modalities": {"input": ["text", "image", "audio", "video"], "output": ["text"]}
+			}
+		}
+	}`)
+	list, err := modeldata.Parse(raw)
+	require.NoError(t, err)
+	registry.SetModelList(list, raw)
+	registry.EnrichModels()
+
+	models := registry.ListModels()
+	require.Len(t, models, 1)
+	require.NotNil(t, models[0].Metadata)
+	assert.Equal(t, map[string]bool{
+		"function_calling": true,
+		"vision":           true,
+		"audio_input":      true,
+		"video_input":      false,
+	}, models[0].Metadata.Capabilities)
+
+	layers, ok := registry.ModelMetadataLayers("xiaomi", "mimo-v2.6-flash")
+	require.True(t, ok)
+	assert.Equal(t, modeldata.MetadataSourceCatalog, layers.Sources["capabilities.vision"])
+}

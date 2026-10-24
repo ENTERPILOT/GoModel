@@ -24,6 +24,7 @@ test("auditTypeForPath mirrors the gateway endpoint classification", () => {
     ["/v1/systemone/permute", "systemone"],
     ["/v1/systemone/separate/", "systemone"],
     ["/v1/systemone/other", ""],
+    ["/v1/decisions", "systemone"],
     ["/v1/realtime/translations/calls", "realtime"],
     ["/mcp", "mcp"],
     ["/mcp/github", "mcp"],

@@ -2,16 +2,19 @@
 // gateway, and covers the self-hosted Kev servers that implement the same
 // API. System One is a decision API rather than a text-generation one: a
 // request carries a state and a map of typed questions (noul, choice, score)
-// and the answer is a calibrated probability per question. It has no
-// OpenAI-compatible surface, so the gateway forwards it natively, at
-// POST /v1/systemone or through passthrough at /p/jev/systemone.
+// and the answer is a calibrated probability per question. The gateway
+// forwards it natively, at POST /v1/systemone or through passthrough at
+// /p/jev/systemone, and answers OpenAI's Decisions API (POST /v1/decisions)
+// with it by translating both ways (see decisions.go).
 package jev
 
 import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
+	"sync/atomic"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
@@ -39,6 +42,9 @@ var Registration = providers.Registration{
 type Provider struct {
 	client *llmclient.Client
 	keys   *providers.Keyring
+	// hosted records whether the base URL is TypeSafe's hosted API, the
+	// only System One server that reads images; see readsImages.
+	hosted atomic.Bool
 }
 
 var (
@@ -62,6 +68,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
 	p.client = llmclient.NewWithOptionalHTTPClient(opts.HTTPClient, clientCfg, p.setHeaders)
+	p.hosted.Store(hostedTypeSafe(clientCfg.BaseURL))
 	return p
 }
 
@@ -71,7 +78,28 @@ func (p *Provider) AcceptsUnlistedModels() bool { return true }
 
 // SetBaseURL allows configuring a custom base URL for the provider.
 func (p *Provider) SetBaseURL(url string) {
-	p.client.SetBaseURL(baseURL(url))
+	resolved := baseURL(url)
+	p.client.SetBaseURL(resolved)
+	p.hosted.Store(hostedTypeSafe(resolved))
+}
+
+// hostedTypeSafe reports whether a base URL addresses TypeSafe's hosted API,
+// https://api.typesafe.ai. Every other System One server a jev provider
+// points at is taken to be a Kev server, which reads text only.
+func hostedTypeSafe(base string) bool {
+	parsed, err := url.Parse(base)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(parsed.Scheme, "https") && strings.EqualFold(parsed.Host, "api.typesafe.ai")
+}
+
+// DecisionsReadImages reports whether this provider reads images: only
+// TypeSafe's hosted API does. It is what the gateway checks before choosing
+// a jev target for an image request, so a Kev server is skipped even when
+// its models carry no capabilities, as with models_mode: allowlist.
+func (p *Provider) DecisionsReadImages() bool {
+	return p.hosted.Load()
 }
 
 func baseURL(configured string) string {
@@ -115,7 +143,7 @@ func (p *Provider) Embeddings(_ context.Context, _ *core.EmbeddingRequest) (*cor
 }
 
 func unsupported(surface string) error {
-	return core.NewInvalidRequestError("jev does not support "+surface+"; it answers System One decision requests, which GoModel does not translate: send them to POST /v1/systemone", nil)
+	return core.NewInvalidRequestError("jev does not support "+surface+"; it answers decision requests: send them to POST /v1/decisions in OpenAI's format, or to POST /v1/systemone in System One's", nil)
 }
 
 // Passthrough forwards a System One request as the client wrote it. Both

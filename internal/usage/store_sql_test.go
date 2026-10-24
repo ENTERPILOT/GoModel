@@ -28,6 +28,7 @@ func TestBuildUsageInsert(t *testing.T) {
 			ProviderName:           "primary-openai",
 			Endpoint:               "/v1/chat/completions",
 			SessionID:              "session-1",
+			AuthKeyID:              "key-1",
 			CacheType:              CacheTypeExact,
 			Labels:                 []string{"alpha", "prod"},
 			InputTokens:            10,
@@ -63,14 +64,15 @@ func TestBuildUsageInsert(t *testing.T) {
 	})
 
 	normalized := strings.Join(strings.Fields(query), " ")
-	wantQuery := "INSERT INTO usage (id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels, input_tokens, output_tokens, total_tokens, rewrite_tokens_saved, rewrite_cost_saved, raw_data, input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING"
+	wantQuery := "INSERT INTO usage (id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels, input_tokens, output_tokens, total_tokens, rewrite_tokens_saved, rewrite_cost_saved, raw_data, input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat, auth_key_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING"
 	require.Equal(t, wantQuery, normalized)
 
-	require.Len(t, args, 46)
+	require.Len(t, args, 48)
 	require.Equal(t, "usage-1", args[0])
 	require.Equal(t, "primary-openai", args[6])
 	require.Equal(t, CostSourceModelPricing, args[21])
-	require.Equal(t, "usage-2", args[23])
+	require.Equal(t, "key-1", args[23])
+	require.Equal(t, "usage-2", args[24])
 	require.Equal(t, "session-1", args[9])
 	require.Equal(t, CacheTypeExact, args[10])
 	require.Equal(t, `["alpha","prod"]`, args[11])
@@ -78,11 +80,12 @@ func TestBuildUsageInsert(t *testing.T) {
 	require.Equal(t, &rewriteCostSaved, args[16])
 	require.Equal(t, now, args[3])
 	require.JSONEq(t, `{"cached_tokens":3}`, args[17].(string))
-	require.Nil(t, args[33])
 	require.Nil(t, args[34])
-	require.Equal(t, 0, args[38])
-	require.Nil(t, args[39].(*float64), "rewrite_cost_saved")
-	require.Nil(t, args[40], "raw_data")
+	require.Nil(t, args[35])
+	require.Equal(t, 0, args[39])
+	require.Nil(t, args[40].(*float64), "rewrite_cost_saved")
+	require.Nil(t, args[41], "raw_data")
+	require.Empty(t, args[47], "auth_key_id")
 }
 
 func TestBuildUsageInsertWritesSQLiteTimestampsAsRFC3339Text(t *testing.T) {

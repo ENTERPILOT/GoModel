@@ -26,8 +26,10 @@ var sqlTable = `CREATE TABLE IF NOT EXISTS auth_keys (
 		labels ` + sqlx.TypeJSON + `,
 		allowed_models ` + sqlx.TypeJSON + `,
 		dashboard_access ` + sqlx.TypeBool + ` NOT NULL DEFAULT FALSE,
+		passthrough_access ` + sqlx.TypeBool + ` NOT NULL DEFAULT TRUE,
 		redacted_value TEXT NOT NULL,
 		secret_hash TEXT NOT NULL UNIQUE,
+		imported_from TEXT,
 		enabled ` + sqlx.TypeBool + ` NOT NULL DEFAULT TRUE,
 		expires_at ` + sqlx.TypeInt64 + `,
 		deactivated_at ` + sqlx.TypeInt64 + `,
@@ -41,16 +43,20 @@ var sqlIndexes = []string{
 }
 
 // sqlMigrations backfill columns added after the table's first release.
+// passthrough_access defaults to TRUE so keys issued before the column
+// existed keep passthrough; Create always writes the column explicitly.
 var sqlMigrations = []string{
 	`ALTER TABLE auth_keys ADD COLUMN user_path TEXT`,
 	`ALTER TABLE auth_keys ADD COLUMN labels ` + sqlx.TypeJSON,
 	`ALTER TABLE auth_keys ADD COLUMN dashboard_access ` + sqlx.TypeBool + ` NOT NULL DEFAULT FALSE`,
 	`ALTER TABLE auth_keys ADD COLUMN allowed_models ` + sqlx.TypeJSON,
+	`ALTER TABLE auth_keys ADD COLUMN imported_from TEXT`,
+	`ALTER TABLE auth_keys ADD COLUMN passthrough_access ` + sqlx.TypeBool + ` NOT NULL DEFAULT TRUE`,
 }
 
 const selectAuthKeyColumns = `
 	SELECT id, name, description, user_path, labels, allowed_models, dashboard_access,
-		redacted_value, secret_hash, enabled, expires_at, deactivated_at,
+		passthrough_access, redacted_value, secret_hash, imported_from, enabled, expires_at, deactivated_at,
 		created_at, updated_at
 	FROM auth_keys
 `
@@ -88,21 +94,50 @@ func (s *SQLStore) List(ctx context.Context) ([]AuthKey, error) {
 }
 
 func (s *SQLStore) Create(ctx context.Context, key AuthKey) error {
-	_, err := s.db.Exec(ctx, `
+	affected, err := s.db.Exec(ctx, `
 		INSERT INTO auth_keys (
 			id, name, description, user_path, labels, allowed_models, dashboard_access,
-			redacted_value, secret_hash, enabled, expires_at, deactivated_at,
-			created_at, updated_at
+			passthrough_access, redacted_value, secret_hash, imported_from, enabled, expires_at,
+			deactivated_at, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (secret_hash) DO NOTHING
 	`, key.ID, key.Name, key.Description,
 		sqlutil.NullableString(key.UserPath), sqlutil.NullableJSONStrings(key.Labels, key.ID),
 		sqlutil.NullableJSONStrings(key.AllowedModels, key.ID),
-		key.DashboardAccess, key.RedactedValue, key.SecretHash, key.Enabled,
+		key.DashboardAccess, key.PassthroughAccess, key.RedactedValue, key.SecretHash,
+		sqlutil.NullableString(key.ImportedFrom), key.Enabled,
 		sqlutil.UnixOrNil(key.ExpiresAt), sqlutil.UnixOrNil(key.DeactivatedAt),
 		key.CreatedAt.Unix(), key.UpdatedAt.Unix())
 	if err != nil {
 		return fmt.Errorf("create auth key: %w", err)
+	}
+	if affected == 0 {
+		return ErrSecretHashExists
+	}
+	return nil
+}
+
+func (s *SQLStore) UpdateImported(ctx context.Context, key AuthKey) error {
+	affected, err := s.db.Exec(ctx, `
+		UPDATE auth_keys
+		SET name = ?,
+			description = ?,
+			user_path = ?,
+			labels = ?,
+			allowed_models = ?,
+			redacted_value = ?,
+			expires_at = ?,
+			updated_at = ?
+		WHERE id = ?
+	`, key.Name, key.Description, sqlutil.NullableString(key.UserPath),
+		sqlutil.NullableJSONStrings(key.Labels, key.ID), sqlutil.NullableJSONStrings(key.AllowedModels, key.ID),
+		key.RedactedValue, sqlutil.UnixOrNil(key.ExpiresAt), key.UpdatedAt.Unix(), normalizeID(key.ID))
+	if err != nil {
+		return fmt.Errorf("update imported auth key: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
 	}
 	return nil
 }
@@ -155,6 +190,22 @@ func (s *SQLStore) UpdateDashboardAccess(ctx context.Context, id string, allowed
 	return nil
 }
 
+func (s *SQLStore) UpdatePassthroughAccess(ctx context.Context, id string, allowed bool, now time.Time) error {
+	affected, err := s.db.Exec(ctx, `
+		UPDATE auth_keys
+		SET passthrough_access = ?,
+			updated_at = ?
+		WHERE id = ?
+	`, allowed, now.Unix(), normalizeID(id))
+	if err != nil {
+		return fmt.Errorf("update auth key passthrough access: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *SQLStore) Deactivate(ctx context.Context, id string, now time.Time) error {
 	affected, err := s.db.Exec(ctx, `
 		UPDATE auth_keys
@@ -178,7 +229,7 @@ func (s *SQLStore) Close() error {
 
 func scanSQLAuthKey(scanner authKeyScanner) (AuthKey, error) {
 	var key AuthKey
-	var userPath, labelsJSON, allowedModelsJSON *string
+	var userPath, labelsJSON, allowedModelsJSON, importedFrom *string
 	var expiresAt, deactivatedAt *int64
 	var createdAt, updatedAt int64
 	if err := scanner.Scan(
@@ -189,8 +240,10 @@ func scanSQLAuthKey(scanner authKeyScanner) (AuthKey, error) {
 		&labelsJSON,
 		&allowedModelsJSON,
 		&key.DashboardAccess,
+		&key.PassthroughAccess,
 		&key.RedactedValue,
 		&key.SecretHash,
+		&importedFrom,
 		&key.Enabled,
 		&expiresAt,
 		&deactivatedAt,
@@ -203,6 +256,7 @@ func scanSQLAuthKey(scanner authKeyScanner) (AuthKey, error) {
 		return AuthKey{}, err
 	}
 	key.UserPath = sqlutil.DerefTrimmed(userPath)
+	key.ImportedFrom = sqlutil.DerefTrimmed(importedFrom)
 	if labelsJSON != nil {
 		key.Labels = sqlutil.StringsFromJSON(*labelsJSON, key.ID)
 	}

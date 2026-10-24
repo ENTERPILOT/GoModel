@@ -182,3 +182,22 @@
     </form>
   </div>
 </Modal>
+
+<style>
+  /* Phones: the editor is a bottom sheet that scrolls, so the actions row
+     sticks to its bottom edge instead of sitting below the last field. The
+     row bleeds over the editor's padding (--space-block, the .model-editor
+     padding) so scrolled fields never show beside or beneath it. */
+  @media (max-width: 768px) {
+    .form-actions {
+      position: sticky;
+      bottom: calc(-1 * var(--space-block));
+      z-index: 1;
+      margin-inline: calc(-1 * var(--space-block));
+      margin-bottom: calc(-1 * var(--space-block));
+      padding: 12px var(--space-block) var(--space-block);
+      border-top: 1px solid var(--border);
+      background: var(--bg-surface);
+    }
+  }
+</style>

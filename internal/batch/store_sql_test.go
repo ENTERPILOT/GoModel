@@ -226,3 +226,27 @@ func TestSQLStoreBackfillsUserPathColumn(t *testing.T) {
 		require.True(t, slices.Equal(got, []string{"batch-old"}), "scoped list after backfill = %v, want [batch-old]", got)
 	})
 }
+
+// User paths are case-sensitive, and SQLite's LIKE is not: a subtree filter
+// must not admit another tenant whose path differs only in case.
+func TestBatchStoreListUserPathIsCaseSensitive(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		ctx := context.Background()
+		for _, row := range []struct{ id, userPath string }{
+			{"batch-alpha", "/team/alpha"},
+			{"batch-alpha-child", "/team/alpha/svc"},
+			{"batch-upper", "/TEAM/ALPHA"},
+			{"batch-upper-child", "/TEAM/ALPHA/svc"},
+		} {
+			err := store.Create(ctx, &StoredBatch{
+				Batch:    &core.BatchResponse{ID: row.id, Object: "batch", Status: "completed", CreatedAt: 1},
+				UserPath: row.userPath,
+			})
+			require.NoError(t, err)
+		}
+
+		got, err := store.List(ctx, 10, "", "/team/alpha")
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"batch-alpha", "batch-alpha-child"}, batchIDs(got))
+	})
+}

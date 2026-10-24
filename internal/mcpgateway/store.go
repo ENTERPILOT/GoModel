@@ -22,6 +22,9 @@ type Store interface {
 	List(ctx context.Context) ([]ManagedServer, error)
 	Get(ctx context.Context, name string) (*ManagedServer, error)
 	Upsert(ctx context.Context, server ManagedServer) error
+	// Update rewrites an existing row and returns ErrNotFound when the row is
+	// gone, so an edit racing a delete cannot recreate the server.
+	Update(ctx context.Context, server ManagedServer) error
 	Delete(ctx context.Context, name string) error
 	Close() error
 }
@@ -129,31 +132,6 @@ func decodeJSONMap(data []byte) (map[string]string, error) {
 	var value map[string]string
 	if err := json.Unmarshal(data, &value); err != nil {
 		return nil, fmt.Errorf("decode map: %w", err)
-	}
-	if len(value) == 0 {
-		return nil, nil
-	}
-	return value, nil
-}
-
-func encodeJSONList(value []string) (string, error) {
-	if value == nil {
-		value = []string{}
-	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return "", fmt.Errorf("encode list: %w", err)
-	}
-	return string(data), nil
-}
-
-func decodeJSONList(data []byte) ([]string, error) {
-	if len(data) == 0 {
-		return nil, nil
-	}
-	var value []string
-	if err := json.Unmarshal(data, &value); err != nil {
-		return nil, fmt.Errorf("decode list: %w", err)
 	}
 	if len(value) == 0 {
 		return nil, nil

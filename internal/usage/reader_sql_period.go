@@ -123,8 +123,9 @@ func (r *SQLReader) sqliteGroupingRange(ctx context.Context, params UsageQueryPa
 		return time.Time{}, time.Time{}, false, err
 	}
 	if userPath != "" {
-		conditions = append(conditions, "(user_path = ? OR user_path LIKE ? ESCAPE '\\')")
-		args = append(args, userPath, usageUserPathSubtreePattern(userPath))
+		condition, conditionArgs := sqlutil.UserPathSubtreeCondition("user_path", userPath)
+		conditions = append(conditions, condition)
+		args = append(args, conditionArgs...)
 	}
 	query := `SELECT MIN(` + sqliteTimestampEpochExpr + `), MAX(` + sqliteTimestampEpochExpr + `) FROM usage` + sqlutil.BuildWhereClause(conditions)
 	if err := r.db.QueryRow(ctx, query, args...).Scan(&minTS, &maxTS); err != nil {

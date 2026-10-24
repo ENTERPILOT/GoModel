@@ -25,8 +25,8 @@ const (
 	SourceManual = "manual"
 )
 
-// Scope names what a budget limits: a consumer user-path subtree or a request
-// label.
+// Scope names what a budget limits: a consumer user-path subtree, a request
+// label, or a provider instance.
 type Scope string
 
 const (
@@ -37,6 +37,10 @@ const (
 	// the label verbatim. A request carrying several labels is charged against
 	// every matching label budget.
 	ScopeLabel Scope = "label"
+	// ScopeProvider limits everything routed to one configured provider
+	// instance; the subject is the provider name (e.g. "openai-prod"), matched
+	// case-insensitively.
+	ScopeProvider Scope = "provider"
 )
 
 // Budget stores one spend limit for one scope, subject, and reset period.
@@ -57,18 +61,24 @@ type Budget struct {
 
 // Subjects identifies the dimensions one request can be budgeted by. UserPath
 // is always known at ingress; Labels are whatever tagging extracted for the
-// request.
+// request; Provider is the routed provider name, empty when the route is not
+// known yet (batch submissions, status lookups).
 type Subjects struct {
 	UserPath string
 	Labels   []string
+	Provider string
 }
 
 // appliesTo reports whether the budget covers the request subjects.
 func (b Budget) appliesTo(s Subjects) bool {
-	if b.Scope == ScopeLabel {
+	switch b.Scope {
+	case ScopeLabel:
 		return slices.Contains(s.Labels, b.Subject)
+	case ScopeProvider:
+		return s.Provider != "" && strings.EqualFold(b.Subject, strings.TrimSpace(s.Provider))
+	default:
+		return budgetAppliesToPath(b.Subject, s.UserPath)
 	}
-	return budgetAppliesToPath(b.Subject, s.UserPath)
 }
 
 // resolve returns the budget instance that applies to the request. Per-child
@@ -91,8 +101,11 @@ func (b Budget) resolve(s Subjects) (Budget, bool) {
 
 // SubjectLabel names the budget subject for error messages and logs.
 func (b Budget) SubjectLabel() string {
-	if b.Scope == ScopeLabel {
+	switch b.Scope {
+	case ScopeLabel:
 		return "label " + b.Subject
+	case ScopeProvider:
+		return "provider " + b.Subject
 	}
 	if b.EffectiveSubject != "" {
 		return b.EffectiveSubject
@@ -220,24 +233,39 @@ func NormalizeScope(raw string) (Scope, error) {
 		return ScopeUserPath, nil
 	case ScopeLabel:
 		return ScopeLabel, nil
+	case ScopeProvider:
+		return ScopeProvider, nil
 	default:
-		return "", fmt.Errorf("scope must be one of user_path, label")
+		return "", fmt.Errorf("scope must be one of user_path, label, provider")
 	}
 }
 
 // NormalizeSubject canonicalizes a budget subject for its scope. Label
 // subjects keep their case: they are compared verbatim against the labels
 // recorded on usage entries, the same way the usage label filter and by-label
-// breakdown compare them.
+// breakdown compare them. Provider subjects are lowercased, as rate limit
+// provider rules are, so "OpenAI" and "openai" cannot persist as two budgets
+// over the same traffic.
 func NormalizeSubject(scope Scope, subject string) (string, error) {
-	if scope != ScopeLabel {
+	switch scope {
+	case ScopeLabel:
+		subject = strings.TrimSpace(subject)
+		if subject == "" {
+			return "", fmt.Errorf("label budget subject is required")
+		}
+		return subject, nil
+	case ScopeProvider:
+		subject = strings.ToLower(strings.TrimSpace(subject))
+		if subject == "" {
+			return "", fmt.Errorf("provider budget subject is required")
+		}
+		if strings.ContainsAny(subject, "/ \t") {
+			return "", fmt.Errorf("provider budget subject must be a provider name without slashes or spaces")
+		}
+		return subject, nil
+	default:
 		return NormalizeUserPath(subject)
 	}
-	subject = strings.TrimSpace(subject)
-	if subject == "" {
-		return "", fmt.Errorf("label budget subject is required")
-	}
-	return subject, nil
 }
 
 func NormalizeBudget(b Budget) (Budget, error) {

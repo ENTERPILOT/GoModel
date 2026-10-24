@@ -129,7 +129,7 @@ func (r *SQLReader) usageCacheStats(ctx context.Context, params UsageQueryParams
 	conditions = append(conditions, extraConditions...)
 	where := sqlutil.BuildWhereClause(conditions)
 
-	rows, err := r.db.Query(ctx, `SELECT model, provider, provider_name, user_path, labels, cache_type, input_tokens, output_tokens, raw_data, timestamp FROM usage`+where, args...)
+	rows, err := r.db.Query(ctx, `SELECT model, provider, provider_name, user_path, endpoint, labels, cache_type, input_tokens, output_tokens, raw_data, timestamp FROM usage`+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query usage cache stats: %w", err)
 	}
@@ -222,6 +222,44 @@ func (r *SQLReader) GetUsageByLabel(ctx context.Context, params UsageQueryParams
 	return result, nil
 }
 
+// GetUsageByEndpoint returns request, token, and cost totals grouped by
+// request endpoint, each tagged with its operation.
+func (r *SQLReader) GetUsageByEndpoint(ctx context.Context, params UsageQueryParams) ([]EndpointUsage, error) {
+	conditions, args, err := r.dialect.usageConditions(params)
+	if err != nil {
+		return nil, err
+	}
+	where := sqlutil.BuildWhereClause(conditions)
+
+	query := `SELECT endpoint, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + usageCostColumns + `
+			FROM usage` + where + ` GROUP BY endpoint ORDER BY endpoint`
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query usage by endpoint: %w", err)
+	}
+	defer rows.Close()
+
+	result := make([]EndpointUsage, 0)
+	for rows.Next() {
+		var e EndpointUsage
+		if err := rows.Scan(&e.Endpoint, &e.Requests, &e.InputTokens, &e.OutputTokens, &e.TotalTokens, &e.InputCost, &e.OutputCost, &e.TotalCost); err != nil {
+			return nil, fmt.Errorf("failed to scan usage by endpoint row: %w", err)
+		}
+		result = append(result, e)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating usage by endpoint rows: %w", err)
+	}
+
+	stats, err := r.usageCacheStats(ctx, params, "user_path", nil, endpointGroupKeys)
+	if err != nil {
+		return nil, err
+	}
+	return applyEndpointCacheStats(result, stats), nil
+}
+
 // GetUsageBySession returns request, token, and cost totals grouped by the
 // detected session id and its tracked user path. Legacy rows without a session
 // id are omitted.
@@ -285,7 +323,7 @@ func (d usageDialect) sessionUsageQueries(params SessionUsageParams) (countQuery
 
 const usageLogColumns = `id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels,
 		input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost, COALESCE(cost_source, ''), raw_data, COALESCE(costs_calculation_caveat, ''),
-		COALESCE(rewrite_tokens_saved, 0), rewrite_cost_saved`
+		COALESCE(rewrite_tokens_saved, 0), rewrite_cost_saved, COALESCE(auth_key_id, '')`
 
 // GetUsageLog returns a paginated list of individual usage log entries.
 func (r *SQLReader) GetUsageLog(ctx context.Context, params UsageLogParams) (*UsageLogResult, error) {
@@ -298,9 +336,9 @@ func (r *SQLReader) GetUsageLog(ctx context.Context, params UsageLogParams) (*Us
 
 	if params.Search != "" {
 		like := r.dialect.like + ` ? ESCAPE '\'`
-		conditions = append(conditions, "(model "+like+" OR provider "+like+" OR provider_name "+like+" OR request_id "+like+" OR provider_id "+like+" OR session_id "+like+")")
+		conditions = append(conditions, "(model "+like+" OR provider "+like+" OR provider_name "+like+" OR endpoint "+like+" OR request_id "+like+" OR provider_id "+like+" OR session_id "+like+")")
 		s := "%" + sqlutil.EscapeLikeWildcards(params.Search) + "%"
-		args = append(args, s, s, s, s, s, s)
+		args = append(args, s, s, s, s, s, s, s)
 	}
 
 	where := sqlutil.BuildWhereClause(conditions)

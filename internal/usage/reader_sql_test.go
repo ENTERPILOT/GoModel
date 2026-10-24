@@ -23,7 +23,7 @@ var sqlReaderFixture = []*UsageEntry{
 		ID: "6f1c3a52-0000-4000-8000-000000000001", RequestID: "req-1", ProviderID: "chatcmpl-1",
 		Timestamp: time.Date(2026, 3, 28, 10, 0, 0, 0, time.UTC),
 		Model:     "gpt-5", Provider: "openai", ProviderName: "primary", Endpoint: "/v1/chat/completions",
-		UserPath: "/team/a", SessionID: "s1", Labels: []string{"alpha", "prod"},
+		UserPath: "/team/a", SessionID: "s1", AuthKeyID: "key-a", Labels: []string{"alpha", "prod"},
 		InputTokens: 100, OutputTokens: 50, TotalTokens: 150,
 		InputCost: new(0.1), OutputCost: new(0.2), TotalCost: new(0.3),
 		RawData: map[string]any{"cached_tokens": 10},
@@ -126,6 +126,38 @@ func TestSQLReaderAggregates(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 3, subtree.TotalRequests)
 
+		// User paths are case-sensitive on both engines.
+		filtered = sqlReaderFixtureRange
+		filtered.UserPath = "/TEAM"
+		upper, err := reader.GetSummary(ctx, filtered)
+		require.NoError(t, err)
+		assert.Equal(t, 0, upper.TotalRequests)
+
+		filtered = sqlReaderFixtureRange
+		filtered.AuthKeyID = "key-a"
+		byKey, err := reader.GetSummary(ctx, filtered)
+		require.NoError(t, err)
+		assert.Equal(t, 1, byKey.TotalRequests)
+
+		byEndpoint, err := reader.GetUsageByEndpoint(ctx, sqlReaderFixtureRange)
+		require.NoError(t, err)
+		require.Len(t, byEndpoint, 1)
+		assert.Equal(t, "/v1/chat/completions", byEndpoint[0].Endpoint)
+		assert.Equal(t, string(core.OperationChatCompletions), byEndpoint[0].Operation)
+		assert.Equal(t, 3, byEndpoint[0].Requests)
+
+		filtered = sqlReaderFixtureRange
+		filtered.Operations = []core.Operation{core.OperationChatCompletions}
+		byOperation, err := reader.GetSummary(ctx, filtered)
+		require.NoError(t, err)
+		assert.Equal(t, 3, byOperation.TotalRequests)
+
+		filtered = sqlReaderFixtureRange
+		filtered.Endpoints = []string{"/v1/responses"}
+		otherEndpoint, err := reader.GetSummary(ctx, filtered)
+		require.NoError(t, err)
+		assert.Equal(t, 0, otherEndpoint.TotalRequests)
+
 		cache, err := reader.GetCacheOverview(ctx, sqlReaderFixtureRange)
 		require.NoError(t, err)
 		assert.Equal(t, 1, cache.Summary.TotalHits)
@@ -160,6 +192,7 @@ func TestSQLReaderSessionsAndLog(t *testing.T) {
 		assert.Equal(t, []string{"alpha", "prod"}, first.Labels)
 		assert.Equal(t, "primary", first.ProviderName)
 		assert.Equal(t, "/team/a", first.UserPath)
+		assert.Equal(t, "key-a", first.AuthKeyID)
 		assert.EqualValues(t, 10, first.RawData["cached_tokens"])
 		require.NotNil(t, page.Entries[0].RewriteCostSaved)
 		assert.InDelta(t, 0.05, *page.Entries[0].RewriteCostSaved, 1e-9)

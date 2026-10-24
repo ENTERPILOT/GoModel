@@ -19,51 +19,55 @@ type dockerContainer struct {
 }
 
 const (
-	dockerPullAttempts = 4
-	dockerPullBackoff  = 3 * time.Second
+	dockerPullRounds  = 3
+	dockerPullBackoff = 3 * time.Second
 )
 
-// dockerPullImages fetches images up front, one at a time, rather than letting
-// `docker run` pull them as a side effect.
-//
-// Two things make the implicit pull unreliable in CI. The containers start
-// concurrently, so both pulls would leave at the same instant, and registries
-// meter anonymous pulls per second — ECR Public rejects the second one with
-// "toomanyrequests: Rate exceeded". Separately, an implicit pull gets no retry
-// of its own, so a single transient registry error fails the whole suite before
-// a test has run. Pulling serially with backoff addresses both.
-func dockerPullImages(ctx context.Context, images ...string) error {
-	for _, image := range images {
-		if err := dockerPullImage(ctx, image); err != nil {
-			return err
-		}
-	}
-	return nil
+// imageRegistries mirror Docker Hub's official library, tried in order. Keep
+// it in step with tools/ci/pull-image.sh.
+var imageRegistries = []string{
+	"mirror.gcr.io/library",
+	"public.ecr.aws/docker/library",
+	"docker.io/library",
 }
 
-func dockerPullImage(ctx context.Context, image string) error {
+// dockerPullImage fetches a library image (postgres:16-alpine) up front rather
+// than letting `docker run` pull it as a side effect, and returns the reference
+// it pulled.
+//
+// Registries meter anonymous pulls per IP, and GitHub runners share IPs with
+// everyone else: ECR Public answers "toomanyrequests: Rate exceeded" or "Data
+// limit exceeded", Docker Hub times out. An implicit pull gets no retry, so one
+// registry error fails the suite before a test has run. Each round tries every
+// registry before backing off, since a used-up quota does not recover in
+// seconds. Callers pull one image at a time so two pulls never leave at once.
+func dockerPullImage(ctx context.Context, name string) (string, error) {
 	var lastErr error
 
-	for attempt := 1; attempt <= dockerPullAttempts; attempt++ {
-		if _, err := runDocker(ctx, "pull", image); err == nil {
-			return nil
-		} else {
-			lastErr = err
+	for round := 1; round <= dockerPullRounds; round++ {
+		for _, registry := range imageRegistries {
+			ref := registry + "/" + name
+			if _, err := runDocker(ctx, "pull", ref); err == nil {
+				return ref, nil
+			} else {
+				lastErr = err
+			}
+			log.Printf("Pull of %s failed: %v", ref, lastErr)
 		}
 
-		if attempt == dockerPullAttempts {
+		if round == dockerPullRounds {
 			break
 		}
 
-		log.Printf("Pull of %s failed (attempt %d/%d), retrying: %v", image, attempt, dockerPullAttempts, lastErr)
+		log.Printf("Pull of %s failed on every registry (round %d/%d), retrying", name, round, dockerPullRounds)
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("pull %s: %w: last error: %v", image, ctx.Err(), lastErr)
-		case <-time.After(time.Duration(attempt) * dockerPullBackoff):
+			return "", fmt.Errorf("pull %s: %w: last error: %v", name, ctx.Err(), lastErr)
+		case <-time.After(time.Duration(round) * dockerPullBackoff):
 		}
 	}
 
-	return fmt.Errorf("pull %s after %d attempts: %w", image, dockerPullAttempts, lastErr)
+	return "", fmt.Errorf("pull %s from every registry after %d rounds: %w", name, dockerPullRounds, lastErr)
 }
 
 func dockerRunDetached(ctx context.Context, options []string, image string, command ...string) (*dockerContainer, error) {

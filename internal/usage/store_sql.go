@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	usageInsertColumnCount = 23
+	usageInsertColumnCount = 24
 
 	// Bind-parameter ceilings per statement: SQLite's default
 	// SQLITE_MAX_VARIABLE_NUMBER and PostgreSQL's wire-protocol limit.
@@ -33,6 +33,9 @@ type SQLStore struct {
 	recalculationBatchSize int
 	stopCleanup            chan struct{}
 	closeOnce              sync.Once
+
+	// stopIndexBuild stops the background PostgreSQL index build, if any.
+	stopIndexBuild func()
 }
 
 // usageTable is the usage table as both stores have always created it. The id
@@ -50,6 +53,7 @@ const usageTable = `
 		endpoint TEXT NOT NULL,
 		user_path TEXT,
 		session_id TEXT,
+		auth_key_id TEXT,
 		cache_type TEXT,
 		input_tokens INTEGER NOT NULL DEFAULT 0,
 		output_tokens INTEGER NOT NULL DEFAULT 0,
@@ -73,6 +77,7 @@ var usageMigrations = []string{
 	"ALTER TABLE usage ADD COLUMN labels " + sqlx.TypeJSON,
 	"ALTER TABLE usage ADD COLUMN rewrite_tokens_saved INTEGER NOT NULL DEFAULT 0",
 	"ALTER TABLE usage ADD COLUMN rewrite_cost_saved " + sqlx.TypeFloat,
+	"ALTER TABLE usage ADD COLUMN auth_key_id TEXT",
 }
 
 var usageIndexes = []string{
@@ -94,23 +99,13 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 	if db == nil {
 		return nil, fmt.Errorf("database connection is required")
 	}
-	dialect := usageDialectFor(db.Dialect())
-
-	if err := db.Schema(ctx, fmt.Sprintf(usageTable, dialect.idType)); err != nil {
-		return nil, fmt.Errorf("failed to create usage table: %w", err)
-	}
-	if err := sqlx.AddColumns(ctx, db, usageMigrations...); err != nil {
-		return nil, fmt.Errorf("failed to migrate usage table: %w", err)
-	}
-	for _, index := range append(append([]string(nil), usageIndexes...), dialect.indexes...) {
-		if err := db.Schema(ctx, index); err != nil {
-			slog.Warn("failed to create index", "error", err)
-		}
+	if err := ensureUsageSchema(ctx, db); err != nil {
+		return nil, err
 	}
 
 	store := &SQLStore{
 		db:                     db,
-		dialect:                dialect,
+		dialect:                usageDialectFor(db.Dialect()),
 		retentionDays:          retentionDays,
 		recalculationBatchSize: defaultRecalculationBatchSize,
 		stopCleanup:            make(chan struct{}),
@@ -119,6 +114,24 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 		go storage.RunCleanupLoop(store.stopCleanup, CleanupInterval, store.cleanup)
 	}
 	return store, nil
+}
+
+// ensureUsageSchema creates the usage table and brings an existing one up to
+// the current columns and indexes. It is idempotent.
+func ensureUsageSchema(ctx context.Context, db sqlx.DB) error {
+	dialect := usageDialectFor(db.Dialect())
+	if err := db.Schema(ctx, fmt.Sprintf(usageTable, dialect.idType)); err != nil {
+		return fmt.Errorf("failed to create usage table: %w", err)
+	}
+	if err := sqlx.AddColumns(ctx, db, usageMigrations...); err != nil {
+		return fmt.Errorf("failed to migrate usage table: %w", err)
+	}
+	for _, index := range append(append([]string(nil), usageIndexes...), dialect.indexes...) {
+		if err := db.Schema(ctx, index); err != nil {
+			slog.Warn("failed to create index", "error", err)
+		}
+	}
+	return nil
 }
 
 // WriteBatch inserts usage entries, skipping ids that are already stored.
@@ -156,7 +169,7 @@ const usageInsertPrefix = `
 		INSERT INTO usage (id, request_id, provider_id, timestamp, model, provider, provider_name,
 			endpoint, user_path, session_id, cache_type, labels, input_tokens, output_tokens, total_tokens,
 			rewrite_tokens_saved, rewrite_cost_saved, raw_data,
-			input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat)
+			input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat, auth_key_id)
 		VALUES `
 
 const usageInsertSuffix = `
@@ -207,6 +220,7 @@ func buildUsageInsert(dialect sqlx.Dialect, entries []*UsageEntry) (string, []an
 			entry.TotalCost,
 			entry.CostSource,
 			entry.CostsCalculationCaveat,
+			entry.AuthKeyID,
 		)
 	}
 
@@ -222,6 +236,9 @@ func (s *SQLStore) Flush(_ context.Context) error {
 // Close stops the cleanup goroutine. The database is owned by the storage
 // layer and stays open. Safe to call multiple times.
 func (s *SQLStore) Close() error {
+	if s.stopIndexBuild != nil {
+		s.stopIndexBuild()
+	}
 	if s.retentionDays > 0 && s.stopCleanup != nil {
 		s.closeOnce.Do(func() {
 			close(s.stopCleanup)

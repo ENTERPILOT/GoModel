@@ -3,6 +3,7 @@ package usage
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -22,8 +23,9 @@ func (d usageDialect) usageConditionsWithUserPathExpr(params UsageQueryParams, u
 		return nil, nil, err
 	}
 	if userPath != "" {
-		conditions = append(conditions, "("+userPathExpr+" = ? OR "+userPathExpr+" LIKE ? ESCAPE '\\')")
-		args = append(args, userPath, usageUserPathSubtreePattern(userPath))
+		condition, conditionArgs := sqlutil.UserPathSubtreeCondition(userPathExpr, userPath)
+		conditions = append(conditions, condition)
+		args = append(args, conditionArgs...)
 	}
 	if params.Model != "" {
 		conditions = append(conditions, "model = ?")
@@ -33,6 +35,10 @@ func (d usageDialect) usageConditionsWithUserPathExpr(params UsageQueryParams, u
 		conditions = append(conditions, "session_id = ?")
 		args = append(args, params.SessionID)
 	}
+	if params.AuthKeyID != "" {
+		conditions = append(conditions, "auth_key_id = ?")
+		args = append(args, params.AuthKeyID)
+	}
 	if params.Provider != "" {
 		conditions = append(conditions, "(provider = ? OR provider_name = ?)")
 		args = append(args, params.Provider, params.Provider)
@@ -40,6 +46,17 @@ func (d usageDialect) usageConditionsWithUserPathExpr(params UsageQueryParams, u
 	if params.Label != "" {
 		conditions = append(conditions, d.labelMatch)
 		args = append(args, params.Label)
+	}
+	if len(params.Endpoints) > 0 {
+		conditions = append(conditions, "endpoint IN ("+strings.TrimSuffix(strings.Repeat("?,", len(params.Endpoints)), ",")+")")
+		for _, endpoint := range params.Endpoints {
+			args = append(args, endpoint)
+		}
+	}
+	if len(params.Operations) > 0 {
+		condition, opArgs := operationCondition(params.Operations)
+		conditions = append(conditions, condition)
+		args = append(args, opArgs...)
 	}
 	if condition := cacheModeCondition(params.CacheMode); condition != "" {
 		conditions = append(conditions, condition)
@@ -107,7 +124,7 @@ func scanUsageLogEntries(rows sqlx.Rows) ([]UsageLogEntry, error) {
 		var providerName, userPath, sessionID, cacheType, labelsJSON, rawDataJSON *string
 		if err := rows.Scan(&e.ID, &e.RequestID, &e.ProviderID, &ts, &e.Model, &e.Provider, &providerName, &e.Endpoint, &userPath, &sessionID, &cacheType, &labelsJSON,
 			&e.InputTokens, &e.OutputTokens, &e.TotalTokens, &e.InputCost, &e.OutputCost, &e.TotalCost, &e.CostSource, &rawDataJSON, &e.CostsCalculationCaveat,
-			&e.RewriteTokensSaved, &e.RewriteCostSaved); err != nil {
+			&e.RewriteTokensSaved, &e.RewriteCostSaved, &e.AuthKeyID); err != nil {
 			return nil, fmt.Errorf("failed to scan usage log row: %w", err)
 		}
 		if ts.Valid {

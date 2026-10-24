@@ -43,6 +43,13 @@ func (b *bootstrap) initStorage() error {
 	app.storage = sharedStorage
 	app.register(subsystemStorage, ownedByShutdown, sharedStorage.Close)
 
+	// Dashboard-managed secrets are sealed with the database's data keys;
+	// every store that holds one is built after this point.
+	app.secrets, err = openSecretBox(b.ctx, sharedStorage, b.cfg.AppConfig)
+	if err != nil {
+		return fmt.Errorf("failed to load encryption keys: %w", err)
+	}
+
 	var registeredSettings []ext.RuntimeSetting
 	if b.cfg.Extensions != nil {
 		registeredSettings = b.cfg.Extensions.Settings()
@@ -123,6 +130,19 @@ func (b *bootstrap) initProviders() error {
 	}
 	app.providers = providerResult
 	app.register(subsystemProviders, ownedByShutdown, app.providers.Close)
+
+	// Secret references were all resolved by now (config, then provider env
+	// vars), so the watcher compares against everything this generation uses.
+	if secrets := b.cfg.AppConfig.Secrets; secrets != nil {
+		app.secretRotation = &secretRotation{
+			secrets:  secrets,
+			planKeys: providerKeyPlanner(providerResult),
+			pinned:   []string{semanticEmbedderProvider(b.appCfg)},
+			reload:   b.cfg.RequestReload,
+		}
+		// Started by startServer, once this generation serves.
+		app.register(subsystemSecretRotation, ownedByShutdown, app.secretRotation.Close)
+	}
 	return nil
 }
 

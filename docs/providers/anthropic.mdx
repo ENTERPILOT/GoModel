@@ -244,6 +244,18 @@ Strict tool schemas are held to the same limits as structured output, so GoModel
 adapts them with the same rules as in [Structured output](#structured-output).
 Tools without `strict` keep their schema exactly as sent.
 
+## Allowed tools
+
+Anthropic cannot limit a turn to a subset of the declared tools. For a
+`tool_choice` of type `allowed_tools`, GoModel sends only the listed functions,
+with `tool_choice: any` when the mode is `required` and `auto` otherwise. On
+models that do not accept forced tool use, `required` becomes `auto` plus a
+system instruction instead; see
+[Forced tool choice on Fable 5.1](#forced-tool-choice-on-fable-51). A subset
+that names no declared function is rejected with a 400.
+
+`allowed_tools` exists so a client can send the same tool list on every turn and keep its prompt cache. Narrowing changes the tool definitions sent upstream, and on Claude models they come before the system prompt in the cached prefix, so a subset that changes between turns invalidates the cache.
+
 ## Verbosity
 
 OpenAI's `verbosity` (and `text.verbosity` on `/v1/responses`) has no Anthropic

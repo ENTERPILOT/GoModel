@@ -3,10 +3,11 @@ package pluginapi
 import "fmt"
 
 // TextTarget locates one piece of editable text: a text part of a prompt
-// message, a text part inside a tool result, or a text part of a completion
-// choice. Plugins that scan or rewrite text list targets with
-// [Prompt.TextTargets] or [Completion.TextTargets] and write back with the
-// matching SetTargetText, instead of walking parts by hand.
+// message, a text part inside a tool result, a text part of a completion
+// choice, or a reasoning part of either. Plugins that scan or rewrite text
+// list targets with [Prompt.TextTargets] or [Completion.TextTargets] (and
+// the ReasoningTargets of each) and write back with the matching
+// SetTargetText, instead of walking parts by hand.
 type TextTarget struct {
 	// MessageID is the prompt message holding the text. Empty for a
 	// completion target.
@@ -26,6 +27,9 @@ type TextTarget struct {
 	// ResultPart is the index in ToolResult.Parts of the text part when
 	// CallID is set.
 	ResultPart int
+	// Reasoning marks a reasoning part (Part is its index), listed by
+	// ReasoningTargets.
+	Reasoning bool
 	// Text is the text as it was when the target was listed.
 	Text string
 }
@@ -60,10 +64,32 @@ func (p *Prompt) TextTargets(roles ...Role) []TextTarget {
 	return out
 }
 
-// SetTargetText replaces the text of a target listed by [Prompt.TextTargets].
-// It reads the current state of the message, so successive edits to
-// different text parts of one tool result compose.
+// ReasoningTargets lists every reasoning part of the messages with one of
+// the given roles (all roles when none is given), in conversation order:
+// the reasoning an assistant turn carried when the client replays it (chat
+// reasoning_content or reasoning).
+func (p *Prompt) ReasoningTargets(roles ...Role) []TextTarget {
+	var out []TextTarget
+	for _, m := range p.Messages {
+		if len(roles) > 0 && !containsRole(roles, m.Role) {
+			continue
+		}
+		for i, part := range m.Parts {
+			if part.Kind == PartReasoning {
+				out = append(out, TextTarget{MessageID: m.ID, Role: m.Role, Part: i, Reasoning: true, Text: part.Text})
+			}
+		}
+	}
+	return out
+}
+
+// SetTargetText replaces the text of a target listed by [Prompt.TextTargets]
+// or [Prompt.ReasoningTargets]. It reads the current state of the message,
+// so successive edits to different text parts of one tool result compose.
 func (p *Prompt) SetTargetText(t TextTarget, text string) error {
+	if t.Reasoning {
+		return p.SetReasoning(t.MessageID, t.Part, text)
+	}
 	if t.CallID == "" {
 		return p.SetText(t.MessageID, t.Part, text)
 	}
@@ -103,8 +129,24 @@ func (c *Completion) TextTargets() []TextTarget {
 	return out
 }
 
+// ReasoningTargets lists every reasoning part of every choice, in order.
+func (c *Completion) ReasoningTargets() []TextTarget {
+	var out []TextTarget
+	for i, choice := range c.Choices {
+		for j, part := range choice.Message.Parts {
+			if part.Kind == PartReasoning {
+				out = append(out, TextTarget{Choice: i, Role: RoleAssistant, Part: j, Reasoning: true, Text: part.Text})
+			}
+		}
+	}
+	return out
+}
+
 // SetTargetText replaces the text of a target listed by
-// [Completion.TextTargets].
+// [Completion.TextTargets] or [Completion.ReasoningTargets].
 func (c *Completion) SetTargetText(t TextTarget, text string) error {
+	if t.Reasoning {
+		return c.SetReasoning(t.Choice, t.Part, text)
+	}
 	return c.SetText(t.Choice, t.Part, text)
 }

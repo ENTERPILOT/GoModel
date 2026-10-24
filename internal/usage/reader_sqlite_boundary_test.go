@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 )
@@ -688,4 +689,51 @@ func TestSQLiteReader_GetUsageLogFiltersByUserPathSubtree(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, log.Entries, 1)
 	require.Equal(t, "match-team", log.Entries[0].ID)
+}
+
+// User paths are case-sensitive, and SQLite's LIKE is not: a subtree filter
+// must not admit another tenant whose path differs only in case.
+func TestSQLiteReaderUserPathSubtreeIsCaseSensitive(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	require.NoError(t, err)
+
+	defer db.Close()
+
+	store, err := newSQLiteStore(db, 0)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	now := time.Date(2026, 3, 30, 10, 0, 0, 0, time.UTC)
+	var entries []*UsageEntry
+	for _, row := range []struct{ id, userPath string }{
+		{"acme", "/acme"},
+		{"acme-child", "/acme/app"},
+		{"upper", "/ACME"},
+		{"upper-child", "/ACME/secret"},
+	} {
+		entries = append(entries, &UsageEntry{
+			ID: row.id, RequestID: "req-" + row.id, ProviderID: "p-" + row.id, Timestamp: now,
+			Model: "gpt-5", Provider: "openai", Endpoint: "/v1/chat/completions", UserPath: row.userPath, TotalTokens: 1,
+		})
+	}
+	require.NoError(t, store.WriteBatch(ctx, entries))
+
+	reader, err := newSQLiteReader(db)
+	require.NoError(t, err)
+
+	log, err := reader.GetUsageLog(ctx, UsageLogParams{UserPath: "/acme", Limit: 10})
+	require.NoError(t, err)
+	var paths []string
+	for _, entry := range log.Entries {
+		paths = append(paths, entry.UserPath)
+	}
+	assert.ElementsMatch(t, []string{"/acme", "/acme/app"}, paths)
+
+	summary, err := reader.GetSummary(ctx, UsageQueryParams{
+		UserPath:  "/acme",
+		StartDate: now.Add(-24 * time.Hour),
+		EndDate:   now.Add(24 * time.Hour),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 2, summary.TotalRequests)
 }

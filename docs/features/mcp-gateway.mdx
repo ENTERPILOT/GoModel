@@ -57,11 +57,59 @@ the endpoint URL and a ready-to-copy client config.
 For client-specific commands, environment-variable authentication, and
 verification steps, see [Connect Claude Code and Codex](/mcp-proxy/claude-code-and-codex).
 
-Three ways to narrow what a client sees:
+Four ways to narrow what a client sees:
 
 - `/mcp` — everything the key's user path may see, namespaced.
 - `/mcp/{slug}` — a single server with its **original** tool names.
+- `/mcp/{name}` — a [virtual server](#group-servers-into-virtual-servers): a
+  named subset of servers, namespaced.
 - `X-MCP-Servers: github,jira` header — a comma-separated subset on `/mcp`.
+
+## Group servers into virtual servers
+
+A virtual server serves a fixed subset of your MCP servers at its own URL. Use
+one for clients that accept only a URL and no custom headers, or to hand each
+team or agent a curated set.
+
+Create one on the **MCP Servers** page with **Add Virtual Server**: pick a
+name, the member servers, and optionally the tool list mode. Changes apply
+immediately. To manage them as code, declare them in config instead:
+
+```yaml
+mcp:
+  virtual_servers:
+    coding:
+      description: Code review tools
+      servers: [github, linear, sentry]
+      tool_discovery: search # optional; default: mcp.tool_discovery
+```
+
+Clients connect to `https://your-gateway/mcp/coding` and see tools namespaced
+as on `/mcp` (`github_create_issue`). The same map works as JSON in
+`MCP_VIRTUAL_SERVERS`.
+
+- **It only narrows.** Every member keeps its `user_paths` and tool filters, so
+  a key that cannot see `github` does not see it through `coding` either.
+  `X-MCP-Servers` narrows a virtual server further.
+- **Names share `/mcp/{name}` with server slugs.** Startup fails if a virtual
+  server in config is named after a server in config, and the dashboard
+  rejects a new server or virtual server whose name the other already uses. If
+  a server and a virtual server end up with the same name anyway (for example,
+  config added after a dashboard entry), the server keeps the URL and the
+  virtual server is not served; the log and the dashboard say so.
+- **Config entries win.** A virtual server declared in config hides a
+  dashboard one with the same name and is read-only in the dashboard.
+- **Missing members are skipped.** The dashboard only offers existing servers,
+  but a member deleted later, or one named in config before it exists, is
+  skipped with a warning and flagged on the **MCP Servers** page.
+
+The **Connect a client** panel can build the client config for each virtual
+server.
+
+With several gateway instances on one database, a dashboard change applies at
+once on the instance that saved it. The others pick it up on their next
+background refresh (`CACHE_REFRESH_INTERVAL`, default 1 hour) or a runtime
+refresh from the dashboard. Dashboard-added MCP servers propagate the same way.
 
 ## Search tools instead of listing them
 

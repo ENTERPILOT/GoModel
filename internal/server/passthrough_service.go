@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+
 	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
@@ -18,6 +20,19 @@ type passthroughService struct {
 	pricingResolver              usage.PricingResolver
 	normalizePassthroughV1Prefix bool
 	enabledPassthroughProviders  map[string]struct{}
+}
+
+// validatePassthroughAccess checks a body that names a model like any model
+// call. A request that names none, such as GET /files, acts on the whole
+// provider account, so the caller must be granted the whole provider.
+func (s *passthroughService) validatePassthroughAccess(ctx context.Context, info *core.PassthroughRouteInfo) error {
+	if s.modelAuthorizer == nil {
+		return nil
+	}
+	if selector, ok := passthroughAccessSelector(s.provider, info); ok {
+		return s.modelAuthorizer.ValidateModelAccess(ctx, selector)
+	}
+	return s.modelAuthorizer.ValidateProviderAccess(ctx, info.ProviderName)
 }
 
 func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
@@ -38,12 +53,8 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 	if info.ModelAmbiguous {
 		return handleError(c, core.NewInvalidRequestError("passthrough request body must name the model once; the model field is repeated", nil))
 	}
-	if s.modelAuthorizer != nil {
-		if selector, ok := passthroughAccessSelector(s.provider, info); ok {
-			if err := s.modelAuthorizer.ValidateModelAccess(c.Request().Context(), selector); err != nil {
-				return handleError(c, err)
-			}
-		}
+	if err := s.validatePassthroughAccess(c.Request().Context(), info); err != nil {
+		return handleError(c, err)
 	}
 	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRoute{provider: info.ProviderName, model: info.Model})
 	if err != nil {

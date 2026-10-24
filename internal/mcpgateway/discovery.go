@@ -34,15 +34,15 @@ const (
 )
 
 // discoveryMode resolves the session's discovery mode from the header, falling
-// back to the configured default.
-func (s *Service) discoveryMode(r *http.Request) bool {
+// back to the endpoint's default.
+func discoveryMode(r *http.Request, fallback bool) bool {
 	switch strings.ToLower(strings.TrimSpace(r.Header.Get(ToolDiscoveryHeader))) {
 	case config.MCPToolDiscoverySearch:
 		return true
 	case config.MCPToolDiscoveryOff:
 		return false
 	}
-	return s.searchDiscovery
+	return fallback
 }
 
 // indexedTool is one searchable tool with its pre-tokenized fields.

@@ -21,7 +21,9 @@ type usageDialect struct {
 	// maxBindParameters caps the placeholders in one statement.
 	maxBindParameters int
 
-	// indexes are created on top of usageIndexes.
+	// indexes are created on top of usageIndexes. PostgreSQL leaves out
+	// idx_usage_auth_key_id: startAuthKeyIndexBuild builds it CONCURRENTLY
+	// in the background, since it lands on tables that already hold history.
 	indexes []string
 
 	// timeExpr is the timestamp column as a comparable, orderable value, and
@@ -74,6 +76,7 @@ func usageDialectFor(dialect sqlx.Dialect) usageDialect {
 		maxBindParameters: sqliteMaxBindParameters,
 		indexes: []string{
 			"CREATE INDEX IF NOT EXISTS idx_usage_timestamp_epoch ON usage(" + sqliteTimestampEpochExpr + ")",
+			"CREATE INDEX IF NOT EXISTS idx_usage_auth_key_id ON usage(auth_key_id)",
 		},
 		timeExpr:    sqliteTimestampEpochExpr,
 		timeArg:     func(t time.Time) any { return t.UTC().Unix() },

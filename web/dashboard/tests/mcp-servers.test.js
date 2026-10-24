@@ -38,6 +38,12 @@ import {
   mcpClientConfig,
   mcpEndpointIsInsecure,
   mcpGatewayEndpoint,
+  mcpServedVirtualServers,
+  mcpVirtualServerEndpoint,
+  buildMcpVirtualServerPayload,
+  mcpVirtualMemberOptions,
+  mcpVirtualServerFormFromVirtual,
+  toggleMcpVirtualMember,
   normalizeMcpToolDiscovery,
 } from "../src/pages/mcp-servers/mcp-servers.js";
 
@@ -660,4 +666,139 @@ test("mcpEndpointIsInsecure flags plain HTTP only off loopback", () => {
   assert.equal(mcpEndpointIsInsecure("http://127.0.0.1:8080/mcp"), false);
   assert.equal(mcpEndpointIsInsecure("http://[::1]:8080/mcp"), false);
   assert.equal(mcpEndpointIsInsecure("not a url"), false);
+});
+
+test("mcpVirtualServerEndpoint appends the virtual server name to /mcp", () => {
+  assert.equal(mcpVirtualServerEndpoint("https://gw/base/mcp", "coding"), "https://gw/base/mcp/coding");
+});
+
+test("mcpServedVirtualServers drops virtual servers a same-named server shadows", () => {
+  assert.deepEqual(
+    mcpServedVirtualServers([
+      { name: "coding", servers: ["github"] },
+      { name: "notion", servers: ["github"], conflict: "not served" },
+      { servers: ["github"] },
+    ]).map((virtual) => virtual.name),
+    ["coding"],
+  );
+  assert.deepEqual(mcpServedVirtualServers(null), []);
+});
+
+test("mcpClientConfig names a virtual server's entry after it", () => {
+  const servers = JSON.parse(mcpClientConfig("https://gw/mcp/coding", "off", "off", "coding")).mcpServers;
+  assert.deepEqual(Object.keys(servers), ["gomodel-coding"]);
+  assert.equal(servers["gomodel-coding"].url, "https://gw/mcp/coding");
+});
+
+// Regression: a virtual-list response landing after the page was left, or
+// after the main list was cleared, put stale virtual servers back.
+test("a stale virtual-server response cannot restore the list", () => {
+  const SRC = fileURLToPath(new URL("../src", import.meta.url));
+  const store = readFileSync(join(SRC, "pages/mcp-servers/mcpServers.svelte.js"), "utf8");
+
+  const fetchVirtual = (store.match(/async fetchVirtualServers\(\) \{[\s\S]*?\n  \}/) || [""])[0];
+  assert.ok(fetchVirtual, "fetchVirtualServers missing");
+  // Each expression must exist: indexOf's -1 would pass an order check.
+  const assertBefore = (first, second, message) => {
+    const firstIndex = fetchVirtual.indexOf(first);
+    const secondIndex = fetchVirtual.indexOf(second);
+    assert.ok(firstIndex >= 0 && secondIndex >= 0 && firstIndex < secondIndex, message);
+  };
+  assertBefore("const seq = ++this.#virtualSeq;", "await ", "the sequence must be taken before the request");
+  assertBefore("seq !== this.#virtualSeq", "this.virtualServers =", "a retired response must be dropped before it is applied");
+
+  const clear = store.match(/#clearVirtualServers\(\) \{[\s\S]*?\n  \}/);
+  assert.ok(clear, "#clearVirtualServers missing");
+  assert.match(clear[0], /this\.#virtualSeq \+= 1;/);
+  assert.equal(
+    store.match(/this\.virtualServers = \[\];/g).length,
+    1,
+    "lists are cleared only through #clearVirtualServers",
+  );
+
+  const stop = store.match(/stopPolling\(\) \{[\s\S]*?\n  \}/);
+  assert.match(stop[0], /this\.#virtualSeq \+= 1;/, "leaving the page retires the request");
+
+  // A main-list response landing after the page was left must not start one.
+  assert.match(
+    store,
+    /if \(!background && generation === this\.#pollGeneration\) \{\s*\n\s*void this\.fetchVirtualServers\(\);/,
+    "fetchVirtualServers must only start for the current page generation",
+  );
+});
+
+test("buildMcpVirtualServerPayload validates and normalizes the form", () => {
+  const servers = [{ slug: "github", name: "GitHub" }, { slug: "jira", name: "Jira" }];
+  const virtuals = [{ name: "research", servers: ["jira"] }];
+  const build = (form, mode = "create") => buildMcpVirtualServerPayload(form, mode, virtuals, servers);
+
+  assert.deepEqual(build({ name: " Coding ", description: " tools ", servers: ["github", "github", "jira"], tool_discovery: "search" }), {
+    payload: { name: "coding", description: "tools", servers: ["github", "jira"], tool_discovery: "search" },
+  });
+  assert.equal(build({ name: "coding", servers: ["github"], tool_discovery: "bogus" }).payload.tool_discovery, "");
+
+  assert.ok(build({ name: "", servers: ["github"] }).error, "name is required");
+  assert.ok(build({ name: "my tools", servers: ["github"] }).error, "name must be a slug");
+  assert.ok(build({ name: "research", servers: ["github"] }).error, "an existing virtual server name is taken on create");
+  assert.ok(build({ name: "github", servers: ["jira"] }).error, "a server slug is taken");
+  assert.ok(build({ name: "coding", servers: [] }).error, "at least one member is required");
+  assert.equal(build({ name: "research", servers: ["github"] }, "edit").error, undefined, "editing keeps the name");
+});
+
+test("buildMcpServerPayload rejects a new slug a virtual server uses", () => {
+  const form = { name: "Coding", slug: "coding", url: "https://mcp.example.com/mcp", headers: [], tool_names: [] };
+  assert.ok(buildMcpServerPayload(form, "create", [], [{ name: "coding" }]).error);
+  assert.equal(buildMcpServerPayload(form, "edit", [], [{ name: "coding" }]).error, undefined);
+});
+
+test("virtual member options keep a selected member that no longer matches a server", () => {
+  const options = mcpVirtualMemberOptions([{ slug: "github", name: "GitHub" }], ["github", "gone"]);
+  assert.deepEqual(options, [
+    { slug: "github", name: "GitHub", missing: false },
+    { slug: "gone", name: "gone", missing: true },
+  ]);
+  assert.deepEqual(toggleMcpVirtualMember(["github"], "jira"), ["github", "jira"]);
+  assert.deepEqual(toggleMcpVirtualMember(["github", "jira"], "github"), ["jira"]);
+});
+
+test("mcpVirtualServerFormFromVirtual keeps the stored discovery setting, not the effective one", () => {
+  const form = mcpVirtualServerFormFromVirtual({ name: "coding", servers: ["github"], tool_discovery: "search", configured_tool_discovery: "" });
+  assert.deepEqual(form, { name: "coding", description: "", servers: ["github"], tool_discovery: "" });
+});
+
+// Regression: a failed virtual-server load cleared the rows, so the section
+// claimed there were no virtual servers.
+test("a failed virtual-server load is reported, not shown as an empty list", () => {
+  const SRC = fileURLToPath(new URL("../src", import.meta.url));
+  const store = readFileSync(join(SRC, "pages/mcp-servers/mcpServers.svelte.js"), "utf8");
+  const list = readFileSync(join(SRC, "pages/mcp-servers/McpVirtualServerList.svelte"), "utf8");
+
+  const fetchVirtual = (store.match(/async fetchVirtualServers\(\) \{[\s\S]*?\n  \}/) || [""])[0];
+  const errorBranch = fetchVirtual.match(/if \(outcome\.status === "error"\) \{[\s\S]*?\n    \}/);
+  assert.ok(errorBranch, "fetchVirtualServers must handle a failed load");
+  assert.match(errorBranch[0], /this\.virtualError = /);
+  assert.match(errorBranch[0], /return;/);
+  assert.equal(errorBranch[0].includes("this.virtualServers ="), false, "a failed load keeps the last known list");
+
+  assert.match(list, /\{#if mcpServers\.virtualError\}/, "the section shows the load error");
+  assert.match(list, /\{#if !mcpServers\.virtualError\}\s*<p class="empty-state">/, "the empty state is hidden while the load failed");
+});
+
+// Regression: a slow virtual-server save closed whatever editor was open when
+// it finished, discarding edits the operator had started since.
+test("a virtual-server save only closes the editor that submitted it", () => {
+  const SRC = fileURLToPath(new URL("../src", import.meta.url));
+  const store = readFileSync(join(SRC, "pages/mcp-servers/mcpServers.svelte.js"), "utf8");
+  const method = (name) => (store.match(new RegExp(`\\n  ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n  \\}`)) || [""])[0];
+
+  for (const name of ["openVirtualCreate", "openVirtualEdit", "closeVirtualForm"]) {
+    assert.match(method(name), /this\.#virtualFormSeq \+= 1;/, `${name} must start a new editor session`);
+  }
+
+  const submit = (store.match(/async submitVirtualForm\(\) \{[\s\S]*?\n  \}/) || [""])[0];
+  const capture = submit.indexOf("const formSeq = this.#virtualFormSeq;");
+  assert.ok(capture >= 0 && capture < submit.indexOf("await "), "the session is captured before the request");
+  assert.match(submit, /const sameEditor = formSeq === this\.#virtualFormSeq;/);
+  assert.match(submit, /if \(sameEditor\) \{\s*\n\s*this\.closeVirtualForm\(\);/, "only the submitting editor is closed");
+  assert.equal(/\n      this\.closeVirtualForm\(\);/.test(submit), false, "no unconditional close remains");
 });

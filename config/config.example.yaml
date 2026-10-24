@@ -2,6 +2,12 @@
 # Copy to config/config.yaml to customize.
 # Environment variables always override values in this file.
 # All settings have sensible defaults — no config file is required.
+#
+# Any string value can be a secret reference, resolved after the file is read:
+#   ${env:NAME}         the variable's value; unset or empty stops startup
+#   ${file:/abs/path}   the file's contents minus one trailing newline (Docker/Kubernetes secrets)
+# References may sit inside a value ("Bearer ${env:TOKEN}"); write $${ for a literal ${.
+# The plain ${NAME} / ${NAME:-default} form still works and leaves an unset NAME in place.
 
 server:
   port: "8080"
@@ -55,6 +61,11 @@ models:
 #     - header: X-Internal-Routing
 #       do_not_pass: true # stripped before forwarding to the provider
 #       delimiter: ";"
+#   # LiteLLM tags (x-litellm-tags header, body "tags", list metadata.tags) become
+#   # labels and are stripped before the provider; at most 32 per request, tags
+#   # over 128 characters are dropped. Clients choose them, so they can charge any
+#   # label budget they name: set false when label budgets must hold per team.
+#   litellm_tags_enabled: true # env: LITELLM_TAGS_ENABLED
 
 # Session keeping: identify which requests belong to one client session, for
 # sticky virtual-model load balancing and audit-log session grouping. Everything
@@ -159,6 +170,14 @@ models:
 #       args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
 #       env: # subprocesses inherit only PATH/HOME/TMPDIR/USER/LANG — never the
 #         SOME_TOKEN: "${SOME_TOKEN}" # gateway's API keys; pass extras here explicitly
+#   # env: MCP_VIRTUAL_SERVERS. Each virtual server serves a subset of the servers
+#   # above at /mcp/{name}, with namespaced tool names. Names must not match a
+#   # server slug. It only narrows: every member keeps its user-path and tool rules.
+#   virtual_servers:
+#     coding:
+#       description: Code review tools
+#       servers: [github, linear]
+#       tool_discovery: search # optional; default: mcp.tool_discovery
 
 cache:
   model:
@@ -218,6 +237,10 @@ storage:
   mongodb:
     url: "mongodb://localhost:27017"
     database: "gomodel"
+  # Encrypts dashboard-managed secrets at rest. Prefer GOMODEL_ENCRYPTION_KEY
+  # from a secret manager over writing the key here.
+  # encryption_key: "${GOMODEL_ENCRYPTION_KEY}"
+  # encryption_key_previous: "${GOMODEL_ENCRYPTION_KEY_PREVIOUS}" # only during a key rotation
 
 # Where media files go: audio and images captured for the audit log (see
 # logging.log_audio_bodies / log_image_bodies). Metadata stays in storage
@@ -272,6 +295,14 @@ budgets:
       limits:
         - period: "monthly"
           amount: 500.00
+  providers:
+    # Caps one provider instance's spend across every user path and label;
+    # failover skips a provider whose budget is spent.
+    # Env equivalent: SET_PROVIDER_BUDGET_OPENAI="daily=100"
+    - name: "openai"
+      limits:
+        - period: "daily"
+          amount: 100.00
 
 rate_limits:
   enabled: true # env: RATE_LIMITS_ENABLED; with no configured rules this has no effect
@@ -491,7 +522,7 @@ failover:
 providers:
   openai:
     type: openai
-    api_key: "sk-..."
+    api_key: "sk-..." # or a secret reference: ${file:/run/secrets/openai}
     # Identified sessions stay on one key by default, preserving provider prompt
     # cache affinity while still spreading different sessions across keys.
     # Equivalent env vars: OPENAI_API_KEY_2, OPENAI_API_KEY_3, ...
@@ -611,10 +642,11 @@ providers:
     type: jev
     api_key: "${JEV_API_KEY}"
     # base_url defaults to "https://api.typesafe.ai". TypeSafe's System One
-    # API is a decision API with no OpenAI-compatible surface: configuring
-    # this provider (or openrouter, which serves Jev natively) enables
-    # POST /v1/systemone, which forwards requests natively (point the
-    # TypeSafe SDK at the gateway root). A self-hosted Kev
+    # API is a decision API: configuring this provider enables
+    # POST /v1/decisions, which answers OpenAI Decisions requests by
+    # translating them to System One, and POST /v1/systemone (also enabled
+    # by openrouter, which serves Jev natively), which forwards System One
+    # requests natively (point the TypeSafe SDK at the gateway root). A self-hosted Kev
     # server speaks the same API without authentication: set base_url
     # (e.g. "http://localhost:8009") and omit api_key. Name it "kev" to see
     # that name in logs and usage; no separate provider type is needed.
