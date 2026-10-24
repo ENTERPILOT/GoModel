@@ -87,7 +87,10 @@ await writeFile("speech.wav", Buffer.from(await speech.arrayBuffer()));
 
 </CodeGroup>
 
-`model`、`input` 和 `voice` 为必填项。可选字段 `instructions`、`response_format`
+`model` 和 `input` 为必填项。`voice` 可选：省略时，OpenAI 和 Azure OpenAI 使用
+`alloy`，其他提供商使用各自的默认声音。ElevenLabs 和 MiniMax 没有默认声音，需要提供
+声音 ID。声音名称因提供商而异，OpenAI 的 `alloy`/`nova`/… 仅适用于 OpenAI 和 Azure。
+可选字段 `instructions`、`response_format`
 （默认 `mp3`，另支持 `opus`、`aac`、`flac`、`wav`、`pcm`）和 `speed` 会转发给提供商。
 响应的 `Content-Type` 使用上游返回的值；若上游未返回，则回退为 `response_format`
 所对应的类型（例如 `wav` → `audio/wav`）。
