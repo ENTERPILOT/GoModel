@@ -457,7 +457,6 @@
   "overview_more": "Mehr",
   "overview_live_token_throughput": "Live-Token-Durchsatz",
   "overview_live_granularity": "Granularität des Live-Token-Durchsatzes",
-  "overview_waiting_live_requests": "Warte auf Live-Anfragen…",
   "overview_seconds": "Sekunden",
   "overview_minutes": "Minuten",
   "overview_hours": "Stunden",

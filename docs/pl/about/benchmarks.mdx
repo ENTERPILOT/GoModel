@@ -1,0 +1,129 @@
+---
+title: "Benchmarki"
+description: "Krótkie, aktualne podsumowanie wyników benchmarków GoModel z linkiem do pełnego opisu i narzędzi do ich odtworzenia."
+icon: "gauge"
+keywords: ["benchmarki", "benchmarks", "opóźnienie", "latency", "przepustowość", "throughput", "wydajność", "porównanie gatewayów", "gateway comparison"]
+---
+
+## Migawka benchmarku
+
+Ta strona to krótkie podsumowanie naszego najnowszego publicznego benchmarku: GoModel
+w porównaniu z **LiteLLM, Portkey i Bifrost**, wszystkie skierowane na ten sam
+natychmiast odpowiadający mockowy backend, dzięki czemu liczby odzwierciedlają narzut
+gatewaya, a nie opóźnienie modelu.
+
+Benchmark jest okresowo uruchamiany ponownie z repozytorium
+[ai-gateway-reproducible-benchmark](https://github.com/ENTERPILOT/ai-gateway-reproducible-benchmark),
+które przechowuje każde zarejestrowane uruchomienie oraz wykres zmian wyników
+w czasie. Pełny opis znajdziesz w artykule z czerwca 2026:
+[AI Gateway Benchmark 2026: GoModel vs LiteLLM, Portkey & Bifrost](https://enterpilot.io/blog/benchmarking-ai-gateways-gomodel-litellm-portkey-bifrost-june-2026/?utm_source=gomodel_docs).
+
+<Note>
+  Poniższa tabela pochodzi z uruchomienia z 20 sierpnia 2026 na AWS. Traktuj ją jako
+  dane, a nie dogmat. Wydajność gatewaya zależy od Twojego obciążenia, zestawu
+  providerów, konfiguracji wdrożenia i strojenia. Starsze uruchomienia (czerwiec i lipiec
+  2026 na tym samym sprzęcie, marzec 2026 tylko z LiteLLM na localhost) znajdziesz
+  w historii repozytorium i na blogu.
+</Note>
+
+## Co testowaliśmy
+
+Prosta konfiguracja, porównująca jak z jakim:
+
+- Jeden gateway naraz, w Dockerze, na AWS `c7i.large` (2 vCPU, 4 GiB), każdy
+  z najnowszego publicznego obrazu (`enterpilot/gomodel`, `litellm/litellm:main-stable`,
+  `portkeyai/gateway`, `maximhq/bifrost`). Wersja i digest obrazu zmierzone w każdym
+  uruchomieniu są zapisane obok jego wyników w repozytorium.
+- Ten sam współdzielony mockowy backend dla wszystkich, więc mierzymy wyłącznie narzut gatewaya.
+- Sześć obciążeń: chat completions, Responses API i Anthropic messages –
+  każde w wersji ze streamingiem i bez.
+- `20,000` requestów na obciążenie przy współbieżności `10`, w pięciu próbach
+  w losowej kolejności (opóźnienie to mediana z nich).
+- Uczciwa konfiguracja: retry wyłączone dla wszystkich, circuit breaker GoModel wyłączony,
+  a LiteLLM uruchomiony w zalecanej konfiguracji z jednym workerem na rdzeń CPU.
+
+## W skrócie
+
+GoModel wypadł najlepiej we wszystkich wskaźnikach operacyjnych, na których zależy
+większości zespołów: najwęższy ogon opóźnień, najwyższa trwała przepustowość,
+najmniejszy obraz i zużycie pamięci oraz najszybszy zimny start.
+
+| Gateway | p50 (ms) | p99 (ms) | Przepustowość (req/s) | Szczytowe RAM | Obraz (skompresowany) | Zimny start |
+| --- | --- | --- | --- | --- | --- | --- |
+| **GoModel** | **`2.1`** | **`7.8`** | **`4,200`** | **`60 MB`** | **`14 MB`** | **`0.76 s`** |
+| Bifrost | `3.0` | `19.2` | `2,600` | `180 MB` | `80 MB` | `6.7 s` |
+| Portkey | `9.1` | `29.4` | `980` | `110 MB` | `58 MB` | `0.99 s` |
+| LiteLLM | `35.9` | `53.3` | `276` | `2.1 GB` | `354 MB` | `26.5 s` |
+
+Opóźnienie dotyczy chat completions bez streamingu (reprezentatywne). Przepustowość
+to trwałe tempo z osobnego testu ze zmienną współbieżnością. Rozmiar obrazu to
+skompresowany rozmiar pobierania.
+
+## Najważniejsze wnioski
+
+- GoModel ma zarówno najniższą medianę (`2.1 ms`), jak i najwęższy ogon (`7.8 ms`).
+- Obsługuje największy ruch na jednej maszynie (`~4,200 req/s`) i najefektywniej
+  wykorzystuje CPU: `42` req/s na 1% CPU przy trwałym obciążeniu, wobec `21` dla
+  Bifrost, `8` dla Portkey i `1.4` dla LiteLLM.
+- Najmniej waży przy dystrybucji i działaniu: `14 MB` skompresowanego obrazu i `60 MB`
+  RAM pod obciążeniem, gotowy do obsługi ruchu `0.76 s` po uruchomieniu.
+- LiteLLM, nawet w zalecanej konfiguracji z wieloma workerami, zużywa `~2.1 GB` RAM
+  i uruchamia się `~26 s` – to koszt Pythona na gorącej ścieżce.
+- Portkey nie obsłużył dialektu Anthropic messages w tej konfiguracji z jednym
+  providerem, więc obejmuje 4 z 6 obciążeń.
+
+## Odtwórz to samodzielnie
+
+Benchmark ma własne repozytorium,
+[ENTERPILOT/ai-gateway-reproducible-benchmark](https://github.com/ENTERPILOT/ai-gateway-reproducible-benchmark),
+razem z każdym zarejestrowanym uruchomieniem i wykresem zmian wyników w czasie.
+Jedno polecenie tworzy małą maszynę na AWS, uruchamia wszystkie cztery gatewaye
+z ich najnowszych publicznych obrazów Dockera na tym samym mockowym backendzie,
+zapisuje wyniki i samodzielnie usuwa infrastrukturę.
+
+<Warning>
+  To działa na **płatnej** infrastrukturze AWS, nie w ramach free tier. `c7i.large`
+  kosztuje około $0.09/godz. On-Demand w `us-east-1` (wolumen gp3 20 GiB i publiczny
+  adres IPv4 dodają kilka centów), a uruchomienie samo się usuwa po mniej więcej
+  90 minutach, więc dla bezpieczeństwa zaplanuj budżet **poniżej $1** na uruchomienie.
+  Jeśli przekażesz `KEEP=1` albo usuwanie infrastruktury się nie powiedzie, płacisz
+  dalej, dopóki nie usuniesz maszyny – upewnij się więc, że jej już nie ma.
+</Warning>
+
+```bash
+# Wymaga Terraform i danych uwierzytelniających AWS
+git clone https://github.com/ENTERPILOT/ai-gateway-reproducible-benchmark.git
+cd ai-gateway-reproducible-benchmark
+./run.sh
+```
+
+Wartości domyślne to `N=20000` requestów na obciążenie, `REPEATS=5` prób
+i współbieżność `C=10`; nadpisz je zmiennymi środowiskowymi, np. `N=5000 REPEATS=2 ./run.sh`
+dla szybszego, ale mniej dokładnego uruchomienia. `GOMODEL_SOURCE=../gomodel` testuje
+lokalny checkout zamiast opublikowanego obrazu.
+
+Takie uruchomienie mierzy obrazy, na które cztery tagi wskazują dzisiaj. Aby powtórzyć
+migawkę z 20 sierpnia 2026 na tych samych release'ach gatewayów, przekaż ich wersje:
+
+```bash
+GOMODEL_IMAGE=enterpilot/gomodel:0.1.79 \
+LITELLM_IMAGE=litellm/litellm:v1.97.0 \
+PORTKEY_IMAGE=portkeyai/gateway:1.15.2 \
+BIFROST_IMAGE=maximhq/bifrost:v1.6.11 \
+./run.sh
+```
+
+Każde zarejestrowane uruchomienie zapisuje zmierzone wersje i digesty obrazów w plikach
+`results/<run>/*_image.json`, więc każde wcześniejsze uruchomienie można powtórzyć w ten sam sposób.
+README repozytorium pokazuje też, jak uruchomić zestaw testowy na dowolnym hoście z Dockerem bez AWS.
+Do szybkiego lokalnego porównania tylko z LiteLLM nadal dostępny jest starszy zestaw dla localhost w
+[`docs/about/benchmark-tools/`](https://github.com/ENTERPILOT/GoModel/tree/main/docs/about/benchmark-tools).
+
+## Dlaczego ta strona jest krótka
+
+Ma szybko podać Ci wynik, wewnątrz dokumentacji produktu, bez pełnego artykułu.
+Opis, wykresy i szczegóły metodologii znajdziesz w
+[pełnym wpisie](https://enterpilot.io/blog/benchmarking-ai-gateways-gomodel-litellm-portkey-bifrost-june-2026/?utm_source=gomodel_docs).
+
+Żaden pojedynczy benchmark nie rozstrzyga kwestii dla każdego środowiska. Jeśli
+poważnie oceniasz gatewaye, odtwórz test na własnym ruchu i własnej infrastrukturze.

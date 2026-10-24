@@ -1,0 +1,157 @@
+---
+title: "用户路径"
+description: "使用 user_path 为密钥、模型访问、模型列表、工作流、用量和审计日志划定作用域。"
+icon: "route"
+keywords: ["user_path", "用户路径", "多租户", "作用域", "访问控制", "团队隔离", "multi-tenancy", "scoping", "access control", "team isolation"]
+---
+
+## 概览
+
+`user_path` 是调用方的规范化层级路径，例如
+`/team/alpha` 或 `/team/alpha/service`。
+
+GoModel 使用它将模型访问、工作流、预算、用量和审计数据限定在正确的团队、租户、服务或客户范围内。
+
+## API 密钥
+
+您可以在管理控制台中将用户路径绑定到托管 API 密钥：
+
+`API Keys -> Create API Key -> User Path`
+
+<img
+  src="/features/auth-keys-labels.png"
+  alt="GoModel 控制台的 API Keys 页面，其中 User Path 列显示 /agents/team1、/engineering/ai 和 /sales/john 等值"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+**API Keys** 页面会列出每个密钥绑定的 `user_path` 及其标签，方便您一眼确认某个密钥对应哪个子树。
+
+当请求使用该密钥时，GoModel 会将密钥的 `user_path` 作为该请求的有效用户路径。
+
+## HTTP 请求头
+
+客户端也可以直接发送用户路径：
+
+```http
+X-GoModel-User-Path: /team/alpha
+```
+
+请求头名称可以通过 `USER_PATH_HEADER` 或 `config.yaml` 中的
+`server.user_path_header` 配置。如果未设置，GoModel 使用
+`X-GoModel-User-Path`。
+
+如果 API 密钥有自己的 `user_path`，则以密钥为准。在工作流匹配、审计日志记录、用量追踪和模型访问检查运行之前，GoModel 会用密钥绑定的路径覆盖请求头中的值。
+
+## 访问作用域
+
+密钥绑定的 `user_path` 同时也是该密钥的**访问作用域**：即它可以读取和管理的子树。绑定到 `/team/alpha` 的密钥可以访问 `/team/alpha` 及其所有后代路径，但不能访问 `/team/beta`、`/team`，也不能访问未记录用户路径的行。请求头永远不会扩大作用域；它只决定请求被归属到哪个路径。
+
+| 凭据                                    | 作用域                       |
+| --------------------------------------- | ---------------------------- |
+| 主密钥                                  | 全局                         |
+| 没有 `user_path`（或为 `/`）的托管密钥  | 全局                         |
+| 绑定到 `/team/alpha` 的托管密钥         | `/team/alpha` 及其后代路径   |
+| SSO 或其他扩展身份                      | 其会话的用户路径，规则相同   |
+
+所有凭据都遵循同一规则：用户路径是您所代表的节点，您可以看到该节点及其下的所有内容。因此，绑定到
+`/users/alice` 的 SSO 会话只能管理该子树。如果扩展需要分配网关管理员，就将这些会话绑定到 `/`；团队管理员则绑定到团队根路径（例如 `/team/alpha`），与在该路径下创建 API 密钥的做法完全相同。
+
+作用域在两个地方生效：
+
+- **Admin API 和控制台。** 具有控制台访问权限且带有 `user_path` 的密钥是该子树的作用域管理员。参见
+  [作用域管理访问](/zh/advanced/admin-endpoints#作用域管理访问)。
+- `/v1` 生命周期端点上的**对象归属**，详见下文。
+
+## 对象归属
+
+Response、Conversation、Batch 和上传的文件都会记住创建它们时所使用的 `user_path`。按 ID 检索、列出、更新、取消或删除其中某个对象时，只有当该路径位于调用方的作用域内时才会成功；否则网关返回 `404`，与 ID 不存在时完全相同。引用其他子树中的 Conversation 或
+`previous_response_id` 的 `/v1/responses` 调用也会以同样的方式失败——包括那些自行解析 `previous_response_id` 的提供商。
+
+带作用域的凭据只能访问网关追踪的对象：网关没有记录的 ID 会被报告为不存在，`GET /v1/files` 会根据网关自身的记录（而非提供商）列出调用方被追踪的文件。全局凭据可以看到所有对象，包括在存储路径之前记录的旧数据行，并且对于未追踪的 ID 仍会回退到提供商查询。请使用持久化存储，以确保所有对象在重启后仍被追踪。
+
+## 模型访问
+
+模型访问策略默认启用。策略是一个没有目标的虚拟模型；它可以使用 `user_paths` 将某个选择器限制到一个子树，也可以被禁用以完全关闭该选择器。选择器可以指向：
+
+- `/`：所有提供商和模型
+- `{provider_name}/`：某个已配置的提供商
+- `{provider_name}/{model}`：某个提供商上的某个模型
+- 不带提供商名称的模型 ID
+
+例如：
+
+- 选择器：`openai/gpt-5`
+- `user_paths`：`["/team/alpha"]`
+
+这会允许 `/team/alpha` 及其后代路径（例如 `/team/alpha/service`）访问。
+
+在控制台中使用 `Models -> New virtual model` 管理这些规则：将
+**Target model** 留空，即可在 **Source** 选择器上创建访问策略。
+关于重定向（别名），请参阅[虚拟模型](/zh/features/virtual-models)。
+
+**Users** 页面从另一个角度回答同样的问题：某个组、用户或 API 密钥可以调用哪些模型。每个用户路径节点和每个托管 API 密钥都带有可选的
+`allowed_models` 列表；这些列表沿树向下取交集，因此子节点只能缩小其所在组允许的范围。参见[用户](/zh/features/users)。
+
+## 公开的模型
+
+`GET /v1/models` 同样使用有效的 `user_path`。
+
+这意味着，如果两个 API 密钥的用户路径对应不同的模型访问规则，它们看到的模型列表也会不同。
+
+## 工作流
+
+工作流也可以包含 `scope_user_path`，因此不同的团队或服务可以使用不同的预算、缓存、审计、用量、护栏和故障转移设置。
+
+您可以将用户路径与提供商和模型作用域组合使用，例如：
+
+- `/team/alpha`
+- `openai_primary` + `/team/alpha`
+- `openai_primary` + `gpt-5` + `/team/alpha`
+
+完整的匹配顺序参见[工作流](/zh/advanced/workflows)。
+
+## 预算
+
+预算同样按 `user_path` 划定作用域。`/team/alpha` 的预算适用于
+`/team/alpha` 及其后代路径（例如 `/team/alpha/service`），但不适用于同级路径（例如 `/team-alpha`）。
+
+支出限额和工作流执行参见[预算](/zh/features/budgets)。
+
+## 自助查询用量和限额
+
+调用方无需管理权限即可查询自己的消耗情况：
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/usage \
+  -H "Authorization: Bearer sk_gom_..."
+```
+
+```python Python
+import httpx
+
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="sk_gom_...")
+usage = client.get("/v1/usage", cast_to=httpx.Response)
+
+print(usage.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "sk_gom_...",
+});
+
+const usage = await client.get("/v1/usage");
+console.log(usage);
+```
+
+</CodeGroup>
+
+响应涵盖调用方的有效用户路径：某个日期窗口内记录的用量，以及作用于该路径的每条预算和速率限制规则的状态。完整示例和字段参考请参阅 [Usage API](/zh/advanced/usage-api)。

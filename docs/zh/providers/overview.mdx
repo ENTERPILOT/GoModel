@@ -1,0 +1,156 @@
+---
+title: "支持的 LLM 提供商及其配置方法"
+sidebarTitle: "概览"
+description: "GoModel 支持的 AI 提供商，以及哪些提供商有专门的配置指南。"
+icon: "list"
+keywords: ["AI 提供商", "AI providers", "支持的提供商", "supported providers", "LLM 提供商", "LLM providers", "提供商列表", "provider list", "配置提供商", "configure provider"]
+---
+
+GoModel 通过一个网关将兼容 OpenAI 的请求路由到众多 AI 提供商。对于大多数提供商，设置 API 密钥就是全部配置工作。本节中的页面面向那些配置**不仅仅**是“设置一个 API 密钥”的提供商：例如基于云凭据的认证流程、基于部署的 URL、区域或项目要求、同时提供原生 API 和兼容 OpenAI API，或存在其他特殊之处。
+
+## 不使用环境变量配置提供商
+
+下面的每个凭据（`OPENAI_API_KEY`、`ANTHROPIC_API_KEY` 等）也可以在管理控制台（`/admin/dashboard`）的 **Providers** 页面中设置，无需重启。这是在不设置任何提供商环境变量的情况下运行 GoModel 的最简单方式：在不配置任何提供商的情况下启动网关（模型目录初始为空；网关仍会正常启动并提供控制台），然后在 UI 中添加提供商。通过这种方式添加的提供商会立即注册到正在运行的网关中。
+
+通过环境变量或 `config.yaml` 声明的提供商始终优先：以任一方式配置的名称在控制台中都是**只读**的（显示 "Config" 徽标），这与 GoModel 对 MCP 服务器、虚拟模型和速率限制采用的规则相同。API 密钥和服务账号 Secret（密钥）保存后会被遮蔽（`***`）：编辑提供商时，所有未修改的内容都会重新提交 `***`，网关会保留已存储的值。禁用提供商（而不是删除）会将其从路由中注销，但保留其配置记录。环境变量支持的多密钥轮换（`api_keys`，有序列表）和按提供商配置的[出站代理](/zh/providers/outbound-proxy)同样可以在控制台表单中配置。
+
+## 支持的提供商
+
+示例模型标识符仅作说明，可能会发生变化；当前可用的模型请查阅各提供商的模型目录。功能列反映的是网关的 API 支持情况，而不是上游提供商提供的每个模型的具体能力。
+
+| 提供商 | 凭据 | 示例模型 | Chat | `/responses` | 嵌入 | Files | Batches | 透传 | 指南 |
+| -------- | ---------- | ------------- | :--: | :----------: | :---: | :---: | :-----: | :------: | ----- |
+| OpenAI | `OPENAI_API_KEY` | `gpt-5.5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| ChatGPT 订阅 | `CHATGPT_API_KEY`（Codex 登录 Token） | `gpt-5.6-sol` | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | [ChatGPT 订阅](/zh/providers/chatgpt) |
+| Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | [Anthropic](/zh/providers/anthropic) |
+| Cohere | `COHERE_API_KEY` | `command-a-plus-05-2026` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Cohere](/zh/providers/cohere) |
+| Google Gemini | `GEMINI_API_KEY` | `gemini-3.7-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | [Google Gemini](/zh/providers/gemini) |
+| Google Vertex AI | `VERTEX_PROJECT` + `VERTEX_LOCATION` + GCP 凭据 | `google/gemini-2.5-flash` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | [Google Vertex AI](/zh/providers/vertex) |
+| DeepSeek | `DEEPSEEK_API_KEY` | `deepseek-v4-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [DeepSeek](/zh/providers/deepseek) |
+| DeepInfra | `DEEPINFRA_API_KEY`（`DEEPINFRA_BASE_URL` 可选） | `Qwen/Qwen3-32B` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [DeepInfra](/zh/providers/deepinfra) |
+| Groq | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | — |
+| Fireworks AI | `FIREWORKS_API_KEY`（`FIREWORKS_BASE_URL` 可选） | `accounts/fireworks/models/gpt-oss-120b` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
+| Chutes AI | `CHUTES_API_KEY`（`CHUTES_BASE_URL` 可选） | `Qwen/Qwen3-32B-TEE` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
+| Meta (Muse Spark) | `META_API_KEY`（`META_BASE_URL` 可选） | `muse-spark-1.1` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
+| OpenRouter | `OPENROUTER_API_KEY` | `google/gemini-2.5-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Kilo AI | `KILO_API_KEY`（`KILO_BASE_URL` 可选） | `anthropic/claude-sonnet-4.5` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
+| Eden AI | `EDENAI_API_KEY`（`EDENAI_BASE_URL` 可选） | `openai/gpt-4` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Eden AI](/zh/providers/edenai) |
+| Z.ai | `ZAI_API_KEY`（`ZAI_BASE_URL` 可选） | `glm-5.1` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
+| xAI (Grok) | `XAI_API_KEY` | `grok-4.6` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | [xAI (Grok)](/zh/providers/xai) |
+| Alibaba Cloud Model Studio（百炼） | `BAILIAN_API_KEY`（`BAILIAN_BASE_URL` 可选） | `qwen3-max` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Alibaba Cloud Model Studio](/zh/providers/bailian) |
+| MiniMax | `MINIMAX_API_KEY`（`MINIMAX_BASE_URL` 可选） | `MiniMax-M3` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [MiniMax](/zh/providers/minimax) |
+| Xiaomi MiMo | `XIAOMI_API_KEY`（`XIAOMI_BASE_URL` 可选） | `mimo-v2.5-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [Xiaomi MiMo](/zh/providers/xiaomi) |
+| ElevenLabs（仅语音） | `ELEVENLABS_API_KEY`（`ELEVENLABS_BASE_URL` 可选） | `eleven_multilingual_v2` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [ElevenLabs](/zh/providers/elevenlabs) |
+| audio.cpp（仅音频） | `AUDIOCPP_BASE_URL`（`AUDIOCPP_API_KEY` 可选） | `pocket-tts` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [audio.cpp](/zh/providers/audiocpp) |
+| Jev / Kev（仅决策） | `JEV_API_KEY`（`JEV_BASE_URL` 可选） | `jev-latest` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [Jev](/zh/providers/jev) |
+| OpenCode Go | `OPENCODE_GO_API_KEY`（`OPENCODE_GO_BASE_URL` 可选） | `glm-5.1` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [OpenCode Go](/zh/providers/opencode-go) |
+| Kimi Code | `KIMICODE_API_KEY` | `kimi-for-coding` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Kimi Code](/zh/providers/kimicode) |
+| Hetzner（实验性） | `HETZNER_API_KEY`（`HETZNER_BASE_URL` 可选） | `Qwen/Qwen3.6-35B-A3B-FP8` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [Hetzner](/zh/providers/hetzner) |
+| Azure OpenAI | `AZURE_API_KEY` + `AZURE_BASE_URL`（`AZURE_API_VERSION` 可选） | `gpt-5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Azure OpenAI](/zh/providers/azure) |
+| Oracle GenAI | `ORACLE_API_KEY` + `ORACLE_BASE_URL` | `openai.gpt-oss-120b` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Oracle GenAI](/zh/providers/oracle) |
+| Ollama | `OLLAMA_BASE_URL` | `llama3.2` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | [Ollama](/zh/providers/multiple-ollama) |
+| SGLang | `SGLANG_BASE_URL`（`SGLANG_API_KEY` 可选） | `Qwen/Qwen2.5-0.5B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [SGLang](/zh/providers/sglang) |
+| vLLM | `VLLM_BASE_URL`（`VLLM_API_KEY` 可选） | `meta-llama/Llama-3.1-8B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [vLLM](/zh/providers/vllm) |
+| llama.cpp / LM Studio | `LLAMACPP_BASE_URL`（`LLAMACPP_API_KEY` 可选） | `gemma-3-4b-it` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [llama.cpp](/zh/providers/llamacpp) |
+| llm-d | `LLMD_BASE_URL`（`LLMD_API_KEY` 可选） | `Qwen/Qwen2.5-0.5B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [llm-d](/zh/providers/llmd) |
+| Amazon Bedrock | `BEDROCK_BASE_URL`（区域或端点）+ AWS 凭据 | `anthropic.claude-3-5-haiku-20241022-v1:0` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Amazon Bedrock](/zh/providers/bedrock) |
+| Amazon Bedrock Mantle | `BEDROCK_MANTLE_API_KEY` 或 AWS 凭据 | `openai.gpt-5.6-sol` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Bedrock Mantle](/zh/providers/bedrock-mantle) |
+
+✅ 支持 ❌ 不支持
+
+## 提供商说明
+
+- **OpenAI 推理模型**：对于 o 系列以及 GPT-5 或更高版本的模型（包括 GPT-6），GoModel 会将 `max_tokens` 作为 `max_completion_tokens` 发送，并丢弃 `temperature` 和 `top_p`，除非 `reasoning_effort` 为 `"none"`（这是这些模型唯一接受这两个参数的情况）。OpenAI 会拒绝这些模型的 `stop` 参数，因此 GoModel 会自行在第一个停止序列处截断输出，并在 `stop_sequence` 中报告。如果 `reasoning_effort` 的值不被模型接受，会调整为模型支持的最接近级别（例如，从 GPT-5.1 起 `minimal` 变为 `low`，`max` 变为 `xhigh`）。从 GPT-5.6 起，OpenAI 仅在 `reasoning_effort: "none"` 时才接受 Chat Completions 上的函数工具，因此未设置推理强度的工具请求会被设为 `"none"`。
+- **通过 Responses 处理的 OpenAI 请求**：部分聊天请求（Chat Completions 和 `/v1/messages`）无法由 OpenAI 的 Chat Completions 处理：GPT-5.6+ 上带推理强度的函数工具、GPT-6 Astra 和 GPT-6.1 上的任何工具调用（它们拒绝 `"none"`）、包含图片或文件的工具结果（Chat Completions 会接受，但模型根本看不到这些内容），以及通过 URL 提供的文件。GoModel 会以 `store: false` 将这些请求发送到 OpenAI 的 `/v1/responses`，并返回普通的 Chat Completion 或数据块流。如果请求中包含 Responses API 没有对应项的字段（例如 `n` 或 `logprobs`），则仍使用 Chat Completions。
+- **llm-d**：将 `LLMD_BASE_URL` 指向 Router/EPP 服务；当该路由不提供 `/v1/models` 时，请声明 `LLMD_MODELS`。该专用提供商会注入受信任的推理目标（inference-objective）和用户路径公平性请求头。
+- **Z.ai GLM Coding Plan**：设置 `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`。
+- **Z.ai 推理强度**：`reasoning.effort`（Chat Completions 和 Responses）会作为 Z.ai 的顶层 `reasoning_effort` 发送。GLM-5.3 和 GLM-5.3-Flash 始终进行思考，且只接受 `low`、`high` 和 `max`，因此 `none` 和 `minimal` 映射为 `low`，`medium` 映射为 `high`，`xhigh` 映射为 `max`。其他 GLM 模型按原样接收该级别。
+- **Groq 推理与转录**：对于 gpt-oss 和 qwen3 系列，GoModel 默认将 Groq 的 `reasoning_format` 设为 `parsed`，因此思维链会出现在 `reasoning` 中，而不是以内联 `<think>…</think>` 文本的形式出现在答案中。如需覆盖，请自行发送 `reasoning_format`（`raw` 或 `hidden`）。JSON 格式的转录和翻译响应会移除 Groq 的厂商成员 `x_groq`，使其与 OpenAI 的结构一致。
+- **MiniMax 区域与当前文本模型**：默认的全球端点为 `https://api.minimax.io/v1`；中国大陆平台的账户应设置 `MINIMAX_BASE_URL=https://api.minimaxi.com/v1`。当前的文本模型 ID 为 `MiniMax-M3`（1,000,000 Token 上下文；支持文本、图片和视频输入）和 `MiniMax-M2.7`（204,800 Token 上下文；支持文本输入）。按每百万 Token 计的美元定价：M3 输入 $0.60、输出 $2.40、缓存输入 $0.12；M2.7 输入 $0.30、输出 $1.20、缓存输入 $0.06、缓存写入 $0.375。M3 支持自适应思考或禁用思考；M2.7 始终进行思考。
+- **Amazon Bedrock Mantle**：GPT-5.6 Sol、Terra 和 Luna 在 Mantle 上只接受 Responses API。GoModel 会将 `/v1/responses` 请求直接发送到 AWS，并选择所需的 `/openai/v1/responses` 上游路径。
+- **Fireworks AI**：模型 ID 是账户作用域的路径，例如 `accounts/fireworks/models/gpt-oss-120b`；请在请求和 `FIREWORKS_MODELS` 中原样使用。
+- **ElevenLabs**：仅语音的提供商：支持 `/v1/audio/speech`（文本转语音）和 `/v1/audio/transcriptions`（语音转文本），但不支持聊天、`/v1/responses` 和嵌入（上表中的 ❌ 反映的是这一点，而不是网关的限制）。OpenAI 的 `voice` 字段必须是 ElevenLabs 的 voice_id。有关支持的音频格式和语音转文本模型，请参阅 [ElevenLabs 指南](/zh/providers/elevenlabs)。
+- **Chutes AI**：默认使用 `https://llm.chutes.ai/v1`，并从实时目录中发现其当前的模型 ID、上下文限制、能力和定价。GoModel 会将 `/v1/responses` 请求转换为 Chat Completions；Chutes 的共享 LLM 端点不提供嵌入。透传支持需要运维人员显式启用，即将 `chutes` 添加到 `ENABLED_PASSTHROUGH_PROVIDERS`。
+- **Meta (Muse Spark)**：Meta Model API 兼容 OpenAI；设置 `META_API_KEY` 并路由到 `muse-spark-1.1`。Muse Spark 模型尚未进入上游模型目录，因此如果需要成本追踪和上下文窗口报告，请在 `config.yaml` 的 `providers.meta.models` 元数据下声明 `context_window` 和 `pricing`。
+- **Kilo AI**：模型 ID 使用 `provider/model` 格式（例如 `anthropic/claude-sonnet-4.5`），并原样转发。GoModel 通过将 `/v1/responses` 转换为 Kilo 的 Chat Completions 端点来提供该接口。如果另一个已配置的提供商提供了相同的原始模型 ID，请使用 `kilo/anthropic/claude-sonnet-4.5` 显式选择 Kilo；GoModel 在转发前只会移除外层的 `kilo/` 路由限定符。
+- **Eden AI**：模型 ID 使用 `provider/model` 格式（例如 `openai/gpt-4`），并原样转发；当另一个已配置的提供商提供了相同的原始 ID 时，请使用 `edenai/openai/gpt-4` 显式选择 Eden。GoModel 从 Eden 自身的 `/v3/models` 中发现其模型目录、上下文窗口、能力和按 Token 计的定价，因此没有内置模型列表，新的 Eden 模型也无需升级即可使用。每个请求的成本来自 Eden 在每个响应中返回的精确美元 `cost`，而不是基于 Token 计算。GoModel 通过将 `/v1/responses` 转换为 Eden 的 Chat Completions 端点来提供该接口；Eden 自身的 `/v3/responses` 是另一套 API，永远不会被使用。参阅 [Eden AI 指南](/zh/providers/edenai)。
+- **Xiaomi MiMo**：TTS（`mimo-v2.5-tts*`）和 ASR（`mimo-v2.5-asr`）既可以通过 `/v1/audio/speech` 和 `/v1/audio/transcriptions` 提供（转换为 MiMo 的 Chat Completions 音频协议），也可以直接通过 Chat Completions 使用；如需 1M 上下文，请在模型 ID 后追加 `[1m]`，并将其列入 `XIAOMI_MODELS`。
+- **OpenCode Go（OpenCode Zen）**：按模型路由：大多数模型使用 OpenAI 风格的 `/chat/completions`，而仅支持 `/messages` 的模型（默认为 `qwen3.7-max`，可通过 `OPENCODE_GO_MESSAGES_MODELS` 覆盖）会发送到 Anthropic 原生端点。没有推理参数的聊天请求会被注入 `reasoning_effort: "low"`，因为部分模型始终进行思考，并会拒绝省略该参数的请求（可通过 `OPENCODE_GO_DEFAULT_REASONING_EFFORT` 覆盖）。请设置 `OPENCODE_GO_API_KEY`；Base URL 默认为 `https://opencode.ai/zen/go/v1`。
+- **ChatGPT 订阅**：仅提供 `/v1/responses`，按 ChatGPT 套餐配额计费，而不是 API 额度。上游只接受严格的参数白名单且仅支持流式传输；GoModel 会适配请求，并为非流式调用方合并流。请将 `CHATGPT_API_KEY` 设置为 `codex login` 获取的访问 Token。报告的成本并非实际支出：这些模型 ID 在 OpenAI Platform 上同样存在，因此注册表会将其按 Token 计的价格套用到固定费率的订阅流量上。请不要对其使用预算和 `cost` 负载均衡。
+- **Kimi Code**：没有按 Token 计的定价；配额每周刷新，同时还受滚动 5 小时窗口的限制。用量成本追踪对 Kimi Code 报告为零，因此 `cost` 负载均衡无法为其定价；建议采用保守的重试策略。
+- **Hetzner（实验性）**：Hetzner 声明其推理 API 处于实验阶段：可能出现破坏性变更，且不提供 SLA。实验期间，模型目录和速率限制窗口会发生变化；请查询实时的 `/v1/models` 端点和官方文档，而不要依赖快照。上表中的示例模型 ID（`Qwen/Qwen3.6-35B-A3B-FP8`）取自 2026-08-17 的 Hetzner 官方文档，阅读时可能已有所不同。实验期间免费，因此用量成本追踪报告为零，`cost` 负载均衡也无法为其定价。没有嵌入端点；仅支持聊天、`/v1/responses`（通过 Chat 转换）、模型列表和透传。透传是通用的转发器，✅ 标记表示适配器具备该能力；在 API 处于实验阶段时，Hetzner 对任意上游路径的兼容性尚未验证。`hetzner` 已包含在默认的 `ENABLED_PASSTHROUGH_PROVIDERS` 白名单中，因此 `/p/hetzner/...` 路由无需运维人员启用即可使用；如需限制，请将其从列表中移除。
+- **配置的模型列表**：所有提供商都可以通过 `<PROVIDER>_MODELS` 配置，例如 `OPENROUTER_MODELS=openai/gpt-oss-120b,anthropic/claude-sonnet-4` 或 `ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3`。DeepSeek 默认使用 `https://api.deepseek.com`；仅在使用兼容代理或其他 DeepSeek 端点时才需设置 `DEEPSEEK_BASE_URL`。默认情况下，`CONFIGURED_PROVIDER_MODELS_MODE=fallback` 仅在上游 `/models` 不可用或为空时使用这些列表。设置 `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` 后，对于定义了列表的提供商，只暴露已配置的模型，并跳过其上游 `/models` 调用。
+- **模型过滤器**：按 glob 模式或价格缩小大型模型目录，而无需逐个列出模型：`OPENROUTER_MODEL_FILTER_INCLUDE=*:free` 只保留 OpenRouter 的免费模型，`<PROVIDER>_MODEL_FILTER_MAX_PRICE_PER_MTOK` 限制提供商可路由到的模型价格上限。参阅[过滤提供商的模型](/zh/advanced/config-yaml#过滤提供商的模型)。
+- **模型分类（聊天、嵌入、音频）**：模型的分类来自其 `modes`，按优先级从四个来源确定：远程模型注册表；在 `config.yaml` 的 `providers.<name>.models` 下声明的运维元数据（例如 `modes: [embedding]`）；提供商自身模型列表中的能力信号（Gemini 的 `supportedGenerationMethods`、Cohere 的 `endpoints`、OpenRouter 的架构模态、Ollama 的 `/api/show` 能力）；最后，对仍未分类的模型进行保守的名称检查：ID 中包含 `embed` 或匹配常见嵌入模型系列（`bge`、`e5`、`gte`、`minilm`）的归类为嵌入模型，ID 中包含 `rerank` 的归类为重排序模型；`org/model` 这类带命名空间的 ID 按其最后一个路径段检查。只有在经过以上所有步骤后模型仍未分类时，才需要声明运维元数据。分类仅影响控制台中的分组；无论分类如何，`/v1/embeddings` 都会路由到该提供商提供的任意模型。
+- **vLLM**：仅当上游服务器使用 `--api-key` 启动时，才需设置 `VLLM_API_KEY`。
+- **audio.cpp**：`AUDIOCPP_BASE_URL` 为必填项（audiocpp_server 的默认端口与 GoModel 自身的 8080 冲突，因此没有默认值）；`AUDIOCPP_API_KEY` 通常不设置，因为 audio.cpp 本身没有认证机制。仅支持音频：`/v1/audio/speech` 和 `/v1/audio/transcriptions` 会路由到它，其详情、对齐和实时流式传输路由可以通过透传访问。参阅 [audio.cpp](/zh/providers/audiocpp)。
+- **Jev / Kev**：TypeSafe 的 System One API 是一个决策 API（输入状态和类型化问题，输出校准后的概率）。GoModel 在 `POST /v1/systemone` 上原生、不经转换地转发该 API（支持虚拟模型、护栏、审计和用量），也可以通过 `/p/jev/...` 透传访问；同时，GoModel 通过双向转换，使用它来响应 OpenAI 的 [Decisions API](/zh/advanced/decisions-api)（`POST /v1/decisions`）。配置了 `openai`、`jev` 或 `openrouter` 提供商后，`/v1/decisions` 即可使用；配置了 `jev` 或 `openrouter` 提供商后，`/v1/systemone` 即可使用；OpenRouter 原生提供 Jev，其决策模型被列为工具类（utility）模型。`JEV_API_KEY` 用于配置托管 API；对于自托管的 Kev 服务器（使用相同的 API，但不需要认证），请设置 `JEV_BASE_URL` 并保持密钥未设置。参阅 [Jev](/zh/providers/jev)。
+- **llama.cpp / LM Studio**：`LLAMACPP_BASE_URL` 为必填项（llama-server 的默认端口与 GoModel 自身的 8080 冲突，因此没有默认值）；`LLAMACPP_API_KEY` 为可选项。请勿将这些服务器注册为 `ollama`，该类型使用 Ollama 的原生 API。参阅 [llama.cpp](/zh/providers/llamacpp)。
+- **llm-d**：`LLMD_BASE_URL` 为必填项。`LLMD_API_KEY` 为可选项，仅当 Router 前面的 Gateway 要求 Bearer 认证时才会发送。
+- **SGLang**：仅当上游服务器使用 `--api-key` 启动时，才需设置 `SGLANG_API_KEY`；否则只需设置 `SGLANG_BASE_URL`。
+- **同一提供商的多个 API 密钥**：设置 `OPENAI_API_KEY_2`、`OPENAI_API_KEY_3` 等，以便将会话分散到多个密钥上，同时让每个对话固定使用一个密钥，以保持提示词缓存亲和性。参阅 [API 密钥轮换](/zh/providers/key-rotation)。
+- **同一提供商类型的多个实例**：在不使用 `config.yaml` 的情况下，使用带后缀的环境变量，例如 `OPENAI_EAST_API_KEY` 和 `OPENAI_EAST_BASE_URL`；添加 `OPENAI_EAST_MODELS` 可配置该实例的模型列表。这会注册类型为 `openai` 的提供商 `openai-east`。Vertex AI 遵循相同的后缀模式：`VERTEX_US_PROJECT` 会注册提供商 `vertex-us`。Vertex 的项目和区域环境变量必须与实例前缀一致：对于 `VERTEX_US_PROJECT` 这样带后缀的实例，还需设置 `VERTEX_US_LOCATION` 以及该实例的其他带后缀设置，而不是通用的 `VERTEX_PROJECT` / `VERTEX_LOCATION`。`VERTEX_AUTH_TYPE` 默认为应用默认凭据（`gcp_adc`）。
+
+## GoModel 在响应中规范化的内容
+
+无论由哪个提供商响应，GoModel 对每个字段都返回统一的结构，其余内容则按提供商发送的原样转发。
+
+- **推理文本**以 `reasoning_content` 的形式返回，位于 `choices[].message` 和流式传输的 `choices[].delta` 上。Groq 以 `reasoning` 返回该内容，GoModel 会将其重命名，因此同一份客户端代码即可读取来自 Groq、DeepSeek、Anthropic、Cohere 和 vLLM 的思维链。
+- **厂商成员不会被移除。** Groq 的 `x_groq` 及其 `queue_time` / `prompt_time` / `completion_time` 用量计时，以及 DeepSeek 的 `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`，都会原封不动地到达客户端。借助这种透传，您无需等待 GoModel 发布新版本即可获取提供商原生的额外信息。如果希望代码与提供商无关，请从可移植的 `usage.prompt_tokens_details.cached_tokens` 中读取缓存命中数。参阅 [ADR-0011](https://github.com/ENTERPILOT/GoModel/blob/main/docs/adr/0011-field-forwarding-on-translated-paths.md)。
+- **即使您没有请求，流中也会包含最终的 `usage`。** 开启用量追踪时，GoModel 会为每个流式请求添加 `stream_options.include_usage` 以便为调用计价，并将提供商的用量数据块原样转发；而 OpenAI 自身的 API 只有在客户端请求时才会返回用量。大多数提供商会将其作为单独的末尾数据块发送，其中 `choices` 数组为空；DeepSeek 则将其附加在最后一个内容数据块上。您可以忽略该成员，或设置 `ENFORCE_RETURNING_USAGE_DATA=false` 让 GoModel 不再请求它，代价是对于只在被请求时才报告用量的提供商，流式请求将没有用量记录。
+
+## 为什么部分提供商有专门的页面
+
+以下是大多数用户在配置时容易遇到问题的提供商：
+
+- **Google Vertex AI**：需要一个 GCP 项目、区域，以及应用默认凭据或服务账号 JSON 密钥。
+- **Amazon Bedrock**：没有自己的 API 密钥；使用 AWS 凭据链，并且需要在 Bedrock 控制台中显式开通模型访问权限。
+- **Azure OpenAI**：基于部署的 Base URL、`api-version` 查询参数，以及使用 `api-key` 请求头而不是 `Authorization: Bearer`。
+- **Oracle GenAI**：需要针对 `generativeaiapikey` 的 OCI IAM 策略，以及特定区域的兼容 OpenAI 端点 URL。
+- **Google Gemini（AI Studio）**：两种路由模式（原生 `generateContent` 与兼容 OpenAI），图片输入行为各不相同。
+- **Anthropic**：推理强度映射到 Claude 的自适应思考和推理强度控制，不同代模型之间存在差异。
+- **DeepSeek**：DeepSeek V4 的推理强度映射存在特殊之处。
+- **Ollama / SGLang / vLLM**：本地模型托管，可通过带后缀的环境变量和带提供商前缀的模型 ID 进行可选的多实例配置。
+- **Xiaomi MiMo**：默认开启思考模式，使用 `[1m]` 上下文后缀，TTS/ASR 通过 Chat Completions 而不是原生音频端点运行。
+- **OpenCode Go**：OpenCode Zen 将模型分布在 OpenAI 风格的 `/chat/completions` 和 Anthropic 原生的 `/messages` 上；GoModel 按模型路由（仅支持 `/messages` 的模型集合需手动维护，默认为 `qwen3.7-max`）。
+- **ChatGPT 订阅**：仅支持 Responses 的上游，带有严格的参数白名单，用于在 Codex 与 ChatGPT 套餐之间部署 GoModel。
+
+<Tip>
+  每个提供商页面都会在一个 CodeGroup 中展示三种启动方式：使用 `--env-file .env` 的 Docker（推荐）、使用内联 `-e` 参数的 Docker，以及通过 `make build` 构建的预编译二进制文件。当变量超过几个时，请复制 `.env.template`，填入所需的值，并在 Docker 和原生二进制文件中复用同一个文件。
+</Tip>
+
+没有专门页面的提供商（OpenAI、Groq、Fireworks AI、Meta、OpenRouter、Kilo AI、Z.ai、xAI、MiniMax）遵循相同的模式：设置 API 密钥（以及在支持时可选的 Base URL），启动 GoModel，然后按模型 ID 路由。完整的环境变量参考请参阅[配置](/zh/advanced/configuration)。
+
+## 提供商状态
+
+管理控制台（`/admin/dashboard`）在 **Overview** 页面的 **Providers Overview** 部分显示每个已配置提供商的实时状态。
+
+<img
+  src="/providers/provider-status.png"
+  alt="GoModel 控制台的 Providers Overview：一张显示 Degraded 状态的 openai 卡片（含一个失败的模型），以及一张显示 Healthy 状态的 vllm 卡片"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+每张卡片的状态标签综合了两种信号：**模型发现**（能否获取该提供商的模型清单？）和**请求健康状况**（经过网关的真实请求是否成功？）。真实流量信号只会让状态变差，而永远不会掩盖模型发现的失败。将鼠标悬停在状态标签上，可以查看分类原因和最近的错误。
+
+| 状态标签 | 含义 |
+| ---- | ------- |
+| `Healthy` | 模型发现成功，且近期流量（如有）正常 |
+| `Starting` | 已配置，正在等待首次模型发现 |
+| `Configured` | 已配置，但尚未暴露任何模型 |
+| `Degraded` | 某个特定模型的近期请求持续失败，**或**所有提供商同时失败，但之前的模型清单仍在提供服务 |
+| `Recovering` | 熔断器处于半开状态，正在探测提供商是否已恢复 |
+| `Circuit Open` | 熔断器已打开；发往该提供商的流量已暂停 |
+| `Offline` | 最近一次刷新或可用性检查失败；在恢复之前，该提供商的模型会从模型列表中隐藏 |
+| `Unhealthy` | 模型发现失败，且没有可用的模型 |
+
+展开卡片（点击底部的箭头条，或使用整个部分的 **Show Details** 开关）可查看请求健康状况详情：
+
+- **Recent Requests**：最近 10 分钟内经过网关的请求数和错误数。
+- **Breaker State**：提供商熔断器的实时状态（参阅[弹性与容错](/zh/advanced/resilience#熔断器与控制台中的提供商健康状态)）。
+- **Models (Recent Traffic)**：按模型统计的请求/错误数。如果某个模型至少有 3 个错误，且错误占其时间窗口内请求数的一半或以上，就会以红色标记。这样可以发现原本健康的提供商上单个出问题的模型，而这是仅靠模型发现无法察觉的。将鼠标悬停在某一行上，可以查看该模型最新的错误消息。没有 choices、没有输出或没有 Token 用量的 `200` 响应在这里同样计为错误。
+
+请求健康状况追踪是被动的：它只观察客户端已经发送的流量（网关自身的后台探测，即模型发现和可用性检查，不计入其中），因此空闲的提供商只会显示没有近期请求。计数器保存在每个网关实例的内存中，重启后会重置。
+
+同样的数据也可以通过 `GET /admin/providers/status` 以 JSON 格式获取，便于编写脚本和进行外部监控。

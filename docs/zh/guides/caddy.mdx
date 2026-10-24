@@ -1,0 +1,119 @@
+---
+title: "GoModel 与 Caddy"
+description: "将 Caddy 的 forward_auth 与 GoModel 的密钥验证端点配合使用，在边缘拒绝未认证的流量，并用 GoModel API 密钥保护其他服务。"
+icon: "shield-check"
+keywords: ["Caddy", "forward_auth", "反向代理", "API 密钥验证", "/v1/auth/verify", "边缘认证", "拦截未认证流量", "reverse proxy", "API key verification", "edge authentication", "block unauthenticated traffic"]
+---
+
+## 概览
+
+Caddy 的 [`forward_auth`](https://caddyserver.com/docs/caddyfile/directives/forward_auth)
+会询问另一个服务某个请求是否可以继续。将它指向 GoModel 的
+[`GET /v1/auth/verify`](/zh/advanced/api-endpoints#密钥验证)，Caddy
+就能基于 GoModel API 密钥控制流量——而代理中无需保存这些密钥的任何副本。
+
+这种做法有两个用途：
+
+- **在边缘拒绝未认证的流量。** 没有可用密钥的请求永远不会到达网关，因此扫描器和配置错误的客户端既不会与网关建立连接，也不会出现在其审计日志中。GoModel 仍会对其处理的每个请求进行认证；边缘检查是前置的过滤器，而不是替代品。
+- **用 GoModel 密钥保护其他服务。** 同一主机上的内部控制台、文档站点或指标端点，无需自行实现认证，即可要求访问者持有有效的 GoModel 密钥。
+
+`/v1/auth/verify` **默认禁用**。使用
+`AUTH_VERIFY_ENABLED=true`（`server.auth_verify_enabled`）启用。它不是
+`/admin` 路由，因此在 `ADMIN_ENDPOINTS_ENABLED=false` 时仍可正常工作。
+
+## 工作原理
+
+`forward_auth` 仅根据**状态码**做出决定：
+
+| GoModel 的响应 | Caddy 的处理 |
+| --------------- | ---------- |
+| `200`——密钥认证通过 | 将请求转发给上游 |
+| `401`——密钥未知、已禁用或已过期，或没有凭据 | 将该响应复制给客户端并停止处理 |
+
+GoModel 的 `401` 响应体是其常规的 OpenAI 格式错误封装，因此已经能理解 GoModel 错误的客户端，从代理处看到的也是熟悉的格式。
+`200` 响应体（`valid`、`method`、`key_id`、`user_path`）会被 Caddy 忽略——
+它是为想知道*哪个*密钥通过验证的脚本和服务准备的。
+
+## 用 GoModel 密钥保护其他服务
+
+这里的上游可以是任何您希望用 GoModel 密钥保护的应用。
+
+```caddyfile
+{
+	auto_https off # 在生产环境中删除此行，并使用真实的主机名
+}
+
+:8090 {
+	forward_auth 127.0.0.1:8080 {
+		uri /v1/auth/verify
+		copy_headers X-Gomodel-Auth-User
+	}
+
+	reverse_proxy 127.0.0.1:9000
+}
+```
+
+`forward_auth` 会将传入请求自身的请求头发送给 GoModel，因此被检查的正是调用方的
+`Authorization: Bearer sk_gom_...`（或 `x-api-key`）。无需其他任何配置即可让凭据到达网关。
+
+`copy_headers X-Gomodel-Auth-User` 会转发 GoModel 关于调用方*是谁*的答复：对于绑定了[用户路径](/zh/features/user-path)的托管密钥，上游会收到该路径，并可据此限定展示的内容。对于使用主密钥的调用方以及未绑定路径的密钥，该请求头为空。
+
+验证一下：
+
+```bash
+# 没有凭据——在边缘被拒绝，上游永远看不到该请求
+curl -i http://localhost:8090/
+
+# 有效的托管密钥——请求到达上游
+curl -i http://localhost:8090/ -H "Authorization: Bearer sk_gom_..."
+```
+
+## 在网关前过滤流量
+
+要在 GoModel 本身前面加上同样的检查，请向网关进行验证并将请求代理给它：
+
+```caddyfile
+api.example.com {
+	forward_auth 127.0.0.1:8080 {
+		uri /v1/auth/verify
+	}
+
+	reverse_proxy 127.0.0.1:8080
+}
+```
+
+这样，每个被代理的请求都会多一次到网关的往返，并且网关在处理请求时还会再认证一次。这是在未认证流量到达应用之前将其丢弃的代价——在面向互联网的边缘值得这样做；而在私有网络中，如果 GoModel 自身的认证已经是唯一的关卡，则不值得。
+
+如果您使用以下路由，它们必须在没有密钥的情况下仍可访问：
+
+```caddyfile
+api.example.com {
+	@public path /health /health/ready /metrics
+	handle @public {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	handle {
+		forward_auth 127.0.0.1:8080 {
+			uri /v1/auth/verify
+		}
+		reverse_proxy 127.0.0.1:8080
+	}
+}
+```
+
+健康检查和 Prometheus 抓取请求不携带 API 密钥，因此如果不这样配置，即使 GoModel 本身无需认证即可响应它们，它们也会被边缘关卡拒绝。
+
+<Warning>
+  **关卡的强度取决于网关自身的认证。** 在既没有主密钥也没有托管密钥的
+  GoModel 实例上（即不安全的开发默认配置），所有请求都会被接受，`/v1/auth/verify` 会返回
+  `200` 和 `{"valid": false, "method": "none"}`（因为没有可确认的密钥），`forward_auth` 会放行所有请求。在依赖此机制拦截任何流量之前，请先设置
+  `GOMODEL_MASTER_KEY` 或签发[托管密钥](/zh/features/users)。
+</Warning>
+
+## 注意事项
+
+- Caddy 会在每个请求上重新检查密钥。`forward_auth` 中没有结果缓存，因此每个被代理的请求都会让网关收到一次验证调用；`/v1/auth/verify` 不会调用提供商，直接根据密钥存储作答。
+- 该端点会返回 `Cache-Control: no-store`——答复描述的是某个调用方的凭据，不得提供给其他任何人。
+- 启用该端点相当于暴露了一个密钥校验器（oracle）：任何能访问它的人都可以测试某个密钥是否有效。请仅在需要的地方暴露它，并对不受信任的调用方启用 GoModel 的[速率限制](/zh/features/rate-limits)。
+- Caddy 会在验证子请求中添加 `X-Forwarded-Method` 和 `X-Forwarded-Uri`。GoModel 会忽略这两者；检查针对的是凭据，而不是所请求的路由。

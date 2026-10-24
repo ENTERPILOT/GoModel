@@ -1,0 +1,154 @@
+---
+title: "Konfiguracja Alibaba Model Studio (Bailian / DashScope)"
+sidebarTitle: "Alibaba Model Studio"
+description: "Skonfiguruj Alibaba Cloud Model Studio, wcześniej Bailian (百炼), znane też z API DashScope, w tym warstwę kompatybilności max_tokens dla modeli Qwen."
+icon: "cloud"
+keywords: ["Alibaba Cloud Model Studio", "Bailian", "DashScope", "Qwen", "konfiguracja providera", "provider setup"]
+---
+
+Alibaba Cloud Model Studio to platforma model-as-a-service Alibaba Cloud dla
+rodziny modeli Qwen. W konsolach, SDK i dokumentacji API usługa występowała też
+pod nazwami Bailian (百炼) i DashScope. GoModel kieruje do niej requesty przez
+endpoint kompatybilny z OpenAI (`/compatible-mode/v1`).
+
+<Note>
+  Ze względu na kompatybilność GoModel zachowuje ID providera, zmienne
+  środowiskowe i ścieżkę passthrough jako `bailian`, `BAILIAN_*` i
+  `/p/bailian/...`.
+</Note>
+
+Ponieważ w kwietniu 2026 Bailian oznaczył `max_tokens` jako przestarzałe na
+rzecz `max_completion_tokens`, GoModel automatycznie mapuje standardowe pole
+`max_tokens` na `max_completion_tokens` w każdym requeście – bez zmian po
+stronie klienta.
+
+## Konfiguracja
+
+```bash
+BAILIAN_API_KEY=...
+```
+
+Albo w `config.yaml`:
+
+```yaml
+providers:
+  bailian:
+    type: bailian
+    api_key: "${BAILIAN_API_KEY}"
+    # base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+```
+
+## Bazowe URL-e
+
+API Model Studio kompatybilne z OpenAI jest dostępne w wielu regionach. Aby
+przełączyć region, ustaw `BAILIAN_BASE_URL`:
+
+| Region | URL |
+| ------ | --- |
+| Pekin (domyślnie) | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| Singapur | `https://{workspace-id}.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1` |
+| Frankfurt | `https://{workspace-id}.eu-central-1.maas.aliyuncs.com/compatible-mode/v1` |
+| Hongkong | `https://{workspace-id}.cn-hongkong.maas.aliyuncs.com/compatible-mode/v1` |
+
+## ID modeli
+
+Popularne identyfikatory modeli Qwen – aktualny katalog znajdziesz na
+[liście modeli Model
+Studio](https://www.alibabacloud.com/help/zh/model-studio/model-list):
+
+| Model | Przykładowe ID |
+| ----- | ---------- |
+| Qwen 3.7 Max | `qwen3.7-max` |
+| Qwen 3.7 Plus | `qwen3.7-plus` |
+| Qwen 3.6 Flash | `qwen3.6-flash` |
+| Qwen 3 Max | `qwen3-max` |
+| Qwen 3 Plus | `qwen3-plus` |
+| Qwen 3 Flash | `qwen3-flash` |
+| Qwen 3 Coder Plus | `qwen3-coder-plus` |
+| Text Embedding | `text-embedding-v3` |
+
+## Kompatybilność `max_tokens`
+
+Model Studio oznaczyło `max_tokens` jako przestarzałe 2026-04-20 (ze skutkiem
+od 2026-05-30). Jego modele w trybie kompatybilnym wymagają teraz zamiast tego
+`max_completion_tokens`.
+
+GoModel w przezroczysty sposób mapuje standardowy parametr `max_tokens` na
+`max_completion_tokens` w każdym requeście do providera `bailian` – wysyłaj
+`max_tokens` tak jak zwykle, a GoModel przepisze go przed przekazaniem do
+Model Studio.
+
+<CodeGroup>
+
+```bash curl
+# max_tokens=4096 jest automatycznie wysyłane jako max_completion_tokens=4096
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen3-max",
+    "messages": [{"role": "user", "content": "Hello"}],
+    "max_tokens": 4096
+  }'
+```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="unused")
+
+# max_tokens=4096 jest automatycznie wysyłane jako max_completion_tokens=4096
+completion = client.chat.completions.create(
+    model="qwen3-max",
+    messages=[{"role": "user", "content": "Hello"}],
+    max_tokens=4096,
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "unused",
+});
+
+// max_tokens=4096 jest automatycznie wysyłane jako max_completion_tokens=4096
+const completion = await client.chat.completions.create({
+  model: "qwen3-max",
+  messages: [{ role: "user", content: "Hello" }],
+  max_tokens: 4096,
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
+
+## Obsługiwane funkcje
+
+| Funkcja | Obsługiwana |
+| ------- | :-------: |
+| Chat completions | ✅ |
+| Streaming czatu | ✅ |
+| Responses (`/v1/responses`) | ✅ (tłumaczone na czat) |
+| Embeddingi | ✅ (ID modeli skonfiguruj przez `BAILIAN_MODELS`) |
+| Pliki (`/v1/files`) | ✅ |
+| Batche (`/v1/batches`) | ✅ |
+| Passthrough (`/p/bailian/...`) | ✅ |
+
+<Note>
+  Modele embeddingów (`text-embedding-v3`, `text-embedding-v4`) są obsługiwane
+  przez API w trybie kompatybilnym, ale **nie** są automatycznie wykrywane z
+  endpointu upstream `/v1/models`. Ustaw
+  `BAILIAN_MODELS=text-embedding-v3,text-embedding-v4` albo użyj
+  `CONFIGURED_PROVIDER_MODELS_MODE=allowlist`, aby były dostępne.
+</Note>
+
+## Źródła
+
+- [Dokumentacja Model Studio](https://www.alibabacloud.com/help/en/model-studio/what-is-model-studio)
+- [Dokumentacja Bailian](https://www.alibabacloud.com/help/zh/model-studio/)
+- [Dokumentacja API kompatybilnego z OpenAI](https://www.alibabacloud.com/help/zh/model-studio/compatibility-with-openai-responses-api)
+- [Lista modeli Qwen](https://www.alibabacloud.com/help/zh/model-studio/model-list)
