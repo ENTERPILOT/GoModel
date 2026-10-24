@@ -46,10 +46,14 @@ func ensureAuthKeyTimestampIndex(ctx context.Context, db sqlx.DB) {
 		if indexBuildInProgress(ctx, db, authKeyTimestampIndex) {
 			return
 		}
-		slog.Warn("auditlog: rebuilding interrupted auth key index")
-		if _, err := db.Exec(ctx, "DROP INDEX CONCURRENTLY IF EXISTS "+authKeyTimestampIndex); err != nil {
-			slog.Warn("auditlog: failed to drop invalid auth key index", "error", err)
-			return
+		// Another instance's build may have finished since the first check;
+		// only an index still invalid with no build running was interrupted.
+		if valid, exists = indexValidity(ctx, db, authKeyTimestampIndex); exists && !valid {
+			slog.Warn("auditlog: rebuilding interrupted auth key index")
+			if _, err := db.Exec(ctx, "DROP INDEX CONCURRENTLY IF EXISTS "+authKeyTimestampIndex); err != nil {
+				slog.Warn("auditlog: failed to drop invalid auth key index", "error", err)
+				return
+			}
 		}
 	}
 	started := time.Now()

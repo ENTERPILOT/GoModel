@@ -106,39 +106,7 @@ func TestEnsureAuthKeyIndexLeavesAnotherInstancesBuild(t *testing.T) {
 			t.Skip("concurrent index builds are PostgreSQL only")
 		}
 		ctx := context.Background()
-		store, err := newSQLStoreForTest(t, db, 0)
-		require.NoError(t, err)
-		store.indexBuild.Wait()
-		require.NoError(t, store.Close())
-		_, err = db.Exec(ctx, "DROP INDEX "+authKeyTimestampIndex)
-		require.NoError(t, err)
-
-		// Release the held writer on every exit path, or a failed assertion
-		// leaves the build and the schema cleanup waiting on it forever.
-		release := make(chan struct{})
-		var releaseOnce sync.Once
-		releaseWriter := func() { releaseOnce.Do(func() { close(release) }) }
-		t.Cleanup(releaseWriter)
-		writerDone := make(chan error, 1)
-		writerStarted := make(chan struct{})
-		go func() {
-			writerDone <- db.InTx(ctx, func(q sqlx.Querier) error {
-				if _, err := q.Exec(ctx, "INSERT INTO audit_logs (id, timestamp) VALUES ('held', NOW())"); err != nil {
-					close(writerStarted)
-					return err
-				}
-				close(writerStarted)
-				<-release
-				return nil
-			})
-		}()
-		<-writerStarted
-		buildDone := make(chan error, 1)
-		go func() {
-			_, err := db.Exec(ctx, "CREATE INDEX CONCURRENTLY "+authKeyTimestampIndex+" ON audit_logs(auth_key_id, timestamp)")
-			buildDone <- err
-		}()
-		require.Eventually(t, func() bool { return indexBuildInProgress(ctx, db, authKeyTimestampIndex) }, 10*time.Second, 20*time.Millisecond)
+		finishBuild := startHeldAuthKeyIndexBuild(ctx, t, db)
 
 		finished := make(chan struct{})
 		go func() {
@@ -153,10 +121,97 @@ func TestEnsureAuthKeyIndexLeavesAnotherInstancesBuild(t *testing.T) {
 		_, exists := indexValidity(ctx, db, authKeyTimestampIndex)
 		assert.True(t, exists, "the in-progress index was dropped")
 
-		releaseWriter()
-		require.NoError(t, <-writerDone)
-		require.NoError(t, <-buildDone)
+		finishBuild()
 		valid, _ := indexValidity(ctx, db, authKeyTimestampIndex)
 		assert.True(t, valid)
 	})
+}
+
+// TestEnsureAuthKeyIndexKeepsBuildFinishedDuringCheck lets another instance's
+// build finish between the validity and progress checks: startup must keep
+// that index instead of treating it as interrupted and rebuilding it.
+func TestEnsureAuthKeyIndexKeepsBuildFinishedDuringCheck(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		if db.Dialect() != sqlx.PostgreSQL {
+			t.Skip("concurrent index builds are PostgreSQL only")
+		}
+		ctx := context.Background()
+		finishBuild := startHeldAuthKeyIndexBuild(ctx, t, db)
+		before := indexOID(ctx, t, db, authKeyTimestampIndex)
+
+		ensureAuthKeyTimestampIndex(ctx, finishBuildOnProgressCheck{DB: db, finish: finishBuild})
+
+		valid, _ := indexValidity(ctx, db, authKeyTimestampIndex)
+		assert.True(t, valid)
+		assert.Equal(t, before, indexOID(ctx, t, db, authKeyTimestampIndex), "the finished index was rebuilt")
+	})
+}
+
+// finishBuildOnProgressCheck completes the held build just before the build
+// progress is read, so the progress check finds no build running.
+type finishBuildOnProgressCheck struct {
+	sqlx.DB
+	finish func()
+}
+
+func (d finishBuildOnProgressCheck) QueryRow(ctx context.Context, query string, args ...any) sqlx.Row {
+	if strings.Contains(query, "pg_stat_progress_create_index") {
+		d.finish()
+	}
+	return d.DB.QueryRow(ctx, query, args...)
+}
+
+// startHeldAuthKeyIndexBuild drops the auth-key index and starts a concurrent
+// rebuild that an open writer keeps in progress. The returned func releases
+// the writer and waits for the build to finish; it is safe to call more than
+// once and also runs at cleanup, so a failed assertion never leaves the build
+// and the schema cleanup waiting on the writer.
+func startHeldAuthKeyIndexBuild(ctx context.Context, t *testing.T, db sqlx.DB) (finish func()) {
+	t.Helper()
+	store, err := newSQLStoreForTest(t, db, 0)
+	require.NoError(t, err)
+	store.indexBuild.Wait()
+	require.NoError(t, store.Close())
+	_, err = db.Exec(ctx, "DROP INDEX "+authKeyTimestampIndex)
+	require.NoError(t, err)
+
+	release := make(chan struct{})
+	writerDone := make(chan error, 1)
+	writerStarted := make(chan struct{})
+	go func() {
+		writerDone <- db.InTx(ctx, func(q sqlx.Querier) error {
+			if _, err := q.Exec(ctx, "INSERT INTO audit_logs (id, timestamp) VALUES ('held', NOW())"); err != nil {
+				close(writerStarted)
+				return err
+			}
+			close(writerStarted)
+			<-release
+			return nil
+		})
+	}()
+	<-writerStarted
+	buildDone := make(chan error, 1)
+	go func() {
+		_, err := db.Exec(ctx, "CREATE INDEX CONCURRENTLY "+authKeyTimestampIndex+" ON audit_logs(auth_key_id, timestamp)")
+		buildDone <- err
+	}()
+
+	var once sync.Once
+	finish = func() {
+		once.Do(func() {
+			close(release)
+			assert.NoError(t, <-writerDone)
+			assert.NoError(t, <-buildDone)
+		})
+	}
+	t.Cleanup(finish)
+	require.Eventually(t, func() bool { return indexBuildInProgress(ctx, db, authKeyTimestampIndex) }, 10*time.Second, 20*time.Millisecond)
+	return finish
+}
+
+func indexOID(ctx context.Context, t *testing.T, db sqlx.DB, name string) int64 {
+	t.Helper()
+	var oid int64
+	require.NoError(t, db.QueryRow(ctx, `SELECT to_regclass(?)::oid::bigint`, name).Scan(&oid))
+	return oid
 }
