@@ -152,7 +152,8 @@ func BuildResponsesOutputItems(msg core.ResponseMessage) []core.ResponsesOutputI
 		})
 	}
 	contentItems := buildResponsesMessageContent(msg.Content)
-	if len(contentItems) > 0 || len(msg.ToolCalls) == 0 {
+	images := imageGenerationCallItems(msg.ExtraFields)
+	if len(contentItems) > 0 || (len(msg.ToolCalls) == 0 && len(images) == 0) {
 		if len(contentItems) == 0 {
 			contentItems = []core.ResponsesContentItem{
 				{
@@ -170,6 +171,7 @@ func BuildResponsesOutputItems(msg core.ResponseMessage) []core.ResponsesOutputI
 			Content: contentItems,
 		})
 	}
+	output = append(output, images...)
 	for _, toolCall := range msg.ToolCalls {
 		callID := ResponsesFunctionCallCallID(toolCall.ID)
 		output = append(output, core.ResponsesOutputItem{
@@ -183,6 +185,41 @@ func BuildResponsesOutputItems(msg core.ResponseMessage) []core.ResponsesOutputI
 		})
 	}
 	return output
+}
+
+// imageGenerationCallItems turns the generated images on a chat message into
+// image_generation_call items, the shape OpenAI returns them in: the base64
+// image in result, its format in output_format. An image's extra_content (a
+// Gemini thought signature) rides on the item so clients replay it.
+func imageGenerationCallItems(fields core.UnknownJSONFields) []core.ResponsesOutputItem {
+	images, err := core.ChatImages(fields)
+	if err != nil {
+		return nil
+	}
+	items := make([]core.ResponsesOutputItem, 0, len(images))
+	for _, image := range images {
+		if image.ImageURL == nil {
+			continue
+		}
+		dataURL, isDataURL := strings.CutPrefix(image.ImageURL.URL, "data:")
+		mediaType, data, ok := strings.Cut(dataURL, ";base64,")
+		if !isDataURL || !ok || data == "" {
+			continue
+		}
+		result, _ := json.Marshal(data)
+		format, _ := json.Marshal(strings.TrimPrefix(mediaType, "image/"))
+		extra := map[string]json.RawMessage{"result": result, "output_format": format}
+		if raw := image.ImageURL.ExtraFields.Lookup(core.ExtraContentField); len(raw) > 0 {
+			extra[core.ExtraContentField] = raw
+		}
+		items = append(items, core.ResponsesOutputItem{
+			ID:          "ig_" + uuid.New().String(),
+			Type:        "image_generation_call",
+			Status:      "completed",
+			ExtraFields: core.UnknownJSONFieldsFromMap(extra),
+		})
+	}
+	return items
 }
 
 // toolCallExtraContent isolates the extra_content member of a chat tool call
