@@ -1089,7 +1089,7 @@ func TestProviderPassthroughRoute_ReadsOversizedBodyCompletely(t *testing.T) {
 		},
 	}
 	srv := New(mock, &Config{})
-	body := `{"model":"gpt-5-mini","padding":"` + strings.Repeat("x", 65*1024) + `","stream":true}`
+	body := `{"padding":"` + strings.Repeat("x", 65*1024) + `","model":"gpt-5-mini","stream":true}`
 	req := httptest.NewRequest(http.MethodPost, "/p/openai/responses", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -1154,7 +1154,7 @@ func TestProviderPassthroughRoute_RejectsRepeatedModelField(t *testing.T) {
 			srv.ServeHTTP(rec, req)
 
 			require.Equal(t, http.StatusBadRequest, rec.Code)
-			require.Contains(t, rec.Body.String(), "model field is repeated")
+			require.Contains(t, rec.Body.String(), "duplicate top-level")
 			require.Nil(t, mock.lastPassthroughReq)
 		})
 	}

@@ -21,9 +21,10 @@ type requestBodySelectorHints struct {
 	streamVerified bool
 	parsed         bool
 	complete       bool
-	// modelAmbiguous reports a complete body that names a model more than
-	// once, so no single value can be trusted.
-	modelAmbiguous bool
+	// duplicate names a top-level selector field the peeked body repeats.
+	// The other fields are meaningless when it is set: the request is
+	// rejected rather than routed on either occurrence.
+	duplicate string
 }
 
 // seedRequestBodySelectorHints records the model, provider, and stream hints a
@@ -32,7 +33,8 @@ type requestBodySelectorHints struct {
 // bodies are forwarded as they are, so their model is the only thing the
 // allowlist can check: it is taken only from a complete body, however large,
 // which is buffered in full when it exceeds the peek limit. The error is a
-// body read failure, including the body-limit 413.
+// body read failure, including the body-limit 413, or an invalid-request
+// error when the body repeats a top-level selector field.
 func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env *core.WhiteBoxPrompt) error {
 	if !shouldPeekRequestBodySelectors(req, bodyMode, env) {
 		return nil
@@ -42,6 +44,9 @@ func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env
 		hints, err := peekCompleteRequestBodySelectorHints(req, requestSelectorPeekLimit)
 		if err != nil {
 			return err
+		}
+		if hints.duplicate != "" {
+			return core.NewDuplicateSelectorFieldError(hints.duplicate)
 		}
 		if hints.complete {
 			core.ApplyBodySelectorHints(env, hints.model, hints.provider, hints.stream)
@@ -55,13 +60,13 @@ func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env
 		if !hints.streamParsed {
 			core.MarkPassthroughStreamUncertain(env)
 		}
-		if hints.modelAmbiguous {
-			core.MarkPassthroughModelAmbiguous(env)
-		}
 		return nil
 	}
 
 	hints := peekRequestBodySelectorHints(req, requestSelectorPeekLimit)
+	if hints.duplicate != "" {
+		return core.NewDuplicateSelectorFieldError(hints.duplicate)
+	}
 	if hints.parsed || hints.streamParsed {
 		core.ApplyBodySelectorHints(env, hints.model, hints.provider, hints.stream)
 	}
@@ -168,9 +173,8 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 
 	var hints requestBodySelectorHints
 	var modelSeen, providerSeen, streamSeen bool
-	var modelAmbiguous, providerAmbiguous, streamAmbiguous bool
 	partialHints := func() requestBodySelectorHints {
-		if !hints.streamParsed || streamAmbiguous {
+		if !hints.streamParsed {
 			return requestBodySelectorHints{}
 		}
 		return hints.independentStreamHint()
@@ -185,10 +189,10 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 			return requestBodySelectorHints{}
 		}
 
-		switch key {
+		switch field := core.SelectorFieldName(key); field {
 		case "model":
-			if requireComplete && modelSeen {
-				modelAmbiguous = true
+			if modelSeen {
+				return requestBodySelectorHints{duplicate: field}
 			}
 			modelSeen = true
 			model, ok, err := readOptionalJSONString(dec)
@@ -204,8 +208,8 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 				return hints
 			}
 		case "provider":
-			if requireComplete && providerSeen {
-				providerAmbiguous = true
+			if providerSeen {
+				return requestBodySelectorHints{duplicate: field}
 			}
 			providerSeen = true
 			provider, ok, err := readOptionalJSONString(dec)
@@ -219,7 +223,7 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 			}
 		case "stream":
 			if streamSeen {
-				streamAmbiguous = true
+				return requestBodySelectorHints{duplicate: field}
 			}
 			streamSeen = true
 			stream, ok, err := readOptionalJSONBool(dec)
@@ -242,16 +246,7 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 		if _, err := dec.Token(); err != io.EOF {
 			return requestBodySelectorHints{}
 		}
-		if streamAmbiguous {
-			return requestBodySelectorHints{}
-		}
 		hints.streamVerified = hints.streamParsed
-		if modelAmbiguous || providerAmbiguous {
-			hints.model = ""
-			hints.provider = ""
-			hints.modelAmbiguous = modelAmbiguous
-			return hints
-		}
 	}
 
 	hints.parsed = true

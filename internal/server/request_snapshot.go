@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -83,10 +84,15 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 			ctx := core.WithUserPathHeaderName(req.Context(), userPathHeaderName)
 			ctx = core.WithRequestSnapshot(ctx, snapshot)
 			if semantics := core.DeriveWhiteBoxPrompt(snapshot); semantics != nil {
-				if bodyCaptured {
-					verifyCapturedOpaqueSelectorHints(desc.BodyMode, bodyBytes, semantics)
-				} else if err := seedRequestBodySelectorHints(req, desc.BodyMode, semantics); err != nil {
-					return handleError(c, requestBodyReadError(err))
+				// A body that repeats model, provider, or stream is rejected
+				// before any routing, authorization, or forwarding reads it.
+				if err := semantics.DuplicateSelectorError(); err != nil {
+					return handleError(c, err)
+				}
+				if !bodyCaptured {
+					if err := seedRequestBodySelectorHints(req, desc.BodyMode, semantics); err != nil {
+						return handleError(c, requestBodyReadError(err))
+					}
 				}
 				ctx = core.WithWhiteBoxPrompt(ctx, semantics)
 			}
@@ -97,26 +103,15 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 	}
 }
 
-// verifyCapturedOpaqueSelectorHints re-reads the selector fields of a
-// captured opaque body with the complete decoder. The snapshot's own peek
-// takes the first model it meets, which is fine for a body the gateway will
-// decode canonically, but an opaque body is forwarded as written and the
-// upstream's parser may take the last one instead; a repeated model is
-// therefore recorded as ambiguous so the passthrough route refuses it.
-func verifyCapturedOpaqueSelectorHints(bodyMode core.BodyMode, body []byte, env *core.WhiteBoxPrompt) {
-	if bodyMode != core.BodyModeOpaque || env == nil || !env.JSONBodyParsed {
-		return
-	}
-	if hints := decodeCompleteRequestBodySelectorHints(bytes.NewReader(body)); hints.modelAmbiguous {
-		core.MarkPassthroughModelAmbiguous(env)
-	}
-}
-
 // requestBodyReadError shapes a failure to read the request body as a gateway
 // error. One that already carries an HTTP status (the body limit's 413) keeps
 // it so the client learns why; any other read failure is the client's
-// malformed or interrupted request.
+// malformed or interrupted request. A gateway error, such as a repeated
+// selector field, is returned unchanged.
 func requestBodyReadError(err error) error {
+	if _, ok := errors.AsType[*core.GatewayError](err); ok {
+		return err
+	}
 	if status := echo.StatusCode(err); status > 0 {
 		return core.NewInvalidRequestErrorWithStatus(status, echoErrorMessage(err, status), err)
 	}
@@ -264,9 +259,16 @@ func (c *combinedReadCloser) Close() error {
 	return c.rc.Close()
 }
 
+// requestBodyBytes returns the full request body, reading and caching it on
+// the snapshot when ingress only peeked. It fails with an invalid-request
+// error when the body repeats a top-level selector field, so late readers
+// never act on a body whose model, provider, or stream is ambiguous.
 func requestBodyBytes(c *echo.Context) ([]byte, error) {
 	if snapshot := core.GetRequestSnapshot(c.Request().Context()); snapshot != nil {
 		if body := snapshot.CapturedBodyView(); body != nil {
+			if err := duplicateSelectorError(c); err != nil {
+				return nil, err
+			}
 			return body, nil
 		}
 	}
@@ -280,6 +282,9 @@ func requestBodyBytes(c *echo.Context) ([]byte, error) {
 	// is replayed from memory; hand that buffer out instead of copying it.
 	if replay, ok := req.Body.(*bytesReadCloser); ok {
 		if body, ok := replay.unread(); ok {
+			if err := duplicateSelectorError(c); err != nil {
+				return nil, err
+			}
 			return body, nil
 		}
 	}
@@ -293,7 +298,14 @@ func requestBodyBytes(c *echo.Context) ([]byte, error) {
 	}
 	req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	storeRequestBodySnapshot(c, bodyBytes)
+	if err := duplicateSelectorError(c); err != nil {
+		return nil, err
+	}
 	return bodyBytes, nil
+}
+
+func duplicateSelectorError(c *echo.Context) error {
+	return core.GetWhiteBoxPrompt(c.Request().Context()).DuplicateSelectorError()
 }
 
 // storeRequestBodySnapshot records the fully read body on the request snapshot
