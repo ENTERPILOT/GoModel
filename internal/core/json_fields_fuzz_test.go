@@ -29,6 +29,8 @@ func FuzzUnknownJSONFieldsRoundTrip(f *testing.F) {
 		`{"model.name":"dot","x*":"star","":"empty","model":"escaped"}`,
 		` { "spaced" : [ ] , "model" : null } `,
 		`{"unicode":"żółć","emoji":"😀"}`,
+		`{"a":1e309}`,
+		`{"a":123456789012345678901234567890}`,
 		`[1,2,3]`,
 		`"string"`,
 		`{"unterminated":`,
@@ -57,6 +59,17 @@ func FuzzUnknownJSONFieldsRoundTrip(f *testing.F) {
 
 		joined, err := marshalWithUnknownJSONFields(known, extra)
 		require.NoError(t, err)
-		assert.JSONEq(t, string(trimmed), string(joined))
+		assert.Equal(t, decodeJSONPreservingNumbers(t, trimmed), decodeJSONPreservingNumbers(t, joined))
 	})
+}
+
+// decodeJSONPreservingNumbers decodes data with numbers kept as their literal
+// text, so values beyond float64 such as 1e309 still compare exactly.
+func decodeJSONPreservingNumbers(t *testing.T, data []byte) any {
+	t.Helper()
+	decoder := stdjson.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	var value any
+	require.NoError(t, decoder.Decode(&value))
+	return value
 }
