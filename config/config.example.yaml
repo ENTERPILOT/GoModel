@@ -279,6 +279,7 @@ usage:
 # Billed cost = provider cost + markup, recorded per usage row. Provider cost,
 # budgets, and dashboard totals are unaffected. Markups are YAML-only.
 pricing:
+  markups_enabled: false # env: PRICING_MARKUPS_ENABLED; true records billed cost and shows it in the dashboard
   bill_cache_hits: true # env: PRICING_BILL_CACHE_HITS; false bills response-cache hits at $0
   markups: {} # selector -> percent; most specific wins: "provider/model", "model", "provider/", "/"
   # markups:

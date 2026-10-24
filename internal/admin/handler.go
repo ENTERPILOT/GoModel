@@ -40,7 +40,7 @@ type Handler struct {
 	auditReader         auditlog.Reader
 	registry            *providers.ModelRegistry
 	pricingResolver     usage.PricingResolver
-	billCacheHits       bool
+	billing             usage.Billing
 	authKeys            *authkeys.Service
 	users               *users.Service
 	virtualModels       *virtualmodels.Service
@@ -85,6 +85,7 @@ const (
 	DashboardConfigRedisURL             = "REDIS_URL"
 	DashboardConfigSemanticCacheEnabled = "SEMANTIC_CACHE_ENABLED"
 	DashboardConfigPricingRecalculation = "USAGE_PRICING_RECALCULATION_ENABLED"
+	DashboardConfigPricingMarkups       = "PRICING_MARKUPS_ENABLED"
 	DashboardConfigLiveLogsEnabled      = "DASHBOARD_LIVE_LOGS_ENABLED"
 	DashboardConfigMCPEnabled           = "MCP_ENABLED"
 	DashboardConfigMCPToolDiscovery     = "MCP_TOOL_DISCOVERY"
@@ -111,8 +112,11 @@ type DashboardConfigResponse struct {
 	RedisURL              string `json:"REDIS_URL,omitempty"`
 	SemanticCacheEnabled  string `json:"SEMANTIC_CACHE_ENABLED,omitempty"`
 	PricingRecalculation  string `json:"USAGE_PRICING_RECALCULATION_ENABLED,omitempty"`
-	LiveLogsEnabled       string `json:"DASHBOARD_LIVE_LOGS_ENABLED,omitempty"`
-	MCPEnabled            string `json:"MCP_ENABLED,omitempty"`
+	// PricingMarkups mirrors pricing.markups_enabled, so the dashboard shows
+	// billed cost only when the markup feature is on.
+	PricingMarkups  string `json:"PRICING_MARKUPS_ENABLED,omitempty"`
+	LiveLogsEnabled string `json:"DASHBOARD_LIVE_LOGS_ENABLED,omitempty"`
+	MCPEnabled      string `json:"MCP_ENABLED,omitempty"`
 	// MCPToolDiscovery is the gateway's default MCP tool discovery mode
 	// ("off" or "search"), so the dashboard can show how clients see tools.
 	MCPToolDiscovery string `json:"MCP_TOOL_DISCOVERY,omitempty"`
@@ -252,11 +256,12 @@ func WithPricingResolver(resolver usage.PricingResolver) Option {
 	}
 }
 
-// WithBillCacheHits sets whether pricing recalculation bills response-cache
-// hits, mirroring pricing.bill_cache_hits. Default: true.
-func WithBillCacheHits(bill bool) Option {
+// WithBilling sets how pricing recalculation treats billed cost, mirroring
+// pricing.markups_enabled and pricing.bill_cache_hits. Default: billing off,
+// so recalculation leaves billed cost unchanged.
+func WithBilling(billing usage.Billing) Option {
 	return func(h *Handler) {
-		h.billCacheHits = bill
+		h.billing = billing
 	}
 }
 
@@ -419,7 +424,6 @@ func NewHandler(reader usage.UsageReader, registry *providers.ModelRegistry, opt
 		usageReader:   reader,
 		registry:      registry,
 		runtimeConfig: DashboardConfigResponse{},
-		billCacheHits: true,
 	}
 	if registry != nil {
 		h.pricingResolver = registry
@@ -450,6 +454,7 @@ func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardCo
 		RedisURL:               strings.TrimSpace(values.RedisURL),
 		SemanticCacheEnabled:   strings.TrimSpace(values.SemanticCacheEnabled),
 		PricingRecalculation:   strings.TrimSpace(values.PricingRecalculation),
+		PricingMarkups:         strings.TrimSpace(values.PricingMarkups),
 		LiveLogsEnabled:        strings.TrimSpace(values.LiveLogsEnabled),
 		MCPEnabled:             strings.TrimSpace(values.MCPEnabled),
 		MCPToolDiscovery:       strings.TrimSpace(values.MCPToolDiscovery),

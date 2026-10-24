@@ -14,6 +14,7 @@ func TestLoadPricingDefaults(t *testing.T) {
 	withTempDir(t, func(string) {
 		result, err := Load()
 		require.NoError(t, err)
+		assert.False(t, result.Config.Pricing.MarkupsEnabled, "markups are opt-in")
 		assert.Empty(t, result.Config.Pricing.Markups)
 		assert.True(t, result.Config.Pricing.BillCacheHits)
 	})
@@ -25,6 +26,7 @@ func TestLoadPricingFromYAML(t *testing.T) {
 	withTempDir(t, func(dir string) {
 		yamlConfig := `
 pricing:
+  markups_enabled: true
   bill_cache_hits: false
   markups:
     "/": 15
@@ -33,12 +35,28 @@ pricing:
 `
 		result := loadConfigYAML(t, dir, yamlConfig)
 
+		assert.True(t, result.Config.Pricing.MarkupsEnabled)
 		assert.False(t, result.Config.Pricing.BillCacheHits)
 		assert.Equal(t, map[string]float64{
 			"/":                         15,
 			"openai/":                   10,
 			"anthropic/claude-opus-4-1": 25.5,
 		}, result.Config.Pricing.Markups)
+	})
+}
+
+func TestLoadPricingMarkupsEnabledEnvOverridesYAML(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		t.Setenv("PRICING_MARKUPS_ENABLED", "true")
+		result := loadConfigYAML(t, dir, "pricing:\n  markups_enabled: false\n")
+		assert.True(t, result.Config.Pricing.MarkupsEnabled)
+	})
+	withTempDir(t, func(dir string) {
+		t.Setenv("PRICING_MARKUPS_ENABLED", "false")
+		result := loadConfigYAML(t, dir, "pricing:\n  markups_enabled: true\n")
+		assert.False(t, result.Config.Pricing.MarkupsEnabled)
 	})
 }
 
