@@ -3,26 +3,30 @@ package app
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/admin"
+	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/plugins"
+	"github.com/enterpilot/gomodel/internal/plugins/builtin"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/server"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
 
 type routeObservationSelector struct {
@@ -48,10 +52,8 @@ func TestRouteSelectorHooksExposeSuccessfulRouteAffinityContext(t *testing.T) {
 	ctx = hooks.OnRequestStart(ctx, llmclient.RequestInfo{Provider: "openai", Model: "gpt"})
 	hooks.OnRequestEnd(ctx, llmclient.ResponseInfo{Provider: "openai", Model: "gpt", StatusCode: http.StatusOK})
 
-	if selector.outcome.Source != "smart" || selector.outcome.SessionID != "session-a" {
-		t.Fatalf("route affinity context = %q/%q, want smart/session-a",
-			selector.outcome.Source, selector.outcome.SessionID)
-	}
+	require.Equal(t, "smart", selector.outcome.Source)
+	require.Equal(t, "session-a", selector.outcome.SessionID)
 }
 
 type runtimeRefreshMockProvider struct {
@@ -89,9 +91,7 @@ func (m *runtimeRefreshMockProvider) Embeddings(_ context.Context, _ *core.Embed
 func TestShutdownClosesLiveStreamsBeforeWaitingForServer(t *testing.T) {
 	broker := live.NewBroker(live.Config{Enabled: true})
 	sub := broker.Subscribe(0)
-	if sub == nil {
-		t.Fatal("Subscribe returned nil")
-	}
+	require.NotNil(t, sub)
 
 	stopped := make(chan struct{})
 	serverDone := make(chan error)
@@ -121,9 +121,8 @@ func TestShutdownClosesLiveStreamsBeforeWaitingForServer(t *testing.T) {
 
 	select {
 	case closed := <-subscriberClosed:
-		if !closed {
-			t.Fatal("live subscriber remained open")
-		}
+		require.True(t, closed)
+
 	default:
 		t.Fatal("server stopped before live subscriber closure was observed")
 	}
@@ -176,26 +175,17 @@ func TestRefreshRuntime_RefreshesModelListProvidersAndRegistryCache(t *testing.T
 	}
 
 	report, err := app.RefreshRuntime(context.Background())
-	if err != nil {
-		t.Fatalf("RefreshRuntime() error = %v", err)
-	}
-	if report.Status != admin.RuntimeRefreshStatusOK {
-		t.Fatalf("RefreshRuntime().Status = %q, want ok; steps=%+v", report.Status, report.Steps)
-	}
-	if report.ModelCount != 1 || report.ProviderCount != 1 {
-		t.Fatalf("RefreshRuntime() counts = %d/%d, want 1/1", report.ModelCount, report.ProviderCount)
-	}
+	require.NoError(t, err)
+	require.Equal(t, admin.RuntimeRefreshStatusOK, report.Status, "RefreshRuntime().Status = %q, want ok; steps=%+v", report.Status, report.Steps)
+	require.Equal(t, 1, report.ModelCount)
+	require.Equal(t, 1, report.ProviderCount)
 
 	info := registry.GetModel("openai/gpt-test")
-	if info == nil || info.Model.Metadata == nil {
-		t.Fatal("expected refreshed provider model metadata")
-	}
-	if info.Model.Metadata.DisplayName != "GPT Test" {
-		t.Fatalf("DisplayName = %q, want GPT Test", info.Model.Metadata.DisplayName)
-	}
-	if info.Model.Metadata.ContextWindow == nil || *info.Model.Metadata.ContextWindow != 128000 {
-		t.Fatalf("ContextWindow = %v, want 128000", info.Model.Metadata.ContextWindow)
-	}
+	require.NotNil(t, info)
+	require.NotNil(t, info.Model.Metadata)
+	require.Equal(t, "GPT Test", info.Model.Metadata.DisplayName)
+	require.NotNil(t, info.Model.Metadata.ContextWindow)
+	require.Equal(t, 128000, *info.Model.Metadata.ContextWindow)
 }
 
 func TestRefreshRuntime_SkipsDisabledVirtualModels(t *testing.T) {
@@ -219,18 +209,16 @@ func TestRefreshRuntime_SkipsDisabledVirtualModels(t *testing.T) {
 	}
 
 	report, err := app.RefreshRuntime(context.Background())
-	if err != nil {
-		t.Fatalf("RefreshRuntime() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	step := runtimeRefreshStepByName(report.Steps, "virtual_models")
-	if step == nil {
-		t.Fatalf("virtual_models step missing: %+v", report.Steps)
-		return
-	}
-	if step.Status != admin.RuntimeRefreshStatusSkipped {
-		t.Fatalf("virtual_models step status = %q, want skipped; step=%+v", step.Status, *step)
-	}
+	require.NotNil(t, step, "virtual_models step missing: %+v", report.Steps)
+	require.Equal(t, admin.RuntimeRefreshStatusSkipped, step.Status, "virtual_models step status = %q, want skipped; step=%+v", step.Status, *step)
+
+	// The MCP gateway is nil too, so its step is listed and skipped.
+	mcpStep := runtimeRefreshStepByName(report.Steps, "mcp_servers")
+	require.NotNil(t, mcpStep, "mcp_servers step missing: %+v", report.Steps)
+	require.Equal(t, admin.RuntimeRefreshStatusSkipped, mcpStep.Status)
 }
 
 func TestRefreshRuntime_ReturnsGatewayErrorWhenContextCanceledBeforeAcquire(t *testing.T) {
@@ -243,20 +231,12 @@ func TestRefreshRuntime_ReturnsGatewayErrorWhenContextCanceledBeforeAcquire(t *t
 	cancel()
 
 	_, err := app.RefreshRuntime(ctx)
-	if err == nil {
-		t.Fatal("RefreshRuntime() error = nil, want cancellation error")
-	}
+	require.Error(t, err)
 
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("RefreshRuntime() error = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.HTTPStatusCode() != http.StatusRequestTimeout {
-		t.Fatalf("status = %d, want 408", gatewayErr.HTTPStatusCode())
-	}
-	if gatewayErr.Provider != "runtime_refresh" {
-		t.Fatalf("provider = %q, want runtime_refresh", gatewayErr.Provider)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, http.StatusRequestTimeout, gatewayErr.HTTPStatusCode())
+	require.Equal(t, "runtime_refresh", gatewayErr.Provider)
 }
 
 func TestRunRuntimeRefreshStepReturnsContextErrorWithoutAppendingStep(t *testing.T) {
@@ -266,12 +246,8 @@ func TestRunRuntimeRefreshStepReturnsContextErrorWithoutAppendingStep(t *testing
 	err := app.runRuntimeRefreshStep(&report, "providers", func() runtimeRefreshStepResult {
 		return runtimeRefreshStepResult{err: context.Canceled}
 	})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("runRuntimeRefreshStep() error = %v, want context canceled", err)
-	}
-	if len(report.Steps) != 0 {
-		t.Fatalf("steps = %+v, want none appended for context cancellation", report.Steps)
-	}
+	require.ErrorIs(t, err, context.Canceled)
+	require.Empty(t, report.Steps)
 }
 
 func TestProviderRefreshIssueCountIncludesAvailabilityErrors(t *testing.T) {
@@ -281,9 +257,7 @@ func TestProviderRefreshIssueCountIncludesAvailabilityErrors(t *testing.T) {
 		{Name: "availability", LastAvailabilityError: " provider unavailable "},
 		{Name: "both", LastModelFetchError: "fetch failed", LastAvailabilityError: "unavailable"},
 	})
-	if got != 3 {
-		t.Fatalf("providerRefreshIssueCount() = %d, want 3", got)
-	}
+	require.Equal(t, 3, got)
 }
 
 func runtimeRefreshStepByName(steps []admin.RuntimeRefreshStep, name string) *admin.RuntimeRefreshStep {
@@ -303,9 +277,7 @@ func TestRuntimeWorkflowFeatureCaps_EnableFailoverFromExplicitFlag(t *testing.T)
 	}
 
 	caps := runtimeWorkflowFeatureCaps(cfg)
-	if !caps.Failover {
-		t.Fatal("runtimeWorkflowFeatureCaps().Failover = false, want true")
-	}
+	require.True(t, caps.Failover)
 }
 
 func TestDefaultWorkflowInput_SetsFailoverFeature(t *testing.T) {
@@ -316,12 +288,8 @@ func TestDefaultWorkflowInput_SetsFailoverFeature(t *testing.T) {
 	}
 
 	input := defaultWorkflowInput(cfg, nil, nil)
-	if input.Payload.Features.Failover == nil {
-		t.Fatal("defaultWorkflowInput().Payload.Features.Failover = nil, want non-nil")
-	}
-	if !*input.Payload.Features.Failover {
-		t.Fatal("defaultWorkflowInput().Payload.Features.Failover = false, want true")
-	}
+	require.NotNil(t, input.Payload.Features.Failover)
+	require.True(t, *input.Payload.Features.Failover)
 }
 
 func TestDefaultWorkflowInput_IncludesConfiguredGuardrailsMissingFromLoadedCatalog(t *testing.T) {
@@ -342,15 +310,10 @@ func TestDefaultWorkflowInput_IncludesConfiguredGuardrailsMissingFromLoadedCatal
 		{Name: "policy-system", Type: "system_prompt"},
 	})
 
-	if !input.Payload.Features.Guardrails {
-		t.Fatal("defaultWorkflowInput().Payload.Features.Guardrails = false, want true")
-	}
-	if len(input.Payload.Guardrails) != 1 {
-		t.Fatalf("len(defaultWorkflowInput().Payload.Guardrails) = %d, want 1", len(input.Payload.Guardrails))
-	}
-	if got := input.Payload.Guardrails[0].Ref; got != "policy-system" {
-		t.Fatalf("defaultWorkflowInput().Payload.Guardrails[0].Ref = %q, want policy-system", got)
-	}
+	require.True(t, input.Payload.Features.Guardrails)
+	require.Len(t, input.Payload.Steps, 1)
+	got := input.Payload.Steps[0].Ref
+	require.Equal(t, "policy-system", got)
 }
 
 func TestDefaultWorkflowInput_TrimsConfiguredGuardrailRefs(t *testing.T) {
@@ -368,16 +331,13 @@ func TestDefaultWorkflowInput_TrimsConfiguredGuardrailRefs(t *testing.T) {
 	}
 
 	input := defaultWorkflowInput(cfg, []string{"policy-system"}, nil)
-	if len(input.Payload.Guardrails) != 1 {
-		t.Fatalf("len(defaultWorkflowInput().Payload.Guardrails) = %d, want 1", len(input.Payload.Guardrails))
-	}
-	if got := input.Payload.Guardrails[0].Ref; got != "policy-system" {
-		t.Fatalf("defaultWorkflowInput().Payload.Guardrails[0].Ref = %q, want policy-system", got)
-	}
+	require.Len(t, input.Payload.Steps, 1)
+	got := input.Payload.Steps[0].Ref
+	require.Equal(t, "policy-system", got)
 }
 
 func TestConfigGuardrailDefinitions_DisabledIgnoresInvalidRules(t *testing.T) {
-	definitions, err := configGuardrailDefinitions(config.GuardrailsConfig{
+	definitions, err := configGuardrailDefinitions(t.Context(), config.GuardrailsConfig{
 		Enabled: false,
 		Rules: []config.GuardrailRuleConfig{
 			{
@@ -388,17 +348,13 @@ func TestConfigGuardrailDefinitions_DisabledIgnoresInvalidRules(t *testing.T) {
 				},
 			},
 		},
-	})
-	if err != nil {
-		t.Fatalf("configGuardrailDefinitions() error = %v, want nil", err)
-	}
-	if len(definitions) != 0 {
-		t.Fatalf("len(configGuardrailDefinitions()) = %d, want 0", len(definitions))
-	}
+	}, testPluginCatalog(t), nil)
+	require.NoError(t, err)
+	require.Empty(t, definitions)
 }
 
 func TestConfigGuardrailDefinitions_EnabledRejectsUnknownType(t *testing.T) {
-	_, err := configGuardrailDefinitions(config.GuardrailsConfig{
+	_, err := configGuardrailDefinitions(t.Context(), config.GuardrailsConfig{
 		Enabled: true,
 		Rules: []config.GuardrailRuleConfig{
 			{
@@ -406,14 +362,12 @@ func TestConfigGuardrailDefinitions_EnabledRejectsUnknownType(t *testing.T) {
 				Type: "future_guardrail_type",
 			},
 		},
-	})
-	if err == nil {
-		t.Fatal("configGuardrailDefinitions() error = nil, want unsupported type error")
-	}
+	}, testPluginCatalog(t), nil)
+	require.Error(t, err)
 }
 
 func TestConfigGuardrailDefinitions_TrimAndCanonicalizeRuleIdentity(t *testing.T) {
-	definitions, err := configGuardrailDefinitions(config.GuardrailsConfig{
+	definitions, err := configGuardrailDefinitions(t.Context(), config.GuardrailsConfig{
 		Enabled: true,
 		Rules: []config.GuardrailRuleConfig{
 			{
@@ -425,23 +379,15 @@ func TestConfigGuardrailDefinitions_TrimAndCanonicalizeRuleIdentity(t *testing.T
 				},
 			},
 		},
-	})
-	if err != nil {
-		t.Fatalf("configGuardrailDefinitions() error = %v", err)
-	}
-	if len(definitions) != 1 {
-		t.Fatalf("len(configGuardrailDefinitions()) = %d, want 1", len(definitions))
-	}
-	if definitions[0].Name != "policy-system" {
-		t.Fatalf("definitions[0].Name = %q, want policy-system", definitions[0].Name)
-	}
-	if definitions[0].Type != "system_prompt" {
-		t.Fatalf("definitions[0].Type = %q, want system_prompt", definitions[0].Type)
-	}
+	}, testPluginCatalog(t), nil)
+	require.NoError(t, err)
+	require.Len(t, definitions, 1)
+	require.Equal(t, "policy-system", definitions[0].Name)
+	require.Equal(t, "system_prompt", definitions[0].Type)
 }
 
 func TestConfigGuardrailDefinitions_RejectsBlankNameOrType(t *testing.T) {
-	_, err := configGuardrailDefinitions(config.GuardrailsConfig{
+	_, err := configGuardrailDefinitions(t.Context(), config.GuardrailsConfig{
 		Enabled: true,
 		Rules: []config.GuardrailRuleConfig{
 			{
@@ -449,12 +395,10 @@ func TestConfigGuardrailDefinitions_RejectsBlankNameOrType(t *testing.T) {
 				Type: "system_prompt",
 			},
 		},
-	})
-	if err == nil {
-		t.Fatal("configGuardrailDefinitions() error = nil, want name validation error")
-	}
+	}, testPluginCatalog(t), nil)
+	require.Error(t, err)
 
-	_, err = configGuardrailDefinitions(config.GuardrailsConfig{
+	_, err = configGuardrailDefinitions(t.Context(), config.GuardrailsConfig{
 		Enabled: true,
 		Rules: []config.GuardrailRuleConfig{
 			{
@@ -462,10 +406,8 @@ func TestConfigGuardrailDefinitions_RejectsBlankNameOrType(t *testing.T) {
 				Type: "   ",
 			},
 		},
-	})
-	if err == nil {
-		t.Fatal("configGuardrailDefinitions() error = nil, want type validation error")
-	}
+	}, testPluginCatalog(t), nil)
+	require.Error(t, err)
 }
 
 func TestDashboardRuntimeConfig_ExposesFailoverEnabled(t *testing.T) {
@@ -476,16 +418,14 @@ func TestDashboardRuntimeConfig_ExposesFailoverEnabled(t *testing.T) {
 	}
 
 	values := dashboardRuntimeConfig(cfg, false, false, false)
-	if got := values.FailoverEnabled; got != "on" {
-		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigFailoverEnabled, got)
-	}
+	got := values.FailoverEnabled
+	require.Equal(t, "on", got, "dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigFailoverEnabled, got)
 }
 
 func TestDashboardRuntimeConfig_ExposesDemoMode(t *testing.T) {
 	values := dashboardRuntimeConfig(&config.Config{}, false, true, false)
-	if got := values.DemoMode; got != "on" {
-		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigDemoMode, got)
-	}
+	got := values.DemoMode
+	require.Equal(t, "on", got, "dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigDemoMode, got)
 }
 
 func TestDashboardRuntimeConfig_FailoverDisabled(t *testing.T) {
@@ -496,9 +436,8 @@ func TestDashboardRuntimeConfig_FailoverDisabled(t *testing.T) {
 	}
 
 	values := dashboardRuntimeConfig(cfg, false, false, false)
-	if got := values.FailoverEnabled; got != "off" {
-		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigFailoverEnabled, got)
-	}
+	got := values.FailoverEnabled
+	require.Equal(t, "off", got, "dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigFailoverEnabled, got)
 }
 
 func TestDashboardRuntimeConfig_DefaultModeDoesNotEnableFailover(t *testing.T) {
@@ -510,9 +449,8 @@ func TestDashboardRuntimeConfig_DefaultModeDoesNotEnableFailover(t *testing.T) {
 	}
 
 	values := dashboardRuntimeConfig(cfg, false, false, false)
-	if got := values.FailoverEnabled; got != "off" {
-		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigFailoverEnabled, got)
-	}
+	got := values.FailoverEnabled
+	require.Equal(t, "off", got, "dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigFailoverEnabled, got)
 }
 
 func TestDashboardRuntimeConfig_ExposesFeatureAvailabilityFlags(t *testing.T) {
@@ -550,52 +488,52 @@ func TestDashboardRuntimeConfig_ExposesFeatureAvailabilityFlags(t *testing.T) {
 	}
 
 	values := dashboardRuntimeConfig(cfg, true, false, false)
-	if got := values.LoggingEnabled; got != "on" {
-		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigLoggingEnabled, got)
-	}
-	if got := values.LoggingRetentionDays; got != "14" {
-		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want 14", admin.DashboardConfigLoggingRetentionDays, got)
-	}
-	if got := values.UsageEnabled; got != "on" {
-		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigUsageEnabled, got)
-	}
-	if got := values.BudgetsEnabled; got != "on" {
-		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigBudgetsEnabled, got)
-	}
-	if got := values.GuardrailsEnabled; got != "on" {
-		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigGuardrailsEnabled, got)
-	}
-	if got := values.CacheEnabled; got != "on" {
-		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigCacheEnabled, got)
-	}
-	if got := values.RedisURL; got != "on" {
-		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigRedisURL, got)
-	}
-	if got := values.SemanticCacheEnabled; got != "off" {
-		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigSemanticCacheEnabled, got)
-	}
-	if got := values.LiveLogsEnabled; got != "on" {
-		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigLiveLogsEnabled, got)
-	}
-	if got := values.MCPEnabled; got != "on" {
-		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigMCPEnabled, got)
-	}
+	got := values.LoggingEnabled
+	require.Equal(t, "on", got, "dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigLoggingEnabled, got)
+	got = values.LoggingRetentionDays
+	require.Equal(t, "14", got, "dashboardRuntimeConfig()[%q] = %q, want 14", admin.DashboardConfigLoggingRetentionDays, got)
+	got = values.UsageEnabled
+	require.Equal(t, "on", got, "dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigUsageEnabled, got)
+	got = values.BudgetsEnabled
+	require.Equal(t, "on", got, "dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigBudgetsEnabled, got)
+	got = values.GuardrailsEnabled
+	require.Equal(t, "on", got, "dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigGuardrailsEnabled, got)
+	got = // Guardrails imply the plugin system, so the Plugins page shows too.
+		values.PluginsEnabled
+	require.Equal(t, "on", got, "dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigPluginsEnabled, got)
+	got = values.CacheEnabled
+	require.Equal(t, "on", got, "dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigCacheEnabled, got)
+	got = values.RedisURL
+	require.Equal(t, "on", got, "dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigRedisURL, got)
+	got = values.SemanticCacheEnabled
+	require.Equal(t, "off", got, "dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigSemanticCacheEnabled, got)
+	got = values.LiveLogsEnabled
+	require.Equal(t, "on", got, "dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigLiveLogsEnabled, got)
+	got = values.MCPEnabled
+	require.Equal(t, "on", got, "dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigMCPEnabled, got)
+	got = values.MCPToolDiscovery
+	require.Equal(t, "off", got, "dashboardRuntimeConfig()[%q] = %q, want off by default", admin.DashboardConfigMCPToolDiscovery, got)
+}
+
+func TestDashboardRuntimeConfig_ExposesMCPToolDiscovery(t *testing.T) {
+	values := dashboardRuntimeConfig(&config.Config{
+		MCP: config.MCPConfig{Enabled: true, ToolDiscovery: config.MCPToolDiscoverySearch},
+	}, false, false, false)
+	require.Equal(t, "search", values.MCPToolDiscovery)
 }
 
 func TestDashboardRuntimeConfig_ExposesIndefiniteLoggingRetention(t *testing.T) {
 	values := dashboardRuntimeConfig(&config.Config{}, false, false, false)
-	if got := values.LoggingRetentionDays; got != "0" {
-		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want 0", admin.DashboardConfigLoggingRetentionDays, got)
-	}
+	got := values.LoggingRetentionDays
+	require.Equal(t, "0", got, "dashboardRuntimeConfig()[%q] = %q, want 0", admin.DashboardConfigLoggingRetentionDays, got)
 }
 
 func TestDashboardRuntimeConfig_HidesMCPWhenDisabled(t *testing.T) {
 	values := dashboardRuntimeConfig(&config.Config{
 		MCP: config.MCPConfig{Enabled: false},
 	}, false, false, false)
-	if got := values.MCPEnabled; got != "off" {
-		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigMCPEnabled, got)
-	}
+	got := values.MCPEnabled
+	require.Equal(t, "off", got, "dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigMCPEnabled, got)
 }
 
 func TestDashboardRuntimeConfig_VirtualModelStrategies(t *testing.T) {
@@ -610,9 +548,31 @@ func TestDashboardRuntimeConfig_VirtualModelStrategies(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			values := dashboardRuntimeConfig(&config.Config{}, false, false, tt.adaptiveRouting)
-			if got := values.VirtualModelStrategies; got != tt.want {
-				t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want %q", admin.DashboardConfigVMStrategies, got, tt.want)
-			}
+			got := values.VirtualModelStrategies
+			require.Equal(t, tt.want, got, "dashboardRuntimeConfig()[%q] = %q, want %q", admin.DashboardConfigVMStrategies, got, tt.want)
+		})
+	}
+}
+
+func TestDashboardRuntimeConfig_ExposesUserPathHeader(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *config.Config
+		want string
+	}{
+		{name: "nil config falls back to default", cfg: nil, want: "X-GoModel-User-Path"},
+		{name: "unset header falls back to default", cfg: &config.Config{}, want: "X-GoModel-User-Path"},
+		{
+			name: "custom header is canonicalized",
+			cfg:  &config.Config{Server: config.ServerConfig{UserPathHeader: "x-tenant-path"}},
+			want: "X-Tenant-Path",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			values := dashboardRuntimeConfig(tt.cfg, false, false, false)
+			got := values.UserPathHeader
+			require.Equal(t, tt.want, got, "dashboardRuntimeConfig()[%q] = %q, want %q", admin.DashboardConfigUserPathHeader, got, tt.want)
 		})
 	}
 }
@@ -634,15 +594,12 @@ func TestDashboardRuntimeConfig_HidesCacheAnalyticsWhenUsageDisabled(t *testing.
 	}
 
 	values := dashboardRuntimeConfig(cfg, false, false, false)
-	if got := values.UsageEnabled; got != "off" {
-		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigUsageEnabled, got)
-	}
-	if got := values.CacheEnabled; got != "off" {
-		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigCacheEnabled, got)
-	}
-	if got := values.RedisURL; got != "on" {
-		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigRedisURL, got)
-	}
+	got := values.UsageEnabled
+	require.Equal(t, "off", got, "dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigUsageEnabled, got)
+	got = values.CacheEnabled
+	require.Equal(t, "off", got, "dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigCacheEnabled, got)
+	got = values.RedisURL
+	require.Equal(t, "on", got, "dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigRedisURL, got)
 }
 
 func TestUsagePricingRecalculationConfigured(t *testing.T) {
@@ -687,12 +644,17 @@ func TestUsagePricingRecalculationConfigured(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := usagePricingRecalculationConfigured(test.cfg); got != test.want {
-				t.Fatalf("usagePricingRecalculationConfigured() = %v, want %v", got, test.want)
-			}
+			got := usagePricingRecalculationConfigured(test.cfg)
+			require.Equal(t, test.want, got)
 		})
 	}
 }
+
+type appTestHealthChecker struct{}
+
+func (appTestHealthChecker) Name() string { return "test" }
+
+func (appTestHealthChecker) CheckHealth(context.Context) ext.HealthStatus { return ext.HealthOK }
 
 func TestApplyExtensionsSnapshotsRegistryIntoServerConfig(t *testing.T) {
 	reg := &ext.Registry{}
@@ -700,37 +662,35 @@ func TestApplyExtensionsSnapshotsRegistryIntoServerConfig(t *testing.T) {
 	reg.UseOuterMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 	reg.UseMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 	reg.RegisterRoutes(func(_ *echo.Echo) {})
+	reg.RegisterAdminRoutes(func(_ *echo.Group) {})
+	reg.RegisterHealthChecker(appTestHealthChecker{})
 	reg.AddPublicPaths("/sso/callback", "/sso/*")
 	reg.RegisterAuthenticator(&appTestAuthenticator{})
 
 	serverCfg := &server.Config{}
 	applyExtensions(serverCfg, reg)
 
-	if len(serverCfg.RequestRewriters) != 1 || serverCfg.RequestRewriters[0].Name() != "r1" {
-		t.Errorf("RequestRewriters not copied: %+v", serverCfg.RequestRewriters)
-	}
-	if len(serverCfg.OuterMiddleware) != 1 {
-		t.Errorf("OuterMiddleware not copied: %d entries", len(serverCfg.OuterMiddleware))
-	}
-	if len(serverCfg.ExtraMiddleware) != 1 {
-		t.Errorf("ExtraMiddleware not copied: %d entries", len(serverCfg.ExtraMiddleware))
-	}
-	if len(serverCfg.ExtraRoutes) != 1 {
-		t.Errorf("ExtraRoutes not copied: %d entries", len(serverCfg.ExtraRoutes))
-	}
-	if len(serverCfg.ExtraAuthSkipPaths) != 2 {
-		t.Errorf("ExtraAuthSkipPaths not copied: %v", serverCfg.ExtraAuthSkipPaths)
-	}
-	if len(serverCfg.RequestAuthenticators) != 1 {
-		t.Errorf("RequestAuthenticators not copied: %v", serverCfg.RequestAuthenticators)
-	}
+	require.Len(t, serverCfg.RequestRewriters, 1)
+	assert.Equal(t, "r1", serverCfg.RequestRewriters[0].Name())
+	assert.Len(t, serverCfg.OuterMiddleware, 1)
+	assert.Len(t, serverCfg.ExtraMiddleware, 1)
+	assert.Len(t, serverCfg.ExtraRoutes, 1)
+	assert.Len(t, serverCfg.ExtraAdminRoutes, 1)
+	assert.Len(t, serverCfg.HealthCheckers, 1)
+	assert.Len(t, serverCfg.ExtraAuthSkipPaths, 2)
+	assert.Len(t, serverCfg.RequestAuthenticators, 1)
 
 	// A nil registry must leave the config untouched.
 	empty := &server.Config{}
 	applyExtensions(empty, nil)
-	if empty.RequestRewriters != nil || empty.OuterMiddleware != nil || empty.ExtraMiddleware != nil || empty.ExtraRoutes != nil || empty.ExtraAuthSkipPaths != nil || empty.RequestAuthenticators != nil {
-		t.Error("nil registry must not modify server config")
-	}
+	assert.Nil(t, empty.RequestRewriters)
+	assert.Nil(t, empty.OuterMiddleware)
+	assert.Nil(t, empty.ExtraMiddleware)
+	assert.Nil(t, empty.ExtraRoutes)
+	assert.Nil(t, empty.ExtraAdminRoutes)
+	assert.Nil(t, empty.HealthCheckers)
+	assert.Nil(t, empty.ExtraAuthSkipPaths)
+	assert.Nil(t, empty.RequestAuthenticators)
 }
 
 type appTestAuthenticator struct{}
@@ -760,27 +720,20 @@ type appAuthenticationEventRecorder struct{}
 func (*appAuthenticationEventRecorder) RecordAuthenticationEvent(ext.AuthenticationEvent) {}
 
 func TestExtensionAuthenticationDetectionAndRecorderBinding(t *testing.T) {
-	if hasUsableRequestAuthenticator(nil) {
-		t.Fatal("nil registry reported extension authentication")
-	}
+	require.False(t, hasUsableRequestAuthenticator(nil))
 
 	registry := &ext.Registry{}
 	var typedNil *appTestAuthenticator
 	registry.RegisterAuthenticator(typedNil)
-	if hasUsableRequestAuthenticator(registry) {
-		t.Fatal("typed-nil authenticator reported extension authentication")
-	}
+	require.False(t, hasUsableRequestAuthenticator(registry))
 
 	authenticator := &recorderAwareAppAuthenticator{}
 	registry.RegisterAuthenticator(authenticator)
-	if !hasUsableRequestAuthenticator(registry) {
-		t.Fatal("usable authenticator was not detected")
-	}
+	require.True(t, hasUsableRequestAuthenticator(registry))
+
 	recorder := &appAuthenticationEventRecorder{}
 	bindAuthenticationEventRecorders(registry, recorder)
-	if authenticator.recorder != recorder {
-		t.Fatal("authentication event recorder was not installed")
-	}
+	require.Same(t, recorder, authenticator.recorder)
 }
 
 func TestLogStartupInfoTreatsExtensionAuthenticatorAsEffectiveAuth(t *testing.T) {
@@ -792,11 +745,49 @@ func TestLogStartupInfoTreatsExtensionAuthenticatorAsEffectiveAuth(t *testing.T)
 	app := &App{config: &config.Config{}, extensionAuth: true}
 	app.logStartupInfo()
 	output := logs.String()
-	if strings.Contains(output, "UNSAFE MODE") || strings.Contains(output, "unauthenticated access allowed") {
-		t.Fatalf("extension-authenticated startup emitted unsafe warning: %s", output)
+	require.NotContains(t, output, "UNSAFE MODE")
+	require.NotContains(t, output, "unauthenticated access allowed", "extension-authenticated startup emitted unsafe warning: %s", output)
+	require.Contains(t, output, `mode=extension`)
+}
+
+func TestLogStartupInfoWarnsWhenManagedKeysLeaveAdminOpen(t *testing.T) {
+	tests := []struct {
+		name     string
+		server   config.ServerConfig
+		admin    config.AdminConfig
+		wantWarn bool
+	}{
+		{name: "admin endpoints without master key", admin: config.AdminConfig{EndpointsEnabled: true}, wantWarn: true},
+		{name: "master key disabled", server: config.ServerConfig{MasterKeyDisabled: true}, admin: config.AdminConfig{EndpointsEnabled: true}},
+		{name: "admin endpoints disabled"},
 	}
-	if !strings.Contains(output, `mode=extension`) {
-		t.Fatalf("extension authentication mode was not logged: %s", output)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store, err := authkeys.NewSQLStore(t.Context(), sqlxtest.NewSQLite(t))
+			require.NoError(t, err)
+			service, err := authkeys.NewService(store)
+			require.NoError(t, err)
+			_, err = service.Create(t.Context(), authkeys.CreateInput{Name: "team"})
+			require.NoError(t, err)
+
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+
+			app := &App{
+				config:   &config.Config{Server: tt.server, Admin: tt.admin},
+				authKeys: &authkeys.Result{Service: service},
+			}
+			app.logStartupInfo()
+			output := logs.String()
+			assert.Contains(t, output, "mode=managed_keys")
+			if tt.wantWarn {
+				assert.Contains(t, output, "admin API is reachable without authentication")
+			} else {
+				assert.NotContains(t, output, "admin API is reachable without authentication")
+			}
+		})
 	}
 }
 
@@ -806,4 +797,75 @@ func (r *staticRewriter) Name() string { return r.name }
 
 func (r *staticRewriter) Rewrite(context.Context, ext.Input) (*ext.Result, error) {
 	return nil, nil
+}
+
+// testPluginCatalog returns a catalog of the built-in plugins.
+func testPluginCatalog(t *testing.T) *plugins.Catalog {
+	t.Helper()
+	catalog := plugins.NewCatalog()
+	for _, factory := range builtin.All() {
+		err := catalog.Register(factory, plugins.SourceBuiltin)
+		require.NoError(t, err)
+	}
+	return catalog
+}
+
+func TestDashboardRuntimeConfig_PluginsFlag(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		cfg  *config.Config
+		want string
+	}{
+		{"default off", &config.Config{}, "off"},
+		{"plugins on", &config.Config{Plugins: config.PluginsConfig{Enabled: true}}, "on"},
+		{"guardrails imply plugins", &config.Config{Guardrails: config.GuardrailsConfig{Enabled: true}}, "on"},
+	} {
+		got := dashboardRuntimeConfig(tt.cfg, false, false, false).PluginsEnabled
+		assert.Equal(t, tt.want, got, "%s: PLUGINS_ENABLED = %q, want %q", tt.name, got, tt.want)
+	}
+}
+
+// Config-declared guardrails are seeded into the database. Their secret
+// fields must be stored as the references written in config.yaml, never as
+// resolved values, and are resolved once, when the guardrail is built.
+func TestConfigGuardrailDefinitions_SeedSecretReferencesUnresolved(t *testing.T) {
+	t.Setenv("GOMODEL_TEST_PII_KEY", "resolved-secret")
+	t.Setenv("GOMODEL_TEST_PII_URL", "http://localhost:5002")
+	result := &config.LoadResult{
+		Config: &config.Config{Guardrails: config.GuardrailsConfig{
+			Enabled: true,
+			Rules: []config.GuardrailRuleConfig{{
+				Name: "pii",
+				Type: "presidio",
+				Config: map[string]any{
+					"api_key":      "${env:GOMODEL_TEST_PII_KEY}",
+					"analyzer_url": "${env:GOMODEL_TEST_PII_URL}",
+				},
+			}},
+		}},
+		Secrets: config.NewSecrets(),
+	}
+	require.NoError(t, result.ResolveSecrets(t.Context()))
+
+	definitions, err := configGuardrailDefinitions(t.Context(), result.Config.Guardrails, testPluginCatalog(t), result.Secrets)
+	require.NoError(t, err)
+	require.Len(t, definitions, 1)
+	stored := string(definitions[0].Config)
+	assert.Contains(t, stored, `"api_key":"${env:GOMODEL_TEST_PII_KEY}"`)
+	assert.NotContains(t, stored, "resolved-secret")
+	assert.Contains(t, stored, `"analyzer_url":"http://localhost:5002"`, "non-secret fields are resolved when seeded")
+}
+
+func TestConfigGuardrailDefinitions_UnresolvableFieldNamesTheRulePath(t *testing.T) {
+	_, err := configGuardrailDefinitions(t.Context(), config.GuardrailsConfig{
+		Enabled: true,
+		Rules: []config.GuardrailRuleConfig{{
+			Name:   "pii",
+			Type:   "presidio",
+			Config: map[string]any{"analyzer_url": "${env:GOMODEL_TEST_UNSET_URL}", "api_key": "${env:GOMODEL_TEST_UNSET_KEY}"},
+		}},
+	}, testPluginCatalog(t), config.NewSecrets())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "guardrails.rules[0].config.analyzer_url")
+	assert.NotContains(t, err.Error(), "api_key", "secret fields are resolved by the guardrail build, not here")
 }

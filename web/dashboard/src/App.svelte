@@ -10,6 +10,8 @@
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { dateRange } from "$lib/stores/dateRange.svelte.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+  import { access } from "$lib/stores/access.svelte.js";
+  import { pageVisibleForScope } from "$lib/stores/accessScope.js";
   import { modelsStore } from "$lib/stores/models.svelte.js";
   import { versionStore } from "$lib/stores/version.svelte.js";
   import { syncDocumentLocale } from "$lib/i18n/locale.js";
@@ -61,8 +63,17 @@
   $effect(() => {
     void auth.refreshTick;
     runtimeConfig.fetch();
+    access.fetch();
     modelsStore.fetchModels();
     modelsStore.fetchCategories();
+  });
+
+  // A scoped admin cannot use the gateway-wide pages (their endpoints answer
+  // 403), so a deep link to one lands on the overview instead.
+  $effect(() => {
+    if (access.loaded && !pageVisibleForScope(router.page, access.scoped)) {
+      router.navigate("overview");
+    }
   });
 
   // Body-level modal class (scroll lock while any overlay dialog is open).

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
@@ -28,8 +29,56 @@ type StoredFile struct {
 type Store interface {
 	Upsert(ctx context.Context, file *StoredFile) error
 	Get(ctx context.Context, id string) (*StoredFile, error)
+	// List returns mappings newest first, starting after the cursor id. The
+	// cursor must exist and match the filter, else ErrNotFound.
+	List(ctx context.Context, filter ListFilter, limit int, after string) ([]*StoredFile, error)
 	Delete(ctx context.Context, id string) error
 	Close() error
+}
+
+// ListFilter narrows a listing. Empty fields do not filter. UserPath keeps
+// the mappings inside one subtree: the path itself and its descendants; root
+// ("/") keeps every mapping that carries a path.
+type ListFilter struct {
+	UserPath     string
+	ProviderType string
+	Purpose      string
+}
+
+func (f ListFilter) matches(file *StoredFile) bool {
+	if file == nil {
+		return false
+	}
+	if f.UserPath != "" && !core.UserPathContains(f.UserPath, file.UserPath) {
+		return false
+	}
+	if f.ProviderType != "" && file.ProviderType != f.ProviderType {
+		return false
+	}
+	if f.Purpose != "" && file.Purpose != f.Purpose {
+		return false
+	}
+	return true
+}
+
+// listLimit bounds a page the way the public files API does.
+func listLimit(limit int) int {
+	switch {
+	case limit <= 0:
+		return 20
+	case limit > 101:
+		return 101
+	default:
+		return limit
+	}
+}
+
+// newerThan orders mappings newest first with the id as tie breaker.
+func newerThan(a, b *StoredFile) bool {
+	if a.CreatedAt == b.CreatedAt {
+		return a.ID > b.ID
+	}
+	return a.CreatedAt > b.CreatedAt
 }
 
 func scanStoredFile(row sqlx.Row) (*StoredFile, error) {

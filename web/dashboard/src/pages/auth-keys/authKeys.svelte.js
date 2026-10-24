@@ -2,9 +2,13 @@
 // on top of the shared admin API client (401s and stale-auth are handled by
 // the client).
 
+
 import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { router } from "$lib/stores/router.svelte.js";
+import { access } from "$lib/stores/access.svelte.js";
+import { normalizeScopePath } from "$lib/stores/accessScope.js";
+import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
 import { createCopyState } from "$lib/utils/clipboard.svelte.js";
 import { displayModelSelector } from "$lib/utils/modelSelectors.js";
@@ -15,6 +19,7 @@ import {
   filterAuthKeys,
   parseAuthKeyAllowedModels,
   parseAuthKeyLabels,
+  retentionDaysFromConfig,
   sortAuthKeys,
 } from "./authKeysLogic.js";
 
@@ -33,6 +38,10 @@ class AuthKeysStore {
   // Load and in-form errors only; row-action feedback goes through the
   // flash store.
   error = $state("");
+  // Audit retention window in days, from the runtime-config store (0 means
+  // retention is disabled and audit entries are kept forever, so a missing
+  // entry really means the key was never used). null means unknown.
+  retentionDays = $derived(retentionDaysFromConfig(runtimeConfig.config.LOGGING_RETENTION_DAYS));
 
   // Toolbar: inactive keys (deactivated or expired) are hidden by default.
   filter = $state("");
@@ -57,6 +66,7 @@ class AuthKeysStore {
   issuedValue = $state("");
   deactivatingID = $state("");
   dashboardAccessID = $state("");
+  passthroughAccessID = $state("");
   form = $state(defaultAuthKeyForm());
   labelsEditor = $state(emptyLabelsEditor());
   allowedModelsEditor = $state(emptyAllowedModelsEditor());
@@ -126,6 +136,8 @@ class AuthKeysStore {
     if (!this.issuedValue) {
       this.copyState.reset();
       this.form = defaultAuthKeyForm();
+      // A scoped key can only issue keys inside its own subtree: start there.
+      this.form.user_path = access.defaultPath(this.form.user_path);
     }
   }
 
@@ -152,6 +164,13 @@ class AuthKeysStore {
   }
 
   async submitForm() {
+    // The server rejects a path outside the key's scope; say so before the
+    // round trip. An empty path binds to the scope root server-side.
+    const userPath = normalizeScopePath(this.form.user_path);
+    if (userPath && !access.allows(userPath)) {
+      this.error = m.access_scope_path_outside({ root: access.userPath });
+      return;
+    }
     const built = buildCreateAuthKeyPayload(this.form);
     if (built.error) {
       this.error = built.error;
@@ -328,46 +347,69 @@ class AuthKeysStore {
     if (!key || !key.active || this.dashboardAccessID) {
       return;
     }
-    const grant = !key.dashboard_access;
-
     this.dashboardAccessID = key.id;
     try {
-      const outcome = await sendAdminMutation(
-        "/admin/auth-keys/" + encodeURIComponent(key.id) + "/dashboard-access",
-        "PUT",
-        { dashboard_access: grant },
-        {
-          label: "update API key dashboard access",
-          errorFallback: m.api_keys_access_update_failed(),
-          unavailableMessage: m.api_keys_feature_unavailable(),
-        },
-      );
-      if (outcome.status === "stale") {
-        return;
-      }
-      if (outcome.status === "unavailable") {
-        this.available = false;
-        flash.error(outcome.error);
-        return;
-      }
-      if (outcome.status === "error") {
-        if (outcome.result && outcome.result.status !== 401) {
-          console.error(
-            "Failed to update auth key dashboard access:",
-            outcome.result.status,
-            outcome.error,
-          );
-        }
-        flash.error(outcome.error);
-        return;
-      }
-      flash.success(grant
-        ? m.api_keys_access_granted({ name: key.name })
-        : m.api_keys_access_revoked({ name: key.name }));
-      void this.fetchKeys();
+      await this.updateKeyAccess(key, "dashboard_access", "dashboard-access", {
+        failed: m.api_keys_access_update_failed(),
+        granted: m.api_keys_access_granted({ name: key.name }),
+        revoked: m.api_keys_access_revoked({ name: key.name }),
+      });
     } finally {
       this.dashboardAccessID = "";
     }
+  }
+
+  async togglePassthroughAccess(key) {
+    if (!key || !key.active || this.passthroughAccessID) {
+      return;
+    }
+    this.passthroughAccessID = key.id;
+    try {
+      await this.updateKeyAccess(key, "passthrough_access", "passthrough-access", {
+        failed: m.api_keys_passthrough_update_failed(),
+        granted: m.api_keys_passthrough_granted({ name: key.name }),
+        revoked: m.api_keys_passthrough_revoked({ name: key.name }),
+      });
+    } finally {
+      this.passthroughAccessID = "";
+    }
+  }
+
+  // updateKeyAccess flips one boolean access field of key through its
+  // PUT /admin/auth-keys/{id}/{endpoint} route.
+  async updateKeyAccess(key, field, endpoint, messages) {
+    const grant = !key[field];
+    const outcome = await sendAdminMutation(
+      "/admin/auth-keys/" + encodeURIComponent(key.id) + "/" + endpoint,
+      "PUT",
+      { [field]: grant },
+      {
+        label: "update API key " + endpoint,
+        errorFallback: messages.failed,
+        unavailableMessage: m.api_keys_feature_unavailable(),
+      },
+    );
+    if (outcome.status === "stale") {
+      return;
+    }
+    if (outcome.status === "unavailable") {
+      this.available = false;
+      flash.error(outcome.error);
+      return;
+    }
+    if (outcome.status === "error") {
+      if (outcome.result && outcome.result.status !== 401) {
+        console.error(
+          "Failed to update auth key " + endpoint + ":",
+          outcome.result.status,
+          outcome.error,
+        );
+      }
+      flash.error(outcome.error);
+      return;
+    }
+    flash.success(grant ? messages.granted : messages.revoked);
+    void this.fetchKeys();
   }
 
   async deactivateKey(key) {

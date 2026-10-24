@@ -1,12 +1,16 @@
 package gateway
 
 import (
+	"context"
 	"math"
+	"net/http"
 	"testing"
 
 	batchstore "github.com/enterpilot/gomodel/internal/batch"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type batchUsageCaptureLogger struct {
@@ -68,23 +72,15 @@ func TestLogBatchUsageFromBatchResultsOnlySetsObservedCostComponents(t *testing.
 		logger,
 		staticBatchPricingResolver{pricing: &core.ModelPricing{InputPerMtok: &inputRate}},
 	)
-	if !logged {
-		t.Fatal("LogBatchUsageFromBatchResults() = false, want true")
-	}
-	if len(logger.entries) != 1 {
-		t.Fatalf("logged entries = %d, want 1", len(logger.entries))
-	}
+	require.True(t, logged)
+	require.Len(t, logger.entries, 1)
 
 	got := stored.Batch.Usage
-	if got.InputCost == nil || *got.InputCost != inputRate {
-		t.Fatalf("InputCost = %#v, want %.2f", got.InputCost, inputRate)
-	}
-	if got.OutputCost != nil {
-		t.Fatalf("OutputCost = %#v, want nil for unobserved output cost", got.OutputCost)
-	}
-	if got.TotalCost == nil || *got.TotalCost != inputRate {
-		t.Fatalf("TotalCost = %#v, want %.2f", got.TotalCost, inputRate)
-	}
+	require.NotNil(t, got.InputCost)
+	require.Equal(t, inputRate, *got.InputCost)
+	require.Nil(t, got.OutputCost)
+	require.NotNil(t, got.TotalCost)
+	require.Equal(t, inputRate, *got.TotalCost)
 }
 
 func TestLogBatchUsageFromBatchResultsUsesXAITicks(t *testing.T) {
@@ -128,23 +124,62 @@ func TestLogBatchUsageFromBatchResultsUsesXAITicks(t *testing.T) {
 		logger,
 		staticBatchPricingResolver{pricing: &core.ModelPricing{OutputPerMtok: &outputRate}},
 	)
-	if !logged {
-		t.Fatal("LogBatchUsageFromBatchResults() = false, want true")
-	}
-	if len(logger.entries) != 1 {
-		t.Fatalf("logged entries = %d, want 1", len(logger.entries))
-	}
+	require.True(t, logged)
+	require.Len(t, logger.entries, 1)
+
 	entry := logger.entries[0]
-	if entry.CostSource != usage.CostSourceXAITicks {
-		t.Fatalf("CostSource = %q, want %q", entry.CostSource, usage.CostSourceXAITicks)
-	}
-	if entry.TotalCost == nil || math.Abs(*entry.TotalCost-0.00001585) > 1e-12 {
-		t.Fatalf("TotalCost = %#v, want 0.00001585", entry.TotalCost)
-	}
-	if entry.InputCost != nil || entry.OutputCost != nil {
-		t.Fatalf("InputCost/OutputCost = %#v/%#v, want nil response split", entry.InputCost, entry.OutputCost)
-	}
-	if stored.Batch.Usage.TotalCost == nil || math.Abs(*stored.Batch.Usage.TotalCost-0.00001585) > 1e-12 {
-		t.Fatalf("stored TotalCost = %#v, want 0.00001585", stored.Batch.Usage.TotalCost)
-	}
+	require.Equal(t, usage.CostSourceXAITicks, entry.CostSource)
+	require.NotNil(t, entry.TotalCost)
+	require.LessOrEqual(t, math.Abs(*entry.TotalCost-0.00001585), 1e-12)
+	require.Nil(t, entry.InputCost)
+	require.Nil(t, entry.OutputCost)
+	require.NotNil(t, stored.Batch.Usage.TotalCost)
+	require.LessOrEqual(t, math.Abs(*stored.Batch.Usage.TotalCost-0.00001585), 1e-12)
+}
+
+// batchResultsProvider answers batch results with one billable item.
+type batchResultsProvider struct {
+	batchBudgetProvider
+}
+
+func (p *batchResultsProvider) GetBatchResults(context.Context, string, string) (*core.BatchResultsResponse, error) {
+	return &core.BatchResultsResponse{
+		Object: "list",
+		Data: []core.BatchResultItem{{
+			StatusCode: 200,
+			Model:      "gpt-4o-mini",
+			Provider:   "openai",
+			Response: map[string]any{
+				"id":    "resp-1",
+				"model": "gpt-4o-mini",
+				"usage": map[string]any{"input_tokens": float64(10), "output_tokens": float64(5), "total_tokens": float64(15)},
+			},
+		}},
+	}, nil
+}
+
+func TestBatchUsageKeepsSubmittingAuthKey(t *testing.T) {
+	logger := &batchUsageCaptureLogger{config: usage.Config{Enabled: true}}
+	orchestrator := NewBatchOrchestrator(BatchConfig{
+		Provider:    &batchResultsProvider{},
+		BatchStore:  batchstore.NewMemoryStore(),
+		UsageLogger: logger,
+	})
+
+	created, err := orchestrator.Create(core.WithAuthKeyID(context.Background(), "key-submitter"), &core.BatchRequest{
+		InputFileID: "file-123",
+		Endpoint:    "/v1/chat/completions",
+		Metadata:    map[string]string{"provider": "openai"},
+	}, BatchMeta{
+		RequestID: "req-create",
+		Endpoint:  core.DescribeEndpoint(http.MethodPost, "/v1/batches"),
+	})
+	require.NoError(t, err)
+
+	// Results are read later, possibly with a different key; the usage stays
+	// with the key that submitted the batch.
+	_, err = orchestrator.Results(core.WithAuthKeyID(context.Background(), "key-reader"), created.Batch.ID, "req-results")
+	require.NoError(t, err)
+	require.Len(t, logger.entries, 1)
+	assert.Equal(t, "key-submitter", logger.entries[0].AuthKeyID)
 }

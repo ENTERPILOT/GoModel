@@ -1,7 +1,7 @@
 // Package llmclient provides a base HTTP client for LLM providers with:
 // - Request marshaling/unmarshaling
 // - Retries with exponential backoff and jitter
-// - Standardized error parsing (429, 502, 503, 504), including errors embedded in 200-status bodies
+// - Standardized error parsing, including errors embedded in 200-status bodies
 // - Circuit breaking with half-open state protection
 package llmclient
 
@@ -43,7 +43,7 @@ type ResponseInfo struct {
 	Stream          bool          // Whether this was a streaming request
 	StreamUncertain bool          // Whether request stream intent was unknown at dispatch
 	Error           error         // Error if request failed (nil on success)
-	// CircuitState is the provider's circuit breaker state after this request
+	// CircuitState is the selected provider or model breaker state after this request
 	// completed ("closed", "half-open", "open"); empty when the breaker is
 	// disabled. It reflects the moment of completion, so metrics built from it
 	// update as traffic flows.
@@ -70,6 +70,29 @@ type Hooks struct {
 	// established but never delivered. OnStreamFirstChunk is not called for
 	// it. Error carries the read error, io.EOF for a clean empty stream.
 	OnStreamEmpty func(ctx context.Context, info ResponseInfo)
+
+	// OnEmptyResponse is called when a buffered inference call succeeded at
+	// the HTTP level but its normalized response carries no choices, output,
+	// or usage. The provider router fires it after decoding, so it follows
+	// the OnRequestEnd call that recorded the same attempt as a success.
+	OnEmptyResponse func(ctx context.Context, info EmptyResponseInfo)
+}
+
+// Empty response reasons reported through Hooks.OnEmptyResponse.
+const (
+	EmptyReasonNoChoices = "no_choices" // chat completion with no choices
+	EmptyReasonNoOutput  = "no_output"  // completed Responses API call with no output items
+	EmptyReasonNoUsage   = "no_usage"   // content returned without any token usage
+)
+
+// EmptyResponseInfo describes a provider response that returned 200 without
+// usable content or usage.
+type EmptyResponseInfo struct {
+	Provider     string // Configured provider name
+	ProviderType string // Provider implementation type
+	Model        string // Upstream model name, as sent to the provider
+	Operation    string // Semantic GenAI operation
+	Reason       string // One of the EmptyReason* values
 }
 
 // Config holds configuration for the LLM client
@@ -102,11 +125,16 @@ type HeaderSetter func(req *http.Request)
 
 // Client is a base HTTP client for LLM providers
 type Client struct {
-	mu             sync.RWMutex
-	httpClient     *http.Client
-	config         Config
-	headerSetter   HeaderSetter
-	circuitBreaker *circuitBreaker
+	mu              sync.RWMutex
+	httpClient      *http.Client
+	config          Config
+	headerSetter    HeaderSetter
+	circuitBreaker  *circuitBreaker
+	modelBreakersMu sync.Mutex
+	modelBreakers   map[[32]byte]*modelBreakerEntry
+	configErr       error
+	retryStatuses   map[int]bool
+	failureStatuses map[int]bool
 }
 
 // New creates a new LLM client with the given configuration
@@ -115,6 +143,21 @@ func New(cfg Config, headerSetter HeaderSetter) *Client {
 		httpClient:   httpclient.NewDefaultHTTPClient(),
 		config:       cfg,
 		headerSetter: headerSetter,
+	}
+
+	// Keep the constructor API stable; direct callers receive invalid-config
+	// errors from request methods. ProviderFactory rejects them before creation.
+	c.configErr = config.ValidateResilience(config.ResilienceConfig{Retry: cfg.Retry, CircuitBreaker: cfg.CircuitBreaker})
+	if c.configErr != nil {
+		return c
+	}
+	c.retryStatuses, c.configErr = config.ParseResilienceStatuses(cfg.Retry.RetryOnStatuses, config.DefaultRetryConfig().RetryOnStatuses)
+	if c.configErr != nil {
+		return c
+	}
+	c.failureStatuses, c.configErr = config.ParseResilienceStatuses(cfg.CircuitBreaker.FailureOnStatuses, config.DefaultCircuitBreakerConfig().FailureOnStatuses)
+	if c.configErr != nil {
+		return c
 	}
 
 	// The breaker is off when explicitly disabled or when it can never trip.
@@ -134,6 +177,17 @@ func NewWithHTTPClient(httpClient *http.Client, cfg Config, headerSetter HeaderS
 	c := New(cfg, headerSetter)
 	c.httpClient = httpClient
 	return c
+}
+
+// NewWithOptionalHTTPClient creates a client on httpClient when one is given
+// and on the shared pooled default otherwise. Providers take their transport
+// from ProviderOptions, which is nil in production, so this keeps the pooling
+// there while letting a test point the same constructor at its own server.
+func NewWithOptionalHTTPClient(httpClient *http.Client, cfg Config, headerSetter HeaderSetter) *Client {
+	if httpClient == nil {
+		return New(cfg, headerSetter)
+	}
+	return NewWithHTTPClient(httpClient, cfg, headerSetter)
 }
 
 // SetBaseURL updates the base URL (thread-safe)
@@ -178,4 +232,7 @@ type Response struct {
 	// provider attempts; it is not relayed to API clients.
 	Header http.Header
 	Body   []byte
+	// Stream is the live upstream body of a streaming response (DoStreamResponse),
+	// where Body stays nil. The caller owns closing it.
+	Stream io.ReadCloser
 }

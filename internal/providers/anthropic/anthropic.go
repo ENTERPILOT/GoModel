@@ -59,6 +59,10 @@ var allowedAnthropicImageMediaTypes = map[string]struct{}{
 type Provider struct {
 	client *llmclient.Client
 	keys   *providers.Keyring
+	// requestHeaders optionally adds per-request headers to every outbound
+	// call; providers that reuse the Anthropic dialect behind another
+	// upstream (OpenCode Go) use it for their identification headers.
+	requestHeaders func(context.Context) http.Header
 
 	batchEndpointsMu sync.RWMutex
 	// batchResultEndpoints keeps endpoint hints by provider batch id and custom_id.
@@ -73,35 +77,30 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 		batchResultEndpoints: make(map[string]map[string]string),
 	}
 	clientCfg := llmclient.Config{
-		ProviderName:   "anthropic",
+		ProviderName:   opts.ClientName("anthropic"),
 		BaseURL:        providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL),
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
-	p.client = llmclient.New(clientCfg, p.setHeaders)
+	p.client = llmclient.NewWithOptionalHTTPClient(opts.HTTPClient, clientCfg, p.setHeaders)
 	return p
 }
 
-// NewWithHTTPClient creates a new Anthropic provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
-	p := &Provider{
-		keys:                 providers.NewKeyring(apiKey),
-		batchResultEndpoints: make(map[string]map[string]string),
-	}
-	cfg := llmclient.DefaultConfig("anthropic", defaultBaseURL)
-	cfg.Hooks = hooks
-	p.client = llmclient.NewWithHTTPClient(httpClient, cfg, p.setHeaders)
-	return p
+// GetBaseURL returns the provider's current API base URL.
+func (p *Provider) GetBaseURL() string {
+	return p.client.BaseURL()
 }
 
 // SetBaseURL allows configuring a custom base URL for the provider
 func (p *Provider) SetBaseURL(url string) {
 	p.client.SetBaseURL(url)
+}
+
+// SetRequestHeaders installs a hook whose headers are added to every outbound
+// request after the standard auth and version headers.
+func (p *Provider) SetRequestHeaders(fn func(context.Context) http.Header) {
+	p.requestHeaders = fn
 }
 
 func cloneBatchResultEndpoints(endpoints map[string]string) map[string]string {
@@ -196,6 +195,15 @@ func (p *Provider) setHeaders(req *http.Request) {
 	// Forward request ID if present in context
 	if requestID := core.GetRequestID(req.Context()); requestID != "" {
 		req.Header.Set("X-Request-Id", requestID)
+	}
+
+	if p.requestHeaders != nil {
+		for name, values := range p.requestHeaders(req.Context()) {
+			req.Header.Del(name)
+			for _, value := range values {
+				req.Header.Add(name, value)
+			}
+		}
 	}
 }
 
@@ -347,10 +355,11 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 	for _, m := range anthropicResp.Data {
 		created := parseCreatedAt(m.CreatedAt)
 		models = append(models, core.Model{
-			ID:      m.ID,
-			Object:  "model",
-			OwnedBy: "anthropic",
-			Created: created,
+			ID:       m.ID,
+			Object:   "model",
+			OwnedBy:  "anthropic",
+			Created:  created,
+			Metadata: m.metadata(),
 		})
 	}
 
@@ -457,6 +466,7 @@ func buildAnthropicRawUsage(u anthropicUsage) map[string]any {
 	if u.CacheReadInputTokens > 0 {
 		raw["cache_read_input_tokens"] = u.CacheReadInputTokens
 	}
+	addAnthropicCacheCreationDetails(raw, u.CacheCreation)
 	if u.OutputTokensDetails.ThinkingTokens > 0 {
 		raw["completion_reasoning_tokens"] = u.OutputTokensDetails.ThinkingTokens
 	}
@@ -473,10 +483,23 @@ func addAnthropicUsagePayloadDetails(payload map[string]any, usage *anthropicUsa
 	if usage.CacheCreationInputTokens > 0 {
 		payload["cache_creation_input_tokens"] = usage.CacheCreationInputTokens
 	}
+	addAnthropicCacheCreationDetails(payload, usage.CacheCreation)
 	if usage.OutputTokensDetails.ThinkingTokens > 0 {
 		payload[outputDetailsKey] = map[string]any{
 			"reasoning_tokens": usage.OutputTokensDetails.ThinkingTokens,
 		}
+	}
+}
+
+// addAnthropicCacheCreationDetails records the cache-write TTL split under
+// the flattened keys the stream usage observer derives from usage.cache_creation,
+// so 1-hour writes are priced at their own rate.
+func addAnthropicCacheCreationDetails(dst map[string]any, c anthropicCacheCreation) {
+	if c.Ephemeral5mInputTokens > 0 {
+		dst["cache_creation_ephemeral_5m_input_tokens"] = c.Ephemeral5mInputTokens
+	}
+	if c.Ephemeral1hInputTokens > 0 {
+		dst["cache_creation_ephemeral_1h_input_tokens"] = c.Ephemeral1hInputTokens
 	}
 }
 
@@ -532,6 +555,10 @@ func mergeAnthropicUsage(dst *anthropicUsage, src *anthropicUsage) bool {
 		dst.CacheReadInputTokens = src.CacheReadInputTokens
 		merged = true
 	}
+	if src.CacheCreation != (anthropicCacheCreation{}) {
+		dst.CacheCreation = src.CacheCreation
+		merged = true
+	}
 	if src.OutputTokensDetails.ThinkingTokens != 0 {
 		dst.OutputTokensDetails.ThinkingTokens = src.OutputTokensDetails.ThinkingTokens
 		merged = true
@@ -580,4 +607,29 @@ func normalizeAnthropicStopReason(stopReason string) string {
 // Voyage AI (Anthropic's recommended embedding provider) may be added in the future.
 func (p *Provider) Embeddings(_ context.Context, _ *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
 	return nil, core.NewInvalidRequestError("anthropic does not support embeddings — consider using Voyage AI", nil)
+}
+
+// metadata keeps what Anthropic's listing says about a model: its display
+// name, context window (max_input_tokens), output limit (max_tokens) and the
+// supported flags of its capabilities, under the catalog's capability keys.
+func (m anthropicModelInfo) metadata() *core.ModelMetadata {
+	modes := []string{"chat"}
+	metadata := &core.ModelMetadata{
+		DisplayName: strings.TrimSpace(m.DisplayName),
+		Modes:       modes,
+		Categories:  core.CategoriesForModes(modes),
+	}
+	if m.MaxInputTokens > 0 {
+		metadata.ContextWindow = new(m.MaxInputTokens)
+	}
+	if m.MaxTokens > 0 {
+		metadata.MaxOutputTokens = new(m.MaxTokens)
+	}
+	for name, capability := range m.Capabilities {
+		if capability.Supported == nil {
+			continue
+		}
+		metadata.Capabilities = providers.SetCapability(metadata.Capabilities, name, *capability.Supported)
+	}
+	return metadata
 }

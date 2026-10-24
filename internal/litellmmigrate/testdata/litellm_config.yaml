@@ -1,0 +1,57 @@
+model_list:
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+      rpm: 900
+    model_info:
+      input_cost_per_token: 0.0000025
+      output_cost_per_token: 0.00001
+  - model_name: gpt-4o
+    litellm_params:
+      model: azure/gpt-4o-eu
+      api_base: os.environ/AZURE_EU_API_BASE
+      api_key: os.environ/AZURE_EU_API_KEY
+      api_version: "2024-10-21"
+      rpm: 300
+  - model_name: claude-sonnet
+    litellm_params:
+      model: anthropic/claude-sonnet-4-5
+      api_key: sk-ant-inline-secret
+      timeout: 30
+  - model_name: local-llama
+    litellm_params:
+      model: ollama/llama3.1
+      api_base: http://ollama:11434
+  - model_name: embeddings
+    litellm_params:
+      model: text-embedding-3-small
+  - model_name: openai/*
+    litellm_params:
+      model: openai/*
+  - model_name: replicate-model
+    litellm_params:
+      model: replicate/meta/llama-2-70b
+
+router_settings:
+  routing_strategy: simple-shuffle
+  num_retries: 2
+  timeout: 45.5
+  fallbacks:
+    - gpt-4o: [claude-sonnet]
+  model_group_alias:
+    gpt-4: gpt-4o
+  redis_host: redis
+
+litellm_settings:
+  drop_params: true
+  callbacks: ["prometheus", "langfuse"]
+  context_window_fallbacks:
+    - gpt-4o: [claude-sonnet]
+
+general_settings:
+  master_key: sk-1234
+  database_url: os.environ/DATABASE_URL
+
+guardrails:
+  - guardrail_name: pii

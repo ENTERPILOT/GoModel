@@ -16,6 +16,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/cache"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 )
 
@@ -253,15 +254,11 @@ func TestDuplicateSelector_PassthroughHandlerRejectsLateDetectedDuplicate(t *tes
 	handler := newHandlerWithAuthorizer(provider, nil, nil, nil, nil, authorizer, nil, nil, nil)
 
 	body := `{"model":"allowed-model","model":"blocked-model"}`
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
+	c, rec := echotest.Request(t, http.MethodPost, "/p/openai/chat/completions", body)
 	snapshot := core.NewRequestSnapshot(http.MethodPost, "/p/openai/chat/completions", map[string]string{"provider": "openai", "endpoint": "chat/completions"}, nil, nil, "application/json", nil, false, "", nil)
-	ctx := core.WithRequestSnapshot(req.Context(), snapshot)
+	ctx := core.WithRequestSnapshot(c.Request().Context(), snapshot)
 	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(snapshot))
-	req = req.WithContext(ctx)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c.SetRequest(c.Request().WithContext(ctx))
 
 	// Simulate the late full-body read.
 	_, err := requestBodyBytes(c)
@@ -316,12 +313,8 @@ func TestDuplicateSelector_HandlerRejectsWithoutIngressMiddleware(t *testing.T) 
 	authorizer := &recordingModelAuthorizer{}
 	handler := newHandlerWithAuthorizer(provider, nil, nil, nil, nil, authorizer, nil, nil, nil)
 
-	e := echo.New()
 	body := `{"model":"allowed-model","model":"blocked-model","messages":[{"role":"user","content":"hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Request(t, http.MethodPost, "/v1/chat/completions", body)
 
 	require.NoError(t, handler.ChatCompletion(c))
 	assertDuplicateSelectorRejected(t, rec, "model")
@@ -363,7 +356,12 @@ func TestDuplicateSelector_UniqueSelectorsStillServed(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			provider := newDuplicateSelectorProvider()
 			provider.err = nil
-			provider.response = &core.ChatResponse{ID: "chatcmpl-1", Object: "chat.completion", Model: "allowed-model"}
+			provider.response = &core.ChatResponse{
+				ID:      "chatcmpl-1",
+				Object:  "chat.completion",
+				Model:   "allowed-model",
+				Choices: []core.Choice{{Message: core.ResponseMessage{Role: "assistant", Content: "hi"}, FinishReason: "stop"}},
+			}
 			authorizer := &recordingModelAuthorizer{}
 			e, _ := newDuplicateSelectorPipeline(provider, authorizer)
 

@@ -19,6 +19,10 @@ const statsHourLayout = "2006-01-02T15"
 type RequestStatsParams struct {
 	QueryParams
 
+	// UserPath limits the stats to one user-path subtree (the path itself and
+	// its descendants). Empty means every request.
+	UserPath string
+
 	// Interval is the bucket granularity: StatsIntervalHour or StatsIntervalDay.
 	Interval string
 

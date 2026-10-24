@@ -4,9 +4,13 @@
 
 import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
+import { confirmDialog } from "$lib/stores/confirm.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+import { access } from "$lib/stores/access.svelte.js";
+import { scopedSubjectAllowed } from "$lib/stores/accessScope.js";
 import * as m from "$lib/paraglide/messages.js";
 import * as logic from "./rateLimitsLogic.js";
+import { Trash2 } from "lucide";
 
 class RateLimitsStore {
   rateLimits = $state([]);
@@ -49,8 +53,13 @@ class RateLimitsStore {
     return logic.rateLimitScopeMeta(scope);
   }
 
+  // Provider and model rules are gateway-wide, so a key scoped to a user
+  // path only creates user-path rules inside its subtree.
   rateLimitScopeOptions() {
-    return logic.rateLimitScopeOptions();
+    const options = logic.rateLimitScopeOptions();
+    return access.scoped
+      ? options.filter((option) => option.value === "user_path")
+      : options;
   }
 
   rateLimitScope(item) {
@@ -261,6 +270,8 @@ class RateLimitsStore {
     } else {
       this.rateLimitEditingOriginal = null;
       this.rateLimitForm = logic.defaultRateLimitForm();
+      // A scoped key can only limit its own subtree: start there.
+      this.rateLimitForm.subject = access.defaultPath(this.rateLimitForm.subject);
     }
     this.rateLimitFormOpen = true;
   }
@@ -295,12 +306,27 @@ class RateLimitsStore {
   }
 
   async submitRateLimitForm() {
+    // A key change can leave the scope pending; settle it before reading the
+    // form, so the payload, the scope check, and the submit lock all see
+    // one consistent snapshot.
+    await access.ensureLoaded();
     if (this.rateLimitFormSubmitting) {
       return;
     }
     const { payload, error } = this.rateLimitFormPayload();
     if (error) {
       this.rateLimitFormError = error;
+      return;
+    }
+    if (
+      !scopedSubjectAllowed(
+        access.scoped,
+        access.userPath,
+        this.rateLimitForm.scope,
+        this.rateLimitForm.subject,
+      )
+    ) {
+      this.rateLimitFormError = m.access_scope_path_outside({ root: access.userPath });
       return;
     }
     const moved = this.rateLimitIdentityMoved(payload);
@@ -374,6 +400,25 @@ class RateLimitsStore {
     return true;
   }
 
+  // requestDeleteRateLimit drives the shared typed-confirmation dialog
+  // rather than deleting outright: a stray click on the list row can no
+  // longer remove a rule (#900). The operator types the rule's subject to
+  // confirm.
+  requestDeleteRateLimit(item) {
+    const subject = logic.rateLimitSubject(item) || "/";
+    confirmDialog.open({
+      title: m.rate_limits_delete_title(),
+      titleId: "rateLimitDeleteDialogTitle",
+      inputId: "rate-limit-delete-confirmation",
+      message: m.rate_limits_delete_message({ subject }),
+      requiredText: subject,
+      confirmLabel: m.rate_limits_delete(),
+      icon: Trash2,
+      dialogClass: "budget-reset-dialog",
+      onConfirm: () => this.deleteRateLimit(item),
+    });
+  }
+
   async deleteRateLimit(item) {
     const key = logic.rateLimitKey(item);
     if (this.rateLimitDeletingKey === key) {
@@ -399,12 +444,15 @@ class RateLimitsStore {
       return;
     }
     if (outcome.status !== "ok") {
-      flash.error(outcome.error);
+      // The failure stays inside the confirmation dialog, which is still
+      // open (like the provider-credential delete).
+      confirmDialog.error = outcome.error;
       return;
     }
     this.rateLimits = logic.normalizeRateLimitListPayload(outcome.result.data);
     this.normalizeActiveScope();
     flash.success(m.rate_limits_deleted());
+    confirmDialog.close();
   }
 
   async resetRateLimit(item) {

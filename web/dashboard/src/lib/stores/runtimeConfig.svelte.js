@@ -16,13 +16,16 @@ const CONFIG_KEYS = [
   "RATE_LIMITS_ENABLED",
   "PER_CHILD_QUOTAS_ENABLED",
   "GUARDRAILS_ENABLED",
+  "PLUGINS_ENABLED",
   "CACHE_ENABLED",
   "REDIS_URL",
   "SEMANTIC_CACHE_ENABLED",
   "USAGE_PRICING_RECALCULATION_ENABLED",
   "DASHBOARD_LIVE_LOGS_ENABLED",
   "MCP_ENABLED",
+  "MCP_TOOL_DISCOVERY",
   "VIRTUAL_MODEL_STRATEGIES",
+  "USER_PATH_HEADER",
 ];
 
 // Strategies every gateway supports; used when the backend predates the
@@ -59,6 +62,13 @@ class RuntimeConfigStore {
       .map((s) => s.trim())
       .filter(Boolean);
     return list.length > 0 ? list : DEFAULT_VM_STRATEGIES;
+  }
+
+  // userPathHeader is the canonical header name the gateway reads user paths
+  // from (USER_PATH_HEADER), or "" when the backend predates the key or the
+  // config has not loaded; callers fall back to the default name.
+  userPathHeader() {
+    return String((this.config && this.config.USER_PATH_HEADER) || "").trim();
   }
 
   // cacheVisible is a tri-source gate: an explicit CACHE_ENABLED wins;
@@ -103,8 +113,18 @@ class RuntimeConfigStore {
     return this.booleanFlag("GUARDRAILS_ENABLED", true);
   }
 
+  pluginsVisible() {
+    return this.booleanFlag("PLUGINS_ENABLED", true);
+  }
+
   mcpVisible() {
     return this.booleanFlag("MCP_ENABLED", true);
+  }
+
+  // mcpToolDiscovery is the gateway's default MCP tool discovery mode:
+  // "search" or "off" (also for backends that predate the key).
+  mcpToolDiscovery() {
+    return this.flag("MCP_TOOL_DISCOVERY") === "search" ? "search" : "off";
   }
 
   liveLogsVisible() {

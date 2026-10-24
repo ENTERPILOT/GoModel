@@ -127,6 +127,7 @@ function ensureAnthropicContentBlockSchema() {
     type: "object",
     properties: {
       content: anthropicContentSchema(),
+      extra_content: freeFormObjectSchema(),
       id: { type: "string" },
       input: freeFormObjectSchema(),
       is_error: { type: "boolean" },
@@ -134,10 +135,18 @@ function ensureAnthropicContentBlockSchema() {
       source: stringOrFreeFormObjectSchema(),
       text: { type: "string" },
       thinking: { type: "string" },
+      // thinking blocks are replayed with the signature Anthropic issued;
+      // redacted ones carry their opaque payload instead.
+      signature: { type: "string" },
+      data: { type: "string" },
       tool_use_id: { type: "string" },
       type: { type: "string" },
     },
   };
+}
+
+function applyResponsesReplayStateSchema() {
+  schema("core.ResponsesOutputItem").properties.extra_content = freeFormObjectSchema();
 }
 
 function applyAnthropicMessageSchemas() {
@@ -148,7 +157,50 @@ function applyAnthropicMessageSchemas() {
   schema("anthropicapi.Tool").properties.input_schema = freeFormObjectSchema();
 }
 
+// Swagger 2 mirror of applyRetrieveModelDialects in openapi-postprocess.mjs:
+// GET /v1/models/{model} answers a request carrying anthropic-version with the
+// Anthropic model and error envelopes instead of the OpenAI ones.
+function applyRetrieveModelDialects() {
+  if (!spec.definitions) {
+    throw new Error("missing Swagger definitions");
+  }
+  spec.definitions["anthropicapi.ModelInfo"] = {
+    description: "One model in the Anthropic dialect, returned when the request carries anthropic-version.",
+    type: "object",
+    required: ["created_at", "display_name", "id", "type"],
+    properties: {
+      type: { type: "string", enum: ["model"] },
+      id: { type: "string" },
+      display_name: { type: "string" },
+      created_at: { type: "string" },
+    },
+  };
+  // A 401 is raised by the auth middleware before the handler runs, so it
+  // stays in the OpenAI envelope whatever the header says.
+  const dialects = {
+    200: ["core.Model", "anthropicapi.ModelInfo"],
+    404: ["core.OpenAIErrorEnvelope", "anthropicapi.ErrorResponse"],
+    502: ["core.OpenAIErrorEnvelope", "anthropicapi.ErrorResponse"],
+  };
+  const responses = spec.paths?.["/v1/models/{model}"]?.get?.responses;
+  if (!responses) {
+    throw new Error("missing operation: GET /v1/models/{model}");
+  }
+  for (const [status, names] of Object.entries(dialects)) {
+    const response = responses[status];
+    if (!response?.schema) {
+      throw new Error(`missing response schema ${status} on GET /v1/models/{model}`);
+    }
+    response.schema = {
+      description: "OpenAI envelope by default; the Anthropic envelope when the request carries anthropic-version.",
+      oneOf: names.map((name) => ({ $ref: `#/definitions/${name}` })),
+    };
+  }
+}
+
 applyAnthropicMessageSchemas();
+applyResponsesReplayStateSchema();
+applyRetrieveModelDialects();
 ensureRequiredProperty("core.ResponsesConversationRef", "id");
 
 // Virtual-models admin contract: mirror the required field and array bounds the

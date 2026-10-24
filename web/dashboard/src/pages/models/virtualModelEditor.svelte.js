@@ -7,7 +7,9 @@ import { errorMessage, sendJSON } from "$lib/api/client.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
 import { modelsStore } from "$lib/stores/models.svelte.js";
+import { pluginsStore } from "$lib/stores/plugins.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+import { cloneSchemaConfig, schemaFieldDefaults } from "$lib/utils/schemaFields.js";
 import {
   modelOverridesDefaultEnabled,
   rowAccessSelector,
@@ -16,14 +18,22 @@ import {
   GLOBAL_OVERRIDE_SELECTOR,
   qualifiedModelName,
 } from "./modelIdentity.js";
-import { modelAccessUserPathsRestrict, strategyOptions } from "./routing.js";
+import {
+  modelAccessUserPathsRestrict,
+  parseStrategyDropdownValue,
+  strategyDropdownValue,
+  strategyOptions,
+} from "./routing.js";
 import {
   aliasFormTargets,
   buildVirtualModelSavePayload,
   defaultVirtualModelForm,
+  moveFormTarget,
   normalizeUserPaths,
   removePrimaryTarget as removePrimaryTargetPure,
   virtualModelTargetOptions,
+  vmFormPopulatedTargetCount,
+  vmFormTargetCount,
   vmRoutingSummary,
 } from "./vmForm.js";
 import { virtualModels } from "./virtualModels.svelte.js";
@@ -46,6 +56,13 @@ class VirtualModelEditorStore {
   vmFormOriginalSource = $state("");
   vmFormManaged = $state(false);
   vmForm = $state(defaultVirtualModelForm());
+  // Drag state: vmDragIndex is the row being dragged, vmDropIndex the row
+  // currently under the cursor for the drop highlight.
+  vmDragIndex = $state(null);
+  vmDropIndex = $state(null);
+  // Set to the moved row's new index after a keyboard move so focus follows;
+  // VmTargetRow focuses the handle and clears it.
+  vmFocusHandle = $state(null);
 
   addVmTarget() {
     if (!Array.isArray(this.vmForm.targets)) {
@@ -65,14 +82,111 @@ class VirtualModelEditorStore {
     removePrimaryTargetPure(this.vmForm);
   }
 
+  // vmTargetCount feeds the drag handle: the handle shows only when there is
+  // more than one row to reorder.
+  vmTargetCount() {
+    return vmFormTargetCount(this.vmForm);
+  }
+
+  // vmPopulatedTargetCount is the reorder gate: blank placeholder rows do not
+  // count, so one filled target plus blank extras stays non-draggable.
+  vmPopulatedTargetCount() {
+    return vmFormPopulatedTargetCount(this.vmForm);
+  }
+
+  // startVmTargetDrag records the flattened index of the row being dragged.
+  startVmTargetDrag(index) {
+    this.vmDragIndex = index;
+  }
+
+  // enterVmTargetDrop marks the row under the cursor as the drop target.
+  // dragover fires continuously; only write on change so fast drags do not
+  // re-render the list on every event.
+  enterVmTargetDrop(index) {
+    if (this.vmDropIndex !== index) {
+      this.vmDropIndex = index;
+    }
+  }
+
+  // leaveVmTargetDrop clears the drop highlight when the cursor leaves a row.
+  leaveVmTargetDrop(index) {
+    if (this.vmDropIndex === index) {
+      this.vmDropIndex = null;
+    }
+  }
+
+  // dropVmTarget moves the dragged row onto `index` and clears drag state.
+  dropVmTarget(index) {
+    if (this.vmDragIndex != null) {
+      moveFormTarget(this.vmForm, this.vmDragIndex, index);
+    }
+    this.vmDragIndex = null;
+    this.vmDropIndex = null;
+  }
+
+  // endVmTargetDrag clears drag state when the drag ends without a drop.
+  endVmTargetDrag() {
+    this.vmDragIndex = null;
+    this.vmDropIndex = null;
+  }
+
+  // requestVmFocusHandle makes focus follow a keyboard move.
+  requestVmFocusHandle(index) {
+    this.vmFocusHandle = index;
+  }
+
+  // clearVmFocusHandle clears the pending focus request once it landed.
+  clearVmFocusHandle() {
+    this.vmFocusHandle = null;
+  }
+
   // vmStrategyOptions builds the strategy dropdown from the strategies this
   // deployment supports (server-driven), keeping the edited row's current
   // value selectable even when the deployment no longer offers it.
   vmStrategyOptions() {
     return strategyOptions(
       runtimeConfig.virtualModelStrategies(),
-      this.vmForm.strategy,
+      this.vmStrategySelection(),
     );
+  }
+
+  // vmStrategySelection is the dropdown value for the form's strategy:
+  // "plugin:<name>" for a plugin strategy, the strategy itself otherwise.
+  vmStrategySelection() {
+    return strategyDropdownValue(this.vmForm.strategy, this.vmForm.strategy_plugin);
+  }
+
+  // setVmStrategy applies a dropdown choice. Switching to another plugin
+  // resets strategy_config to that plugin's route-field defaults; leaving the
+  // plugin strategy keeps nothing plugin-specific.
+  setVmStrategy(value) {
+    const parsed = parseStrategyDropdownValue(value);
+    const previousPlugin = this.vmForm.strategy_plugin;
+    this.vmForm.strategy = parsed.strategy;
+    this.vmForm.strategy_plugin = parsed.strategy_plugin;
+    if (parsed.strategy !== "plugin") {
+      this.vmForm.strategy_config = {};
+      return;
+    }
+    if (parsed.strategy_plugin !== previousPlugin) {
+      this.vmForm.strategy_config = schemaFieldDefaults(
+        this.vmRouteFields(),
+      );
+    }
+  }
+
+  // vmRouteFields lists the chosen routing plugin's per-virtual-model
+  // fields; [] when no plugin strategy is selected or GET /admin/plugins is
+  // unavailable (the strategy can still be saved without them).
+  vmRouteFields() {
+    if (this.vmForm.strategy !== "plugin") {
+      return [];
+    }
+    return pluginsStore.routeFields(this.vmForm.strategy_plugin);
+  }
+
+  setVmStrategyConfig(config) {
+    this.vmForm.strategy_config = cloneSchemaConfig(config);
   }
 
   // vmRoutingSummary describes the form's effect; whether the source names a
@@ -126,6 +240,10 @@ class VirtualModelEditorStore {
     this.vmFormSourceLocked = false;
     this.vmFormOriginalSource = "";
     this.vmFormManaged = false;
+    // Transient drag/focus state must not leak into the next form.
+    this.vmDragIndex = null;
+    this.vmDropIndex = null;
+    this.vmFocusHandle = null;
     this.vmForm = defaultVirtualModelForm();
   }
 
@@ -178,6 +296,8 @@ class VirtualModelEditorStore {
       target_weight: primaryWeight,
       targets: extraTargets,
       strategy: alias.strategy || "round_robin",
+      strategy_plugin: String(alias.strategy_plugin || "").trim(),
+      strategy_config: cloneSchemaConfig(alias.strategy_config),
       session_affinity: alias.session_affinity !== false,
       failover: alias.failover !== false,
       user_paths: (Array.isArray(alias.user_paths)
@@ -238,6 +358,8 @@ class VirtualModelEditorStore {
       target_weight: primaryWeight,
       targets: extraTargets,
       strategy: (override && override.strategy) || "failover",
+      strategy_plugin: String((override && override.strategy_plugin) || "").trim(),
+      strategy_config: cloneSchemaConfig(override && override.strategy_config),
       session_affinity: !override || override.session_affinity !== false,
       failover: !override || override.failover !== false,
       user_paths: userPaths.join("\n"),

@@ -90,6 +90,80 @@ func (s *MongoDBStore) Get(ctx context.Context, id string) (*StoredFile, error) 
 	})
 }
 
+// List returns the mappings matching filter, newest first, after the cursor.
+func (s *MongoDBStore) List(ctx context.Context, filter ListFilter, limit int, after string) ([]*StoredFile, error) {
+	limit = listLimit(limit)
+	var conditions bson.A
+	switch filter.UserPath {
+	case "":
+	case "/":
+		conditions = append(conditions, bson.M{"user_path": bson.M{"$exists": true, "$ne": ""}})
+	default:
+		// Descendants sort in the half-open byte range [path+"/", path+"0"):
+		// '0' is the byte after '/', so no regex over caller input is needed.
+		conditions = append(conditions, bson.M{"$or": bson.A{
+			bson.M{"user_path": filter.UserPath},
+			bson.M{"user_path": bson.M{"$gte": filter.UserPath + "/", "$lt": filter.UserPath + "0"}},
+		}})
+	}
+	if filter.ProviderType != "" {
+		conditions = append(conditions, bson.M{"provider_type": filter.ProviderType})
+	}
+	if filter.Purpose != "" {
+		conditions = append(conditions, bson.M{"purpose": filter.Purpose})
+	}
+	if after != "" {
+		cursorFile, err := s.Get(ctx, after)
+		if err != nil {
+			return nil, err
+		}
+		if !filter.matches(cursorFile) {
+			// A cursor outside the filter is indistinguishable from a missing one.
+			return nil, ErrNotFound
+		}
+		conditions = append(conditions, bson.M{"$or": bson.A{
+			bson.M{"created_at": bson.M{"$lt": cursorFile.CreatedAt}},
+			bson.M{"created_at": cursorFile.CreatedAt, "_id": bson.M{"$lt": cursorFile.ID}},
+		}})
+	}
+	query := bson.M{}
+	if len(conditions) > 0 {
+		query = bson.M{"$and": conditions}
+	}
+	opts := options.Find().
+		SetSort(bson.D{{Key: "created_at", Value: -1}, {Key: "_id", Value: -1}}).
+		SetLimit(int64(limit))
+	cursor, err := s.collection.Find(ctx, query, opts)
+	if err != nil {
+		return nil, fmt.Errorf("list file mappings: %w", err)
+	}
+	defer func() { _ = cursor.Close(ctx) }()
+	items := make([]*StoredFile, 0, limit)
+	for cursor.Next(ctx) {
+		var doc mongoFileDocument
+		if err := cursor.Decode(&doc); err != nil {
+			return nil, fmt.Errorf("decode file mapping: %w", err)
+		}
+		file, err := cloneStoredFile(&StoredFile{
+			ID:           doc.ID,
+			ProviderType: doc.ProviderType,
+			Purpose:      doc.Purpose,
+			Filename:     doc.Filename,
+			Bytes:        doc.Bytes,
+			CreatedAt:    doc.CreatedAt,
+			UserPath:     doc.UserPath,
+		})
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, file)
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("iterate file mappings: %w", err)
+	}
+	return items, nil
+}
+
 // Delete removes one file mapping by id.
 func (s *MongoDBStore) Delete(ctx context.Context, id string) error {
 	result, err := s.collection.DeleteOne(ctx, bson.M{"_id": id})

@@ -3,9 +3,10 @@
   // the DOM (hidden, not unmounted) so audio playback and scroll position
   // survive tab switches.
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import AuditGuardrailsPane from "./AuditGuardrailsPane.svelte";
   import AuditPane from "./AuditPane.svelte";
   import { auditEffectiveTab, auditTabKeydownTarget, statusCodeClass } from "./audit-logic.js";
-  import { ArrowLeft, ArrowRight } from "lucide";
+  import { ArrowLeft, ArrowRight, Shield } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   let { entry, panes = [] } = $props();
@@ -53,6 +54,8 @@
             <Icon icon={ArrowRight} />
           {:else if p.pane.direction === "response"}
             <Icon icon={ArrowLeft} />
+          {:else if p.pane.type === "guardrails"}
+            <Icon icon={Shield} />
           {/if}
         </span>
         <span class="audit-pane-tab-label">{p.pane.title}</span>
@@ -79,6 +82,9 @@
             >{p.pane.statusCode}</span
           >
         {/if}
+        {#if p.pane.badge}
+          <span class="audit-status-badge {p.pane.badge.class}">{p.pane.badge.text}</span>
+        {/if}
       </button>
     {/each}
   </div>
@@ -90,7 +96,11 @@
       id={panelId(p.id)}
       aria-labelledby={tabId(p.id)}
     >
-      <AuditPane pane={p.pane} />
+      {#if p.pane.type === "guardrails"}
+        <AuditGuardrailsPane pane={p.pane} />
+      {:else}
+        <AuditPane pane={p.pane} />
+      {/if}
     </div>
   {/each}
 </div>

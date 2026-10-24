@@ -16,16 +16,17 @@ import (
 // chooses that first target; every other available target is a failover leg,
 // so a load balancer and a priority list fail over the same way. A redirect
 // with failover switched off, and requests that did not go through a redirect,
-// have no chain — except a request that named its provider explicitly for a
-// model shadowed by a redirect listing that model among its targets (see
-// snapshot.failoverEntry).
+// have no chain; a redirect whose single target is a chained redirect keeps
+// that subtree's leaves as its chain — except a request that named its
+// provider explicitly for a model shadowed by a redirect listing that model
+// among its targets (see snapshot.failoverEntry).
 func (s *Service) ResolveFailovers(resolution *core.RequestModelResolution, _ core.Operation) []core.ModelSelector {
 	if s == nil || resolution == nil {
 		return nil
 	}
 	snap := s.snapshot()
 	entry, ok := snap.failoverEntry(resolution)
-	if !ok || !entry.failover() || len(entry.targets) < 2 {
+	if !ok || !entry.failover() {
 		return nil
 	}
 	seen := map[string]struct{}{resolution.ResolvedQualifiedModel(): {}}

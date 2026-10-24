@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -90,7 +91,7 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 				}
 				if !bodyCaptured {
 					if err := seedRequestBodySelectorHints(req, desc.BodyMode, semantics); err != nil {
-						return handleError(c, err)
+						return handleError(c, requestBodyReadError(err))
 					}
 				}
 				ctx = core.WithWhiteBoxPrompt(ctx, semantics)
@@ -100,6 +101,21 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 			return next(c)
 		}
 	}
+}
+
+// requestBodyReadError shapes a failure to read the request body as a gateway
+// error. One that already carries an HTTP status (the body limit's 413) keeps
+// it so the client learns why; any other read failure is the client's
+// malformed or interrupted request. A gateway error, such as a repeated
+// selector field, is returned unchanged.
+func requestBodyReadError(err error) error {
+	if _, ok := errors.AsType[*core.GatewayError](err); ok {
+		return err
+	}
+	if status := echo.StatusCode(err); status > 0 {
+		return core.NewInvalidRequestErrorWithStatus(status, echoErrorMessage(err, status), err)
+	}
+	return core.NewInvalidRequestError("failed to read request body", err)
 }
 
 func configuredUserPathHeaderName(headerNames ...string) string {
@@ -182,19 +198,33 @@ func captureSmallRequestBodyForSnapshot(req *http.Request, bodyMode core.BodyMod
 	if bodyBytes == nil {
 		bodyBytes = []byte{}
 	}
-	body := &bytesReadCloser{}
-	body.Reset(bodyBytes)
-	req.Body = body
+	req.Body = newBytesReadCloser(bodyBytes)
 	return bodyBytes, false, true, nil
 }
 
 // bytesReadCloser is io.NopCloser(bytes.NewReader(b)) in one allocation
-// instead of two; it keeps bytes.Reader's WriteTo for efficient copies.
+// instead of two; it keeps bytes.Reader's WriteTo for efficient copies and
+// remembers its buffer so a handler can take the bytes without re-reading.
 type bytesReadCloser struct {
 	bytes.Reader
+	body []byte
+}
+
+func newBytesReadCloser(body []byte) *bytesReadCloser {
+	b := &bytesReadCloser{body: body}
+	b.Reset(body)
+	return b
 }
 
 func (*bytesReadCloser) Close() error { return nil }
+
+// unread returns the whole buffer while nothing has been read from it yet.
+func (b *bytesReadCloser) unread() ([]byte, bool) {
+	if b == nil || b.Len() != len(b.body) {
+		return nil, false
+	}
+	return b.body, true
+}
 
 func shouldCaptureSmallRequestBody(req *http.Request, bodyMode core.BodyMode) bool {
 	if req == nil || req.Body == nil {
@@ -248,6 +278,17 @@ func requestBodyBytes(c *echo.Context) ([]byte, error) {
 		return []byte{}, nil
 	}
 
+	// A body the session middleware materialized past the audit capture limit
+	// is replayed from memory; hand that buffer out instead of copying it.
+	if replay, ok := req.Body.(*bytesReadCloser); ok {
+		if body, ok := replay.unread(); ok {
+			if err := duplicateSelectorError(c); err != nil {
+				return nil, err
+			}
+			return body, nil
+		}
+	}
+
 	bodyBytes, err := io.ReadAll(req.Body)
 	if err != nil {
 		return nil, err
@@ -267,14 +308,19 @@ func duplicateSelectorError(c *echo.Context) error {
 	return core.GetWhiteBoxPrompt(c.Request().Context()).DuplicateSelectorError()
 }
 
-func storeRequestBodySnapshot(c *echo.Context, bodyBytes []byte) {
+// storeRequestBodySnapshot records the fully read body on the request snapshot
+// and refreshes the white-box prompt semantics from it. The audit capture on
+// the shared snapshot stops at MaxBodyCapture; the returned snapshot always
+// carries the complete body so callers such as session detection can read an
+// oversized one. It returns nil when the request has no snapshot.
+func storeRequestBodySnapshot(c *echo.Context, bodyBytes []byte) *core.RequestSnapshot {
 	if c == nil {
-		return
+		return nil
 	}
 	req := c.Request()
 	snapshot := core.GetRequestSnapshot(req.Context())
 	if snapshot == nil {
-		return
+		return nil
 	}
 
 	bodyNotCaptured := int64(len(bodyBytes)) > auditlog.MaxBodyCapture
@@ -286,12 +332,13 @@ func storeRequestBodySnapshot(c *echo.Context, bodyBytes []byte) {
 	updated := snapshot.WithOwnedCapturedBody(capturedBody, bodyNotCaptured)
 	ctx := core.WithRequestSnapshot(req.Context(), updated)
 	previous := core.GetWhiteBoxPrompt(req.Context())
-	semanticSnapshot := updated
+	complete := updated
 	if bodyNotCaptured {
-		semanticSnapshot = snapshot.WithOwnedCapturedBody(bodyBytes, false)
+		complete = snapshot.WithOwnedCapturedBody(bodyBytes, false)
 	}
-	if semantics := core.RefreshWhiteBoxPrompt(semanticSnapshot, previous); semantics != nil {
+	if semantics := core.RefreshWhiteBoxPrompt(complete, previous); semantics != nil {
 		ctx = core.WithWhiteBoxPrompt(ctx, semantics)
 	}
 	c.SetRequest(req.WithContext(ctx))
+	return complete
 }

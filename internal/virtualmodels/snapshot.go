@@ -27,6 +27,9 @@ type redirectEntry struct {
 	vm       VirtualModel
 	targets  []resolvedTarget
 	strategy string
+	// route caches the validated strategy_config handed to a routing-strategy
+	// plugin; nil for entries built outside buildSnapshot.
+	route *routeConfigCache
 }
 
 // sessionAffinity reports whether this redirect keeps sessions pinned to the
@@ -114,6 +117,7 @@ func buildSnapshot(rows []VirtualModel, defaultEnable bool) (snapshot, error) {
 				vm:       normalized,
 				targets:  targets,
 				strategy: normalized.Strategy,
+				route:    &routeConfigCache{},
 			}
 			next.order = append(next.order, normalized.Source)
 			next.bySource[normalized.Source] = normalized
@@ -193,53 +197,36 @@ func (s *snapshot) findRedirect(name, userPath string, enforceUserPaths bool) (*
 	return entry, true
 }
 
-// resolveRedirect returns a stateless, representative resolution for a redirect
-// name: the first catalog-supported concrete model behind it, descending chained
-// virtual models. It backs validity checks and model listing, which must not
-// advance any load-balancing state. The request path uses
-// Service.balancedResolution, which applies the redirect's load-balancing
-// strategy across all available targets.
-func (s *snapshot) resolveRedirect(name string, catalog Catalog, userPath string, enforceUserPaths bool) (Resolution, bool) {
-	name = strings.TrimSpace(name)
-	resolution := Resolution{
-		Requested: core.ModelSelector{Model: name},
-		Resolved:  core.ModelSelector{Model: name},
-	}
-	entry, ok := s.findRedirect(name, userPath, enforceUserPaths)
-	if !ok {
-		return resolution, false
-	}
-	leaves := s.leafTargets(entry, catalog)
-	if len(leaves) == 0 {
-		return resolution, false
-	}
-	resolution.Resolved = leaves[0].selector
-	resolution.Source = entry.vm.Source
-	return resolution, true
-}
-
 // effectiveState resolves the compiled access state for one concrete selector.
 func (s *snapshot) effectiveState(selector core.ModelSelector) EffectiveState {
 	model := strings.TrimSpace(selector.Model)
 	providerName := strings.TrimSpace(selector.Provider)
-	state := EffectiveState{
+	enabled, userPaths := s.access(selector)
+	return EffectiveState{
 		Selector:       selectorString(providerName, model),
 		ProviderName:   providerName,
 		Model:          model,
 		DefaultEnabled: s.defaultEnable,
-		Enabled:        s.defaultEnable,
+		Enabled:        enabled,
+		UserPaths:      append([]string(nil), userPaths...),
 	}
-	if model == "" && providerName == "" {
-		return state
-	}
+}
 
+// access returns whether selector is enabled and the user paths restricting
+// it: effectiveState without building the reported view, for the per-request
+// path. The returned slice is the snapshot's own and must not be modified.
+func (s *snapshot) access(selector core.ModelSelector) (bool, []string) {
+	model := strings.TrimSpace(selector.Model)
+	providerName := strings.TrimSpace(selector.Provider)
+	if model == "" && providerName == "" {
+		return s.defaultEnable, nil
+	}
 	if rule, ok := s.matchingPolicy(providerName, model); ok {
 		// Native Enabled: a disabled policy row turns the model OFF; an enabled
 		// row with user_paths restricts; an enabled row with no paths allows.
-		state.Enabled = rule.Enabled
-		state.UserPaths = append([]string(nil), rule.UserPaths...)
+		return rule.Enabled, rule.UserPaths
 	}
-	return state
+	return s.defaultEnable, nil
 }
 
 // matchingPolicy returns the most specific policy row matching providerName and

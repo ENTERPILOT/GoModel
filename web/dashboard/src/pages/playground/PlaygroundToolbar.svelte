@@ -61,7 +61,7 @@
         mono
       />
     </div>
-    <div class="playground-field playground-field-user-path" title={m.playground_user_path_help()}>
+    <div class="playground-field playground-field-user-path" title={m.playground_user_path_help({ header: store.userPathHeaderName })}>
       <label class="playground-field-label" for="playground-user-path">{m.playground_user_path_label()}</label>
       <SearchSelect
         id="playground-user-path"

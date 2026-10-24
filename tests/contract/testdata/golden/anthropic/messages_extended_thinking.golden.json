@@ -5,6 +5,17 @@
       "index": 0,
       "message": {
         "content": "To solve for x in the equation x + 5 = 12, I need to isolate x.\n\nI'll subtract 5 from both sides:\nx + 5 = 12\nx + 5 - 5 = 12 - 5\nx = 7\n\nLet me verify: 7 + 5 = 12 ✓\n\nTherefore, x = 7.",
+        "extra_content": {
+          "anthropic": {
+            "thinking_blocks": [
+              {
+                "signature": "EoQDCkYICxgCKkD/7LGRV3nhFx7eDr0a8CqN9Q7VPNpcIwqMFQzxg6yM6cO8+q0blgDq+FxNpRMTkCjr3IJM6NaGVts1UOfeU5aNEgxb0pVzXeXVpI7s+Z4aDE478qswmtW5VM64tCIw0s9xrQpgRYkAQXva9t8ffdPRTNonQJha21BqfjukLhWjHR9NjkDoP7Qwsg1Y/puqKusBe7vIpKbZDnINky4NLhrdk10PAhtp428bEsRkJYKhoSfNfmxO6KQUH4xA7zXA4FWNwrrWtbaq8Wjy7A6NQ5RMCzxqOa1gzUpI06JOJf47QcjJuJmu6IzjL8Wj6e0vg1v8AQyiLQRh+vMlTkCmT1p2rmmUfrqGA68oEKWt6HkytfiRrkw3UrbIqjOlPlWYmFSh3ypnYHV91QILr8uoaRivkLko8eTMnS2dq8qKBJyH+nZvKjNnQg2fz4Xj25wfDyiB6dQ2zXPL1vdMurqfzsM2ZKoihxVGCPkfstDG24iadpjrH09hqTriwIVspRgB",
+                "thinking": "I need to solve for x in the equation x + 5 = 12.\n\nTo isolate x, I need to subtract 5 from both sides of the equation:\n\nx + 5 = 12\nx + 5 - 5 = 12 - 5\nx = 7\n\nLet me check: If x = 7, then x + 5 = 7 + 5 = 12 ✓\n\nSo x = 7.",
+                "type": "thinking"
+              }
+            ]
+          }
+        },
         "reasoning_content": "I need to solve for x in the equation x + 5 = 12.\n\nTo isolate x, I need to subtract 5 from both sides of the equation:\n\nx + 5 = 12\nx + 5 - 5 = 12 - 5\nx = 7\n\nLet me check: If x = 7, then x + 5 = 7 + 5 = 12 ✓\n\nSo x = 7.",
         "role": "assistant"
       }

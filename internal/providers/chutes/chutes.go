@@ -7,7 +7,6 @@ import (
 	"net/http"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 )
@@ -37,14 +36,6 @@ var _ core.PassthroughProvider = (*Provider)(nil)
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	return &Provider{compat: openai.NewCompatibleProvider(cfg.APIKey, opts, compatibleConfig(
 		providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
-	))}
-}
-
-// NewWithHTTPClient creates a new Chutes AI provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	return &Provider{compat: openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(
-		providers.ResolveBaseURL(baseURL, defaultBaseURL),
 	))}
 }
 
@@ -79,7 +70,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 
 // Responses translates an OpenAI Responses request through Chutes chat completions.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return providers.ResponsesViaChat(ctx, p, req)
+	return providers.ResponsesViaChat(ctx, p, req, "chutes")
 }
 
 // StreamResponses translates a streaming Responses request through Chutes chat completions.

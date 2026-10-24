@@ -10,6 +10,7 @@ import {
   defaultGuardrailForm,
   filterGuardrails,
   guardrailArrayFieldSelected,
+  guardrailDegraded,
   guardrailFieldValue,
   normalizeGuardrailConfig,
   setGuardrailFieldValue,
@@ -216,4 +217,143 @@ test("buildGuardrailPayload keeps trimmed optional fields", () => {
     user_path: "/team/alpha",
     config: { content: "x" },
   });
+});
+
+// ─── Plugin-era additions: field defaults, scopes, phases, secrets, advanced ───
+
+import {
+  guardrailEditForm,
+  guardrailPhases,
+  guardrailTypeFields,
+  guardrailTypePhases,
+  parseGuardrailTimeoutMs,
+} from "../src/pages/guardrails/guardrails-logic.js";
+
+const PLUGIN_TYPES = [
+  {
+    type: "classifier",
+    label: "Classifier",
+    defaults: { threshold: 0.5, endpoint: "" },
+    phases: ["prompt", "response"],
+    fields: [
+      { key: "api_key", input: "secret" },
+      { key: "endpoint", input: "text", default: "https://classifier.local" },
+      { key: "threshold", input: "number", default: 0.8 },
+      { key: "model", input: "model" },
+      { key: "budget_ms", input: "number", scope: "route", default: 250 },
+    ],
+  },
+];
+
+test("guardrailTypeFields renders only instance-scoped fields", () => {
+  assert.deepEqual(
+    guardrailTypeFields(PLUGIN_TYPES, "classifier").map((field) => field.key),
+    ["api_key", "endpoint", "threshold", "model"],
+  );
+});
+
+test("defaultGuardrailForm applies per-field defaults over the defaults object", () => {
+  const form = defaultGuardrailForm(PLUGIN_TYPES, "classifier");
+  // endpoint/threshold come from Field.default; nothing from a route field.
+  assert.deepEqual(form.config, {
+    threshold: 0.8,
+    endpoint: "https://classifier.local",
+  });
+  assert.equal(form.fail_mode, "");
+  assert.equal(form.timeout_ms, "");
+});
+
+test("guardrail phases come from the view, then the type, then prompt-only", () => {
+  assert.deepEqual(guardrailTypePhases(PLUGIN_TYPES, "classifier"), ["prompt", "response"]);
+  assert.deepEqual(guardrailTypePhases(PLUGIN_TYPES, "system_prompt"), ["prompt"]);
+  assert.deepEqual(
+    guardrailPhases(PLUGIN_TYPES, { type: "classifier", phases: ["stream"] }),
+    ["stream"],
+  );
+  assert.deepEqual(guardrailPhases(PLUGIN_TYPES, { type: "classifier" }), [
+    "prompt",
+    "response",
+  ]);
+  assert.deepEqual(guardrailPhases(PLUGIN_TYPES, { type: "legacy" }), ["prompt"]);
+});
+
+test("editing keeps the stored secret placeholder and sends it back unchanged", () => {
+  const form = guardrailEditForm(PLUGIN_TYPES, {
+    name: "pii",
+    type: "classifier",
+    config: { api_key: "********", endpoint: "https://x", threshold: 0.9 },
+    fail_mode: "open",
+    timeout_ms: 1500,
+  });
+  assert.equal(form.config.api_key, "********");
+  assert.equal(form.fail_mode, "open");
+  assert.equal(form.timeout_ms, "1500");
+
+  const untouched = JSON.parse(JSON.stringify(buildGuardrailPayload(form)));
+  assert.equal(untouched.config.api_key, "********");
+  assert.equal(untouched.fail_mode, "open");
+  assert.equal(untouched.timeout_ms, 1500);
+
+  const edited = buildGuardrailPayload({
+    ...form,
+    config: setGuardrailFieldValue(form.config, { key: "api_key", input: "secret" }, "sk-new"),
+  });
+  assert.equal(edited.config.api_key, "sk-new");
+});
+
+test("buildGuardrailPayload omits default fail_mode and timeout", () => {
+  const payload = JSON.parse(
+    JSON.stringify(
+      buildGuardrailPayload({
+        name: "x",
+        type: "classifier",
+        config: {},
+        fail_mode: "",
+        timeout_ms: "",
+      }),
+    ),
+  );
+  assert.equal("fail_mode" in payload, false);
+  assert.equal("timeout_ms" in payload, false);
+
+  const zero = JSON.parse(
+    JSON.stringify(
+      buildGuardrailPayload({ name: "x", type: "classifier", timeout_ms: "0", fail_mode: "bogus" }),
+    ),
+  );
+  assert.equal("timeout_ms" in zero, false);
+  assert.equal("fail_mode" in zero, false);
+});
+
+test("parseGuardrailTimeoutMs accepts empty/whole numbers and rejects the rest", () => {
+  assert.equal(parseGuardrailTimeoutMs(""), 0);
+  assert.equal(parseGuardrailTimeoutMs(" 250 "), 250);
+  assert.ok(Number.isNaN(parseGuardrailTimeoutMs("1.5")));
+  assert.ok(Number.isNaN(parseGuardrailTimeoutMs("-1")));
+  assert.ok(Number.isNaN(parseGuardrailTimeoutMs("abc")));
+});
+
+test("guardrailEditForm keeps an unknown stored type and its config", () => {
+  const form = guardrailEditForm(PLUGIN_TYPES, {
+    name: "old",
+    type: "gone",
+    config: { api_key: "********", endpoint: "http://x" },
+    timeout_ms: 0,
+  });
+  assert.equal(form.type, "gone");
+  assert.deepEqual(form.config, { api_key: "********", endpoint: "http://x" });
+  assert.equal(form.timeout_ms, "");
+});
+
+test("guardrailEditForm keeps the stored type when no types are loaded", () => {
+  const form = guardrailEditForm([], { name: "old", type: "llm_judge", config: { model: "a/b" } });
+  assert.equal(form.type, "llm_judge");
+  assert.deepEqual(form.config, { model: "a/b" });
+});
+
+test("guardrailDegraded reads the instance health of a view", () => {
+  assert.equal(guardrailDegraded({ name: "pii", health: "degraded", health_error: "analyzer unreachable" }), true);
+  assert.equal(guardrailDegraded({ name: "pii", health: "ok" }), false);
+  assert.equal(guardrailDegraded({ name: "legacy" }), false);
+  assert.equal(guardrailDegraded(undefined), false);
 });

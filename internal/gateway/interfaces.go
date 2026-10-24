@@ -37,6 +37,9 @@ type FailoverResolver interface {
 // ModelAuthorizer validates request-scoped access to concrete models.
 type ModelAuthorizer interface {
 	ValidateModelAccess(ctx context.Context, selector core.ModelSelector) error
+	// ValidateProviderAccess checks a request that names a provider but no
+	// model against the caller's allowlists.
+	ValidateProviderAccess(ctx context.Context, provider string) error
 	AllowsModel(ctx context.Context, selector core.ModelSelector) bool
 	FilterPublicModels(ctx context.Context, models []core.Model) []core.Model
 }
@@ -51,6 +54,48 @@ type WorkflowPolicyResolver interface {
 type TranslatedRequestPatcher interface {
 	PatchChatRequest(ctx context.Context, req *core.ChatRequest) (*core.ChatRequest, error)
 	PatchResponsesRequest(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesRequest, error)
+}
+
+// SystemOneRequestPatcher is an optional TranslatedRequestPatcher capability:
+// it runs the prompt phase over a System One decision request's state.
+type SystemOneRequestPatcher interface {
+	PatchSystemOneRequest(ctx context.Context, req *core.SystemOneRequest) (*core.SystemOneRequest, error)
+}
+
+// DecisionRequestPatcher is an optional TranslatedRequestPatcher capability:
+// it runs the prompt phase over an OpenAI Decisions request's input.
+type DecisionRequestPatcher interface {
+	PatchDecisionRequest(ctx context.Context, req *core.DecisionRequest) (*core.DecisionRequest, error)
+}
+
+// PromptContentEditor is an optional TranslatedRequestPatcher capability: it
+// reports whether the prompt phase may rewrite the content of this request.
+// Only a rewriting prompt phase (anonymization, redaction) needs the replayed
+// history of a chained request in its input; a patcher that does not implement
+// this interface is assumed to rewrite.
+type PromptContentEditor interface {
+	EditsPromptContent(ctx context.Context) bool
+}
+
+// ResponsesAttemptPatcher adapts a Responses request to the provider one
+// attempt is about to reach, after failover has chosen the target. It runs
+// for the primary attempt and for every failover attempt with that target's
+// provider type, so a field one provider resolves itself (previous_response_id
+// on a native Responses provider) can be rewritten only for targets that
+// cannot.
+type ResponsesAttemptPatcher interface {
+	PatchResponsesAttempt(ctx context.Context, req *core.ResponsesRequest, providerType string) (*core.ResponsesRequest, error)
+}
+
+// ResponsesHistoryResolver expands the history a Responses request refers to
+// (a gateway-managed conversation, a stored previous response) into its
+// input. It runs once the workflow is resolved and before the prompt-phase
+// patch, so guardrails see every message the provider will receive.
+// providerTypes lists the primary target's provider type, then each failover
+// target's. The returned context carries whatever the resolver keeps for the
+// rest of the request.
+type ResponsesHistoryResolver interface {
+	ResolveResponsesHistory(ctx context.Context, req *core.ResponsesRequest, providerTypes []string) (context.Context, *core.ResponsesRequest, error)
 }
 
 // BatchRequestPreparer rewrites a native batch request before provider

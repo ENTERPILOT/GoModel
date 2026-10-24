@@ -24,11 +24,11 @@ func newBenchService(b *testing.B) *Service {
 	b.Helper()
 	tp := sdkTrace.NewTracerProvider(sdkTrace.WithBatcher(tracetest.NewNoopExporter()))
 	mp := sdkMetric.NewMeterProvider(sdkMetric.WithReader(sdkMetric.NewPeriodicReader(&dropMetricExporter{})))
-	observer, err := newObserver(tp, mp)
+	observer, err := newObserver(tp, mp, false)
 	if err != nil {
 		b.Fatal(err)
 	}
-	middleware, err := newMiddleware(tp, mp, propagatorsFromEnv(), "/metrics")
+	middleware, err := newMiddleware(tp, mp, propagatorsFromEnv(), "/metrics", false)
 	if err != nil {
 		b.Fatal(err)
 	}

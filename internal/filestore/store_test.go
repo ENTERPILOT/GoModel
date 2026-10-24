@@ -2,8 +2,8 @@ package filestore
 
 import (
 	"context"
-	"errors"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +13,8 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // runStoreSuite exercises the behaviour every Store implementation owes its
@@ -27,9 +29,8 @@ func runStoreSuite(t *testing.T, suite func(t *testing.T, store Store)) {
 	t.Run("sql", func(t *testing.T) {
 		sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 			store, err := NewSQLStore(context.Background(), db)
-			if err != nil {
-				t.Fatalf("NewSQLStore: %v", err)
-			}
+			require.NoError(t, err)
+
 			suite(t, store)
 		})
 	})
@@ -48,9 +49,8 @@ func newMongoTestStore(t *testing.T) Store {
 	}
 	ctx := context.Background()
 	client, err := mongo.Connect(options.Client().ApplyURI(dsn))
-	if err != nil {
-		t.Fatalf("mongo.Connect: %v", err)
-	}
+	require.NoError(t, err)
+
 	// MongoDB rejects database names of 64 bytes or more, and the prefix plus
 	// a timestamp already spends 48 of them, so the test name is bounded
 	// rather than concatenated whole.
@@ -83,8 +83,7 @@ func mongoTestDatabaseName(testName string) string {
 func TestStoreUpsertPreservesCreatedAt(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
-
-		if err := store.Upsert(ctx, &StoredFile{
+		err := store.Upsert(ctx, &StoredFile{
 			ID:           "file-1",
 			ProviderType: "openai",
 			Purpose:      "batch",
@@ -92,10 +91,9 @@ func TestStoreUpsertPreservesCreatedAt(t *testing.T) {
 			Bytes:        10,
 			CreatedAt:    111,
 			UserPath:     "/v1/files",
-		}); err != nil {
-			t.Fatalf("initial Upsert: %v", err)
-		}
-		if err := store.Upsert(ctx, &StoredFile{
+		})
+		require.NoError(t, err)
+		err = store.Upsert(ctx, &StoredFile{
 			ID:           "file-1",
 			ProviderType: "anthropic",
 			Purpose:      "fine-tune",
@@ -103,70 +101,136 @@ func TestStoreUpsertPreservesCreatedAt(t *testing.T) {
 			Bytes:        20,
 			CreatedAt:    222,
 			UserPath:     "/v1/files?provider=anthropic",
-		}); err != nil {
-			t.Fatalf("second Upsert: %v", err)
-		}
+		})
+		require.NoError(t, err)
 
 		stored, err := store.Get(ctx, "file-1")
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
+		require.NoError(t, err)
+
 		// created_at is deliberately absent from the ON CONFLICT update list:
 		// a re-upsert refreshes provider ownership without rewriting when the
 		// file was first seen.
-		if stored.CreatedAt != 111 {
-			t.Errorf("CreatedAt = %d, want 111 preserved", stored.CreatedAt)
-		}
-		if stored.ProviderType != "anthropic" {
-			t.Errorf("ProviderType = %q, want anthropic", stored.ProviderType)
-		}
-		if stored.Filename != "updated.jsonl" {
-			t.Errorf("Filename = %q, want updated.jsonl", stored.Filename)
-		}
+		assert.Equal(t, int64(111), stored.CreatedAt)
+		assert.Equal(t, "anthropic", stored.ProviderType)
+		assert.Equal(t, "updated.jsonl", stored.Filename)
 	})
 }
 
 func TestStoreGetMissingReturnsNotFound(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		_, err := store.Get(context.Background(), "absent")
-		if !errors.Is(err, ErrNotFound) {
-			t.Fatalf("Get error = %v, want ErrNotFound", err)
-		}
+		require.ErrorIs(t, err, ErrNotFound)
 	})
 }
 
 func TestStoreDeleteMissingReturnsNotFound(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		err := store.Delete(context.Background(), "absent")
-		if !errors.Is(err, ErrNotFound) {
-			t.Fatalf("Delete error = %v, want ErrNotFound", err)
-		}
+		require.ErrorIs(t, err, ErrNotFound)
 	})
 }
 
 func TestStoreDeleteRemovesMapping(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
-		if err := store.Upsert(ctx, &StoredFile{ID: "file-1", ProviderType: "openai"}); err != nil {
-			t.Fatalf("Upsert: %v", err)
-		}
-		if err := store.Delete(ctx, "file-1"); err != nil {
-			t.Fatalf("Delete: %v", err)
-		}
-		if _, err := store.Get(ctx, "file-1"); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("Get after Delete = %v, want ErrNotFound", err)
-		}
+		err := store.Upsert(ctx, &StoredFile{ID: "file-1", ProviderType: "openai"})
+		require.NoError(t, err)
+		err = store.Delete(ctx, "file-1")
+		require.NoError(t, err)
+		_, err = store.Get(ctx, "file-1")
+		require.ErrorIs(t, err, ErrNotFound)
 	})
 }
 
 func TestStoreRejectsIncompleteMapping(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
-		if err := store.Upsert(ctx, &StoredFile{ProviderType: "openai"}); err == nil {
-			t.Error("Upsert without an id succeeded, want failure")
+		require.Error(t, store.Upsert(ctx, &StoredFile{ProviderType: "openai"}))
+		assert.Error(t, store.Upsert(ctx, &StoredFile{ID: "file-1"}))
+	})
+}
+
+func fileIDs(files []*StoredFile) []string {
+	ids := make([]string, 0, len(files))
+	for _, file := range files {
+		ids = append(ids, file.ID)
+	}
+	return ids
+}
+
+func TestStoreListFiltersByUserPathSubtree(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		ctx := context.Background()
+		rows := []struct {
+			id, userPath, provider, purpose string
+			createdAt                       int64
+		}{
+			{"file-beta", "/team/beta", "openai", "batch", 6},
+			{"file-alpha-new", "/team/alpha", "openai", "batch", 5},
+			{"file-alpha-anthropic", "/team/alpha", "anthropic", "batch", 4},
+			{"file-alpha-child", "/team/alpha/service", "openai", "assistants", 3},
+			{"file-alpha-sibling", "/team/alpha-2", "openai", "batch", 2},
+			{"file-legacy", "", "openai", "batch", 1},
 		}
-		if err := store.Upsert(ctx, &StoredFile{ID: "file-1"}); err == nil {
-			t.Error("Upsert without a provider type succeeded, want failure")
+		for _, row := range rows {
+			err := store.Upsert(ctx, &StoredFile{ID: row.id, ProviderType: row.provider, Purpose: row.purpose, UserPath: row.userPath, CreatedAt: row.createdAt})
+			require.NoError(t, err, "upsert %s: %v", row.id, err)
 		}
+
+		tests := []struct {
+			name   string
+			filter ListFilter
+			after  string
+			want   []string
+			notFnd bool
+		}{
+			{name: "no filter", want: []string{"file-beta", "file-alpha-new", "file-alpha-anthropic", "file-alpha-child", "file-alpha-sibling", "file-legacy"}},
+			{name: "subtree", filter: ListFilter{UserPath: "/team/alpha"}, want: []string{"file-alpha-new", "file-alpha-anthropic", "file-alpha-child"}},
+			{name: "subtree and provider", filter: ListFilter{UserPath: "/team/alpha", ProviderType: "openai"}, want: []string{"file-alpha-new", "file-alpha-child"}},
+			{name: "subtree and purpose", filter: ListFilter{UserPath: "/team/alpha", Purpose: "assistants"}, want: []string{"file-alpha-child"}},
+			{name: "subtree after cursor", filter: ListFilter{UserPath: "/team/alpha"}, after: "file-alpha-new", want: []string{"file-alpha-anthropic", "file-alpha-child"}},
+			{name: "root keeps every tracked path", filter: ListFilter{UserPath: "/"}, want: []string{"file-beta", "file-alpha-new", "file-alpha-anthropic", "file-alpha-child", "file-alpha-sibling"}},
+			{name: "foreign cursor is missing", filter: ListFilter{UserPath: "/team/alpha"}, after: "file-beta", notFnd: true},
+			{name: "unknown cursor is missing", after: "nope", notFnd: true},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				got, err := store.List(ctx, tt.filter, 10, tt.after)
+				if tt.notFnd {
+					require.ErrorIs(t, err, ErrNotFound)
+
+					return
+				}
+				require.NoError(t, err)
+				ids := fileIDs(got)
+				require.True(t, slices.Equal(ids, tt.want), "ids = %v, want %v", ids, tt.want)
+			})
+		}
+
+		page, err := store.List(ctx, ListFilter{UserPath: "/team/alpha"}, 2, "")
+		require.NoError(t, err)
+		ids := fileIDs(page)
+		require.True(t, slices.Equal(ids, []string{"file-alpha-new", "file-alpha-anthropic"}), "page ids = %v", ids)
+	})
+}
+
+// User paths are case-sensitive, and SQLite's LIKE is not: a subtree filter
+// must not admit another tenant whose path differs only in case.
+func TestFileStoreListUserPathIsCaseSensitive(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		ctx := context.Background()
+		for i, row := range []struct{ id, userPath string }{
+			{"file-alpha", "/team/alpha"},
+			{"file-alpha-child", "/team/alpha/svc"},
+			{"file-upper", "/TEAM/ALPHA"},
+			{"file-upper-child", "/TEAM/ALPHA/svc"},
+		} {
+			err := store.Upsert(ctx, &StoredFile{ID: row.id, ProviderType: "openai", Purpose: "batch", UserPath: row.userPath, CreatedAt: int64(i + 1)})
+			require.NoError(t, err)
+		}
+
+		got, err := store.List(ctx, ListFilter{UserPath: "/team/alpha"}, 10, "")
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"file-alpha", "file-alpha-child"}, fileIDs(got))
 	})
 }

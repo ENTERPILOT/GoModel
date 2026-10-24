@@ -3,8 +3,10 @@ package usage
 import (
 	"encoding/base64"
 	"encoding/json"
-	"math"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // appendFrame builds a client audio append event carrying n bytes of PCM16.
@@ -14,9 +16,8 @@ func appendFrame(t *testing.T, eventType string, n int) []byte {
 		"type":  eventType,
 		"audio": base64.StdEncoding.EncodeToString(make([]byte, n)),
 	})
-	if err != nil {
-		t.Fatalf("failed to build frame: %v", err)
-	}
+	require.NoError(t, err)
+
 	return frame
 }
 
@@ -42,9 +43,7 @@ func TestRealtimeInputAudioMeterSeconds(t *testing.T) {
 			for range tt.frames {
 				meter.Observe(appendFrame(t, tt.eventType, tt.bytesPerAdd))
 			}
-			if got := meter.Seconds(); math.Abs(got-tt.wantSeconds) > 1e-9 {
-				t.Errorf("Seconds() = %v, want %v", got, tt.wantSeconds)
-			}
+			assert.InDelta(t, tt.wantSeconds, meter.Seconds(), 1e-9)
 		})
 	}
 }
@@ -64,21 +63,7 @@ func TestRealtimeInputAudioMeterIgnoresOtherFrames(t *testing.T) {
 	for _, frame := range frames {
 		meter.Observe(frame)
 	}
-	if got := meter.Seconds(); got != 0 {
-		t.Errorf("Seconds() = %v, want 0 for frames that carry no input audio", got)
-	}
-}
-
-func TestRealtimeInputAudioMeterReadsAudioAfterOtherFields(t *testing.T) {
-	// Field order is the client's choice, and an append may carry an event id, so
-	// the scan must find the audio payload wherever it sits.
-	frame := []byte(`{"event_id":"evt_1","type":"session.input_audio_buffer.append","audio":"` +
-		base64.StdEncoding.EncodeToString(make([]byte, 48000)) + `"}`)
-	var meter RealtimeInputAudioMeter
-	meter.Observe(frame)
-	if got := meter.Seconds(); math.Abs(got-1) > 1e-9 {
-		t.Errorf("Seconds() = %v, want 1", got)
-	}
+	assert.Equal(t, float64(0), meter.Seconds())
 }
 
 func TestRealtimeInputAudioMeterIgnoresMarkerOutsideEventType(t *testing.T) {
@@ -99,9 +84,7 @@ func TestRealtimeInputAudioMeterIgnoresMarkerOutsideEventType(t *testing.T) {
 	for _, frame := range frames {
 		meter.Observe(frame)
 	}
-	if got := meter.Seconds(); got != 0 {
-		t.Errorf("Seconds() = %v, want 0 for frames that only mention the append event", got)
-	}
+	assert.Equal(t, float64(0), meter.Seconds())
 }
 
 func TestRealtimeInputAudioMeterIgnoresUndecodablePayloads(t *testing.T) {
@@ -118,9 +101,7 @@ func TestRealtimeInputAudioMeterIgnoresUndecodablePayloads(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var meter RealtimeInputAudioMeter
 			meter.Observe(frame)
-			if got := meter.Seconds(); got != 0 {
-				t.Errorf("Seconds() = %v, want 0 for a payload the provider rejects", got)
-			}
+			assert.Equal(t, float64(0), meter.Seconds())
 		})
 	}
 }
@@ -152,12 +133,11 @@ func TestBase64DecodedLen(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			got, ok := base64DecodedLen([]byte(tt.encoded))
-			if ok != tt.wantOK || (ok && got != tt.want) {
-				t.Errorf("base64DecodedLen(%q) = (%d, %v), want (%d, %v)", tt.encoded, got, ok, tt.want, tt.wantOK)
+			assert.Equal(t, tt.wantOK, ok)
+			if ok {
+				assert.Equal(t, tt.want, got)
 			}
-			if decodable := anyBase64Decodes(tt.encoded); decodable != tt.wantOK {
-				t.Errorf("Go decoders accept %q = %v, but the case expects %v", tt.encoded, decodable, tt.wantOK)
-			}
+			assert.Equal(t, tt.wantOK, anyBase64Decodes(tt.encoded), "Go decoders disagree with the case for %q", tt.encoded)
 		})
 	}
 }
@@ -192,9 +172,7 @@ func TestRealtimeInputAudioMeterReadsOnlyTopLevelFields(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var meter RealtimeInputAudioMeter
 			meter.Observe([]byte(frame))
-			if got := meter.Seconds(); got != 0 {
-				t.Errorf("Seconds() = %v, want 0 for audio outside the append event", got)
-			}
+			assert.Equal(t, float64(0), meter.Seconds())
 		})
 	}
 }
@@ -214,9 +192,7 @@ func TestRealtimeInputAudioMeterReadsAppendsAroundOtherFields(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var meter RealtimeInputAudioMeter
 			meter.Observe([]byte(frame))
-			if got := meter.Seconds(); math.Abs(got-1) > 1e-9 {
-				t.Errorf("Seconds() = %v, want 1", got)
-			}
+			assert.InDelta(t, 1, meter.Seconds(), 1e-9)
 		})
 	}
 }
@@ -254,8 +230,9 @@ func TestTopLevelStringFieldMatchesJSONDecoding(t *testing.T) {
 			for _, field := range []string{"type", "audio"} {
 				want, wantOK := referenceStringField(frame, field)
 				got, gotOK := topLevelStringField([]byte(frame), field)
-				if gotOK != wantOK || (gotOK && string(got) != want) {
-					t.Errorf("topLevelStringField(%q) = (%q, %v), want (%q, %v)", field, got, gotOK, want, wantOK)
+				assert.Equal(t, wantOK, gotOK, "field %q", field)
+				if gotOK {
+					assert.Equal(t, want, string(got), "field %q", field)
 				}
 			}
 		})

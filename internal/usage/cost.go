@@ -17,33 +17,65 @@ const (
 	CostSourceModelPricing      = "model_pricing"
 	CostSourceOpenRouterCredits = "openrouter_credits"
 	CostSourceXAITicks          = "xai_cost_in_usd_ticks"
+	CostSourceEdenAICost        = "edenai_cost"
 )
 
 // xAI reports usage.cost_in_usd_ticks as USD-denominated ticks, where 10^10
 // ticks equals 1 USD.
 const xaiUSDTicksPerUSD = 10_000_000_000
 
-// Missing-usage caveats mark rows whose provider reported no usage at all;
-// they describe the usage report, not the price math, so pricing
-// recalculation preserves them (see retainedMissingUsageCaveat).
+// Uncalculated-cost caveats mark rows the configured pricing could not cost:
+// the provider reported no usage, or reported a quantity with no rate to price
+// it. They describe the billable quantity, not the price math, so pricing
+// recalculation preserves them until new pricing closes the gap (see
+// retainedMissingUsageCaveat).
 const (
 	caveatImageMissingUsage     = "provider returned no token usage; set a per_image price to cost this model"
+	caveatImageUnpricedOutput   = "provider reported image output tokens with no configured rate; cost not calculated"
 	caveatEmbeddingMissingUsage = "provider reported no token usage; cost not calculated"
+	caveatAudioMissingUsage     = "provider reported no usage and audio duration could not be measured; cost not calculated"
 )
 
-// imageCostDetermined reports whether pricing can cost an image row whose
-// provider reported no usage: a per_image rate is not a basis on its own,
-// there must also be images to multiply it by. An explicit zero rate counts —
-// a deliberately free model is a known price, not a missing one. A per-request
-// rate stands alone, since it does not depend on reported usage at all.
-func imageCostDetermined(pricing *core.ModelPricing, imageCount int) bool {
-	if pricing == nil {
+// imageCostCaveat reports the caveat an image row needs, or "" when the
+// configured pricing costs it. An image response is billed one of two ways:
+// by the generated image tokens the provider reported, or — when it reported
+// none — by the number of images returned, each needing its own rate. An
+// explicit zero rate counts as priced: a deliberately free model is a known
+// price, not a missing one. A per-request rate stands alone, since it does not
+// depend on reported usage at all.
+//
+// pricing must already be resolved for the image endpoint (see
+// pricingForImageEndpoint), so OutputPerMtok is the image output rate.
+func imageCostCaveat(pricing *core.ModelPricing, outputTokens, imageCount int) string {
+	if pricing != nil && pricing.PerRequest != nil {
+		return ""
+	}
+	if outputTokens > 0 {
+		if pricing != nil && pricing.OutputPerMtok != nil {
+			return ""
+		}
+		return caveatImageUnpricedOutput
+	}
+	if imageCount > 0 && pricing != nil && pricing.PerImage != nil {
+		return ""
+	}
+	return caveatImageMissingUsage
+}
+
+// audioDurationAffectsCost reports whether a transcription or translation row
+// with no reported usage is understated: its model is priced by input audio
+// duration (or by tokens), and neither quantity is available.
+func audioDurationAffectsCost(pricing *core.ModelPricing) bool {
+	if pricing == nil || pricing.PerRequest != nil {
 		return false
 	}
-	if pricing.PerRequest != nil {
-		return true
+	rates := []*float64{pricing.PerSecondInput, pricing.AudioInputPerMtok, pricing.AudioOutputPerMtok}
+	for _, rate := range rates {
+		if rate != nil && *rate != 0 {
+			return true
+		}
 	}
-	return imageCount > 0 && pricing.PerImage != nil
+	return tokenRatesAffectCost(pricing)
 }
 
 // tokenRatesAffectCost reports whether reported token usage would have changed
@@ -64,6 +96,9 @@ func tokenRatesAffectCost(pricing *core.ModelPricing) bool {
 	for _, tier := range pricing.Tiers {
 		rates = append(rates, tier.InputPerMtok, tier.OutputPerMtok)
 	}
+	for _, window := range pricing.TimeWindows {
+		rates = append(rates, window.Pricing.InputPerMtok, window.Pricing.OutputPerMtok)
+	}
 	for _, rate := range rates {
 		if rate != nil && *rate != 0 {
 			return true
@@ -75,16 +110,22 @@ func tokenRatesAffectCost(pricing *core.ModelPricing) bool {
 // retainedMissingUsageCaveat keeps a stored missing-usage caveat across
 // repricing: recalculation cannot conjure usage the provider never reported.
 // A caveat lifts once the new pricing determines the cost without that usage.
-func retainedMissingUsageCaveat(existing string, rawData map[string]any, pricing *core.ModelPricing) string {
+func retainedMissingUsageCaveat(existing string, outputTokens int, rawData map[string]any, pricing *core.ModelPricing) string {
 	// A prior recalculation may have joined the missing-usage caveat with its
 	// own caveats, so match by containment and return the canonical constant —
 	// the caller re-joins it with the fresh recalculation caveats.
 	switch {
-	case strings.Contains(existing, caveatImageMissingUsage):
-		if imageCostDetermined(pricing, extractInt(rawData, rawKeyImages)) {
+	case strings.Contains(existing, caveatImageMissingUsage),
+		strings.Contains(existing, caveatImageUnpricedOutput):
+		return imageCostCaveat(pricing, outputTokens, extractInt(rawData, rawKeyImages))
+	case strings.Contains(existing, caveatAudioMissingUsage):
+		if _, ok := extractFloat(rawData, rawKeyAudioSeconds); ok {
 			return ""
 		}
-		return caveatImageMissingUsage
+		if !audioDurationAffectsCost(pricing) {
+			return ""
+		}
+		return caveatAudioMissingUsage
 	case strings.Contains(existing, caveatEmbeddingMissingUsage):
 		if !tokenRatesAffectCost(pricing) {
 			return ""
@@ -126,6 +167,9 @@ type tokenCostMapping struct {
 	side           costSide
 	unit           costUnit
 	includedInBase bool
+	// includedIn returns the rate another mapping already charged these
+	// tokens at, so only the difference is added.
+	includedIn func(p *core.ModelPricing) *float64
 }
 
 var openAICompatibleTokenCostMappings = []tokenCostMapping{
@@ -137,6 +181,10 @@ var openAICompatibleTokenCostMappings = []tokenCostMapping{
 	// Treat it as a cached-input alias; the miss count needs no rate (the base
 	// input rate already covers it) and is listed in informationalFields.
 	{rawDataKey: "prompt_cache_hit_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
+	// OpenAI GPT-5.6+ reports prompt-cache writes as
+	// prompt_tokens_details.cache_write_tokens, part of prompt_tokens and
+	// billed at the cache-write rate instead of the base input rate.
+	{rawDataKey: "prompt_cache_write_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CacheWritePerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
 	{rawDataKey: "reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
 	{rawDataKey: "completion_reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
 	{rawDataKey: "prompt_audio_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.AudioInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
@@ -156,8 +204,20 @@ var providerMappings = map[string][]tokenCostMapping{
 	"openrouter": openAICompatibleTokenCostMappings,
 	"anthropic": {
 		{rawDataKey: "cache_read_input_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok},
+		// The Responses surface reports cache reads in the OpenAI shape
+		// (input_tokens_details.cached_tokens), which usage extraction turns
+		// into prompt_cached_tokens. Price it like the Anthropic-named count so
+		// a cache hit replayed from a stored response body keeps its rate.
+		{rawDataKey: "prompt_cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok},
 		{rawDataKey: "cache_creation_input_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CacheWritePerMtok }, side: sideInput, unit: unitPerMtok},
+		// usage.cache_creation splits cache_creation_input_tokens by TTL.
+		// 1-hour writes cost more than the 5-minute writes the total was
+		// already priced at, so only the surcharge is added here.
+		{rawDataKey: "cache_creation_ephemeral_1h_input_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CacheWrite1hPerMtok }, side: sideInput, unit: unitPerMtok, includedIn: func(p *core.ModelPricing) *float64 { return p.CacheWritePerMtok }},
 		{rawDataKey: "completion_reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
+		// Native Messages streams report output_tokens_details.thinking_tokens,
+		// which the stream observer records under this name.
+		{rawDataKey: "completion_thinking_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
 	},
 	"gemini": {
 		{rawDataKey: "cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
@@ -199,6 +259,9 @@ var informationalFields = map[string]struct{}{
 	"tool_use_prompt_token_count":           {},
 	"completion_accepted_prediction_tokens": {},
 	"completion_rejected_prediction_tokens": {},
+	// Anthropic's 5-minute share of cache_creation_input_tokens, already
+	// priced at the cache-write rate.
+	"cache_creation_ephemeral_5m_input_tokens": {},
 }
 
 // CalculateGranularCost computes input, output, and total costs from token counts,
@@ -260,6 +323,11 @@ func CalculateGranularCost(inputTokens, outputTokens int, rawData map[string]any
 				effectiveRate -= *baseRate
 			}
 		}
+		if m.includedIn != nil {
+			if paidRate := m.includedIn(pricing); paidRate != nil {
+				effectiveRate -= *paidRate
+			}
+		}
 
 		var cost float64
 		switch m.unit {
@@ -297,11 +365,14 @@ func CalculateGranularCost(inputTokens, outputTokens int, rawData map[string]any
 		mappedKeys[rawKeyAudioOutputSeconds] = true
 	}
 
-	// Price generated images for per-image models (DALL·E). The count lives in
-	// RawData (see usage/images.go); token-billed image models carry no
-	// PerImage rate and are priced through the token paths above.
+	// Price generated images for per-image models (DALL·E, Imagen, grok-imagine).
+	// The count lives in RawData (see usage/images.go). PerImage and the output
+	// token rate are two expressions of the same charge — the catalog carries
+	// both for Gemini image models and gpt-image-1, where per_image is just the
+	// token price of one typical image — so a response that reported generated
+	// tokens is priced by tokens alone and never also per image.
 	if pricing.PerImage != nil {
-		if count := extractInt(rawData, rawKeyImages); count > 0 {
+		if count := extractInt(rawData, rawKeyImages); count > 0 && outputTokens <= 0 {
 			outputCost += float64(count) * *pricing.PerImage
 			hasOutput = true
 		}
@@ -406,6 +477,9 @@ func pricingForTokenCount(pricing *core.ModelPricing, inputTokens int) *core.Mod
 	effective := *pricing
 	if tier.InputPerMtok != nil {
 		effective.InputPerMtok = tier.InputPerMtok
+	}
+	if tier.CachedInputPerMtok != nil {
+		effective.CachedInputPerMtok = tier.CachedInputPerMtok
 	}
 	if tier.OutputPerMtok != nil {
 		effective.OutputPerMtok = tier.OutputPerMtok
@@ -516,6 +590,9 @@ func CalculateUsageCost(inputTokens, outputTokens int, rawData map[string]any, p
 	if result, ok := xaiTicksCost(rawData, providerType); ok {
 		return result
 	}
+	if result, ok := edenAICost(rawData, providerType); ok {
+		return result
+	}
 	return CalculateGranularCost(inputTokens, outputTokens, rawData, providerType, pricing)
 }
 
@@ -563,6 +640,48 @@ func xaiTicksCost(rawData map[string]any, providerType string) (CostResult, bool
 
 func isXAIProvider(providerType string) bool {
 	return strings.EqualFold(strings.TrimSpace(providerType), "xai")
+}
+
+// edenAICost uses Eden AI's own per-request charge instead of recomputing cost
+// from token counts. Eden is a multi-provider gateway that reprices upstreams
+// automatically and applies per-account discounts, so the figure it returns is
+// authoritative in a way a rate-card reconstruction cannot be.
+//
+// Eden publishes cost at the response root rather than inside usage; the Eden
+// provider moves it into RawUsage so it arrives here on the same path as
+// OpenRouter's and xAI's. Eden reports no input/output split, so only the
+// total is set — the same shape xaiTicksCost produces.
+func edenAICost(rawData map[string]any, providerType string) (CostResult, bool) {
+	if !isEdenAIProvider(providerType) {
+		return CostResult{}, false
+	}
+	total, ok := extractFloat(rawData, "cost")
+	if !ok || !isFiniteCost(total) || total < 0 {
+		return CostResult{}, false
+	}
+
+	return CostResult{
+		TotalCost: &total,
+		Source:    CostSourceEdenAICost,
+	}, true
+}
+
+func isEdenAIProvider(providerType string) bool {
+	return strings.EqualFold(strings.TrimSpace(providerType), "edenai")
+}
+
+// isProviderReportedCostSource reports whether a CostSource names a charge the
+// provider itself returned, rather than one reconstructed from token counts and
+// a rate card. Callers use it to suppress caveats that only make sense for a
+// rate-card reconstruction: a provider-reported total is authoritative no
+// matter what token counts came with it.
+func isProviderReportedCostSource(source string) bool {
+	switch strings.TrimSpace(source) {
+	case CostSourceOpenRouterCredits, CostSourceXAITicks, CostSourceEdenAICost:
+		return true
+	default:
+		return false
+	}
 }
 
 func openRouterCreditCostSplit(rawData map[string]any, total float64) (float64, float64, bool) {

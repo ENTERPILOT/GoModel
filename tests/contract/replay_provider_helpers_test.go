@@ -8,7 +8,9 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/gemini"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
 func newGeminiReplayProvider(t *testing.T, routes map[string]replayRoute) core.Provider {
@@ -29,7 +31,9 @@ func newGeminiReplayProviderWithMode(t *testing.T, routes map[string]replayRoute
 
 	t.Setenv("USE_GOOGLE_GEMINI_NATIVE_API", strconv.FormatBool(native))
 	client := newReplayHTTPClient(t, routes)
-	provider := gemini.NewWithHTTPClient("test-api-key", client, llmclient.Hooks{})
+	opts := providertest.Options(llmclient.Hooks{})
+	opts.HTTPClient = client
+	provider := gemini.New(providers.ProviderConfig{APIKey: "test-api-key"}, opts).(*gemini.Provider)
 	provider.SetBaseURL("https://replay.local")
 	provider.SetModelsURL("https://replay.local")
 	return provider

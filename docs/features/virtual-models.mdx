@@ -44,11 +44,13 @@ adds 50%, so a response that takes 2 seconds upstream is returned after about
 from a concrete model. Leaving the field empty leaves the setting unspecified.
 Delays honor request cancellation.
 
-For Chat Completions and Responses API SSE streams, GoModel drains the upstream
-in the background and releases each read chunk on the scaled timeline. This
+For streamed responses — Chat Completions and Responses API SSE, and the
+[audio endpoints](/advanced/audio-api#streaming) — GoModel drains the upstream in
+the background and releases each read chunk on the scaled timeline. This
 preserves the provider's relative chunk timing while delayed chunks accumulate
-in memory. A large factor on a long or high-volume stream can therefore use
-substantial memory. Realtime WebSocket sessions are not slowed.
+in memory. A large factor on a long or high-volume stream, or on a large audio
+response, can therefore use substantial memory; leave slowdown unset in
+production, where it has no purpose. Realtime WebSocket sessions are not slowed.
 
 When an alias and its concrete target both have a slowdown, the alias value
 wins. An alias without its own value inherits the selected target model's
@@ -96,10 +98,25 @@ them. Add more than one target in the editor (**Add target**) and pick a
   a session on the provider whose prompt cache is warm. See
   [Intelligent Routing](/pro/intelligent-routing). On an open-source build the
   strategy falls back to round-robin.
+- **Plugin** (`strategy: plugin`) delegates the choice to a loaded
+  [routing strategy plugin](/advanced/plugins#routing-strategy-plugins) named
+  by `strategy_plugin`, configured per redirect through `strategy_config`.
+  The built-in `cheapest_healthy` prefers the cheapest (or fastest) target
+  whose recent error rate is acceptable. Weights do not apply; if the plugin
+  fails or is missing, the redirect falls back to weighted round-robin.
 
 Targets that the gateway cannot currently serve (unknown model, provider down)
 are skipped automatically, so a redirect keeps working as long as one target is
-available. A redirect with a single target behaves exactly like a plain alias.
+available. The same goes for a target model you have **disabled**, or one the
+request's API key or `user_path` may not use: every strategy routes around it,
+so disabling a model (for example while its provider's quota is exhausted)
+moves its traffic to the other targets until you re-enable it. When every
+available target is disabled or denied, the request fails with
+`model_access_denied`; when no target is available at all (unknown model,
+provider down), the name is resolved like any other model name, usually
+ending in a model-not-found error. A request that names a disabled model
+directly still fails.
+A redirect with a single target behaves exactly like a plain alias.
 
 Whatever the strategy, the remaining targets are the redirect's **failover
 chain**: when the chosen target fails with a retryable error, the request is
@@ -127,6 +144,20 @@ restore stateless balancing — see
 For example, point `smart` at both `openai/gpt-4o` and `anthropic/claude-sonnet-4-6`
 with the round-robin strategy to split load, or at a premium and a budget model
 with the cost strategy to always take the cheaper one.
+
+## Reorder targets
+
+The target list is an ordered list, and the editor keeps it editable: drag the
+**grip handle** (☰) at the left edge of each target row onto another row to change
+its position. The drop row is not replaced — the dragged row moves into its
+position and the rows in between shift. Keyboard users can focus the handle and
+press **ArrowUp** / **ArrowDown** for the same move.
+
+The handle shows only when the redirect has more than one target, and every
+strategy benefits: for **failover** the order is the priority chain (position
+`1` is tried first), for the balancing strategies position `1` is the first
+slot in the queue. Weights and explicit provider pins stay attached to their
+target when it moves.
 
 ## Chain virtual models
 
@@ -272,6 +303,29 @@ Two lenient exceptions keep valid setups booting:
 - Whether a target *model* exists is never checked at startup: the model catalog
   loads asynchronously, so availability is a runtime concern and an unavailable
   target is simply skipped at resolve time.
+
+## Model availability by default
+
+Every provider model is available unless a `virtual_models` entry says
+otherwise. To flip that default, set:
+
+```env
+MODELS_ENABLED_BY_DEFAULT=false
+```
+
+With the default off, a provider model stays unavailable until an entry
+matches it. An entry with empty `targets` is enough — it acts as a pure
+access rule (`enabled: true`, optionally with `user_paths`). Unavailable
+models fail requests with `400 model_access_denied` and stay out of
+`GET /v1/models`. A redirect resolves by its own `enabled` flag, but its
+target is validated like a direct call: with the default off, give the
+target model its own access entry too. When that target is also the source
+of another redirect, use a provider-wide or model-wide policy instead: an
+access entry at that source replaces a dashboard-managed redirect there.
+
+This is not the reverse of [exposing only redirects](#expose-only-redirects):
+that setting only changes what `GET /v1/models` lists, while the availability
+default decides which models requests may call at all.
 
 ## Expose only redirects
 

@@ -19,6 +19,8 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
+	"github.com/enterpilot/gomodel/internal/mediastore"
+	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/health"
@@ -50,12 +52,14 @@ type Handler struct {
 	runtimeSettings     *runtimesettings.Service
 	guardrails          guardrails.Catalog
 	guardrailDefs       *guardrails.Service
+	pluginCatalog       *plugins.Catalog
 	liveBroker          *live.Broker
 	runtimeConfig       DashboardConfigResponse
 	runtimeRefresher    RuntimeRefresher
 	configuredProviders []providers.SanitizedProviderConfig
 	providerCredentials ProviderCredentialsAdmin
 	requestHealth       RequestHealthSource
+	media               *mediastore.Service
 	quotaTemplates      bool
 
 	mutationMu sync.Mutex
@@ -75,13 +79,16 @@ const (
 	DashboardConfigRateLimitsEnabled    = "RATE_LIMITS_ENABLED"
 	DashboardConfigQuotaTemplates       = "PER_CHILD_QUOTAS_ENABLED"
 	DashboardConfigGuardrailsEnabled    = "GUARDRAILS_ENABLED"
+	DashboardConfigPluginsEnabled       = "PLUGINS_ENABLED"
 	DashboardConfigCacheEnabled         = "CACHE_ENABLED"
 	DashboardConfigRedisURL             = "REDIS_URL"
 	DashboardConfigSemanticCacheEnabled = "SEMANTIC_CACHE_ENABLED"
 	DashboardConfigPricingRecalculation = "USAGE_PRICING_RECALCULATION_ENABLED"
 	DashboardConfigLiveLogsEnabled      = "DASHBOARD_LIVE_LOGS_ENABLED"
 	DashboardConfigMCPEnabled           = "MCP_ENABLED"
+	DashboardConfigMCPToolDiscovery     = "MCP_TOOL_DISCOVERY"
 	DashboardConfigVMStrategies         = "VIRTUAL_MODEL_STRATEGIES"
+	DashboardConfigUserPathHeader       = "USER_PATH_HEADER"
 )
 
 // statusClientClosedRequest is the de facto status used by proxies for client-aborted requests.
@@ -98,17 +105,25 @@ type DashboardConfigResponse struct {
 	RateLimitsEnabled     string `json:"RATE_LIMITS_ENABLED,omitempty"`
 	QuotaTemplatesEnabled string `json:"PER_CHILD_QUOTAS_ENABLED,omitempty"`
 	GuardrailsEnabled     string `json:"GUARDRAILS_ENABLED,omitempty"`
+	PluginsEnabled        string `json:"PLUGINS_ENABLED,omitempty"`
 	CacheEnabled          string `json:"CACHE_ENABLED,omitempty"`
 	RedisURL              string `json:"REDIS_URL,omitempty"`
 	SemanticCacheEnabled  string `json:"SEMANTIC_CACHE_ENABLED,omitempty"`
 	PricingRecalculation  string `json:"USAGE_PRICING_RECALCULATION_ENABLED,omitempty"`
 	LiveLogsEnabled       string `json:"DASHBOARD_LIVE_LOGS_ENABLED,omitempty"`
 	MCPEnabled            string `json:"MCP_ENABLED,omitempty"`
+	// MCPToolDiscovery is the gateway's default MCP tool discovery mode
+	// ("off" or "search"), so the dashboard can show how clients see tools.
+	MCPToolDiscovery string `json:"MCP_TOOL_DISCOVERY,omitempty"`
 	// VirtualModelStrategies is the comma-separated list of load-balancing
 	// strategies this deployment supports. "adaptive" appears only when a
 	// route-selector extension is registered, so the dashboard never offers
 	// a strategy that would silently fall back to round robin.
 	VirtualModelStrategies string `json:"VIRTUAL_MODEL_STRATEGIES,omitempty"`
+	// UserPathHeader is the canonical name of the inbound header the gateway
+	// reads user paths from (server.user_path_header), so the Playground sends
+	// the header this deployment actually honors.
+	UserPathHeader string `json:"USER_PATH_HEADER,omitempty"`
 }
 
 type providerStatusSummaryResponse struct {
@@ -319,9 +334,21 @@ func WithTagging(service *tagging.Service) Option {
 	}
 }
 
-// WithGuardrailService enables full guardrail definition administration endpoints.
+// WithPluginCatalog enables the plugin listing endpoint.
+func WithPluginCatalog(catalog *plugins.Catalog) Option {
+	return func(h *Handler) {
+		h.pluginCatalog = catalog
+	}
+}
+
+// WithGuardrailService enables full guardrail definition administration
+// endpoints. A nil service (plugin system disabled) leaves them unavailable
+// rather than storing a nil pointer behind the interfaces.
 func WithGuardrailService(service *guardrails.Service) Option {
 	return func(h *Handler) {
+		if service == nil {
+			return
+		}
 		h.guardrails = service
 		h.guardrailDefs = service
 	}
@@ -408,13 +435,16 @@ func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardCo
 		RateLimitsEnabled:      strings.TrimSpace(values.RateLimitsEnabled),
 		QuotaTemplatesEnabled:  strings.TrimSpace(values.QuotaTemplatesEnabled),
 		GuardrailsEnabled:      strings.TrimSpace(values.GuardrailsEnabled),
+		PluginsEnabled:         strings.TrimSpace(values.PluginsEnabled),
 		CacheEnabled:           strings.TrimSpace(values.CacheEnabled),
 		RedisURL:               strings.TrimSpace(values.RedisURL),
 		SemanticCacheEnabled:   strings.TrimSpace(values.SemanticCacheEnabled),
 		PricingRecalculation:   strings.TrimSpace(values.PricingRecalculation),
 		LiveLogsEnabled:        strings.TrimSpace(values.LiveLogsEnabled),
 		MCPEnabled:             strings.TrimSpace(values.MCPEnabled),
+		MCPToolDiscovery:       strings.TrimSpace(values.MCPToolDiscovery),
 		VirtualModelStrategies: strings.TrimSpace(values.VirtualModelStrategies),
+		UserPathHeader:         strings.TrimSpace(values.UserPathHeader),
 	}
 }
 
@@ -470,14 +500,39 @@ func parseUsageParams(c *echo.Context) (usage.UsageQueryParams, error) {
 	params.Provider = strings.TrimSpace(c.QueryParam("provider"))
 	params.Label = strings.TrimSpace(c.QueryParam("label"))
 	params.SessionID = strings.TrimSpace(c.QueryParam("session_id"))
+	params.AuthKeyID = strings.TrimSpace(c.QueryParam("auth_key_id"))
+	params.Endpoints = parseCommaList(c.QueryParam("endpoint"))
+	if raw := c.QueryParam("operation"); raw != "" {
+		ops, unknown, ok := core.ParseOperations(raw)
+		if !ok {
+			return params, core.NewInvalidRequestError("invalid operation: "+unknown, nil)
+		}
+		params.Operations = ops
+	}
 
-	userPath, err := normalizeUserPathQueryParam("user_path", c.QueryParam("user_path"))
+	userPath, err := scopedUserPath(c, "user_path", c.QueryParam("user_path"))
 	if err != nil {
 		return params, err
 	}
 	params.UserPath = userPath
 
 	return params, nil
+}
+
+// parseCommaList splits a comma-separated query value, trimming entries and
+// dropping blanks and duplicates.
+func parseCommaList(raw string) []string {
+	var values []string
+	seen := map[string]bool{}
+	for part := range strings.SplitSeq(raw, ",") {
+		value := strings.TrimSpace(part)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		values = append(values, value)
+	}
+	return values
 }
 
 func normalizeUserPathQueryParam(fieldName, raw string) (string, error) {
@@ -551,7 +606,7 @@ func handleError(c *echo.Context, err error) error {
 	}
 
 	fallback := &core.GatewayError{
-		Type:       "internal_error",
+		Type:       core.ErrorTypeInternal,
 		Message:    "an unexpected error occurred",
 		StatusCode: http.StatusInternalServerError,
 		Err:        err,

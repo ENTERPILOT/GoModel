@@ -152,6 +152,25 @@
           <span>{m.api_keys_dashboard_allow()}</span>
         </label>
       </div>
+      <div class="form-field">
+        <InlineHelpSection copyId="auth-key-passthrough-access-help-copy" label={m.api_keys_passthrough_help_label()}>
+          {#snippet title()}
+            <label class="form-field-label" for="auth-key-passthrough-access">{m.api_keys_passthrough_access()}</label>
+          {/snippet}
+          {#snippet help()}
+            {m.api_keys_passthrough_help()}
+          {/snippet}
+        </InlineHelpSection>
+        <label class="auth-key-dashboard-toggle">
+          <input
+            id="auth-key-passthrough-access"
+            type="checkbox"
+            aria-describedby="auth-key-passthrough-access-help-copy"
+            bind:checked={store.form.passthrough_access}
+          />
+          <span>{m.api_keys_passthrough_allow()}</span>
+        </label>
+      </div>
       <FormField id="auth-key-description" label={m.api_keys_description_optional()}>
         <textarea
           id="auth-key-description"

@@ -1,10 +1,11 @@
 package core
 
 import (
-	"errors"
 	"net/http"
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var benchmarkSemanticSelectorBody = []byte(`{
@@ -36,53 +37,31 @@ func TestDeriveWhiteBoxPrompt_OpenAICompat(t *testing.T) {
 	)
 
 	env := DeriveWhiteBoxPrompt(frame)
-	if env == nil {
-		t.Fatal("DeriveWhiteBoxPrompt() = nil")
-		return
-	}
-	if env.RouteType != "openai_compat" {
-		t.Fatalf("RouteType = %q, want openai_compat", env.RouteType)
-	}
-	if env.OperationType != "chat_completions" {
-		t.Fatalf("OperationType = %q, want chat_completions", env.OperationType)
-	}
-	if !env.JSONBodyParsed {
-		t.Fatal("JSONBodyParsed = false, want true")
-	}
-	if env.RouteHints.Model != "gpt-5-mini" {
-		t.Fatalf("RouteHints.Model = %q, want gpt-5-mini", env.RouteHints.Model)
-	}
-	if env.RouteHints.Provider != "openai" {
-		t.Fatalf("RouteHints.Provider = %q, want openai", env.RouteHints.Provider)
-	}
-	if !env.StreamRequested {
-		t.Fatal("StreamRequested = false, want true")
-	}
-	if env.CachedChatRequest() != nil || env.CachedResponsesRequest() != nil || env.CachedEmbeddingRequest() != nil || env.CachedBatchRequest() != nil || env.CachedBatchRouteInfo() != nil || env.CachedFileRouteInfo() != nil || env.CachedPassthroughRouteInfo() != nil {
-		t.Fatalf("canonical request payloads should be nil, got %+v", env)
-	}
+	require.NotNil(t, env)
+	require.Equal(t, "openai_compat", env.RouteType)
+	require.Equal(t, "chat_completions", env.OperationType)
+	require.True(t, env.JSONBodyParsed)
+	require.Equal(t, "gpt-5-mini", env.RouteHints.Model)
+	require.Equal(t, "openai", env.RouteHints.Provider)
+	require.True(t, env.StreamRequested)
+	require.Nil(t, env.CachedChatRequest())
+	require.Nil(t, env.CachedResponsesRequest())
+	require.Nil(t, env.CachedEmbeddingRequest())
+	require.Nil(t, env.CachedBatchRequest())
+	require.Nil(t, env.CachedBatchRouteInfo())
+	require.Nil(t, env.CachedFileRouteInfo())
+	require.Nil(t, env.CachedPassthroughRouteInfo(), "canonical request payloads should be nil, got %+v", env)
 }
 
 func TestDeriveWhiteBoxPrompt_InvalidJSONRemainsPartial(t *testing.T) {
 	frame := NewRequestSnapshot("POST", "/v1/responses", nil, nil, nil, "application/json", []byte(`{invalid}`), false, "", nil)
 
 	env := DeriveWhiteBoxPrompt(frame)
-	if env == nil {
-		t.Fatal("DeriveWhiteBoxPrompt() = nil")
-		return
-	}
-	if env.RouteType != "openai_compat" {
-		t.Fatalf("RouteType = %q, want openai_compat", env.RouteType)
-	}
-	if env.OperationType != "responses" {
-		t.Fatalf("OperationType = %q, want responses", env.OperationType)
-	}
-	if env.JSONBodyParsed {
-		t.Fatal("JSONBodyParsed = true, want false")
-	}
-	if env.RouteHints.Model != "" {
-		t.Fatalf("RouteHints.Model = %q, want empty", env.RouteHints.Model)
-	}
+	require.NotNil(t, env)
+	require.Equal(t, "openai_compat", env.RouteType)
+	require.Equal(t, "responses", env.OperationType)
+	require.False(t, env.JSONBodyParsed)
+	require.Empty(t, env.RouteHints.Model)
 }
 
 func TestDeriveWhiteBoxPrompt_PassthroughRouteParams(t *testing.T) {
@@ -100,92 +79,50 @@ func TestDeriveWhiteBoxPrompt_PassthroughRouteParams(t *testing.T) {
 	)
 
 	env := DeriveWhiteBoxPrompt(frame)
-	if env == nil {
-		t.Fatal("DeriveWhiteBoxPrompt() = nil")
-		return
-	}
-	if env.RouteType != "provider_passthrough" {
-		t.Fatalf("RouteType = %q, want provider_passthrough", env.RouteType)
-	}
-	if env.OperationType != "provider_passthrough" {
-		t.Fatalf("OperationType = %q, want provider_passthrough", env.OperationType)
-	}
-	if env.RouteHints.Provider != "openai" {
-		t.Fatalf("RouteHints.Provider = %q, want openai", env.RouteHints.Provider)
-	}
-	if env.RouteHints.Endpoint != "responses" {
-		t.Fatalf("RouteHints.Endpoint = %q, want responses", env.RouteHints.Endpoint)
-	}
-	if env.RouteHints.Model != "gpt-5-mini" {
-		t.Fatalf("RouteHints.Model = %q, want gpt-5-mini", env.RouteHints.Model)
-	}
-	if !env.StreamRequested {
-		t.Fatal("StreamRequested = false, want true")
-	}
+	require.NotNil(t, env)
+	require.Equal(t, "provider_passthrough", env.RouteType)
+	require.Equal(t, "provider_passthrough", env.OperationType)
+	require.Equal(t, "openai", env.RouteHints.Provider)
+	require.Equal(t, "responses", env.RouteHints.Endpoint)
+	require.Equal(t, "gpt-5-mini", env.RouteHints.Model)
+	require.True(t, env.StreamRequested)
+
 	info := env.CachedPassthroughRouteInfo()
-	if info == nil {
-		t.Fatal("CachedPassthroughRouteInfo() = nil")
-	}
-	if info.Provider != "openai" {
-		t.Fatalf("PassthroughRouteInfo.Provider = %q, want openai", info.Provider)
-	}
-	if info.RawEndpoint != "responses" {
-		t.Fatalf("PassthroughRouteInfo.RawEndpoint = %q, want responses", info.RawEndpoint)
-	}
-	if info.Model != "gpt-5-mini" {
-		t.Fatalf("PassthroughRouteInfo.Model = %q, want gpt-5-mini", info.Model)
-	}
-	if !info.Stream {
-		t.Fatal("PassthroughRouteInfo.Stream = false, want true")
-	}
-	if info.AuditPath != "/p/openai/responses" {
-		t.Fatalf("PassthroughRouteInfo.AuditPath = %q, want /p/openai/responses", info.AuditPath)
-	}
-	if env.CachedChatRequest() != nil || env.CachedResponsesRequest() != nil || env.CachedEmbeddingRequest() != nil || env.CachedBatchRequest() != nil || env.CachedBatchRouteInfo() != nil || env.CachedFileRouteInfo() != nil {
-		t.Fatalf("canonical request payloads should be nil, got %+v", env)
-	}
+	require.NotNil(t, info)
+	require.Equal(t, "openai", info.Provider)
+	require.Equal(t, "responses", info.RawEndpoint)
+	require.Equal(t, "gpt-5-mini", info.Model)
+	require.True(t, info.Stream)
+	require.Equal(t, "/p/openai/responses", info.AuditPath)
+	require.Nil(t, env.CachedChatRequest())
+	require.Nil(t, env.CachedResponsesRequest())
+	require.Nil(t, env.CachedEmbeddingRequest())
+	require.Nil(t, env.CachedBatchRequest())
+	require.Nil(t, env.CachedBatchRouteInfo())
+	require.Nil(t, env.CachedFileRouteInfo(), "canonical request payloads should be nil, got %+v", env)
 }
 
 func TestDeriveWhiteBoxPrompt_PassthroughPathFallback(t *testing.T) {
 	frame := NewRequestSnapshot("POST", "/p/anthropic/messages", nil, nil, nil, "", []byte(`{"model":"claude-sonnet-4-5"}`), false, "", nil)
 
 	env := DeriveWhiteBoxPrompt(frame)
-	if env == nil {
-		t.Fatal("DeriveWhiteBoxPrompt() = nil")
-		return
-	}
-	if env.RouteHints.Provider != "anthropic" {
-		t.Fatalf("RouteHints.Provider = %q, want anthropic", env.RouteHints.Provider)
-	}
-	if env.RouteHints.Endpoint != "messages" {
-		t.Fatalf("RouteHints.Endpoint = %q, want messages", env.RouteHints.Endpoint)
-	}
+	require.NotNil(t, env)
+	require.Equal(t, "anthropic", env.RouteHints.Provider)
+	require.Equal(t, "messages", env.RouteHints.Endpoint)
+
 	info := env.CachedPassthroughRouteInfo()
-	if info == nil {
-		t.Fatal("CachedPassthroughRouteInfo() = nil")
-	}
-	if info.Provider != "anthropic" {
-		t.Fatalf("PassthroughRouteInfo.Provider = %q, want anthropic", info.Provider)
-	}
-	if info.RawEndpoint != "messages" {
-		t.Fatalf("PassthroughRouteInfo.RawEndpoint = %q, want messages", info.RawEndpoint)
-	}
+	require.NotNil(t, info)
+	require.Equal(t, "anthropic", info.Provider)
+	require.Equal(t, "messages", info.RawEndpoint)
 }
 
 func TestDeriveWhiteBoxPrompt_SkipsBodyParsingWhenIngressBodyWasNotCaptured(t *testing.T) {
 	frame := NewRequestSnapshot("POST", "/v1/chat/completions", nil, nil, nil, "", nil, true, "", nil)
 
 	env := DeriveWhiteBoxPrompt(frame)
-	if env == nil {
-		t.Fatal("DeriveWhiteBoxPrompt() = nil")
-		return
-	}
-	if env.JSONBodyParsed {
-		t.Fatal("JSONBodyParsed = true, want false")
-	}
-	if env.RouteHints.Model != "" {
-		t.Fatalf("RouteHints.Model = %q, want empty", env.RouteHints.Model)
-	}
+	require.NotNil(t, env)
+	require.False(t, env.JSONBodyParsed)
+	require.Empty(t, env.RouteHints.Model)
 }
 
 func TestApplyBodyStreamHintPreservesSelectorConfidence(t *testing.T) {
@@ -200,22 +137,16 @@ func TestApplyBodyStreamHintPreservesSelectorConfidence(t *testing.T) {
 
 	ApplyBodyStreamHint(env, true)
 
-	if env.JSONBodyParsed {
-		t.Fatal("JSONBodyParsed = true, want false")
-	}
-	if !env.StreamRequested {
-		t.Fatal("StreamRequested = false, want true")
-	}
-	if env.RouteHints.Model != "existing-model" || env.RouteHints.Provider != "openai" {
-		t.Fatalf("RouteHints = %+v, want existing selector preserved", env.RouteHints)
-	}
+	require.False(t, env.JSONBodyParsed)
+	require.True(t, env.StreamRequested)
+	require.Equal(t, "existing-model", env.RouteHints.Model)
+	require.Equal(t, "openai", env.RouteHints.Provider, "RouteHints = %+v, want existing selector preserved", env.RouteHints)
+
 	info := env.CachedPassthroughRouteInfo()
-	if info == nil {
-		t.Fatal("CachedPassthroughRouteInfo() = nil")
-	}
-	if info.Model != "existing-model" || !info.Stream || info.StreamUncertain {
-		t.Fatalf("PassthroughRouteInfo = %+v, want model preserved and stream confirmed", info)
-	}
+	require.NotNil(t, info)
+	require.Equal(t, "existing-model", info.Model)
+	require.True(t, info.Stream)
+	require.False(t, info.StreamUncertain, "PassthroughRouteInfo = %+v, want model preserved and stream confirmed", info)
 }
 
 func TestApplyPartialBodyStreamHintPreservesUncertainty(t *testing.T) {
@@ -229,22 +160,16 @@ func TestApplyPartialBodyStreamHintPreservesUncertainty(t *testing.T) {
 
 	ApplyPartialBodyStreamHint(env, true)
 
-	if env.JSONBodyParsed {
-		t.Fatal("JSONBodyParsed = true, want false")
-	}
-	if !env.StreamRequested {
-		t.Fatal("StreamRequested = false, want observed true hint")
-	}
-	if env.RouteHints.Model != "existing-model" || env.RouteHints.Provider != "openai" {
-		t.Fatalf("RouteHints = %+v, want existing selector preserved", env.RouteHints)
-	}
+	require.False(t, env.JSONBodyParsed)
+	require.True(t, env.StreamRequested)
+	require.Equal(t, "existing-model", env.RouteHints.Model)
+	require.Equal(t, "openai", env.RouteHints.Provider, "RouteHints = %+v, want existing selector preserved", env.RouteHints)
+
 	info := env.CachedPassthroughRouteInfo()
-	if info == nil {
-		t.Fatal("CachedPassthroughRouteInfo() = nil")
-	}
-	if info.Model != "existing-model" || !info.Stream || !info.StreamUncertain {
-		t.Fatalf("PassthroughRouteInfo = %+v, want model preserved and stream uncertain", info)
-	}
+	require.NotNil(t, info)
+	require.Equal(t, "existing-model", info.Model)
+	require.True(t, info.Stream)
+	require.True(t, info.StreamUncertain, "PassthroughRouteInfo = %+v, want model preserved and stream uncertain", info)
 }
 
 func TestDeriveWhiteBoxPrompt_FilesMetadata(t *testing.T) {
@@ -264,30 +189,15 @@ func TestDeriveWhiteBoxPrompt_FilesMetadata(t *testing.T) {
 	)
 
 	env := DeriveWhiteBoxPrompt(frame)
-	if env == nil {
-		t.Fatal("DeriveWhiteBoxPrompt() = nil")
-		return
-	}
-	if env.OperationType != "files" {
-		t.Fatalf("OperationType = %q, want files", env.OperationType)
-	}
+	require.NotNil(t, env)
+	require.Equal(t, "files", env.OperationType)
+
 	req := env.CachedFileRouteInfo()
-	if req == nil {
-		t.Fatal("FileRequest = nil")
-		return
-	}
-	if req.Action != FileActionContent {
-		t.Fatalf("FileRequest.Action = %q, want %q", req.Action, FileActionContent)
-	}
-	if req.FileID != "file_123" {
-		t.Fatalf("FileRequest.FileID = %q, want file_123", req.FileID)
-	}
-	if req.Provider != "openai" {
-		t.Fatalf("FileRequest.Provider = %q, want openai", req.Provider)
-	}
-	if env.RouteHints.Provider != "openai" {
-		t.Fatalf("RouteHints.Provider = %q, want openai", env.RouteHints.Provider)
-	}
+	require.NotNil(t, req)
+	require.Equal(t, FileActionContent, req.Action)
+	require.Equal(t, "file_123", req.FileID)
+	require.Equal(t, "openai", req.Provider)
+	require.Equal(t, "openai", env.RouteHints.Provider)
 }
 
 func TestDeriveWhiteBoxPrompt_BatchesListMetadata(t *testing.T) {
@@ -308,51 +218,28 @@ func TestDeriveWhiteBoxPrompt_BatchesListMetadata(t *testing.T) {
 	)
 
 	env := DeriveWhiteBoxPrompt(frame)
-	if env == nil {
-		t.Fatal("DeriveWhiteBoxPrompt() = nil")
-		return
-	}
-	if env.OperationType != "batches" {
-		t.Fatalf("OperationType = %q, want batches", env.OperationType)
-	}
+	require.NotNil(t, env)
+	require.Equal(t, "batches", env.OperationType)
+
 	req := env.CachedBatchRouteInfo()
-	if req == nil {
-		t.Fatal("BatchMetadata = nil")
-		return
-	}
-	if req.Action != BatchActionList {
-		t.Fatalf("BatchMetadata.Action = %q, want %q", req.Action, BatchActionList)
-	}
-	if req.After != "batch_prev" {
-		t.Fatalf("BatchMetadata.After = %q, want batch_prev", req.After)
-	}
-	if !req.HasLimit || req.Limit != 5 {
-		t.Fatalf("BatchMetadata limit = %d/%v, want 5/true", req.Limit, req.HasLimit)
-	}
+	require.NotNil(t, req)
+	require.Equal(t, BatchActionList, req.Action)
+	require.Equal(t, "batch_prev", req.After)
+	require.True(t, req.HasLimit)
+	require.Equal(t, 5, req.Limit)
 }
 
 func TestDeriveWhiteBoxPrompt_BatchResultsMetadata(t *testing.T) {
 	frame := NewRequestSnapshot(http.MethodGet, "/v1/batches/batch_123/results", map[string]string{"id": "batch_123"}, nil, nil, "", nil, false, "", nil)
 
 	env := DeriveWhiteBoxPrompt(frame)
-	if env == nil {
-		t.Fatal("DeriveWhiteBoxPrompt() = nil")
-		return
-	}
-	if env.OperationType != "batches" {
-		t.Fatalf("OperationType = %q, want batches", env.OperationType)
-	}
+	require.NotNil(t, env)
+	require.Equal(t, "batches", env.OperationType)
+
 	req := env.CachedBatchRouteInfo()
-	if req == nil {
-		t.Fatal("BatchMetadata = nil")
-		return
-	}
-	if req.Action != BatchActionResults {
-		t.Fatalf("BatchMetadata.Action = %q, want %q", req.Action, BatchActionResults)
-	}
-	if req.BatchID != "batch_123" {
-		t.Fatalf("BatchMetadata.BatchID = %q, want batch_123", req.BatchID)
-	}
+	require.NotNil(t, req)
+	require.Equal(t, BatchActionResults, req.Action)
+	require.Equal(t, "batch_123", req.BatchID)
 }
 
 func TestDeriveSnapshotSelectorHintsGJSON_MatchesStdlibSemantics(t *testing.T) {
@@ -387,9 +274,7 @@ func TestDeriveSnapshotSelectorHintsGJSON_MatchesStdlibSemantics(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := deriveSnapshotSelectorHintsGJSON([]byte(tt.body))
 			want := snapshotSelectorHints{model: tt.wantModel, provider: tt.wantProvider, stream: tt.wantStream, parsed: tt.wantParsed, duplicate: tt.wantDuplicate}
-			if got != want {
-				t.Fatalf("gjson mismatch: want %+v, got %+v", want, got)
-			}
+			require.Equal(t, want, got)
 		})
 	}
 }
@@ -410,41 +295,25 @@ func TestDeriveWhiteBoxPrompt_FlagsDuplicateSelectorFields(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			snapshot := NewRequestSnapshot(http.MethodPost, tt.path, nil, nil, nil, "application/json", []byte(tt.body), false, "", nil)
 			env := DeriveWhiteBoxPrompt(snapshot)
-			if env == nil {
-				t.Fatal("DeriveWhiteBoxPrompt() = nil")
-			}
-			if env.DuplicateSelectorField != tt.want {
-				t.Fatalf("DuplicateSelectorField = %q, want %q", env.DuplicateSelectorField, tt.want)
-			}
-			if env.JSONBodyParsed {
-				t.Fatal("JSONBodyParsed = true, want false: a duplicate body yields no selector hints")
-			}
-			if env.RouteHints.Model != "" {
-				t.Fatalf("RouteHints.Model = %q, want empty", env.RouteHints.Model)
-			}
+			require.NotNil(t, env)
+			assert.Equal(t, tt.want, env.DuplicateSelectorField)
+			assert.False(t, env.JSONBodyParsed, "a duplicate body yields no selector hints")
+			assert.Empty(t, env.RouteHints.Model)
+
 			err := env.DuplicateSelectorError()
-			if err == nil {
-				t.Fatal("DuplicateSelectorError() = nil, want invalid request error")
-			}
+			require.Error(t, err)
 			var gatewayErr *GatewayError
-			if !errors.As(err, &gatewayErr) || gatewayErr.StatusCode != http.StatusBadRequest {
-				t.Fatalf("DuplicateSelectorError() = %v, want 400 gateway error", err)
-			}
-			if !strings.Contains(err.Error(), `"`+tt.want+`"`) {
-				t.Fatalf("error %q does not name field %q", err.Error(), tt.want)
-			}
+			require.ErrorAs(t, err, &gatewayErr)
+			assert.Equal(t, http.StatusBadRequest, gatewayErr.StatusCode)
+			assert.Contains(t, err.Error(), `"`+tt.want+`"`)
 		})
 	}
 }
 
 func TestWhiteBoxPrompt_DuplicateSelectorErrorNilWhenUnique(t *testing.T) {
 	var env *WhiteBoxPrompt
-	if err := env.DuplicateSelectorError(); err != nil {
-		t.Fatalf("nil env error = %v, want nil", err)
-	}
-	if err := (&WhiteBoxPrompt{}).DuplicateSelectorError(); err != nil {
-		t.Fatalf("unique env error = %v, want nil", err)
-	}
+	assert.NoError(t, env.DuplicateSelectorError())
+	assert.NoError(t, (&WhiteBoxPrompt{}).DuplicateSelectorError())
 }
 
 func BenchmarkDeriveSnapshotSelectorHintsGJSON(b *testing.B) {
@@ -476,15 +345,24 @@ func TestDeriveBatchRouteInfoFromTransport_MessagesBatches(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := DeriveBatchRouteInfoFromTransport(tc.method, tc.path, nil, nil)
-			if got == nil {
-				t.Fatal("derived nil route info")
-			}
-			if got.Action != tc.wantAction {
-				t.Fatalf("action = %q, want %q", got.Action, tc.wantAction)
-			}
-			if got.BatchID != tc.wantID {
-				t.Fatalf("batch id = %q, want %q", got.BatchID, tc.wantID)
-			}
+			require.NotNil(t, got)
+			require.Equal(t, tc.wantAction, got.Action)
+			require.Equal(t, tc.wantID, got.BatchID)
 		})
 	}
+}
+
+// A deferred body read refreshes the envelope from the complete body, so a
+// repeated selector past the ingress peek is still flagged on the passthrough
+// route.
+func TestRefreshWhiteBoxPrompt_FlagsDuplicateSelectorField(t *testing.T) {
+	env := &WhiteBoxPrompt{}
+	CachePassthroughRouteInfo(env, &PassthroughRouteInfo{Provider: "jev"})
+	ApplyBodySelectorHints(env, "jev-latest", "", false)
+
+	snapshot := NewRequestSnapshot(http.MethodPost, "/p/jev/systemone", map[string]string{"provider": "jev", "endpoint": "systemone"}, nil, nil, "application/json", []byte(`{"model":"jev-latest","model":"jev-preview"}`), false, "", nil)
+	refreshed := RefreshWhiteBoxPrompt(snapshot, env)
+	require.NotNil(t, refreshed)
+	assert.Equal(t, "model", refreshed.DuplicateSelectorField)
+	assert.Error(t, refreshed.DuplicateSelectorError())
 }

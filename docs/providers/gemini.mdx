@@ -99,6 +99,42 @@ therefore drops those four fields for Gemini 3 and later (`gemini-3-*`,
 Gemma and other models. `max_tokens`, `stop`, penalties, `response_format` and
 thinking settings are unaffected.
 
+## Thought signatures
+
+Gemini 3 attaches an encrypted `thoughtSignature` to the function calls it
+emits and rejects a follow-up request (HTTP 400, "Function call is missing a
+thought_signature") when that call comes back in the history without it. In
+native mode GoModel exposes the signature the same way Google's own
+OpenAI-compatible endpoint does, so a client that echoes assistant messages
+back unchanged keeps working:
+
+```json
+{
+  "role": "assistant",
+  "tool_calls": [{
+    "id": "call_1",
+    "type": "function",
+    "function": {"name": "lookup_weather", "arguments": "{\"city\":\"Warsaw\"}"},
+    "extra_content": {"google": {"thought_signature": "EvACCu0CARFNMg..."}}
+  }]
+}
+```
+
+The same `extra_content` member appears on streamed `tool_calls` deltas, on
+Responses API `function_call` output items, on Anthropic Messages API
+`tool_use` blocks, and (for text-only turns) on the assistant message itself.
+Send it back verbatim; only the first call of a parallel batch carries a
+signature. Other providers never see it; see
+[Extra content, thinking blocks, and thought signatures](/advanced/extra-content) for the shared convention. A flat `thought_signature` (or
+`thoughtSignature`) on the tool call or its `function` object is accepted too,
+so clients built against other gateways keep working.
+
+When a Gemini 3 history contains a function call without any signature (the
+conversation started on another model, or the client dropped the field),
+GoModel sends Google's documented `skip_thought_signature_validator`
+placeholder instead of surfacing the 400. Reasoning continuity is reduced for
+that turn, so prefer echoing the real signature.
+
 ## Image input
 
 | Mode | OpenAI-style `image_url` |
@@ -109,12 +145,58 @@ thinking settings are unaffected.
 For URL-hosted images in native mode, Google's own examples fetch the URL
 first and send the bytes to `generateContent`.
 
+## Video input
+
+| Mode | OpenAI-style `video_url` |
+| ---- | ----- |
+| `native` (default) | inline `data:` URLs, YouTube links, Gemini Files API URIs, and `gs://` objects |
+| `openai_compatible` | forwarded unchanged, but Google's OpenAI-compatible endpoint has no video input — use `native` |
+
+```json
+{"type":"video_url","video_url":{"url":"https://www.youtube.com/watch?v=abc123"}}
+```
+
+In native mode a `data:` URL becomes an inline video part (defaulting to
+`video/mp4` when the data URL declares no media type), while YouTube, Files API,
+and Cloud Storage URIs are sent as a file reference Gemini resolves itself. Any
+other remote `https://...` URL is rejected rather than dropped — upload it
+through the Gemini Files API first.
+
+## Messages and tools
+
+In native mode, OpenAI chat fields map onto `generateContent` like this:
+
+| OpenAI field | Gemini `generateContent` |
+| ------------ | ------------------------ |
+| `system` and `developer` messages | `system_instruction` (Gemini has no separate developer role) |
+| `tool_choice: "auto"` / `"required"` / `"none"` | `functionCallingConfig.mode` `AUTO` / `ANY` / `NONE` |
+| `tool_choice` naming one function | `ANY` with `allowedFunctionNames: [name]` |
+| `tool_choice: {"type": "allowed_tools", ...}` with mode `required` | `ANY` with `allowedFunctionNames` |
+| `tool_choice: {"type": "allowed_tools", ...}` with mode `auto` | `VALIDATED` with `allowedFunctionNames` |
+| `strict: true` on any function tool | `VALIDATED` instead of `AUTO`; `ANY` already enforces the schema |
+| `parallel_tool_calls: false` | dropped; Gemini has no equivalent |
+
+Gemini accepts `allowedFunctionNames` only with `ANY` or `VALIDATED`, which is
+why an `auto` subset becomes `VALIDATED`: the model can still answer in text,
+but any call it makes is limited to the listed tools. `VALIDATED` applies to
+the whole request, so one strict tool makes every declared tool
+schema-validated.
+
+Gemini has no way to limit a turn to one function call, and naming a single
+tool does not help: Gemini can call the same function more than once in a turn.
+When `parallel_tool_calls: false` (or Anthropic's `disable_parallel_tool_use`)
+matters, handle or reject the extra calls in your client.
+
+An `allowed_tools` choice with an empty `tools` list is rejected with a 400, as
+OpenAI does.
+
 ## Not yet integrated
 
 - Automatic fetching of remote `image_url` values in native mode.
-- Uploading remote images through the Gemini Files API before a chat request.
+- Uploading remote images or videos through the Gemini Files API before a chat request.
 
 ## References
 
 - [Gemini image understanding](https://ai.google.dev/gemini-api/docs/image-understanding)
+- [Gemini video understanding](https://ai.google.dev/gemini-api/docs/video-understanding)
 - [Gemini OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai)

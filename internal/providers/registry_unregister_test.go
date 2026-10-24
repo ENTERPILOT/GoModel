@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type blockingRegistryProvider struct {
@@ -63,30 +65,19 @@ func TestModelRegistry_UnregisterProvider(t *testing.T) {
 		}
 		registry.RegisterProviderWithNameAndType(keep, "keep", "test")
 		registry.RegisterProviderWithNameAndType(drop, "drop", "test")
-
-		if err := registry.Initialize(context.Background()); err != nil {
-			t.Fatalf("Initialize() error = %v", err)
-		}
-		if got := registry.ModelCount(); got != 2 {
-			t.Fatalf("ModelCount() before unregister = %d, want 2", got)
-		}
+		err := registry.Initialize(context.Background())
+		require.NoError(t, err)
+		got := registry.ModelCount()
+		require.Equal(t, 2, got)
 
 		registry.UnregisterProvider("drop")
-		if got := registry.ProviderCount(); got != 1 {
-			t.Fatalf("ProviderCount() after UnregisterProvider = %d, want 1", got)
-		}
-		if got := registry.ModelCount(); got != 1 {
-			t.Fatalf("ModelCount() after UnregisterProvider = %d, want 1", got)
-		}
-		if !registry.Supports("keep/keep-model") {
-			t.Error("Supports(keep/keep-model) = false, want true")
-		}
-		if registry.Supports("drop/drop-model") {
-			t.Error("Supports(drop/drop-model) = true, want false (unregistered provider)")
-		}
-		if got := registry.GetProviderType("drop-model"); got != "" {
-			t.Errorf("GetProviderType(drop-model) = %q, want empty", got)
-		}
+		got = registry.ProviderCount()
+		require.Equal(t, 1, got)
+		got = registry.ModelCount()
+		require.Equal(t, 1, got)
+		assert.True(t, registry.Supports("keep/keep-model"))
+		assert.False(t, registry.Supports("drop/drop-model"))
+		assert.Empty(t, registry.GetProviderType("drop-model"))
 	})
 
 	t.Run("promotes another provider for an overlapping bare model", func(t *testing.T) {
@@ -107,21 +98,14 @@ func TestModelRegistry_UnregisterProvider(t *testing.T) {
 		}
 		registry.RegisterProviderWithNameAndType(first, "first", "test")
 		registry.RegisterProviderWithNameAndType(second, "second", "test")
-		if err := registry.Initialize(context.Background()); err != nil {
-			t.Fatalf("Initialize() error = %v", err)
-		}
+		err := registry.Initialize(context.Background())
+		require.NoError(t, err)
 
 		registry.UnregisterProvider("first")
-
-		if got := registry.GetProvider("shared"); got != second {
-			t.Fatalf("GetProvider(shared) = %T %p, want second provider %p", got, got, second)
-		}
-		if registry.Supports("first/shared") {
-			t.Error("Supports(first/shared) = true, want false")
-		}
-		if !registry.Supports("second/shared") {
-			t.Error("Supports(second/shared) = false, want true")
-		}
+		got := registry.GetProvider("shared")
+		require.Equal(t, second, got)
+		assert.False(t, registry.Supports("first/shared"))
+		assert.True(t, registry.Supports("second/shared"))
 	})
 
 	t.Run("an in-flight refresh cannot restore a removed provider", func(t *testing.T) {
@@ -142,13 +126,9 @@ func TestModelRegistry_UnregisterProvider(t *testing.T) {
 			runtimeUpdates:   map[string]providerRuntimeState{"drop": {registered: true}},
 			totalModels:      1,
 		}, 1)
-
-		if got := registry.ModelCount(); got != 0 {
-			t.Fatalf("ModelCount() after stale refresh result = %d, want 0", got)
-		}
-		if registry.Supports("drop/stale-model") {
-			t.Error("Supports(drop/stale-model) = true, want false")
-		}
+		got := registry.ModelCount()
+		require.Equal(t, 0, got)
+		assert.False(t, registry.Supports("drop/stale-model"))
 	})
 
 	t.Run("an in-flight refresh cannot overwrite a same-name replacement", func(t *testing.T) {
@@ -179,23 +159,15 @@ func TestModelRegistry_UnregisterProvider(t *testing.T) {
 		registry.UnregisterProvider("shared")
 		registry.RegisterProviderWithNameAndType(newProvider, "shared", "test")
 		close(oldProvider.release)
-		if err := <-refreshDone; err != nil {
-			t.Fatalf("old Initialize() error = %v", err)
-		}
-
-		if registry.Supports("shared/old-model") {
-			t.Error("Supports(shared/old-model) = true, want false for replaced provider")
-		}
-		if got := registry.GetProvider("old-model"); got != nil {
-			t.Fatalf("GetProvider(old-model) = %T, want nil", got)
-		}
-
-		if err := registry.Initialize(context.Background()); err != nil {
-			t.Fatalf("replacement Initialize() error = %v", err)
-		}
-		if got := registry.GetProvider("shared/new-model"); got != newProvider {
-			t.Fatalf("GetProvider(shared/new-model) = %T, want replacement provider", got)
-		}
+		err := <-refreshDone
+		require.NoError(t, err)
+		assert.False(t, registry.Supports("shared/old-model"))
+		got := registry.GetProvider("old-model")
+		require.Nil(t, got)
+		err = registry.Initialize(context.Background())
+		require.NoError(t, err)
+		got = registry.GetProvider("shared/new-model")
+		require.Equal(t, newProvider, got)
 	})
 
 	t.Run("is a no-op for a name that was never registered", func(t *testing.T) {
@@ -204,10 +176,8 @@ func TestModelRegistry_UnregisterProvider(t *testing.T) {
 		registry.RegisterProviderWithNameAndType(mock, "only", "test")
 
 		registry.UnregisterProvider("never-registered")
-
-		if got := registry.ProviderCount(); got != 1 {
-			t.Fatalf("ProviderCount() = %d, want 1 (unaffected)", got)
-		}
+		got := registry.ProviderCount()
+		require.Equal(t, 1, got)
 	})
 
 	t.Run("empty name is a no-op", func(t *testing.T) {
@@ -216,9 +186,7 @@ func TestModelRegistry_UnregisterProvider(t *testing.T) {
 		registry.RegisterProviderWithNameAndType(mock, "only", "test")
 
 		registry.UnregisterProvider("")
-
-		if got := registry.ProviderCount(); got != 1 {
-			t.Fatalf("ProviderCount() = %d, want 1 (unaffected)", got)
-		}
+		got := registry.ProviderCount()
+		require.Equal(t, 1, got)
 	})
 }

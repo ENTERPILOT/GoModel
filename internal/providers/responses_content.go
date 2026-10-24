@@ -44,6 +44,24 @@ func ConvertResponsesContentToChatContent(content any) (any, bool) {
 	}
 }
 
+// responsesOnlyTextKeys are output_text members that chat has no place for.
+// Clients replay assistant output with them (annotations: []), and strict
+// chat providers such as Fireworks reject unknown members of a text part.
+var responsesOnlyTextKeys = []string{"annotations", "logprobs"}
+
+// responsesOnlyItemKeys are input-item members that a chat message has no place
+// for. Replayed Responses output items always carry an "id" (the OpenAI SDK
+// emits one on every output item), and strict chat providers reject it:
+// Groq answers "property 'id' is unsupported", Fireworks "Extra inputs are not
+// permitted, field: 'messages[1].id'".
+var responsesOnlyItemKeys = []string{"id"}
+
+// chatExtraFieldsFromResponsesItem copies the unknown members of a Responses
+// input item onto a chat message, dropping the Responses-only ones.
+func chatExtraFieldsFromResponsesItem(fields core.UnknownJSONFields) core.UnknownJSONFields {
+	return core.CloneUnknownJSONFields(fields.Without(responsesOnlyItemKeys...))
+}
+
 func convertResponsesContentParts(parts []any) (any, bool) {
 	typedParts := make([]core.ContentPart, 0, len(parts))
 
@@ -63,7 +81,7 @@ func convertResponsesContentParts(parts []any) (any, bool) {
 			typedParts = append(typedParts, core.ContentPart{
 				Type:        "text",
 				Text:        text,
-				ExtraFields: core.UnknownJSONFieldsFromMap(rawJSONMapFromUnknownKeys(partMap, "type", "text")),
+				ExtraFields: core.UnknownJSONFieldsFromMap(rawJSONMapFromUnknownKeys(partMap, append([]string{"type", "text"}, responsesOnlyTextKeys...)...)),
 			})
 		case "image_url", "input_image":
 			imageURL, ok := normalizeResponsesImageURLForChat(partMap["image_url"])
@@ -84,6 +102,37 @@ func convertResponsesContentParts(parts []any) (any, bool) {
 				Type:        "input_audio",
 				InputAudio:  inputAudio,
 				ExtraFields: core.UnknownJSONFieldsFromMap(rawJSONMapFromUnknownKeys(partMap, "type", "input_audio")),
+			})
+		case "input_file", "file":
+			// Responses carries file fields flat on the part; chat nests them
+			// under "file". Accept both shapes.
+			fileMap := partMap
+			fileKeys := []string{"type", "file", "file_data", "file_url", "file_id", "filename"}
+			var fileExtras map[string]json.RawMessage
+			if nested, ok := partMap["file"].(map[string]any); ok {
+				// Unknown keys inside the nested object belong to the file, not
+				// the part.
+				fileMap = nested
+				fileExtras = rawJSONMapFromUnknownKeys(nested, "file_data", "file_url", "file_id", "filename")
+			}
+			fileData, _ := fileMap["file_data"].(string)
+			fileURL, _ := fileMap["file_url"].(string)
+			fileID, _ := fileMap["file_id"].(string)
+			filename, _ := fileMap["filename"].(string)
+			file := &core.FileContent{
+				FileData:    strings.TrimSpace(fileData),
+				FileURL:     strings.TrimSpace(fileURL),
+				FileID:      strings.TrimSpace(fileID),
+				Filename:    strings.TrimSpace(filename),
+				ExtraFields: core.UnknownJSONFieldsFromMap(fileExtras),
+			}
+			if !core.ValidFilePayload(file) {
+				return nil, false
+			}
+			typedParts = append(typedParts, core.ContentPart{
+				Type:        "file",
+				File:        file,
+				ExtraFields: core.UnknownJSONFieldsFromMap(rawJSONMapFromUnknownKeys(partMap, fileKeys...)),
 			})
 		default:
 			if nested, ok := partMap["content"]; ok {
@@ -113,7 +162,7 @@ func normalizeTypedResponsesContentPart(part core.ContentPart) (core.ContentPart
 		return core.ContentPart{
 			Type:        "text",
 			Text:        part.Text,
-			ExtraFields: core.CloneUnknownJSONFields(part.ExtraFields),
+			ExtraFields: core.CloneUnknownJSONFields(part.ExtraFields.Without(responsesOnlyTextKeys...)),
 		}, true
 	case "image_url", "input_image":
 		if part.ImageURL == nil {
@@ -148,6 +197,21 @@ func normalizeTypedResponsesContentPart(part core.ContentPart) (core.ContentPart
 				Data:        data,
 				Format:      format,
 				ExtraFields: core.CloneUnknownJSONFields(part.InputAudio.ExtraFields),
+			},
+			ExtraFields: core.CloneUnknownJSONFields(part.ExtraFields),
+		}, true
+	case "file", "input_file":
+		if !core.ValidFilePayload(part.File) {
+			return core.ContentPart{}, false
+		}
+		return core.ContentPart{
+			Type: "file",
+			File: &core.FileContent{
+				FileData:    strings.TrimSpace(part.File.FileData),
+				FileURL:     strings.TrimSpace(part.File.FileURL),
+				FileID:      strings.TrimSpace(part.File.FileID),
+				Filename:    strings.TrimSpace(part.File.Filename),
+				ExtraFields: core.CloneUnknownJSONFields(part.File.ExtraFields),
 			},
 			ExtraFields: core.CloneUnknownJSONFields(part.ExtraFields),
 		}, true

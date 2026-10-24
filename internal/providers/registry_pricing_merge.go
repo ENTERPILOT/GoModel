@@ -54,11 +54,13 @@ func mergeConfigPricing(base, override *core.ModelPricing) *core.ModelPricing {
 	applyPricingOverride(&merged.OutputPerMtok, override.OutputPerMtok)
 	applyPricingOverride(&merged.CachedInputPerMtok, override.CachedInputPerMtok)
 	applyPricingOverride(&merged.CacheWritePerMtok, override.CacheWritePerMtok)
+	applyPricingOverride(&merged.CacheWrite1hPerMtok, override.CacheWrite1hPerMtok)
 	applyPricingOverride(&merged.ReasoningOutputPerMtok, override.ReasoningOutputPerMtok)
 	applyPricingOverride(&merged.BatchInputPerMtok, override.BatchInputPerMtok)
 	applyPricingOverride(&merged.BatchOutputPerMtok, override.BatchOutputPerMtok)
 	applyPricingOverride(&merged.AudioInputPerMtok, override.AudioInputPerMtok)
 	applyPricingOverride(&merged.AudioOutputPerMtok, override.AudioOutputPerMtok)
+	applyPricingOverride(&merged.OutputImagePerMtok, override.OutputImagePerMtok)
 	applyPricingOverride(&merged.PerImage, override.PerImage)
 	applyPricingOverride(&merged.InputPerImage, override.InputPerImage)
 	applyPricingOverride(&merged.PerSecondInput, override.PerSecondInput)
@@ -68,6 +70,11 @@ func mergeConfigPricing(base, override *core.ModelPricing) *core.ModelPricing {
 	applyPricingOverride(&merged.PerPage, override.PerPage)
 	if len(override.Tiers) > 0 {
 		merged.Tiers = override.Clone().Tiers
+	}
+	if len(override.TimeWindows) > 0 {
+		merged.TimeWindows = override.Clone().TimeWindows
+	} else {
+		merged.DropTimeWindowRatesOverriddenBy(override)
 	}
 	return merged
 }

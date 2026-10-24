@@ -2,15 +2,12 @@ package server
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/goccy/go-json"
-
-	"github.com/google/uuid"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -32,6 +29,8 @@ type InternalChatCompletionExecutorConfig struct {
 	PricingResolver        usage.PricingResolver
 	ResponseCache          *responsecache.ResponseCacheMiddleware
 }
+
+const chatCompletionsPath = "/v1/chat/completions"
 
 // InternalChatCompletionExecutor executes internal translated chat requests
 // without synthesizing an HTTP request or Echo context.
@@ -80,18 +79,23 @@ func (e *InternalChatCompletionExecutor) ChatCompletion(ctx context.Context, req
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ctx = core.WithRequestOrigin(ctx, core.RequestOriginGuardrail)
+	if core.GetRequestOrigin(ctx) != core.RequestOriginPlugin {
+		ctx = core.WithRequestOrigin(ctx, core.RequestOriginGuardrail)
+	}
 	ctx = gateway.WithAttemptRecorder(ctx)
 
 	requestID := strings.TrimSpace(core.GetRequestID(ctx))
 	requested := core.NewRequestedModelSelector(req.Model, req.Provider)
 	start := time.Now()
-	entry := e.newAuditEntry(ctx, requestID, requested)
+	entry := newInternalAuditEntry(e.logger, ctx, requestID, requested, chatCompletionsPath)
 	var workflow *core.Workflow
 	var cacheType string
 	var meta gateway.ExecutionMeta
 	defer func() {
-		e.finishAuditEntry(ctx, entry, start, workflow, req, resp, err, cacheType, meta)
+		finishInternalAuditEntry(e.logger, ctx, entry, internalExchange{
+			path: chatCompletionsPath, start: start, workflow: workflow, request: req, response: resp,
+			model: chatResponseModel(resp), err: err, cacheType: cacheType, meta: meta,
+		})
 	}()
 
 	resolution, err := resolveRequestModelWithAuthorizer(ctx, e.provider, e.modelResolver, e.modelAuthorizer, requested)
@@ -101,7 +105,7 @@ func (e *InternalChatCompletionExecutor) ChatCompletion(ctx context.Context, req
 	workflow, err = translatedWorkflow(
 		ctx,
 		requestID,
-		core.DescribeEndpoint(http.MethodPost, "/v1/chat/completions"),
+		core.DescribeEndpoint(http.MethodPost, chatCompletionsPath),
 		resolution,
 		e.workflowPolicyResolver,
 	)
@@ -118,7 +122,7 @@ func (e *InternalChatCompletionExecutor) ChatCompletion(ctx context.Context, req
 
 	if cacheType == "" {
 		e.orchestrator.LogUsage(ctx, workflow, resp.Model, meta.ProviderType, meta.ProviderName, func(pricing *core.ModelPricing) *usage.UsageEntry {
-			return usage.ExtractFromChatResponse(resp, requestID, meta.ProviderType, "/v1/chat/completions", pricing)
+			return usage.ExtractFromChatResponse(resp, requestID, meta.ProviderType, chatCompletionsPath, pricing)
 		})
 	}
 	return resp, nil
@@ -145,7 +149,7 @@ func (e *InternalChatCompletionExecutor) executeChatCompletion(
 		resp *core.ChatResponse
 		meta gateway.ExecutionMeta
 	)
-	result, err := e.responseCache.HandleInternalRequest(ctx, http.MethodPost, "/v1/chat/completions", body, func(callCtx context.Context) (*responsecache.InternalResponse, error) {
+	result, err := e.responseCache.HandleInternalRequest(ctx, http.MethodPost, chatCompletionsPath, body, func(callCtx context.Context) (*responsecache.InternalResponse, error) {
 		var execErr error
 		resp, meta, execErr = e.orchestrator.DispatchChatCompletion(callCtx, workflow, req)
 		if execErr != nil {
@@ -187,92 +191,6 @@ func (e *InternalChatCompletionExecutor) dispatchChatCompletionNoCache(
 ) (*core.ChatResponse, gateway.ExecutionMeta, string, error) {
 	resp, meta, err := e.orchestrator.DispatchChatCompletion(ctx, workflow, req)
 	return resp, meta, "", err
-}
-
-func (e *InternalChatCompletionExecutor) newAuditEntry(
-	ctx context.Context,
-	requestID string,
-	requested core.RequestedModelSelector,
-) *auditlog.LogEntry {
-	if e.logger == nil || !e.logger.Config().Enabled {
-		return nil
-	}
-
-	userPath := core.UserPathFromContext(ctx)
-	if userPath == "" {
-		userPath = "/"
-	}
-
-	entry := &auditlog.LogEntry{
-		ID:        uuid.NewString(),
-		Timestamp: time.Now(),
-		RequestID: requestID,
-		Method:    http.MethodPost,
-		Path:      "/v1/chat/completions",
-		UserPath:  userPath,
-		SessionID: core.SessionIDFromContext(ctx),
-		Data:      &auditlog.LogData{Labels: core.RequestLabelsFromContext(ctx)},
-	}
-	if requestedModel := requested.RequestedQualifiedModel(); requestedModel != "" {
-		entry.RequestedModel = requestedModel
-	}
-	return entry
-}
-
-func (e *InternalChatCompletionExecutor) finishAuditEntry(
-	ctx context.Context,
-	entry *auditlog.LogEntry,
-	start time.Time,
-	workflow *core.Workflow,
-	req *core.ChatRequest,
-	resp *core.ChatResponse,
-	err error,
-	cacheType string,
-	meta gateway.ExecutionMeta,
-) {
-	if entry == nil || e.logger == nil || !e.logger.Config().Enabled {
-		return
-	}
-
-	entry.DurationNs = time.Since(start).Nanoseconds()
-	auditlog.EnrichLogEntryWithWorkflow(entry, workflow)
-	auditlog.EnrichLogEntryWithFailover(entry, meta.FailoverModel)
-	auditlog.EnrichLogEntryWithAttempts(entry, auditlog.GateAttemptCapture(auditAttemptsFromGateway(ctx), e.logger.Config()))
-	auditlog.EnrichLogEntryWithResolvedRoute(entry, qualifyExecutedModel(workflow, chatResponseModel(resp), meta.ProviderName), meta.ProviderType, meta.ProviderName)
-	auditlog.EnrichLogEntryWithRequestContext(entry, ctx)
-	if workflow != nil && !workflow.AuditEnabled() {
-		return
-	}
-
-	cfg := e.logger.Config()
-	auditlog.CaptureInternalJSONExchange(entry, ctx, http.MethodPost, "/v1/chat/completions", req, resp, err, cfg)
-	if cacheType != "" {
-		entry.CacheType = cacheType
-	}
-
-	if err != nil {
-		var gatewayErr *core.GatewayError
-		if errors.As(err, &gatewayErr) && gatewayErr != nil {
-			entry.ErrorType = string(gatewayErr.Type)
-			entry.StatusCode = gatewayErr.HTTPStatusCode()
-			if entry.Data != nil {
-				entry.Data.ErrorMessage = gatewayErr.Message
-				if gatewayErr.Code != nil {
-					entry.Data.ErrorCode = *gatewayErr.Code
-				}
-			}
-		} else {
-			entry.ErrorType = string(core.ErrorTypeProvider)
-			entry.StatusCode = http.StatusInternalServerError
-			if entry.Data != nil {
-				entry.Data.ErrorMessage = err.Error()
-			}
-		}
-	} else {
-		entry.StatusCode = http.StatusOK
-	}
-
-	e.logger.Write(entry)
 }
 
 func chatResponseModel(resp *core.ChatResponse) string {

@@ -1,8 +1,10 @@
 package auditlog
 
 import (
-	"encoding/base64"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsAudioContentType(t *testing.T) {
@@ -19,108 +21,59 @@ func TestIsAudioContentType(t *testing.T) {
 		{"text/plain", false},
 	}
 	for _, tt := range tests {
-		if got := IsAudioContentType(tt.contentType); got != tt.want {
-			t.Errorf("IsAudioContentType(%q) = %v, want %v", tt.contentType, got, tt.want)
-		}
+		assert.Equal(t, tt.want, IsAudioContentType(tt.contentType), "IsAudioContentType(%q)", tt.contentType)
 	}
 }
 
-func TestBuildAudioResponseBody_StoresBase64WhenEnabled(t *testing.T) {
+func TestBuildAudioResponseBody_StoresMediaWhenCaptured(t *testing.T) {
+	capture, store := newTestMediaCapture(t, 30)
 	data := []byte{0x00, 0x01, 0x02, 0xff, 0xfe}
-	body := BuildAudioResponseBody("audio/mpeg", data, true)
+	body := BuildAudioResponseBody(capture, "audio/mpeg", data)
 
-	if !body.Audio {
-		t.Fatal("expected Audio marker to be true")
-	}
-	if !body.Stored || body.Encoding != "base64" {
-		t.Fatalf("expected stored base64, got stored=%v encoding=%q", body.Stored, body.Encoding)
-	}
-	if body.Bytes != len(data) {
-		t.Errorf("Bytes = %d, want %d", body.Bytes, len(data))
-	}
-	decoded, err := base64.StdEncoding.DecodeString(body.Data)
-	if err != nil {
-		t.Fatalf("stored data is not valid base64: %v", err)
-	}
-	if string(decoded) != string(data) {
-		t.Errorf("round-trip mismatch: audio bytes were not preserved losslessly")
-	}
+	require.True(t, body.Audio)
+	require.True(t, body.Stored)
+	require.NotEmpty(t, body.MediaID)
+	assert.Equal(t, int64(len(data)), body.Bytes)
+	assert.Equal(t, "audio/mpeg", body.ContentType)
+
+	_, stored := readMedia(t, store, body.MediaID)
+	assert.Equal(t, data, stored)
 }
 
-func TestBuildAudioResponseBody_PlaceholderWhenDisabled(t *testing.T) {
+func TestBuildAudioResponseBody_PlaceholderWithoutCapture(t *testing.T) {
 	data := []byte{0x00, 0x01, 0x02}
-	body := BuildAudioResponseBody("audio/mpeg", data, false)
+	body := BuildAudioResponseBody(nil, "audio/mpeg", data)
 
-	if !body.Audio {
-		t.Fatal("expected Audio marker to be true")
-	}
-	if body.Stored || body.Data != "" || body.Encoding != "" {
-		t.Errorf("expected no bytes stored when disabled, got %+v", body)
-	}
-	if body.Bytes != len(data) {
-		t.Errorf("Bytes = %d, want %d (size metadata should still be recorded)", body.Bytes, len(data))
-	}
+	require.True(t, body.Audio)
+	assert.False(t, body.Stored)
+	assert.Empty(t, body.MediaID, "no media should be stored without a capture: %+v", body)
+	assert.Equal(t, int64(len(data)), body.Bytes)
 }
 
-func TestBuildAudioUploadBody_StoresBase64AndMeta(t *testing.T) {
-	data := []byte("uploaded-audio")
-	meta := map[string]any{"model": "gpt-4o-transcribe", "filename": "a.mp3"}
-	body := BuildAudioUploadBody("audio/mpeg", data, true, meta)
+func TestBuildAudioResponseBody_EmptyPayloadStoresNothing(t *testing.T) {
+	capture, _ := newTestMediaCapture(t, 30)
+	body := BuildAudioResponseBody(capture, "audio/mpeg", nil)
+	assert.False(t, body.Stored)
+	assert.Equal(t, int64(0), body.Bytes)
+}
 
-	if !body.Audio || !body.Stored || body.Encoding != "base64" {
-		t.Fatalf("expected stored base64 upload, got %+v", body)
-	}
-	decoded, err := base64.StdEncoding.DecodeString(body.Data)
-	if err != nil || string(decoded) != "uploaded-audio" {
-		t.Fatalf("base64 did not round-trip: decoded=%q err=%v", decoded, err)
-	}
-	if body.Meta["model"] != "gpt-4o-transcribe" {
-		t.Errorf("meta not preserved alongside audio: %+v", body.Meta)
-	}
+func TestBuildAudioUploadBody_StoresMediaAndMeta(t *testing.T) {
+	capture, store := newTestMediaCapture(t, 30)
+	meta := map[string]any{"model": "gpt-4o-transcribe", "filename": "a.mp3"}
+	body := BuildAudioUploadBody(capture, "audio/mpeg", []byte("uploaded-audio"), meta)
+
+	require.True(t, body.Audio)
+	require.True(t, body.Stored)
+	_, stored := readMedia(t, store, body.MediaID)
+	require.Equal(t, "uploaded-audio", string(stored))
+	assert.Equal(t, "gpt-4o-transcribe", body.Meta["model"], "meta not preserved alongside audio: %+v", body.Meta)
 }
 
 func TestBuildAudioUploadBody_PlaceholderKeepsMeta(t *testing.T) {
 	meta := map[string]any{"model": "whisper-1"}
-	body := BuildAudioUploadBody("audio/wav", []byte("x"), false, meta)
+	body := BuildAudioUploadBody(nil, "audio/wav", []byte("x"), meta)
 
-	if body.Stored || body.Data != "" {
-		t.Errorf("expected no bytes stored when disabled, got %+v", body)
-	}
-	if body.Meta["model"] != "whisper-1" {
-		t.Errorf("meta should be kept on the placeholder: %+v", body.Meta)
-	}
-}
-
-func TestBuildAudioResponseBody_TooLarge(t *testing.T) {
-	data := make([]byte, audioBodyMaxBytes+1)
-	body := BuildAudioResponseBody("audio/mpeg", data, true)
-
-	if body.Stored || body.Data != "" {
-		t.Error("expected oversized audio to not be stored")
-	}
-	if !body.TooLarge {
-		t.Error("expected TooLarge to be set for oversized audio")
-	}
-}
-
-func TestBuildAudioResponseBody_AvoidsUTF8Corruption(t *testing.T) {
-	// MP3 frame headers contain bytes that are invalid UTF-8; the old capture
-	// path coerced these to U+FFFD. base64 must preserve them exactly.
-	data := []byte{0xff, 0xfb, 0x90, 0x00}
-	body := BuildAudioResponseBody("audio/mpeg", data, true)
-	decoded, err := base64.StdEncoding.DecodeString(body.Data)
-	if err != nil {
-		t.Fatalf("invalid base64: %v", err)
-	}
-	// The bytes must survive verbatim — the old toValidUTF8String path would
-	// have rewritten 0xff/0x90 into the U+FFFD replacement character (0xEF 0xBF
-	// 0xBD), changing the byte length and content.
-	if len(decoded) != len(data) {
-		t.Fatalf("length changed: got %d bytes, want %d (UTF-8 coercion would have altered this)", len(decoded), len(data))
-	}
-	for i := range data {
-		if decoded[i] != data[i] {
-			t.Fatalf("byte %d = %#x, want %#x", i, decoded[i], data[i])
-		}
-	}
+	assert.False(t, body.Stored)
+	assert.Empty(t, body.MediaID, "no media should be stored without a capture: %+v", body)
+	assert.Equal(t, "whisper-1", body.Meta["model"], "meta should be kept on the placeholder: %+v", body.Meta)
 }

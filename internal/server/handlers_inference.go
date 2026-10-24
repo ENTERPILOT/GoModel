@@ -2,6 +2,8 @@ package server
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/labstack/echo/v5"
 
@@ -59,59 +61,9 @@ func (h *Handler) ListModels(c *echo.Context) error {
 		return err
 	}
 
-	// Create context with request ID for provider
-	requestID := c.Request().Header.Get(core.RequestIDHeader)
-	ctx := core.WithRequestID(c.Request().Context(), requestID)
-
-	resp, err := h.provider.ListModels(ctx)
+	resp, err := h.visibleModels(c)
 	if err != nil {
 		return handleError(c, err)
-	}
-	if h.keepOnlyAliasesAtModelsEndpoint {
-		object := "list"
-		if resp != nil && resp.Object != "" {
-			object = resp.Object
-		}
-		resp = &core.ModelsResponse{Object: object, Data: []core.Model{}}
-	}
-	if h.modelAuthorizer != nil && resp != nil {
-		resp = &core.ModelsResponse{
-			Object: resp.Object,
-			Data:   h.modelAuthorizer.FilterPublicModels(c.Request().Context(), resp.Data),
-		}
-	}
-	if h.exposedModelLister != nil {
-		ctx := c.Request().Context()
-		// The target-access filter is only available when an authorizer is set.
-		var allow func(core.ModelSelector) bool
-		if h.modelAuthorizer != nil {
-			allow = func(selector core.ModelSelector) bool {
-				return h.modelAuthorizer.AllowsModel(ctx, selector)
-			}
-		}
-		// User-path scoping of redirects is a property of the redirect itself, not
-		// of the authorizer, so it must apply even when no authorizer is configured
-		// (allow is nil there) — otherwise scoped redirect IDs leak to callers
-		// outside their user_paths.
-		if scoped, ok := h.exposedModelLister.(UserPathExposedModelLister); ok {
-			resp = mergeExposedModelsResponse(resp, scoped.ExposedModelsForUserPath(core.UserPathFromContext(ctx), allow))
-		} else if filtered, ok := h.exposedModelLister.(FilteredExposedModelLister); ok && allow != nil {
-			resp = mergeExposedModelsResponse(resp, filtered.ExposedModelsFiltered(allow))
-		} else {
-			exposed := h.exposedModelLister.ExposedModels()
-			if allow != nil {
-				filtered := make([]core.Model, 0, len(exposed))
-				for _, model := range exposed {
-					selector, err := core.ParseModelSelector(model.ID, "")
-					if err != nil || !allow(selector) {
-						continue
-					}
-					filtered = append(filtered, model)
-				}
-				exposed = filtered
-			}
-			resp = mergeExposedModelsResponse(resp, exposed)
-		}
 	}
 
 	// The models route is shared by both wire dialects. Anthropic SDK clients
@@ -122,7 +74,11 @@ func (h *Handler) ListModels(c *echo.Context) error {
 		if resp != nil {
 			models = resp.Data
 		}
-		return c.JSON(http.StatusOK, anthropicapi.FromModels(models))
+		list, err := anthropicapi.FromModelsPage(models, anthropicModelsPage(c))
+		if err != nil {
+			return respondModelError(c, err)
+		}
+		return c.JSON(http.StatusOK, list)
 	}
 
 	return c.JSON(http.StatusOK, resp)
@@ -144,4 +100,19 @@ func (h *Handler) ListModels(c *echo.Context) error {
 // @Router       /v1/embeddings [post]
 func (h *Handler) Embeddings(c *echo.Context) error {
 	return h.translatedInference().Embeddings(c)
+}
+
+// anthropicModelsPage reads the Anthropic models-list paging parameters. A
+// limit that is not a positive number is ignored, as if it were not sent.
+func anthropicModelsPage(c *echo.Context) anthropicapi.ModelsPage {
+	query := c.Request().URL.Query()
+	limit, err := strconv.Atoi(strings.TrimSpace(query.Get("limit")))
+	if err != nil || limit < 0 {
+		limit = 0
+	}
+	return anthropicapi.ModelsPage{
+		Limit:    limit,
+		AfterID:  strings.TrimSpace(query.Get("after_id")),
+		BeforeID: strings.TrimSpace(query.Get("before_id")),
+	}
 }

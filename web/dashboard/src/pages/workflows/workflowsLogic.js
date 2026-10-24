@@ -6,8 +6,20 @@
 // runtimeConfig store (see workflows.svelte.js featureCaps()).
 
 import * as m from "../../lib/paraglide/messages.js";
+import {
+  DEFAULT_PHASE,
+  WORKFLOW_PHASES,
+  isWorkflowPhase,
+  normalizeWorkflowPhase,
+  phasesSupport,
+} from "../../lib/utils/pluginPhases.js";
 
 export const DRAFT_WORKFLOW_PREVIEW_ID = "draft-workflow-preview";
+
+// WORKFLOW_SCHEMA_VERSION is what the dashboard POSTs: steps carry a phase.
+// Stored version-1 payloads (`guardrails: [{ref, step}]`) are read as
+// prompt-phase steps.
+export const WORKFLOW_SCHEMA_VERSION = 2;
 
 export function defaultWorkflowForm() {
   return {
@@ -36,10 +48,86 @@ export function emptyHydratedScope() {
   };
 }
 
-export function defaultWorkflowGuardrailStep(step) {
+// nextWorkflowGuardrailStep is the step number a new row in a phase gets:
+// 10 past the phase's highest step, so it runs after the existing rows.
+export function nextWorkflowGuardrailStep(steps, phase) {
+  const wanted = normalizeWorkflowPhase(phase);
+  const highest = (Array.isArray(steps) ? steps : []).reduce((maxStep, step) => {
+    if (normalizeWorkflowPhase(step && step.phase) !== wanted) return maxStep;
+    const parsed = Number(step && step.step);
+    return Number.isFinite(parsed) ? Math.max(maxStep, parsed) : maxStep;
+  }, 0);
+  return highest + 10;
+}
+
+export function defaultWorkflowGuardrailStep(step, phase) {
   return {
     ref: "",
+    phase: normalizeWorkflowPhase(phase),
     step: Number.isFinite(step) ? step : 10,
+  };
+}
+
+// workflowPayloadSteps reads a payload's steps in the v2 shape
+// ({ref, phase, step}). Legacy `guardrails` entries (stored v1 versions, and
+// the editor form, which keeps its rows under the same key) are read too; a
+// step without a phase is a prompt step. Raw step numbers are passed through
+// so callers decide how strictly to validate.
+export function workflowPayloadSteps(payload) {
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+  const raw = Array.isArray(payload.steps)
+    ? payload.steps
+    : Array.isArray(payload.guardrails)
+      ? payload.guardrails
+      : [];
+  return raw.map((step) => ({
+    ref: String((step && step.ref) || "").trim(),
+    phase: normalizeWorkflowPhase(step && step.phase),
+    step: step && step.step,
+  }));
+}
+
+// workflowGuardrailRefOptions lists the instances a step may reference for a
+// phase. GET /admin/workflows/guardrails returns either names (older
+// gateway) or {name, type, phases, summary} rows; an entry without `phases`
+// is prompt-only. The current ref stays selectable even when it no longer
+// qualifies (cloned workflow, removed instance) so the select never blanks.
+export function workflowGuardrailRefOptions(refs, phase, current) {
+  const wanted = normalizeWorkflowPhase(phase);
+  const options = [];
+  const seen = new Set();
+  for (const entry of Array.isArray(refs) ? refs : []) {
+    const name =
+      typeof entry === "string"
+        ? entry.trim()
+        : String((entry && entry.name) || "").trim();
+    if (!name || seen.has(name)) continue;
+    const phases = typeof entry === "string" ? null : entry && entry.phases;
+    if (!phasesSupport(phases, wanted)) continue;
+    seen.add(name);
+    options.push({
+      value: name,
+      label: name,
+      summary: typeof entry === "string" ? "" : String((entry && entry.summary) || ""),
+    });
+  }
+  const active = String(current || "").trim();
+  if (active && !seen.has(active)) {
+    options.push({ value: active, label: active, summary: "" });
+  }
+  return options;
+}
+
+// workflowGuardrailStepIssues reports which fields of an editor row would
+// fail validateWorkflowRequest, so the editor can outline them once the
+// user has tried to submit.
+export function workflowGuardrailStepIssues(step) {
+  const parsed = parseWorkflowGuardrailStep(step && step.step);
+  return {
+    ref: !String((step && step.ref) || "").trim(),
+    step: !Number.isInteger(parsed) || parsed < 0,
   };
 }
 
@@ -134,35 +222,21 @@ export function workflowSourceFeatures(source, caps) {
   };
 }
 
-export function workflowFailoverLabel(source, caps) {
-  return workflowSourceFeatures(source, caps).failover ? m.workflows_on() : m.workflows_off();
-}
-
+// workflowSourceGuardrails reads a stored workflow's (or the editor form's)
+// steps as {ref, phase, step}, accepting the v2 `steps` list and the legacy
+// `guardrails` list, and drops steps without a usable step number.
 export function workflowSourceGuardrails(source) {
-  const raw = Array.isArray(
-    source && source.workflow_payload && source.workflow_payload.guardrails,
-  )
-    ? source.workflow_payload.guardrails
-    : Array.isArray(source && source.guardrails)
-      ? source.guardrails
-      : [];
-  return raw
+  const payload =
+    source && source.workflow_payload && typeof source.workflow_payload === "object"
+      ? source.workflow_payload
+      : source;
+  return workflowPayloadSteps(payload)
     .map((step) => ({
-      ref: String((step && step.ref) || "").trim(),
-      step: parseWorkflowGuardrailStep(step && step.step),
+      ref: step.ref,
+      phase: step.phase,
+      step: parseWorkflowGuardrailStep(step.step),
     }))
     .filter((step) => Number.isInteger(step.step) && step.step >= 0);
-}
-
-export function workflowGuardrails(workflow, caps) {
-  if (!workflowSourceFeatures(workflow, caps).guardrails) {
-    return [];
-  }
-  return Array.isArray(
-    workflow && workflow.workflow_payload && workflow.workflow_payload.guardrails,
-  )
-    ? workflow.workflow_payload.guardrails
-    : [];
 }
 
 export function workflowScopeProviderValue(scope) {
@@ -232,6 +306,14 @@ export function workflowScopeTypeLabel(workflow) {
 
 export function workflowScopeLabel(workflow) {
   return String((workflow && workflow.scope_display) || "global").trim() || "global";
+}
+
+// workflowScopeBadgeVisible hides the scope badge when it would only repeat
+// the card head: the global scope already reads "Global" in the kicker, and
+// an unnamed workflow already shows its scope as the title.
+export function workflowScopeBadgeVisible(workflow) {
+  const scopeLabel = workflowScopeLabel(workflow);
+  return scopeLabel !== "global" && workflowDisplayName(workflow) !== scopeLabel;
 }
 
 export function workflowDisplayName(workflow) {
@@ -390,9 +472,7 @@ export function filterWorkflows(workflows, filter) {
       workflow.scope && workflow.scope.scope_model,
       workflow.scope && workflow.scope.scope_user_path,
       workflow.workflow_hash,
-      ...(Array.isArray(workflow.workflow_payload && workflow.workflow_payload.guardrails)
-        ? workflow.workflow_payload.guardrails.map((step) => step.ref)
-        : []),
+      ...workflowPayloadSteps(workflow.workflow_payload).map((step) => step.ref),
     ];
     return fields.some((value) => String(value || "").toLowerCase().includes(wanted));
   });
@@ -422,7 +502,7 @@ export function workflowPreview(form, caps) {
     name: String(currentForm.name || "").trim(),
     description: String(currentForm.description || "").trim(),
     workflow_payload: {
-      schema_version: 1,
+      schema_version: WORKFLOW_SCHEMA_VERSION,
       features: {
         cache: !!features.cache,
         audit: !!features.audit,
@@ -431,7 +511,7 @@ export function workflowPreview(form, caps) {
         guardrails: guardrailsEnabled,
         failover: !!features.failover,
       },
-      guardrails,
+      steps: guardrails,
     },
   };
 }
@@ -480,10 +560,11 @@ export function buildWorkflowRequest({
       Object.prototype.hasOwnProperty.call(rawFeatures, "failover")) ||
     (!formHydrated && !!activeScopeMatch && activeScopeHasFailover);
 
-  const guardrails = features.guardrails
+  const steps = features.guardrails
     ? (Array.isArray(currentForm.guardrails) ? currentForm.guardrails : []).map(
         (step) => ({
           ref: String((step && step.ref) || "").trim(),
+          phase: normalizeWorkflowPhase(step && step.phase),
           step: parseWorkflowGuardrailStep(step && step.step),
         }),
       )
@@ -496,7 +577,7 @@ export function buildWorkflowRequest({
     name: String(currentForm.name || "").trim(),
     description: String(currentForm.description || "").trim(),
     workflow_payload: {
-      schema_version: 1,
+      schema_version: WORKFLOW_SCHEMA_VERSION,
       features: {
         cache: !!features.cache,
         audit: !!features.audit,
@@ -504,7 +585,7 @@ export function buildWorkflowRequest({
         budget: !!features.budget,
         guardrails: !!features.guardrails,
       },
-      guardrails,
+      steps,
     },
   };
   if (includeFailover) {
@@ -551,27 +632,34 @@ export function validateWorkflowRequest(payload, { models = [], hydratedScope = 
     payload.workflow_payload && payload.workflow_payload.features
       ? payload.workflow_payload.features
       : {};
-  const guardrails = Array.isArray(
-    payload.workflow_payload && payload.workflow_payload.guardrails,
-  )
-    ? payload.workflow_payload.guardrails
-    : [];
+  const steps = Array.isArray(payload.workflow_payload && payload.workflow_payload.steps)
+    ? payload.workflow_payload.steps
+    : Array.isArray(payload.workflow_payload && payload.workflow_payload.guardrails)
+      ? payload.workflow_payload.guardrails
+      : [];
   if (!features.guardrails) {
     return "";
   }
 
+  // The same ref may run once per phase (e.g. a scanner on both the prompt
+  // and the response), never twice within one phase.
   const seen = new Set();
-  for (const step of guardrails) {
+  for (const step of steps) {
     if (!step.ref) {
       return m.workflows_guardrail_ref_required();
+    }
+    const phase = step.phase === undefined || step.phase === null ? DEFAULT_PHASE : step.phase;
+    if (!isWorkflowPhase(phase)) {
+      return m.workflows_guardrail_phase_invalid();
     }
     if (!Number.isInteger(step.step) || step.step < 0) {
       return m.workflows_guardrail_step_invalid();
     }
-    if (seen.has(step.ref)) {
+    const key = normalizeWorkflowPhase(phase) + ":" + step.ref;
+    if (seen.has(key)) {
       return m.workflows_guardrail_ref_unique();
     }
-    seen.add(step.ref);
+    seen.add(key);
   }
 
   return "";

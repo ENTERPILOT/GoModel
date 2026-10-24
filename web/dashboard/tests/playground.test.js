@@ -4,10 +4,12 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_MAX_TOKENS,
   ENDPOINTS,
+  abortable,
   buildPlaygroundRequest,
   clampJsonPanelWidth,
   createStreamAccumulator,
   defaultUserPathForModel,
+  effectiveUserPathHeaderName,
   extractResponseText,
   extractUsage,
   initialJsonPanelOpen,
@@ -366,14 +368,59 @@ test("defaultUserPathForModel returns the first allowed path or empty", () => {
   assert.equal(defaultUserPathForModel(undefined, "team-model"), "");
 });
 
-test("playgroundUserPathHeader sends X-GoModel-User-Path only when non-empty", () => {
+test("effectiveUserPathHeaderName falls back to the default header name", () => {
+  assert.equal(effectiveUserPathHeaderName(undefined), "X-GoModel-User-Path");
+  assert.equal(effectiveUserPathHeaderName(""), "X-GoModel-User-Path");
+  assert.equal(effectiveUserPathHeaderName("   "), "X-GoModel-User-Path");
+  // A customized USER_PATH_HEADER from /admin/runtime/config wins.
+  assert.equal(effectiveUserPathHeaderName("X-Tenant-Path"), "X-Tenant-Path");
+  assert.equal(effectiveUserPathHeaderName("  X-Tenant-Path  "), "X-Tenant-Path");
+});
+
+test("playgroundUserPathHeader sends the default header name only when non-empty", () => {
   assert.deepEqual(playgroundUserPathHeader("/team/alpha"), { "X-GoModel-User-Path": "/team/alpha" });
+  assert.deepEqual(playgroundUserPathHeader("/team/alpha", ""), { "X-GoModel-User-Path": "/team/alpha" });
   // Surrounding whitespace is trimmed before the header is built.
   assert.deepEqual(playgroundUserPathHeader("  /team/alpha  "), { "X-GoModel-User-Path": "/team/alpha" });
   // Unrestricted selection or blank input drops the header.
   assert.deepEqual(playgroundUserPathHeader(""), {});
   assert.deepEqual(playgroundUserPathHeader("   "), {});
   assert.deepEqual(playgroundUserPathHeader(undefined), {});
+});
+
+test("playgroundUserPathHeader honors a customized USER_PATH_HEADER", () => {
+  assert.deepEqual(playgroundUserPathHeader("/team/alpha", "X-Tenant-Path"), { "X-Tenant-Path": "/team/alpha" });
+  assert.deepEqual(playgroundUserPathHeader("  /team/alpha  ", "X-Tenant-Path"), { "X-Tenant-Path": "/team/alpha" });
+  // A blank path still produces no header, whatever the configured name.
+  assert.deepEqual(playgroundUserPathHeader("", "X-Tenant-Path"), {});
+  assert.deepEqual(playgroundUserPathHeader("   ", "X-Tenant-Path"), {});
+});
+
+test("abortable resolves normally while the signal stays live", async () => {
+  const controller = new AbortController();
+  assert.equal(await abortable(Promise.resolve("ok"), controller.signal), "ok");
+  // Without a signal the promise passes straight through.
+  assert.equal(await abortable(Promise.resolve("plain"), undefined), "plain");
+  // Rejections propagate unchanged.
+  await assert.rejects(abortable(Promise.reject(new Error("boom")), controller.signal), /boom/);
+});
+
+test("abortable rejects with an AbortError when the signal fires", async () => {
+  const controller = new AbortController();
+  const pending = abortable(new Promise(() => {}), controller.signal);
+  controller.abort();
+  await assert.rejects(pending, (error) => error.name === "AbortError");
+  // An already-aborted signal rejects without waiting on the promise.
+  await assert.rejects(abortable(new Promise(() => {}), controller.signal), (error) => error.name === "AbortError");
+  // A promise that later rejects after an abort is still observed (no
+  // unhandled rejection) and the caller sees the AbortError.
+  let rejectLater;
+  const late = new Promise((_, reject) => {
+    rejectLater = reject;
+  });
+  await assert.rejects(abortable(late, controller.signal), (error) => error.name === "AbortError");
+  rejectLater(new Error("late"));
+  await new Promise((resolve) => setImmediate(resolve));
 });
 
 test("clampJsonPanelWidth keeps the panel inside the viewport", () => {

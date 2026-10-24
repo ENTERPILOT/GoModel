@@ -1,19 +1,20 @@
 package admin
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sort"
 	"testing"
 	"time"
 
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
 )
 
@@ -24,6 +25,8 @@ type mcpAdminFake struct {
 	managed      map[string]struct{}
 	stored       map[string]mcpgateway.ManagedServer
 	catalogs     map[string]mcpgateway.CatalogView
+	virtuals     []mcpgateway.VirtualServerView
+	virtualErr   error
 	upsertErr    error
 	deleteErr    error
 	reconnectErr error
@@ -134,27 +137,38 @@ func (f *mcpAdminFake) Catalog(name string) (mcpgateway.CatalogView, bool) {
 	return catalog, true
 }
 
+func (f *mcpAdminFake) IsVirtual(name string) bool {
+	return slices.ContainsFunc(f.virtuals, func(view mcpgateway.VirtualServerView) bool { return view.Spec.Name == name })
+}
+
+func (f *mcpAdminFake) VirtualViews() []mcpgateway.VirtualServerView { return f.virtuals }
+
+func (f *mcpAdminFake) IsManagedVirtual(name string) bool {
+	return slices.ContainsFunc(f.virtuals, func(view mcpgateway.VirtualServerView) bool {
+		return view.Spec.Name == name && view.Spec.Managed
+	})
+}
+
+func (f *mcpAdminFake) UpsertVirtual(_ context.Context, virtual mcpgateway.ManagedVirtualServer) (mcpgateway.VirtualServerView, error) {
+	if f.virtualErr != nil {
+		return mcpgateway.VirtualServerView{}, f.virtualErr
+	}
+	view := mcpgateway.VirtualServerView{Spec: virtual.Spec(), ToolDiscovery: "off"}
+	f.virtuals = slices.DeleteFunc(f.virtuals, func(existing mcpgateway.VirtualServerView) bool { return existing.Spec.Name == virtual.Name })
+	f.virtuals = append(f.virtuals, view)
+	return view, nil
+}
+
+func (f *mcpAdminFake) DeleteVirtual(_ context.Context, name string) error {
+	if !f.IsVirtual(name) {
+		return mcpgateway.ErrNotFound
+	}
+	f.virtuals = slices.DeleteFunc(f.virtuals, func(view mcpgateway.VirtualServerView) bool { return view.Spec.Name == name })
+	return nil
+}
+
 func newMCPHandler(fake *mcpAdminFake) *Handler {
 	return NewHandler(nil, nil, WithMCPServers(fake))
-}
-
-func newMCPServerContext(method, target, body string) (*echo.Context, *httptest.ResponseRecorder) {
-	e := echo.New()
-	var req *http.Request
-	if body == "" {
-		req = httptest.NewRequest(method, target, nil)
-	} else {
-		req = httptest.NewRequest(method, target, bytes.NewBufferString(body))
-		req.Header.Set("Content-Type", "application/json")
-	}
-	rec := httptest.NewRecorder()
-	return e.NewContext(req, rec), rec
-}
-
-func newMCPServerNameContext(method, target, name string) (*echo.Context, *httptest.ResponseRecorder) {
-	c, rec := newMCPServerContext(method, target, "")
-	c.SetPathValues(echo.PathValues{{Name: "name", Value: name}})
-	return c, rec
 }
 
 func TestListMCPServers_RedactsHeadersAndFlagsManaged(t *testing.T) {
@@ -169,9 +183,10 @@ func TestListMCPServers_RedactsHeadersAndFlagsManaged(t *testing.T) {
 			Enabled:     true,
 			ToolTimeout: 30 * time.Second,
 		},
-		Status:      mcpgateway.StatusConnected,
-		ToolCount:   3,
-		ConnectedAt: connectedAt,
+		Status:            mcpgateway.StatusConnected,
+		ToolCount:         3,
+		ExcludedToolCount: 2,
+		ConnectedAt:       connectedAt,
 	})
 	fake.addStored(mcpgateway.ManagedServer{
 		Name:    "notion",
@@ -181,55 +196,36 @@ func TestListMCPServers_RedactsHeadersAndFlagsManaged(t *testing.T) {
 	}, mcpgateway.StatusConnecting)
 	h := newMCPHandler(fake)
 
-	c, rec := newMCPServerContext(http.MethodGet, "/admin/mcp-servers", "")
-	if err := h.ListMCPServers(c); err != nil {
-		t.Fatalf("ListMCPServers() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/admin/mcp-servers")
+	err := h.ListMCPServers(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 	for _, secret := range []string{"top-secret", "sk-hidden"} {
-		if containsString(rec.Body.String(), secret) {
-			t.Fatalf("response leaked header value %q: %s", secret, rec.Body.String())
-		}
+		assert.NotContains(t, rec.Body.String(), secret)
 	}
 
-	var body []mcpServerViewResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if len(body) != 2 {
-		t.Fatalf("len(body) = %d, want 2 (%#v)", len(body), body)
-	}
+	body := echotest.Decode[[]mcpServerViewResponse](t, rec)
+	require.Len(t, body, 2)
+
 	byName := map[string]mcpServerViewResponse{}
 	for _, view := range body {
 		byName[view.Name] = view
 	}
 
 	github := byName["github"]
-	if !github.Managed {
-		t.Fatalf("github.Managed = false, want true (config-declared)")
-	}
-	if got := github.Headers["Authorization"]; got != "***" {
-		t.Fatalf("github Authorization header = %q, want ***", got)
-	}
-	if github.Status != string(mcpgateway.StatusConnected) || github.ToolCount != 3 {
-		t.Fatalf("github view = %#v, want connected with 3 tools", github)
-	}
-	if github.ConnectedAt == nil || !github.ConnectedAt.Equal(connectedAt) {
-		t.Fatalf("github.ConnectedAt = %v, want %v", github.ConnectedAt, connectedAt)
-	}
+	assert.True(t, github.Managed)
+	assert.Equal(t, "***", github.Headers["Authorization"])
+	assert.Equal(t, string(mcpgateway.StatusConnected), github.Status)
+	assert.Equal(t, 3, github.ToolCount)
+	assert.Equal(t, 2, github.ExcludedToolCount)
+	require.NotNil(t, github.ConnectedAt)
+	assert.True(t, github.ConnectedAt.Equal(connectedAt))
 
 	notion := byName["notion"]
-	if notion.Managed {
-		t.Fatalf("notion.Managed = true, want false (admin-store row)")
-	}
-	if got := notion.Headers["X-Api-Key"]; got != "***" {
-		t.Fatalf("notion X-Api-Key header = %q, want ***", got)
-	}
-	if notion.ConnectedAt != nil {
-		t.Fatalf("notion.ConnectedAt = %v, want omitted for a never-connected server", notion.ConnectedAt)
-	}
+	assert.False(t, notion.Managed)
+	assert.Equal(t, "***", notion.Headers["X-Api-Key"])
+	assert.Nil(t, notion.ConnectedAt)
 }
 
 func TestMCPServerEndpointsReturn503WhenUnavailable(t *testing.T) {
@@ -237,31 +233,31 @@ func TestMCPServerEndpointsReturn503WhenUnavailable(t *testing.T) {
 
 	assertUnavailable := func(name string, err error, rec *httptest.ResponseRecorder) {
 		t.Helper()
-		if err != nil {
-			t.Fatalf("%s error = %v", name, err)
-		}
-		if rec.Code != http.StatusServiceUnavailable {
-			t.Fatalf("%s status = %d, want 503", name, rec.Code)
-		}
-		var body map[string]map[string]any
-		if decodeErr := json.Unmarshal(rec.Body.Bytes(), &body); decodeErr != nil {
-			t.Fatalf("%s decode error = %v", name, decodeErr)
-		}
-		if got := body["error"]["code"]; got != "feature_unavailable" {
-			t.Fatalf("%s error code = %v, want feature_unavailable", name, got)
-		}
+		require.NoError(t, err)
+		require.Equal(t, http.StatusServiceUnavailable, rec.Code, name)
+		body := echotest.Decode[map[string]map[string]any](t, rec)
+		assert.Equal(t, "feature_unavailable", body["error"]["code"], name)
 	}
 
-	listCtx, listRec := newMCPServerContext(http.MethodGet, "/admin/mcp-servers", "")
+	listCtx, listRec := echotest.Get(t, "/admin/mcp-servers")
 	assertUnavailable("ListMCPServers", h.ListMCPServers(listCtx), listRec)
 
-	putCtx, putRec := newMCPServerContext(http.MethodPut, "/admin/mcp-servers", `{"name":"notion","url":"https://mcp.notion.com/mcp"}`)
+	virtualCtx, virtualRec := echotest.Get(t, "/admin/mcp-virtual-servers")
+	assertUnavailable("ListMCPVirtualServers", h.ListMCPVirtualServers(virtualCtx), virtualRec)
+
+	virtualPutCtx, virtualPutRec := echotest.Request(t, http.MethodPut, "/admin/mcp-virtual-servers", `{"name":"coding","servers":["github"]}`)
+	assertUnavailable("UpsertMCPVirtualServer", h.UpsertMCPVirtualServer(virtualPutCtx), virtualPutRec)
+
+	virtualDeleteCtx, virtualDeleteRec := echotest.Request(t, http.MethodDelete, "/admin/mcp-virtual-servers/coding", nil, echotest.WithPathValue("name", "coding"))
+	assertUnavailable("DeleteMCPVirtualServer", h.DeleteMCPVirtualServer(virtualDeleteCtx), virtualDeleteRec)
+
+	putCtx, putRec := echotest.Request(t, http.MethodPut, "/admin/mcp-servers", `{"name":"notion","url":"https://mcp.notion.com/mcp"}`)
 	assertUnavailable("UpsertMCPServer", h.UpsertMCPServer(putCtx), putRec)
 
-	deleteCtx, deleteRec := newMCPServerNameContext(http.MethodDelete, "/admin/mcp-servers/notion", "notion")
+	deleteCtx, deleteRec := echotest.Request(t, http.MethodDelete, "/admin/mcp-servers/notion", nil, echotest.WithPathValue("name", "notion"))
 	assertUnavailable("DeleteMCPServer", h.DeleteMCPServer(deleteCtx), deleteRec)
 
-	reconnectCtx, reconnectRec := newMCPServerNameContext(http.MethodPost, "/admin/mcp-servers/notion/reconnect", "notion")
+	reconnectCtx, reconnectRec := echotest.Request(t, http.MethodPost, "/admin/mcp-servers/notion/reconnect", nil, echotest.WithPathValue("name", "notion"))
 	assertUnavailable("ReconnectMCPServer", h.ReconnectMCPServer(reconnectCtx), reconnectRec)
 }
 
@@ -269,42 +265,25 @@ func TestUpsertMCPServer_CreatesAndReturnsRedactedView(t *testing.T) {
 	fake := newMCPAdminFake()
 	h := newMCPHandler(fake)
 
-	body := `{"name":"notion","url":"https://mcp.notion.com/mcp","headers":{"Authorization":"Bearer real-token"},"description":"notes","user_paths":["/team"]}`
-	c, rec := newMCPServerContext(http.MethodPut, "/admin/mcp-servers", body)
-	if err := h.UpsertMCPServer(c); err != nil {
-		t.Fatalf("UpsertMCPServer() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
-	if containsString(rec.Body.String(), "real-token") {
-		t.Fatalf("upsert response leaked header value: %s", rec.Body.String())
-	}
+	body := `{"name":"notion","url":"https://mcp.notion.com/mcp","headers":{"Authorization":"Bearer real-token"},"description":"notes","user_paths":["/team"],"disallowed_user_paths":[" team/contractors/ "]}`
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/mcp-servers", body)
+	err := h.UpsertMCPServer(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.NotContains(t, rec.Body.String(), "real-token")
 
-	var view mcpServerViewResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
-		t.Fatalf("decode upsert response: %v", err)
-	}
-	if view.Name != "notion" || view.URL != "https://mcp.notion.com/mcp" {
-		t.Fatalf("view = %#v, want notion", view)
-	}
-	if view.Transport != "http" {
-		t.Fatalf("view.Transport = %q, want default http", view.Transport)
-	}
-	if !view.Enabled {
-		t.Fatalf("view.Enabled = false, want default true")
-	}
-	if got := view.Headers["Authorization"]; got != "***" {
-		t.Fatalf("view Authorization header = %q, want ***", got)
-	}
+	view := echotest.Decode[mcpServerViewResponse](t, rec)
+	assert.Equal(t, "notion", view.Name)
+	assert.Equal(t, "https://mcp.notion.com/mcp", view.URL)
+	assert.Equal(t, "http", view.Transport)
+	assert.True(t, view.Enabled)
+	assert.Equal(t, "***", view.Headers["Authorization"])
 
 	stored, ok := fake.stored["notion"]
-	if !ok {
-		t.Fatalf("upsert did not reach the service; stored = %#v", fake.stored)
-	}
-	if got := stored.Headers["Authorization"]; got != "Bearer real-token" {
-		t.Fatalf("stored Authorization header = %q, want the real value", got)
-	}
+	require.True(t, ok, "upsert did not reach the service")
+	assert.Equal(t, "Bearer real-token", stored.Headers["Authorization"])
+	assert.Equal(t, []string{"/team/contractors"}, stored.DisallowedUserPaths)
+	assert.Equal(t, []string{"/team/contractors"}, view.DisallowedUserPaths)
 }
 
 func TestUpsertMCPServer_PreservesRedactedHeadersAndEnabled(t *testing.T) {
@@ -321,24 +300,15 @@ func TestUpsertMCPServer_PreservesRedactedHeadersAndEnabled(t *testing.T) {
 	// The dashboard round-trips the redacted view: "***" keeps the stored
 	// secret, plain values overwrite, and the omitted enabled flag is preserved.
 	body := `{"name":"notion","url":"https://mcp.notion.com/mcp","headers":{"Authorization":"***","X-Region":"us"}}`
-	c, rec := newMCPServerContext(http.MethodPut, "/admin/mcp-servers", body)
-	if err := h.UpsertMCPServer(c); err != nil {
-		t.Fatalf("UpsertMCPServer() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/mcp-servers", body)
+	err := h.UpsertMCPServer(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
 	stored := fake.stored["notion"]
-	if got := stored.Headers["Authorization"]; got != "Bearer original" {
-		t.Fatalf("stored Authorization = %q, want preserved original", got)
-	}
-	if got := stored.Headers["X-Region"]; got != "us" {
-		t.Fatalf("stored X-Region = %q, want us", got)
-	}
-	if stored.Enabled {
-		t.Fatalf("stored.Enabled = true, want false (preserved when omitted)")
-	}
+	assert.Equal(t, "Bearer original", stored.Headers["Authorization"])
+	assert.Equal(t, "us", stored.Headers["X-Region"])
+	assert.False(t, stored.Enabled)
 }
 
 func TestUpsertMCPServer_AllowsUnicodeDisplayNameAndKeepsSlug(t *testing.T) {
@@ -349,25 +319,22 @@ func TestUpsertMCPServer_AllowsUnicodeDisplayNameAndKeepsSlug(t *testing.T) {
 		`{"name":"Linear MCP 线性","slug":"linear","url":"https://mcp.linear.app/mcp"}`,
 		`{"name":"Linear 问题追踪器","slug":"linear","url":"https://mcp.linear.app/mcp"}`,
 	} {
-		c, rec := newMCPServerContext(http.MethodPut, "/admin/mcp-servers", body)
-		if err := h.UpsertMCPServer(c); err != nil {
-			t.Fatalf("UpsertMCPServer() error = %v", err)
-		}
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-		}
+		c, rec := echotest.Request(t, http.MethodPut, "/admin/mcp-servers", body)
+		err := h.UpsertMCPServer(c)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	}
 
 	stored := fake.stored["linear"]
-	if stored.Name != "linear" || stored.DisplayName != "Linear 问题追踪器" {
-		t.Fatalf("stored identity = (%q, %q), want immutable slug and edited display name", stored.Name, stored.DisplayName)
-	}
+	assert.Equal(t, "linear", stored.Name)
+	assert.Equal(t, "Linear 问题追踪器", stored.DisplayName)
 }
 
 func TestUpsertMCPServer_Rejections(t *testing.T) {
 	tests := []struct {
-		name string
-		body string
+		name    string
+		body    string
+		wantErr string
 	}{
 		{
 			name: "stdio transport",
@@ -397,6 +364,11 @@ func TestUpsertMCPServer_Rejections(t *testing.T) {
 			name: "redacted header without stored value",
 			body: `{"name":"fresh","url":"https://mcp.example.com/mcp","headers":{"Authorization":"***"}}`,
 		},
+		{
+			name:    "slug used by a virtual server",
+			body:    `{"name":"Coding","url":"https://mcp.example.com/mcp"}`,
+			wantErr: `slug \"coding\" is used by virtual MCP server \"coding\"; choose another slug`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -405,21 +377,16 @@ func TestUpsertMCPServer_Rejections(t *testing.T) {
 			fake.addManaged(mcpgateway.ServerView{
 				Spec: mcpgateway.ServerSpec{Name: "github", URL: "https://api.githubcopilot.com/mcp/", Transport: "http", Enabled: true},
 			})
+			fake.virtuals = []mcpgateway.VirtualServerView{{Spec: mcpgateway.VirtualServerSpec{Name: "coding", Servers: []string{"github"}}}}
 			h := newMCPHandler(fake)
 
-			c, rec := newMCPServerContext(http.MethodPut, "/admin/mcp-servers", tt.body)
-			if err := h.UpsertMCPServer(c); err != nil {
-				t.Fatalf("UpsertMCPServer() error = %v", err)
-			}
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400 body=%s", rec.Code, rec.Body.String())
-			}
-			if !containsString(rec.Body.String(), "invalid_request_error") {
-				t.Fatalf("body = %s, want invalid_request_error", rec.Body.String())
-			}
-			if len(fake.stored) != 0 {
-				t.Fatalf("rejected upsert reached the service: %#v", fake.stored)
-			}
+			c, rec := echotest.Request(t, http.MethodPut, "/admin/mcp-servers", tt.body)
+			err := h.UpsertMCPServer(c)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+			assert.Contains(t, rec.Body.String(), "invalid_request_error")
+			assert.Contains(t, rec.Body.String(), tt.wantErr)
+			assert.Empty(t, fake.stored)
 		})
 	}
 }
@@ -429,13 +396,10 @@ func TestUpsertMCPServer_BubblesProviderErrorOnStoreFailure(t *testing.T) {
 	fake.upsertErr = errors.New("disk full")
 	h := newMCPHandler(fake)
 
-	c, rec := newMCPServerContext(http.MethodPut, "/admin/mcp-servers", `{"name":"notion","url":"https://mcp.notion.com/mcp"}`)
-	if err := h.UpsertMCPServer(c); err != nil {
-		t.Fatalf("UpsertMCPServer() error = %v", err)
-	}
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502 body=%s", rec.Code, rec.Body.String())
-	}
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/mcp-servers", `{"name":"notion","url":"https://mcp.notion.com/mcp"}`)
+	err := h.UpsertMCPServer(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadGateway, rec.Code, rec.Body.String())
 }
 
 func TestDeleteMCPServer(t *testing.T) {
@@ -460,18 +424,15 @@ func TestDeleteMCPServer(t *testing.T) {
 			}, mcpgateway.StatusConnected)
 			h := newMCPHandler(fake)
 
-			c, rec := newMCPServerNameContext(http.MethodDelete, "/admin/mcp-servers/"+tt.server, tt.server)
-			if err := h.DeleteMCPServer(c); err != nil {
-				t.Fatalf("DeleteMCPServer() error = %v", err)
-			}
-			if rec.Code != tt.wantStatus {
-				t.Fatalf("status = %d, want %d body=%s", rec.Code, tt.wantStatus, rec.Body.String())
-			}
-			if _, managedKept := fake.views["github"]; !managedKept {
-				t.Fatalf("managed server was removed")
-			}
-			if _, storedKept := fake.stored["notion"]; storedKept == (tt.wantStatus == http.StatusNoContent) {
-				t.Fatalf("stored row presence = %v after status %d", storedKept, rec.Code)
+			c, rec := echotest.Request(t, http.MethodDelete, "/admin/mcp-servers/"+tt.server, nil, echotest.WithPathValue("name", tt.server))
+			err := h.DeleteMCPServer(c)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+			assert.Contains(t, fake.views, "github", "managed view must survive")
+			if tt.wantStatus == http.StatusNoContent {
+				assert.NotContains(t, fake.stored, "notion")
+			} else {
+				assert.Contains(t, fake.stored, "notion")
 			}
 		})
 	}
@@ -488,54 +449,36 @@ func TestReconnectMCPServer(t *testing.T) {
 
 	t.Run("unknown name is 404", func(t *testing.T) {
 		h := newMCPHandler(newFake())
-		c, rec := newMCPServerNameContext(http.MethodPost, "/admin/mcp-servers/missing/reconnect", "missing")
-		if err := h.ReconnectMCPServer(c); err != nil {
-			t.Fatalf("ReconnectMCPServer() error = %v", err)
-		}
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("status = %d, want 404 body=%s", rec.Code, rec.Body.String())
-		}
+		c, rec := echotest.Request(t, http.MethodPost, "/admin/mcp-servers/missing/reconnect", nil, echotest.WithPathValue("name", "missing"))
+		err := h.ReconnectMCPServer(c)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
 	})
 
 	t.Run("successful redial returns fresh view", func(t *testing.T) {
 		h := newMCPHandler(newFake())
-		c, rec := newMCPServerNameContext(http.MethodPost, "/admin/mcp-servers/notion/reconnect", "notion")
-		if err := h.ReconnectMCPServer(c); err != nil {
-			t.Fatalf("ReconnectMCPServer() error = %v", err)
-		}
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-		}
-		var view mcpServerViewResponse
-		if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
-			t.Fatalf("decode response: %v", err)
-		}
-		if view.Name != "notion" || view.Status != string(mcpgateway.StatusConnected) {
-			t.Fatalf("view = %#v, want connected notion", view)
-		}
+		c, rec := echotest.Request(t, http.MethodPost, "/admin/mcp-servers/notion/reconnect", nil, echotest.WithPathValue("name", "notion"))
+		err := h.ReconnectMCPServer(c)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+		view := echotest.Decode[mcpServerViewResponse](t, rec)
+		assert.Equal(t, "notion", view.Name)
+		assert.Equal(t, string(mcpgateway.StatusConnected), view.Status)
 	})
 
 	t.Run("failed redial still returns 200 with last_error", func(t *testing.T) {
 		fake := newFake()
 		fake.reconnectErr = errors.New("dial tcp: connection refused")
 		h := newMCPHandler(fake)
-		c, rec := newMCPServerNameContext(http.MethodPost, "/admin/mcp-servers/notion/reconnect", "notion")
-		if err := h.ReconnectMCPServer(c); err != nil {
-			t.Fatalf("ReconnectMCPServer() error = %v", err)
-		}
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-		}
-		var view mcpServerViewResponse
-		if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
-			t.Fatalf("decode response: %v", err)
-		}
-		if view.Status != string(mcpgateway.StatusDegraded) {
-			t.Fatalf("view.Status = %q, want degraded", view.Status)
-		}
-		if !containsString(view.LastError, "connection refused") {
-			t.Fatalf("view.LastError = %q, want the redial failure", view.LastError)
-		}
+		c, rec := echotest.Request(t, http.MethodPost, "/admin/mcp-servers/notion/reconnect", nil, echotest.WithPathValue("name", "notion"))
+		err := h.ReconnectMCPServer(c)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+		view := echotest.Decode[mcpServerViewResponse](t, rec)
+		assert.Equal(t, string(mcpgateway.StatusDegraded), view.Status)
+		assert.Contains(t, view.LastError, "connection refused")
 	})
 }
 
@@ -547,8 +490,9 @@ func TestMCPServerCatalog(t *testing.T) {
 		}, mcpgateway.StatusConnected)
 		fake.catalogs = map[string]mcpgateway.CatalogView{
 			"github": {
-				Tools:   []mcpgateway.CatalogFeature{{Name: "create_issue", Description: "Create an issue"}},
-				Prompts: []mcpgateway.CatalogFeature{{Name: "triage"}},
+				Tools:         []mcpgateway.CatalogFeature{{Name: "create_issue", Description: "Create an issue"}},
+				ExcludedTools: []mcpgateway.CatalogFeature{{Name: "delete_repo", Destructive: true}},
+				Prompts:       []mcpgateway.CatalogFeature{{Name: "triage"}},
 				Resources: []mcpgateway.CatalogResource{
 					{URI: "repo://readme", Name: "readme"},
 				},
@@ -560,47 +504,152 @@ func TestMCPServerCatalog(t *testing.T) {
 
 	t.Run("unavailable service is 503", func(t *testing.T) {
 		h := NewHandler(nil, nil)
-		c, rec := newMCPServerNameContext(http.MethodGet, "/admin/mcp-servers/github/catalog", "github")
-		if err := h.MCPServerCatalog(c); err != nil {
-			t.Fatalf("MCPServerCatalog() error = %v", err)
-		}
-		if rec.Code != http.StatusServiceUnavailable {
-			t.Fatalf("status = %d, want 503 body=%s", rec.Code, rec.Body.String())
-		}
+		c, rec := echotest.Request(t, http.MethodGet, "/admin/mcp-servers/github/catalog", nil, echotest.WithPathValue("name", "github"))
+		err := h.MCPServerCatalog(c)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
 	})
 
 	t.Run("unknown name is 404", func(t *testing.T) {
 		h := newMCPHandler(newFake())
-		c, rec := newMCPServerNameContext(http.MethodGet, "/admin/mcp-servers/missing/catalog", "missing")
-		if err := h.MCPServerCatalog(c); err != nil {
-			t.Fatalf("MCPServerCatalog() error = %v", err)
-		}
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("status = %d, want 404 body=%s", rec.Code, rec.Body.String())
-		}
+		c, rec := echotest.Request(t, http.MethodGet, "/admin/mcp-servers/missing/catalog", nil, echotest.WithPathValue("name", "missing"))
+		err := h.MCPServerCatalog(c)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
 	})
 
 	t.Run("returns the catalog snapshot", func(t *testing.T) {
 		h := newMCPHandler(newFake())
-		c, rec := newMCPServerNameContext(http.MethodGet, "/admin/mcp-servers/github/catalog", "github")
-		if err := h.MCPServerCatalog(c); err != nil {
-			t.Fatalf("MCPServerCatalog() error = %v", err)
-		}
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-		}
-		var catalog mcpgateway.CatalogView
-		if err := json.Unmarshal(rec.Body.Bytes(), &catalog); err != nil {
-			t.Fatalf("decode response: %v", err)
-		}
-		if catalog.Server != "github" || catalog.Status != mcpgateway.StatusConnected {
-			t.Fatalf("catalog = %+v, want connected github", catalog)
-		}
-		if len(catalog.Tools) != 1 || catalog.Tools[0].Name != "create_issue" {
-			t.Fatalf("catalog.Tools = %+v, want create_issue", catalog.Tools)
-		}
-		if len(catalog.Prompts) != 1 || len(catalog.Resources) != 1 {
-			t.Fatalf("catalog prompts/resources = %+v / %+v", catalog.Prompts, catalog.Resources)
-		}
+		c, rec := echotest.Request(t, http.MethodGet, "/admin/mcp-servers/github/catalog", nil, echotest.WithPathValue("name", "github"))
+		err := h.MCPServerCatalog(c)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+		catalog := echotest.Decode[mcpgateway.CatalogView](t, rec)
+		assert.Equal(t, "github", catalog.Server)
+		assert.Equal(t, mcpgateway.StatusConnected, catalog.Status)
+		require.Len(t, catalog.Tools, 1)
+		assert.Equal(t, "create_issue", catalog.Tools[0].Name)
+		require.Len(t, catalog.ExcludedTools, 1)
+		assert.Equal(t, "delete_repo", catalog.ExcludedTools[0].Name)
+		assert.True(t, catalog.ExcludedTools[0].Destructive)
+		assert.Len(t, catalog.Prompts, 1)
+		assert.Len(t, catalog.Resources, 1)
 	})
+}
+
+func TestListMCPVirtualServers(t *testing.T) {
+	fake := newMCPAdminFake()
+	fake.virtuals = []mcpgateway.VirtualServerView{
+		{
+			Spec:           mcpgateway.VirtualServerSpec{Name: "coding", Description: "code tools", Servers: []string{"github", "ghost"}},
+			ToolDiscovery:  "search",
+			MissingServers: []string{"ghost"},
+		},
+		{
+			Spec:          mcpgateway.VirtualServerSpec{Name: "notion", Servers: []string{"github"}},
+			ToolDiscovery: "off",
+			Conflict:      `virtual MCP server "notion" is not served`,
+		},
+	}
+	h := newMCPHandler(fake)
+
+	c, rec := echotest.Get(t, "/admin/mcp-virtual-servers")
+	require.NoError(t, h.ListMCPVirtualServers(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	got := echotest.Decode[[]mcpVirtualServerResponse](t, rec)
+	assert.Equal(t, []mcpVirtualServerResponse{
+		{Name: "coding", Description: "code tools", Servers: []string{"github", "ghost"}, MissingServers: []string{"ghost"}, ToolDiscovery: "search"},
+		{Name: "notion", Servers: []string{"github"}, ToolDiscovery: "off", Conflict: `virtual MCP server "notion" is not served`},
+	}, got)
+}
+
+func TestUpsertMCPServer_DeletedDuringEditOfVirtualNameIsBadRequest(t *testing.T) {
+	fake := newMCPAdminFake()
+	fake.addStored(mcpgateway.ManagedServer{Name: "coding", URL: "https://old.example.com/mcp", Transport: "http", Enabled: true}, mcpgateway.StatusConnected)
+	fake.virtuals = []mcpgateway.VirtualServerView{{Spec: mcpgateway.VirtualServerSpec{Name: "coding", Servers: []string{"github"}}}}
+	// The row passes the handler's check, then a concurrent delete wins.
+	fake.upsertErr = mcpgateway.VirtualNameTakenError("coding")
+	h := newMCPHandler(fake)
+
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/mcp-servers", `{"name":"coding","url":"https://new.example.com/mcp"}`)
+	require.NoError(t, h.UpsertMCPServer(c))
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), `is used by virtual MCP server`)
+}
+
+func TestUpsertMCPServer_EditsServerStoredBeforeVirtualServer(t *testing.T) {
+	fake := newMCPAdminFake()
+	fake.addStored(mcpgateway.ManagedServer{Name: "coding", URL: "https://old.example.com/mcp", Transport: "http", Enabled: true}, mcpgateway.StatusConnected)
+	fake.virtuals = []mcpgateway.VirtualServerView{{Spec: mcpgateway.VirtualServerSpec{Name: "coding", Servers: []string{"github"}}}}
+	h := newMCPHandler(fake)
+
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/mcp-servers", `{"name":"coding","url":"https://new.example.com/mcp"}`)
+	require.NoError(t, h.UpsertMCPServer(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, "https://new.example.com/mcp", fake.stored["coding"].URL)
+}
+
+func TestUpsertMCPVirtualServer(t *testing.T) {
+	fake := newMCPAdminFake()
+	h := newMCPHandler(fake)
+
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/mcp-virtual-servers", `{"name":" Coding ","description":"code tools","servers":["github"],"tool_discovery":"search"}`)
+	require.NoError(t, h.UpsertMCPVirtualServer(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	got := echotest.Decode[mcpVirtualServerResponse](t, rec)
+	assert.Equal(t, "coding", got.Name)
+	assert.Equal(t, []string{"github"}, got.Servers)
+	assert.Equal(t, "search", got.ConfiguredToolDiscovery)
+	assert.False(t, got.Managed)
+}
+
+func TestUpsertMCPVirtualServer_Errors(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+	}{
+		{name: "refused definition", err: mcpgateway.ErrInvalidVirtualServer, wantStatus: http.StatusBadRequest},
+		{name: "store failure", err: errors.New("database is down"), wantStatus: http.StatusBadGateway},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := newMCPAdminFake()
+			fake.virtualErr = tt.err
+			h := newMCPHandler(fake)
+
+			c, rec := echotest.Request(t, http.MethodPut, "/admin/mcp-virtual-servers", `{"name":"coding","servers":["github"]}`)
+			require.NoError(t, h.UpsertMCPVirtualServer(c))
+			assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+		})
+	}
+}
+
+func TestDeleteMCPVirtualServer(t *testing.T) {
+	tests := []struct {
+		name       string
+		target     string
+		wantStatus int
+	}{
+		{name: "stored", target: "coding", wantStatus: http.StatusNoContent},
+		{name: "config-declared is read-only", target: "research", wantStatus: http.StatusBadRequest},
+		{name: "unknown", target: "ghost", wantStatus: http.StatusNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := newMCPAdminFake()
+			fake.virtuals = []mcpgateway.VirtualServerView{
+				{Spec: mcpgateway.VirtualServerSpec{Name: "coding", Servers: []string{"github"}}},
+				{Spec: mcpgateway.VirtualServerSpec{Name: "research", Servers: []string{"github"}, Managed: true}},
+			}
+			h := newMCPHandler(fake)
+
+			c, rec := echotest.Request(t, http.MethodDelete, "/admin/mcp-virtual-servers/"+tt.target, nil, echotest.WithPathValue("name", tt.target))
+			require.NoError(t, h.DeleteMCPVirtualServer(c))
+			assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+		})
+	}
 }

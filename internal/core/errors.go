@@ -27,6 +27,12 @@ const (
 	ErrorTypeAuthentication ErrorType = "authentication_error"
 	// ErrorTypeNotFound indicates a not found error (404)
 	ErrorTypeNotFound ErrorType = "not_found_error"
+	// ErrorTypePermission indicates an authenticated caller lacks the
+	// permission for the operation (403)
+	ErrorTypePermission ErrorType = "permission_error"
+	// ErrorTypeInternal indicates a failure inside the gateway itself (500),
+	// as opposed to one an upstream provider reported
+	ErrorTypeInternal ErrorType = "internal_error"
 )
 
 // GatewayError is the base error type for all gateway errors
@@ -106,6 +112,8 @@ func (e *GatewayError) HTTPStatusCode() int {
 		return http.StatusUnauthorized
 	case ErrorTypeNotFound:
 		return http.StatusNotFound
+	case ErrorTypePermission:
+		return http.StatusForbidden
 	case ErrorTypeProvider:
 		return http.StatusBadGateway
 	default:
@@ -152,6 +160,14 @@ func (e *GatewayError) WithCode(code string) *GatewayError {
 	return e
 }
 
+// WithResponseBody attaches a bounded copy of the raw upstream response body
+// for auditing. Providers that report failures inside a 2xx body use this to
+// retain the same evidence ParseProviderError captures for non-2xx responses.
+func (e *GatewayError) WithResponseBody(body []byte) *GatewayError {
+	e.ResponseBody = captureGatewayErrorBody(body)
+	return e
+}
+
 // NewProviderError creates a new provider error (upstream 5xx)
 func NewProviderError(provider string, statusCode int, message string, err error) *GatewayError {
 	return &GatewayError{
@@ -166,6 +182,45 @@ func NewProviderError(provider string, statusCode int, message string, err error
 // NewEmptyProviderResponseError reports that a provider returned no response body (502).
 func NewEmptyProviderResponseError(provider string) *GatewayError {
 	return NewProviderError(provider, http.StatusBadGateway, "provider returned empty response", nil)
+}
+
+// ErrNoChoices is wrapped by NewNoChoicesProviderError so observers can tell
+// an empty 200 response apart from other 502s.
+var ErrNoChoices = errors.New("provider returned no choices")
+
+// ErrModelListingUnsupported marks a model-list failure meaning the upstream
+// has no /models endpoint, as opposed to a listing that failed; test with
+// errors.Is.
+var ErrModelListingUnsupported = errors.New("provider does not list models")
+
+// MarkModelListingUnsupported tags a 404 or 405 from an OpenAI-compatible
+// /models call with ErrModelListingUnsupported. The message is unchanged and
+// errors.As still finds the GatewayError; other errors pass through as is.
+// Only call it on errors from a /models request: the same statuses from other
+// APIs do not mean the endpoint is missing.
+func MarkModelListingUnsupported(err error) error {
+	gatewayErr, ok := errors.AsType[*GatewayError](err)
+	if !ok {
+		return err
+	}
+	switch gatewayErr.HTTPStatusCode() {
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		return modelListingUnsupportedError{err}
+	default:
+		return err
+	}
+}
+
+type modelListingUnsupportedError struct{ error }
+
+func (e modelListingUnsupportedError) Unwrap() []error {
+	return []error{e.error, ErrModelListingUnsupported}
+}
+
+// NewNoChoicesProviderError reports a chat completion that succeeded upstream
+// but carried no choices (502), so failover treats it as a failed attempt.
+func NewNoChoicesProviderError(provider string) *GatewayError {
+	return NewProviderError(provider, http.StatusBadGateway, ErrNoChoices.Error(), ErrNoChoices)
 }
 
 // NewRateLimitError creates a new rate limit error (429)
@@ -200,6 +255,16 @@ func NewAuthenticationError(provider string, message string) *GatewayError {
 		Message:    message,
 		StatusCode: http.StatusUnauthorized,
 		Provider:   provider,
+	}
+}
+
+// NewPermissionError creates a new permission error (403) for an
+// authenticated caller whose credential does not cover the operation.
+func NewPermissionError(message string) *GatewayError {
+	return &GatewayError{
+		Type:       ErrorTypePermission,
+		Message:    message,
+		StatusCode: http.StatusForbidden,
 	}
 }
 

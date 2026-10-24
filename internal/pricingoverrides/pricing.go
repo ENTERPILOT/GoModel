@@ -10,11 +10,13 @@ func clonePricing(p Pricing) Pricing {
 	out.OutputPerMtok = cloneFloatPtr(p.OutputPerMtok)
 	out.CachedInputPerMtok = cloneFloatPtr(p.CachedInputPerMtok)
 	out.CacheWritePerMtok = cloneFloatPtr(p.CacheWritePerMtok)
+	out.CacheWrite1hPerMtok = cloneFloatPtr(p.CacheWrite1hPerMtok)
 	out.ReasoningOutputPerMtok = cloneFloatPtr(p.ReasoningOutputPerMtok)
 	out.BatchInputPerMtok = cloneFloatPtr(p.BatchInputPerMtok)
 	out.BatchOutputPerMtok = cloneFloatPtr(p.BatchOutputPerMtok)
 	out.AudioInputPerMtok = cloneFloatPtr(p.AudioInputPerMtok)
 	out.AudioOutputPerMtok = cloneFloatPtr(p.AudioOutputPerMtok)
+	out.OutputImagePerMtok = cloneFloatPtr(p.OutputImagePerMtok)
 	out.PerImage = cloneFloatPtr(p.PerImage)
 	out.InputPerImage = cloneFloatPtr(p.InputPerImage)
 	out.PerSecondInput = cloneFloatPtr(p.PerSecondInput)
@@ -43,11 +45,13 @@ func pricingEmpty(p Pricing) bool {
 		p.OutputPerMtok != nil ||
 		p.CachedInputPerMtok != nil ||
 		p.CacheWritePerMtok != nil ||
+		p.CacheWrite1hPerMtok != nil ||
 		p.ReasoningOutputPerMtok != nil ||
 		p.BatchInputPerMtok != nil ||
 		p.BatchOutputPerMtok != nil ||
 		p.AudioInputPerMtok != nil ||
 		p.AudioOutputPerMtok != nil ||
+		p.OutputImagePerMtok != nil ||
 		p.PerImage != nil ||
 		p.InputPerImage != nil ||
 		p.PerSecondInput != nil ||
@@ -80,11 +84,13 @@ func pricingToCore(p Pricing) *core.ModelPricing {
 		OutputPerMtok:          cloneFloatPtr(p.OutputPerMtok),
 		CachedInputPerMtok:     cloneFloatPtr(p.CachedInputPerMtok),
 		CacheWritePerMtok:      cloneFloatPtr(p.CacheWritePerMtok),
+		CacheWrite1hPerMtok:    cloneFloatPtr(p.CacheWrite1hPerMtok),
 		ReasoningOutputPerMtok: cloneFloatPtr(p.ReasoningOutputPerMtok),
 		BatchInputPerMtok:      cloneFloatPtr(p.BatchInputPerMtok),
 		BatchOutputPerMtok:     cloneFloatPtr(p.BatchOutputPerMtok),
 		AudioInputPerMtok:      cloneFloatPtr(p.AudioInputPerMtok),
 		AudioOutputPerMtok:     cloneFloatPtr(p.AudioOutputPerMtok),
+		OutputImagePerMtok:     cloneFloatPtr(p.OutputImagePerMtok),
 		PerImage:               cloneFloatPtr(p.PerImage),
 		InputPerImage:          cloneFloatPtr(p.InputPerImage),
 		PerSecondInput:         cloneFloatPtr(p.PerSecondInput),
@@ -121,11 +127,13 @@ func mergePricing(base *core.ModelPricing, override Pricing) *core.ModelPricing 
 	applyFloatOverride(&out.OutputPerMtok, overlay.OutputPerMtok)
 	applyFloatOverride(&out.CachedInputPerMtok, overlay.CachedInputPerMtok)
 	applyFloatOverride(&out.CacheWritePerMtok, overlay.CacheWritePerMtok)
+	applyFloatOverride(&out.CacheWrite1hPerMtok, overlay.CacheWrite1hPerMtok)
 	applyFloatOverride(&out.ReasoningOutputPerMtok, overlay.ReasoningOutputPerMtok)
 	applyFloatOverride(&out.BatchInputPerMtok, overlay.BatchInputPerMtok)
 	applyFloatOverride(&out.BatchOutputPerMtok, overlay.BatchOutputPerMtok)
 	applyFloatOverride(&out.AudioInputPerMtok, overlay.AudioInputPerMtok)
 	applyFloatOverride(&out.AudioOutputPerMtok, overlay.AudioOutputPerMtok)
+	applyFloatOverride(&out.OutputImagePerMtok, overlay.OutputImagePerMtok)
 	applyFloatOverride(&out.PerImage, overlay.PerImage)
 	applyFloatOverride(&out.InputPerImage, overlay.InputPerImage)
 	applyFloatOverride(&out.PerSecondInput, overlay.PerSecondInput)
@@ -136,6 +144,9 @@ func mergePricing(base *core.ModelPricing, override Pricing) *core.ModelPricing 
 	if len(overlay.Tiers) > 0 {
 		out.Tiers = overlay.Tiers
 	}
+	// An operator's rate replaces the catalog's base price and any catalog
+	// time-window discount published against it.
+	out.DropTimeWindowRatesOverriddenBy(overlay)
 	return out
 }
 

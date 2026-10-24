@@ -7,14 +7,20 @@
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { auth } from "$lib/stores/auth.svelte.js";
   import { guardrailsStore as store } from "./guardrails.svelte.js";
-  import { Pencil, Plus, X } from "lucide";
+  import { guardrailDegraded } from "./guardrails-logic.js";
+  import { phaseLabel } from "$lib/utils/pluginPhases.js";
+  import { formatNumber } from "$lib/utils/format.js";
+  import { Pencil, Plus, ShieldCheck, X } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
 <section class="settings-panel settings-guardrails-list">
   <div class="editor-header">
     <div>
-      <h3>{m.guardrails_instances()}</h3>
+      <h3 class="settings-section-title">
+        {m.guardrails_instances()}
+        <span class="provider-badge">{formatNumber(store.guardrails.length)}</span>
+      </h3>
       <p class="form-hint">
         {m.guardrails_instances_help()}
       </p>
@@ -62,11 +68,30 @@
         <tbody>
           {#each store.filtered as guardrail (guardrail.name)}
             <tr>
-              <td class="mono font-size-md">{guardrail.name}</td>
+              <td class="mono font-size-md">
+                {guardrail.name}
+                {#if guardrailDegraded(guardrail)}
+                  <span
+                    class="settings-guardrail-health is-degraded"
+                    title={guardrail.health_error || m.guardrails_health_degraded()}
+                    >{m.guardrails_health_degraded()}</span
+                  >
+                {/if}
+              </td>
               <td>
-                <span class="settings-guardrail-type-pill"
-                  >{store.typeLabel(guardrail.type)}</span
-                >
+                <span class="settings-guardrail-type-pill">
+                  {#if guardrail.guardrail}
+                    <span class="settings-guardrail-shield" role="img" title={m.plugins_guardrail()} aria-label={m.plugins_guardrail()}>
+                      <Icon icon={ShieldCheck} class="form-action-icon" />
+                    </span>
+                  {/if}
+                  {store.typeLabel(guardrail.type)}
+                </span>
+                <div class="settings-guardrail-phases" aria-label={m.guardrails_phases()}>
+                  {#each store.phases(guardrail) as phase (phase)}
+                    <span class="settings-guardrail-phase">{phaseLabel(phase)}</span>
+                  {/each}
+                </div>
               </td>
               <td class="mono font-size-md">{guardrail.user_path || "—"}</td>
               <td>
@@ -113,8 +138,34 @@
 </section>
 
 <style>
+  .settings-guardrail-health {
+    margin-left: 6px;
+    font-family: var(--font-sans, inherit);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .settings-guardrail-health.is-degraded {
+    color: var(--danger);
+  }
+
   .settings-guardrails-list {
     min-width: 0;
+  }
+
+  .settings-section-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .settings-guardrail-shield {
+    display: inline-flex;
+    margin-right: 4px;
+    color: var(--accent);
   }
 
   .settings-guardrail-type-pill {
@@ -128,6 +179,29 @@
     font-size: 12px;
     font-weight: 600;
     white-space: nowrap;
+  }
+
+  .settings-guardrail-phases {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 6px;
+  }
+
+  .settings-guardrail-phase {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg);
+    color: var(--text-muted);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    line-height: 1.5;
   }
 
   .settings-guardrail-summary {

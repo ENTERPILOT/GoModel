@@ -46,6 +46,7 @@ type bootstrap struct {
 	// Produced by the server phases.
 	provider                 core.RoutableProvider
 	translatedRequestPatcher server.TranslatedRequestPatcher
+	pluginChains             server.PluginChainsResolver
 	batchRequestPreparer     server.BatchRequestPreparer
 	swaggerEnabled           bool
 	serverUsageLogger        usage.LoggerInterface
@@ -63,6 +64,15 @@ func newBootstrap(ctx context.Context, cfg Config) *bootstrap {
 	// Install config-file HTTP timeouts before any provider constructs a
 	// transport; env vars still take precedence inside httpclient.
 	httpclient.SetConfiguredTimeouts(appCfg.HTTP.Timeout, appCfg.HTTP.ResponseHeaderTimeout)
+	httpclient.SetConfiguredStreamIdleTimeout(appCfg.HTTP.StreamIdleTimeout)
+	if appCfg.Offline {
+		catalog := "disabled"
+		if appCfg.Cache.Model.ModelList.URL != "" {
+			catalog = "local file"
+		}
+		slog.Info("offline mode: update check disabled, remote model catalog download disabled; only configured providers and declared endpoints are contacted",
+			"model_catalog", catalog)
+	}
 	if appCfg.Budgets.Enabled && !appCfg.Usage.Enabled {
 		appCfg.Budgets.Enabled = false
 		slog.Warn("budget management disabled because usage tracking is disabled",

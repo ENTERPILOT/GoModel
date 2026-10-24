@@ -3,6 +3,7 @@
 // relative imports keep it loadable outside Vite.
 
 import * as m from "../../lib/paraglide/messages.js";
+import { cloneSchemaConfig } from "../../lib/utils/schemaFields.js";
 import {
   GLOBAL_OVERRIDE_SELECTOR,
   qualifiedModelName,
@@ -65,6 +66,10 @@ export function defaultVirtualModelForm() {
     target_weight: 1,
     targets: [],
     strategy: "round_robin",
+    // A "plugin" strategy names its routing plugin and carries that plugin's
+    // route-scoped settings (see GET /admin/plugins route_fields).
+    strategy_plugin: "",
+    strategy_config: {},
     session_affinity: true,
     failover: true,
     user_paths: "",
@@ -74,8 +79,94 @@ export function defaultVirtualModelForm() {
   };
 }
 
+// vmFormPluginStrategy reports whether the form routes through a plugin.
+export function vmFormPluginStrategy(form) {
+  return String((form && form.strategy) || "").toLowerCase() === "plugin";
+}
+
+// pluginStrategyFields returns the strategy_plugin/strategy_config pair to
+// persist for a plugin strategy; an empty config is omitted.
+function pluginStrategyFields(source) {
+  const fields = {
+    strategy_plugin: String((source && source.strategy_plugin) || "").trim(),
+  };
+  const config = cloneSchemaConfig(source && source.strategy_config);
+  if (Object.keys(config).length > 0) {
+    fields.strategy_config = config;
+  }
+  return fields;
+}
+
 export function vmFormHasPrimaryTarget(form) {
   return String((form && form.target_model) || "").trim() !== "";
+}
+
+// vmFormTargetCount is the total number of reorderable rows in the editor.
+export function vmFormTargetCount(form) {
+  if (!form) return 0;
+  const primary = vmFormHasPrimaryTarget(form) ? 1 : 0;
+  return primary + (Array.isArray(form.targets) ? form.targets.length : 0);
+}
+
+// normalizedTargetWeight mirrors the backend contract: a non-positive or
+// unset weight counts as 1.
+function normalizedTargetWeight(value) {
+  const weight = Number(value);
+  return Number.isFinite(weight) && weight > 0 ? weight : 1;
+}
+
+// vmFormPopulatedTargetCount counts only targets that hold a model; blank
+// placeholder rows do not make reordering meaningful.
+export function vmFormPopulatedTargetCount(form) {
+  return flattenFormTargets(form).filter((target) => target.model !== "").length;
+}
+
+// flattenFormTargets returns the full target list in display order: primary
+// first, so position 0 is the failover primary / first round-robin slot.
+export function flattenFormTargets(form) {
+  if (!form) return [];
+  const list = [];
+  if (vmFormHasPrimaryTarget(form)) {
+    list.push({
+      provider: String(form.target_provider || ""),
+      model: String(form.target_model || "").trim(),
+      weight: normalizedTargetWeight(form.target_weight),
+    });
+  }
+  if (Array.isArray(form.targets)) {
+    for (const target of form.targets) {
+      list.push({
+        provider: String((target && target.provider) || ""),
+        model: String((target && target.model) || ""),
+        weight: normalizedTargetWeight((target && target.weight)),
+      });
+    }
+  }
+  return list;
+}
+
+// moveFormTarget splices the flattened target list in place, writing the
+// result back into the primary slot plus the extras array. Returns false on
+// invalid bounds or no-op moves.
+export function moveFormTarget(form, from, to) {
+  if (!form) return false;
+  const list = flattenFormTargets(form);
+  const length = list.length;
+  if (length < 2) return false;
+  if (from < 0 || to < 0 || from >= length || to >= length) return false;
+  if (from === to) return false;
+  const [entry] = list.splice(from, 1);
+  list.splice(to, 0, entry);
+  const first = list[0];
+  form.target_provider = String(first.provider || "");
+  form.target_model = first.model || "";
+  form.target_weight = normalizedTargetWeight(first.weight);
+  form.targets = list.slice(1).map((row) => ({
+    provider: row.provider || "",
+    model: row.model || "",
+    weight: normalizedTargetWeight(row.weight),
+  }));
+  return true;
 }
 
 // vmFormSelfOnly: the editor opened from a real model pins that model as its
@@ -162,7 +253,7 @@ export function vmRoutingSummary(form, sourceIsModel) {
   );
   if (!source || targets.length === 0) return { text: "", replaces: false };
 
-  const strategy = strategyLabel(form.strategy);
+  const strategy = strategyLabel(form.strategy, form.strategy_plugin);
   const failover = isFailoverStrategy(form && form.strategy);
   const others = targets.filter((target) => target !== source);
   const selfFirst = targets[0] === source;
@@ -338,6 +429,9 @@ export function buildVirtualModelSavePayload(form, originalSource, mode) {
         ? targets
         : targets.map(weightless);
       payload.strategy = strategy;
+      if (vmFormPluginStrategy(form)) {
+        Object.assign(payload, pluginStrategyFields(form));
+      }
       // Affinity defaults to on server-side; only an explicit opt-out is sent.
       if (form && form.session_affinity === false) {
         payload.session_affinity = false;
@@ -376,6 +470,9 @@ export function buildAliasTogglePayload(alias) {
   const lbTargets = Array.isArray(alias.targets) ? alias.targets : [];
   if (lbTargets.length > 1) {
     payload.strategy = alias.strategy || "round_robin";
+    if (vmFormPluginStrategy(alias)) {
+      Object.assign(payload, pluginStrategyFields(alias));
+    }
     if (alias.session_affinity === false) {
       payload.session_affinity = false;
     }

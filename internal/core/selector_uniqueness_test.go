@@ -1,6 +1,10 @@
 package core
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 func TestDuplicateSelectorField(t *testing.T) {
 	tests := []struct {
@@ -32,19 +36,14 @@ func TestDuplicateSelectorField(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := DuplicateSelectorField([]byte(tt.body)); got != tt.want {
-				t.Fatalf("DuplicateSelectorField(%s) = %q, want %q", tt.body, got, tt.want)
-			}
+			assert.Equal(t, tt.want, DuplicateSelectorField([]byte(tt.body)), "body: %s", tt.body)
 		})
 	}
 }
 
 func TestNewDuplicateSelectorFieldError(t *testing.T) {
 	err := NewDuplicateSelectorFieldError("model")
-	if err.StatusCode != 400 || err.Type != ErrorTypeInvalidRequest {
-		t.Fatalf("error = %+v, want 400 invalid_request", err)
-	}
-	if want := `duplicate top-level "model" field in request body`; err.Message != want {
-		t.Fatalf("message = %q, want %q", err.Message, want)
-	}
+	assert.Equal(t, 400, err.StatusCode)
+	assert.Equal(t, ErrorTypeInvalidRequest, err.Type)
+	assert.Equal(t, `duplicate top-level "model" field in request body`, err.Message)
 }

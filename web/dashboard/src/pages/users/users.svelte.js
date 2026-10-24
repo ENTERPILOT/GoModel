@@ -4,11 +4,14 @@
 
 import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
+import { access } from "$lib/stores/access.svelte.js";
+import { normalizeScopePath } from "$lib/stores/accessScope.js";
 import * as m from "$lib/paraglide/messages.js";
 import { writeTextToClipboard } from "$lib/utils/clipboard.svelte.js";
 import { displayModelSelector } from "$lib/utils/modelSelectors.js";
 import {
   buildUpsertUserPayload,
+  countInactiveUserNodes,
   defaultUserForm,
   filterUserNodes,
   sortUserNodes,
@@ -20,8 +23,20 @@ class UsersStore {
   loading = $state(false);
   error = $state("");
   filter = $state("");
+  showInactive = $state(false);
 
-  visibleNodes = $derived(sortUserNodes(filterUserNodes(this.nodes, this.filter)));
+  visibleNodes = $derived(
+    sortUserNodes(filterUserNodes(this.nodes, this.filter, { showInactive: this.showInactive })),
+  );
+
+  // Count inactive only among rows matching the current filter, so the
+  // toggle badge never claims hidden rows the query would not surface.
+  inactiveCount = $derived(
+    countInactiveUserNodes(
+      filterUserNodes(this.nodes, this.filter, { showInactive: true }),
+      this.filter,
+    ),
+  );
 
   formOpen = $state(false);
   formSubmitting = $state(false);
@@ -113,6 +128,10 @@ class UsersStore {
           description: node.description || "",
         }
       : defaultUserForm();
+    if (!node) {
+      // A scoped key can only manage its own subtree: start there.
+      this.form.user_path = access.defaultPath(this.form.user_path);
+    }
     this.formOpen = true;
   }
 
@@ -127,6 +146,13 @@ class UsersStore {
   }
 
   async submitForm() {
+    // The server rejects a path outside the key's scope; say so before the
+    // round trip.
+    const userPath = normalizeScopePath(this.form.user_path);
+    if (userPath && !access.allows(userPath)) {
+      this.error = m.access_scope_path_outside({ root: access.userPath });
+      return;
+    }
     const built = buildUpsertUserPayload(this.form);
     if (built.error) {
       this.error = built.error;

@@ -2,11 +2,10 @@ package auditlog
 
 import (
 	"context"
-	"errors"
-	"reflect"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -24,37 +23,18 @@ func TestSanitizeLogDataRedactsHeaders(t *testing.T) {
 	}
 
 	sanitized := sanitizeLogData(original)
-	if sanitized == nil {
-		t.Fatalf("sanitizeLogData returned nil")
-		return
-	}
-
-	if got := sanitized.RequestHeaders["Authorization"]; got != "[REDACTED]" {
-		t.Fatalf("request Authorization not redacted: %q", got)
-	}
-	if got := sanitized.RequestHeaders["X-Test"]; got != "ok" {
-		t.Fatalf("request non-sensitive header changed: %q", got)
-	}
-	if got := sanitized.ResponseHeaders["Set-Cookie"]; got != "[REDACTED]" {
-		t.Fatalf("response Set-Cookie not redacted: %q", got)
-	}
-	if got := sanitized.ResponseHeaders["Server"]; got != "gateway" {
-		t.Fatalf("response non-sensitive header changed: %q", got)
-	}
-
+	require.NotNil(t, sanitized)
+	require.Equal(t, "[REDACTED]", sanitized.RequestHeaders["Authorization"])
+	require.Equal(t, "ok", sanitized.RequestHeaders["X-Test"])
+	require.Equal(t, "[REDACTED]", sanitized.ResponseHeaders["Set-Cookie"])
+	require.Equal(t, "gateway", sanitized.ResponseHeaders["Server"])
 	// Ensure original is not mutated.
-	if got := original.RequestHeaders["Authorization"]; got != "Bearer secret" {
-		t.Fatalf("original request headers mutated: %q", got)
-	}
-	if got := original.ResponseHeaders["Set-Cookie"]; got != "session=abc" {
-		t.Fatalf("original response headers mutated: %q", got)
-	}
+	require.Equal(t, "Bearer secret", original.RequestHeaders["Authorization"])
+	require.Equal(t, "session=abc", original.ResponseHeaders["Set-Cookie"])
 }
 
 func TestSanitizeLogDataNilSafe(t *testing.T) {
-	if sanitizeLogData(nil) != nil {
-		t.Fatalf("expected nil input to return nil")
-	}
+	require.Nil(t, sanitizeLogData(nil))
 }
 
 func TestMongoLogRowToLogEntryPreservesCacheType(t *testing.T) {
@@ -66,30 +46,19 @@ func TestMongoLogRowToLogEntryPreservesCacheType(t *testing.T) {
 	}
 
 	entry := row.toLogEntry()
-	if entry == nil {
-		t.Fatal("expected entry, got nil")
-		return
-	}
-	if entry.CacheType != CacheTypeSemantic {
-		t.Fatalf("CacheType = %q, want %q", entry.CacheType, CacheTypeSemantic)
-	}
+	require.NotNil(t, entry)
+	require.Equal(t, CacheTypeSemantic, entry.CacheType)
 }
 
 func TestMongoDBReader_GetLogsInvalidUserPathReturnsGatewayError(t *testing.T) {
 	reader := &MongoDBReader{}
 
 	_, err := reader.GetLogs(context.Background(), LogQueryParams{UserPath: "/team/../alpha"})
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("expected GatewayError, got %T", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
-		t.Fatalf("gatewayErr.Type = %q, want %q", gatewayErr.Type, core.ErrorTypeInvalidRequest)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
 }
 
 func TestMongoUserPathMatchFilter(t *testing.T) {
@@ -103,9 +72,7 @@ func TestMongoUserPathMatchFilter(t *testing.T) {
 				bson.D{{Key: "user_path", Value: nil}},
 			},
 		}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("mongoUserPathMatchFilter(%q) = %#v, want %#v", "/", got, want)
-		}
+		require.Equal(t, want, got)
 	})
 
 	t.Run("non-root uses regex only", func(t *testing.T) {
@@ -114,9 +81,7 @@ func TestMongoUserPathMatchFilter(t *testing.T) {
 			Key:   "user_path",
 			Value: bson.D{{Key: "$regex", Value: "^/team(?:/|$)"}},
 		}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("mongoUserPathMatchFilter(%q) = %#v, want %#v", "/team", got, want)
-		}
+		require.Equal(t, want, got)
 	})
 }
 
@@ -132,16 +97,12 @@ func TestMongoExactUserPathMatchFilter(t *testing.T) {
 				bson.D{{Key: "user_path", Value: nil}},
 			},
 		}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("mongoExactUserPathMatchFilter(%q) = %#v, want %#v", "/", got, want)
-		}
+		require.Equal(t, want, got)
 	})
 
 	t.Run("non-root uses equality", func(t *testing.T) {
 		got := mongoExactUserPathMatchFilter("/team")
 		want := bson.E{Key: "user_path", Value: "/team"}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("mongoExactUserPathMatchFilter(%q) = %#v, want %#v", "/team", got, want)
-		}
+		require.Equal(t, want, got)
 	})
 }

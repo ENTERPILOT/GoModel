@@ -2,11 +2,13 @@
   // Segmented button group for switching between a few exclusive options
   // (Tokens/Costs, chart intervals, throughput granularity, ...).
   // options: array of {value, label}; onchange fires with the picked value.
+  // disabled locks every option (the active one stays highlighted).
   let {
     options = [],
     value,
     onchange,
     ariaLabel = "",
+    disabled = false,
     class: className = "",
   } = $props();
 </script>
@@ -18,6 +20,7 @@
       class="segmented-btn"
       class:active={value === option.value}
       aria-pressed={value === option.value}
+      {disabled}
       onclick={() => onchange?.(option.value)}
     >{option.label}</button>
   {/each}
@@ -51,8 +54,13 @@
     white-space: nowrap;
   }
 
-  .segmented-btn:hover {
+  .segmented-btn:hover:not(:disabled) {
     color: var(--text);
+  }
+
+  .segmented-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
   }
 
   .segmented-btn.active {

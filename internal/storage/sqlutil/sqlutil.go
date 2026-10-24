@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/goccy/go-json"
 )
@@ -17,6 +18,20 @@ func EscapeLikeWildcards(s string) string {
 	s = strings.ReplaceAll(s, `%`, `\%`)
 	s = strings.ReplaceAll(s, `_`, `\_`)
 	return s
+}
+
+// UserPathSubtreeCondition matches column against userPath itself and every
+// path below it, binding its own arguments. The LIKE term keeps the prefix
+// index-friendly; the substr term repeats the prefix test case-sensitively,
+// because SQLite's LIKE ignores ASCII case while user paths do not. column
+// may be an expression; it is repeated in the predicate.
+func UserPathSubtreeCondition(column, userPath string) (string, []any) {
+	prefix := userPath + "/"
+	if userPath == "/" {
+		prefix = "/"
+	}
+	condition := "(" + column + " = ? OR (" + column + " LIKE ? ESCAPE '\\' AND substr(" + column + ", 1, ?) = ?))"
+	return condition, []any{userPath, EscapeLikeWildcards(prefix) + "%", utf8.RuneCountInString(prefix), prefix}
 }
 
 // BuildWhereClause joins condition strings into a SQL WHERE clause.
@@ -64,12 +79,27 @@ func UnixOrNil(value *time.Time) any {
 	return value.UTC().Unix()
 }
 
+// TimeFromUnix converts a stored Unix-seconds column into a UTC time,
+// mapping a value JSON cannot represent (time.Time marshals only years 0-9999)
+// to the zero time. A single corrupt timestamp — a row written while the host
+// clock was wrong, or hand-edited — would otherwise make every API response
+// carrying that row unserializable, failing the whole listing instead of the
+// one column. Same tolerance as StringsFromJSON, for the same reason.
+func TimeFromUnix(value int64) time.Time {
+	t := time.Unix(value, 0).UTC()
+	if year := t.Year(); year < 0 || year > 9999 {
+		slog.Warn("dropping out-of-range stored timestamp", "unix_seconds", value)
+		return time.Time{}
+	}
+	return t
+}
+
 // TimeFromUnixPtr converts an optional Unix timestamp to a *time.Time.
 func TimeFromUnixPtr(value *int64) *time.Time {
 	if value == nil {
 		return nil
 	}
-	t := time.Unix(*value, 0).UTC()
+	t := TimeFromUnix(*value)
 	return &t
 }
 
@@ -81,6 +111,33 @@ func NullableString(value string) any {
 		return nil
 	}
 	return value
+}
+
+// JSONStrings marshals values to a JSON array for a NOT NULL JSON column;
+// nil and empty both persist as "[]". Marshaling a []string cannot fail.
+func JSONStrings(values []string) string {
+	if values == nil {
+		values = []string{}
+	}
+	data, _ := json.Marshal(values)
+	return string(data)
+}
+
+// DecodeJSONStrings parses a JSON array column written by JSONStrings. Empty
+// input and an empty array both decode to nil. Unlike StringsFromJSON, a
+// malformed value is returned as an error.
+func DecodeJSONStrings(raw []byte) ([]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var values []string
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return nil, err
+	}
+	if len(values) == 0 {
+		return nil, nil
+	}
+	return values, nil
 }
 
 // NullableJSONStrings marshals values to a JSON array for binding to a JSON

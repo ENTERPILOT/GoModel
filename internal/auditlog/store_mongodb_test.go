@@ -9,6 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewMongoDBStoreDropsLegacyExecutionPlanIndex(t *testing.T) {
@@ -16,43 +17,29 @@ func TestNewMongoDBStoreDropsLegacyExecutionPlanIndex(t *testing.T) {
 		ctx := context.Background()
 		coll := db.Collection("audit_logs")
 		// A collection from before v0.1.17 still carries the pre-rename index.
-		if _, err := coll.Indexes().CreateOne(ctx, mongo.IndexModel{Keys: bson.D{{Key: "execution_plan_version_id", Value: 1}}}); err != nil {
-			t.Fatalf("create legacy index: %v", err)
-		}
-
-		if _, err := NewMongoDBStore(db, 0); err != nil {
-			t.Fatalf("NewMongoDBStore: %v", err)
-		}
+		_, err := coll.Indexes().CreateOne(ctx, mongo.IndexModel{Keys: bson.D{{Key: "execution_plan_version_id", Value: 1}}})
+		require.NoError(t, err)
+		_, err = NewMongoDBStore(db, 0)
+		require.NoError(t, err)
 
 		cursor, err := coll.Indexes().List(ctx)
-		if err != nil {
-			t.Fatalf("list indexes: %v", err)
-		}
-		var specs []bson.M
-		if err := cursor.All(ctx, &specs); err != nil {
-			t.Fatalf("decode indexes: %v", err)
-		}
-		for _, spec := range specs {
-			if spec["name"] == legacyExecutionPlanIndex {
-				t.Fatalf("legacy index still present after NewMongoDBStore: %v", specs)
-			}
-		}
+		require.NoError(t, err)
 
-		// A second start finds no legacy index; that is not an error either.
-		if _, err := NewMongoDBStore(db, 0); err != nil {
-			t.Fatalf("NewMongoDBStore (second start): %v", err)
+		var specs []bson.M
+		err = cursor.All(ctx, &specs)
+		require.NoError(t, err)
+
+		for _, spec := range specs {
+			require.NotEqual(t, legacyExecutionPlanIndex, spec["name"], "legacy index still present after NewMongoDBStore: %v", specs)
 		}
+		// A second start finds no legacy index; that is not an error either.
+		_, err = NewMongoDBStore(db, 0)
+		require.NoError(t, err)
 	})
 }
 
 func TestIsIndexNotFound(t *testing.T) {
-	if !isIndexNotFound(mongo.CommandError{Code: 27, Name: "IndexNotFound"}) {
-		t.Fatal("code 27 should be reported as index not found")
-	}
-	if isIndexNotFound(mongo.CommandError{Code: 26, Name: "NamespaceNotFound"}) {
-		t.Fatal("other command errors must not be treated as index not found")
-	}
-	if isIndexNotFound(errors.New("connection reset")) {
-		t.Fatal("non-command errors must not be treated as index not found")
-	}
+	require.True(t, isIndexNotFound(mongo.CommandError{Code: 27, Name: "IndexNotFound"}))
+	require.False(t, isIndexNotFound(mongo.CommandError{Code: 26, Name: "NamespaceNotFound"}))
+	require.False(t, isIndexNotFound(errors.New("connection reset")))
 }

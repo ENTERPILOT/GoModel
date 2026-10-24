@@ -2,10 +2,9 @@ package users
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"time"
 
+	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
@@ -52,11 +51,11 @@ func (s *SQLStore) List(ctx context.Context) ([]User, error) {
 		if err := rows.Scan(&user.UserPath, &allowedJSON, &user.Description, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan user: %w", err)
 		}
-		if user.AllowedModels, err = decodeAllowedModels(allowedJSON); err != nil {
-			return nil, err
+		if user.AllowedModels, err = sqlutil.DecodeJSONStrings([]byte(allowedJSON)); err != nil {
+			return nil, fmt.Errorf("decode allowed_models: %w", err)
 		}
-		user.CreatedAt = time.Unix(createdAt, 0).UTC()
-		user.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+		user.CreatedAt = sqlutil.TimeFromUnix(createdAt)
+		user.UpdatedAt = sqlutil.TimeFromUnix(updatedAt)
 		result = append(result, user)
 	}
 	if err := rows.Err(); err != nil {
@@ -66,18 +65,14 @@ func (s *SQLStore) List(ctx context.Context) ([]User, error) {
 }
 
 func (s *SQLStore) Upsert(ctx context.Context, user User) error {
-	allowedJSON, err := encodeAllowedModels(user.AllowedModels)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.Exec(ctx, `
+	_, err := s.db.Exec(ctx, `
 		INSERT INTO users (user_path, allowed_models, description, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(user_path) DO UPDATE SET
 			allowed_models = excluded.allowed_models,
 			description = excluded.description,
 			updated_at = excluded.updated_at
-	`, user.UserPath, allowedJSON, user.Description, user.CreatedAt.Unix(), user.UpdatedAt.Unix())
+	`, user.UserPath, sqlutil.JSONStrings(user.AllowedModels), user.Description, user.CreatedAt.Unix(), user.UpdatedAt.Unix())
 	if err != nil {
 		return fmt.Errorf("upsert user: %w", err)
 	}
@@ -97,29 +92,4 @@ func (s *SQLStore) Delete(ctx context.Context, userPath string) error {
 
 func (s *SQLStore) Close() error {
 	return nil
-}
-
-func encodeAllowedModels(values []string) (string, error) {
-	if values == nil {
-		values = []string{}
-	}
-	data, err := json.Marshal(values)
-	if err != nil {
-		return "", fmt.Errorf("encode allowed_models: %w", err)
-	}
-	return string(data), nil
-}
-
-func decodeAllowedModels(raw string) ([]string, error) {
-	if raw == "" {
-		return nil, nil
-	}
-	var values []string
-	if err := json.Unmarshal([]byte(raw), &values); err != nil {
-		return nil, fmt.Errorf("decode allowed_models: %w", err)
-	}
-	if len(values) == 0 {
-		return nil, nil
-	}
-	return values, nil
 }

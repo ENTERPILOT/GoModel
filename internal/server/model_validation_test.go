@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -14,6 +13,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
 )
 
@@ -204,7 +204,6 @@ func TestModelValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := echo.New()
 			handlerCalled := false
 
 			middleware := WorkflowResolution(provider)
@@ -213,23 +212,14 @@ func TestModelValidation(t *testing.T) {
 				return c.String(http.StatusOK, "ok")
 			})
 
-			var body *strings.Reader
+			var body any
 			if tt.body != "" {
-				body = strings.NewReader(tt.body)
-			} else {
-				body = strings.NewReader("")
+				body = tt.body
 			}
-
-			req := httptest.NewRequest(tt.method, tt.path, body)
-			if tt.body != "" {
-				req.Header.Set("Content-Type", "application/json")
-			}
-			rec := httptest.NewRecorder()
-			c := e.NewContext(req, rec)
+			c, rec := echotest.Request(t, tt.method, tt.path, body)
 
 			err := handler(c)
 			require.NoError(t, err)
-
 			assert.Equal(t, tt.expectedStatus, rec.Code)
 			assert.Equal(t, tt.handlerCalled, handlerCalled)
 
@@ -242,8 +232,6 @@ func TestModelValidation(t *testing.T) {
 
 func TestModelValidation_SetsProviderType(t *testing.T) {
 	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
-
-	e := echo.New()
 	var capturedProviderType string
 
 	middleware := WorkflowResolution(provider)
@@ -252,22 +240,15 @@ func TestModelValidation_SetsProviderType(t *testing.T) {
 		return c.String(http.StatusOK, "ok")
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
-		strings.NewReader(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`)
 
 	err := handler(c)
 	require.NoError(t, err)
-
 	assert.Equal(t, "mock", capturedProviderType)
 }
 
 func TestModelValidation_StoresWorkflow(t *testing.T) {
 	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
-
-	e := echo.New()
 	var capturedWorkflow *core.Workflow
 
 	middleware := WorkflowResolution(provider)
@@ -276,12 +257,7 @@ func TestModelValidation_StoresWorkflow(t *testing.T) {
 		return c.String(http.StatusOK, "ok")
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
-		strings.NewReader(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", "workflow-req-123")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`, echotest.WithHeader("X-Request-ID", "workflow-req-123"))
 
 	err := handler(c)
 	require.NoError(t, err)
@@ -305,8 +281,6 @@ func TestModelValidation_StoresMatchedWorkflowPolicy(t *testing.T) {
 		supportedModels: []string{"gpt-4o-mini"},
 		providerNames:   map[string]string{"gpt-4o-mini": "mock"},
 	}
-
-	e := echo.New()
 	var capturedWorkflow *core.Workflow
 
 	policyResolver := &staticWorkflowPolicyResolver{
@@ -338,11 +312,7 @@ func TestModelValidation_StoresMatchedWorkflowPolicy(t *testing.T) {
 		return c.String(http.StatusOK, "ok")
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
-		strings.NewReader(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`)
 
 	err := handler(c)
 	require.NoError(t, err)
@@ -358,8 +328,6 @@ func TestModelValidation_PassesUserPathToWorkflowPolicyResolver(t *testing.T) {
 		supportedModels: []string{"gpt-4o-mini"},
 		providerNames:   map[string]string{"gpt-4o-mini": "mock"},
 	}
-
-	e := echo.New()
 	var capturedSelector core.WorkflowSelector
 
 	policyResolver := &staticWorkflowPolicyResolver{
@@ -379,12 +347,7 @@ func TestModelValidation_PassesUserPathToWorkflowPolicyResolver(t *testing.T) {
 		return c.String(http.StatusOK, "ok")
 	}))
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
-		strings.NewReader(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(core.UserPathHeader, "/team/a/user")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`, echotest.WithHeader(core.UserPathHeader, "/team/a/user"))
 
 	err := handler(c)
 	require.NoError(t, err)
@@ -395,8 +358,6 @@ func TestModelValidation_PassesUserPathToWorkflowPolicyResolver(t *testing.T) {
 
 func TestWorkflowResolution_StoresPassthroughRouteInfo(t *testing.T) {
 	provider := &mockProvider{}
-
-	e := echo.New()
 	var capturedWorkflow *core.Workflow
 
 	middleware := WorkflowResolution(provider)
@@ -405,7 +366,7 @@ func TestWorkflowResolution_StoresPassthroughRouteInfo(t *testing.T) {
 		return c.String(http.StatusOK, "ok")
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/p/openai/responses", nil)
+	c, _ := echotest.Request(t, http.MethodPost, "/p/openai/responses", nil, echotest.WithHeader("X-Request-ID", "pass-req-123"))
 	frame := core.NewRequestSnapshot(
 		http.MethodPost,
 		"/p/openai/responses",
@@ -418,12 +379,7 @@ func TestWorkflowResolution_StoresPassthroughRouteInfo(t *testing.T) {
 		"pass-req-123",
 		nil,
 	)
-	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
-	req = req.WithContext(ctx)
-	req.Header.Set("X-Request-ID", "pass-req-123")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c.SetRequest(withRequestSnapshotAndPrompt(c.Request(), frame))
 
 	err := handler(c)
 	require.NoError(t, err)
@@ -450,8 +406,6 @@ func TestWorkflowResolution_PassthroughProviderNameRouteUsesCanonicalProviderNam
 			"openai_test/gpt-5-mini": "openai_test",
 		},
 	}
-
-	e := echo.New()
 	var capturedSelector core.WorkflowSelector
 	var capturedWorkflow *core.Workflow
 
@@ -473,10 +427,7 @@ func TestWorkflowResolution_PassthroughProviderNameRouteUsesCanonicalProviderNam
 		return c.String(http.StatusOK, "ok")
 	}))
 
-	req := httptest.NewRequest(http.MethodPost, "/p/openai_test/responses", strings.NewReader(`{"model":"gpt-5-mini"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/p/openai_test/responses", `{"model":"gpt-5-mini"}`)
 
 	err := handler(c)
 	require.NoError(t, err)
@@ -492,8 +443,6 @@ func TestWorkflowResolution_PassthroughProviderNameRouteUsesCanonicalProviderNam
 
 func TestWorkflowResolution_PopulatesPassthroughProviderFromPathFallback(t *testing.T) {
 	provider := &mockProvider{}
-
-	e := echo.New()
 	var capturedWorkflow *core.Workflow
 
 	middleware := WorkflowResolution(provider)
@@ -502,7 +451,7 @@ func TestWorkflowResolution_PopulatesPassthroughProviderFromPathFallback(t *test
 		return c.String(http.StatusOK, "ok")
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/p/openai/responses", nil)
+	c, _ := echotest.Request(t, http.MethodPost, "/p/openai/responses", nil, echotest.WithHeader("X-Request-ID", "pass-req-fallback-123"))
 	frame := core.NewRequestSnapshot(
 		http.MethodPost,
 		"/p/openai/responses",
@@ -524,12 +473,9 @@ func TestWorkflowResolution_PopulatesPassthroughProviderFromPathFallback(t *test
 		Model:       "gpt-5-mini",
 		AuditPath:   "/p/openai/responses",
 	})
-	ctx := core.WithRequestSnapshot(req.Context(), frame)
+	ctx := core.WithRequestSnapshot(c.Request().Context(), frame)
 	ctx = core.WithWhiteBoxPrompt(ctx, env)
-	req = req.WithContext(ctx)
-	req.Header.Set("X-Request-ID", "pass-req-fallback-123")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c.SetRequest(c.Request().WithContext(ctx))
 
 	err := handler(c)
 	require.NoError(t, err)
@@ -547,8 +493,6 @@ func TestWorkflowResolution_PopulatesPassthroughProviderFromPathFallback(t *test
 
 func TestModelValidation_SetsRequestIDInContext(t *testing.T) {
 	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
-
-	e := echo.New()
 	var capturedRequestID string
 
 	middleware := WorkflowResolution(provider)
@@ -557,23 +501,15 @@ func TestModelValidation_SetsRequestIDInContext(t *testing.T) {
 		return c.String(http.StatusOK, "ok")
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
-		strings.NewReader(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", "test-req-123")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`, echotest.WithHeader("X-Request-ID", "test-req-123"))
 
 	err := handler(c)
 	require.NoError(t, err)
-
 	assert.Equal(t, "test-req-123", capturedRequestID)
 }
 
 func TestModelValidation_DoesNotTreatPrefixOvermatchAsBatchPath(t *testing.T) {
 	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
-
-	e := echo.New()
 	var capturedRequestID string
 
 	middleware := WorkflowResolution(provider)
@@ -582,23 +518,16 @@ func TestModelValidation_DoesNotTreatPrefixOvermatchAsBatchPath(t *testing.T) {
 		return c.String(http.StatusOK, "ok")
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/batchesXYZ", strings.NewReader(`{"foo":"bar"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", "test-req-123")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/batchesXYZ", `{"foo":"bar"}`, echotest.WithHeader("X-Request-ID", "test-req-123"))
 
 	err := handler(c)
 	require.NoError(t, err)
-
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "", capturedRequestID)
+	assert.Empty(t, capturedRequestID)
 }
 
 func TestModelValidation_BodyRewound(t *testing.T) {
 	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
-
-	e := echo.New()
 	var boundReq core.ChatRequest
 
 	middleware := WorkflowResolution(provider)
@@ -610,22 +539,16 @@ func TestModelValidation_BodyRewound(t *testing.T) {
 	})
 
 	reqBody := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/v1/chat/completions", reqBody)
 
 	err := handler(c)
 	require.NoError(t, err)
-
 	assert.Equal(t, "gpt-4o-mini", boundReq.Model)
 	assert.Len(t, boundReq.Messages, 1)
 }
 
 func TestModelValidation_DoesNotReadLiveBodyWhenSelectorHintsAlreadyExist(t *testing.T) {
 	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
-
-	e := echo.New()
 	handlerCalled := false
 
 	middleware := WorkflowResolution(provider)
@@ -634,12 +557,10 @@ func TestModelValidation_DoesNotReadLiveBodyWhenSelectorHintsAlreadyExist(t *tes
 		return c.String(http.StatusOK, "ok")
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req.Header.Set("Content-Type", "application/json")
-	req.Body = explodingValidationReadCloser{}
+	c, rec := echotest.Post(t, "/v1/chat/completions", explodingValidationReadCloser{})
 
 	frame := core.NewRequestSnapshot(http.MethodPost, "/v1/chat/completions", nil, nil, nil, "application/json", nil, false, "", nil)
-	ctx := core.WithRequestSnapshot(req.Context(), frame)
+	ctx := core.WithRequestSnapshot(c.Request().Context(), frame)
 	ctx = core.WithWhiteBoxPrompt(ctx, &core.WhiteBoxPrompt{
 		RouteType:      "openai_compat",
 		OperationType:  "chat_completions",
@@ -648,10 +569,7 @@ func TestModelValidation_DoesNotReadLiveBodyWhenSelectorHintsAlreadyExist(t *tes
 			Model: "gpt-4o-mini",
 		},
 	})
-	req = req.WithContext(ctx)
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c.SetRequest(c.Request().WithContext(ctx))
 
 	err := handler(c)
 	require.NoError(t, err)
@@ -661,8 +579,6 @@ func TestModelValidation_DoesNotReadLiveBodyWhenSelectorHintsAlreadyExist(t *tes
 
 func TestModelValidation_UsesIngressBodyForMissingSelectorHints(t *testing.T) {
 	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
-
-	e := echo.New()
 	handlerCalled := false
 
 	middleware := WorkflowResolution(provider)
@@ -671,9 +587,7 @@ func TestModelValidation_UsesIngressBodyForMissingSelectorHints(t *testing.T) {
 		return c.String(http.StatusOK, "ok")
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req.Header.Set("Content-Type", "application/json")
-	req.Body = explodingValidationReadCloser{}
+	c, rec := echotest.Post(t, "/v1/chat/completions", explodingValidationReadCloser{})
 
 	frame := core.NewRequestSnapshot(
 		http.MethodPost,
@@ -687,12 +601,7 @@ func TestModelValidation_UsesIngressBodyForMissingSelectorHints(t *testing.T) {
 		"",
 		nil,
 	)
-	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
-	req = req.WithContext(ctx)
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c.SetRequest(withRequestSnapshotAndPrompt(c.Request(), frame))
 
 	err := handler(c)
 	require.NoError(t, err)
@@ -705,8 +614,6 @@ func TestModelValidation_RegistryNotInitializedReturnsGatewayError(t *testing.T)
 		mockProvider: &mockProvider{},
 		modelCount:   0,
 	}
-
-	e := echo.New()
 	handlerCalled := false
 
 	middleware := WorkflowResolution(provider)
@@ -715,17 +622,12 @@ func TestModelValidation_RegistryNotInitializedReturnsGatewayError(t *testing.T)
 		return c.String(http.StatusOK, "ok")
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
-		strings.NewReader(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`)
 
 	err := handler(c)
 	require.NoError(t, err)
-
 	assert.False(t, handlerCalled)
-	assert.Equal(t, http.StatusBadGateway, rec.Code)
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	assert.Contains(t, rec.Body.String(), "model registry not initialized")
 }
 
@@ -752,7 +654,6 @@ func TestModelValidation_EnrichesAuditEntryWithRequestedModelOnResolutionError(t
 			"openai/gpt-4o": "openai",
 		},
 	}
-	e := echo.New()
 	handlerCalled := false
 
 	middleware := WorkflowResolutionWithResolver(inner, service)
@@ -761,22 +662,18 @@ func TestModelValidation_EnrichesAuditEntryWithRequestedModelOnResolutionError(t
 		return c.String(http.StatusOK, "ok")
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"smart","input":"hello"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/responses", `{"model":"smart","input":"hello"}`)
 	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
 	c.Set(string(auditlog.LogEntryKey), entry)
 
 	err = handler(c)
 	require.NoError(t, err)
-
 	assert.False(t, handlerCalled)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 	assert.Contains(t, rec.Body.String(), "unsupported model: smart")
 	assert.Equal(t, "smart", entry.RequestedModel)
-	assert.Equal(t, "", entry.ResolvedModel)
-	assert.Equal(t, "", entry.Provider)
+	assert.Empty(t, entry.ResolvedModel)
+	assert.Empty(t, entry.Provider)
 	assert.Equal(t, "not_found_error", entry.ErrorType)
 }
 
@@ -787,8 +684,6 @@ func TestModelValidation_DefersOversizedLiveBodyResolutionToHandler(t *testing.T
 			"openai/gpt-4o-mini": "openai",
 		},
 	}
-
-	e := echo.New()
 	var capturedEnv *core.WhiteBoxPrompt
 	var capturedProviderType string
 
@@ -799,21 +694,14 @@ func TestModelValidation_DefersOversizedLiveBodyResolutionToHandler(t *testing.T
 		return c.String(http.StatusOK, "ok")
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
+	c, rec := echotest.Post(t, "/v1/chat/completions", `{
 		"provider":"openai",
 		"model":"gpt-4o-mini",
 		"messages":[{"role":"user","content":"hi"}]
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", "oversized-live-body")
+	}`, echotest.WithHeader("X-Request-ID", "oversized-live-body"))
 
 	frame := core.NewRequestSnapshot(http.MethodPost, "/v1/chat/completions", nil, nil, nil, "application/json", nil, true, "", nil)
-	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
-	req = req.WithContext(ctx)
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c.SetRequest(withRequestSnapshotAndPrompt(c.Request(), frame))
 
 	err := handler(c)
 	require.NoError(t, err)
@@ -824,13 +712,9 @@ func TestModelValidation_DefersOversizedLiveBodyResolutionToHandler(t *testing.T
 }
 
 func TestSelectorHintsForValidationFallsBackWhenPeekFindsModelOnly(t *testing.T) {
-	e := echo.New()
 	largeContent := strings.Repeat("x", int(requestSelectorPeekLimit))
 	reqBody := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"` + largeContent + `"}],"provider":"openai"}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/v1/chat/completions", reqBody)
 
 	model, provider, parsed, err := selectorHintsForValidation(c)
 	require.NoError(t, err)
@@ -841,8 +725,6 @@ func TestSelectorHintsForValidationFallsBackWhenPeekFindsModelOnly(t *testing.T)
 
 func TestModelValidation_DoesNotCacheCanonicalChatRequestWhenRouteHintsAlreadyExist(t *testing.T) {
 	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
-
-	e := echo.New()
 	var capturedEnv *core.WhiteBoxPrompt
 
 	middleware := WorkflowResolution(provider)
@@ -851,9 +733,7 @@ func TestModelValidation_DoesNotCacheCanonicalChatRequestWhenRouteHintsAlreadyEx
 		return c.String(http.StatusOK, "ok")
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req.Header.Set("Content-Type", "application/json")
-	req.Body = explodingValidationReadCloser{}
+	c, _ := echotest.Post(t, "/v1/chat/completions", explodingValidationReadCloser{})
 
 	frame := core.NewRequestSnapshot(
 		http.MethodPost,
@@ -872,12 +752,7 @@ func TestModelValidation_DoesNotCacheCanonicalChatRequestWhenRouteHintsAlreadyEx
 		"",
 		nil,
 	)
-	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
-	req = req.WithContext(ctx)
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c.SetRequest(withRequestSnapshotAndPrompt(c.Request(), frame))
 
 	err := handler(c)
 	require.NoError(t, err)
@@ -889,8 +764,6 @@ func TestModelValidation_DoesNotCacheCanonicalChatRequestWhenRouteHintsAlreadyEx
 
 func TestModelValidation_DoesNotCacheCanonicalResponsesRequestWhenRouteHintsAlreadyExist(t *testing.T) {
 	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
-
-	e := echo.New()
 	var capturedEnv *core.WhiteBoxPrompt
 
 	middleware := WorkflowResolution(provider)
@@ -899,9 +772,7 @@ func TestModelValidation_DoesNotCacheCanonicalResponsesRequestWhenRouteHintsAlre
 		return c.String(http.StatusOK, "ok")
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	req.Header.Set("Content-Type", "application/json")
-	req.Body = explodingValidationReadCloser{}
+	c, _ := echotest.Post(t, "/v1/responses", explodingValidationReadCloser{})
 
 	frame := core.NewRequestSnapshot(
 		http.MethodPost,
@@ -918,12 +789,7 @@ func TestModelValidation_DoesNotCacheCanonicalResponsesRequestWhenRouteHintsAlre
 		"",
 		nil,
 	)
-	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
-	req = req.WithContext(ctx)
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c.SetRequest(withRequestSnapshotAndPrompt(c.Request(), frame))
 
 	err := handler(c)
 	require.NoError(t, err)
@@ -999,12 +865,9 @@ func TestWorkflowResolutionWithResolver_UsesExplicitAliasResolverWithoutProvider
 	service, err := virtualmodels.NewService(newAliasesTestStore(
 		redirectVM("anthropic/claude-opus-4-6", "gpt-5-nano", "openai", true),
 	), &catalog, true)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	provider := &mockProvider{
 		supportedModels: []string{"gpt-5-nano"},
@@ -1012,8 +875,6 @@ func TestWorkflowResolutionWithResolver_UsesExplicitAliasResolverWithoutProvider
 			"openai/gpt-5-nano": "openai",
 		},
 	}
-
-	e := echo.New()
 	var capturedWorkflow *core.Workflow
 
 	middleware := WorkflowResolutionWithResolver(provider, service)
@@ -1022,15 +883,10 @@ func TestWorkflowResolutionWithResolver_UsesExplicitAliasResolverWithoutProvider
 		return c.String(http.StatusOK, "ok")
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
-		strings.NewReader(`{"model":"anthropic/claude-opus-4-6","messages":[{"role":"user","content":"hi"}]}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", `{"model":"anthropic/claude-opus-4-6","messages":[{"role":"user","content":"hi"}]}`)
 
 	err = handler(c)
 	require.NoError(t, err)
-
 	assert.Equal(t, http.StatusOK, rec.Code)
 	if assert.NotNil(t, capturedWorkflow) && assert.NotNil(t, capturedWorkflow.Resolution) {
 		assert.Equal(t, "openai", capturedWorkflow.ProviderType)

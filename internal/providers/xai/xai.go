@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,7 +14,6 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 )
@@ -53,13 +53,6 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 	return newProvider(compat, opts.Keyring(providerCfg.APIKey))
 }
 
-// NewWithHTTPClient creates a new xAI provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	compat := openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(defaultBaseURL))
-	return newProvider(compat, providers.NewKeyring(apiKey))
-}
-
 func newProvider(compat *openai.CompatibleProvider, keys *providers.Keyring) *Provider {
 	return &Provider{
 		BatchSurface: openai.NewBatchSurface(compat),
@@ -84,11 +77,42 @@ func compatibleConfig(baseURL string) openai.CompatibleProviderConfig {
 // reasoning_effort as a top-level string (e.g. grok-4.5: low/medium/high,
 // default high), not "reasoning": {"effort": "..."}; the nested shape is
 // native only to xAI's Responses API, which passes through untouched.
+// Models that do not take a configurable effort reject the parameter
+// outright, so it is dropped for them instead of forwarded.
 func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
-	if req == nil || req.Reasoning == nil || strings.TrimSpace(req.Reasoning.Effort) == "" {
+	if req == nil || req.Reasoning == nil {
 		return req, nil
 	}
-	return providers.AdaptReasoningEffortRequest(req, normalizeReasoningEffort(req.Model, req.Reasoning.Effort))
+	effort := strings.TrimSpace(req.Reasoning.Effort)
+	if effort == "" || rejectsReasoningEffort(req.Model) {
+		return providers.DropReasoning(req), nil
+	}
+	return providers.AdaptReasoningEffortRequest(req, normalizeReasoningEffort(req.Model, effort))
+}
+
+// rejectsReasoningEffort reports whether an xAI chat model answers 400
+// "Model ... does not support parameter reasoningEffort": the explicit
+// "-non-reasoning" Grok variants, the grok-build coding family (it thinks,
+// but the effort is fixed), grok-2, and grok-3 (only grok-3-mini takes an
+// effort). Unknown ids are not included, so a new reasoning model keeps the
+// parameter before this list learns about it.
+func rejectsReasoningEffort(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	if i := strings.LastIndex(m, "/"); i >= 0 {
+		m = m[i+1:]
+	}
+	switch {
+	case strings.Contains(m, "non-reasoning"):
+		return true
+	case strings.HasPrefix(m, "grok-build"):
+		return true
+	case strings.HasPrefix(m, "grok-2"):
+		return true
+	case strings.HasPrefix(m, "grok-3"):
+		return !strings.Contains(m, "mini")
+	default:
+		return false
+	}
 }
 
 // normalizeReasoningEffort downgrades GoModel effort levels xAI does not
@@ -244,14 +268,27 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	return p.compat.StreamChatCompletion(ctx, req)
 }
 
-// ListModels retrieves the list of available models from xAI
-func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
-	return p.compat.ListModels(ctx)
+// adaptResponsesRequest drops Responses members xAI's native /responses
+// endpoint refuses. xAI answers a request carrying "metadata" with
+// 400 "Argument not supported: metadata", even though it is a standard
+// OpenAI Responses member; it is a caller-side label that does not affect
+// generation, so dropping it is preferable to relaying an error the client
+// cannot act on. The caller's request is left untouched so the gateway can
+// still echo the member back to the client.
+func adaptResponsesRequest(req *core.ResponsesRequest) *core.ResponsesRequest {
+	if req == nil || len(req.Metadata) == 0 {
+		return req
+	}
+	slog.Warn("dropping metadata; xai rejects the member on /responses",
+		"model", req.Model, "keys", len(req.Metadata))
+	adapted := *req
+	adapted.Metadata = nil
+	return &adapted
 }
 
 // Responses sends a Responses API request to xAI's native /responses endpoint.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return p.compat.Responses(ctx, req)
+	return p.compat.Responses(ctx, adaptResponsesRequest(req))
 }
 
 // StreamResponses returns a normalized streaming Responses API body.
@@ -260,7 +297,7 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 // synthesize a terminal `data: [DONE]` marker on completed streams. Callers
 // remain responsible for closing the returned stream.
 func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
-	return p.compat.StreamResponses(ctx, req)
+	return p.compat.StreamResponses(ctx, adaptResponsesRequest(req))
 }
 
 // Embeddings sends an embeddings request to xAI

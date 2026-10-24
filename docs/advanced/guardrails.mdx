@@ -1,19 +1,44 @@
 ---
 title: "Guardrails"
-description: "Run rules that inspect, modify, or reject prompts before they reach any LLM provider, configured in config.yaml or from the admin dashboard."
+description: "Run plugin instances that inspect, modify, block, or answer prompts, responses, and streams, configured in config.yaml or from the admin dashboard."
 icon: "shield-check"
-keywords: ["guardrails", "request interception", "content filtering", "policy enforcement"]
+keywords: ["guardrails", "request interception", "content filtering", "policy enforcement", "plugins"]
 ---
 
 ## Overview
 
-Guardrails are a pipeline of rules that run **before** a request reaches any LLM provider. They can inspect, modify, or reject requests — giving you centralized control over every prompt that flows through GoModel.
+A guardrail is a named, configured instance of a [plugin](/advanced/plugins).
+Guardrails run inside every [workflow](/advanced/workflows) that references
+them, in one of three phases:
+
+- **prompt**: after routing, before the request reaches the provider
+- **response**: on the complete response, before it reaches the client
+- **stream**: on each streamed event (or on the buffered stream, depending on the plugin)
+
+A guardrail can edit content, add headers, reject the request with an error,
+answer it with a safe message, or let it through with a warning.
+
+<Warning>
+  A response-phase guardrail needs the complete response, so a workflow that
+  runs one buffers every streaming request it matches: the client still asked
+  for `stream: true` and still receives SSE, but as one burst once the provider
+  has finished, and time to first token becomes the total response time. A
+  stream-phase guardrail keeps delivery incremental only when its plugin
+  streams too; a plugin whose stream policy buffers has the same effect.
+</Warning>
+
+On `/v1/responses`, a stream-phase guardrail may drop, merge, or split events,
+so GoModel renumbers what it delivers: `sequence_number` still runs from `0`
+without gaps, up to the terminal `response.completed` (or `response.incomplete`
+/ `response.failed` on a cut stream).
 
 Guardrails work across all text-based endpoints:
 
 - `/v1/chat/completions`
 - `/v1/responses`
 - `/v1/messages`
+- `/v1/decisions` and `/v1/systemone`, prompt phase only (see
+  [How It Works With Different Endpoints](#how-it-works-with-different-endpoints))
 
 <Note>
   Guardrails for images, TTS, STT, and video models are planned as a separate
@@ -46,17 +71,23 @@ redeploy, or for operators who don't manage this repo's config directly.
 
 <img
   src="/advanced/guardrails.png"
-  alt="GoModel dashboard Guardrails page with a Guardrail Library summary card and an empty Instances list with a Create Guardrail button"
+  alt="GoModel dashboard Plugins &amp; Guardrails page with an empty Guardrails list, a Create Guardrail button, and the loaded plugin list"
   style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
   className="rounded-lg"
 />
 
-Open **Guardrails** in the sidebar and click **Create Guardrail** to add an
-instance: give it a name, pick a type (`system_prompt` or
-`llm_based_altering`), optionally scope it to a `user_path`, and fill in the
-type-specific settings described below. `config.yaml` entries are seeded into
-the same store at startup and stay in sync with it, so dashboard-created and
-config-declared guardrails appear side by side.
+Open **Plugins & Guardrails** in the sidebar and click **Create Guardrail**: give it a
+name, pick a type (every loaded plugin with a prompt, response, or stream
+hook is listed), optionally scope it to a `user_path`, and fill in the form
+the plugin declares. The **Advanced** section holds the failure mode and
+timeout. `config.yaml` entries are seeded into the same store at startup and
+stay in sync with it, so dashboard-created and config-declared guardrails
+appear side by side. The **Plugins** list at the bottom of the page shows
+every loaded plugin type, its hooks, source, and health. Not every plugin is a guardrail:
+a plugin declares `Guardrail: true` in its manifest when its instances apply
+a policy to prompts, responses, or streams, and the dashboard marks those,
+and the instances built from them, with a shield. A routing strategy such as
+`cheapest_healthy` is listed on the same page but is not a guardrail.
 
 <Note>
   Runtime guardrail execution still depends on `GUARDRAILS_ENABLED`. With it
@@ -66,31 +97,30 @@ config-declared guardrails appear side by side.
 
 ## How It Works
 
-{/* Client Request → Extract messages → Guardrails Pipeline (order 0 → order 1 → ...) → Apply back → LLM Provider */}
-
 ```mermaid
 flowchart LR
-    A[Client Request] --> B[Extract messages]
-    B --> C[Guardrails Pipeline]
-    C --> D[Apply back]
-    D --> E[LLM Provider]
+    A[Client Request] --> B[Prompt chain]
+    B --> C[LLM Provider]
+    C --> D[Response or stream chain]
+    D --> E[Client]
 ```
 
-1. Messages are **extracted** from the incoming request into a normalized format
-2. The guardrails pipeline **processes** the messages (inject, modify, or reject)
-3. Modified messages are **applied back** to the original request
-4. The request continues to the LLM provider
+1. The request is mapped to a unified `Prompt` (system, user, assistant, and tool messages with stable IDs)
+2. The **prompt chain** runs: each guardrail edits the prompt, or decides to block, respond, or warn
+3. Edits are applied back to the original request, which continues to the provider
+4. The **response chain** runs on the complete response (or the **stream chain** on the stream) before anything reaches the client
 
-Guardrails never see the raw API request types — they operate on a normalized message list. This means the same guardrail works identically for `/chat/completions`, `/responses`, and `/messages`.
+Guardrails never see the raw API request types — they operate on the unified
+[`Exchange`](/advanced/plugins#the-exchange). The same guardrail works
+identically for `/chat/completions`, `/responses`, and `/messages`.
 
 ## Execution Order
 
-Each guardrail has an `order` value that controls when it runs:
+Each guardrail has an `order` value (the workflow step) that controls when it
+runs within its phase:
 
 - **Same order** → run **in parallel** (concurrently)
 - **Different order** → run **sequentially** (ascending)
-
-{/* Order 0 (parallel: safety-prompt, content-policy) → Order 1 (compliance-check) → Order 2 (parallel: final-filter, audit-tag) → done */}
 
 ```mermaid
 flowchart LR
@@ -108,7 +138,13 @@ flowchart LR
     Order 0 --> Order 1 --> Order 2
 ```
 
-Each sequential group receives the output of the previous group. If any guardrail returns an error, the request is **rejected** and never reaches the provider.
+Each sequential group receives the output of the previous group. Guardrails
+that **edit content** (`system_prompt`, `llm_based_altering`,
+`string_replace`, `presidio`) cannot share an order with another editing guardrail; only
+one editor per order, and any number of non-editing checks (`llm_judge`,
+`header_edit`) next to it. When several guardrails at one order decide
+differently, the most severe decision wins: `block` > `respond` > `warn` >
+`allow`.
 
 ## Configuration
 
@@ -117,15 +153,26 @@ Each sequential group receives the output of the previous group. If any guardrai
 ```yaml
 guardrails:
   enabled: true    # Master switch (default: false)
+  enable_for_batch_processing: false   # Also run the prompt chain on inline /v1/batches items
   rules:
-    - name: "rule-name"         # Unique identifier for this instance
-      type: "system_prompt"     # Guardrail type
+    - name: "rule-name"          # Unique identifier for this instance
+      type: "system_prompt"      # Plugin name
       user_path: "/team/privacy" # Optional base path for internal auxiliary calls
-      order: 0                  # Execution order
-      system_prompt:            # Type-specific settings
+      phase: "prompt"            # prompt (default) | response | stream
+      order: 0                   # Step within the phase
+      fail_mode: "closed"        # closed (default) | open
+      timeout_ms: 0              # Per-call timeout; 0 = none (default)
+      config:                    # Plugin settings, validated against the plugin's schema
         mode: "decorator"
         content: "Your prompt text here."
 ```
+
+`system_prompt` and `llm_based_altering` also accept their settings in a typed
+block named after the type (`system_prompt:` / `llm_based_altering:`), as in
+the Quick Start. The typed block and `config:` are equivalent; use `config:`
+for every other type. Line-oriented keys such as `string_replace.rules` and
+the `header_edit` lists accept either a block scalar (`|`) or a YAML list of
+strings, joined by newlines.
 
 ### Environment Variable
 
@@ -135,27 +182,40 @@ You can toggle guardrails without editing the config file:
 export GUARDRAILS_ENABLED=true
 ```
 
+Guardrails are built from [plugins](/advanced/plugins), so enabling them also
+enables the plugin system (`PLUGINS_ENABLED`, off by default). With both off,
+the guardrail endpoints and the dashboard page are unavailable.
+
 ### Rule Fields
 
-| Field  | Required | Description                                                         |
-| ------ | -------- | ------------------------------------------------------------------- |
-| `name` | Yes      | Human-readable identifier. Supports spaces and unicode, but not `/`. |
-| `type` | Yes      | Guardrail type: `system_prompt` or `llm_based_altering`.            |
-| `user_path` | No  | Optional base user path for internal auxiliary guardrail requests. |
-| `order`| No       | Execution order. Default `0`. Same value = parallel, different = sequential. |
+| Field | Required | Description |
+| ----- | -------- | ----------- |
+| `name` | Yes | Human-readable identifier. Supports spaces and unicode, but not `/`. |
+| `type` | Yes | Plugin name: a built-in type below, or the manifest name of a loaded plugin. |
+| `user_path` | No | Optional base user path for internal auxiliary requests. |
+| `phase` | No | `prompt`, `response`, or `stream`. Default `prompt`. |
+| `order` | No | Execution order within the phase. Default `0`. Same value = parallel, different = sequential. |
+| `config` | No | Plugin settings. Keys, defaults, and validation come from the plugin (`GET /admin/guardrails/types`). |
+| `fail_mode` | No | `closed` rejects the request with HTTP 500 when the guardrail errors or times out; `open` continues without it. Default `closed`. |
+| `timeout_ms` | No | Upper bound for each call of the guardrail, enforced at the deadline. Default `0` (none). A guardrail that edits content and overruns its timeout fails the request even with `fail_mode: open`; see [Fail modes and timeouts](/advanced/plugins#fail-modes-and-timeouts). |
 
 ## Guardrail Types
+
+Six types ship with GoModel. Each is a built-in plugin; the tables list its
+config keys as they appear under `config:` and on the dashboard form.
 
 ### `system_prompt`
 
 Adds, replaces, or decorates the system prompt on every request.
 
+**Phases:** prompt. **Edits content:** yes.
+
 #### Settings
 
-| Field     | Required | Description                                    |
-| --------- | -------- | ---------------------------------------------- |
-| `mode`    | No       | `inject`, `override`, or `decorator`. Default: `inject`. |
-| `content` | Yes      | The system prompt text to apply.               |
+| Key | Required | Default | Description |
+| --- | -------- | ------- | ----------- |
+| `mode` | No | `inject` | `inject`, `override`, or `decorator`. |
+| `content` | Yes | | The system prompt text to apply. |
 
 #### Modes
 
@@ -216,34 +276,39 @@ Adds, replaces, or decorates the system prompt on every request.
 
 ### `llm_based_altering`
 
-Rewrites selected message roles by calling an auxiliary model before the main
-provider request runs. This is useful for PII anonymization and other
-prompt-preserving rewrites.
+Rewrites the text of selected message roles by calling an auxiliary model.
+In the prompt phase it rewrites the request; in the response phase it
+rewrites the assistant's reply (when `roles` includes `assistant`). This is
+useful for PII anonymization and other content-preserving rewrites.
 
 The default `prompt` is derived from LiteLLM's `data_anonymization` guardrail,
 so a minimal config acts as an anonymizing preprocessor.
 
+**Phases:** prompt, response. **Edits content:** yes.
+
 #### Settings
 
-| Field | Required | Description |
-| ----- | -------- | ----------- |
-| `model` | Yes | Auxiliary model selector used for the rewrite call. |
-| `provider` | No | Optional routing hint for `model`. |
-| `prompt` | No | Custom rewrite prompt. Defaults to the built-in anonymization prompt. |
-| `roles` | No | Message roles to rewrite. Default: `["user"]`. |
-| `skip_content_prefix` | No | Skip rewriting when the trimmed message starts with this prefix. |
-| `max_tokens` | No | `max_tokens` for the auxiliary rewrite call. Default: `4096`. |
+| Key | Required | Default | Description |
+| --- | -------- | ------- | ----------- |
+| `model` | Yes | | Model, alias, or `provider/model` selector for the rewrite call. |
+| `provider` | No | | Optional routing hint; folded into `model` as `provider/model`. |
+| `roles` | No | `["user"]` | Roles to rewrite: `system` (includes developer), `user`, `assistant`, `tool`. |
+| `max_tokens` | No | `4096` | `max_tokens` for the auxiliary rewrite call. |
+| `skip_content_prefix` | No | | Skip rewriting when the trimmed text starts with this prefix. |
+| `prompt` | No | built-in anonymization prompt | Custom rewrite instructions. |
 
-When `llm_based_altering` calls the auxiliary model, GoModel runs that call
-through the normal translated request path in-process. That means ordinary
+Rewrites run through the normal translated request path in-process, so
 workflow selection, failover, usage, audit, and cache behavior still apply.
 The internal request uses:
 
 - path: `/v1/chat/completions`
 - user path: `{guardrail.user_path or caller user path}/guardrails/{guardrail name}`
-- request origin: `guardrail`
+- request origin: `plugin`
 
-Guardrails are explicitly skipped for that internal request to avoid recursion.
+Guardrails are skipped for that internal request to avoid recursion. A rewrite
+that fails (an error, an empty or truncated reply, a tool call instead of
+text) fails the guardrail, so `fail_mode` decides: `closed` rejects the
+request, `open` continues with the original text.
 
 #### Example
 
@@ -252,9 +317,417 @@ Guardrails are explicitly skipped for that internal request to avoid recursion.
   type: "llm_based_altering"
   user_path: "/team/privacy"
   order: 1
+  timeout_ms: 20000
   llm_based_altering:
     model: "gpt-4o-mini"
     roles: ["user"]
+```
+
+### `string_replace`
+
+Replaces, flags, or blocks text that matches a list of literal or regular
+expression rules. Works on prompts, responses, and streams. Rules match
+within one text part (a content part or a tool-result part) in every mode;
+text split across two parts is not matched.
+
+**Phases:** prompt, response, stream. **Edits content:** yes.
+
+#### Settings
+
+| Key | Required | Default | Description |
+| --- | -------- | ------- | ----------- |
+| `rules` | Yes | | One rule per line as `find => replace` (the separator is ` => ` with spaces; the replacement may be empty). Blank lines and lines starting with `#` are ignored. `\n`, `\t`, and `\\` are understood on both sides in literal mode and on the replace side in regex mode. |
+| `mode` | No | `literal` | `literal` matches the text as written; `regex` uses Go RE2 syntax with `$1`, `$2` capture references in the replacement (`$$` for a literal dollar sign). |
+| `case_insensitive` | No | `false` | Match regardless of letter case. |
+| `roles` | No | `["user"]` | Prompt messages the rules apply to: `system` (includes developer), `user`, `assistant`, `tool`. In the response phase the assistant text is always the target. |
+| `on_match` | No | `replace` | `replace` substitutes; `block` rejects with an error; `respond` answers with `message` as an assistant reply; `warn` continues and records the match. Only `replace` edits the text. |
+| `message` | No | `Request blocked by policy` | Error message for `block`, assistant reply for `respond`, audit note for `warn`. |
+| `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`, for example `403`. Empty means 400 when the prompt is blocked, 502 when the response is blocked. |
+| `stream_lookbehind` | No | `64` | Characters of streamed text held back so a match spanning two chunks is still rewritten; set it to at least the longest find text. A match at the end of the text streamed so far is held until it stops growing, so an open-ended pattern such as `sk-[A-Za-z0-9]{20,}` masks the whole value when it is at most this long. Used by `replace` and `warn`. |
+
+In the stream phase, `replace` and `warn` transform events in flight with the
+configured lookbehind. `block` and `respond` buffer the whole stream so
+nothing leaks before the decision, at the cost of delaying the first token
+until the response is complete.
+
+#### Example
+
+```yaml
+- name: "mask-internal-names"
+  type: "string_replace"
+  order: 0
+  config:
+    mode: "literal"
+    case_insensitive: true
+    rules: |
+      Project Falcon => [project]
+      ACME Corp => [company]
+```
+
+### `tag_replace`
+
+Replaces `{{gomodel.<tag>}}` placeholders in prompt text with values of the
+current request, just before the provider call. Use it to tell the model which
+model it runs as, or today's date, without the client sending them. It pairs
+well with `system_prompt`: put the tags in the system prompt and run
+`tag_replace` at a later `order`.
+
+**Phases:** prompt. **Edits content:** yes.
+
+#### Tags
+
+| Tag | Value |
+| --- | ----- |
+| `{{gomodel.requested_model}}` | Model the client asked for. |
+| `{{gomodel.resolved_model}}` | Provider model the request is sent to. |
+| `{{gomodel.virtual_model}}` | Virtual model that produced the resolution, empty otherwise. |
+| `{{gomodel.provider_type}}` | Provider type, for example `openai`. |
+| `{{gomodel.provider_name}}` | Provider instance name. |
+| `{{gomodel.user_path}}` | Effective user path. |
+| `{{gomodel.request_id}}` | Gateway request ID. |
+| `{{gomodel.session_id}}` | Detected session ID, empty when none. |
+| `{{gomodel.date}}` | Current date, `2026-09-15`. |
+| `{{gomodel.time}}` | Current time, `14:05:00`. |
+| `{{gomodel.datetime}}` | Current date and time in RFC 3339, `2026-09-15T14:05:00Z`. |
+| `{{gomodel.weekday}}` | Current day of the week, `Tuesday`. |
+
+Spaces inside the braces are allowed. Unknown tags are left as written.
+
+A tag with no value for the request, such as `session_id` without a session,
+becomes empty. The model and provider tags name the first selected provider:
+the prompt phase runs once, so a failover attempt receives the same text.
+Values that come from the caller, such as `user_path` and `session_id`, are
+inserted as sent. A request whose prompt had a tag expanded is not stored in the
+response cache, because the reply may repeat request-specific values.
+
+<Warning>
+Time-based tags can break provider prompt caching and raise costs. Providers
+cache the start of a prompt, usually the system message, and reuse it only
+when it is identical. `{{gomodel.time}}` and `{{gomodel.datetime}}` change
+every second, and `{{gomodel.request_id}}` changes on every request, so every
+call pays the full input price and waits longer. `{{gomodel.date}}` and
+`{{gomodel.weekday}}` change once a day and cost one cache miss per day. Prefer
+`date` over `time` or `datetime`, and place volatile tags at the end of the
+prompt rather than the start of a long system message.
+</Warning>
+
+#### Settings
+
+| Key | Required | Default | Description |
+| --- | -------- | ------- | ----------- |
+| `roles` | No | `["system"]` | Prompt messages tags are expanded in: `system` (includes developer), `user`, `assistant`, `tool`. Adding `user` lets callers read request values such as the user path and rewrites template text in their prompts. |
+| `timezone` | No | `UTC` | IANA timezone for the date and time tags, for example `Europe/Warsaw`. The host zone `Local` is rejected. |
+
+#### Example
+
+```yaml
+- name: "model-facts"
+  type: "system_prompt"
+  order: 0
+  system_prompt:
+    mode: "decorator"
+    content: "You are {{gomodel.resolved_model}}. Today is {{gomodel.weekday}}, {{gomodel.date}}."
+- name: "expand-tags"
+  type: "tag_replace"
+  order: 1
+  config:
+    timezone: "Europe/Warsaw"
+```
+
+### `header_edit`
+
+Sets, adds, and removes HTTP headers on the request, the client response, and
+the upstream provider call. It never edits content, so it can share an order
+with an editing guardrail.
+
+**Phases:** prompt, response. **Edits content:** no.
+
+#### Settings
+
+Every key is a list of lines. Set and add lines look like `Name: value`;
+remove lines are a bare `Name`. Blank lines and `#` comments are ignored.
+
+| Key | Description |
+| --- | ----------- |
+| `request_set` | Replace a header on the live request after the prompt phase: visible to later guardrails and request logging, not forwarded to the provider. |
+| `request_remove` | Drop a header from the live request after the prompt phase. |
+| `response_set` | Replace a header on the response sent to the client. |
+| `response_add` | Append a value to a client response header, keeping existing values. Applied once per request even when the instance runs in both phases. |
+| `response_remove` | Drop a header from the client response, including headers GoModel adds itself (for example `X-Request-Id`). |
+| `upstream_set` | Static headers for the provider call. Recorded but not forwarded in this release. |
+
+Credential headers (`Authorization`, `X-Api-Key`, `Cookie`, ...) can never be
+edited, and names containing `secret` or `token` cannot be set.
+
+#### Example
+
+```yaml
+- name: "served-by"
+  type: "header_edit"
+  order: 0
+  config:
+    response_add: |
+      X-Served-By: gomodel
+    response_remove: |
+      X-Request-Id
+```
+
+### `llm_judge`
+
+Asks a judge model whether the prompt (or the response) violates a policy and
+blocks, answers, or flags it based on the verdict. The judge is either a chat
+model or a decision model:
+
+- A **chat model** must reply with one JSON object
+  `{"verdict":"allow"|"block","reason":"..."}`. The default instructions ask
+  for that and tell the model to ignore instructions inside the content.
+- A **decision model** (Jev, Kev, OpenRouter's decision models, or an OpenAI
+  model through the [Decisions API](/advanced/decisions-api)) is asked a
+  yes-or-no question and returns the probability of yes. There is no text to
+  parse, and it bills input tokens only. See
+  [Judging with a decision model](#judging-with-a-decision-model).
+
+**Phases:** prompt, response, stream (buffered). **Edits content:** no.
+
+#### Settings
+
+| Key | Required | Default | Description |
+| --- | -------- | ------- | ----------- |
+| `model` | Yes | | Judge model: `provider/model`, an alias, or a virtual model; a chat model or a decision model. Its usage is accounted with origin `plugin`. |
+| `engine` | No | `auto` | How the judge is asked: `chat`, `decision`, or `auto`, which uses `decision` for a model that answers decisions only (any `jev` model, OpenRouter's decision models, or a virtual model whose targets all are) and `chat` otherwise. |
+| `user_path` | No | current request's path | User path the judge call is scoped to for budgets and audit. |
+| `prompt` | No | built-in policy | Chat engine: system prompt for the judge. |
+| `decision_question` | No | built-in policy | Decision engine: the yes-or-no question asked about the content. Yes means it violates the policy. |
+| `block_threshold` | No | `0.5` | Decision engine: probability of yes, from 0 to 1, at or above which the content counts as a block verdict. |
+| `judge_images` | No | `false` | Decision engine: also send the images of the judged messages. |
+| `target` | No | `auto` | What the judge sees in the prompt phase: `auto` or `last_user` (last user message), `all_user`, `conversation`. In the response phase it always sees the assistant text. |
+| `action` | No | `block` | On a block verdict: `block` rejects, `respond` answers with `respond_text`, `warn` continues and records the verdict. |
+| `message` | No | `This request was blocked by policy` | Error message for `block`, audit note for `warn`. |
+| `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`, for example `403`. Empty means 400 when the prompt is blocked, 502 when the response is blocked. |
+| `respond_text` | No | `I can't help with that request.` | Assistant reply for `respond`. |
+| `on_unclear` | No | `warn` | When the judge reply cannot be parsed, was cut off by `max_tokens`, or was spent entirely on reasoning: `allow`, `warn`, or `block` (applies `action`). A verdict counts only as a JSON object or a bare `allow` or `block`, never as a word inside a sentence. |
+| `max_tokens` | No | `2048` | Chat engine: completion cap for the judge call. Unused tokens cost nothing; size it for the judge model's reasoning, not for the verdict. |
+| `temperature` | No | `0` | Chat engine: sampling temperature for the judge call (0 to 2). |
+
+Identical text is judged once per request, so an instance that runs in both
+the prompt and the response phase does not double-charge for the same
+content. In the stream phase the whole stream is buffered and judged as a
+complete response.
+
+#### Judging with a decision model
+
+With a decision model the judge sends the judged text as the Decisions input,
+without tags, and asks one predicate question, `decision_question`. It does not
+use `prompt`, `max_tokens`, or `temperature`. A probability at or above
+`block_threshold` is a block verdict, and `action` applies. A lower probability
+allows. The call goes through the same routing as
+[`POST /v1/decisions`](/advanced/decisions-api): virtual models, failover to
+targets that serve Decisions, the exact response cache, usage, and audit, under
+the instance's user path.
+
+Each verdict records the probability in the decision detail (`probability`),
+and the instance reports it as the histogram
+`plugin_llm_judge_decision_probability`. Use them to tune `block_threshold` per
+policy: raise it to block only clear violations, or lower it to catch more
+borderline content.
+
+`engine: auto` recognises decision-only models from the model catalog. An
+OpenAI model with Decisions support also chats, so `auto` asks it by chat. Set
+`engine: decision` to use its Decisions API instead.
+
+Leave `judge_images` off for a judge that reads text only, such as a Kev
+server: with images, every call fails and `fail_mode` decides. Hosted Jev reads
+images sent as base64 data URLs. With `judge_images` on, a prompt that holds
+only an image is judged too; otherwise it is allowed without a judge call.
+
+```yaml
+- name: "policy-judge"
+  type: "llm_judge"
+  order: 5
+  timeout_ms: 5000
+  config:
+    model: "jev/jev-latest"
+    block_threshold: 0.7
+    decision_question: "Does the content ask for help with fraud or account takeover?"
+```
+
+#### Sizing `max_tokens` for a reasoning judge
+
+A reasoning judge model spends its completion on thinking before it writes
+anything: with a cap that runs out first the judge returns no verdict, and the
+instance enforces nothing — it follows `on_unclear` instead, which by default
+only warns. The default cap of `2048` leaves room for that; unused tokens are
+never billed, so raise it further rather than trimming it when the judge model
+reasons a lot.
+
+A judge that reaches no verdict is recorded apart from a reply that was
+answered but could not be parsed:
+
+| Code | Meaning |
+| ---- | ------- |
+| `llm_judge_block` | The judge returned a block verdict; `action` applies. |
+| `llm_judge_no_verdict` | The reply was cut off (`finish_reason: length`) or was all reasoning, or a decision model returned no answer. For a cut-off reply, a warning naming the judge model and the cap is logged. `on_unclear` applies. |
+| `llm_judge_unclear` | The judge answered, but the reply is not a verdict, or a decision model declined the question. `on_unclear` applies. |
+
+Check the gateway log for `judge returned no verdict` after configuring an
+instance, and set `on_unclear: block` for a policy that must hold even when the
+judge answers nothing usable. A judge call that fails outright — provider error,
+timeout — is not an unclear verdict: `fail_mode` decides it, like any other
+guardrail failure.
+
+#### Example
+
+```yaml
+- name: "policy-judge"
+  type: "llm_judge"
+  order: 5
+  timeout_ms: 10000
+  config:
+    model: "openai/gpt-4o-mini"
+    action: "respond"
+    respond_text: "I can't help with that request."
+```
+
+### `presidio`
+
+Detects personal data with a [Presidio](https://presidio.dataprivacystack.org/)
+analyzer and anonymizes, flags, or blocks it. Only the analyzer service is
+needed; GoModel rewrites the text itself, so it can put the original values
+back into the response.
+
+```bash
+docker run -d -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer:latest
+```
+
+**Phases:** prompt, response, stream. **Edits content:** yes.
+
+#### Settings
+
+| Key | Required | Default | Description |
+| --- | -------- | ------- | ----------- |
+| `analyzer_url` | No | `http://localhost:5002` | Base URL of the analyzer service. |
+| `api_key` | No | | Bearer token sent as `Authorization`, for an analyzer behind an authenticating proxy. Needs an `https://` URL unless the analyzer is on localhost. |
+| `language` | No | `en` | Language code the analyzer runs with. The default image ships only `en`; the instance shows as degraded when the analyzer has no model for the language. |
+| `entities` | No | all | Entity types to look for (`PERSON`, `EMAIL_ADDRESS`, `PHONE_NUMBER`, `CREDIT_CARD`, `US_SSN`, ...; see `GET /supportedentities` on the analyzer). |
+| `block_entities` | No | | Entity types that reject the request (or answer with `message` when the action is `respond`) whatever the action. |
+| `score_threshold` | No | analyzer default | Minimum confidence, 0 to 1. Raise it when common words are taken for names or dates. |
+| `allow_list` | No | | Exact words never treated as personal data: product names, your company. |
+| `ad_hoc_recognizers` | No | | JSON array of Presidio pattern recognizers (`supported_entity` plus `patterns` or `deny_list`) for identifiers of your own. |
+| `roles` | No | `["user", "assistant", "tool"]` | Prompt messages analyzed, tool-result text, tool-call arguments, and the reasoning of replayed assistant turns included. In the response phase the assistant text and tool-call arguments are always analyzed. |
+| `action` | No | `anonymize` | `anonymize` rewrites the values; `block` rejects with an error; `respond` answers with `message` as an assistant reply; `warn` continues and records the entity types. |
+| `operator` | No | `replace` | How `anonymize` rewrites a value: `replace` with a numbered placeholder (`<PERSON_1>`, the same one for every occurrence of that value in the request), `mask` with `*` per character, `redact` (removed), `hash` (SHA-256). |
+| `placeholder_format` | No | `<{entity}_{n}>` | How `replace` writes a placeholder. `{entity}` is the entity type, `{n}` its number; it must start and end with a punctuation character and put something between the two. |
+| `restore` | No | `false` | Put the original values back where the model repeats a placeholder. Needs `operator: replace`; see below. |
+| `restore_roles` | No | `["user", "assistant", "tool"]` | Prompt roles whose values are put back. Honored on whichever instance (prompt or response phase) sets it; set on both, a role must be in both lists. |
+| `restore_tools` | No | all | Tools (function names) whose call arguments get the values back. The others keep the placeholders. |
+| `restore_tools_exclude` | No | | Tools whose call arguments keep the placeholders even when `restore_tools` selects them. |
+| `message` | No | `Request blocked: it contains personal data` | Error message for `block`, assistant reply for `respond`, audit note for `warn`. |
+| `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`. Empty means 400 when the prompt is blocked, 502 when the response is blocked. |
+| `stream_chunk` | No | `256` | Characters of streamed text (or tool-call arguments) collected before the analyzer runs on them, so it sees whole sentences and runs once per chunk. The client waits for at most this much text at a time. |
+| `stream_lookbehind` | No | `64` | Characters of streamed text (or tool-call arguments) held back so a value or placeholder split across two chunks is still handled. At most 4096. |
+
+Every text part is analyzed on its own (one analyzer call each, up to eight
+in flight), so the analyzer never sees the whole conversation as one text and
+the analyzer's own limits apply per part. The audit detail records entity
+types and counts, never the values, and errors from the analyzer never carry
+the text it was given. The analyzer receives the text in clear, so run it as
+a sidecar on the same host or reach it over `https://` or a private network.
+
+<Tip>
+  Start with an explicit `entities` list. With every type enabled, the
+  analyzer's language model also reports `DATE_TIME`, `LOCATION`, `NRP`, and
+  `URL`, which turns phrases like "a nice day" or "Paris" into placeholders
+  in both the prompt and the reply. `PERSON`, `EMAIL_ADDRESS`, `PHONE_NUMBER`,
+  `CREDIT_CARD`, `IBAN_CODE`, and the national identifiers you need cover most
+  deployments. Some models, Claude among them, treat unexplained
+  `<PERSON_1>`-style tokens with suspicion and may refuse to repeat them; a
+  system prompt line such as `Values like <PERSON_1> are privacy placeholders;
+  use them as ordinary values` fixes that.
+</Tip>
+
+In the stream phase, `anonymize` and `warn` transform events in flight in
+chunks of `stream_chunk` characters with `stream_lookbehind` of overlap; a
+`block_entities` type found mid-stream cuts the stream before that chunk
+reaches the client. `block` and `respond` buffer the whole stream so nothing
+leaks before the decision.
+
+#### Restoring values
+
+With `restore: true` the prompt phase replaces values with numbered
+placeholders and remembers them for the request; the response or stream
+phase puts the values back where the model repeats a placeholder, in text,
+reasoning (`reasoning_content` or `reasoning`), and tool-call arguments, so
+the client sees its own data while the provider never does. Set `restore` on
+the instances in both phases: the prompt-phase instance records the values,
+the response-phase instance restores them. Reasoning is only restored, not
+analyzed. Restored reasoning a chat client sends back on the next turn
+(`reasoning_content`, which DeepSeek requires with tool calls) is anonymized
+again in the prompt phase, like the rest of the history. Signed Anthropic
+thinking blocks travel separately and are never edited; on `/v1/messages`,
+where the client sends the thinking text back with its signature, Anthropic
+thinking keeps its placeholders. Reasoning items of a `/v1/responses` output
+(summaries and reasoning text) keep the placeholders too: clients replay them
+in `input` as they are, so restored values would reach the provider on the
+next turn.
+
+The prompt-phase instance needs `restore` to record the values; the
+restoring instance reads `restore_tools` and `restore_tools_exclude`.
+`restore_roles` is read by both: a role's values come back when every
+instance that sets `restore_roles` lists the role, or, when neither sets it,
+when the default list does.
+
+Only values from the `restore_roles` (user messages, earlier assistant turns,
+and tool results by default) are put back; a value from a system or developer
+message stays a placeholder, so a user cannot make the model reveal it. Add
+`system` when the system message carries the user's own data (a chat
+frontend's user name or memories) and anyone who can use the deployment may
+see it. A value the model
+produced on its own is still anonymized on the way out. Such responses are
+kept out of the [response cache](/features/cache). Placeholder-shaped text
+already in the conversation, such as a `<PERSON_2>` an earlier reply carried
+back, is left as it is and its number is never reused for a new value.
+
+Placeholders are found in any letter case (`<Person_1>`) and when Markdown-
+or HTML-escaped (`\<PERSON\_1\>`, `&lt;PERSON_1&gt;`). Streamed text,
+reasoning, and each call's tool-call arguments are restored in flight, each
+as a window of its own under `stream_lookbehind`, including placeholders
+whose angle brackets the provider escaped (Gemini returns
+`\u003cPERSON_1\u003e`).
+
+Tool-call arguments are restored for every tool by default. A client-run tool
+that sends its arguments to a third party, such as web search, should keep
+the placeholders: list it in `restore_tools_exclude`, or list only the tools
+that need the values (knowledge search, asking the user, document generation)
+in `restore_tools`.
+
+A Markdown renderer that sanitizes HTML can hide a placeholder left in the
+reply (one the model made up, or one from the system prompt). Set
+`placeholder_format: "[{entity}_{n}]"` to keep them visible. The instances
+working on one request share the placeholders, in the format of the first
+instance that runs, so give them the same format.
+
+#### Example
+
+```yaml
+- name: "pii-in"
+  type: "presidio"
+  order: 1
+  timeout_ms: 5000
+  config:
+    entities: ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
+    block_entities: ["CREDIT_CARD", "US_SSN"]
+    restore: true
+
+- name: "pii-out"
+  type: "presidio"
+  phase: "response"
+  order: 1
+  timeout_ms: 5000
+  fail_mode: "open"
+  config:
+    entities: ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
+    restore: true
+    restore_tools_exclude: ["web_search"]
 ```
 
 ## Examples
@@ -275,9 +748,10 @@ guardrails:
         content: "Always be safe, respectful, and helpful."
 ```
 
-### Multiple Guardrails in Parallel
+### Checks in Parallel with an Editor
 
-Two guardrails running at the same order execute concurrently:
+A non-editing check shares order `0` with the system prompt editor and runs
+concurrently with it:
 
 ```yaml
 guardrails:
@@ -290,12 +764,11 @@ guardrails:
         mode: "decorator"
         content: "Always be safe and respectful."
 
-    - name: "compliance-prompt"
-      type: "system_prompt"
+    - name: "policy-judge"
+      type: "llm_judge"
       order: 0
-      system_prompt:
-        mode: "inject"
-        content: "Follow all company compliance policies."
+      config:
+        model: "openai/gpt-4o-mini"
 ```
 
 ### Sequential Pipeline
@@ -331,53 +804,131 @@ guardrails:
         roles: ["user"]
 ```
 
-### Mixed Parallel and Sequential
+### Response Phase: Redact Secrets on the Way Out
+
+Runs on the complete response before it reaches the client. Set
+`fail_mode: open` if you prefer an unredacted answer over a 500 when the
+guardrail itself fails.
 
 ```yaml
 guardrails:
   enabled: true
   rules:
-    # Order 0: these two run in parallel
-    - name: "safety"
-      type: "system_prompt"
-      order: 0
-      system_prompt:
-        mode: "decorator"
-        content: "Be safe."
-
-    - name: "policy"
-      type: "system_prompt"
-      order: 0
-      system_prompt:
-        mode: "inject"
-        content: "Follow company policy."
-
-    # Order 1: runs after both order-0 guardrails complete
-    - name: "final-override"
-      type: "system_prompt"
-      order: 1
-      system_prompt:
-        mode: "decorator"
-        content: "[FINAL CHECK]"
+    - name: "mask-keys"
+      type: "string_replace"
+      phase: "response"
+      order: 10
+      config:
+        mode: "regex"
+        rules: |
+          sk-[A-Za-z0-9]{20,} => [redacted]
+          AKIA[0-9A-Z]{16} => [redacted]
 ```
+
+### Stream Phase: Redact In Flight and Judge the Whole Answer
+
+The same instance can be referenced in several phases. `mask-keys` transforms
+streamed chunks in flight (64 characters of lookbehind, so a key split across
+two chunks is still caught). `answer-judge` needs the whole answer, so it
+buffers the stream and the client receives it once the verdict is in.
+
+```yaml
+guardrails:
+  enabled: true
+  rules:
+    - name: "mask-keys"
+      type: "string_replace"
+      phase: "stream"
+      order: 10
+      config:
+        mode: "regex"
+        rules: |
+          sk-[A-Za-z0-9]{20,} => [redacted]
+
+    - name: "answer-judge"
+      type: "llm_judge"
+      phase: "stream"
+      order: 20
+      config:
+        model: "openai/gpt-4o-mini"
+        action: "respond"
+```
+
+<Tip>
+  A rule in `config.yaml` places one instance in one phase. To run the same
+  instance in two phases, add it to the workflow twice with different
+  `phase` values on the dashboard or through `POST /admin/workflows`; see
+  [Workflows](/advanced/workflows#guardrail-steps).
+</Tip>
 
 ## How It Works With Different Endpoints
 
-Guardrails operate on a normalized message format internally. The adaptation between API-specific request types and this format happens automatically:
+Guardrails operate on a unified message format internally. The adaptation between API-specific request types and this format happens automatically:
 
-| Endpoint              | System prompt source     | User messages source |
-| --------------------- | ------------------------ | -------------------- |
-| `/v1/chat/completions`| `messages` with `role: "system"` | `messages` array     |
-| `/v1/responses`       | `instructions` field     | `input` field        |
-| `/v1/messages`        | `system` field           | `messages` array     |
+| Endpoint | System prompt source | User messages source |
+| --- | --- | --- |
+| `/v1/chat/completions` | `messages` with `role: "system"` | `messages` array |
+| `/v1/responses` | `instructions` field | `input` field |
+| `/v1/messages` | `system` field | `messages` array |
+| `/v1/decisions` | — | `input` (text and image parts) |
+| `/v1/systemone` | — | `state` |
 
 <Tip>
   You don't need to think about which endpoint your users call. A single
   guardrail rule works identically for all supported text endpoints.
 </Tip>
 
-## Errors and Rejection
+`/v1/decisions` and `/v1/systemone` run the prompt phase only: their answers are
+typed values rather than completions, so response and stream phase guardrails
+are skipped there, with one warning per guardrail. Edits they cannot carry,
+such as an injected system prompt, are dropped.
 
-If a guardrail returns an error, the request is rejected immediately. The error is returned to the client and the request **never reaches** the LLM provider.
+For `/v1/messages`, a request that runs any guardrail takes the translated
+path (the native passthrough is skipped). A response cut by a guardrail is
+reported with `finish_reason: "content_filter"` on OpenAI-compatible
+endpoints and `stop_reason: "end_turn"` on `/v1/messages`.
 
-This is useful for future guardrail types that validate content (e.g., PII detection, content filtering). The system prompt guardrail does not reject requests — it only modifies them.
+## Guardrails and the Response Cache
+
+The [response cache](/features/cache) stores the reply the response and stream
+chains already produced, and a cache hit replays it without running those
+chains again. Both cache layers therefore key on the guardrail chain the
+request resolves to, across all three phases:
+
+- Editing, adding or removing a step makes every entry stored under the old
+  chain unreachable; the next request runs the full pipeline and stores its own
+  entry.
+- Two workflows with different chains never share entries, so a tenant whose
+  workflow redacts on the way out is never served another tenant's unredacted
+  reply.
+- A blocked response is not a cacheable response, so a blocking guardrail can
+  never be skipped by a hit.
+
+Prompt-phase guardrails run before the cache is consulted, so a prompt-phase
+block or answer applies to a request that would otherwise have been a hit. A
+response a guardrail restores request-specific data into is never cached at all
+(see `restore` under [`presidio`](#presidio)).
+
+Because the response chain does not run on a hit, the audit entry for a hit
+records the prompt-phase outcomes only, plus the cache type.
+
+## Decisions, Errors, and Rejection
+
+| Outcome | What the client sees |
+| --- | --- |
+| **block** | An error in the endpoint's native format: HTTP 400 (prompt phase) or 502 (response and stream phases) unless the guardrail sets `block_status`; code `guardrail_blocked` unless the plugin sets its own. |
+| **respond** | An ordinary assistant reply with HTTP 200 (a one-turn stream for streaming requests). |
+| **warn** | The unchanged response plus an `X-GoModel-Guardrail: warn; code=<code>` header; the detail is stored in the audit trail. On a stream the header is sent only when the warn was decided before the first bytes went out (a buffered response); later warns are audit-only. |
+| **guardrail failure** (`fail_mode: closed`) | HTTP 500 with code `plugin_failure`. The guardrail's name is in the logs and audit record, not in the client message. |
+
+A blocked request never reaches the provider; a blocked response never
+reaches the client. See [Plugins](/advanced/plugins#decisions) for how
+decisions merge when several guardrails run at the same order.
+
+Every outcome, a silent allow included, is recorded in the request's audit
+entry under `data.guardrails`, with the phase, step, decision, whether the
+guardrail edited the request or response, and how it failed. The dashboard
+colors the guardrail steps of an audit entry's workflow chart from it: green
+when the step passed or edited, amber for a warning or a fail-open error,
+red for a block, an answer or a fail-closed error, dimmed when the step never
+ran. See [Plugins](/advanced/plugins#audit-trail) for the fields.

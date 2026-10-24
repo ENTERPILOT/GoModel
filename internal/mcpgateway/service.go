@@ -3,9 +3,12 @@ package mcpgateway
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -13,7 +16,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/usage"
 	"github.com/enterpilot/gomodel/internal/version"
 )
@@ -33,9 +38,21 @@ const ScopeHeader = "X-MCP-Servers"
 // strips any client-sent value before stamping its own.
 const labelsHeader = "X-Gomodel-Mcp-Labels"
 
+// authKeyIDHeader carries the managed auth key id into tool handlers so MCP
+// usage rows can be attributed per key. Internal like labelsHeader.
+const authKeyIDHeader = "X-Gomodel-Mcp-Auth-Key-Id"
+
 // pinnedServerKey carries the /mcp/{server} path pin through the request
 // context into per-session server construction.
 type pinnedServerKey struct{}
+
+// virtualServerKey carries the /mcp/{name} virtual server the same way.
+type virtualServerKey struct{}
+
+// virtualBindingPrefix marks a session bound to a virtual server, so a session
+// opened on /mcp/{name} stops matching if a real server takes that path. "/"
+// never occurs in a slug, so the two kinds cannot collide.
+const virtualBindingPrefix = "virtual/"
 
 // Service is the MCP gateway: it merges declarative and admin-store server
 // specs into the upstream manager and serves the downstream MCP endpoints.
@@ -45,6 +62,38 @@ type Service struct {
 	usageLogger    usage.LoggerInterface
 	userPathHeader string
 	configSpecs    map[string]ServerSpec
+	// virtualConfig holds the declarative virtual servers; virtualStore the
+	// admin-managed ones. virtualSpecs is their merge, rebuilt on reload.
+	virtualConfig map[string]VirtualServerSpec
+	virtualStore  VirtualStore
+	virtualMu     sync.RWMutex
+	virtualSpecs  map[string]VirtualServerSpec
+	// secrets resolves the secret references admin-managed headers hold.
+	secrets *config.Secrets
+	// reloadMu serializes reloads, so a slower one never applies an older
+	// server set over a newer one. Close takes it too: an in-flight reload
+	// finishes before the upstreams are closed, and reloadStopped turns later
+	// ones into no-ops, so no upstream is dialed after shutdown.
+	reloadMu      sync.Mutex
+	reloadStopped bool
+	// stopCtx is cancelled by Close, so a reload blocked on a store read,
+	// whether background, admin-triggered, or a secret rotation, does not
+	// hold up shutdown.
+	stopCtx    context.Context
+	stopCancel context.CancelFunc
+	// mutateMu serializes admin saves and deletes from reading the stored
+	// row through releasing the secrets it held, so none releases a secret
+	// another one has just stored, or stores one another has just released.
+	mutateMu sync.Mutex
+	// recorded names the admin-managed servers whose references rotation
+	// watches.
+	recorded map[string]struct{}
+	// skipped holds, by name, why the last full reload left out stored
+	// servers whose references did not resolve. Guarded by reloadMu.
+	skipped map[string]error
+	// searchDiscovery is the default for sessions that do not send
+	// ToolDiscoveryHeader: serve search_tools/call_tool instead of the catalog.
+	searchDiscovery bool
 
 	handler http.Handler
 	origins *originGuard
@@ -61,6 +110,13 @@ type Service struct {
 	stop     chan struct{}
 }
 
+// errServiceClosed rejects a reload after Close.
+var errServiceClosed = errors.New("mcp gateway is shut down")
+
+// ErrServerNotVisible rejects a call from a session whose user path may no
+// longer use the server.
+var ErrServerNotVisible = errors.New("server is not available for this user path")
+
 // sessionBinding pins a downstream MCP session to the user path it was
 // initialized under. Bearer auth still runs on every request; the binding
 // additionally stops a *different* principal from riding a leaked session ID,
@@ -68,14 +124,32 @@ type Service struct {
 type sessionBinding struct {
 	authKeyID string
 	userPath  string
-	pinned    string
-	lastSeen  time.Time
+	// endpoint identifies the endpoint the session was opened on: a pinned
+	// server slug, virtualBindingPrefix plus a virtual server name, or "" for
+	// the aggregated endpoint.
+	endpoint string
+	lastSeen time.Time
+	// discovery and toolAliases let request logs name the tool a call runs:
+	// a discovery session's call_tool target, and the namespaced name an
+	// unambiguous bare name resolves to.
+	discovery   bool
+	toolAliases map[string]string
+	// server hosts the session; closeEndpointSessions closes it through it.
+	server *mcp.Server
 }
 
 // Options configures NewService.
 type Options struct {
 	// ConfigServers are the declarative servers from config.yaml / MCP_SERVERS.
 	ConfigServers map[string]ServerSpec
+	// VirtualServers are the declarative virtual servers, keyed by name.
+	VirtualServers map[string]VirtualServerSpec
+	// VirtualStore persists admin-managed virtual servers. Optional.
+	VirtualStore VirtualStore
+	// RefreshInterval re-reads the stores in the background, so admin edits
+	// made on another gateway instance sharing the database reach this one.
+	// Zero disables it.
+	RefreshInterval time.Duration
 	// Store persists admin-managed servers. Optional.
 	Store Store
 	// HTTPClient is the shared outbound HTTP client for http/sse upstreams.
@@ -87,21 +161,33 @@ type Options struct {
 	// AllowedOrigins are the browser origins permitted to reach the endpoint.
 	// Empty trusts none, which is the default; see originGuard.
 	AllowedOrigins []string
+	// ToolDiscovery is the default discovery mode, config.MCPToolDiscoveryOff
+	// or config.MCPToolDiscoverySearch.
+	ToolDiscovery string
+	// Secrets resolves secret references in admin-managed header values.
+	// Nil resolves the built-in env and file schemes only.
+	Secrets *config.Secrets
 }
 
 // NewService builds the gateway service and starts connecting to the merged
 // server set. Upstream connects are asynchronous; construction never blocks.
 func NewService(ctx context.Context, opts Options) (*Service, error) {
 	s := &Service{
-		manager:        NewManager(opts.HTTPClient),
-		store:          opts.Store,
-		usageLogger:    opts.UsageLogger,
-		userPathHeader: core.UserPathHeaderName(opts.UserPathHeader),
-		configSpecs:    opts.ConfigServers,
-		bindings:       make(map[string]sessionBinding),
-		requestCancels: make(map[uint64]context.CancelFunc),
-		stop:           make(chan struct{}),
+		manager:         NewManager(opts.HTTPClient),
+		store:           opts.Store,
+		usageLogger:     opts.UsageLogger,
+		userPathHeader:  core.UserPathHeaderName(opts.UserPathHeader),
+		configSpecs:     opts.ConfigServers,
+		virtualConfig:   opts.VirtualServers,
+		virtualStore:    opts.VirtualStore,
+		secrets:         opts.Secrets,
+		recorded:        make(map[string]struct{}),
+		searchDiscovery: opts.ToolDiscovery == config.MCPToolDiscoverySearch,
+		bindings:        make(map[string]sessionBinding),
+		requestCancels:  make(map[uint64]context.CancelFunc),
+		stop:            make(chan struct{}),
 	}
+	s.stopCtx, s.stopCancel = context.WithCancel(context.Background())
 	guard, err := newOriginGuard(opts.AllowedOrigins)
 	if err != nil {
 		return nil, fmt.Errorf("mcp allowed origins: %w", err)
@@ -119,19 +205,72 @@ func NewService(ctx context.Context, opts Options) (*Service, error) {
 		return nil, err
 	}
 	go s.sweepBindings()
+	if opts.RefreshInterval > 0 && (s.store != nil || s.virtualStore != nil) {
+		go s.refreshLoop(opts.RefreshInterval)
+	}
 	return s, nil
+}
+
+// Refresh re-reads the stores and reconciles; the admin runtime refresh calls
+// it, as does the background loop.
+func (s *Service) Refresh(ctx context.Context) error {
+	return s.Reload(ctx)
+}
+
+func (s *Service) refreshLoop(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stop:
+			return
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			if err := s.Reload(ctx); err != nil && !errors.Is(err, errServiceClosed) && s.stopCtx.Err() == nil {
+				slog.Error("failed to refresh mcp servers", "error", err)
+			}
+			cancel()
+		}
+	}
 }
 
 // Reload re-merges declarative and store specs and reconciles the upstream
 // set. Declarative entries shadow store rows with the same name, mirroring
 // the tagging/virtual-models source precedence.
+//
+// Secret references in stored headers are resolved here. A row whose
+// references do not resolve is logged and left out at startup; once its
+// server runs, it keeps its current headers instead, so a secret backend
+// outage never disconnects a working upstream.
 func (s *Service) Reload(ctx context.Context) error {
+	return s.reload(ctx, nil)
+}
+
+// reload is Reload resolving only the rows rotated reports true for; every
+// other running server keeps its current spec. A nil rotated resolves all.
+func (s *Service) reload(ctx context.Context, rotated func(name string) bool) error {
+	// Close cancels every reload, not only background ones: an admin save
+	// or a rotation waiting on a slow store read must not hold shutdown open.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer context.AfterFunc(s.stopCtx, cancel)()
+
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+	if s.reloadStopped || s.stopCtx.Err() != nil {
+		return errServiceClosed
+	}
+
 	specs := make([]ServerSpec, 0, len(s.configSpecs))
 	seen := make(map[string]struct{}, len(s.configSpecs))
 	for name, spec := range s.configSpecs {
 		specs = append(specs, spec)
 		seen[name] = struct{}{}
 	}
+	var resolved []*config.ResolvedEntity
+	stored := make(map[string]struct{})
+	skipped := make(map[string]error)
+	var errs []error
 	if s.store != nil {
 		rows, err := s.store.List(ctx)
 		if err != nil {
@@ -142,11 +281,89 @@ func (s *Service) Reload(ctx context.Context) error {
 				slog.Warn("mcp server from admin store is shadowed by config", "server", row.Name)
 				continue
 			}
-			specs = append(specs, row.Spec())
+			stored[row.Name] = struct{}{}
+			current, running := s.manager.spec(row.Name)
+			if running && rotated != nil && !rotated(row.Name) {
+				specs = append(specs, current)
+				continue
+			}
+			spec, secrets, err := s.resolveServer(ctx, row)
+			if err != nil {
+				errs = append(errs, err)
+				if running {
+					slog.Warn("mcp server secret references could not be resolved; keeping its current headers", "server", row.Name, "error", err)
+					specs = append(specs, current)
+				} else {
+					slog.Error("mcp server secret references could not be resolved; server skipped", "server", row.Name, "error", err)
+					skipped[row.Name] = err
+				}
+				continue
+			}
+			specs = append(specs, spec)
+			resolved = append(resolved, secrets)
 		}
 	}
+	virtuals, err := s.mergedVirtualSpecs(ctx)
+	if err != nil {
+		return err
+	}
+	s.virtualMu.Lock()
+	s.virtualSpecs = virtuals
+	s.virtualMu.Unlock()
 	s.manager.Apply(specs)
+	s.logVirtualServerIssues()
+
+	for _, secrets := range resolved {
+		secrets.Record()
+	}
+	for name := range s.recorded {
+		if _, ok := stored[name]; !ok {
+			s.secrets.ForgetEntity(serverSecretEntity(name))
+		}
+	}
+	s.recorded = stored
+	if rotated != nil {
+		return errors.Join(errs...)
+	}
+	s.skipped = skipped
 	return nil
+}
+
+// mergedVirtualSpecs merges declarative and store virtual servers. Config
+// entries shadow store rows with the same name, like servers.
+func (s *Service) mergedVirtualSpecs(ctx context.Context) (map[string]VirtualServerSpec, error) {
+	merged := make(map[string]VirtualServerSpec, len(s.virtualConfig))
+	maps.Copy(merged, s.virtualConfig)
+	if s.virtualStore == nil {
+		return merged, nil
+	}
+	rows, err := s.virtualStore.ListVirtual(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list managed mcp virtual servers: %w", err)
+	}
+	for _, row := range rows {
+		if _, shadowed := merged[row.Name]; shadowed {
+			slog.Warn("mcp virtual server from admin store is shadowed by config", "virtual_server", row.Name)
+			continue
+		}
+		merged[row.Name] = row.Spec()
+	}
+	return merged, nil
+}
+
+// Skipped returns, by name, why the last full reload left out stored
+// servers whose secret references did not resolve.
+func (s *Service) Skipped() map[string]error {
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+	return maps.Clone(s.skipped)
+}
+
+// Running reports whether the server name is enabled in the running upstream
+// set. A disabled server is kept there for the admin view but serves nothing.
+func (s *Service) Running(name string) bool {
+	spec, ok := s.manager.spec(name)
+	return ok && spec.Enabled
 }
 
 // Views returns the current admin snapshot of all servers.
@@ -173,15 +390,81 @@ func (s *Service) Upsert(ctx context.Context, server ManagedServer) error {
 	if err := server.Validate(); err != nil {
 		return err
 	}
-	if err := s.store.Upsert(ctx, server); err != nil {
-		return err
+	// ErrSealUnconfirmed means the row was written: apply it like any other
+	// save, then report the error.
+	saveErr := s.persist(ctx, &server)
+	if saveErr != nil && !errors.Is(saveErr, encryption.ErrSealUnconfirmed) {
+		return saveErr
 	}
 	if err := s.Reload(ctx); err != nil {
 		// The row is persisted; only applying it to the running manager
 		// failed. Say so — a retry or restart picks the row up.
-		return fmt.Errorf("mcp server %q was saved but not applied: %w", server.Name, err)
+		return errors.Join(saveErr, fmt.Errorf("mcp server %q was saved but not applied: %w", server.Name, err))
 	}
-	return nil
+	return saveErr
+}
+
+// persist stores server in place of the row it replaces and releases the
+// secrets that row held and server no longer does. A name a virtual server
+// takes is refused with VirtualNameTakenError unless the row already exists.
+// An error wrapping encryption.ErrSealUnconfirmed means the row was written.
+func (s *Service) persist(ctx context.Context, server *ManagedServer) error {
+	s.mutateMu.Lock()
+	defer s.mutateMu.Unlock()
+
+	previous, err := s.store.Get(ctx, server.Name)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	write := s.store.Upsert
+	// Stored rows, not the loaded list: a virtual server another instance
+	// saved counts before this one refreshes. mutateMu, which virtual saves
+	// hold too, keeps an overlapping save on this instance from slipping in.
+	virtualTaken, err := s.virtualNameTaken(ctx, server.Name)
+	if err != nil {
+		return err
+	}
+	if virtualTaken {
+		// Only a new server is refused: one stored before the virtual server
+		// was declared keeps its endpoint and stays editable. Update fails
+		// atomically if the row is gone, so an edit racing a delete cannot
+		// recreate it under the virtual server's name.
+		if previous == nil {
+			return VirtualNameTakenError(server.Name)
+		}
+		write = s.store.Update
+	}
+	if err := config.CheckSecretDestinations(ctx, ServerSecretEntity, server.Name, serverDestinations(previous, server), headerValues(server)); err != nil {
+		return err
+	}
+	// Literal headers go to the secret writer first, when one is registered,
+	// so the row is stored with references only; then every reference must
+	// resolve before anything is persisted.
+	kept := headerValues(previous)
+	written, err := s.storeServerSecrets(ctx, server, kept)
+	if err != nil {
+		return err
+	}
+	if _, _, err := s.resolveServer(ctx, *server); err != nil {
+		// Nothing was stored, so whatever the stored row holds stays.
+		s.releaseSecrets(ctx, server.Name, written, kept)
+		return err
+	}
+	// ErrSealUnconfirmed means the row was written: treat it like any other
+	// save, then report the error.
+	saveErr := write(ctx, *server)
+	if saveErr != nil && !errors.Is(saveErr, encryption.ErrSealUnconfirmed) {
+		// The stored row is unchanged, so whatever it holds stays.
+		s.releaseSecrets(ctx, server.Name, written, kept)
+		if errors.Is(saveErr, ErrNotFound) {
+			return VirtualNameTakenError(server.Name)
+		}
+		return saveErr
+	}
+	// The new row is committed, so what it replaced is released even if
+	// applying it fails: a later edit only sees the new row.
+	s.releaseSecrets(ctx, server.Name, kept, headerValues(server))
+	return saveErr
 }
 
 // GetManaged returns one admin-managed server row from the store. Config-
@@ -202,12 +485,28 @@ func (s *Service) Delete(ctx context.Context, name string) error {
 	if s.IsManaged(name) {
 		return fmt.Errorf("mcp server %q is managed by config/env and is read-only", name)
 	}
-	if err := s.store.Delete(ctx, name); err != nil {
+	if err := s.remove(ctx, name); err != nil {
 		return err
 	}
 	if err := s.Reload(ctx); err != nil {
 		return fmt.Errorf("mcp server %q was deleted but the running set was not updated: %w", name, err)
 	}
+	return nil
+}
+
+// remove deletes the stored row name and releases the secrets it held.
+func (s *Service) remove(ctx context.Context, name string) error {
+	s.mutateMu.Lock()
+	defer s.mutateMu.Unlock()
+
+	previous, err := s.store.Get(ctx, name)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if err := s.store.Delete(ctx, name); err != nil {
+		return err
+	}
+	s.releaseSecrets(ctx, name, headerValues(previous), nil)
 	return nil
 }
 
@@ -235,12 +534,20 @@ func (s *Service) Close() {
 			cancel()
 		}
 
+		// Wait out an in-flight Reload, then stop later ones, before closing
+		// the upstreams, so none is added after this point.
+		s.stopCancel()
+		s.reloadMu.Lock()
+		s.reloadStopped = true
+		s.reloadMu.Unlock()
+
 		s.manager.Close()
 	})
 }
 
 // ServeHTTP handles one downstream MCP HTTP exchange. pinnedServer is the
-// /mcp/{server} path segment ("" for the aggregated endpoint). Gateway
+// /mcp/{server} path segment ("" for the aggregated endpoint): a server slug
+// or a virtual server name; a server wins over a virtual server. Gateway
 // authentication has already run; this layer enforces session-to-principal
 // binding and stamps the internal identity headers tool handlers read.
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer string) error {
@@ -272,18 +579,26 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 	userPath := core.UserPathFromContext(r.Context())
 	authKeyID := core.GetAuthKeyID(r.Context())
 
-	if pinnedServer != "" {
+	virtual := ""
+	if s.servedVirtual(pinnedServer) {
+		virtual = pinnedServer
+	} else if pinnedServer != "" {
+		s.closeStaleVirtualSessions(r, pinnedServer)
 		view, ok := s.findVisibleServer(pinnedServer, userPath)
 		if !ok {
-			return core.NewNotFoundError("unknown mcp server: " + pinnedServer)
+			return core.NewNotFoundError("unknown MCP server or virtual server: " + pinnedServer)
 		}
 		if !view.Spec.Enabled {
 			return core.NewNotFoundError("mcp server is disabled: " + pinnedServer)
 		}
 	}
 
+	bindingEndpoint := pinnedServer
+	if virtual != "" {
+		bindingEndpoint = virtualBindingPrefix + virtual
+	}
 	if sessionID := strings.TrimSpace(r.Header.Get("Mcp-Session-Id")); sessionID != "" {
-		if !s.touchBinding(sessionID, authKeyID, userPath, pinnedServer, r.Method == http.MethodDelete) {
+		if !s.touchBinding(sessionID, authKeyID, userPath, bindingEndpoint, r.Method == http.MethodDelete) {
 			// A different principal presented this session ID. Report the
 			// session as gone (404 per the transport spec) so the legitimate
 			// client's session stays unaffected and this caller re-initializes.
@@ -296,8 +611,18 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 	if labels := core.RequestLabelsFromContext(r.Context()); len(labels) > 0 {
 		r.Header.Set(labelsHeader, strings.Join(labels, ","))
 	}
+	r.Header.Del(authKeyIDHeader)
+	if authKeyID != "" {
+		r.Header.Set(authKeyIDHeader, authKeyID)
+	}
 
-	r = r.WithContext(context.WithValue(r.Context(), pinnedServerKey{}, pinnedServer))
+	ctx := r.Context()
+	if virtual != "" {
+		ctx = context.WithValue(ctx, virtualServerKey{}, virtual)
+	} else {
+		ctx = context.WithValue(ctx, pinnedServerKey{}, pinnedServer)
+	}
+	r = r.WithContext(ctx)
 	s.handler.ServeHTTP(w, r)
 	return nil
 }
@@ -307,7 +632,27 @@ type requestScope struct {
 	authKeyID string
 	userPath  string
 	pinned    string
+	// virtual names the virtual server whose members bound the view.
+	virtual   string
 	include   map[string]struct{}
+	discovery bool
+}
+
+// endpoint is the /mcp/{name} segment the scope was opened on.
+func (scope requestScope) endpoint() string {
+	if scope.virtual != "" {
+		return scope.virtual
+	}
+	return scope.pinned
+}
+
+// bindingEndpoint is the endpoint identity a session is bound to; see
+// sessionBinding.endpoint.
+func (scope requestScope) bindingEndpoint() string {
+	if scope.virtual != "" {
+		return virtualBindingPrefix + scope.virtual
+	}
+	return scope.pinned
 }
 
 func (s *Service) scopeFromRequest(r *http.Request) requestScope {
@@ -318,6 +663,12 @@ func (s *Service) scopeFromRequest(r *http.Request) requestScope {
 	if pinned, ok := r.Context().Value(pinnedServerKey{}).(string); ok {
 		scope.pinned = pinned
 	}
+	defaultDiscovery := s.searchDiscovery
+	if virtual, ok := r.Context().Value(virtualServerKey{}).(string); ok {
+		scope.virtual = virtual
+		defaultDiscovery = s.virtualDiscovery(virtual)
+	}
+	scope.discovery = discoveryMode(r, defaultDiscovery)
 	if raw := r.Header.Get(ScopeHeader); raw != "" {
 		scope.include = make(map[string]struct{})
 		for name := range strings.SplitSeq(raw, ",") {
@@ -336,8 +687,14 @@ func (s *Service) scopeFromRequest(r *http.Request) requestScope {
 func (s *Service) getServer(r *http.Request) *mcp.Server {
 	scope := s.scopeFromRequest(r)
 	views := s.visibleServers(scope)
+	// Assigned below; the SDK asks for the session ID only after getServer
+	// returns, so the binding sees the final map.
+	var aliases map[string]string
 
-	server := mcp.NewServer(&mcp.Implementation{
+	// Declared first so GetSessionID can bind the session to the server that
+	// hosts it; deleting a virtual server closes its sessions through it.
+	var server *mcp.Server
+	server = mcp.NewServer(&mcp.Implementation{
 		Name:    "gomodel",
 		Title:   "GoModel MCP Gateway",
 		Version: version.Version,
@@ -353,17 +710,21 @@ func (s *Service) getServer(r *http.Request) *mcp.Server {
 		},
 		GetSessionID: func() string {
 			id := rand.Text()
-			s.bindSession(id, scope.authKeyID, scope.userPath, scope.pinned)
+			s.bindSession(id, scope.authKeyID, scope.userPath, scope.bindingEndpoint(), scope.discovery, aliases, server)
 			return id
 		},
 	})
 
 	endpoint := "/mcp"
-	prefixNames := scope.pinned == ""
-	if !prefixNames {
-		endpoint = "/mcp/" + scope.pinned
+	if name := scope.endpoint(); name != "" {
+		endpoint = "/mcp/" + name
 	}
+	prefixNames := scope.pinned == ""
 
+	var index *toolIndex
+	if scope.discovery {
+		index = &toolIndex{}
+	}
 	toolOwners := make(map[string]string)
 	promptOwners := make(map[string]string)
 	resourceOwners := make(map[string]string)
@@ -372,14 +733,18 @@ func (s *Service) getServer(r *http.Request) *mcp.Server {
 		if snapshot == nil {
 			continue
 		}
-		s.registerTools(server, view.Spec.Name, snapshot, prefixNames, endpoint, toolOwners)
+		s.registerTools(server, view.Spec.Name, snapshot, prefixNames, endpoint, toolOwners, index)
 		s.registerPrompts(server, view.Spec.Name, snapshot, prefixNames, promptOwners)
 		s.registerResources(server, view.Spec.Name, snapshot, resourceOwners)
 	}
 	if prefixNames {
-		if aliases := bareToolAliases(toolOwners); len(aliases) > 0 {
-			server.AddReceivingMiddleware(bareToolCallMiddleware(aliases))
-		}
+		aliases = bareToolAliases(toolOwners)
+	}
+	if index != nil {
+		index.aliases = aliases
+		s.registerDiscoveryTools(server, index, endpoint)
+	} else if len(aliases) > 0 {
+		server.AddReceivingMiddleware(bareToolCallMiddleware(aliases))
 	}
 	return server
 }
@@ -436,8 +801,14 @@ func (s *Service) upstreamCatalog(name string) (*catalog, ServerStatus) {
 }
 
 // visibleServers filters the upstream set down to one request's view:
-// enabled, allowed for the user path, and inside the pin/header scope.
+// enabled, allowed for the user path, and inside the pin, virtual server,
+// and header scopes. A virtual server only narrows the view.
 func (s *Service) visibleServers(scope requestScope) []ServerView {
+	var virtualMembers []string
+	if scope.virtual != "" {
+		spec, _ := s.virtualSpec(scope.virtual)
+		virtualMembers = spec.Servers
+	}
 	views := s.manager.Views()
 	visible := make([]ServerView, 0, len(views))
 	for _, view := range views {
@@ -447,12 +818,15 @@ func (s *Service) visibleServers(scope requestScope) []ServerView {
 		if scope.pinned != "" && view.Spec.Name != scope.pinned {
 			continue
 		}
+		if scope.virtual != "" && !slices.Contains(virtualMembers, view.Spec.Name) {
+			continue
+		}
 		if scope.include != nil {
 			if _, ok := scope.include[view.Spec.Name]; !ok {
 				continue
 			}
 		}
-		if !userPathAllowed(scope.userPath, view.Spec.UserPaths) {
+		if !view.Spec.visibleTo(scope.userPath) {
 			continue
 		}
 		visible = append(visible, view)
@@ -465,7 +839,7 @@ func (s *Service) findVisibleServer(name, userPath string) (ServerView, bool) {
 		if view.Spec.Name != name {
 			continue
 		}
-		if !userPathAllowed(userPath, view.Spec.UserPaths) {
+		if !view.Spec.visibleTo(userPath) {
 			return ServerView{}, false
 		}
 		return view, true
@@ -483,8 +857,22 @@ func (s *Service) composeInstructions(scope requestScope, views []ServerView) st
 			names = append(names, view.Spec.Name)
 		}
 		sort.Strings(names)
-		fmt.Fprintf(&b, "GoModel MCP gateway aggregating %d server(s): %s. Tools and prompts are namespaced as {server}%s{name}.",
+		if scope.virtual != "" {
+			fmt.Fprintf(&b, "GoModel MCP virtual server %q", scope.virtual)
+		} else {
+			b.WriteString("GoModel MCP gateway")
+		}
+		fmt.Fprintf(&b, " aggregating %d server(s): %s. Tools and prompts are namespaced as {server}%s{name}.",
 			len(names), strings.Join(names, ", "), namespaceSeparator)
+		if scope.virtual != "" && len(names) == 0 {
+			b.WriteString(" None of its member servers is available for this API key.")
+		}
+	}
+	if scope.discovery {
+		if b.Len() > 0 {
+			b.WriteString(" ")
+		}
+		fmt.Fprintf(&b, "Tools are not listed directly: find them with %s and run them with %s.", searchToolsName, callToolName)
 	}
 	for _, view := range views {
 		snapshot, _ := s.upstreamCatalog(view.Spec.Name)
@@ -507,8 +895,9 @@ func (s *Service) composeInstructions(scope requestScope, views []ServerView) st
 // registerTools adds one upstream's tools to a session server. Tool metadata
 // and valid schemas relay verbatim; only the name is prefixed on the
 // aggregated endpoint. Arguments relay as raw JSON — validation belongs to
-// the upstream.
-func (s *Service) registerTools(server *mcp.Server, upstreamName string, snapshot *catalog, prefix bool, endpoint string, owners map[string]string) {
+// the upstream. A non-nil index collects the tools for search discovery
+// instead of listing them.
+func (s *Service) registerTools(server *mcp.Server, upstreamName string, snapshot *catalog, prefix bool, endpoint string, owners map[string]string, index *toolIndex) {
 	for _, tool := range snapshot.tools {
 		exposed := tool.Name
 		if prefix {
@@ -520,6 +909,10 @@ func (s *Service) registerTools(server *mcp.Server, upstreamName string, snapsho
 			continue
 		}
 		owners[exposed] = upstreamName
+		if index != nil {
+			index.add(exposed, upstreamName, tool)
+			continue
+		}
 		clone := *tool
 		clone.Name = exposed
 		server.AddTool(&clone, s.toolHandler(upstreamName, tool.Name, exposed, endpoint))
@@ -528,6 +921,9 @@ func (s *Service) registerTools(server *mcp.Server, upstreamName string, snapsho
 
 func (s *Service) toolHandler(upstreamName, toolName, exposedName, endpoint string) mcp.ToolHandler {
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if err := s.authorizeSession(req.Session, upstreamName); err != nil {
+			return nil, err
+		}
 		started := time.Now()
 		result, err := s.manager.CallTool(ctx, upstreamName, toolName, req.Params.Arguments)
 		s.recordToolCall(req, upstreamName, exposedName, endpoint, started, result, err)
@@ -555,6 +951,9 @@ func (s *Service) registerPrompts(server *mcp.Server, upstreamName string, snaps
 		clone.Name = exposed
 		originalName := prompt.Name
 		server.AddPrompt(&clone, func(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+			if err := s.authorizeSession(req.Session, upstreamName); err != nil {
+				return nil, err
+			}
 			params := *req.Params
 			params.Name = originalName
 			result, err := s.manager.GetPrompt(ctx, upstreamName, &params)
@@ -571,6 +970,9 @@ func (s *Service) registerPrompts(server *mcp.Server, upstreamName string, snaps
 // skipped with a warning rather than silently re-routed.
 func (s *Service) registerResources(server *mcp.Server, upstreamName string, snapshot *catalog, owners map[string]string) {
 	read := func(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		if err := s.authorizeSession(req.Session, upstreamName); err != nil {
+			return nil, err
+		}
 		result, err := s.manager.ReadResource(ctx, upstreamName, req.Params)
 		if err != nil {
 			return nil, fmt.Errorf("mcp server %q: %w", upstreamName, err)
@@ -598,30 +1000,128 @@ func (s *Service) registerResources(server *mcp.Server, upstreamName string, sna
 	}
 }
 
+// authorizeSession re-checks, on every call, that the user path a session
+// was bound to may still use upstreamName. Sessions snapshot their catalog at
+// initialize, so without this a narrowed user_paths or a new
+// disallowed_user_paths entry would not reach sessions that are already open.
+// A session without a binding is rejected: bindings live as long as the
+// session, so a missing one means it was deleted or expired mid-call, and
+// guessing a user path could slip past disallowed_user_paths. A session on a
+// virtual server is also held to the virtual server's current members, so
+// removing a member or the virtual server reaches open sessions too.
+func (s *Service) authorizeSession(session *mcp.ServerSession, upstreamName string) error {
+	sessionID := ""
+	if session != nil {
+		sessionID = session.ID()
+	}
+	return s.authorizeSessionID(sessionID, upstreamName)
+}
+
+func (s *Service) authorizeSessionID(sessionID, upstreamName string) error {
+	s.bindMu.Lock()
+	binding, ok := s.bindings[sessionID]
+	s.bindMu.Unlock()
+	if !ok {
+		return fmt.Errorf("mcp server %q: %w", upstreamName, ErrServerNotVisible)
+	}
+	if _, visible := s.findVisibleServer(upstreamName, binding.userPath); !visible {
+		return fmt.Errorf("mcp server %q: %w", upstreamName, ErrServerNotVisible)
+	}
+	if virtual, ok := strings.CutPrefix(binding.endpoint, virtualBindingPrefix); ok && !s.virtualServes(virtual, upstreamName) {
+		return fmt.Errorf("mcp server %q: %w", upstreamName, ErrServerNotVisible)
+	}
+	return nil
+}
+
 // bindSession records the principal a new session was initialized under.
-func (s *Service) bindSession(sessionID, authKeyID, userPath, pinned string) {
+func (s *Service) bindSession(sessionID, authKeyID, userPath, endpoint string, discovery bool, toolAliases map[string]string, server *mcp.Server) {
 	s.bindMu.Lock()
 	s.bindings[sessionID] = sessionBinding{
-		authKeyID: authKeyID,
-		userPath:  userPath,
-		pinned:    pinned,
-		lastSeen:  time.Now(),
+		authKeyID:   authKeyID,
+		userPath:    userPath,
+		endpoint:    endpoint,
+		lastSeen:    time.Now(),
+		discovery:   discovery,
+		toolAliases: toolAliases,
+		server:      server,
 	}
 	s.bindMu.Unlock()
+}
+
+// closeStaleVirtualSessions closes the sessions of a virtual server that is no
+// longer served when one of them sends a request. DeleteVirtual closes the
+// sessions it finds, but one still initializing during the delete registers
+// afterwards; this catches it on its next request instead of at the idle
+// timeout.
+func (s *Service) closeStaleVirtualSessions(r *http.Request, name string) {
+	sessionID := strings.TrimSpace(r.Header.Get("Mcp-Session-Id"))
+	if sessionID == "" {
+		return
+	}
+	endpoint := virtualBindingPrefix + name
+	s.bindMu.Lock()
+	binding, ok := s.bindings[sessionID]
+	s.bindMu.Unlock()
+	if ok && binding.endpoint == endpoint {
+		s.closeEndpointSessions(endpoint)
+	}
+}
+
+// closeEndpointSessions ends every session bound to endpoint (see
+// sessionBinding.endpoint) and drops their bindings, so an endpoint that no
+// longer exists does not keep idle sessions until the idle timeout. Closing
+// waits for in-flight requests to drain, so it runs in the background.
+func (s *Service) closeEndpointSessions(endpoint string) {
+	var servers []*mcp.Server
+	s.bindMu.Lock()
+	for id, binding := range s.bindings {
+		if binding.endpoint != endpoint {
+			continue
+		}
+		delete(s.bindings, id)
+		if binding.server != nil {
+			servers = append(servers, binding.server)
+		}
+	}
+	s.bindMu.Unlock()
+	for _, server := range servers {
+		for session := range server.Sessions() {
+			go func() { _ = session.Close() }()
+		}
+	}
+}
+
+// ToolCallLabel names the tool a session's tools/call runs, matching its
+// usage entry. name is the called tool and target the call's
+// arguments.name. In a discovery session call_tool resolves to its target,
+// and a bare name the session accepts resolves to its namespaced name. Only
+// the session knows whether call_tool is the meta-tool: on a pinned endpoint
+// without discovery it can be an upstream tool of that name.
+func (s *Service) ToolCallLabel(sessionID, name, target string) string {
+	s.bindMu.Lock()
+	defer s.bindMu.Unlock()
+	binding := s.bindings[sessionID]
+	if binding.discovery && name == callToolName && target != "" {
+		name = target
+	}
+	if exposed, ok := binding.toolAliases[name]; ok {
+		return exposed
+	}
+	return name
 }
 
 // touchBinding refreshes a known session binding and reports whether the
 // caller's authenticated identity, user path, and endpoint pin match it.
 // Unknown session IDs pass through: the SDK rejects them itself, and bindings
 // do not survive restarts.
-func (s *Service) touchBinding(sessionID, authKeyID, userPath, pinned string, remove bool) bool {
+func (s *Service) touchBinding(sessionID, authKeyID, userPath, endpoint string, remove bool) bool {
 	s.bindMu.Lock()
 	defer s.bindMu.Unlock()
 	binding, ok := s.bindings[sessionID]
 	if !ok {
 		return true
 	}
-	if binding.authKeyID != authKeyID || binding.userPath != userPath || binding.pinned != pinned {
+	if binding.authKeyID != authKeyID || binding.userPath != userPath || binding.endpoint != endpoint {
 		return false
 	}
 	if remove {

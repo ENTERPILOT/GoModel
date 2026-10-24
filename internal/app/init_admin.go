@@ -11,9 +11,12 @@ import (
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/budget"
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
+	"github.com/enterpilot/gomodel/internal/mediastore"
+	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
@@ -41,8 +44,15 @@ func (b *bootstrap) initAdmin() error {
 		adminCfg.UIEnabled = false
 	}
 	if adminCfg.EndpointsEnabled {
+		// Nil when the plugin system is disabled; the admin handler then
+		// reports the guardrail endpoints unavailable.
+		var guardrailService *guardrails.Service
+		if app.guardrails != nil {
+			guardrailService = app.guardrails.Service
+		}
 		usageEnabledForDashboard := app.usage.Logger.Config().Enabled
 		adminRuntimeConfig := dashboardRuntimeConfig(appCfg, usageEnabledForDashboard, b.cfg.DemoMode, b.routeSelector != nil)
+		adminRuntimeConfig.VirtualModelStrategies = dashboardVirtualModelStrategies(b.routeSelector != nil, plugins.RoutePluginNames(app.pluginCatalog))
 		adminRuntimeConfig.QuotaTemplatesEnabled = dashboardEnabledValue(b.quotaTemplatesEnabled)
 		adminHandler, dashHandler, auditReader, adminErr := newAdminHandlers(
 			b.usageReader,
@@ -54,13 +64,15 @@ func (b *bootstrap) initAdmin() error {
 			app.virtualModels.Service,
 			app.pricingOverrides.Service,
 			app.workflows.Service,
-			app.guardrails.Service,
+			guardrailService,
+			app.pluginCatalog,
 			app.budgets.Service,
 			app.rateLimits.Service,
 			app.tagging.Service,
 			app.runtimeSettings,
 			app.mcpGateway,
 			app.providerCredentials,
+			app.media,
 			app,
 			adminRuntimeConfig,
 			b.quotaTemplatesEnabled,
@@ -119,12 +131,14 @@ func newAdminHandlers(
 	pricingOverrideService *pricingoverrides.Service,
 	workflowService *workflows.Service,
 	guardrailService *guardrails.Service,
+	pluginCatalog *plugins.Catalog,
 	budgetService *budget.Service,
 	rateLimitService *ratelimit.Service,
 	taggingService *tagging.Service,
 	runtimeSettingsService *runtimesettings.Service,
 	mcpResult *mcpgateway.Result,
 	providerCredentialsResult *providers.CredentialsResult,
+	mediaResult *mediastore.Result,
 	runtimeRefresher admin.RuntimeRefresher,
 	runtimeConfig admin.DashboardConfigResponse,
 	quotaTemplatesEnabled bool,
@@ -167,6 +181,10 @@ func newAdminHandlers(
 	if providerCredentialsResult != nil && providerCredentialsResult.Service != nil {
 		providerCredentialsOption = admin.WithProviderCredentials(providerCredentialsResult.Service)
 	}
+	var mediaOption admin.Option
+	if mediaResult != nil && mediaResult.Service != nil {
+		mediaOption = admin.WithMediaStore(mediaResult.Service)
+	}
 
 	adminHandler := admin.NewHandler(
 		reader,
@@ -181,6 +199,7 @@ func newAdminHandlers(
 		admin.WithPricingOverrides(pricingOverrideService),
 		admin.WithWorkflows(workflowService),
 		admin.WithGuardrailService(guardrailService),
+		admin.WithPluginCatalog(pluginCatalog),
 		admin.WithBudgets(budgetService),
 		admin.WithRateLimits(rateLimitService),
 		admin.WithQuotaTemplatesEnabled(quotaTemplatesEnabled),
@@ -188,6 +207,7 @@ func newAdminHandlers(
 		admin.WithRuntimeSettings(runtimeSettingsService),
 		mcpOption,
 		providerCredentialsOption,
+		mediaOption,
 		admin.WithRuntimeRefresher(runtimeRefresher),
 		admin.WithDashboardRuntimeConfig(runtimeConfig),
 		admin.WithLiveBroker(liveBroker),
@@ -220,23 +240,51 @@ func dashboardRuntimeConfig(cfg *config.Config, usageEnabled, demoMode, adaptive
 		BudgetsEnabled:         dashboardEnabledValue(cfg != nil && cfg.Budgets.Enabled),
 		RateLimitsEnabled:      dashboardEnabledValue(cfg != nil && cfg.RateLimits.Enabled),
 		GuardrailsEnabled:      dashboardEnabledValue(cfg != nil && cfg.Guardrails.Enabled),
+		PluginsEnabled:         dashboardEnabledValue(pluginsEnabled(cfg)),
 		CacheEnabled:           dashboardEnabledValue(cacheAnalyticsConfigured(cfg, usageEnabled)),
 		RedisURL:               dashboardEnabledValue(simpleResponseCacheConfigured(cfg)),
 		SemanticCacheEnabled:   dashboardEnabledValue(semanticResponseCacheConfigured(cfg)),
 		LiveLogsEnabled:        dashboardEnabledValue(cfg != nil && cfg.Admin.LiveLogsEnabled),
 		MCPEnabled:             dashboardEnabledValue(cfg != nil && cfg.MCP.Enabled),
-		VirtualModelStrategies: dashboardVirtualModelStrategies(adaptiveRouting),
+		MCPToolDiscovery:       dashboardMCPToolDiscovery(cfg),
+		VirtualModelStrategies: dashboardVirtualModelStrategies(adaptiveRouting, nil),
+		UserPathHeader:         dashboardUserPathHeader(cfg),
 	}
+}
+
+// dashboardMCPToolDiscovery is the default MCP tool discovery mode. Loaded
+// config is already normalized; an unset value means the "off" default.
+func dashboardMCPToolDiscovery(cfg *config.Config) string {
+	if cfg == nil || cfg.MCP.ToolDiscovery == "" {
+		return config.MCPToolDiscoveryOff
+	}
+	return cfg.MCP.ToolDiscovery
+}
+
+// dashboardUserPathHeader is the canonical user-path header name the public
+// API reads, so the Playground sends the configured USER_PATH_HEADER rather
+// than assuming the default.
+func dashboardUserPathHeader(cfg *config.Config) string {
+	if cfg == nil {
+		return core.UserPathHeader
+	}
+	return core.UserPathHeaderName(cfg.Server.UserPathHeader)
 }
 
 // dashboardVirtualModelStrategies lists the load-balancing strategies the
 // dashboard should offer. Core accepts "adaptive" regardless (it falls back
 // to round robin without a selector), but the UI only advertises it when a
-// route-selector extension is actually registered.
-func dashboardVirtualModelStrategies(adaptiveRouting bool) string {
+// route-selector extension is actually registered. Every loaded
+// routing-strategy plugin adds one "plugin:<name>" entry.
+func dashboardVirtualModelStrategies(adaptiveRouting bool, routePlugins []string) string {
 	strategies := []string{virtualmodels.StrategyRoundRobin, virtualmodels.StrategyCost, virtualmodels.StrategyFailover}
 	if adaptiveRouting {
 		strategies = append(strategies, virtualmodels.StrategyAdaptive)
+	}
+	for _, name := range routePlugins {
+		if name = strings.TrimSpace(name); name != "" {
+			strategies = append(strategies, virtualmodels.StrategyPlugin+":"+name)
+		}
 	}
 	return strings.Join(strategies, ",")
 }

@@ -10,7 +10,7 @@ The CI job and pre-commit hook both run this guard. The current allocation and
 byte ceilings live in `tests/perf/hotpath_test.go`. The same command also
 measures median routing overhead for TTS, STT, realtime WebSocket setup, and
 WebRTC SDP signaling against a zero-delay local mock provider. Those scenarios
-fail above the 5 ms threshold in `tests/perf/voice_routing_latency_test.go`; no
+fail above the 1 ms threshold in `tests/perf/voice_routing_latency_test.go`; no
 provider account, API key, or billable request is used. Direct and routed calls
 alternate order, and the guard uses the median of their paired latency deltas.
 
@@ -40,8 +40,12 @@ guarded alongside the bare routed case, so a regression that only shows up
 when the model has to be rewritten cannot hide behind the bare benchmark.
 
 `BenchmarkSharedStreamingObserversDefaultConfig` covers streaming observation
-with audit body capture disabled (the default), where the observed stream
-skips JSON decoding for chunks no observer wants.
+with audit body capture disabled, where the observed stream skips JSON
+decoding for chunks no observer wants. Body capture is on by default, so this
+measures deployments that turned it off.
+`BenchmarkSharedStreamingObserversIncludeUsage` runs the same pipeline over the
+stream shape OpenAI sends with `include_usage` forced on, where every content
+chunk carries `"usage":null`.
 
 ## Production shape and ablation
 

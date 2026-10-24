@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/labstack/echo/v5"
 
@@ -37,6 +38,7 @@ func (b *bootstrap) initServerDependencies() error {
 	if b.featureCaps.Guardrails {
 		if app.guardrails != nil && app.guardrails.Service != nil {
 			b.translatedRequestPatcher = guardrails.NewWorkflowRequestPatcher(app.workflows.Service)
+			b.pluginChains = app.workflows.Service
 			if appCfg.Guardrails.EnableForBatchProcessing {
 				batchRequestPreparers = append(batchRequestPreparers, guardrails.NewWorkflowBatchPreparer(b.provider, app.workflows.Service))
 			}
@@ -72,12 +74,18 @@ func (b *bootstrap) initServerDependencies() error {
 
 	// Initialize the MCP gateway (aggregated upstream MCP servers behind /mcp).
 	if appCfg.MCP.Enabled {
-		mcpResult, err := mcpgateway.New(b.ctx, appCfg, app.storage, nil, b.serverUsageLogger)
+		mcpResult, err := mcpgateway.New(b.ctx, appCfg, app.storage, app.secrets, nil, b.serverUsageLogger, b.cfg.AppConfig.Secrets)
 		if err != nil {
 			return fmt.Errorf("failed to initialize mcp gateway: %w", err)
 		}
 		app.mcpGateway = mcpResult
 		app.register(subsystemMCPGateway, ownedByShutdown, app.mcpGateway.Close)
+		if previous := b.cfg.Replaces; previous != nil && previous.mcpGateway != nil {
+			if err := keepServingEntities("mcp servers", mcpResult.Service.Skipped(), previous.mcpGateway.Service.Running); err != nil {
+				return err
+			}
+		}
+		app.secretRotation.watchEntities(mcpgateway.ServerSecretEntity+".", mcpResult.Service)
 		slog.Info("mcp gateway enabled",
 			"path", config.JoinBasePath(appCfg.Server.BasePath, "/mcp"),
 			"configured_servers", len(appCfg.MCP.Servers))
@@ -101,8 +109,9 @@ func (b *bootstrap) initServerDependencies() error {
 	// The update check owns the only outbound connection core makes that is
 	// not a provider call. It is constructed even when disabled so GET
 	// /version keeps reporting the local build.
-	app.versionCheck = newVersionChecker(b.ctx, appCfg.VersionCheck, app.storage, appCfg.Server.MasterKey)
+	app.versionCheck = newVersionChecker(b.ctx, appCfg.VersionCheck, app.storage)
 	warnIfDataDirEphemeral(appCfg.Storage.BackendConfig())
+	warnIfMediaDirEphemeral(appCfg)
 	return nil
 }
 
@@ -118,10 +127,12 @@ func (b *bootstrap) initServerConfig() error {
 	serverCfg := &server.Config{
 		BasePath:                        appCfg.Server.BasePath,
 		MasterKey:                       appCfg.Server.MasterKey,
+		MasterKeyDisabled:               appCfg.Server.MasterKeyDisabled,
 		Authenticator:                   app.authKeys.Service,
 		MetricsEnabled:                  appCfg.Metrics.Enabled,
 		MetricsEndpoint:                 appCfg.Metrics.Endpoint,
 		BodySizeLimit:                   appCfg.Server.BodySizeLimit,
+		StreamStallTimeout:              time.Duration(appCfg.Server.StreamStallTimeout) * time.Second,
 		PprofEnabled:                    appCfg.Server.PprofEnabled,
 		AuditLogger:                     app.audit.Logger,
 		UsageLogger:                     b.serverUsageLogger,
@@ -133,24 +144,29 @@ func (b *bootstrap) initServerConfig() error {
 		FailoverPolicy:                  gateway.NewFailoverPolicy(appCfg.Failover),
 		WorkflowPolicyResolver:          app.workflows.Service,
 		TranslatedRequestPatcher:        b.translatedRequestPatcher,
+		PluginChainsResolver:            b.pluginChains,
 		BatchRequestPreparer:            b.batchRequestPreparer,
 		ExposedModelLister:              vm,
 		KeepOnlyAliasesAtModelsEndpoint: appCfg.Models.KeepOnlyAliasesAtModelsEndpoint,
 		PassthroughSemanticEnrichers:    b.cfg.Factory.PassthroughSemanticEnrichers(),
 		BatchStore:                      app.batch.Store,
 		FileStore:                       app.fileStore.Store,
+		MediaStore:                      app.media.Service,
 		ResponseStore:                   app.responseStore.Store,
 		ConversationStore:               app.conversations.Store,
 		LogOnlyModelInteractions:        appCfg.Logging.OnlyModelInteractions,
 		DisablePassthroughRoutes:        !appCfg.Server.EnablePassthroughRoutes,
+		DisableLiteLLMTags:              !appCfg.Tagging.LiteLLMTagsEnabled,
 		EnabledPassthroughProviders:     appCfg.Server.EnabledPassthroughProviders,
 		RealtimeEnabled:                 appCfg.Server.RealtimeEnabled,
+		AuthVerifyEnabled:               appCfg.Server.AuthVerifyEnabled,
 		AllowPassthroughV1Alias:         &allowPassthroughV1Alias,
 		UserPathHeader:                  appCfg.Server.UserPathHeader,
 		SwaggerEnabled:                  b.swaggerEnabled,
 		Tagging:                         app.tagging.Service,
 		SessionDetector:                 session.NewDetectorFromConfig(appCfg.Session),
 		MCPEnabled:                      appCfg.MCP.Enabled,
+		IPExtractor:                     server.ClientIPExtractor(appCfg.Server.ClientIP),
 		VersionChecker:                  app.versionCheck,
 	}
 	if app.mcpGateway != nil {
@@ -177,6 +193,11 @@ func (b *bootstrap) initServerConfig() error {
 	// backend is active, readiness simply collapses to liveness.
 	if hc, ok := app.storage.(storage.HealthChecker); ok {
 		serverCfg.StorageProbe = hc
+	}
+	// The model registry is reported but never blocks traffic: see
+	// server.ModelInventory.
+	if app.providers.Registry != nil {
+		serverCfg.ModelInventory = app.providers.Registry
 	}
 	b.serverCfg = serverCfg
 	return nil
@@ -207,7 +228,7 @@ func (b *bootstrap) initResponseCache() error {
 	}
 
 	vm := app.virtualModels.Service
-	internalGuardrailExecutor := server.NewInternalChatCompletionExecutor(b.provider, server.InternalChatCompletionExecutorConfig{
+	internalCfg := server.InternalChatCompletionExecutorConfig{
 		ModelResolver:          vm,
 		ModelAuthorizer:        vm,
 		WorkflowPolicyResolver: app.workflows.Service,
@@ -219,12 +240,16 @@ func (b *bootstrap) initResponseCache() error {
 		UsageLogger:     b.serverUsageLogger,
 		PricingResolver: b.pricingResolver,
 		ResponseCache:   rcm,
-	})
-	if err := app.guardrails.Service.SetExecutor(b.ctx, internalGuardrailExecutor); err != nil {
-		return fmt.Errorf("failed to wire internal guardrail executor: %w", err)
 	}
-	if err := app.workflows.Service.Refresh(b.ctx); err != nil {
-		return fmt.Errorf("failed to refresh workflows after wiring internal guardrail executor: %w", err)
+	internalGuardrailExecutor := server.NewInternalChatCompletionExecutor(b.provider, internalCfg)
+	// Instances pick the executors up on their next call; no rebuild needed.
+	if app.guardrails != nil && app.guardrails.Service != nil {
+		app.guardrails.Service.SetChatCompleter(internalGuardrailExecutor)
+		app.guardrails.Service.SetDecider(pluginDecider{
+			InternalDecisionsExecutor: server.NewInternalDecisionsExecutor(b.provider, internalCfg),
+			router:                    app.providers.Router,
+			virtualModels:             vm,
+		})
 	}
 	return nil
 }
@@ -258,6 +283,8 @@ func applyExtensions(serverCfg *server.Config, extensions *ext.Registry) {
 	serverCfg.OuterMiddleware = extensions.OuterMiddleware()
 	serverCfg.ExtraMiddleware = extensions.Middleware()
 	serverCfg.ExtraRoutes = extensions.Routes()
+	serverCfg.ExtraAdminRoutes = extensions.AdminRoutes()
+	serverCfg.HealthCheckers = extensions.HealthCheckers()
 	serverCfg.ExtraAuthSkipPaths = extensions.PublicPaths()
 	serverCfg.RequestAuthenticators = extensions.Authenticators()
 }

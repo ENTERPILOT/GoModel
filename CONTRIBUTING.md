@@ -22,6 +22,10 @@ Please use Conventional Commits for commit subjects and PR titles:
 
 Allowed types are `feat`, `fix`, `perf`, `docs`, `refactor`, `test`, `build`, `ci`, `chore`, and `revert`.
 
+## Agent instruction files
+
+`AGENTS.md` holds the agent instructions that agent harnesses read; `CLAUDE.md` imports it for Claude Code. Make agent-instruction changes in `AGENTS.md`; harness-specific behavior belongs in that harness's file, such as `CLAUDE.md` for Claude Code.
+
 ## Dashboard frontend
 
 The admin dashboard is a Svelte 5 single-page app in `web/dashboard/`. Vite
@@ -29,7 +33,7 @@ builds it into `internal/admin/dashboard/static/dist/`, which the Go binary
 embeds. The build output is not committed — CI builds it in a secretless job
 and feeds the result to the tests and release builds (see
 [ADR-0010](docs/adr/0010-dashboard-built-in-ci.md)). On a fresh clone, run
-`make frontend` once (requires Node 22+) before `make test` or starting the
+`make frontend` once (requires Node 22.12+ or 24+) before `make test` or starting the
 gateway with the UI enabled; `make build` does this for you, and the test
 targets stop with a hint if the build is missing.
 
@@ -39,7 +43,7 @@ Dashboard translations are welcome; see the
 When you change dashboard sources:
 
 ```sh
-make frontend        # npm ci + vite build (requires Node 22+)
+make frontend        # npm ci + vite build (requires Node 22.12+ or 24+)
 make test-dashboard  # frontend unit tests
 ```
 

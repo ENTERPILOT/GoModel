@@ -1,8 +1,9 @@
 ---
-title: "OpenCode Go"
+title: "OpenCode Go: Base URL & OpenAI-Compatible Endpoint"
+sidebarTitle: "OpenCode Go"
 description: "Configure OpenCode Zen (Go subscription) in GoModel using an OpenAI-compatible endpoint."
 icon: "terminal"
-keywords: ["OpenCode Zen", "OpenCode Go", "provider setup"]
+keywords: ["OpenCode Zen", "OpenCode Go", "OPENCODE_GO_BASE_URL", "OpenCode Go endpoint", "provider setup"]
 ---
 
 [OpenCode Zen](https://opencode.ai/docs/zen/) exposes its "Go" subscription
@@ -13,6 +14,8 @@ provider that defaults the base URL, so you only need an API key.
 
 ```bash
 OPENCODE_GO_API_KEY=sk-...
+# Optional: override the default endpoint.
+# OPENCODE_GO_BASE_URL=https://opencode.ai/zen/go/v1
 ```
 
 Or in `config.yaml`:
@@ -68,6 +71,33 @@ OPENCODE_GO_MESSAGES_MODELS=qwen3.7-max
   once the upstream model list distinguishes endpoints.
 </Note>
 
+## Session header
+
+OpenCode Zen asks every client to send an `x-opencode-session` header so it
+can route one conversation to the same upstream and keep its prompt cache
+warm. Upstream has announced that requests without it may start failing.
+GoModel adds the header to every OpenCode Go request by default, on both the
+`/chat/completions` and `/messages` paths, using the first available value:
+
+1. An `x-opencode-session` header sent by the client (OpenCode itself, pi, and
+   other tools that speak OpenCode Zen's dialect) is forwarded verbatim.
+2. Otherwise the session GoModel detected through
+   [session keeping](/features/session-keeping): OpenCode's `X-Session-Id`,
+   Claude Code's session id, a session body field, or the content-derived
+   `auto-…` id for agents that send no signal at all.
+
+A request with no detectable session is sent without the header. GoModel also
+identifies itself with `x-opencode-client` (forwarding the client's own value
+when present, `gomodel` otherwise) and a `gomodel/<version>` User-Agent, as
+the upstream [usage guidelines](https://opencode.ai/docs/go/#where-can-i-use-it)
+require.
+
+Disable session forwarding only if upstream asks you to:
+
+```bash
+OPENCODE_GO_SESSION_HEADER=false
+```
+
 ## Reasoning
 
 Some OpenCode Zen models always think and reject requests that leave the
@@ -106,6 +136,15 @@ the same precedence every other GoModel provider applies.
 
 Models routed to `/messages` use the Anthropic thinking dialect instead and are
 not affected by this mapping.
+
+## DeepSeek models
+
+Model IDs starting with `deepseek` get the same request handling as the native
+DeepSeek provider, including when a virtual model routes to them:
+`reasoning_content` is filled in on earlier assistant turns when tools are
+present, and `json_schema` structured output follows
+`DEEPSEEK_JSON_SCHEMA_MODE`. See
+[DeepSeek](/providers/deepseek#structured-outputs) for details.
 
 ## Not supported
 

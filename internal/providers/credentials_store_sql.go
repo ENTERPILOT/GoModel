@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
+	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
@@ -32,6 +32,7 @@ var credentialSQLSchema = []string{
 		service_account_json TEXT NOT NULL DEFAULT '',
 		service_account_json_base64 TEXT NOT NULL DEFAULT '',
 		gcp_scope TEXT NOT NULL DEFAULT '',
+		proxy_url TEXT NOT NULL DEFAULT '',
 		models TEXT NOT NULL DEFAULT '[]',
 		enabled ` + sqlx.TypeBool + ` NOT NULL DEFAULT TRUE,
 		created_at ` + sqlx.TypeInt64 + ` NOT NULL,
@@ -42,7 +43,7 @@ var credentialSQLSchema = []string{
 
 const selectCredentialColumns = `name, type, api_keys, base_url, api_version, backend, auth_type, api_mode, ` +
 	`vertex_project, vertex_location, service_account_file, service_account_json, ` +
-	`service_account_json_base64, gcp_scope, models, session_sticky_keys, enabled, created_at, updated_at`
+	`service_account_json_base64, gcp_scope, proxy_url, models, session_sticky_keys, enabled, created_at, updated_at`
 
 // NewSQLCredentialStore creates the provider_credentials table and indexes if
 // needed.
@@ -55,6 +56,7 @@ func NewSQLCredentialStore(ctx context.Context, db sqlx.DB) (*SQLCredentialStore
 	}
 	if err := sqlx.AddColumns(ctx, db,
 		`ALTER TABLE provider_credentials ADD COLUMN session_sticky_keys `+sqlx.TypeBool+` NOT NULL DEFAULT TRUE`,
+		`ALTER TABLE provider_credentials ADD COLUMN proxy_url TEXT NOT NULL DEFAULT ''`,
 	); err != nil {
 		return nil, fmt.Errorf("migrate provider_credentials: %w", err)
 	}
@@ -93,21 +95,15 @@ func (s *SQLCredentialStore) Get(ctx context.Context, name string) (*ManagedProv
 
 func (s *SQLCredentialStore) Upsert(ctx context.Context, cred ManagedProviderCredential) error {
 	stampCredentialUpsert(&cred)
-	keysJSON, err := encodeCredentialList(cred.APIKeys)
-	if err != nil {
-		return err
-	}
-	modelsJSON, err := encodeCredentialList(cred.Models)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.Exec(ctx, `
+	keysJSON := sqlutil.JSONStrings(cred.APIKeys)
+	modelsJSON := sqlutil.JSONStrings(cred.Models)
+	_, err := s.db.Exec(ctx, `
 		INSERT INTO provider_credentials (
 			name, type, api_keys, base_url, api_version, backend, auth_type, api_mode,
 			vertex_project, vertex_location, service_account_file, service_account_json,
-			service_account_json_base64, gcp_scope, models, session_sticky_keys, enabled, created_at, updated_at
+			service_account_json_base64, gcp_scope, proxy_url, models, session_sticky_keys, enabled, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(name) DO UPDATE SET
 			type = excluded.type,
 			api_keys = excluded.api_keys,
@@ -122,6 +118,7 @@ func (s *SQLCredentialStore) Upsert(ctx context.Context, cred ManagedProviderCre
 			service_account_json = excluded.service_account_json,
 			service_account_json_base64 = excluded.service_account_json_base64,
 			gcp_scope = excluded.gcp_scope,
+			proxy_url = excluded.proxy_url,
 			models = excluded.models,
 			session_sticky_keys = excluded.session_sticky_keys,
 			enabled = excluded.enabled,
@@ -141,6 +138,7 @@ func (s *SQLCredentialStore) Upsert(ctx context.Context, cred ManagedProviderCre
 		cred.ServiceAccountJSON,
 		cred.ServiceAccountJSONBase64,
 		cred.GCPScope,
+		cred.ProxyURL,
 		modelsJSON,
 		sessionStickyKeysEnabled(cred.SessionStickyKeys),
 		cred.Enabled,
@@ -163,6 +161,26 @@ func (s *SQLCredentialStore) Delete(ctx context.Context, name string) error {
 		return ErrCredentialNotFound
 	}
 	return nil
+}
+
+// swapSecrets replaces a credential's secret columns only while they still
+// hold the values in current, and reports whether it did. Other columns are
+// left alone, so a concurrent edit to them is never lost either.
+func (s *SQLCredentialStore) swapSecrets(ctx context.Context, current, next ManagedProviderCredential) (bool, error) {
+	currentKeys := sqlutil.JSONStrings(current.APIKeys)
+	nextKeys := sqlutil.JSONStrings(next.APIKeys)
+	affected, err := s.db.Exec(ctx, `
+		UPDATE provider_credentials
+		SET api_keys = ?, service_account_json = ?, service_account_json_base64 = ?, proxy_url = ?
+		WHERE name = ? AND api_keys = ? AND service_account_json = ? AND service_account_json_base64 = ? AND proxy_url = ?
+	`,
+		nextKeys, next.ServiceAccountJSON, next.ServiceAccountJSONBase64, next.ProxyURL,
+		normalizeCredentialName(current.Name), currentKeys, current.ServiceAccountJSON, current.ServiceAccountJSONBase64, current.ProxyURL,
+	)
+	if err != nil {
+		return false, fmt.Errorf("swap provider credential secrets: %w", err)
+	}
+	return affected > 0, nil
 }
 
 func (s *SQLCredentialStore) Close() error {
@@ -189,6 +207,7 @@ func scanSQLCredential(scanner sqlx.Row) (ManagedProviderCredential, error) {
 		&cred.ServiceAccountJSON,
 		&cred.ServiceAccountJSONBase64,
 		&cred.GCPScope,
+		&cred.ProxyURL,
 		&models,
 		&sessionStickyKeys,
 		&cred.Enabled,
@@ -199,13 +218,13 @@ func scanSQLCredential(scanner sqlx.Row) (ManagedProviderCredential, error) {
 	}
 	cred.SessionStickyKeys = &sessionStickyKeys
 	var err error
-	if cred.APIKeys, err = decodeCredentialList(apiKeys); err != nil {
+	if cred.APIKeys, err = sqlutil.DecodeJSONStrings(apiKeys); err != nil {
 		return ManagedProviderCredential{}, err
 	}
-	if cred.Models, err = decodeCredentialList(models); err != nil {
+	if cred.Models, err = sqlutil.DecodeJSONStrings(models); err != nil {
 		return ManagedProviderCredential{}, err
 	}
-	cred.CreatedAt = time.Unix(createdAt, 0).UTC()
-	cred.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+	cred.CreatedAt = sqlutil.TimeFromUnix(createdAt)
+	cred.UpdatedAt = sqlutil.TimeFromUnix(updatedAt)
 	return cred, nil
 }

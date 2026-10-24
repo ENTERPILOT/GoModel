@@ -173,12 +173,7 @@ var cacheDirectiveKeys = []string{
 }
 
 func hasCacheDirective(fields core.UnknownJSONFields) bool {
-	for _, key := range cacheDirectiveKeys {
-		if len(fields.Lookup(key)) > 0 {
-			return true
-		}
-	}
-	return false
+	return fields.HasAny(cacheDirectiveKeys...)
 }
 
 func hasChatCacheDirective(req *core.ChatRequest, prefix []core.Message) bool {
@@ -315,7 +310,7 @@ func markOpenAIChatBreakpoint(messages *[]core.Message) bool {
 			return true
 		case []core.ContentPart:
 			for j := len(content) - 1; j >= 0; j-- {
-				if content[j].Type == "text" || content[j].Type == "image_url" || content[j].Type == "input_audio" {
+				if content[j].Type == "text" || content[j].Type == "image_url" || content[j].Type == "input_audio" || content[j].Type == "file" {
 					parts := slices.Clone(content)
 					parts[j].ExtraFields = mergeCacheExtras(parts[j].ExtraFields, map[string]json.RawMessage{
 						"prompt_cache_breakpoint": json.RawMessage(`{"mode":"explicit"}`),
@@ -510,8 +505,13 @@ func (d *prefixDigest) key() string {
 	return "gomodel-" + hex.EncodeToString(d.hash.Sum(nil)[:16])
 }
 
+// cacheModelSeparators folds the separators model names vary on, so the
+// family checks below match "gpt-5.6", "gpt_5_6" and "GPT-5-6" alike. It is
+// built once: providerCacheMinimum runs twice per planned request.
+var cacheModelSeparators = strings.NewReplacer(".", "-", "_", "-")
+
 func providerCacheMinimum(profile promptCacheProfile, model string) int {
-	model = strings.NewReplacer(".", "-", "_", "-").Replace(strings.ToLower(model))
+	model = cacheModelSeparators.Replace(strings.ToLower(model))
 	switch profile.mode {
 	case promptCacheOpenAI:
 		return 1024

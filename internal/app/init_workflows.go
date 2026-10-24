@@ -1,19 +1,29 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"log/slog"
+	"maps"
 	"strings"
 	"time"
 
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/pluginload"
+	"github.com/enterpilot/gomodel/internal/plugins"
+	"github.com/enterpilot/gomodel/internal/plugins/builtin"
 	"github.com/enterpilot/gomodel/internal/server"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
 	"github.com/enterpilot/gomodel/internal/workflows"
+	"github.com/enterpilot/gomodel/pluginapi"
 )
 
 // initWorkflows builds guardrails, the workflows that reference them, and
@@ -26,35 +36,43 @@ func (b *bootstrap) initWorkflows() error {
 	vm := app.virtualModels.Service
 
 	refreshInterval := workflowRefreshInterval(appCfg)
-	var guardrailExecutor guardrails.ChatCompletionExecutor = app.providers.Router
+	var guardrailExecutor plugins.ChatCompleter = app.providers.Router
 	if vm != nil {
 		guardrailExecutor = virtualmodels.NewChatExecutor(app.providers.Router, vm)
 	}
 
-	// Initialize reusable guardrail definitions using shared storage when already available.
-	guardrailResult, err := guardrails.New(b.ctx, app.storage, refreshInterval, guardrailExecutor)
-	if err != nil {
-		return fmt.Errorf("failed to initialize guardrails: %w", err)
+	catalog := app.pluginCatalog
+	if catalog == nil && pluginsEnabled(appCfg) {
+		built, err := buildPluginCatalog(appCfg, b.cfg.Extensions)
+		if err != nil {
+			return err
+		}
+		catalog = built
+		app.pluginCatalog = catalog
 	}
-	app.guardrails = guardrailResult
-	app.register(subsystemGuardrails, ownedByShutdown, app.guardrails.Close)
 
-	b.seedGuardrails, err = configGuardrailDefinitions(appCfg.Guardrails)
-	if err != nil {
-		return fmt.Errorf("failed to prepare guardrail definitions: %w", err)
-	}
-	if err := guardrailResult.Service.UpsertDefinitions(b.ctx, b.seedGuardrails); err != nil {
-		return fmt.Errorf("failed to upsert guardrails: %w", err)
+	// The guardrails service exists only with the plugin system on; without
+	// it workflows compile with no guardrail steps and the guardrail admin
+	// endpoints report the feature unavailable.
+	var guardrailRegistry guardrails.Catalog
+	var guardrailNames []string
+	if catalog != nil {
+		service, err := b.initGuardrails(refreshInterval, catalog, guardrailExecutor)
+		if err != nil {
+			return err
+		}
+		guardrailRegistry = service
+		guardrailNames = service.Names()
 	}
 
 	b.featureCaps = runtimeWorkflowFeatureCaps(appCfg)
-	workflowCompiler := workflows.NewCompilerWithFeatureCaps(guardrailResult.Service, b.featureCaps)
+	workflowCompiler := workflows.NewCompilerWithFeatureCaps(guardrailRegistry, b.featureCaps)
 	workflowResult, err := workflows.New(b.ctx, app.storage, workflowCompiler, refreshInterval)
 	if err != nil {
 		return fmt.Errorf("failed to initialize workflows: %w", err)
 	}
 	app.register(subsystemWorkflows, ownedByShutdown, workflowResult.Close)
-	defaultWorkflow := defaultWorkflowInput(appCfg, guardrailResult.Service.Names(), b.seedGuardrails)
+	defaultWorkflow := defaultWorkflowInput(appCfg, guardrailNames, b.seedGuardrails)
 	if err := workflowResult.Service.EnsureDefaultGlobal(b.ctx, defaultWorkflow); err != nil {
 		return fmt.Errorf("failed to seed workflows: %w", err)
 	}
@@ -62,6 +80,9 @@ func (b *bootstrap) initWorkflows() error {
 		return fmt.Errorf("failed to load workflows: %w", err)
 	}
 	app.workflows = workflowResult
+	if app.guardrails != nil && app.guardrails.Service != nil {
+		app.secretRotation.watchEntities(guardrails.DefinitionSecretEntity+".", guardrailSecrets{guardrails: app.guardrails.Service, workflows: workflowResult.Service})
+	}
 
 	authKeyResult, err := authkeys.New(b.ctx, app.storage)
 	if err != nil {
@@ -76,7 +97,85 @@ func (b *bootstrap) initWorkflows() error {
 	return nil
 }
 
-func configGuardrailDefinitions(cfg config.GuardrailsConfig) ([]guardrails.Definition, error) {
+// initGuardrails builds the guardrails service over the plugin catalog and
+// seeds the instances declared in the configuration.
+func (b *bootstrap) initGuardrails(refreshInterval time.Duration, catalog *plugins.Catalog, executor plugins.ChatCompleter) (*guardrails.Service, error) {
+	app := b.app
+	result, err := guardrails.New(b.ctx, app.storage, app.secrets, refreshInterval, catalog, plugins.HostDeps{
+		Logger: slog.Default(),
+		Chat:   executor,
+	}, b.cfg.AppConfig.Secrets)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize guardrails: %w", err)
+	}
+	app.guardrails = result
+	app.register(subsystemGuardrails, ownedByShutdown, app.guardrails.Close)
+
+	b.seedGuardrails, err = configGuardrailDefinitions(b.ctx, b.appCfg.Guardrails, catalog, b.cfg.AppConfig.Secrets)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare guardrail definitions: %w", err)
+	}
+	if err := result.Service.UpsertDefinitions(b.ctx, b.seedGuardrails); err != nil {
+		// The definitions were saved and applied; only the post-save data key
+		// check failed, which `gomodel secrets reencrypt` repairs.
+		if !errors.Is(err, encryption.ErrSealUnconfirmed) {
+			return nil, fmt.Errorf("failed to upsert guardrails: %w", err)
+		}
+		slog.Warn("configured guardrails were saved, but their data key could not be confirmed", "error", err)
+	}
+	return result.Service, nil
+}
+
+// pluginsEnabled reports whether the plugin system is on. Guardrails imply
+// it: config.Load applies that at load time, and it is honoured here as
+// well for configurations built in code.
+func pluginsEnabled(cfg *config.Config) bool {
+	return cfg != nil && (cfg.Plugins.Enabled || cfg.Guardrails.Enabled)
+}
+
+// buildPluginCatalog registers the built-in plugins, the plugins compiled in
+// through the ext registry, and the shared objects listed in the
+// configuration.
+func buildPluginCatalog(appCfg *config.Config, extensions *ext.Registry) (*plugins.Catalog, error) {
+	catalog := plugins.NewCatalog()
+	for _, factory := range builtin.All() {
+		if err := catalog.Register(factory, plugins.SourceBuiltin); err != nil {
+			return nil, fmt.Errorf("failed to register built-in plugin: %w", err)
+		}
+	}
+	if extensions != nil {
+		for _, factory := range extensions.Plugins() {
+			if err := catalog.Register(plugins.Factory(factory), plugins.SourceRegistered); err != nil {
+				return nil, fmt.Errorf("failed to register extension plugin: %w", err)
+			}
+		}
+	}
+	if appCfg == nil {
+		return catalog, nil
+	}
+	loaded, err := pluginload.Load(appCfg.Plugins)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load plugins: %w", err)
+	}
+	for _, l := range loaded {
+		if err := catalog.Register(l.Factory, plugins.Source(l.Path), plugins.RegisterOptions{SingleInstance: l.SingleInstance}); err != nil {
+			return nil, fmt.Errorf("failed to register plugin %s: %w", l.Path, err)
+		}
+		slog.Info("plugin loaded", "name", l.Manifest.Name, "version", l.Manifest.Version, "path", l.Path)
+	}
+	return catalog, nil
+}
+
+// configGuardrailDefinitions converts configured guardrail rules into
+// definitions. The typed system_prompt and llm_based_altering blocks are
+// folded into the generic config; a catalog, when given, rejects unknown
+// types early.
+//
+// The generic config block reaches here with its secret references in place
+// (see config.GuardrailRuleConfig.Config). Secret fields keep them, so the
+// guardrail store holds references and the guardrail service resolves them
+// when it builds the instance; every other field is resolved here.
+func configGuardrailDefinitions(ctx context.Context, cfg config.GuardrailsConfig, catalog *plugins.Catalog, secrets *config.Secrets) ([]guardrails.Definition, error) {
 	if !cfg.Enabled {
 		return nil, nil
 	}
@@ -84,56 +183,113 @@ func configGuardrailDefinitions(cfg config.GuardrailsConfig) ([]guardrails.Defin
 	definitions := make([]guardrails.Definition, 0, len(cfg.Rules))
 	for i, rule := range cfg.Rules {
 		name := strings.TrimSpace(rule.Name)
-		ruleType := strings.ToLower(strings.TrimSpace(rule.Type))
-		switch ruleType {
-		case "llm-based-altering":
-			ruleType = "llm_based_altering"
-		}
+		ruleType := normalizeGuardrailRuleType(rule.Type)
 		if name == "" {
 			return nil, fmt.Errorf("guardrail rule #%d: name is required", i)
 		}
 		if ruleType == "" {
 			return nil, fmt.Errorf("guardrail rule #%d (%q): type is required", i, name)
 		}
-
-		var rawConfig []byte
-		var err error
-		switch ruleType {
-		case "system_prompt":
-			rawConfig, err = json.Marshal(map[string]any{
-				"mode":    rule.SystemPrompt.Mode,
-				"content": rule.SystemPrompt.Content,
-			})
-		case "llm_based_altering":
-			rawConfig, err = json.Marshal(map[string]any{
-				"model":               rule.LLMBasedAltering.Model,
-				"provider":            rule.LLMBasedAltering.Provider,
-				"prompt":              rule.LLMBasedAltering.Prompt,
-				"roles":               rule.LLMBasedAltering.Roles,
-				"skip_content_prefix": rule.LLMBasedAltering.SkipContentPrefix,
-				"max_tokens":          rule.LLMBasedAltering.MaxTokens,
-			})
-		default:
-			return nil, fmt.Errorf("guardrail rule #%d (%q): unsupported type %q", i, name, ruleType)
+		var schema []pluginapi.Field
+		if catalog != nil {
+			entry, ok := catalog.Lookup(ruleType)
+			if !ok {
+				return nil, fmt.Errorf("guardrail rule #%d (%q): unsupported type %q", i, name, ruleType)
+			}
+			schema = entry.Manifest.ConfigSchema
 		}
+		ruleConfig, err := resolveGuardrailRuleConfig(ctx, secrets, schema, i, guardrailRuleConfig(rule, ruleType))
+		if err != nil {
+			return nil, fmt.Errorf("guardrail rule #%d (%q): %w", i, name, err)
+		}
+		rawConfig, err := json.Marshal(ruleConfig)
 		if err != nil {
 			return nil, fmt.Errorf("guardrail rule #%d (%q): marshal config: %w", i, name, err)
 		}
 		definitions = append(definitions, guardrails.Definition{
-			Name:     name,
-			Type:     ruleType,
-			UserPath: strings.TrimSpace(rule.UserPath),
-			Config:   rawConfig,
+			Name:      name,
+			Type:      ruleType,
+			UserPath:  strings.TrimSpace(rule.UserPath),
+			Config:    rawConfig,
+			FailMode:  strings.TrimSpace(rule.FailMode),
+			TimeoutMS: rule.TimeoutMS,
 		})
 	}
 	return definitions, nil
+}
+
+func normalizeGuardrailRuleType(raw string) string {
+	ruleType := strings.ToLower(strings.TrimSpace(raw))
+	switch ruleType {
+	case "llm-based-altering":
+		return "llm_based_altering"
+	case "system-prompt":
+		return "system_prompt"
+	}
+	return strings.TrimPrefix(ruleType, "plugin:")
+}
+
+// resolveGuardrailRuleConfig resolves the secret references in the fields of
+// rule i's config that are not secret fields of its plugin, as
+// guardrails.rules[i].config.<key>, and keeps secret fields as configured.
+// With no schema, every field is resolved.
+func resolveGuardrailRuleConfig(ctx context.Context, secrets *config.Secrets, schema []pluginapi.Field, i int, ruleConfig map[string]any) (map[string]any, error) {
+	secretKeys := make(map[string]struct{})
+	for _, field := range schema {
+		if field.Input == pluginapi.InputSecret {
+			secretKeys[field.Key] = struct{}{}
+		}
+	}
+	plain := make(map[string]any, len(ruleConfig))
+	resolved := make(map[string]any, len(ruleConfig))
+	for key, value := range ruleConfig {
+		if _, secret := secretKeys[key]; secret {
+			resolved[key] = value
+			continue
+		}
+		plain[key] = value
+	}
+	if err := secrets.ResolveFields(ctx, fmt.Sprintf("guardrails.rules[%d].config", i), &plain); err != nil {
+		return nil, err
+	}
+	maps.Copy(resolved, plain)
+	return resolved, nil
+}
+
+// guardrailRuleConfig returns the plugin config of a rule: the generic
+// config block, or the typed legacy block for the two original types.
+func guardrailRuleConfig(rule config.GuardrailRuleConfig, ruleType string) map[string]any {
+	if len(rule.Config) > 0 {
+		return rule.Config
+	}
+	switch ruleType {
+	case "system_prompt":
+		return map[string]any{
+			"mode":    rule.SystemPrompt.Mode,
+			"content": rule.SystemPrompt.Content,
+		}
+	case "llm_based_altering":
+		cfg := map[string]any{
+			"model":               rule.LLMBasedAltering.Model,
+			"provider":            rule.LLMBasedAltering.Provider,
+			"prompt":              rule.LLMBasedAltering.Prompt,
+			"roles":               rule.LLMBasedAltering.Roles,
+			"skip_content_prefix": rule.LLMBasedAltering.SkipContentPrefix,
+		}
+		if rule.LLMBasedAltering.MaxTokens > 0 {
+			cfg["max_tokens"] = rule.LLMBasedAltering.MaxTokens
+		}
+		return cfg
+	default:
+		return map[string]any{}
+	}
 }
 
 func defaultWorkflowInput(cfg *config.Config, availableGuardrails []string, configuredGuardrails []guardrails.Definition) workflows.CreateInput {
 	failoverEnabled := failoverFeatureEnabledGlobally(cfg)
 	budgetEnabled := cfg.Budgets.Enabled
 	payload := workflows.Payload{
-		SchemaVersion: 1,
+		SchemaVersion: 2,
 		Features: workflows.FeatureFlags{
 			Cache:    responseCacheConfigured(cfg.Cache.Response),
 			Audit:    cfg.Logging.Enabled,
@@ -154,7 +310,7 @@ func defaultWorkflowInput(cfg *config.Config, availableGuardrails []string, conf
 		available[name] = struct{}{}
 	}
 	if cfg.Guardrails.Enabled && len(cfg.Guardrails.Rules) > 0 {
-		payload.Guardrails = make([]workflows.GuardrailStep, 0, len(cfg.Guardrails.Rules))
+		payload.Steps = make([]workflows.Step, 0, len(cfg.Guardrails.Rules))
 		for _, rule := range cfg.Guardrails.Rules {
 			name := strings.TrimSpace(rule.Name)
 			if name == "" {
@@ -165,13 +321,18 @@ func defaultWorkflowInput(cfg *config.Config, availableGuardrails []string, conf
 					continue
 				}
 			}
-			payload.Guardrails = append(payload.Guardrails, workflows.GuardrailStep{
-				Ref:  name,
-				Step: rule.Order,
+			phase := strings.ToLower(strings.TrimSpace(rule.Phase))
+			if phase == "" {
+				phase = workflows.PhasePrompt
+			}
+			payload.Steps = append(payload.Steps, workflows.Step{
+				Ref:   name,
+				Phase: phase,
+				Step:  rule.Order,
 			})
 		}
 	}
-	payload.Features.Guardrails = len(payload.Guardrails) > 0
+	payload.Features.Guardrails = len(payload.Steps) > 0
 
 	return workflows.CreateInput{
 		Scope:       workflows.Scope{},
@@ -242,4 +403,22 @@ func failoverResolver(cfg *config.Config, vm *virtualmodels.Service) server.Requ
 		return nil
 	}
 	return vm
+}
+
+// guardrailSecrets rotates guardrail secrets and recompiles the workflows, so
+// requests move to the rebuilt instances at once rather than on the next
+// periodic refresh. The rebuilt instance is installed and its secrets recorded
+// either way: if this recompile fails, the workflows' background refresh
+// (every workflows.refresh_interval) recompiles onto it, and the replaced
+// instance stays open until then (see guardrails.Service retireAfter).
+type guardrailSecrets struct {
+	guardrails *guardrails.Service
+	workflows  *workflows.Service
+}
+
+func (g guardrailSecrets) RotateSecrets(ctx context.Context, fields []string) error {
+	// A guardrail that failed keeps its instance while the others were
+	// rebuilt, so the workflows are recompiled either way.
+	err := g.guardrails.RotateSecrets(ctx, fields)
+	return errors.Join(err, g.workflows.Refresh(ctx))
 }

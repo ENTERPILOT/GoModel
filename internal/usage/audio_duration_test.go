@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/binary"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // buildWAV produces a canonical PCM WAV of the given duration so duration and
@@ -15,9 +18,8 @@ func buildWAV(t *testing.T, sampleRate, channels, bitsPerSample int, seconds flo
 
 	var buf bytes.Buffer
 	write := func(v any) {
-		if err := binary.Write(&buf, binary.LittleEndian, v); err != nil {
-			t.Fatalf("write wav: %v", err)
-		}
+		err := binary.Write(&buf, binary.LittleEndian, v)
+		require.NoError(t, err)
 	}
 	buf.WriteString("RIFF")
 	write(uint32(36 + dataLen))
@@ -77,11 +79,10 @@ func TestMP3DurationSeconds(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, ok := mp3DurationSeconds(tt.data)
-			if ok != tt.wantOK {
-				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
-			}
-			if ok && !nearlyEqual(got, tt.want) {
-				t.Errorf("seconds = %v, want %v", got, tt.want)
+			require.Equal(t, tt.wantOK, ok)
+
+			if ok {
+				assert.InDelta(t, tt.want, got, 1e-9)
 			}
 		})
 	}
@@ -92,9 +93,9 @@ func TestParseMP3FrameHeader_MPEG1(t *testing.T) {
 	// = 417 bytes per frame.
 	buf := []byte{0xFF, 0xFB, 0x90, 0xC0}
 	size, seconds, ok := parseMP3FrameHeader(buf)
-	if !ok || size != 417 || !nearlyEqual(seconds, 1152.0/44100) {
-		t.Errorf("got (%d, %v, %v), want (417, %v, true)", size, seconds, ok, 1152.0/44100)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, 417, size)
+	assert.InDelta(t, 1152.0/44100, seconds, 1e-9)
 }
 
 func TestMeasureSpeechDurationSeconds(t *testing.T) {
@@ -120,11 +121,10 @@ func TestMeasureSpeechDurationSeconds(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, ok := measureSpeechDurationSeconds(tt.data, tt.format)
-			if ok != tt.wantOK {
-				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
-			}
-			if ok && !nearlyEqual(got, tt.want) {
-				t.Errorf("seconds = %v, want %v", got, tt.want)
+			require.Equal(t, tt.wantOK, ok)
+
+			if ok {
+				assert.InDelta(t, tt.want, got, 1e-9)
 			}
 		})
 	}
@@ -135,15 +135,13 @@ func TestWavDurationSeconds_FallsBackToTrailingBytes(t *testing.T) {
 	// parser must fall back to the actual trailing byte count.
 	wav := buildWAV(t, 24000, 1, 16, 1.0)
 	idx := bytes.Index(wav, []byte("data"))
-	if idx < 0 {
-		t.Fatal("no data chunk")
-	}
+	require.GreaterOrEqual(t, idx, 0)
+
 	binary.LittleEndian.PutUint32(wav[idx+4:idx+8], 0xFFFFFFFF)
 
 	got, ok := wavDurationSeconds(wav)
-	if !ok || !nearlyEqual(got, 1.0) {
-		t.Errorf("got (%v, %v), want (1, true)", got, ok)
-	}
+	assert.True(t, ok)
+	assert.InDelta(t, 1.0, got, 1e-9)
 }
 
 func TestWavDurationSeconds_SkipsZeroLengthChunk(t *testing.T) {
@@ -151,15 +149,13 @@ func TestWavDurationSeconds_SkipsZeroLengthChunk(t *testing.T) {
 	// stop the walk; the duration is still derived from the following data chunk.
 	wav := buildWAV(t, 24000, 1, 16, 1.0)
 	idx := bytes.Index(wav, []byte("data"))
-	if idx < 0 {
-		t.Fatal("no data chunk")
-	}
+	require.GreaterOrEqual(t, idx, 0)
+
 	withEmptyChunk := append(append(append([]byte{}, wav[:idx]...), []byte("fact\x00\x00\x00\x00")...), wav[idx:]...)
 
 	got, ok := wavDurationSeconds(withEmptyChunk)
-	if !ok || !nearlyEqual(got, 1.0) {
-		t.Errorf("got (%v, %v), want (1, true)", got, ok)
-	}
+	assert.True(t, ok)
+	assert.InDelta(t, 1.0, got, 1e-9)
 }
 
 func TestNormalizeAudioFormat(t *testing.T) {
@@ -175,16 +171,6 @@ func TestNormalizeAudioFormat(t *testing.T) {
 		"":                        "",
 	}
 	for in, want := range cases {
-		if got := normalizeAudioFormat(in); got != want {
-			t.Errorf("normalizeAudioFormat(%q) = %q, want %q", in, got, want)
-		}
+		assert.Equal(t, want, normalizeAudioFormat(in))
 	}
-}
-
-func nearlyEqual(a, b float64) bool {
-	diff := a - b
-	if diff < 0 {
-		diff = -diff
-	}
-	return diff < 1e-9
 }

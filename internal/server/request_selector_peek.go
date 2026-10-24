@@ -27,16 +27,24 @@ type requestBodySelectorHints struct {
 	duplicate string
 }
 
-// seedRequestBodySelectorHints peeks selector hints from a body that ingress
-// did not capture. It returns an invalid-request error when the peek sees a
-// repeated top-level selector field.
+// seedRequestBodySelectorHints records the model, provider, and stream hints a
+// JSON request body carries. Managed routes are peeked within the limit, since
+// canonical decode later reads the whole body anyway. Opaque passthrough
+// bodies are forwarded as they are, so their model is the only thing the
+// allowlist can check: it is taken only from a complete body, however large,
+// which is buffered in full when it exceeds the peek limit. The error is a
+// body read failure, including the body-limit 413, or an invalid-request
+// error when the body repeats a top-level selector field.
 func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env *core.WhiteBoxPrompt) error {
 	if !shouldPeekRequestBodySelectors(req, bodyMode, env) {
 		return nil
 	}
 
 	if bodyMode == core.BodyModeOpaque {
-		hints := peekCompleteRequestBodySelectorHints(req)
+		hints, err := peekCompleteRequestBodySelectorHints(req, requestSelectorPeekLimit)
+		if err != nil {
+			return err
+		}
 		if hints.duplicate != "" {
 			return core.NewDuplicateSelectorFieldError(hints.duplicate)
 		}
@@ -104,30 +112,34 @@ func peekRequestBodySelectorHints(req *http.Request, limit int64) requestBodySel
 	return hints
 }
 
-// peekCompleteRequestBodySelectorHints reads the whole JSON body so the
-// selector hints it returns are authoritative for the exact bytes that will
-// be forwarded: a duplicate selector anywhere in the body is reported, and a
-// unique model is retained however large the body is. The body size is
-// already bounded by the body-limit middleware, and the body is restored
-// before returning so passthrough forwarding remains byte-for-byte unchanged.
-func peekCompleteRequestBodySelectorHints(req *http.Request) requestBodySelectorHints {
-	if req == nil || req.Body == nil {
-		return requestBodySelectorHints{}
+// peekCompleteRequestBodySelectorHints returns authoritative selector hints
+// from the entire body, which is what makes them safe to authorize on: an
+// opaque body is forwarded byte for byte, so a model field the upstream's
+// parser would see must be seen here too, including a repeat of it after a
+// long value. A body within limit is read once; a larger one is buffered in
+// full, bounded by the body-limit middleware ahead of this peek. The body is
+// restored before returning so forwarding remains unchanged. A read error is
+// returned as is, so the body limit's 413 reaches the client.
+func peekCompleteRequestBodySelectorHints(req *http.Request, limit int64) (requestBodySelectorHints, error) {
+	if req == nil || req.Body == nil || limit <= 0 {
+		return requestBodySelectorHints{}, nil
 	}
 
 	originalBody := req.Body
-	body, err := io.ReadAll(originalBody)
-	// Chaining originalBody keeps a read error (such as the body limit being
-	// exceeded) visible to the next reader instead of a clean EOF after the
-	// partial bytes.
+	body, err := io.ReadAll(io.LimitReader(originalBody, limit+1))
+	if err == nil && int64(len(body)) > limit {
+		var rest []byte
+		rest, err = io.ReadAll(originalBody)
+		body = append(body, rest...)
+	}
 	req.Body = &combinedReadCloser{
 		Reader: io.MultiReader(bytes.NewReader(body), originalBody),
 		rc:     originalBody,
 	}
 	if err != nil {
-		return requestBodySelectorHints{}
+		return requestBodySelectorHints{}, err
 	}
-	return decodeCompleteRequestBodySelectorHints(bytes.NewReader(body))
+	return decodeCompleteRequestBodySelectorHints(bytes.NewReader(body)), nil
 }
 
 func (hints requestBodySelectorHints) independentStreamHint() requestBodySelectorHints {

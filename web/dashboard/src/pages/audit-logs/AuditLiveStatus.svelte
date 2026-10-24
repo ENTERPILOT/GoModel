@@ -4,7 +4,6 @@
   // paused (filters, pagination, or a date range detached from today), and
   // a connecting note while the stream is down. Hidden entirely when the
   // deployment disables live logs.
-  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { liveLogs } from "./liveLogs.svelte.js";
   import { auditLivePauseMessage } from "./live-logs-logic.js";
   import * as m from "$lib/paraglide/messages.js";
@@ -13,7 +12,7 @@
   const live = $derived(liveLogs.liveLogsStreaming && !pauseReason);
 </script>
 
-{#if runtimeConfig.liveLogsVisible()}
+{#if liveLogs.liveLogsEnabled()}
   <span class="audit-live-status" role="status">
     <span class="live-dot" class:is-streaming={live} aria-hidden="true"></span>
     {#if !liveLogs.liveLogsStreaming}

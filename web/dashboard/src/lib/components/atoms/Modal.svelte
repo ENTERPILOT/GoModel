@@ -2,11 +2,13 @@
   // Overlay dialog whose backdrop/shell class names match dashboard.css
   // selectors. Handles Escape, backdrop click, body scroll
   // lock (via the modals store), and autofocus of [data-modal-autofocus].
+  // The overlay renders at the end of <body> (portal), outside the page's
+  // scrolling column, so no ancestor can clip it or paint over it.
   // Children render inside the shell; give the top-level child the dialog
   // role/class (e.g. <section class="model-editor" role="dialog">).
   import { untrack } from "svelte";
   import { modals } from "$lib/stores/ui.svelte.js";
-  import { autofocusWithin } from "$lib/utils/attachments.js";
+  import { autofocusWithin, portal } from "$lib/utils/attachments.js";
 
   let {
     open = false,
@@ -14,15 +16,21 @@
     // Class pair: "editor" (editor-modal-*) or "auth" (auth-dialog-*).
     variant = "editor",
     closeOnBackdrop = true,
+    // Rendered on top of another open modal (e.g. the discard confirmation
+    // over an editor): the modal below already dims the page, so lighten
+    // the backdrop and lift the shell above the modal underneath.
+    stacked = false,
     children,
   } = $props();
 
-  const backdropClass = $derived(
+  const backdropClass = $derived([
     variant === "auth" ? "auth-dialog-backdrop" : "editor-modal-backdrop",
-  );
-  const shellClass = $derived(
+    ...(stacked ? ["modal-stacked-backdrop"] : []),
+  ]);
+  const shellClass = $derived([
     variant === "auth" ? "auth-dialog-shell" : "editor-modal-shell",
-  );
+    ...(stacked ? ["modal-stacked-shell"] : []),
+  ]);
 
   $effect(() => {
     if (!open) return;
@@ -53,10 +61,12 @@
 </script>
 
 {#if open}
-  <div class={backdropClass} aria-hidden="true"></div>
-  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class={shellClass} onclick={onShellClick} {@attach autofocusWithin()}>
-    {@render children?.()}
+  <div {@attach portal}>
+    <div class={backdropClass} aria-hidden="true"></div>
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <div class={shellClass} onclick={onShellClick} {@attach autofocusWithin()}>
+      {@render children?.()}
+    </div>
   </div>
 {/if}
 
@@ -94,11 +104,28 @@
     overflow-y: auto;
   }
 
+  /* Stacked modal over another open modal: the modal below already dims
+     the page, so only dim a little more and sit above its shell. */
+  .modal-stacked-backdrop {
+    background: rgba(0, 0, 0, 0.16);
+    z-index: 95;
+  }
+
+  .modal-stacked-shell {
+    z-index: 100;
+  }
+
+  /* dvh is the height actually visible: on phones 100vh is the height with
+     the browser toolbars hidden, so a 100vh dialog runs off the top. The
+     dialog never scrolls sideways — a field whose intrinsic width (a select
+     with long option text) overflows must not make the form pannable. */
   .editor-modal-shell > :global(*) {
     width: min(760px, 100%);
     max-height: min(calc(100vh - 40px), 960px);
+    max-height: min(calc(100dvh - 40px), 960px);
     margin: 0;
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
     overscroll-behavior: contain;
     box-shadow: 0 24px 70px rgba(0, 0, 0, 0.38);
   }
@@ -117,6 +144,7 @@
 
     .editor-modal-shell > :global(*) {
         max-height: calc(100vh - 24px - env(safe-area-inset-bottom, 0px));
+        max-height: calc(100dvh - 24px - env(safe-area-inset-bottom, 0px));
       }
   }
 </style>
