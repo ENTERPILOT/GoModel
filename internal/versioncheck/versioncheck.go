@@ -352,5 +352,5 @@ func jitter(d time.Duration) time.Duration {
 	if d <= 0 {
 		return 0
 	}
-	return time.Duration(rand.Int64N(int64(d)))
+	return time.Duration(rand.Int64N(int64(d))) //nolint:gosec // Scheduling jitter, not a secret.
 }

@@ -71,7 +71,7 @@ func (c *LocalCache) Set(ctx context.Context, cache *ModelCache) error {
 
 	// Write atomically using temp file + rename
 	tmpFile := c.filePath + ".tmp"
-	if err := os.WriteFile(tmpFile, data, 0o644); err != nil {
+	if err := os.WriteFile(tmpFile, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write cache file: %w", err)
 	}
 	if err := os.Rename(tmpFile, c.filePath); err != nil {
