@@ -10,7 +10,10 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/responsestore"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestResponsesUtilityRoutesRejectNullBody(t *testing.T) {
@@ -27,12 +30,8 @@ func TestResponsesUtilityRoutesRejectNullBody(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (%s)", rec.Code, rec.Body.String())
-	}
-	if len(provider.capturedResponseUtilityReqs) != 0 {
-		t.Fatalf("utility calls = %d, want 0", len(provider.capturedResponseUtilityReqs))
-	}
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	require.Empty(t, provider.capturedResponseUtilityReqs)
 }
 
 func TestCancelResponseNormalizesNativeResponse(t *testing.T) {
@@ -52,16 +51,12 @@ func TestCancelResponseNormalizesNativeResponse(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
-	}
-	var resp core.ResponsesResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.ID != "resp_gateway" || resp.Object != "response" || resp.Provider != "mock" {
-		t.Fatalf("response = %+v, want gateway id/object/provider", resp)
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	resp := echotest.Decode[core.ResponsesResponse](t, rec)
+	require.Equal(t, "resp_gateway", resp.ID)
+	require.Equal(t, "response", resp.Object)
+	require.Equal(t, "mock", resp.Provider)
 }
 
 func TestCancelStoredResponseNormalizesPersistedResponse(t *testing.T) {
@@ -71,9 +66,8 @@ func TestCancelStoredResponseNormalizesPersistedResponse(t *testing.T) {
 		Provider:           "mock",
 		ProviderResponseID: "provider_resp",
 	})
-	if err != nil {
-		t.Fatalf("store.Create() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	provider := &mockProvider{
 		responseCancelResponse: &core.ResponsesResponse{
 			ID:       "provider_resp",
@@ -87,24 +81,18 @@ func TestCancelStoredResponseNormalizesPersistedResponse(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
-	}
-	var resp core.ResponsesResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.ID != "resp_gateway" || resp.Object != "response" || resp.Provider != "mock" {
-		t.Fatalf("response = %+v, want gateway id/object/provider", resp)
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	resp := echotest.Decode[core.ResponsesResponse](t, rec)
+	require.Equal(t, "resp_gateway", resp.ID)
+	require.Equal(t, "response", resp.Object)
+	require.Equal(t, "mock", resp.Provider)
 
 	stored, err := store.Get(context.Background(), "resp_gateway")
-	if err != nil {
-		t.Fatalf("store.Get() error = %v", err)
-	}
-	if stored.Response.ID != "resp_gateway" || stored.Response.Object != "response" || stored.Response.Provider != "mock" {
-		t.Fatalf("stored response = %+v, want normalized gateway id/object/provider", stored.Response)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "resp_gateway", stored.Response.ID)
+	require.Equal(t, "response", stored.Response.Object)
+	require.Equal(t, "mock", stored.Response.Provider)
 }
 
 func TestGetStoredResponseRefreshesNonTerminalSnapshot(t *testing.T) {
@@ -114,9 +102,8 @@ func TestGetStoredResponseRefreshesNonTerminalSnapshot(t *testing.T) {
 		Provider:           "mock",
 		ProviderResponseID: "provider_resp",
 	})
-	if err != nil {
-		t.Fatalf("store.Create() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	provider := &mockProvider{
 		responseGetResponse: &core.ResponsesResponse{
 			ID:       "provider_resp",
@@ -134,30 +121,20 @@ func TestGetStoredResponseRefreshesNonTerminalSnapshot(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
-	}
-	var resp core.ResponsesResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Status != "completed" {
-		t.Fatalf("status = %q, want completed", resp.Status)
-	}
-	if resp.ID != "resp_gateway" || resp.Object != "response" || resp.Provider != "mock" {
-		t.Fatalf("response = %+v, want gateway id/object/provider", resp)
-	}
-	if len(provider.responseGetCalls) != 1 || provider.responseGetCalls[0].id != "provider_resp" {
-		t.Fatalf("provider get calls = %+v, want one lookup of provider_resp", provider.responseGetCalls)
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	resp := echotest.Decode[core.ResponsesResponse](t, rec)
+	require.Equal(t, "completed", resp.Status)
+	require.Equal(t, "resp_gateway", resp.ID)
+	require.Equal(t, "response", resp.Object)
+	require.Equal(t, "mock", resp.Provider)
+	require.Len(t, provider.responseGetCalls, 1)
+	require.Equal(t, "provider_resp", provider.responseGetCalls[0].id)
 
 	stored, err := store.Get(context.Background(), "resp_gateway")
-	if err != nil {
-		t.Fatalf("store.Get() error = %v", err)
-	}
-	if stored.Response.Status != "completed" || stored.Response.ID != "resp_gateway" {
-		t.Fatalf("stored response = %+v, want persisted terminal snapshot", stored.Response)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "completed", stored.Response.Status)
+	require.Equal(t, "resp_gateway", stored.Response.ID)
 }
 
 func TestGetStoredResponseKeepsTerminalSnapshot(t *testing.T) {
@@ -167,9 +144,8 @@ func TestGetStoredResponseKeepsTerminalSnapshot(t *testing.T) {
 		Provider:           "mock",
 		ProviderResponseID: "provider_resp",
 	})
-	if err != nil {
-		t.Fatalf("store.Create() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	provider := &mockProvider{}
 	srv := New(provider, &Config{ResponseStore: store})
 
@@ -177,12 +153,8 @@ func TestGetStoredResponseKeepsTerminalSnapshot(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
-	}
-	if len(provider.responseGetCalls) != 0 {
-		t.Fatalf("provider get calls = %+v, want none for a terminal snapshot", provider.responseGetCalls)
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Empty(t, provider.responseGetCalls)
 }
 
 func TestGetStoredResponseKeepsConcurrentCancellation(t *testing.T) {
@@ -192,9 +164,8 @@ func TestGetStoredResponseKeepsConcurrentCancellation(t *testing.T) {
 		Provider:           "mock",
 		ProviderResponseID: "provider_resp",
 	})
-	if err != nil {
-		t.Fatalf("store.Create() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	provider := &mockProvider{
 		responseGetResponse: &core.ResponsesResponse{ID: "provider_resp", Object: "response", Status: "completed"},
 	}
@@ -205,9 +176,7 @@ func TestGetStoredResponseKeepsConcurrentCancellation(t *testing.T) {
 			Provider:           "mock",
 			ProviderResponseID: "provider_resp",
 		})
-		if updateErr != nil {
-			t.Errorf("store.Update() error = %v", updateErr)
-		}
+		assert.NoError(t, updateErr)
 	}
 	srv := New(provider, &Config{ResponseStore: store})
 
@@ -215,24 +184,14 @@ func TestGetStoredResponseKeepsConcurrentCancellation(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
-	}
-	var resp core.ResponsesResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Status != "cancelled" {
-		t.Fatalf("status = %q, want the cancellation to win", resp.Status)
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	resp := echotest.Decode[core.ResponsesResponse](t, rec)
+	require.Equal(t, "cancelled", resp.Status)
 
 	stored, err := store.Get(context.Background(), "resp_gateway")
-	if err != nil {
-		t.Fatalf("store.Get() error = %v", err)
-	}
-	if stored.Response.Status != "cancelled" {
-		t.Fatalf("stored status = %q, want cancelled", stored.Response.Status)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "cancelled", stored.Response.Status)
 }
 
 func TestGetStoredResponseServesSnapshotWhenRefreshFails(t *testing.T) {
@@ -253,9 +212,8 @@ func TestGetStoredResponseServesSnapshotWhenRefreshFails(t *testing.T) {
 				Provider:           "mock",
 				ProviderResponseID: "provider_resp",
 			})
-			if err != nil {
-				t.Fatalf("store.Create() error = %v", err)
-			}
+			require.NoError(t, err)
+
 			provider := &mockProvider{responseLifecycleErr: tt.lifecycleErr}
 			srv := New(provider, &Config{ResponseStore: store})
 
@@ -263,23 +221,15 @@ func TestGetStoredResponseServesSnapshotWhenRefreshFails(t *testing.T) {
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, req)
 
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
-			}
-			var resp core.ResponsesResponse
-			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-				t.Fatalf("decode response: %v", err)
-			}
-			if resp.Status != "in_progress" || resp.ID != "resp_gateway" {
-				t.Fatalf("response = %+v, want the stored snapshot", resp)
-			}
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+			resp := echotest.Decode[core.ResponsesResponse](t, rec)
+			require.Equal(t, "in_progress", resp.Status)
+			require.Equal(t, "resp_gateway", resp.ID)
+
 			stored, err := store.Get(context.Background(), "resp_gateway")
-			if err != nil {
-				t.Fatalf("store.Get() error = %v", err)
-			}
-			if stored.Response.Status != "in_progress" {
-				t.Fatalf("stored status = %q, want the snapshot left unchanged", stored.Response.Status)
-			}
+			require.NoError(t, err)
+			require.Equal(t, "in_progress", stored.Response.Status)
 		})
 	}
 }
@@ -309,9 +259,7 @@ func TestResponseLifecycleRoutesIgnoreJSONBody(t *testing.T) {
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, req)
 
-			if rec.Code != tt.want {
-				t.Fatalf("status = %d, want %d (%s)", rec.Code, tt.want, rec.Body.String())
-			}
+			require.Equal(t, tt.want, rec.Code, rec.Body.String())
 		})
 	}
 }
@@ -331,22 +279,15 @@ func TestNativeResponseByProviderWrapsContextCancellation(t *testing.T) {
 	})
 
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T %[1]v, want *core.GatewayError", err)
-	}
-	if gatewayErr.HTTPStatusCode() != http.StatusRequestTimeout {
-		t.Fatalf("status = %d, want 408", gatewayErr.HTTPStatusCode())
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, http.StatusRequestTimeout, gatewayErr.HTTPStatusCode())
 }
 
 func TestIsUnsupportedNativeResponseErrorUsesCode(t *testing.T) {
-	if !isUnsupportedNativeResponseError(unsupportedResponseOperation("response compaction is not supported")) {
-		t.Fatal("unsupportedResponseOperation should be recognized")
-	}
+	require.True(t, isUnsupportedNativeResponseError(unsupportedResponseOperation("response compaction is not supported")))
+
 	messageOnly := core.NewInvalidRequestErrorWithStatus(http.StatusNotImplemented, "response compaction is not supported", nil)
-	if isUnsupportedNativeResponseError(messageOnly) {
-		t.Fatal("message-only unsupported error should not be recognized")
-	}
+	require.False(t, isUnsupportedNativeResponseError(messageOnly))
 }
 
 func TestPaginateStoredResponseInputItemsSelectsOrderedWindow(t *testing.T) {
@@ -364,21 +305,13 @@ func TestPaginateStoredResponseInputItemsSelectsOrderedWindow(t *testing.T) {
 		Limit: 2,
 	})
 
-	if !resp.HasMore {
-		t.Fatal("HasMore = false, want true")
-	}
-	if resp.FirstID != "item_3" || resp.LastID != "item_2" {
-		t.Fatalf("first/last = %q/%q, want item_3/item_2", resp.FirstID, resp.LastID)
-	}
-	if got := responseInputItemID(resp.Data[0]); got != "item_3" {
-		t.Fatalf("data[0] id = %q, want item_3", got)
-	}
-	if got := responseInputItemID(resp.Data[1]); got != "item_2" {
-		t.Fatalf("data[1] id = %q, want item_2", got)
-	}
+	require.True(t, resp.HasMore)
+	require.Equal(t, "item_3", resp.FirstID)
+	require.Equal(t, "item_2", resp.LastID)
+	require.Equal(t, "item_3", responseInputItemID(resp.Data[0]))
+	require.Equal(t, "item_2", responseInputItemID(resp.Data[1]))
 
 	items[2][len(`{"id":"item_`)] = 'x'
-	if len(resp.Data) != 2 || responseInputItemID(resp.Data[0]) != "item_3" {
-		t.Fatal("paginated data should be cloned from the source items")
-	}
+	require.Len(t, resp.Data, 2)
+	require.Equal(t, "item_3", responseInputItemID(resp.Data[0]))
 }

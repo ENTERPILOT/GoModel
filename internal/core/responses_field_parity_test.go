@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/require"
 )
 
 // The utility request types must accept exactly the ResponsesRequest field set
@@ -27,9 +28,7 @@ func TestResponsesUtilityFieldParity(t *testing.T) {
 	slices.Sort(want)
 	got := slices.Clone(utility)
 	slices.Sort(got)
-	if !slices.Equal(got, want) {
-		t.Fatalf("ResponseInputTokensRequest fields = %v, want ResponsesRequest minus stream controls = %v", got, want)
-	}
+	require.Equal(t, want, got, "ResponseInputTokensRequest fields must be ResponsesRequest minus stream controls")
 }
 
 // InputTokensRequest must copy every field the utility type declares. Filled
@@ -41,32 +40,26 @@ func TestInputTokensRequestCopiesEveryField(t *testing.T) {
 	full.ExtraFields = UnknownJSONFieldsFromMap(map[string]json.RawMessage{"x_custom": json.RawMessage(`1`)})
 
 	reduced := full.InputTokensRequest()
-	if reduced == nil {
-		t.Fatal("InputTokensRequest() = nil")
-	}
+	require.NotNil(t, reduced)
 
 	rv := reflect.ValueOf(*reduced)
 	rt := rv.Type()
 	for i := range rt.NumField() {
 		field := rt.Field(i)
 		if field.Name == "ExtraFields" {
-			if reduced.ExtraFields.IsEmpty() {
-				t.Fatal("ExtraFields were not cloned")
-			}
+			require.False(t, reduced.ExtraFields.IsEmpty())
+
 			continue
 		}
-		if rv.Field(i).IsZero() {
-			t.Fatalf("InputTokensRequest() left %s zero-valued; the reduction must copy it", field.Name)
-		}
+		require.False(t, rv.Field(i).IsZero(), "InputTokensRequest() left %s zero-valued; the reduction must copy it", field.Name)
 	}
+	compact := full.CompactRequest()
+	require.NotNil(t, compact)
+	require.Equal(t, full.Model, compact.Model)
 
-	if compact := full.CompactRequest(); compact == nil || compact.Model != full.Model {
-		t.Fatalf("CompactRequest() = %+v, want model %q", compact, full.Model)
-	}
 	var nilReq *ResponsesRequest
-	if nilReq.InputTokensRequest() != nil || nilReq.CompactRequest() != nil {
-		t.Fatal("nil receiver must reduce to nil")
-	}
+	require.Nil(t, nilReq.InputTokensRequest())
+	require.Nil(t, nilReq.CompactRequest())
 }
 
 // fill sets every exported field of v to a non-zero value.

@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func storedConversation(id string, storedAt time.Time) *StoredConversation {
@@ -27,51 +29,36 @@ func storedConversation(id string, storedAt time.Time) *StoredConversation {
 func TestMemoryStoreCreateGetDelete(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()
-
-	if err := store.Create(ctx, storedConversation("conv_1", time.Time{})); err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
+	err := store.Create(ctx, storedConversation("conv_1", time.Time{}))
+	require.NoError(t, err)
 
 	got, err := store.Get(ctx, "conv_1")
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-	if got.Conversation.ID != "conv_1" {
-		t.Fatalf("id = %q, want conv_1", got.Conversation.ID)
-	}
-
-	if err := store.Delete(ctx, "conv_1"); err != nil {
-		t.Fatalf("Delete() error = %v", err)
-	}
-	if _, err := store.Get(ctx, "conv_1"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Get() after delete error = %v, want ErrNotFound", err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "conv_1", got.Conversation.ID)
+	err = store.Delete(ctx, "conv_1")
+	require.NoError(t, err)
+	_, err = store.Get(ctx, "conv_1")
+	require.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestMemoryStoreCreateRejectsDuplicate(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()
-
-	if err := store.Create(ctx, storedConversation("conv_dup", time.Time{})); err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
-	if err := store.Create(ctx, storedConversation("conv_dup", time.Time{})); err == nil {
-		t.Fatal("Create() duplicate error = nil, want error")
-	}
+	err := store.Create(ctx, storedConversation("conv_dup", time.Time{}))
+	require.NoError(t, err)
+	require.Error(t, store.Create(ctx, storedConversation("conv_dup", time.Time{})))
 }
 
 func TestMemoryStoreDeleteMissingReturnsNotFound(t *testing.T) {
-	if err := NewMemoryStore().Delete(context.Background(), "conv_missing"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Delete() error = %v, want ErrNotFound", err)
-	}
+	err := NewMemoryStore().Delete(context.Background(), "conv_missing")
+	require.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestMemoryStoreConcurrentAppendRejectsDuplicateItemID(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()
-	if err := store.Create(ctx, storedConversation("conv_duplicate_items", time.Time{})); err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
+	err := store.Create(ctx, storedConversation("conv_duplicate_items", time.Time{}))
+	require.NoError(t, err)
 
 	item := json.RawMessage(`{"id":"msg_shared","type":"message","role":"user","content":[]}`)
 	const writers = 32
@@ -100,40 +87,30 @@ func TestMemoryStoreConcurrentAppendRejectsDuplicateItemID(t *testing.T) {
 			t.Fatalf("AppendItems() unexpected error = %v", err)
 		}
 	}
-	if succeeded != 1 || duplicates != writers-1 {
-		t.Fatalf("append results = %d success, %d duplicate; want 1/%d", succeeded, duplicates, writers-1)
-	}
+	require.Equal(t, 1, succeeded)
+	require.Equal(t, writers-1, duplicates)
+
 	got, err := store.Get(ctx, "conv_duplicate_items")
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-	if len(got.Items) != 1 {
-		t.Fatalf("stored items = %d, want 1", len(got.Items))
-	}
+	require.NoError(t, err)
+	require.Len(t, got.Items, 1)
 }
 
 func TestMemoryStoreDeleteExpiredReturnsNotFound(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore(WithTTL(time.Second))
-
-	if err := store.Create(ctx, storedConversation("conv_expired", time.Now().UTC().Add(-2*time.Second))); err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
-	if err := store.Delete(ctx, "conv_expired"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Delete() error = %v, want ErrNotFound", err)
-	}
+	err := store.Create(ctx, storedConversation("conv_expired", time.Now().UTC().Add(-2*time.Second)))
+	require.NoError(t, err)
+	err = store.Delete(ctx, "conv_expired")
+	require.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestMemoryStoreExpiresConversations(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore(WithTTL(time.Second))
-
-	if err := store.Create(ctx, storedConversation("conv_old", time.Now().UTC().Add(-2*time.Second))); err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
-	if _, err := store.Get(ctx, "conv_old"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Get() error = %v, want ErrNotFound", err)
-	}
+	err := store.Create(ctx, storedConversation("conv_old", time.Now().UTC().Add(-2*time.Second)))
+	require.NoError(t, err)
+	_, err = store.Get(ctx, "conv_old")
+	require.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestMemoryStoreMaxEntriesEvictsOldest(t *testing.T) {
@@ -146,52 +123,40 @@ func TestMemoryStoreMaxEntriesEvictsOldest(t *testing.T) {
 		storedConversation("conv_2", now.Add(-2*time.Second)),
 		storedConversation("conv_3", now.Add(-1*time.Second)),
 	} {
-		if err := store.Create(ctx, conversation); err != nil {
-			t.Fatalf("Create(%s) error = %v", conversation.Conversation.ID, err)
-		}
+		err := store.Create(ctx, conversation)
+		require.NoError(t, err)
 	}
+	_, err := store.Get(ctx, "conv_1")
+	require.ErrorIs(t, err, ErrNotFound)
 
-	if _, err := store.Get(ctx, "conv_1"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Get(conv_1) error = %v, want ErrNotFound", err)
-	}
 	for _, id := range []string{"conv_2", "conv_3"} {
-		if _, err := store.Get(ctx, id); err != nil {
-			t.Fatalf("Get(%s) error = %v", id, err)
-		}
+		_, err := store.Get(ctx, id)
+		require.NoError(t, err)
 	}
 }
 
 func TestMemoryStoreDefaultRetentionIsBounded(t *testing.T) {
 	store := NewMemoryStore()
 
-	if store.ttl != DefaultMemoryStoreTTL {
-		t.Fatalf("ttl = %s, want %s", store.ttl, DefaultMemoryStoreTTL)
-	}
-	if store.maxEntries != DefaultMemoryStoreMaxEntries {
-		t.Fatalf("maxEntries = %d, want %d", store.maxEntries, DefaultMemoryStoreMaxEntries)
-	}
+	require.Equal(t, DefaultMemoryStoreTTL, store.ttl)
+	require.Equal(t, DefaultMemoryStoreMaxEntries, store.maxEntries)
 }
 
 func TestMemoryStoreGetReturnsIsolatedCopy(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()
-	if err := store.Create(ctx, storedConversation("conv_iso", time.Time{})); err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
+	err := store.Create(ctx, storedConversation("conv_iso", time.Time{}))
+	require.NoError(t, err)
 
 	first, err := store.Get(ctx, "conv_iso")
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	first.Conversation.Metadata["mutated"] = "true"
 
 	second, err := store.Get(ctx, "conv_iso")
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-	if _, mutated := second.Conversation.Metadata["mutated"]; mutated {
-		t.Fatal("stored conversation mutated through returned copy")
-	}
+	require.NoError(t, err)
+	_, mutated := second.Conversation.Metadata["mutated"]
+	require.False(t, mutated)
 }
 
 func TestMemoryStoreAppendItems(t *testing.T) {
@@ -200,27 +165,19 @@ func TestMemoryStoreAppendItems(t *testing.T) {
 		Conversation: &core.Conversation{ID: "conv_append", Object: "conversation"},
 		Items:        []json.RawMessage{json.RawMessage(`{"n":0}`)},
 	}
-	if err := store.Create(context.Background(), conv); err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
-
-	if err := store.AppendItems(context.Background(), "conv_append", []json.RawMessage{json.RawMessage(`{"n":1}`)}); err != nil {
-		t.Fatalf("AppendItems() error = %v", err)
-	}
-	if err := store.AppendItems(context.Background(), "conv_append", nil); err != nil {
-		t.Fatalf("AppendItems(empty) error = %v", err)
-	}
-	if err := store.AppendItems(context.Background(), "missing", []json.RawMessage{json.RawMessage(`{}`)}); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("AppendItems(missing) error = %v, want ErrNotFound", err)
-	}
+	err := store.Create(context.Background(), conv)
+	require.NoError(t, err)
+	err = store.AppendItems(context.Background(), "conv_append", []json.RawMessage{json.RawMessage(`{"n":1}`)})
+	require.NoError(t, err)
+	err = store.AppendItems(context.Background(), "conv_append", nil)
+	require.NoError(t, err)
+	err = store.AppendItems(context.Background(), "missing", []json.RawMessage{json.RawMessage(`{}`)})
+	require.ErrorIs(t, err, ErrNotFound)
 
 	got, err := store.Get(context.Background(), "conv_append")
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-	if len(got.Items) != 2 || string(got.Items[1]) != `{"n":1}` {
-		t.Fatalf("Items = %v, want initial item plus appended item", got.Items)
-	}
+	require.NoError(t, err)
+	require.Len(t, got.Items, 2)
+	require.Equal(t, `{"n":1}`, string(got.Items[1]))
 }
 
 func TestMemoryStoreMergeMetadataAndDeleteItem(t *testing.T) {
@@ -231,28 +188,21 @@ func TestMemoryStoreMergeMetadataAndDeleteItem(t *testing.T) {
 		json.RawMessage(`{"id":"msg_1","type":"message"}`),
 		json.RawMessage(`{"id":"msg_2","type":"message"}`),
 	}
-	if err := store.Create(context.Background(), conv); err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
+	err := store.Create(context.Background(), conv)
+	require.NoError(t, err)
 
 	merged, err := store.MergeMetadata(context.Background(), "conv_items", map[string]string{"new": "value"})
-	if err != nil {
-		t.Fatalf("MergeMetadata() error = %v", err)
-	}
-	if merged.Conversation.Metadata["existing"] != "kept" || merged.Conversation.Metadata["new"] != "value" || len(merged.Items) != 2 {
-		t.Fatalf("merged = %+v, want merged metadata and preserved items", merged)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "kept", merged.Conversation.Metadata["existing"])
+	require.Equal(t, "value", merged.Conversation.Metadata["new"])
+	require.Len(t, merged.Items, 2, "merged = %+v, want merged metadata and preserved items", merged)
 
 	updated, err := store.DeleteItem(context.Background(), "conv_items", "msg_1")
-	if err != nil {
-		t.Fatalf("DeleteItem() error = %v", err)
-	}
-	if len(updated.Items) != 1 || itemID(updated.Items[0]) != "msg_2" {
-		t.Fatalf("items = %s, want msg_2 only", updated.Items)
-	}
-	if _, err := store.DeleteItem(context.Background(), "conv_items", "missing"); !errors.Is(err, ErrItemNotFound) {
-		t.Fatalf("DeleteItem(missing) error = %v, want ErrItemNotFound", err)
-	}
+	require.NoError(t, err)
+	require.Len(t, updated.Items, 1)
+	require.Equal(t, "msg_2", itemID(updated.Items[0]))
+	_, err = store.DeleteItem(context.Background(), "conv_items", "missing")
+	require.ErrorIs(t, err, ErrItemNotFound)
 }
 
 func TestMemoryStoreMergeMetadataRejectsOversizedResult(t *testing.T) {
@@ -262,28 +212,21 @@ func TestMemoryStoreMergeMetadataRejectsOversizedResult(t *testing.T) {
 	for index := range core.MaxConversationMetadataPairs {
 		conv.Conversation.Metadata[fmt.Sprintf("key_%d", index)] = "value"
 	}
-	if err := store.Create(context.Background(), conv); err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
+	err := store.Create(context.Background(), conv)
+	require.NoError(t, err)
+	_, err = store.MergeMetadata(context.Background(), conv.Conversation.ID, map[string]string{"extra": "value"})
+	require.ErrorIs(t, err, ErrMetadataLimitExceeded)
 
-	if _, err := store.MergeMetadata(context.Background(), conv.Conversation.ID, map[string]string{"extra": "value"}); !errors.Is(err, ErrMetadataLimitExceeded) {
-		t.Fatalf("MergeMetadata() error = %v, want ErrMetadataLimitExceeded", err)
-	}
 	got, err := store.Get(context.Background(), conv.Conversation.ID)
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-	if len(got.Conversation.Metadata) != core.MaxConversationMetadataPairs {
-		t.Fatalf("metadata size = %d, want %d", len(got.Conversation.Metadata), core.MaxConversationMetadataPairs)
-	}
+	require.NoError(t, err)
+	require.Len(t, got.Conversation.Metadata, core.MaxConversationMetadataPairs)
 }
 
 func TestMemoryStoreAppendItems_ConcurrentAppendsAllSurvive(t *testing.T) {
 	store := NewMemoryStore()
 	conv := &StoredConversation{Conversation: &core.Conversation{ID: "conv_race", Object: "conversation"}}
-	if err := store.Create(context.Background(), conv); err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
+	err := store.Create(context.Background(), conv)
+	require.NoError(t, err)
 
 	const writers = 20
 	var wg sync.WaitGroup
@@ -292,34 +235,29 @@ func TestMemoryStoreAppendItems_ConcurrentAppendsAllSurvive(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			item := json.RawMessage(fmt.Sprintf(`{"writer":%d}`, n))
-			if err := store.AppendItems(context.Background(), "conv_race", []json.RawMessage{item}); err != nil {
-				t.Errorf("AppendItems() error = %v", err)
-			}
+			err := store.AppendItems(context.Background(), "conv_race", []json.RawMessage{item})
+			assert.NoError(t, err)
+
 		}(i)
 	}
 	wg.Wait()
 
 	got, err := store.Get(context.Background(), "conv_race")
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-	if len(got.Items) != writers {
-		t.Fatalf("Items = %d, want %d (no lost appends)", len(got.Items), writers)
-	}
+	require.NoError(t, err)
+	require.Len(t, got.Items, writers)
+
 	seen := make(map[int]int, writers)
 	for _, raw := range got.Items {
 		var item struct {
 			Writer int `json:"writer"`
 		}
-		if err := json.Unmarshal(raw, &item); err != nil {
-			t.Fatalf("unmarshal appended item: %v", err)
-		}
+		err := json.Unmarshal(raw, &item)
+		require.NoError(t, err)
+
 		seen[item.Writer]++
 	}
 	for i := range writers {
-		if seen[i] != 1 {
-			t.Fatalf("writer %d count = %d, want exactly once (no lost or duplicated appends)", i, seen[i])
-		}
+		require.Equal(t, 1, seen[i], "writer %d count = %d, want exactly once (no lost or duplicated appends)", i, seen[i])
 	}
 }
 
@@ -335,9 +273,9 @@ func TestMemoryStoreMaxBytesEvictsOldest(t *testing.T) {
 
 	// Size one entry via a probe store, then budget for exactly two.
 	probe := NewMemoryStore(WithTTL(0))
-	if err := probe.Create(ctx, large("probe", now)); err != nil {
-		t.Fatalf("Create(probe) error = %v", err)
-	}
+	err := probe.Create(ctx, large("probe", now))
+	require.NoError(t, err)
+
 	budget := 2*probe.totalBytes + 10
 
 	store := NewMemoryStore(WithTTL(0), WithMaxEntries(0), WithMaxBytes(budget))
@@ -346,18 +284,15 @@ func TestMemoryStoreMaxBytesEvictsOldest(t *testing.T) {
 		large("conv_2", now.Add(-2*time.Second)),
 		large("conv_3", now.Add(-1*time.Second)),
 	} {
-		if err := store.Create(ctx, conversation); err != nil {
-			t.Fatalf("Create(%d) error = %v", i, err)
-		}
+		err := store.Create(ctx, conversation)
+		require.NoError(t, err, "create conversation %d", i)
 	}
+	_, err = store.Get(ctx, "conv_1")
+	require.ErrorIs(t, err, ErrNotFound)
 
-	if _, err := store.Get(ctx, "conv_1"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Get(conv_1) error = %v, want ErrNotFound (oldest evicted)", err)
-	}
 	for _, id := range []string{"conv_2", "conv_3"} {
-		if _, err := store.Get(ctx, id); err != nil {
-			t.Fatalf("Get(%s) error = %v, want kept", id, err)
-		}
+		_, err := store.Get(ctx, id)
+		require.NoError(t, err)
 	}
 }
 
@@ -366,40 +301,27 @@ func TestMemoryStoreAppendItemsCountsTowardByteBudget(t *testing.T) {
 	now := time.Now().UTC()
 
 	store := NewMemoryStore(WithTTL(0), WithMaxEntries(0), WithMaxBytes(2100))
-	if err := store.Create(ctx, storedConversation("conv_old", now.Add(-time.Minute))); err != nil {
-		t.Fatalf("Create(conv_old) error = %v", err)
-	}
-	if err := store.Create(ctx, storedConversation("conv_grow", now)); err != nil {
-		t.Fatalf("Create(conv_grow) error = %v", err)
-	}
+	err := store.Create(ctx, storedConversation("conv_old", now.Add(-time.Minute)))
+	require.NoError(t, err)
+	err = store.Create(ctx, storedConversation("conv_grow", now))
+	require.NoError(t, err)
 
 	// Growing conv_grow within its own budget but past the total evicts the
 	// older conversation, never the one just appended to.
 	item := json.RawMessage(fmt.Sprintf(`{"type":"message","content":%q}`, strings.Repeat("x", 1800)))
-	if err := store.AppendItems(ctx, "conv_grow", []json.RawMessage{item}); err != nil {
-		t.Fatalf("AppendItems() error = %v", err)
-	}
+	err = store.AppendItems(ctx, "conv_grow", []json.RawMessage{item})
+	require.NoError(t, err)
+	_, err = store.Get(ctx, "conv_old")
+	require.ErrorIs(t, err, ErrNotFound)
 
-	if _, err := store.Get(ctx, "conv_old"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Get(conv_old) error = %v, want ErrNotFound (evicted by append growth)", err)
-	}
 	grown, err := store.Get(ctx, "conv_grow")
-	if err != nil {
-		t.Fatalf("Get(conv_grow) error = %v, want kept", err)
-	}
-	if len(grown.Items) != 1 {
-		t.Fatalf("conv_grow items = %d, want 1", len(grown.Items))
-	}
-	if store.totalBytes > 2100 {
-		t.Fatalf("totalBytes = %d, want <= 2100", store.totalBytes)
-	}
+	require.NoError(t, err)
+	require.Len(t, grown.Items, 1)
+	require.LessOrEqual(t, store.totalBytes, int64(2100))
+
 	_, exactSize, err := cloneConversationWithSize(grown)
-	if err != nil {
-		t.Fatalf("measure grown conversation: %v", err)
-	}
-	if store.sizes["conv_grow"] != exactSize {
-		t.Fatalf("recorded size = %d, exact serialized size = %d", store.sizes["conv_grow"], exactSize)
-	}
+	require.NoError(t, err)
+	require.Equal(t, exactSize, store.sizes["conv_grow"])
 }
 
 func TestMemoryStoreAppendItemsRejectsOversizeGrowth(t *testing.T) {
@@ -407,30 +329,21 @@ func TestMemoryStoreAppendItemsRejectsOversizeGrowth(t *testing.T) {
 	now := time.Now().UTC()
 
 	store := NewMemoryStore(WithTTL(0), WithMaxEntries(0), WithMaxBytes(2100))
-	if err := store.Create(ctx, storedConversation("conv_other", now.Add(-time.Minute))); err != nil {
-		t.Fatalf("Create(conv_other) error = %v", err)
-	}
-	if err := store.Create(ctx, storedConversation("conv_grow", now)); err != nil {
-		t.Fatalf("Create(conv_grow) error = %v", err)
-	}
+	err := store.Create(ctx, storedConversation("conv_other", now.Add(-time.Minute)))
+	require.NoError(t, err)
+	err = store.Create(ctx, storedConversation("conv_grow", now))
+	require.NoError(t, err)
 
 	// An append that would grow the conversation past the whole budget is
 	// rejected outright instead of evicting the store out from under it.
 	item := json.RawMessage(fmt.Sprintf(`{"type":"message","content":%q}`, strings.Repeat("x", 2500)))
-	if err := store.AppendItems(ctx, "conv_grow", []json.RawMessage{item}); err == nil {
-		t.Fatal("AppendItems() error = nil, want byte budget rejection")
-	}
+	require.Error(t, store.AppendItems(ctx, "conv_grow", []json.RawMessage{item}))
 
 	grown, err := store.Get(ctx, "conv_grow")
-	if err != nil {
-		t.Fatalf("Get(conv_grow) error = %v, want kept", err)
-	}
-	if len(grown.Items) != 0 {
-		t.Fatalf("conv_grow items = %d, want 0 (rejected append must not mutate)", len(grown.Items))
-	}
-	if _, err := store.Get(ctx, "conv_other"); err != nil {
-		t.Fatalf("Get(conv_other) error = %v, want untouched", err)
-	}
+	require.NoError(t, err)
+	require.Empty(t, grown.Items)
+	_, err = store.Get(ctx, "conv_other")
+	require.NoError(t, err)
 }
 
 func TestMemoryStoreAppendItemsNeverEvictsAppendedConversation(t *testing.T) {
@@ -438,30 +351,22 @@ func TestMemoryStoreAppendItemsNeverEvictsAppendedConversation(t *testing.T) {
 	now := time.Now().UTC()
 
 	store := NewMemoryStore(WithTTL(0), WithMaxEntries(0), WithMaxBytes(2100))
-	// conv_grow is the OLDEST entry — without protection, oldest-first
-	// eviction would drop it right after its own successful append.
-	if err := store.Create(ctx, storedConversation("conv_grow", now.Add(-time.Minute))); err != nil {
-		t.Fatalf("Create(conv_grow) error = %v", err)
-	}
-	if err := store.Create(ctx, storedConversation("conv_new", now)); err != nil {
-		t.Fatalf("Create(conv_new) error = %v", err)
-	}
+	err := // conv_grow is the OLDEST entry — without protection, oldest-first
+		// eviction would drop it right after its own successful append.
+		store.Create(ctx, storedConversation("conv_grow", now.Add(-time.Minute)))
+	require.NoError(t, err)
+	err = store.Create(ctx, storedConversation("conv_new", now))
+	require.NoError(t, err)
 
 	item := json.RawMessage(fmt.Sprintf(`{"type":"message","content":%q}`, strings.Repeat("x", 1800)))
-	if err := store.AppendItems(ctx, "conv_grow", []json.RawMessage{item}); err != nil {
-		t.Fatalf("AppendItems() error = %v", err)
-	}
+	err = store.AppendItems(ctx, "conv_grow", []json.RawMessage{item})
+	require.NoError(t, err)
 
 	grown, err := store.Get(ctx, "conv_grow")
-	if err != nil {
-		t.Fatalf("Get(conv_grow) error = %v, want protected from self-eviction", err)
-	}
-	if len(grown.Items) != 1 {
-		t.Fatalf("conv_grow items = %d, want 1", len(grown.Items))
-	}
-	if _, err := store.Get(ctx, "conv_new"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Get(conv_new) error = %v, want ErrNotFound (evicted instead)", err)
-	}
+	require.NoError(t, err)
+	require.Len(t, grown.Items, 1)
+	_, err = store.Get(ctx, "conv_new")
+	require.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestMemoryStoreRejectsConversationOverByteBudget(t *testing.T) {
@@ -469,7 +374,5 @@ func TestMemoryStoreRejectsConversationOverByteBudget(t *testing.T) {
 	store := NewMemoryStore(WithMaxBytes(100))
 	c := storedConversation("conv_big", time.Now().UTC())
 	c.Items = []json.RawMessage{json.RawMessage(fmt.Sprintf(`{"content":%q}`, strings.Repeat("x", 200)))}
-	if err := store.Create(ctx, c); err == nil {
-		t.Fatal("Create() error = nil, want byte budget rejection")
-	}
+	require.Error(t, store.Create(ctx, c))
 }

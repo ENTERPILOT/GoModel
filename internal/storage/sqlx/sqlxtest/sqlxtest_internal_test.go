@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsTransientCatalogRace(t *testing.T) {
@@ -23,9 +24,8 @@ func TestIsTransientCatalogRace(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isTransientCatalogRace(tt.err); got != tt.want {
-				t.Fatalf("isTransientCatalogRace(%v) = %v, want %v", tt.err, got, tt.want)
-			}
+			got := isTransientCatalogRace(tt.err)
+			require.Equal(t, tt.want, got, "isTransientCatalogRace(%v) = %v, want %v", tt.err, got, tt.want)
 		})
 	}
 }

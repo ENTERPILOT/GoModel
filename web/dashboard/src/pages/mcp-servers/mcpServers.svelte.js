@@ -9,18 +9,41 @@ import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
 import {
   buildMcpServerPayload,
+  buildMcpVirtualServerPayload,
+  defaultMcpVirtualServerForm,
+  mcpVirtualServerFormFromVirtual,
+  toggleMcpVirtualMember,
   defaultMcpCatalog,
   defaultMcpServerForm,
   deriveMcpServerSlug,
   filterMcpServers,
+  mcpDiscoveredTools,
   mcpServerFormFromServer,
+  mcpPollShouldRetry,
   mcpServerSlug,
+  mcpServersNeedPolling,
   mcpServerStatus,
   normalizeMcpCatalog,
+  setMcpToolsExposed,
+  switchMcpToolMode,
+  MCP_SERVERS_POLL_MS,
+  MCP_TOOL_MODE_ALLOW,
 } from "./mcp-servers.js";
 
 class McpServersState {
   servers = $state([]);
+  // Virtual servers, each served at /mcp/{name}. Config-declared ones are
+  // read-only (managed); the rest are edited here.
+  virtualServers = $state([]);
+  // Set when the virtual-server list failed to load, so the section shows the
+  // failure instead of an empty list.
+  virtualError = $state("");
+  virtualFormOpen = $state(false);
+  virtualFormMode = $state("create");
+  virtualForm = $state(defaultMcpVirtualServerForm());
+  virtualFormSubmitting = $state(false);
+  virtualFormError = $state("");
+  deletingVirtualName = $state("");
   available = $state(true);
   loading = $state(false);
   // Load and in-form errors only; row-action feedback goes through the
@@ -35,6 +58,15 @@ class McpServersState {
   advancedOpen = $state(false);
   form = $state(defaultMcpServerForm());
 
+  // Editor tool picker: every tool the server reports, exposed or not. A new
+  // server, or one that never listed, has none yet.
+  editorTools = $state({ loading: false, error: "", tools: [] });
+  toolQuery = $state("");
+  toolDraft = $state("");
+  // Bumped per editor catalog load, so a response for an editor session that
+  // was closed and reopened (same slug) cannot overwrite the newer one.
+  #toolLoadSeq = 0;
+
   deletingName = $state("");
   reconnectingName = $state("");
 
@@ -45,21 +77,54 @@ class McpServersState {
 
   filtered = $derived(filterMcpServers(this.servers, this.filter));
 
+  #pollTimer = null;
+  // stopPolling starts a new generation. A list request already in flight
+  // then belongs to the previous one: clearing the timer cannot cancel it, so
+  // the generation is what keeps its response from scheduling a fresh timer
+  // after the page is gone.
+  #pollGeneration = 0;
+  #pollFailures = 0;
+  // Row actions and the poll timer can both have a list request in flight.
+  // loadAdminList only reports "stale" when the API key changed, so the
+  // newest request wins here: an older response must not restore the list a
+  // delete just removed, or replace the timer the newer one scheduled.
+  #listSeq = 0;
+  #virtualSeq = 0;
+  // Bumped whenever the virtual-server editor opens or closes, so a save
+  // that finishes after the operator moved on cannot close or overwrite the
+  // editor they are using now.
+  #virtualFormSeq = 0;
+
   // --- server list -------------------------------------------------------
 
-  async fetchServers() {
+  // background=true is the poll loop re-fetching: it leaves the loading flag
+  // alone so the settled list never flickers back to the spinner.
+  async fetchServers({ background = false } = {}) {
+    // Both captured before the first await, so a cleanup or a newer request
+    // during any suspension of this one — not just the list call — retires it.
+    const generation = this.#pollGeneration;
+    const seq = ++this.#listSeq;
     // Wait for the shared runtime-config request before deciding whether the
     // MCP admin API is available.
     await runtimeConfig.ensureLoaded();
+    if (generation !== this.#pollGeneration) {
+      return;
+    }
     if (!runtimeConfig.mcpVisible()) {
+      this.stopPolling();
       this.available = false;
       this.servers = [];
+      this.#clearVirtualServers();
       this.error = "";
       this.loading = false;
       return;
     }
 
-    this.loading = true;
+    this.#clearPoll();
+    if (!background) {
+      this.loading = true;
+      this.#pollFailures = 0;
+    }
     this.error = "";
     try {
       const outcome = await loadAdminList("/admin/mcp-servers", {
@@ -67,12 +132,13 @@ class McpServersState {
         errorFallback: m.mcp_load_failed(),
         unavailableStatuses: [503, 404],
       });
-      if (outcome.status === "stale") {
+      if (outcome.status === "stale" || seq !== this.#listSeq) {
         return;
       }
       if (outcome.status === "unavailable") {
         this.available = false;
         this.servers = [];
+        this.#clearVirtualServers();
         return;
       }
       if (outcome.status === "error") {
@@ -81,15 +147,100 @@ class McpServersState {
         if (outcome.result) {
           this.available = true;
         }
+        // A failed background poll keeps the list it already has: a blip
+        // while waiting for a dial must not blank the table or replace it
+        // with an error the operator never asked for. It retries, since the
+        // pending row is exactly what the loop is waiting on, until the
+        // failure budget runs out.
+        if (background) {
+          this.#pollFailures += 1;
+          if (mcpPollShouldRetry(this.#pollFailures)) {
+            this.#schedulePoll(generation);
+          }
+          return;
+        }
         this.servers = [];
+        this.#clearVirtualServers();
         this.error = outcome.error;
         return;
       }
       this.available = true;
       this.servers = outcome.items;
+      this.#pollFailures = 0;
+      this.#schedulePoll(generation);
+      // A list response can land after the page was left; it must not start
+      // a request the cleanup can no longer retire.
+      if (!background && generation === this.#pollGeneration) {
+        void this.fetchVirtualServers();
+      }
     } finally {
-      this.loading = false;
+      if (!background && seq === this.#listSeq) {
+        this.loading = false;
+      }
     }
+  }
+
+  // Virtual servers load with the list and after their own edits; they skip
+  // the connect poll. A failed load keeps the last known list and reports the
+  // failure, so it never reads as "no virtual servers".
+  async fetchVirtualServers() {
+    const seq = ++this.#virtualSeq;
+    const outcome = await loadAdminList("/admin/mcp-virtual-servers", {
+      label: "mcp virtual servers",
+      errorFallback: m.mcp_virtual_load_failed(),
+      unavailableStatuses: [503, 404],
+    });
+    if (outcome.status === "stale" || seq !== this.#virtualSeq) {
+      return;
+    }
+    if (outcome.status === "error") {
+      this.virtualError = outcome.error || m.mcp_virtual_load_failed();
+      return;
+    }
+    this.virtualError = "";
+    this.virtualServers = outcome.status === "ok" ? outcome.items : [];
+  }
+
+  // Clearing also retires a virtual-list request in flight, so its response
+  // cannot bring the list back.
+  #clearVirtualServers() {
+    this.#virtualSeq += 1;
+    this.virtualServers = [];
+    this.virtualError = "";
+  }
+
+  // --- connect poll ------------------------------------------------------
+
+  #schedulePoll(generation) {
+    // The generation check comes first: a response from a stopped loop must
+    // not clear a timer a newer load already scheduled.
+    if (generation !== this.#pollGeneration) {
+      return;
+    }
+    this.#clearPoll();
+    if (!mcpServersNeedPolling(this.servers)) {
+      return;
+    }
+    this.#pollTimer = setTimeout(() => {
+      this.#pollTimer = null;
+      void this.fetchServers({ background: true });
+    }, MCP_SERVERS_POLL_MS);
+  }
+
+  #clearPoll() {
+    if (this.#pollTimer) {
+      clearTimeout(this.#pollTimer);
+      this.#pollTimer = null;
+    }
+  }
+
+  // stopPolling is called when the page is left, so neither a timer nor an
+  // in-flight request outlives it.
+  stopPolling() {
+    this.#pollGeneration += 1;
+    this.#virtualSeq += 1;
+    this.#pollFailures = 0;
+    this.#clearPoll();
   }
 
   // --- editor form -------------------------------------------------------
@@ -100,6 +251,7 @@ class McpServersState {
     this.advancedOpen = false;
     this.error = "";
     this.form = defaultMcpServerForm();
+    this.#resetEditorTools();
     this.formOpen = true;
   }
 
@@ -112,7 +264,9 @@ class McpServersState {
     this.advancedOpen = false;
     this.error = "";
     this.form = mcpServerFormFromServer(server);
+    this.#resetEditorTools();
     this.formOpen = true;
+    void this.#loadEditorTools(server);
   }
 
   closeForm() {
@@ -122,6 +276,57 @@ class McpServersState {
     this.advancedOpen = false;
     this.error = "";
     this.form = defaultMcpServerForm();
+    this.#resetEditorTools();
+  }
+
+  #resetEditorTools() {
+    this.#toolLoadSeq += 1;
+    this.editorTools = { loading: false, error: "", tools: [] };
+    this.toolQuery = "";
+    this.toolDraft = "";
+  }
+
+  async #loadEditorTools(server) {
+    const seq = ++this.#toolLoadSeq;
+    this.editorTools = { ...this.editorTools, loading: true, error: "" };
+    const loaded = await this.#fetchCatalog(server);
+    // The editor may have closed, reopened, or moved to another server.
+    if (seq !== this.#toolLoadSeq) {
+      return;
+    }
+    if (loaded.stale) {
+      this.editorTools = { ...this.editorTools, loading: false };
+      return;
+    }
+    this.editorTools = {
+      loading: false,
+      error: loaded.error || "",
+      tools: loaded.error ? [] : mcpDiscoveredTools(loaded.catalog),
+    };
+  }
+
+  setToolsExposed(names, exposed) {
+    this.form.tool_names = setMcpToolsExposed(this.form, names, exposed);
+  }
+
+  switchToolMode(mode) {
+    const next = switchMcpToolMode(this.form, mode, this.editorTools.tools);
+    this.form.tool_mode = next.tool_mode;
+    this.form.tool_names = next.tool_names;
+  }
+
+  addToolDraft() {
+    const name = this.toolDraft.trim();
+    if (!name) {
+      return;
+    }
+    // Adding a name lists it in the current mode: excluded or allowed.
+    this.setToolsExposed([name], this.form.tool_mode === MCP_TOOL_MODE_ALLOW);
+    this.toolDraft = "";
+  }
+
+  removeToolName(name) {
+    this.form.tool_names = (this.form.tool_names || []).filter((item) => item !== name);
   }
 
   syncSlugFromName() {
@@ -145,7 +350,7 @@ class McpServersState {
   }
 
   async submitForm() {
-    const built = buildMcpServerPayload(this.form, this.formMode, this.servers);
+    const built = buildMcpServerPayload(this.form, this.formMode, this.servers, this.virtualServers);
     if (built.error) {
       this.error = built.error;
       return;
@@ -183,6 +388,134 @@ class McpServersState {
       void this.fetchServers();
     } finally {
       this.formSubmitting = false;
+    }
+  }
+
+  // --- virtual server editor ----------------------------------------------
+
+  openVirtualCreate() {
+    this.#virtualFormSeq += 1;
+    this.virtualFormMode = "create";
+    this.virtualFormError = "";
+    this.virtualForm = defaultMcpVirtualServerForm();
+    this.virtualFormOpen = true;
+  }
+
+  openVirtualEdit(virtual) {
+    if (!virtual || virtual.managed) {
+      return;
+    }
+    this.#virtualFormSeq += 1;
+    this.virtualFormMode = "edit";
+    this.virtualFormError = "";
+    this.virtualForm = mcpVirtualServerFormFromVirtual(virtual);
+    this.virtualFormOpen = true;
+  }
+
+  closeVirtualForm() {
+    this.#virtualFormSeq += 1;
+    this.virtualFormOpen = false;
+    this.virtualFormMode = "create";
+    this.virtualFormError = "";
+    this.virtualForm = defaultMcpVirtualServerForm();
+  }
+
+  toggleVirtualMember(slug) {
+    this.virtualForm.servers = toggleMcpVirtualMember(this.virtualForm.servers, slug);
+  }
+
+  async submitVirtualForm() {
+    const built = buildMcpVirtualServerPayload(
+      this.virtualForm,
+      this.virtualFormMode,
+      this.virtualServers,
+      this.servers,
+    );
+    if (built.error) {
+      this.virtualFormError = built.error;
+      return;
+    }
+    this.virtualFormError = "";
+    this.virtualFormSubmitting = true;
+    const formSeq = this.#virtualFormSeq;
+    try {
+      const outcome = await sendAdminMutation("/admin/mcp-virtual-servers", "PUT", built.payload, {
+        label: "save mcp virtual server",
+        errorFallback: m.mcp_virtual_save_failed(),
+        unavailableMessage: m.mcp_unavailable(),
+      });
+      if (outcome.status === "stale") {
+        return;
+      }
+      // The editor that submitted may be gone: report the outcome without
+      // touching the one open now.
+      const sameEditor = formSeq === this.#virtualFormSeq;
+      if (outcome.status === "unavailable") {
+        this.available = false;
+        if (sameEditor) {
+          this.virtualFormError = outcome.error;
+        } else {
+          flash.error(outcome.error);
+        }
+        return;
+      }
+      if (outcome.status === "error") {
+        if (sameEditor) {
+          this.virtualFormError = outcome.error;
+        } else {
+          flash.error(outcome.error);
+        }
+        return;
+      }
+      flash.success(m.mcp_virtual_saved({ name: built.payload.name }));
+      if (sameEditor) {
+        this.closeVirtualForm();
+      }
+      void this.fetchVirtualServers();
+    } finally {
+      this.virtualFormSubmitting = false;
+    }
+  }
+
+  async deleteVirtualServer(virtual) {
+    const name = String(virtual?.name || "");
+    if (!name || this.deletingVirtualName || virtual.managed) {
+      return;
+    }
+    if (!confirm(m.mcp_virtual_delete_confirm({ name }))) {
+      return;
+    }
+    this.deletingVirtualName = name;
+    try {
+      const outcome = await sendAdminMutation(
+        "/admin/mcp-virtual-servers/" + encodeURIComponent(name),
+        "DELETE",
+        undefined,
+        {
+          label: "delete mcp virtual server",
+          errorFallback: m.mcp_virtual_delete_failed(),
+          unavailableMessage: m.mcp_unavailable(),
+        },
+      );
+      if (outcome.status === "stale") {
+        return;
+      }
+      if (outcome.status === "unavailable") {
+        this.available = false;
+        flash.error(outcome.error);
+        return;
+      }
+      if (outcome.status === "error") {
+        flash.error(outcome.error);
+        return;
+      }
+      flash.success(m.mcp_virtual_deleted({ name }));
+      if (this.virtualFormOpen && this.virtualForm.name === name) {
+        this.closeVirtualForm();
+      }
+      void this.fetchVirtualServers();
+    } finally {
+      this.deletingVirtualName = "";
     }
   }
 
@@ -298,7 +631,6 @@ class McpServersState {
   // so it does not map onto the shared list/mutation ladder.
 
   async openCatalog(server) {
-    const name = String((server && server.name) || "").trim();
     const slug = mcpServerSlug(server);
     if (!slug) {
       return;
@@ -313,39 +645,62 @@ class McpServersState {
       status: mcpServerStatus(server),
     };
 
+    const loaded = await this.#fetchCatalog(server);
+    this.catalogLoading = false;
+    if (loaded.stale) {
+      return;
+    }
+    if (loaded.error) {
+      this.catalogError = loaded.error;
+      return;
+    }
+    this.catalog = loaded.catalog;
+  }
+
+  // chooseToolsFromCatalog jumps from the read-only inspector to the editor's
+  // tool picker for the same server.
+  chooseToolsFromCatalog() {
+    const server = (this.servers || []).find(
+      (item) => mcpServerSlug(item) === this.catalog.server,
+    );
+    if (!server || server.managed) {
+      return;
+    }
+    this.closeCatalog();
+    this.openEdit(server);
+  }
+
+  // #fetchCatalog resolves to { catalog }, { error }, or { stale }.
+  async #fetchCatalog(server) {
+    const name = String((server && server.name) || "").trim();
+    const slug = mcpServerSlug(server);
     try {
       const result = await getJSON(
         "/admin/mcp-servers/" + encodeURIComponent(slug) + "/catalog",
         { label: "mcp server catalog" },
       );
       if (result.stale) {
-        return;
+        return { stale: true };
       }
       if (result.status === 503) {
         this.available = false;
-        this.catalogError = m.mcp_unavailable();
-        return;
+        return { error: m.mcp_unavailable() };
       }
       if (result.status === 404) {
-        this.catalogError = m.mcp_not_found({ name });
-        return;
+        return { error: m.mcp_not_found({ name }) };
       }
       if (!result.ok) {
-        this.catalogError =
-          result.status === 401
-            ? m.common_authentication_required()
-            : errorPayloadMessage(
-                result.data,
-                m.mcp_catalog_load_failed(),
-              );
-        return;
+        return {
+          error:
+            result.status === 401
+              ? m.common_authentication_required()
+              : errorPayloadMessage(result.data, m.mcp_catalog_load_failed()),
+        };
       }
-      this.catalog = normalizeMcpCatalog(slug, result.data);
+      return { catalog: normalizeMcpCatalog(slug, result.data) };
     } catch (e) {
       console.error("Failed to load MCP server catalog:", e);
-      this.catalogError = m.mcp_catalog_load_failed();
-    } finally {
-      this.catalogLoading = false;
+      return { error: m.mcp_catalog_load_failed() };
     }
   }
 

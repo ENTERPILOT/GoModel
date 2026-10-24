@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/ext"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAuthenticationEventRecorderWritesDurableAuditEntry(t *testing.T) {
@@ -18,26 +19,22 @@ func TestAuthenticationEventRecorderWritesDurableAuditEntry(t *testing.T) {
 		UserAgent: "browser", Reason: "group_denied",
 	})
 
-	if len(logger.entries) != 1 {
-		t.Fatalf("entries = %d, want 1", len(logger.entries))
-	}
+	require.Len(t, logger.entries, 1)
+
 	entry := logger.entries[0]
-	if entry.Provider != authenticationEventProvider || entry.StatusCode != 401 ||
-		entry.AuthMethod != "sso" ||
-		entry.Path != "/sso/callback?code=REDACTED&id_token=REDACTED&return_to=%2Fadmin%2Fdashboard&state=REDACTED" ||
-		entry.ErrorType != "authentication_error" || entry.Data.EventType != "login" ||
-		entry.Data.ErrorCode != "group_denied" {
-		t.Fatalf("entry = %+v, data = %+v", entry, entry.Data)
-	}
-	if entry.Timestamp.Location() != time.UTC || !entry.Timestamp.Equal(timestamp) {
-		t.Fatalf("timestamp = %v, want %v in UTC", entry.Timestamp, timestamp)
-	}
+	require.Equal(t, authenticationEventProvider, entry.Provider)
+	require.Equal(t, 401, entry.StatusCode)
+	require.Equal(t, "sso", entry.AuthMethod)
+	require.Equal(t, "/sso/callback?code=REDACTED&id_token=REDACTED&return_to=%2Fadmin%2Fdashboard&state=REDACTED", entry.Path)
+	require.Equal(t, "authentication_error", entry.ErrorType)
+	require.Equal(t, "login", entry.Data.EventType)
+	require.Equal(t, "group_denied", entry.Data.ErrorCode, "entry = %+v, data = %+v", entry, entry.Data)
+	require.Same(t, time.UTC, entry.Timestamp.Location())
+	require.True(t, entry.Timestamp.Equal(timestamp), "timestamp = %v, want %v in UTC", entry.Timestamp, timestamp)
 }
 
 func TestAuthenticationEventRecorderNoopsWhenAuditDisabled(t *testing.T) {
 	logger := &capturingLogger{}
 	NewAuthenticationEventRecorder(logger).RecordAuthenticationEvent(ext.AuthenticationEvent{Type: "login"})
-	if len(logger.entries) != 0 {
-		t.Fatalf("entries = %d, want none", len(logger.entries))
-	}
+	require.Empty(t, logger.entries)
 }

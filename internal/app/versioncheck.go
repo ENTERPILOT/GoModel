@@ -19,9 +19,8 @@ import (
 // that opted out never writes one.
 //
 // The identifier is kept in the deployment's database first and the data
-// directory second (see versioncheck.Identity), with the master key as the
-// fallback that survives a container recreated without either.
-func newVersionChecker(ctx context.Context, cfg config.VersionCheckConfig, backend storage.Storage, masterKey string) *versioncheck.Checker {
+// directory second (see versioncheck.Identity).
+func newVersionChecker(ctx context.Context, cfg config.VersionCheckConfig, backend storage.Storage) *versioncheck.Checker {
 	checkerCfg := versioncheck.Config{
 		Enabled:        cfg.Enabled,
 		URL:            cfg.URL,
@@ -41,9 +40,9 @@ func newVersionChecker(ctx context.Context, cfg config.VersionCheckConfig, backe
 				store = s
 			}
 		}
-		identity := versioncheck.NewIdentity(store, masterKey)
+		identity := versioncheck.NewIdentity(store)
 		id, source := identity.Resolve(ctx)
-		if source == versioncheck.SourceGenerated || source == versioncheck.SourceDerived {
+		if source == versioncheck.SourceGenerated {
 			slog.Info("install id created", "source", string(source))
 		}
 		// Resolved again per check rather than fixed here: if the database
@@ -75,6 +74,28 @@ func warnIfDataDirEphemeral(cfg storage.Config) {
 		slog.Warn("data directory is on the container's own filesystem, not a volume: "+
 			"the database (audit logs, usage, budgets, keys) and the install identity are lost when the container is recreated; "+
 			"mount a volume there or use PostgreSQL/MongoDB",
+			"dir", dir)
+	}
+}
+
+// warnIfMediaDirEphemeral does the same for the media directory, but only
+// when something writes to it: with audio and image body logging off the
+// directory holds nothing worth keeping.
+func warnIfMediaDirEphemeral(cfg *config.Config) {
+	if cfg == nil || cfg.Media.Storage.Type != config.MediaStorageFilesystem {
+		return
+	}
+	if !mediaCaptureEnabled(cfg) {
+		return
+	}
+	dir := cfg.Media.Storage.Path
+	if dir == "" {
+		dir = config.DefaultMediaPath()
+	}
+	if platformdir.Ephemeral(dir) {
+		slog.Warn("media directory is on the container's own filesystem, not a volume: "+
+			"logged audio and images are lost when the container is recreated; "+
+			"mount a volume there or set MEDIA_STORAGE_PATH",
 			"dir", dir)
 	}
 }

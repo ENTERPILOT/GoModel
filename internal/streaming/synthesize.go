@@ -10,7 +10,7 @@ import (
 
 // SynthesizeChatStream renders a chat completion as a chat SSE stream: per
 // choice a role chunk, a reasoning chunk (when the message carries
-// reasoning_content), a content chunk, one chunk per tool call and a finish
+// reasoning_content or reasoning), a content chunk, one chunk per tool call and a finish
 // chunk; then a usage chunk when includeUsage is set, and [DONE].
 func SynthesizeChatStream(resp *core.ChatResponse, includeUsage bool) []byte {
 	var out []byte
@@ -45,8 +45,13 @@ func SynthesizeChatStream(resp *core.ChatResponse, includeUsage bool) []byte {
 			role = "assistant"
 		}
 		delta(choice.Index, map[string]any{"role": role})
-		if raw := choice.Message.ExtraFields.Lookup("reasoning_content"); len(raw) > 0 {
-			delta(choice.Index, map[string]any{"reasoning_content": json.RawMessage(raw)})
+		// Reasoning goes out under the member it came in: the
+		// reasoning_content extension, or the vendor "reasoning" member.
+		for _, member := range []string{"reasoning_content", "reasoning"} {
+			if raw := choice.Message.ExtraFields.Lookup(member); len(raw) > 0 {
+				delta(choice.Index, map[string]any{member: json.RawMessage(raw)})
+				break
+			}
 		}
 		// Replay state (Anthropic thinking signatures) has to reach the client
 		// here too: a synthesized stream is indistinguishable from a real one

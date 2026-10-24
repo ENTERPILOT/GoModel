@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"strings"
@@ -85,7 +86,8 @@ func (h *Handler) visibleModels(c *echo.Context) (*core.ModelsResponse, error) {
 // @Tags         models
 // @Produce      json
 // @Security     BearerAuth
-// @Param        model  path      string  true  "Model ID, e.g. openai/gpt-4.1-mini"
+// @Param        model             path    string  true   "Model ID, e.g. openai/gpt-4.1-mini"
+// @Param        anthropic-version header  string  false  "Anthropic API version, e.g. 2023-06-01. When present, the model and error bodies use the Anthropic envelopes instead of the OpenAI ones."
 // @Success      200    {object}  core.Model
 // @Failure      401    {object}  core.OpenAIErrorEnvelope
 // @Failure      404    {object}  core.OpenAIErrorEnvelope
@@ -107,35 +109,68 @@ func (h *Handler) RetrieveModel(c *echo.Context) error {
 
 	resp, err := h.visibleModels(c)
 	if err != nil {
-		return handleError(c, err)
+		return respondModelError(c, err)
 	}
 
 	var models []core.Model
 	if resp != nil {
 		models = resp.Data
 	}
-	for _, model := range models {
-		if model.ID != modelID {
-			continue
-		}
-		// The models routes are shared by both wire dialects; Anthropic SDK
-		// clients are identified by the anthropic-version header they always
-		// send (see ListModels).
-		if c.Request().Header.Get("anthropic-version") != "" {
-			return c.JSON(http.StatusOK, anthropicapi.FromModel(model))
-		}
-		if model.Object == "" {
-			model.Object = "model"
-		}
-		return c.JSON(http.StatusOK, model)
+	model, ok, err := h.listedModel(c.Request().Context(), models, modelID)
+	if err != nil {
+		return respondModelError(c, err)
 	}
-
-	notFound := core.NewModelNotFoundError(modelID)
+	if !ok {
+		return respondModelError(c, core.NewModelNotFoundError(modelID))
+	}
+	// The models routes are shared by both wire dialects; Anthropic SDK
+	// clients are identified by the anthropic-version header they always
+	// send (see ListModels).
 	if c.Request().Header.Get("anthropic-version") != "" {
-		status, body := anthropicapi.ErrorFromGateway(notFound)
-		return c.JSON(status, body)
+		return c.JSON(http.StatusOK, anthropicapi.FromModel(model))
 	}
-	return handleError(c, notFound)
+	if model.Object == "" {
+		model.Object = "model"
+	}
+	return c.JSON(http.StatusOK, model)
+}
+
+// listedModel finds the listed model an ID names: the listed ID itself, or
+// the model it resolves to the way an inference request would, so a bare ID
+// that works for chat (gpt-6-luna) also retrieves its listed model
+// (openai/gpt-6-luna). A resolution error (a registry that is not ready, a
+// malformed ID) is returned as inference would report it.
+func (h *Handler) listedModel(ctx context.Context, models []core.Model, modelID string) (core.Model, bool, error) {
+	find := func(id string) (core.Model, bool) {
+		for _, model := range models {
+			if model.ID == id {
+				return model, true
+			}
+		}
+		return core.Model{}, false
+	}
+	if model, ok := find(modelID); ok {
+		return model, true, nil
+	}
+	selector, err := resolveServiceModel(ctx, h.provider, h.modelResolver, modelID, "")
+	if err != nil {
+		return core.Model{}, false, err
+	}
+	model, ok := find(selector.QualifiedModel())
+	return model, ok, nil
+}
+
+// respondModelError renders a retrieve failure in the caller's dialect, the
+// same way the success body is chosen: an Anthropic SDK client — identified by
+// the anthropic-version header it always sends — never has to parse an OpenAI
+// envelope, whether the model is unknown or the upstream call failed. A 401
+// is raised by the auth middleware before the handler runs and stays in the
+// OpenAI envelope.
+func respondModelError(c *echo.Context, err error) error {
+	if c.Request().Header.Get("anthropic-version") != "" {
+		return handleErrorAsAnthropic(c, err)
+	}
+	return handleError(c, err)
 }
 
 // retrieveModelID reads the model ID from the wildcard segment of

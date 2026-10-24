@@ -31,9 +31,11 @@ func (p *Provider) CreateTranslation(ctx context.Context, req *core.AudioTranscr
 }
 
 // normalizeTranscription drops the vendor member from JSON bodies (json and
-// verbose_json). Text, SRT and VTT bodies are returned untouched.
+// verbose_json). Text, SRT and VTT bodies are returned untouched, and so is a
+// relayed body: it is forwarded to the client as the upstream produces it, so
+// there is nothing buffered here to rewrite.
 func normalizeTranscription(resp *core.AudioResponse, err error) (*core.AudioResponse, error) {
-	if err != nil || resp == nil || !strings.Contains(resp.ContentType, "json") {
+	if err != nil || resp == nil || resp.Stream != nil || !strings.Contains(resp.ContentType, "json") {
 		return resp, err
 	}
 	resp.Data = withoutJSONMember(resp.Data, vendorTranscriptionMember)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
 )
@@ -109,11 +110,33 @@ func enforceAdmission(c *echo.Context, limiter RateLimiter, checker BudgetChecke
 			return admission{release: noopRelease}, err
 		}
 	}
-	if err := enforceBudget(c, checker); err != nil {
-		release()
-		return admission{release: noopRelease}, err
+	if err := enforceBudget(c, checker, route); err != nil {
+		deferred := providerBudgetDeferrableToFailover(err, route)
+		if deferred == nil {
+			release()
+			return admission{release: noopRelease}, err
+		}
+		// Consumer budgets sort ahead of provider budgets, so reaching an
+		// exhausted provider budget means every consumer budget passed.
+		if saturated == nil {
+			saturated = deferred
+		}
 	}
 	return admission{release: release, saturatedRoute: saturated}, nil
+}
+
+// providerBudgetDeferrableToFailover returns the rejection when an exhausted
+// provider budget may defer to failover, which skips targets whose provider
+// budget is also spent.
+func providerBudgetDeferrableToFailover(err error, route rateLimitRoute) error {
+	if route.failovers == 0 {
+		return nil
+	}
+	exceeded, ok := errors.AsType[*budget.ExceededError](err)
+	if !ok || exceeded.Result.Budget.Scope != budget.ScopeProvider {
+		return nil
+	}
+	return err
 }
 
 // routeSaturationDeferrableToFailover returns the rejection when it may defer
@@ -198,6 +221,13 @@ func rateLimitBreachHeaders(exceeded *ratelimit.ExceededError) http.Header {
 		headers.Set(rateLimitLimitTokensHeader, limit)
 		headers.Set(rateLimitRemainingTokensHeader, "0")
 		headers.Set(rateLimitResetTokensHeader, reset)
+	case ratelimit.ScopeConcurrency:
+		// An in-flight gauge has no window: the cap and the zero headroom are
+		// well defined, a reset time is not — a slot frees when a request
+		// finishes. Retry-After carries the retry hint instead, so
+		// x-ratelimit-reset-requests is deliberately omitted here.
+		headers.Set(rateLimitLimitRequestsHeader, limit)
+		headers.Set(rateLimitRemainingRequestsHeader, "0")
 	}
 	return headers
 }

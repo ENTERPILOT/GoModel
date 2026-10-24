@@ -3,10 +3,10 @@ package batchrewrite
 import (
 	"context"
 	"errors"
-	"reflect"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 type deleteCall struct {
@@ -36,33 +36,23 @@ func TestRecordResult(t *testing.T) {
 		RewrittenInputFileID: "file_rewritten",
 	})
 
-	if metadata.OriginalInputFileID != "file_original" {
-		t.Fatalf("OriginalInputFileID = %q, want file_original", metadata.OriginalInputFileID)
-	}
-	if metadata.RewrittenInputFileID != "file_rewritten" {
-		t.Fatalf("RewrittenInputFileID = %q, want file_rewritten", metadata.RewrittenInputFileID)
-	}
+	require.Equal(t, "file_original", metadata.OriginalInputFileID)
+	require.Equal(t, "file_rewritten", metadata.RewrittenInputFileID)
 }
 
 func TestCleanupFile(t *testing.T) {
 	deleter := &recordingDeleter{}
 
-	if !CleanupFile(context.Background(), deleter, "openai", " file_rewritten ", "") {
-		t.Fatal("CleanupFile returned false, want true")
-	}
+	require.True(t, CleanupFile(context.Background(), deleter, "openai", " file_rewritten ", ""))
 
 	want := []deleteCall{{providerType: "openai", fileID: "file_rewritten"}}
-	if !reflect.DeepEqual(deleter.calls, want) {
-		t.Fatalf("calls = %#v, want %#v", deleter.calls, want)
-	}
+	require.Equal(t, want, deleter.calls)
 }
 
 func TestCleanupFileReturnsFalseOnDeleteError(t *testing.T) {
 	deleter := &recordingDeleter{err: errors.New("delete failed")}
 
-	if CleanupFile(context.Background(), deleter, "openai", "file_rewritten", "") {
-		t.Fatal("CleanupFile returned true, want false")
-	}
+	require.False(t, CleanupFile(context.Background(), deleter, "openai", "file_rewritten", ""))
 }
 
 func TestMergeEndpointHints(t *testing.T) {
@@ -76,18 +66,13 @@ func TestMergeEndpointHints(t *testing.T) {
 		"b": "/v1/chat/completions",
 		"c": "/v1/embeddings",
 	}
-	if !reflect.DeepEqual(merged, want) {
-		t.Fatalf("merged = %#v, want %#v", merged, want)
-	}
+	require.Equal(t, want, merged)
 
 	merged["a"] = "changed"
-	if left["a"] != "/v1/chat/completions" {
-		t.Fatal("MergeEndpointHints returned a map aliasing the left input")
-	}
+	require.Equal(t, "/v1/chat/completions", left["a"])
 }
 
 func TestMergeEndpointHintsEmpty(t *testing.T) {
-	if merged := MergeEndpointHints(nil, nil); merged != nil {
-		t.Fatalf("merged = %#v, want nil", merged)
-	}
+	merged := MergeEndpointHints(nil, nil)
+	require.Nil(t, merged)
 }

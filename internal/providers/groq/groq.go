@@ -7,7 +7,6 @@ import (
 	"net/http"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 )
@@ -44,12 +43,6 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 	return newProvider(openai.NewCompatibleProvider(providerCfg.APIKey, opts, compatibleConfig(providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL))))
 }
 
-// NewWithHTTPClient creates a new Groq provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	return newProvider(openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(defaultBaseURL)))
-}
-
 func newProvider(compat *openai.CompatibleProvider) *Provider {
 	return &Provider{
 		BatchSurface: openai.NewBatchSurface(compat),
@@ -80,19 +73,26 @@ func (p *Provider) SetBaseURL(url string) {
 	p.compat.SetBaseURL(url)
 }
 
-// ChatCompletion sends a chat completion request to Groq
+// ChatCompletion sends a chat completion request to Groq, renaming Groq's
+// "reasoning" member to GoModel's canonical "reasoning_content".
 func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
-	return p.compat.ChatCompletion(ctx, req)
+	resp, err := p.compat.ChatCompletion(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	normalizeChatResponse(resp)
+	return resp, nil
 }
 
-// StreamChatCompletion returns a raw response body for streaming (caller must close)
+// StreamChatCompletion returns a response body for streaming (caller must
+// close). Reasoning deltas are renamed to "reasoning_content"; every other
+// line is relayed byte for byte.
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
-	return p.compat.StreamChatCompletion(ctx, req)
-}
-
-// ListModels retrieves the list of available models from Groq
-func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
-	return p.compat.ListModels(ctx)
+	stream, err := p.compat.StreamChatCompletion(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return normalizeChatStream(stream), nil
 }
 
 // Responses sends a Responses API request to Groq (converted to chat format)

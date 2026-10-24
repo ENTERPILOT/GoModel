@@ -3,6 +3,9 @@
 // and DOM/template cases are covered by the Svelte components and skipped.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   buildMcpServerPayload,
@@ -16,12 +19,32 @@ import {
   mcpHeadersToRows,
   mcpServerEndpointLabel,
   mcpServerFormFromServer,
+  mcpPollShouldRetry,
+  MCP_SERVERS_POLL_MAX_FAILURES,
+  mcpServersNeedPolling,
   mcpServerStatus,
   mcpServerStatusClass,
   mcpServerStatusTitle,
   normalizeMcpCatalog,
   splitCommaList,
   normalizeMcpUserPaths,
+  mcpDiscoveredTools,
+  mcpToolFilterFromServer,
+  mcpToolModeSwitchable,
+  mcpToolPickerRows,
+  mcpToolSelectionSummary,
+  setMcpToolsExposed,
+  switchMcpToolMode,
+  mcpClientConfig,
+  mcpEndpointIsInsecure,
+  mcpGatewayEndpoint,
+  mcpServedVirtualServers,
+  mcpVirtualServerEndpoint,
+  buildMcpVirtualServerPayload,
+  mcpVirtualMemberOptions,
+  mcpVirtualServerFormFromVirtual,
+  toggleMcpVirtualMember,
+  normalizeMcpToolDiscovery,
 } from "../src/pages/mcp-servers/mcp-servers.js";
 
 test("deriveMcpServerSlug normalizes display names and falls back to a hash", () => {
@@ -66,6 +89,129 @@ test("mcpServerStatusClass maps statuses to badge classes", () => {
 test("mcpServerStatus defaults to connecting", () => {
   assert.equal(mcpServerStatus({}), "connecting");
   assert.equal(mcpServerStatus({ status: " degraded " }), "degraded");
+});
+
+test("mcpServersNeedPolling stays on only while a server is still connecting", () => {
+  assert.equal(mcpServersNeedPolling([{ name: "a", status: "connecting" }]), true);
+  // A server saved a moment ago comes back without a status yet.
+  assert.equal(mcpServersNeedPolling([{ name: "a" }]), true);
+  assert.equal(
+    mcpServersNeedPolling([
+      { name: "a", status: "connected" },
+      { name: "b", status: "connecting" },
+    ]),
+    true,
+  );
+  // Degraded is terminal for the poll loop: the row already shows last_error
+  // and the gateway re-probes it on its own schedule.
+  assert.equal(
+    mcpServersNeedPolling([
+      { name: "a", status: "connected" },
+      { name: "b", status: "degraded" },
+      { name: "c", status: "disabled" },
+    ]),
+    false,
+  );
+  assert.equal(mcpServersNeedPolling([]), false);
+  assert.equal(mcpServersNeedPolling(null), false);
+});
+
+test("mcpPollShouldRetry keeps retrying a failing poll until the budget runs out", () => {
+  assert.equal(mcpPollShouldRetry(0), true);
+  assert.equal(mcpPollShouldRetry(MCP_SERVERS_POLL_MAX_FAILURES - 1), true);
+  assert.equal(mcpPollShouldRetry(MCP_SERVERS_POLL_MAX_FAILURES), false);
+  assert.equal(mcpPollShouldRetry(undefined), true);
+});
+
+// Guard for the poll loop's lifecycle contract (#1024). The store uses runes,
+// so it cannot be imported here; like editor-dialog.test.js, this asserts the
+// wiring on the source. Both halves are regressions the loop shipped with:
+// a failed background poll that never retried left the row it was waiting on
+// stuck on "connecting", and a response landing after the page was left
+// scheduled a timer that outlived it.
+test("the MCP connect poll retries failures and cannot outlive the page", () => {
+  const SRC = fileURLToPath(new URL("../src", import.meta.url));
+  const store = readFileSync(
+    join(SRC, "pages/mcp-servers/mcpServers.svelte.js"),
+    "utf8",
+  );
+  const fetchServersDecl = (
+    store.match(
+      /async fetchServers\(\{ background = false \} = \{\}\) \{[\s\S]*?\n  \}/,
+    ) || [""]
+  )[0];
+
+  // Every scheduling path passes the generation captured when the request
+  // started, and the timer is only armed while that generation is current.
+  const schedule = store.match(/#schedulePoll\(generation\) \{[\s\S]*?\n  \}/);
+  assert.ok(schedule, "#schedulePoll(generation) missing");
+  assert.ok(
+    schedule[0].indexOf("generation !== this.#pollGeneration") <
+      schedule[0].indexOf("this.#clearPoll()"),
+    "a stale generation must return before clearing a newer timer",
+  );
+  assert.match(schedule[0], /setTimeout\(/);
+  assert.equal(
+    store.match(/this\.#schedulePoll\((?!generation\))/),
+    null,
+    "#schedulePoll must always be called with the request's generation",
+  );
+
+  // The generation is captured before the first await, so a cleanup during
+  // the shared runtime-config load retires the request too.
+  assert.ok(fetchServersDecl, "fetchServers declaration missing");
+  const capture = fetchServersDecl.indexOf(
+    "const generation = this.#pollGeneration;",
+  );
+  const firstAwait = fetchServersDecl.indexOf("await ");
+  assert.ok(capture >= 0, "fetchServers must capture the poll generation");
+  assert.ok(
+    capture < firstAwait,
+    "the generation must be captured before the first await",
+  );
+  assert.match(
+    fetchServersDecl.slice(firstAwait),
+    /^await runtimeConfig\.ensureLoaded\(\);\s*\n\s*if \(generation !== this\.#pollGeneration\) \{\s*\n\s*return;/,
+  );
+
+  // Overlapping list requests: the newest one wins. The sequence is taken
+  // before the first await and checked before any response is applied, so a
+  // slow poll cannot restore a list a delete just removed.
+  const seqCapture = fetchServersDecl.indexOf("const seq = ++this.#listSeq;");
+  assert.ok(seqCapture >= 0, "fetchServers must take a list sequence");
+  assert.ok(
+    seqCapture < firstAwait,
+    "the list sequence must be taken before the first await",
+  );
+  const seqCheck = fetchServersDecl.indexOf("seq !== this.#listSeq");
+  assert.ok(seqCheck >= 0, "a superseded response must be dropped");
+  assert.ok(
+    seqCheck < fetchServersDecl.indexOf("this.servers = outcome.items;"),
+    "the sequence check must run before the response is applied",
+  );
+  assert.match(fetchServersDecl, /if \(!background && seq === this\.#listSeq\)/);
+
+  // Leaving the page invalidates whatever is in flight.
+  const stop = store.match(/stopPolling\(\) \{[\s\S]*?\n  \}/);
+  assert.ok(stop, "stopPolling missing");
+  assert.match(stop[0], /this\.#pollGeneration \+= 1;/);
+  assert.match(stop[0], /this\.#clearPoll\(\);/);
+
+  // A failed background poll retries on the budget instead of giving up.
+  const backgroundFailure = fetchServersDecl.match(
+    /if \(background\) \{[\s\S]*?\n        \}/,
+  );
+  assert.ok(backgroundFailure, "background failure branch missing");
+  assert.match(backgroundFailure[0], /this\.#pollFailures \+= 1;/);
+  assert.match(
+    backgroundFailure[0],
+    /mcpPollShouldRetry\(this\.#pollFailures\)[\s\S]*?this\.#schedulePoll\(generation\)/,
+  );
+  assert.equal(
+    backgroundFailure[0].includes("this.servers = []"),
+    false,
+    "a failed background poll must keep the list it already has",
+  );
 });
 
 test("mcpServerStatusTitle surfaces last_error for degraded servers", () => {
@@ -113,9 +259,10 @@ test("buildMcpServerPayload produces the normalized PUT payload", () => {
         { name: "Authorization", value: "***" },
         { name: "", value: "ignored" },
       ],
-      allowed_tools: "search_issues, get_file",
-      disallowed_tools: "",
+      tool_mode: "allow",
+      tool_names: ["search_issues", " get_file ", "search_issues"],
       user_paths: "/team/alpha\n/team/beta",
+      disallowed_user_paths: " /team/alpha/contractors \n\n",
       tool_timeout_seconds: "45",
     },
     "edit",
@@ -134,6 +281,7 @@ test("buildMcpServerPayload produces the normalized PUT payload", () => {
     allowed_tools: ["search_issues", "get_file"],
     disallowed_tools: [],
     user_paths: ["/team/alpha", "/team/beta"],
+    disallowed_user_paths: ["/team/alpha/contractors"],
     tool_timeout_seconds: 45,
   });
 });
@@ -173,6 +321,30 @@ test("buildMcpServerPayload validates required fields and timeout", () => {
   }
 });
 
+test("buildMcpServerPayload maps the tool mode onto one filter list", () => {
+  const base = {
+    ...defaultMcpServerForm(),
+    name: "github",
+    url: "https://mcp.example.com/mcp",
+  };
+
+  const excluded = buildMcpServerPayload(
+    { ...base, tool_names: ["delete_repo"] },
+    "create",
+    [],
+  );
+  assert.deepEqual(excluded.payload.allowed_tools, []);
+  assert.deepEqual(excluded.payload.disallowed_tools, ["delete_repo"]);
+
+  // An empty allowlist would expose every tool on the gateway, so the
+  // "only selected" mode requires at least one selection.
+  assert.equal(
+    buildMcpServerPayload({ ...base, tool_mode: "allow", tool_names: [] }, "create", [])
+      .error,
+    "Select at least one tool, or switch new tools to exposed.",
+  );
+});
+
 test("buildMcpServerPayload rejects duplicate slugs only when creating", () => {
   const form = {
     ...defaultMcpServerForm(),
@@ -201,6 +373,7 @@ test("mcpServerFormFromServer prefills the editor form", () => {
       allowed_tools: ["search_issues"],
       disallowed_tools: ["delete_repo"],
       user_paths: ["/team/alpha"],
+      disallowed_user_paths: ["/team/alpha/contractors"],
       tool_timeout_seconds: 45,
     }),
     {
@@ -211,12 +384,134 @@ test("mcpServerFormFromServer prefills the editor form", () => {
       description: "Issue tools",
       enabled: false,
       headers: [{ name: "Authorization", value: "***" }],
-      allowed_tools: "search_issues",
-      disallowed_tools: "delete_repo",
+      tool_mode: "allow",
+      tool_names: ["search_issues"],
       user_paths: "/team/alpha",
+      disallowed_user_paths: "/team/alpha/contractors",
       tool_timeout_seconds: "45",
     },
   );
+});
+
+test("mcpToolFilterFromServer picks one mode without changing exposure", () => {
+  assert.deepEqual(mcpToolFilterFromServer({}), { tool_mode: "exclude", tool_names: [] });
+  assert.deepEqual(mcpToolFilterFromServer({ disallowed_tools: ["delete_repo"] }), {
+    tool_mode: "exclude",
+    tool_names: ["delete_repo"],
+  });
+  // Deny applies after allow on the gateway, so allowed − disallowed exposes
+  // the same tools.
+  assert.deepEqual(
+    mcpToolFilterFromServer({
+      allowed_tools: ["read", "write"],
+      disallowed_tools: ["write"],
+    }),
+    { tool_mode: "allow", tool_names: ["read"] },
+  );
+});
+
+test("mcpDiscoveredTools merges exposed and excluded tools by name", () => {
+  const discovered = mcpDiscoveredTools(
+    normalizeMcpCatalog("github", {
+      tools: [{ name: "search", read_only: true }],
+      excluded_tools: [{ name: "delete_repo", description: "Delete", destructive: true }],
+    }),
+  );
+  assert.deepEqual(discovered, [
+    { name: "delete_repo", description: "Delete", readOnly: false, destructive: true },
+    { name: "search", description: "", readOnly: true, destructive: false },
+  ]);
+});
+
+test("tool picker toggles, bulk actions, and summary follow the mode", () => {
+  const discovered = [{ name: "a" }, { name: "b" }, { name: "c" }].map((tool) => ({
+    ...tool,
+    description: "",
+    readOnly: false,
+    destructive: false,
+  }));
+
+  const exclude = { tool_mode: "exclude", tool_names: [] };
+  exclude.tool_names = setMcpToolsExposed(exclude, ["b"], false);
+  assert.deepEqual(exclude.tool_names, ["b"]);
+  assert.deepEqual(mcpToolSelectionSummary(exclude, discovered), { exposed: 2, total: 3 });
+  assert.deepEqual(setMcpToolsExposed(exclude, ["a", "b", "c"], true), []);
+  assert.deepEqual(setMcpToolsExposed(exclude, ["a", "b", "c"], false), ["b", "a", "c"]);
+
+  const allow = { tool_mode: "allow", tool_names: ["a"] };
+  assert.deepEqual(setMcpToolsExposed(allow, ["c"], true), ["a", "c"]);
+  assert.deepEqual(setMcpToolsExposed(allow, ["a"], false), []);
+  assert.deepEqual(mcpToolSelectionSummary(allow, discovered), { exposed: 1, total: 3 });
+});
+
+test("switchMcpToolMode keeps every discovered tool's exposure", () => {
+  const discovered = [{ name: "a" }, { name: "b" }, { name: "c" }];
+  const toAllow = switchMcpToolMode(
+    { tool_mode: "exclude", tool_names: ["b", "ghost"] },
+    "allow",
+    discovered,
+  );
+  assert.deepEqual(toAllow, { tool_mode: "allow", tool_names: ["a", "c"] });
+
+  const back = switchMcpToolMode(toAllow, "exclude", discovered);
+  assert.deepEqual(back, { tool_mode: "exclude", tool_names: ["b"] });
+});
+
+test("switchMcpToolMode keeps the list when the catalog is unknown", () => {
+  // Without the full tool set, an allowlist would become an empty denylist,
+  // which exposes every tool on save.
+  const allow = { tool_mode: "allow", tool_names: ["read"] };
+  assert.equal(mcpToolModeSwitchable(allow, []), false);
+  assert.deepEqual(switchMcpToolMode(allow, "exclude", []), {
+    tool_mode: "allow",
+    tool_names: ["read"],
+  });
+
+  // An empty list flips safely, so a brand-new server can still pick a mode.
+  const fresh = { tool_mode: "exclude", tool_names: [] };
+  assert.equal(mcpToolModeSwitchable(fresh, []), true);
+  assert.deepEqual(switchMcpToolMode(fresh, "allow", []), {
+    tool_mode: "allow",
+    tool_names: [],
+  });
+});
+
+test("mcpToolPickerRows flags listed names the server does not report and filters", () => {
+  const discovered = [
+    { name: "create_issue", description: "Create an issue", readOnly: false, destructive: false },
+    { name: "delete_repo", description: "", readOnly: false, destructive: true },
+  ];
+  const form = { tool_mode: "exclude", tool_names: ["delete_repo", "delet_repo"] };
+
+  const rows = mcpToolPickerRows(form, discovered, "");
+  assert.deepEqual(
+    rows.map((row) => [row.name, row.exposed, row.missing]),
+    [
+      ["create_issue", true, false],
+      ["delete_repo", false, false],
+      ["delet_repo", false, true],
+    ],
+  );
+  assert.deepEqual(
+    mcpToolPickerRows(form, discovered, "ISSUE").map((row) => row.name),
+    ["create_issue"],
+  );
+});
+
+test("mcpCatalogSections lists excluded tools without an aggregated name", () => {
+  const sections = mcpCatalogSections(
+    normalizeMcpCatalog("github", {
+      tools: [{ name: "search" }],
+      excluded_tools: [{ name: "delete_repo", destructive: true }],
+    }),
+  );
+  assert.deepEqual(
+    sections.map((section) => section.key),
+    ["tools", "excluded_tools"],
+  );
+  assert.equal(sections[1].excluded, true);
+  assert.equal(sections[1].items[0].aggregated, "");
+  assert.equal(sections[1].items[0].destructive, true);
 });
 
 test("mcpCatalogSections derives aggregated /mcp names for tools and prompts only", () => {
@@ -249,6 +544,8 @@ test("mcpCatalogSections derives aggregated /mcp names for tools and prompts onl
     name: "create_issue",
     aggregated: "github_create_issue",
     description: "Create a GitHub issue",
+    readOnly: false,
+    destructive: false,
   });
   assert.equal(tools[1].aggregated, "github_search_issues");
   assert.equal(tools[1].description, "");
@@ -325,4 +622,183 @@ test("filterMcpServers matches name, url, transport, and status", () => {
     ["github"],
   );
   assert.equal(filterMcpServers(servers, "").length, 2);
+});
+
+test("normalizeMcpToolDiscovery accepts search loosely and defaults to off", () => {
+  assert.equal(normalizeMcpToolDiscovery(" Search "), "search");
+  assert.equal(normalizeMcpToolDiscovery("off"), "off");
+  assert.equal(normalizeMcpToolDiscovery(""), "off");
+  assert.equal(normalizeMcpToolDiscovery("semantic"), "off");
+});
+
+test("mcpGatewayEndpoint honors the base path", () => {
+  assert.equal(mcpGatewayEndpoint("https://gw.example.com", "/"), "https://gw.example.com/mcp");
+  assert.equal(mcpGatewayEndpoint("https://gw.example.com/", "/gomodel/"), "https://gw.example.com/gomodel/mcp");
+  assert.equal(mcpGatewayEndpoint("http://localhost:8080", ""), "http://localhost:8080/mcp");
+});
+
+test("mcpClientConfig adds the discovery header only when it changes the default", () => {
+  const headersFor = (mode, defaultMode) =>
+    JSON.parse(mcpClientConfig("https://gw/mcp", mode, defaultMode)).mcpServers.gomodel.headers;
+
+  assert.deepEqual(headersFor("off", "off"), { Authorization: "Bearer YOUR_GOMODEL_API_KEY" });
+  assert.deepEqual(headersFor("search", "off"), {
+    Authorization: "Bearer YOUR_GOMODEL_API_KEY",
+    "X-MCP-Tool-Discovery": "search",
+  });
+  assert.deepEqual(headersFor("off", "search"), {
+    Authorization: "Bearer YOUR_GOMODEL_API_KEY",
+    "X-MCP-Tool-Discovery": "off",
+  });
+  assert.deepEqual(headersFor("search", "search"), { Authorization: "Bearer YOUR_GOMODEL_API_KEY" });
+
+  const config = JSON.parse(mcpClientConfig("https://gw/mcp", "off", "off"));
+  assert.equal(config.mcpServers.gomodel.type, "http");
+  assert.equal(config.mcpServers.gomodel.url, "https://gw/mcp");
+});
+
+test("mcpEndpointIsInsecure flags plain HTTP only off loopback", () => {
+  assert.equal(mcpEndpointIsInsecure("http://gw.example.com/mcp"), true);
+  assert.equal(mcpEndpointIsInsecure("http://10.0.0.5:8080/mcp"), true);
+  assert.equal(mcpEndpointIsInsecure("https://gw.example.com/mcp"), false);
+  assert.equal(mcpEndpointIsInsecure("http://localhost:8080/mcp"), false);
+  assert.equal(mcpEndpointIsInsecure("http://gomodel.localhost/mcp"), false);
+  assert.equal(mcpEndpointIsInsecure("http://127.0.0.1:8080/mcp"), false);
+  assert.equal(mcpEndpointIsInsecure("http://[::1]:8080/mcp"), false);
+  assert.equal(mcpEndpointIsInsecure("not a url"), false);
+});
+
+test("mcpVirtualServerEndpoint appends the virtual server name to /mcp", () => {
+  assert.equal(mcpVirtualServerEndpoint("https://gw/base/mcp", "coding"), "https://gw/base/mcp/coding");
+});
+
+test("mcpServedVirtualServers drops virtual servers a same-named server shadows", () => {
+  assert.deepEqual(
+    mcpServedVirtualServers([
+      { name: "coding", servers: ["github"] },
+      { name: "notion", servers: ["github"], conflict: "not served" },
+      { servers: ["github"] },
+    ]).map((virtual) => virtual.name),
+    ["coding"],
+  );
+  assert.deepEqual(mcpServedVirtualServers(null), []);
+});
+
+test("mcpClientConfig names a virtual server's entry after it", () => {
+  const servers = JSON.parse(mcpClientConfig("https://gw/mcp/coding", "off", "off", "coding")).mcpServers;
+  assert.deepEqual(Object.keys(servers), ["gomodel-coding"]);
+  assert.equal(servers["gomodel-coding"].url, "https://gw/mcp/coding");
+});
+
+// Regression: a virtual-list response landing after the page was left, or
+// after the main list was cleared, put stale virtual servers back.
+test("a stale virtual-server response cannot restore the list", () => {
+  const SRC = fileURLToPath(new URL("../src", import.meta.url));
+  const store = readFileSync(join(SRC, "pages/mcp-servers/mcpServers.svelte.js"), "utf8");
+
+  const fetchVirtual = (store.match(/async fetchVirtualServers\(\) \{[\s\S]*?\n  \}/) || [""])[0];
+  assert.ok(fetchVirtual, "fetchVirtualServers missing");
+  // Each expression must exist: indexOf's -1 would pass an order check.
+  const assertBefore = (first, second, message) => {
+    const firstIndex = fetchVirtual.indexOf(first);
+    const secondIndex = fetchVirtual.indexOf(second);
+    assert.ok(firstIndex >= 0 && secondIndex >= 0 && firstIndex < secondIndex, message);
+  };
+  assertBefore("const seq = ++this.#virtualSeq;", "await ", "the sequence must be taken before the request");
+  assertBefore("seq !== this.#virtualSeq", "this.virtualServers =", "a retired response must be dropped before it is applied");
+
+  const clear = store.match(/#clearVirtualServers\(\) \{[\s\S]*?\n  \}/);
+  assert.ok(clear, "#clearVirtualServers missing");
+  assert.match(clear[0], /this\.#virtualSeq \+= 1;/);
+  assert.equal(
+    store.match(/this\.virtualServers = \[\];/g).length,
+    1,
+    "lists are cleared only through #clearVirtualServers",
+  );
+
+  const stop = store.match(/stopPolling\(\) \{[\s\S]*?\n  \}/);
+  assert.match(stop[0], /this\.#virtualSeq \+= 1;/, "leaving the page retires the request");
+
+  // A main-list response landing after the page was left must not start one.
+  assert.match(
+    store,
+    /if \(!background && generation === this\.#pollGeneration\) \{\s*\n\s*void this\.fetchVirtualServers\(\);/,
+    "fetchVirtualServers must only start for the current page generation",
+  );
+});
+
+test("buildMcpVirtualServerPayload validates and normalizes the form", () => {
+  const servers = [{ slug: "github", name: "GitHub" }, { slug: "jira", name: "Jira" }];
+  const virtuals = [{ name: "research", servers: ["jira"] }];
+  const build = (form, mode = "create") => buildMcpVirtualServerPayload(form, mode, virtuals, servers);
+
+  assert.deepEqual(build({ name: " Coding ", description: " tools ", servers: ["github", "github", "jira"], tool_discovery: "search" }), {
+    payload: { name: "coding", description: "tools", servers: ["github", "jira"], tool_discovery: "search" },
+  });
+  assert.equal(build({ name: "coding", servers: ["github"], tool_discovery: "bogus" }).payload.tool_discovery, "");
+
+  assert.ok(build({ name: "", servers: ["github"] }).error, "name is required");
+  assert.ok(build({ name: "my tools", servers: ["github"] }).error, "name must be a slug");
+  assert.ok(build({ name: "research", servers: ["github"] }).error, "an existing virtual server name is taken on create");
+  assert.ok(build({ name: "github", servers: ["jira"] }).error, "a server slug is taken");
+  assert.ok(build({ name: "coding", servers: [] }).error, "at least one member is required");
+  assert.equal(build({ name: "research", servers: ["github"] }, "edit").error, undefined, "editing keeps the name");
+});
+
+test("buildMcpServerPayload rejects a new slug a virtual server uses", () => {
+  const form = { name: "Coding", slug: "coding", url: "https://mcp.example.com/mcp", headers: [], tool_names: [] };
+  assert.ok(buildMcpServerPayload(form, "create", [], [{ name: "coding" }]).error);
+  assert.equal(buildMcpServerPayload(form, "edit", [], [{ name: "coding" }]).error, undefined);
+});
+
+test("virtual member options keep a selected member that no longer matches a server", () => {
+  const options = mcpVirtualMemberOptions([{ slug: "github", name: "GitHub" }], ["github", "gone"]);
+  assert.deepEqual(options, [
+    { slug: "github", name: "GitHub", missing: false },
+    { slug: "gone", name: "gone", missing: true },
+  ]);
+  assert.deepEqual(toggleMcpVirtualMember(["github"], "jira"), ["github", "jira"]);
+  assert.deepEqual(toggleMcpVirtualMember(["github", "jira"], "github"), ["jira"]);
+});
+
+test("mcpVirtualServerFormFromVirtual keeps the stored discovery setting, not the effective one", () => {
+  const form = mcpVirtualServerFormFromVirtual({ name: "coding", servers: ["github"], tool_discovery: "search", configured_tool_discovery: "" });
+  assert.deepEqual(form, { name: "coding", description: "", servers: ["github"], tool_discovery: "" });
+});
+
+// Regression: a failed virtual-server load cleared the rows, so the section
+// claimed there were no virtual servers.
+test("a failed virtual-server load is reported, not shown as an empty list", () => {
+  const SRC = fileURLToPath(new URL("../src", import.meta.url));
+  const store = readFileSync(join(SRC, "pages/mcp-servers/mcpServers.svelte.js"), "utf8");
+  const list = readFileSync(join(SRC, "pages/mcp-servers/McpVirtualServerList.svelte"), "utf8");
+
+  const fetchVirtual = (store.match(/async fetchVirtualServers\(\) \{[\s\S]*?\n  \}/) || [""])[0];
+  const errorBranch = fetchVirtual.match(/if \(outcome\.status === "error"\) \{[\s\S]*?\n    \}/);
+  assert.ok(errorBranch, "fetchVirtualServers must handle a failed load");
+  assert.match(errorBranch[0], /this\.virtualError = /);
+  assert.match(errorBranch[0], /return;/);
+  assert.equal(errorBranch[0].includes("this.virtualServers ="), false, "a failed load keeps the last known list");
+
+  assert.match(list, /\{#if mcpServers\.virtualError\}/, "the section shows the load error");
+  assert.match(list, /\{#if !mcpServers\.virtualError\}\s*<p class="empty-state">/, "the empty state is hidden while the load failed");
+});
+
+// Regression: a slow virtual-server save closed whatever editor was open when
+// it finished, discarding edits the operator had started since.
+test("a virtual-server save only closes the editor that submitted it", () => {
+  const SRC = fileURLToPath(new URL("../src", import.meta.url));
+  const store = readFileSync(join(SRC, "pages/mcp-servers/mcpServers.svelte.js"), "utf8");
+  const method = (name) => (store.match(new RegExp(`\\n  ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n  \\}`)) || [""])[0];
+
+  for (const name of ["openVirtualCreate", "openVirtualEdit", "closeVirtualForm"]) {
+    assert.match(method(name), /this\.#virtualFormSeq \+= 1;/, `${name} must start a new editor session`);
+  }
+
+  const submit = (store.match(/async submitVirtualForm\(\) \{[\s\S]*?\n  \}/) || [""])[0];
+  const capture = submit.indexOf("const formSeq = this.#virtualFormSeq;");
+  assert.ok(capture >= 0 && capture < submit.indexOf("await "), "the session is captured before the request");
+  assert.match(submit, /const sameEditor = formSeq === this\.#virtualFormSeq;/);
+  assert.match(submit, /if \(sameEditor\) \{\s*\n\s*this\.closeVirtualForm\(\);/, "only the submitting editor is closed");
+  assert.equal(/\n      this\.closeVirtualForm\(\);/.test(submit), false, "no unconditional close remains");
 });

@@ -2,6 +2,8 @@
 package config
 
 import (
+	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -13,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/enterpilot/gomodel/internal/storage"
 )
@@ -25,6 +27,7 @@ type Config struct {
 	Cache         CacheConfig         `yaml:"cache"`
 	Storage       StorageConfig       `yaml:"storage"`
 	Logging       LogConfig           `yaml:"logging"`
+	Media         MediaConfig         `yaml:"media"`
 	Usage         UsageConfig         `yaml:"usage"`
 	Budgets       BudgetsConfig       `yaml:"budgets"`
 	RateLimits    RateLimitsConfig    `yaml:"rate_limits"`
@@ -75,21 +78,38 @@ type Config struct {
 type LoadResult struct {
 	Config       *Config
 	RawProviders map[string]RawProviderConfig
+
+	// Secrets resolves ${scheme:reference} secret references for this
+	// generation. Load leaves references in place; a distribution may Register
+	// more schemes in its configuration hook before ResolveSecrets runs.
+	Secrets *Secrets
+
+	secretsResolved bool
+	secretsErr      error
+
+	keyWrapper          KeyWrapper
+	previousKeyWrappers []KeyWrapper
 }
 
 // DecodeExtension strictly decodes one named extensions: section into target.
 // It returns false when the section is absent. Core deliberately does not know
 // any extension's schema, while each extension still gets unknown-key safety.
+// Secret references in the section are resolved with the schemes registered
+// on Secrets at the time of the call.
 func (r *LoadResult) DecodeExtension(name string, target any) (bool, error) {
 	if r == nil || r.Config == nil || target == nil {
 		return false, nil
 	}
 	name = strings.TrimSpace(name)
-	node, ok := r.Config.Extensions[name]
+	stored, ok := r.Config.Extensions[name]
 	if !ok {
 		return false, nil
 	}
-	data, err := yaml.Marshal(&node)
+	node := cloneYAMLNode(&stored)
+	if err := r.Secrets.resolveYAMLNode(context.Background(), "extensions."+name, node); err != nil {
+		return false, err
+	}
+	data, err := yaml.Marshal(node)
 	if err != nil {
 		return false, fmt.Errorf("encode extensions.%s: %w", name, err)
 	}
@@ -127,6 +147,8 @@ func buildDefaultConfig() *Config {
 				"llamacpp",
 				"llmd",
 				"deepseek",
+				"edenai",
+				"jev",
 			},
 		},
 		Models: ModelsConfig{
@@ -154,6 +176,12 @@ func buildDefaultConfig() *Config {
 			},
 			PostgreSQL: PostgreSQLStorageConfig{
 				MaxConns: 10,
+			},
+		},
+		Media: MediaConfig{
+			Storage: MediaStorageConfig{
+				Type: MediaStorageFilesystem,
+				Path: DefaultMediaPath(),
 			},
 		},
 		Logging: LogConfig{
@@ -189,6 +217,7 @@ func buildDefaultConfig() *Config {
 		HTTP: HTTPConfig{
 			Timeout:               600,
 			ResponseHeaderTimeout: 600,
+			StreamIdleTimeout:     300,
 		},
 		Failover: FailoverConfig{
 			Enabled:     true,
@@ -210,6 +239,9 @@ func buildDefaultConfig() *Config {
 			LiveLogsHeartbeatSeconds: 15,
 		},
 		Guardrails: GuardrailsConfig{},
+		Tagging: TaggingConfig{
+			LiteLLMTagsEnabled: true,
+		},
 		Session: SessionConfig{
 			Enabled:      true,
 			AutoDetect:   true,
@@ -242,11 +274,15 @@ func Load() (*LoadResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := rejectParsedEnvReferences(os.Environ()); err != nil {
+		return nil, err
+	}
 
-	rawProviders, err := applyYAML(cfg, strict)
+	rawProviders, masterKeyUnresolved, err := applyYAML(cfg, strict)
 	if err != nil {
 		return nil, err
 	}
+	yamlMasterKey := cfg.Server.MasterKey
 
 	if err := applyResponseSimpleEnv(&cfg.Cache.Response); err != nil {
 		return nil, err
@@ -280,6 +316,9 @@ func Load() (*LoadResult, error) {
 	if err := applyMCPEnv(cfg); err != nil {
 		return nil, err
 	}
+	if err := applyMCPVirtualEnv(cfg); err != nil {
+		return nil, err
+	}
 	if err := normalizeMCPConfig(&cfg.MCP); err != nil {
 		return nil, err
 	}
@@ -296,6 +335,18 @@ func Load() (*LoadResult, error) {
 	}
 	if err := validateRateLimitConfig(&cfg.RateLimits); err != nil {
 		return nil, err
+	}
+	// A disabled master key is forgotten outright, so no part of the gateway —
+	// the auth middleware, /v1/auth/verify, the version-check identity — can
+	// accept or derive anything from a key the operator turned off.
+	if cfg.Server.MasterKeyDisabled {
+		cfg.Server.MasterKey = ""
+	}
+	// Expansion leaves an unset ${NAME} in config.yaml verbatim. As a master
+	// key, that text would be a password anyone who reads the file knows. A
+	// key from GOMODEL_MASTER_KEY replaces it and is used as-is.
+	if masterKeyUnresolved && cfg.Server.MasterKey != "" && cfg.Server.MasterKey == yamlMasterKey {
+		return nil, errors.New("server.master_key reads an environment variable that is not set; set it or remove server.master_key")
 	}
 	cfg.Server.BasePath = NormalizeBasePath(cfg.Server.BasePath)
 	cfg.Server.UserPathHeader, err = NormalizeHeaderName(cfg.Server.UserPathHeader, "X-GoModel-User-Path")
@@ -338,10 +389,17 @@ func Load() (*LoadResult, error) {
 	if !cfg.Logging.LogImageBodiesScope.Valid() {
 		return nil, fmt.Errorf("logging.log_image_bodies_scope must be one of: all, input, output; got %q", cfg.Logging.LogImageBodiesScope)
 	}
+	if err := ResolveMediaConfig(&cfg.Media); err != nil {
+		return nil, err
+	}
+	if err := ResolveClientIPPolicy(&cfg.Server); err != nil {
+		return nil, err
+	}
 
 	return &LoadResult{
 		Config:       cfg,
 		RawProviders: rawProviders,
+		Secrets:      NewSecrets(),
 	}, nil
 }
 
@@ -385,14 +443,14 @@ func resolveConfigStrict() (bool, error) {
 // zero — otherwise parses as a null section plus unknown top-level keys, and the
 // gateway boots with none of the operator's providers. CONFIG_STRICT=false
 // downgrades unknown keys to warnings; malformed values stay fatal either way.
-func applyYAML(cfg *Config, strict bool) (map[string]RawProviderConfig, error) {
+func applyYAML(cfg *Config, strict bool) (map[string]RawProviderConfig, bool, error) {
 	path, data, err := readConfigFile()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if data == nil {
 		slog.Info("no config file found; using defaults and environment", "searched", configFilePaths)
-		return map[string]RawProviderConfig{}, nil
+		return map[string]RawProviderConfig{}, false, nil
 	}
 
 	// yamlTarget is a local struct that mirrors Config for YAML unmarshaling,
@@ -412,19 +470,38 @@ func applyYAML(cfg *Config, strict bool) (map[string]RawProviderConfig, error) {
 	decodeErr := decoder.Decode(&target)
 	if decodeErr != nil && !errors.Is(decodeErr, io.EOF) {
 		if err := reportYAMLDecodeError(path, decodeErr, strict); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
 	if err := ensureSingleDocument(path, decoder); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	slog.Info("config file loaded", "path", path, "providers", len(target.RawProviders))
 
 	if target.RawProviders == nil {
-		return map[string]RawProviderConfig{}, nil
+		target.RawProviders = map[string]RawProviderConfig{}
 	}
-	return target.RawProviders, nil
+	return target.RawProviders, masterKeyReadsUnsetVariable(data, cfg.Server.MasterKey), nil
+}
+
+// masterKeyReadsUnsetVariable reports whether the master key decoded from
+// data holds a reference expansion left unresolved. It expands data again with
+// a random marker in place of each unresolved reference, so field names expand
+// exactly as in the real decode and a key that merely contains "${" passes.
+func masterKeyReadsUnsetVariable(data []byte, expandedKey string) bool {
+	marker := "gomodel-unset-" + rand.Text()
+	var marked struct {
+		Server struct {
+			MasterKey string `yaml:"master_key"`
+		} `yaml:"server"`
+	}
+	if err := yaml.Unmarshal([]byte(expandWith(string(data), func(string) string { return marker })), &marked); err != nil {
+		// Unreachable when the real decode succeeded, since a marker parses
+		// wherever "${...}" does; stay closed regardless.
+		return strings.Contains(expandedKey, "${")
+	}
+	return strings.Contains(marked.Server.MasterKey, marker)
 }
 
 // ensureSingleDocument rejects a config file holding more than one YAML document.

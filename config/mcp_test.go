@@ -1,10 +1,11 @@
 package config
 
 import (
-	"slices"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNormalizeMCPConfigDefaultsAndValidation(t *testing.T) {
@@ -12,41 +13,28 @@ func TestNormalizeMCPConfigDefaultsAndValidation(t *testing.T) {
 		"GitHub": {URL: "https://api.githubcopilot.com/mcp"},
 		"local":  {Command: "npx", Args: []string{"-y", "some-server"}},
 	}}
-	if err := normalizeMCPConfig(&cfg); err != nil {
-		t.Fatalf("normalizeMCPConfig() error = %v", err)
-	}
+	err := normalizeMCPConfig(&cfg)
+	require.NoError(t, err)
 
 	github, ok := cfg.Servers["github"]
-	if !ok {
-		t.Fatalf("server name not canonicalized to lowercase: %v", cfg.Servers)
-	}
-	if github.Transport != MCPTransportHTTP {
-		t.Fatalf("default transport = %q, want http", github.Transport)
-	}
-	if github.ToolTimeout != DefaultMCPToolTimeout {
-		t.Fatalf("default tool timeout = %v, want %v", github.ToolTimeout, DefaultMCPToolTimeout)
-	}
+	require.True(t, ok, "server name not canonicalized to lowercase: %v", cfg.Servers)
+	require.Equal(t, MCPTransportHTTP, github.Transport)
+	require.Equal(t, DefaultMCPToolTimeout, github.ToolTimeout)
 
 	local := cfg.Servers["local"]
-	if local.Transport != MCPTransportStdio {
-		t.Fatalf("command-only server transport = %q, want stdio inferred", local.Transport)
-	}
+	require.Equal(t, MCPTransportStdio, local.Transport)
 }
 
 func TestMCPServerDisplayNameAndSlug(t *testing.T) {
 	t.Parallel()
 
 	for _, name := range []string{"Linear MCP", "线性 MCP", "Линейный сервер", "MCP 🚀"} {
-		if err := ValidateMCPServerName(name); err != nil {
-			t.Errorf("ValidateMCPServerName(%q) error = %v", name, err)
-		}
+		err := ValidateMCPServerName(name)
+		require.NoError(t, err, "ValidateMCPServerName(%q)", name)
 	}
-	if err := ValidateMCPServerSlug("linear-mcp"); err != nil {
-		t.Fatalf("ValidateMCPServerSlug(valid) error = %v", err)
-	}
-	if err := ValidateMCPServerSlug("Linear MCP"); err == nil {
-		t.Fatal("ValidateMCPServerSlug should reject spaces and uppercase characters")
-	}
+	err := ValidateMCPServerSlug("linear-mcp")
+	require.NoError(t, err)
+	require.Error(t, ValidateMCPServerSlug("Linear MCP"))
 
 	derived := map[string]string{
 		"Linear MCP": "linear-mcp",
@@ -54,9 +42,8 @@ func TestMCPServerDisplayNameAndSlug(t *testing.T) {
 		"线性":         "mcp-b7ccbb8b",
 	}
 	for name, want := range derived {
-		if got := DeriveMCPServerSlug(name); got != want {
-			t.Errorf("DeriveMCPServerSlug(%q) = %q, want %q", name, got, want)
-		}
+		got := DeriveMCPServerSlug(name)
+		assert.Equal(t, want, got)
 	}
 }
 
@@ -111,17 +98,18 @@ func TestNormalizeMCPConfigRejectsInvalid(t *testing.T) {
 			servers: map[string]MCPServerConfig{"a": {URL: "https://x/mcp", UserPaths: []string{"/team/../admin"}}},
 			wantErr: "invalid user_paths",
 		},
+		{
+			name:    "invalid disallowed user path",
+			servers: map[string]MCPServerConfig{"a": {URL: "https://x/mcp", DisallowedUserPaths: []string{"/team/../admin"}}},
+			wantErr: "invalid disallowed_user_paths",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := MCPConfig{Servers: tt.servers}
 			err := normalizeMCPConfig(&cfg)
-			if err == nil {
-				t.Fatalf("normalizeMCPConfig() = nil, want error containing %q", tt.wantErr)
-			}
-			if !strings.Contains(err.Error(), tt.wantErr) {
-				t.Fatalf("normalizeMCPConfig() error = %v, want containing %q", err, tt.wantErr)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
 }
@@ -129,18 +117,18 @@ func TestNormalizeMCPConfigRejectsInvalid(t *testing.T) {
 func TestNormalizeMCPConfigCanonicalizesUserPaths(t *testing.T) {
 	cfg := MCPConfig{Servers: map[string]MCPServerConfig{
 		"a": {
-			URL:       "https://x/mcp",
-			UserPaths: []string{" team/a ", "/team/a", "/team/b/"},
+			URL:                 "https://x/mcp",
+			UserPaths:           []string{" team/a ", "/team/a", "/team/b/"},
+			DisallowedUserPaths: []string{"/team/a/contractors/", " team/a/contractors"},
 		},
 	}}
-	if err := normalizeMCPConfig(&cfg); err != nil {
-		t.Fatalf("normalizeMCPConfig() error = %v", err)
-	}
+	err := normalizeMCPConfig(&cfg)
+	require.NoError(t, err)
+
 	got := cfg.Servers["a"].UserPaths
 	want := []string{"/team/a", "/team/b"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("UserPaths = %v, want %v", got, want)
-	}
+	require.Equal(t, want, got)
+	assert.Equal(t, []string{"/team/a/contractors"}, cfg.Servers["a"].DisallowedUserPaths)
 }
 
 func TestApplyMCPEnvMergesOverYAML(t *testing.T) {
@@ -152,72 +140,49 @@ func TestApplyMCPEnvMergesOverYAML(t *testing.T) {
 		},
 	}}
 	t.Setenv("MCP_SERVERS", `{"github":{"url":"https://env.example/mcp","transport":"sse"},"extra":{"url":"https://extra.example/mcp"}}`)
+	err := applyMCPEnv(cfg)
+	require.NoError(t, err)
+	err = normalizeMCPConfig(&cfg.MCP)
+	require.NoError(t, err)
+	require.Len(t, cfg.MCP.Servers, 3)
 
-	if err := applyMCPEnv(cfg); err != nil {
-		t.Fatalf("applyMCPEnv() error = %v", err)
-	}
-	if err := normalizeMCPConfig(&cfg.MCP); err != nil {
-		t.Fatalf("normalizeMCPConfig() error = %v", err)
-	}
-
-	if len(cfg.MCP.Servers) != 3 {
-		t.Fatalf("len(Servers) = %d, want 3", len(cfg.MCP.Servers))
-	}
 	github := cfg.MCP.Servers["github"]
-	if github.URL != "https://env.example/mcp" || github.Transport != MCPTransportSSE {
-		t.Fatalf("env entry did not replace YAML entry: %+v", github)
-	}
-	if cfg.MCP.Servers["other"].URL != "https://other.example/mcp" {
-		t.Fatalf("untouched YAML entry lost: %+v", cfg.MCP.Servers["other"])
-	}
-	if cfg.MCP.Servers["extra"].URL != "https://extra.example/mcp" {
-		t.Fatalf("env-only entry missing: %+v", cfg.MCP.Servers["extra"])
-	}
+	require.Equal(t, "https://env.example/mcp", github.URL)
+	require.Equal(t, MCPTransportSSE, github.Transport, "env entry did not replace YAML entry: %+v", github)
+	require.Equal(t, "https://other.example/mcp", cfg.MCP.Servers["other"].URL, "untouched YAML entry lost: %+v", cfg.MCP.Servers["other"])
+	require.Equal(t, "https://extra.example/mcp", cfg.MCP.Servers["extra"].URL, "env-only entry missing: %+v", cfg.MCP.Servers["extra"])
 }
 
 func TestApplyMCPEnvExpandsEnvironmentReferences(t *testing.T) {
 	t.Setenv("MCP_TEST_TOKEN", `secret"token\value`)
 	t.Setenv("MCP_SERVERS", `{"github":{"url":"https://example.com/mcp","headers":{"Authorization":"Bearer ${MCP_TEST_TOKEN}"}}}`)
 	cfg := &Config{}
-
-	if err := applyMCPEnv(cfg); err != nil {
-		t.Fatalf("applyMCPEnv() error = %v", err)
-	}
+	err := applyMCPEnv(cfg)
+	require.NoError(t, err)
 
 	got := cfg.MCP.Servers["github"].Headers["Authorization"]
-	if got != `Bearer secret"token\value` {
-		t.Fatalf("Authorization header = %q, want expanded token", got)
-	}
+	require.Equal(t, `Bearer secret"token\value`, got)
 }
 
 func TestApplyMCPEnvRejectsInvalidJSON(t *testing.T) {
 	cfg := &Config{}
 	t.Setenv("MCP_SERVERS", `[not json`)
-	if err := applyMCPEnv(cfg); err == nil {
-		t.Fatalf("applyMCPEnv() with invalid JSON should fail")
-	}
+	require.Error(t, applyMCPEnv(cfg))
 }
 
 func TestApplyMCPEnvRejectsCanonicalNameCollision(t *testing.T) {
 	cfg := &Config{}
 	t.Setenv("MCP_SERVERS", `{"GitHub":{"url":"https://a.example/mcp"},"github":{"url":"https://b.example/mcp"}}`)
 	err := applyMCPEnv(cfg)
-	if err == nil {
-		t.Fatalf("applyMCPEnv() with colliding canonical names should fail")
-	}
-	if !strings.Contains(err.Error(), "canonicalize") {
-		t.Fatalf("applyMCPEnv() error = %v, want canonical-collision message", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "canonicalize")
 }
 
 func TestMCPServerEnabledDefaultsTrue(t *testing.T) {
-	if !MCPServerEnabled(MCPServerConfig{}) {
-		t.Fatalf("MCPServerEnabled(zero) = false, want true")
-	}
+	require.True(t, MCPServerEnabled(MCPServerConfig{}))
+
 	off := false
-	if MCPServerEnabled(MCPServerConfig{Enabled: &off}) {
-		t.Fatalf("MCPServerEnabled(disabled) = true, want false")
-	}
+	require.False(t, MCPServerEnabled(MCPServerConfig{Enabled: &off}))
 }
 
 func TestNormalizeMCPAllowedOrigins(t *testing.T) {
@@ -277,17 +242,36 @@ func TestNormalizeMCPAllowedOrigins(t *testing.T) {
 			cfg := &MCPConfig{AllowedOrigins: tt.input}
 			err := normalizeMCPConfig(cfg)
 			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("normalizeMCPConfig(%v) = nil error, want a rejection", tt.input)
-				}
+				require.Error(t, err)
 				return
 			}
-			if err != nil {
-				t.Fatalf("normalizeMCPConfig(%v) error = %v", tt.input, err)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, cfg.AllowedOrigins)
+		})
+	}
+}
+
+func TestNormalizeMCPToolDiscovery(t *testing.T) {
+	tests := []struct {
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{input: "", want: MCPToolDiscoveryOff},
+		{input: "off", want: MCPToolDiscoveryOff},
+		{input: " Search ", want: MCPToolDiscoverySearch},
+		{input: "semantic", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			cfg := MCPConfig{ToolDiscovery: tt.input}
+			err := normalizeMCPConfig(&cfg)
+			if tt.wantErr {
+				require.ErrorContains(t, err, "mcp.tool_discovery")
+				return
 			}
-			if !slices.Equal(cfg.AllowedOrigins, tt.want) {
-				t.Fatalf("AllowedOrigins = %v, want %v", cfg.AllowedOrigins, tt.want)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, cfg.ToolDiscovery)
 		})
 	}
 }

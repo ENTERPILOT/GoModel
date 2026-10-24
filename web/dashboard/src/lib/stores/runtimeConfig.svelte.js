@@ -23,6 +23,7 @@ const CONFIG_KEYS = [
   "USAGE_PRICING_RECALCULATION_ENABLED",
   "DASHBOARD_LIVE_LOGS_ENABLED",
   "MCP_ENABLED",
+  "MCP_TOOL_DISCOVERY",
   "VIRTUAL_MODEL_STRATEGIES",
   "USER_PATH_HEADER",
 ];
@@ -118,6 +119,12 @@ class RuntimeConfigStore {
 
   mcpVisible() {
     return this.booleanFlag("MCP_ENABLED", true);
+  }
+
+  // mcpToolDiscovery is the gateway's default MCP tool discovery mode:
+  // "search" or "off" (also for backends that predate the key).
+  mcpToolDiscovery() {
+    return this.flag("MCP_TOOL_DISCOVERY") === "search" ? "search" : "off";
   }
 
   liveLogsVisible() {

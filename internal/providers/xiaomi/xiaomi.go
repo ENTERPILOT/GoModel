@@ -3,10 +3,8 @@ package xiaomi
 
 import (
 	"context"
-	"net/http"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 )
@@ -36,15 +34,6 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 	return &Provider{openai.NewChatCompatible(cfg.APIKey, opts, openai.CompatibleProviderConfig{
 		ProviderName: "xiaomi",
 		BaseURL:      providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
-	})}
-}
-
-// NewWithHTTPClient creates a new Xiaomi MiMo provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	return &Provider{openai.NewChatCompatibleWithHTTPClient(apiKey, httpClient, hooks, openai.CompatibleProviderConfig{
-		ProviderName: "xiaomi",
-		BaseURL:      providers.ResolveBaseURL(baseURL, defaultBaseURL),
 	})}
 }
 

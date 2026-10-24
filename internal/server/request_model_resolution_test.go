@@ -4,14 +4,15 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 type canonicalizingProvider struct {
@@ -92,16 +93,9 @@ func TestResolveRequestModel_UsesResolvedProviderNameInsteadOfSelectorPrefix(t *
 	}
 
 	resolution, err := resolveRequestModelWithAuthorizer(context.Background(), provider, nil, nil, core.NewRequestedModelSelector("openai/gpt-5-nano", ""))
-	if err != nil {
-		t.Fatalf("resolveRequestModelWithAuthorizer() error = %v", err)
-	}
-
-	if got := resolution.ResolvedSelector.Provider; got != "openai" {
-		t.Fatalf("ResolvedSelector.Provider = %q, want %q", got, "openai")
-	}
-	if got := resolution.ProviderName; got != "openai_test" {
-		t.Fatalf("ProviderName = %q, want %q", got, "openai_test")
-	}
+	require.NoError(t, err)
+	require.Equal(t, "openai", resolution.ResolvedSelector.Provider)
+	require.Equal(t, "openai_test", resolution.ProviderName)
 }
 
 func TestResolveRequestModel_CanonicalizesProviderTypeSelectorToConcreteProviderName(t *testing.T) {
@@ -118,19 +112,10 @@ func TestResolveRequestModel_CanonicalizesProviderTypeSelectorToConcreteProvider
 	}
 
 	resolution, err := resolveRequestModelWithAuthorizer(context.Background(), provider, nil, nil, core.NewRequestedModelSelector("openai/gpt-5-nano", ""))
-	if err != nil {
-		t.Fatalf("resolveRequestModelWithAuthorizer() error = %v", err)
-	}
-
-	if got := resolution.ResolvedQualifiedModel(); got != "openai_test/gpt-5-nano" {
-		t.Fatalf("ResolvedQualifiedModel = %q, want %q", got, "openai_test/gpt-5-nano")
-	}
-	if got := resolution.ProviderType; got != "openai" {
-		t.Fatalf("ProviderType = %q, want %q", got, "openai")
-	}
-	if got := resolution.ProviderName; got != "openai_test" {
-		t.Fatalf("ProviderName = %q, want %q", got, "openai_test")
-	}
+	require.NoError(t, err)
+	require.Equal(t, "openai_test/gpt-5-nano", resolution.ResolvedQualifiedModel())
+	require.Equal(t, "openai", resolution.ProviderType)
+	require.Equal(t, "openai_test", resolution.ProviderName)
 }
 
 type aliasResolverStub struct{}
@@ -157,22 +142,11 @@ func TestResolveRequestModel_CanonicalizesAliasOutputThroughProviderResolver(t *
 	}
 
 	resolution, err := resolveRequestModelWithAuthorizer(context.Background(), provider, aliasResolverStub{}, nil, core.NewRequestedModelSelector("anthropic/claude-opus-4-6", ""))
-	if err != nil {
-		t.Fatalf("resolveRequestModelWithAuthorizer() error = %v", err)
-	}
-
-	if !resolution.AliasApplied {
-		t.Fatal("AliasApplied = false, want true")
-	}
-	if got := resolution.ResolvedQualifiedModel(); got != "openai_test/gpt-5-nano" {
-		t.Fatalf("ResolvedQualifiedModel = %q, want %q", got, "openai_test/gpt-5-nano")
-	}
-	if got := resolution.ProviderType; got != "openai" {
-		t.Fatalf("ProviderType = %q, want %q", got, "openai")
-	}
-	if got := resolution.ProviderName; got != "openai_test" {
-		t.Fatalf("ProviderName = %q, want %q", got, "openai_test")
-	}
+	require.NoError(t, err)
+	require.True(t, resolution.AliasApplied)
+	require.Equal(t, "openai_test/gpt-5-nano", resolution.ResolvedQualifiedModel())
+	require.Equal(t, "openai", resolution.ProviderType)
+	require.Equal(t, "openai_test", resolution.ProviderName)
 }
 
 func TestEnrichAuditEntryWithRequestedModelDoesNotPublishBodyBeforePolicy(t *testing.T) {
@@ -183,9 +157,8 @@ func TestEnrichAuditEntryWithRequestedModelDoesNotPublishBodyBeforePolicy(t *tes
 		},
 	}
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req = req.WithContext(core.WithRequestSnapshot(req.Context(), core.NewRequestSnapshot(
+	c, _ := echotest.Post(t, "/v1/chat/completions", nil)
+	c.SetRequest(c.Request().WithContext(core.WithRequestSnapshot(c.Request().Context(), core.NewRequestSnapshot(
 		http.MethodPost,
 		"/v1/chat/completions",
 		nil,
@@ -196,25 +169,16 @@ func TestEnrichAuditEntryWithRequestedModelDoesNotPublishBodyBeforePolicy(t *tes
 		false,
 		"req-hidden",
 		nil,
-	)))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	))))
 
 	handler := auditlog.Middleware(logger)(func(c *echo.Context) error {
 		enrichAuditEntryWithRequestedModel(c, core.NewRequestedModelSelector("gpt-test", ""))
-		if len(logger.events) != 2 {
-			t.Fatalf("live events before policy resolution = %d, want 2", len(logger.events))
-		}
+		require.Len(t, logger.events, 2)
+
 		updated := logger.events[1]
-		if updated.eventType != auditlog.LiveEventAuditUpdated {
-			t.Fatalf("second event type = %q, want %q", updated.eventType, auditlog.LiveEventAuditUpdated)
-		}
-		if updated.requestedModel != "gpt-test" {
-			t.Fatalf("requested model = %q, want gpt-test", updated.requestedModel)
-		}
-		if updated.requestBody != nil {
-			t.Fatalf("request body before policy resolution = %#v, want nil", updated.requestBody)
-		}
+		require.Equal(t, auditlog.LiveEventAuditUpdated, updated.eventType)
+		require.Equal(t, "gpt-test", updated.requestedModel)
+		require.Nil(t, updated.requestBody)
 
 		workflow := &core.Workflow{
 			Policy: &core.ResolvedWorkflowPolicy{
@@ -227,23 +191,14 @@ func TestEnrichAuditEntryWithRequestedModelDoesNotPublishBodyBeforePolicy(t *tes
 		c.SetRequest(c.Request().WithContext(core.WithWorkflow(c.Request().Context(), workflow)))
 		return nil
 	})
+	err := handler(c)
+	require.NoError(t, err)
+	require.Len(t, logger.events, 3)
 
-	if err := handler(c); err != nil {
-		t.Fatalf("handler error: %v", err)
-	}
-	if len(logger.events) != 3 {
-		t.Fatalf("live events after audit removal = %d, want 3", len(logger.events))
-	}
 	removed := logger.events[2]
-	if removed.eventType != auditlog.LiveEventAuditRemoved {
-		t.Fatalf("third event type = %q, want %q", removed.eventType, auditlog.LiveEventAuditRemoved)
-	}
-	if removed.requestBody != nil {
-		t.Fatalf("removed event request body = %#v, want nil", removed.requestBody)
-	}
-	if logger.writes != 0 {
-		t.Fatalf("audit writes = %d, want 0", logger.writes)
-	}
+	require.Equal(t, auditlog.LiveEventAuditRemoved, removed.eventType)
+	require.Nil(t, removed.requestBody)
+	require.Equal(t, 0, logger.writes)
 }
 
 type requestModelLiveEvent struct {

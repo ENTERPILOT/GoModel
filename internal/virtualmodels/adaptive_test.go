@@ -2,14 +2,12 @@ package virtualmodels
 
 import (
 	"context"
-	"fmt"
-	"reflect"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 
 	"github.com/enterpilot/gomodel/ext"
+	"github.com/stretchr/testify/require"
 )
 
 // scriptedSelector answers Select with a fixed qualified model (or declines)
@@ -54,7 +52,7 @@ func (s *scriptedSelector) seen() []ext.RouteRequest {
 
 func upsertAdaptive(t *testing.T, svc *Service) {
 	t.Helper()
-	if err := svc.Upsert(context.Background(), VirtualModel{
+	err := svc.Upsert(context.Background(), VirtualModel{
 		Source:   "smart",
 		Strategy: StrategyAdaptive,
 		Targets: []Target{
@@ -63,9 +61,8 @@ func upsertAdaptive(t *testing.T, svc *Service) {
 			{Provider: "groq", Model: "llama"},
 		},
 		Enabled: true,
-	}); err != nil {
-		t.Fatalf("Upsert() error = %v", err)
-	}
+	})
+	require.NoError(t, err)
 }
 
 func TestBalancer_AdaptiveDelegatesToSelector(t *testing.T) {
@@ -76,42 +73,21 @@ func TestBalancer_AdaptiveDelegatesToSelector(t *testing.T) {
 	upsertAdaptive(t, svc)
 
 	for i, got := range resolvedModels(t, svc, "smart", 4) {
-		if got != "groq/llama" {
-			t.Fatalf("resolution[%d] = %q, want selector's choice groq/llama", i, got)
-		}
+		require.Equal(t, "groq/llama", got, "resolution[%d]: want selector's choice groq/llama", i)
 	}
 
 	requests := selector.seen()
-	if len(requests) != 4 {
-		t.Fatalf("selector saw %d requests, want 4", len(requests))
-	}
+	require.Len(t, requests, 4)
+
 	req := requests[0]
-	if req.Source != "smart" {
-		t.Fatalf("RouteRequest source = %q, want smart", req.Source)
-	}
+	require.Equal(t, "smart", req.Source)
+
 	want := []ext.RouteCandidate{
 		{Provider: "openai", Model: "gpt-4o", Qualified: "openai/gpt-4o", InputPerMtok: new(2.5), OutputPerMtok: new(10.0)},
 		{Provider: "anthropic", Model: "claude", Qualified: "anthropic/claude", InputPerMtok: new(3.0), OutputPerMtok: new(15.0)},
 		{Provider: "groq", Model: "llama", Qualified: "groq/llama", InputPerMtok: new(0.5), OutputPerMtok: new(0.8)},
 	}
-	if !reflect.DeepEqual(req.Candidates, want) {
-		t.Fatalf("candidates = %s, want %s", formatCandidates(req.Candidates), formatCandidates(want))
-	}
-}
-
-func formatCandidates(candidates []ext.RouteCandidate) string {
-	out := make([]string, 0, len(candidates))
-	for _, c := range candidates {
-		in, priced := "nil", "nil"
-		if c.InputPerMtok != nil {
-			in = fmt.Sprintf("%v", *c.InputPerMtok)
-		}
-		if c.OutputPerMtok != nil {
-			priced = fmt.Sprintf("%v", *c.OutputPerMtok)
-		}
-		out = append(out, fmt.Sprintf("{%s w=%v in=%s out=%s}", c.Qualified, c.Weight, in, priced))
-	}
-	return strings.Join(out, " ")
+	require.Equal(t, want, req.Candidates)
 }
 
 // The catalog's pricing must not be reachable through candidates: a selector
@@ -141,13 +117,12 @@ func TestBalancer_AdaptiveCandidatePricingIsCopied(t *testing.T) {
 	}
 	for qualified, prices := range want {
 		model, ok := svc.catalog.LookupModel(qualified)
-		if !ok || model.Metadata.Pricing.InputPerMtok == nil || model.Metadata.Pricing.OutputPerMtok == nil {
-			t.Fatalf("catalog lost the priced model %s", qualified)
-		}
-		if in, out := *model.Metadata.Pricing.InputPerMtok, *model.Metadata.Pricing.OutputPerMtok; in != prices[0] || out != prices[1] {
-			t.Fatalf("catalog prices for %s = %v/%v after selector mutation, want %v/%v (defensive copies)",
-				qualified, in, out, prices[0], prices[1])
-		}
+		require.True(t, ok)
+		require.NotNil(t, model.Metadata.Pricing.InputPerMtok)
+		require.NotNil(t, model.Metadata.Pricing.OutputPerMtok, "catalog lost the priced model %s", qualified)
+
+		require.Equal(t, prices[0], *model.Metadata.Pricing.InputPerMtok, "catalog input price for %s changed after selector mutation (defensive copies)", qualified)
+		require.Equal(t, prices[1], *model.Metadata.Pricing.OutputPerMtok, "catalog output price for %s changed after selector mutation (defensive copies)", qualified)
 	}
 }
 
@@ -174,11 +149,7 @@ func TestBalancer_AdaptiveFallsBackToRoundRobin(t *testing.T) {
 
 			got := resolvedModels(t, svc, "smart", 3)
 			want := []string{"openai/gpt-4o", "anthropic/claude", "groq/llama"}
-			for i := range want {
-				if got[i] != want[i] {
-					t.Fatalf("fallback[%d] = %q, want round-robin order %q (full: %v)", i, got[i], want[i], got)
-				}
-			}
+			require.Equal(t, want, got, "fallback must follow round-robin order")
 		})
 	}
 }
@@ -192,13 +163,10 @@ func TestBalancer_AdaptiveSingleViableTargetBypassesSelector(t *testing.T) {
 	upsertAdaptive(t, svc)
 
 	for i, got := range resolvedModels(t, svc, "smart", 2) {
-		if got != "anthropic/claude" {
-			t.Fatalf("resolution[%d] = %q, want the only target with capacity (anthropic/claude)", i, got)
-		}
+		require.Equal(t, "anthropic/claude", got, "resolution[%d]: want the only target with capacity (anthropic/claude)", i)
 	}
-	if seen := selector.seen(); len(seen) != 0 {
-		t.Fatalf("selector saw %d requests, want 0 for a single-target pool", len(seen))
-	}
+	seen := selector.seen()
+	require.Empty(t, seen)
 }
 
 // steeringSelector answers with whatever target is currently healthy,
@@ -263,13 +231,11 @@ func TestSticky_AdaptiveConsultsSelectorOnEveryRequest(t *testing.T) {
 	upsertAdaptive(t, svc)
 
 	for i := range 5 {
-		if got := resolveSession(t, svc, "smart", "sess-a"); got != "groq/llama" {
-			t.Fatalf("resolution %d = %q, want selector's choice groq/llama", i, got)
-		}
+		got := resolveSession(t, svc, "smart", "sess-a")
+		require.Equal(t, "groq/llama", got, "resolution %d: want selector's choice groq/llama", i)
 	}
-	if got := len(selector.seen()); got != 5 {
-		t.Fatalf("selector saw %d requests, want one per request (5)", got)
-	}
+	got := len(selector.seen())
+	require.Equal(t, 5, got)
 }
 
 // The pin reaches the selector as SessionTarget, so it can weigh cache
@@ -285,19 +251,12 @@ func TestSticky_AdaptiveSelectorReceivesThePin(t *testing.T) {
 		resolveSession(t, svc, "smart", "sess-a")
 	}
 	requests := selector.seen()
-	if len(requests) != 3 {
-		t.Fatalf("selector saw %d requests, want 3", len(requests))
-	}
-	if requests[0].SessionTarget != "" {
-		t.Fatalf("first request SessionTarget = %q, want empty for a new session", requests[0].SessionTarget)
-	}
+	require.Len(t, requests, 3)
+	require.Empty(t, requests[0].SessionTarget)
+
 	for i, req := range requests[1:] {
-		if req.SessionTarget != "anthropic/claude" {
-			t.Fatalf("request %d SessionTarget = %q, want the recorded pin anthropic/claude", i+1, req.SessionTarget)
-		}
-		if req.SessionID != "sess-a" {
-			t.Fatalf("request %d SessionID = %q, want sess-a", i+1, req.SessionID)
-		}
+		require.Equal(t, "anthropic/claude", req.SessionTarget, "request %d SessionTarget: want the recorded pin anthropic/claude", i+1)
+		require.Equal(t, "sess-a", req.SessionID, "request %d SessionID: want sess-a", i+1)
 	}
 }
 
@@ -311,30 +270,22 @@ func TestSticky_AdaptiveSelectorMovesSessionOffFailingTarget(t *testing.T) {
 	upsertAdaptive(t, svc)
 
 	first := resolveSession(t, svc, "smart", "sess-a")
-	if first != "openai/gpt-4o" {
-		t.Fatalf("first resolution = %q, want openai/gpt-4o", first)
-	}
-	if got := resolveSession(t, svc, "smart", "sess-a"); got != first {
-		t.Fatalf("healthy session moved to %q, want to stay on %q", got, first)
-	}
+	require.Equal(t, "openai/gpt-4o", first)
+	got := resolveSession(t, svc, "smart", "sess-a")
+	require.Equal(t, first, got)
 
 	selector.fail(first)
 	for i := range 3 {
 		got := resolveSession(t, svc, "smart", "sess-a")
-		if got == first {
-			t.Fatalf("resolution %d stayed on failing target %q", i, got)
-		}
-		if got != "anthropic/claude" {
-			t.Fatalf("resolution %d = %q, want the selector's replacement anthropic/claude", i, got)
-		}
+		require.NotEqual(t, first, got, "resolution %d stayed on failing target %q", i, got)
+		require.Equal(t, "anthropic/claude", got, "resolution %d: want the selector's replacement anthropic/claude", i)
 	}
 
 	// The session re-pinned to the replacement, so the selector sees the new
 	// target as the pin rather than the one it took out of service.
 	requests := selector.seen()
-	if last := requests[len(requests)-1].SessionTarget; last != "anthropic/claude" {
-		t.Fatalf("final SessionTarget = %q, want the re-pinned anthropic/claude", last)
-	}
+	last := requests[len(requests)-1].SessionTarget
+	require.Equal(t, "anthropic/claude", last)
 }
 
 // A selector that declines must not cost a session its affinity: core's own
@@ -348,9 +299,8 @@ func TestSticky_AdaptiveDeclineKeepsCoreAffinity(t *testing.T) {
 
 	first := resolveSession(t, svc, "smart", "sess-a")
 	for i := range 5 {
-		if got := resolveSession(t, svc, "smart", "sess-a"); got != first {
-			t.Fatalf("resolution %d = %q, want pinned %q despite the decline", i, got, first)
-		}
+		got := resolveSession(t, svc, "smart", "sess-a")
+		require.Equal(t, first, got, "resolution %d: want pinned %q despite the decline", i, first)
 	}
 }
 
@@ -364,9 +314,8 @@ func TestSticky_AdaptiveWithoutSelectorPinsLikeRoundRobin(t *testing.T) {
 
 	first := resolveSession(t, svc, "smart", "sess-a")
 	for i := range 5 {
-		if got := resolveSession(t, svc, "smart", "sess-a"); got != first {
-			t.Fatalf("resolution %d = %q, want pinned %q", i, got, first)
-		}
+		got := resolveSession(t, svc, "smart", "sess-a")
+		require.Equal(t, first, got, "resolution %d: want pinned %q", i, first)
 	}
 }
 
@@ -383,9 +332,7 @@ func TestSticky_AdaptiveAffinityDisabledSendsNoPin(t *testing.T) {
 		resolveSession(t, svc, "smart", "sess-a")
 	}
 	for i, req := range selector.seen() {
-		if req.SessionTarget != "" {
-			t.Fatalf("request %d SessionTarget = %q, want empty with affinity disabled", i, req.SessionTarget)
-		}
+		require.Empty(t, req.SessionTarget, "request %d SessionTarget: want empty with affinity disabled", i)
 	}
 }
 
@@ -462,13 +409,10 @@ func TestSticky_AdaptiveConcurrentFirstRequestsAgree(t *testing.T) {
 	close(selector.release)
 	wg.Wait()
 
-	if results[0] != results[1] {
-		t.Fatalf("concurrent requests of one session split across %q and %q", results[0], results[1])
-	}
+	require.Equal(t, results[1], results[0])
 	// And the committed pin is the one both requests actually used.
-	if got := resolveSession(t, svc, "smart", "sess-race"); got != results[0] {
-		t.Fatalf("later request = %q, want the committed target %q", got, results[0])
-	}
+	got := resolveSession(t, svc, "smart", "sess-race")
+	require.Equal(t, results[0], got)
 }
 
 // The same race, but against an existing pin the selector deliberately
@@ -479,9 +423,8 @@ func TestSticky_AdaptiveConcurrentRepinsAgree(t *testing.T) {
 	steering := newSteeringSelector("openai/gpt-4o", "anthropic/claude", "groq/llama")
 	svc.SetRouteSelector(steering)
 	upsertAdaptive(t, svc)
-	if got := resolveSession(t, svc, "smart", "sess-race"); got != "openai/gpt-4o" {
-		t.Fatalf("initial pin = %q, want openai/gpt-4o", got)
-	}
+	got := resolveSession(t, svc, "smart", "sess-race")
+	require.Equal(t, "openai/gpt-4o", got)
 
 	racing := newRacingSelector("anthropic/claude", "groq/llama")
 	svc.SetRouteSelector(racing)
@@ -499,13 +442,9 @@ func TestSticky_AdaptiveConcurrentRepinsAgree(t *testing.T) {
 	wg.Wait()
 
 	for i, pin := range racing.observedPins() {
-		if pin != "openai/gpt-4o" {
-			t.Fatalf("concurrent call %d saw pin %q, want both to observe openai/gpt-4o", i, pin)
-		}
+		require.Equal(t, "openai/gpt-4o", pin, "observed pin %d", i)
 	}
-	if results[0] != results[1] {
-		t.Fatalf("concurrent re-pins split one session across %q and %q", results[0], results[1])
-	}
+	require.Equal(t, results[1], results[0])
 }
 
 // counterFor reads the round-robin position for a source, or -1 when the
@@ -542,13 +481,11 @@ func TestSticky_AdaptiveDeclineDoesNotAdvanceRoundRobin(t *testing.T) {
 
 			before := counterFor(svc, "smart")
 			for i := range 4 {
-				if got := resolveSession(t, svc, "smart", "sess-a"); got != pinned {
-					t.Fatalf("resolution %d = %q, want the pin %q kept", i, got, pinned)
-				}
+				got := resolveSession(t, svc, "smart", "sess-a")
+				require.Equal(t, pinned, got, "resolution %d: want the pin %q kept", i, pinned)
 			}
-			if after := counterFor(svc, "smart"); after != before {
-				t.Fatalf("round-robin counter advanced %d -> %d on the pinned fallback path", before, after)
-			}
+			after := counterFor(svc, "smart")
+			require.Equal(t, before, after)
 		})
 	}
 }

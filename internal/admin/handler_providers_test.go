@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/stretchr/testify/require"
 )
 
 // TestClassifyProviderStatus_HealthyForAllowlistInventory locks in the
@@ -27,12 +28,31 @@ func TestClassifyProviderStatus_HealthyForAllowlistInventory(t *testing.T) {
 	}
 
 	status, label, _, _ := classifyProviderStatus(cfg, runtime)
-	if status != "healthy" {
-		t.Fatalf("status = %q, want healthy", status)
+	require.Equal(t, "healthy", status)
+	require.Equal(t, "Healthy", label)
+}
+
+// A provider without a /models endpoint (e.g. a speech-to-text server) is
+// fully described by its configured models and must not look degraded.
+func TestClassifyProviderStatus_HealthyWhenModelListingUnsupported(t *testing.T) {
+	now := time.Now().UTC()
+	cfg := providers.SanitizedProviderConfig{Name: "stt", Type: "openai"}
+	runtime := providers.ProviderRuntimeSnapshot{
+		Name:                    "stt",
+		Type:                    "openai",
+		Registered:              true,
+		RegistryInitialized:     true,
+		DiscoveredModelCount:    1,
+		LastModelFetchAt:        &now,
+		LastModelFetchSuccessAt: &now,
+		ModelListingUnsupported: true,
 	}
-	if label != "Healthy" {
-		t.Fatalf("label = %q, want Healthy", label)
-	}
+
+	status, label, reason, lastError := classifyProviderStatus(cfg, runtime)
+	require.Equal(t, "healthy", status)
+	require.Equal(t, "Healthy", label)
+	require.Equal(t, "provider does not list models; serving configured models", reason)
+	require.Empty(t, lastError)
 }
 
 // A provider retired from load balancing by a failed availability probe has a
@@ -55,16 +75,8 @@ func TestClassifyProviderStatus_StaleInventoryIsUnhealthy(t *testing.T) {
 	}
 
 	status, label, reason, lastError := classifyProviderStatus(cfg, runtime)
-	if status != "unhealthy" {
-		t.Fatalf("status = %q, want unhealthy", status)
-	}
-	if label != "Offline" {
-		t.Fatalf("label = %q, want Offline", label)
-	}
-	if reason == "" {
-		t.Fatal("reason empty, want stale-inventory explanation")
-	}
-	if lastError != "connection refused" {
-		t.Fatalf("lastError = %q, want availability error surfaced", lastError)
-	}
+	require.Equal(t, "unhealthy", status)
+	require.Equal(t, "Offline", label)
+	require.NotEmpty(t, reason)
+	require.Equal(t, "connection refused", lastError)
 }

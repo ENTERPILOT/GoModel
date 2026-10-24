@@ -21,6 +21,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/server"
+	"github.com/stretchr/testify/require"
 )
 
 // =============================================================================
@@ -115,9 +116,7 @@ func TestRegistryRaceCondition(t *testing.T) {
 
 	wg.Wait()
 
-	if panicked.Load() {
-		t.Fatal("Race condition detected - concurrent map access panic occurred")
-	}
+	require.False(t, panicked.Load(), "Race condition detected - concurrent map access panic occurred")
 
 	t.Log("No race detected in this run (run with -race flag for definitive check)")
 }

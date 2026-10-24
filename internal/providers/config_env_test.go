@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // captureSlog routes the default logger into a buffer for the test's lifetime.
@@ -119,44 +121,50 @@ func TestApplyProviderEnvVars_BareTypeEnvVarsAgainstRenamedProviders(t *testing.
 			}
 			logs := captureSlog(t)
 
-			got := applyProviderEnvVars(tt.raw, testDiscoveryConfigs)
+			got, _ := applyEnv(t, tt.raw)
 
 			for name, want := range tt.want {
 				p, ok := got[name]
-				if !ok {
-					t.Fatalf("provider %q missing from result", name)
-				}
-				if p.APIKey != want.APIKey {
-					t.Errorf("%s APIKey = %q, want %q", name, p.APIKey, want.APIKey)
-				}
-				if strings.Join(p.APIKeys, ",") != strings.Join(want.APIKeys, ",") {
-					t.Errorf("%s APIKeys = %v, want %v", name, p.APIKeys, want.APIKeys)
-				}
-				if p.BaseURL != want.BaseURL {
-					t.Errorf("%s BaseURL = %q, want %q", name, p.BaseURL, want.BaseURL)
-				}
-				if got, wantIDs := config.ProviderModelIDs(p.Models), config.ProviderModelIDs(want.Models); strings.Join(got, ",") != strings.Join(wantIDs, ",") {
-					t.Errorf("%s Models = %v, want %v", name, got, wantIDs)
-				}
+				require.True(t, ok, "provider %q missing from result", name)
+				assert.Equal(t, want.APIKey, p.APIKey, "%s APIKey", name)
+				assert.Equal(t, strings.Join(want.APIKeys, ","), strings.Join(p.APIKeys, ","), "%s APIKeys", name)
+				assert.Equal(t, want.BaseURL, p.BaseURL, "%s BaseURL", name)
+				assert.Equal(t, strings.Join(config.ProviderModelIDs(want.Models), ","), strings.Join(config.ProviderModelIDs(p.Models), ","), "%s Models", name)
 			}
 			if tt.wantNoOpenAI {
-				if _, exists := got["openai"]; exists {
-					t.Error("expected no auto-discovered openai provider")
-				}
+				_, exists := got["openai"]
+				assert.False(t, exists)
 			}
 
 			out := logs.String()
-			if len(tt.wantLog) == 0 && out != "" {
-				t.Errorf("expected no warning, got:\n%s", out)
+			if len(tt.wantLog) == 0 {
+				assert.Empty(t, out, "expected no warning")
 			}
 			for _, fragment := range tt.wantLog {
-				if !strings.Contains(out, fragment) {
-					t.Errorf("warning missing %s in:\n%s", fragment, out)
-				}
+				assert.Contains(t, out, fragment)
 			}
-			if strings.Contains(out, envKey) {
-				t.Errorf("warning leaked the env api key:\n%s", out)
-			}
+			assert.NotContains(t, out, envKey, "warning leaked the env api key")
 		})
 	}
+}
+
+func TestApplyProviderEnvVars_ProxyURL(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-openai")
+	t.Setenv("OPENAI_PROXY_URL", "http://proxy.internal:3128")
+	t.Setenv("OPENAI_EU_API_KEY", "sk-eu")
+	t.Setenv("OPENAI_EU_PROXY_URL", "socks5://user:pass@10.0.0.1:1080")
+
+	got, _ := applyEnv(t, map[string]config.RawProviderConfig{
+		"anthropic": {Type: "anthropic", APIKey: "sk-ant", ProxyURL: "http://yaml-proxy:3128"},
+	})
+
+	require.Contains(t, got, "openai")
+	assert.Equal(t, "http://proxy.internal:3128", got["openai"].ProxyURL)
+	require.Contains(t, got, "openai-eu")
+	assert.Equal(t, "socks5://user:pass@10.0.0.1:1080", got["openai-eu"].ProxyURL)
+	// YAML keeps its proxy when the environment sets none for that provider.
+	assert.Equal(t, "http://yaml-proxy:3128", got["anthropic"].ProxyURL)
+
+	resolved := buildProviderConfig(got["openai-eu"], config.ResilienceConfig{Retry: config.DefaultRetryConfig(), CircuitBreaker: config.DefaultCircuitBreakerConfig()})
+	assert.Equal(t, "socks5://user:pass@10.0.0.1:1080", resolved.ProxyURL)
 }

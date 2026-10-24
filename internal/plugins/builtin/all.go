@@ -9,6 +9,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/plugins/builtin/routeexample"
 	"github.com/enterpilot/gomodel/internal/plugins/builtin/stringreplace"
 	"github.com/enterpilot/gomodel/internal/plugins/builtin/systemprompt"
+	"github.com/enterpilot/gomodel/internal/plugins/builtin/tagreplace"
 	"github.com/enterpilot/gomodel/pluginapi"
 )
 
@@ -18,6 +19,7 @@ func All() []func() pluginapi.Plugin {
 		systemprompt.New,
 		llmaltering.New,
 		stringreplace.New,
+		tagreplace.New,
 		headeredit.New,
 		llmjudge.New,
 		presidio.New,

@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -50,5 +51,42 @@ func BenchmarkPlanChat(b *testing.B) {
 				}
 			})
 		}
+	}
+}
+
+// benchChatRequestWithExtras is the same conversation carrying the
+// passthrough fields real agentic traffic sends (a speaker name, client
+// tracing metadata). None of them is a cache directive, which is the common
+// case: the planner has to scan every container to find that out.
+func benchChatRequestWithExtras(messages int) *core.ChatRequest {
+	req := benchChatRequest(messages, true)
+	extras := core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+		"name":           json.RawMessage(`"alice"`),
+		"x_message_meta": json.RawMessage(`{"id":"msg-1","turn":3}`),
+		"x_trace":        json.RawMessage(`{"id":"trace-1"}`),
+	})
+	for i := range req.Messages {
+		req.Messages[i].ExtraFields = extras
+	}
+	req.ExtraFields = extras
+	return req
+}
+
+// BenchmarkPlanChatWithExtraFields measures planning for a request whose
+// messages carry passthrough fields, so the cache-directive scan does real
+// work instead of returning on an empty container.
+func BenchmarkPlanChatWithExtraFields(b *testing.B) {
+	planner := &cachePlanner{enabled: true}
+	selector := core.ModelSelector{Provider: "openai", Model: "gpt-4o"}
+	for _, messages := range []int{20, 60} {
+		req := benchChatRequestWithExtras(messages)
+		b.Run(fmt.Sprintf("messages=%d", messages), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				if planned := planner.planChat(req, "openai", selector); planned == req {
+					b.Fatal("request was not planned")
+				}
+			}
+		})
 	}
 }
