@@ -15,6 +15,7 @@ export function emptyUsageSummary() {
     total_input_cost: null,
     total_output_cost: null,
     total_cost: null,
+    total_billed_cost: null,
   };
 }
 

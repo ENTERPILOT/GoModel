@@ -1,0 +1,201 @@
+---
+title: "Google Gemini"
+description: "Skonfiguruj Google Gemini przez AI Studio w GoModel, wybierz routing natywny lub kompatybilny z OpenAI i poznaj zachowanie image_url."
+icon: "sparkles"
+keywords: ["Google Gemini", "AI Studio", "native Gemini API", "natywne API Gemini", "provider setup", "konfiguracja providera"]
+---
+
+Ta strona opisuje Gemini z kluczami API **Google AI Studio**. Gemini w
+Vertex AI w Google Cloud opisuje [przewodnik po Google Vertex AI](/pl/providers/vertex).
+
+Domyślnie GoModel kieruje requesty Gemini dla czatu, Responses, embeddingów i
+[obrazów](/pl/advanced/images-api) przez natywne API Gemini
+(`generateContent`, `batchEmbedContents`, Imagen `predict`). Przełącz się na
+endpoint kompatybilny z OpenAI, gdy potrzebujesz zachowania zgodności, którego natywny
+adapter jeszcze nie implementuje (przede wszystkim zdalnych wartości `image_url`).
+
+## Konfiguracja
+
+```bash
+GEMINI_API_KEY=...
+GEMINI_API_MODE=native        # lub openai_compatible
+```
+
+Albo w `config.yaml`:
+
+```yaml
+providers:
+  gemini:
+    type: gemini
+    api_key: "${GEMINI_API_KEY}"
+    api_mode: native
+```
+
+<Note>
+  `USE_GOOGLE_GEMINI_NATIVE_API` jest nadal respektowane jako przestarzały globalny przełącznik,
+  gdy `GEMINI_API_MODE` dla danego providera nie jest ustawione. Wybieraj `GEMINI_API_MODE`.
+</Note>
+
+Natywny tryb AI Studio potrafi też materializować plany prompt cache, które GoModel tworzy po routingu,
+jako pięciominutowe obiekty cached-content Gemini. Ponowne użycie jest ograniczone do klucza
+API wybranego dla sesji; ruch bez sesji z rotującymi kluczami pomija
+tworzenie obiektów, żeby zasób nigdy nie został użyty ponownie z niewłaściwymi danymi uwierzytelniającymi.
+Vertex obecnie otrzymuje oryginalny request bez obiektów cached-content.
+
+## Bazowe URL-e
+
+GoModel utrzymuje osobne wewnętrzne adresy bazowe dla natywnego Gemini i
+API kompatybilnego z OpenAI:
+
+- natywny czat/modele: `https://generativelanguage.googleapis.com/v1beta`
+- kompatybilny z OpenAI: `https://generativelanguage.googleapis.com/v1beta/openai`
+
+`GEMINI_BASE_URL` je nadpisuje. Gdy wartość kończy się na `/openai`, GoModel
+używa jej dla klienta kompatybilnego z OpenAI i wyznacza natywny adres bazowy przez
+usunięcie `/openai`. Pliki i batche zawsze korzystają z interfejsu
+kompatybilnego z OpenAI; czat, embeddingi i obrazy zależą od trybu API.
+
+## Embeddingi
+
+W trybie natywnym embeddingi są obsługiwane przez `models/{model}:batchEmbedContents`.
+`dimensions` mapuje się na `outputDimensionality`, a `encoding_format: "base64"` jest
+respektowane. Gemini nie raportuje użycia tokenów dla embeddingów w żadnym z interfejsów API, więc
+odpowiedzi z embeddingami zawierają zerowe liczby tokenów, a wiersz użycia jest oznaczany
+zastrzeżeniem dotyczącym obliczenia kosztu.
+
+## Generowanie i edycja obrazów
+
+W trybie natywnym [endpointy obrazów kompatybilne z OpenAI](/pl/advanced/images-api)
+działają z modelami obrazowymi Gemini (`gemini-2.5-flash-image`, ..., przez
+`generateContent`). Google wycofał Imagen z API AI Studio w sierpniu
+2026; Imagen jest nadal dostępny w [Vertex AI](/pl/providers/vertex). Edycja obrazów
+wymaga trybu natywnego i modelu obrazowego Gemini; maski nie są obsługiwane. Szczegóły
+mapowania parametrów i cen znajdziesz w [uwagach o providerze w Images API](/pl/advanced/images-api#google-gemini).
+
+## Reasoning effort
+
+W trybie natywnym `reasoning_effort` (lub `reasoning.effort`) jest tłumaczone na
+`thinkingConfig` Gemini:
+
+| Rodzina modeli | `none` / `minimal` | `low` / `medium` / `high` |
+| ------------ | ------------------ | ------------------------- |
+| Gemini 2.5 | `thinkingBudget` 0 / 1024 | `thinkingBudget` 1024 / 8192 / 24576 |
+| Gemini 3 Flash, 3.5, 3.6 | `thinkingLevel: minimal` | `thinkingLevel` bez zmian |
+| Gemini 3 Pro, 3.1 Pro, 3.7 Flash, 3.8 Flash | `thinkingLevel: low` | `thinkingLevel` bez zmian |
+
+W Gemini 3 nie da się wyłączyć thinkingu, a modele Pro oraz 3.7 i 3.8
+Flash odrzucają `minimal`, więc GoModel wysyła najniższy poziom akceptowany przez te modele,
+zamiast zwracać błąd 400 od Google. Jawne
+`extra_body.google.thinking_config` jest zawsze przekazywane bez zmian.
+
+## Parametry samplingu w Gemini 3
+
+Przewodniki migracji Google do Gemini 3 zalecają usunięcie `temperature`, `top_p` i
+`top_k` z każdego requestu, bo modele są dostrojone pod swoje wartości domyślne,
+i wymieniają `candidate_count` jako nieobsługiwane w Gemini 3.x. W trybie natywnym GoModel
+pomija więc te cztery pola dla Gemini 3 i nowszych (`gemini-3-*`,
+`gemini-3.5-*`, `gemini-3.8-*`, ...), a nadal przekazuje je dla Gemini 2.5,
+Gemmy i innych modeli. Nie dotyczy to `max_tokens`, `stop`, kar (penalties), `response_format` ani
+ustawień thinkingu.
+
+## Thought signatures
+
+Gemini 3 dołącza zaszyfrowane `thoughtSignature` do emitowanych wywołań funkcji
+i odrzuca kolejny request (HTTP 400, "Function call is missing a
+thought_signature"), gdy to wywołanie wraca w historii bez sygnatury. W
+trybie natywnym GoModel udostępnia sygnaturę tak samo jak własny endpoint Google
+kompatybilny z OpenAI, więc klient, który odsyła wiadomości asystenta
+bez zmian, nadal działa:
+
+```json
+{
+  "role": "assistant",
+  "tool_calls": [{
+    "id": "call_1",
+    "type": "function",
+    "function": {"name": "lookup_weather", "arguments": "{\"city\":\"Warsaw\"}"},
+    "extra_content": {"google": {"thought_signature": "EvACCu0CARFNMg..."}}
+  }]
+}
+```
+
+To samo pole `extra_content` pojawia się w streamowanych deltach `tool_calls`, w
+elementach output `function_call` w Responses API, w blokach `tool_use` w Anthropic Messages API
+oraz (dla tur wyłącznie tekstowych) w samej wiadomości asystenta.
+Odsyłaj je dosłownie; tylko pierwsze wywołanie w równoległej grupie ma
+sygnaturę. Inni providerzy nigdy jej nie widzą; wspólną konwencję opisuje strona
+[Extra content, bloki thinking i thought signatures](/pl/advanced/extra-content). Akceptowane jest też płaskie `thought_signature` (lub
+`thoughtSignature`) w wywołaniu narzędzia lub w jego obiekcie `function`,
+więc klienci zbudowani pod inne gatewaye nadal działają.
+
+Gdy historia Gemini 3 zawiera wywołanie funkcji bez żadnej sygnatury (rozmowa
+zaczęła się na innym modelu lub klient pominął to pole),
+GoModel wysyła udokumentowany przez Google placeholder `skip_thought_signature_validator`,
+zamiast zwracać błąd 400. Ciągłość reasoningu jest dla
+tej tury ograniczona, więc lepiej odsyłać prawdziwą sygnaturę.
+
+## Obrazy na wejściu
+
+| Tryb | `image_url` w stylu OpenAI |
+| ---- | ----- |
+| `native` (domyślnie) | tylko osadzone URL-e `data:` – zdalne URL-e `https://...` są odrzucane |
+| `openai_compatible` | zdalne URL-e w stylu OpenAI są przekazywane do endpointu Google kompatybilnego z OpenAI |
+
+W przypadku obrazów hostowanych pod URL-em w trybie natywnym własne przykłady Google najpierw pobierają URL,
+a następnie wysyłają bajty do `generateContent`.
+
+## Wideo na wejściu
+
+| Tryb | `video_url` w stylu OpenAI |
+| ---- | ----- |
+| `native` (domyślnie) | osadzone URL-e `data:`, linki YouTube, URI z Gemini Files API i obiekty `gs://` |
+| `openai_compatible` | przekazywane bez zmian, ale endpoint Google kompatybilny z OpenAI nie obsługuje wideo na wejściu – użyj `native` |
+
+```json
+{"type":"video_url","video_url":{"url":"https://www.youtube.com/watch?v=abc123"}}
+```
+
+W trybie natywnym URL `data:` staje się osadzoną częścią wideo (domyślnie
+`video/mp4`, gdy data URL nie deklaruje typu mediów), a URI YouTube, Files API
+i Cloud Storage są wysyłane jako referencja do pliku, którą Gemini rozwiązuje samodzielnie. Każdy
+inny zdalny URL `https://...` jest odrzucany, a nie pomijany – najpierw prześlij plik
+przez Gemini Files API.
+
+## Wiadomości i narzędzia
+
+W trybie natywnym pola czatu OpenAI mapują się na `generateContent` w następujący sposób:
+
+| Pole OpenAI | Gemini `generateContent` |
+| ------------ | ------------------------ |
+| wiadomości `system` i `developer` | `system_instruction` (Gemini nie ma osobnej roli developer) |
+| `tool_choice: "auto"` / `"required"` / `"none"` | `functionCallingConfig.mode` `AUTO` / `ANY` / `NONE` |
+| `tool_choice` wskazujące jedną funkcję | `ANY` z `allowedFunctionNames: [name]` |
+| `tool_choice: {"type": "allowed_tools", ...}` z trybem `required` | `ANY` z `allowedFunctionNames` |
+| `tool_choice: {"type": "allowed_tools", ...}` z trybem `auto` | `VALIDATED` z `allowedFunctionNames` |
+| `strict: true` w dowolnym narzędziu funkcyjnym | `VALIDATED` zamiast `AUTO`; `ANY` już wymusza schemat |
+| `parallel_tool_calls: false` | pomijane; Gemini nie ma odpowiednika |
+
+Gemini akceptuje `allowedFunctionNames` tylko z `ANY` lub `VALIDATED`, dlatego
+podzbiór `auto` staje się `VALIDATED`: model nadal może odpowiedzieć tekstem,
+ale każde wykonane przez niego wywołanie jest ograniczone do wymienionych narzędzi. `VALIDATED` dotyczy
+całego requestu, więc jedno narzędzie strict sprawia, że każde zadeklarowane narzędzie
+jest walidowane względem schematu.
+
+Gemini nie pozwala ograniczyć tury do jednego wywołania funkcji, a wskazanie pojedynczego
+narzędzia nie pomaga: Gemini może wywołać tę samą funkcję więcej niż raz w jednej turze.
+Gdy `parallel_tool_calls: false` (lub `disable_parallel_tool_use` z Anthropic)
+ma znaczenie, obsłuż lub odrzuć dodatkowe wywołania w swoim kliencie.
+
+Wybór `allowed_tools` z pustą listą `tools` jest odrzucany z kodem 400, tak jak
+robi to OpenAI.
+
+## Jeszcze niezintegrowane
+
+- Automatyczne pobieranie zdalnych wartości `image_url` w trybie natywnym.
+- Przesyłanie zdalnych obrazów lub wideo przez Gemini Files API przed requestem czatu.
+
+## Materiały źródłowe
+
+- [Rozumienie obrazów w Gemini](https://ai.google.dev/gemini-api/docs/image-understanding)
+- [Rozumienie wideo w Gemini](https://ai.google.dev/gemini-api/docs/video-understanding)
+- [Zgodność Gemini z OpenAI](https://ai.google.dev/gemini-api/docs/openai)

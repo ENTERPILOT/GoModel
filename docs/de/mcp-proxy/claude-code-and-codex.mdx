@@ -1,0 +1,168 @@
+---
+title: "Claude Code und Codex verbinden"
+description: "Verbinden Sie Claude Code oder Codex über Streamable HTTP und einen GoModel-Bearer-Key mit dem MCP Proxy von GoModel."
+icon: "terminal"
+keywords: ["MCP Proxy", "MCP proxy", "Claude Code MCP", "Codex MCP", "Streamable HTTP", "MCP-Einrichtung", "MCP setup"]
+---
+
+Claude Code und Codex können GoModel als einen einzigen authentifizierten MCP-Endpunkt nutzen. Sie
+erhalten die Tools, die GoModel bereitstellt, während die Zugangsdaten für Linear, GitHub und
+andere Upstream-MCP-Server in GoModel verbleiben.
+
+`Claude Code or Codex -> GoModel /mcp -> upstream MCP servers`
+
+## Bevor Sie beginnen
+
+Sie benötigen:
+
+- Ein laufendes GoModel-Deployment, das der Client erreichen kann.
+- Mindestens einen verbundenen MCP-Server im GoModel-Dashboard oder in der Konfiguration.
+- Einen GoModel-Master-Key oder einen verwalteten Auth-Key, der diesen Server sehen darf.
+
+Setzen Sie die Client-Zugangsdaten in Ihrer Shell:
+
+```bash
+export GOMODEL_API_KEY="sk-your-gomodel-key"
+```
+
+Verwenden Sie für ein entferntes Deployment HTTPS. Für einen lokalen GoModel-Prozess ersetzen Sie
+die Beispiel-URL durch `http://localhost:8080/mcp`.
+
+<Note>
+  Senden Sie vom Client aus nur den GoModel-Key. Konfigurieren Sie Upstream-Tokens, etwa einen
+  Linear-API-Key, stattdessen in den MCP-Server-Einstellungen von GoModel.
+</Note>
+
+## Einen Endpunkt wählen
+
+| Endpunkt | Für den Client bereitgestellter Katalog |
+| --- | --- |
+| `https://gomodel.example.com/mcp` | Jeder für den Key sichtbare Server, mit Namen wie `linear_create_issue` |
+| `https://gomodel.example.com/mcp/linear` | Nur Linear, mit den ursprünglichen Tool-Namen |
+| `https://gomodel.example.com/mcp/github` | Nur GitHub, mit den ursprünglichen Tool-Namen |
+
+Der gebündelte Endpunkt `/mcp` ist die übliche Wahl. Ein Endpunkt pro Server ist nützlich, wenn ein
+Agent einen kleineren Katalog erhalten soll.
+
+## Claude Code
+
+Fügen Sie GoModel als Streamable-HTTP-Server mit Benutzer-Scope hinzu:
+
+```bash
+claude mcp add \
+  --transport http \
+  --scope user \
+  gomodel \
+  https://gomodel.example.com/mcp \
+  --header "Authorization: Bearer ${GOMODEL_API_KEY}"
+```
+
+Prüfen Sie die gespeicherte Verbindung:
+
+```bash
+claude mcp list
+claude mcp get gomodel
+```
+
+Starten Sie Claude Code und geben Sie `/mcp` ein, um die Verbindung und die verfügbaren Tools zu
+prüfen.
+
+### Den Key aus einer gemeinsam genutzten Datei heraushalten
+
+Für eine Einrichtung mit Projekt-Scope legen Sie `.mcp.json` im Stammverzeichnis des Projekts an.
+Claude Code expandiert Umgebungsvariablen in URLs und Headern:
+
+```json
+{
+  "mcpServers": {
+    "gomodel": {
+      "type": "http",
+      "url": "https://gomodel.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${GOMODEL_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+Die Datei kann ohne den Key geteilt werden. Jeder Benutzer exportiert `GOMODEL_API_KEY` lokal und
+genehmigt den MCP-Server des Projekts, wenn Claude Code danach fragt.
+
+Konfigurations-Scopes und weitere Verwaltungsbefehle finden Sie in der offiziellen
+[MCP-Dokumentation von Claude Code](https://docs.anthropic.com/en/docs/claude-code/mcp).
+
+## Codex
+
+Codex kann das Bearer-Token aus einer Umgebungsvariable lesen, ohne seinen Wert in der
+MCP-Konfiguration zu speichern:
+
+```bash
+codex mcp add gomodel \
+  --url https://gomodel.example.com/mcp \
+  --bearer-token-env-var GOMODEL_API_KEY
+```
+
+Prüfen Sie die gespeicherte Verbindung:
+
+```bash
+codex mcp list
+```
+
+Starten Sie Codex und geben Sie `/mcp` ein, um den Server und seine Tools zu prüfen. Die Codex CLI
+und die IDE-Erweiterung nutzen dieselbe MCP-Konfiguration.
+
+Der entsprechende Eintrag in `~/.codex/config.toml` lautet:
+
+```toml
+[mcp_servers.gomodel]
+url = "https://gomodel.example.com/mcp"
+bearer_token_env_var = "GOMODEL_API_KEY"
+```
+
+Genehmigungsrichtlinien, Tool-Filter und Konfiguration mit Projekt-Scope finden Sie in der
+offiziellen [MCP-Dokumentation von Codex](https://developers.openai.com/codex/mcp/).
+
+## Den gebündelten Katalog einschränken
+
+Um die URL `/mcp` beizubehalten und dennoch nur einen Teil der Upstream-Server auszuwählen, senden
+Sie einen Header `X-MCP-Servers` mit kommagetrennten Server-Slugs.
+
+Bei Claude Code fügen Sie ihn in `.mcp.json` neben `Authorization` hinzu:
+
+```json
+"headers": {
+  "Authorization": "Bearer ${GOMODEL_API_KEY}",
+  "X-MCP-Servers": "linear,github"
+}
+```
+
+Bei Codex fügen Sie einen statischen Header hinzu:
+
+```toml
+[mcp_servers.gomodel]
+url = "https://gomodel.example.com/mcp"
+bearer_token_env_var = "GOMODEL_API_KEY"
+http_headers = { "X-MCP-Servers" = "linear,github" }
+```
+
+Unbekannte Slugs in `X-MCP-Servers` werden ignoriert. GoModel wendet weiterhin die
+`user_path`-Sichtbarkeit des Auth-Keys und die Allow-/Disallow-Tool-Filter jedes Servers an.
+
+## Fehlerbehebung
+
+| Symptom | Was Sie prüfen sollten |
+| --- | --- |
+| `401 Unauthorized` | `GOMODEL_API_KEY` ist exportiert und enthält einen gültigen GoModel-Key |
+| Verbunden, aber keine Tools | Den `user_path` des Keys, die Sichtbarkeitseinstellungen des Servers und die Allow-/Disallow-Tool-Filter |
+| Server ist degraded | Öffnen Sie seinen Katalog im Dashboard, prüfen Sie den letzten Fehler und verwenden Sie dann **Reconnect** |
+| Letzter Fehler lautet `no MCP endpoint at that path` (ältere Releases: `session not found` beim ersten Verbindungsaufbau) | Die `url` des Servers enthält den Pfad seines MCP-Endpunkts, zum Beispiel `/http` bei mcp-devtools oder `/v2/mcp` bei Firecrawl |
+| Letzter Fehler erwähnt `HTTP 405 Method Not Allowed` | Der `transport` des Servers passt zum Endpunkt: `http` für Streamable HTTP, `sse` nur für ältere SSE-Server |
+| Funktioniert lokal, aber nicht entfernt | Die öffentliche URL, das TLS-Zertifikat, die Firewall und die Weiterleitung von `/mcp` im Reverse Proxy |
+
+GoModel verwendet für seinen Downstream-MCP-Endpunkt Bearer-Authentifizierung statt eines
+interaktiven OAuth-Flows. Führen Sie nicht `codex mcp login gomodel` aus; konfigurieren Sie das
+Bearer-Token wie oben gezeigt.
+
+Details zum Proxy-Verhalten, zur Upstream-Konfiguration, zum Lebenszyklus und zur Sicherheit finden
+Sie unter [MCP Gateway](/de/features/mcp-gateway).

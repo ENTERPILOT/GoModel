@@ -1,0 +1,244 @@
+---
+title: "Usage API"
+description: "使用与推理相同的 API 密钥，查看您自己的用量、预算和速率限制状态。"
+icon: "gauge"
+keywords: ["Usage API", "用量 API", "/v1/usage", "自助查询用量", "self-service usage", "预算状态", "budget status", "速率限制状态", "rate limit status"]
+---
+
+## 概览
+
+`GET /v1/usage` 返回调用方自身的消耗情况和限额，无需管理员权限。一次调用即可回答三个问题：
+
+- 我已经用了多少（请求数、Token 数、预估成本）？
+- 我还剩多少预算，何时重置？
+- 哪些速率限制适用于我，还剩多少余量？
+
+所有数据都限定在调用方生效的[用户路径](/zh/features/user-path)范围内，因此持有托管 API 密钥的工具（例如 OpenCode 插件、CLI 或状态小组件）可以使用其已用于推理的密钥轮询此接口。轮询不会消耗速率限制配额。
+
+## 快速示例
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/usage \
+  -H "Authorization: Bearer sk_gom_..."
+```
+
+```python Python
+import httpx
+
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="sk_gom_...")
+usage = client.get("/v1/usage", cast_to=httpx.Response)
+
+print(usage.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "sk_gom_...",
+});
+
+const usage = await client.get("/v1/usage");
+console.log(usage);
+```
+
+</CodeGroup>
+
+```json
+{
+  "user_path": "/team/alpha",
+  "server_time": "2026-07-07T09:30:00Z",
+  "usage": {
+    "start_date": "2026-06-08",
+    "end_date": "2026-07-07",
+    "total_requests": 128,
+    "total_input_tokens": 74210,
+    "total_output_tokens": 17024,
+    "total_tokens": 91234,
+    "uncached_input_tokens": 61420,
+    "cached_input_tokens": 12790,
+    "cache_write_input_tokens": 0,
+    "total_input_cost": 1.12,
+    "total_output_cost": 0.61,
+    "total_cost": 1.73,
+    "rewrite_tokens_saved": 0,
+    "rewrite_cost_saved": null
+  },
+  "budgets": [
+    {
+      "user_path": "/team/alpha",
+      "period_seconds": 2592000,
+      "period_label": "monthly",
+      "amount": 100,
+      "spent": 41.2,
+      "remaining": 58.8,
+      "usage_ratio": 0.412,
+      "period_start": "2026-07-01T00:00:00Z",
+      "period_end": "2026-08-01T00:00:00Z",
+      "resets_in_seconds": 2125800,
+      "exceeded": false
+    }
+  ],
+  "rate_limits": [
+    {
+      "user_path": "/team/alpha",
+      "period_seconds": 60,
+      "period_label": "minute",
+      "max_requests": 60,
+      "requests_used": 3,
+      "requests_remaining": 57,
+      "requests_usage_ratio": 0.05,
+      "tokens_used": 0,
+      "in_flight": 0,
+      "window_start": "2026-07-07T09:30:00Z",
+      "window_end": "2026-07-07T09:31:00Z",
+      "resets_in_seconds": 60,
+      "exhausted": false
+    }
+  ]
+}
+```
+
+## 您看到的是谁的用量
+
+- **托管 API 密钥**：使用该密钥绑定的 `user_path`。无需任何参数，密钥持有者无法读取其自身子树之外的数据。
+- **主密钥（或不安全模式）**：传入 `X-GoModel-User-Path` 来选择路径，省略时查看 `/`（全部）：
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/usage \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "X-GoModel-User-Path: /team/alpha"
+```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+    default_headers={"X-GoModel-User-Path": "/team/alpha"},
+)
+usage = client.get("/v1/usage", cast_to=httpx.Response)
+
+print(usage.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+  defaultHeaders: { "X-GoModel-User-Path": "/team/alpha" },
+});
+
+const usage = await client.get("/v1/usage");
+console.log(usage);
+```
+
+</CodeGroup>
+
+## 响应字段
+
+### `usage`
+
+基于日期窗口内被追踪的请求汇总，Token 和[预估成本](/zh/features/cost-tracking)的语义与控制台相同。如果匹配的请求都没有定价信息，成本字段为 `null`。如果没有存储后端记录用量（`USAGE_ENABLED=false` 或未配置数据库），整个块为 `null`。
+
+### `budgets`
+
+覆盖该路径的每个[预算](/zh/features/budgets)各占一项，包括从祖先路径（例如 `/`）继承的预算。`remaining` 可能为负数，`usage_ratio` 也可能大于 `1`，两者都表示预算已被超支；`exceeded` 与实际执行状态一致，当其为 `true` 时，请求会被拒绝，直到 `period_end`（`period_seconds` 为 `2592000` 是表示自然月的特殊值，而不是字面意义上的 30 天）。`resets_in_seconds` 以 `server_time` 为基准倒计时至 `period_end`，因此可以直接展示，无需担心客户端时钟偏差。
+
+### `rate_limits`
+
+覆盖该路径的每条用户路径[速率限制规则](/zh/features/rate-limits)的实时计数器。`max_tokens`/`tokens_remaining`/`tokens_usage_ratio` 仅出现在带有 Token 限制的规则上；`period_label` 为 `concurrent` 表示并发上限，此时 `in_flight` 为当前并发数（并用于计算 `requests_usage_ratio`）。`*_usage_ratio` 字段为各维度的已用量/限额，不做截断，Token 窗口可能超过 `1`。当任一维度用尽时，`exhausted` 为 `true`；`resets_in_seconds` 以 `server_time` 为基准倒计时至 `window_end`（并发规则没有窗口，因此省略该字段）。提供商和模型作用域的规则不会列出：它们描述的是共享基础设施的容量，而不是调用方。
+
+<Note>
+  速率限制计数器保存在每个网关实例的内存中：重启后会重置，如果有 N 个副本，每个副本各自维护计数器。预算才是持久化的、跨实例的数据。
+</Note>
+
+## 日期窗口
+
+`usage` 块默认统计最近 30 天（按 UTC 日边界）。可以通过查询参数缩小范围：使用 `days`，或显式指定 `start_date`/`end_date`（YYYY-MM-DD，最长 365 天）：
+
+<CodeGroup>
+
+```bash curl
+curl "http://localhost:8080/v1/usage?days=7" \
+  -H "Authorization: Bearer sk_gom_..."
+
+curl "http://localhost:8080/v1/usage?start_date=2026-07-01&end_date=2026-07-07" \
+  -H "Authorization: Bearer sk_gom_..."
+```
+
+```python Python
+import httpx
+
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="sk_gom_...")
+
+last_seven_days = client.get("/v1/usage?days=7", cast_to=httpx.Response)
+date_range = client.get(
+    "/v1/usage?start_date=2026-07-01&end_date=2026-07-07",
+    cast_to=httpx.Response,
+)
+
+print(last_seven_days.json())
+print(date_range.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "sk_gom_...",
+});
+
+const lastSevenDays = await client.get("/v1/usage?days=7");
+const dateRange = await client.get(
+  "/v1/usage?start_date=2026-07-01&end_date=2026-07-07",
+);
+
+console.log(lastSevenDays);
+console.log(dateRange);
+```
+
+</CodeGroup>
+
+预算和速率限制始终按各自的实时周期报告；日期窗口只影响 `usage`。
+
+## 缓存模式
+
+`usage` 块默认只统计发往提供商的请求，因此与预算和成本保持一致。[响应缓存](/zh/features/cache)命中同样会被记录，可通过 `cache_mode` 查看：
+
+| 值         | 统计范围                                                 |
+| ---------- | -------------------------------------------------------- |
+| `uncached` | 仅统计发往提供商的请求（默认值）                         |
+| `cached`   | 仅统计本地缓存命中，即缓存免费提供的部分                 |
+| `all`      | 两者都统计，即您的总请求量                               |
+
+```bash
+curl "http://localhost:8080/v1/usage?cache_mode=cached" \
+  -H "Authorization: Bearer sk_gom_..."
+```
+
+将 `cached` 与默认值对比，是了解缓存吸收了多少流量的最快方式。无法识别的值会回退为 `uncached`。`cache_mode` 只影响 `usage`：预算和速率限制从不统计缓存命中，因为命中既不产生支出，也不消耗配额。
+
+## 错误
+
+| 状态码 | 含义                                                                   |
+| ------ | ---------------------------------------------------------------------- |
+| 400    | `start_date`/`end_date`/`days` 格式错误、范围颠倒、范围超过 365 天，或用户路径无效 |
+| 401    | 缺少 API 密钥或 API 密钥无效（已配置认证时）                           |
+| 503    | 无法读取用量或预算存储（`usage_status_failed`）                        |

@@ -1,0 +1,66 @@
+---
+title: "xAI (Grok)"
+description: "在 GoModel 中配置 xAI Grok 模型，并了解推理强度和提示词缓存亲和性的处理方式。"
+icon: "x"
+keywords: ["xAI", "Grok", "推理强度", "提示词缓存", "提供商配置", "reasoning effort", "prompt cache", "provider setup"]
+---
+
+xAI 的 API 兼容 OpenAI，并提供原生的 Responses API。`grok-4.6` 等模型会通过 xAI 的 `/models` 端点被自动发现，
+除 API 密钥外无需任何其他配置。
+
+## 配置
+
+```bash
+XAI_API_KEY=...
+```
+
+或者在 `config.yaml` 中配置：
+
+```yaml
+providers:
+  xai:
+    type: xai
+    base_url: "https://api.x.ai/v1"
+    api_key: "${XAI_API_KEY}"
+```
+
+<Note>
+  语音模型（例如 `grok-voice-latest`）不会出现在 xAI 的 `/models`
+  端点列表中。如需将实时会话路由到这些模型，请通过
+  `XAI_MODELS=grok-voice-latest` 或已配置的模型列表显式添加它们。
+</Note>
+
+`grok-2-image` 等图像模型通过
+[Images API](/zh/advanced/images-api)（`POST /v1/images/generations`）提供。xAI 按图像张数计费；如果目录中没有该模型的价格，请为其设置 `per_image` 价格。
+
+## 推理强度映射
+
+Grok 推理模型（例如 `grok-4.6`，默认值为 `high`）在 Chat Completions 上接受顶层字符串字段
+`reasoning_effort`。GoModel 会将 OpenAI 格式的 `"reasoning": {"effort": "..."}` 改写为该扁平字段，客户端无需任何修改。
+在 Responses API 上，嵌套格式是 xAI 原生支持的，因此会原样透传。
+
+| 客户端发送 | xAI 收到 |
+| ------------ | ------------ |
+| `none` / `low` / `medium` / `high` | 保持不变 |
+| `xhigh` / `max` | 在 `grok-4.6` 及更高版本以及多 Agent Grok 系列（用于选择 Agent 数量）上为 `xhigh`；在较旧的模型上（包括实验性的 `grok-4.20` 系列）为 `high` |
+| 其他任何值 | 原样透传，由 xAI 判断 |
+
+不支持配置推理强度的模型会返回 `400 ... does not support
+parameter reasoningEffort`。GoModel 会为这些模型删除该字段而不是转发它，因此同一个请求可以适用于目录中的所有模型：
+`-non-reasoning` Grok 变体、`grok-build` 编程系列、`grok-2` 和
+`grok-3`（只有 `grok-3-mini` 支持推理强度）。未知的模型 ID 会保留该字段，因此新的推理模型在 GoModel 尚未识别它之前也能正常使用。
+
+## 提示词缓存亲和性
+
+xAI 通过
+`x-grok-conv-id` 请求头将同一对话的请求路由到同一台服务器；如果没有该请求头，缓存命中将不可靠，输入 Token 通常会按未缓存的价格计费。
+
+- **Chat Completions：** GoModel 会转发客户端提供的 `X-Grok-Conv-Id`
+  请求头；如果没有，则根据对话的开头消息生成一个稳定的值，因此无需修改客户端即可实现缓存亲和性。
+- **Responses API：** 请在请求体中传入 `prompt_cache_key`；GoModel 会原样转发。
+
+## Responses API 上的 `metadata`
+
+xAI 原生的 `/responses` 端点会拒绝标准 OpenAI 的 `metadata`
+成员，并返回 `400 "Argument not supported: metadata"`。GoModel 会从出站请求中删除该成员（并记录日志），而不是转发该错误，
+因此为每个请求都打上 metadata 标签的客户端可以继续正常工作。该成员仅在发往 xAI 时被删除；请求的其他内容不会改变。

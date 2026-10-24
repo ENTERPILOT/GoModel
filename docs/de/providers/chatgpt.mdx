@@ -1,0 +1,155 @@
+---
+title: "ChatGPT-Abonnement"
+description: "Leiten Sie Traffic der Responses API über ein ChatGPT-Abonnement statt über einen API-Key der OpenAI Platform."
+icon: "message-circle"
+keywords: ["ChatGPT", "Codex", "Abonnement", "subscription", "OAuth", "Responses API", "Provider-Einrichtung", "provider setup"]
+---
+
+Der Provider `chatgpt` ruft das Codex-Backend auf, das in einem
+ChatGPT-Abonnement (Plus, Pro, Business oder Enterprise) enthalten ist. Die
+Nutzung wird auf das Kontingent des Abonnements angerechnet, nicht auf einen
+API-Key der OpenAI Platform.
+
+Kombinieren Sie ihn mit dem [Codex-Leitfaden](/de/guides/codex), um
+`Codex -> GoModel -> ChatGPT subscription` zu betreiben.
+
+## Konfiguration
+
+Als Zugangsdaten dient das Access-Token aus Ihrer Codex-Anmeldung:
+
+```bash
+CHATGPT_API_KEY=$(jq -r .tokens.access_token ~/.codex/auth.json)
+```
+
+Oder in `config.yaml`:
+
+```yaml
+providers:
+  chatgpt:
+    type: chatgpt
+    api_key: "${CHATGPT_API_KEY}"
+```
+
+Führen Sie zuerst `codex login` aus, falls `~/.codex/auth.json` noch nicht
+existiert. GoModel leitet die ChatGPT-Konto-ID aus dem Token selbst ab, daher
+ist sonst nichts erforderlich.
+
+<Warning>
+  Das Token läuft etwa alle 10 Tage ab. Exportieren Sie es erneut (die Codex CLI
+  aktualisiert die Datei bei jedem Lauf) oder führen Sie `codex login` erneut
+  aus, sobald Requests 401 zurückgeben.
+</Warning>
+
+## Modelle
+
+Das Codex-Backend hat keinen Endpunkt zum Auflisten von Modellen, daher liefert
+GoModel das Modellinventar mit, das ein ChatGPT-Abonnement aufrufen kann:
+
+```text
+gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5
+```
+
+Überschreiben Sie es, wenn Ihr Plan andere Modelle bereitstellt:
+
+```bash
+CHATGPT_MODELS=gpt-5.6-sol,gpt-5.6-terra
+```
+
+Ein Modell außerhalb des Plans wird upstream mit `The '<model>' model
+is not supported when using Codex with a ChatGPT account` abgelehnt.
+
+`gpt-5.4` und `gpt-5.4-mini` sind ab dem 31. August 2026 nicht mehr in
+ChatGPT-authentifiziertem Codex verfügbar; verwenden Sie stattdessen
+`gpt-5.6-terra` und `gpt-5.6-luna`. Beide bleiben für Codex-Sessions, die mit
+einem OpenAI-API-Key authentifiziert sind, über den Provider `openai` verfügbar.
+
+## Nur Responses API
+
+Das Codex-Backend bedient `/responses` und sonst nichts, daher antworten
+`/v1/chat/completions` und `/v1/embeddings` für `chatgpt`-Modelle mit `501`.
+Verwenden Sie `/v1/responses` – das sendet Codex ohnehin.
+
+Das Backend prüft Requests außerdem gegen eine strikte Allowlist von Parametern.
+GoModel passt Requests an, statt sie fehlschlagen zu lassen, sodass Aufrufer
+weiterhin die Standard-Responses-API verwenden können:
+
+| Request-Feld | Verhalten |
+| ------------- | -------- |
+| `stream`, `store` | Fest auf `true` / `false` gesetzt – das Backend lehnt alles andere ab |
+| `input` als String | In die vom Backend geforderte Nachrichtenliste verpackt |
+| `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `reasoning`, `text`, `include`, `prompt_cache_key` | Weitergeleitet |
+| `temperature`, `top_p`, `max_output_tokens`, `previous_response_id`, `truncation`, `metadata`, `user`, `service_tier`, `top_logprobs` | Verworfen – upstream nicht unterstützt |
+| `prompt_cache_retention`, `prompt_cache_options` | Verworfen – die Codex CLI sendet sie nie, daher ist die Unterstützung im Backend nicht verifiziert |
+
+Da das Backend ausschließlich streamt, wird ein nicht streamender
+`POST /v1/responses` bedient, indem upstream gestreamt und das finale
+Response-Objekt zurückgegeben wird. Clients sehen eine normale, nicht
+streamende Response. Unter
+[Responses-Kompatibilität](/de/advanced/responses-compatibility) erfahren Sie,
+wie sich die Responses-Oberfläche des Gateways bei den verschiedenen Providern
+verhält.
+
+## Prompt-Caching
+
+Das Backend hält eine Unterhaltung auf einem warmen Präfix-Cache, wenn jeder
+Turn denselben `session-id`-Header mitführt; `prompt_cache_key` allein führt zu
+keinen Cache-Treffern. GoModel sendet die erkannte
+[Session](/de/features/session-keeping) als `session-id` – oder den
+`prompt_cache_key` des Clients, wenn keine Session erkannt wird – und leitet den
+Key wie die Codex CLI zusätzlich im Body weiter. Sendet der Client keinen Key,
+tritt die Session-ID an seine Stelle, sofern sie das Limit von 64 Zeichen für
+Keys einhält.
+
+Wenn der Client keinen Key sendet und GoModel keine Session erkennt, erhält das
+Backend keines der beiden Signale. Senden Sie `prompt_cache_key`, um
+Cache-Treffer zu erhalten; ein Session-Header wie `X-Session-Id` funktioniert
+ebenfalls, außer bei `SESSION_KEEPING_ENABLED=false`, womit die
+Session-Erkennung deaktiviert wird.
+
+Um die Trefferquoten gegen das echte Backend zu prüfen, führen Sie den optionalen
+Live-Test aus:
+
+```bash
+CHATGPT_API_KEY=$(jq -r .tokens.access_token ~/.codex/auth.json) make test-live
+```
+
+## Ausgewiesene Kosten sind keine echten Ausgaben
+
+Die Nutzung im Abonnement erfolgt zum Pauschalpreis, doch diese Modell-IDs gibt
+es auch auf der OpenAI Platform, daher hängt der Modellkatalog ihre
+API-Preise pro Token an. Nutzungsdatensätze und Dashboard-Summen für `chatgpt`
+zeigen einen Betrag, dem keine tatsächliche Abrechnung entspricht. Dieselbe
+Überschneidung führt dazu, dass `GET /v1/models` `modes: ["chat", "responses"]`
+ausweist.
+
+Die Modi sind rein kosmetisch – sie steuern die Gruppierung im Dashboard, nicht
+das Routing. Die Preise dagegen nicht: Sie fließen in die
+[Kostenerfassung](/de/features/cost-tracking), in Budgets und in das
+`cost`-Load-Balancing ein.
+
+<Warning>
+  Ein **Budget** kann daher `chatgpt`-Traffic ablehnen, weil Geld „ausgegeben“
+  wurde, das das Abonnement nie berechnet. Beschränken Sie Budgets auf einen
+  [User Path](/de/features/user-path), der den Abonnement-Traffic ausschließt,
+  oder lassen Sie Budgets dafür deaktiviert. Wenn Sie pro Modell `pricing` und
+  `modes: ["responses"]` in den [Modell-Metadaten](/de/advanced/model-metadata)
+  deklarieren, wird korrigiert, was `/v1/models` ausweist, Nutzungsdatensätze
+  werden aber weiterhin zu Katalogpreisen bewertet. Deklarieren Sie jedes
+  Modell, das bereitgestellt werden soll: Die Liste ersetzt das
+  Standardinventar, statt es zu ergänzen.
+</Warning>
+
+## Limits
+
+Das Abonnement-Kontingent ist vom API-Guthaben getrennt. Ist es aufgebraucht,
+gibt das Gateway einen `429` weiter:
+
+```json
+{"error":{"message":"The usage limit has been reached","type":"rate_limit_error"}}
+```
+
+<Warning>
+  OpenAI autorisiert diese Tokens für Codex-Traffic. Verwenden Sie diesen
+  Provider, um Ihre eigene Codex-Nutzung über GoModel zu leiten, nicht als
+  universelle Inferenz-API.
+</Warning>

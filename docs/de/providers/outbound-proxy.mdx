@@ -1,0 +1,102 @@
+---
+title: "Ausgehende Proxys"
+description: "Leiten Sie den Traffic eines einzelnen Providers über einen HTTP-, HTTPS- oder SOCKS5-Proxy, während die übrigen die gatewayweiten Proxy-Einstellungen behalten."
+icon: "route"
+keywords: ["Proxy", "proxy", "SOCKS5", "HTTP proxy", "HTTP-Proxy", "egress", "ausgehender Traffic", "HTTPS_PROXY", "geo-restricted", "Geoblocking", "static IP", "statische IP"]
+---
+
+Standardmäßig verbindet sich GoModel direkt mit jedem Provider und berücksichtigt
+dabei für den gesamten Prozess die Standardvariablen `HTTP_PROXY`, `HTTPS_PROXY`
+und `NO_PROXY`. Damit ist ein Egress-Proxy im Unternehmen abgedeckt, über den
+sämtlicher Traffic laufen muss.
+
+Setzen Sie `proxy_url` an einem Provider, wenn nur **einige** Provider einen Proxy
+benötigen oder verschiedene Provider unterschiedliche Proxys: etwa um einen Provider
+zu erreichen, der in Ihrer Region gesperrt ist, um einem Provider eine feste
+ausgehende IP für dessen Allowlist zu geben, oder um den Traffic eines einzelnen
+Providers zu untersuchen, während der Rest direkt bleibt.
+
+## Konfiguration
+
+Provider, die nur über Umgebungsvariablen konfiguriert werden, verwenden – wie jede
+andere Provider-Einstellung – das Provider-Präfix und ein optionales
+Instanz-Suffix:
+
+```bash
+OPENAI_API_KEY=sk-...
+OPENAI_PROXY_URL=socks5://user:pass@10.0.0.1:1080
+
+# Eine zweite Instanz desselben Typs mit eigenem Proxy
+OPENAI_EU_API_KEY=sk-...
+OPENAI_EU_PROXY_URL=http://egress-eu.internal:3128
+
+# Lokale Modelle bleiben direkt: keine proxy_url
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+Oder in der `config.yaml`:
+
+```yaml
+providers:
+  openai:
+    type: openai
+    api_key: "${OPENAI_API_KEY}"
+    proxy_url: "${OPENAI_PROXY_URL}"
+  anthropic:
+    type: anthropic
+    api_key: "${ANTHROPIC_API_KEY}"
+    proxy_url: "http://egress.internal:3128"
+```
+
+Dieselbe Einstellung entspricht dem Feld **Outbound proxy URL** im Provider-Editor
+des Dashboards, unter den erweiterten Feldern. Das Passwort wird nach dem Speichern
+maskiert; beim Bearbeiten eines anderen Felds wird der maskierte Wert erneut
+gesendet, und das Gateway behält den gespeicherten Wert bei.
+
+## Unterstützte Proxys
+
+| Schema | Proxy-Typ |
+| --- | --- |
+| `http://` | HTTP-CONNECT-Proxy (HTTPS-Upstreams werden getunnelt) |
+| `https://` | HTTP-CONNECT-Proxy, der über TLS erreicht wird |
+| `socks5://` | SOCKS5, mit optionaler Authentifizierung über `user:pass@` |
+| `socks5h://` | Wie `socks5://` |
+
+Hostnamen werden immer auf dem Proxy aufgelöst, daher verhalten sich `socks5://` und
+`socks5h://` identisch. Die URL besteht aus einem Schema, einem Host, einem
+optionalen Port (standardmäßig 80, 443 oder 1080) und optionalen Zugangsdaten: Ein
+Pfad, ein Query-String oder ein Fragment wird beim Start und im Dashboard
+abgelehnt.
+
+## Regeln
+
+- Die `proxy_url` eines Providers gilt für alles, was dieser Provider sendet:
+  Modell-Discovery, Inferenz, Streaming, Files und Batches.
+- Ein Provider mit `proxy_url` ignoriert `HTTP_PROXY`, `HTTPS_PROXY` und
+  `NO_PROXY`. Ein Provider ohne `proxy_url` behält das prozessweite Verhalten bei.
+- Eine ungültige `proxy_url` ist ein Konfigurationsfehler: Der Provider wird beim
+  Start mit einem Log-Eintrag, der ihn benennt, übersprungen, und das Dashboard
+  lehnt das Speichern ab.
+- Proxy-Zugangsdaten werden nie protokolliert. Admin API und Provider-Status zeigen
+  die URL mit durch `xxxxx` ersetztem Passwort an.
+- Verbindungen werden pro Provider gepoolt, sodass jeder Provider eigene
+  Keep-Alive-Verbindungen zu seinem Proxy behält.
+
+## Überprüfen
+
+Der Endpunkt für den Provider-Status meldet für jeden Provider den maskierten Proxy:
+
+```bash
+curl -s -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  http://localhost:8080/admin/providers/status | jq '.providers[] | {name, proxy_url: .config.proxy_url}'
+```
+
+Senden Sie anschließend einen Request und prüfen Sie, ob er im Access-Log des Proxys
+erscheint, während vom Gateway aus über dessen eigene IP nichts beim Provider
+ankommt.
+
+<Note>
+  Gepoolte Proxys mit Health Checks, automatischem Failover zwischen Proxys und
+  Zuweisungsregeln, die viele Provider auf einmal abdecken, sind ein
+  [Feature von GoModel Pro](/de/pro/egress).
+</Note>

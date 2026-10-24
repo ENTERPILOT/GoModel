@@ -1,0 +1,308 @@
+---
+title: "Images API"
+description: "OpenAI-kompatible Bildgenerierung und -bearbeitung über GoModel, nach Modell geroutet und mit denselben Zugriffsregeln, Budgets, Rate-Limits und derselben Kostenerfassung wie Chat."
+icon: "image"
+keywords: ["Images API", "images API", "Bildgenerierung", "image generation", "Bildbearbeitung", "image edit", "Inpainting", "inpainting", "dall-e", "gpt-image-1", "grok-2-image"]
+---
+
+## Übersicht
+
+GoModel stellt die **OpenAI-kompatiblen Bild-Endpunkte** für Generierung und
+Bearbeitung bereit. Clients und SDKs, die bereits OpenAIs
+`/v1/images/generations` oder `/v1/images/edits` aufrufen, können unverändert
+auf GoModel zeigen.
+
+Requests werden **nach Modell** über dieselbe Registry geroutet, die auch für
+Chat und Embeddings verwendet wird. Daher gelten die Auswahl über `model`,
+`provider`-Hinweise, virtuelle Modelle, Modellzugriffsregeln pro Key
+([User Paths](/de/features/user-path)), [Budgets](/de/features/budgets) und
+[Rate-Limits](/de/features/rate-limits). Bildgenerierung wird von OpenAI und
+den OpenAI-kompatiblen Providern bedient, die den Endpunkt implementieren
+(Azure OpenAI, OpenRouter, [xAI](/de/providers/xai)), sowie von
+[Google Gemini](/de/providers/gemini) – Gemini-Bildmodelle über die native API,
+dazu Imagen auf [Vertex AI](/de/providers/vertex). Bildbearbeitung wird von
+OpenAI und Azure OpenAI bedient, von Gemini-Bildmodellen
+(`gemini-2.5-flash-image`, ...) sowie von jedem OpenAI-kompatiblen Provider,
+der OpenAIs Multipart-Upload auf `/images/edits` akzeptiert. Ein Provider ohne
+diese Fähigkeit liefert einen eindeutigen Fehler
+`model "…" does not support image generation` (bzw. `image edits`), statt
+falsch zu routen, und reine Bildmodelle werden bei Providern ohne
+Bildunterstützung in `/v1/models` ausgeblendet.
+
+## Unterstützte Endpunkte
+
+| Endpunkt | Verhalten |
+| --- | --- |
+| `POST /v1/images/generations` | Erzeugt Bilder aus einem Text-Prompt. Akzeptiert einen JSON-Body und liefert die OpenAI-Bild-Hülle (`created`, `data[]`, optional `usage`). |
+| `POST /v1/images/edits` | Bearbeitet oder erweitert ein hochgeladenes Bild (Inpainting mit optionaler Maske, Image-to-Image). Akzeptiert `multipart/form-data` und liefert dieselbe Hülle. |
+
+## Ein Bild generieren
+
+<CodeGroup>
+
+```bash curl
+curl https://your-gateway/v1/images/generations \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-image-1",
+    "prompt": "A watercolor painting of a lighthouse at dawn",
+    "n": 1,
+    "size": "1024x1024",
+    "quality": "medium"
+  }'
+```
+
+```python Python
+import base64
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://your-gateway/v1",
+    api_key=os.environ["GOMODEL_KEY"],
+)
+
+result = client.images.generate(
+    model="gpt-image-1",
+    prompt="A watercolor painting of a lighthouse at dawn",
+    size="1024x1024",
+    quality="medium",
+)
+
+with open("lighthouse.png", "wb") as f:
+    f.write(base64.b64decode(result.data[0].b64_json))
+```
+
+```javascript JavaScript
+import { writeFile } from "node:fs/promises";
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "https://your-gateway/v1",
+  apiKey: process.env.GOMODEL_KEY,
+});
+
+const result = await client.images.generate({
+  model: "gpt-image-1",
+  prompt: "A watercolor painting of a lighthouse at dawn",
+  size: "1024x1024",
+  quality: "medium",
+});
+
+await writeFile("lighthouse.png", Buffer.from(result.data[0].b64_json, "base64"));
+```
+
+</CodeGroup>
+
+`model` und `prompt` sind erforderlich. Jedes andere Feld – `n`, `size`,
+`quality`, `style`, `response_format`, `background`, `output_format`,
+`output_compression`, `moderation`, `user` und jeder künftige Parameter – wird
+**unverändert an den Provider weitergeleitet**, sodass modellspezifische
+Optionen ohne Update des Gateways funktionieren. Der Provider entscheidet,
+welche Werte er akzeptiert, und gibt andernfalls einen eigenen Fehler zurück.
+Die Ausnahme ist der native Adapter für Gemini, der `n` und `size` in ihre
+nativen Entsprechungen übersetzt – siehe [Google Gemini](/de/advanced/images-api#google-gemini).
+
+Die Response ist die OpenAI-Bild-Hülle. Einträge in `data[]` enthalten
+entweder eine gehostete `url` (DALL·E, `response_format: "url"`) oder
+eingebettetes `b64_json` (`gpt-image-1` liefert immer Base64). GoModel ergänzt
+ein Feld `provider`, das den Provider-Typ nennt, der den Request bedient hat;
+alles andere wird durchgereicht, einschließlich des `usage`-Blocks und der
+zurückgegebenen Ausgabeparameter, die `gpt-image-1` meldet.
+
+<Tip>
+  Verwenden Sie einen `provider/model`-Selektor (zum Beispiel
+  `"model": "openai/dall-e-3"`) oder den Hinweis `"provider"`, wenn dieselbe
+  Modell-ID bei mehreren Providern konfiguriert ist – genau wie bei Chat.
+</Tip>
+
+## Ein Bild bearbeiten
+
+Bei Bearbeitungen werden das oder die Quellbilder und eine optionale Maske als
+`multipart/form-data` hochgeladen, genau wie es der Endpunkt von OpenAI
+erwartet. `image`, `prompt` und `model` sind erforderlich; senden Sie mehrere
+Quellbilder als `image[]` (gpt-image-1 akzeptiert bis zu 16). Eine `mask` ist
+ein PNG, dessen transparente Pixel den zu ändernden Bereich markieren.
+
+<CodeGroup>
+
+```bash curl
+curl https://your-gateway/v1/images/edits \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -F model="gpt-image-1" \
+  -F image="@lighthouse.png" \
+  -F mask="@mask.png" \
+  -F prompt="Add a sailboat on the horizon" \
+  -F size="1024x1024"
+```
+
+```python Python
+result = client.images.edit(
+    model="gpt-image-1",
+    image=open("lighthouse.png", "rb"),
+    mask=open("mask.png", "rb"),
+    prompt="Add a sailboat on the horizon",
+    size="1024x1024",
+)
+
+with open("lighthouse-edited.png", "wb") as f:
+    f.write(base64.b64decode(result.data[0].b64_json))
+```
+
+```javascript JavaScript
+import fs from "node:fs";
+
+const result = await client.images.edit({
+  model: "gpt-image-1",
+  image: fs.createReadStream("lighthouse.png"),
+  mask: fs.createReadStream("mask.png"),
+  prompt: "Add a sailboat on the horizon",
+  size: "1024x1024",
+});
+
+await writeFile("lighthouse-edited.png", Buffer.from(result.data[0].b64_json, "base64"));
+```
+
+</CodeGroup>
+
+Wie bei der Generierung wird jedes andere Formularfeld (`n`, `size`,
+`quality`, `response_format`, `background`, `output_format`,
+`input_fidelity`, `user`, …) unverändert an den Provider weitergeleitet. Die
+hochgeladenen Dateien zählen zum Limit des Gateways für den Request-Body
+(`BODY_SIZE_LIMIT`).
+
+## Kostenerfassung
+
+Bildaufrufe werden in der [Nutzungserfassung](/de/features/cost-tracking) unter
+den Endpunkten `/v1/images/generations` und `/v1/images/edits` erfasst:
+
+Der Prompt wird immer mit `input_per_mtok` bepreist, wenn der Provider
+Eingabe-Tokens meldet. Die **generierten Bilder** werden auf eine von zwei
+Arten abgerechnet, niemals auf beide – die gemeldete Nutzung entscheidet:
+
+- **Tokenbasiert abgerechnete Modelle** (`gpt-image-1`, Gemini-Bildmodelle)
+  melden `usage`. GoModel speichert die Token-Zahlen und bepreist die
+  generierten Tokens mit dem Satz `output_image_per_mtok` des Modells (mit
+  Rückfall auf `output_per_mtok`). Der Satz für Bildausgaben ist derjenige, den
+  Provider hier berechnen: `gpt-image-1` hat überhaupt keinen Preis für
+  Textausgaben, und Gemini 3 Pro Image berechnet Bildausgaben mit $120/Mtok
+  gegenüber $12/Mtok für Text. Diese Bepreisung ist für jede Größe und
+  Qualität exakt.
+- **Pro Bild abgerechnete Modelle** (DALL·E, `grok-imagine-image`, Imagen)
+  melden keine Tokens. GoModel erfasst die Anzahl der zurückgegebenen Bilder
+  (`images` in den Roh-Nutzungsdaten) und bepreist sie mit dem Satz
+  `per_image` des Modells.
+
+Katalogeinträge enthalten für dasselbe Modell oft beide Sätze, weil
+`per_image` das pauschale Äquivalent der Tokens eines typischen Bildes ist
+($0.039 für ein `gemini-2.5-flash-image` mit 1290 Tokens). Eine Response, die
+generierte Tokens gemeldet hat, wird allein nach diesen Tokens bepreist, die
+beiden Sätze werden also nie addiert.
+
+Kann die Preisgestaltung die generierten Bilder nicht bepreisen – kein Satz
+für die gemeldeten Bildausgabe-Tokens oder keine gemeldeten Ausgabe-Tokens und
+kein Satz `per_image`/`per_request` –, wird die Nutzungszeile mit einem
+Vorbehalt zur Kostenberechnung markiert, sodass sie als „nicht gemeldete
+Nutzung“ erscheint und nicht als kostenloser Aufruf.
+
+Setzen Sie `per_image` über eine
+[Preisüberschreibung](/de/features/cost-tracking#preise-überschreiben) oder in
+`config.yaml`, wenn der Modellkatalog keinen Preis für ein Bildmodell enthält:
+
+```yaml
+providers:
+  openai:
+    type: openai
+    api_key: "${OPENAI_API_KEY}"
+    models:
+      - id: dall-e-3
+        metadata:
+          pricing:
+            currency: USD
+            per_image: 0.04
+```
+
+## Einschränkungen
+
+Die Bild-Endpunkte sind eine schlanke, nach Modell geroutete Weiterleitung an
+den Provider und **durchlaufen nicht den vollständigen
+Inferenz-Orchestrator**. Im Vergleich zu `/v1/chat/completions`:
+
+- **Kein Failover, keine Guardrails, kein Response-Cache** – diese Stufen
+  werden übersprungen. Requests werden dennoch autorisiert, gegen Budgets
+  geprüft, Rate-Limits unterworfen, gemessen und in das
+  [Audit-Log](/de/advanced/admin-endpoints) geschrieben.
+- **Kein Streaming** – `stream: true` wird mit `400` abgelehnt, weil
+  gestreamte Bildgenerierung als Server-Sent Events geliefert wird, die diese
+  Endpunkte nicht weiterreichen. Lassen Sie `stream` weg (oder setzen Sie es
+  auf `false`), um die vollständige JSON-Response zu erhalten.
+- **Variationen** (`/v1/images/variations`) werden nicht bereitgestellt.
+  Verwenden Sie die [Passthrough-API](/de/features/passthrough-api)
+  (`/p/{provider}/v1/images/...`), um sie bei einem bestimmten Provider zu
+  erreichen.
+- **Request-Format von OpenAI als Eingabe** – Die nativen Bild-APIs von Google
+  Gemini (Imagen `predict`, `generateContent` für Gemini-Bildmodelle) werden
+  hinter diesen Endpunkten übersetzt; siehe die
+  [Hinweise zu Providern](/de/advanced/images-api#google-gemini) unten. Andere Provider, deren native
+  Bild-API von der OpenAI-API abweicht, werden nicht übersetzt; verwenden Sie
+  für diese Passthrough.
+
+## Google Gemini
+
+Mit dem Gemini-Provider im nativen API-Modus (Standard) generieren
+Gemini-Bildmodelle (`gemini-2.5-flash-image`, ...) über `generateContent` und
+`imagen-*`-Modelle über die `predict`-API von Imagen. Google hat Imagen am
+17. August 2026 aus der Gemini API (AI Studio) entfernt – verwenden Sie dort
+ein Gemini-Bildmodell; Imagen bleibt auf [Vertex AI](/de/providers/vertex)
+verfügbar.
+
+- Gemini-Bildmodelle unterstützen keine Ausgabe mehrerer Kandidaten, daher
+  wird `n` (bis zu 10) als `n` parallele `generateContent`-Aufrufe bedient,
+  deren Ergebnisse zusammengeführt werden – jeder Aufruf wird von Google
+  abgerechnet. Bei Imagen wird `n` auf `sampleCount` abgebildet; `size` wird
+  auf das nächstgelegene unterstützte Seitenverhältnis abgebildet
+  (`1024x1024` → `1:1`, `1536x1024` → `3:2`, ...), und ein direkt angegebenes
+  Verhältnis wie `"16:9"` wird durchgereicht. Unbekannte JSON-Felder werden
+  unverändert weitergeleitet, sodass native Parameter (`personGeneration`,
+  `sampleImageSize`, `imageConfig`, ...) ohne Anpassung funktionieren.
+- Bilder werden immer als `b64_json` zurückgegeben. Text, den ein
+  Gemini-Bildmodell zusätzlich zum Bild erzeugt, wird als `revised_prompt`
+  ausgegeben.
+- Gemini-Bildmodelle melden Token-`usage` (tokenbasiert abgerechnet); Imagen
+  meldet keine (bepreisen Sie es mit `per_image`).
+- Bearbeitungen funktionieren nur mit Gemini-Bildmodellen: Uploads werden zu
+  eingebetteten Bildteilen vor dem Prompt. `mask` wird nicht unterstützt –
+  beschreiben Sie den zu ändernden Bereich im Prompt. Imagen-Modelle können
+  nur generieren.
+
+Im OpenAI-kompatiblen Modus wird die Generierung an Geminis Endpunkt
+`/openai/images/generations` weitergeleitet, und Bearbeitungen werden
+abgelehnt (diese Schnittstelle hat keinen Bearbeitungs-Endpunkt).
+
+## Audit-Logging
+
+Bild-Requests erscheinen im Audit-Log wie jede andere Modellinteraktion. Wenn
+`LOGGING_LOG_BODIES` aktiviert ist:
+
+- Der Generierungs-Request wird als JSON gespeichert. Ein Bearbeitungs-Request
+  wird als Bild-Body gespeichert: Prompt und Parameter sowie ein Element pro
+  hochgeladenem Quellbild und pro Maske (Dateiname, Content-Type, Größe).
+- Die Response wird ebenfalls als Bild-Body gespeichert – die Hülle
+  (`created`, `usage`, `size`, `quality`, …) sowie ein Element pro
+  zurückgegebenem Bild. Gehostete URLs bleiben als Links erhalten.
+
+Die Pixel selbst werden **nicht** gespeichert, es sei denn,
+[`LOGGING_LOG_IMAGE_BODIES=true`](/de/advanced/configuration#audit-logging) ist
+gesetzt. Ist die Option aktiv, werden Uploads und generierte Bilder in den
+[Medienspeicher](/de/advanced/configuration#medienspeicher) geschrieben, und
+jedes Element enthält eine `media_id`, die das Dashboard über
+`GET /admin/media/{id}` direkt anzeigt; `LOGGING_LOG_IMAGE_BODIES_SCOPE`
+beschränkt dies auf `input` (Uploads für Bearbeitungen) oder `output`
+(Ergebnisse). Ohne die Option ist jedes Bild ein Platzhalter mit Größenangabe
+(`stored: false`). In beiden Fällen bleibt der Eintrag klein und vollständig –
+er erreicht nie die allgemeine Kürzung von Bodys bei 1 MB, selbst bei großen
+`b64_json`-Ergebnissen, und es gibt keine Obergrenze für gespeicherte Bilder
+pro Eintrag. Dateien werden so lange aufbewahrt wie die Audit-Einträge, die
+auf sie verweisen (`LOGGING_RETENTION_DAYS`).

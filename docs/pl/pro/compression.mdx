@@ -1,0 +1,107 @@
+---
+title: "Kompresja promptów"
+description: "Redukuj powtarzający się i strukturalny kontekst w requestach inferencji, zanim trafią do providera, bez zmiany struktury requestu."
+icon: "package-minus"
+tag: "Pro"
+keywords: ["GoModel Pro", "kompresja promptów", "prompt compression", "oszczędność tokenów", "token savings", "deduplikacja", "deduplication", "prompt cache"]
+---
+
+<Frame caption="Strona Usage w dashboardzie: oszczędności Pro w ciągu siedmiu dni ruchu produkcyjnego.">
+  <img src="/pro/pro-saved.webp" alt="Usage Analytics pokazujące szacowany koszt 268,63 USD i 45,17 USD zaoszczędzone przez Pro, czyli o 14,4% mniej" />
+</Frame>
+
+## Sprawdzone na produkcji
+
+Kompresja promptów została przetestowana na miliardach tokenów produkcyjnych w
+agentowym kodowaniu, czacie i obciążeniach intensywnie korzystających z narzędzi.
+
+- **Bezstratna.** Kompresja jedynie zastępuje treść, którą model już widział
+  w tym samym requeście, odwołaniem do niej albo odwracalnie przekodowuje dane strukturalne.
+  Model otrzymuje te same informacje; nic nie jest streszczane
+  ani usuwane. Jedyna stratna opcja, przycinanie wyników narzędzi, to osobna
+  polityka, domyślnie wyłączona.
+- **Bez pogorszenia prompt cache.** Ponieważ wcześniej wysłany prefiks
+  sesji jest odtwarzany bajt w bajt, a przepisywane są tylko nowe wiadomości,
+  prompt cache providera nadal trafia w kolejnych turach. Testerzy zauważyli wręcz
+  około 2% *wzrostu* trafień w prompt cache, bo krótsze, stabilniejsze
+  requesty lepiej mieszczą się w cache’u – co daje dodatkowe oszczędności ponad samą
+  kompresję.
+- **Rzeczywiste oszczędności od 2% do 20%** tokenów wejściowych u naszych testerów, zależnie od
+  przypadku użycia. Agenty, które ponownie czytają pliki, odtwarzają wyniki narzędzi lub niosą długą
+  historię, są na górze tego zakresu; krótki czat bez powtórzeń jest na
+  dole, gdzie kompresor po prostu przekazuje requesty bez zmian.
+- **Pełna kontrola.** Wybieraj poziom per gateway lub per request, wykluczaj
+  modele wzorcami glob, chroń istniejącą historię przez `new_messages_only`, zachowuj
+  kod źródłowy dosłownie i sprawdzaj każde przepisanie przez nagłówki odpowiedzi,
+  rewizje audytu i metryki.
+
+## Przegląd
+
+Kompresja promptów przepisuje obsługiwane requesty inferencji, zanim trafią do
+providera. Redukuje powtarzający się lub strukturalny kontekst, zachowując
+nietekstową strukturę requestu.
+
+Obsługuje `POST /v1/chat/completions`, `POST /v1/messages` i
+`POST /v1/responses`. Argumenty wywołań narzędzi, części nietekstowe i nieznane pola
+JSON pozostają nienaruszone. Elementy reasoning w Responses są zawsze odtwarzane
+bez zmian, bo Responses API może ich wymagać obok wywołań funkcji.
+
+Domyślna polityka `high` łączy deduplikację ciągów linii z normalizacją:
+
+- marginesy z numerami linii z odczytu plików stają się zwięzłym nagłówkiem zakresu
+- odtwarzany reasoning z chat completions jest usuwany, gdy jest to bezpieczne
+- znane koperty wyników narzędzi, wyniki wyszukiwania, logi, JSON i ujednolicone diffy
+  są normalizowane z uwzględnieniem treści
+- opłacalne jednorodne tablice JSON i logi strukturalne używają odwracalnych,
+  samoopisujących się kodowań
+
+Kompresor jest deterministyczny i przepuszcza w razie błędu (fail open). Przekazuje request
+bez zmian, gdy przepisanie jest poniżej progu oszczędności albo przekroczyłoby swój
+budżet pracy. Kod źródłowy jest domyślnie zachowywany; deduplikację kodu włącz tylko
+wtedy, gdy dodatkowa oszczędność jest warta zastąpienia dokładnie powtórzonego kodu odwołaniami.
+
+Dla wykrytej sesji gateway przechowuje dokładne body, które wcześniej wysłał
+do upstreamu, i odtwarza ten prefiks bajt w bajt w kolejnych turach. Chroni to
+prefiks prompt cache providera, a jednocześnie pozwala nowym wiadomościom odwoływać się do powtórzonej
+historii. Użyj `new_messages_only`, gdy gateway może dołączyć do rozmowy, której
+prefiksu nie obserwował.
+
+## Konfiguracja kompresji
+
+| Zmienna środowiskowa | Wartość domyślna | Przeznaczenie |
+| --- | --- | --- |
+| `PRO_COMPRESSION_LEVEL` | `high` | Wybierz `none`, `low`, `medium` lub `high`. Jawna wartość sprawia, że ustawienie w dashboardzie jest tylko do odczytu. |
+| `PRO_COMPRESSION_SCOPE` | `full_history` | Użyj `new_messages_only`, aby chronić istniejącą historię rozmowy. |
+| `PRO_COMPRESSION_EXCLUDE_MODELS` | — | Rozdzielone przecinkami wzorce glob żądanych modeli do pominięcia, np. `ollama/*`. |
+| `PRO_COMPRESSION_MIN_BLOCK_CHARS` | `128` | Minimalny rozmiar powtórzonego ciągu linii w presecie high. |
+| `PRO_COMPRESSION_MIN_SAVINGS_TOKENS` | `32` | Minimalna szacowana oszczędność netto w presecie high. |
+| `PRO_COMPRESSION_DEDUPLICATE_CODE` | `false` | Pozwala zastępować powtórzone fragmenty kodu źródłowego odwołaniami. |
+| `PRO_COMPRESSION_NORMALIZE` | `true` | Włącza normalizację treści i stabilizację schematów narzędzi. |
+| `PRO_COMPRESSION_COMPRESS_JSON_STRUCTURE` | preset high | Włącza odwracalne kodowanie JSON jako tabeli. |
+| `PRO_COMPRESSION_COMPRESS_LOG_STRUCTURE` | preset high | Włącza odwracalne kodowanie logów strukturalnych. |
+
+Ustaw `PRO_COMPRESSION_LEVEL=none`, aby wyłączyć kompresję dla całego
+gatewaya. Dla pojedynczego requestu wyślij:
+
+```http
+X-GoModel-Compression: off
+```
+
+Rezygnacja per request i poziom `none` pomijają parsowanie body requestu, więc
+request jest przekazywany bez zmian.
+
+## Podgląd kompresji
+
+Skompresowane odpowiedzi zawierają szacowane oszczędności i liczbę zastąpionych
+zduplikowanych bloków:
+
+```http
+X-GoModel-Pro-Tokens-Saved: 1843
+X-GoModel-Pro-Compression-Blocks: 12
+```
+
+Logi audytowe zachowują oryginalny request i rewizję dla każdego mechanizmu przepisującego.
+Rewizja zapisuje rozmiary w bajtach i szczegóły kompresji; przepisane body jest
+również zachowywane, gdy `LOGGING_LOG_BODIES=true`. Metryki Prometheus używają
+prefiksu `gomodel_pro_compression_`, a strona Usage w dashboardzie raportuje oszczędności Pro
+w tokenach lub koszcie.

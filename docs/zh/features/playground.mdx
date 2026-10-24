@@ -1,0 +1,31 @@
+---
+title: "Playground"
+description: "在控制台中通过网关试用任意模型，并查看确切的请求和响应 JSON。"
+icon: "flask-conical"
+keywords: ["playground", "调试台", "控制台", "dashboard", "chat completions", "responses", "messages", "流式传输", "streaming"]
+---
+
+**Playground**（调试台）页面（`/admin/dashboard/playground`）使用您的控制台密钥，通过网关的公开 API 发送请求，
+因此每次调用都会像客户端请求一样被路由、记录日志和计量。您可以选择端点（`/v1/chat/completions`、
+`/v1/responses` 或 `/v1/messages`）、库存中的模型或任意别名、按名称指定的虚拟模型，以及是否使用流式传输；
+通过可编辑、可重新排序的 System、User 和 Assistant 消息构建对话；然后发送提示词。
+右侧的 JSON 面板会显示即将发送的请求体（随编辑实时更新），以及最近一次响应及其状态、延迟和 Token 用量——
+流式响应会被组装成与非流式调用返回结果相同的结构。
+这些请求与网关的任何其他客户端一样，受相同的预算、速率限制、护栏和审计日志约束。
+
+## 用户路径作用域
+
+虚拟模型可以被限定到特定的 `user_paths`，而使用主密钥认证的 Playground 请求可以通过模型选择器旁边的 **User path**
+字段，将自身限定到其中一个路径。当您选择的模型的策略声明了 `user_paths` 时，该字段会预填第一个条目；您可以在发送前对其进行编辑。
+发送时，该值会通过用户路径请求头传递，与外部客户端的发送方式完全相同，因此网关会在请求快照中记录该路径，并授予对限定到该路径的模型的访问权限——
+不带该请求头的请求将被拒绝访问这些模型。
+
+请求头名称默认为 `X-GoModel-User-Path`。如果您通过 `USER_PATH_HEADER`（或 `server.user_path_header`）自定义了它，
+控制台会从 `GET /admin/runtime/config` 读取实际生效的名称，并在该请求头下发送限定的路径，因此无需在控制台中进行额外配置。
+
+<img
+  src="/features/playground.png"
+  alt="GoModel 控制台的 Playground 页面，已选择 Messages 端点，包含模型选择器、System、User 和 Assistant 消息卡片、提示词编辑器，以及右侧的请求 JSON 面板"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>

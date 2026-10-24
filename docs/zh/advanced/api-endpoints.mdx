@@ -1,0 +1,187 @@
+---
+title: "API 端点"
+description: "GoModel 兼容 OpenAI 和兼容 Anthropic 的端点、提供商透传以及运维路由的参考文档。"
+icon: "list-tree"
+keywords: ["API 端点", "兼容 OpenAI 的 API", "路由", "透传", "参考", "API endpoints", "OpenAI-compatible API", "routes", "passthrough", "reference"]
+---
+
+GoModel 提供兼容 OpenAI 和兼容 Anthropic 的 API、提供商原生透传，以及一组运维端点。
+管理和控制台路由请参阅单独的 [管理端点](/zh/advanced/admin-endpoints) 文档。
+
+请求和响应的详细信息请参阅各专题指南：
+[Responses API](/zh/advanced/responses-api)、[Conversations API](/zh/advanced/conversations-api)、
+[Anthropic Messages API](/zh/advanced/anthropic-messages-api)、
+[Audio API](/zh/advanced/audio-api)、[Images API](/zh/advanced/images-api)、
+[Decisions API](/zh/advanced/decisions-api)、[System One API](/zh/advanced/systemone-api)
+以及 [Usage API](/zh/advanced/usage-api)。
+
+## 兼容 OpenAI 的 API
+
+| 端点 | 方法 | 说明 |
+| --------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------ |
+| `/v1/chat/completions`            | POST   | 聊天补全（支持流式传输） |
+| `/v1/responses`                   | POST   | 创建 OpenAI Responses API 响应 |
+| `/v1/responses/{id}`              | GET    | 获取已存储的响应 |
+| `/v1/responses/{id}`              | DELETE | 删除已存储的响应（在支持的情况下转发原生删除请求） |
+| `/v1/responses/{id}/cancel`       | POST   | 取消进行中的响应（在支持的情况下使用提供商原生实现） |
+| `/v1/responses/{id}/input_items`  | GET    | 列出已存储响应的输入项 |
+| `/v1/responses/input_tokens`      | POST   | 统计 Responses 请求的输入 Token 数 |
+| `/v1/responses/compact`           | POST   | 压缩 Responses 对话（在支持的情况下使用提供商原生实现） |
+| `/v1/conversations`               | POST   | 创建对话（由网关管理） |
+| `/v1/conversations/{id}`          | GET    | 获取对话 |
+| `/v1/conversations/{id}`          | POST   | 合并对话元数据 |
+| `/v1/conversations/{id}`          | DELETE | 删除对话 |
+| `/v1/conversations/{id}/items`    | POST   | 向对话添加条目 |
+| `/v1/conversations/{id}/items`    | GET    | 使用游标分页列出对话条目 |
+| `/v1/conversations/{id}/items/{item_id}` | GET | 获取对话条目 |
+| `/v1/conversations/{id}/items/{item_id}` | DELETE | 删除对话条目并返回对话 |
+| `/v1/embeddings`                  | POST   | 文本嵌入 |
+| `/v1/models`                      | GET    | 列出可用模型 |
+| `/v1/models/{model}`              | GET    | 按 ID 获取单个模型（`openai/gpt-4.1-mini`；斜杠可以原样发送，也可以进行百分号编码）。可用于推理的 ID（例如不带前缀的 `gpt-4.1-mini`）会返回其解析到的模型 |
+| `/v1/audio/speech`                | POST   | 文本转语音，返回二进制音频 |
+| `/v1/audio/transcriptions`        | POST   | 基于 multipart 上传的语音转文本 |
+| `/v1/images/generations`          | POST   | 根据文本提示词生成图像（DALL·E、gpt-image-1、grok-2-image、Imagen、Gemini 图像模型） |
+| `/v1/images/edits`                | POST   | 基于 multipart 上传的图像编辑 / 局部重绘（图像、可选蒙版、提示词） |
+| `/v1/realtime`                    | GET    | 实时语音对语音 WebSocket 升级；`?call_id=` 可作为旁路通道连接到现有的 WebRTC/SIP 通话（需启用 `REALTIME_ENABLED`） |
+| `/v1/realtime/calls`              | POST   | 实时 WebRTC SDP 交换：带 `?model=` 的 `application/sdp` offer，或包含 `sdp` + `session` 字段的 multipart 请求（需启用 `REALTIME_ENABLED`） |
+| `/v1/realtime/client_secrets`     | POST   | 为浏览器客户端签发临时的实时客户端 Secret，按 `session.model` 路由（需启用 `REALTIME_ENABLED`） |
+| `/v1/realtime/translations`       | GET    | 实时语音翻译 WebSocket 升级（例如 `gpt-realtime-translate`）；等同于 `/v1/realtime?intent=translation`（需启用 `REALTIME_ENABLED`） |
+| `/v1/realtime/translations/calls` | POST   | 翻译会话的 WebRTC SDP 交换（需启用 `REALTIME_ENABLED`） |
+| `/v1/realtime/translations/client_secrets` | POST | 为翻译会话签发临时客户端 Secret（需启用 `REALTIME_ENABLED`） |
+| `/v1/files`                       | POST   | 上传文件（兼容 OpenAI 的 multipart） |
+| `/v1/files`                       | GET    | 列出文件 |
+| `/v1/files/{id}`                  | GET    | 获取文件元数据 |
+| `/v1/files/{id}`                  | DELETE | 删除文件 |
+| `/v1/files/{id}/content`          | GET    | 获取文件原始内容 |
+| `/v1/batches`                     | POST   | 创建提供商原生批处理（兼容 OpenAI 的 schema；在提供商原生支持时可使用内联 `requests`） |
+| `/v1/batches`                     | GET    | 列出已存储的批处理 |
+| `/v1/batches/{id}`                | GET    | 获取单个已存储的批处理 |
+| `/v1/batches/{id}/cancel`         | POST   | 取消待处理的批处理 |
+| `/v1/batches/{id}/results`        | GET    | 获取原生批处理结果（如可用） |
+
+### 实时翻译会话
+
+语音翻译模型（OpenAI `gpt-realtime-translate`）运行在独立的会话接口上，因此网关也对其进行了镜像。
+连接到 `/v1/realtime/translations`（或 `/v1/realtime?intent=translation`，二者为同一会话），并在 socket 打开后设置目标语言：
+
+```bash
+wscat -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -c "ws://localhost:8080/v1/realtime/translations?model=gpt-realtime-translate"
+```
+
+```json
+{"type": "session.update", "session": {"audio": {"output": {"language": "pl"}}}}
+```
+
+翻译会话使用自己的事件名称（输入为 `session.input_audio_buffer.append`，
+输出为 `session.output_audio.delta` 和 `session.output_transcript.delta`），
+并接受 24 kHz PCM16 音频。帧会被原样转发，因此任何基于提供商翻译 API 编写的客户端都无需修改即可使用。
+
+目前翻译仅支持 OpenAI 接口。如果将翻译会话路由到不支持翻译的提供商，请求会返回 400 错误，而不会悄悄地改为打开一个普通的对话会话。
+
+这类会话不会上报用量事件，因此网关会根据其转发的输入音频，按模型每秒的输入单价计费。
+WebRTC 翻译通话除外：其媒体流不经过网关，因此不会被计量。
+
+### 实时转录会话
+
+转录会话（`/v1/realtime?intent=transcription`）在 `session.update` 中选择模型，而不是在 URL 中指定；
+`model` 查询参数用于路由请求，网关会将会话内的模型选择固定为该模型。
+
+大多数转录模型会在其
+`conversation.item.input_audio_transcription.completed` 事件中上报用量（Token 数，或对于 whisper 类模型为秒数），
+并以此为会话计费。如果模型在该事件中未上报用量，网关会回退为根据其转发的输入音频，按每秒输入单价计费。
+仅当会话自身未上报任何用量时才会使用这种回退方式，因此同一会话绝不会被重复计费。
+与翻译相同，WebRTC 通话的媒体流不经过网关，因此不会被计量。
+
+## 兼容 Anthropic 的 API
+
+| 端点 | 方法 | 说明 |
+| --------------------------- | ------ | ----------------------------------------------------------------------------- |
+| `/v1/messages`              | POST   | 通过转换后的模型路由调用 Anthropic Messages API（支持流式传输） |
+| `/v1/messages/count_tokens` | POST   | 基于启发式方法估算 Anthropic Messages 的输入 Token 数 |
+
+## Decisions API
+
+在配置了 `openai`、`jev` 或 `openrouter` 提供商时可用；请参阅
+[Decisions API](/zh/advanced/decisions-api)。
+
+| 端点 | 方法 | 说明 |
+| --------------- | ------ | ------------------------------------------------------------------------------------- |
+| `/v1/decisions` | POST   | 回答关于输入的类型化问题（OpenAI 为原生实现，Jev / Kev 通过 System One 实现） |
+
+## System One API
+
+在配置了 `jev` 或 `openrouter` 提供商时可用；请参阅
+[System One API](/zh/advanced/systemone-api)。
+
+| 端点 | 方法 | 说明 |
+| ---------------------------- | ------ | ------------------------------------------------------------------------ |
+| `/v1/systemone`              | POST   | 针对类型化问题评估某个状态（Jev、Kev），以原生方式转发 |
+| `/v1/systemone/permute`      | POST   | 仅限 Kev：以多种选项顺序运行同一个 Choice 问题 |
+| `/v1/systemone/separate`     | POST   | 仅限 Kev：每个问题在独立的前向传播中运行 |
+
+## 网关扩展
+
+| 端点 | 方法 | 说明 |
+| ----------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `/v1/usage` | GET    | 自助查询调用方有效用户路径的用量、预算和速率限制状态，请参阅 [Usage API](/zh/advanced/usage-api) |
+| `/v1/auth/verify` | GET | 报告请求所携带的 API 密钥是否有效（需启用 `AUTH_VERIFY_ENABLED`） |
+
+### 密钥验证
+
+`GET /v1/auth/verify` 让位于网关前方的服务无需持有密钥列表副本即可校验 API 密钥。
+该端点**默认禁用**；可通过 `AUTH_VERIFY_ENABLED=true`（`server.auth_verify_enabled`）启用。
+它不是 `/admin` 路由，因此在禁用 Admin API 时依然可用。
+
+```bash
+curl http://localhost:8080/v1/auth/verify \
+  -H "Authorization: Bearer sk_gom_..."
+```
+
+```json
+{ "valid": true, "method": "api_key", "key_id": "key_01H...", "user_path": "/acme/eng" }
+```
+
+未知、已禁用或已过期的密钥会被网关的常规认证以 `401` 拒绝，因此返回 `200` 即表示该密钥认证通过。
+`method` 表示接受该密钥的机制：`api_key` 是存储在数据库中的托管密钥，
+`master_key` 是来自 `GOMODEL_MASTER_KEY` 的引导密钥。`key_id`
+和 `user_path` 仅在托管密钥绑定了相应值时才会出现。
+
+<Note>
+  当网关允许未认证的调用方访问时（完全未配置认证，或某个路由被扩展排除在认证之外），
+  没有可供确认的密钥，此时该端点返回 `200` 和
+  `{"valid": false, "method": "none"}`，而不会声称密钥有效。
+  基于状态码判断的使用方（例如 Caddy 的 `forward_auth`）会将其视为允许访问，
+  这与网关自身对这些请求的处理方式一致。
+</Note>
+
+## 提供商透传
+
+| 端点 | 方法 | 说明 |
+| ------------------- | -------------------------------------------- | ---------------------------------------------------------- |
+| `/p/{provider}/...` | GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS | 提供商原生透传，上游响应不做解析处理 |
+
+## MCP 网关
+
+聚合已配置上游 MCP 服务器的 Streamable-HTTP MCP（Model Context Protocol）端点
+（需启用 `MCP_ENABLED`，默认开启）。请参阅
+[MCP 网关](/zh/features/mcp-gateway)。
+
+| 端点 | 方法 | 说明 |
+| --------------- | ----------------- | ------------------------------------------------------------------------------- |
+| `/mcp`          | POST, GET, DELETE | 聚合的 MCP 端点；工具 / 提示词以 `{server}_{name}` 形式添加命名空间 |
+| `/mcp/{server}` | POST, GET, DELETE | 单个已配置的 MCP 服务器，保留原始工具名称 |
+
+## 管理端点
+
+管理 REST 和控制台路由（`/admin/*`）请参阅
+[管理端点](/zh/advanced/admin-endpoints)。
+
+## 运维端点
+
+| 端点 | 方法 | 说明 |
+| --------------------- | ------ | ---------------------------------------------------------------------------------- |
+| `/health`             | GET    | 存活检查（只要进程在提供服务，始终返回 200） |
+| `/health/ready`       | GET    | 就绪检查：探测存储（不可用时返回 503）；Redis 缓存不可用或尚未加载任何模型时报告为 degraded（仍返回 200）。扩展组件（例如 GoModel Pro 的 vault）以各自的名称显示：`degraded` 仍返回 200，`down` 返回 503 |
+| `/metrics`            | GET    | Prometheus 指标（实验性功能，需启用） |
+| `/swagger/index.html` | GET    | [Swagger UI](/zh/advanced/swagger-ui)（需使用 `-tags=swagger` 构建并启用） |

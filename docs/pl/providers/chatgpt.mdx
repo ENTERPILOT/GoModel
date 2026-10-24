@@ -1,0 +1,147 @@
+---
+title: "Subskrypcja ChatGPT"
+description: "Kieruj ruch Responses API przez subskrypcję ChatGPT zamiast klucza API OpenAI Platform."
+icon: "message-circle"
+keywords: ["ChatGPT", "Codex", "subscription", "subskrypcja", "OAuth", "Responses API", "konfiguracja providera", "provider setup"]
+---
+
+Provider `chatgpt` wywołuje backend Codex dostępny w ramach subskrypcji ChatGPT
+(Plus, Pro, Business lub Enterprise). Użycie jest rozliczane z limitu
+subskrypcji, a nie z klucza API OpenAI Platform.
+
+Połącz go z [przewodnikiem po Codex](/pl/guides/codex), aby uruchomić
+`Codex -> GoModel -> ChatGPT subscription`.
+
+## Konfiguracja
+
+Danymi uwierzytelniającymi jest access token z Twojego logowania do Codex:
+
+```bash
+CHATGPT_API_KEY=$(jq -r .tokens.access_token ~/.codex/auth.json)
+```
+
+Albo w `config.yaml`:
+
+```yaml
+providers:
+  chatgpt:
+    type: chatgpt
+    api_key: "${CHATGPT_API_KEY}"
+```
+
+Jeśli plik `~/.codex/auth.json` jeszcze nie istnieje, najpierw uruchom
+`codex login`. GoModel wyznacza ID konta ChatGPT z samego tokena, więc nic
+więcej nie jest potrzebne.
+
+<Warning>
+  Token wygasa mniej więcej co 10 dni. Wyeksportuj go ponownie (Codex CLI
+  odświeża plik przy każdym uruchomieniu) albo ponownie uruchom `codex login`,
+  gdy requesty zaczną zwracać 401.
+</Warning>
+
+## Modele
+
+Backend Codex nie ma endpointu listującego modele, więc GoModel dostarcza
+listę modeli, które może wywołać subskrypcja ChatGPT:
+
+```text
+gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5
+```
+
+Nadpisz ją, jeśli Twój plan obsługuje inny zestaw:
+
+```bash
+CHATGPT_MODELS=gpt-5.6-sol,gpt-5.6-terra
+```
+
+Model spoza zestawu planu jest odrzucany przez upstream komunikatem `The '<model>' model
+is not supported when using Codex with a ChatGPT account`.
+
+`gpt-5.4` i `gpt-5.4-mini` znikają z Codex uwierzytelnianego przez ChatGPT
+31 sierpnia 2026; zamiast nich używaj `gpt-5.6-terra` i `gpt-5.6-luna`. Oba
+pozostają dostępne dla sesji Codex uwierzytelnianych kluczem API OpenAI, przez
+providera `openai`.
+
+## Tylko Responses API
+
+Backend Codex obsługuje wyłącznie `/responses`, więc `/v1/chat/completions` i
+`/v1/embeddings` odpowiadają `501` dla modeli `chatgpt`. Używaj
+`/v1/responses` – i tak to właśnie wysyła Codex.
+
+Backend dodatkowo waliduje parametry względem ścisłej listy dozwolonych pól.
+GoModel dostosowuje requesty, zamiast je odrzucać, więc wywołujący nadal
+korzystają ze standardowego Responses API:
+
+| Pole requestu | Zachowanie |
+| ------------- | -------- |
+| `stream`, `store` | Ustawione na stałe na `true` / `false` – backend odrzuca inne wartości |
+| `input` jako string | Opakowywane w listę wiadomości wymaganą przez backend |
+| `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `reasoning`, `text`, `include`, `prompt_cache_key` | Przekazywane |
+| `temperature`, `top_p`, `max_output_tokens`, `previous_response_id`, `truncation`, `metadata`, `user`, `service_tier`, `top_logprobs` | Pomijane – nieobsługiwane przez upstream |
+| `prompt_cache_retention`, `prompt_cache_options` | Pomijane – Codex CLI nigdy ich nie wysyła, więc obsługa po stronie backendu nie jest zweryfikowana |
+
+Ponieważ backend obsługuje wyłącznie streaming, niestreamingowy
+`POST /v1/responses` jest realizowany przez streaming do upstreamu i zwrócenie
+końcowego obiektu response. Klienci widzą zwykłą niestreamingową odpowiedź.
+Zobacz [Kompatybilność Responses](/pl/advanced/responses-compatibility), aby
+dowiedzieć się, jak zachowuje się Responses API gatewaya u różnych providerów.
+
+## Prompt caching
+
+Backend utrzymuje jedną rozmowę na rozgrzanym cache’u prefiksu, gdy każda tura
+niesie ten sam nagłówek `session-id`; sam `prompt_cache_key` nie daje cache
+hitów. GoModel wysyła wykrytą [sesję](/pl/features/session-keeping) jako
+`session-id` albo, gdy nie wykryto sesji, `prompt_cache_key` klienta, a klucz
+przekazuje także w body, tak jak robi to Codex CLI. Gdy klient nie wysyła
+klucza, jego rolę przejmuje ID sesji, o ile mieści się w limicie 64 znaków
+klucza.
+
+Jeśli klient nie wysyła klucza, a GoModel nie wykrywa sesji, backend nie
+dostaje żadnego z tych sygnałów. Wysyłaj `prompt_cache_key`, aby zachować cache
+hity; nagłówek sesji, taki jak `X-Session-Id`, również działa, chyba że
+ustawiono `SESSION_KEEPING_ENABLED=false`, co wyłącza wykrywanie sesji.
+
+Aby sprawdzić współczynnik trafień na prawdziwym backendzie, uruchom opcjonalny
+test live:
+
+```bash
+CHATGPT_API_KEY=$(jq -r .tokens.access_token ~/.codex/auth.json) make test-live
+```
+
+## Raportowany koszt to nie rzeczywiste wydatki
+
+Użycie w ramach subskrypcji jest rozliczane ryczałtowo, ale te ID modeli
+istnieją też w OpenAI Platform, więc katalog modeli przypisuje im ceny API za
+token. Rekordy użycia i sumy w dashboardzie dla `chatgpt` pokazują kwotę, która
+nie odpowiada żadnemu faktycznemu obciążeniu, a ta sama kolizja sprawia, że
+`GET /v1/models` ogłasza `modes: ["chat", "responses"]`.
+
+Tryby są kosmetyczne – wpływają na grupowanie w dashboardzie, nie na routing.
+Ceny już nie: zasilają [śledzenie kosztów](/pl/features/cost-tracking), budżety
+i load balancing `cost`.
+
+<Warning>
+  **Budżet** może więc odrzucać ruch `chatgpt` za „wydawanie” pieniędzy, których
+  subskrypcja nigdy nie pobiera. Ogranicz budżety do
+  [ścieżki użytkownika](/pl/features/user-path), która wyklucza ruch
+  subskrypcyjny, albo nie włączaj dla niego budżetów. Zadeklarowanie per model
+  `pricing` i `modes: ["responses"]` w [metadanych modeli](/pl/advanced/model-metadata)
+  poprawia to, co ogłasza `/v1/models`, ale rekordy użycia nadal są wyceniane
+  według stawek z katalogu. Zadeklaruj każdy model, który ma być obsługiwany:
+  lista zastępuje domyślny zestaw modeli, zamiast go uzupełniać.
+</Warning>
+
+## Limity
+
+Limit subskrypcji jest oddzielny od kredytów API. Gdy się wyczerpie, gateway
+przekazuje `429`:
+
+```json
+{"error":{"message":"The usage limit has been reached","type":"rate_limit_error"}}
+```
+
+<Warning>
+  OpenAI autoryzuje te tokeny do ruchu Codex. Używaj tego providera do
+  kierowania własnego użycia Codex przez GoModel, a nie jako API do inferencji
+  ogólnego przeznaczenia.
+</Warning>

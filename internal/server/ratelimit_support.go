@@ -239,9 +239,9 @@ const (
 	rateLimitLimitRequestsHeader     = "X-Ratelimit-Limit-Requests"
 	rateLimitRemainingRequestsHeader = "X-Ratelimit-Remaining-Requests"
 	rateLimitResetRequestsHeader     = "X-Ratelimit-Reset-Requests"
-	rateLimitLimitTokensHeader       = "X-Ratelimit-Limit-Tokens"
-	rateLimitRemainingTokensHeader   = "X-Ratelimit-Remaining-Tokens"
-	rateLimitResetTokensHeader       = "X-Ratelimit-Reset-Tokens"
+	rateLimitLimitTokensHeader       = "X-Ratelimit-Limit-Tokens"     //nolint:gosec // G101: header name, not a credential.
+	rateLimitRemainingTokensHeader   = "X-Ratelimit-Remaining-Tokens" //nolint:gosec // G101: header name, not a credential.
+	rateLimitResetTokensHeader       = "X-Ratelimit-Reset-Tokens"     //nolint:gosec // G101: header name, not a credential.
 )
 
 func rateLimitBreachHeaders(exceeded *ratelimit.ExceededError) http.Header {

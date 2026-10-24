@@ -1,0 +1,212 @@
+---
+title: "Cursor：覆盖 OpenAI Base URL"
+sidebarTitle: "Cursor"
+description: "将 Cursor 的 OpenAI BYOK 模型流量路由到 GoModel，配置公网 HTTPS Base URL，并了解哪些 Cursor 功能会绕过网关。"
+icon: "mouse-pointer-click"
+keywords: ["Cursor", "Cursor IDE", "BYOK", "覆盖 OpenAI Base URL", "override OpenAI base URL", "Cursor 代理", "Cursor proxy", "AI 网关", "AI gateway", "配置指南", "setup guide"]
+---
+
+Cursor 可以通过其 **OpenAI API Key** 和 **Override OpenAI
+Base URL** 设置使用 GoModel。这是一条可用但有限的集成路径，并不能让所有 Cursor 功能都经过网关。
+
+流程：
+
+`Cursor IDE -> Cursor backend -> GoModel -> upstream model provider`
+
+<Warning>
+  GoModel 必须可以通过公网 HTTPS URL 访问。Cursor 会通过其后端完成最终的提示词构建，因此 `http://localhost:8080/v1` 不能作为可靠的 Cursor Base URL。请将已部署的 GoModel 实例置于 TLS 之后，或在临时测试时使用安全隧道。
+</Warning>
+
+## Cursor 订阅与 GoModel 相互独立
+
+付费的 Cursor 订阅可以与 GoModel 同时使用。它提供 Cursor 编辑器以及依赖 Cursor 基础设施的功能；目前，在 BYOK 模型上使用 Agent 和 Edit 需要 Cursor 付费套餐。
+
+它不会为 GoModel 提供上游模型额度：
+
+| 在 Cursor 中选择的路由 | 模型请求发往 | 模型推理计费 |
+| --- | --- | --- |
+| Cursor 托管的模型或 Auto | Cursor 的基础设施 | Cursor 订阅用量 |
+| 使用 GoModel Base URL 的 OpenAI BYOK | GoModel，再到其配置的提供商 | GoModel 中配置的提供商账户 |
+| Composer、Grok 或 Tab | Cursor 的基础设施 | Cursor 订阅用量 |
+
+<Warning>
+  Cursor 套餐中包含的 **Cursor Models** 和 **Other Models** 用量不能用作 GoModel 的提供商额度。Cursor 不会将订阅模型作为通用的兼容 OpenAI 推理 API 开放。Cursor SDK 和 Cloud Agents API 用于运行 Cursor 智能体，并不是 GoModel 可以用作上游提供商的原始模型端点。
+</Warning>
+
+因此，当选择 GoModel 时，您既要为 Cursor 套餐付费，也要为 GoModel 背后提供商账户上的模型用量付费。Teams 和 Enterprise 客户还需要为符合条件的第三方 BYOK 请求支付 Cursor 的 Token 费率。
+
+## 哪些流量经过 GoModel
+
+| Cursor 功能 | GoModel 网关状态 |
+| --- | --- |
+| 使用 BYOK 的 OpenAI 系列聊天模型 | 通过 OpenAI Base URL 覆盖可正常工作 |
+| 自定义的兼容 OpenAI 模型 | 可用，但 Cursor 的兼容性因模型和版本而异 |
+| Agent 和工具调用 | 可以工作；请验证所选模型，因为 Cursor 的工具 schema 在不同版本之间有过变化 |
+| 图片附件 | 当前 Cursor 版本支持；如果较旧版本忽略了 Base URL，请升级 |
+| Tab 补全 | 不支持；Cursor 使用其内置模型 |
+| Auto、Cursor 原生模型和 Background Agents | 无法通过 BYOK 完全替代 |
+| Cursor CLI | 目前不支持自定义 API 密钥和 Base URL |
+
+OpenAI Base URL 覆盖对 OpenAI 系列模型路由全局生效。在使用不应经过 GoModel 的 Cursor 托管模型之前，请先禁用该覆盖。
+
+## 开始之前
+
+- 将 GoModel 部署在公网 HTTPS URL 上，例如 `https://gomodel.example.com`。
+- 使用 Cursor 付费套餐，以便通过 GoModel BYOK 路由使用 Agent 和 Edit。
+- 在 GoModel 中至少配置一个上游提供商和模型。
+- 在控制台的 **API Keys -> Create API Key** 中，为 Cursor 创建一个专用的 GoModel 托管 API 密钥。
+- 安装最新的 Cursor 版本。包括图片路由在内的自定义端点修复已于 2026 年 6 月发布。
+
+<Note>
+  Cursor 会在每个请求中将您的 API 密钥发送到其后端。Cursor 声明该密钥在传输过程中加密且不会被持久化，但其零数据保留（Zero Data Retention）政策不适用于 BYOK 请求。请使用专用的 GoModel 托管密钥，而不是 `GOMODEL_MASTER_KEY`。
+</Note>
+
+## 1. 运行 GoModel
+
+此示例以 OpenAI 作为上游启动 GoModel。在生产环境中，请在反向代理或负载均衡器上终止 TLS，并遵循[生产部署指南](/zh/guides/production)。
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e OPENAI_API_KEY="sk-..." \
+  enterpilot/gomodel
+```
+
+`GOMODEL_MASTER_KEY` 用于管理 GoModel。创建专用托管密钥后，请勿在 Cursor 中输入主密钥。
+
+## 2. 验证公网端点
+
+请在不属于 GoModel 所在私有网络的机器上运行以下检查。将 `sk_gom_...` 替换为为 Cursor 创建的专用密钥。
+
+```bash
+curl -s https://gomodel.example.com/v1/models \
+  -H "Authorization: Bearer sk_gom_..." \
+  | jq '.data[].id'
+```
+
+然后验证一个简单的 Chat Completions 请求：
+
+```bash
+curl -s https://gomodel.example.com/v1/chat/completions \
+  -H "Authorization: Bearer sk_gom_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4.1-mini",
+    "messages": [
+      {"role": "user", "content": "Reply with exactly ok"}
+    ],
+    "max_tokens": 16
+  }'
+```
+
+响应中应包含 `ok`。
+
+## 3. 选择 Cursor 模型名称
+
+最简单的配置是使用 Cursor 接受的 OpenAI 风格模型名称，例如 `gpt-4.1-mini`。Cursor 会将该模型名称原样转发给 GoModel。
+
+GoModel 通常列出带提供商前缀的选择器，例如 `openai/gpt-4.1-mini`。请创建一个[虚拟模型](/zh/features/virtual-models)，其简短的源名称与 Cursor 中的名称一致，目标为确切的带提供商前缀的选择器：
+
+```yaml
+virtual_models:
+  - source: gpt-4.1-mini
+    target: openai/gpt-4.1-mini
+```
+
+您也可以在 Cursor 中添加自定义名称，并将同一名称用作 GoModel 虚拟模型。请避免使用以 `claude-` 或 `gemini-` 开头的自定义名称，因为 Cursor 会将这些名称路由到其特定提供商的 BYOK 路径，而不是 OpenAI Base URL 覆盖。
+
+## 4. 配置 Cursor
+
+<Steps>
+  <Step title="打开模型设置">
+    在 Cursor 中打开 **Cursor Settings -> Models**。
+  </Step>
+  <Step title="设置 OpenAI API 密钥">
+    找到 **OpenAI API Key**，启用它，并输入专用的 GoModel 托管密钥。
+  </Step>
+  <Step title="覆盖 OpenAI Base URL">
+    启用 **Override OpenAI Base URL**，并输入 `https://gomodel.example.com/v1`。保留 `/v1`；不要追加 `/chat/completions` 或 `/responses`。
+  </Step>
+  <Step title="保存设置">
+    点击 **Save**。如果您的 Cursor 版本显示 **Verify**，也请点击它。
+  </Step>
+  <Step title="选择模型">
+    打开一个新的聊天并选择 `gpt-4.1-mini`。如果您创建了自定义虚拟模型，请先在模型设置中使用 **Add Model** 输入确切的源名称。
+  </Step>
+</Steps>
+
+## 5. 验证 Cursor 流量
+
+先使用纯文本提示词：
+
+```text
+Reply with exactly ok and no punctuation.
+```
+
+然后在一个可随时丢弃的项目中测试 Agent 模式：
+
+```text
+Create a file named gomodel-cursor-test.txt containing exactly tool-ok
+```
+
+在接受编辑之前先确认其内容。使用主密钥或已启用控制台访问的托管密钥单独登录 GoModel 控制台。打开 **Audit Logs**，检查 Cursor 是否请求了 `POST /v1/chat/completions` 并使用了预期的模型。
+
+<Warning>
+  文本提示词成功并不能证明所选模型可以支持所有 Agent 工具。Cursor 此前曾在部分较新的 GPT 模型的 Chat Completions 请求中混入 Responses 风格的自定义工具。如果 Agent 模式失败但文本聊天成功，请先尝试标准的非推理聊天模型，并在修改网关之前检查 GoModel 审计日志中的响应。
+</Warning>
+
+## 故障排查
+
+### Cursor 无法访问 `localhost`
+
+请使用公网 HTTPS URL。Cursor 的后端必须能够访问 GoModel。本地地址、私有 IP 或自签名 TLS 证书都无法可靠工作。
+
+### `401 Unauthorized`
+
+请确认 **OpenAI API Key** 中填写的是专用的 GoModel 密钥，且该密钥未被吊销。请勿在 Cursor 中输入上游提供商的密钥。
+
+### `Model not found`
+
+Cursor 会将所选模型名称转发给 GoModel。请从 `/v1/models` 复制确切的选择器，或创建一个源名称与 Cursor 中显示的名称一致的虚拟模型。
+
+### Cursor 托管的模型无法工作
+
+OpenAI 覆盖可能会影响其他 OpenAI 系列以及部分 Cursor 托管的模型路由。切换回这些模型之前，请先禁用自定义 OpenAI 密钥和 Base URL，然后开始新的聊天。
+
+### 文本正常，但 Agent 或工具调用失败
+
+升级 Cursor，使用标准的 OpenAI 聊天模型重试，并在 GoModel 审计日志中检查上游响应。自定义端点支持曾出现过与特定版本相关的请求体问题，尤其是在较新 GPT 模型的自定义工具方面。
+
+### 图片未到达 GoModel
+
+请升级 Cursor。Cursor 已于 2026 年 6 月在 `3.9.16` 版本中修复了自定义 Base URL 的图片路由问题。较旧的版本可能会直接向 OpenAI 验证 GoModel 密钥，并在请求到达 GoModel 之前失败。
+
+## 安全与隐私
+
+此配置不会在 Cursor 桌面应用与 GoModel 之间建立直接的私有连接。Cursor 的后端仍位于请求路径中，负责提示词构建和上下文检索。此配置也不会让 Cursor Tab 或其他 Cursor 托管功能使用 GoModel。
+
+对于面向互联网的 GoModel 部署：
+
+- 使用由公共受信任证书签发的 TLS
+- 为 Cursor 分配其专属的托管密钥，而不是主密钥
+- 在适当时限制该密钥的用户路径和模型访问权限
+- 将管理控制台与公网 API 分开保护
+- 如果 Cursor 密钥被意外粘贴或记录到任何地方，请轮换该密钥
+
+## 参考
+
+- Cursor：[Bring your own API key](https://cursor.com/help/models-and-usage/api-keys)
+- Cursor：[Models and pricing](https://cursor.com/docs/models-and-pricing)
+- Cursor：[Cursor token rate](https://cursor.com/help/models-and-usage/token-rate)
+- Cursor 工作人员：[自定义端点需要公网 HTTPS](https://forum.cursor.com/t/how-can-i-use-a-local-llm-on-my-desktop-ai-computer/152419/3)
+- Cursor 工作人员：[OpenAI 覆盖下的模型路由机制](https://forum.cursor.com/t/how-can-i-use-a-local-llm-on-my-desktop-ai-computer/152419/8)
+- Cursor 工作人员：[订阅模型不是通用推理 API](https://forum.cursor.com/t/can-we-use-llms-in-the-cursor-subscription-outside-cursor-by-and-api-a-key/159598/5)
+- Cursor 工作人员：[BYOK Agent 和 Edit 需要付费套餐](https://forum.cursor.com/t/external-models-setup/158906/4)
+- Cursor 工作人员：[自定义端点图片路由修复](https://forum.cursor.com/t/bug-images-vision-completely-broken-with-openai-byok-custom-endpoint-override-unauthorized-error/158460/78)
+- Cursor：[自定义端点 Agent 请求体讨论](https://forum.cursor.com/t/cursor-agent-sends-responses-api-format-to-chat-completions-endpoint/153019/20)
+
+## 2026 年 8 月 8 日调研
+
+当前的 Cursor 文档和工作人员说明均确认，OpenAI Base URL 覆盖可以将模型请求路由到兼容 OpenAI 的网关。GoModel 已提供所需的 `/v1/models`、`/v1/chat/completions` 和 `/v1/responses` 端点，因此按文档所述路径使用时，GoModel 应用本身无需任何改动。使用 `openai/gpt-4.1-mini` 进行的本地 GoModel 验证确认了 Chat Completions 和 Responses 的文本响应、流式 Chat Completions，以及标准的函数工具调用。
+
+本地测试环境中没有可运行的 Cursor 安装，因此 Cursor UI 流程并未作为端到端的本地验证结果。GoModel 端点及模型/工具行为已单独测试；在生产环境中依赖 Agent 模式之前，请使用已部署的 URL 和您的 Cursor 版本重复执行[第 5 步](#5-验证-cursor-流量)。

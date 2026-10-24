@@ -1,0 +1,263 @@
+---
+title: "Etykietowanie"
+description: "Przypisuj requestom etykiety z nagłówków HTTP lub kluczy API i rozbijaj użycie oraz logi audytowe według etykiet."
+icon: "tags"
+keywords: ["etykiety", "labels", "tagowanie", "tagging", "etykiety requestów", "request labels", "tagowanie nagłówkami", "przypisywanie kosztów", "cost attribution"]
+---
+
+## Przegląd
+
+Etykiety oznaczają każdy request na potrzeby atrybucji: który zespół, funkcja, zadanie lub
+środowisko wygenerowały ruch. Request można oznaczyć etykietami na dwa sposoby, a oba
+mogą działać jednocześnie:
+
+- **Nagłówki tagujące** — etykiety wyodrębniane ze skonfigurowanych nagłówków HTTP każdego requestu.
+- **Etykiety kluczy API** — etykiety przypisane do zarządzanego klucza API, stosowane do każdego requestu uwierzytelnionego tym kluczem.
+
+Etykiety z obu źródeł są scalane i deduplikowane. Są zapisywane we
+wpisach użycia i wpisach logu audytowego oraz zasilają rozbicie użycia według etykiet
+w dashboardzie.
+
+## Etykiety kluczy API
+
+Przypisz etykiety podczas tworzenia klucza w dashboardzie administracyjnym:
+
+`API Keys -> Create API Key -> Labels`
+
+<img
+  src="/features/auth-keys-labels.png"
+  alt="Strona API Keys w dashboardzie GoModel z kolumną Labels pokazującą przy każdym kluczu etykiety w formie chipów, takie jak env:demo, team:engineering i priority:high"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+Strona **API Keys** wyświetla każdy zarządzany klucz z jego etykietami w postaci chipów obok
+ścieżki użytkownika, więc atrybucję widać od razu, bez otwierania
+poszczególnych kluczy. Kliknij **Edit Labels** w wierszu, aby zmienić je później.
+
+Albo przez Admin API:
+
+<CodeGroup>
+
+```bash curl
+curl -X POST http://localhost:8080/admin/auth-keys \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "team-a-batch", "labels": ["team-a", "batch-jobs"]}'
+```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+auth_key = client.post(
+    "/admin/auth-keys",
+    cast_to=httpx.Response,
+    body={"name": "team-a-batch", "labels": ["team-a", "batch-jobs"]},
+)
+
+print(auth_key.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const authKey = await client.post("/admin/auth-keys", {
+  body: { name: "team-a-batch", labels: ["team-a", "batch-jobs"] },
+});
+
+console.log(authKey);
+```
+
+</CodeGroup>
+
+Każdy request uwierzytelniony tym kluczem niesie te etykiety — bez żadnych zmian
+po stronie klienta. To najprostszy sposób przypisywania ruchu do zespołu lub
+usługi: wydaj każdemu konsumentowi osobny klucz z etykietami.
+
+Etykiety można później zmienić bez rotacji klucza, w dashboardzie
+(`API Keys -> Edit Labels`) lub przez Admin API:
+
+<CodeGroup>
+
+```bash curl
+curl -X PUT http://localhost:8080/admin/auth-keys/<key-id>/labels \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"labels": ["team-a", "realtime"]}'
+```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+auth_key = client.put(
+    "/admin/auth-keys/<key-id>/labels",
+    cast_to=httpx.Response,
+    body={"labels": ["team-a", "realtime"]},
+)
+
+print(auth_key.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const authKey = await client.put("/admin/auth-keys/<key-id>/labels", {
+  body: { labels: ["team-a", "realtime"] },
+});
+
+console.log(authKey);
+```
+
+</CodeGroup>
+
+Nowa lista zastępuje starą; wyślij `[]`, aby usunąć wszystkie etykiety. Zmiany
+obowiązują dla nowych requestów natychmiast na instancji, która obsłużyła aktualizację,
+a na pozostałych replikach w ciągu około minuty (klucze są odświeżane ze storage
+w tle).
+
+## Nagłówki tagujące
+
+Reguły tagowania wskazują nagłówki, których wartości niosą etykiety. Zarządzaj nimi w
+dashboardzie (`Settings -> Tagging based on headers`) lub zadeklaruj je jako
+infrastructure-as-code:
+
+<img
+  src="/features/tagging-headers.png"
+  alt="Formularz Tagging based on headers na stronie Settings w dashboardzie GoModel z dwoma wierszami nagłówków (X-Team, X-Environment) oraz polami prefix, delimiter i do-not-pass-upstream"
+  style={{ width: "100%", maxWidth: "1000px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+Kliknij **Add Header**, podaj nazwę nagłówka, który będą wysyłać klienci (na przykład
+`X-Team`), opcjonalnie ustaw prefiks do obcięcia i separator, a następnie kliknij **Save
+Tagging Settings**. Zaznacz **Do not pass upstream** przy nagłówkach, które mają
+zostać usunięte, zanim request dotrze do providera.
+
+```yaml config.yaml
+tagging:
+  headers:
+    - header: X-My-Tags
+      prefix: "tag-" # opcjonalnie: "tag-alpha, beta" → etykiety "alpha", "beta"
+    - header: X-Internal-Routing
+      do_not_pass: true # usuwany przed przekazaniem do providera
+      delimiter: ";" # domyślnie: ","
+```
+
+Albo za pomocą zmiennych środowiskowych (wpis ze zmiennej środowiskowej zastępuje cały wpis YAML
+z tą samą nazwą nagłówka; nieustawione zmienne towarzyszące wracają do wartości domyślnych):
+
+```bash
+TAGGING_HEADER_1=X-My-Tags
+TAGGING_HEADER_1_PREFIX=tag-    # opcjonalnie, obcinany tylko z każdej wyodrębnionej etykiety
+TAGGING_HEADER_1_DONOTPASS=true # opcjonalnie, domyślnie false (nagłówki są przekazywane bez zmian)
+TAGGING_HEADER_1_DELIMITER=";"  # opcjonalnie, domyślnie ","
+```
+
+Klient oznacza wtedy request etykietami w ten sposób:
+
+```http
+X-My-Tags: tag-alpha, beta
+```
+
+Reguły zadeklarowane w `config.yaml` lub w zmiennych środowiskowych są w dashboardzie tylko do odczytu.
+Nagłówki zawierające dane uwierzytelniające (`Authorization`, `Cookie`, nagłówki z kluczami API)
+są odrzucane jako źródła tagów.
+
+`do_not_pass` usuwa nagłówek przed przekazaniem na trasach passthrough i realtime;
+trasy z translacją i tak nigdy nie przekazują nagłówków klienta.
+
+## Tagi LiteLLM
+
+Klienci napisani dla LiteLLM zachowują swoje tagi bez żadnej konfiguracji. GoModel
+odczytuje je jako etykiety z:
+
+- nagłówka `x-litellm-tags` (rozdzielane przecinkami, podobnie jak string `tags`);
+- pola `tags` w body `/v1/chat/completions`, `/v1/responses`,
+  `/v1/messages` i `/v1/embeddings`;
+- `metadata.tags` w tych body, jeśli jest listą.
+
+```json
+{
+  "model": "gpt-4o",
+  "messages": [{"role": "user", "content": "Hello"}],
+  "metadata": {"tags": ["search-team", "prod"]}
+}
+```
+
+GoModel usuwa je, zanim request dotrze do providera, który by je
+odrzucił: OpenAI nie ma parametru `tags`, a wartości w jego `metadata` muszą być
+stringami. Pozostałe klucze `metadata` są przekazywane dalej, a `metadata.tags` w postaci stringa
+pozostaje nietknięte jako zwykłe metadane OpenAI. Logi audytowe zachowują body w postaci
+wysłanej przez klienta.
+
+Jeden request wnosi najwyżej **32** różne tagi, liczone łącznie z
+nagłówka i obu pól body, w tej kolejności; pozostałe są odrzucane. Tagi dłuższe
+niż **128** znaków są odrzucane, a nie przycinane. Odrzucone tagi i tak są
+usuwane przed wysłaniem do providera.
+
+<Warning>
+  Klienci sami wybierają swoje tagi, więc każdy klient może obciążyć budżet etykiety,
+  podając jej nazwę. Gdy budżety etykiet muszą być egzekwowane per zespół, wyłącz tagi
+  LiteLLM i oznaczaj ruch za pomocą [etykiet kluczy API](#etykiety-kluczy-api) lub nagłówków
+  tagujących ustawianych przez Twoje proxy.
+</Warning>
+
+Tagi LiteLLM są domyślnie włączone. Wyłącz je za pomocą:
+
+```bash
+LITELLM_TAGS_ENABLED=false
+```
+
+```yaml config.yaml
+tagging:
+  litellm_tags_enabled: false
+```
+
+Gdy są wyłączone, GoModel ani nie odczytuje, ani nie usuwa tagów: requesty docierają do providera
+w postaci wysłanej przez klienta, więc provider odrzucający `tags` zwraca swój błąd.
+
+## Gdzie widać etykiety
+
+- **Dashboard użycia** — strona użycia pokazuje rozbicie według etykiet
+  (`GET /admin/usage/labels`). Request z kilkoma etykietami jest liczony raz pod
+  każdą z nich.
+- **Log requestów** — chipy etykiet przy każdym requeście, z możliwością filtrowania parametrem
+  zapytania `label` w `GET /admin/usage/log`.
+- **Logi audytowe** — zapisywane w `data.labels` w każdym wpisie (logowanie audytowe jest
+  domyślnie włączone).
+- **Strona kluczy API** — etykiety każdego klucza są wyświetlane obok jego ścieżki użytkownika.
+- **Budżety** — budżet może być ograniczony do etykiety i limitować wydatki każdego
+  requestu, który ją niesie. Zobacz [Budżety](/pl/features/budgets).
+
+## Wartości domyślne
+
+Etykietowanie jest domyślnie włączone i nic nie kosztuje, dopóki nie skonfigurujesz reguły
+tagowania, nie utworzysz klucza z etykietami lub klient nie wyśle tagów LiteLLM. Requesty bez etykiet są śledzone tak jak dotąd.
+
+| Ustawienie | Wartość domyślna | Zmień, gdy |
+| --- | --- | --- |
+| `LITELLM_TAGS_ENABLED` / `tagging.litellm_tags_enabled` | `true` | Budżety etykiet nie mogą być obciążane tagami wybieranymi przez klientów. |
