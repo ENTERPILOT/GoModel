@@ -164,17 +164,27 @@ vget() { curl -fsS "$BASE$1" -H "Authorization: Bearer $(api_key)"; }
 seed() {
   echo "-- writing one row per store domain with the $BASELINE_REF binary"
 
+  # An empty database with no Redis cache answers /health before the provider
+  # inventory loads, and the virtual models below must name listed models.
+  local attempt
+  for attempt in $(seq 1 60); do
+    curl -fsS "$BASE/v1/models" 2>/dev/null \
+      | jq -e '[.data[].id] | index("openai/gpt-4.1-nano") and index("groq/openai/gpt-oss-20b")' >/dev/null && break
+    [[ "$attempt" == 60 ]] && die "the seeded target models never appeared in /v1/models"
+    sleep 1
+  done
+
   jput /admin/virtual-models \
     '{"source":"compat-alias","target_model":"openai/gpt-4.1-nano","description":"upgrade compat alias"}' >/dev/null
   jput /admin/virtual-models \
-    '{"source":"compat-lb","targets":[{"provider":"openai","model":"gpt-4.1-nano","weight":2},{"provider":"groq","model":"groq/compound-mini"}],"strategy":"round_robin"}' >/dev/null
+    '{"source":"compat-lb","targets":[{"provider":"openai","model":"gpt-4.1-nano","weight":2},{"provider":"groq","model":"openai/gpt-oss-20b"}],"strategy":"round_robin"}' >/dev/null
 
   # A baseline older than #788 still has the standalone failover store, and the
   # working tree converts that mapping into a failover-strategy virtual model at
   # startup. Once #788 is itself in the baseline the route is gone, so seed it
   # only when the baseline answers it.
   if jput /admin/failover \
-    '{"primary_model":"compat-failover-src","fallback_models":["groq/groq/compound-mini","gemini/gemini-2.5-flash-lite"]}' >/dev/null 2>&1; then
+    '{"primary_model":"compat-failover-src","fallback_models":["groq/openai/gpt-oss-20b","gemini/gemini-2.5-flash-lite"]}' >/dev/null 2>&1; then
     SEEDED_FAILOVER=1
   else
     SEEDED_FAILOVER=0
@@ -260,8 +270,10 @@ snapshot() {
   curl -fsS "$BASE/admin/provider-credentials" \
     | jq -S 'map(select(.name|startswith("compat")))' > "$out/provider-credentials.json"
   curl -fsS "$BASE/admin/model-pricing-overrides" | jq -S '.' > "$out/pricing-overrides.json"
+  # last_used_at comes from the newest audit entry for the key, and the vget
+  # reads below add one, so only its presence is compared.
   curl -fsS "$BASE/admin/auth-keys" \
-    | jq -S 'if type=="array" then map(select(.name|startswith("compat"))) else . end' > "$out/auth-keys.json"
+    | jq -S 'if type=="array" then map(select(.name|startswith("compat")) | .last_used_at |= (. != null)) else . end' > "$out/auth-keys.json"
   # created_at is dropped because it is the one field whose representation
   # deliberately changed: PostgreSQL stored it as TIMESTAMPTZ and now stores
   # unix seconds like SQLite always did, so the same instant renders without
@@ -371,7 +383,7 @@ done
 if [[ "${SEEDED_FAILOVER:-0}" == 1 ]]; then
   migrated="$(curl -fsS "$BASE/admin/virtual-models" \
     | jq -c '.[] | select(.source == "compat-failover-src") | [.strategy, (.targets | map(.model))]')"
-  [[ "$migrated" == '["failover",["compat-failover-src","groq/groq/compound-mini","gemini/gemini-2.5-flash-lite"]]' ]]
+  [[ "$migrated" == '["failover",["compat-failover-src","groq/openai/gpt-oss-20b","gemini/gemini-2.5-flash-lite"]]' ]]
   report "failover mapping converted into a failover-strategy virtual model" "$?"
 fi
 
@@ -385,7 +397,7 @@ write_check() {
 }
 
 write_check "virtual-models upsert" jput /admin/virtual-models '{"source":"compat-alias","target_model":"openai/gpt-4.1-mini","description":"updated after upgrade"}'
-write_check "failover virtual model upsert" jput /admin/virtual-models '{"source":"compat-failover","strategy":"failover","targets":[{"model":"openai/gpt-4.1-nano"},{"model":"groq/groq/compound-mini"}]}'
+write_check "failover virtual model upsert" jput /admin/virtual-models '{"source":"compat-failover","strategy":"failover","targets":[{"model":"openai/gpt-4.1-nano"},{"model":"groq/openai/gpt-oss-20b"}]}'
 write_check "guardrail upsert" jput /admin/guardrails '{"name":"compat-guardrail","type":"system_prompt","description":"updated","config":{"mode":"inject","content":"updated content"}}'
 write_check "budget upsert" jput /admin/budgets '{"user_path":"/compat/budget","budget_key":{"period":"daily"},"amount":22.5}'
 write_check "label budget upsert" jput /admin/budgets '{"scope":"label","subject":"compat-label","budget_key":{"period":"daily"},"amount":7.5}'

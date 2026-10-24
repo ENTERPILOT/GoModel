@@ -97,6 +97,14 @@ func tryFailoverResponse[T any](
 			)
 			continue
 		}
+		if o.providerOverBudget(ctx, workflow, providerName) {
+			slog.Info("skipping over-budget failover target",
+				"request_id", requestID,
+				"to", qualified,
+				"provider", providerName,
+			)
+			continue
+		}
 		slog.Warn("primary model attempt failed, trying failover",
 			"request_id", requestID,
 			"from", primaryModel,
@@ -127,6 +135,12 @@ func tryFailoverResponse[T any](
 	}
 
 	return zero, ExecutionMeta{}, lastErr
+}
+
+// providerOverBudget reports whether a failover target's provider budget is
+// spent. A workflow that disables budgets skips the gate, as admission does.
+func (o *InferenceOrchestrator) providerOverBudget(ctx context.Context, workflow *core.Workflow, providerName string) bool {
+	return o.budgetGate != nil && workflow.BudgetEnabled() && !o.budgetGate.ProviderWithinBudget(ctx, providerName)
 }
 
 func executeWithFailoverResponse[T any](
@@ -224,6 +238,14 @@ func tryFailoverStream(
 		providerName := ResolvedProviderName(o.provider, selector, ProviderNameFromWorkflow(workflow))
 		if o.routeGate != nil && !o.routeGate.RouteAvailable(providerName, qualified) {
 			slog.Info("skipping rate-limited failover target",
+				"request_id", requestID,
+				"to", qualified,
+				"provider", providerName,
+			)
+			continue
+		}
+		if o.providerOverBudget(ctx, workflow, providerName) {
+			slog.Info("skipping over-budget failover target",
 				"request_id", requestID,
 				"to", qualified,
 				"provider", providerName,

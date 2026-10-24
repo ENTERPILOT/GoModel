@@ -213,3 +213,24 @@ func TestStoreListFiltersByUserPathSubtree(t *testing.T) {
 		require.True(t, slices.Equal(ids, []string{"file-alpha-new", "file-alpha-anthropic"}), "page ids = %v", ids)
 	})
 }
+
+// User paths are case-sensitive, and SQLite's LIKE is not: a subtree filter
+// must not admit another tenant whose path differs only in case.
+func TestFileStoreListUserPathIsCaseSensitive(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		ctx := context.Background()
+		for i, row := range []struct{ id, userPath string }{
+			{"file-alpha", "/team/alpha"},
+			{"file-alpha-child", "/team/alpha/svc"},
+			{"file-upper", "/TEAM/ALPHA"},
+			{"file-upper-child", "/TEAM/ALPHA/svc"},
+		} {
+			err := store.Upsert(ctx, &StoredFile{ID: row.id, ProviderType: "openai", Purpose: "batch", UserPath: row.userPath, CreatedAt: int64(i + 1)})
+			require.NoError(t, err)
+		}
+
+		got, err := store.List(ctx, ListFilter{UserPath: "/team/alpha"}, 10, "")
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"file-alpha", "file-alpha-child"}, fileIDs(got))
+	})
+}

@@ -700,22 +700,11 @@ func geminiToolConfigFromOpenAI(choice any, strict bool) (*geminiToolConfig, err
 // text, but any call is limited to the subset. An empty subset is rejected, as
 // OpenAI does, rather than widened to every declared tool.
 func geminiAllowedToolsConfig(choice map[string]any) (string, []string, error) {
-	spec, _ := choice["allowed_tools"].(map[string]any)
-	tools, _ := spec["tools"].([]any)
-	var names []string
-	for _, raw := range tools {
-		tool, _ := raw.(map[string]any)
-		fn, _ := tool["function"].(map[string]any)
-		if name, _ := fn["name"].(string); strings.TrimSpace(name) != "" {
-			names = append(names, name)
-		}
-	}
-
+	names, required, _ := core.AllowedToolsChoice(choice)
 	if len(names) == 0 {
 		return "", nil, core.NewInvalidRequestError("tool_choice.allowed_tools.tools must list at least one function", nil)
 	}
-
-	if mode, _ := spec["mode"].(string); strings.TrimSpace(mode) == "required" {
+	if required {
 		return "ANY", names, nil
 	}
 	return "VALIDATED", names, nil

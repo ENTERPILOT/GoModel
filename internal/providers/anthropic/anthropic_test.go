@@ -2293,6 +2293,10 @@ func TestConvertFromAnthropicResponse_WithCacheFields(t *testing.T) {
 			OutputTokens:             20,
 			CacheCreationInputTokens: 50,
 			CacheReadInputTokens:     30,
+			CacheCreation: anthropicCacheCreation{
+				Ephemeral5mInputTokens: 20,
+				Ephemeral1hInputTokens: 30,
+			},
 		},
 	}
 
@@ -2301,6 +2305,27 @@ func TestConvertFromAnthropicResponse_WithCacheFields(t *testing.T) {
 	require.NotNil(t, result.Usage.RawUsage)
 	assert.Equal(t, 50, result.Usage.RawUsage["cache_creation_input_tokens"])
 	assert.Equal(t, 30, result.Usage.RawUsage["cache_read_input_tokens"])
+	assert.Equal(t, 20, result.Usage.RawUsage["cache_creation_ephemeral_5m_input_tokens"])
+	assert.Equal(t, 30, result.Usage.RawUsage["cache_creation_ephemeral_1h_input_tokens"])
+}
+
+func TestMergeAnthropicUsage_WithCacheCreationTTL(t *testing.T) {
+	dst := anthropicUsage{}
+	src := anthropicUsage{
+		CacheCreationInputTokens: 50,
+		CacheCreation:            anthropicCacheCreation{Ephemeral1hInputTokens: 50},
+	}
+
+	require.True(t, mergeAnthropicUsage(&dst, &src))
+	require.Equal(t, 50, dst.CacheCreation.Ephemeral1hInputTokens)
+
+	for name, payload := range map[string]map[string]any{
+		"chat":      anthropicChatUsagePayload(&dst),
+		"responses": anthropicResponsesUsagePayload(&dst),
+	} {
+		assert.Equal(t, 50, payload["cache_creation_ephemeral_1h_input_tokens"], name)
+		assert.NotContains(t, payload, "cache_creation_ephemeral_5m_input_tokens", name)
+	}
 }
 
 func TestConvertFromAnthropicResponse_WithThinkingTokens(t *testing.T) {
@@ -3569,18 +3594,15 @@ func TestConvertResponsesRequestToAnthropic_RejectsTrailingToolArgumentContent(t
 	require.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
 }
 
-func TestConvertResponsesRequestToAnthropic_ToolChoiceRequiresTools(t *testing.T) {
-	_, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
+func TestConvertResponsesRequestToAnthropic_DropsToolChoiceWithoutTools(t *testing.T) {
+	anthropicReq, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
 		Model:      "claude-sonnet-4-5-20250929",
 		Input:      "Hello",
 		ToolChoice: "auto",
 	})
-	require.Error(t, err)
-
-	var gatewayErr *core.GatewayError
-	require.ErrorAs(t, err, &gatewayErr)
-	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
-	require.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
+	require.NoError(t, err)
+	assert.Nil(t, anthropicReq.Tools)
+	assert.Nil(t, anthropicReq.ToolChoice)
 }
 
 func TestBuildAnthropicBatchCreateRequest_PreservesGatewayErrorDetails(t *testing.T) {
@@ -6231,4 +6253,71 @@ func TestGetBaseURL(t *testing.T) {
 	assert.Equal(t, defaultBaseURL, New(providers.ProviderConfig{APIKey: "k"}, providertest.Options(llmclient.Hooks{})).(*Provider).GetBaseURL())
 	assert.Equal(t, "https://proxy.example.com/v1",
 		New(providers.ProviderConfig{APIKey: "k", BaseURL: "https://proxy.example.com/v1"}, providertest.Options(llmclient.Hooks{})).(*Provider).GetBaseURL())
+}
+
+func TestConvertToAnthropicRequest_AllowedToolsNarrowsDeclaredTools(t *testing.T) {
+	tool := func(name string) map[string]any {
+		return map[string]any{"type": "function", "function": map[string]any{
+			"name": name, "parameters": map[string]any{"type": "object"},
+		}}
+	}
+	allowed := func(mode string, names ...string) map[string]any {
+		entries := make([]any, 0, len(names))
+		for _, name := range names {
+			entries = append(entries, map[string]any{"type": "function", "function": map[string]any{"name": name}})
+		}
+		return map[string]any{"type": "allowed_tools", "allowed_tools": map[string]any{"mode": mode, "tools": entries}}
+	}
+	request := func(choice any) *core.ChatRequest {
+		return &core.ChatRequest{
+			Model:      "claude-sonnet-4-5-20250929",
+			Messages:   []core.Message{{Role: "user", Content: "Hello"}},
+			Tools:      []map[string]any{tool("tool_a"), tool("tool_b"), tool("tool_c")},
+			ToolChoice: choice,
+		}
+	}
+	names := func(req *anthropicRequest) []string {
+		var out []string
+		for _, tool := range req.Tools {
+			out = append(out, tool.Name)
+		}
+		return out
+	}
+
+	req, err := convertToAnthropicRequest(request(allowed("required", "tool_b", "tool_c")))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"tool_b", "tool_c"}, names(req))
+	require.NotNil(t, req.ToolChoice)
+	assert.Equal(t, "any", req.ToolChoice.Type)
+
+	req, err = convertToAnthropicRequest(request(allowed("auto", "tool_a")))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"tool_a"}, names(req))
+	require.NotNil(t, req.ToolChoice)
+	assert.Equal(t, "auto", req.ToolChoice.Type)
+
+	_, err = convertToAnthropicRequest(request(allowed("required", "unknown")))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tool_choice.allowed_tools.tools")
+}
+
+func TestConvertResponsesRequestToAnthropic_AllowedToolsNarrowsDeclaredTools(t *testing.T) {
+	req, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Input: "Hello",
+		Tools: []map[string]any{
+			{"type": "function", "name": "tool_a", "parameters": map[string]any{"type": "object"}},
+			{"type": "function", "name": "tool_b", "parameters": map[string]any{"type": "object"}},
+		},
+		ToolChoice: map[string]any{
+			"type":  "allowed_tools",
+			"mode":  "required",
+			"tools": []any{map[string]any{"type": "function", "name": "tool_b"}},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, req.Tools, 1)
+	assert.Equal(t, "tool_b", req.Tools[0].Name)
+	require.NotNil(t, req.ToolChoice)
+	assert.Equal(t, "any", req.ToolChoice.Type)
 }

@@ -34,6 +34,7 @@ type StoredBatch struct {
 	RequestID                 string              `json:"request_id,omitempty"`
 	UserPath                  string              `json:"user_path,omitempty"`
 	SessionID                 string              `json:"session_id,omitempty"`
+	AuthKeyID                 string              `json:"auth_key_id,omitempty"`
 	WorkflowVersionID         string              `json:"workflow_version_id,omitempty"`
 	UsageEnabled              *bool               `json:"usage_enabled,omitempty"`
 	UsageLoggedAt             *time.Time          `json:"usage_logged_at,omitempty"`

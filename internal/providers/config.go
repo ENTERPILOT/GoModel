@@ -83,16 +83,38 @@ type ProviderConfig struct {
 // wrote, and only then are equal values collapsed, so
 // ProviderConfig.APIKeySources maps every normalized key back to all of them.
 func resolveProviders(ctx context.Context, secrets *config.Secrets, raw map[string]config.RawProviderConfig, global config.ResilienceConfig, discovery map[string]DiscoveryConfig) (map[string]ProviderConfig, map[string]config.RawProviderConfig, error) {
-	raw, err := resolveProviderSelectors(ctx, secrets, raw)
+	sources, err := mergeProviderSources(ctx, secrets, raw, discovery)
 	if err != nil {
 		return nil, nil, err
+	}
+	providers, filtered := finishProviders(sources, global, discovery)
+	return providers, filtered, nil
+}
+
+// providerSources is resolution's state before API keys are collapsed: the
+// candidate providers with every field but the keys resolved, and each
+// provider's keys, one entry per source label, resolved but not yet
+// de-duplicated. Key rotation patches the keys by label and runs
+// finishProviders again (see keyRotation).
+type providerSources struct {
+	providers map[string]config.RawProviderConfig
+	keys      map[string][]sourcedKey
+}
+
+// mergeProviderSources is the first half of resolveProviders: settings that
+// steer the overlay, the env overlay, the pre-resolution credential filter,
+// and secret resolution.
+func mergeProviderSources(ctx context.Context, secrets *config.Secrets, raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig) (providerSources, error) {
+	raw, err := resolveProviderSelectors(ctx, secrets, raw)
+	if err != nil {
+		return providerSources{}, err
 	}
 	merged, envKeys, err := applyProviderEnvVars(ctx, secrets, raw, discovery, os.Environ())
 	if err != nil {
-		return nil, nil, err
+		return providerSources{}, err
 	}
 	if err := resolveFilterSettings(ctx, secrets, merged); err != nil {
-		return nil, nil, err
+		return providerSources{}, err
 	}
 	keys := make(map[string][]sourcedKey, len(merged))
 	for name, p := range merged {
@@ -112,67 +134,37 @@ func resolveProviders(ctx context.Context, secrets *config.Secrets, raw map[stri
 		candidates[name] = p
 	}
 	if err := secrets.ResolveFields(ctx, "providers", &candidates); err != nil {
-		return nil, nil, err
+		return providerSources{}, err
 	}
-	for name, p := range candidates {
-		resolved, err := resolveSecretKeys(ctx, secrets, keys[name])
+	resolvedKeys := make(map[string][]sourcedKey, len(candidates))
+	for name := range candidates {
+		resolved, err := resolveKeySources(ctx, secrets, keys[name])
 		if err != nil {
-			return nil, nil, err
+			return providerSources{}, err
 		}
-		keys[name] = resolved
-		p.APIKey, p.APIKeys = keyValues(resolved)
+		resolvedKeys[name] = resolved
+	}
+	return providerSources{providers: candidates, keys: resolvedKeys}, nil
+}
+
+// finishProviders is the second half of resolveProviders: key
+// de-duplication, credential filtering, and resilience merging over resolved
+// values.
+func finishProviders(sources providerSources, global config.ResilienceConfig, discovery map[string]DiscoveryConfig) (map[string]ProviderConfig, map[string]config.RawProviderConfig) {
+	candidates := make(map[string]config.RawProviderConfig, len(sources.providers))
+	keys := make(map[string][]sourcedKey, len(sources.providers))
+	for name, p := range sources.providers {
+		keys[name] = dedupeKeys(sources.keys[name], resolvedValueSet)
+		p.APIKey, p.APIKeys = keyValues(keys[name])
 		candidates[name] = p
 	}
-
 	filtered := filterProviders(candidates, discovery, resolvedValueSet)
 	providers := buildProviderConfigs(filtered, global)
 	for name, p := range providers {
 		p.APIKeySources = keySources(keys[name])
 		providers[name] = p
 	}
-	return providers, filtered, nil
-}
-
-// normalizeProviderAPIKeys collapses each provider's `api_key` and `api_keys`
-// into one canonical ordered set: APIKeys holds every usable key and APIKey
-// holds the first. Unresolved `${VAR}` placeholders are dropped here rather
-// than forwarded as literal credentials, so a provider whose only key failed
-// to resolve ends up keyless and is then dropped by filterEmptyProviders --
-// the same outcome as before rotation existed.
-func normalizeProviderAPIKeys(raw map[string]config.RawProviderConfig) map[string]config.RawProviderConfig {
-	result := make(map[string]config.RawProviderConfig, len(raw))
-	for name, p := range raw {
-		keys := resolvedAPIKeys(append([]string{p.APIKey}, p.APIKeys...))
-		p.APIKeys = keys
-		p.APIKey = ""
-		if len(keys) > 0 {
-			p.APIKey = keys[0]
-		}
-		result[name] = p
-	}
-	return result
-}
-
-// resolvedAPIKeys trims, drops unresolved and empty entries, and de-duplicates
-// while preserving order.
-func resolvedAPIKeys(keys []string) []string {
-	resolved := make([]string, 0, len(keys))
-	seen := make(map[string]struct{}, len(keys))
-	for _, key := range keys {
-		key = strings.TrimSpace(key)
-		if !HasResolvedProviderValue(key) {
-			continue
-		}
-		if _, dup := seen[key]; dup {
-			continue
-		}
-		seen[key] = struct{}{}
-		resolved = append(resolved, key)
-	}
-	if len(resolved) == 0 {
-		return nil
-	}
-	return resolved
+	return providers, filtered
 }
 
 // providerOrigins splits the resolved provider names by where they were declared:

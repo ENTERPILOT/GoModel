@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -293,3 +294,24 @@ func TestCredentialsContextRoutesTokenExchangeThroughTheClient(t *testing.T) {
 type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// The OAuth transport adds the token on every request, including a
+// redirected one, so the client must not follow a redirect to another origin.
+func TestHTTPClientDoesNotSendTokenAcrossOrigins(t *testing.T) {
+	var otherAuth atomic.Value
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		otherAuth.Store(r.Header.Get("Authorization"))
+	}))
+	defer other.Close()
+	origin := httptest.NewServer(http.RedirectHandler(other.URL+"/steal", http.StatusTemporaryRedirect))
+	defer origin.Close()
+
+	source := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "test-token", TokenType: "Bearer"})
+	client := HTTPClient(httpclient.NewHTTPClient(nil), source, "")
+
+	resp, err := client.Get(origin.URL + "/v1/models")
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	assert.Equal(t, http.StatusTemporaryRedirect, resp.StatusCode)
+	assert.Nil(t, otherAuth.Load(), "the other origin was contacted")
+}

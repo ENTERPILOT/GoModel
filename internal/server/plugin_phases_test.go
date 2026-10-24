@@ -120,6 +120,14 @@ func (p *phasePlugin) OnStreamEvent(_ context.Context, _ *pluginapi.Exchange, ev
 		if ev.Kind == pluginapi.EventTextDelta {
 			return pluginapi.Replace(strings.ReplaceAll(ev.Text, "secret", p.text)), nil
 		}
+	case "replace_reasoning":
+		if ev.Kind == pluginapi.EventReasoningDelta {
+			return pluginapi.Replace(p.text), nil
+		}
+	case "drop_reasoning":
+		if ev.Kind == pluginapi.EventReasoningDelta {
+			return pluginapi.Drop(), nil
+		}
 	case "terminate":
 		if ev.Kind == pluginapi.EventTextDelta && strings.Contains(ev.Text, "secret") {
 			return pluginapi.Terminate(pluginapi.Block(0, "policy", "cut")), nil

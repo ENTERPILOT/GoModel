@@ -97,3 +97,20 @@ The Build job, the Docker image, and the release workflow still download the
 artifact from the secretless `frontend` job; the stub never ships. Locally,
 `make frontend-stub` refuses to overwrite an existing bundle, and the stub page
 itself says it is a stub and how to build the real one.
+
+## Amendment (2026-10): releases publish the dashboard
+
+Each release attaches `gomodel_<version>_dashboard.tar.gz`, built by GoReleaser
+from the same `dashboard-dist` artifact it embeds, and lists it in
+`checksums.txt`. Paths inside are relative to the repository root, and file
+owner and mtime are fixed (root, commit date) so the archive is reproducible
+from a given build. Package maintainers and downstream builds (such as
+GoModel Pro's image) can unpack it into a source checkout and run `go build`
+without Node; see `docs/advanced/build-from-source.mdx`.
+
+The plugins the dashboard build loads are npm dev dependencies, so
+`package-lock.json` pins every file the build downloads, and
+`npm ci --offline` works once the lockfile's packages are fetched.
+
+`go install` still produces a binary without the dashboard; the "Revisit when"
+condition above is unchanged.

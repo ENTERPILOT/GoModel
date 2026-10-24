@@ -63,7 +63,7 @@ func messageFromChat(id string, m core.Message) (pluginapi.Message, error) {
 		}}
 		return msg, nil
 	}
-	msg.Parts = parts
+	msg.Parts = reasoningParts(m.ExtraFields, parts)
 	for _, tc := range m.ToolCalls {
 		msg.Parts = append(msg.Parts, pluginapi.Part{Kind: pluginapi.PartToolCall, ToolCall: &pluginapi.ToolCall{
 			ID:        tc.ID,

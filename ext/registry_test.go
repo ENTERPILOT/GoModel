@@ -2,6 +2,7 @@ package ext
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"sync"
@@ -146,7 +147,9 @@ func TestRegistryConcurrentRegistration(t *testing.T) {
 			reg.UseMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 			reg.AddPublicPaths("/p")
 			reg.EnableCapability(CapabilityQuotaTemplates)
+			reg.WrapLogHandler(func(h slog.Handler) slog.Handler { return h })
 			_ = reg.Rewriters()
+			_ = reg.LogHandlerWrappers()
 			_ = reg.HasCapability(CapabilityQuotaTemplates)
 		})
 	}
@@ -156,6 +159,7 @@ func TestRegistryConcurrentRegistration(t *testing.T) {
 	assert.Len(t, reg.OuterMiddleware(), workers)
 	assert.Len(t, reg.Middleware(), workers)
 	assert.Len(t, reg.PublicPaths(), workers)
+	assert.Len(t, reg.LogHandlerWrappers(), workers)
 	assert.True(t, reg.HasCapability(CapabilityQuotaTemplates))
 }
 

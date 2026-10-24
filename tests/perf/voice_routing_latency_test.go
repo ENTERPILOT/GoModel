@@ -21,8 +21,10 @@ import (
 )
 
 const (
-	voiceLatencySamples     = 31
-	maxVoiceRoutingOverhead = 5 * time.Millisecond
+	voiceLatencySamples = 31
+	// CI medians run 40-340µs across runners (realtime is the slowest
+	// path), so 1ms leaves about 3x headroom for runner noise.
+	maxVoiceRoutingOverhead = 1 * time.Millisecond
 )
 
 // TestVoiceRoutingLatency measures only GoModel's added latency by comparing the

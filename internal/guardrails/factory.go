@@ -9,6 +9,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/storage"
@@ -57,8 +58,9 @@ func (r *Result) Close() error {
 
 // New creates a guardrails subsystem using an existing storage connection,
 // building instances from the plugin catalog. Secret config values are
-// sealed with box; a nil box stores them in plaintext.
-func New(ctx context.Context, shared storage.Storage, box *encryption.Box, refreshInterval time.Duration, catalog *plugins.Catalog, deps plugins.HostDeps) (*Result, error) {
+// sealed with box; a nil box stores them in plaintext. secrets resolves the
+// secret references stored configs hold.
+func New(ctx context.Context, shared storage.Storage, box *encryption.Box, refreshInterval time.Duration, catalog *plugins.Catalog, deps plugins.HostDeps, secrets *config.Secrets) (*Result, error) {
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
@@ -71,6 +73,7 @@ func New(ctx context.Context, shared storage.Storage, box *encryption.Box, refre
 	if err != nil {
 		return nil, err
 	}
+	service.secrets = secrets
 	if refreshInterval > 0 {
 		// Workflows recompile on the same interval; two cycles later no
 		// compiled workflow references a replaced instance any more.

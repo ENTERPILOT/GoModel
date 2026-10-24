@@ -16,6 +16,13 @@ func TestResolveMetricsEndpoint(t *testing.T) {
 		"../v1/models":           "/metrics",
 		"/v1/models":             "/metrics",
 		"/p/internal":            "/metrics",
+		"/admin":                 "/metrics",
+		"/admin/auth-keys":       "/metrics",
+		"admin/../admin/usage":   "/metrics",
+		"/mcp":                   "/metrics",
+		"/mcp/github":            "/metrics",
+		"/administration":        "/administration",
+		"/mcp-metrics":           "/mcp-metrics",
 	}
 	for input, want := range tests {
 		got := ResolveMetricsEndpoint(input)
