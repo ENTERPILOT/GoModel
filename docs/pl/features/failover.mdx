@@ -1,0 +1,229 @@
+---
+title: "Failover"
+description: "Przełączaj się awaryjnie między celami modelu wirtualnego i zamień listę celów w ścisłą kolejność priorytetów dzięki strategii failover."
+icon: "shuffle"
+keywords: ["failover", "fallback", "awaria providera", "provider outage", "automatyczny retry", "wysoka dostępność", "high availability", "routing priorytetowy"]
+---
+
+## Przegląd
+
+Failover jest częścią [modeli wirtualnych](/pl/features/virtual-models). Każde
+przekierowanie z dwoma lub więcej celami przełącza się między nimi awaryjnie: gdy cel,
+do którego wysłano request, zwróci błąd kwalifikujący się do failoveru, GoModel ponawia
+request na pozostałych dostępnych celach przekierowania, w zadeklarowanej kolejności,
+i zatrzymuje się na pierwszym sukcesie.
+
+**Strategia load balancingu** przekierowania decyduje wyłącznie o tym, który cel jest
+próbowany jako pierwszy:
+
+| Strategia | Pierwszy cel | Następnie |
+| --- | --- | --- |
+| Round-robin | rotacja między celami (z wagami) | pozostałe cele, w zadeklarowanej kolejności |
+| Lowest cost | najtańszy dostępny cel | pozostałe cele, w zadeklarowanej kolejności |
+| **Failover** | zawsze pierwszy dostępny cel | kolejne cele, w zadeklarowanej kolejności |
+
+Wybierz **Failover**, gdy lista celów jest kolejnością priorytetów — zawsze używaj
+najlepszego modelu, chyba że nie działa, i dopiero wtedy przechodź kaskadowo do zapasowych.
+
+Dla pozostałych strategii edytor wyświetla pole wyboru **Failover**, domyślnie
+zaznaczone. Odznacz je (lub ustaw `failover: false` w kodzie), gdy przekierowanie ma
+tylko rozkładać ruch, a nieudany request ma zwrócić swój błąd, na przykład gdy
+cele nie są wymienne, a klient sam obsługuje ponowienia. Strategia
+Failover zawsze przełącza awaryjnie, więc to pole wyboru nie jest w niej dostępne.
+
+## Konfiguracja łańcucha failoveru
+
+W dashboardzie otwórz **Models** i edytuj model, który chcesz zabezpieczyć:
+model jest już przypięty jako pierwszy cel, więc dodaj pod nim modele zapasowe
+w kolejności priorytetów i zapisz — strategia domyślnie ustawia się na **Failover**. Aby
+zamiast tego przełączać się awaryjnie pod nową nazwą, utwórz model wirtualny, wypisz cele
+w kolejności priorytetów i wybierz **Failover** z listy rozwijanej **Load-balancing strategy**.
+Wagi i utrzymywanie sesji nie mają zastosowania w tej strategii, więc
+edytor je ukrywa. Usunięcie przypiętego wiersza zamienia wpis w zwykłe
+przekierowanie: requesty do tego modelu trafiają wtedy do pozostałych celów.
+
+W kodzie (`config.yaml` lub zmienna środowiskowa `VIRTUAL_MODELS`):
+
+```yaml
+virtual_models:
+  # Nowa nazwa, która zawsze preferuje pierwszy cel.
+  - source: resilient-chat
+    strategy: failover
+    targets:
+      - { model: kimicode/kimi-k2 }
+      - { model: openai/gpt-4o }
+      - { model: ollama/qwen3:8b }
+
+  # Failover dla prawdziwego modelu: przekierowanie przesłania `gpt-4o`, próbuje go najpierw,
+  # a potem kolejno modeli zapasowych. Wpisanie samego źródła jako pierwszego celu
+  # oznacza konkretny model, który ono przesłania.
+  - source: gpt-4o
+    strategy: failover
+    targets:
+      - { model: gpt-4o }
+      - { model: azure/gpt-4o }
+      - { model: gemini/gemini-2.5-pro }
+```
+
+Cel może też wskazywać inny model wirtualny
+([łączenie w łańcuch](/pl/features/virtual-models#łączenie-modeli-wirtualnych-w-łańcuchy)); wtedy przebieg
+próbuje każdego konkretnego modelu, który się za nim kryje. Jeden wyjątek umożliwia
+wzajemną ochronę: gdy łańcuch przesłaniający prawdziwy model wymienia inny model
+przesłonięty w ten sam sposób, ten fallback trafia wyłącznie do samego modelu — jego
+modele zapasowe nie są z kolei przeglądane — i właśnie dzięki temu `gpt-4o` może
+przełączać się na `claude-sonnet-4-6`, a `claude-sonnet-4-6` na `gpt-4o`. Każde
+inne przekierowanie (alias, model wirtualny pod nową nazwą), które wymienia
+chroniony model, przegląda modele zapasowe tego modelu.
+
+Dla requestów bez streamingu retry u providera następują przed failoverem. Aby ponawiać
+odpowiedzi Cloudflare `522`/`524`, a następnie przełączyć model u tego samego providera,
+użyj [ustawień odporności na awarie z circuit breakerami per model](/pl/advanced/resilience#ponawianie-timeoutów-cloudflare-a-potem-zmiana-modelu).
+
+Failover reaguje na nieudane próby, a nie na powolne. Aby przenieść ruch z
+providera, który wciąż odpowiada, ale trwa to zbyt długo, ustaw
+[próg wolnych wywołań](/pl/advanced/resilience#failover-od-wolnego-providera) w
+jego circuit breakerze.
+
+## Kiedy działa
+
+Failover jest podejmowany tylko wtedy, gdy próba zwróci:
+
+- `5xx`
+- `429`, w tym limit żądań, który GoModel sam egzekwuje na celu — nasycony cel
+  jest pomijany, dopóki inny cel ma wolną przepustowość
+- błędy typu model niedostępny, nieobsługiwany lub nieznaleziony
+- komunikaty o awarii upstreamu przekazane ze statusem `4xx` (providerzy agregujący,
+  tacy jak OpenCode Zen, mogą zgłaszać przejściową awarię własnego upstreamu jako
+  `400 "Upstream request failed"`)
+
+Dotyczy requestów `/v1/chat/completions`, `/v1/responses` i `/v1/messages`
+z translacją. Log requestów pokazuje każdą próbę, więc obsłużony failover jest
+widoczny w ścieżce audytu i wyceniany według modelu, który odpowiedział.
+
+Model docelowy, który jest wyłączony albo którego nie może używać klucz API
+lub `user_path` requestu, nigdy nie jest próbowany: jest pomijany zarówno przy wyborze
+pierwszego celu, jak i w łańcuchu failoveru, i nie liczy się jako próba.
+
+Request, który wskazuje swojego providera w polu `provider`, omija modele
+wirtualne i trafia bezpośrednio do konkretnego modelu. Nadal dostaje jednak łańcuch
+modelu wirtualnego, który przesłania dokładnie ten model i wymienia go jako cel (taki
+kształt tworzy strona Models dla prawdziwego modelu), ponieważ ten model wirtualny
+dodaje do modelu failover, a nie go zastępuje.
+
+<Note>
+  Odpowiedź wygenerowana przez cel failoveru nie jest zapisywana w
+  [cache'u odpowiedzi](/pl/features/cache#odpowiedzi-obsłużone-przez-failover-nie-są-cache’owane):
+  klucz cache'u jest hashowany z rozwiązania sprzed failoveru, więc w przeciwnym razie
+  odpowiedź modelu zapasowego byłaby odtwarzana pod kluczem modelu głównego. Dopóki pierwszy
+  cel nie działa, łańcuch nie dodaje więc nowych wpisów do cache'u; wpisy
+  zapisane przed awarią są serwowane do czasu wygaśnięcia ich TTL.
+</Note>
+
+Ustaw `FAILOVER_ENABLED=false` (lub `failover.enabled: false`), aby globalnie wyłączyć
+przeglądanie celów; [workflow](/pl/advanced/workflows) również może je wyłączyć w swoim
+zakresie. Wybrany cel jest wtedy nadal obsługiwany, ale bez ponowień.
+
+## Dostrajanie polityki failoveru
+
+Opisane wyżej wartości domyślne pasują do większości wdrożeń. Można je dostosować
+trzema ustawieniami w sekcji `failover` (lub odpowiadającymi im zmiennymi środowiskowymi):
+
+| Ustawienie | Zmienna środowiskowa | Wartość domyślna | Znaczenie |
+| --- | --- | --- | --- |
+| `max_attempts` | `FAILOVER_MAX_ATTEMPTS` | `0` (wszystkie pozostałe cele) | Ile celów failoveru może wypróbować jeden request po nieudanej pierwszej próbie. Cele pominięte bez wywołania (nasycony limit żądań) się nie liczą. |
+| `retry_on_statuses` | `FAILOVER_RETRY_ON_STATUSES` | `[429, 5xx]` | Statusy HTTP upstreamu, które uruchamiają failover: dokładne kody (`408`) lub cała klasa (`5xx`). |
+| `retry_on_errors` | `FAILOVER_RETRY_ON_ERRORS` | patrz niżej | Frazy błędów, które uruchamiają failover niezależnie od statusu. |
+
+Niepusta lista **zastępuje** swoją wartość domyślną, więc powtórz te wartości domyślne,
+które chcesz zachować; pusta lub pominięta lista zachowuje wartość domyślną (aby
+wyłączyć failover, użyj `enabled: false`). W zmiennych środowiskowych oddzielaj wpisy przecinkami.
+
+Fraza z `retry_on_errors` pasuje, gdy każde jej słowo występuje w kodzie
+lub komunikacie błędu (bez rozróżniania wielkości liter, jako podciąg): `model not found`
+pasuje do `The model 'gpt-9' was not found`. Słowo liczbowe — `404` lub `4xx` —
+ogranicza status HTTP zamiast tekstu, więc `404 deprecated` pasuje do
+404, którego komunikat zawiera „deprecated”, i do niczego innego. Domyślna lista to:
+
+```yaml
+retry_on_errors:
+  - model not found
+  - model does not exist
+  - model unsupported
+  - model unavailable
+  - model not available
+  - model deprecated
+  - model retired
+  - model disabled
+  - upstream failed
+  - upstream error
+  - upstream unavailable
+  - upstream timed out
+  - upstream timeout
+  - 404 unsupported
+  - 404 unavailable
+  - 404 not available
+  - 404 deprecated
+  - 404 retired
+  - 404 disabled
+```
+
+Chat completion bez streamingu, które zwraca `200` z pustą tablicą `choices`,
+jest traktowane jak `502` (`provider returned no choices`), więc przełącza się awaryjnie
+zgodnie z domyślną regułą statusu `5xx`. Każda taka próba jest też logowana
+i zliczana w `gomodel_empty_responses_total`.
+
+Requesty ze streamingiem są sprawdzane w ten sam sposób, zanim jakiekolwiek bajty dotrą do klienta.
+Stream `200`, który kończy się bez żadnego zdarzenia, jest traktowany jak `502`
+(`provider returned an empty stream`), a stream, którego pierwszym zdarzeniem jest payload
+`{"error": ...}`, kończy się błędem ze statusem przenoszonym przez ten payload (na
+przykład `429` przekazanym w strumieniu) albo `502`, gdy payload go nie zawiera. W obu
+przypadkach następuje failover zgodnie z domyślnymi regułami. Nagłówki odpowiedzi czekają na to pierwsze zdarzenie.
+
+[Tryby awarii providerów](/pl/advanced/provider-failure-modes) wymieniają każdy taki
+przypadek i wskazują, które z nich uruchamiają failover.
+
+Przykład: wypróbuj najwyżej jeden model zapasowy, traktuj timeouty jako kwalifikujące się
+do failoveru, ale nadal zwracaj klientowi odpowiedzi `429`, i dodaj specyficzny dla providera
+komunikat o przeciążeniu:
+
+```yaml
+failover:
+  max_attempts: 1
+  retry_on_statuses: [408, 5xx]
+  retry_on_errors:
+    - model not found
+    - model does not exist
+    - upstream failed
+    - overloaded
+```
+
+Klient otrzymuje błąd ostatniego wypróbowanego celu, więc przy
+`max_attempts: 1` request, który wyczerpie swój limit, zgłasza awarię modelu zapasowego,
+a nie głównego.
+
+## Migracja z reguł failoveru
+
+Wcześniejsze wersje zarządzały failoverem jako osobnymi mapowaniami per model (ikona
+shuffle na stronie Models i konfiguracja `failover.rules`). Oba są
+konwertowane automatycznie:
+
+- Mapowania zarządzane z dashboardu stają się modelami wirtualnymi ze strategią failover,
+  które przesłaniają swój model główny. Konwersja uruchamia się raz przy starcie,
+  a następnie usuwa stary magazyn `failover_rules` (w dowolnym z jego historycznych kształtów).
+  Gdy model główny ma już zwykłe ustawienie per model (spowolnienie lub
+  opis ustawione na stronie Models), mapowanie zostaje z nim scalone,
+  a ustawienie zachowane. Model główny, który ma już przekierowanie, ustawienie
+  ograniczone do ścieżki lub jest wyłączony, zostaje zalogowany i pominięty, a magazyn
+  jest zachowywany do czasu rozwiązania problemu — dodaj jego modele zapasowe jako cele tego
+  modelu wirtualnego ze strategią failover, a następnie usuń wiersz. Mapowanie, którego
+  model zapasowy wskazuje model wirtualny kierujący z powrotem do modelu głównego, jest
+  zachowywane w ten sam sposób, ponieważ jego konwersja utworzyłaby cykl w łańcuchu —
+  popraw lub usuń ten model wirtualny, a następnie zrestartuj gateway. Model główny wymieniony w
+  `disabled_models` jest konwertowany na wyłączony model wirtualny: jego modele zapasowe są
+  zachowywane, ale nieaktywne, dopóki nie włączysz go na stronie Models.
+- `failover.rules`, `manual_rules_path`, `FAILOVER_RULES_JSON` i
+  `disabled_models` nadal są wczytywane i przy każdym starcie tłumaczone na modele
+  wirtualne zarządzane konfiguracją, z ostrzeżeniem o wycofaniu. Reguła, której
+  model główny ma model wirtualny w dashboardzie, jest pomijana z
+  ostrzeżeniem, więc nigdy nie zastępuje routingu tego modelu wirtualnego. Przenieś reguły
+  do `virtual_models`, w dogodnym dla siebie momencie.

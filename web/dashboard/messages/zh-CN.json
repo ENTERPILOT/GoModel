@@ -430,7 +430,6 @@
   "overview_more": "多",
   "overview_live_token_throughput": "实时 Token 吞吐量",
   "overview_live_granularity": "实时 Token 吞吐量粒度",
-  "overview_waiting_live_requests": "正在等待实时请求…",
   "overview_seconds": "秒",
   "overview_minutes": "分钟",
   "overview_hours": "小时",

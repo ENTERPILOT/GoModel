@@ -1,0 +1,89 @@
+---
+title: "Kimi Code"
+description: "Konfigurieren Sie Kimi Code in GoModel und verstehen Sie den Modell-Alias, den Vorbehalt bei Embeddings und das Kontingentverhalten."
+icon: "code"
+keywords: ["Kimi Code", "Moonshot", "Kontingent", "quota", "Provider-Einrichtung", "provider setup"]
+---
+
+Kimi Code ist ein OpenAI-kompatibler Coding-Assistent, der unter `https://api.kimi.com/coding/v1` bereitgestellt wird.
+GoModel routet Requests für Chat, Modellauflistung, Embeddings und Passthrough über den gemeinsamen
+OpenAI-Adapter. Der Endpunkt `/v1/responses` wird nativ an die Upstream-Responses-API
+weitergeleitet, statt über Chat Completions übersetzt zu werden; Dateien und Batches werden
+vom Upstream-Endpunkt nicht unterstützt.
+
+Kimi Code speichert keine Responses. Requests mit `store: true` werden in `store: false`
+umgeschrieben (Upstream lehnt `store: true` mit 400 ab). Verkettung funktioniert nur über
+GoModel: Ist ein Response-Speicher konfiguriert, löst das Gateway eine
+`previous_response_id`-Kette auf, indem es den gespeicherten Verlauf vor dem Weiterleiten in
+den Request einspielt, und eine `conversation`-Referenz wird auf dieselbe Weise über den
+Conversation-Speicher aufgelöst. Ohne diese Speicher wird ein Request mit
+`previous_response_id` oder `conversation` mit einem Fehler wegen ungültigen Requests
+abgelehnt, weil Upstream den referenzierten Zustand nie auflösen kann.
+
+## Konfigurieren
+
+```bash
+KIMICODE_API_KEY=...
+```
+
+Oder in `config.yaml`:
+
+```yaml
+providers:
+  kimicode:
+    type: kimicode
+    base_url: "https://api.kimi.com/coding/v1"
+    api_key: "${KIMICODE_API_KEY}"
+```
+
+<Note>
+  Der Provider-`type` ist `kimicode` (ohne Bindestrich). Der Konfigurationsschlüssel
+  (`kimicode` im obigen Beispiel) ist frei wählbar und identifiziert nur diesen
+  Eintrag in Ihrer Konfiguration; er kann geändert werden.
+</Note>
+
+Sie können die Base-URL und die Modellliste auch so überschreiben:
+
+```bash
+KIMICODE_BASE_URL=https://api.kimi.com/coding/v1
+KIMICODE_MODELS=kimi-for-coding,bge_m3_embed
+```
+
+## Modelle
+
+Der Standard-Alias für das Chat-Modell ist `kimi-for-coding`. Sie können ihn in einem
+virtuellen Modell referenzieren oder direkt über den OpenAI-kompatiblen Endpunkt
+`/v1/chat/completions` aufrufen.
+
+```yaml
+virtual_models:
+  - source: kimi-coding
+    target: kimicode/kimi-for-coding
+```
+
+## Embeddings
+
+Kimi Code stellt `bge_m3_embed` für Embeddings bereit, dieses Modell ist Upstream jedoch
+nicht dokumentiert. Behandeln Sie es als experimentell: Testen Sie Verfügbarkeit und
+Dimensionalität in Ihrem Konto, bevor Sie sich in produktiven Workflows darauf verlassen.
+
+## Preise und Kontingent
+
+Kimi Code veröffentlicht keine Preise pro Token. Da die Kostenerfassung von GoModel
+keinen Preis zum Multiplizieren hat, meldet sie `cost` für Kimi-Code-Requests als null.
+Die Load-Balancing-Strategie `cost` kann diesen Provider nicht nach Preis bevorzugen oder
+einordnen, kann aber dennoch auf Kimi Code zurückgreifen, wenn kein Provider mit Preis
+verfügbar ist.
+
+Das Upstream-Kontingent basiert auf einer wöchentlichen Erneuerung plus einem rollierenden
+Fünf-Stunden-Fenster. Planen Sie Burst-Limits ein und bevorzugen Sie zurückhaltende
+Retry-Einstellungen pro Provider:
+
+```yaml
+providers:
+  kimicode:
+    type: kimicode
+    base_url: "https://api.kimi.com/coding/v1"
+    api_key: "${KIMICODE_API_KEY}"
+    retries: 3
+```

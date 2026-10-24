@@ -1,0 +1,207 @@
+---
+title: "GoModel & LibreChat"
+description: "通过 GoModel 为 LibreChat 提供一个连接所有提供商的自定义端点，并为每次对话获得审计日志、按用户的成本追踪和指标。"
+icon: "message-circle"
+keywords: ["LibreChat", "librechat.yaml", "自定义端点", "自托管聊天", "按用户成本", "LLM 可观测性", "配置指南", "custom endpoint", "self-hosted chat", "per-user costs", "LLM observability", "setup guide"]
+---
+
+## 概览
+
+LibreChat 是一个自托管的聊天界面，通过自定义端点与兼容 OpenAI 的 API 通信。只需将一个自定义端点指向 GoModel，
+每个 LibreChat 用户就能通过单一连接使用您的所有提供商，并且每次对话都会在 GoModel 中被记录、计费，并归属到已登录的 LibreChat 用户。
+
+流程：
+
+`LibreChat chat -> LibreChat backend -> GoModel -> OpenAI/Anthropic/Gemini/...`
+
+您将获得：
+
+- GoModel 审计日志中每次对话的完整请求体和响应体。
+- 通过请求头模板和
+  [标签](/zh/features/labelling) 实现按 LibreChat 用户统计成本。
+- 所有提供商都位于同一个自定义端点之后；无需在 LibreChat 中为每个提供商单独配置。
+- 启用相应的导出器后，可获得聊天流量的 Prometheus 指标和 OpenTelemetry Trace（请参阅 [说明](#说明)）。
+- 在 GoModel 中配置后，故障转移、速率限制、预算和响应缓存都会应用于聊天流量。
+
+## 1. 在 LibreChat 旁运行 GoModel
+
+LibreChat 从 `librechat.yaml` 读取自定义端点。请在 compose 文件旁创建该文件：
+
+```yaml librechat.yaml
+version: 1.3.13
+cache: true
+endpoints:
+  custom:
+    - name: "GoModel"
+      apiKey: "${GOMODEL_API_KEY}"
+      baseURL: "http://gomodel:8080/v1"
+      headers:
+        X-LibreChat-User-Email: "{{LIBRECHAT_USER_EMAIL}}"
+      models:
+        default: ["openai/gpt-5-mini"]
+        fetch: true
+      titleConvo: true
+      titleModel: "openai/gpt-5-mini"
+      modelDisplayLabel: "GoModel"
+```
+
+然后将 GoModel、LibreChat 和 MongoDB 运行在同一个 Docker 网络中，以便 LibreChat 可以通过容器名称访问 GoModel：
+
+```yaml docker-compose.yml
+services:
+  gomodel:
+    image: enterpilot/gomodel
+    environment:
+      GOMODEL_MASTER_KEY: change-me
+      OPENAI_API_KEY: sk-...
+      ANTHROPIC_API_KEY: sk-ant-...
+      TAGGING_HEADER_1: X-LibreChat-User-Email
+      TAGGING_HEADER_1_DONOTPASS: "true"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - gomodel_data:/app/data
+
+  librechat:
+    image: ghcr.io/danny-avila/librechat:v0.8.7
+    depends_on:
+      - mongodb
+    environment:
+      HOST: 0.0.0.0
+      MONGO_URI: mongodb://mongodb:27017/LibreChat
+      GOMODEL_API_KEY: change-me
+      ALLOW_REGISTRATION: "true"
+      SEARCH: "false"
+      JWT_SECRET: ${JWT_SECRET:?generate with openssl rand -hex 32}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?generate with openssl rand -hex 32}
+      CREDS_KEY: ${CREDS_KEY:?generate with openssl rand -hex 32}
+      CREDS_IV: ${CREDS_IV:?generate with openssl rand -hex 16}
+    ports:
+      - "127.0.0.1:3080:3080"
+    volumes:
+      - ./librechat.yaml:/app/librechat.yaml
+      - librechat_uploads:/app/uploads
+
+  mongodb:
+    image: mongo:8
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  gomodel_data:
+  librechat_uploads:
+  mongo_data:
+```
+
+| 设置 | 作用 |
+| --- | --- |
+| `baseURL` | 将该端点的流量发送到 GoModel。请保留 `/v1` 后缀。 |
+| `apiKey` / `GOMODEL_API_KEY` | GoModel API 密钥（或 `GOMODEL_MASTER_KEY`），而不是真实的提供商密钥。 |
+| `headers` | 通过 LibreChat 的 `{{LIBRECHAT_USER_EMAIL}}` 模板，在每次模型调用中添加已登录用户的邮箱，GoModel 会将其转换为下文所述的标签。 |
+| `models.fetch` | 从 GoModel 的 `GET /v1/models` 填充模型选择器，而不是使用硬编码的 `default` 列表。 |
+| `titleModel` | LibreChat 默认使用 `gpt-3.5-turbo` 生成对话标题，而 GoModel 并不提供该模型。请设置一个 GoModel 提供的模型 ID。 |
+| `TAGGING_HEADER_1` | 让 GoModel 将该请求头的值记录为每个请求的标签。 |
+| `TAGGING_HEADER_1_DONOTPASS` | 保留标签，但在转发前移除该请求头，这样在 [透传](/zh/features/passthrough-api) 路由上用户邮箱永远不会到达提供商。经过转换的路由从不转发客户端请求头。 |
+| `ALLOW_REGISTRATION` | 在未挂载 `.env` 的情况下，LibreChat 默认拒绝新用户注册。第一个注册的账户会成为管理员，因此在该账户创建之前，请保持端口仅绑定到回环地址（如上所示）；用户都创建好账户后，请再次关闭注册。 |
+| `SEARCH` | 禁用 Meilisearch 聊天搜索，从而无需额外的容器。 |
+| `JWT_SECRET`、`CREDS_KEY` 等 | LibreChat 的会话和加密 Secret。`${VAR:?...}` 语法会让 Compose 在您提供真实值之前拒绝启动。请使用 `openssl rand -hex 32`（`CREDS_IV` 使用 `-hex 16`）分别生成，并将它们放入 compose 文件旁的 `.env` 文件中。 |
+
+打开 `http://localhost:3080`，注册第一个账户（该账户会成为 LibreChat 管理员），
+`GoModel` 端点就会出现在模型选择器中，并列出 GoModel 提供的所有模型，包括 Anthropic 和 Gemini 模型以及所有
+[虚拟模型](/zh/features/virtual-models)。
+
+<Tip>
+  请在 GoModel 控制台中为 LibreChat 创建专用的 API 密钥
+  （`API Keys -> Create API Key`），而不是使用主密钥。密钥可以携带标签、预算和速率限制，因此聊天支出会在控制台中单独显示。
+</Tip>
+
+## 2. 开始聊天，并在 GoModel 中查看每次调用
+
+选择任意模型（`openai/gpt-5-mini`、`anthropic/claude-haiku-4-5-20251001`、
+`gemini/gemini-2.5-flash`）即可开始聊天。流式响应以及 LibreChat 在首次交互后执行的标题生成都会经过 GoModel。
+每次调用都会出现在审计日志中，包含完整的提示词、响应、Token 数、成本以及标识用户的请求头。
+
+<Note>
+  已在 LibreChat v0.8.7 上验证：针对 OpenAI、Anthropic 和 Gemini 模型的模型获取、聊天和标题生成、按用户标签，以及 RAG
+  文件嵌入，全部经由 GoModel 路由。
+</Note>
+
+### 按用户追踪成本
+
+使用第 1 步中的 `headers` 模板后，每个请求都会携带
+`X-LibreChat-User-Email`，GoModel 会将其值记录为标签。随后，控制台的按标签用量视图会显示每个人的请求数、Token 数和成本。
+如果不希望邮箱出现在用量数据中，请改为在模板中使用
+`"{{LIBRECHAT_USER_ID}}"`，并保留
+`TAGGING_HEADER_1_DONOTPASS`。请始终设置 `TAGGING_HEADER_1_DONOTPASS`：常规路由的请求从不转发客户端请求头，但
+[透传](/zh/features/passthrough-api) 请求否则会将邮箱请求头带给提供商。有关前缀和其他请求头选项，请参阅 [标签](/zh/features/labelling)。
+
+### 精选模型选择器中的模型
+
+GoModel 可能提供数百个模型，而 `fetch: true` 会将它们全部列出。
+如需提供固定的模型菜单，请设置 `fetch: false` 并列出希望用户看到的模型：
+
+```yaml
+models:
+  default:
+    - "openai/gpt-5-mini"
+    - "anthropic/claude-haiku-4-5-20251001"
+    - "gemini/gemini-2.5-flash"
+  fetch: false
+```
+
+或者在 GoModel 中只开放较少的提供商；`fetch: true` 会以 `GET /v1/models` 的结果为准。
+
+## 嵌入与 RAG
+
+LibreChat 上传的文件由其独立的 RAG API 进行嵌入，该 API 使用 OpenAI 嵌入 API，同样可以指向 GoModel。请在 compose 文件中添加：
+
+```yaml
+  rag_api:
+    image: ghcr.io/danny-avila/librechat-rag-api-dev-lite:latest
+    depends_on:
+      - vectordb
+    environment:
+      DB_HOST: vectordb
+      POSTGRES_DB: librechat_rag
+      POSTGRES_USER: librechat
+      POSTGRES_PASSWORD: change-me
+      RAG_OPENAI_BASEURL: http://gomodel:8080/v1
+      RAG_OPENAI_API_KEY: change-me
+      EMBEDDINGS_PROVIDER: openai
+      EMBEDDINGS_MODEL: openai/text-embedding-3-small
+
+  vectordb:
+    image: pgvector/pgvector:pg15
+    environment:
+      POSTGRES_DB: librechat_rag
+      POSTGRES_USER: librechat
+      POSTGRES_PASSWORD: change-me
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+```
+
+在 `librechat` 服务中添加 `RAG_API_URL: http://rag_api:8000`，并在 volumes 列表中添加
+`pg_data:`。每个上传的文档都会被分块，并通过 GoModel 的 `/v1/embeddings` 进行嵌入，因此嵌入用量会像其他调用一样被记录和计费。
+即使没有本节配置，聊天路由也能正常工作。
+
+## 故障排查
+
+| 现象 | 解决方法 |
+| --- | --- |
+| "Registration is not allowed." | 在 `librechat` 服务上设置 `ALLOW_REGISTRATION: "true"`（第 1 步），然后重新创建容器。 |
+| 模型选择器中没有该端点 | `librechat.yaml` 没有挂载到 `/app/librechat.yaml`，或存在语法错误。请在 LibreChat 启动日志中查找 "Custom config file loaded"。 |
+| 模型选择器只显示 `default` 列表 | `fetch: true` 无法访问 GoModel，或密钥被拒绝。请在 `baseURL` 中使用 Docker 服务名称（`gomodel`）而不是 `localhost`，并检查 GoModel 日志中是否有 `401`。 |
+| 启动时出现 "Outdated Config version" 警告 | 将 `librechat.yaml` 中的 `version:` 字段升级为警告中建议的版本。 |
+| 对话标题一直是 "New Chat"，且 GoModel 日志中出现 `404` 错误 | 未设置 `titleModel`，因此 LibreChat 请求的是 `gpt-3.5-turbo`。请将 `titleModel` 设置为 GoModel 提供的模型。 |
+| 用量中没有按用户的标签 | 端点中缺少 `headers` 配置块，或 GoModel 中未设置 `TAGGING_HEADER_1`。两者缺一不可。 |
+| 文件上传失败 | 未设置 `RAG_API_URL`，或 RAG API 未运行。请参阅 [嵌入与 RAG](#嵌入与-rag)。 |
+| 相同的提示词重复返回相同的回答 | GoModel 的 [响应缓存](/zh/features/cache) 会重放相同的请求。这通常正是您想要的；如果不是，请禁用缓存。 |
+
+## 说明
+
+- GoModel 的 [故障转移](/zh/features/failover) 和 [预算](/zh/features/budgets)
+  会自动应用于聊天流量；按密钥设置的预算可以限制整个 LibreChat 实例的支出上限。
+- LibreChat 的 Agent、网页搜索和图像生成功能有各自的提供商设置，不在本次验证范围内。
+- 关于控制台和告警，请参阅
+  [Prometheus 指标](/zh/guides/prometheus-metrics) 和
+  [OpenTelemetry](/zh/guides/opentelemetry)。
