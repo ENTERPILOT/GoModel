@@ -7,6 +7,7 @@
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { debounced } from "$lib/utils/debounce.js";
   import Pagination from "$lib/components/molecules/Pagination.svelte";
+  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import {
     formatCost,
@@ -18,6 +19,7 @@
   import SessionIDChip from "./SessionIDChip.svelte";
   import {
     authKeyDisplayName,
+    billedCostTitle,
     cachedCostTitle,
     costSourceTooltip,
     entryLabels,
@@ -36,6 +38,9 @@
   import * as m from "$lib/paraglide/messages.js";
 
   const costsMode = $derived(usagePage.usageMode === "costs");
+  // Billed cost sits next to total cost in the costs view; the tokens view
+  // keeps its single provider-cost column.
+  const showBilled = $derived(costsMode && runtimeConfig.billedCostVisible());
   const hasLabels = $derived(
     usageLogHasLabels(
       usagePage.labelUsage,
@@ -132,6 +137,9 @@
             <th class="col-price">{costsMode ? m.usage_column_input_cost() : m.usage_column_input()}</th>
             <th class="col-price">{costsMode ? m.usage_column_output_cost() : m.usage_column_output()}</th>
             <th class="col-price">{costsMode ? m.usage_column_total_cost() : m.usage_column_total()}</th>
+            {#if showBilled}
+              <th class="col-price" title={m.usage_billed_cost_help()}>{m.usage_billed_cost()}</th>
+            {/if}
             {#if !costsMode}
               <th class="col-price">{m.usage_column_cost()}</th>
             {/if}
@@ -212,6 +220,9 @@
                   <span class="caveat-icon" title={entry.costs_calculation_caveat}>&#9888;</span>
                 {/if}
               </td>
+              {#if showBilled}
+                <td class="col-price" title={billedCostTitle(entry)}>{formatCost(entry.billed_cost)}</td>
+              {/if}
               {#if !costsMode}
                 <td class="col-price" title={cachedCostTitle(entry, formatCostTooltip(entry))}>
                   <span>{formatCost(entry.total_cost)}</span>

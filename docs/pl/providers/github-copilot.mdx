@@ -1,0 +1,115 @@
+---
+title: "GitHub Copilot"
+description: "Kieruj ruch czatu, Responses i embeddingów przez subskrypcję GitHub Copilot."
+icon: "github"
+keywords: ["GitHub Copilot", "Copilot", "subskrypcja", "subscription", "OAuth", "konfiguracja providera", "provider setup"]
+---
+
+Provider `github-copilot` wywołuje API GitHub Copilot z modelami, które obejmuje
+Twój plan Copilot (Free, Pro, Pro+, Max, Business lub Enterprise). Użycie jest
+rozliczane z GitHub AI Credits planu, a nie z klucza API dostawcy modelu.
+
+Typ nazywa się `github-copilot`, a nie `copilot`, żeby nie mylił się z
+Microsoft Copilot.
+
+## Konfiguracja
+
+Danymi uwierzytelniającymi jest token OAuth GitHuba (`gho_...`) dla konta z
+dostępem do Copilota:
+
+```bash
+GITHUB_COPILOT_API_KEY=gho_...
+```
+
+Albo w `config.yaml`:
+
+```yaml
+providers:
+  github-copilot:
+    type: github-copilot
+    api_key: "${GITHUB_COPILOT_API_KEY}"
+```
+
+GoModel wysyła token bez zmian, bez kroku wymiany ani odświeżania.
+
+### Skąd wziąć token
+
+Działa dowolny token OAuth GitHuba dla tego konta, na przykład:
+
+```bash
+# GitHub CLI
+GITHUB_COPILOT_API_KEY=$(gh auth token)
+
+# Logowanie klienta Copilota, np. po `opencode auth login`
+GITHUB_COPILOT_API_KEY=$(jq -r '."github-copilot".refresh' ~/.local/share/opencode/auth.json)
+```
+
+To, które modele odpowiadają, zależy od Twojego planu Copilot, a nie od tokena.
+Model, którego plan nie obejmuje, odpowiada `model_not_supported`, nawet jeśli
+`/models` go wymienia.
+
+### Business i Enterprise
+
+Plany indywidualne (Free, Pro, Pro+, Max) używają domyślnego base URL,
+`https://api.githubcopilot.com`. Miejsce w planie Business lub Enterprise może
+być obsługiwane przez inny endpoint; ustaw go, gdy requesty kończą się błędem
+`401` lub `model_not_supported`:
+
+```bash
+GITHUB_COPILOT_BASE_URL=https://api.business.githubcopilot.com
+```
+
+Endpoint Twojego konta to `endpoints.api` w odpowiedzi na
+`curl -H "Authorization: Bearer $GITHUB_COPILOT_API_KEY" https://api.github.com/copilot_internal/user`.
+
+## Modele
+
+GoModel pobiera listę modeli z `/models` Copilota. Modele, które Twój plan
+wymienia, ale które nie są włączone na koncie (policy `disabled`), są
+pomijane; włącz je w
+[ustawieniach Copilota](https://github.com/settings/copilot/features), a
+pojawią się przy następnym odświeżeniu modeli.
+
+Aby udostępniać tylko część z nich,
+[przefiltruj](/pl/advanced/config-yaml#filtrowanie-modeli-providera) listę:
+
+```bash
+GITHUB_COPILOT_MODEL_FILTER_INCLUDE=claude-sonnet-5.5,gpt-5.6-luna,gpt-4.1
+```
+
+`GITHUB_COPILOT_MODELS` to lista zapasowa, używana tylko wtedy, gdy `/models`
+zawodzi lub zwraca pustą listę; `CONFIGURED_PROVIDER_MODELS_MODE=allowlist`
+czyni ją jedyną listą i pomija `/models`.
+
+## Chat completions i Responses dla każdego modelu
+
+Copilot obsługuje GPT-5 i nowsze wyłącznie przez `/responses`, a Claude, Kimi
+i starsze modele GPT wyłącznie przez `/chat/completions`. GoModel odczytuje
+endpointy każdego modelu z `/models` i udostępnia oba API dla każdego modelu:
+
+| Klient wywołuje | Model obsługiwany przez | GoModel |
+| --------------- | ----------------------- | ------- |
+| `/v1/chat/completions` | `/chat/completions` | Przekazuje |
+| `/v1/chat/completions` | tylko `/responses` | Tłumaczy na Responses i z powrotem |
+| `/v1/responses` | `/responses` | Przekazuje |
+| `/v1/responses` | tylko `/chat/completions` | Tłumaczy na chat completions i z powrotem |
+
+Dopóki GoModel nie odczyta endpointów modelu, na przykład gdy `/models` jest
+nieosiągalne, model jest wysyłany do `/chat/completions`.
+
+Request czatu do modelu dostępnego tylko przez Responses jest odrzucany z kodem
+`400`, gdy zawiera pole, którego tłumaczenie nie odwzoruje dokładnie (na
+przykład `logit_bias`); wyślij go wtedy do `/v1/responses`.
+
+Embeddingi (`text-embedding-3-small`) są obsługiwane. Copilot przyjmuje jako
+`input` tylko listę, więc pojedynczy string jest opakowywany w listę z jednym
+elementem.
+
+## Koszt
+
+Copilot [rozlicza tokeny](https://docs.github.com/en/copilot/concepts/billing-and-usage/individuals/billing)
+według cennika API danego modelu, w AI Credits pobieranych najpierw z
+miesięcznego limitu planu. GoModel wycenia ten sam ruch na podstawie swojego
+katalogu modeli, więc [koszt](/pl/features/cost-tracking) jest szacunkiem
+zużytych kredytów. Nie uwzględnia limitu zawartego w planie ani rabatów
+Copilota, więc może przekraczać to, co GitHub faktycznie nalicza.

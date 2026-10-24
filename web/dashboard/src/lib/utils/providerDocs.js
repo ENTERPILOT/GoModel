@@ -33,6 +33,7 @@ const PROVIDER_DOC_SLUGS = new Set([
   "edenai",
   "elevenlabs",
   "gemini",
+  "github-copilot",
   "hetzner",
   "kimicode",
   "llamacpp",
