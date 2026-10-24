@@ -18,10 +18,14 @@ import (
 // as not found, so a scoped caller learns nothing about other tenants' IDs.
 
 const (
-	codeAdminScopeDenied     = "admin_scope_denied"
-	codeUserPathOutOfScope   = "user_path_out_of_scope"
-	adminScopeDeniedMessage  = "this endpoint requires a global admin credential"
-	userPathOutOfScopeFormat = " is outside the credential's user path scope"
+	codeAdminScopeDenied   = "admin_scope_denied"
+	codeUserPathOutOfScope = "user_path_out_of_scope"
+	// Auth-key writes: a key may not edit itself, and a key limited to a
+	// model allowlist may not issue keys outside it.
+	codeAuthKeySelfUpdate       = "auth_key_self_update"
+	codeAllowedModelsOutOfScope = "allowed_models_out_of_scope"
+	adminScopeDeniedMessage     = "this endpoint requires a global admin credential"
+	userPathOutOfScopeFormat    = " is outside the credential's user path scope"
 )
 
 // requestScope returns the access scope of the authenticated credential.

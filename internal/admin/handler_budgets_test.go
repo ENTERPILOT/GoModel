@@ -240,7 +240,7 @@ func TestBudgetEndpointsRejectInvalidBudgetKey(t *testing.T) {
 		},
 		{
 			name: "unknown scope",
-			body: `{"scope":"provider","subject":"openai","budget_key":{"period":"daily"},"amount":12.5}`,
+			body: `{"scope":"model","subject":"openai/gpt-4o","budget_key":{"period":"daily"},"amount":12.5}`,
 			run:  (*Handler).UpsertBudget,
 		},
 		{
@@ -413,6 +413,27 @@ func TestBudgetEndpointsUpsertLabelBudget(t *testing.T) {
 	assert.Equal(t, "label", got.Scope)
 	assert.Equal(t, "Mobile-App-iOS", got.Subject)
 	assert.Empty(t, got.UserPath)
+}
+
+// The API accepts a provider budget and folds the provider name to the
+// lowercase key that matching uses.
+func TestBudgetEndpointsUpsertProviderBudget(t *testing.T) {
+	store := &adminBudgetStore{}
+	h := newBudgetHandler(t, store)
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/budgets", `{"scope":"provider","subject":"OpenAI-Prod","budget_key":{"period":"daily"},"amount":100}`)
+	err := h.UpsertBudget(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Len(t, store.budgets, 1)
+
+	stored := store.budgets[0]
+	assert.Equal(t, budget.ScopeProvider, stored.Scope)
+	assert.Equal(t, "openai-prod", stored.Subject)
+
+	body := echotest.Decode[budgetListResponse](t, rec)
+	require.Len(t, body.Budgets, 1)
+	assert.Equal(t, "provider", body.Budgets[0].Scope)
+	assert.Empty(t, body.Budgets[0].UserPath)
 }
 
 // A user path and a label can spell the same subject; deleting one must leave

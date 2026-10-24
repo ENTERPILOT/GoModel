@@ -60,7 +60,8 @@ type Options struct {
 	// Default: version.AppCore ("GoModel").
 	AppName string
 	// Extensions is the extension registry snapshotted at server
-	// construction. Default: ext.Default.
+	// construction. Its log handler wrappers are read earlier, when Run
+	// starts. Default: ext.Default.
 	Extensions *ext.Registry
 	// Args are the CLI arguments (without the program name). Default: os.Args[1:].
 	Args []string
@@ -75,7 +76,8 @@ type Options struct {
 	// gateway — after CLI parsing, --version/--health/--ready
 	// short-circuits, dotenv loading, and logging configuration, but before
 	// config loading. Register extensions here so operator tooling modes
-	// stay silent. A returned error aborts startup.
+	// stay silent; log handler wrappers are the exception and must be
+	// registered before Run. A returned error aborts startup.
 	Setup func(ctx context.Context) error
 	// SetupConfig runs once after the initial configuration has been loaded and
 	// before the application is constructed. It lets custom distributions
@@ -218,7 +220,10 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 
-	if err := configureLogging(opts.Stderr); err != nil {
+	// Read once, before the first logger is built: every generation's logger
+	// gets the same wrappers.
+	logWrappers := opts.Extensions.LogHandlerWrappers()
+	if err := configureLogging(opts.Stderr, logWrappers); err != nil {
 		fmt.Fprintf(opts.Stderr, "failed to configure logging: %v\n", err)
 		return err
 	}
@@ -250,16 +255,31 @@ func Run(ctx context.Context, opts Options) error {
 
 	configure := configHooks(ctx, opts)
 
+	// Reload requests arrive as SIGHUP or from inside the process, when a
+	// referenced secret other than a provider API key rotates. Both land on
+	// this channel; signal.Notify is wired to it further down.
+	reload := make(chan os.Signal, 1)
+	requestReload := reloadRequester(reload)
+	// One notifier for every generation: an extension notifying the Secrets
+	// of a generation whose reload was rejected still reaches the one
+	// serving, which is the only one listening.
+	secretChanges := config.NewSecretNotifier()
+
 	// build produces one generation of the gateway from the configuration as it
 	// stands right now. It is called again for every reload, which is what lets
 	// a reload re-read every configuration value rather than a hand-picked
 	// subset — everything except what is fixed for the life of the process (see
 	// warnAboutStartupOnlySettings).
+	//
+	// serving is the generation built last: the one serving, or about to,
+	// which the next build replaces. Builds run one at a time.
+	var serving *app.App
 	build := func() (*app.App, *config.Config, error) {
 		result, err := config.Load()
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to load config: %w", err)
 		}
+		result.Secrets.SetNotifier(secretChanges)
 		if err := configure(result); err != nil {
 			return nil, nil, err
 		}
@@ -272,15 +292,18 @@ func Run(ctx context.Context, opts Options) error {
 		opts.ConfigureSwaggerDocs(result.Config.Server.BasePath)
 
 		application, err := app.New(ctx, app.Config{
-			AppConfig:   result,
-			Factory:     defaultProviderFactory(result.Config),
-			Extensions:  opts.Extensions,
-			DemoMode:    demoMode,
-			ProductName: opts.ProductName,
+			AppConfig:     result,
+			Factory:       defaultProviderFactory(result.Config),
+			Extensions:    opts.Extensions,
+			DemoMode:      demoMode,
+			ProductName:   opts.ProductName,
+			RequestReload: requestReload,
+			Replaces:      serving,
 		})
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize application: %w", err)
 		}
+		serving = application
 		return application, result.Config, nil
 	}
 
@@ -302,7 +325,6 @@ func Run(ctx context.Context, opts Options) error {
 	// tells an operator or a process manager that this instance can be signalled,
 	// and until Notify runs, SIGHUP still carries its default disposition: it
 	// would kill the gateway instead of reloading it.
-	reload := make(chan os.Signal, 1)
 	signal.Notify(reload, reloadSignal)
 	defer signal.Stop(reload)
 
@@ -330,7 +352,7 @@ func Run(ctx context.Context, opts Options) error {
 			undoEnv()
 		}
 
-		if err := configureLogging(opts.Stderr); err != nil {
+		if err := configureLogging(opts.Stderr, logWrappers); err != nil {
 			rollback()
 			return nil, err
 		}
@@ -414,7 +436,7 @@ func serveUntilShutdown(ctx context.Context, reload <-chan os.Signal, socket *bo
 		startErr := serveGeneration(generationCtx, application, listener)
 		endGeneration()
 
-		next := <-replacement
+		next := awaitReplacement(replacement, startErr != nil || ctx.Err() != nil)
 		switch {
 		case next == nil:
 			return startErr
@@ -426,6 +448,28 @@ func serveUntilShutdown(ctx context.Context, reload <-chan os.Signal, socket *bo
 		}
 		application = next
 		slog.Info("configuration reloaded")
+	}
+}
+
+// awaitReplacement returns the replacement watchForReload yields. When the
+// gateway is stopping, a reload still building it is waited on for at most
+// shutdownTimeout: one stuck on a resolver that never returns must not keep
+// the process from exiting.
+func awaitReplacement(replacement <-chan lifecycleApp, stopping bool) lifecycleApp {
+	if !stopping {
+		return <-replacement
+	}
+	select {
+	case next := <-replacement:
+		return next
+	case <-time.After(shutdownTimeout):
+		slog.Warn("a configuration reload was still running at shutdown; abandoning it", "waited", shutdownTimeout)
+		go func() {
+			if next := <-replacement; next != nil {
+				_ = shutdownApplicationWithTimeout(next)
+			}
+		}()
+		return nil
 	}
 }
 

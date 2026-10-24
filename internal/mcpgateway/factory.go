@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
@@ -50,15 +51,16 @@ func (r *Result) Close() error {
 
 // New creates the MCP gateway subsystem using an existing
 // storage connection. Header values of managed servers are sealed with box;
-// a nil box stores them in plaintext.
-func New(ctx context.Context, cfg *config.Config, shared storage.Storage, box *encryption.Box, httpClient *http.Client, usageLogger usage.LoggerInterface) (*Result, error) {
+// a nil box stores them in plaintext. secrets resolves the secret references
+// admin-managed servers hold.
+func New(ctx context.Context, cfg *config.Config, shared storage.Storage, box *encryption.Box, httpClient *http.Client, usageLogger usage.LoggerInterface, secrets *config.Secrets) (*Result, error) {
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
-	return newResult(ctx, cfg, shared, box, httpClient, usageLogger)
+	return newResult(ctx, cfg, shared, box, httpClient, usageLogger, secrets)
 }
 
 // Reencrypt seals every managed server header that is in plaintext or sealed
@@ -76,7 +78,7 @@ func Reencrypt(ctx context.Context, shared storage.Storage, box *encryption.Box)
 	return (&sealedStore{Store: store, box: box, swap: swap}).reencrypt(ctx, swap)
 }
 
-func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage, box *encryption.Box, httpClient *http.Client, usageLogger usage.LoggerInterface) (*Result, error) {
+func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage, box *encryption.Box, httpClient *http.Client, usageLogger usage.LoggerInterface, secrets *config.Secrets) (*Result, error) {
 	rawStore, err := createStore(ctx, storeConn)
 	if err != nil {
 		return nil, err
@@ -99,12 +101,20 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 	service, err := NewService(ctx, Options{
 		ConfigServers:  configSpecs,
 		VirtualServers: virtualSpecs,
-		Store:          store,
-		HTTPClient:     httpClient,
-		UsageLogger:    usageLogger,
-		UserPathHeader: cfg.Server.UserPathHeader,
-		AllowedOrigins: cfg.MCP.AllowedOrigins,
-		ToolDiscovery:  cfg.MCP.ToolDiscovery,
+		// Virtual server rows hold no secrets, so they use the unsealed store;
+		// the sealing wrapper only implements Store.
+		VirtualStore: virtualStoreOf(rawStore),
+		// Admin-managed servers and virtual servers share the model-config
+		// refresh cadence, like virtual models; operators tune
+		// CACHE_REFRESH_INTERVAL for faster cross-instance propagation.
+		RefreshInterval: time.Duration(cfg.Cache.Model.RefreshInterval) * time.Second,
+		Store:           store,
+		HTTPClient:      httpClient,
+		UsageLogger:     usageLogger,
+		UserPathHeader:  cfg.Server.UserPathHeader,
+		AllowedOrigins:  cfg.MCP.AllowedOrigins,
+		ToolDiscovery:   cfg.MCP.ToolDiscovery,
+		Secrets:         secrets,
 	})
 	if err != nil {
 		return nil, err
@@ -133,4 +143,11 @@ func createStore(ctx context.Context, store storage.Storage) (Store, error) {
 		func(db sqlx.DB) (Store, error) { return NewSQLStore(ctx, db) },
 		func(db *mongo.Database) (Store, error) { return NewMongoDBStore(db) },
 	)
+}
+
+// virtualStoreOf returns the store's virtual-server persistence; both
+// backends provide it.
+func virtualStoreOf(store Store) VirtualStore {
+	virtualStore, _ := store.(VirtualStore)
+	return virtualStore
 }

@@ -16,6 +16,11 @@ type MetricsConfig struct {
 	Endpoint string `yaml:"endpoint" env:"METRICS_ENDPOINT"`
 }
 
+// reservedMetricsPrefixes are the authenticated route trees the metrics
+// endpoint must never overlap: the metrics path skips authentication, so a
+// metrics path inside one of them would expose that route without a credential.
+var reservedMetricsPrefixes = []string{"/v1", "/p", "/admin", "/mcp"}
+
 // ResolveMetricsEndpoint returns the normalized, safe endpoint used by the
 // HTTP server. Extensions should use the same value when excluding Prometheus
 // scrapes from request instrumentation.
@@ -24,9 +29,10 @@ func ResolveMetricsEndpoint(endpoint string) string {
 	if endpoint != "" {
 		metricsPath = path.Clean("/" + endpoint)
 	}
-	if metricsPath == "/v1" || strings.HasPrefix(metricsPath, "/v1/") ||
-		metricsPath == "/p" || strings.HasPrefix(metricsPath, "/p/") {
-		return "/metrics"
+	for _, prefix := range reservedMetricsPrefixes {
+		if metricsPath == prefix || strings.HasPrefix(metricsPath, prefix+"/") {
+			return "/metrics"
+		}
 	}
 	return metricsPath
 }

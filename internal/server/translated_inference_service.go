@@ -104,6 +104,9 @@ func (s *translatedInferenceService) newInferenceOrchestrator() *gateway.Inferen
 	if s.rateLimiter != nil {
 		cfg.RouteGate = s.rateLimiter
 	}
+	if gate, ok := s.budgetChecker.(gateway.BudgetGate); ok {
+		cfg.BudgetGate = gate
+	}
 	return gateway.NewInferenceOrchestrator(cfg)
 }
 
@@ -694,6 +697,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 		if usageObserver != nil {
 			usageObserver.SetProviderName(providerName)
 			usageObserver.SetSessionID(core.SessionIDFromContext(c.Request().Context()))
+			usageObserver.SetAuthKeyID(core.GetAuthKeyID(c.Request().Context()))
 			usageObserver.SetLabels(core.RequestLabelsFromContext(c.Request().Context()))
 			usageObserver.SetRewriteTokensSaved(core.RewriteTokensSavedFromContext(c.Request().Context()))
 			observers = append(observers, usageObserver)

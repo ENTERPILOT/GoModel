@@ -252,6 +252,37 @@ func TestAuthKeysScoped(t *testing.T) {
 		assert.Empty(t, unbound.UserPath, "global scope keeps an unbound key unbound")
 	})
 
+	// A passthrough key reaches the whole shared provider account, so only a
+	// global credential may grant it; a scoped one may still revoke it.
+	t.Run("only global credentials grant passthrough access", func(t *testing.T) {
+		h := newHandler(t)
+		c, rec := scopedRequest(t, http.MethodPost, "/admin/auth-keys", `{"name":"proxy","passthrough_access":true}`, scopeAlpha)
+		require.NoError(t, h.CreateAuthKey(c))
+		assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+		assert.Equal(t, codeAdminScopeDenied, errorCode(t, rec))
+
+		update := func(body, userPath string) *httptest.ResponseRecorder {
+			c, rec := scopedRequest(t, http.MethodPut, "/admin/auth-keys/alpha-child/passthrough-access", body, userPath, echotest.WithPathValue("id", "alpha-child"))
+			require.NoError(t, h.UpdateAuthKeyPassthroughAccess(c))
+			return rec
+		}
+		rec = update(`{"passthrough_access":true}`, scopeAlpha)
+		assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+		assert.Equal(t, codeAdminScopeDenied, errorCode(t, rec))
+
+		rec = update(`{"passthrough_access":true}`, "")
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		assert.True(t, echotest.Decode[authkeys.View](t, rec).PassthroughAccess)
+
+		rec = update(`{"passthrough_access":false}`, scopeAlpha)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		assert.False(t, echotest.Decode[authkeys.View](t, rec).PassthroughAccess)
+
+		c, rec = scopedRequest(t, http.MethodPut, "/admin/auth-keys/beta/passthrough-access", `{"passthrough_access":true}`, scopeAlpha, echotest.WithPathValue("id", "beta"))
+		require.NoError(t, h.UpdateAuthKeyPassthroughAccess(c))
+		assert.Equal(t, http.StatusNotFound, rec.Code, "a key outside the scope stays hidden")
+	})
+
 	t.Run("updates and deactivation hide keys outside the scope", func(t *testing.T) {
 		tests := []struct {
 			name       string

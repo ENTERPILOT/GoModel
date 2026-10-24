@@ -248,9 +248,15 @@ func assertSumSpendMatchesSubjects(t *testing.T, usageStore usageWriter, db sqlx
 		usageEntryWithCost("team-root", "/team", "", now, 0.25, "prod"),
 		usageEntryWithCost("team-child", "/team/app", "", now, 0.75, "prod", "iOS"),
 		usageEntryWithCost("sibling", "/team-alpha", "", now, 5, "iOS"),
+		// Differs from /team only in case: user paths are case-sensitive.
+		usageEntryWithCost("upper", "/TEAM/app", "", now, 100),
 		usageEntryWithCost("cached", "/team/cache", usage.CacheTypeExact, now, 10, "prod"),
 		usageEntryWithCost("outside-window", "/team/app", "", now.Add(-48*time.Hour), 7, "prod"),
 		usageEntryWithCost("unlabelled", "/team/plain", "", now, 0.5),
+		usageEntryForProvider("openai-prod", "openai", "OpenAI-Prod", now, 2),
+		usageEntryForProvider("openai-free", "openai", "openai-free", now, 4),
+		// Written before provider_name existed: only the provider type is set.
+		usageEntryForProvider("legacy-openai", "openai", "", now, 3),
 	}
 	err = usageStore.WriteBatch(ctx, entries)
 	require.NoError(t, err)
@@ -259,19 +265,29 @@ func assertSumSpendMatchesSubjects(t *testing.T, usageStore usageWriter, db sqlx
 	windows := []SpendWindow{
 		{Scope: ScopeUserPath, Subject: "/team", Start: start, End: end},
 		{Scope: ScopeUserPath, Subject: "/missing", Start: start, End: end},
+		{Scope: ScopeUserPath, Subject: "/TEAM", Start: start, End: end},
 		{Scope: ScopeLabel, Subject: "prod", Start: start, End: end},
 		{Scope: ScopeLabel, Subject: "iOS", Start: start, End: end},
 		{Scope: ScopeLabel, Subject: "absent", Start: start, End: end},
 		// Same label, but a window that excludes every entry.
 		{Scope: ScopeLabel, Subject: "prod", Start: now.Add(-72 * time.Hour), End: now.Add(-60 * time.Hour)},
+		{Scope: ScopeProvider, Subject: "openai-prod", Start: start, End: end},
+		{Scope: ScopeProvider, Subject: "openai", Start: start, End: end},
+		{Scope: ScopeProvider, Subject: "test", Start: start, End: end},
+		{Scope: ScopeProvider, Subject: "anthropic", Start: start, End: end},
 	}
 	want := []Spend{
-		{Total: 1.5, HasUsage: true},  // /team subtree, uncached, minus the sibling
-		{},                            // no such path
-		{Total: 1.0, HasUsage: true},  // prod: team-root + team-child, cached excluded
-		{Total: 5.75, HasUsage: true}, // iOS: team-child + sibling
-		{},                            // no such label
-		{},                            // window with no entries
+		{Total: 1.5, HasUsage: true},   // /team subtree, uncached, minus the sibling and /TEAM
+		{},                             // no such path
+		{Total: 100, HasUsage: true},   // /TEAM subtree only
+		{Total: 1.0, HasUsage: true},   // prod: team-root + team-child, cached excluded
+		{Total: 5.75, HasUsage: true},  // iOS: team-child + sibling
+		{},                             // no such label
+		{},                             // window with no entries
+		{Total: 2, HasUsage: true},     // openai-prod, matched case-insensitively
+		{Total: 3, HasUsage: true},     // openai: only the row without a provider name
+		{Total: 106.5, HasUsage: true}, // test: every uncached in-window user-path row
+		{},                             // no such provider
 	}
 
 	got, err := store.SumSpend(ctx, windows)
@@ -336,6 +352,15 @@ func TestSQLStoreSumSpendChunksLargeBatches(t *testing.T) {
 	last := got[total-1]
 	require.True(t, last.HasUsage)
 	require.Equal(t, float64(3), last.Total, "last spend = %+v, want 3 with usage — chunk boundaries must preserve order", last)
+}
+
+// usageEntryForProvider builds one priced usage row routed to a provider,
+// outside every user path and label the subject test budgets by.
+func usageEntryForProvider(name, providerType, providerName string, ts time.Time, cost float64) *usage.UsageEntry {
+	entry := usageEntryWithCost(name, "/providers", "", ts, cost)
+	entry.Provider = providerType
+	entry.ProviderName = providerName
+	return entry
 }
 
 // usageEntryWithCost builds one priced usage row. PostgreSQL types usage.id as

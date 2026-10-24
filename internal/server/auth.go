@@ -10,6 +10,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
@@ -123,6 +124,7 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 					authResult, err := authenticator.Authenticate(c.Request().Context(), token)
 					if err == nil {
 						applyAuthKeyResult(c, authResult, userPathHeaderName)
+						restrictSecretReferences(c, masterKey)
 						return next(c)
 					}
 
@@ -150,6 +152,7 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 				if err := applyExtensionAuthResult(c, result, userPathHeaderName); err != nil {
 					return writeGatewayError(c, extensionAuthenticationError(c))
 				}
+				restrictSecretReferences(c, masterKey)
 				return next(c)
 			}
 
@@ -273,6 +276,18 @@ func AdminAccessMiddleware() echo.MiddlewareFunc {
 	}
 }
 
+// restrictSecretReferences keeps a credential other than the master key from
+// adding or changing secret references in admin-saved entities while a master
+// key is configured (see config.RestrictSecretReferences). Without a master
+// key, dashboard credentials are the gateway's top credentials and keep
+// saving references.
+func restrictSecretReferences(c *echo.Context, masterKey string) {
+	if masterKey == "" {
+		return
+	}
+	c.SetRequest(c.Request().WithContext(config.RestrictSecretReferences(c.Request().Context())))
+}
+
 func extensionAuthenticationError(c *echo.Context) *core.GatewayError {
 	const (
 		message = "authentication failed"
@@ -316,6 +331,20 @@ func managedDashboardAccess(ctx context.Context) (allowed, isManagedKey bool) {
 	return allowed, isManagedKey
 }
 
+// managedPassthroughAccessKey marks requests authenticated with a managed key.
+// Its bool value is the key's passthrough access. Like
+// managedDashboardAccessKey, the master key, extension identities, and
+// unauthenticated requests never carry it.
+type managedPassthroughAccessKey struct{}
+
+// managedPassthroughAccess reports whether the request was authenticated with
+// a managed key and, if so, whether that key may call the provider
+// passthrough routes.
+func managedPassthroughAccess(ctx context.Context) (allowed, isManagedKey bool) {
+	allowed, isManagedKey = ctx.Value(managedPassthroughAccessKey{}).(bool)
+	return allowed, isManagedKey
+}
+
 func setInteractionContinuationAllowed(c *echo.Context, allowed bool) {
 	if c == nil {
 		return
@@ -337,6 +366,7 @@ func applyAuthKeyResult(c *echo.Context, authResult authkeys.AuthenticationResul
 	// objects it may address; a key without one stays global.
 	ctx = core.WithAccessScope(ctx, core.AccessScope{UserPath: strings.TrimSpace(authResult.UserPath)})
 	ctx = context.WithValue(ctx, managedDashboardAccessKey{}, authResult.DashboardAccess)
+	ctx = context.WithValue(ctx, managedPassthroughAccessKey{}, authResult.PassthroughAccess)
 	ctx = context.WithValue(ctx, interactionContinuationAllowedKey{}, authResult.DashboardAccess)
 	if len(authResult.AllowedModels) > 0 {
 		ctx = core.WithCredentialAllowedModels(ctx, authResult.AllowedModels)

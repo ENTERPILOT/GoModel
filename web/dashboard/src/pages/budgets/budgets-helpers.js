@@ -34,12 +34,18 @@ export function budgetScopeMeta(scope) {
       fieldLabel: m.budgets_scope_label(),
       placeholder: "Mobile-App-iOS",
     },
+    provider: {
+      label: m.budgets_scope_provider(),
+      chip: m.budgets_scope_provider_chip(),
+      fieldLabel: m.budgets_scope_provider_field(),
+      placeholder: "openai",
+    },
   };
   return meta[scope] || meta.user_path;
 }
 
 export function budgetScopeOptions() {
-  return ["user_path", "label"].map((scope) => ({
+  return ["user_path", "label", "provider"].map((scope) => ({
     value: scope,
     label: budgetScopeMeta(scope).label,
   }));
@@ -74,7 +80,7 @@ export function budgetSubjectPlaceholder(form) {
 }
 
 // Changing scope resets the subject: a user path never carries over to a
-// label. Mutates the form in place.
+// label or provider. Mutates the form in place.
 export function syncBudgetScope(form) {
   form.subject = String((form && form.scope) || "") === "user_path" ? "/" : "";
   form.per_child = false;
@@ -214,7 +220,7 @@ function budgetFilterText(item) {
     .toLowerCase();
 }
 
-const budgetScopeOrder = { user_path: 0, label: 1 };
+const budgetScopeOrder = { user_path: 0, label: 1, provider: 2 };
 
 function sortBudgets(items, sortBy) {
   const sorted = Array.isArray(items) ? items.slice() : [];
@@ -257,6 +263,13 @@ export function buildBudgetFormPayload(form) {
     if (userPathError) {
       return { payload: null, error: userPathError };
     }
+  } else if (scope === "provider") {
+    if (!subject) {
+      return { payload: null, error: m.budgets_provider_required() };
+    }
+    if (/[\/\s]/.test(subject)) {
+      return { payload: null, error: m.budgets_provider_invalid() };
+    }
   } else if (!subject) {
     return { payload: null, error: m.budgets_label_required() };
   }
@@ -275,8 +288,7 @@ export function buildBudgetFormPayload(form) {
   return {
     payload: {
       scope,
-      subject:
-        scope === "user_path" ? normalizeBudgetUserPath(subject) : subject,
+      subject: budgetPayloadSubject(scope, subject),
       period_seconds: Math.trunc(periodSeconds),
       amount,
       per_child: scope === "user_path" && Boolean(f.per_child),
@@ -284,6 +296,15 @@ export function buildBudgetFormPayload(form) {
     },
     error: "",
   };
+}
+
+// Provider names are matched case-insensitively and stored lowercased; label
+// subjects stay verbatim.
+function budgetPayloadSubject(scope, subject) {
+  if (scope === "user_path") {
+    return normalizeBudgetUserPath(subject);
+  }
+  return scope === "provider" ? subject.toLowerCase() : subject;
 }
 
 // Request bodies for the /admin/budgets endpoints (the exact shapes the

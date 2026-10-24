@@ -263,13 +263,11 @@ func (fields UnknownJSONFields) HasAny(keys ...string) bool {
 }
 
 // decoderAcceptsJSONValue reports whether raw is a value the request decoder
-// accepts, which is deliberately not the same as strictly valid JSON:
-// goccy/go-json tolerates a trailing comma and a leading-zero number inside a
-// passthrough value (pinned by TestDecoderLeniencyIsBounded), and a member the
-// gateway accepted on the way in must not become invisible on the way out.
+// accepts. A member the gateway accepted on the way in must not become
+// invisible on the way out, so the decoder, not gjson, has the final say.
 //
-// gjson is the stricter of the two, so its verdict settles the common case
-// without allocating; only a value it rejects is put to the decoder.
+// gjson's verdict settles the common case without allocating; only a value it
+// rejects is put to the decoder.
 func decoderAcceptsJSONValue(raw string) bool {
 	if gjson.Valid(raw) {
 		return true

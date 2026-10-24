@@ -70,6 +70,21 @@ test("buildCreateAuthKeyPayload sends dashboard_access only when granted", () =>
   assert.equal(denied.payload.dashboard_access, undefined);
 });
 
+test("buildCreateAuthKeyPayload sends passthrough_access only when granted", () => {
+  const granted = buildCreateAuthKeyPayload({
+    ...defaultAuthKeyForm(),
+    name: "proxy",
+    passthrough_access: true,
+  });
+  assert.equal(granted.payload.passthrough_access, true);
+
+  const denied = buildCreateAuthKeyPayload({
+    ...defaultAuthKeyForm(),
+    name: "ci-deploy",
+  });
+  assert.equal(denied.payload.passthrough_access, undefined);
+});
+
 test("buildCreateAuthKeyPayload normalizes user paths before sending them", () => {
   const { payload, error } = buildCreateAuthKeyPayload({
     ...defaultAuthKeyForm(),

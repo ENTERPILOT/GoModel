@@ -32,9 +32,11 @@ type responsesEventView struct {
 // responsesItem tracks an output item announced by response.output_item.added
 // so a cut stream can close it.
 type responsesItem struct {
-	index     int
-	id        string
-	itemType  string
+	index    int
+	id       string
+	itemType string
+	// name is the tool name of a function_call item.
+	name      string
 	raw       json.RawMessage
 	text      strings.Builder
 	arguments strings.Builder
@@ -120,6 +122,9 @@ func (c *responsesCodec) Decode(raw RawEvent, seq int) Event {
 		ev.Kind, ev.Text = KindReasoningDelta, view.Delta
 	case "response.function_call_arguments.delta":
 		ev.Kind, ev.Text, ev.Call = KindToolCallDelta, view.Delta, view.OutputIndex
+		if item := c.items[view.OutputIndex]; item != nil {
+			ev.Tool = item.name
+		}
 	case "response.completed", "response.incomplete", "response.failed":
 		ev.Kind = KindFinish
 	}
@@ -264,9 +269,10 @@ func (c *responsesCodec) Track(ev Event) {
 		var head struct {
 			ID   string `json:"id"`
 			Type string `json:"type"`
+			Name string `json:"name"`
 		}
 		_ = json.Unmarshal(view.Item, &head)
-		item.id, item.itemType = head.ID, head.Type
+		item.id, item.itemType, item.name = head.ID, head.Type, head.Name
 		if _, seen := c.items[view.OutputIndex]; !seen {
 			c.order = append(c.order, view.OutputIndex)
 		}
