@@ -64,8 +64,11 @@ Every batch item, inline or a line of the input file, must `POST` to
 `/v1/chat/completions`, `/v1/responses`, or `/v1/embeddings` (the unversioned
 Azure forms such as `/chat/completions` work too), so the gateway can check
 its model access and guardrails before the provider runs it. Any other item is
-rejected with `400`, as is an item whose JSON repeats a key or whose body has
-top-level keys that differ only in case.
+rejected with `400` (for example `/v1/completions` or `/v1/moderations`), as
+is an item whose JSON repeats a key or whose body has top-level keys that
+differ only in case. The batch `endpoint` follows the same rule. A full URL, a
+query, or a trailing slash is accepted, and the item is forwarded with the
+normalized path, e.g. `/v1/responses`.
 
 ### Realtime translation sessions
 

@@ -66,7 +66,10 @@ niewersjonowane formy Azure, np. `/chat/completions`), aby gateway mógł
 sprawdzić dostęp do modelu i guardrails, zanim provider go wykona. Każdy inny
 element jest odrzucany z `400`, podobnie jak element, którego JSON powtarza
 klucz albo którego body ma klucze najwyższego poziomu różniące się tylko
-wielkością liter.
+wielkością liter (odrzucane są np. `/v1/completions` czy `/v1/moderations`).
+Batchowy `endpoint` podlega tej samej regule. Pełny URL, query lub końcowy
+ukośnik są akceptowane, a element jest przekazywany ze znormalizowaną ścieżką,
+np. `/v1/responses`.
 
 ### Sesje tłumaczenia w czasie rzeczywistym
 

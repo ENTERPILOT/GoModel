@@ -59,7 +59,7 @@ GoModel 提供兼容 OpenAI 和兼容 Anthropic 的 API、提供商原生透传�
 | `/v1/batches/{id}/cancel`         | POST   | 取消待处理的批处理 |
 | `/v1/batches/{id}/results`        | GET    | 获取原生批处理结果（如可用） |
 
-每个批处理项（无论是内联项还是输入文件中的一行）都必须以 `POST` 发送到 `/v1/chat/completions`、`/v1/responses` 或 `/v1/embeddings`（`/chat/completions` 等不带版本号的 Azure 形式同样可用），这样网关才能在提供商执行之前检查其模型访问权限和护栏。其他任何项都会以 `400` 被拒绝；JSON 中重复某个键、或请求体顶层存在仅大小写不同的键的项也会被拒绝。
+每个批处理项（无论是内联项还是输入文件中的一行）都必须以 `POST` 发送到 `/v1/chat/completions`、`/v1/responses` 或 `/v1/embeddings`（`/chat/completions` 等不带版本号的 Azure 形式同样可用），这样网关才能在提供商执行之前检查其模型访问权限和护栏。其他任何项都会以 `400` 被拒绝；JSON 中重复某个键、或请求体顶层存在仅大小写不同的键的项也会被拒绝（例如 `/v1/completions` 或 `/v1/moderations` 会被拒绝）。批处理的 `endpoint` 遵循相同规则。完整 URL、查询参数或末尾斜杠都可以接受，转发时会使用规范化后的路径，例如 `/v1/responses`。
 
 ### 实时翻译会话
 

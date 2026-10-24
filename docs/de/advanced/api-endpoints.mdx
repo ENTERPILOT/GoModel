@@ -66,7 +66,11 @@ unversionierten Azure-Formen wie `/chat/completions` funktionieren ebenfalls),
 damit das Gateway Modellzugriff und Guardrails prüfen kann, bevor der Provider
 es ausführt. Jedes andere Item wird mit `400` abgelehnt, ebenso ein Item, dessen
 JSON einen Schlüssel wiederholt oder dessen Body Schlüssel auf oberster Ebene
-enthält, die sich nur in der Groß-/Kleinschreibung unterscheiden.
+enthält, die sich nur in der Groß-/Kleinschreibung unterscheiden (abgelehnt
+werden etwa `/v1/completions` oder `/v1/moderations`). Für den Batch-`endpoint`
+gilt dieselbe Regel. Eine vollständige URL, eine Query oder ein abschließender
+Schrägstrich wird akzeptiert, und das Item wird mit dem normalisierten Pfad
+weitergeleitet, z. B. `/v1/responses`.
 
 ### Realtime-Übersetzungs-Sessions
 
