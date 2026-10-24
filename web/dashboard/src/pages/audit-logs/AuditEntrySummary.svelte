@@ -8,7 +8,9 @@
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
   import {
     auditEntryLiveInProgress,
+    auditOutputTokensPerSecond,
     formatDurationNs,
+    formatTokensPerSecond,
     statusCodeClass,
   } from "./audit-logic.js";
   import { ChartNoAxesColumnIncreasing, ChevronDown, ChevronLeft, ChevronRight } from "lucide";
@@ -28,6 +30,9 @@
     hidePath = false,
   } = $props();
 
+  const tokensPerSecond = $derived(
+    formatTokensPerSecond(auditOutputTokensPerSecond(entry)),
+  );
   const timestamp = $derived(timezone.formatTimestamp(entry.timestamp));
   const timestampTime = $derived(
     timestamp === "-" ? timestamp : timestamp.slice(timestamp.lastIndexOf(" ") + 1),
@@ -145,7 +150,12 @@
       <span class="audit-timestamp-full" aria-hidden="true">{timestamp}</span>
       <span class="audit-timestamp-time" aria-hidden="true">{timestampTime}</span>
     </span>
-    <span class="mono font-size-md">{formatDurationNs(entry.duration_ns)}</span>
+    <span class="audit-timing mono font-size-md">{formatDurationNs(entry.duration_ns)}</span>
+    {#if tokensPerSecond}
+      <span class="audit-token-rate mono" title={m.audit_tokens_per_second_title()}
+        >{tokensPerSecond}</span
+      >
+    {/if}
     {#if conversationDrawer.canShowConversation(entry)}
       <button
         type="button"
@@ -350,7 +360,14 @@
     display: none;
   }
 
-  .audit-provider-model {
+  .audit-timing {
+    white-space: nowrap;
+  }
+
+  /* The token rate shares the provider/model pill so it does not read as
+     part of the plain timestamp and duration text next to it. */
+  .audit-provider-model,
+  .audit-token-rate {
     height: 24px;
     padding: 0 10px;
     display: inline-flex;
@@ -361,6 +378,9 @@
     background: var(--bg-surface);
     color: var(--text-muted);
     white-space: nowrap;
+  }
+
+  .audit-provider-model {
     max-width: 420px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -390,6 +410,7 @@
 
     .audit-entry-right {
         width: 100%;
+        flex-wrap: wrap;
         justify-content: space-between;
       }
 

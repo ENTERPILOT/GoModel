@@ -1,0 +1,228 @@
+---
+title: "Eden AI"
+description: "Konfigurieren Sie die OpenAI-kompatible Multi-Provider-API von Eden AI in GoModel."
+icon: "leaf"
+keywords: ["Eden AI", "edenai", "multi-provider", "Multi-Provider", "OpenAI-compatible", "OpenAI-kompatibel", "Provider-Einrichtung", "provider setup"]
+---
+
+Eden AI ist ein Multi-Provider-Gateway, das unter `https://api.edenai.run/v3` eine
+OpenAI-kompatible REST-API bereitstellt. GoModel routet Chat Completions, Streaming,
+das Auflisten von Modellen, Embeddings und Passthrough über den gemeinsamen
+OpenAI-Adapter, sodass ein einziger Eden-Key Modelle von OpenAI, Anthropic, Google,
+Mistral, Cohere, DeepInfra und weiteren erreicht.
+
+## Konfiguration
+
+Erstellen Sie einen API-Key in der [Eden AI Console](https://app.edenai.run/) und
+setzen Sie:
+
+```bash
+EDENAI_API_KEY=
+```
+
+`EDENAI_BASE_URL` ist optional — der Provider verwendet standardmäßig
+`https://api.edenai.run/v3`. Setzen Sie die Variable nur, um einen anderen
+Eden-kompatiblen Endpunkt anzusprechen:
+
+```bash
+EDENAI_BASE_URL=https://api.edenai.run/v3
+```
+
+<Warning>
+  Verwenden Sie einen `https://`-Endpunkt. GoModel **verweigert** jeden
+  Eden-Request an ein unverschlüsseltes Ziel, statt ihn zu senden, weil der
+  Request-Body den Prompt bzw. die Embedding-Eingabe enthält, nicht nur den
+  API-Key. Eine `http://`-Basis-URL, die nicht auf Loopback zeigt, schlägt daher
+  mit einem expliziten Fehler fehl, statt irgendetwas zu übertragen.
+
+  Für Weiterleitungen gilt derselbe Maßstab: Nur eine Weiterleitung, die auf dem
+  von Ihnen konfigurierten Host bleibt, wird verfolgt. Eine Weiterleitung auf
+  `http://` oder auf einen anderen Host — einschließlich einer Subdomain, an die Go
+  sonst den `Authorization`-Header mitsenden würde — wird abgelehnt statt verfolgt,
+  sodass ein vom Upstream gewählter `Location`-Header Ihren Key oder Ihren Prompt
+  nicht an ein Ziel verlagern kann, das Sie nicht konfiguriert haben.
+
+  Unverschlüsselter Traffic zu `localhost` (oder `127.0.0.1`) ist erlaubt, da er
+  nie ein Netzwerk erreicht -- so bleibt ein lokaler Eden-kompatibler Proxy
+  nutzbar. Wenn Sie Eden einen Proxy auf einem anderen Host vorschalten,
+  terminieren Sie TLS dort und richten Sie `EDENAI_BASE_URL` auf dessen
+  `https://`-Adresse aus.
+</Warning>
+
+Oder in der `config.yaml`:
+
+```yaml
+providers:
+  edenai:
+    type: edenai
+    api_key: "${EDENAI_API_KEY}"
+    # base_url: "https://api.edenai.run/v3"
+```
+
+Sie können die Zugangsdaten statt über Umgebungsvariablen auch auf der Seite
+**Providers** im Admin-Dashboard hinzufügen.
+
+## Modelle
+
+GoModel ermittelt den Katalog von Eden beim Start und bei jeder Aktualisierung der
+Registry über Edens eigenes `GET /v3/models`. **Es gibt keine integrierte
+Modellliste**: Ein Modell, das Eden hinzufügt, ist routbar, sobald der Katalog
+aktualisiert wird – ohne GoModel-Upgrade und ohne Konfigurationsänderung.
+
+Modell-IDs verwenden die Notation `provider/model` und werden unverändert
+weitergeleitet:
+
+```json
+{ "model": "openai/gpt-4", "messages": [{ "role": "user", "content": "Hi" }] }
+```
+
+Da die ID bereits einen Schrägstrich enthält, qualifizieren Sie sie mit dem
+Provider-Namen, wenn ein anderer konfigurierter Provider dieselbe rohe ID
+bereitstellt: `edenai/anthropic/claude-sonnet-latest`. GoModel entfernt vor der
+Weiterleitung nur den äußeren Routing-Qualifier `edenai/`.
+
+Optional können Sie eine konfigurierte Teilmenge festlegen:
+
+```bash
+EDENAI_MODELS=openai/gpt-4,anthropic/claude-sonnet-latest
+```
+
+### Ermittelte Metadaten
+
+Jeder Katalogeintrag liefert Metadaten, die `GET /v1/models` zurückgibt und die
+Router, Filter und Kostenstrategien verwenden:
+
+| Eden-Feld | GoModel-Metadaten |
+| ---------- | ---------------- |
+| `context_length` | Kontextfenster |
+| `capabilities.supports_*` | Capabilities, ohne das Präfix (`reasoning`, `function_calling`, `prompt_caching`, …) |
+| `capabilities.input_modalities` | Capabilities `vision` / `audio` / `video` |
+| `capabilities.output_modalities` | Modi und Kategorien |
+| `pricing` | Preise pro Modell (siehe unten) |
+
+Die Output-Modalitäten entscheiden außerdem, was GoModel ausweist: Ein Modell, das
+ausschließlich Audio oder Bilder ausgibt, wird nicht in `/v1/models` aufgenommen,
+weil Eden hier nur Chat, Embeddings und Passthrough bedient. In der Praxis
+veröffentlicht Edens Katalog für jedes Modell Text-Output, einschließlich der
+wenigen, die zusätzlich Bilder zurückgeben; derzeit wird also nichts
+herausgefiltert.
+
+## Preise
+
+Eden veröffentlicht Token-Preise in USD pro Modell, und GoModel rechnet sie in seine
+Darstellung pro Million Tokens um (`input_cost_per_token: 6e-8` → `$0.06 /
+MTok`).
+
+Die Preise stammen aus Edens `pricing`-Block, also aus dem, was dem Konto
+tatsächlich berechnet wird — dem unrabattierten `list_pricing` mit bereits
+angewendetem Kontorabatt. Jeder Preis wird einzeln aufgelöst: Ein verwendbarer
+Kontopreis hat immer Vorrang, und `list_pricing` liefert nur die einzelnen Preise,
+die `pricing` nicht enthält. Eden veröffentlicht derzeit in beiden Blöcken dieselben
+Preise, sodass in der Praxis alles aus `pricing` aufgelöst wird; der Fallback pro
+Preis verhindert, dass einem nur teilweise bepreisten Modell die fehlenden Preise
+verloren gehen – diese Token-Typen würden sonst mit $0 abgerechnet.
+
+Ein Preis, den Eden als `0` meldet, gilt als tatsächlich kostenlos und nicht als
+fehlend, und ein Preis, den keiner der beiden Blöcke verwendbar veröffentlicht,
+bleibt ungesetzt, statt erfunden zu werden.
+
+Diese Preise decken Input, Output, Cache-Lesezugriffe und Cache-Schreibzugriffe ab.
+Edens nach Kontextlänge gestaffelte Preise (`input_cost_per_token_above_200k_tokens`),
+seine Liste `tiered_pricing` und seine Suchgebühren pro Abfrage haben keine
+Entsprechung in GoModel und werden nicht gelesen.
+
+Edens Preise für Reasoning und Audio (`output_cost_per_reasoning_token`,
+`input_cost_per_audio_token`) werden ebenfalls nicht gelesen. GoModel würde diese
+Token-Typen bepreisen, indem es den Basispreis abzieht, was voraussetzt, dass die
+Zählungen bereits in den Basissummen enthalten sind — und Edens Usage-Objekt meldet
+nur `prompt_tokens`, `completion_tokens` und `total_tokens`, es gibt also keine
+Aufschlüsselung, anhand derer sich das bestätigen ließe. Für diese Token-Typen
+gelten stattdessen die Basispreise für Input/Output.
+
+Die Preise werden live von Eden gelesen — nichts ist fest einprogrammiert, und
+Eden-Modelle müssen nicht im zentralen Modellkatalog von GoModel vorhanden sein.
+Dadurch funktionieren `EDENAI_MODEL_FILTER_MAX_PRICE_PER_MTOK`, kostenbasiertes Load
+Balancing und die Preisanzeige für Eden-Modelle.
+
+Diese ermittelten Preise zeigen die Modell-Metadaten an, und auf sie greift die
+Kostenabrechnung zurück, wenn eine Response keine exakte Gebühr enthält. Die exakten
+Kosten pro Request, die Eden zurückgibt, haben Vorrang, sobald sie verfügbar sind
+(siehe unten).
+
+## Kosten pro Request
+
+Eden gibt die exakte USD-Gebühr für jeden Request als `cost`-Feld auf oberster Ebene
+zurück — bei Chat Completions ebenso wie bei Embeddings —, und GoModel erfasst diesen
+Wert als Kosten des Requests, statt ihn aus den Token-Zahlen neu zu berechnen. Eden
+passt die Preise seiner Upstreams automatisch an und wendet Rabatte auf Kontoebene
+an; sein eigener Wert ist daher in einer Weise maßgeblich, wie es eine
+Rekonstruktion aus einer Preistabelle nicht ist.
+
+Dadurch werden Ausgaben bei Eden in Nutzungsdatensätzen, Budgets,
+Kosten-Dashboards und Observability sichtbar, und der Nutzungseintrag wird mit der
+Kostenquelle `edenai_cost` gekennzeichnet. Enthält eine Response keine verwendbaren
+Kosten, greift GoModel auf die oben beschriebenen ermittelten Preise pro Modell
+zurück.
+
+<Note>
+  Das von Eden zurückgegebene Feld `provider` (`"openai"`, `"deepinfra"`) benennt den
+  Upstream, zu dem Eden geroutet hat. GoModel meldet `edenai` als ausführenden
+  Provider — das ist der Provider, den es aufgerufen hat — und stellt Edens Wert in
+  der Response als `edenai_upstream_provider` erneut bereit, sodass Clients weiterhin
+  sehen können, welcher Upstream den Request bedient hat.
+</Note>
+
+## Responses API
+
+GoModel stellt `/v1/responses` für Eden bereit, indem es **den Request auf Edens
+Chat-Completions-Endpunkt übersetzt**.
+
+<Warning>
+  Edens eigene Route `/v3/responses` ist **nicht** die OpenAI Responses API. Sie
+  nimmt Eden-spezifische Eingaben entgegen (`routing`, `router_candidates`,
+  `fallbacks`) und gibt ein eigenes Response-Objekt zurück; GoModel leitet daher nie
+  dorthin weiter. Betrachten Sie die Unterstützung von `/v1/responses` hier als
+  Übersetzung auf Chat Completions, nicht als native Kompatibilität.
+</Warning>
+
+## Eden-spezifische Request-Felder
+
+Eden akzeptiert bei Chat Completions zusätzliche Felder auf oberster Ebene —
+`routing`, `fallbacks`, `session_id`, `pre_hooks` und `post_hooks`. GoModel behält
+unbekannte JSON-Felder auf oberster Ebene bei Chat-Requests bei, sodass diese Eden
+unverändert erreichen:
+
+```json
+{
+  "model": "openai/gpt-4",
+  "messages": [{ "role": "user", "content": "Hi" }],
+  "fallbacks": ["anthropic/claude-sonnet-latest"]
+}
+```
+
+## Embeddings
+
+Edens Route `/embeddings` ist OpenAI-kompatibel und verwendet dieselben
+`provider/model`-IDs:
+
+```json
+{ "model": "openai/text-embedding-3-small", "input": "hello" }
+```
+
+Embeddings-Responses enthalten dieselben Eden-Erweiterungen wie Chat Completions,
+sodass auch für sie die von Eden gemeldeten exakten `cost` erfasst werden. Edens
+LLM-Katalog (`GET /v3/models`) listet keine Embedding-Modelle auf; Embedding-IDs
+werden daher ohne ermittelte Metadaten weitergeleitet. Legen Sie sie unter
+`models:` fest, wenn sie in `/v1/models` ausgewiesen werden sollen.
+
+## Passthrough
+
+`edenai` ist in der Standard-Allowlist `ENABLED_PASSTHROUGH_PROVIDERS` enthalten,
+sodass `/p/edenai/...`-Routen ohne Aktivierung durch den Betreiber funktionieren.
+Passthrough ist eine generische Weiterleitung: Er sendet jeden angegebenen Pfad
+unverändert an Eden, mit den eigenen Zugangsdaten des Gateways.
+
+## Nicht unterstützte Oberflächen
+
+Files, Batches und Audio werden für Eden nicht bereitgestellt. Requests an diese
+Gateway-Endpunkte werden nicht zu diesem Provider geroutet.

@@ -1,0 +1,154 @@
+---
+title: "版本感知"
+description: "GoModel 如何检查是否有更新的版本、检查时具体发送了什么，以及如何关闭检查。"
+icon: "refresh-cw"
+keywords: ["版本", "更新", "升级", "遥测", "隐私", "离线部署", "version", "update", "upgrade", "telemetry", "privacy", "air-gapped"]
+---
+
+GoModel 每天检查一次是否有更新的版本，因此您无需关注代码仓库也能及时获知升级信息。
+检查结果显示在控制台 **Settings** 页面顶部，也可以通过 `GET /version` 以 JSON 形式获取。
+
+## 我们为什么需要它
+
+我们用它来了解有多少部署正在运行哪个版本的 GoModel。
+
+这在发现安全漏洞时最为重要。它能告诉我们有多少人受到影响、有多少人仍在使用需要修补的版本，
+从而判断推送修复的紧急程度以及发出警告的力度。没有这些信息，我们只能猜测。
+
+**我们建议保持开启。** 它不会发送 API 密钥、提示词、模型名称或用量数据，具体清单请参阅
+[检查时发送的内容](#检查时发送的内容)；如果您愿意，也可以通过一个环境变量将其关闭。
+
+如果您对这些数据有任何顾虑，请告诉我们：在 [GitHub](https://github.com/ENTERPILOT/GoModel/issues)
+上提交 Issue，或在 [Discord](https://discord.gg/gaEB9BQSPH) 上找到我们。涉及安全敏感的问题，
+请使用 [SECURITY.md](https://github.com/ENTERPILOT/GoModel/blob/main/SECURITY.md) 中的联系方式。
+
+检查会读取一个纯文本文件：
+
+| 发行版       | URL                              | 内容        |
+| ------------ | -------------------------------- | ----------- |
+| GoModel      | `(thiswebsite)/version/core.txt` | `X.Y.Z`     |
+| GoModel Pro  | `(thiswebsite)/version/pro.txt`  | `X.Y.Z+pro` |
+
+## 何时运行
+
+有两种触发方式，均有频率限制：
+
+- **每日定时器**，这样即使是无人打开控制台的无界面网关也能获知新版本。首次检查会在启动后随机等待
+  几分钟，且检查间隔带有 ±10% 的抖动，因此同时重启的一批实例不会同步进行检查。
+- **每天首次访问控制台时**，按浏览器计算。名为 `gomodel_version_check` 的 Cookie 保存
+  `YYYY-MM-DD-{id}`，即该浏览器上次检查的日期加上首次访问时生成的随机 ID。每天首次加载之后的
+  每次页面加载，控制台都会读取该日期，并且完全不发出请求。
+
+检查失败或无法访问永远不会被视为错误。网关会提供缓存的结果，并在稍后重试。
+
+## 检查时发送的内容
+
+<Note>
+  永远不会发送与您的流量有关的任何信息：不发送模型名称、提供商名称、提示词或响应、
+  用量或成本数据，也不发送用户路径。
+</Note>
+
+每次检查都携带：
+
+| Header              | 示例        | 含义                                |
+| ------------------- | ----------- | ----------------------------------- |
+| `X-GoModel-Version` | `0.1.81`    | 您正在运行的版本                    |
+| `X-GoModel-App`     | `GoModel`   | `GoModel` 或 `GoModel Pro`          |
+| `X-GoModel-Install` | 一个 UUID   | 匿名的部署 ID，见下文               |
+| `X-GoModel-Source`  | `scheduled` | `scheduled` 或 `dashboard`          |
+
+由控制台访问触发的检查还会转发该次访问中**允许列表**内的部分信息：浏览器的 `User-Agent`、
+`Accept-Language`、`Sec-CH-UA*` 客户端提示，以及访问 Cookie 的值（`X-GoModel-Date`）。
+
+由于采用允许列表，不在列表中的任何内容都会被丢弃，包括 `Cookie`、`Authorization`、
+`X-API-Key` 和 `Referer`。控制台会话凭据或主密钥无法通过此途径离开您的部署。
+
+有两项信息是刻意不发送的：**提供控制台服务的主机名**（它会暴露您的组织身份），以及
+**客户端 IP 地址**（它属于个人数据）。两者都永远不会被发送。
+
+### 安装标识符
+
+首次使用时选定的随机 UUID。它不包含任何关于您的主机、组织、配置或主密钥的信息；
+它存在的唯一目的，是让来自同一部署的重复检查只计为一个部署。禁用检查后，它永远不会被创建。
+
+它保存在部署的数据库中，位于 `runtime_settings` 表（或集合）的 `install_id` 键下，
+并同步到数据目录中的 `install-id`。以数据库中的副本为准：重新创建容器后它依然存在，
+共享同一数据库的副本也会作为同一个部署上报。网关使用本版本首次启动时，会原样沿用早期版本留下的
+`install-id` 文件，除非数据库中已经存在 ID（例如共享该数据库的另一个副本先启动），
+此时以数据库中的 ID 为准，并重写该文件以保持一致。如果启动时无法访问数据库，网关会使用该文件
+（或一个新的随机 ID），直到可以访问数据库为止，并在之后的某次检查中切换到数据库中的 ID，
+而不会在整个进程生命周期内一直使用临时 ID。
+
+当两个副本都不存在时（例如在未挂载卷的情况下重新创建运行 SQLite 的容器），会生成一个新的随机 ID，
+重新创建的容器会被视为一个新部署。请为数据目录挂载卷，以保持相同的 ID。
+
+在这种情况下，早期版本会从 `GOMODEL_MASTER_KEY` 派生该标识符。以这种方式保存的 ID
+会在本版本首次启动时，在数据库和文件中都被替换为随机 ID，因此该部署会以新部署的身份上报一次。
+
+## 如果您不想获取更新，可将其关闭
+
+```bash
+GOMODEL_VERSION_CHECK_ENABLED=false
+```
+
+这会停止所有相关行为：没有定时器，没有出站请求，磁盘上也不会有安装 ID。
+`GET /version` 仍会报告您的本地构建，并带有 `"enabled": false`，控制台则不会显示任何更新通知。
+
+## 离线部署与镜像部署
+
+`GOMODEL_OFFLINE=true` 会同时关闭此检查和远程模型目录的下载；请参阅
+[生产环境指南](/zh/guides/production#离线隔离与离线部署)。
+
+如果您希望在离线环境中仍能收到更新通知，可以将检查指向您自己的主机，并在该主机上提供
+`core.txt`（或 `pro.txt`）：
+
+```bash
+GOMODEL_VERSION_CHECK_URL=https://releases.internal.example.com/version
+```
+
+网关会根据其发行版追加 `/core.txt` 或 `/pro.txt`，并期望得到一个不带前导 `v` 的纯版本字符串。
+
+镜像可以使用语义化版本的**构建元数据**（`1.2.3+mirror`）为该值添加标注，构建元数据不参与版本优先级比较，
+因此是安全的。请不要使用预发布后缀（`1.2.3-mirror`）进行标注：它的优先级*高于*普通的 `1.2.3`，
+又低于 `1.2.3-mirrorx`，导致网关比较的对象与您发布的版本不一致。
+
+## 配置
+
+| 设置                              | 环境变量                                  | 默认值                                  |
+| --------------------------------- | ----------------------------------------- | --------------------------------------- |
+| `version_check.enabled`           | `GOMODEL_VERSION_CHECK_ENABLED`           | `true`                                  |
+| `version_check.url`               | `GOMODEL_VERSION_CHECK_URL`               | `https://gomodel.enterpilot.io/version` |
+| `version_check.interval_hours`    | `GOMODEL_VERSION_CHECK_INTERVAL_HOURS`    | `24`                                    |
+| `version_check.timeout_seconds`   | `GOMODEL_VERSION_CHECK_TIMEOUT_SECONDS`   | `5`                                     |
+| `version_check.max_daily_checks`  | `GOMODEL_VERSION_CHECK_MAX_DAILY`         | `500`                                   |
+
+`max_daily_checks` 限制网关每天出站检查的总次数，因此 `/version` 无法被用作出站请求放大器。
+
+```yaml config.yaml
+version_check:
+  enabled: true
+  interval_hours: 24
+```
+
+## `/version` 端点
+
+公开且无需认证，与 `/health` 并列。它从缓存中返回结果，永远不会阻塞在网络上：到期的检查会在后台运行，
+因此无法访问的版本发布主机永远不会拖慢控制台：
+
+```bash
+curl -s http://localhost:8080/version
+```
+
+```json
+{
+  "app": "GoModel",
+  "version": "0.1.81",
+  "latest": "0.1.82",
+  "update_available": true,
+  "checked_at": "2026-08-26T09:12:44Z",
+  "enabled": true
+}
+```
+
+`update_available` 的判断是保守的：忽略构建元数据，预发布版本按语义化版本规范进行比较
+（`1.0.0-rc1` < `1.0.0-rc2` < `1.0.0`），且开发构建（`dev`、仅有提交哈希）永远不会报告有可用更新。

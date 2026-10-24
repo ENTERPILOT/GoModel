@@ -1,0 +1,84 @@
+---
+title: "DeepInfra"
+description: "Configure DeepInfra in GoModel for chat, Responses, embeddings, images, audio, and batches."
+icon: "server"
+keywords: ["DeepInfra", "open models", "provider setup", "batches", "images", "audio"]
+---
+
+DeepInfra serves open and proxied models through an OpenAI-compatible API at
+`https://api.deepinfra.com/v1/openai`. GoModel routes these endpoints to it unchanged:
+
+| GoModel endpoint | DeepInfra models |
+| ---------------- | ---------------- |
+| `/v1/chat/completions` | chat models (`Qwen/Qwen3-32B`, `openai/gpt-oss-120b`, ...) |
+| `/v1/responses` | chat models, served by DeepInfra's native Responses API |
+| `/v1/embeddings` | embedding models (`Qwen/Qwen3-Embedding-0.6B`, `BAAI/bge-m3`, ...) |
+| `/v1/images/generations`, `/v1/images/edits` | image models (`black-forest-labs/FLUX-1-schnell`, `Bria/fibo_edit`, ...) |
+| `/v1/audio/speech` | TTS models (`hexgrad/Kokoro-82M`, ...) |
+| `/v1/audio/transcriptions`, `/v1/audio/translations` | STT models (`openai/whisper-large-v3-turbo`, ...) |
+| `/v1/files`, `/v1/batches` | DeepInfra's batch API |
+
+## Configure
+
+Create an API key in the [DeepInfra dashboard](https://deepinfra.com/dash/api_keys) and set:
+
+```bash
+DEEPINFRA_API_KEY=...
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  deepinfra:
+    type: deepinfra
+    api_key: "${DEEPINFRA_API_KEY}"
+    # base_url defaults to "https://api.deepinfra.com/v1/openai".
+```
+
+Override the base URL or pin a model list only when you need to:
+
+```bash
+DEEPINFRA_BASE_URL=https://api.deepinfra.com/v1/openai
+DEEPINFRA_MODELS=Qwen/Qwen3-32B,Qwen/Qwen3-Embedding-0.6B
+```
+
+## Models
+
+GoModel reads DeepInfra's live `/models` listing, including each model's kind
+(chat, embedding, image, speech, transcription), context length, reasoning and
+vision tags, and prices. Video generation models are left out because GoModel
+has no video endpoint for DeepInfra. Model IDs contain a slash; use them
+verbatim, or prefix the provider name to pin the route:
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "deepinfra/Qwen/Qwen3-32B", "messages": [{"role": "user", "content": "Hello"}]}'
+```
+
+Both `reasoning_effort` and `reasoning: {"effort": ...}` are honored by
+DeepInfra's reasoning models, and `none` turns thinking off on hybrid models
+such as Qwen3.
+
+## Behavior notes
+
+- **Responses are stateless.** DeepInfra keeps no responses, so `store: true`
+  has no upstream effect. With a GoModel response store configured,
+  `previous_response_id` chains still work: the gateway replays the stored
+  history before dispatch. Without one, DeepInfra rejects `previous_response_id`
+  and `conversation` with an invalid-request error.
+- **Structured Responses output goes through chat.** DeepInfra's native
+  Responses endpoint rejects every `text` setting (`text.format`,
+  `text.verbosity`), so GoModel serves those requests through chat
+  completions, where `json_schema` and `json_object` work.
+- **Speech defaults to MP3.** DeepInfra answers WAV when `response_format` is
+  omitted; GoModel sends OpenAI's default (`mp3`) instead. Set
+  `response_format` explicitly to get another format.
+- **Image pricing is per image unit.** DeepInfra lists image prices per image
+  unit, and GoModel records that rate as the per-image price. Cost tracking is
+  approximate for models DeepInfra bills by size or step count.
+- **Passthrough is opt-in.** Add `deepinfra` to `ENABLED_PASSTHROUGH_PROVIDERS`
+  to expose `/p/deepinfra/...`, which forwards any path under the base URL with
+  the gateway's DeepInfra key.

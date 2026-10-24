@@ -1,0 +1,130 @@
+---
+title: "FAQ"
+description: "Aktualizacja, przypinanie wersji i odinstalowywanie GoModel; gdzie gateway przechowuje dane i dlaczego część projektu jest komercyjna."
+icon: "lightbulb"
+keywords: ["faq", "aktualizacja", "update", "odinstalowanie", "uninstall", "lokalizacja danych", "data location", "przypinanie wersji", "version pinning", "open source", "licencja", "license", "pro"]
+---
+
+## Jak zaktualizować GoModel?
+
+Najpierw zrób kopię zapasową bazy danych – na stronie [Aktualizacja GoModel](/pl/guides/updating)
+znajdziesz polecenia backupu dla każdego backendu storage, a także weryfikację i rollback. Następnie:
+
+<Tabs>
+  <Tab title="Docker">
+    ```bash
+    docker pull enterpilot/gomodel
+    ```
+
+    Następnie utwórz kontener ponownie. Z Docker Compose:
+
+    ```bash
+    docker compose pull && docker compose up -d
+    ```
+  </Tab>
+  <Tab title="macOS / Linux">
+    Uruchom ponownie instalator – zawsze pobiera najnowszy release i podmienia
+    plik binarny w miejscu:
+
+    ```bash
+    curl -fsSL https://gomodel.enterpilot.io/install.sh | sh
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    irm https://gomodel.enterpilot.io/install.ps1 | iex
+    ```
+  </Tab>
+</Tabs>
+
+Po aktualizacji zrestartuj gateway; nie ma aktualizacji „na gorąco” w miejscu.
+
+## Jak sprawdzić, którą wersję uruchamiam?
+
+```bash
+gomodel --version
+```
+
+Wersja jest też wypisywana w pierwszej linii logu startowego.
+
+## Czy mogę zainstalować konkretną wersję albo wrócić do poprzedniej?
+
+Tak – ustaw `GOMODEL_VERSION` przed uruchomieniem instalatora:
+
+```bash
+curl -fsSL https://gomodel.enterpilot.io/install.sh | GOMODEL_VERSION=vX.Y.Z sh
+```
+
+W Windows najpierw ustaw `$env:GOMODEL_VERSION`. W Dockerze użyj tagu wersji
+(`enterpilot/gomodel:X.Y.Z`) zamiast `latest`. Zastąp `X.Y.Z`
+[opublikowanym release'em GoModel](https://github.com/ENTERPILOT/GoModel/releases).
+
+## Czy aktualizacja jest bezpieczna dla moich danych?
+
+Tak, sama aktualizacja jest bezpieczna. Schemat jest migrowany przy starcie,
+a aktualizacja nigdy nie przenosi ani nie usuwa bazy danych, konfiguracji ani cache'u.
+
+Powrót do starszej wersji wymaga ostrożności. Większość migracji tylko dodaje
+elementy, a starszy plik binarny ignoruje to, czego nie zna – ale niektóre
+release'y przebudowują storage do nowego kształtu, jak w przypadku budżetów
+z zakresem i rate limitów, i starszy plik binarny nie znajdzie tego, czego oczekuje.
+Zamiast tego przywróć kopię zapasową wykonaną przed aktualizacją. GoModel
+wydawany jest często, więc rób ją przy każdej aktualizacji:
+polecenia znajdziesz na stronie [Aktualizacja GoModel](/pl/guides/updating#1-wykonaj-kopię-zapasową-bazy-danych).
+
+## Gdzie GoModel przechowuje dane?
+
+Jeśli katalog `./data` istnieje obok miejsca, z którego uruchamiasz GoModel
+(istniejące wdrożenia, obraz Dockera), baza danych pozostaje w `./data/gomodel.db`.
+W przeciwnym razie plik binarny korzysta ze standardowych katalogów użytkownika
+w Twoim systemie operacyjnym:
+
+| | Baza danych | Cache modeli |
+| --- | --- | --- |
+| Linux | `~/.local/share/gomodel/` | `~/.cache/gomodel/` |
+| macOS | `~/Library/Application Support/gomodel/` | `~/Library/Caches/gomodel/` |
+| Windows | `%LocalAppData%\gomodel\` | `%LocalAppData%\gomodel\cache\` |
+
+Rozwiązana ścieżka bazy danych jest wypisywana przy starcie (`storage configured`).
+`SQLITE_PATH` nadpisuje ścieżkę bazy danych, a `GOMODEL_CACHE_DIR` nadpisuje
+katalog cache'u modeli. Dostępne od
+v0.1.54; starsze pliki binarne zawsze używają `./data` względem katalogu
+roboczego.
+
+## Jak odinstalować GoModel?
+
+Usuń plik binarny oraz – jeśli chcesz zacząć od zera – katalogi z danymi:
+
+```bash
+rm "$(command -v gomodel)"
+rm -rf ~/.local/share/gomodel ~/.cache/gomodel   # Linux
+rm -rf ~/Library/"Application Support"/gomodel ~/Library/Caches/gomodel   # macOS
+```
+
+W Windows usuń `%LOCALAPPDATA%\Programs\gomodel` (oraz
+`%LOCALAPPDATA%\gomodel` z danymi), a następnie usuń ten folder z PATH
+użytkownika. W przypadku Dockera usuń kontener i obraz jak zwykle.
+
+## Dlaczego GoModel nie jest w 100% open source?
+
+Prawie cały jest. Gateway jest na licencji MIT i tak pozostanie. Niewielka
+komercyjna dystrybucja – [GoModel Pro](/pl/pro/overview), dodająca OIDC SSO
+i kilka innych rozszerzeń – jest w drodze; stanowi mniej więcej 3% kodu.
+
+**Projekt może jeszcze stać się w pełni otwarty.** Podwójna licencja albo coś
+w rodzaju BSL pozwoliłyby zachować cały kod do wglądu, audytu i forkowania,
+a jednocześnie chronić go komercyjnie. Otwarcie projektu jest uczciwsze niż jego
+zamknięcie, więc w tę stronę się skłaniamy.
+
+**Ale projekt musi na siebie zarabiać.** Po dziewięciu miesiącach pracy GoModel
+zarobił łącznie 90 $ (sierpień 2026). Z tego nie da się żyć. Utrzymanie małej
+części jako komercyjnej oznacza, że płacą firmy, które zarabiają na dobrze
+zbudowanym AI gateway, a dla wszystkich pozostałych pozostaje on darmowy. To
+wydaje się najuczciwszym dostępnym układem.
+
+**O poszczególnych funkcjach można rozmawiać.** Jeśli coś planowanego w Pro
+to funkcja, której potrzebujesz jako developer, a płacenie za Pro nie ma dla
+Ciebie sensu, daj nam znać. Tańsza licencja do użytku osobistego – albo
+udostępnienie tej konkretnej funkcji jako open source – wchodzi w grę. Zapytaj na
+[Discordzie](https://discord.gg/gaEB9BQSPH) lub na
+[GitHubie](https://github.com/ENTERPILOT/GoModel/issues).

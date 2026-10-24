@@ -1,0 +1,85 @@
+---
+title: "出站代理池"
+sidebarTitle: "出站代理池"
+description: "通过具名的 HTTP 或 SOCKS5 代理池发送提供商流量，支持健康检查、故障转移，以及将提供商分配到代理池的规则。"
+icon: "route"
+tag: "Pro"
+keywords: ["GoModel Pro", "出站", "egress", "代理池", "proxy pool", "SOCKS5", "HTTP 代理", "HTTP proxy", "故障转移", "failover", "静态 IP", "static IP", "健康检查", "health check"]
+---
+
+## 概览
+
+开源版 GoModel 通过 [`proxy_url`](/zh/providers/outbound-proxy) 让一个提供商经由一个代理发送流量。这对于单个有地域限制的提供商已经足够，但如果一组提供商必须始终经由白名单中的出站 IP 访问，就不够了：一旦这个唯一的代理宕机，其后的所有请求都会失败。
+
+出站代理池补齐了缺失的能力：
+
+- **代理池**：由 HTTP、HTTPS、SOCKS5 或 SOCKS5h 代理组成，按 `failover`（按顺序选择第一个健康的代理）或 `round_robin` 策略选择。
+- **健康检查**：按计划探测每个代理，跳过失败的成员，并在其恢复正常后重新启用。
+- **规则**：按名称模式或提供商类型将提供商分配到代理池，因此新增的提供商无需修改其自身配置即可被覆盖。
+
+提供商自身的 `proxy_url` 仍优先于任何规则。未匹配任何规则的提供商继续沿用网关全局的 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NO_PROXY` 行为。
+
+<Warning>
+  与 SSO 一样，启用后的出站代理采用失败即拒绝（fail closed）策略：如果缺少 `egress` 授权或配置无效，启动会中止。本应经由代理发出的流量绝不会悄悄改为从网关自身的地址发出。
+</Warning>
+
+## 配置代理池
+
+在 GoModel 主 YAML 配置的 `extensions.egress` 下进行配置：
+
+```yaml
+extensions:
+  egress:
+    enabled: true
+    proxies:
+      eu:
+        urls:
+          - socks5://user:${EU_PROXY_PASSWORD}@10.0.0.1:1080
+          - socks5://user:${EU_PROXY_PASSWORD}@10.0.0.2:1080
+        strategy: failover
+        check_url: https://api.openai.com/v1/models
+      us:
+        urls: [http://egress-us.internal:3128]
+    rules:
+      - providers: ["openai*", "type:anthropic"]
+        proxy: eu
+      - providers: ["*"]
+        proxy: us
+```
+
+规则按顺序评估，第一个匹配的规则生效。模式匹配的是提供商名称（`openai-eu`、`openai*`）；带有 `type:` 前缀时则匹配提供商类型（`type:gemini`）。如果只有一个代理池且没有规则，所有提供商都会使用该代理池。
+
+同样的设置也可以通过环境变量配置，环境变量会覆盖 YAML 中的值。每个 `PRO_EGRESS_PROXY_<NAME>` 对应一个代理池；名称转为小写并将下划线替换为连字符后作为代理池名称（`EU_STATIC` 变为 `eu-static`）：
+
+```bash
+PRO_EGRESS_ENABLED=true
+PRO_EGRESS_PROXY_EU=socks5://user:pass@10.0.0.1:1080,socks5://user:pass@10.0.0.2:1080
+PRO_EGRESS_PROXY_EU_STRATEGY=failover
+PRO_EGRESS_PROXY_EU_CHECK_URL=https://api.openai.com/v1/models
+PRO_EGRESS_PROXY_US=http://egress-us.internal:3128
+PRO_EGRESS_RULES=openai*=eu,type:anthropic=eu,*=us
+```
+
+| 设置 | 默认值 | 何时修改 |
+| --- | --- | --- |
+| `strategy` | `failover` | 使用 `round_robin` 在成员之间分摊负载，而不是优先使用第一个成员。 |
+| `check_url` | 未设置（TCP 拨测） | 设置一个 URL，以证明代理确实能够访问互联网，而不仅仅是能接受连接。 |
+| `health_check_interval` | `30s` | 当需要在半分钟内更快发现失效代理时，调低该值。 |
+| `health_check_timeout` | `5s` | 对于距离网关较远的慢速代理，调高该值。 |
+| `failure_threshold` | `2` | 成员被跳过前需要连续失败的探测次数。链路不稳定时调高该值。 |
+
+## 健康检查与故障转移
+
+在网关处理第一个请求之前，每个成员都会先被探测，因此已经宕机的代理永远不会收到流量。未设置 `check_url` 时，探测是到代理端口的 TCP 连接。设置 `check_url` 后，探测是一个经由代理发送的 `HEAD` 请求；任何被转发回来的响应都视为健康，包括目标返回的 `401` 或 `404`，而 `5xx` 则视为失败，因为正向代理在无法访问目标时会自行返回 `502`、`503` 和 `504`。
+
+首次探测之后，成员需要连续失败 `failure_threshold` 次才会被跳过，成功一次即可恢复。当代理池的所有成员都不健康时，该代理池仍会被使用（从第一个成员开始），并且每次故障期间只记录一次警告。已匹配的代理池永远不会回退为直接连接。
+
+## 检查
+
+健康状态的变化会记录到日志中，包含代理池名称、成员位置以及代理 URL（其中的密码会被遮蔽）。Prometheus 暴露以下指标：
+
+- `gomodel_pro_egress_proxy_healthy{pool,member,proxy}`：成员处于轮换中时为 `1`。
+- `gomodel_pro_egress_health_checks_total{pool,member,proxy,result}`：按结果统计的探测次数。
+- `gomodel_pro_egress_selections_total{pool,member,proxy}`：每个成员被选中处理的请求数。
+
+对 `gomodel_pro_egress_proxy_healthy == 0` 设置告警，以便在代理池的成员耗尽之前发现失效的代理。

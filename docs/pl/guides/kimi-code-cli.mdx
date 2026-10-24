@@ -1,0 +1,225 @@
+---
+title: "GoModel i Kimi Code CLI"
+description: "Kieruj ruch Kimi Code CLI przez GoModel bez URL-a rejestru api.json, skonfiguruj profil modelu i zweryfikuj prompty oraz wywołania narzędzi."
+icon: "terminal"
+keywords: ["Kimi Code", "Kimi Code CLI", "Kimi CLI", "api.json", "coding agent", "agent kodujący", "konfiguracja", "setup guide"]
+---
+
+Kimi Code CLI może korzystać z GoModel jako providera kompatybilnego z OpenAI. W pliku
+`~/.kimi/config.toml` Kimi konfigurujesz bazowy URL GoModel, dedykowany zarządzany klucz API
+i co najmniej jeden model.
+
+Przepływ:
+
+`Kimi Code CLI -> GoModel -> upstream model provider`
+
+## Nie potrzebujesz URL-a `api.json`
+
+Opcja **Custom registry (`api.json`)** w Kimi importuje katalog providerów
+w formacie models.dev. Jest opcjonalna i nie jest standardową ścieżką konfiguracji
+dla API kompatybilnego z OpenAI.
+
+GoModel udostępnia swój katalog modeli pod `/v1/models`, ale ta odpowiedź używa
+formatu listy modeli OpenAI, a nie formatu niestandardowego rejestru Kimi. Nie wklejaj
+`http://localhost:8080/v1/models` w prompt `api.json` w Kimi. Wyjdź z tego
+promptu i zamiast tego użyj bezpośredniej konfiguracji opisanej poniżej.
+
+<Note>
+  Jeśli szukałeś `pi.json`, Kimi wyświetla nazwę pliku `api.json`.
+  Żaden z tych plików nie jest potrzebny w tej konfiguracji.
+</Note>
+
+## Zanim zaczniesz
+
+- Zainstaluj [Kimi Code CLI](https://moonshotai.github.io/kimi-cli/en/guides/getting-started.html).
+- Wybierz master key GoModel do administrowania gatewayem, na przykład
+  `change-me`.
+- Upewnij się, że GoModel ma upstreamowe dane uwierzytelniające dla modelu, którego chcesz używać.
+
+## 1. Uruchom GoModel
+
+Uruchom GoModel z master key i co najmniej jednym upstreamowym providerem. Ten
+przykład korzysta z OpenAI:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e OPENAI_API_KEY="sk-..." \
+  enterpilot/gomodel
+```
+
+`GOMODEL_MASTER_KEY` to dane uwierzytelniające gatewaya do bootstrapu i administracji.
+Nie umieszczaj go w trwałej konfiguracji Kimi. `OPENAI_API_KEY` należy do
+GoModel i jest używany wyłącznie do upstreamowego requestu.
+
+## 2. Utwórz dedykowany klucz API dla Kimi
+
+Otwórz dashboard GoModel pod adresem
+[http://localhost:8080/admin/dashboard](http://localhost:8080/admin/dashboard)
+i zaloguj się za pomocą `GOMODEL_MASTER_KEY`. Przejdź do
+`API Keys -> Create API Key`, a następnie:
+
+1. Nazwij klucz `kimi-code`.
+2. Ustaw **User Path** na `/agents/kimi`.
+3. Pozostaw **Dashboard access** wyłączone.
+4. Utwórz klucz i skopiuj wartość `sk_gom_...`. Jest wyświetlana tylko raz.
+
+Przypisana ścieżka użytkownika daje Kimi własny zakres użycia i audytu. Zarządzane klucze są przypisywane
+bezpośrednio do ścieżki użytkownika, a ograniczenia modeli konfiguruje się osobno jako
+[polityki dostępu do modeli](/pl/features/user-path#dostęp-do-modeli) obowiązujące w całym gatewayu. Jeśli
+korzystasz z tych polityk, zezwól dla `/agents/kimi` tylko na selektory, których potrzebuje Kimi.
+
+<Warning>
+  W Kimi używaj tego zarządzanego klucza, a nie `GOMODEL_MASTER_KEY`. Zarządzany klucz bez
+  dostępu do dashboardu może wywoływać endpointy modeli, ale nie może czytać logów audytowych, tworzyć
+  kluczy ani zmieniać ustawień gatewaya. Master key omija to ograniczenie.
+</Warning>
+
+## 3. Wybierz model
+
+Wyświetl modele widoczne przez GoModel:
+
+```bash
+curl -s http://localhost:8080/v1/models \
+  -H "Authorization: Bearer sk_gom_..." \
+  | jq '.data[] | {
+      id,
+      context_window: .metadata.context_window,
+      max_output_tokens: .metadata.max_output_tokens
+    }'
+```
+
+Ten przewodnik używa `openai/gpt-5-mini` z oknem kontekstu 400 000 tokenów i
+limitem wyjścia 128 000 tokenów. Wybieraj identyfikator z prefiksem providera z tej
+odpowiedzi, żeby GoModel kierował request do właściwego providera.
+
+## 4. Skonfiguruj Kimi Code CLI
+
+Otwórz `~/.kimi/config.toml` i dodaj:
+
+```toml
+default_model = "gomodel/gpt-5-mini"
+default_thinking = true
+
+[providers.gomodel]
+type = "openai_legacy"
+base_url = "http://localhost:8080/v1"
+api_key = "sk_gom_..."
+
+[models."gomodel/gpt-5-mini"]
+provider = "gomodel"
+model = "openai/gpt-5-mini"
+max_context_size = 400000
+capabilities = ["thinking", "image_in"]
+```
+
+Alias `gomodel/gpt-5-mini` jest lokalny dla Kimi. Wartość `model` to
+dokładny selektor, który Kimi wysyła do GoModel.
+
+<Warning>
+  Kimi nie odczytuje automatycznie zwykłych danych uwierzytelniających providerów, takich jak
+  `OPENAI_API_KEY`, z Twojej powłoki dla trwale skonfigurowanych providerów. W tym pliku
+  `api_key` musi zawierać dedykowany zarządzany klucz GoModel, a nie master key
+  ani klucz upstreamowego providera. Ogranicz dostęp za pomocą
+  `chmod 600 ~/.kimi/config.toml`.
+</Warning>
+
+Gdy konfigurujesz inny model, użyj wartości `context_window` zwróconej przez GoModel jako `max_context_size`.
+Capability `thinking` i
+`default_thinking = true` pasują do użytego tu modelu reasoningowego. Dostosuj
+capabilities w Kimi do innego modelu.
+
+Jeśli GoModel działa na innym hoście, zamień `localhost:8080`. Zachowaj `/v1` w
+bazowym URL-u; nie dopisuj `/chat/completions`.
+
+## 5. Zweryfikuj konfigurację
+
+Sprawdź zainstalowaną wersję Kimi:
+
+```bash
+kimi --version
+```
+
+Następnie uruchom krótki prompt:
+
+```bash
+kimi --quiet -p 'Reply with exactly ok and no punctuation.'
+```
+
+Oczekiwana odpowiedź modelu:
+
+```text
+ok
+```
+
+Możesz też zweryfikować tool calling:
+
+```bash
+kimi --quiet -p 'Use the Shell tool to run pwd. After it succeeds, reply with exactly tool-ok and no punctuation.'
+```
+
+Końcowa odpowiedź modelu powinna brzmieć:
+
+```text
+tool-ok
+```
+
+## 6. Sprawdź ruch w GoModel
+
+Otwórz logi audytowe w dashboardzie GoModel:
+
+[http://localhost:8080/admin/dashboard/audit](http://localhost:8080/admin/dashboard/audit)
+
+Na podstawie śladu audytowego potwierdź, że Kimi wysyła requesty streamingowe do
+`POST /v1/chat/completions` i że GoModel kieruje je do wybranego
+providera. Zaloguj się za pomocą master key lub osobnego zarządzanego klucza z
+dostępem do dashboardu; klucz Kimi celowo nie może otworzyć tej strony.
+
+## Rozwiązywanie problemów
+
+### Kimi prosi o URL `api.json`
+
+Wybrałeś w Kimi przepływ importu niestandardowego rejestru. Anuluj go i edytuj
+`~/.kimi/config.toml` tak jak pokazano powyżej. GoModel nie potrzebuje endpointu
+rejestru, żeby Kimi działało.
+
+### `401 Unauthorized`
+
+Upewnij się, że `api_key` w Kimi odpowiada aktywnemu zarządzanemu kluczowi `sk_gom_...` utworzonemu
+dla Kimi. Nie umieszczaj w konfiguracji Kimi master key ani klucza upstreamowego providera.
+
+### `reasoning_effort` jest odrzucane
+
+Użyj modelu, który akceptuje reasoning effort, zadeklaruj capability `thinking`
+i włącz `default_thinking`, tak jak w przetestowanym przykładzie. Kimi CLI 1.49.0 wysyła
+jawną wartość `reasoning_effort` przez `openai_legacy`; modele bez reasoningu
+mogą ją odrzucić.
+
+### Model nie został znaleziony
+
+Skopiuj dokładny identyfikator modelu z `/v1/models`. Jeśli ten sam model udostępnia
+więcej niż jeden provider, użyj identyfikatora z prefiksem providera, na przykład
+`openai/gpt-5-mini`.
+
+## Materiały źródłowe
+
+- Kimi Code CLI: [Getting started](https://moonshotai.github.io/kimi-cli/en/guides/getting-started.html)
+- Kimi Code CLI: [Providers and models](https://moonshotai.github.io/kimi-cli/en/configuration/providers.html)
+- Kimi Code CLI: [Configuration files](https://moonshotai.github.io/kimi-cli/en/configuration/config-files.html)
+
+## Zweryfikowano 8 sierpnia 2026
+
+Ten przewodnik zweryfikowano na:
+
+- lokalnej instancji GoModel pod `http://localhost:8080`
+- Kimi Code CLI `1.49.0`
+- `openai/gpt-5-mini` przez Chat Completions API kompatybilne z OpenAI w GoModel
+
+Lokalna weryfikacja potwierdziła, że:
+
+- Kimi zaakceptowało opisaną konfigurację TOML z dedykowanym zarządzanym kluczem,
+  który miał ścieżkę użytkownika `/agents/kimi` i nie miał dostępu do dashboardu
+- `kimi --quiet -p` zwróciło `ok` przez `Kimi Code CLI -> GoModel -> OpenAI`
+- Kimi wywołało swoje narzędzie Shell i zwróciło `tool-ok` tą samą drogą
+- klucz Kimi mógł wyświetlać i wywoływać modele, ale z Admin API otrzymywał `403`
+- nie była potrzebna żadna zmiana w aplikacji GoModel ani endpoint `api.json`

@@ -1,0 +1,223 @@
+---
+title: "GoModel & Langfuse"
+description: "Senden Sie GoModel-Gateway-Traces mit Token-Nutzung und optionalen Prompts per OTLP an Langfuse, oder richten Sie das Langfuse SDK auf GoModel aus und führen Sie beides zu einem Trace zusammen."
+icon: "telescope"
+keywords: ["Langfuse", "LLM-Observability", "LLM observability", "Tracing", "OTLP", "OpenTelemetry", "Prompt-Tracing", "langfuse.openai", "self-hosted", "Einrichtungsanleitung"]
+---
+
+## Übersicht
+
+Langfuse ist eine Open-Source-Plattform für LLM-Engineering: Traces, Token- und Kostenanalysen,
+Prompt-Management und Evals. Sie lässt sich auf zwei einander ergänzende Arten mit GoModel
+kombinieren:
+
+- **Gateway-Traces.** Der [OpenTelemetry-Exporter](/de/guides/opentelemetry) von GoModel sendet für
+  jeden Request einen Trace an den OTLP-Endpunkt von Langfuse. Jeder Client des Gateways ist
+  abgedeckt, ohne den Anwendungscode anzufassen, und jeder Trace zeigt das Modell, den Provider, der
+  es bereitgestellt hat, Latenz, Token-Nutzung und Kosten, Status sowie jeden Retry und jedes
+  Failover. Prompts und Completions werden nur hinzugefügt, wenn Sie die Erfassung von Inhalten
+  aktivieren.
+- **Anwendungs-Traces.** Der OpenAI-Drop-in-Wrapper des Langfuse SDK, mit GoModel als Base-URL.
+  Langfuse zeichnet vollständige Prompts, Completions und Token-Nutzung auf; GoModel liefert
+  darunter Routing, Failover, Caching sowie ein eigenes
+  [Audit-Log](/de/advanced/configuration#audit-logging) und eine eigene Kostenerfassung.
+
+Verwenden Sie einen der beiden Wege allein oder beide zusammen – mit Weitergabe des
+W3C-Trace-Kontexts werden sie pro Request zu einem einzigen Langfuse-Trace zusammengeführt (siehe
+[Ein Trace von Ende zu Ende](/de/guides/langfuse#3-ein-trace-von-ende-zu-ende)).
+
+`App (Langfuse SDK) -> GoModel -> OpenAI/Anthropic/Gemini/...`, wobei Traces von beiden
+Stationen in Langfuse ankommen.
+
+## 1. Gateway-Traces an Langfuse senden
+
+Langfuse nimmt OTLP-Traces unter `/api/public/otel` entgegen, authentifiziert mit dem API-Key-Paar
+eines Projekts. Kodieren Sie die Keys in Base64:
+
+```bash
+echo -n "pk-lf-...:sk-lf-..." | base64
+```
+
+Aktivieren Sie dann den Exporter von GoModel:
+
+<CodeGroup>
+
+```bash Self-hosted Langfuse
+OTEL_ENABLED=true
+OTEL_EXPORTER_OTLP_ENDPOINT=http://langfuse-web:3000/api/public/otel
+OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic <base64 above>,x-langfuse-ingestion-version=4"
+OTEL_METRICS_EXPORTER=none
+```
+
+```bash Langfuse Cloud
+OTEL_ENABLED=true
+OTEL_EXPORTER_OTLP_ENDPOINT=https://cloud.langfuse.com/api/public/otel
+OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic <base64 above>,x-langfuse-ingestion-version=4"
+OTEL_METRICS_EXPORTER=none
+```
+
+</CodeGroup>
+
+In einer Shell sind die Anführungszeichen wichtig: Der Header-Wert enthält ein Leerzeichen. Lassen
+Sie sie in einer Docker-`.env`-Datei weg – dort würden sie Teil des Werts.
+
+| Variable | Zweck |
+| --- | --- |
+| `OTEL_ENABLED` | Export-Schalter von GoModel; standardmäßig deaktiviert. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Basispfad für die OTLP-Aufnahme von Langfuse. Das SDK hängt `/v1/traces` an. Verwenden Sie `https://us.cloud.langfuse.com/...` für die US-Region von Langfuse Cloud. |
+| `OTEL_EXPORTER_OTLP_HEADERS` | Basic Auth aus dem Public und Secret Key des Projekts sowie der Header, der direkt in das aktuelle (v4-)Datenmodell von Langfuse aufnimmt. |
+| `OTEL_METRICS_EXPORTER` | Langfuse akzeptiert nur Traces, deaktivieren Sie also Metriken – oder senden Sie sie stattdessen mit `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` an einen separaten Collector. |
+
+Behalten Sie das Standardprotokoll `http/protobuf` bei: Der OTLP-Endpunkt von Langfuse spricht kein
+gRPC. Die API-Keys finden Sie in Langfuse unter **Project Settings -> API Keys**; selbst gehostete
+Deployments können sie auch mit den
+[`LANGFUSE_INIT_*`-Variablen](https://langfuse.com/self-hosting/administration/headless-initialization)
+vorab bereitstellen. Wie Sie Langfuse selbst betreiben, beschreibt der
+[Docker-Compose-Schnellstart](https://langfuse.com/self-hosting/deployment/docker-compose) –
+`git clone https://github.com/langfuse/langfuse.git && cd langfuse && docker compose up`,
+UI auf Port 3000.
+
+<Warning>
+  Der Basic-Auth-Header enthält bei jedem Export Ihren Langfuse-Secret-Key. Verwenden Sie einen
+  `https://`-Endpunkt, sofern Langfuse nicht auf demselben Host läuft; GoModel gibt beim Start eine
+  Warnung aus, wenn Auth-Header mit einem unverschlüsselten Endpunkt außerhalb von Loopback
+  konfiguriert sind.
+</Warning>
+
+### Was in Langfuse erscheint
+
+Jeder Gateway-Request wird zu einem Trace: ein `POST /v1/chat/completions`-Span mit einer
+verschachtelten Generation pro Provider-Aufruf, benannt nach Operation und Modell
+(`chat gpt-5-mini`). Die Generation enthält das Modell, mit dem der Provider geantwortet hat, die
+Input- und Output-Token-Anzahl und den Finish Reason, sodass Langfuse sie anhand seines
+Modellkatalogs bepreist und seine Kosten- und Token-Dashboards füllt. Ihre Metadaten enthalten
+außerdem `gen_ai.provider.name` und `gomodel.provider.name` (den exakten Provider aus Ihrer
+Konfiguration). Ein Request mit [Failover](/de/features/failover) zeigt daher eine Generation pro
+Versuch – welcher Provider mit welcher Fehlerklasse fehlgeschlagen ist und welcher geantwortet hat,
+mit der Nutzung beim erfolgreichen Versuch.
+
+Gestreamte Chat Completions, die Responses API und übersetzte `/v1/messages`-Aufrufe erhalten eine
+Generation, die bis zum Ende des Streams dauert, mit derselben Nutzung. `/v1/messages`-Requests,
+die GoModel nativ an einen Anthropic-Provider weiterleitet, erscheinen ohne Nutzung.
+
+Langfuse berechnet Kosten anhand seiner eigenen Preisliste. Die
+[Kostenerfassung](/de/features/cost-tracking) von GoModel wendet Ihre Preis-Overrides und
+Cache-Tarife an, daher können die beiden Summen voneinander abweichen.
+
+### Prompts und Completions erfassen
+
+Prompts und Completions bleiben außerhalb der Telemetrie, sofern Sie die Erfassung von Inhalten
+nicht aktivieren:
+
+```bash
+OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true
+```
+
+Jede Generation zeigt dann die Request-Nachrichten als Input und die Response als Output,
+einschließlich Tool Calls und Tool-Ergebnissen. Bilder und Dateien erscheinen nur mit ihrem Typ,
+und sehr langer Text wird gekürzt; siehe
+[Erfassung von Prompts und Completions](/de/guides/opentelemetry#erfassung-von-prompts-und-completions).
+
+<Warning>
+  Die Erfassung von Inhalten sendet jeden gesampelten Prompt und jede gesampelte Completion an
+  Langfuse. Lassen Sie sie deaktiviert, wenn diese Daten das Gateway nicht verlassen dürfen; das
+  [Audit-Log](/de/advanced/configuration#audit-logging) zeichnet sie stattdessen in Ihrem eigenen
+  Speicher auf.
+</Warning>
+
+## 2. Aus der Anwendung mit dem Langfuse SDK tracen
+
+Um stattdessen aus der Anwendung zu tracen – etwa um Aufrufe in eigenen Spans zu gruppieren oder
+Langfuse-Prompt-Versionen anzuhängen –, instrumentieren Sie sie mit dem OpenAI-Wrapper von Langfuse
+und richten Sie ihn auf GoModel aus. In einer bestehenden App mit dem OpenAI SDK sind dafür zwei
+Zeilen zu ändern:
+
+```python
+# pip install langfuse openai
+# LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY und LANGFUSE_BASE_URL
+# (z. B. http://localhost:3000 bei Self-Hosting) sind in der Umgebung gesetzt
+from langfuse.openai import OpenAI  # statt: from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",  # GoModel
+    api_key="<gomodel-api-key>",
+)
+
+response = client.chat.completions.create(
+    model="anthropic/claude-haiku-4-5-20251001",  # jedes Modell, das GoModel bereitstellt
+    messages=[{"role": "user", "content": "Hello"}],
+)
+```
+
+Langfuse zeichnet für jeden Aufruf, auch beim Streaming, die Nachrichten, die Completion und die
+Token-Nutzung auf und bepreist sie anhand seines Modellkatalogs. Da die Base-URL auf GoModel zeigt,
+erreicht ein einziger Client jeden konfigurierten Provider über Modell-IDs mit Provider-Präfix
+(`openai/gpt-5-mini`, `gemini/gemini-2.5-flash`,
+[virtuelle Modelle](/de/features/virtual-models)), und jeder Aufruf erhält weiterhin Failover,
+Caching, Budgets und den Audit-Trail von GoModel. Der
+[JS/TS-Wrapper](https://langfuse.com/integrations/model-providers/openai-js) funktioniert genauso.
+
+## 3. Ein Trace von Ende zu Ende
+
+Sind beide Wege aktiviert, erzeugt ein LLM-Aufruf zwei getrennte Langfuse-Traces – den des SDK und
+den des Gateways. Geben Sie den W3C-Trace-Kontext weiter, um sie zusammenzuführen: Senden Sie mit
+dem Request einen `traceparent`-Header, dann ordnet GoModel seine Spans unter dem Trace des
+Aufrufers ein.
+
+```python
+from langfuse import get_client
+from opentelemetry.propagate import inject
+
+langfuse = get_client()
+
+with langfuse.start_as_current_observation(name="my-feature", as_type="span"):
+    headers = {}
+    inject(headers)  # schreibt den aktuellen traceparent
+    response = client.chat.completions.create(
+        model="openai/gpt-5-mini",
+        messages=[{"role": "user", "content": "Hello"}],
+        extra_headers=headers,
+    )
+```
+
+Der resultierende einzelne Trace verschachtelt den Anwendungs-Span, die SDK-Generation mit dem
+Prompt, den Server-Span von GoModel und die Provider-Generation – was der Benutzer gefragt hat, was
+es gekostet hat und wie das Gateway geroutet hat, in einer Ansicht.
+
+Beide Generationen in diesem Trace enthalten die Token-Nutzung des Aufrufs, daher addiert Langfuse
+die Kosten doppelt zur Summe des Traces. Wenn Sie sich auf Kosten auf Trace-Ebene verlassen, filtern
+Sie Kostenansichten auf eine der beiden Generationen, oder senden Sie die Traces des Gateways an ein
+separates Langfuse-Projekt.
+
+<Note>
+  Verifiziert mit Langfuse v4.27.0 (selbst gehostet über Docker Compose) und dem Langfuse Python SDK
+  4.15.1: Gateway-OTLP-Traces für gepufferten und gestreamten Chat über OpenAI, Anthropic und
+  Gemini, Failover-Spans, Prompt-Erfassung durch das SDK über GoModel sowie die Weitergabe des
+  Trace-Kontexts, die beides zusammenführt.
+</Note>
+
+## Fehlerbehebung
+
+| Symptom | Lösung |
+| --- | --- |
+| In Langfuse erscheinen keine Traces | Prüfen Sie, ob der `Authorization`-Header `Basic` + Base64 von `pk-lf-...:sk-lf-...` ist (nicht die rohen Keys) und der Endpunkt auf `/api/public/otel` endet. GoModel loggt beim Start `opentelemetry enabled`, wenn der Exporter aktiv ist. Exporte werden gebündelt – warten Sie einige Sekunden. |
+| Gateway-Generationen zeigen keinen Prompt und keine Completion | Die Erfassung von Inhalten ist standardmäßig deaktiviert. Setzen Sie `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true`. |
+| Eine gestreamte Generation zeigt keine Token oder Kosten | Der Provider hat keinen Usage-Chunk gesendet. GoModel fordert ihn nur an, solange die Nutzungserfassung aktiv ist (`USAGE_ENABLED`, der Standard). |
+| Generationen haben Token, aber keine Kosten | Langfuse hat keinen Preis für das Modell gefunden. Fügen Sie das Modell in Langfuse unter **Settings -> Models** hinzu. |
+| Verbindungsfehler mit einem gRPC-Endpunkt | Der OTLP-Endpunkt von Langfuse unterstützt nur HTTP. Behalten Sie `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` bei (der Standard). |
+| Jeder Request erscheint als zwei Traces | Gateway und SDK exportieren beide ohne gemeinsamen Kontext. Geben Sie `traceparent` wie oben beschrieben weiter, oder senden Sie jeden Weg an ein anderes Langfuse-Projekt. |
+| `GET /api/public/traces` gibt bei selbst gehostetem Langfuse 404 zurück | Langfuse v4 bedient Lesezugriffe über seine v2-APIs (z. B. `/api/public/v2/observations`); die v1-Trace-Endpunkte gibt es nicht mehr. Verwenden Sie die UI oder die v2-APIs. |
+| Bei identischen Prompts wiederholt sich dieselbe Antwort | Der [Response-Cache](/de/features/cache) von GoModel spielt identische Requests erneut ab. Das ist meist gewünscht; deaktivieren Sie den Cache, falls nicht. |
+
+## Hinweise
+
+- Gateways mit hohem Traffic können Gateway-Traces sampeln
+  (`OTEL_TRACES_SAMPLER=parentbased_traceidratio`,
+  `OTEL_TRACES_SAMPLER_ARG=0.1`) – mit `parentbased_*` behalten Requests, deren Aufrufer seinen
+  Trace gesampelt hat, ihre Gateway-Spans, sodass weitergegebene Traces vollständig bleiben.
+- Die vollständige Referenz des Exporters – YAML-Konfiguration, Endpunkte pro Signal, Sampler,
+  Reload-Verhalten – finden Sie im [OpenTelemetry-Leitfaden](/de/guides/opentelemetry). Alles dort
+  gilt auch hier; Langfuse ist lediglich das OTLP-Backend.
+- Für Dashboards zu Request-Rate- und Latenz-Metriken kombinieren Sie dies mit
+  [Prometheus-Metriken](/de/guides/prometheus-metrics) – Langfuse enthält die Traces, Prometheus die
+  Metriken.

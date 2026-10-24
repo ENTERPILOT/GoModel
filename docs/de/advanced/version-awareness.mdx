@@ -1,0 +1,204 @@
+---
+title: "Versionsprüfung"
+description: "Wie GoModel nach einem neueren Release sucht, was genau die Prüfung sendet und wie Sie sie deaktivieren."
+icon: "refresh-cw"
+keywords: ["Version", "version", "Update", "Upgrade", "Telemetrie", "telemetry", "Datenschutz", "privacy", "air-gapped"]
+---
+
+GoModel prüft einmal täglich, ob ein neueres Release existiert. So erfahren Sie
+von einem Upgrade, ohne das Repository beobachten zu müssen. Das Ergebnis
+erscheint oben auf der Seite **Settings** im Dashboard und ist als JSON über
+`GET /version` verfügbar.
+
+## Warum wir darum bitten
+
+Wir nutzen diese Prüfung, um zu sehen, wie viele Deployments welche Version von
+GoModel betreiben.
+
+Das ist vor allem dann wichtig, wenn eine Sicherheitslücke gefunden wird. Es
+zeigt uns, wie viele Benutzer betroffen sind und wie viele noch ein Release
+verwenden, das gepatcht werden muss. So wissen wir, wie dringend wir einen Fix
+ausliefern und wie deutlich wir warnen müssen. Ohne diese Daten müssten wir
+raten.
+
+**Wir empfehlen, die Prüfung aktiviert zu lassen.** Sie sendet keine API-Keys,
+keine Prompts, keine Modellnamen und keine Nutzungsdaten – die genaue Liste
+finden Sie unter [Was die Prüfung sendet](/de/advanced/version-awareness#was-die-prüfung-sendet). Wenn Sie
+möchten, deaktivieren Sie sie mit einer einzigen Umgebungsvariable.
+
+Wenn Sie Bedenken zu diesen Daten haben, teilen Sie sie uns bitte mit: Eröffnen
+Sie ein Issue auf [GitHub](https://github.com/ENTERPILOT/GoModel/issues) oder
+finden Sie uns auf [Discord](https://discord.gg/gaEB9BQSPH). Für
+sicherheitsrelevante Themen verwenden Sie den Kontakt in
+[SECURITY.md](https://github.com/ENTERPILOT/GoModel/blob/main/SECURITY.md).
+
+Die Prüfung liest eine einzige Klartextdatei:
+
+| Distribution | URL                              | Inhalt      |
+| ------------ | -------------------------------- | ----------- |
+| GoModel      | `(thiswebsite)/version/core.txt` | `X.Y.Z`     |
+| GoModel Pro  | `(thiswebsite)/version/pro.txt`  | `X.Y.Z+pro` |
+
+## Wann sie ausgeführt wird
+
+Es gibt zwei Auslöser, beide gedrosselt:
+
+- **Ein täglicher Timer**, damit auch ein Headless-Gateway, auf dem niemand ein
+  Dashboard öffnet, neue Releases bemerkt. Die erste Prüfung wartet nach dem
+  Start einige zufällige Minuten, und das Intervall hat ±10 % Jitter, sodass
+  eine gemeinsam neu gestartete Flotte nicht im Gleichschritt prüft.
+- **Der erste Dashboard-Besuch eines Tages**, pro Browser. Ein Cookie namens
+  `gomodel_version_check` enthält `YYYY-MM-DD-{id}` – den Tag, an dem dieser
+  Browser zuletzt geprüft hat, plus eine zufällige ID, die bei seinem ersten
+  Besuch erzeugt wurde. Bei jedem weiteren Seitenaufruf nach dem ersten des
+  Tages liest das Dashboard dieses Datum und sendet überhaupt keinen Request.
+
+Eine fehlgeschlagene oder nicht erreichbare Prüfung ist nie ein Fehler. Das
+Gateway liefert sein zwischengespeichertes Ergebnis aus und versucht es später
+erneut.
+
+## Was die Prüfung sendet
+
+<Note>
+  Über Ihren Traffic wird niemals etwas gesendet: keine Modellnamen, keine
+  Provider-Namen, keine Prompts oder Responses, keine Nutzungs- oder Kostendaten,
+  keine User Paths.
+</Note>
+
+Jede Prüfung enthält:
+
+| Header              | Beispiel    | Bedeutung                           |
+| ------------------- | ----------- | ----------------------------------- |
+| `X-GoModel-Version` | `0.1.81`    | das Release, das Sie betreiben      |
+| `X-GoModel-App`     | `GoModel`   | `GoModel` oder `GoModel Pro`        |
+| `X-GoModel-Install` | eine UUID   | anonyme ID pro Deployment, siehe unten |
+| `X-GoModel-Source`  | `scheduled` | `scheduled` oder `dashboard`        |
+
+Eine durch einen Dashboard-Besuch ausgelöste Prüfung leitet außerdem einen
+Ausschnitt dieses Besuchs weiter, der auf einer **Allowlist** steht: den
+`User-Agent` des Browsers, `Accept-Language`, die Client Hints `Sec-CH-UA*`
+und den Wert des Besuchs-Cookies (`X-GoModel-Date`).
+
+Da es sich um eine Allowlist handelt, wird alles, was nicht darauf steht,
+verworfen – einschließlich `Cookie`, `Authorization`, `X-API-Key` und `Referer`.
+Ein Session-Credential des Dashboards oder ein Master-Key kann Ihr Deployment auf
+diesem Weg nicht verlassen.
+
+Zwei Dinge werden bewusst zurückgehalten: **der Hostname, unter dem Ihr
+Dashboard ausgeliefert wird**, der Ihre Organisation identifizieren würde, und
+**Client-IP-Adressen**, die personenbezogene Daten sind. Keines von beiden wird
+jemals gesendet.
+
+### Die Installations-ID
+
+Eine zufällige UUID, die bei der ersten Verwendung gewählt wird. Sie kodiert
+nichts über Ihren Host, Ihre Organisation, Ihre Konfiguration oder Ihren
+Master-Key; sie existiert nur, damit wiederholte Prüfungen eines Deployments als
+ein Deployment gezählt werden. Wenn die Prüfung deaktiviert ist, wird sie nie
+erzeugt.
+
+Sie wird in der Datenbank des Deployments unter dem Schlüssel `install_id` in der
+Tabelle (oder Collection) `runtime_settings` gespeichert und in `install-id` im
+Datenverzeichnis gespiegelt. Die Kopie in der Datenbank ist maßgeblich: Sie
+übersteht das Neuerstellen eines Containers, und Replikate, die sich eine
+Datenbank teilen, melden sich als ein Deployment. Eine `install-id`-Datei aus
+einem früheren Release wird beim ersten Start des Gateways mit diesem Release
+unverändert übernommen, es sei denn, die Datenbank enthält bereits eine ID –
+etwa weil ein anderes Replikat, das sie mitnutzt, zuerst gestartet ist. In diesem
+Fall gilt die ID aus der Datenbank, und die Datei wird entsprechend
+überschrieben. Ist die Datenbank beim Start nicht erreichbar, verwendet das
+Gateway die Datei (oder eine neue zufällige ID), bis die Datenbank erreichbar
+ist, und wechselt bei einer späteren Prüfung zur ID aus der Datenbank, statt eine
+vorläufige ID für die gesamte Lebensdauer des Prozesses zu behalten.
+
+Wenn keine der beiden Kopien existiert – ein ohne Volume neu erstellter
+Container mit SQLite –, wird eine neue zufällige ID erzeugt, und der neu
+erstellte Container gilt als neues Deployment. Mounten Sie ein Volume für das
+Datenverzeichnis, um dieselbe ID zu behalten.
+
+Frühere Releases haben die ID in dieser Situation aus `GOMODEL_MASTER_KEY`
+abgeleitet. Eine so gespeicherte ID wird beim ersten Start dieses Releases
+sowohl in der Datenbank als auch in der Datei durch eine zufällige ersetzt,
+sodass sich das Deployment einmalig als neu meldet.
+
+## Deaktivieren, wenn Sie keine Update-Hinweise erhalten möchten
+
+```bash
+GOMODEL_VERSION_CHECK_ENABLED=false
+```
+
+Damit wird alles gestoppt: kein Timer, kein ausgehender Request, keine
+Installations-ID auf der Festplatte. `GET /version` meldet weiterhin Ihren
+lokalen Build mit `"enabled": false`, und das Dashboard zeigt einfach keinen
+Update-Hinweis an.
+
+## Air-gapped und gespiegelte Deployments
+
+`GOMODEL_OFFLINE=true` deaktiviert die Prüfung zusammen mit dem Download des
+Remote-Modellkatalogs; siehe den
+[Leitfaden für den Produktivbetrieb](/de/guides/production#air-gapped-und-offline-deployments).
+
+Um Update-Hinweise stattdessen innerhalb einer Air-Gap-Umgebung zu erhalten,
+richten Sie die Prüfung auf Ihren eigenen Host und stellen Sie dort `core.txt`
+(oder `pro.txt`) bereit:
+
+```bash
+GOMODEL_VERSION_CHECK_URL=https://releases.internal.example.com/version
+```
+
+Das Gateway hängt je nach Distribution `/core.txt` oder `/pro.txt` an und
+erwartet einen reinen Versions-String ohne führendes `v`.
+
+Ein Mirror kann den Wert mit **Build-Metadaten** gemäß Semantic Versioning
+ergänzen (`1.2.3+mirror`). Diese werden bei der Rangfolge nicht berücksichtigt
+und sind daher unbedenklich. Verwenden Sie kein Prerelease-Suffix
+(`1.2.3-mirror`): Dieses rangiert *über* einem einfachen `1.2.3` und unter
+`1.2.3-mirrorx`, sodass Gateways mit etwas anderem vergleichen würden als dem
+Release, das Sie veröffentlicht haben.
+
+## Konfiguration
+
+| Einstellung                       | Umgebungsvariable                         | Standardwert                            |
+| --------------------------------- | ----------------------------------------- | --------------------------------------- |
+| `version_check.enabled`           | `GOMODEL_VERSION_CHECK_ENABLED`           | `true`                                  |
+| `version_check.url`               | `GOMODEL_VERSION_CHECK_URL`               | `https://gomodel.enterpilot.io/version` |
+| `version_check.interval_hours`    | `GOMODEL_VERSION_CHECK_INTERVAL_HOURS`    | `24`                                    |
+| `version_check.timeout_seconds`   | `GOMODEL_VERSION_CHECK_TIMEOUT_SECONDS`   | `5`                                     |
+| `version_check.max_daily_checks`  | `GOMODEL_VERSION_CHECK_MAX_DAILY`         | `500`                                   |
+
+`max_daily_checks` begrenzt die Gesamtzahl der ausgehenden Prüfungen des
+Gateways pro Tag, sodass `/version` nicht als Verstärker für ausgehende Requests
+missbraucht werden kann.
+
+```yaml config.yaml
+version_check:
+  enabled: true
+  interval_hours: 24
+```
+
+## Der `/version`-Endpunkt
+
+Öffentlich und ohne Authentifizierung, neben `/health`. Er antwortet aus dem
+Cache und blockiert nie auf das Netzwerk – eine fällige Prüfung läuft im
+Hintergrund, sodass ein nicht erreichbarer Release-Host das Dashboard nie
+verlangsamt:
+
+```bash
+curl -s http://localhost:8080/version
+```
+
+```json
+{
+  "app": "GoModel",
+  "version": "0.1.81",
+  "latest": "0.1.82",
+  "update_available": true,
+  "checked_at": "2026-08-26T09:12:44Z",
+  "enabled": true
+}
+```
+
+`update_available` ist konservativ: Build-Metadaten werden ignoriert,
+Prereleases werden so verglichen, wie Semantic Versioning es vorgibt
+(`1.0.0-rc1` < `1.0.0-rc2` < `1.0.0`), und ein Entwicklungs-Build (`dev`, ein
+reiner Commit) meldet nie ein Update.

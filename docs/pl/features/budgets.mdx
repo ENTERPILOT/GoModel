@@ -1,0 +1,514 @@
+---
+title: "Budżety"
+description: "Ustawiaj limity wydatków dla ścieżki użytkownika, etykiety requestu lub providera i egzekwuj je za pomocą kontrolki budżetu w workflow."
+icon: "wallet"
+keywords: ["budżety", "budgets", "limity wydatków", "spend limits", "kontrola kosztów", "cost controls", "ścieżka użytkownika", "user path", "etykiety", "labels", "providerzy", "providers"]
+---
+
+## Przegląd
+
+Budżety pozwalają ustawić limity wydatków dla poddrzewa `user_path`, [etykiety](/pl/features/labelling)
+requestu lub providera. GoModel ocenia je na podstawie śledzonych rekordów kosztów użycia
+i blokuje pasujące requesty, gdy limit został już wyczerpany.
+
+Każdy budżet ma **scope**, który określa, co ogranicza:
+
+| Scope       | Podmiot                            | Dopasowuje                                           |
+| ----------- | ---------------------------------- | ---------------------------------------------------- |
+| `user_path` | Ścieżka użytkownika (`/team/alpha`) | Tę ścieżkę i każdą ścieżkę poniżej niej              |
+| `label`     | Etykieta (`Mobile-App-iOS`)         | Każdy request z tą etykietą                          |
+| `provider`  | Nazwa providera (`openai-prod`)     | Każdy request kierowany do tej instancji providera   |
+
+Używaj budżetów, gdy potrzebujesz limitów takich jak:
+
+- `/team/alpha` może wydać `$10` dziennie
+- `/team/alpha` może wydać `$50` tygodniowo
+- `/` ma globalny limit miesięczny
+- wszystko z etykietą `Mobile-App-iOS` może wydać `$500` miesięcznie
+- provider `openai-prod` może wydać `$100` dziennie, łącznie dla wszystkich użytkowników
+
+<Info>
+  Egzekwowanie budżetów działa tylko wtedy, gdy budżety są włączone globalnie, a aktywny
+  workflow ma włączony Budget. Kontrolka Budget w workflow jest domyślnie włączona,
+  gdy globalna funkcja budżetów jest włączona.
+</Info>
+
+## Włącz budżety
+
+Budżety są domyślnie włączone:
+
+```env
+BUDGETS_ENABLED=true
+```
+
+Budżety zależą od śledzenia użycia, ponieważ wydatki są wyliczane z rekordów kosztów
+użycia:
+
+```env
+USAGE_ENABLED=true
+```
+
+Jeśli śledzenie użycia jest wyłączone, GoModel uruchamia się z wyłączonym zarządzaniem
+budżetami i zapisuje ostrzeżenie w logach.
+
+## Utwórz budżety
+
+Budżety możesz tworzyć w dashboardzie:
+
+```text
+Budgets -> Create Budget
+```
+
+<img
+  src="/features/budgets.png"
+  alt="Strona Budgets w dashboardzie GoModel z listą miesięcznych, tygodniowych i dziennych budżetów dla ścieżek użytkownika, z paskami wydatków i pozostałymi kwotami"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+W formularzu ustaw **scope**, **subject** (ścieżkę użytkownika, etykietę lub providera),
+**period** oraz **amount**. Każdy wiersz na stronie Budgets pokazuje wtedy wydatki jako
+procent limitu, wydaną kwotę w porównaniu z limitem oraz pozostałe saldo dla bieżącego
+okresu. Budżety etykiet i providerów mają obok okresu znacznik `label` lub
+`provider`. Budżety utworzone w dashboardzie są oznaczone jako `manual`. Budżety
+wczytane z YAML lub zmiennych środowiskowych są oznaczone jako `config`.
+
+Budżety możesz też zainicjować z YAML:
+
+```yaml
+budgets:
+  enabled: true
+  user_paths:
+    - path: "/team/alpha"
+      limits:
+        - period: "daily"
+          amount: 10.00
+        - period: "weekly"
+          amount: 50.00
+    - path: "/customers"
+      # GoModel Pro: wymaga uprawnienia licencyjnego quota_templates.
+      per_child: true
+      limits:
+        - period: "daily"
+          amount: 5.00
+    - path: "/"
+      limits:
+        - period: "monthly"
+          amount: 500.00
+  labels:
+    - label: "Mobile-App-iOS"
+      limits:
+        - period: "monthly"
+          amount: 500.00
+  providers:
+    - name: "openai-prod"
+      limits:
+        - period: "daily"
+          amount: 100.00
+```
+
+Albo użyj zmiennych środowiskowych:
+
+```env
+SET_BUDGET_TEAM__ALPHA="daily=10,weekly=50"
+SET_BUDGET_="monthly=500"
+# GoModel Pro (uprawnienie licencyjne quota_templates):
+SET_BUDGET_CUSTOMERS='[{"period":"daily","amount":5,"per_child":true}]'
+SET_PROVIDER_BUDGET_OPENAI_PROD="daily=100"
+```
+
+Sufiks po `SET_BUDGET_` staje się ścieżką użytkownika. Między segmentami ścieżki używaj
+podwójnych podkreśleń (`__`); pojedyncze podkreślenia pozostają częścią segmentu:
+
+- `SET_BUDGET_TEAM__ALPHA` -> `/team/alpha`
+- `SET_BUDGET_USER_123` -> `/user_123`
+- `SET_BUDGET_` -> `/`
+
+Nie ma sposobu na zapisanie dosłownego podwójnego podkreślenia wewnątrz segmentu
+ścieżki. Dla ścieżek, które wymagają segmentu z `__`, użyj YAML lub dashboardu.
+
+Budżety providerów mają własny prefiks, `SET_PROVIDER_BUDGET_<NAME>`, podobnie jak
+`SET_PROVIDER_RATE_LIMIT_<NAME>`. Podkreślenia w sufiksie zamieniają się w myślniki, więc
+`SET_PROVIDER_BUDGET_OPENAI_PROD` ogranicza providera `openai-prod`.
+
+<Note>
+  Budżety etykiet nie mają formy zmiennej środowiskowej. Etykiety są dopasowywane
+  dosłownie, łącznie z wielkością liter, i mogą zawierać znaki, których nie da się
+  wyrazić w nazwach zmiennych środowiskowych. Zadeklaruj je w `budgets.labels` w YAML
+  albo utwórz w dashboardzie lub przez Admin API.
+</Note>
+
+Obsługiwane standardowe okresy:
+
+| Okres     | Sekundy   |
+| --------- | --------- |
+| `hourly`  | `3600`    |
+| `daily`   | `86400`   |
+| `weekly`  | `604800`  |
+| `monthly` | `2592000` |
+
+Kolumna Sekundy to wewnętrzny identyfikator okresu. Standardowe okresy korzystają
+ze skonfigurowanej logiki punktów resetu; na przykład `monthly` jest przechowywany jako
+`2592000`, ale resetuje się według punktów miesiąca kalendarzowego i przycina dzień resetu
+w krótszych miesiącach. Tylko niestandardowe wartości `period_seconds` działają jako
+okna o stałej liczbie sekund.
+
+Dla niestandardowych okien ustaw `period_seconds` w YAML:
+
+```yaml
+budgets:
+  user_paths:
+    - path: "/team/alpha"
+      limits:
+        - period_seconds: 7200
+          amount: 5.00
+```
+
+## Jak działa dopasowywanie
+
+Ścieżki budżetów dotyczą skonfigurowanej ścieżki i jej potomków:
+
+- ścieżka budżetu `/team`
+- ścieżka requestu `/team/app`
+- wynik: budżet obowiązuje
+
+Ścieżki równoległe nie pasują:
+
+- ścieżka budżetu `/team`
+- ścieżka requestu `/team-alpha`
+- wynik: budżet nie obowiązuje
+
+Budżety etykiet dopasowują etykietę dokładnie, bez poddrzew i bez ignorowania wielkości liter:
+
+- etykieta budżetu `Mobile-App-iOS`
+- etykiety requestu `["Mobile-App-iOS", "prod"]`
+- wynik: budżet obowiązuje
+
+- etykieta budżetu `Mobile-App-iOS`
+- etykiety requestu `["mobile-app-ios"]`
+- wynik: budżet nie obowiązuje
+
+Etykiety pochodzą z reguł tagowania, z etykiet przypisanych do zarządzanego klucza API,
+który uwierzytelnił request, oraz z tagów LiteLLM wysyłanych przez klienta;
+zobacz [Etykietowanie](/pl/features/labelling). Request z kilkoma etykietami jest
+obciążany w każdym pasującym budżecie etykiety. Tagi LiteLLM wybiera klient, więc
+ustaw `LITELLM_TAGS_ENABLED=false`, gdy klient nie może obciążać budżetu etykiety
+innego zespołu.
+
+Budżety providerów dopasowują skonfigurowaną instancję providera, która obsługuje
+request, bez rozróżniania wielkości liter. Budżet providera ogranicza łączne wydatki
+tego providera dla wszystkich ścieżek użytkowników i etykiet; nie zawęża budżetu
+ścieżki użytkownika ani etykiety. Requesty, których provider nie jest znany w momencie
+przyjęcia, np. zgłoszenia batchy i wywołania MCP, nie są sprawdzane względem budżetów
+providerów.
+
+Jeśli do requestu pasuje kilka budżetów, GoModel sprawdza wszystkie pasujące limity
+w jednym zapytaniu. Request jest odrzucany, jeśli którykolwiek pasujący limit jest wyczerpany.
+
+### Budżety providerów i failover
+
+Gdy budżet providera jest wyczerpany, a request ma cele
+[failoveru](/pl/features/failover), GoModel pomija wyczerpanego providera
+i próbuje celów failoveru zamiast odrzucać request. Failover pomija także każdy
+cel, którego własny budżet providera jest wyczerpany. Jeśli nie zostaje żaden cel,
+klient otrzymuje pierwotny błąd `budget_exceeded`. Budżety ścieżek użytkowników
+i etykiet zawsze odrzucają request: zmiana providera nie może ich odciążyć.
+
+### Dynamiczne budżety dla każdego potomka
+
+<Info>
+  Dynamiczne budżety dla każdego potomka są dostępne w GoModel Pro i wymagają
+  uprawnienia licencyjnego `quota_templates`. Bez niego zapisy przez Admin API są
+  odrzucane z 403 `quota_templates_not_entitled`, a `per_child: true`
+  w konfiguracji przerywa uruchamianie – GoModel nigdy nie przechodzi po cichu na
+  jeden wspólny budżet poddrzewa, ponieważ zmieniłoby to semantykę egzekwowania.
+</Info>
+
+Ustaw `per_child: true` we wpisie ścieżki użytkownika, gdy jego limit ma być szablonem
+dla bezpośrednich potomków, a nie jednym wspólnym budżetem poddrzewa. Dla szablonu
+na `/customers`:
+
+- `/customers/alice` i `/customers/alice/app` wydają z budżetu Alice
+- `/customers/bob` wydaje z niezależnego budżetu Boba
+- samo `/customers` nie pasuje do szablonu, ponieważ nie ma potomka
+
+Dashboard pokazuje definicję jako szablon `per child` zamiast wymyślać zagregowaną
+wartość użycia. Użyj `GET /v1/usage` z efektywną ścieżką użytkownika potomka, aby
+sprawdzić rozwiązany budżet tego potomka. Zresetowanie szablonu rozpoczyna nowy
+okres dla wszystkich jego potomków.
+
+## Egzekwowanie w workflow
+
+Aktywny workflow decyduje, czy dla requestu są wykonywane sprawdzenia budżetu.
+
+W payloadzie workflow:
+
+```json
+{
+  "schema_version": 1,
+  "features": {
+    "budget": true,
+    "cache": true,
+    "audit": true,
+    "usage": true,
+    "guardrails": true,
+    "failover": true
+  }
+}
+```
+
+Używaj workflow z zakresem, aby włączać lub wyłączać egzekwowanie budżetów dla
+providera, modelu lub poddrzewa `user_path`. Kolejność dopasowywania opisuje strona
+[Workflows](/pl/advanced/workflows).
+
+<Note>
+  Cache hity odpowiedzi mogą zwrócić wynik przed egzekwowaniem budżetu. Jeśli istnieje
+  odpowiedź w cache'u, GoModel może ją zwrócić bez dodatkowych kosztów u providera.
+</Note>
+
+## Okna resetu
+
+Punkty resetu budżetów konfiguruje się w dashboardzie w:
+
+```text
+Settings -> Budget Resets
+```
+
+Ustawienia resetu są obliczane w UTC.
+
+W przypadku budżetów miesięcznych, jeśli skonfigurowany dzień nie istnieje w danym
+miesiącu, reset następuje w ostatnim dniu tego miesiąca. Na przykład miesięczny
+dzień resetu `31` wypada 30 kwietnia oraz 28 lub 29 lutego.
+
+Edycja budżetu zmienia limit, ale nie resetuje bieżącego okresu. Użyj akcji Reset
+w wierszu, aby rozpocząć nowy okres dla jednego budżetu, lub
+`Settings -> Reset All Budgets`, aby zresetować wszystkie budżety.
+
+## Admin API
+
+Zarządzanie budżetami jest dostępne także przez Admin API:
+
+<CodeGroup>
+
+```bash curl
+curl -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  http://localhost:8080/admin/budgets
+```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+budgets = client.get("/admin/budgets", cast_to=httpx.Response)
+
+print(budgets.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const budgets = await client.get("/admin/budgets");
+console.log(budgets);
+```
+
+</CodeGroup>
+
+Utwórz lub zaktualizuj budżet. Budżet jest identyfikowany przez `scope`, `subject`
+i okres; dla budżetów ścieżek użytkowników `user_path` jest akceptowane jako skrócony
+zapis podmiotu:
+
+<CodeGroup>
+
+```bash curl
+curl -X PUT http://localhost:8080/admin/budgets \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": "user_path",
+    "subject": "/team/alpha",
+    "per_child": false,
+    "budget_key": { "period": "daily" },
+    "amount": 10.00
+  }'
+```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+budget = client.put(
+    "/admin/budgets",
+    cast_to=httpx.Response,
+    body={
+        "scope": "user_path",
+        "subject": "/team/alpha",
+        "budget_key": {"period": "daily"},
+        "amount": 10.00,
+    },
+)
+
+print(budget.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const budget = await client.put("/admin/budgets", {
+  body: {
+    scope: "user_path",
+    subject: "/team/alpha",
+    budget_key: { period: "daily" },
+    amount: 10.0,
+  },
+});
+
+console.log(budget);
+```
+
+</CodeGroup>
+
+To samo wywołanie dla budżetu etykiety (dla budżetu providera użyj `"scope": "provider"`
+z nazwą providera jako podmiotem):
+
+<CodeGroup>
+
+```bash curl
+curl -X PUT http://localhost:8080/admin/budgets \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": "label",
+    "subject": "Mobile-App-iOS",
+    "budget_key": { "period": "monthly" },
+    "amount": 500.00
+  }'
+```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+budget = client.put(
+    "/admin/budgets",
+    cast_to=httpx.Response,
+    body={
+        "scope": "label",
+        "subject": "Mobile-App-iOS",
+        "budget_key": {"period": "monthly"},
+        "amount": 500.00,
+    },
+)
+
+print(budget.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const budget = await client.put("/admin/budgets", {
+  body: {
+    scope: "label",
+    subject: "Mobile-App-iOS",
+    budget_key: { period: "monthly" },
+    amount: 500.0,
+  },
+});
+
+console.log(budget);
+```
+
+</CodeGroup>
+
+Usuń budżet:
+
+<CodeGroup>
+
+```bash curl
+curl -X DELETE http://localhost:8080/admin/budgets \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": "label",
+    "subject": "Mobile-App-iOS",
+    "budget_key": { "period": "monthly" }
+  }'
+```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+deleted = client.delete(
+    "/admin/budgets",
+    cast_to=httpx.Response,
+    body={
+        "scope": "label",
+        "subject": "Mobile-App-iOS",
+        "budget_key": {"period": "monthly"},
+    },
+)
+
+print(deleted.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const deleted = await client.delete("/admin/budgets", {
+  body: {
+    scope: "label",
+    subject: "Mobile-App-iOS",
+    budget_key: { period: "monthly" },
+  },
+});
+
+console.log(deleted);
+```
+
+</CodeGroup>
+
+Listę endpointów znajdziesz na stronie [Admin Endpoints](/pl/advanced/admin-endpoints).

@@ -1,0 +1,323 @@
+---
+title: "Anthropic Messages API i liczenie tokenów"
+sidebarTitle: "Anthropic Messages API"
+description: "Przyjmuj w GoModel requesty /v1/messages w stylu Anthropic i kieruj je do dowolnego skonfigurowanego providera – z budżetami, failoverem i śledzeniem użycia."
+icon: "message-square-code"
+keywords: ["Anthropic Messages API", "/v1/messages", "count_tokens", "liczenie tokenów", "count message tokens", "Claude API", "Anthropic SDK", "tłumaczenie API", "API translation"]
+---
+
+## Przegląd
+
+Oprócz API kompatybilnego z OpenAI GoModel przyjmuje requesty w dialekcie
+**Anthropic Messages API** pod `POST /v1/messages`. Klienty i SDK, które mówią
+formatem Anthropic, mogą wskazywać na GoModel bez żadnych zmian.
+
+Request jest tłumaczony na kanoniczny typ czatu GoModel już na wejściu i przechodzi przez
+ten sam pipeline co `/v1/chat/completions` – działają więc modele wirtualne, polityka
+workflow, budżety, failover, cache odpowiedzi, śledzenie użycia i kosztów oraz log
+audytowy. Ponieważ każdy provider obsługuje chat completion, request w formacie
+Anthropic można skierować do **dowolnego** skonfigurowanego providera (OpenAI, Gemini,
+Bedrock i innych), nie tylko do Anthropic.
+
+To coś innego niż [passthrough API](/pl/features/passthrough-api): `/p/anthropic/v1/messages`
+przekazuje bajty bez zmian wyłącznie do upstreamu Anthropic, natomiast zarządzany endpoint
+`/v1/messages` kieruje requesty gdziekolwiek i jest w pełni zarządzany.
+
+## Natywne przekazywanie do Anthropic
+
+Gdy request `/v1/messages` zostanie rozwiązany do providera **Anthropic**, GoModel
+pomija tłumaczenie w obie strony i przekazuje oryginalne body requestu bez zmian
+(nadpisując tylko pole `model`, gdy alias został rozwiązany do innej nazwy),
+a następnie przekazuje natywną odpowiedź providera lub strumień SSE bez zmian.
+Zachowuje to wszystko, czego kanoniczne tłumaczenie nie potrafi odwzorować –
+breakpointy `cache_control`, podpisy bloków thinking, nagłówki `anthropic-beta` –
+od czego zależą agenty programistyczne takie jak Claude Code. Rate limity,
+budżety, log audytowy i śledzenie użycia nadal działają, zarówno dla odpowiedzi
+streamingowych, jak i niestreamingowych.
+
+Natywne przekazywanie działa automatycznie. Requesty wracają do pipeline'u
+z tłumaczeniem, gdy w grę wchodzi funkcja działająca na kanonicznym requeście:
+modyfikowanie requestu przez guardrails, cache odpowiedzi lub routing z failoverem.
+Requesty rozwiązywane do providera innego niż Anthropic są zawsze tłumaczone.
+
+Ponieważ body jest przekazywane bez zmian, na tej ścieżce nie obowiązuje żadne
+z [ograniczeń tłumaczenia](#ograniczenia): historia narzędzi serwerowych
+(`server_tool_use`, `web_search_tool_result`, …), uploady do kontenerów i każdy inny
+blok, którego kanoniczny request nie potrafi odwzorować, docierają do Anthropic bez zmian.
+
+## Obsługiwane endpointy
+
+| Endpoint | Zachowanie |
+| --- | --- |
+| `POST /v1/messages` | Tworzy wiadomość przez routing modelu z tłumaczeniem. Obsługuje streaming (`stream: true`) ze zdarzeniami SSE w formacie Anthropic. |
+| `POST /v1/messages/count_tokens` | Liczy tokeny wejściowe. Dokładnie dla modeli, których provider ma endpoint do liczenia (Anthropic, OpenAI); w pozostałych przypadkach jest to skalibrowane oszacowanie. |
+| `GET /v1/models` | Zwraca katalog w kształcie listy Anthropic (`type: "model"`, `display_name`, `created_at`), gdy request zawiera nagłówek `anthropic-version`, który SDK Anthropic zawsze wysyłają; w przeciwnym razie w kształcie OpenAI. Cały katalog wraca na jednej stronie, chyba że klient stronicuje za pomocą `limit`, `after_id` lub `before_id` (stronicowanie Anthropic, `has_more` ustawiane odpowiednio); kursor, który nie wskazuje żadnego modelu z listy, zwraca `400`, więc zacznij od pierwszej strony. |
+| `GET /v1/models/{model}` | Pobiera jeden model, w kształcie modelu Anthropic, gdy request zawiera `anthropic-version`; w przeciwnym razie w kształcie OpenAI. Samo ID działające przy inferencji (`gpt-6-luna`) pobiera model z listy, do którego zostaje rozwiązane. Błędy (np. nieznany model) używają koperty błędu Anthropic (`{"type": "error", "error": {...}}`) pod tym samym warunkiem. |
+| `POST /v1/messages/batches` | Tworzy Message Batch. Inline `requests[].params` są tłumaczone dla każdego elementu osobno, więc batch może trafić do dowolnego providera z natywną obsługą batchy (Anthropic, OpenAI, …), nie tylko do Anthropic. |
+| `GET /v1/messages/batches` | Wyświetla listę batchy (`limit`, `after_id`). |
+| `GET /v1/messages/batches/{id}` | Pobiera batch (`processing_status`, `request_counts`, `results_url` po zakończeniu). |
+| `POST /v1/messages/batches/{id}/cancel` | Anuluje działający batch. |
+| `DELETE /v1/messages/batches/{id}` | Usuwa zakończony batch. Jest usuwany także w upstreamie, gdy batch API providera to obsługuje (Anthropic); w przeciwnym razie tylko z gatewaya. |
+| `GET /v1/messages/batches/{id}/results` | Streamuje wyniki jako JSONL. Elementy zakończone sukcesem są zwracane w kształcie Anthropic Messages niezależnie od providera, który je obsłużył. |
+
+## Message Batches
+
+`/v1/messages/batches` współdzieli pipeline natywnych batchy gatewaya z trasą
+`/v1/batches` kompatybilną z OpenAI – obie są widokami tego samego zasobu w różnych
+dialektach. ID batchy są wymienne między dialektami (`msgbatch_<uuid>`
+tutaj, `batch_<uuid>` tam). Wszystkie requesty w jednym batchu muszą być rozwiązane
+do jednego providera; wartości `custom_id` dla każdego elementu są wymagane i muszą być unikalne.
+
+Providerzy, których batch API opiera się na plikach (kompatybilni z OpenAI), otrzymują
+requesty inline jako automatycznie uploadowany plik wejściowy JSONL. `request_counts`
+mapuje zagregowane liczniki providera: w trakcie działania batcha niezakończone requesty
+są raportowane jako `processing`; po jego zakończeniu pozostałe są przypisywane według
+wyniku batcha (`canceled`, `expired` lub `errored`).
+
+```python
+batch = client.messages.batches.create(requests=[
+    {"custom_id": "q1", "params": {"model": "openai/gpt-4o-mini", "max_tokens": 64,
+        "messages": [{"role": "user", "content": "What is 2+3?"}]}},
+])
+# odpytuj client.messages.batches.retrieve(batch.id) aż do "ended", a następnie:
+for entry in client.messages.batches.results(batch.id):
+    print(entry.custom_id, entry.result.type)
+```
+
+## Uwierzytelnianie
+
+Działają oba sposoby przekazywania danych uwierzytelniających, więc oficjalne SDK
+Anthropic można podłączyć bez zmian:
+
+- `Authorization: Bearer <key>` – podstawowy schemat GoModel.
+- `x-api-key: <key>` – natywny nagłówek Anthropic, akceptowany jako fallback, gdy
+  nie ma nagłówka `Authorization`.
+
+```python
+import anthropic
+
+client = anthropic.Anthropic(
+    api_key="<your GoModel key>",       # wysyłany jako x-api-key – działa bez zmian
+    base_url="https://your-gateway",
+)
+client.messages.create(
+    model="openai/gpt-4o-mini",          # model dowolnego skonfigurowanego providera
+    max_tokens=256,
+    messages=[{"role": "user", "content": "Hello"}],
+)
+```
+
+## Przykład
+
+<CodeGroup>
+
+```bash curl
+curl https://your-gateway/v1/messages \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-sonnet-4-6",
+    "max_tokens": 256,
+    "system": "Be concise.",
+    "messages": [{"role": "user", "content": "Hello"}]
+  }'
+```
+
+```python Python
+import os
+
+import anthropic
+
+client = anthropic.Anthropic(
+    base_url="https://your-gateway",
+    api_key=os.environ["GOMODEL_KEY"],
+)
+
+message = client.messages.create(
+    model="claude-sonnet-4-6",
+    max_tokens=256,
+    system="Be concise.",
+    messages=[{"role": "user", "content": "Hello"}],
+)
+
+print(message.content[0].text)
+```
+
+```javascript JavaScript
+import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic({
+  baseURL: "https://your-gateway",
+  apiKey: process.env.GOMODEL_KEY,
+});
+
+const message = await client.messages.create({
+  model: "claude-sonnet-4-6",
+  max_tokens: 256,
+  system: "Be concise.",
+  messages: [{ role: "user", content: "Hello" }],
+});
+
+console.log(message.content[0].text);
+```
+
+</CodeGroup>
+
+Odpowiedź ma kształt Anthropic Messages (`type: "message"`, bloki `content`,
+`stop_reason`, `usage`). Błędy używają koperty błędu Anthropic
+(`{"type": "error", "error": {...}}`). `max_tokens` jest wymagane, tak jak w API Anthropic.
+Zadziałanie filtra treści providera jest raportowane jako `stop_reason: "refusal"`. Jeśli
+provider zawiedzie w trakcie strumienia, strumień kończy się zdarzeniem `error`
+z komunikatem samego providera.
+
+`usage` stosuje semantykę Anthropic dla każdego providera: `input_tokens` nie obejmuje
+tokenów z cache'u, które są raportowane osobno jako `cache_read_input_tokens`
+i `cache_creation_input_tokens`. W przypadku providerów kompatybilnych z OpenAI, których
+`prompt_tokens` obejmuje tokeny z cache'u, GoModel przenosi `cached_tokens`
+i `cache_write_tokens` do tych pól, więc trzy liczniki sumują się do całego
+promptu.
+
+Odpowiedzi streamingowe emitują sekwencję zdarzeń SSE Anthropic (`message_start`,
+`content_block_start`/`content_block_delta`/`content_block_stop`, `message_delta`,
+`message_stop`).
+
+## Śledzenie kosztów i logi audytowe
+
+Requesty `/v1/messages` są śledzone i audytowane dokładnie tak jak trasy kompatybilne
+z OpenAI. Koszt jest wyliczany na podstawie providera, który faktycznie obsłużył request,
+a użycie jest zapisywane pod endpointem `/v1/messages`, dzięki czemu można je filtrować
+w dashboardzie.
+
+## Ograniczenia
+
+Te ograniczenia dotyczą pipeline'u **z tłumaczeniem** – requestów kierowanych do
+providera innego niż Anthropic albo do Anthropic, gdy działają guardrails, cache
+odpowiedzi lub failover. Requesty [natywnie przekazywane do Anthropic](#natywne-przekazywanie-do-anthropic)
+są zachowywane bajt w bajt, z wyjątkiem wartości `model`, gdy alias został
+rozwiązany do innej nazwy, i nic z poniższego ich nie dotyczy.
+
+`/v1/messages` tłumaczy przez kanoniczny typ czatu GoModel. Funkcje specyficzne dla
+Anthropic, które nie mają kanonicznego odpowiednika, nie są zachowywane od początku do końca:
+
+- **`cache_control`** jest zachowywane w requeście, blokach system/content,
+  niestandardowych narzędziach oraz historii tool-use/tool-result przy kierowaniu do Anthropic.
+- **Wiadomości `{"role": "system"}` wewnątrz `messages`** zachowują swoją pozycję
+  i breakpointy `cache_control` przy kierowaniu do modelu z rodziny Claude 4.8+/5
+  (Claude Code w ten sposób dokleja przypomnienia systemowe, a jego prompt caching
+  zależy od tego, czy pozostaną na miejscu). W starszych modelach Claude, które
+  odrzucają tę rolę, ich tekst jest zamiast tego przenoszony do system promptu najwyższego poziomu.
+- **Bloki `thinking` i `redacted_thinking`** przechodzą w obie strony bez zmian,
+  łącznie z podpisami: odpowiedzi zawierają `signature` wydany przez Anthropic (jako
+  `signature_delta` przy streamingu), a odesłana tura asystenta jest odtwarzana
+  bez zmian, więc rozmowy z włączonym thinking i pętle tool-use działają
+  poprawnie. Inni providerzy nigdy ich nie widzą.
+- **Reasoning od providera, który go nie podpisuje** (DeepSeek, Fireworks, …),
+  jest zwracany jako blok `thinking` z `signature: ""` – to pole jest wymagane
+  przez schemat Anthropic, a pusta wartość oznacza, że reasoning nie jest
+  podpisany. Odeślij turę bez zmian: blok trafia z powrotem do tego providera jak
+  każdy inny. Anthropic akceptuje tylko podpisy, które sam wystawił, więc z tury
+  zawierającej niepodpisany blok jest on usuwany przed wysłaniem do Claude (reszta
+  tury jest wysyłana bez zmian).
+- **`tool_result.is_error`** jest zachowywane przy kierowaniu do Anthropic. Inni
+  providerzy nie mają odpowiedniej flagi i otrzymują tylko treść wyniku.
+- **`tool_use.extra_content`** przenosi stan do odtworzenia należący do innego
+  providera, na przykład thought signature Gemini 3, z powrotem do tego providera.
+  GoModel ustawia go w zwracanych blokach `tool_use`; odsyłaj go bez zmian. Zobacz
+  [Extra content, bloki thinking i thought signatures](/pl/advanced/extra-content).
+- **Narzędzia serwerowe/wbudowane** (web search, wykonywanie kodu, …) i ich bloki
+  historii (`server_tool_use`, `web_search_tool_result`, …) są odrzucane z czytelnym
+  `400`; tłumaczone są tylko narzędzia niestandardowe (`type` nieobecne lub `"custom"`).
+  Wyjątkiem jest tool search (zobacz odroczone ładowanie narzędzi poniżej).
+- **`top_k`** jest pomijane – nie ma przenośnego odpowiednika kompatybilnego z OpenAI,
+  a providerzy z rodziny OpenAI odrzucają nieznane pola requestu. `temperature` i `top_p`
+  są przekazywane.
+- **Obrazy i dokumenty wewnątrz bloków `tool_result`** (zrzuty ekranu, pliki
+  obrazów i PDF odczytane przez narzędzie – Claude Code zwraca je w ten sposób) są
+  przekazywane jako natywne bloki `image` i `document` przy kierowaniu do Anthropic.
+  OpenAI otrzymuje je przez swoje Responses API, gdzie model może je zobaczyć (zobacz
+  [Requesty OpenAI obsługiwane przez Responses](/pl/providers/overview#uwagi-dotyczące-providerów)).
+  Inni providerzy otrzymują tylko tekstową część wyniku narzędzia.
+- **Bloki `document`** (źródła PDF, plain text, URL lub `file_id` z Files API)
+  są tłumaczone na część treści `file` w stylu OpenAI (`file_data` dla treści
+  inline, `file_url` dla zdalnych URL-i, `file_id` dla uploadów). Anthropic otrzymuje
+  dokument z powrotem natywnie wraz z jego `title`; Gemini otrzymuje tylko dane inline;
+  providerzy kompatybilni z OpenAI otrzymują część `file` bez zmian. W OpenAI
+  PDF bez tytułu dostaje nazwę pliku (`document.pdf`), a dokumenty z URL przechodzą
+  przez Responses API. Dokument tekstowy w requeście, który pozostaje na Chat
+  Completions, jest wysyłany jako tekst (poprzedzony swoim `title`), ponieważ akceptowane
+  są tam tylko dane plików PDF; w requeście obsługiwanym przez Responses API,
+  np. z dokumentem tekstowym wewnątrz `tool_result`, pozostaje plikiem.
+  Ustawienia cytowań i `context` są pomijane. Wariant z treścią niestandardową
+  (`source.type: "content"`) degraduje się do tekstu.
+- **Bloki `search_result`** degradują się do tekstu (tytuł, URL źródła i treść);
+  metadane cytowań są pomijane.
+- **Odroczone ładowanie narzędzi** jest akceptowane. Narzędzie oznaczone `defer_loading: true`
+  to zwykłe narzędzie niestandardowe, którego schemat API ładuje na żądanie; znacznik
+  nie ma kanonicznego odpowiednika i jest pomijany, więc narzędzie jest wysyłane jak każde inne.
+  `tool_reference` (dopasowanie tool search) degraduje się do nazwy narzędzia jako
+  tekstu, ponieważ żaden provider za pipeline'em z tłumaczeniem nie ładuje schematów
+  narzędzi przez referencję. Rozmowę, w której działał serwerowy tool search Anthropic,
+  można kontynuować na innym modelu: narzędzie tool search jest pomijane, ponieważ
+  każde odroczone narzędzie jest już wysyłane w całości, a jego historia (`server_tool_use`
+  i `tool_search_tool_result`) degraduje się do tekstu z nazwą wyszukiwania i znalezionymi
+  narzędziami. Dzięki temu Claude Code może działać z `ENABLE_TOOL_SEARCH`
+  przez gateway z modelem innym niż Anthropic.
+- **Inne bloki treści** (`container_upload`, …) są odrzucane
+  z czytelnym błędem `400` zamiast cicho pomijane.
+- **`stop_sequences`** są respektowane u każdego providera. Providerzy, którzy natywnie
+  raportują dopasowaną sekwencję (Anthropic), zwracają pełny kontrakt:
+  `stop_reason: "stop_sequence"` wraz z wartością `stop_sequence`; tak samo
+  modele reasoning OpenAI (GPT-5 i nowsze, seria o), w których GoModel sam przycina
+  wyjście, ponieważ OpenAI odrzuca dla nich `stop`. Inne modele z rodziny OpenAI
+  nie odróżniają w `finish_reason` zatrzymania przez parametr stop od naturalnego
+  zakończenia, więc ich odpowiedzi raportują `stop_reason: "end_turn"` (wyjście
+  jest nadal poprawnie przycięte).
+- **`output_config`**: `effort` ustawia reasoning effort (ma pierwszeństwo przed
+  wartością wyprowadzoną z `thinking`), a `format` (lub starsze pole najwyższego
+  poziomu `output_format`) staje się structured output opartym na JSON schema –
+  w trybie strict, gdy schemat spełnia reguły trybu strict OpenAI
+  (`additionalProperties: false`, każda właściwość wymagana i brak słów kluczowych
+  `allOf`, `not` ani warunkowych). Pozostałe schematy są wysyłane z `strict: false`:
+  ukierunkowują wyjście, ale go nie gwarantują. Format inny niż `json_schema` jest
+  odrzucany z `400`.
+- **`thinking`** w modelu innym niż Anthropic staje się reasoning effort (budżet
+  poniżej 10000 tokenów: `low`, poniżej 20000: `medium`, w przeciwnym razie `high`;
+  adaptive: `medium`), wysyłanym w polu właściwym dla danego providera: `reasoning_effort`
+  w OpenAI, Groq, Fireworks i xAI. Modele, które odrzucają to pole (OpenAI `gpt-4*`,
+  modele Groq inne niż gpt-oss i qwen3, `-non-reasoning` xAI, `grok-build`,
+  `grok-2` i `grok-3` z wyjątkiem `grok-3-mini`), otrzymują request bez niego
+  zamiast błędu.
+  Reasoning wraca jako bloki `thinking` niezależnie od tego, którego pola provider
+  do tego używa (`reasoning_content` lub `reasoning`).
+- **`count_tokens`** jest dokładne, gdy provider modelu sam potrafi liczyć tokeny:
+  modele Anthropic są liczone przez własny endpoint `count_tokens` Anthropic.
+  Przekazywany request zawiera rozwiązany model (alias jest rozwiązywany najpierw)
+  i tylko pola akceptowane przez ten endpoint: `messages`, `system`, `tools`,
+  `tool_choice`, `thinking`, `cache_control` i `output_config`; `max_tokens`,
+  `stream`, `metadata` i parametry samplingu są pomijane, ponieważ Anthropic
+  je tam odrzuca. Modele OpenAI są liczone przez endpoint OpenAI
+  `/v1/responses/input_tokens` dla requestu w postaci, w jakiej GoModel go wyśle.
+  W GPT-5 i nowszych wynik odpowiada rozliczanemu wejściu (z dokładnością do tokenu):
+  dla requestu z narzędziami obsługiwanego przez Chat Completions doliczany jest
+  stały preambuł narzędzi, za który naliczana jest opłata. W starszych rodzinach
+  modeli taki request może dać wynik o kilka tokenów niższy od rozliczanego wejścia
+  (6 w `gpt-4o-mini`). Guardrails nie są uruchamiane przy liczeniu, więc gdy workflow
+  requestu ma guardrails promptu, prompt nigdy nie jest wysyłany do providera w celu
+  policzenia i odpowiada oszacowanie (guardrails działające tylko na odpowiedzi
+  i strumieniu zachowują dokładne liczenie). Dla każdego innego providera, a także
+  gdy to wywołanie się nie powiedzie, gateway odpowiada oszacowaniem, które waży tekst
+  według gęstości tokenizacji (proza, kod i JSON, CJK, emoji), dolicza narzut na każdą
+  wiadomość i każde narzędzie oraz system prompt dla tool-use, a obrazy wycenia według
+  ich powierzchni w pikselach. Przy typowym ruchu agentów oszacowanie mieści się
+  w około dziesięciu procentach od dokładnego wyniku tokenizera; surowe base64
+  w tekście pozostaje niedoszacowane, a obraz, którego rozmiaru nie da się odczytać,
+  jest liczony jako największy rozmiar, jaki zachowuje provider. To samo oszacowanie
+  wypełnia `usage.input_tokens` w streamingowym zdarzeniu `message_start`; miarodajne
+  liczniki przychodzą w końcowym zdarzeniu `message_delta`, które akumulatory SDK
+  traktują priorytetowo.
+
+Jeśli potrzebujesz wierności Anthropic bajt w bajt wykraczającej poza obsługiwane
+kontrolki cache, użyj zamiast tego trasy passthrough `/p/anthropic/v1/messages`.
+
+Uzasadnienie projektu i kompromisy opisuje
+[ADR-0007](https://github.com/ENTERPILOT/GoModel/blob/main/docs/adr/0007-anthropic-messages-ingress.md).

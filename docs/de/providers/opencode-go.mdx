@@ -1,0 +1,160 @@
+---
+title: "OpenCode Go: Basis-URL und OpenAI-kompatibler Endpunkt"
+sidebarTitle: "OpenCode Go"
+description: "Konfigurieren Sie OpenCode Zen (Go-Abonnement) in GoModel über einen OpenAI-kompatiblen Endpunkt."
+icon: "terminal"
+keywords: ["OpenCode Zen", "OpenCode Go", "OPENCODE_GO_BASE_URL", "OpenCode Go endpoint", "OpenCode-Go-Endpunkt", "Provider-Einrichtung", "provider setup"]
+---
+
+[OpenCode Zen](https://opencode.ai/docs/zen/) stellt die Modelle seines
+„Go“-Abonnements hinter einer OpenAI-kompatiblen API bereit. GoModel bringt einen
+nativen Provider `opencode_go` mit, der die Basis-URL vorbelegt; Sie benötigen also
+nur einen API-Key.
+
+## Konfiguration
+
+```bash
+OPENCODE_GO_API_KEY=sk-...
+# Optional: den Standard-Endpunkt überschreiben.
+# OPENCODE_GO_BASE_URL=https://opencode.ai/zen/go/v1
+```
+
+Oder in der `config.yaml`:
+
+```yaml
+providers:
+  opencode_go:
+    type: opencode_go
+    api_key: "${OPENCODE_GO_API_KEY}"
+    # Optional: den Standard-Endpunkt überschreiben.
+    # base_url: "https://opencode.ai/zen/go/v1"
+```
+
+Die Standard-Basis-URL ist `https://opencode.ai/zen/go/v1`. Die Authentifizierung
+erfolgt über `Authorization: Bearer <api_key>` mit dem Key, der in der OpenCode Zen
+Console erzeugt wurde.
+
+## Modelle
+
+`GET /v1/models` reicht die Modellliste von OpenCode Zen durch und stellt IDs wie
+`glm-5.1`, `kimi-k2.7-code`, `deepseek-v4-pro` und `mimo-v2.5-pro` bereit.
+Beschränken Sie die ausgewiesene Menge mit einer konfigurierten Liste, wenn Sie nur
+eine Teilmenge möchten:
+
+```bash
+OPENCODE_GO_MODELS=glm-5.1,kimi-k2.7-code,deepseek-v4-pro
+```
+
+## Endpunkte
+
+OpenCode Zen bedient die meisten Modelle über das OpenAI-artige `/chat/completions`
+(Bearer-Authentifizierung) und einige Modelle ausschließlich über den
+Anthropic-nativen Endpunkt `/messages` (Authentifizierung über `x-api-key`). GoModel
+routet pro Modell:
+
+- **OpenAI-artige Modelle** (GLM, Kimi, DeepSeek, MiMo, MiniMax, die meisten
+  Qwen-Modelle) gehen an `/chat/completions`. `/models` und `/v1/responses` (auf Chat
+  Completions übersetzt) nutzen denselben Pfad.
+- **Reine Anthropic-Modelle** werden in den Dialekt der Anthropic Messages API
+  übersetzt und an `/messages` gesendet – so, wie GoModel bereits natives Anthropic
+  bedient. Beide Pfade werden auf dieselbe OpenAI-kompatible Response normalisiert,
+  sodass Clients unabhängig vom gewählten Modell eine einheitliche Oberfläche sehen —
+  ob sie nun `/v1/chat/completions` oder `/v1/messages` aufrufen.
+
+Die Menge der Modelle, die nur über `/messages` erreichbar sind, wird derzeit manuell
+gepflegt (Standard: `qwen3.7-max`), weil OpenCode Zen noch keine Endpunkt-Metadaten
+pro Modell bereitstellt. Überschreiben Sie sie bei Bedarf:
+
+```bash
+OPENCODE_GO_MESSAGES_MODELS=qwen3.7-max
+```
+
+<Note>
+  Diese manuelle Aufteilung ist vorübergehend und wird durch metadatengesteuertes
+  Routing ersetzt, sobald die Upstream-Modellliste Endpunkte unterscheidet.
+</Note>
+
+## Session-Header
+
+OpenCode Zen verlangt von jedem Client einen Header `x-opencode-session`, damit es
+eine Konversation zum selben Upstream routen und dessen Prompt-Cache warm halten
+kann. Upstream hat angekündigt, dass Requests ohne diesen Header künftig fehlschlagen
+können. GoModel fügt den Header standardmäßig jedem OpenCode-Go-Request hinzu, sowohl
+auf dem Pfad `/chat/completions` als auch auf `/messages`, und verwendet dabei den
+ersten verfügbaren Wert:
+
+1. Ein vom Client gesendeter Header `x-opencode-session` (OpenCode selbst, pi und
+   andere Tools, die den Dialekt von OpenCode Zen sprechen) wird unverändert
+   weitergeleitet.
+2. Andernfalls die Session, die GoModel über
+   [Session Keeping](/de/features/session-keeping) erkannt hat: OpenCodes
+   `X-Session-Id`, die Session-ID von Claude Code, ein Session-Feld im Body oder die
+   aus dem Inhalt abgeleitete `auto-…`-ID für Agents, die überhaupt kein Signal
+   senden.
+
+Ein Request ohne erkennbare Session wird ohne den Header gesendet. GoModel
+identifiziert sich außerdem mit `x-opencode-client` (der eigene Wert des Clients wird
+weitergeleitet, falls vorhanden, sonst `gomodel`) und einem User-Agent
+`gomodel/<version>`, wie es die
+[Nutzungsrichtlinien](https://opencode.ai/docs/go/#where-can-i-use-it) des Upstreams
+verlangen.
+
+Deaktivieren Sie die Weiterleitung der Session nur, wenn der Upstream Sie dazu
+auffordert:
+
+```bash
+OPENCODE_GO_SESSION_HEADER=false
+```
+
+## Reasoning
+
+Einige Modelle von OpenCode Zen denken immer und lehnen Requests ab, in denen der
+Reasoning-Parameter fehlt:
+
+```text
+[1210] This model always engages in thinking and cannot be disabled; please use low, high, or max
+```
+
+GoModel sendet daher auf `/chat/completions` `reasoning_effort: "low"`, wenn ein
+Request überhaupt keinen Reasoning-Parameter enthält. Modelle, die den Parameter
+ignorieren, sind davon nicht betroffen. Erhöhen Sie den Standardwert pro Deployment:
+
+```bash
+OPENCODE_GO_DEFAULT_REASONING_EFFORT=high
+```
+
+Setzen Sie ihn auf `none` (oder `off`), um nichts einzufügen und Requests unverändert
+weiterzuleiten.
+
+Clients behalten die Kontrolle, wenn sie selbst Reasoning anfordern: Über ein
+explizites `reasoning.effort` oder ein `reasoning_effort` auf oberster Ebene wird
+nichts eingefügt. Die von GoModel erkannten Effort-Stufen werden auf ihre nächste
+Entsprechung in der Menge low / high / max abgebildet, die OpenCode Zen akzeptiert:
+
+| Angeforderter Effort     | Upstream gesendet |
+| ------------------------ | ------------- |
+| `none`, `minimal`, `low` | `low`         |
+| `medium`                 | `low`         |
+| `high`                   | `high`        |
+| `xhigh`, `max`           | `max`         |
+
+Jeder andere Wert (etwa `turbo`) wird unverändert weitergeleitet, damit der Upstream
+darüber entscheidet. `reasoning.effort` ist das kanonische Feld von GoModel; ein
+Request, der sowohl dieses Feld als auch ein `reasoning_effort` auf oberster Ebene
+setzt, wird daher mit dem abgebildeten `reasoning.effort` gesendet — dieselbe
+Rangfolge, die jeder andere GoModel-Provider anwendet.
+
+Modelle, die zu `/messages` geroutet werden, verwenden stattdessen den
+Thinking-Dialekt von Anthropic und sind von dieser Abbildung nicht betroffen.
+
+## DeepSeek-Modelle
+
+Modell-IDs, die mit `deepseek` beginnen, erhalten dieselbe Request-Behandlung wie
+beim nativen DeepSeek-Provider, auch wenn ein virtuelles Modell zu ihnen routet:
+`reasoning_content` wird in früheren Assistant-Turns ergänzt, wenn Tools vorhanden
+sind, und Structured Output über `json_schema` folgt `DEEPSEEK_JSON_SCHEMA_MODE`.
+Details finden Sie unter [DeepSeek](/de/providers/deepseek#structured-outputs).
+
+## Nicht unterstützt
+
+- Embeddings (liefert `invalid_request_error`).

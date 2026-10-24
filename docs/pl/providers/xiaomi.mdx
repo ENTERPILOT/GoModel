@@ -1,0 +1,91 @@
+---
+title: "Xiaomi MiMo"
+description: "Skonfiguruj Xiaomi MiMo w GoModel: tryb thinking, sufiks kontekstu [1m] i mapowanie TTS/ASR na standardowe endpointy audio."
+icon: "mic"
+keywords: ["Xiaomi MiMo", "thinking mode", "tryb thinking", "TTS", "ASR", "konfiguracja providera", "provider setup"]
+---
+
+Xiaomi MiMo udostępnia API czatu kompatybilne z OpenAI z kilkoma odstępstwami
+w dialekcie: tryb thinking jest domyślnie włączony, kontekst 1M wybiera się
+sufiksem w ID modelu, a TTS/ASR działają przez chat completions zamiast przez
+dedykowane endpointy audio. GoModel tłumaczy za Ciebie standardowe endpointy
+`/v1/audio/speech` i `/v1/audio/transcriptions` na ten dialekt.
+
+## Konfiguracja
+
+```bash
+XIAOMI_API_KEY=...
+```
+
+Albo w `config.yaml`:
+
+```yaml
+providers:
+  xiaomi:
+    type: xiaomi
+    base_url: "https://api.xiaomimimo.com/v1"
+    api_key: "${XIAOMI_API_KEY}"
+```
+
+## Tryb thinking
+
+Modele MiMo domyślnie korzystają z thinking, co zwiększa zużycie tokenów.
+Wyłącz go dla pojedynczego requestu parametrem `thinking` MiMo – GoModel
+przekazuje go bez zmian:
+
+```json
+{"model": "xiaomi/mimo-v2.5-pro", "thinking": {"type": "disabled"}, ...}
+```
+
+W wieloturowych rozmowach z tool calling odtwarzaj w historii wiadomości pole
+`reasoning_content` asystenta dokładnie w takiej postaci, w jakiej je
+otrzymałeś. GoModel zachowuje je w obu kierunkach.
+
+## Kontekst 1M
+
+Dopisz `[1m]` do ID modelu (na przykład `mimo-v2.5-pro[1m]`), aby włączyć
+kontekst 1M tokenów. Te warianty zwykle nie są zwracane przez listę `/models`
+MiMo, więc dodaj je do skonfigurowanej listy modeli, aby dało się do nich
+routować requesty:
+
+```bash
+XIAOMI_MODELS=mimo-v2.5-pro,mimo-v2.5-pro[1m]
+```
+
+## Zamiana tekstu na mowę i transkrypcja
+
+MiMo nie ma natywnych endpointów `/audio/*` – TTS (`mimo-v2.5-tts`,
+`mimo-v2.5-tts-voicedesign`, `mimo-v2.5-tts-voiceclone`) i ASR
+(`mimo-v2.5-asr`) działają przez chat completions. GoModel udostępnia oba
+sposoby:
+
+- **Standardowe endpointy audio** – `/v1/audio/speech` i
+  `/v1/audio/transcriptions` są tłumaczone automatycznie. Synteza mowy obsługuje
+  `response_format` `wav` (domyślnie) i `pcm`; `mp3` – udokumentowana przez
+  OpenAI wartość domyślna, którą niektóre SDK wysyłają jawnie – jest traktowane
+  jako „nieokreślone” i obsługiwane jako WAV, więc `Content-Type` odpowiedzi to
+  `audio/wav`. `instructions` stają się promptem stylu MiMo, a `voice` wybiera
+  predefiniowany głos. Transkrypcja obsługuje
+  formaty odpowiedzi `json` (domyślnie) i `text`, przy czym `language` jest
+  przekazywane do `asr_options` MiMo, a `temperature` do requestu czatu.
+- **Dialekt czatu MiMo** – wysyłaj chat completions bezpośrednio: tekst do
+  syntezy w wiadomości `assistant` z parametrem najwyższego poziomu
+  `audio: {format, voice}` albo, przy transkrypcji, część treści `input_audio`,
+  której `data` to URI `data:` w base64. GoModel przekazuje te struktury bez
+  zmian.
+
+## Funkcje nieobsługiwane przez Xiaomi MiMo
+
+Wszystkie poniższe zwracają `invalid_request_error`, zamiast po cichu pomijać
+opcję:
+
+- Embeddingi.
+- Wartości `response_format` syntezy mowy inne niż `wav`/`pcm`/`mp3` (`opus`, `aac`,
+  `flac`) oraz niedomyślne `speed` (do regulacji tempa użyj `instructions`).
+- Formaty transkrypcji `verbose_json`/`srt`/`vtt`, `prompt` oraz
+  `timestamp_granularities` (MiMo zwraca wyłącznie zwykły tekst transkrypcji).
+
+<Note>
+  Od 18 czerwca 2026 requesty do MiMo-V2-Flash i V2-TTS są automatycznie
+  kierowane do modeli V2.5 (po cenach V2.5).
+</Note>

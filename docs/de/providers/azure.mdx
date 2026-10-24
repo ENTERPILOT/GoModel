@@ -1,0 +1,159 @@
+---
+title: "Azure OpenAI: Deployment-URLs und api-version"
+sidebarTitle: "Azure OpenAI"
+description: "Konfigurieren Sie Azure OpenAI in GoModel mit Deployment-basierten URLs und dem Query-Parameter api-version."
+icon: "/brand/azure.svg"
+keywords: ["Azure OpenAI", "Azure-Endpunkt", "azure endpoint", "Deployment-Name", "deployment name", "api-version", "api_version", "Provider-Einrichtung", "provider setup"]
+---
+
+Azure OpenAI verwendet das Format der OpenAI-API mit zwei Unterschieden, die
+GoModel übernimmt: einen `api-key`-Header statt `Authorization: Bearer` und
+einen erforderlichen Query-Parameter `api-version` bei jedem Request.
+
+## Konfigurieren
+
+```bash
+AZURE_API_KEY=...
+AZURE_BASE_URL=https://your-resource.openai.azure.com/openai/deployments/your-deployment
+AZURE_API_VERSION=2024-10-21   # optional, Standardwert ist 2024-10-21
+GOMODEL_MASTER_KEY=change-me
+```
+
+Oder in `config.yaml`:
+
+```yaml
+providers:
+  azure:
+    type: azure
+    base_url: "${AZURE_BASE_URL}"
+    api_key: "${AZURE_API_KEY}"
+    api_version: "2024-10-21"
+```
+
+## GoModel starten
+
+<CodeGroup>
+
+```bash Docker (.env-Datei)
+docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
+```
+
+```bash Docker (inline -e)
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e AZURE_API_KEY="..." \
+  -e AZURE_BASE_URL="https://your-resource.openai.azure.com/openai/deployments/your-deployment" \
+  enterpilot/gomodel
+```
+
+```bash Binary (make build)
+make build
+./bin/gomodel
+```
+
+</CodeGroup>
+
+## Prüfen
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-5",
+    "messages": [{"role": "user", "content": "Reply with the single word ok."}],
+    "max_tokens": 80
+  }'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+completion = client.chat.completions.create(
+    model="gpt-5",
+    messages=[{"role": "user", "content": "Reply with the single word ok."}],
+    max_tokens=80,
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const completion = await client.chat.completions.create({
+  model: "gpt-5",
+  messages: [{ role: "user", content: "Reply with the single word ok." }],
+  max_tokens: 80,
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
+
+`GET /v1/models` liefert die Deployments, die die Azure-Ressource bereitstellt,
+mit `owned_by: "azure"`. Streaming, Responses, Embeddings und Batches
+funktionieren genauso; Batch-Ergebnisse werden über den Ressourcenpfad
+`/openai/batches` geroutet.
+
+## Mehrere Deployments
+
+Jedes Azure-Deployment ist ein eigener Endpunkt. Registrieren Sie sie über
+Umgebungsvariablen mit Suffix als separate Provider:
+
+```bash
+AZURE_GPT5_API_KEY=...
+AZURE_GPT5_BASE_URL=https://your-resource.openai.azure.com/openai/deployments/gpt-5
+
+AZURE_EMBED_API_KEY=...
+AZURE_EMBED_BASE_URL=https://your-resource.openai.azure.com/openai/deployments/text-embedding-3-small
+```
+
+Dadurch werden `azure-gpt5` und `azure-embed` registriert. Um alle Deployments
+einer Ressource über einen einzigen Provider bereitzustellen, richten Sie
+`AZURE_BASE_URL` auf die Wurzel der Ressource (ohne `/deployments/...`) und
+verwenden Sie [virtuelle Modelle](/de/features/virtual-models) oder
+`AZURE_MODELS`, um bestimmte Deployment-Namen anzubieten.
+
+## Hinweise
+
+- GoModel akzeptiert die Deployment-bezogene URL, die Ihnen das Portal
+  anzeigt. Für kontoweite Operationen (Auflisten von Modellen, Batches)
+  entfernt GoModel das Suffix `/openai/deployments/<deployment>` automatisch,
+  sodass eine einzige `AZURE_BASE_URL` sowohl Chat- als auch
+  Ressourcen-Aufrufe abdeckt.
+- `AZURE_API_VERSION` müssen Sie nur dann explizit setzen, wenn Sie eine
+  andere stabile oder Preview-Version benötigen – zum Beispiel eine neuere
+  Version der Responses API.
+
+## Fehlerbehebung
+
+- **`401 Unauthorized` / `403`** – `AZURE_API_KEY` passt nicht zu der
+  Ressource, die das Deployment hostet, oder der Deployment-Name in der URL ist
+  falsch.
+- **`Resource not found` / `DeploymentNotFound`** – Das Modell im Request-Body
+  muss der Deployment-Name sein, nicht das zugrunde liegende Basismodell.
+- **`unsupported api version`** – Erhöhen Sie `AZURE_API_VERSION` auf eine
+  Version, die das aufgerufene Feature unterstützt. Neuere Features der
+  Responses API erfordern aktuelle Preview-Versionen.
+
+## Referenzen
+
+- [Versionierung der Azure-OpenAI-REST-API](https://learn.microsoft.com/azure/ai-services/openai/reference)
+- [Azure-OpenAI-Deployments](https://learn.microsoft.com/azure/ai-services/openai/how-to/create-resource)
+- [Authentifizierung bei Azure OpenAI](https://learn.microsoft.com/azure/ai-services/openai/how-to/managed-identity)

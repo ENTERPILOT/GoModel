@@ -1,0 +1,199 @@
+---
+title: "API-Endpunkte"
+description: "Referenz der OpenAI-kompatiblen und Anthropic-kompatiblen Endpunkte von GoModel, des Provider-Passthroughs und der Betriebsrouten."
+icon: "list-tree"
+keywords: ["API-Endpunkte", "API endpoints", "OpenAI-kompatible API", "OpenAI-compatible API", "Routen", "routes", "Passthrough", "Referenz", "reference"]
+---
+
+GoModel stellt OpenAI-kompatible und Anthropic-kompatible APIs, einen Provider-nativen Passthrough
+und eine Reihe von Betriebsendpunkten bereit. Admin- und Dashboard-Routen sind separat unter
+[Admin-Endpunkte](/de/advanced/admin-endpoints) dokumentiert.
+
+Details zu Requests und Responses finden Sie in den jeweiligen Leitfäden:
+[Responses API](/de/advanced/responses-api), [Conversations API](/de/advanced/conversations-api),
+[Anthropic Messages API](/de/advanced/anthropic-messages-api),
+[Audio API](/de/advanced/audio-api), [Images API](/de/advanced/images-api),
+[Decisions API](/de/advanced/decisions-api), [System One API](/de/advanced/systemone-api)
+und [Usage API](/de/advanced/usage-api).
+
+## OpenAI-kompatible API
+
+| Endpunkt                          | Methode | Beschreibung                                                                                                  |
+| --------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------ |
+| `/v1/chat/completions`            | POST   | Chat Completions (Streaming wird unterstützt)                                                                       |
+| `/v1/responses`                   | POST   | Eine Response der OpenAI Responses API erstellen                                                                      |
+| `/v1/responses/{id}`              | GET    | Eine gespeicherte Response abrufen                                                                                   |
+| `/v1/responses/{id}`              | DELETE | Eine gespeicherte Response löschen (leitet das native Löschen weiter, wo unterstützt)                                          |
+| `/v1/responses/{id}/cancel`       | POST   | Eine laufende Response abbrechen (Provider-nativ, wo unterstützt)                                             |
+| `/v1/responses/{id}/input_items`  | GET    | Die Input-Items einer gespeicherten Response auflisten                                                                    |
+| `/v1/responses/input_tokens`      | POST   | Input-Tokens für einen Responses-Request zählen                                                                   |
+| `/v1/responses/compact`           | POST   | Eine Responses-Konversation komprimieren (Provider-nativ, wo unterstützt)                                           |
+| `/v1/conversations`               | POST   | Eine Konversation erstellen (vom Gateway verwaltet)                                                                      |
+| `/v1/conversations/{id}`          | GET    | Eine Konversation abrufen                                                                                      |
+| `/v1/conversations/{id}`          | POST   | Metadaten einer Konversation zusammenführen                                                                                  |
+| `/v1/conversations/{id}`          | DELETE | Eine Konversation löschen                                                                                        |
+| `/v1/conversations/{id}/items`    | POST   | Items zu einer Konversation hinzufügen                                                                                  |
+| `/v1/conversations/{id}/items`    | GET    | Items einer Konversation mit Cursor-Paginierung auflisten                                                              |
+| `/v1/conversations/{id}/items/{item_id}` | GET | Ein Item einer Konversation abrufen                                                                         |
+| `/v1/conversations/{id}/items/{item_id}` | DELETE | Ein Item einer Konversation löschen und die Konversation zurückgeben                                                |
+| `/v1/embeddings`                  | POST   | Text-Embeddings                                                                                              |
+| `/v1/models`                      | GET    | Verfügbare Modelle auflisten                                                                                        |
+| `/v1/models/{model}`              | GET    | Ein Modell anhand seiner ID abrufen (`openai/gpt-4.1-mini`; Schrägstriche können unverändert oder Percent-codiert gesendet werden). Eine ID, die für Inferenz funktioniert, etwa ein bloßes `gpt-4.1-mini`, liefert das Modell, auf das sie aufgelöst wird |
+| `/v1/audio/speech`                | POST   | Text-to-Speech, gibt binäres Audio zurück                                                                       |
+| `/v1/audio/transcriptions`        | POST   | Speech-to-Text aus einem Multipart-Upload                                                                       |
+| `/v1/images/generations`          | POST   | Bildgenerierung aus einem Text-Prompt (DALL·E, gpt-image-1, grok-2-image, Imagen, Gemini-Bildmodelle)                                     |
+| `/v1/images/edits`                | POST   | Bildbearbeitung / Inpainting aus einem Multipart-Upload (Bild, optionale Maske, Prompt)                             |
+| `/v1/realtime`                    | GET    | Websocket-Upgrade für Realtime-Speech-to-Speech; `?call_id=` verbindet sich als Sideband-Kanal mit einem bestehenden WebRTC/SIP-Call (wenn `REALTIME_ENABLED`) |
+| `/v1/realtime/calls`              | POST   | Realtime-WebRTC-SDP-Austausch: `application/sdp`-Offer mit `?model=` oder Multipart-Felder `sdp` + `session` (wenn `REALTIME_ENABLED`)            |
+| `/v1/realtime/client_secrets`     | POST   | Ein kurzlebiges Realtime-Client-Secret für Browser-Clients ausstellen, geroutet über `session.model` (wenn `REALTIME_ENABLED`)                                |
+| `/v1/realtime/translations`       | GET    | Websocket-Upgrade für Realtime-Sprachübersetzung (z. B. `gpt-realtime-translate`); identisch mit `/v1/realtime?intent=translation` (wenn `REALTIME_ENABLED`) |
+| `/v1/realtime/translations/calls` | POST   | WebRTC-SDP-Austausch für eine Übersetzungs-Session (wenn `REALTIME_ENABLED`)                                                                          |
+| `/v1/realtime/translations/client_secrets` | POST | Ein kurzlebiges Client-Secret für eine Übersetzungs-Session ausstellen (wenn `REALTIME_ENABLED`)                                                     |
+| `/v1/files`                       | POST   | Eine Datei hochladen (OpenAI-kompatibles Multipart)                                                                  |
+| `/v1/files`                       | GET    | Dateien auflisten                                                                                                   |
+| `/v1/files/{id}`                  | GET    | Metadaten einer Datei abrufen                                                                                       |
+| `/v1/files/{id}`                  | DELETE | Eine Datei löschen                                                                                                |
+| `/v1/files/{id}/content`          | GET    | Den Rohinhalt einer Datei abrufen                                                                                    |
+| `/v1/batches`                     | POST   | Einen nativen Provider-Batch erstellen (OpenAI-kompatibles Schema; Inline-`requests` werden unterstützt, wo Provider-nativ verfügbar) |
+| `/v1/batches`                     | GET    | Gespeicherte Batches auflisten                                                                                          |
+| `/v1/batches/{id}`                | GET    | Einen gespeicherten Batch abrufen                                                                                    |
+| `/v1/batches/{id}/cancel`         | POST   | Einen ausstehenden Batch abbrechen                                                                                       |
+| `/v1/batches/{id}/results`        | GET    | Native Batch-Ergebnisse abrufen, sofern verfügbar                                                                 |
+
+### Realtime-Übersetzungs-Sessions
+
+Sprachübersetzungsmodelle (OpenAI `gpt-realtime-translate`) laufen auf einer eigenen
+Session-Schnittstelle, die das Gateway entsprechend abbildet. Verbinden Sie sich mit
+`/v1/realtime/translations` – oder mit `/v1/realtime?intent=translation`, was dieselbe Session ist –
+und legen Sie die Zielsprache fest, nachdem der Socket geöffnet wurde:
+
+```bash
+wscat -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -c "ws://localhost:8080/v1/realtime/translations?model=gpt-realtime-translate"
+```
+
+```json
+{"type": "session.update", "session": {"audio": {"output": {"language": "pl"}}}}
+```
+
+Übersetzungs-Sessions verwenden eigene Event-Namen (`session.input_audio_buffer.append` eingehend,
+`session.output_audio.delta` und `session.output_transcript.delta` ausgehend) und akzeptieren
+PCM16-Audio mit 24 kHz. Frames werden unverändert weitergeleitet, sodass jeder Client, der gegen die
+Übersetzungs-API des Providers geschrieben wurde, ohne Änderungen funktioniert.
+
+Übersetzung ist derzeit eine OpenAI-Schnittstelle. Wird eine Übersetzungs-Session an einen Provider
+geroutet, der keine anbietet, schlägt sie mit 400 fehl, statt stillschweigend eine gewöhnliche
+Konversations-Session an ihrer Stelle zu öffnen.
+
+Diese Sessions melden keine Nutzungs-Events, daher berechnet das Gateway ihre Kosten anhand des
+weitergeleiteten Input-Audios zum sekundengenauen Input-Preis des Modells. WebRTC-Übersetzungs-Calls
+sind die Ausnahme: Ihre Medien laufen nie durch das Gateway, daher werden sie nicht erfasst.
+
+### Realtime-Transkriptions-Sessions
+
+Transkriptions-Sessions (`/v1/realtime?intent=transcription`) wählen ihr Modell in
+`session.update` statt in der URL; der Query-Parameter `model` routet den Request, und das Gateway
+legt die Auswahl innerhalb der Session auf dieses Modell fest.
+
+Die meisten Transkriptionsmodelle melden ihre Nutzung im Event
+`conversation.item.input_audio_transcription.completed` – als Tokens oder, bei Whisper-artigen
+Modellen, als Sekunden –, und diese Meldung bestimmt den Preis der Session. Ein Modell, das dort
+keine Nutzung angibt, meldet nichts; dann greift das Gateway auf das weitergeleitete Input-Audio zum
+sekundengenauen Input-Preis zurück. Der Fallback greift nur, wenn eine Session selbst keine Nutzung
+gemeldet hat, sodass eine Session nie doppelt abgerechnet wird. Wie bei der Übersetzung übertragen
+WebRTC-Calls ihre Medien außerhalb des Gateways und werden nicht erfasst.
+
+## Anthropic-kompatible API
+
+| Endpunkt                    | Methode | Beschreibung                                                                   |
+| --------------------------- | ------ | ----------------------------------------------------------------------------- |
+| `/v1/messages`              | POST   | Anthropic Messages API über übersetztes Modell-Routing (Streaming wird unterstützt) |
+| `/v1/messages/count_tokens` | POST   | Heuristische Schätzung der Input-Tokens für Anthropic Messages                             |
+
+## Decisions API
+
+Verfügbar, wenn ein Provider vom Typ `openai`, `jev` oder `openrouter` konfiguriert ist; siehe
+[Decisions API](/de/advanced/decisions-api).
+
+| Endpunkt        | Methode | Beschreibung                                                                           |
+| --------------- | ------ | ------------------------------------------------------------------------------------- |
+| `/v1/decisions` | POST   | Typisierte Fragen zu einem Input beantworten (OpenAI nativ, Jev / Kev über System One) |
+
+## System One API
+
+Verfügbar, wenn ein Provider vom Typ `jev` oder `openrouter` konfiguriert ist; siehe
+[System One API](/de/advanced/systemone-api).
+
+| Endpunkt                     | Methode | Beschreibung                                                              |
+| ---------------------------- | ------ | ------------------------------------------------------------------------ |
+| `/v1/systemone`              | POST   | Einen Zustand anhand typisierter Fragen auswerten (Jev, Kev), nativ weitergeleitet |
+| `/v1/systemone/permute`      | POST   | Nur Kev: eine Choice-Frage mit mehreren Reihenfolgen der Optionen ausführen            |
+| `/v1/systemone/separate`     | POST   | Nur Kev: jede Frage in einem eigenen Forward Pass ausführen                     |
+
+## Gateway-Erweiterungen
+
+| Endpunkt    | Methode | Beschreibung                                                                                                                              |
+| ----------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `/v1/usage` | GET    | Self-Service-Status zu Nutzung, Budget und Rate-Limit für den effektiven User Path des Aufrufers – siehe [Usage API](/de/advanced/usage-api) |
+| `/v1/auth/verify` | GET | Meldet, ob der API-Key im Request gültig ist (wenn `AUTH_VERIFY_ENABLED`) |
+
+### Key-Verifizierung
+
+Mit `GET /v1/auth/verify` kann ein Dienst, der vor dem Gateway steht, einen API-Key prüfen, ohne
+eine Kopie der Key-Liste vorzuhalten. Der Endpunkt ist **standardmäßig deaktiviert**; aktivieren Sie
+ihn mit `AUTH_VERIFY_ENABLED=true` (`server.auth_verify_enabled`). Es handelt sich nicht um eine
+`/admin`-Route, daher funktioniert er auch dann, wenn die Admin API deaktiviert ist.
+
+```bash
+curl http://localhost:8080/v1/auth/verify \
+  -H "Authorization: Bearer sk_gom_..."
+```
+
+```json
+{ "valid": true, "method": "api_key", "key_id": "key_01H...", "user_path": "/acme/eng" }
+```
+
+Ein unbekannter, deaktivierter oder abgelaufener Key wird von der normalen Authentifizierung des
+Gateways mit `401` abgelehnt; ein `200` bedeutet also, dass der Key sich erfolgreich
+authentifiziert. `method` gibt an, welcher Mechanismus ihn akzeptiert hat: `api_key` ist ein
+verwalteter, in der Datenbank gespeicherter Key, `master_key` der Bootstrap-Key aus
+`GOMODEL_MASTER_KEY`. `key_id` und `user_path` sind nur bei verwalteten Keys vorhanden, die daran
+gebunden sind.
+
+<Note>
+  Wo das Gateway nicht authentifizierte Aufrufer zulässt – weil überhaupt keine Authentifizierung
+  konfiguriert ist oder weil eine Erweiterung eine Route davon ausgenommen hat –, gibt es keinen Key
+  zu bestätigen. Der Endpunkt antwortet dann mit `200` und `{"valid": false, "method": "none"}`,
+  statt zu behaupten, der Key sei gültig. Ein Statuscode-basierter Consumer wie `forward_auth` von
+  Caddy wertet das als erlaubt, was dem entspricht, wie das Gateway selbst diese Requests behandelt.
+</Note>
+
+## Provider-Passthrough
+
+| Endpunkt            | Methode                                       | Beschreibung                                                |
+| ------------------- | -------------------------------------------- | ---------------------------------------------------------- |
+| `/p/{provider}/...` | GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS | Provider-nativer Passthrough mit unverändert durchgereichten Upstream-Responses |
+
+## MCP Gateway
+
+Streamable-HTTP-MCP-Endpunkte (Model Context Protocol), die die konfigurierten Upstream-MCP-Server
+bündeln (wenn `MCP_ENABLED`, standardmäßig aktiviert). Siehe [MCP Gateway](/de/features/mcp-gateway).
+
+| Endpunkt        | Methode            | Beschreibung                                                                     |
+| --------------- | ----------------- | ------------------------------------------------------------------------------- |
+| `/mcp`          | POST, GET, DELETE | Gebündelter MCP-Endpunkt; Tools/Prompts mit Namensraum als `{server}_{name}`          |
+| `/mcp/{server}` | POST, GET, DELETE | Ein einzelner konfigurierter MCP-Server mit den ursprünglichen Tool-Namen                           |
+
+## Admin-Endpunkte
+
+Admin-REST- und Dashboard-Routen (`/admin/*`) werden unter
+[Admin-Endpunkte](/de/advanced/admin-endpoints) behandelt.
+
+## Betriebsendpunkte
+
+| Endpunkt              | Methode | Beschreibung                                                                        |
+| --------------------- | ------ | ---------------------------------------------------------------------------------- |
+| `/health`             | GET    | Liveness-Check (immer 200, solange der Prozess Requests bedient)                               |
+| `/health/ready`       | GET    | Readiness-Check: pingt den Speicher (503, wenn nicht erreichbar); ein ausgefallener Redis-Cache oder noch nicht geladene Modelle werden als degraded gemeldet (weiterhin 200). Erweiterungskomponenten (zum Beispiel Vaults von GoModel Pro) erscheinen unter ihrem eigenen Namen: `degraded` behält 200 bei, `down` liefert 503 |
+| `/metrics`            | GET    | Prometheus-Metriken (experimentell, wenn aktiviert)                                    |
+| `/swagger/index.html` | GET    | [Swagger UI](/de/advanced/swagger-ui) (wenn mit `-tags=swagger` gebaut und aktiviert)    |

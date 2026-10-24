@@ -1,0 +1,85 @@
+---
+title: "DeepSeek"
+description: "Skonfiguruj DeepSeek V4 w GoModel i dowiedz się, jak poziom reasoningu jest mapowany na pole reasoning_effort w DeepSeek."
+icon: "brain"
+keywords: ["DeepSeek", "reasoning effort", "poziom reasoningu", "konfiguracja providera", "provider setup"]
+---
+
+DeepSeek nie udostępnia natywnego Responses API, więc GoModel automatycznie tłumaczy
+`/v1/responses` na `/chat/completions`. Mapuje też poziomy reasoningu w stylu OpenAI
+na dwa poziomy akceptowane przez DeepSeek.
+
+## Konfiguracja
+
+```bash
+DEEPSEEK_API_KEY=...
+```
+
+Albo w `config.yaml`:
+
+```yaml
+providers:
+  deepseek:
+    type: deepseek
+    base_url: "https://api.deepseek.com"
+    api_key: "${DEEPSEEK_API_KEY}"
+```
+
+<Note>
+  Jeśli wcześniej skonfigurowałeś DeepSeek jako `type: openai`, zmień to na
+  `type: deepseek`. Ogólny provider OpenAI nie tłumaczy `/responses`
+  ani nie mapuje poziomu reasoningu.
+</Note>
+
+## Mapowanie poziomu reasoningu
+
+Modele reasoningowe DeepSeek V4 przyjmują `reasoning_effort` jako string na najwyższym
+poziomie z dwoma dozwolonymi poziomami: `high` i `max`.
+
+| Klient wysyła | DeepSeek otrzymuje |
+| ------------ | ----------------- |
+| `low` / `medium` / `high` | `high` |
+| `xhigh` / `max` | `max` |
+| cokolwiek innego | przekazywane dalej przez GoModel, a następnie odrzucane przez DeepSeek |
+
+GoModel przepisuje `"reasoning": {"effort": "..."}` w formacie OpenAI na
+`reasoning_effort` na najwyższym poziomie w formacie DeepSeek – bez zmian po stronie klienta.
+Własne wartości klienta zwaliduj lub znormalizuj do `high` albo `max` przed wywołaniem GoModel.
+Aby wyłączyć reasoning, całkowicie pomiń pole `reasoning`; każde podane
+`reasoning.effort`, łącznie z `low`, zostaje zmapowane i włącza reasoning.
+
+## Wywołania narzędzi i reasoning
+
+W trybie thinking DeepSeek wymaga `reasoning_content` w każdej wcześniejszej
+turze asystenta, gdy request zawiera `tools`, nawet w turach bez wywołań
+narzędzi. GoModel zachowuje wartość wysłaną przez klienta, a gdy jej brakuje, wstawia
+pojedynczą spację, dzięki czemu klienci, którzy nie wiedzą, że request obsługuje DeepSeek
+(na przykład przez model wirtualny), nadal działają.
+
+## Structured output
+
+DeepSeek akceptuje `response_format: {"type": "json_object"}`, ale nie
+`json_schema`. Dla requestów z `json_schema` (w tym `text.format` na
+`/v1/responses`) GoModel kieruje się ustawieniem `DEEPSEEK_JSON_SCHEMA_MODE`:
+
+| Wartość | Zachowanie |
+| ----- | -------- |
+| `downgrade` (domyślnie) | Wysyła `json_object` i dodaje schemat do konwersacji jako wiadomość systemową. |
+| `error` | Zwraca `invalid_request_error` ze wskazaniem providera i modelu. |
+
+```bash
+DEEPSEEK_JSON_SCHEMA_MODE=error
+```
+
+<Note>
+  Wynik po obniżeniu trybu to poprawny JSON zgodny z założeniami schematu, ale DeepSeek
+  go nie wymusza. Zwaliduj wynik, jeśli zależy Ci na dokładnym kształcie, albo ustaw
+  `error`, gdy klienci nigdy nie mogą otrzymać niewymuszonego wyniku.
+</Note>
+
+Obie reguły dotyczą też modeli DeepSeek udostępnianych przez
+[OpenCode Go](/pl/providers/opencode-go).
+
+## Nieobsługiwane przez DeepSeek
+
+- Embeddingi (zwraca `invalid_request_error`).

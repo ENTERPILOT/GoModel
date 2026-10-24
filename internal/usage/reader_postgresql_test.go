@@ -71,15 +71,16 @@ func (f *fakePgxRows) Scan(dest ...any) error {
 // provider_id, timestamp, model, provider, provider_name, endpoint, user_path,
 // session_id, cache_type, labels, input_tokens, output_tokens, total_tokens, input_cost,
 // output_cost, total_cost, cost_source, raw_data, costs_calculation_caveat,
-// rewrite_tokens_saved, rewrite_cost_saved.
+// rewrite_tokens_saved, rewrite_cost_saved, auth_key_id, markup_percent,
+// markup_selector, billed_cost.
 func TestScanPostgreSQLUsageLogEntries_CarriesRewriteSavings(t *testing.T) {
 	cost := 0.0375
 	ts := time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC)
 	rows := &fakePgxRows{rows: [][]any{
 		{"with-savings", "req-saved", "provider-1", ts, "gpt-5", "openai", nil, "/v1/chat/completions", nil, nil, nil, nil,
-			100, 10, 110, nil, nil, nil, "", nil, "", int64(89), &cost, "key-a"},
+			100, 10, 110, nil, nil, nil, "", nil, "", int64(89), &cost, "key-a", new(20.0), "openai/", new(0.045)},
 		{"without-savings", "req-plain", "provider-2", ts, "gpt-5", "openai", nil, "/v1/chat/completions", nil, nil, nil, nil,
-			50, 10, 60, nil, nil, nil, "", nil, "", int64(0), nil, ""},
+			50, 10, 60, nil, nil, nil, "", nil, "", int64(0), nil, "", nil, "", nil},
 	}}
 
 	entries, err := scanPostgreSQLUsageLogEntries(rows)
@@ -91,8 +92,14 @@ func TestScanPostgreSQLUsageLogEntries_CarriesRewriteSavings(t *testing.T) {
 	require.NotNil(t, saved.RewriteCostSaved)
 	assert.Equal(t, cost, *saved.RewriteCostSaved)
 	assert.Equal(t, "key-a", saved.AuthKeyID)
+	require.NotNil(t, saved.MarkupPercent)
+	assert.Equal(t, 20.0, *saved.MarkupPercent)
+	assert.Equal(t, "openai/", saved.MarkupSelector)
+	require.NotNil(t, saved.BilledCost)
+	assert.Equal(t, 0.045, *saved.BilledCost)
 
 	plain := entries[1]
 	assert.Equal(t, int64(0), plain.RewriteTokensSaved)
 	assert.Nil(t, plain.RewriteCostSaved)
+	assert.Nil(t, plain.BilledCost)
 }

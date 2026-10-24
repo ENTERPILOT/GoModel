@@ -1,0 +1,242 @@
+---
+title: "GoModel i Claude Code"
+description: "Przewodnik krok po kroku: kieruj ruch Claude Code przez GoModel z passthrough Anthropic."
+icon: "terminal"
+keywords: ["Claude Code", "Anthropic passthrough", "passthrough Anthropic", "agent programistyczny", "coding agent", "przewodnik konfiguracji", "setup guide"]
+---
+
+GoModel może stać przed Claude Code, dzięki czemu każdy request najpierw przechodzi
+przez Twój własny gateway.
+
+Przepływ:
+
+`Claude Code -> GoModel -> Anthropic`
+
+## Zanim zaczniesz
+
+- Zainstaluj Claude Code na swoim komputerze.
+- Wybierz master key GoModel, np. `change-me`.
+- Upewnij się, że GoModel ma dane uwierzytelniające do upstreamu Anthropic.
+
+<Note>
+  Claude Code można kierować przez GoModel niezależnie od tego, czy osobiście
+  korzystasz z subskrypcji Claude Code. W trybie gatewaya Claude Code komunikuje się
+  z GoModel za pomocą `ANTHROPIC_BASE_URL` i `ANTHROPIC_AUTH_TOKEN`. GoModel nadal
+  potrzebuje własnego `ANTHROPIC_API_KEY`, aby dotrzeć do upstreamu Anthropic –
+  klucza API z Console albo tokena OAuth subskrypcji Claude.
+</Note>
+
+## Jak uzyskać `ANTHROPIC_API_KEY`
+
+**Opcja A – klucz API z Console (pay-as-you-go):**
+
+1. Otwórz Claude Console i zaloguj się na swoje konto API.
+2. Przejdź do ustawień konta w Console i utwórz klucz API.
+3. Skopiuj klucz (jest wyświetlany tylko raz) i ustaw go dla GoModel jako `ANTHROPIC_API_KEY`.
+
+Dokumentacja API Anthropic podaje, że klucze API tworzy się w ustawieniach konta
+w Console.
+
+<Warning>
+  Płatne plany Claude (Pro, Max, Team, Enterprise) i rozliczenia Claude API Console
+  są oddzielne. Użycie klucza API jest rozliczane jako użycie API.
+</Warning>
+
+**Opcja B – token subskrypcji Claude (Pro, Max, Team lub Enterprise):**
+
+1. Uruchom `claude setup-token` na komputerze, na którym Claude Code jest
+   zalogowany do Twojej subskrypcji.
+2. Skopiuj wygenerowany token `sk-ant-oat01-...` i ustaw go dla GoModel jako
+   `ANTHROPIC_API_KEY`.
+
+GoModel wykrywa prefiks `sk-ant-oat` i automatycznie uwierzytelnia się w upstreamie
+schematem OAuth Bearer. Użycie jest pokrywane z limitów Twojej subskrypcji zamiast
+z rozliczeń API.
+
+<Warning>
+  Anthropic autoryzuje tokeny subskrypcji **wyłącznie dla ruchu Claude Code**.
+  Ta konfiguracja działa, ponieważ klientem pozostaje Claude Code, a GoModel
+  przekazuje jego requesty bez zmian; kierowanie innych klientów lub narzędzi na te
+  same dane uwierzytelniające gatewaya jest odrzucane przez upstream i narusza
+  warunki korzystania z usług Anthropic.
+</Warning>
+
+## 1. Uruchom GoModel
+
+Uruchom GoModel z master key i kluczem providera Anthropic:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e ANTHROPIC_API_KEY="sk-ant-..." \
+  enterpilot/gomodel
+```
+
+## 2. Sprawdź passthrough Anthropic
+
+Sprawdź, czy endpoint modeli passthrough Anthropic odpowiada:
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/p/anthropic/v1/models \
+  -H "Authorization: Bearer change-me"
+```
+
+```python Python
+import anthropic
+
+client = anthropic.Anthropic(
+    base_url="http://localhost:8080/p/anthropic",
+    api_key="change-me",
+)
+
+for model in client.models.list():
+    print(model.id)
+```
+
+```javascript JavaScript
+import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic({
+  baseURL: "http://localhost:8080/p/anthropic",
+  apiKey: "change-me",
+});
+
+for await (const model of client.models.list()) {
+  console.log(model.id);
+}
+```
+
+</CodeGroup>
+
+Następnie wyślij jedną krótką wiadomość testową:
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/p/anthropic/v1/messages \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "claude-3-haiku-20240307",
+    "max_tokens": 16,
+    "messages": [
+      {
+        "role": "user",
+        "content": "Reply with exactly ok"
+      }
+    ]
+  }'
+```
+
+```python Python
+import anthropic
+
+client = anthropic.Anthropic(
+    base_url="http://localhost:8080/p/anthropic",
+    api_key="change-me",
+)
+
+message = client.messages.create(
+    model="claude-3-haiku-20240307",
+    max_tokens=16,
+    messages=[{"role": "user", "content": "Reply with exactly ok"}],
+)
+
+print(message.content[0].text)
+```
+
+```javascript JavaScript
+import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic({
+  baseURL: "http://localhost:8080/p/anthropic",
+  apiKey: "change-me",
+});
+
+const message = await client.messages.create({
+  model: "claude-3-haiku-20240307",
+  max_tokens: 16,
+  messages: [{ role: "user", content: "Reply with exactly ok" }],
+});
+
+console.log(message.content[0].text);
+```
+
+</CodeGroup>
+
+Jeśli gateway jest poprawnie podłączony, odpowiedź będzie zawierać `ok`.
+
+## 3. Skonfiguruj Claude Code do korzystania z GoModel
+
+Skieruj Claude Code na GoModel:
+
+```bash
+export ANTHROPIC_BASE_URL=http://localhost:8080
+export ANTHROPIC_AUTH_TOKEN=change-me
+export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1
+```
+
+Zarządzany bazowy URL obsługuje `/v1/messages` z
+[natywnym przekazywaniem](/pl/advanced/anthropic-messages-api#natywne-przekazywanie-do-anthropic):
+requesty rozwiązywane do Anthropic są przekazywane bez zmian poza rozwiązaniem
+aliasu modelu (z zachowaniem `cache_control`, podpisów thinking i nagłówków beta),
+a jednocześnie działają rate limity, budżety, audyt i śledzenie użycia – a aliasy
+modeli lub modele wirtualne mogą kierować Claude Code do innych providerów.
+Alternatywnie `ANTHROPIC_BASE_URL=http://localhost:8080/p/anthropic` używa surowego
+passthrough przypiętego do upstreamu Anthropic.
+
+Krótkie podsumowanie dokumentacji Claude Code: w trybie gatewaya ustaw
+`ANTHROPIC_BASE_URL` na URL swojego gatewaya, a `ANTHROPIC_AUTH_TOKEN` na token
+gatewaya, a następnie uruchom Claude Code jak zwykle. Zobacz oficjalny przewodnik:
+[dokumentacja LLM gateway w Claude Code](https://code.claude.com/docs/en/llm-gateway).
+
+Jeśli GoModel nie działa na Twoim lokalnym komputerze, zastąp `localhost:8080`
+właściwym hostem i portem.
+
+## 4. Uruchom testowy prompt w Claude Code
+
+```bash
+claude -p --output-format text --model claude-3-haiku-20240307 \
+  'Reply with exactly ok and no punctuation.'
+```
+
+Zweryfikowany wynik:
+
+```text
+ok
+```
+
+## 5. Sprawdź ruch w GoModel
+
+Otwórz logi audytowe w dashboardzie GoModel:
+
+[http://localhost:8080/admin/dashboard/audit](http://localhost:8080/admin/dashboard/audit)
+
+To najprostsze miejsce, aby potwierdzić, że Claude Code dociera do GoModel,
+i przejrzeć pełny ślad requestów i odpowiedzi. W tym samym dashboardzie możesz
+dalej śledzić ruch i użycie GoModel.
+
+## Źródła
+
+- Dokumentacja gatewaya Claude Code od Anthropic: [LLM gateway](https://code.claude.com/docs/en/llm-gateway)
+- Ustawienia Claude Code od Anthropic: [Settings](https://code.claude.com/docs/en/settings)
+- Claude Help: [Managing API key environment variables in Claude Code](https://support.claude.com/en/articles/12304248-managing-api-key-environment-variables-in-claude-code)
+- Claude Help: [Paid Claude plans vs API Console billing](https://support.claude.com/en/articles/9876003-i-have-a-paid-claude-subscription-pro-max-team-or-enterprise-plans-why-do-i-have-to-pay-separately-to-use-the-claude-api-and-console)
+- Dokumentacja Claude API: [API overview (klucze z ustawień konta w Console)](https://docs.anthropic.com/en/api/getting-started)
+
+## Zweryfikowano 10 marca 2026
+
+Ten przewodnik został zweryfikowany z użyciem:
+
+- lokalnej instancji GoModel pod `http://localhost:8080`
+- gałęzi GoModel udostępniającej `/p/{provider}/v1/...`
+- Claude Code `2.1.72`
+
+Lokalna weryfikacja potwierdziła, że:
+
+- `GET /p/anthropic/v1/models` zwrócił `200 OK`
+- `POST /p/anthropic/v1/messages` zwrócił `200 OK`
+- `claude` zwrócił `ok` po skierowaniu na GoModel

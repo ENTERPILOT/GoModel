@@ -1,0 +1,46 @@
+---
+title: "Playground"
+description: "Testen Sie jedes Modell über das Gateway direkt im Dashboard und prüfen Sie das exakte JSON von Request und Response."
+icon: "flask-conical"
+keywords: ["Playground", "playground", "Dashboard", "Chat Completions", "Responses", "Messages", "Streaming"]
+---
+
+Die Seite **Playground** (`/admin/dashboard/playground`) sendet Requests mit
+Ihrem Dashboard-Key über die öffentliche API des Gateways. Jeder Aufruf wird
+daher genau wie der Request eines Clients geroutet, protokolliert und erfasst.
+Wählen Sie einen Endpunkt (`/v1/chat/completions`, `/v1/responses` oder
+`/v1/messages`), ein Modell aus dem Bestand oder einen beliebigen Alias bzw. ein
+virtuelles Modell über seinen Namen sowie, ob gestreamt werden soll. Bauen Sie
+die Konversation aus bearbeitbaren, umsortierbaren System-, User- und
+Assistant-Nachrichten auf und senden Sie einen Prompt. Das JSON-Panel rechts
+zeigt den Request-Body so, wie er gesendet wird (live aktualisiert, während Sie
+bearbeiten), sowie die letzte Response mit Status, Latenz und Token-Nutzung –
+gestreamte Responses werden in dieselbe Form zusammengesetzt, die ein Aufruf
+ohne Streaming zurückgibt. Für Requests gelten dieselben Budgets, Rate-Limits,
+Guardrails und dasselbe Audit-Logging wie für jeden anderen Client des Gateways.
+
+## Eingrenzung per User Path
+
+Virtuelle Modelle können auf bestimmte `user_paths` beschränkt werden, und
+Playground-Requests, die mit dem Master-Key authentifiziert sind, können sich
+über das Feld **User path** neben der Modellauswahl auf einen dieser Pfade
+eingrenzen. Wenn Sie ein Modell auswählen, dessen Richtlinie `user_paths`
+deklariert, wird das Feld mit dem ersten Eintrag vorbelegt; Sie können ihn vor
+dem Senden bearbeiten. Beim Senden wird der Wert im User-Path-Request-Header
+übertragen, genau wie ein externer Client ihn senden würde. Das Gateway
+erfasst den Pfad daher im Request-Snapshot und gewährt Zugriff auf Modelle, die
+auf diesen Pfad beschränkt sind – ein Request ohne den Header wird für diese
+Modelle abgelehnt.
+
+Der Header-Name ist standardmäßig `X-GoModel-User-Path`. Wenn Sie ihn über
+`USER_PATH_HEADER` (oder `server.user_path_header`) anpassen, liest das
+Dashboard den gültigen Namen aus `GET /admin/runtime/config` und sendet den
+eingegrenzten Pfad unter diesem Header. Eine zusätzliche Konfiguration des
+Dashboards ist nicht nötig.
+
+<img
+  src="/features/playground.png"
+  alt="Seite Playground im GoModel Dashboard mit ausgewähltem Endpunkt Messages, einer Modellauswahl, Nachrichtenkarten für System, User und Assistant, einem Prompt-Eingabefeld und dem Request-JSON-Panel auf der rechten Seite"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>

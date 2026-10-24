@@ -1,0 +1,71 @@
+---
+title: "路线图"
+description: "GoModel 路线图，分为商业功能以及公开的 0.2.0 和 0.3.0 里程碑。"
+icon: "list-todo"
+keywords: ["路线图", "里程碑", "即将推出的功能", "版本发布", "roadmap", "milestones", "releases"]
+---
+
+## 0.2.0 路线图
+
+- [ ] 改进/重新设计测试策略
+- [ ] 护栏加固：更好的 UI、更简单的架构、更易实现的自定义护栏，以及在输出到达客户端之前生效的响应侧护栏
+- [x] 编写定制的行为准则（Code of Conduct）
+- [x] 插件——至少支持护栏
+- [x] OpenTelemetry (OTel) 支持
+- [x] 完整支持 OpenAI `/conversations` 生命周期
+- [x] 完整支持 OpenAI `/responses` 生命周期
+- [x] 兼容 Anthropic 的 `/messages` 入口和 `/messages/count_tokens`
+- [x] 预算管理，支持按 `user_path` 和/或 API 密钥设置限额
+- [x] 可编辑的模型定价，实现准确的成本追踪和预算管理
+- [x] 提示词缓存可见性，显示每个提示词中有多少被提供商缓存
+- [x] 在 UI 中展示提示词缓存和本地缓存的使用情况
+- [x] 修复控制台中的故障转移图表
+
+## 0.3.0 路线图
+
+- [ ] 加固并扩展 MCP 代理功能
+- [ ] 提升配置和 UI 的整体质量与简洁性
+- [ ] 重新思考并重构透传 API
+- [ ] 支持 Gemini 原生 API，以及将 Gemini 原生 API 调用转换为其他方言
+- [ ] 提升默认价格的准确性
+  - [ ] 部署 AI 管理员/智能体，监控各提供商网站上的价格
+- [ ] 提升 UI 和审计日志视图的性能
+- [ ] 改进弹性与容错功能（针对 vLLM 在流式传输中途停止等情况，显式报错并进行故障转移）
+- [ ] 简化从 LiteLLM 到 GoModel 的迁移
+  - [x] `gomodel migrate litellm` config.yaml 转换器和[迁移指南](/zh/guides/migrate-from-litellm)
+  - [x] 从 LiteLLM 数据库导入虚拟密钥、团队、用户、预算和速率限制
+  - [ ] 迁移 LiteLLM 支出数据
+- [ ] 更好地支持 /audio 相关端点和模态
+- [ ] 更好地支持视频生成（存储生成产物等）
+- [ ] 为所有提供商提供原生透传，超越当前 Beta 版的覆盖范围
+- [ ] 图像端点的故障转移，使图像生成和编辑能够像聊天一样在提供商之间回退
+- [ ] 流式图像生成（在 `/v1/images/*` 上通过 SSE 中继部分图像）
+- [ ] 插件加固
+- [ ] 更多地依据 models.json 文件属性（而非模型名称）来确定模型特性
+  - [ ] 在响应中使用 \<think\> / \<thinking\> 块，而不是单独的字段
+  - [ ] 每个模型支持的端点
+- [ ] 控制台自定义（更多图表、展示更多数据、瀑布图）
+- [ ] 重构工作流，提供更好的 UI/UX 和更灵活的设计
+
+## 商业功能（Pro/Enterprise 版本）
+
+- [x] 智能路由（[GoModel Pro](/zh/pro/intelligent-routing)，Beta）
+- [x] 上下文窗口压缩（[GoModel Pro](/zh/pro/compression)）
+- [x] OIDC 单点登录（[GoModel Pro](/zh/pro/sso)）
+- [x] 带健康检查和故障转移的出站代理池（[GoModel Pro](/zh/pro/egress)，Beta；按提供商配置的 `proxy_url` 包含在[核心版](/zh/providers/outbound-proxy)中）
+- [ ] 集群模式
+- [ ] LDAP 集成
+- [ ] 控制台和 Admin API 的基于角色的访问控制（RBAC）
+- [ ] GoModel Pro 中的 Secret 管理器集成（Vault、AWS Secrets Manager/KMS、Azure Key Vault、GCP Secret Manager）；支持 `env` 和 `file` 的 [Secret 引用](/zh/advanced/secret-references)包含在核心版中
+- [ ] 将审计日志导出/流式传输到对象存储和数据湖
+- [ ] IP / CIDR 允许列表
+- [ ] LTS 渠道，提供签名产物、SBOM 和 CVE 预先通知
+- [ ] SAML 2.0 + SCIM 目录同步
+
+## 有什么建议？
+
+路线图由用户的实际需求决定——请告诉我们还缺少什么：
+
+- 在 [Discord](https://discord.gg/gaEB9BQSPH) 上与我们交流
+- 在 [GitHub](https://github.com/ENTERPILOT/GoModel/issues) 上报告问题或提交功能请求
+- 与团队[预约一次简短通话](https://cal.com/jakubw/30)
