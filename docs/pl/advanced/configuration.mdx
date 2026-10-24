@@ -62,9 +62,8 @@ większym. Gateway dekoduje je przed routingiem, więc guardrails, audyt i
 providerzy widzą zwykłe body, a `BODY_SIZE_LIMIT` dotyczy zarówno rozmiaru
 po kompresji, jak i po zdekodowaniu (`413`, gdy którykolwiek go przekracza). Inne kodowania
 zwracają `415`. Body jest odczytywane i dekodowane dopiero po uwierzytelnieniu
-requestu: request bez ważnych danych uwierzytelniających dostaje `401`, zanim
-zostanie odczytany jakikolwiek fragment jego body, a jego wpis audytu nie
-zawiera body requestu.
+requestu, więc z body requestu bez ważnych danych uwierzytelniających nie jest
+odczytywany żaden fragment, a jego wpis audytu nie zawiera body requestu.
 
 `STREAM_STALL_TIMEOUT` (`server.stream_stall_timeout` w YAML) chroni
 gateway przed klientami, którzy otwierają odpowiedź streamingową i przestają ją czytać. Każdy

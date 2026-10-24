@@ -62,9 +62,9 @@ mit zstd. Das Gateway dekodiert sie vor dem Routing, sodass Guardrails, Audit
 und Provider den unkomprimierten Body sehen, und `BODY_SIZE_LIMIT` gilt sowohl
 für die komprimierte als auch für die dekodierte Größe (`413`, wenn eine davon
 überschritten wird). Andere Kodierungen liefern `415`. Ein Body wird erst
-gelesen und dekodiert, nachdem der Request authentifiziert ist: Ein Request ohne
-gültige Zugangsdaten erhält `401`, bevor etwas von seinem Body gelesen wird, und
-sein Audit-Eintrag enthält keinen Request-Body.
+gelesen und dekodiert, nachdem der Request authentifiziert ist. Vom Body eines
+Requests ohne gültige Zugangsdaten wird daher nichts gelesen, und sein
+Audit-Eintrag enthält keinen Request-Body.
 
 `STREAM_STALL_TIMEOUT` (`server.stream_stall_timeout` in YAML) schützt das
 Gateway vor Clients, die eine Streaming-Response öffnen und dann aufhören, sie
