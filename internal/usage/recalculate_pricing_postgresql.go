@@ -37,7 +37,7 @@ func (s *PostgreSQLStore) RecalculatePricing(ctx context.Context, params Recalcu
 		update := recalculateEntryCosts(entry, resolver)
 		if _, err := tx.Exec(ctx, `
 			UPDATE usage
-			SET input_cost = $1, output_cost = $2, total_cost = $3, rewrite_cost_saved = $4, billed_cost = $5, cost_source = $6, costs_calculation_caveat = $7
+			SET input_cost = $1, output_cost = $2, total_cost = $3, rewrite_cost_saved = $4, billed_cost = CASE WHEN $9 THEN billed_cost ELSE $5 END, cost_source = $6, costs_calculation_caveat = $7
 			WHERE id = $8::uuid
 		`,
 			nullableFloat(update.InputCost),
@@ -48,6 +48,7 @@ func (s *PostgreSQLStore) RecalculatePricing(ctx context.Context, params Recalcu
 			update.CostSource,
 			update.Caveat,
 			update.ID,
+			update.KeepBilledCost,
 		); err != nil {
 			return RecalculatePricingResult{}, fmt.Errorf("update postgres usage cost %s: %w", update.ID, err)
 		}
@@ -77,7 +78,7 @@ func postgresRecalculationEntries(ctx context.Context, tx pgx.Tx, params Recalcu
 
 	entries := make([]recalculationEntry, 0)
 	for rows.Next() {
-		entry := recalculationEntry{BillCacheHits: params.BillCacheHits}
+		entry := recalculationEntry{Billing: params.Billing}
 		var providerName sql.NullString
 		var rawData *string
 		if err := rows.Scan(

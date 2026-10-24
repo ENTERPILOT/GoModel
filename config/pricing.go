@@ -10,6 +10,12 @@ import (
 // billed to the caller. It never changes the provider cost itself, so budgets
 // and cost reports keep measuring upstream spend.
 type PricingConfig struct {
+	// MarkupsEnabled turns on markups and billed cost: usage rows record a
+	// billed cost and the dashboard shows it. While off, Markups and
+	// BillCacheHits are ignored and no billed cost is recorded.
+	// Default: false
+	MarkupsEnabled bool `yaml:"markups_enabled" env:"PRICING_MARKUPS_ENABLED"`
+
 	// Markups maps a model selector to a percentage added on top of the
 	// provider cost: "/" (all models), "openai/" (one provider instance),
 	// "gpt-5" (a model on any provider) or "openai/gpt-5". The most specific

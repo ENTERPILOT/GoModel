@@ -2,8 +2,10 @@
   // Period totals for the active filters. Requests follow the request log's
   // cache scope (cached rows count unless "Hide cached requests" is on);
   // cost comes from the uncached summary so cached rows' avoided cost never
-  // inflates it.
+  // inflates it. Billed cost (shown once pricing.markups is configured) is
+  // what customers are charged, so it includes billed cache hits.
   import Spinner from "$lib/components/atoms/Spinner.svelte";
+  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { formatCost, formatNumber } from "$lib/utils/format.js";
   import { usagePage } from "./usage.svelte.js";
   import {
@@ -18,6 +20,7 @@
   import CacheOverviewCards from "./CacheOverviewCards.svelte";
   import * as m from "$lib/paraglide/messages.js";
 
+  const billedVisible = $derived(runtimeConfig.billedCostVisible());
   const savingsVisible = $derived(rewriteSavingsVisible(usagePage.usageSummary));
   // One savings number, in whatever unit the page's Tokens/Costs toggle is on.
   const savedValue = $derived(
@@ -62,6 +65,18 @@
       {/if}
     </div>
   </div>
+  {#if billedVisible}
+    <div class="card">
+      <div class="card-label">{m.usage_billed_cost()}</div>
+      <div class="card-value" title={m.usage_billed_cost_help()}>
+        {#if usagePage.summaryLoading}
+          <Spinner size={18} label={m.usage_loading_summary()} />
+        {:else}
+          {formatCost(usagePage.usageSummary.total_billed_cost)}
+        {/if}
+      </div>
+    </div>
+  {/if}
   {#if savingsVisible}
     <div class="card">
       <div class="card-label">{m.usage_pro_saved()}</div>

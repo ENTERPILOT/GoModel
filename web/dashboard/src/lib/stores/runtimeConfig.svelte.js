@@ -21,6 +21,7 @@ const CONFIG_KEYS = [
   "REDIS_URL",
   "SEMANTIC_CACHE_ENABLED",
   "USAGE_PRICING_RECALCULATION_ENABLED",
+  "PRICING_MARKUPS_ENABLED",
   "DASHBOARD_LIVE_LOGS_ENABLED",
   "MCP_ENABLED",
   "MCP_TOOL_DISCOVERY",
@@ -125,6 +126,13 @@ class RuntimeConfigStore {
   // "search" or "off" (also for backends that predate the key).
   mcpToolDiscovery() {
     return this.flag("MCP_TOOL_DISCOVERY") === "search" ? "search" : "off";
+  }
+
+  // billedCostVisible gates the billed-cost columns and card: they only add
+  // information once pricing.markups declares at least one rule, and stay
+  // hidden on backends that predate the key.
+  billedCostVisible() {
+    return this.booleanFlag("PRICING_MARKUPS_ENABLED", false);
   }
 
   liveLogsVisible() {

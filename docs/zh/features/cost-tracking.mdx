@@ -99,10 +99,11 @@ GoModel 使用请求完成时刻生效的费率为每个请求计价，并且无
 
 当您转售模型访问权限时（例如按客户使用的 Token 向其收费），可以设置加价。GoModel 会为每个请求记录**计费成本**（用量记录中的 `billed_cost`）：即提供商成本加上加价。提供商成本本身不会改变，因此预算、控制台汇总和节省金额仍然衡量您向上游支付的费用。
 
-加价是在 `config.yaml` 中设置的百分比。未配置任何加价时（默认），计费成本等于提供商成本。
+加价默认关闭。使用 `markups_enabled: true`（env `PRICING_MARKUPS_ENABLED=true`）开启后，在 `config.yaml` 中设置百分比。开启加价但没有规则匹配某个请求时，其计费成本等于提供商成本。关闭加价时，GoModel 不记录计费成本，并忽略 `markups` 和 `bill_cache_hits`；如果设置了 `markups`，启动时会记录一条警告。
 
 ```yaml
 pricing:
+  markups_enabled: true # env: PRICING_MARKUPS_ENABLED；默认 false
   bill_cache_hits: true # env: PRICING_BILL_CACHE_HITS；默认 true
   markups:
     "/": 15                         # 所有模型
@@ -117,10 +118,13 @@ pricing:
 
 每条用量记录还会存储其计费时使用的加价（`markup_percent`、`markup_selector`），因此更改加价永远不会改写过去的账单。
 
+开启加价后，用量页面会在提供商成本旁显示计费成本：一张 **Billed** 卡片、按模型、用户路径和标签分类的明细中的一列，以及请求日志中的一列（其提示会显示每条记录计费时使用的加价）。管理 API 通过 `/admin/usage/summary` 中的 `total_billed_cost`，`/admin/usage/models`、`/admin/usage/user-paths` 和 `/admin/usage/labels` 中的 `billed_cost`，以及 `/admin/usage/log` 条目中的 `billed_cost`、`markup_percent` 和 `markup_selector` 提供这些数据。计费汇总包含计费的缓存命中，而其他成本数据不包含它们，因此按用户路径统计的计费成本就是应向每位客户收取的金额。
+
 ## 控制台汇总
 
 - **Estimated Cost**：实时提供商请求的支出；不包括缓存命中。
 - **Saved Cost**：由缓存提供服务的请求原本需要花费的成本。
+- **Billed**：开启加价后显示：提供商成本加上加价，包括计费的缓存命中。
 
 `---` 表示由于没有可用的定价，成本未知，这与 `$0` 不同。
 
@@ -128,7 +132,7 @@ pricing:
 
 重新计算会根据当前定价，重新计算匹配的用量记录中已存储的成本。请在更改覆盖之后，或在请求运行时定价不可用的情况下使用。该操作默认启用（`USAGE_PRICING_RECALCULATION_ENABLED`）；在用量视图中选择 **Recalculate**，然后输入 `recalculate` 进行确认。其范围限定为所选的日期范围、提供商或模型，以及用户路径。
 
-重新计算会使用每条记录计费时的加价重新计算计费成本，并根据当前的 `bill_cache_hits` 对缓存命中计费。在加价功能出现之前记录的行按其提供商成本计费。
+重新计算会使用每条记录计费时的加价重新计算计费成本，并根据当前的 `bill_cache_hits` 对缓存命中计费。在加价功能出现之前记录的行按其提供商成本计费。关闭加价期间，重新计算不会改变计费成本。
 
 <Warning>
   重新计算会**覆盖**每条匹配记录的成本字段，并**清除**模型已无法解析到定价的记录的成本。

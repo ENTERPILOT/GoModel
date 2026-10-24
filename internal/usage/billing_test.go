@@ -116,8 +116,9 @@ type billingRecalculationStore interface {
 }
 
 // assertBilledCostRecalculation checks that recalculation reprices billed cost
-// with each row's stored markup and bills cache hits per the switch.
-func assertBilledCostRecalculation(t *testing.T, store billingRecalculationStore, billCacheHits bool, readCosts func(id string) (total, billed float64)) {
+// with each row's stored markup and bills cache hits per the switch, and
+// leaves billed cost untouched while billing is off.
+func assertBilledCostRecalculation(t *testing.T, store billingRecalculationStore, billing Billing, readCosts func(id string) (total, billed float64)) {
 	t.Helper()
 	ctx := context.Background()
 	require.NoError(t, store.WriteBatch(ctx, []*UsageEntry{
@@ -129,12 +130,12 @@ func assertBilledCostRecalculation(t *testing.T, store billingRecalculationStore
 	}))
 
 	inputRate := 2.0
-	_, err := store.RecalculatePricing(ctx, RecalculatePricingParams{BillCacheHits: billCacheHits},
+	_, err := store.RecalculatePricing(ctx, RecalculatePricingParams{Billing: billing},
 		staticTestPricingResolver{"openai/gpt-4o": {InputPerMtok: &inputRate}})
 	require.NoError(t, err)
 
 	hit := func(billed float64) float64 {
-		if billCacheHits {
+		if billing.BillCacheHits {
 			return billed
 		}
 		return 0
@@ -146,6 +147,11 @@ func assertBilledCostRecalculation(t *testing.T, store billingRecalculationStore
 		billingSemanticID:  hit(2.4),
 		billingLegacyHitID: hit(2.0),
 	}
+	if !billing.Enabled {
+		for id := range want {
+			want[id] = 99 // the stored billed cost
+		}
+	}
 	for id, wantBilled := range want {
 		total, billed := readCosts(id)
 		assert.Equal(t, 2.0, total, "%s total_cost", id)
@@ -154,17 +160,18 @@ func assertBilledCostRecalculation(t *testing.T, store billingRecalculationStore
 }
 
 func TestRecalculatePricingRecomputesBilledCost(t *testing.T) {
-	for _, billCacheHits := range []bool{true, false} {
-		t.Run(fmt.Sprintf("sqlite/bill_cache_hits=%t", billCacheHits), func(t *testing.T) {
+	for _, billing := range []Billing{{Enabled: true, BillCacheHits: true}, {Enabled: true}, {}} {
+		name := fmt.Sprintf("enabled=%t/bill_cache_hits=%t", billing.Enabled, billing.BillCacheHits)
+		t.Run("sqlite/"+name, func(t *testing.T) {
 			store, db := newBillingTestSQLiteStore(t)
-			assertBilledCostRecalculation(t, store, billCacheHits, func(id string) (total, billed float64) {
+			assertBilledCostRecalculation(t, store, billing, func(id string) (total, billed float64) {
 				err := db.QueryRow(`SELECT total_cost, billed_cost FROM usage WHERE id = ?`, id).Scan(&total, &billed)
 				require.NoError(t, err, id)
 				return total, billed
 			})
 		})
 
-		t.Run(fmt.Sprintf("postgresql/bill_cache_hits=%t", billCacheHits), func(t *testing.T) {
+		t.Run("postgresql/"+name, func(t *testing.T) {
 			pool := sqlxtest.NewPostgresPool(t)
 			if pool == nil {
 				return // skipped: no test server configured
@@ -172,17 +179,17 @@ func TestRecalculatePricingRecomputesBilledCost(t *testing.T) {
 			store, err := NewPostgreSQLStore(pool, 0)
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = store.Close() })
-			assertBilledCostRecalculation(t, store, billCacheHits, func(id string) (total, billed float64) {
+			assertBilledCostRecalculation(t, store, billing, func(id string) (total, billed float64) {
 				err := pool.QueryRow(context.Background(), `SELECT total_cost, billed_cost FROM usage WHERE id = $1::uuid`, id).Scan(&total, &billed)
 				require.NoError(t, err, id)
 				return total, billed
 			})
 		})
 
-		t.Run(fmt.Sprintf("mongodb/bill_cache_hits=%t", billCacheHits), func(t *testing.T) {
+		t.Run("mongodb/"+name, func(t *testing.T) {
 			mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
 				store, _ := newMongoUsageStore(t, db, 0)
-				assertBilledCostRecalculation(t, store, billCacheHits, func(id string) (total, billed float64) {
+				assertBilledCostRecalculation(t, store, billing, func(id string) (total, billed float64) {
 					var doc struct {
 						TotalCost  float64 `bson:"total_cost"`
 						BilledCost float64 `bson:"billed_cost"`

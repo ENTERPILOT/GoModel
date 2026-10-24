@@ -27,7 +27,7 @@ func (s *SQLiteStore) RecalculatePricing(ctx context.Context, params Recalculate
 
 	stmt, err := tx.PrepareContext(ctx, `
 		UPDATE usage
-		SET input_cost = ?, output_cost = ?, total_cost = ?, rewrite_cost_saved = ?, billed_cost = ?, cost_source = ?, costs_calculation_caveat = ?
+		SET input_cost = ?, output_cost = ?, total_cost = ?, rewrite_cost_saved = ?, billed_cost = CASE WHEN ? THEN billed_cost ELSE ? END, cost_source = ?, costs_calculation_caveat = ?
 		WHERE id = ?
 	`)
 	if err != nil {
@@ -53,6 +53,7 @@ func (s *SQLiteStore) RecalculatePricing(ctx context.Context, params Recalculate
 				nullableFloat(update.OutputCost),
 				nullableFloat(update.TotalCost),
 				nullableFloat(update.RewriteCostSaved),
+				update.KeepBilledCost,
 				nullableFloat(update.BilledCost),
 				update.CostSource,
 				update.Caveat,
@@ -101,7 +102,7 @@ func (s *SQLiteStore) sqliteRecalculationEntries(ctx context.Context, tx *sql.Tx
 
 	entries := make([]recalculationEntry, 0)
 	for rows.Next() {
-		entry := recalculationEntry{BillCacheHits: params.BillCacheHits}
+		entry := recalculationEntry{Billing: params.Billing}
 		var timestamp string
 		var markupPercent sql.NullFloat64
 		var providerName sql.NullString

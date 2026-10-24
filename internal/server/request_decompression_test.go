@@ -17,7 +17,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/auditlog"
 )
 
-func gzipBytes(t *testing.T, body string) []byte {
+func gzipBytes(t testing.TB, body string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	w := gzip.NewWriter(&buf)
@@ -27,7 +27,7 @@ func gzipBytes(t *testing.T, body string) []byte {
 	return buf.Bytes()
 }
 
-func zstdBytes(t *testing.T, body string) []byte {
+func zstdBytes(t testing.TB, body string) []byte {
 	t.Helper()
 	enc, err := zstd.NewWriter(nil)
 	require.NoError(t, err)
@@ -50,7 +50,7 @@ func postEncoded(t *testing.T, srv *Server, path, encoding string, body []byte) 
 // reaches the provider uncompressed.
 func TestRequestDecompression_DecodesGzipAndZstd(t *testing.T) {
 	body := systemOneBody("kev/kev-latest")
-	encoders := map[string]func(*testing.T, string) []byte{
+	encoders := map[string]func(testing.TB, string) []byte{
 		"gzip":   gzipBytes,
 		"x-gzip": gzipBytes,
 		"zstd":   zstdBytes,
@@ -202,12 +202,36 @@ func TestRequestBody_NotReadBeforeAuth(t *testing.T) {
 	}
 }
 
+// A wrong credential is rejected before the body is read too, with the master
+// key and with managed keys alike.
+func TestRequestBody_NotReadWithInvalidCredential(t *testing.T) {
+	body := zstdBytes(t, `{"model":"gpt-4o-mini","padding":"`+strings.Repeat("a", 4<<20)+`"}`)
+	configs := map[string]*Config{
+		"master key": {MasterKey: "master"},
+		"managed keys": {Authenticator: mockAuthenticator{
+			enabled:   true,
+			tokenToID: map[string]string{"sk_gom_valid": "key-1"},
+		}},
+	}
+	for name, cfg := range configs {
+		t.Run(name, func(t *testing.T) {
+			srv := New(&mockProvider{passthroughResponse: okPassthroughResponse()}, cfg)
+			counter := &countingReader{r: bytes.NewReader(body)}
+
+			rec := postWithCredential(t, srv, "/v1/chat/completions", "wrong-key", counter, "zstd")
+
+			require.Equal(t, http.StatusUnauthorized, rec.Code, rec.Body.String())
+			assert.Zero(t, counter.read)
+		})
+	}
+}
+
 // Once the caller is authenticated, a long compressed body is decoded in full
 // and reaches the provider unchanged.
 func TestRequestDecompression_DecodesLongBodiesAfterAuth(t *testing.T) {
 	state := strings.Repeat("I was charged twice. ", 10_000)
 	body := `{"model":"kev/kev-latest","state":"` + state + `","questions":` + systemOneQuestions + `}`
-	encoders := map[string]func(*testing.T, string) []byte{"gzip": gzipBytes, "zstd": zstdBytes}
+	encoders := map[string]func(testing.TB, string) []byte{"gzip": gzipBytes, "zstd": zstdBytes}
 	for encoding, encode := range encoders {
 		t.Run(encoding, func(t *testing.T) {
 			provider := newSystemOneProvider(systemOneAnswer)

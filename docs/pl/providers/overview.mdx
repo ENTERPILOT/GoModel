@@ -47,6 +47,7 @@ przez providera upstream.
 | -------- | ---------- | ------------- | :--: | :----------: | :---: | :---: | :-----: | :------: | ----- |
 | OpenAI | `OPENAI_API_KEY` | `gpt-5.5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | Subskrypcja ChatGPT | `CHATGPT_API_KEY` (token logowania Codex) | `gpt-5.6-sol` | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | [Subskrypcja ChatGPT](/pl/providers/chatgpt) |
+| GitHub Copilot | `GITHUB_COPILOT_API_KEY` (token OAuth GitHuba) | `claude-sonnet-5.5` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [GitHub Copilot](/pl/providers/github-copilot) |
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | [Anthropic](/pl/providers/anthropic) |
 | Cohere | `COHERE_API_KEY` | `command-a-plus-05-2026` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Cohere](/pl/providers/cohere) |
 | Google Gemini | `GEMINI_API_KEY` | `gemini-3.7-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | [Google Gemini](/pl/providers/gemini) |
@@ -190,6 +191,14 @@ przez providera upstream.
   faktycznym wydatkiem: te ID modeli istnieją też na OpenAI Platform, więc
   rejestr przypisuje ich ceny za token do ruchu w ramach subskrypcji o stałej
   opłacie – nie stosuj do niego budżetów ani load balancingu `cost`.
+- **GitHub Copilot** – rozliczany za tokeny w GitHub AI Credits, pobieranych
+  najpierw z miesięcznego limitu planu Copilot. Copilot obsługuje GPT-5 i nowsze
+  wyłącznie przez `/responses`, a pozostałe modele wyłącznie przez
+  `/chat/completions`; GoModel odczytuje endpointy każdego modelu z `/models` i
+  tłumaczy requesty, więc oba API działają dla każdego modelu. Ustaw
+  `GITHUB_COPILOT_API_KEY` na token OAuth GitHuba dla konta, np. z
+  `gh auth token`; dostępne modele zależą od planu Copilot. Raportowany koszt
+  jest szacunkiem, który pomija limit zawarty w planie.
 - **Kimi Code** – brak cen za token; limit odnawia się co tydzień i jest dodatkowo
   ograniczony kroczącym oknem 5-godzinnym. Śledzenie kosztów użycia raportuje
   zero dla Kimi Code, więc load balancing `cost` nie może go wycenić; preferuj
@@ -344,6 +353,8 @@ To providerzy, z którymi użytkownicy najczęściej mają problemy:
 - **Subskrypcja ChatGPT** – upstream obsługujący wyłącznie Responses, ze ścisłą
   listą dozwolonych parametrów, używany do postawienia GoModel między Codexem a
   planem ChatGPT.
+- **GitHub Copilot** – skąd wziąć token, endpointy Business i Enterprise oraz
+  routing per model między chat completions a Responses.
 
 <Tip>
   Każda strona providera pokazuje w jednym CodeGroup trzy sposoby uruchamiania:
