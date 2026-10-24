@@ -1,0 +1,340 @@
+---
+title: "Extra content, bloki thinking i thought signatures"
+description: "Jak GoModel zachowuje stan do odtworzenia po stronie providera, np. thought signatures Gemini 3 i bloki thinking Anthropic, między turami, API i providerami"
+icon: "fingerprint"
+---
+
+## Czym jest extra content
+
+Niektórzy providerzy dołączają do odpowiedzi nieprzezroczysty stan i oczekują,
+że w następnej turze otrzymają go z powrotem bez zmian. Gemini 3 podpisuje swoje
+wywołania funkcji thought signature i odrzuca historię, która odtwarza wywołanie
+bez niej. Anthropic wymaga, aby bloki thinking tury asystenta, łącznie z
+podpisami, znalazły się przed kontynuowaną turą tool-use.
+
+Taki stan nie ma pola kompatybilnego z OpenAI, więc GoModel przenosi go w jednym
+miejscu: w obiekcie `extra_content` z kluczami według dostawcy (vendora).
+
+```json
+{
+  "role": "assistant",
+  "tool_calls": [{
+    "id": "call_1",
+    "type": "function",
+    "function": {"name": "get_weather", "arguments": "{\"city\":\"Kraków\"}"},
+    "extra_content": {"google": {"thought_signature": "EvACCu0CARFNMg..."}}
+  }]
+}
+```
+
+GoModel niczego nie przechowuje. Stan trafia do klienta w odpowiedzi i wraca w
+historii wiadomości klienta. Klienci, którzy kopiują wiadomości asystenta do
+historii dosłownie – a tak robią SDK OpenAI, Anthropic i Responses – nie wymagają
+żadnych zmian.
+
+Struktura odpowiada własnemu endpointowi Google kompatybilnemu z OpenAI, więc
+klienci zbudowani pod niego działają bez zmian.
+
+### Gdzie się pojawia
+
+| API | Lokalizacja |
+| --- | --- |
+| Chat Completions | `tool_calls[].extra_content`; na wiadomości asystenta dla stanu dotyczącego całej tury, np. bloków thinking; również na streamowanych `tool_calls` i deltach wiadomości |
+| Responses | elementy wyjściowe `function_call`; elementy wyjściowe `reasoning`; element `message` asystenta, gdy podpis tury tekstowej nadejdzie podczas streamingu |
+| Anthropic Messages | bloki treści `tool_use`. Bloki thinking używają zamiast tego własnych pól dialektu: `signature` i `data`. |
+
+Stan znajduje się na jednostce, która odpowiada jednej części po stronie providera.
+Wywołanie narzędzia staje się jednym `part` w Gemini, więc podpis per wywołanie
+siedzi na wywołaniu narzędzia. Bloki thinking należą do całej tury asystenta,
+więc siedzą na wiadomości.
+
+### Zasady
+
+- **Każde tłumaczenie przenosi go dalej.** Wejście Chat, Responses i Anthropic
+  Messages, streaming oraz echo tury asystenta przenoszą `extra_content` bez
+  zaglądania do środka.
+- **Tylko właściwy provider widzi obiekt swojego vendora.** Zanim request
+  zostanie wysłany do providera, GoModel usuwa każdy obiekt vendora, którego ten
+  provider nie jest właścicielem. Podpis Gemini nigdy nie trafia do Anthropic ani
+  OpenAI, a historia przeniesiona między providerami nie kończy się błędem z powodu
+  obcych pól.
+- **Tylko właściwy adapter odczytuje lub zapisuje jego zawartość.** Nic innego w
+  gatewayu nie interpretuje tej zawartości.
+- **Odsyłaj go dosłownie.** Nie przepisuj, nie zmieniaj kolejności ani nie skracaj
+  tego pola.
+
+## Zachowywanie thought signatures
+
+Gemini 3 dołącza zaszyfrowany `thoughtSignature` do emitowanych wywołań funkcji.
+Następny request musi zawierać ten sam podpis na tym samym wywołaniu, inaczej
+Gemini odpowiada HTTP 400 „Function call is missing a thought_signature”.
+Jedna tura z wywołaniem narzędzia przez Chat Completions wygląda tak. Pokazano
+tylko istotne pola.
+
+<Steps>
+  <Step title="Klient zadaje pytanie z dostępnym narzędziem">
+    ```json
+    POST /v1/chat/completions
+    {
+      "model": "gemini-3.5-flash",
+      "messages": [
+        {"role": "user", "content": "What's the weather in Kraków?"}
+      ],
+      "tools": [{
+        "type": "function",
+        "function": {"name": "get_weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}}}
+      }]
+    }
+    ```
+  </Step>
+  <Step title="Gemini odpowiada wywołaniem funkcji i podpisem">
+    GoModel tłumaczy request na natywną strukturę `generateContent` Gemini.
+    Gemini zwraca część `functionCall`, która zawiera podpis.
+
+    ```json
+    {
+      "candidates": [{
+        "content": {
+          "role": "model",
+          "parts": [{
+            "functionCall": {"name": "get_weather", "args": {"city": "Kraków"}},
+            "thoughtSignature": "EvACCu0CARFNMg..."
+          }]
+        }
+      }]
+    }
+    ```
+  </Step>
+  <Step title="GoModel zwraca wywołanie z podpisem w extra_content">
+    ```json
+    {
+      "choices": [{
+        "message": {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [{
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "get_weather", "arguments": "{\"city\":\"Kraków\"}"},
+            "extra_content": {"google": {"thought_signature": "EvACCu0CARFNMg..."}}
+          }]
+        },
+        "finish_reason": "tool_calls"
+      }]
+    }
+    ```
+  </Step>
+  <Step title="Klient uruchamia narzędzie i odsyła pełną historię">
+    Wiadomość asystenta jest dołączana w otrzymanej postaci, więc `extra_content`
+    trafia z powrotem bez dodatkowej pracy.
+
+    ```json
+    POST /v1/chat/completions
+    {
+      "model": "gemini-3.5-flash",
+      "messages": [
+        {"role": "user", "content": "What's the weather in Kraków?"},
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [{
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "get_weather", "arguments": "{\"city\":\"Kraków\"}"},
+            "extra_content": {"google": {"thought_signature": "EvACCu0CARFNMg..."}}
+          }]
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "{\"temp_c\": 18, \"sky\": \"cloudy\"}"}
+      ],
+      "tools": ["..."]
+    }
+    ```
+  </Step>
+  <Step title="GoModel odtwarza podpis na odpowiadającej części Gemini">
+    ```json
+    {
+      "contents": [
+        {"role": "user", "parts": [{"text": "What's the weather in Kraków?"}]},
+        {"role": "model", "parts": [{
+          "functionCall": {"name": "get_weather", "args": {"city": "Kraków"}},
+          "thoughtSignature": "EvACCu0CARFNMg..."
+        }]},
+        {"role": "user", "parts": [{
+          "functionResponse": {"name": "get_weather", "response": {"temp_c": 18, "sky": "cloudy"}}
+        }]}
+      ]
+    }
+    ```
+
+    Gemini akceptuje odtworzoną historię i odpowiada tekstem. GoModel zwraca
+    zwykłe chat completion.
+  </Step>
+</Steps>
+
+To samo pole pojawia się na streamowanych deltach `tool_calls`, na elementach
+`function_call` w Responses API, na blokach `tool_use` w Anthropic Messages, a w
+przypadku tur wyłącznie tekstowych – na samej wiadomości asystenta. W Responses
+API podpis tury wyłącznie tekstowej jest przenoszony na elemencie wyjściowym
+`reasoning` przed wiadomością, bez własnego tekstu reasoning; odeślij ten element,
+a podpis trafi na turę asystenta. Podpis ma tylko pierwsze wywołanie z
+równoległego batcha. Akceptowane jest też płaskie pole `thought_signature` lub
+`thoughtSignature` na wywołaniu narzędzia, dzięki czemu klienci zbudowani pod inne
+gatewaye nadal działają.
+
+Gdy historia Gemini 3 zawiera wywołanie funkcji bez żadnego podpisu – bo
+rozmowa zaczęła się u innego providera albo klient usunął to pole – GoModel
+wysyła udokumentowany przez Google placeholder zamiast zwracać błąd 400. Zawsze,
+gdy masz prawdziwą wartość, odsyłaj ją; placeholder kosztuje utratę ciągłości
+reasoningu w tej turze. Szczegóły po stronie providera znajdziesz w sekcji [Gemini
+thought signatures](/pl/providers/gemini#thought-signatures).
+
+## Bloki thinking
+
+Extended thinking w Anthropic zwraca bloki treści `thinking` i `redacted_thinking`
+w turze asystenta. Gdy ta tura kończy się wywołaniem narzędzia, kolejny request
+musi odtworzyć te bloki, łącznie z podpisami, przed blokiem `tool_use`. Przez
+[Anthropic Messages API](/pl/advanced/anthropic-messages-api) przepływ wygląda tak:
+
+<Steps>
+  <Step title="Klient wysyła historię zawierającą bloki thinking">
+    ```json
+    POST /v1/messages
+    {
+      "model": "claude-sonnet-4-5",
+      "max_tokens": 1024,
+      "thinking": {"type": "enabled", "budget_tokens": 2048},
+      "messages": [
+        {"role": "user", "content": "What's the weather in Kraków?"},
+        {"role": "assistant", "content": [
+          {"type": "thinking", "thinking": "I should call the weather tool.", "signature": "EqQBCkYIBRgC..."},
+          {"type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": {"city": "Kraków"}}
+        ]},
+        {"role": "user", "content": [
+          {"type": "tool_result", "tool_use_id": "toolu_1", "content": "weather service timed out", "is_error": true}
+        ]}
+      ],
+      "tools": ["..."]
+    }
+    ```
+  </Step>
+  <Step title="GoModel przechowuje bloki w extra_content.anthropic">
+    Wewnętrznie historia ma strukturę chatu. Bloki thinking są przenoszone na
+    wiadomości asystenta, a `is_error` na wyniku narzędzia. Żadne z nich nie ma
+    pola kompatybilnego z OpenAI, więc oba trafiają pod vendora `anthropic`.
+    `is_error` jest zapisywane tylko wtedy, gdy wynik zakończył się błędem.
+
+    ```json
+    [
+      {"role": "user", "content": "What's the weather in Kraków?"},
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [{"id": "toolu_1", "type": "function", "function": {"name": "get_weather", "arguments": "{\"city\":\"Kraków\"}"}}],
+        "extra_content": {"anthropic": {"thinking_blocks": [
+          {"type": "thinking", "thinking": "I should call the weather tool.", "signature": "EqQBCkYIBRgC..."}
+        ]}}
+      },
+      {
+        "role": "tool", "tool_call_id": "toolu_1", "content": "weather service timed out",
+        "extra_content": {"anthropic": {"is_error": true}}
+      }
+    ]
+    ```
+  </Step>
+  <Step title="Anthropic otrzymuje bloki dosłownie">
+    Gdy trasa prowadzi do Anthropic, bloki thinking wracają przed blok
+    `tool_use` dokładnie w wysłanej postaci, a `is_error` zostaje przywrócone na
+    `tool_result`. Każdy inny provider otrzymuje tylko wywołanie narzędzia i
+    tekst wyniku.
+  </Step>
+</Steps>
+
+### W drodze powrotnej
+
+Anthropic podpisuje każdy zwracany blok thinking i odrzuca późniejszą turę,
+która odtwarza blok bez jego podpisu:
+
+```text
+400 messages.1.content.0.thinking.signature: Field required
+```
+
+Dlatego bloki trafiają do klienta w taki sam sposób, w jaki z niego przychodzą.
+Anthropic Messages API renderuje je jako prawdziwe bloki treści, łącznie z
+podpisem, bo właśnie to klient Anthropic odsyła z powrotem:
+
+```json
+{
+  "content": [
+    {"type": "thinking", "thinking": "I should call the weather tool.", "signature": "EqQBCkYIBRgC..."},
+    {"type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": {"city": "Kraków"}}
+  ],
+  "stop_reason": "tool_use"
+}
+```
+
+Streaming emituje podpis jako `signature_delta` wewnątrz bloku thinking, zanim
+ten blok się zamknie – dokładnie tak jak Anthropic.
+
+### Reasoning od providerów, którzy go nie podpisują
+
+DeepSeek, Fireworks i inni providerzy zwracają tekst reasoningu bez niczego, co
+pozwalałoby go uwierzytelnić. Anthropic Messages API nadal renderuje go jako blok
+`thinking` z `signature: ""` – schemat oznacza to pole jako wymagane, więc klient
+ze ścisłym typowaniem odrzuciłby blok bez niego. Streaming otwiera blok z pustym
+podpisem i nie wysyła `signature_delta`, czyli tak samo, jak Anthropic streamuje
+blok przed nadejściem prawdziwego podpisu. Odeślij turę bez zmian: blok zostanie
+odtworzony u tego providera jak każdy inny.
+
+Anthropic akceptuje wyłącznie podpisy, które sam wygenerował (brak podpisu kończy
+się błędem `signature: Field required`, każda inna wartość błędem ``Invalid `signature` in
+`thinking` block``), więc gdy taka historia jest kierowana do Anthropic, niepodpisany
+blok jest usuwany, a reszta tury jest wysyłana normalnie.
+
+Pozostałe dialekty nie mają bloku thinking, więc przenoszą te same dane w
+`extra_content.anthropic.thinking_blocks` – na wiadomości asystenta w Chat
+Completions i na elemencie wyjściowym `reasoning` w Responses API. Streamowane
+delty chatu przenoszą tę wartość po zakończeniu bloku thinking, przed jakimkolwiek
+tekstem, i jest ona kumulatywna: ostatnia otrzymana zawiera całą turę.
+
+```json
+{
+  "role": "assistant",
+  "content": "Let me look that up.",
+  "reasoning_content": "I should call the weather tool.",
+  "extra_content": {"anthropic": {"thinking_blocks": [
+    {"type": "thinking", "thinking": "I should call the weather tool.", "signature": "EqQBCkYIBRgC..."}
+  ]}}
+}
+```
+
+`reasoning_content` pozostaje tym, czym było zawsze: czytelnym tekstem, który nie
+służy do odtwarzania. Blok `redacted_thinking` nie ma w ogóle czytelnego tekstu,
+więc przenosi go wyłącznie `extra_content`.
+
+Dołącz turę asystenta do historii w otrzymanej postaci, a odtworzenie nastąpi
+automatycznie. Skierowanie tej historii do innego providera usuwa to pole – tak
+jak każdy obcy obiekt vendora – a rozmowa toczy się dalej bez niego.
+
+
+## Przenoszenie historii między providerami
+
+Rozmowa może zacząć się u jednego providera i być kontynuowana u innego. Zasada
+jest prosta: każdy obiekt vendora, którego właścicielem nie jest docelowy
+provider, jest usuwany przed wysłaniem – na każdej trasie i w każdym dialekcie.
+
+| Historia zawiera | Kierowana do | Provider otrzymuje |
+| --- | --- | --- |
+| `extra_content.google` | `gemini`, `vertex` | podpis, odtworzony na odpowiadającej części |
+| `extra_content.google` | dowolny inny provider | nic; pole jest usuwane |
+| `extra_content.anthropic` | `anthropic` | bloki thinking i `is_error`, przywrócone na swoje miejsce; blok thinking niepodpisany przez Anthropic jest usuwany |
+| `extra_content.anthropic` | dowolny inny provider | nic; pole jest usuwane |
+
+Historia po stronie klienta nigdy nie jest modyfikowana. Filtrowanie odbywa się
+na kopii, którą GoModel wysyła do upstreamu.
+
+## Dokumentacja referencyjna vendorów
+
+| Vendor | Providerzy | Pola |
+| --- | --- | --- |
+| `google` | `gemini`, `vertex` | `thought_signature`: podpis Gemini 3 wywołania funkcji lub tury tekstowej. |
+| `anthropic` | `anthropic` | `thinking_blocks`: bloki `thinking` i `redacted_thinking` tury asystenta, łącznie z podpisami, zapisywane w odpowiedziach i odczytywane z powrotem w requestach; `is_error`: oznacza wynik narzędzia jako nieudany, ustawiane przez wejście Anthropic Messages API. |
