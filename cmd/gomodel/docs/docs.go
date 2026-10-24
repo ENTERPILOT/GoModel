@@ -956,8 +956,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -1262,6 +1280,167 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/mcp-virtual-servers": {
+            "get": {
+                "description": "Each virtual server serves a subset of the MCP servers at /mcp/{name}. missing_servers lists members no server matches; conflict explains why a virtual server is not served.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "List virtual MCP servers (config-declared and admin-managed)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/admin.mcpVirtualServerResponse"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "description": "Members must be existing MCP servers. A new virtual server may not use an MCP server's slug, and config-declared virtual servers are read-only.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Create or update one admin-managed virtual MCP server",
+                "parameters": [
+                    {
+                        "description": "Virtual MCP server definition",
+                        "name": "virtual_server",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.upsertMCPVirtualServerRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.mcpVirtualServerResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/mcp-virtual-servers/{name}": {
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Delete one admin-managed virtual MCP server",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Virtual MCP server name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -2307,8 +2486,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -2331,6 +2528,126 @@ const docTemplate = `{
                             "type": "array",
                             "items": {
                                 "$ref": "#/definitions/usage.DailyUsage"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/usage/endpoints": {
+            "get": {
+                "description": "Returns per-endpoint token and cost aggregates. Each row names\nthe operation its endpoint belongs to, so endpoints that mean\nthe same thing can be folded: /v1/chat/completions and\n/v1/messages are both chat_completions.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get usage breakdown by request endpoint",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Number of days (default 30)",
+                        "name": "days",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date (YYYY-MM-DD)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (YYYY-MM-DD)",
+                        "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact model name",
+                        "name": "model",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by provider name or provider type",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by request label (exact match)",
+                        "name": "label",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact detected session ID",
+                        "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by tracked user path subtree",
+                        "name": "user_path",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Cache mode filter: uncached, cached, all (default uncached)",
+                        "name": "cache_mode",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/usage.EndpointUsage"
                             }
                         }
                     },
@@ -2409,8 +2726,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -2510,6 +2845,18 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by tracked user path subtree",
                         "name": "user_path",
                         "in": "query"
@@ -2528,7 +2875,13 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Search across model, provider, request_id, provider_id, session_id",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Search across model, provider, endpoint, request_id, provider_id, session_id",
                         "name": "search",
                         "in": "query"
                     },
@@ -2626,8 +2979,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -2796,8 +3167,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -2900,8 +3289,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -3050,8 +3457,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -3712,6 +4137,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
@@ -3789,6 +4220,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
@@ -3874,6 +4311,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
@@ -3951,6 +4394,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
@@ -4036,6 +4485,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
@@ -4117,6 +4572,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
@@ -4194,6 +4655,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
@@ -5365,6 +5832,75 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/decisions": {
+            "post": {
+                "description": "Available when an openai, jev, or openrouter provider is configured. OpenAI models answer natively; jev models (Jev, Kev) and OpenRouter's decision models answer through System One, translated both ways. Hosted Jev reads images sent as base64 data URLs; Kev and OpenRouter read text only.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "decisions"
+                ],
+                "summary": "Answer typed questions about an input (OpenAI Decisions)",
+                "parameters": [
+                    {
+                        "description": "Decisions request: model, input, and questions",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Decision: answers in question order, model, and usage",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
@@ -7508,7 +8044,8 @@ const docTemplate = `{
             "post": {
                 "description": "Available when a jev or openrouter provider is configured. The request and answer follow TypeSafe's System One API; models on providers without that API are rejected rather than translated.",
                 "consumes": [
-                    "application/json"
+                    "application/json",
+                    "multipart/form-data"
                 ],
                 "produces": [
                     "application/json"
@@ -7577,7 +8114,8 @@ const docTemplate = `{
             "post": {
                 "description": "A Kev server diagnostic: the request is a System One request, and n_perm (1 to 64, default 6) sets how many option orders run. Only jev providers pointing at a Kev server serve it.",
                 "consumes": [
-                    "application/json"
+                    "application/json",
+                    "multipart/form-data"
                 ],
                 "produces": [
                     "application/json"
@@ -7646,7 +8184,8 @@ const docTemplate = `{
             "post": {
                 "description": "A Kev server diagnostic that answers each question separately. Only jev providers pointing at a Kev server serve it.",
                 "consumes": [
-                    "application/json"
+                    "application/json",
+                    "multipart/form-data"
                 ],
                 "produces": [
                     "application/json"
@@ -7829,6 +8368,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "MCP_ENABLED": {
+                    "type": "string"
+                },
+                "MCP_TOOL_DISCOVERY": {
+                    "description": "MCPToolDiscovery is the gateway's default MCP tool discovery mode\n(\"off\" or \"search\"), so the dashboard can show how clients see tools.",
                     "type": "string"
                 },
                 "PER_CHILD_QUOTAS_ENABLED": {
@@ -8257,6 +8800,42 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "admin.mcpVirtualServerResponse": {
+            "type": "object",
+            "properties": {
+                "configured_tool_discovery": {
+                    "description": "ConfiguredToolDiscovery is the stored setting: \"off\", \"search\", or \"\"\nto inherit the gateway default. ToolDiscovery is the effective mode.",
+                    "type": "string"
+                },
+                "conflict": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "managed": {
+                    "type": "boolean"
+                },
+                "missing_servers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "servers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "tool_discovery": {
+                    "type": "string"
                 }
             }
         },
@@ -8737,6 +9316,26 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "admin.upsertMCPVirtualServerRequest": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "servers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "tool_discovery": {
+                    "type": "string"
                 }
             }
         },
@@ -9261,6 +9860,10 @@ const docTemplate = `{
             "properties": {
                 "cache_control": {
                     "type": "object"
+                },
+                "defer_loading": {
+                    "description": "DeferLoading marks a tool whose schema the API loads only when tool\nsearch matches it. It is an ordinary custom tool that declares itself\ndeferred, so the translated pipeline sends it like any other and drops\nthe marker (see convertTools).",
+                    "type": "boolean"
                 },
                 "description": {
                     "type": "string"
@@ -10705,6 +11308,10 @@ const docTemplate = `{
                 "batch_output_per_mtok": {
                     "type": "number"
                 },
+                "cache_write_1h_per_mtok": {
+                    "description": "Anthropic 1-hour TTL cache writes; cache_write_per_mtok prices the default 5-minute ones",
+                    "type": "number"
+                },
                 "cache_write_per_mtok": {
                     "type": "number"
                 },
@@ -11681,6 +12288,9 @@ const docTemplate = `{
                 "batch_output_per_mtok": {
                     "type": "number"
                 },
+                "cache_write_1h_per_mtok": {
+                    "type": "number"
+                },
                 "cache_write_per_mtok": {
                     "type": "number"
                 },
@@ -12185,6 +12795,60 @@ const docTemplate = `{
                 }
             }
         },
+        "usage.EndpointUsage": {
+            "type": "object",
+            "properties": {
+                "cache_write_input_tokens": {
+                    "type": "integer"
+                },
+                "cached_input_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "cached_input_tokens": {
+                    "type": "integer"
+                },
+                "endpoint": {
+                    "type": "string"
+                },
+                "input_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "local_cached_input_tokens": {
+                    "type": "integer"
+                },
+                "local_cached_output_tokens": {
+                    "type": "integer"
+                },
+                "operation": {
+                    "type": "string"
+                },
+                "output_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "output_tokens": {
+                    "type": "integer"
+                },
+                "requests": {
+                    "type": "integer"
+                },
+                "total_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "total_tokens": {
+                    "type": "integer"
+                },
+                "uncached_input_tokens": {
+                    "type": "integer"
+                }
+            }
+        },
         "usage.LabelUsage": {
             "type": "object",
             "properties": {
@@ -12437,6 +13101,9 @@ const docTemplate = `{
         "usage.UsageLogEntry": {
             "type": "object",
             "properties": {
+                "auth_key_id": {
+                    "type": "string"
+                },
                 "cache_type": {
                     "type": "string"
                 },

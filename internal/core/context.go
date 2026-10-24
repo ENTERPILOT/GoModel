@@ -287,8 +287,8 @@ func GetEnforceReturningUsageData(ctx context.Context) bool {
 	return false
 }
 
-// WithPrimaryRouteSaturated marks the resolved primary route as rate-saturated.
-// The stored error is the 429 the client would have received; dispatch uses it
+// WithPrimaryRouteSaturated marks the resolved primary route as rate-saturated
+// or over its provider budget. The stored error is the 429 the client would have received; dispatch uses it
 // as the synthetic primary failure that triggers the failover sweep, and it
 // surfaces unchanged when no failover target can take the request.
 func WithPrimaryRouteSaturated(ctx context.Context, err error) context.Context {
@@ -298,7 +298,7 @@ func WithPrimaryRouteSaturated(ctx context.Context, err error) context.Context {
 	return context.WithValue(ctx, primaryRouteSaturatedKey, err)
 }
 
-// PrimaryRouteSaturated returns the rate-limit rejection recorded for the
+// PrimaryRouteSaturated returns the rate-limit or budget rejection recorded for the
 // resolved primary route, or nil when the route has capacity.
 func PrimaryRouteSaturated(ctx context.Context) error {
 	if v := ctx.Value(primaryRouteSaturatedKey); v != nil {

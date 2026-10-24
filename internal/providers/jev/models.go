@@ -37,10 +37,10 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 	}, &raw); err != nil {
 		return nil, err
 	}
-	return raw.toCore(), nil
+	return raw.toCore(p.hosted.Load()), nil
 }
 
-func (r *modelsResponse) toCore() *core.ModelsResponse {
+func (r *modelsResponse) toCore(readsImages bool) *core.ModelsResponse {
 	resp := &core.ModelsResponse{Object: "list", Data: make([]core.Model, 0, len(r.Models))}
 	seen := make(map[string]struct{}, len(r.Models))
 	for _, entry := range r.Models {
@@ -49,7 +49,7 @@ func (r *modelsResponse) toCore() *core.ModelsResponse {
 				continue
 			}
 			seen[id] = struct{}{}
-			resp.Data = append(resp.Data, entry.toCore(id))
+			resp.Data = append(resp.Data, entry.toCore(id, readsImages))
 		}
 	}
 	return resp
@@ -75,15 +75,20 @@ func (e modelEntry) ids() []string {
 
 // toCore describes one name from the entry. System One models are decision
 // models with no generation mode the gateway could route an OpenAI request
-// to, so they are categorized as utility models and claim no mode.
-func (e modelEntry) toCore(id string) core.Model {
+// to, so they are categorized as utility models and claim no mode. The
+// vision capability says whether the server reads images: TypeSafe's hosted
+// API does, a Kev server does not. It follows the rule the provider enforces
+// (see hostedTypeSafe), so the gateway can refuse an image request to Kev, or
+// skip Kev in a failover chain, before the provider would.
+func (e modelEntry) toCore(id string, readsImages bool) core.Model {
 	return core.Model{
 		ID:      id,
 		Object:  "model",
 		Created: releaseTimestamp(e.ReleaseDate),
 		Metadata: &core.ModelMetadata{
-			Description: strings.TrimSpace(e.Description),
-			Categories:  []core.ModelCategory{core.CategoryUtility},
+			Description:  strings.TrimSpace(e.Description),
+			Categories:   []core.ModelCategory{core.CategoryUtility},
+			Capabilities: map[string]bool{"vision": readsImages},
 		},
 	}
 }

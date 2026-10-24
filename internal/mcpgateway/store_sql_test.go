@@ -161,3 +161,64 @@ func TestManagedServerSpecDefaultsTimeout(t *testing.T) {
 	require.Greater(t, spec.ToolTimeout, time.Duration(0))
 	require.False(t, spec.Managed)
 }
+
+func TestStoreUpdateRequiresExistingRow(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		ctx := context.Background()
+		server := ManagedServer{Name: "coding", URL: "https://old.example.com/mcp", Transport: "http", Enabled: true}
+
+		require.ErrorIs(t, store.Update(ctx, server), ErrNotFound, "update must not create a missing row")
+		_, err := store.Get(ctx, "coding")
+		require.ErrorIs(t, err, ErrNotFound)
+
+		require.NoError(t, store.Upsert(ctx, server))
+		created, err := store.Get(ctx, "coding")
+		require.NoError(t, err)
+
+		server.URL = "https://new.example.com/mcp"
+		server.UserPaths = []string{"/team"}
+		require.NoError(t, store.Update(ctx, server))
+		got, err := store.Get(ctx, "coding")
+		require.NoError(t, err)
+		require.Equal(t, "https://new.example.com/mcp", got.URL)
+		require.Equal(t, []string{"/team"}, got.UserPaths)
+		require.Equal(t, created.CreatedAt.Unix(), got.CreatedAt.Unix(), "update keeps created_at")
+
+		require.NoError(t, store.Delete(ctx, "coding"))
+		require.ErrorIs(t, store.Update(ctx, server), ErrNotFound, "an edit after a delete must not recreate the row")
+	})
+}
+
+func TestVirtualStoreRoundTrip(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		ctx := context.Background()
+		virtualStore, ok := store.(VirtualStore)
+		require.True(t, ok, "every store backend persists virtual servers")
+
+		virtual := ManagedVirtualServer{Name: "coding", Description: "code tools", Servers: []string{"github", "jira"}, ToolDiscovery: "search"}
+		require.ErrorIs(t, virtualStore.UpdateVirtual(ctx, virtual), ErrNotFound, "update must not create a missing row")
+		require.NoError(t, virtualStore.UpsertVirtual(ctx, virtual))
+
+		got, err := virtualStore.GetVirtual(ctx, "coding")
+		require.NoError(t, err)
+		require.Equal(t, "code tools", got.Description)
+		require.Equal(t, []string{"github", "jira"}, got.Servers)
+		require.Equal(t, "search", got.ToolDiscovery)
+		require.False(t, got.CreatedAt.IsZero())
+
+		virtual.Servers = []string{"github"}
+		virtual.ToolDiscovery = ""
+		require.NoError(t, virtualStore.UpdateVirtual(ctx, virtual))
+		rows, err := virtualStore.ListVirtual(ctx)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		require.Equal(t, []string{"github"}, rows[0].Servers)
+		require.Empty(t, rows[0].ToolDiscovery)
+		require.Equal(t, got.CreatedAt.Unix(), rows[0].CreatedAt.Unix(), "update keeps created_at")
+
+		require.NoError(t, virtualStore.DeleteVirtual(ctx, "coding"))
+		require.ErrorIs(t, virtualStore.DeleteVirtual(ctx, "coding"), ErrNotFound)
+		_, err = virtualStore.GetVirtual(ctx, "coding")
+		require.ErrorIs(t, err, ErrNotFound)
+	})
+}

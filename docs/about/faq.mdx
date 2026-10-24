@@ -11,6 +11,17 @@ Back up your database first — [Updating GoModel](/guides/updating) has the
 backup commands for each storage backend, plus verification and rollback. Then:
 
 <Tabs>
+  <Tab title="Docker">
+    ```bash
+    docker pull enterpilot/gomodel
+    ```
+
+    Then recreate the container. With Docker Compose:
+
+    ```bash
+    docker compose pull && docker compose up -d
+    ```
+  </Tab>
   <Tab title="macOS / Linux">
     Re-run the installer — it always fetches the latest release and replaces
     the binary in place:
@@ -22,17 +33,6 @@ backup commands for each storage backend, plus verification and rollback. Then:
   <Tab title="Windows">
     ```powershell
     irm https://gomodel.enterpilot.io/install.ps1 | iex
-    ```
-  </Tab>
-  <Tab title="Docker">
-    ```bash
-    docker pull enterpilot/gomodel
-    ```
-
-    Then recreate the container. With Docker Compose:
-
-    ```bash
-    docker compose pull && docker compose up -d
     ```
   </Tab>
 </Tabs>

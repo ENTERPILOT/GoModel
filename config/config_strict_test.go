@@ -198,7 +198,7 @@ func TestApplyYAML_ExampleConfigParses(t *testing.T) {
 
 	withTempDir(t, func(dir string) {
 		writeConfigYAML(t, dir, string(example))
-		_, err := applyYAML(buildDefaultConfig(), true)
+		_, _, err := applyYAML(buildDefaultConfig(), true)
 		require.NoError(t, err)
 	})
 }
@@ -212,7 +212,7 @@ func TestApplyYAML_UnreadableConfigFileIsAnError(t *testing.T) {
 		err := os.Mkdir(filepath.Join(dir, "config.yaml"), 0755)
 		require.NoError(t, err)
 
-		_, err = applyYAML(buildDefaultConfig(), true)
+		_, _, err = applyYAML(buildDefaultConfig(), true)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "failed to read config.yaml")
 	})

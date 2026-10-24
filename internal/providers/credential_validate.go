@@ -14,9 +14,14 @@ import (
 type CredentialFieldError struct {
 	Field   string
 	Message string
+	// Err is the underlying cause, when there is one: a *config.SecretError
+	// for a secret reference that did not resolve.
+	Err error
 }
 
 func (e *CredentialFieldError) Error() string { return e.Message }
+
+func (e *CredentialFieldError) Unwrap() error { return e.Err }
 
 // credentialFieldError is a small constructor keeping call sites readable.
 func credentialFieldError(field, format string, args ...any) *CredentialFieldError {

@@ -170,16 +170,9 @@ func TestMergeUnknownJSONFields_NoAdditionsReturnsBase(t *testing.T) {
 // extractUnknownJSONFields assumes its input is already valid JSON: every
 // production caller is an UnmarshalJSON method that runs json.Unmarshal on the
 // same bytes first. This test pins the meaningful guarantee at that boundary —
-// structurally malformed bodies are rejected before unknown-field extraction
-// runs — rather than re-validating inside the helper.
-//
-// Note on the JSON decoder: the project uses github.com/goccy/go-json, which is
-// slightly more lenient than encoding/json on a couple of malformed-input edge
-// cases (notably trailing commas inside skipped unknown/passthrough fields, and
-// leading-zero numbers). That extra input tolerance is acceptable under the
-// gateway's "accept generously" principle, so this test covers structural
-// errors that remain rejected; see TestDecoderLeniencyIsBounded for the
-// documented, intentional acceptances.
+// malformed bodies, including malformed passthrough values, are rejected
+// before unknown-field extraction runs — rather than re-validating inside the
+// helper.
 func TestUnmarshalJSON_RejectsInvalidJSONSyntax(t *testing.T) {
 	tests := []struct {
 		name string
@@ -189,37 +182,15 @@ func TestUnmarshalJSON_RejectsInvalidJSONSyntax(t *testing.T) {
 		{name: "missing object comma", body: `{"model":"m" "x":1}`},
 		{name: "trailing object comma", body: `{"model":"m","x":1,}`},
 		{name: "trailing top-level data", body: `{"model":"m","x":1}{"extra":true}`},
+		{name: "trailing array comma in passthrough field", body: `{"model":"m","x":[1,]}`},
+		{name: "trailing object comma in passthrough field", body: `{"model":"m","x":{"a":1,}}`},
+		{name: "leading-zero number in passthrough field", body: `{"model":"m","x":01}`},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var req ChatRequest
 			require.Error(t, req.UnmarshalJSON([]byte(tt.body)), "ChatRequest.UnmarshalJSON(%q) error = nil, want syntax error", tt.body)
-		})
-	}
-}
-
-// TestDecoderLeniencyIsBounded documents the known, intentional input-tolerance
-// differences introduced by github.com/goccy/go-json relative to encoding/json.
-// These are accepted (the gateway favors accepting generously and normalizing),
-// but pinning them here makes the behavior explicit and flags any future change.
-func TestDecoderLeniencyIsBounded(t *testing.T) {
-	accepted := []struct {
-		name string
-		body string
-	}{
-		// Malformed values inside an unknown/passthrough field are skipped
-		// leniently rather than rejected.
-		{name: "trailing array comma in passthrough field", body: `{"model":"m","x":[1,]}`},
-		// Leading-zero numbers are tolerated.
-		{name: "leading-zero number in passthrough field", body: `{"model":"m","x":01}`},
-	}
-
-	for _, tt := range accepted {
-		t.Run(tt.name, func(t *testing.T) {
-			var req ChatRequest
-			err := req.UnmarshalJSON([]byte(tt.body))
-			require.NoError(t, err)
 		})
 	}
 }
@@ -397,16 +368,15 @@ func lookupDecoderBaseline(fields UnknownJSONFields, key string) json.RawMessage
 	return nil
 }
 
-// The request decoder is deliberately more lenient than strict JSON (see
-// TestDecoderLeniencyIsBounded). A passthrough member the gateway accepted on
-// the way in must still be visible on the way out, or it would be dropped
-// from the request forwarded upstream.
+// A passthrough member the gateway accepted on the way in must still be
+// visible on the way out, or it would be dropped from the request forwarded
+// upstream.
 func TestUnknownJSONFieldsSeeEveryValueTheDecoderAccepted(t *testing.T) {
 	accepted := map[string]string{
-		"trailing array comma":  `[1,]`,
-		"trailing object comma": `{"a":1,}`,
-		"leading-zero number":   `01`,
-		"plain object":          `{"a":1}`,
+		"plain object":    `{"a":1}`,
+		"nested array":    `[1,[2,{"b":null}]]`,
+		"negative number": `-0.5e3`,
+		"string":          `"x"`,
 	}
 	for name, value := range accepted {
 		t.Run(name, func(t *testing.T) {

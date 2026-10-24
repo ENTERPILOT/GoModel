@@ -27,25 +27,37 @@ func execSchema(ctx context.Context, q Querier, dialect Dialect, statements []st
 // present.
 //
 // Tolerating the error is the portable form: SQLite has no ADD COLUMN IF NOT
-// EXISTS, so the PostgreSQL store used the IF NOT EXISTS spelling while the
-// SQLite store pattern-matched its error text. Both engines reject a duplicate
-// add with a recognisable message, so one list now serves both.
+// EXISTS, and both engines reject a duplicate add with a recognisable message,
+// so one list serves both. PostgreSQL still gets the IF NOT EXISTS spelling
+// (see addColumnStatement) so that re-running applied migrations on every
+// start does not write an ERROR line per column to the server log.
 func AddColumns(ctx context.Context, db DB, statements ...string) error {
+	dialect := db.Dialect()
 	for _, statement := range statements {
-		statement = db.Dialect().ExpandTypes(statement)
-		if db.Dialect() == DuckDB {
-			// DuckDB cannot ADD COLUMN with constraints and rejects the
-			// statement before checking whether the column exists. A DuckDB
-			// table is always created from the current schema, so dropping the
-			// constraint only affects the duplicate-column no-op.
-			statement = strings.ReplaceAll(statement, " NOT NULL", "")
-		}
-		_, err := db.Exec(ctx, statement)
+		_, err := db.Exec(ctx, dialect.addColumnStatement(statement))
 		if err != nil && !IsDuplicateColumnError(err) {
 			return fmt.Errorf("apply migration %q: %w", statement, err)
 		}
 	}
 	return nil
+}
+
+// addColumnStatement expands type tokens and, on PostgreSQL, turns
+// `ADD COLUMN` into `ADD COLUMN IF NOT EXISTS`.
+//
+// DuckDB cannot ADD COLUMN with constraints and rejects the statement before
+// checking whether the column exists. A DuckDB table is always created from
+// the current schema, so dropping the constraint only affects the
+// duplicate-column no-op.
+func (d Dialect) addColumnStatement(statement string) string {
+	statement = d.ExpandTypes(statement)
+	if d == DuckDB {
+		statement = strings.ReplaceAll(statement, " NOT NULL", "")
+	}
+	if d != PostgreSQL || strings.Contains(statement, "IF NOT EXISTS") {
+		return statement
+	}
+	return strings.Replace(statement, "ADD COLUMN ", "ADD COLUMN IF NOT EXISTS ", 1)
 }
 
 // IsDuplicateColumnError reports whether err is an engine's complaint that a

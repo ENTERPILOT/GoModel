@@ -207,6 +207,17 @@ type MessagesTokenCounter interface {
 	CountMessagesTokens(ctx context.Context, model string, body []byte) (int, error)
 }
 
+// ChatTokenCounter is implemented by providers that count the input tokens of
+// a canonical chat request exactly through an endpoint of their own (OpenAI's
+// /responses/input_tokens). It serves Messages token counts for providers
+// without a MessagesTokenCounter. It is optional: the router answers
+// ErrMessagesTokenCountUnsupported for a route whose provider lacks it, and so
+// may the provider for a request its endpoint cannot count; the caller then
+// estimates.
+type ChatTokenCounter interface {
+	CountChatTokens(ctx context.Context, req *ChatRequest) (int, error)
+}
+
 // UnlistedModelAcceptor is implemented by providers that serve model IDs
 // their listing omits, such as TypeSafe's versioned Jev IDs (jev-1.13.0), so a
 // virtual model can target a provider-qualified name the catalog lacks.
@@ -215,7 +226,7 @@ type UnlistedModelAcceptor interface {
 }
 
 // ErrMessagesTokenCountUnsupported reports that the provider owning a model
-// has no token counting endpoint.
+// has no token counting endpoint, or none that can count the given request.
 var ErrMessagesTokenCountUnsupported = errors.New("provider has no token counting endpoint")
 
 // ProviderNameResolver is an optional interface for components that can map a

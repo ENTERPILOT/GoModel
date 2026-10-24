@@ -34,6 +34,7 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/usage/models", h.UsageByModel)
 	g.GET("/usage/user-paths", h.UsageByUserPath)
 	g.GET("/usage/labels", h.UsageByLabel)
+	g.GET("/usage/endpoints", h.UsageByEndpoint)
 	g.GET("/usage/sessions", h.UsageBySession)
 	g.GET("/usage/log", h.UsageLog)
 	g.GET("/usage/throughput", h.TokenThroughput, global)
@@ -84,6 +85,9 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.DELETE("/mcp-servers/:name", h.DeleteMCPServer, global)
 	g.POST("/mcp-servers/:name/reconnect", h.ReconnectMCPServer, global)
 	g.GET("/mcp-servers/:name/catalog", h.MCPServerCatalog, global)
+	g.GET("/mcp-virtual-servers", h.ListMCPVirtualServers, global)
+	g.PUT("/mcp-virtual-servers", h.UpsertMCPVirtualServer, global)
+	g.DELETE("/mcp-virtual-servers/:name", h.DeleteMCPVirtualServer, global)
 
 	g.GET("/model-pricing-overrides", h.ListModelPricingOverrides, global)
 	g.PUT("/model-pricing-overrides", h.UpsertModelPricingOverride, global)
@@ -91,9 +95,11 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 
 	g.GET("/auth-keys", h.ListAuthKeys)
 	g.POST("/auth-keys", h.CreateAuthKey)
+	g.POST("/auth-keys/import", h.ImportAuthKey, global)
 	g.PUT("/auth-keys/:id/labels", h.UpdateAuthKeyLabels)
 	g.PUT("/auth-keys/:id/allowed-models", h.UpdateAuthKeyAllowedModels)
 	g.PUT("/auth-keys/:id/dashboard-access", h.UpdateAuthKeyDashboardAccess)
+	g.PUT("/auth-keys/:id/passthrough-access", h.UpdateAuthKeyPassthroughAccess)
 	g.POST("/auth-keys/:id/deactivate", h.DeactivateAuthKey)
 
 	g.GET("/users", h.ListUsers)

@@ -44,6 +44,7 @@ func (s *Service) recordToolCall(req *mcp.CallToolRequest, server, exposedTool, 
 		entry.RequestID = strings.TrimSpace(extra.Header.Get(core.RequestIDHeader))
 		entry.UserPath = strings.TrimSpace(extra.Header.Get(s.userPathHeader))
 		entry.Labels = parseLabelsHeader(extra.Header.Get(labelsHeader))
+		entry.AuthKeyID = strings.TrimSpace(extra.Header.Get(authKeyIDHeader))
 	}
 	if req.Params != nil && len(req.Params.Arguments) > 0 {
 		entry.RawData["args_bytes"] = len(req.Params.Arguments)

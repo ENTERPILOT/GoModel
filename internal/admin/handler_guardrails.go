@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 )
 
@@ -80,7 +81,9 @@ func (h *Handler) UpsertGuardrail(c *echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("guardrail type "+strings.TrimSpace(req.Type)+" does not support the phases used by active workflows: "+strings.Join(conflicts, ", "), nil))
 	}
 
-	if err := h.guardrailDefs.Upsert(c.Request().Context(), guardrails.Definition{
+	// ErrSealUnconfirmed means the definition was saved and applied: refresh
+	// the workflows that use it like after any other save, then report it.
+	saveErr := h.guardrailDefs.Upsert(c.Request().Context(), guardrails.Definition{
 		Name:        name,
 		Type:        req.Type,
 		Description: req.Description,
@@ -88,11 +91,15 @@ func (h *Handler) UpsertGuardrail(c *echo.Context) error {
 		Config:      req.Config,
 		FailMode:    req.FailMode,
 		TimeoutMS:   req.TimeoutMS,
-	}); err != nil {
-		return handleError(c, guardrailWriteError(err))
+	})
+	if saveErr != nil && !errors.Is(saveErr, encryption.ErrSealUnconfirmed) {
+		return handleError(c, guardrailWriteError(saveErr))
 	}
 	if err := h.refreshWorkflowsAfterGuardrailChange(c.Request().Context()); err != nil {
 		return handleError(c, err)
+	}
+	if saveErr != nil {
+		return handleError(c, guardrailWriteError(saveErr))
 	}
 
 	view, ok := h.guardrailDefs.GetView(name)

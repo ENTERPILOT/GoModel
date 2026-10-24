@@ -35,6 +35,7 @@ const kevModelsJSON = `{
 func TestListModels_ReadsTheHostedCatalog(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, typesafeModelsJSON)
 	provider := newTestProvider("ts-key", server.URL, server.Client(), llmclient.Hooks{})
+	provider.hosted.Store(true) // the test server stands in for api.typesafe.ai
 
 	resp, err := provider.ListModels(context.Background())
 	require.NoError(t, err)
@@ -53,6 +54,7 @@ func TestListModels_ReadsTheHostedCatalog(t *testing.T) {
 	assert.Equal(t, "The most recent stable release.", latest.Metadata.Description)
 	assert.Equal(t, []core.ModelCategory{core.CategoryUtility}, latest.Metadata.Categories)
 	assert.Empty(t, latest.Metadata.Modes, "a decision model claims no generation mode")
+	assert.Equal(t, map[string]bool{"vision": true}, latest.Metadata.Capabilities, "hosted Jev reads images")
 
 	preview := resp.Data[1]
 	assert.Equal(t, "jev-preview", preview.ID)
@@ -75,6 +77,7 @@ func TestListModels_ListsKevAliasesAsModels(t *testing.T) {
 		assert.Zero(t, model.Created, "no release date is reported")
 		require.NotNil(t, model.Metadata)
 		assert.Equal(t, []core.ModelCategory{core.CategoryUtility}, model.Metadata.Categories)
+		assert.Equal(t, map[string]bool{"vision": false}, model.Metadata.Capabilities, "a Kev server reads text only")
 	}
 }
 

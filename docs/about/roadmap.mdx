@@ -31,7 +31,10 @@ keywords: ["roadmap", "milestones", "upcoming features", "releases"]
   - [ ] setting up an AI curator / agent to monitor the prices across the providers websites
 - [ ] Improving UI and Audit Logs view performance
 - [ ] Improving resilient features (explicit failure + failover for cases like vLLM stopped in the middle of streaming etc.)
-- [ ] Facilitate migration from LiteLLM to GoModel (script/command + config.yaml convertedr + guide)
+- [ ] Facilitate migration from LiteLLM to GoModel
+  - [x] `gomodel migrate litellm` config.yaml converter and [migration guide](/guides/migrate-from-litellm)
+  - [x] Importing virtual keys, teams, users, budgets, and rate limits from the LiteLLM database
+  - [ ] Carrying over LiteLLM spend
 - [ ] Better support for /audio related endpoints and modalities
 - [ ] Better for Video Generation (storing artifacts and more)
 - [ ] Provider-native passthrough for all providers, beyond the current beta coverage
@@ -53,7 +56,7 @@ keywords: ["roadmap", "milestones", "upcoming features", "releases"]
 - [ ] Cluster mode
 - [ ] LDAP integration
 - [ ] Role-based access control (RBAC) for the dashboard and admin API
-- [ ] Secret manager integrations (Vault, AWS Secrets Manager/KMS, Azure Key Vault, GCP Secret Manager)
+- [ ] Secret manager integrations (Vault, AWS Secrets Manager/KMS, Azure Key Vault, GCP Secret Manager) in GoModel Pro; [secret references](/advanced/secret-references) with `env` and `file` are in core
 - [ ] Audit-log export/streaming to object storage and data lakes
 - [ ] IP / CIDR allowlists
 - [ ] LTS channel with signed artifacts, SBOM, and CVE pre-notification

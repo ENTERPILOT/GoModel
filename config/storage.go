@@ -18,6 +18,17 @@ type StorageConfig struct {
 
 	// DuckDB configuration (needs a binary built with -tags duckdb)
 	DuckDB DuckDBStorageConfig `yaml:"duckdb"`
+
+	// EncryptionKey enables encryption at rest for dashboard-managed secrets
+	// (provider credentials, MCP headers, guardrail secrets). Any string is
+	// accepted; 32 random bytes in base64 (openssl rand -base64 32) is
+	// recommended. Losing it makes those secrets unrecoverable.
+	// Default: empty (secrets are stored in plaintext).
+	EncryptionKey string `yaml:"encryption_key" env:"GOMODEL_ENCRYPTION_KEY"`
+
+	// EncryptionKeyPrevious is the old EncryptionKey during a key rotation.
+	// It is only used at startup to re-wrap the data key with EncryptionKey.
+	EncryptionKeyPrevious string `yaml:"encryption_key_previous" env:"GOMODEL_ENCRYPTION_KEY_PREVIOUS"`
 }
 
 // DuckDBStorageConfig holds DuckDB-specific storage configuration

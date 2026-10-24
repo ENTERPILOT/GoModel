@@ -15,6 +15,9 @@ import (
 type StreamResult struct {
 	// Text is the delivered text per choice, after the hook's edits.
 	Text map[int]string
+	// Reasoning is the delivered reasoning per choice, after the hook's
+	// edits.
+	Reasoning map[int]string
 	// ToolArguments is the delivered tool-call arguments per choice and
 	// call index, after the hook's edits.
 	ToolArguments map[int]map[int]string
@@ -33,13 +36,13 @@ type StreamResult struct {
 }
 
 // RunStream drives hook with events the way GoModel does under its
-// StreamPolicy: in transform mode the text deltas of a choice, and the
-// argument deltas of each of its tool calls, form windows that are
-// coalesced until MinChunkChars runes are pending; the last LookbehindChars
-// runes of a delivered window are withheld and shown again in front of the
-// next delta with Overlap set, and pass, replace, drop, and terminate are
-// applied to the whole window. Reasoning deltas are presented as they
-// arrive and may be replaced or dropped too. A delta of another kind for
+// StreamPolicy: in transform mode the text deltas of a choice, its
+// reasoning deltas, and the argument deltas of each of its tool calls, form
+// windows that are coalesced until MinChunkChars runes are pending; the
+// last LookbehindChars runes of a delivered window are withheld and shown
+// again in front of the next delta with Overlap set, and pass, replace,
+// drop, and terminate are applied to the whole window. A delta of another
+// kind for
 // the same choice flushes that choice's windows of other kinds, an event
 // that is not held flushes every window, and so does the end of the
 // stream. In observe mode only terminate has an effect.
@@ -50,8 +53,9 @@ type StreamResult struct {
 // the hook a completion of your own, with tool calls, usage, or another
 // finish reason.
 //
-// Only choice, kind, and text matter on the input events; Seq and Overlap
-// are set by the driver.
+// Only choice, kind, text, and (for tool-call deltas) call and tool matter
+// on the input events; Seq and Overlap are set by the driver. A tool name
+// given on any delta of a call is carried by every event of its window.
 func RunStream(ctx context.Context, hook pluginapi.StreamHook, x *pluginapi.Exchange, events []*pluginapi.StreamEvent) (*StreamResult, error) {
 	if x == nil {
 		x = Exchange(nil, nil)
@@ -66,12 +70,15 @@ func RunStream(ctx context.Context, hook pluginapi.StreamHook, x *pluginapi.Exch
 	if policy.Mode == pluginapi.StreamBuffer {
 		return runBuffered(ctx, hook, x, events)
 	}
-	d := &driver{hook: hook, x: x, policy: policy, result: &StreamResult{Text: map[int]string{}, ToolArguments: map[int]map[int]string{}}, pending: map[window]string{}, tail: map[window]string{}}
+	d := &driver{hook: hook, x: x, policy: policy, result: &StreamResult{Text: map[int]string{}, Reasoning: map[int]string{}, ToolArguments: map[int]map[int]string{}}, pending: map[window]string{}, tail: map[window]string{}, tools: map[window]string{}}
 	for _, ev := range events {
 		if ev == nil {
 			continue
 		}
-		if ev.Kind == pluginapi.EventTextDelta || (ev.Kind == pluginapi.EventToolCallDelta && ev.Text != "") {
+		if ev.Kind == pluginapi.EventToolCallDelta && ev.Tool != "" {
+			d.tools[windowOf(ev)] = ev.Tool
+		}
+		if held(ev) {
 			w := windowOf(ev)
 			if err := d.flushOthers(ctx, w); err != nil || d.result.Terminated != nil {
 				return d.result, err
@@ -102,7 +109,20 @@ func RunStream(ctx context.Context, hook pluginapi.StreamHook, x *pluginapi.Exch
 	return d.result, nil
 }
 
-// window identifies a choice's text or one of its tool calls' arguments.
+// held reports whether the driver windows ev: text and reasoning deltas, and
+// tool-call deltas carrying arguments.
+func held(ev *pluginapi.StreamEvent) bool {
+	switch ev.Kind {
+	case pluginapi.EventTextDelta, pluginapi.EventReasoningDelta:
+		return true
+	case pluginapi.EventToolCallDelta:
+		return ev.Text != ""
+	}
+	return false
+}
+
+// window identifies a choice's text, its reasoning, or one of its tool
+// calls' arguments.
 type window struct {
 	choice int
 	call   int
@@ -125,6 +145,7 @@ type driver struct {
 	pending map[window]string
 	tail    map[window]string
 	order   []window // windows in order of first appearance
+	tools   map[window]string
 	seq     int
 }
 
@@ -180,7 +201,7 @@ func (d *driver) present(ctx context.Context, w window, final bool) error {
 	overlap := utf8.RuneCountInString(d.tail[w])
 	d.tail[w], d.pending[w] = "", ""
 	d.seq++
-	ev := &pluginapi.StreamEvent{Seq: d.seq, Kind: w.kind, Choice: w.choice, Call: w.call, Text: full, Overlap: overlap, Final: final}
+	ev := &pluginapi.StreamEvent{Seq: d.seq, Kind: w.kind, Choice: w.choice, Call: w.call, Tool: d.tools[w], Text: full, Overlap: overlap, Final: final}
 	decision, err := d.hook.OnStreamEvent(ctx, d.x, ev)
 	if err != nil {
 		return err
@@ -215,8 +236,8 @@ func (d *driver) present(ctx context.Context, w window, final bool) error {
 	return nil
 }
 
-// other presents a non-text event: reasoning deltas may be replaced or
-// dropped in transform mode, everything else passed or dropped.
+// other presents an event that is not windowed: in transform mode it may
+// be dropped, and a reasoning delta (an empty one) replaced.
 func (d *driver) other(ctx context.Context, ev *pluginapi.StreamEvent) error {
 	d.seq++
 	out := *ev
@@ -242,20 +263,26 @@ func (d *driver) other(ctx context.Context, ev *pluginapi.StreamEvent) error {
 		}
 	}
 	d.x.Stream.Append(&out)
+	if out.Kind == pluginapi.EventReasoningDelta {
+		d.result.Reasoning[out.Choice] += out.Text
+	}
 	d.result.Events = append(d.result.Events, &out)
 	return nil
 }
 
 func (d *driver) deliver(w window, text string) {
-	if w.kind == pluginapi.EventToolCallDelta {
+	switch w.kind {
+	case pluginapi.EventToolCallDelta:
 		if d.result.ToolArguments[w.choice] == nil {
 			d.result.ToolArguments[w.choice] = map[int]string{}
 		}
 		d.result.ToolArguments[w.choice][w.call] += text
-	} else {
+	case pluginapi.EventReasoningDelta:
+		d.result.Reasoning[w.choice] += text
+	default:
 		d.result.Text[w.choice] += text
 	}
-	d.result.Events = append(d.result.Events, &pluginapi.StreamEvent{Kind: w.kind, Choice: w.choice, Call: w.call, Text: text})
+	d.result.Events = append(d.result.Events, &pluginapi.StreamEvent{Kind: w.kind, Choice: w.choice, Call: w.call, Tool: d.tools[w], Text: text})
 }
 
 func (d *driver) terminate(decision pluginapi.StreamDecision) {
@@ -270,7 +297,7 @@ func (d *driver) terminate(decision pluginapi.StreamDecision) {
 // runs the plugin's ResponseHook on it, as the host does for a buffering
 // policy.
 func runBuffered(ctx context.Context, hook pluginapi.StreamHook, x *pluginapi.Exchange, events []*pluginapi.StreamEvent) (*StreamResult, error) {
-	result := &StreamResult{Text: map[int]string{}}
+	result := &StreamResult{Text: map[int]string{}, Reasoning: map[int]string{}}
 	responder, ok := hook.(pluginapi.ResponseHook)
 	if !ok {
 		return nil, fmt.Errorf("plugintest: a buffering stream plugin must implement pluginapi.ResponseHook")
@@ -296,8 +323,13 @@ func runBuffered(ctx context.Context, hook pluginapi.StreamHook, x *pluginapi.Ex
 	case pluginapi.ActionBlock:
 		return result, nil
 	}
-	for i := range delivered.Choices {
+	for i, choice := range delivered.Choices {
 		result.Text[i] = delivered.Text(i)
+		for _, part := range choice.Message.Parts {
+			if part.Kind == pluginapi.PartReasoning {
+				result.Reasoning[i] += part.Text
+			}
+		}
 	}
 	return result, nil
 }

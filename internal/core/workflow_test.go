@@ -3,6 +3,7 @@ package core
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -46,6 +47,29 @@ func TestWorkflowFeaturesApplyUpperBound_DisablesBudgetWhenUsageDisabled(t *test
 			features := tt.base.ApplyUpperBound(tt.caps)
 			require.Equal(t, tt.wantUsage, features.Usage)
 			require.Equal(t, tt.wantBudget, features.Budget)
+		})
+	}
+}
+
+func TestWorkflowPromptGuardrailsHash(t *testing.T) {
+	disabled := DefaultWorkflowFeatures()
+	disabled.Guardrails = false
+	tests := []struct {
+		name     string
+		workflow *Workflow
+		want     string
+	}{
+		{name: "nil workflow", workflow: nil},
+		{name: "prompt chain", want: "p1", workflow: &Workflow{Policy: &ResolvedWorkflowPolicy{
+			VersionID: "v1", Features: DefaultWorkflowFeatures(), ChainHashes: map[string]string{"prompt": "p1", "response": "r1"}}}},
+		{name: "response chain only", workflow: &Workflow{Policy: &ResolvedWorkflowPolicy{
+			VersionID: "v1", Features: DefaultWorkflowFeatures(), ChainHashes: map[string]string{"response": "r1"}}}},
+		{name: "guardrails disabled", workflow: &Workflow{Policy: &ResolvedWorkflowPolicy{
+			VersionID: "v1", Features: disabled, ChainHashes: map[string]string{"prompt": "p1"}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.workflow.PromptGuardrailsHash())
 		})
 	}
 }

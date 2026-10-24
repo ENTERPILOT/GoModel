@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -57,4 +58,42 @@ func TestRouterCountMessagesTokens_PropagatesProviderError(t *testing.T) {
 	_, err := router.CountMessagesTokens(context.Background(), "anthropic/claude-haiku-4-5", []byte(`{"messages":[]}`))
 	require.ErrorIs(t, err, upstream)
 	require.NotErrorIs(t, err, core.ErrMessagesTokenCountUnsupported)
+}
+
+type mockChatTokenCountingProvider struct {
+	*mockProvider
+	count int
+	last  *core.ChatRequest
+}
+
+func (m *mockChatTokenCountingProvider) CountChatTokens(_ context.Context, req *core.ChatRequest) (int, error) {
+	m.last = req
+	return m.count, nil
+}
+
+// A chat count reaches the provider as a completion would: with the resolved
+// model and without Anthropic cache directives the provider does not accept.
+func TestRouterCountChatTokens(t *testing.T) {
+	counter := &mockChatTokenCountingProvider{mockProvider: &mockProvider{name: "openai"}, count: 130}
+	plain := &mockProvider{name: "other"}
+	lookup := newMockLookup()
+	lookup.addModel("openai/gpt-6-luna", counter, "openai")
+	lookup.addModel("other/model-x", plain, "other")
+	router, _ := NewRouter(lookup)
+
+	cacheControl := core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"cache_control": json.RawMessage(`{"type":"ephemeral"}`)})
+	ctx := core.WithRequestDialect(context.Background(), core.RequestDialectAnthropicMessages)
+	got, err := router.CountChatTokens(ctx, &core.ChatRequest{
+		Model:    "openai/gpt-6-luna",
+		Messages: []core.Message{{Role: "user", Content: []core.ContentPart{{Type: "text", Text: "hi", ExtraFields: cacheControl}}}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 130, got)
+	require.NotNil(t, counter.last)
+	assert.Equal(t, "gpt-6-luna", counter.last.Model)
+	parts := counter.last.Messages[0].Content.([]core.ContentPart)
+	assert.True(t, parts[0].ExtraFields.IsEmpty(), "cache_control must not reach OpenAI")
+
+	_, err = router.CountChatTokens(ctx, &core.ChatRequest{Model: "other/model-x", Messages: []core.Message{{Role: "user", Content: "hi"}}})
+	assert.ErrorIs(t, err, core.ErrMessagesTokenCountUnsupported)
 }

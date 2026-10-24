@@ -44,20 +44,22 @@ func TestStore_RoundTrip(t *testing.T) {
 		deactivated := now.Add(-time.Minute)
 
 		full := AuthKey{
-			ID:              "key-full",
-			Name:            "full",
-			Description:     "every field set",
-			UserPath:        "/team/alpha",
-			Labels:          []string{"team-a", "batch"},
-			AllowedModels:   []string{"anthropic/", "openai/gpt-4o"},
-			DashboardAccess: true,
-			RedactedValue:   TokenPrefix + "...full",
-			SecretHash:      "hash-full",
-			Enabled:         false,
-			ExpiresAt:       &expires,
-			DeactivatedAt:   &deactivated,
-			CreatedAt:       now,
-			UpdatedAt:       now.Add(time.Minute),
+			ID:                "key-full",
+			Name:              "full",
+			Description:       "every field set",
+			UserPath:          "/team/alpha",
+			Labels:            []string{"team-a", "batch"},
+			AllowedModels:     []string{"anthropic/", "openai/gpt-4o"},
+			DashboardAccess:   true,
+			PassthroughAccess: true,
+			RedactedValue:     TokenPrefix + "...full",
+			SecretHash:        "hash-full",
+			ImportedFrom:      ImportedFromLiteLLM,
+			Enabled:           false,
+			ExpiresAt:         &expires,
+			DeactivatedAt:     &deactivated,
+			CreatedAt:         now,
+			UpdatedAt:         now.Add(time.Minute),
 		}
 		minimal := newTestKey("key-minimal", now.Add(-time.Hour))
 		emptySlices := newTestKey("key-empty-slices", now.Add(-2*time.Hour))
@@ -83,8 +85,10 @@ func TestStore_RoundTrip(t *testing.T) {
 		require.Equal(t, full.Labels, got.Labels)
 		require.Equal(t, full.AllowedModels, got.AllowedModels)
 		require.True(t, got.DashboardAccess)
+		require.True(t, got.PassthroughAccess)
 		require.Equal(t, full.RedactedValue, got.RedactedValue)
 		require.Equal(t, full.SecretHash, got.SecretHash)
+		require.Equal(t, ImportedFromLiteLLM, got.ImportedFrom)
 		require.False(t, got.Enabled)
 		require.NotNil(t, got.ExpiresAt)
 		require.True(t, got.ExpiresAt.Equal(expires), "ExpiresAt = %v, want %v", got.ExpiresAt, expires)
@@ -100,6 +104,8 @@ func TestStore_RoundTrip(t *testing.T) {
 			require.Nil(t, got.Labels, "%s: Labels = %#v, want nil", got.ID, got.Labels)
 			require.Nil(t, got.AllowedModels, "%s: AllowedModels = %#v, want nil", got.ID, got.AllowedModels)
 			require.False(t, got.DashboardAccess)
+			require.False(t, got.PassthroughAccess)
+			require.Empty(t, got.ImportedFrom)
 			require.True(t, got.Enabled)
 			require.Nil(t, got.ExpiresAt)
 			require.Nil(t, got.DeactivatedAt)
@@ -150,7 +156,7 @@ func TestStore_CreateRejectsDuplicates(t *testing.T) {
 
 		sameSecret := newTestKey("key-two", storeTestNow)
 		sameSecret.SecretHash = key.SecretHash
-		require.Error(t, store.Create(ctx, sameSecret), "duplicate secret hash")
+		require.ErrorIs(t, store.Create(ctx, sameSecret), ErrSecretHashExists)
 
 		keys, err := store.List(ctx)
 		require.NoError(t, err)
@@ -249,6 +255,27 @@ func TestStore_UpdateDashboardAccess(t *testing.T) {
 	})
 }
 
+func TestStore_UpdatePassthroughAccess(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		ctx := context.Background()
+		now := storeTestNow
+		granted := newTestKey("key-granted", now)
+		granted.PassthroughAccess = true
+		require.NoError(t, store.Create(ctx, granted))
+		require.NoError(t, store.Create(ctx, newTestKey("key-plain", now)))
+
+		later := now.Add(time.Hour)
+		require.NoError(t, store.UpdatePassthroughAccess(ctx, "key-plain", true, later))
+		require.NoError(t, store.UpdatePassthroughAccess(ctx, "key-granted", false, later))
+		require.ErrorIs(t, store.UpdatePassthroughAccess(ctx, "missing", true, later), ErrNotFound)
+
+		byID := listByID(t, store)
+		require.True(t, byID["key-plain"].PassthroughAccess)
+		require.False(t, byID["key-granted"].PassthroughAccess)
+		require.True(t, byID["key-plain"].UpdatedAt.Equal(later), "UpdatedAt = %v, want %v", byID["key-plain"].UpdatedAt, later)
+	})
+}
+
 func TestStore_Deactivate(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
@@ -278,5 +305,51 @@ func TestStore_Deactivate(t *testing.T) {
 		require.False(t, got.Enabled)
 		require.True(t, got.DeactivatedAt.Equal(first), "DeactivatedAt = %v, want first deactivation %v", got.DeactivatedAt, first)
 		require.True(t, got.UpdatedAt.Equal(second), "UpdatedAt = %v, want %v", got.UpdatedAt, second)
+	})
+}
+
+func TestStore_UpdateImported(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		ctx := context.Background()
+		expires := storeTestNow.Add(24 * time.Hour)
+		key := newTestKey("key-imported", storeTestNow)
+		key.ImportedFrom = ImportedFromLiteLLM
+		key.Description = "old"
+		key.UserPath = "/old"
+		key.Labels = []string{"a"}
+		key.AllowedModels = []string{"openai/gpt-4o"}
+		key.DashboardAccess = true
+		key.PassthroughAccess = true
+		key.ExpiresAt = &expires
+		require.NoError(t, store.Create(ctx, key))
+
+		updated := key
+		updated.Name = "renamed"
+		updated.Description = ""
+		updated.UserPath = "/new"
+		updated.Labels = nil
+		updated.AllowedModels = []string{"openai/gpt-4o-mini"}
+		updated.RedactedValue = "sk-...wxyz"
+		updated.ExpiresAt = nil
+		updated.DashboardAccess = false
+		updated.PassthroughAccess = false
+		updated.UpdatedAt = storeTestNow.Add(time.Hour)
+		require.NoError(t, store.UpdateImported(ctx, updated))
+
+		got := listByID(t, store)["key-imported"]
+		require.Equal(t, "renamed", got.Name)
+		require.Empty(t, got.Description)
+		require.Equal(t, "/new", got.UserPath)
+		require.Nil(t, got.Labels)
+		require.Equal(t, []string{"openai/gpt-4o-mini"}, got.AllowedModels)
+		require.Equal(t, "sk-...wxyz", got.RedactedValue)
+		require.Nil(t, got.ExpiresAt)
+		require.True(t, got.DashboardAccess, "dashboard access is not an import field")
+		require.True(t, got.PassthroughAccess, "passthrough access is not an import field")
+		require.Equal(t, key.SecretHash, got.SecretHash)
+		require.True(t, got.UpdatedAt.Equal(updated.UpdatedAt))
+
+		missing := newTestKey("missing", storeTestNow)
+		require.ErrorIs(t, store.UpdateImported(ctx, missing), ErrNotFound)
 	})
 }

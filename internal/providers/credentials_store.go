@@ -3,34 +3,7 @@ package providers
 import (
 	"strings"
 	"time"
-
-	"github.com/goccy/go-json"
 )
-
-func encodeCredentialList(value []string) (string, error) {
-	if value == nil {
-		value = []string{}
-	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
-func decodeCredentialList(data []byte) ([]string, error) {
-	if len(data) == 0 {
-		return nil, nil
-	}
-	var value []string
-	if err := json.Unmarshal(data, &value); err != nil {
-		return nil, err
-	}
-	if len(value) == 0 {
-		return nil, nil
-	}
-	return value, nil
-}
 
 // stampCredentialUpsert sets timestamps: CreatedAt on insert, UpdatedAt always.
 func stampCredentialUpsert(cred *ManagedProviderCredential) {
