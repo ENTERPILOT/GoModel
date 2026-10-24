@@ -152,7 +152,7 @@
     </span>
     <span class="audit-timing mono font-size-md">{formatDurationNs(entry.duration_ns)}</span>
     {#if tokensPerSecond}
-      <span class="audit-timing mono font-size-md" title={m.audit_tokens_per_second_title()}
+      <span class="audit-token-rate mono" title={m.audit_tokens_per_second_title()}
         >{tokensPerSecond}</span
       >
     {/if}
@@ -364,7 +364,10 @@
     white-space: nowrap;
   }
 
-  .audit-provider-model {
+  /* The token rate shares the provider/model pill so it does not read as
+     part of the plain timestamp and duration text next to it. */
+  .audit-provider-model,
+  .audit-token-rate {
     height: 24px;
     padding: 0 10px;
     display: inline-flex;
@@ -375,6 +378,9 @@
     background: var(--bg-surface);
     color: var(--text-muted);
     white-space: nowrap;
+  }
+
+  .audit-provider-model {
     max-width: 420px;
     overflow: hidden;
     text-overflow: ellipsis;
