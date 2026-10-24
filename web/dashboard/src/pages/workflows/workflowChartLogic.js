@@ -550,7 +550,9 @@ function workflowPrimaryRouteFromEntry(entry, source) {
     // apart; the type is the fallback for entries recorded without a name.
     return {
       provider:
-        String(entry.provider_name || entry.provider || "").trim() || null,
+        String(entry.provider_name || "").trim() ||
+        String(entry.provider || "").trim() ||
+        null,
       model: requestedModel || null,
     };
   }

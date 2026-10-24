@@ -456,6 +456,10 @@ test("workflowAuditChart names the configured provider instance, not its type", 
     workflowAuditChart({ ...entry, provider_name: "" }, null, ALL_CAPS).aiLabel,
     "deepseek",
   );
+  assert.equal(
+    workflowAuditChart({ ...entry, provider_name: "   " }, null, ALL_CAPS).aiLabel,
+    "deepseek",
+  );
 });
 
 test("workflowAuditChart prefers request-time workflow features over current workflow state", () => {

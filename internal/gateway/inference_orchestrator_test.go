@@ -159,6 +159,54 @@ func TestExecuteChatCompletionNamesTheProviderInstance(t *testing.T) {
 	}
 }
 
+func TestExecuteResponsesNamesTheProviderInstance(t *testing.T) {
+	tests := []struct {
+		name         string
+		providerName string
+		wantProvider string
+	}{
+		{name: "configured instance name", providerName: "mockds", wantProvider: "mockds"},
+		{name: "no configured instance name", wantProvider: "deepseek"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := &providerTypeResolverStub{
+				responsesResponse: &core.ResponsesResponse{
+					ID:       "resp-test",
+					Object:   "response",
+					Model:    "deepseek-chat",
+					Provider: "deepseek",
+					Status:   "completed",
+				},
+			}
+			orchestrator := NewInferenceOrchestrator(InferenceConfig{Provider: provider})
+			workflow := &core.Workflow{
+				ProviderType: "deepseek",
+				Resolution: &core.RequestModelResolution{
+					Requested:        core.NewRequestedModelSelector("deepseek/deepseek-chat", ""),
+					ResolvedSelector: core.ModelSelector{Provider: "deepseek", Model: "deepseek-chat"},
+					ProviderType:     "deepseek",
+					ProviderName:     tt.providerName,
+				},
+			}
+
+			result, err := orchestrator.ExecuteResponses(
+				context.Background(),
+				workflow,
+				&core.ResponsesRequest{Model: "deepseek/deepseek-chat"},
+				"req-provider-name",
+				"/v1/responses",
+			)
+			require.NoError(t, err)
+			require.NotNil(t, result.Response)
+			assert.Equal(t, tt.wantProvider, result.Response.Provider, "response provider")
+			assert.Equal(t, "deepseek", result.Meta.ProviderType, "meta provider type must stay the type")
+			assert.Equal(t, tt.providerName, result.Meta.ProviderName, "meta provider name")
+		})
+	}
+}
+
 func TestInferenceOrchestratorLogUsageSkipsWhenWorkflowDisablesUsage(t *testing.T) {
 	logger := &usageCaptureLogger{config: usage.Config{Enabled: true}}
 	orchestrator := NewInferenceOrchestrator(InferenceConfig{UsageLogger: logger})
@@ -257,8 +305,9 @@ func TestQualifyModelWithProviderKeepsAlreadyQualifiedModelIDs(t *testing.T) {
 }
 
 type providerTypeResolverStub struct {
-	providerTypes map[string]string
-	chatResponse  *core.ChatResponse
+	providerTypes     map[string]string
+	chatResponse      *core.ChatResponse
+	responsesResponse *core.ResponsesResponse
 }
 
 func (p *providerTypeResolverStub) ChatCompletion(context.Context, *core.ChatRequest) (*core.ChatResponse, error) {
@@ -274,7 +323,7 @@ func (p *providerTypeResolverStub) ListModels(context.Context) (*core.ModelsResp
 }
 
 func (p *providerTypeResolverStub) Responses(context.Context, *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return nil, nil
+	return p.responsesResponse, nil
 }
 
 func (p *providerTypeResolverStub) StreamResponses(context.Context, *core.ResponsesRequest) (io.ReadCloser, error) {
