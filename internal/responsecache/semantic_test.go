@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/config"
@@ -390,29 +391,53 @@ func TestSemanticCacheMiddleware_NoCacheControlSkip(t *testing.T) {
 }
 
 func TestSemanticCacheMiddleware_HeaderThresholdOverride(t *testing.T) {
-	store := NewMapVecStore()
-	emb := &mockEmbedder{}
+	// Against the cached {1, 0, 0}, near has cosine similarity ~0.9986 and
+	// far ~0.9507; the configured threshold is 0.99.
+	near := []float32{0.95, 0.05, 0}
+	far := []float32{0.95, 0.31, 0}
+	tests := []struct {
+		name      string
+		vector    []float32
+		header    string
+		wantCache string
+	}{
+		{name: "near hits at configured threshold", vector: near, wantCache: CacheHeaderSemantic},
+		{name: "higher header tightens matching", vector: near, header: "0.9999", wantCache: ""},
+		{name: "far misses at configured threshold", vector: far, wantCache: ""},
+		{name: "lower header cannot loosen matching", vector: far, header: "0.50", wantCache: ""},
+		{name: "tiny header cannot loosen matching", vector: far, header: "0.0001", wantCache: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := NewMapVecStore()
+			emb := &mockEmbedder{}
 
-	m := newSemanticCacheMiddleware(emb, store, config.SemanticCacheConfig{
-		SimilarityThreshold:     0.99,
-		TTL:                     new(3600),
-		MaxConversationMessages: new(10),
-	}, nil)
+			m := newSemanticCacheMiddleware(emb, store, config.SemanticCacheConfig{
+				SimilarityThreshold:     0.99,
+				TTL:                     new(3600),
+				MaxConversationMessages: new(10),
+			}, nil)
 
-	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hello"}]}`)
+			body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hello"}]}`)
 
-	emb.vector = []float32{1, 0, 0}
-	serveSemanticRequest(t, m, body, "")
-	m.wg.Wait()
+			emb.vector = []float32{1, 0, 0}
+			serveSemanticRequest(t, m, body, "")
+			m.wg.Wait()
 
-	emb.vector = []float32{0.95, 0.05, 0}
+			emb.vector = tt.vector
 
-	c, rec := echotest.Post(t, "/v1/chat/completions", body, echotest.WithHeader("X-Cache-Semantic-Threshold", "0.50"))
-	err := m.Handle(&echoExchange{c: c}, body, func() error {
-		return c.JSON(http.StatusOK, map[string]string{"r": "1"})
-	})
-	require.NoError(t, err)
-	require.Equal(t, "HIT (semantic)", rec.Header().Get("X-Cache"))
+			var opts []echotest.Option
+			if tt.header != "" {
+				opts = append(opts, echotest.WithHeader("X-Cache-Semantic-Threshold", tt.header))
+			}
+			c, rec := echotest.Post(t, "/v1/chat/completions", body, opts...)
+			err := m.Handle(&echoExchange{c: c}, body, func() error {
+				return c.JSON(http.StatusOK, map[string]string{"r": "1"})
+			})
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantCache, rec.Header().Get("X-Cache"))
+		})
+	}
 }
 
 func TestSemanticCacheMiddleware_TTLExpiry(t *testing.T) {

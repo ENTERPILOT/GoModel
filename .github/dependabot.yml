@@ -5,6 +5,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 3
     labels:
       - "dependencies"
     ignore:
@@ -17,20 +19,35 @@ updates:
           - "*"
 
   - package-ecosystem: "docker"
-    directory: "/"
+    # .oss-scanner holds the image for Anthropic's OSS Scanner; it pins the same Go.
+    directories:
+      - "/"
+      - "/.oss-scanner"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 3
     labels:
       - "dependencies"
+    ignore:
+      # Node stays on the major version CI uses (node-version in .github/workflows).
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
     groups:
       docker:
         patterns:
           - "*"
 
   - package-ecosystem: "github-actions"
-    directory: "/"
+    # "/" covers .github/workflows only; local composite actions are listed
+    # separately or their pinned actions never get updated.
+    directories:
+      - "/"
+      - "/.github/actions/*"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 3
     labels:
       - "dependencies"
     groups:

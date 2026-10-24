@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 )
 
 // SecretResolver resolves the reference part of ${scheme:reference}.
 // Implementations must be safe for concurrent use and must never include the
-// resolved value in an error.
+// resolved value in an error. ResolveSecret must return once ctx is done:
+// each call gets a deadline, and one that ignores it holds up whatever is
+// resolving, such as startup, a reload, or a dashboard save.
 type SecretResolver interface {
 	ResolveSecret(ctx context.Context, reference string) (string, error)
 }
@@ -32,13 +35,20 @@ var ErrUnknownSecretScheme = errors.New("unknown secret scheme")
 type SecretError struct {
 	// Field is the configuration path or environment variable holding the
 	// reference, for example "providers.openai.api_key". It may be empty.
-	Field  string
+	Field string
+	// Scheme is the reference's scheme when GoModel knows it: a built-in
+	// scheme, one an extension registered, or one it has a hint for. It is
+	// empty for any other scheme, whose name is text taken from the value,
+	// which may be a literal secret that only looks like a reference.
 	Scheme string
 	Err    error
 }
 
 func (e *SecretError) Error() string {
-	msg := fmt.Sprintf("secret reference ${%s:...}: %v", e.Scheme, e.Err)
+	msg := fmt.Sprintf("secret reference: %v", e.Err)
+	if e.Scheme != "" {
+		msg = fmt.Sprintf("secret reference ${%s:...}: %v", e.Scheme, e.Err)
+	}
 	if e.Field == "" {
 		return msg
 	}
@@ -53,10 +63,15 @@ var schemeHints = map[string]string{
 	"vault": "the vault scheme is provided by GoModel Pro vaults (extensions.vaults)",
 }
 
+// secretResolveTimeout bounds the resolution of one reference, so a backend
+// that never answers fails that field instead of wedging startup, a reload,
+// or an admin save.
+var secretResolveTimeout = 30 * time.Second
+
 // builtinSecretResolvers are available in every Secrets and cannot be replaced.
 var builtinSecretResolvers = map[string]SecretResolver{
 	"env":  SecretResolverFunc(resolveEnvSecret),
-	"file": SecretResolverFunc(resolveFileSecret),
+	"file": cancellable(resolveFileSecret),
 }
 
 // Secrets resolves ${scheme:reference} secret references for one configuration
@@ -66,6 +81,9 @@ var builtinSecretResolvers = map[string]SecretResolver{
 type Secrets struct {
 	mu        sync.RWMutex
 	resolvers map[string]SecretResolver
+	writer    SecretWriter
+
+	rotation rotation
 }
 
 // NewSecrets returns a Secrets with only the built-in schemes registered.
@@ -115,11 +133,27 @@ func (s *Secrets) Resolve(ctx context.Context, value string) (string, error) {
 }
 
 // resolveField is Resolve for a value found at field. Every resolution goes
-// through here, so per-field bookkeeping has one place to live.
+// through here, so a field that held a reference is recorded for rotation
+// (see Recheck). An empty field is not recorded.
 func (s *Secrets) resolveField(ctx context.Context, field, value string) (string, error) {
-	if !strings.Contains(value, "${") {
-		return value, nil
+	resolved, referenced, err := s.resolveValue(ctx, field, value)
+	if err != nil {
+		return "", err
 	}
+	if referenced {
+		s.record(field, value, resolved)
+	}
+	return resolved, nil
+}
+
+// resolveValue resolves value without recording it, reporting whether it held
+// at least one reference.
+func (s *Secrets) resolveValue(ctx context.Context, field, value string) (string, bool, error) {
+	if !strings.Contains(value, "${") {
+		return value, false, nil
+	}
+	ctx = withSecretField(ctx, field)
+	referenced := false
 	var b strings.Builder
 	b.Grow(len(value))
 	for rest := value; rest != ""; {
@@ -150,11 +184,12 @@ func (s *Secrets) resolveField(ctx context.Context, field, value string) (string
 		}
 		resolved, err := s.resolveReference(ctx, scheme, reference)
 		if err != nil {
-			return "", &SecretError{Field: field, Scheme: scheme, Err: err}
+			return "", false, &SecretError{Field: field, Scheme: s.schemeName(scheme), Err: err}
 		}
+		referenced = true
 		b.WriteString(resolved)
 	}
-	return b.String(), nil
+	return b.String(), referenced, nil
 }
 
 func (s *Secrets) resolveReference(ctx context.Context, scheme, reference string) (string, error) {
@@ -165,15 +200,74 @@ func (s *Secrets) resolveReference(ctx context.Context, scheme, reference string
 		s.mu.RUnlock()
 	}
 	if !ok {
-		if hint, found := schemeHints[scheme]; found {
-			return "", fmt.Errorf("%w %q: %s", ErrUnknownSecretScheme, scheme, hint)
+		// The hint's own key is quoted rather than scheme: see schemeName.
+		for name, hint := range schemeHints {
+			if name == scheme {
+				return "", fmt.Errorf("%w %q: %s", ErrUnknownSecretScheme, name, hint)
+			}
 		}
-		return "", fmt.Errorf("%w %q: the built-in schemes are env and file; other schemes are registered by extensions", ErrUnknownSecretScheme, scheme)
+		return "", fmt.Errorf("%w: the built-in schemes are env and file; other schemes are registered by extensions", ErrUnknownSecretScheme)
 	}
+	ctx, cancel := context.WithTimeout(ctx, secretResolveTimeout)
+	defer cancel()
+	return r.ResolveSecret(ctx, reference)
+}
+
+// schemeName returns scheme as GoModel names it: a built-in scheme, one
+// registered with s, or one schemeHints describes. Any other scheme returns
+// "": its name is text cut from a configured value, which may be a literal
+// secret that only looks like a reference, so errors never repeat it.
+func (s *Secrets) schemeName(scheme string) string {
+	for name := range builtinSecretResolvers {
+		if name == scheme {
+			return name
+		}
+	}
+	for name := range schemeHints {
+		if name == scheme {
+			return name
+		}
+	}
+	if s == nil {
+		return ""
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for name := range s.resolvers {
+		if name == scheme {
+			return name
+		}
+	}
+	return ""
+}
+
+type secretFieldKey struct{}
+
+// SecretFieldFromContext returns the field a SecretResolver is resolving
+// for, as passed to ResolveSecret: a configuration path such as
+// "server.master_key", "extensions.vaults.token", or
+// "providers.openai.api_keys[1]". A provider API key set by an environment
+// variable is named by the variable ("OPENAI_API_KEY_2"); other provider
+// values an environment variable set are named by the provider field. Field
+// labels are not secret, so resolvers may log them for audit. The boolean is
+// false for an anonymous Resolve.
+func SecretFieldFromContext(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	field, ok := ctx.Value(secretFieldKey{}).(string)
+	return field, ok
+}
+
+// withSecretField returns the context resolvers are called with.
+func withSecretField(ctx context.Context, field string) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return r.ResolveSecret(ctx, reference)
+	if field == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, secretFieldKey{}, field)
 }
 
 // HasSecretReference reports whether value contains at least one secret

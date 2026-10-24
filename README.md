@@ -47,6 +47,14 @@
 
 **Step 1:** Install and start GoModel
 
+**Docker**
+
+```bash
+docker run --rm -p 8080:8080 \
+  -v gomodel_data:/app/data \
+  enterpilot/gomodel
+```
+
 **macOS / Linux**
 
 ```bash
@@ -63,19 +71,11 @@ irm https://gomodel.enterpilot.io/install.ps1 | iex
 gomodel
 ```
 
-**Docker**
-
-```bash
-docker run --rm -p 8080:8080 \
-  -e OPENAI_API_KEY="your-openai-key" \
-  enterpilot/gomodel
-```
-
 ℹ️ Configure GoModel with `.env`, a `config.yaml` file, or manage the most important settings directly in the dashboard.
 
 ℹ️ See [`.env.template`](./.env.template) for the complete list of environment variables, including all available providers.
 
-**Step 2:** Open the dashboard
+**Step 2:** Open the dashboard and add a provider
 
 ```text
 http://localhost:8080/admin/dashboard
@@ -133,7 +133,7 @@ The official SDKs therefore work unchanged. Configure their base URLs as follows
 - Amazon Bedrock Runtime and Bedrock Mantle
 - ChatGPT (the Codex backend) and Claude
 - ElevenLabs (text-to-speech and speech-to-text)
-- Jev (TypeSafe System One decision API) and self-hosted Kev
+- Jev (TypeSafe System One decision API) and self-hosted Kev, also behind OpenAI's Decisions API
 - All OpenAI-compatible providers
 
 See the [Providers Overview](https://gomodel.enterpilot.io/docs/providers/overview?utm_source=readme) for the full

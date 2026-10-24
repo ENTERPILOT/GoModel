@@ -9,7 +9,9 @@ keywords: ["System One", "systemone", "Jev", "Kev", "TypeSafe", "decision model"
 `state` (the text or record to evaluate) and a map of typed questions, and the
 answer is a calibrated probability per question. It is a decision API, not a
 text generator, so GoModel forwards it **natively** and never translates it to
-or from chat.
+or from chat. To reach the same models with OpenAI's request and answer
+shapes, use the [Decisions API](/advanced/decisions-api), which GoModel
+translates to System One.
 
 The endpoint is available once a [`jev` provider](/providers/jev) (hosted Jev
 or a self-hosted Kev server) or an `openrouter` provider is configured. Without
@@ -81,7 +83,32 @@ returns its own `404` for them.
    guardrail edited it) changed. Questions, criteria, and every other field
    reach the provider byte for byte.
 5. Relays the answer unchanged and records it in the audit log (request type
-   **System One**) and in usage.
+   **Decisions**) and in usage.
+
+## Images
+
+TypeSafe's [image](https://docs.typesafe.ai/images) requests work as sent:
+`assets` in the JSON body, or TypeSafe's `multipart/form-data` form, with the
+JSON request as the first part, named `request`, and each image as a file part
+an asset names with `part`. The TypeSafe SDKs send that form for `Image`
+objects. GoModel inlines each image part into its asset as `data_base64` and
+forwards one JSON request, so guardrails, the cache, and failover handle both
+forms the same way. The image must be a PNG or JPEG; the asset's `format` is
+kept when it states one, and otherwise comes from the image's bytes. A form
+TypeSafe would reject, such as a part no asset uses, an asset naming a
+missing part, or an image that is not a PNG or JPEG, returns `400`. Send the
+`TypeSafe-Danger-Zone-Images: true` header as TypeSafe requires; the gateway
+forwards it. Kev servers read text only.
+
+```bash
+curl -s http://localhost:8080/v1/systemone \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "TypeSafe-Danger-Zone-Images: true" \
+  -F 'request={"model": "jev-latest", "state": {"door": "ref-door"},
+    "assets": {"ref-door": {"type": "image", "part": "door-photo"}},
+    "questions": {"person": {"type": "noul", "instructions": "Is there a person in `door`?"}}};type=application/json' \
+  -F 'door-photo=@door.png;type=image/png'
+```
 
 ## Models
 
@@ -156,6 +183,11 @@ warning per kind of dropped edit, then logs repeats at debug level. A
 guardrail that would answer the request itself blocks it instead, since System
 One callers expect typed answers, not text.
 
+Only the prompt phase applies. The answer is typed values, not a completion,
+so response and stream phase guardrails do not run on it and it is relayed
+unchanged; a workflow that selects them for a System One request logs one
+warning per guardrail.
+
 ## Errors and misuse
 
 The endpoint never translates, and it says so when a request cannot work:
@@ -165,14 +197,14 @@ The endpoint never translates, and it says so when a request cannot work:
 | No `jev` or `openrouter` provider configured | `404` |
 | `model` missing | `400` |
 | Model on a provider without System One, or a chat, embedding, or other generation model (including through a virtual model) | `400 invalid_request_error` explaining why; the gateway logs a warning |
-| A System One model sent to `/v1/chat/completions`, `/v1/responses`, or `/v1/embeddings` | `400 invalid_request_error` pointing at `/v1/systemone` |
+| A System One model sent to `/v1/chat/completions`, `/v1/responses`, or `/v1/embeddings` | `400 invalid_request_error` pointing at `/v1/decisions` and `/v1/systemone` |
 | Upstream error, such as a malformed question | The provider's status, with its message |
 
 ## Audit, usage, and cost
 
 Each call is an audit entry under its route, with the requested and resolved
 model, provider, request and response bodies, guardrail outcomes, and failover
-attempts; filter the audit log by the **System One** request type. Usage
+attempts; filter the audit log by the **Decisions** request type. Usage
 records the answer's `input_tokens` and `output_tokens` under the model that
 answered. OpenRouter reports its own `usage.cost`, which is recorded as the
 request's cost; for hosted Jev, declare pricing on the provider (see

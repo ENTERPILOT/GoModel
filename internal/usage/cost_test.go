@@ -106,6 +106,69 @@ func TestCalculateGranularCost_Anthropic_CacheTokens(t *testing.T) {
 	assertCostNear(t, "OutputCost", result.OutputCost, 1.5)
 }
 
+func TestCalculateGranularCost_Anthropic_CacheWriteTTL(t *testing.T) {
+	tests := []struct {
+		name      string
+		rate1h    *float64
+		rawData   map[string]any
+		wantInput float64
+	}{
+		{
+			name:    "no ttl split prices every write at the 5m rate",
+			rate1h:  new(8.0),
+			rawData: map[string]any{"cache_creation_input_tokens": 19_743},
+			// 2 * 4/1M + 19,743 * 5/1M
+			wantInput: 0.098723,
+		},
+		{
+			name:   "1h writes priced at the 1h rate",
+			rate1h: new(8.0),
+			rawData: map[string]any{
+				"cache_creation_input_tokens":              19_743,
+				"cache_creation_ephemeral_1h_input_tokens": 19_743,
+			},
+			// 2 * 4/1M + 19,743 * 8/1M
+			wantInput: 0.157952,
+		},
+		{
+			name:   "mixed ttl writes priced at their own rates",
+			rate1h: new(8.0),
+			rawData: map[string]any{
+				"cache_creation_input_tokens":              300_000,
+				"cache_creation_ephemeral_5m_input_tokens": 100_000,
+				"cache_creation_ephemeral_1h_input_tokens": 200_000,
+			},
+			// 2 * 4/1M + 100k * 5/1M + 200k * 8/1M
+			wantInput: 2.100008,
+		},
+		{
+			name: "missing 1h rate falls back to the 5m rate",
+			rawData: map[string]any{
+				"cache_creation_input_tokens":              19_743,
+				"cache_creation_ephemeral_1h_input_tokens": 19_743,
+			},
+			wantInput: 0.098723,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pricing := &core.ModelPricing{
+				InputPerMtok:        new(4.0),
+				OutputPerMtok:       new(20.0),
+				CacheWritePerMtok:   new(5.0),
+				CacheWrite1hPerMtok: tt.rate1h,
+			}
+
+			result := CalculateGranularCost(2, 252, tt.rawData, "anthropic", pricing)
+
+			assertCostNear(t, "InputCost", result.InputCost, tt.wantInput)
+			assertCostNear(t, "OutputCost", result.OutputCost, 0.00504)
+			require.Empty(t, result.Caveat)
+		})
+	}
+}
+
 func TestCalculateGranularCost_Anthropic_ThinkingTokens(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -123,15 +186,17 @@ func TestCalculateGranularCost_Anthropic_ThinkingTokens(t *testing.T) {
 				OutputPerMtok:          new(15.0),
 				ReasoningOutputPerMtok: tt.reasoningRate,
 			}
-			rawData := map[string]any{
-				"completion_reasoning_tokens": 20_000,
+			// The translated paths record completion_reasoning_tokens; native
+			// Messages streams record completion_thinking_tokens.
+			for _, key := range []string{"completion_reasoning_tokens", "completion_thinking_tokens"} {
+				rawData := map[string]any{key: 20_000}
+
+				result := CalculateGranularCost(200_000, 100_000, rawData, "anthropic", pricing)
+
+				assertCostNear(t, "InputCost", result.InputCost, 0.6)
+				assertCostNear(t, "OutputCost", result.OutputCost, tt.wantOutput)
+				require.Empty(t, result.Caveat, key)
 			}
-
-			result := CalculateGranularCost(200_000, 100_000, rawData, "anthropic", pricing)
-
-			assertCostNear(t, "InputCost", result.InputCost, 0.6)
-			assertCostNear(t, "OutputCost", result.OutputCost, tt.wantOutput)
-			require.Empty(t, result.Caveat)
 		})
 	}
 }

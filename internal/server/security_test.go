@@ -253,15 +253,15 @@ func TestMetricsEndpointPathTraversal(t *testing.T) {
 	mock := &mockProvider{}
 
 	t.Run("path traversal is normalized", func(t *testing.T) {
-		// /foo/../admin normalizes to /admin
+		// /foo/../monitoring normalizes to /monitoring
 		srv := New(mock, &Config{
 			MasterKey:       "secret",
 			MetricsEnabled:  true,
-			MetricsEndpoint: "/foo/../admin",
+			MetricsEndpoint: "/foo/../monitoring",
 		})
 
-		// Normalized path /admin should serve metrics
-		req := httptest.NewRequest(http.MethodGet, "/admin", nil)
+		// Normalized path /monitoring should serve metrics
+		req := httptest.NewRequest(http.MethodGet, "/monitoring", nil)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 

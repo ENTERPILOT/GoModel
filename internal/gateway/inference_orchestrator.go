@@ -17,6 +17,13 @@ type RouteGate interface {
 	RouteAvailable(providerName, model string) bool
 }
 
+// BudgetGate reports whether a provider still has budget left. Failover uses
+// it to skip targets whose provider budget is exhausted; admission at the
+// handler layer stays the authoritative check for the primary route.
+type BudgetGate interface {
+	ProviderWithinBudget(ctx context.Context, providerName string) bool
+}
+
 // InferenceConfig configures translated inference orchestration.
 type InferenceConfig struct {
 	Provider                 core.RoutableProvider
@@ -31,6 +38,7 @@ type InferenceConfig struct {
 	UsageLogger              usage.LoggerInterface
 	PricingResolver          usage.PricingResolver
 	RouteGate                RouteGate
+	BudgetGate               BudgetGate
 	GuardrailsHash           string
 }
 
@@ -49,6 +57,7 @@ type InferenceOrchestrator struct {
 	usageLogger              usage.LoggerInterface
 	pricingResolver          usage.PricingResolver
 	routeGate                RouteGate
+	budgetGate               BudgetGate
 	guardrailsHash           string
 }
 
@@ -67,6 +76,7 @@ func NewInferenceOrchestrator(cfg InferenceConfig) *InferenceOrchestrator {
 		usageLogger:              cfg.UsageLogger,
 		pricingResolver:          cfg.PricingResolver,
 		routeGate:                cfg.RouteGate,
+		budgetGate:               cfg.BudgetGate,
 		guardrailsHash:           cfg.GuardrailsHash,
 	}
 }

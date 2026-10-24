@@ -75,6 +75,21 @@ func TestEstimateInputTokens_Overheads(t *testing.T) {
 	assert.GreaterOrEqual(t, withTool-plain, 300)
 }
 
+// A replayed server-side tool search counts its search as well as its result.
+func TestEstimateInputTokens_ServerToolSearch(t *testing.T) {
+	turn := func(search string) string {
+		return `{"model":"m","max_tokens":1,"messages":[
+			{"role":"user","content":"hi"},
+			{"role":"assistant","content":[` + search + `
+				{"type":"tool_search_tool_result","tool_use_id":"s","content":{"type":"tool_search_tool_search_result","tool_references":[{"type":"tool_reference","tool_name":"get_weather"}]}}
+			]},
+			{"role":"user","content":"ok"}]}`
+	}
+	without := estimateFor(t, turn(""))
+	with := estimateFor(t, turn(`{"type":"server_tool_use","id":"s","name":"tool_search_tool_bm25","input":{"query":"weather forecast for the city of Paris"}},`))
+	assert.Greater(t, with, without)
+}
+
 // An image costs (width × height) / 750 tokens. Dimensions come from the
 // encoded header; an image that cannot be measured is charged the largest
 // size Anthropic keeps, so the estimate errs toward not fitting rather than

@@ -65,6 +65,26 @@ func (s *SQLStore) SetDefault(ctx context.Context, key, value string) (string, e
 	return stored, nil
 }
 
+// Replace updates key to value only while it still holds old, then reads
+// back the winner. The conditional UPDATE is atomic in both SQLite and
+// PostgreSQL, so of two instances replacing the same old value only one does.
+func (s *SQLStore) Replace(ctx context.Context, key, old, value string) (string, error) {
+	_, err := s.db.Exec(ctx, `
+		UPDATE runtime_settings SET value = ?, updated_at = ? WHERE key = ? AND value = ?
+	`, value, time.Now().Unix(), key, old)
+	if err != nil {
+		return "", fmt.Errorf("replace runtime setting %q: %w", key, err)
+	}
+	stored, found, err := s.Get(ctx, key)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", fmt.Errorf("replace runtime setting %q: value missing", key)
+	}
+	return stored, nil
+}
+
 // Set upserts a persisted value.
 func (s *SQLStore) Set(ctx context.Context, key, value string) error {
 	_, err := s.db.Exec(ctx, `

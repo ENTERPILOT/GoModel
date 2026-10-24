@@ -262,6 +262,32 @@ func TestMetricsEndpointDoesNotCollideWithPprof(t *testing.T) {
 	require.NotContains(t, pprofRec.Body.String(), "# HELP go_")
 }
 
+// The metrics path skips authentication, so a metrics endpoint inside an
+// authenticated route tree must not open that route to anonymous callers.
+func TestMetricsEndpointDoesNotOpenAuthenticatedRoutes(t *testing.T) {
+	for _, endpoint := range []string{"/admin/access", "/mcp"} {
+		t.Run(endpoint, func(t *testing.T) {
+			srv := New(&mockProvider{}, &Config{
+				MasterKey:             "master",
+				MetricsEnabled:        true,
+				MetricsEndpoint:       endpoint,
+				AdminEndpointsEnabled: true,
+				AdminHandler:          admin.NewHandler(nil, nil),
+			})
+
+			req := httptest.NewRequest(http.MethodGet, endpoint, nil)
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+			assert.Equal(t, http.StatusUnauthorized, rec.Code)
+
+			metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+			metricsRec := httptest.NewRecorder()
+			srv.ServeHTTP(metricsRec, metricsReq)
+			assert.Equal(t, http.StatusOK, metricsRec.Code)
+		})
+	}
+}
+
 func TestOuterMiddlewarePanicIsRecovered(t *testing.T) {
 	srv := New(&mockProvider{}, &Config{
 		OuterMiddleware: []echo.MiddlewareFunc{

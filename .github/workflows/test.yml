@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: "1.27.1"
+  GO_VERSION: "1.27.3"
   # Pull requests run the suites in -short mode: it skips the plugin fixture
   # builds (`go build -buildmode=plugin` of the whole gateway) and the e2e
   # shared-object round trip, which together cost about a minute of runner
@@ -35,15 +35,22 @@ jobs:
           # the token in .git/config exposes it to everything that runs
           # afterwards, npm install scripts included.
           persist-credentials: false
+      # Type-checking reads the Go build cache. setup-go's own cache only
+      # saves on a go.sum change, so it went stale and every run rebuilt most
+      # packages; go-cache keeps it current.
+      - name: Restore Go caches
+        uses: ./.github/actions/go-cache
+        with:
+          key: lint
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: true
+          cache: false
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
-          # v2.13+ supports Go 1.27 and bundles a compatible staticcheck.
-          version: v2.13.1
+          # v2.14+ reads Go 1.27.3 export data and bundles a compatible staticcheck.
+          version: v2.14.0
           # The shared analysis cache went bad once (2026-08-25: staticcheck
           # lost t.Fatal no-return facts and flagged SA5011 false positives in
           # untouched files). Rotating the cache key daily bounds how long a
@@ -70,7 +77,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: '22.23.2'
 
@@ -89,7 +96,7 @@ jobs:
         run: cd web/dashboard && npm run build
 
       - name: Upload dashboard build
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dashboard-dist
           path: internal/admin/dashboard/static/dist
@@ -97,8 +104,10 @@ jobs:
           retention-days: 1
 
   # One job for the whole unit suite plus the contract replay suite (an
-  # in-memory suite behind a build tag). PostgreSQL is a service container and
-  # MongoDB a replica set from tools/ci/mongo-replset.sh; without them
+  # in-memory suite behind a build tag). PostgreSQL comes from
+  # tools/ci/postgres.sh and MongoDB, a replica set, from
+  # tools/ci/mongo-replset.sh; both pull through tools/ci/pull-image.sh, which
+  # tries mirror.gcr.io, then ECR Public, then Docker Hub. Without them
   # GOMODEL_TEST_POSTGRES_URL and MONGO_TEST_DSN are unset, every PostgreSQL
   # and MongoDB subtest skips, and CI stays green while covering only SQLite.
   # Pull requests run without the race detector; pushes to main run under
@@ -106,22 +115,6 @@ jobs:
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        # Mirrors Docker Hub's official image. Anonymous pulls of
-        # registry-1.docker.io intermittently time out on GitHub runners.
-        image: public.ecr.aws/docker/library/postgres:18-alpine
-        env:
-          POSTGRES_USER: gomodel
-          POSTGRES_PASSWORD: gomodel
-          POSTGRES_DB: gomodel
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U gomodel -d gomodel"
-          --health-interval 2s
-          --health-timeout 5s
-          --health-retries 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -129,6 +122,9 @@ jobs:
 
       - name: Start MongoDB
         run: sh tools/ci/mongo-replset.sh start
+
+      - name: Start PostgreSQL
+        run: sh tools/ci/postgres.sh start
 
       - name: Restore Go caches
         uses: ./.github/actions/go-cache
@@ -146,6 +142,9 @@ jobs:
 
       - name: Wait for MongoDB
         run: sh tools/ci/mongo-replset.sh wait
+
+      - name: Wait for PostgreSQL
+        run: sh tools/ci/postgres.sh wait
 
       - name: Run tests
         run: >-
@@ -191,33 +190,26 @@ jobs:
       - name: Run tests
         run: go test ${{ env.GO_TEST_SHORT }} -tags=e2e -timeout=5m ./tests/e2e/...
 
-  # MongoDB still comes from TestMain, which starts it as a replica set — a
-  # service container cannot be one. PostgreSQL is a service container, so the
-  # runner pulls and starts it while the suite compiles rather than after;
+  # MongoDB still comes from TestMain, which starts it as a replica set and
+  # pulls it with the same registry failover as tools/ci/pull-image.sh.
+  # PostgreSQL is started before the suite compiles rather than after;
   # GOMODEL_INTEGRATION_POSTGRES_URL tells TestMain to use it.
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        # The version TestMain starts locally, from the ECR Public mirror of
-        # Docker Hub's official image.
-        image: public.ecr.aws/docker/library/postgres:16-alpine
-        env:
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: gomodel_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U test -d gomodel_test"
-          --health-interval 2s
-          --health-timeout 5s
-          --health-retries 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+
+      - name: Start PostgreSQL
+        run: sh tools/ci/postgres.sh start
+        env:
+          # The version TestMain starts locally.
+          POSTGRES_IMAGE: postgres:16-alpine
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: gomodel_test
 
       - name: Restore Go caches
         uses: ./.github/actions/go-cache
@@ -232,6 +224,12 @@ jobs:
 
       - name: Stub the dashboard bundle
         run: make frontend-stub
+
+      - name: Wait for PostgreSQL
+        run: sh tools/ci/postgres.sh wait
+        env:
+          POSTGRES_USER: test
+          POSTGRES_DB: gomodel_test
 
       - name: Run tests
         run: go test -tags=integration -timeout=10m ./tests/integration/...
@@ -322,7 +320,7 @@ jobs:
 
       - name: Setup Node.js
         if: steps.changes.outputs.docs == 'true'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: '22'
 
@@ -344,7 +342,7 @@ jobs:
           persist-credentials: false
 
       - name: Download dashboard build
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: dashboard-dist
           path: internal/admin/dashboard/static/dist

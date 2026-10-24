@@ -200,12 +200,12 @@ func TestFoldUsageCacheRowsScansNullableColumns(t *testing.T) {
 	// SQLite as stored text.
 	monday := time.Date(2026, 8, 24, 12, 30, 0, 0, time.UTC)
 	rows := &fakePgxRows{rows: [][]any{
-		// model, provider, provider_name, user_path, labels, cache_type, input, output, raw_data, timestamp
-		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), str(`["prod","batch"]`), nil, 100, 20, str(`{"prompt_cached_tokens": 60}`), monday},
-		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), nil, str(CacheTypeExact), 100, 20, nil, "2026-08-24T12:31:00Z"},
-		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), nil, nil, 50, 20, str(`{"prompt_cached_tokens": 10}`), "2026-08-29T08:00:00Z"},
-		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), nil, nil, 30, 20, str(`{"prompt_cached_tokens": 5}`), "not a timestamp"},
-		{"gpt-4o", "openai", nil, nil, nil, nil, 40, 10, nil, nil},
+		// model, provider, provider_name, user_path, endpoint, labels, cache_type, input, output, raw_data, timestamp
+		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), str("/v1/chat/completions"), str(`["prod","batch"]`), nil, 100, 20, str(`{"prompt_cached_tokens": 60}`), monday},
+		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), str("/v1/chat/completions"), nil, str(CacheTypeExact), 100, 20, nil, "2026-08-24T12:31:00Z"},
+		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), str("/v1/chat/completions"), nil, nil, 50, 20, str(`{"prompt_cached_tokens": 10}`), "2026-08-29T08:00:00Z"},
+		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), str("/v1/chat/completions"), nil, nil, 30, 20, str(`{"prompt_cached_tokens": 5}`), "not a timestamp"},
+		{"gpt-4o", "openai", nil, nil, nil, nil, nil, 40, 10, nil, nil},
 	}}
 
 	stats, err := foldUsageCacheRows(rows, modelGroupKeys)
@@ -235,7 +235,7 @@ func TestFoldUsageCacheRowsScansNullableColumns(t *testing.T) {
 
 	// The same rows folded per label: only the labelled row contributes.
 	labelRows := &fakePgxRows{rows: [][]any{
-		{"gpt-5", "openai", nil, nil, str(`["prod","batch"]`), nil, 100, 20, str(`{"prompt_cached_tokens": 60}`), nil},
+		{"gpt-5", "openai", nil, nil, nil, str(`["prod","batch"]`), nil, 100, 20, str(`{"prompt_cached_tokens": 60}`), nil},
 	}}
 	labelStats, err := foldUsageCacheRows(labelRows, labelGroupKeys)
 	require.NoError(t, err)
