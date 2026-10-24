@@ -206,7 +206,7 @@ func NewService(ctx context.Context, opts Options) (*Service, error) {
 	}
 	go s.sweepBindings()
 	if opts.RefreshInterval > 0 && (s.store != nil || s.virtualStore != nil) {
-		go s.refreshLoop(opts.RefreshInterval)
+		go s.refreshLoop(opts.RefreshInterval) //nolint:gosec // Runs for the service lifetime, not the constructor call.
 	}
 	return s, nil
 }

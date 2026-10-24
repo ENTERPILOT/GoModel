@@ -8,11 +8,9 @@
 // `param` of a validation error, which is what lets a server-side rejection
 // land on the input that caused it.
 
-import { splitCommaList } from "../../lib/utils/format.js";
 import { hasSecretReference } from "../../lib/utils/secretReference.js";
 import * as m from "../../lib/paraglide/messages.js";
-
-export { splitCommaList };
+import { modelRowsToList, modelsToRows } from "./providerModels.js";
 
 // Field names, mirroring internal/providers/credential_schema.go.
 export const FIELD_API_KEYS = "api_keys";
@@ -122,8 +120,7 @@ function providerCredentialFields() {
     },
     [FIELD_MODELS]: {
       label: m.providers_models_field(),
-      control: "text",
-      placeholder: "gpt-4o, gpt-4o-mini",
+      control: "models",
       hint: m.providers_models_hint(),
     },
   };
@@ -167,7 +164,7 @@ export function defaultProviderCredentialForm() {
     service_account_json_base64: "",
     gcp_scope: "",
     proxy_url: "",
-    models: "",
+    models: [],
     enabled: true,
   };
 }
@@ -376,7 +373,7 @@ export function providerCredentialRowToForm(row) {
     ),
     gcp_scope: String((row && row.gcp_scope) || ""),
     proxy_url: String((row && row.proxy_url) || ""),
-    models: (Array.isArray(row && row.models) ? row.models : []).join(", "),
+    models: modelsToRows(row && row.models),
     enabled: !row || row.enabled !== false,
   };
 }
@@ -436,6 +433,12 @@ function validateProviderCredentialField(form, field) {
     }
     if (keys.some((value) => !value.trim())) {
       return m.providers_key_blank();
+    }
+    return "";
+  }
+  if (field.name === FIELD_MODELS) {
+    if (field.required && modelRowsToList(form && form.models).length === 0) {
+      return m.providers_field_required({ field: field.label });
     }
     return "";
   }
@@ -521,7 +524,7 @@ function providerCredentialPayloadValue(form, name) {
     case FIELD_API_KEYS:
       return providerCredentialKeyRowsToArray(form && form.api_keys);
     case FIELD_MODELS:
-      return splitCommaList(form && form.models);
+      return modelRowsToList(form && form.models);
     case FIELD_SESSION_STICKY_KEYS:
       return Boolean(form && form.session_sticky_keys);
     // Raw JSON must survive verbatim: trimming would still parse, but the

@@ -12,6 +12,7 @@
   import { router } from "$lib/stores/router.svelte.js";
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { formatNumber } from "$lib/utils/format.js";
+  import { virtualModels } from "../models/virtualModels.svelte.js";
   import { providerStatusState } from "./overviewState.svelte.js";
   import ProviderStatusCardDetails from "./ProviderStatusCardDetails.svelte";
   import {
@@ -33,7 +34,8 @@
   // The models count links to the Models page filtered to this provider. A
   // real href keeps open-in-new-tab working (unfiltered there); a normal
   // click routes in-app with the filter applied. The filter is text, so the
-  // category is reset to "all" first: switching categories clears it.
+  // category is reset to "all" first: switching categories clears it. An
+  // earlier status choice is cleared too, so all of the provider's models show.
   const modelsHref = gomodelPath("/admin/dashboard/models");
   function openProviderModels(event) {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
@@ -42,6 +44,7 @@
       modelsStore.selectCategory("all");
     }
     modelsStore.filter = provider.name;
+    virtualModels.statusFilter = "all";
     router.navigate("models");
   }
 </script>

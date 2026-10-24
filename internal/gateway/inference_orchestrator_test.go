@@ -105,6 +105,7 @@ func TestExecuteChatCompletionPricesRequestedModelWhenResponseModelIsVersioned(t
 
 	entry := logger.entries[0]
 	require.Equal(t, "gpt-4o-mini-2024-07-18", entry.Model)
+	assert.Equal(t, "gpt-4o-mini", entry.RoutedModel, "markups select on the routed model")
 	require.NotNil(t, entry.TotalCost)
 	require.LessOrEqual(t, math.Abs(*entry.TotalCost-perRequest), 0.0000001, "total cost = %v, want %f", entry.TotalCost, perRequest)
 }
