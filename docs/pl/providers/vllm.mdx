@@ -1,0 +1,181 @@
+---
+title: "vLLM"
+description: "Kieruj kompatybilne z OpenAI requesty GoModel do jednego lub wielu serwerów vLLM, w tym z ID modeli Hugging Face zawierającymi ukośniki."
+icon: "server"
+keywords: ["vLLM", "self-hosted", "modele Hugging Face", "Hugging Face models", "serwer kompatybilny z OpenAI", "OpenAI-compatible server"]
+---
+
+GoModel komunikuje się z vLLM przez jego kompatybilny z OpenAI serwer HTTP. ID modeli
+Hugging Face z ukośnikami (np. `meta-llama/Llama-3.1-8B-Instruct`) działają — GoModel
+dzieli selektory z kwalifikatorem providera tylko na pierwszym ukośniku.
+
+Najpierw uruchom vLLM:
+
+```bash
+vllm serve meta-llama/Llama-3.1-8B-Instruct
+# dodaj --api-key token-abc123, jeśli vLLM ma wymagać uwierzytelniania bearer
+```
+
+## Konfiguracja
+
+```bash
+VLLM_BASE_URL=http://host.docker.internal:8000/v1   # uwzględnij /v1
+# VLLM_API_KEY=token-abc123                         # tylko jeśli vLLM uruchomiono z --api-key
+GOMODEL_MASTER_KEY=change-me
+```
+
+<Note>
+  Te przykłady zakładają, że GoModel działa w Dockerze, a vLLM na hoście pod adresem
+  `localhost:8000` — stąd `host.docker.internal`. Jeśli oba działają w tej samej
+  sieci Docker, użyj nazwy usługi vLLM. Jeśli GoModel działa bezpośrednio
+  na hoście, użyj `http://localhost:8000/v1`.
+</Note>
+
+## Uruchom GoModel
+
+<CodeGroup>
+
+```bash Docker (plik .env)
+docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
+```
+
+```bash Docker (inline -e)
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e VLLM_BASE_URL="http://host.docker.internal:8000/v1" \
+  enterpilot/gomodel
+```
+
+```bash Binary (make build)
+make build
+./bin/gomodel
+```
+
+</CodeGroup>
+
+## Weryfikacja
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "vllm/meta-llama/Llama-3.1-8B-Instruct",
+    "messages": [{"role": "user", "content": "Reply with exactly ok."}]
+  }'
+```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="change-me")
+
+completion = client.chat.completions.create(
+    model="vllm/meta-llama/Llama-3.1-8B-Instruct",
+    messages=[{"role": "user", "content": "Reply with exactly ok."}],
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "change-me",
+});
+
+const completion = await client.chat.completions.create({
+  model: "vllm/meta-llama/Llama-3.1-8B-Instruct",
+  messages: [{ role: "user", content: "Reply with exactly ok." }],
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
+
+`GET /v1/models` zwraca ID modeli vLLM poprzedzone nazwą providera, np.
+`vllm/meta-llama/Llama-3.1-8B-Instruct`.
+
+## Wiele instancji vLLM
+
+Użyj zmiennych środowiskowych z sufiksem, aby zarejestrować więcej niż jedną instancję bez YAML:
+
+```bash
+VLLM_BASE_URL=http://host.docker.internal:8000/v1
+VLLM_TEST_BASE_URL=http://host.docker.internal:8001/v1
+```
+
+`VLLM_BASE_URL` rejestruje `vllm`. `VLLM_TEST_BASE_URL` rejestruje `vllm-test`
+(sufiks jest zamieniany na małe litery, a podkreślenia na myślniki).
+
+## Passthrough vLLM
+
+Passthrough jest domyślnie włączony. Używaj go do endpointów specyficznych dla vLLM, takich jak
+`/tokenize`, `/detokenize`, `/pooling`, `/rerank`:
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/p/vllm/tokenize \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "meta-llama/Llama-3.1-8B-Instruct", "prompt": "Hello"}'
+```
+
+```python Python
+import httpx
+
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="change-me")
+tokens = client.post(
+    "/p/vllm/tokenize",
+    cast_to=httpx.Response,
+    body={
+        "model": "meta-llama/Llama-3.1-8B-Instruct",
+        "prompt": "Hello",
+    },
+)
+
+print(tokens.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "change-me",
+});
+
+const tokens = await client.post("/p/vllm/tokenize", {
+  body: {
+    model: "meta-llama/Llama-3.1-8B-Instruct",
+    prompt: "Hello",
+  },
+});
+
+console.log(tokens);
+```
+
+</CodeGroup>
+
+GoModel usuwa nagłówki uwierzytelniające klienta przed przekazaniem requestu i, jeśli jest skonfigurowany,
+dodaje `VLLM_API_KEY` do requestów do upstreamu.
+
+<Note>
+  Trasy passthrough są ograniczone do typu providera i dostępne pod `/p/vllm/...`. Aby skierować request
+  do jednej nazwanej instancji w konfiguracji z wieloma vLLM, użyj requestów `/v1/...` z translacją
+  i ID modeli z kwalifikatorem providera (np. `vllm-test/meta-llama/Llama-3.1-8B-Instruct`).
+</Note>
+
+## Jeszcze niezintegrowane
+
+- Natywne API batchy vLLM.
+- Kompatybilny z OpenAI cykl życia plików.
+- Endpointy pomocnicze cyklu życia Responses.

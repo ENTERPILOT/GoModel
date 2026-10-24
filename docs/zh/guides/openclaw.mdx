@@ -1,0 +1,155 @@
+---
+title: "GoModel 与 OpenClaw"
+description: "将 GoModel 用作 OpenClaw 的兼容 OpenAI 的 AI 网关，包括推荐的 OpenAI 模型和可用于生产环境的配置。"
+icon: "paw-print"
+keywords: ["OpenClaw", "兼容 OpenAI 的网关", "OpenAI-compatible gateway", "AI 网关", "配置指南", "setup guide"]
+---
+
+## 概览
+
+GoModel 是一个适用于 OpenClaw 的兼容 OpenAI 的 **AI 网关**。它为您提供一个稳定的 API 端点，同时将请求路由到 OpenAI 及其他提供商。这样可以让 OpenClaw 的配置保持简单，也更便于切换模型。
+
+流程：
+
+`OpenClaw -> GoModel -> OpenAI/Anthropic/Gemini/...`
+
+## 推荐的 OpenAI 模型（截至 2026 年 2 月 28 日）
+
+以下 OpenAI 模型 ID 目前是 OpenClaw 的理想默认选择：
+
+| 模型 ID | 适用场景 |
+| --- | --- |
+| `gpt-5-mini` | 默认选择，兼顾成本与性能 |
+| `gpt-5.2` | 更高质量，适用于复杂编程和智能体任务 |
+| `gpt-5.2-chat-latest` | 针对聊天优化，行为与 ChatGPT 一致 |
+| `gpt-5.2-codex` | 适用于类 Codex 环境中的高级编程工作流（面向 Responses API） |
+
+<Note>
+  请先在您的 GoModel 实例中确认模型可用性：`GET /v1/models`。模型是否可用取决于您的 OpenAI 账户等级和 API 类型。
+</Note>
+
+参考：
+- OpenAI GPT-5.2 发布：[OpenAI Changelog](https://platform.openai.com/docs/changelog)
+- OpenAI 模型文档：[Models Overview](https://platform.openai.com/docs/models)
+
+## 1. 运行 GoModel
+
+使用至少一个提供商和一个主密钥启动 GoModel：
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e OPENAI_API_KEY="sk-..." \
+  enterpilot/gomodel
+```
+
+确认您的模型列表：
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/v1/models \
+  -H "Authorization: Bearer change-me"
+```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="change-me")
+
+for model in client.models.list():
+    print(model.id)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "change-me",
+});
+
+for await (const model of client.models.list()) {
+  console.log(model.id);
+}
+```
+
+</CodeGroup>
+
+## 2. 在 OpenClaw 中添加 GoModel 提供商
+
+在 OpenClaw 配置中，添加一个使用兼容 OpenAI 请求的自定义提供商：
+
+```json
+{
+  "env": {
+    "GOMODEL_MASTER_KEY": "change-me"
+  },
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "gomodel": {
+        "baseUrl": "http://localhost:8080/v1",
+        "apiKey": "${GOMODEL_MASTER_KEY}",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "gpt-5-mini",
+            "name": "GoModel gpt-5-mini",
+            "reasoning": false,
+            "input": ["text"],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 128000,
+            "maxTokens": 8192
+          },
+          {
+            "id": "gpt-5.2",
+            "name": "GoModel gpt-5.2",
+            "reasoning": true,
+            "input": ["text"],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 128000,
+            "maxTokens": 8192
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "gomodel/gpt-5-mini"
+      }
+    }
+  }
+}
+```
+
+请将模型 ID 替换为 GoModel 在 `/v1/models` 返回的值。
+
+<Tip>
+  `gpt-5.2-codex` 与编程智能体高度相关，但 OpenAI 目前将其定位为面向 Responses API 的模型。如果您的 OpenClaw 配置使用 `openai-completions`，请优先选择 `gpt-5-mini` 或 `gpt-5.2`。
+</Tip>
+
+## 3. 在 OpenClaw 中验证
+
+重新加载 OpenClaw 后，使用您配置的默认模型发送一条测试提示词。
+
+如果收到 `401 Unauthorized`，请确认 OpenClaw 发送的值与 `GOMODEL_MASTER_KEY` 相同。
+
+## 说明
+
+- 如果 GoModel 运行在 Docker 中，而 OpenClaw 不在 Docker 中，通常使用 `http://localhost:8080` 即可。
+- 如果两者运行在不同的容器中，请使用共享的 Docker 网络和容器主机名，而不是 `localhost`。
+- 您可以在 `models.providers.gomodel.models` 下添加更多条目，以提供多个由 GoModel 支持的模型。
+- 作为 AI 网关，GoModel 还通过一个兼容 OpenAI 的端点为您提供集中式认证、审计日志、用量分析和提供商抽象。

@@ -1,0 +1,200 @@
+---
+title: "Benutzer"
+description: "Legen Sie fest, welche Modelle eine Gruppe, ein Benutzer oder ein API-Key aufrufen darf – mit Allowlists, die im Baum der User Paths nach unten vererbt werden."
+icon: "users"
+keywords: ["Benutzer", "users", "Gruppen", "groups", "Modellzugriff", "model access", "erlaubte Modelle", "allowed models", "user_path", "API-Key", "API key", "Zugriffsrichtlinie", "access policy"]
+---
+
+## Übersicht
+
+Die Seite **Users** macht aus der [`user_path`](/de/features/user-path)-Hierarchie
+hinter Ihren API-Keys einen Baum aus Gruppen und Benutzern und erlaubt es,
+für jeden Knoten einzuschränken, welche Modelle Requests darunter aufrufen
+dürfen:
+
+- `/acme` und `/acme/eng` sind **Gruppen** – sie enthalten weitere Pfade.
+- `/acme/eng/alice` ist ein **Benutzer** – API-Keys sind direkt daran gebunden.
+
+Nichts muss vorab angelegt werden. Der Baum wird aus den User Paths
+bestehender API-Keys abgeleitet; fügen Sie einem Knoten nur dann eine
+Richtlinie hinzu, wenn Sie ihn einschränken möchten.
+
+## Regeln
+
+1. **Neue Keys und Knoten erlauben alles.** Ein Knoten oder Key ohne
+   `allowed_models` legt selbst keine Einschränkung fest.
+2. **Das Auflisten von Modellen schränkt ein.** Sobald ein Knoten Modelle
+   auflistet, dürfen Requests darunter nur Modelle verwenden, die zu dieser
+   Liste passen.
+3. **Listen werden im Baum nach unten geschnitten.** Ein Request muss die
+   Allowlist seines API-Keys, seines User Paths und jedes übergeordneten
+   Knotens bis `/` erfüllen. Ein untergeordneter Knoten kann das, was seine
+   Gruppe erlaubt, einschränken, aber niemals erweitern.
+4. Modellseitige Regeln gelten weiterhin. Eine
+   [Zugriffsrichtlinie eines virtuellen Modells](/de/features/virtual-models),
+   die ein Modell vor einem Teilbaum verbirgt, verbirgt es weiterhin.
+
+`GET /v1/models` liefert nur die Modelle, die der Aufrufer verwenden darf,
+sodass Clients dasselbe Bild sehen, das das Gateway durchsetzt.
+
+Requests, die auf anderem Weg authentifiziert werden, folgen denselben
+Pfadregeln: Eine [OIDC-SSO](/de/pro/sso)-Session oder ein Request, der nur den
+User-Path-Header mitbringt, wird durch die Richtlinien auf seinem
+`user_path` eingeschränkt; nur verwaltete API-Keys bringen zusätzlich eine
+Allowlist pro Key mit. Der Master-Key hat keinen gebundenen User Path: Ohne
+den Header ist er uneingeschränkt, mit dem Header wird er wie jeder andere
+Request auf diesem Pfad eingeschränkt.
+
+## Wie der Zugriff ermittelt wird
+
+Richtlinien hängen am Baum der User Paths und werden von oben nach unten
+kombiniert. Jede Liste auf dem Weg von der Wurzel zum Pfad des Requests muss
+passen, und die eigene Liste des API-Keys wird zuletzt angewendet:
+
+```mermaid
+flowchart TD
+    root["/  (keine Liste → alles)"]
+    acme["/acme<br/>erlaubt: openai/*, anthropic/*"]
+    eng["/acme/eng<br/>erlaubt: anthropic/*"]
+    sales["/acme/sales<br/>(keine Liste → erbt /acme)"]
+    alice["/acme/eng/alice<br/>(keine Liste → erbt /acme/eng)"]
+    key["API-Key, gebunden an /acme/eng/alice<br/>erlaubt: anthropic/claude-sonnet-4-6"]
+
+    root --> acme
+    acme --> eng
+    acme --> sales
+    eng --> alice
+    alice -.-> key
+
+    result_sales(["/acme/sales → openai/* oder anthropic/*"])
+    result_alice(["/acme/eng/alice → anthropic/*"])
+    result_key(["Request mit dem Key → nur claude-sonnet-4-6"])
+
+    sales --> result_sales
+    alice --> result_alice
+    key --> result_key
+```
+
+Für einen einzelnen Request prüft das Gateway der Reihe nach:
+
+```mermaid
+flowchart LR
+    A["Richtlinie auf Modellseite<br/>(virtuelles Modell: user_paths, enabled)"] --> B["API-Key: allowed_models"]
+    B --> C["User Path: allowed_models"]
+    C --> D["…jeder übergeordnete Pfad bis /"]
+    D --> E{"alle erfüllt?"}
+    E -->|ja| F["Request wird ausgeführt"]
+    E -->|nein| G["400 model_access_denied"]
+```
+
+Woher die einzelnen Bausteine stammen:
+
+| Baustein                   | Quelle                                                       |
+| ----------------------- | ------------------------------------------------------------ |
+| der User Path des Requests | der `user_path` des verwalteten API-Keys, eine SSO-Session oder der Header `X-GoModel-User-Path` |
+| der Baum                | abgeleitet aus den User Paths bestehender API-Keys – nichts anzulegen |
+| Richtlinien der Knoten           | die Seite **Users**, `users:` in `config.yaml` oder die Umgebungsvariable `USERS` |
+| Richtlinien der Keys            | die Seite **API Keys** oder `allowed_models` bei `POST /admin/auth-keys` |
+| modellseitige Richtlinien     | [virtuelle Modelle](/de/features/virtual-models) mit `user_paths` oder `enabled: false` |
+
+Ein Knoten ohne Liste trägt nichts zur Kette bei; er erweitert nichts und
+schränkt nichts ein. Deshalb hat ein neuer Key oder eine neue Gruppe zunächst
+Zugriff auf alles, und deshalb sieht `/acme/sales` oben weiterhin beide
+Provider.
+
+## Selektoren
+
+Jeder Eintrag in einer Allowlist ist ein Selektor:
+
+| Eintrag              | Passt auf                                             |
+| ------------------ | --------------------------------------------------- |
+| `anthropic/*`      | jedes Modell des Providers `anthropic`             |
+| `openai/gpt-4o`    | ein Modell bei einem Provider                           |
+| `gpt-4o`           | diese Modell-ID bei jedem Provider                       |
+| `*`                | jedes Modell; überflüssig, sofern Sie keine explizite Zeile wünschen, und erweitert niemals die Liste eines übergeordneten Knotens (Regel 3) |
+
+Provider-Namen müssen einem konfigurierten Provider entsprechen; unbekannte
+Namen werden beim Speichern der Richtlinie abgelehnt. Virtuelle Modelle sind
+keine Selektoren: Ein Alias oder ein Load Balancer wird vor der Prüfung in das
+konkrete Provider-Modell aufgelöst. Erlauben Sie daher die Zielmodelle, nicht
+das virtuelle Modell. Ein Name eines virtuellen Modells in einer Liste wird als
+reine Modell-ID akzeptiert, passt aber nie auf etwas. Ein Load Balancer, dessen
+Ziele sich über mehrere Provider erstrecken, ist nur nutzbar, wenn jedes Ziel,
+das er wählen kann, erlaubt ist; andernfalls schlagen Requests mit `400` fehl,
+sobald er ein nicht erlaubtes Ziel wählt. Der Benutzerbaum zeigt einen solchen
+Knoten mit einer leeren effektiven Liste.
+
+## Beispiel
+
+```yaml
+users:
+  - path: /acme
+    allowed_models: [openai/*, anthropic/*]
+  - path: /acme/eng
+    allowed_models: [anthropic/*]
+    description: Engineering only ships on Claude
+```
+
+| User Path des Requests  | `openai/gpt-4o` | `anthropic/claude-sonnet-4-6` |
+| ------------------ | --------------- | ----------------------------- |
+| `/acme/sales`      | erlaubt         | erlaubt                       |
+| `/acme/eng/alice`  | abgelehnt          | erlaubt                       |
+| `/other`           | erlaubt         | erlaubt                       |
+
+Ein an `/acme/eng/alice` gebundener API-Key mit eigenem
+`allowed_models: [anthropic/claude-sonnet-4-6]` schränkt Alice weiter auf
+dieses eine Modell ein.
+
+Ein abgelehnter Request erhält `400` mit dem Code `model_access_denied`.
+
+## Richtlinien verwalten
+
+### Dashboard
+
+`Users` listet jeden Knoten mit seiner eigenen Allowlist, seinen **effective
+models** – dem Ergebnis auf Pfadebene, nachdem seine eigene Liste, die Listen
+aller übergeordneten Knoten und die modellseitigen Richtlinien virtueller
+Modelle angewendet wurden (ein rotes **None** kennzeichnet einen Knoten, dessen
+Listen keine gemeinsame Schnittmenge haben) – und der Anzahl der daran
+gebundenen API-Keys. Die eigenen `allowed_models` eines verwalteten API-Keys
+können einen Request weiter einschränken, als der Pfad anzeigt. Der Editor
+warnt bereits während der Eingabe, wenn die Liste kein Modell mehr übrig
+lassen würde. Fügen Sie einen Knoten hinzu oder bearbeiten Sie ihn, um seine
+Modelle festzulegen; entfernen Sie die Richtlinie, um auf die Limits der
+übergeordneten Knoten zurückzufallen.
+
+Die Anzahl der Keys verlinkt auf die Seite **API Keys**, gefiltert auf den
+Teilbaum dieses Pfads, und jede Zeile hat eine Aktion *Add API key*, die das
+Formular zum Anlegen eines Keys mit vorausgefülltem Pfad öffnet.
+
+Allowlists pro Key befinden sich auf der Seite **API Keys**: Setzen Sie
+`Allowed models` beim Anlegen eines Keys oder bearbeiten Sie sie später in der
+Zeile des Keys. Die Spalte **Effective models** dort ist die endgültige
+Antwort für diese Zugangsdaten – Pfadrichtlinien, die eigene Liste des Keys und
+modellseitige Richtlinien kombiniert.
+
+### Konfiguration
+
+Deklarieren Sie Richtlinien in `config.yaml` unter `users:` (siehe Beispiel
+oben) oder in der Umgebungsvariable `USERS` als JSON-Array mit denselben
+Feldern:
+
+```bash
+USERS='[{"path":"/acme/eng","allowed_models":["anthropic/*"]}]'
+```
+
+Deklarierte Richtlinien überdecken Dashboard-Zeilen für denselben Pfad und
+sind im Dashboard schreibgeschützt. Ein falsch geschriebener Provider in einer
+deklarierten Richtlinie lässt den Start fehlschlagen.
+
+### Admin API
+
+| Methode   | Endpunkt                                | Beschreibung                               |
+| -------- | --------------------------------------- | ----------------------------------------- |
+| `GET`    | `/admin/users`                          | Der Baum mit eigenen und geerbten Limits    |
+| `PUT`    | `/admin/users`                          | Legt die Richtlinie eines Knotens an oder ersetzt sie       |
+| `DELETE` | `/admin/users?user_path=/acme/eng`      | Entfernt die Richtlinie eines Knotens                  |
+| `PUT`    | `/admin/auth-keys/{id}/allowed-models`  | Ersetzt die Allowlist eines API-Keys           |
+
+`POST /admin/auth-keys` akzeptiert `allowed_models` beim Anlegen. Request- und
+Response-Formate finden Sie unter [Admin-Endpunkte](/de/advanced/admin-endpoints).

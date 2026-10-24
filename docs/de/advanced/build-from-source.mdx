@@ -1,0 +1,66 @@
+---
+title: "Aus dem Quellcode bauen"
+description: "Bauen Sie das GoModel-Binary aus dem Quellcode eines Releases, mit dem vorgefertigten Admin-Dashboard oder mit Node, einschließlich vollständig offline durchgeführter Builds für Paket-Maintainer."
+icon: "hammer"
+keywords: ["aus dem Quellcode bauen", "build from source", "Paketierung", "Offline-Build", "Nix", "Homebrew", "Dashboard", "reproduzierbar"]
+---
+
+Die meisten Benutzer sollten GoModel mit dem [Schnellstart](/de/getting-started/quickstart)-Skript,
+mit Docker oder mit einem Binary aus den
+[GitHub Releases](https://github.com/ENTERPILOT/GoModel/releases) installieren. Bauen Sie aus dem
+Quellcode, wenn Sie GoModel für eine Distribution paketieren oder einen eigenen Build benötigen.
+
+Das Admin-Dashboard ist eine Svelte-App, die beim Kompilieren in das Binary eingebettet wird.
+Ihr Build-Output liegt nicht im Repository, daher erzeugt ein einfaches `go build` auf einem
+Source-Checkout ein Binary mit deaktivierter UI. Das Gateway und die Admin API funktionieren
+trotzdem, und im Log steht, dass die UI deaktiviert ist. Fügen Sie das Dashboard vor `go build`
+auf eine der beiden folgenden Arten hinzu.
+
+## Option 1: Vorgefertigtes Dashboard verwenden (ohne Node)
+
+Jedes Release enthält `gomodel_<version>_dashboard.tar.gz`, aufgeführt in der `checksums.txt`
+des jeweiligen Releases. Das Archiv enthält genau das Dashboard, das in die Release-Binaries und
+das Docker-Image eingebettet ist. Seine Pfade sind relativ zum Root des Repositorys, entpacken
+Sie es also dort:
+
+```bash
+VERSION=0.1.102
+git clone --depth 1 --branch "v${VERSION}" https://github.com/ENTERPILOT/GoModel.git
+cd GoModel
+
+curl -fsSLO "https://github.com/ENTERPILOT/GoModel/releases/download/v${VERSION}/gomodel_${VERSION}_dashboard.tar.gz"
+curl -fsSLO "https://github.com/ENTERPILOT/GoModel/releases/download/v${VERSION}/checksums.txt"
+grep " gomodel_${VERSION}_dashboard.tar.gz\$" checksums.txt | sha256sum -c -
+tar -xzf "gomodel_${VERSION}_dashboard.tar.gz"
+
+CGO_ENABLED=0 go build \
+  -ldflags "-s -w -X github.com/enterpilot/gomodel/internal/version.Version=${VERSION}" \
+  -o gomodel ./cmd/gomodel
+```
+
+Paket-Rezepte können die SHA-256-Prüfsumme des Archivs neben der Prüfsumme des Quellcodes
+pinnen.
+
+## Option 2: Dashboard mit Node bauen
+
+Verwenden Sie Node 22.12 oder neuer aus der 22.x-Reihe oder Node 24+. Node 23 wird von den
+Build-Tools des Dashboards nicht unterstützt.
+
+```bash
+make build   # führt make frontend aus (npm ci + vite build) und schreibt dann bin/gomodel
+```
+
+Jede Datei, die der Dashboard-Build herunterlädt, ist in `web/dashboard/package-lock.json` mit
+einem Integritäts-Hash gepinnt. Sobald die npm-Abhängigkeiten anhand der Lockfile abgerufen
+wurden, läuft der Build daher offline:
+
+```bash
+cd web/dashboard
+npm ci --offline --ignore-scripts && npm run build
+```
+
+## Versionsstempel
+
+Setzen Sie `internal/version.Version` wie oben gezeigt mit `-ldflags`. Ohne diese Angabe meldet
+das Binary `dev`, und die [Update-Prüfung](/de/advanced/version-awareness) meldet nie ein neueres
+Release.
