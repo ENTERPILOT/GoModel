@@ -41,10 +41,6 @@ linters:
       - linters:
           - gosec
         path: cmd/recordapi/
-      # Developer benchmark tool: runs ps against the benchmarked process.
-      - linters:
-          - gosec
-        path: docs/about/benchmark-tools/
       # WHERE clauses are joined from constant fragments; every value is a
       # bound parameter.
       - linters:
