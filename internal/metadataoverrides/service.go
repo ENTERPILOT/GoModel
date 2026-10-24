@@ -54,7 +54,10 @@ func NewService(store Store, registry Registry) (*Service, error) {
 func (s *Service) Refresh(ctx context.Context) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
+	return s.refreshLocked(ctx)
+}
 
+func (s *Service) refreshLocked(ctx context.Context) error {
 	stored, err := s.store.List(ctx)
 	if err != nil {
 		return fmt.Errorf("list model metadata overrides: %w", err)
@@ -103,17 +106,29 @@ func (s *Service) Get(selector string) (Override, bool) {
 }
 
 // Upsert validates and stores one override, then applies it. It returns the
-// normalized override.
+// normalized override. The write and refresh run under the refresh lock, so
+// concurrent saves each return their own value; a failed refresh restores the
+// previous stored value, so a save reported as failed never applies later.
 func (s *Service) Upsert(ctx context.Context, override Override) (Override, error) {
 	normalized, err := normalizeInput(s.registry, override)
 	if err != nil {
 		return Override{}, err
 	}
+
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+
+	previous, existed := (*s.current.Load())[normalized.Selector]
 	if err := s.store.Upsert(ctx, normalized); err != nil {
 		return Override{}, err
 	}
-	if err := s.Refresh(ctx); err != nil {
-		return Override{}, err
+	if err := s.refreshLocked(ctx); err != nil {
+		return Override{}, rollback(err, func(ctx context.Context) error {
+			if existed {
+				return s.store.Upsert(ctx, previous)
+			}
+			return s.store.Delete(ctx, normalized.Selector)
+		})
 	}
 	saved, ok := (*s.current.Load())[normalized.Selector]
 	if !ok {
@@ -128,10 +143,35 @@ func (s *Service) Delete(ctx context.Context, selector string) error {
 	if err != nil {
 		return err
 	}
+
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+
+	previous, existed := (*s.current.Load())[parts.Selector]
 	if err := s.store.Delete(ctx, parts.Selector); err != nil {
 		return err
 	}
-	return s.Refresh(ctx)
+	if err := s.refreshLocked(ctx); err != nil {
+		if !existed {
+			return err
+		}
+		return rollback(err, func(ctx context.Context) error {
+			return s.store.Upsert(ctx, previous)
+		})
+	}
+	return nil
+}
+
+// rollback restores the stored state after a write whose refresh failed, on
+// a fresh context because the request context may be what failed.
+func rollback(refreshErr error, restore func(context.Context) error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), refreshTimeout)
+	defer cancel()
+	if err := restore(ctx); err != nil {
+		slog.Warn("model metadata override rollback failed", "refresh_error", refreshErr, "rollback_error", err)
+		return fmt.Errorf("%w (rollback failed: %v)", refreshErr, err)
+	}
+	return refreshErr
 }
 
 // StartBackgroundRefresh periodically reloads overrides so changes made

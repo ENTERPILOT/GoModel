@@ -2,6 +2,10 @@ package metadataoverrides
 
 import (
 	"context"
+	"errors"
+	"maps"
+	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,10 +15,14 @@ import (
 )
 
 type memoryStore struct {
-	items map[string]Override
+	items   map[string]Override
+	listErr error
 }
 
 func (s *memoryStore) List(context.Context) ([]Override, error) {
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
 	out := make([]Override, 0, len(s.items))
 	for _, item := range s.items {
 		out = append(out, item)
@@ -139,4 +147,56 @@ func TestServiceDeleteRevertsRegistryLayer(t *testing.T) {
 	assert.Empty(t, registry.applied)
 	assert.Empty(t, service.List())
 	assert.ErrorIs(t, service.Delete(context.Background(), "pollinations/flux"), ErrNotFound)
+}
+
+func TestServiceWriteRollsBackWhenRefreshFails(t *testing.T) {
+	flux := Override{Selector: "pollinations/flux", ProviderName: "pollinations", Model: "flux", Metadata: Metadata{ContextWindow: new(1000)}}
+	tests := []struct {
+		name  string
+		rows  []Override
+		write func(*Service) error
+	}{
+		{"new override", nil, func(s *Service) error {
+			_, err := s.Upsert(context.Background(), Override{Selector: "pollinations/flux", Metadata: Metadata{ContextWindow: new(2000)}})
+			return err
+		}},
+		{"changed override", []Override{flux}, func(s *Service) error {
+			_, err := s.Upsert(context.Background(), Override{Selector: "pollinations/flux", Metadata: Metadata{ContextWindow: new(2000)}})
+			return err
+		}},
+		{"deleted override", []Override{flux}, func(s *Service) error {
+			return s.Delete(context.Background(), "pollinations/flux")
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service, store, _ := newTestService(t, tt.rows...)
+			before := maps.Clone(store.items)
+			listErr := errors.New("storage unavailable")
+			store.listErr = listErr
+
+			err := tt.write(service)
+
+			require.ErrorIs(t, err, listErr)
+			assert.Equal(t, before, store.items)
+		})
+	}
+}
+
+func TestServiceConcurrentUpsertsReturnTheirOwnValue(t *testing.T) {
+	service, _, _ := newTestService(t)
+
+	var wg sync.WaitGroup
+	for i := 1; i <= 20; i++ {
+		wg.Go(func() {
+			saved, err := service.Upsert(context.Background(), Override{
+				Selector: "pollinations/flux",
+				Metadata: Metadata{ContextWindow: new(i * 1000)},
+			})
+			if assert.NoError(t, err, strconv.Itoa(i)) && assert.NotNil(t, saved.Metadata.ContextWindow) {
+				assert.Equal(t, i*1000, *saved.Metadata.ContextWindow)
+			}
+		})
+	}
+	wg.Wait()
 }
