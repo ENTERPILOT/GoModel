@@ -280,6 +280,7 @@
                     "providers/cohere",
                     "providers/gemini",
                     "providers/deepseek",
+                    "providers/deepinfra",
                     "providers/xai",
                     "providers/bailian",
                     "providers/xiaomi",
