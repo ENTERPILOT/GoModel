@@ -1,0 +1,100 @@
+---
+title: "Hetzner"
+description: "Skonfiguruj w GoModel eksperymentalne API inferencji Hetznera kompatybilne z OpenAI."
+icon: "server"
+keywords: ["Hetzner", "eksperymentalne", "inferencja", "konfiguracja providera", "experimental", "inference", "provider setup"]
+---
+
+<Warning>
+  **Funkcja eksperymentalna**: Hetzner deklaruje to API inferencji jako eksperymentalne. Licz się
+  ze zmianami łamiącymi kompatybilność, brakiem SLA i brakiem gwarancji dostępności. Nie używaj go do obciążeń
+  produkcyjnych. W trakcie eksperymentu Hetzner może bez uprzedzenia zmieniać modele, limity
+  lub sam endpoint.
+</Warning>
+
+Hetzner Inference to REST API kompatybilne z OpenAI, serwowane pod adresem
+`https://inference.hetzner.com/api/v1`. GoModel routuje czat, listowanie modeli
+i requesty passthrough przez współdzielony adapter OpenAI. Endpoint `/v1/responses` jest
+tłumaczony przez chat completions. Pliki, batche i embeddingi nie są obsługiwane –
+Hetzner nie udostępnia endpointu `/v1/embeddings`. Requesty o embeddingi od razu kończą się
+typowanym błędem „not supported”; żadne wywołanie upstreamu nie jest wykonywane.
+
+<Note>
+  Passthrough to ogólny mechanizm przekazujący: wysyła do Hetznera dowolną podaną ścieżkę
+  bez zmian. To, jak Hetzner reaguje na dowolne ścieżki upstreamu, nie zostało zweryfikowane, dopóki
+  API jest eksperymentalne – dla ścieżek innych niż `/v1/models`,
+  `/v1/completions` i `/v1/chat/completions` spodziewaj się HTTP 404 lub 405. `hetzner` jest na domyślnej
+  allowliście `ENABLED_PASSTHROUGH_PROVIDERS`, więc ścieżki `/p/hetzner/...` działają
+  bez jawnego włączenia przez operatora.
+</Note>
+
+## Konfiguracja
+
+Utwórz token API w [konsoli Hetzner Experiments](https://experiments.hetzner.com/inference)
+i ustaw:
+
+```bash
+HETZNER_API_KEY=...
+```
+
+Albo w `config.yaml`:
+
+```yaml
+providers:
+  hetzner:
+    type: hetzner
+    base_url: "https://inference.hetzner.com/api/v1"
+    api_key: "${HETZNER_API_KEY}"
+```
+
+Możesz też nadpisać bazowy URL i listę modeli:
+
+```bash
+HETZNER_BASE_URL=https://inference.hetzner.com/api/v1
+HETZNER_MODELS=Qwen/Qwen3.6-35B-A3B-FP8
+```
+
+<Note>
+  Powyższy identyfikator modelu to przykład z
+  [oficjalnej dokumentacji inferencji Hetznera](https://docs.hetzner.com/general/company-and-policy/experiments/inference/)
+  (sprawdzone 2026-08-17). Katalog jest eksperymentalny i się zmienia; przed skopiowaniem
+  przykładu potwierdź aktualne identyfikatory za pomocą `GET /v1/models`.
+</Note>
+
+## Modele
+
+Katalog modeli zmienia się w trakcie eksperymentu. Odpytuj aktualną listę, zamiast
+polegać na migawkach z dokumentacji:
+
+```bash
+curl -s https://inference.hetzner.com/api/v1/models \
+  -H "Authorization: Bearer $HETZNER_API_KEY"
+```
+
+Po skonfigurowaniu providera GoModel udostępnia tę listę także przez własny endpoint `/v1/models`.
+Modele obsługujące obraz przyjmują standardowe dla OpenAI części treści `image_url`
+bez zmian.
+
+## Rate limity
+
+Hetzner egzekwuje limity per klucz dla tokenów wejściowych i wyjściowych.
+Przekroczenie któregokolwiek z nich zwraca HTTP 429. Udokumentowane okna to 3M tokenów wejściowych /
+60k tokenów wyjściowych na 60s oraz 500M wejściowych / 5M wyjściowych na 24h. Dokładne wartości zmieniają się
+w trakcie eksperymentu, więc aktualne liczby sprawdzaj w
+[oficjalnej dokumentacji inferencji](https://docs.hetzner.com/general/company-and-policy/experiments/inference/).
+Preferuj zachowawcze ustawienia retry:
+
+```yaml
+providers:
+  hetzner:
+    type: hetzner
+    api_key: "${HETZNER_API_KEY}"
+    retries: 2
+```
+
+## Cennik
+
+API jest bezpłatne, dopóki pozostaje w statusie eksperymentalnym. Hetzner deklaruje, że
+przed rozpoczęciem naliczania opłat powiadomi użytkowników e-mailem. Śledzenie kosztów użycia w GoModel raportuje `cost`
+jako zero dla requestów do Hetznera, dopóki nie pojawi się cennik upstreamu, więc load balancing `cost`
+nie może uszeregować tego providera według ceny.
