@@ -21,6 +21,9 @@ class LiveTokensState {
   granularity = $state("minutes");
   buckets = $state([]);
   active = $state(false);
+  // False until the first response for the selected granularity arrives, so
+  // the widget can tell "still loading" apart from "loaded, but empty".
+  loaded = $state(false);
 
   // Engine internals (timers, stream state) are deliberately non-reactive.
   #scrollTimer = null;
@@ -58,6 +61,7 @@ class LiveTokensState {
       this.#sseController = null;
     }
     this.buckets = [];
+    this.loaded = false;
   }
 
   setGranularity(value) {
@@ -66,6 +70,7 @@ class LiveTokensState {
     }
     this.granularity = value;
     this.buckets = []; // force a re-bucketed chart
+    this.loaded = false;
     this.#restartScroll();
     this.fetch();
   }
@@ -113,13 +118,14 @@ class LiveTokensState {
         "/admin/usage/throughput?granularity=" + cfg.apiName,
         { label: "token throughput" },
       );
-      if (result.stale || !result.ok) {
-        return;
-      }
       // The granularity changed while this request was in flight, so its
       // buckets no longer match the selected window — discard them (a fresh
       // fetch is issued in finally).
-      if (this.granularity !== requested) {
+      if (result.stale || this.granularity !== requested) {
+        return;
+      }
+      this.loaded = true;
+      if (!result.ok) {
         return;
       }
       this.buckets =
