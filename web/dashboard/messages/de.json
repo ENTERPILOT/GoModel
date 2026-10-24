@@ -1430,6 +1430,8 @@
   "models_global_pricing": "globale Modellpreise",
   "models_model_settings_for": "Modelleinstellungen für {name}",
   "models_provider_access_for": "Anbieterzugriff für {name}",
+  "models_expand_provider_group": "{name} ausklappen",
+  "models_collapse_provider_group": "{name} einklappen",
   "models_global_access": "globaler Modellzugriff",
   "models_remove_alias": "Alias {name} entfernen",
   "models_removing_alias": "Alias {name} wird entfernt",

@@ -16,8 +16,9 @@
   import AccessToggle from "./AccessToggle.svelte";
   import ModelGlobalActions from "./ModelGlobalActions.svelte";
   import ModelRow from "./ModelRow.svelte";
+  import { providerGroups } from "./providerGroups.svelte.js";
   import { categoryColumns, categoryColspan } from "./categoryColumns.js";
-  import { CircleDollarSign, Gauge, Pencil } from "lucide";
+  import { ChevronRight, CircleDollarSign, Gauge, Pencil } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   const category = $derived(modelsStore.activeCategory || "all");
@@ -41,13 +42,26 @@
       </tr>
     </thead>
     {#each virtualModels.filteredDisplayModelGroups as group (group.key)}
+      {@const collapsed = providerGroups.isCollapsed(group)}
       <tbody>
         <tr class="provider-group-row">
           <td colspan={groupColspan}>
             <div class="provider-group-header">
               <div class="provider-group-meta">
                 <div class="provider-group-title">
-                  <span class="mono font-size-md">{group.display_name}</span>
+                  <button
+                    type="button"
+                    class="provider-group-toggle"
+                    class:is-expanded={!collapsed}
+                    aria-expanded={!collapsed}
+                    title={collapsed
+                      ? m.models_expand_provider_group({ name: group.display_name })
+                      : m.models_collapse_provider_group({ name: group.display_name })}
+                    onclick={() => providerGroups.toggle(group)}
+                  >
+                    <Icon icon={ChevronRight} class="provider-group-toggle-icon" />
+                    <span class="mono font-size-md">{group.display_name}</span>
+                  </button>
                   {#if group.type_label}
                     <span class="provider-group-type">{"(" + group.type_label + ")"}</span>
                   {/if}
@@ -94,9 +108,11 @@
             </div>
           </td>
         </tr>
-        {#each group.rows as row (row.key)}
-          <ModelRow {row} {columns} colspan={groupColspan} />
-        {/each}
+        {#if !collapsed}
+          {#each group.rows as row (row.key)}
+            <ModelRow {row} {columns} colspan={groupColspan} />
+          {/each}
+        {/if}
       </tbody>
     {/each}
   </table>
@@ -132,6 +148,44 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
+  }
+
+  .provider-group-toggle {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .provider-group-toggle:hover {
+    color: var(--accent);
+  }
+
+  .provider-group-toggle:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 32%, transparent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* The class rides on the Icon child's own <svg>, so it needs :global. */
+  .provider-group-toggle :global(.provider-group-toggle-icon) {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    color: var(--text-muted);
+    transition: transform 0.2s ease;
+  }
+
+  .provider-group-toggle.is-expanded :global(.provider-group-toggle-icon) {
+    transform: rotate(90deg);
   }
 
   .provider-group-type, .provider-group-count, .provider-group-summary {
