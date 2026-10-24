@@ -181,6 +181,7 @@ Pełny przewodnik po funkcji znajdziesz w [MCP Gateway](/pl/features/mcp-gateway
 | `MCP_SERVERS` | Obiekt JSON z upstreamowymi serwerami MCP, scalany per nazwa z mapą YAML `mcp.servers` (wpisy są w dashboardzie tylko do odczytu) | _(brak)_           |
 | `MCP_ALLOWED_ORIGINS` | Rozdzielone przecinkami originy przeglądarki (`scheme://host[:port]`), które mogą wywoływać `/mcp`; domyślnie żaden nie jest zaufany, co blokuje DNS rebinding. `*` wyłącza sprawdzanie | _(brak)_           |
 | `MCP_TOOL_DISCOVERY` | `off` wyświetla każde narzędzie; `search` udostępnia zamiast tego `search_tools` i `call_tool`, żeby duże katalogi nie zapełniały kontekstu modelu. Klienci nadpisują to per sesja nagłówkiem `X-MCP-Tool-Discovery` | `off` |
+| `MCP_PROVIDER_SERVERS` | Rozdzielone przecinkami nazwy skonfigurowanych dostawców, których własne serwery MCP mają być udostępnione z kluczem API dostawcy (na przykład `zai`). Zobacz [serwery MCP dostawców](/pl/features/mcp-gateway#udostępnij-serwery-mcp-dostawców) | _(brak)_ |
 | `MCP_VIRTUAL_SERVERS` | Obiekt JSON z serwerami wirtualnymi, scalany per nazwa z mapą YAML `mcp.virtual_servers`. Każdy serwuje podzbiór serwerów MCP pod `/mcp/{name}` | _(brak)_ |
 
 #### Logowanie

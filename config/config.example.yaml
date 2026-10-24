@@ -152,6 +152,11 @@ models:
 #   # so large catalogs stop costing model context. Clients override it per session
 #   # with the X-MCP-Tool-Discovery header.
 #   tool_discovery: off # env: MCP_TOOL_DISCOVERY
+#   # Configured provider names whose own hosted MCP servers to expose, using the
+#   # provider's API key. Default: none (each call costs on that key). Supported:
+#   # zai -> zai-web-search, zai-web-reader, zai-zread (GLM Coding Plan keys).
+#   # A server in `servers` with the same slug replaces the provider-hosted one.
+#   provider_servers: [] # env: MCP_PROVIDER_SERVERS (comma-separated)
 #   servers:
 #     github:
 #       url: https://api.githubcopilot.com/mcp
