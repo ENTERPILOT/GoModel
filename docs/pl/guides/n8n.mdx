@@ -1,0 +1,183 @@
+---
+title: "GoModel i n8n"
+description: "Kieruj każde wywołanie węzłów AI Agent, LLM Chain i OpenAI w n8n przez GoModel z jednymi danymi uwierzytelniającymi i uzyskaj logi audytowe, śledzenie kosztów oraz metryki dla wszystkich swoich workflow."
+icon: "workflow"
+keywords: ["n8n", "AI Agent", "OpenAI credential", "dane uwierzytelniające OpenAI", "base URL", "automatyzacja workflow", "workflow automation", "obserwowalność LLM", "LLM observability", "przewodnik konfiguracji", "setup guide"]
+---
+
+## Przegląd
+
+n8n nie ma wbudowanego śledzenia tego, co jego węzły AI wysyłają i otrzymują. Skierowanie n8n
+na GoModel rozwiązuje to bez żadnego węzła community: jeden credential **OpenAI**
+z base URL GoModel i każde wywołanie modelu w każdym workflow jest logowane, wyceniane
+i eksportowane jako metryki. Ten sam credential pozwala też węzłom OpenAI w n8n korzystać
+z Anthropic, Gemini i każdego innego providera skonfigurowanego w GoModel.
+
+Przepływ:
+
+`n8n workflow -> OpenAI Chat Model / OpenAI node -> GoModel -> OpenAI/Anthropic/Gemini/...`
+
+Co zyskujesz:
+
+- Pełne treści requestów i odpowiedzi każdego wywołania AI w logu audytowym GoModel.
+- Użycie tokenów i koszt per model, per klucz API i per etykieta.
+- Metryki Prometheus i trace'y OpenTelemetry dla ruchu AI.
+- Failover, cache, limity żądań i budżety stosowane do ruchu z n8n.
+- Modele spoza OpenAI w węzłach OpenAI w n8n, bez dodatkowych danych uwierzytelniających.
+
+## 1. Uruchom GoModel obok n8n
+
+Uruchom obie usługi w jednej sieci Dockera, aby n8n mógł połączyć się z GoModel po nazwie
+kontenera:
+
+```yaml docker-compose.yml
+services:
+  gomodel:
+    image: enterpilot/gomodel
+    environment:
+      GOMODEL_MASTER_KEY: change-me
+      OPENAI_API_KEY: sk-...
+      ANTHROPIC_API_KEY: sk-ant-...
+    ports:
+      - "8080:8080"
+
+  n8n:
+    image: n8nio/n8n
+    environment:
+      N8N_COMMUNITY_PACKAGES_ENABLED: "false"
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+volumes:
+  n8n_data:
+```
+
+Sprawdź, czy GoModel wyświetla Twoje modele:
+
+```bash
+curl -s http://localhost:8080/v1/models \
+  -H "Authorization: Bearer change-me"
+```
+
+<Tip>
+  Utwórz dedykowany klucz API dla n8n w dashboardzie GoModel
+  (`API Keys -> Create API Key`) zamiast używać klucza głównego. Klucze mają
+  etykiety, budżety i limity żądań, więc wydatki n8n są widoczne osobno w
+  dashboardzie.
+</Tip>
+
+## 2. Utwórz credential OpenAI w n8n
+
+W n8n otwórz `Settings -> Credentials -> Add credential -> OpenAI` i wypełnij:
+
+| Pole | Wartość |
+| --- | --- |
+| API Key | Klucz API GoModel (albo `GOMODEL_MASTER_KEY`) |
+| Organization ID | Zostaw puste |
+| Base URL | `http://gomodel:8080/v1` |
+| Add Custom Header | Opcjonalne, zobacz [Przypisywanie workflow za pomocą etykiet](#przypisywanie-workflow-za-pomocą-etykiet) |
+
+n8n testuje credential przez `GET /v1/models` przy zapisywaniu. GoModel
+obsługuje ten endpoint, więc test powinien przejść, a selektor modeli w węźle
+**OpenAI Chat Model** wyświetli dokładnie te modele, które udostępnia GoModel, łącznie
+z modelami Anthropic i Gemini oraz wszystkimi [modelami wirtualnymi](/pl/features/virtual-models).
+
+<Note>
+  Gdy obie usługi działają w kontenerach, użyj nazwy usługi Dockera (`gomodel`).
+  `http://localhost:8080/v1` działa tylko wtedy, gdy n8n działa na maszynie hosta.
+</Note>
+
+## 3. Użyj go w workflow
+
+Każdy węzeł, który przyjmuje credential OpenAI, działa teraz przez GoModel:
+
+- **AI Agent** i **Basic LLM Chain** z podwęzłem **OpenAI Chat Model**.
+- **Embeddings OpenAI** dla vector store'ów.
+- Zwykły węzeł **OpenAI** (operacje czatu, obrazów, audio).
+
+Podłącz credential do podwęzła **OpenAI Chat Model** i wybierz model.
+Ponieważ lista pochodzi z GoModel, możesz wybrać
+`anthropic/claude-haiku-4-5-20251001` albo `gemini/gemini-2.5-flash` w tym samym
+węźle, który wcześniej obsługiwał tylko OpenAI. Działają zarówno id z prefiksem providera
+z selektora, jak i zwykłe id, takie jak `gpt-5-mini`. Uruchom workflow, a następnie otwórz
+dashboard GoModel: wywołanie pojawi się w logu audytowym z pełnym promptem,
+definicjami narzędzi dołączonymi przez n8n, odpowiedzią, tokenami i kosztem.
+
+<Note>
+  Zweryfikowane z n8n 2.36 (AI Agent 3.1 i 2.2, OpenAI Chat Model 1.3) oraz
+  narzędziem Calculator z modelami OpenAI, Anthropic i Gemini kierowanymi
+  przez GoModel.
+</Note>
+
+### Chat Completions czy Responses API
+
+Węzeł **OpenAI Chat Model** ma przełącznik **Use Responses API**. W n8n 2.x
+jest on **domyślnie włączony** dla nowych węzłów. Obie ścieżki działają przez GoModel:
+
+| Ustawienie | Endpoint GoModel | Uwagi |
+| --- | --- | --- |
+| Włączone (domyślnie w n8n) | `/v1/responses` | Natywne dla OpenAI. Tłumaczone dla Anthropic i Gemini; `conversation_id` i narzędzia hostowane przez OpenAI nie są tam dostępne. |
+| Wyłączone | `/v1/chat/completions` | Działa z każdym providerem i każdą wersją GoModel. |
+
+Tool calling działa na obu ścieżkach dla modeli OpenAI, Anthropic i Gemini.
+Wyłącz przełącznik, jeśli funkcja dostępna tylko w Responses ma być wyraźnie odrzucana
+zamiast tłumaczona albo jeśli używasz release'u GoModel starszego niż
+poprawka `annotations` opisana w sekcji [Rozwiązywanie problemów](#rozwiązywanie-problemów). Dokładne
+ograniczenia dla tłumaczonych providerów opisuje strona
+[Kompatybilność Responses](/pl/advanced/responses-compatibility).
+
+## Przypisywanie workflow za pomocą etykiet
+
+Aby odróżnić workflow w raportach użycia, wysyłaj z n8n nagłówek tagujący i
+zadeklaruj go w GoModel:
+
+1. W GoModel ustaw `TAGGING_HEADER_1=X-N8N-Workflow` (albo dodaj go w
+   `Settings -> Tagging based on headers` w dashboardzie).
+2. W credentialu n8n włącz **Add Custom Header** z nazwą
+   `X-N8N-Workflow` i wartością, na przykład `invoice-triage`.
+
+Wartość nagłówka staje się etykietą każdego wpisu użycia utworzonego z tym
+credentialem; widok użycia według etykiet w dashboardzie pokazuje wtedy requesty,
+tokeny i koszt workflow. n8n normalizuje wielkość liter w nazwie nagłówka
+(`X-N8n-Workflow`); GoModel dopasowuje ją bez rozróżniania wielkości liter. Utwórz jeden
+credential na workflow lub zespół, jeśli chcesz mieć osobne etykiety; mogą współdzielić ten sam klucz API GoModel.
+Prefiksy, separatory i blokowanie przekazywania nagłówków do upstreamowego providera
+opisuje strona [Etykietowanie](/pl/features/labelling).
+
+## Inne węzły modeli w n8n
+
+Credential **Anthropic Chat Model** w n8n również ma pole **Base URL**.
+Skieruj je na `http://gomodel:8080` (bez `/v1`) z kluczem API GoModel, aby kierować
+natywny ruch `/v1/messages` przez GoModel; test credentialu i wywołania narzędzi
+w AI Agent działają (zobacz
+[Anthropic Messages API](/pl/advanced/anthropic-messages-api)). W większości workflow
+pojedynczy credential OpenAI opisany wyżej jest prostszy, bo już obsługuje każdego
+providera.
+
+## Rozwiązywanie problemów
+
+| Objaw | Rozwiązanie |
+| --- | --- |
+| Test credentialu kończy się błędem połączenia | n8n nie może rozwiązać base URL. Sprawdź sieć Dockera i użyj nazwy usługi, a nie `localhost`. |
+| `401 Unauthorized` w logach GoModel | Klucz w credentialu n8n nie pasuje do klucza API GoModel ani do `GOMODEL_MASTER_KEY`. |
+| Selektor modeli jest pusty | GoModel nie ma skonfigurowanego providera dla tego modelu. Sprawdź `GET /v1/models` i zmienne środowiskowe providerów. |
+| `Cannot read properties of undefined (reading 'map')` przy włączonym **Use Responses API** | Release'y GoModel sprzed poprawki `annotations` pomijały `annotations: []` w częściach `output_text`, czego wymaga klient OpenAI w n8n. Zaktualizuj GoModel albo wyłącz **Use Responses API**. |
+| Ten sam błąd występuje zaraz po aktualizacji | Cache odpowiedzi GoModel odtwarza treść zapisaną przed aktualizacją. Zmień prompt albo wyczyść cache. |
+| Błędy Responses API w Anthropic lub Gemini | Usuń `conversation_id` i narzędzia hostowane; nie da się ich przetłumaczyć. |
+| Odpowiedzi modelu wyglądają „dziwnie” | Sprawdź guardrails w GoModel; guardrail `system_prompt` przepisuje prompt wysyłany przez n8n. |
+
+## Uwagi
+
+- [Failover](/pl/features/failover) i [cache](/pl/features/cache) w GoModel działają
+  automatycznie dla ruchu z n8n; nie trzeba niczego zmieniać w n8n. Przy włączonym
+  cache odpowiedzi powtarzające się identyczne prompty zwracają odpowiedzi z cache, czego
+  zwykle oczekujesz przy ponawianych uruchomieniach workflow.
+- Streaming do chat triggera n8n nie był częścią weryfikacji;
+  uruchomienia agentów bez streamingu były.
+- Istnieją węzły community, takie jak `n8n-nodes-openai-litellm`, które dodają metadane
+  gatewaya do requestów n8n. Z GoModel nie są potrzebne; wbudowany
+  credential i nagłówki tagujące pokrywają tę samą potrzebę.
+- Dashboardy i alerty opisują strony [Metryki Prometheus](/pl/guides/prometheus-metrics)
+  i [OpenTelemetry](/pl/guides/opentelemetry).

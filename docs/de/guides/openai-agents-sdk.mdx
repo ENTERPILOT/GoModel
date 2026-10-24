@@ -1,0 +1,278 @@
+---
+title: "GoModel & OpenAI Agents SDK"
+description: "Leiten Sie Modellaufrufe des OpenAI Agents SDK über die OpenAI-kompatible Responses API von GoModel."
+icon: "bot"
+keywords: ["OpenAI Agents SDK", "Responses API", "Agents", "agents", "Python SDK"]
+---
+
+GoModel lässt sich vor das OpenAI Agents SDK schalten, wenn Sie Gateway-Keys,
+Budgets, Audit-Logs, Modell-Routing und Nutzungserfassung rund um
+Agent-Ausführungen nutzen möchten.
+
+Ablauf:
+
+`OpenAI Agents SDK -> GoModel /v1 -> selected provider`
+
+## Bevor Sie beginnen
+
+- Installieren Sie GoModel.
+- Wählen Sie einen GoModel-Master-Key, zum Beispiel `change-me`.
+- Konfigurieren Sie mindestens einen Upstream-Modell-Provider.
+- Installieren Sie das OpenAI Agents SDK für Python oder JavaScript.
+
+<Note>
+  Das SDK exportiert Traces standardmäßig an OpenAI. Wenn GoModel Ihr einziger
+  OpenAI-Client-Endpunkt ist, deaktivieren Sie das Tracing oder konfigurieren
+  Sie einen separaten OpenAI-Tracing-Key.
+</Note>
+
+## 1. GoModel starten
+
+Starten Sie GoModel mit einem Master-Key und einem API-Key für einen
+Upstream-Provider. Dieses Beispiel verwendet OpenAI als Upstream:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e OPENAI_API_KEY="sk-..." \
+  enterpilot/gomodel
+```
+
+Wenn Sie einen anderen Provider verwenden, behalten Sie dieselbe GoModel-Base-URL
+bei und wählen Sie ein Modell, das Ihr Provider über GoModel bereitstellt.
+
+## 2. Den Responses-Endpunkt prüfen
+
+Senden Sie einen kleinen Request über GoModel:
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/v1/responses \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-5-mini",
+    "input": "Reply with exactly ok."
+  }'
+```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="change-me")
+
+response = client.responses.create(
+    model="gpt-5-mini",
+    input="Reply with exactly ok.",
+)
+
+print(response.output_text)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "change-me",
+});
+
+const response = await client.responses.create({
+  model: "gpt-5-mini",
+  input: "Reply with exactly ok.",
+});
+
+console.log(response.output_text);
+```
+
+</CodeGroup>
+
+Ist das Gateway korrekt angebunden, enthält die Response `ok`.
+
+## 3. Das SDK konfigurieren
+
+Richten Sie den OpenAI-Client des SDK auf GoModel aus:
+
+<CodeGroup>
+
+```python Python
+import asyncio
+import os
+
+from agents import Agent, Runner, set_default_openai_client, set_tracing_disabled
+from openai import AsyncOpenAI
+
+set_default_openai_client(
+    AsyncOpenAI(
+        base_url=os.getenv("OPENAI_BASE_URL", "http://localhost:8080/v1"),
+        api_key=os.getenv("GOMODEL_MASTER_KEY", "change-me"),
+    ),
+    use_for_tracing=False,
+)
+set_tracing_disabled(True)
+
+agent = Agent(
+    name="Gateway assistant",
+    instructions="Be concise.",
+    model=os.getenv("OPENAI_MODEL", "gpt-5-mini"),
+)
+
+
+async def main():
+    result = await Runner.run(agent, "Reply with exactly ok.")
+    print(result.final_output)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+import {
+  Agent,
+  run,
+  setDefaultOpenAIClient,
+  setOpenAIAPI,
+  setTracingDisabled,
+} from "@openai/agents";
+
+setDefaultOpenAIClient(
+  new OpenAI({
+    baseURL: process.env.OPENAI_BASE_URL ?? "http://localhost:8080/v1",
+    apiKey: process.env.GOMODEL_MASTER_KEY ?? "change-me",
+  }),
+);
+setOpenAIAPI("responses");
+setTracingDisabled(true);
+
+const agent = new Agent({
+  name: "Gateway assistant",
+  instructions: "Be concise.",
+  model: process.env.OPENAI_MODEL ?? "gpt-5-mini",
+});
+
+const result = await run(agent, "Reply with exactly ok.");
+console.log(result.finalOutput);
+```
+
+</CodeGroup>
+
+### Modell-IDs mit Namespace
+
+Das Python-SDK behandelt Strings wie `anthropic/claude-sonnet-4-20250514` und
+`gemini/gemini-2.0-flash` standardmäßig als Modellnamen mit Provider-Präfix.
+Sollen diese GoModel-IDs mit Namespace das Gateway unverändert erreichen,
+konfigurieren Sie den Modell-Provider des SDK im Pass-through-Modus für
+Modell-IDs:
+
+```python
+import asyncio
+import os
+
+from agents import Agent, MultiProvider, RunConfig, Runner
+from openai import AsyncOpenAI
+
+client = AsyncOpenAI(
+    base_url=os.getenv("OPENAI_BASE_URL", "http://localhost:8080/v1"),
+    api_key=os.getenv("GOMODEL_MASTER_KEY", "change-me"),
+)
+
+run_config = RunConfig(
+    model_provider=MultiProvider(
+        openai_client=client,
+        unknown_prefix_mode="model_id",
+        openai_prefix_mode="model_id",
+    )
+)
+
+agent = Agent(
+    name="Gateway assistant",
+    instructions="Be concise.",
+    model=os.getenv("OPENAI_MODEL", "anthropic/claude-sonnet-4-20250514"),
+)
+
+
+async def main():
+    result = await Runner.run(
+        agent,
+        "Reply with exactly ok.",
+        run_config=run_config,
+    )
+    print(result.final_output)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## Unterstützte SDK-Pfade
+
+GoModel unterstützt den normalen HTTP-Responses-Pfad des SDK:
+
+- `Runner.run(...)` ohne Streaming
+- `Runner.run_streamed(...)` mit Streaming über HTTP/SSE
+- Function-Tool-Schleifen
+- Handoffs und Agents-as-Tools, sofern sie zu Tool Calls des Modells
+  kompiliert werden
+- vom SDK verwaltete lokale Sessions, die den Input-Verlauf erneut senden
+- `/v1/conversations` für serverseitig verwaltete Conversation-Ressourcen
+- `/v1/responses/input_tokens`
+- `/v1/responses/compact`
+- lokaler Abruf von Responses über `/v1/responses/{id}` und
+  `/v1/responses/{id}/input_items`
+
+GoModel behält außerdem neuere Responses-Input-Items für native
+Responses-Provider bei. Muss ein Request für einen Provider, der Responses
+nicht nativ implementiert, in Chat Completions übersetzt werden, übersetzt
+GoModel strukturierte `text`-Output-Einstellungen in das `response_format` der
+Chat Completions (und reicht `text.verbosity` durch) – allerdings nur für
+Chat-Provider, die diese Felder unterstützen. Für zustandsbehaftete oder
+providernative Responses-Felder wie `previous_response_id`, `conversation` und
+gehostete Tool-Items gibt GoModel einen eindeutigen Fehler zurück.
+
+Die vollständige Feature-Matrix finden Sie unter
+[Responses-Kompatibilität](/de/advanced/responses-compatibility).
+
+## Speicherverhalten
+
+GoModel speichert lokale Response-Snapshots, damit Lebenszyklus-Endpunkte auch
+dann funktionieren, wenn der Upstream-Provider keinen Abruf von Responses
+unterstützt. Sendet das SDK `store: false`, persistiert GoModel diesen lokalen
+Response-Snapshot nicht.
+
+## Aktuelle Einschränkungen
+
+- Der WebSocket-Transport für Responses ist nicht implementiert. Verwenden Sie
+  mit GoModel den HTTP/SSE-Transport des SDK.
+- Gehostete Tools wie Websuche, Dateisuche und Computer Use erfordern einen
+  nativen Upstream-Provider, der diese Tool-Payloads unterstützt.
+  Chat-übersetzte Provider wie Anthropic und Gemini lehnen diese Tools ab,
+  sofern GoModel nicht eine explizite Zuordnung der Provider-Funktionen dafür
+  ergänzt.
+- Bei Anthropic wird `text.format` über die nativen Structured Outputs von
+  Claude (`json_schema`) oder über eine Anweisung im System-Prompt
+  (`json_object`) bedient, und `text.verbosity` wird mit einer Warnung
+  verworfen – Anthropic hat dafür keine Entsprechung.
+- `previous_response_id` wird an native Responses-Provider weitergeleitet. Für
+  Chat-übersetzte Provider löst GoModel die ID aus seinen gespeicherten
+  Responses auf und sendet Input und Output des vorherigen Turns erneut. Die
+  vorherige Response muss daher mit aktiviertem `store` erstellt worden sein.
+  `conversation` wird für jeden Provider aus den vom Gateway verwalteten
+  Conversations aufgelöst.
+- Tracing ist vom Modell-Routing getrennt. Deaktivieren Sie das Tracing des
+  SDK oder konfigurieren Sie einen echten OpenAI-Tracing-Key.
+
+## Weitere Beispiele
+
+Lauffähige Beispiele finden Sie in `docs/examples/openai-agents-sdk/`.
+
+## Referenzen
+
+- Konfiguration des OpenAI Agents SDK für Python:
+  [https://openai.github.io/openai-agents-python/config/](https://openai.github.io/openai-agents-python/config/)
+- Konfiguration des OpenAI Agents SDK für JavaScript:
+  [https://openai.github.io/openai-agents-js/guides/config/](https://openai.github.io/openai-agents-js/guides/config/)
+- Agents mit dem OpenAI Agents SDK ausführen:
+  [https://openai.github.io/openai-agents-python/running_agents/](https://openai.github.io/openai-agents-python/running_agents/)

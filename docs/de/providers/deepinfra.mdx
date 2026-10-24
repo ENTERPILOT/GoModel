@@ -1,0 +1,84 @@
+---
+title: "DeepInfra"
+description: "Konfigurieren Sie DeepInfra in GoModel für Chat, Responses, Embeddings, Bilder, Audio und Batches."
+icon: "server"
+keywords: ["DeepInfra", "offene Modelle", "open models", "Provider-Einrichtung", "provider setup", "Batches", "Bilder", "images", "Audio"]
+---
+
+DeepInfra stellt offene und weitergeleitete Modelle über eine OpenAI-kompatible API unter
+`https://api.deepinfra.com/v1/openai` bereit. GoModel leitet diese Endpunkte unverändert dorthin weiter:
+
+| GoModel-Endpunkt | DeepInfra-Modelle |
+| ---------------- | ---------------- |
+| `/v1/chat/completions` | Chat-Modelle (`Qwen/Qwen3-32B`, `openai/gpt-oss-120b`, ...) |
+| `/v1/responses` | Chat-Modelle, bedient von der nativen Responses API von DeepInfra |
+| `/v1/embeddings` | Embedding-Modelle (`Qwen/Qwen3-Embedding-0.6B`, `BAAI/bge-m3`, ...) |
+| `/v1/images/generations`, `/v1/images/edits` | Bildmodelle (`black-forest-labs/FLUX-1-schnell`, `Bria/fibo_edit`, ...) |
+| `/v1/audio/speech` | TTS-Modelle (`hexgrad/Kokoro-82M`, ...) |
+| `/v1/audio/transcriptions`, `/v1/audio/translations` | STT-Modelle (`openai/whisper-large-v3-turbo`, ...) |
+| `/v1/files`, `/v1/batches` | Batch-API von DeepInfra |
+
+## Konfiguration
+
+Erstellen Sie im [DeepInfra-Dashboard](https://deepinfra.com/dash/api_keys) einen API-Key und setzen Sie:
+
+```bash
+DEEPINFRA_API_KEY=...
+```
+
+Oder in `config.yaml`:
+
+```yaml
+providers:
+  deepinfra:
+    type: deepinfra
+    api_key: "${DEEPINFRA_API_KEY}"
+    # base_url ist standardmäßig "https://api.deepinfra.com/v1/openai".
+```
+
+Überschreiben Sie die Base-URL oder legen Sie eine feste Modellliste nur fest, wenn Sie dies benötigen:
+
+```bash
+DEEPINFRA_BASE_URL=https://api.deepinfra.com/v1/openai
+DEEPINFRA_MODELS=Qwen/Qwen3-32B,Qwen/Qwen3-Embedding-0.6B
+```
+
+## Modelle
+
+GoModel liest die Live-Liste `/models` von DeepInfra, einschließlich der Art jedes Modells
+(Chat, Embedding, Bild, Sprachausgabe, Transkription), der Kontextlänge, der Reasoning- und
+Vision-Tags sowie der Preise. Modelle zur Videogenerierung werden ausgelassen, weil GoModel
+für DeepInfra keinen Video-Endpunkt hat. Modell-IDs enthalten einen Schrägstrich; verwenden Sie sie
+unverändert, oder stellen Sie den Provider-Namen voran, um die Route festzulegen:
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "deepinfra/Qwen/Qwen3-32B", "messages": [{"role": "user", "content": "Hello"}]}'
+```
+
+Sowohl `reasoning_effort` als auch `reasoning: {"effort": ...}` werden von den
+Reasoning-Modellen von DeepInfra berücksichtigt, und `none` schaltet das Thinking bei hybriden
+Modellen wie Qwen3 ab.
+
+## Hinweise zum Verhalten
+
+- **Responses sind zustandslos.** DeepInfra speichert keine Responses, daher hat `store: true`
+  upstream keine Wirkung. Ist in GoModel ein Response-Speicher konfiguriert, funktionieren
+  Ketten mit `previous_response_id` trotzdem: Das Gateway spielt den gespeicherten Verlauf vor
+  dem Weiterleiten erneut ein. Ohne einen solchen Speicher lehnt DeepInfra `previous_response_id`
+  und `conversation` mit einem Invalid-Request-Fehler ab.
+- **Structured Output bei Responses läuft über Chat.** Der native Responses-Endpunkt von
+  DeepInfra lehnt jede `text`-Einstellung ab (`text.format`, `text.verbosity`), daher bedient
+  GoModel diese Requests über Chat Completions, wo `json_schema` und `json_object`
+  funktionieren.
+- **Sprachausgabe standardmäßig als MP3.** DeepInfra antwortet mit WAV, wenn `response_format`
+  fehlt; GoModel sendet stattdessen den Standardwert von OpenAI (`mp3`). Setzen Sie
+  `response_format` explizit, um ein anderes Format zu erhalten.
+- **Bildpreise gelten pro Bildeinheit.** DeepInfra führt Bildpreise pro Bildeinheit auf, und
+  GoModel erfasst diesen Tarif als Preis pro Bild. Die Kostenerfassung ist für Modelle, die
+  DeepInfra nach Größe oder Schrittzahl abrechnet, nur näherungsweise.
+- **Passthrough muss aktiviert werden.** Fügen Sie `deepinfra` zu `ENABLED_PASSTHROUGH_PROVIDERS`
+  hinzu, um `/p/deepinfra/...` bereitzustellen. Dieser Pfad leitet jeden Pfad unterhalb der
+  Base-URL mit dem DeepInfra-Key des Gateways weiter.

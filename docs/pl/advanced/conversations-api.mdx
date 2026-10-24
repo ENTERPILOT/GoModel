@@ -1,0 +1,395 @@
+---
+title: "Conversations API"
+description: "Twórz, odczytuj i usuwaj konwersacje kompatybilne z OpenAI oraz ich elementy przez GoModel, który przechowuje je w gatewayu, dzięki czemu możesz używać dowolnego providera."
+icon: "messages-square"
+keywords: ["conversations API", "/v1/conversations", "historia konwersacji", "conversation history", "requesty stanowe", "stateful requests"]
+---
+
+## Przegląd
+
+GoModel udostępnia endpointy Conversations API kompatybilne z OpenAI pod
+`/v1/conversations`.
+
+Konwersacje są **zasobem zarządzanym przez gateway**. Conversations API od OpenAI
+jest specyficzne dla providera, więc GoModel sam generuje ID konwersacji i przechowuje
+konwersację. Dzięki temu `/v1/conversations` jest dostępne i działa spójnie
+niezależnie od tego, który provider obsługuje ruch do Twoich modeli, i nie wymaga
+żadnej konfiguracji providera.
+
+## Obsługiwane endpointy
+
+| Endpoint | Zachowanie |
+| --- | --- |
+| `POST /v1/conversations` | Tworzy konwersację. Przyjmuje opcjonalne `items` i `metadata`. |
+| `GET /v1/conversations/{id}` | Zwraca zapisaną konwersację. |
+| `POST /v1/conversations/{id}` | Scala podane klucze z `metadata` konwersacji. |
+| `DELETE /v1/conversations/{id}` | Usuwa zapisaną konwersację. |
+| `POST /v1/conversations/{id}/items` | Dodaje do 20 elementów i zwraca dodane elementy jako listę. |
+| `GET /v1/conversations/{id}/items` | Wyświetla elementy z parametrami `after`, `include`, `limit` i `order`. |
+| `GET /v1/conversations/{id}/items/{item_id}` | Zwraca jeden element konwersacji. |
+| `DELETE /v1/conversations/{id}/items/{item_id}` | Usuwa jeden element i zwraca konwersację. |
+
+## Obiekt konwersacji
+
+```json
+{
+  "id": "conv_a1b2c3d4e5f6...",
+  "object": "conversation",
+  "created_at": 1741900000,
+  "metadata": {}
+}
+```
+
+`metadata` jest zawsze obecne i serializuje się jako `{}`, gdy jest puste.
+
+## Limity
+
+GoModel egzekwuje limity OpenAI Conversations, aby publiczny kontrakt pozostał
+kompatybilny:
+
+- `items` – maksymalnie 20 wpisów przy tworzeniu.
+- `metadata` – maksymalnie 16 par klucz-wartość; klucze do 64 znaków; wartości do
+  512 znaków.
+
+Payloady elementów odpowiadają unii elementów wejściowych/wyjściowych Responses API. GoModel
+normalizuje wygodne stringi wiadomości, nadaje stabilne ID elementów i zachowuje
+nowe lub specyficzne dla providera pola elementów, aby można je było później wyświetlić i odtworzyć.
+
+Listy elementów domyślnie zaczynają się od najnowszych (`order=desc`), po 20 elementów na stronę.
+Użyj zwróconego `last_id` jako kursora `after` w kolejnym requeście. `limit` przyjmuje
+do 100 elementów. Opcjonalny parametr `include` przyjmuje te same wartości co
+OpenAI Conversations API, w tym `reasoning.encrypted_content` i
+`message.output_text.logprobs`. GoModel przechowuje kompletne payloady elementów, więc
+opcjonalne pola pozostają dostępne dla późniejszych requestów, a zwracane są tylko pola
+wskazane w `include`.
+
+## Przechowywanie i retencja
+
+Standardowa aplikacja GoModel przechowuje konwersacje w skonfigurowanym współdzielonym
+backendzie storage (`sqlite`, `postgresql` lub `mongodb`), więc przetrwają restarty
+procesu. Snapshoty konwersacji wygasają po 30 dniach.
+
+Zapasowy magazyn w pamięci jest używany tylko przy osadzaniu serwera HTTP bez
+konfiguracji storage aplikacji, na przykład w lekkich testach. On również
+usuwa wpisy po 30 dniach i przechowuje maksymalnie 10 000 konwersacji,
+usuwając najpierw najstarsze.
+
+## Błędy
+
+GoModel zwraca błędy kompatybilne z OpenAI:
+
+- `400 invalid_request_error` – nieprawidłowa treść, brak `metadata` przy aktualizacji,
+  nieprawidłowy element lub przekroczony limit (pole `param` wskazuje problematyczne pole).
+- `404 not_found_error` – konwersacja lub żądany element nie istnieje.
+- `404 invalid_request_error` z `param: "after"` – kursor paginacji nie wskazuje
+  elementu w tej konwersacji.
+
+Zapis konwersacji jest częścią udanej tury `/v1/responses`. Jeśli
+provider odpowie poprawnie, ale ukończonej wymiany nie da się zapisać, request
+bez streamingu zwraca `500`; request ze streamingiem kończy się bez wysłania
+`response.completed`. GoModel obecnie nie deduplikuje ponowienia takiego
+nieudanego requestu przez klienta, więc retry może ponownie wywołać providera i ponownie
+wygenerować koszt. Nieudanej wymiany nie ma w historii konwersacji, więc sprawdzenie
+historii nie pozwala wiarygodnie ustalić, czy wywołanie providera już się wykonało. Unikaj
+automatycznych retry albo koordynuj je przez niezależny, trwały mechanizm
+idempotencji, gdy zduplikowane wywołania mają istotny koszt lub skutki uboczne.
+
+## Przykłady
+
+Utwórz konwersację:
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/conversations \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "metadata": { "topic": "support" }
+  }'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+conversation = client.conversations.create(metadata={"topic": "support"})
+print(conversation.id)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const conversation = await client.conversations.create({
+  metadata: { topic: "support" },
+});
+
+console.log(conversation.id);
+```
+
+</CodeGroup>
+
+Pobierz ją:
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/conversations/conv_abc123 \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+conversation = client.conversations.retrieve("conv_abc123")
+print(conversation)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const conversation = await client.conversations.retrieve("conv_abc123");
+console.log(conversation);
+```
+
+</CodeGroup>
+
+Zaktualizuj jej metadane (istniejące klucze, których tu nie podasz, zostają zachowane):
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/conversations/conv_abc123 \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "metadata": { "topic": "billing" }
+  }'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+conversation = client.conversations.update(
+    "conv_abc123",
+    metadata={"topic": "billing"},
+)
+print(conversation)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const conversation = await client.conversations.update("conv_abc123", {
+  metadata: { topic: "billing" },
+});
+
+console.log(conversation);
+```
+
+</CodeGroup>
+
+Dodaj zaawansowane elementy Responses:
+
+<CodeGroup>
+
+```bash curl
+curl 'http://localhost:8080/v1/conversations/conv_abc123/items?include=reasoning.encrypted_content' \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "items": [
+      {
+        "type": "function_call",
+        "call_id": "call_lookup_1",
+        "name": "lookup_order",
+        "arguments": "{\"order_id\":\"A-42\"}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "call_lookup_1",
+        "output": "{\"status\":\"shipped\"}"
+      }
+    ]
+  }'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+items = client.conversations.items.create(
+    "conv_abc123",
+    include=["reasoning.encrypted_content"],
+    items=[
+        {
+            "type": "function_call",
+            "call_id": "call_lookup_1",
+            "name": "lookup_order",
+            "arguments": '{"order_id":"A-42"}',
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call_lookup_1",
+            "output": '{"status":"shipped"}',
+        },
+    ],
+)
+
+print(items)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const items = await client.conversations.items.create("conv_abc123", {
+  include: ["reasoning.encrypted_content"],
+  items: [
+    {
+      type: "function_call",
+      call_id: "call_lookup_1",
+      name: "lookup_order",
+      arguments: '{"order_id":"A-42"}',
+    },
+    {
+      type: "function_call_output",
+      call_id: "call_lookup_1",
+      output: '{"status":"shipped"}',
+    },
+  ],
+});
+
+console.log(items);
+```
+
+</CodeGroup>
+
+Wyświetl kolejną stronę w porządku chronologicznym:
+
+<CodeGroup>
+
+```bash curl
+curl 'http://localhost:8080/v1/conversations/conv_abc123/items?order=asc&limit=10&after=msg_abc123' \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+for item in client.conversations.items.list(
+    "conv_abc123",
+    order="asc",
+    limit=10,
+    after="msg_abc123",
+):
+    print(item)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+for await (const item of client.conversations.items.list("conv_abc123", {
+  order: "asc",
+  limit: 10,
+  after: "msg_abc123",
+})) {
+  console.log(item);
+}
+```
+
+</CodeGroup>
+
+Usuń ją:
+
+<CodeGroup>
+
+```bash curl
+curl -X DELETE http://localhost:8080/v1/conversations/conv_abc123 \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+deleted = client.conversations.delete("conv_abc123")
+print(deleted.deleted)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const deleted = await client.conversations.delete("conv_abc123");
+console.log(deleted.deleted);
+```
+
+</CodeGroup>

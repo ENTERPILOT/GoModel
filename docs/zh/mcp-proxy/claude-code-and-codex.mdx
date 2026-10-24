@@ -1,0 +1,156 @@
+---
+title: "连接 Claude Code 和 Codex"
+description: "使用 Streamable HTTP 和 GoModel Bearer 密钥，将 Claude Code 或 Codex 连接到 GoModel MCP 代理。"
+icon: "terminal"
+keywords: ["MCP 代理", "MCP 配置", "MCP proxy", "Claude Code MCP", "Codex MCP", "Streamable HTTP", "MCP setup"]
+---
+
+Claude Code 和 Codex 可以将 GoModel 用作单一的、经过认证的 MCP 端点。它们会获得 GoModel 提供的工具，
+而 Linear、GitHub 和其他上游 MCP 服务器的凭据则保留在 GoModel 中。
+
+`Claude Code or Codex -> GoModel /mcp -> upstream MCP servers`
+
+## 开始之前
+
+您需要：
+
+- 一个客户端可以访问的、正在运行的 GoModel 部署。
+- 在 GoModel 控制台或配置中至少有一个已连接的 MCP 服务器。
+- 一个 GoModel 主密钥，或有权查看该服务器的托管认证密钥。
+
+在 shell 中设置客户端凭据：
+
+```bash
+export GOMODEL_API_KEY="sk-your-gomodel-key"
+```
+
+远程部署请使用 HTTPS。对于本地 GoModel 进程，请将示例 URL 替换为 `http://localhost:8080/mcp`。
+
+<Note>
+  客户端只需发送 GoModel 密钥。上游 Token（例如 Linear API 密钥）请在 GoModel 的 MCP 服务器设置中配置。
+</Note>
+
+## 选择端点
+
+| 端点 | 向客户端提供的工具目录 |
+| --- | --- |
+| `https://gomodel.example.com/mcp` | 该密钥可见的所有服务器，工具名称形如 `linear_create_issue` |
+| `https://gomodel.example.com/mcp/linear` | 仅 Linear，使用其原始工具名称 |
+| `https://gomodel.example.com/mcp/github` | 仅 GitHub，使用其原始工具名称 |
+
+通常选择聚合的 `/mcp` 端点。当某个 Agent 只需要较小的工具目录时，单服务器端点会很有用。
+
+## Claude Code
+
+将 GoModel 添加为用户作用域的 Streamable HTTP 服务器：
+
+```bash
+claude mcp add \
+  --transport http \
+  --scope user \
+  gomodel \
+  https://gomodel.example.com/mcp \
+  --header "Authorization: Bearer ${GOMODEL_API_KEY}"
+```
+
+检查已保存的连接：
+
+```bash
+claude mcp list
+claude mcp get gomodel
+```
+
+启动 Claude Code 并输入 `/mcp`，即可查看连接和可用工具。
+
+### 避免将密钥写入共享文件
+
+对于项目作用域的配置，请在项目根目录中创建 `.mcp.json`。Claude Code
+会展开 URL 和请求头中的环境变量：
+
+```json
+{
+  "mcpServers": {
+    "gomodel": {
+      "type": "http",
+      "url": "https://gomodel.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${GOMODEL_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+该文件可以在不包含密钥的情况下共享。每个用户在本地导出
+`GOMODEL_API_KEY`，并在 Claude Code 提示时批准该项目的 MCP 服务器。
+
+有关配置作用域和更多管理命令，请参阅官方 [Claude Code MCP 文档](https://docs.anthropic.com/en/docs/claude-code/mcp)。
+
+## Codex
+
+Codex 可以从环境变量读取 Bearer Token，而无需将其值存储在 MCP 配置中：
+
+```bash
+codex mcp add gomodel \
+  --url https://gomodel.example.com/mcp \
+  --bearer-token-env-var GOMODEL_API_KEY
+```
+
+检查已保存的连接：
+
+```bash
+codex mcp list
+```
+
+启动 Codex 并输入 `/mcp`，即可查看服务器及其工具。Codex CLI
+和 IDE 扩展共用这份 MCP 配置。
+
+等效的 `~/.codex/config.toml` 条目如下：
+
+```toml
+[mcp_servers.gomodel]
+url = "https://gomodel.example.com/mcp"
+bearer_token_env_var = "GOMODEL_API_KEY"
+```
+
+有关审批策略、工具过滤器和项目作用域配置，请参阅官方 [Codex MCP 文档](https://developers.openai.com/codex/mcp/)。
+
+## 限制聚合的工具目录
+
+如需保留 `/mcp` URL 的同时只选择部分上游服务器，请发送
+`X-MCP-Servers` 请求头，值为以逗号分隔的服务器 slug。
+
+对于 Claude Code，请在 `.mcp.json` 中将其添加到 `Authorization` 旁边：
+
+```json
+"headers": {
+  "Authorization": "Bearer ${GOMODEL_API_KEY}",
+  "X-MCP-Servers": "linear,github"
+}
+```
+
+对于 Codex，请添加一个静态请求头：
+
+```toml
+[mcp_servers.gomodel]
+url = "https://gomodel.example.com/mcp"
+bearer_token_env_var = "GOMODEL_API_KEY"
+http_headers = { "X-MCP-Servers" = "linear,github" }
+```
+
+`X-MCP-Servers` 中未知的 slug 会被忽略。GoModel 仍会应用认证密钥的 `user_path` 可见性以及每个服务器的允许 / 禁止工具过滤器。
+
+## 故障排查
+
+| 现象 | 检查项 |
+| --- | --- |
+| `401 Unauthorized` | `GOMODEL_API_KEY` 已导出，且包含有效的 GoModel 密钥 |
+| 已连接但没有工具 | 密钥的 `user_path`、服务器的可见性设置，以及允许 / 禁止工具过滤器 |
+| 服务器状态为 degraded | 在控制台中打开其工具目录，查看最近的错误，然后使用 **Reconnect** |
+| 最近的错误显示 `no MCP endpoint at that path`（旧版本：初始连接时显示 `session not found`） | 服务器的 `url` 需包含其 MCP 端点路径，例如 mcp-devtools 为 `/http`，Firecrawl 为 `/v2/mcp` |
+| 最近的错误提到 `HTTP 405 Method Not Allowed` | 服务器的 `transport` 需与端点匹配：Streamable HTTP 使用 `http`，`sse` 仅用于旧版 SSE 服务器 |
+| 本地可用但远程不可用 | 检查公网 URL、TLS 证书、防火墙，以及反向代理对 `/mcp` 的转发 |
+
+GoModel 的下游 MCP 端点使用 Bearer 认证，而不是交互式 OAuth 流程。请不要运行 `codex mcp login gomodel`；请按上文所示配置 Bearer Token。
+
+有关代理行为、上游配置、生命周期和安全细节，请参阅 [MCP 网关](/zh/features/mcp-gateway)。

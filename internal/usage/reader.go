@@ -58,6 +58,10 @@ type UsageSummary struct {
 	TotalInputCost        *float64 `json:"total_input_cost"`
 	TotalOutputCost       *float64 `json:"total_output_cost"`
 	TotalCost             *float64 `json:"total_cost"`
+	// TotalBilledCost is what the period was billed at: provider cost plus
+	// markup. Unlike the other cost fields it includes billed response-cache
+	// hits in every cache mode, because those are billed to the caller too.
+	TotalBilledCost *float64 `json:"total_billed_cost" extensions:"x-nullable"`
 	// Rewrite savings: prompt tokens request rewriters removed before the
 	// provider call, and the estimated input cost avoided (nil when no
 	// matched row had a priced savings estimate).
@@ -125,6 +129,7 @@ type ModelUsage struct {
 	InputCost    *float64 `json:"input_cost"`
 	OutputCost   *float64 `json:"output_cost"`
 	TotalCost    *float64 `json:"total_cost"`
+	BilledCost   *float64 `json:"billed_cost" extensions:"x-nullable"`
 	GroupCacheFields
 }
 
@@ -137,6 +142,7 @@ type UserPathUsage struct {
 	InputCost    *float64 `json:"input_cost" extensions:"x-nullable"`
 	OutputCost   *float64 `json:"output_cost" extensions:"x-nullable"`
 	TotalCost    *float64 `json:"total_cost" extensions:"x-nullable"`
+	BilledCost   *float64 `json:"billed_cost" extensions:"x-nullable"`
 	GroupCacheFields
 }
 
@@ -152,6 +158,7 @@ type LabelUsage struct {
 	InputCost    *float64 `json:"input_cost" extensions:"x-nullable"`
 	OutputCost   *float64 `json:"output_cost" extensions:"x-nullable"`
 	TotalCost    *float64 `json:"total_cost" extensions:"x-nullable"`
+	BilledCost   *float64 `json:"billed_cost" extensions:"x-nullable"`
 	GroupCacheFields
 }
 
@@ -374,6 +381,9 @@ type UsageLogEntry struct {
 	OutputCost             *float64       `json:"output_cost"`
 	TotalCost              *float64       `json:"total_cost"`
 	CostSource             string         `json:"cost_source,omitempty"`
+	MarkupPercent          *float64       `json:"markup_percent,omitempty"`
+	MarkupSelector         string         `json:"markup_selector,omitempty"`
+	BilledCost             *float64       `json:"billed_cost,omitempty"`
 	RawData                map[string]any `json:"raw_data,omitempty"`
 	CostsCalculationCaveat string         `json:"costs_calculation_caveat,omitempty"`
 	RewriteTokensSaved     int64          `json:"rewrite_tokens_saved,omitempty"`

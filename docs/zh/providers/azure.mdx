@@ -1,0 +1,138 @@
+---
+title: "Azure OpenAI：部署 URL 与 api-version"
+sidebarTitle: "Azure OpenAI"
+description: "在 GoModel 中使用基于部署的 URL 和 api-version 查询参数配置 Azure OpenAI。"
+icon: "/brand/azure.svg"
+keywords: ["Azure OpenAI", "Azure 端点", "部署名称", "提供商配置", "azure endpoint", "deployment name", "api-version", "api_version", "provider setup"]
+---
+
+Azure OpenAI 使用 OpenAI 的 API 格式，但有两处差异由 GoModel 负责处理：使用 `api-key` 请求头而不是 `Authorization: Bearer`，并且每个请求都必须带有 `api-version` 查询参数。
+
+## 配置
+
+```bash
+AZURE_API_KEY=...
+AZURE_BASE_URL=https://your-resource.openai.azure.com/openai/deployments/your-deployment
+AZURE_API_VERSION=2024-10-21   # 可选，默认为 2024-10-21
+GOMODEL_MASTER_KEY=change-me
+```
+
+或在 `config.yaml` 中配置：
+
+```yaml
+providers:
+  azure:
+    type: azure
+    base_url: "${AZURE_BASE_URL}"
+    api_key: "${AZURE_API_KEY}"
+    api_version: "2024-10-21"
+```
+
+## 运行 GoModel
+
+<CodeGroup>
+
+```bash Docker (.env 文件)
+docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
+```
+
+```bash Docker (inline -e)
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e AZURE_API_KEY="..." \
+  -e AZURE_BASE_URL="https://your-resource.openai.azure.com/openai/deployments/your-deployment" \
+  enterpilot/gomodel
+```
+
+```bash Binary (make build)
+make build
+./bin/gomodel
+```
+
+</CodeGroup>
+
+## 验证
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-5",
+    "messages": [{"role": "user", "content": "Reply with the single word ok."}],
+    "max_tokens": 80
+  }'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+completion = client.chat.completions.create(
+    model="gpt-5",
+    messages=[{"role": "user", "content": "Reply with the single word ok."}],
+    max_tokens=80,
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const completion = await client.chat.completions.create({
+  model: "gpt-5",
+  messages: [{ role: "user", content: "Reply with the single word ok." }],
+  max_tokens: 80,
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
+
+`GET /v1/models` 返回该 Azure 资源暴露的部署，并带有 `owned_by: "azure"`。流式传输、Responses、嵌入（Embeddings）和批处理的使用方式完全相同；批处理结果通过 `/openai/batches` 资源路径路由。
+
+## 多个部署
+
+每个 Azure 部署都是一个独立的端点。请使用带后缀的环境变量将它们注册为不同的提供商：
+
+```bash
+AZURE_GPT5_API_KEY=...
+AZURE_GPT5_BASE_URL=https://your-resource.openai.azure.com/openai/deployments/gpt-5
+
+AZURE_EMBED_API_KEY=...
+AZURE_EMBED_BASE_URL=https://your-resource.openai.azure.com/openai/deployments/text-embedding-3-small
+```
+
+这会注册 `azure-gpt5` 和 `azure-embed`。如果要通过单个提供商暴露同一资源下的所有部署，请将 `AZURE_BASE_URL` 指向资源根路径（不带 `/deployments/...`），并使用[虚拟模型](/zh/features/virtual-models)或 `AZURE_MODELS` 声明具体的部署名称。
+
+## 说明
+
+- GoModel 接受门户中提供的部署级 URL。对于账户级操作（模型列表、批处理），GoModel 会自动去掉 `/openai/deployments/<deployment>` 后缀，因此一个 `AZURE_BASE_URL` 即可同时覆盖聊天调用和资源级调用。
+- 只有当您需要其他稳定版或预览版（例如较新的 Responses API 接口）时，才需要显式设置 `AZURE_API_VERSION`。
+
+## 故障排查
+
+- **`401 Unauthorized` / `403`**：`AZURE_API_KEY` 与托管该部署的资源不匹配，或 URL 中的部署名称有误。
+- **`Resource not found` / `DeploymentNotFound`**：请求体中的模型必须是部署名称，而不是底层的基础模型。
+- **`unsupported api version`**：将 `AZURE_API_VERSION` 升级到您所调用功能支持的版本。较新的 Responses API 功能需要较新的预览版本。
+
+## 参考
+
+- [Azure OpenAI REST API versioning](https://learn.microsoft.com/azure/ai-services/openai/reference)
+- [Azure OpenAI deployments](https://learn.microsoft.com/azure/ai-services/openai/how-to/create-resource)
+- [Azure OpenAI authentication](https://learn.microsoft.com/azure/ai-services/openai/how-to/managed-identity)

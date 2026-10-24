@@ -1,0 +1,107 @@
+---
+title: "Prompt-Komprimierung"
+description: "Reduzieren Sie wiederholten und strukturellen Kontext in Inferenz-Requests, bevor sie den Provider erreichen, ohne die Struktur des Requests zu verändern."
+icon: "package-minus"
+tag: "Pro"
+keywords: ["GoModel Pro", "Prompt-Komprimierung", "prompt compression", "Token-Einsparungen", "token savings", "Deduplizierung", "deduplication", "Prompt-Cache", "prompt cache"]
+---
+
+<Frame caption="Seite „Usage“ im Dashboard: Pro-Einsparungen über sieben Tage Produktions-Traffic.">
+  <img src="/pro/pro-saved.webp" alt="Usage Analytics mit geschätzten Kosten von $268.63 und $45.17 Pro-Einsparung, 14.4% weniger" />
+</Frame>
+
+## In der Produktion bewährt
+
+Die Prompt-Komprimierung wurde mit Milliarden von Produktions-Tokens in
+agentischen Coding-, Chat- und Tool-lastigen Workloads erprobt.
+
+- **Verlustfrei.** Die Komprimierung ersetzt nur Inhalte, die das Modell im selben Request
+  bereits gesehen hat, durch einen Verweis darauf, oder kodiert strukturierte Daten
+  umkehrbar neu. Das Modell erhält dieselben Informationen; nichts wird zusammengefasst
+  oder weggelassen. Die einzige verlustbehaftete Option, das Kürzen von Tool-Ergebnissen, ist eine separate
+  Richtlinie, die standardmäßig ausgeschaltet ist.
+- **Keine Beeinträchtigung des Prompt-Caches.** Da das zuvor gesendete Präfix einer
+  Session Byte für Byte wiederholt wird und nur neue Nachrichten umgeschrieben werden,
+  treffen die Prompt-Caches der Provider über mehrere Turns hinweg weiterhin. Tester beobachteten sogar
+  eine *Steigerung* der Prompt-Cache-Treffer um etwa 2 %, da kürzere, stabilere
+  Requests besser in den Cache passen – was zusätzliche Einsparungen zur eigentlichen
+  Komprimierung bringt.
+- **Echte Einsparungen von 2 %–20 %** der Input-Tokens bei unseren Testern, je nach
+  Anwendungsfall. Agenten, die Dateien erneut lesen, Tool-Ausgaben wiederholen oder lange
+  Verläufe mitführen, liegen am oberen Ende dieser Spanne; kurzer, nicht repetitiver Chat liegt
+  am unteren Ende, wo der Kompressor Requests einfach unverändert weiterleitet.
+- **Volle Kontrolle.** Wählen Sie die Stufe pro Gateway oder pro Request, schließen Sie
+  Modelle per Glob aus, schützen Sie bestehende Verläufe mit `new_messages_only`, behalten Sie
+  Quellcode wortgetreu bei und prüfen Sie jede Umschreibung über Response-Header,
+  Audit-Revisionen und Metriken.
+
+## Übersicht
+
+Die Prompt-Komprimierung schreibt unterstützte Inferenz-Requests um, bevor sie den
+Provider erreichen. Sie reduziert wiederholten oder strukturellen Kontext und erhält dabei die
+Nicht-Text-Struktur des Requests.
+
+Unterstützt werden `POST /v1/chat/completions`, `POST /v1/messages` und
+`POST /v1/responses`. Argumente von Tool-Aufrufen, Nicht-Text-Teile und unbekannte JSON-Felder
+bleiben unverändert. Reasoning-Elemente von Responses werden immer unverändert
+wiederholt, da die Responses API sie zusammen mit Function Calls verlangen kann.
+
+Die Standardrichtlinie `high` kombiniert die Deduplizierung von Zeilenfolgen mit Normalisierung:
+
+- Zeilennummern-Spalten aus Dateilesevorgängen werden zu einem kompakten Bereichs-Header
+- wiederholtes Chat-Completions-Reasoning wird entfernt, wenn dies sicher möglich ist
+- bekannte Hüllen von Tool-Ergebnissen, Suchergebnisse, Logs, JSON und Unified Diffs
+  werden inhaltsbezogen normalisiert
+- lohnende homogene JSON-Arrays und strukturierte Logs verwenden umkehrbare,
+  selbstbeschreibende Kodierungen
+
+Der Kompressor ist deterministisch und schlägt offen fehl („fail open“). Er leitet einen Request
+unverändert weiter, wenn eine Umschreibung unter der Einsparungsschwelle liegt oder ihr Arbeitsbudget
+überschreiten würde. Quellcode bleibt standardmäßig erhalten; aktivieren Sie die Code-Deduplizierung nur,
+wenn die zusätzliche Einsparung es wert ist, exakt wiederholten Quellcode durch Verweise zu ersetzen.
+
+Für eine erkannte Session behält das Gateway den exakten Body, den es zuvor
+upstream gesendet hat, und wiederholt dieses Präfix in späteren Turns Byte für Byte. Das schützt ein
+Prompt-Cache-Präfix beim Provider und erlaubt neuen Nachrichten zugleich, auf wiederholte
+Verläufe zu verweisen. Verwenden Sie `new_messages_only`, wenn das Gateway einer Unterhaltung beitreten kann, deren
+Präfix es nicht beobachtet hat.
+
+## Komprimierung konfigurieren
+
+| Umgebungsvariable | Standardwert | Zweck |
+| --- | --- | --- |
+| `PRO_COMPRESSION_LEVEL` | `high` | Wählen Sie `none`, `low`, `medium` oder `high`. Ein expliziter Wert macht die Einstellung im Dashboard schreibgeschützt. |
+| `PRO_COMPRESSION_SCOPE` | `full_history` | Verwenden Sie `new_messages_only`, um bestehende Gesprächsverläufe zu schützen. |
+| `PRO_COMPRESSION_EXCLUDE_MODELS` | — | Kommagetrennte Globs für angefragte Modelle, die übersprungen werden, etwa `ollama/*`. |
+| `PRO_COMPRESSION_MIN_BLOCK_CHARS` | `128` | Mindestgröße einer wiederholten Zeilenfolge in der Voreinstellung `high`. |
+| `PRO_COMPRESSION_MIN_SAVINGS_TOKENS` | `32` | Geschätzte Mindest-Nettoeinsparung in der Voreinstellung `high`. |
+| `PRO_COMPRESSION_DEDUPLICATE_CODE` | `false` | Erlaubt, wiederholte Quellcode-Abschnitte durch Verweise zu ersetzen. |
+| `PRO_COMPRESSION_NORMALIZE` | `true` | Aktiviert Inhaltsnormalisierung und die Stabilisierung von Tool-Schemas. |
+| `PRO_COMPRESSION_COMPRESS_JSON_STRUCTURE` | Voreinstellung `high` | Aktiviert die umkehrbare JSON-Tabellenkodierung. |
+| `PRO_COMPRESSION_COMPRESS_LOG_STRUCTURE` | Voreinstellung `high` | Aktiviert die umkehrbare Kodierung strukturierter Logs. |
+
+Setzen Sie `PRO_COMPRESSION_LEVEL=none`, um die Komprimierung für das gesamte
+Gateway zu deaktivieren. Für einen einzelnen Request senden Sie:
+
+```http
+X-GoModel-Compression: off
+```
+
+Das Opt-out pro Request und die Stufe `none` umgehen das Parsen des Request-Bodys, sodass
+der Request unverändert weitergeleitet wird.
+
+## Komprimierung prüfen
+
+Komprimierte Responses enthalten die geschätzte Einsparung und die Anzahl der ersetzten
+doppelten Blöcke:
+
+```http
+X-GoModel-Pro-Tokens-Saved: 1843
+X-GoModel-Pro-Compression-Blocks: 12
+```
+
+Audit-Logs bewahren den ursprünglichen Request und eine Revision pro Rewriter auf. Die
+Revision erfasst ihre Bytegrößen und Komprimierungsdetails; der umgeschriebene Body wird
+zusätzlich aufbewahrt, wenn `LOGGING_LOG_BODIES=true` gesetzt ist. Prometheus-Metriken verwenden das
+Präfix `gomodel_pro_compression_`, und die Seite „Usage“ im Dashboard zeigt die Pro-Einsparungen
+in Tokens oder Kosten.

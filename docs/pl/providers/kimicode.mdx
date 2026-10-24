@@ -1,0 +1,85 @@
+---
+title: "Kimi Code"
+description: "Skonfiguruj Kimi Code w GoModel i poznaj jego alias modelu, zastrzeżenia dotyczące embeddingów oraz zachowanie limitów (quota)."
+icon: "code"
+keywords: ["Kimi Code", "Moonshot", "quota", "limit", "provider setup", "konfiguracja providera"]
+---
+
+Kimi Code to asystent programisty kompatybilny z OpenAI, udostępniany pod `https://api.kimi.com/coding/v1`.
+GoModel kieruje requesty czatu, listowania modeli, embeddingów i passthrough przez wspólny
+adapter OpenAI. Endpoint `/v1/responses` jest przekazywany natywnie do upstreamowego Responses
+API, zamiast być tłumaczonym przez chat completions, a pliki i batche nie są
+obsługiwane przez upstreamowy endpoint.
+
+Kimi Code nie przechowuje odpowiedzi. Requesty ze `store: true` są przepisywane na `store: false`
+(upstream odrzuca `store: true` z kodem 400). Łączenie odpowiedzi w łańcuch działa tylko przez GoModel: przy
+skonfigurowanym magazynie odpowiedzi gateway rozwija łańcuch `previous_response_id`, odtwarzając
+zapisaną historię w requeście przed jego wysłaniem, a referencja `conversation` jest rozwiązywana
+w ten sam sposób przez magazyn konwersacji. Bez tych magazynów request zawierający
+`previous_response_id` lub `conversation` jest odrzucany z błędem nieprawidłowego requestu, bo
+upstream nigdy nie będzie w stanie rozwiązać wskazanego stanu.
+
+## Konfiguracja
+
+```bash
+KIMICODE_API_KEY=...
+```
+
+Albo w `config.yaml`:
+
+```yaml
+providers:
+  kimicode:
+    type: kimicode
+    base_url: "https://api.kimi.com/coding/v1"
+    api_key: "${KIMICODE_API_KEY}"
+```
+
+<Note>
+  `type` providera to `kimicode` (bez myślnika). Klucz konfiguracji (`kimicode` w
+  powyższym przykładzie) jest dowolny i służy wyłącznie do identyfikacji tego wpisu w Twojej
+  konfiguracji; możesz go zmienić.
+</Note>
+
+Możesz też nadpisać bazowy URL i listę modeli za pomocą:
+
+```bash
+KIMICODE_BASE_URL=https://api.kimi.com/coding/v1
+KIMICODE_MODELS=kimi-for-coding,bge_m3_embed
+```
+
+## Modele
+
+Standardowy alias modelu czatu to `kimi-for-coding`. Możesz odwołać się do niego w modelu
+wirtualnym lub wywołać go bezpośrednio przez endpoint `/v1/chat/completions` kompatybilny z OpenAI.
+
+```yaml
+virtual_models:
+  - source: kimi-coding
+    target: kimicode/kimi-for-coding
+```
+
+## Embeddingi
+
+Kimi Code udostępnia `bge_m3_embed` do embeddingów, ale ten model nie jest udokumentowany
+po stronie upstreamu. Traktuj go jako eksperymentalny: sprawdź dostępność i wymiarowość na swoim koncie,
+zanim zaczniesz polegać na nim w produkcyjnych workflowach.
+
+## Cennik i limity
+
+Kimi Code nie publikuje cen za token. Ponieważ śledzenie kosztów użycia w GoModel nie ma
+ceny, przez którą mogłoby mnożyć, raportuje `cost` równe zero dla requestów do Kimi Code. Strategia load balancingu
+`cost` nie może preferować tego providera ani szeregować go według ceny, ale nadal może awaryjnie wybrać Kimi Code,
+gdy żaden provider z ceną nie jest dostępny.
+
+Limity upstreamu działają na zasadzie cotygodniowego odnowienia oraz kroczącego pięciogodzinnego okna. Zaplanuj
+ograniczenia przy skokach ruchu i wybieraj zachowawcze nadpisania retry per provider:
+
+```yaml
+providers:
+  kimicode:
+    type: kimicode
+    base_url: "https://api.kimi.com/coding/v1"
+    api_key: "${KIMICODE_API_KEY}"
+    retries: 3
+```

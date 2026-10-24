@@ -1,0 +1,162 @@
+---
+title: "快速开始"
+description: "GoModel AI 网关：20 秒内运行兼容 OpenAI 的 LLM 网关，发送第一个请求并查看实时日志。"
+icon: "rocket"
+keywords: ["快速开始", "安装", "入门", "AI 网关部署", "quick start", "install", "getting started", "AI gateway setup", "Docker"]
+---
+
+## 20 秒运行 GoModel
+
+### 1. 安装并启动 GoModel
+
+<Tabs>
+  <Tab title="Docker">
+    ```bash
+    docker run --rm -p 8080:8080 \
+      -v gomodel_data:/app/data \
+      enterpilot/gomodel
+    ```
+  </Tab>
+  <Tab title="macOS / Linux">
+    ```bash
+    curl -fsSL https://gomodel.enterpilot.io/install.sh | sh
+    gomodel
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    irm https://gomodel.enterpilot.io/install.ps1 | iex
+    gomodel
+    ```
+  </Tab>
+  <Tab title="在线演示" icon="monitor-play">
+    [https://demo.enterpilot.io/admin/dashboard](https://demo.enterpilot.io/admin/dashboard?utm_source=gomodel_docs)
+  </Tab>
+</Tabs>
+
+### 2. 配置提供商
+
+您可以通过[环境变量](/zh/advanced/configuration#通过环境变量自动发现)、
+[config.yaml 文件](/zh/advanced/config-yaml)（基础设施即代码），或在控制台的
+[Providers 页面](/zh/providers/overview#不使用环境变量配置提供商)完成配置
+（这种方式无需重启）。
+
+![GoModel 控制台中的 Add Provider 对话框](/getting-started/images/add-provider.png)
+
+### 3. 发送第一个请求
+
+针对同一个网关，您可以使用 `curl`、OpenAI SDK，或 Python 和 JavaScript 版的 Anthropic SDK：
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer change-me" \
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [{"role": "user", "content": "Say hello in one sentence."}]
+  }'
+```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="change-me",
+)
+
+completion = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "Say hello in one sentence."}],
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "change-me",
+});
+
+const completion = await client.chat.completions.create({
+  model: "gpt-4o-mini",
+  messages: [{ role: "user", content: "Say hello in one sentence." }],
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+```python Python (Anthropic)
+import anthropic
+
+client = anthropic.Anthropic(
+    base_url="http://localhost:8080",
+    api_key="change-me",
+)
+
+message = client.messages.create(
+    model="claude-sonnet-4-6",
+    max_tokens=256,
+    messages=[{"role": "user", "content": "Say hello in one sentence."}],
+)
+
+print(message.content[0].text)
+```
+
+```javascript JavaScript (Anthropic)
+import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic({
+  baseURL: "http://localhost:8080",
+  apiKey: "change-me",
+});
+
+const message = await client.messages.create({
+  model: "claude-sonnet-4-6",
+  max_tokens: 256,
+  messages: [{ role: "user", content: "Say hello in one sentence." }],
+});
+
+console.log(message.content[0].text);
+```
+
+</CodeGroup>
+
+<Tip>
+  Anthropic SDK 示例调用的是 `POST /v1/messages`，即 GoModel 的
+  [兼容 Anthropic 的端点](/zh/advanced/anthropic-messages-api)。在该端点上可以使用任何已配置提供商的模型，而不仅限于 Anthropic 的模型。
+</Tip>
+
+## 管理面板预览
+
+在浏览器中打开以下 URL，即可查看管理控制台、实时审计日志等内容：
+
+`http://localhost:8080/admin/dashboard`
+
+<Tip>
+  控制台 UI 默认启用（`ADMIN_UI_ENABLED=true`）。Admin API
+  端点位于 `/admin/*`，使用与主 API 相同的 Bearer 认证。
+</Tip>
+
+### 用量分析
+
+![GoModel AI 网关用量分析控制台](/getting-started/images/usage-analytics.png)
+
+### 审计日志
+
+![GoModel AI 网关审计日志控制台](/getting-started/images/audit-logs.png)
+
+## 后续步骤
+
+- 投入生产环境：[生产环境部署](/zh/guides/production)
+- 升级、固定版本或卸载：[常见问题](/zh/about/faq)
+- 了解响应缓存：[缓存](/zh/features/cache)
+- 添加支出限额：[预算](/zh/features/budgets)
+- 配置生产环境设置：[配置](/zh/advanced/configuration)
+- 添加请求策略：[护栏](/zh/advanced/guardrails)
+- 连接 OpenClaw：[在 OpenClaw 中使用 GoModel](/zh/guides/openclaw)

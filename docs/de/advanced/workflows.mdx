@@ -1,0 +1,256 @@
+---
+title: "Workflows"
+description: "Wie das Matching von Workflows funktioniert, einschließlich des Vorrangs von user_path, der Eingrenzung nach Provider-Namen und der Guardrail-Steps pro Phase."
+icon: "workflow"
+keywords: ["Workflows", "workflows", "Routing-Regeln", "routing rules", "user_path-Vorrang", "user_path precedence", "Provider-Scoping", "provider scoping", "Guardrail-Steps", "guardrail steps"]
+---
+
+## Übersicht
+
+Workflows sind unveränderliche Versionen von Workflow-Richtlinien, die im
+Gateway gespeichert und pro Request zugeordnet werden.
+
+Derzeit steuern sie Verhalten, das in der Verantwortung des Gateways liegt, etwa:
+
+- Cache
+- Budgets
+- Audit-Logging
+- Nutzungserfassung
+- Guardrails: welche [Plugin-Instanzen](/de/advanced/guardrails) laufen, in welcher Phase und in welcher Reihenfolge
+- Failover für übersetzte Routen
+
+Jeder Request wird genau einem aktiven Workflow zugeordnet.
+
+## Scope-Felder
+
+Der Scope eines Workflows wird durch diese Felder definiert:
+
+- `scope_provider_name`
+- `scope_model`
+- `scope_user_path`
+
+`scope_provider_name` ist der Name der konfigurierten Provider-Instanz, nicht der Provider-Typ.
+
+Beispiele:
+
+- Provider-Typ: `openai`
+- Provider-Name: `openai_primary`
+
+Wenn Sie mehrere konfigurierte Provider desselben Typs haben, können Workflows sie über den Provider-Namen unabhängig voneinander ansprechen.
+
+## Rangfolge beim Matching
+
+Beim Matching von Workflows hat der User Path Vorrang.
+
+Für einen Request mit `user_path=/team/team1/user` prüft das Gateway zuerst die pfadbezogenen Kandidaten vom tiefsten Pfad bis zum Root:
+
+1. `provider_name + model + /team/team1/user`
+2. `provider_name + /team/team1/user`
+3. `/team/team1/user`
+4. `provider_name + model + /team/team1`
+5. `provider_name + /team/team1`
+6. `/team/team1`
+7. `provider_name + model + /team`
+8. `provider_name + /team`
+9. `/team`
+10. `provider_name + model + /`
+11. `provider_name + /`
+12. `/`
+13. `provider_name + model`
+14. `provider_name`
+15. `global`
+
+In der Praxis bedeutet das:
+
+- ein Workflow mit tieferem `user_path` schlägt einen allgemeineren Workflow, der nur auf Provider oder auf Provider+Modell eingegrenzt ist
+- bei gleicher Pfadtiefe ist Provider+Modell spezifischer als nur Provider
+- passt kein pfadbezogener Workflow, fällt das Gateway auf Provider+Modell zurück, dann auf Provider, dann auf global
+
+## Guardrail-Steps
+
+Der Workflow-Payload listet die auszuführenden Guardrail-Instanzen als `steps`
+auf. Jeder Step benennt eine Instanz (`ref`), die Phase, in der sie läuft, und
+ihre Position:
+
+```json
+{
+  "schema_version": 2,
+  "features": { "cache": true, "audit": true, "usage": true, "budget": true, "guardrails": true, "failover": true },
+  "steps": [
+    { "ref": "pii-redact",   "phase": "prompt",   "step": 10 },
+    { "ref": "policy-judge", "phase": "prompt",   "step": 10 },
+    { "ref": "safety-prompt","phase": "prompt",   "step": 20 },
+    { "ref": "mask-keys",    "phase": "response", "step": 10 },
+    { "ref": "mask-keys",    "phase": "stream",   "step": 10 }
+  ]
+}
+```
+
+- `phase` ist `prompt` (Standard, wenn weggelassen), `response` oder `stream`.
+  Das Plugin der Instanz muss diese Phase implementieren;
+  `GET /admin/workflows/guardrails` listet jede Instanz mit ihren `phases` auf.
+- Innerhalb einer Phase laufen die Steps in aufsteigender Reihenfolge von `step`
+  (eine nicht negative Ganzzahl); gleiche `step`-Werte laufen parallel. Höchstens
+  eine inhaltsverändernde Instanz darf sich einen `step` teilen.
+- Dieselbe `ref` darf einmal pro Phase vorkommen.
+- `features.guardrails: false` deaktiviert jeden Step des Workflows.
+
+Payloads der Version 1 (`"schema_version": 1` mit `"guardrails": [{"ref", "step"}]`)
+werden weiterhin akzeptiert und als Steps der Prompt-Phase kompiliert.
+Gespeicherte Workflows der Version 1 werden unverändert zurückgegeben; das
+Dashboard schreibt immer Version 2.
+
+Workflow-Ansichten (`GET /admin/workflows`, `GET /admin/workflows/:id`) geben den
+Hash jeder kompilierten Kette als `chain_hashes` aus (`{"prompt": "...", "response": "...", "stream": "..."}`).
+Die Identität der kompilierten Kette ist Teil beider Response-Cache-Keys. Eine
+Änderung an einem Guardrail in einer beliebigen Phase macht daher gecachte
+Antworten ungültig, die unter den alten Regeln entstanden sind, und zwei
+Workflows mit unterschiedlichen Ketten teilen sich nie gecachte Antworten.
+
+## Beispiele
+
+### Pfadvererbung
+
+Angenommen, Sie haben:
+
+- Workflow A: `scope_user_path=/team`
+- Workflow B: `scope_user_path=/team/team1`
+
+und der API-Key verwendet `user_path=/team/team1/user`, dann gewinnt Workflow B.
+
+Existiert Workflow B nicht, gewinnt Workflow A.
+
+### Eingrenzung nach Provider-Namen
+
+Wenn Sie zwei OpenAI-Provider haben:
+
+- `openai_primary`
+- `openai_backup`
+
+können Sie separate Workflows erstellen für:
+
+- `scope_provider_name=openai_primary`
+- `scope_provider_name=openai_backup`
+
+Obwohl beide den Provider-Typ `openai` haben, sind es unterschiedliche Workflow-Scopes.
+
+## API-Beispiel
+
+Erstellen Sie einen Workflow, der auf einen konfigurierten Provider-Namen, ein Modell und einen User-Path-Teilbaum eingegrenzt ist:
+
+<CodeGroup>
+
+```bash curl
+curl -X POST http://localhost:8080/admin/workflows \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope_provider_name": "openai_primary",
+    "scope_model": "gpt-5",
+    "scope_user_path": "/team/alpha",
+    "name": "team-alpha-openai-primary",
+    "description": "Disable cache for this tenant on the primary OpenAI provider",
+    "workflow_payload": {
+      "schema_version": 2,
+      "features": {
+        "cache": false,
+        "budget": true,
+        "audit": true,
+        "usage": true,
+        "guardrails": true,
+        "failover": true
+      },
+      "steps": [
+        { "ref": "pii-redact", "phase": "prompt", "step": 10 },
+        { "ref": "mask-keys", "phase": "response", "step": 10 }
+      ]
+    }
+  }'
+```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+workflow = client.post(
+    "/admin/workflows",
+    cast_to=httpx.Response,
+    body={
+        "scope_provider_name": "openai_primary",
+        "scope_model": "gpt-5",
+        "scope_user_path": "/team/alpha",
+        "name": "team-alpha-openai-primary",
+        "description": "Disable cache for this tenant on the primary OpenAI provider",
+        "workflow_payload": {
+            "schema_version": 2,
+            "features": {
+                "cache": False,
+                "budget": True,
+                "audit": True,
+                "usage": True,
+                "guardrails": True,
+                "failover": True,
+            },
+            "steps": [
+                {"ref": "pii-redact", "phase": "prompt", "step": 10},
+                {"ref": "mask-keys", "phase": "response", "step": 10},
+            ],
+        },
+    },
+)
+
+print(workflow.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const workflow = await client.post("/admin/workflows", {
+  body: {
+    scope_provider_name: "openai_primary",
+    scope_model: "gpt-5",
+    scope_user_path: "/team/alpha",
+    name: "team-alpha-openai-primary",
+    description: "Disable cache for this tenant on the primary OpenAI provider",
+    workflow_payload: {
+      schema_version: 2,
+      features: {
+        cache: false,
+        budget: true,
+        audit: true,
+        usage: true,
+        guardrails: true,
+        failover: true,
+      },
+      steps: [
+        { ref: "pii-redact", phase: "prompt", step: 10 },
+        { ref: "mask-keys", phase: "response", step: 10 },
+      ],
+    },
+  },
+});
+
+console.log(workflow);
+```
+
+</CodeGroup>
+
+## Hinweise
+
+- `scope_model` erfordert `scope_provider_name`
+- `scope_user_path` wird in die kanonische Form mit Schrägstrichen normalisiert
+- verwaltete API-Keys können den User-Path-Header des Requests überschreiben; das Workflow-Matching verwendet den effektiven User Path des Requests
+- Budgets werden nur durchgesetzt, wenn sowohl das globale Budget-Feature als auch das `budget`-Feature des zugeordneten Workflows aktiviert sind; siehe [Budgets](/de/features/budgets)
+- jede `ref` muss eine existierende Guardrail-Instanz benennen; ein Guardrail, auf den ein aktiver Workflow verweist, kann nicht gelöscht werden

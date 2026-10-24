@@ -1,0 +1,215 @@
+---
+title: "System One API"
+description: "Wysyłaj requesty decyzyjne TypeSafe System One (Jev, Kev) przez GoModel – przekazywane natywnie, z modelami wirtualnymi, guardrails, cache’em, failoverem, audytem i rejestrowaniem użycia."
+icon: "scale"
+keywords: ["System One", "systemone", "Jev", "Kev", "TypeSafe", "decision model", "model decyzyjny", "noul", "choice", "score", "OpenRouter"]
+---
+
+`POST /v1/systemone` obsługuje System One API od TypeSafe: request niesie
+`state` (tekst lub rekord do oceny) oraz mapę typowanych pytań, a odpowiedzią
+jest skalibrowane prawdopodobieństwo dla każdego pytania. To API decyzyjne, a
+nie generator tekstu, więc GoModel przekazuje je **natywnie** i nigdy nie
+tłumaczy go na czat ani z czatu. Aby korzystać z tych samych modeli przy
+strukturach requestów i odpowiedzi OpenAI, użyj
+[Decisions API](/pl/advanced/decisions-api), które GoModel tłumaczy na System
+One.
+
+Endpoint jest dostępny, gdy skonfigurowano [providera `jev`](/pl/providers/jev)
+(hostowany Jev lub self-hosted serwer Kev) albo providera `openrouter`. Bez
+nich odpowiada `404`.
+
+## Request i odpowiedź
+
+```bash
+curl -s http://localhost:8080/v1/systemone \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "jev-latest",
+    "state": "Shoes arrived two weeks late and in the wrong size. Also I see two charges on my card.",
+    "questions": {
+      "department": {"type": "choice", "instructions": "Which team should handle this?",
+                     "criteria": {"returns": "Exchanges, refunds, wrong items",
+                                  "shipping": "Delivery status, delays",
+                                  "billing": "Charges, invoices"}},
+      "escalate":   {"type": "noul", "instructions": "Does this need urgent human attention?"},
+      "frustration": {"type": "score", "instructions": "How frustrated is the customer?",
+                      "criteria": ["Calm", "Frustrated", "Very angry"]}
+    }
+  }'
+```
+
+Odpowiedź pochodzi od samego providera i jest przekazywana bez zmian:
+
+```json
+{
+  "model": "jev-1.13.0",
+  "answers": {
+    "department":  {"type": "choice", "choice": "returns", "confidence": 0.21,
+                    "probabilities": {"returns": 0.47, "shipping": 0.28, "billing": 0.25}},
+    "escalate":    {"type": "noul", "noul": 0.93},
+    "frustration": {"type": "score", "score": 1.44, "confidence": 0.78,
+                    "legend": {"0": "Calm", "1": "Frustrated", "2": "Very angry"},
+                    "probabilities": {"0": 0.00, "1": 0.56, "2": 0.44}}
+  },
+  "usage": {"input_tokens": 101, "output_tokens": 161}
+}
+```
+
+SDK TypeSafe wysyłają `POST {base_url}/v1/systemone`, więc skieruj je na
+główny adres gatewaya (`base_url="http://localhost:8080"`) z Twoim kluczem
+GoModel; zobacz [Jev / Kev](/pl/providers/jev#korzystanie-z-sdk-typesafe).
+
+## Trasy
+
+| Trasa | Co robi |
+| --- | --- |
+| `POST /v1/systemone` | Ocenia stan względem mapy pytań |
+| `POST /v1/systemone/permute` | Tylko Kev: uruchamia jedno pytanie Choice z kilkoma kolejnościami opcji (`n_perm`, od 1 do 64, domyślnie 6) |
+| `POST /v1/systemone/separate` | Tylko Kev: uruchamia każde pytanie w osobnym przebiegu w przód |
+
+Trasy Kev zachowują się jak `/v1/systemone`. Są odrzucane dla OpenRoutera,
+który obsługuje tylko trasę oceny; hostowany provider TypeSafe `jev` zwraca dla
+nich własne `404`.
+
+## Co robi gateway
+
+1. Rozwiązuje `model` jak w każdym innym endpoincie: gołą nazwę, nazwę z
+   providerem (`jev/jev-latest`) lub [model wirtualny](/pl/features/virtual-models),
+   a następnie stosuje [listę dozwolonych modeli](/pl/features/users)
+   wywołującego, [rate limity](/pl/features/rate-limits) i
+   [budżety](/pl/features/budgets).
+2. Uruchamia [guardrails](/pl/advanced/guardrails) promptu z workflow na
+   `state`.
+3. Serwuje identyczny wcześniejszy request z [cache’u odpowiedzi](/pl/features/cache).
+4. Przekazuje body, zmieniając jedynie `model` (rozwiązaną nazwę) i `state`
+   (jeśli edytował je guardrail). Pytania, kryteria i wszystkie inne pola
+   docierają do providera bajt w bajt.
+5. Przekazuje odpowiedź bez zmian i zapisuje ją w logu audytowym (typ requestu
+   **Decisions**) oraz w użyciu.
+
+## Obrazy
+
+Requesty z [obrazami](https://docs.typesafe.ai/images) TypeSafe działają w
+wysłanej postaci: `assets` w body JSON albo formularz `multipart/form-data`
+TypeSafe, w którym request JSON jest pierwszą częścią o nazwie `request`, a
+każdy obraz to część plikowa, którą asset wskazuje przez `part`. SDK TypeSafe
+wysyłają ten formularz dla obiektów `Image`. GoModel wstawia każdą część z
+obrazem do jej assetu jako `data_base64` i przekazuje jeden request JSON, więc
+guardrails, cache i failover obsługują obie formy tak samo. Obraz musi być w
+formacie PNG lub JPEG; `format` assetu jest zachowywany, gdy go podano, a w
+przeciwnym razie wynika z bajtów obrazu. Formularz, który TypeSafe by odrzucił
+– np. część nieużywana przez żaden asset, asset wskazujący brakującą część albo
+obraz niebędący PNG ani JPEG – zwraca `400`. Wysyłaj nagłówek
+`TypeSafe-Danger-Zone-Images: true`, jak wymaga TypeSafe; gateway go
+przekazuje. Serwery Kev odczytują wyłącznie tekst.
+
+```bash
+curl -s http://localhost:8080/v1/systemone \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "TypeSafe-Danger-Zone-Images: true" \
+  -F 'request={"model": "jev-latest", "state": {"door": "ref-door"},
+    "assets": {"ref-door": {"type": "image", "part": "door-photo"}},
+    "questions": {"person": {"type": "noul", "instructions": "Is there a person in `door`?"}}};type=application/json' \
+  -F 'door-photo=@door.png;type=image/png'
+```
+
+## Modele
+
+| Provider | Nazwy modeli |
+| --- | --- |
+| `jev` (hostowany) | `jev/jev-latest`, `jev/jev-preview` i dowolne wersjonowane ID, np. `jev/jev-1.13.0` |
+| `jev` (serwer Kev) | `kev/kev-latest` i aliasy checkpointu, dla providera o nazwie `kev` |
+| `openrouter` | `openrouter/typesafe/jev-1.13`, `openrouter/~typesafe/jev-latest` i inne modele decyzyjne OpenRoutera, np. `openrouter/jaredpalmer/kev-4b` |
+
+Modele System One są wymienione w `GET /v1/models` jako modele narzędziowe bez
+trybu generowania.
+
+TypeSafe wymienia tylko swoje aliasy, ale przyjmuje dowolne wersjonowane ID,
+więc przypięta wersja działa bez deklarowania: GoModel kieruje model, którego
+nie ma na liście, do providera `jev`, gdy nazwa wskazuje, do którego
+(`jev/jev-1.13.0`), albo – przy gołej nazwie – gdy skonfigurowany jest dokładnie
+jeden provider `jev`. Model wirtualny może przypiąć wersję w ten sam sposób.
+
+OpenRouter sam przyjmuje `jev-latest`, ale GoModel routuje według ID z jego
+katalogu. Aby zwykłe `jev-latest` (wartość domyślna SDK TypeSafe) działało przez
+OpenRoutera, dodaj model wirtualny:
+
+```yaml
+virtual_models:
+  - source: jev-latest
+    target: openrouter/~typesafe/jev-latest
+```
+
+## Cache
+
+Przy włączonym [cache’u odpowiedzi](/pl/features/cache) identyczny request (ta
+sama trasa, rozwiązany model, guardrails i body po edycjach guardrails)
+otrzymuje odpowiedź z cache’u dokładnego (`X-Cache: HIT (exact)`) i jest
+zapisywany w użyciu jako cache hit. Cache semantyczny nigdy nie obsługuje
+System One: stan, który jest jedynie podobny, to nie ta sama decyzja. Wyślij
+`Cache-Control: no-cache`, aby pominąć cache dla jednego requestu.
+
+## Failover
+
+Model wirtualny ze strategią `failover` przenosi request do kolejnego targetu,
+gdy bieżący zawodzi z błędem dostępności (domyślnie `429` lub `5xx`, w tym
+`529` od TypeSafe; zobacz [Failover](/pl/features/failover)). Każdy target
+otrzymuje request we własnej formie System One. Target bez tego API, np. model
+czatu, jest pomijany bez zużywania próby failoveru, a błędy klienta, takie jak
+źle sformułowane pytanie (`422`), są zwracane bez failoveru:
+
+```yaml
+virtual_models:
+  - source: decider
+    strategy: failover
+    targets:
+      - { model: kev/kev-latest }                # najpierw lokalny Kev
+      - { model: openrouter/typesafe/jev-1.13 }  # hostowany Jev, gdy Kev nie działa
+```
+
+Log audytowy pokazuje każdą próbę, użycie jest zapisywane pod targetem, który
+odpowiedział, a odpowiedź z failoveru nie trafia do cache’u.
+
+## Guardrails
+
+Guardrails widzą `state` jako pojedynczą wiadomość użytkownika: stan będący
+stringiem – jako jej tekst, każdą inną wartość JSON – jako zakodowany JSON,
+który po edycji nadal musi być poprawnym JSON-em. Tego potrzebują guardrails
+anonimizujące i blokujące; na przykład reguła `string_replace` maskująca numery
+kart działa na `state`, zanim opuści on gateway. Pytania to stały schemat
+Twojej aplikacji i nie są udostępniane.
+
+Edycje, na które request decyzyjny nie ma miejsca, np. system prompt
+wstrzyknięty przez guardrail obejmujący też modele czatu, są pomijane. Gateway
+loguje jedno ostrzeżenie dla każdego rodzaju pominiętej edycji, a powtórzenia
+loguje na poziomie debug. Guardrail, który sam odpowiedziałby na request,
+zamiast tego go blokuje, ponieważ wywołujący System One oczekują typowanych
+odpowiedzi, a nie tekstu.
+
+Stosowana jest wyłącznie faza promptu. Odpowiedź to typowane wartości, a nie
+completion, więc guardrails fazy response i stream nie są na niej uruchamiane i
+jest ona przekazywana bez zmian; workflow, który wybiera je dla requestu System
+One, loguje jedno ostrzeżenie na guardrail.
+
+## Błędy i niewłaściwe użycie
+
+Endpoint nigdy nie tłumaczy i informuje o tym, gdy request nie może zadziałać:
+
+| Sytuacja | Wynik |
+| --- | --- |
+| Nie skonfigurowano providera `jev` ani `openrouter` | `404` |
+| Brak `model` | `400` |
+| Model u providera bez System One albo model czatu, embeddingów lub inny model generujący (także przez model wirtualny) | `400 invalid_request_error` z wyjaśnieniem przyczyny; gateway loguje ostrzeżenie |
+| Model System One wysłany do `/v1/chat/completions`, `/v1/responses` lub `/v1/embeddings` | `400 invalid_request_error` wskazujący na `/v1/decisions` i `/v1/systemone` |
+| Błąd upstreamu, np. źle sformułowane pytanie | Status providera wraz z jego komunikatem |
+
+## Audyt, użycie i koszt
+
+Każde wywołanie jest wpisem audytowym pod swoją trasą, z żądanym i rozwiązanym
+modelem, providerem, body requestu i odpowiedzi, wynikami guardrails i próbami
+failoveru; filtruj log audytowy według typu requestu **Decisions**. W użyciu
+zapisywane są `input_tokens` i `output_tokens` odpowiedzi pod modelem, który
+odpowiedział. OpenRouter raportuje własne `usage.cost`, które jest zapisywane
+jako koszt requestu; dla hostowanego Jev zadeklaruj ceny na providerze (zobacz
+[Jev / Kev](/pl/providers/jev#modele-kontrola-dostępu-i-koszty)).

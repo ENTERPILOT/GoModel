@@ -13,11 +13,13 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers/chatgpt"
 	"github.com/enterpilot/gomodel/internal/providers/chutes"
 	"github.com/enterpilot/gomodel/internal/providers/cohere"
+	"github.com/enterpilot/gomodel/internal/providers/deepinfra"
 	"github.com/enterpilot/gomodel/internal/providers/deepseek"
 	"github.com/enterpilot/gomodel/internal/providers/edenai"
 	"github.com/enterpilot/gomodel/internal/providers/elevenlabs"
 	"github.com/enterpilot/gomodel/internal/providers/fireworks"
 	"github.com/enterpilot/gomodel/internal/providers/gemini"
+	"github.com/enterpilot/gomodel/internal/providers/githubcopilot"
 	"github.com/enterpilot/gomodel/internal/providers/groq"
 	"github.com/enterpilot/gomodel/internal/providers/hetzner"
 	"github.com/enterpilot/gomodel/internal/providers/jev"
@@ -61,11 +63,13 @@ func defaultProviderFactory(cfg *config.Config) *providers.ProviderFactory {
 	factory.Add(chatgpt.Registration)
 	factory.Add(chutes.Registration)
 	factory.Add(cohere.Registration)
+	factory.Add(deepinfra.Registration)
 	factory.Add(deepseek.Registration)
 	factory.Add(edenai.Registration)
 	factory.Add(elevenlabs.Registration)
 	factory.Add(fireworks.Registration)
 	factory.Add(gemini.Registration)
+	factory.Add(githubcopilot.Registration)
 	factory.Add(vertex.Registration)
 	factory.Add(groq.Registration)
 	factory.Add(hetzner.Registration)

@@ -1,0 +1,76 @@
+---
+title: "出站代理"
+description: "让单个提供商的流量经过 HTTP、HTTPS 或 SOCKS5 代理，其余提供商则保持网关全局的代理设置。"
+icon: "route"
+keywords: ["代理", "出站代理", "出站", "地域限制", "固定 IP", "proxy", "SOCKS5", "HTTP proxy", "egress", "HTTPS_PROXY", "geo-restricted", "static IP"]
+---
+
+默认情况下，GoModel 直接连接每个提供商，并对整个进程遵循标准的 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NO_PROXY` 变量。这可以满足所有流量都必须经过企业出站代理的场景。
+
+当只有**部分**提供商需要代理，或者不同提供商需要不同的代理时，请在提供商上设置 `proxy_url`。例如：访问在您所在地区被屏蔽的提供商、为某个提供商的允许列表提供固定的出站 IP，或者在其余流量保持直连的同时检查单个提供商的流量。
+
+## 配置
+
+仅通过环境变量配置的提供商，与其他所有提供商设置一样，使用提供商前缀和可选的实例后缀：
+
+```bash
+OPENAI_API_KEY=sk-...
+OPENAI_PROXY_URL=socks5://user:pass@10.0.0.1:1080
+
+# 同一类型的第二个实例，使用自己的代理
+OPENAI_EU_API_KEY=sk-...
+OPENAI_EU_PROXY_URL=http://egress-eu.internal:3128
+
+# 本地模型保持直连：不设置 proxy_url
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+或者在 `config.yaml` 中配置：
+
+```yaml
+providers:
+  openai:
+    type: openai
+    api_key: "${OPENAI_API_KEY}"
+    proxy_url: "${OPENAI_PROXY_URL}"
+  anthropic:
+    type: anthropic
+    api_key: "${ANTHROPIC_API_KEY}"
+    proxy_url: "http://egress.internal:3128"
+```
+
+同一设置对应控制台提供商编辑器中高级字段下的 **Outbound proxy URL** 字段。保存后密码会被掩码；编辑其他字段时会重新发送掩码值，网关会保留已存储的值。
+
+## 支持的代理
+
+| 方案 | 代理类型 |
+| --- | --- |
+| `http://` | HTTP CONNECT 代理（HTTPS 上游通过隧道传输） |
+| `https://` | 通过 TLS 访问的 HTTP CONNECT 代理 |
+| `socks5://` | SOCKS5，支持可选的 `user:pass@` 认证 |
+| `socks5h://` | 与 `socks5://` 相同 |
+
+主机名始终在代理上解析，因此 `socks5://` 和 `socks5h://` 的行为完全相同。URL 由方案、主机、可选端口（默认为 80、443 或 1080）和可选凭据组成：带有路径、查询参数或片段的 URL 会在启动时和控制台中被拒绝。
+
+## 规则
+
+- 提供商的 `proxy_url` 适用于该提供商发送的所有流量：模型发现、推理、流式传输、文件和批处理。
+- 设置了 `proxy_url` 的提供商会忽略 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NO_PROXY`。未设置的提供商保持进程级的行为。
+- 无效的 `proxy_url` 属于配置错误：启动时会跳过该提供商并记录一条指明其名称的日志，控制台也会拒绝保存。
+- 代理凭据永远不会被记录到日志中。Admin API 和提供商状态显示的 URL 中，密码会被替换为 `xxxxx`。
+- 连接按提供商进行池化，因此每个提供商都保持自己到其代理的 keep-alive 连接。
+
+## 验证
+
+提供商状态端点会报告每个提供商经过掩码处理的代理：
+
+```bash
+curl -s -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  http://localhost:8080/admin/providers/status | jq '.providers[] | {name, proxy_url: .config.proxy_url}'
+```
+
+然后发送一个请求，确认它出现在代理的访问日志中，并且没有任何流量从网关自身的 IP 直接到达该提供商。
+
+<Note>
+  带健康检查的代理池、代理之间的自动故障转移，以及一次覆盖多个提供商的分配规则，是 [GoModel Pro 功能](/zh/pro/egress)。
+</Note>

@@ -1,0 +1,184 @@
+---
+title: "Sprawdzanie wersji"
+description: "Jak GoModel sprawdza, czy jest nowszy release, co dokładnie wysyła to sprawdzenie i jak je wyłączyć."
+icon: "refresh-cw"
+keywords: ["wersja", "aktualizacja", "telemetria", "prywatność", "środowisko odizolowane", "version", "update", "upgrade", "telemetry", "privacy", "air-gapped"]
+---
+
+GoModel raz dziennie sprawdza, czy istnieje nowszy release, więc dowiesz się
+o aktualizacji bez obserwowania repozytorium. Wynik pojawia się na górze strony
+**Settings** w dashboardzie i jest dostępny jako JSON z `GET /version`.
+
+## Dlaczego o to prosimy
+
+Dzięki temu widzimy, ile wdrożeń działa na której wersji GoModel.
+
+Ma to największe znaczenie, gdy zostanie znaleziona podatność. Wiemy wtedy, ilu
+osób to dotyczy i ile wciąż korzysta z release’u wymagającego łatki, więc wiemy,
+jak pilnie wypuścić poprawkę i jak głośno ostrzegać. Bez tego zgadywalibyśmy.
+
+**Zalecamy pozostawienie tego włączonego.** Sprawdzenie nie wysyła kluczy API, promptów,
+nazw modeli ani danych o użyciu – dokładną listę znajdziesz w sekcji
+[Co wysyła sprawdzenie](#co-wysyła-sprawdzenie), a jeśli wolisz, wyłączysz je
+jedną zmienną środowiskową.
+
+Jeśli masz jakiekolwiek wątpliwości co do tych danych, daj nam znać: otwórz issue na
+[GitHubie](https://github.com/ENTERPILOT/GoModel/issues) albo znajdź nas na
+[Discordzie](https://discord.gg/gaEB9BQSPH). W sprawach dotyczących bezpieczeństwa użyj
+kontaktu z [SECURITY.md](https://github.com/ENTERPILOT/GoModel/blob/main/SECURITY.md).
+
+Sprawdzenie odczytuje jeden plik tekstowy:
+
+| Dystrybucja  | URL                              | Zawartość   |
+| ------------ | -------------------------------- | ----------- |
+| GoModel      | `(thiswebsite)/version/core.txt` | `X.Y.Z`     |
+| GoModel Pro  | `(thiswebsite)/version/pro.txt`  | `X.Y.Z+pro` |
+
+## Kiedy się uruchamia
+
+Dwa wyzwalacze, oba z ograniczeniem częstotliwości:
+
+- **Dzienny timer**, aby gateway działający bez interfejsu, na którym nikt nie
+  otwiera dashboardu, też zauważał nowe release’y. Pierwsze sprawdzenie czeka losowo
+  kilka minut po starcie, a interwał ma jitter ±10%, więc flota zrestartowana
+  jednocześnie nie sprawdza wersji w tym samym momencie.
+- **Pierwsza wizyta w dashboardzie danego dnia**, per przeglądarka. Ciasteczko
+  `gomodel_version_check` przechowuje `YYYY-MM-DD-{id}` – dzień, w którym ta przeglądarka
+  ostatnio sprawdzała, oraz losowy identyfikator wygenerowany przy jej pierwszej wizycie.
+  Przy każdym kolejnym załadowaniu strony tego dnia dashboard odczytuje tę datę i nie
+  wysyła żadnego requestu.
+
+Nieudane lub nieosiągalne sprawdzenie nigdy nie jest błędem. Gateway zwraca
+wynik z cache’u i próbuje ponownie później.
+
+## Co wysyła sprawdzenie
+
+<Note>
+  Nic na temat Twojego ruchu nie jest nigdy wysyłane: żadnych nazw modeli, nazw providerów,
+  promptów ani odpowiedzi, danych o użyciu ani kosztach, ścieżek użytkowników.
+</Note>
+
+Każde sprawdzenie zawiera:
+
+| Nagłówek            | Przykład    | Znaczenie                           |
+| ------------------- | ----------- | ----------------------------------- |
+| `X-GoModel-Version` | `0.1.81`    | release, którego używasz            |
+| `X-GoModel-App`     | `GoModel`   | `GoModel` lub `GoModel Pro`         |
+| `X-GoModel-Install` | UUID        | anonimowy identyfikator wdrożenia, opisany poniżej |
+| `X-GoModel-Source`  | `scheduled` | `scheduled` lub `dashboard`         |
+
+Sprawdzenie wywołane wizytą w dashboardzie przekazuje też **dozwolony** (allowlist) wycinek
+tej wizyty: `User-Agent` przeglądarki, `Accept-Language`, client hints `Sec-CH-UA*`
+oraz wartość ciasteczka wizyty (`X-GoModel-Date`).
+
+Ponieważ to allowlista, wszystko, czego na niej nie ma, jest odrzucane – w tym `Cookie`,
+`Authorization`, `X-API-Key` i `Referer`. Dane uwierzytelniające sesji dashboardu ani
+master key nie mogą opuścić Twojego wdrożenia tą drogą.
+
+Dwie rzeczy są celowo pomijane: **nazwa hosta, pod którą serwowany jest Twój dashboard**,
+która identyfikowałaby Twoją organizację, oraz **adresy IP klientów**, które są
+danymi osobowymi. Żadna z nich nigdy nie jest wysyłana.
+
+### Identyfikator instalacji
+
+Losowy UUID wybierany przy pierwszym użyciu. Nie koduje niczego o Twoim hoście, Twojej
+organizacji, konfiguracji ani master key; istnieje tylko po to, aby
+powtarzane sprawdzenia z jednego wdrożenia liczyły się jako jedno wdrożenie. Wyłączenie
+sprawdzania oznacza, że identyfikator nigdy nie zostanie utworzony.
+
+Jest przechowywany w bazie danych wdrożenia, pod kluczem `install_id` w tabeli
+(lub kolekcji) `runtime_settings`, i kopiowany do `install-id` w katalogu
+danych. Rozstrzygająca jest kopia w bazie danych: przetrwa ponowne utworzenie
+kontenera, a repliki współdzielące jedną bazę danych raportują się jako jedno wdrożenie.
+Plik `install-id` z wcześniejszego release’u jest przejmowany bez zmian przy pierwszym
+uruchomieniu gatewaya w tej wersji, chyba że baza danych już zawiera identyfikator – na
+przykład dlatego, że inna replika z tą samą bazą wystartowała wcześniej – wtedy
+wygrywa identyfikator z bazy danych, a plik jest nadpisywany, aby się z nim zgadzał. Jeśli
+bazy danych nie da się osiągnąć przy starcie, gateway używa pliku (lub świeżego losowego
+identyfikatora), dopóki się to nie uda, i przełącza się na identyfikator z bazy przy
+późniejszym sprawdzeniu, zamiast zachowywać tymczasowy przez cały czas życia procesu.
+
+Gdy nie istnieje żadna z kopii – kontener odtworzony bez wolumenu, z SQLite –
+generowany jest świeży losowy identyfikator, a odtworzony kontener jest widziany jako
+nowe wdrożenie. Zamontuj wolumen na katalog danych, aby zachować ten sam identyfikator.
+
+Wcześniejsze release’y w takiej sytuacji wyprowadzały identyfikator z `GOMODEL_MASTER_KEY`.
+Identyfikator zapisany w ten sposób jest zastępowany losowym, zarówno w bazie
+danych, jak i w pliku, przy pierwszym uruchomieniu tej wersji, więc wdrożenie
+jednorazowo zaraportuje się jako nowe.
+
+## Wyłączanie, jeśli nie chcesz otrzymywać informacji o aktualizacjach
+
+```bash
+GOMODEL_VERSION_CHECK_ENABLED=false
+```
+
+To zatrzymuje wszystko: żadnego timera, żadnego wychodzącego requestu, żadnego identyfikatora
+instalacji na dysku. `GET /version` nadal raportuje Twój lokalny build z `"enabled": false`,
+a dashboard po prostu nie pokazuje powiadomienia o aktualizacji.
+
+## Wdrożenia odizolowane (air-gapped) i z mirrorem
+
+`GOMODEL_OFFLINE=true` wyłącza sprawdzanie razem z pobieraniem zdalnego katalogu
+modeli; zobacz
+[przewodnik produkcyjny](/pl/guides/production#wdrożenia-air-gapped-i-offline).
+
+Aby zamiast tego zachować powiadomienia o aktualizacjach w odizolowanej sieci, skieruj sprawdzanie na własny host i serwuj z niego `core.txt` (lub `pro.txt`):
+
+```bash
+GOMODEL_VERSION_CHECK_URL=https://releases.internal.example.com/version
+```
+
+Gateway dopisuje `/core.txt` lub `/pro.txt` zależnie od swojej dystrybucji i
+oczekuje samego ciągu wersji bez wiodącego `v`.
+
+Mirror może opatrzyć wartość **metadanymi builda** z wersjonowania semantycznego
+(`1.2.3+mirror`), które są pomijane przy ustalaniu kolejności, więc to bezpieczne. Nie
+dodawaj sufiksu prerelease (`1.2.3-mirror`): taka wersja jest *wyżej* niż zwykłe
+`1.2.3` i niżej niż `1.2.3-mirrorx`, więc gatewaye porównywałyby się z czymś
+innym niż opublikowany przez Ciebie release.
+
+## Konfiguracja
+
+| Ustawienie                        | Zmienna środowiskowa                      | Domyślnie                               |
+| --------------------------------- | ----------------------------------------- | --------------------------------------- |
+| `version_check.enabled`           | `GOMODEL_VERSION_CHECK_ENABLED`           | `true`                                  |
+| `version_check.url`               | `GOMODEL_VERSION_CHECK_URL`               | `https://gomodel.enterpilot.io/version` |
+| `version_check.interval_hours`    | `GOMODEL_VERSION_CHECK_INTERVAL_HOURS`    | `24`                                    |
+| `version_check.timeout_seconds`   | `GOMODEL_VERSION_CHECK_TIMEOUT_SECONDS`   | `5`                                     |
+| `version_check.max_daily_checks`  | `GOMODEL_VERSION_CHECK_MAX_DAILY`         | `500`                                   |
+
+`max_daily_checks` ogranicza łączną liczbę wychodzących sprawdzeń gatewaya na dzień, więc
+`/version` nie może posłużyć jako wzmacniacz wychodzących requestów.
+
+```yaml config.yaml
+version_check:
+  enabled: true
+  interval_hours: 24
+```
+
+## Endpoint `/version`
+
+Publiczny i bez uwierzytelniania, obok `/health`. Odpowiada z cache’u i
+nigdy nie blokuje się na sieci – zaległe sprawdzenie uruchamia się w tle, więc
+nieosiągalny host z release’ami nigdy nie spowalnia dashboardu:
+
+```bash
+curl -s http://localhost:8080/version
+```
+
+```json
+{
+  "app": "GoModel",
+  "version": "0.1.81",
+  "latest": "0.1.82",
+  "update_available": true,
+  "checked_at": "2026-08-26T09:12:44Z",
+  "enabled": true
+}
+```
+
+`update_available` jest konserwatywne: metadane builda są ignorowane, prerelease’y są
+porównywane zgodnie ze specyfikacją wersjonowania semantycznego (`1.0.0-rc1` < `1.0.0-rc2` <
+`1.0.0`), a build deweloperski (`dev`, sam commit) nigdy nie zgłasza
+aktualizacji.

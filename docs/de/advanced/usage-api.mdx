@@ -1,0 +1,279 @@
+---
+title: "Usage API"
+description: "Prüfen Sie Ihre eigene Nutzung, Ihr Budget und den Status Ihrer Rate-Limits mit demselben API-Key, den Sie für Inferenz verwenden."
+icon: "gauge"
+keywords: ["Usage API", "/v1/usage", "Nutzung per Self-Service", "Budget-Status", "Rate-Limit-Status"]
+---
+
+## Übersicht
+
+`GET /v1/usage` gibt den eigenen Verbrauch und die eigenen Limits des Aufrufers zurück – ohne
+Admin-Zugriff. Ein einziger Aufruf beantwortet drei Fragen:
+
+- Wie viel habe ich verbraucht (Requests, Token, geschätzte Kosten)?
+- Wie viel Budget bleibt mir, und wann wird es zurückgesetzt?
+- Welche Rate-Limits gelten für mich, und wie viel Spielraum bleibt?
+
+Alles bezieht sich auf den effektiven [User Path](/de/features/user-path) des Aufrufers. Ein
+Tool mit einem verwalteten API-Key – ein OpenCode-Plugin, eine CLI, ein Status-Widget – kann den
+Endpunkt also mit dem Key abfragen, den es ohnehin für Inferenz verwendet. Das Abfragen verbraucht
+kein Rate-Limit-Kontingent.
+
+## Kurzes Beispiel
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/usage \
+  -H "Authorization: Bearer sk_gom_..."
+```
+
+```python Python
+import httpx
+
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="sk_gom_...")
+usage = client.get("/v1/usage", cast_to=httpx.Response)
+
+print(usage.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "sk_gom_...",
+});
+
+const usage = await client.get("/v1/usage");
+console.log(usage);
+```
+
+</CodeGroup>
+
+```json
+{
+  "user_path": "/team/alpha",
+  "server_time": "2026-07-07T09:30:00Z",
+  "usage": {
+    "start_date": "2026-06-08",
+    "end_date": "2026-07-07",
+    "total_requests": 128,
+    "total_input_tokens": 74210,
+    "total_output_tokens": 17024,
+    "total_tokens": 91234,
+    "uncached_input_tokens": 61420,
+    "cached_input_tokens": 12790,
+    "cache_write_input_tokens": 0,
+    "total_input_cost": 1.12,
+    "total_output_cost": 0.61,
+    "total_cost": 1.73,
+    "rewrite_tokens_saved": 0,
+    "rewrite_cost_saved": null
+  },
+  "budgets": [
+    {
+      "user_path": "/team/alpha",
+      "period_seconds": 2592000,
+      "period_label": "monthly",
+      "amount": 100,
+      "spent": 41.2,
+      "remaining": 58.8,
+      "usage_ratio": 0.412,
+      "period_start": "2026-07-01T00:00:00Z",
+      "period_end": "2026-08-01T00:00:00Z",
+      "resets_in_seconds": 2125800,
+      "exceeded": false
+    }
+  ],
+  "rate_limits": [
+    {
+      "user_path": "/team/alpha",
+      "period_seconds": 60,
+      "period_label": "minute",
+      "max_requests": 60,
+      "requests_used": 3,
+      "requests_remaining": 57,
+      "requests_usage_ratio": 0.05,
+      "tokens_used": 0,
+      "in_flight": 0,
+      "window_start": "2026-07-07T09:30:00Z",
+      "window_end": "2026-07-07T09:31:00Z",
+      "resets_in_seconds": 60,
+      "exhausted": false
+    }
+  ]
+}
+```
+
+## Wessen Nutzung Sie sehen
+
+- **Verwalteter API-Key** – der an den Key gebundene `user_path` wird verwendet. Es sind keine
+  Parameter nötig, und der Inhaber des Keys kann nichts außerhalb seines eigenen Teilbaums lesen.
+- **Master-Key (oder Unsafe-Modus)** – übergeben Sie `X-GoModel-User-Path`, um einen Pfad
+  auszuwählen, oder lassen Sie den Header weg, um `/` (alles) zu sehen:
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/usage \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "X-GoModel-User-Path: /team/alpha"
+```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+    default_headers={"X-GoModel-User-Path": "/team/alpha"},
+)
+usage = client.get("/v1/usage", cast_to=httpx.Response)
+
+print(usage.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+  defaultHeaders: { "X-GoModel-User-Path": "/team/alpha" },
+});
+
+const usage = await client.get("/v1/usage");
+console.log(usage);
+```
+
+</CodeGroup>
+
+## Response-Felder
+
+### `usage`
+
+Aggregiert aus erfassten Requests innerhalb des Datumsfensters, mit derselben Token- und
+[Kostenschätzungs](/de/features/cost-tracking)-Semantik wie im Dashboard. Kostenfelder sind `null`,
+wenn für keinen passenden Request Preise vorliegen. Der gesamte Block ist `null`, wenn kein
+Storage-Backend die Nutzung aufzeichnet (`USAGE_ENABLED=false` oder keine Datenbank).
+
+### `budgets`
+
+Ein Eintrag pro [Budget](/de/features/budgets), das den Pfad abdeckt – einschließlich Budgets, die
+von übergeordneten Pfaden wie `/` geerbt werden. `remaining` kann negativ werden und `usage_ratio`
+über `1` steigen – beides bedeutet, dass das Budget überschritten ist. `exceeded` spiegelt die
+Durchsetzung wider: Ist der Wert `true`, werden Requests bis `period_end` abgelehnt
+(`period_seconds` mit dem Wert `2592000` ist der Sentinel-Wert für den Kalendermonat, nicht
+buchstäblich 30 Tage). `resets_in_seconds` zählt relativ zu `server_time` bis `period_end`
+herunter, sodass Sie den Wert anzeigen können, ohne sich um Uhrzeitabweichungen auf dem Client
+kümmern zu müssen.
+
+### `rate_limits`
+
+Live-Zähler für jede User-Path-[Rate-Limit-Regel](/de/features/rate-limits), die den Pfad abdeckt.
+`max_tokens`/`tokens_remaining`/`tokens_usage_ratio` erscheinen nur bei Regeln mit Token-Limits;
+ein `period_label` mit dem Wert `concurrent` kennzeichnet eine Obergrenze für gleichzeitige
+Requests, wobei `in_flight` die aktuelle Anzahl ist (und in `requests_usage_ratio` einfließt). Die
+`*_usage_ratio`-Felder geben pro Dimension verbraucht/Limit an, ohne Begrenzung – Token-Fenster
+können über `1` hinausschießen. `exhausted` ist `true`, wenn irgendeine Dimension vollständig
+ausgeschöpft ist, und `resets_in_seconds` zählt relativ zu `server_time` bis `window_end` herunter
+(entfällt bei Regeln für gleichzeitige Requests, die kein Fenster haben). Regeln mit Provider-
+oder Modell-Scope werden nicht aufgeführt: Sie beschreiben gemeinsam genutzte
+Infrastrukturkapazität, nicht den Aufrufer.
+
+<Note>
+  Rate-Limit-Zähler liegen pro Gateway-Instanz im Arbeitsspeicher: Sie werden bei einem Neustart
+  zurückgesetzt, und bei N Replikaten führt jedes Replikat seine eigenen Zähler. Budgets sind die
+  dauerhaften, instanzübergreifenden Werte.
+</Note>
+
+## Datumsfenster
+
+Der `usage`-Block umfasst standardmäßig die letzten 30 Tage (Tagesgrenzen in UTC). Schränken Sie
+ihn mit Query-Parametern ein – `days` oder explizit `start_date`/`end_date` (YYYY-MM-DD, maximal
+365 Tage):
+
+<CodeGroup>
+
+```bash curl
+curl "http://localhost:8080/v1/usage?days=7" \
+  -H "Authorization: Bearer sk_gom_..."
+
+curl "http://localhost:8080/v1/usage?start_date=2026-07-01&end_date=2026-07-07" \
+  -H "Authorization: Bearer sk_gom_..."
+```
+
+```python Python
+import httpx
+
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="sk_gom_...")
+
+last_seven_days = client.get("/v1/usage?days=7", cast_to=httpx.Response)
+date_range = client.get(
+    "/v1/usage?start_date=2026-07-01&end_date=2026-07-07",
+    cast_to=httpx.Response,
+)
+
+print(last_seven_days.json())
+print(date_range.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "sk_gom_...",
+});
+
+const lastSevenDays = await client.get("/v1/usage?days=7");
+const dateRange = await client.get(
+  "/v1/usage?start_date=2026-07-01&end_date=2026-07-07",
+);
+
+console.log(lastSevenDays);
+console.log(dateRange);
+```
+
+</CodeGroup>
+
+Budgets und Rate-Limits melden immer ihre eigenen aktuellen Zeiträume; das Fenster wirkt sich nur
+auf `usage` aus.
+
+## Cache-Modus
+
+Der `usage`-Block zählt nur Requests, die an einen Provider gehen, damit er mit Budgets und Kosten
+übereinstimmt. Treffer im [Response-Cache](/de/features/cache) werden ebenfalls erfasst, und
+`cache_mode` macht sie sichtbar:
+
+| Wert       | Zählt                                                    |
+| ---------- | -------------------------------------------------------- |
+| `uncached` | Nur Requests an Provider – der Standardwert              |
+| `cached`   | Nur lokale Cache-Treffer – was der Cache kostenlos ausgeliefert hat |
+| `all`      | Beides, Ihr gesamtes Request-Volumen                     |
+
+```bash
+curl "http://localhost:8080/v1/usage?cache_mode=cached" \
+  -H "Authorization: Bearer sk_gom_..."
+```
+
+Ein Vergleich von `cached` mit dem Standardwert zeigt am schnellsten, welchen Anteil Ihres
+Traffics der Cache abfängt. Nicht erkannte Werte fallen auf `uncached` zurück. `cache_mode` wirkt
+sich nur auf `usage` aus: Budgets und Rate-Limits zählen nie Cache-Treffer, weil ein Treffer
+nichts kostet und kein Kontingent verbraucht.
+
+## Fehler
+
+| Status | Bedeutung                                                              |
+| ------ | ---------------------------------------------------------------------- |
+| 400    | Fehlerhaftes `start_date`/`end_date`/`days`, umgekehrter Bereich, ein Bereich über 365 Tage oder ungültiger User Path |
+| 401    | Fehlender oder ungültiger API-Key (wenn Authentifizierung konfiguriert ist) |
+| 503    | Der Usage- oder Budget-Speicher konnte nicht gelesen werden (`usage_status_failed`) |

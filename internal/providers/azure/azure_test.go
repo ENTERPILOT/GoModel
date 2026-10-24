@@ -8,6 +8,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers/openai"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -30,6 +31,21 @@ func newTestProvider(client *http.Client, baseURL string) *Provider {
 	provider := newHTTPTestProvider("test-api-key", client, llmclient.Hooks{})
 	provider.SetBaseURL(baseURL)
 	return provider
+}
+
+func TestCreateSpeech_FillsDefaultVoice(t *testing.T) {
+	server, capture := providertest.Server(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = w.Write([]byte("audio-bytes"))
+	})
+	provider := newTestProvider(server.Client(), server.URL)
+
+	_, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{Model: "tts", Input: "hello"})
+	require.NoError(t, err)
+
+	sent := capture.Last(t)
+	assert.Equal(t, "/audio/speech", sent.Path)
+	assert.Equal(t, openai.DefaultSpeechVoice, sent.JSON(t)["voice"])
 }
 
 func TestChatCompletion_UsesAzureAuthAndDefaultAPIVersion(t *testing.T) {

@@ -18,6 +18,18 @@ import (
 // UsageQueryParams, sharing the readers' filter semantics.
 type RecalculatePricingParams struct {
 	UsageQueryParams
+
+	Billing Billing
+}
+
+// Billing holds the pricing switches recalculation applies to billed cost.
+type Billing struct {
+	// Enabled mirrors pricing.markups_enabled. While false, recalculation
+	// leaves each row's billed cost as it was.
+	Enabled bool
+	// BillCacheHits mirrors pricing.bill_cache_hits: whether recalculated
+	// response-cache hit rows are billed or billed at zero.
+	BillCacheHits bool
 }
 
 // RecalculatePricingResult summarizes a pricing recalculation run.
@@ -48,6 +60,13 @@ type recalculationEntry struct {
 	RewriteTokensSaved int
 	RawData            map[string]any
 	Caveat             string
+
+	// CacheType and MarkupPercent are the stored row values; the billed cost
+	// is recomputed from the new total cost with the markup the row was
+	// billed at, so changed markup rules never rewrite past bills.
+	CacheType     string
+	MarkupPercent *float64
+	Billing       Billing
 }
 
 type recalculationUpdate struct {
@@ -56,9 +75,13 @@ type recalculationUpdate struct {
 	OutputCost       *float64
 	TotalCost        *float64
 	RewriteCostSaved *float64
-	CostSource       string
-	Caveat           string
-	HasPricing       bool
+	BilledCost       *float64
+	// KeepBilledCost leaves the stored billed cost unchanged (billing is
+	// off), so BilledCost is not written.
+	KeepBilledCost bool
+	CostSource     string
+	Caveat         string
+	HasPricing     bool
 }
 
 func normalizedRecalculatePricingParams(params RecalculatePricingParams) RecalculatePricingParams {
@@ -99,9 +122,11 @@ func recalculateEntryCosts(entry recalculationEntry, resolver PricingResolver) r
 			effectivePricing,
 			entry.RewriteTokensSaved,
 		),
-		CostSource: result.Source,
-		Caveat:     caveat,
-		HasPricing: result.TotalCost != nil || result.InputCost != nil || result.OutputCost != nil,
+		BilledCost:     entryBilledCost(entry, result.TotalCost),
+		KeepBilledCost: !entry.Billing.Enabled,
+		CostSource:     result.Source,
+		Caveat:         caveat,
+		HasPricing:     result.TotalCost != nil || result.InputCost != nil || result.OutputCost != nil,
 	}
 }
 
@@ -155,4 +180,13 @@ func recalculatePricingUnavailable(resolver PricingResolver) error {
 		return fmt.Errorf("pricing resolver is required")
 	}
 	return nil
+}
+
+// entryBilledCost recomputes a row's billed cost from its new total cost and
+// the markup it was billed at, or returns nil while billing is off.
+func entryBilledCost(entry recalculationEntry, totalCost *float64) *float64 {
+	if !entry.Billing.Enabled {
+		return nil
+	}
+	return BilledCost(totalCost, entry.MarkupPercent, entry.CacheType != "", entry.Billing.BillCacheHits)
 }
