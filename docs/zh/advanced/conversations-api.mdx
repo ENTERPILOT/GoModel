@@ -1,0 +1,379 @@
+---
+title: "Conversations API"
+description: "通过 GoModel 创建、读取和删除兼容 OpenAI 的对话及其条目。对话存储在网关中，因此可以使用任意提供商。"
+icon: "messages-square"
+keywords: ["对话 API", "对话历史", "有状态请求", "conversations API", "/v1/conversations", "conversation history", "stateful requests"]
+---
+
+## 概览
+
+GoModel 在 `/v1/conversations` 下提供兼容 OpenAI 的 Conversations API 端点。
+
+对话是一种**由网关管理的资源**。OpenAI Conversations API 是特定于提供商的，
+因此由 GoModel 生成对话 ID 并自行存储对话。这样无论您的模型流量路由到哪个提供商，
+`/v1/conversations` 都能保持可用且行为一致，并且无需任何提供商配置。
+
+## 支持的端点
+
+| 端点 | 行为 |
+| --- | --- |
+| `POST /v1/conversations` | 创建对话。可接受可选的 `items` 和 `metadata`。 |
+| `GET /v1/conversations/{id}` | 返回已存储的对话。 |
+| `POST /v1/conversations/{id}` | 将提供的键合并到对话的 `metadata` 中。 |
+| `DELETE /v1/conversations/{id}` | 删除已存储的对话。 |
+| `POST /v1/conversations/{id}/items` | 最多添加 20 个条目，并以列表形式返回已添加的条目。 |
+| `GET /v1/conversations/{id}/items` | 使用 `after`、`include`、`limit` 和 `order` 列出条目。 |
+| `GET /v1/conversations/{id}/items/{item_id}` | 返回单个对话条目。 |
+| `DELETE /v1/conversations/{id}/items/{item_id}` | 删除单个条目并返回对话。 |
+
+## 对话对象
+
+```json
+{
+  "id": "conv_a1b2c3d4e5f6...",
+  "object": "conversation",
+  "created_at": 1741900000,
+  "metadata": {}
+}
+```
+
+`metadata` 始终存在，为空时序列化为 `{}`。
+
+## 限制
+
+GoModel 遵循 OpenAI Conversations 的限制，以保持公开接口的兼容性：
+
+- `items`：创建时最多 20 个条目。
+- `metadata`：最多 16 个键值对；键最长 64 个字符；值最长 512 个字符。
+
+条目的负载遵循 Responses API 的输入 / 输出条目联合类型。GoModel
+会规范化便捷的消息字符串，分配稳定的条目 ID，并保留新增的或特定于提供商的条目字段，以便之后列出和重放。
+
+条目列表默认按从新到旧排序（`order=desc`），每页 20 个条目。将返回的 `last_id`
+作为下一次请求的 `after` 游标。`limit` 最多接受 100 个条目。可选的 `include` 参数接受与
+OpenAI Conversations API 相同的值，包括 `reasoning.encrypted_content` 和
+`message.output_text.logprobs`。GoModel 存储完整的条目负载，因此可选字段在之后的请求中依然可用，
+而响应中只返回 `include` 指定的字段。
+
+## 存储与保留
+
+常规的 GoModel 应用会将对话存储在已配置的共享存储后端（`sqlite`、`postgresql` 或 `mongodb`）中，
+因此进程重启后对话依然存在。对话快照在 30 天后过期。
+
+仅当嵌入 HTTP 服务器且未配置应用存储时（例如轻量级测试），才会使用内存回退存储。
+该回退存储同样会在 30 天后使条目过期，并最多保留 10,000 个对话，超出时优先淘汰最旧的对话。
+
+## 错误
+
+GoModel 返回兼容 OpenAI 的错误：
+
+- `400 invalid_request_error`：请求体无效、更新时缺少 `metadata`、条目无效或超出限制（`param` 字段会指明出错的字段）。
+- `404 not_found_error`：对话或请求的条目不存在。
+- 带有 `param: "after"` 的 `404 invalid_request_error`：分页游标未指向该对话中的任何条目。
+
+对话持久化是一次成功的 `/v1/responses` 轮次的一部分。如果提供商调用成功，但已完成的交互无法存储，
+非流式请求会返回 `500`；流式请求会在不发出
+`response.completed` 的情况下结束。GoModel 目前不会对客户端针对该失败请求的重试进行去重，
+因此重试可能会再次调用提供商并再次产生费用。失败的交互不会出现在对话历史中，
+因此无法通过检查历史可靠地判断提供商调用是否已经执行。当重复调用会带来实际成本或副作用时，
+请避免自动重试，或通过独立的持久化幂等机制来协调重试。
+
+## 示例
+
+创建对话：
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/conversations \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "metadata": { "topic": "support" }
+  }'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+conversation = client.conversations.create(metadata={"topic": "support"})
+print(conversation.id)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const conversation = await client.conversations.create({
+  metadata: { topic: "support" },
+});
+
+console.log(conversation.id);
+```
+
+</CodeGroup>
+
+获取对话：
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/conversations/conv_abc123 \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+conversation = client.conversations.retrieve("conv_abc123")
+print(conversation)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const conversation = await client.conversations.retrieve("conv_abc123");
+console.log(conversation);
+```
+
+</CodeGroup>
+
+更新对话元数据（此处未提供的现有键会被保留）：
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/conversations/conv_abc123 \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "metadata": { "topic": "billing" }
+  }'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+conversation = client.conversations.update(
+    "conv_abc123",
+    metadata={"topic": "billing"},
+)
+print(conversation)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const conversation = await client.conversations.update("conv_abc123", {
+  metadata: { topic: "billing" },
+});
+
+console.log(conversation);
+```
+
+</CodeGroup>
+
+添加高级 Responses 条目：
+
+<CodeGroup>
+
+```bash curl
+curl 'http://localhost:8080/v1/conversations/conv_abc123/items?include=reasoning.encrypted_content' \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "items": [
+      {
+        "type": "function_call",
+        "call_id": "call_lookup_1",
+        "name": "lookup_order",
+        "arguments": "{\"order_id\":\"A-42\"}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "call_lookup_1",
+        "output": "{\"status\":\"shipped\"}"
+      }
+    ]
+  }'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+items = client.conversations.items.create(
+    "conv_abc123",
+    include=["reasoning.encrypted_content"],
+    items=[
+        {
+            "type": "function_call",
+            "call_id": "call_lookup_1",
+            "name": "lookup_order",
+            "arguments": '{"order_id":"A-42"}',
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call_lookup_1",
+            "output": '{"status":"shipped"}',
+        },
+    ],
+)
+
+print(items)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const items = await client.conversations.items.create("conv_abc123", {
+  include: ["reasoning.encrypted_content"],
+  items: [
+    {
+      type: "function_call",
+      call_id: "call_lookup_1",
+      name: "lookup_order",
+      arguments: '{"order_id":"A-42"}',
+    },
+    {
+      type: "function_call_output",
+      call_id: "call_lookup_1",
+      output: '{"status":"shipped"}',
+    },
+  ],
+});
+
+console.log(items);
+```
+
+</CodeGroup>
+
+按时间顺序列出下一页：
+
+<CodeGroup>
+
+```bash curl
+curl 'http://localhost:8080/v1/conversations/conv_abc123/items?order=asc&limit=10&after=msg_abc123' \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+for item in client.conversations.items.list(
+    "conv_abc123",
+    order="asc",
+    limit=10,
+    after="msg_abc123",
+):
+    print(item)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+for await (const item of client.conversations.items.list("conv_abc123", {
+  order: "asc",
+  limit: 10,
+  after: "msg_abc123",
+})) {
+  console.log(item);
+}
+```
+
+</CodeGroup>
+
+删除对话：
+
+<CodeGroup>
+
+```bash curl
+curl -X DELETE http://localhost:8080/v1/conversations/conv_abc123 \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+deleted = client.conversations.delete("conv_abc123")
+print(deleted.deleted)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const deleted = await client.conversations.delete("conv_abc123");
+console.log(deleted.deleted);
+```
+
+</CodeGroup>

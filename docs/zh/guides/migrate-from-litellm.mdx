@@ -1,0 +1,193 @@
+---
+title: "从 LiteLLM 迁移"
+description: "通过一条命令将 LiteLLM 代理的 config.yaml 转换为 GoModel 配置，让两个网关并行运行，并在不更改模型名称的情况下迁移客户端。"
+icon: "arrow-right-left"
+keywords: ["LiteLLM", "迁移", "LiteLLM 替代方案", "虚拟密钥", "团队", "预算", "回退", "migration", "migrate", "LiteLLM alternative", "config.yaml", "model_list", "router_settings", "virtual keys", "teams", "budgets", "fallbacks"]
+---
+
+GoModel 与 LiteLLM 代理使用相同的兼容 OpenAI 的 API，因此大多数应用只需更换基础 URL 和密钥。
+主要工作在于网关配置，而 `gomodel migrate litellm` 可以完成其中的大部分。
+
+| 内容 | 迁移方式 |
+| --- | --- |
+| `model_list`、`router_settings`、`litellm_settings`、`general_settings` | 由 `gomodel migrate litellm` 转换 |
+| 客户端调用的模型名称 | 保留：每个 `model_name` 都会成为一个[虚拟模型](/zh/features/virtual-models) |
+| 主密钥 | 保留 |
+| 虚拟密钥、团队、用户、组织 | 从 LiteLLM 数据库导入；客户端继续使用其 `sk-...` 密钥（[见下文](#4-导入密钥、团队和预算)） |
+| 模型访问权限、预算、速率限制 | 导入到 GoModel [用户路径](/zh/features/user-path)上 |
+| 支出 | 不迁移：预算从零开始 |
+
+## 1. 转换配置
+
+请先进行一次试运行。它会打印迁移报告和生成的配置，但不写入任何内容：
+
+```bash
+gomodel migrate litellm litellm_config.yaml
+```
+
+然后写入文件：
+
+```bash
+gomodel migrate litellm --out ./gomodel litellm_config.yaml
+```
+
+使用 Docker 时（镜像以非 root 用户运行，因此请传入您自己的用户，以便写入挂载的目录）：
+
+```bash
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work \
+  enterpilot/gomodel migrate litellm --out /work/gomodel /work/litellm_config.yaml
+```
+
+`--out` 会写入三个文件，除非您传入 `--force`，否则不会覆盖已有文件：
+
+| 文件 | 内容 |
+| --- | --- |
+| `config.yaml` | 提供商、虚拟模型、重试、超时和可观测性设置 |
+| `.env` | 原本内联在 LiteLLM 配置中的 Secret（API 密钥、主密钥）。以 `0600` 权限创建；请不要将其纳入版本控制 |
+| `MIGRATION_REPORT.md` | 已创建的提供商和虚拟模型、需要设置的环境变量，以及每一项被更改或未迁移的设置 |
+
+`os.environ/NAME` 引用会变为 `${NAME}`，因此您当前运行 LiteLLM 所用的环境可以继续使用。
+`include:` 引入的文件也会被处理。
+
+## 2. 检查报告
+
+在发送流量之前，请阅读 `MIGRATION_REPORT.md`。它包含三个列表：
+
+- **Review before switching traffic**：您必须完成的事项，例如护栏、模型访问组或 Langfuse 回调。
+  在您配置之前，GoModel 护栏处于关闭状态。
+- **Not migrated**：在 GoModel 中没有对应项的设置，会逐一列出。不会静默丢弃任何内容。
+- **Behavior changes**：已转换但行为略有不同的设置，例如路由策略。
+
+## 3. 让 GoModel 与 LiteLLM 并行运行
+
+使用生成的文件在另一个端口上启动 GoModel。将报告中 **Environment** 下列出的变量（即 LiteLLM 已通过
+`os.environ/` 读取的变量）添加到 `.env` 中；如果转换器没有生成该文件，请自行创建。在 `server.master_key`
+所读取的变量未设置时，GoModel 会拒绝启动。然后使用客户端所用的模型发送几个测试请求：
+
+```yaml compose.yaml
+services:
+  gomodel:
+    image: enterpilot/gomodel
+    ports: ["8080:8080"]
+    env_file: .env
+    volumes:
+      - ./config.yaml:/app/config/config.yaml:ro
+```
+
+```bash
+cd gomodel
+docker compose up
+```
+
+请通过 Compose 的 `env_file` 加载 `.env`（如果您在该目录中运行二进制文件，也可以使用 GoModel 自带的
+`.env` 加载器）。`docker run --env-file` 会按字面读取值，因此会保留 `.env` 为内联 JSON 凭据等值添加的引号。
+直接运行二进制文件时，已在 shell 中导出的变量（例如 `OPENAI_API_KEY`）优先于 `.env` 中的同名变量。
+
+```bash
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gpt-4o", "messages": [{"role": "user", "content": "ok?"}]}'
+```
+
+`GET /v1/models` 会列出与 LiteLLM 相同的模型名称。然后按团队逐个迁移客户端。
+
+## 4. 导入密钥、团队和预算
+
+LiteLLM 将虚拟密钥、团队、用户、组织及其预算保存在 PostgreSQL 数据库中。当同一条命令知道数据库地址时，
+就会读取这些数据：优先使用 `--database-url`，其次是配置中的 `general_settings.database_url`，最后是
+`DATABASE_URL`。它只在只读事务中进行读取。没有数据库 URL 时，它只转换配置。
+
+GoModel 使用转换后的配置运行后，将数据导入其中：
+
+```bash
+gomodel migrate litellm --database-url "$LITELLM_DATABASE_URL" \
+  --gomodel-url http://localhost:8080 litellm_config.yaml
+```
+
+该命令使用 `GOMODEL_MASTER_KEY` 进行认证，若未设置则使用 LiteLLM 主密钥；对于位于另一台机器上的 GoModel，
+需要使用 `https`（在受信任的网络中，例如 Compose 网络，可使用 `--allow-http`）。不带 `--gomodel-url` 时，
+它只会在报告中列出要导入的内容。
+
+在两个网关并行运行期间可以再次运行该命令：它会让 GoModel 与 LiteLLM 保持同步。密钥会获得其当前的路径、标签、
+允许的模型和过期时间，而 LiteLLM 中此后被封禁或已过期的密钥会被停用。在 GoModel 中授予的控制台访问权限
+和停用的密钥会保持不变。
+
+在写入任何内容之前，该命令会检查 GoModel 是否已开启导入所需的功能，例如预算（需要用量追踪）和速率限制，
+如果某项功能未开启则会停止。某个路径的规则会在其密钥之前写入；如果规则被拒绝，这些密钥会被暂缓导入，
+命令会以错误退出。
+
+每个密钥都会保留其 `sk-...` 值：LiteLLM 只存储其 SHA-256 哈希值，而 GoModel
+[导入该哈希值](/zh/advanced/admin-endpoints#从-litellm-导入密钥)，因此 GoModel 永远不会接触密钥本身。
+其他所有内容都会落到[用户路径](/zh/features/user-path)上：
+
+| LiteLLM | GoModel 用户路径 |
+| --- | --- |
+| 组织 | `/<organization>` |
+| 团队 | `/<organization>/<team>`，无组织时为 `/<team>` |
+| 团队密钥 | `/<organization>/<team>/<key alias>` |
+| 个人密钥 | `/users/<user>/<key alias>` |
+| 不属于任何团队或用户的密钥 | `/keys/<key alias>` |
+
+| LiteLLM 设置 | GoModel |
+| --- | --- |
+| 组织、团队或用户上的 `models` | 其路径上的[允许的模型](/zh/features/users) |
+| 密钥上的 `models` | 该密钥允许的模型 |
+| `max_budget` + `budget_duration` | 路径上的[预算](/zh/features/budgets) |
+| `rpm_limit` / `tpm_limit`、`tpd_limit`、`max_parallel_requests` | 每分钟、每天和并发的[速率限制](/zh/features/rate-limits) |
+| 密钥和团队的 `metadata.tags` | 密钥[标签](/zh/features/labelling) |
+| `expires` | 密钥过期时间 |
+
+模型访问遵循 LiteLLM 的规则。用户的模型列表约束的是该用户的个人密钥，而不是其持有的团队密钥，因为只有个人密钥
+位于 `/users/<user>` 之下。模型名称会解析为其背后的提供商模型，因为 GoModel 检查的是虚拟模型解析到的模型；
+如果您之后将某个虚拟模型指向其他模型，请更新指定了该虚拟模型的允许模型列表。
+
+在 LiteLLM 中，值为 `0` 的 `max_budget` 或速率限制会拒绝所有请求。GoModel 的限制必须为正数，
+因此这类路径会改为获得一条不匹配任何模型的模型策略。
+
+`budget_duration` 会映射为 `hourly`、`daily`、`weekly` 或 `monthly`（`30d` 和 `1mo` 都会变为 `monthly`，
+按自然月重置），其他时长则映射为固定窗口。以下内容不会导入，并会列在报告中：
+
+- 被封禁或已过期的密钥，以及被封禁团队的密钥（如果之前的运行已导入它们，则会被停用）；
+- 没有 `budget_duration` 的预算：GoModel 预算在每个周期都会重置；
+- 支出：预算从零开始，报告会在每个预算旁显示 LiteLLM 当前的支出；
+- 团队成员预算，以及按模型设置的预算和限制。
+
+## 对客户端的影响
+
+| LiteLLM | GoModel |
+| --- | --- |
+| 基础 URL `http://litellm:4000` 或 `http://litellm:4000/v1` | 基础 URL 必须以 `/v1` 结尾：`http://gomodel:8080/v1` |
+| 虚拟密钥 `sk-...` | [导入](#4-导入密钥、团队和预算)后保持不变；新密钥为 `sk_gom_...` |
+| `model_name` 别名 | 保持不变 |
+| `/health/liveliness`、`/health/readiness` | [`/health` 和 `/health/ready`](/zh/advanced/cli#健康探测) |
+| 透传 `/anthropic/*`、`/gemini/*`、`/vertex_ai/*` | [`/p/{provider}/*`](/zh/features/passthrough-api)；Anthropic SDK 也可以直接使用 `/v1/messages` |
+| 请求体中的 `tags` 或 `metadata.tags` 中的列表、`x-litellm-tags` 请求头 | 保持不变：它们会成为[标签](/zh/features/labelling#litellm-标签) |
+| `x-litellm-*` 响应头、`/key/*`、`/team/*` 管理 API | GoModel 的 [Admin API](/zh/advanced/admin-endpoints) 和 [Usage API](/zh/advanced/usage-api) |
+
+## 设置映射关系
+
+| LiteLLM | GoModel |
+| --- | --- |
+| `litellm_params.model: provider/model` | `providers` 中的一个提供商，模型位于其 `models` 列表中 |
+| 共享同一 `model_name` 的多个部署 | 一个 `round_robin` 虚拟模型，按 `weight` 加权，其次按 `rpm`，再其次按 `tpm` |
+| `routing_strategy: cost-based-routing` | 虚拟模型 `strategy: cost` |
+| 其他路由策略 | 带故障转移的 `round_robin`（会在报告中注明） |
+| `fallbacks`、`default_fallbacks` | 一个 `failover` 虚拟模型，先尝试该组，再尝试其回退模型 |
+| `context_window_fallbacks`、`content_policy_fallbacks` | 不转换；请将错误短语添加到 [`failover.retry_on_errors`](/zh/features/failover) |
+| `model_group_alias` | 指向该组的虚拟模型 |
+| `openai/*` 通配符 | 该提供商提供其完整的模型目录；部分通配符会变为 [`model_filter`](/zh/advanced/config-yaml#过滤提供商的模型) |
+| `input_cost_per_token`、`output_cost_per_token`、`max_input_tokens` | 模型的 `metadata.pricing`（按每百万 Token 计）和 `context_window` |
+| 基于用量的路由下部署的 `rpm` / `tpm` | [模型速率限制](/zh/features/rate-limits) |
+| `num_retries`、`timeout` | `resilience.retry.max_retries`、`http.timeout` |
+| `allowed_fails`、`cooldown_time` | 熔断器的 `failure_threshold`、`timeout` |
+| `callbacks: prometheus` / `otel` | `metrics.enabled` / `opentelemetry.enabled` |
+| `callbacks: langfuse` | [通过 OpenTelemetry 接入 Langfuse](/zh/guides/langfuse) |
+| `master_key` | `GOMODEL_MASTER_KEY`（或 `server.master_key`） |
+| `database_url` | 供导入时读取；GoModel 使用其自身的[存储](/zh/guides/production) |
+
+提供商名称遵循 GoModel 的环境变量约定：使用 LiteLLM 默认密钥变量（`OPENAI_API_KEY`）的部署会成为提供商
+`openai`，读取 `OPENAI_EU_API_KEY` 的部署会成为 `openai-eu`，而每个 Azure 部署都会成为独立的提供商，
+例如 `azure-gpt-4o-prod`。
+
+GoModel 尚不支持的提供商（例如 Replicate 或 SageMaker）会列在报告的 **Not migrated** 下。

@@ -1,0 +1,768 @@
+---
+title: "Admin-Endpunkte"
+description: "Integrierte REST-API und integriertes Dashboard zur Überwachung von Nutzung, Budgets, Modellen und Gateway-Zustand."
+icon: "server-cog"
+keywords: ["Admin API", "Dashboard", "REST API", "Monitoring", "Überwachung", "Gateway-Zustand", "gateway health"]
+---
+
+## Philosophie
+
+GoModel wird mit **standardmäßig aktivierten** Admin-Endpunkten ausgeliefert. Das Ziel ist einfach: Sie sollen GoModel deployen können und sofort sehen, was passiert – ohne zusätzliche Dienste, ohne separaten Monitoring-Stack, ohne Konfiguration.
+
+Die Admin-Schicht besteht aus zwei unabhängig steuerbaren Teilen:
+
+1. **Admin-REST-API** (`/admin/*`) – maschinenlesbare JSON-Endpunkte für Nutzungsdaten, Budgets und den Modellbestand. Wie alle anderen API-Routen durch `GOMODEL_MASTER_KEY` geschützt.
+2. **Admin-Dashboard-UI** (`/admin/dashboard`) – ein schlankes, eingebettetes HTML-Dashboard, das dieselben Daten visualisiert. Keine externen Abhängigkeiten, keine zu installierenden JavaScript-Frameworks – es ist in das Binary einkompiliert.
+
+Beide sind standardmäßig aktiv, denn Observability sollte kein Opt-in sein. Wenn Sie sie nicht benötigen, schalten Sie sie mit einer einzigen Umgebungsvariable ab.
+
+## Konfiguration
+
+Das Verhalten von Admin-Schicht und Dashboard wird über Umgebungsvariablen (oder den
+entsprechenden YAML-Block `admin:`) gesteuert. Unter
+[Admin-Konfiguration](/de/advanced/configuration#admin) finden Sie die vollständige Tabelle der
+Variablen, Standardwerte und den entsprechenden YAML-Block `admin:`.
+
+<Note>
+  Die Dashboard-UI setzt eine aktivierte REST-API voraus. Wenn Sie
+  `ADMIN_ENDPOINTS_ENABLED=false` setzen, aber `ADMIN_UI_ENABLED=true` belassen, wird die UI
+  automatisch deaktiviert und eine Warnung in die Logs geschrieben.
+</Note>
+
+## Authentifizierung
+
+Die Admin-REST-API-Endpunkte (`/admin/*`) akzeptieren zwei Arten von Zugangsdaten als Bearer-Token:
+
+- **`GOMODEL_MASTER_KEY`** – hat immer Admin-Zugriff.
+- **Ein verwalteter API-Key mit Dashboard-Zugriff** – verwaltete Keys werden standardmäßig *ohne* Dashboard-Zugriff erstellt, sodass ein für Modell-Traffic ausgegebener Key weder das Audit-Log lesen noch neue Keys ausstellen oder Gateway-Einstellungen ändern kann. Requests mit einem verwalteten Key ohne diesen Zugriff liefern `403` mit dem Fehlercode `dashboard_access_denied`.
+
+<CodeGroup>
+
+```bash curl
+curl -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  http://localhost:8080/admin/usage/summary
+```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+summary = client.get("/admin/usage/summary", cast_to=httpx.Response)
+
+print(summary.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const summary = await client.get("/admin/usage/summary");
+console.log(summary);
+```
+
+</CodeGroup>
+
+Dashboard-Zugriff erteilen oder entziehen Sie pro Key auf der Seite „API Keys“ des Dashboards, beim Erstellen (`"dashboard_access": true` bei `POST /admin/auth-keys`) oder nachträglich:
+
+<CodeGroup>
+
+```bash curl
+curl -X PUT http://localhost:8080/admin/auth-keys/<key-id>/dashboard-access \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"dashboard_access": true}'
+```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+auth_key = client.put(
+    "/admin/auth-keys/<key-id>/dashboard-access",
+    cast_to=httpx.Response,
+    body={"dashboard_access": True},
+)
+
+print(auth_key.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const authKey = await client.put(
+  "/admin/auth-keys/<key-id>/dashboard-access",
+  { body: { dashboard_access: true } },
+);
+
+console.log(authKey);
+```
+
+</CodeGroup>
+
+Zeilen von `GET /admin/auth-keys` enthalten `restricted` und `effective_models` – die
+Katalogmodelle, die ein Request mit diesem Key tatsächlich aufrufen kann, nach Anwendung der
+User-Path-Richtlinien, der eigenen Allowlist des Keys und der modellseitigen Richtlinien.
+
+Beschränken Sie einen Key auf bestimmte Modelle mit dem optionalen Feld `allowed_models` bei
+`POST /admin/auth-keys` (fehlt es, gibt es wie bei jedem anderen optionalen Erstellungsfeld
+keine Beschränkung auf Key-Ebene) oder nachträglich mit
+`PUT /admin/auth-keys/<key-id>/allowed-models` (`{"allowed_models": ["anthropic/*", "openai/gpt-4o"]}`;
+eine explizit leere Liste hebt die Beschränkung auf Key-Ebene auf; ein fehlendes Feld wird abgelehnt). Allowlists auf Gruppen- und
+Benutzerebene verwalten Sie über die [Benutzer-Endpunkte](/de/advanced/admin-endpoints#benutzer-endpunkte).
+
+Dashboard-Zugriff regelt nur `/admin/*`. Modell-Endpunkte und der Self-Service-Endpunkt [`GET /v1/usage`](/de/advanced/usage-api) bleiben für jeden verwalteten Key verfügbar, mit Ausnahme der Provider-Passthrough-Routen (`/p/{provider}/...`): Verwaltete Keys werden ohne Passthrough-Zugriff erstellt; Sie erteilen ihn mit `"passthrough_access": true` bei `POST /admin/auth-keys` oder mit `PUT /admin/auth-keys/<key-id>/passthrough-access` (siehe [Passthrough-Zugriffskontrolle](/de/features/passthrough-api#zugriffskontrolle)).
+
+### Keys aus LiteLLM importieren
+
+`POST /admin/auth-keys/import` fügt einen virtuellen LiteLLM-Key über den SHA-256-Hash
+hinzu, den LiteLLM dafür speichert, sodass Clients weiterhin dasselbe `sk-...`-Token senden. GoModel
+erhält das Token selbst nie.
+
+```bash
+curl -X POST http://localhost:8080/admin/auth-keys/import \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "search-team",
+    "imported_from": "litellm",
+    "secret_hash": "<64-character hex token column from LiteLLM_VerificationToken>",
+    "redacted_value": "sk-...k6Hd",
+    "user_path": "/acme/search"
+  }'
+```
+
+Der Endpunkt akzeptiert dieselben optionalen Felder wie `POST /admin/auth-keys` (`description`,
+`user_path`, `labels`, `allowed_models`, `dashboard_access`, `expires_at`) und
+antwortet mit `201` und dem Key, der dann `"imported_from": "litellm"` anzeigt.
+`redacted_value` ist der `key_name` von LiteLLM, etwa `sk-...k6Hd`, und lautet standardmäßig
+`sk-...`. Ein Eintrag in `allowed_models`, der ein virtuelles Modell benennt, wird durch die
+Modelle ersetzt, an die es routet, da die Modelllisten von LiteLLM-Keys Modellgruppen benennen und
+[Allowlists](/de/features/users#selektoren) das aufgelöste Modell abgleichen. Die Liste wird
+einmalig aufgelöst: Wird das virtuelle Modell später auf ein anderes Ziel umgestellt, ändert sich der Key nicht.
+Der Import eines bereits früher importierten Tokens aktualisiert stattdessen diesen Key und
+antwortet mit `200`: Name, Pfad, Labels, erlaubte Modelle und Ablaufdatum. Dashboard-Zugriff
+und eine Deaktivierung bleiben unverändert. `"enabled": false` kennzeichnet einen Key, den die
+Quelle gesperrt hat: Ein früherer Import wird deaktiviert und ansonsten nicht verändert,
+und ein nie importierter Key wird nicht erstellt (`204`). Ein Hash, der zu einem von GoModel ausgestellten Key gehört, liefert `409`
+mit dem Code `auth_key_exists`.
+
+Tokens, die mit `sk-` beginnen, werden nur gegen importierte Keys geprüft und
+`sk_gom_`-Tokens nur gegen von GoModel ausgestellte Keys. Ohne importierte Keys
+werden `sk-`-Tokens wie bisher abgelehnt. Deaktivieren Sie einen importierten Key wie jeden
+anderen. Der Import-Endpunkt erfordert globalen Admin-Zugriff.
+
+Ein importierter Key ist genau so stark wie der LiteLLM-Key. Bei LiteLLM können Sie
+benutzerdefinierte Keys wie `sk-1234` wählen; ersetzen Sie solche durch einen neuen GoModel-Key, statt
+sie zu importieren.
+
+### Bereichsbeschränkter Admin-Zugriff
+
+Der `user_path` eines verwalteten Keys begrenzt auch, was dieser verwalten darf. Ein Key mit
+Dashboard-Zugriff und ohne `user_path` (oder mit `/`) ist ein **globaler Admin** und sieht
+alles, wie der Master-Key. Ein an `/team/alpha` gebundener Key ist ein **bereichsbeschränkter
+Admin**: Er liest und verwaltet nur `/team/alpha` und dessen Nachfahren
+(`/team/alpha/service`, `/team/alpha/service/worker`, ...). Der
+Header `X-GoModel-User-Path` erweitert den Bereich eines Keys nie.
+
+Erweiterungsidentitäten wie SSO-Sessions folgen derselben Regel: Der User-Path der Session
+ist der Teilbaum, den sie verwaltet. Eine Erweiterung bindet daher Gateway-Admins
+an `/` und Team-Admins an die Wurzel des Teams.
+
+Mit `GET /admin/access` finden Sie heraus, um welche Art es sich bei Zugangsdaten handelt:
+
+```json
+{"scope": "global"}
+{"scope": "user_path", "user_path": "/team/alpha"}
+```
+
+Für einen bereichsbeschränkten Admin gilt:
+
+- Endpunkte für Nutzung, Audit, API-Keys, Benutzer, Budgets und Rate-Limits werden
+  auf den Bereich gefiltert. Ein fehlender `user_path`-Filter bedeutet die Wurzel des Bereichs; ein
+  `user_path` außerhalb des Bereichs liefert `403` mit dem Code
+  `user_path_out_of_scope`.
+- Über eine ID adressierte Objekte, die zu einem anderen Teilbaum gehören (ein Audit-Eintrag, ein
+  API-Key), liefern `404` – genau so, als gäbe es sie nicht.
+- Neue API-Keys und Benutzerrichtlinien verwenden standardmäßig die Wurzel des Bereichs und können nicht
+  außerhalb davon erstellt werden. Auf diese Weise erstellte Keys mit Dashboard-Zugriff sind ihrerseits
+  bereichsbeschränkte Admins dieses Teilbaums.
+- Ein Key kann seine eigenen Labels, erlaubten Modelle oder Zugriffs-Flags nicht ändern
+  (`403 auth_key_self_update`); er kann sich aber weiterhin selbst deaktivieren. Ein Key mit
+  erlaubten Modellen kann den Keys, die er erstellt oder bearbeitet, nur Modelle geben, die ihm selbst
+  erlaubt sind: `openai/*` kann `openai/gpt-4o-mini` vergeben, aber weder
+  `anthropic/*` noch einen unbeschränkten Key (`403 allowed_models_out_of_scope`).
+  Diese Regeln gelten auch für globale Keys, die außerdem keinen Key mit
+  umfassenderen Modellen importieren und ihr eigenes Token nicht erneut importieren können, außer mit
+  `"enabled": false`, um es zu deaktivieren.
+- Nur Budgets und Rate-Limits für User-Paths sind sichtbar und bearbeitbar; Regeln für Labels,
+  Provider und Modelle gelten Gateway-weit.
+- Gateway-weite Endpunkte liefern `403` mit dem Code `admin_scope_denied`: Provider-Status
+  und -Zugangsdaten, Laufzeiteinstellungen und deren Aktualisierung, API-Key-Import,
+  Tagging-Einstellungen, virtuelle Modelle, Workflows, Guardrails, MCP-Server, Preisüberschreibungen,
+  Cache-Übersicht, Live-Logs, Token-Durchsatz, Neuberechnung der Preise,
+  Zurücksetzen aller Budgets und Rate-Limits sowie Änderungen der Budgeteinstellungen. Das Dashboard blendet die
+  entsprechenden Seiten und Aktionen aus.
+
+Ohne User-Path erfasste Zeilen (zum Beispiel Traffic, der mit dem Master-Key
+und ohne Header gesendet wurde) sind nur für globale Admins sichtbar.
+
+Derselbe Bereich gilt für `/v1`-Lebenszyklusobjekte; siehe
+[User Path → Objekteigentum](/de/features/user-path#objekteigentum).
+
+Die Seiten der Dashboard-UI (`/admin/dashboard`) und die statischen Assets (`/admin/static/*`) **überspringen die Authentifizierung**, damit die Dashboard-Oberfläche erreichbar ist, ohne API-Keys im Browser zu konfigurieren – die Daten, die sie lädt, erfordern weiterhin einen Key mit Dashboard-Zugriff.
+
+<Warning>
+  Wenn Ihre GoModel-Instanz öffentlich erreichbar ist, beachten Sie, dass die Dashboard-UI
+  nicht authentifiziert ist. Deaktivieren Sie sie mit `ADMIN_UI_ENABLED=false` oder beschränken Sie
+  den Zugriff auf Netzwerkebene.
+</Warning>
+
+## REST-API-Endpunkte
+
+Alle Admin-API-Endpunkte sind unter `/admin` eingehängt.
+
+<Note>
+  **Alter Pfad-Alias** – bis zum **09.08.2026** sind dieselben Endpunkte auch
+  unter `/admin/api/v1/*` erreichbar. Responses auf dem alten Pfad enthalten
+  `Deprecation: true`, `Sunset: Sun, 09 Aug 2026 00:00:00 GMT` und einen `Link`-Header,
+  der auf den neuen Pfad verweist. Zur Migration ersetzen Sie in Ihren Skripten `/admin/api/v1/` durch
+  `/admin/`. Ein Endpunkt wurde zusätzlich innerhalb von `/admin` verschoben:
+  `/admin/api/v1/dashboard/config` → `/admin/runtime/config`.
+</Note>
+
+### GET /admin/access
+
+Gibt den Admin-Bereich des Aufrufers zurück, damit sich Skripte und das Dashboard anpassen können. Siehe
+[Bereichsbeschränkter Admin-Zugriff](/de/advanced/admin-endpoints#bereichsbeschränkter-admin-zugriff).
+
+**Response:**
+
+```json
+{"scope": "user_path", "user_path": "/team/alpha"}
+```
+
+`scope` ist `global` (Master-Key oder ein Key ohne `user_path`) oder
+`user_path`; `user_path` ist nur bei bereichsbeschränkten Zugangsdaten vorhanden.
+
+### GET /admin/usage/summary
+
+Gibt aggregierte Statistiken zur Token-Nutzung für ein konfigurierbares Zeitfenster zurück.
+
+**Query-Parameter:**
+
+| Parameter    | Typ    | Beschreibung                                             | Standardwert         |
+| ------------ | ------ | -------------------------------------------------------- | -------------------- |
+| `start_date` | string | Beginn des Zeitraums im Format `YYYY-MM-DD`              | 29 Tage vor Ende     |
+| `end_date`   | string | Ende des Zeitraums im Format `YYYY-MM-DD`                | Heute                |
+| `days`       | int    | Kurzform für das Rückblickfenster (ignoriert, wenn Datumswerte gesetzt sind) | `30` |
+| `cache_mode` | string | Welche Requests gezählt werden: `uncached`, `cached`, `all` (siehe [Cache-Modus](/de/advanced/admin-endpoints#cache-modus)) | `uncached` |
+| `auth_key_id` | string | Exakte ID des verwalteten Auth-Keys, der die Requests authentifiziert hat | —   |
+
+Verwenden Sie `start_date`/`end_date` für explizite Zeiträume oder `days` als Kurzform. Sind beide angegeben, haben `start_date`/`end_date` Vorrang.
+
+Jede Nutzungszeile erfasst den verwalteten Auth-Key, der den Request gestellt hat. Daher
+beantwortet `auth_key_id` die Frage „Wie viel hat dieser Key ausgegeben?“. Jeder Reporting-Endpunkt
+unter `/admin/usage/*` außer `throughput` akzeptiert den Parameter, und Einträge von `/admin/usage/log`
+enthalten ihn. `/admin/usage/recalculate-pricing` akzeptiert diesen
+Filter nicht. Requests mit dem Master-Key sowie Zeilen, die erfasst wurden, bevor es dieses Feld
+gab, haben keine Key-ID.
+
+```bash
+curl "http://localhost:8080/admin/usage/summary?auth_key_id=$KEY_ID" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+**Response:**
+
+```json
+{
+  "total_requests": 1542,
+  "total_input_tokens": 2450000,
+  "total_output_tokens": 890000,
+  "total_tokens": 3340000
+}
+```
+
+Ist die Nutzungserfassung deaktiviert, werden Nullwerte zurückgegeben.
+
+### GET /admin/usage/daily
+
+Gibt eine Aufschlüsselung der Token-Nutzung pro Zeitabschnitt für ein konfigurierbares Zeitfenster zurück, gruppiert nach dem angegebenen Intervall.
+
+**Query-Parameter:**
+
+| Parameter    | Typ    | Beschreibung                                             | Standardwert         |
+| ------------ | ------ | -------------------------------------------------------- | -------------------- |
+| `start_date` | string | Beginn des Zeitraums im Format `YYYY-MM-DD`              | 29 Tage vor Ende     |
+| `end_date`   | string | Ende des Zeitraums im Format `YYYY-MM-DD`                | Heute                |
+| `days`       | int    | Kurzform für das Rückblickfenster (ignoriert, wenn Datumswerte gesetzt sind) | `30` |
+| `interval`   | string | Gruppierung: `daily`, `weekly`, `monthly`, `yearly`      | `daily`              |
+| `cache_mode` | string | Welche Requests gezählt werden: `uncached`, `cached`, `all` (siehe [Cache-Modus](/de/advanced/admin-endpoints#cache-modus)) | `uncached` |
+
+Das Format des Felds `date` in der Response hängt vom Intervall ab: `YYYY-MM-DD` (täglich), `YYYY-Www` (wöchentlich), `YYYY-MM` (monatlich) oder `YYYY` (jährlich).
+
+**Response:**
+
+```json
+[
+  {
+    "date": "2026-02-17",
+    "requests": 84,
+    "input_tokens": 120000,
+    "output_tokens": 45000,
+    "total_tokens": 165000
+  },
+  {
+    "date": "2026-02-16",
+    "requests": 102,
+    "input_tokens": 155000,
+    "output_tokens": 58000,
+    "total_tokens": 213000
+  }
+]
+```
+
+Gibt ein leeres Array zurück, wenn die Nutzungserfassung deaktiviert ist oder für den Zeitraum keine Daten vorliegen.
+
+### GET /admin/usage/sessions
+
+Gibt eine begrenzte Seite mit der Nutzung zurück, gruppiert nach erkannten, auf den User-Path bezogenen Sessions
+und sortiert nach der letzten Session-Aktivität. Zeilen ohne erkannte Session werden
+ausgelassen.
+
+Die Summen für Requests und Tokens enthalten Treffer im lokalen Response-Cache. Die Kostensummen
+enthalten nur Requests, die an Provider gingen, sodass vermiedene Cache-Kosten nicht als Ausgaben erscheinen.
+
+**Query-Parameter:**
+
+| Parameter    | Typ    | Beschreibung                                     | Standardwert |
+| ------------ | ------ | ------------------------------------------------ | ------- |
+| `days`       | int    | Anzahl der Tage                                  | `30`    |
+| `start_date` | string | Startdatum (`YYYY-MM-DD`)                        | —       |
+| `end_date`   | string | Enddatum (`YYYY-MM-DD`)                          | —       |
+| `session_id` | string | Exakte ID der erkannten Session                  | —       |
+| `auth_key_id` | string | Exakte ID des verwalteten Auth-Keys             | —       |
+| `user_path`  | string | Erfasster User-Path-Teilbaum                     | —       |
+| `model`      | string | Exakter Modellname                               | —       |
+| `provider`   | string | Provider-Name oder -Typ                          | —       |
+| `label`      | string | Exaktes Request-Label                            | —       |
+| `limit`      | int    | Seitengröße, höchstens 200                       | `50`    |
+| `offset`     | int    | Paginierungs-Offset                              | `0`     |
+
+```json
+{
+  "entries": [
+    {
+      "session_id": "scoped-0123456789abcdef0123456789abcdef",
+      "user_path": "/team/alpha",
+      "requests": 8,
+      "input_tokens": 24000,
+      "output_tokens": 4100,
+      "total_tokens": 28100,
+      "input_cost": 0.42,
+      "output_cost": 0.16,
+      "total_cost": 0.58
+    }
+  ],
+  "total": 1,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+### GET /admin/usage/endpoints
+
+Gibt die Nutzung gruppiert nach Request-Endpunkt zurück, sodass Sie sehen, was Chat, Audio oder
+Embeddings kosten. Jede Zeile enthält die `operation`, zu der ihr Endpunkt gehört;
+Endpunkte mit derselben Bedeutung teilen sich eine Operation, sodass `/v1/chat/completions` und
+`/v1/messages` beide `chat_completions` sind. Summieren Sie die Zeilen nach `operation`, um eine
+Ansicht pro Operation zu erhalten. Für Endpunkte, die das Gateway nicht klassifiziert, wird `operation`
+weggelassen.
+
+Der Endpunkt akzeptiert die Zeitraumparameter (`days`, `start_date`, `end_date`) und die
+Datenfilter `model`, `provider`, `label`, `user_path`, `session_id`,
+`auth_key_id`, `endpoint`, `operation` und `cache_mode`.
+
+```json
+[
+  {
+    "endpoint": "/v1/audio/transcriptions",
+    "operation": "audio_transcriptions",
+    "requests": 42,
+    "input_tokens": 0,
+    "output_tokens": 18000,
+    "total_tokens": 18000,
+    "input_cost": 0,
+    "output_cost": 1.26,
+    "total_cost": 1.26
+  },
+  {
+    "endpoint": "/v1/messages",
+    "operation": "chat_completions",
+    "requests": 310,
+    "input_tokens": 920000,
+    "output_tokens": 140000,
+    "total_tokens": 1060000,
+    "input_cost": 2.76,
+    "output_cost": 2.1,
+    "total_cost": 4.86
+  }
+]
+```
+
+### Endpunkt- und Operationsfilter
+
+Jeder Reporting-Endpunkt unter `/admin/usage/*` außer `throughput` sowie
+`/admin/cache/overview` akzeptiert zwei Endpunktfilter:
+
+| Parameter   | Beschreibung                                                       |
+| ----------- | ------------------------------------------------------------------ |
+| `endpoint`  | Kommagetrennte exakte Request-Endpunkte, z. B. `/v1/chat/completions,/v1/messages` |
+| `operation` | Kommagetrennte Operationen; eine Zeile passt, wenn ihr Endpunkt zu einer davon gehört |
+
+Operationen: `chat_completions`, `responses`, `conversations`, `embeddings`,
+`batches`, `files`, `audio_speech`, `audio_transcriptions`,
+`audio_translations`, `image_generations`, `image_edits`, `realtime`, `mcp`,
+`systemone` und `provider_passthrough`. Eine unbekannte Operation liefert `400`.
+Provider-Passthrough-Traffic (`/p/{provider}/...`) zählt als
+`provider_passthrough`, unabhängig davon, welchen Endpunkt er upstream erreicht.
+
+```bash
+# Was hat Audio in den letzten 30 Tagen gekostet?
+curl "http://localhost:8080/admin/usage/summary?operation=audio_speech,audio_transcriptions,audio_translations" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+Beide akzeptieren Listen, sodass Sie Dialekte vergleichen oder zusammenrechnen können:
+
+```bash
+# Chat Completions, Responses und Messages zusammen
+curl "http://localhost:8080/admin/usage/summary?endpoint=/v1/chat/completions,/v1/responses,/v1/messages" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+`/admin/usage/log` gleicht seinen `search`-Text zusätzlich mit dem Endpunkt ab.
+
+### Cache-Modus
+
+Jeder Treffer im [Response-Cache](/de/features/cache) wird als Nutzungseintrag erfasst, mit
+dem `user_path` des Aufrufers und einem `cache_type` von `exact` oder `semantic`. Die Nutzungs-Endpunkte
+lassen diese Einträge standardmäßig weg, sodass Requests, Tokens und Kosten durchweg
+die Ausgaben bei Providern beschreiben. Übergeben Sie `cache_mode`, um das zu ändern:
+
+| Wert       | Zählt                                                     |
+| ---------- | --------------------------------------------------------- |
+| `uncached` | Nur Requests an Provider – der Standardwert               |
+| `cached`   | Nur lokale Cache-Treffer – was der Cache kostenlos ausgeliefert hat |
+| `all`      | Beides, das gesamte Request-Volumen des Gateways          |
+
+```bash
+curl "http://localhost:8080/admin/usage/summary?user_path=/team/alpha&cache_mode=all" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+Akzeptiert von `/admin/usage/summary`, `/admin/usage/daily`, `/admin/usage/log`,
+`/admin/usage/models`, `/admin/usage/labels`, `/admin/usage/user-paths`,
+`/admin/usage/endpoints` und
+`/v1/usage` (siehe die [Usage API](/de/advanced/usage-api#cache-modus)). Nicht erkannte
+Werte fallen auf `uncached` zurück. `/admin/usage/sessions` ignoriert den Parameter: Die Summen für
+Requests und Tokens der Sessions enthalten immer Cache-Treffer, während die Kostenfelder
+nur Provider-Kosten enthalten.
+
+Zwei Endpunkte ignorieren den Parameter bewusst: `/admin/cache/overview` meldet immer nur
+Cache-Treffer, und `/admin/usage/sessions` schließt sie immer ein (die Kostenfelder
+enthalten nur Provider-Kosten).
+
+### GET /admin/audit/stats
+
+Gibt in Zeitabschnitte eingeteilte Request-Zahlen zurück, gruppiert nach den Statusklassen
+`2xx`/`4xx`/`5xx`, dazu eine Zusammenfassung der Gesamterfolgsquote und die durchschnittliche Request-Dauer pro
+Provider. Darauf basieren die Diagramme „Requests by Status“ und „Provider Latency“ auf
+der Seite „Overview“ des Dashboards. Die Daten stammen aus dem Audit-Log (Audit-Logging ist standardmäßig aktiviert;
+`LOGGING_ENABLED`).
+
+**Query-Parameter:**
+
+| Parameter    | Typ    | Beschreibung                                             | Standardwert         |
+| ------------ | ------ | -------------------------------------------------------- | -------------------- |
+| `start_date` | string | Beginn des Zeitraums im Format `YYYY-MM-DD`              | 29 Tage vor Ende     |
+| `end_date`   | string | Ende des Zeitraums im Format `YYYY-MM-DD`                | Heute                |
+| `days`       | int    | Kurzform für das Rückblickfenster (ignoriert, wenn Datumswerte gesetzt sind) | `30` |
+
+Zeiträume bis 3 Tage verwenden stündliche Abschnitte (`"interval": "hour"`); längere Zeiträume verwenden
+tägliche Abschnitte (`"interval": "day"`). Die Abschnitte werden vom Beginn des Zeitraums
+bis zum aktuellen Zeitpunkt mit Nullwerten aufgefüllt.
+
+**Response:**
+
+```json
+{
+  "interval": "day",
+  "buckets": [
+    {
+      "start": "2026-02-17T00:00:00Z",
+      "requests": 84,
+      "status_2xx": 80,
+      "status_4xx": 3,
+      "status_5xx": 1,
+      "status_other": 0
+    }
+  ],
+  "summary": {
+    "requests": 84,
+    "status_2xx": 80,
+    "status_4xx": 3,
+    "status_5xx": 1,
+    "status_other": 0,
+    "success_rate": 0.952,
+    "avg_duration_ms": 812.4
+  },
+  "provider_latency": [
+    {
+      "provider": "openai",
+      "requests": [78],
+      "avg_duration_ms": [795.1]
+    }
+  ]
+}
+```
+
+Jede `provider_latency`-Reihe ist Index für Index an `buckets` ausgerichtet. Einträge sind
+`null` für Abschnitte, in denen der Provider keinen erfolgreichen Request bedient hat, und die
+Durchschnittswerte umfassen nur erfolgreiche (2xx) Requests, die den Provider erreicht haben – Treffer im lokalen
+Response-Cache und fehlgeschlagene Requests sind ausgenommen. Ist das Audit-Logging
+deaktiviert, werden leere Abschnitte zurückgegeben.
+
+### Budget-Endpunkte
+
+Budgets werden unter `/admin/budgets` verwaltet. Diese Endpunkte sind
+verfügbar, wenn die Budgetverwaltung aktiviert ist.
+
+| Methode  | Pfad                                  | Beschreibung                         |
+| -------- | ------------------------------------- | ------------------------------------ |
+| `GET`    | `/admin/budgets`               | Budgets mit aktuellem Status auflisten |
+| `PUT`    | `/admin/budgets/{user_path}/{period}` | Ein Budget erstellen oder aktualisieren |
+| `DELETE` | `/admin/budgets/{user_path}/{period}` | Ein Budget löschen                   |
+| `GET`    | `/admin/budgets/settings`      | Einstellungen zum Zurücksetzen von Budgets lesen |
+| `PUT`    | `/admin/budgets/settings`      | Einstellungen zum Zurücksetzen von Budgets aktualisieren |
+| `POST`   | `/admin/budgets/reset-one`     | Einen Budgetzeitraum zurücksetzen    |
+| `POST`   | `/admin/budgets/reset`         | Alle Budgetzeiträume zurücksetzen    |
+
+`PUT`, `DELETE` und `reset-one` identifizieren ein Budget über den zusammengesetzten
+Schlüssel `(user_path, period)` bzw. `(user_path, period_seconds)` für benutzerdefinierte Zeiträume.
+Diese Operationen wirken nicht global pro Zeitraum. Für die pfadbezogenen Routen `PUT` und
+`DELETE` muss `user_path` URL-kodiert werden; die Form des Requests finden Sie unter [Budgets](/de/features/budgets).
+
+Unter [Budgets](/de/features/budgets) finden Sie Request-Beispiele und das Durchsetzungsverhalten.
+
+### Benutzer-Endpunkte
+
+| Methode  | Endpunkt                             | Beschreibung                                  |
+| -------- | ------------------------------------ | --------------------------------------------- |
+| `GET`    | `/admin/users`                       | Der User-Path-Baum mit Modell-Allowlists      |
+| `PUT`    | `/admin/users`                       | Die Richtlinie eines Knotens erstellen oder ersetzen |
+| `DELETE` | `/admin/users?user_path=<path>`      | Die Richtlinie eines Knotens entfernen        |
+
+`GET /admin/users` gibt jeden Knoten zurück, den das Gateway kennt – gespeicherte
+Richtlinien, die User-Paths verwalteter API-Keys und deren Vorfahren –, sortiert nach
+Pfad:
+
+```json
+{
+  "users": [
+    {
+      "user_path": "/acme",
+      "allowed_models": ["openai/", "anthropic/"],
+      "configured": true,
+      "key_count": 0,
+      "inherited_from": [],
+      "restricted": true,
+      "effective_models": ["openai/gpt-4o", "anthropic/claude-sonnet-4-6"],
+      "created_at": "2026-08-30T10:00:00Z",
+      "updated_at": "2026-08-30T10:00:00Z"
+    },
+    {
+      "user_path": "/acme/eng/alice",
+      "allowed_models": [],
+      "configured": false,
+      "key_count": 2,
+      "inherited_from": ["/acme"],
+      "restricted": true,
+      "effective_models": ["openai/gpt-4o", "anthropic/claude-sonnet-4-6"]
+    }
+  ]
+}
+```
+
+`allowed_models` ist die eigene Liste des Knotens in kanonischer Form (`anthropic/` für einen
+Provider-Platzhalter, `/` für alles); `inherited_from` listet die Vorfahren auf,
+deren Listen ebenfalls gelten. `effective_models` ist das Ergebnis auf Pfadebene – die Liste des Knotens, die Listen seiner Vorfahren
+und die modellseitigen Richtlinien virtueller Modelle –, ausgewertet mit demselben
+Autorisierer, den auch die Inferenz verwendet; die eigenen `allowed_models` eines verwalteten API-Keys können
+einen Request weiter einschränken. Eine leere Liste mit `restricted: true` bedeutet, dass die Schnittmenge der Listen
+des Knotens leer ist. `configured` ist `false` für Knoten, die sich nur aus Keys
+oder Nachfahren ergeben; `managed: true` kennzeichnet in der Konfiguration deklarierte Richtlinien,
+die hier schreibgeschützt sind (`409`, Code `user_managed`).
+
+`PUT /admin/users` akzeptiert `{"user_path": "/acme/eng", "allowed_models": ["anthropic/*"], "description": "..."}`
+und gibt den aktualisierten Baum zurück. Selektoren werden gegen die konfigurierten
+Provider validiert. Die Abgleichsregeln finden Sie unter [Benutzer](/de/features/users).
+
+### GET /admin/models
+
+Gibt alle registrierten Modelle mit Provider-Typ und konfiguriertem Provider-Namen zurück.
+
+**Response:**
+
+```json
+[
+  {
+    "model": {
+      "id": "gpt-4o",
+      "object": "model",
+      "created": 1715367049,
+      "owned_by": "system"
+    },
+    "provider_type": "openai",
+    "provider_name": "openai_primary",
+    "selector": "openai_primary/gpt-4o"
+  },
+  {
+    "model": {
+      "id": "claude-sonnet-4-5-20250929",
+      "object": "model",
+      "created": 1727568000,
+      "owned_by": "system"
+    },
+    "provider_type": "anthropic",
+    "provider_name": "anthropic_main",
+    "selector": "anthropic_main/claude-sonnet-4-5-20250929"
+  }
+]
+```
+
+Das unterscheidet sich vom Standard-Endpunkt `/v1/models`: Die Admin-Version enthält für jedes Modell sowohl `provider_type` als auch `provider_name`. So erkennen Sie sowohl die Provider-Familie als auch die konkret konfigurierte Provider-Instanz, die das Modell bereitstellt.
+
+
+### GET /admin/models/metadata
+
+Gibt zurück, woher die Metadaten eines Modells stammen: die zusammengeführten Metadaten, die das Gateway
+ausliefert (`effective`), und jede Ebene, aus der sie zusammengeführt wurden. `provider` ist das, was der
+Provider in seiner eigenen Modellliste gemeldet hat, `catalog` der Eintrag in
+[ai-model-list](https://github.com/ENTERPILOT/ai-model-list) und
+`config` die Metadaten-Überschreibung aus `config.yaml`; eine Ebene mit `null` weiß nichts
+über das Modell. `sources` nennt für jedes effektive Feld die maßgebliche Ebene
+(`config`, `provider`, `catalog` oder `inferred` für Modi, die aus der
+Modell-ID abgeleitet wurden). Die Rangfolge finden Sie unter [Modell-Metadaten](/de/advanced/model-metadata).
+
+Die Seite **Models** des Dashboards ruft diesen Endpunkt ab, wenn eine Zeile aufgeklappt wird. Dafür wird
+nichts gespeichert: Die Ebenen werden bereits pro Modell vorgehalten, und der Katalogeintrag
+wird bei Bedarf aufgelöst.
+
+**Query-Parameter:**
+
+- `provider` (erforderlich): Name der Provider-Instanz oder Provider-Typ
+- `model` (erforderlich): unveränderte Upstream-Modell-ID
+
+**Response:**
+
+```json
+{
+  "selector": "local/gemma-3-4b-it",
+  "effective": { "display_name": "Gemma (local)", "modes": ["chat"], "context_window": 4096 },
+  "provider": { "context_window": 4096 },
+  "catalog": { "display_name": "Gemma 3 4B IT", "modes": ["chat"], "context_window": 131072 },
+  "config": { "display_name": "Gemma (local)" },
+  "sources": {
+    "display_name": "config",
+    "context_window": "provider",
+    "modes": "catalog",
+    "categories": "catalog"
+  }
+}
+```
+
+Gibt `400` zurück, wenn ein Parameter fehlt, und `404`, wenn das Modell nicht
+registriert ist.
+
+### Plugin-, Guardrail- und Workflow-Endpunkte
+
+| Methode | Pfad | Beschreibung |
+| ------ | ---- | ----------- |
+| `GET` | `/admin/plugins` | Jeder geladene Plugin-Typ: `name` und sein Titel `label`, Manifest, Hook-Arten, Konfigurationsschema, Quelle, Zustand und ob es ein `guardrail` ist |
+| `GET` | `/admin/guardrails/types` | Guardrail-Typen mit ihrem Editor-Schema, `phases`, `source`, `mutates` und `guardrail` |
+| `GET` | `/admin/guardrails` | Guardrail-Instanzen mit `fail_mode`, `timeout_ms`, `phases`, `summary` und `guardrail` |
+| `PUT` | `/admin/guardrails` | Eine Instanz erstellen oder aktualisieren (akzeptiert `fail_mode` und `timeout_ms`; abgelehnt, wenn dem neuen Typ eine Phase fehlt, in der ein aktiver Workflow die Instanz verwendet) |
+| `DELETE` | `/admin/guardrails` | Eine Instanz löschen (abgelehnt, solange ein aktiver Workflow darauf verweist) |
+| `GET` | `/admin/workflows/guardrails` | Für Workflow-Schritte verfügbare Instanzen mit den jeweils unterstützten `phases` |
+| `GET` | `/admin/workflows` | Aktive Workflows; die Ansichten enthalten `chain_hashes` pro Phase |
+| `POST` | `/admin/workflows` | Eine Workflow-Version erstellen (`schema_version: 2` mit `steps[].phase`; Version 1 wird weiterhin akzeptiert) |
+
+Die Response-Formate sind unter [Plugins](/de/advanced/plugins#admin-endpunkte)
+und [Workflows](/de/advanced/workflows#guardrail-steps) dokumentiert. Die Plugin- und Guardrail-Endpunkte
+antworten mit `503` und dem Code `feature_unavailable`, solange das Plugin-System
+ausgeschaltet ist (`PLUGINS_ENABLED=false` und `GUARDRAILS_ENABLED=false`).
+
+## Admin-Dashboard
+
+Das Dashboard ist eine serverseitig gerenderte HTML-Seite, die in das GoModel-Binary eingebettet ist. Sie erreichen es unter:
+
+```
+http://localhost:8080/admin/dashboard
+```
+
+Es bietet einen visuellen Überblick über Nutzungsstatistiken und registrierte Modelle und verwendet dieselben Daten wie die oben beschriebenen REST-API-Endpunkte.
+
+Bei `DASHBOARD_LIVE_LOGS_ENABLED=true` öffnet das Dashboard
+`GET /admin/live/logs` und streamt kompakte Vorschauen des Audit-/Nutzungs-Lebenszyklus. So
+können die Seiten „Audit Logs“ und „Usage“ einen Request anzeigen, während er den
+Workflow durchläuft, noch bevor das asynchrone Schreiben in die Datenbank abgeschlossen ist. Der Stream verwendet Sequenz-Cursor,
+begrenzte Wiederholung und Heartbeat-Events, damit sich wieder verbindende Browser nach kurzen
+Netzwerkunterbrechungen aufholen können.
+
+Die persistierten Audit- und Nutzungstabellen bleiben die maßgebliche Datenquelle. Fällt der
+Cursor des Browsers aus dem Wiederholungspuffer heraus, sendet der Stream ein Reset-Event,
+und das Dashboard lädt die Daten neu über die normalen REST-Endpunkte.
+
+## Admin-Features deaktivieren
+
+So deaktivieren Sie alle Admin-Features:
+
+```bash
+export ADMIN_ENDPOINTS_ENABLED=false
+```
+
+Damit werden sowohl die REST-API als auch die Dashboard-UI deaktiviert. Um die API zu behalten, das Dashboard aber auszublenden:
+
+```bash
+export ADMIN_ENDPOINTS_ENABLED=true
+export ADMIN_UI_ENABLED=false
+```
+
+<Tip>
+  Die Admin-Schicht ist auf eine kontrollierte Degradierung ausgelegt. Ist die Nutzungserfassung ausgeschaltet,
+  liefern die Nutzungs-Endpunkte leere Ergebnisse statt Fehlern. Ist die Modell-Registry
+  noch nicht bereit, gibt der Modell-Endpunkt ein leeres Array zurück. Das Gateway
+  läuft in jedem Fall weiter.
+</Tip>

@@ -1,0 +1,62 @@
+---
+title: "GoModel Pro"
+sidebarTitle: "Übersicht"
+description: "GoModel Pro erweitert das GoModel Gateway um lizenzierte Prompt-Komprimierung, intelligentes Routing, OIDC SSO und Egress-Proxy-Pools."
+icon: "gem"
+tag: "Pro"
+keywords: ["GoModel Pro", "Prompt-Komprimierung", "prompt compression", "intelligentes Routing", "intelligent routing", "OIDC", "SSO", "Quota-Templates", "Egress-Proxy-Pools", "egress proxy pools", "Lizenz", "license"]
+---
+
+## Was Pro ist
+
+GoModel Pro ist die kommerzielle Distribution von GoModel. Sie verwendet
+dasselbe Gateway, dieselbe Konfiguration, dieselben Provider, dasselbe
+Dashboard und dieselben APIs wie das Open-Source-GoModel, ergänzt um
+lizenzierte Erweiterungen für Prompt-Komprimierung, intelligentes Routing,
+OIDC Single Sign-On, Egress-Proxy-Pools und Quota-Templates pro
+untergeordnetem Pfad.
+
+Ohne gültige Lizenz startet das Pro-Binary als Open-Source-Gateway und
+blockiert keinen Traffic. Ausnahmen sind explizit aktiviertes SSO und
+Egress-Pools: Ist ihr Entitlement oder ihre Konfiguration ungültig, schlägt der
+Start geschlossen fehl (fail closed). So kann eine Authentifizierungsgrenze
+nicht unbemerkt verschwinden, und über Proxys geleiteter Traffic verlässt nie
+die eigene Adresse des Gateways.
+
+<CardGroup cols={2}>
+  <Card title="Prompt-Komprimierung" icon="package-minus" href="/de/pro/compression">
+    Deterministisches Umschreiben von Requests nach dem Fail-open-Prinzip, das
+    wiederholten Kontext entfernt, bevor er den Provider erreicht.
+  </Card>
+  <Card title="OIDC Single Sign-On" icon="key-round" href="/de/pro/sso">
+    Schützen Sie das Dashboard mit Ihrem Identity-Provider über den
+    Authorization Code Flow mit PKCE.
+  </Card>
+  <Card title="Intelligentes Routing" icon="route" href="/de/pro/intelligent-routing">
+    Einstufung jedes Requests als einfach oder schwer sowie adaptive,
+    zustandsabhängige Provider-Auswahl innerhalb eines virtuellen Modells. Beta.
+  </Card>
+  <Card title="Egress-Proxy-Pools" icon="route" href="/de/pro/egress">
+    Per Health Check überwachte Pools aus HTTP- oder SOCKS5-Proxys mit Failover
+    und Regeln, die Provider bestimmten Pools zuweisen.
+  </Card>
+</CardGroup>
+
+## Quota-Templates
+
+Mit Quota-Templates pro untergeordnetem Pfad gilt eine einzige
+Budget-Definition für einen `user_path` unabhängig für jeden direkt
+untergeordneten Pfad, statt eines gemeinsamen Budgets für den gesamten
+Teilbaum. Setzen Sie `per_child: true` in einem Eintrag unter
+`budgets.user_paths` – YAML- und Umgebungsvariablen-Beispiele sowie die
+Abgleichsregeln finden Sie unter
+[Budgets](/de/features/budgets#dynamische-budgets-pro-kind). Ohne das
+Entitlement `quota_templates` bricht `per_child: true` in der Konfiguration den
+Start ab, und Schreibzugriffe über die Admin API werden mit 403
+`quota_templates_not_entitled` abgelehnt.
+
+## Lizenzierung
+
+Pro-Features werden über ein offline mit Ed25519 signiertes Token in
+`GOMODEL_PRO_LICENSE` freigeschaltet. Die Validierung benötigt keinen
+Netzwerkzugriff und funktioniert auch in Air-Gapped-Umgebungen.

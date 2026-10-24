@@ -1,0 +1,45 @@
+---
+title: "许可证"
+description: "GoModel 当前的许可证，以及我们对项目长期可持续发展的考虑。"
+icon: "scale"
+keywords: ["许可证", "开源", "可持续发展", "license", "MIT", "open source", "sustainability"]
+---
+
+## 摘要
+
+GoModel 以宽松的 MIT 许可证发布。我们希望它对开发者、小团队和独立项目保持开放和实用。
+
+有两点需要说明：
+
+1. 一个小型商业发行版 [GoModel Pro](/zh/pro/overview) 即将推出。它在同一个开源网关之上增加了 OIDC SSO 和少量其他扩展；这些扩展单独授权，不采用 MIT 许可证。
+2. 为防止项目被大型云厂商攫取价值，我们可能会将网关本身的许可证调整得不那么宽松。
+
+## 完整说明
+
+AI 网关是基础设施。它位于您的应用发出的每个请求与其调用的每个模型之间。这类组件应当是您可以阅读、审计、扩展并信任的。这正是 GoModel 目前开源的原因。
+
+不过，我们也希望坦诚地说明其他方面的情况。
+
+### 保护项目
+
+有一种广为人知的模式：大型云厂商拿走开源基础设施，将其作为托管服务提供，却从不回馈。这已经迫使其他项目做出应对：
+
+- [MongoDB 改用 SSPL](https://www.mongodb.com/blog/post/mongodb-now-released-under-the-server-side-public-license)，起因是 AWS 推出了 DocumentDB，这是一个基于 MongoDB 成果构建的兼容托管服务。
+- [Elastic 改用双许可证](https://www.elastic.co/blog/licensing-change)，起因是 AWS 以 OpenSearch 之名推出了自己的 Elasticsearch 服务。
+- [Redis 改用源码可用许可证](https://redis.io/blog/redis-adopts-dual-source-available-licensing/)，理由同样是对云厂商的担忧。
+
+如果 GoModel 发展到这类风险变得真实存在，我们可能会调整许可证，以防止此类价值攫取。
+
+### 可持续发展
+
+开发 GoModel 是我们的谋生方式，但到目前为止它还没能自给自足。因此，一个商业发行版 [GoModel Pro](/zh/pro/overview)（包含 OIDC SSO 和少量其他扩展）正在路上。网关采用 MIT 许可证，无需许可证即可完整使用；Pro 面向的是直接从项目中获利的公司，而不是使用它进行开发的个人开发者或小团队。
+
+如果某个计划中的 Pro 功能正是您所需要的，而购买 Pro 对您来说不可行，请告诉我们：更便宜的个人使用许可证，或者将该功能开源，都可以商量。更详细的说明请参阅[常见问题](/zh/about/faq)。
+
+<Card
+  title="当前许可证"
+  icon="scale"
+  href="https://github.com/ENTERPILOT/GoModel/blob/main/LICENSE"
+>
+  您可以随时在此阅读当前许可证。
+</Card>

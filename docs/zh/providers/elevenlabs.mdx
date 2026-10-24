@@ -1,0 +1,86 @@
+---
+title: "ElevenLabs"
+description: "在 GoModel 中配置 ElevenLabs：voice_id 与命名语音的区别、支持的音频格式，以及语音转文本的时间戳。"
+icon: "audio-lines"
+keywords: ["ElevenLabs", "文本转语音", "text-to-speech", "TTS", "语音转文本", "speech-to-text", "STT", "语音", "voice", "提供商配置", "provider setup"]
+---
+
+ElevenLabs 是一个仅提供语音能力的提供商：它通过标准的 `/v1/audio/speech` 和
+`/v1/audio/transcriptions` 端点提供文本转语音和语音转文本。它没有聊天、`/responses` 或嵌入 API，因此对于路由到 ElevenLabs 的模型，这些端点会返回 `invalid_request_error`。
+
+## 配置
+
+```bash
+ELEVENLABS_API_KEY=...
+```
+
+或者在 `config.yaml` 中：
+
+```yaml
+providers:
+  elevenlabs:
+    type: elevenlabs
+    api_key: "${ELEVENLABS_API_KEY}"
+    # base_url 默认为 "https://api.elevenlabs.io"。
+```
+
+## 语音使用 ID，而不是名称
+
+与 OpenAI 固定的语音名称（`alloy`、`verse` 等）不同，ElevenLabs 没有内置的命名语音——每个语音都是您 ElevenLabs 语音库（内置、克隆或共享）中的一个 ID。请将该 ID 作为兼容 OpenAI 的
+`voice` 字段传入：
+
+```json
+{
+  "model": "eleven_multilingual_v2",
+  "input": "Hello there",
+  "voice": "21m00Tcm4TlvDq8ikWAM"
+}
+```
+
+您可以在 ElevenLabs 控制台中查看可用的语音 ID，也可以通过
+[透传](/zh/features/passthrough-api)（需先将 `elevenlabs` 加入
+`ENABLED_PASSTHROUGH_PROVIDERS`）访问 `/p/elevenlabs/v2/voices`——即较新的
+`GET /v2/voices` 搜索端点。`/p/elevenlabs/v1/voices` 目前无法使用：
+GoModel 的提供商透传路由会把路径开头的 `v1/` 段视为别名（用于 base URL 已包含 `/v1` 的提供商，例如
+OpenAI），并在转发前将其去除。ElevenLabs 的 base URL 是不带 `/v1` 的
+`https://api.elevenlabs.io`，因此目前每个 `/p/elevenlabs/v1/...`
+透传调用都会返回 404。这会影响通过透传访问 ElevenLabs 全部原生 `/v1`
+接口，而不仅仅是语音列表——参见下文的“未实现”。
+
+## 支持的语音格式
+
+`response_format` 接受 `mp3`（默认）、`opus`、`pcm` 和 `wav`；每种格式都映射到一个固定的 ElevenLabs `output_format`（`mp3_44100_128`、`opus_48000_128`、
+`pcm_24000`、`wav_44100`）。不支持 `aac` 和 `flac`，使用它们会返回
+`invalid_request_error`。设置 `speed` 时，其值会被限制在 ElevenLabs 语音设置的 `0.7`-`1.2`
+范围内（OpenAI 接受 `0.25`-`4.0`）；不支持 `instructions`。
+
+## 语音转文本模型与时间戳
+
+转录模型（当前为 `scribe_v2`；`scribe_v1` 仍然有效）与文本转语音目录属于不同的模型系列，不会出现在
+ElevenLabs 的 `/v1/models` 列表中——GoModel 会自行将它们添加到 `/v1/models` 的输出中。`response_format` 接受 `json`（默认）、`text` 和
+`verbose_json`；不支持 `srt`/`vtt`。请求 `verbose_json`，或在 `timestamp_granularities` 中包含
+`word`，会向 ElevenLabs 请求单词级时间信息，GoModel 会将其映射到 OpenAI 的 `words` 数组中。不支持 `prompt`。
+
+## ElevenLabs 不支持的功能
+
+以下所有情况都会返回 `invalid_request_error`，而不是静默丢弃该选项：
+
+- Chat Completions、`/v1/responses` 和嵌入。
+- 语音的 `instructions`，以及
+  `mp3`/`opus`/`pcm`/`wav` 以外的 `response_format` 值。
+- 转录的 `prompt`，以及
+  `json`/`text`/`verbose_json` 以外的 `response_format` 值。
+
+## 未实现
+
+GoModel 只实现了 ElevenLabs 中能够映射到兼容 OpenAI 端点的两项能力：文本转语音和语音转文本。ElevenLabs 提供的其他所有功能，目前在 GoModel 中都没有类型化支持：
+
+- **语音转语音（变声器）**——`POST /v1/speech-to-speech/{voice_id}`
+  没有可供翻译的兼容 OpenAI 的对应接口，因此没有对应的类型化端点。未来可以将其作为原生透传路由添加，但**目前通过透传也无法使用它**——参见上文的
+  `/v1` 别名限制；语音转语音没有可用于绕过该限制的 `/v2` 路径，因此目前完全无法通过 GoModel 访问。
+- **配音、语音克隆/设计、项目（Studio）以及对话式 AI（智能体）**——原因相同：没有可翻译的兼容 OpenAI 的结构，并且（对于这些 API 中仅提供 `/v1` 的部分）同样受上述透传限制影响。在该限制修复后，它们是未来原生透传支持的合理候选。
+- **实时/流式 TTS 和 STT**（`/v1/text-to-speech/{voice_id}/stream`、
+  WebSocket 流式传输）——GoModel 的 `/v1/audio/speech` 和
+  `/v1/audio/transcriptions` 是同步的请求/响应；没有为 ElevenLabs 实现流式变体。
+
+这些都不是专门针对 ElevenLabs 刻意回避功能扩张——而是反映了 GoModel 的音频接口有意采用 OpenAI 的结构，而 ElevenLabs 的 API 远比 OpenAI 的 TTS/STT 这一对接口庞大。

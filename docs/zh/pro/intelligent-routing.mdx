@@ -1,0 +1,142 @@
+---
+title: "智能路由"
+description: "根据请求内容将其路由到简单或困难模型档位，再在该档位内选择最健康、最便宜的提供商。"
+icon: "route"
+tag: "Pro · Beta"
+keywords: ["GoModel Pro", "智能路由", "模型档位", "自适应路由", "负载均衡", "成本优化", "intelligent routing", "smart routing", "model tiers", "adaptive routing", "load balancing", "cost optimization"]
+---
+
+<Warning>
+  智能路由目前处于 Beta 阶段。评分信号、默认值和配置项可能会在不同版本之间发生变化；您可以通过响应头和指标验证它做出的每一个决策。
+</Warning>
+
+## 概览
+
+智能路由包含两个需要许可证的扩展，可与核心版的[虚拟模型](/zh/features/virtual-models)组合使用：
+
+- **智能档位路由**回答的问题是：*这个请求应该使用哪个质量档位？* 它会在选择提供商之前，将已配置的模型别名划分到 `easy` 或 `hard`
+  档位，从而让简短的聊天发往便宜的模型，而推理密集、代码密集或工具密集的任务发往能力强的模型。
+- **自适应路由**回答的问题是：*在该档位内使用哪个提供商？* 它根据观测到的延迟、错误、冷却状态以及配置的成本或延迟目标，从虚拟模型的目标池中选择一个上游目标。
+
+两者可以叠加：对 `model: "normal"` 的请求会被改写为 `normal-easy` 或
+`normal-hard`；如果其中任一个是使用 `adaptive`
+策略的虚拟模型，选择器随后会为其挑选最佳提供商。
+
+## 智能档位路由
+
+使用普通的 GoModel 模型名称配置分档别名。档位目标可以是具体模型，也可以是虚拟模型：
+
+```bash
+PRO_SMART_ROUTING_ROUTES='{"normal":{"easy":"normal-easy","hard":"normal-hard"}}'
+```
+
+只有 `PRO_SMART_ROUTING_ROUTES` 中列出的别名才会被改写；其他所有模型名称都原样通过。如果未配置任何路由，该功能处于空闲状态，启动日志会给出提示。
+
+### 请求如何评分
+
+分类是确定性的，在进程内运行，不调用任何模型。显式要求推理的请求（`reasoning_effort` 为 medium 或更高，或带有 Anthropic `thinking` 块）会直接进入困难档位。
+否则，请求会累计分数，分数达到或超过
+`PRO_SMART_ROUTING_THRESHOLD`（默认 `4`）时选择困难档位：
+
+| 信号 | 分数 |
+| --- | --- |
+| 最新用户消息中的投入程度关键词（`think hard`、`step by step`、`root cause` 等） | +4 |
+| 代码或诊断信息（代码块、`diff --git`、调用栈、`panic:`） | +3 |
+| 声明了工具 | +2，工具数达到 5 个或以上时再 +2 |
+| 结构化输出（JSON schema / response format） | +2 |
+| 附件（图像、文件） | +2 |
+| 上下文大小 | 达到 2k 字符时 +1，达到 8k 时再 +2，达到 32k 时再 +3 |
+| 对话深度达到 7 条或以上消息 | +1 |
+
+在默认设置下，仅有一小段代码（3 分）会留在简单档位，而代码加上 2k 字符的上下文（4 分）则会升级。降低阈值可将更多流量发往困难档位，提高阈值则可保护便宜档位。
+
+### 会话固定
+
+所选档位会按路由别名和检测到的会话进行固定（参见
+[会话保持](/zh/features/session-keeping)）。该固定**只升不降**：
+在固定有效期间，对话可以从简单档位升到困难档位，但永远不会被静默降级，因此像“谢谢！”这样的后续消息不会把困难对话打回便宜档位，也不会使其提供商提示词缓存失效。固定在
+`PRO_SMART_ROUTING_SESSION_TTL` 时长内无活动后过期。
+
+### 配置智能档位路由
+
+| 环境变量 | 默认值 | 用途 |
+| --- | --- | --- |
+| `PRO_SMART_ROUTING_ENABLED` | `true` | 启用智能档位路由。 |
+| `PRO_SMART_ROUTING_ROUTES` | — | 从请求别名到 `easy` 和 `hard` 模型的 JSON 映射。没有路由时该功能处于空闲状态。 |
+| `PRO_SMART_ROUTING_THRESHOLD` | `4` | 分数达到或超过此值时选择困难档位。 |
+| `PRO_SMART_ROUTING_SESSION_TTL` | `30m` | 只升不降的会话固定的滑动有效期。 |
+
+### 覆盖和检查决策
+
+发送 `X-GoModel-Smart-Routing: off` 可为单个请求跳过分类，
+发送 `X-GoModel-Tier: easy` 或 `X-GoModel-Tier: hard` 可强制指定其档位，且不改变会话固定。
+
+每个经过路由的响应都会报告该决策：
+
+```http
+X-GoModel-Pro-Tier: hard
+X-GoModel-Pro-Tier-Target: normal-hard
+X-GoModel-Pro-Tier-Score: 5
+```
+
+同样的判定及其原因会记录在审计修订详情中。
+Prometheus 以 `gomodel_pro_smartroute_` 前缀公开请求、升级和评分指标；评分直方图是根据真实流量调整阈值的工具。
+
+## 自适应路由
+
+自适应路由用一个感知健康状况的选择器取代了核心版的 `round_robin` 和 `cost` 策略。它在启动时为整个网关注册一次，但**只有配置了 `strategy: adaptive` 的虚拟模型才会使用它**——其他所有虚拟模型保持原有策略。
+
+```yaml
+virtual_models:
+  - source: normal-hard
+    strategy: adaptive
+    targets:
+      - { model: anthropic/claude-opus-4-6 }
+      - { model: bedrock/anthropic.claude-opus-4-6 }
+      - { model: vertex/claude-opus-4-6 }
+```
+
+在控制台中，只有当运行的是带有 `routing` 授权的 Pro 构建时，`adaptive` 才会出现在虚拟模型策略下拉菜单中。在开源构建上，`strategy: adaptive` 的虚拟模型会回退为轮询。
+
+### 如何选择目标
+
+选择采用“二选一”（power-of-two-choices）算法：按权重比例抽取两个候选，瞬时负载（延迟估算 × 进行中的请求数）较低的一方胜出。权重根据进程内状态按请求重新计算——请求路径上没有外部存储。
+
+- **延迟**——每个目标都维护一个峰值 EWMA 延迟估算（对于流式请求为首字节时间），由每一次上游尝试（包括重试和故障转移）更新。
+- **冷却**——`429` 会触发时长为 `PRO_ROUTING_COOLDOWN_BASE` 的冷却，每次连续触发时翻倍，最多到 `PRO_ROUTING_COOLDOWN_MAX`；
+  `401`、`403` 和 `404` 会立即以最大时长冷却；重复的 5xx
+  或网络故障在连续三次后进入冷却。只要有其他目标可用，处于冷却中的目标就会被跳过。
+- **权重下限**——每个未处于冷却中的目标至少保留最重候选权重的
+  `PRO_ROUTING_MIN_WEIGHT_FRACTION`，因此较慢或正在恢复的目标仍能获得少量流量，并通过真实请求证明其已恢复。
+- **提示词缓存热度**——上一次为某个检测到的会话提供服务的提供商，会在 `PRO_ROUTING_WARM_CACHE_TTL` 内获得 `PRO_ROUTING_WARM_CACHE_WEIGHT` 的权重加成，
+  从而在其提示词缓存很可能仍然有效时，让对话保持在同一凭据、端点和区域上。处于冷却中的目标会失去该加成。
+
+目标设置决定价格如何影响权重：
+
+| `PRO_ROUTING_OBJECTIVE` | 行为 |
+| --- | --- |
+| `latency` | 仅根据观测到的延迟和健康状况为目标加权。 |
+| `cost` | 额外按价格的平方反比加权：价格为最便宜目标两倍的目标，只能获得其四分之一的份额。与核心版的 `cost` 策略不同，不健康的便宜目标仍会分流出去。 |
+| `balanced` | 综合延迟和价格加权。默认值。 |
+
+### 配置自适应路由
+
+| 环境变量 | 默认值 | 用途 |
+| --- | --- | --- |
+| `PRO_ROUTING_ENABLED` | `true` | 注册自适应选择器。 |
+| `PRO_ROUTING_OBJECTIVE` | `balanced` | `latency`、`cost` 或 `balanced`。 |
+| `PRO_ROUTING_MIN_WEIGHT_FRACTION` | `0.05` | 未处于冷却中的目标的权重下限，以最重候选的比例表示（`0`–`0.5`）。 |
+| `PRO_ROUTING_COOLDOWN_BASE` | `30s` | 收到 `429` 或上游重复失败后的首次冷却时长；连续触发时翻倍。 |
+| `PRO_ROUTING_COOLDOWN_MAX` | `5m` | 冷却时长上限；也是 `401`、`403` 和 `404` 的立即冷却时长。 |
+| `PRO_ROUTING_WARM_CACHE_WEIGHT` | `8` | 上一次为会话提供服务的提供商的权重乘数。 |
+| `PRO_ROUTING_WARM_CACHE_TTL` | `10m` | 假定会话的提示词缓存保持有效的时长。 |
+
+### 会话保持与健康状况
+
+启用[会话保持](/zh/features/session-keeping)（默认启用）时，只要有多个可用目标，网关就会将当前为每个会话提供服务的目标交给选择器，由它逐个请求决定该会话是否继续使用该目标。（只有一个可用目标时没有选择余地，因此会跳过选择器。）只要该目标保持健康，固定就会一直有效——迁移会话会丢弃固定所要保护的提供商提示词缓存，因此即使存在便宜得多或快得多的替代目标，也不会抢走该会话。只有当目标进入冷却时，固定才会被释放，随后会话会重新固定到选择器选出的目标上。
+
+这是网关自身无法做出的唯一判断：一个正在返回 `429` 或超时的目标，仍然是已配置且受目录支持的目标，因此能通过核心版固定机制的所有检查。如果请求路径中没有选择器，智能体会话（一个会话 ID、成千上万个请求）会在第一个请求时被固定，并在固定的整个有效期内一直使用这个故障目标，而这只会表现为延迟和浪费的上游支出，因为故障转移仍会向客户端返回 `200`。
+
+`gomodel_pro_routing_session_affinity_total{outcome}` 统计 `honored`（被遵守）的固定和因冷却而 `released`（被释放）的固定，因此您可以在 Prometheus 中看到这一行为，而不必等到提供商账单上才发现。
+
+Prometheus 指标使用 `gomodel_pro_routing_` 前缀（选择、拒绝、结果、冷却、会话亲和性以及延迟估算仪表）。评分状态按节点保存；各副本独立学习，互不共享。
