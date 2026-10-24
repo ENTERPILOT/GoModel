@@ -3,6 +3,7 @@ linters:
   enable:
     - dupl
     - errcheck
+    - gosec
     - govet
     - ineffassign
     - staticcheck
@@ -11,6 +12,14 @@ linters:
   settings:
     dupl:
       threshold: 100
+    gosec:
+      excludes:
+        # Matches identifier names such as header, field, and env var names;
+        # every hit was a name, not a credential.
+        - G101
+        # Integer conversions in hashing, modulo, and config-bounded values;
+        # the rule cannot see the surrounding bounds checks.
+        - G115
     testifylint:
       enable-all: true
       disable:
@@ -28,6 +37,24 @@ linters:
       - linters:
           - dupl
         path: tests/
+      # Tests use fixture credentials, temp files, and local HTTP servers.
+      - linters:
+          - gosec
+        path: _test\.go
+      - linters:
+          - gosec
+        path: tests/
+      # Developer tool: fetches the configured provider and writes golden
+      # files into the repository.
+      - linters:
+          - gosec
+        path: cmd/recordapi/
+      # WHERE clauses are joined from constant fragments; every value is a
+      # bound parameter.
+      - linters:
+          - gosec
+        path: internal/usage/
+        text: G202
     generated: lax
     presets:
       - comments

@@ -84,6 +84,7 @@ func (h *Handler) Version(c *echo.Context) error {
 // localhost would otherwise have the cookie silently dropped, and the daily
 // gate would degrade into a check on every page load.
 func (h *Handler) setVisitCookie(c *echo.Context, value string) {
+	//nolint:gosec // Non-secret visit marker; see the Secure and HttpOnly notes.
 	http.SetCookie(c.Response(), &http.Cookie{
 		Name:     versioncheck.CookieName,
 		Value:    value,
