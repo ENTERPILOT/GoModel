@@ -29,6 +29,16 @@
     document.getElementById(rowId(index))?.focus();
   }
 
+  // Removing a row takes the focused button with it, so focus moves to the
+  // row that took its place, the new last row, or Add model when none remain.
+  async function removeRow(index) {
+    providersConfig.removeModelRow(index);
+    await tick();
+    const remaining = providersConfig.form.models.length;
+    const next = remaining > 0 ? rowId(Math.min(index, remaining - 1)) : id;
+    document.getElementById(next)?.focus();
+  }
+
   // Enter starts the next model instead of submitting the whole dialog.
   function onRowKeydown(event, index) {
     if (event.key === "Enter" && !event.isComposing) {
@@ -60,7 +70,7 @@
           placeholder="gpt-4o"
           aria-label={m.providers_model_entry({ number: index + 1 })}
           aria-invalid={invalid ? "true" : undefined}
-          aria-describedby={index === 0 ? describedBy : undefined}
+          aria-describedby={describedBy}
           bind:value={row.value}
           oninput={() => providersConfig.clearFieldError("models")}
           onkeydown={(event) => onRowKeydown(event, index)}
@@ -68,7 +78,7 @@
         <TableActionButton
           label={m.providers_remove_model({ number: index + 1 })}
           class="table-action-btn-danger table-icon-btn vm-target-remove"
-          onclick={() => providersConfig.removeModelRow(index)}
+          onclick={() => removeRow(index)}
         >
           <Icon icon={Trash2} class="table-icon-svg" />
         </TableActionButton>

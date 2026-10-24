@@ -1,6 +1,9 @@
 // Pure-logic tests for the provider editor's custom models list/text control.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   modelRowsToList,
@@ -48,4 +51,51 @@ test("rows and text round-trip through each other", () => {
   assert.deepEqual(modelsTextToRows(text), rows);
   assert.deepEqual(modelsTextToRows(""), []);
   assert.deepEqual(modelsToRows(undefined), []);
+});
+
+// There is no DOM test harness in this suite, so the editor's keyboard and
+// view wiring is asserted on the component and store source.
+const SRC = fileURLToPath(new URL("../src", import.meta.url));
+const control = readFileSync(
+  join(SRC, "pages/providers-config/ProviderModelsControl.svelte"),
+  "utf8",
+);
+const store = readFileSync(
+  join(SRC, "pages/providers-config/providersConfig.svelte.js"),
+  "utf8",
+);
+
+test("Enter in a model row adds and focuses the next row instead of submitting", () => {
+  const keydown = (control.match(/function onRowKeydown\([^)]*\) \{[\s\S]*?\n  \}/) || [""])[0];
+  assert.match(keydown, /event\.key === "Enter" && !event\.isComposing/);
+  assert.match(keydown, /event\.preventDefault\(\)/);
+  assert.match(keydown, /addRow\(index \+ 1\)/);
+
+  const addRow = (control.match(/async function addRow\([^)]*\) \{[\s\S]*?\n  \}/) || [""])[0];
+  assert.match(addRow, /await tick\(\)/);
+  assert.match(addRow, /getElementById\(rowId\(index\)\)\?\.focus\(\)/);
+});
+
+test("removing a model row keeps focus inside the control", () => {
+  const removeRow = (control.match(/async function removeRow\([^)]*\) \{[\s\S]*?\n  \}/) || [""])[0];
+  assert.match(removeRow, /providersConfig\.removeModelRow\(index\)/);
+  assert.match(removeRow, /await tick\(\)/);
+  assert.match(removeRow, /getElementById\(next\)\?\.focus\(\)/);
+  assert.match(control, /onclick=\{\(\) => removeRow\(index\)\}/);
+  // With no rows left, the Add model button takes the control's id.
+  assert.match(control, /id=\{rows\.length === 0 \? id : undefined\}/);
+});
+
+test("every model row links to the models error message", () => {
+  const input = (control.match(/<input[\s\S]*?\/>/) || [""])[0];
+  assert.match(input, /aria-invalid=\{invalid \? "true" : undefined\}/);
+  assert.match(input, /aria-describedby=\{describedBy\}/);
+});
+
+test("switching to the text view starts from the current rows", () => {
+  const setView = (store.match(/\n  setModelsView\([^)]*\) \{[\s\S]*?\n  \}/) || [""])[0];
+  assert.match(setView, /this\.modelsText = modelRowsToText\(this\.form\.models\)/);
+  assert.match(setView, /this\.modelsView = view/);
+  assert.match(control, /onchange=\{\(view\) => providersConfig\.setModelsView\(view\)\}/);
+  assert.match(control, /oninput=\{\(event\) => providersConfig\.setModelsText\(event\.currentTarget\.value\)\}/);
 });
