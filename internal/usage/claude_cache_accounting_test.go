@@ -119,3 +119,41 @@ func TestEntryInputSegments_OpenAINamesInsideInput(t *testing.T) {
 		})
 	}
 }
+
+func TestCalculateGranularCost_CacheCountsLargerThanInputTogetherAreAdditive(t *testing.T) {
+	pricing := &core.ModelPricing{
+		InputPerMtok:       new(3.0),
+		CachedInputPerMtok: new(0.30),
+		CacheWritePerMtok:  new(3.75),
+	}
+	raw := map[string]any{"prompt_cached_tokens": 15, "prompt_cache_write_tokens": 15}
+
+	result := CalculateGranularCost(20, 0, raw, "anthropic", pricing)
+
+	// Each count fits in input_tokens, but together they do not, so both come
+	// on top of it, as EntryInputSegments splits the row:
+	// 20 * 3.0/1M + 15 * 0.30/1M + 15 * 3.75/1M
+	assertCostNear(t, "InputCost", result.InputCost, 0.00012075)
+}
+
+func TestCalculateGranularCost_1hWritesWithoutCacheWriteRate(t *testing.T) {
+	pricing := &core.ModelPricing{
+		InputPerMtok:        new(3.0),
+		CachedInputPerMtok:  new(0.30),
+		CacheWrite1hPerMtok: new(6.0),
+	}
+	raw := map[string]any{
+		"prompt_cached_tokens":                     100_000,
+		"prompt_cache_write_tokens":                50_000,
+		"cache_creation_ephemeral_5m_input_tokens": 20_000,
+		"cache_creation_ephemeral_1h_input_tokens": 30_000,
+	}
+
+	result := CalculateGranularCost(350_000, 0, raw, "anthropic", pricing)
+
+	// The 5-minute writes stay at the base input rate and the 1-hour writes
+	// cost the 1-hour rate once:
+	// 200k * 3.0/1M + 100k * 0.30/1M + 20k * 3.0/1M + 30k * 6.0/1M
+	assertCostNear(t, "InputCost", result.InputCost, 0.87)
+	assert.Empty(t, result.Caveat)
+}

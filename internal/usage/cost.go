@@ -309,6 +309,10 @@ func CalculateGranularCost(inputTokens, outputTokens int, rawData map[string]any
 	// rawData keys map to the same pricing field (e.g. cached_tokens and prompt_cached_tokens
 	// both map to CachedInputPerMtok).
 	appliedFields := make(map[*float64]bool)
+	// Split the cache counts the way EntryInputSegments does, so the cost and
+	// the input breakdown agree on whether the cache is part of inputTokens.
+	uncachedInput, cachedInput, cacheWriteInput := EntryInputSegments(UsageLogEntry{InputTokens: inputTokens, RawData: rawData})
+	cacheInInput := uncachedInput+cachedInput+cacheWriteInput == int64(inputTokens)
 	for _, m := range tokenCostMappingsForProvider(providerType) {
 		count := extractInt(rawData, m.rawDataKey)
 		if count == 0 {
@@ -331,13 +335,22 @@ func CalculateGranularCost(inputTokens, outputTokens int, rawData map[string]any
 		// it: a Claude Responses body cached before input_tokens included the
 		// cache reports its cache reads on top of input_tokens.
 		includedInBase := m.includedInBase && (m.side != sideInput || count <= inputTokens)
+		if rate == pricing.CachedInputPerMtok || rate == pricing.CacheWritePerMtok {
+			includedInBase = includedInBase && cacheInInput
+		}
 		if includedInBase && m.unit == unitPerMtok {
 			if baseRate := baseRateForSide(pricing, m.side); baseRate != nil {
 				effectiveRate -= *baseRate
 			}
 		}
 		if m.includedIn != nil {
-			if paidRate := m.includedIn(pricing); paidRate != nil {
+			paidRate := m.includedIn(pricing)
+			// Without their own rate, cache writes inside inputTokens were
+			// already charged at the base input rate.
+			if paidRate == nil && cacheInInput && cacheWriteInput > 0 {
+				paidRate = baseRateForSide(pricing, m.side)
+			}
+			if paidRate != nil {
 				effectiveRate -= *paidRate
 			}
 		}
