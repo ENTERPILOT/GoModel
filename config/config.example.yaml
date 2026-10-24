@@ -624,6 +624,11 @@ providers:
     api_key: "${DEEPINFRA_API_KEY}"
     # base_url defaults to "https://api.deepinfra.com/v1/openai".
 
+  together:
+    type: together
+    api_key: "${TOGETHER_API_KEY}"
+    # base_url defaults to "https://api.together.ai/v1".
+
   chutes:
     type: chutes
     api_key: "${CHUTES_API_KEY}"
