@@ -91,7 +91,11 @@ await writeFile("speech.wav", Buffer.from(await speech.arrayBuffer()));
 
 </CodeGroup>
 
-Pola `model`, `input` i `voice` są wymagane. Pola opcjonalne – `instructions`,
+Pola `model` i `input` są wymagane. `voice` jest opcjonalne: gdy go brak, OpenAI
+i Azure OpenAI używają `alloy`, a pozostali providerzy własnego domyślnego głosu.
+ElevenLabs i MiniMax nie mają głosu domyślnego i wymagają ID głosu. Nazwy głosów
+zależą od providera, więc `alloy`/`nova`/… z OpenAI działają tylko w OpenAI i
+Azure. Pola opcjonalne – `instructions`,
 `response_format` (domyślnie `mp3`, a także `opus`, `aac`, `flac`, `wav`, `pcm`) oraz
 `speed` – są przekazywane do providera. `Content-Type` odpowiedzi to ten,
 który zwraca upstream, a w razie jego braku typ wynikający z `response_format` (na

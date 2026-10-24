@@ -71,6 +71,47 @@ func TestCreateSpeech_PreservesUpstreamContentType(t *testing.T) {
 	}
 }
 
+// TestCreateSpeech_Voice checks who supplies a missing voice: native OpenAI
+// fills its required default, while the shared compatible adapter omits it so
+// the provider's own default speaker applies.
+func TestCreateSpeech_Voice(t *testing.T) {
+	tests := []struct {
+		name   string
+		native bool
+		voice  string
+		want   any // nil => voice omitted upstream
+	}{
+		{name: "native fills default", native: true, voice: "", want: DefaultSpeechVoice},
+		{name: "native keeps voice", native: true, voice: "nova", want: "nova"},
+		{name: "compatible omits blank voice", native: false, voice: "", want: nil},
+		{name: "compatible keeps voice", native: false, voice: "Vivian", want: "Vivian"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			compat, capture := newTestProvider(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "audio/mpeg")
+				_, _ = w.Write([]byte("audio-bytes"))
+			})
+			var provider core.AudioProvider = compat
+			if tt.native {
+				provider = &Provider{CompatibleProvider: compat}
+			}
+
+			req := &core.AudioSpeechRequest{Model: "tts-model", Input: "hello", Voice: tt.voice}
+			_, err := provider.CreateSpeech(context.Background(), req)
+			require.NoError(t, err)
+
+			voice, sent := capture.Last(t).JSON(t)["voice"]
+			if tt.want == nil {
+				assert.False(t, sent, "blank voice must not be sent upstream")
+			} else {
+				assert.Equal(t, tt.want, voice)
+			}
+			assert.Equal(t, tt.voice, req.Voice, "caller's request must not be modified")
+		})
+	}
+}
+
 func TestCreateTranslation_UsesTranslationMultipartShape(t *testing.T) {
 	provider, capture := newTestProvider(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")

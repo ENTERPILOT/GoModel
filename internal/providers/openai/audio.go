@@ -12,6 +12,28 @@ import (
 	"github.com/enterpilot/gomodel/internal/llmclient"
 )
 
+// DefaultSpeechVoice is the voice native OpenAI and Azure OpenAI speech requests
+// use when the client sends none. OpenAI requires a voice; other
+// OpenAI-compatible providers have their own default speaker and reject
+// OpenAI's voice names, so only these two fill it in.
+const DefaultSpeechVoice = "alloy"
+
+// WithDefaultSpeechVoice returns req, or a copy naming DefaultSpeechVoice when
+// req names no voice.
+func WithDefaultSpeechVoice(req *core.AudioSpeechRequest) *core.AudioSpeechRequest {
+	if req == nil || strings.TrimSpace(req.Voice) != "" {
+		return req
+	}
+	withVoice := *req
+	withVoice.Voice = DefaultSpeechVoice
+	return &withVoice
+}
+
+// CreateSpeech fills OpenAI's required voice before synthesizing.
+func (p *Provider) CreateSpeech(ctx context.Context, req *core.AudioSpeechRequest) (*core.AudioResponse, error) {
+	return p.CompatibleProvider.CreateSpeech(ctx, WithDefaultSpeechVoice(req))
+}
+
 // CreateSpeech implements OpenAI text-to-speech (POST /audio/speech). The upstream
 // produces the audio as it synthesizes it, so the body is relayed as it arrives:
 // buffering it charges the client the whole generation before the first byte. The
@@ -25,9 +47,8 @@ func (p *CompatibleProvider) CreateSpeech(ctx context.Context, req *core.AudioSp
 	if strings.TrimSpace(req.Input) == "" {
 		return nil, core.NewInvalidRequestError("input is required", nil)
 	}
-	if strings.TrimSpace(req.Voice) == "" {
-		return nil, core.NewInvalidRequestError("voice is required", nil)
-	}
+	// A blank voice is omitted so OpenAI-compatible providers apply their own
+	// default speaker; native OpenAI fills one in first (WithDefaultSpeechVoice).
 
 	raw, err := p.client.DoStreamResponse(ctx, p.prepareRequest(llmclient.Request{
 		Method:   http.MethodPost,
