@@ -1,0 +1,198 @@
+---
+title: "Intelligentes Routing"
+description: "Leiten Sie jeden Request anhand seines Inhalts an eine einfache oder anspruchsvolle Modellstufe weiter und wählen Sie innerhalb dieser Stufe den gesündesten und günstigsten Provider."
+icon: "route"
+tag: "Pro · Beta"
+keywords: ["GoModel Pro", "intelligentes Routing", "intelligent routing", "Smart Routing", "Modellstufen", "model tiers", "adaptives Routing", "adaptive routing", "Load Balancing", "Kostenoptimierung"]
+---
+
+<Warning>
+  Intelligentes Routing befindet sich in der Beta. Bewertungssignale, Standardwerte und
+  Konfigurationsoptionen können sich zwischen Releases ändern; mit den Response-Headern
+  und Metriken können Sie jede getroffene Entscheidung überprüfen.
+</Warning>
+
+## Übersicht
+
+Intelligentes Routing umfasst zwei lizenzierte Erweiterungen, die mit den
+[virtuellen Modellen](/de/features/virtual-models) des Core zusammenspielen:
+
+- **Smart Tier Routing** beantwortet die Frage *Welche Qualitätsstufe verdient dieser
+  Request?* Es ordnet einen konfigurierten Modell-Alias vor der Provider-Auswahl der Stufe `easy` oder `hard`
+  zu, sodass kurzer Chat an ein günstiges Modell geht und
+  Reasoning-, Code- oder Tool-intensive Arbeit an ein leistungsstarkes.
+- **Adaptives Routing** beantwortet die Frage *Welcher Provider innerhalb dieser Stufe?* Es wählt
+  aus dem Pool eines virtuellen Modells ein Upstream-Ziel anhand der beobachteten Latenz,
+  Fehler, Cooldowns und des konfigurierten Kosten- oder Latenzziels.
+
+Beide lassen sich kombinieren: Ein Request für `model: "normal"` wird zu `normal-easy` oder
+`normal-hard` umgeschrieben, und ist eines davon ein virtuelles Modell mit der Strategie
+`adaptive`, wählt der Selektor anschließend den besten Provider dafür.
+
+## Smart Tier Routing
+
+Konfigurieren Sie einen gestuften Alias mit gewöhnlichen GoModel-Modellnamen. Die Ziele der Stufen können
+konkrete Modelle oder virtuelle Modelle sein:
+
+```bash
+PRO_SMART_ROUTING_ROUTES='{"normal":{"easy":"normal-easy","hard":"normal-hard"}}'
+```
+
+Nur in `PRO_SMART_ROUTING_ROUTES` aufgeführte Aliase werden umgeschrieben; jeder andere
+Modellname wird unverändert durchgereicht. Sind keine Routen konfiguriert, ist das Feature
+inaktiv, und beim Start wird ein Hinweis protokolliert.
+
+### Wie ein Request bewertet wird
+
+Die Klassifizierung ist deterministisch, läuft im Prozess und ruft kein Modell auf. Ein
+Request, der explizit Reasoning anfordert (`reasoning_effort` ab medium
+oder ein Anthropic-`thinking`-Block), geht direkt an die Stufe `hard`.
+Andernfalls sammelt der Request Punkte, und ein Wert ab
+`PRO_SMART_ROUTING_THRESHOLD` (Standardwert `4`) wählt die Stufe `hard`:
+
+| Signal | Punkte |
+| --- | --- |
+| Aufwands-Schlüsselwörter in der letzten Benutzernachricht (`think hard`, `step by step`, `root cause`, …) | +4 |
+| Code oder Diagnosen (umzäunter Code, `diff --git`, Tracebacks, `panic:`) | +3 |
+| Deklarierte Tools | +2, und weitere +2 ab 5 Tools |
+| Structured Output (JSON-Schema / Response-Format) | +2 |
+| Anhänge (Bilder, Dateien) | +2 |
+| Kontextgröße | +1 ab 2k Zeichen, weitere +2 ab 8k, weitere +3 ab 32k |
+| Thread-Tiefe von 7 oder mehr Nachrichten | +1 |
+
+Mit den Standardwerten bleibt ein kurzes Code-Snippet allein (3) auf der Stufe `easy`, während
+Code plus 2k Zeichen Kontext (4) eskaliert. Senken Sie den Schwellenwert, um
+mehr Traffic an die Stufe `hard` zu senden, oder erhöhen Sie ihn, um die günstige Stufe zu schützen.
+
+### Session-Pinning
+
+Die gewählte Stufe wird pro gerouteten Alias und erkannter Session festgehalten (siehe
+[Session Keeping](/de/features/session-keeping)). Das Pinning **eskaliert nur**:
+Eine Unterhaltung kann bei aktivem Pin von `easy` zu `hard` wechseln, wird aber nie
+stillschweigend herabgestuft. Eine Folgenachricht wie „thanks!“ kann eine anspruchsvolle
+Unterhaltung daher nicht auf die günstige Stufe zurückwerfen oder ihren Prompt-Cache beim Provider ungültig machen. Der
+Pin läuft nach `PRO_SMART_ROUTING_SESSION_TTL` Inaktivität ab.
+
+### Smart Tier Routing konfigurieren
+
+| Umgebungsvariable | Standardwert | Zweck |
+| --- | --- | --- |
+| `PRO_SMART_ROUTING_ENABLED` | `true` | Aktiviert Smart Tier Routing. |
+| `PRO_SMART_ROUTING_ROUTES` | — | JSON-Map von angefragten Aliasen auf `easy`- und `hard`-Modelle. Ohne Routen bleibt das Feature inaktiv. |
+| `PRO_SMART_ROUTING_THRESHOLD` | `4` | Ein Wert ab dieser Schwelle wählt die Stufe `hard`. |
+| `PRO_SMART_ROUTING_SESSION_TTL` | `30m` | Gleitende Lebensdauer eines nur eskalierenden Session-Pins. |
+
+### Eine Entscheidung überschreiben und prüfen
+
+Senden Sie `X-GoModel-Smart-Routing: off`, um die Klassifizierung für einen Request zu umgehen,
+oder `X-GoModel-Tier: easy` bzw. `X-GoModel-Tier: hard`, um seine Stufe zu erzwingen, ohne
+den Session-Pin zu ändern.
+
+Jede geroutete Response meldet die Entscheidung:
+
+```http
+X-GoModel-Pro-Tier: hard
+X-GoModel-Pro-Tier-Target: normal-hard
+X-GoModel-Pro-Tier-Score: 5
+```
+
+Dasselbe Urteil samt Begründung wird im Detail der Audit-Revision erfasst.
+Prometheus stellt Metriken zu Requests, Eskalationen und Bewertungen unter dem Präfix
+`gomodel_pro_smartroute_` bereit; mit dem Histogramm der Bewertungen stimmen Sie
+den Schwellenwert auf echten Traffic ab.
+
+## Adaptives Routing
+
+Adaptives Routing ersetzt die Core-Strategien `round_robin` und `cost` durch einen
+zustandsbewussten Selektor. Er wird beim Start einmal für das gesamte
+Gateway registriert, aber **nur virtuelle Modelle, die mit `strategy: adaptive` konfiguriert sind, verwenden
+ihn** – jedes andere virtuelle Modell behält seine Strategie.
+
+```yaml
+virtual_models:
+  - source: normal-hard
+    strategy: adaptive
+    targets:
+      - { model: anthropic/claude-opus-4-6 }
+      - { model: bedrock/anthropic.claude-opus-4-6 }
+      - { model: vertex/claude-opus-4-6 }
+```
+
+Im Dashboard erscheint `adaptive` in der Strategie-Auswahl für virtuelle Modelle
+nur, wenn ein Pro-Build mit der Berechtigung `routing` läuft. Bei einem
+Open-Source-Build fällt ein virtuelles Modell mit `strategy: adaptive` auf
+Round-Robin zurück.
+
+### Wie ein Ziel gewählt wird
+
+Die Auswahl folgt dem Power-of-Two-Choices-Verfahren: Zwei Kandidaten werden proportional zu
+ihren Gewichten gezogen, und der mit der geringeren momentanen Last (Latenzschätzung
+× laufende Requests) gewinnt. Die Gewichte werden pro Request aus dem Zustand im Prozess
+neu berechnet – im Request-Pfad gibt es keinen externen Speicher.
+
+- **Latenz** – jedes Ziel führt eine Peak-EWMA-Latenzschätzung (Time to First
+  Byte bei Streams), gespeist von jedem Upstream-Versuch, einschließlich Retries und
+  Failovers.
+- **Cooldowns** – ein `429` startet einen Cooldown von `PRO_ROUTING_COOLDOWN_BASE`,
+  der sich bei jedem aufeinanderfolgenden Auslöser bis zu `PRO_ROUTING_COOLDOWN_MAX` verdoppelt;
+  `401`, `403` und `404` lösen sofort den maximalen Cooldown aus; wiederholte 5xx-
+  oder Netzwerkfehler lösen nach drei in Folge einen Cooldown aus. Ziele im Cooldown werden
+  übersprungen, solange ein anderes Ziel verfügbar ist.
+- **Gewichtsuntergrenze** – jedes Ziel, das sich nicht im Cooldown befindet, behält mindestens
+  `PRO_ROUTING_MIN_WEIGHT_FRACTION` des Gewichts des schwersten Kandidaten. So
+  erhält ein langsames oder sich erholendes Ziel weiterhin ein wenig Traffic, und seine
+  Erholung wird an echten Requests nachgewiesen.
+- **Warmer Prompt-Cache** – der Provider, der eine erkannte Session zuletzt bedient hat,
+  wird für `PRO_ROUTING_WARM_CACHE_TTL` um `PRO_ROUTING_WARM_CACHE_WEIGHT` bevorzugt,
+  sodass eine Unterhaltung bei denselben Zugangsdaten, demselben Endpunkt und derselben Region bleibt, solange
+  ihr Prompt-Cache wahrscheinlich warm ist. Ein Ziel im Cooldown verliert diesen Bonus.
+
+Das Ziel (Objective) bestimmt, wie der Preis in das Gewicht einfließt:
+
+| `PRO_ROUTING_OBJECTIVE` | Verhalten |
+| --- | --- |
+| `latency` | Gewichtet Ziele nur nach beobachteter Latenz und Zustand. |
+| `cost` | Gewichtet zusätzlich nach dem inversen Quadrat des Preises: Ein Ziel zum doppelten Preis des günstigsten erhält ein Viertel von dessen Anteil. Anders als bei der Core-Strategie `cost` verliert auch ein ungesundes günstiges Ziel weiterhin Traffic. |
+| `balanced` | Mischt Latenz- und Preisgewichtung. Der Standardwert. |
+
+### Adaptives Routing konfigurieren
+
+| Umgebungsvariable | Standardwert | Zweck |
+| --- | --- | --- |
+| `PRO_ROUTING_ENABLED` | `true` | Registriert den adaptiven Selektor. |
+| `PRO_ROUTING_OBJECTIVE` | `balanced` | `latency`, `cost` oder `balanced`. |
+| `PRO_ROUTING_MIN_WEIGHT_FRACTION` | `0.05` | Gewichtsuntergrenze für Ziele ohne Cooldown, als Anteil am schwersten Kandidaten (`0`–`0.5`). |
+| `PRO_ROUTING_COOLDOWN_BASE` | `30s` | Erster Cooldown nach einem `429` oder wiederholten Upstream-Fehlern; verdoppelt sich bei aufeinanderfolgenden Auslösern. |
+| `PRO_ROUTING_COOLDOWN_MAX` | `5m` | Obergrenze des Cooldowns; zugleich der sofortige Cooldown bei `401`, `403` und `404`. |
+| `PRO_ROUTING_WARM_CACHE_WEIGHT` | `8` | Gewichtsmultiplikator für den Provider, der eine Session zuletzt bedient hat. |
+| `PRO_ROUTING_WARM_CACHE_TTL` | `10m` | Wie lange für eine Session ein warmer Prompt-Cache angenommen wird. |
+
+### Session Keeping und Zustand
+
+Bei aktiviertem [Session Keeping](/de/features/session-keeping) (Standard) übergibt das
+Gateway dem Selektor das Ziel, das die jeweilige Session bereits bedient, und lässt
+ihn Request für Request entscheiden, ob die Session es behält – sofern mehr
+als ein Ziel infrage kommt. (Bei nur einem infrage kommenden Ziel gibt es nichts zu
+wählen, daher wird der Selektor übersprungen.) Der Pin bleibt bestehen,
+solange dieses Ziel gesund ist – das Verschieben einer Session verwirft den Prompt-Cache
+beim Provider, den der Pin schützen soll. Daher übernimmt selbst eine deutlich günstigere oder deutlich schnellere
+Alternative die Session nicht. Ein Pin wird nur freigegeben, wenn sein Ziel in einen
+Cooldown geht, und die Session wird dann stattdessen an das Ziel gebunden, das der Selektor
+wählt.
+
+Das ist die eine Beurteilung, die das Gateway nicht allein treffen kann: Ein Ziel, das
+`429`-Fehler liefert oder in Timeouts läuft, ist weiterhin ein konfiguriertes, vom Katalog unterstütztes
+Ziel und besteht damit jede Prüfung, die der Core-Pin anwendet. Ohne den Selektor
+im Pfad bindet sich eine Agenten-Session – eine Session-ID, Tausende von Requests – bei
+ihrem ersten Request und bleibt für die gesamte Lebensdauer des Pins an einem fehlerhaften Ziel hängen.
+Das ist nur als Latenz und verschwendete Upstream-Ausgaben sichtbar, da das Failover dem Client
+weiterhin `200` liefert.
+
+`gomodel_pro_routing_session_affinity_total{outcome}` zählt beibehaltene (`honored`)
+und wegen eines Cooldowns freigegebene (`released`) Pins, sodass das Verhalten in Prometheus sichtbar ist
+und nicht erst auf einer Provider-Rechnung.
+
+Prometheus-Metriken verwenden das Präfix `gomodel_pro_routing_` (Auswahlen,
+Ablehnungen, Ergebnisse, Cooldowns, Session-Affinität und ein Gauge für die Latenzschätzung).
+Der Bewertungszustand gilt pro Knoten; Replikas lernen unabhängig voneinander und teilen
+nichts.

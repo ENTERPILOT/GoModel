@@ -1,0 +1,120 @@
+---
+title: "Kostenerfassung"
+description: "Wie GoModel die Kosten von Requests schätzt, woher die Preise stammen, wie Sie sie überschreiben und wie Sie gespeicherte Kosten neu berechnen."
+icon: "calculator"
+keywords: ["Kostenerfassung", "cost tracking", "LLM-Kosten", "LLM cost", "Token-Preise", "token pricing", "Ausgaben", "spend", "Preis-Override", "Kostenschätzung"]
+---
+
+GoModel schätzt die Kosten jedes erfassten Requests anhand der Modellpreise und zeigt die Summen im Dashboard an.
+
+<Warning>
+  Diese Kosten sind **Schätzungen**, keine Abrechnungsdaten. Sofern ein Provider
+  keine exakten Kosten meldet, multipliziert GoModel die vom Provider gemeldeten
+  Token mit den konfigurierten Preisen des Modells. Rabatte, Aktionen und
+  providerseitige Rundungen werden daher nicht berücksichtigt. Betrachten Sie das
+  Dashboard des Providers als maßgebliche Quelle und gleichen Sie die Zahlen von
+  GoModel damit ab, bevor Sie sie für Rechnungsstellung oder Abstimmung
+  verwenden.
+</Warning>
+
+## Wie Kosten geschätzt werden
+
+Für jeden Request bepreist GoModel:
+
+- **Input**- und **Output**-Token zu den Preisen des Modells pro Million Token (MTok).
+- **Gecachte Input**-, **Reasoning**- und **Audio**-Token zu ihren eigenen Preisen, sofern der Provider sie meldet, sodass Traffic mit vielen Cache-Treffern oder viel Reasoning korrekt bepreist wird.
+- **Nicht-Token-Einheiten**, wenn der Provider so abrechnet: generierte Bilder (`per_image` / `output_image_per_mtok`), Audiodauer (`per_second_input`, `per_second_output`) und Sprachzeichen (`per_character_input`). Unter [Bilder](/de/advanced/images-api#kostenerfassung) und [Audio](/de/advanced/audio-api#kostenerfassung) erfahren Sie, welche Einheit für welches Modell gilt – wenn ein Preis und ein Token-Preis zwei Ausdrucksformen derselben Gebühr sind (die generierten Token eines Bildes, die Dauer eines Audioclips), wird nur einer davon angewendet.
+
+Wenn ein Provider exakte Kosten zurückgibt (OpenRouter-Credits, xAI `cost_in_usd_ticks`), verwendet GoModel diesen Wert statt der Katalogpreise. Jede Zeile hält im Feld `cost_source` fest, welche Methode verwendet wurde: `model_pricing`, `openrouter_credits` oder `xai_cost_in_usd_ticks`.
+
+<Note>
+  Gecachte Token werden nur dann rabattiert, wenn die Preise des Modells einen
+  `cached_input_per_mtok`-Preis enthalten. Andernfalls werden sie zum vollen
+  Input-Preis berechnet.
+</Note>
+
+Anthropic rechnet Cache-Schreibvorgänge nach TTL ab: die standardmäßigen 5-Minuten-Schreibvorgänge zu `cache_write_per_mtok` und 1-Stunden-Schreibvorgänge (`"ttl": "1h"`) zu `cache_write_1h_per_mtok`. GoModel bepreist jeden Anteil anhand der Aufteilung in `usage.cache_creation` zu seinem eigenen Preis. Ohne einen `cache_write_1h_per_mtok`-Preis werden 1-Stunden-Schreibvorgänge zu `cache_write_per_mtok` berechnet.
+
+## Tageszeitabhängige Preise
+
+Manche Provider berechnen je nach Ausführungszeitpunkt eines Requests unterschiedliche Preise. DeepSeek zum Beispiel rechnet seine Nebenzeiten zum halben Preis der Hauptzeiten ab und behandelt Wochenenden als Nebenzeit. Der Katalog veröffentlicht die Standardpreise (Hauptzeit) als Basispreise eines Modells und führt die rabattierten Zeiträume unter `pricing.time_windows` auf:
+
+```json
+"pricing": {
+  "input_per_mtok": 0.44,
+  "output_per_mtok": 1.32,
+  "cached_input_per_mtok": 0.014,
+  "time_windows": [
+    {
+      "label": "off_peak",
+      "utc_ranges": [
+        { "days": ["mon", "tue", "wed", "thu", "fri"], "start": "00:00", "end": "01:00" },
+        { "days": ["mon", "tue", "wed", "thu", "fri"], "start": "04:00", "end": "06:00" },
+        { "days": ["mon", "tue", "wed", "thu", "fri"], "start": "10:00", "end": "24:00" },
+        { "days": ["sat", "sun"], "start": "00:00", "end": "24:00" }
+      ],
+      "pricing": { "input_per_mtok": 0.22, "output_per_mtok": 0.66, "cached_input_per_mtok": 0.007 }
+    }
+  ]
+}
+```
+
+GoModel bepreist jeden Request mit den Preisen, die zum Zeitpunkt seines Abschlusses galten, ausgewertet in **UTC**, unabhängig von der Zeitzone des Servers oder des Dashboards. Zeitbereiche sind halboffen (`start` einschließlich, `end` ausschließlich); ein `end` gleich oder vor `start` reicht über Mitternacht hinaus, und `days` beschränkt einen Bereich auf bestimmte Wochentage (alle Tage, wenn weggelassen). Preise, die in einem Zeitfenster fehlen, behalten ihren Basispreis, und außerhalb aller Zeitfenster gelten die Basispreise. Die Neuberechnung gespeicherter Kosten verwendet den gespeicherten Zeitstempel jeder Zeile, sodass historische Zeilen für das Zeitfenster neu bepreist werden, in das sie tatsächlich fielen. Die Kostenschätzung für gecachten Input im Dashboard wendet Zeitfenster pro Minute der Woche an, passend zur Genauigkeit der Fenstergrenzen.
+
+Auf der Seite **Models** markiert ein `*` neben einem Preis ein Modell mit Zeitfenstern; fahren Sie mit der Maus darüber, um Zeitplan und Preise zu sehen. Das Überschreiben eines Basispreises (Input, Output, gecachter Input oder Cache-Schreibvorgang) ersetzt auch den Katalograbatt für diesen Preis: Der Override wird zum Preis für jede Stunde. Modell-Metadaten in `config.yaml` können außerdem eigene `time_windows` deklarieren, die die des Katalogs ersetzen.
+
+<Note>
+  Zeitfenster sind ausschließlich wiederkehrende UTC-Zeitpläne. Regeln, die der
+  Katalog nicht abbilden kann – Feiertage eines Providers oder Aktionen mit
+  festem Enddatum –, werden nicht angewendet.
+</Note>
+
+## Woher die Preise stammen
+
+Die Preise eines Modells werden in folgender Prioritätsreihenfolge aufgelöst:
+
+1. Vom Betreiber im Dashboard gesetzte **Overrides**.
+2. Metadaten unter `providers.<name>.models` in **`config.yaml`**.
+3. Der **Modellkatalog**, bezogen aus der Registry [`ai-model-list`](https://github.com/ENTERPILOT/ai-model-list).
+
+Der Katalog liefert die Standardpreise für die meisten Modelle. Wenn der Preis eines Modells falsch aussieht oder ein Preis fehlt (zum Beispiel ein Preis für gecachten Input), prüfen Sie ihn anhand von [`ai-model-list`](https://github.com/ENTERPILOT/ai-model-list) und reichen Sie dort eine Korrektur ein, oder setzen Sie für eine sofortige Behebung einen Override.
+
+Die Preise sind ein Teil einer umfassenderen Metadaten-Pipeline, die auch Kontextfenster, Fähigkeiten und Modellkategorien auflöst – die vollständige Quellenkette finden Sie unter [Modell-Metadaten](/de/advanced/model-metadata).
+
+## Preise überschreiben
+
+Überschreiben Sie Preise, wenn der Katalogpreis falsch ist, fehlt oder von Ihrem ausgehandelten Preis abweicht. Öffnen Sie die Seite **Models**, suchen Sie das Modell und öffnen Sie dessen Editor **Pricing override**. Legen Sie einen oder mehrere Preistypen (Input, Output, gecachter Input usw.) in USD fest. Gespeicherte Felder überschreiben die Preise aus dem Katalog und aus `config.yaml` für diesen Selektor; nicht gesetzte Felder werden weiterhin geerbt.
+
+<Frame caption="Die Seite Models listet die Preise jedes Modells auf; die $-Aktion öffnet dessen Preis-Override">
+  <img
+    src="/features/pricing-override-models.png"
+    alt="GoModel-Seite Models mit registrierten Modellen, Input- und Output-Preisen pro MTok und einer Aktion für den Preis-Override in jeder Zeile"
+  />
+</Frame>
+
+<Frame caption="Legen Sie einen Preistyp und einen USD-Wert fest; gespeicherte Felder überschreiben die Preise aus dem Katalog und aus config.yaml für den Selektor">
+  <img
+    src="/features/pricing-override-editor.png"
+    alt="GoModel-Editor Pricing override mit dem Selektor, einem Preistyp Input in Dollar pro MTok und dessen USD-Wert"
+  />
+</Frame>
+
+Overrides gelten für neue Requests. Um bereits ausgeführte Requests neu zu bepreisen, berechnen Sie sie neu.
+
+## Summen im Dashboard
+
+- **Estimated Cost** – Ausgaben für Live-Requests an Provider; Cache-Treffer sind ausgenommen.
+- **Saved Cost** – was aus dem Cache bediente Requests andernfalls gekostet hätten.
+
+Ein Wert `---` bedeutet, dass die Kosten unbekannt sind, weil keine Preise verfügbar waren. Das ist nicht dasselbe wie `$0`.
+
+## Gespeicherte Kosten neu berechnen
+
+Die Neuberechnung ermittelt die gespeicherten Kosten der passenden Nutzungszeilen anhand der aktuellen Preise neu. Verwenden Sie sie nach der Änderung eines Overrides oder wenn zum Zeitpunkt eines Requests keine Preise verfügbar waren. Die Aktion ist standardmäßig aktiviert (`USAGE_PRICING_RECALCULATION_ENABLED`); wählen Sie in der Nutzungsansicht **Recalculate** und geben Sie dann zur Bestätigung `recalculate` ein. Sie ist auf den ausgewählten Datumsbereich, Provider oder das Modell sowie den User Path beschränkt.
+
+<Warning>
+  Die Neuberechnung **überschreibt** die Kostenfelder jeder passenden Zeile und
+  **löscht** die Kosten jeder Zeile, deren Modell sich nicht mehr in Preise
+  auflösen lässt. Das Ergebnis meldet, wie vielen Zeilen weiterhin Preise
+  fehlen. Token-Anzahlen werden nie verändert.
+</Warning>

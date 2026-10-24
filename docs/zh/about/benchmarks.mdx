@@ -1,0 +1,110 @@
+---
+title: "基准测试"
+description: "GoModel 基准测试结果的简要最新汇总，附完整文章链接和复现测试所用的工具。"
+icon: "gauge"
+keywords: ["基准测试", "延迟", "吞吐量", "性能", "网关对比", "benchmarks", "latency", "throughput", "performance", "gateway comparison"]
+---
+
+## 基准测试快照
+
+本页简要介绍我们最新公开的基准测试：GoModel 与 **LiteLLM、Portkey 和 Bifrost** 的对比。
+所有网关都指向同一个即时响应的模拟后端，因此数据反映的是网关自身的开销，而非模型延迟。
+
+该基准测试会定期基于
+[ai-gateway-reproducible-benchmark](https://github.com/ENTERPILOT/ai-gateway-reproducible-benchmark)
+仓库重新运行。该仓库保存了每一次运行的记录，并提供数据随时间变化的图表。完整的文字解读请参阅 2026 年 6 月的文章：
+[AI Gateway Benchmark 2026: GoModel vs LiteLLM, Portkey & Bifrost](https://enterpilot.io/blog/benchmarking-ai-gateways-gomodel-litellm-portkey-bifrost-june-2026/?utm_source=gomodel_docs)。
+
+<Note>
+  下表为 2026 年 8 月 20 日在 AWS 上的运行结果。请将其视为参考数据，而非定论。
+  网关性能取决于您的工作负载、提供商组合、部署方式和调优。更早的运行结果（2026 年 6 月和 7 月在相同硬件上的运行，以及 2026 年 3 月仅针对 LiteLLM 的 localhost 运行）可在仓库历史和博客中找到。
+</Note>
+
+## 测试内容
+
+一套简单、条件对等的测试环境：
+
+- 每次只运行一个网关，运行于 Docker 中，机器为 AWS `c7i.large`（2 vCPU，4 GiB），
+  每个网关均使用其最新的公开镜像（`enterpilot/gomodel`、`litellm/litellm:main-stable`、
+  `portkeyai/gateway`、`maximhq/bifrost`）。每次运行所测的版本和镜像摘要都记录在仓库中对应结果的旁边。
+- 所有网关共用同一个模拟后端，因此只测量网关开销。
+- 六种工作负载：Chat Completions、Responses API 和 Anthropic Messages，
+  每种都分别测试流式和非流式。
+- 每种工作负载 `20,000` 个请求，并发数 `10`，共进行五轮随机顺序的测试（延迟取各轮的中位数）。
+- 公平的配置：所有网关都关闭重试，关闭 GoModel 的熔断器，
+  LiteLLM 按其推荐配置为每个 CPU 核心运行一个 worker。
+
+## 结果一览
+
+在大多数团队关心的各项运维指标上，GoModel 均处于领先：
+最紧凑的延迟长尾、最高的持续吞吐量、最小的镜像和内存占用，以及最快的冷启动。
+
+| 网关 | p50 (ms) | p99 (ms) | 吞吐量 (req/s) | 内存峰值 | 镜像（压缩后） | 冷启动 |
+| --- | --- | --- | --- | --- | --- | --- |
+| **GoModel** | **`2.1`** | **`7.8`** | **`4,200`** | **`60 MB`** | **`14 MB`** | **`0.76 s`** |
+| Bifrost | `3.0` | `19.2` | `2,600` | `180 MB` | `80 MB` | `6.7 s` |
+| Portkey | `9.1` | `29.4` | `980` | `110 MB` | `58 MB` | `0.99 s` |
+| LiteLLM | `35.9` | `53.3` | `276` | `2.1 GB` | `354 MB` | `26.5 s` |
+
+延迟数据为非流式 Chat Completions（具有代表性）。吞吐量为单独的并发扫描测试中测得的持续速率。镜像大小为压缩后的拉取大小。
+
+## 关键结论
+
+- GoModel 的中位延迟最低（`2.1 ms`），长尾延迟也最紧凑（`7.8 ms`）。
+- 它在单台机器上承载的流量最多（`~4,200 req/s`），CPU 效率也最高：
+  持续负载下每 1% CPU 可处理 `42` req/s，而 Bifrost 为 `21`，Portkey 为 `8`，LiteLLM 为 `1.4`。
+- 它的交付和运行体积最小：压缩镜像仅 `14 MB`，负载下内存占用 `60 MB`，
+  启动后 `0.76 s` 即可提供服务。
+- LiteLLM 即使采用其推荐的多 worker 配置，也需要占用 `~2.1 GB` 内存，
+  启动耗时 `~26 s`，这是在热路径上使用 Python 的代价。
+- 在这种单提供商的测试环境下，Portkey 不支持 Anthropic Messages 协议，
+  因此只覆盖了 6 种工作负载中的 4 种。
+
+## 自行复现
+
+基准测试位于独立的仓库
+[ENTERPILOT/ai-gateway-reproducible-benchmark](https://github.com/ENTERPILOT/ai-gateway-reproducible-benchmark)
+中，同时附有每一次运行的记录以及数据随时间变化的图表。
+只需一条命令，即可创建一台小型 AWS 机器，使用四个网关最新的公开 Docker 镜像对同一个模拟后端进行测试，记录结果，并自动销毁基础设施。
+
+<Warning>
+  该测试运行在**付费**的 AWS 基础设施上，而不是免费套餐。在 `us-east-1` 区域，
+  按需实例 `c7i.large` 约为每小时 $0.09（20 GiB gp3 卷和公网 IPv4 还会增加几美分），
+  且测试大约 90 分钟后自动销毁，因此稳妥起见，每次运行的预算请按 **$1 以内**估算。
+  如果您传入 `KEEP=1` 或销毁失败，在您手动销毁机器之前会持续计费，因此请确认机器已被删除。
+</Warning>
+
+```bash
+# 需要 Terraform 和 AWS 凭据
+git clone https://github.com/ENTERPILOT/ai-gateway-reproducible-benchmark.git
+cd ai-gateway-reproducible-benchmark
+./run.sh
+```
+
+默认值为每种工作负载 `N=20000` 个请求、`REPEATS=5` 轮测试、并发数 `C=10`；
+可以通过环境变量覆盖，例如使用 `N=5000 REPEATS=2 ./run.sh` 进行更快但噪声更大的测试。
+设置 `GOMODEL_SOURCE=../gomodel` 可对本地检出的代码进行基准测试，而不是使用已发布的镜像。
+
+上述命令测量的是四个镜像当前解析到的版本。如需在相同的网关版本上重复
+2026 年 8 月 20 日的快照，请传入对应版本：
+
+```bash
+GOMODEL_IMAGE=enterpilot/gomodel:0.1.79 \
+LITELLM_IMAGE=litellm/litellm:v1.97.0 \
+PORTKEY_IMAGE=portkeyai/gateway:1.15.2 \
+BIFROST_IMAGE=maximhq/bifrost:v1.6.11 \
+./run.sh
+```
+
+每一次记录的运行都会在其 `results/<run>/*_image.json` 文件中列出所测的版本和镜像摘要，
+因此任何历史运行都可以用同样的方式重复。仓库的 README
+还介绍了如何在任意 Docker 主机上运行测试工具，无需 AWS。如果只想在本地快速对比 LiteLLM，
+旧版的 localhost 测试工具仍保留在
+[`docs/about/benchmark-tools/`](https://github.com/ENTERPILOT/GoModel/tree/main/docs/about/benchmark-tools) 中。
+
+## 为什么本页如此简短
+
+本页旨在让您在产品文档中快速看到结果，而无需阅读完整文章。如需了解详细解读、图表和测试方法，请阅读
+[完整文章](https://enterpilot.io/blog/benchmarking-ai-gateways-gomodel-litellm-portkey-bifrost-june-2026/?utm_source=gomodel_docs)。
+
+没有任何单一基准测试能够为所有环境给出定论。如果您正在认真评估网关，请使用您自己的流量和基础设施复现测试。
