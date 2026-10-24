@@ -1,0 +1,41 @@
+---
+title: "Playground"
+description: "Wypróbuj dowolny model przez gateway z poziomu dashboardu i sprawdź dokładny JSON requestu i odpowiedzi."
+icon: "flask-conical"
+keywords: ["playground", "dashboard", "chat completions", "responses", "messages", "streaming"]
+---
+
+Strona **Playground** (`/admin/dashboard/playground`) wysyła requesty przez
+publiczne API gatewaya z Twoim kluczem dashboardu, więc każde wywołanie jest routowane,
+logowane i rozliczane dokładnie tak jak request klienta. Wybierz endpoint (`/v1/chat/completions`,
+`/v1/responses` lub `/v1/messages`), model z inwentarza albo dowolny alias
+lub model wirtualny po nazwie oraz to, czy używać streamingu; zbuduj rozmowę
+z edytowalnych wiadomości System, User i Assistant, których kolejność można zmieniać, i wyślij prompt.
+Panel JSON po prawej stronie pokazuje body requestu w postaci, w jakiej zostanie wysłane (aktualizowane na żywo
+podczas edycji), oraz ostatnią odpowiedź z jej statusem, opóźnieniem i użyciem tokenów —
+odpowiedzi streamowane są składane do tego samego kształtu, jaki zwraca wywołanie bez streamingu.
+Requesty podlegają tym samym budżetom, limitom żądań, guardrails i logowaniu audytowemu
+co każdy inny klient gatewaya.
+
+## Ograniczanie do ścieżki użytkownika
+
+Modele wirtualne można ograniczyć do konkretnych `user_paths`, a requesty z Playground
+uwierzytelnione kluczem głównym mogą ograniczyć się do jednej z tych ścieżek za pomocą
+pola **User path** obok selektora modelu. Gdy wybierzesz model, którego
+polityka deklaruje `user_paths`, pole zostanie wstępnie wypełnione pierwszym wpisem; możesz
+je edytować przed wysłaniem. Przy wysyłaniu wartość jest przekazywana w nagłówku ścieżki
+użytkownika, dokładnie tak, jak wysłałby ją zewnętrzny klient, więc gateway zapisuje
+ścieżkę w snapshocie requestu i przyznaje dostęp do modeli ograniczonych do tej ścieżki —
+request bez nagłówka otrzymuje odmowę dostępu do tych modeli.
+
+Nagłówek domyślnie nazywa się `X-GoModel-User-Path`. Jeśli zmienisz go za pomocą
+`USER_PATH_HEADER` (lub `server.user_path_header`), dashboard odczyta
+obowiązującą nazwę z `GET /admin/runtime/config` i wyśle ograniczoną ścieżkę w
+tym nagłówku, więc nie jest potrzebna żadna dodatkowa konfiguracja dashboardu.
+
+<img
+  src="/features/playground.png"
+  alt="Strona Playground w dashboardzie GoModel z wybranym endpointem Messages, selektorem modelu, kartami wiadomości System, User i Assistant, polem do tworzenia promptu i panelem JSON requestu po prawej stronie"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>

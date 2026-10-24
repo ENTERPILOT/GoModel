@@ -1,0 +1,219 @@
+---
+title: "OpenCode 及其他智能体：兼容 OpenAI 的配置"
+sidebarTitle: "编程智能体"
+description: "通过标准的 /v1 端点和单个网关密钥，将 OpenCode、Cline、Roo Code 及其他兼容 OpenAI 的编程智能体连接到 GoModel。"
+icon: "bot"
+keywords: ["OpenCode", "Cline", "Roo Code", "编程智能体", "coding agents", "兼容 OpenAI", "OpenAI-compatible", "配置指南", "setup guide"]
+---
+
+除 Claude Code 之外，大多数编程智能体最容易通过标准的兼容 OpenAI 的 API 连接到 GoModel。
+
+流程：
+
+`OpenCode / Cline / Roo Code / Kilo Code -> GoModel -> your upstream providers`
+
+## 开始之前
+
+- 选择一个 GoModel 主密钥，例如 `change-me`。
+- 使用至少一个上游提供商密钥启动 GoModel。
+- 使用 GoModel 的标准地址 `http://localhost:8080/v1`，除非您的客户端明确要求填写完整的端点 URL。
+
+## 1. 运行 GoModel
+
+使用主密钥和至少一个上游提供商启动 GoModel：
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e OPENAI_API_KEY="sk-..." \
+  enterpilot/gomodel
+```
+
+<Note>
+  如果您的目标模型使用其他提供商，可以将 `OPENAI_API_KEY` 替换为相应提供商的密钥。关键在于 GoModel 至少配置了一个上游提供商。
+</Note>
+
+## 2. 确认兼容 OpenAI 的 API
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4.1-mini",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Reply with exactly ok"
+      }
+    ]
+  }'
+```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="change-me")
+
+completion = client.chat.completions.create(
+    model="gpt-4.1-mini",
+    messages=[{"role": "user", "content": "Reply with exactly ok"}],
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "change-me",
+});
+
+const completion = await client.chat.completions.create({
+  model: "gpt-4.1-mini",
+  messages: [{ role: "user", content: "Reply with exactly ok" }],
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
+
+如果网关连接正确，响应中会包含 `ok`。
+
+## 3. 配置您的编程智能体
+
+### OpenCode
+
+创建一个包含 GoModel 提供商的 `opencode.json` 文件：
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "gomodel": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "GoModel",
+      "options": {
+        "baseURL": "http://localhost:8080/v1",
+        "apiKey": "{env:OPENAI_API_KEY}"
+      },
+      "models": {
+        "gpt-4.1-mini": {
+          "name": "GPT-4.1 Mini",
+          "limit": {
+            "context": 200000,
+            "output": 32768
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+然后导出 GoModel 密钥：
+
+```bash
+export OPENAI_API_KEY=change-me
+```
+
+### Cline
+
+在 Cline 中选择：
+
+- API Provider：`OpenAI Compatible`
+- Base URL：`http://localhost:8080/v1`
+- API Key：`change-me`
+- Model ID：`GET /v1/models` 返回的某个模型
+
+### Roo Code
+
+在 Roo Code 中选择：
+
+- API Provider：`OpenAI Compatible`
+- Base URL：`http://localhost:8080/v1`
+- API Key：`change-me`
+- Model ID：`GET /v1/models` 返回的某个模型
+
+<Note>
+  Roo Code 需要原生工具调用。请选择支持兼容 OpenAI 工具调用的模型和提供商路径。
+</Note>
+
+### Kilo Code
+
+在 Kilo Code 中选择：
+
+- API Provider：`OpenAI Compatible`
+- Base URL：`http://localhost:8080/v1`
+- API Key：`change-me`
+- Model ID：`GET /v1/models` 返回的某个模型
+
+如有需要，Kilo Code 也支持填写完整的端点 URL：
+
+```text
+http://localhost:8080/v1/chat/completions
+```
+
+请先使用更简单的基础 URL，只有在您的环境确实需要时才改用完整的端点 URL。
+
+## 4. 运行测试提示词
+
+对于 OpenCode，以下命令已验证可用：
+
+```bash
+opencode run -m gomodel/gpt-4.1-mini \
+  'Reply with exactly ok and no punctuation.'
+```
+
+验证结果为：
+
+```text
+ok
+```
+
+对于 Cline、Roo Code 和 Kilo Code，请保存上述提供商设置，然后发送一个简单的提示词，例如：
+
+```text
+Reply with exactly ok and no punctuation.
+```
+
+## 5. 在 GoModel 中查看流量
+
+打开 GoModel 控制台的审计日志：
+
+[http://localhost:8080/admin/dashboard/audit](http://localhost:8080/admin/dashboard/audit)
+
+这是确认编程智能体已连接到 GoModel 并查看每次交互的最快方式。在同一个控制台中，您还可以持续跟踪 GoModel 的流量和用量。
+
+## 当前状态
+
+- OpenCode 已在本地验证，可在标准地址 `http://localhost:8080/v1` 上正常工作
+- Cline、Roo Code 和 Kilo Code 遵循相同的兼容 OpenAI 的配置方式
+- Roo Code 需要所选模型支持原生工具调用
+- Kilo Code 既可以使用基础 URL，也可以使用完整的端点 URL
+
+## 参考
+
+- OpenCode 提供商文档：[Providers](https://opencode.ai/docs/providers/)
+- Cline 兼容 OpenAI 的提供商文档：[OpenAI Compatible](https://docs.cline.bot/provider-config/openai-compatible)
+- Roo Code 兼容 OpenAI 的提供商文档：[OpenAI Compatible](https://docs.roocode.com/providers/openai-compatible)
+- Kilo Code 兼容 OpenAI 的提供商文档：[OpenAI Compatible](https://kilo.ai/docs/providers/openai-compatible)
+
+## 验证日期：2026 年 3 月 10 日
+
+本指南综合了以下内容：
+
+- 针对 `http://localhost:8080` 上的 GoModel 实例进行的本地验证
+- 使用 OpenCode `1.1.36` 进行的本地验证
+- Cline、Roo Code 和 Kilo Code 的官方文档
+
+本地验证确认：
+
+- OpenCode 可在 `http://localhost:8080/v1` 上正常工作
+- 经验证的 OpenCode 请求使用了 `POST /v1/chat/completions`
+- GoModel 控制台的审计日志立即显示了 OpenCode 的流量

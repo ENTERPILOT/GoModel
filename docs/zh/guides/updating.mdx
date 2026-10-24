@@ -1,0 +1,197 @@
+---
+title: "升级 GoModel"
+description: "在 Docker 或独立二进制文件上升级 GoModel，先备份数据库，并了解自动 Schema 迁移的作用。"
+icon: "refresh-cw"
+keywords: ["升级", "更新", "update", "upgrade", "docker", "迁移", "migration", "备份", "backup", "回滚", "rollback", "版本固定", "version pinning"]
+---
+
+升级 GoModel 只需拉取新版本并重启。Schema 迁移内置于二进制文件中，会在新版本首次启动时自动运行，因此不需要单独的迁移步骤，
+除重启之外也不需要维护窗口。
+
+<Warning>
+  **每次升级前请备份数据库。** GoModel 处于活跃开发中且发布频繁，部分升级会转换已存储的数据。只有备份才能让一次失败的升级变成五分钟就能解决的问题，
+  而不是丢失审计记录、用量历史和托管 API 密钥。
+</Warning>
+
+## 1. 备份数据库
+
+<Tabs>
+  <Tab title="SQLite（Docker 卷）">
+    停止网关，以免在复制过程中写入文件，然后归档该卷：
+
+    ```bash
+    docker compose stop gomodel
+    docker run --rm \
+      -v gomodel_data:/data -v "$PWD":/backup alpine \
+      tar czf /backup/gomodel-$(date +%F).tar.gz -C /data .
+    ```
+
+    请将 `gomodel_data` 替换为您的卷名称（`docker volume ls`）。如果您改为绑定挂载主机目录，执行
+    `cp -a ./data ./data.bak-$(date +%F)` 即可。
+  </Tab>
+  <Tab title="SQLite（二进制文件）">
+    停止网关，然后复制启动时以 `storage configured` 打印出的数据库文件：
+
+    ```bash
+    cp -a ~/.local/share/gomodel/gomodel.db gomodel-$(date +%F).db   # Linux
+    ```
+
+    在 macOS 上，默认路径为 `~/Library/Application Support/gomodel/gomodel.db`。请参阅
+    [GoModel 将数据存储在哪里](/zh/about/faq#gomodel-在哪里存储数据？)。
+  </Tab>
+  <Tab title="PostgreSQL">
+    ```bash
+    pg_dump "$POSTGRES_URL" > gomodel-$(date +%F).sql
+    ```
+  </Tab>
+  <Tab title="MongoDB">
+    ```bash
+    mongodump --uri="$MONGODB_URL" --out "gomodel-$(date +%F)"
+    ```
+  </Tab>
+</Tabs>
+
+## 2. 升级
+
+### Docker Compose
+
+```bash
+docker compose pull gomodel
+docker compose up -d gomodel
+docker compose logs -f gomodel
+```
+
+日志的第一行应显示新版本号，并有一行包含数据库路径的 `storage configured`。
+
+<Warning>
+  **升级前请确认数据库位于卷上。** 镜像没有声明任何卷，因此没有在 `/app/data` 挂载卷的容器会将 SQLite 数据库保存在容器自身的文件系统中——
+  一旦容器因升级被替换，所有数据都会丢失。请参阅[生产环境存储](/zh/guides/production#选择存储后端)。
+</Warning>
+
+### docker run
+
+重新创建容器会丢弃其启动参数，因此请先从正在运行的容器中读取这些参数：
+
+```bash
+docker inspect gomodel --format '{{json .Mounts}} {{.Config.Env}}'
+```
+
+如果 `/app/data` 上没有挂载任何内容，数据库就位于容器文件系统中，`docker rm` 会将其删除。请在旧容器仍然存在时将数据库复制出来，
+并预先填充到您即将挂载的卷中——空卷会遮盖原有的副本，网关启动后将没有任何密钥、用量或日志：
+
+```bash
+docker cp gomodel:/app/data/. ./gomodel-data
+docker run --rm -v gomodel_data:/data -v "$PWD/gomodel-data":/seed alpine \
+  sh -c 'cp -a /seed/. /data/ && chown -R 65532:65532 /data'
+```
+
+`65532` 是镜像的非 root 用户 UID——网关无法写入属于其他用户的卷。
+
+然后替换容器，并重新传入相同的挂载和环境变量参数：
+
+```bash
+docker pull enterpilot/gomodel
+docker rm -f gomodel
+docker run -d --name gomodel -p 8080:8080 \
+  -v gomodel_data:/app/data \
+  --env-file .env \
+  enterpilot/gomodel
+```
+
+### 二进制文件
+
+重新运行安装程序。它会获取最新发布版本，并原地替换二进制文件：
+
+<Tabs>
+  <Tab title="macOS / Linux">
+    ```bash
+    curl -fsSL https://gomodel.enterpilot.io/install.sh | sh
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    irm https://gomodel.enterpilot.io/install.ps1 | iex
+    ```
+  </Tab>
+</Tabs>
+
+之后请重启网关——不支持原地热升级。
+
+## 3. 验证
+
+```bash
+gomodel --version
+curl -s http://localhost:8080/version
+```
+
+`GET /version` 会报告当前运行的版本、最新发布的版本，以及是否有可用更新：
+
+```json
+{
+  "app": "GoModel",
+  "version": "0.1.60",
+  "latest": "0.1.60",
+  "update_available": false,
+  "enabled": true
+}
+```
+
+控制台的 **Settings** 页面会显示相同的结果。有关该检查的工作原理以及如何禁用它，请参阅[版本感知](/zh/advanced/version-awareness)。
+
+## 迁移的作用
+
+迁移会在新版本首次启动时运行。没有单独的迁移命令，升级也永远不会移动或删除您的数据库、配置或缓存。
+
+大多数迁移是增量式的：会创建缺失的表、索引和列，部分应用的 Schema 可以在下次启动时安全地重试。有些版本则会转换存储——
+当预算和速率限制增加作用域时，它们的表被重建，旧表被删除。两种迁移向前执行都是安全的，正因如此，反向操作才需要格外小心。
+
+## 固定版本
+
+默认升级到最新版本。如需停留在某个已知版本，请将其固定：
+
+<Tabs>
+  <Tab title="Docker">
+    ```bash
+    docker pull enterpilot/gomodel:X.Y.Z
+    ```
+
+    请在 compose 文件中使用版本标签，而不是 `latest`。
+  </Tab>
+  <Tab title="macOS / Linux">
+    ```bash
+    curl -fsSL https://gomodel.enterpilot.io/install.sh | GOMODEL_VERSION=vX.Y.Z sh
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:GOMODEL_VERSION = "vX.Y.Z"
+    irm https://gomodel.enterpilot.io/install.ps1 | iex
+    ```
+  </Tab>
+</Tabs>
+
+请将 `X.Y.Z` 替换为某个[已发布的版本](https://github.com/ENTERPILOT/GoModel/releases)。
+
+## 回滚
+
+安装或拉取上一个版本并重启。只有当期间的每次迁移都是增量式时，这样做才足够；如果跨越了转换式迁移，旧版二进制文件会去查找已被升级重建的存储。
+从外部无法区分这两种情况，因此除非确认旧版本能够基于迁移后的数据库启动，否则请**恢复第 1 步中的备份**。
+
+恢复 SQLite 卷备份会替换卷中的内容，因此请先停止网关——`docker compose stop gomodel`，独立容器则使用 `docker stop gomodel`——
+然后解压归档并重新启动：
+
+```bash
+docker run --rm -v gomodel_data:/data -v "$PWD":/backup alpine \
+  sh -c 'rm -rf /data/* && tar xzf /backup/gomodel-YYYY-MM-DD.tar.gz -C /data \
+         && chown -R 65532:65532 /data'
+```
+
+## 出现问题时
+
+| 现象 | 原因 |
+| --- | --- |
+| 升级后控制台为空：没有密钥、没有用量、没有日志 | 数据库不在卷上，或 `SQLITE_PATH` 解析到了其他位置。请比较升级前后的 `storage configured` 路径。 |
+| 升级后网关无法启动 | 请阅读第一行错误信息。以前被忽略的配置可能会开始接受校验；发布说明中列出了破坏性变更。 |
+| 版本没有变化 | 旧容器仍在运行（`docker ps`），或者启动的是 `PATH` 中位置更靠前的另一个 `gomodel` 二进制文件。 |
+
+仍未解决？请在 [Discord](https://discord.gg/gaEB9BQSPH) 上提问，或提交 [GitHub issue](https://github.com/ENTERPILOT/GoModel/issues)。

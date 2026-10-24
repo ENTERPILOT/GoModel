@@ -1,0 +1,115 @@
+---
+title: "ChatGPT 订阅"
+description: "通过 ChatGPT 订阅而非 OpenAI Platform API 密钥来路由 Responses API 流量。"
+icon: "message-circle"
+keywords: ["ChatGPT", "Codex", "订阅", "subscription", "OAuth", "Responses API", "提供商配置", "provider setup"]
+---
+
+`chatgpt` 提供商调用的是 ChatGPT 订阅（Plus、Pro、Business 或 Enterprise）所附带的 Codex 后端。用量计入订阅的配额，而不是 OpenAI Platform API 密钥。
+
+可搭配 [Codex 指南](/zh/guides/codex) 实现
+`Codex -> GoModel -> ChatGPT subscription`。
+
+## 配置
+
+凭据是您登录 Codex 后获得的访问令牌：
+
+```bash
+CHATGPT_API_KEY=$(jq -r .tokens.access_token ~/.codex/auth.json)
+```
+
+或者在 `config.yaml` 中：
+
+```yaml
+providers:
+  chatgpt:
+    type: chatgpt
+    api_key: "${CHATGPT_API_KEY}"
+```
+
+如果 `~/.codex/auth.json` 尚不存在，请先运行 `codex login`。GoModel
+会从令牌本身推导出 ChatGPT 账号 ID，因此无需其他配置。
+
+<Warning>
+  该令牌大约每 10 天过期一次。当请求开始返回 401 时，请重新导出它（Codex CLI 每次运行时都会刷新该文件），或再次运行 `codex login`。
+</Warning>
+
+## 模型
+
+Codex 后端没有模型列表端点，因此 GoModel 内置了 ChatGPT 订阅可调用的模型清单：
+
+```text
+gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5
+```
+
+如果您的套餐提供的模型集合不同，可以覆盖该清单：
+
+```bash
+CHATGPT_MODELS=gpt-5.6-sol,gpt-5.6-terra
+```
+
+不在套餐集合中的模型会被上游拒绝，并返回 `The '<model>' model
+is not supported when using Codex with a ChatGPT account`。
+
+`gpt-5.4` 和 `gpt-5.4-mini` 将于 2026 年 8 月 31 日退出通过 ChatGPT 认证的 Codex；请改用 `gpt-5.6-terra` 和 `gpt-5.6-luna`。对于使用 OpenAI API 密钥认证的 Codex 会话，这两个模型仍可通过 `openai`
+提供商使用。
+
+## 仅支持 Responses API
+
+Codex 后端只提供 `/responses`，因此对于 `chatgpt` 模型，
+`/v1/chat/completions` 和 `/v1/embeddings` 会返回 `501`。
+请使用 `/v1/responses`，这本来也是 Codex 发送的请求。
+
+后端还会按严格的参数允许列表进行校验。GoModel
+会适配请求而不是让请求失败，因此调用方可以继续使用标准的 Responses API：
+
+| 请求字段 | 行为 |
+| ------------- | -------- |
+| `stream`、`store` | 固定为 `true` / `false`——后端会拒绝其他任何值 |
+| 字符串形式的 `input` | 包装为后端要求的消息列表 |
+| `instructions`、`tools`、`tool_choice`、`parallel_tool_calls`、`reasoning`、`text`、`include`、`prompt_cache_key` | 转发 |
+| `temperature`、`top_p`、`max_output_tokens`、`previous_response_id`、`truncation`、`metadata`、`user`、`service_tier`、`top_logprobs` | 丢弃——上游不支持 |
+| `prompt_cache_retention`、`prompt_cache_options` | 丢弃——Codex CLI 从不发送它们，因此后端是否支持尚未验证 |
+
+由于后端只支持流式传输，非流式的 `POST /v1/responses` 会通过向上游发起流式请求、再返回最终响应对象的方式提供服务。客户端看到的是普通的非流式响应。关于网关的 Responses 接口在不同提供商上的行为，参见
+[Responses 兼容性](/zh/advanced/responses-compatibility)。
+
+## 提示词缓存
+
+当每一轮都携带相同的 `session-id` 请求头时，后端会让同一段对话保持在预热的前缀缓存上；仅有 `prompt_cache_key` 不会产生缓存命中。GoModel 会将检测到的 [会话](/zh/features/session-keeping) 作为
+`session-id` 发送，在未检测到会话时则发送客户端的 `prompt_cache_key`，并且像 Codex CLI 一样，也会在请求体中转发该键。当客户端未发送键时，如果会话 ID 符合 64 个字符的键长度限制，则会用它来代替。
+
+如果客户端没有发送键，GoModel 也未检测到会话，后端就不会收到任何一种信号。请发送 `prompt_cache_key` 以保持缓存命中；`X-Session-Id` 等会话请求头同样有效，除非设置了 `SESSION_KEEPING_ENABLED=false`（这会关闭会话检测）。
+
+如需针对真实后端检查命中率，请运行需手动启用的在线测试：
+
+```bash
+CHATGPT_API_KEY=$(jq -r .tokens.access_token ~/.codex/auth.json) make test-live
+```
+
+## 报告的成本并非实际支出
+
+订阅用量是固定费率，但这些模型 ID 在 OpenAI
+Platform 上同样存在，因此模型目录会为它们附上按 Token 计费的 API 价格。`chatgpt` 的用量记录和控制台汇总显示的数字并不对应任何实际扣费，同样的冲突也会使 `GET /v1/models` 宣告
+`modes: ["chat", "responses"]`。
+
+这些模式只是表面上的——它们影响的是控制台中的分组，而不是路由。定价则不然：它会输入到 [成本追踪](/zh/features/cost-tracking)、预算以及 `cost`
+负载均衡中。
+
+<Warning>
+  因此，**预算**可能会因为订阅从未实际收取的“支出”而拒绝 `chatgpt` 流量。请将预算的作用域限定到不包含订阅流量的
+  [用户路径](/zh/features/user-path)，或者对其不启用预算。在 [模型元数据](/zh/advanced/model-metadata) 中按模型声明 `pricing` 和 `modes: ["responses"]`
+  可以纠正 `/v1/models` 宣告的内容，但用量记录仍会按目录价格计价。请声明您希望提供的每一个模型：该列表会替换默认清单，而不是在其基础上追加。
+</Warning>
+
+## 限制
+
+订阅配额与 API 额度相互独立。配额耗尽时，网关会转发 `429`：
+
+```json
+{"error":{"message":"The usage limit has been reached","type":"rate_limit_error"}}
+```
+
+<Warning>
+  OpenAI 授权这些令牌用于 Codex 流量。请使用此提供商将您自己的 Codex 用量路由经过 GoModel，而不要将其用作通用推理 API。
+</Warning>

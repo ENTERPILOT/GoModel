@@ -1,0 +1,487 @@
+---
+title: "MCP-Gateway"
+description: "Bündeln Sie Ihre MCP-Server hinter einem authentifizierten GoModel-Endpunkt – mit Tool-Sichtbarkeit pro Key, Nutzungserfassung und Rate-Limits."
+icon: "plug"
+keywords: ["MCP gateway", "MCP-Gateway", "Model Context Protocol", "MCP servers", "MCP-Server", "Tool-Aggregation", "tool aggregation", "MCP proxy"]
+---
+
+## Was das MCP-Gateway leistet
+
+GoModel kann zwischen Ihren Agent-Clients (Claude Code, Claude Desktop, Cursor,
+VS Code, …) und den MCP-Servern (Model Context Protocol) stehen, die diese nutzen —
+genauso, wie es bereits zwischen Ihren Anwendungen und den Modell-Providern steht:
+
+- **Ein Endpunkt, ein Key.** Clients verbinden sich mit `https://your-gateway/mcp`
+  über einen GoModel-API-Key. Sie halten nie Zugangsdaten für die Upstream-MCP-Server;
+  das Gateway fügt die Header jedes Servers selbst ein.
+- **Aggregation mit Namespaces.** Tools und Prompts aller konfigurierten Server
+  erscheinen in einem gemeinsamen Katalog als `{slug}_{name}` (zum Beispiel
+  `github_create_issue`), in einer stabilen, deterministischen Reihenfolge.
+- **Discovery nach dem Least-Privilege-Prinzip.** Ein Server kann auf `user_paths`
+  beschränkt und mit `disallowed_user_paths` für Teilbereiche ausgenommen werden;
+  Aufrufer, für die er verborgen ist, erhalten nicht nur Fehler — die Tools erscheinen
+  in ihrem `tools/list` überhaupt nicht. Filter auf Betreiberebene,
+  `allowed_tools` / `disallowed_tools`, stutzen umfangreiche Server zurecht, was den
+  Agent-Kontext klein hält.
+- **Observability.** Jeder Tool-Aufruf wird zu einem Nutzungseintrag (Server, Tool,
+  Dauer, Größen, Fehler-Flag, Labels, User-Path), und MCP-Requests erscheinen im
+  Audit-Log und im Request-Log wie jeder andere Modell-Traffic — gekennzeichnet mit
+  der JSON-RPC-Methode und bei Aufrufen mit dem Tool- oder Prompt-Namen, sodass eine
+  `tools/call`-Zeile `github_create_issue` lautet und nicht nur einen Pfad zeigt. Mit
+  `LOGGING_LOG_BODIES=true` werden die JSON-RPC-Request- und -Response-Frames
+  ebenfalls im Audit-Eintrag erfasst (einschließlich Tool-Argumenten und
+  -Ergebnissen), mit derselben Obergrenze von 1 MB wie bei anderen Endpunkten.
+  Rate-Limits und Budgets pro User-Path gelten auch für MCP-Requests.
+
+## Einen Client verbinden
+
+Richten Sie einen beliebigen MCP-Client mit Streamable HTTP auf das Gateway aus und
+übergeben Sie Ihren GoModel-Key als Bearer-Token:
+
+```json
+{
+  "mcpServers": {
+    "gomodel": {
+      "type": "http",
+      "url": "https://your-gateway/mcp",
+      "headers": {
+        "Authorization": "Bearer sk-your-gomodel-key"
+      }
+    }
+  }
+}
+```
+
+Die Seite **MCP Servers** im Dashboard enthält ein Panel **Connect a client** mit
+der Endpunkt-URL und einer Client-Konfiguration zum direkten Kopieren.
+
+Client-spezifische Befehle, Authentifizierung über Umgebungsvariablen und Schritte
+zur Überprüfung finden Sie unter
+[Claude Code und Codex verbinden](/de/mcp-proxy/claude-code-and-codex).
+
+Vier Möglichkeiten, einzuschränken, was ein Client sieht:
+
+- `/mcp` — alles, was der User-Path des Keys sehen darf, mit Namespaces.
+- `/mcp/{slug}` — ein einzelner Server mit seinen **ursprünglichen** Tool-Namen.
+- `/mcp/{name}` — ein [virtueller Server](/de/features/mcp-gateway#server-zu-virtuellen-servern-gruppieren): eine
+  benannte Teilmenge von Servern, mit Namespaces.
+- Header `X-MCP-Servers: github,jira` — eine kommagetrennte Teilmenge auf `/mcp`.
+
+## Server zu virtuellen Servern gruppieren
+
+Ein virtueller Server stellt eine feste Teilmenge Ihrer MCP-Server unter einer
+eigenen URL bereit. Verwenden Sie einen für Clients, die nur eine URL und keine
+benutzerdefinierten Header akzeptieren, oder um jedem Team oder Agent eine
+kuratierte Auswahl bereitzustellen.
+
+Erstellen Sie einen auf der Seite **MCP Servers** über **Add Virtual Server**:
+Wählen Sie einen Namen, die zugehörigen Server und optional den Modus der
+Tool-Liste. Änderungen werden sofort wirksam. Um virtuelle Server als Code zu
+verwalten, deklarieren Sie sie stattdessen in der Konfiguration:
+
+```yaml
+mcp:
+  virtual_servers:
+    coding:
+      description: Code review tools
+      servers: [github, linear, sentry]
+      tool_discovery: search # optional; Standard: mcp.tool_discovery
+```
+
+Clients verbinden sich mit `https://your-gateway/mcp/coding` und sehen die Tools mit
+Namespaces wie auf `/mcp` (`github_create_issue`). Dieselbe Map funktioniert als JSON
+in `MCP_VIRTUAL_SERVERS`.
+
+- **Er schränkt nur ein.** Jedes Mitglied behält seine `user_paths` und Tool-Filter;
+  ein Key, der `github` nicht sehen kann, sieht ihn also auch über `coding` nicht.
+  `X-MCP-Servers` schränkt einen virtuellen Server weiter ein.
+- **Namen teilen sich `/mcp/{name}` mit Server-Slugs.** Der Start schlägt fehl, wenn
+  ein virtueller Server in der Konfiguration nach einem Server in der Konfiguration
+  benannt ist, und das Dashboard lehnt einen neuen Server oder virtuellen Server ab,
+  dessen Name bereits von der jeweils anderen Art verwendet wird. Haben ein Server und
+  ein virtueller Server dennoch denselben Namen (zum Beispiel, weil die Konfiguration
+  nach einem Dashboard-Eintrag hinzugefügt wurde), behält der Server die URL, und der
+  virtuelle Server wird nicht bereitgestellt; Log und Dashboard weisen darauf hin.
+- **Konfigurationseinträge haben Vorrang.** Ein in der Konfiguration deklarierter
+  virtueller Server verdeckt einen gleichnamigen aus dem Dashboard und ist im
+  Dashboard schreibgeschützt.
+- **Fehlende Mitglieder werden übersprungen.** Das Dashboard bietet nur vorhandene
+  Server an, aber ein später gelöschtes Mitglied oder eines, das in der Konfiguration
+  genannt wird, bevor es existiert, wird mit einer Warnung übersprungen und auf der
+  Seite **MCP Servers** markiert.
+
+Das Panel **Connect a client** kann die Client-Konfiguration für jeden virtuellen
+Server erzeugen.
+
+Bei mehreren Gateway-Instanzen auf einer Datenbank wird eine Änderung im Dashboard
+sofort auf der Instanz wirksam, die sie gespeichert hat. Die anderen übernehmen sie
+bei ihrer nächsten Hintergrundaktualisierung (`CACHE_REFRESH_INTERVAL`, Standard
+1 Stunde) oder bei einer Laufzeitaktualisierung aus dem Dashboard. Im Dashboard
+hinzugefügte MCP-Server werden auf dieselbe Weise verteilt.
+
+## Tools suchen statt auflisten
+
+Jedes Tool in `tools/list` wird in jedem Turn an das Modell gesendet. Bei einigen
+großen Servern können das Zehntausende von Tokens sein. Die Such-Discovery ersetzt
+die Liste durch zwei Tools:
+
+- `search_tools` nimmt Schlüsselwörter (oder einen exakten Tool-Namen) entgegen und
+  gibt die passenden Tools mit ihren Beschreibungen und Input-Schemas zurück.
+- `call_tool` führt ein gefundenes Tool über `name` mit seinen `arguments` aus.
+
+Die Funktion ist standardmäßig deaktiviert. Aktivieren Sie sie für alle Clients:
+
+```yaml
+mcp:
+  tool_discovery: search # env: MCP_TOOL_DISCOVERY; Standard: off
+```
+
+Oder pro Client mit einem Header, der den Standardwert für diese Session
+überschreibt. Das Panel **Connect a client** zeigt den Standardwert des Gateways an;
+sein Konfigurations-Snippet fügt den Header nur hinzu, wenn der gewählte Modus von
+diesem Standardwert abweicht:
+
+```json
+{
+  "mcpServers": {
+    "gomodel": {
+      "type": "http",
+      "url": "https://your-gateway/mcp",
+      "headers": {
+        "Authorization": "Bearer sk-your-gomodel-key",
+        "X-MCP-Tool-Discovery": "search"
+      }
+    }
+  }
+}
+```
+
+Verwenden Sie sie für Clients, die jedes Tool an das Modell senden, etwa eigene
+Agents und SDK-Schleifen. Lassen Sie sie für Clients mit eigener Tool-Suche, wie
+Claude Code, deaktiviert: Diese laden Tools bereits verzögert und erhalten
+Berechtigungsabfragen pro Tool sowie Hinweise auf schreibgeschützte bzw. destruktive
+Tools nur dann, wenn Tools direkt aufgelistet werden. Über `call_tool` sieht für den
+Client jeder Aufruf wie dasselbe Tool aus.
+
+Suchergebnisse und Aufrufe berücksichtigen User-Paths und Tool-Filter. Fehler, etwa
+ein unbekannter Name oder ein nicht erreichbarer Server, kommen als Tool-Fehler
+zurück, die das Modell lesen und auf die es reagieren kann. Nutzungseinträge und das
+Request-Log erfassen den echten Tool-Namen, nicht `call_tool`. Ist der Katalog nur
+wegen Tools groß, die niemand verwendet, ist es einfacher, ihn mit
+[Tool-Filtern](/de/features/mcp-gateway#festlegen-welche-tools-ein-server-bereitstellt) oder `X-MCP-Servers` zu
+verkleinern – die Tools bleiben dann direkt aufgelistet.
+
+## Server deklarieren
+
+Server lassen sich im Dashboard verwalten (Seite **MCP Servers**) oder als
+Infrastructure-as-Code deklarieren — deklarative Einträge überschreiben
+Dashboard-Zeilen mit demselben Slug und sind dort schreibgeschützt:
+
+<img
+  src="/features/mcp-servers.png"
+  alt="Seite MCP Servers im GoModel-Dashboard mit zwei Servern samt Transport, Endpunkt, Status, Anzahl der Tools und Schalter zum Aktivieren"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+### Einen Server über das Dashboard hinzufügen
+
+Öffnen Sie **MCP Servers** und klicken Sie auf **Add MCP Server**. Füllen Sie aus:
+
+- **Name** — für Menschen gedacht; Sie können ihn später umbenennen.
+- **Transport** — `http` (Streamable HTTP, Standard) oder `sse` (Legacy).
+- **URL** — der Upstream-MCP-Endpunkt.
+- **Headers** — Upstream-Zugangsdaten (zum Beispiel `Authorization: Bearer …`);
+  gespeicherte Werte werden danach geschwärzt angezeigt.
+- **Tools** — aktivieren Sie die Tools, die Clients verwenden dürfen; siehe
+  [Festlegen, welche Tools ein Server bereitstellt](/de/features/mcp-gateway#festlegen-welche-tools-ein-server-bereitstellt).
+- Optional **user paths** und **excluded user paths** unter **Advanced**; siehe
+  [Einschränken, wer einen Server sieht](/de/features/mcp-gateway#einschränken-wer-einen-server-sieht).
+
+Speichern Sie, um sofort zu verbinden. Verwenden Sie das Aktualisierungssymbol der
+Zeile, um einen **Reconnect** zu erzwingen, das Listensymbol, um den
+Katalog-Inspektor zu öffnen, und das Stiftsymbol zum Bearbeiten. Auf diese Weise
+hinzugefügte Zeilen lassen sich bearbeiten und löschen; Zeilen aus der `config.yaml`
+oder `MCP_SERVERS` werden hier schreibgeschützt angezeigt.
+
+Im Dashboard verwaltete Server haben zwei Bezeichner:
+
+- **Name** ist für Menschen gedacht, akzeptiert Unicode und kann später bearbeitet
+  werden.
+- **Slug** wird standardmäßig aus dem Namen abgeleitet. Er besteht aus ASCII-
+  Kleinbuchstaben, Ziffern, Bindestrichen und Unterstrichen und kann beim Erstellen
+  des Servers angepasst werden. Nach dem Erstellen ist er unveränderlich, weil er in
+  `/mcp/{slug}`, `X-MCP-Servers` und in den aggregierten Tool-Namen verwendet wird.
+
+Bei deklarativen Servern ist der Schlüssel der Map `mcp.servers` der Slug und wird im
+Dashboard auch als Name angezeigt.
+
+```yaml
+mcp:
+  enabled: true # Standard; MCP_ENABLED=false deaktiviert die Endpunkte
+  servers:
+    github:
+      url: https://api.githubcopilot.com/mcp
+      headers:
+        Authorization: "Bearer ${GITHUB_PAT}"
+      user_paths: ["/engineering"] # optionaler Sichtbarkeitsbereich
+      disallowed_user_paths: ["/engineering/contractors"] # Ausnahme; hat Vorrang vor user_paths
+      disallowed_tools: ["delete_repo"]
+    local-files:
+      transport: stdio # nur deklarativ; siehe Sicherheitshinweise
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+```
+
+Oder über die Umgebungsvariable `MCP_SERVERS` (ein JSON-Objekt, das pro Name über die
+YAML-Werte gelegt wird):
+
+```bash
+MCP_SERVERS='{"github":{"url":"https://api.githubcopilot.com/mcp","headers":{"Authorization":"Bearer ${GITHUB_PAT}"}}}'
+```
+
+Felder pro Server:
+
+| Feld | Standardwert | Bedeutung |
+| --- | --- | --- |
+| `url` | — | Endpunkt für die Transporte `http` (Streamable HTTP) und `sse` |
+| `transport` | `http` | `http`, `sse` (Legacy) oder `stdio` (nur Konfiguration) |
+| `headers` | — | Werden unverändert upstream gesendet; Werte unterstützen `${ENV}` |
+| `command`, `args`, `env` | — | Definition des stdio-Subprozesses |
+| `enabled` | `true` | Ein-/Ausschalten ohne Löschen |
+| `allowed_tools` | alle | Allowlist von Upstream-Tool-Namen |
+| `disallowed_tools` | keine | Blocklist, angewendet nach der Allowlist |
+| `user_paths` | alle | Sichtbarkeits-Teilbäume, wie bei virtuellen Modellen |
+| `disallowed_user_paths` | keine | Teilbäume, die den Server nie sehen; hat Vorrang vor `user_paths` |
+| `tool_timeout` | `30s` | Obergrenze für einen einzelnen `tools/call` |
+
+Ungültige Deklarationen (fehlerhafter Slug, fehlende `url`/`command`, unbekannter
+Transport) brechen den Start mit einem eindeutigen Fehler ab, statt den Server
+stillschweigend zu verwerfen.
+
+### stdio-Server mit Docker betreiben
+
+Das offizielle Image enthält nur die GoModel-Binärdatei — keine Shell, kein Node und
+kein Python —, daher können `npx`- und `uvx`-Befehle darin nicht starten.
+stdio-Server, die als statische Binärdatei ausgeliefert werden, funktionieren: Hängen
+Sie die Binärdatei ein und richten Sie `command` darauf aus.
+
+Für alles andere betreiben Sie den stdio-Server in einem eigenen Container hinter
+einer stdio-zu-HTTP-Bridge wie
+[supergateway](https://github.com/supercorp-ai/supergateway) und deklarieren ihn als
+regulären `http`-Server:
+
+```yaml
+services:
+  mcp-files:
+    image: supercorp/supergateway
+    command:
+      - --stdio
+      - npx -y @modelcontextprotocol/server-filesystem /data
+      - --outputTransport
+      - streamableHttp
+      - --port
+      - "8000"
+    volumes:
+      - ./files:/data
+
+  gomodel:
+    image: enterpilot/gomodel
+    ports: ["8080:8080"]
+    environment:
+      GOMODEL_MASTER_KEY: change-me
+      MCP_SERVERS: '{"files":{"url":"http://mcp-files:8000/mcp"}}'
+    depends_on: [mcp-files]
+```
+
+So bleiben Laufzeitumgebung und Abhängigkeiten des MCP-Servers aus dem
+Gateway-Container heraus. Die Bridge hat keine Authentifizierung; veröffentlichen
+Sie ihren Port daher nicht — lassen Sie sie nur im internen Compose-Netzwerk
+erreichbar.
+
+Um den Subprozess direkt aus dem Gateway zu starten, bauen Sie stattdessen ein
+eigenes Image. Die Binärdatei ist statisch und läuft daher auf jeder Basis:
+
+```dockerfile
+FROM node:22-slim
+COPY --from=enterpilot/gomodel /gomodel /gomodel
+COPY --from=enterpilot/gomodel /app /app
+RUN chown -R node:node /app
+USER node
+WORKDIR /app
+EXPOSE 8080
+ENTRYPOINT ["/gomodel"]
+```
+
+Für Updates und Sicherheitspatches dieses Images sind Sie dann selbst zuständig.
+
+## Zustand und Lebenszyklus
+
+Das Dashboard zeigt jeden Server als **connected**, **degraded**, **connecting** oder
+**disabled** an, mit der Anzahl der Tools und dem letzten Fehler; die Seite Overview
+fasst den Zustand der MCP-Server zusammen, sobald Server konfiguriert sind. Ein
+Server, dessen Auflistung fehlschlägt, behält seinen bisherigen Katalog (als
+degraded markiert) und wird alle 60 Sekunden erneut geprüft; funktionierende
+Kataloge werden alle 5 Minuten neu aufgelistet und sofort aktualisiert, wenn der
+Upstream eine `list_changed`-Benachrichtigung sendet. **Reconnect** im Dashboard
+(oder `POST /admin/mcp-servers/{slug}/reconnect`) erzwingt einen erneuten
+Verbindungsaufbau.
+
+Ein im Dashboard gespeicherter Server startet als **connecting**: Der erste
+Verbindungsaufbau läuft im Hintergrund, sodass das Speichern nie auf Upstream-IO
+wartet. Das Dashboard prüft alle paar Sekunden erneut, bis die Zeile auf connected
+oder degraded steht; ein Neuladen der Seite ist nicht nötig.
+
+Ein letzter Fehler `no MCP endpoint at that path` bedeutet, dass die URL den
+Handshake mit HTTP 404 beantwortet hat: Dort lauscht etwas, aber kein MCP-Endpunkt
+unter diesem Pfad. Server stellen ihren Endpunkt unter unterschiedlichen Pfaden
+bereit, daher muss `url` den Pfad enthalten — zum Beispiel
+`http://localhost:18080/http` für mcp-devtools oder `http://localhost:3000/v2/mcp`
+für selbst gehostetes Firecrawl. Ein letzter Fehler mit HTTP 405 bedeutet, dass der
+Pfad existiert, die Handshake-Methode aber ablehnt; so antwortet ein
+Streamable-HTTP-Endpunkt, wenn `transport` auf `sse` steht (und ein SSE-Endpunkt,
+wenn er auf `http` steht): Korrigieren Sie zuerst `transport`, dann den Pfad.
+Zustandslose Server (ohne `Mcp-Session-Id`) benötigen keine zusätzliche
+Konfiguration.
+
+Ein letzter Fehler mit `x509: certificate signed by unknown authority` bedeutet, dass
+das TLS-Zertifikat des Servers von einer CA ausgestellt wurde, der der Container
+nicht vertraut. Siehe
+[Private CA-Zertifikate](/de/guides/production#upstream-zertifikate-hinter-einer-privaten-ca).
+
+## Festlegen, welche Tools ein Server bereitstellt
+
+Standardmäßig wird jedes Tool bereitgestellt, das ein Server meldet. Reduzieren Sie
+die Tools eines Servers, um den Agent-Kontext klein zu halten und riskante Tools,
+etwa zum Löschen oder Mergen, von Clients fernzuhalten.
+
+Bearbeiten Sie dazu im Dashboard einen Server und nutzen Sie dessen Abschnitt
+**Tools**. Er listet jedes vom Server gemeldete Tool mit einer Checkbox auf, dazu ein
+Filterfeld sowie **Expose all** / **Exclude all** für die gefilterten Zeilen. Tools,
+die der Server als `read-only` oder `destructive` annotiert, tragen ein Badge. Diese
+Hinweise stammen vom Upstream; GoModel überprüft sie nicht.
+
+**Tools the server adds later** steuert, was passiert, wenn der Upstream wächst:
+
+| Auswahl | Gespeichert als | Neue Upstream-Tools |
+| --- | --- | --- |
+| **Expose automatically** (Standard) | `disallowed_tools`: die nicht aktivierten Tools | Bereitgestellt |
+| **Keep hidden** | `allowed_tools`: die aktivierten Tools | Verborgen, bis Sie sie aktivieren |
+
+Wählen Sie **Keep hidden** für Server, die Sie nicht kontrollieren, damit ein neues
+Tool Clients nie ohne Prüfung erreicht.
+
+Sie können ein Tool auch über seinen Namen hinzufügen, zum Beispiel bevor sich der
+Server zum ersten Mal verbindet. Namen, die der Server nicht meldet, bleiben in der
+Liste und sind mit **Not reported by the server** markiert, sodass Tippfehler und
+entfernte Tools sichtbar bleiben.
+
+Änderungen an Tool-Filtern werden sofort wirksam, ohne die Verbindung zum Server neu
+aufzubauen. Die Änderung gilt auch für bereits offene MCP-Sessions: Ein
+ausgeschlossenes Tool schlägt mit einem Fehler fehl, selbst für einen Client, der es
+vor der Änderung aufgelistet hat.
+
+In der `config.yaml` verwenden dieselben Filter die ursprünglichen Tool-Namen ohne
+Präfix:
+
+```yaml
+mcp:
+  servers:
+    github:
+      url: https://api.githubcopilot.com/mcp
+      disallowed_tools: ["delete_repository", "merge_pull_request"]
+```
+
+## Einschränken, wer einen Server sieht
+
+`user_paths` listet auf, wer einen Server sehen darf; `disallowed_user_paths` nimmt
+Aufrufer aus. Beide gleichen Teilbäume ab, sodass `/contractors` auch
+`/contractors/acme` abdeckt, und ein Ausschluss hat Vorrang vor einem erlaubten Pfad.
+
+| Ziel | Konfiguration |
+| --- | --- |
+| Alle | beide leer lassen (Standard) |
+| Nur Engineering | `user_paths: ["/engineering"]` |
+| Alle außer Contractors | `disallowed_user_paths: ["/contractors"]` |
+| Engineering ohne seine Contractors | beides oben, unterhalb von `/engineering` |
+
+Der User-Path des Aufrufers stammt aus seinem API-Key, sofern der Key einen hat.
+Andernfalls – auch mit dem Master-Key – stammt er aus dem Header
+`X-GoModel-User-Path` (oder dem über `USER_PATH_HEADER` benannten Header); so können
+Sie schnell prüfen, was ein bestimmter Teilbaum sieht.
+
+Verborgene Server fehlen in `tools/list`, und `/mcp/{slug}` gibt für sie 404 zurück.
+Wie bei Tool-Filtern werden Änderungen an der Sichtbarkeit ohne neuen
+Verbindungsaufbau zum Server wirksam und bei jedem Aufruf geprüft; sie erreichen
+daher auch bereits offene MCP-Sessions.
+
+## Den Katalog eines Servers einsehen
+
+Der Katalog-Inspektor im Dashboard (oder `GET /admin/mcp-servers/{slug}/catalog`)
+listet auf, was ein Server aktuell über das Gateway bereitstellt: Tools, Prompts,
+Ressourcen und Ressourcen-Templates mit ihren Beschreibungen, nach Anwendung Ihrer
+`allowed_tools`- / `disallowed_tools`-Filter. Tools, die der Server meldet, die aber
+durch die Filter verborgen werden, sind separat unter `excluded_tools` aufgeführt.
+Die Namen sind die ursprünglichen Upstream-Namen; der aggregierte Endpunkt `/mcp`
+stellt sie als `{slug}_{name}` bereit.
+
+## Sicherheitshinweise
+
+- **Grenze für Zugangsdaten.** Die MCP-Spezifikation verbietet das Durchreichen von
+  Tokens; GoModel terminiert das Bearer-Token des Clients und fügt
+  serverspezifische Zugangsdaten aus der Konfiguration ein. Client-Keys erreichen
+  nie einen Upstream, und konfigurierte Upstream-Header werden bei Cross-Origin-
+  Weiterleitungen nicht mitgesendet.
+- **Browser-Origins werden standardmäßig abgelehnt.** MCP-Clients sind keine
+  Webseiten; daher lehnt `/mcp` jeden Request mit Browser-Fetch-Metadaten (`Origin`
+  oder `Sec-Fetch-Site`) ab, sofern er nicht von einem Origin stammt, der in
+  `mcp.allowed_origins` (`MCP_ALLOWED_ORIGINS`) aufgeführt ist. Schreiben Sie
+  Einträge so, wie ein Browser sie serialisiert — `https://console.example.com`, ohne
+  abschließenden Schrägstrich, Standardports optional. Ein Origin auf der Allowlist
+  erhält eine vollständige Session, einschließlich des `GET`-Benachrichtigungsstreams,
+  den Browser ohne `Origin`-Header senden. Genau das blockiert browserbasiertes DNS
+  Rebinding: Rebinding ändert nur, zu welcher Adresse ein Hostname aufgelöst wird;
+  `Origin` und `Host` einer umgebundenen Seite stimmen also weiterhin überein, und der
+  Browser meldet weiterhin `Sec-Fetch-Site: same-origin` — ein Vergleich beweist
+  nichts, und nur eine explizite Allowlist unterscheidet Ihren Origin von dem eines
+  Angreifers. Setzen Sie `allowed_origins` nur, wenn Sie einen MCP-Web-Client von
+  einem bekannten Origin ausliefern; `"*"` vertraut jedem Origin, deaktiviert die
+  Schutzmaßnahme und erzeugt beim Start eine Warnung.
+- **stdio ist nur deklarativ möglich.** stdio-Server starten Subprozesse auf dem
+  Gateway-Host und können daher nur in der `config.yaml` / `MCP_SERVERS` deklariert
+  werden. Admin API und Dashboard lehnen sie ab — ein Dashboard-Login darf niemals
+  gleichbedeutend mit Codeausführung auf dem Gateway sein.
+- **stdio-Subprozesse erhalten eine minimale Umgebung.** Nur `PATH`, `HOME`,
+  `TMPDIR`, `USER` und `LANG` werden vererbt — niemals die Provider-API-Keys oder der
+  Master-Key des Gateways. Übergeben Sie alles Weitere explizit über die `env:`-Map
+  des Servers (Werte unterstützen `${VAR}`).
+- **Im Dashboard verwaltete Zugangsdaten liegen in der Gateway-Datenbank.** Header
+  von Servern, die über die Admin-Oberfläche erstellt wurden, werden im
+  konfigurierten Storage-Backend gespeichert (sie werden nur auf API-/UI-Ebene
+  geschwärzt). Wenn Ihr Bedrohungsmodell Secrets in der Datenbank ausschließt,
+  deklarieren Sie diese Server stattdessen in der `config.yaml` / `MCP_SERVERS` —
+  `${ENV}`-Referenzen halten das Secret in der Umgebung, und deklarative Server
+  berühren den Speicher nie.
+- **Remote-URLs sind serverseitiger ausgehender Traffic.** Im Dashboard verwaltete
+  HTTP/SSE-Server unterstützen bewusst private und Loopback-Endpunkte. Schützen Sie
+  den Admin-Schreibzugriff und setzen Sie die Egress-Richtlinie Ihres Deployments
+  durch, damit nicht vertrauenswürdige Betreiber das Gateway nicht nutzen können, um
+  interne Dienste auszuspähen.
+- **Sessions sind keine Authentifizierung.** Jeder Request wird per Bearer-Token
+  authentifiziert, und eine Session ist zusätzlich an die Identität des verwalteten
+  Auth-Keys, den User-Path und den festgelegten Endpunkt gebunden, die sie
+  initialisiert haben; wer eine geleakte Session-ID unter einer anderen Identität
+  verwendet, erhält 404.
+- Geheime Header-Werte werden in der Admin API und im Dashboard geschwärzt (`***`)
+  angezeigt; das Speichern eines Formulars mit `***` behält das gespeicherte Secret
+  bei.
+
+## Protokollabdeckung
+
+Tools, Prompts, Ressourcen und Ressourcen-Templates werden aggregiert und
+weitergeleitet. Gültige Schemas und alle Ergebnisse bleiben unverändert; fehlerhafte
+Tool-Schemas werden zu sicheren Objekt-Schemas normalisiert, statt nachgelagerte
+Sessions abstürzen zu lassen. Upstream-`instructions` werden in die
+`initialize`-Response des Gateways zusammengeführt. Vom Server initiierte Features
+(Sampling, Elicitation, Roots) und Ressourcen-Abonnements werden in dieser Version
+nicht ausgehandelt, was nachgelagerte Clients transparent handhaben.

@@ -1,0 +1,189 @@
+---
+title: "SGLang"
+description: "将兼容 OpenAI 的 GoModel 请求路由到一个或多个自托管的 SGLang 服务器。"
+icon: "server"
+keywords: ["SGLang", "自托管", "Hugging Face 模型", "兼容 OpenAI 的服务器", "self-hosted", "Hugging Face models", "OpenAI-compatible server"]
+---
+
+GoModel 通过 SGLang 兼容 OpenAI 的 `/v1` API 与其通信，并通过提供商透传暴露 SGLang 的原生端点。
+包含斜杠的 Hugging Face 模型 ID 也可以正常使用，因为 GoModel 只在第一个斜杠处拆分带提供商限定的选择器。
+
+请先启动 SGLang：
+
+```bash
+python -m sglang.launch_server \
+  --model-path Qwen/Qwen2.5-0.5B-Instruct \
+  --host 0.0.0.0 \
+  --port 30000
+# 如果服务器需要 Bearer 认证，请添加 --api-key token-abc123。
+```
+
+有关当前的启动选项和特定于加速器的选项，请参阅 SGLang 的
+[兼容 OpenAI 的 API 文档](https://docs.sglang.io/docs/basic_usage/openai_api_completions)。
+
+## 配置
+
+```bash
+SGLANG_BASE_URL=http://host.docker.internal:30000/v1   # 包含 /v1
+# SGLANG_API_KEY=token-abc123                          # 仅在使用 --api-key 时设置
+GOMODEL_MASTER_KEY=change-me
+```
+
+<Note>
+  这些示例假设 GoModel 运行在 Docker 中，而 SGLang 运行在宿主机上。如果两者运行在同一个 Docker
+  或 Kubernetes 网络中，请使用 SGLang 的服务名称。如果 GoModel 直接运行在宿主机上，请使用
+  `http://localhost:30000/v1`。
+</Note>
+
+## 运行 GoModel
+
+<CodeGroup>
+
+```bash Docker (.env 文件)
+docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
+```
+
+```bash Docker (inline -e)
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e SGLANG_BASE_URL="http://host.docker.internal:30000/v1" \
+  enterpilot/gomodel
+```
+
+```bash Binary (make build)
+make build
+./bin/gomodel
+```
+
+</CodeGroup>
+
+## 验证
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "sglang/Qwen/Qwen2.5-0.5B-Instruct",
+    "messages": [{"role": "user", "content": "Reply with exactly ok."}],
+    "max_tokens": 8
+  }'
+```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="change-me")
+
+completion = client.chat.completions.create(
+    model="sglang/Qwen/Qwen2.5-0.5B-Instruct",
+    messages=[{"role": "user", "content": "Reply with exactly ok."}],
+    max_tokens=8,
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "change-me",
+});
+
+const completion = await client.chat.completions.create({
+  model: "sglang/Qwen/Qwen2.5-0.5B-Instruct",
+  messages: [{ role: "user", content: "Reply with exactly ok." }],
+  max_tokens: 8,
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
+
+`GET /v1/models` 返回以提供商名称为前缀的 SGLang 模型 ID，例如 `sglang/Qwen/Qwen2.5-0.5B-Instruct`。
+
+## 多个 SGLang 实例
+
+使用带后缀的环境变量，无需 YAML 即可注册多个实例：
+
+```bash
+SGLANG_BASE_URL=http://host.docker.internal:30000/v1
+SGLANG_TEST_BASE_URL=http://host.docker.internal:30001/v1
+```
+
+这会注册 `sglang` 和 `sglang-test`。后缀会被转换为小写，下划线会变为连字符。
+
+## 原生透传
+
+透传默认启用。`/generate` 这类相对于根路径的 SGLang 端点，在发送时不会带上配置的 `/v1` 前缀：
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/p/sglang/generate \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Hello",
+    "sampling_params": {"max_new_tokens": 8}
+  }'
+```
+
+```python Python
+import httpx
+
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="change-me")
+generation = client.post(
+    "/p/sglang/generate",
+    cast_to=httpx.Response,
+    body={
+        "text": "Hello",
+        "sampling_params": {"max_new_tokens": 8},
+    },
+)
+
+print(generation.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "change-me",
+});
+
+const generation = await client.post("/p/sglang/generate", {
+  body: {
+    text: "Hello",
+    sampling_params: { max_new_tokens: 8 },
+  },
+});
+
+console.log(generation);
+```
+
+</CodeGroup>
+
+对于本身包含 `v1/` 路径段的 SGLang 端点（例如 `/v1/rerank` 或 `/v1/tokenize`），请保留该显式路径段：
+
+```text
+/p/sglang/v1/rerank
+/p/sglang/v1/tokenize
+```
+
+GoModel 在转发前会移除客户端的认证信息，并在已配置时使用 `SGLANG_API_KEY`。
+
+## 能力说明
+
+- Chat Completions、流式传输、模型列表、Responses 和嵌入使用 SGLang 兼容 OpenAI 的 API。
+- 嵌入和特定于模型的功能取决于 SGLang 加载的模型。
+- 原生的批处理、文件和已存储响应的生命周期接口尚未作为带类型的 GoModel 提供商能力暴露；
+  在已安装的 SGLang 版本支持的情况下，请使用透传。

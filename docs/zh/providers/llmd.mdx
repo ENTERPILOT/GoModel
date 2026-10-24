@@ -1,0 +1,188 @@
+---
+title: "llm-d"
+description: "通过 llm-d Inference Gateway 路由 GoModel 请求，并注入受信任的调度元数据。"
+icon: "route"
+keywords: ["llm-d", "Inference Gateway", "EPP", "Kubernetes", "推理调度", "inference scheduling"]
+---
+
+GoModel 的 `llmd` 提供商会将兼容 OpenAI 的请求发送到 [llm-d Router](https://llm-d.ai/docs/dev/architecture/core/router)，并为 Endpoint Picker（EPP）添加受信任的调度元数据。当 GoModel 作为 llm-d 前面的认证 API 网关时，请使用此提供商。
+
+## 前提条件
+
+- 一个正在运行的 llm-d 部署，并带有可到达 Router/EPP 的 HTTPRoute。
+- 该路由暴露的模型名称。
+- GoModel 到 Router 服务的网络连通性。
+
+[llm-d 快速开始](https://llm-d.ai/docs/dev/getting-started/quickstart)会创建一个以指南 Release 命名的 EPP 服务。请使用您自己部署中的服务名称。
+
+## 使用环境变量配置
+
+```bash
+LLMD_BASE_URL=http://quickstart-epp.llm-d.svc.cluster.local/v1
+LLMD_MODELS=Qwen/Qwen2.5-0.5B-Instruct
+GOMODEL_MASTER_KEY=change-me
+
+# 可选控制项
+LLMD_INFERENCE_OBJECTIVE=standard-traffic
+LLMD_FAIRNESS_FROM_USER_PATH=true
+# LLMD_API_KEY=router-token
+```
+
+`LLMD_BASE_URL` 为必填项，且应包含 `/v1`。`LLMD_API_KEY` 为可选项；当 llm-d 前面的 Gateway 要求 Bearer 认证时才需设置。
+
+省略 `LLMD_INFERENCE_OBJECTIVE` 时，GoModel 不会发送推理目标（inference objective）请求头。当 llm-d 部署定义了多个推理目标、且此 GoModel 提供商需要选择其中之一时，请设置该变量。
+
+当您的路由不提供 `GET /v1/models` 时，请声明 `LLMD_MODELS`。GoModel 会将该列表用作此提供商的模型清单。
+
+## 使用 YAML 配置
+
+```yaml
+providers:
+  llmd:
+    type: llmd
+    base_url: "http://quickstart-epp.llm-d.svc.cluster.local/v1"
+    inference_objective: "standard-traffic"
+    fairness_from_user_path: true
+    models:
+      - id: "Qwen/Qwen2.5-0.5B-Instruct"
+```
+
+`fairness_from_user_path` 默认为 `true`。GoModel 会在应用认证和密钥策略之后，根据实际生效的 [`user_path`](/zh/features/user-path) 推导出公平性 ID（fairness ID）。如果由另一个受信任的层设置公平性元数据，请将其设置为 `false`。
+
+<Note>
+  仅凭客户端提供的原始 `X-GoModel-User-Path` 不足以设置公平性 ID。请将该路径绑定到托管认证密钥或扩展身份，以便 GoModel 将其视为实际生效的已认证路径。
+</Note>
+
+<Warning>
+  不要从不受信任的边缘转发客户端提供的 llm-d 调度请求头，否则客户端可能会选择其他推理目标或公平性组。该专用提供商会在透传请求中移除 llm-d 和 Gateway API Inference Extension 的控制请求头，然后注入配置的值。
+</Warning>
+
+对于推理目标和公平性 ID，GoModel 会同时发送当前的 `x-llm-d-*` 请求头和已弃用的 `x-gateway-*` 别名，两者携带相同的受信任值。这样既支持稳定版 llm-d 0.8 部署，又使用了 llm-d 0.9 及更高版本所识别的规范名称。
+
+当 EPP 流量控制在经过转换的推理路由上返回 `429` 时，GoModel 会保留 `x-llm-d-request-dropped-reason` 响应头，以便客户端区分请求被拒绝和分发后被驱逐。
+
+## 验证
+
+首先在控制台中创建一个 GoModel 托管 API 密钥，将其 `user_path` 绑定到 `/team/alpha`，并将返回的值赋给 `TEAM_ALPHA_GOMODEL_KEY`。该请求所使用的公平性 ID 由密钥绑定确定，而不是由客户端声明的请求头确定。
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer ${TEAM_ALPHA_GOMODEL_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llmd/Qwen/Qwen2.5-0.5B-Instruct",
+    "messages": [{"role": "user", "content": "Reply with exactly ok."}]
+  }'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["TEAM_ALPHA_GOMODEL_KEY"],
+)
+
+completion = client.chat.completions.create(
+    model="llmd/Qwen/Qwen2.5-0.5B-Instruct",
+    messages=[{"role": "user", "content": "Reply with exactly ok."}],
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.TEAM_ALPHA_GOMODEL_KEY,
+});
+
+const completion = await client.chat.completions.create({
+  model: "llmd/Qwen/Qwen2.5-0.5B-Instruct",
+  messages: [{ role: "user", content: "Reply with exactly ok." }],
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
+
+GoModel 在将模型名称发送到上游之前，会移除外层的 `llmd/` 路由前缀。带斜杠的 Hugging Face 模型 ID 会保持不变。
+
+## 支持的路由
+
+该提供商通过兼容 OpenAI 的 API 实现了 Chat Completions、Responses、嵌入（Embeddings）和模型列表。对于 [llm-d HTTP API 参考](https://llm-d.ai/docs/dev/api-reference/epp-http-apis)中的其他路由，默认启用透传，包括 OpenAI completions、Anthropic Messages 和 vLLM Generate：
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/p/llmd/completions \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen/Qwen2.5-0.5B-Instruct",
+    "prompt": "Hello"
+  }'
+```
+
+```python Python
+import httpx
+
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="change-me")
+completion = client.post(
+    "/p/llmd/completions",
+    cast_to=httpx.Response,
+    body={
+        "model": "Qwen/Qwen2.5-0.5B-Instruct",
+        "prompt": "Hello",
+    },
+)
+
+print(completion.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "change-me",
+});
+
+const completion = await client.post("/p/llmd/completions", {
+  body: {
+    model: "Qwen/Qwen2.5-0.5B-Instruct",
+    prompt: "Hello",
+  },
+});
+
+console.log(completion);
+```
+
+</CodeGroup>
+
+独立的 llm-d Batch Gateway 不会作为 GoModel 的原生批处理 API 暴露。该提供商也不声明支持文件、音频以及 Responses 生命周期类工具端点。
+
+## 多个 llm-d 路由
+
+使用带后缀的变量注册相互独立的 Router 服务：
+
+```bash
+LLMD_PROD_BASE_URL=http://prod-epp.llm-d.svc.cluster.local/v1
+LLMD_PROD_MODELS=Qwen/Qwen3-32B
+LLMD_PROD_INFERENCE_OBJECTIVE=production
+
+LLMD_DEV_BASE_URL=http://dev-epp.llm-d.svc.cluster.local/v1
+LLMD_DEV_MODELS=Qwen/Qwen2.5-0.5B-Instruct
+LLMD_DEV_INFERENCE_OBJECTIVE=development
+```
+
+这些变量会注册 `llmd-prod` 和 `llmd-dev`。使用 `llmd-dev/Qwen/Qwen2.5-0.5B-Instruct` 这样的模型名称来选择它们。

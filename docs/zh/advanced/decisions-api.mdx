@@ -1,0 +1,137 @@
+---
+title: "Decisions API"
+description: "通过 GoModel 使用 OpenAI 的 Decisions API 提出类型化的判断、选择和评分问题，由 OpenAI、Jev / Kev 或 OpenRouter 的决策模型作答。"
+icon: "list-check"
+keywords: ["Decisions", "decisions API", "决策 API", "gpt-6-luna", "predicate", "判断", "choice", "选择", "score", "评分", "classification", "分类", "Jev", "Kev", "System One", "OpenRouter"]
+---
+
+`POST /v1/decisions` 提供 [OpenAI 的 Decisions API](https://developers.openai.com/api/docs/guides/decisions)：
+请求包含一个 `input`（文本，或由文本和图像组成的用户消息）以及一组类型化的问题，每个回答都是一个概率、一个选项或一个分数，而不是自由文本。
+
+只要配置了 `openai`、[`jev`](/zh/providers/jev) 或
+`openrouter` 提供商，该端点即可使用。否则，它会返回 `404`。
+
+| 提供商 | 作答方式 |
+| --- | --- |
+| `openai` | 原生支持：请求体按原样发送到 `/v1/decisions` |
+| `jev`（托管版 Jev、自托管 Kev） | 通过 [System One](/zh/advanced/systemone-api)，双向转换；仅托管版 Jev 支持图像 |
+| `openrouter` | 其 System One 决策模型（`openrouter/typesafe/jev-1.13`、`openrouter/~typesafe/jev-latest`、Kev），以相同方式转换；仅支持文本。OpenRouter 的聊天模型不会响应该 API |
+
+无论哪种方式，回答都采用 OpenAI 的格式，因此 OpenAI SDK 无需修改即可使用。
+
+## 请求和回答
+
+```bash
+curl -s http://localhost:8080/v1/decisions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai/gpt-6-luna",
+    "input": "Shoes arrived two weeks late and in the wrong size. Also I see two charges on my card.",
+    "questions": [
+      {"type": "predicate", "name": "escalate", "instructions": "Does this need urgent human attention?"},
+      {"type": "choice", "name": "department", "instructions": "Which team should handle this?",
+       "choices": [{"value": "returns", "description": "Exchanges, wrong items"},
+                   {"value": "shipping", "description": "Delivery status, delays"},
+                   {"value": "billing", "description": "Charges, invoices"}]},
+      {"type": "score", "name": "frustration", "instructions": "How frustrated is the customer?",
+       "levels": [{"label": "Calm"}, {"label": "Frustrated"}, {"label": "Very angry"}]}
+    ]
+  }'
+```
+
+```json
+{
+  "model": "gpt-6-luna",
+  "answers": [
+    {"name": "escalate", "type": "predicate", "probability": 0.93},
+    {"name": "department", "type": "choice", "choice": "returns", "confidence": 0.21,
+     "probabilities": [{"value": "returns", "probability": 0.47}, {"value": "shipping", "probability": 0.28},
+                       {"value": "billing", "probability": 0.25}]},
+    {"name": "frustration", "type": "score", "score": 1.44, "confidence": 0.78,
+     "probabilities": [{"label": "Calm", "probability": 0.0, "value": 0},
+                       {"label": "Frustrated", "probability": 0.56, "value": 1},
+                       {"label": "Very angry", "probability": 0.44, "value": 2}]}
+  ],
+  "usage": {"input_tokens": 101, "input_tokens_details": {"cache_write_tokens": 0, "cached_tokens": 0},
+            "output_tokens": 0, "output_tokens_details": {"reasoning_tokens": 0}, "total_tokens": 101}
+}
+```
+
+使用 OpenAI SDK 时，将 `base_url` 指向网关：
+
+```python
+from openai import OpenAI
+
+client = OpenAI(api_key="change-me", base_url="http://localhost:8080/v1")
+decision = client.decisions.create(
+    model="jev/jev-latest",  # 或 openai/gpt-6-luna
+    input="I was charged twice. Please fix this ASAP.",
+    questions=[{"type": "predicate", "name": "billing", "instructions": "Is this ticket about billing?"}],
+)
+print(decision.answers[0].probability)
+```
+
+## Jev 和 Kev
+
+`jev` 模型通过 System One 回答相同的请求，System One 支持同样三类问题：`predicate` 对应 `noul`，`choice` 和
+`score` 保持原名。GoModel 会转换请求和回答，因此您可以在 OpenAI 和 Jev 之间切换，或在两者之间进行故障转移，而无需修改客户端代码。
+
+| Decisions | System One |
+| --- | --- |
+| `input` 字符串，或用户消息中以空行连接的文本部分 | `state` |
+| `questions` 列表，按顺序 | 顺序相同的 `questions` 映射，以 `name` 为键（未命名时为 `question_<n>`） |
+| `choices[].value` 和 `description` | `criteria` 选项名称和描述（没有描述时为 `null`），按发送顺序 |
+| `levels[].label` 和 `description` | `criteria` 等级，按顺序 |
+| 回答中的 `probabilities` 列表 | 回答中的 `probabilities` 映射 |
+
+请求的某些部分在转换时存在限制：
+
+- **图像**可在托管版 Jev 上使用，以 base64 PNG 或 JPEG data URL 形式发送
+  （`data:image/png;base64,...`）。每张图像都会成为一个 System One 图像资源，放在 state 中与其在输入中相同的位置，GoModel 还会添加
+  TypeSafe 要求的 `TypeSafe-Danger-Zone-Images: true` 请求头。GoModel
+  不会为 Jev 获取图像链接，因此 `https` 图像 URL 会返回 `400`；`detail`
+  会被忽略。TypeSafe 将图像支持标记为实验性功能，并将每张图像的每条边限制在 280–1568 像素。Kev 服务器只读取文本，因此向 Kev 模型发送图像请求会返回 `400`：除非 `jev` 提供商的基础 URL 是 TypeSafe 的托管 API
+  （`https://api.typesafe.ai`），否则 GoModel 会将其视为 Kev 服务器。
+- **选项值**可以是字符串或布尔值；布尔值以 `"true"` 或
+  `"false"` 发送，返回时还原为布尔值。同一问题中同时出现字符串 `"true"` 和布尔值
+  `true` 会产生冲突并被拒绝。
+- `prompt_cache_key`、`prompt_cache_options` 和 `safety_identifier` 会被丢弃。
+- System One 未回答的问题会以 `refusal` 形式返回，Decisions API 允许任何问题出现这种情况。
+- 上游错误会保留 TypeSafe 的状态码和消息；格式错误的问题会注明其 System One 键名。
+
+## 网关的处理
+
+与 [System One](/zh/advanced/systemone-api#网关的处理过程) 一样，该端点会解析
+`model`（包括[虚拟模型](/zh/features/virtual-models)和固定版本的 Jev），应用调用方的允许列表、速率限制和预算，对输入运行提示词[护栏](/zh/advanced/guardrails)，通过精确[响应缓存](/zh/features/cache)响应相同的请求，在出现可用性错误时故障转移到下一个目标，并以实际作答的模型记录审计和用量。在审计日志中按 **Decisions** 请求类型过滤即可。
+
+`/v1/decisions` 上的用量只对输入 Token 计费，全部按模型的输入费率计算，与 OpenAI 对 Decisions API 的计费方式一致：在该 API 中，输出、缓存读取和缓存写入 Token 都是免费的，即使是像 `gpt-6-luna` 这样目录定价中带有聊天费率的模型也是如此。长上下文档位仍决定输入费率。OpenRouter
+会以 `usage.cost` 报告其实际收费；转换后的回答会保留该值，用量记录也将其作为该请求的成本。
+
+护栏将每条输入消息视为一条用户消息，包含其文本和图像部分；修改会传递到提供商，未改动的部分保留原始 JSON。
+决策请求无法容纳的修改（例如注入的系统提示词）会被丢弃并输出警告。只有提示词阶段适用：回答是类型化的值（概率、选项、分数），而不是补全内容，因此响应阶段和流式阶段的护栏不会对其运行，回答会原样转发。如果某个工作流为 Decisions 请求选择了此类护栏，每个护栏会记录一条警告。
+
+决策模型还可以评判其他流量：使用决策模型的
+[`llm_judge`](/zh/advanced/guardrails#使用决策模型进行评判) 护栏会针对每个聊天或 Responses 提示词向其提出一个“是或否”的策略问题，并根据概率进行拦截。该调用与此端点走相同的路径，并归属于该护栏的用户路径。
+
+故障转移链可以混合多个提供商：每个目标都以其自身的格式接收请求；如果目标所在的提供商没有 Decisions API，或无法读取请求中的图像（Kev 服务器，或收到图像链接的 `jev` 模型），则会被跳过，且不消耗尝试次数。如果链中的第一个目标无法读取图像，请求会从第一个可以读取图像的目标开始，因此下面的链会将文本发送给 Kev，将图像发送给 OpenAI。
+
+```yaml
+virtual_models:
+  - source: classifier
+    strategy: failover
+    targets:
+      - { model: kev/kev-latest }     # 优先使用本地 Kev
+      - { model: openai/gpt-6-luna }  # Kev 不可用时以及处理图像时使用 OpenAI
+```
+
+## 错误
+
+| 情况 | 结果 |
+| --- | --- |
+| 未配置 `openai`、`jev` 或 `openrouter` 提供商 | `404` |
+| OpenRouter 上的聊天模型 | `400 invalid_request_error`：只有其决策模型才能回答 Decisions 请求 |
+| 缺少 `model` | `400` |
+| 模型所在的提供商没有 Decisions API（包括通过虚拟模型的情况） | `400 invalid_request_error`；网关会记录一条警告 |
+| 向纯文本模型（Kev）发送图像、向 `jev` 模型发送图像链接或非 PNG/JPEG 图像，或其他 System One 无法表达的请求 | `400 invalid_request_error`，并指明相应字段 |
+| 上游错误 | 提供商的状态码及其消息 |

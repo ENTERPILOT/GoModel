@@ -3,8 +3,11 @@
   // chart of token volume bucketed by a selectable granularity; the data
   // engine (polling + usage SSE signal) lives in liveTokensState.svelte.js.
   import ChartCanvas from "$lib/components/molecules/ChartCanvas.svelte";
+  import Spinner from "$lib/components/atoms/Spinner.svelte";
+  import NoDataIllustration from "$lib/components/atoms/NoDataIllustration.svelte";
   import SegmentedControl from "$lib/components/atoms/SegmentedControl.svelte";
   import { chartColors, resolveCssColor as resolveColor } from "$lib/utils/chartTheme.js";
+  import { auth } from "$lib/stores/auth.svelte.js";
   import { liveTokensState } from "./liveTokensState.svelte.js";
   import {
     granularityOptions,
@@ -81,9 +84,13 @@
           liveTokensState.granularity,
         )}
     />
-    {#if !liveTokensHasData(totals)}
+    {#if !liveTokensHasData(totals) && !liveTokensState.loaded}
+      <div class="chart-empty-overlay">
+        <Spinner size={24} label={m.usage_loading()} />
+      </div>
+    {:else if !liveTokensHasData(totals) && !auth.authError}
       <div class="chart-empty-overlay live-tokens-empty">
-        <span class="live-tokens-empty-text">{m.overview_waiting_live_requests()}</span>
+        <NoDataIllustration />
       </div>
     {/if}
   </div>
@@ -139,8 +146,12 @@
     font-weight: 600;
   }
 
-  .live-tokens-empty .live-tokens-empty-text {
-    font-size: 13px;
-    color: var(--text-muted);
+  /* Keep the no-data illustration clear of the x-axis labels. */
+  .live-tokens-empty {
+    bottom: 30px;
+  }
+
+  .live-tokens-empty :global(.empty-state-icon) {
+    max-height: 100%;
   }
 </style>

@@ -1,0 +1,254 @@
+---
+title: "Cohere"
+description: "Skonfiguruj Cohere w GoModel i korzystaj z czatu Command, tool calling, reasoningu, wejścia obrazowego, transkrypcji audio i modeli Embed przez API kompatybilne z OpenAI."
+icon: "message-circle"
+keywords: ["Cohere", "Command models", "modele Command", "Embed", "tool calling", "konfiguracja providera", "provider setup"]
+---
+
+GoModel tłumaczy kompatybilne z OpenAI requesty Chat Completions, Responses,
+Embeddings i Audio Transcription na natywne API v2 Cohere. Wykrywanie modeli
+korzysta z katalogu modeli Cohere i udostępnia modele czatu, embeddingów oraz
+transkrypcji przez `/v1/models`.
+
+## Konfiguracja
+
+```bash
+COHERE_API_KEY=...
+# COHERE_BASE_URL=https://api.cohere.com   # opcjonalne nadpisanie
+```
+
+Albo w `config.yaml`:
+
+```yaml
+providers:
+  cohere:
+    type: cohere
+    api_key: "${COHERE_API_KEY}"
+```
+
+Wiele kluczy obsługuje standardowa konwencja rotacji `COHERE_API_KEY_2`,
+`COHERE_API_KEY_3`, ... Wykrywanie modeli możesz ograniczyć lub uzupełnić
+zmienną `COHERE_MODELS`.
+
+## Chat i Responses
+
+Używaj modelu Cohere Command z dowolnym z endpointów kompatybilnych z OpenAI:
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "command-a-plus-05-2026",
+    "messages": [{"role": "user", "content": "Explain vector search briefly"}]
+  }'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_API_KEY"],
+)
+
+completion = client.chat.completions.create(
+    model="command-a-plus-05-2026",
+    messages=[{"role": "user", "content": "Explain vector search briefly"}],
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_API_KEY,
+});
+
+const completion = await client.chat.completions.create({
+  model: "command-a-plus-05-2026",
+  messages: [{ role: "user", content: "Explain vector search briefly" }],
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
+
+Streaming czatu, wiadomości system i developer, części z URL-ami obrazów,
+formaty odpowiedzi JSON, definicje narzędzi, wywołania narzędzi i ich wyniki są
+tłumaczone na format Cohere v2. `/v1/responses` korzysta z tego samego adaptera
+czatu.
+
+Modele reasoningowe Cohere domyślnie włączają thinking. Aby sterować natywnym
+reasoningiem Cohere, dołącz jego obiekt `thinking` jako rozszerzenie:
+
+```json
+{
+  "model": "command-a-reasoning-08-2025",
+  "messages": [{"role": "user", "content": "Solve this carefully..."}],
+  "thinking": {"type": "enabled", "token_budget": 4000}
+}
+```
+
+Wynik thinking jest zwracany jako kompatybilne z OpenAI rozszerzenie
+`reasoning_content` zarówno w zwykłych, jak i streamingowych odpowiedziach.
+
+Cohere nie potrafi ograniczyć tury do podzbioru zadeklarowanych narzędzi. Dla
+`tool_choice` typu `allowed_tools` GoModel wysyła tylko wymienione funkcje, z
+`tool_choice: REQUIRED`, gdy tryb to `required`, a w pozostałych przypadkach z
+ustawieniem domyślnym Cohere. Podzbiór, który nie wskazuje żadnej
+zadeklarowanej funkcji, jest odrzucany z kodem 400. `allowed_tools` istnieje po
+to, by klient mógł wysyłać tę samą listę narzędzi w każdej turze i zachować
+swój prompt cache; zawężanie zmienia definicje narzędzi wysyłane do Cohere,
+więc podzbiór zmieniający się między turami zmienia prefiks requestu.
+
+## Transkrypcja audio
+
+Audio w Cohere korzysta z dedykowanego modelu i endpointu zamiany mowy na
+tekst; modele czatu Command nie przyjmują treści audio wmieszanej w Chat
+Completions ani Responses. Transkrybuj audio przez endpoint kompatybilny z
+OpenAI:
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/audio/transcriptions \
+  -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -F "model=cohere/cohere-transcribe-03-2026" \
+  -F "language=en" \
+  -F "response_format=json" \
+  -F "file=@recording.wav"
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_API_KEY"],
+)
+
+with open("recording.wav", "rb") as audio_file:
+    transcription = client.audio.transcriptions.create(
+        file=audio_file,
+        model="cohere/cohere-transcribe-03-2026",
+        language="en",
+        response_format="json",
+    )
+
+print(transcription.text)
+```
+
+```javascript JavaScript
+import { createReadStream } from "node:fs";
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_API_KEY,
+});
+
+const transcription = await client.audio.transcriptions.create({
+  file: createReadStream("recording.wav"),
+  model: "cohere/cohere-transcribe-03-2026",
+  language: "en",
+  response_format: "json",
+});
+
+console.log(transcription.text);
+```
+
+</CodeGroup>
+
+API transkrypcji Cohere wymaga `language` i zwraca JSON. GoModel przyjmuje
+kompatybilne z OpenAI pole `response_format=json`, ale pomija je w natywnym
+requeście, ponieważ JSON jest stałym formatem odpowiedzi Cohere. Cohere nie
+obsługuje zamiany tekstu na mowę, podpowiedzi w prompcie, granularności
+znaczników czasu ani streamingowej transkrypcji.
+
+## Embeddingi
+
+GoModel uzupełnia pola embeddingów wymagane przez Cohere, zachowując strukturę
+requestu OpenAI:
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/embeddings \
+  -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "embed-v4.0",
+    "input": ["first document", "second document"],
+    "dimensions": 1024,
+    "input_type": "search_document"
+  }'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_API_KEY"],
+)
+
+embeddings = client.embeddings.create(
+    model="embed-v4.0",
+    input=["first document", "second document"],
+    dimensions=1024,
+    extra_body={"input_type": "search_document"},
+)
+
+print(embeddings.data[0].embedding)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_API_KEY,
+});
+
+const embeddings = await client.embeddings.create({
+  model: "embed-v4.0",
+  input: ["first document", "second document"],
+  dimensions: 1024,
+  input_type: "search_document",
+});
+
+console.log(embeddings.data[0].embedding);
+```
+
+</CodeGroup>
+
+`input_type` domyślnie ma wartość `search_document`. Ustaw `search_query`,
+`classification` lub `clustering`, jeśli lepiej opisuje to dane wejściowe.
+`encoding_format` obsługuje `float` (domyślnie) i `base64`. Natywne pola Cohere
+`truncate`, `max_tokens` i `priority` również są przekazywane.
+
+## Natywny passthrough
+
+Dodaj `cohere` do `server.enabled_passthrough_providers`, a następnie używaj
+ścieżek takich jak `/p/cohere/v2/chat` czy `/p/cohere/v2/rerank`, aby wywoływać
+natywne API Cohere, które nie mają w GoModel odpowiednika kompatybilnego z
+OpenAI.
+
+Natywne pola i możliwości poszczególnych modeli opisują dokumenty Cohere:
+[Chat API](https://docs.cohere.com/reference/chat),
+[Embed API](https://docs.cohere.com/reference/embed),
+[Audio Transcription API](https://docs.cohere.com/reference/create-audio-transcription)
+i [przewodnik po reasoningu](https://docs.cohere.com/docs/reasoning).

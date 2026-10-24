@@ -1,0 +1,237 @@
+---
+title: "Responses API"
+description: "通过 GoModel 使用兼容 OpenAI 的响应创建、生命周期、输入项及工具类端点。"
+icon: "messages-square"
+keywords: ["Responses API", "/v1/responses", "OpenAI Responses", "agents", "智能体", "响应 API"]
+---
+
+## 概览
+
+GoModel 在 `/v1/responses` 下提供兼容 OpenAI 的 Responses API 端点。
+
+创建请求会经过翻译后的模型路由流水线，因此虚拟模型、工作流、护栏、故障转移、用量日志和响应缓存都会继续生效。
+生命周期和工具类端点在可用时使用提供商的原生能力；当所选提供商不支持所请求的操作时，会返回明确的兼容性错误。
+
+有关功能层面的行为（包括托管工具和通过 Chat 翻译的提供商），请参阅 [Responses 兼容性](/zh/advanced/responses-compatibility)。
+
+## 支持的端点
+
+| 端点 | 行为 |
+| --- | --- |
+| `POST /v1/responses` | 通过翻译后的模型路由创建响应。响应会被存储，以便稍后检索。 |
+| `GET /v1/responses/{id}` | 如有可用，返回网关存储的响应；否则在支持时代理到提供商的原生查询。 |
+| `GET /v1/responses/{id}/input_items` | 如有可用，返回从原始创建请求中捕获并规范化的输入项；否则在支持时代理到提供商的原生查询。 |
+| `POST /v1/responses/{id}/cancel` | 在支持时通过原生提供商取消响应。 |
+| `DELETE /v1/responses/{id}` | 删除网关存储的响应。当提供商支持原生删除时，GoModel 还会将删除请求转发到上游。 |
+| `POST /v1/responses/input_tokens` | 在支持时通过提供商原生工具端点统计输入 Token 数。 |
+| `POST /v1/responses/compact` | 在支持时通过提供商原生工具端点压缩响应输入。 |
+
+## 已存储的响应
+
+对于 `POST /v1/responses` 调用，除非请求设置了 `store: false`，否则 GoModel 会存储规范化后的响应体，以及客户端发送的请求输入项（同样经过规范化；存储的是护栏修改之前的内容，且不包含 `previous_response_id` 或 `conversation` 追加的历史）。流式响应会根据其终止事件（`response.completed`、`response.incomplete` 或 `response.failed`）进行存储。快照在响应返回之后于后台写入，因此存储延迟绝不会拖慢客户端。在 `POST` 之后立即发出的
+`GET /v1/responses/{id}` 可能在快照存储完成之前到达；优雅关闭会等待挂起的快照写入完成，但进程被强制退出时，尚未完成的快照可能丢失。快照写入失败时会记录日志，并计入
+`gomodel_response_snapshot_store_failures_total` 指标。
+
+这使得以下功能成为可能：
+
+- 对通过 GoModel 创建的响应使用 `GET /v1/responses/{id}`。
+- 使用 `GET /v1/responses/{id}/input_items` 获取原始的规范化输入。
+- 即使提供商未提供原生响应删除功能，也可以使用 `DELETE /v1/responses/{id}`。
+- 在 Anthropic 和 Gemini 等通过 Chat 翻译的提供商上使用 `previous_response_id`：GoModel 会沿着已存储的响应及其链上的每个前序响应回溯，
+  并将它们的输入项和输出添加到新输入之前，因此提供商在每一轮都会收到完整的链。无论是否为流式响应，响应都会在
+  `previous_response_id` 中指明其前序响应。在这些提供商上，未被存储的 id（前一个响应以 `store: false` 发送）或属于其他租户的 id
+  会返回 404。原生支持 Responses 的提供商会直接收到该 id 并在其自身一侧解析，因此不需要 GoModel 快照。GoModel 为通过 Chat
+  翻译的提供商生成的 id 也会为原生提供商重放，因此一条链可以在对话中途从 Gemini 或 Anthropic 切换到 OpenAI。所有提供商都会强制执行所有权校验：
+  如果某个 id 的已存储响应属于其他[用户路径](/zh/features/user-path#对象归属)，会返回 404，而不会在上游解析；
+  而 GoModel 从未存储过的 id 仍会被转发。
+
+重放的历史与网关托管的 `conversation` 中的条目一样，会在提示词阶段的[护栏](/zh/advanced/guardrails)运行之前合并到输入中，
+因此护栏会像处理其他输入一样检查和改写它：已存储的响应保存的是其客户端看到的内容，而 [presidio](/zh/advanced/guardrails#presidio)
+护栏会在下一轮到达提供商之前，再次对其在此处还原的值进行匿名化。当提示词上运行了会改写内容的护栏（仅配置为标记或拦截的实例不算在内），
+或故障转移目标是通过 Chat 翻译的提供商时，原生主提供商收到的也将是重放的历史，而不是 id。没有此类护栏时，id 会原样转发，
+由提供商根据其自身状态继续处理该链。
+
+## 后台响应
+
+`background: true` 会立即返回一个 `queued` 快照。由于该快照不是最终结果，`GET /v1/responses/{id}` 在每次轮询时都会从创建它的提供商重新读取，
+并在响应达到终止状态（`completed`、`incomplete`、`failed` 或 `cancelled`）后存储结果，因此常见的 SDK 循环——轮询直到状态为终止状态，再读取
+`output`——可以通过网关正常工作。终止状态的快照直接从存储中提供，无需调用上游。如果刷新失败，则原样返回已存储的快照。
+
+后台创建请求永远不会从[响应缓存](/zh/features/cache)中提供：`queued` 响应体携带的 id 属于某一个调用方的响应。
+
+## 原生提供商查询
+
+当响应不是通过当前 GoModel 进程或响应存储创建时，生命周期端点仍可使用提供商的原生查询。
+
+当响应 ID 未在本地存储时，请指定提供商：
+
+```http
+GET /v1/responses/resp_abc123?provider=openai
+```
+
+如果既没有已存储的响应，也没有提供商提示，GoModel 会检查支持原生 Responses 生命周期的提供商。如果生命周期路由不可用，
+GoModel 会返回兼容性错误。如果生命周期路由可用但没有提供商能够提供该响应，GoModel 会返回普通的未找到错误。
+
+## 输入项
+
+GoModel 会将存储的输入规范化为兼容 OpenAI 的响应输入项。字符串输入会变为一条带有 `input_text` 内容项的用户消息：
+
+```json
+{
+  "type": "message",
+  "role": "user",
+  "content": [
+    {
+      "type": "input_text",
+      "text": "hello"
+    }
+  ]
+}
+```
+
+结构化输入数组会尽可能保留消息、函数调用和函数调用输出项。
+
+## 兼容性错误
+
+部分提供商并不支持所有 Responses 生命周期或工具类端点。当所选提供商无法执行某项操作时，GoModel 会返回如下兼容 OpenAI 的错误：
+
+```json
+{
+  "error": {
+    "type": "invalid_request_error",
+    "message": "response compaction is not supported by this provider",
+    "param": null,
+    "code": "unsupported_response_operation"
+  }
+}
+```
+
+GoModel 对不支持的操作使用 OpenAI 的 `invalid_request_error` 类型，从而保持公开错误类型集合的封闭性。`unsupported_response_operation`
+错误码用于标识不支持的操作，并随 HTTP `501 Not Implemented` 一起返回。
+
+## 示例
+
+创建响应：
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/responses \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-5-mini",
+    "input": "Write one short sentence about reliable gateways."
+  }'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+response = client.responses.create(
+    model="gpt-5-mini",
+    input="Write one short sentence about reliable gateways.",
+)
+
+print(response.output_text)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const response = await client.responses.create({
+  model: "gpt-5-mini",
+  input: "Write one short sentence about reliable gateways.",
+});
+
+console.log(response.output_text);
+```
+
+</CodeGroup>
+
+稍后检索该响应：
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/responses/resp_abc123 \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+response = client.responses.retrieve("resp_abc123")
+print(response.output_text)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const response = await client.responses.retrieve("resp_abc123");
+console.log(response.output_text);
+```
+
+</CodeGroup>
+
+列出其已存储的输入项：
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/responses/resp_abc123/input_items \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+for item in client.responses.input_items.list("resp_abc123"):
+    print(item)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+for await (const item of client.responses.inputItems.list("resp_abc123")) {
+  console.log(item);
+}
+```
+
+</CodeGroup>

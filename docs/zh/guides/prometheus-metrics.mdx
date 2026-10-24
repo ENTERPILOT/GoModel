@@ -1,0 +1,437 @@
+---
+title: "Prometheus 指标"
+description: "通过 METRICS_ENABLED 启用 GoModel 的实验性 Prometheus 指标，抓取 /metrics 端点，并了解网关导出了哪些指标。"
+icon: "chart-line"
+keywords: ["Prometheus", "指标", "metrics", "监控", "monitoring", "可观测性", "observability", "Grafana"]
+---
+
+<Warning>
+  Prometheus 支持目前处于**实验阶段**。指标名称、标签和配置项可能会在不另行通知的情况下发生变化。如果您依赖稳定的 schema，请固定使用特定的 GoModel 版本。
+</Warning>
+
+本指南介绍如何在 GoModel 中配置实验性的 Prometheus 指标端点。
+
+## 快速开始
+
+### 默认禁用
+
+指标**默认禁用**。要启用指标采集，请设置 `METRICS_ENABLED=true` 并启动 GoModel：
+
+<CodeGroup>
+
+```bash Docker (.env 文件)
+# 在 .env 文件中添加 METRICS_ENABLED=true，然后：
+docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
+# 指标可通过 http://localhost:8080/metrics 访问
+```
+
+```bash Docker (inline -e)
+docker run --rm -p 8080:8080 \
+  -e METRICS_ENABLED=true \
+  enterpilot/gomodel
+# 指标可通过 http://localhost:8080/metrics 访问
+```
+
+```bash Binary (make build)
+# 需要 Go 1.27.3+；生成 bin/gomodel。
+make build
+
+export METRICS_ENABLED=true
+./bin/gomodel
+# 指标可通过 http://localhost:8080/metrics 访问
+```
+
+</CodeGroup>
+
+<Note>
+  本指南其余部分只展示要设置的变量。请通过您在上面选择的启动方式应用该变量（`.env` 加 `--env-file`、内联 `-e` 参数，或在 `./bin/gomodel` 之前 `export`），然后重启 GoModel。
+</Note>
+
+### 禁用指标
+
+**方式 1：环境变量**
+
+```bash
+METRICS_ENABLED=false
+```
+
+**方式 2：.env 文件**
+
+```bash
+echo "METRICS_ENABLED=false" >> .env
+```
+
+**方式 3：config.yaml**
+
+```yaml
+metrics:
+  enabled: false
+```
+
+### 自定义指标端点
+
+修改默认的 `/metrics` 路径：
+
+```bash
+METRICS_ENABLED=true
+METRICS_ENDPOINT=/internal/prometheus
+```
+
+## 配置选项
+
+### 通过环境变量
+
+| 变量               | 默认值     | 说明                              |
+| ------------------ | ---------- | --------------------------------- |
+| `METRICS_ENABLED`  | `false`    | 启用/禁用指标采集                 |
+| `METRICS_ENDPOINT` | `/metrics` | 指标端点的 HTTP 路径              |
+
+### 通过 config.yaml
+
+```yaml
+metrics:
+  # 启用或禁用 Prometheus 指标采集
+  # 禁用时不采集任何指标，且端点返回 404
+  enabled: true
+
+  # 暴露指标的 HTTP 端点路径
+  endpoint: "/metrics"
+```
+
+## 示例
+
+### 生产环境配置（启用指标）
+
+**.env**
+
+```bash
+PORT=8080
+GOMODEL_MASTER_KEY=your-secret-key
+METRICS_ENABLED=true
+METRICS_ENDPOINT=/metrics
+OPENAI_API_KEY=sk-...
+```
+
+### 开发环境配置（禁用指标）
+
+**.env**
+
+```bash
+PORT=8080
+METRICS_ENABLED=false
+OPENAI_API_KEY=sk-...
+```
+
+### 用于内部监控的自定义端点
+
+**config.yaml**
+
+```yaml
+server:
+  port: "8080"
+  master_key: "${GOMODEL_MASTER_KEY}"
+
+metrics:
+  enabled: true
+  endpoint: "/internal/prometheus" # 自定义路径
+
+providers:
+  openai:
+    type: "openai"
+    api_key: "${OPENAI_API_KEY}"
+```
+
+## 验证
+
+### 检查指标是否已启用
+
+启动服务器并查看日志消息：
+
+**指标已启用：**
+
+```json
+{ "level": "INFO", "msg": "prometheus metrics enabled", "endpoint": "/metrics" }
+```
+
+**指标已禁用：**
+
+```json
+{ "level": "INFO", "msg": "prometheus metrics disabled" }
+```
+
+### 测试指标端点
+
+**启用时：**
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/metrics
+# 以文本格式返回 Prometheus 指标
+```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="unused")
+metrics = client.get("/metrics", cast_to=str)
+
+print(metrics)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "unused",
+});
+
+const metrics = await client.get("/metrics");
+console.log(metrics);
+```
+
+</CodeGroup>
+
+**禁用时：**
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/metrics
+# 返回 404 Not Found
+```
+
+```python Python
+from openai import NotFoundError, OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="unused")
+
+try:
+    client.get("/metrics", cast_to=str)
+except NotFoundError as error:
+    print(error.status_code)  # 404
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "unused",
+});
+
+try {
+  await client.get("/metrics");
+} catch (error) {
+  console.log(error.status); // 404
+}
+```
+
+</CodeGroup>
+
+## 性能影响
+
+### 启用指标时
+
+- 开销极小：每个请求执行钩子约 100ns
+- 内存：指标存储约 1MB（取决于基数）
+- CPU：影响可忽略不计（基准测试中 `<0.1%`）
+
+### 禁用指标时
+
+- **零开销**：不注册钩子，不进行采集
+- 指标库仍会被链接，但处于非活动状态
+- 推荐在非生产环境中使用，以获得最佳性能
+
+## 安全注意事项
+
+### 暴露指标端点
+
+与其他 HTTP 端点一样，配置主密钥后，`/metrics` 端点受主密钥认证保护。如果未配置主密钥，则无需认证即可访问该端点，Prometheus 可以在没有凭据的情况下抓取指标。
+
+如果需要进一步保护指标端点：
+
+1. **使用自定义内部路径：**
+
+   ```yaml
+   metrics:
+     endpoint: "/internal/prometheus" # 更难被猜到
+   ```
+
+2. **使用网络层安全措施：**
+   - 配置防火墙规则，仅允许 Prometheus 服务器访问
+   - 使用私有网络进行指标采集
+   - 将 Prometheus 部署在同一 VPC/网络中
+
+3. **使用带认证的反向代理：**
+
+   ```nginx
+   location /metrics {
+       auth_basic "Metrics";
+       auth_basic_user_file /etc/nginx/.htpasswd;
+       proxy_pass http://gomodel:8080/metrics;
+   }
+   ```
+
+## 针对空响应告警
+
+提供商有时会返回 `200`，但响应中没有 choices、没有输出或没有 Token 用量。`gomodel_requests_total` 会将这些调用计为成功，因此 GoModel 还会递增 `gomodel_empty_responses_total` 并记录一条警告（`provider returned 200 with an empty response`）。
+
+| 标签       | 取值                                      |
+| ---------- | ----------------------------------------- |
+| `provider` | 您配置中的提供商名称                      |
+| `model`    | 发往上游的模型                            |
+| `reason`   | `no_choices`、`no_output` 或 `no_usage`   |
+
+没有 choices 的 Chat Completion 还会向客户端返回 `502`；如果存在故障转移目标，则会进行故障转移。有内容但没有用量的响应仍会正常返回，只是会影响用量和成本追踪。
+
+```promql
+sum(rate(gomodel_empty_responses_total[5m])) by (provider, model, reason) > 0
+```
+
+## Prometheus 配置
+
+### 抓取配置
+
+**prometheus.yml**
+
+```yaml
+scrape_configs:
+  - job_name: "gomodel"
+    static_configs:
+      - targets: ["localhost:8080"]
+    metrics_path: "/metrics" # 或您的自定义路径
+    scrape_interval: 15s
+    scrape_timeout: 10s
+```
+
+### 使用自定义端点
+
+```yaml
+scrape_configs:
+  - job_name: "gomodel"
+    static_configs:
+      - targets: ["localhost:8080"]
+    metrics_path: "/internal/prometheus" # 自定义路径
+    scrape_interval: 15s
+```
+
+## 故障排查
+
+### 指标端点返回 404
+
+**原因**：指标已禁用（默认状态）。
+
+**解决方法**：
+
+```bash
+# 检查配置
+echo $METRICS_ENABLED  # "true" 表示启用；为空或 "false" 表示禁用
+```
+
+通过 `.env` 文件、内联的 `-e METRICS_ENABLED=true` 参数或 `export METRICS_ENABLED=true` 设置 `METRICS_ENABLED=true`（三种启动方式请参阅[快速开始](#默认禁用)），然后重启 GoModel。
+
+### 没有出现指标数据
+
+**原因**：尚未发起任何请求。
+
+**解决方法**：发起一些请求以生成指标：
+
+<CodeGroup>
+
+```bash curl
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-master-key" \
+  -d '{"model": "gpt-4", "messages": [{"role": "user", "content": "Hi"}]}'
+
+# 然后检查指标
+curl http://localhost:8080/metrics | grep gomodel_requests_total
+```
+
+```python Python
+from openai import OpenAI
+
+models = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="your-master-key",
+)
+models.chat.completions.create(
+    model="gpt-4",
+    messages=[{"role": "user", "content": "Hi"}],
+)
+
+gateway = OpenAI(base_url="http://localhost:8080", api_key="your-master-key")
+metrics = gateway.get("/metrics", cast_to=str)
+
+for line in metrics.splitlines():
+    if "gomodel_requests_total" in line:
+        print(line)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const models = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "your-master-key",
+});
+await models.chat.completions.create({
+  model: "gpt-4",
+  messages: [{ role: "user", content: "Hi" }],
+});
+
+const gateway = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "your-master-key",
+});
+const metrics = await gateway.get("/metrics");
+
+for (const line of metrics.split("\n")) {
+  if (line.includes("gomodel_requests_total")) console.log(line);
+}
+```
+
+</CodeGroup>
+
+### 自定义端点不生效
+
+**原因**：端点必须以 `/` 开头。
+
+**错误：**
+
+```bash
+export METRICS_ENDPOINT=metrics  # 缺少开头的斜杠
+```
+
+**正确：**
+
+```bash
+export METRICS_ENDPOINT=/metrics  # 包含开头的斜杠
+```
+
+## 最佳实践
+
+### 开发环境
+
+- **禁用指标**，以加快启动速度并减少干扰
+- 仅在测试可观测性功能时启用
+
+### 预发布环境
+
+- **启用指标**，以测试监控配置
+- 如有安全需要，使用自定义端点
+
+### 生产环境
+
+- **启用指标**，以获得完整的可观测性
+- 配置 Prometheus 告警
+- 使用 Grafana 看板进行可视化
+- 出于安全考虑，可以使用自定义端点
+- 监控指标基数，避免基数爆炸
+
+## 另请参阅
+
+- [配置](/zh/advanced/configuration)：完整的环境变量参考
+- [config.yaml](/zh/advanced/config-yaml)：YAML 配置参考

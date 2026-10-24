@@ -1,0 +1,190 @@
+---
+title: "User Path"
+description: "Używaj user_path do ograniczania zakresu kluczy, dostępu do modeli, list modeli, workflow, użycia i logów audytowych."
+icon: "route"
+keywords: ["user_path", "ścieżka użytkownika", "multi-tenancy", "wielodostępność", "scoping", "kontrola dostępu", "access control", "izolacja zespołów", "team isolation"]
+---
+
+## Przegląd
+
+`user_path` to znormalizowana hierarchia wywołującego, na przykład
+`/team/alpha` lub `/team/alpha/service`.
+
+GoModel używa jej, aby dostęp do modeli, workflow, budżety, użycie i dane audytowe
+były przypisane do właściwego zespołu, tenanta, usługi lub klienta.
+
+## Klucze API
+
+Ścieżkę użytkownika możesz przypisać do zarządzanego klucza API w dashboardzie administracyjnym:
+
+`API Keys -> Create API Key -> User Path`
+
+<img
+  src="/features/auth-keys-labels.png"
+  alt="Strona API Keys w dashboardzie GoModel z kolumną User Path zawierającą wartości takie jak /agents/team1, /engineering/ai i /sales/john"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+Strona **API Keys** pokazuje przypisany do każdego klucza `user_path` obok jego
+etykiet, dzięki czemu od razu widzisz, do którego poddrzewa należy dany klucz.
+
+Gdy request używa tego klucza, GoModel traktuje `user_path` klucza jako
+efektywną ścieżkę użytkownika dla requestu.
+
+## Nagłówek HTTP
+
+Klienci mogą też wysłać ścieżkę użytkownika bezpośrednio:
+
+```http
+X-GoModel-User-Path: /team/alpha
+```
+
+Nazwę nagłówka możesz zmienić przez `USER_PATH_HEADER` lub
+`server.user_path_header` w `config.yaml`. Jeśli nie jest ustawiona, GoModel używa
+`X-GoModel-User-Path`.
+
+Jeśli klucz API ma własny `user_path`, wygrywa klucz. GoModel nadpisuje
+wartość nagłówka ścieżką przypisaną do klucza, zanim zostaną uruchomione dopasowanie workflow, logowanie audytowe,
+śledzenie użycia i kontrole dostępu do modeli.
+
+## Zakres dostępu
+
+Przypisany do klucza `user_path` jest też **zakresem dostępu** klucza: poddrzewem, które
+klucz może odczytywać i którym może zarządzać. Klucz przypisany do `/team/alpha` ma dostęp do `/team/alpha` i
+każdego potomka, ale nie do `/team/beta`, nie do `/team` i nie do wierszy zapisanych
+bez ścieżki użytkownika. Nagłówek nigdy nie poszerza zakresu; wybiera jedynie
+ścieżkę, do której przypisywany jest request.
+
+| Dane uwierzytelniające                  | Zakres                       |
+| --------------------------------------- | ---------------------------- |
+| Master key                              | Globalny                     |
+| Zarządzany klucz bez `user_path` (lub z `/`) | Globalny                |
+| Zarządzany klucz przypisany do `/team/alpha` | `/team/alpha` i potomkowie |
+| SSO lub inna tożsamość z rozszerzenia   | Ścieżka użytkownika jej sesji, według tej samej reguły |
+
+Reguła jest taka sama dla wszystkich danych uwierzytelniających: ścieżka użytkownika to węzeł, w imieniu którego działasz,
+i widzisz ten węzeł oraz wszystko poniżej. Sesja SSO przypisana do
+`/users/alice` administruje więc tylko tym poddrzewem. Rozszerzenie, które chce
+nadawać uprawnienia administratorów gatewaya, przypisuje takie sesje do `/`, a administratorów zespołów do
+katalogu głównego zespołu, np. `/team/alpha` – dokładnie tak, jak utworzyłbyś klucz API pod
+tą ścieżką.
+
+Zakres obowiązuje w dwóch miejscach:
+
+- **Admin API i dashboard.** Klucz z dostępem do dashboardu i `user_path`
+  jest administratorem zakresowym tego poddrzewa. Zobacz
+  [Zakresowy dostęp administracyjny](/pl/advanced/admin-endpoints#zakresowy-dostęp-administracyjny).
+- **Własność obiektów** na endpointach cyklu życia `/v1`, opisana poniżej.
+
+## Własność obiektów
+
+Odpowiedzi (responses), konwersacje, batche i przesłane pliki pamiętają `user_path`,
+pod którym zostały utworzone. Pobranie, wylistowanie, aktualizacja, anulowanie lub usunięcie
+takiego obiektu po ID udaje się tylko wtedy, gdy ta ścieżka leży w zakresie wywołującego;
+w przeciwnym razie gateway odpowiada `404`, dokładnie tak jak dla nieznanego ID.
+Wywołanie `/v1/responses`, które odwołuje się do konwersacji lub
+`previous_response_id` z innego poddrzewa, kończy się tak samo – także u
+providerów, które same rozwiązują `previous_response_id`.
+
+Zakresowe dane uwierzytelniające mogą odwoływać się tylko do obiektów śledzonych przez gateway: ID, którego
+gateway nie ma w rejestrze, jest raportowane jako nieistniejące, a `GET /v1/files` listuje
+śledzone pliki wywołującego z własnych rekordów gatewaya, a nie od
+providera. Globalne dane uwierzytelniające widzą każdy obiekt, w tym starsze wiersze zapisane,
+zanim ścieżka była przechowywana, i nadal odpytują providera o nieśledzone
+ID. Używaj trwałego magazynu danych, aby każdy obiekt pozostawał śledzony po restartach.
+
+## Dostęp do modeli
+
+Polityki dostępu do modeli są domyślnie włączone. Polityka to model wirtualny
+bez celu; może używać `user_paths`, aby ograniczyć selektor do poddrzewa, albo być
+wyłączona, aby całkowicie wyłączyć selektor. Selektory mogą wskazywać:
+
+- `/` dla wszystkich providerów i modeli
+- `{provider_name}/` dla jednego skonfigurowanego providera
+- `{provider_name}/{model}` dla jednego modelu u jednego providera
+- ID modelu bez nazwy providera
+
+Na przykład:
+
+- selektor: `openai/gpt-5`
+- `user_paths`: `["/team/alpha"]`
+
+To dopuszcza `/team/alpha` i jego potomków, takich jak `/team/alpha/service`.
+
+Do zarządzania tymi regułami użyj w dashboardzie `Models -> New virtual model`: zostaw
+**Target model** puste, aby utworzyć politykę dostępu dla selektora **Source**.
+Przekierowania (aliasy) opisuje strona [Modele wirtualne](/pl/features/virtual-models).
+
+Strona **Users** odpowiada na to samo pytanie z drugiej strony: które modele
+może wywołać grupa, użytkownik lub klucz API. Każdy węzeł ścieżki użytkownika i każdy zarządzany klucz API ma
+opcjonalną listę `allowed_models`; listy są przecinane w dół drzewa, więc potomek może
+jedynie zawęzić to, na co pozwala jego grupa. Zobacz [Użytkownicy](/pl/features/users).
+
+## Udostępniane modele
+
+`GET /v1/models` również używa efektywnego `user_path`.
+
+Oznacza to, że dwa klucze API mogą widzieć różne listy modeli, jeśli ich ścieżki użytkownika mają
+różne reguły dostępu do modeli.
+
+## Workflow
+
+Workflow mogą też zawierać `scope_user_path`, dzięki czemu różne zespoły lub usługi mogą
+korzystać z różnych ustawień budżetu, cache’u, audytu, użycia, guardrails i failoveru.
+
+Ścieżkę użytkownika możesz łączyć z zakresem providera i modelu, na przykład:
+
+- `/team/alpha`
+- `openai_primary` + `/team/alpha`
+- `openai_primary` + `gpt-5` + `/team/alpha`
+
+Pełną kolejność dopasowania opisuje strona [Workflow](/pl/advanced/workflows).
+
+## Budżety
+
+Budżety również mają zakres wyznaczany przez `user_path`. Budżet dla `/team/alpha` dotyczy
+`/team/alpha` i potomków, takich jak `/team/alpha/service`, ale nie ścieżek
+sąsiednich, takich jak `/team-alpha`.
+
+Limity wydatków i egzekwowanie w workflow opisuje strona [Budżety](/pl/features/budgets).
+
+## Samoobsługowe użycie i limity
+
+Wywołujący mogą sprawdzić własne zużycie bez dostępu administracyjnego:
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/usage \
+  -H "Authorization: Bearer sk_gom_..."
+```
+
+```python Python
+import httpx
+
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="sk_gom_...")
+usage = client.get("/v1/usage", cast_to=httpx.Response)
+
+print(usage.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "sk_gom_...",
+});
+
+const usage = await client.get("/v1/usage");
+console.log(usage);
+```
+
+</CodeGroup>
+
+Odpowiedź dotyczy efektywnej ścieżki użytkownika wywołującego: zapisanego użycia w
+oknie dat oraz statusu każdego budżetu i reguły rate limitu obowiązujących dla tej
+ścieżki. Pełny przykład i opis pól znajdziesz w [Usage API](/pl/advanced/usage-api).

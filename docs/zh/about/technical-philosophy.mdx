@@ -1,0 +1,27 @@
+---
+title: "技术理念"
+description: "GoModel 背后的工程理念：在网关边界遵循 Postel 定律、无需配置即可使用的默认值，以及受 Twelve-Factor 方法论的影响。"
+icon: "brain"
+keywords: ["技术理念", "设计原则", "架构", "Postel 定律", "technical philosophy", "design principles", "architecture", "Postel's law"]
+---
+
+## Postel 定律
+
+发送时要保守，接收时要宽容。
+
+作为 AI 网关，GoModel 位于客户端和提供商之间，而它们的行为并不总是一致。
+我们希望自身行为严格且可预测，同时在外部环境混乱时也不至于变得脆弱。
+
+## 良好的默认值
+
+GoModel 应当只需极少的配置就能发挥作用。
+
+默认值不是凑数的，它们本身就是产品的一部分。网关应当启动迅速、能在本地运行，
+并让显而易见的使用方式足够简单，而不是先要求用户了解每一个配置项。
+
+## Twelve-Factor 的影响
+
+我们在整体上与 [Twelve-Factor App](https://12factor.net/) 保持一致。
+
+这并非盲目遵循教条，而是将其作为一个实用的基线，用于构建可移植、运维清晰、
+易于在不同环境中运行的软件。
