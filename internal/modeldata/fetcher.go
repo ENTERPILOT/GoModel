@@ -126,13 +126,18 @@ func localPath(location string) (string, bool) {
 			// remainder as the path so the mistake still resolves.
 			return strings.TrimPrefix(trimmed[len("file://"):], "/"), true
 		}
-		if u.Host != "" && u.Host != "localhost" {
+		if u.Host != "" && !strings.EqualFold(u.Host, "localhost") {
 			return u.Host + u.Path, true
 		}
 		return u.Path, true
 	case strings.HasPrefix(lower, "http://"), strings.HasPrefix(lower, "https://"):
 		return "", false
 	default:
+		// Any other "scheme://" is a URL, not a path: the HTTP client rejects
+		// the scheme instead of the fetcher looking for a file by that name.
+		if u, err := neturl.Parse(trimmed); err == nil && u.Scheme != "" && strings.HasPrefix(lower, u.Scheme+"://") {
+			return "", false
+		}
 		return trimmed, true
 	}
 }
