@@ -13,6 +13,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers/chatgpt"
 	"github.com/enterpilot/gomodel/internal/providers/chutes"
 	"github.com/enterpilot/gomodel/internal/providers/cohere"
+	"github.com/enterpilot/gomodel/internal/providers/deepinfra"
 	"github.com/enterpilot/gomodel/internal/providers/deepseek"
 	"github.com/enterpilot/gomodel/internal/providers/edenai"
 	"github.com/enterpilot/gomodel/internal/providers/elevenlabs"
@@ -61,6 +62,7 @@ func defaultProviderFactory(cfg *config.Config) *providers.ProviderFactory {
 	factory.Add(chatgpt.Registration)
 	factory.Add(chutes.Registration)
 	factory.Add(cohere.Registration)
+	factory.Add(deepinfra.Registration)
 	factory.Add(deepseek.Registration)
 	factory.Add(edenai.Registration)
 	factory.Add(elevenlabs.Registration)

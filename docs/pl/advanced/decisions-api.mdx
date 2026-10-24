@@ -1,0 +1,173 @@
+---
+title: "Decisions API"
+description: "Zadawaj przez GoModel typowane pytania typu predicate, choice i score za pomocą Decisions API od OpenAI, na które odpowiadają OpenAI, Jev / Kev lub modele decyzyjne OpenRouter."
+icon: "list-check"
+keywords: ["Decisions", "decisions API", "gpt-6-luna", "predicate", "choice", "score", "klasyfikacja", "classification", "Jev", "Kev", "System One", "OpenRouter"]
+---
+
+`POST /v1/decisions` obsługuje [Decisions API od OpenAI](https://developers.openai.com/api/docs/guides/decisions):
+request zawiera `input` (tekst lub wiadomości użytkownika z tekstem i obrazami) oraz
+listę typowanych pytań, a każda odpowiedź jest prawdopodobieństwem, wyborem lub
+oceną (score) zamiast dowolnego tekstu.
+
+Endpoint jest dostępny, gdy skonfigurowany jest provider `openai`, [`jev`](/pl/providers/jev) lub
+`openrouter`. Bez żadnego z nich odpowiada `404`.
+
+| Provider | Jak odpowiada |
+| --- | --- |
+| `openai` | Natywnie: body trafia do `/v1/decisions` w wysłanej postaci |
+| `jev` (hostowany Jev, self-hosted Kev) | Przez [System One](/pl/advanced/systemone-api), z tłumaczeniem w obie strony; obrazy tylko w hostowanym Jev |
+| `openrouter` | Jego modele decyzyjne System One (`openrouter/typesafe/jev-1.13`, `openrouter/~typesafe/jev-latest`, Kev), tłumaczone w ten sam sposób; tylko tekst. Modele czatowe OpenRouter nie odpowiadają na ten endpoint |
+
+W każdym przypadku odpowiedź ma kształt OpenAI, więc SDK OpenAI działają bez zmian.
+
+## Request i odpowiedź
+
+```bash
+curl -s http://localhost:8080/v1/decisions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai/gpt-6-luna",
+    "input": "Shoes arrived two weeks late and in the wrong size. Also I see two charges on my card.",
+    "questions": [
+      {"type": "predicate", "name": "escalate", "instructions": "Does this need urgent human attention?"},
+      {"type": "choice", "name": "department", "instructions": "Which team should handle this?",
+       "choices": [{"value": "returns", "description": "Exchanges, wrong items"},
+                   {"value": "shipping", "description": "Delivery status, delays"},
+                   {"value": "billing", "description": "Charges, invoices"}]},
+      {"type": "score", "name": "frustration", "instructions": "How frustrated is the customer?",
+       "levels": [{"label": "Calm"}, {"label": "Frustrated"}, {"label": "Very angry"}]}
+    ]
+  }'
+```
+
+```json
+{
+  "model": "gpt-6-luna",
+  "answers": [
+    {"name": "escalate", "type": "predicate", "probability": 0.93},
+    {"name": "department", "type": "choice", "choice": "returns", "confidence": 0.21,
+     "probabilities": [{"value": "returns", "probability": 0.47}, {"value": "shipping", "probability": 0.28},
+                       {"value": "billing", "probability": 0.25}]},
+    {"name": "frustration", "type": "score", "score": 1.44, "confidence": 0.78,
+     "probabilities": [{"label": "Calm", "probability": 0.0, "value": 0},
+                       {"label": "Frustrated", "probability": 0.56, "value": 1},
+                       {"label": "Very angry", "probability": 0.44, "value": 2}]}
+  ],
+  "usage": {"input_tokens": 101, "input_tokens_details": {"cache_write_tokens": 0, "cached_tokens": 0},
+            "output_tokens": 0, "output_tokens_details": {"reasoning_tokens": 0}, "total_tokens": 101}
+}
+```
+
+W SDK OpenAI skieruj `base_url` na gateway:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(api_key="change-me", base_url="http://localhost:8080/v1")
+decision = client.decisions.create(
+    model="jev/jev-latest",  # lub openai/gpt-6-luna
+    input="I was charged twice. Please fix this ASAP.",
+    questions=[{"type": "predicate", "name": "billing", "instructions": "Is this ticket about billing?"}],
+)
+print(decision.answers[0].probability)
+```
+
+## Jev i Kev
+
+Model `jev` odpowiada na ten sam request przez System One, który zadaje te
+same trzy rodzaje pytań: `predicate` to `noul`, a `choice` i
+`score` zachowują swoje nazwy. GoModel tłumaczy request i odpowiedź, więc
+możesz przełączać się między OpenAI a Jev lub robić failover z jednego na drugi
+bez zmiany kodu klienta.
+
+| Decisions | System One |
+| --- | --- |
+| String `input` lub tekstowe części wiadomości użytkownika połączone pustymi liniami | `state` |
+| Lista `questions`, w kolejności | Mapa `questions` w tej samej kolejności, z kluczami `name` (`question_<n>`, gdy pytanie nie ma nazwy) |
+| `choices[].value` i `description` | Nazwa i opis opcji w `criteria` (`null`, gdy brak), w wysłanej kolejności |
+| `levels[].label` i `description` | Poziomy `criteria`, w kolejności |
+| Listy `probabilities` w odpowiedzi | Mapy `probabilities` w odpowiedzi |
+
+Niektóre części requestu tłumaczą się z ograniczeniami:
+
+- **Obrazy** działają w hostowanym Jev, wysyłane jako data URL z base64 PNG lub JPEG
+  (`data:image/png;base64,...`). Każdy z nich staje się zasobem obrazu System One,
+  umieszczonym w stanie w tym miejscu, w którym był w input, a GoModel dodaje
+  nagłówek `TypeSafe-Danger-Zone-Images: true` wymagany przez TypeSafe. GoModel
+  nie pobiera obrazów z linków dla Jev, więc URL obrazu `https` zwraca `400`; `detail`
+  jest ignorowane. TypeSafe oznacza obsługę obrazów jako eksperymentalną i ogranicza każdy
+  obraz do 280–1568 pikseli na bok. Serwer Kev czyta tylko tekst, więc request
+  z obrazem do modelu Kev zwraca `400`: GoModel traktuje providera `jev` jako
+  serwer Kev, chyba że jego bazowy URL to hostowane API TypeSafe
+  (`https://api.typesafe.ai`).
+- **Wartości choice** to stringi lub wartości logiczne; wartość logiczna jest wysyłana jako `"true"` lub
+  `"false"` i wraca jako wartość logiczna. String `"true"` i wartość logiczna
+  `true` w jednym pytaniu kolidują i są odrzucane.
+- `prompt_cache_key`, `prompt_cache_options` i `safety_identifier` są
+  usuwane.
+- Pytanie, na które System One nie odpowie, wraca jako `refusal`, na co
+  Decisions API pozwala dla dowolnego pytania.
+- Błędy upstreamu zachowują status i komunikat TypeSafe; błędnie sformułowane pytanie
+  wskazuje swój klucz System One.
+
+## Co robi gateway
+
+Podobnie jak w [System One](/pl/advanced/systemone-api#co-robi-gateway), endpoint
+rozwiązuje `model` (w tym [modele wirtualne](/pl/features/virtual-models) i
+przypięte wersje Jev), stosuje listę dozwolonych modeli wywołującego, rate limity i
+budżety, uruchamia [guardrails](/pl/advanced/guardrails) promptu na input,
+obsługuje identyczne requesty z dokładnego [cache’u odpowiedzi](/pl/features/cache),
+robi failover na kolejny cel przy błędach dostępności i zapisuje audyt oraz
+użycie pod modelem, który odpowiedział. Filtruj log audytowy po typie requestu
+**Decisions**.
+
+Użycie na `/v1/decisions` jest wyceniane wyłącznie za tokeny wejściowe, każdy według
+stawki wejściowej modelu, tak jak OpenAI rozlicza Decisions API: tokeny wyjściowe, odczytu z cache’u i
+zapisu do cache’u są tam darmowe, nawet dla modelu takiego jak `gpt-6-luna`, którego
+cennik w katalogu ma stawki czatowe. Progi długiego kontekstu nadal wyznaczają stawkę wejściową. OpenRouter
+raportuje naliczoną kwotę jako `usage.cost`; przetłumaczona odpowiedź ją zachowuje, a
+użycie zapisuje ją jako koszt requestu.
+
+Guardrails widzą każdą wiadomość wejściową jako wiadomość użytkownika z jej częściami tekstowymi i
+obrazowymi; zmiany trafiają do providera, a nietknięte części zachowują dokładny JSON.
+Zmiany, na które request decyzyjny nie ma miejsca, takie jak wstrzyknięty system prompt,
+są odrzucane z ostrzeżeniem. Obowiązuje tylko faza promptu: odpowiedź to typowane
+wartości (prawdopodobieństwa, wybory, oceny), a nie completion, więc guardrails fazy odpowiedzi i
+streamu nie są na niej uruchamiane, a odpowiedź jest przekazywana bez zmian.
+Workflow, który wybiera takie guardrails dla requestu Decisions, loguje jedno ostrzeżenie
+na guardrail.
+
+Modele decyzyjne mogą też oceniać inny ruch: guardrail
+[`llm_judge`](/pl/advanced/guardrails#ocena-modelem-decyzyjnym) z modelem
+decyzyjnym zadaje mu pytanie tak/nie o politykę dla każdego promptu czatu lub
+Responses i blokuje na podstawie prawdopodobieństwa. To wywołanie przechodzi tą
+samą ścieżką co ten endpoint, w ramach ścieżki użytkownika guardraila.
+
+Łańcuch failoveru może mieszać providerów: każdy cel otrzymuje request we
+własnej postaci, a cel u providera bez Decisions API albo taki, który
+nie potrafi odczytać obrazów z requestu (serwer Kev lub model `jev`, któremu przekazano link
+do obrazu), jest pomijany bez zużywania próby. Gdy pierwszy cel łańcucha
+nie potrafi odczytać obrazów, request zaczyna się od pierwszego celu, który to potrafi, więc
+poniższy łańcuch wysyła tekst do Kev, a obrazy do OpenAI.
+
+```yaml
+virtual_models:
+  - source: classifier
+    strategy: failover
+    targets:
+      - { model: kev/kev-latest }     # najpierw lokalny Kev
+      - { model: openai/gpt-6-luna }  # OpenAI, gdy Kev nie działa, oraz dla obrazów
+```
+
+## Błędy
+
+| Sytuacja | Wynik |
+| --- | --- |
+| Nie skonfigurowano providera `openai`, `jev` ani `openrouter` | `404` |
+| Model czatowy w OpenRouter | `400 invalid_request_error`: na Decisions odpowiadają tylko jego modele decyzyjne |
+| Brak `model` | `400` |
+| Model u providera bez Decisions API (także przez model wirtualny) | `400 invalid_request_error`; gateway loguje ostrzeżenie |
+| Obraz wysłany do modelu obsługującego tylko tekst (Kev), link do obrazu lub obraz inny niż PNG/JPEG wysłany do modelu `jev` albo inny request, którego System One nie potrafi wyrazić | `400 invalid_request_error` ze wskazaniem pola |
+| Błąd upstreamu | Status providera wraz z jego komunikatem |

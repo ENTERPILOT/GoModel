@@ -1,0 +1,139 @@
+---
+title: "Google Gemini"
+description: "在 GoModel 中通过 AI Studio 配置 Google Gemini，选择原生路由或兼容 OpenAI 的路由，并了解 image_url 的行为。"
+icon: "sparkles"
+keywords: ["Google Gemini", "AI Studio", "Gemini 原生 API", "提供商配置", "native Gemini API", "provider setup"]
+---
+
+本页介绍如何通过 **Google AI Studio** API 密钥使用 Gemini。关于 Google Cloud Vertex AI 上的 Gemini，请参阅 [Google Vertex AI 指南](/zh/providers/vertex)。
+
+默认情况下，GoModel 通过 Gemini 的原生 API（`generateContent`、`batchEmbedContents`、Imagen `predict`）路由 Gemini 的聊天、Responses、嵌入（Embeddings）和[图片](/zh/advanced/images-api)请求。如果您需要原生适配器尚未实现的兼容行为（尤其是远程 `image_url` 值），请切换到兼容 OpenAI 的端点。
+
+## 配置
+
+```bash
+GEMINI_API_KEY=...
+GEMINI_API_MODE=native        # 或 openai_compatible
+```
+
+或在 `config.yaml` 中配置：
+
+```yaml
+providers:
+  gemini:
+    type: gemini
+    api_key: "${GEMINI_API_KEY}"
+    api_mode: native
+```
+
+<Note>
+  当未设置按提供商的 `GEMINI_API_MODE` 时，`USE_GOOGLE_GEMINI_NATIVE_API` 仍作为旧版全局开关生效。建议使用 `GEMINI_API_MODE`。
+</Note>
+
+原生 AI Studio 模式还可以将 GoModel 在路由后生成的提示词缓存计划落地为五分钟有效的 Gemini cached-content 对象。复用范围限定在为该会话选定的 API 密钥内；对于使用轮换密钥的无会话流量，会跳过对象创建，以确保资源永远不会在错误的凭据下被复用。目前 Vertex 接收的是原始请求，不带 cached-content 对象。
+
+## Base URL
+
+GoModel 为原生 Gemini 和兼容 OpenAI 的 API 分别维护内部的 Base URL：
+
+- 原生聊天/模型：`https://generativelanguage.googleapis.com/v1beta`
+- 兼容 OpenAI：`https://generativelanguage.googleapis.com/v1beta/openai`
+
+`GEMINI_BASE_URL` 会覆盖它们。当该值以 `/openai` 结尾时，GoModel 将其用于兼容 OpenAI 的客户端，并通过去掉 `/openai` 推导出原生 Base URL。文件和批处理始终使用兼容 OpenAI 的接口；聊天、嵌入和图片则遵循 API 模式。
+
+## 嵌入
+
+在原生模式下，嵌入通过 `models/{model}:batchEmbedContents` 提供。`dimensions` 映射为 `outputDimensionality`，并支持 `encoding_format: "base64"`。Gemini 在两种 API 接口上都不报告嵌入的 Token 用量，因此嵌入响应中的 Token 数为零，且该用量记录会被标记一条成本计算说明。
+
+## 图片生成与编辑
+
+在原生模式下，[兼容 OpenAI 的图片端点](/zh/advanced/images-api)可用于 Gemini 图片模型（`gemini-2.5-flash-image` 等，通过 `generateContent`）。Google 已于 2026 年 8 月从 AI Studio API 中下线 Imagen；Imagen 仍可在 [Vertex AI](/zh/providers/vertex) 上使用。图片编辑需要原生模式和 Gemini 图片模型；不支持蒙版。关于参数映射和定价详情，请参阅 [Images API 的提供商说明](/zh/advanced/images-api#google-gemini)。
+
+## 推理强度
+
+在原生模式下，`reasoning_effort`（或 `reasoning.effort`）会被转换为 Gemini 的 `thinkingConfig`：
+
+| 模型系列 | `none` / `minimal` | `low` / `medium` / `high` |
+| ------------ | ------------------ | ------------------------- |
+| Gemini 2.5 | `thinkingBudget` 0 / 1024 | `thinkingBudget` 1024 / 8192 / 24576 |
+| Gemini 3 Flash、3.5、3.6 | `thinkingLevel: minimal` | `thinkingLevel` 按原值 |
+| Gemini 3 Pro、3.1 Pro、3.7 Flash、3.8 Flash | `thinkingLevel: low` | `thinkingLevel` 按原值 |
+
+Gemini 3 无法关闭思考，并且 Pro 系列以及 3.7 和 3.8 Flash 会拒绝 `minimal`，因此 GoModel 会发送这些模型所接受的最低级别，而不是将 Google 的 400 错误返回给您。显式设置的 `extra_body.google.thinking_config` 始终会原样转发。
+
+## Gemini 3 上的采样参数
+
+Google 的 Gemini 3 迁移指南建议从每个请求中移除 `temperature`、`top_p` 和 `top_k`，因为这些模型已针对其默认值调优，并将 `candidate_count` 列为 Gemini 3.x 不支持的参数。因此在原生模式下，GoModel 会为 Gemini 3 及更高版本（`gemini-3-*`、`gemini-3.5-*`、`gemini-3.8-*` 等）丢弃这四个字段，而对 Gemini 2.5、Gemma 和其他模型仍会转发。`max_tokens`、`stop`、惩罚参数、`response_format` 和思考设置不受影响。
+
+## 思考签名（Thought signatures）
+
+Gemini 3 会为其发出的函数调用附加一个加密的 `thoughtSignature`；当该调用在历史记录中回传时如果缺少这个签名，后续请求会被拒绝（HTTP 400，"Function call is missing a thought_signature"）。在原生模式下，GoModel 以与 Google 自己的兼容 OpenAI 端点相同的方式暴露该签名，因此原样回传助手消息的客户端可以继续正常工作：
+
+```json
+{
+  "role": "assistant",
+  "tool_calls": [{
+    "id": "call_1",
+    "type": "function",
+    "function": {"name": "lookup_weather", "arguments": "{\"city\":\"Warsaw\"}"},
+    "extra_content": {"google": {"thought_signature": "EvACCu0CARFNMg..."}}
+  }]
+}
+```
+
+相同的 `extra_content` 成员也会出现在流式的 `tool_calls` 增量、Responses API 的 `function_call` 输出项、Anthropic Messages API 的 `tool_use` 块上，以及（对于纯文本轮次）助手消息本身上。请原样回传；在并行调用批次中，只有第一个调用携带签名。其他提供商永远不会看到它；共享约定请参阅[额外内容、思考块与思考签名](/zh/advanced/extra-content)。工具调用或其 `function` 对象上的扁平 `thought_signature`（或 `thoughtSignature`）也会被接受，因此为其他网关构建的客户端可以继续正常工作。
+
+当 Gemini 3 的历史记录中包含没有任何签名的函数调用时（对话最初在其他模型上开始，或客户端丢弃了该字段），GoModel 会发送 Google 文档中说明的 `skip_thought_signature_validator` 占位符，而不是返回 400 错误。这会降低该轮次的推理连续性，因此建议回传真实的签名。
+
+## 图片输入
+
+| 模式 | OpenAI 风格的 `image_url` |
+| ---- | ----- |
+| `native`（默认） | 仅支持内联 `data:` URL，远程 `https://...` URL 会被拒绝 |
+| `openai_compatible` | OpenAI 风格的远程 URL 会透传到 Google 兼容 OpenAI 的端点 |
+
+在原生模式下使用 URL 托管的图片时，Google 自己的示例会先获取该 URL，再将字节发送到 `generateContent`。
+
+## 视频输入
+
+| 模式 | OpenAI 风格的 `video_url` |
+| ---- | ----- |
+| `native`（默认） | 内联 `data:` URL、YouTube 链接、Gemini Files API URI 和 `gs://` 对象 |
+| `openai_compatible` | 原样转发，但 Google 兼容 OpenAI 的端点不支持视频输入，请使用 `native` |
+
+```json
+{"type":"video_url","video_url":{"url":"https://www.youtube.com/watch?v=abc123"}}
+```
+
+在原生模式下，`data:` URL 会变为内联视频部分（当 data URL 未声明媒体类型时默认为 `video/mp4`），而 YouTube、Files API 和 Cloud Storage URI 会作为文件引用发送，由 Gemini 自行解析。其他任何远程 `https://...` URL 都会被拒绝而不是被丢弃，请先通过 Gemini Files API 上传。
+
+## 消息与工具
+
+在原生模式下，OpenAI 聊天字段按如下方式映射到 `generateContent`：
+
+| OpenAI 字段 | Gemini `generateContent` |
+| ------------ | ------------------------ |
+| `system` 和 `developer` 消息 | `system_instruction`（Gemini 没有单独的 developer 角色） |
+| `tool_choice: "auto"` / `"required"` / `"none"` | `functionCallingConfig.mode` `AUTO` / `ANY` / `NONE` |
+| 指定单个函数的 `tool_choice` | `ANY` 配合 `allowedFunctionNames: [name]` |
+| 模式为 `required` 的 `tool_choice: {"type": "allowed_tools", ...}` | `ANY` 配合 `allowedFunctionNames` |
+| 模式为 `auto` 的 `tool_choice: {"type": "allowed_tools", ...}` | `VALIDATED` 配合 `allowedFunctionNames` |
+| 任一函数工具上的 `strict: true` | 使用 `VALIDATED` 代替 `AUTO`；`ANY` 本身已强制执行 Schema |
+| `parallel_tool_calls: false` | 丢弃；Gemini 没有对应的参数 |
+
+Gemini 只在 `ANY` 或 `VALIDATED` 模式下接受 `allowedFunctionNames`，这就是 `auto` 子集会变为 `VALIDATED` 的原因：模型仍可以用文本回答，但它发起的任何调用都仅限于列出的工具。`VALIDATED` 作用于整个请求，因此只要有一个 strict 工具，所有已声明的工具都会进行 Schema 校验。
+
+Gemini 无法将某一轮限制为只进行一次函数调用，指定单个工具也无济于事：Gemini 可以在一轮中多次调用同一个函数。如果 `parallel_tool_calls: false`（或 Anthropic 的 `disable_parallel_tool_use`）对您很重要，请在客户端中处理或拒绝多余的调用。
+
+与 OpenAI 一样，`tools` 列表为空的 `allowed_tools` 选择会以 400 被拒绝。
+
+## 尚未集成
+
+- 在原生模式下自动获取远程 `image_url` 值。
+- 在聊天请求之前，通过 Gemini Files API 上传远程图片或视频。
+
+## 参考
+
+- [Gemini image understanding](https://ai.google.dev/gemini-api/docs/image-understanding)
+- [Gemini video understanding](https://ai.google.dev/gemini-api/docs/video-understanding)
+- [Gemini OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai)

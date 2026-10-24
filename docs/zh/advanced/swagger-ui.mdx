@@ -1,0 +1,49 @@
+---
+title: "Swagger UI"
+description: "使用带 swagger 构建标签编译的二进制文件，为 GoModel 的 API 提供交互式 Swagger UI。"
+icon: "file-code"
+keywords: ["Swagger", "Swagger UI", "OpenAPI", "构建标签", "build tag", "API 浏览器", "API explorer"]
+---
+
+GoModel 可以在 `/swagger/index.html` 提供交互式 Swagger UI。它需要在两个层面上显式启用：二进制文件必须使用 `swagger` 构建标签编译，并且运行时必须设置 `SWAGGER_ENABLED`。
+
+## 为什么默认构建中不包含它
+
+Release 二进制文件和官方 Docker 镜像在构建时**不带** `swagger` 标签。内嵌的规范和 UI 资源会使二进制文件增大 30 MB 以上（在未剥离符号的构建中大约从 55 MB 增至 88 MB），镜像也会相应增大，而生产环境中很少需要该端点。不包含它可以让构建产物保持精简，并将暴露面降到最低。
+
+如果您只需要 API 规范，可以改为在任意 OpenAPI 查看器中使用仓库中的 [`docs/openapi.json`](https://github.com/ENTERPILOT/GoModel/blob/main/docs/openapi.json)。
+
+## 带 Swagger 构建
+
+```bash
+go build -tags=swagger -o bin/gomodel ./cmd/gomodel
+```
+
+`make run` 会带上该标签进行构建，并在本地开发时自动启用 UI。
+
+## 运行时启用
+
+| 设置                  | 默认值 | 说明                                    |
+| ------------------------ | ------- | ---------------------------------------------- |
+| `SWAGGER_ENABLED`        | `false` | 在 `/swagger/index.html` 暴露 Swagger UI |
+
+```bash
+SWAGGER_ENABLED=true ./bin/gomodel
+```
+
+或在 `config.yaml` 中设置：
+
+```yaml
+server:
+  swagger_enabled: true
+```
+
+<Warning>
+`/swagger/*` 会绕过 `GOMODEL_MASTER_KEY` 和网关 API 密钥认证，因此启用后，任何能访问该服务器的人都能看到交互式 API 文档。请仅在开发环境或受信任的环境中启用，或在网络层限制该路径。
+</Warning>
+
+UI 遵循 `BASE_PATH` 设置。如果在未带该标签构建的二进制文件上设置了 `SWAGGER_ENABLED=true`，GoModel 会在启动时记录一条警告，并且 `/swagger/*` 不提供任何内容。
+
+## 重新生成规范
+
+修改 API 注解后，运行 `make swagger` 以重新生成内嵌的 docs 包和 `docs/openapi.json`。详情请参阅 [DEVELOPMENT.md](https://github.com/ENTERPILOT/GoModel/blob/main/docs/DEVELOPMENT.md)。

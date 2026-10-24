@@ -1,0 +1,273 @@
+---
+title: "Labeling"
+description: "Versehen Sie Requests über HTTP-Header oder API-Keys mit Labels und schlüsseln Sie Nutzung und Audit-Logs nach Label auf."
+icon: "tags"
+keywords: ["Labels", "labels", "Tagging", "Request-Labels", "Header-Tagging", "Kostenzuordnung", "cost attribution"]
+---
+
+## Übersicht
+
+Labels kennzeichnen jeden Request für die Zuordnung: welches Team, welches
+Feature, welcher Job oder welche Umgebung den Traffic erzeugt hat. Ein Request
+kann auf zwei Arten mit Labels versehen werden, und beide können gleichzeitig
+gelten:
+
+- **Tagging-Header** – Labels, die aus konfigurierten HTTP-Headern jedes Requests extrahiert werden.
+- **API-Key-Labels** – Labels, die an einen verwalteten API-Key gebunden sind und für jeden damit authentifizierten Request gelten.
+
+Labels aus beiden Quellen werden zusammengeführt und dedupliziert. Sie werden
+in Nutzungs- und Audit-Log-Einträgen erfasst und speisen die Aufschlüsselung
+der Nutzung nach Label im Dashboard.
+
+## API-Key-Labels
+
+Weisen Sie Labels zu, wenn Sie im Admin-Dashboard einen Key erstellen:
+
+`API Keys -> Create API Key -> Labels`
+
+<img
+  src="/features/auth-keys-labels.png"
+  alt="Seite API Keys im GoModel Dashboard mit einer Spalte Labels, die für jeden Key Chips wie env:demo, team:engineering und priority:high anzeigt"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+Die Seite **API Keys** listet jeden verwalteten Key mit seinen Labels als Chips
+neben seinem User Path auf. So sehen Sie die Zuordnung auf einen Blick, ohne
+jeden Key öffnen zu müssen. Klicken Sie in einer Zeile auf **Edit Labels**, um
+sie später zu ändern.
+
+Oder über die Admin API:
+
+<CodeGroup>
+
+```bash curl
+curl -X POST http://localhost:8080/admin/auth-keys \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "team-a-batch", "labels": ["team-a", "batch-jobs"]}'
+```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+auth_key = client.post(
+    "/admin/auth-keys",
+    cast_to=httpx.Response,
+    body={"name": "team-a-batch", "labels": ["team-a", "batch-jobs"]},
+)
+
+print(auth_key.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const authKey = await client.post("/admin/auth-keys", {
+  body: { name: "team-a-batch", labels: ["team-a", "batch-jobs"] },
+});
+
+console.log(authKey);
+```
+
+</CodeGroup>
+
+Jeder mit diesem Key authentifizierte Request trägt diese Labels – ohne
+Änderungen am Client. Das ist der einfachste Weg, Traffic pro Team oder Service
+zuzuordnen: Geben Sie jedem Nutzer einen eigenen Key mit Labels.
+
+Labels lassen sich später ändern, ohne den Key zu rotieren, im Dashboard
+(`API Keys -> Edit Labels`) oder über die Admin API:
+
+<CodeGroup>
+
+```bash curl
+curl -X PUT http://localhost:8080/admin/auth-keys/<key-id>/labels \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"labels": ["team-a", "realtime"]}'
+```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+auth_key = client.put(
+    "/admin/auth-keys/<key-id>/labels",
+    cast_to=httpx.Response,
+    body={"labels": ["team-a", "realtime"]},
+)
+
+print(auth_key.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const authKey = await client.put("/admin/auth-keys/<key-id>/labels", {
+  body: { labels: ["team-a", "realtime"] },
+});
+
+console.log(authKey);
+```
+
+</CodeGroup>
+
+Die neue Liste ersetzt die alte; senden Sie `[]`, um alle Labels zu entfernen.
+Änderungen gelten für neue Requests sofort auf der Instanz, die die
+Aktualisierung verarbeitet hat, und auf anderen Replikaten innerhalb von etwa
+einer Minute (Keys werden im Hintergrund aus dem Speicher aktualisiert).
+
+## Tagging-Header
+
+Tagging-Regeln benennen Header, deren Werte Labels enthalten. Verwalten Sie sie
+im Dashboard (`Settings -> Tagging based on headers`) oder deklarieren Sie sie
+als Infrastructure as Code:
+
+<img
+  src="/features/tagging-headers.png"
+  alt="Formular Tagging based on headers auf der Seite Settings im GoModel Dashboard mit zwei Header-Zeilen (X-Team, X-Environment) sowie Feldern für Präfix, Trennzeichen und Do not pass upstream"
+  style={{ width: "100%", maxWidth: "1000px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+Klicken Sie auf **Add Header**, geben Sie den Header an, den Ihre Clients senden
+(zum Beispiel `X-Team`), legen Sie optional ein zu entfernendes Präfix und ein
+Trennzeichen fest und klicken Sie dann auf **Save Tagging Settings**. Aktivieren
+Sie **Do not pass upstream** für Header, die entfernt werden sollen, bevor der
+Request den Provider erreicht.
+
+```yaml config.yaml
+tagging:
+  headers:
+    - header: X-My-Tags
+      prefix: "tag-" # optional: "tag-alpha, beta" → Labels "alpha", "beta"
+    - header: X-Internal-Routing
+      do_not_pass: true # wird vor der Weiterleitung an den Provider entfernt
+      delimiter: ";" # Standardwert: ","
+```
+
+Oder mit Umgebungsvariablen (ein Umgebungseintrag ersetzt den gesamten
+YAML-Eintrag mit demselben Header-Namen; nicht gesetzte zugehörige Variablen
+fallen auf die Standardwerte zurück):
+
+```bash
+TAGGING_HEADER_1=X-My-Tags
+TAGGING_HEADER_1_PREFIX=tag-    # optional, wird nur von jedem extrahierten Label entfernt
+TAGGING_HEADER_1_DONOTPASS=true # optional, Standardwert false (Header werden unverändert weitergeleitet)
+TAGGING_HEADER_1_DELIMITER=";"  # optional, Standardwert ","
+```
+
+Ein Client versieht einen Request dann so mit Labels:
+
+```http
+X-My-Tags: tag-alpha, beta
+```
+
+In `config.yaml` oder per Umgebungsvariable deklarierte Regeln sind im
+Dashboard schreibgeschützt. Header mit Zugangsdaten (`Authorization`, `Cookie`,
+API-Key-Header) werden als Tagging-Quellen abgelehnt.
+
+`do_not_pass` entfernt den Header vor der Weiterleitung auf Passthrough- und
+Realtime-Routen; übersetzte Routen leiten Client-Header ohnehin nie weiter.
+
+## LiteLLM-Tags
+
+Für LiteLLM geschriebene Clients behalten ihre Tags ohne jede Konfiguration.
+GoModel liest sie als Labels aus:
+
+- dem Header `x-litellm-tags` (kommagetrennt, ebenso wie ein `tags`-String);
+- einem Feld `tags` im Body von `/v1/chat/completions`, `/v1/responses`,
+  `/v1/messages` und `/v1/embeddings`;
+- `metadata.tags` in diesen Bodys, sofern es eine Liste ist.
+
+```json
+{
+  "model": "gpt-4o",
+  "messages": [{"role": "user", "content": "Hello"}],
+  "metadata": {"tags": ["search-team", "prod"]}
+}
+```
+
+GoModel entfernt sie, bevor der Request den Provider erreicht, der sie sonst
+ablehnen würde: OpenAI kennt keinen Parameter `tags`, und die Werte in
+`metadata` müssen Strings sein. Andere `metadata`-Keys werden durchgereicht,
+und ein String in `metadata.tags` bleibt als gewöhnliche OpenAI-Metadaten
+unverändert. Audit-Logs speichern den Body so, wie der Client ihn gesendet hat.
+
+Ein Request steuert höchstens **32** unterschiedliche Tags bei, gezählt über
+den Header und beide Body-Felder in dieser Reihenfolge; der Rest wird
+verworfen. Tags mit mehr als **128** Zeichen werden verworfen, nicht gekürzt.
+Verworfene Tags werden trotzdem entfernt, bevor der Request den Provider
+erreicht.
+
+<Warning>
+  Clients wählen ihre Tags selbst, sodass jeder Client ein Label-Budget
+  belasten kann, indem er dessen Label nennt. Wenn Label-Budgets pro Team
+  verlässlich gelten müssen, schalten Sie LiteLLM-Tags ab und versehen Sie
+  Traffic mit [API-Key-Labels](/de/features/labelling#api-key-labels) oder mit Tagging-Headern, die
+  Ihr Proxy setzt.
+</Warning>
+
+LiteLLM-Tags sind standardmäßig aktiviert. Schalten Sie sie so ab:
+
+```bash
+LITELLM_TAGS_ENABLED=false
+```
+
+```yaml config.yaml
+tagging:
+  litellm_tags_enabled: false
+```
+
+Wenn sie abgeschaltet sind, liest GoModel Tags weder aus noch entfernt es sie:
+Requests erreichen den Provider so, wie der Client sie gesendet hat, und ein
+Provider, der `tags` ablehnt, gibt seinen Fehler zurück.
+
+## Wo Labels erscheinen
+
+- **Nutzungs-Dashboard** – die Nutzungsseite zeigt eine Aufschlüsselung nach
+  Label (`GET /admin/usage/labels`). Ein Request mit mehreren Labels zählt
+  einmal unter jedem davon.
+- **Request-Log** – Label-Chips pro Request, filterbar mit dem Query-Parameter
+  `label` bei `GET /admin/usage/log`.
+- **Audit-Logs** – erfasst unter `data.labels` in jedem Eintrag (Audit-Logging
+  ist standardmäßig aktiviert).
+- **Seite API Keys** – die Labels jedes Keys werden neben seinem User Path
+  aufgeführt.
+- **Budgets** – ein Budget kann auf ein Label beschränkt werden und begrenzt
+  dann die Ausgaben aller Requests mit diesem Label. Siehe
+  [Budgets](/de/features/budgets).
+
+## Standardwerte
+
+Labeling ist standardmäßig aktiviert und kostet nichts, bis Sie eine
+Tagging-Regel konfigurieren, einen Key mit Labels erstellen oder ein Client
+LiteLLM-Tags sendet. Requests ohne Labels werden wie bisher erfasst.
+
+| Einstellung | Standardwert | Ändern, wenn |
+| --- | --- | --- |
+| `LITELLM_TAGS_ENABLED` / `tagging.litellm_tags_enabled` | `true` | Label-Budgets nicht durch vom Client gewählte Tags belastet werden dürfen. |

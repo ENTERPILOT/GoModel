@@ -1,0 +1,142 @@
+---
+title: "提供商故障模式"
+description: "当提供商改变响应结构、返回 200 却没有有效内容，或在流式传输中途中断时，GoModel 会如何处理——以及其中哪些情况会触发故障转移。"
+icon: "triangle-alert"
+keywords: ["Schema 漂移", "故障模式", "空响应", "格式错误的响应", "流中断", "影响范围", "schema drift", "failure modes", "empty response", "malformed response", "truncated stream", "blast radius"]
+---
+
+提供商出故障的方式并不只有服务中断。一次静默部署后某个字段改了类型、一个 `200 OK` 返回时什么都没带、一个流在工具调用进行到一半时停止。本页是针对这些情况的约定：调用方会收到什么、GoModel 是否重试或进行故障转移，以及该事件会出现在您监控中的什么位置。
+
+关于控制重试和熔断器的配置项，请参阅
+[弹性与容错](/zh/advanced/resilience)。关于如何选择备用模型，请参阅
+[故障转移](/zh/features/failover)。
+
+## Schema 漂移
+
+提供商改变响应结构，是网关通常避而不谈的故障，因为要应对它，就必须对“响应应该是什么样子”有自己的立场。GoModel 的立场是 OpenAI Schema，并以宽松的方式应用：未知成员予以保留，已知成员进行规范化，只有完全无法读取的响应才会变成错误。
+
+| 发生了什么漂移 | 调用方收到什么 | 是否故障转移 | 信号 |
+| --- | --- | --- | --- |
+| **我们未建模的新字段** | 原样透传，无论是在响应顶层，还是在 `choices`、`tool_calls` 和 `usage` 内部 | 否 | 无——这是设计中的路径（[额外内容](/zh/advanced/extra-content)） |
+| **已知字段消失** | 正常返回响应，该字段为空或为零。不报错 | 否 | 当丢失的是 Token 用量时，记录 `gomodel_empty_responses_total{reason="no_usage"}` |
+| **字段类型改变** | `502`，注明提供商，并附带解码错误：`failed to unmarshal response: ...` | 是 | `gomodel_requests_total{status_type="error"}` |
+| **整个响应体无法解析或缺失** | `502 provider returned empty response` | 是 | 同上 |
+| **错误隐藏在 `200` 之后** | 返回真实错误：保留 `error.code` 中的状态码，其他情况映射为 `502` | 是 | 同上 |
+
+<Warning>
+  字段消失这一行才是需要设置告警的情况。它不是一次事故——它是一个悄悄变小的数字，没有人会主动去查。
+  参见下方的[捕获静默故障](#捕获静默故障)。
+</Warning>
+
+透传端点不受上述所有规则约束：
+[`/p/{provider}/...`](/zh/advanced/api-endpoints#提供商透传) 直接转发提供商返回的字节，不施加 GoModel 的任何处理，因此希望自行处理漂移的客户端可以这样做。
+
+## 看似成功的空响应
+
+没有可用内容的 `200` 是披着成功外衣的失败。问题在于是否值得为它进行故障转移——对于 Chat Completions，答案是肯定的。
+
+| 提供商行为 | 调用方收到什么 | 是否故障转移 | 信号 |
+| --- | --- | --- | --- |
+| `200`，但 `choices` 数组为空 | `502 provider returned no choices` | 是 | `reason="no_choices"` |
+| `200`，有内容但 `usage` 全为零 | 正常返回响应 | 否 | `reason="no_usage"` |
+| 原生 `/v1/responses` 提供商返回 `200`，`status: completed`，`output` 为空 | 正常返回响应 | 否 | `reason="no_output"` |
+| 经聊天适配的 `/v1/responses` 提供商返回 `200`，没有 choices | `502 provider returned no choices` | 是 | `reason="no_choices"` |
+
+每一行都会记录一条警告，注明提供商、模型和原因，并递增 `gomodel_empty_responses_total`。由于 `gomodel_requests_total`
+将正常返回的那些行计为成功，因此该计数器是那些不会失败的行唯一出现的地方。
+
+<Note>
+  后台运行或进行中的 `/v1/responses` 调用本来就既没有输出也没有用量，因此永远不会被报告为空响应。
+</Note>
+
+## 流式传输故障
+
+已经发送过字节的流无法重试——客户端已经拿到了部分回答。因此 GoModel 的规则是：能在第一个字节之前做出判断的，就在之前判断；无法做到时，则明确告知截断。
+
+| 提供商行为 | 调用方收到什么 | 是否故障转移 | 信号 |
+| --- | --- | --- | --- |
+| `200` 流在结束前从未发送任何事件 | `502 provider returned an empty stream`，在响应头之前返回 | 是 | `gomodel_requests_total{status_type="error"}` |
+| 第一个事件是 `{"error": ...}` 载荷 | 返回该载荷携带的状态码（带内的 `429` 与真实的状态码行为相同），否则为 `502`，在响应头之前返回 | 是 | 同上 |
+| 流在终止事件之前停止 | 已收到的全部内容，随后是一个明确的错误事件，带有 `"code":"stream_incomplete"` | 否——字节已经发送 | 请求日志记录 `stream_error` |
+| 流在传输中途陷入静默 | 已收到的全部内容，在 `HTTP_STREAM_IDLE_TIMEOUT`（默认 300s）之后，随后是一个 `"code":"stream_incomplete"` 错误事件 | 否——字节已经发送 | 同上 |
+| 流中途出现格式错误的数据块 | 视为截断：先转发，再发送 `stream_incomplete` | 否 | 同上 |
+
+等待*第一个*字节的时间永远不计入空闲超时，因此在提供商发送任何内容之前，慢速推理模型都是安全的。此后，任何字节都会启动计时器——包括 keep-alive 注释——之后的每个字节都会重新计时，因此该限制约束的是两次读取之间的间隔，而不是响应的总长度。一旦第一个字节发出，响应就已确定为
+`200`，这就是为什么此后的停滞只能在带内报告，而无法作为状态码返回。详情参见：
+[流完成](/zh/advanced/resilience#什么算作失败)、
+[空闲超时](/zh/advanced/configuration)、
+[流启动时的故障转移](/zh/features/failover)。
+
+## 传输和状态码故障
+
+为完整起见，列出常规情况。
+
+| 提供商行为 | 调用方收到什么 | 是否重试 | 是否计为熔断器失败 | 是否故障转移 |
+| --- | --- | --- | --- | --- |
+| 连接被拒绝、连接重置、DNS 解析失败 | `502`/`503`，注明提供商 | 是 | 是 | 是 |
+| `429`、`502`、`503`、`504`、`522`、`524` | 重试耗尽后返回该状态码 | 是 | 是（`429` 和 `5xx`） | 是 |
+| `500` | 立即返回 `500` | 否 | 是 | 是 |
+| `429` 以外的 `4xx` | 提供商的状态码和消息 | 否 | 否 | 仅当匹配 `retry_on_errors` 中的短语时 |
+| 本地 HTTP 客户端超时 | `504` | 否 | 是 | 是 |
+| 响应慢于 `slow_call_threshold`（默认关闭） | 提供商的回答，原样返回 | 否 | 是 | 熔断器打开后 |
+| 熔断器已处于打开状态 | `503 circuit breaker is open - provider <name> temporarily unavailable` | 否 | — | 是 |
+
+流式请求一旦发出就永远不会重试；透传请求仅在可安全重放时才会重试（`GET`、`HEAD`、`OPTIONS`、`PUT`，或任何携带 `Idempotency-Key` 的请求）。
+
+## 捕获静默故障
+
+上面那些**不会**触发故障转移的行，正是需要设置告警的情况，因为按定义，不会有其他任何地方报错：
+
+```promql
+# 任何空的 200，按提供商和原因分组
+sum(rate(gomodel_empty_responses_total[5m])) by (provider, model, reason) > 0
+```
+
+```promql
+# 请求持续成功，但用量上报停止了——
+# 这是用量字段被重命名或删除的特征
+sum(rate(gomodel_empty_responses_total{reason="no_usage"}[15m])) by (provider) > 0
+```
+
+两者都会通过 OpenTelemetry 导出为 `gomodel.client.empty_responses`，
+其中原因以 `error.type` 而非 `reason` 的形式提供，同时附带
+`gomodel.provider.name` 和 `gen_ai.request.model`。参见
+[Prometheus 指标](/zh/guides/prometheus-metrics)和
+[OpenTelemetry](/zh/guides/opentelemetry)。
+
+控制台读取的是同样的信号：如果某个模型的近期请求持续失败，即使模型发现仍然成功，其提供商也会被标记为 **Degraded**——这正可以发现那些能正常列出模型、但实际调用失败的上游。
+
+## 模型发现中断
+
+提供商的 `/models` 列表可能失败，而推理仍然正常。此时 GoModel 会按以下顺序继续路由：
+
+1. 上一次获取或从缓存加载的模型清单。
+2. 已配置的模型（`<PROVIDER>_MODELS`，参见 `CONFIGURED_PROVIDER_MODELS_MODE`）。
+3. 对于使用默认基础 URL 的提供商，使用
+   [模型目录](/zh/advanced/configuration)中该提供商类型的模型列表。
+
+失败的提供商每隔 `PROVIDER_RECHECK_INTERVAL` 秒（默认 `60`）重新检查一次，一旦列表获取成功，实时列表就会替换临时列表。如果没有任何可用模型，请求会返回 `503`，以便客户端重试；
+`/health/ready` 会报告 `degraded` 并带有 `"models": "down"`，而实例仍保留在轮转中。
+
+如果要完全不依赖模型发现，请自行列出模型并设置
+`CONFIGURED_PROVIDER_MODELS_MODE=allowlist`：
+
+```bash
+export OPENAI_MODELS=gpt-6-sol,gpt-6-luna
+export CONFIGURED_PROVIDER_MODELS_MODE=allowlist
+```
+
+## 如果 GoModel 本身宕机
+
+在请求路径中加入网关，是用网关风险换取提供商风险，因此如实的数据比安慰性的说法更重要。
+
+GoModel 的故障是显性的，而不是静默的：宕机的实例会返回连接被拒绝，或由其前置组件返回 `502`，绝不会给出看似合理的错误答案。
+它是单个静态二进制文件，请求路径无状态，提供 `/health` 和
+`/health/ready` 探针，并在收到 `SIGTERM` 时进行 10 秒的优雅排空，因此滚动重启以及在负载均衡器后部署多个副本，现在就能正常工作。
+
+这次排空是一个截止时间，而不是完成保证：它针对的是能在十秒内真正完成的请求，超过时间仍未结束的请求——尤其是进行中的流——连接会被切断。对于长时间运行的流量，请在负载均衡器上排空连接，让新旧副本重叠运行足够长的时间以覆盖一次生成，并让客户端进行重试。
+
+以下状态按实例保存，因此不会在副本之间共享：熔断器状态、速率限制计数器、请求健康窗口以及会话保持。[生产环境指南](/zh/guides/production)介绍了这对您的拓扑意味着什么。
+
+如果 GoModel 宕机，而您需要立即恢复流量，可以将
+`base_url` 直接指回提供商——API 在两个方向上都兼容 OpenAI。在 GoModel 恢复之前，您将失去路由、故障转移和日志记录——而且，由于速率限制和预算检查运行在 GoModel 的请求路径中而非提供商的请求路径中，它们将完全不再起任何拦截作用。

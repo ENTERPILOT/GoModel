@@ -1,0 +1,70 @@
+---
+title: "Lizenz"
+description: "Die aktuelle Lizenz von GoModel und wie wir über die langfristige Tragfähigkeit des Projekts denken."
+icon: "scale"
+keywords: ["Lizenz", "license", "MIT", "open source", "Nachhaltigkeit", "sustainability"]
+---
+
+## Zusammenfassung
+
+GoModel wird unter der permissiven MIT-Lizenz veröffentlicht. Wir möchten das
+Projekt offen und praxistauglich halten — für Entwickler, kleine Teams und
+unabhängige Projekte.
+
+Zwei Einschränkungen:
+
+1. Eine kleine kommerzielle Distribution, [GoModel Pro](/de/pro/overview), ist in
+   Vorbereitung. Sie ergänzt OIDC-SSO und einige weitere Erweiterungen auf Basis
+   desselben Open-Source-Gateways; diese Erweiterungen sind separat lizenziert,
+   nicht unter MIT.
+2. Möglicherweise machen wir die Lizenz des Gateways selbst weniger permissiv,
+   um das Projekt vor der Ausbeutung durch große Cloud-Anbieter zu schützen.
+
+## Die ganze Geschichte
+
+Ein AI-Gateway ist Infrastruktur. Es sitzt zwischen jedem Request, den Ihre
+Anwendung stellt, und jedem Modell, mit dem sie kommuniziert. Eine solche
+Komponente sollte etwas sein, das Sie lesen, prüfen, erweitern und dem Sie
+vertrauen können. Deshalb ist GoModel heute Open Source.
+
+Wir möchten aber auch beim Rest des Gesamtbilds offen sein.
+
+### Schutz des Projekts
+
+Es gibt ein gut dokumentiertes Muster: Große Cloud-Anbieter übernehmen
+Open-Source-Infrastruktur, bieten sie als Managed Service an und geben nichts
+zurück. Andere Projekte waren deshalb gezwungen zu reagieren:
+
+- [MongoDB wechselte zur SSPL](https://www.mongodb.com/blog/post/mongodb-now-released-under-the-server-side-public-license),
+  nachdem AWS DocumentDB gestartet hatte, einen kompatiblen Managed Service, der
+  auf der Arbeit von MongoDB aufbaut.
+- [Elastic stellte auf eine Dual-Lizenz um](https://www.elastic.co/blog/licensing-change),
+  nachdem AWS einen eigenen Elasticsearch-Service unter dem Namen OpenSearch
+  gestartet hatte.
+- [Redis wechselte zu einer Source-Available-Lizenz](https://redis.io/blog/redis-adopts-dual-source-available-licensing/)
+  und nannte dabei ähnliche Bedenken gegenüber Cloud-Anbietern.
+
+Falls GoModel so weit wächst, dass dies zu einem realen Risiko wird, passen wir
+die Lizenz möglicherweise an, um diese Art der Ausbeutung zu verhindern.
+
+### Tragfähigkeit
+
+Mit GoModel verdienen wir unseren Lebensunterhalt, und bisher hat sich das
+Projekt nicht selbst getragen. Deshalb ist eine kommerzielle Distribution —
+[GoModel Pro](/de/pro/overview) mit OIDC-SSO und einigen weiteren Erweiterungen —
+auf dem Weg. Das Gateway steht unter der MIT-Lizenz und ist ohne kommerzielle
+Lizenz vollständig nutzbar; Pro richtet sich an Unternehmen, die direkt von dem Projekt
+profitieren, nicht an einzelne Entwickler oder kleine Teams, die damit arbeiten.
+
+Wenn Sie ein geplantes Pro-Feature benötigen und Pro für Sie nicht infrage kommt,
+sagen Sie es uns — eine günstigere Lizenz für die private Nutzung oder die
+Veröffentlichung dieses Features als Open Source ist verhandelbar. Die
+ausführlichere Antwort finden Sie in der [FAQ](/de/about/faq).
+
+<Card
+  title="Aktuelle Lizenz"
+  icon="scale"
+  href="https://github.com/ENTERPILOT/GoModel/blob/main/LICENSE"
+>
+  Die aktuelle Lizenz können Sie jederzeit hier nachlesen.
+</Card>

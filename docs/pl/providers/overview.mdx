@@ -1,0 +1,414 @@
+---
+title: "Obsługiwani providerzy LLM i ich konfiguracja"
+sidebarTitle: "Przegląd"
+description: "Providerzy AI obsługiwani przez GoModel i informacja, którzy z nich mają dedykowane przewodniki konfiguracji."
+icon: "list"
+keywords: ["providerzy AI", "AI providers", "obsługiwani providerzy", "supported providers", "providerzy LLM", "LLM providers", "lista providerów", "provider list", "konfiguracja providera", "configure provider"]
+---
+
+GoModel kieruje requesty kompatybilne z OpenAI do wielu providerów AI przez jeden
+gateway. W przypadku większości providerów cała konfiguracja sprowadza się do
+ustawienia klucza API. Strony w tej sekcji istnieją dla tych providerów, których
+konfiguracja **nie** polega wyłącznie na „ustaw klucz API” – uwierzytelnianie
+przez dane uwierzytelniające chmury, URL-e zależne od wdrożenia, wymagania
+dotyczące regionu lub projektu, równoległe API natywne i kompatybilne z OpenAI
+albo inne osobliwości.
+
+## Konfiguracja providerów bez zmiennych środowiskowych
+
+Każde z poniższych danych uwierzytelniających (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...)
+możesz zamiast tego ustawić na stronie **Providers** w dashboardzie
+administracyjnym (`/admin/dashboard`) – bez restartu. To najprostszy sposób na
+uruchomienie GoModel bez żadnych zmiennych środowiskowych providerów: uruchom
+gateway bez skonfigurowanych providerów (katalog startuje pusty; gateway i tak
+się uruchamia i serwuje dashboard), a następnie dodaj providerów z UI. Provider
+dodany w ten sposób od razu rejestruje się w działającym gatewayu.
+
+Providerzy zadeklarowani przez zmienne środowiskowe lub `config.yaml` zawsze mają
+pierwszeństwo: nazwa skonfigurowana w którykolwiek z tych sposobów jest w
+dashboardzie **tylko do odczytu** (oznaczona plakietką „Config”) – to ta sama
+zasada, którą GoModel stosuje już do serwerów MCP, modeli wirtualnych i limitów
+żądań. Klucze API i sekrety kont serwisowych są po zapisaniu maskowane (`***`) –
+edycja providera wysyła ponownie `***` dla wszystkiego, czego nie zmieniłeś, a
+gateway zachowuje zapisaną wartość. Wyłączenie providera (zamiast usunięcia)
+wyrejestrowuje go z routingu, ale zachowuje jego konfigurację. W formularzu
+dashboardu dostępna jest ta sama rotacja wielu kluczy, którą obsługują zmienne
+środowiskowe (`api_keys`, uporządkowana lista), oraz
+[proxy wychodzące](/pl/providers/outbound-proxy) per provider.
+
+## Obsługiwani providerzy
+
+Przykładowe identyfikatory modeli są poglądowe i mogą się zmienić; aktualne
+modele sprawdzaj w katalogach providerów. Kolumny funkcji odzwierciedlają
+obsługę API w gatewayu, a nie każdą możliwość poszczególnych modeli udostępnianą
+przez providera upstream.
+
+| Provider | Dane uwierzytelniające | Przykładowy model | Chat | `/responses` | Embed | Pliki | Batche | Passthru | Przewodnik |
+| -------- | ---------- | ------------- | :--: | :----------: | :---: | :---: | :-----: | :------: | ----- |
+| OpenAI | `OPENAI_API_KEY` | `gpt-5.5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Subskrypcja ChatGPT | `CHATGPT_API_KEY` (token logowania Codex) | `gpt-5.6-sol` | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | [Subskrypcja ChatGPT](/pl/providers/chatgpt) |
+| Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | [Anthropic](/pl/providers/anthropic) |
+| Cohere | `COHERE_API_KEY` | `command-a-plus-05-2026` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Cohere](/pl/providers/cohere) |
+| Google Gemini | `GEMINI_API_KEY` | `gemini-3.7-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | [Google Gemini](/pl/providers/gemini) |
+| Google Vertex AI | `VERTEX_PROJECT` + `VERTEX_LOCATION` + dane uwierzytelniające GCP | `google/gemini-2.5-flash` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | [Google Vertex AI](/pl/providers/vertex) |
+| DeepSeek | `DEEPSEEK_API_KEY` | `deepseek-v4-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [DeepSeek](/pl/providers/deepseek) |
+| DeepInfra | `DEEPINFRA_API_KEY` (`DEEPINFRA_BASE_URL` opcjonalnie) | `Qwen/Qwen3-32B` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [DeepInfra](/pl/providers/deepinfra) |
+| Groq | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | — |
+| Fireworks AI | `FIREWORKS_API_KEY` (`FIREWORKS_BASE_URL` opcjonalnie) | `accounts/fireworks/models/gpt-oss-120b` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
+| Chutes AI | `CHUTES_API_KEY` (`CHUTES_BASE_URL` opcjonalnie) | `Qwen/Qwen3-32B-TEE` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
+| Meta (Muse Spark) | `META_API_KEY` (`META_BASE_URL` opcjonalnie) | `muse-spark-1.1` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
+| OpenRouter | `OPENROUTER_API_KEY` | `google/gemini-2.5-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Kilo AI | `KILO_API_KEY` (`KILO_BASE_URL` opcjonalnie) | `anthropic/claude-sonnet-4.5` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
+| Eden AI | `EDENAI_API_KEY` (`EDENAI_BASE_URL` opcjonalnie) | `openai/gpt-4` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Eden AI](/pl/providers/edenai) |
+| Z.ai | `ZAI_API_KEY` (`ZAI_BASE_URL` opcjonalnie) | `glm-5.1` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
+| xAI (Grok) | `XAI_API_KEY` | `grok-4.6` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | [xAI (Grok)](/pl/providers/xai) |
+| Alibaba Cloud Model Studio (Bailian) | `BAILIAN_API_KEY` (`BAILIAN_BASE_URL` opcjonalnie) | `qwen3-max` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Alibaba Cloud Model Studio](/pl/providers/bailian) |
+| MiniMax | `MINIMAX_API_KEY` (`MINIMAX_BASE_URL` opcjonalnie) | `MiniMax-M3` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [MiniMax](/pl/providers/minimax) |
+| Xiaomi MiMo | `XIAOMI_API_KEY` (`XIAOMI_BASE_URL` opcjonalnie) | `mimo-v2.5-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [Xiaomi MiMo](/pl/providers/xiaomi) |
+| ElevenLabs (tylko głos) | `ELEVENLABS_API_KEY` (`ELEVENLABS_BASE_URL` opcjonalnie) | `eleven_multilingual_v2` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [ElevenLabs](/pl/providers/elevenlabs) |
+| audio.cpp (tylko audio) | `AUDIOCPP_BASE_URL` (`AUDIOCPP_API_KEY` opcjonalnie) | `pocket-tts` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [audio.cpp](/pl/providers/audiocpp) |
+| Jev / Kev (tylko decyzje) | `JEV_API_KEY` (`JEV_BASE_URL` opcjonalnie) | `jev-latest` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [Jev](/pl/providers/jev) |
+| OpenCode Go | `OPENCODE_GO_API_KEY` (`OPENCODE_GO_BASE_URL` opcjonalnie) | `glm-5.1` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [OpenCode Go](/pl/providers/opencode-go) |
+| Kimi Code | `KIMICODE_API_KEY` | `kimi-for-coding` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Kimi Code](/pl/providers/kimicode) |
+| Hetzner (eksperymentalny) | `HETZNER_API_KEY` (`HETZNER_BASE_URL` opcjonalnie) | `Qwen/Qwen3.6-35B-A3B-FP8` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [Hetzner](/pl/providers/hetzner) |
+| Azure OpenAI | `AZURE_API_KEY` + `AZURE_BASE_URL` (`AZURE_API_VERSION` opcjonalnie) | `gpt-5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Azure OpenAI](/pl/providers/azure) |
+| Oracle GenAI | `ORACLE_API_KEY` + `ORACLE_BASE_URL` | `openai.gpt-oss-120b` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Oracle GenAI](/pl/providers/oracle) |
+| Ollama | `OLLAMA_BASE_URL` | `llama3.2` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | [Ollama](/pl/providers/multiple-ollama) |
+| SGLang | `SGLANG_BASE_URL` (`SGLANG_API_KEY` opcjonalnie) | `Qwen/Qwen2.5-0.5B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [SGLang](/pl/providers/sglang) |
+| vLLM | `VLLM_BASE_URL` (`VLLM_API_KEY` opcjonalnie) | `meta-llama/Llama-3.1-8B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [vLLM](/pl/providers/vllm) |
+| llama.cpp / LM Studio | `LLAMACPP_BASE_URL` (`LLAMACPP_API_KEY` opcjonalnie) | `gemma-3-4b-it` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [llama.cpp](/pl/providers/llamacpp) |
+| llm-d | `LLMD_BASE_URL` (`LLMD_API_KEY` opcjonalnie) | `Qwen/Qwen2.5-0.5B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [llm-d](/pl/providers/llmd) |
+| Amazon Bedrock | `BEDROCK_BASE_URL` (region lub endpoint) + dane uwierzytelniające AWS | `anthropic.claude-3-5-haiku-20241022-v1:0` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Amazon Bedrock](/pl/providers/bedrock) |
+| Amazon Bedrock Mantle | `BEDROCK_MANTLE_API_KEY` lub dane uwierzytelniające AWS | `openai.gpt-5.6-sol` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Bedrock Mantle](/pl/providers/bedrock-mantle) |
+
+✅ Obsługiwane ❌ Nieobsługiwane
+
+## Uwagi dotyczące providerów
+
+- **Modele reasoningowe OpenAI** – dla modeli z serii o oraz GPT-5 i nowszych
+  (w tym GPT-6) GoModel wysyła `max_tokens` jako `max_completion_tokens` i
+  pomija `temperature` oraz `top_p`, chyba że `reasoning_effort` ma wartość
+  `"none"` (jedyny przypadek, w którym te modele je akceptują). OpenAI odrzuca
+  `stop` dla tych modeli, więc GoModel sam obcina wynik na pierwszej sekwencji
+  stop i raportuje ją w `stop_sequence`. `reasoning_effort`, którego model nie
+  akceptuje, jest zamieniany na najbliższy obsługiwany poziom (na przykład
+  `minimal` staje się `low` od GPT-5.1, a `max` staje się `xhigh`). Od GPT-5.6
+  OpenAI akceptuje function tools w Chat Completions tylko z
+  `reasoning_effort: "none"`, więc request z narzędziami bez ustawionego effort
+  dostaje `"none"`.
+- **Requesty OpenAI obsługiwane przez Responses** – niektórych requestów chat
+  (Chat Completions i `/v1/messages`) nie da się obsłużyć przez Chat Completions
+  OpenAI: function tools z reasoning effort w GPT-5.6+, dowolne wywołanie
+  narzędzia w GPT-6 Astra i GPT-6.1 (odrzucają `"none"`), wyniki narzędzi z
+  obrazami lub plikami (Chat Completions je akceptuje, ale model nigdy ich nie
+  widzi) oraz pliki podane przez URL. GoModel wysyła je do `/v1/responses` OpenAI
+  z `store: false` i zwraca zwykłe chat completion lub stream chunków. Request z
+  polem, które nie ma odpowiednika w Responses API (na przykład `n` lub
+  `logprobs`), pozostaje w Chat Completions.
+- **llm-d** – skieruj `LLMD_BASE_URL` na usługę Router/EPP i zadeklaruj
+  `LLMD_MODELS`, gdy trasa nie obsługuje `/v1/models`. Dedykowany provider
+  wstrzykuje zaufane nagłówki inference-objective i fairness według ścieżki
+  użytkownika.
+- **Z.ai GLM Coding Plan** – ustaw
+  `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`.
+- **Reasoning effort w Z.ai** – `reasoning.effort` (Chat Completions i
+  Responses) jest wysyłane jako `reasoning_effort` na najwyższym poziomie
+  requestu Z.ai. GLM-5.3 i GLM-5.3-Flash zawsze myślą i akceptują tylko `low`,
+  `high` i `max`, więc `none` i `minimal` są mapowane na `low`, `medium` na
+  `high`, a `xhigh` na `max`. Pozostałe modele GLM otrzymują poziom bez zmian.
+- **Reasoning i transkrypcje w Groq** – w rodzinach gpt-oss i qwen3 GoModel
+  domyślnie ustawia `reasoning_format` Groqa na `parsed`, więc chain of thought
+  trafia do `reasoning` zamiast jako tekst `<think>…</think>` wewnątrz
+  odpowiedzi. Aby to nadpisać, wyślij `reasoning_format` samodzielnie (`raw` lub
+  `hidden`). Z odpowiedzi JSON dla transkrypcji i tłumaczeń usuwane jest
+  specyficzne dla Groqa pole `x_groq`, aby pasowały do formatu OpenAI.
+- **Regiony MiniMax i aktualne modele tekstowe** – domyślny globalny endpoint to
+  `https://api.minimax.io/v1`; konta na platformie chińskiej powinny ustawić
+  `MINIMAX_BASE_URL=https://api.minimaxi.com/v1`. Aktualne ID modeli tekstowych
+  to `MiniMax-M3` (kontekst 1 000 000 tokenów; wejście tekstowe, obrazy i wideo)
+  oraz `MiniMax-M2.7` (kontekst 204 800 tokenów; wejście tekstowe). Ceny w USD za
+  milion tokenów: dla M3 0,60 $ za wejście, 2,40 $ za wyjście i 0,12 $ za wejście
+  z cache; dla M2.7 0,30 $ za wejście, 1,20 $ za wyjście, 0,06 $ za wejście z
+  cache i 0,375 $ za zapis do cache. M3 obsługuje thinking adaptacyjny lub
+  wyłączony; M2.7 zawsze myśli.
+- **Amazon Bedrock Mantle** – GPT-5.6 Sol, Terra i Luna akceptują w Mantle
+  wyłącznie Responses API. GoModel wysyła requesty `/v1/responses` bezpośrednio
+  do AWS i wybiera wymaganą ścieżkę upstream `/openai/v1/responses`.
+- **Fireworks AI** – ID modeli to ścieżki w zakresie konta, takie jak
+  `accounts/fireworks/models/gpt-oss-120b`; używaj ich dosłownie w requestach i w
+  `FIREWORKS_MODELS`.
+- **ElevenLabs** – provider wyłącznie głosowy: `/v1/audio/speech` (text-to-speech)
+  i `/v1/audio/transcriptions` (speech-to-text) są obsługiwane, ale chat,
+  `/v1/responses` i embeddingi nie (oznaczenia ❌ powyżej wynikają z tego, a nie z
+  ograniczeń gatewaya). Pole `voice` z OpenAI musi być voice_id ElevenLabs.
+  Obsługiwane formaty audio i modele speech-to-text opisuje
+  [przewodnik ElevenLabs](/pl/providers/elevenlabs).
+- **Chutes AI** – domyślnie używa `https://llm.chutes.ai/v1` i wykrywa aktualne
+  ID modeli, limity kontekstu, możliwości i ceny z bieżącego katalogu. GoModel
+  tłumaczy requesty `/v1/responses` na chat completions; współdzielony endpoint
+  LLM Chutes nie udostępnia embeddingów. Obsługa passthrough wymaga jawnego
+  włączenia przez operatora – dodania `chutes` do
+  `ENABLED_PASSTHROUGH_PROVIDERS`.
+- **Meta (Muse Spark)** – Meta Model API jest kompatybilne z OpenAI; ustaw
+  `META_API_KEY` i kieruj requesty do `muse-spark-1.1`. Modeli Muse Spark nie ma
+  jeszcze w katalogu modeli upstream, więc jeśli chcesz śledzić koszty i
+  raportować okno kontekstu, zadeklaruj `context_window` i `pricing` w metadanych
+  `providers.meta.models` w `config.yaml`.
+- **Kilo AI** – ID modeli mają postać `provider/model` (na przykład
+  `anthropic/claude-sonnet-4.5`) i są przekazywane bez zmian. GoModel obsługuje
+  `/v1/responses`, tłumacząc je na endpoint chat-completions Kilo. Jeśli inny
+  skonfigurowany provider udostępnia to samo surowe ID modelu, wybierz Kilo
+  jawnie przez `kilo/anthropic/claude-sonnet-4.5`; przed przekazaniem GoModel
+  usuwa tylko zewnętrzny kwalifikator routingu `kilo/`.
+- **Eden AI** – ID modeli mają postać `provider/model` (na przykład `openai/gpt-4`)
+  i są przekazywane bez zmian; wybierz Eden jawnie przez
+  `edenai/openai/gpt-4`, gdy inny skonfigurowany provider udostępnia to samo
+  surowe ID. GoModel wykrywa katalog Eden, okna kontekstu, możliwości i ceny za
+  token z własnego `/v3/models` Eden, więc nie ma wbudowanej listy modeli, a nowe
+  modele Eden nie wymagają aktualizacji. Koszt pojedynczego requestu pochodzi z
+  dokładnej wartości `cost` w USD, którą Eden zwraca w każdej odpowiedzi, a nie z
+  wyliczeń na podstawie tokenów. GoModel obsługuje `/v1/responses`, tłumacząc je
+  na endpoint chat-completions Eden – własne `/v3/responses` Eden to inne API i
+  nigdy nie jest używane. Zobacz [przewodnik Eden AI](/pl/providers/edenai).
+- **Xiaomi MiMo** – TTS (`mimo-v2.5-tts*`) i ASR (`mimo-v2.5-asr`) są obsługiwane
+  przez `/v1/audio/speech` i `/v1/audio/transcriptions` (tłumaczone na dialekt
+  audio chat-completions MiMo), a także bezpośrednio przez chat completions; aby
+  uzyskać kontekst 1M, dopisz `[1m]` do ID modelu i dodaj je do `XIAOMI_MODELS`.
+- **OpenCode Go (OpenCode Zen)** – routing per model: większość modeli używa
+  `/chat/completions` w stylu OpenAI, a modele obsługujące wyłącznie `/messages`
+  (domyślnie `qwen3.7-max`, nadpisz przez `OPENCODE_GO_MESSAGES_MODELS`) są
+  wysyłane do natywnego endpointu Anthropic. Do requestów chat bez parametru
+  reasoning wstrzykiwane jest `reasoning_effort: "low"`, bo niektóre modele
+  zawsze myślą i odrzucają requesty, które go pomijają (nadpisz przez
+  `OPENCODE_GO_DEFAULT_REASONING_EFFORT`). Ustaw `OPENCODE_GO_API_KEY`; base URL
+  domyślnie to `https://opencode.ai/zen/go/v1`.
+- **Subskrypcja ChatGPT** – obsługuje wyłącznie `/v1/responses`, rozliczane z
+  limitu planu ChatGPT, a nie z kredytów API. Upstream akceptuje ścisłą listę
+  dozwolonych parametrów i działa tylko w trybie streamingu; GoModel dostosowuje
+  requesty i składa stream w całość dla wywołań bez streamingu. Ustaw
+  `CHATGPT_API_KEY` na token dostępu z `codex login`. Raportowany koszt nie jest
+  faktycznym wydatkiem: te ID modeli istnieją też na OpenAI Platform, więc
+  rejestr przypisuje ich ceny za token do ruchu w ramach subskrypcji o stałej
+  opłacie – nie stosuj do niego budżetów ani load balancingu `cost`.
+- **Kimi Code** – brak cen za token; limit odnawia się co tydzień i jest dodatkowo
+  ograniczony kroczącym oknem 5-godzinnym. Śledzenie kosztów użycia raportuje
+  zero dla Kimi Code, więc load balancing `cost` nie może go wycenić; preferuj
+  zachowawcze strategie retry.
+- **Hetzner (eksperymentalny)** – Hetzner określa API inferencji jako
+  eksperymentalne: spodziewaj się zmian łamiących kompatybilność i braku SLA.
+  Katalog modeli i okna limitów żądań zmieniają się w trakcie eksperymentu;
+  odpytuj bieżący endpoint `/v1/models` i oficjalną dokumentację zamiast polegać
+  na zrzutach. Przykładowe ID modelu w tabeli powyżej
+  (`Qwen/Qwen3.6-35B-A3B-FP8`) to wpis z oficjalnej dokumentacji Hetznera z
+  2026-08-17 i w chwili czytania może być inne. W fazie eksperymentalnej usługa
+  jest bezpłatna, więc śledzenie kosztów użycia raportuje zero, a load balancing
+  `cost` nie może jej wycenić. Brak endpointu embeddingów; tylko chat,
+  `/v1/responses` (przez chat), lista modeli i passthrough. Passthrough to ogólny
+  mechanizm przekazywania – ✅ oznacza możliwość adaptera; tolerancja Hetznera na
+  dowolne ścieżki upstream nie jest zweryfikowana, dopóki API jest
+  eksperymentalne. `hetzner` znajduje się na domyślnej liście
+  `ENABLED_PASSTHROUGH_PROVIDERS`, więc trasy `/p/hetzner/...` działają bez
+  włączania przez operatora; usuń go z listy, aby je zablokować.
+- **Skonfigurowane listy modeli** – dostępne dla każdego providera przez
+  `<PROVIDER>_MODELS`, na przykład
+  `OPENROUTER_MODELS=openai/gpt-oss-120b,anthropic/claude-sonnet-4` lub
+  `ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3`. DeepSeek domyślnie używa
+  `https://api.deepseek.com`; ustaw `DEEPSEEK_BASE_URL` tylko wtedy, gdy używasz
+  kompatybilnego proxy lub alternatywnego endpointu DeepSeek. Domyślnie
+  `CONFIGURED_PROVIDER_MODELS_MODE=fallback` używa tych list tylko wtedy, gdy
+  `/models` upstreamu jest niedostępne lub puste. Ustaw
+  `CONFIGURED_PROVIDER_MODELS_MODE=allowlist`, aby udostępniać tylko
+  skonfigurowane modele dla providerów, które definiują listę, z pominięciem
+  wywołań `/models` w ich upstreamie.
+- **Filtry modeli** – zawężaj duży katalog wzorcem glob lub ceną zamiast
+  wymieniać modele jeden po drugim: `OPENROUTER_MODEL_FILTER_INCLUDE=*:free`
+  zostawia tylko darmowe modele OpenRouter, a
+  `<PROVIDER>_MODEL_FILTER_MAX_PRICE_PER_MTOK` ogranicza, do czego provider może
+  kierować requesty. Zobacz
+  [Filtrowanie modeli providera](/pl/advanced/config-yaml#filtrowanie-modeli-providera).
+- **Kategorie modeli (chat, embeddingi, audio)** – kategoria modelu wynika z jego
+  `modes`, ustalanych z czterech źródeł w kolejności pierwszeństwa: zdalny
+  rejestr modeli, metadane operatora zadeklarowane w `providers.<name>.models` w
+  `config.yaml` (np. `modes: [embedding]`), sygnały możliwości z listy modeli
+  samego providera (Gemini `supportedGenerationMethods`, Cohere `endpoints`,
+  modalności architektury OpenRouter, możliwości z `/api/show` w Ollama) i na
+  końcu zachowawcze sprawdzenie nazwy dla modeli wciąż niesklasyfikowanych: ID
+  zawierające `embed` lub pasujące do znanych rodzin modeli embeddingowych
+  (`bge`, `e5`, `gte`, `minilm`) są kategoryzowane jako modele do embeddingów, a
+  ID zawierające `rerank` – jako modele do rerankingu; w przypadku ID z
+  przestrzenią nazw, takich jak `org/model`, sprawdzany jest ostatni segment
+  ścieżki. Deklaruj metadane operatora tylko wtedy, gdy model po tym wszystkim
+  pozostaje niesklasyfikowany. Kategorie wpływają tylko na grupowanie w
+  dashboardzie; `/v1/embeddings` kieruje requesty do dowolnego modelu
+  obsługiwanego przez providera niezależnie od kategorii.
+- **vLLM** – ustaw `VLLM_API_KEY` tylko wtedy, gdy serwer upstream uruchomiono z
+  `--api-key`.
+- **audio.cpp** – `AUDIOCPP_BASE_URL` jest wymagane (domyślny port
+  audiocpp_server koliduje z portem 8080 samego GoModel, więc nie ma wartości
+  domyślnej); `AUDIOCPP_API_KEY` zwykle nie jest ustawiane, bo audio.cpp nie ma
+  własnego uwierzytelniania. Tylko audio: kierowane są do niego
+  `/v1/audio/speech` i `/v1/audio/transcriptions`, a jego trasy szczegółów,
+  wyrównania i streamingu na żywo są dostępne przez passthrough. Zobacz
+  [audio.cpp](/pl/providers/audiocpp).
+- **Jev / Kev** – System One API od TypeSafe to API decyzyjne (na wejściu stan i
+  typowane pytania, na wyjściu skalibrowane prawdopodobieństwa). GoModel
+  przekazuje je natywnie, bez tłumaczenia, pod `POST /v1/systemone` (z modelami
+  wirtualnymi, guardrails, audytem i użyciem) oraz przez passthrough pod
+  `/p/jev/...`, a także odpowiada nim na [Decisions API](/pl/advanced/decisions-api)
+  OpenAI pod `POST /v1/decisions`, tłumacząc w obie strony. `/v1/decisions` jest
+  dostępne po skonfigurowaniu providera `openai`, `jev` lub `openrouter`, a
+  `/v1/systemone` po skonfigurowaniu providera `jev` lub `openrouter`; OpenRouter
+  obsługuje Jev natywnie, a jego modele decyzyjne są wymienione jako modele
+  użytkowe (utility). `JEV_API_KEY` konfiguruje hostowane API; dla self-hosted
+  serwera Kev, który obsługuje to samo API bez uwierzytelniania, ustaw
+  `JEV_BASE_URL` i pozostaw klucz nieustawiony. Zobacz [Jev](/pl/providers/jev).
+- **llama.cpp / LM Studio** – `LLAMACPP_BASE_URL` jest wymagane (domyślny port
+  llama-server koliduje z portem 8080 samego GoModel, więc nie ma wartości
+  domyślnej); `LLAMACPP_API_KEY` jest opcjonalne. Nie rejestruj tych serwerów
+  jako `ollama`, bo ten typ używa natywnego API Ollamy. Zobacz
+  [llama.cpp](/pl/providers/llamacpp).
+- **llm-d** – `LLMD_BASE_URL` jest wymagane. `LLMD_API_KEY` jest opcjonalne i jest
+  wysyłane tylko wtedy, gdy Gateway przed Routerem wymaga uwierzytelniania bearer.
+- **SGLang** – ustaw `SGLANG_API_KEY` tylko wtedy, gdy serwer upstream uruchomiono
+  z `--api-key`; w przeciwnym razie wystarczy `SGLANG_BASE_URL`.
+- **Wiele kluczy API dla jednego providera** – ustaw `OPENAI_API_KEY_2`,
+  `OPENAI_API_KEY_3` itd., aby rozłożyć sesje na wiele kluczy, zachowując każdą
+  rozmowę na jednym kluczu ze względu na powinowactwo prompt cache. Zobacz
+  [Rotacja kluczy API](/pl/providers/key-rotation).
+- **Wiele instancji jednego typu providera** – bez `config.yaml` użyj zmiennych
+  środowiskowych z sufiksem, takich jak `OPENAI_EAST_API_KEY` i
+  `OPENAI_EAST_BASE_URL`; dodaj `OPENAI_EAST_MODELS`, aby skonfigurować listę
+  modeli tej instancji. To rejestruje providera `openai-east` typu `openai`.
+  Vertex AI stosuje ten sam wzorzec sufiksów – `VERTEX_US_PROJECT` rejestruje
+  providera `vertex-us`. Zmienne środowiskowe projektu i lokalizacji Vertex muszą
+  pasować do prefiksu instancji: dla instancji z sufiksem, takiej jak
+  `VERTEX_US_PROJECT`, ustaw też `VERTEX_US_LOCATION` i wszystkie inne ustawienia
+  z sufiksem dla tej instancji zamiast ogólnych `VERTEX_PROJECT` /
+  `VERTEX_LOCATION`. `VERTEX_AUTH_TYPE` domyślnie używa Application Default
+  Credentials (`gcp_adc`).
+
+## Co GoModel normalizuje w odpowiedziach
+
+GoModel zwraca jeden format każdego pola niezależnie od tego, który provider
+odpowiedział, a wszystko inne przekazuje dokładnie tak, jak wysłał to provider.
+
+- **Tekst reasoningu** wraca jako `reasoning_content`, w `choices[].message` i
+  w streamowanych `choices[].delta`. Groq zwraca go jako `reasoning`; GoModel
+  zmienia nazwę, więc ten sam kod klienta odczytuje chain of thought z Groq,
+  DeepSeek, Anthropic, Cohere i vLLM.
+- **Pola specyficzne dla vendora nie są usuwane.** `x_groq` z Groqa i jego czasy
+  użycia `queue_time` / `prompt_time` / `completion_time` oraz
+  `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens` z DeepSeek docierają do
+  klienta nietknięte – dzięki temu passthrough masz dostęp do natywnych dodatków
+  providera bez czekania na release GoModel. Jeśli chcesz pisać kod niezależny od
+  providera, odczytuj cache hity z przenośnego
+  `usage.prompt_tokens_details.cached_tokens`. Zobacz
+  [ADR-0011](https://github.com/ENTERPILOT/GoModel/blob/main/docs/adr/0011-field-forwarding-on-translated-paths.md).
+- **Streamy zawierają końcowe `usage`, nawet jeśli o nie nie prosisz.** Przy
+  włączonym śledzeniu użycia GoModel dodaje `stream_options.include_usage` do
+  każdego requestu ze streamingiem, aby móc wycenić wywołanie, a chunk z użyciem
+  od providera jest przekazywany bez zmian; własne API OpenAI pomija użycie,
+  dopóki klient o nie nie poprosi. Większość providerów wysyła je jako osobny
+  końcowy chunk z pustą tablicą `choices`, DeepSeek dołącza je do ostatniego
+  chunka z treścią. Zignoruj to pole albo ustaw
+  `ENFORCE_RETURNING_USAGE_DATA=false`, aby GoModel przestał o nie prosić –
+  kosztem braku rekordów użycia dla streamowanych requestów u providerów, które
+  raportują użycie tylko na żądanie.
+
+## Dlaczego niektórzy providerzy mają dedykowane strony
+
+To providerzy, z którymi użytkownicy najczęściej mają problemy:
+
+- **Google Vertex AI** – wymaga projektu GCP, regionu oraz Application Default
+  Credentials albo klucza JSON konta serwisowego.
+- **Amazon Bedrock** – nie ma własnego klucza API; używa łańcucha danych
+  uwierzytelniających AWS i wymaga jawnego dostępu do modeli w konsoli Bedrock.
+- **Azure OpenAI** – base URL-e w zakresie wdrożenia, parametr zapytania
+  `api-version` i nagłówek `api-key` zamiast `Authorization: Bearer`.
+- **Oracle GenAI** – wymaga polityki OCI IAM dla `generativeaiapikey` i
+  regionalnego URL-a endpointu kompatybilnego z OpenAI.
+- **Google Gemini (AI Studio)** – dwa tryby routingu (natywny `generateContent`
+  i kompatybilny z OpenAI) z różną obsługą wejścia w postaci obrazów.
+- **Anthropic** – reasoning effort jest mapowany na adaptive thinking i kontrolę
+  effort w Claude, które różnią się między generacjami modeli.
+- **DeepSeek** – osobliwości mapowania reasoning effort dla DeepSeek V4.
+- **Ollama / SGLang / vLLM** – hosting modeli lokalnych z opcjonalną konfiguracją
+  wielu instancji przez zmienne środowiskowe z sufiksem i ID modeli z prefiksem
+  providera.
+- **Xiaomi MiMo** – tryb thinking domyślnie włączony, sufiks kontekstu `[1m]` oraz
+  TTS/ASR działające przez chat completions zamiast natywnych endpointów audio.
+- **OpenCode Go** – OpenCode Zen dzieli modele między `/chat/completions` w stylu
+  OpenAI i natywne dla Anthropic `/messages`; GoModel kieruje requesty per model
+  (zestaw modeli obsługujących wyłącznie `/messages` jest utrzymywany ręcznie,
+  domyślnie `qwen3.7-max`).
+- **Subskrypcja ChatGPT** – upstream obsługujący wyłącznie Responses, ze ścisłą
+  listą dozwolonych parametrów, używany do postawienia GoModel między Codexem a
+  planem ChatGPT.
+
+<Tip>
+  Każda strona providera pokazuje w jednym CodeGroup trzy sposoby uruchamiania:
+  Docker z `--env-file .env` (zalecany), Docker z flagami `-e` w linii poleceń
+  oraz gotową binarkę z `make build`. Gdy masz więcej niż kilka zmiennych,
+  skopiuj `.env.template`, uzupełnij potrzebne wartości i używaj tego samego
+  pliku zarówno dla Dockera, jak i dla natywnej binarki.
+</Tip>
+
+Providerzy bez dedykowanej strony (OpenAI, Groq, Fireworks AI, Meta,
+OpenRouter, Kilo AI, Z.ai, xAI, MiniMax) działają według tego samego schematu:
+ustaw klucz API (i opcjonalnie base URL tam, gdzie jest obsługiwany), uruchom
+GoModel i kieruj requesty według ID modelu. Pełna dokumentacja referencyjna
+zmiennych środowiskowych znajduje się w sekcji [Konfiguracja](/pl/advanced/configuration).
+
+## Status providerów
+
+Dashboard administracyjny (`/admin/dashboard`) pokazuje bieżący status każdego
+skonfigurowanego providera w sekcji **Providers Overview** na stronie
+**Overview**.
+
+<img
+  src="/providers/provider-status.png"
+  alt="Sekcja Providers Overview w dashboardzie GoModel z kartą openai w stanie Degraded pokazującą niedziałający model oraz kartą vllm w stanie Healthy"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+Plakietka statusu na każdej karcie łączy dwa sygnały – **wykrywanie modeli** (czy
+da się pobrać listę modeli providera?) i **zdrowie requestów** (czy prawdziwe
+requesty przez gateway kończą się powodzeniem?). Sygnały z prawdziwego ruchu mogą
+tylko pogorszyć status i nigdy nie maskują błędu wykrywania modeli. Najedź na
+plakietkę, aby zobaczyć powód klasyfikacji i ostatni błąd.
+
+| Plakietka | Znaczenie |
+| ---- | ------- |
+| `Healthy` | Wykrywanie modeli się powiodło, a ostatni ruch (jeśli był) wygląda dobrze |
+| `Starting` | Skonfigurowany i oczekuje na pierwsze wykrycie modeli |
+| `Configured` | Skonfigurowany, ale nie udostępnia jeszcze żadnych modeli |
+| `Degraded` | Ostatnie requesty do konkretnego modelu ciągle kończą się błędem **lub** wszyscy providerzy jednocześnie zwracają błędy, a nadal obsługiwana jest poprzednia lista modeli |
+| `Recovering` | Circuit breaker jest w stanie półotwartym i sprawdza, czy provider wrócił do działania |
+| `Circuit Open` | Circuit breaker jest otwarty; ruch do providera jest wstrzymany |
+| `Offline` | Ostatnie odświeżenie lub sprawdzenie dostępności nie powiodło się; modele providera są ukryte na liście modeli do czasu jego powrotu |
+| `Unhealthy` | Wykrywanie modeli nie powiodło się i żadne modele nie są dostępne |
+
+Rozwiń kartę (pasek ze strzałką na dole albo przełącznik **Show Details** dla
+całej sekcji), aby zobaczyć szczegóły zdrowia requestów:
+
+- **Recent Requests** – requesty i błędy przez gateway w ciągu ostatnich
+  10 minut.
+- **Breaker State** – bieżący stan circuit breakera providera
+  (zobacz [Odporność na awarie](/pl/advanced/resilience#circuit-breaker-a-stan-providerów-w-dashboardzie)).
+- **Models (Recent Traffic)** – liczba requestów i błędów per model. Model z co
+  najmniej 3 błędami stanowiącymi połowę lub więcej jego requestów w danym oknie
+  jest oznaczany na czerwono – pozwala to wychwycić pojedynczy zepsuty model u
+  providera, który poza tym działa poprawnie, czego samo wykrywanie modeli nie
+  zauważy. Najedź na wiersz, aby zobaczyć ostatni komunikat błędu modelu.
+  Odpowiedź `200` bez choices, bez outputu lub bez użycia tokenów również liczy
+  się tu jako błąd.
+
+Śledzenie zdrowia requestów jest pasywne: obserwuje ruch, który Twoi klienci już
+wysyłają (własne testy w tle gatewaya – wykrywanie modeli i sprawdzanie
+dostępności – są wykluczone), więc nieużywany provider po prostu nie pokazuje
+żadnych ostatnich requestów. Liczniki są przechowywane w pamięci każdej instancji
+gatewaya i zerują się po restarcie.
+
+Te same dane są dostępne jako JSON pod `GET /admin/providers/status` do
+skryptów i zewnętrznego monitoringu.
