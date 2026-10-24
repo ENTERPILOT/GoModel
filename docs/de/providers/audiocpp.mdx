@@ -1,0 +1,211 @@
+---
+title: "audio.cpp"
+description: "Routen Sie Sprach- und Transkriptions-Requests von GoModel zu einem lokalen audio.cpp-Server, einschließlich seiner nativen Routen für Details, Alignment und Live-Streaming."
+icon: "audio-lines"
+keywords: ["audio.cpp", "audiocpp_server", "text-to-speech", "Text-to-Speech", "TTS", "speech-to-text", "Speech-to-Text", "ASR", "lokale Modelle", "local models", "self-hosted", "GGUF"]
+---
+
+[audio.cpp](https://github.com/0xShug0/audio.cpp) ist ein lokaler
+C++-Inferenzserver für Audio auf Basis von `ggml`: Text-to-Speech, Speech-to-Text,
+Alignment, Diarisierung, Separation und mehr, über 80+ Modellfamilien hinweg.
+GoModel hat dafür einen eigenen Provider-Typ `audiocpp`.
+
+Es handelt sich um einen reinen Audio-Provider. `/v1/audio/speech` und
+`/v1/audio/transcriptions` werden zu ihm geroutet; Chat, `/responses` und
+`/v1/embeddings` liefern `invalid_request_error`, weil `audiocpp_server` keine
+solchen Endpunkte hat.
+
+Starten Sie zuerst den Server mit einer Konfiguration, die die bereitgestellten
+Modelle benennt:
+
+```json
+{
+  "host": "127.0.0.1",
+  "port": 8099,
+  "backend": "metal",
+  "lazy_load": true,
+  "models": [
+    {"id": "moonshine-tiny", "family": "moonshine_asr", "path": "/models/moonshine-streaming-tiny-q8_0.gguf", "task": "asr", "mode": "streaming"},
+    {"id": "pocket-tts", "family": "pocket_tts", "path": "/models/pocket-tts", "task": "tts", "mode": "offline"}
+  ]
+}
+```
+
+```bash
+audiocpp_server --config server.json --no-ui
+```
+
+## Konfiguration
+
+Die Basis-URL ist erforderlich und registriert den Provider — der Standardport von
+`audiocpp_server` (8080) kollidiert mit dem von GoModel, daher gibt es keinen
+Standardwert:
+
+```bash
+AUDIOCPP_BASE_URL=http://host.docker.internal:8099
+GOMODEL_MASTER_KEY=change-me
+```
+
+`AUDIOCPP_API_KEY` ist optional und in der Regel nicht gesetzt: audio.cpp hat keine
+eigene Authentifizierung. Setzen Sie ihn nur, wenn ein Reverse Proxy vor dem Server
+ein Bearer-Token erwartet.
+
+<Note>
+  Diese Beispiele gehen davon aus, dass GoModel in Docker läuft und audio.cpp auf
+  dem Host — daher `host.docker.internal`. Läuft GoModel direkt auf dem Host,
+  verwenden Sie `http://localhost:8099`. Ein abschließendes `/v1` wird akzeptiert
+  und entfernt, sodass beide Schreibweisen denselben Server ansprechen. Sie
+  betreiben mehrere Instanzen? Registrieren Sie jede unter einem Namen mit Suffix:
+  `AUDIOCPP_GPU_BASE_URL=...` erzeugt den Provider `audiocpp-gpu`.
+</Note>
+
+## Überprüfen
+
+```bash
+curl -s http://localhost:8080/v1/audio/speech \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -o speech.wav \
+  -d '{"model": "audiocpp/pocket-tts", "input": "Reply with exactly ok.", "voice": "alba"}'
+
+curl -s http://localhost:8080/v1/audio/transcriptions \
+  -H "Authorization: Bearer change-me" \
+  -F model=audiocpp/moonshine-tiny \
+  -F file=@speech.wav
+```
+
+## Stimmen sind audio.cpp-Namen, keine OpenAI-Namen
+
+`voice` benennt ein Stimm-Preset von audio.cpp, eine gecachte Voice-ID oder eine
+WAV-Datei in der konfigurierten Stimmbibliothek — audio.cpp hat keinen festen
+Stimmensatz, daher bedeuten OpenAIs `alloy`/`nova`/… für audio.cpp nichts. Welche
+Stimmen ein Modell anbietet, listen Sie mit
+`GET /p/audiocpp/audio/voices?model=<id>` auf.
+
+`voice` ist bei `/v1/audio/speech` erforderlich, wie in der OpenAI-API. Damit
+audio.cpp stattdessen das konfigurierte `default_voice_preset` eines Modells
+anwendet, rufen Sie die Route über Passthrough auf: `POST /p/audiocpp/audio/speech`.
+
+Parameter für das Klonen von Stimmen (`voice_ref`, `reference_text`, `seed`,
+`max_tokens`, `options`, …) werden unverändert weitergeleitet, sodass die eigenen
+Request-Felder von audio.cpp über den Standard-Endpunkt funktionieren — mit einer
+Ausnahme: eine `voice_ref`, die einen serverseitigen Pfad benennt (siehe unten):
+
+```bash
+curl -s http://localhost:8080/v1/audio/speech \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -o cloned.wav \
+  -d '{
+    "model": "audiocpp/indextts2",
+    "input": "Cloned from an inline reference.",
+    "voice": "alba",
+    "voice_ref": {"type": "base64", "data": "UklGRh..."},
+    "reference_text": "Transcript of the reference audio."
+  }'
+```
+
+## Audioformate
+
+Die Synthese liefert WAV zurück, unabhängig davon, welches `response_format`
+angefordert wurde, es sei denn, der Server wurde mit dem MP3-Frontend-Modul gebaut.
+Die Response wird mit dem Typ gekennzeichnet, den audio.cpp tatsächlich
+zurückgegeben hat (`audio/wav`), nicht mit dem angeforderten.
+
+Uploads für Transkriptionen müssen WAV sein; der Server lehnt andere Container ab,
+es sei denn, er wurde mit dem Frontend-Modul `audio_decode` gebaut, das MP3 und FLAC
+hinzufügt.
+
+## Transkribieren ohne Upload
+
+audio.cpp kann Audio auch von dem Rechner lesen, auf dem es läuft, und seine
+Live-Route überträgt rohes PCM ganz ohne Datei. Keine dieser beiden Formen wird auf
+`/v1/audio/transcriptions` angeboten: Beide lassen den Aufrufer bestimmen, was der
+audio.cpp-Host liest bzw. wie lange er ein Modell belegt, und die Berechtigung für
+ein Modell ist keine Berechtigung für eines davon. Sie bleiben auf der unten
+beschriebenen nativen Oberfläche, die ein Betreiber bewusst aktiviert und nur
+vertrauenswürdigen Aufrufern zugänglich macht.
+
+Aus demselben Grund muss eine `voice_ref` auf `/v1/audio/speech` Inline-Audio als
+Base64 enthalten; `{"type": "path"}` und ein reiner Pfad-String werden abgelehnt und
+sind nur über Passthrough verfügbar.
+
+## Streaming
+
+Für ein Modell, das mit `"mode": "streaming"` konfiguriert ist, liefert
+`stream=true` die OpenAI-artigen Transkript-Events von audio.cpp
+(`transcript.text.delta`, `transcript.text.done`, `[DONE]`). GoModel gibt den
+Event-Stream unverändert weiter, liest ihn aber zuvor vollständig ein; das verkürzt
+also durchgängig nichts — erst die unten beschriebene *Live*-Route gibt Text aus,
+während der Sprecher noch spricht.
+
+```bash
+curl -s http://localhost:8080/v1/audio/transcriptions \
+  -H "Authorization: Bearer change-me" \
+  -F model=audiocpp/moonshine-tiny \
+  -F file=@speech.wav \
+  -F stream=true
+```
+
+## Native Endpunkte
+
+Die Routen von audio.cpp ohne OpenAI-Entsprechung sind über
+[Passthrough](/de/features/passthrough-api) unter `/p/audiocpp/...` erreichbar,
+sobald ein Betreiber dies explizit aktiviert:
+
+```bash
+ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,...,audiocpp
+```
+
+Anders als bei den meisten Provider-Typen ist dies standardmäßig nicht aktiviert:
+Diese Oberfläche ist undurchsichtig, ein Request, der sie erreicht, wird also nicht
+gegen die Modell-Allowlist des Aufrufers geprüft, und audio.cpp stellt dort
+Modellverwaltung (`/models/load`, `/tasks/unload_models`) und serverlokale
+Dateipfade bereit. Aktivieren Sie sie nur für vertrauenswürdige Aufrufer.
+
+Das Präfix `/v1` ist optional (`/p/audiocpp/audio/voices` und
+`/p/audiocpp/v1/audio/voices` sind dieselbe Route); `/health` wird vom Server-Root
+bereitgestellt.
+
+| Route | Was sie ergänzt |
+| --- | --- |
+| `POST /p/audiocpp/audio/transcriptions/details` | Wort-Zeitstempel, Segmente und Sprecherwechsel, die die einfache Transkriptions-Response weglässt |
+| `POST /p/audiocpp/audio/transcriptions/live` | Rohes PCM in Chunks hinein, Transkript-Events heraus, über eine einzige Verbindung |
+| `POST /p/audiocpp/audio/speech/live` | Die Live-Ingest-Variante für Speech-to-Speech |
+| `POST /p/audiocpp/audio/alignments` | Forced Alignment von bekanntem Text gegen Audio |
+| `GET /p/audiocpp/audio/voices?model=<id>` | Die Stimmen, die ein TTS-Modell anbietet |
+| `POST /p/audiocpp/tasks/run` | Der generische Framework-Request von audio.cpp für Aufgaben ohne OpenAI-Endpunkt (Separation, VAD, Diarisierung, Musik) |
+| `GET /p/audiocpp/health` | Bereitschaft des Servers und Anzahl der konfigurierten Modelle |
+
+Die Live-Route transkribiert Sprache bereits während der Aufnahme — es gibt keine
+Datei, und das Audio muss nie auf der Festplatte existieren:
+
+```bash
+ffmpeg -f avfoundation -i ":0" -ar 16000 -ac 1 -f s16le - \
+  | curl -sN -X POST -H 'Expect:' \
+      -H "Authorization: Bearer change-me" \
+      -T - \
+      'http://localhost:8080/p/audiocpp/audio/transcriptions/live?model=moonshine-tiny&sample_rate=16000&channels=1&sample_format=s16le'
+```
+
+`-T -` sorgt dafür, dass es live bleibt: `--data-binary @-` liest stdin vollständig
+ein, bevor die Verbindung geöffnet wird, und macht die Aufnahme damit wieder zu
+einem Datei-Upload. Ob Teiltext *während* der Aufnahme erscheint, ist eine
+Eigenschaft des Modells, nicht der Route.
+
+## Modell-Metadaten
+
+`GET /v1/models` meldet, was audio.cpp über jedes konfigurierte Modell angibt:
+
+- **Family** — die Modellfamilie von audio.cpp (`pocket_tts`, `moonshine_asr`, …).
+- **Mode** — `audio_speech` für ein `tts`-Modell und `audio_transcription` für ein
+  `asr`-Modell. Modelle, die für andere Aufgaben registriert sind (`align`,
+  Diarisierung, Separation, …), bleiben ohne Modus gelistet: GoModel hat keinen
+  Endpunkt, zu dem es sie routen könnte; sie werden stattdessen über Passthrough
+  erreicht.
+- **Capabilities** — `streaming` für ein Modell, das mit `"mode": "streaming"`
+  konfiguriert ist.
+
+Das sind Standardwerte, keine Festlegungen: Alles, was Sie in den Modell-Metadaten
+des Providers deklarieren, hat Vorrang — siehe
+[Modell-Metadaten](/de/advanced/model-metadata).

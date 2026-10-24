@@ -1,0 +1,200 @@
+---
+title: "SGLang"
+description: "Routuj kompatybilne z OpenAI requesty GoModel do jednego lub wielu self-hosted serwerów SGLang."
+icon: "server"
+keywords: ["SGLang", "self-hosted", "modele Hugging Face", "serwer kompatybilny z OpenAI", "Hugging Face models", "OpenAI-compatible server"]
+---
+
+GoModel komunikuje się z SGLang przez jego kompatybilne z OpenAI API `/v1` i udostępnia
+natywne endpointy SGLang przez passthrough providera. Identyfikatory modeli Hugging Face
+zawierające ukośniki działają, ponieważ GoModel dzieli selektory kwalifikowane providerem
+tylko na pierwszym ukośniku.
+
+Najpierw uruchom SGLang:
+
+```bash
+python -m sglang.launch_server \
+  --model-path Qwen/Qwen2.5-0.5B-Instruct \
+  --host 0.0.0.0 \
+  --port 30000
+# Dodaj --api-key token-abc123, jeśli serwer ma wymagać uwierzytelniania bearer.
+```
+
+Aktualne opcje uruchamiania i opcje specyficzne dla akceleratorów znajdziesz w
+[dokumentacji API SGLang kompatybilnego z OpenAI](https://docs.sglang.io/docs/basic_usage/openai_api_completions).
+
+## Konfiguracja
+
+```bash
+SGLANG_BASE_URL=http://host.docker.internal:30000/v1   # uwzględnij /v1
+# SGLANG_API_KEY=token-abc123                          # tylko z --api-key
+GOMODEL_MASTER_KEY=change-me
+```
+
+<Note>
+  Te przykłady zakładają, że GoModel działa w Dockerze, a SGLang na hoście. Jeśli
+  oba działają w tej samej sieci Docker lub Kubernetes, użyj nazwy usługi
+  SGLang. Jeśli GoModel działa bezpośrednio na hoście, użyj
+  `http://localhost:30000/v1`.
+</Note>
+
+## Uruchomienie GoModel
+
+<CodeGroup>
+
+```bash Docker (plik .env)
+docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
+```
+
+```bash Docker (inline -e)
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e SGLANG_BASE_URL="http://host.docker.internal:30000/v1" \
+  enterpilot/gomodel
+```
+
+```bash Binary (make build)
+make build
+./bin/gomodel
+```
+
+</CodeGroup>
+
+## Weryfikacja
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "sglang/Qwen/Qwen2.5-0.5B-Instruct",
+    "messages": [{"role": "user", "content": "Reply with exactly ok."}],
+    "max_tokens": 8
+  }'
+```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="change-me")
+
+completion = client.chat.completions.create(
+    model="sglang/Qwen/Qwen2.5-0.5B-Instruct",
+    messages=[{"role": "user", "content": "Reply with exactly ok."}],
+    max_tokens=8,
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "change-me",
+});
+
+const completion = await client.chat.completions.create({
+  model: "sglang/Qwen/Qwen2.5-0.5B-Instruct",
+  messages: [{ role: "user", content: "Reply with exactly ok." }],
+  max_tokens: 8,
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
+
+`GET /v1/models` zwraca identyfikatory modeli SGLang poprzedzone nazwą providera, na
+przykład `sglang/Qwen/Qwen2.5-0.5B-Instruct`.
+
+## Wiele instancji SGLang
+
+Użyj zmiennych środowiskowych z sufiksem, aby zarejestrować więcej niż jedną instancję bez
+YAML:
+
+```bash
+SGLANG_BASE_URL=http://host.docker.internal:30000/v1
+SGLANG_TEST_BASE_URL=http://host.docker.internal:30001/v1
+```
+
+To rejestruje `sglang` i `sglang-test`. Sufiks jest zamieniany na małe litery,
+a podkreślenia stają się myślnikami.
+
+## Natywny passthrough
+
+Passthrough jest domyślnie włączony. Endpointy SGLang względne wobec katalogu głównego, takie jak
+`/generate`, są wysyłane bez skonfigurowanego prefiksu `/v1`:
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/p/sglang/generate \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Hello",
+    "sampling_params": {"max_new_tokens": 8}
+  }'
+```
+
+```python Python
+import httpx
+
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="change-me")
+generation = client.post(
+    "/p/sglang/generate",
+    cast_to=httpx.Response,
+    body={
+        "text": "Hello",
+        "sampling_params": {"max_new_tokens": 8},
+    },
+)
+
+print(generation.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "change-me",
+});
+
+const generation = await client.post("/p/sglang/generate", {
+  body: {
+    text: "Hello",
+    sampling_params: { max_new_tokens: 8 },
+  },
+});
+
+console.log(generation);
+```
+
+</CodeGroup>
+
+Zachowaj jawny segment `v1/` dla endpointów SGLang, które go zawierają, takich jak
+`/v1/rerank` czy `/v1/tokenize`:
+
+```text
+/p/sglang/v1/rerank
+/p/sglang/v1/tokenize
+```
+
+GoModel usuwa autoryzację klienta przed przekazaniem requestu i dołącza
+`SGLANG_API_KEY`, gdy jest skonfigurowany.
+
+## Uwagi o możliwościach
+
+- Chat completions, streaming, listowanie modeli, Responses i embeddingi używają
+  API SGLang kompatybilnego z OpenAI.
+- Embeddingi i funkcje specyficzne dla modelu zależą od modelu załadowanego przez SGLang.
+- Natywne interfejsy batchy, plików i cyklu życia zapisanych odpowiedzi nie są jeszcze
+  udostępniane jako typowane możliwości providera w GoModel; używaj passthrough tam, gdzie
+  zainstalowana wersja SGLang je obsługuje.

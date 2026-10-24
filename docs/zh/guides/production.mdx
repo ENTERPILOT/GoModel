@@ -1,0 +1,325 @@
+---
+title: "生产环境部署"
+description: "GoModel 生产级部署检查清单：存储后端、凭据处理、离线隔离安装、多副本行为、数据保留和安全加固。"
+icon: "server-cog"
+keywords: ["生产环境", "production", "部署", "deployment", "自托管", "self-hosted", "离线隔离", "air-gapped", "离线", "offline", "Kubernetes", "安全加固", "hardening", "安全", "security"]
+---
+
+本页汇总了在生产环境中运行 GoModel 的最佳实践。[快速开始](/zh/getting-started/quickstart)可以让您在一分钟内开始处理流量；
+本页则介绍在该安装承载真实负载之前需要做出的决策。
+
+每一节都会说明默认值、默认值何时适用，以及何时应该修改。文末附有一份精简的[检查清单](#生产环境检查清单)。
+
+## 小巧到可以在任何地方运行
+
+GoModel 是一个没有运行时依赖的单一静态 Go 二进制文件。它使用 `CGO_ENABLED=0` 构建，并基于 `distroless/static` 发布，
+因此容器中没有 shell、没有包管理器，也没有需要打补丁的 libc。
+
+| | GoModel |
+| --- | --- |
+| 容器镜像（压缩后） | `14 MB` |
+| 负载下的峰值内存 | `60 MB` |
+| 冷启动 | `0.76 s` |
+
+以上数据来自[基准测试](/zh/about/benchmarks)页面，是在相同硬件上与其他网关对比测得的。
+
+实际意义在于，GoModel 可以轻松运行在对体积和冷启动有要求的环境中：Cloud Run、Fargate、Container Apps、Fly.io、容器化 Lambda，
+或与您的应用部署在同一台小型虚拟机上。它不需要专用的节点池。
+
+<Warning>
+  缩容至零和自动扩缩容环境会改变两件事。本地磁盘是临时的，因此 SQLite 在这类环境中不是有效的后端（请参阅[存储](#选择存储后端)）；
+  此外，若干基于内存的控制项会按运行中实例的数量成倍放大（请参阅[多副本](#运行多个副本)）。
+</Warning>
+
+## 选择存储后端
+
+GoModel 通过 `STORAGE_TYPE` 持久化审计日志、用量记录、预算、虚拟模型、托管 API 密钥及其他管理状态。
+
+| 后端 | `STORAGE_TYPE` | 适用场景 |
+| --- | --- | --- |
+| SQLite（默认） | `sqlite` | 单实例，并具有持久的本地磁盘或已挂载的卷。 |
+| PostgreSQL | `postgresql` | 多于一个副本，或您已经在运维 Postgres。生产环境的常规选择。 |
+| MongoDB | `mongodb` | 您已经在运维 MongoDB，且更倾向于使用它而非 Postgres。 |
+
+SQLite 是默认选项，使 GoModel 无需任何配置即可运行；对于挂载了持久卷的单实例，它也是真正可用于生产环境的选择。
+它省去了一次网络跳转，也少了一个需要运维的组件。
+
+在两种情况下它不再适用：多于一个副本，以及文件系统在重启后无法保留的任何运行时。两个 SQLite 副本不会共享数据库，
+而是各自拥有自己的数据库，因此用量、预算和托管 API 密钥会悄无声息地出现分歧。在一个 Pod 上创建的密钥在另一个 Pod 上并不存在。
+
+此外，SQLite 在设计上只使用单个打开的连接，以保持单一写入者并避免锁竞争。每次审计日志刷新、用量刷新和预算检查都要通过它串行执行，
+这在持续负载下会成为吞吐量上限。
+
+对于 Postgres，`POSTGRES_MAX_CONNS` 默认为 `10`。如果您在启用预算或速率限制的情况下运行高并发负载，请首先调高该值。
+
+<Warning>
+  **Docker 镜像没有声明卷。** 默认数据库路径在镜像内解析为 `/app/data/gomodel.db`，这是一个镜像层目录。如果没有显式挂载卷，
+  每当容器被替换时，所有审计日志、用量记录、预算、托管 API 密钥和已存储的凭据都会丢失。请始终在 `/app/data` 挂载卷，或改用 Postgres/MongoDB。
+  网关在启动时检测到这种情况会记录一条警告，仓库中的 `docker-compose.yaml` 也已在该位置挂载了 `gomodel_data` 卷。
+</Warning>
+
+如果二进制文件旁已存在 `./data` 目录，默认 SQLite 路径为 `./data/gomodel.db`；否则使用操作系统的用户数据目录。
+这使得默认路径依赖于工作目录，因此在生产环境中请显式设置 `SQLITE_PATH`。解析后的路径会在启动时以
+`storage configured` 打印出来。请参阅 [GoModel 将数据存储在哪里？](/zh/about/faq#gomodel-在哪里存储数据？)。
+
+### Redis
+
+Redis 是可选的。它用于支撑共享的模型目录快照和精确[响应缓存](/zh/features/cache)。没有 Redis 时，GoModel 使用进程内缓存加本地文件缓存，
+这种方式是正确的，但不会在副本之间共享。当多个副本需要共享模型发现结果和缓存命中时，请添加 Redis。
+
+<Note>
+  如果配置了 Redis 模型缓存，而 Redis 在**启动时**不可达，网关将无法启动。之后与 Redis 断开连接只会导致降级状态。
+  在安排服务启动顺序时请考虑这一点。
+</Note>
+
+Redis 不负责协调速率限制或预算。它是缓存，而不是分布式锁。
+
+## 提供商凭据
+
+GoModel 可以从环境变量、`config.yaml` 或控制台的 Providers 页面获取提供商凭据。三种方式都可行，但风险并不相同。
+
+**在生产环境中，请通过环境变量配置提供商，并由您的 Secret（密钥）管理器提供这些值。** 可以使用 AWS Secrets Manager、
+Google Secret Manager、Azure Key Vault、HashiCorp Vault，或由 External Secrets Operator 或 Secrets Store CSI driver
+填充的 Kubernetes Secret 来注入它们。
+
+原因有两个，而第二个常常被忽视。
+
+**Secret 不会进入数据库。** 从控制台保存的提供商凭据会持久化到 `provider_credentials` 存储中，MCP 服务器请求头和护栏 Secret
+也会持久化到各自的存储中。除非设置了 `GOMODEL_ENCRYPTION_KEY`，否则它们以明文存储：`***` 掩码仅在读取路径上应用，
+因此任何拿到数据库文件、备份、快照或只读副本的人都能读取存储的值。设置密钥后，它们会被静态加密（请参阅[静态数据加密](/zh/advanced/encryption-at-rest)），
+但此时需要保护并妥善保存该密钥。通过环境变量或 `config.yaml` 声明的凭据则根本不会写入存储。
+
+**在配置中声明的提供商无法在运行时编辑。** 在环境变量或 `config.yaml` 中声明的提供商在控制台中为只读。而存储在数据库中的提供商，
+任何持有具备控制台权限的密钥的人都可以编辑，包括其 `base_url`。将 `base_url` 改指向攻击者控制的主机，会悄无声息地把每条提示词和注入的上游密钥都重定向过去。
+以代码方式声明提供商意味着此类变更只能通过您的部署流水线进行。
+
+<Warning>
+  环境变量的安全性取决于其来源。写死在 `Dockerfile`、已提交的 `.env` 或 compose 文件中的密钥比控制台更糟，而不是更好。
+  关键在于，该值应在运行时由负责其轮换、访问控制和审计记录的 Secret 管理器提供。
+
+  环境变量还可以通过 `/proc/<pid>/environ`、`docker inspect` 和崩溃转储被看到，因此请限制谁可以 exec 进入容器或 describe Pod。
+</Warning>
+
+如果您的 Secret 工具以文件形式挂载，请使用 [Secret 引用](/zh/advanced/secret-references)将设置指向该文件，而不是将其复制到环境变量中：
+
+```bash
+OPENAI_API_KEY='${file:/run/secrets/openai}'
+POSTGRES_URL='${file:/run/secrets/postgres-url}'
+```
+
+无法解析的引用会导致启动中止，而失败的重新加载会保留当前运行的配置。直接从 HashiCorp Vault、AWS Secrets Manager、
+GCP Secret Manager 或 Azure Key Vault 读取 Secret 的功能由 [GoModel Pro](/zh/pro/overview) 提供。
+
+对于开发、评估以及无需重新部署即可添加提供商的场景，控制台方式仍然是合适的选择。如果在生产环境中使用它，请设置
+`GOMODEL_ENCRYPTION_KEY`，并且仍应将数据库视为敏感数据：加密卷、限制访问，并对备份进行相应分级。
+
+### 其他凭据处理
+
+- **托管 API 密钥**以高熵随机 Secret 的 SHA-256 哈希形式存储，永远无法还原。明文仅在创建时显示一次。这与提供商凭据的处理方式刻意不同。
+- **客户端凭据请求头在持久化之前会被脱敏。** 当设置 `LOGGING_LOG_HEADERS=true` 时，`Authorization`、`x-api-key`、`Cookie`
+  及其他凭据请求头会在写入路径上被替换为 `[REDACTED]`，因此审计存储永远不会收到它们。
+- **设置 `GOMODEL_MASTER_KEY`。** 如果它为空且不存在任何托管密钥，所有请求都会在未经认证的情况下放行，并且 `/admin/*`
+  会被加入认证跳过列表，作为锁定后的恢复路径。处于这种状态且可从互联网访问的网关，会把完整的 Admin API 交给任何人。
+
+### TLS
+
+GoModel 不负责终止 TLS。它提供纯 HTTP 服务，并期望前面部署反向代理或负载均衡器。对于任何不仅限于回环地址的部署，都请部署一个：
+否则客户端 API 密钥、托管网关密钥和主密钥都会以明文在网络上传输。
+
+此外，GoModel 没有 CORS 中间件，因此其他源上的浏览器客户端无法直接调用网关。如有需要，请在代理上添加相应的响应头。
+
+### 私有 CA 签发的上游证书
+
+出站 HTTPS（提供商和 MCP 服务器）会使用系统 CA 证书包进行校验。容器镜像已包含该证书包（`/etc/ssl/certs/ca-certificates.crt`），
+因此公共端点无需任何设置。
+
+如果上游证书由内部或企业 CA 签发，连接会失败并报 `x509: certificate signed by unknown authority`。请将 CA 证书挂载到受信任目录中，
+GoModel 会在公共根证书之外额外读取该目录：
+
+```bash
+docker run --rm -p 8080:8080 \
+  -v "$PWD/corp-ca.crt:/etc/ssl/certs/corp-ca.crt:ro" \
+  enterpilot/gomodel:latest
+```
+
+`SSL_CERT_FILE` 同样可用，但它会替换证书包文件而不是向其中追加，因此请将其指向一个同时包含您所需公共根证书的证书包。
+
+## 离线隔离与离线部署
+
+**GoModel 可以在完全离线隔离（air-gapped）的环境中运行。** 没有遥测、没有分析，也没有许可证检查。管理控制台内嵌在二进制文件中，
+其字体也已随附，因此界面不会加载任何 CDN 资源。搭配 [Ollama](/zh/providers/multiple-ollama)、[SGLang](/zh/providers/sglang)
+或 [vLLM](/zh/providers/vllm) 等本地模型服务器时，网关无需任何通往公共互联网的路由。
+
+默认情况下，网关只会发出两种不面向已配置提供商的出站调用，一个开关即可同时关闭两者：
+
+```bash
+GOMODEL_OFFLINE=true
+```
+
+| 调用 | 作用 | 默认 |
+| --- | --- | --- |
+| 访问 `GOMODEL_VERSION_CHECK_URL` 的[更新检查](/zh/advanced/version-awareness) | 每天获取最新的发布版本号，附带匿名安装 ID | 开启 |
+| 访问 `MODEL_LIST_URL` 的[模型目录](/zh/advanced/model-metadata) | 定价、上下文窗口和能力信息，在启动时及每次缓存刷新时获取 | 开启 |
+
+`GOMODEL_OFFLINE=true`（或 `config.yaml` 中的 `offline: true`）会禁用更新检查，并丢弃所有 HTTP 目录 URL。它在所有其他设置之后应用，
+因此 `config.yaml` 或环境变量中的任何内容都无法在其之下重新启用出站调用。对已配置提供商的调用，以及对您自行声明的任何服务
+（例如 OTLP 采集器、MCP 上游或向量存储）的调用不受影响。启动日志会确认该模式。
+
+您也可以通过 `GOMODEL_VERSION_CHECK_ENABLED=false` 和 `MODEL_LIST_URL=off` 分别控制这两种调用。
+
+目录获取是尽力而为的。当它被关闭或失败时，网关会正常启动，`/health` 和 `/health/ready` 返回 `200`，提供商模型发现仍然有效，
+因为模型列表来自各提供商自己的 `/models` 端点，请求也会正常路由。您失去的是元数据补充。
+
+<Warning>
+  没有元数据补充时，模型**没有定价**。此时成本追踪不会报告任何成本；由于[预算](/zh/features/budgets)从用量成本记录中读取支出，
+  预算将无从扣费，也就无法执行支出限制。
+</Warning>
+
+在离线隔离环境中保留定价有以下三种方式：
+
+1. **以文件形式提供目录。** 在隔离环境之外下载 `models.min.json`，复制进来，并将网关指向它。本地文件只会被读取而不会被下载，
+   因此在 `GOMODEL_OFFLINE=true` 下依然有效：
+
+   ```bash
+   MODEL_LIST_URL=/etc/gomodel/models.json   # 或 file:///etc/gomodel/models.json
+   ```
+
+   每次缓存刷新时都会重新读取该文件，因此在磁盘上替换它即可更新定价，无需重启。
+2. **建立镜像。** 在内部 HTTP 主机上提供该文件，并将 `MODEL_LIST_URL` 设置为该 URL。不要设置 `GOMODEL_OFFLINE`，
+   并单独禁用更新检查，或者同样将 `GOMODEL_VERSION_CHECK_URL` 指向内部镜像。
+3. 在 `config.yaml` 的 `providers.<name>.models[].metadata.pricing` 下**按模型声明定价**。
+
+<Note>
+  将 `MODEL_LIST_URL` 设置为空字符串**不会**禁用下载：空的环境变量值会被跳过，因此默认 URL 依然生效。请使用 `off` 或 `GOMODEL_OFFLINE=true`。
+</Note>
+
+如果配置了 Bedrock 提供商，AWS SDK 还可能探测链路本地实例元数据端点（`169.254.169.254`）以获取凭据。离线隔离安装通常不会配置
+Bedrock，但了解这一点仍有必要。
+
+## 运行多个副本
+
+请求处理是无状态的，因此普通流量不需要副本亲和性。不过，有若干功能会将状态保存在进程内存中，且不会在实例之间协调。
+
+| 状态 | 范围 | N 个副本时的影响 |
+| --- | --- | --- |
+| [预算](/zh/features/budgets)执行 | 持久化（数据库） | 跨副本正确。支出从共享的用量表中读取。 |
+| [用量和成本记录](/zh/features/cost-tracking) | 持久化（数据库） | 汇总正确。 |
+| 审计日志 | 持久化（数据库） | 跨副本完整。 |
+| [速率限制](/zh/features/rate-limits) | 内存中，按实例 | 实际限制约为配置限制的 `N x`。计数器在重启时重置。 |
+| 熔断器 | 内存中，按进程 | 每个副本各自感知故障，因此在任何熔断器打开之前，上游最多会看到 `N x failure_threshold` 次失败。 |
+| [会话亲和性](/zh/features/session-keeping)绑定 | 内存中，按实例 | 会话按副本保持，而非全局保持，除非负载均衡器启用了会话保持。 |
+| 实时日志缓冲区 | 内存中，按实例 | 已连接的控制台只能看到该副本的实时流量，约为总量的 `1/N`。历史记录仍来自数据库。 |
+| MCP 下游会话 | 内存中，按实例 | 来自一个副本的 `Mcp-Session-Id` 在另一个副本上会返回 404。[MCP](/zh/features/mcp-gateway) 客户端需要会话保持。 |
+| 提供商请求健康状态 | 内存中，按实例 | 控制台中的提供商状态反映的是应答请求的那个副本。 |
+
+最容易让人意外的是速率限制：它是进程内控制，因此三个副本配合 100 rpm 的规则，总计最多可放行 300 rpm。请按单个副本设定规则，
+并使用[预算](/zh/features/budgets)作为持久化的跨实例控制，因为预算从共享数据库中读取。
+
+### 配置变更不会立即传播
+
+管理端托管的配置持久化在数据库中，但每个副本都是从内存快照中提供服务的。在控制台中保存的变更会立即更新处理该请求的副本。
+其他副本按各自的刷新节奏获取变更，其中有两类配置根本没有刷新机制。
+
+| 在控制台中修改的内容 | 到达其他副本所需时间 |
+| --- | --- |
+| 预算定义 | **仅在重启后** |
+| 速率限制规则 | **仅在重启后** |
+| 虚拟模型（包括故障转移链） | 最长 `CACHE_REFRESH_INTERVAL`（默认 1 小时） |
+| 托管 API 密钥 | 最长 60 秒 |
+| 护栏、工作流、定价覆盖 | 约 60 秒 |
+
+<Warning>
+  其中两项对运维影响较大。**吊销托管 API 密钥后，可能需要最长一分钟才能在其他副本上生效。** 此外，**在控制台中创建的预算或速率限制规则在其他副本重启之前不会到达这些副本**，
+  因此在三个副本的情况下，新预算最初只约束三分之一的流量。
+
+  如果您运行多个副本，请在 `config.yaml` 或环境变量中以代码方式声明预算和速率限制，使它们在启动时被一致地加载，并在控制台变更后重启。
+</Warning>
+
+### 健康探测与关闭
+
+GoModel 分别提供存活和就绪检查，二进制文件还可以自我探测，这在没有 shell 或 `curl` 的 distroless 镜像中同样适用。
+
+| 用途 | HTTP | CLI | 检查内容 |
+| --- | --- | --- | --- |
+| 存活 | `GET /health` | `gomodel --health` | 不检查任何依赖。仅确认监听器有响应。 |
+| 就绪 | `GET /health/ready` | `gomodel --ready` | 存储（不可用时返回 503）、Redis（降级，仍返回 200）、扩展组件（降级：200，不可用：503）。 |
+
+请将 Kubernetes 就绪探针指向 `/health/ready`，而不是 `/health`。仓库 `helm/` 目录中的 Helm chart 已经这样配置，它会以镜像的非 root
+用户在只读文件系统上运行网关，将 SQLite 保存在持久卷上，并且在您将 `storage.type` 切换为 `postgresql` 或 `mongodb` 之前拒绝多于一个副本。
+相关取值请参阅 `helm/README.md`。
+
+<Note>
+  就绪检查不会等待模型目录加载完成，目录是异步加载的。新的 Pod 可能在 `GET /v1/models` 仍为空时就报告就绪，导致最初的请求失败。
+  请在发布设置中考虑这一点，或在切换流量之前预热 Pod。
+</Note>
+
+收到 `SIGTERM` 后，网关会用 10 秒排空进行中的 HTTP 工作，然后在 30 秒内完成清理，并在退出过程中刷新缓冲的用量和审计条目。
+这两个超时都不可配置。进行中的流式响应会在第 10 秒时被中断，因此滚动部署期间正在进行的长补全会被截断。请将
+`terminationGracePeriodSeconds` 设置为大于 30（45 是一个合理的选择），以免清理过程与 SIGKILL 竞争。
+
+## 数据保留与磁盘增长
+
+审计日志和用量追踪会为每个请求写入一行，并且两者每小时清理一次。
+
+| 设置 | 默认值 | 说明 |
+| --- | --- | --- |
+| `LOGGING_RETENTION_DAYS` | `30` | 早于该天数的审计条目会被删除。 |
+| `USAGE_RETENTION_DAYS` | `90` | 早于该天数的用量记录会被删除。 |
+| `LOGGING_LOG_BODIES` | `true` | 捕获完整的请求体和响应体，每个最大 1 MB。 |
+
+<Warning>
+  `LOGGING_LOG_BODIES` 默认开启，会存储完整的提示词和响应体，且不做任何内容脱敏。它非常适合调试，也是迄今为止数据库增长的最大来源：
+  每个请求最多约 2 MB，保留 30 天。这也意味着用户在提示词中输入的任何敏感内容都会在整个保留期内被持久化。
+
+  在受监管的环境中，或提示词中包含个人数据的任何场景下，请设置 `LOGGING_LOG_BODIES=false`，仅保留元数据审计记录。
+</Warning>
+
+在大流量下还有两点需要注意：
+
+- **当缓冲区写满时，用量和审计写入会被丢弃，而不是阻塞。** 突发流量或缓慢的数据库可能会悄无声息地丢失用量条目，
+  这意味着成本数据丢失和预算扣费不足。唯一的信号是日志中的 `usage log buffer full` 警告，因此请针对它设置告警。
+- **预算检查会在每个请求上查询用量表。** 启用预算时请将 `USAGE_RETENTION_DAYS` 设置得尽量小，并优先使用 Postgres 而非 SQLite，
+  因为 SQLite 的单连接会使这部分成为主要开销。
+
+数据保留会删除行，但不会缩小 SQLite 文件。如果文件大小很重要，请单独执行 VACUUM。
+
+## 可观测性
+
+- **指标默认关闭。** 设置 `METRICS_ENABLED=true` 可在 `METRICS_ENDPOINT`（`/metrics`）暴露 Prometheus 指标。该端点无需认证，
+  因此请将其保留在您的网络边界之内。请参阅 [Prometheus 指南](/zh/guides/prometheus-metrics)。
+- **OpenTelemetry 导出默认关闭。** 设置 `OTEL_ENABLED=true` 和 `OTEL_EXPORTER_OTLP_ENDPOINT`，即可将 Trace 和 GenAI 指标发送到您的采集器。
+  请参阅 [OpenTelemetry 指南](/zh/guides/opentelemetry)。
+- **当 stdout 不是 TTY 时，日志会自动采用 JSON 格式**，因此容器无需任何配置即可获得结构化日志。如需覆盖，请显式设置 `LOG_FORMAT`。
+  `LOG_LEVEL` 默认为 `info`；无效值会导致启动失败。
+- **`gomodel_circuit_breaker_state`** 是用于提供商健康告警的计量指标。它按请求更新，因此空闲的提供商会保持其最后一次观测到的值。
+- **流式响应的请求时长衡量的是建立流所需的时间**，而不是整个流的持续时间。阅读流式延迟面板时请注意这一点。
+- **Prometheus 中没有 Token 或成本指标。** 支出和 Token 统计保存在用量数据库、控制台和 [`GET /v1/usage`](/zh/advanced/usage-api) 中。
+  请基于预算而不是 Prometheus 设置支出告警。
+
+## 安全加固说明
+
+- **将管理入口置于您的网络边界之后。** 控制台和 `/admin/*` 与模型 API 在同一端口上提供服务，且无法迁移到单独的监听器。
+  请在代理或网络层面限制对它们的访问，或使用 `ADMIN_ENDPOINTS_ENABLED=false` 将其禁用。控制台外壳及其静态资源在设计上跳过认证；
+  只有它们加载的数据受到保护。
+- **限制数据库文件的访问权限。** SQLite 数据目录以 `0755` 创建，数据库文件使用默认权限，因此在共享主机上可能对所有人可读。
+  请以专用用户身份运行 GoModel 并收紧权限，尤其是在通过控制台存储了任何凭据的情况下。
+- **将 `BODY_SIZE_LIMIT` 保持在合理范围。** 它默认为 `10M`，用于防止超大请求体成为耗尽内存的攻击途径。无法解析的值会回退到默认值，
+  且只会给出一条警告，因此请检查拼写。
+- **保持 `STREAM_STALL_TIMEOUT` 开启。** 它默认为 `60` 秒，当客户端打开流后停止读取时，它负责释放该客户端占用的 goroutine 和上游提供商连接。
+  禁用它（`0`）会让此类客户端一直占用这两者，直到提供商侧的 `HTTP_TIMEOUT` 到期。
+- **保持 `pprof` 禁用。** 它默认关闭，开启时无需认证。
+- **限定托管 API 密钥的作用域。** 为每个使用方分配独立的密钥及其独立的[用户路径](/zh/features/user-path)，这也是实现按使用方速率限制和预算的前提。
+  仅在需要时授予 `dashboard_access` 和 [`passthrough_access`](/zh/features/passthrough-api#访问控制)。
+
+## 生产环境检查清单
+
+- 将 `GOMODEL_MASTER_KEY` 设置为强密码值。
+- 在网关前面的代理中终止 TLS。
+- 在网络边界限制对 `/admin/*`、控制台和 `/metrics` 的访问。
+- 多于一个副本或使用任何临时文件系统时，请使用 Postgres 或 MongoDB；使用 SQLite 时，请挂载卷并设置 `SQLITE_PATH`。
+- 在环境变量或 `config.yaml` 中声明提供商，其值来自 Secret 管理器。
+- 运行多个副本时，以代码方式声明预算和速率限制，并按单个副本设定速率限制规则。
+- 明确决定 `LOGGING_LOG_BODIES` 的取值，并有意识地设置数据保留期。
+- 将就绪检查指向 `/health/ready`，并将 `terminationGracePeriodSeconds` 设置为大于 30。
+- 启用指标，并针对 `gomodel_circuit_breaker_state` 和 `usage log buffer full` 设置告警。
+- 对于离线隔离安装，请设置 `GOMODEL_OFFLINE=true`，然后以文件形式提供模型目录，或在配置中声明模型定价，以确保成本追踪和预算继续工作。
