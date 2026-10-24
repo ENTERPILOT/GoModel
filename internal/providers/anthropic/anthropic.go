@@ -38,7 +38,7 @@ const (
 	// with `claude setup-token`). Anthropic only authorizes these credentials
 	// for Claude Code-shaped traffic; they authenticate with a Bearer header
 	// plus the oauth beta instead of x-api-key.
-	oauthTokenPrefix = "sk-ant-oat"
+	oauthTokenPrefix = "sk-ant-oat" //nolint:gosec // G101: token prefix used for detection, not a credential.
 	oauthBetaFlag    = "oauth-2025-04-20"
 
 	anthropicBetaHeader = "anthropic-beta"
