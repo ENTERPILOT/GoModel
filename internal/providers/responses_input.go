@@ -97,6 +97,9 @@ func convertResponsesInputItems(items []any) ([]core.Message, error) {
 		}
 
 		if image, ok := responsesInputGeneratedImage(item); ok {
+			if image.ImageURL == nil {
+				continue
+			}
 			if pendingAssistant == nil {
 				pendingAssistant = &core.Message{Role: "assistant", Content: ""}
 			}

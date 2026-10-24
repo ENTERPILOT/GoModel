@@ -48,7 +48,7 @@ func TestNativeChatResponse_ImageOnlyResponsesOutput(t *testing.T) {
 	resp, err := nativeChatResponse(&core.ChatRequest{Model: "gemini-2.5-flash-image"}, &geminiResp, "gemini")
 	require.NoError(t, err)
 	require.Len(t, resp.Choices, 1)
-	assert.Equal(t, "", resp.Choices[0].Message.Content)
+	assert.Empty(t, resp.Choices[0].Message.Content)
 
 	output := providers.ConvertChatResponseToResponses(resp).Output
 	require.Len(t, output, 1)
@@ -174,4 +174,16 @@ func TestNativeChatResponse_ImageSignatureRoundTripsThroughResponses(t *testing.
 	require.NotNil(t, parts[1].InlineData)
 	assert.Equal(t, "aW1n", parts[1].InlineData.Data)
 	assert.Equal(t, "sig-image", parts[1].ThoughtSignature)
+}
+
+func TestConvertResponsesInput_SkipsImageWithoutResult(t *testing.T) {
+	messages, err := providers.ConvertResponsesInputToMessages([]any{
+		map[string]any{"role": "user", "content": "draw"},
+		map[string]any{"type": "image_generation_call", "status": "failed"},
+		map[string]any{"role": "user", "content": "again"},
+	})
+	require.NoError(t, err)
+	require.Len(t, messages, 2)
+	assert.Equal(t, "user", messages[0].Role)
+	assert.Equal(t, "user", messages[1].Role)
 }
