@@ -17,7 +17,6 @@ import {
   providerCredentialKeysToRows,
   providerCredentialKeyRowsToArray,
   suggestProviderCredentialName,
-  splitCommaList,
   providerCredentialRowToForm,
   resetProviderCredentialFields,
   validateProviderCredentialForm,
@@ -69,7 +68,7 @@ test("buildProviderCredentialPayload sends a normalized PUT payload on create", 
     type: "openai",
     api_keys: [{ value: " sk-live-123 " }],
     base_url: " https://api.openai.com/v1 ",
-    models: " gpt-4o, gpt-4o-mini ,,",
+    models: [{ value: " gpt-4o" }, { value: "" }, { value: "gpt-4o-mini, gpt-4o " }],
     enabled: true,
   };
 
@@ -136,7 +135,7 @@ test("changing type drops the values the new type does not render", () => {
     api_keys: [{ value: "sk-live" }],
     vertex_project: "left-over",
     service_account_json: '{"type":"service_account"}',
-    models: "gpt-4o",
+    models: [{ value: "gpt-4o" }],
   };
 
   const form = resetProviderCredentialFields(
@@ -149,7 +148,7 @@ test("changing type drops the values the new type does not render", () => {
   // Identity and the fields OpenAI does render survive.
   assert.equal(form.name, "my-openai");
   assert.equal(form.type, "openai");
-  assert.equal(form.models, "gpt-4o");
+  assert.deepEqual(form.models, [{ value: "gpt-4o" }]);
   assert.deepEqual(form.api_keys, [{ value: "sk-live" }]);
   assert.equal("vertex_project" in buildProviderCredentialPayload(form, OPENAI_SCHEMA), false);
 });
@@ -486,7 +485,7 @@ test("providerCredentialRowToForm prefills the form from a view row", () => {
   assert.equal(form.name, "my-openai");
   assert.equal(form.type, "openai");
   assert.deepEqual(form.api_keys, [{ value: "***********" }]);
-  assert.equal(form.models, "gpt-4o, gpt-4o-mini");
+  assert.deepEqual(form.models, [{ value: "gpt-4o" }, { value: "gpt-4o-mini" }]);
   assert.equal(form.enabled, false);
 });
 
@@ -551,14 +550,6 @@ test("providerCredentialTypeOptions lists every server-supplied provider type", 
     "llmd",
     "sglang",
   ]);
-});
-
-test("splitCommaList trims and drops empties", () => {
-  assert.deepEqual(
-    splitCommaList(" gpt-4o, gpt-4o-mini ,,"),
-    ["gpt-4o", "gpt-4o-mini"],
-  );
-  assert.deepEqual(splitCommaList(""), []);
 });
 
 test("providerRowsHaveActions is false when every provider is managed", () => {

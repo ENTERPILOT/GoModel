@@ -311,7 +311,7 @@ func waitForMongoMutationRetry(ctx context.Context, attempt int) error {
 	delay := min(mongoMutationInitialBackoff<<shift, mongoMutationMaxBackoff)
 	// Half of the delay is fixed and half randomized. Writers that collide on
 	// one snapshot therefore stop retrying in lockstep under heavy contention.
-	delay = delay/2 + time.Duration(rand.Int64N(max(int64(delay/2), 1)))
+	delay = delay/2 + time.Duration(rand.Int64N(max(int64(delay/2), 1))) //nolint:gosec // Retry jitter, not a secret.
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	select {

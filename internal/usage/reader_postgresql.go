@@ -40,7 +40,7 @@ func (r *PostgreSQLReader) GetSummary(ctx context.Context, params UsageQueryPara
 	}
 	where := sqlutil.BuildWhereClause(conditions)
 
-	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
+	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost), SUM(billed_cost)`
 	savingsCols := `, COALESCE(SUM(rewrite_tokens_saved), 0), SUM(rewrite_cost_saved)`
 	query := `SELECT COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + costCols + savingsCols + `
 			FROM "usage"` + where
@@ -48,11 +48,19 @@ func (r *PostgreSQLReader) GetSummary(ctx context.Context, params UsageQueryPara
 	summary := &UsageSummary{}
 	err = r.pool.QueryRow(ctx, query, args...).Scan(
 		&summary.TotalRequests, &summary.TotalInput, &summary.TotalOutput, &summary.TotalTokens,
-		&summary.TotalInputCost, &summary.TotalOutputCost, &summary.TotalCost,
+		&summary.TotalInputCost, &summary.TotalOutputCost, &summary.TotalCost, &summary.TotalBilledCost,
 		&summary.RewriteTokensSaved, &summary.RewriteCostSaved,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query usage summary: %w", err)
+	}
+
+	if mode := billedCacheHitsMode(params.CacheMode); mode != "" {
+		hits, err := r.billedCost(ctx, params, mode)
+		if err != nil {
+			return nil, err
+		}
+		summary.TotalBilledCost = addCost(summary.TotalBilledCost, hits)
 	}
 
 	if err := r.accumulateInputSegments(ctx, where, args, summary); err != nil {
@@ -60,6 +68,20 @@ func (r *PostgreSQLReader) GetSummary(ctx context.Context, params UsageQueryPara
 	}
 
 	return summary, nil
+}
+
+// billedCost sums billed_cost over the rows params matches in cacheMode.
+func (r *PostgreSQLReader) billedCost(ctx context.Context, params UsageQueryParams, cacheMode string) (*float64, error) {
+	params.CacheMode = cacheMode
+	conditions, args, _, err := pgUsageConditions(params, 1)
+	if err != nil {
+		return nil, err
+	}
+	var billed *float64
+	if err := r.pool.QueryRow(ctx, `SELECT SUM(billed_cost) FROM "usage"`+sqlutil.BuildWhereClause(conditions), args...).Scan(&billed); err != nil {
+		return nil, fmt.Errorf("failed to query usage billed cost: %w", err)
+	}
+	return billed, nil
 }
 
 // accumulateInputSegments streams the matched rows and folds each row's
@@ -85,7 +107,7 @@ func (r *PostgreSQLReader) GetUsageByModel(ctx context.Context, params UsageQuer
 	where := sqlutil.BuildWhereClause(conditions)
 	providerNameExpr := usageGroupedProviderNameSQL("provider_name", "provider")
 
-	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
+	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost), SUM(billed_cost)`
 	query := `SELECT model, provider, ` + providerNameExpr + ` AS provider_name, COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)` + costCols + `
 			FROM "usage"` + where + ` GROUP BY model, provider, ` + providerNameExpr
 
@@ -98,7 +120,7 @@ func (r *PostgreSQLReader) GetUsageByModel(ctx context.Context, params UsageQuer
 	result := make([]ModelUsage, 0)
 	for rows.Next() {
 		var m ModelUsage
-		if err := rows.Scan(&m.Model, &m.Provider, &m.ProviderName, &m.InputTokens, &m.OutputTokens, &m.InputCost, &m.OutputCost, &m.TotalCost); err != nil {
+		if err := rows.Scan(&m.Model, &m.Provider, &m.ProviderName, &m.InputTokens, &m.OutputTokens, &m.InputCost, &m.OutputCost, &m.TotalCost, &m.BilledCost); err != nil {
 			return nil, fmt.Errorf("failed to scan usage by model row: %w", err)
 		}
 		result = append(result, m)
@@ -137,7 +159,7 @@ func (r *PostgreSQLReader) usageCacheStats(ctx context.Context, params UsageQuer
 	conditions = append(conditions, extraConditions...)
 	where := sqlutil.BuildWhereClause(conditions)
 
-	rows, err := r.pool.Query(ctx, `SELECT model, provider, provider_name, user_path, endpoint, labels::text, cache_type, input_tokens, output_tokens, raw_data, timestamp FROM "usage"`+where, args...)
+	rows, err := r.pool.Query(ctx, `SELECT model, provider, provider_name, user_path, endpoint, labels::text, cache_type, input_tokens, output_tokens, billed_cost, raw_data, timestamp FROM "usage"`+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query usage cache stats: %w", err)
 	}
@@ -156,7 +178,7 @@ func (r *PostgreSQLReader) GetUsageByUserPath(ctx context.Context, params UsageQ
 	}
 	where := sqlutil.BuildWhereClause(conditions)
 
-	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
+	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost), SUM(billed_cost)`
 	query := `SELECT ` + userPathExpr + ` AS user_path, COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + costCols + `
 			FROM "usage"` + where + ` GROUP BY ` + userPathExpr
 
@@ -169,7 +191,7 @@ func (r *PostgreSQLReader) GetUsageByUserPath(ctx context.Context, params UsageQ
 	result := make([]UserPathUsage, 0)
 	for rows.Next() {
 		var u UserPathUsage
-		if err := rows.Scan(&u.UserPath, &u.InputTokens, &u.OutputTokens, &u.TotalTokens, &u.InputCost, &u.OutputCost, &u.TotalCost); err != nil {
+		if err := rows.Scan(&u.UserPath, &u.InputTokens, &u.OutputTokens, &u.TotalTokens, &u.InputCost, &u.OutputCost, &u.TotalCost, &u.BilledCost); err != nil {
 			return nil, fmt.Errorf("failed to scan usage by user path row: %w", err)
 		}
 		result = append(result, u)
@@ -200,7 +222,7 @@ func (r *PostgreSQLReader) GetUsageByLabel(ctx context.Context, params UsageQuer
 	conditions = append(conditions, "jsonb_typeof(labels) = 'array'")
 	where := sqlutil.BuildWhereClause(conditions)
 
-	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
+	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost), SUM(billed_cost)`
 	query := `SELECT label, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + costCols + `
 			FROM "usage", jsonb_array_elements_text(labels) AS label` + where + ` GROUP BY label ORDER BY label`
 
@@ -213,7 +235,7 @@ func (r *PostgreSQLReader) GetUsageByLabel(ctx context.Context, params UsageQuer
 	result := make([]LabelUsage, 0)
 	for rows.Next() {
 		var l LabelUsage
-		if err := rows.Scan(&l.Label, &l.Requests, &l.InputTokens, &l.OutputTokens, &l.TotalTokens, &l.InputCost, &l.OutputCost, &l.TotalCost); err != nil {
+		if err := rows.Scan(&l.Label, &l.Requests, &l.InputTokens, &l.OutputTokens, &l.TotalTokens, &l.InputCost, &l.OutputCost, &l.TotalCost, &l.BilledCost); err != nil {
 			return nil, fmt.Errorf("failed to scan usage by label row: %w", err)
 		}
 		result = append(result, l)
@@ -360,7 +382,8 @@ func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParam
 	// Fetch page
 	dataQuery := fmt.Sprintf(`SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels,
 		input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost, COALESCE(cost_source, ''), raw_data, COALESCE(costs_calculation_caveat, ''),
-		COALESCE(rewrite_tokens_saved, 0), rewrite_cost_saved, COALESCE(auth_key_id, '')
+		COALESCE(rewrite_tokens_saved, 0), rewrite_cost_saved, COALESCE(auth_key_id, ''),
+		markup_percent, COALESCE(markup_selector, ''), billed_cost
 		FROM "usage"%s ORDER BY timestamp DESC LIMIT $%d OFFSET $%d`, where, argIdx, argIdx+1)
 	dataArgs := append(append([]any(nil), args...), limit, offset)
 
@@ -403,7 +426,8 @@ func (r *PostgreSQLReader) GetUsageByRequestIDs(ctx context.Context, requestIDs 
 
 	query := fmt.Sprintf(`SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels,
 		input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost, COALESCE(cost_source, ''), raw_data, COALESCE(costs_calculation_caveat, ''),
-		COALESCE(rewrite_tokens_saved, 0), rewrite_cost_saved, COALESCE(auth_key_id, '')
+		COALESCE(rewrite_tokens_saved, 0), rewrite_cost_saved, COALESCE(auth_key_id, ''),
+		markup_percent, COALESCE(markup_selector, ''), billed_cost
 		FROM "usage" WHERE request_id IN (%s) ORDER BY timestamp DESC, id DESC`, strings.Join(placeholders, ", "))
 
 	rows, err := r.pool.Query(ctx, query, args...)
@@ -439,7 +463,8 @@ func scanPostgreSQLUsageLogEntries(rows pgxRows) ([]UsageLogEntry, error) {
 		var labelsJSON *string
 		if err := rows.Scan(&e.ID, &e.RequestID, &e.ProviderID, &e.Timestamp, &e.Model, &e.Provider, &providerName, &e.Endpoint, &userPath, &sessionID, &cacheType, &labelsJSON,
 			&e.InputTokens, &e.OutputTokens, &e.TotalTokens, &e.InputCost, &e.OutputCost, &e.TotalCost, &e.CostSource, &rawDataJSON, &e.CostsCalculationCaveat,
-			&e.RewriteTokensSaved, &e.RewriteCostSaved, &e.AuthKeyID); err != nil {
+			&e.RewriteTokensSaved, &e.RewriteCostSaved, &e.AuthKeyID,
+			&e.MarkupPercent, &e.MarkupSelector, &e.BilledCost); err != nil {
 			return nil, fmt.Errorf("failed to scan usage log row: %w", err)
 		}
 		if labelsJSON != nil {

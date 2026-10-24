@@ -415,7 +415,7 @@ func DeriveMCPServerSlug(name string) string {
 	if slug == "" {
 		hash := uint32(2166136261)
 		for _, r := range normalized {
-			hash ^= uint32(r)
+			hash ^= uint32(r) //nolint:gosec // G115: FNV-1a hash input; the wrap-around is intended.
 			hash *= 16777619
 		}
 		return fmt.Sprintf("mcp-%08x", hash)

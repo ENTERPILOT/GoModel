@@ -78,9 +78,8 @@ configured voice library — audio.cpp has no fixed voice set, so OpenAI's
 `alloy`/`nova`/… mean nothing to it. List what a model offers with
 `GET /p/audiocpp/audio/voices?model=<id>`.
 
-`voice` is required on `/v1/audio/speech`, as it is in the OpenAI API. To let
-audio.cpp apply a model's configured `default_voice_preset` instead, call the
-route through passthrough: `POST /p/audiocpp/audio/speech`.
+Omit `voice` to let audio.cpp apply the model's configured
+`default_voice_preset`.
 
 Cloning parameters (`voice_ref`, `reference_text`, `seed`, `max_tokens`,
 `options`, …) are forwarded verbatim, so audio.cpp's own request fields work

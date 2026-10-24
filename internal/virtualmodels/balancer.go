@@ -284,9 +284,9 @@ func weightedIndex(targets []resolvedTarget, counter uint64) int {
 		}
 	}
 	if !weighted || total <= 0 {
-		return int(counter % uint64(len(targets)))
+		return int(counter % uint64(len(targets))) //nolint:gosec // G115: the remainder is below len(targets).
 	}
-	slot := int(counter % uint64(total))
+	slot := int(counter % uint64(total)) //nolint:gosec // G115: the remainder is below total, an int.
 	for i, target := range targets {
 		slot -= normalizeWeight(target.weight)
 		if slot < 0 {

@@ -16,9 +16,8 @@ import (
 const requestSnapshotInlineBodyLimit int64 = 64 * 1024
 
 // RequestSnapshotCapture captures immutable transport-level request data for
-// model-facing endpoints. Known-small JSON bodies are captured once for the
-// hot path; larger or unknown-size bodies only get a bounded selector peek and
-// stay on the live request stream until the handler actually decodes them.
+// model-facing endpoints. It does not read the body: that waits for
+// authentication, in RequestBodyCapture.
 func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 	userPathHeaderName := configuredUserPathHeaderName(userPathHeader...)
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -59,11 +58,6 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 				req.Header.Set(userPathHeaderName, userPath)
 			}
 
-			bodyBytes, bodyNotCaptured, bodyCaptured, err := captureSmallRequestBodyForSnapshot(req, desc.BodyMode)
-			if err != nil {
-				return handleError(c, core.NewInvalidRequestError("failed to read request body", err))
-			}
-
 			// Query/route/trace maps are freshly built here, so the snapshot can
 			// own them directly; only req.Header is live and gets cloned.
 			snapshot := core.NewRequestSnapshotWithOwnedMaps(
@@ -73,8 +67,8 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 				req.URL.Query(),
 				req.Header,
 				req.Header.Get("Content-Type"),
-				bodyBytes,
-				bodyNotCaptured,
+				nil,
+				false,
 				requestID,
 				extractTraceMetadata(req.Header),
 				userPath,
@@ -83,15 +77,49 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 			ctx := core.WithUserPathHeaderName(req.Context(), userPathHeaderName)
 			ctx = core.WithRequestSnapshot(ctx, snapshot)
 			if semantics := core.DeriveWhiteBoxPrompt(snapshot); semantics != nil {
-				if bodyCaptured {
-					verifyCapturedOpaqueSelectorHints(desc.BodyMode, bodyBytes, semantics)
-				} else if err := seedRequestBodySelectorHints(req, desc.BodyMode, semantics); err != nil {
-					return handleError(c, requestBodyReadError(err))
-				}
 				ctx = core.WithWhiteBoxPrompt(ctx, semantics)
 			}
 			c.SetRequest(req.WithContext(ctx))
 
+			return next(c)
+		}
+	}
+}
+
+// RequestBodyCapture adds the request body to the snapshot and its selector
+// hints to the request semantics. Known-small JSON bodies are captured once
+// for the hot path; larger or unknown-size bodies only get a selector peek
+// and stay on the live request stream until the handler decodes them.
+//
+// It runs after authentication, so a caller without credentials never makes
+// the gateway read, decompress, or buffer a body.
+func RequestBodyCapture() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			req := c.Request()
+			snapshot := core.GetRequestSnapshot(req.Context())
+			if snapshot == nil {
+				return next(c)
+			}
+			bodyMode := core.DescribeEndpoint(req.Method, req.URL.Path).BodyMode
+			bodyBytes, bodyNotCaptured, bodyCaptured, err := captureSmallRequestBodyForSnapshot(req, bodyMode)
+			if err != nil {
+				return handleError(c, core.NewInvalidRequestError("failed to read request body", err))
+			}
+
+			semantics := core.GetWhiteBoxPrompt(req.Context())
+			if bodyCaptured {
+				core.ApplyCapturedBodySelectorHints(semantics, bodyBytes)
+				verifyCapturedOpaqueSelectorHints(bodyMode, bodyBytes, semantics)
+			} else if semantics != nil {
+				if err := seedRequestBodySelectorHints(req, bodyMode, semantics); err != nil {
+					return handleError(c, requestBodyReadError(err))
+				}
+			}
+			if bodyCaptured || bodyNotCaptured {
+				snapshot = snapshot.WithOwnedCapturedBody(bodyBytes, bodyNotCaptured)
+				c.SetRequest(req.WithContext(core.WithRequestSnapshot(req.Context(), snapshot)))
+			}
 			return next(c)
 		}
 	}
