@@ -1,0 +1,121 @@
+---
+title: "API 密钥轮换"
+description: "为一个提供商配置多个 API 密钥，将会话分散到这些密钥上，并保持提示词缓存亲和性。"
+icon: "key-round"
+keywords: ["API 密钥轮换", "API key rotation", "多个 API 密钥", "multiple API keys", "轮询", "round robin", "速率限制", "rate limits"]
+---
+
+一个提供商通常只持有一个 API 密钥，所有发往它的请求都使用该密钥。如果配置了多个密钥，GoModel 会将已识别的会话分散到这些密钥上。
+默认情况下，每个对话会固定在一个密钥上，因此可以持续命中提供商的提示词缓存，同时每个密钥只承担总流量的一部分。
+
+在配置第二个密钥之前，轮换处于关闭状态。只有一个密钥时，行为与以往完全相同。
+
+<Note>
+  未检测到会话的请求仍会以轮询方式轮换。有关支持的会话请求头、请求体字段以及自动对话检测，请参阅[会话保持](/zh/features/session-keeping)。
+</Note>
+
+## 配置
+
+使用带编号的环境变量添加密钥。`<PROVIDER>_API_KEY` 是第一个密钥；`<PROVIDER>_API_KEY_2`、`_3` 等依次添加其余密钥。
+
+```bash
+OPENAI_API_KEY=sk-first
+OPENAI_API_KEY_2=sk-second
+OPENAI_API_KEY_3=sk-third
+```
+
+这里有三个密钥，因此不同会话会确定性地分布到这三个密钥上；同一会话中的每个请求都会选择同一个密钥。
+
+或者在 `config.yaml` 中配置：
+
+```yaml
+providers:
+  openai:
+    type: openai
+    api_keys:
+      - "${OPENAI_API_KEY}"
+      - "${OPENAI_API_KEY_2}"
+      - "${OPENAI_API_KEY_3}"
+```
+
+`api_key` 和 `api_keys` 可以同时使用；`api_key` 排在最前。
+
+如需恢复严格的按请求轮询，请为该提供商关闭此功能：
+
+```yaml
+providers:
+  openai:
+    session_sticky_keys: false
+```
+
+仅通过环境变量定义的提供商实例，使用与其 API 密钥相同的提供商前缀和可选后缀：
+
+```bash
+OPENAI_API_KEY=sk-primary
+OPENAI_API_KEY_2=sk-secondary
+OPENAI_SESSION_STICKY_KEYS=false
+
+OPENAI_EU_API_KEY=sk-eu-primary
+OPENAI_EU_API_KEY_2=sk-eu-secondary
+OPENAI_EU_SESSION_STICKY_KEYS=false
+```
+
+在控制台的提供商编辑器中，同一设置对应 **Session-sticky API keys** 复选框，默认处于勾选状态。
+
+任何使用 API 密钥认证的提供商都可以轮换——`ANTHROPIC_API_KEY_2`、`GEMINI_API_KEY_2`、`GROQ_API_KEY_2` 等。
+使用其他方式认证的提供商（Vertex AI 和 Bedrock，分别使用 Google 和 AWS 凭据）会忽略这些变量。
+
+## 规则
+
+- 编号从 `2` 开始，因为 `<PROVIDER>_API_KEY` 即为密钥 1。也可以显式写成 `<PROVIDER>_API_KEY_1`，代替不带后缀的形式。
+- 编号可以不连续。只设置 `_API_KEY` 和 `_API_KEY_3` 会得到两个密钥。
+- 重复的密钥会被合并，因此在两个变量中重复出现的密钥不会分到双倍的流量。
+- 密钥按配置顺序使用：先使用不带后缀的密钥，然后按编号升序使用。
+- 环境变量会替换 `config.yaml` 中该提供商的整个 `api_keys` 列表，而不是与之合并。
+- 无法解析的密钥（`${UNSET_VAR}` 占位符）会被丢弃。最终没有任何密钥的提供商不会被注册。
+
+<Note>
+  启用会话粘性时，重试会使用该会话固定的密钥。禁用粘性时，每一次出站尝试都会参与轮询。
+</Note>
+
+## 带后缀提供商上的轮换
+
+带后缀的环境变量会注册一个同类型的*独立提供商*。两种机制可以组合使用，末尾的数字用于区分它们：
+
+```bash
+OPENAI_EU_API_KEY=sk-eu-first
+OPENAI_EU_API_KEY_2=sk-eu-second
+```
+
+这是带有两个密钥的提供商 `openai-eu`。末尾的 `_2` 表示一个密钥。
+
+```bash
+OPENAI_REGION_2_API_KEY=sk-only
+```
+
+这是只有一个密钥的提供商 `openai-region-2`。这里的 `2` 是提供商后缀的一部分，而不是密钥编号。
+
+## 轮换的覆盖范围
+
+GoModel 对提供商发起的每一次调用都使用相同的选择策略：Chat Completions、Responses、嵌入（Embeddings）、音频、图像、批处理、
+提供商原生的[透传路由](/zh/features/passthrough-api)以及 Realtime 会话。已识别的会话具有粘性；无会话的流量则以轮询方式分配。
+
+轮换以网关进程为单位。计数器保存在内存中，并在重启时重置，因此 `N` 个副本会各自独立地轮换——这没有问题，因为目标是分散负载，而不是精确地按顺序分配。
+
+## 在轮换与独立提供商之间选择
+
+两者都可以让您使用同一提供商类型的多个密钥，但它们解决的是不同的问题。
+
+| | 密钥轮换 | 带后缀的提供商 |
+| --- | --- | --- |
+| 配置 | `OPENAI_API_KEY_2` | `OPENAI_EAST_API_KEY` |
+| 模型 ID | 不变（`gpt-4o`） | 带提供商限定（`openai-east/gpt-4o`） |
+| 路由 | 自动，按会话保持粘性 | 由调用方选择，或由[虚拟模型](/zh/features/virtual-models)进行负载均衡 |
+| 提示词缓存 | 对已识别的会话保持 | 按提供商保持 |
+| 适用场景 | 提升单个账号的速率限制 | 不同的账号、区域或基础 URL |
+
+当密钥指向不同的账号、区域、基础 URL 或模型目录时，独立提供商仍然很有用。但仅仅为了在多个密钥之间保持提示词缓存，已不再需要使用独立提供商。
+
+## 验证
+
+API 不会报告轮换情况。如需确认，请查看提供商自己的用量控制台：流量应大致平均地分布在各个密钥上。

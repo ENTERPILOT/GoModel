@@ -121,6 +121,18 @@
         {
             "source": "/api-reference/admin/reset-dashboard-managed-failover-mappings",
             "destination": "/features/failover"
+        },
+        {
+            "source": "/de/pro",
+            "destination": "/de/pro/overview"
+        },
+        {
+            "source": "/zh/pro",
+            "destination": "/zh/pro/overview"
+        },
+        {
+            "source": "/pl/pro",
+            "destination": "/pl/pro/overview"
         }
     ],
     "navbar": {
@@ -141,182 +153,731 @@
                 }
             ]
         },
-        "tabs": [
+        "languages": [
             {
-                "tab": "Documentation",
-                "icon": "book-open",
-                "pages": [
+                "language": "en",
+                "default": true,
+                "tabs": [
                     {
-                        "group": "Getting Started",
-                        "icon": "rocket",
+                        "tab": "Documentation",
+                        "icon": "book-open",
                         "pages": [
-                            "getting-started/quickstart"
+                            {
+                                "group": "Getting Started",
+                                "icon": "rocket",
+                                "pages": [
+                                    "getting-started/quickstart"
+                                ]
+                            },
+                            {
+                                "group": "Features",
+                                "icon": "sparkles",
+                                "pages": [
+                                    "features/virtual-models",
+                                    "features/playground",
+                                    "features/session-keeping",
+                                    "features/user-path",
+                                    "features/users",
+                                    "features/passthrough-api",
+                                    "features/budgets",
+                                    "features/rate-limits",
+                                    "features/cost-tracking",
+                                    "features/labelling",
+                                    "features/cache",
+                                    "features/failover"
+                                ]
+                            },
+                            {
+                                "group": "Pro features",
+                                "icon": "gem",
+                                "pages": [
+                                    "pro/overview",
+                                    "pro/compression",
+                                    "pro/sso",
+                                    "pro/intelligent-routing",
+                                    "pro/egress"
+                                ]
+                            },
+                            {
+                                "group": "MCP Proxy",
+                                "icon": "waypoints",
+                                "pages": [
+                                    "features/mcp-gateway",
+                                    "mcp-proxy/claude-code-and-codex"
+                                ]
+                            },
+                            {
+                                "group": "Advanced",
+                                "icon": "settings-2",
+                                "pages": [
+                                    "advanced/configuration",
+                                    "advanced/config-yaml",
+                                    "advanced/secret-references",
+                                    "advanced/encryption-at-rest",
+                                    "advanced/model-metadata",
+                                    "advanced/cli",
+                                    "advanced/build-from-source",
+                                    "advanced/api-endpoints",
+                                    "advanced/swagger-ui",
+                                    "advanced/resilience",
+                                    "advanced/provider-failure-modes",
+                                    "advanced/version-awareness",
+                                    "advanced/responses-api",
+                                    "advanced/responses-compatibility",
+                                    "advanced/conversations-api",
+                                    "advanced/anthropic-messages-api",
+                                    "advanced/decisions-api",
+                                    "advanced/systemone-api",
+                                    "advanced/extra-content",
+                                    "advanced/audio-api",
+                                    "advanced/images-api",
+                                    "advanced/usage-api",
+                                    "advanced/guardrails",
+                                    "advanced/plugins",
+                                    "advanced/workflows",
+                                    "advanced/admin-endpoints"
+                                ]
+                            },
+                            {
+                                "group": "About",
+                                "icon": "info",
+                                "pages": [
+                                    "about/who-we-are",
+                                    "about/values",
+                                    "about/technical-philosophy",
+                                    "about/why-go",
+                                    "about/roadmap",
+                                    "about/license",
+                                    "about/benchmarks",
+                                    "about/faq"
+                                ]
+                            }
                         ]
                     },
                     {
-                        "group": "Features",
-                        "icon": "sparkles",
+                        "tab": "Guides",
+                        "icon": "compass",
                         "pages": [
-                            "features/virtual-models",
-                            "features/playground",
-                            "features/session-keeping",
-                            "features/user-path",
-                            "features/users",
-                            "features/passthrough-api",
-                            "features/budgets",
-                            "features/rate-limits",
-                            "features/cost-tracking",
-                            "features/labelling",
-                            "features/cache",
-                            "features/failover"
+                            "guides/production",
+                            "guides/updating",
+                            "guides/migrate-from-litellm",
+                            "guides/caddy",
+                            "guides/openai-agents-sdk",
+                            "guides/openclaw",
+                            "guides/n8n",
+                            "guides/openwebui",
+                            "guides/librechat",
+                            {
+                                "group": "AI coding harnesses",
+                                "icon": "terminal",
+                                "pages": [
+                                    "guides/claude-code",
+                                    "guides/codex",
+                                    "guides/cursor",
+                                    "guides/kimi-code-cli",
+                                    "guides/oh-my-pi",
+                                    "guides/opencode-and-other-agents"
+                                ]
+                            },
+                            "guides/prometheus-metrics",
+                            "guides/opentelemetry",
+                            "guides/langfuse"
                         ]
                     },
                     {
-                        "group": "Pro features",
-                        "icon": "gem",
+                        "tab": "Providers",
+                        "icon": "plug",
                         "pages": [
-                            "pro/overview",
-                            "pro/compression",
-                            "pro/sso",
-                            "pro/intelligent-routing",
-                            "pro/egress"
+                            "providers/overview",
+                            "providers/key-rotation",
+                            "providers/outbound-proxy",
+                            "providers/anthropic",
+                            "providers/chatgpt",
+                            "providers/cohere",
+                            "providers/gemini",
+                            "providers/deepseek",
+                            "providers/deepinfra",
+                            "providers/xai",
+                            "providers/bailian",
+                            "providers/xiaomi",
+                            "providers/minimax",
+                            "providers/elevenlabs",
+                            "providers/audiocpp",
+                            "providers/jev",
+                            "providers/opencode-go",
+                            "providers/sglang",
+                            "providers/vllm",
+                            "providers/llamacpp",
+                            "providers/llmd",
+                            "providers/multiple-ollama",
+                            "providers/kimicode",
+                            "providers/hetzner",
+                            "providers/edenai",
+                            {
+                                "group": "Cloud Platforms",
+                                "icon": "cloud",
+                                "pages": [
+                                    "providers/vertex",
+                                    "providers/bedrock",
+                                    "providers/bedrock-mantle",
+                                    "providers/azure",
+                                    "providers/oracle"
+                                ]
+                            }
                         ]
                     },
                     {
-                        "group": "MCP Proxy",
-                        "icon": "waypoints",
-                        "pages": [
-                            "features/mcp-gateway",
-                            "mcp-proxy/claude-code-and-codex"
-                        ]
-                    },
-                    {
-                        "group": "Advanced",
-                        "icon": "settings-2",
-                        "pages": [
-                            "advanced/configuration",
-                            "advanced/config-yaml",
-                            "advanced/secret-references",
-                            "advanced/encryption-at-rest",
-                            "advanced/model-metadata",
-                            "advanced/cli",
-                            "advanced/build-from-source",
-                            "advanced/api-endpoints",
-                            "advanced/swagger-ui",
-                            "advanced/resilience",
-                            "advanced/provider-failure-modes",
-                            "advanced/version-awareness",
-                            "advanced/responses-api",
-                            "advanced/responses-compatibility",
-                            "advanced/conversations-api",
-                            "advanced/anthropic-messages-api",
-                            "advanced/decisions-api",
-                            "advanced/systemone-api",
-                            "advanced/extra-content",
-                            "advanced/audio-api",
-                            "advanced/images-api",
-                            "advanced/usage-api",
-                            "advanced/guardrails",
-                            "advanced/plugins",
-                            "advanced/workflows",
-                            "advanced/admin-endpoints"
-                        ]
-                    },
-                    {
-                        "group": "About",
-                        "icon": "info",
-                        "pages": [
-                            "about/who-we-are",
-                            "about/values",
-                            "about/technical-philosophy",
-                            "about/why-go",
-                            "about/roadmap",
-                            "about/license",
-                            "about/benchmarks",
-                            "about/faq"
-                        ]
+                        "tab": "API Reference",
+                        "icon": "braces",
+                        "openapi": {
+                            "source": "openapi.json",
+                            "directory": "api-reference"
+                        }
                     }
                 ]
             },
             {
-                "tab": "Guides",
-                "icon": "compass",
-                "pages": [
-                    "guides/production",
-                    "guides/updating",
-                    "guides/migrate-from-litellm",
-                    "guides/caddy",
-                    "guides/openai-agents-sdk",
-                    "guides/openclaw",
-                    "guides/n8n",
-                    "guides/openwebui",
-                    "guides/librechat",
+                "language": "de",
+                "tabs": [
                     {
-                        "group": "AI coding harnesses",
-                        "icon": "terminal",
+                        "tab": "Dokumentation",
+                        "icon": "book-open",
                         "pages": [
-                            "guides/claude-code",
-                            "guides/codex",
-                            "guides/cursor",
-                            "guides/kimi-code-cli",
-                            "guides/oh-my-pi",
-                            "guides/opencode-and-other-agents"
+                            {
+                                "group": "Erste Schritte",
+                                "icon": "rocket",
+                                "pages": [
+                                    "de/getting-started/quickstart"
+                                ]
+                            },
+                            {
+                                "group": "Funktionen",
+                                "icon": "sparkles",
+                                "pages": [
+                                    "de/features/virtual-models",
+                                    "de/features/playground",
+                                    "de/features/session-keeping",
+                                    "de/features/user-path",
+                                    "de/features/users",
+                                    "de/features/passthrough-api",
+                                    "de/features/budgets",
+                                    "de/features/rate-limits",
+                                    "de/features/cost-tracking",
+                                    "de/features/labelling",
+                                    "de/features/cache",
+                                    "de/features/failover"
+                                ]
+                            },
+                            {
+                                "group": "Pro-Funktionen",
+                                "icon": "gem",
+                                "pages": [
+                                    "de/pro/overview",
+                                    "de/pro/compression",
+                                    "de/pro/sso",
+                                    "de/pro/intelligent-routing",
+                                    "de/pro/egress"
+                                ]
+                            },
+                            {
+                                "group": "MCP Proxy",
+                                "icon": "waypoints",
+                                "pages": [
+                                    "de/features/mcp-gateway",
+                                    "de/mcp-proxy/claude-code-and-codex"
+                                ]
+                            },
+                            {
+                                "group": "Erweitert",
+                                "icon": "settings-2",
+                                "pages": [
+                                    "de/advanced/configuration",
+                                    "de/advanced/config-yaml",
+                                    "de/advanced/secret-references",
+                                    "de/advanced/encryption-at-rest",
+                                    "de/advanced/model-metadata",
+                                    "de/advanced/cli",
+                                    "de/advanced/build-from-source",
+                                    "de/advanced/api-endpoints",
+                                    "de/advanced/swagger-ui",
+                                    "de/advanced/resilience",
+                                    "de/advanced/provider-failure-modes",
+                                    "de/advanced/version-awareness",
+                                    "de/advanced/responses-api",
+                                    "de/advanced/responses-compatibility",
+                                    "de/advanced/conversations-api",
+                                    "de/advanced/anthropic-messages-api",
+                                    "de/advanced/decisions-api",
+                                    "de/advanced/systemone-api",
+                                    "de/advanced/extra-content",
+                                    "de/advanced/audio-api",
+                                    "de/advanced/images-api",
+                                    "de/advanced/usage-api",
+                                    "de/advanced/guardrails",
+                                    "de/advanced/plugins",
+                                    "de/advanced/workflows",
+                                    "de/advanced/admin-endpoints"
+                                ]
+                            },
+                            {
+                                "group": "Über GoModel",
+                                "icon": "info",
+                                "pages": [
+                                    "de/about/who-we-are",
+                                    "de/about/values",
+                                    "de/about/technical-philosophy",
+                                    "de/about/why-go",
+                                    "de/about/roadmap",
+                                    "de/about/license",
+                                    "de/about/benchmarks",
+                                    "de/about/faq"
+                                ]
+                            }
                         ]
                     },
-                    "guides/prometheus-metrics",
-                    "guides/opentelemetry",
-                    "guides/langfuse"
-                ]
-            },
-            {
-                "tab": "Providers",
-                "icon": "plug",
-                "pages": [
-                    "providers/overview",
-                    "providers/key-rotation",
-                    "providers/outbound-proxy",
-                    "providers/anthropic",
-                    "providers/chatgpt",
-                    "providers/cohere",
-                    "providers/gemini",
-                    "providers/deepseek",
-                    "providers/deepinfra",
-                    "providers/xai",
-                    "providers/bailian",
-                    "providers/xiaomi",
-                    "providers/minimax",
-                    "providers/elevenlabs",
-                    "providers/audiocpp",
-                    "providers/jev",
-                    "providers/opencode-go",
-                    "providers/sglang",
-                    "providers/vllm",
-                    "providers/llamacpp",
-                    "providers/llmd",
-                    "providers/multiple-ollama",
-                    "providers/kimicode",
-                    "providers/hetzner",
-                    "providers/edenai",
                     {
-                        "group": "Cloud Platforms",
-                        "icon": "cloud",
+                        "tab": "Leitfäden",
+                        "icon": "compass",
                         "pages": [
-                            "providers/vertex",
-                            "providers/bedrock",
-                            "providers/bedrock-mantle",
-                            "providers/azure",
-                            "providers/oracle"
+                            "de/guides/production",
+                            "de/guides/updating",
+                            "de/guides/migrate-from-litellm",
+                            "de/guides/caddy",
+                            "de/guides/openai-agents-sdk",
+                            "de/guides/openclaw",
+                            "de/guides/n8n",
+                            "de/guides/openwebui",
+                            "de/guides/librechat",
+                            {
+                                "group": "KI-Coding-Tools",
+                                "icon": "terminal",
+                                "pages": [
+                                    "de/guides/claude-code",
+                                    "de/guides/codex",
+                                    "de/guides/cursor",
+                                    "de/guides/kimi-code-cli",
+                                    "de/guides/oh-my-pi",
+                                    "de/guides/opencode-and-other-agents"
+                                ]
+                            },
+                            "de/guides/prometheus-metrics",
+                            "de/guides/opentelemetry",
+                            "de/guides/langfuse"
                         ]
+                    },
+                    {
+                        "tab": "Provider",
+                        "icon": "plug",
+                        "pages": [
+                            "de/providers/overview",
+                            "de/providers/key-rotation",
+                            "de/providers/outbound-proxy",
+                            "de/providers/anthropic",
+                            "de/providers/chatgpt",
+                            "de/providers/cohere",
+                            "de/providers/gemini",
+                            "de/providers/deepseek",
+                            "de/providers/deepinfra",
+                            "de/providers/xai",
+                            "de/providers/bailian",
+                            "de/providers/xiaomi",
+                            "de/providers/minimax",
+                            "de/providers/elevenlabs",
+                            "de/providers/audiocpp",
+                            "de/providers/jev",
+                            "de/providers/opencode-go",
+                            "de/providers/sglang",
+                            "de/providers/vllm",
+                            "de/providers/llamacpp",
+                            "de/providers/llmd",
+                            "de/providers/multiple-ollama",
+                            "de/providers/kimicode",
+                            "de/providers/hetzner",
+                            "de/providers/edenai",
+                            {
+                                "group": "Cloud-Plattformen",
+                                "icon": "cloud",
+                                "pages": [
+                                    "de/providers/vertex",
+                                    "de/providers/bedrock",
+                                    "de/providers/bedrock-mantle",
+                                    "de/providers/azure",
+                                    "de/providers/oracle"
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "tab": "API-Referenz",
+                        "icon": "braces",
+                        "openapi": {
+                            "source": "openapi.json",
+                            "directory": "de/api-reference"
+                        }
                     }
                 ]
             },
             {
-                "tab": "API Reference",
-                "icon": "braces",
-                "openapi": {
-                    "source": "openapi.json",
-                    "directory": "api-reference"
-                }
+                "language": "zh",
+                "tabs": [
+                    {
+                        "tab": "文档",
+                        "icon": "book-open",
+                        "pages": [
+                            {
+                                "group": "入门",
+                                "icon": "rocket",
+                                "pages": [
+                                    "zh/getting-started/quickstart"
+                                ]
+                            },
+                            {
+                                "group": "功能",
+                                "icon": "sparkles",
+                                "pages": [
+                                    "zh/features/virtual-models",
+                                    "zh/features/playground",
+                                    "zh/features/session-keeping",
+                                    "zh/features/user-path",
+                                    "zh/features/users",
+                                    "zh/features/passthrough-api",
+                                    "zh/features/budgets",
+                                    "zh/features/rate-limits",
+                                    "zh/features/cost-tracking",
+                                    "zh/features/labelling",
+                                    "zh/features/cache",
+                                    "zh/features/failover"
+                                ]
+                            },
+                            {
+                                "group": "Pro 功能",
+                                "icon": "gem",
+                                "pages": [
+                                    "zh/pro/overview",
+                                    "zh/pro/compression",
+                                    "zh/pro/sso",
+                                    "zh/pro/intelligent-routing",
+                                    "zh/pro/egress"
+                                ]
+                            },
+                            {
+                                "group": "MCP 代理",
+                                "icon": "waypoints",
+                                "pages": [
+                                    "zh/features/mcp-gateway",
+                                    "zh/mcp-proxy/claude-code-and-codex"
+                                ]
+                            },
+                            {
+                                "group": "高级",
+                                "icon": "settings-2",
+                                "pages": [
+                                    "zh/advanced/configuration",
+                                    "zh/advanced/config-yaml",
+                                    "zh/advanced/secret-references",
+                                    "zh/advanced/encryption-at-rest",
+                                    "zh/advanced/model-metadata",
+                                    "zh/advanced/cli",
+                                    "zh/advanced/build-from-source",
+                                    "zh/advanced/api-endpoints",
+                                    "zh/advanced/swagger-ui",
+                                    "zh/advanced/resilience",
+                                    "zh/advanced/provider-failure-modes",
+                                    "zh/advanced/version-awareness",
+                                    "zh/advanced/responses-api",
+                                    "zh/advanced/responses-compatibility",
+                                    "zh/advanced/conversations-api",
+                                    "zh/advanced/anthropic-messages-api",
+                                    "zh/advanced/decisions-api",
+                                    "zh/advanced/systemone-api",
+                                    "zh/advanced/extra-content",
+                                    "zh/advanced/audio-api",
+                                    "zh/advanced/images-api",
+                                    "zh/advanced/usage-api",
+                                    "zh/advanced/guardrails",
+                                    "zh/advanced/plugins",
+                                    "zh/advanced/workflows",
+                                    "zh/advanced/admin-endpoints"
+                                ]
+                            },
+                            {
+                                "group": "关于 GoModel",
+                                "icon": "info",
+                                "pages": [
+                                    "zh/about/who-we-are",
+                                    "zh/about/values",
+                                    "zh/about/technical-philosophy",
+                                    "zh/about/why-go",
+                                    "zh/about/roadmap",
+                                    "zh/about/license",
+                                    "zh/about/benchmarks",
+                                    "zh/about/faq"
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "tab": "指南",
+                        "icon": "compass",
+                        "pages": [
+                            "zh/guides/production",
+                            "zh/guides/updating",
+                            "zh/guides/migrate-from-litellm",
+                            "zh/guides/caddy",
+                            "zh/guides/openai-agents-sdk",
+                            "zh/guides/openclaw",
+                            "zh/guides/n8n",
+                            "zh/guides/openwebui",
+                            "zh/guides/librechat",
+                            {
+                                "group": "AI 编程工具",
+                                "icon": "terminal",
+                                "pages": [
+                                    "zh/guides/claude-code",
+                                    "zh/guides/codex",
+                                    "zh/guides/cursor",
+                                    "zh/guides/kimi-code-cli",
+                                    "zh/guides/oh-my-pi",
+                                    "zh/guides/opencode-and-other-agents"
+                                ]
+                            },
+                            "zh/guides/prometheus-metrics",
+                            "zh/guides/opentelemetry",
+                            "zh/guides/langfuse"
+                        ]
+                    },
+                    {
+                        "tab": "提供商",
+                        "icon": "plug",
+                        "pages": [
+                            "zh/providers/overview",
+                            "zh/providers/key-rotation",
+                            "zh/providers/outbound-proxy",
+                            "zh/providers/anthropic",
+                            "zh/providers/chatgpt",
+                            "zh/providers/cohere",
+                            "zh/providers/gemini",
+                            "zh/providers/deepseek",
+                            "zh/providers/deepinfra",
+                            "zh/providers/xai",
+                            "zh/providers/bailian",
+                            "zh/providers/xiaomi",
+                            "zh/providers/minimax",
+                            "zh/providers/elevenlabs",
+                            "zh/providers/audiocpp",
+                            "zh/providers/jev",
+                            "zh/providers/opencode-go",
+                            "zh/providers/sglang",
+                            "zh/providers/vllm",
+                            "zh/providers/llamacpp",
+                            "zh/providers/llmd",
+                            "zh/providers/multiple-ollama",
+                            "zh/providers/kimicode",
+                            "zh/providers/hetzner",
+                            "zh/providers/edenai",
+                            {
+                                "group": "云平台",
+                                "icon": "cloud",
+                                "pages": [
+                                    "zh/providers/vertex",
+                                    "zh/providers/bedrock",
+                                    "zh/providers/bedrock-mantle",
+                                    "zh/providers/azure",
+                                    "zh/providers/oracle"
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "tab": "API 参考",
+                        "icon": "braces",
+                        "openapi": {
+                            "source": "openapi.json",
+                            "directory": "zh/api-reference"
+                        }
+                    }
+                ]
+            },
+            {
+                "language": "pl",
+                "tabs": [
+                    {
+                        "tab": "Dokumentacja",
+                        "icon": "book-open",
+                        "pages": [
+                            {
+                                "group": "Pierwsze kroki",
+                                "icon": "rocket",
+                                "pages": [
+                                    "pl/getting-started/quickstart"
+                                ]
+                            },
+                            {
+                                "group": "Funkcje",
+                                "icon": "sparkles",
+                                "pages": [
+                                    "pl/features/virtual-models",
+                                    "pl/features/playground",
+                                    "pl/features/session-keeping",
+                                    "pl/features/user-path",
+                                    "pl/features/users",
+                                    "pl/features/passthrough-api",
+                                    "pl/features/budgets",
+                                    "pl/features/rate-limits",
+                                    "pl/features/cost-tracking",
+                                    "pl/features/labelling",
+                                    "pl/features/cache",
+                                    "pl/features/failover"
+                                ]
+                            },
+                            {
+                                "group": "Funkcje Pro",
+                                "icon": "gem",
+                                "pages": [
+                                    "pl/pro/overview",
+                                    "pl/pro/compression",
+                                    "pl/pro/sso",
+                                    "pl/pro/intelligent-routing",
+                                    "pl/pro/egress"
+                                ]
+                            },
+                            {
+                                "group": "MCP Proxy",
+                                "icon": "waypoints",
+                                "pages": [
+                                    "pl/features/mcp-gateway",
+                                    "pl/mcp-proxy/claude-code-and-codex"
+                                ]
+                            },
+                            {
+                                "group": "Zaawansowane",
+                                "icon": "settings-2",
+                                "pages": [
+                                    "pl/advanced/configuration",
+                                    "pl/advanced/config-yaml",
+                                    "pl/advanced/secret-references",
+                                    "pl/advanced/encryption-at-rest",
+                                    "pl/advanced/model-metadata",
+                                    "pl/advanced/cli",
+                                    "pl/advanced/build-from-source",
+                                    "pl/advanced/api-endpoints",
+                                    "pl/advanced/swagger-ui",
+                                    "pl/advanced/resilience",
+                                    "pl/advanced/provider-failure-modes",
+                                    "pl/advanced/version-awareness",
+                                    "pl/advanced/responses-api",
+                                    "pl/advanced/responses-compatibility",
+                                    "pl/advanced/conversations-api",
+                                    "pl/advanced/anthropic-messages-api",
+                                    "pl/advanced/decisions-api",
+                                    "pl/advanced/systemone-api",
+                                    "pl/advanced/extra-content",
+                                    "pl/advanced/audio-api",
+                                    "pl/advanced/images-api",
+                                    "pl/advanced/usage-api",
+                                    "pl/advanced/guardrails",
+                                    "pl/advanced/plugins",
+                                    "pl/advanced/workflows",
+                                    "pl/advanced/admin-endpoints"
+                                ]
+                            },
+                            {
+                                "group": "O GoModel",
+                                "icon": "info",
+                                "pages": [
+                                    "pl/about/who-we-are",
+                                    "pl/about/values",
+                                    "pl/about/technical-philosophy",
+                                    "pl/about/why-go",
+                                    "pl/about/roadmap",
+                                    "pl/about/license",
+                                    "pl/about/benchmarks",
+                                    "pl/about/faq"
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "tab": "Przewodniki",
+                        "icon": "compass",
+                        "pages": [
+                            "pl/guides/production",
+                            "pl/guides/updating",
+                            "pl/guides/migrate-from-litellm",
+                            "pl/guides/caddy",
+                            "pl/guides/openai-agents-sdk",
+                            "pl/guides/openclaw",
+                            "pl/guides/n8n",
+                            "pl/guides/openwebui",
+                            "pl/guides/librechat",
+                            {
+                                "group": "Narzędzia AI do programowania",
+                                "icon": "terminal",
+                                "pages": [
+                                    "pl/guides/claude-code",
+                                    "pl/guides/codex",
+                                    "pl/guides/cursor",
+                                    "pl/guides/kimi-code-cli",
+                                    "pl/guides/oh-my-pi",
+                                    "pl/guides/opencode-and-other-agents"
+                                ]
+                            },
+                            "pl/guides/prometheus-metrics",
+                            "pl/guides/opentelemetry",
+                            "pl/guides/langfuse"
+                        ]
+                    },
+                    {
+                        "tab": "Providerzy",
+                        "icon": "plug",
+                        "pages": [
+                            "pl/providers/overview",
+                            "pl/providers/key-rotation",
+                            "pl/providers/outbound-proxy",
+                            "pl/providers/anthropic",
+                            "pl/providers/chatgpt",
+                            "pl/providers/cohere",
+                            "pl/providers/gemini",
+                            "pl/providers/deepseek",
+                            "pl/providers/deepinfra",
+                            "pl/providers/xai",
+                            "pl/providers/bailian",
+                            "pl/providers/xiaomi",
+                            "pl/providers/minimax",
+                            "pl/providers/elevenlabs",
+                            "pl/providers/audiocpp",
+                            "pl/providers/jev",
+                            "pl/providers/opencode-go",
+                            "pl/providers/sglang",
+                            "pl/providers/vllm",
+                            "pl/providers/llamacpp",
+                            "pl/providers/llmd",
+                            "pl/providers/multiple-ollama",
+                            "pl/providers/kimicode",
+                            "pl/providers/hetzner",
+                            "pl/providers/edenai",
+                            {
+                                "group": "Platformy chmurowe",
+                                "icon": "cloud",
+                                "pages": [
+                                    "pl/providers/vertex",
+                                    "pl/providers/bedrock",
+                                    "pl/providers/bedrock-mantle",
+                                    "pl/providers/azure",
+                                    "pl/providers/oracle"
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "tab": "Dokumentacja API",
+                        "icon": "braces",
+                        "openapi": {
+                            "source": "openapi.json",
+                            "directory": "pl/api-reference"
+                        }
+                    }
+                ]
             }
         ]
     }

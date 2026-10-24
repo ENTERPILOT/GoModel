@@ -1,0 +1,203 @@
+---
+title: "Amazon Bedrock Mantle"
+description: "Nutzen Sie den OpenAI-kompatiblen Mantle-Endpunkt von Amazon Bedrock mit direktem Routing über die Responses API, einschließlich GPT-5.6 Sol, Terra und Luna."
+icon: "/brand/bedrock.svg"
+keywords: ["Amazon Bedrock Mantle", "Responses API", "OpenAI-kompatibles Bedrock", "OpenAI-compatible Bedrock", "Provider-Einrichtung", "provider setup"]
+---
+
+Bedrock Mantle ist der OpenAI-kompatible Inferenz-Endpunkt von Amazon Bedrock. GoModel ruft dessen
+Responses API direkt auf, sodass Modelle, die nur die Responses API unterstützen, nicht in Chat
+Completions oder Bedrock Converse übersetzt werden.
+
+<Note>
+  Dies ist ein eigener Provider-Typ, getrennt von [Amazon Bedrock Runtime](/de/providers/bedrock).
+  Verwenden Sie `bedrock-mantle` für OpenAI-kompatible Mantle-Modelle und `bedrock` für
+  Converse-Modelle von Bedrock Runtime. Sie können beide gleichzeitig konfigurieren.
+</Note>
+
+## Voraussetzungen
+
+Aktivieren Sie die Modelle in Ihrem AWS-Konto und wählen Sie eine unterstützte AWS-Region. Sie
+können sich mit einem Amazon-Bedrock-API-Key oder über die Standard-Credential-Chain von AWS
+authentifizieren.
+
+## Konfiguration
+
+<Tabs>
+  <Tab title="Bedrock-API-Key">
+
+```bash
+BEDROCK_MANTLE_API_KEY=ABSK...
+BEDROCK_MANTLE_BASE_URL=us-east-1
+GOMODEL_MASTER_KEY=change-me
+```
+
+  </Tab>
+  <Tab title="AWS-Zugangsdaten (SigV4)">
+
+```bash
+BEDROCK_MANTLE_BASE_URL=us-east-1
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+# AWS_SESSION_TOKEN=...       # nur für temporäre Zugangsdaten
+GOMODEL_MASTER_KEY=change-me
+```
+
+  </Tab>
+</Tabs>
+
+Für SigV4 verwendet GoModel die Credential-Chain des AWS SDK, einschließlich `AWS_PROFILE`, IAM
+Identity Center sowie Container- oder Instanzrollen. Bevorzugen Sie im Produktivbetrieb
+Workload-Zugangsdaten gegenüber langlebigen Access Keys.
+
+`AWS_BEARER_TOKEN_BEDROCK` wird ebenfalls als Bearer-Token-Fallback akzeptiert. Setzen Sie dazu
+`BEDROCK_MANTLE_BASE_URL`, damit die Provider-Erkennung Mantle aktivieren kann.
+
+Die Base URL kann eine AWS-Region oder ein vollständiger Endpunkt sein. Eine Region ist die
+empfohlene Form:
+
+```bash
+BEDROCK_MANTLE_BASE_URL=us-west-2
+# Entsprechender Host: https://bedrock-mantle.us-west-2.api.aws
+```
+
+Bei einer Konfiguration per API-Key oder YAML ohne Base URL verwendet GoModel
+`BEDROCK_MANTLE_REGION`, dann `AWS_REGION`, dann `AWS_DEFAULT_REGION` und schließlich `us-east-1`.
+Wenn nur IAM-Zugangsdaten vorhanden sind, setzen Sie `BEDROCK_MANTLE_BASE_URL`, damit die
+Provider-Erkennung Mantle aktiviert.
+
+Alternativ konfigurieren Sie den Provider in `config.yaml`:
+
+```yaml
+providers:
+  bedrock-mantle:
+    type: bedrock-mantle
+    base_url: us-east-1
+    api_key: "${BEDROCK_MANTLE_API_KEY}"
+```
+
+## GPT-5.6 aufrufen
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/v1/responses \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai.gpt-5.6-sol",
+    "input": "Explain why idempotency matters in distributed systems."
+  }'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+response = client.responses.create(
+    model="openai.gpt-5.6-sol",
+    input="Explain why idempotency matters in distributed systems.",
+)
+
+print(response.output_text)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const response = await client.responses.create({
+  model: "openai.gpt-5.6-sol",
+  input: "Explain why idempotency matters in distributed systems.",
+});
+
+console.log(response.output_text);
+```
+
+</CodeGroup>
+
+Streaming nutzt denselben Gateway-Endpunkt mit `"stream": true`. `previous_response_id`, Tools,
+Reasoning-Steuerungen und unbekannte Erweiterungsfelder werden an Mantle weitergeleitet, ohne den
+Request in das Chat-Format zu übersetzen.
+
+### Verfügbarkeit von GPT-5.6
+
+| Modell | Modell-ID | Kontext | AWS-Regionen |
+| ----- | -------- | ------- | ----------- |
+| Sol | `openai.gpt-5.6-sol` | 272K | `us-east-1`, `us-east-2` |
+| Terra | `openai.gpt-5.6-terra` | 272K | `us-east-1`, `us-east-2`, `us-west-2` |
+| Luna | `openai.gpt-5.6-luna` | 272K | `us-east-1`, `us-east-2`, `us-west-2` |
+
+Diese Modelle unterstützen die Responses API, nicht Chat Completions, Converse oder Invoke. GoModel
+sendet sie automatisch an `/openai/v1/responses`, den modellspezifischen Pfad, den AWS
+voraussetzt. Andere Mantle-Modelle verwenden je nach Bedarf `/v1/responses` oder
+`/v1/chat/completions`.
+
+## Auswahl des Endpunktpfads
+
+`BEDROCK_MANTLE_API_MODE` steuert, welchen OpenAI-kompatiblen Pfad GoModel verwendet:
+
+| Wert | Verhalten |
+| ----- | -------- |
+| `auto` | Standardwert. Verwendet `/openai/v1` für bekannte Modellfamilien, die diesen Pfad erfordern, und `/v1` für andere Modelle. |
+| `openai` | Erzwingt `/openai/v1` für Inferenz-Requests. |
+| `standard` | Erzwingt `/v1` für Inferenz-Requests. |
+
+Der Modellkatalog verwendet immer `/v1/models`. Nutzen Sie einen Override, wenn AWS ein Modell
+hinzufügt, bevor die automatische Pfadliste von GoModel aktualisiert wurde.
+
+In YAML setzen Sie dieselbe Option mit `api_mode`:
+
+```yaml
+providers:
+  mantle-preview:
+    type: bedrock-mantle
+    base_url: us-east-1
+    api_mode: openai
+    models:
+      - openai.gpt-5.6-sol
+```
+
+## Mehrere Mantle-Provider
+
+Verwenden Sie Umgebungsvariablen mit Suffix für getrennte Regionen oder Konten:
+
+```bash
+BEDROCK_MANTLE_EAST_API_KEY=ABSK...
+BEDROCK_MANTLE_EAST_BASE_URL=us-east-1
+
+BEDROCK_MANTLE_WEST_API_KEY=ABSK...
+BEDROCK_MANTLE_WEST_BASE_URL=us-west-2
+```
+
+Dadurch werden `bedrock-mantle-east` und `bedrock-mantle-west` registriert.
+
+## Fehlerbehebung
+
+- **GPT-5.6 liefert `404` oder lehnt den Request ab** – verwenden Sie den Provider-Typ
+  `bedrock-mantle`. Der Bedrock-Runtime-Provider nutzt Converse, das GPT-5.6 nicht unterstützt.
+- **`403` / Zugriff verweigert** – aktivieren Sie den Modellzugriff und prüfen Sie, ob der API-Key
+  oder der IAM-Principal in dieser Region Inferenz über Bedrock Mantle aufrufen darf.
+- **Provider wird mit `AWS_BEARER_TOKEN_BEDROCK` oder einer IAM-Rolle nicht erkannt** – setzen Sie
+  `BEDROCK_MANTLE_BASE_URL`, um den Provider ohne Key zu aktivieren.
+- **Ein neu veröffentlichtes Modell verwendet die falsche Route** – setzen Sie
+  `BEDROCK_MANTLE_API_MODE=openai` oder `standard` für diese Provider-Instanz.
+
+## Referenzen
+
+- [Inference using the Responses API](https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-mantle.html)
+- [GPT-5.6 Sol](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-56-sol.html)
+- [GPT-5.6 Terra](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-56-terra.html)
+- [GPT-5.6 Luna](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-56-luna.html)
+- [API compatibility by model](https://docs.aws.amazon.com/bedrock/latest/userguide/models-api-compatibility.html)
+- [Bedrock Mantle quotas](https://docs.aws.amazon.com/bedrock/latest/userguide/quotas-mantle.html)

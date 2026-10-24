@@ -1,0 +1,192 @@
+---
+title: "Amazon Bedrock: Zugangsdaten und Modell-Routing"
+sidebarTitle: "Amazon Bedrock"
+description: "Konfigurieren Sie Amazon Bedrock in GoModel mit AWS-Zugangsdaten und der Converse API von Bedrock Runtime."
+icon: "/brand/bedrock.svg"
+keywords: ["Amazon Bedrock", "AWS-Zugangsdaten", "AWS credentials", "Converse API", "Bedrock-Modell-Routing", "Bedrock model routing", "Provider-Einrichtung", "provider setup"]
+---
+
+GoModel routet Bedrock-Requests über die APIs Converse und ConverseStream von
+Bedrock Runtime und normalisiert die Responses über alle Modellfamilien
+hinweg (Anthropic, Amazon Nova, Meta Llama, Mistral, Cohere, AI21 und weitere)
+in OpenAI-kompatible Chat Completions.
+
+Bedrock hat keinen eigenen API-Key – GoModel ermittelt AWS-Zugangsdaten zur
+Laufzeit über die Standard-Credential-Chain von AWS (Umgebung, `AWS_PROFILE`,
+IAM Identity Center, Instanz- und Container-Rollen).
+
+## Konfigurieren
+
+```bash
+BEDROCK_BASE_URL=us-east-1   # Region (empfohlen) oder vollständige URL des Bedrock-Endpunkts
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+# AWS_SESSION_TOKEN=...      # nur für temporäre Zugangsdaten
+GOMODEL_MASTER_KEY=change-me
+```
+
+Bevorzugen Sie im Produktivbetrieb Instanzrollen, IRSA oder IAM Identity
+Center gegenüber langlebigen Access Keys. Ist `BEDROCK_BASE_URL` leer, greift
+GoModel auf `AWS_REGION` / `AWS_DEFAULT_REGION` zurück.
+
+## GoModel starten
+
+<CodeGroup>
+
+```bash Docker (.env-Datei)
+docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
+```
+
+```bash Docker (inline -e)
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e BEDROCK_BASE_URL="us-east-1" \
+  -e AWS_ACCESS_KEY_ID="..." \
+  -e AWS_SECRET_ACCESS_KEY="..." \
+  enterpilot/gomodel
+```
+
+```bash Binary (make build)
+make build
+./bin/gomodel
+```
+
+</CodeGroup>
+
+## Prüfen
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "anthropic.claude-3-5-haiku-20241022-v1:0",
+    "messages": [{"role": "user", "content": "Reply with the single word ok."}],
+    "max_tokens": 80
+  }'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+completion = client.chat.completions.create(
+    model="anthropic.claude-3-5-haiku-20241022-v1:0",
+    messages=[{"role": "user", "content": "Reply with the single word ok."}],
+    max_tokens=80,
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const completion = await client.chat.completions.create({
+  model: "anthropic.claude-3-5-haiku-20241022-v1:0",
+  messages: [{ role: "user", content: "Reply with the single word ok." }],
+  max_tokens: 80,
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
+
+`GET /v1/models` liefert Bedrock-Modelle, bei denen `owned_by` auf den
+ursprünglichen Hersteller gesetzt ist (z. B. `anthropic`, `amazon`). Streaming
+(`stream: true`) und die Responses API werden intern auf Converse abgebildet.
+
+## Die Modellliste einschränken oder erweitern
+
+Standardmäßig fragt GoModel die Control Plane von Bedrock ab und listet alle
+On-Demand-Textmodelle auf, auf die das Konto Zugriff hat. Um IDs von
+Inference-Profilen oder ARNs eigener Modelle festzulegen:
+
+```bash
+BEDROCK_MODELS=anthropic.claude-3-5-haiku-20241022-v1:0,amazon.nova-lite-v1:0
+```
+
+Oder in `config.yaml`:
+
+```yaml
+providers:
+  bedrock:
+    type: bedrock
+    base_url: "us-east-1"
+    models:
+      - anthropic.claude-3-5-haiku-20241022-v1:0
+      - amazon.nova-lite-v1:0
+```
+
+Das Verhalten folgt der globalen Einstellung `CONFIGURED_PROVIDER_MODELS_MODE`
+– `fallback` (Standard) verwendet die Liste nur, wenn `ListFoundationModels`
+nicht verfügbar oder leer ist; `allowlist` stellt nur die konfigurierten
+Modelle bereit und überspringt den Upstream-Aufruf.
+
+## Mehrere Bedrock-Provider
+
+Verwenden Sie Umgebungsvariablen mit Suffix, um separate Bedrock-Instanzen zu
+registrieren:
+
+```bash
+BEDROCK_US_BASE_URL=us-east-1
+BEDROCK_US_MODELS=anthropic.claude-3-5-haiku-20241022-v1:0
+
+BEDROCK_EU_BASE_URL=eu-west-1
+BEDROCK_EU_MODELS=amazon.nova-lite-v1:0
+```
+
+Dadurch werden die Provider `bedrock-us` und `bedrock-eu` registriert. Die
+Bedrock-Zugangsdaten stammen weiterhin aus der Standard-Credential-Chain von
+AWS.
+
+## Erlaubte Tools
+
+Bedrock Converse kann einen Turn nicht auf eine Teilmenge der deklarierten
+Tools beschränken. Bei einem `tool_choice` vom Typ `allowed_tools` deklariert
+GoModel nur die aufgelisteten Funktionen, mit `toolChoice` `any`, wenn der
+Modus `required` ist, und andernfalls `auto`. Eine Teilmenge, die keine
+deklarierte Funktion nennt, wird mit 400 abgelehnt.
+
+`allowed_tools` existiert, damit ein Client bei jedem Turn dieselbe Tool-Liste senden und seinen Prompt-Cache behalten kann. Das Einschränken ändert die an Upstream gesendeten Tool-Definitionen, und bei Claude-Modellen stehen diese im gecachten Präfix vor dem System-Prompt. Eine Teilmenge, die sich zwischen Turns ändert, macht den Cache daher ungültig.
+
+## Noch nicht integriert
+
+- Bedrock-Embeddings – der Embedding-Pfad über `InvokeModel` ist
+  modellspezifisch und nicht angebunden.
+
+## Fehlerbehebung
+
+- **`AccessDeniedException` / `403`** – Dem AWS-Principal fehlen
+  Bedrock-Berechtigungen, oder der Modellzugriff wurde in der Bedrock-Konsole
+  nicht gewährt.
+- **`on-demand throughput isn't supported`** – Das Modell erfordert ein
+  Inference-Profil oder Provisioned Throughput. Setzen Sie `BEDROCK_MODELS`
+  auf die ID des Inference-Profils.
+- **`model registry has no models`** – Die Region hat keine
+  On-Demand-Textmodelle, oder der Aufruf der Control Plane ist fehlgeschlagen.
+  Setzen Sie `BEDROCK_MODELS` oder prüfen Sie IAM.
+- **Falsche Region ermittelt** – Übergeben Sie `BEDROCK_BASE_URL` explizit. Bei
+  einer vollständigen Endpunkt-URL extrahiert GoModel das Regionssegment nur,
+  wenn der Host auf `.amazonaws.com` endet; eigene Endpunkte sollten mit
+  `AWS_REGION` kombiniert werden.
+
+## Referenzen
+
+- [Bedrock Runtime Converse API](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html)
+- [Modellzugriff in der Bedrock-Konsole](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html)
+- [AWS-Credential-Chain](https://docs.aws.amazon.com/sdkref/latest/guide/standardized-credentials.html)

@@ -1,0 +1,339 @@
+---
+title: "弹性与容错"
+description: "调整重试和按提供商划分的熔断器，并了解何时应改用跨模型故障转移。"
+icon: "shield-check"
+keywords: ["弹性与容错", "重试", "熔断器", "退避", "容错", "resilience", "retries", "circuit breaker", "backoff", "fault tolerance"]
+---
+
+GoModel 为每次上游提供商调用都加上了两层弹性保护：
+
+1. **指数退避重试**：以逐渐增长的延迟，对同一提供商重复发送失败的请求。
+2. **熔断器**：对持续失败的提供商直接短路调用，并在超时结束后进行探测。
+
+重试作用于所选的目标。熔断器默认按提供商生效，设置 `scope: model` 后则按模型生效。
+它们在失败时不会切换到其他模型或提供商。如需跨模型故障转移，请参阅
+[故障转移](/zh/features/failover)。
+
+本页介绍可调整的参数。关于提供商更改响应格式、返回 `200` 但内容不可用，或在流式传输中途中断时
+GoModel 的处理方式，请参阅[提供商故障模式](/zh/advanced/provider-failure-modes)。
+
+## 默认值
+
+默认值经过调优，对大多数部署而言都是安全的。只需覆盖您需要的部分。
+
+| 设置                | 默认值  | 说明                                           |
+| ------------------- | ------- | ---------------------------------------------- |
+| `retry_on_statuses` | `[429, 502, 503, 504, 522, 524]` | 触发重试的 HTTP 状态码 |
+| `failure_on_statuses` | `[429, 5xx]` | 计为熔断器失败的 HTTP 状态码 |
+| `scope` | `provider` | 熔断器隔离粒度：`provider` 或 `model` |
+| `max_retries`       | `3`     | 每个请求的最大重试次数                         |
+| `initial_backoff`   | `1s`    | 首次重试的等待时间                             |
+| `max_backoff`       | `30s`   | 重试等待时间的上限                             |
+| `backoff_factor`    | `2.0`   | 两次重试之间的指数乘数                         |
+| `jitter_factor`     | `0.1`   | 随机抖动，以退避时间的比例表示                 |
+| `enabled`           | `true`  | 开启或关闭熔断器                               |
+| `failure_threshold` | `5`     | 熔断器打开前的连续失败次数                     |
+| `success_threshold` | `2`     | 熔断器重新关闭所需的连续成功次数               |
+| `timeout`           | `30s`   | 熔断器保持打开状态多久后开始探测               |
+| `slow_call_threshold` | `0`（关闭） | 慢于此值的响应计为熔断器失败 |
+
+要禁用重试，请设置 `max_retries: 0`，每个请求只会尝试一次。要禁用熔断器，请设置
+`circuit_breaker.enabled: false`（或 `CIRCUIT_BREAKER_ENABLED=false`）；阈值会被保留但不再生效，
+因此重新开启后您的调优设置会恢复。设置 `failure_threshold: 0` 也会禁用熔断器。
+两个开关都可以全局设置或按提供商设置；当全局关闭熔断器时，按提供商设置 `enabled: true`
+可以为该提供商重新启用熔断器。
+
+当提供商前面已有组件负责削减负载（提供商侧的负载均衡器、服务网格），或者短时间内的一批
+`5xx` 响应绝不能暂停发往该提供商的流量时，请关闭熔断器。其他情况下请保持开启：
+正是熔断器避免了一个已宕机的上游让每个请求都耗尽完整的超时时间。
+
+## 什么算作失败
+
+**重试**会在传输错误（连接被拒绝、连接重置、DNS 解析失败）时触发，默认也会在 `429`、`502`、
+`503`、`504`、`522` 和 `524` 响应时触发。其他状态码（包括 `500`）会直接返回给调用方，不进行重试。
+以下路径的重试比上表所示更少：
+
+- **本地 HTTP 客户端超时**会立即返回，不进行重试。整体请求上下文已过期时也会阻止后续尝试。
+
+- **流式**请求一旦发出便永远不会重试，因为部分数据可能已经发送。
+- **透传**请求仅在可安全重放时才会重试：`GET`、`HEAD`、`OPTIONS`、`PUT`，
+  或任何携带 `Idempotency-Key` 请求头的请求。
+
+**幂等键**会传递给提供商。当客户端发送 `Idempotency-Key` 请求头时，GoModel 会在为该请求发起的
+提供商调用及其每次重试中原样转发它，因此按该键去重的提供商可以识别出重放的请求。
+故障转移到其他目标的尝试会发送不同的请求体，因此不携带该键；护栏检查等网关内部调用同样不携带。
+键必须是不超过 255 个字符的可见 ASCII 字符，其他任何值都会被忽略。
+
+**隐藏在 HTTP 200 背后的错误**会在上述处理之前被识别出来。一些提供商（最著名的是 OpenRouter）
+会返回 `200 OK`，但响应体只是一个 `{"error": ...}` JSON。GoModel 会检测此类负载，并将其作为
+真正的错误处理：嵌入在 `error.code` 中的状态码会被保留（因此隐藏的 `429` 与真实状态码的
+行为一致），其他情况则映射为 `502`。映射后的状态码随后会像真实的错误状态码一样驱动重试、
+熔断器和故障转移，且该响应永远不会被作为成功结果缓存。透传端点不受此影响：
+它们会逐字节转发提供商的响应。
+
+**提前停止的流**会以明确的错误结束，而不是静默的 EOF。当提供商的流在其终止事件
+（Chat Completions 的 `data: [DONE]` 或 `finish_reason`，`/v1/responses` 的终止
+`response.*` 事件，`/v1/messages` 的 `message_stop`）之前关闭或失败时，GoModel 会中继目前已收到的
+全部内容，然后以该端点的格式发送一个错误事件：
+
+- Chat Completions：`data: {"error":{"code":"stream_incomplete",...}}`
+- `/v1/responses`：一个带有 `"code":"stream_incomplete"` 的 `error` 事件
+- `/v1/messages`：一个 Anthropic `error` 事件，其 `error.type` 设置为 `api_error`
+
+这涵盖了格式错误的数据块、工具调用中途断开的连接以及类似的截断情况，因此客户端永远不会把
+部分回答误认为完整回答。已经发送终止事件的流，即使之后连接失败，也仍视为完整。
+请求日志会将被截断的流记录为 `stream_error`。
+
+**熔断器**将传输错误计为失败，默认也将 `429` 和所有 `5xx` 响应计为失败。一次耗尽的重试序列
+计为一次失败；单个 HTTP 重试不会增加熔断器计数。成功的序列会记录为成功。客户端取消会被忽略；
+本地客户端超时计为失败。
+
+`retry.retry_on_statuses` 和 `circuit_breaker.failure_on_statuses` 需分别设置。两者都接受
+精确的状态码和 `5xx` 这样的类别。省略列表时使用默认值；显式列表会替换默认值；`[]` 会禁用基于状态码的
+触发，但保留对传输错误的处理。例如，`failure_on_statuses: [5xx]` 会将速率限制排除在熔断器失败之外，
+恢复探测期间也是如此。无效的状态码或作用域会导致配置加载失败。
+
+**持续的高延迟**也会使熔断器打开。设置 `circuit_breaker.slow_call_threshold`
+（或 `CIRCUIT_BREAKER_SLOW_CALL_THRESHOLD`）后，任何提供商响应慢于该值的调用都会计为熔断器失败，
+与 `5xx` 完全相同。慢响应仍会返回给调用方；在连续 `failure_threshold` 次慢调用或失败调用之后，
+熔断器打开，后续请求会以可触发故障转移的 `503` 快速失败，而缓慢的恢复探测会使其重新打开。
+请参阅[从慢速提供商故障转移](#从慢速提供商故障转移)。
+
+计时覆盖包括重试在内的整个调用。对于流式请求，计时在第一个数据事件时停止，
+因此该阈值限制的是首个 Token 的时间，而不是流的长度。
+
+该功能默认关闭，因为正常延迟取决于工作负载：一次非流式的推理调用完全可能合理地耗时数分钟。
+请选择一个远高于最慢的健康请求的值，并在工作负载不同时按提供商覆盖。该阈值永远不会取消请求，
+那是 `HTTP_TIMEOUT` 的职责，而触发该超时的调用本身就已计为失败。
+
+默认值现在包含 `429` 熔断器失败。此前依赖速率限制不会打开熔断器的部署，可以设置
+`failure_on_statuses: [5xx]` 以保留原有行为。
+
+熔断器打开期间，请求会以 `503` 快速失败，消息为
+`circuit breaker is open - provider <name> temporarily unavailable`，其中 `<name>`
+是配置的提供商名称（例如 `openai-eu`，而不是其类型）。`timeout` 结束后，会放行一个探测请求，
+同时并发请求继续快速失败；连续 `success_threshold` 次探测成功后熔断器关闭，而一次符合熔断器策略的失败
+会使其重新打开。探测只发起一次 HTTP 尝试，不进行重试。
+
+熔断器保存在内存中，且按网关进程划分：默认情况下每个提供商拥有自己的熔断器。设置 `scope: model` 后，
+提供商实例中的每个模型都有独立的熔断器；不带模型的请求（例如模型发现）使用单独的提供商熔断器。
+multipart 音频上传使用其显式指定的模型名称。
+
+每个提供商最多保留 1,024 个模型熔断器。查找新模型时，空闲且处于关闭状态的条目会在 10 分钟后过期；
+达到上限时，最旧的空闲关闭条目会被更早淘汰。活跃的熔断器和处于打开状态的熔断器会被保留。
+如果所有槽位都受保护，新模型会收到可触发故障转移的 `503`，直到有槽位可用。
+
+状态会在重启时重置，且副本之间不共享任何状态。
+
+## 环境变量
+
+这些变量设置全局默认值，除非在 YAML 中被覆盖，否则适用于所有提供商。
+
+### 重试
+
+| 变量                     | 类型     | 默认值  | 说明                                       |
+| ------------------------ | -------- | ------- | ------------------------------------------ |
+| `RETRY_ON_STATUSES` | 逗号分隔的列表 | `429,502,503,504,522,524` | 触发重试的 HTTP 状态码 |
+| `RETRY_MAX_RETRIES`      | int      | `3`     | 每个请求的最大重试次数                     |
+| `RETRY_INITIAL_BACKOFF`  | duration | `1s`    | 首次重试的等待时间（如 `500ms`、`2s`）     |
+| `RETRY_MAX_BACKOFF`      | duration | `30s`   | 重试等待时间的上限                         |
+| `RETRY_BACKOFF_FACTOR`   | float    | `2.0`   | 两次重试之间的指数乘数                     |
+| `RETRY_JITTER_FACTOR`    | float    | `0.1`   | 随机抖动，以退避时间的比例表示             |
+
+### 熔断器
+
+| 变量                                | 类型     | 默认值  | 说明                                          |
+| ----------------------------------- | -------- | ------- | --------------------------------------------- |
+| `CIRCUIT_BREAKER_FAILURE_ON_STATUSES` | 逗号分隔的列表 | `429,5xx` | 计为失败的 HTTP 状态码 |
+| `CIRCUIT_BREAKER_SCOPE` | string | `provider` | `provider` 或 `model` 隔离 |
+| `CIRCUIT_BREAKER_ENABLED`           | bool     | `true`  | 设置为 `false` 可关闭熔断器                   |
+| `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | int      | `5`     | 打开前的连续失败次数                          |
+| `CIRCUIT_BREAKER_SUCCESS_THRESHOLD` | int      | `2`     | 重新关闭所需的连续成功次数                    |
+| `CIRCUIT_BREAKER_TIMEOUT`           | duration | `30s`   | 熔断器保持打开状态多久后开始探测              |
+| `CIRCUIT_BREAKER_SLOW_CALL_THRESHOLD` | duration | `0`   | 慢于此值的响应计为失败；`0` 表示禁用 |
+
+## YAML
+
+全局 `resilience:` 块中提供相同的字段，并可按提供商覆盖：
+
+```yaml
+resilience:
+  retry:
+    max_retries: 2
+    initial_backoff: 500ms
+    max_backoff: 10s
+    backoff_factor: 1.5
+    jitter_factor: 0.05
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 3
+    success_threshold: 1
+    timeout: 15s
+
+providers:
+  anthropic:
+    type: anthropic
+    api_key: ${ANTHROPIC_API_KEY}
+    resilience:
+      retry:
+        max_retries: 5 # Anthropic 支持长请求，允许更多重试
+
+  ollama:
+    type: ollama
+    base_url: ${OLLAMA_BASE_URL:-http://localhost:11434/v1}
+    resilience:
+      circuit_breaker:
+        failure_threshold: 10 # 本地服务，容忍更多暂时性失败
+        timeout: 5s
+
+  vllm:
+    type: vllm
+    base_url: ${VLLM_BASE_URL:-http://localhost:8000/v1}
+    resilience:
+      circuit_breaker:
+        enabled: false # 前面有自己的负载均衡器，永不快速失败
+```
+
+只有在提供商的 `resilience:` 块中显式列出的字段才会被覆盖。其余字段均继承自全局部分，
+而全局部分又继承自内置默认值。
+
+<Note>
+  按提供商的调优**必须**通过 YAML 设置。环境变量只设置全局默认值，
+  `RETRY_MAX_RETRIES` 无法针对单个提供商。请参阅
+  [config.yaml 注意事项](/zh/advanced/config-yaml#注意事项)。
+</Note>
+
+### 完整示例
+
+根据上面的 YAML，各提供商的实际生效设置如下：
+
+| 提供商    | max_retries      | 熔断器 enabled       | failure_threshold | 熔断器 timeout    |
+| --------- | ---------------- | -------------------- | ----------------- | ----------------- |
+| openai    | 2（全局）        | true（全局）         | 3（全局）         | 15s（全局）       |
+| anthropic | **5**（覆盖）    | true（全局）         | 3（全局）         | 15s（全局）       |
+| ollama    | 2（全局）        | true（全局）         | **10**（覆盖）    | **5s**（覆盖）    |
+| vllm      | 2（全局）        | **false**（覆盖）    | 3（全局，未使用） | 15s（全局，未使用） |
+
+`anthropic`、`ollama` 和 `vllm` 继承了所有未显式覆盖的字段。由于熔断器被禁用，
+`vllm` 也不会在控制台或 `gomodel_circuit_breaker_state` 指标中报告熔断器状态。
+
+## 熔断器与控制台中的提供商健康状态
+
+控制台的[提供商状态](/zh/providers/overview#提供商状态)结合了两个相互独立的信号：
+
+- **模型发现**：最近一次是否能够获取该提供商的模型清单（详见下文）。
+- **请求健康状况**：按提供商和模型统计的 10 分钟滑动窗口内的真实请求结果，包括熔断器的实时状态。
+
+熔断器的状态显示在每个提供商卡片上：展开卡片会显示 **Breaker State** 标签；熔断器打开时，
+提供商的状态标签会变为 `Circuit Open`；半开状态则显示 `Recovering`。设置 `scope: model` 时，
+提供商级别的熔断器显示和指标反映的是最近完成的请求所对应的熔断器，而不是所有模型熔断器的汇总。
+如果某个模型最近的请求持续失败（至少 3 次错误，且占其窗口内请求的一半或以上），即使模型发现
+仍然成功，该提供商也会被标记为 `Degraded`。这可以发现那些能正常列出模型、但真实调用失败的上游，
+例如故意从不触发熔断器、却误报的 `4xx` 错误。
+
+请求健康信号只会使基于模型发现的状态变差，而不会使其变好，且这种追踪保存在每个网关进程的内存中。
+提供商恢复后，熔断器仍会在 `timeout`（默认 30s）内自行恢复；启用[指标](/zh/advanced/configuration#指标)
+时，其状态还会以 `gomodel_circuit_breaker_state` 仪表指标导出（0 = 关闭，1 = 半开，2 = 打开）。
+
+模型发现会在以下时机重新检查：
+
+- 启动时；
+- 每次刷新模型注册表时，由 `CACHE_REFRESH_INTERVAL` 控制（单位为秒，默认 `3600`，即每小时）；
+- 在快速重检循环中，该循环**仅**重新探测最近一次刷新失败的提供商，由
+  `PROVIDER_RECHECK_INTERVAL` 控制（在 `config.yaml` 中为 `cache.model.recheck_interval`；
+  单位为秒，默认 `60`；`0` 表示禁用）；
+- 按需检查：当请求指定了注册表中不存在的、带提供商限定的模型（`provider/model`）时。
+
+## 提供商宕机期间会发生什么
+
+当提供商的刷新失败时，其先前发现的模型会被标记为过期，控制台会将该提供商显示为 Offline：
+
+- **模型列表**（`GET /v1/models` 和控制台的模型列表）会隐藏该提供商的模型，直到其恢复，
+  因此不会向客户端提供当前无法服务的模型。
+- 对其模型的**直接请求**（`provider/model`）仍会被解析并发送给该提供商，因此调用方会得到如实的
+  `502`/`503`（且覆盖该模型的虚拟模型的故障转移链可以触发），而不是具有误导性的 “model not found”。
+- **虚拟模型重定向**会跳过该提供商的目标，因此负载均衡的重定向会通过其健康的目标继续工作。
+
+例外情况：当**所有**提供商同时失败时（例如仅控制面中断，模型发现不可达，但推理仍然正常），
+之前的模型清单会原样保留并继续列出，因为隐藏所有模型只会把提供商错误变成 “model not found”。
+
+快速重检循环每隔 `PROVIDER_RECHECK_INTERVAL` 秒重新探测该提供商，更新 “Last checked”，
+通常会在提供商恢复后一分钟内恢复正常路由。启动时就已宕机的提供商（尚未发现任何模型）
+会显示为 Unhealthy，直到首次成功获取模型清单。
+
+## 故障转移与弹性容错
+
+重试始终针对所选目标；熔断器跟踪配置的提供商或模型作用域。如果您还希望 GoModel 在主模型持续失败时
+尝试其他模型或提供商，请为该模型配置一个包含多个目标的虚拟模型，其余目标即构成故障转移链。
+请参阅[故障转移](/zh/features/failover)。
+
+## 重试 Cloudflare 超时，然后切换模型
+
+对于非流式的转换请求，可以将重试与故障转移虚拟模型结合使用。请将以下设置合并到您现有的配置中，
+并使用您配置的提供商和模型名称：
+
+```yaml
+providers:
+  cloudflare:
+    # 在此保留您现有的 type、base_url 和凭据。
+    resilience:
+      retry:
+        max_retries: 2
+        retry_on_statuses: [429, 502, 503, 504, 522, 524]
+      circuit_breaker:
+        scope: model
+        failure_on_statuses: [429, 5xx]
+        failure_threshold: 5
+
+virtual_models:
+  - source: resilient-chat
+    strategy: failover
+    targets:
+      - model: cloudflare/model1
+      - model: cloudflare/model2
+
+failover:
+  enabled: true
+  retry_on_statuses: [429, 5xx]
+```
+
+发送 `model: resilient-chat`。当 model1 的熔断器处于关闭状态时，`524` 响应会触发最多两次对 model1
+的重试。如果三次尝试全部失败，GoModel 会使用 model2 自身的重试预算尝试 model2。model1 的熔断器打开后，
+会跳过对其上游的调用，而不会阻塞 model2。若使用默认的 `scope: provider`，两个模型则共享一个熔断器。
+
+调用方的截止时间必须为这些尝试和退避留出足够时间。流式请求不会使用此重试序列；
+已部分交付的响应无法透明地重新开始。
+
+## 从慢速提供商故障转移
+
+仍在响应、但需要数分钟才能响应的提供商，永远不会产生使熔断器打开的错误。
+`slow_call_threshold` 可以让延迟也被计入：
+
+```yaml
+providers:
+  opencode:
+    # 在此保留您现有的 type、base_url 和凭据。
+    resilience:
+      circuit_breaker:
+        scope: model # 一个慢速模型不应暂停整个提供商
+        slow_call_threshold: 60s
+        failure_threshold: 3
+
+virtual_models:
+  - source: resilient-chat
+    strategy: failover
+    targets:
+      - model: opencode/deepseek-v3
+      - model: openai/gpt-4o-mini
+
+failover:
+  enabled: true
+```
+
+一旦对 `opencode/deepseek-v3` 的连续三次调用耗时超过 60 秒（或失败），其熔断器就会打开，
+`resilient-chat` 请求会直接发送到 `openai/gpt-4o-mini`，无需等待。每隔 `timeout`（默认 30s），
+会有一个探测请求再次尝试主模型；当探测在阈值内得到响应后，流量便会恢复。
+
+两次慢调用之间出现一次快速响应就会重置计数，因此偶发的慢调用永远不会使熔断器打开。
+这里推荐使用 `scope: model`：若使用默认的 `scope: provider`，同一提供商上的快速模型
+会不断为慢速模型重置计数。

@@ -1,0 +1,157 @@
+---
+title: "System One API"
+description: "通过 GoModel 发送 TypeSafe System One 决策请求（Jev、Kev），以原生方式转发，并支持虚拟模型、护栏、缓存、故障转移、审计和用量统计。"
+icon: "scale"
+keywords: ["System One", "systemone", "Jev", "Kev", "TypeSafe", "决策模型", "decision model", "noul", "choice", "score", "OpenRouter"]
+---
+
+`POST /v1/systemone` 提供 TypeSafe 的 System One API：请求携带一个
+`state`（要评估的文本或记录）和一组类型化问题，回答则是每个问题经过校准的概率。它是决策 API，而不是文本生成器，因此 GoModel 会以**原生**方式转发它，从不在它与聊天格式之间进行翻译。如需使用 OpenAI 的请求和回答结构访问相同的模型，请使用 [Decisions API](/zh/advanced/decisions-api)，GoModel 会将其翻译为 System One。
+
+配置了 [`jev` 提供商](/zh/providers/jev)（托管的 Jev 或自托管的 Kev 服务器）或 `openrouter` 提供商后，该端点即可使用。否则，它会返回 `404`。
+
+## 请求与回答
+
+```bash
+curl -s http://localhost:8080/v1/systemone \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "jev-latest",
+    "state": "Shoes arrived two weeks late and in the wrong size. Also I see two charges on my card.",
+    "questions": {
+      "department": {"type": "choice", "instructions": "Which team should handle this?",
+                     "criteria": {"returns": "Exchanges, refunds, wrong items",
+                                  "shipping": "Delivery status, delays",
+                                  "billing": "Charges, invoices"}},
+      "escalate":   {"type": "noul", "instructions": "Does this need urgent human attention?"},
+      "frustration": {"type": "score", "instructions": "How frustrated is the customer?",
+                      "criteria": ["Calm", "Frustrated", "Very angry"]}
+    }
+  }'
+```
+
+回答由提供商给出，原样转发：
+
+```json
+{
+  "model": "jev-1.13.0",
+  "answers": {
+    "department":  {"type": "choice", "choice": "returns", "confidence": 0.21,
+                    "probabilities": {"returns": 0.47, "shipping": 0.28, "billing": 0.25}},
+    "escalate":    {"type": "noul", "noul": 0.93},
+    "frustration": {"type": "score", "score": 1.44, "confidence": 0.78,
+                    "legend": {"0": "Calm", "1": "Frustrated", "2": "Very angry"},
+                    "probabilities": {"0": 0.00, "1": 0.56, "2": 0.44}}
+  },
+  "usage": {"input_tokens": 101, "output_tokens": 161}
+}
+```
+
+TypeSafe SDK 会发送 `POST {base_url}/v1/systemone`，因此请将它们指向网关根地址（`base_url="http://localhost:8080"`），并使用您的 GoModel 密钥；参见
+[Jev / Kev](/zh/providers/jev#使用-typesafe-sdk)。
+
+## 路由
+
+| 路由 | 作用 |
+| --- | --- |
+| `POST /v1/systemone` | 针对一组问题评估某个 state |
+| `POST /v1/systemone/permute` | 仅限 Kev：以多种选项顺序运行一个 Choice 问题（`n_perm`，1 到 64，默认 6） |
+| `POST /v1/systemone/separate` | 仅限 Kev：每个问题各自单独执行一次前向传播 |
+
+Kev 路由的行为与 `/v1/systemone` 相同。OpenRouter 只支持评估路由，因此这些路由对 OpenRouter 会被拒绝；托管的 TypeSafe `jev` 提供商会自行返回 `404`。
+
+## 网关的处理过程
+
+1. 与其他端点一样解析 `model`：裸名称、带提供商限定的名称（`jev/jev-latest`）或 [虚拟模型](/zh/features/virtual-models)，然后应用调用方的 [模型允许列表](/zh/features/users)、
+   [速率限制](/zh/features/rate-limits) 和 [预算](/zh/features/budgets)。
+2. 对 `state` 运行工作流中的 prompt [护栏](/zh/advanced/guardrails)。
+3. 从 [响应缓存](/zh/features/cache) 中为相同的历史请求提供结果。
+4. 转发请求体时只修改 `model`（解析后的名称）和 `state`（如果护栏编辑了它）。问题、标准以及其他所有字段都会逐字节原样到达提供商。
+5. 原样转发回答，并将其记录到审计日志（请求类型为
+   **Decisions**）和用量中。
+
+## 图像
+
+TypeSafe 的 [图像](https://docs.typesafe.ai/images) 请求可按原样发送：
+在 JSON 请求体中使用 `assets`，或使用 TypeSafe 的 `multipart/form-data` 表单——其中 JSON 请求作为第一个部分，名为 `request`，每张图像作为一个文件部分，由某个 asset 通过 `part` 引用。TypeSafe SDK 会为 `Image`
+对象发送该表单。GoModel 会将每个图像部分以 `data_base64` 内联到对应的 asset 中，并转发一个 JSON 请求，因此护栏、缓存和故障转移对两种形式的处理方式相同。图像必须是 PNG 或 JPEG；如果 asset 指定了 `format` 则保留，否则根据图像字节判断。TypeSafe 会拒绝的表单（例如没有任何 asset 使用的部分、asset 引用了不存在的部分，或者图像不是 PNG 或 JPEG）会返回 `400`。请按 TypeSafe 的要求发送
+`TypeSafe-Danger-Zone-Images: true` 请求头；网关会将其转发。Kev 服务器只读取文本。
+
+```bash
+curl -s http://localhost:8080/v1/systemone \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "TypeSafe-Danger-Zone-Images: true" \
+  -F 'request={"model": "jev-latest", "state": {"door": "ref-door"},
+    "assets": {"ref-door": {"type": "image", "part": "door-photo"}},
+    "questions": {"person": {"type": "noul", "instructions": "Is there a person in `door`?"}}};type=application/json' \
+  -F 'door-photo=@door.png;type=image/png'
+```
+
+## 模型
+
+| 提供商 | 模型名称 |
+| --- | --- |
+| `jev`（托管） | `jev/jev-latest`、`jev/jev-preview`，以及任何带版本的 ID，例如 `jev/jev-1.13.0` |
+| `jev`（Kev 服务器） | 对于名为 `kev` 的提供商，为 `kev/kev-latest` 以及该检查点的别名 |
+| `openrouter` | `openrouter/typesafe/jev-1.13`、`openrouter/~typesafe/jev-latest`，以及 OpenRouter 的其他决策模型，例如 `openrouter/jaredpalmer/kev-4b` |
+
+System One 模型在 `GET /v1/models` 中被列为不带生成模式的工具类模型。
+
+TypeSafe 只列出其别名，但接受任何带版本的 ID，因此固定版本无需声明即可使用：当名称指明了提供商时（`jev/jev-1.13.0`），或者对于裸名称而言恰好只配置了一个 `jev` 提供商时，GoModel 会将未列出的模型路由到该 `jev` 提供商。虚拟模型也可以用同样的方式固定版本。
+
+OpenRouter 本身接受 `jev-latest`，但 GoModel 按其目录 ID 进行路由。
+如需让普通的 `jev-latest`（TypeSafe SDK 的默认值）通过 OpenRouter 正常工作，请添加一个虚拟模型：
+
+```yaml
+virtual_models:
+  - source: jev-latest
+    target: openrouter/~typesafe/jev-latest
+```
+
+## 缓存
+
+启用 [响应缓存](/zh/features/cache) 后，相同的请求（相同的路由、解析后的模型、护栏，以及护栏编辑后的请求体）会由精确缓存应答（`X-Cache: HIT (exact)`），并在用量中记录为缓存命中。语义缓存从不为 System One 提供服务：仅仅相似的 state 并不是同一个决策。发送 `Cache-Control: no-cache` 可让单个请求跳过缓存。
+
+## 故障转移
+
+使用 `failover` 策略的虚拟模型，会在当前目标因可用性错误（默认为 `429` 或 `5xx`，包括 TypeSafe 的 `529`；参见 [故障转移](/zh/features/failover)）失败时，将请求转移到下一个目标。
+每个目标都以各自的 System One 形式接收请求。不支持该 API 的目标（例如聊天模型）会被跳过，且不消耗故障转移尝试次数；客户端错误（例如格式错误的问题，`422`）会直接返回，不进行故障转移：
+
+```yaml
+virtual_models:
+  - source: decider
+    strategy: failover
+    targets:
+      - { model: kev/kev-latest }                # 优先使用本地 Kev
+      - { model: openrouter/typesafe/jev-1.13 }  # Kev 不可用时使用托管 Jev
+```
+
+审计日志会显示每次尝试，用量记录在实际作答的目标下，故障转移得到的回答不会被缓存。
+
+## 护栏
+
+护栏将 `state` 视为一条用户消息：字符串类型的 state 以其文本形式出现，其他 JSON 值以编码后的 JSON 形式出现，且编辑后必须仍是有效的 JSON。这正是匿名化和拦截类护栏所需要的；例如，遮盖卡号的
+`string_replace` 规则会在 `state` 离开网关之前对其生效。问题是您应用程序的固定 schema，不会暴露给护栏。
+
+决策请求无法承载的编辑（例如同时覆盖聊天模型的护栏所注入的系统提示词）会被丢弃。网关会为每种被丢弃的编辑输出一条警告，之后的重复情况以 debug 级别记录。本会直接应答请求的护栏会改为拦截该请求，因为 System
+One 的调用方期望得到类型化的回答，而不是文本。
+
+只有 prompt 阶段适用。回答是类型化的值而不是补全，因此 response 和 stream 阶段的护栏不会对其运行，回答会被原样转发；为 System One 请求选择了此类护栏的工作流，会为每个护栏输出一条警告。
+
+## 错误与误用
+
+该端点从不进行翻译，当请求无法工作时会明确告知：
+
+| 情况 | 结果 |
+| --- | --- |
+| 未配置 `jev` 或 `openrouter` 提供商 | `404` |
+| 缺少 `model` | `400` |
+| 模型所在的提供商不支持 System One，或者是聊天、嵌入或其他生成类模型（包括通过虚拟模型） | `400 invalid_request_error` 并说明原因；网关会输出一条警告 |
+| System One 模型被发送到 `/v1/chat/completions`、`/v1/responses` 或 `/v1/embeddings` | `400 invalid_request_error`，并指向 `/v1/decisions` 和 `/v1/systemone` |
+| 上游错误，例如格式错误的问题 | 提供商的状态码及其消息 |
+
+## 审计、用量与成本
+
+每次调用都会在其路由下生成一条审计条目，包含请求的模型和解析后的模型、提供商、请求体和响应体、护栏结果以及故障转移尝试；可按 **Decisions** 请求类型过滤审计日志。用量会将回答中的 `input_tokens` 和 `output_tokens` 记录在实际作答的模型下。OpenRouter 会报告自己的 `usage.cost`，并将其记录为该请求的成本；对于托管的 Jev，请在提供商上声明定价（参见
+[Jev / Kev](/zh/providers/jev#模型、访问控制与成本)）。

@@ -1,0 +1,294 @@
+---
+title: "Audio API：语音转文本与文本转语音"
+sidebarTitle: "Audio API"
+description: "通过 GoModel 使用兼容 OpenAI 的文本转语音和转录功能，按模型路由，并与聊天共用相同的访问规则、预算和虚拟模型。"
+icon: "audio-lines"
+keywords: ["音频 API", "文本转语音", "语音转文本", "转录", "语音合成", "语音识别", "audio API", "text-to-speech", "speech-to-text", "transcription", "TTS", "STT", "input_audio"]
+---
+
+## 概览
+
+GoModel 提供**兼容 OpenAI 的音频端点**，用于文本转语音（TTS）和语音转文本（STT）。
+已经调用 OpenAI `/v1/audio/*` 路由的客户端和 SDK 无需修改即可指向 GoModel。
+
+请求通过与聊天和嵌入相同的注册表**按模型路由**，因此 `model` 选择、`provider` 提示、
+虚拟模型、按密钥划分的模型访问规则（[用户路径](/zh/features/user-path)）以及预算均适用。
+音频由 OpenAI 和兼容 OpenAI 的提供商（OpenRouter、Azure OpenAI、vLLM、Oracle、Z.ai）提供，
+另外还包括 **GoModel 在相同端点背后转换其原生音频 API** 的提供商：
+[Xiaomi MiMo](/zh/providers/xiaomi)（通过 Chat Completions 实现 TTS 和 ASR）、
+[Cohere](/zh/providers/cohere)（转录）以及 [MiniMax](/zh/providers/minimax)（通过其原生
+`t2a_v2` API 实现 TTS）。不支持音频的提供商会返回明确的错误，而不会错误路由。
+
+## 支持的端点
+
+| 端点 | 行为 |
+| --- | --- |
+| `POST /v1/audio/speech` | 文本转语音。接收 JSON 请求体，并以请求的 `response_format` 返回**二进制音频**。 |
+| `POST /v1/audio/transcriptions` | 语音转文本。接收 `multipart/form-data` 上传，并根据 `response_format` 返回 JSON 或纯文本。 |
+| `POST /v1/audio/translations` | 语音转英文文本。上传格式与转录相同，但不含 `language` 和 `timestamp_granularities[]`。 |
+
+JSON 格式的转录和翻译响应体会被规范化为 OpenAI 的格式：Groq 特有的 `x_groq` 成员会从
+`json` 和 `verbose_json` 响应中移除，因此按 OpenAI 编写的客户端在任何地方看到的字段都相同。
+
+## 文本转语音
+
+<CodeGroup>
+
+```bash curl
+curl https://your-gateway/v1/audio/speech \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o-mini-tts",
+    "input": "Hello from GoModel.",
+    "voice": "alloy",
+    "response_format": "wav"
+  }' \
+  --output speech.wav
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://your-gateway/v1",
+    api_key=os.environ["GOMODEL_KEY"],
+)
+
+speech = client.audio.speech.create(
+    model="gpt-4o-mini-tts",
+    input="Hello from GoModel.",
+    voice="alloy",
+    response_format="wav",
+)
+speech.write_to_file("speech.wav")
+```
+
+```javascript JavaScript
+import { writeFile } from "node:fs/promises";
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "https://your-gateway/v1",
+  apiKey: process.env.GOMODEL_KEY,
+});
+
+const speech = await client.audio.speech.create({
+  model: "gpt-4o-mini-tts",
+  input: "Hello from GoModel.",
+  voice: "alloy",
+  response_format: "wav",
+});
+
+await writeFile("speech.wav", Buffer.from(await speech.arrayBuffer()));
+```
+
+</CodeGroup>
+
+`model`、`input` 和 `voice` 为必填项。可选字段 `instructions`、`response_format`
+（默认 `mp3`，另支持 `opus`、`aac`、`flac`、`wav`、`pcm`）和 `speed` 会转发给提供商。
+响应的 `Content-Type` 使用上游返回的值；若上游未返回，则回退为 `response_format`
+所对应的类型（例如 `wav` → `audio/wav`）。
+
+合成的音频会**在提供商生成的同时进行中继**，详见[流式传输](#流式传输)。
+
+## 语音转文本
+
+<CodeGroup>
+
+```bash curl
+curl https://your-gateway/v1/audio/transcriptions \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -F "file=@speech.wav" \
+  -F "model=gpt-4o-transcribe" \
+  -F "response_format=json"
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://your-gateway/v1",
+    api_key=os.environ["GOMODEL_KEY"],
+)
+
+with open("speech.wav", "rb") as audio_file:
+    transcription = client.audio.transcriptions.create(
+        file=audio_file,
+        model="gpt-4o-transcribe",
+        response_format="json",
+    )
+
+print(transcription.text)
+```
+
+```javascript JavaScript
+import { createReadStream } from "node:fs";
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "https://your-gateway/v1",
+  apiKey: process.env.GOMODEL_KEY,
+});
+
+const transcription = await client.audio.transcriptions.create({
+  file: createReadStream("speech.wav"),
+  model: "gpt-4o-transcribe",
+  response_format: "json",
+});
+
+console.log(transcription.text);
+```
+
+</CodeGroup>
+
+`file` 和 `model` 为必填项。可选表单字段 `language`、`prompt`、`response_format`、
+`temperature` 和 `timestamp_granularities[]` 会被转发。`response_format` 决定响应格式：
+`json` 和 `verbose_json` 返回 JSON 对象；`text`、`srt` 和 `vtt` 返回 `text/plain` 响应体。
+
+<Tip>
+  带方括号的 `timestamp_granularities[]` 是标准的表单键名，但为了兼容客户端，GoModel
+  也接受不带方括号的 `timestamp_granularities`。
+</Tip>
+
+添加 `stream=true` 即可在转录生成的同时接收结果，详见[流式传输](#流式传输)。
+
+### 自托管语音转文本服务器
+
+许多自托管 STT 服务器提供 `/v1/audio/transcriptions`，但不提供 `/v1/models`。
+请将其注册为 `openai` 提供商，并列出它所提供的模型：
+
+```yaml
+providers:
+  local-stt:
+    type: openai
+    base_url: "http://localhost:8000/v1"
+    api_key: "unused"
+    models:
+      - id: "whisper-1" # 您的服务器所期望的模型名称
+        metadata:
+          modes: [audio_transcription] # 将其列为音频模型
+```
+
+当 `/models` 返回 404 或 405 时，GoModel 会提供已配置的模型，并将该提供商报告为健康状态。
+`/models` 的其他失败仍会将其标记为降级状态。
+
+## 流式传输
+
+GoModel 会**在提供商生成音频的同时**将音频响应体转发给客户端，因此首字节时间取决于
+提供商，而不是整个生成过程：
+
+| 调用 | 流式传输的内容 |
+| --- | --- |
+| `POST /v1/audio/speech` | 始终流式传输。以请求的 `response_format` 分块传输音频；若转发的 `stream_format: "sse"` 要求使用服务器发送事件，则以 SSE 传输。 |
+| `POST /v1/audio/transcriptions` | 转发 `stream: true` 时，以 `text/event-stream` 传输（`transcript.text.delta` 事件，以 `transcript.text.done` 结束）。否则在一个响应中返回完整转录。 |
+
+```bash Incremental transcript
+curl -N https://your-gateway/v1/audio/transcriptions \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -F "file=@speech.wav" \
+  -F "model=gpt-4o-transcribe" \
+  -F "stream=true"
+```
+
+用量和[成本追踪](#成本追踪)保持不变：流式转录根据其 `transcript.text.done` 事件报告的
+Token 数计价，流式语音则根据实际传输的音频时长计价。两者都在响应流式传输的过程中测量，
+而不是基于缓冲后的副本，因此任意长度的响应都会被完整计费。
+
+<Note>
+  流式响应的首批字节一旦到达客户端便无法重试。因此，与流式 Chat Completions 一样，
+  GoModel 不会对 `/v1/audio/speech` 或 `stream: true` 转录中失败的上游尝试进行重试。
+  普通的转录请求仍保留常规的重试机制。
+</Note>
+
+<Note>
+  流式传输适用于兼容 OpenAI 的上游。GoModel 转换其原生音频 API 的提供商（Xiaomi MiMo、
+  Cohere、MiniMax、ElevenLabs）会返回完整的响应体，GoModel 将其作为一个响应转发。
+</Note>
+
+## 参数转发
+
+上文未提及的任何参数都会**原样转发给提供商**，因此新的 OpenAI 选项和提供商原生的额外参数
+无需等待网关发布新版本即可使用（[ADR-0011](https://github.com/ENTERPILOT/GoModel/blob/main/docs/adr/0011-field-forwarding-on-translated-paths.md)
+规则 1）：
+
+- `/v1/audio/speech`：未知的 JSON 成员（例如 `stream_format`）会被合并回上游请求体。
+- `/v1/audio/transcriptions` 和 `/v1/audio/translations`：未知的表单值（例如
+  `include[]=logprobs`、`chunking_strategy`、`stream`）会被写入上游的 multipart 请求体，
+  包括重复的值。
+
+是否接受某个字段仍由提供商决定：被提供商拒绝的字段会返回该提供商自身的错误，
+而不是静默返回 200。
+
+有两类内容永远不会被转发：一是 GoModel 自身控制的字段（`model`、`file`、路由提示
+`provider`，以及它重新发出的转录选项：`language`、`prompt`、`response_format`、
+`temperature`，以及 `timestamp_granularities[]` 和其不带方括号的别名
+`timestamp_granularities`）；二是转录上传中额外的**文件**部分，只有 `file` 中的音频会被发送。
+
+转发的值不会存储在[审计日志](/zh/advanced/admin-endpoints)中：由于它们是任意的客户端输入，
+可能包含提供商凭据，日志条目只会在 `forwarded_fields` 下记录字段**名称**。
+
+<Note>
+  转发适用于兼容 OpenAI 的上游。GoModel 转换其原生音频 API 的提供商（Xiaomi MiMo、
+  Cohere、MiniMax、ElevenLabs）会构建自己的请求格式，并忽略额外的参数。
+</Note>
+## 成本追踪
+
+每次 `/v1/audio/*` 调用都会以其自身的端点路径记录在[用量追踪](/zh/features/cost-tracking)中。
+音频模型按提供商计费的单位定价，而不是按 Token 定价：
+
+- **语音合成**（`/v1/audio/speech`）记录输入字符数（`input_characters`，使用
+  `per_character_input` 定价，与 `tts-1` 的计费方式相同）以及合成音频的时长
+  （`audio_output_seconds`，使用 `per_second_output` 定价，与 `gpt-4o-mini-tts` 的计费方式相同）。
+  时长从返回的 `wav`、`pcm` 或 `mp3` 中测量；其他编解码格式（`opus`、`aac`、`flac`）
+  不解码就无法测量，对应的记录会带有说明这一点的成本提示。
+- **转录和翻译**按上传音频的时长定价（`audio_seconds`，使用 `per_second_input` 定价）。
+  GoModel 采用提供商在 `usage.seconds` 或 `verbose_json` 的 `duration` 中报告的时长，
+  否则自行测量上传的音频。因此成本不取决于客户端请求的 `response_format`，
+  完全不报告用量的提供商（Groq、ElevenLabs）也同样会被计量。
+- **按 Token 计费的转录模型**（`gpt-4o-transcribe` 等）会报告 Token `usage`，
+  并改用 `input_per_mtok` / `output_per_mtok` 定价。同时公布了 Token 费率和按秒费率的模型，
+  会按提供商实际报告的单位计费，绝不会重复计费。
+
+当没有任何可计费的数据时（提供商未报告用量，且上传文件所用的容器格式 GoModel 无法测量，
+如 `m4a`、`ogg`、`flac`、`webm`），用量记录会被标记一条成本计算提示，而不是记为 $0 成本。
+
+## 限制
+
+音频端点是按模型路由、直接传递给提供商的轻量通道，**不会经过完整的推理编排器**。
+与 `/v1/chat/completions` 相比：
+
+- **无故障转移、护栏或响应缓存**：这些阶段会被跳过。请求仍会经过授权、预算检查和计量
+  （参见[成本追踪](#成本追踪)），并以其 `/v1/audio/*` 路径写入
+  [审计日志](/zh/advanced/admin-endpoints)。
+- **输入为 OpenAI 请求格式，输出为提供商的方言**：客户端始终发送 OpenAI 的音频格式。
+  兼容 OpenAI 的上游会原样接收；Xiaomi MiMo、Cohere 和 MiniMax 的请求会被转换为
+  各提供商的原生音频协议。除此之外的提供商不会在此端点背后进行适配。
+- **流式响应不重试**：参见[流式传输](#流式传输)。
+- **不支持实时语音到语音**（WebSocket Realtime API）。
+
+如果提供商的原生音频 API 与 OpenAI 不同，请使用[透传 API](/zh/features/passthrough-api)
+（`/p/{provider}/v1/audio/...`），将字节原样转发到该上游。
+
+## 审计日志
+
+音频请求会像其他模型交互一样出现在审计日志中。由于音频负载是二进制数据且体积较大，
+其请求体和响应体由专门的设置
+[`LOGGING_LOG_AUDIO_BODIES`](/zh/advanced/configuration#审计日志)（默认 `false`）控制。
+该设置是对 `LOGGING_LOG_BODIES` 的**细化**，只有在启用请求体日志时才会生效：
+
+- **请求体日志关闭**（`LOGGING_LOG_BODIES=false`）：无论此设置如何，都不会存储音频内容。
+- **请求体日志开启，音频关闭**（默认）：音频响应会被记录为一个轻量的
+  `{__audio__, content_type, bytes, stored: false}` 占位符，不存储任何音频字节。
+- **请求体日志开启，音频开启**：`/v1/audio/speech` 会存储其文本输入和生成的音频，
+  使**控制台能够渲染内嵌播放器**；`/v1/audio/transcriptions` 会存储上传的音频（同样可在
+  控制台中播放）以及上传元数据（文件名、模型、参数）。
+
+音频字节会存入[媒体存储](/zh/advanced/configuration#媒体存储)，而不是审计数据库：
+日志条目携带一个 `media_id`，控制台通过 `GET /admin/media/{id}` 获取该文件。
+文件大小没有上限，流式响应会在中继的同时被存储。文件的保留时间与引用它们的审计条目相同
+（`LOGGING_RETENTION_DAYS`）。

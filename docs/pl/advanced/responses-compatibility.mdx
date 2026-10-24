@@ -1,0 +1,171 @@
+---
+title: "Kompatybilność Responses"
+description: "Dowiedz się, które funkcje Responses API GoModel potrafi przetłumaczyć dla providerów czatowych, które wymagają natywnej obsługi u providera i jak wpływa to na SDK agentów."
+icon: "route"
+keywords: ["Responses API compatibility", "kompatybilność Responses API", "obsługa funkcji", "feature support", "agent SDK", "SDK agentów", "ograniczenia tłumaczenia", "translation limits"]
+---
+
+GoModel przyjmuje kompatybilne z OpenAI requesty `/v1/responses` i kieruje je
+do wybranego providera modelu. Niektórzy providerzy udostępniają natywne API
+kompatybilne z Responses. Inni udostępniają chat completions albo własne
+natywne API czatu, więc GoModel tłumaczy request.
+
+Zasada kompatybilności wynika z prawa Postela: GoModel tłumaczy przenośne
+funkcje modeli i przyjmuje nieznane deklaracje narzędzi, nie przekazując ich
+providerowi, który nie potrafi ich wykonać. Pola, które zmieniłyby znaczenie
+wyniku modelu, są nadal odrzucane, gdy nie da się ich bezpiecznie przetłumaczyć.
+
+## Tryby routingu
+
+| Tryb | Co się dzieje |
+| --- | --- |
+| Provider z natywnym Responses | GoModel przekazuje payload Responses do endpointu providera kompatybilnego z Responses. Natywne funkcje providera mogą działać, jeśli ten provider je obsługuje. |
+| Provider z tłumaczeniem na czat | GoModel konwertuje `/v1/responses` na semantykę czatu, wywołuje API czatu providera, a następnie konwertuje wynik z powrotem do struktury Responses. |
+
+Providerzy z tłumaczeniem na czat to m.in. natywny routing Anthropic i Gemini.
+Dobrze sprawdzają się przy tekście, streamingu, wejściach multimodalnych
+obsługiwanych przez docelowy adapter i pętlach function tools. Nie mogą
+bezpiecznie wykonywać narzędzi hostowanych przez OpenAI.
+
+## Zachowanie funkcji
+
+| Funkcja | Provider z natywnym Responses | Provider z tłumaczeniem na czat |
+| --- | --- | --- |
+| Wejście tekstowe i `instructions` | Przekazywane | Konwertowane na wiadomości czatu |
+| Streaming przez HTTP/SSE | Przekazywany | Konwertowany ze zdarzeń streamingu czatu na sekwencję zdarzeń OpenAI: `response.created` i `response.in_progress`, zdarzenia cyklu życia elementów wyjściowych i części treści oraz `sequence_number` w każdym zdarzeniu |
+| Function tools | Przekazywane | Konwertowane na deklaracje funkcji/narzędzi providera |
+| Elementy wyjściowe wywołań funkcji | Przekazywane | Konwertowane na wiadomości czatu z wynikami narzędzi |
+| Metadane odtwarzanych elementów wyjściowych (`id`, `status`, `annotations`, `logprobs`) | Przekazywane | Usuwane przed wysłaniem: providerzy czatowi nie mają na nie miejsca, a Groq i Fireworks wprost je odrzucają |
+| Structured output `text.format` | Przekazywany | Konwertowany na `response_format`, gdy provider go obsługuje |
+| Narzędzia dostępne tylko w Responses (`web_search`, `file_search`, `computer_use_preview` i `namespace`) | Decyduje provider | Akceptowane i pomijane |
+| `previous_response_id` | Przekazywane, chyba że GoModel wygenerował ID dla providera z tłumaczeniem na czat albo działa guardrail promptu edytujący treść: wtedy rozwiązywane jak w kolumnie obok | Rozwiązywane przez GoModel: elementy wejściowe i wynik zapisanej poprzedniej odpowiedzi są dołączane na początku wejścia. Poprzednia odpowiedź musi być zapisana (`store` pozostawione włączone), w przeciwnym razie request zwraca 404 (zobacz [Zapisane odpowiedzi](/pl/advanced/responses-api#zapisane-odpowiedzi)) |
+| `conversation` | Rozwiązywane przez GoModel z rozmowy zarządzanej przez gateway | Rozwiązywane przez GoModel z rozmowy zarządzanej przez gateway |
+| Adnotacje `include` | Przekazywane | Akceptowane i ignorowane, z wyjątkiem `message.output_text.logprobs` |
+| Nieznane typy elementów wejściowych Responses | Zachowywane | Odrzucane |
+| Transport websocket Responses | Nie zaimplementowano w GoModel | Nie zaimplementowano w GoModel |
+
+<Note>
+  W Anthropic `text.format` jest obsługiwane przez natywny structured output
+  providera (`json_schema`) albo przez instrukcję w system prompcie
+  (`json_object`) – zobacz [Anthropic](/pl/providers/anthropic#structured-output).
+  `text.verbosity` nie ma odpowiednika w Anthropic i jest pomijane z
+  ostrzeżeniem.
+</Note>
+
+## Pole `include`
+
+`include` prosi o dodatkowe adnotacje w elementach odpowiedzi, takie jak
+`reasoning.encrypted_content` czy `file_search_call.results`. Nigdy nie zmienia
+tego, co robi model, więc providerzy z tłumaczeniem na czat je akceptują i
+zwracają odpowiedź bez tych adnotacji – dokładnie tak jak natywny provider,
+który ich nie obsługuje. Klienty, które zawsze dołączają `include`, takie jak
+Codex z `wire_api = "responses"`, działają bez dodatkowej konfiguracji.
+
+Jedynym wyjątkiem jest `message.output_text.logprobs`, które żąda
+rzeczywistego wyniku modelu, a nie adnotacji. GoModel odrzuca je z tego samego
+powodu, z którego odrzuca `top_logprobs`.
+
+## Narzędzia hostowane
+
+Narzędzia hostowane są wykonywane przez providera upstream, a nie przez samo
+generowanie tekstu przez model. Ich payloady często odwołują się do zasobów
+należących do providera i stanu w czasie wykonania:
+
+- `web_search` i jego starszy alias `web_search_preview` zależą od
+  implementacji wyszukiwania i schematu zdarzeń providera.
+- `file_search` odwołuje się do vector store’ów providera, np. przez
+  `vector_store_ids`.
+- `computer_use_preview` zależy od sesji komputera zarządzanej przez
+  providera, środowiska wyświetlania i modelu bezpieczeństwa.
+
+GoModel nie tłumaczy ich na wywołania narzędzi Anthropic, Gemini ani innych
+providerów czatowych. Udawane tłumaczenie zmieniłoby to, gdzie narzędzie się
+wykonuje, jak przechowywany jest stan i które mechanizmy bezpieczeństwa mają
+zastosowanie. Providerzy z tłumaczeniem na czat przyjmują więc request, ale
+przed wysłaniem do providera pomijają każde narzędzie niebędące funkcją.
+Obsługiwane function tools w tym samym requeście działają normalnie.
+
+Narzędzia `namespace` są pomijane w całości, a nie spłaszczane. Spłaszczenie
+zmieniłoby nazwy narzędzi i złamało kontrakt routingu klienta. `tool_choice`,
+które wybiera pominięte narzędzie, również jest pomijane. Jeśli pominięte
+zostaną wszystkie narzędzia, z przetłumaczonego requestu usuwane jest także
+`parallel_tool_calls`.
+
+To łagodna degradacja możliwości, a nie emulacja narzędzi hostowanych. W
+szczególności odpowiedź od providera z tłumaczeniem na czat nie oznacza, że
+doszło do wyszukiwania w sieci, wyszukiwania w plikach czy akcji na komputerze.
+Używaj providera z natywnym Responses, gdy wynik zależy od uruchomienia
+któregoś z tych narzędzi.
+
+## SDK agentów
+
+Klienty OpenAI Agents SDK mogą komunikować się z modelami Anthropic i Gemini
+przez GoModel w przenośnych przepływach:
+
+- zwykłe `Runner.run(...)`
+- `Runner.run_streamed(...)` przez HTTP/SSE
+- lokalne function tools
+- odtwarzanie lokalnej historii zarządzanej przez SDK
+
+Narzędzia hostowane przez providera są ignorowane przez providerów z
+tłumaczeniem na czat. Stan rozmowy zarządzany po stronie serwera i transport
+websocket Responses nadal zależą od obsługi przez konkretnego providera.
+
+Bezstanowe odtwarzanie również działa. Klienty, które odsyłają elementy
+wyjściowe poprzedniej tury jako wejście (`store: false`, Codex, historia
+zarządzana przez SDK), zawsze dołączają `id` elementu zwrócone przez Responses
+API. GoModel usuwa to `id`, razem z innymi metadanymi elementów specyficznymi
+dla Responses, przed wywołaniem providera czatowego, więc to samo body
+odtwarzania działa u każdego providera.
+
+W klientach Python Agents SDK ID modeli GoModel z przestrzenią nazw, takie jak
+`anthropic/claude-sonnet-4-20250514` i `gemini/gemini-2.0-flash`, wymagają
+trybu przekazywania ID modelu bez zmian:
+
+```python
+from agents import MultiProvider, RunConfig
+from openai import AsyncOpenAI
+
+client = AsyncOpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="change-me",
+)
+
+run_config = RunConfig(
+    model_provider=MultiProvider(
+        openai_client=client,
+        unknown_prefix_mode="model_id",
+        openai_prefix_mode="model_id",
+    )
+)
+```
+
+Użyj tego `run_config` przy wywoływaniu `Runner.run(...)` lub
+`Runner.run_streamed(...)`.
+
+## Przetestuj granicę kompatybilności
+
+Przykłady OpenAI Agents SDK zawierają sondy dla routingu Anthropic przez
+GoModel:
+
+```bash
+export OPENAI_BASE_URL=http://localhost:8080/v1
+export GOMODEL_MASTER_KEY=change-me
+export OPENAI_MODEL=anthropic/claude-sonnet-4-20250514
+
+python3 docs/examples/openai-agents-sdk/anthropic_responses_probe.py
+python3 docs/examples/openai-agents-sdk/anthropic_agents_probe.py
+```
+
+Sonda Responses weryfikuje zarówno obsługiwane, jak i nieobsługiwane ścieżki:
+zwykłe wywołania Responses, function tools, odrzucanie structured output,
+odrzucanie pól stanowych, odrzucanie nieznanych elementów wejściowych i łagodne
+pomijanie narzędzi hostowanych. Sonda Agents weryfikuje podstawowe uruchomienia,
+pętle function tools i streamowane pętle function tools.
+
+## Roadmap
+
+Przyszła obsługa narzędzi hostowanych powinna korzystać z jawnego mapowania
+możliwości providerów. Oznacza to, że GoModel powinien wiedzieć, który provider,
+model, tryb API i struktura requestu mogą bezpiecznie obsłużyć każdą funkcję,
+zanim przyjmie request.
