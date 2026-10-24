@@ -54,7 +54,9 @@ flowchart LR
    defaults — pricing, context windows, capabilities, modes — for most hosted
    models, matching IDs directly, through aliases, and with release-date
    suffixes stripped, and it fills in every field the provider above did not
-   report. Wrong or missing data is best fixed by contributing to the registry;
+   report. Input modalities count as capabilities: an entry accepting `image`
+   advertises `vision` (likewise `audio_input`, `video_input`, `pdf_input`)
+   unless its capabilities set that key explicitly. Wrong or missing data is best fixed by contributing to the registry;
    use an override for an immediate fix.
 5. **ID heuristic** — a last-resort name check for models that end up with no
    modes at all (typical for llama.cpp and LM Studio): IDs containing `embed` or

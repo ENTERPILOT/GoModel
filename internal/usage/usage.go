@@ -57,6 +57,11 @@ type UsageEntry struct {
 	SessionID    string `json:"session_id,omitempty" bson:"session_id,omitempty"`
 	CacheType    string `json:"cache_type,omitempty" bson:"cache_type,omitempty"`
 
+	// AuthKeyID is the managed auth key that authenticated the request, so
+	// spend can be attributed per key. Empty for master-key or unauthenticated
+	// traffic.
+	AuthKeyID string `json:"auth_key_id,omitempty" bson:"auth_key_id,omitempty"`
+
 	// Labels are request labels extracted from configured tagging headers.
 	Labels []string `json:"labels,omitempty" bson:"labels,omitempty"`
 

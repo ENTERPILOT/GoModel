@@ -3,6 +3,8 @@ package virtualmodels
 import (
 	"fmt"
 	"strings"
+
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // MaxChainDepth caps how many virtual models a redirect may pass through
@@ -43,16 +45,17 @@ func (s *snapshot) chained(owner string, target resolvedTarget) (*redirectEntry,
 
 // viableTargets returns entry's direct targets that can currently serve a
 // request, preserving declared order: a concrete target the catalog reports
-// available, or a chained virtual model that is enabled and itself has a
-// viable target. A provider whose latest model refresh failed keeps its models
-// registered but is skipped here, so redirects route around it.
-func (s *snapshot) viableTargets(entry *redirectEntry, catalog Catalog) []resolvedTarget {
+// available and allow permits (nil allows every model), or a chained virtual
+// model that is enabled and itself has a viable target. A provider whose
+// latest model refresh failed keeps its models registered but is skipped
+// here, so redirects route around it.
+func (s *snapshot) viableTargets(entry *redirectEntry, catalog Catalog, allow func(core.ModelSelector) bool) []resolvedTarget {
 	if catalog == nil {
 		return nil
 	}
 	out := make([]resolvedTarget, 0, len(entry.targets))
 	for _, target := range entry.targets {
-		if s.viable(entry, target, catalog) {
+		if s.viable(entry, target, catalog, allow) {
 			out = append(out, target)
 		}
 	}
@@ -60,19 +63,19 @@ func (s *snapshot) viableTargets(entry *redirectEntry, catalog Catalog) []resolv
 }
 
 // viable reports whether one target of owner can currently serve a request:
-// a concrete model the catalog has available, or an enabled chained redirect
-// with a viable target of its own. It is the allocation-free counterpart of
-// leaves for the per-request path.
-func (s *snapshot) viable(owner *redirectEntry, target resolvedTarget, catalog Catalog) bool {
+// a concrete model the catalog has available and allow permits, or an enabled
+// chained redirect with a viable target of its own. It is the allocation-free
+// counterpart of leaves for the per-request path.
+func (s *snapshot) viable(owner *redirectEntry, target resolvedTarget, catalog Catalog, allow func(core.ModelSelector) bool) bool {
 	inner, ok := s.chained(owner.vm.Source, target)
 	if !ok {
-		return modelServable(catalog, target.qualified)
+		return modelServable(catalog, target.qualified) && (allow == nil || allow(target.selector))
 	}
 	if !inner.vm.Enabled {
 		return false
 	}
 	for _, next := range inner.targets {
-		if s.viable(inner, next, catalog) {
+		if s.viable(inner, next, catalog, allow) {
 			return true
 		}
 	}

@@ -208,7 +208,26 @@ mcp_servers: {}
 	assert.Contains(t, info, "general_settings.alerting: GoModel has no built-in alerting; alert on its Prometheus metrics")
 	warnings := findings(result, SeverityWarning)
 	assert.Contains(t, warnings, "guardrails (pii): not migrated, and GoModel guardrails are off by default: rebuild them before switching traffic; see /advanced/guardrails")
-	assert.Contains(t, strings.Join(warnings, "\n"), "general_settings.database_url: not reused")
+	assert.Contains(t, strings.Join(info, "\n"), "general_settings.database_url: not GoModel's storage")
+	assert.Equal(t, "postgres://x", result.DatabaseURL)
+}
+
+func TestConvert_ResolvesDatabaseURLAndMasterKey(t *testing.T) {
+	t.Setenv("LITELLM_DB", "postgres://from-env")
+	t.Setenv("LITELLM_KEY", "")
+	_, result := convertYAML(t, `
+environment_variables:
+  LITELLM_KEY: sk-from-section
+general_settings:
+  database_url: os.environ/LITELLM_DB
+  master_key: os.environ/LITELLM_KEY
+`)
+	assert.Equal(t, "postgres://from-env", result.DatabaseURL)
+	assert.Equal(t, "sk-from-section", result.MasterKey, "an unset variable falls back to environment_variables")
+
+	_, result = convertYAML(t, `model_list: []`)
+	assert.Empty(t, result.DatabaseURL)
+	assert.Empty(t, result.MasterKey)
 }
 
 func TestConvert_EnvironmentVariables(t *testing.T) {

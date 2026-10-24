@@ -45,6 +45,7 @@ func TestDescribeEndpointPath(t *testing.T) {
 		{path: "/v1/systemone", managed: true, dialect: "systemone", operation: OperationSystemOne, bodyMode: BodyModeJSON, interaction: true},
 		{path: "/v1/systemone/permute", managed: true, dialect: "systemone", operation: OperationSystemOne, bodyMode: BodyModeJSON, interaction: true},
 		{path: "/v1/systemone/separate", managed: true, dialect: "systemone", operation: OperationSystemOne, bodyMode: BodyModeJSON, interaction: true},
+		{path: "/v1/decisions", managed: true, dialect: "openai_compat", operation: OperationDecisions, bodyMode: BodyModeJSON, interaction: true},
 		{path: "/v1/systemone/other", managed: false, dialect: "", operation: "", bodyMode: BodyModeNone, interaction: false},
 		{path: "/p/openai/responses", managed: true, dialect: "provider_passthrough", operation: OperationProviderPassthrough, bodyMode: BodyModeOpaque, interaction: true},
 		{path: "/v1/models", managed: false, dialect: "", operation: "", bodyMode: BodyModeNone, interaction: false},

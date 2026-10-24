@@ -3,7 +3,6 @@ package modeldata
 import (
 	"maps"
 	"regexp"
-	"slices"
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -274,7 +273,7 @@ func buildMetadata(model *ModelEntry, pm *ProviderModelEntry) *core.ModelMetadat
 		meta.Tags = model.Tags
 		meta.ContextWindow = model.ContextWindow
 		meta.MaxOutputTokens = model.MaxOutputTokens
-		meta.Capabilities = catalogCapabilities(model)
+		meta.Capabilities = model.Capabilities
 		meta.Rankings = buildRankings(model.Rankings)
 		meta.Pricing = model.Pricing
 		meta.PricingSources = model.Pricing.FieldSources(core.ModelPricingSourceModelRegistry)
@@ -297,23 +296,46 @@ func buildMetadata(model *ModelEntry, pm *ProviderModelEntry) *core.ModelMetadat
 		}
 	}
 
+	// Input modalities describe the model itself, so they also fill gaps in
+	// a provider_model capabilities override.
+	if model != nil {
+		meta.Capabilities = withModalityCapabilities(meta.Capabilities, model.Capabilities, model.Modalities)
+	}
+
 	return meta
 }
 
-// catalogCapabilities returns the entry's capabilities with vision set when
-// its input modalities list images: the catalog records image input in either
-// place, and routing reads only the capability. An explicit vision flag wins.
-func catalogCapabilities(model *ModelEntry) map[string]bool {
-	if model.Modalities == nil || !slices.Contains(model.Modalities.Input, "image") {
-		return model.Capabilities
+// withModalityCapabilities adds the capabilities a catalog entry expresses
+// only through modalities.input. A key set in capabilities or in the model's
+// own explicit map wins, including false, even when a provider_model
+// override replaced the model's map. The input map is copied, not modified,
+// because it belongs to the shared catalog.
+func withModalityCapabilities(capabilities, explicit map[string]bool, modalities *Modalities) map[string]bool {
+	if modalities == nil {
+		return capabilities
 	}
-	if _, set := model.Capabilities["vision"]; set {
-		return model.Capabilities
+	var out map[string]bool
+	for _, modality := range modalities.Input {
+		key, ok := InputModalityCapability(modality)
+		if !ok {
+			continue
+		}
+		if _, set := capabilities[key]; set {
+			continue
+		}
+		if _, set := explicit[key]; set {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]bool, len(capabilities)+len(modalities.Input))
+			maps.Copy(out, capabilities)
+		}
+		out[key] = true
 	}
-	capabilities := make(map[string]bool, len(model.Capabilities)+1)
-	maps.Copy(capabilities, model.Capabilities)
-	capabilities["vision"] = true
-	return capabilities
+	if out == nil {
+		return capabilities
+	}
+	return out
 }
 
 func buildRankings(rankings map[string]RankingEntry) map[string]core.ModelRanking {

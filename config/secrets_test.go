@@ -114,7 +114,7 @@ func TestSecretsResolveErrors(t *testing.T) {
 		{name: "empty env", value: "${env:GOMODEL_TEST_EMPTY}", wantScheme: "env", wantContain: "GOMODEL_TEST_EMPTY is empty"},
 		{name: "relative file", value: "${file:secrets/key}", wantScheme: "file", wantContain: "must be absolute"},
 		{name: "vault without Pro", value: "${vault:prod/openai}", wantScheme: "vault", wantContain: "GoModel Pro vaults (extensions.vaults)", wantIs: ErrUnknownSecretScheme},
-		{name: "unknown scheme", value: "x ${aws:key}", wantScheme: "aws", wantContain: "built-in schemes are env and file", wantIs: ErrUnknownSecretScheme},
+		{name: "unknown scheme", value: "x ${aws:key}", wantScheme: "", wantContain: "built-in schemes are env and file", wantIs: ErrUnknownSecretScheme},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -129,6 +129,26 @@ func TestSecretsResolveErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSecretErrorNeverRepeatsAnUnknownScheme(t *testing.T) {
+	// A literal key that only looks like a reference: its "scheme" is part of
+	// the secret, so the error names the field alone.
+	secrets := NewSecrets()
+	require.NoError(t, secrets.Register("vault", SecretResolverFunc(func(context.Context, string) (string, error) {
+		return "", errors.New("not found")
+	})))
+	_, _, err := secrets.resolveValue(t.Context(), "providers.openai.api_key", "sk-${live9x2q:7fa1}")
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "live9x2q")
+	assert.Equal(t, "providers.openai.api_key: secret reference: unknown secret scheme: the built-in schemes are env and file; other schemes are registered by extensions", err.Error())
+
+	// A registered scheme is named as registered.
+	_, _, err = secrets.resolveValue(t.Context(), "server.master_key", "${vault:prod/key}")
+	secretErr, ok := errors.AsType[*SecretError](err)
+	require.True(t, ok)
+	assert.Equal(t, "vault", secretErr.Scheme)
+	assert.Equal(t, "server.master_key: secret reference ${vault:...}: not found", err.Error())
 }
 
 func TestSecretsRegister(t *testing.T) {
@@ -233,7 +253,10 @@ func TestResolveFileSecret(t *testing.T) {
 		{name: "crlf stripped", path: write("crlf", []byte("abc\r\n")), want: "abc"},
 		{name: "only one newline stripped", path: write("lflf", []byte("abc\n\n")), want: "abc\n"},
 		{name: "inner newlines kept", path: write("multi", []byte("{\n  \"k\": 1\n}\n")), want: "{\n  \"k\": 1\n}"},
-		{name: "empty file", path: write("empty", nil), want: ""},
+		{name: "empty file", path: write("empty", nil), wantErr: "file " + filepath.Join(dir, "empty") + " is empty"},
+		{name: "newline only", path: write("nl", []byte("\n")), wantErr: "file " + filepath.Join(dir, "nl") + " is empty"},
+		{name: "crlf only", path: write("crlfonly", []byte("\r\n")), wantErr: "file " + filepath.Join(dir, "crlfonly") + " is empty"},
+		{name: "two newlines", path: write("nlnl", []byte("\n\n")), want: "\n"},
 		{name: "exactly 1 MiB", path: write("max", []byte(strings.Repeat("a", maxSecretFileSize))), want: strings.Repeat("a", maxSecretFileSize)},
 		{name: "over 1 MiB", path: write("big", []byte(strings.Repeat("a", maxSecretFileSize+1))), wantErr: "larger than 1 MiB"},
 		{name: "missing", path: filepath.Join(dir, "missing"), wantErr: "no such file"},

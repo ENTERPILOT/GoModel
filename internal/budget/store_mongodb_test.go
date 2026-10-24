@@ -78,11 +78,45 @@ func TestMongoSubjectMatchUsesLabelMembership(t *testing.T) {
 	require.NoError(t, err)
 
 	want := bson.D{{Key: "$in", Value: bson.A{
-		"iOS",
+		bson.D{{Key: "$literal", Value: "iOS"}},
 		bson.D{{Key: "$ifNull", Value: bson.A{"$labels", bson.A{}}}},
 	}}}
 
 	require.Equal(t, want, got)
+}
+
+// A subject that starts with "$" would otherwise be read as a field path
+// inside the aggregation expression instead of compared as text.
+func TestMongoSubjectMatchTreatsDollarSubjectsAsLiterals(t *testing.T) {
+	tests := []struct {
+		name   string
+		window SpendWindow
+		want   bson.D
+	}{
+		{
+			name:   "label",
+			window: SpendWindow{Scope: ScopeLabel, Subject: "$labels"},
+			want: bson.D{{Key: "$in", Value: bson.A{
+				bson.D{{Key: "$literal", Value: "$labels"}},
+				bson.D{{Key: "$ifNull", Value: bson.A{"$labels", bson.A{}}}},
+			}}},
+		},
+		{
+			name:   "provider",
+			window: SpendWindow{Scope: ScopeProvider, Subject: "$provider"},
+			want: bson.D{{Key: "$eq", Value: bson.A{
+				bson.D{{Key: "$toLower", Value: mongoTrimmedOr("$provider_name", "$provider")}},
+				bson.D{{Key: "$literal", Value: "$provider"}},
+			}}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := mongoSubjectMatch(tt.window)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }
 
 func TestMongoSubjectMatchRejectsBlankLabel(t *testing.T) {
@@ -211,5 +245,57 @@ func TestMongoDBStoreMigratesPreScopeDocuments(t *testing.T) {
 			{Scope: ScopeLabel, Subject: "/team/alpha", PeriodSeconds: PeriodDailySeconds, Amount: 1},
 		})
 		require.NoError(t, err)
+	})
+}
+
+func TestMongoDBStoreSumSpendMatchesProvider(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		ctx := context.Background()
+		store, err := NewMongoDBStore(ctx, db)
+		require.NoError(t, err)
+
+		now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
+		_, err = db.Collection("usage").InsertMany(ctx, []any{
+			bson.D{{Key: "timestamp", Value: now}, {Key: "provider", Value: "openai"}, {Key: "provider_name", Value: "OpenAI-Prod"}, {Key: "total_cost", Value: 2.0}},
+			bson.D{{Key: "timestamp", Value: now}, {Key: "provider", Value: "openai"}, {Key: "provider_name", Value: "openai-free"}, {Key: "total_cost", Value: 4.0}},
+			// Written before provider_name existed: only the provider type is set.
+			bson.D{{Key: "timestamp", Value: now}, {Key: "provider", Value: "openai"}, {Key: "total_cost", Value: 3.0}},
+			bson.D{{Key: "timestamp", Value: now}, {Key: "provider", Value: "openai"}, {Key: "provider_name", Value: "openai-prod"}, {Key: "cache_type", Value: "exact"}, {Key: "total_cost", Value: 10.0}},
+		})
+		require.NoError(t, err)
+
+		start, end := now.Add(-time.Hour), now.Add(time.Hour)
+		got, err := store.SumSpend(ctx, []SpendWindow{
+			{Scope: ScopeProvider, Subject: "openai-prod", Start: start, End: end},
+			{Scope: ScopeProvider, Subject: "openai", Start: start, End: end},
+			{Scope: ScopeProvider, Subject: "anthropic", Start: start, End: end},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []Spend{
+			{Total: 2, HasUsage: true}, // case-insensitive, cached row excluded
+			{Total: 3, HasUsage: true}, // only the row without a provider name
+			{},
+		}, got)
+	})
+}
+
+func TestMongoDBStoreSumSpendMatchesDollarLabelLiterally(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		ctx := context.Background()
+		store, err := NewMongoDBStore(ctx, db)
+		require.NoError(t, err)
+
+		now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
+		_, err = db.Collection("usage").InsertMany(ctx, []any{
+			bson.D{{Key: "timestamp", Value: now}, {Key: "labels", Value: bson.A{"$labels"}}, {Key: "total_cost", Value: 2.0}},
+			bson.D{{Key: "timestamp", Value: now}, {Key: "labels", Value: bson.A{"other"}}, {Key: "total_cost", Value: 4.0}},
+		})
+		require.NoError(t, err)
+
+		got, err := store.SumSpend(ctx, []SpendWindow{
+			{Scope: ScopeLabel, Subject: "$labels", Start: now.Add(-time.Hour), End: now.Add(time.Hour)},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []Spend{{Total: 2, HasUsage: true}}, got)
 	})
 }

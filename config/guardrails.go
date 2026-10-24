@@ -46,7 +46,12 @@ type GuardrailRuleConfig struct {
 	// Config is the plugin's own configuration, validated against the
 	// plugin's config schema (see GET /admin/guardrails/types). The typed
 	// system_prompt and llm_based_altering blocks below are folded into it.
-	Config map[string]any `yaml:"config"`
+	//
+	// LoadResult.ResolveSecrets leaves its secret references in place: the
+	// rule is seeded into the guardrail store with them, secret fields are
+	// resolved when the guardrail is built, and other fields when the rule is
+	// seeded. A resolved secret is therefore never written to the database.
+	Config map[string]any `yaml:"config" secrets:"deferred"`
 
 	// FailMode selects what happens when the instance errors or times out:
 	// "closed" rejects the request with HTTP 500, "open" continues without it.

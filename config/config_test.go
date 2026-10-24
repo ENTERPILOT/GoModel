@@ -94,13 +94,14 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"MODELS_ENABLED_BY_DEFAULT", "KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT", "UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT", "CONFIGURED_PROVIDER_MODELS_MODE",
 		"HTTP_TIMEOUT", "HTTP_RESPONSE_HEADER_TIMEOUT",
 		"WORKFLOW_REFRESH_INTERVAL",
+		"LITELLM_TAGS_ENABLED",
 	} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
 	}
 	for _, item := range os.Environ() {
 		key, _, _ := strings.Cut(item, "=")
-		if strings.HasPrefix(key, "SET_BUDGET_") || strings.HasPrefix(key, "SET_RATE_LIMIT_") || strings.HasPrefix(key, "SET_PROVIDER_RATE_LIMIT_") || strings.HasPrefix(key, "TAGGING_HEADER_") {
+		if strings.HasPrefix(key, "SET_BUDGET_") || strings.HasPrefix(key, "SET_RATE_LIMIT_") || strings.HasPrefix(key, "SET_PROVIDER_RATE_LIMIT_") || strings.HasPrefix(key, "SET_PROVIDER_BUDGET_") || strings.HasPrefix(key, "TAGGING_HEADER_") {
 			t.Setenv(key, "")
 			os.Unsetenv(key)
 		}
@@ -261,6 +262,61 @@ func TestLoadBudgetEnvUserPath(t *testing.T) {
 		assert.Equal(t, 12.5, entries[0].Limits[0].Amount)
 		assert.Equal(t, int64(604800), entries[0].Limits[1].PeriodSeconds)
 		assert.Equal(t, 50.0, entries[0].Limits[1].Amount)
+	})
+}
+
+func TestLoadProviderBudgets(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		writeConfigYAML(t, dir, `
+budgets:
+  providers:
+    - name: OpenAI-Prod
+      limits:
+        - period: daily
+          amount: 100
+    - name: anthropic
+      limits:
+        - period: monthly
+          amount: 500
+`)
+		// The env entry replaces the YAML entry with the same provider, and
+		// underscores map to hyphens like provider-instance env vars.
+		t.Setenv("SET_PROVIDER_BUDGET_OPENAI_PROD", "daily=50,monthly=1000")
+		t.Setenv("SET_PROVIDER_BUDGET_GROQ", "hourly=2")
+
+		result, err := Load()
+		require.NoError(t, err)
+
+		byName := map[string]BudgetProviderConfig{}
+		for _, entry := range result.Config.Budgets.Providers {
+			byName[entry.Name] = entry
+		}
+		require.Len(t, byName, 3)
+		assert.Len(t, byName["openai-prod"].Limits, 2)
+		assert.Equal(t, 50.0, byName["openai-prod"].Limits[0].Amount)
+		assert.Equal(t, int64(2592000), byName["anthropic"].Limits[0].PeriodSeconds)
+		assert.Equal(t, int64(3600), byName["groq"].Limits[0].PeriodSeconds)
+		// Provider budgets stay out of the SET_BUDGET_* user-path space.
+		assert.Empty(t, result.Config.Budgets.UserPaths)
+	})
+}
+
+func TestLoadProviderBudgetRejectsQualifiedModel(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		writeConfigYAML(t, dir, `
+budgets:
+  providers:
+    - name: openai/gpt-4o
+      limits:
+        - period: daily
+          amount: 100
+`)
+		_, err := Load()
+		require.ErrorContains(t, err, "budgets.providers[0].name must be a provider name without slashes or spaces")
 	})
 }
 

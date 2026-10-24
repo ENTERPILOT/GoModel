@@ -24,7 +24,7 @@ var parsedEnvVars = []string{
 }
 
 // parsedEnvPrefixes are variable families whose values are limits.
-var parsedEnvPrefixes = []string{"SET_BUDGET_", "SET_RATE_LIMIT_", "SET_PROVIDER_RATE_LIMIT_"}
+var parsedEnvPrefixes = []string{"SET_BUDGET_", "SET_RATE_LIMIT_", "SET_PROVIDER_RATE_LIMIT_", "SET_PROVIDER_BUDGET_"}
 
 // parsedEnvNames returns every variable Load parses into something other than
 // a single string: the env-tagged non-string fields of Config plus

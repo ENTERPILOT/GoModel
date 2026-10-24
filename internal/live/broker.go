@@ -1032,6 +1032,7 @@ func usagePreviewFromEntry(entry *usage.UsageEntry) usage.UsageLogEntry {
 		Endpoint:               entry.Endpoint,
 		UserPath:               entry.UserPath,
 		SessionID:              entry.SessionID,
+		AuthKeyID:              entry.AuthKeyID,
 		CacheType:              entry.CacheType,
 		Labels:                 append([]string(nil), entry.Labels...),
 		InputTokens:            entry.InputTokens,

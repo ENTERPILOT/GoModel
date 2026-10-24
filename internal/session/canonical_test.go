@@ -19,6 +19,7 @@ func TestCanonicalSegmentMatchesStdlib(t *testing.T) {
 		`"gpt-4o-mini"`,
 		`"with \"escapes\" and é unicode 😀"`,
 		`"html <b>&amp;</b> specials"`,
+		`"control \b\f\u0001 escapes"`,
 		`123`,
 		`1e2`,
 		`1.50`,

@@ -676,50 +676,104 @@ func TestStripRoutingSuffix(t *testing.T) {
 	}
 }
 
-func TestResolve_ImageInputModalityImpliesVision(t *testing.T) {
+func TestResolve_CapabilitiesFromInputModalities(t *testing.T) {
 	tests := []struct {
-		name         string
-		entry        ModelEntry
-		wantVision   bool
-		wantPresent  bool
-		wantFunction bool
+		name           string
+		capabilities   map[string]bool
+		input          []string
+		pmCapabilities map[string]bool
+		want           map[string]bool
 	}{
 		{
-			name: "image input without a vision flag",
-			entry: ModelEntry{
-				Modalities:   &Modalities{Input: []string{"text", "image"}},
-				Capabilities: map[string]bool{"function_calling": true},
+			name:  "modalities only",
+			input: []string{"text", "image", "audio", "video", "pdf"},
+			want: map[string]bool{
+				"vision":      true,
+				"audio_input": true,
+				"video_input": true,
+				"pdf_input":   true,
 			},
-			wantVision: true, wantPresent: true, wantFunction: true,
 		},
 		{
-			name: "explicit vision false wins",
-			entry: ModelEntry{
-				Modalities:   &Modalities{Input: []string{"text", "image"}},
-				Capabilities: map[string]bool{"vision": false},
-			},
-			wantVision: false, wantPresent: true,
+			name:         "merged with catalog capabilities",
+			capabilities: map[string]bool{"function_calling": true},
+			input:        []string{" Image "},
+			want:         map[string]bool{"function_calling": true, "vision": true},
 		},
 		{
-			name:  "text only input",
-			entry: ModelEntry{Modalities: &Modalities{Input: []string{"text"}}},
+			name:         "explicit false wins",
+			capabilities: map[string]bool{"vision": false},
+			input:        []string{"image"},
+			want:         map[string]bool{"vision": false},
 		},
 		{
-			name:  "no modalities",
-			entry: ModelEntry{},
+			name:  "text only",
+			input: []string{"text"},
+			want:  nil,
+		},
+		{
+			name:           "provider model override keeps modality capabilities",
+			capabilities:   map[string]bool{"function_calling": true},
+			input:          []string{"image"},
+			pmCapabilities: map[string]bool{"reasoning": true},
+			want:           map[string]bool{"reasoning": true, "vision": true},
+		},
+		{
+			name:           "model false survives provider model override",
+			capabilities:   map[string]bool{"vision": false},
+			input:          []string{"image"},
+			pmCapabilities: map[string]bool{"reasoning": true},
+			want:           map[string]bool{"reasoning": true},
+		},
+		{
+			name:           "provider model override false wins",
+			input:          []string{"image"},
+			pmCapabilities: map[string]bool{"vision": false},
+			want:           map[string]bool{"vision": false},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			list := &ModelList{Models: map[string]ModelEntry{"m": tt.entry}}
-			meta := Resolve(list, "openai", "m")
+			list := &ModelList{
+				Models: map[string]ModelEntry{
+					"mimo": {
+						DisplayName:  "Mimo",
+						Capabilities: tt.capabilities,
+						Modalities:   &Modalities{Input: tt.input},
+					},
+				},
+				ProviderModels: map[string]ProviderModelEntry{},
+			}
+			if tt.pmCapabilities != nil {
+				list.ProviderModels["xiaomi/mimo"] = ProviderModelEntry{
+					ModelRef:     "mimo",
+					Enabled:      true,
+					Capabilities: tt.pmCapabilities,
+				}
+			}
+
+			meta := Resolve(list, "xiaomi", "mimo")
 			require.NotNil(t, meta)
-			vision, present := meta.Capabilities["vision"]
-			assert.Equal(t, tt.wantPresent, present)
-			assert.Equal(t, tt.wantVision, vision)
-			assert.Equal(t, tt.wantFunction, meta.Capabilities["function_calling"])
-			_, mutated := tt.entry.Capabilities["vision"]
-			assert.Equal(t, tt.wantPresent && !tt.wantVision, mutated, "the catalog entry is not modified")
+			assert.Equal(t, tt.want, meta.Capabilities)
 		})
 	}
+}
+
+func TestResolve_ModalityCapabilitiesDoNotModifyCatalog(t *testing.T) {
+	catalogCapabilities := map[string]bool{"function_calling": true}
+	list := &ModelList{
+		Models: map[string]ModelEntry{
+			"mimo": {
+				DisplayName:  "Mimo",
+				Capabilities: catalogCapabilities,
+				Modalities:   &Modalities{Input: []string{"image"}},
+			},
+		},
+	}
+
+	meta := Resolve(list, "xiaomi", "mimo")
+	require.NotNil(t, meta)
+	assert.True(t, meta.Capabilities["vision"])
+	assert.Equal(t, map[string]bool{"function_calling": true}, catalogCapabilities)
 }

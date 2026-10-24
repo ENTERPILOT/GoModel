@@ -50,7 +50,7 @@ func (s *mcpService) handle(c *echo.Context, pinnedServer string) error {
 			return handleError(c, err)
 		}
 		defer release()
-		if err := enforceBudget(c, s.budgetChecker); err != nil {
+		if err := enforceBudget(c, s.budgetChecker, rateLimitRoute{}); err != nil {
 			return handleError(c, err)
 		}
 		if s.logBodies {
