@@ -89,7 +89,7 @@
         <Spinner size={24} label={m.usage_loading()} />
       </div>
     {:else if !liveTokensHasData(totals) && !auth.authError}
-      <div class="chart-empty-overlay">
+      <div class="chart-empty-overlay live-tokens-empty">
         <NoDataIllustration />
       </div>
     {/if}
@@ -144,5 +144,14 @@
   .live-tokens-legend-value {
     color: var(--text);
     font-weight: 600;
+  }
+
+  /* Keep the no-data illustration clear of the x-axis labels. */
+  .live-tokens-empty {
+    bottom: 30px;
+  }
+
+  .live-tokens-empty :global(.empty-state-icon) {
+    max-height: 100%;
   }
 </style>
