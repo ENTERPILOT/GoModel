@@ -2,10 +2,13 @@ package providers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type mockTokenCountingProvider struct {
@@ -35,17 +38,12 @@ func TestRouterCountMessagesTokens(t *testing.T) {
 	router, _ := NewRouter(lookup)
 
 	got, err := router.CountMessagesTokens(context.Background(), "anthropic/claude-haiku-4-5", []byte(`{"messages":[]}`))
-	if err != nil {
-		t.Fatalf("CountMessagesTokens: %v", err)
-	}
-	if got != 321 || counter.lastModel != "claude-haiku-4-5" {
-		t.Errorf("count = %d via model %q, want 321 via the bare model", got, counter.lastModel)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 321, got)
+	assert.Equal(t, "claude-haiku-4-5", counter.lastModel)
 
 	_, err = router.CountMessagesTokens(context.Background(), "openai/gpt-5-mini", []byte(`{"messages":[]}`))
-	if !errors.Is(err, core.ErrMessagesTokenCountUnsupported) {
-		t.Errorf("err = %v, want ErrMessagesTokenCountUnsupported for a provider without the endpoint", err)
-	}
+	assert.ErrorIs(t, err, core.ErrMessagesTokenCountUnsupported)
 }
 
 // A failure from the counting provider reaches the caller unchanged, so the
@@ -58,10 +56,44 @@ func TestRouterCountMessagesTokens_PropagatesProviderError(t *testing.T) {
 	router, _ := NewRouter(lookup)
 
 	_, err := router.CountMessagesTokens(context.Background(), "anthropic/claude-haiku-4-5", []byte(`{"messages":[]}`))
-	if !errors.Is(err, upstream) {
-		t.Fatalf("err = %v, want the provider's error propagated", err)
-	}
-	if errors.Is(err, core.ErrMessagesTokenCountUnsupported) {
-		t.Fatal("an upstream failure must not read as an unsupported provider")
-	}
+	require.ErrorIs(t, err, upstream)
+	require.NotErrorIs(t, err, core.ErrMessagesTokenCountUnsupported)
+}
+
+type mockChatTokenCountingProvider struct {
+	*mockProvider
+	count int
+	last  *core.ChatRequest
+}
+
+func (m *mockChatTokenCountingProvider) CountChatTokens(_ context.Context, req *core.ChatRequest) (int, error) {
+	m.last = req
+	return m.count, nil
+}
+
+// A chat count reaches the provider as a completion would: with the resolved
+// model and without Anthropic cache directives the provider does not accept.
+func TestRouterCountChatTokens(t *testing.T) {
+	counter := &mockChatTokenCountingProvider{mockProvider: &mockProvider{name: "openai"}, count: 130}
+	plain := &mockProvider{name: "other"}
+	lookup := newMockLookup()
+	lookup.addModel("openai/gpt-6-luna", counter, "openai")
+	lookup.addModel("other/model-x", plain, "other")
+	router, _ := NewRouter(lookup)
+
+	cacheControl := core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"cache_control": json.RawMessage(`{"type":"ephemeral"}`)})
+	ctx := core.WithRequestDialect(context.Background(), core.RequestDialectAnthropicMessages)
+	got, err := router.CountChatTokens(ctx, &core.ChatRequest{
+		Model:    "openai/gpt-6-luna",
+		Messages: []core.Message{{Role: "user", Content: []core.ContentPart{{Type: "text", Text: "hi", ExtraFields: cacheControl}}}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 130, got)
+	require.NotNil(t, counter.last)
+	assert.Equal(t, "gpt-6-luna", counter.last.Model)
+	parts := counter.last.Messages[0].Content.([]core.ContentPart)
+	assert.True(t, parts[0].ExtraFields.IsEmpty(), "cache_control must not reach OpenAI")
+
+	_, err = router.CountChatTokens(ctx, &core.ChatRequest{Model: "other/model-x", Messages: []core.Message{{Role: "user", Content: "hi"}}})
+	assert.ErrorIs(t, err, core.ErrMessagesTokenCountUnsupported)
 }

@@ -20,6 +20,11 @@ const maxReason = 200
 type verdict struct {
 	Verdict string
 	Reason  string
+	// NoVerdict marks an unclear verdict the judge never reached: the reply
+	// was cut off or spent on reasoning. It selects [CodeNoVerdict].
+	NoVerdict bool
+	// Probability is a decision model's probability of a violation.
+	Probability *float64
 }
 
 // verdictSep matches what a model wraps a bare verdict in: whitespace,

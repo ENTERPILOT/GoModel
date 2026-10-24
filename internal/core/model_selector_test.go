@@ -1,6 +1,10 @@
 package core
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestParseModelSelector(t *testing.T) {
 	tests := []struct {
@@ -61,23 +65,13 @@ func TestParseModelSelector(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			selector, err := ParseModelSelector(tt.model, tt.provider)
 			if tt.wantErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
-				}
+				require.Error(t, err)
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if selector.Model != tt.wantModel {
-				t.Fatalf("Model = %q, want %q", selector.Model, tt.wantModel)
-			}
-			if selector.Provider != tt.wantProvider {
-				t.Fatalf("Provider = %q, want %q", selector.Provider, tt.wantProvider)
-			}
-			if selector.QualifiedModel() != tt.wantQualified {
-				t.Fatalf("QualifiedModel = %q, want %q", selector.QualifiedModel(), tt.wantQualified)
-			}
+			require.NoError(t, err)
+			require.Equal(t, tt.wantModel, selector.Model)
+			require.Equal(t, tt.wantProvider, selector.Provider)
+			require.Equal(t, tt.wantQualified, selector.QualifiedModel())
 		})
 	}
 }

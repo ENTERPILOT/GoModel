@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGeminiPartsFromContentParts_FileProjection(t *testing.T) {
@@ -33,23 +35,16 @@ func TestGeminiPartsFromContentParts_FileProjection(t *testing.T) {
 				{Type: "file", File: &file},
 			})
 			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("expected invalid-request error, got parts %#v", parts)
-				}
-				if gatewayErr, ok := err.(*core.GatewayError); !ok || gatewayErr.Type != core.ErrorTypeInvalidRequest {
-					t.Fatalf("error = %v, want invalid_request_error", err)
-				}
+				var gatewayErr *core.GatewayError
+				require.ErrorAs(t, err, &gatewayErr)
+				assert.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
 				return
 			}
-			if err != nil {
-				t.Fatalf("geminiPartsFromContentParts: %v", err)
-			}
-			if len(parts) != 2 || parts[1].InlineData == nil {
-				t.Fatalf("parts = %#v, want text + inline_data", parts)
-			}
-			if parts[1].InlineData.MimeType != tc.wantMime || parts[1].InlineData.Data != tc.wantData {
-				t.Errorf("inline_data = %+v, want mime %q data %q", *parts[1].InlineData, tc.wantMime, tc.wantData)
-			}
+			require.NoError(t, err)
+			require.Len(t, parts, 2)
+			require.NotNil(t, parts[1].InlineData)
+			assert.Equal(t, tc.wantMime, parts[1].InlineData.MimeType)
+			assert.Equal(t, tc.wantData, parts[1].InlineData.Data)
 		})
 	}
 }

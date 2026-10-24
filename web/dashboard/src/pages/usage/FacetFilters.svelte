@@ -2,6 +2,7 @@
   // Page-level data filters: every widget on the usage page follows them.
   // Each facet dropdown honors every filter except its own (faceted search).
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
+  import SearchSelect from "$lib/components/molecules/SearchSelect.svelte";
   import { debounced } from "$lib/utils/debounce.js";
   import { access } from "$lib/stores/access.svelte.js";
   import { usagePage } from "./usage.svelte.js";
@@ -9,9 +10,13 @@
 
   const onUserPathInput = debounced(() => usagePage.onUsageFilterChanged());
   const onSessionInput = debounced(() => usagePage.onUsageFilterChanged());
+  // The endpoint list stays open while picking several; refetch once the
+  // picks settle rather than on every toggle.
+  const onEndpointsChange = debounced(() => usagePage.onUsageFilterChanged());
   $effect(() => () => {
     onUserPathInput.cancel();
     onSessionInput.cancel();
+    onEndpointsChange.cancel();
   });
 </script>
 
@@ -51,6 +56,32 @@
       {/each}
     </select>
   {/if}
+  {#if usagePage.usageFilterEndpointOptions().length > 0}
+    <SearchSelect
+      class="usage-page-filters-endpoints"
+      options={usagePage.usageFilterEndpointOptions()}
+      multiple
+      mono
+      bind:values={usagePage.usageFilterEndpoints}
+      onchange={onEndpointsChange}
+      placeholder={m.usage_all_endpoints()}
+      searchPlaceholder={m.usage_search_endpoints()}
+      ariaLabel={m.usage_filter_endpoint()}
+    />
+  {/if}
+  {#if usagePage.usageFilterAuthKeyOptions().length > 0}
+    <select
+      bind:value={usagePage.usageFilterAuthKey}
+      onchange={() => usagePage.onUsageFilterChanged()}
+      class="usage-log-select"
+      aria-label={m.usage_filter_auth_key()}
+    >
+      <option value="">{m.usage_all_auth_keys()}</option>
+      {#each usagePage.usageFilterAuthKeyOptions() as key (key.id)}
+        <option value={key.id}>{key.name}</option>
+      {/each}
+    </select>
+  {/if}
   <!-- A scoped key's server-side default is its scope root: show it as the
        placeholder so an empty filter reads as that subtree. -->
   <FilterInput
@@ -84,8 +115,10 @@
     margin-bottom: 20px;
   }
 
+  /* White like the endpoint picker beside them, not the page background. */
   .usage-page-filters :global(.usage-log-select) {
     flex: 0 1 auto;
+    background-color: var(--bg-surface);
   }
 
   /* The modifier class rides on FilterInput's own wrapper, so it has to be
@@ -102,10 +135,16 @@
     max-width: 360px;
   }
 
+  .usage-page-filters :global(.usage-page-filters-endpoints) {
+    flex: 0 1 260px;
+    min-width: 180px;
+  }
+
   @media (max-width: 768px) {
     .usage-page-filters :global(.usage-log-select),
     .usage-page-filters :global(.usage-page-filters-user-path),
-    .usage-page-filters :global(.usage-page-filters-session) {
+    .usage-page-filters :global(.usage-page-filters-session),
+    .usage-page-filters :global(.usage-page-filters-endpoints) {
         flex: 1 1 100%;
         max-width: none;
       }

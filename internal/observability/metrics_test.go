@@ -8,6 +8,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
@@ -20,12 +22,8 @@ func TestPrometheusHooks(t *testing.T) {
 	// Create hooks
 	hooks := NewPrometheusHooks()
 
-	if hooks.OnRequestStart == nil {
-		t.Fatal("OnRequestStart hook should not be nil")
-	}
-	if hooks.OnRequestEnd == nil {
-		t.Fatal("OnRequestEnd hook should not be nil")
-	}
+	require.NotNil(t, hooks.OnRequestStart)
+	require.NotNil(t, hooks.OnRequestEnd)
 }
 
 func TestRequestMetrics_Success(t *testing.T) {
@@ -68,14 +66,10 @@ func TestRequestMetrics_Success(t *testing.T) {
 	counter, err := RequestsTotal.GetMetricWithLabelValues(
 		"openai", "gpt-4", "/chat/completions", "200", "success", "false",
 	)
-	if err != nil {
-		t.Fatalf("Failed to get counter metric: %v", err)
-	}
+	require.NoError(t, err)
 
 	value := testutil.ToFloat64(counter)
-	if value != 1 {
-		t.Errorf("Expected counter value 1, got %f", value)
-	}
+	assert.Equal(t, float64(1), value)
 }
 
 func TestRequestMetrics_CircuitBreakerStateGauge(t *testing.T) {
@@ -105,20 +99,16 @@ func TestRequestMetrics_CircuitBreakerStateGauge(t *testing.T) {
 	} {
 		endRequest(tc.state)
 		gauge, err := CircuitBreakerState.GetMetricWithLabelValues("openai")
-		if err != nil {
-			t.Fatalf("Failed to get gauge metric: %v", err)
-		}
-		if value := testutil.ToFloat64(gauge); value != tc.want {
-			t.Errorf("gauge after state %q = %f, want %f", tc.state, value, tc.want)
-		}
+		require.NoError(t, err)
+		value := testutil.ToFloat64(gauge)
+		assert.Equal(t, tc.want, value, "gauge after state %q = %f, want %f", tc.state, value, tc.want)
 	}
 
 	// A client without a breaker reports no state and must not create a series.
 	ResetMetrics()
 	endRequest("")
-	if count := testutil.CollectAndCount(CircuitBreakerState); count != 0 {
-		t.Errorf("gauge series count = %d after empty state, want 0", count)
-	}
+	count := testutil.CollectAndCount(CircuitBreakerState)
+	assert.Equal(t, 0, count)
 }
 
 func TestRequestMetrics_Error(t *testing.T) {
@@ -157,14 +147,10 @@ func TestRequestMetrics_Error(t *testing.T) {
 	counter, err := RequestsTotal.GetMetricWithLabelValues(
 		"anthropic", "claude-3-opus", "/messages", "400", "error", "false",
 	)
-	if err != nil {
-		t.Fatalf("Failed to get counter metric: %v", err)
-	}
+	require.NoError(t, err)
 
 	value := testutil.ToFloat64(counter)
-	if value != 1 {
-		t.Errorf("Expected counter value 1, got %f", value)
-	}
+	assert.Equal(t, float64(1), value)
 }
 
 func TestRequestMetrics_NetworkError(t *testing.T) {
@@ -203,14 +189,10 @@ func TestRequestMetrics_NetworkError(t *testing.T) {
 	counter, err := RequestsTotal.GetMetricWithLabelValues(
 		"gemini", "gemini-pro", "/chat/completions", "network_error", "error", "false",
 	)
-	if err != nil {
-		t.Fatalf("Failed to get counter metric: %v", err)
-	}
+	require.NoError(t, err)
 
 	value := testutil.ToFloat64(counter)
-	if value != 1 {
-		t.Errorf("Expected counter value 1, got %f", value)
-	}
+	assert.Equal(t, float64(1), value)
 }
 
 func TestRequestMetrics_Streaming(t *testing.T) {
@@ -249,14 +231,10 @@ func TestRequestMetrics_Streaming(t *testing.T) {
 	counter, err := RequestsTotal.GetMetricWithLabelValues(
 		"openai", "gpt-4-turbo", "/chat/completions", "200", "success", "true",
 	)
-	if err != nil {
-		t.Fatalf("Failed to get counter metric: %v", err)
-	}
+	require.NoError(t, err)
 
 	value := testutil.ToFloat64(counter)
-	if value != 1 {
-		t.Errorf("Expected counter value 1, got %f", value)
-	}
+	assert.Equal(t, float64(1), value)
 }
 
 func TestInFlightRequests(t *testing.T) {
@@ -279,13 +257,10 @@ func TestInFlightRequests(t *testing.T) {
 
 	// Check in-flight gauge increased
 	gauge, err := InFlightRequests.GetMetricWithLabelValues("openai", "/chat/completions", "false")
-	if err != nil {
-		t.Fatalf("Failed to get gauge metric: %v", err)
-	}
+	require.NoError(t, err)
+
 	value := testutil.ToFloat64(gauge)
-	if value != 1 {
-		t.Errorf("Expected in-flight gauge value 1, got %f", value)
-	}
+	assert.Equal(t, float64(1), value)
 
 	// Start second request
 	ctx2 := context.Background()
@@ -300,9 +275,7 @@ func TestInFlightRequests(t *testing.T) {
 
 	// Check in-flight gauge increased again
 	value = testutil.ToFloat64(gauge)
-	if value != 2 {
-		t.Errorf("Expected in-flight gauge value 2, got %f", value)
-	}
+	assert.Equal(t, float64(2), value)
 
 	// End first request
 	respInfo1 := llmclient.ResponseInfo{
@@ -318,9 +291,7 @@ func TestInFlightRequests(t *testing.T) {
 
 	// Check in-flight gauge decreased
 	value = testutil.ToFloat64(gauge)
-	if value != 1 {
-		t.Errorf("Expected in-flight gauge value 1 after first request ended, got %f", value)
-	}
+	assert.Equal(t, float64(1), value)
 
 	// End second request
 	respInfo2 := llmclient.ResponseInfo{
@@ -336,9 +307,7 @@ func TestInFlightRequests(t *testing.T) {
 
 	// Check in-flight gauge back to 0
 	value = testutil.ToFloat64(gauge)
-	if value != 0 {
-		t.Errorf("Expected in-flight gauge value 0 after all requests ended, got %f", value)
-	}
+	assert.Equal(t, float64(0), value)
 }
 
 func TestRequestDuration(t *testing.T) {
@@ -376,15 +345,11 @@ func TestRequestDuration(t *testing.T) {
 	// Note: We can't easily verify the exact value without accessing internal histogram state,
 	// but we can verify the metric exists and has observations
 	observer, err := RequestDuration.GetMetricWithLabelValues("openai", "gpt-4", "/chat/completions", "false")
-	if err != nil {
-		t.Fatalf("Failed to get histogram metric: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Verify at least one observation was recorded
 	hist := observer.(prometheus.Histogram)
-	if hist == nil {
-		t.Fatal("Expected histogram, got nil")
-	}
+	require.NotNil(t, hist)
 }
 
 func TestEmptyResponseMetric(t *testing.T) {
@@ -398,11 +363,8 @@ func TestEmptyResponseMetric(t *testing.T) {
 			Reason:   reason,
 		})
 	}
-
-	if got := testutil.ToFloat64(EmptyResponsesTotal.WithLabelValues("openai-eu", "gpt-4", llmclient.EmptyReasonNoChoices)); got != 2 {
-		t.Fatalf("no_choices count = %v, want 2", got)
-	}
-	if got := testutil.ToFloat64(EmptyResponsesTotal.WithLabelValues("openai-eu", "gpt-4", llmclient.EmptyReasonNoUsage)); got != 1 {
-		t.Fatalf("no_usage count = %v, want 1", got)
-	}
+	got := testutil.ToFloat64(EmptyResponsesTotal.WithLabelValues("openai-eu", "gpt-4", llmclient.EmptyReasonNoChoices))
+	require.Equal(t, float64(2), got)
+	got = testutil.ToFloat64(EmptyResponsesTotal.WithLabelValues("openai-eu", "gpt-4", llmclient.EmptyReasonNoUsage))
+	require.Equal(t, float64(1), got)
 }

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,7 +14,6 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 )
@@ -51,13 +51,6 @@ type Provider struct {
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	compat := openai.NewCompatibleProvider(providerCfg.APIKey, opts, compatibleConfig(providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL)))
 	return newProvider(compat, opts.Keyring(providerCfg.APIKey))
-}
-
-// NewWithHTTPClient creates a new xAI provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	compat := openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(defaultBaseURL))
-	return newProvider(compat, providers.NewKeyring(apiKey))
 }
 
 func newProvider(compat *openai.CompatibleProvider, keys *providers.Keyring) *Provider {
@@ -275,14 +268,27 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	return p.compat.StreamChatCompletion(ctx, req)
 }
 
-// ListModels retrieves the list of available models from xAI
-func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
-	return p.compat.ListModels(ctx)
+// adaptResponsesRequest drops Responses members xAI's native /responses
+// endpoint refuses. xAI answers a request carrying "metadata" with
+// 400 "Argument not supported: metadata", even though it is a standard
+// OpenAI Responses member; it is a caller-side label that does not affect
+// generation, so dropping it is preferable to relaying an error the client
+// cannot act on. The caller's request is left untouched so the gateway can
+// still echo the member back to the client.
+func adaptResponsesRequest(req *core.ResponsesRequest) *core.ResponsesRequest {
+	if req == nil || len(req.Metadata) == 0 {
+		return req
+	}
+	slog.Warn("dropping metadata; xai rejects the member on /responses",
+		"model", req.Model, "keys", len(req.Metadata))
+	adapted := *req
+	adapted.Metadata = nil
+	return &adapted
 }
 
 // Responses sends a Responses API request to xAI's native /responses endpoint.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return p.compat.Responses(ctx, req)
+	return p.compat.Responses(ctx, adaptResponsesRequest(req))
 }
 
 // StreamResponses returns a normalized streaming Responses API body.
@@ -291,7 +297,7 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 // synthesize a terminal `data: [DONE]` marker on completed streams. Callers
 // remain responsible for closing the returned stream.
 func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
-	return p.compat.StreamResponses(ctx, req)
+	return p.compat.StreamResponses(ctx, adaptResponsesRequest(req))
 }
 
 // Embeddings sends an embeddings request to xAI

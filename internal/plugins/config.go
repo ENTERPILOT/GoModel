@@ -9,6 +9,7 @@ import (
 
 	"github.com/goccy/go-json"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/pluginapi"
 )
 
@@ -70,7 +71,10 @@ func ValidateConfig(schema []pluginapi.Field, raw json.RawMessage, scope plugina
 	return marshalCanonical(out)
 }
 
-// RedactSecrets replaces every non-empty secret value with SecretMask.
+// RedactSecrets replaces every non-empty secret value with SecretMask. A
+// value made of secret references alone (${scheme:reference}) is kept: it
+// names where the secret lives and is not secret itself. A value mixing
+// literal text with a reference is masked, as it may hold a literal secret.
 func RedactSecrets(schema []pluginapi.Field, raw json.RawMessage) json.RawMessage {
 	values, err := decodeConfigObject(raw)
 	if err != nil {
@@ -81,7 +85,7 @@ func RedactSecrets(schema []pluginapi.Field, raw json.RawMessage) json.RawMessag
 		if field.Input != pluginapi.InputSecret {
 			continue
 		}
-		if s, ok := values[field.Key].(string); ok && s != "" {
+		if s, ok := values[field.Key].(string); ok && s != "" && !config.OnlySecretReferences(s) {
 			values[field.Key] = SecretMask
 			changed = true
 		}
@@ -129,6 +133,46 @@ func MergeSecrets(schema []pluginapi.Field, incoming, stored json.RawMessage) js
 		return incoming
 	}
 	return out
+}
+
+// SecretKeys returns the keys of the schema's secret fields.
+func SecretKeys(schema []pluginapi.Field) map[string]bool {
+	keys := map[string]bool{}
+	for _, field := range schema {
+		if field.Input == pluginapi.InputSecret {
+			keys[field.Key] = true
+		}
+	}
+	return keys
+}
+
+// MapConfigStrings applies fn to every top-level string value of a config
+// object and returns the canonical result. raw is returned unchanged when fn
+// changes nothing.
+func MapConfigStrings(raw json.RawMessage, fn func(key, value string) (string, error)) (json.RawMessage, error) {
+	values, err := decodeConfigObject(raw)
+	if err != nil {
+		return nil, err
+	}
+	changed := false
+	for key, value := range values {
+		s, ok := value.(string)
+		if !ok {
+			continue
+		}
+		mapped, err := fn(key, s)
+		if err != nil {
+			return nil, err
+		}
+		if mapped != s {
+			values[key] = mapped
+			changed = true
+		}
+	}
+	if !changed {
+		return raw, nil
+	}
+	return marshalCanonical(values)
 }
 
 // SchemaDefaults renders the default config object of the instance-scoped

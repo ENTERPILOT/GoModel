@@ -12,6 +12,8 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 	"github.com/enterpilot/gomodel/internal/providers/xai"
 )
 
@@ -19,7 +21,9 @@ func newXAIReplayProvider(t *testing.T, routes map[string]replayRoute) core.Prov
 	t.Helper()
 
 	client := newReplayHTTPClient(t, routes)
-	provider := xai.NewWithHTTPClient("xai-test", client, llmclient.Hooks{})
+	opts := providertest.Options(llmclient.Hooks{})
+	opts.HTTPClient = client
+	provider := xai.New(providers.ProviderConfig{APIKey: "xai-test"}, opts).(*xai.Provider)
 	provider.SetBaseURL("https://replay.local")
 	return provider
 }
@@ -91,9 +95,7 @@ func TestXAIReplayListModels(t *testing.T) {
 }
 
 func TestXAIReplayResponses(t *testing.T) {
-	if !goldenFileExists(t, "xai/responses.json") {
-		t.Fatalf("missing golden file xai/responses.json; run `make record-api` to create/update contract fixtures")
-	}
+	require.True(t, goldenFileExists(t, "xai/responses.json"), "missing golden file xai/responses.json; run `make record-api` to create/update contract fixtures")
 
 	provider := newXAIReplayProvider(t, map[string]replayRoute{
 		replayKey(http.MethodPost, "/responses"): jsonFixtureRoute(t, "xai/responses.json"),
@@ -110,9 +112,7 @@ func TestXAIReplayResponses(t *testing.T) {
 }
 
 func TestXAIReplayStreamResponses(t *testing.T) {
-	if !goldenFileExists(t, "xai/responses_stream.txt") {
-		t.Fatalf("missing golden file xai/responses_stream.txt; run `make record-api` to create/update contract fixtures")
-	}
+	require.True(t, goldenFileExists(t, "xai/responses_stream.txt"), "missing golden file xai/responses_stream.txt; run `make record-api` to create/update contract fixtures")
 
 	provider := newXAIReplayProvider(t, map[string]replayRoute{
 		replayKey(http.MethodPost, "/responses"): sseFixtureRoute(t, "xai/responses_stream.txt"),

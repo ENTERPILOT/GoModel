@@ -12,14 +12,18 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/anthropic"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
 func newAnthropicReplayProvider(t *testing.T, routes map[string]replayRoute) core.Provider {
 	t.Helper()
 
 	client := newReplayHTTPClient(t, routes)
-	provider := anthropic.NewWithHTTPClient("sk-ant-test", client, llmclient.Hooks{})
+	opts := providertest.Options(llmclient.Hooks{})
+	opts.HTTPClient = client
+	provider := anthropic.New(providers.ProviderConfig{APIKey: "sk-ant-test"}, opts).(*anthropic.Provider)
 	provider.SetBaseURL("https://replay.local")
 	return provider
 }

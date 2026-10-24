@@ -223,13 +223,15 @@ export function providerCircuitBreakerSummary(provider) {
       : null;
   if (!breaker) return "-";
   if (breaker.enabled === false) return m.common_disabled();
+  const slowCall = breaker.slow_call_threshold;
   return (
     String(breaker.failure_threshold) +
     " fail, " +
     String(breaker.success_threshold) +
     " success, " +
     breaker.timeout +
-    " timeout"
+    " timeout" +
+    (slowCall && slowCall !== "0s" ? ", slow over " + slowCall : "")
   );
 }
 

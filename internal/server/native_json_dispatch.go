@@ -1,0 +1,151 @@
+package server
+
+import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"strings"
+
+	"github.com/labstack/echo/v5"
+
+	"github.com/enterpilot/gomodel/internal/auditlog"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/gateway"
+	"github.com/enterpilot/gomodel/internal/responsecache"
+)
+
+// nativeJSONRoute is a gateway route that forwards a provider-native JSON
+// body, such as System One or Decisions, rather than translating it to a
+// canonical request.
+type nativeJSONRoute struct {
+	// path is the gateway route; endpoint is the same route as a provider's
+	// passthrough spells it, without the /v1 prefix.
+	path     string
+	endpoint string
+	// operation names the call in provider metrics and logs.
+	operation string
+}
+
+// nativeJSONSender sends the guarded body to one target, the primary or a
+// failover, and returns its successful response or the upstream error.
+type nativeJSONSender func(ctx context.Context, selector core.ModelSelector, providerType, providerName string, headers http.Header) (*core.PassthroughResponse, error)
+
+// dispatchNativeJSONWithCache serves a guarded native body from the response
+// cache when the workflow allows it, and runs dispatch otherwise. Only the
+// exact layer applies: the key covers the route, the resolved model, the
+// guardrail chain, and the forwarded body, and the semantic layer never
+// serves these paths, since a similar input is not the same decision.
+func (s *translatedInferenceService) dispatchNativeJSONWithCache(c *echo.Context, route nativeJSONRoute, workflow *core.Workflow, body []byte, dispatch func() error) error {
+	// Before the cache: an answer replayed from a warm shared cache skips the
+	// selected response guardrails as much as a live one does.
+	s.warnSkippedResponsePlugins(c.Request().Context(), route)
+	if s.responseCache == nil || !workflow.CacheEnabled() {
+		return dispatch()
+	}
+	c.SetRequest(c.Request().WithContext(s.inference().WithCacheRequestContext(c.Request().Context(), workflow)))
+	err := s.responseCache.HandleRequest(c, body, dispatch)
+	if replayErr, ok := errors.AsType[*responsecache.ReplayError](err); ok {
+		recordCachedStreamError(c, replayErr.Err)
+		return nil
+	}
+	return err
+}
+
+// dispatchNativeJSON sends the body to the resolved target, and to the
+// workflow's eligible failover targets while the failover policy allows,
+// then relays the answer with audit and usage accounting.
+func (s *translatedInferenceService) dispatchNativeJSON(
+	c *echo.Context,
+	route nativeJSONRoute,
+	workflow *core.Workflow,
+	eligible func(selector core.ModelSelector, providerType string) bool,
+	send nativeJSONSender,
+) error {
+	// Record each provider attempt so the audit entry shows a failed primary
+	// and the failover that answered, as it does for chat.
+	c.SetRequest(c.Request().WithContext(gateway.WithAttemptRecorder(c.Request().Context())))
+	s.observeLiveProviderAttempts(c, workflow)
+
+	// A prompt guardrail may already have admitted the request.
+	adm, err := admitOnce(c, s.rateLimiter, s.budgetChecker, s.admissionRoute(workflow))
+	if err != nil {
+		return handleError(c, err)
+	}
+	defer releaseAdmission(c)
+	ctx := adm.dispatchContext(c.Request().Context())
+
+	headers := buildPassthroughHeaders(ctx, c.Request().Header)
+	// The client's Idempotency-Key reaches the primary through the request
+	// context, which failover attempts clear; forwarded as an explicit header
+	// it would also mark every failover target's different body.
+	headers.Del(core.IdempotencyKeyHeader)
+	resp, executed, meta, err := s.inference().ExecutePassthroughWithFailover(ctx, workflow, eligible,
+		func(ctx context.Context, selector core.ModelSelector, providerType, providerName string) (*core.PassthroughResponse, error) {
+			return send(ctx, selector, providerType, providerName, headers.Clone())
+		})
+	enrichAuditEntryWithProviderAttempts(c)
+	if err != nil {
+		return handleError(c, err)
+	}
+
+	if meta.UsedFailover {
+		markRequestFailoverUsed(c)
+		auditlog.EnrichEntryWithFailover(c, meta.FailoverModel)
+		workflow = executedNativeWorkflow(workflow, executed, meta)
+		storeWorkflow(c, workflow)
+	}
+	auditlog.EnrichEntryWithWorkflow(c, workflow)
+	auditlog.EnrichEntryWithResolvedRoute(c, executed.QualifiedModel(), meta.ProviderType, meta.ProviderName)
+	info := &core.PassthroughRouteInfo{
+		Provider:           meta.ProviderType,
+		ProviderName:       meta.ProviderName,
+		NormalizedEndpoint: route.endpoint,
+		SemanticOperation:  route.operation,
+		AuditPath:          route.path,
+		Model:              executed.Model,
+	}
+	return proxyPassthroughResponse(c, s.logger, s.usageLogger, s.pricingResolver, meta.ProviderType, meta.ProviderName, route.endpoint, info, resp)
+}
+
+// maxNativeErrorBodyBytes caps how much of an upstream error body is read to
+// build the gateway error, so a misbehaving upstream cannot make the gateway
+// buffer an unbounded body.
+const maxNativeErrorBodyBytes = 64 << 10
+
+// nativeJSONResult turns one target's response into what the failover policy
+// judges: the response when it succeeded, or the upstream error it carries.
+func nativeJSONResult(providerType string, resp *core.PassthroughResponse, err error) (*core.PassthroughResponse, error) {
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil || resp.Body == nil {
+		return nil, core.NewProviderError(providerType, http.StatusBadGateway, "provider returned empty passthrough response", nil)
+	}
+	if resp.StatusCode < http.StatusBadRequest {
+		return resp, nil
+	}
+	defer func() { _ = resp.Body.Close() }()
+	errorBody, err := io.ReadAll(io.LimitReader(resp.Body, maxNativeErrorBodyBytes))
+	if err != nil {
+		return nil, core.NewProviderError(providerType, http.StatusBadGateway, "failed to read provider error response", err)
+	}
+	return nil, core.ParseProviderError(providerType, resp.StatusCode, errorBody, nil)
+}
+
+// executedNativeWorkflow returns a copy of workflow routed to the failover
+// target that answered, so usage is priced and audited under the model that
+// did the work rather than the primary that failed.
+func executedNativeWorkflow(workflow *core.Workflow, executed core.ModelSelector, meta gateway.ExecutionMeta) *core.Workflow {
+	if workflow == nil || workflow.Resolution == nil {
+		return workflow
+	}
+	resolution := *workflow.Resolution
+	resolution.ResolvedSelector = executed
+	resolution.ProviderType = strings.TrimSpace(meta.ProviderType)
+	resolution.ProviderName = strings.TrimSpace(meta.ProviderName)
+	cloned := *workflow
+	cloned.ProviderType = resolution.ProviderType
+	cloned.Resolution = &resolution
+	return &cloned
+}

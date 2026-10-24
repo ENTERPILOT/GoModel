@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -15,31 +16,20 @@ func TestAdaptReasoningEffortRequest(t *testing.T) {
 	}
 
 	adapted, err := AdaptReasoningEffortRequest(req, "high")
-	if err != nil {
-		t.Fatalf("AdaptReasoningEffortRequest: %v", err)
-	}
-
-	if adapted.Reasoning != nil {
-		t.Fatalf("adapted.Reasoning = %#v, want nil (flat extension only)", adapted.Reasoning)
-	}
-	if req.Reasoning == nil {
-		t.Fatal("original request mutated: Reasoning cleared")
-	}
+	require.NoError(t, err)
+	require.Nil(t, adapted.Reasoning)
+	require.NotNil(t, req.Reasoning)
 
 	body, err := json.Marshal(adapted)
-	if err != nil {
-		t.Fatalf("marshal adapted request: %v", err)
-	}
+	require.NoError(t, err)
+
 	var wire map[string]json.RawMessage
-	if err := json.Unmarshal(body, &wire); err != nil {
-		t.Fatalf("unmarshal wire body: %v", err)
-	}
-	if got := string(wire["reasoning_effort"]); got != `"high"` {
-		t.Fatalf("reasoning_effort = %s, want \"high\"", got)
-	}
-	if _, present := wire["reasoning"]; present {
-		t.Fatal("reasoning present on the wire, want dropped")
-	}
+	err = json.Unmarshal(body, &wire)
+	require.NoError(t, err)
+	got := string(wire["reasoning_effort"])
+	require.Equal(t, `"high"`, got)
+	_, present := wire["reasoning"]
+	require.False(t, present)
 }
 
 func TestAdaptReasoningEffortRequestPreservesExistingExtraFields(t *testing.T) {
@@ -53,33 +43,24 @@ func TestAdaptReasoningEffortRequestPreservesExistingExtraFields(t *testing.T) {
 	}
 
 	adapted, err := AdaptReasoningEffortRequest(req, "low")
-	if err != nil {
-		t.Fatalf("AdaptReasoningEffortRequest: %v", err)
-	}
+	require.NoError(t, err)
 
 	body, err := json.Marshal(adapted)
-	if err != nil {
-		t.Fatalf("marshal adapted request: %v", err)
-	}
+	require.NoError(t, err)
+
 	var wire map[string]json.RawMessage
-	if err := json.Unmarshal(body, &wire); err != nil {
-		t.Fatalf("unmarshal wire body: %v", err)
-	}
-	if got := string(wire["custom_field"]); got != `"kept"` {
-		t.Fatalf("custom_field = %s, want preserved", got)
-	}
-	if got := string(wire["reasoning_effort"]); got != `"low"` {
-		t.Fatalf("reasoning_effort = %s, want adaptation to win over stale extra field", got)
-	}
+	err = json.Unmarshal(body, &wire)
+	require.NoError(t, err)
+	got := string(wire["custom_field"])
+	require.Equal(t, `"kept"`, got)
+	got = string(wire["reasoning_effort"])
+	require.Equal(t, `"low"`, got)
 }
 
 func TestDropReasoning(t *testing.T) {
 	req := &core.ChatRequest{Model: "m", Reasoning: &core.Reasoning{Effort: "low"}}
 	got := DropReasoning(req)
-	if got.Reasoning != nil {
-		t.Fatalf("Reasoning = %+v, want nil", got.Reasoning)
-	}
-	if req.Reasoning == nil || got.Model != "m" {
-		t.Fatalf("DropReasoning mutated its input or lost fields: in=%+v out=%+v", req, got)
-	}
+	require.Nil(t, got.Reasoning)
+	require.NotNil(t, req.Reasoning)
+	require.Equal(t, "m", got.Model, "DropReasoning mutated its input or lost fields: in=%+v out=%+v", req, got)
 }

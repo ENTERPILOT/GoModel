@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
@@ -35,9 +37,8 @@ func TestClientRequestID(t *testing.T) {
 
 			header := http.Header{}
 			header.Set(core.RequestIDHeader, tt.id)
-			if got := clientRequestID(header); got != tt.want {
-				t.Fatalf("clientRequestID(%q) = %q, want %q", tt.id, got, tt.want)
-			}
+			got := clientRequestID(header)
+			require.Equal(t, tt.want, got, "clientRequestID(%q) = %q, want %q", tt.id, got, tt.want)
 		})
 	}
 }

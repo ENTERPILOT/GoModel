@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSetAuthHeaders(t *testing.T) {
@@ -91,19 +93,15 @@ func TestSetAuthHeaders(t *testing.T) {
 				ctx = core.WithRequestID(ctx, tt.requestID)
 			}
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://example.com", nil)
-			if err != nil {
-				t.Fatalf("new request: %v", err)
-			}
+			require.NoError(t, err)
 
 			SetAuthHeaders(req, tt.apiKey, tt.cfg)
+			got := req.Header.Get(tt.authKey)
+			assert.Equal(t, tt.wantAuth, got, "auth header %q", tt.authKey)
 
-			if got := req.Header.Get(tt.authKey); got != tt.wantAuth {
-				t.Errorf("auth header %q = %q, want %q", tt.authKey, got, tt.wantAuth)
-			}
 			if tt.reqIDKey != "" {
-				if got := req.Header.Get(tt.reqIDKey); got != tt.wantReqID {
-					t.Errorf("request id header %q = %q, want %q", tt.reqIDKey, got, tt.wantReqID)
-				}
+				got := req.Header.Get(tt.reqIDKey)
+				assert.Equal(t, tt.wantReqID, got, "request id header %q", tt.reqIDKey)
 			}
 		})
 	}
@@ -180,9 +178,7 @@ func TestIsValidClientRequestID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := IsValidClientRequestID(tt.id)
-			if got != tt.valid {
-				t.Errorf("IsValidClientRequestID(%q) = %v, want %v", tt.id, got, tt.valid)
-			}
+			assert.Equal(t, tt.valid, got, "IsValidClientRequestID(%q)", tt.id)
 		})
 	}
 }

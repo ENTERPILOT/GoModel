@@ -21,10 +21,12 @@ import (
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/filestore"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
+	"github.com/enterpilot/gomodel/internal/mediastore"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -48,12 +50,14 @@ type App struct {
 	config              *config.Config
 	telemetry           *telemetry.Service // nil unless OpenTelemetry export is enabled
 	providers           *providers.InitResult
+	secretRotation      *secretRotation
 	audit               *auditlog.Result
 	usage               *usage.Result
 	budgets             *budget.Result
 	rateLimits          *ratelimit.Result
 	batch               *batch.Result
 	fileStore           *filestore.Result
+	media               *mediastore.Result
 	responseStore       *responsestore.Result
 	conversations       *conversationstore.Result
 	virtualModels       *virtualmodels.Result
@@ -70,6 +74,7 @@ type App struct {
 	live                *live.Broker
 	server              *server.Server
 	storage             storage.Storage
+	secrets             *encryption.Box
 	runtimeSettings     *runtimesettings.Service
 	versionCheck        *versioncheck.Checker
 	extensionAuth       bool
@@ -111,6 +116,18 @@ type Config struct {
 	// and becomes the default OpenTelemetry service.name. Empty means
 	// "gomodel".
 	ProductName string
+
+	// RequestReload asks the process to replace this generation with one built
+	// from the configuration as it stands now, the reload SIGHUP triggers. It
+	// must not block. The app calls it when a referenced secret other than a
+	// provider API key rotates. Nil leaves such a change to a manual reload.
+	RequestReload func(reason string)
+
+	// Replaces is the serving generation a reload builds this one to replace,
+	// nil at startup. A provider credential or MCP server it runs whose
+	// stored secret references no longer resolve fails the build, so the
+	// serving generation keeps running it instead of the reload dropping it.
+	Replaces *App
 }
 
 // New creates a new App with all dependencies initialized.
@@ -231,6 +248,9 @@ func (a *App) startServer(ctx context.Context, address string, start func(contex
 	if a.versionCheck.Enabled() {
 		go a.versionCheck.Run(serverCtx)
 	}
+	// Rotated secrets apply only to the generation that serves; see
+	// secretRotation.start.
+	a.secretRotation.start(serverCtx)
 
 	slog.Info("starting server", "address", address)
 	err := start(serverCtx)
@@ -345,6 +365,16 @@ func (a *App) logStartupInfo() {
 
 	// Security warnings
 	managedKeysConfigured := a.authKeys != nil && a.authKeys.Service != nil && a.authKeys.Service.Enabled()
+	if cfg.Server.MasterKeyDisabled {
+		// The key is already cleared from the configuration at load; this only
+		// reports the posture, and warns when it leaves nothing to authenticate
+		// with, because then every request is rejected.
+		slog.Info("master key authentication disabled", "master_key_disabled", true)
+		if !managedKeysConfigured && !a.extensionAuth {
+			slog.Warn("SECURITY NOTICE: master key disabled with no other credential configured - every request will be rejected",
+				"recommendation", "create a managed gateway API key, or unset MASTER_KEY_DISABLED to use the master key again")
+		}
+	}
 	switch {
 	case a.extensionAuth && cfg.Server.MasterKey != "" && managedKeysConfigured:
 		slog.Info("authentication enabled", "mode", "master_key+managed_keys+extension")
@@ -356,6 +386,17 @@ func (a *App) logStartupInfo() {
 		slog.Info("authentication enabled", "mode", "master_key+managed_keys", "managed_key_total", a.authKeys.Service.Total(), "managed_key_active", a.authKeys.Service.ActiveCount())
 	case managedKeysConfigured:
 		slog.Info("authentication enabled", "mode", "managed_keys", "managed_key_total", a.authKeys.Service.Total(), "managed_key_active", a.authKeys.Service.ActiveCount())
+		if !cfg.Server.MasterKeyDisabled && cfg.Admin.EndpointsEnabled {
+			// Without a master key the admin API stays open for bootstrap
+			// (see server.New), even though model endpoints now require a
+			// managed key.
+			slog.Warn("SECURITY WARNING: admin API is reachable without authentication",
+				"security_risk", "any caller that can reach this port can create API keys and change providers",
+				"recommendation", "set GOMODEL_MASTER_KEY, or set MASTER_KEY_DISABLED=true once a managed key with dashboard access exists")
+		}
+	case cfg.Server.MasterKeyDisabled:
+		// Reported above; no master key means no authentication only when one
+		// could have been configured.
 	case cfg.Server.MasterKey == "":
 		slog.Warn("SECURITY WARNING: GOMODEL_MASTER_KEY not set - server running in UNSAFE MODE",
 			"security_risk", "unauthenticated access allowed",
@@ -381,6 +422,16 @@ func (a *App) logStartupInfo() {
 			"recommendation", "list the specific origins you serve an MCP web client from instead of \"*\"")
 	}
 
+	// Client address resolution. Reported whenever a proxy is trusted, because
+	// it decides which address every audit entry, rate limit key, and log line
+	// attributes a request to.
+	if policy := cfg.Server.ClientIP; policy.Enabled() {
+		slog.Info("trusted proxies configured",
+			"networks", cfg.Server.TrustedProxies,
+			"client_ip_header", policy.Header,
+			"trusted_hops", policy.Hops)
+	}
+
 	// Metrics configuration
 	if cfg.Metrics.Enabled {
 		slog.Info("prometheus metrics enabled", "endpoint", cfg.Metrics.Endpoint)
@@ -393,6 +444,12 @@ func (a *App) logStartupInfo() {
 		slog.Info("storage configured", "type", backend.Type, "path", backend.SQLite.Path)
 	} else {
 		slog.Info("storage configured", "type", backend.Type)
+	}
+
+	if cfg.Media.Storage.Type == config.MediaStorageFilesystem {
+		slog.Info("media storage configured", "type", cfg.Media.Storage.Type, "path", cfg.Media.Storage.Path)
+	} else {
+		slog.Info("media storage configured", "type", cfg.Media.Storage.Type)
 	}
 
 	// Audit logging configuration

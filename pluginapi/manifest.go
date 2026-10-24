@@ -24,7 +24,7 @@ const (
 // filled by the `gomodel plugin build` helper and used only to produce a
 // readable error when a shared object cannot be loaded.
 type BuildInfo struct {
-	// GoVersion is the Go toolchain version, for example "go1.27.1".
+	// GoVersion is the Go toolchain version, for example "go1.27.3".
 	GoVersion string
 	// PluginAPIVersion is the [Version] of this package at build time.
 	PluginAPIVersion string
@@ -72,7 +72,9 @@ const (
 	InputSelect Input = "select"
 	// InputCheckboxes is a multi-choice list over Field.Options.
 	InputCheckboxes Input = "checkboxes"
-	// InputSecret is a masked text box; the value is stored encrypted.
+	// InputSecret is a masked text box. The admin API never returns the
+	// value, only a mask; the value is encrypted at rest when
+	// GOMODEL_ENCRYPTION_KEY is set, and stored in plaintext otherwise.
 	InputSecret Input = "secret"
 	// InputModel is a model picker listing the gateway's models; the value
 	// is a "provider/model" selector, an alias, or a virtual model.
@@ -125,4 +127,9 @@ type Field struct {
 	Options []Option
 	// Scope selects the editor; see [FieldScope].
 	Scope FieldScope
+	// Destination marks a field that decides where the plugin sends its
+	// [InputSecret] fields, such as a service URL. While a secret field holds
+	// a secret reference, only the master key can change it through the
+	// admin API, so no other credential can redirect the resolved secret.
+	Destination bool
 }

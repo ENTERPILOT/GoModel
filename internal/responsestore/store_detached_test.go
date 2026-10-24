@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDetachRequiresResponseID(t *testing.T) {
@@ -15,21 +16,16 @@ func TestDetachRequiresResponseID(t *testing.T) {
 		{},
 		{Response: &core.ResponsesResponse{}},
 	} {
-		if _, err := Detach(src); err == nil {
-			t.Fatalf("Detach(%+v) error = nil, want response id required", src)
-		}
+		_, err := Detach(src)
+		require.Error(t, err)
 	}
 }
 
 func TestDetachSharesNoMemoryWithSource(t *testing.T) {
 	src := testStoredResponse("resp-detached")
 	snapshot, err := Detach(src)
-	if err != nil {
-		t.Fatalf("Detach: %v", err)
-	}
-	if snapshot.ID() != "resp-detached" {
-		t.Fatalf("ID() = %q, want resp-detached", snapshot.ID())
-	}
+	require.NoError(t, err)
+	require.Equal(t, "resp-detached", snapshot.ID())
 
 	// Mutate the source after detaching; the persisted snapshot must keep the
 	// pre-mutation state.
@@ -38,19 +34,13 @@ func TestDetachSharesNoMemoryWithSource(t *testing.T) {
 
 	store := NewMemoryStore(WithUnboundedRetention())
 	t.Cleanup(func() { _ = store.Close() })
-	if err := snapshot.Persist(context.Background(), store); err != nil {
-		t.Fatalf("Persist: %v", err)
-	}
+	err = snapshot.Persist(context.Background(), store)
+	require.NoError(t, err)
+
 	got, err := store.Get(context.Background(), "resp-detached")
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if got.Response.Model != "gpt-test" {
-		t.Fatalf("model = %q, want pre-mutation gpt-test", got.Response.Model)
-	}
-	if string(got.InputItems[0]) == `{"mutated":true}` {
-		t.Fatal("input items reflect post-detach mutation")
-	}
+	require.NoError(t, err)
+	require.Equal(t, "gpt-test", got.Response.Model)
+	require.NotEqual(t, `{"mutated":true}`, string(got.InputItems[0]))
 }
 
 // TestDetachedPersistSuite exercises Persist against every Store backend:
@@ -60,44 +50,30 @@ func TestDetachedPersistSuite(t *testing.T) {
 		ctx := context.Background()
 
 		first, err := Detach(testStoredResponse("resp-persist"))
-		if err != nil {
-			t.Fatalf("Detach: %v", err)
-		}
-		if err := first.Persist(ctx, store); err != nil {
-			t.Fatalf("first Persist: %v", err)
-		}
+		require.NoError(t, err)
+		err = first.Persist(ctx, store)
+		require.NoError(t, err)
+
 		got, err := store.Get(ctx, "resp-persist")
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-		if got.Response == nil || got.Response.Model != "gpt-test" {
-			t.Fatalf("response = %+v, want model gpt-test", got.Response)
-		}
-		if got.Provider != "openai" || got.RequestID != "req-1" {
-			t.Fatalf("metadata = %+v, want provider and request id preserved", got)
-		}
-		if got.StoredAt.IsZero() {
-			t.Fatal("StoredAt not stamped")
-		}
+		require.NoError(t, err)
+		require.NotNil(t, got.Response)
+		require.Equal(t, "gpt-test", got.Response.Model)
+		require.Equal(t, "openai", got.Provider)
+		require.Equal(t, "req-1", got.RequestID, "metadata = %+v, want provider and request id preserved", got)
+		require.False(t, got.StoredAt.IsZero())
 
 		// A second Persist for the same id must overwrite the live row via the
 		// update fallback, not fail as a duplicate.
 		updatedSrc := testStoredResponse("resp-persist")
 		updatedSrc.Response.Model = "gpt-updated"
 		second, err := Detach(updatedSrc)
-		if err != nil {
-			t.Fatalf("Detach updated: %v", err)
-		}
-		if err := second.Persist(ctx, store); err != nil {
-			t.Fatalf("second Persist: %v", err)
-		}
+		require.NoError(t, err)
+		err = second.Persist(ctx, store)
+		require.NoError(t, err)
+
 		got, err = store.Get(ctx, "resp-persist")
-		if err != nil {
-			t.Fatalf("Get after update: %v", err)
-		}
-		if got.Response.Model != "gpt-updated" {
-			t.Fatalf("model = %q, want gpt-updated", got.Response.Model)
-		}
+		require.NoError(t, err)
+		require.Equal(t, "gpt-updated", got.Response.Model)
 	})
 }
 
@@ -108,24 +84,18 @@ func TestDetachNormalizesMetadata(t *testing.T) {
 	src.ProviderResponseID = ""
 
 	snapshot, err := Detach(src)
-	if err != nil {
-		t.Fatalf("Detach: %v", err)
-	}
+	require.NoError(t, err)
+
 	store := NewMemoryStore(WithUnboundedRetention())
 	t.Cleanup(func() { _ = store.Close() })
-	if err := snapshot.Persist(context.Background(), store); err != nil {
-		t.Fatalf("Persist: %v", err)
-	}
+	err = snapshot.Persist(context.Background(), store)
+	require.NoError(t, err)
+
 	got, err := store.Get(context.Background(), "resp-normalize")
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if got.Provider != "openai" || got.RequestID != "req-9" {
-		t.Fatalf("metadata = (%q, %q), want trimmed (openai, req-9)", got.Provider, got.RequestID)
-	}
-	if got.ProviderResponseID != "resp-normalize" {
-		t.Fatalf("provider response id = %q, want defaulted resp-normalize", got.ProviderResponseID)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "openai", got.Provider)
+	require.Equal(t, "req-9", got.RequestID)
+	require.Equal(t, "resp-normalize", got.ProviderResponseID)
 }
 
 // erroringStore fails Create and Update with distinct errors, exercising the
@@ -159,21 +129,16 @@ func TestDetachedPersistJoinsCreateAndUpdateErrors(t *testing.T) {
 	createErr := errors.New("create boom")
 	updateErr := errors.New("update boom")
 	snapshot, err := Detach(testStoredResponse("resp-fail"))
-	if err != nil {
-		t.Fatalf("Detach: %v", err)
-	}
+	require.NoError(t, err)
 
 	for name, store := range map[string]Store{
 		"regular":    &erroringStore{createErr: createErr, updateErr: updateErr},
 		"serialized": &erroringSerializedStore{createErr: createErr, updateErr: updateErr},
 	} {
 		err := snapshot.Persist(context.Background(), store)
-		if err == nil {
-			t.Fatalf("%s: Persist error = nil, want joined errors", name)
-		}
-		if !errors.Is(err, createErr) || !errors.Is(err, updateErr) {
-			t.Fatalf("%s: Persist error = %v, want both create and update errors", name, err)
-		}
+		require.Error(t, err, "store %q", name)
+		require.ErrorIs(t, err, createErr)
+		require.ErrorIs(t, err, updateErr)
 	}
 }
 
@@ -185,20 +150,14 @@ func TestSQLStorePersistPreservesExplicitRetention(t *testing.T) {
 		src.StoredAt = time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
 		src.ExpiresAt = time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
 		snapshot, err := Detach(src)
-		if err != nil {
-			t.Fatalf("Detach: %v", err)
-		}
-		if err := snapshot.Persist(ctx, store); err != nil {
-			t.Fatalf("Persist: %v", err)
-		}
+		require.NoError(t, err)
+		err = snapshot.Persist(ctx, store)
+		require.NoError(t, err)
+
 		got, err := store.Get(ctx, "resp-explicit")
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-		if got.StoredAt.Unix() != src.StoredAt.Unix() || got.ExpiresAt.Unix() != src.ExpiresAt.Unix() {
-			t.Fatalf("retention = (%v, %v), want explicit (%v, %v)",
-				got.StoredAt, got.ExpiresAt, src.StoredAt, src.ExpiresAt)
-		}
+		require.NoError(t, err)
+		require.Equal(t, src.StoredAt.Unix(), got.StoredAt.Unix())
+		require.Equal(t, src.ExpiresAt.Unix(), got.ExpiresAt.Unix(), "retention = (%v, %v), want explicit (%v, %v)", got.StoredAt, got.ExpiresAt, src.StoredAt, src.ExpiresAt)
 
 		// A same-id persist with different explicit retention replaces both
 		// columns through the update fallback.
@@ -206,34 +165,24 @@ func TestSQLStorePersistPreservesExplicitRetention(t *testing.T) {
 		replaced.StoredAt = time.Now().UTC().Add(-30 * time.Minute).Truncate(time.Second)
 		replaced.ExpiresAt = time.Now().UTC().Add(4 * time.Hour).Truncate(time.Second)
 		replacedSnapshot, err := Detach(replaced)
-		if err != nil {
-			t.Fatalf("Detach replacement: %v", err)
-		}
-		if err := replacedSnapshot.Persist(ctx, store); err != nil {
-			t.Fatalf("Persist replacement: %v", err)
-		}
+		require.NoError(t, err)
+		err = replacedSnapshot.Persist(ctx, store)
+		require.NoError(t, err)
+
 		got, err = store.Get(ctx, "resp-explicit")
-		if err != nil {
-			t.Fatalf("Get after replacement: %v", err)
-		}
-		if got.StoredAt.Unix() != replaced.StoredAt.Unix() || got.ExpiresAt.Unix() != replaced.ExpiresAt.Unix() {
-			t.Fatalf("retention = (%v, %v), want replaced (%v, %v)",
-				got.StoredAt, got.ExpiresAt, replaced.StoredAt, replaced.ExpiresAt)
-		}
+		require.NoError(t, err)
+		require.Equal(t, replaced.StoredAt.Unix(), got.StoredAt.Unix())
+		require.Equal(t, replaced.ExpiresAt.Unix(), got.ExpiresAt.Unix(), "retention = (%v, %v), want replaced (%v, %v)", got.StoredAt, got.ExpiresAt, replaced.StoredAt, replaced.ExpiresAt)
 
 		// An already-expired snapshot is silently skipped, mirroring Create.
 		expired := testStoredResponse("resp-expired")
 		expired.ExpiresAt = time.Now().UTC().Add(-time.Minute)
 		expiredSnapshot, err := Detach(expired)
-		if err != nil {
-			t.Fatalf("Detach expired: %v", err)
-		}
-		if err := expiredSnapshot.Persist(ctx, store); err != nil {
-			t.Fatalf("Persist expired: %v", err)
-		}
-		if _, err := store.Get(ctx, "resp-expired"); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("Get expired error = %v, want ErrNotFound", err)
-		}
+		require.NoError(t, err)
+		err = expiredSnapshot.Persist(ctx, store)
+		require.NoError(t, err)
+		_, err = store.Get(ctx, "resp-expired")
+		require.ErrorIs(t, err, ErrNotFound)
 	})
 }
 
@@ -242,40 +191,27 @@ func TestSQLStorePersistStampsRetentionColumns(t *testing.T) {
 		ctx := context.Background()
 
 		snapshot, err := Detach(testStoredResponse("resp-retention"))
-		if err != nil {
-			t.Fatalf("Detach: %v", err)
-		}
+		require.NoError(t, err)
+
 		before := time.Now().UTC().Add(-time.Second)
-		if err := snapshot.Persist(ctx, store); err != nil {
-			t.Fatalf("Persist: %v", err)
-		}
+		err = snapshot.Persist(ctx, store)
+		require.NoError(t, err)
+
 		got, err := store.Get(ctx, "resp-retention")
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-		if got.StoredAt.Before(before) {
-			t.Fatalf("StoredAt = %v, want stamped at write time", got.StoredAt)
-		}
-		if !got.ExpiresAt.After(got.StoredAt) {
-			t.Fatalf("ExpiresAt = %v, want after StoredAt %v", got.ExpiresAt, got.StoredAt)
-		}
+		require.NoError(t, err)
+		require.False(t, got.StoredAt.Before(before), "StoredAt = %v, want stamped at write time", got.StoredAt)
+		require.True(t, got.ExpiresAt.After(got.StoredAt), "ExpiresAt = %v, want after StoredAt %v", got.ExpiresAt, got.StoredAt)
 
 		// The update fallback must preserve the original retention columns.
 		storedAt, expiresAt := got.StoredAt, got.ExpiresAt
 		updated, err := Detach(testStoredResponse("resp-retention"))
-		if err != nil {
-			t.Fatalf("Detach updated: %v", err)
-		}
-		if err := updated.Persist(ctx, store); err != nil {
-			t.Fatalf("second Persist: %v", err)
-		}
+		require.NoError(t, err)
+		err = updated.Persist(ctx, store)
+		require.NoError(t, err)
+
 		got, err = store.Get(ctx, "resp-retention")
-		if err != nil {
-			t.Fatalf("Get after update: %v", err)
-		}
-		if !got.StoredAt.Equal(storedAt) || !got.ExpiresAt.Equal(expiresAt) {
-			t.Fatalf("retention = (%v, %v), want preserved (%v, %v)",
-				got.StoredAt, got.ExpiresAt, storedAt, expiresAt)
-		}
+		require.NoError(t, err)
+		require.True(t, got.StoredAt.Equal(storedAt))
+		require.True(t, got.ExpiresAt.Equal(expiresAt), "retention = (%v, %v), want preserved (%v, %v)", got.StoredAt, got.ExpiresAt, storedAt, expiresAt)
 	})
 }

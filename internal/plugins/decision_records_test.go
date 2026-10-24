@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDecisionRecordsOf(t *testing.T) {
@@ -16,21 +18,21 @@ func TestDecisionRecordsOf(t *testing.T) {
 		{Instance: "c", Type: "t", Step: 2, Err: failed},
 	}}
 	records := DecisionRecordsOf(pluginapi.KindResponse, outcome, &PluginError{Instance: "c", Phase: pluginapi.KindResponse, Err: failed})
-	if len(records) != 3 {
-		t.Fatalf("records = %+v, want 3", records)
-	}
+	require.Len(t, records, 3)
+
 	first := records[0]
-	if first.Phase != pluginapi.KindResponse || first.Instance != "a" || first.Type != "t" || first.Step != 1 ||
-		first.Decision.Action != pluginapi.ActionWarn || first.Duration != time.Millisecond || !first.Edited || first.FailedClosed {
-		t.Errorf("record = %+v, want the warn record copied", first)
-	}
-	if records[1].Err != failed || records[1].FailedClosed {
-		t.Errorf("record = %+v, want a fail-open failure", records[1])
-	}
-	if records[2].Err != failed || !records[2].FailedClosed {
-		t.Errorf("record = %+v, want the failure that ended the run marked closed", records[2])
-	}
-	if got := DecisionRecordsOf(pluginapi.KindPrompt, outcome, errors.New("not a plugin error")); got[2].FailedClosed {
-		t.Errorf("record = %+v, want no fail-closed mark without a plugin error", got[2])
-	}
+	assert.Equal(t, pluginapi.KindResponse, first.Phase)
+	assert.Equal(t, "a", first.Instance)
+	assert.Equal(t, "t", first.Type)
+	assert.Equal(t, 1, first.Step)
+	assert.Equal(t, pluginapi.ActionWarn, first.Decision.Action)
+	assert.Equal(t, time.Millisecond, first.Duration)
+	assert.True(t, first.Edited)
+	assert.False(t, first.FailedClosed, "record = %+v, want the warn record copied", first)
+	assert.Equal(t, failed, records[1].Err)
+	assert.False(t, records[1].FailedClosed, "record = %+v, want a fail-open failure", records[1])
+	assert.Equal(t, failed, records[2].Err)
+	assert.True(t, records[2].FailedClosed, "record = %+v, want the failure that ended the run marked closed", records[2])
+	got := DecisionRecordsOf(pluginapi.KindPrompt, outcome, errors.New("not a plugin error"))
+	assert.False(t, got[2].FailedClosed, "record = %+v, want no fail-closed mark without a plugin error", got[2])
 }

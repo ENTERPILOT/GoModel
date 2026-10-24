@@ -31,7 +31,7 @@ func FromChatResponse(resp *core.ChatResponse) *MessagesResponse {
 		if blocks, ok := thinkingBlocks(choice.Message.ExtraFields); ok {
 			out.Content = append(out.Content, blocks...)
 		} else if thinking := reasoningContent(choice.Message.ExtraFields); thinking != "" {
-			out.Content = append(out.Content, ResponseContentBlock{Type: "thinking", Thinking: thinking})
+			out.Content = append(out.Content, unsignedThinkingBlock(thinking))
 		}
 		if text := core.ExtractTextContent(choice.Message.Content); text != "" {
 			out.Content = append(out.Content, ResponseContentBlock{Type: "text", Text: text})
@@ -62,14 +62,42 @@ func FromChatResponse(resp *core.ChatResponse) *MessagesResponse {
 	return out
 }
 
+// usageFromCore renders a canonical chat response's usage in the Anthropic
+// shape (see anthropicUsage).
 func usageFromCore(usage core.Usage) Usage {
-	out := Usage{
-		InputTokens:  usage.PromptTokens,
-		OutputTokens: usage.CompletionTokens,
+	return anthropicUsage(
+		usage.PromptTokens,
+		usage.CompletionTokens,
+		intFromRaw(usage.RawUsage["cache_read_input_tokens"]),
+		intFromRaw(usage.RawUsage["cache_creation_input_tokens"]),
+		usage.PromptTokensDetails,
+	)
+}
 
-		CacheCreationInputTokens: intFromRaw(usage.RawUsage["cache_creation_input_tokens"]),
-		CacheReadInputTokens:     intFromRaw(usage.RawUsage["cache_read_input_tokens"])}
-	return out
+// anthropicUsage renders token counts in the Anthropic shape, where
+// input_tokens excludes cached tokens: input_tokens + cache_read_input_tokens +
+// cache_creation_input_tokens is the whole prompt. A provider reporting in that
+// shape names its cache counts cache_read_input_tokens and
+// cache_creation_input_tokens (nativeRead, nativeWrite), which pass through.
+// OpenAI-family providers instead report a prompt_tokens total that includes
+// cached_tokens and cache_write_tokens, so those are taken out of it. Both the
+// response and the stream converter render through here so the two agree.
+func anthropicUsage(promptTokens, outputTokens, nativeRead, nativeWrite int, details *core.PromptTokensDetails) Usage {
+	if nativeRead > 0 || nativeWrite > 0 || details == nil {
+		return Usage{
+			InputTokens:              promptTokens,
+			OutputTokens:             outputTokens,
+			CacheReadInputTokens:     nativeRead,
+			CacheCreationInputTokens: nativeWrite,
+		}
+	}
+	read, write := details.CachedTokens, details.CacheWriteTokens
+	return Usage{
+		InputTokens:              max(promptTokens-read-write, 0),
+		OutputTokens:             outputTokens,
+		CacheReadInputTokens:     read,
+		CacheCreationInputTokens: write,
+	}
 }
 
 // normalizeMessageID ensures the response carries an Anthropic-style msg_ id.
@@ -101,7 +129,27 @@ func thinkingBlocks(fields core.UnknownJSONFields) ([]ResponseContentBlock, bool
 	if err := json.Unmarshal(raw, &extra); err != nil || len(extra.ThinkingBlocks) == 0 {
 		return nil, false
 	}
+	for i, block := range extra.ThinkingBlocks {
+		if block.Type == "thinking" && block.Signature == nil {
+			extra.ThinkingBlocks[i].Signature = emptySignature()
+		}
+	}
 	return extra.ThinkingBlocks, true
+}
+
+// unsignedThinkingBlock renders reasoning text a provider produced without a
+// signature. The Anthropic schema marks signature required on a thinking
+// block, so a strictly typed client rejects a block that omits it; the empty
+// string says "this reasoning is not signed" without pretending otherwise.
+// Anthropic refuses any signature it did not mint, so the gateway drops such a
+// block again on its way back in rather than forwarding it to Claude.
+func unsignedThinkingBlock(thinking string) ResponseContentBlock {
+	return ResponseContentBlock{Type: "thinking", Thinking: thinking, Signature: emptySignature()}
+}
+
+func emptySignature() *string {
+	empty := ""
+	return &empty
 }
 
 // reasoningContent extracts the reasoning text surfaced by providers in a
@@ -154,7 +202,9 @@ func stopReasonFromFinish(finish string, hasToolCalls bool) string {
 	case "tool_calls":
 		return "tool_use"
 	case "content_filter":
-		return "end_turn"
+		// The model declined or was stopped by the provider's safety
+		// system; Anthropic reports that as a refusal.
+		return "refusal"
 	case "":
 		return ""
 	default:

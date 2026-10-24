@@ -27,6 +27,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/filestore"
 	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
+	"github.com/enterpilot/gomodel/internal/mediastore"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/responsestore"
 	"github.com/enterpilot/gomodel/internal/session"
@@ -68,6 +69,7 @@ const (
 type Config struct {
 	BasePath                        string                                 // URL path prefix where the app is mounted (default: /)
 	MasterKey                       string                                 // Optional: Master key for authentication
+	MasterKeyDisabled               bool                                   // Master key authentication turned off: require a credential and never open admin bootstrap
 	Authenticator                   BearerTokenAuthenticator               // Optional: managed API key authenticator
 	MetricsEnabled                  bool                                   // Whether to expose Prometheus metrics endpoint
 	MetricsEndpoint                 string                                 // HTTP path for metrics endpoint (default: /metrics)
@@ -94,10 +96,12 @@ type Config struct {
 	PassthroughSemanticEnrichers    []core.PassthroughSemanticEnricher     // Optional: provider-owned passthrough semantic enrichers before workflow resolution
 	BatchStore                      batchstore.Store                       // Optional: Batch lifecycle persistence store
 	FileStore                       filestore.Store                        // Optional: File provider mapping persistence store
+	MediaStore                      *mediastore.Service                    // Optional: where audited audio and image payloads are stored
 	ResponseStore                   responsestore.Store                    // Optional: Responses lifecycle persistence store
 	ConversationStore               conversationstore.Store                // Optional: Conversations lifecycle persistence store
 	LogOnlyModelInteractions        bool                                   // Only log AI model endpoints (default: true)
 	DisablePassthroughRoutes        bool                                   // Disable /p/{provider}/{endpoint} route registration
+	DisableLiteLLMTags              bool                                   // Leave LiteLLM tags alone: no labels from them and no stripping
 	RealtimeEnabled                 bool                                   // Enable the realtime websocket routes (/v1/realtime, /v1/realtime/translations) and passthrough upgrades
 	AuthVerifyEnabled               bool                                   // Enable the credential check route (GET /v1/auth/verify); off by default
 	MCPEnabled                      bool                                   // Enable the MCP gateway routes /mcp and /mcp/{server}
@@ -116,15 +120,28 @@ type Config struct {
 	IPExtractor                     echo.IPExtractor                       // Optional: trusted client IP extraction strategy for proxied deployments
 	StorageProbe                    ReadinessProbe                         // Optional: primary storage connectivity check; failure makes /health/ready report not_ready (503)
 	CacheProbe                      ReadinessProbe                         // Optional: Redis cache connectivity check; failure makes /health/ready report degraded (200, non-blocking)
+	ModelInventory                  ModelInventory                         // Optional: model registry; no models with providers configured makes /health/ready report degraded (200, non-blocking)
+	HealthCheckers                  []ext.HealthChecker                    // Optional: extension components reported by /health/ready (degraded: 200, down: 503)
 	RequestRewriters                []ext.RequestRewriter                  // Optional: raw-body rewriters invoked on inference ingress (post-auth, pre-workflow-resolution)
 	OuterMiddleware                 []echo.MiddlewareFunc                  // Optional: extension middleware after sensitive URI redaction, before logging/recovery/limits
 	ExtraMiddleware                 []echo.MiddlewareFunc                  // Optional: extension middleware registered after audit, before gateway auth
 	ExtraRoutes                     []func(*echo.Echo)                     // Optional: extension route registration callbacks invoked after core routes
+	ExtraAdminRoutes                []func(*echo.Group)                    // Optional: extension callbacks mounted on the /admin group behind the admin gate
 	ExtraAuthSkipPaths              []string                               // Optional: extension paths appended to the auth skip list ("/*" suffix matches a prefix)
 	RequestAuthenticators           []ext.RequestAuthenticator             // Optional extension-provided request authentication mechanisms
 	Tagging                         *tagging.Service                       // Optional: request labelling based on configured tagging headers
 	SessionDetector                 *session.Detector                      // Optional: client session identification for sticky routing and audit grouping
 	VersionChecker                  *versioncheck.Checker                  // Optional: daily update check backing GET /version
+}
+
+// effectiveMasterKey returns the master key this gateway accepts as a
+// credential. A deployment that disabled master key authentication accepts
+// none, whatever the field still holds.
+func (c *Config) effectiveMasterKey() string {
+	if c == nil || c.MasterKeyDisabled {
+		return ""
+	}
+	return c.MasterKey
 }
 
 // ReadinessProbe verifies that a dependency the gateway owns is reachable.
@@ -133,6 +150,14 @@ type Config struct {
 // an external provider outage must not pull a healthy gateway out of rotation.
 type ReadinessProbe interface {
 	Ping(ctx context.Context) error
+}
+
+// ModelInventory reports how many models are routable and how many providers
+// are configured. Providers with no models means model discovery has not
+// succeeded yet and nothing is cached: requests fail with 503 until it does.
+type ModelInventory interface {
+	ModelCount() int
+	ProviderCount() int
 }
 
 // New creates a new HTTP server
@@ -206,6 +231,8 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		handler.guardrailsHash = cfg.GuardrailsHash
 		handler.storageProbe = cfg.StorageProbe
 		handler.cacheProbe = cfg.CacheProbe
+		handler.modelInventory = cfg.ModelInventory
+		handler.healthCheckers = validHealthCheckers(cfg.HealthCheckers)
 	}
 	if cfg != nil && cfg.EnabledPassthroughProviders != nil {
 		handler.setEnabledPassthroughProviders(cfg.EnabledPassthroughProviders)
@@ -218,7 +245,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	handler.realtimeEnabled = cfg == nil || cfg.RealtimeEnabled
 	if cfg != nil {
 		handler.versionChecker = cfg.VersionChecker
-		handler.masterKey = cfg.MasterKey
+		handler.masterKey = cfg.effectiveMasterKey()
 	}
 	if cfg != nil {
 		handler.mcpEnabled = cfg.MCPEnabled
@@ -232,6 +259,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 	if cfg != nil && cfg.FileStore != nil {
 		handler.SetFileStore(cfg.FileStore)
+	}
+	if cfg != nil && cfg.MediaStore != nil {
+		handler.SetMediaStore(cfg.MediaStore)
 	}
 	if cfg != nil && cfg.ResponseStore != nil {
 		handler.SetResponseStore(cfg.ResponseStore)
@@ -262,8 +292,10 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		authSkipPaths = append(authSkipPaths, "/admin/dashboard", "/admin/dashboard/*", "/admin/static/*")
 	}
 	// When no bootstrap master key is configured, keep admin APIs reachable so
-	// the dashboard can recover managed-key access instead of locking itself out.
-	if cfg != nil && cfg.MasterKey == "" && !hasRequestAuthenticators(cfg.RequestAuthenticators) && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
+	// the dashboard can recover managed-key access instead of locking itself
+	// out. A master key that was deliberately turned off is not an absent one:
+	// that deployment wants managed keys enforced, admin API included.
+	if cfg != nil && cfg.effectiveMasterKey() == "" && !cfg.MasterKeyDisabled && !hasRequestAuthenticators(cfg.RequestAuthenticators) && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
 		authSkipPaths = append(authSkipPaths, "/admin/*")
 	}
 	if cfg != nil && cfg.SwaggerEnabled && SwaggerAvailable() {
@@ -333,7 +365,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	if cfg != nil && cfg.BodySizeLimit != "" {
 		bodySizeLimit = cfg.BodySizeLimit
 	}
-	e.Use(middleware.BodyLimit(parseBodySizeLimitBytes(bodySizeLimit)))
+	bodyLimitBytes := parseBodySizeLimitBytes(bodySizeLimit)
+	e.Use(middleware.BodyLimit(bodyLimitBytes))
+	e.Use(requestDecompression(bodyLimitBytes))
 
 	e.Use(modelInteractionWriteDeadlineMiddleware(streamStallTimeout(cfg)))
 
@@ -375,9 +409,16 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 
 	// Authentication (skips public paths)
 	// Register by authenticator presence; its Enabled state can change at runtime.
-	authMiddlewareRegistered := cfg != nil && (cfg.MasterKey != "" || cfg.Authenticator != nil || hasRequestAuthenticators(cfg.RequestAuthenticators))
+	authMiddlewareRegistered := cfg != nil && (cfg.effectiveMasterKey() != "" || cfg.Authenticator != nil || hasRequestAuthenticators(cfg.RequestAuthenticators) || cfg.MasterKeyDisabled)
 	if authMiddlewareRegistered {
-		e.Use(AuthMiddlewareWithRequestAuthenticators(cfg.MasterKey, cfg.Authenticator, cfg.RequestAuthenticators, authSkipPaths, userPathHeaderName))
+		e.Use(NewAuthMiddleware(AuthMiddlewareConfig{
+			MasterKey:             cfg.effectiveMasterKey(),
+			Authenticator:         cfg.Authenticator,
+			RequestAuthenticators: cfg.RequestAuthenticators,
+			SkipPaths:             authSkipPaths,
+			UserPathHeader:        userPathHeaderName,
+			RequireCredential:     cfg.MasterKeyDisabled,
+		}))
 	}
 
 	// Session identification runs after auth so session ids are scoped by the
@@ -388,6 +429,13 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// created earlier in the chain.
 	if cfg != nil && cfg.SessionDetector != nil {
 		e.Use(sessionCapture(cfg.SessionDetector, cfg.AuditReader, !authMiddlewareRegistered))
+	}
+
+	// LiteLLM tags become labels post-auth (only authenticated bodies are
+	// read) and before request rewriters and workflow resolution, which see
+	// the body without them. Turned off, requests keep their tags untouched.
+	if cfg == nil || !cfg.DisableLiteLLMTags {
+		e.Use(LiteLLMTags(auditLogger))
 	}
 
 	// Request rewriters run post-auth (rewriters only see authenticated
@@ -475,6 +523,14 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.POST("/v1/audio/translations", handler.AudioTranslations)
 	e.POST("/v1/images/generations", handler.ImageGenerations)
 	e.POST("/v1/images/edits", handler.ImageEdits)
+	// System One decisions (Jev / Kev). The handler answers 404 until a jev
+	// or openrouter provider is configured.
+	e.POST("/v1/systemone", handler.SystemOne)
+	e.POST("/v1/systemone/permute", handler.SystemOnePermute)
+	e.POST("/v1/systemone/separate", handler.SystemOneSeparate)
+	// OpenAI Decisions. The handler answers 404 until an openai, jev, or openrouter
+	// provider is configured.
+	e.POST("/v1/decisions", handler.Decisions)
 	if cfg == nil || cfg.RealtimeEnabled {
 		e.GET("/v1/realtime", handler.Realtime)
 		e.POST("/v1/realtime/calls", handler.RealtimeCalls)
@@ -518,7 +574,14 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 				return strings.HasSuffix(c.Request().URL.Path, "/live/logs")
 			},
 		})
-		cfg.AdminHandler.RegisterRoutes(e.Group("/admin", adminGate, adminGzip))
+		adminGroup := e.Group("/admin", adminGate, adminGzip)
+		cfg.AdminHandler.RegisterRoutes(adminGroup)
+		// Extension admin routes share the group, so they get exactly the
+		// built-in admin API's authorization. They are not mirrored onto the
+		// deprecated legacy alias below.
+		for _, register := range cfg.ExtraAdminRoutes {
+			register(adminGroup)
+		}
 
 		// Legacy alias under /admin/api/v1/* — accepted until adminLegacySunset
 		// to give operators a window to migrate. Responses carry Deprecation,

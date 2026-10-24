@@ -104,6 +104,7 @@ type usageStatusRateLimit struct {
 // @Param        start_date  query  string  false  "Inclusive window start (YYYY-MM-DD, UTC); defaults to 29 days before end_date"
 // @Param        end_date    query  string  false  "Inclusive window end (YYYY-MM-DD, UTC); defaults to today; the whole range may span at most 365 days"
 // @Param        days        query  int     false  "Window length ending today when no explicit dates are given (default 30, max 365)"
+// @Param        cache_mode  query  string  false  "Which requests to count: uncached (default, provider-bound only), cached (local response-cache hits only), or all"
 // @Success      200  {object}  usageStatusResponse
 // @Failure      400  {object}  core.OpenAIErrorEnvelope
 // @Failure      401  {object}  core.OpenAIErrorEnvelope
@@ -185,9 +186,12 @@ func (h *Handler) usageStatusUserPath(c *echo.Context) (string, error) {
 }
 
 // usageStatusWindow resolves the summary date window from the same query
-// params as the dashboard usage endpoints, always in UTC.
+// params as the dashboard usage endpoints, always in UTC. cache_mode is read
+// here too so a tenant can see its own local response-cache hits, which the
+// default ("uncached", provider-bound requests only) leaves out; unknown
+// values fall back to that default, as on the admin endpoints.
 func usageStatusWindow(c *echo.Context, now time.Time) (usage.UsageQueryParams, error) {
-	params := usage.UsageQueryParams{TimeZone: "UTC"}
+	params := usage.UsageQueryParams{TimeZone: "UTC", CacheMode: strings.TrimSpace(c.QueryParam("cache_mode"))}
 	days := usage.DefaultDateRangeDays
 	if raw := c.QueryParam("days"); raw != "" {
 		parsed, err := strconv.Atoi(raw)

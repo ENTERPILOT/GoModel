@@ -2,7 +2,6 @@ package admin
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,8 +11,11 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/ext"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/runtimesettings"
 	"github.com/enterpilot/gomodel/internal/storage"
 )
@@ -58,14 +60,12 @@ func (s *adminTestRuntimeSetting) currentValue() string {
 func newAdminRuntimeSettingsService(t *testing.T, setting ext.RuntimeSetting) *runtimesettings.Service {
 	t.Helper()
 	backend, err := storage.NewSQLite(storage.SQLiteConfig{Path: filepath.Join(t.TempDir(), "admin-settings.db")})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	require.NoError(t, err)
+
 	t.Cleanup(func() { _ = backend.Close() })
 	service, err := runtimesettings.New(context.Background(), backend, []ext.RuntimeSetting{setting})
-	if err != nil {
-		t.Fatalf("create runtime settings service: %v", err)
-	}
+	require.NoError(t, err)
+
 	t.Cleanup(func() { _ = service.Close() })
 	return service
 }
@@ -87,18 +87,13 @@ func TestRuntimeSettingsListAndUpdate(t *testing.T) {
 	e := echo.New()
 	h.RegisterRoutes(e.Group("/admin"))
 	listRec := runtimeSettingsRequest(e, http.MethodGet, "/admin/runtime/settings", "")
-	var list runtimeSettingsResponse
-	if err := json.Unmarshal(listRec.Body.Bytes(), &list); err != nil {
-		t.Fatalf("decode list: %v", err)
-	}
-	if len(list.Settings) != 1 || list.Settings[0].Value != "high" {
-		t.Fatalf("settings = %+v", list.Settings)
-	}
+	list := echotest.Decode[runtimeSettingsResponse](t, listRec)
+	require.Len(t, list.Settings, 1)
+	assert.Equal(t, "high", list.Settings[0].Value)
 
 	updateRec := runtimeSettingsRequest(e, http.MethodPut, "/admin/runtime/settings/pro.compression.level", `{"value":"none"}`)
-	if updateRec.Code != http.StatusOK || setting.currentValue() != "none" {
-		t.Fatalf("update status=%d value=%q body=%s", updateRec.Code, setting.currentValue(), updateRec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, updateRec.Code, updateRec.Body.String())
+	assert.Equal(t, "none", setting.currentValue())
 }
 
 func TestRuntimeSettingManagedByEnvironmentIsReadOnly(t *testing.T) {
@@ -108,9 +103,8 @@ func TestRuntimeSettingManagedByEnvironmentIsReadOnly(t *testing.T) {
 	e := echo.New()
 	h.RegisterRoutes(e.Group("/admin"))
 	rec := runtimeSettingsRequest(e, http.MethodPut, "/admin/runtime/settings/pro.compression.level", `{"value":"none"}`)
-	if rec.Code != http.StatusBadRequest || setting.currentValue() != "high" {
-		t.Fatalf("locked update status=%d value=%q body=%s", rec.Code, setting.currentValue(), rec.Body.String())
-	}
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.Equal(t, "high", setting.currentValue(), "locked setting must not change")
 }
 
 func TestUpdateRuntimeSettingRejectsUnknownKeyAndInvalidValue(t *testing.T) {
@@ -120,16 +114,12 @@ func TestUpdateRuntimeSettingRejectsUnknownKeyAndInvalidValue(t *testing.T) {
 	h.RegisterRoutes(e.Group("/admin"))
 
 	unknown := runtimeSettingsRequest(e, http.MethodPut, "/admin/runtime/settings/missing", `{"value":"none"}`)
-	if unknown.Code != http.StatusNotFound || !strings.Contains(unknown.Body.String(), `"code":"runtime_setting_not_found"`) {
-		t.Fatalf("unknown update status=%d body=%s", unknown.Code, unknown.Body.String())
-	}
+	require.Equal(t, http.StatusNotFound, unknown.Code)
+	assert.Contains(t, unknown.Body.String(), `"code":"runtime_setting_not_found"`)
+
 	invalid := runtimeSettingsRequest(e, http.MethodPut, "/admin/runtime/settings/pro.compression.level", `{"value":"turbo"}`)
-	if invalid.Code != http.StatusBadRequest {
-		t.Fatalf("invalid update status=%d body=%s", invalid.Code, invalid.Body.String())
-	}
-	if setting.currentValue() != "high" {
-		t.Fatalf("rejected updates changed value to %q", setting.currentValue())
-	}
+	require.Equal(t, http.StatusBadRequest, invalid.Code, invalid.Body.String())
+	assert.Equal(t, "high", setting.currentValue())
 }
 
 func TestRuntimeSettingsWithoutRegisteredExtensions(t *testing.T) {
@@ -138,15 +128,10 @@ func TestRuntimeSettingsWithoutRegisteredExtensions(t *testing.T) {
 	h.RegisterRoutes(e.Group("/admin"))
 
 	list := runtimeSettingsRequest(e, http.MethodGet, "/admin/runtime/settings", "")
-	var response runtimeSettingsResponse
-	if err := json.Unmarshal(list.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decode empty list: %v", err)
-	}
-	if list.Code != http.StatusOK || len(response.Settings) != 0 {
-		t.Fatalf("empty list status=%d body=%s", list.Code, list.Body.String())
-	}
+	require.Equal(t, http.StatusOK, list.Code, list.Body.String())
+	assert.Empty(t, echotest.Decode[runtimeSettingsResponse](t, list).Settings)
+
 	update := runtimeSettingsRequest(e, http.MethodPut, "/admin/runtime/settings/pro.compression.level", `{"value":"high"}`)
-	if update.Code != http.StatusServiceUnavailable || !strings.Contains(update.Body.String(), `"code":"feature_unavailable"`) {
-		t.Fatalf("unavailable update status=%d body=%s", update.Code, update.Body.String())
-	}
+	require.Equal(t, http.StatusServiceUnavailable, update.Code)
+	assert.Contains(t, update.Body.String(), `"code":"feature_unavailable"`)
 }

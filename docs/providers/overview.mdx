@@ -1,8 +1,9 @@
 ---
-title: "Providers Overview"
+title: "Supported LLM Providers and How to Configure Them"
+sidebarTitle: "Overview"
 description: "Supported AI providers in GoModel and which ones have dedicated configuration guides."
 icon: "list"
-keywords: ["AI providers", "supported providers", "LLM providers", "provider list"]
+keywords: ["AI providers", "supported providers", "LLM providers", "provider list", "configure provider"]
 ---
 
 GoModel routes OpenAI-compatible requests to many AI providers through one
@@ -30,7 +31,9 @@ masked (`***`) once saved — editing a provider re-sends `***` for anything you
 didn't change, and the gateway keeps the stored value. Disabling a provider
 (rather than deleting it) unregisters it from routing but keeps its
 configuration on file. The same multi-key rotation env vars support
-(`api_keys`, an ordered list) is available from the dashboard form.
+(`api_keys`, an ordered list) and the per-provider
+[outbound proxy](/providers/outbound-proxy) are available from the dashboard
+form.
 
 ## Supported providers
 
@@ -53,12 +56,15 @@ support, not every individual model capability exposed by an upstream provider.
 | Meta (Muse Spark) | `META_API_KEY` (`META_BASE_URL` optional) | `muse-spark-1.1` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
 | OpenRouter | `OPENROUTER_API_KEY` | `google/gemini-2.5-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | Kilo AI | `KILO_API_KEY` (`KILO_BASE_URL` optional) | `anthropic/claude-sonnet-4.5` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
+| Eden AI | `EDENAI_API_KEY` (`EDENAI_BASE_URL` optional) | `openai/gpt-4` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Eden AI](/providers/edenai) |
 | Z.ai | `ZAI_API_KEY` (`ZAI_BASE_URL` optional) | `glm-5.1` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
 | xAI (Grok) | `XAI_API_KEY` | `grok-4.6` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | [xAI (Grok)](/providers/xai) |
 | Alibaba Cloud Model Studio (Bailian) | `BAILIAN_API_KEY` (`BAILIAN_BASE_URL` optional) | `qwen3-max` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Alibaba Cloud Model Studio](/providers/bailian) |
 | MiniMax | `MINIMAX_API_KEY` (`MINIMAX_BASE_URL` optional) | `MiniMax-M3` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [MiniMax](/providers/minimax) |
 | Xiaomi MiMo | `XIAOMI_API_KEY` (`XIAOMI_BASE_URL` optional) | `mimo-v2.5-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [Xiaomi MiMo](/providers/xiaomi) |
 | ElevenLabs (voice only) | `ELEVENLABS_API_KEY` (`ELEVENLABS_BASE_URL` optional) | `eleven_multilingual_v2` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [ElevenLabs](/providers/elevenlabs) |
+| audio.cpp (audio only) | `AUDIOCPP_BASE_URL` (`AUDIOCPP_API_KEY` optional) | `pocket-tts` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [audio.cpp](/providers/audiocpp) |
+| Jev / Kev (decisions only) | `JEV_API_KEY` (`JEV_BASE_URL` optional) | `jev-latest` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [Jev](/providers/jev) |
 | OpenCode Go | `OPENCODE_GO_API_KEY` (`OPENCODE_GO_BASE_URL` optional) | `glm-5.1` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [OpenCode Go](/providers/opencode-go) |
 | Kimi Code | `KIMICODE_API_KEY` | `kimi-for-coding` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Kimi Code](/providers/kimicode) |
 | Hetzner (experimental) | `HETZNER_API_KEY` (`HETZNER_BASE_URL` optional) | `Qwen/Qwen3.6-35B-A3B-FP8` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [Hetzner](/providers/hetzner) |
@@ -76,11 +82,35 @@ support, not every individual model capability exposed by an upstream provider.
 
 ## Provider notes
 
+- **OpenAI reasoning models** — for o-series and GPT-5 or later models
+  (including GPT-6), GoModel sends `max_tokens` as `max_completion_tokens` and
+  drops `temperature` and `top_p` unless `reasoning_effort` is `"none"` (the
+  only case these models accept them). OpenAI rejects `stop` for these models, so
+  GoModel cuts the output at the first stop sequence itself and reports it in
+  `stop_sequence`. A `reasoning_effort` the model does not accept moves to the
+  closest level it does (for example `minimal` becomes `low` from GPT-5.1 on,
+  and `max` becomes `xhigh`). From GPT-5.6 on, OpenAI accepts function tools on
+  Chat Completions only with `reasoning_effort: "none"`, so a tool request that
+  sets no effort gets `"none"`.
+- **OpenAI requests served through Responses** — some chat requests (Chat
+  Completions and `/v1/messages`) cannot be served by OpenAI's Chat
+  Completions: function tools with a reasoning effort on GPT-5.6+, any tool
+  call on GPT-6 Astra and GPT-6.1 (they reject `"none"`), tool results with
+  images or files (Chat Completions accepts them but the model never sees
+  them), and files given by URL. GoModel sends these to OpenAI's
+  `/v1/responses` with `store: false` and returns a normal chat completion or
+  chunk stream. A request with a field the Responses API has no equivalent for
+  (for example `n` or `logprobs`) stays on Chat Completions.
 - **llm-d** — point `LLMD_BASE_URL` at the Router/EPP service and declare
   `LLMD_MODELS` when the route does not serve `/v1/models`. The dedicated
   provider injects trusted inference-objective and user-path fairness headers.
 - **Z.ai GLM Coding Plan** — set
   `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`.
+- **Z.ai reasoning effort** — `reasoning.effort` (Chat Completions and
+  Responses) is sent as Z.ai's top-level `reasoning_effort`. GLM-5.3 and
+  GLM-5.3-Flash always think and accept only `low`, `high`, and `max`, so
+  `none` and `minimal` map to `low`, `medium` to `high`, and `xhigh` to `max`.
+  Other GLM models receive the level unchanged.
 - **Groq reasoning and transcriptions** — on the gpt-oss and qwen3 families
   GoModel defaults Groq's `reasoning_format` to `parsed`, so chain of thought
   arrives in `reasoning` instead of as inline `<think>…</think>` text inside
@@ -124,6 +154,16 @@ support, not every individual model capability exposed by an upstream provider.
   another configured provider exposes the same raw model ID, select Kilo
   explicitly with `kilo/anthropic/claude-sonnet-4.5`; GoModel removes only the
   outer `kilo/` routing qualifier before forwarding.
+- **Eden AI** — model IDs use `provider/model` (for example, `openai/gpt-4`)
+  and are forwarded unchanged; select Eden explicitly with
+  `edenai/openai/gpt-4` when another configured provider exposes the same raw
+  ID. GoModel discovers Eden's catalog, context windows, capabilities, and
+  per-token pricing from Eden's own `/v3/models`, so there is no built-in
+  model list and new Eden models need no upgrade. Per-request cost comes from
+  the exact USD `cost` Eden returns on each response rather than from token
+  math. GoModel serves `/v1/responses` by translating it to Eden's
+  chat-completions endpoint — Eden's own `/v3/responses` is a different API
+  and is never used. See the [Eden AI guide](/providers/edenai).
 - **Xiaomi MiMo** — TTS (`mimo-v2.5-tts*`) and ASR (`mimo-v2.5-asr`) are served
   through `/v1/audio/speech` and `/v1/audio/transcriptions` (translated to
   MiMo's chat-completions audio dialect) as well as directly via chat
@@ -193,6 +233,24 @@ support, not every individual model capability exposed by an upstream provider.
   routes to any model the provider serves regardless of category.
 - **vLLM** — set `VLLM_API_KEY` only if the upstream server was started with
   `--api-key`.
+- **audio.cpp** — `AUDIOCPP_BASE_URL` is required (audiocpp_server's default
+  port collides with GoModel's own 8080, so there is no default);
+  `AUDIOCPP_API_KEY` is usually unset, since audio.cpp has no authentication of
+  its own. Audio only: `/v1/audio/speech` and `/v1/audio/transcriptions` route
+  to it, and its detail, alignment, and live-streaming routes are reachable
+  through passthrough. See [audio.cpp](/providers/audiocpp).
+- **Jev / Kev** — TypeSafe's System One API is a decision API (state plus
+  typed questions in, calibrated probabilities out). GoModel forwards it
+  natively, untranslated, at `POST /v1/systemone` (with virtual models,
+  guardrails, audit, and usage) and through passthrough at `/p/jev/...`, and
+  answers OpenAI's [Decisions API](/advanced/decisions-api) at
+  `POST /v1/decisions` with it by translating both ways. `/v1/decisions` is
+  available once an `openai`, `jev`, or `openrouter` provider is configured, and
+  `/v1/systemone` once a `jev` or `openrouter` provider is; OpenRouter serves
+  Jev natively, and its decision models are listed as utility models.
+  `JEV_API_KEY` configures the hosted API; for a self-hosted Kev server, which
+  speaks the same API without authentication, set `JEV_BASE_URL` and leave the
+  key unset. See [Jev](/providers/jev).
 - **llama.cpp / LM Studio** — `LLAMACPP_BASE_URL` is required (llama-server's
   default port collides with GoModel's own 8080, so there is no default);
   `LLAMACPP_API_KEY` is optional. Do not register these servers as `ollama`,
@@ -215,6 +273,32 @@ support, not every individual model capability exposed by an upstream provider.
   and any other suffixed settings for that instance, rather than the generic
   `VERTEX_PROJECT` / `VERTEX_LOCATION`. `VERTEX_AUTH_TYPE` defaults to
   Application Default Credentials (`gcp_adc`).
+
+## What GoModel normalizes in responses
+
+GoModel returns one shape per field no matter which provider answered, and
+forwards everything else exactly as the provider sent it.
+
+- **Reasoning text** comes back as `reasoning_content`, on
+  `choices[].message` and on streamed `choices[].delta`. Groq returns it as
+  `reasoning`; GoModel renames it, so the same client code reads the chain of
+  thought from Groq, DeepSeek, Anthropic, Cohere and vLLM alike.
+- **Vendor members are not stripped.** Groq's `x_groq` and its
+  `queue_time` / `prompt_time` / `completion_time` usage timings, and
+  DeepSeek's `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`, reach the
+  client untouched — that passthrough is how you get at provider-native extras
+  without waiting for a GoModel release. Read cache hits from the portable
+  `usage.prompt_tokens_details.cached_tokens` if you want provider-independent
+  code. See [ADR-0011](https://github.com/ENTERPILOT/GoModel/blob/main/docs/adr/0011-field-forwarding-on-translated-paths.md).
+- **Streams carry a final `usage` even if you did not ask for it.** With usage
+  tracking on, GoModel adds `stream_options.include_usage` to every streaming
+  request so it can price the call, and the provider's usage chunk is relayed
+  as-is; OpenAI's own API omits usage unless the client asks. Most providers
+  send it as a separate trailing chunk with an empty `choices` array, DeepSeek
+  attaches it to its last content chunk. Ignore the member, or set
+  `ENFORCE_RETURNING_USAGE_DATA=false` to stop GoModel asking for it — at the
+  cost of usage records for streamed requests on providers that only report
+  usage when asked.
 
 ## Why some providers have dedicated pages
 

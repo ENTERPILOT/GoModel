@@ -331,6 +331,14 @@
             }
           },
           {
+            "description": "Comma-separated endpoint operations to hide, e.g. mcp,provider_passthrough,audio_speech; other entries, including unclassified ones, stay",
+            "name": "exclude_operation",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Search across request_id/requested_model/provider/method/path/session_id/error_type/error_message",
             "name": "search",
             "in": "query",
@@ -505,6 +513,14 @@
             "in": "query",
             "schema": {
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Comma-separated endpoint operations to hide, e.g. mcp,provider_passthrough,audio_speech; other entries, including unclassified ones, stay",
+            "name": "exclude_operation",
+            "in": "query",
+            "schema": {
+              "type": "string"
             }
           },
           {
@@ -1282,8 +1298,32 @@
             }
           },
           {
+            "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+            "name": "endpoint",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+            "name": "operation",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Filter by exact detected session ID",
             "name": "session_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by exact managed auth key ID",
+            "name": "auth_key_id",
             "in": "query",
             "schema": {
               "type": "string"
@@ -1596,7 +1636,7 @@
     },
     "/admin/mcp-servers/{name}/catalog": {
       "get": {
-        "description": "Lists the tools, prompts, resources, and resource templates the named server currently exposes through the gateway, after operator tool filters. Names are the upstream originals; the aggregated /mcp endpoint prefixes them with the server slug.",
+        "description": "Lists the tools, prompts, resources, and resource templates the named server currently exposes through the gateway, after operator tool filters. Discovered tools the filters hide are listed separately under excluded_tools. Names are the upstream originals; the aggregated /mcp endpoint prefixes them with the server slug.",
         "tags": [
           "admin"
         ],
@@ -1747,6 +1787,316 @@
             "sidebarTitle": "/admin/mcp-servers/{name}/reconnect",
             "title": "Force-redial one MCP server and return its fresh state",
             "description": "GoModel API reference for POST /admin/mcp-servers/{name}/reconnect: Force-redial one MCP server and return its fresh state."
+          }
+        }
+      }
+    },
+    "/admin/mcp-virtual-servers": {
+      "get": {
+        "description": "Each virtual server serves a subset of the MCP servers at /mcp/{name}. missing_servers lists members no server matches; conflict explains why a virtual server is not served.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "List virtual MCP servers (config-declared and admin-managed)",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/admin.mcpVirtualServerResponse"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/mcp-virtual-servers",
+            "title": "List virtual MCP servers (config-declared and admin-managed)",
+            "description": "GoModel API reference for GET /admin/mcp-virtual-servers: List virtual MCP servers (config-declared and admin-managed)."
+          }
+        }
+      },
+      "put": {
+        "description": "Members must be existing MCP servers. A new virtual server may not use an MCP server's slug, and config-declared virtual servers are read-only.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create or update one admin-managed virtual MCP server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/admin.upsertMCPVirtualServerRequest"
+              }
+            }
+          },
+          "description": "Virtual MCP server definition",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/admin.mcpVirtualServerResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/mcp-virtual-servers",
+            "title": "Create or update one admin-managed virtual MCP server",
+            "description": "GoModel API reference for PUT /admin/mcp-virtual-servers: Create or update one admin-managed virtual MCP server."
+          }
+        }
+      }
+    },
+    "/admin/mcp-virtual-servers/{name}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete one admin-managed virtual MCP server",
+        "parameters": [
+          {
+            "description": "Virtual MCP server name",
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/mcp-virtual-servers/{name}",
+            "title": "Delete one admin-managed virtual MCP server",
+            "description": "GoModel API reference for DELETE /admin/mcp-virtual-servers/{name}: Delete one admin-managed virtual MCP server."
+          }
+        }
+      }
+    },
+    "/admin/media/{id}": {
+      "get": {
+        "description": "Streams the bytes of an audio or image object the audit log\nreferences by media_id, with its content type. Range requests\nare honored so browser players can seek. An object outside the\ncaller's user-path scope is reported as missing.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Download a stored media object",
+        "parameters": [
+          {
+            "description": "Media object id",
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "Partial Content",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/media/{id}",
+            "title": "Download a stored media object",
+            "description": "GoModel API reference for GET /admin/media/{id}: Download a stored media object."
           }
         }
       }
@@ -2093,6 +2443,89 @@
             "sidebarTitle": "/admin/models/categories",
             "title": "List model categories with counts",
             "description": "GoModel API reference for GET /admin/models/categories: List model categories with counts."
+          }
+        }
+      }
+    },
+    "/admin/models/metadata": {
+      "get": {
+        "description": "Returns the merged metadata the gateway serves for a model together with each layer it was merged from: the provider's own listing, the model catalog entry and the config.yaml override. A null layer knows nothing about the model. `sources` names the winning layer per field (config, provider, catalog or inferred).",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Show where one model's metadata comes from",
+        "parameters": [
+          {
+            "description": "Provider instance name or provider type",
+            "name": "provider",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Raw upstream model ID",
+            "name": "model",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/providers.ModelMetadataLayers"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/models/metadata",
+            "title": "Show where one model's metadata comes from",
+            "description": "GoModel API reference for GET /admin/models/metadata: Show where one model's metadata comes from."
           }
         }
       }
@@ -2995,8 +3428,32 @@
             }
           },
           {
+            "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+            "name": "endpoint",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+            "name": "operation",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Filter by exact detected session ID",
             "name": "session_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by exact managed auth key ID",
+            "name": "auth_key_id",
             "in": "query",
             "schema": {
               "type": "string"
@@ -3078,6 +3535,170 @@
         }
       }
     },
+    "/admin/usage/endpoints": {
+      "get": {
+        "description": "Returns per-endpoint token and cost aggregates. Each row names\nthe operation its endpoint belongs to, so endpoints that mean\nthe same thing can be folded: /v1/chat/completions and\n/v1/messages are both chat_completions.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get usage breakdown by request endpoint",
+        "parameters": [
+          {
+            "description": "Number of days (default 30)",
+            "name": "days",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Start date (YYYY-MM-DD)",
+            "name": "start_date",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "End date (YYYY-MM-DD)",
+            "name": "end_date",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by exact model name",
+            "name": "model",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by provider name or provider type",
+            "name": "provider",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by request label (exact match)",
+            "name": "label",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+            "name": "endpoint",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+            "name": "operation",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by exact detected session ID",
+            "name": "session_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by exact managed auth key ID",
+            "name": "auth_key_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by tracked user path subtree",
+            "name": "user_path",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Cache mode filter: uncached, cached, all (default uncached)",
+            "name": "cache_mode",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/usage.EndpointUsage"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/usage/endpoints",
+            "title": "Get usage breakdown by request endpoint",
+            "description": "GoModel API reference for GET /admin/usage/endpoints: Get usage breakdown by request endpoint."
+          }
+        }
+      }
+    },
     "/admin/usage/labels": {
       "get": {
         "description": "Returns per-label token and cost aggregates. Requests carrying\nseveral labels count once per label, so rows overlap and do\nnot sum to the period totals. Unlabelled requests are omitted.",
@@ -3135,8 +3756,32 @@
             }
           },
           {
+            "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+            "name": "endpoint",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+            "name": "operation",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Filter by exact detected session ID",
             "name": "session_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by exact managed auth key ID",
+            "name": "auth_key_id",
             "in": "query",
             "schema": {
               "type": "string"
@@ -3274,6 +3919,22 @@
             }
           },
           {
+            "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+            "name": "endpoint",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+            "name": "operation",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Filter by tracked user path subtree",
             "name": "user_path",
             "in": "query",
@@ -3298,7 +3959,15 @@
             }
           },
           {
-            "description": "Search across model, provider, request_id, provider_id, session_id",
+            "description": "Filter by exact managed auth key ID",
+            "name": "auth_key_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Search across model, provider, endpoint, request_id, provider_id, session_id",
             "name": "search",
             "in": "query",
             "schema": {
@@ -3434,8 +4103,32 @@
             }
           },
           {
+            "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+            "name": "endpoint",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+            "name": "operation",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Filter by exact detected session ID",
             "name": "session_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by exact managed auth key ID",
+            "name": "auth_key_id",
             "in": "query",
             "schema": {
               "type": "string"
@@ -3667,8 +4360,32 @@
             }
           },
           {
+            "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+            "name": "endpoint",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+            "name": "operation",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Filter by exact detected session ID",
             "name": "session_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by exact managed auth key ID",
+            "name": "auth_key_id",
             "in": "query",
             "schema": {
               "type": "string"
@@ -3811,8 +4528,32 @@
             }
           },
           {
+            "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+            "name": "endpoint",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+            "name": "operation",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Filter by exact detected session ID",
             "name": "session_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by exact managed auth key ID",
+            "name": "auth_key_id",
             "in": "query",
             "schema": {
               "type": "string"
@@ -4021,8 +4762,32 @@
             }
           },
           {
+            "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+            "name": "endpoint",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+            "name": "operation",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Filter by exact detected session ID",
             "name": "session_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by exact managed auth key ID",
+            "name": "auth_key_id",
             "in": "query",
             "schema": {
               "type": "string"
@@ -5135,6 +5900,26 @@
               }
             }
           },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
           "502": {
             "description": "Bad Gateway",
             "content": {
@@ -5307,6 +6092,26 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
             "content": {
               "application/json": {
                 "schema": {
@@ -5515,6 +6320,26 @@
               }
             }
           },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
           "502": {
             "description": "Bad Gateway",
             "content": {
@@ -5687,6 +6512,26 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
             "content": {
               "application/json": {
                 "schema": {
@@ -5895,6 +6740,26 @@
               }
             }
           },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
           "502": {
             "description": "Bad Gateway",
             "content": {
@@ -6067,6 +6932,26 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
             "content": {
               "application/json": {
                 "schema": {
@@ -6275,6 +7160,26 @@
               }
             }
           },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
           "502": {
             "description": "Bad Gateway",
             "content": {
@@ -6437,6 +7342,10 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "stream": {
+                    "description": "Relay the transcript as server-sent events while the provider produces it",
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -6450,7 +7359,7 @@
         },
         "responses": {
           "200": {
-            "description": "Transcription in the requested response_format: a JSON object for json/verbose_json, or a text/plain body for text/srt/vtt",
+            "description": "Transcription in the requested response_format: a JSON object for json/verbose_json, a text/plain body for text/srt/vtt, or a text/event-stream when stream=true",
             "content": {
               "application/json": {
                 "schema": {
@@ -7964,6 +8873,100 @@
         }
       }
     },
+    "/v1/decisions": {
+      "post": {
+        "description": "Available when an openai, jev, or openrouter provider is configured. OpenAI models answer natively; jev models (Jev, Kev) and OpenRouter's decision models answer through System One, translated both ways. Hosted Jev reads images sent as base64 data URLs; Kev and OpenRouter read text only.",
+        "tags": [
+          "decisions"
+        ],
+        "summary": "Answer typed questions about an input (OpenAI Decisions)",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "description": "Decisions request: model, input, and questions",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Decision: answers in question order, model, and usage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/decisions",
+            "title": "Answer typed questions about an input (OpenAI Decisions)",
+            "description": "GoModel API reference for POST /v1/decisions: Answer typed questions about an input (OpenAI Decisions)."
+          }
+        }
+      }
+    },
     "/v1/embeddings": {
       "post": {
         "tags": [
@@ -9404,6 +10407,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Anthropic API version, e.g. 2023-06-01. When present, the model and error bodies use the Anthropic envelopes instead of the OpenAI ones.",
+            "name": "anthropic-version",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -9412,7 +10423,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.Model"
+                  "description": "OpenAI envelope by default; the Anthropic envelope when the request carries anthropic-version.",
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/core.Model"
+                    },
+                    {
+                      "$ref": "#/components/schemas/anthropicapi.ModelInfo"
+                    }
+                  ]
                 }
               }
             }
@@ -9432,7 +10451,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                  "description": "OpenAI envelope by default; the Anthropic envelope when the request carries anthropic-version.",
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                    },
+                    {
+                      "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                    }
+                  ]
                 }
               }
             }
@@ -9442,7 +10469,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                  "description": "OpenAI envelope by default; the Anthropic envelope when the request carries anthropic-version.",
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                    },
+                    {
+                      "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                    }
+                  ]
                 }
               }
             }
@@ -10972,6 +12007,277 @@
         }
       }
     },
+    "/v1/systemone": {
+      "post": {
+        "description": "Available when a jev or openrouter provider is configured. The request and answer follow TypeSafe's System One API; models on providers without that API are rejected rather than translated.",
+        "tags": [
+          "systemone"
+        ],
+        "summary": "Evaluate a System One decision request (Jev / Kev)",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Request2"
+        },
+        "responses": {
+          "200": {
+            "description": "System One answers, in the provider's shape",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/systemone",
+            "title": "Evaluate a System One decision request (Jev / Kev)",
+            "description": "GoModel API reference for POST /v1/systemone: Evaluate a System One decision request (Jev / Kev)."
+          }
+        }
+      }
+    },
+    "/v1/systemone/permute": {
+      "post": {
+        "description": "A Kev server diagnostic: the request is a System One request, and n_perm (1 to 64, default 6) sets how many option orders run. Only jev providers pointing at a Kev server serve it.",
+        "tags": [
+          "systemone"
+        ],
+        "summary": "Run one Choice question with several option orders (Kev)",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "description": "System One request with one Choice question",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Kev's answer, in the provider's shape",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/systemone/permute",
+            "title": "Run one Choice question with several option orders (Kev)",
+            "description": "GoModel API reference for POST /v1/systemone/permute: Run one Choice question with several option orders (Kev)."
+          }
+        }
+      }
+    },
+    "/v1/systemone/separate": {
+      "post": {
+        "description": "A Kev server diagnostic that answers each question separately. Only jev providers pointing at a Kev server serve it.",
+        "tags": [
+          "systemone"
+        ],
+        "summary": "Run each System One question in its own forward pass (Kev)",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Request2"
+        },
+        "responses": {
+          "200": {
+            "description": "Kev's answer, in the provider's shape",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/systemone/separate",
+            "title": "Run each System One question in its own forward pass (Kev)",
+            "description": "GoModel API reference for POST /v1/systemone/separate: Run each System One question in its own forward pass (Kev)."
+          }
+        }
+      }
+    },
     "/v1/usage": {
       "get": {
         "description": "Returns recorded usage, budget statuses, and rate limit statuses for the caller's effective user path (the path bound to the managed API key, or the user-path header for master-key callers).",
@@ -11002,6 +12308,14 @@
             "in": "query",
             "schema": {
               "type": "integer"
+            }
+          },
+          {
+            "description": "Which requests to count: uncached (default, provider-bound only), cached (local response-cache hits only), or all",
+            "name": "cache_mode",
+            "in": "query",
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -11119,6 +12433,22 @@
         "description": "SDP offer (raw application/sdp body), or a multipart form with sdp and session (JSON) fields",
         "required": true
       },
+      "Request2": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "multipart/form-data": {
+            "schema": {
+              "type": "object"
+            }
+          }
+        },
+        "description": "System One request: model, state, and questions",
+        "required": true
+      },
       "anthropicapi.MessagesRequest": {
         "content": {
           "application/json": {
@@ -11167,6 +12497,10 @@
             "type": "string"
           },
           "MCP_ENABLED": {
+            "type": "string"
+          },
+          "MCP_TOOL_DISCOVERY": {
+            "description": "MCPToolDiscovery is the gateway's default MCP tool discovery mode\n(\"off\" or \"search\"), so the dashboard can show how clients see tools.",
             "type": "string"
           },
           "PER_CHILD_QUOTAS_ENABLED": {
@@ -11557,8 +12891,17 @@
               "type": "string"
             }
           },
+          "disallowed_user_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "enabled": {
             "type": "boolean"
+          },
+          "excluded_tool_count": {
+            "type": "integer"
           },
           "headers": {
             "type": "object",
@@ -11604,6 +12947,42 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "admin.mcpVirtualServerResponse": {
+        "type": "object",
+        "properties": {
+          "configured_tool_discovery": {
+            "description": "ConfiguredToolDiscovery is the stored setting: \"off\", \"search\", or \"\"\nto inherit the gateway default. ToolDiscovery is the effective mode.",
+            "type": "string"
+          },
+          "conflict": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "managed": {
+            "type": "boolean"
+          },
+          "missing_servers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "servers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tool_discovery": {
+            "type": "string"
           }
         }
       },
@@ -11732,6 +13111,10 @@
             }
           },
           "name": {
+            "type": "string"
+          },
+          "proxy_url": {
+            "description": "ProxyURL is the provider's outbound proxy with any password masked.",
             "type": "string"
           },
           "service_account_file": {
@@ -12052,6 +13435,12 @@
               "type": "string"
             }
           },
+          "disallowed_user_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -12081,6 +13470,26 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "admin.upsertMCPVirtualServerRequest": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "servers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tool_discovery": {
+            "type": "string"
           }
         }
       },
@@ -12136,6 +13545,10 @@
             }
           },
           "name": {
+            "type": "string"
+          },
+          "proxy_url": {
+            "description": "ProxyURL may be sent back exactly as the view rendered it (password\nmasked) to keep the stored proxy credentials.",
             "type": "string"
           },
           "service_account_file": {
@@ -12457,6 +13870,18 @@
           "model": {
             "type": "string"
           },
+          "output_config": {
+            "description": "OutputConfig carries structured output (format) and the effort level.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/anthropicapi.OutputConfig"
+              }
+            ]
+          },
+          "output_format": {
+            "description": "OutputFormat is the deprecated top-level form of output_config.format.",
+            "type": "object"
+          },
           "stop_sequences": {
             "type": "array",
             "items": {
@@ -12542,6 +13967,17 @@
           }
         }
       },
+      "anthropicapi.OutputConfig": {
+        "type": "object",
+        "properties": {
+          "effort": {
+            "type": "string"
+          },
+          "format": {
+            "type": "object"
+          }
+        }
+      },
       "anthropicapi.ResponseContentBlock": {
         "type": "object",
         "properties": {
@@ -12564,7 +14000,7 @@
             "type": "string"
           },
           "signature": {
-            "description": "Signature authenticates a thinking block. Anthropic requires it back\nverbatim when the conversation continues, so clients must echo it.",
+            "description": "Signature authenticates a thinking block. Anthropic requires it back\nverbatim when the conversation continues, so clients must echo it. Every\nthinking block carries the member, as the Anthropic schema requires;\nreasoning from a provider that does not sign its output is rendered with\nan empty signature. Hence the pointer: only a thinking block has one.",
             "type": "string"
           },
           "text": {
@@ -12595,6 +14031,10 @@
           "cache_control": {
             "type": "object"
           },
+          "defer_loading": {
+            "description": "DeferLoading marks a tool whose schema the API loads only when tool\nsearch matches it. It is an ordinary custom tool that declares itself\ndeferred, so the translated pipeline sends it like any other and drops\nthe marker (see convertTools).",
+            "type": "boolean"
+          },
           "description": {
             "type": "string"
           },
@@ -12604,6 +14044,9 @@
           },
           "name": {
             "type": "string"
+          },
+          "strict": {
+            "type": "boolean"
           },
           "type": {
             "type": "string"
@@ -13435,6 +14878,9 @@
           },
           "type": {
             "type": "string"
+          },
+          "video_url": {
+            "$ref": "#/components/schemas/core.VideoURLContent"
           }
         }
       },
@@ -13605,6 +15051,10 @@
         "properties": {
           "prompt_tokens": {
             "type": "integer"
+          },
+          "raw_usage": {
+            "type": "object",
+            "additionalProperties": {}
           },
           "total_tokens": {
             "type": "integer"
@@ -14033,6 +15483,10 @@
           "batch_output_per_mtok": {
             "type": "number"
           },
+          "cache_write_1h_per_mtok": {
+            "description": "Anthropic 1-hour TTL cache writes; cache_write_per_mtok prices the default 5-minute ones",
+            "type": "number"
+          },
           "cache_write_per_mtok": {
             "type": "number"
           },
@@ -14095,6 +15549,9 @@
       "core.ModelPricingTier": {
         "type": "object",
         "properties": {
+          "cached_input_per_mtok": {
+            "type": "number"
+          },
           "input_per_mtok": {
             "type": "number"
           },
@@ -14233,6 +15690,10 @@
         "type": "object",
         "properties": {
           "audio_tokens": {
+            "type": "integer"
+          },
+          "cache_write_tokens": {
+            "description": "CacheWriteTokens is the part of the prompt written to the prompt cache\n(OpenAI GPT-5.6+), billed at the cache-write rate. Omitted when zero\nso providers that never report it do not gain the member.",
             "type": "integer"
           },
           "cached_tokens": {
@@ -14596,11 +16057,15 @@
           "input_audio": {
             "$ref": "#/components/schemas/core.InputAudioContent"
           },
+          "refusal": {
+            "description": "Refusal is the model's explanation on a \"refusal\" content item.",
+            "type": "string"
+          },
           "text": {
             "type": "string"
           },
           "type": {
-            "description": "\"output_text\", \"input_image\", \"input_audio\", etc.",
+            "description": "\"output_text\", \"refusal\", \"input_image\", \"input_audio\", etc.",
             "type": "string"
           }
         }
@@ -14623,6 +16088,14 @@
             "type": "string"
           },
           "message": {
+            "type": "string"
+          }
+        }
+      },
+      "core.ResponsesIncompleteDetails": {
+        "type": "object",
+        "properties": {
+          "reason": {
             "type": "string"
           }
         }
@@ -14786,6 +16259,14 @@
           "id": {
             "type": "string"
           },
+          "incomplete_details": {
+            "description": "IncompleteDetails explains a status of \"incomplete\": the model hit\nmax_output_tokens, was stopped by a content filter, or the upstream\nstream was interrupted.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/core.ResponsesIncompleteDetails"
+              }
+            ]
+          },
           "model": {
             "type": "string"
           },
@@ -14807,7 +16288,7 @@
             "type": "string"
           },
           "status": {
-            "description": "\"completed\", \"failed\", \"in_progress\"",
+            "description": "\"completed\", \"incomplete\", \"failed\", \"in_progress\"",
             "type": "string"
           },
           "usage": {
@@ -14886,14 +16367,31 @@
           }
         }
       },
+      "core.VideoURLContent": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
       "mcpgateway.CatalogFeature": {
         "type": "object",
         "properties": {
           "description": {
             "type": "string"
           },
+          "destructive": {
+            "type": "boolean"
+          },
           "name": {
             "type": "string"
+          },
+          "read_only": {
+            "type": "boolean"
           }
         }
       },
@@ -14928,6 +16426,12 @@
       "mcpgateway.CatalogView": {
         "type": "object",
         "properties": {
+          "excluded_tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/mcpgateway.CatalogFeature"
+            }
+          },
           "instructions": {
             "type": "string"
           },
@@ -14991,6 +16495,9 @@
             "type": "number"
           },
           "batch_output_per_mtok": {
+            "type": "number"
+          },
+          "cache_write_1h_per_mtok": {
             "type": "number"
           },
           "cache_write_per_mtok": {
@@ -15111,6 +16618,56 @@
           },
           "display_name": {
             "type": "string"
+          }
+        }
+      },
+      "providers.ModelMetadataLayers": {
+        "type": "object",
+        "properties": {
+          "catalog": {
+            "description": "Catalog is the model list (ai-model-list) entry.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/core.ModelMetadata"
+              }
+            ],
+            "nullable": true
+          },
+          "config": {
+            "description": "Config is the config.yaml metadata override.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/core.ModelMetadata"
+              }
+            ],
+            "nullable": true
+          },
+          "effective": {
+            "description": "Effective is the merged metadata, as listed by /admin/models.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/core.ModelMetadata"
+              }
+            ]
+          },
+          "provider": {
+            "description": "Provider is what the provider reported in its own model listing.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/core.ModelMetadata"
+              }
+            ],
+            "nullable": true
+          },
+          "selector": {
+            "type": "string"
+          },
+          "sources": {
+            "description": "Sources names the layer that supplied each effective field\n(see modeldata.MetadataSources).",
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         }
       },
@@ -15449,6 +17006,60 @@
           }
         }
       },
+      "usage.EndpointUsage": {
+        "type": "object",
+        "properties": {
+          "cache_write_input_tokens": {
+            "type": "integer"
+          },
+          "cached_input_cost": {
+            "type": "number",
+            "nullable": true
+          },
+          "cached_input_tokens": {
+            "type": "integer"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "input_cost": {
+            "type": "number",
+            "nullable": true
+          },
+          "input_tokens": {
+            "type": "integer"
+          },
+          "local_cached_input_tokens": {
+            "type": "integer"
+          },
+          "local_cached_output_tokens": {
+            "type": "integer"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "output_cost": {
+            "type": "number",
+            "nullable": true
+          },
+          "output_tokens": {
+            "type": "integer"
+          },
+          "requests": {
+            "type": "integer"
+          },
+          "total_cost": {
+            "type": "number",
+            "nullable": true
+          },
+          "total_tokens": {
+            "type": "integer"
+          },
+          "uncached_input_tokens": {
+            "type": "integer"
+          }
+        }
+      },
       "usage.LabelUsage": {
         "type": "object",
         "properties": {
@@ -15701,6 +17312,9 @@
       "usage.UsageLogEntry": {
         "type": "object",
         "properties": {
+          "auth_key_id": {
+            "type": "string"
+          },
           "cache_type": {
             "type": "string"
           },
@@ -16405,6 +18019,34 @@
             "$ref": "#/components/schemas/anthropicapi.SSEUnknownEvent"
           }
         ]
+      },
+      "anthropicapi.ModelInfo": {
+        "description": "One model in the Anthropic dialect, returned when the request carries anthropic-version.",
+        "type": "object",
+        "required": [
+          "created_at",
+          "display_name",
+          "id",
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "model"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       }
     }
   }

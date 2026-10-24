@@ -37,6 +37,8 @@ Guardrails work across all text-based endpoints:
 - `/v1/chat/completions`
 - `/v1/responses`
 - `/v1/messages`
+- `/v1/decisions` and `/v1/systemone`, prompt phase only (see
+  [How It Works With Different Endpoints](#how-it-works-with-different-endpoints))
 
 <Note>
   Guardrails for images, TTS, STT, and video models are planned as a separate
@@ -396,6 +398,76 @@ until the response is complete.
       ACME Corp => [company]
 ```
 
+### `tag_replace`
+
+Replaces `{{gomodel.<tag>}}` placeholders in prompt text with values of the
+current request, just before the provider call. Use it to tell the model which
+model it runs as, or today's date, without the client sending them. It pairs
+well with `system_prompt`: put the tags in the system prompt and run
+`tag_replace` at a later `order`.
+
+**Phases:** prompt. **Edits content:** yes.
+
+#### Tags
+
+| Tag | Value |
+| --- | ----- |
+| `{{gomodel.requested_model}}` | Model the client asked for. |
+| `{{gomodel.resolved_model}}` | Provider model the request is sent to. |
+| `{{gomodel.virtual_model}}` | Virtual model that produced the resolution, empty otherwise. |
+| `{{gomodel.provider_type}}` | Provider type, for example `openai`. |
+| `{{gomodel.provider_name}}` | Provider instance name. |
+| `{{gomodel.user_path}}` | Effective user path. |
+| `{{gomodel.request_id}}` | Gateway request ID. |
+| `{{gomodel.session_id}}` | Detected session ID, empty when none. |
+| `{{gomodel.date}}` | Current date, `2026-09-15`. |
+| `{{gomodel.time}}` | Current time, `14:05:00`. |
+| `{{gomodel.datetime}}` | Current date and time in RFC 3339, `2026-09-15T14:05:00Z`. |
+| `{{gomodel.weekday}}` | Current day of the week, `Tuesday`. |
+
+Spaces inside the braces are allowed. Unknown tags are left as written.
+
+A tag with no value for the request, such as `session_id` without a session,
+becomes empty. The model and provider tags name the first selected provider:
+the prompt phase runs once, so a failover attempt receives the same text.
+Values that come from the caller, such as `user_path` and `session_id`, are
+inserted as sent. A request whose prompt had a tag expanded is not stored in the
+response cache, because the reply may repeat request-specific values.
+
+<Warning>
+Time-based tags can break provider prompt caching and raise costs. Providers
+cache the start of a prompt, usually the system message, and reuse it only
+when it is identical. `{{gomodel.time}}` and `{{gomodel.datetime}}` change
+every second, and `{{gomodel.request_id}}` changes on every request, so every
+call pays the full input price and waits longer. `{{gomodel.date}}` and
+`{{gomodel.weekday}}` change once a day and cost one cache miss per day. Prefer
+`date` over `time` or `datetime`, and place volatile tags at the end of the
+prompt rather than the start of a long system message.
+</Warning>
+
+#### Settings
+
+| Key | Required | Default | Description |
+| --- | -------- | ------- | ----------- |
+| `roles` | No | `["system"]` | Prompt messages tags are expanded in: `system` (includes developer), `user`, `assistant`, `tool`. Adding `user` lets callers read request values such as the user path and rewrites template text in their prompts. |
+| `timezone` | No | `UTC` | IANA timezone for the date and time tags, for example `Europe/Warsaw`. The host zone `Local` is rejected. |
+
+#### Example
+
+```yaml
+- name: "model-facts"
+  type: "system_prompt"
+  order: 0
+  system_prompt:
+    mode: "decorator"
+    content: "You are {{gomodel.resolved_model}}. Today is {{gomodel.weekday}}, {{gomodel.date}}."
+- name: "expand-tags"
+  type: "tag_replace"
+  order: 1
+  config:
+    timezone: "Europe/Warsaw"
+```
+
 ### `header_edit`
 
 Sets, adds, and removes HTTP headers on the request, the client response, and
@@ -437,10 +509,17 @@ edited, and names containing `secret` or `token` cannot be set.
 ### `llm_judge`
 
 Asks a judge model whether the prompt (or the response) violates a policy and
-blocks, answers, or flags it based on the verdict. The judge must reply with
-one JSON object `{"verdict":"allow"|"block","reason":"..."}`; the default
-instructions do that and tell the model to ignore instructions inside the
-content.
+blocks, answers, or flags it based on the verdict. The judge is either a chat
+model or a decision model:
+
+- A **chat model** must reply with one JSON object
+  `{"verdict":"allow"|"block","reason":"..."}`. The default instructions ask
+  for that and tell the model to ignore instructions inside the content.
+- A **decision model** (Jev, Kev, OpenRouter's decision models, or an OpenAI
+  model through the [Decisions API](/advanced/decisions-api)) is asked a
+  yes-or-no question and returns the probability of yes. There is no text to
+  parse, and it bills input tokens only. See
+  [Judging with a decision model](#judging-with-a-decision-model).
 
 **Phases:** prompt, response, stream (buffered). **Edits content:** no.
 
@@ -448,22 +527,87 @@ content.
 
 | Key | Required | Default | Description |
 | --- | -------- | ------- | ----------- |
-| `model` | Yes | | Judge model: `provider/model`, an alias, or a virtual model. Its usage is accounted with origin `plugin`. |
+| `model` | Yes | | Judge model: `provider/model`, an alias, or a virtual model; a chat model or a decision model. Its usage is accounted with origin `plugin`. |
+| `engine` | No | `auto` | How the judge is asked: `chat`, `decision`, or `auto`, which uses `decision` for a model that answers decisions only (any `jev` model, OpenRouter's decision models, or a virtual model whose targets all are) and `chat` otherwise. |
 | `user_path` | No | current request's path | User path the judge call is scoped to for budgets and audit. |
-| `prompt` | No | built-in policy | System prompt for the judge. |
+| `prompt` | No | built-in policy | Chat engine: system prompt for the judge. |
+| `decision_question` | No | built-in policy | Decision engine: the yes-or-no question asked about the content. Yes means it violates the policy. |
+| `block_threshold` | No | `0.5` | Decision engine: probability of yes, from 0 to 1, at or above which the content counts as a block verdict. |
+| `judge_images` | No | `false` | Decision engine: also send the images of the judged messages. |
 | `target` | No | `auto` | What the judge sees in the prompt phase: `auto` or `last_user` (last user message), `all_user`, `conversation`. In the response phase it always sees the assistant text. |
 | `action` | No | `block` | On a block verdict: `block` rejects, `respond` answers with `respond_text`, `warn` continues and records the verdict. |
 | `message` | No | `This request was blocked by policy` | Error message for `block`, audit note for `warn`. |
 | `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`, for example `403`. Empty means 400 when the prompt is blocked, 502 when the response is blocked. |
 | `respond_text` | No | `I can't help with that request.` | Assistant reply for `respond`. |
-| `on_unclear` | No | `warn` | When the judge reply cannot be parsed or was cut off by `max_tokens`: `allow`, `warn`, or `block` (applies `action`). A verdict counts only as a JSON object or a bare `allow` or `block`, never as a word inside a sentence. |
-| `max_tokens` | No | `256` | Completion cap for the judge call. |
-| `temperature` | No | `0` | Sampling temperature for the judge call (0 to 2). |
+| `on_unclear` | No | `warn` | When the judge reply cannot be parsed, was cut off by `max_tokens`, or was spent entirely on reasoning: `allow`, `warn`, or `block` (applies `action`). A verdict counts only as a JSON object or a bare `allow` or `block`, never as a word inside a sentence. |
+| `max_tokens` | No | `2048` | Chat engine: completion cap for the judge call. Unused tokens cost nothing; size it for the judge model's reasoning, not for the verdict. |
+| `temperature` | No | `0` | Chat engine: sampling temperature for the judge call (0 to 2). |
 
 Identical text is judged once per request, so an instance that runs in both
 the prompt and the response phase does not double-charge for the same
 content. In the stream phase the whole stream is buffered and judged as a
 complete response.
+
+#### Judging with a decision model
+
+With a decision model the judge sends the judged text as the Decisions input,
+without tags, and asks one predicate question, `decision_question`. It does not
+use `prompt`, `max_tokens`, or `temperature`. A probability at or above
+`block_threshold` is a block verdict, and `action` applies. A lower probability
+allows. The call goes through the same routing as
+[`POST /v1/decisions`](/advanced/decisions-api): virtual models, failover to
+targets that serve Decisions, the exact response cache, usage, and audit, under
+the instance's user path.
+
+Each verdict records the probability in the decision detail (`probability`),
+and the instance reports it as the histogram
+`plugin_llm_judge_decision_probability`. Use them to tune `block_threshold` per
+policy: raise it to block only clear violations, or lower it to catch more
+borderline content.
+
+`engine: auto` recognises decision-only models from the model catalog. An
+OpenAI model with Decisions support also chats, so `auto` asks it by chat. Set
+`engine: decision` to use its Decisions API instead.
+
+Leave `judge_images` off for a judge that reads text only, such as a Kev
+server: with images, every call fails and `fail_mode` decides. Hosted Jev reads
+images sent as base64 data URLs. With `judge_images` on, a prompt that holds
+only an image is judged too; otherwise it is allowed without a judge call.
+
+```yaml
+- name: "policy-judge"
+  type: "llm_judge"
+  order: 5
+  timeout_ms: 5000
+  config:
+    model: "jev/jev-latest"
+    block_threshold: 0.7
+    decision_question: "Does the content ask for help with fraud or account takeover?"
+```
+
+#### Sizing `max_tokens` for a reasoning judge
+
+A reasoning judge model spends its completion on thinking before it writes
+anything: with a cap that runs out first the judge returns no verdict, and the
+instance enforces nothing — it follows `on_unclear` instead, which by default
+only warns. The default cap of `2048` leaves room for that; unused tokens are
+never billed, so raise it further rather than trimming it when the judge model
+reasons a lot.
+
+A judge that reaches no verdict is recorded apart from a reply that was
+answered but could not be parsed:
+
+| Code | Meaning |
+| ---- | ------- |
+| `llm_judge_block` | The judge returned a block verdict; `action` applies. |
+| `llm_judge_no_verdict` | The reply was cut off (`finish_reason: length`) or was all reasoning, or a decision model returned no answer. For a cut-off reply, a warning naming the judge model and the cap is logged. `on_unclear` applies. |
+| `llm_judge_unclear` | The judge answered, but the reply is not a verdict, or a decision model declined the question. `on_unclear` applies. |
+
+Check the gateway log for `judge returned no verdict` after configuring an
+instance, and set `on_unclear: block` for a policy that must hold even when the
+judge answers nothing usable. A judge call that fails outright — provider error,
+timeout — is not an unclear verdict: `fail_mode` decides it, like any other
+guardrail failure.
 
 #### Example
 
@@ -503,14 +647,18 @@ docker run -d -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer:latest
 | `score_threshold` | No | analyzer default | Minimum confidence, 0 to 1. Raise it when common words are taken for names or dates. |
 | `allow_list` | No | | Exact words never treated as personal data: product names, your company. |
 | `ad_hoc_recognizers` | No | | JSON array of Presidio pattern recognizers (`supported_entity` plus `patterns` or `deny_list`) for identifiers of your own. |
-| `roles` | No | `["user", "assistant", "tool"]` | Prompt messages analyzed, tool-result text and tool-call arguments included. In the response phase the assistant text and tool-call arguments are always analyzed. |
+| `roles` | No | `["user", "assistant", "tool"]` | Prompt messages analyzed, tool-result text, tool-call arguments, and the reasoning of replayed assistant turns included. In the response phase the assistant text and tool-call arguments are always analyzed. |
 | `action` | No | `anonymize` | `anonymize` rewrites the values; `block` rejects with an error; `respond` answers with `message` as an assistant reply; `warn` continues and records the entity types. |
 | `operator` | No | `replace` | How `anonymize` rewrites a value: `replace` with a numbered placeholder (`<PERSON_1>`, the same one for every occurrence of that value in the request), `mask` with `*` per character, `redact` (removed), `hash` (SHA-256). |
+| `placeholder_format` | No | `<{entity}_{n}>` | How `replace` writes a placeholder. `{entity}` is the entity type, `{n}` its number; it must start and end with a punctuation character and put something between the two. |
 | `restore` | No | `false` | Put the original values back where the model repeats a placeholder. Needs `operator: replace`; see below. |
+| `restore_roles` | No | `["user", "assistant", "tool"]` | Prompt roles whose values are put back. Honored on whichever instance (prompt or response phase) sets it; set on both, a role must be in both lists. |
+| `restore_tools` | No | all | Tools (function names) whose call arguments get the values back. The others keep the placeholders. |
+| `restore_tools_exclude` | No | | Tools whose call arguments keep the placeholders even when `restore_tools` selects them. |
 | `message` | No | `Request blocked: it contains personal data` | Error message for `block`, assistant reply for `respond`, audit note for `warn`. |
 | `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`. Empty means 400 when the prompt is blocked, 502 when the response is blocked. |
 | `stream_chunk` | No | `256` | Characters of streamed text (or tool-call arguments) collected before the analyzer runs on them, so it sees whole sentences and runs once per chunk. The client waits for at most this much text at a time. |
-| `stream_lookbehind` | No | `64` | Characters of streamed text (or tool-call arguments) held back so a value or placeholder split across two chunks is still handled. |
+| `stream_lookbehind` | No | `64` | Characters of streamed text (or tool-call arguments) held back so a value or placeholder split across two chunks is still handled. At most 4096. |
 
 Every text part is analyzed on its own (one analyzer call each, up to eight
 in flight), so the analyzer never sees the whole conversation as one text and
@@ -541,22 +689,56 @@ leaks before the decision.
 
 With `restore: true` the prompt phase replaces values with numbered
 placeholders and remembers them for the request; the response or stream
-phase puts the values back where the model repeats a placeholder, in text
-and in tool-call arguments, so the client sees its own data while the
-provider never does. Set `restore` on the instances in both phases: the
-prompt-phase instance records the values, the response-phase instance
-restores them. Only values from user messages, earlier assistant turns, and
-tool results are put back; a value from a system or developer message stays
-a placeholder, so a user cannot make the model reveal it. A value the model
+phase puts the values back where the model repeats a placeholder, in text,
+reasoning (`reasoning_content` or `reasoning`), and tool-call arguments, so
+the client sees its own data while the provider never does. Set `restore` on
+the instances in both phases: the prompt-phase instance records the values,
+the response-phase instance restores them. Reasoning is only restored, not
+analyzed. Restored reasoning a chat client sends back on the next turn
+(`reasoning_content`, which DeepSeek requires with tool calls) is anonymized
+again in the prompt phase, like the rest of the history. Signed Anthropic
+thinking blocks travel separately and are never edited; on `/v1/messages`,
+where the client sends the thinking text back with its signature, Anthropic
+thinking keeps its placeholders. Reasoning items of a `/v1/responses` output
+(summaries and reasoning text) keep the placeholders too: clients replay them
+in `input` as they are, so restored values would reach the provider on the
+next turn.
+
+The prompt-phase instance needs `restore` to record the values; the
+restoring instance reads `restore_tools` and `restore_tools_exclude`.
+`restore_roles` is read by both: a role's values come back when every
+instance that sets `restore_roles` lists the role, or, when neither sets it,
+when the default list does.
+
+Only values from the `restore_roles` (user messages, earlier assistant turns,
+and tool results by default) are put back; a value from a system or developer
+message stays a placeholder, so a user cannot make the model reveal it. Add
+`system` when the system message carries the user's own data (a chat
+frontend's user name or memories) and anyone who can use the deployment may
+see it. A value the model
 produced on its own is still anonymized on the way out. Such responses are
 kept out of the [response cache](/features/cache). Placeholder-shaped text
 already in the conversation, such as a `<PERSON_2>` an earlier reply carried
 back, is left as it is and its number is never reused for a new value.
 
-Streamed tool-call arguments are restored in flight as well, each call's
-arguments as a window of its own under `stream_lookbehind`, including
-placeholders whose angle brackets the provider escaped (Gemini returns
+Placeholders are found in any letter case (`<Person_1>`) and when Markdown-
+or HTML-escaped (`\<PERSON\_1\>`, `&lt;PERSON_1&gt;`). Streamed text,
+reasoning, and each call's tool-call arguments are restored in flight, each
+as a window of its own under `stream_lookbehind`, including placeholders
+whose angle brackets the provider escaped (Gemini returns
 `\u003cPERSON_1\u003e`).
+
+Tool-call arguments are restored for every tool by default. A client-run tool
+that sends its arguments to a third party, such as web search, should keep
+the placeholders: list it in `restore_tools_exclude`, or list only the tools
+that need the values (knowledge search, asking the user, document generation)
+in `restore_tools`.
+
+A Markdown renderer that sanitizes HTML can hide a placeholder left in the
+reply (one the model made up, or one from the system prompt). Set
+`placeholder_format: "[{entity}_{n}]"` to keep them visible. The instances
+working on one request share the placeholders, in the format of the first
+instance that runs, so give them the same format.
 
 #### Example
 
@@ -579,6 +761,7 @@ placeholders whose angle brackets the provider escaped (Gemini returns
   config:
     entities: ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
     restore: true
+    restore_tools_exclude: ["web_search"]
 ```
 
 ## Examples
@@ -721,11 +904,18 @@ Guardrails operate on a unified message format internally. The adaptation betwee
 | `/v1/chat/completions` | `messages` with `role: "system"` | `messages` array |
 | `/v1/responses` | `instructions` field | `input` field |
 | `/v1/messages` | `system` field | `messages` array |
+| `/v1/decisions` | — | `input` (text and image parts) |
+| `/v1/systemone` | — | `state` |
 
 <Tip>
   You don't need to think about which endpoint your users call. A single
   guardrail rule works identically for all supported text endpoints.
 </Tip>
+
+`/v1/decisions` and `/v1/systemone` run the prompt phase only: their answers are
+typed values rather than completions, so response and stream phase guardrails
+are skipped there, with one warning per guardrail. Edits they cannot carry,
+such as an injected system prompt, are dropped.
 
 For `/v1/messages`, a request that runs any guardrail takes the translated
 path (the native passthrough is skipped). A response cut by a guardrail is

@@ -2,17 +2,17 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 func TestMessages_NonStreaming(t *testing.T) {
@@ -31,51 +31,34 @@ func TestMessages_NonStreaming(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
 
 	reqBody := `{"model":"claude-test","max_tokens":64,"system":"be brief","messages":[{"role":"user","content":"Hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
+	c, rec := echotest.Post(t, "/v1/messages", reqBody)
+	err := handler.Messages(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-	if err := handler.Messages(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("Messages: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
+	resp := echotest.Decode[map[string]any](t, rec)
+	assert.Equal(t, "message", resp["type"])
+	assert.Equal(t, "assistant", resp["role"], "envelope = %+v", resp)
 
-	var resp map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if resp["type"] != "message" || resp["role"] != "assistant" {
-		t.Errorf("envelope = %+v", resp)
-	}
 	content, _ := resp["content"].([]any)
-	if len(content) != 1 {
-		t.Fatalf("content = %+v", resp["content"])
-	}
+	require.Len(t, content, 1)
+
 	block, _ := content[0].(map[string]any)
-	if block["type"] != "text" || block["text"] != "Hello back" {
-		t.Errorf("content block = %+v", block)
-	}
-	if resp["stop_reason"] != "end_turn" {
-		t.Errorf("stop_reason = %v", resp["stop_reason"])
-	}
+	assert.Equal(t, "text", block["type"])
+	assert.Equal(t, "Hello back", block["text"], "content block = %+v", block)
+	assert.Equal(t, "end_turn", resp["stop_reason"])
 
 	// The Anthropic request must have been translated to the canonical chat type.
-	if provider.capturedChatReq == nil {
-		t.Fatal("provider did not receive a chat request")
-	}
-	if got := core.RequestDialectFromContext(provider.capturedChatCtx); got != core.RequestDialectAnthropicMessages {
-		t.Fatalf("request dialect = %q, want %q", got, core.RequestDialectAnthropicMessages)
-	}
+	require.NotNil(t, provider.capturedChatReq)
+	require.Equal(t, core.RequestDialectAnthropicMessages, core.RequestDialectFromContext(provider.capturedChatCtx))
+
 	msgs := provider.capturedChatReq.Messages
-	if len(msgs) != 2 || msgs[0].Role != "system" || msgs[1].Role != "user" {
-		t.Fatalf("translated messages = %+v", msgs)
-	}
+	require.Len(t, msgs, 2)
+	require.Equal(t, "system", msgs[0].Role)
+	require.Equal(t, "user", msgs[1].Role)
 }
 
 func TestMessages_Streaming(t *testing.T) {
@@ -92,20 +75,13 @@ func TestMessages_Streaming(t *testing.T) {
 		streamData:      chatSSE,
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
 
 	reqBody := `{"model":"claude-test","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"Hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	if err := handler.Messages(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("Messages: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
+	c, rec := echotest.Post(t, "/v1/messages", reqBody)
+	err := handler.Messages(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
 	body := rec.Body.String()
 	for _, want := range []string{
@@ -115,15 +91,12 @@ func TestMessages_Streaming(t *testing.T) {
 		"event: message_delta",
 		"event: message_stop",
 	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("stream missing %q\n%s", want, body)
-		}
+		assert.Contains(t, body, want)
 	}
 	// include_usage must be set so the converter sees the final usage chunk.
-	if provider.capturedChatReq == nil || provider.capturedChatReq.StreamOptions == nil ||
-		!provider.capturedChatReq.StreamOptions.IncludeUsage {
-		t.Error("translated stream request did not request usage")
-	}
+	require.NotNil(t, provider.capturedChatReq)
+	require.NotNil(t, provider.capturedChatReq.StreamOptions)
+	assert.True(t, provider.capturedChatReq.StreamOptions.IncludeUsage)
 }
 
 func TestMessages_NativeAnthropicForwarding(t *testing.T) {
@@ -138,47 +111,27 @@ func TestMessages_NativeAnthropicForwarding(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
 
 	// cache_control does not survive the translated pipeline; the native path
 	// must forward it verbatim.
 	reqBody := `{"model":"claude-test","max_tokens":64,"messages":[{"role":"user","content":[{"type":"text","text":"Hi","cache_control":{"type":"ephemeral"}}]}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("anthropic-beta", "claude-code-20250219")
-	rec := httptest.NewRecorder()
+	c, rec := echotest.Post(t, "/v1/messages", reqBody, echotest.WithHeader("anthropic-beta", "claude-code-20250219"))
+	err := handler.Messages(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, nativeResponse, rec.Body.String())
+	require.Equal(t, "anthropic", provider.lastPassthroughProvider)
 
-	if err := handler.Messages(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("Messages: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if rec.Body.String() != nativeResponse {
-		t.Errorf("body = %s, want provider-native response verbatim", rec.Body.String())
-	}
-
-	if provider.lastPassthroughProvider != "anthropic" {
-		t.Fatalf("passthrough provider = %q, want anthropic", provider.lastPassthroughProvider)
-	}
 	forwarded := provider.lastPassthroughReq
-	if forwarded == nil {
-		t.Fatal("provider did not receive a passthrough request")
-	}
-	if forwarded.Endpoint != "messages" || forwarded.Method != http.MethodPost {
-		t.Errorf("endpoint = %q method = %q", forwarded.Endpoint, forwarded.Method)
-	}
+	require.NotNil(t, forwarded)
+	assert.Equal(t, "messages", forwarded.Endpoint)
+	assert.Equal(t, http.MethodPost, forwarded.Method)
+
 	forwardedBody, err := io.ReadAll(forwarded.Body)
-	if err != nil {
-		t.Fatalf("read forwarded body: %v", err)
-	}
-	if string(forwardedBody) != reqBody {
-		t.Errorf("forwarded body = %s, want original request verbatim", forwardedBody)
-	}
-	if got := forwarded.Headers.Get("anthropic-beta"); got != "claude-code-20250219" {
-		t.Errorf("forwarded anthropic-beta = %q", got)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, reqBody, string(forwardedBody), "forwarded body = %s, want original request verbatim", forwardedBody)
+	assert.Equal(t, "claude-code-20250219", forwarded.Headers.Get("anthropic-beta"))
 }
 
 func TestMessages_NativeForwardingSurvivesUntranslatableContent(t *testing.T) {
@@ -195,30 +148,73 @@ func TestMessages_NativeForwardingSurvivesUntranslatableContent(t *testing.T) {
 			Body:       io.NopCloser(strings.NewReader(nativeResponse)),
 		},
 	}
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
 
 	reqBody := `{"model":"claude-test","max_tokens":64,"tools":[{"type":"web_search_20250305","name":"web_search"}],"messages":[{"role":"user","content":"search"},{"role":"assistant","content":[{"type":"server_tool_use","id":"srv_1","name":"web_search","input":{"query":"q"}},{"type":"web_search_tool_result","tool_use_id":"srv_1","content":[]}]},{"role":"user","content":"and?"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
+	c, rec := echotest.Post(t, "/v1/messages", reqBody)
+	err := handler.Messages(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, provider.lastPassthroughReq)
 
-	if err := handler.Messages(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("Messages: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if provider.lastPassthroughReq == nil {
-		t.Fatal("provider did not receive a passthrough request")
-	}
 	forwardedBody, err := io.ReadAll(provider.lastPassthroughReq.Body)
-	if err != nil {
-		t.Fatalf("read forwarded body: %v", err)
+	require.NoError(t, err)
+	assert.Equal(t, reqBody, string(forwardedBody), "forwarded body = %s, want original request verbatim", forwardedBody)
+}
+
+// A turn produced by another provider replays a thinking block Anthropic never
+// signed. Forwarding it verbatim would fail the request upstream, so the
+// request takes the translated pipeline, which drops the block.
+func TestMessages_UnsignedThinkingSkipsNativeForwarding(t *testing.T) {
+	provider := &mockProvider{
+		supportedModels: []string{"claude-test"},
+		providerTypes:   map[string]string{"claude-test": "anthropic"},
+		response: &core.ChatResponse{
+			ID:      "msg_1",
+			Choices: []core.Choice{{Message: core.ResponseMessage{Role: "assistant", Content: "ok"}, FinishReason: "stop"}},
+		},
 	}
-	if string(forwardedBody) != reqBody {
-		t.Errorf("forwarded body = %s, want original request verbatim", forwardedBody)
+	handler := NewHandler(provider, nil, nil, nil)
+
+	reqBody := `{"model":"claude-test","max_tokens":64,"messages":[{"role":"user","content":"hi"},` +
+		`{"role":"assistant","content":[{"type":"thinking","thinking":"foreign","signature":""},{"type":"text","text":"391"}]},` +
+		`{"role":"user","content":"and now?"}]}`
+	c, rec := echotest.Post(t, "/v1/messages", reqBody)
+	err := handler.Messages(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Nil(t, provider.lastPassthroughReq)
+	assert.Contains(t, rec.Body.String(), `"text":"ok"`)
+}
+
+// Untranslatable content wins over the unsigned-thinking detour: the
+// translated pipeline would reject the request outright, so the body is still
+// forwarded verbatim and Anthropic decides.
+func TestMessages_UnsignedThinkingKeepsNativeForwardingForUntranslatableContent(t *testing.T) {
+	nativeResponse := `{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"native"}],"model":"claude-test","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`
+	provider := &mockProvider{
+		supportedModels: []string{"claude-test"},
+		providerTypes:   map[string]string{"claude-test": "anthropic"},
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers:    map[string][]string{"Content-Type": {"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(nativeResponse)),
+		},
 	}
+	handler := NewHandler(provider, nil, nil, nil)
+
+	reqBody := `{"model":"claude-test","max_tokens":64,"tools":[{"type":"web_search_20250305","name":"web_search"}],"messages":[{"role":"user","content":"search"},` +
+		`{"role":"assistant","content":[{"type":"thinking","thinking":"foreign","signature":""},{"type":"server_tool_use","id":"srv_1","name":"web_search","input":{"query":"q"}},{"type":"web_search_tool_result","tool_use_id":"srv_1","content":[]}]},` +
+		`{"role":"user","content":"and?"}]}`
+	c, rec := echotest.Post(t, "/v1/messages", reqBody)
+	err := handler.Messages(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, provider.lastPassthroughReq)
+
+	forwardedBody, err := io.ReadAll(provider.lastPassthroughReq.Body)
+	require.NoError(t, err)
+	assert.Equal(t, reqBody, string(forwardedBody), "forwarded body = %s, want original request verbatim", forwardedBody)
 }
 
 func TestMessages_TranslatedPipelineStillRejectsUntranslatableContent(t *testing.T) {
@@ -226,26 +222,15 @@ func TestMessages_TranslatedPipelineStillRejectsUntranslatableContent(t *testing
 		supportedModels: []string{"gpt-test"},
 		providerTypes:   map[string]string{"gpt-test": "openai"},
 	}
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
 
 	reqBody := `{"model":"gpt-test","max_tokens":64,"messages":[{"role":"user","content":[{"type":"container_upload","file_id":"file_1"}]}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	if err := handler.Messages(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("Messages: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "container_upload") {
-		t.Errorf("body = %s, want the strict translation error", rec.Body.String())
-	}
-	if provider.lastPassthroughReq != nil {
-		t.Error("request must not be forwarded natively to a non-Anthropic provider")
-	}
+	c, rec := echotest.Post(t, "/v1/messages", reqBody)
+	err := handler.Messages(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "container_upload")
+	assert.Nil(t, provider.lastPassthroughReq)
 }
 
 func TestRewriteMessagesModel(t *testing.T) {
@@ -271,12 +256,8 @@ func TestRewriteMessagesModel(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := rewriteMessagesModel([]byte(tt.body), tt.model)
-			if err != nil {
-				t.Fatalf("rewriteMessagesModel: %v", err)
-			}
-			if string(got) != tt.want {
-				t.Errorf("body = %s, want %s", got, tt.want)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, string(got), "body = %s, want %s", got, tt.want)
 		})
 	}
 
@@ -286,12 +267,8 @@ func TestRewriteMessagesModel(t *testing.T) {
 		body := `{"max_tokens": 1,  "model" : "my-alias" , "temperature": 1.50}`
 		want := `{"max_tokens": 1,  "model" : "claude-test" , "temperature": 1.50}`
 		got, err := rewriteMessagesModel([]byte(body), "claude-test")
-		if err != nil {
-			t.Fatalf("rewriteMessagesModel: %v", err)
-		}
-		if string(got) != want {
-			t.Errorf("body = %s, want %s", got, want)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, want, string(got))
 	})
 
 	t.Run("duplicate model members rewrite the last one", func(t *testing.T) {
@@ -300,77 +277,49 @@ func TestRewriteMessagesModel(t *testing.T) {
 		body := `{"model":"ignored","max_tokens":1,"model":"my-alias"}`
 		want := `{"model":"ignored","max_tokens":1,"model":"claude-test"}`
 		got, err := rewriteMessagesModel([]byte(body), "claude-test")
-		if err != nil {
-			t.Fatalf("rewriteMessagesModel: %v", err)
-		}
-		if string(got) != want {
-			t.Errorf("body = %s, want %s", got, want)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, want, string(got))
 	})
 
 	t.Run("non-object body errors", func(t *testing.T) {
-		if _, err := rewriteMessagesModel([]byte(`[1,2]`), "claude-test"); err == nil {
-			t.Fatal("expected error for non-object body")
-		}
+		_, err := rewriteMessagesModel([]byte(`[1,2]`), "claude-test")
+		require.Error(t, err)
 	})
 }
 
 func TestMessages_InvalidRequestReturnsAnthropicError(t *testing.T) {
 	provider := &mockProvider{supportedModels: []string{"claude-test"}}
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
 
 	// max_tokens is required by the Anthropic dialect.
 	reqBody := `{"model":"claude-test","messages":[{"role":"user","content":"Hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
+	c, rec := echotest.Post(t, "/v1/messages", reqBody)
+	err := handler.Messages(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 
-	if err := handler.Messages(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("Messages: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
+	resp := echotest.Decode[map[string]any](t, rec)
+	require.Equal(t, "error", resp["type"], "response is not an Anthropic error envelope: %+v", resp)
 
-	var resp map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if resp["type"] != "error" {
-		t.Fatalf("response is not an Anthropic error envelope: %+v", resp)
-	}
 	errObj, _ := resp["error"].(map[string]any)
-	if errObj["type"] != "invalid_request_error" {
-		t.Errorf("error type = %v, want invalid_request_error", errObj["type"])
-	}
+	assert.Equal(t, "invalid_request_error", errObj["type"])
 }
 
 func TestCountMessageTokens(t *testing.T) {
 	provider := &mockProvider{supportedModels: []string{"claude-test"}}
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
 
 	reqBody := `{"model":"claude-test","max_tokens":64,"messages":[{"role":"user","content":"count these tokens please"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
+	c, rec := echotest.Post(t, "/v1/messages/count_tokens", reqBody)
+	err := handler.CountMessageTokens(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-	if err := handler.CountMessageTokens(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("CountMessageTokens: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
+	resp := echotest.Decode[map[string]any](t, rec)
 
-	var resp map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
 	tokens, ok := resp["input_tokens"].(float64)
-	if !ok || tokens <= 0 {
-		t.Errorf("input_tokens = %v, want > 0", resp["input_tokens"])
-	}
+	assert.True(t, ok)
+	assert.Greater(t, tokens, float64(0))
 }
 
 type tokenCountingMockProvider struct {
@@ -396,34 +345,142 @@ func TestCountMessageTokens_ProviderBacked(t *testing.T) {
 	call := func(t *testing.T, provider core.RoutableProvider) float64 {
 		t.Helper()
 		handler := NewHandler(provider, nil, nil, nil)
-		req := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", strings.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-		if err := handler.CountMessageTokens(echo.New().NewContext(req, rec)); err != nil {
-			t.Fatalf("CountMessageTokens: %v", err)
-		}
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-		}
-		var resp map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-			t.Fatalf("unmarshal: %v", err)
-		}
+		c, rec := echotest.Post(t, "/v1/messages/count_tokens", body)
+		err := handler.CountMessageTokens(c)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+		resp := echotest.Decode[map[string]any](t, rec)
+
 		return resp["input_tokens"].(float64)
 	}
 
 	exact := &tokenCountingMockProvider{mockProvider: &mockProvider{supportedModels: []string{"claude-test"}}, count: 4321}
-	if got := call(t, exact); got != 4321 || exact.calls != 1 {
-		t.Errorf("provider-backed count = %v (calls %d), want 4321 from the provider", got, exact.calls)
-	}
+	assert.Equal(t, float64(4321), call(t, exact))
+	assert.Equal(t, 1, exact.calls)
 
 	heuristic := call(t, &mockProvider{supportedModels: []string{"claude-test"}})
-	if heuristic <= 0 || heuristic == 4321 {
-		t.Errorf("heuristic count = %v, want the estimate when the provider cannot count", heuristic)
-	}
+	assert.Greater(t, heuristic, float64(0))
+	assert.NotEqual(t, float64(4321), heuristic)
 
 	failing := &tokenCountingMockProvider{mockProvider: &mockProvider{supportedModels: []string{"claude-test"}}, countErr: errors.New("upstream down")}
-	if got := call(t, failing); got != heuristic {
-		t.Errorf("count after upstream failure = %v, want the heuristic %v", got, heuristic)
+	assert.Equal(t, heuristic, call(t, failing))
+}
+
+type chatTokenCountingMockProvider struct {
+	*mockProvider
+	messagesErr   error // answer of the native Messages counter
+	messagesCalls int
+	chatCount     int
+	chatErr       error
+	chatCalls     int
+	last          *core.ChatRequest
+	lastDialect   core.RequestDialect
+}
+
+func (m *chatTokenCountingMockProvider) CountMessagesTokens(context.Context, string, []byte) (int, error) {
+	m.messagesCalls++
+	return 0, m.messagesErr
+}
+
+func (m *chatTokenCountingMockProvider) CountChatTokens(ctx context.Context, req *core.ChatRequest) (int, error) {
+	m.chatCalls++
+	m.last, m.lastDialect = req, core.RequestDialectFromContext(ctx)
+	if m.chatErr != nil {
+		return 0, m.chatErr
 	}
+	return m.chatCount, nil
+}
+
+// A provider without a native Messages counter counts the request's chat
+// translation (OpenAI); an upstream failure on either path falls back to the
+// estimate.
+func TestCountMessageTokens_ChatCounter(t *testing.T) {
+	body := `{"model":"gpt-test","messages":[{"role":"user","content":"count these tokens please"}]}`
+	call := func(t *testing.T, provider core.RoutableProvider) float64 {
+		t.Helper()
+		handler := NewHandler(provider, nil, nil, nil)
+		c, rec := echotest.Post(t, "/v1/messages/count_tokens", body)
+		require.NoError(t, handler.CountMessageTokens(c))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		return echotest.Decode[map[string]any](t, rec)["input_tokens"].(float64)
+	}
+	base := func() *mockProvider { return &mockProvider{supportedModels: []string{"gpt-test"}} }
+	estimate := call(t, base())
+
+	counted := &chatTokenCountingMockProvider{mockProvider: base(), messagesErr: core.ErrMessagesTokenCountUnsupported, chatCount: 777}
+	assert.Equal(t, float64(777), call(t, counted))
+	require.NotNil(t, counted.last)
+	assert.Contains(t, counted.last.Model, "gpt-test")
+	assert.Equal(t, core.RequestDialectAnthropicMessages, counted.lastDialect)
+
+	chatFails := &chatTokenCountingMockProvider{mockProvider: base(), messagesErr: core.ErrMessagesTokenCountUnsupported, chatErr: errors.New("upstream down")}
+	assert.Equal(t, estimate, call(t, chatFails))
+
+	nativeFails := &chatTokenCountingMockProvider{mockProvider: base(), messagesErr: errors.New("upstream down"), chatCount: 777}
+	assert.Equal(t, estimate, call(t, nativeFails))
+	assert.Zero(t, nativeFails.chatCalls, "a failed native count does not fall through to the chat counter")
+}
+
+// Under a workflow with prompt guardrails the prompt is never sent to a
+// provider for counting (guardrails do not run for a count), so the estimate
+// answers. Response- and stream-only guardrails never see the prompt, so the
+// count stays exact.
+func TestCountMessageTokens_PromptGuardrailsKeepThePromptLocal(t *testing.T) {
+	body := `{"model":"gpt-test","messages":[{"role":"user","content":"my email is jane@example.com"}]}`
+	tests := []struct {
+		name       string
+		chains     map[string]string
+		wantRemote bool
+	}{
+		{name: "prompt guardrails", chains: map[string]string{"prompt": "redact-pii"}},
+		{name: "prompt and response guardrails", chains: map[string]string{"prompt": "redact-pii", "response": "tone"}},
+		{name: "response-only guardrails", chains: map[string]string{"response": "tone"}, wantRemote: true},
+		{name: "stream-only guardrails", chains: map[string]string{"stream": "tone"}, wantRemote: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := &chatTokenCountingMockProvider{
+				mockProvider: &mockProvider{supportedModels: []string{"gpt-test"}},
+				messagesErr:  core.ErrMessagesTokenCountUnsupported,
+				chatCount:    777,
+			}
+			handler := NewHandler(provider, nil, nil, nil)
+			c, rec := echotest.Post(t, "/v1/messages/count_tokens", body)
+			workflow := &core.Workflow{Policy: &core.ResolvedWorkflowPolicy{
+				VersionID: "v1", Features: core.DefaultWorkflowFeatures(), GuardrailsHash: "any", ChainHashes: tt.chains,
+			}}
+			c.SetRequest(c.Request().WithContext(core.WithWorkflow(c.Request().Context(), workflow)))
+
+			require.NoError(t, handler.CountMessageTokens(c))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			count := echotest.Decode[map[string]any](t, rec)["input_tokens"].(float64)
+			if tt.wantRemote {
+				assert.Equal(t, float64(777), count)
+				return
+			}
+			assert.NotEqual(t, float64(777), count)
+			assert.Zero(t, provider.messagesCalls, "the prompt must not reach the native Messages counter")
+			assert.Zero(t, provider.chatCalls, "the prompt must not reach the chat counter")
+		})
+	}
+}
+
+// Counting sends the prompt to the model's provider, so a caller that may not
+// use the model is denied as an inference request would be, before either
+// counter runs, instead of getting an estimate.
+func TestCountMessageTokens_DeniedModel(t *testing.T) {
+	provider := &chatTokenCountingMockProvider{
+		mockProvider: &mockProvider{supportedModels: []string{"gpt-test"}},
+		messagesErr:  core.ErrMessagesTokenCountUnsupported,
+		chatCount:    777,
+	}
+	handler := NewHandler(provider, nil, nil, nil)
+	handler.modelAuthorizer = &recordingModelAuthorizer{err: core.NewPermissionError("model is not allowed for this key")}
+
+	c, rec := echotest.Post(t, "/v1/messages/count_tokens", `{"model":"gpt-test","messages":[{"role":"user","content":"hi"}]}`)
+	require.NoError(t, handler.CountMessageTokens(c))
+	assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+	assert.Zero(t, provider.messagesCalls)
+	assert.Zero(t, provider.chatCalls)
 }

@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -20,34 +22,17 @@ import (
 func TestLiveCursorRejectsInvalidValue(t *testing.T) {
 	broker := live.NewBroker(live.Config{Enabled: true})
 	h := NewHandler(nil, nil, WithLiveBroker(broker))
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/live/logs?cursor=bad", nil)
-	rec := httptest.NewRecorder()
-
-	if err := h.LiveLogs(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("LiveLogs returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
-	}
-	if !strings.Contains(rec.Body.String(), "invalid cursor") {
-		t.Fatalf("response body = %q, want invalid cursor error", rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/admin/live/logs?cursor=bad")
+	require.NoError(t, h.LiveLogs(c))
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "invalid cursor")
 }
 
 func TestLiveTypeFilterProvidedInvalidTokensMatchNothing(t *testing.T) {
-	if !liveTypeFilter("").matches(live.EventAuditStarted) {
-		t.Fatal("empty types filter should match audit events")
-	}
-	if !liveTypeFilter("audit").matches(live.EventAuditStarted) {
-		t.Fatal("audit types filter should match audit events")
-	}
-	if liveTypeFilter("usage").matches(live.EventAuditStarted) {
-		t.Fatal("usage types filter matched audit event")
-	}
-	if liveTypeFilter("foo").matches(live.EventAuditStarted) {
-		t.Fatal("invalid provided types filter matched audit event")
-	}
+	require.True(t, liveTypeFilter("").matches(live.EventAuditStarted))
+	require.True(t, liveTypeFilter("audit").matches(live.EventAuditStarted))
+	require.False(t, liveTypeFilter("usage").matches(live.EventAuditStarted))
+	require.False(t, liveTypeFilter("foo").matches(live.EventAuditStarted))
 }
 
 func TestLiveLogsAppliesTypeFilterToReplayEvents(t *testing.T) {
@@ -64,17 +49,12 @@ func TestLiveLogsAppliesTypeFilterToReplayEvents(t *testing.T) {
 	})
 
 	body := runLiveLogsWithCanceledContext(t, broker, "/admin/live/logs?types=usage")
-	if strings.Contains(body, "event: audit.started") {
-		t.Fatalf("body contains filtered audit event: %s", body)
-	}
-	if !strings.Contains(body, "event: usage.completed") {
-		t.Fatalf("body = %q, want usage replay event", body)
-	}
+	require.NotContains(t, body, "event: audit.started")
+	require.Contains(t, body, "event: usage.completed")
 
 	body = runLiveLogsWithCanceledContext(t, broker, "/admin/live/logs?types=foo")
-	if strings.Contains(body, "event: audit.") || strings.Contains(body, "event: usage.") {
-		t.Fatalf("invalid types filter should match no replay events, got: %s", body)
-	}
+	require.NotContains(t, body, "event: audit.")
+	require.NotContains(t, body, "event: usage.")
 }
 
 func TestLiveLogsWritesResetAndReplayEvents(t *testing.T) {
@@ -99,15 +79,9 @@ func TestLiveLogsWritesResetAndReplayEvents(t *testing.T) {
 	})
 
 	body := runLiveLogsWithCanceledContext(t, broker, "/admin/live/logs?cursor=1")
-	if !strings.Contains(body, "event: reset") {
-		t.Fatalf("body = %q, want reset event", body)
-	}
-	if !strings.Contains(body, "event: audit.updated") {
-		t.Fatalf("body = %q, want replayed audit event", body)
-	}
-	if !strings.Contains(body, `"provider":"openai"`) {
-		t.Fatalf("body = %q, want latest replay payload", body)
-	}
+	require.Contains(t, body, "event: reset")
+	require.Contains(t, body, "event: audit.updated")
+	require.Contains(t, body, `"provider":"openai"`)
 }
 
 func TestLiveLogsForwardsEventsAndHeartbeats(t *testing.T) {
@@ -143,9 +117,7 @@ func TestLiveLogsForwardsEventsAndHeartbeats(t *testing.T) {
 	broker.Close()
 	select {
 	case err := <-errCh:
-		if err != nil {
-			t.Fatalf("LiveLogs returned error: %v", err)
-		}
+		require.NoError(t, err)
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for LiveLogs to exit")
 	}
@@ -185,11 +157,10 @@ func TestLiveLogsWritesImmediateHeartbeat(t *testing.T) {
 			}
 
 			body := runLiveLogsWithCanceledContext(t, broker, "/admin/live/logs?types=audit,usage")
-			if !strings.Contains(body, tc.want) {
-				t.Fatalf("body = %q, want immediate %q", body, tc.want)
-			}
-			if tc.wantAbsent != "" && strings.Contains(body, tc.wantAbsent) {
-				t.Fatalf("body = %q, want no %q", body, tc.wantAbsent)
+			require.Contains(t, body, tc.want)
+
+			if tc.wantAbsent != "" {
+				require.NotContains(t, body, tc.wantAbsent)
 			}
 		})
 	}
@@ -198,18 +169,12 @@ func TestLiveLogsWritesImmediateHeartbeat(t *testing.T) {
 func runLiveLogsWithCanceledContext(t *testing.T, broker *live.Broker, target string) string {
 	t.Helper()
 	h := NewHandler(nil, nil, WithLiveBroker(broker))
-	e := echo.New()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	req := httptest.NewRequest(http.MethodGet, target, nil).WithContext(ctx)
-	rec := httptest.NewRecorder()
-
-	if err := h.LiveLogs(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("LiveLogs returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
-	}
+	c, rec := echotest.Get(t, target)
+	c.SetRequest(c.Request().WithContext(ctx))
+	require.NoError(t, h.LiveLogs(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	return rec.Body.String()
 }
 

@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -11,8 +10,11 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/workflows"
@@ -148,6 +150,20 @@ func workflowTestWorkflowHash(payload workflows.Payload) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
+// globalWorkflow is the active global version every workflow store starts
+// with; the scoped tests build on top of it.
+func globalWorkflow(features workflows.FeatureFlags) workflows.Version {
+	return workflows.Version{
+		ID:           "global-workflow",
+		ScopeKey:     "global",
+		Version:      1,
+		Active:       true,
+		Name:         "global",
+		Payload:      workflows.Payload{SchemaVersion: 1, Features: features},
+		WorkflowHash: "hash-global",
+	}
+}
+
 func newWorkflowRegistry(t *testing.T) *guardrails.Service {
 	t.Helper()
 	return newGuardrailService(t, guardrails.Definition{
@@ -169,20 +185,10 @@ func newWorkflowModelRegistry(t *testing.T) *providers.ModelRegistry {
 			},
 		},
 	}, "openai")
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize() error = %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
+
 	return registry
-}
-
-func decodeWorkflowErrorEnvelope(t *testing.T, body []byte) workflowErrorEnvelope {
-	t.Helper()
-
-	var envelope workflowErrorEnvelope
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	return envelope
 }
 
 func newWorkflowHandler(t *testing.T, store workflows.Store, registry *guardrails.Service) *Handler {
@@ -193,162 +199,67 @@ func newWorkflowHandlerWithModelRegistry(t *testing.T, store workflows.Store, mo
 	t.Helper()
 
 	service, err := workflows.NewService(store, workflows.NewCompilerWithFeatureCaps(guardrailRegistry, core.DefaultWorkflowFeatures()))
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	return NewHandler(nil, modelRegistry, WithWorkflows(service), WithGuardrailsRegistry(guardrailRegistry))
 }
 
 func TestListWorkflows(t *testing.T) {
 	failoverDisabled := false
-	store := &workflowTestStore{
-		versions: []workflows.Version{
-			{
-				ID:       "global-workflow",
-				Scope:    workflows.Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: workflows.Payload{
-					SchemaVersion: 1,
-					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false, Failover: &failoverDisabled},
-				},
-				WorkflowHash: "hash-global",
-			},
-		},
-	}
+	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Failover: &failoverDisabled})}}
 
 	h := newWorkflowHandler(t, store, nil)
-	c, rec := newHandlerContext("/admin/workflows")
+	c, rec := echotest.Get(t, "/admin/workflows")
+	err := h.ListWorkflows(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.ListWorkflows(c); err != nil {
-		t.Fatalf("ListWorkflows() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-
-	var body []workflows.View
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if len(body) != 1 {
-		t.Fatalf("len(body) = %d, want 1", len(body))
-	}
-	if body[0].ScopeType != "global" {
-		t.Fatalf("scope type = %q, want global", body[0].ScopeType)
-	}
-	if body[0].ScopeDisplay != "global" {
-		t.Fatalf("scope display = %q, want global", body[0].ScopeDisplay)
-	}
-	if body[0].Payload.Features.Failover == nil || *body[0].Payload.Features.Failover {
-		t.Fatalf("payload failover = %v, want explicit false", body[0].Payload.Features.Failover)
-	}
-	if !body[0].EffectiveFeatures.Cache || !body[0].EffectiveFeatures.Audit || !body[0].EffectiveFeatures.Usage {
-		t.Fatalf("effective features = %+v, want cache/audit/usage enabled", body[0].EffectiveFeatures)
-	}
-	if body[0].EffectiveFeatures.Failover {
-		t.Fatalf("effective features = %+v, want failover disabled", body[0].EffectiveFeatures)
-	}
+	body := echotest.Decode[[]workflows.View](t, rec)
+	require.Len(t, body, 1)
+	assert.Equal(t, "global", body[0].ScopeType)
+	assert.Equal(t, "global", body[0].ScopeDisplay)
+	require.NotNil(t, body[0].Payload.Features.Failover, "payload failover must stay explicit")
+	assert.False(t, *body[0].Payload.Features.Failover)
+	assert.True(t, body[0].EffectiveFeatures.Cache)
+	assert.True(t, body[0].EffectiveFeatures.Audit)
+	assert.True(t, body[0].EffectiveFeatures.Usage)
+	assert.False(t, body[0].EffectiveFeatures.Failover)
 }
 
 func TestWorkflowsEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 	h := NewHandler(nil, nil)
-	e := echo.New()
+	withID := echotest.WithPathValue("id", "test-workflow")
 
-	listCtx, listRec := newHandlerContext("/admin/workflows")
-	if err := h.ListWorkflows(listCtx); err != nil {
-		t.Fatalf("ListWorkflows() error = %v", err)
+	tests := []struct {
+		name string
+		run  func() (*echo.Context, *httptest.ResponseRecorder)
+		call func(*echo.Context) error
+	}{
+		{"ListWorkflows", func() (*echo.Context, *httptest.ResponseRecorder) { return echotest.Get(t, "/admin/workflows") }, h.ListWorkflows},
+		{"CreateWorkflow", func() (*echo.Context, *httptest.ResponseRecorder) { return echotest.Post(t, "/admin/workflows", `{}`) }, h.CreateWorkflow},
+		{"DeactivateWorkflow", func() (*echo.Context, *httptest.ResponseRecorder) {
+			return echotest.Post(t, "/admin/workflows/test-workflow/deactivate", nil, withID)
+		}, h.DeactivateWorkflow},
+		{"GetWorkflow", func() (*echo.Context, *httptest.ResponseRecorder) {
+			return echotest.Get(t, "/admin/workflows/test-workflow", withID)
+		}, h.GetWorkflow},
 	}
-	if listRec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("list status = %d, want 503", listRec.Code)
-	}
-	listEnvelope := decodeWorkflowErrorEnvelope(t, listRec.Body.Bytes())
-	if listEnvelope.Error.Type != "invalid_request_error" {
-		t.Fatalf("list error type = %q, want invalid_request_error", listEnvelope.Error.Type)
-	}
-	if listEnvelope.Error.Message != "workflows feature is unavailable" {
-		t.Fatalf("list error message = %q, want workflows feature is unavailable", listEnvelope.Error.Message)
-	}
-	if listEnvelope.Error.Param != nil {
-		t.Fatalf("list error param = %v, want nil", *listEnvelope.Error.Param)
-	}
-	if listEnvelope.Error.Code == nil || *listEnvelope.Error.Code != "feature_unavailable" {
-		t.Fatalf("list error code = %v, want feature_unavailable", listEnvelope.Error.Code)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, rec := tt.run()
+			err := tt.call(c)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/workflows", bytes.NewBufferString(`{}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	if err := h.CreateWorkflow(c); err != nil {
-		t.Fatalf("CreateWorkflow() error = %v", err)
-	}
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("create status = %d, want 503", rec.Code)
-	}
-	createEnvelope := decodeWorkflowErrorEnvelope(t, rec.Body.Bytes())
-	if createEnvelope.Error.Type != "invalid_request_error" {
-		t.Fatalf("create error type = %q, want invalid_request_error", createEnvelope.Error.Type)
-	}
-	if createEnvelope.Error.Message != "workflows feature is unavailable" {
-		t.Fatalf("create error message = %q, want workflows feature is unavailable", createEnvelope.Error.Message)
-	}
-	if createEnvelope.Error.Param != nil {
-		t.Fatalf("create error param = %v, want nil", *createEnvelope.Error.Param)
-	}
-	if createEnvelope.Error.Code == nil || *createEnvelope.Error.Code != "feature_unavailable" {
-		t.Fatalf("create error code = %v, want feature_unavailable", createEnvelope.Error.Code)
-	}
-
-	req = httptest.NewRequest(http.MethodPost, "/admin/workflows/test-workflow/deactivate", nil)
-	rec = httptest.NewRecorder()
-	c = e.NewContext(req, rec)
-	c.SetPath("/admin/workflows/:id/deactivate")
-	c.SetPathValues(echo.PathValues{{Name: "id", Value: "test-workflow"}})
-	if err := h.DeactivateWorkflow(c); err != nil {
-		t.Fatalf("DeactivateWorkflow() error = %v", err)
-	}
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("deactivate status = %d, want 503", rec.Code)
-	}
-	deactivateEnvelope := decodeWorkflowErrorEnvelope(t, rec.Body.Bytes())
-	if deactivateEnvelope.Error.Type != "invalid_request_error" {
-		t.Fatalf("deactivate error type = %q, want invalid_request_error", deactivateEnvelope.Error.Type)
-	}
-	if deactivateEnvelope.Error.Message != "workflows feature is unavailable" {
-		t.Fatalf("deactivate error message = %q, want workflows feature is unavailable", deactivateEnvelope.Error.Message)
-	}
-	if deactivateEnvelope.Error.Param != nil {
-		t.Fatalf("deactivate error param = %v, want nil", *deactivateEnvelope.Error.Param)
-	}
-	if deactivateEnvelope.Error.Code == nil || *deactivateEnvelope.Error.Code != "feature_unavailable" {
-		t.Fatalf("deactivate error code = %v, want feature_unavailable", deactivateEnvelope.Error.Code)
-	}
-
-	getCtx, getRec := newHandlerContext("/admin/workflows/test-workflow")
-	getCtx.SetPath("/admin/workflows/:id")
-	getCtx.SetPathValues(echo.PathValues{{Name: "id", Value: "test-workflow"}})
-	if err := h.GetWorkflow(getCtx); err != nil {
-		t.Fatalf("GetWorkflow() error = %v", err)
-	}
-	if getRec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("get status = %d, want 503", getRec.Code)
-	}
-	getEnvelope := decodeWorkflowErrorEnvelope(t, getRec.Body.Bytes())
-	if getEnvelope.Error.Type != "invalid_request_error" {
-		t.Fatalf("get error type = %q, want invalid_request_error", getEnvelope.Error.Type)
-	}
-	if getEnvelope.Error.Message != "workflows feature is unavailable" {
-		t.Fatalf("get error message = %q, want workflows feature is unavailable", getEnvelope.Error.Message)
-	}
-	if getEnvelope.Error.Code == nil || *getEnvelope.Error.Code != "feature_unavailable" {
-		t.Fatalf("get error code = %v, want feature_unavailable", getEnvelope.Error.Code)
+			envelope := echotest.Decode[workflowErrorEnvelope](t, rec)
+			assert.Equal(t, "invalid_request_error", envelope.Error.Type)
+			assert.Equal(t, "workflows feature is unavailable", envelope.Error.Message)
+			assert.Nil(t, envelope.Error.Param)
+			require.NotNil(t, envelope.Error.Code)
+			assert.Equal(t, "feature_unavailable", *envelope.Error.Code)
+		})
 	}
 }
 
@@ -356,23 +267,7 @@ func TestGetWorkflow(t *testing.T) {
 	failoverEnabled := true
 	store := &workflowTestStore{
 		versions: []workflows.Version{
-			{
-				ID:       "global-workflow",
-				Scope:    workflows.Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: workflows.Payload{
-					SchemaVersion: 1,
-					Features: workflows.FeatureFlags{
-						Cache: true,
-						Audit: true,
-						Usage: true,
-					},
-				},
-				WorkflowHash: "hash-global",
-			},
+			globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true}),
 			{
 				ID:          "provider-workflow-v1",
 				Scope:       workflows.Scope{Provider: "openai", Model: "gpt-5"},
@@ -401,83 +296,40 @@ func TestGetWorkflow(t *testing.T) {
 
 	registry := newWorkflowRegistry(t)
 	h := newWorkflowHandler(t, store, registry)
-	c, rec := newHandlerContext("/admin/workflows/provider-workflow-v1")
-	c.SetPath("/admin/workflows/:id")
-	c.SetPathValues(echo.PathValues{{Name: "id", Value: "provider-workflow-v1"}})
+	c, rec := echotest.Get(t, "/admin/workflows/provider-workflow-v1", echotest.WithPathValue("id", "provider-workflow-v1"))
+	err := h.GetWorkflow(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.GetWorkflow(c); err != nil {
-		t.Fatalf("GetWorkflow() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
+	rawBody := echotest.Decode[map[string]json.RawMessage](t, rec)
 
-	var rawBody map[string]json.RawMessage
-	if err := json.Unmarshal(rec.Body.Bytes(), &rawBody); err != nil {
-		t.Fatalf("unmarshal raw response: %v", err)
-	}
 	var effectiveFeatures map[string]bool
-	if err := json.Unmarshal(rawBody["effective_features"], &effectiveFeatures); err != nil {
-		t.Fatalf("unmarshal effective_features: %v", err)
-	}
-	for _, key := range []string{"cache", "audit", "usage", "guardrails", "failover"} {
-		if _, ok := effectiveFeatures[key]; !ok {
-			t.Fatalf("effective_features missing lower-case key %q: %s", key, rec.Body.String())
-		}
-	}
-	if !effectiveFeatures["failover"] {
-		t.Fatalf("effective_features failover = false, want true (renamed field must round-trip): %s", rec.Body.String())
-	}
-	if _, ok := effectiveFeatures["Cache"]; ok {
-		t.Fatalf("effective_features leaked Go field key %q: %s", "Cache", rec.Body.String())
-	}
+	err = json.Unmarshal(rawBody["effective_features"], &effectiveFeatures)
+	require.NoError(t, err)
 
-	var body workflows.View
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
+	for _, key := range []string{"cache", "audit", "usage", "guardrails", "failover"} {
+		assert.Contains(t, effectiveFeatures, key, "effective_features must use lower-case keys")
 	}
-	if body.ID != "provider-workflow-v1" {
-		t.Fatalf("id = %q, want provider-workflow-v1", body.ID)
-	}
-	if body.Active {
-		t.Fatal("Active = true, want false")
-	}
-	if body.ScopeType != "provider_model" {
-		t.Fatalf("scope type = %q, want provider_model", body.ScopeType)
-	}
-	if body.ScopeDisplay != "openai/gpt-5" {
-		t.Fatalf("scope display = %q, want openai/gpt-5", body.ScopeDisplay)
-	}
-	if !body.Payload.Features.Usage || !body.Payload.Features.Audit || !body.Payload.Features.Guardrails {
-		t.Fatalf("payload features = %+v, want usage/audit/guardrails enabled", body.Payload.Features)
-	}
-	if body.Payload.Features.Failover == nil || !*body.Payload.Features.Failover {
-		t.Fatalf("payload failover = %v, want true (renamed field must round-trip)", body.Payload.Features.Failover)
-	}
+	assert.True(t, effectiveFeatures["failover"], "renamed field must round-trip")
+	assert.NotContains(t, effectiveFeatures, "Cache", "effective_features leaked a Go field key")
+
+	body := echotest.Decode[workflows.View](t, rec)
+	assert.Equal(t, "provider-workflow-v1", body.ID)
+	assert.False(t, body.Active)
+	assert.Equal(t, "provider_model", body.ScopeType)
+	assert.Equal(t, "openai/gpt-5", body.ScopeDisplay)
+	assert.True(t, body.Payload.Features.Usage)
+	assert.True(t, body.Payload.Features.Audit)
+	assert.True(t, body.Payload.Features.Guardrails)
+	require.NotNil(t, body.Payload.Features.Failover)
+	assert.True(t, *body.Payload.Features.Failover)
 }
 
 func TestCreateWorkflow_NormalizesScopeUserPath(t *testing.T) {
-	store := &workflowTestStore{
-		versions: []workflows.Version{
-			{
-				ID:       "global-workflow",
-				Scope:    workflows.Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: workflows.Payload{
-					SchemaVersion: 1,
-					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true},
-				},
-				WorkflowHash: "hash-global",
-			},
-		},
-	}
+	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
 	h := newWorkflowHandler(t, store, nil)
-	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/workflows", bytes.NewBufferString(`{
+	c, rec := echotest.Request(t, http.MethodPost, "/admin/workflows", `{
 		"scope_provider_name":"openai",
 		"scope_model":"gpt-5",
 		"scope_user_path":" team//alpha/user/ ",
@@ -486,86 +338,50 @@ func TestCreateWorkflow_NormalizesScopeUserPath(t *testing.T) {
 			"schema_version":1,
 			"features":{"cache":true,"audit":true,"usage":true,"guardrails":false}
 		}
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	}`)
+	err := h.CreateWorkflow(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, rec.Code)
 
-	if err := h.CreateWorkflow(c); err != nil {
-		t.Fatalf("CreateWorkflow() error = %v", err)
-	}
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201", rec.Code)
-	}
-
-	var version workflows.Version
-	if err := json.Unmarshal(rec.Body.Bytes(), &version); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if got := version.Scope.UserPath; got != "/team/alpha/user" {
-		t.Fatalf("Scope.UserPath = %q, want /team/alpha/user", got)
-	}
+	version := echotest.Decode[workflows.Version](t, rec)
+	assert.Equal(t, "/team/alpha/user", version.Scope.UserPath)
 }
 
 func TestListWorkflowGuardrails(t *testing.T) {
 	registry := newWorkflowRegistry(t)
 	h := NewHandler(nil, nil, WithGuardrailsRegistry(registry))
-	c, rec := newHandlerContext("/admin/workflows/guardrails")
+	c, rec := echotest.Get(t, "/admin/workflows/guardrails")
+	err := h.ListWorkflowGuardrails(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.ListWorkflowGuardrails(c); err != nil {
-		t.Fatalf("ListWorkflowGuardrails() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-
-	var body []workflowGuardrailItem
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if len(body) != 1 || body[0].Name != "policy-system" || len(body[0].Phases) != 1 || body[0].Phases[0] != "prompt" || body[0].Mutates {
-		t.Fatalf("body = %#v, want [policy-system] with prompt phase and no mutates flag", body)
-	}
+	body := echotest.Decode[[]workflowGuardrailItem](t, rec)
+	require.Len(t, body, 1)
+	assert.Equal(t, "policy-system", body[0].Name)
+	assert.Equal(t, []string{"prompt"}, body[0].Phases)
+	assert.False(t, body[0].Mutates)
 
 	// The full service reports type, phases, summary and the mutates flag
 	// per instance (system_prompt edits the prompt).
 	h = NewHandler(nil, nil, WithGuardrailService(registry))
-	c, rec = newHandlerContext("/admin/workflows/guardrails")
-	if err := h.ListWorkflowGuardrails(c); err != nil {
-		t.Fatalf("ListWorkflowGuardrails() error = %v", err)
-	}
-	body = nil
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if len(body) != 1 || body[0].Type != "system_prompt" || body[0].Summary == "" || body[0].Phases[0] != "prompt" || !body[0].Mutates {
-		t.Fatalf("body = %#v, want typed mutating item with summary", body)
-	}
+	c, rec = echotest.Get(t, "/admin/workflows/guardrails")
+	err = h.ListWorkflowGuardrails(c)
+	require.NoError(t, err)
+
+	body = echotest.Decode[[]workflowGuardrailItem](t, rec)
+	require.Len(t, body, 1)
+	assert.Equal(t, "system_prompt", body[0].Type)
+	assert.NotEmpty(t, body[0].Summary)
+	assert.Equal(t, []string{"prompt"}, body[0].Phases)
+	assert.True(t, body[0].Mutates)
 }
 
 func TestCreateWorkflow(t *testing.T) {
-	store := &workflowTestStore{
-		versions: []workflows.Version{
-			{
-				ID:       "global-workflow",
-				Scope:    workflows.Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: workflows.Payload{
-					SchemaVersion: 1,
-					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-				},
-				WorkflowHash: "hash-global",
-			},
-		},
-	}
+	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
 
 	h := newWorkflowHandler(t, store, nil)
-	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/workflows", bytes.NewBufferString(`{
+	c, rec := echotest.Request(t, http.MethodPost, "/admin/workflows", `{
 		"scope_provider":"openai",
 		"scope_model":"gpt-5",
 		"name":"openai gpt-5",
@@ -575,39 +391,21 @@ func TestCreateWorkflow(t *testing.T) {
 			"features":{"cache":false,"audit":true,"usage":true,"guardrails":false,"failover":false},
 			"guardrails":[]
 		}
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	}`)
+	err := h.CreateWorkflow(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, rec.Code)
 
-	if err := h.CreateWorkflow(c); err != nil {
-		t.Fatalf("CreateWorkflow() error = %v", err)
-	}
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201", rec.Code)
-	}
-
-	var body workflows.Version
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if body.Scope.Provider != "openai" || body.Scope.Model != "gpt-5" {
-		t.Fatalf("scope = %#v, want openai/gpt-5", body.Scope)
-	}
-	if body.Name != "openai gpt-5" {
-		t.Fatalf("name = %q, want openai gpt-5", body.Name)
-	}
-	if body.Payload.Features.Failover == nil || *body.Payload.Features.Failover {
-		t.Fatalf("payload failover = %v, want explicit false", body.Payload.Features.Failover)
-	}
+	body := echotest.Decode[workflows.Version](t, rec)
+	assert.Equal(t, "openai", body.Scope.Provider)
+	assert.Equal(t, "gpt-5", body.Scope.Model)
+	assert.Equal(t, "openai gpt-5", body.Name)
+	require.NotNil(t, body.Payload.Features.Failover, "payload failover must stay explicit")
+	assert.False(t, *body.Payload.Features.Failover)
 
 	views, err := h.workflows.ListViews(context.Background())
-	if err != nil {
-		t.Fatalf("ListViews() error = %v", err)
-	}
-	if len(views) != 2 {
-		t.Fatalf("len(views) = %d, want 2", len(views))
-	}
+	require.NoError(t, err)
+	assert.Len(t, views, 2)
 }
 
 func TestCreateWorkflow_StoresCanonicalScopeModel(t *testing.T) {
@@ -651,71 +449,24 @@ func TestCreateWorkflow_StoresCanonicalScopeModel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := &workflowTestStore{
-				versions: []workflows.Version{
-					{
-						ID:       "global-workflow",
-						Scope:    workflows.Scope{},
-						ScopeKey: "global",
-						Version:  1,
-						Active:   true,
-						Name:     "global",
-						Payload: workflows.Payload{
-							SchemaVersion: 1,
-							Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-						},
-						WorkflowHash: "hash-global",
-					},
-				},
-			}
+			store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
 
 			h := newWorkflowHandler(t, store, nil)
-			e := echo.New()
 
-			req := httptest.NewRequest(http.MethodPost, "/admin/workflows", bytes.NewBufferString(tt.body))
-			req.Header.Set("Content-Type", "application/json")
-			rec := httptest.NewRecorder()
-			c := e.NewContext(req, rec)
+			c, rec := echotest.Request(t, http.MethodPost, "/admin/workflows", tt.body)
+			err := h.CreateWorkflow(c)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusCreated, rec.Code)
 
-			if err := h.CreateWorkflow(c); err != nil {
-				t.Fatalf("CreateWorkflow() error = %v", err)
-			}
-			if rec.Code != http.StatusCreated {
-				t.Fatalf("status = %d, want 201", rec.Code)
-			}
-
-			var body workflows.Version
-			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-				t.Fatalf("unmarshal response: %v", err)
-			}
-			if body.Scope.Model != tt.wantModel {
-				t.Fatalf("Scope.Model = %q, want %q", body.Scope.Model, tt.wantModel)
-			}
-			if body.ScopeKey != tt.wantScopeKey {
-				t.Fatalf("ScopeKey = %q, want %q", body.ScopeKey, tt.wantScopeKey)
-			}
+			body := echotest.Decode[workflows.Version](t, rec)
+			assert.Equal(t, tt.wantModel, body.Scope.Model)
+			assert.Equal(t, tt.wantScopeKey, body.ScopeKey)
 		})
 	}
 }
 
 func TestCreateWorkflow_LegacyProviderTypeResolvesToConfiguredProviderName(t *testing.T) {
-	store := &workflowTestStore{
-		versions: []workflows.Version{
-			{
-				ID:       "global-workflow",
-				Scope:    workflows.Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: workflows.Payload{
-					SchemaVersion: 1,
-					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-				},
-				WorkflowHash: "hash-global",
-			},
-		},
-	}
+	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
 
 	modelRegistry := providers.NewModelRegistry()
 	modelRegistry.RegisterProviderWithNameAndType(&handlerMockProvider{
@@ -726,14 +477,12 @@ func TestCreateWorkflow_LegacyProviderTypeResolvesToConfiguredProviderName(t *te
 			},
 		},
 	}, "primary-openai", "openai")
-	if err := modelRegistry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize() error = %v", err)
-	}
+	err := modelRegistry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	h := newWorkflowHandlerWithModelRegistry(t, store, modelRegistry, nil)
-	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/workflows", bytes.NewBufferString(`{
+	c, rec := echotest.Request(t, http.MethodPost, "/admin/workflows", `{
 		"scope_provider":"openai",
 		"scope_model":"gpt-5",
 		"name":"legacy provider type scope",
@@ -742,50 +491,22 @@ func TestCreateWorkflow_LegacyProviderTypeResolvesToConfiguredProviderName(t *te
 			"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},
 			"guardrails":[]
 		}
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	}`)
+	err = h.CreateWorkflow(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, rec.Code)
 
-	if err := h.CreateWorkflow(c); err != nil {
-		t.Fatalf("CreateWorkflow() error = %v", err)
-	}
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201", rec.Code)
-	}
-
-	var body workflows.Version
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if body.Scope.Provider != "primary-openai" || body.Scope.Model != "gpt-5" {
-		t.Fatalf("scope = %#v, want primary-openai/gpt-5", body.Scope)
-	}
+	body := echotest.Decode[workflows.Version](t, rec)
+	assert.Equal(t, "primary-openai", body.Scope.Provider)
+	assert.Equal(t, "gpt-5", body.Scope.Model)
 }
 
 func TestCreateWorkflow_AllowsEmptyName(t *testing.T) {
-	store := &workflowTestStore{
-		versions: []workflows.Version{
-			{
-				ID:       "global-workflow",
-				Scope:    workflows.Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "",
-				Payload: workflows.Payload{
-					SchemaVersion: 1,
-					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-				},
-				WorkflowHash: "hash-global",
-			},
-		},
-	}
+	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
 
 	h := newWorkflowHandler(t, store, nil)
-	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/workflows", bytes.NewBufferString(`{
+	c, rec := echotest.Request(t, http.MethodPost, "/admin/workflows", `{
 		"scope_provider":"openai",
 		"scope_model":"gpt-5",
 		"description":"provider-model workflow",
@@ -794,106 +515,45 @@ func TestCreateWorkflow_AllowsEmptyName(t *testing.T) {
 			"features":{"cache":false,"audit":true,"usage":true,"guardrails":false},
 			"guardrails":[]
 		}
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	}`)
+	err := h.CreateWorkflow(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, rec.Code)
 
-	if err := h.CreateWorkflow(c); err != nil {
-		t.Fatalf("CreateWorkflow() error = %v", err)
-	}
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201", rec.Code)
-	}
-
-	var body workflows.Version
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if body.Name != "" {
-		t.Fatalf("name = %q, want empty", body.Name)
-	}
+	body := echotest.Decode[workflows.Version](t, rec)
+	assert.Empty(t, body.Name)
 }
 
 func TestCreateWorkflowRejectsUnknownGuardrail(t *testing.T) {
-	store := &workflowTestStore{
-		versions: []workflows.Version{
-			{
-				ID:       "global-workflow",
-				Scope:    workflows.Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: workflows.Payload{
-					SchemaVersion: 1,
-					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-				},
-				WorkflowHash: "hash-global",
-			},
-		},
-	}
+	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
 	registry := newWorkflowRegistry(t)
 	h := newWorkflowHandler(t, store, registry)
-	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/workflows", bytes.NewBufferString(`{
+	c, rec := echotest.Request(t, http.MethodPost, "/admin/workflows", `{
 		"name":"guardrail workflow",
 		"workflow_payload":{
 			"schema_version":1,
 			"features":{"cache":true,"audit":true,"usage":true,"guardrails":true},
 			"guardrails":[{"ref":"missing-guardrail","step":10}]
 		}
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	}`)
+	err := h.CreateWorkflow(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 
-	if err := h.CreateWorkflow(c); err != nil {
-		t.Fatalf("CreateWorkflow() error = %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-
-	body := decodeWorkflowErrorEnvelope(t, rec.Body.Bytes())
-	if body.Error.Type != "invalid_request_error" {
-		t.Fatalf("error type = %q, want invalid_request_error", body.Error.Type)
-	}
-	if body.Error.Message != "unknown guardrail ref: missing-guardrail" {
-		t.Fatalf("error message = %q, want unknown guardrail ref", body.Error.Message)
-	}
-	if body.Error.Param != nil {
-		t.Fatalf("error param = %v, want nil", *body.Error.Param)
-	}
-	if body.Error.Code != nil {
-		t.Fatalf("error code = %v, want nil", *body.Error.Code)
-	}
+	body := echotest.Decode[workflowErrorEnvelope](t, rec)
+	assert.Equal(t, "invalid_request_error", body.Error.Type)
+	assert.Equal(t, "unknown guardrail ref: missing-guardrail", body.Error.Message)
+	assert.Nil(t, body.Error.Param)
+	assert.Nil(t, body.Error.Code)
 }
 
 func TestCreateWorkflowReturnsValidationErrors(t *testing.T) {
-	store := &workflowTestStore{
-		versions: []workflows.Version{
-			{
-				ID:       "global-workflow",
-				Scope:    workflows.Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: workflows.Payload{
-					SchemaVersion: 1,
-					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-				},
-				WorkflowHash: "hash-global",
-			},
-		},
-	}
+	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
 
 	h := newWorkflowHandler(t, store, nil)
-	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/workflows", bytes.NewBufferString(`{
+	c, rec := echotest.Request(t, http.MethodPost, "/admin/workflows", `{
 		"scope_model":"gpt-5",
 		"name":"invalid scope",
 		"workflow_payload":{
@@ -901,48 +561,19 @@ func TestCreateWorkflowReturnsValidationErrors(t *testing.T) {
 			"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},
 			"guardrails":[]
 		}
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	}`)
+	err := h.CreateWorkflow(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 
-	if err := h.CreateWorkflow(c); err != nil {
-		t.Fatalf("CreateWorkflow() error = %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-
-	body := decodeWorkflowErrorEnvelope(t, rec.Body.Bytes())
-	if body.Error.Type != "invalid_request_error" {
-		t.Fatalf("error type = %q, want invalid_request_error", body.Error.Type)
-	}
-	if body.Error.Param != nil {
-		t.Fatalf("error param = %v, want nil", *body.Error.Param)
-	}
-	if body.Error.Code != nil {
-		t.Fatalf("error code = %v, want nil", *body.Error.Code)
-	}
+	body := echotest.Decode[workflowErrorEnvelope](t, rec)
+	assert.Equal(t, "invalid_request_error", body.Error.Type)
+	assert.Nil(t, body.Error.Param)
+	assert.Nil(t, body.Error.Code)
 }
 
 func TestCreateWorkflowRejectsUnknownProviderOrModelScope(t *testing.T) {
-	store := &workflowTestStore{
-		versions: []workflows.Version{
-			{
-				ID:       "global-workflow",
-				Scope:    workflows.Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: workflows.Payload{
-					SchemaVersion: 1,
-					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-				},
-				WorkflowHash: "hash-global",
-			},
-		},
-	}
+	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
 
 	tests := []struct {
 		name        string
@@ -981,59 +612,26 @@ func TestCreateWorkflowRejectsUnknownProviderOrModelScope(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newWorkflowHandler(t, store, nil)
-			e := echo.New()
 
-			req := httptest.NewRequest(http.MethodPost, "/admin/workflows", bytes.NewBufferString(tt.body))
-			req.Header.Set("Content-Type", "application/json")
-			rec := httptest.NewRecorder()
-			c := e.NewContext(req, rec)
+			c, rec := echotest.Request(t, http.MethodPost, "/admin/workflows", tt.body)
+			err := h.CreateWorkflow(c)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusBadRequest, rec.Code)
 
-			if err := h.CreateWorkflow(c); err != nil {
-				t.Fatalf("CreateWorkflow() error = %v", err)
-			}
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400", rec.Code)
-			}
-
-			body := decodeWorkflowErrorEnvelope(t, rec.Body.Bytes())
-			if body.Error.Type != "invalid_request_error" {
-				t.Fatalf("error type = %q, want invalid_request_error", body.Error.Type)
-			}
-			if body.Error.Message != tt.wantMessage {
-				t.Fatalf("error message = %q, want %q", body.Error.Message, tt.wantMessage)
-			}
-			if body.Error.Param != nil {
-				t.Fatalf("error param = %v, want nil", *body.Error.Param)
-			}
-			if body.Error.Code != nil {
-				t.Fatalf("error code = %v, want nil", *body.Error.Code)
-			}
+			body := echotest.Decode[workflowErrorEnvelope](t, rec)
+			assert.Equal(t, "invalid_request_error", body.Error.Type)
+			assert.Equal(t, tt.wantMessage, body.Error.Message)
+			assert.Nil(t, body.Error.Param)
+			assert.Nil(t, body.Error.Code)
 		})
 	}
 }
 
 func TestCreateWorkflow_UsesScopeUserPathInValidationErrors(t *testing.T) {
-	store := &workflowTestStore{
-		versions: []workflows.Version{
-			{
-				ID:       "global-workflow",
-				Scope:    workflows.Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: workflows.Payload{
-					SchemaVersion: 1,
-					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-				},
-				WorkflowHash: "hash-global",
-			},
-		},
-	}
+	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
 	h := newWorkflowHandler(t, store, nil)
-	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/workflows", bytes.NewBufferString(`{
+	c, rec := echotest.Request(t, http.MethodPost, "/admin/workflows", `{
 		"scope_user_path":"/team/../alpha",
 		"name":"invalid path",
 		"workflow_payload":{
@@ -1041,45 +639,18 @@ func TestCreateWorkflow_UsesScopeUserPathInValidationErrors(t *testing.T) {
 			"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},
 			"guardrails":[]
 		}
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	}`)
+	err := h.CreateWorkflow(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 
-	if err := h.CreateWorkflow(c); err != nil {
-		t.Fatalf("CreateWorkflow() error = %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-
-	body := decodeWorkflowErrorEnvelope(t, rec.Body.Bytes())
-	if body.Error.Type != "invalid_request_error" {
-		t.Fatalf("error type = %q, want invalid_request_error", body.Error.Type)
-	}
-	if body.Error.Message != `invalid scope_user_path: user path cannot contain '.' or '..' segments` {
-		t.Fatalf("error message = %q, want invalid scope_user_path message", body.Error.Message)
-	}
+	body := echotest.Decode[workflowErrorEnvelope](t, rec)
+	assert.Equal(t, "invalid_request_error", body.Error.Type)
+	assert.Equal(t, `invalid scope_user_path: user path cannot contain '.' or '..' segments`, body.Error.Message)
 }
 
 func TestWorkflowViewReflectsFeatureCaps(t *testing.T) {
-	store := &workflowTestStore{
-		versions: []workflows.Version{
-			{
-				ID:       "global-workflow",
-				Scope:    workflows.Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: workflows.Payload{
-					SchemaVersion: 1,
-					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: true},
-				},
-				WorkflowHash: "hash-global",
-			},
-		},
-	}
+	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: true})}}
 
 	service, err := workflows.NewService(store, workflows.NewCompilerWithFeatureCaps(nil, core.WorkflowFeatures{
 		Cache:      false,
@@ -1087,54 +658,26 @@ func TestWorkflowViewReflectsFeatureCaps(t *testing.T) {
 		Usage:      true,
 		Guardrails: false,
 	}))
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	h := NewHandler(nil, nil, WithWorkflows(service))
-	c, rec := newHandlerContext("/admin/workflows")
+	c, rec := echotest.Get(t, "/admin/workflows")
+	err = h.ListWorkflows(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.ListWorkflows(c); err != nil {
-		t.Fatalf("ListWorkflows() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-
-	var body []workflows.View
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if len(body) != 1 {
-		t.Fatalf("len(body) = %d, want 1", len(body))
-	}
-	if body[0].EffectiveFeatures.Cache {
-		t.Fatal("effective cache feature = true, want false")
-	}
-	if body[0].EffectiveFeatures.Guardrails {
-		t.Fatal("effective guardrails feature = true, want false")
-	}
+	body := echotest.Decode[[]workflows.View](t, rec)
+	require.Len(t, body, 1)
+	assert.False(t, body[0].EffectiveFeatures.Cache)
+	assert.False(t, body[0].EffectiveFeatures.Guardrails)
 }
 
 func TestDeactivateWorkflow(t *testing.T) {
 	store := &workflowTestStore{
 		versions: []workflows.Version{
-			{
-				ID:       "global-workflow",
-				Scope:    workflows.Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: workflows.Payload{
-					SchemaVersion: 1,
-					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-				},
-				WorkflowHash: "hash-global",
-			},
+			globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true}),
 			{
 				ID:       "provider-workflow",
 				Scope:    workflows.Scope{Provider: "openai"},
@@ -1152,79 +695,31 @@ func TestDeactivateWorkflow(t *testing.T) {
 	}
 
 	h := newWorkflowHandler(t, store, nil)
-	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/workflows/provider-workflow/deactivate", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetPath("/admin/workflows/:id/deactivate")
-	c.SetPathValues(echo.PathValues{{Name: "id", Value: "provider-workflow"}})
-
-	if err := h.DeactivateWorkflow(c); err != nil {
-		t.Fatalf("DeactivateWorkflow() error = %v", err)
-	}
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204", rec.Code)
-	}
+	c, rec := echotest.Post(t, "/admin/workflows/provider-workflow/deactivate", nil, echotest.WithPathValue("id", "provider-workflow"))
+	err := h.DeactivateWorkflow(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNoContent, rec.Code)
 
 	views, err := h.workflows.ListViews(context.Background())
-	if err != nil {
-		t.Fatalf("ListViews() error = %v", err)
-	}
-	if len(views) != 1 {
-		t.Fatalf("len(views) = %d, want 1", len(views))
-	}
-	if views[0].ID != "global-workflow" {
-		t.Fatalf("remaining view = %q, want global-workflow", views[0].ID)
-	}
+	require.NoError(t, err)
+	require.Len(t, views, 1)
+	assert.Equal(t, "global-workflow", views[0].ID)
 }
 
 func TestDeactivateWorkflowRejectsGlobalWorkflow(t *testing.T) {
-	store := &workflowTestStore{
-		versions: []workflows.Version{
-			{
-				ID:       "global-workflow",
-				Scope:    workflows.Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: workflows.Payload{
-					SchemaVersion: 1,
-					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-				},
-				WorkflowHash: "hash-global",
-			},
-		},
-	}
+	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
 
 	h := newWorkflowHandler(t, store, nil)
-	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/workflows/global-workflow/deactivate", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetPath("/admin/workflows/:id/deactivate")
-	c.SetPathValues(echo.PathValues{{Name: "id", Value: "global-workflow"}})
+	c, rec := echotest.Post(t, "/admin/workflows/global-workflow/deactivate", nil, echotest.WithPathValue("id", "global-workflow"))
+	err := h.DeactivateWorkflow(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 
-	if err := h.DeactivateWorkflow(c); err != nil {
-		t.Fatalf("DeactivateWorkflow() error = %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-
-	body := decodeWorkflowErrorEnvelope(t, rec.Body.Bytes())
-	if body.Error.Type != "invalid_request_error" {
-		t.Fatalf("error type = %q, want invalid_request_error", body.Error.Type)
-	}
-	if body.Error.Message != "cannot deactivate the global workflow" {
-		t.Fatalf("error message = %q, want cannot deactivate the global workflow", body.Error.Message)
-	}
-	if body.Error.Param != nil {
-		t.Fatalf("error param = %v, want nil", *body.Error.Param)
-	}
-	if body.Error.Code != nil {
-		t.Fatalf("error code = %v, want nil", *body.Error.Code)
-	}
+	body := echotest.Decode[workflowErrorEnvelope](t, rec)
+	assert.Equal(t, "invalid_request_error", body.Error.Type)
+	assert.Equal(t, "cannot deactivate the global workflow", body.Error.Message)
+	assert.Nil(t, body.Error.Param)
+	assert.Nil(t, body.Error.Code)
 }

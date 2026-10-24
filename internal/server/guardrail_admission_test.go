@@ -4,15 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/pluginapi"
@@ -72,11 +72,11 @@ func countingPromptChains(t *testing.T, action string) *plugins.Chains {
 		guardrails.Definition{Name: "counter", Type: "counting_prompt", Config: raw})
 }
 
-// exceededBudgetChecker refuses every request, standing in for a path that is
-// already over budget.
-type exceededBudgetChecker struct{ calls int }
+// overBudgetCounter refuses and counts every request, standing in for a path
+// that is already over budget.
+type overBudgetCounter struct{ calls int }
 
-func (c *exceededBudgetChecker) Check(context.Context, budget.Subjects, time.Time) error {
+func (c *overBudgetCounter) Check(context.Context, budget.Subjects, time.Time) error {
 	c.calls++
 	return &budget.ExceededError{Result: budget.CheckResult{
 		Budget:    budget.Budget{Scope: budget.ScopeUserPath, Subject: "/", PeriodSeconds: budget.PeriodDailySeconds, Amount: 1},
@@ -96,46 +96,31 @@ func TestGuardrailDecisionsAreAdmitted(t *testing.T) {
 			handler := phaseHandler(t, phaseProvider(), countingPromptChains(t, action))
 			handler.rateLimiter = newTestRateLimitService(t, rateLimitRuleWithRequests("/", 1))
 
+			wantFirst := http.StatusBadRequest
+			if action == "respond" {
+				wantFirst = http.StatusOK
+			}
 			first := doChat(t, handler, chatBody)
-			if action == "block" && first.Code != http.StatusBadRequest {
-				t.Fatalf("first status = %d, want 400 (%s)", first.Code, first.Body.String())
-			}
-			if action == "respond" && first.Code != http.StatusOK {
-				t.Fatalf("first status = %d, want 200 (%s)", first.Code, first.Body.String())
-			}
+			require.Equal(t, wantFirst, first.Code, first.Body.String())
 
 			second := doChat(t, handler, chatBody)
-			if second.Code != http.StatusTooManyRequests {
-				t.Fatalf("second status = %d, want 429 — the guardrail decision did not consume the limit (%s)", second.Code, second.Body.String())
-			}
-			if !strings.Contains(second.Body.String(), "rate_limit_exceeded") {
-				t.Fatalf("second body = %s, want rate_limit_exceeded", second.Body.String())
-			}
-			if promptHookCalls != 1 {
-				t.Fatalf("prompt hook ran %d times, want 1 — the rejected request still paid for the chain", promptHookCalls)
-			}
+			require.Equal(t, http.StatusTooManyRequests, second.Code, "the guardrail decision did not consume the limit: %s", second.Body.String())
+			assert.Contains(t, second.Body.String(), "rate_limit_exceeded")
+			assert.Equal(t, 1, promptHookCalls, "the rejected request still paid for the chain")
 		})
 	}
 
 	t.Run("over budget refuses before the chain", func(t *testing.T) {
 		promptHookCalls = 0
 		handler := phaseHandler(t, phaseProvider(), countingPromptChains(t, "respond"))
-		checker := &exceededBudgetChecker{}
+		checker := &overBudgetCounter{}
 		handler.budgetChecker = checker
 
 		rec := doChat(t, handler, chatBody)
-		if rec.Code != http.StatusTooManyRequests {
-			t.Fatalf("status = %d, want 429 (%s)", rec.Code, rec.Body.String())
-		}
-		if !strings.Contains(rec.Body.String(), "budget_exceeded") {
-			t.Fatalf("body = %s, want budget_exceeded", rec.Body.String())
-		}
-		if promptHookCalls != 0 {
-			t.Fatalf("prompt hook ran %d times over budget, want 0", promptHookCalls)
-		}
-		if checker.calls != 1 {
-			t.Fatalf("budget checked %d times, want 1", checker.calls)
-		}
+		require.Equal(t, http.StatusTooManyRequests, rec.Code, rec.Body.String())
+		assert.Contains(t, rec.Body.String(), "budget_exceeded")
+		assert.Zero(t, promptHookCalls, "prompt hook ran over budget")
+		assert.Equal(t, 1, checker.calls, "budget checks")
 	})
 
 	t.Run("an allowed request is counted once", func(t *testing.T) {
@@ -144,13 +129,11 @@ func TestGuardrailDecisionsAreAdmitted(t *testing.T) {
 		handler.rateLimiter = newTestRateLimitService(t, rateLimitRuleWithRequests("/", 2))
 
 		for i := range 2 {
-			if rec := doChat(t, handler, chatBody); rec.Code != http.StatusOK {
-				t.Fatalf("request %d status = %d, want 200 (%s)", i+1, rec.Code, rec.Body.String())
-			}
+			rec := doChat(t, handler, chatBody)
+			require.Equal(t, http.StatusOK, rec.Code, "request %d: %s", i+1, rec.Body.String())
 		}
-		if rec := doChat(t, handler, chatBody); rec.Code != http.StatusTooManyRequests {
-			t.Fatalf("third status = %d, want 429 (%s)", rec.Code, rec.Body.String())
-		}
+		rec := doChat(t, handler, chatBody)
+		assert.Equal(t, http.StatusTooManyRequests, rec.Code, rec.Body.String())
 	})
 }
 
@@ -253,25 +236,14 @@ func TestPassthroughRefusesWhenGuardrailsApply(t *testing.T) {
 				pluginChains:              staticChainsResolver{chains: tt.chains, configured: tt.configured},
 				allowUnguardedPassthrough: tt.allowUnguarded,
 			}
-			e := echo.New()
-			req := httptest.NewRequest(http.MethodPost, "/p/openai/v1/chat/completions", nil)
-			rec := httptest.NewRecorder()
-			c := e.NewContext(req, rec)
-			if got := svc.guardrailWorkflowApplies(c, info); got != tt.wantRefused {
-				t.Fatalf("guardrailWorkflowApplies() = %v, want %v", got, tt.wantRefused)
-			}
+			c, rec := echotest.Post(t, "/p/openai/v1/chat/completions", nil)
+			require.Equal(t, tt.wantRefused, svc.guardrailWorkflowApplies(c, info))
 			if !tt.wantRefused {
 				return
 			}
-			if err := handleError(c, guardrailsBypassedError("openai")); err != nil {
-				t.Fatalf("handleError() error = %v", err)
-			}
-			if rec.Code != http.StatusForbidden {
-				t.Fatalf("status = %d, want 403 (%s)", rec.Code, rec.Body.String())
-			}
-			if !strings.Contains(rec.Body.String(), tt.wantErrContains) {
-				t.Fatalf("body = %s, want %q", rec.Body.String(), tt.wantErrContains)
-			}
+			require.NoError(t, handleError(c, guardrailsBypassedError("openai")))
+			assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+			assert.Contains(t, rec.Body.String(), tt.wantErrContains)
 		})
 	}
 }
@@ -280,19 +252,52 @@ func TestPassthroughRefusesWhenGuardrailsApply(t *testing.T) {
 // reaches it both before the prompt phase and from dispatch.
 func TestAdmitOnceGrantsASingleAdmission(t *testing.T) {
 	service := newTestRateLimitService(t, rateLimitRuleWithRequests("/team", 1))
-	c, _ := newRateLimitTestContext("/team")
+	c, _ := newRateLimitTestContext(t, "/team")
 
-	if _, err := admitOnce(c, service, nil, rateLimitRoute{}); err != nil {
-		t.Fatalf("first admitOnce() error = %v", err)
-	}
-	if _, err := admitOnce(c, service, nil, rateLimitRoute{}); err != nil {
-		t.Fatalf("second admitOnce() error = %v — the request was counted twice", err)
-	}
+	_, err := admitOnce(c, service, nil, rateLimitRoute{})
+	require.NoError(t, err, "first admitOnce")
+	_, err = admitOnce(c, service, nil, rateLimitRoute{})
+	require.NoError(t, err, "second admitOnce: the request was counted twice")
 	releaseAdmission(c)
 	releaseAdmission(c)
 
-	other, _ := newRateLimitTestContext("/team")
-	if _, err := admitOnce(other, service, nil, rateLimitRoute{}); err == nil {
-		t.Fatal("a second request was admitted under a limit of 1")
+	other, _ := newRateLimitTestContext(t, "/team")
+	_, err = admitOnce(other, service, nil, rateLimitRoute{})
+	assert.Error(t, err, "a second request was admitted under a limit of 1")
+}
+
+// Native JSON routes (/v1/systemone, /v1/decisions) run their prompt
+// guardrails before dispatch too, so they are admitted before the chain and
+// counted once.
+func TestNativeJSONGuardrailDecisionsAreAdmitted(t *testing.T) {
+	newNativeHandler := func(t *testing.T, chains *plugins.Chains) *Handler {
+		t.Helper()
+		provider := newScriptedSystemOneProvider(map[string]string{"kev/kev-latest": "jev"})
+		handler := newHandler(provider, nil, nil, nil, nil, nil, nil, guardrails.NewWorkflowRequestPatcher(staticChainsResolver{chains: chains}))
+		handler.pluginChains = staticChainsResolver{chains: chains}
+		handler.rateLimiter = newTestRateLimitService(t, rateLimitRuleWithRequests("/", 1))
+		return handler
 	}
+	doSystemOne := func(t *testing.T, handler *Handler) int {
+		t.Helper()
+		c, rec := echotest.Post(t, "/v1/systemone", systemOneRequest("kev-latest"))
+		require.NoError(t, handler.SystemOne(c))
+		return rec.Code
+	}
+
+	t.Run("a block consumes the rate limit", func(t *testing.T) {
+		promptHookCalls = 0
+		handler := newNativeHandler(t, countingPromptChains(t, "block"))
+
+		assert.Equal(t, http.StatusBadRequest, doSystemOne(t, handler))
+		assert.Equal(t, http.StatusTooManyRequests, doSystemOne(t, handler))
+		assert.Equal(t, 1, promptHookCalls, "the rejected request still paid for the chain")
+	})
+
+	t.Run("an allowed request is counted once", func(t *testing.T) {
+		handler := newNativeHandler(t, newSystemPromptChains(t, "be safe"))
+
+		assert.Equal(t, http.StatusOK, doSystemOne(t, handler))
+		assert.Equal(t, http.StatusTooManyRequests, doSystemOne(t, handler))
+	})
 }

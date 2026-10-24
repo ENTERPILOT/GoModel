@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDashboardVirtualModelStrategies_IncludesRoutePlugins(t *testing.T) {
@@ -24,9 +25,8 @@ func TestDashboardVirtualModelStrategies_IncludesRoutePlugins(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := dashboardVirtualModelStrategies(tc.adaptiveRouting, tc.plugins); got != tc.want {
-				t.Fatalf("dashboardVirtualModelStrategies() = %q, want %q", got, tc.want)
-			}
+			got := dashboardVirtualModelStrategies(tc.adaptiveRouting, tc.plugins)
+			require.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -55,15 +55,12 @@ func TestRouteOutcome_MapsClientResults(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.info.Provider, tc.info.Model = "openai", "gpt-4o"
 			got := routeOutcome("smart", tc.info)
-			if got.Source != "smart" || got.Target.Qualified() != "openai/gpt-4o" {
-				t.Fatalf("outcome = %+v, want source smart and target openai/gpt-4o", got)
-			}
-			if got.Success != tc.wantSuccess || got.Timeout != tc.wantTimeout {
-				t.Fatalf("outcome = %+v, want success=%v timeout=%v", got, tc.wantSuccess, tc.wantTimeout)
-			}
-			if got.StatusCode != tc.info.StatusCode || got.Latency != tc.info.Duration {
-				t.Fatalf("outcome = %+v, want status and latency copied", got)
-			}
+			require.Equal(t, "smart", got.Source)
+			require.Equal(t, "openai/gpt-4o", got.Target.Qualified(), "outcome = %+v, want source smart and target openai/gpt-4o", got)
+			require.Equal(t, tc.wantSuccess, got.Success)
+			require.Equal(t, tc.wantTimeout, got.Timeout, "outcome = %+v, want success=%v timeout=%v", got, tc.wantSuccess, tc.wantTimeout)
+			require.Equal(t, tc.info.StatusCode, got.StatusCode)
+			require.Equal(t, tc.info.Duration, got.Latency, "outcome = %+v, want status and latency copied", got)
 		})
 	}
 }

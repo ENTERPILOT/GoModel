@@ -254,6 +254,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Comma-separated endpoint operations to hide, e.g. mcp,provider_passthrough,audio_speech; other entries, including unclassified ones, stay",
+                        "name": "exclude_operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Search across request_id/requested_model/provider/method/path/session_id/error_type/error_message",
                         "name": "search",
                         "in": "query"
@@ -379,6 +385,12 @@ const docTemplate = `{
                         "type": "boolean",
                         "description": "Filter by stream mode (true/false)",
                         "name": "stream",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated endpoint operations to hide, e.g. mcp,provider_passthrough,audio_speech; other entries, including unclassified ones, stay",
+                        "name": "exclude_operation",
                         "in": "query"
                     },
                     {
@@ -944,8 +956,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -1161,7 +1191,7 @@ const docTemplate = `{
         },
         "/admin/mcp-servers/{name}/catalog": {
             "get": {
-                "description": "Lists the tools, prompts, resources, and resource templates the named server currently exposes through the gateway, after operator tool filters. Names are the upstream originals; the aggregated /mcp endpoint prefixes them with the server slug.",
+                "description": "Lists the tools, prompts, resources, and resource templates the named server currently exposes through the gateway, after operator tool filters. Discovered tools the filters hide are listed separately under excluded_tools. Names are the upstream originals; the aggregated /mcp endpoint prefixes them with the server slug.",
                 "produces": [
                     "application/json"
                 ],
@@ -1244,6 +1274,225 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/mcp-virtual-servers": {
+            "get": {
+                "description": "Each virtual server serves a subset of the MCP servers at /mcp/{name}. missing_servers lists members no server matches; conflict explains why a virtual server is not served.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "List virtual MCP servers (config-declared and admin-managed)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/admin.mcpVirtualServerResponse"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "description": "Members must be existing MCP servers. A new virtual server may not use an MCP server's slug, and config-declared virtual servers are read-only.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Create or update one admin-managed virtual MCP server",
+                "parameters": [
+                    {
+                        "description": "Virtual MCP server definition",
+                        "name": "virtual_server",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.upsertMCPVirtualServerRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.mcpVirtualServerResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/mcp-virtual-servers/{name}": {
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Delete one admin-managed virtual MCP server",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Virtual MCP server name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/media/{id}": {
+            "get": {
+                "description": "Streams the bytes of an audio or image object the audit log\nreferences by media_id, with its content type. Range requests\nare honored so browser players can seek. An object outside the\ncaller's user-path scope is reported as missing.",
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Download a stored media object",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Media object id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "206": {
+                        "description": "Partial Content",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -1506,6 +1755,65 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/models/metadata": {
+            "get": {
+                "description": "Returns the merged metadata the gateway serves for a model together with each layer it was merged from: the provider's own listing, the model catalog entry and the config.yaml override. A null layer knows nothing about the model. ` + "`" + `sources` + "`" + ` names the winning layer per field (config, provider, catalog or inferred).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Show where one model's metadata comes from",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider instance name or provider type",
+                        "name": "provider",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Raw upstream model ID",
+                        "name": "model",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/providers.ModelMetadataLayers"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -2178,8 +2486,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -2202,6 +2528,126 @@ const docTemplate = `{
                             "type": "array",
                             "items": {
                                 "$ref": "#/definitions/usage.DailyUsage"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/usage/endpoints": {
+            "get": {
+                "description": "Returns per-endpoint token and cost aggregates. Each row names\nthe operation its endpoint belongs to, so endpoints that mean\nthe same thing can be folded: /v1/chat/completions and\n/v1/messages are both chat_completions.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get usage breakdown by request endpoint",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Number of days (default 30)",
+                        "name": "days",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date (YYYY-MM-DD)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (YYYY-MM-DD)",
+                        "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact model name",
+                        "name": "model",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by provider name or provider type",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by request label (exact match)",
+                        "name": "label",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact detected session ID",
+                        "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by tracked user path subtree",
+                        "name": "user_path",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Cache mode filter: uncached, cached, all (default uncached)",
+                        "name": "cache_mode",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/usage.EndpointUsage"
                             }
                         }
                     },
@@ -2280,8 +2726,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -2381,6 +2845,18 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by tracked user path subtree",
                         "name": "user_path",
                         "in": "query"
@@ -2399,7 +2875,13 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Search across model, provider, request_id, provider_id, session_id",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Search across model, provider, endpoint, request_id, provider_id, session_id",
                         "name": "search",
                         "in": "query"
                     },
@@ -2497,8 +2979,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -2667,8 +3167,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -2771,8 +3289,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -2921,8 +3457,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact detected session ID",
                         "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact managed auth key ID",
+                        "name": "auth_key_id",
                         "in": "query"
                     },
                     {
@@ -3583,6 +4137,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
@@ -3660,6 +4220,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
@@ -3745,6 +4311,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
@@ -3822,6 +4394,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
@@ -3907,6 +4485,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
@@ -3988,6 +4572,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
@@ -4065,6 +4655,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
@@ -4206,11 +4802,17 @@ const docTemplate = `{
                         "description": "Timestamp granularities to populate: word and/or segment",
                         "name": "timestamp_granularities[]",
                         "in": "formData"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Relay the transcript as server-sent events while the provider produces it",
+                        "name": "stream",
+                        "in": "formData"
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "Transcription in the requested response_format: a JSON object for json/verbose_json, or a text/plain body for text/srt/vtt",
+                        "description": "Transcription in the requested response_format: a JSON object for json/verbose_json, a text/plain body for text/srt/vtt, or a text/event-stream when stream=true",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -5230,6 +5832,75 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/decisions": {
+            "post": {
+                "description": "Available when an openai, jev, or openrouter provider is configured. OpenAI models answer natively; jev models (Jev, Kev) and OpenRouter's decision models answer through System One, translated both ways. Hosted Jev reads images sent as base64 data URLs; Kev and OpenRouter read text only.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "decisions"
+                ],
+                "summary": "Answer typed questions about an input (OpenAI Decisions)",
+                "parameters": [
+                    {
+                        "description": "Decisions request: model, input, and questions",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Decision: answers in question order, model, and usage",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
@@ -6280,13 +6951,27 @@ const docTemplate = `{
                         "name": "model",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Anthropic API version, e.g. 2023-06-01. When present, the model and error bodies use the Anthropic envelopes instead of the OpenAI ones.",
+                        "name": "anthropic-version",
+                        "in": "header"
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/core.Model"
+                            "description": "OpenAI envelope by default; the Anthropic envelope when the request carries anthropic-version.",
+                            "oneOf": [
+                                {
+                                    "$ref": "#/definitions/core.Model"
+                                },
+                                {
+                                    "$ref": "#/definitions/anthropicapi.ModelInfo"
+                                }
+                            ]
                         }
                     },
                     "401": {
@@ -6298,13 +6983,29 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                            "description": "OpenAI envelope by default; the Anthropic envelope when the request carries anthropic-version.",
+                            "oneOf": [
+                                {
+                                    "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                                },
+                                {
+                                    "$ref": "#/definitions/anthropicapi.ErrorResponse"
+                                }
+                            ]
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                            "description": "OpenAI envelope by default; the Anthropic envelope when the request carries anthropic-version.",
+                            "oneOf": [
+                                {
+                                    "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                                },
+                                {
+                                    "$ref": "#/definitions/anthropicapi.ErrorResponse"
+                                }
+                            ]
                         }
                     }
                 },
@@ -7339,6 +8040,216 @@ const docTemplate = `{
                 ]
             }
         },
+        "/v1/systemone": {
+            "post": {
+                "description": "Available when a jev or openrouter provider is configured. The request and answer follow TypeSafe's System One API; models on providers without that API are rejected rather than translated.",
+                "consumes": [
+                    "application/json",
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "systemone"
+                ],
+                "summary": "Evaluate a System One decision request (Jev / Kev)",
+                "parameters": [
+                    {
+                        "description": "System One request: model, state, and questions",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "System One answers, in the provider's shape",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/systemone/permute": {
+            "post": {
+                "description": "A Kev server diagnostic: the request is a System One request, and n_perm (1 to 64, default 6) sets how many option orders run. Only jev providers pointing at a Kev server serve it.",
+                "consumes": [
+                    "application/json",
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "systemone"
+                ],
+                "summary": "Run one Choice question with several option orders (Kev)",
+                "parameters": [
+                    {
+                        "description": "System One request with one Choice question",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Kev's answer, in the provider's shape",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/systemone/separate": {
+            "post": {
+                "description": "A Kev server diagnostic that answers each question separately. Only jev providers pointing at a Kev server serve it.",
+                "consumes": [
+                    "application/json",
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "systemone"
+                ],
+                "summary": "Run each System One question in its own forward pass (Kev)",
+                "parameters": [
+                    {
+                        "description": "System One request: model, state, and questions",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Kev's answer, in the provider's shape",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/v1/usage": {
             "get": {
                 "description": "Returns recorded usage, budget statuses, and rate limit statuses for the caller's effective user path (the path bound to the managed API key, or the user-path header for master-key callers).",
@@ -7366,6 +8277,12 @@ const docTemplate = `{
                         "type": "integer",
                         "description": "Window length ending today when no explicit dates are given (default 30, max 365)",
                         "name": "days",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Which requests to count: uncached (default, provider-bound only), cached (local response-cache hits only), or all",
+                        "name": "cache_mode",
                         "in": "query"
                     }
                 ],
@@ -7451,6 +8368,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "MCP_ENABLED": {
+                    "type": "string"
+                },
+                "MCP_TOOL_DISCOVERY": {
+                    "description": "MCPToolDiscovery is the gateway's default MCP tool discovery mode\n(\"off\" or \"search\"), so the dashboard can show how clients see tools.",
                     "type": "string"
                 },
                 "PER_CHILD_QUOTAS_ENABLED": {
@@ -7823,8 +8744,17 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "disallowed_user_paths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "enabled": {
                     "type": "boolean"
+                },
+                "excluded_tool_count": {
+                    "type": "integer"
                 },
                 "headers": {
                     "type": "object",
@@ -7870,6 +8800,42 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "admin.mcpVirtualServerResponse": {
+            "type": "object",
+            "properties": {
+                "configured_tool_discovery": {
+                    "description": "ConfiguredToolDiscovery is the stored setting: \"off\", \"search\", or \"\"\nto inherit the gateway default. ToolDiscovery is the effective mode.",
+                    "type": "string"
+                },
+                "conflict": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "managed": {
+                    "type": "boolean"
+                },
+                "missing_servers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "servers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "tool_discovery": {
+                    "type": "string"
                 }
             }
         },
@@ -7998,6 +8964,10 @@ const docTemplate = `{
                     }
                 },
                 "name": {
+                    "type": "string"
+                },
+                "proxy_url": {
+                    "description": "ProxyURL is the provider's outbound proxy with any password masked.",
                     "type": "string"
                 },
                 "service_account_file": {
@@ -8311,6 +9281,12 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "disallowed_user_paths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "enabled": {
                     "type": "boolean"
                 },
@@ -8340,6 +9316,26 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "admin.upsertMCPVirtualServerRequest": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "servers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "tool_discovery": {
+                    "type": "string"
                 }
             }
         },
@@ -8391,6 +9387,10 @@ const docTemplate = `{
                     }
                 },
                 "name": {
+                    "type": "string"
+                },
+                "proxy_url": {
+                    "description": "ProxyURL may be sent back exactly as the view rendered it (password\nmasked) to keep the stored proxy credentials.",
                     "type": "string"
                 },
                 "service_account_file": {
@@ -8700,6 +9700,18 @@ const docTemplate = `{
                 "model": {
                     "type": "string"
                 },
+                "output_config": {
+                    "description": "OutputConfig carries structured output (format) and the effort level.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/anthropicapi.OutputConfig"
+                        }
+                    ]
+                },
+                "output_format": {
+                    "description": "OutputFormat is the deprecated top-level form of output_config.format.",
+                    "type": "object"
+                },
                 "stop_sequences": {
                     "type": "array",
                     "items": {
@@ -8785,6 +9797,17 @@ const docTemplate = `{
                 }
             }
         },
+        "anthropicapi.OutputConfig": {
+            "type": "object",
+            "properties": {
+                "effort": {
+                    "type": "string"
+                },
+                "format": {
+                    "type": "object"
+                }
+            }
+        },
         "anthropicapi.ResponseContentBlock": {
             "type": "object",
             "properties": {
@@ -8807,7 +9830,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "signature": {
-                    "description": "Signature authenticates a thinking block. Anthropic requires it back\nverbatim when the conversation continues, so clients must echo it.",
+                    "description": "Signature authenticates a thinking block. Anthropic requires it back\nverbatim when the conversation continues, so clients must echo it. Every\nthinking block carries the member, as the Anthropic schema requires;\nreasoning from a provider that does not sign its output is rendered with\nan empty signature. Hence the pointer: only a thinking block has one.",
                     "type": "string"
                 },
                 "text": {
@@ -8838,6 +9861,10 @@ const docTemplate = `{
                 "cache_control": {
                     "type": "object"
                 },
+                "defer_loading": {
+                    "description": "DeferLoading marks a tool whose schema the API loads only when tool\nsearch matches it. It is an ordinary custom tool that declares itself\ndeferred, so the translated pipeline sends it like any other and drops\nthe marker (see convertTools).",
+                    "type": "boolean"
+                },
                 "description": {
                     "type": "string"
                 },
@@ -8847,6 +9874,9 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "strict": {
+                    "type": "boolean"
                 },
                 "type": {
                     "type": "string"
@@ -9673,6 +10703,9 @@ const docTemplate = `{
                 },
                 "type": {
                     "type": "string"
+                },
+                "video_url": {
+                    "$ref": "#/definitions/core.VideoURLContent"
                 }
             }
         },
@@ -9843,6 +10876,10 @@ const docTemplate = `{
             "properties": {
                 "prompt_tokens": {
                     "type": "integer"
+                },
+                "raw_usage": {
+                    "type": "object",
+                    "additionalProperties": {}
                 },
                 "total_tokens": {
                     "type": "integer"
@@ -10271,6 +11308,10 @@ const docTemplate = `{
                 "batch_output_per_mtok": {
                     "type": "number"
                 },
+                "cache_write_1h_per_mtok": {
+                    "description": "Anthropic 1-hour TTL cache writes; cache_write_per_mtok prices the default 5-minute ones",
+                    "type": "number"
+                },
                 "cache_write_per_mtok": {
                     "type": "number"
                 },
@@ -10333,6 +11374,9 @@ const docTemplate = `{
         "core.ModelPricingTier": {
             "type": "object",
             "properties": {
+                "cached_input_per_mtok": {
+                    "type": "number"
+                },
                 "input_per_mtok": {
                     "type": "number"
                 },
@@ -10470,6 +11514,10 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "audio_tokens": {
+                    "type": "integer"
+                },
+                "cache_write_tokens": {
+                    "description": "CacheWriteTokens is the part of the prompt written to the prompt cache\n(OpenAI GPT-5.6+), billed at the cache-write rate. Omitted when zero\nso providers that never report it do not gain the member.",
                     "type": "integer"
                 },
                 "cached_tokens": {
@@ -10811,11 +11859,15 @@ const docTemplate = `{
                 "input_audio": {
                     "$ref": "#/definitions/core.InputAudioContent"
                 },
+                "refusal": {
+                    "description": "Refusal is the model's explanation on a \"refusal\" content item.",
+                    "type": "string"
+                },
                 "text": {
                     "type": "string"
                 },
                 "type": {
-                    "description": "\"output_text\", \"input_image\", \"input_audio\", etc.",
+                    "description": "\"output_text\", \"refusal\", \"input_image\", \"input_audio\", etc.",
                     "type": "string"
                 }
             }
@@ -10838,6 +11890,14 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "core.ResponsesIncompleteDetails": {
+            "type": "object",
+            "properties": {
+                "reason": {
                     "type": "string"
                 }
             }
@@ -10990,6 +12050,14 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "incomplete_details": {
+                    "description": "IncompleteDetails explains a status of \"incomplete\": the model hit\nmax_output_tokens, was stopped by a content filter, or the upstream\nstream was interrupted.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/core.ResponsesIncompleteDetails"
+                        }
+                    ]
+                },
                 "model": {
                     "type": "string"
                 },
@@ -11011,7 +12079,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
-                    "description": "\"completed\", \"failed\", \"in_progress\"",
+                    "description": "\"completed\", \"incomplete\", \"failed\", \"in_progress\"",
                     "type": "string"
                 },
                 "usage": {
@@ -11090,14 +12158,31 @@ const docTemplate = `{
                 }
             }
         },
+        "core.VideoURLContent": {
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
         "mcpgateway.CatalogFeature": {
             "type": "object",
             "properties": {
                 "description": {
                     "type": "string"
                 },
+                "destructive": {
+                    "type": "boolean"
+                },
                 "name": {
                     "type": "string"
+                },
+                "read_only": {
+                    "type": "boolean"
                 }
             }
         },
@@ -11132,6 +12217,12 @@ const docTemplate = `{
         "mcpgateway.CatalogView": {
             "type": "object",
             "properties": {
+                "excluded_tools": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/mcpgateway.CatalogFeature"
+                    }
+                },
                 "instructions": {
                     "type": "string"
                 },
@@ -11195,6 +12286,9 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "batch_output_per_mtok": {
+                    "type": "number"
+                },
+                "cache_write_1h_per_mtok": {
                     "type": "number"
                 },
                 "cache_write_per_mtok": {
@@ -11313,6 +12407,56 @@ const docTemplate = `{
                 },
                 "display_name": {
                     "type": "string"
+                }
+            }
+        },
+        "providers.ModelMetadataLayers": {
+            "type": "object",
+            "properties": {
+                "catalog": {
+                    "description": "Catalog is the model list (ai-model-list) entry.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/core.ModelMetadata"
+                        }
+                    ],
+                    "x-nullable": true
+                },
+                "config": {
+                    "description": "Config is the config.yaml metadata override.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/core.ModelMetadata"
+                        }
+                    ],
+                    "x-nullable": true
+                },
+                "effective": {
+                    "description": "Effective is the merged metadata, as listed by /admin/models.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/core.ModelMetadata"
+                        }
+                    ]
+                },
+                "provider": {
+                    "description": "Provider is what the provider reported in its own model listing.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/core.ModelMetadata"
+                        }
+                    ],
+                    "x-nullable": true
+                },
+                "selector": {
+                    "type": "string"
+                },
+                "sources": {
+                    "description": "Sources names the layer that supplied each effective field\n(see modeldata.MetadataSources).",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -11651,6 +12795,60 @@ const docTemplate = `{
                 }
             }
         },
+        "usage.EndpointUsage": {
+            "type": "object",
+            "properties": {
+                "cache_write_input_tokens": {
+                    "type": "integer"
+                },
+                "cached_input_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "cached_input_tokens": {
+                    "type": "integer"
+                },
+                "endpoint": {
+                    "type": "string"
+                },
+                "input_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "local_cached_input_tokens": {
+                    "type": "integer"
+                },
+                "local_cached_output_tokens": {
+                    "type": "integer"
+                },
+                "operation": {
+                    "type": "string"
+                },
+                "output_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "output_tokens": {
+                    "type": "integer"
+                },
+                "requests": {
+                    "type": "integer"
+                },
+                "total_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "total_tokens": {
+                    "type": "integer"
+                },
+                "uncached_input_tokens": {
+                    "type": "integer"
+                }
+            }
+        },
         "usage.LabelUsage": {
             "type": "object",
             "properties": {
@@ -11903,6 +13101,9 @@ const docTemplate = `{
         "usage.UsageLogEntry": {
             "type": "object",
             "properties": {
+                "auth_key_id": {
+                    "type": "string"
+                },
                 "cache_type": {
                     "type": "string"
                 },
@@ -12338,6 +13539,33 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "anthropicapi.ModelInfo": {
+            "description": "One model in the Anthropic dialect, returned when the request carries anthropic-version.",
+            "type": "object",
+            "required": [
+                "created_at",
+                "display_name",
+                "id",
+                "type"
+            ],
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "model"
+                    ]
+                },
+                "id": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "created_at": {
                     "type": "string"
                 }
             }

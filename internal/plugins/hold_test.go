@@ -2,28 +2,26 @@ package plugins
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/stretchr/testify/require"
 )
 
 func TestClosedInstanceRefusesCalls(t *testing.T) {
 	inst := newTestInstance(&fakePlugin{name: "p"}, InstanceSpec{})
-	if err := inst.Close(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if err := inst.Close(context.Background()); err != nil {
-		t.Fatalf("second Close() error = %v, want nil (idempotent)", err)
-	}
+	err := inst.Close(context.Background())
+	require.NoError(t, err)
+	err = inst.Close(context.Background())
+	require.NoError(t, err)
+
 	called := false
-	_, err := Call(context.Background(), inst, func(context.Context) (pluginapi.Decision, error) {
+	_, err = Call(context.Background(), inst, func(context.Context) (pluginapi.Decision, error) {
 		called = true
 		return pluginapi.Allow(), nil
 	})
-	if !errors.Is(err, ErrInstanceClosed) || called {
-		t.Fatalf("Call on closed instance: err = %v, called = %v; want ErrInstanceClosed without calling", err, called)
-	}
+	require.ErrorIs(t, err, ErrInstanceClosed)
+	require.False(t, called)
 }
 
 func TestChainsAcquireHoldsEachInstanceOnce(t *testing.T) {
@@ -34,13 +32,15 @@ func TestChainsAcquireHoldsEachInstanceOnce(t *testing.T) {
 		Response: &Chain{Steps: []Step{{Instances: []*Instance{a}}}},
 	}
 	chains.Acquire()
-	if !a.Held() || !b.Held() || a.refs.Load() != 1 || b.refs.Load() != 1 {
-		t.Fatalf("refs after Acquire: a=%d b=%d, want 1 each", a.refs.Load(), b.refs.Load())
-	}
+	require.True(t, a.Held())
+	require.True(t, b.Held())
+	require.Equal(t, int64(1), a.refs.Load())
+	require.Equal(t, int64(1), b.refs.Load())
+
 	chains.Release()
-	if a.Held() || b.Held() {
-		t.Fatal("instances still held after Release")
-	}
+	require.False(t, a.Held())
+	require.False(t, b.Held())
+
 	var none *Chains
 	none.Acquire()
 	none.Release()

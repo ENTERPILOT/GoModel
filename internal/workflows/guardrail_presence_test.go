@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/plugins"
@@ -45,20 +48,12 @@ func TestServiceHasGuardrailChains(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			service, err := NewService(&staticStore{versions: tt.versions}, NewCompilerWithFeatureCaps(chainCatalog{}, core.DefaultWorkflowFeatures()))
-			if err != nil {
-				t.Fatalf("NewService() error = %v", err)
-			}
-			if err := service.Refresh(context.Background()); err != nil {
-				t.Fatalf("Refresh() error = %v", err)
-			}
-			if got := service.HasGuardrailChains(); got != tt.want {
-				t.Fatalf("HasGuardrailChains() = %v, want %v", got, tt.want)
-			}
+			require.NoError(t, err)
+			require.NoError(t, service.Refresh(context.Background()))
+			assert.Equal(t, tt.want, service.HasGuardrailChains())
 		})
 	}
 
 	var nilService *Service
-	if nilService.HasGuardrailChains() {
-		t.Fatal("HasGuardrailChains() on a nil service = true, want false")
-	}
+	assert.False(t, nilService.HasGuardrailChains(), "nil service")
 }

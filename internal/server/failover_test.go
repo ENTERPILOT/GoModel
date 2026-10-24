@@ -2,17 +2,17 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/virtualmodels"
 )
 
 type failoverResolverStub struct {
@@ -138,53 +138,26 @@ func TestChatCompletion_FallsBackToAlternateModel(t *testing.T) {
 		selectors: []core.ModelSelector{{Provider: "azure", Model: "gpt-4o"}},
 	}, nil)
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`)
 	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
 	c.Set(string(auditlog.LogEntryKey), entry)
+	err := handler.ChatCompletion(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, []string{"gpt-4o", "azure/gpt-4o"}, provider.chatCalls)
+	require.Contains(t, rec.Body.String(), "failover ok")
+	require.True(t, core.GetFailoverUsed(c.Request().Context()))
+	require.NotNil(t, entry.Data)
+	require.NotNil(t, entry.Data.Failover)
+	require.Equal(t, "azure/gpt-4o", entry.Data.Failover.TargetModel)
 
-	if err := handler.ChatCompletion(c); err != nil {
-		t.Fatalf("handler.ChatCompletion() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	if len(provider.chatCalls) != 2 {
-		t.Fatalf("chat calls = %v, want 2 attempts", provider.chatCalls)
-	}
-	if provider.chatCalls[0] != "gpt-4o" || provider.chatCalls[1] != "azure/gpt-4o" {
-		t.Fatalf("chat calls = %v, want [gpt-4o azure/gpt-4o]", provider.chatCalls)
-	}
-	if !strings.Contains(rec.Body.String(), "failover ok") {
-		t.Fatalf("response body = %s, want failover response", rec.Body.String())
-	}
-	if !core.GetFailoverUsed(c.Request().Context()) {
-		t.Fatal("expected request context to be marked as failover-used")
-	}
-	if entry.Data == nil || entry.Data.Failover == nil {
-		t.Fatal("expected audit entry to capture failover details")
-	}
-	if got := entry.Data.Failover.TargetModel; got != "azure/gpt-4o" {
-		t.Fatalf("failover target = %q, want %q", got, "azure/gpt-4o")
-	}
-	if got := len(entry.Data.Attempts); got != 2 {
-		t.Fatalf("audit attempts = %d, want 2: %#v", got, entry.Data.Attempts)
-	}
-	if entry.Data.Attempts[0].Kind != auditlog.AttemptKindPrimary || entry.Data.Attempts[0].Success {
-		t.Fatalf("primary audit attempt = %#v, want failed primary", entry.Data.Attempts[0])
-	}
-	if entry.Data.Attempts[0].StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("primary attempt status = %d, want %d", entry.Data.Attempts[0].StatusCode, http.StatusServiceUnavailable)
-	}
-	if entry.Data.Attempts[1].Kind != auditlog.AttemptKindFailover || !entry.Data.Attempts[1].Success {
-		t.Fatalf("failover audit attempt = %#v, want successful failover", entry.Data.Attempts[1])
-	}
-	if entry.Data.Attempts[1].Model != "azure/gpt-4o" {
-		t.Fatalf("failover attempt model = %q, want azure/gpt-4o", entry.Data.Attempts[1].Model)
-	}
+	require.Len(t, entry.Data.Attempts, 2)
+	require.Equal(t, auditlog.AttemptKindPrimary, entry.Data.Attempts[0].Kind)
+	require.False(t, entry.Data.Attempts[0].Success, "primary attempt must be recorded as failed")
+	require.Equal(t, http.StatusServiceUnavailable, entry.Data.Attempts[0].StatusCode)
+	require.Equal(t, auditlog.AttemptKindFailover, entry.Data.Attempts[1].Kind)
+	require.True(t, entry.Data.Attempts[1].Success, "failover attempt must be recorded as successful")
+	require.Equal(t, "azure/gpt-4o", entry.Data.Attempts[1].Model)
 }
 
 func TestChatCompletion_DoesNotFailoverOnNonAvailabilityError(t *testing.T) {
@@ -202,21 +175,11 @@ func TestChatCompletion_DoesNotFailoverOnNonAvailabilityError(t *testing.T) {
 		selectors: []core.ModelSelector{{Provider: "azure", Model: "gpt-4o"}},
 	}, nil)
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.ChatCompletion(c); err != nil {
-		t.Fatalf("handler.ChatCompletion() error = %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
-	}
-	if len(provider.chatCalls) != 1 || provider.chatCalls[0] != "gpt-4o" {
-		t.Fatalf("chat calls = %v, want only the primary model", provider.chatCalls)
-	}
+	c, rec := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`)
+	err := handler.ChatCompletion(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	require.Equal(t, []string{"gpt-4o"}, provider.chatCalls)
 }
 
 func TestChatCompletion_DoesNotFailoverWhenWorkflowPolicyDisablesFailover(t *testing.T) {
@@ -258,21 +221,11 @@ func TestChatCompletion_DoesNotFailoverWhenWorkflowPolicyDisablesFailover(t *tes
 		selectors: []core.ModelSelector{{Provider: "azure", Model: "gpt-4o"}},
 	}, nil)
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.ChatCompletion(c); err != nil {
-		t.Fatalf("handler.ChatCompletion() error = %v", err)
-	}
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
-	}
-	if len(provider.chatCalls) != 1 || provider.chatCalls[0] != "gpt-4o" {
-		t.Fatalf("chat calls = %v, want only the primary model", provider.chatCalls)
-	}
+	c, rec := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`)
+	err := handler.ChatCompletion(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+	require.Equal(t, []string{"gpt-4o"}, provider.chatCalls)
 }
 
 func TestChatCompletion_StreamFallsBackToAlternateModel(t *testing.T) {
@@ -293,30 +246,13 @@ func TestChatCompletion_StreamFallsBackToAlternateModel(t *testing.T) {
 		selectors: []core.ModelSelector{{Provider: "azure", Model: "gpt-4o"}},
 	}, nil)
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.ChatCompletion(c); err != nil {
-		t.Fatalf("handler.ChatCompletion() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	if len(provider.chatCalls) != 2 {
-		t.Fatalf("chat calls = %v, want 2 attempts", provider.chatCalls)
-	}
-	if provider.chatCalls[0] != "gpt-4o" || provider.chatCalls[1] != "azure/gpt-4o" {
-		t.Fatalf("chat calls = %v, want [gpt-4o azure/gpt-4o]", provider.chatCalls)
-	}
-	if !strings.Contains(rec.Body.String(), "failover ok") {
-		t.Fatalf("response body = %s, want failover stream content", rec.Body.String())
-	}
-	if !core.GetFailoverUsed(c.Request().Context()) {
-		t.Fatal("expected request context to be marked as failover-used")
-	}
+	c, rec := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-4o","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	err := handler.ChatCompletion(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, []string{"gpt-4o", "azure/gpt-4o"}, provider.chatCalls)
+	require.Contains(t, rec.Body.String(), "failover ok")
+	require.True(t, core.GetFailoverUsed(c.Request().Context()))
 }
 
 func TestChatCompletion_StreamDoesNotFailoverWhenWorkflowPolicyDisablesFailover(t *testing.T) {
@@ -348,21 +284,11 @@ func TestChatCompletion_StreamDoesNotFailoverWhenWorkflowPolicyDisablesFailover(
 		selectors: []core.ModelSelector{{Provider: "azure", Model: "gpt-4o"}},
 	}, nil)
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.ChatCompletion(c); err != nil {
-		t.Fatalf("handler.ChatCompletion() error = %v", err)
-	}
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
-	}
-	if len(provider.chatCalls) != 1 || provider.chatCalls[0] != "gpt-4o" {
-		t.Fatalf("chat calls = %v, want only the primary model", provider.chatCalls)
-	}
+	c, rec := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-4o","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	err := handler.ChatCompletion(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+	require.Equal(t, []string{"gpt-4o"}, provider.chatCalls)
 }
 
 func TestResponses_FallsBackToAlternateModel(t *testing.T) {
@@ -399,45 +325,26 @@ func TestResponses_FallsBackToAlternateModel(t *testing.T) {
 		selectors: []core.ModelSelector{{Provider: "azure", Model: "gpt-4o"}},
 	}, nil)
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-4o","input":"hi"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/responses", `{"model":"gpt-4o","input":"hi"}`)
 	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
 	c.Set(string(auditlog.LogEntryKey), entry)
+	err := handler.Responses(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, []string{"gpt-4o", "azure/gpt-4o"}, provider.responsesCalls)
 
-	if err := handler.Responses(c); err != nil {
-		t.Fatalf("handler.Responses() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	if len(provider.responsesCalls) != 2 {
-		t.Fatalf("responses calls = %v, want 2 attempts", provider.responsesCalls)
-	}
-	if provider.responsesCalls[0] != "gpt-4o" || provider.responsesCalls[1] != "azure/gpt-4o" {
-		t.Fatalf("responses calls = %v, want [gpt-4o azure/gpt-4o]", provider.responsesCalls)
-	}
-	var resp core.ResponsesResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("response body is not valid JSON: %v body=%s", err, rec.Body.String())
-	}
-	if resp.ID != "resp-failover" || resp.Provider != "azure" || resp.Model != "gpt-4o" || resp.Status != "completed" {
-		t.Fatalf("response = %+v, want failover response metadata", resp)
-	}
-	if len(resp.Output) != 1 || len(resp.Output[0].Content) != 1 || resp.Output[0].Content[0].Text != "failover response" {
-		t.Fatalf("response output = %+v, want failover response content", resp.Output)
-	}
-	if !core.GetFailoverUsed(c.Request().Context()) {
-		t.Fatal("expected request context to be marked as failover-used")
-	}
-	if entry.Data == nil || entry.Data.Failover == nil {
-		t.Fatal("expected audit entry to capture streaming failover details")
-	}
-	if got := entry.Data.Failover.TargetModel; got != "azure/gpt-4o" {
-		t.Fatalf("streaming failover target = %q, want %q", got, "azure/gpt-4o")
-	}
+	resp := echotest.Decode[core.ResponsesResponse](t, rec)
+	require.Equal(t, "resp-failover", resp.ID)
+	require.Equal(t, "azure", resp.Provider)
+	require.Equal(t, "gpt-4o", resp.Model)
+	require.Equal(t, "completed", resp.Status)
+	require.Len(t, resp.Output, 1)
+	require.Len(t, resp.Output[0].Content, 1)
+	require.Equal(t, "failover response", resp.Output[0].Content[0].Text)
+	require.True(t, core.GetFailoverUsed(c.Request().Context()))
+	require.NotNil(t, entry.Data)
+	require.NotNil(t, entry.Data.Failover)
+	require.Equal(t, "azure/gpt-4o", entry.Data.Failover.TargetModel)
 }
 
 func TestResponses_StreamFallsBackToAlternateModel(t *testing.T) {
@@ -458,30 +365,13 @@ func TestResponses_StreamFallsBackToAlternateModel(t *testing.T) {
 		selectors: []core.ModelSelector{{Provider: "azure", Model: "gpt-4o"}},
 	}, nil)
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-4o","stream":true,"input":"hi"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.Responses(c); err != nil {
-		t.Fatalf("handler.Responses() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	if len(provider.responsesCalls) != 2 {
-		t.Fatalf("responses calls = %v, want 2 attempts", provider.responsesCalls)
-	}
-	if provider.responsesCalls[0] != "gpt-4o" || provider.responsesCalls[1] != "azure/gpt-4o" {
-		t.Fatalf("responses calls = %v, want [gpt-4o azure/gpt-4o]", provider.responsesCalls)
-	}
-	if !strings.Contains(rec.Body.String(), "failover response") {
-		t.Fatalf("response body = %s, want failover stream content", rec.Body.String())
-	}
-	if !core.GetFailoverUsed(c.Request().Context()) {
-		t.Fatal("expected request context to be marked as failover-used")
-	}
+	c, rec := echotest.Post(t, "/v1/responses", `{"model":"gpt-4o","stream":true,"input":"hi"}`)
+	err := handler.Responses(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, []string{"gpt-4o", "azure/gpt-4o"}, provider.responsesCalls)
+	require.Contains(t, rec.Body.String(), "failover response")
+	require.True(t, core.GetFailoverUsed(c.Request().Context()))
 }
 
 func TestResponses_StreamDoesNotFailoverOnNonAvailabilityError(t *testing.T) {
@@ -502,24 +392,12 @@ func TestResponses_StreamDoesNotFailoverOnNonAvailabilityError(t *testing.T) {
 		selectors: []core.ModelSelector{{Provider: "azure", Model: "gpt-4o"}},
 	}, nil)
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-4o","stream":true,"input":"hi"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.Responses(c); err != nil {
-		t.Fatalf("handler.Responses() error = %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
-	}
-	if len(provider.responsesCalls) != 1 || provider.responsesCalls[0] != "gpt-4o" {
-		t.Fatalf("responses calls = %v, want only the primary model", provider.responsesCalls)
-	}
-	if core.GetFailoverUsed(c.Request().Context()) {
-		t.Fatal("expected request context to remain unmarked for failover")
-	}
+	c, rec := echotest.Post(t, "/v1/responses", `{"model":"gpt-4o","stream":true,"input":"hi"}`)
+	err := handler.Responses(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	require.Equal(t, []string{"gpt-4o"}, provider.responsesCalls)
+	require.False(t, core.GetFailoverUsed(c.Request().Context()))
 }
 
 func TestResponses_StreamDoesNotFailoverWhenWorkflowPolicyDisablesFailover(t *testing.T) {
@@ -551,24 +429,12 @@ func TestResponses_StreamDoesNotFailoverWhenWorkflowPolicyDisablesFailover(t *te
 		selectors: []core.ModelSelector{{Provider: "azure", Model: "gpt-4o"}},
 	}, nil)
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-4o","stream":true,"input":"hi"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.Responses(c); err != nil {
-		t.Fatalf("handler.Responses() error = %v", err)
-	}
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
-	}
-	if len(provider.responsesCalls) != 1 || provider.responsesCalls[0] != "gpt-4o" {
-		t.Fatalf("responses calls = %v, want only the primary model", provider.responsesCalls)
-	}
-	if core.GetFailoverUsed(c.Request().Context()) {
-		t.Fatal("expected request context to remain unmarked for failover")
-	}
+	c, rec := echotest.Post(t, "/v1/responses", `{"model":"gpt-4o","stream":true,"input":"hi"}`)
+	err := handler.Responses(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+	require.Equal(t, []string{"gpt-4o"}, provider.responsesCalls)
+	require.False(t, core.GetFailoverUsed(c.Request().Context()))
 }
 
 func TestChatCompletion_DoesNotFailoverOnNonModelNotFound(t *testing.T) {
@@ -586,22 +452,13 @@ func TestChatCompletion_DoesNotFailoverOnNonModelNotFound(t *testing.T) {
 		selectors: []core.ModelSelector{{Provider: "azure", Model: "gpt-4o"}},
 	}, nil)
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.ChatCompletion(c); err != nil {
-		t.Fatalf("handler.ChatCompletion() error = %v", err)
-	}
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusNotFound, rec.Body.String())
-	}
-	if len(provider.chatCalls) != 1 || provider.chatCalls[0] != "gpt-4o" {
-		t.Fatalf("chat calls = %v, want only the primary model", provider.chatCalls)
-	}
+	c, rec := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`)
+	err := handler.ChatCompletion(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+	require.Equal(t, []string{"gpt-4o"}, provider.chatCalls)
 }
+
 func TestEmbeddings_DoesNotFailover(t *testing.T) {
 	provider := &failoverProvider{
 		embeddingResponses: map[string]*core.EmbeddingResponse{
@@ -629,21 +486,88 @@ func TestEmbeddings_DoesNotFailover(t *testing.T) {
 		selectors: []core.ModelSelector{{Provider: "azure", Model: "text-embedding-3-small"}},
 	}, nil)
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"text-embedding-3-small","input":"hi"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/embeddings", `{"model":"text-embedding-3-small","input":"hi"}`)
+	err := handler.Embeddings(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+	require.Equal(t, []string{"text-embedding-3-small"}, provider.embeddingCalls)
+}
 
-	if err := handler.Embeddings(c); err != nil {
-		t.Fatalf("handler.Embeddings() error = %v", err)
+// TestChatCompletion_SingleTargetAliasKeepsSubtreeFailover pins the
+// end-to-end contract through the real virtualmodels.Service: a redirect
+// with one declared target whose target is a chained failover redirect keeps
+// the subtree's alternative leaves as its failover chain. A future change
+// that re-narrows the chain to declared targets only must fail this test.
+func TestChatCompletion_SingleTargetAliasKeepsSubtreeFailover(t *testing.T) {
+	catalog := &aliasesTestCatalog{
+		supported: map[string]bool{
+			"vendor-a/model-x": true,
+			"vendor-b/model-y": true,
+		},
+		providerTypes: map[string]string{
+			"vendor-a/model-x": "vendor-a",
+			"vendor-b/model-y": "vendor-b",
+		},
 	}
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
+	service, err := virtualmodels.NewService(newAliasesTestStore(
+		virtualmodels.VirtualModel{
+			Source:  "public/model",
+			Targets: []virtualmodels.Target{{Model: "router/main"}},
+			Enabled: true,
+		},
+		virtualmodels.VirtualModel{
+			Source:   "router/main",
+			Strategy: virtualmodels.StrategyFailover,
+			Targets: []virtualmodels.Target{
+				{Model: "vendor-a/model-x"},
+				{Model: "vendor-b/model-y"},
+			},
+			Enabled: true,
+		},
+	), catalog, true)
+	require.NoError(t, err)
+	require.NoError(t, service.Refresh(context.Background()))
+
+	provider := &failoverProvider{
+		chatResponses: map[string]*core.ChatResponse{
+			"vendor-b/model-y": {
+				ID:       "chatcmpl-subtree-failover",
+				Object:   "chat.completion",
+				Model:    "model-y",
+				Provider: "vendor-b",
+				Choices: []core.Choice{{
+					Index:        0,
+					Message:      core.ResponseMessage{Role: "assistant", Content: "subtree failover ok"},
+					FinishReason: "stop",
+				}},
+			},
+		},
+		chatErrors: map[string]error{
+			"vendor-a/model-x": core.NewProviderError("vendor-a", http.StatusServiceUnavailable, "model temporarily unavailable", nil),
+		},
+		supportedModels: map[string]string{
+			"vendor-a/model-x": "vendor-a",
+			"vendor-b/model-y": "vendor-b",
+		},
 	}
-	if len(provider.embeddingCalls) != 1 || provider.embeddingCalls[0] != "text-embedding-3-small" {
-		t.Fatalf("embedding calls = %v, want only the primary model", provider.embeddingCalls)
-	}
+
+	handler := newHandler(provider, nil, nil, nil, service, nil, service, nil)
+
+	c, rec := echotest.Post(t, "/v1/chat/completions", `{"model":"public/model","messages":[{"role":"user","content":"hi"}]}`)
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	c.Set(string(auditlog.LogEntryKey), entry)
+	err = handler.ChatCompletion(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, []string{"vendor-a/model-x", "vendor-b/model-y"}, provider.chatCalls)
+	require.Contains(t, rec.Body.String(), "subtree failover ok")
+	require.NotNil(t, entry.Data)
+	require.Len(t, entry.Data.Attempts, 2)
+	require.Equal(t, auditlog.AttemptKindPrimary, entry.Data.Attempts[0].Kind)
+	require.False(t, entry.Data.Attempts[0].Success)
+	require.Equal(t, auditlog.AttemptKindFailover, entry.Data.Attempts[1].Kind)
+	require.True(t, entry.Data.Attempts[1].Success)
+	require.Equal(t, "vendor-b/model-y", entry.Data.Attempts[1].Model)
 }
 
 func requestSelector(model, provider string) string {

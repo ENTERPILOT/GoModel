@@ -1,10 +1,10 @@
 ---
 title: "GoModel Pro"
 sidebarTitle: "Overview"
-description: "GoModel Pro adds licensed prompt compression, intelligent routing, and OIDC SSO to the GoModel gateway."
+description: "GoModel Pro adds licensed prompt compression, intelligent routing, OIDC SSO, and egress proxy pools to the GoModel gateway."
 icon: "gem"
 tag: "Pro"
-keywords: ["GoModel Pro", "prompt compression", "intelligent routing", "OIDC", "SSO", "quota templates", "license"]
+keywords: ["GoModel Pro", "prompt compression", "intelligent routing", "OIDC", "SSO", "quota templates", "egress proxy pools", "license"]
 ---
 
 ## What Pro is
@@ -12,14 +12,15 @@ keywords: ["GoModel Pro", "prompt compression", "intelligent routing", "OIDC", "
 GoModel Pro is the commercial distribution of GoModel. It uses the same
 gateway, configuration, providers, dashboard, and APIs as open-source
 GoModel, with licensed extensions for prompt compression, intelligent routing,
-OIDC single sign-on, and per-child quota templates.
+OIDC single sign-on, egress proxy pools, and per-child quota templates.
 
 Without a valid license, the Pro binary starts as the open-source gateway and
-does not block traffic. An explicitly enabled SSO configuration is the
-exception: startup fails closed when its SSO entitlement or configuration is
-invalid, so an authentication boundary cannot disappear silently.
+does not block traffic. Explicitly enabled SSO or egress pools are the
+exception: startup fails closed when their entitlement or configuration is
+invalid, so an authentication boundary cannot disappear silently and proxied
+traffic never leaves from the gateway's own address.
 
-<CardGroup cols={3}>
+<CardGroup cols={2}>
   <Card title="Prompt compression" icon="package-minus" href="/pro/compression">
     Deterministic, fail-open request rewriting that removes repeated context
     before it reaches the provider.
@@ -31,6 +32,10 @@ invalid, so an authentication boundary cannot disappear silently.
   <Card title="Intelligent routing" icon="route" href="/pro/intelligent-routing">
     Easy/hard tier classification per request plus adaptive, health-aware
     provider selection inside a virtual model. Beta.
+  </Card>
+  <Card title="Egress proxy pools" icon="route" href="/pro/egress">
+    Health-checked pools of HTTP or SOCKS5 proxies with failover and rules
+    that assign providers to pools.
   </Card>
 </CardGroup>
 

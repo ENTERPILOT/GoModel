@@ -50,6 +50,7 @@ const (
 	subsystemStorage             = "storage"
 	subsystemRuntimeSettings     = "runtime settings"
 	subsystemProviders           = "providers"
+	subsystemSecretRotation      = "secret rotation"
 	subsystemRouteStrategies     = "routing-strategy plugins"
 	subsystemAudit               = "audit"
 	subsystemUsage               = "usage"
@@ -57,6 +58,7 @@ const (
 	subsystemRateLimits          = "rate limits"
 	subsystemBatch               = "batch store"
 	subsystemFileStore           = "file store"
+	subsystemMediaStore          = "media store"
 	subsystemResponseStore       = "response store"
 	subsystemConversationStore   = "conversation store"
 	subsystemProviderCredentials = "provider credentials"
@@ -109,6 +111,9 @@ func (a *App) unwind() error {
 // while leaking on SIGTERM.
 func (a *App) shutdownOrder() []registeredSubsystem {
 	return []registeredSubsystem{
+		// Stop applying rotated secrets before anything they would swap into
+		// or reload is torn down.
+		{name: subsystemSecretRotation, close: closerOf(a.secretRotation)},
 		// Stop live setting reconciliation before tearing down anything it can
 		// reconfigure.
 		{name: subsystemRuntimeSettings, close: closerOf(a.runtimeSettings)},
@@ -127,6 +132,9 @@ func (a *App) shutdownOrder() []registeredSubsystem {
 		{name: subsystemAuthKeys, close: closerOf(a.authKeys)},
 		{name: subsystemUsers, close: closerOf(a.users)},
 		{name: subsystemFileStore, close: closerOf(a.fileStore)},
+		// Stops the media retention sweep; audit entries referencing media
+		// are flushed by the audit subsystem below.
+		{name: subsystemMediaStore, close: closerOf(a.media)},
 		// The remaining stores flush buffered work into storage, so they must
 		// close before the connection they write through.
 		{name: subsystemBatch, close: closerOf(a.batch)},

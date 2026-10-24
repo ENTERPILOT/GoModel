@@ -1,10 +1,12 @@
 package users
 
 import (
-	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type testCatalog []string
@@ -36,20 +38,13 @@ func TestNormalizeAllowedModels(t *testing.T) {
 			t.Parallel()
 			got, err := NormalizeAllowedModels(catalog, tc.raw)
 			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("NormalizeAllowedModels(%v) error = nil, want error", tc.raw)
-				}
-				if !IsValidationError(err) {
-					t.Fatalf("error %v is not a validation error", err)
-				}
+				require.Error(t, err)
+				require.True(t, IsValidationError(err))
+
 				return
 			}
-			if err != nil {
-				t.Fatalf("NormalizeAllowedModels(%v) error = %v", tc.raw, err)
-			}
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("NormalizeAllowedModels(%v) = %v, want %v", tc.raw, got, tc.want)
-			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got, "NormalizeAllowedModels(%v) = %v, want %v", tc.raw, got, tc.want)
 		})
 	}
 }
@@ -80,9 +75,36 @@ func TestMatches(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := Matches(tc.allowed, tc.selector); got != tc.want {
-				t.Fatalf("Matches(%v, %s) = %v, want %v", tc.allowed, tc.selector.QualifiedModel(), got, tc.want)
-			}
+			got := Matches(tc.allowed, tc.selector)
+			require.Equal(t, tc.want, got, "Matches(%v, %s) = %v, want %v", tc.allowed, tc.selector.QualifiedModel(), got, tc.want)
+		})
+	}
+}
+
+func TestCovers(t *testing.T) {
+	tests := []struct {
+		allowed []string
+		entry   string
+		want    bool
+	}{
+		{allowed: nil, entry: "/", want: true},
+		{allowed: []string{"/"}, entry: "/", want: true},
+		{allowed: []string{"/"}, entry: "openai/gpt-4o", want: true},
+		{allowed: []string{"openai/"}, entry: "openai/gpt-4o", want: true},
+		{allowed: []string{"openai/"}, entry: "openai/", want: true},
+		{allowed: []string{"openai/"}, entry: "/", want: false},
+		{allowed: []string{"openai/"}, entry: "anthropic/claude", want: false},
+		{allowed: []string{"openai/"}, entry: "gpt-4o", want: false},
+		{allowed: []string{"openai/gpt-4o"}, entry: "openai/gpt-4o", want: true},
+		{allowed: []string{"openai/gpt-4o"}, entry: "openai/", want: false},
+		{allowed: []string{"openai/gpt-4o"}, entry: "gpt-4o", want: false},
+		{allowed: []string{"gpt-4o"}, entry: "gpt-4o", want: true},
+		{allowed: []string{"gpt-4o"}, entry: "openai/gpt-4o", want: true},
+		{allowed: []string{"gpt-4o"}, entry: "openai/gpt-4o-mini", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(strings.Join(tt.allowed, ",")+" covers "+tt.entry, func(t *testing.T) {
+			assert.Equal(t, tt.want, Covers(tt.allowed, tt.entry))
 		})
 	}
 }

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -135,6 +136,19 @@ func textInferenceEndpoint(path string) bool {
 	return false
 }
 
+// validatePassthroughAccess checks a body that names a model like any model
+// call. A request that names none, such as GET /files, acts on the whole
+// provider account, so the caller must be granted the whole provider.
+func (s *passthroughService) validatePassthroughAccess(ctx context.Context, info *core.PassthroughRouteInfo) error {
+	if s.modelAuthorizer == nil {
+		return nil
+	}
+	if selector, ok := passthroughAccessSelector(s.provider, info); ok {
+		return s.modelAuthorizer.ValidateModelAccess(ctx, selector)
+	}
+	return s.modelAuthorizer.ValidateProviderAccess(ctx, info.ProviderName)
+}
+
 func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 	passthroughProvider, ok := s.provider.(core.RoutablePassthrough)
 	if !ok {
@@ -148,12 +162,13 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 	if !isEnabledPassthroughProvider(providerType, s.enabledPassthroughProviders) {
 		return handleError(c, s.unsupportedPassthroughProviderError(providerType))
 	}
-	if s.modelAuthorizer != nil {
-		if selector, ok := passthroughAccessSelector(s.provider, info); ok {
-			if err := s.modelAuthorizer.ValidateModelAccess(c.Request().Context(), selector); err != nil {
-				return handleError(c, err)
-			}
-		}
+	// The body is forwarded unchanged, so a repeated model field would let the
+	// upstream's parser pick a value the gateway never checked.
+	if info.ModelAmbiguous {
+		return handleError(c, core.NewInvalidRequestError("passthrough request body must name the model once; the model field is repeated", nil))
+	}
+	if err := s.validatePassthroughAccess(c.Request().Context(), info); err != nil {
+		return handleError(c, err)
 	}
 	if s.guardrailWorkflowApplies(c, info) {
 		return handleError(c, guardrailsBypassedError(providerType))
