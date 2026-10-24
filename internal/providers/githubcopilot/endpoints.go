@@ -15,6 +15,10 @@ const (
 	// provider has not seen re-reads /models, so traffic to an unlisted or
 	// mistyped model cannot turn into one listing call per request.
 	routesRefetchInterval = time.Minute
+	// routesFetchTimeout bounds a refetch made on behalf of a request. The
+	// refetch ignores that request's cancellation, so one client hanging up
+	// cannot spend the refetch interval on a failed listing.
+	routesFetchTimeout = 10 * time.Second
 )
 
 // modelRoutes holds the endpoints each model is served on, as /models
@@ -60,7 +64,10 @@ func (r *modelRoutes) claimFetch() bool {
 
 // lookup returns the model's endpoints, reading /models through fetch when
 // the model is unknown: the registry may serve a cached or configured model
-// list without ever calling ListModels on this instance.
+// list without ever calling ListModels on this instance. A model still unknown
+// after that, because the listing omits it or failed, gets no endpoints and is
+// sent to /chat/completions. Most Copilot models are served there, so a
+// /models outage keeps them working instead of failing every request.
 func (r *modelRoutes) lookup(ctx context.Context, model string, fetch func(context.Context) error) []string {
 	if endpoints, ok := r.get(model); ok {
 		return endpoints
@@ -73,8 +80,10 @@ func (r *modelRoutes) lookup(ctx context.Context, model string, fetch func(conte
 	if !r.claimFetch() {
 		return nil
 	}
-	if err := fetch(ctx); err != nil {
-		slog.Debug("github-copilot model listing failed; routing to chat completions", "model", model, "error", err)
+	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), routesFetchTimeout)
+	defer cancel()
+	if err := fetch(fetchCtx); err != nil {
+		slog.Warn("github-copilot model listing failed; routing unknown models to chat completions", "model", model, "error", err)
 	}
 	endpoints, _ := r.get(model)
 	return endpoints

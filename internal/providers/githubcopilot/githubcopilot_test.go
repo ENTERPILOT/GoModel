@@ -259,8 +259,23 @@ func TestListModels_SkipsDisabledModelsAndReportsMetadata(t *testing.T) {
 	assert.Equal(t, []string{"/responses"}, inferencePaths(capture))
 }
 
-func TestRoutes_UnknownModelRefetchesListingAtMostOncePerInterval(t *testing.T) {
+func TestRoutes_UnlistedModelGoesToChatAndRefetchesAtMostOncePerInterval(t *testing.T) {
+	provider, capture := copilotServer(t)
+
+	for range 3 {
+		_, err := provider.ChatCompletion(context.Background(), chatRequest("unlisted"))
+		require.NoError(t, err)
+	}
+
+	assert.Equal(t, 1, listingCalls(capture))
+	assert.Equal(t, []string{"/chat/completions", "/chat/completions", "/chat/completions"}, inferencePaths(capture))
+}
+
+func TestRoutes_FailedListingRoutesToChatAndRetriesAtMostOncePerInterval(t *testing.T) {
 	server, capture := providertest.RouteServer(t, map[string]http.HandlerFunc{
+		"/models": func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+		},
 		"/chat/completions": func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = io.WriteString(w, chatJSON)
@@ -269,18 +284,36 @@ func TestRoutes_UnknownModelRefetchesListingAtMostOncePerInterval(t *testing.T) 
 	provider := newTestProvider("gho_test", server.URL, server.Client(), llmclient.Hooks{})
 
 	for range 3 {
-		_, err := provider.ChatCompletion(context.Background(), chatRequest("unlisted"))
+		_, err := provider.ChatCompletion(context.Background(), chatRequest("claude-haiku-4.5"))
 		require.NoError(t, err)
 	}
 
-	listings := 0
+	assert.Equal(t, 1, listingCalls(capture), "a failing listing is retried at most once per interval")
+	assert.Equal(t, []string{"/chat/completions", "/chat/completions", "/chat/completions"}, inferencePaths(capture))
+}
+
+func TestRoutes_RefetchSurvivesCallerCancellation(t *testing.T) {
+	provider, capture := copilotServer(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := provider.ChatCompletion(ctx, chatRequest("gpt-5.6-luna"))
+	require.Error(t, err)
+
+	_, err = provider.ChatCompletion(context.Background(), chatRequest("gpt-5.6-luna"))
+	require.NoError(t, err)
+	assert.Equal(t, 1, listingCalls(capture))
+	assert.Equal(t, []string{"/responses"}, inferencePaths(capture))
+}
+
+func listingCalls(capture *providertest.Capture) int {
+	calls := 0
 	for _, req := range capture.All() {
 		if req.Path == "/models" {
-			listings++
+			calls++
 		}
 	}
-	assert.Equal(t, 1, listings, "a failing listing is retried at most once per interval")
-	assert.Equal(t, []string{"/chat/completions", "/chat/completions", "/chat/completions"}, inferencePaths(capture))
+	return calls
 }
 
 func TestHeaders(t *testing.T) {
@@ -338,6 +371,32 @@ func TestHeaders(t *testing.T) {
 					map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_image", "image_url": "data:image/png;base64,AAAA"}}},
 					map[string]any{"type": "function_call", "call_id": "call_1", "name": "weather", "arguments": "{}"},
 					map[string]any{"type": "function_call_output", "call_id": "call_1", "output": "sunny"},
+				}})
+				return err
+			},
+			wantPath: "/responses", wantInitiator: "agent", wantVision: true,
+		},
+		{
+			name: "responses tool result carrying the only image",
+			call: func(p *Provider) error {
+				_, err := p.Responses(context.Background(), &core.ResponsesRequest{Model: "gpt-5.6-luna", Input: []any{
+					map[string]any{"role": "user", "content": "describe the screenshot"},
+					map[string]any{"type": "function_call", "call_id": "call_1", "name": "screenshot", "arguments": "{}"},
+					map[string]any{"type": "function_call_output", "call_id": "call_1", "output": []any{
+						map[string]any{"type": "input_image", "image_url": "data:image/png;base64,AAAA"},
+					}},
+				}})
+				return err
+			},
+			wantPath: "/responses", wantInitiator: "agent", wantVision: true,
+		},
+		{
+			name: "chat tool result carrying the only image on a Responses-only model",
+			call: func(p *Provider) error {
+				_, err := p.ChatCompletion(context.Background(), &core.ChatRequest{Model: "gpt-5.6-luna", Messages: []core.Message{
+					{Role: "user", Content: "describe the screenshot"},
+					{Role: "assistant", ToolCalls: []core.ToolCall{{ID: "call_1", Type: "function", Function: core.FunctionCall{Name: "screenshot", Arguments: "{}"}}}},
+					{Role: "tool", ToolCallID: "call_1", Content: image},
 				}})
 				return err
 			},

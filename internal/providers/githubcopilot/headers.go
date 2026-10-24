@@ -14,9 +14,8 @@ import (
 
 // Copilot request headers, as Copilot's own clients send them.
 const (
-	// initiatorHeader says who started the turn. Copilot bills a premium
-	// request for a "user" turn only, so a tool-call continuation is sent as
-	// "agent".
+	// initiatorHeader says who started the turn: "user" for a user message,
+	// "agent" for a tool-call continuation.
 	initiatorHeader = "X-Initiator"
 	// visionHeader marks a request carrying images, as Copilot's clients
 	// mark them.
@@ -77,28 +76,37 @@ func responsesHeaders(input any) http.Header {
 	if err != nil {
 		return requestHeaders(true, false)
 	}
+	// A message carries its parts in content; a function_call_output, such
+	// as a tool result with an image, carries them in output.
 	var items []struct {
 		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"`
+		Output  json.RawMessage `json:"output"`
 	}
 	if err := json.Unmarshal(raw, &items); err != nil || len(items) == 0 {
 		return requestHeaders(true, false)
 	}
 	vision := false
 	for _, item := range items {
-		var parts []struct {
-			Type string `json:"type"`
-		}
-		if json.Unmarshal(item.Content, &parts) != nil {
-			continue
-		}
-		for _, part := range parts {
-			if part.Type == "input_image" {
-				vision = true
-			}
-		}
+		vision = vision || hasInputImage(item.Content) || hasInputImage(item.Output)
 	}
 	return requestHeaders(items[len(items)-1].Role == "user", vision)
+}
+
+// hasInputImage reports whether raw is a list of content parts with an image.
+func hasInputImage(raw json.RawMessage) bool {
+	var parts []struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(raw, &parts) != nil {
+		return false
+	}
+	for _, part := range parts {
+		if part.Type == "input_image" {
+			return true
+		}
+	}
+	return false
 }
 
 func requestHeaders(userTurn, vision bool) http.Header {

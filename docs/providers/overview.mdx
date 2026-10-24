@@ -187,12 +187,14 @@ support, not every individual model capability exposed by an upstream provider.
   also exist on the OpenAI Platform, so the registry attaches their per-token
   prices to flat-rate subscription traffic — keep budgets and `cost` load
   balancing off it.
-- **GitHub Copilot** — billed against the Copilot plan's premium requests.
+- **GitHub Copilot** — billed in GitHub AI Credits per token, drawn first from
+  the Copilot plan's monthly allowance.
   Copilot serves GPT-5 and later only on `/responses` and other models only on
   `/chat/completions`; GoModel reads each model's endpoints from `/models` and
   translates, so both APIs work on every model. Set `GITHUB_COPILOT_API_KEY` to
   a GitHub OAuth token for the account, such as `gh auth token`; the models it
-  can call depend on the Copilot plan. Reported cost is not real spend, as with ChatGPT.
+  can call depend on the Copilot plan. Reported cost is an estimate that ignores
+  the plan's included allowance.
 - **Kimi Code** — no per-token pricing; quota refreshes weekly and is also
   constrained by a rolling 5-hour window. Usage-cost tracking reports zero for
   Kimi Code, so `cost` load-balancing cannot price it; prefer conservative

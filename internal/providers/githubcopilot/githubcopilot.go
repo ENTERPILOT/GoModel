@@ -19,7 +19,7 @@ import (
 
 const (
 	providerType = "github-copilot"
-	// defaultBaseURL serves Copilot Free, Pro, and Pro+. Business and
+	// defaultBaseURL serves the individual Copilot plans. Business and
 	// Enterprise seats use the endpoint GitHub assigns the account, set with
 	// GITHUB_COPILOT_BASE_URL.
 	defaultBaseURL = "https://api.githubcopilot.com"
