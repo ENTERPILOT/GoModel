@@ -1,0 +1,57 @@
+---
+title: "GoModel Pro"
+sidebarTitle: "Przegląd"
+description: "GoModel Pro dodaje do gatewaya GoModel licencjonowaną kompresję promptów, inteligentny routing, OIDC SSO i pule proxy wychodzącego."
+icon: "gem"
+tag: "Pro"
+keywords: ["GoModel Pro", "kompresja promptów", "prompt compression", "inteligentny routing", "intelligent routing", "OIDC", "SSO", "szablony limitów", "quota templates", "pule proxy wychodzącego", "egress proxy pools", "licencja", "license"]
+---
+
+## Czym jest Pro
+
+GoModel Pro to komercyjna dystrybucja GoModel. Korzysta z tego samego
+gatewaya, konfiguracji, providerów, dashboardu i API co open source'owy
+GoModel, z licencjonowanymi rozszerzeniami do kompresji promptów, inteligentnego routingu,
+jednokrotnego logowania OIDC (SSO), pul proxy wychodzącego i szablonów limitów dla ścieżek podrzędnych.
+
+Bez ważnej licencji binarka Pro uruchamia się jako open source'owy gateway i
+nie blokuje ruchu. Wyjątkiem są jawnie włączone SSO lub pule proxy wychodzącego:
+start kończy się błędem (fail closed), gdy ich uprawnienie licencyjne lub konfiguracja są
+nieprawidłowe, więc granica uwierzytelniania nie może po cichu zniknąć, a ruch kierowany przez proxy
+nigdy nie wychodzi z własnego adresu gatewaya.
+
+<CardGroup cols={2}>
+  <Card title="Kompresja promptów" icon="package-minus" href="/pl/pro/compression">
+    Deterministyczne przepisywanie requestów, przepuszczające w razie błędu (fail open),
+    które usuwa powtarzający się kontekst, zanim dotrze on do providera.
+  </Card>
+  <Card title="Jednokrotne logowanie OIDC" icon="key-round" href="/pl/pro/sso">
+    Chroń Dashboard za pomocą swojego dostawcy tożsamości, korzystając z przepływu Authorization Code
+    z PKCE.
+  </Card>
+  <Card title="Inteligentny routing" icon="route" href="/pl/pro/intelligent-routing">
+    Klasyfikacja każdego requestu do poziomu łatwy/trudny oraz adaptacyjny, uwzględniający stan zdrowia
+    wybór providera w ramach modelu wirtualnego. Beta.
+  </Card>
+  <Card title="Pule proxy wychodzącego" icon="route" href="/pl/pro/egress">
+    Pule proxy HTTP lub SOCKS5 z health checkami, failoverem i regułami
+    przypisującymi providerów do pul.
+  </Card>
+</CardGroup>
+
+## Szablony limitów
+
+Szablony limitów dla ścieżek podrzędnych pozwalają, by jedna definicja budżetu `user_path`
+obowiązywała niezależnie dla każdej bezpośredniej ścieżki podrzędnej zamiast jednego wspólnego budżetu
+dla całego poddrzewa. Ustaw `per_child: true` we wpisie `budgets.user_paths` — przykłady
+w YAML i ze zmiennymi środowiskowymi oraz reguły dopasowania znajdziesz w
+[Budżetach](/pl/features/budgets#dynamiczne-budżety-dla-każdego-potomka). Bez uprawnienia licencyjnego
+`quota_templates` ustawienie `per_child: true` w konfiguracji przerywa
+start, a zapisy przez Admin API są odrzucane z kodem 403
+`quota_templates_not_entitled`.
+
+## Licencjonowanie
+
+Funkcje Pro są przyznawane przez offline'owy token podpisany kluczem Ed25519 w
+`GOMODEL_PRO_LICENSE`. Walidacja nie wymaga dostępu do sieci i działa w
+środowiskach odizolowanych od sieci (air-gapped).

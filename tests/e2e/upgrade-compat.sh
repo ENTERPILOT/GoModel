@@ -169,15 +169,15 @@ seed() {
   local attempt
   for attempt in $(seq 1 60); do
     curl -fsS "$BASE/v1/models" 2>/dev/null \
-      | jq -e '[.data[].id] | index("openai/gpt-4.1-nano") and index("groq/openai/gpt-oss-20b")' >/dev/null && break
+      | jq -e '[.data[].id] | index("openai/gpt-4.1-mini") and index("groq/openai/gpt-oss-20b")' >/dev/null && break
     [[ "$attempt" == 60 ]] && die "the seeded target models never appeared in /v1/models"
     sleep 1
   done
 
   jput /admin/virtual-models \
-    '{"source":"compat-alias","target_model":"openai/gpt-4.1-nano","description":"upgrade compat alias"}' >/dev/null
+    '{"source":"compat-alias","target_model":"openai/gpt-4.1-mini","description":"upgrade compat alias"}' >/dev/null
   jput /admin/virtual-models \
-    '{"source":"compat-lb","targets":[{"provider":"openai","model":"gpt-4.1-nano","weight":2},{"provider":"groq","model":"openai/gpt-oss-20b"}],"strategy":"round_robin"}' >/dev/null
+    '{"source":"compat-lb","targets":[{"provider":"openai","model":"gpt-4.1-mini","weight":2},{"provider":"groq","model":"openai/gpt-oss-20b"}],"strategy":"round_robin"}' >/dev/null
 
   # A baseline older than #788 still has the standalone failover store, and the
   # working tree converts that mapping into a failover-strategy virtual model at
@@ -212,27 +212,27 @@ seed() {
     '{"name":"compat-prov","type":"openai","api_keys":["sk-compat-secret"],"base_url":"https://example.invalid/v1","models":["compat-cred-model"]}' >/dev/null
 
   jput /admin/model-pricing-overrides \
-    '{"selector":"openai/gpt-4.1-nano","pricing":{"input_per_mtok":1.25,"output_per_mtok":9.5}}' >/dev/null
+    '{"selector":"openai/gpt-4.1-mini","pricing":{"input_per_mtok":1.25,"output_per_mtok":9.5}}' >/dev/null
 
   jpost /admin/auth-keys \
     '{"name":"compat-key","description":"upgrade compat key","user_path":"/compat","labels":["compat-label"]}' \
     > "$WORK/authkey.json"
 
   jpost /admin/workflows \
-    '{"scope_provider":"openai","scope_model":"gpt-4.1-nano","scope_user_path":"/compat","name":"compat-workflow","description":"upgrade compat workflow","workflow_payload":{"schema_version":1,"features":{"cache":false,"audit":true,"usage":true,"guardrails":false,"failover":false},"guardrails":[]}}' \
+    '{"scope_provider":"openai","scope_model":"gpt-4.1-mini","scope_user_path":"/compat","name":"compat-workflow","description":"upgrade compat workflow","workflow_payload":{"schema_version":1,"features":{"cache":false,"audit":true,"usage":true,"guardrails":false,"failover":false},"guardrails":[]}}' \
     > "$WORK/workflow.json"
 
   # A real chat call fills the usage and audit-log stores.
   vpost /v1/chat/completions \
-    '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly COMPAT_OK"}],"max_tokens":16,"temperature":0}' \
+    '{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"Reply with exactly COMPAT_OK"}],"max_tokens":16,"temperature":0}' \
     > "$WORK/chat.json"
 
   vpost /v1/conversations '{"metadata":{"purpose":"upgrade-compat"}}' > "$WORK/conversation.json"
   vpost /v1/responses \
-    '{"model":"gpt-4.1-nano","input":"Reply with exactly RESP_OK","store":true,"max_output_tokens":16}' \
+    '{"model":"gpt-4.1-mini","input":"Reply with exactly RESP_OK","store":true,"max_output_tokens":16}' \
     > "$WORK/response.json"
 
-  printf '%s\n' '{"custom_id":"compat-1","method":"POST","url":"/v1/chat/completions","body":{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"hi"}],"max_tokens":8}}' \
+  printf '%s\n' '{"custom_id":"compat-1","method":"POST","url":"/v1/chat/completions","body":{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"hi"}],"max_tokens":8}}' \
     > "$WORK/batch.jsonl"
   curl -fsS -X POST "$BASE/v1/files?provider=openai" -H "Authorization: Bearer $(api_key)" \
     -F purpose=batch -F "file=@$WORK/batch.jsonl" > "$WORK/file.json"
@@ -396,8 +396,8 @@ write_check() {
   [[ "$rc" == 0 ]] || cat "$WORK/write-err.txt"
 }
 
-write_check "virtual-models upsert" jput /admin/virtual-models '{"source":"compat-alias","target_model":"openai/gpt-4.1-mini","description":"updated after upgrade"}'
-write_check "failover virtual model upsert" jput /admin/virtual-models '{"source":"compat-failover","strategy":"failover","targets":[{"model":"openai/gpt-4.1-nano"},{"model":"groq/openai/gpt-oss-20b"}]}'
+write_check "virtual-models upsert" jput /admin/virtual-models '{"source":"compat-alias","target_model":"openai/gpt-4.1","description":"updated after upgrade"}'
+write_check "failover virtual model upsert" jput /admin/virtual-models '{"source":"compat-failover","strategy":"failover","targets":[{"model":"openai/gpt-4.1-mini"},{"model":"groq/openai/gpt-oss-20b"}]}'
 write_check "guardrail upsert" jput /admin/guardrails '{"name":"compat-guardrail","type":"system_prompt","description":"updated","config":{"mode":"inject","content":"updated content"}}'
 write_check "budget upsert" jput /admin/budgets '{"user_path":"/compat/budget","budget_key":{"period":"daily"},"amount":22.5}'
 write_check "label budget upsert" jput /admin/budgets '{"scope":"label","subject":"compat-label","budget_key":{"period":"daily"},"amount":7.5}'
@@ -405,11 +405,11 @@ write_check "rate-limit upsert" jput /admin/rate-limits '{"scope":"user_path","s
 write_check "tagging upsert" jput /admin/tagging/settings '{"headers":[{"header":"X-Compat-Tag-2"}]}'
 write_check "mcp-server upsert" jput /admin/mcp-servers '{"name":"compat-mcp","url":"http://localhost:18090/beta","transport":"http","description":"updated"}'
 write_check "provider-credential upsert" jput /admin/provider-credentials '{"name":"compat-prov","type":"openai","api_keys":["***********"],"base_url":"https://example.invalid/v2","models":["compat-cred-model"]}'
-write_check "pricing override upsert" jput /admin/model-pricing-overrides '{"selector":"openai/gpt-4.1-nano","pricing":{"input_per_mtok":2.25,"output_per_mtok":9.75}}'
+write_check "pricing override upsert" jput /admin/model-pricing-overrides '{"selector":"openai/gpt-4.1-mini","pricing":{"input_per_mtok":2.25,"output_per_mtok":9.75}}'
 write_check "auth-key create" jpost /admin/auth-keys '{"name":"compat-key-2","user_path":"/compat"}'
-write_check "workflow create" jpost /admin/workflows '{"scope_provider":"openai","scope_model":"gpt-4.1-mini","scope_user_path":"/compat","name":"compat-workflow-2","workflow_payload":{"schema_version":1,"features":{"cache":false,"audit":true,"usage":true,"guardrails":false,"failover":false},"guardrails":[]}}'
-write_check "chat completion (usage + audit)" vpost /v1/chat/completions '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly UPGRADE_OK"}],"max_tokens":16,"temperature":0}'
-write_check "response snapshot" vpost /v1/responses '{"model":"gpt-4.1-nano","input":"Reply with exactly UPGRADE_RESP_OK","store":true,"max_output_tokens":16}'
+write_check "workflow create" jpost /admin/workflows '{"scope_provider":"openai","scope_model":"gpt-4.1","scope_user_path":"/compat","name":"compat-workflow-2","workflow_payload":{"schema_version":1,"features":{"cache":false,"audit":true,"usage":true,"guardrails":false,"failover":false},"guardrails":[]}}'
+write_check "chat completion (usage + audit)" vpost /v1/chat/completions '{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"Reply with exactly UPGRADE_OK"}],"max_tokens":16,"temperature":0}'
+write_check "response snapshot" vpost /v1/responses '{"model":"gpt-4.1-mini","input":"Reply with exactly UPGRADE_RESP_OK","store":true,"max_output_tokens":16}'
 write_check "conversation create" vpost /v1/conversations '{"metadata":{"purpose":"post-upgrade"}}'
 
 upload_file() {

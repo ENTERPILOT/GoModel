@@ -1,0 +1,350 @@
+---
+title: "Audio API: Speech-to-Text und Text-to-Speech"
+sidebarTitle: "Audio API"
+description: "OpenAI-kompatibles Text-to-Speech und Transkription über GoModel, nach Modell geroutet und mit denselben Zugriffsregeln, Budgets und virtuellen Modellen wie bei Chat."
+icon: "audio-lines"
+keywords: ["Audio API", "audio API", "Text-to-Speech", "Speech-to-Text", "Transkription", "transcription", "TTS", "STT", "input_audio"]
+---
+
+## Übersicht
+
+GoModel stellt die **OpenAI-kompatiblen Audio-Endpunkte** für Text-to-Speech (TTS)
+und Speech-to-Text (STT) bereit. Clients und SDKs, die bereits die
+`/v1/audio/*`-Routen von OpenAI aufrufen, können unverändert auf GoModel zeigen.
+
+Requests werden **nach Modell** über dieselbe Registry geroutet, die auch für
+Chat und Embeddings verwendet wird. Daher gelten die Auswahl über `model`,
+`provider`-Hinweise, virtuelle Modelle, Modell-Zugriffsregeln pro Key
+([User Paths](/de/features/user-path)) und Budgets gleichermaßen. Audio wird von
+OpenAI und den OpenAI-kompatiblen Providern (OpenRouter, Azure OpenAI, vLLM,
+Oracle, Z.ai) bereitgestellt, außerdem von Providern, deren **native Audio-APIs
+GoModel** hinter denselben Endpunkten **übersetzt**: [Xiaomi MiMo](/de/providers/xiaomi)
+(TTS und ASR über Chat Completions), [Cohere](/de/providers/cohere) (Transkription)
+und [MiniMax](/de/providers/minimax) (TTS über die native `t2a_v2`-API). Ein
+Provider ohne Audio-Unterstützung gibt einen eindeutigen Fehler zurück, statt den
+Request falsch zu routen.
+
+## Unterstützte Endpunkte
+
+| Endpunkt | Verhalten |
+| --- | --- |
+| `POST /v1/audio/speech` | Text-to-Speech. Akzeptiert einen JSON-Body und gibt **binäres Audio** im angeforderten `response_format` zurück. |
+| `POST /v1/audio/transcriptions` | Speech-to-Text. Akzeptiert einen `multipart/form-data`-Upload und gibt je nach `response_format` JSON oder reinen Text zurück. |
+| `POST /v1/audio/translations` | Speech-to-Text mit englischem Ausgabetext. Gleiche Upload-Form wie bei Transkriptionen, ohne `language` und `timestamp_granularities[]`. |
+
+JSON-Bodys von Transkriptionen und Übersetzungen werden in die OpenAI-Form
+normalisiert: Das herstellerspezifische Feld `x_groq` von Groq wird aus
+`json`- und `verbose_json`-Responses entfernt, sodass ein für OpenAI
+geschriebener Client überall dieselben Felder sieht.
+
+## Text-to-Speech
+
+<CodeGroup>
+
+```bash curl
+curl https://your-gateway/v1/audio/speech \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o-mini-tts",
+    "input": "Hello from GoModel.",
+    "voice": "alloy",
+    "response_format": "wav"
+  }' \
+  --output speech.wav
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://your-gateway/v1",
+    api_key=os.environ["GOMODEL_KEY"],
+)
+
+speech = client.audio.speech.create(
+    model="gpt-4o-mini-tts",
+    input="Hello from GoModel.",
+    voice="alloy",
+    response_format="wav",
+)
+speech.write_to_file("speech.wav")
+```
+
+```javascript JavaScript
+import { writeFile } from "node:fs/promises";
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "https://your-gateway/v1",
+  apiKey: process.env.GOMODEL_KEY,
+});
+
+const speech = await client.audio.speech.create({
+  model: "gpt-4o-mini-tts",
+  input: "Hello from GoModel.",
+  voice: "alloy",
+  response_format: "wav",
+});
+
+await writeFile("speech.wav", Buffer.from(await speech.arrayBuffer()));
+```
+
+</CodeGroup>
+
+`model`, `input` und `voice` sind erforderlich. Optionale Felder – `instructions`,
+`response_format` (Standardwert `mp3`, außerdem `opus`, `aac`, `flac`, `wav`, `pcm`)
+und `speed` – werden an den Provider weitergeleitet. Der `Content-Type` der
+Response ist derjenige, den der Upstream zurückgibt; ersatzweise wird der Typ
+verwendet, der sich aus `response_format` ergibt (zum Beispiel `wav` → `audio/wav`).
+
+Synthetisiertes Audio wird **so weitergereicht, wie der Provider es erzeugt** –
+siehe [Streaming](/de/advanced/audio-api#streaming).
+
+## Speech-to-Text
+
+<CodeGroup>
+
+```bash curl
+curl https://your-gateway/v1/audio/transcriptions \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -F "file=@speech.wav" \
+  -F "model=gpt-4o-transcribe" \
+  -F "response_format=json"
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://your-gateway/v1",
+    api_key=os.environ["GOMODEL_KEY"],
+)
+
+with open("speech.wav", "rb") as audio_file:
+    transcription = client.audio.transcriptions.create(
+        file=audio_file,
+        model="gpt-4o-transcribe",
+        response_format="json",
+    )
+
+print(transcription.text)
+```
+
+```javascript JavaScript
+import { createReadStream } from "node:fs";
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "https://your-gateway/v1",
+  apiKey: process.env.GOMODEL_KEY,
+});
+
+const transcription = await client.audio.transcriptions.create({
+  file: createReadStream("speech.wav"),
+  model: "gpt-4o-transcribe",
+  response_format: "json",
+});
+
+console.log(transcription.text);
+```
+
+</CodeGroup>
+
+`file` und `model` sind erforderlich. Optionale Formularfelder – `language`,
+`prompt`, `response_format`, `temperature` und `timestamp_granularities[]` –
+werden weitergeleitet. `response_format` bestimmt die Form der Response: `json`
+und `verbose_json` geben ein JSON-Objekt zurück; `text`, `srt` und `vtt` geben
+einen `text/plain`-Body zurück.
+
+<Tip>
+  Der Formularschlüssel `timestamp_granularities[]` mit eckigen Klammern ist die
+  kanonische Form, GoModel akzeptiert aus Gründen der Client-Kompatibilität aber
+  auch `timestamp_granularities` ohne Klammern.
+</Tip>
+
+Fügen Sie `stream=true` hinzu, um das Transkript bereits während der Erzeugung zu
+erhalten – siehe [Streaming](/de/advanced/audio-api#streaming).
+
+### Self-hosted Speech-to-Text-Server
+
+Viele self-hosted STT-Server stellen `/v1/audio/transcriptions` bereit, aber kein
+`/v1/models`. Registrieren Sie einen solchen Server als `openai`-Provider und
+geben Sie das Modell an, das er bereitstellt:
+
+```yaml
+providers:
+  local-stt:
+    type: openai
+    base_url: "http://localhost:8000/v1"
+    api_key: "unused"
+    models:
+      - id: "whisper-1" # der Modellname, den Ihr Server erwartet
+        metadata:
+          modes: [audio_transcription] # führt es als Audiomodell
+```
+
+Wenn `/models` mit 404 oder 405 antwortet, stellt GoModel die konfigurierten
+Modelle bereit und meldet den Provider als gesund. Andere Fehler von `/models`
+markieren ihn weiterhin als beeinträchtigt (degraded).
+
+## Streaming
+
+GoModel leitet einen Audio-Body **so an den Client weiter, wie der Provider ihn
+erzeugt**. Die Zeit bis zum ersten Byte richtet sich daher nach dem Provider und
+nicht nach der gesamten Generierung:
+
+| Aufruf | Was gestreamt wird |
+| --- | --- |
+| `POST /v1/audio/speech` | Immer. Audio in Chunks im angeforderten `response_format` oder Server-Sent Events, wenn das weitergeleitete `stream_format: "sse"` diese anfordert. |
+| `POST /v1/audio/transcriptions` | Mit dem weitergeleiteten `stream: true` als `text/event-stream` (`transcript.text.delta`-Events, abgeschlossen durch `transcript.text.done`). Ohne diese Option das vollständige Transkript in einer Response. |
+
+```bash Inkrementelles Transkript
+curl -N https://your-gateway/v1/audio/transcriptions \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -F "file=@speech.wav" \
+  -F "model=gpt-4o-transcribe" \
+  -F "stream=true"
+```
+
+Nutzung und [Kostenerfassung](/de/advanced/audio-api#kostenerfassung) bleiben unverändert: Ein
+gestreamtes Transkript wird anhand der Token-Anzahlen bepreist, die sein
+`transcript.text.done`-Event meldet, gestreamte Sprachausgabe anhand der Dauer
+des durchgeleiteten Audios. Beides wird gemessen, während die Response gestreamt
+wird, und nicht anhand einer gepufferten Kopie. Eine Response beliebiger Länge
+wird daher vollständig abgerechnet.
+
+<Note>
+  Eine gestreamte Response kann nicht wiederholt werden, sobald ihre ersten Bytes
+  beim Client angekommen sind. Daher führt GoModel – wie bei gestreamten Chat
+  Completions – für einen fehlgeschlagenen Upstream-Versuch bei `/v1/audio/speech`
+  oder bei einer Transkription mit `stream: true` keinen Retry durch. Ein normaler
+  Transkriptions-Request behält die üblichen Retries.
+</Note>
+
+<Note>
+  Streaming gilt für die OpenAI-kompatiblen Upstreams. Provider, deren native
+  Audio-API GoModel übersetzt (Xiaomi MiMo, Cohere, MiniMax, ElevenLabs), geben
+  einen vollständigen Body zurück, den GoModel als eine Response weiterleitet.
+</Note>
+
+## Weiterleitung von Parametern
+
+Jeder Parameter, den GoModel oben nicht nennt, wird **unverändert an den Provider
+weitergeleitet**. So funktionieren neuere OpenAI-Optionen und providerspezifische
+Zusatzoptionen, ohne auf ein Gateway-Release warten zu müssen
+([ADR-0011](https://github.com/ENTERPILOT/GoModel/blob/main/docs/adr/0011-field-forwarding-on-translated-paths.md),
+Regel 1):
+
+- `/v1/audio/speech` – unbekannte JSON-Felder (zum Beispiel `stream_format`)
+  werden wieder in den Upstream-Body eingefügt.
+- `/v1/audio/transcriptions` und `/v1/audio/translations` – unbekannte
+  Formularwerte (zum Beispiel `include[]=logprobs`, `chunking_strategy`, `stream`)
+  werden in den Multipart-Body für den Upstream geschrieben, einschließlich
+  wiederholter Werte.
+
+Der Provider bleibt maßgeblich dafür, was er akzeptiert: Ein Feld, das er
+ablehnt, kommt als Fehler dieses Providers zurück und nicht als stilles 200.
+
+Zwei Dinge werden nie weitergegeben: die Felder, die GoModel selbst steuert
+(`model`, `file` und der Routing-Hinweis `provider`, außerdem die
+Transkriptionsoptionen, die es neu ausgibt – `language`, `prompt`,
+`response_format`, `temperature` sowie `timestamp_granularities[]` und sein
+Alias ohne Klammern `timestamp_granularities`), und zusätzliche **Datei**-Teile
+in einem Transkriptions-Upload; nur das Audio in `file` wird gesendet.
+
+Weitergeleitete Werte werden nicht im [Audit-Log](/de/advanced/admin-endpoints)
+gespeichert: Da es sich um beliebige Client-Eingaben handelt, die
+Provider-Zugangsdaten enthalten können, erfasst der Eintrag unter
+`forwarded_fields` nur die **Namen** der Felder.
+
+<Note>
+  Die Weiterleitung gilt für die OpenAI-kompatiblen Upstreams. Provider, deren
+  native Audio-API GoModel übersetzt (Xiaomi MiMo, Cohere, MiniMax, ElevenLabs),
+  erstellen ihre eigene Request-Form und ignorieren zusätzliche Parameter.
+</Note>
+## Kostenerfassung
+
+Jeder `/v1/audio/*`-Aufruf wird in der [Nutzungserfassung](/de/features/cost-tracking)
+unter seinem eigenen Endpunktpfad erfasst. Audiomodelle werden nach der Einheit
+bepreist, die der Provider abrechnet, nicht nach Token:
+
+- **Sprachausgabe** (`/v1/audio/speech`) erfasst die Anzahl der Eingabezeichen
+  (`input_characters`, bepreist mit `per_character_input`, wie `tts-1`
+  abgerechnet wird) und die Dauer des synthetisierten Audios
+  (`audio_output_seconds`, bepreist mit `per_second_output`, wie
+  `gpt-4o-mini-tts` abgerechnet wird). Die Dauer wird anhand des
+  zurückgegebenen `wav`, `pcm` oder `mp3` gemessen; andere Codecs (`opus`, `aac`,
+  `flac`) lassen sich ohne Dekodierung nicht messen, und die Zeile enthält einen
+  entsprechenden Kostenhinweis.
+- **Transkriptionen und Übersetzungen** werden nach der Dauer des hochgeladenen
+  Audios bepreist (`audio_seconds`, bepreist mit `per_second_input`). GoModel
+  übernimmt die Dauer, die der Provider in `usage.seconds` oder in `duration`
+  von `verbose_json` meldet, und misst andernfalls den Upload selbst. Die Kosten
+  hängen daher nicht vom `response_format` ab, das der Client angefordert hat,
+  und auch Provider, die überhaupt keine Nutzung melden (Groq, ElevenLabs),
+  werden erfasst.
+- **Nach Token abgerechnete Transkriptionsmodelle** (`gpt-4o-transcribe` und
+  ähnliche) melden Token-`usage` und werden stattdessen mit `input_per_mtok` /
+  `output_per_mtok` bepreist. Ein Modell, das sowohl einen Token-Preis als auch
+  einen Preis pro Sekunde veröffentlicht, wird nach der Einheit abgerechnet, die
+  der Provider gemeldet hat, nie nach beiden.
+
+Wenn nichts Abrechenbares verfügbar ist – der Provider hat keine Nutzung
+gemeldet und der Upload liegt in einem Container-Format vor, das GoModel nicht
+messen kann (`m4a`, `ogg`, `flac`, `webm`) –, wird die Nutzungszeile mit einem
+Hinweis zur Kostenberechnung markiert, statt Kosten von $0 auszuweisen.
+
+## Einschränkungen
+
+Die Audio-Endpunkte sind eine schlanke, nach Modell geroutete Weiterleitung an
+den Provider und **durchlaufen nicht den vollständigen Inferenz-Orchestrator**.
+Im Vergleich zu `/v1/chat/completions` gilt:
+
+- **Kein Failover, keine Guardrails, kein Response-Cache** – diese Stufen werden
+  übersprungen. Requests werden trotzdem autorisiert, gegen das Budget geprüft,
+  erfasst (siehe [Kostenerfassung](/de/advanced/audio-api#kostenerfassung)) und unter ihrem
+  `/v1/audio/*`-Pfad in das [Audit-Log](/de/advanced/admin-endpoints) geschrieben.
+- **OpenAI-Request-Form rein, Provider-Dialekt raus** – Clients senden immer das
+  Audioformat von OpenAI. OpenAI-kompatible Upstreams erhalten es unverändert;
+  Requests an Xiaomi MiMo, Cohere und MiniMax werden in den nativen Audio-Vertrag
+  des jeweiligen Providers übersetzt. Weitere Provider werden hinter diesem
+  Endpunkt nicht angepasst.
+- **Keine Retries für eine gestreamte Response** – siehe [Streaming](/de/advanced/audio-api#streaming).
+- **Realtime Voice-to-Voice** (die WebSocket-basierte Realtime-API) wird nicht
+  unterstützt.
+
+Für einen Provider, dessen native Audio-API von der OpenAI-API abweicht, nutzen
+Sie die [Passthrough-API](/de/features/passthrough-api)
+(`/p/{provider}/v1/audio/...`), um Bytes unverändert an diesen Upstream
+weiterzuleiten.
+
+## Audit-Logging
+
+Audio-Requests erscheinen im Audit-Log wie jede andere Modellinteraktion. Da
+Audio-Payloads binär und groß sind, werden ihre Bodys über eine eigene
+Einstellung gesteuert, [`LOGGING_LOG_AUDIO_BODIES`](/de/advanced/configuration#audit-logging)
+(Standardwert `false`), die `LOGGING_LOG_BODIES` **verfeinert** – sie hat keine
+Wirkung, solange das Body-Logging nicht aktiviert ist:
+
+- **Body-Logging aus** (`LOGGING_LOG_BODIES=false`) – unabhängig von dieser
+  Einstellung wird kein Audio-Body gespeichert.
+- **Body-Logging an, Audio aus** (Standard) – die Audio-Response wird als
+  schlanker Platzhalter `{__audio__, content_type, bytes, stored: false}`
+  erfasst; es werden keine Audio-Bytes gespeichert.
+- **Body-Logging an, Audio an** – `/v1/audio/speech` speichert seine Texteingabe
+  und das erzeugte Audio, sodass das **Dashboard einen eingebetteten Player
+  anzeigt**, und `/v1/audio/transcriptions` speichert das hochgeladene Audio
+  (ebenfalls im Dashboard abspielbar) zusammen mit den Upload-Metadaten
+  (Dateiname, Modell, Parameter).
+
+Die Audio-Bytes landen im [Medienspeicher](/de/advanced/configuration#medienspeicher),
+nicht in der Audit-Datenbank: Der Eintrag enthält eine `media_id`, und das
+Dashboard ruft die Datei über `GET /admin/media/{id}` ab. Es gibt keine
+Größenbegrenzung, und eine gestreamte Response wird gespeichert, während sie
+weitergereicht wird. Dateien werden so lange aufbewahrt wie die Audit-Einträge,
+die auf sie verweisen (`LOGGING_RETENTION_DAYS`).

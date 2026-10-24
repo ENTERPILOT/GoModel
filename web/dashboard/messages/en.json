@@ -477,7 +477,6 @@
   "overview_more": "More",
   "overview_live_token_throughput": "Live Token Throughput",
   "overview_live_granularity": "Live token throughput granularity",
-  "overview_waiting_live_requests": "Waiting for live requests…",
   "overview_seconds": "Seconds",
   "overview_minutes": "Minutes",
   "overview_hours": "Hours",

@@ -1,0 +1,70 @@
+---
+title: "DeepInfra"
+description: "在 GoModel 中配置 DeepInfra，用于聊天、Responses、嵌入、图像、音频和批处理。"
+icon: "server"
+keywords: ["DeepInfra", "开源模型", "提供商配置", "批处理", "图像", "音频", "open models", "provider setup", "batches", "images", "audio"]
+---
+
+DeepInfra 通过位于 `https://api.deepinfra.com/v1/openai` 的兼容 OpenAI 的 API 提供开源模型和代理模型。GoModel 会将以下端点原样路由到 DeepInfra：
+
+| GoModel 端点 | DeepInfra 模型 |
+| ---------------- | ---------------- |
+| `/v1/chat/completions` | 聊天模型（`Qwen/Qwen3-32B`、`openai/gpt-oss-120b` 等） |
+| `/v1/responses` | 聊天模型，由 DeepInfra 原生的 Responses API 提供服务 |
+| `/v1/embeddings` | 嵌入模型（`Qwen/Qwen3-Embedding-0.6B`、`BAAI/bge-m3` 等） |
+| `/v1/images/generations`、`/v1/images/edits` | 图像模型（`black-forest-labs/FLUX-1-schnell`、`Bria/fibo_edit` 等） |
+| `/v1/audio/speech` | TTS 模型（`hexgrad/Kokoro-82M` 等） |
+| `/v1/audio/transcriptions`、`/v1/audio/translations` | STT 模型（`openai/whisper-large-v3-turbo` 等） |
+| `/v1/files`、`/v1/batches` | DeepInfra 的批处理 API |
+
+## 配置
+
+在 [DeepInfra 控制台](https://deepinfra.com/dash/api_keys)中创建一个 API 密钥，然后设置：
+
+```bash
+DEEPINFRA_API_KEY=...
+```
+
+或者在 `config.yaml` 中配置：
+
+```yaml
+providers:
+  deepinfra:
+    type: deepinfra
+    api_key: "${DEEPINFRA_API_KEY}"
+    # base_url 默认为 "https://api.deepinfra.com/v1/openai"。
+```
+
+仅在需要时才覆盖 Base URL 或固定模型列表：
+
+```bash
+DEEPINFRA_BASE_URL=https://api.deepinfra.com/v1/openai
+DEEPINFRA_MODELS=Qwen/Qwen3-32B,Qwen/Qwen3-Embedding-0.6B
+```
+
+## 模型
+
+GoModel 会读取 DeepInfra 实时的 `/models` 列表，包括每个模型的类型（聊天、嵌入、图像、语音、转录）、上下文长度、推理和视觉标签以及价格。视频生成模型不会列出，因为 GoModel 没有面向 DeepInfra 的视频端点。模型 ID 中包含斜杠；您可以原样使用，也可以加上提供商名称前缀来固定路由：
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "deepinfra/Qwen/Qwen3-32B", "messages": [{"role": "user", "content": "Hello"}]}'
+```
+
+DeepInfra 的推理模型同时支持 `reasoning_effort` 和 `reasoning: {"effort": ...}`；在 Qwen3 等混合模型上，`none` 会关闭思考。
+
+## 行为说明
+
+- **Responses 是无状态的。** DeepInfra 不保存任何响应，因此 `store: true`
+  对上游不起作用。如果配置了 GoModel 响应存储，`previous_response_id` 链仍然有效：网关会在分发请求之前重放已存储的历史记录。如果未配置，DeepInfra 会以无效请求错误拒绝 `previous_response_id`
+  和 `conversation`。
+- **结构化的 Responses 输出通过聊天处理。** DeepInfra 原生的
+  Responses 端点会拒绝所有 `text` 设置（`text.format`、
+  `text.verbosity`），因此 GoModel 会通过聊天补全处理这些请求，`json_schema` 和 `json_object` 在其中可以正常使用。
+- **语音默认为 MP3。** 省略 `response_format` 时，DeepInfra 会返回 WAV；GoModel 则改为发送 OpenAI 的默认值（`mp3`）。如需其他格式，请显式设置
+  `response_format`。
+- **图像按图像单位计价。** DeepInfra 按图像单位列出图像价格，GoModel 会将该费率记录为每张图像的价格。对于 DeepInfra 按尺寸或步数计费的模型，成本追踪结果为近似值。
+- **透传需要手动启用。** 将 `deepinfra` 添加到 `ENABLED_PASSTHROUGH_PROVIDERS`
+  即可开放 `/p/deepinfra/...`，它会使用网关的 DeepInfra 密钥，将 Base URL 下的任何路径转发出去。

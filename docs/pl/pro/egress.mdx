@@ -1,0 +1,118 @@
+---
+title: "Pule proxy egress"
+sidebarTitle: "Pule proxy egress"
+description: "Wysyłaj ruch do providerów przez nazwane pule proxy HTTP lub SOCKS5 z health checkami, failoverem i regułami przypisującymi providerów do pul."
+icon: "route"
+tag: "Pro"
+keywords: ["GoModel Pro", "egress", "pula proxy", "proxy pool", "SOCKS5", "proxy HTTP", "HTTP proxy", "failover", "statyczny adres IP", "static IP", "health check"]
+---
+
+## Przegląd
+
+Open source’owy GoModel wysyła ruch jednego providera przez jedno proxy za pomocą
+[`proxy_url`](/pl/providers/outbound-proxy). To wystarcza dla pojedynczego providera
+z ograniczeniami geograficznymi, ale nie dla floty, która zawsze musi wychodzić
+przez adres IP egress znajdujący się na allowliście: gdy to jedno proxy
+przestanie działać, każdy request za nim kończy się błędem.
+
+Pule proxy egress uzupełniają brakujące elementy:
+
+- **Pule** proxy HTTP, HTTPS, SOCKS5 lub SOCKS5h, wybierane strategią `failover`
+  (pierwsze zdrowe, w kolejności) lub `round_robin`.
+- **Health checki**, które cyklicznie sprawdzają każde proxy, pomijają członków
+  puli zwracających błędy i przywracają ich, gdy znów przejdą test.
+- **Reguły**, które przypisują providerów do pul według wzorca nazwy lub typu
+  providera, dzięki czemu nowy provider jest objęty konfiguracją bez zmian w jego
+  własnych ustawieniach.
+
+Własne `proxy_url` providera nadal ma pierwszeństwo przed każdą regułą.
+Providerzy, do których nie pasuje żadna reguła, zachowują globalne dla gatewaya
+zachowanie `HTTP_PROXY`, `HTTPS_PROXY` i `NO_PROXY`.
+
+<Warning>
+  Podobnie jak SSO, włączony egress blokuje w razie błędu (fail closed): start
+  zostaje przerwany, gdy brakuje uprawnienia licencyjnego `egress` lub
+  konfiguracja jest nieprawidłowa. Ruch, który miał wyjść przez proxy, nigdy po
+  cichu nie wyjdzie zamiast tego z własnego adresu gatewaya.
+</Warning>
+
+## Konfiguracja pul
+
+Skonfiguruj je w sekcji `extensions.egress` głównej konfiguracji YAML GoModel:
+
+```yaml
+extensions:
+  egress:
+    enabled: true
+    proxies:
+      eu:
+        urls:
+          - socks5://user:${EU_PROXY_PASSWORD}@10.0.0.1:1080
+          - socks5://user:${EU_PROXY_PASSWORD}@10.0.0.2:1080
+        strategy: failover
+        check_url: https://api.openai.com/v1/models
+      us:
+        urls: [http://egress-us.internal:3128]
+    rules:
+      - providers: ["openai*", "type:anthropic"]
+        proxy: eu
+      - providers: ["*"]
+        proxy: us
+```
+
+Reguły są sprawdzane w kolejności i wygrywa pierwsze dopasowanie. Wzorzec jest
+dopasowywany do nazwy providera (`openai-eu`, `openai*`); z prefiksem `type:` jest
+dopasowywany zamiast tego do typu providera (`type:gemini`). Przy jednej puli i
+braku reguł każdy provider używa tej puli.
+
+Te same ustawienia są dostępne jako zmienne środowiskowe, które nadpisują
+wartości z YAML. Jedna pula na każdą zmienną `PRO_EGRESS_PROXY_<NAME>`; nazwa
+staje się nazwą puli zapisaną małymi literami, z podkreśleniami zamienionymi na
+myślniki (`EU_STATIC` staje się `eu-static`):
+
+```bash
+PRO_EGRESS_ENABLED=true
+PRO_EGRESS_PROXY_EU=socks5://user:pass@10.0.0.1:1080,socks5://user:pass@10.0.0.2:1080
+PRO_EGRESS_PROXY_EU_STRATEGY=failover
+PRO_EGRESS_PROXY_EU_CHECK_URL=https://api.openai.com/v1/models
+PRO_EGRESS_PROXY_US=http://egress-us.internal:3128
+PRO_EGRESS_RULES=openai*=eu,type:anthropic=eu,*=us
+```
+
+| Ustawienie | Wartość domyślna | Kiedy zmienić |
+| --- | --- | --- |
+| `strategy` | `failover` | Użyj `round_robin`, aby rozłożyć obciążenie na członków puli zamiast preferować pierwszego. |
+| `check_url` | nieustawione (połączenie TCP) | Ustaw URL, aby potwierdzić, że proxy faktycznie ma dostęp do internetu, a nie tylko przyjmuje połączenia. |
+| `health_check_interval` | `30s` | Zmniejsz, gdy niedziałające proxy musi zostać wykryte szybciej niż w pół minuty. |
+| `health_check_timeout` | `5s` | Zwiększ dla wolnych proxy oddalonych od gatewaya. |
+| `failure_threshold` | `2` | Liczba kolejnych nieudanych testów, po której członek puli jest pomijany. Zwiększ przy niestabilnych łączach. |
+
+## Health checki i failover
+
+Każdy członek puli jest sprawdzany, zanim gateway obsłuży pierwszy request, więc
+proxy, które już nie działa, nigdy nie dostaje ruchu. Bez `check_url` test to
+połączenie TCP z portem proxy. Z `check_url` jest to request `HEAD` przez proxy;
+każda przekazana odpowiedź oznacza zdrowe proxy, łącznie z `401` lub `404` od
+celu, natomiast `5xx` oznacza błąd, bo forward proxy same odpowiadają `502`,
+`503` i `504`, gdy nie mogą dotrzeć do celu.
+
+Po pierwszym teście członek puli musi zaliczyć `failure_threshold` kolejnych
+błędów, aby został pominięty, i jeden sukces, aby wrócił. Gdy wszyscy członkowie
+puli są niezdrowi, pula jest nadal używana, począwszy od pierwszego członka, a
+ostrzeżenie jest logowane raz na awarię. Dopasowana pula nigdy nie przechodzi na
+połączenie bezpośrednie.
+
+## Podgląd
+
+Zmiany stanu zdrowia są logowane z nazwą puli, pozycją członka i URL-em proxy z
+zamaskowanym hasłem. Prometheus udostępnia:
+
+- `gomodel_pro_egress_proxy_healthy{pool,member,proxy}`: `1`, dopóki członek
+  puli jest w rotacji.
+- `gomodel_pro_egress_health_checks_total{pool,member,proxy,result}`: testy
+  według wyniku.
+- `gomodel_pro_egress_selections_total{pool,member,proxy}`: liczba requestów, dla
+  których wybrano danego członka puli.
+
+Ustaw alert na `gomodel_pro_egress_proxy_healthy == 0`, aby dowiedzieć się o
+niedziałającym proxy, zanim w puli skończą się członkowie.

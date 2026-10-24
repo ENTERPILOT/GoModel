@@ -1,0 +1,193 @@
+---
+title: "oh-my-pi（omp）：调整推理强度与自定义提供商"
+sidebarTitle: "oh-my-pi"
+description: "将 oh-my-pi（omp）编程智能体路由到 GoModel，支持自动发现模型、正常的工具调用和推理强度设置。"
+icon: "square-terminal"
+keywords: ["oh-my-pi", "omp", "omp change effort", "omp 推理强度", "omp custom provider", "omp 自定义提供商", "models.yml", "编程智能体", "coding agent", "reasoning effort", "配置指南", "setup guide"]
+---
+
+[oh-my-pi](https://github.com/can1357/oh-my-pi)（`omp`）可以将 GoModel 用作自定义提供商。在 omp 的 `models.yml` 中添加一个提供商配置块，即可自动发现 GoModel 提供的所有模型，因此您只需配置一次网关，无需逐个手动定义模型。
+
+流程：
+
+`oh-my-pi (omp) -> GoModel -> upstream model providers`
+
+## 开始之前
+
+- 安装 [oh-my-pi](https://github.com/can1357/oh-my-pi#install)，例如使用 `curl -fsSL https://omp.sh/install | sh`。
+- 选择一个用于网关管理的 GoModel 主密钥，例如 `change-me`。
+- 确保 GoModel 拥有您要使用的模型所需的上游凭据。
+
+## 1. 运行 GoModel
+
+使用主密钥和至少一个上游提供商启动 GoModel。此示例使用 Anthropic：
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e ANTHROPIC_API_KEY="sk-ant-..." \
+  enterpilot/gomodel
+```
+
+`GOMODEL_MASTER_KEY` 是网关的引导和管理员凭据，请勿将其写入 omp 的配置中。`ANTHROPIC_API_KEY` 归 GoModel 所有，仅用于上游请求。
+
+## 2. 为 omp 创建专用 API 密钥
+
+打开 GoModel 控制台 [http://localhost:8080/admin/dashboard](http://localhost:8080/admin/dashboard)，使用 `GOMODEL_MASTER_KEY` 登录。进入 `API Keys -> Create API Key`，然后：
+
+1. 将密钥命名为 `oh-my-pi`。
+2. 将 **User Path** 设置为 `/agents/omp`。
+3. 保持 **Dashboard access** 为禁用状态。
+4. 创建密钥并复制 `sk_gom_...` 值。该值只显示一次。
+
+绑定的用户路径为 omp 提供独立的用量和审计范围。如果您使用了网关级别的[模型访问策略](/zh/features/user-path#模型访问)，请为 `/agents/omp` 放行 omp 所需的选择器。
+
+<Warning>
+  请在 omp 中使用此托管密钥，而不是 `GOMODEL_MASTER_KEY`。没有控制台访问权限的托管密钥可以调用模型端点，但无法读取审计日志、创建密钥或修改网关设置。
+</Warning>
+
+## 3. 配置 omp
+
+创建或编辑 `~/.omp/agent/models.yml`，并添加一个 `gomodel` 提供商：
+
+```yaml
+providers:
+  gomodel:
+    baseUrl: http://localhost:8080/v1
+    apiKey: sk_gom_...
+    api: openai-completions
+    discovery:
+      type: openai-models-list
+```
+
+`discovery` 配置块让 omp 在启动时获取 GoModel 的 `/v1/models` 目录，因此 GoModel 能够路由的每个模型都会自动出现在 omp 中，包括来自 GoModel 模型元数据的上下文窗口和输出限制。您无需手动列出模型。
+
+使用 `chmod 600 ~/.omp/agent/models.yml` 限制对该文件的访问。如果不希望将密钥直接写在文件中，`apiKey` 也可以接受环境变量的*名称*（例如 `apiKey: GOMODEL_API_KEY`），或以 `!` 为前缀、标准输出为该 Secret 的命令（例如 `apiKey: "!op read op://dev/gomodel/api-key"`）。
+
+如果 GoModel 运行在其他主机上，请将 `localhost:8080` 替换为 `https://` URL，并在 GoModel 前面的反向代理或负载均衡器上终止 TLS；仅在回环地址的开发环境中使用纯 HTTP。请在 Base URL 中保留 `/v1`。
+
+## 4. 选择模型并运行 omp
+
+列出 omp 通过网关发现的模型：
+
+```bash
+omp models gomodel
+```
+
+omp 的模型选择器格式为 `<provider>/<model-id>`。GoModel 的模型 ID 本身已带有提供商前缀（`anthropic/claude-sonnet-5`），因此完整的选择器包含两个前缀：
+
+```bash
+omp --model "gomodel/anthropic/claude-sonnet-5"
+```
+
+或者先以无界面方式验证：
+
+```bash
+omp -p --model "gomodel/anthropic/claude-sonnet-5" \
+  'Reply with exactly ok and no punctuation.'
+```
+
+预期输出为 `ok`。
+
+<Note>
+  omp 会将发现的模型目录缓存在本地数据库中。在 GoModel 中添加模型或提供商后，请运行 `omp models refresh` 强制重新获取。
+</Note>
+
+## 5. 启用推理强度
+
+omp 的 `--thinking` 级别（`low`、`medium`、`high` 等）会作为兼容 OpenAI 的 `reasoning_effort` 字段发送，GoModel 会针对每个上游转换该字段：对于 Anthropic 模型，它会转换为思考预算（thinking budget），模型的思考内容以 `reasoning_content` 的形式流式返回，omp 将其渲染为思考块。
+
+omp 只会为已知支持推理的模型发送 `reasoning_effort`，而从普通 `/v1/models` 列表中发现的模型不会被标记为支持推理。请使用 `modelOverrides` 为这些模型显式启用：
+
+```yaml
+providers:
+  gomodel:
+    baseUrl: http://localhost:8080/v1
+    apiKey: sk_gom_...
+    api: openai-completions
+    discovery:
+      type: openai-models-list
+    modelOverrides:
+      anthropic/claude-sonnet-5:
+        reasoning: true
+```
+
+然后运行：
+
+```bash
+omp -p --print-thoughts --thinking high \
+  --model "gomodel/anthropic/claude-sonnet-5" 'What is 17*23?'
+```
+
+添加该覆盖配置后，响应中会包含模型的思考内容；如果没有该配置，该模型的 `--thinking` 会被静默忽略。
+
+## 可选：使用 GoModel 的 Anthropic Messages 端点
+
+omp 也可以通过 GoModel 的 [`/v1/messages`](/zh/advanced/anthropic-messages-api) 端点，以 Anthropic 协议与 GoModel 通信。此路径不支持模型发现，因此需要显式定义模型：
+
+```yaml
+providers:
+  gomodel-anthropic:
+    baseUrl: http://localhost:8080/v1
+    apiKey: sk_gom_...
+    api: anthropic-messages
+    models:
+      - id: anthropic/claude-sonnet-5
+        name: Claude Sonnet 5 (GoModel)
+        reasoning: true
+        contextWindow: 1000000
+        maxTokens: 128000
+```
+
+两种路径使用相同的网关密钥、预算和审计记录。推荐默认使用带模型发现的兼容 OpenAI 路径；只有在您明确需要端到端的 Messages API 语义时，才使用 Anthropic 协议。
+
+## 6. 在 GoModel 中检查流量
+
+打开 GoModel 控制台的审计日志：
+
+[http://localhost:8080/admin/dashboard/audit](http://localhost:8080/admin/dashboard/audit)
+
+确认 omp 发往 `POST /v1/chat/completions` 的流式请求出现在 `/agents/omp` 用户路径下，并且 GoModel 将其路由到了预期的提供商。请使用主密钥登录；omp 密钥被有意设计为无法打开此页面。
+
+## 故障排查
+
+### `401 Unauthorized`
+
+`models.yml` 中的 `apiKey` 值必须是 `sk_gom_...` 托管密钥。如果您改为按名称引用环境变量，请确保在启动 omp 的 Shell 中已导出该变量。
+
+### 找不到模型
+
+omp 选择器需要使用包含 GoModel 提供商前缀的完整发现 ID：应为 `gomodel/anthropic/claude-sonnet-5`，而不是 `gomodel/claude-sonnet-5`。请从 `omp models gomodel` 中复制确切的 ID。
+
+### 新的 GoModel 模型没有出现
+
+运行 `omp models refresh`。否则 omp 会继续使用缓存的目录。
+
+### `--thinking` 不生效
+
+按上文所示，在 `modelOverrides` 下为该模型添加 `reasoning: true`。如果没有该配置，omp 不会发送 `reasoning_effort`，GoModel 也就永远收不到可转换的推理强度。
+
+### 思考在 Anthropic 模型上有效，但在其他模型上无效
+
+GoModel 会按提供商映射 `reasoning_effort`。请检查 `/v1/models` 元数据中该模型的 `capabilities.reasoning` 标志；不支持推理的模型会忽略或拒绝推理强度值。
+
+## 参考
+
+- oh-my-pi：[模型和提供商配置（`models.yml`）](https://github.com/can1357/oh-my-pi/blob/main/docs/models.md)
+- oh-my-pi：[CLI 参考](https://github.com/can1357/oh-my-pi/blob/main/docs/cli-reference.md)
+- GoModel：[Anthropic Messages API](/zh/advanced/anthropic-messages-api)
+
+## 2026 年 8 月 31 日验证
+
+本指南已基于以下环境验证：
+
+- 位于 `http://localhost:8080` 的本地 GoModel 实例
+- oh-my-pi `18.0.11`（`omp`）
+- 通过 GoModel 访问的 `anthropic/claude-haiku-4-5-20251001`
+
+本地验证确认：
+
+- `discovery: openai-models-list` 导入了完整的 GoModel 目录（955 个模型），包括上下文窗口和输出限制
+- 使用专用托管密钥，`omp -p` 无界面提示词和 Shell 工具调用均通过 `omp -> GoModel -> Anthropic` 成功完成
+- 通过 `modelOverrides` 启用推理后，`--thinking high` 在请求中生成了 `reasoning_effort: "high"`，GoModel 将其转换为 Anthropic 思考参数，omp 渲染了返回的 `reasoning_content` 思考块；未启用时，omp 不会发送该字段
+- `api: anthropic-messages` 提供商变体通过 GoModel 的 `/v1/messages` 端点完成了相同的提示词
