@@ -300,6 +300,7 @@ class VirtualModelEditorStore {
       strategy_config: cloneSchemaConfig(alias.strategy_config),
       session_affinity: alias.session_affinity !== false,
       failover: alias.failover !== false,
+      vision_routing: alias.vision_routing === true,
       user_paths: (Array.isArray(alias.user_paths)
         ? alias.user_paths
         : []
@@ -362,6 +363,7 @@ class VirtualModelEditorStore {
       strategy_config: cloneSchemaConfig(override && override.strategy_config),
       session_affinity: !override || override.session_affinity !== false,
       failover: !override || override.failover !== false,
+      vision_routing: Boolean(override && override.vision_routing),
       user_paths: userPaths.join("\n"),
       description: override && override.description ? override.description : "",
       slowdown: override && override.slowdown != null ? override.slowdown : "",

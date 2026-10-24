@@ -21,7 +21,7 @@ func (s *Service) resolveRequested(ctx context.Context, requested core.Requested
 	}
 	snap := s.snapshot()
 	if entry, ok := snap.findRedirect(requested.Model, userPath, enforceUserPaths); ok {
-		if resolved, ok := s.balancedResolution(ctx, snap, entry, sessionID); ok {
+		if resolved, ok := s.balancedResolution(ctx, snap, entry, sessionID, false); ok {
 			return Resolution{Requested: selector, Resolved: resolved, Source: entry.vm.Source}, true, nil
 		}
 	}
@@ -48,6 +48,12 @@ func (s *Service) ResolveModelForUserPath(ctx context.Context, requested core.Re
 		return core.ModelSelector{}, false, err
 	}
 	return resolution.Resolved, changed, nil
+}
+
+// RoutesImageInput reports whether any enabled redirect has vision routing,
+// so callers attach the request's image-input probe only when it can matter.
+func (s *Service) RoutesImageInput() bool {
+	return s != nil && s.snapshot().visionRouting
 }
 
 // ResolveRefreshTarget returns a redirect target without consulting the current

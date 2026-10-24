@@ -192,6 +192,7 @@ export function mapRedirectView(view) {
     // Tri-state on the wire; only explicit false disables session affinity.
     session_affinity: view.session_affinity !== false,
     failover: view.failover !== false,
+    vision_routing: view.vision_routing === true,
     description: view.description || "",
     slowdown: view.slowdown == null ? null : Number(view.slowdown),
     enabled: view.enabled !== false,

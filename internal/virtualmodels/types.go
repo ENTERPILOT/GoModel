@@ -71,6 +71,12 @@ type VirtualModel struct {
 	// serves the chosen target only. The failover strategy always fails over.
 	Failover *bool `json:"failover,omitempty" bson:"failover,omitempty"`
 
+	// VisionRouting sends a request that carries image input only to the
+	// targets whose model metadata reports the vision capability. When no
+	// target does, every target stays eligible and the provider answers as
+	// before. Off by default.
+	VisionRouting bool `json:"vision_routing,omitempty" bson:"vision_routing,omitempty"`
+
 	CreatedAt time.Time `json:"created_at" bson:"created_at"`
 	UpdatedAt time.Time `json:"updated_at" bson:"updated_at"`
 
@@ -209,6 +215,7 @@ type View struct {
 	StrategyConfig  map[string]any `json:"strategy_config,omitempty"`
 	SessionAffinity *bool          `json:"session_affinity,omitempty"`
 	Failover        *bool          `json:"failover,omitempty"`
+	VisionRouting   bool           `json:"vision_routing,omitempty"`
 	ProviderName    string         `json:"provider_name,omitempty"`
 	Model           string         `json:"model,omitempty"`
 	UserPaths       []string       `json:"user_paths,omitempty"`

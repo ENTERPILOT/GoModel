@@ -35,9 +35,12 @@ type upsertVirtualModelRequest struct {
 	SessionAffinity *bool `json:"session_affinity,omitempty"`
 	// Failover retries a failed request on the remaining targets. Omitted
 	// means enabled; false serves the chosen target only.
-	Failover    *bool    `json:"failover,omitempty"`
-	UserPaths   []string `json:"user_paths,omitempty"`
-	Description string   `json:"description,omitempty"`
+	Failover *bool `json:"failover,omitempty"`
+	// VisionRouting sends a request that carries images only to targets
+	// whose model metadata reports the vision capability. Off by default.
+	VisionRouting bool     `json:"vision_routing,omitempty"`
+	UserPaths     []string `json:"user_paths,omitempty"`
+	Description   string   `json:"description,omitempty"`
 	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it.
 	Slowdown *float64 `json:"slowdown,omitempty"`
 	Enabled  *bool    `json:"enabled,omitempty"`
@@ -177,6 +180,7 @@ func (h *Handler) buildVirtualModelUpsert(source string, req upsertVirtualModelR
 		StrategyConfig:  req.StrategyConfig,
 		SessionAffinity: req.SessionAffinity,
 		Failover:        req.Failover,
+		VisionRouting:   req.VisionRouting,
 		UserPaths:       req.UserPaths,
 		Description:     strings.TrimSpace(req.Description),
 		Slowdown:        req.Slowdown,

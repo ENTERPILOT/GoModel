@@ -192,6 +192,16 @@
       </label>
     </div>
   {/if}
+  <div class="form-field">
+    <label class="vm-option-checkbox">
+      <input
+        type="checkbox"
+        bind:checked={vm.vmForm.vision_routing}
+        disabled={vm.vmFormManaged || vmFormStrategyPending(vm.vmForm)}
+      />
+      <span>{m.models_vision_routing_option()}</span>
+    </label>
+  </div>
 
   <div class="form-field">
     <InlineHelpSection

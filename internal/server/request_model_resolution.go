@@ -119,12 +119,38 @@ func resolveAndStoreRequestModelResolution(
 	requested := core.NewRequestedModelSelector(model, providerHint)
 	enrichAuditEntryWithRequestedModel(c, requested)
 
-	resolution, err := resolveRequestModelWithAuthorizer(c.Request().Context(), provider, resolver, authorizer, requested)
+	ctx := c.Request().Context()
+	if routesImageInput(resolver) {
+		ctx = core.WithImageInputProbe(ctx, func() bool { return requestHasImageInput(c) })
+	}
+	resolution, err := resolveRequestModelWithAuthorizer(ctx, provider, resolver, authorizer, requested)
 	if err != nil {
 		return nil, err
 	}
 	storeRequestModelResolution(c, resolution)
 	return resolution, nil
+}
+
+// imageInputRouter is implemented by resolvers that route requests by
+// whether they carry images (virtual models with vision routing).
+type imageInputRouter interface {
+	RoutesImageInput() bool
+}
+
+// routesImageInput reports whether resolver may route on image input. Other
+// resolvers, and a virtual model service without vision routing, keep the
+// probe (and its allocations) off the request path.
+func routesImageInput(resolver RequestModelResolver) bool {
+	router, ok := resolver.(imageInputRouter)
+	return ok && router.RoutesImageInput()
+}
+
+// requestHasImageInput reports whether the request body carries an image
+// part. Only a virtual model with vision routing asks, so other requests
+// never read the body for it.
+func requestHasImageInput(c *echo.Context) bool {
+	body, err := requestBodyBytes(c)
+	return err == nil && core.BodyHasImageInput(body)
 }
 
 func enrichAuditEntryWithRequestedModel(c *echo.Context, requested core.RequestedModelSelector) {
