@@ -120,10 +120,13 @@ The most specific selector wins, in this order: provider/model, model, provider,
 
 Each usage row also stores the markup it was billed at (`markup_percent`, `markup_selector`), so changing markups never rewrites past bills.
 
+Once markups are configured, the usage page shows billed cost next to provider cost: a **Billed** card, a column in the model, user path, and label breakdowns, and a column in the request log whose tooltip names the markup each row was billed at. The admin API reports it as `total_billed_cost` on `/admin/usage/summary`, `billed_cost` on `/admin/usage/models`, `/admin/usage/user-paths`, and `/admin/usage/labels`, and `billed_cost`, `markup_percent`, and `markup_selector` on `/admin/usage/log` entries. Billed totals include billed cache hits even though the other cost figures exclude them, so per-user-path billed cost is what to charge each customer.
+
 ## Dashboard totals
 
 - **Estimated Cost** — spend on live provider requests; cache hits are excluded.
 - **Saved Cost** — what requests served from the cache would otherwise have cost.
+- **Billed** — shown when markups are configured: provider cost plus markup, including billed cache hits.
 
 A `---` value means the cost is unknown because no pricing was available, which is not the same as `$0`.
 

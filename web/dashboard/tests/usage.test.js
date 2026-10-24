@@ -9,6 +9,8 @@ import {
   authKeyDisplayName,
   authKeyNameMap,
   authKeyOptionList,
+  billedCostTitle,
+  breakdownHasBilledCost,
   cachedCostTitle,
   chartWrapHeight,
   costSourceTooltip,
@@ -89,6 +91,26 @@ test("usageEntryCached detects exact and semantic cache types and ignores others
   assert.equal(usageEntryCached({ cache_type: "" }), false);
   assert.equal(usageEntryCached({}), false);
   assert.equal(usageEntryCached({ cache_type: "other" }), false);
+});
+
+test("billedCostTitle names the markup rule a row was billed at", () => {
+  assert.equal(
+    billedCostTitle({ markup_percent: 20, markup_selector: "openai/" }),
+    "Markup 20% (openai/)",
+  );
+  assert.equal(billedCostTitle({ markup_percent: 12.5, markup_selector: " " }), "Markup 12.5%");
+  assert.equal(billedCostTitle({ markup_percent: 0, markup_selector: "/" }), "Markup 0% (/)");
+  assert.equal(billedCostTitle({ billed_cost: 1 }), "No markup");
+  assert.equal(billedCostTitle({ markup_percent: "n/a" }), "No markup");
+  assert.equal(billedCostTitle(null), "No markup");
+});
+
+test("breakdownHasBilledCost covers the model, user path, and label breakdowns", () => {
+  assert.equal(breakdownHasBilledCost("model"), true);
+  assert.equal(breakdownHasBilledCost("userPath"), true);
+  assert.equal(breakdownHasBilledCost("label"), true);
+  assert.equal(breakdownHasBilledCost("type"), false);
+  assert.equal(breakdownHasBilledCost("session"), false);
 });
 
 test("usageEntryCacheLabel returns capitalized cache type or dash", () => {
@@ -494,6 +516,7 @@ test("emptyUsagePageSummary carries the cache split and rewrite fields", () => {
   assert.equal(summary.cached_input_tokens, 0);
   assert.equal(summary.cache_write_input_tokens, 0);
   assert.equal(summary.total_cost, null);
+  assert.equal(summary.total_billed_cost, null);
   assert.equal(summary.rewrite_tokens_saved, 0);
   assert.equal(summary.rewrite_cost_saved, null);
 });

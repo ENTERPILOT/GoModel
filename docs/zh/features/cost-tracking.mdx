@@ -117,10 +117,13 @@ pricing:
 
 每条用量记录还会存储其计费时使用的加价（`markup_percent`、`markup_selector`），因此更改加价永远不会改写过去的账单。
 
+配置加价后，用量页面会在提供商成本旁显示计费成本：一张 **Billed** 卡片、按模型、用户路径和标签分类的明细中的一列，以及请求日志中的一列（其提示会显示每条记录计费时使用的加价）。管理 API 通过 `/admin/usage/summary` 中的 `total_billed_cost`，`/admin/usage/models`、`/admin/usage/user-paths` 和 `/admin/usage/labels` 中的 `billed_cost`，以及 `/admin/usage/log` 条目中的 `billed_cost`、`markup_percent` 和 `markup_selector` 提供这些数据。计费汇总包含计费的缓存命中，而其他成本数据不包含它们，因此按用户路径统计的计费成本就是应向每位客户收取的金额。
+
 ## 控制台汇总
 
 - **Estimated Cost**：实时提供商请求的支出；不包括缓存命中。
 - **Saved Cost**：由缓存提供服务的请求原本需要花费的成本。
+- **Billed**：配置加价后显示：提供商成本加上加价，包括计费的缓存命中。
 
 `---` 表示由于没有可用的定价，成本未知，这与 `$0` 不同。
 
