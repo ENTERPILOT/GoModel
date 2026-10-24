@@ -278,6 +278,17 @@ usage:
   flush_interval: 5
   retention_days: 90
 
+# Billed cost = provider cost + markup, recorded per usage row. Provider cost,
+# budgets, and dashboard totals are unaffected. Markups are YAML-only.
+pricing:
+  markups_enabled: false # env: PRICING_MARKUPS_ENABLED; true records billed cost and shows it in the dashboard
+  bill_cache_hits: true # env: PRICING_BILL_CACHE_HITS; false bills response-cache hits at $0
+  markups: {} # selector -> percent; most specific wins: "provider/model", "model", "provider/", "/"
+  # markups:
+  #   "/": 15
+  #   "openai/": 10
+  #   "anthropic/claude-opus-4-1": 25
+
 budgets:
   enabled: true # env: BUDGETS_ENABLED; with no configured budgets this has no effect
   user_paths:
@@ -556,6 +567,12 @@ providers:
     type: chatgpt
     api_key: "${CHATGPT_API_KEY}"
     # models: [gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5]
+
+  # GitHub Copilot subscription. The key is a GitHub OAuth token for the
+  # account, e.g. `gh auth token` (see docs/providers/github-copilot.mdx).
+  github-copilot:
+    type: github-copilot
+    api_key: "${GITHUB_COPILOT_API_KEY}"
 
   cohere:
     type: cohere

@@ -9,7 +9,9 @@ import {
   aliasRowCanRemove,
   buildDisplayModels,
   displayRowClass,
+  displayRowEnabled,
   filterDisplayModels,
+  filterDisplayModelsByStatus,
   groupDisplayModels,
   rowIsManaged,
   rowRedirectCanRemove,
@@ -81,6 +83,71 @@ test("filterDisplayModels returns stable rows when the filter is empty", () => {
   assert.strictEqual(second, first);
   assert.strictEqual(second[0], first[0]);
   assert.equal(first[0].key, "model:openai/davinci-002");
+});
+
+function statusFilterRows() {
+  const model = (id, access) => ({
+    provider_name: "openai",
+    provider_type: "openai",
+    model: { id, object: "model", owned_by: "openai" },
+    access,
+  });
+  return display(
+    [
+      model("gpt-on", { effective_enabled: true, user_paths: [] }),
+      model("gpt-off", { effective_enabled: false, user_paths: [] }),
+      model("gpt-team", { effective_enabled: true, user_paths: ["/team"] }),
+    ],
+    [
+      { name: "smart", target_model: "gpt-on", enabled: true, valid: true },
+      { name: "retired", target_model: "gpt-on", enabled: false, valid: true },
+      { name: "broken", target_model: "missing", enabled: true, valid: false },
+    ],
+  );
+}
+
+test("displayRowEnabled follows the access toggle state", () => {
+  const cases = [
+    { name: "missing row", row: null, want: false },
+    { name: "enabled model", row: { access: { effective_enabled: true } }, want: true },
+    { name: "disabled model", row: { access: { effective_enabled: false } }, want: false },
+    { name: "model without access", row: { access: null }, want: false },
+    { name: "enabled alias", row: { is_alias: true, alias: { enabled: true } }, want: true },
+    { name: "alias without flag", row: { is_alias: true, alias: {} }, want: true },
+    { name: "disabled alias", row: { is_alias: true, alias: { enabled: false } }, want: false },
+  ];
+  for (const tc of cases) {
+    assert.equal(displayRowEnabled(tc.row), tc.want, tc.name);
+  }
+});
+
+test("filterDisplayModelsByStatus keeps rows matching the status", () => {
+  const rows = statusFilterRows();
+  const cases = [
+    { status: "enabled", want: ["broken", "openai/gpt-on", "openai/gpt-team", "smart"] },
+    { status: "disabled", want: ["openai/gpt-off", "retired"] },
+  ];
+  for (const tc of cases) {
+    const got = filterDisplayModelsByStatus(rows, tc.status)
+      .map((row) => row.display_name)
+      .sort();
+    assert.deepEqual(got, tc.want, tc.status);
+  }
+});
+
+test("filterDisplayModelsByStatus returns the input for all or unknown statuses", () => {
+  const rows = statusFilterRows();
+  for (const status of ["all", "", undefined, "bogus"]) {
+    assert.strictEqual(filterDisplayModelsByStatus(rows, status), rows, String(status));
+  }
+});
+
+test("status filter composes with the text filter", () => {
+  const rows = filterDisplayModels(statusFilterRows(), "openai/gpt");
+  const names = (status) =>
+    filterDisplayModelsByStatus(rows, status).map((row) => row.display_name);
+  assert.deepEqual(names("enabled"), ["openai/gpt-on", "openai/gpt-team"]);
+  assert.deepEqual(names("disabled"), ["openai/gpt-off"]);
 });
 
 test("qualifiedModelName prefers selector when available", () => {

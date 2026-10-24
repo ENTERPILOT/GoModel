@@ -11,6 +11,7 @@
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
+  import SegmentedControl from "$lib/components/atoms/SegmentedControl.svelte";
   import { virtualModels } from "./virtualModels.svelte.js";
   import { virtualModelEditor } from "./virtualModelEditor.svelte.js";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
@@ -73,6 +74,12 @@
     utility: m.models_category_utility,
   };
 
+  const statusOptions = $derived([
+    { value: "all", label: m.models_status_all() },
+    { value: "enabled", label: m.models_enabled() },
+    { value: "disabled", label: m.models_disabled() },
+  ]);
+
   function categoryLabel(category) {
     return categoryLabels[category.category]?.() || category.display_name;
   }
@@ -84,7 +91,7 @@
     {#if virtualModels.displayModels.length > 0}
       <div class="model-count">
         {m.models_total_count({
-          count: modelsStore.filter
+          count: virtualModels.filtersActive()
             ? virtualModels.filteredDisplayModels.length + " / " + virtualModels.displayModels.length
             : virtualModels.displayModels.length,
         })}
@@ -128,6 +135,12 @@
           bind:value={modelsStore.filter}
         />
       </div>
+      <SegmentedControl
+        options={statusOptions}
+        value={virtualModels.statusFilter}
+        ariaLabel={m.models_status_filter_label()}
+        onchange={(value) => (virtualModels.statusFilter = value)}
+      />
       <div class="table-toolbar-actions">
         {#if virtualModels.virtualModelsAvailable}
           <button
@@ -162,7 +175,7 @@
   {#if virtualModels.displayModels.length === 0 && !modelsStore.loading && !authError && !modelsStore.filter && modelsStore.activeCategory && modelsStore.activeCategory !== "all"}
     <p class="empty-state">{m.models_empty_category()}</p>
   {/if}
-  {#if virtualModels.displayModels.length > 0 && virtualModels.filteredDisplayModels.length === 0 && modelsStore.filter}
+  {#if virtualModels.displayModels.length > 0 && virtualModels.filteredDisplayModels.length === 0 && virtualModels.filtersActive()}
     <p class="empty-state">{m.models_no_match()}</p>
   {/if}
 
