@@ -98,6 +98,18 @@ func TestLocalCache(t *testing.T) {
 		_, err = cache.Get(ctx)
 		require.Error(t, err)
 	})
+
+	t.Run("StaleTempFileDoesNotWidenMode", func(t *testing.T) {
+		cacheFile := filepath.Join(t.TempDir(), "models.json")
+		require.NoError(t, os.WriteFile(cacheFile+".tmp", []byte("stale"), 0o644))
+
+		cache := NewLocalCache(cacheFile)
+		require.NoError(t, cache.Set(context.Background(), &ModelCache{UpdatedAt: time.Now().UTC()}))
+
+		info, err := os.Stat(cacheFile)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	})
 }
 
 func TestModelCacheSerialization(t *testing.T) {

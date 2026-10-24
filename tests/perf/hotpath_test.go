@@ -445,7 +445,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 			name:      "gateway_chat_completion_hot_path",
 			bench:     BenchmarkGatewayHotPathChatCompletion,
 			maxAllocs: 92,    // baseline 89 (85 + 2 per unknown-field-preserving response level: ChatResponse, Choice)
-			maxBytes:  14336, // baseline ~13.7 KB (incl. per-attempt response body/header capture fields)
+			maxBytes:  14848, // baseline ~14.2 KB (incl. per-attempt response body/header capture fields, and the snapshot copy that adds the body after auth)
 		},
 		{
 			// Production-shaped path: request resolves through a real Router +
@@ -456,7 +456,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 			name:      "gateway_chat_completion_hot_path_routed",
 			bench:     BenchmarkGatewayHotPathChatCompletionRouted,
 			maxAllocs: 103,   // baseline 100 (see the bare case; plus strings.Cut selector parsing)
-			maxBytes:  14720, // baseline ~13.7 KB
+			maxBytes:  15232, // baseline ~14.2 KB
 		},
 		{
 			// Alias shape: the model resolver rewrites "fast" to a concrete
@@ -466,7 +466,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 			name:      "gateway_chat_completion_hot_path_routed_alias",
 			bench:     BenchmarkGatewayHotPathChatCompletionRoutedAlias,
 			maxAllocs: 104,   // baseline 101 (routed + resolver selector)
-			maxBytes:  14656, // baseline ~13.7 KB
+			maxBytes:  15168, // baseline ~14.2 KB
 		},
 		{
 			// Provider-qualified shape ("mock/gpt-4o-mini"): the qualified
@@ -474,7 +474,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 			name:      "gateway_chat_completion_hot_path_routed_qualified",
 			bench:     BenchmarkGatewayHotPathChatCompletionRoutedQualified,
 			maxAllocs: 103,   // baseline 100
-			maxBytes:  14720, // baseline ~13.8 KB
+			maxBytes:  15232, // baseline ~14.3 KB
 		},
 		{
 			// Default-deployment shape: auth + audit (bodies/headers) + usage +
@@ -485,7 +485,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 			name:      "gateway_chat_completion_production_shape",
 			bench:     BenchmarkGatewayHotPathProductionShape,
 			maxAllocs: 161,   // baseline 158 (audit bodies kept as raw JSON instead of decoded into maps)
-			maxBytes:  21056, // baseline ~19.6 KB
+			maxBytes:  21568, // baseline ~20.1 KB
 		},
 		{
 			// The same shape with live logs on and no dashboard connected,
@@ -519,7 +519,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 			name:      "shared_stream_audit_and_usage_observers",
 			bench:     BenchmarkSharedStreamingAuditAndUsageObservers,
 			maxAllocs: 157,  // baseline 155 (incl. request labels on both observers)
-			maxBytes:  9024, // baseline ~8.75 KB (incl. auth key id on the usage entry)
+			maxBytes:  9088, // baseline ~8.8 KB (incl. auth key id, markup and billed cost on the usage entry)
 		},
 		{
 			// Default configuration: audit body capture off, so the observed
@@ -537,7 +537,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 			name:      "streaming_observers_include_usage",
 			bench:     BenchmarkSharedStreamingObserversIncludeUsage,
 			maxAllocs: 50,   // baseline 48
-			maxBytes:  3136, // baseline ~2.9 KB
+			maxBytes:  3200, // baseline ~3.1 KB (incl. markup and billed cost on the usage entry)
 		},
 	}
 

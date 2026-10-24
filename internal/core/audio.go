@@ -16,7 +16,7 @@ import (
 type AudioSpeechRequest struct {
 	Model          string  `json:"model"`
 	Input          string  `json:"input"`
-	Voice          string  `json:"voice"`
+	Voice          string  `json:"voice,omitempty"`
 	Instructions   string  `json:"instructions,omitempty"`
 	ResponseFormat string  `json:"response_format,omitempty"`
 	Speed          float64 `json:"speed,omitempty"`
