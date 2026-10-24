@@ -7,6 +7,7 @@
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import Pagination from "$lib/components/molecules/Pagination.svelte";
   import Spinner from "$lib/components/atoms/Spinner.svelte";
+  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { chartColors, resolveCssColor } from "$lib/utils/chartTheme.js";
   import {
     formatCost,
@@ -17,6 +18,7 @@
   import { usagePage } from "./usage.svelte.js";
   import SessionIDChip from "./SessionIDChip.svelte";
   import {
+    breakdownHasBilledCost,
     chartWrapHeight,
     divergingDataFrom,
     endpointListSummary,
@@ -120,6 +122,9 @@
             : usagePage.sessionUsageLoading,
   );
   const costs = $derived(usagePage.usageMode === "costs");
+  const showBilled = $derived(
+    breakdownHasBilledCost(kind) && runtimeConfig.billedCostVisible(),
+  );
   const visible = $derived(
     kind === "userPath" ? userPathUsageChartVisible(rows) : rows.length > 0,
   );
@@ -268,6 +273,9 @@
               <th class="col-price">{m.usage_column_input_cost()}</th>
               <th class="col-price">{m.usage_column_output_cost()}</th>
               <th class="col-price">{m.usage_column_total_cost()}</th>
+              {#if showBilled}
+                <th class="col-price" title={m.usage_billed_cost_help()}>{m.usage_billed_cost()}</th>
+              {/if}
             </tr>
           </thead>
           <tbody>
@@ -344,6 +352,9 @@
                 <td class="col-price">{formatCost(row.input_cost)}</td>
                 <td class="col-price">{formatCost(row.output_cost)}</td>
                 <td class="col-price">{formatCost(row.total_cost)}</td>
+                {#if showBilled}
+                  <td class="col-price">{formatCost(row.billed_cost)}</td>
+                {/if}
               </tr>
             {/each}
           </tbody>

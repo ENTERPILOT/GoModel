@@ -29,6 +29,7 @@ type Config struct {
 	Logging       LogConfig           `yaml:"logging"`
 	Media         MediaConfig         `yaml:"media"`
 	Usage         UsageConfig         `yaml:"usage"`
+	Pricing       PricingConfig       `yaml:"pricing"`
 	Budgets       BudgetsConfig       `yaml:"budgets"`
 	RateLimits    RateLimitsConfig    `yaml:"rate_limits"`
 	Metrics       MetricsConfig       `yaml:"metrics"`
@@ -204,6 +205,9 @@ func buildDefaultConfig() *Config {
 			FlushInterval:               5,
 			RetentionDays:               90,
 		},
+		Pricing: PricingConfig{
+			BillCacheHits: true,
+		},
 		Budgets: BudgetsConfig{
 			Enabled: true,
 		},
@@ -320,6 +324,9 @@ func Load() (*LoadResult, error) {
 		return nil, err
 	}
 	if err := normalizeMCPConfig(&cfg.MCP); err != nil {
+		return nil, err
+	}
+	if err := validatePricingConfig(&cfg.Pricing); err != nil {
 		return nil, err
 	}
 	applyBudgetDependencies(cfg)

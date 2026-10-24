@@ -70,6 +70,11 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 	return &resp, nil
 }
 
+// CreateSpeech fills OpenAI's required voice, as Azure OpenAI requires one too.
+func (p *Provider) CreateSpeech(ctx context.Context, req *core.AudioSpeechRequest) (*core.AudioResponse, error) {
+	return p.CompatibleProvider.CreateSpeech(ctx, openai.WithDefaultSpeechVoice(req))
+}
+
 func (p *Provider) CreateBatch(ctx context.Context, req *core.BatchRequest) (*core.BatchResponse, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("batch request is required", nil)

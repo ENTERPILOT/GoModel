@@ -22,6 +22,7 @@ GoModel 通过一个网关将兼容 OpenAI 的请求路由到众多 AI 提供商
 | -------- | ---------- | ------------- | :--: | :----------: | :---: | :---: | :-----: | :------: | ----- |
 | OpenAI | `OPENAI_API_KEY` | `gpt-5.5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | ChatGPT 订阅 | `CHATGPT_API_KEY`（Codex 登录 Token） | `gpt-5.6-sol` | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | [ChatGPT 订阅](/zh/providers/chatgpt) |
+| GitHub Copilot | `GITHUB_COPILOT_API_KEY`（GitHub OAuth Token） | `claude-sonnet-5.5` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [GitHub Copilot](/zh/providers/github-copilot) |
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | [Anthropic](/zh/providers/anthropic) |
 | Cohere | `COHERE_API_KEY` | `command-a-plus-05-2026` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Cohere](/zh/providers/cohere) |
 | Google Gemini | `GEMINI_API_KEY` | `gemini-3.7-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | [Google Gemini](/zh/providers/gemini) |
@@ -77,6 +78,7 @@ GoModel 通过一个网关将兼容 OpenAI 的请求路由到众多 AI 提供商
 - **Xiaomi MiMo**：TTS（`mimo-v2.5-tts*`）和 ASR（`mimo-v2.5-asr`）既可以通过 `/v1/audio/speech` 和 `/v1/audio/transcriptions` 提供（转换为 MiMo 的 Chat Completions 音频协议），也可以直接通过 Chat Completions 使用；如需 1M 上下文，请在模型 ID 后追加 `[1m]`，并将其列入 `XIAOMI_MODELS`。
 - **OpenCode Go（OpenCode Zen）**：按模型路由：大多数模型使用 OpenAI 风格的 `/chat/completions`，而仅支持 `/messages` 的模型（默认为 `qwen3.7-max`，可通过 `OPENCODE_GO_MESSAGES_MODELS` 覆盖）会发送到 Anthropic 原生端点。没有推理参数的聊天请求会被注入 `reasoning_effort: "low"`，因为部分模型始终进行思考，并会拒绝省略该参数的请求（可通过 `OPENCODE_GO_DEFAULT_REASONING_EFFORT` 覆盖）。请设置 `OPENCODE_GO_API_KEY`；Base URL 默认为 `https://opencode.ai/zen/go/v1`。
 - **ChatGPT 订阅**：仅提供 `/v1/responses`，按 ChatGPT 套餐配额计费，而不是 API 额度。上游只接受严格的参数白名单且仅支持流式传输；GoModel 会适配请求，并为非流式调用方合并流。请将 `CHATGPT_API_KEY` 设置为 `codex login` 获取的访问 Token。报告的成本并非实际支出：这些模型 ID 在 OpenAI Platform 上同样存在，因此注册表会将其按 Token 计的价格套用到固定费率的订阅流量上。请不要对其使用预算和 `cost` 负载均衡。
+- **GitHub Copilot**：以 GitHub AI Credits 按 Token 计费，优先从 Copilot 套餐的每月额度中扣除。Copilot 仅通过 `/responses` 提供 GPT-5 及更新的模型，其他模型仅通过 `/chat/completions` 提供；GoModel 从 `/models` 读取每个模型的端点并进行转换，因此两种 API 对每个模型都可用。请将 `GITHUB_COPILOT_API_KEY` 设置为该账号的 GitHub OAuth Token，例如 `gh auth token` 的输出；可调用的模型取决于 Copilot 套餐。报告的成本是估算值，未考虑套餐包含的额度。
 - **Kimi Code**：没有按 Token 计的定价；配额每周刷新，同时还受滚动 5 小时窗口的限制。用量成本追踪对 Kimi Code 报告为零，因此 `cost` 负载均衡无法为其定价；建议采用保守的重试策略。
 - **Hetzner（实验性）**：Hetzner 声明其推理 API 处于实验阶段：可能出现破坏性变更，且不提供 SLA。实验期间，模型目录和速率限制窗口会发生变化；请查询实时的 `/v1/models` 端点和官方文档，而不要依赖快照。上表中的示例模型 ID（`Qwen/Qwen3.6-35B-A3B-FP8`）取自 2026-08-17 的 Hetzner 官方文档，阅读时可能已有所不同。实验期间免费，因此用量成本追踪报告为零，`cost` 负载均衡也无法为其定价。没有嵌入端点；仅支持聊天、`/v1/responses`（通过 Chat 转换）、模型列表和透传。透传是通用的转发器，✅ 标记表示适配器具备该能力；在 API 处于实验阶段时，Hetzner 对任意上游路径的兼容性尚未验证。`hetzner` 已包含在默认的 `ENABLED_PASSTHROUGH_PROVIDERS` 白名单中，因此 `/p/hetzner/...` 路由无需运维人员启用即可使用；如需限制，请将其从列表中移除。
 - **配置的模型列表**：所有提供商都可以通过 `<PROVIDER>_MODELS` 配置，例如 `OPENROUTER_MODELS=openai/gpt-oss-120b,anthropic/claude-sonnet-4` 或 `ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3`。DeepSeek 默认使用 `https://api.deepseek.com`；仅在使用兼容代理或其他 DeepSeek 端点时才需设置 `DEEPSEEK_BASE_URL`。默认情况下，`CONFIGURED_PROVIDER_MODELS_MODE=fallback` 仅在上游 `/models` 不可用或为空时使用这些列表。设置 `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` 后，对于定义了列表的提供商，只暴露已配置的模型，并跳过其上游 `/models` 调用。
@@ -114,6 +116,7 @@ GoModel 通过一个网关将兼容 OpenAI 的请求路由到众多 AI 提供商
 - **Xiaomi MiMo**：默认开启思考模式，使用 `[1m]` 上下文后缀，TTS/ASR 通过 Chat Completions 而不是原生音频端点运行。
 - **OpenCode Go**：OpenCode Zen 将模型分布在 OpenAI 风格的 `/chat/completions` 和 Anthropic 原生的 `/messages` 上；GoModel 按模型路由（仅支持 `/messages` 的模型集合需手动维护，默认为 `qwen3.7-max`）。
 - **ChatGPT 订阅**：仅支持 Responses 的上游，带有严格的参数白名单，用于在 Codex 与 ChatGPT 套餐之间部署 GoModel。
+- **GitHub Copilot**：获取 Token、Business 和 Enterprise 端点，以及按模型在 Chat Completions 与 Responses 之间的路由。
 
 <Tip>
   每个提供商页面都会在一个 CodeGroup 中展示三种启动方式：使用 `--env-file .env` 的 Docker（推荐）、使用内联 `-e` 参数的 Docker，以及通过 `make build` 构建的预编译二进制文件。当变量超过几个时，请复制 `.env.template`，填入所需的值，并在 Docker 和原生二进制文件中复用同一个文件。
