@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -36,6 +38,11 @@ type ClientConfig struct {
 
 	// ResponseHeaderTimeout specifies the amount of time to wait for a server's response headers
 	ResponseHeaderTimeout time.Duration
+
+	// Proxy selects the outbound proxy for each request. Nil keeps the
+	// process-wide HTTP_PROXY / HTTPS_PROXY / NO_PROXY behaviour; a function
+	// returning nil sends that request directly.
+	Proxy func(*http.Request) (*url.URL, error)
 }
 
 // getEnvDuration reads a duration from an environment variable, returning the default if not set or invalid.
@@ -118,8 +125,9 @@ func NewHTTPClient(config *ClientConfig) *http.Client {
 	dt := &dynamicTransport{config: *config}
 	dt.current()
 	return &http.Client{
-		Transport: dt,
-		Timeout:   config.Timeout,
+		Transport:     dt,
+		Timeout:       config.Timeout,
+		CheckRedirect: stopCrossOriginRedirects,
 	}
 }
 
@@ -172,9 +180,27 @@ func (d *dynamicTransport) CloseIdleConnections() {
 	}
 }
 
+// CurrentTransport returns the *http.Transport a client created by this
+// package currently sends through, so callers can inspect its settings such
+// as the proxy function. It reports false for any other client.
+func CurrentTransport(client *http.Client) (*http.Transport, bool) {
+	if client == nil {
+		return nil, false
+	}
+	dt, ok := client.Transport.(*dynamicTransport)
+	if !ok {
+		return nil, false
+	}
+	return dt.current(), true
+}
+
 func newTransport(config *ClientConfig, state *trustState) *http.Transport {
+	proxy := config.Proxy
+	if proxy == nil {
+		proxy = http.ProxyFromEnvironment
+	}
 	return &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
+		Proxy: proxy,
 		DialContext: (&net.Dialer{
 			Timeout:   config.DialTimeout,
 			KeepAlive: config.KeepAlive,
@@ -190,36 +216,55 @@ func newTransport(config *ClientConfig, state *trustState) *http.Transport {
 	}
 }
 
+// stopCrossOriginRedirects follows redirects like net/http's default policy
+// while they stay on the original scheme, host, and port, and hands any other
+// redirect back to the caller unfollowed. Following one would resend the
+// request to another host: provider credentials that net/http does not strip
+// (X-Api-Key, Api-Key, X-Goog-Api-Key, xi-api-key, ...), tokens a wrapping
+// transport adds on every hop (Google OAuth), and, for 307 and 308, the
+// request body.
+func stopCrossOriginRedirects(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxRedirects)
+	}
+	origin := via[0].URL
+	if req.URL.Scheme != origin.Scheme || !strings.EqualFold(req.URL.Host, origin.Host) {
+		return http.ErrUseLastResponse
+	}
+	return nil
+}
+
+// maxRedirects matches net/http's default redirect limit.
+const maxRedirects = 10
+
 // NewDefaultHTTPClient creates a new HTTP client with default configuration.
 // This is a convenience function equivalent to NewHTTPClient(nil).
 func NewDefaultHTTPClient() *http.Client {
 	return NewHTTPClient(nil)
 }
 
-// maxRedirects mirrors net/http's default redirect limit, which is lost as
-// soon as a custom CheckRedirect is installed.
-const maxRedirects = 10
-
-// NewAWSSDKClient returns a client on the shared transport for use with
-// aws-sdk-go-v2's WithHTTPClient. The SDK's own client follows only 307 and
-// 308 redirects, because a 301/302 would replay a signed request against a
-// different host; a custom client must do the same.
-func NewAWSSDKClient() *http.Client {
-	client := NewDefaultHTTPClient()
+// NewAWSSDKClient returns a client for aws-sdk-go-v2's WithHTTPClient on
+// base's transport, or on the shared default transport when base is nil, so
+// a provider's outbound proxy and the gateway's TLS trust both apply. The
+// SDK's own client follows only 307 and 308 redirects, because a 301/302
+// would replay a signed request; this client does the same, and like every
+// client here it never follows a redirect to another origin.
+func NewAWSSDKClient(base *http.Client) *http.Client {
+	if base == nil {
+		base = NewDefaultHTTPClient()
+	}
+	client := *base
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if len(via) >= maxRedirects {
-			return fmt.Errorf("stopped after %d redirects", maxRedirects)
-		}
 		if req.Response == nil {
 			return http.ErrUseLastResponse
 		}
 		switch req.Response.StatusCode {
 		case http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
-			return nil
+			return stopCrossOriginRedirects(req, via)
 		}
 		return http.ErrUseLastResponse
 	}
-	return client
+	return &client
 }
 
 // NewClientWithTimeout returns a client on the shared transport settings

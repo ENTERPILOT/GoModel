@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 
 import {
   buildUpsertUserPayload,
+  countInactiveUserNodes,
   defaultUserForm,
   filterUserNodes,
   parentEffectiveModels,
   previewEffectiveModels,
   selectorMatchesModel,
   sortUserNodes,
+  userNodeInactive,
   userNodeKind,
   userNodeRestricted,
   userPathDepth,
@@ -29,6 +31,7 @@ function node(overrides) {
     inherited_from: [],
     configured: false,
     key_count: 0,
+    active_key_count: 0,
     ...overrides,
   };
 }
@@ -96,6 +99,48 @@ test("filterUserNodes matches path, description, and selectors; sortUserNodes or
   assert.equal(filterUserNodes(nodes, "anthropic").length, 1);
   assert.equal(filterUserNodes(nodes, "acme").length, 2);
   assert.equal(filterUserNodes(nodes, "").length, 3);
+});
+
+test("userNodeInactive is true only when a node has keys and none are active", () => {
+  assert.equal(userNodeInactive(node({ key_count: 2, active_key_count: 1 })), false);
+  assert.equal(userNodeInactive(node({ key_count: 2, active_key_count: 0 })), true);
+  assert.equal(userNodeInactive(node({ key_count: 1 })), true);
+  // Zero-key nodes are groups or configured policies and never hide.
+  assert.equal(userNodeInactive(node({ key_count: 0 })), false);
+  assert.equal(userNodeInactive(null), false);
+});
+
+test("filterUserNodes hides all-inactive-key users unless showInactive; groups stay visible", () => {
+  const nodes = [
+    node({ user_path: "/friends", key_count: 0 }),
+    node({ user_path: "/friends/tom", key_count: 1, active_key_count: 0 }),
+    node({ user_path: "/friends/anna", key_count: 1, active_key_count: 1 }),
+    node({ user_path: "/policies", configured: true }),
+  ];
+  assert.deepEqual(
+    filterUserNodes(nodes, "").map((n) => n.user_path),
+    ["/friends", "/friends/anna", "/policies"],
+  );
+  assert.deepEqual(
+    filterUserNodes(nodes, "", { showInactive: true }).map((n) => n.user_path),
+    ["/friends", "/friends/tom", "/friends/anna", "/policies"],
+  );
+  assert.deepEqual(
+    filterUserNodes(nodes, "tom", { showInactive: true }).map((n) => n.user_path),
+    ["/friends/tom"],
+  );
+});
+
+test("countInactiveUserNodes counts the rows the default view hides", () => {
+  const nodes = [
+    node({ user_path: "/friends" }),
+    node({ user_path: "/friends/tom", key_count: 1, active_key_count: 0 }),
+    node({ user_path: "/friends/anna", key_count: 2, active_key_count: 0 }),
+    node({ user_path: "/friends/bob", key_count: 1, active_key_count: 1 }),
+  ];
+  assert.equal(countInactiveUserNodes(nodes), 2);
+  assert.equal(countInactiveUserNodes([]), 0);
+  assert.equal(countInactiveUserNodes(undefined), 0);
 });
 
 test("userPathValidationError mirrors the backend rules", () => {
@@ -167,4 +212,62 @@ test("previewEffectiveModels intersects the parent's models with the typed selec
   assert.deepEqual(previewEffectiveModels(parent, ["openai/*"]), []);
   assert.deepEqual(previewEffectiveModels(parent, ["anthropic/opus"]), ["anthropic/opus"]);
   assert.deepEqual(previewEffectiveModels(parent, []), parent);
+});
+
+test("filterUserNodes keeps inactive ancestor when descendant is visible, and countInactiveUserNodes excludes it", () => {
+  // Inactive parent (/acme) with active child → parent stays visible and is NOT counted hidden.
+  // Child /acme/eng/deep is inactive, no active descendants → hidden and counted.
+  const nodes = [
+    node({ user_path: "/acme", key_count: 1, active_key_count: 0 }),
+    node({ user_path: "/acme/eng", key_count: 1, active_key_count: 1 }),
+    node({ user_path: "/acme/eng/deep", key_count: 1, active_key_count: 0 }),
+    node({ user_path: "/policies", key_count: 0 }),
+  ];
+  const filtered = filterUserNodes(nodes, "");
+  assert.deepEqual(
+    filtered.map((n) => n.user_path),
+    ["/acme", "/acme/eng", "/policies"],
+  );
+  // /acme is retained (anchors visible /acme/eng); /acme/eng/deep is hidden.
+  assert.equal(countInactiveUserNodes(nodes), 1);
+});
+
+test("countInactiveUserNodes counts fully inactive subtrees", () => {
+  const nodes = [
+    node({ user_path: "/teams", key_count: 1, active_key_count: 0 }),
+    node({ user_path: "/teams/old", key_count: 1, active_key_count: 0 }),
+  ];
+  assert.equal(countInactiveUserNodes(nodes), 2);
+  assert.deepEqual(
+    filterUserNodes(nodes, ""),
+    [],
+  );
+});
+
+test("filterUserNodes retains inactive ancestors only when query matches an active descendant", () => {
+  // /acme is inactive; /acme/eng is active but does NOT match query "xyz".
+  // Retained inactive ancestors must be scoped to query-matching active nodes,
+  // so /acme must NOT be retained and visibleNodes must be empty.
+  const nodes = [
+    node({ user_path: "/acme", key_count: 1, active_key_count: 0 }),
+    node({ user_path: "/acme/eng", key_count: 1, active_key_count: 1 }),
+  ];
+  const filtered = filterUserNodes(nodes, "xyz");
+  assert.deepEqual(filtered, []);
+  assert.equal(countInactiveUserNodes(nodes, "xyz"), 1);
+});
+
+test("filterUserNodes retains inactive ancestor when query matches an active descendant", () => {
+  // /acme is inactive; /acme/eng is active AND matches "eng".
+  // /acme must be retained to anchor the visible descendant.
+  const nodes = [
+    node({ user_path: "/acme", key_count: 1, active_key_count: 0 }),
+    node({ user_path: "/acme/eng", key_count: 1, active_key_count: 1 }),
+  ];
+  const filtered = filterUserNodes(nodes, "eng");
+  assert.deepEqual(
+    filtered.map((n) => n.user_path),
+    ["/acme", "/acme/eng"],
+  );
+  assert.equal(countInactiveUserNodes(nodes, "eng"), 0);
 });

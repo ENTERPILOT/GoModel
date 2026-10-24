@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 type workflowPolicyResolverFunc func(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error)
@@ -32,17 +33,11 @@ func TestBatchOrchestratorWorkflowForBatchNormalizesPolicyErrors(t *testing.T) {
 		ProviderType: "openai",
 		Selector:     core.NewWorkflowSelector("openai", "gpt-4o-mini"),
 	})
-	if err == nil {
-		t.Fatal("workflowForBatch() error = nil, want gateway error")
-	}
+	require.Error(t, err)
 
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("workflowForBatch() error = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeProvider {
-		t.Fatalf("gateway error type = %q, want %q", gatewayErr.Type, core.ErrorTypeProvider)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, core.ErrorTypeProvider, gatewayErr.Type)
 }
 
 func TestBatchOrchestratorCreateEnforcesBudgetAfterWorkflowResolution(t *testing.T) {
@@ -56,9 +51,8 @@ func TestBatchOrchestratorCreateEnforcesBudgetAfterWorkflowResolution(t *testing
 	orchestrator := NewBatchOrchestrator(BatchConfig{
 		Provider: provider,
 		WorkflowPolicyResolver: workflowPolicyResolverFunc(func(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
-			if selector.Provider != "openai" {
-				t.Fatalf("workflow selector provider = %q, want openai", selector.Provider)
-			}
+			require.Equal(t, "openai", selector.Provider)
+
 			return &core.ResolvedWorkflowPolicy{
 				VersionID: "workflow-budget-disabled",
 				Features: core.WorkflowFeatures{
@@ -84,21 +78,12 @@ func TestBatchOrchestratorCreateEnforcesBudgetAfterWorkflowResolution(t *testing
 		RequestID: "req-budget",
 		Endpoint:  core.DescribeEndpoint(http.MethodPost, "/v1/batches"),
 	})
-	if !errors.Is(err, budgetErr) {
-		t.Fatalf("Create() error = %v, want %v", err, budgetErr)
-	}
-	if budgetWorkflow == nil || budgetWorkflow.Policy == nil {
-		t.Fatal("budget enforcer did not receive resolved workflow")
-	}
-	if budgetWorkflow.Policy.VersionID != "workflow-budget-disabled" {
-		t.Fatalf("budget workflow version = %q, want workflow-budget-disabled", budgetWorkflow.Policy.VersionID)
-	}
-	if budgetRequestID != "req-budget" {
-		t.Fatalf("budget request id = %q, want req-budget", budgetRequestID)
-	}
-	if provider.createCalls != 0 {
-		t.Fatalf("provider CreateBatch calls = %d, want 0", provider.createCalls)
-	}
+	require.ErrorIs(t, err, budgetErr)
+	require.NotNil(t, budgetWorkflow)
+	require.NotNil(t, budgetWorkflow.Policy)
+	require.Equal(t, "workflow-budget-disabled", budgetWorkflow.Policy.VersionID)
+	require.Equal(t, "req-budget", budgetRequestID)
+	require.Equal(t, 0, provider.createCalls)
 }
 
 type batchBudgetProvider struct {

@@ -53,7 +53,7 @@
         />
       </div>
       <div class="table-toolbar-actions">
-        <span class="model-count">{wf.filteredWorkflows.length + " active scopes"}</span>
+        <span class="model-count">{m.workflows_active_scopes({ count: wf.filteredWorkflows.length })}</span>
       </div>
     </div>
   {/if}
@@ -61,16 +61,14 @@
   <WorkflowEditor />
 
   <WorkflowList />
-
-  <datalist id="workflow-guardrail-options">
-    {#each wf.guardrailRefs as guardrailRef (guardrailRef)}
-      <option value={guardrailRef}></option>
-    {/each}
-  </datalist>
 </div>
 
 <style>
 /* Workflows */
+.workflow-create-btn {
+    white-space: nowrap;
+  }
+
 .workflow-page-note {
     margin-top: 6px;
     color: var(--text-muted);

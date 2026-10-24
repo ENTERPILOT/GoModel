@@ -9,6 +9,7 @@
 // land on the input that caused it.
 
 import { splitCommaList } from "../../lib/utils/format.js";
+import { hasSecretReference } from "../../lib/utils/secretReference.js";
 import * as m from "../../lib/paraglide/messages.js";
 
 export { splitCommaList };
@@ -40,6 +41,7 @@ const PROVIDER_CREDENTIAL_FIELD_NAMES = [
   FIELD_SERVICE_ACCOUNT_JSON,
   "service_account_json_base64",
   "gcp_scope",
+  "proxy_url",
   FIELD_MODELS,
 ];
 
@@ -112,6 +114,12 @@ function providerCredentialFields() {
       control: "text",
       placeholder: "https://www.googleapis.com/auth/cloud-platform",
     },
+    proxy_url: {
+      label: m.providers_proxy_url(),
+      control: "text",
+      placeholder: "socks5://user:pass@proxy.internal:1080",
+      hint: m.providers_proxy_url_hint(),
+    },
     [FIELD_MODELS]: {
       label: m.providers_models_field(),
       control: "text",
@@ -158,6 +166,7 @@ export function defaultProviderCredentialForm() {
     service_account_json: "",
     service_account_json_base64: "",
     gcp_scope: "",
+    proxy_url: "",
     models: "",
     enabled: true,
   };
@@ -366,6 +375,7 @@ export function providerCredentialRowToForm(row) {
       (row && row.service_account_json_base64) || "",
     ),
     gcp_scope: String((row && row.gcp_scope) || ""),
+    proxy_url: String((row && row.proxy_url) || ""),
     models: (Array.isArray(row && row.models) ? row.models : []).join(", "),
     enabled: !row || row.enabled !== false,
   };
@@ -440,7 +450,11 @@ function validateProviderCredentialField(form, field) {
   if (field.name === FIELD_BASE_URL && !value.includes("://") && /[./]/.test(value)) {
     return m.providers_url_scheme({ value });
   }
-  if (field.name === FIELD_SERVICE_ACCOUNT_JSON && !isRedactedCredentialValue(value)) {
+  if (
+    field.name === FIELD_SERVICE_ACCOUNT_JSON &&
+    !isRedactedCredentialValue(value) &&
+    !hasSecretReference(value)
+  ) {
     try {
       JSON.parse(value);
     } catch {

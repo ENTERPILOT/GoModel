@@ -6,6 +6,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // runtimeConfigStorePath holds the dashboard store that mirrors DashboardConfigResponse.
@@ -33,18 +36,13 @@ func TestDashboardConfigContract_MatchesFrontendAllowlist(t *testing.T) {
 			backend[name] = true
 		}
 	}
-	if len(backend) == 0 {
-		t.Fatal("DashboardConfigResponse exposes no json-tagged fields")
-	}
+	require.NotEmpty(t, backend)
 
 	source, err := os.ReadFile(runtimeConfigStorePath)
-	if err != nil {
-		t.Fatalf("read %s: %v", runtimeConfigStorePath, err)
-	}
+	require.NoError(t, err, runtimeConfigStorePath)
+
 	block := allowlistBlockRe.FindSubmatch(source)
-	if block == nil {
-		t.Fatalf("CONFIG_KEYS allowlist not found in %s", runtimeConfigStorePath)
-	}
+	require.NotNil(t, block, "CONFIG_KEYS allowlist not found in %s", runtimeConfigStorePath)
 
 	frontend := map[string]bool{}
 	for _, m := range allowlistKeyRe.FindAllSubmatch(block[1], -1) {
@@ -52,13 +50,9 @@ func TestDashboardConfigContract_MatchesFrontendAllowlist(t *testing.T) {
 	}
 
 	for key := range backend {
-		if !frontend[key] {
-			t.Errorf("%s is served by /admin/runtime/config but missing from CONFIG_KEYS in %s; the dashboard will drop it and fall back to the gate's default", key, runtimeConfigStorePath)
-		}
+		assert.True(t, frontend[key], "%s is served by /admin/runtime/config but missing from CONFIG_KEYS in %s; the dashboard will drop it and fall back to the gate's default", key, runtimeConfigStorePath)
 	}
 	for key := range frontend {
-		if !backend[key] {
-			t.Errorf("CONFIG_KEYS allowlists %s, but DashboardConfigResponse never emits it", key)
-		}
+		assert.True(t, backend[key], "CONFIG_KEYS allowlists %s, but DashboardConfigResponse never emits it", key)
 	}
 }

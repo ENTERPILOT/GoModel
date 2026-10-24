@@ -103,8 +103,26 @@ func deriveWorkflowWithPolicy(
 		}
 		return workflow, nil
 
+	case core.OperationSystemOne, core.OperationDecisions:
+		// The System One and Decisions handlers resolve the model
+		// themselves: only they know whether the endpoint is available
+		// (answering 404 before any model error) and when an unlisted pinned
+		// version may still route to a jev provider.
+		return nil, nil
+
 	case core.OperationChatCompletions, core.OperationResponses, core.OperationEmbeddings:
 		workflow.Mode = core.ExecutionModeTranslated
+		if desc.BodyMode != core.BodyModeJSON {
+			// Responses lifecycle routes (GET/DELETE /v1/responses/{id},
+			// /cancel, /input_items) address a stored response by id and carry
+			// no model. Running the create-path model resolution on them turns
+			// any JSON body a client happens to send — `{}` included — into a
+			// misleading "model is required" 400.
+			if err := applyWorkflowPolicy(c.Request().Context(), workflow, policyResolver, core.WorkflowSelector{}); err != nil {
+				return nil, err
+			}
+			return workflow, nil
+		}
 		resolution, parsed, err := ensureRequestModelResolution(c, provider, resolver)
 		if err != nil {
 			return nil, err
@@ -114,6 +132,9 @@ func deriveWorkflowWithPolicy(
 				return nil, err
 			}
 			return workflow, nil
+		}
+		if systemOneOnlyModel(provider, resolution) {
+			return nil, systemOneOnlyModelError(desc.Operation, resolution)
 		}
 		return translatedWorkflow(c.Request().Context(), requestID, desc, resolution, policyResolver)
 

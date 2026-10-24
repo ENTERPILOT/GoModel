@@ -2,6 +2,7 @@ package anthropicapi
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -49,6 +50,33 @@ func ToChatRequest(req *MessagesRequest) (*core.ChatRequest, error) {
 // the translated pipeline.
 func ToChatRequestLenient(req *MessagesRequest) (*core.ChatRequest, error) {
 	return toChatRequest(req, true)
+}
+
+// HasUnsignedThinking reports whether an assistant turn replays a thinking
+// block with no signature. Such a block is reasoning some other provider
+// produced (the gateway renders it with an empty signature, because the
+// Anthropic schema requires the member); Anthropic refuses any signature it did
+// not mint, so a request carrying one must take the translated pipeline, which
+// drops the block, instead of being forwarded to Claude verbatim.
+func HasUnsignedThinking(req *MessagesRequest) bool {
+	if req == nil {
+		return false
+	}
+	for _, message := range req.Messages {
+		if message.Role != "assistant" {
+			continue
+		}
+		_, blocks, err := parseContent(message.Content)
+		if err != nil {
+			continue
+		}
+		for _, block := range blocks {
+			if block.Type == "thinking" && strings.TrimSpace(block.Signature) == "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func toChatRequest(req *MessagesRequest, lenient bool) (*core.ChatRequest, error) {
@@ -101,6 +129,9 @@ func toChatRequest(req *MessagesRequest, lenient bool) (*core.ChatRequest, error
 
 	if extra := buildExtraFields(req); !extra.IsEmpty() {
 		chat.ExtraFields = extra
+	}
+	if err := applyOutputConfig(req, chat); err != nil && !lenient {
+		return nil, err
 	}
 	return chat, nil
 }
@@ -162,9 +193,9 @@ func convertMessages(req *MessagesRequest, lenient bool) ([]core.Message, error)
 // blocks become standalone role:"tool" messages that precede the remaining
 // content, matching the OpenAI ordering where tool responses follow the
 // assistant tool call and any user follow-up comes after. Assistant thinking
-// blocks are preserved verbatim on the message so the Anthropic provider can
-// replay them; they have no meaning for other providers and are stripped
-// before the request reaches one.
+// blocks are preserved verbatim under extra_content.anthropic so the Anthropic
+// provider can replay them; the router strips them before any other provider
+// sees the request.
 func convertBlockMessage(role string, blocks []ContentBlock, lenient bool) ([]core.Message, error) {
 	var (
 		toolMessages []core.Message
@@ -186,9 +217,17 @@ func convertBlockMessage(role string, blocks []ContentBlock, lenient bool) ([]co
 			if ok {
 				parts = append(parts, part)
 			}
+		case "tool_reference":
+			if text := textBlockText(block); text != "" {
+				parts = append(parts, core.ContentPart{Type: "text", Text: text, ExtraFields: extra})
+			}
 		case "tool_use":
 			if strings.TrimSpace(block.Name) == "" {
 				return nil, fmt.Errorf("tool_use block is missing name")
+			}
+			extra, err = toolUseExtra(extra, block.ExtraContent)
+			if err != nil {
+				return nil, err
 			}
 			toolCalls = append(toolCalls, core.ToolCall{
 				ID:          block.ID,
@@ -205,12 +244,40 @@ func convertBlockMessage(role string, blocks []ContentBlock, lenient bool) ([]co
 			if err != nil {
 				return nil, err
 			}
+			extra, err = toolResultExtra(extra, block.IsError)
+			if err != nil {
+				return nil, err
+			}
 			toolMessages = append(toolMessages, core.Message{
 				Role:        "tool",
 				ToolCallID:  id,
 				Content:     content,
-				ExtraFields: toolResultExtra(extra, block.IsError),
+				ExtraFields: extra,
 			})
+		case "server_tool_use":
+			// Anthropic runs the server-side tool search itself and replays it
+			// in the assistant turn as this call plus its
+			// tool_search_tool_result. No client executes it, so it cannot
+			// become a tool call; the search degrades to text like its result.
+			// Other server tools (web search, code execution) carry results
+			// the translated pipeline cannot reproduce and stay rejected.
+			if !isToolSearchTool(block.Name) {
+				if lenient {
+					continue
+				}
+				return nil, unsupportedBlockError(block.Type)
+			}
+			if text := toolSearchCallText(block.Input); text != "" {
+				parts = append(parts, core.ContentPart{Type: "text", Text: text, ExtraFields: extra})
+			}
+		case "tool_search_tool_result":
+			// The server-side tool search is answered by Anthropic, not the
+			// client, so it cannot become a role:"tool" message. Its matched
+			// tools degrade to text in the turn that carries it: no provider
+			// behind the translated pipeline can resolve a tool_reference.
+			if text := toolReferencesText(block.References()); text != "" {
+				parts = append(parts, core.ContentPart{Type: "text", Text: text, ExtraFields: extra})
+			}
 		case "thinking", "redacted_thinking":
 			// Only assistant turns carry thinking; anywhere else it is an
 			// artifact with nothing to replay.
@@ -225,7 +292,7 @@ func convertBlockMessage(role string, blocks []ContentBlock, lenient bool) ([]co
 			// container uploads, …) have no canonical chat equivalent. Reject
 			// them rather than silently dropping the data, which would make
 			// the model answer as if the content were never sent.
-			return nil, fmt.Errorf("unsupported content block type %q; use the /p/anthropic/v1/messages passthrough for provider-native features", block.Type)
+			return nil, unsupportedBlockError(block.Type)
 		}
 	}
 
@@ -238,13 +305,14 @@ func convertBlockMessage(role string, blocks []ContentBlock, lenient bool) ([]co
 			ToolCalls: toolCalls,
 		}
 		if len(thinking) > 0 {
-			raw, err := json.Marshal(thinking)
+			raw, err := json.Marshal(map[string][]json.RawMessage{core.ThinkingBlocksField: thinking})
 			if err != nil {
 				return nil, fmt.Errorf("thinking blocks: %v", err)
 			}
-			msg.ExtraFields = core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
-				core.ThinkingBlocksField: raw,
-			})
+			msg.ExtraFields, err = msg.ExtraFields.WithExtraContent(core.ExtraContentVendorAnthropic, raw)
+			if err != nil {
+				return nil, fmt.Errorf("thinking blocks: %v", err)
+			}
 		}
 		messages = append(messages, msg)
 	}
@@ -348,6 +416,13 @@ func documentPart(block ContentBlock, extra core.UnknownJSONFields) (core.Conten
 	default:
 		return core.ContentPart{}, false, fmt.Errorf("unsupported document source type %q", source.Type)
 	}
+	if file.Filename == "" && source.Type == "base64" {
+		// OpenAI rejects inline file data without a filename, and Anthropic
+		// clients often send documents with no title. Text documents keep no
+		// invented name: providers that cannot take text files receive them
+		// as text, where a name would read as the caller's title.
+		file.Filename = core.DefaultFilename(file.FileData)
+	}
 	return core.ContentPart{Type: "file", File: file, ExtraFields: extra}, true, nil
 }
 
@@ -380,6 +455,66 @@ func searchResultText(block ContentBlock) (string, error) {
 	return strings.Join(lines, "\n"), nil
 }
 
+// toolReferencesText renders the tools a server-side tool search matched as the
+// text a provider without tool_reference support reads.
+func toolReferencesText(refs []ToolReference) string {
+	names := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if name := strings.TrimSpace(ref.ToolName); name != "" {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return "Tools found: " + strings.Join(names, ", ")
+}
+
+func unsupportedBlockError(blockType string) error {
+	return fmt.Errorf("unsupported content block type %q; use the /p/anthropic/v1/messages passthrough for provider-native features", blockType)
+}
+
+// isToolSearchTool reports whether a server tool name or type is Anthropic's
+// tool search: the tool_search_tool_regex and tool_search_tool_bm25 names and
+// their versioned types (tool_search_tool_regex_20251119). Any version
+// suffix is accepted so a new release keeps working; other variants are not.
+func isToolSearchTool(nameOrType string) bool {
+	value := strings.TrimSpace(nameOrType)
+	for _, base := range []string{"tool_search_tool_regex", "tool_search_tool_bm25"} {
+		if value == base || strings.HasPrefix(value, base+"_") {
+			return true
+		}
+	}
+	return false
+}
+
+// toolSearchCallText renders a server-side tool search call as text. The regex
+// variant sends its search as "pattern", the BM25 variant as "query".
+func toolSearchCallText(input json.RawMessage) string {
+	var args struct {
+		Pattern string `json:"pattern"`
+		Query   string `json:"query"`
+	}
+	if err := json.Unmarshal(input, &args); err != nil {
+		return ""
+	}
+	search := strings.TrimSpace(cmp.Or(args.Query, args.Pattern))
+	if search == "" {
+		return ""
+	}
+	return "Tool search: " + search
+}
+
+// textBlockText returns a text block's text, or the name a tool_reference
+// carries: Anthropic lets a tool_reference appear anywhere a text block can,
+// and outside a tool_result there is no tool message to hold it.
+func textBlockText(block ContentBlock) string {
+	if block.Type == "tool_reference" {
+		return strings.TrimSpace(block.ToolName)
+	}
+	return block.Text
+}
+
 // textBlocksText joins the text of a string-or-text-block-array content value.
 func textBlocksText(raw json.RawMessage) (string, error) {
 	text, blocks, err := parseContent(raw)
@@ -391,11 +526,11 @@ func textBlocksText(raw json.RawMessage) (string, error) {
 	}
 	parts := make([]string, 0, len(blocks))
 	for _, block := range blocks {
-		if block.Type != "text" {
+		if block.Type != "text" && block.Type != "tool_reference" {
 			return "", fmt.Errorf("block type %q is not supported; only text is allowed", block.Type)
 		}
-		if block.Text != "" {
-			parts = append(parts, block.Text)
+		if text := textBlockText(block); text != "" {
+			parts = append(parts, text)
 		}
 	}
 	return strings.Join(parts, "\n"), nil
@@ -421,16 +556,31 @@ func thinkingBlockJSON(block ContentBlock) json.RawMessage {
 	return raw
 }
 
-// toolResultExtra adds the is_error marker to a tool message's extras.
-func toolResultExtra(extra core.UnknownJSONFields, isError bool) core.UnknownJSONFields {
+// toolResultExtra adds the is_error marker to a tool message's extras under
+// extra_content.anthropic.
+func toolResultExtra(extra core.UnknownJSONFields, isError bool) (core.UnknownJSONFields, error) {
 	if !isError {
-		return extra
+		return extra, nil
 	}
-	fields := map[string]json.RawMessage{core.ToolResultIsErrorField: json.RawMessage("true")}
-	if raw := extra.Lookup("cache_control"); len(raw) > 0 {
-		fields["cache_control"] = raw
+	marker, err := json.Marshal(map[string]bool{core.ToolResultIsErrorField: true})
+	if err != nil {
+		return core.UnknownJSONFields{}, err
 	}
-	return core.UnknownJSONFieldsFromMap(fields)
+	return extra.WithExtraContent(core.ExtraContentVendorAnthropic, marker)
+}
+
+// toolUseExtra carries a tool_use block's extra_content (provider replay
+// state the client echoed back) onto the canonical tool call.
+func toolUseExtra(extra core.UnknownJSONFields, extraContent json.RawMessage) (core.UnknownJSONFields, error) {
+	trimmed := bytes.TrimSpace(extraContent)
+	if len(trimmed) == 0 || core.IsJSONNull(trimmed) {
+		return extra, nil
+	}
+	merged, err := core.MergeUnknownJSONFields(extra, map[string]json.RawMessage{core.ExtraContentField: trimmed})
+	if err != nil {
+		return core.UnknownJSONFields{}, fmt.Errorf("tool_use extra_content: %v", err)
+	}
+	return merged, nil
 }
 
 // decodeSource decodes an image/document source object. A nil result means
@@ -448,6 +598,25 @@ func decodeSource(raw json.RawMessage) (*Source, error) {
 		return nil, fmt.Errorf("source: %v", err)
 	}
 	return &source, nil
+}
+
+// decodeSearchResult decodes the nested content object of a
+// tool_search_tool_result block, which holds the tools the server-side search
+// matched. Other block types leave SearchResult nil.
+func (block *ContentBlock) decodeSearchResult() error {
+	if block.Type != "tool_search_tool_result" {
+		return nil
+	}
+	trimmed := bytes.TrimSpace(block.Content)
+	if len(trimmed) == 0 || core.IsJSONNull(trimmed) {
+		return nil
+	}
+	var result ToolSearchResult
+	if err := json.Unmarshal(trimmed, &result); err != nil {
+		return fmt.Errorf("tool_search_tool_result content: %v", err)
+	}
+	block.SearchResult = &result
+	return nil
 }
 
 // collapseParts reduces content parts to a plain string when they are all text,
@@ -492,6 +661,11 @@ func parseContent(raw json.RawMessage) (text string, blocks []ContentBlock, err 
 		decoded := []ContentBlock{}
 		if err := json.Unmarshal(trimmed, &decoded); err != nil {
 			return "", nil, err
+		}
+		for i := range decoded {
+			if err := decoded[i].decodeSearchResult(); err != nil {
+				return "", nil, err
+			}
 		}
 		return "", decoded, nil
 	default:
@@ -590,14 +764,14 @@ func validatedCacheControlJSON(raw json.RawMessage) (json.RawMessage, error) {
 }
 
 // toolResultContent converts a tool_result block content, which itself may be
-// a string or an array of text, image, document, and search_result blocks,
-// into canonical message content. Text-only results collapse to a plain
-// string; results carrying attachments (Claude Code returns screenshots and
-// read image/PDF files this way) keep the structured part list so the egress
-// translator can forward them. A present but malformed or otherwise
-// unsupported tool_result content is an error rather than silently dropped:
-// the downstream provider must not receive an empty or truncated tool
-// response.
+// a string or an array of text, image, document, search_result, and
+// tool_reference blocks, into canonical message content. Text-only results
+// collapse to a plain string; results carrying attachments (Claude Code returns
+// screenshots and read image/PDF files this way) keep the structured part list
+// so the egress translator can forward them. A tool_reference degrades to the
+// tool name as text. A present but malformed or otherwise unsupported
+// tool_result content is an error rather than silently dropped: the downstream
+// provider must not receive an empty or truncated tool response.
 func toolResultContent(raw json.RawMessage, lenient bool) (core.MessageContent, error) {
 	text, blocks, err := parseContent(raw)
 	if err != nil {
@@ -620,6 +794,14 @@ func toolResultContent(raw json.RawMessage, lenient bool) (core.MessageContent, 
 			}
 			if ok {
 				parts = append(parts, part)
+			}
+		case "tool_reference":
+			// Claude Code returns the tools a deferred-loading search matched
+			// as tool_reference blocks. No provider behind the translated
+			// pipeline resolves those schemas, so the names travel as text
+			// instead of making the whole tool result undeliverable.
+			if text := textBlockText(block); text != "" {
+				parts = append(parts, core.ContentPart{Type: "text", Text: text, ExtraFields: extra})
 			}
 		default:
 			if lenient {
@@ -680,7 +862,10 @@ func convertTools(tools []Tool, lenient bool) ([]map[string]any, error) {
 		// canonical chat equivalent; reject them rather than mistranslating
 		// them into a phantom custom function the gateway cannot execute.
 		if t := strings.TrimSpace(tool.Type); t != "" && t != "custom" {
-			if lenient {
+			// The tool search only picks among deferred tools, which are
+			// sent in full like any other tool, so it is dropped rather
+			// than rejected.
+			if lenient || isToolSearchTool(t) {
 				continue
 			}
 			return nil, core.NewInvalidRequestError(fmt.Sprintf("tools[%d]: server tool type %q is not supported; use the /p/anthropic/v1/messages passthrough for provider-native tools", i, tool.Type), nil)
@@ -698,6 +883,9 @@ func convertTools(tools []Tool, lenient bool) ([]map[string]any, error) {
 				return nil, core.NewInvalidRequestError(fmt.Sprintf("tools[%d].input_schema: %v", i, err), err)
 			}
 			function["parameters"] = schema
+		}
+		if tool.Strict != nil {
+			function["strict"] = *tool.Strict
 		}
 		converted := map[string]any{"type": "function", "function": function}
 		raw, err := validatedCacheControlJSON(tool.CacheControl)
@@ -786,66 +974,4 @@ func buildExtraFields(req *MessagesRequest) core.UnknownJSONFields {
 		fields["cache_control"] = core.CloneRawJSON(raw)
 	}
 	return core.UnknownJSONFieldsFromMap(fields)
-}
-
-// EstimateInputTokens returns a provider-agnostic heuristic estimate of the
-// input token count for a Messages request (roughly characters / 4). It is an
-// approximation, not a tokenizer-exact count.
-func EstimateInputTokens(req *MessagesRequest) int {
-	if req == nil {
-		return 0
-	}
-	// Errors are ignored here: count_tokens is a best-effort heuristic and
-	// must not fail on malformed sub-fields that ToChatRequest would reject.
-	system, _ := systemText(req.System)
-	chars := len(system)
-	for _, msg := range req.Messages {
-		text, blocks, err := parseContent(msg.Content)
-		if err != nil {
-			continue
-		}
-		chars += len(text)
-		for _, block := range blocks {
-			chars += len(block.Text) + len(block.Thinking)
-			chars += len(bytes.TrimSpace(block.Input))
-			result, _ := toolResultContent(block.Content, true)
-			chars += len(core.ExtractTextContent(result))
-		}
-	}
-	for _, tool := range req.Tools {
-		chars += len(tool.Name) + len(tool.Description) + len(bytes.TrimSpace(tool.InputSchema))
-	}
-	return tokensFromChars(chars)
-}
-
-// EstimateChatInputTokens returns the same chars/4 heuristic for a canonical
-// chat request. It seeds the stream converter's message_start usage, where the
-// Anthropic contract expects input tokens before the upstream has reported any.
-func EstimateChatInputTokens(req *core.ChatRequest) int {
-	if req == nil {
-		return 0
-	}
-	chars := 0
-	for _, msg := range req.Messages {
-		chars += len(core.ExtractTextContent(msg.Content))
-		for _, call := range msg.ToolCalls {
-			chars += len(call.Function.Name) + len(call.Function.Arguments)
-		}
-	}
-	for _, tool := range req.Tools {
-		if raw, err := json.Marshal(tool); err == nil {
-			chars += len(raw)
-		}
-	}
-	return tokensFromChars(chars)
-}
-
-// tokensFromChars converts a character count to the heuristic token estimate
-// (roughly characters / 4, at least 1 for non-empty input).
-func tokensFromChars(chars int) int {
-	tokens := (chars + 3) / 4
-	if tokens == 0 && chars > 0 {
-		return 1
-	}
-	return tokens
 }

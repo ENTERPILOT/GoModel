@@ -1,0 +1,122 @@
+---
+title: "Encryption at Rest"
+description: "Encrypt provider credentials, MCP headers, and guardrail secrets saved from the dashboard with GOMODEL_ENCRYPTION_KEY."
+icon: "lock"
+keywords: ["encryption at rest", "GOMODEL_ENCRYPTION_KEY", "key rotation", "secrets", "AES-256-GCM", "KMS"]
+---
+
+Secrets you save through the dashboard or the admin API are stored in
+GoModel's database. Set `GOMODEL_ENCRYPTION_KEY` and they are encrypted before
+they are written, so a database file, dump, backup, or replica no longer holds
+them in plaintext.
+
+Encrypted fields:
+
+| Table / collection      | Fields                                                                         |
+| ----------------------- | ------------------------------------------------------------------------------ |
+| `provider_credentials`  | `api_keys`, `service_account_json`, `service_account_json_base64`, `proxy_url` |
+| `mcp_servers`           | `headers` values                                                               |
+| `guardrail_definitions` | config fields the plugin marks as secret (for example Presidio's `api_key`)    |
+
+Credentials declared in environment variables or `config.yaml` are never
+written to the database, so they are not affected.
+
+Default: unset. Secrets are stored in plaintext, and GoModel logs one warning
+at startup when an enabled feature (providers, and MCP or guardrails when they
+are on) loads a plaintext secret.
+
+## Enable it
+
+Generate a key and pass it to every instance that shares the database:
+
+```bash
+openssl rand -base64 32
+```
+
+```bash
+GOMODEL_ENCRYPTION_KEY=<generated value>
+```
+
+An empty value leaves encryption off. Any other string works, but the
+key-encryption key is derived from it, so a short or guessable value weakens
+the encryption: use 32 random bytes as above. Deliver it the way you deliver
+other secrets, from a secret manager at runtime, not from a committed file. A
+[secret reference](/advanced/secret-references) such as
+`GOMODEL_ENCRYPTION_KEY=${file:/run/secrets/gomodel-encryption-key}` works too.
+
+<Warning>
+  Losing the key makes the encrypted secrets unrecoverable. Store it as
+  carefully as the database backups it protects, and keep it separate from
+  them. Without the key, GoModel refuses to start against a database that
+  holds encrypted secrets.
+</Warning>
+
+## Existing plaintext secrets
+
+Enabling the key does not rewrite anything. Plaintext values keep working and
+are encrypted the next time each entry is saved. To encrypt everything at
+once, run:
+
+```bash
+gomodel secrets reencrypt
+```
+
+It uses the same configuration and environment as the gateway, prints counts
+per table (never values), and is safe to run repeatedly and while the gateway
+is running. Each rewrite only succeeds if the entry's secrets are still what
+the command read, so an edit or delete made during the run is never
+overwritten; the command re-reads the entry instead. An entry that keeps
+changing is reported as skipped, and the next run picks it up.
+
+## Rotate the key
+
+To change `GOMODEL_ENCRYPTION_KEY`, start with the new key and the old one in
+`GOMODEL_ENCRYPTION_KEY_PREVIOUS`:
+
+```bash
+GOMODEL_ENCRYPTION_KEY=<new value>
+GOMODEL_ENCRYPTION_KEY_PREVIOUS=<old value>
+```
+
+At startup GoModel re-wraps the database's data key with the new key. Stored
+secrets are not rewritten, so this is instant. Once every instance runs with
+the new key, remove `GOMODEL_ENCRYPTION_KEY_PREVIOUS`.
+
+To replace the data key itself, for example after a suspected leak of a
+database copy together with the old key, run:
+
+```bash
+gomodel secrets reencrypt --rotate-data-key
+```
+
+This creates a new data key and re-encrypts every secret with it. Values under
+older data keys stay readable throughout. A running gateway checks which data
+key is active before it saves a secret, so it switches to the new key without
+a restart, and checks again after the save: a save that was already in flight
+when the key changed re-encrypts itself with the new key. If that second check
+cannot reach the key store, the secret is still saved, but the save returns an
+error asking you to save it again or run `gomodel secrets reencrypt`.
+
+## How it works
+
+Each database gets a random 256-bit data key, stored only in wrapped form in
+the `encryption_keys` table. The key that wraps it is derived from
+`GOMODEL_ENCRYPTION_KEY` with Argon2id. Secret values are encrypted with
+AES-256-GCM and stored as `enc:v1:<key-id>:<ciphertext>`; the row and field
+are bound into the ciphertext, so a value copied into another row or field
+fails to decrypt instead of being used there.
+
+The admin API is unchanged: secrets are still masked in responses.
+
+Encryption at rest protects copies of the database. It does not protect
+against someone who can read the gateway's environment or memory, and it does
+not replace restricting access to the database and its backups.
+
+## Custom distributions
+
+A distribution built on GoModel can wrap the data key with a KMS instead of
+`GOMODEL_ENCRYPTION_KEY` by calling `LoadResult.SetKeyWrapper` with a
+`config.KeyWrapper` from `run.Options.SetupConfig`. On the first start with a
+new wrapper, keep `GOMODEL_ENCRYPTION_KEY` set once so the existing data key
+can be moved to it. To move from one wrapper to another, pass the old one as
+a previous wrapper: `SetKeyWrapper(next, previous)`.

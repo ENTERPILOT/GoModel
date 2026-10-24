@@ -34,6 +34,9 @@ func buildRawUsageFromDetails(ptd *core.PromptTokensDetails, ctd *core.Completio
 		if ptd.ImageTokens > 0 {
 			raw["prompt_image_tokens"] = ptd.ImageTokens
 		}
+		if ptd.CacheWriteTokens > 0 {
+			raw["prompt_cache_write_tokens"] = ptd.CacheWriteTokens
+		}
 	}
 	if ctd != nil {
 		if ctd.ReasoningTokens > 0 {
@@ -193,6 +196,11 @@ func ExtractFromEmbeddingResponse(resp *core.EmbeddingResponse, requestID, provi
 		Endpoint:    endpoint,
 		InputTokens: resp.Usage.PromptTokens,
 		TotalTokens: resp.Usage.TotalTokens,
+		// Carry the provider's extra usage members into the cost pipeline, so
+		// an embeddings provider that returns an exact per-request charge is
+		// costed from that figure rather than from token rates. Nil for
+		// providers that report nothing beyond the token counts.
+		RawData: cloneRawData(resp.Usage.RawUsage),
 	}
 
 	applyUsageCosts(entry, provider, endpoint, pricing...)
@@ -201,9 +209,12 @@ func ExtractFromEmbeddingResponse(resp *core.EmbeddingResponse, requestID, provi
 	// rates and understates the real call. Flag that — but not when the
 	// configured pricing determines the cost without token counts (a
 	// per-request price, or an explicit zero rate), where the recorded cost is
-	// correct and calling it uncalculated would be false.
+	// correct and calling it uncalculated would be false, and not when the
+	// cost came from a figure the provider itself reported, which is
+	// authoritative however many tokens it counted.
 	if resp.Usage.PromptTokens == 0 && resp.Usage.TotalTokens == 0 &&
-		tokenRatesAffectCost(effectiveEndpointPricing(endpoint, pricing...)) &&
+		!isProviderReportedCostSource(entry.CostSource) &&
+		tokenRatesAffectCost(effectiveEndpointPricing(endpoint, entry.Timestamp, pricing...)) &&
 		entry.CostsCalculationCaveat == "" {
 		entry.CostsCalculationCaveat = caveatEmbeddingMissingUsage
 	}
@@ -223,6 +234,11 @@ func ExtractFromSSEUsage(
 	requestID, model, provider, endpoint string,
 	pricing ...*core.ModelPricing,
 ) *UsageEntry {
+	// Anthropic-style usage (and System One answers) report input and output
+	// tokens without a total.
+	if totalTokens == 0 {
+		totalTokens = inputTokens + outputTokens
+	}
 	entry := &UsageEntry{
 		ID:           uuid.New().String(),
 		RequestID:    requestID,
@@ -280,6 +296,9 @@ func ExtractFromCachedResponseBody(
 	}
 	if entry == nil {
 		entry = extractFromCachedSSEBody(body, requestID, model, provider, endpoint, pricing...)
+	}
+	if entry == nil {
+		entry = extractFromCachedJSONBody(body, requestID, model, provider, endpoint, pricing...)
 	}
 
 	if entry == nil {
@@ -346,6 +365,38 @@ func extractFromCachedSSEBody(
 	return observer.cachedEntry
 }
 
+// extractFromCachedJSONBody reads usage from a cached JSON body of an
+// endpoint without a typed response, such as a native /v1/systemone answer,
+// the same way a live passthrough response is read.
+// ExtractFromJSONBody creates a UsageEntry from a complete JSON response body
+// whose usage member the stream observer reads, such as a Decision. It
+// returns nil when the body is not a JSON object.
+func ExtractFromJSONBody(body []byte, requestID, model, provider, endpoint string, pricing ...*core.ModelPricing) *UsageEntry {
+	return extractFromCachedJSONBody(body, requestID, model, provider, endpoint, pricing...)
+}
+
+func extractFromCachedJSONBody(
+	body []byte,
+	requestID, model, provider, endpoint string,
+	pricing ...*core.ModelPricing,
+) *UsageEntry {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil || payload == nil {
+		return nil
+	}
+	observer := &StreamUsageObserver{
+		model:     strings.TrimSpace(model),
+		provider:  strings.TrimSpace(provider),
+		requestID: strings.TrimSpace(requestID),
+		endpoint:  endpoint,
+	}
+	if len(pricing) > 0 && pricing[0] != nil {
+		observer.pricingResolver = staticPricingResolver{pricing: pricing[0]}
+	}
+	observer.OnJSONEvent(payload)
+	return observer.cachedEntry
+}
+
 func normalizeCachedResponseEndpoint(endpoint string) string {
 	normalized := strings.TrimSpace(endpoint)
 	if normalized == "" {
@@ -362,18 +413,26 @@ func normalizeCachedResponseEndpoint(endpoint string) string {
 	return cleaned
 }
 
-// effectiveEndpointPricing resolves the pricing that applies to endpoint, or
-// nil when the caller supplied none.
-func effectiveEndpointPricing(endpoint string, pricing ...*core.ModelPricing) *core.ModelPricing {
+// effectiveEndpointPricing resolves the pricing that applies to endpoint at the
+// entry's timestamp, or nil when the caller supplied none. It matches what
+// applyUsageCosts priced the entry with, so caveat checks read the same rates
+// the cost came from (time-of-day windows included).
+func effectiveEndpointPricing(endpoint string, at time.Time, pricing ...*core.ModelPricing) *core.ModelPricing {
 	if len(pricing) == 0 {
 		return nil
 	}
-	return pricingForEndpoint(pricing[0], endpoint)
+	return pricingForEndpoint(pricing[0].AtTime(at), endpoint)
 }
 
 func pricingForEndpoint(pricing *core.ModelPricing, endpoint string) *core.ModelPricing {
 	if pricing == nil {
 		return nil
+	}
+	if isImageEndpoint(endpoint) {
+		return pricingForImageEndpoint(pricing)
+	}
+	if endpoint == endpointDecisions {
+		return pricingForDecisionsEndpoint(pricing)
 	}
 	if endpoint != "/v1/batches" && !strings.HasPrefix(endpoint, "/v1/batches/") {
 		return pricing

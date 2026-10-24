@@ -6,7 +6,12 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { overwriteGetLocale } from "../src/lib/paraglide/runtime.js";
+
+const SRC = fileURLToPath(new URL("../src", import.meta.url));
 
 import {
   defaultRateLimitForm,
@@ -682,5 +687,59 @@ test("inspector summary reports in-flight or per-cap usage", () => {
       requests_used: 10,
     }),
     "10/100 req",
+  );
+});
+
+// Guard for the delete-confirmation contract (#900): the list button must
+// open the shared typed-confirmation dialog instead of deleting outright,
+// failures stay inside the dialog, and only a successful delete closes it.
+// There is no DOM test harness in this suite, so this asserts the wiring
+// contract directly on the source (like editor-dialog.test.js).
+test("rate-limit deletes route through the typed confirmation dialog", () => {
+  const storeSource = readFileSync(
+    join(SRC, "pages/rate-limits/rateLimits.svelte.js"),
+    "utf8",
+  );
+  const listSource = readFileSync(
+    join(SRC, "pages/rate-limits/RateLimitList.svelte"),
+    "utf8",
+  );
+
+  // The dialog requires the rule's subject back and deletes on confirm —
+  // asserted inside requestDeleteRateLimit's body, not anywhere in the store.
+  const requestDelete = storeSource.match(
+    /requestDeleteRateLimit\(item\) \{[\s\S]*?\n  \}/,
+  );
+  assert.ok(requestDelete, "requestDeleteRateLimit method missing");
+  assert.match(requestDelete[0], /requiredText: subject,/);
+  assert.match(
+    requestDelete[0],
+    /onConfirm: \(\) => this\.deleteRateLimit\(item\)/,
+  );
+
+  // Failures stay inside the dialog; only success closes it — asserted
+  // inside deleteRateLimit's body, failure branch before the success close.
+  const deleteRateLimit = storeSource.match(
+    /async deleteRateLimit\(item\) \{[\s\S]*?\n  \}/,
+  );
+  assert.ok(deleteRateLimit, "deleteRateLimit method missing");
+  // The failure branch must be guarded by the non-ok status, assign the
+  // dialog error, and return; the close belongs to the success path after
+  // that branch, not inside it.
+  const failureBranch = deleteRateLimit[0].match(
+    /if \(outcome\.status !== "ok"\) \{[\s\S]*?confirmDialog\.error = outcome\.error;[\s\S]*?return;[\s\S]*?\n    \}/,
+  );
+  assert.ok(failureBranch, "deleteRateLimit failure branch missing");
+  assert.ok(
+    deleteRateLimit[0].indexOf(failureBranch[0]) <
+      deleteRateLimit[0].indexOf("confirmDialog.close();"),
+    "confirmDialog.close() must run after the failure branch",
+  );
+  // The list button opens the confirmation; no path deletes outright.
+  assert.match(listSource, /onclick=\{\(\) => rateLimits\.requestDeleteRateLimit\(item\)\}/);
+  assert.equal(
+    listSource.match(/onclick=\{\(\) => rateLimits\.deleteRateLimit\(item\)\}/),
+    null,
+    "a list path deletes without confirmation",
   );
 });

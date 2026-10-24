@@ -12,14 +12,18 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/groq"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
 func newGroqReplayProvider(t *testing.T, routes map[string]replayRoute) core.Provider {
 	t.Helper()
 
 	client := newReplayHTTPClient(t, routes)
-	provider := groq.NewWithHTTPClient("gsk-test", client, llmclient.Hooks{})
+	opts := providertest.Options(llmclient.Hooks{})
+	opts.HTTPClient = client
+	provider := groq.New(providers.ProviderConfig{APIKey: "gsk-test"}, opts).(*groq.Provider)
 	provider.SetBaseURL("https://replay.local")
 	return provider
 }

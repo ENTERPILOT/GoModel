@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -25,13 +26,23 @@ type geminiModel struct {
 	Temperature      *float64 `json:"temperature,omitempty"`
 	TopP             *float64 `json:"topP,omitempty"`
 	TopK             *int     `json:"topK,omitempty"`
+	Thinking         bool     `json:"thinking"`
 }
 
-// geminiModelsResponse represents the native Gemini models list response
+// geminiModelsResponse represents one page of the native Gemini models list.
+// The API pages at 50 models by default and hands out nextPageToken until the
+// last page, which omits it.
 type geminiModelsResponse struct {
 	Models          []geminiModel `json:"models"`
 	PublisherModels []geminiModel `json:"publisherModels"`
+	NextPageToken   string        `json:"nextPageToken"`
 }
+
+// maxModelListPages bounds the pagination loop so a server that keeps handing
+// out tokens cannot stall discovery. At 50 models a page it covers 1000
+// models, far beyond Google's catalog; a listing that still has pages past
+// it is reported as an error rather than published incomplete.
+const maxModelListPages = 20
 
 func geminiModelSupportedMethods(modelID string, methods []string) (supportsGenerate, supportsEmbed, supportsImage bool) {
 	normalized := normalizeGeminiModelID(modelID)
@@ -57,12 +68,13 @@ func isGeminiImageModelID(normalized string) bool {
 		(strings.Contains(normalized, "-image-") || strings.HasSuffix(normalized, "-image"))
 }
 
-// geminiDiscoveredMetadata stamps modes/categories from the native listing's
-// supportedGenerationMethods so embedding models are classified even when the
-// remote model registry has no entry (new or preview IDs). Registry enrichment
-// replaces this metadata whenever it does have an entry, and operator config
-// merges on top, so the discovery stamp is only the lowest-precedence signal.
-func geminiDiscoveredMetadata(supportsGenerate, supportsEmbed, supportsImage bool) *core.ModelMetadata {
+// geminiDiscoveredMetadata stamps what the native listing says about a model:
+// modes/categories from supportedGenerationMethods (so embedding models are
+// classified even when the remote model registry has no entry), the display
+// name and description, the token limits, and thinking support. Registry
+// enrichment merges its entry underneath field by field, and operator config
+// on top, so a field the listing reports always wins over the catalog.
+func geminiDiscoveredMetadata(gm geminiModel, supportsGenerate, supportsEmbed, supportsImage bool) *core.ModelMetadata {
 	modes := make([]string, 0, 3)
 	if supportsGenerate {
 		modes = append(modes, "chat")
@@ -78,16 +90,35 @@ func geminiDiscoveredMetadata(supportsGenerate, supportsEmbed, supportsImage boo
 			modes = append(modes, "image_edit")
 		}
 	}
-	if len(modes) == 0 {
+	metadata := &core.ModelMetadata{
+		DisplayName: strings.TrimSpace(gm.DisplayName),
+		Description: strings.TrimSpace(gm.Description),
+	}
+	if len(modes) > 0 {
+		metadata.Modes = modes
+		metadata.Categories = core.CategoriesForModes(modes)
+	}
+	if gm.InputTokenLimit > 0 {
+		metadata.ContextWindow = new(gm.InputTokenLimit)
+	}
+	// Embedding models report a nominal output limit of 1; only generation
+	// models have an output limit worth surfacing.
+	if gm.OutputTokenLimit > 0 && supportsGenerate {
+		metadata.MaxOutputTokens = new(gm.OutputTokenLimit)
+	}
+	if gm.Thinking {
+		metadata.Capabilities = map[string]bool{"reasoning": true}
+	}
+	if len(modes) == 0 && metadata.DisplayName == "" && metadata.Description == "" &&
+		metadata.ContextWindow == nil && metadata.MaxOutputTokens == nil && metadata.Capabilities == nil {
 		return nil
 	}
-	return &core.ModelMetadata{
-		Modes:      modes,
-		Categories: core.CategoriesForModes(modes),
-	}
+	return metadata
 }
 
-// ListModels retrieves the list of available models from Gemini
+// ListModels retrieves the list of available models from Gemini, following
+// the native listing's page tokens so models past the first page of 50 are
+// not dropped.
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
 	if err := p.ready(); err != nil {
 		return nil, err
@@ -119,6 +150,31 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 			return nil, core.NewProviderError(p.responseProviderName(), http.StatusBadGateway, "failed to parse native Gemini models response", err)
 		}
 		modelEntries := append(geminiResp.Models, geminiResp.PublisherModels...)
+		// The first page decides the response shape; later pages are native
+		// by construction, so they are fetched and appended here. A partial
+		// catalog would hide models with nothing to explain why, so a token
+		// that repeats or outlives the page cap fails the listing instead.
+		seen := map[string]struct{}{}
+		token := geminiResp.NextPageToken
+		for page := 1; token != "" && page < maxModelListPages; page++ {
+			if _, dup := seen[token]; dup {
+				return nil, core.NewProviderError(p.responseProviderName(), http.StatusBadGateway, "Gemini models listing repeated page token "+token, nil)
+			}
+			seen[token] = struct{}{}
+			var next geminiModelsResponse
+			if err := modelsClient.Do(ctx, llmclient.Request{
+				Method:   http.MethodGet,
+				Endpoint: "/models?pageToken=" + url.QueryEscape(token),
+			}, &next); err != nil {
+				return nil, err
+			}
+			modelEntries = append(modelEntries, next.Models...)
+			modelEntries = append(modelEntries, next.PublisherModels...)
+			token = next.NextPageToken
+		}
+		if token != "" {
+			return nil, core.NewProviderError(p.responseProviderName(), http.StatusBadGateway, fmt.Sprintf("Gemini models listing did not end within %d pages", maxModelListPages), nil)
+		}
 		if len(modelEntries) == 0 {
 			return &core.ModelsResponse{
 				Object: "list",
@@ -139,7 +195,7 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 					Object:   "model",
 					OwnedBy:  "google",
 					Created:  now,
-					Metadata: geminiDiscoveredMetadata(supportsGenerate, supportsEmbed, supportsImage),
+					Metadata: geminiDiscoveredMetadata(gm, supportsGenerate, supportsEmbed, supportsImage),
 				})
 			}
 		}

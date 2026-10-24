@@ -249,6 +249,28 @@ console.log(dateRange);
 Budgets and rate limits always report their own live periods; the window only
 affects `usage`.
 
+## Cache mode
+
+The `usage` block counts provider-bound requests only, so it lines up with
+budgets and cost. [Response-cache](/features/cache) hits are recorded too, and
+`cache_mode` brings them into view:
+
+| Value      | Counts                                                  |
+| ---------- | -------------------------------------------------------- |
+| `uncached` | Provider-bound requests only — the default               |
+| `cached`   | Local cache hits only — what the cache served for free   |
+| `all`      | Both, your total request volume                          |
+
+```bash
+curl "http://localhost:8080/v1/usage?cache_mode=cached" \
+  -H "Authorization: Bearer sk_gom_..."
+```
+
+Comparing `cached` with the default is the quickest read on how much of your
+traffic the cache is absorbing. Unrecognized values fall back to `uncached`.
+`cache_mode` affects only `usage`: budgets and rate limits never count cache
+hits, because a hit spends nothing and consumes no quota.
+
 ## Errors
 
 | Status | Meaning                                                                |

@@ -11,7 +11,9 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/workflows"
+	"github.com/enterpilot/gomodel/pluginapi"
 )
 
 type createWorkflowRequest struct {
@@ -61,13 +63,35 @@ func (h *Handler) GetWorkflow(c *echo.Context) error {
 	return c.JSON(http.StatusOK, view)
 }
 
+// workflowGuardrailItem is one instance available to workflow steps.
+type workflowGuardrailItem struct {
+	Name    string   `json:"name"`
+	Type    string   `json:"type,omitempty"`
+	Phases  []string `json:"phases"`
+	Summary string   `json:"summary,omitempty"`
+	// Mutates marks an instance that may edit the request or response; the
+	// gateway runs it after the readers of its step.
+	Mutates bool `json:"mutates"`
+}
+
 // ListWorkflowGuardrails handles GET /admin/workflows/guardrails
 func (h *Handler) ListWorkflowGuardrails(c *echo.Context) error {
-	if h.guardrails == nil {
-		return c.JSON(http.StatusOK, []string{})
+	items := []workflowGuardrailItem{}
+	switch {
+	case h.guardrailDefs != nil:
+		for _, view := range h.guardrailDefs.ListViews() {
+			phases := view.Phases
+			if phases == nil {
+				phases = []string{}
+			}
+			items = append(items, workflowGuardrailItem{Name: view.Name, Type: view.Type, Phases: phases, Summary: view.Summary, Mutates: view.Mutates})
+		}
+	case h.guardrails != nil:
+		for _, name := range h.guardrails.Names() {
+			items = append(items, workflowGuardrailItem{Name: name, Phases: []string{workflows.PhasePrompt}})
+		}
 	}
-
-	return c.JSON(http.StatusOK, h.guardrails.Names())
+	return c.JSON(http.StatusOK, items)
 }
 
 // CreateWorkflow handles POST /admin/workflows
@@ -176,7 +200,7 @@ func (h *Handler) activeWorkflowGuardrailReferences(ctx context.Context, name st
 		if !view.Payload.Features.Guardrails {
 			continue
 		}
-		for _, step := range view.Payload.Guardrails {
+		for _, step := range view.Payload.EffectiveSteps() {
 			if strings.TrimSpace(step.Ref) != name {
 				continue
 			}
@@ -188,26 +212,85 @@ func (h *Handler) activeWorkflowGuardrailReferences(ctx context.Context, name st
 	return references, nil
 }
 
+// activeWorkflowPhaseConflicts lists, as "<scope> (<phase>)", the steps of
+// active workflows that reference the named guardrail in a phase the given
+// type does not implement. An unknown type yields nothing; the guardrail
+// service reports it when the definition is saved.
+func (h *Handler) activeWorkflowPhaseConflicts(ctx context.Context, name, typeName string) ([]string, error) {
+	if h.workflows == nil || h.guardrailDefs == nil {
+		return nil, nil
+	}
+	name = strings.TrimSpace(name)
+	typeName = strings.TrimSpace(typeName)
+	if name == "" || typeName == "" {
+		return nil, nil
+	}
+	var supported []string
+	found := false
+	for _, def := range h.guardrailDefs.TypeDefinitions() {
+		if def.Type == typeName {
+			supported, found = def.Phases, true
+			break
+		}
+	}
+	if !found {
+		return nil, nil
+	}
+
+	views, err := h.workflows.ListViews(ctx)
+	if err != nil {
+		return nil, err
+	}
+	conflicts := make([]string, 0)
+	for _, view := range views {
+		if !view.Payload.Features.Guardrails {
+			continue
+		}
+		for _, step := range view.Payload.EffectiveSteps() {
+			if strings.TrimSpace(step.Ref) != name {
+				continue
+			}
+			phase := strings.ToLower(strings.TrimSpace(step.Phase))
+			if phase == "" {
+				phase = workflows.PhasePrompt
+			}
+			if !slices.Contains(supported, phase) {
+				conflicts = append(conflicts, view.ScopeDisplay+" ("+phase+")")
+			}
+		}
+	}
+	sort.Strings(conflicts)
+	return conflicts, nil
+}
+
+// validateWorkflowGuardrails checks every step reference against the loaded
+// instances and the phases their plugins implement.
 func (h *Handler) validateWorkflowGuardrails(payload workflows.Payload) error {
-	if !payload.Features.Guardrails || len(payload.Guardrails) == 0 {
+	steps := payload.EffectiveSteps()
+	if !payload.Features.Guardrails || len(steps) == 0 {
 		return nil
 	}
 	if h.guardrails == nil {
 		return featureUnavailableError("guardrail registry is unavailable for workflow authoring")
 	}
 
-	known := make(map[string]struct{}, h.guardrails.Len())
-	for _, name := range h.guardrails.Names() {
-		known[name] = struct{}{}
-	}
-	for _, step := range payload.Guardrails {
+	refs := make([]guardrails.StepReference, 0, len(steps))
+	for _, step := range steps {
 		ref := strings.TrimSpace(step.Ref)
 		if ref == "" {
 			continue
 		}
-		if _, ok := known[ref]; !ok {
-			return core.NewInvalidRequestError("unknown guardrail ref: "+ref, nil)
+		phase := strings.ToLower(strings.TrimSpace(step.Phase))
+		if phase == "" {
+			phase = workflows.PhasePrompt
 		}
+		refs = append(refs, guardrails.StepReference{Ref: ref, Phase: pluginapi.Kind(phase), Step: step.Step})
+	}
+	if _, err := h.guardrails.BuildChains(refs); err != nil {
+		if gatewayErr, ok := errors.AsType[*core.GatewayError](err); ok {
+			return gatewayErr
+		}
+		return core.NewInvalidRequestError(err.Error(), err)
 	}
 	return nil
 }

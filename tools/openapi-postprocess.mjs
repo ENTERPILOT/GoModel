@@ -100,6 +100,7 @@ function ensureResponsesInputElementSchema() {
         description: 'Function call fields (type="function_call")',
         type: "string",
       },
+      extra_content: freeFormObjectSchema(),
       content: {
         description: "Can be string or []ContentPart",
         oneOf: [
@@ -165,6 +166,7 @@ function ensureAnthropicContentBlockSchema() {
     type: "object",
     properties: {
       content: anthropicContentSchema(),
+      extra_content: freeFormObjectSchema(),
       id: { type: "string" },
       input: freeFormObjectSchema(),
       is_error: { type: "boolean" },
@@ -172,10 +174,18 @@ function ensureAnthropicContentBlockSchema() {
       source: stringOrFreeFormObjectSchema(),
       text: { type: "string" },
       thinking: { type: "string" },
+      // thinking blocks are replayed with the signature Anthropic issued;
+      // redacted ones carry their opaque payload instead.
+      signature: { type: "string" },
+      data: { type: "string" },
       tool_use_id: { type: "string" },
       type: { type: "string" },
     },
   };
+}
+
+function applyResponsesReplayStateSchema() {
+  schema("core.ResponsesOutputItem").properties.extra_content = freeFormObjectSchema();
 }
 
 function applyAnthropicMessageSchemas() {
@@ -297,6 +307,49 @@ function applyAnthropicMessagesStreamSchema() {
   streamResponse.schema = {
     $ref: "#/components/schemas/anthropicapi.SSEEventFrame",
   };
+}
+
+// applyRetrieveModelDialects documents the second wire dialect of
+// GET /v1/models/{model}: a request carrying anthropic-version is answered with
+// Anthropic's model envelope, and its failures with Anthropic's error envelope.
+// swag models one schema per status code, so the alternatives are spelled here.
+function applyRetrieveModelDialects() {
+  const schemas = spec.components?.schemas;
+  if (!schemas) {
+    throw new Error("missing OpenAPI components.schemas");
+  }
+  schemas["anthropicapi.ModelInfo"] = {
+    description: "One model in the Anthropic dialect, returned when the request carries anthropic-version.",
+    type: "object",
+    required: ["created_at", "display_name", "id", "type"],
+    properties: {
+      type: constStringSchema("model"),
+      id: { type: "string" },
+      display_name: { type: "string" },
+      created_at: { type: "string", format: "date-time" },
+    },
+  };
+  // A 401 is raised by the auth middleware before the handler runs, so it
+  // stays in the OpenAI envelope whatever the header says.
+  const dialects = {
+    200: ["core.Model", "anthropicapi.ModelInfo"],
+    404: ["core.OpenAIErrorEnvelope", "anthropicapi.ErrorResponse"],
+    502: ["core.OpenAIErrorEnvelope", "anthropicapi.ErrorResponse"],
+  };
+  const responses = spec.paths?.["/v1/models/{model}"]?.get?.responses;
+  if (!responses) {
+    throw new Error("missing OpenAPI operation: GET /v1/models/{model}");
+  }
+  for (const [status, names] of Object.entries(dialects)) {
+    const body = responses[status]?.content?.["application/json"];
+    if (!body) {
+      throw new Error(`missing JSON response ${status} on GET /v1/models/{model}`);
+    }
+    body.schema = {
+      description: "OpenAI envelope by default; the Anthropic envelope when the request carries anthropic-version.",
+      oneOf: names.map((name) => ({ $ref: `#/components/schemas/${name}` })),
+    };
+  }
 }
 
 function applyAudioTranscriptionTextSchema() {
@@ -510,8 +563,10 @@ function applyBudgetKeySchemaConstraints() {
 spec.servers = parseServers(process.env.DOCS_API_SERVERS);
 ensureResponsesInputElementSchema();
 applyAnthropicMessageSchemas();
+applyResponsesReplayStateSchema();
 applyAnthropicMessagesStreamSchema();
 applyAudioTranscriptionTextSchema();
+applyRetrieveModelDialects();
 applyImageEditMultiImageSchema();
 ensureBearerAuthSecurityScheme();
 ensureRequiredProperty("core.AudioSpeechRequest", "model");

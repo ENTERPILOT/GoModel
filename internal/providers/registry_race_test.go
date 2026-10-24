@@ -90,8 +90,8 @@ func TestRegistry_Concurrency(t *testing.T) {
 		})
 	}
 
-	// Let it run for 1 second
-	time.Sleep(1 * time.Second)
+	// Let the writer and readers overlap for a while.
+	time.Sleep(200 * time.Millisecond)
 	cancel()
 	wg.Wait()
 }

@@ -204,3 +204,11 @@ func isZeroJSONFieldValue(value any) bool {
 		return value == nil
 	}
 }
+
+// tailMatchedSystemOffsets aligns the trailing system messages of a modified
+// list with the original ones, so injected leading system messages are
+// encoded fresh while pre-existing ones keep their raw envelope.
+func tailMatchedSystemOffsets(originalSystemCount, modifiedSystemCount int) (matchStart, originalStart int) {
+	matched := min(modifiedSystemCount, originalSystemCount)
+	return modifiedSystemCount - matched, originalSystemCount - matched
+}

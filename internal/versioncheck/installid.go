@@ -2,8 +2,6 @@ package versioncheck
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -23,11 +21,6 @@ const installIDFile = "install-id"
 // database, alongside the runtime settings.
 const InstallIDKey = "install_id"
 
-// derivedIDPurpose is the fixed message signed with the operator's secret
-// when the identifier has to be derived. It ties the derivation to this use,
-// so the same secret used for anything else yields an unrelated value.
-const derivedIDPurpose = "gomodel install identifier v1"
-
 // Store is the durable key/value the identifier is kept in. It is satisfied
 // by runtimesettings.Store: the identifier is per-deployment state exactly
 // like a runtime setting, so it shares the table.
@@ -36,6 +29,10 @@ type Store interface {
 	// SetDefault stores value only when key has no value yet, and returns
 	// whatever is stored afterwards. It must be atomic across instances.
 	SetDefault(ctx context.Context, key, value string) (string, error)
+	// Replace stores value only when key still holds old, and returns
+	// whatever is stored afterwards. It must be atomic across instances. It
+	// is used only to replace an id that was derived from the master key.
+	Replace(ctx context.Context, key, old, value string) (string, error)
 }
 
 // InstallIDSource names where a resolved identifier came from, for the
@@ -47,9 +44,6 @@ const (
 	SourceDatabase InstallIDSource = "database"
 	// SourceFile: read from the install-id file in the data directory.
 	SourceFile InstallIDSource = "file"
-	// SourceDerived: computed from the operator's secret because nothing was
-	// stored; stable as long as the secret is.
-	SourceDerived InstallIDSource = "derived"
 	// SourceGenerated: freshly minted; nothing durable was available.
 	SourceGenerated InstallIDSource = "generated"
 )
@@ -67,10 +61,11 @@ const (
 //  2. The install-id file in the data directory. The canonical location
 //     before the database was used; an existing id migrates to the database
 //     unchanged, so upgrading never creates a new deployment.
-//  3. An HMAC of the operator's secret, when one is configured. Nothing on
-//     disk survived (a container recreated without a volume) but the
-//     configuration did, and the same configuration is the same deployment.
-//  4. A random UUID.
+//  3. A random UUID.
+//
+// The identifier is never derived from the master key: it is sent on every
+// update check, and anything computed from the key would let whoever sees it
+// test guesses of a weak key offline.
 //
 // Whichever step wins is written to the database and the file, so the copies
 // converge and the next start takes the shortest path. The database write is
@@ -84,8 +79,7 @@ const (
 // the next call, so an outage at startup can never mint a new identity or
 // hide the real one for the life of the process.
 type Identity struct {
-	store  Store
-	secret string
+	store Store
 
 	mu       sync.Mutex
 	id       string
@@ -94,10 +88,10 @@ type Identity struct {
 	warnedDB bool // the outage has been logged once; retries stay quiet
 }
 
-// NewIdentity prepares a resolver. store may be nil (no database) and secret
-// may be empty (no derived fallback). Nothing is read until Resolve or ID.
-func NewIdentity(store Store, secret string) *Identity {
-	return &Identity{store: store, secret: secret}
+// NewIdentity prepares a resolver. store may be nil (no database). Nothing is
+// read until Resolve or ID.
+func NewIdentity(store Store) *Identity {
+	return &Identity{store: store}
 }
 
 // ID returns the identifier for a request, resolving it on first use.
@@ -119,14 +113,20 @@ func (i *Identity) Resolve(ctx context.Context) (string, InstallIDSource) {
 
 	path := platformdir.DataFile(installIDFile)
 	fileID := readInstallIDFile(path)
+	if derivedFromSecret(fileID) {
+		fileID = "" // replaced, and the file rewritten, below
+	}
 
 	storeUsable := i.store != nil
+	derivedStored := "" // the exact stored value, for the conditional replace
 	if storeUsable {
 		stored, found, err := i.store.Get(ctx, InstallIDKey)
 		switch {
 		case err != nil:
 			i.warnStoreOnce("install id database unavailable; using the local copy until it answers", err)
 			storeUsable = false
+		case found && derivedFromSecret(stored):
+			derivedStored = stored
 		case found && strings.TrimSpace(stored) != "":
 			i.adopt(strings.TrimSpace(stored), SourceDatabase, true)
 			if i.id != fileID {
@@ -142,14 +142,26 @@ func (i *Identity) Resolve(ctx context.Context) (string, InstallIDSource) {
 		switch {
 		case fileID != "":
 			i.adopt(fileID, SourceFile, false)
-		case i.secret != "":
-			i.adopt(deriveInstallID(i.secret), SourceDerived, false)
 		default:
 			i.adopt(uuid.NewString(), SourceGenerated, false)
 		}
 	}
 
-	if storeUsable {
+	switch {
+	case storeUsable && derivedStored != "":
+		// SetDefault would keep the derived id, so replace it, but only while
+		// it is still there: a replica upgrading at the same time may have
+		// replaced it first, and then its id is the deployment's.
+		stored, err := i.store.Replace(ctx, InstallIDKey, derivedStored, i.id)
+		switch {
+		case err != nil:
+			i.warnStoreOnce("install id could not be replaced in the database; it stays in the data directory until it can", err)
+		case stored == i.id:
+			i.settled = true
+		case strings.TrimSpace(stored) != "" && !derivedFromSecret(stored):
+			i.adopt(strings.TrimSpace(stored), SourceDatabase, true)
+		}
+	case storeUsable:
 		stored, err := i.store.SetDefault(ctx, InstallIDKey, i.id)
 		switch {
 		case err != nil:
@@ -163,7 +175,7 @@ func (i *Identity) Resolve(ctx context.Context) (string, InstallIDSource) {
 			// become the deployment's id. Either way this id is final.
 			i.settled = true
 		}
-	} else if i.store == nil {
+	case i.store == nil:
 		i.settled = true
 	}
 
@@ -171,6 +183,16 @@ func (i *Identity) Resolve(ctx context.Context) (string, InstallIDSource) {
 		writeInstallIDFile(path, i.id)
 	}
 	return i.id, i.source
+}
+
+// derivedFromSecret reports whether id came from the HMAC of the master key
+// that earlier releases used as a fallback. Those ids, and only those, are
+// version-8 UUIDs; every other id is a random version-4 one. They are
+// replaced, because sending one would let a weak master key be guessed
+// offline.
+func derivedFromSecret(id string) bool {
+	parsed, err := uuid.Parse(strings.TrimSpace(id))
+	return err == nil && parsed.Version() == 8
 }
 
 func (i *Identity) adopt(id string, source InstallIDSource, settled bool) {
@@ -202,20 +224,4 @@ func writeInstallIDFile(path, id string) {
 	// 0600: the id is not a secret, but it is per-deployment state and has
 	// no reason to be world-readable.
 	_ = os.WriteFile(path, []byte(id+"\n"), 0o600)
-}
-
-// deriveInstallID turns the operator's secret into an identifier shaped like
-// every other one. HMAC-SHA256 is one-way: the identifier reveals nothing
-// about the secret, and the fixed purpose string keeps it unrelated to any
-// other value derived from the same secret.
-func deriveInstallID(secret string) string {
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(derivedIDPurpose))
-	var id uuid.UUID
-	copy(id[:], mac.Sum(nil))
-	// RFC 9562 version 8 marks a UUID whose bits are application-defined,
-	// which is exactly what this is; the variant bits make it well-formed.
-	id[6] = (id[6] & 0x0f) | 0x80
-	id[8] = (id[8] & 0x3f) | 0x80
-	return id.String()
 }

@@ -1,6 +1,10 @@
 package workflows
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestNormalizeScope_RejectsColonDelimitedFields(t *testing.T) {
 	t.Parallel()
@@ -16,12 +20,8 @@ func TestNormalizeScope_RejectsColonDelimitedFields(t *testing.T) {
 			t.Parallel()
 
 			_, _, err := normalizeScope(scope)
-			if err == nil {
-				t.Fatal("normalizeScope() error = nil, want validation error")
-			}
-			if !IsValidationError(err) {
-				t.Fatalf("normalizeScope() error = %T, want validation error", err)
-			}
+			require.Error(t, err)
+			require.True(t, IsValidationError(err))
 		})
 	}
 }
@@ -30,15 +30,9 @@ func TestNormalizeScope_AllowsPathOnlyScope(t *testing.T) {
 	t.Parallel()
 
 	scope, scopeKey, err := normalizeScope(Scope{UserPath: "/team/a"})
-	if err != nil {
-		t.Fatalf("normalizeScope() error = %v", err)
-	}
-	if scope.UserPath != "/team/a" {
-		t.Fatalf("scope.UserPath = %q, want /team/a", scope.UserPath)
-	}
-	if scopeKey != "path:/team/a" {
-		t.Fatalf("scopeKey = %q, want path:/team/a", scopeKey)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "/team/a", scope.UserPath)
+	require.Equal(t, "path:/team/a", scopeKey)
 }
 
 func TestNormalizeCreateInput_AllowsEmptyName(t *testing.T) {
@@ -53,18 +47,10 @@ func TestNormalizeCreateInput_AllowsEmptyName(t *testing.T) {
 			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 		},
 	})
-	if err != nil {
-		t.Fatalf("normalizeCreateInput() error = %v", err)
-	}
-	if input.Name != "" {
-		t.Fatalf("Name = %q, want empty", input.Name)
-	}
-	if scopeKey != "global" {
-		t.Fatalf("scopeKey = %q, want global", scopeKey)
-	}
-	if workflowHash == "" {
-		t.Fatal("workflowHash is empty")
-	}
+	require.NoError(t, err)
+	require.Empty(t, input.Name)
+	require.Equal(t, "global", scopeKey)
+	require.NotEmpty(t, workflowHash)
 }
 
 func TestNormalizeCreateInput_RejectsReservedManagedDefaultIdentityForUserPlans(t *testing.T) {
@@ -80,12 +66,8 @@ func TestNormalizeCreateInput_RejectsReservedManagedDefaultIdentityForUserPlans(
 			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 		},
 	})
-	if err == nil {
-		t.Fatal("normalizeCreateInput() error = nil, want validation error")
-	}
-	if !IsValidationError(err) {
-		t.Fatalf("normalizeCreateInput() error = %T, want validation error", err)
-	}
+	require.Error(t, err)
+	require.True(t, IsValidationError(err))
 }
 
 func TestNormalizeCreateInput_RejectsManagedDefaultForNonGlobalScope(t *testing.T) {
@@ -101,12 +83,8 @@ func TestNormalizeCreateInput_RejectsManagedDefaultForNonGlobalScope(t *testing.
 			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 		},
 	})
-	if err == nil {
-		t.Fatal("normalizeCreateInput() error = nil, want validation error")
-	}
-	if !IsValidationError(err) {
-		t.Fatalf("normalizeCreateInput() error = %T, want validation error", err)
-	}
+	require.Error(t, err)
+	require.True(t, IsValidationError(err))
 }
 
 func TestFeatureFlagsRuntimeFeatures_FailoverDefaultsToTrue(t *testing.T) {
@@ -117,9 +95,7 @@ func TestFeatureFlagsRuntimeFeatures_FailoverDefaultsToTrue(t *testing.T) {
 		Guardrails: false,
 	}.runtimeFeatures()
 
-	if !features.Failover {
-		t.Fatal("runtimeFeatures().Failover = false, want true")
-	}
+	require.True(t, features.Failover)
 }
 
 func TestFeatureFlagsRuntimeFeatures_DisablesBudgetWhenUsageDisabled(t *testing.T) {
@@ -158,9 +134,7 @@ func TestFeatureFlagsRuntimeFeatures_DisablesBudgetWhenUsageDisabled(t *testing.
 			t.Parallel()
 
 			features := tt.flags.runtimeFeatures()
-			if features.Budget != tt.budget {
-				t.Fatalf("runtimeFeatures().Budget = %v, want %v", features.Budget, tt.budget)
-			}
+			require.Equal(t, tt.budget, features.Budget)
 		})
 	}
 }
@@ -177,9 +151,7 @@ func TestNormalizePayload_CanonicalizesFailoverForStableWorkflowHash(t *testing.
 			Guardrails: false,
 		},
 	})
-	if err != nil {
-		t.Fatalf("normalizePayload() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	explicitPayload, explicitHash, err := normalizePayload(Payload{
 		SchemaVersion: 1,
@@ -192,23 +164,80 @@ func TestNormalizePayload_CanonicalizesFailoverForStableWorkflowHash(t *testing.
 			Budget:     &explicitTrue,
 		},
 	})
-	if err != nil {
-		t.Fatalf("normalizePayload() error = %v", err)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, implicitPayload.Features.Failover)
+	require.True(t, *implicitPayload.Features.Failover)
+	require.NotNil(t, explicitPayload.Features.Failover)
+	require.True(t, *explicitPayload.Features.Failover)
+	require.NotNil(t, implicitPayload.Features.Budget)
+	require.True(t, *implicitPayload.Features.Budget)
+	require.NotNil(t, explicitPayload.Features.Budget)
+	require.True(t, *explicitPayload.Features.Budget)
+	require.Equal(t, explicitHash, implicitHash)
+}
 
-	if implicitPayload.Features.Failover == nil || !*implicitPayload.Features.Failover {
-		t.Fatalf("implicit payload failover = %v, want explicit true", implicitPayload.Features.Failover)
+func TestNormalizePayload_V2Steps(t *testing.T) {
+	payload, hash, err := normalizePayload(Payload{
+		SchemaVersion: 2,
+		Features:      FeatureFlags{Guardrails: true},
+		Guardrails:    []GuardrailStep{{Ref: "legacy", Step: 5}},
+		Steps: []Step{
+			{Ref: "b", Phase: "stream", Step: 10},
+			{Ref: " a ", Phase: "", Step: 20},
+			{Ref: "b", Phase: "Response", Step: 10},
+			{Ref: "c", Phase: "prompt", Step: 10},
+		},
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, hash)
+	require.Equal(t, 2, payload.SchemaVersion)
+	require.Nil(t, payload.Guardrails)
+
+	want := []Step{
+		{Ref: "legacy", Phase: "prompt", Step: 5},
+		{Ref: "c", Phase: "prompt", Step: 10},
+		{Ref: "a", Phase: "prompt", Step: 20},
+		{Ref: "b", Phase: "response", Step: 10},
+		{Ref: "b", Phase: "stream", Step: 10},
 	}
-	if explicitPayload.Features.Failover == nil || !*explicitPayload.Features.Failover {
-		t.Fatalf("explicit payload failover = %v, want explicit true", explicitPayload.Features.Failover)
+	require.Equal(t, want, payload.Steps)
+	steps := payload.EffectiveSteps()
+	require.Len(t, steps, 5)
+}
+
+func TestNormalizePayload_V2Validation(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload Payload
+		want    string
+	}{
+		{"duplicate ref per phase", Payload{SchemaVersion: 2, Steps: []Step{{Ref: "a", Step: 1}, {Ref: "a", Phase: "prompt", Step: 2}}}, "duplicate guardrail ref in prompt phase"},
+		{"invalid phase", Payload{SchemaVersion: 2, Steps: []Step{{Ref: "a", Phase: "route", Step: 1}}}, "invalid step phase"},
+		{"empty ref", Payload{SchemaVersion: 2, Steps: []Step{{Ref: " ", Step: 1}}}, "ref is required"},
+		{"negative step", Payload{SchemaVersion: 2, Steps: []Step{{Ref: "a", Step: -1}}}, "step must not be negative"},
+		{"negative legacy step", Payload{SchemaVersion: 1, Guardrails: []GuardrailStep{{Ref: "a", Step: -1}}}, "step must not be negative"},
+		{"negative folded legacy step", Payload{SchemaVersion: 2, Guardrails: []GuardrailStep{{Ref: "a", Step: -5}}}, "step must not be negative"},
+		{"v1 with steps", Payload{SchemaVersion: 1, Steps: []Step{{Ref: "a", Step: 1}}}, "schema_version 1"},
+		{"unsupported version", Payload{SchemaVersion: 3}, "unsupported schema_version"},
 	}
-	if implicitPayload.Features.Budget == nil || !*implicitPayload.Features.Budget {
-		t.Fatalf("implicit payload budget = %v, want explicit true", implicitPayload.Features.Budget)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := normalizePayload(tt.payload)
+			require.ErrorContains(t, err, tt.want)
+		})
 	}
-	if explicitPayload.Features.Budget == nil || !*explicitPayload.Features.Budget {
-		t.Fatalf("explicit payload budget = %v, want explicit true", explicitPayload.Features.Budget)
-	}
-	if implicitHash != explicitHash {
-		t.Fatalf("workflow hash mismatch: implicit=%q explicit=%q", implicitHash, explicitHash)
-	}
+}
+
+func TestNormalizePayload_DefaultsSchemaVersion(t *testing.T) {
+	legacy, _, err := normalizePayload(Payload{Guardrails: []GuardrailStep{{Ref: "a", Step: 1}}})
+	require.NoError(t, err)
+	require.Equal(t, 1, legacy.SchemaVersion)
+	require.Len(t, legacy.Guardrails, 1, "legacy = %+v, %v", legacy, err)
+	steps := legacy.EffectiveSteps()
+	require.Len(t, steps, 1)
+	require.Equal(t, PhasePrompt, steps[0].Phase)
+
+	fresh, _, err := normalizePayload(Payload{})
+	require.NoError(t, err)
+	require.Equal(t, 2, fresh.SchemaVersion, "fresh = %+v, %v", fresh, err)
 }

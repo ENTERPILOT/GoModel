@@ -24,6 +24,17 @@ type MessagesRequest struct {
 	ToolChoice    *ToolChoice     `json:"tool_choice,omitempty"`
 	Thinking      *Thinking       `json:"thinking,omitempty"`
 	CacheControl  json.RawMessage `json:"cache_control,omitempty" swaggertype:"object"`
+	// OutputConfig carries structured output (format) and the effort level.
+	OutputConfig *OutputConfig `json:"output_config,omitempty"`
+	// OutputFormat is the deprecated top-level form of output_config.format.
+	OutputFormat json.RawMessage `json:"output_format,omitempty" swaggertype:"object"`
+}
+
+// OutputConfig is the Anthropic output configuration: the effort level and a
+// structured output format ({"type":"json_schema","schema":{...}}).
+type OutputConfig struct {
+	Effort string          `json:"effort,omitempty"`
+	Format json.RawMessage `json:"format,omitempty" swaggertype:"object"`
 }
 
 // Metadata carries the optional Anthropic request metadata object.
@@ -55,14 +66,48 @@ type ContentBlock struct {
 	ID    string          `json:"id,omitempty"`
 	Name  string          `json:"name,omitempty"`
 	Input json.RawMessage `json:"input,omitempty" swaggertype:"object"`
-	// tool_result (Content also carries search_result text blocks and the
-	// custom-content variant of document sources)
+	// tool_result (Content also carries search_result text blocks, tool
+	// references, and the custom-content variant of document sources)
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   json.RawMessage `json:"content,omitempty" swaggertype:"object"`
 	IsError   bool            `json:"is_error,omitempty"`
+	// tool_reference: the name of a tool a tool search matched.
+	ToolName string `json:"tool_name,omitempty"`
+	// tool_search_tool_result: the search's matches, in a nested
+	// tool_search_tool_search_result object under Content.
+	SearchResult *ToolSearchResult `json:"-" swaggerignore:"true"`
 	// CacheControl preserves Anthropic prompt-cache breakpoints through the
 	// canonical chat representation when the request is routed back to Claude.
 	CacheControl json.RawMessage `json:"cache_control,omitempty" swaggertype:"object"`
+	// ExtraContent carries provider replay state on tool_use blocks (see
+	// core.ExtraContentField), so a tool-call history another provider produced
+	// through this API replays to it unchanged.
+	ExtraContent json.RawMessage `json:"extra_content,omitempty" swaggertype:"object"`
+}
+
+// ToolReference names a tool that a server-side tool search matched. Anthropic
+// returns it in tool_search_tool_result blocks and in tool_result content
+// marked deferred, and replays it as a tool_reference: the model loads the
+// tool's schema from the API rather than from the request's tool list.
+type ToolReference struct {
+	Type     string `json:"type"`
+	ToolName string `json:"tool_name"`
+}
+
+// ToolSearchResult is the content object of a tool_search_tool_result block.
+type ToolSearchResult struct {
+	Type           string          `json:"type"`
+	ToolReferences []ToolReference `json:"tool_references"`
+}
+
+// References returns the tools a tool_search_tool_result block matched. The
+// search keeps its matches in the nested content object; a block that carries
+// none has no result to report.
+func (block ContentBlock) References() []ToolReference {
+	if block.SearchResult == nil {
+		return nil
+	}
+	return block.SearchResult.ToolReferences
 }
 
 // Source describes an Anthropic image or document source: base64 inline
@@ -84,7 +129,13 @@ type Tool struct {
 	Name         string          `json:"name"`
 	Description  string          `json:"description,omitempty"`
 	InputSchema  json.RawMessage `json:"input_schema,omitempty" swaggertype:"object"`
+	Strict       *bool           `json:"strict,omitempty"`
 	CacheControl json.RawMessage `json:"cache_control,omitempty" swaggertype:"object"`
+	// DeferLoading marks a tool whose schema the API loads only when tool
+	// search matches it. It is an ordinary custom tool that declares itself
+	// deferred, so the translated pipeline sends it like any other and drops
+	// the marker (see convertTools).
+	DeferLoading bool `json:"defer_loading,omitempty"`
 }
 
 // ToolChoice constrains how the model selects tools.
@@ -114,12 +165,23 @@ type MessagesResponse struct {
 
 // ResponseContentBlock is one element of an Anthropic response content array.
 type ResponseContentBlock struct {
-	Type     string          `json:"type"`
-	Text     string          `json:"text,omitempty"`
-	Thinking string          `json:"thinking,omitempty"`
-	ID       string          `json:"id,omitempty"`
-	Name     string          `json:"name,omitempty"`
-	Input    json.RawMessage `json:"input,omitempty" swaggertype:"object"`
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	Thinking string `json:"thinking,omitempty"`
+	// Signature authenticates a thinking block. Anthropic requires it back
+	// verbatim when the conversation continues, so clients must echo it. Every
+	// thinking block carries the member, as the Anthropic schema requires;
+	// reasoning from a provider that does not sign its output is rendered with
+	// an empty signature. Hence the pointer: only a thinking block has one.
+	Signature *string `json:"signature,omitempty"`
+	// Data is the opaque payload of a redacted_thinking block.
+	Data  string          `json:"data,omitempty"`
+	ID    string          `json:"id,omitempty"`
+	Name  string          `json:"name,omitempty"`
+	Input json.RawMessage `json:"input,omitempty" swaggertype:"object"`
+	// ExtraContent is provider replay state on a tool_use block; clients echo
+	// it back on the next turn (see core.ExtraContentField).
+	ExtraContent json.RawMessage `json:"extra_content,omitempty" swaggertype:"object"`
 }
 
 // Usage reports Anthropic-style token usage.

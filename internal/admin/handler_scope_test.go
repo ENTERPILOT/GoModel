@@ -15,6 +15,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -23,8 +24,13 @@ const scopeAlpha = "/team/alpha"
 
 // scopedRequest builds a request whose credential is confined to userPath;
 // an empty userPath yields a global credential.
-func scopedRequest(method, target, body, userPath string) (*echo.Context, *httptest.ResponseRecorder) {
-	c, rec := jsonRequest(method, target, body)
+func scopedRequest(t *testing.T, method, target, body, userPath string, opts ...echotest.Option) (*echo.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	var payload any
+	if body != "" {
+		payload = body
+	}
+	c, rec := echotest.Request(t, method, target, payload, opts...)
 	if userPath != "" {
 		req := c.Request()
 		c.SetRequest(req.WithContext(core.WithAccessScope(req.Context(), core.AccessScope{UserPath: userPath})))
@@ -60,6 +66,7 @@ func TestRequireGlobalScope(t *testing.T) {
 		{name: "scoped credential denied on workflows", method: http.MethodGet, path: "/admin/workflows", scope: scopeAlpha, wantStatus: http.StatusForbidden, wantCode: codeAdminScopeDenied},
 		{name: "scoped credential denied on reset all", method: http.MethodPost, path: "/admin/budgets/reset", scope: scopeAlpha, wantStatus: http.StatusForbidden, wantCode: codeAdminScopeDenied},
 		{name: "scoped credential denied on usage throughput", method: http.MethodGet, path: "/admin/usage/throughput", scope: scopeAlpha, wantStatus: http.StatusForbidden, wantCode: codeAdminScopeDenied},
+		{name: "scoped credential denied on key import", method: http.MethodPost, path: "/admin/auth-keys/import", scope: scopeAlpha, wantStatus: http.StatusForbidden, wantCode: codeAdminScopeDenied},
 		// A zero-value handler answers 503 past the gate: the gate let it through.
 		{name: "global credential passes gateway-wide route", method: http.MethodGet, path: "/admin/workflows", wantStatus: http.StatusServiceUnavailable},
 		{name: "scoped credential reaches tenant route", method: http.MethodGet, path: "/admin/auth-keys", scope: scopeAlpha, wantStatus: http.StatusServiceUnavailable},
@@ -83,11 +90,11 @@ func TestRequireGlobalScope(t *testing.T) {
 func TestAccessEndpoint(t *testing.T) {
 	h := NewHandler(nil, nil)
 
-	c, rec := scopedRequest(http.MethodGet, "/admin/access", "", "")
+	c, rec := scopedRequest(t, http.MethodGet, "/admin/access", "", "")
 	require.NoError(t, h.Access(c))
 	assert.JSONEq(t, `{"scope":"global"}`, rec.Body.String())
 
-	c, rec = scopedRequest(http.MethodGet, "/admin/access", "", scopeAlpha)
+	c, rec = scopedRequest(t, http.MethodGet, "/admin/access", "", scopeAlpha)
 	require.NoError(t, h.Access(c))
 	assert.JSONEq(t, `{"scope":"user_path","user_path":"/team/alpha"}`, rec.Body.String())
 }
@@ -114,7 +121,7 @@ func TestScopedUserPathFilter(t *testing.T) {
 			auditReader := &mockAuditReader{logResult: &auditlog.LogListResult{}}
 			h := NewHandler(usageReader, nil, WithAuditReader(auditReader))
 
-			c, rec := scopedRequest(http.MethodGet, "/admin/usage/log?user_path="+tt.query, "", tt.scope)
+			c, rec := scopedRequest(t, http.MethodGet, "/admin/usage/log?user_path="+tt.query, "", tt.scope)
 			require.NoError(t, h.UsageLog(c))
 			if tt.wantCode != "" {
 				assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
@@ -124,7 +131,7 @@ func TestScopedUserPathFilter(t *testing.T) {
 				assert.Equal(t, tt.wantPath, usageReader.lastUsageLog.UserPath)
 			}
 
-			c, rec = scopedRequest(http.MethodGet, "/admin/audit/log?user_path="+tt.query, "", tt.scope)
+			c, rec = scopedRequest(t, http.MethodGet, "/admin/audit/log?user_path="+tt.query, "", tt.scope)
 			require.NoError(t, h.AuditLog(c))
 			if tt.wantCode != "" {
 				assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
@@ -164,18 +171,17 @@ func TestAuditDetailAndConversationHideOtherTenants(t *testing.T) {
 			}
 			h := NewHandler(nil, nil, WithAuditReader(reader))
 
-			c, rec := scopedRequest(http.MethodGet, "/admin/audit/detail?log_id=log-1", "", tt.scope)
+			c, rec := scopedRequest(t, http.MethodGet, "/admin/audit/detail?log_id=log-1", "", tt.scope)
 			require.NoError(t, h.AuditLogDetail(c))
 			assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
 
-			c, rec = scopedRequest(http.MethodGet, "/admin/audit/conversation?log_id=log-1", "", tt.scope)
+			c, rec = scopedRequest(t, http.MethodGet, "/admin/audit/conversation?log_id=log-1", "", tt.scope)
 			require.NoError(t, h.AuditConversation(c))
 			assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
 			if tt.wantStatus != http.StatusOK {
 				return
 			}
-			var resp auditConversationResponse
-			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+			resp := echotest.Decode[auditConversationResponse](t, rec)
 			ids := make([]string, 0, len(resp.Entries))
 			for _, e := range resp.Entries {
 				ids = append(ids, e.ID)
@@ -206,47 +212,75 @@ func TestAuthKeysScoped(t *testing.T) {
 
 	t.Run("list is filtered to the scope", func(t *testing.T) {
 		h := newHandler(t)
-		c, rec := scopedRequest(http.MethodGet, "/admin/auth-keys", "", scopeAlpha)
+		c, rec := scopedRequest(t, http.MethodGet, "/admin/auth-keys", "", scopeAlpha)
 		require.NoError(t, h.ListAuthKeys(c))
 		require.Equal(t, http.StatusOK, rec.Code)
-		var rows []authKeyResponse
-		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &rows))
+		rows := echotest.Decode[[]authKeyResponse](t, rec)
 		ids := make([]string, 0, len(rows))
 		for _, row := range rows {
 			ids = append(ids, row.ID)
 		}
 		assert.ElementsMatch(t, []string{"alpha-root", "alpha-child"}, ids)
 
-		c, rec = scopedRequest(http.MethodGet, "/admin/auth-keys", "", "")
+		c, rec = scopedRequest(t, http.MethodGet, "/admin/auth-keys", "", "")
 		require.NoError(t, h.ListAuthKeys(c))
-		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &rows))
+		rows = echotest.Decode[[]authKeyResponse](t, rec)
 		assert.Len(t, rows, 4, "global scope lists every key")
 	})
 
 	t.Run("create defaults to the scope root and rejects outside paths", func(t *testing.T) {
 		h := newHandler(t)
-		c, rec := scopedRequest(http.MethodPost, "/admin/auth-keys", `{"name":"new"}`, scopeAlpha)
+		c, rec := scopedRequest(t, http.MethodPost, "/admin/auth-keys", `{"name":"new"}`, scopeAlpha)
 		require.NoError(t, h.CreateAuthKey(c))
 		require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
-		var issued authkeys.IssuedKey
-		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &issued))
+		issued := echotest.Decode[authkeys.IssuedKey](t, rec)
 		assert.Equal(t, scopeAlpha, issued.UserPath)
 
-		c, rec = scopedRequest(http.MethodPost, "/admin/auth-keys", `{"name":"new","user_path":"/team/alpha/child"}`, scopeAlpha)
+		c, rec = scopedRequest(t, http.MethodPost, "/admin/auth-keys", `{"name":"new","user_path":"/team/alpha/child"}`, scopeAlpha)
 		require.NoError(t, h.CreateAuthKey(c))
 		assert.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
 
-		c, rec = scopedRequest(http.MethodPost, "/admin/auth-keys", `{"name":"new","user_path":"/team/beta"}`, scopeAlpha)
+		c, rec = scopedRequest(t, http.MethodPost, "/admin/auth-keys", `{"name":"new","user_path":"/team/beta"}`, scopeAlpha)
 		require.NoError(t, h.CreateAuthKey(c))
 		assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
 		assert.Equal(t, codeUserPathOutOfScope, errorCode(t, rec))
 
-		c, rec = scopedRequest(http.MethodPost, "/admin/auth-keys", `{"name":"new"}`, "")
+		c, rec = scopedRequest(t, http.MethodPost, "/admin/auth-keys", `{"name":"new"}`, "")
 		require.NoError(t, h.CreateAuthKey(c))
 		require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
-		var unbound authkeys.IssuedKey
-		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &unbound))
+		unbound := echotest.Decode[authkeys.IssuedKey](t, rec)
 		assert.Empty(t, unbound.UserPath, "global scope keeps an unbound key unbound")
+	})
+
+	// A passthrough key reaches the whole shared provider account, so only a
+	// global credential may grant it; a scoped one may still revoke it.
+	t.Run("only global credentials grant passthrough access", func(t *testing.T) {
+		h := newHandler(t)
+		c, rec := scopedRequest(t, http.MethodPost, "/admin/auth-keys", `{"name":"proxy","passthrough_access":true}`, scopeAlpha)
+		require.NoError(t, h.CreateAuthKey(c))
+		assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+		assert.Equal(t, codeAdminScopeDenied, errorCode(t, rec))
+
+		update := func(body, userPath string) *httptest.ResponseRecorder {
+			c, rec := scopedRequest(t, http.MethodPut, "/admin/auth-keys/alpha-child/passthrough-access", body, userPath, echotest.WithPathValue("id", "alpha-child"))
+			require.NoError(t, h.UpdateAuthKeyPassthroughAccess(c))
+			return rec
+		}
+		rec = update(`{"passthrough_access":true}`, scopeAlpha)
+		assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+		assert.Equal(t, codeAdminScopeDenied, errorCode(t, rec))
+
+		rec = update(`{"passthrough_access":true}`, "")
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		assert.True(t, echotest.Decode[authkeys.View](t, rec).PassthroughAccess)
+
+		rec = update(`{"passthrough_access":false}`, scopeAlpha)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		assert.False(t, echotest.Decode[authkeys.View](t, rec).PassthroughAccess)
+
+		c, rec = scopedRequest(t, http.MethodPut, "/admin/auth-keys/beta/passthrough-access", `{"passthrough_access":true}`, scopeAlpha, echotest.WithPathValue("id", "beta"))
+		require.NoError(t, h.UpdateAuthKeyPassthroughAccess(c))
+		assert.Equal(t, http.StatusNotFound, rec.Code, "a key outside the scope stays hidden")
 	})
 
 	t.Run("updates and deactivation hide keys outside the scope", func(t *testing.T) {
@@ -263,13 +297,11 @@ func TestAuthKeysScoped(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				h := newHandler(t)
-				c, rec := scopedRequest(http.MethodPut, "/admin/auth-keys/"+tt.id+"/labels", `{"labels":["x"]}`, scopeAlpha)
-				c.SetPathValues(echo.PathValues{{Name: "id", Value: tt.id}})
+				c, rec := scopedRequest(t, http.MethodPut, "/admin/auth-keys/"+tt.id+"/labels", `{"labels":["x"]}`, scopeAlpha, echotest.WithPathValue("id", tt.id))
 				require.NoError(t, h.UpdateAuthKeyLabels(c))
 				assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
 
-				c, rec = scopedRequest(http.MethodPost, "/admin/auth-keys/"+tt.id+"/deactivate", "", scopeAlpha)
-				c.SetPathValues(echo.PathValues{{Name: "id", Value: tt.id}})
+				c, rec = scopedRequest(t, http.MethodPost, "/admin/auth-keys/"+tt.id+"/deactivate", "", scopeAlpha, echotest.WithPathValue("id", tt.id))
 				require.NoError(t, h.DeactivateAuthKey(c))
 				want := tt.wantStatus
 				if want == http.StatusOK {
@@ -288,7 +320,7 @@ func TestUsersScoped(t *testing.T) {
 		authkeys.AuthKey{ID: "k2", Name: "k2", UserPath: "/team/beta", Enabled: true, SecretHash: "h2", CreatedAt: now, UpdatedAt: now},
 	)
 
-	c, rec := scopedRequest(http.MethodPut, "/admin/users", `{"user_path":"/team/alpha","allowed_models":["openai/"]}`, scopeAlpha)
+	c, rec := scopedRequest(t, http.MethodPut, "/admin/users", `{"user_path":"/team/alpha","allowed_models":["openai/"]}`, scopeAlpha)
 	require.NoError(t, h.UpsertUser(c))
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	nodes := decodeUsers(t, rec)
@@ -298,21 +330,21 @@ func TestUsersScoped(t *testing.T) {
 	assert.NotContains(t, nodes, "/team/beta")
 	assert.NotContains(t, nodes, "/")
 
-	c, rec = scopedRequest(http.MethodPut, "/admin/users", `{"user_path":"/team/beta","allowed_models":["openai/"]}`, scopeAlpha)
+	c, rec = scopedRequest(t, http.MethodPut, "/admin/users", `{"user_path":"/team/beta","allowed_models":["openai/"]}`, scopeAlpha)
 	require.NoError(t, h.UpsertUser(c))
 	assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
 	assert.Equal(t, codeUserPathOutOfScope, errorCode(t, rec))
 
-	c, rec = scopedRequest(http.MethodDelete, "/admin/users?user_path=/team/beta", "", scopeAlpha)
+	c, rec = scopedRequest(t, http.MethodDelete, "/admin/users?user_path=/team/beta", "", scopeAlpha)
 	require.NoError(t, h.DeleteUser(c))
 	assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
 	assert.Equal(t, codeUserPathOutOfScope, errorCode(t, rec))
 
-	c, rec = scopedRequest(http.MethodDelete, "/admin/users?user_path=/team/alpha", "", scopeAlpha)
+	c, rec = scopedRequest(t, http.MethodDelete, "/admin/users?user_path=/team/alpha", "", scopeAlpha)
 	require.NoError(t, h.DeleteUser(c))
 	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-	c, rec = scopedRequest(http.MethodGet, "/admin/users", "", "")
+	c, rec = scopedRequest(t, http.MethodGet, "/admin/users", "", "")
 	require.NoError(t, h.ListUsers(c))
 	nodes = decodeUsers(t, rec)
 	assert.Contains(t, nodes, "/team/beta", "global scope keeps the whole tree")
@@ -332,20 +364,19 @@ func TestBudgetsScoped(t *testing.T) {
 
 	t.Run("list keeps only user_path budgets inside the scope", func(t *testing.T) {
 		h := newHandler(t)
-		c, rec := scopedRequest(http.MethodGet, "/admin/budgets", "", scopeAlpha)
+		c, rec := scopedRequest(t, http.MethodGet, "/admin/budgets", "", scopeAlpha)
 		require.NoError(t, h.ListBudgets(c))
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		var resp budgetListResponse
-		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		resp := echotest.Decode[budgetListResponse](t, rec)
 		subjects := make([]string, 0, len(resp.Budgets))
 		for _, item := range resp.Budgets {
 			subjects = append(subjects, item.Subject)
 		}
 		assert.ElementsMatch(t, []string{"/team/alpha", "/team/alpha/svc"}, subjects)
 
-		c, rec = scopedRequest(http.MethodGet, "/admin/budgets", "", "")
+		c, rec = scopedRequest(t, http.MethodGet, "/admin/budgets", "", "")
 		require.NoError(t, h.ListBudgets(c))
-		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		resp = echotest.Decode[budgetListResponse](t, rec)
 		assert.Len(t, resp.Budgets, 4, "global scope lists every budget")
 	})
 
@@ -361,7 +392,7 @@ func TestBudgetsScoped(t *testing.T) {
 	for _, tt := range writes {
 		t.Run("upsert "+tt.name, func(t *testing.T) {
 			h := newHandler(t)
-			c, rec := scopedRequest(http.MethodPut, "/admin/budgets", tt.body, scopeAlpha)
+			c, rec := scopedRequest(t, http.MethodPut, "/admin/budgets", tt.body, scopeAlpha)
 			require.NoError(t, h.UpsertBudget(c))
 			assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
 			if tt.wantStatus == http.StatusForbidden {
@@ -370,7 +401,7 @@ func TestBudgetsScoped(t *testing.T) {
 		})
 		t.Run("delete "+tt.name, func(t *testing.T) {
 			h := newHandler(t)
-			c, rec := scopedRequest(http.MethodDelete, "/admin/budgets", tt.body, scopeAlpha)
+			c, rec := scopedRequest(t, http.MethodDelete, "/admin/budgets", tt.body, scopeAlpha)
 			require.NoError(t, h.DeleteBudget(c))
 			if tt.wantStatus == http.StatusForbidden {
 				assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
@@ -383,7 +414,7 @@ func TestBudgetsScoped(t *testing.T) {
 
 	t.Run("reset-one outside scope", func(t *testing.T) {
 		h := newHandler(t)
-		c, rec := scopedRequest(http.MethodPost, "/admin/budgets/reset-one", `{"user_path":"/team/beta","period":"daily"}`, scopeAlpha)
+		c, rec := scopedRequest(t, http.MethodPost, "/admin/budgets/reset-one", `{"user_path":"/team/beta","period":"daily"}`, scopeAlpha)
 		require.NoError(t, h.ResetBudget(c))
 		assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
 		assert.Equal(t, codeUserPathOutOfScope, errorCode(t, rec))
@@ -404,17 +435,16 @@ func TestRateLimitsScoped(t *testing.T) {
 
 	t.Run("list keeps only user_path rules inside the scope", func(t *testing.T) {
 		h := newHandler(t)
-		c, rec := scopedRequest(http.MethodGet, "/admin/rate-limits", "", scopeAlpha)
+		c, rec := scopedRequest(t, http.MethodGet, "/admin/rate-limits", "", scopeAlpha)
 		require.NoError(t, h.ListRateLimits(c))
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		var resp rateLimitListResponse
-		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		resp := echotest.Decode[rateLimitListResponse](t, rec)
 		require.Len(t, resp.RateLimits, 1)
 		assert.Equal(t, "/team/alpha", resp.RateLimits[0].Subject)
 
-		c, rec = scopedRequest(http.MethodGet, "/admin/rate-limits", "", "")
+		c, rec = scopedRequest(t, http.MethodGet, "/admin/rate-limits", "", "")
 		require.NoError(t, h.ListRateLimits(c))
-		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		resp = echotest.Decode[rateLimitListResponse](t, rec)
 		assert.Len(t, resp.RateLimits, 3, "global scope lists every rule")
 	})
 
@@ -430,7 +460,7 @@ func TestRateLimitsScoped(t *testing.T) {
 	for _, tt := range writes {
 		t.Run("upsert "+tt.name, func(t *testing.T) {
 			h := newHandler(t)
-			c, rec := scopedRequest(http.MethodPut, "/admin/rate-limits", tt.body, scopeAlpha)
+			c, rec := scopedRequest(t, http.MethodPut, "/admin/rate-limits", tt.body, scopeAlpha)
 			require.NoError(t, h.UpsertRateLimit(c))
 			assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
 			if tt.wantStatus == http.StatusForbidden {
@@ -439,7 +469,7 @@ func TestRateLimitsScoped(t *testing.T) {
 		})
 		t.Run("delete "+tt.name, func(t *testing.T) {
 			h := newHandler(t)
-			c, rec := scopedRequest(http.MethodDelete, "/admin/rate-limits", tt.body, scopeAlpha)
+			c, rec := scopedRequest(t, http.MethodDelete, "/admin/rate-limits", tt.body, scopeAlpha)
 			require.NoError(t, h.DeleteRateLimit(c))
 			if tt.wantStatus == http.StatusForbidden {
 				assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
@@ -452,7 +482,7 @@ func TestRateLimitsScoped(t *testing.T) {
 
 	t.Run("reset-one outside scope", func(t *testing.T) {
 		h := newHandler(t)
-		c, rec := scopedRequest(http.MethodPost, "/admin/rate-limits/reset-one", `{"user_path":"/team/beta","period":"minute"}`, scopeAlpha)
+		c, rec := scopedRequest(t, http.MethodPost, "/admin/rate-limits/reset-one", `{"user_path":"/team/beta","period":"minute"}`, scopeAlpha)
 		require.NoError(t, h.ResetRateLimit(c))
 		assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
 		assert.Equal(t, codeUserPathOutOfScope, errorCode(t, rec))
@@ -482,7 +512,7 @@ func TestAuditStatsScoped(t *testing.T) {
 			if tt.filter != "" {
 				target += "&user_path=" + tt.filter
 			}
-			c, rec := scopedRequest(http.MethodGet, target, "", tt.scope)
+			c, rec := scopedRequest(t, http.MethodGet, target, "", tt.scope)
 			require.NoError(t, h.AuditStats(c))
 			assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
 			if tt.wantCode != "" {

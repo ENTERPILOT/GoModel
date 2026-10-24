@@ -12,14 +12,13 @@ import {
   defaultGuardrailForm,
   defaultGuardrailType,
   filterGuardrails,
-  guardrailArrayFieldSelected,
-  guardrailFieldValue,
+  guardrailEditForm,
+  guardrailPhases,
   guardrailTypeFields,
   guardrailTypeLabel,
   normalizeGuardrailConfig,
+  parseGuardrailTimeoutMs,
   resolvedGuardrailType,
-  setGuardrailFieldValue,
-  toggleGuardrailArrayValue,
 } from "./guardrails-logic.js";
 
 class GuardrailsStore {
@@ -29,20 +28,28 @@ class GuardrailsStore {
   loading = $state(false);
   typesLoading = $state(false);
   // Load and in-form errors only; mutation feedback goes through the
-  // flash store.
+  // flash store. The type catalog has its own so a later successful
+  // guardrails load cannot clear a type-load failure.
   error = $state("");
+  typesError = $state("");
   filter = $state("");
   formOpen = $state(false);
   formSubmitting = $state(false);
   deletingName = $state("");
   formMode = $state("create");
   formOriginalName = $state("");
+  // onSaved(name) runs after a successful save when another editor (the
+  // workflow editor) opened this form and wants the result. Plain field,
+  // not state: it never renders. Cleared when the form closes.
+  onSaved = null;
   form = $state({
     name: "",
     type: "",
     description: "",
     user_path: "",
     config: {},
+    fail_mode: "",
+    timeout_ms: "",
   });
 
   get filtered() {
@@ -57,35 +64,14 @@ class GuardrailsStore {
     return guardrailTypeFields(this.types, type);
   }
 
-  fieldValue(field) {
-    return guardrailFieldValue(this.form && this.form.config, field);
+  phases(guardrail) {
+    return guardrailPhases(this.types, guardrail);
   }
 
-  setFieldValue(field, value) {
-    this.form = {
-      ...this.form,
-      config: setGuardrailFieldValue(this.form.config, field, value),
-    };
-  }
-
-  arrayFieldSelected(field, optionValue) {
-    return guardrailArrayFieldSelected(
-      this.form && this.form.config,
-      field,
-      optionValue,
-    );
-  }
-
-  toggleArrayFieldValue(field, optionValue, checked) {
-    this.form = {
-      ...this.form,
-      config: toggleGuardrailArrayValue(
-        this.form.config,
-        field,
-        optionValue,
-        checked,
-      ),
-    };
+  // setConfig replaces the schema-driven config (SchemaFields emits a new
+  // object per edit).
+  setConfig(config) {
+    this.form = { ...this.form, config };
   }
 
   openCreate() {
@@ -97,24 +83,10 @@ class GuardrailsStore {
   }
 
   openEdit(guardrail) {
-    const resolvedType = resolvedGuardrailType(
-      this.types,
-      guardrail && guardrail.type,
-    );
     this.formMode = "edit";
     this.formOriginalName = String((guardrail && guardrail.name) || "").trim();
     this.error = "";
-    this.form = {
-      name: this.formOriginalName,
-      type: resolvedType,
-      description: String((guardrail && guardrail.description) || "").trim(),
-      user_path: String((guardrail && guardrail.user_path) || "").trim(),
-      config: normalizeGuardrailConfig(
-        this.types,
-        guardrail && guardrail.config,
-        resolvedType,
-      ),
-    };
+    this.form = guardrailEditForm(this.types, guardrail);
     this.formOpen = true;
   }
 
@@ -122,6 +94,7 @@ class GuardrailsStore {
     this.formOpen = false;
     this.formMode = "create";
     this.formOriginalName = "";
+    this.onSaved = null;
     this.error = "";
     this.form = defaultGuardrailForm(this.types, defaultGuardrailType(this.types));
   }
@@ -147,6 +120,7 @@ class GuardrailsStore {
       if (outcome.status === "unavailable") {
         this.available = false;
         this.types = [];
+        this.typesError = "";
         return;
       }
       // Only a real gateway response proves the feature is back — a thrown
@@ -154,12 +128,20 @@ class GuardrailsStore {
       if (outcome.result) {
         this.available = true;
       }
-      this.types = outcome.items;
       if (outcome.status === "error") {
-        this.error = outcome.error;
+        // Keep the types already loaded: with an empty list every stored
+        // definition would look unknown and the editor would retype it.
+        this.typesError = outcome.error;
         return;
       }
-      const resolvedType = resolvedGuardrailType(this.types, this.form.type);
+      this.typesError = "";
+      this.types = outcome.items;
+      // A definition being edited keeps its stored type whatever the
+      // catalog now says; the type select is disabled in that mode.
+      const resolvedType =
+        this.formMode === "edit"
+          ? this.form.type
+          : resolvedGuardrailType(this.types, this.form.type);
       this.form = {
         ...this.form,
         type: resolvedType,
@@ -213,6 +195,10 @@ class GuardrailsStore {
       this.error = m.guardrails_type_required();
       return;
     }
+    if (Number.isNaN(parseGuardrailTimeoutMs(this.form.timeout_ms))) {
+      this.error = m.guardrails_timeout_invalid();
+      return;
+    }
 
     this.error = "";
     this.formSubmitting = true;
@@ -237,8 +223,10 @@ class GuardrailsStore {
       }
 
       flash.success(m.guardrails_saved({ name }));
+      const onSaved = this.onSaved;
       this.closeForm();
       void this.fetchGuardrails();
+      onSaved?.(name);
     } finally {
       this.formSubmitting = false;
     }

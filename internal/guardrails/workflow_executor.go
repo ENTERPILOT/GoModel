@@ -2,75 +2,186 @@ package guardrails
 
 import (
 	"context"
+	"log/slog"
+	"strings"
+	"sync"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/plugins"
+	"github.com/enterpilot/gomodel/internal/plugins/exchange"
+	"github.com/enterpilot/gomodel/pluginapi"
 )
 
-// ContextPipelineResolver resolves a request-scoped guardrails pipeline.
-type ContextPipelineResolver interface {
-	PipelineForContext(ctx context.Context) *Pipeline
+// ContextChainsResolver resolves the request-scoped plugin chains.
+type ContextChainsResolver interface {
+	ChainsForContext(ctx context.Context) *plugins.Chains
 }
 
-// WorkflowRequestPatcher applies the guardrails pipeline selected by the current workflow.
+// WorkflowRequestPatcher runs the prompt chain selected by the current
+// workflow over translated requests.
 type WorkflowRequestPatcher struct {
-	resolver ContextPipelineResolver
+	resolver ContextChainsResolver
 }
 
 // NewWorkflowRequestPatcher creates a translated-request patcher that resolves
-// its pipeline from the request context on each call.
-func NewWorkflowRequestPatcher(resolver ContextPipelineResolver) *WorkflowRequestPatcher {
+// its chains from the request context on each call.
+func NewWorkflowRequestPatcher(resolver ContextChainsResolver) *WorkflowRequestPatcher {
 	return &WorkflowRequestPatcher{resolver: resolver}
 }
 
-// PatchChatRequest applies the request-scoped guardrails pipeline to a translated chat request.
+// PatchChatRequest runs the prompt chain over a translated chat request.
 func (p *WorkflowRequestPatcher) PatchChatRequest(ctx context.Context, req *core.ChatRequest) (*core.ChatRequest, error) {
-	return processGuardedChat(ctx, p.pipeline(ctx), req)
+	return processGuardedChat(ctx, p.chain(ctx), req)
 }
 
-// PatchResponsesRequest applies the request-scoped guardrails pipeline to a translated responses request.
+// PatchResponsesRequest runs the prompt chain over a translated responses request.
 func (p *WorkflowRequestPatcher) PatchResponsesRequest(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesRequest, error) {
-	return processGuardedResponses(ctx, p.pipeline(ctx), req)
+	return processGuardedResponses(ctx, p.chain(ctx), req)
 }
 
-func (p *WorkflowRequestPatcher) pipeline(ctx context.Context) *Pipeline {
-	if p == nil || p.resolver == nil {
+// PatchSystemOneRequest runs the prompt chain over a System One request's
+// state. Edits a decision request has no place for, such as an injected
+// system prompt, are dropped with a warning rather than failing the request:
+// a guardrail scoped to every model is not wrong for System One models, it
+// only has nothing to change there.
+func (p *WorkflowRequestPatcher) PatchSystemOneRequest(ctx context.Context, req *core.SystemOneRequest) (*core.SystemOneRequest, error) {
+	if req == nil {
+		return nil, nil
+	}
+	return processGuarded(ctx, p.chain(ctx), req, "System One", exchange.FromSystemOneRequest, applySystemOneEdits)
+}
+
+// decisionDropsWarned records the kinds of dropped guardrail edits already
+// logged at warning level. A guardrail scoped to every model edits every
+// System One or Decisions request the same way, so the misconfiguration is
+// reported once per kind; repeats are logged at debug level.
+var decisionDropsWarned sync.Map
+
+func applySystemOneEdits(req *core.SystemOneRequest, prompt *pluginapi.Prompt) (*core.SystemOneRequest, error) {
+	if dropped := exchange.SystemOneUncarriedEdits(prompt); len(dropped) > 0 {
+		warnDroppedDecisionEdits("guardrail edits a System One request cannot carry were dropped; only the state is guarded", req.Model, dropped)
+	}
+	return exchange.ApplyToSystemOneRequest(req, prompt)
+}
+
+// warnDroppedDecisionEdits logs dropped edits once per message and kind at
+// warning level, and repeats at debug level.
+func warnDroppedDecisionEdits(message, model string, dropped []string) {
+	if _, repeated := decisionDropsWarned.LoadOrStore(message+"|"+strings.Join(dropped, ","), struct{}{}); repeated {
+		slog.Debug(message, "model", model, "dropped", dropped)
+	} else {
+		slog.Warn(message+" (repeats are logged at debug level)", "model", model, "dropped", dropped)
+	}
+}
+
+// PatchDecisionRequest runs the prompt chain over a Decisions request's
+// input. As with System One, edits a decision request has no place for are
+// dropped with a warning rather than failing the request.
+func (p *WorkflowRequestPatcher) PatchDecisionRequest(ctx context.Context, req *core.DecisionRequest) (*core.DecisionRequest, error) {
+	if req == nil {
+		return nil, nil
+	}
+	return processGuarded(ctx, p.chain(ctx), req, "decision", exchange.FromDecisionRequest, applyDecisionEdits)
+}
+
+func applyDecisionEdits(req *core.DecisionRequest, prompt *pluginapi.Prompt) (*core.DecisionRequest, error) {
+	if dropped := exchange.DecisionUncarriedEdits(prompt); len(dropped) > 0 {
+		warnDroppedDecisionEdits("guardrail edits a decision request cannot carry were dropped; only the input is guarded", req.Model, dropped)
+	}
+	return exchange.ApplyToDecisionRequest(req, prompt)
+}
+
+// EditsPromptContent reports whether the request's prompt chain holds an
+// instance that edits content, such as an anonymizing guardrail. A chained
+// Responses request only needs its stored history expanded into the input
+// when such an instance runs; otherwise the request reaches the provider as
+// the client sent it. An instance configured only to flag or block counts as
+// non-editing.
+func (p *WorkflowRequestPatcher) EditsPromptContent(ctx context.Context) bool {
+	for _, instance := range p.chain(ctx).Instances() {
+		if instance.EditsContent() {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *WorkflowRequestPatcher) chain(ctx context.Context) *plugins.Chain {
+	return promptChain(p.resolver, ctx)
+}
+
+func promptChain(resolver ContextChainsResolver, ctx context.Context) *plugins.Chain {
+	if resolver == nil {
 		return nil
 	}
-	return p.resolver.PipelineForContext(ctx)
-}
-
-// WorkflowBatchPreparer applies the guardrails pipeline selected by the current workflow.
-type WorkflowBatchPreparer struct {
-	provider core.RoutableProvider
-	resolver ContextPipelineResolver
-}
-
-// NewWorkflowBatchPreparer creates a native-batch preparer that resolves its pipeline per request.
-func NewWorkflowBatchPreparer(provider core.RoutableProvider, resolver ContextPipelineResolver) *WorkflowBatchPreparer {
-	return &WorkflowBatchPreparer{
-		provider: provider,
-		resolver: resolver,
-	}
-}
-
-// PrepareBatchRequest applies the request-scoped guardrails pipeline to native batch items.
-func (p *WorkflowBatchPreparer) PrepareBatchRequest(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchRewriteResult, error) {
-	return processGuardedBatchRequest(ctx, providerType, req, p.pipeline(ctx), p.batchFileTransport())
-}
-
-func (p *WorkflowBatchPreparer) batchFileTransport() core.BatchFileTransport {
-	if p == nil || p.provider == nil {
+	chains := resolver.ChainsForContext(ctx)
+	if chains == nil {
 		return nil
 	}
-	if files, ok := p.provider.(core.NativeFileRoutableProvider); ok {
-		return files
-	}
-	return nil
+	return chains.Prompt
 }
 
-func (p *WorkflowBatchPreparer) pipeline(ctx context.Context) *Pipeline {
-	if p == nil || p.resolver == nil {
-		return nil
+func processGuardedChat(ctx context.Context, chain *plugins.Chain, req *core.ChatRequest) (*core.ChatRequest, error) {
+	if req == nil {
+		return nil, nil
 	}
-	return p.resolver.PipelineForContext(ctx)
+	return processGuarded(ctx, chain, req, "chat", exchange.FromChatRequest, exchange.ApplyToChatRequest)
+}
+
+func processGuardedResponses(ctx context.Context, chain *plugins.Chain, req *core.ResponsesRequest) (*core.ResponsesRequest, error) {
+	if req == nil {
+		return nil, nil
+	}
+	return processGuarded(ctx, chain, req, "responses", exchange.FromResponsesRequest, exchange.ApplyToResponsesRequest)
+}
+
+// processGuarded maps req to a prompt, runs the chain and applies the edits
+// back. The request is returned as-is when nothing changed.
+func processGuarded[Req any](
+	ctx context.Context,
+	chain *plugins.Chain,
+	req Req,
+	kind string,
+	from func(Req) (*pluginapi.Prompt, error),
+	apply func(Req, *pluginapi.Prompt) (Req, error),
+) (Req, error) {
+	var zero Req
+	if chain.Empty() {
+		return req, nil
+	}
+	chain.Acquire()
+	defer chain.Release()
+	prompt, err := from(req)
+	if err != nil {
+		return zero, core.NewInvalidRequestError("invalid "+kind+" request for guardrails", err)
+	}
+	run := newPromptRun(ctx, chain)
+	// When the request is audited, every editing step leaves a PromptEdit
+	// behind: a snapshot of the prompt as the step left it, applied to the
+	// request later, off the request path, by the audit revision chain.
+	var observe plugins.EditObserver
+	if plugins.PromptEditCaptureEnabled(ctx) {
+		observe = func(instance string, x *pluginapi.Exchange) {
+			snapshot := x.Prompt.Clone()
+			run.state.AddPromptEdit(plugins.PromptEdit{Instance: instance, Apply: func() (any, error) {
+				applied, err := apply(req, snapshot)
+				if err != nil {
+					return nil, err
+				}
+				return applied, nil
+			}})
+		}
+	}
+	edited, err := run.run(ctx, prompt, observe)
+	if err != nil {
+		return zero, err
+	}
+	if !edited {
+		return req, nil
+	}
+	applied, err := apply(req, prompt)
+	if err != nil {
+		return zero, core.NewInvalidRequestError("guardrails produced an invalid "+kind+" request: "+err.Error(), err)
+	}
+	return applied, nil
 }

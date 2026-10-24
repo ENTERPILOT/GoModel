@@ -108,6 +108,12 @@ class PricingOverridesStore {
     return modelRowPricingState(row, this.modelPricingOverrideViews).pricing;
   }
 
+  // Per-field source labels (model registry, config.yaml, or the override
+  // scope) matching modelRowPricing's fields.
+  modelRowPricingSources(row) {
+    return modelRowPricingState(row, this.modelPricingOverrideViews).sources;
+  }
+
   // ---- Editor ----
 
   openGlobalPricingOverrideEdit() {

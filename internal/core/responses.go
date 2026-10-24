@@ -189,10 +189,17 @@ type ResponsesResponse struct {
 	CreatedAt int64                 `json:"created_at"`
 	Model     string                `json:"model"`
 	Provider  string                `json:"provider"`
-	Status    string                `json:"status"` // "completed", "failed", "in_progress"
+	Status    string                `json:"status"` // "completed", "incomplete", "failed", "in_progress"
 	Output    []ResponsesOutputItem `json:"output"`
 	Usage     *ResponsesUsage       `json:"usage,omitempty"`
 	Error     *ResponsesError       `json:"error,omitempty"`
+	// IncompleteDetails explains a status of "incomplete": the model hit
+	// max_output_tokens, was stopped by a content filter, or the upstream
+	// stream was interrupted.
+	IncompleteDetails *ResponsesIncompleteDetails `json:"incomplete_details,omitempty"`
+	// PreviousResponseID names the response this one was chained from, as
+	// OpenAI echoes it; stored snapshots follow it to rebuild the history.
+	PreviousResponseID string `json:"previous_response_id,omitempty"`
 }
 
 // ResponsesOutputItem represents an item in the output array.
@@ -213,8 +220,10 @@ type ResponsesOutputItem struct {
 
 // ResponsesContentItem represents a content item in the output.
 type ResponsesContentItem struct {
-	Type       string             `json:"type"` // "output_text", "input_image", "input_audio", etc.
-	Text       string             `json:"text,omitempty"`
+	Type string `json:"type"` // "output_text", "refusal", "input_image", "input_audio", etc.
+	Text string `json:"text,omitempty"`
+	// Refusal is the model's explanation on a "refusal" content item.
+	Refusal    string             `json:"refusal,omitempty"`
 	ImageURL   *ImageURLContent   `json:"image_url,omitempty"`
 	InputAudio *InputAudioContent `json:"input_audio,omitempty"`
 	// input_file items carry their file fields flat, unlike chat file parts.
@@ -235,6 +244,13 @@ type ResponsesUsage struct {
 	PromptTokensDetails     *PromptTokensDetails     `json:"prompt_tokens_details,omitempty"`
 	CompletionTokensDetails *CompletionTokensDetails `json:"completion_tokens_details,omitempty"`
 	RawUsage                map[string]any           `json:"raw_usage,omitempty"`
+}
+
+// ResponsesIncompleteDetails carries the reason a response stopped early,
+// following the OpenAI Responses contract ("max_output_tokens",
+// "content_filter", or "interrupted" for a cut upstream stream).
+type ResponsesIncompleteDetails struct {
+	Reason string `json:"reason"`
 }
 
 // ResponsesError represents an error in the response.

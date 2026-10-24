@@ -4,23 +4,30 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 )
 
 // SanitizedRetryConfig exposes effective retry settings without secrets.
 type SanitizedRetryConfig struct {
-	MaxRetries     int     `json:"max_retries"`
-	InitialBackoff string  `json:"initial_backoff"`
-	MaxBackoff     string  `json:"max_backoff"`
-	BackoffFactor  float64 `json:"backoff_factor"`
-	JitterFactor   float64 `json:"jitter_factor"`
+	RetryOnStatuses []string `json:"retry_on_statuses"`
+	MaxRetries      int      `json:"max_retries"`
+	InitialBackoff  string   `json:"initial_backoff"`
+	MaxBackoff      string   `json:"max_backoff"`
+	BackoffFactor   float64  `json:"backoff_factor"`
+	JitterFactor    float64  `json:"jitter_factor"`
 }
 
 // SanitizedCircuitBreakerConfig exposes effective circuit-breaker settings.
 type SanitizedCircuitBreakerConfig struct {
-	Enabled          bool   `json:"enabled"`
-	FailureThreshold int    `json:"failure_threshold"`
-	SuccessThreshold int    `json:"success_threshold"`
-	Timeout          string `json:"timeout"`
+	FailureOnStatuses []string `json:"failure_on_statuses"`
+	Scope             string   `json:"scope"`
+	Enabled           bool     `json:"enabled"`
+	FailureThreshold  int      `json:"failure_threshold"`
+	SuccessThreshold  int      `json:"success_threshold"`
+	Timeout           string   `json:"timeout"`
+	SlowCallThreshold string   `json:"slow_call_threshold"`
 }
 
 // SanitizedResilienceConfig exposes effective resilience settings.
@@ -31,13 +38,15 @@ type SanitizedResilienceConfig struct {
 
 // SanitizedProviderConfig is the admin-safe provider configuration view.
 type SanitizedProviderConfig struct {
-	Name              string                    `json:"name"`
-	Type              string                    `json:"type"`
-	BaseURL           string                    `json:"base_url,omitempty"`
-	APIVersion        string                    `json:"api_version,omitempty"`
-	Models            []string                  `json:"models,omitempty"`
-	SessionStickyKeys bool                      `json:"session_sticky_keys"`
-	Resilience        SanitizedResilienceConfig `json:"resilience"`
+	Name              string   `json:"name"`
+	Type              string   `json:"type"`
+	BaseURL           string   `json:"base_url,omitempty"`
+	APIVersion        string   `json:"api_version,omitempty"`
+	Models            []string `json:"models,omitempty"`
+	SessionStickyKeys bool     `json:"session_sticky_keys"`
+	// ProxyURL is the provider's outbound proxy with any password masked.
+	ProxyURL   string                    `json:"proxy_url,omitempty"`
+	Resilience SanitizedResilienceConfig `json:"resilience"`
 }
 
 // ProviderRuntimeSnapshot describes runtime diagnostics for a configured provider.
@@ -55,6 +64,7 @@ type ProviderRuntimeSnapshot struct {
 	LastAvailabilityOKAt    *time.Time `json:"last_availability_ok_at,omitempty"`
 	LastAvailabilityError   string     `json:"last_availability_error,omitempty"`
 	InventoryStale          bool       `json:"inventory_stale,omitempty"`
+	ModelListingUnsupported bool       `json:"model_listing_unsupported,omitempty"`
 }
 
 type providerRuntimeState struct {
@@ -71,6 +81,14 @@ type providerRuntimeState struct {
 	// provider with an honest 502/503) but are skipped by ModelAvailable,
 	// which load balancing uses to route around the provider.
 	inventoryStale bool
+	// modelListingUnsupported marks a provider without a /models endpoint
+	// whose inventory comes from its configured model list.
+	modelListingUnsupported bool
+	// catalogStandIn marks an inventory taken from the model catalog because
+	// the provider's listing failed with nothing else to go on. It was never
+	// confirmed by the provider, so it is not cached and is replaced as soon
+	// as a listing succeeds.
+	catalogStandIn bool
 }
 
 // SanitizeProviderConfigs converts effective provider configs into a stable,
@@ -105,19 +123,24 @@ func SanitizeProviderConfigs(configs map[string]ProviderConfig) []SanitizedProvi
 			APIVersion:        strings.TrimSpace(cfg.APIVersion),
 			Models:            models,
 			SessionStickyKeys: cfg.SessionStickyKeys,
+			ProxyURL:          httpclient.RedactProxyURL(cfg.ProxyURL),
 			Resilience: SanitizedResilienceConfig{
 				Retry: SanitizedRetryConfig{
-					MaxRetries:     cfg.Resilience.Retry.MaxRetries,
-					InitialBackoff: cfg.Resilience.Retry.InitialBackoff.String(),
-					MaxBackoff:     cfg.Resilience.Retry.MaxBackoff.String(),
-					BackoffFactor:  cfg.Resilience.Retry.BackoffFactor,
-					JitterFactor:   cfg.Resilience.Retry.JitterFactor,
+					RetryOnStatuses: cfg.Resilience.Retry.RetryOnStatuses,
+					MaxRetries:      cfg.Resilience.Retry.MaxRetries,
+					InitialBackoff:  cfg.Resilience.Retry.InitialBackoff.String(),
+					MaxBackoff:      cfg.Resilience.Retry.MaxBackoff.String(),
+					BackoffFactor:   cfg.Resilience.Retry.BackoffFactor,
+					JitterFactor:    cfg.Resilience.Retry.JitterFactor,
 				},
 				CircuitBreaker: SanitizedCircuitBreakerConfig{
-					Enabled:          cfg.Resilience.CircuitBreaker.Enabled,
-					FailureThreshold: cfg.Resilience.CircuitBreaker.FailureThreshold,
-					SuccessThreshold: cfg.Resilience.CircuitBreaker.SuccessThreshold,
-					Timeout:          cfg.Resilience.CircuitBreaker.Timeout.String(),
+					FailureOnStatuses: cfg.Resilience.CircuitBreaker.FailureOnStatuses,
+					Scope:             config.NormalizeBreakerScope(cfg.Resilience.CircuitBreaker.Scope),
+					Enabled:           cfg.Resilience.CircuitBreaker.Enabled,
+					FailureThreshold:  cfg.Resilience.CircuitBreaker.FailureThreshold,
+					SuccessThreshold:  cfg.Resilience.CircuitBreaker.SuccessThreshold,
+					Timeout:           cfg.Resilience.CircuitBreaker.Timeout.String(),
+					SlowCallThreshold: cfg.Resilience.CircuitBreaker.SlowCallThreshold.String(),
 				},
 			},
 		})

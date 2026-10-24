@@ -77,6 +77,7 @@ func buildLoggerConfig(logCfg config.LogConfig) Config {
 		LogImageInputs:        logCfg.LogImageBodies && imageScope.Inputs(),
 		LogImageOutputs:       logCfg.LogImageBodies && imageScope.Outputs(),
 		LogRevisionBodies:     logCfg.LogRevisionBodies,
+		LogGuardrailSteps:     logCfg.LogGuardrailSteps,
 		LogHeaders:            logCfg.LogHeaders,
 		BufferSize:            logCfg.BufferSize,
 		FlushInterval:         time.Duration(logCfg.FlushInterval) * time.Second,

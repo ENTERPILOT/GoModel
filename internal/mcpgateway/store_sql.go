@@ -26,6 +26,7 @@ var sqlTable = `CREATE TABLE IF NOT EXISTS mcp_servers (
 	allowed_tools TEXT NOT NULL DEFAULT '[]',
 	disallowed_tools TEXT NOT NULL DEFAULT '[]',
 	user_paths TEXT NOT NULL DEFAULT '[]',
+	disallowed_user_paths TEXT NOT NULL DEFAULT '[]',
 	tool_timeout_seconds INTEGER NOT NULL DEFAULT 0,
 	created_at ` + sqlx.TypeInt64 + ` NOT NULL,
 	updated_at ` + sqlx.TypeInt64 + ` NOT NULL
@@ -39,10 +40,11 @@ var sqlIndexes = []string{
 // sqlMigrations backfill columns added after the table's first release.
 var sqlMigrations = []string{
 	`ALTER TABLE mcp_servers ADD COLUMN display_name TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE mcp_servers ADD COLUMN disallowed_user_paths TEXT NOT NULL DEFAULT '[]'`,
 }
 
 const selectMCPServerColumns = `name, display_name, url, transport, headers, description, enabled, ` +
-	`allowed_tools, disallowed_tools, user_paths, tool_timeout_seconds, created_at, updated_at`
+	`allowed_tools, disallowed_tools, user_paths, disallowed_user_paths, tool_timeout_seconds, created_at, updated_at`
 
 // NewSQLStore creates the mcp_servers table and indexes if needed.
 func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
@@ -62,6 +64,9 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	}
 	if err := db.Schema(ctx, sqlIndexes...); err != nil {
 		return nil, fmt.Errorf("failed to create mcp_servers index: %w", err)
+	}
+	if err := db.Schema(ctx, sqlVirtualTable); err != nil {
+		return nil, fmt.Errorf("failed to create mcp_virtual_servers table: %w", err)
 	}
 	return &SQLStore{db: db}, nil
 }
@@ -101,30 +106,36 @@ func (s *SQLStore) Get(ctx context.Context, name string) (*ManagedServer, error)
 	return &server, nil
 }
 
+// sqlMCPServerJSON holds one row's JSON-encoded collection columns.
+type sqlMCPServerJSON struct {
+	headers, allowed, disallowed, paths, disallowedPaths string
+}
+
+func encodeSQLMCPServerJSON(server ManagedServer) (sqlMCPServerJSON, error) {
+	var encoded sqlMCPServerJSON
+	var err error
+	if encoded.headers, err = encodeJSONMap(server.Headers); err != nil {
+		return encoded, err
+	}
+	encoded.allowed = sqlutil.JSONStrings(server.AllowedTools)
+	encoded.disallowed = sqlutil.JSONStrings(server.DisallowedTools)
+	encoded.paths = sqlutil.JSONStrings(server.UserPaths)
+	encoded.disallowedPaths = sqlutil.JSONStrings(server.DisallowedUserPaths)
+	return encoded, nil
+}
+
 func (s *SQLStore) Upsert(ctx context.Context, server ManagedServer) error {
 	stampUpsert(&server)
-	headersJSON, err := encodeJSONMap(server.Headers)
-	if err != nil {
-		return err
-	}
-	allowedJSON, err := encodeJSONList(server.AllowedTools)
-	if err != nil {
-		return err
-	}
-	disallowedJSON, err := encodeJSONList(server.DisallowedTools)
-	if err != nil {
-		return err
-	}
-	pathsJSON, err := encodeJSONList(server.UserPaths)
+	encoded, err := encodeSQLMCPServerJSON(server)
 	if err != nil {
 		return err
 	}
 	_, err = s.db.Exec(ctx, `
 		INSERT INTO mcp_servers (
 			name, display_name, url, transport, headers, description, enabled,
-			allowed_tools, disallowed_tools, user_paths, tool_timeout_seconds, created_at, updated_at
+			allowed_tools, disallowed_tools, user_paths, disallowed_user_paths, tool_timeout_seconds, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(name) DO UPDATE SET
 			display_name = excluded.display_name,
 			url = excluded.url,
@@ -135,6 +146,7 @@ func (s *SQLStore) Upsert(ctx context.Context, server ManagedServer) error {
 			allowed_tools = excluded.allowed_tools,
 			disallowed_tools = excluded.disallowed_tools,
 			user_paths = excluded.user_paths,
+			disallowed_user_paths = excluded.disallowed_user_paths,
 			tool_timeout_seconds = excluded.tool_timeout_seconds,
 			updated_at = excluded.updated_at
 	`,
@@ -142,18 +154,55 @@ func (s *SQLStore) Upsert(ctx context.Context, server ManagedServer) error {
 		server.DisplayName,
 		server.URL,
 		server.Transport,
-		headersJSON,
+		encoded.headers,
 		server.Description,
 		server.Enabled,
-		allowedJSON,
-		disallowedJSON,
-		pathsJSON,
+		encoded.allowed,
+		encoded.disallowed,
+		encoded.paths,
+		encoded.disallowedPaths,
 		server.ToolTimeoutSeconds,
 		server.CreatedAt.Unix(),
 		server.UpdatedAt.Unix(),
 	)
 	if err != nil {
 		return fmt.Errorf("upsert mcp server: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLStore) Update(ctx context.Context, server ManagedServer) error {
+	stampUpsert(&server)
+	encoded, err := encodeSQLMCPServerJSON(server)
+	if err != nil {
+		return err
+	}
+	affected, err := s.db.Exec(ctx, `
+		UPDATE mcp_servers SET
+			display_name = ?, url = ?, transport = ?, headers = ?, description = ?, enabled = ?,
+			allowed_tools = ?, disallowed_tools = ?, user_paths = ?, disallowed_user_paths = ?,
+			tool_timeout_seconds = ?, updated_at = ?
+		WHERE name = ?
+	`,
+		server.DisplayName,
+		server.URL,
+		server.Transport,
+		encoded.headers,
+		server.Description,
+		server.Enabled,
+		encoded.allowed,
+		encoded.disallowed,
+		encoded.paths,
+		encoded.disallowedPaths,
+		server.ToolTimeoutSeconds,
+		server.UpdatedAt.Unix(),
+		strings.TrimSpace(server.Name),
+	)
+	if err != nil {
+		return fmt.Errorf("update mcp server: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
 	}
 	return nil
 }
@@ -169,13 +218,33 @@ func (s *SQLStore) Delete(ctx context.Context, name string) error {
 	return nil
 }
 
+// swapHeaders replaces a server's headers only while they still hold the
+// values in current, and reports whether it did. Other columns are left
+// alone, so a concurrent edit to them is never lost either.
+func (s *SQLStore) swapHeaders(ctx context.Context, current, next ManagedServer) (bool, error) {
+	currentJSON, err := encodeJSONMap(current.Headers)
+	if err != nil {
+		return false, err
+	}
+	nextJSON, err := encodeJSONMap(next.Headers)
+	if err != nil {
+		return false, err
+	}
+	affected, err := s.db.Exec(ctx, `UPDATE mcp_servers SET headers = ? WHERE name = ? AND headers = ?`,
+		nextJSON, strings.TrimSpace(current.Name), currentJSON)
+	if err != nil {
+		return false, fmt.Errorf("swap mcp server headers: %w", err)
+	}
+	return affected > 0, nil
+}
+
 func (s *SQLStore) Close() error {
 	return nil
 }
 
 func scanSQLMCPServer(scanner sqlx.Row) (ManagedServer, error) {
 	var server ManagedServer
-	var headers, allowed, disallowed, userPaths []byte
+	var headers, allowed, disallowed, userPaths, disallowedUserPaths []byte
 	var createdAt, updatedAt int64
 	if err := scanner.Scan(
 		&server.Name,
@@ -188,6 +257,7 @@ func scanSQLMCPServer(scanner sqlx.Row) (ManagedServer, error) {
 		&allowed,
 		&disallowed,
 		&userPaths,
+		&disallowedUserPaths,
 		&server.ToolTimeoutSeconds,
 		&createdAt,
 		&updatedAt,
@@ -198,14 +268,17 @@ func scanSQLMCPServer(scanner sqlx.Row) (ManagedServer, error) {
 	if server.Headers, err = decodeJSONMap(headers); err != nil {
 		return ManagedServer{}, err
 	}
-	if server.AllowedTools, err = decodeJSONList(allowed); err != nil {
-		return ManagedServer{}, err
+	if server.AllowedTools, err = sqlutil.DecodeJSONStrings(allowed); err != nil {
+		return ManagedServer{}, fmt.Errorf("decode allowed_tools: %w", err)
 	}
-	if server.DisallowedTools, err = decodeJSONList(disallowed); err != nil {
-		return ManagedServer{}, err
+	if server.DisallowedTools, err = sqlutil.DecodeJSONStrings(disallowed); err != nil {
+		return ManagedServer{}, fmt.Errorf("decode disallowed_tools: %w", err)
 	}
-	if server.UserPaths, err = decodeJSONList(userPaths); err != nil {
-		return ManagedServer{}, err
+	if server.UserPaths, err = sqlutil.DecodeJSONStrings(userPaths); err != nil {
+		return ManagedServer{}, fmt.Errorf("decode user_paths: %w", err)
+	}
+	if server.DisallowedUserPaths, err = sqlutil.DecodeJSONStrings(disallowedUserPaths); err != nil {
+		return ManagedServer{}, fmt.Errorf("decode disallowed_user_paths: %w", err)
 	}
 	if server.DisplayName == "" {
 		server.DisplayName = server.Name

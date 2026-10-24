@@ -28,6 +28,9 @@ type userNodeResponse struct {
 	Managed bool `json:"managed,omitempty"`
 	// KeyCount is the number of managed auth keys bound exactly to this path.
 	KeyCount int `json:"key_count"`
+	// ActiveKeyCount is how many of those keys can still authenticate
+	// requests (not deactivated and not expired).
+	ActiveKeyCount int `json:"active_key_count"`
 	// InheritedFrom lists ancestor paths whose allowlists also apply here,
 	// root first.
 	InheritedFrom []string `json:"inherited_from"`
@@ -218,7 +221,11 @@ func (h *Handler) userNodes(scope core.AccessScope) []userNodeResponse {
 			if err != nil || userPath == "" {
 				continue
 			}
-			ensure(userPath).KeyCount++
+			node := ensure(userPath)
+			node.KeyCount++
+			if key.Active {
+				node.ActiveKeyCount++
+			}
 		}
 	}
 

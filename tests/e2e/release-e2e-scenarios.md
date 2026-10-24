@@ -11,6 +11,9 @@ These scenarios are prepared for execution across these local gateways:
 - `http://localhost:18090` - mock MCP upstream (`tests/e2e/mockmcp`, started by
   the stack manager; `/alpha` requires the `X-Mock-Token` header, `/beta` is
   open)
+- `http://localhost:18091` - mock System One upstreams (`tests/e2e/mockjev`,
+  started by the stack manager and registered on every gateway as the `jev`,
+  `jev-kev`, and `jev-down` providers)
 
 ## Recommended runner
 
@@ -77,7 +80,7 @@ Stateful note:
 - `S155`-`S159` exercise scoped rate limits (admin CRUD, user-path request and
   token enforcement, model-scope saturation, auth gating); each creates
   `$QA_SUFFIX`-scoped probe rules and deletes them, so they are
-  self-contained, but `S158` saturates `deepseek/deepseek-v4-flash` for up to
+  self-contained, but `S158` saturates `deepseek/deepseek-flash` for up to
   one minute after it runs
 - `S163`-`S172` exercise the MCP gateway (admin CRUD with secret redaction,
   aggregation/namespacing, tools/prompts/resources relay, usage and audit
@@ -98,6 +101,16 @@ Stateful note:
   written by this one) needs two binaries, so it is covered by
   `tests/e2e/upgrade-compat.sh` rather than this matrix, which always runs one
   binary against whatever the stack already holds
+- Client address resolution (`SERVER_TRUSTED_PROXIES`,
+  `SERVER_CLIENT_IP_HEADER`, `SERVER_TRUSTED_HOPS`) needs one gateway per
+  policy, so it is covered by a standalone script rather than this matrix
+  (`tests/e2e/test-clientip.sh`). This stack trusts no proxy, which is the
+  default posture: a forwarding header it carries is ignored and the audit
+  entry records the socket peer
+- Disabled master key authentication (`MASTER_KEY_DISABLED`) needs a gateway
+  booted with the key turned off and a managed key issued before that, so it is
+  covered by a standalone script rather than this matrix
+  (`tests/e2e/test-masterkey-disabled.sh`)
 - `S173`-`S182` exercise the Anthropic Messages drop-in compatibility fixes
   (`x-api-key` auth fallback, `stop_sequence`, seeded stream usage,
   dialect-aware `/v1/models` and 404s); `S173`-`S175` need the auth-enabled
@@ -155,11 +168,59 @@ Stateful note:
   defaults `OPENROUTER_MODEL_FILTER_INCLUDE` to `*:free`, which leaves models
   used by the rest of the matrix untouched; the scenario is read-only and
   rerunnable in any order
-- `S225`-`S227` cover recent release regressions: image content nested in an
+- `S225`-`S228` cover recent release regressions: image content nested in an
   Anthropic `tool_result`, time-window pricing merged with an operator override,
-  and tolerant admin listing of a virtual model with corrupt SQL timestamps.
-  They create and clean up their own artifacts and are rerunnable in any order;
-  `S227` reloads the SQLite gateway and therefore stays sequential
+  tolerant admin listing of a virtual model with corrupt SQL timestamps, and a
+  Gemini 3 tool call replayed with its thought signature. They create and clean
+  up their own artifacts and are rerunnable in any order; `S227` reloads the
+  SQLite gateway and therefore stays sequential
+- `S229`-`S241` exercise the Jev / Kev System One API (`/v1/systemone`, Kev's
+  `/permute` and `/separate`, passthrough, pinned versions, misuse negatives,
+  audit and usage, failover, exact cache on the auth gateway, state guardrails
+  on the guardrail gateway, managed-key allowlists) against the mock upstream
+  on port 18091, since no hosted Jev key or Kev server is available; each
+  prints `SKIPPED:` and exits 0 when the mock is down. They create and delete
+  their own `$QA_SUFFIX`-scoped virtual models, guardrails, workflows, keys,
+  and pricing overrides and are rerunnable in any order. `S237` sets a pricing
+  override and `S240` a guardrail workflow, so both stay sequential
+- `S242`-`S244` exercise MCP per-server tool filters and
+  `disallowed_user_paths` (in-place edits reaching open sessions) and the
+  master key keeping the caller's user-path header on `/mcp` and audio
+  uploads; they register `$QA_SUFFIX`-scoped servers and delete them, but
+  mutate the shared MCP catalog, so they stay sequential
+- `S245`-`S246` exercise `developer` messages, `strict` tools, and Gemini's
+  `allowed_tools` tool choice; they are read-only and rerunnable in any order
+- `S247`-`S255` cover the changes after v0.1.99. `S247` (model retrieval and
+  Anthropic list paging) walks the whole catalog and `S249` disables real
+  models gateway-wide, so both stay sequential. `S248` and `S250` create
+  `$QA_SUFFIX`-scoped keys on the auth gateway. `S251`-`S255` each boot a
+  scratch gateway from `bin/gomodel` on their own port (18085-18089) with the
+  startup-only settings they test (converted LiteLLM config, secret
+  references, `GOMODEL_ENCRYPTION_KEY`, `MCP_VIRTUAL_SERVERS`, a ChatGPT
+  token), and stop it on exit. `S251` also creates and drops a throwaway
+  LiteLLM database in the local PostgreSQL. `S255` reads the Codex sign-in
+  from `~/.codex/auth.json`, spends a little ChatGPT subscription quota, and
+  prints `SKIPPED:` without a valid token
+- `S256` replays a Claude server-side tool search turn (regex and BM25) on
+  OpenAI and Gemini through `/v1/messages`; read-only and rerunnable in any
+  order
+- `S257`-`S262` exercise the OpenAI Decisions API (`/v1/decisions` translated
+  to System One on the mock `jev` upstreams, Kev image refusals and image
+  routing to OpenAI, native OpenAI answers costed for input only, OpenRouter
+  chat-model refusals), TypeSafe's multipart image form on `/v1/systemone`, and
+  gzip/zstd request bodies. The `jev` checks print `SKIPPED:` when the mock is
+  down; `S258` and `S259` call the real `openai/gpt-6-luna`. They delete their
+  own `$QA_SUFFIX`-scoped virtual models and are rerunnable in any order
+- `S263` exercises per-key passthrough access on the auth gateway (new keys
+  start without it, the grant endpoint, provider-wide grants for model-less
+  calls, global-admin-only grants); it creates and deactivates its own
+  `$QA_SUFFIX`-scoped keys and is rerunnable in any order
+- `S264` exercises `llm_judge` with a decision model on the guardrail gateway
+  (a block on the mock Jev probability, the judge call audited and accounted
+  under `/v1/decisions`, an allow under a higher threshold that reaches the
+  real `gpt-4.1-nano`); it prints `SKIPPED:` when the mock is down, deletes
+  its own `$QA_SUFFIX`-scoped guardrail and workflow, and is rerunnable in any
+  order
 - `S218` exercises Gemini's native `batchEmbedContents` path (batch input,
   `dimensions`); read-only and rerunnable in any order
 - `S219` asserts the effective resilience configuration on
@@ -476,6 +537,58 @@ mcp_cleanup_release_servers() {
   curl -sS -o /dev/null -X DELETE "$base/admin/mcp-servers/$QA_MCP_BETA" || true
 }
 
+# System One (Jev / Kev) upstreams served by tests/e2e/mockjev: the stack
+# manager registers "jev" (hosted shape, keyed), "jev-kev" (keyless Kev
+# server), and "jev-down" (always 529) on every gateway.
+export JEV_MOCK_BASE="${JEV_MOCK_BASE:-http://localhost:${GOMODEL_RELEASE_MOCK_JEV_PORT:-18091}}"
+export QA_SYSTEMONE_QUESTIONS='{"department":{"type":"choice","instructions":"Which team should handle this?","criteria":{"returns":"Exchanges and refunds","shipping":"Delivery delays","billing":"Charges and invoices"}},"escalate":{"type":"noul","instructions":"Does this need urgent human attention?"},"frustration":{"type":"score","instructions":"How frustrated is the customer?","criteria":["Calm","Frustrated","Very angry"]}}'
+export QA_SYSTEMONE_CHOICE='{"department":{"type":"choice","instructions":"Which team?","criteria":{"returns":"Returns","billing":"Billing"}}}'
+
+# Skips when the mock upstream is down, and fails when the gateway was started
+# without the mock-backed jev providers (an outdated stack manager).
+# usage: systemone_require_mock BASE_URL [curl args...]
+systemone_require_mock() {
+  local base="$1"
+  shift
+  if ! curl -fsS "$JEV_MOCK_BASE/healthz" >/dev/null 2>&1; then
+    echo "SKIPPED: mock System One upstream is not running on $JEV_MOCK_BASE"
+    exit 0
+  fi
+  if ! curl -fsS "$base/v1/models" "$@" | jq -e '
+      any(.data[]; .id == "jev/jev-latest") and any(.data[]; .id == "jev-kev/kev-latest")
+    ' >/dev/null; then
+    echo "error: $base has no mock-backed jev providers; restart it with tests/e2e/manage-release-e2e-stack.sh" >&2
+    exit 1
+  fi
+}
+
+# Asserts an HTTP status and prints the body on a mismatch.
+# usage: assert_http_status WANT GOT BODY_FILE
+assert_http_status() {
+  if [ "$2" != "$1" ]; then
+    echo "error: expected HTTP $1, got $2" >&2
+    cat "$3" >&2 || true
+    exit 1
+  fi
+}
+
+# Polls the audit or usage log until an entry for the request id appears.
+# usage: wait_log_entry BASE_URL audit|usage REQUEST_ID OUTPUT_FILE [curl args...]
+wait_log_entry() {
+  local base="$1" kind="$2" rid="$3" out="$4"
+  shift 4
+  for _ in $(seq 1 15); do
+    curl -fsS "$base/admin/$kind/log?search=$rid&limit=5" "$@" > "$out"
+    if jq -e --arg rid "$rid" 'any(.entries[]?; .request_id == $rid)' "$out" >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  jq . "$out" >&2 || true
+  echo "error: no $kind entry for $rid on $base" >&2
+  exit 1
+}
+
 run_release_budget_enforcement() {
   local base_url="$1"
   local budget_path="$2"
@@ -576,6 +689,96 @@ reset_release_budget() {
     curl -fsS -X POST "$base_url/admin/budgets/reset-one" \
       -H 'Content-Type: application/json' \
       -d "{\"scope\":\"$scope\",\"subject\":\"$subject\",\"period\":\"daily\"}" >/dev/null
+  fi
+}
+```
+
+```bash
+# Scratch gateways: scenarios that test settings read only at startup (secret
+# references, encryption at rest, virtual MCP servers, a converted LiteLLM
+# config) boot their own short-lived gateway from the release binary, with
+# only the environment they pass, in a directory of their own. Ports
+# 18085-18089 are reserved for them.
+export GOMODEL_BIN="${GOMODEL_RELEASE_BINARY:-$PWD/bin/gomodel}"
+
+# Starts a scratch gateway in DIR on PORT and waits until it is healthy.
+# DIR becomes its working directory, so a DIR/config.yaml is loaded; storage
+# is SQLite in DIR unless the caller passes other STORAGE_* variables.
+# usage: scratch_gateway_start DIR PORT [VAR=value...]
+scratch_gateway_start() {
+  local dir="$1" port="$2"
+  shift 2
+  mkdir -p "$dir"
+  if curl -fsS --max-time 1 "http://localhost:$port/health" >/dev/null 2>&1; then
+    echo "error: port $port already serves a gateway; stop it first" >&2
+    return 1
+  fi
+  (
+    cd "$dir"
+    nohup env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" \
+      PORT="$port" STORAGE_TYPE=sqlite SQLITE_PATH="$dir/gomodel.db" \
+      "$@" "$GOMODEL_BIN" >>"$dir/server.log" 2>&1 </dev/null &
+    echo $! >"$dir/server.pid"
+  )
+  for _ in $(seq 1 60); do
+    if curl -fsS --max-time 1 "http://localhost:$port/health" >/dev/null 2>&1; then
+      return 0
+    fi
+    if ! kill -0 "$(cat "$dir/server.pid")" 2>/dev/null; then
+      break
+    fi
+    sleep 0.5
+  done
+  echo "error: scratch gateway in $dir did not become healthy on port $port" >&2
+  tail -n 30 "$dir/server.log" >&2 || true
+  return 1
+}
+
+# Stops the scratch gateway started in DIR; safe when it is not running.
+# usage: scratch_gateway_stop DIR
+scratch_gateway_stop() {
+  local dir="$1" pid
+  pid="$(cat "$dir/server.pid" 2>/dev/null || true)"
+  [ -n "$pid" ] || return 0
+  kill "$pid" 2>/dev/null || true
+  for _ in $(seq 1 40); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.25
+  done
+  kill -KILL "$pid" 2>/dev/null || true
+  rm -f "$dir/server.pid"
+}
+
+# Runs the gateway in DIR expecting it to refuse to start: it must exit
+# non-zero within 20s. Its output goes to DIR/refused.log for the caller to
+# inspect.
+# usage: scratch_gateway_expect_refusal DIR PORT [VAR=value...]
+scratch_gateway_expect_refusal() {
+  local dir="$1" port="$2" pid code
+  shift 2
+  mkdir -p "$dir"
+  (
+    cd "$dir"
+    exec env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" \
+      PORT="$port" STORAGE_TYPE=sqlite SQLITE_PATH="$dir/gomodel.db" \
+      "$@" "$GOMODEL_BIN" >"$dir/refused.log" 2>&1 </dev/null
+  ) &
+  pid=$!
+  for _ in $(seq 1 80); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.25
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    echo "error: gateway in $dir started although it should have refused" >&2
+    return 1
+  fi
+  code=0
+  wait "$pid" || code=$?
+  if [ "$code" -eq 0 ]; then
+    echo "error: gateway in $dir exited 0 although it should have refused" >&2
+    return 1
   fi
 }
 ```
@@ -901,7 +1104,7 @@ Checks translated chat on Groq.
 RESP_FILE="$QA_RUN_DIR/s21.chat.json"
 curl -fsS "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"groq/compound-mini","messages":[{"role":"user","content":"Reply with exactly QA_GROQ_OK"}],"max_tokens":20}' \
+  -d '{"model":"groq/openai/gpt-oss-20b","messages":[{"role":"user","content":"Reply with exactly QA_GROQ_OK"}],"max_tokens":200}' \
   > "$RESP_FILE"
 jq '{model,provider,usage,answer:.choices[0].message.content}' "$RESP_FILE"
 assert_chat_response_contains "$RESP_FILE" "groq" "QA_GROQ_OK"
@@ -963,20 +1166,20 @@ jq '{model,provider,answer:.choices[0].message.content}' "$RESP_FILE"
 assert_chat_response_contains "$RESP_FILE" "anthropic" "QA_ALIAS_SONNET_OK"
 ```
 
-### S26 Latest GPT reasoning on chat (negative)
+### S26 Latest GPT reasoning on chat
 
-Reproduces the current gap for `reasoning` on `gpt-5-nano` via chat completions.
+Checks that `reasoning` on `gpt-5-nano` via chat completions is accepted and
+mapped to OpenAI's `reasoning_effort`. The generous `max_tokens` leaves room for
+reasoning before the final content.
 
 ```bash
-HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s26.headers.XXXXXX")
-BODY_FILE=$(mktemp "$QA_RUN_DIR/s26.body.XXXXXX")
-curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/chat/completions" \
+RESP_FILE="$QA_RUN_DIR/s26.chat.json"
+curl -fsS "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"gpt-5-nano","messages":[{"role":"user","content":"Reply with exactly QA_GPT5_REASONING_OK"}],"reasoning":{"effort":"low"},"max_tokens":20}'
-sed -n '1,20p' "$HEADERS_FILE"
-jq '.' "$BODY_FILE"
-grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
-jq -e '.error.type == "invalid_request_error"' "$BODY_FILE" >/dev/null
+  -d '{"model":"gpt-5-nano","messages":[{"role":"user","content":"Reply with exactly QA_GPT5_REASONING_OK"}],"reasoning":{"effort":"low"},"max_tokens":2000}' \
+  > "$RESP_FILE"
+jq '{model,provider,usage,answer:.choices[0].message.content}' "$RESP_FILE"
+assert_chat_response_contains "$RESP_FILE" "openai" "QA_GPT5_REASONING_OK"
 ```
 
 ## 4. Responses API
@@ -2706,11 +2909,11 @@ Creates a two-target round-robin redirect and verifies the admin view shape.
 SRC="qa-lb-rr-$QA_SUFFIX"
 curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
-  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/groq/compound-mini\"}],\"description\":\"qa lb rr\"}" \
+  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/openai/gpt-oss-20b\"}],\"description\":\"qa lb rr\"}" \
   | jq -e --arg s "$SRC" '
       .source == $s and .kind == "redirect" and .strategy == "round_robin"
       and (.targets | length) == 2
-      and .targets[0].model == "openai/gpt-4.1-nano" and .targets[1].model == "groq/groq/compound-mini"
+      and .targets[0].model == "openai/gpt-4.1-nano" and .targets[1].model == "groq/openai/gpt-oss-20b"
       and .enabled == true
     ' >/dev/null
 curl -fsS -X DELETE "$BASE_URL/admin/virtual-models" \
@@ -2727,8 +2930,8 @@ requests resolve to each provider three times.
 SRC="qa-lb-rrd-$QA_SUFFIX"
 curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
-  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"session_affinity\":false,\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/groq/compound-mini\"}]}" >/dev/null
-for M in openai/gpt-4.1-nano groq/groq/compound-mini; do
+  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"session_affinity\":false,\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/openai/gpt-oss-20b\"}]}" >/dev/null
+for M in openai/gpt-4.1-nano groq/openai/gpt-oss-20b; do
   curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
     -d "{\"model\":\"$M\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":5}" >/dev/null
 done
@@ -2757,8 +2960,8 @@ of them to the target that served the first — the weighting would never run.
 SRC="qa-lb-w-$QA_SUFFIX"
 curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
-  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"session_affinity\":false,\"targets\":[{\"model\":\"openai/gpt-4.1-nano\",\"weight\":2},{\"model\":\"groq/groq/compound-mini\",\"weight\":1}]}" >/dev/null
-for M in openai/gpt-4.1-nano groq/groq/compound-mini; do
+  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"session_affinity\":false,\"targets\":[{\"model\":\"openai/gpt-4.1-nano\",\"weight\":2},{\"model\":\"groq/openai/gpt-oss-20b\",\"weight\":1}]}" >/dev/null
+for M in openai/gpt-4.1-nano groq/openai/gpt-oss-20b; do
   curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
     -d "{\"model\":\"$M\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":5}" >/dev/null
 done
@@ -2837,7 +3040,7 @@ HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s123.headers.XXXXXX")
 BODY_FILE=$(mktemp "$QA_RUN_DIR/s123.body.XXXXXX")
 curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
-  -d "{\"source\":\"qa-lb-bad-$QA_SUFFIX\",\"strategy\":\"weighted\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/groq/compound-mini\"}]}"
+  -d "{\"source\":\"qa-lb-bad-$QA_SUFFIX\",\"strategy\":\"weighted\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/openai/gpt-oss-20b\"}]}"
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
 jq -e '.error.type == "invalid_request_error" and (.error.message | test("strategy"))' "$BODY_FILE" >/dev/null
 ```
@@ -3444,7 +3647,7 @@ curl -fsS "$AUTH_BASE_URL/admin/tagging/settings" -H "$ADMIN_AUTH_HEADER" \
 
 These scenarios cover providers rewired through the shared OpenAI-compatible
 core (`#486`) and the new Fireworks provider (`#475`). DeepSeek scenarios use
-`deepseek-v4-flash`, a reasoning model that needs a generous `max_tokens`
+`deepseek-flash`, a reasoning model that needs a generous `max_tokens`
 budget before it emits final content.
 
 ### S149 DeepSeek non-streaming chat
@@ -3455,7 +3658,7 @@ Checks translated chat on DeepSeek through the shared OpenAI-compatible core.
 RESP_FILE="$QA_RUN_DIR/s149.chat.json"
 curl -fsS "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"Reply with exactly QA_DEEPSEEK_OK"}],"max_tokens":2000}' \
+  -d '{"model":"deepseek-flash","messages":[{"role":"user","content":"Reply with exactly QA_DEEPSEEK_OK"}],"max_tokens":2000}' \
   > "$RESP_FILE"
 jq '{model,provider,usage,answer:.choices[0].message.content}' "$RESP_FILE"
 assert_chat_response_contains "$RESP_FILE" "deepseek" "QA_DEEPSEEK_OK"
@@ -3469,7 +3672,7 @@ Checks SSE chat streaming and the final usage chunk on DeepSeek.
 SSE_FILE="$QA_RUN_DIR/s150.chat.sse"
 curl -fsS --no-buffer "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"Reply with exactly QA_DEEPSEEK_STREAM_OK"}],"max_tokens":2000}' \
+  -d '{"model":"deepseek-flash","stream":true,"messages":[{"role":"user","content":"Reply with exactly QA_DEEPSEEK_STREAM_OK"}],"max_tokens":2000}' \
   > "$SSE_FILE"
 sed -n '1,8p' "$SSE_FILE"
 assert_chat_stream_contains "$SSE_FILE" "QA_DEEPSEEK_STREAM_OK"
@@ -3554,7 +3757,7 @@ if jq -e '.providers[] | select(.name == "fireworks") | (.status != "healthy") a
   exit 0
 fi
 FIREWORKS_MODEL=$(curl -fsS "$BASE_URL/v1/models" \
-  | jq -er '[.data[].id | select(startswith("fireworks/"))] | (map(select(test("llama-v3p1-8b-instruct$"))) + .)[0]')
+  | jq -er '[.data[].id | select(startswith("fireworks/"))] | (map(select(test("gpt-oss-120b$"))) + .)[0]')
 RESP_FILE="$QA_RUN_DIR/s153.chat.json"
 curl -fsS "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
@@ -3578,7 +3781,7 @@ if jq -e '.providers[] | select(.name == "fireworks") | (.status != "healthy") a
   exit 0
 fi
 FIREWORKS_MODEL=$(curl -fsS "$BASE_URL/v1/models" \
-  | jq -er '[.data[].id | select(startswith("fireworks/"))] | (map(select(test("llama-v3p1-8b-instruct$"))) + .)[0]')
+  | jq -er '[.data[].id | select(startswith("fireworks/"))] | (map(select(test("gpt-oss-120b$"))) + .)[0]')
 SSE_FILE="$QA_RUN_DIR/s154.chat.sse"
 curl -fsS --no-buffer "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
@@ -3736,7 +3939,7 @@ curl -fsS -X DELETE "$BASE_URL/admin/rate-limits" \
 
 ### S158 Model-scope saturation returns 429 without alternatives
 
-Pins `deepseek/deepseek-v4-flash` to one request per minute; the second direct
+Pins `deepseek/deepseek-flash` to one request per minute; the second direct
 request has no alternative provider for the model and must be rejected with
 `429` instead of routed elsewhere. Leaves the model saturated for up to one
 minute after the scenario runs.
@@ -3746,24 +3949,24 @@ BODY_FILE="$QA_RUN_DIR/s158.body.json"
 
 curl -fsS -X PUT "$BASE_URL/admin/rate-limits" \
   -H 'Content-Type: application/json' \
-  -d '{"scope":"model","subject":"deepseek/deepseek-v4-flash","limit_key":{"period":"minute"},"max_requests":1}' \
-  | jq -e 'any(.rate_limits[]?; .scope == "model" and .subject == "deepseek/deepseek-v4-flash" and .max_requests == 1)' >/dev/null
+  -d '{"scope":"model","subject":"deepseek/deepseek-flash","limit_key":{"period":"minute"},"max_requests":1}' \
+  | jq -e 'any(.rate_limits[]?; .scope == "model" and .subject == "deepseek/deepseek-flash" and .max_requests == 1)' >/dev/null
 
 curl -fsS -o "$BODY_FILE" "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"Reply with exactly QA_RL_MODEL_OK"}],"max_tokens":2000}'
+  -d '{"model":"deepseek-flash","messages":[{"role":"user","content":"Reply with exactly QA_RL_MODEL_OK"}],"max_tokens":2000}'
 assert_chat_response_contains "$BODY_FILE" "deepseek" "QA_RL_MODEL_OK"
 
 curl -sS -o "$BODY_FILE" -w '%{http_code}' "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"Reply with exactly QA_RL_MODEL_BLOCKED"}],"max_tokens":2000}' \
+  -d '{"model":"deepseek-flash","messages":[{"role":"user","content":"Reply with exactly QA_RL_MODEL_BLOCKED"}],"max_tokens":2000}' \
   | jq -R -e '. == "429"' >/dev/null
 jq -e '.error.type == "rate_limit_error" and .error.code == "rate_limit_exceeded"' "$BODY_FILE" >/dev/null
 
 curl -fsS -X DELETE "$BASE_URL/admin/rate-limits" \
   -H 'Content-Type: application/json' \
-  -d '{"scope":"model","subject":"deepseek/deepseek-v4-flash","limit_key":{"period":"minute"}}' \
-  | jq -e 'all(.rate_limits[]?; .subject != "deepseek/deepseek-v4-flash")' >/dev/null
+  -d '{"scope":"model","subject":"deepseek/deepseek-flash","limit_key":{"period":"minute"}}' \
+  | jq -e 'all(.rate_limits[]?; .subject != "deepseek/deepseek-flash")' >/dev/null
 ```
 
 ### S159 Rate limit admin requires authentication
@@ -5866,14 +6069,17 @@ jq -e '(.data[0].embedding | length) == 256' "$DIM_FILE" >/dev/null
 ### S219 Provider status exposes the circuit-breaker switch and its thresholds
 
 `/admin/providers/status` reports the effective resilience settings per
-provider, including the circuit-breaker enable switch (#729). The release stack
-sets no resilience overrides, so every provider must report the documented
-defaults: the breaker on, five failures to open, two successes to close, and a
-30s timeout. Turning the breaker off needs a gateway booted with
-`RESILIENCE_CIRCUIT_BREAKER_ENABLED=false`, so that path is covered by the
-`config` and `internal/llmclient` unit tests. The stack manager deletes every
-unmanaged (dashboard-registered) provider credential on `start`, so a leftover
-runtime credential cannot make this assertion nondeterministic.
+provider, including the circuit-breaker enable switch (#729) and the configurable
+status policies and breaker scope (#896). The release stack sets no resilience
+overrides, so every provider must report the documented defaults: the breaker on,
+five failures to open, two successes to close, a 30s timeout, `provider` scope,
+retries on `429,502,503,504,522,524`, and the breaker tripping on `429,5xx`.
+Turning the breaker off, narrowing the status lists, or switching a provider to
+`model` scope needs a gateway booted with `RESILIENCE_*` overrides, so those paths
+are covered by the `config`, `internal/providers` and `internal/llmclient` unit
+tests. The stack manager deletes every unmanaged (dashboard-registered) provider
+credential on `start`, so a leftover runtime credential cannot make this
+assertion nondeterministic.
 
 ```bash
 STATUS_FILE="$QA_RUN_DIR/s219.status.json"
@@ -5887,6 +6093,15 @@ jq -e '
     and .config.resilience.circuit_breaker.success_threshold == 2
     and .config.resilience.circuit_breaker.timeout == "30s"
     and (.config.resilience.retry.max_retries | type == "number"))
+' "$STATUS_FILE" >/dev/null
+# The status policies and the breaker scope are configurable, so the endpoint
+# must report the resolved values rather than omit them. An unset scope resolves
+# to "provider", never to an empty string.
+jq -e '
+  all(.providers[];
+    .config.resilience.circuit_breaker.scope == "provider"
+    and .config.resilience.circuit_breaker.failure_on_statuses == ["429", "5xx"]
+    and .config.resilience.retry.retry_on_statuses == ["429", "502", "503", "504", "522", "524"])
 ' "$STATUS_FILE" >/dev/null
 ```
 
@@ -6046,7 +6261,7 @@ overrides must win at every hour, which is verified against the token counts and
 costs persisted for a real request.
 
 ```bash
-SELECTOR="deepseek/deepseek-v4-flash"
+SELECTOR="deepseek/deepseek-flash"
 cleanup_s226() {
   curl -sS -X DELETE "$BASE_URL/admin/model-pricing-overrides" \
     -H 'Content-Type: application/json' -d "{\"selector\":\"$SELECTOR\"}" >/dev/null || true
@@ -6055,11 +6270,11 @@ trap cleanup_s226 EXIT
 curl -fsS -X PUT "$BASE_URL/admin/model-pricing-overrides" \
   -H 'Content-Type: application/json' \
   -d "{\"selector\":\"$SELECTOR\",\"pricing\":{\"input_per_mtok\":100,\"output_per_mtok\":200}}" \
-  | jq -e '.selector == "deepseek/deepseek-v4-flash" and .pricing.input_per_mtok == 100 and .pricing.output_per_mtok == 200' >/dev/null
+  | jq -e '.selector == "deepseek/deepseek-flash" and .pricing.input_per_mtok == 100 and .pricing.output_per_mtok == 200' >/dev/null
 RID="qa-pricing-window-$QA_SUFFIX"
 curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
   -H "X-Request-ID: $RID" \
-  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"Reply with exactly QA_PRICING_WINDOW_OK"}],"max_tokens":2000}' >/dev/null
+  -d '{"model":"deepseek-flash","messages":[{"role":"user","content":"Reply with exactly QA_PRICING_WINDOW_OK"}],"max_tokens":2000}' >/dev/null
 USAGE_FILE="$QA_RUN_DIR/s226.usage.json"
 for _ in $(seq 1 15); do
   curl -fsS "$BASE_URL/admin/usage/log?search=$RID&limit=3" > "$USAGE_FILE"
@@ -6105,4 +6320,2223 @@ curl -fsS "$BASE_URL/admin/virtual-models" \
     ' >/dev/null
 cleanup_s227
 trap - EXIT
+```
+
+### S228 Gemini 3 tool-call round trip preserves the thought signature
+
+Gemini 3 attaches a `thoughtSignature` to every function call and rejects a
+follow-up request whose history lacks it (HTTP 400). The gateway must expose
+it as `tool_calls[].extra_content.google.thought_signature` and send it back
+when the client echoes the assistant turn verbatim, as OpenAI SDK agent loops
+do.
+
+```bash
+CALL_FILE="$QA_RUN_DIR/s228.call.json"
+FOLLOW_FILE="$QA_RUN_DIR/s228.followup.json"
+TOOLS='[{"type":"function","function":{"name":"lookup_weather","description":"Get the current weather for a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}]'
+curl -fsS "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"gemini-3.5-flash-lite\",\"tools\":$TOOLS,\"tool_choice\":{\"type\":\"function\",\"function\":{\"name\":\"lookup_weather\"}},\"messages\":[{\"role\":\"user\",\"content\":\"What is the weather in Warsaw?\"}]}" \
+  > "$CALL_FILE"
+jq '{finish_reason:.choices[0].finish_reason,tool_calls:.choices[0].message.tool_calls}' "$CALL_FILE"
+jq -e '
+    .choices[0].finish_reason == "tool_calls"
+    and (.choices[0].message.tool_calls[0].function.name == "lookup_weather")
+    and (.choices[0].message.tool_calls[0].extra_content.google.thought_signature | type == "string" and length > 0)
+  ' "$CALL_FILE" >/dev/null
+jq -c --argjson tools "$TOOLS" '{
+    model: "gemini-3.5-flash-lite",
+    tools: $tools,
+    messages: [
+      {role: "user", content: "What is the weather in Warsaw?"},
+      .choices[0].message,
+      {role: "tool", tool_call_id: .choices[0].message.tool_calls[0].id, content: "sunny, 22C"}
+    ]
+  }' "$CALL_FILE" \
+  | curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' -d @- \
+  > "$FOLLOW_FILE"
+jq '{provider,answer:.choices[0].message.content}' "$FOLLOW_FILE"
+assert_chat_response_contains "$FOLLOW_FILE" "gemini" "22"
+```
+
+## 35. Jev / Kev System One API
+
+`POST /v1/systemone` (and Kev's `/permute` and `/separate`) forwards TypeSafe
+System One decision requests natively. No hosted Jev key or Kev server is
+available to the matrix, so the stack manager starts `tests/e2e/mockjev` on
+port 18091 and registers three `jev` providers against it on every gateway:
+`jev` (hosted-API shape, keyed, lists `jev-latest`/`jev-preview`, accepts any
+versioned `jev-X.Y.Z`), `jev-kev` (keyless Kev server whose base URL keeps a
+trailing `/v1`, checkpoint `kev-latest` with alias `kev-4b`), and `jev-down`
+(lists `kev-down`, answers every System One route with `529`). Each mock
+answer carries a `mock` object echoing what reached the upstream (model,
+state, questions, extra fields, whether an `Authorization` header arrived,
+`X-Request-Id`, and a per-upstream request sequence), so the scenarios can
+assert exactly what the gateway forwarded and whether an answer was replayed
+from cache.
+
+### S229 System One providers register and list utility models
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+MODELS_FILE="$QA_RUN_DIR/s229.models.json"
+curl -fsS "$BASE_URL/v1/models" > "$MODELS_FILE"
+jq -c '[.data[] | select(.owned_by | startswith("jev")) | {id, categories: .metadata.categories, modes: .metadata.modes}]' "$MODELS_FILE"
+jq -e '
+  ([.data[] | select(.owned_by | startswith("jev")) | .id] | sort)
+    == ["jev-down/kev-down","jev-kev/kev-4b","jev-kev/kev-latest","jev/jev-latest","jev/jev-preview"]
+  and all(.data[] | select(.owned_by | startswith("jev")); .metadata.categories == ["utility"] and ((.metadata.modes // []) | length == 0))
+  and any(.data[]; .id == "jev/jev-latest" and .metadata.description == "Latest Jev (mock)" and .created > 0)
+' "$MODELS_FILE" >/dev/null
+
+STATUS_FILE="$QA_RUN_DIR/s229.status.json"
+# jev-down turns degraded once failover scenarios have sent it traffic (its
+# 529s count against request health), so it only has to be registered. S227
+# reloads this gateway just before, and every provider reports degraded while
+# the reload's model refresh runs, so poll until it finishes.
+for attempt in $(seq 1 30); do
+  curl -fsS "$BASE_URL/admin/providers/status" > "$STATUS_FILE"
+  jq -e '
+    [.. | objects | select(.type? == "jev" and has("status")) | {name, status}] | sort_by(.name) as $s
+    | ($s | map(.name)) == ["jev","jev-down","jev-kev"]
+      and all($s[]; if .name == "jev-down" then (.status | IN("healthy","degraded")) else .status == "healthy" end)
+  ' "$STATUS_FILE" >/dev/null && break
+  [ "$attempt" -lt 30 ] || exit 1
+  sleep 1
+done
+
+# Passthrough lists models in each upstream's own shape.
+curl -fsS "$BASE_URL/p/jev/v1/models" \
+  | jq -e '[.models[].name] == ["jev-latest","jev-preview"]' >/dev/null
+curl -fsS "$BASE_URL/p/jev-kev/v1/models" \
+  | jq -e '.models[0].id == "kev-latest" and .models[0].aliases == ["kev-4b"]' >/dev/null
+```
+
+### S230 Native `/v1/systemone` answers every question type on hosted Jev
+
+Sends choice, noul, and score questions plus an extra top-level field. The
+answer is relayed unchanged, only `model` is rewritten to the resolved name,
+the questions and extra field reach the upstream byte for byte, the client's
+`Authorization` header is replaced by the provider key, and the request ID is
+forwarded.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+for MODEL in jev-latest jev/jev-latest; do
+  RID="qa-s1-hosted-$QA_SUFFIX-${MODEL//\//-}"
+  RESP_FILE="$QA_RUN_DIR/s230.${MODEL//\//-}.json"
+  CODE=$(curl -sS -o "$RESP_FILE" -w '%{http_code}' "$BASE_URL/v1/systemone" \
+    -H 'Content-Type: application/json' \
+    -H 'Authorization: Bearer qa-client-token-must-not-reach-upstream' \
+    -H "X-Request-ID: $RID" \
+    -d "{\"model\":\"$MODEL\",\"state\":\"Shoes arrived late and I see two charges on my card.\",\"questions\":$QA_SYSTEMONE_QUESTIONS,\"qa_marker\":{\"nested\":[1,2,3]}}")
+  assert_http_status 200 "$CODE" "$RESP_FILE"
+  jq -c '{model, answers, usage, mock: (.mock | {upstream, received_model, authorization, request_id})}' "$RESP_FILE"
+  jq -e --arg rid "$RID" --argjson questions "$QA_SYSTEMONE_QUESTIONS" '
+    .model == "jev-1.13.0"
+    and .answers.department.type == "choice" and (.answers.department.choice | IN("returns","shipping","billing"))
+    and (.answers.department.probabilities | keys | sort) == ["billing","returns","shipping"]
+    and .answers.escalate.type == "noul" and (.answers.escalate.noul | type == "number")
+    and .answers.frustration.type == "score" and .answers.frustration.legend == {"0":"Calm","1":"Frustrated","2":"Very angry"}
+    and .usage.input_tokens > 0 and .usage.output_tokens > 0
+    and .mock.upstream == "jev"
+    and .mock.received_model == "jev-latest"
+    and .mock.questions == $questions
+    and .mock.extra == {"qa_marker":{"nested":[1,2,3]}}
+    and .mock.authorization == "provider-key"
+    and .mock.request_id == $rid
+  ' "$RESP_FILE" >/dev/null
+done
+```
+
+### S231 Keyless Kev server by checkpoint and alias
+
+The `jev-kev` provider has no key and its base URL ends in `/v1`, which the
+provider trims. No `Authorization` header may reach it, not even the client's.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+for MODEL in jev-kev/kev-latest kev-latest jev-kev/kev-4b kev-4b; do
+  RESP_FILE="$QA_RUN_DIR/s231.${MODEL//\//-}.json"
+  CODE=$(curl -sS -o "$RESP_FILE" -w '%{http_code}' "$BASE_URL/v1/systemone" \
+    -H 'Content-Type: application/json' \
+    -H 'Authorization: Bearer qa-client-token-must-not-reach-upstream' \
+    -d "{\"model\":\"$MODEL\",\"state\":\"I was charged twice.\",\"questions\":$QA_SYSTEMONE_CHOICE}")
+  assert_http_status 200 "$CODE" "$RESP_FILE"
+  jq -e --arg sent "${MODEL#jev-kev/}" '
+    .model == "kev-4b-e2e"
+    and .mock.upstream == "kev"
+    and .mock.received_model == $sent
+    and .mock.authorization == "none"
+    and .answers.department.type == "choice"
+  ' "$RESP_FILE" >/dev/null
+done
+```
+
+### S232 Pinned Jev versions route without being listed
+
+TypeSafe lists only its aliases but accepts any versioned ID. A name that
+says which `jev` provider to use reaches it unlisted; a bare unlisted name is
+not guessed while several `jev` providers are configured; a model the
+upstream rejects comes back with the upstream's status.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+for MODEL in jev/jev-1.13.0 jev/jev-1.12.0; do
+  RESP_FILE="$QA_RUN_DIR/s232.${MODEL//\//-}.json"
+  CODE=$(curl -sS -o "$RESP_FILE" -w '%{http_code}' "$BASE_URL/v1/systemone" \
+    -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$MODEL\",\"state\":\"pinned\",\"questions\":$QA_SYSTEMONE_CHOICE}")
+  assert_http_status 200 "$CODE" "$RESP_FILE"
+  jq -e --arg version "${MODEL#jev/}" '.model == $version and .mock.upstream == "jev" and .mock.received_model == $version' "$RESP_FILE" >/dev/null
+done
+
+# Bare and unlisted, with jev, jev-kev, and jev-down all configured.
+RESP_FILE="$QA_RUN_DIR/s232.bare.json"
+CODE=$(curl -sS -o "$RESP_FILE" -w '%{http_code}' "$BASE_URL/v1/systemone" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"jev-1.13.0\",\"state\":\"pinned\",\"questions\":$QA_SYSTEMONE_CHOICE}")
+assert_http_status 404 "$CODE" "$RESP_FILE"
+jq -e '.error.code == "model_not_found"' "$RESP_FILE" >/dev/null
+
+# Routed to jev because the name says so; the upstream rejects it.
+RESP_FILE="$QA_RUN_DIR/s232.unknown.json"
+CODE=$(curl -sS -o "$RESP_FILE" -w '%{http_code}' "$BASE_URL/v1/systemone" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"jev/not-a-jev-model\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}")
+assert_http_status 404 "$CODE" "$RESP_FILE"
+jq -e '.error.type == "not_found_error" and .error.provider == "jev" and (.error.message | contains("not-a-jev-model"))' "$RESP_FILE" >/dev/null
+```
+
+### S233 A virtual model pins an unlisted Jev version
+
+The System One docs state that a virtual model can pin a version the same way
+a provider-qualified name does (`virtual_models: [{source: ..., target:
+jev/jev-1.13.0}]`). This creates one through the admin API and sends a request
+through it.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+NAME="qa-jev-pinned-$QA_SUFFIX"
+cleanup_s233() {
+  curl -sS -o /dev/null -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+    -d "{\"source\":\"$NAME\"}" || true
+}
+trap cleanup_s233 EXIT
+
+VM_FILE="$QA_RUN_DIR/s233.vm.json"
+CODE=$(curl -sS -o "$VM_FILE" -w '%{http_code}' -X PUT "$BASE_URL/admin/virtual-models" \
+  -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$NAME\",\"target_model\":\"jev/jev-1.12.0\"}")
+assert_http_status 200 "$CODE" "$VM_FILE"
+
+RESP_FILE="$QA_RUN_DIR/s233.answer.json"
+CODE=$(curl -sS -o "$RESP_FILE" -w '%{http_code}' "$BASE_URL/v1/systemone" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$NAME\",\"state\":\"pinned through a virtual model\",\"questions\":$QA_SYSTEMONE_CHOICE}")
+assert_http_status 200 "$CODE" "$RESP_FILE"
+jq -e '.model == "jev-1.12.0" and .mock.upstream == "jev" and .mock.received_model == "jev-1.12.0"' "$RESP_FILE" >/dev/null
+```
+
+### S234 Kev diagnostic routes `/permute` and `/separate`
+
+Kev serves both diagnostic routes; the hosted-shaped `jev` answers them with
+its own `404`, and an OpenRouter model is refused before any upstream call
+since OpenRouter serves only the evaluation route.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+post_systemone() {
+  local route="$1" body="$2" out="$3"
+  curl -sS -o "$out" -w '%{http_code}' "$BASE_URL/v1/systemone$route" -H 'Content-Type: application/json' -d "$body"
+}
+
+F="$QA_RUN_DIR/s234.permute.json"
+CODE=$(post_systemone /permute "{\"model\":\"jev-kev/kev-latest\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE,\"n_perm\":3}" "$F")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.n_perm == 3 and .mock.route == "permute" and .mock.received_model == "kev-latest"' "$F" >/dev/null
+
+F="$QA_RUN_DIR/s234.permute-default.json"
+CODE=$(post_systemone /permute "{\"model\":\"kev-latest\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}" "$F")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.n_perm == 6' "$F" >/dev/null
+
+F="$QA_RUN_DIR/s234.permute-bad.json"
+CODE=$(post_systemone /permute "{\"model\":\"kev-latest\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE,\"n_perm\":65}" "$F")
+assert_http_status 422 "$CODE" "$F"
+jq -e '.error.type == "invalid_request_error" and (.error.message | contains("n_perm"))' "$F" >/dev/null
+
+F="$QA_RUN_DIR/s234.separate.json"
+CODE=$(post_systemone /separate "{\"model\":\"jev-kev/kev-4b\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_QUESTIONS}" "$F")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.separate == true and .mock.route == "separate" and (.answers | keys | length) == 3' "$F" >/dev/null
+
+F="$QA_RUN_DIR/s234.hosted-permute.json"
+CODE=$(post_systemone /permute "{\"model\":\"jev/jev-latest\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}" "$F")
+assert_http_status 404 "$CODE" "$F"
+jq -e '.error.type == "not_found_error" and .error.provider == "jev"' "$F" >/dev/null
+
+OPENROUTER_MODEL=$(curl -fsS "$BASE_URL/v1/models" | jq -r '[.data[].id | select(startswith("openrouter/"))][0] // empty')
+if [ -n "$OPENROUTER_MODEL" ]; then
+  F="$QA_RUN_DIR/s234.openrouter-permute.json"
+  CODE=$(post_systemone /permute "{\"model\":\"$OPENROUTER_MODEL\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}" "$F")
+  assert_http_status 400 "$CODE" "$F"
+  jq -e '.error.param == "model" and (.error.message | contains("answers only /v1/systemone"))' "$F" >/dev/null
+else
+  echo "note: no openrouter model in the catalog; OpenRouter permute refusal not checked"
+fi
+```
+
+### S235 System One misuse is rejected with an explanation (negatives)
+
+The endpoint never translates: missing or malformed input, chat models (direct
+or through a virtual model), and System One models on OpenAI routes are all
+`400 invalid_request_error` naming the fix. A malformed question reaches the
+upstream and comes back as its `422`.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+NAME="qa-s1-chat-vm-$QA_SUFFIX"
+cleanup_s235() {
+  curl -sS -o /dev/null -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+    -d "{\"source\":\"$NAME\"}" || true
+}
+trap cleanup_s235 EXIT
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$NAME\",\"target_model\":\"openai/gpt-4.1-nano\"}" >/dev/null
+
+# expect_invalid PATH BODY JQ_MESSAGE_FILTER
+expect_invalid() {
+  local path="$1" body="$2" filter="$3" out
+  out=$(mktemp "$QA_RUN_DIR/s235.XXXXXX")
+  local code
+  code=$(curl -sS -o "$out" -w '%{http_code}' "$BASE_URL$path" -H 'Content-Type: application/json' -d "$body")
+  assert_http_status 400 "$code" "$out"
+  if ! jq -e ".error.type == \"invalid_request_error\" and ($filter)" "$out" >/dev/null; then
+    echo "error: unexpected 400 body for $path" >&2
+    cat "$out" >&2
+    exit 1
+  fi
+}
+
+expect_invalid /v1/systemone "{\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}" \
+  '.error.param == "model" and .error.message == "model is required"'
+expect_invalid /v1/systemone '{"model":' \
+  '.error.message | startswith("invalid request body")'
+expect_invalid /v1/systemone "{\"model\":\"openai/gpt-4.1-nano\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}" \
+  '.error.param == "model" and (.error.message | contains("provider type openai, which has no System One API"))'
+expect_invalid /v1/systemone "{\"model\":\"$NAME\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}" \
+  '.error.message | contains("(resolved to \"openai/gpt-4.1-nano\")")'
+OPENROUTER_MODEL=$(curl -fsS "$BASE_URL/v1/models" | jq -r '[.data[] | select((.id | startswith("openrouter/")) and ((.metadata.modes // []) | index("chat")))][0].id // empty')
+if [ -n "$OPENROUTER_MODEL" ]; then
+  expect_invalid /v1/systemone "{\"model\":\"$OPENROUTER_MODEL\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}" \
+    '.error.message | contains("not a System One model")'
+fi
+
+expect_invalid /v1/chat/completions '{"model":"jev/jev-latest","messages":[{"role":"user","content":"hi"}]}' \
+  '.error.param == "model" and (.error.message | contains("does not support chat completions") and contains("POST /v1/systemone"))'
+expect_invalid /v1/responses '{"model":"jev-kev/kev-latest","input":"hi"}' \
+  '.error.message | contains("does not support responses") and contains("POST /v1/systemone")'
+expect_invalid /v1/embeddings '{"model":"jev-latest","input":"hi"}' \
+  '.error.message | contains("does not support embeddings") and contains("POST /v1/systemone")'
+
+# A misrouted System One request is an operator mistake, so it is logged.
+grep -Fq 'System One request routed to a model without the System One API' \
+  "$RELEASE_STACK_DIR/sqlite-main/logs/server.log"
+
+F="$QA_RUN_DIR/s235.bad-question.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone" -H 'Content-Type: application/json' \
+  -d '{"model":"jev-kev/kev-latest","state":"x","questions":{"q":{"type":"maybe","instructions":"?"}}}')
+assert_http_status 422 "$CODE" "$F"
+jq -e '.error.provider == "jev" and (.error.message | contains("questions") and contains("maybe"))' "$F" >/dev/null
+
+F="$QA_RUN_DIR/s235.get.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone")
+assert_http_status 405 "$CODE" "$F"
+```
+
+### S236 Passthrough reaches the same upstreams under `/p/jev*`
+
+Passthrough forwards the body as sent (no model rewrite), rejects a body that
+names the model twice (the upstream parser could pick a value the gateway
+never checked), and reaches Kev's diagnostic routes on the suffixed provider.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+F="$QA_RUN_DIR/s236.systemone.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/p/jev/v1/systemone" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"jev-latest\",\"state\":\"via passthrough\",\"questions\":$QA_SYSTEMONE_CHOICE}")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.model == "jev-1.13.0" and .mock.received_model == "jev-latest" and .mock.authorization == "provider-key"' "$F" >/dev/null
+
+# The /v1 prefix is optional on passthrough routes.
+F="$QA_RUN_DIR/s236.permute.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/p/jev-kev/systemone/permute" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"kev-latest\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE,\"n_perm\":2}")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.n_perm == 2 and .mock.upstream == "kev" and .mock.authorization == "none"' "$F" >/dev/null
+
+F="$QA_RUN_DIR/s236.dup-model.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/p/jev/v1/systemone" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"jev-latest\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE,\"model\":\"jev-preview\"}")
+assert_http_status 400 "$CODE" "$F"
+jq -e '.error.message | contains("model field is repeated")' "$F" >/dev/null
+```
+
+### S237 System One calls are audited, filterable, metered, and priced
+
+Checks the audit entry (route, requested and resolved model, provider, one
+successful primary attempt), the `exclude_operation=systemone` request-type
+filter, and the usage entry: tokens copied from the answer, recorded under
+the model that answered, and priced by an operator override.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+# A provider-wide rate must not shadow the rate declared for the version that
+# answers the jev-latest alias.
+SELECTOR="jev/jev-1.13.0"
+PROVIDER_SELECTOR="jev/"
+cleanup_s237() {
+  for selector in "$SELECTOR" "$PROVIDER_SELECTOR"; do
+    curl -sS -o /dev/null -X DELETE "$BASE_URL/admin/model-pricing-overrides" \
+      -H 'Content-Type: application/json' -d "{\"selector\":\"$selector\"}" || true
+  done
+}
+trap cleanup_s237 EXIT
+curl -fsS -X PUT "$BASE_URL/admin/model-pricing-overrides" -H 'Content-Type: application/json' \
+  -d "{\"selector\":\"$SELECTOR\",\"pricing\":{\"input_per_mtok\":42,\"output_per_mtok\":0}}" >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/model-pricing-overrides" -H 'Content-Type: application/json' \
+  -d "{\"selector\":\"$PROVIDER_SELECTOR\",\"pricing\":{\"input_per_mtok\":1,\"output_per_mtok\":1}}" >/dev/null
+
+RID="qa-s1-audit-$QA_SUFFIX"
+ANSWER_FILE="$QA_RUN_DIR/s237.answer.json"
+curl -fsS "$BASE_URL/v1/systemone" -H 'Content-Type: application/json' -H "X-Request-ID: $RID" \
+  -d "{\"model\":\"jev/jev-latest\",\"state\":\"audit me\",\"questions\":$QA_SYSTEMONE_QUESTIONS}" > "$ANSWER_FILE"
+IN=$(jq -er '.usage.input_tokens' "$ANSWER_FILE")
+OUT=$(jq -er '.usage.output_tokens' "$ANSWER_FILE")
+
+AUDIT_FILE="$QA_RUN_DIR/s237.audit.json"
+wait_log_entry "$BASE_URL" audit "$RID" "$AUDIT_FILE"
+jq -e --arg rid "$RID" '
+  any(.entries[]; .request_id == $rid
+    and .path == "/v1/systemone" and .method == "POST" and .status_code == 200
+    and .requested_model == "jev/jev-latest" and .resolved_model == "jev/jev-latest"
+    and .provider == "jev" and .provider_name == "jev"
+    and ([.data.attempts[]? | {kind, provider_name, success}] == [{"kind":"primary","provider_name":"jev","success":true}]))
+' "$AUDIT_FILE" >/dev/null
+
+curl -fsS "$BASE_URL/admin/audit/log?search=$RID&limit=5&exclude_operation=systemone" \
+  | jq -e '(.entries // []) | length == 0' >/dev/null
+curl -fsS "$BASE_URL/admin/audit/log?search=$RID&limit=5&exclude_operation=chat_completions,provider_passthrough" \
+  | jq -e --arg rid "$RID" 'any(.entries[]; .request_id == $rid)' >/dev/null
+CODE=$(curl -sS -o "$QA_RUN_DIR/s237.bad-filter.json" -w '%{http_code}' "$BASE_URL/admin/audit/log?exclude_operation=not_an_operation")
+assert_http_status 400 "$CODE" "$QA_RUN_DIR/s237.bad-filter.json"
+
+USAGE_FILE="$QA_RUN_DIR/s237.usage.json"
+wait_log_entry "$BASE_URL" usage "$RID" "$USAGE_FILE"
+jq -c --arg rid "$RID" '.entries[] | select(.request_id == $rid)' "$USAGE_FILE"
+jq -e --arg rid "$RID" --argjson in "$IN" --argjson out "$OUT" '
+  any(.entries[]; .request_id == $rid
+    and .endpoint == "/v1/systemone" and .model == "jev-1.13.0"
+    and .provider == "jev" and .provider_name == "jev"
+    and .input_tokens == $in and .output_tokens == $out)
+' "$USAGE_FILE" >/dev/null
+# The two checks below are independent, so both are reported before failing.
+FAILED=0
+if ! jq -e --arg rid "$RID" --argjson total "$((IN + OUT))" \
+    'any(.entries[]; .request_id == $rid and .total_tokens == $total)' "$USAGE_FILE" >/dev/null; then
+  echo "error: usage total_tokens is not input_tokens + output_tokens ($IN + $OUT) for a System One answer" >&2
+  FAILED=1
+fi
+# Jev's documented pricing: per input token, output_per_mtok 0.
+if ! jq -e --arg rid "$RID" --argjson in "$IN" '
+    any(.entries[]; .request_id == $rid and ((((.input_cost // -1) - ($in * 42 / 1000000)) | fabs) < 0.000000001))
+  ' "$USAGE_FILE" >/dev/null; then
+  echo "error: the pricing override (input 42/Mtok, output 0) did not cost the System One usage entry" >&2
+  FAILED=1
+fi
+[ "$FAILED" = 0 ]
+```
+
+### S238 Failover moves System One requests between System One targets
+
+A `failover` virtual model whose primary answers `529` moves to its next
+target, skips a chat model without spending an attempt, and records the
+answer under the target that did the work. A client error (`422`) is returned
+without failover.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+FO="qa-s1-failover-$QA_SUFFIX"
+FO422="qa-s1-failover-422-$QA_SUFFIX"
+FOPIN="qa-s1-failover-pinned-$QA_SUFFIX"
+cleanup_s238() {
+  for name in "$FO" "$FO422" "$FOPIN"; do
+    curl -sS -o /dev/null -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+      -d "{\"source\":\"$name\"}" || true
+  done
+}
+trap cleanup_s238 EXIT
+
+# The down target on its own relays the upstream overload status (or 503
+# once its circuit breaker has opened after earlier reruns).
+F="$QA_RUN_DIR/s238.down.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"jev-down/kev-down\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}")
+case "$CODE" in 529|503) ;; *) assert_http_status 529 "$CODE" "$F" ;; esac
+
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$FO\",\"strategy\":\"failover\",\"targets\":[{\"model\":\"jev-down/kev-down\"},{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"jev-kev/kev-latest\"}]}" >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$FO422\",\"strategy\":\"failover\",\"targets\":[{\"model\":\"jev-kev/kev-latest\"},{\"model\":\"jev/jev-latest\"}]}" >/dev/null
+
+RID="qa-s1-failover-$QA_SUFFIX"
+F="$QA_RUN_DIR/s238.failover.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $RID" \
+  -d "{\"model\":\"$FO\",\"state\":\"fail over please\",\"questions\":$QA_SYSTEMONE_CHOICE}")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.model == "kev-4b-e2e" and .mock.upstream == "kev" and .mock.received_model == "kev-latest"' "$F" >/dev/null
+
+AUDIT_FILE="$QA_RUN_DIR/s238.audit.json"
+wait_log_entry "$BASE_URL" audit "$RID" "$AUDIT_FILE"
+jq -c --arg rid "$RID" '.entries[] | select(.request_id == $rid) | [.data.attempts[] | {kind, provider_name, status_code, success}]' "$AUDIT_FILE"
+jq -e --arg rid "$RID" --arg fo "$FO" '
+  any(.entries[]; .request_id == $rid
+    and .requested_model == $fo and .resolved_model == "jev-kev/kev-latest" and .provider_name == "jev-kev"
+    and .data.failover != null
+    and ([.data.attempts[] | .provider_name] == ["jev-down","jev-kev"])
+    and .data.attempts[0].success == false and .data.attempts[1].kind == "failover" and .data.attempts[1].success == true)
+' "$AUDIT_FILE" >/dev/null
+
+USAGE_FILE="$QA_RUN_DIR/s238.usage.json"
+wait_log_entry "$BASE_URL" usage "$RID" "$USAGE_FILE"
+jq -e --arg rid "$RID" 'any(.entries[]; .request_id == $rid and .provider_name == "jev-kev" and .model == "kev-4b-e2e")' "$USAGE_FILE" >/dev/null
+
+# A pinned version the catalog does not list is a valid failover target and
+# is sent to the provider it names, not to the failed primary's.
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$FOPIN\",\"strategy\":\"failover\",\"targets\":[{\"model\":\"jev-down/kev-down\"},{\"model\":\"jev/jev-1.12.0\"}]}" >/dev/null
+F="$QA_RUN_DIR/s238.failover-pinned.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$FOPIN\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.model == "jev-1.12.0" and .mock.upstream == "jev" and .mock.received_model == "jev-1.12.0"' "$F" >/dev/null
+
+RID422="qa-s1-failover-422-$QA_SUFFIX"
+F="$QA_RUN_DIR/s238.no-failover.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $RID422" \
+  -d "{\"model\":\"$FO422\",\"state\":\"x\",\"questions\":{\"q\":{\"type\":\"maybe\",\"instructions\":\"?\"}}}")
+assert_http_status 422 "$CODE" "$F"
+wait_log_entry "$BASE_URL" audit "$RID422" "$AUDIT_FILE"
+jq -e --arg rid "$RID422" '
+  any(.entries[]; .request_id == $rid and .status_code == 422 and ([.data.attempts[] | .provider_name] == ["jev-kev"]))
+' "$AUDIT_FILE" >/dev/null
+```
+
+### S239 Identical System One requests hit the exact response cache
+
+Runs on the auth + exact-cache gateway. The replayed answer carries the same
+mock request sequence (the upstream was not called), `Cache-Control: no-cache`
+bypasses the cache, a different state misses, and the hit is audited and
+recorded in usage as an exact cache hit.
+
+```bash
+systemone_require_mock "$AUTH_BASE_URL" -H "$ADMIN_AUTH_HEADER"
+
+STATE="release cache probe $QA_SUFFIX"
+BODY="{\"model\":\"jev-kev/kev-latest\",\"state\":\"$STATE\",\"questions\":$QA_SYSTEMONE_CHOICE}"
+send_cached() {
+  local rid="$1" headers="$2" body_file="$3"
+  shift 3
+  curl -fsS -D "$headers" -o "$body_file" "$AUTH_BASE_URL/v1/systemone" \
+    -H "$ADMIN_AUTH_HEADER" -H 'Content-Type: application/json' -H "X-Request-ID: $rid" "$@" -d "${BODY_OVERRIDE:-$BODY}"
+}
+
+RID1="qa-s1-cache-$QA_SUFFIX-1"
+RID2="qa-s1-cache-$QA_SUFFIX-2"
+RID3="qa-s1-cache-$QA_SUFFIX-3"
+send_cached "$RID1" "$QA_RUN_DIR/s239.1.headers" "$QA_RUN_DIR/s239.1.json"
+send_cached "$RID2" "$QA_RUN_DIR/s239.2.headers" "$QA_RUN_DIR/s239.2.json"
+send_cached "$RID3" "$QA_RUN_DIR/s239.3.headers" "$QA_RUN_DIR/s239.3.json" -H 'Cache-Control: no-cache'
+BODY_OVERRIDE="{\"model\":\"jev-kev/kev-latest\",\"state\":\"$STATE changed\",\"questions\":$QA_SYSTEMONE_CHOICE}" \
+  send_cached "qa-s1-cache-$QA_SUFFIX-4" "$QA_RUN_DIR/s239.4.headers" "$QA_RUN_DIR/s239.4.json"
+
+SEQ1=$(jq -er '.mock.request_seq' "$QA_RUN_DIR/s239.1.json")
+grep -Eiq '^X-Cache: *HIT \(exact\)' "$QA_RUN_DIR/s239.2.headers"
+jq -e --argjson seq "$SEQ1" '.mock.request_seq == $seq and .model == "kev-4b-e2e"' "$QA_RUN_DIR/s239.2.json" >/dev/null
+cmp -s "$QA_RUN_DIR/s239.1.json" "$QA_RUN_DIR/s239.2.json"
+for n in 3 4; do
+  if grep -Eiq '^X-Cache:' "$QA_RUN_DIR/s239.$n.headers"; then
+    echo "error: request $n should not have been served from cache" >&2
+    exit 1
+  fi
+  jq -e --argjson seq "$SEQ1" '.mock.request_seq > $seq' "$QA_RUN_DIR/s239.$n.json" >/dev/null
+done
+
+AUDIT_FILE="$QA_RUN_DIR/s239.audit.json"
+wait_log_entry "$AUTH_BASE_URL" audit "$RID2" "$AUDIT_FILE" -H "$ADMIN_AUTH_HEADER"
+jq -e --arg rid "$RID2" 'any(.entries[]; .request_id == $rid and .cache_type == "exact" and .status_code == 200 and .path == "/v1/systemone")' "$AUDIT_FILE" >/dev/null
+
+USAGE_FILE="$QA_RUN_DIR/s239.usage.json"
+wait_log_entry "$AUTH_BASE_URL" usage "$RID1" "$USAGE_FILE" -H "$ADMIN_AUTH_HEADER"
+# Cache hits are listed only with cache_mode=cached.
+for _ in $(seq 1 15); do
+  curl -fsS "$AUTH_BASE_URL/admin/usage/log?search=$RID2&cache_mode=cached&limit=5" -H "$ADMIN_AUTH_HEADER" > "$USAGE_FILE"
+  if jq -e --arg rid "$RID2" 'any(.entries[]?; .request_id == $rid)' "$USAGE_FILE" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+jq -e --arg rid "$RID2" '
+  any(.entries[]; .request_id == $rid and .cache_type == "exact" and .endpoint == "/v1/systemone"
+    and .input_tokens > 0 and .total_tokens == .input_tokens + .output_tokens and .provider_name == "jev-kev")
+' "$USAGE_FILE" >/dev/null
+```
+
+### S240 Guardrails see the System One state and nothing else
+
+Runs on the guardrail gateway. Its global `system_prompt` override has no
+place in a decision request, so the edit is dropped with a one-time warning
+and the state is forwarded untouched. A workflow scoped to `jev-kev` and a
+user path then masks card numbers in a string state and in a JSON state
+(which stays JSON), and blocks a forbidden state before any upstream call.
+
+```bash
+systemone_require_mock "$GR_BASE_URL"
+
+S="${QA_SUFFIX//[^[:alnum:]-]/-}"
+MASK="qa-s1-mask-$S"
+BLOCK="qa-s1-block-$S"
+SCOPE_PATH="/qa/systemone/$S"
+WORKFLOW_ID_FILE="$QA_RUN_DIR/s240.workflow.id"
+cleanup_s240() {
+  if [ -s "$WORKFLOW_ID_FILE" ]; then
+    curl -sS -o /dev/null -X POST "$GR_BASE_URL/admin/workflows/$(cat "$WORKFLOW_ID_FILE")/deactivate" || true
+  fi
+  for name in "$MASK" "$BLOCK"; do
+    curl -sS -o /dev/null -X DELETE "$GR_BASE_URL/admin/guardrails" -H 'Content-Type: application/json' \
+      -d "{\"name\":\"$name\"}" || true
+  done
+}
+trap cleanup_s240 EXIT
+
+# Global system_prompt guardrail: dropped, state unchanged, warning logged.
+F="$QA_RUN_DIR/s240.global.json"
+curl -fsS "$GR_BASE_URL/v1/systemone" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"jev-kev/kev-latest\",\"state\":\"card 4111 1111 1111 1111\",\"questions\":$QA_SYSTEMONE_CHOICE}" > "$F"
+jq -e '.mock.received_state == "card 4111 1111 1111 1111" and .answers.department.type == "choice"' "$F" >/dev/null
+grep -Fq 'guardrail edits a System One request cannot carry were dropped' "$RELEASE_STACK_DIR/guardrails/logs/server.log"
+
+jq -n --arg name "$MASK" '{
+  name: $name, type: "string_replace", description: "release e2e: mask card numbers",
+  config: {mode: "regex", rules: "\\b(\\d{4}) \\d{4} \\d{4} (\\d{4})\\b => $1 **** **** $2"}
+}' | curl -fsS -X PUT "$GR_BASE_URL/admin/guardrails" -H 'Content-Type: application/json' -d @- >/dev/null
+jq -n --arg name "$BLOCK" '{
+  name: $name, type: "string_replace", description: "release e2e: block a forbidden state",
+  config: {mode: "literal", rules: "QA_FORBIDDEN_STATE => x", on_match: "block", message: "QA_SYSTEMONE_BLOCKED"}
+}' | curl -fsS -X PUT "$GR_BASE_URL/admin/guardrails" -H 'Content-Type: application/json' -d @- >/dev/null
+
+jq -n --arg mask "$MASK" --arg block "$BLOCK" --arg path "$SCOPE_PATH" --arg name "qa-s1-guard-$S" '{
+  scope_provider_name: "jev-kev", scope_user_path: $path, name: $name,
+  description: "release e2e: System One state guardrails",
+  workflow_payload: {
+    schema_version: 2,
+    features: {cache: false, audit: true, usage: true, guardrails: true, failover: false},
+    steps: [{ref: $mask, phase: "prompt", step: 10}, {ref: $block, phase: "prompt", step: 20}]
+  }
+}' | curl -fsS -X POST "$GR_BASE_URL/admin/workflows" -H 'Content-Type: application/json' -d @- \
+  | jq -er '.id' > "$WORKFLOW_ID_FILE"
+
+guarded() {
+  curl -sS -o "$2" -w '%{http_code}' "$GR_BASE_URL/v1/systemone" -H 'Content-Type: application/json' \
+    -H "X-GoModel-User-Path: $SCOPE_PATH/agent" -d "$1"
+}
+
+F="$QA_RUN_DIR/s240.string.json"
+CODE=$(guarded "{\"model\":\"jev-kev/kev-latest\",\"state\":\"card 4111 1111 1111 1234 was charged twice\",\"questions\":$QA_SYSTEMONE_CHOICE}" "$F")
+assert_http_status 200 "$CODE" "$F"
+jq -e --argjson q "$QA_SYSTEMONE_CHOICE" '
+  .mock.received_state == "card 4111 **** **** 1234 was charged twice" and .mock.questions == $q
+' "$F" >/dev/null
+
+F="$QA_RUN_DIR/s240.object.json"
+CODE=$(guarded "{\"model\":\"jev-kev/kev-latest\",\"state\":{\"note\":\"card 4111 1111 1111 1234\",\"order\":7},\"questions\":$QA_SYSTEMONE_CHOICE}" "$F")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.mock.received_state == {"note":"card 4111 **** **** 1234","order":7}' "$F" >/dev/null
+
+F="$QA_RUN_DIR/s240.blocked.json"
+CODE=$(guarded "{\"model\":\"jev-kev/kev-latest\",\"state\":\"QA_FORBIDDEN_STATE\",\"questions\":$QA_SYSTEMONE_CHOICE}" "$F")
+assert_http_status 400 "$CODE" "$F"
+jq -e '.error.message | contains("QA_SYSTEMONE_BLOCKED")' "$F" >/dev/null
+
+# The same request outside the scoped user path is not masked.
+F="$QA_RUN_DIR/s240.unscoped.json"
+curl -fsS "$GR_BASE_URL/v1/systemone" -H 'Content-Type: application/json' -H "X-GoModel-User-Path: /qa/other/$S" \
+  -d "{\"model\":\"jev-kev/kev-latest\",\"state\":\"card 4111 1111 1111 1234\",\"questions\":$QA_SYSTEMONE_CHOICE}" > "$F"
+jq -e '.mock.received_state == "card 4111 1111 1111 1234"' "$F" >/dev/null
+```
+
+### S241 Managed-key model allowlists cover System One and its passthrough
+
+Runs on the auth gateway with a key allowed only `jev-kev/kev-latest` and
+granted passthrough access. Other System One models are refused on
+`/v1/systemone` and on passthrough, including a passthrough body larger than
+the 64 KiB peek window whose `model` comes last.
+
+```bash
+systemone_require_mock "$AUTH_BASE_URL" -H "$ADMIN_AUTH_HEADER"
+
+KEY_FILE="$QA_RUN_DIR/s241.key.json"
+cleanup_s241() {
+  if [ -s "$KEY_FILE" ]; then
+    curl -sS -o /dev/null -X POST "$AUTH_BASE_URL/admin/auth-keys/$(jq -r '.id' "$KEY_FILE")/deactivate" -H "$ADMIN_AUTH_HEADER" || true
+  fi
+}
+trap cleanup_s241 EXIT
+curl -fsS -X POST "$AUTH_BASE_URL/admin/auth-keys" -H "$ADMIN_AUTH_HEADER" -H 'Content-Type: application/json' \
+  -d "{\"name\":\"qa-s1-allowlist-$QA_SUFFIX\",\"user_path\":\"/qa/systemone/allowlist\",\"allowed_models\":[\"jev-kev/kev-latest\"],\"passthrough_access\":true}" \
+  > "$KEY_FILE"
+chmod 600 "$KEY_FILE"
+KEY=$(jq -er '.value' "$KEY_FILE")
+
+with_key() {
+  curl -sS -o "$3" -w '%{http_code}' "$AUTH_BASE_URL$1" -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d "$2"
+}
+expect_denied() {
+  local code
+  code=$(with_key "$1" "$2" "$3")
+  assert_http_status 400 "$code" "$3"
+  jq -e '.error.code == "model_access_denied"' "$3" >/dev/null
+}
+
+F="$QA_RUN_DIR/s241.allowed.json"
+CODE=$(with_key /v1/systemone "{\"model\":\"jev-kev/kev-latest\",\"state\":\"allowed\",\"questions\":$QA_SYSTEMONE_CHOICE}" "$F")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.mock.upstream == "kev"' "$F" >/dev/null
+
+expect_denied /v1/systemone "{\"model\":\"jev/jev-latest\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}" "$QA_RUN_DIR/s241.denied.json"
+expect_denied /v1/systemone "{\"model\":\"jev/jev-1.13.0\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}" "$QA_RUN_DIR/s241.denied-pinned.json"
+expect_denied /p/jev/v1/systemone "{\"model\":\"jev-latest\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}" "$QA_RUN_DIR/s241.denied-pt.json"
+
+BIG_STATE=$(head -c 70000 /dev/zero | tr '\0' 'a')
+BIG_BODY_FILE="$QA_RUN_DIR/s241.big-body.json"
+jq -n --arg state "$BIG_STATE" --argjson q "$QA_SYSTEMONE_CHOICE" '{state: $state, questions: $q, model: "jev-latest"}' > "$BIG_BODY_FILE"
+expect_denied /p/jev/v1/systemone "@$BIG_BODY_FILE" "$QA_RUN_DIR/s241.denied-big.json"
+
+jq -n --arg state "$BIG_STATE" --argjson q "$QA_SYSTEMONE_CHOICE" '{state: $state, questions: $q, model: "kev-latest"}' > "$BIG_BODY_FILE"
+F="$QA_RUN_DIR/s241.allowed-big.json"
+CODE=$(with_key /p/jev-kev/v1/systemone "@$BIG_BODY_FILE" "$F")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.mock.received_length > 65536' "$F" >/dev/null
+```
+
+## 36. MCP tool and user-path exclusions
+
+Per-server tool filters and `disallowed_user_paths` are gateway-side access
+policy: an edit applies in place without redialing the upstream, and it is
+checked on every call, so it also reaches MCP sessions that are already open.
+These scenarios register `$QA_SUFFIX`-scoped servers against the mock MCP
+upstream on port 18090 and delete them.
+
+### S242 Tool filters apply in place and reach open sessions
+
+```bash
+if ! curl -fsS "$MCP_UPSTREAM_BASE/healthz" >/dev/null 2>&1; then
+  echo "SKIPPED: mock MCP upstream is not running on $MCP_UPSTREAM_BASE"
+  exit 0
+fi
+trap 'mcp_cleanup_release_servers "$BASE_URL"' EXIT
+
+put_alpha() {
+  curl -fsS -X PUT "$BASE_URL/admin/mcp-servers" -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$QA_MCP_ALPHA\",\"url\":\"$MCP_UPSTREAM_BASE/alpha\",\"transport\":\"http\",\"headers\":{\"X-Mock-Token\":\"$1\"},$2}" >/dev/null
+}
+alpha_view() {
+  curl -fsS "$BASE_URL/admin/mcp-servers" | jq -c --arg n "$QA_MCP_ALPHA" '.[] | select(.name == $n)'
+}
+
+put_alpha "$MCP_UPSTREAM_TOKEN" '"disallowed_tools":["add"]'
+mcp_wait_status "$BASE_URL" "$QA_MCP_ALPHA" connected
+alpha_view | jq -e '.tool_count == 1 and .excluded_tool_count == 1 and .disallowed_tools == ["add"]' >/dev/null
+CONNECTED_AT=$(alpha_view | jq -er '.connected_at')
+curl -fsS "$BASE_URL/admin/mcp-servers/$QA_MCP_ALPHA/catalog" \
+  | jq -e '[.tools[].name] == ["echo"] and [.excluded_tools[].name] == ["add"]' >/dev/null
+
+SID=$(mcp_initialize "$BASE_URL/mcp" "$QA_RUN_DIR/s242.init.headers" "$QA_RUN_DIR/s242.init.raw")
+[ -n "$SID" ]
+mcp_initialized "$BASE_URL/mcp" "$SID"
+mcp_post "$BASE_URL/mcp" "$SID" '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  | jq -e --arg a "$QA_MCP_ALPHA" '([.result.tools[].name | select(startswith($a + "_"))]) == [$a + "_echo"]' >/dev/null
+mcp_post "$BASE_URL/mcp" "$SID" "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"${QA_MCP_ALPHA}_add\",\"arguments\":{}}}" \
+  | jq -e '.error != null' >/dev/null
+
+# Flip to an allowlist ("Keep hidden") that excludes echo. The stored header
+# secret round-trips as ***, and the connection is not redialed.
+put_alpha '***' '"allowed_tools":["add"]'
+alpha_view | jq -e --arg at "$CONNECTED_AT" '
+  .status == "connected" and .connected_at == $at
+  and .allowed_tools == ["add"] and ((.disallowed_tools // []) | length == 0)
+  and .tool_count == 1 and .excluded_tool_count == 1
+' >/dev/null
+
+# echo was listed by the open session before the change; calling it now fails.
+mcp_post "$BASE_URL/mcp" "$SID" "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"${QA_MCP_ALPHA}_echo\",\"arguments\":{}}}" \
+  > "$QA_RUN_DIR/s242.stale-call.json"
+jq -e '.error.message | contains("excluded by the gateway tool filters")' "$QA_RUN_DIR/s242.stale-call.json" >/dev/null
+
+# A new session sees the new filter.
+SID2=$(mcp_initialize "$BASE_URL/mcp" "$QA_RUN_DIR/s242.init2.headers" "$QA_RUN_DIR/s242.init2.raw")
+mcp_initialized "$BASE_URL/mcp" "$SID2"
+mcp_post "$BASE_URL/mcp" "$SID2" '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  | jq -e --arg a "$QA_MCP_ALPHA" '([.result.tools[].name | select(startswith($a + "_"))]) == [$a + "_add"]' >/dev/null
+mcp_post "$BASE_URL/mcp" "$SID2" "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"${QA_MCP_ALPHA}_add\",\"arguments\":{\"marker\":\"QA_MCP_ALLOWED_OK\"}}}" \
+  | jq -e '.result.content[0].text | contains("QA_MCP_ALLOWED_OK")' >/dev/null
+```
+
+### S243 `disallowed_user_paths` carves callers out of a server
+
+The carve-out wins over `user_paths`, matches whole subtrees, hides the
+server from `tools/list` and its per-server endpoint, and a later edit reaches
+a session that is already open. Invalid paths are rejected.
+
+```bash
+if ! curl -fsS "$MCP_UPSTREAM_BASE/healthz" >/dev/null 2>&1; then
+  echo "SKIPPED: mock MCP upstream is not running on $MCP_UPSTREAM_BASE"
+  exit 0
+fi
+trap 'mcp_cleanup_release_servers "$BASE_URL"' EXIT
+
+ROOT="/qa/mcp-carve/${QA_SUFFIX//[^[:alnum:]-]/-}"
+put_beta() {
+  curl -sS -o "$QA_RUN_DIR/s243.put.json" -w '%{http_code}' -X PUT "$BASE_URL/admin/mcp-servers" -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$QA_MCP_BETA\",\"url\":\"$MCP_UPSTREAM_BASE/beta\",\"transport\":\"http\",\"user_paths\":[\"$ROOT\"],\"disallowed_user_paths\":$1}"
+}
+CODE=$(put_beta "[\"$ROOT/contractors/\",\"$ROOT/contractors\"]")
+assert_http_status 200 "$CODE" "$QA_RUN_DIR/s243.put.json"
+mcp_wait_status "$BASE_URL" "$QA_MCP_BETA" connected
+curl -fsS "$BASE_URL/admin/mcp-servers" | jq -e --arg n "$QA_MCP_BETA" --arg root "$ROOT" '
+  any(.[]; .name == $n and .user_paths == [$root] and .disallowed_user_paths == [$root + "/contractors"])
+' >/dev/null
+
+# beta_tools SESSION_ID USER_PATH -> prints the beta tool names visible to it
+beta_tools() {
+  mcp_post "$BASE_URL/mcp" "$1" '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' -H "X-GoModel-User-Path: $2" \
+    | jq -c --arg b "$QA_MCP_BETA" '[.result.tools[]?.name | select(startswith($b + "_"))]'
+}
+open_session() {
+  local sid
+  sid=$(mcp_initialize "$BASE_URL/mcp" "$QA_RUN_DIR/s243.$2.headers" "$QA_RUN_DIR/s243.$2.raw" -H "X-GoModel-User-Path: $1")
+  mcp_initialized "$BASE_URL/mcp" "$sid" -H "X-GoModel-User-Path: $1"
+  echo "$sid"
+}
+
+ENG_SID=$(open_session "$ROOT/eng" eng)
+CON_SID=$(open_session "$ROOT/contractors/acme" con)
+OUT_SID=$(open_session "/qa/elsewhere" out)
+[ "$(beta_tools "$ENG_SID" "$ROOT/eng")" = "[\"${QA_MCP_BETA}_fetch\",\"${QA_MCP_BETA}_search\"]" ]
+[ "$(beta_tools "$CON_SID" "$ROOT/contractors/acme")" = "[]" ]
+[ "$(beta_tools "$OUT_SID" "/qa/elsewhere")" = "[]" ]
+
+CODE=$(curl -sS -o "$QA_RUN_DIR/s243.per-server.json" -w '%{http_code}' "$BASE_URL/mcp/$QA_MCP_BETA" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -H "X-GoModel-User-Path: $ROOT/contractors/acme" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"qa-release","version":"1"}}}')
+assert_http_status 404 "$CODE" "$QA_RUN_DIR/s243.per-server.json"
+
+# Carve eng out too: the already-open eng session loses the server.
+CODE=$(put_beta "[\"$ROOT/contractors\",\"$ROOT/eng\"]")
+assert_http_status 200 "$CODE" "$QA_RUN_DIR/s243.put.json"
+mcp_post "$BASE_URL/mcp" "$ENG_SID" \
+  "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"${QA_MCP_BETA}_search\",\"arguments\":{}}}" \
+  -H "X-GoModel-User-Path: $ROOT/eng" > "$QA_RUN_DIR/s243.eng-call.json"
+jq -e '.result == null and (.error.message | contains("not available for this user path"))' "$QA_RUN_DIR/s243.eng-call.json" >/dev/null
+# A new eng session no longer lists the server.
+ENG2_SID=$(open_session "$ROOT/eng" eng2)
+[ "$(beta_tools "$ENG2_SID" "$ROOT/eng")" = "[]" ]
+
+CODE=$(put_beta '["/qa/../escape"]')
+assert_http_status 400 "$CODE" "$QA_RUN_DIR/s243.put.json"
+jq -e '.error.message | contains("disallowed_user_paths")' "$QA_RUN_DIR/s243.put.json" >/dev/null
+```
+
+### S244 The master key keeps the caller's user-path header on `/mcp` and audio uploads
+
+MCP and audio uploads own their transport and take no request snapshot. With
+the master key on the auth gateway, the `X-GoModel-User-Path` header must
+still scope usage, as it does on chat.
+
+```bash
+if ! curl -fsS "$MCP_UPSTREAM_BASE/healthz" >/dev/null 2>&1; then
+  echo "SKIPPED: mock MCP upstream is not running on $MCP_UPSTREAM_BASE"
+  exit 0
+fi
+cleanup_s244() {
+  curl -sS -o /dev/null -X DELETE "$AUTH_BASE_URL/admin/mcp-servers/$QA_MCP_BETA" -H "$ADMIN_AUTH_HEADER" || true
+}
+trap cleanup_s244 EXIT
+
+USER_PATH="/qa/master-key-path/${QA_SUFFIX//[^[:alnum:]-]/-}"
+curl -fsS -X PUT "$AUTH_BASE_URL/admin/mcp-servers" -H "$ADMIN_AUTH_HEADER" -H 'Content-Type: application/json' \
+  -d "{\"name\":\"$QA_MCP_BETA\",\"url\":\"$MCP_UPSTREAM_BASE/beta\",\"transport\":\"http\"}" >/dev/null
+for _ in $(seq 1 20); do
+  if curl -fsS "$AUTH_BASE_URL/admin/mcp-servers" -H "$ADMIN_AUTH_HEADER" \
+      | jq -e --arg n "$QA_MCP_BETA" 'any(.[]; .name == $n and .status == "connected")' >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+
+AUTH_ARGS=(-H "$ADMIN_AUTH_HEADER" -H "X-GoModel-User-Path: $USER_PATH")
+SID=$(mcp_initialize "$AUTH_BASE_URL/mcp" "$QA_RUN_DIR/s244.init.headers" "$QA_RUN_DIR/s244.init.raw" "${AUTH_ARGS[@]}")
+[ -n "$SID" ]
+mcp_initialized "$AUTH_BASE_URL/mcp" "$SID" "${AUTH_ARGS[@]}"
+RID="qa-mk-path-mcp-$QA_SUFFIX"
+mcp_post "$AUTH_BASE_URL/mcp" "$SID" \
+  "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"${QA_MCP_BETA}_search\",\"arguments\":{\"q\":\"x\"}}}" \
+  "${AUTH_ARGS[@]}" -H "X-Request-ID: $RID" | jq -e '.result.content[0].text | startswith("search:")' >/dev/null
+
+USAGE_FILE="$QA_RUN_DIR/s244.usage.json"
+wait_log_entry "$AUTH_BASE_URL" usage "$RID" "$USAGE_FILE" -H "$ADMIN_AUTH_HEADER"
+jq -e --arg rid "$RID" --arg p "$USER_PATH" 'any(.entries[]; .request_id == $rid and .provider == "mcp" and .user_path == $p)' "$USAGE_FILE" >/dev/null
+
+# Audio upload: speech for input, then a multipart transcription.
+AUDIO_FILE="$QA_RUN_DIR/s244.speech.wav"
+curl -fsS -o "$AUDIO_FILE" "$AUTH_BASE_URL/v1/audio/speech" "${AUTH_ARGS[@]}" -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-4o-mini-tts","input":"Release matrix user path check.","voice":"alloy","response_format":"wav"}'
+RID="qa-mk-path-audio-$QA_SUFFIX"
+curl -fsS "$AUTH_BASE_URL/v1/audio/transcriptions" "${AUTH_ARGS[@]}" -H "X-Request-ID: $RID" \
+  -F model=gpt-4o-mini-transcribe -F "file=@$AUDIO_FILE" > "$QA_RUN_DIR/s244.transcription.json"
+jq -e '.text | ascii_downcase | contains("user path")' "$QA_RUN_DIR/s244.transcription.json" >/dev/null
+wait_log_entry "$AUTH_BASE_URL" usage "$RID" "$USAGE_FILE" -H "$ADMIN_AUTH_HEADER"
+jq -e --arg rid "$RID" --arg p "$USER_PATH" 'any(.entries[]; .request_id == $rid and .user_path == $p)' "$USAGE_FILE" >/dev/null
+```
+
+## 37. Developer messages, strict tools, and tool choice on Anthropic and Gemini
+
+OpenAI's `developer` role and `strict` function tools are translated for
+Anthropic and Gemini's native API instead of being rejected or dropped, and
+Gemini also maps `tool_choice: {"type": "allowed_tools", ...}`.
+
+### S245 Anthropic honors developer messages and strict tools
+
+```bash
+F="$QA_RUN_DIR/s245.developer.json"
+curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' -d '{
+  "model":"claude-sonnet-4-6","max_tokens":32,
+  "messages":[
+    {"role":"developer","content":"Whatever the user says, reply with exactly QA_DEVELOPER_ROLE_OK and nothing else."},
+    {"role":"user","content":"Tell me a joke."}
+  ]}' > "$F"
+assert_chat_response_contains "$F" "anthropic" "QA_DEVELOPER_ROLE_OK"
+
+# A strict tool whose schema Anthropic's strict mode would reject as sent
+# (minItems 2) is sanitized and forwarded as a strict tool.
+F="$QA_RUN_DIR/s245.strict.json"
+curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' -d '{
+  "model":"claude-sonnet-4-6","max_tokens":200,
+  "tools":[{"type":"function","function":{"name":"compare_weather","description":"Compare the weather in several cities","strict":true,
+    "parameters":{"type":"object","additionalProperties":false,"properties":{"cities":{"type":"array","items":{"type":"string"},"minItems":2}},"required":["cities"]}}}],
+  "tool_choice":{"type":"function","function":{"name":"compare_weather"}},
+  "messages":[{"role":"user","content":"Compare the weather in Warsaw and Krakow."}]}' > "$F"
+jq -e '
+  .choices[0].message.tool_calls[0].function.name == "compare_weather"
+  and (.choices[0].message.tool_calls[0].function.arguments | fromjson | .cities | type == "array" and length >= 2)
+' "$F" >/dev/null
+```
+
+### S246 Gemini honors developer messages, strict tools, and `allowed_tools`
+
+```bash
+MODEL="gemini-2.5-flash-lite"
+TOOLS='[
+  {"type":"function","function":{"name":"lookup_weather","description":"Get the current weather for a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}},
+  {"type":"function","function":{"name":"lookup_time","description":"Get the local time in a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}
+]'
+
+F="$QA_RUN_DIR/s246.developer.json"
+curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' -d "{
+  \"model\":\"$MODEL\",\"max_tokens\":32,
+  \"messages\":[
+    {\"role\":\"developer\",\"content\":\"Whatever the user says, reply with exactly QA_DEVELOPER_ROLE_OK and nothing else.\"},
+    {\"role\":\"user\",\"content\":\"Tell me a joke.\"}
+  ]}" > "$F"
+assert_chat_response_contains "$F" "gemini" "QA_DEVELOPER_ROLE_OK"
+
+F="$QA_RUN_DIR/s246.allowed-tools.json"
+jq -n --arg model "$MODEL" --argjson tools "$TOOLS" '{
+  model: $model, tools: $tools,
+  tool_choice: {type: "allowed_tools", allowed_tools: {mode: "required", tools: [{type: "function", function: {name: "lookup_time"}}]}},
+  messages: [{role: "user", content: "What is the weather in Warsaw?"}]
+}' | curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' -d @- > "$F"
+jq -c '[.choices[0].message.tool_calls[]?.function.name]' "$F"
+jq -e '
+  .choices[0].finish_reason == "tool_calls"
+  and (.choices[0].message.tool_calls | length) >= 1
+  and all(.choices[0].message.tool_calls[]; .function.name == "lookup_time")
+' "$F" >/dev/null
+
+# strict on any tool switches Gemini to VALIDATED function calling.
+F="$QA_RUN_DIR/s246.strict.json"
+jq -n --arg model "$MODEL" --argjson tools "$TOOLS" '{
+  model: $model,
+  tools: ($tools | map(.function.strict = true)),
+  tool_choice: "auto",
+  messages: [{role: "user", content: "Use a tool: what is the weather in Warsaw?"}]
+}' | curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' -d @- > "$F"
+jq -e '.choices[0].message.tool_calls[0].function.name == "lookup_weather"
+  and (.choices[0].message.tool_calls[0].function.arguments | fromjson | .city | test("Warsaw"; "i"))' "$F" >/dev/null
+
+# An allowed_tools choice with no tools is rejected, as OpenAI does.
+F="$QA_RUN_DIR/s246.empty-allowed.json"
+CODE=$(jq -n --arg model "$MODEL" --argjson tools "$TOOLS" '{
+  model: $model, tools: $tools,
+  tool_choice: {type: "allowed_tools", allowed_tools: {mode: "auto", tools: []}},
+  messages: [{role: "user", content: "hi"}]
+}' | curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' -d @-)
+assert_http_status 400 "$CODE" "$F"
+jq -e '.error.type == "invalid_request_error"' "$F" >/dev/null
+```
+
+## 38. Post-v0.1.99 changes
+
+Model retrieval and Anthropic list paging, exact OpenAI token counts on
+`/v1/messages/count_tokens`, virtual models routing around disabled targets,
+LiteLLM key import and migration, secret references, encryption at rest,
+virtual MCP servers, and ChatGPT prompt caching. They use the cheapest current
+models (`gpt-6-luna`, `gemini-3.5-flash-lite`, and `gpt-5.6-luna` on the
+ChatGPT subscription).
+
+### S247 A model retrieves by any ID inference accepts, and Anthropic clients can page the list
+
+```bash
+F="$QA_RUN_DIR/s247.model.json"
+curl -fsS "$BASE_URL/v1/models/gpt-6-luna" > "$F"
+jq -e '.id == "openai/gpt-6-luna" and .object == "model"' "$F" >/dev/null
+curl -fsS "$BASE_URL/v1/models/openai/gpt-6-luna" | jq -e '.id == "openai/gpt-6-luna"' >/dev/null
+curl -fsS "$BASE_URL/v1/models/openai%2Fgpt-6-luna" | jq -e '.id == "openai/gpt-6-luna"' >/dev/null
+curl -fsS -H 'anthropic-version: 2023-06-01' "$BASE_URL/v1/models/gpt-6-luna" \
+  | jq -e '.type == "model" and .id == "openai/gpt-6-luna" and (.display_name | length > 0)' >/dev/null
+
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/models/qa-no-such-model-$QA_SUFFIX")
+assert_http_status 404 "$CODE" "$F"
+jq -e '.error.code == "model_not_found"' "$F" >/dev/null
+CODE=$(curl -sS -o "$F" -w '%{http_code}' -H 'anthropic-version: 2023-06-01' "$BASE_URL/v1/models/qa-no-such-model-$QA_SUFFIX")
+assert_http_status 404 "$CODE" "$F"
+jq -e '.type == "error" and .error.type == "not_found_error"' "$F" >/dev/null
+
+# Paging follows the Anthropic list parameters; no parameters is one page.
+ALL="$QA_RUN_DIR/s247.all.json"
+curl -fsS -H 'anthropic-version: 2023-06-01' "$BASE_URL/v1/models" > "$ALL"
+jq -e '.has_more == false and (.data | length) >= 6' "$ALL" >/dev/null
+page() {
+  curl -fsS -H 'anthropic-version: 2023-06-01' "$BASE_URL/v1/models?$1"
+}
+page 'limit=2' | jq -e --slurpfile all "$ALL" '
+  [.data[].id] == [$all[0].data[0:2][].id] and .has_more == true and .last_id == $all[0].data[1].id
+' >/dev/null
+AFTER=$(jq -r '.data[1].id' "$ALL")
+page "limit=2&after_id=$AFTER" | jq -e --slurpfile all "$ALL" '[.data[].id] == [$all[0].data[2:4][].id]' >/dev/null
+BEFORE=$(jq -r '.data[4].id' "$ALL")
+page "limit=2&before_id=$BEFORE" | jq -e --slurpfile all "$ALL" '
+  [.data[].id] == [$all[0].data[2:4][].id] and .has_more == true
+' >/dev/null
+
+# Walking the catalog with after_id visits every model once, in order.
+WALK="$QA_RUN_DIR/s247.walk.txt"
+: > "$WALK"
+CURSOR=""
+for _ in $(seq 1 50); do
+  P=$(page "limit=100${CURSOR:+&after_id=$CURSOR}")
+  jq -r '.data[].id' <<<"$P" >> "$WALK"
+  [ "$(jq -r '.has_more' <<<"$P")" = "true" ] || break
+  CURSOR=$(jq -r '.last_id' <<<"$P")
+done
+[ "$(jq -r '.data[].id' "$ALL")" = "$(cat "$WALK")" ]
+
+for PARAM in after_id before_id; do
+  CODE=$(curl -sS -o "$F" -w '%{http_code}' -H 'anthropic-version: 2023-06-01' "$BASE_URL/v1/models?$PARAM=qa-gone-$QA_SUFFIX")
+  assert_http_status 400 "$CODE" "$F"
+  jq -e --arg p "$PARAM" '.type == "error" and .error.type == "invalid_request_error" and (.error.message | contains($p))' "$F" >/dev/null
+done
+
+# A virtual model retrieves under its own name.
+VM="qa-retrieve-$QA_SUFFIX"
+trap 'curl -sS -o /dev/null -X DELETE "$BASE_URL/admin/virtual-models" -H "Content-Type: application/json" -d "{\"source\":\"$VM\"}" || true' EXIT
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$VM\",\"target_model\":\"openai/gpt-6-luna\"}" >/dev/null
+curl -fsS "$BASE_URL/v1/models/$VM" | jq -e --arg vm "$VM" '.id == $vm' >/dev/null
+```
+
+### S248 `count_tokens` is exact for OpenAI models, estimated under prompt guardrails, and authorized
+
+OpenAI models are counted by OpenAI's `input_tokens` endpoint, so on GPT-5 and
+later the count matches the input `/v1/messages` bills, tools included. The
+guardrail gateway has a prompt guardrail, so it must not send the prompt
+upstream and answers with the local estimate, which differs from the exact
+count for a request with tools. A managed key may count only models it may use.
+
+```bash
+PLAIN='{"model":"gpt-6-luna","system":"You are terse.","messages":[{"role":"user","content":"Reply with exactly QA_COUNT_OK and nothing else."}]}'
+TOOLS='{"model":"gpt-6-luna","tools":[{"name":"get_weather","description":"Get the weather for a city","input_schema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}],"messages":[{"role":"user","content":"What is the weather in Warsaw? Use the tool."}]}'
+
+count() {
+  local base="$1" body="$2"
+  shift 2
+  curl -fsS "$base/v1/messages/count_tokens" -H 'Content-Type: application/json' \
+    -H 'anthropic-version: 2023-06-01' "$@" -d "$body" | jq -er '.input_tokens'
+}
+billed() {
+  jq '.max_tokens = 256' <<<"$1" | curl -fsS "$BASE_URL/v1/messages" -H 'Content-Type: application/json' \
+    -H 'anthropic-version: 2023-06-01' -d @- | jq -er '.usage.input_tokens'
+}
+for BODY in "$PLAIN" "$TOOLS"; do
+  COUNTED=$(count "$BASE_URL" "$BODY")
+  BILLED=$(billed "$BODY")
+  echo "counted=$COUNTED billed=$BILLED"
+  (( COUNTED - BILLED <= 1 && BILLED - COUNTED <= 1 ))
+done
+EXACT_TOOLS=$(count "$BASE_URL" "$TOOLS")
+
+GUARDED=$(count "$GR_BASE_URL" "$TOOLS")
+echo "guardrail gateway estimate=$GUARDED exact=$EXACT_TOOLS"
+(( GUARDED > 0 && GUARDED != EXACT_TOOLS ))
+
+KEY_FILE="$QA_RUN_DIR/s248.key.json"
+trap '[ -s "$KEY_FILE" ] && curl -sS -o /dev/null -X POST "$AUTH_BASE_URL/admin/auth-keys/$(jq -r .id "$KEY_FILE")/deactivate" -H "$ADMIN_AUTH_HEADER" || true' EXIT
+curl -fsS -X POST "$AUTH_BASE_URL/admin/auth-keys" -H "$ADMIN_AUTH_HEADER" -H 'Content-Type: application/json' \
+  -d "{\"name\":\"qa-count-allowlist-$QA_SUFFIX\",\"user_path\":\"/qa/count/$QA_SUFFIX\",\"allowed_models\":[\"gemini/gemini-3.5-flash-lite\"]}" > "$KEY_FILE"
+chmod 600 "$KEY_FILE"
+KEY=$(jq -er '.value' "$KEY_FILE")
+F="$QA_RUN_DIR/s248.denied.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$AUTH_BASE_URL/v1/messages/count_tokens" -H "x-api-key: $KEY" \
+  -H 'Content-Type: application/json' -H 'anthropic-version: 2023-06-01' -d "$PLAIN")
+assert_http_status 400 "$CODE" "$F"
+jq -e '.type == "error" and .error.type == "invalid_request_error" and (.error.message | contains("not available"))' "$F" >/dev/null
+count "$AUTH_BASE_URL" "$(jq -c '.model = "gemini-3.5-flash-lite"' <<<"$PLAIN")" -H "x-api-key: $KEY" >/dev/null
+```
+
+### S249 Virtual models route around disabled and disallowed targets
+
+Disabling a model moves a virtual model's traffic to its other targets under
+every strategy; a direct request for the disabled model still fails, and
+with every target disabled the virtual model answers `model_access_denied`.
+A key's allowlist is honored the same way. Disabling is gateway-global, so
+this scenario stays sequential.
+
+```bash
+COST="qa-skip-cost-$QA_SUFFIX"
+FAILOVER="qa-skip-failover-$QA_SUFFIX"
+RR="qa-skip-rr-$QA_SUFFIX"
+LUNA="openai/gpt-6-luna"
+LITE="gemini/gemini-3.5-flash-lite"
+KEY_FILE="$QA_RUN_DIR/s249.key.json"
+
+vm() {
+  curl -fsS -X "$1" "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' -d "$2" >/dev/null
+}
+cleanup_s249() {
+  for SRC in "$COST" "$FAILOVER" "$RR" "$LUNA" "$LITE"; do
+    curl -sS -o /dev/null -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' -d "{\"source\":\"$SRC\"}" || true
+  done
+  curl -sS -o /dev/null -X DELETE "$AUTH_BASE_URL/admin/virtual-models" -H "$ADMIN_AUTH_HEADER" \
+    -H 'Content-Type: application/json' -d "{\"source\":\"$RR\"}" || true
+  if [ -s "$KEY_FILE" ]; then
+    curl -sS -o /dev/null -X POST "$AUTH_BASE_URL/admin/auth-keys/$(jq -r .id "$KEY_FILE")/deactivate" -H "$ADMIN_AUTH_HEADER" || true
+  fi
+}
+trap cleanup_s249 EXIT
+
+# served_by MODEL [BASE_URL [curl args...]] -> provider/model, or the error code.
+# Each call is a new conversation: session affinity keeps a conversation on
+# the target that served it, even after a disabled target is re-enabled.
+served_by() {
+  local model="$1" base="${2:-$BASE_URL}"
+  shift 2 2>/dev/null || shift
+  curl -sS "$base/v1/chat/completions" -H 'Content-Type: application/json' "$@" \
+    -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly OK ($(openssl rand -hex 6))\"}],\"max_tokens\":64}" \
+    | jq -r 'if .error then .error.code else "\(.provider)/\(.model)" end'
+}
+
+vm PUT "{\"source\":\"$COST\",\"strategy\":\"cost\",\"targets\":[{\"model\":\"$LUNA\"},{\"model\":\"$LITE\"}]}"
+vm PUT "{\"source\":\"$FAILOVER\",\"strategy\":\"failover\",\"targets\":[{\"model\":\"$LUNA\"},{\"model\":\"$LITE\"}]}"
+vm PUT "{\"source\":\"$RR\",\"strategy\":\"round_robin\",\"targets\":[{\"model\":\"$LUNA\"},{\"model\":\"$LITE\"}]}"
+[ "$(served_by "$COST")" = "$LUNA" ]
+
+vm PUT "{\"source\":\"$LUNA\",\"enabled\":false}"
+curl -fsS "$BASE_URL/admin/virtual-models" | jq -e --arg s "$LUNA" 'any(.[]; .source == $s and .enabled == false)' >/dev/null
+[ "$(served_by "$COST")" = "$LITE" ]
+[ "$(served_by "$FAILOVER")" = "$LITE" ]
+for _ in 1 2 3; do
+  [ "$(served_by "$RR")" = "$LITE" ]
+done
+[ "$(served_by "$LUNA")" = "model_access_denied" ]
+
+vm PUT "{\"source\":\"$LITE\",\"enabled\":false}"
+[ "$(served_by "$COST")" = "model_access_denied" ]
+
+vm DELETE "{\"source\":\"$LITE\"}"
+vm DELETE "{\"source\":\"$LUNA\"}"
+[ "$(served_by "$COST")" = "$LUNA" ]
+
+# A target the key may not use is skipped like a disabled one.
+curl -fsS -X PUT "$AUTH_BASE_URL/admin/virtual-models" -H "$ADMIN_AUTH_HEADER" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$RR\",\"strategy\":\"round_robin\",\"targets\":[{\"model\":\"$LUNA\"},{\"model\":\"$LITE\"}]}" >/dev/null
+curl -fsS -X POST "$AUTH_BASE_URL/admin/auth-keys" -H "$ADMIN_AUTH_HEADER" -H 'Content-Type: application/json' \
+  -d "{\"name\":\"qa-skip-allowlist-$QA_SUFFIX\",\"user_path\":\"/qa/skip/$QA_SUFFIX\",\"allowed_models\":[\"$LITE\"]}" > "$KEY_FILE"
+chmod 600 "$KEY_FILE"
+KEY=$(jq -er '.value' "$KEY_FILE")
+for _ in 1 2 3; do
+  [ "$(served_by "$RR" "$AUTH_BASE_URL" -H "Authorization: Bearer $KEY")" = "$LITE" ]
+done
+```
+
+### S250 LiteLLM virtual keys import by hash and keep working
+
+Runs on the auth gateway. The key is imported by the SHA-256 of its `sk-...`
+token, so the gateway never sees the token until a client sends it.
+
+```bash
+TOKEN="sk-qa$(openssl rand -hex 16)"
+HASH=$(printf %s "$TOKEN" | shasum -a 256 | cut -d' ' -f1)
+GROUP="qa-litellm-group-$QA_SUFFIX"
+IMPORT_PATH="/qa/litellm/$QA_SUFFIX"
+F="$QA_RUN_DIR/s250.import.json"
+ISSUED_FILE="$QA_RUN_DIR/s250.issued.json"
+
+cleanup_s250() {
+  curl -sS -o /dev/null -X DELETE "$AUTH_BASE_URL/admin/virtual-models" -H "$ADMIN_AUTH_HEADER" \
+    -H 'Content-Type: application/json' -d "{\"source\":\"$GROUP\"}" || true
+  for ID in $(jq -r '.id // empty' "$QA_RUN_DIR/s250.created.json" "$ISSUED_FILE" 2>/dev/null); do
+    curl -sS -o /dev/null -X POST "$AUTH_BASE_URL/admin/auth-keys/$ID/deactivate" -H "$ADMIN_AUTH_HEADER" || true
+  done
+}
+trap cleanup_s250 EXIT
+import_key() {
+  curl -sS -o "$F" -w '%{http_code}' -X POST "$AUTH_BASE_URL/admin/auth-keys/import" "${@:2}" \
+    -H 'Content-Type: application/json' -d "$1"
+}
+# A fresh prompt per call, so the auth gateway's exact cache never answers
+# (a cache hit records no usage entry).
+chat_as() {
+  curl -sS -o "$QA_RUN_DIR/s250.chat.json" -w '%{http_code}' "$AUTH_BASE_URL/v1/chat/completions" "${@:3}" \
+    -H "Authorization: Bearer $1" -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$2\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly OK ($(openssl rand -hex 6))\"}],\"max_tokens\":64}"
+}
+
+# A LiteLLM model group is a virtual model; the allowlist stores what it routes to.
+curl -fsS -X PUT "$AUTH_BASE_URL/admin/virtual-models" -H "$ADMIN_AUTH_HEADER" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$GROUP\",\"strategy\":\"round_robin\",\"targets\":[{\"model\":\"openai/gpt-6-luna\"},{\"model\":\"gemini/gemini-3.5-flash-lite\"}]}" >/dev/null
+CODE=$(import_key "{\"name\":\"qa-litellm-$QA_SUFFIX\",\"imported_from\":\"litellm\",\"secret_hash\":\"$HASH\",\"redacted_value\":\"sk-...${TOKEN: -4}\",\"user_path\":\"$IMPORT_PATH\",\"allowed_models\":[\"$GROUP\"]}" -H "$ADMIN_AUTH_HEADER")
+assert_http_status 201 "$CODE" "$F"
+cp "$F" "$QA_RUN_DIR/s250.created.json"
+jq -e --arg p "$IMPORT_PATH" --arg r "sk-...${TOKEN: -4}" '
+  .imported_from == "litellm" and .active == true and .user_path == $p and .redacted_value == $r
+  and (.allowed_models | sort) == ["gemini/gemini-3.5-flash-lite", "openai/gpt-6-luna"]
+  and (has("value") | not)
+' "$F" >/dev/null
+KEY_ID=$(jq -r '.id' "$F")
+
+RID="qa-litellm-import-$QA_SUFFIX"
+CODE=$(chat_as "$TOKEN" "$GROUP" -H "X-Request-ID: $RID")
+assert_http_status 200 "$CODE" "$QA_RUN_DIR/s250.chat.json"
+wait_log_entry "$AUTH_BASE_URL" usage "$RID" "$QA_RUN_DIR/s250.usage.json" -H "$ADMIN_AUTH_HEADER"
+jq -e --arg rid "$RID" --arg p "$IMPORT_PATH" 'any(.entries[]; .request_id == $rid and .user_path == $p)' "$QA_RUN_DIR/s250.usage.json" >/dev/null
+# Anthropic SDKs send the same token as x-api-key.
+curl -fsS "$AUTH_BASE_URL/v1/messages" -H "x-api-key: $TOKEN" -H 'Content-Type: application/json' -H 'anthropic-version: 2023-06-01' \
+  -d '{"model":"gpt-6-luna","max_tokens":64,"messages":[{"role":"user","content":"Reply with exactly OK"}]}' \
+  | jq -e '.type == "message"' >/dev/null
+CODE=$(chat_as "$TOKEN" "claude-haiku-4-5-20251001")
+assert_http_status 400 "$CODE" "$QA_RUN_DIR/s250.chat.json"
+jq -e '.error.code == "model_access_denied"' "$QA_RUN_DIR/s250.chat.json" >/dev/null
+CODE=$(chat_as "sk-qa-never-imported-$QA_SUFFIX" "gpt-6-luna")
+assert_http_status 401 "$CODE" "$QA_RUN_DIR/s250.chat.json"
+
+# Importing the same token again updates that key.
+CODE=$(import_key "{\"name\":\"qa-litellm-renamed-$QA_SUFFIX\",\"imported_from\":\"litellm\",\"secret_hash\":\"$HASH\",\"user_path\":\"$IMPORT_PATH/v2\",\"labels\":[\"team:qa\"]}" -H "$ADMIN_AUTH_HEADER")
+assert_http_status 200 "$CODE" "$F"
+jq -e --arg id "$KEY_ID" --arg p "$IMPORT_PATH/v2" '.id == $id and .user_path == $p and .labels == ["team:qa"] and .active == true' "$F" >/dev/null
+
+# A key LiteLLM blocked is deactivated; one never imported is not created.
+CODE=$(import_key "{\"name\":\"ignored\",\"imported_from\":\"litellm\",\"secret_hash\":\"$HASH\",\"enabled\":false}" -H "$ADMIN_AUTH_HEADER")
+assert_http_status 200 "$CODE" "$F"
+jq -e --arg id "$KEY_ID" '.id == $id and .active == false and .name == "qa-litellm-renamed-'"$QA_SUFFIX"'"' "$F" >/dev/null
+CODE=$(chat_as "$TOKEN" "gpt-6-luna")
+assert_http_status 401 "$CODE" "$QA_RUN_DIR/s250.chat.json"
+CODE=$(import_key "{\"name\":\"qa-never\",\"imported_from\":\"litellm\",\"secret_hash\":\"$(openssl rand -hex 32)\",\"enabled\":false}" -H "$ADMIN_AUTH_HEADER")
+assert_http_status 204 "$CODE" "$F"
+
+# A hash that belongs to a GoModel-issued key (the secret after sk_gom_) conflicts.
+curl -fsS -X POST "$AUTH_BASE_URL/admin/auth-keys" -H "$ADMIN_AUTH_HEADER" -H 'Content-Type: application/json' \
+  -d "{\"name\":\"qa-litellm-native-$QA_SUFFIX\"}" > "$ISSUED_FILE"
+chmod 600 "$ISSUED_FILE"
+ISSUED=$(jq -er '.value' "$ISSUED_FILE")
+ISSUED_HASH=$(printf %s "${ISSUED#sk_gom_}" | shasum -a 256 | cut -d' ' -f1)
+CODE=$(import_key "{\"name\":\"qa-dup\",\"imported_from\":\"litellm\",\"secret_hash\":\"$ISSUED_HASH\"}" -H "$ADMIN_AUTH_HEADER")
+assert_http_status 409 "$CODE" "$F"
+jq -e '.error.code == "auth_key_exists"' "$F" >/dev/null
+
+for BAD in '{"name":"qa-bad","imported_from":"litellm","secret_hash":"xyz"}' \
+           "{\"name\":\"qa-bad\",\"secret_hash\":\"$(openssl rand -hex 32)\"}"; do
+  CODE=$(import_key "$BAD" -H "$ADMIN_AUTH_HEADER")
+  assert_http_status 400 "$CODE" "$F"
+done
+# Import needs global admin access, not just a valid key.
+CODE=$(import_key "{\"name\":\"qa-x\",\"imported_from\":\"litellm\",\"secret_hash\":\"$(openssl rand -hex 32)\"}" -H "Authorization: Bearer $ISSUED")
+assert_http_status 403 "$CODE" "$F"
+CODE=$(import_key "{\"name\":\"qa-x\",\"imported_from\":\"litellm\",\"secret_hash\":\"$(openssl rand -hex 32)\"}")
+assert_http_status 401 "$CODE" "$F"
+```
+
+### S251 `gomodel migrate litellm` converts a config and imports keys, teams, and budgets
+
+Converts a LiteLLM config, boots a scratch gateway (port 18085) with the
+result, then imports from a minimal LiteLLM database created in the local
+PostgreSQL: a team with a budget and a rate limit, one active team key, and
+one blocked key. A second run brings GoModel up to date and deactivates a
+key LiteLLM has since blocked.
+
+```bash
+DIR="$QA_RUN_DIR/s251"
+GW="http://localhost:18085"
+LDB="litellm_qa_${QA_SUFFIX//[^[:alnum:]]/_}"
+PG_ADMIN_URL="postgres://gomodel:gomodel@localhost:5432/postgres?sslmode=disable"
+LITELLM_DB_URL="postgres://gomodel:gomodel@localhost:5432/$LDB?sslmode=disable"
+MASTER="sk-qa-litellm-master-$QA_SUFFIX"
+rm -rf "$DIR"
+mkdir -p "$DIR"
+cleanup_s251() {
+  scratch_gateway_stop "$DIR/out"
+  psql "$PG_ADMIN_URL" -qc "DROP DATABASE IF EXISTS $LDB" >/dev/null 2>&1 || true
+}
+trap cleanup_s251 EXIT
+
+cat > "$DIR/litellm.yaml" <<'EOF'
+model_list:
+  - model_name: qa-luna
+    litellm_params:
+      model: openai/gpt-6-luna
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: qa-fast
+    litellm_params:
+      model: gemini/gemini-3.5-flash-lite
+      api_key: os.environ/GEMINI_API_KEY
+  - model_name: qa-fast
+    litellm_params:
+      model: openai/gpt-6-luna
+      api_key: os.environ/OPENAI_API_KEY
+router_settings:
+  routing_strategy: simple-shuffle
+  num_retries: 2
+litellm_settings:
+  fallbacks:
+    - qa-luna: [qa-fast]
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+EOF
+
+# A dry run writes nothing.
+(cd "$DIR" && "$GOMODEL_BIN" migrate litellm --skip-database litellm.yaml) > "$DIR/dry-run.txt"
+grep -q 'virtual_models:' "$DIR/dry-run.txt"
+[ ! -e "$DIR/out" ]
+
+(cd "$DIR" && "$GOMODEL_BIN" migrate litellm --skip-database --out out litellm.yaml)
+[ -s "$DIR/out/config.yaml" ]
+[ -s "$DIR/out/MIGRATION_REPORT.md" ]
+[ ! -e "$DIR/out/.env" ]
+grep -qF 'master_key: ${LITELLM_MASTER_KEY}' "$DIR/out/config.yaml"
+grep -qF '| `qa-luna` | failover | `openai/gpt-6-luna`, `qa-fast` |' "$DIR/out/MIGRATION_REPORT.md"
+grep -qF '| `qa-fast` | round_robin |' "$DIR/out/MIGRATION_REPORT.md"
+if (cd "$DIR" && "$GOMODEL_BIN" migrate litellm --skip-database --out out litellm.yaml) 2>"$DIR/overwrite.err"; then
+  echo "error: --out overwrote existing files without --force" >&2
+  exit 1
+fi
+(cd "$DIR" && "$GOMODEL_BIN" migrate litellm --skip-database --out out --force litellm.yaml) >/dev/null
+
+# The converted config refuses to start while the master key variable is unset.
+scratch_gateway_expect_refusal "$DIR/out" 18085 OPENAI_API_KEY="$OPENAI_API_KEY" GEMINI_API_KEY="$GEMINI_API_KEY"
+grep -q 'master' "$DIR/out/refused.log"
+
+scratch_gateway_start "$DIR/out" 18085 LITELLM_MASTER_KEY="$MASTER" \
+  OPENAI_API_KEY="$OPENAI_API_KEY" GEMINI_API_KEY="$GEMINI_API_KEY"
+ADMIN=(-H "Authorization: Bearer $MASTER")
+curl -fsS "$GW/v1/models" "${ADMIN[@]}" | jq -e '[.data[].id] | sort == ["qa-fast", "qa-luna"]' >/dev/null
+curl -fsS "$GW/v1/chat/completions" "${ADMIN[@]}" -H 'Content-Type: application/json' \
+  -d '{"model":"qa-luna","messages":[{"role":"user","content":"Reply with exactly OK"}],"max_tokens":64}' \
+  | jq -e '.provider == "openai" and .model == "gpt-6-luna"' >/dev/null
+
+# A minimal LiteLLM database: only the columns the importer reads.
+TEAM_TOKEN="sk-qateam$(openssl rand -hex 12)"
+BLOCKED_TOKEN="sk-qablocked$(openssl rand -hex 12)"
+sha() { printf %s "$1" | shasum -a 256 | cut -d' ' -f1; }
+psql "$PG_ADMIN_URL" -qc "DROP DATABASE IF EXISTS $LDB" -c "CREATE DATABASE $LDB" >/dev/null
+psql "$LITELLM_DB_URL" -v ON_ERROR_STOP=1 -q <<SQL
+CREATE TABLE "LiteLLM_TeamTable" (team_id text, team_alias text, organization_id text, spend float8 DEFAULT 0,
+  models text[] DEFAULT '{}', blocked bool DEFAULT false, metadata jsonb DEFAULT '{}', created_at timestamp DEFAULT now(),
+  max_budget float8, budget_duration text, tpm_limit bigint, rpm_limit bigint, tpd_limit bigint, max_parallel_requests bigint);
+CREATE TABLE "LiteLLM_VerificationToken" (token text, key_name text, key_alias text, spend float8 DEFAULT 0, expires timestamp,
+  models text[] DEFAULT '{}', user_id text, team_id text, organization_id text, budget_id text, blocked bool,
+  metadata jsonb DEFAULT '{}', created_at timestamp DEFAULT now(),
+  max_budget float8, budget_duration text, tpm_limit bigint, rpm_limit bigint, tpd_limit bigint, max_parallel_requests bigint);
+INSERT INTO "LiteLLM_TeamTable" (team_id, team_alias, models, max_budget, budget_duration, rpm_limit, spend)
+  VALUES ('team-1', 'search', '{qa-fast,qa-luna}', 5, '30d', 100, 1.25);
+INSERT INTO "LiteLLM_VerificationToken" (token, key_name, key_alias, team_id, models, metadata)
+  VALUES ('$(sha "$TEAM_TOKEN")', 'sk-...${TEAM_TOKEN: -4}', 'bot', 'team-1', '{qa-luna}', '{"tags":["env:qa"]}');
+INSERT INTO "LiteLLM_VerificationToken" (token, key_name, key_alias, team_id, blocked)
+  VALUES ('$(sha "$BLOCKED_TOKEN")', 'sk-...${BLOCKED_TOKEN: -4}', 'old', 'team-1', true);
+SQL
+
+migrate_import() {
+  (cd "$DIR" && GOMODEL_MASTER_KEY="$MASTER" "$GOMODEL_BIN" migrate litellm --database-url "$LITELLM_DB_URL" \
+    --gomodel-url "$GW" --out "import-$1" litellm.yaml) | tee "$DIR/import-$1.txt"
+}
+migrate_import 1
+grep -qF '1 new keys, 0 keys updated, 1 model policies, 1 budgets, 1 rate limits' "$DIR/import-1.txt"
+grep -qF '`key old`: blocked in LiteLLM' "$DIR/import-1/MIGRATION_REPORT.md"
+grep -qF '$5 monthly (LiteLLM spent $1.25)' "$DIR/import-1/MIGRATION_REPORT.md"
+
+curl -fsS "$GW/admin/auth-keys" "${ADMIN[@]}" | jq -e --arg r "sk-...${TEAM_TOKEN: -4}" '
+  [.[] | select(.imported_from == "litellm")] | length == 1
+  and (.[0] | .name == "bot" and .user_path == "/search/bot" and .labels == ["env:qa"] and .redacted_value == $r and .active)
+' >/dev/null
+curl -fsS "$GW/admin/budgets" "${ADMIN[@]}" | jq -e '
+  any(.budgets[]; .user_path == "/search" and .amount == 5 and .period_label == "monthly" and .spent == 0)
+' >/dev/null
+curl -fsS "$GW/admin/rate-limits" "${ADMIN[@]}" | jq -e '
+  any(.rate_limits[]; .user_path == "/search" and .max_requests == 100 and .period_label == "minute")
+' >/dev/null
+
+# Clients keep their LiteLLM tokens and model names; usage charges the team.
+chat_token() {
+  curl -sS -o "$DIR/chat.json" -w '%{http_code}' "$GW/v1/chat/completions" -H "Authorization: Bearer $1" \
+    -H 'Content-Type: application/json' -d '{"model":"qa-luna","messages":[{"role":"user","content":"Reply with exactly OK"}],"max_tokens":64}'
+}
+CODE=$(chat_token "$TEAM_TOKEN")
+assert_http_status 200 "$CODE" "$DIR/chat.json"
+CODE=$(chat_token "$BLOCKED_TOKEN")
+assert_http_status 401 "$CODE" "$DIR/chat.json"
+for _ in $(seq 1 15); do
+  if curl -fsS "$GW/admin/budgets" "${ADMIN[@]}" | jq -e 'any(.budgets[]; .user_path == "/search" and .spent > 0)' >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+curl -fsS "$GW/admin/budgets" "${ADMIN[@]}" | jq -e 'any(.budgets[]; .user_path == "/search" and .spent > 0)' >/dev/null
+curl -fsS "$GW/admin/rate-limits" "${ADMIN[@]}" | jq -e 'any(.rate_limits[]; .user_path == "/search" and .requests_used >= 1)' >/dev/null
+
+# Re-running updates in place; blocking the key in LiteLLM deactivates it here.
+migrate_import 2
+grep -qF '0 new keys, 1 keys updated' "$DIR/import-2.txt"
+psql "$LITELLM_DB_URL" -qc "UPDATE \"LiteLLM_VerificationToken\" SET blocked = true WHERE key_alias = 'bot'" >/dev/null
+migrate_import 3
+CODE=$(chat_token "$TEAM_TOKEN")
+assert_http_status 401 "$CODE" "$DIR/chat.json"
+```
+
+### S252 Secret references resolve from files and variables and stop startup when they cannot
+
+Boots scratch gateways on port 18086. The master key and the OpenAI key are
+read from files, a `config.yaml` provider key from a variable, and `$${` stays
+a literal `${`. A reference that cannot be resolved stops startup with an
+error that names the setting and never the value.
+
+```bash
+DIR="$QA_RUN_DIR/s252"
+GW="http://localhost:18086"
+rm -rf "$DIR"
+mkdir -p "$DIR/ok/secrets" "$DIR/fail"
+trap 'scratch_gateway_stop "$DIR/ok"; scratch_gateway_stop "$DIR/literal"; rm -rf "$DIR"' EXIT
+(umask 077
+ printf '%s\n' "$OPENAI_API_KEY" > "$DIR/ok/secrets/openai"
+ printf 'qa-master-from-file-%s\n' "$QA_SUFFIX" > "$DIR/ok/secrets/master")
+cat > "$DIR/ok/config.yaml" <<'EOF'
+providers:
+  qa-gem:
+    type: gemini
+    api_key: ${env:QA_GEMINI_KEY_REF}
+    models:
+      - id: gemini-3.5-flash-lite
+EOF
+scratch_gateway_start "$DIR/ok" 18086 \
+  GOMODEL_MASTER_KEY="\${file:$DIR/ok/secrets/master}" \
+  OPENAI_API_KEY="\${file:$DIR/ok/secrets/openai}" OPENAI_MODELS=gpt-6-luna \
+  QA_GEMINI_KEY_REF="$GEMINI_API_KEY"
+MASTER="qa-master-from-file-$QA_SUFFIX"
+CODE=$(curl -sS -o "$DIR/models.json" -w '%{http_code}' "$GW/v1/models")
+assert_http_status 401 "$CODE" "$DIR/models.json"
+curl -fsS "$GW/v1/models" -H "Authorization: Bearer $MASTER" \
+  | jq -e '[.data[].id] | sort == ["openai/gpt-6-luna", "qa-gem/gemini-3.5-flash-lite"]' >/dev/null
+for MODEL in openai/gpt-6-luna qa-gem/gemini-3.5-flash-lite; do
+  curl -fsS "$GW/v1/chat/completions" -H "Authorization: Bearer $MASTER" -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly OK\"}],\"max_tokens\":64}" \
+    | jq -e '.choices[0].message.role == "assistant"' >/dev/null
+done
+scratch_gateway_stop "$DIR/ok"
+if grep -qF "$OPENAI_API_KEY" "$DIR/ok/server.log"; then
+  echo "error: the resolved OpenAI key reached the log" >&2
+  exit 1
+fi
+
+# $${ is a literal ${.
+scratch_gateway_start "$DIR/literal" 18086 GOMODEL_MASTER_KEY='qa-pa$${literal}'
+[ "$(curl -sS -o /dev/null -w '%{http_code}' "$GW/admin/auth-keys" -H 'Authorization: Bearer qa-pa${literal}')" = 200 ]
+[ "$(curl -sS -o /dev/null -w '%{http_code}' "$GW/admin/auth-keys" -H 'Authorization: Bearer qa-pa$${literal}')" = 401 ]
+scratch_gateway_stop "$DIR/literal"
+
+scratch_gateway_expect_refusal "$DIR/fail" 18086 OPENAI_API_KEY='${file:/nonexistent/qa-openai-key}'
+grep -qF 'OPENAI_API_KEY: secret reference ${file:...}: open /nonexistent/qa-openai-key' "$DIR/fail/refused.log"
+scratch_gateway_expect_refusal "$DIR/fail" 18086 GOMODEL_MASTER_KEY='${env:QA_SURELY_UNSET_VARIABLE}'
+grep -qF 'server.master_key: secret reference ${env:...}: environment variable QA_SURELY_UNSET_VARIABLE is not set' "$DIR/fail/refused.log"
+# A reference in a boolean setting is refused without echoing what it points at.
+scratch_gateway_expect_refusal "$DIR/fail" 18086 QA_SECRET_VALUE="qa-must-not-leak-$QA_SUFFIX" LOGGING_ENABLED='${env:QA_SECRET_VALUE}'
+grep -q 'LOGGING_ENABLED: secret references are supported only in string settings' "$DIR/fail/refused.log"
+if grep -q "qa-must-not-leak" "$DIR/fail/refused.log"; then
+  echo "error: the startup error echoed the referenced value" >&2
+  exit 1
+fi
+```
+
+### S253 Dashboard-managed secrets are encrypted at rest, re-encrypted, and rotated
+
+Boots scratch gateways on port 18087. A provider key saved without
+`GOMODEL_ENCRYPTION_KEY` is plaintext in SQLite until `gomodel secrets
+reencrypt` seals it; after that the gateway refuses to start without the key
+or with a wrong one. Provider keys and MCP headers saved with the key are
+sealed as `enc:v1:` and still work. Rotating the key re-wraps the data key,
+and `--rotate-data-key` re-seals every secret under a new data key.
+
+```bash
+DIR="$QA_RUN_DIR/s253"
+GW="http://localhost:18087"
+DB="$DIR/gomodel.db"
+K1=$(openssl rand -base64 32)
+K2=$(openssl rand -base64 32)
+rm -rf "$DIR"
+mkdir -p "$DIR"
+trap 'scratch_gateway_stop "$DIR"; rm -rf "$DIR"' EXIT
+
+chat_ok() {
+  curl -fsS "$GW/v1/chat/completions" -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$1\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly OK\"}],\"max_tokens\":64}" \
+    | jq -e '.choices[0].message.role == "assistant"' >/dev/null
+}
+holds() { sqlite3 "$DB" "SELECT count(*) FROM $1 WHERE instr($2, '$3') > 0"; }
+reencrypt() {
+  (cd "$DIR" && env -i PATH="$PATH" HOME="$HOME" STORAGE_TYPE=sqlite SQLITE_PATH="$DB" \
+    GOMODEL_ENCRYPTION_KEY="$1" "$GOMODEL_BIN" secrets reencrypt "${@:2}")
+}
+
+scratch_gateway_start "$DIR" 18087
+curl -fsS -X PUT "$GW/admin/provider-credentials" -H 'Content-Type: application/json' \
+  -d "{\"name\":\"qa-enc-gem\",\"type\":\"gemini\",\"api_keys\":[\"$GEMINI_API_KEY\"],\"models\":[\"gemini-3.5-flash-lite\"]}" \
+  | jq -e '.api_keys == ["***********"]' >/dev/null
+[ "$(holds provider_credentials api_keys "$GEMINI_API_KEY")" = 1 ]
+scratch_gateway_stop "$DIR"
+
+reencrypt "$K1" > "$DIR/reencrypt-1.txt"
+grep -q 'provider_credentials: 1 rows, 1 re-encrypted' "$DIR/reencrypt-1.txt"
+[ "$(holds provider_credentials api_keys "$GEMINI_API_KEY")" = 0 ]
+[ "$(holds provider_credentials api_keys 'enc:v1:1:')" = 1 ]
+
+scratch_gateway_expect_refusal "$DIR" 18087
+grep -q 'the database holds encrypted secrets but GOMODEL_ENCRYPTION_KEY is not set' "$DIR/refused.log"
+scratch_gateway_expect_refusal "$DIR" 18087 GOMODEL_ENCRYPTION_KEY="$K2"
+grep -q 'GOMODEL_ENCRYPTION_KEY does not decrypt data key' "$DIR/refused.log"
+
+scratch_gateway_start "$DIR" 18087 GOMODEL_ENCRYPTION_KEY="$K1"
+chat_ok qa-enc-gem/gemini-3.5-flash-lite
+curl -fsS -X PUT "$GW/admin/provider-credentials" -H 'Content-Type: application/json' \
+  -d "{\"name\":\"qa-enc-oai\",\"type\":\"openai\",\"api_keys\":[\"$OPENAI_API_KEY\"],\"models\":[\"gpt-6-luna\"]}" >/dev/null
+chat_ok qa-enc-oai/gpt-6-luna
+[ "$(holds provider_credentials api_keys "$OPENAI_API_KEY")" = 0 ]
+[ "$(holds provider_credentials api_keys 'enc:v1:')" = 2 ]
+if curl -fsS "$MCP_UPSTREAM_BASE/healthz" >/dev/null 2>&1; then
+  curl -fsS -X PUT "$GW/admin/mcp-servers" -H 'Content-Type: application/json' \
+    -d "{\"name\":\"qa-enc-alpha\",\"url\":\"$MCP_UPSTREAM_BASE/alpha\",\"transport\":\"http\",\"headers\":{\"X-Mock-Token\":\"$MCP_UPSTREAM_TOKEN\"}}" \
+    | jq -e '.headers["X-Mock-Token"] == "***"' >/dev/null
+  mcp_wait_status "$GW" qa-enc-alpha connected
+  [ "$(holds mcp_servers headers "$MCP_UPSTREAM_TOKEN")" = 0 ]
+  [ "$(holds mcp_servers headers 'enc:v1:')" = 1 ]
+fi
+scratch_gateway_stop "$DIR"
+
+# Key rotation re-wraps the data key; the previous key is needed only once.
+scratch_gateway_start "$DIR" 18087 GOMODEL_ENCRYPTION_KEY="$K2" GOMODEL_ENCRYPTION_KEY_PREVIOUS="$K1"
+grep -q 're-wrapped data key with the current key-encryption key' "$DIR/server.log"
+chat_ok qa-enc-oai/gpt-6-luna
+scratch_gateway_stop "$DIR"
+scratch_gateway_start "$DIR" 18087 GOMODEL_ENCRYPTION_KEY="$K2"
+chat_ok qa-enc-gem/gemini-3.5-flash-lite
+scratch_gateway_stop "$DIR"
+scratch_gateway_expect_refusal "$DIR" 18087 GOMODEL_ENCRYPTION_KEY="$K1"
+
+reencrypt "$K2" --rotate-data-key > "$DIR/reencrypt-2.txt"
+grep -q 'provider_credentials: 2 rows, 2 re-encrypted' "$DIR/reencrypt-2.txt"
+grep -q 'active data key: 2' "$DIR/reencrypt-2.txt"
+[ "$(holds provider_credentials api_keys 'enc:v1:2:')" = 2 ]
+scratch_gateway_start "$DIR" 18087 GOMODEL_ENCRYPTION_KEY="$K2"
+chat_ok qa-enc-oai/gpt-6-luna
+if curl -fsS "$MCP_UPSTREAM_BASE/healthz" >/dev/null 2>&1; then
+  mcp_wait_status "$GW" qa-enc-alpha connected
+fi
+```
+
+### S254 Virtual MCP servers serve a narrowed, namespaced subset at `/mcp/{name}`
+
+Boots a scratch gateway on port 18088 with the mock MCP upstreams declared in
+`config.yaml` and two virtual servers, one from `config.yaml` (with an unknown
+member) and one from `MCP_VIRTUAL_SERVERS` (search discovery). Members keep
+their own `user_paths`, `X-MCP-Servers` narrows further, a dashboard server
+cannot take a virtual name, and a virtual server named after a declared
+server stops startup.
+
+```bash
+if ! curl -fsS "$MCP_UPSTREAM_BASE/healthz" >/dev/null 2>&1; then
+  echo "SKIPPED: mock MCP upstream is not running on $MCP_UPSTREAM_BASE"
+  exit 0
+fi
+DIR="$QA_RUN_DIR/s254"
+GW="http://localhost:18088"
+rm -rf "$DIR"
+mkdir -p "$DIR"
+trap 'scratch_gateway_stop "$DIR"' EXIT
+cat > "$DIR/config.yaml" <<EOF
+mcp:
+  servers:
+    alpha:
+      url: $MCP_UPSTREAM_BASE/alpha
+      headers:
+        X-Mock-Token: $MCP_UPSTREAM_TOKEN
+    beta:
+      url: $MCP_UPSTREAM_BASE/beta
+      user_paths: ["/qa/vmcp/eng"]
+  virtual_servers:
+    qa-tools:
+      description: QA alpha tools
+      servers: [alpha, ghost]
+EOF
+scratch_gateway_start "$DIR" 18088 MCP_VIRTUAL_SERVERS='{"qa-all":{"servers":["alpha","beta"],"tool_discovery":"search"}}'
+
+curl -fsS "$GW/admin/mcp-virtual-servers" | jq -e '
+  (map(.name) | sort) == ["qa-all", "qa-tools"]
+  and any(.[]; .name == "qa-tools" and .description == "QA alpha tools" and .servers == ["alpha", "ghost"]
+    and .missing_servers == ["ghost"] and .tool_discovery == "off")
+  and any(.[]; .name == "qa-all" and .tool_discovery == "search" and ((.missing_servers // []) | length == 0))
+' >/dev/null
+
+# tools URL [curl args...] -> sorted tool names on a fresh session
+tools() {
+  local url="$1" sid
+  shift
+  sid=$(mcp_initialize "$url" "$DIR/init.headers" "$DIR/init.raw" "$@")
+  [ -n "$sid" ]
+  mcp_initialized "$url" "$sid" "$@"
+  mcp_post "$url" "$sid" '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' "$@" | jq -c '[.result.tools[]?.name] | sort'
+}
+[ "$(tools "$GW/mcp/qa-tools")" = '["alpha_add","alpha_echo"]' ]
+[ "$(tools "$GW/mcp/qa-all")" = '["call_tool","search_tools"]' ]
+[ "$(tools "$GW/mcp/qa-all" -H 'X-MCP-Tool-Discovery: off')" = '["alpha_add","alpha_echo"]' ]
+ENG=(-H 'X-MCP-Tool-Discovery: off' -H 'X-GoModel-User-Path: /qa/vmcp/eng')
+[ "$(tools "$GW/mcp/qa-all" "${ENG[@]}")" = '["alpha_add","alpha_echo","beta_fetch","beta_search"]' ]
+[ "$(tools "$GW/mcp/qa-all" "${ENG[@]}" -H 'X-MCP-Servers: beta')" = '["beta_fetch","beta_search"]' ]
+[ "$(tools "$GW/mcp/qa-tools" -H 'X-MCP-Servers: beta')" = '[]' ]
+
+SID=$(mcp_initialize "$GW/mcp/qa-tools" "$DIR/init.headers" "$DIR/init.raw")
+mcp_initialized "$GW/mcp/qa-tools" "$SID"
+mcp_post "$GW/mcp/qa-tools" "$SID" '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"alpha_echo","arguments":{"q":"qa"}}}' \
+  | jq -e '.result.content[0].text == "echo:{\"q\":\"qa\"}"' >/dev/null
+mcp_post "$GW/mcp/qa-tools" "$SID" '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"beta_search","arguments":{}}}' \
+  | jq -e '.result == null and (.error.message | contains("unknown tool"))' >/dev/null
+
+CODE=$(curl -sS -o "$DIR/put.json" -w '%{http_code}' -X PUT "$GW/admin/mcp-servers" -H 'Content-Type: application/json' \
+  -d "{\"name\":\"qa-tools\",\"url\":\"$MCP_UPSTREAM_BASE/beta\",\"transport\":\"http\"}")
+assert_http_status 400 "$CODE" "$DIR/put.json"
+jq -e '.error.message | contains("is used by virtual MCP server")' "$DIR/put.json" >/dev/null
+CODE=$(curl -sS -o /dev/null -w '%{http_code}' "$GW/mcp/qa-nothing-$QA_SUFFIX" -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"qa","version":"1"}}}')
+[ "$CODE" = 404 ]
+scratch_gateway_stop "$DIR"
+
+scratch_gateway_expect_refusal "$DIR" 18088 MCP_VIRTUAL_SERVERS='{"alpha":{"servers":["beta"]}}'
+grep -q 'mcp.virtual_servers' "$DIR/refused.log"
+```
+
+### S255 ChatGPT subscription forwards `prompt_cache_key` and answers non-streaming calls
+
+Boots a scratch gateway on port 18089 with `CHATGPT_API_KEY` read through a
+`${file:...}` reference from the local Codex sign-in, and calls
+`gpt-5.6-luna`. With no session headers, the client's `prompt_cache_key` is
+what keeps warm turns on the backend's prompt cache. Spends a little
+ChatGPT subscription quota; prints `SKIPPED:` without a valid Codex token.
+
+```bash
+CODEX_AUTH="${CODEX_HOME:-$HOME/.codex}/auth.json"
+if [ ! -r "$CODEX_AUTH" ] || ! jq -e '.tokens.access_token | type == "string"' "$CODEX_AUTH" >/dev/null 2>&1; then
+  echo "SKIPPED: no Codex sign-in at $CODEX_AUTH (run codex login)"
+  exit 0
+fi
+EXP=$(jq -r '.tokens.access_token | split(".")[1] | gsub("-"; "+") | gsub("_"; "/") | . + ("=" * ((4 - length % 4) % 4)) | @base64d | fromjson | .exp // 0' "$CODEX_AUTH")
+if [ "$EXP" -le "$(($(date +%s) + 300))" ]; then
+  echo "SKIPPED: the Codex access token has expired (run codex to refresh it)"
+  exit 0
+fi
+DIR="$QA_RUN_DIR/s255"
+GW="http://localhost:18089"
+rm -rf "$DIR"
+mkdir -p "$DIR"
+trap 'scratch_gateway_stop "$DIR"; rm -f "$DIR/chatgpt.token"' EXIT
+(umask 077; jq -r '.tokens.access_token' "$CODEX_AUTH" > "$DIR/chatgpt.token")
+scratch_gateway_start "$DIR" 18089 CHATGPT_API_KEY="\${file:$DIR/chatgpt.token}" CHATGPT_MODELS=gpt-5.6-luna
+curl -fsS "$GW/v1/models" | jq -e '[.data[].id] == ["chatgpt/gpt-5.6-luna"]' >/dev/null
+
+# Streaming is what Codex sends.
+curl -fsS -N "$GW/v1/responses" -H 'Content-Type: application/json' \
+  -d '{"model":"chatgpt/gpt-5.6-luna","input":"Reply with exactly QA_CHATGPT_OK","stream":true}' > "$DIR/stream.sse"
+sed -n 's/^data: //p' "$DIR/stream.sse" | grep -v '^\[DONE\]$' | jq -se '
+  any(.[]; .type == "response.output_item.done" and (.item.content[]?.text // "" | contains("QA_CHATGPT_OK")))
+  and any(.[]; .type == "response.completed")
+' >/dev/null
+
+# A ~2k-token prefix with one prompt_cache_key: warm turns read the cache.
+INSTRUCTIONS=$(for i in $(seq 1 160); do printf 'Rule %s: answer tersely and never mention rule numbers. ' "$i"; done)
+CACHE_KEY="qa-pck-$QA_SUFFIX-$(openssl rand -hex 4)"
+CACHED=0
+for TURN in 1 2 3 4; do
+  jq -n --arg i "$INSTRUCTIONS" --arg k "$CACHE_KEY" '{
+    model: "chatgpt/gpt-5.6-luna", instructions: $i, prompt_cache_key: $k,
+    input: "Reply with exactly QA_CHATGPT_OK"
+  }' | curl -fsS "$GW/v1/responses" -H 'Content-Type: application/json' -d @- > "$DIR/turn-$TURN.json"
+  jq -e '.status == "completed" and .usage.input_tokens > 1500' "$DIR/turn-$TURN.json" >/dev/null
+  CACHED=$(jq '.usage.input_tokens_details.cached_tokens // 0' "$DIR/turn-$TURN.json")
+  echo "turn $TURN cached_tokens=$CACHED"
+  if [ "$TURN" -gt 1 ] && [ "$CACHED" -gt 0 ]; then
+    break
+  fi
+done
+[ "$CACHED" -gt 0 ]
+
+# A non-streaming call returns the answer, not just the usage: the backend's
+# response.completed event carries an empty output list.
+jq -e '[.output[]? | select(.type == "message") | .content[]?.text] | join("") | contains("QA_CHATGPT_OK")' \
+  "$DIR/turn-1.json" >/dev/null
+```
+
+## 39. Anthropic server-side tool search on translated models
+
+A conversation that ran Anthropic's server-side tool search on Claude can
+continue on another model through `/v1/messages`: the tool search tool is
+dropped and its history (`server_tool_use`, `tool_search_tool_result`)
+degrades to text.
+
+### S256 A Claude tool-search turn continues on OpenAI and Gemini
+
+Claude runs the real regex and BM25 searches over a deferred tool. Its turn is
+replayed unchanged, with the tool result, on `gpt-6-luna` and
+`gemini-3.5-flash-lite`, non-streaming, streaming, and through `count_tokens`.
+A web search `server_tool_use` stays rejected.
+
+```bash
+H=(-H 'Content-Type: application/json' -H 'anthropic-version: 2023-06-01')
+for KIND in regex bm25; do
+  BODY=$(jq -nc --arg k "$KIND" '{
+    model: "claude-haiku-4-5-20251001", max_tokens: 400,
+    tools: [
+      {type: ("tool_search_tool_" + $k + "_20251119"), name: ("tool_search_tool_" + $k)},
+      {name: "get_weather", description: "Get the current weather for a city",
+       input_schema: {type: "object", properties: {city: {type: "string"}}, required: ["city"]},
+       defer_loading: true}
+    ],
+    messages: [{role: "user", content: "What is the weather in Paris? Use your tools."}]}')
+
+  # Claude sometimes answers without calling the tool it found; retry until
+  # the turn has both the search and the tool call to replay.
+  F="$QA_RUN_DIR/s256.$KIND.claude.json"
+  for _ in 1 2 3 4; do
+    curl -fsS "$BASE_URL/v1/messages" "${H[@]}" -d "$BODY" > "$F"
+    if jq -e 'any(.content[]; .type == "server_tool_use") and any(.content[]; .type == "tool_use")' "$F" >/dev/null; then
+      break
+    fi
+  done
+  jq -e 'any(.content[]; .type == "tool_search_tool_result") and any(.content[]; .type == "tool_use" and .name == "get_weather")' "$F" >/dev/null
+
+  NEXT=$(jq -c --argjson body "$BODY" '
+    ([.content[] | select(.type == "tool_use")][0].id) as $id
+    | $body + {messages: ($body.messages + [
+        {role: "assistant", content: .content},
+        {role: "user", content: [{type: "tool_result", tool_use_id: $id, content: "18C and sunny"}]}])}' "$F")
+
+  for MODEL in gpt-6-luna gemini-3.5-flash-lite; do
+    OUT="$QA_RUN_DIR/s256.$KIND.$MODEL.json"
+    CODE=$(curl -sS -o "$OUT" -w '%{http_code}' "$BASE_URL/v1/messages" "${H[@]}" -d "$(jq -c --arg m "$MODEL" '.model = $m' <<<"$NEXT")")
+    assert_http_status 200 "$CODE" "$OUT"
+    jq -e '.type == "message" and ([.content[] | select(.type == "text") | .text] | join(" ") | test("18"))' "$OUT" >/dev/null
+
+    CODE=$(curl -sS -o "$OUT.sse" -w '%{http_code}' "$BASE_URL/v1/messages" "${H[@]}" -d "$(jq -c --arg m "$MODEL" '.model = $m | .stream = true' <<<"$NEXT")")
+    assert_http_status 200 "$CODE" "$OUT.sse"
+    grep -q '^event: message_stop' "$OUT.sse"
+
+    CODE=$(curl -sS -o "$OUT.count" -w '%{http_code}' "$BASE_URL/v1/messages/count_tokens" "${H[@]}" -d "$(jq -c --arg m "$MODEL" '.model = $m | del(.max_tokens)' <<<"$NEXT")")
+    assert_http_status 200 "$CODE" "$OUT.count"
+    jq -e '.input_tokens > 0' "$OUT.count" >/dev/null
+  done
+done
+
+OUT="$QA_RUN_DIR/s256.web-search.json"
+CODE=$(curl -sS -o "$OUT" -w '%{http_code}' "$BASE_URL/v1/messages" "${H[@]}" -d '{
+  "model":"gpt-6-luna","max_tokens":20,
+  "messages":[
+    {"role":"user","content":"search the web"},
+    {"role":"assistant","content":[{"type":"server_tool_use","id":"srvtoolu_qa","name":"web_search","input":{"query":"q"}},{"type":"text","text":"found"}]},
+    {"role":"user","content":"thanks"}]}')
+assert_http_status 400 "$CODE" "$OUT"
+jq -e '.type == "error" and (.error.message | contains("server_tool_use"))' "$OUT" >/dev/null
+```
+
+## 40. OpenAI Decisions API
+
+`POST /v1/decisions` answers OpenAI's Decisions API: natively on `openai`, and
+on `jev` providers (and OpenRouter's decision models) by translating to System
+One and back. The `jev` scenarios run against the mockjev upstreams from
+section 35. Its answers are translated, so they carry no `mock` echo; the mock's
+`GET /<prefix>/v1/_last` returns the last System One request it received
+instead. The mock providers are not at `https://api.typesafe.ai`, so the
+gateway treats every one of them as a Kev server that reads text only.
+
+### S257 `/v1/decisions` translates to System One on Jev and back
+
+Question and option order survive translation, an unnamed question gets a
+generated key and comes back as `name: null`, a boolean choice comes back as a
+boolean, OpenAI-only members are dropped, and usage has the Responses shape.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+RID="qa-dec-jev-$QA_SUFFIX"
+F="$QA_RUN_DIR/s257.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/decisions" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $RID" -d '{
+  "model":"jev/jev-latest",
+  "input":[{"role":"user","content":[{"type":"input_text","text":"Shoes arrived late."},{"type":"input_text","text":"I see two charges."}]}],
+  "questions":[
+    {"type":"choice","name":"zz_department","instructions":"Which team?","choices":[{"value":"shipping"},{"value":"billing","description":"Charges"},{"value":"other"}]},
+    {"type":"predicate","name":"aa_escalate","instructions":"Urgent?"},
+    {"type":"choice","name":"is_refund","instructions":"Refund?","choices":[{"value":true},{"value":false}]},
+    {"type":"score","instructions":"How frustrated?","levels":[{"label":"Calm"},{"label":"Angry","description":"Threats to leave"}]}],
+  "prompt_cache_key":"qa","safety_identifier":"qa-user"}')
+assert_http_status 200 "$CODE" "$F"
+jq -c '{model, answers: [.answers[] | {name, type, choice, probability, score}], usage}' "$F"
+jq -e '
+  .model == "jev-1.13.0"
+  and ([.answers[].name] == ["zz_department","aa_escalate","is_refund",null])
+  and ([.answers[].type] == ["choice","predicate","choice","score"])
+  and ([.answers[0].probabilities[].value] == ["shipping","billing","other"])
+  and (.answers[2].choice | type == "boolean")
+  and ([.answers[3].probabilities[].label] == ["Calm","Angry"])
+  and .usage.total_tokens == (.usage.input_tokens + .usage.output_tokens)
+  and .usage.output_tokens_details.reasoning_tokens == 0
+' "$F" >/dev/null
+
+LAST="$QA_RUN_DIR/s257.last.json"
+curl -fsS "$JEV_MOCK_BASE/jev/v1/_last" > "$LAST"
+jq -c '.body' "$LAST"
+jq -e --arg rid "$RID" '
+  .request_id == $rid
+  and (.body.questions | keys_unsorted) == ["zz_department","aa_escalate","is_refund","question_4"]
+  and (.body.questions.zz_department.criteria | keys_unsorted) == ["shipping","billing","other"]
+  and .body.questions.aa_escalate.type == "noul"
+  and .body.state == "Shoes arrived late.\n\nI see two charges."
+  and (.body | has("prompt_cache_key") | not) and (.body | has("safety_identifier") | not)
+' "$LAST" >/dev/null
+```
+
+### S258 Images are refused on Kev and routed to a target that reads them
+
+A text-only Kev target refuses an image request, a `jev` target refuses an
+image link, and a failover chain whose first target is Kev sends text to Kev
+and images to OpenAI.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+CHAIN="qa-dec-images-$QA_SUFFIX"
+cleanup_s258() {
+  curl -sS -o /dev/null -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+    -d "{\"source\":\"$CHAIN\"}" || true
+}
+trap cleanup_s258 EXIT
+
+PNG="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+image_body() {
+  jq -nc --arg model "$1" --arg url "$2" '{model: $model,
+    input: [{role: "user", content: [{type: "input_text", text: "Is the box damaged?"}, {type: "input_image", image_url: $url}]}],
+    questions: [{type: "predicate", name: "damaged", instructions: "Is there visible damage?"}]}'
+}
+
+F="$QA_RUN_DIR/s258.kev.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/decisions" -H 'Content-Type: application/json' \
+  -d "$(image_body jev-kev/kev-latest "$PNG")")
+assert_http_status 400 "$CODE" "$F"
+jq -e '.error.type == "invalid_request_error" and (.error.message | contains("does not read images"))' "$F" >/dev/null
+
+F="$QA_RUN_DIR/s258.link.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/decisions" -H 'Content-Type: application/json' \
+  -d "$(image_body jev/jev-latest https://example.com/box.png)")
+assert_http_status 400 "$CODE" "$F"
+jq -e '.error.message | contains("not a link")' "$F" >/dev/null
+
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$CHAIN\",\"strategy\":\"failover\",\"targets\":[{\"model\":\"jev-kev/kev-latest\"},{\"model\":\"openai/gpt-6-luna\"}]}" >/dev/null
+
+F="$QA_RUN_DIR/s258.chain-text.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/decisions" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$CHAIN\",\"input\":\"text only\",\"questions\":[{\"type\":\"predicate\",\"name\":\"damaged\",\"instructions\":\"Damaged?\"}]}")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.model == "kev-4b-e2e" and .answers[0].type == "predicate"' "$F" >/dev/null
+
+F="$QA_RUN_DIR/s258.chain-image.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/decisions" -H 'Content-Type: application/json' \
+  -d "$(image_body "$CHAIN" "$PNG")")
+assert_http_status 200 "$CODE" "$F"
+jq -c '{model, answers}' "$F"
+jq -e '(.model | startswith("gpt-6-luna")) and (.answers[0].type | IN("predicate","refusal"))' "$F" >/dev/null
+```
+
+### S259 OpenAI answers Decisions natively and is costed for input only
+
+The body reaches OpenAI as sent, text and an inline image included. Usage on
+`/v1/decisions` is costed for input tokens only, as OpenAI bills the API.
+
+```bash
+RID="qa-dec-openai-$QA_SUFFIX"
+PNG="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+F="$QA_RUN_DIR/s259.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/decisions" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $RID" -d "$(jq -nc --arg url "$PNG" '{model: "openai/gpt-6-luna",
+    input: [{role: "user", content: [{type: "input_text", text: "I was charged twice. Here is the receipt."}, {type: "input_image", image_url: $url}]}],
+    questions: [
+      {type: "predicate", name: "billing", instructions: "Is this about billing?"},
+      {type: "choice", name: "team", instructions: "Which team?", choices: [{value: "billing"}, {value: "shipping"}, {value: "other"}]},
+      {type: "score", name: "urgency", instructions: "How urgent?", levels: [{label: "Low"}, {label: "Medium"}, {label: "High"}]}]}')")
+assert_http_status 200 "$CODE" "$F"
+jq -c '{model, answers: [.answers[] | {name, type}], usage}' "$F"
+jq -e '
+  (.model | startswith("gpt-6-luna"))
+  and ([.answers[].name] == ["billing","team","urgency"])
+  and all(.answers[]; .type | IN("predicate","choice","score","refusal"))
+  and .usage.input_tokens > 0
+' "$F" >/dev/null
+
+USAGE_FILE="$QA_RUN_DIR/s259.usage.json"
+wait_log_entry "$BASE_URL" usage "$RID" "$USAGE_FILE"
+jq -c --arg rid "$RID" '.entries[] | select(.request_id == $rid) | {endpoint, model, input_tokens, output_tokens, input_cost, output_cost}' "$USAGE_FILE"
+jq -e --arg rid "$RID" '
+  any(.entries[]; .request_id == $rid and .endpoint == "/v1/decisions"
+    and ((.output_cost // 0) == 0) and ((.input_cost // 0) >= 0))
+' "$USAGE_FILE" >/dev/null
+```
+
+### S260 OpenRouter's chat models do not answer Decisions
+
+OpenRouter answers Decisions only with its System One decision models; a chat
+model is refused with the reason. The release matrix lists only OpenRouter's
+free models, which hold no decision model, so only the refusal is checked.
+
+```bash
+OPENROUTER_MODEL=$(curl -fsS "$BASE_URL/v1/models" | jq -r '[.data[] | select((.id | startswith("openrouter/")) and ((.metadata.modes // []) | index("chat")))][0].id // empty')
+if [ -z "$OPENROUTER_MODEL" ]; then
+  echo "SKIPPED: no OpenRouter chat model is listed"
+  exit 0
+fi
+F="$QA_RUN_DIR/s260.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/decisions" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$OPENROUTER_MODEL\",\"input\":\"x\",\"questions\":[{\"type\":\"predicate\",\"instructions\":\"?\"}]}")
+assert_http_status 400 "$CODE" "$F"
+jq -e '.error.message | contains("not a System One model")' "$F" >/dev/null
+```
+
+### S261 `/v1/systemone` accepts TypeSafe's multipart image form
+
+The TypeSafe SDKs send images as `multipart/form-data`: the JSON request as the
+`request` part and each image as a file part an asset names. The upstream
+receives one JSON request with the image inlined as `data_base64`.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+IMG="$QA_RUN_DIR/s261.png"
+printf '\211PNG\r\n\032\n\000\000\000\rIHDRqa-e2e' > "$IMG"
+REF="ref-door-$QA_SUFFIX"
+F="$QA_RUN_DIR/s261.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone" \
+  -H 'TypeSafe-Danger-Zone-Images: true' \
+  -F "request={\"model\":\"jev/jev-latest\",\"state\":{\"door\":\"$REF\"},\"assets\":{\"$REF\":{\"type\":\"image\",\"part\":\"door-photo\"}},\"questions\":$QA_SYSTEMONE_CHOICE};type=application/json" \
+  -F "door-photo=@$IMG;type=image/png")
+assert_http_status 200 "$CODE" "$F"
+jq -e --arg ref "$REF" '.mock.received_state.door == $ref and .mock.extra.assets[$ref].format == "png"' "$F" >/dev/null
+
+LAST="$QA_RUN_DIR/s261.last.json"
+curl -fsS "$JEV_MOCK_BASE/jev/v1/_last" > "$LAST"
+WANT=$(base64 < "$IMG" | tr -d '\n')
+jq -e --arg ref "$REF" --arg want "$WANT" '
+  .content_type == "application/json" and .images == "true"
+  and .body.assets[$ref].data_base64 == $want
+  and (.body.assets[$ref] | has("part") | not)
+' "$LAST" >/dev/null
+
+# A form TypeSafe would reject is rejected before routing.
+F="$QA_RUN_DIR/s261.unused.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone" \
+  -F "request={\"model\":\"jev/jev-latest\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE};type=application/json" \
+  -F "stray=@$IMG;type=image/png")
+assert_http_status 400 "$CODE" "$F"
+jq -e '.error.message | contains("not used by any asset")' "$F" >/dev/null
+```
+
+### S262 Compressed request bodies are decoded
+
+The TypeSafe SDKs zstd-compress bodies of 1 KiB or more. gzip and zstd bodies
+are decoded before routing; an unsupported encoding returns `415`.
+
+```bash
+systemone_require_mock "$BASE_URL"
+
+BODY="{\"model\":\"jev-kev/kev-latest\",\"state\":\"$(printf 'Charged twice. %.0s' $(seq 1 120))\",\"questions\":$QA_SYSTEMONE_CHOICE}"
+F="$QA_RUN_DIR/s262.gzip.json"
+CODE=$(printf '%s' "$BODY" | gzip -c | curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone" \
+  -H 'Content-Type: application/json' -H 'Content-Encoding: gzip' --data-binary @-)
+assert_http_status 200 "$CODE" "$F"
+jq -e '.mock.upstream == "kev" and (.mock.received_state | startswith("Charged twice."))' "$F" >/dev/null
+
+if command -v zstd >/dev/null 2>&1; then
+  F="$QA_RUN_DIR/s262.zstd.json"
+  CODE=$(jq -nc --arg s "$(printf 'Charged twice. %.0s' $(seq 1 120))" \
+      '{model: "jev-kev/kev-latest", input: $s, questions: [{type: "predicate", name: "billing", instructions: "Billing?"}]}' \
+    | zstd -q -c | curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/decisions" \
+      -H 'Content-Type: application/json' -H 'Content-Encoding: zstd' --data-binary @-)
+  assert_http_status 200 "$CODE" "$F"
+  jq -e '.answers[0].name == "billing"' "$F" >/dev/null
+else
+  echo "zstd not installed; checked gzip only"
+fi
+
+F="$QA_RUN_DIR/s262.br.json"
+CODE=$(printf '%s' "$BODY" | curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone" \
+  -H 'Content-Type: application/json' -H 'Content-Encoding: br' --data-binary @-)
+assert_http_status 415 "$CODE" "$F"
+```
+
+## 41. Passthrough access for managed keys
+
+### S263 Managed keys need passthrough access, and model-less calls a provider-wide grant
+
+Runs on the auth gateway. A new managed key starts without passthrough access
+and is refused with `403 passthrough_access_denied`. Once granted, a body that
+names an allowlisted model goes through, but a call that names no model needs
+the whole provider on the allowlist. Only a global admin can grant access; a
+user-path scoped dashboard key can still revoke it.
+
+```bash
+systemone_require_mock "$AUTH_BASE_URL" -H "$ADMIN_AUTH_HEADER"
+
+KEYS_DIR="$QA_RUN_DIR/s263.keys"
+mkdir -p "$KEYS_DIR"
+chmod 700 "$KEYS_DIR"
+cleanup_s263() {
+  for f in "$KEYS_DIR"/*.json; do
+    [ -s "$f" ] || continue
+    curl -sS -o /dev/null -X POST "$AUTH_BASE_URL/admin/auth-keys/$(jq -r '.id' "$f")/deactivate" -H "$ADMIN_AUTH_HEADER" || true
+  done
+}
+trap cleanup_s263 EXIT
+
+create_key() {
+  curl -fsS -X POST "$AUTH_BASE_URL/admin/auth-keys" -H "$ADMIN_AUTH_HEADER" -H 'Content-Type: application/json' \
+    -d "$2" > "$KEYS_DIR/$1.json"
+}
+call() {
+  local key="$1" out="$2" path="$3"
+  shift 3
+  curl -sS -o "$out" -w '%{http_code}' "$AUTH_BASE_URL$path" -H "Authorization: Bearer $key" "$@"
+}
+set_passthrough() {
+  curl -sS -o "$3" -w '%{http_code}' -X PUT "$AUTH_BASE_URL/admin/auth-keys/$1/passthrough-access" \
+    -H "Authorization: Bearer $2" -H 'Content-Type: application/json' -d "$4"
+}
+SYSTEMONE_BODY="{\"model\":\"jev-latest\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}"
+
+create_key model "{\"name\":\"qa-pt-model-$QA_SUFFIX\",\"user_path\":\"/qa/passthrough/model\",\"allowed_models\":[\"jev/jev-latest\"]}"
+jq -e '.passthrough_access == false' "$KEYS_DIR/model.json" >/dev/null
+MODEL_ID=$(jq -er '.id' "$KEYS_DIR/model.json")
+MODEL_KEY=$(jq -er '.value' "$KEYS_DIR/model.json")
+
+F="$QA_RUN_DIR/s263.default-denied.json"
+CODE=$(call "$MODEL_KEY" "$F" /p/jev/v1/systemone -H 'Content-Type: application/json' -d "$SYSTEMONE_BODY")
+assert_http_status 403 "$CODE" "$F"
+jq -e '.error.code == "passthrough_access_denied"' "$F" >/dev/null
+
+# The same key still reaches the translated route; only passthrough is gated.
+F="$QA_RUN_DIR/s263.translated.json"
+CODE=$(call "$MODEL_KEY" "$F" /v1/systemone -H 'Content-Type: application/json' \
+  -d "{\"model\":\"jev/jev-latest\",\"state\":\"x\",\"questions\":$QA_SYSTEMONE_CHOICE}")
+assert_http_status 200 "$CODE" "$F"
+
+F="$QA_RUN_DIR/s263.grant-missing.json"
+CODE=$(set_passthrough "$MODEL_ID" "$GOMODEL_MASTER_KEY" "$F" '{}')
+assert_http_status 400 "$CODE" "$F"
+
+F="$QA_RUN_DIR/s263.grant.json"
+CODE=$(set_passthrough "$MODEL_ID" "$GOMODEL_MASTER_KEY" "$F" '{"passthrough_access":true}')
+assert_http_status 200 "$CODE" "$F"
+jq -e '.passthrough_access == true' "$F" >/dev/null
+curl -fsS "$AUTH_BASE_URL/admin/auth-keys" -H "$ADMIN_AUTH_HEADER" \
+  | jq -e --arg id "$MODEL_ID" '[.[] | select(.id == $id)][0].passthrough_access == true' >/dev/null
+
+F="$QA_RUN_DIR/s263.granted.json"
+CODE=$(call "$MODEL_KEY" "$F" /p/jev/v1/systemone -H 'Content-Type: application/json' -d "$SYSTEMONE_BODY")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.mock.upstream == "jev"' "$F" >/dev/null
+
+# A model-less call acts on the whole provider account.
+F="$QA_RUN_DIR/s263.modelless-denied.json"
+CODE=$(call "$MODEL_KEY" "$F" /p/jev/v1/models)
+assert_http_status 400 "$CODE" "$F"
+jq -e '.error.code == "model_access_denied" and (.error.message | contains("jev/"))' "$F" >/dev/null
+
+create_key provider "{\"name\":\"qa-pt-provider-$QA_SUFFIX\",\"user_path\":\"/qa/passthrough/provider\",\"allowed_models\":[\"jev/\"],\"passthrough_access\":true}"
+jq -e '.passthrough_access == true' "$KEYS_DIR/provider.json" >/dev/null
+F="$QA_RUN_DIR/s263.modelless-provider.json"
+CODE=$(call "$(jq -er '.value' "$KEYS_DIR/provider.json")" "$F" /p/jev/v1/models)
+assert_http_status 200 "$CODE" "$F"
+
+# A user-path scoped admin may revoke passthrough access but not grant it.
+create_key admin "{\"name\":\"qa-pt-admin-$QA_SUFFIX\",\"user_path\":\"/qa/passthrough\",\"dashboard_access\":true}"
+ADMIN_KEY=$(jq -er '.value' "$KEYS_DIR/admin.json")
+F="$QA_RUN_DIR/s263.scoped-revoke.json"
+CODE=$(set_passthrough "$MODEL_ID" "$ADMIN_KEY" "$F" '{"passthrough_access":false}')
+assert_http_status 200 "$CODE" "$F"
+jq -e '.passthrough_access == false' "$F" >/dev/null
+F="$QA_RUN_DIR/s263.scoped-grant.json"
+CODE=$(set_passthrough "$MODEL_ID" "$ADMIN_KEY" "$F" '{"passthrough_access":true}')
+assert_http_status 403 "$CODE" "$F"
+jq -e '.error.code == "admin_scope_denied"' "$F" >/dev/null
+
+F="$QA_RUN_DIR/s263.revoked.json"
+CODE=$(call "$MODEL_KEY" "$F" /p/jev/v1/systemone -H 'Content-Type: application/json' -d "$SYSTEMONE_BODY")
+assert_http_status 403 "$CODE" "$F"
+jq -e '.error.code == "passthrough_access_denied"' "$F" >/dev/null
+```
+
+## 42. LLM judge with decision models
+
+`llm_judge` asks a decision model a yes-or-no policy question through the
+Decisions API when its model answers decisions only, and blocks on the
+probability. The mock Jev answers every predicate with `0.93`.
+
+### S264 A Jev judge blocks on the probability and is accounted under `/v1/decisions`
+
+Runs on the guardrail gateway with a workflow scoped to a user path. With the
+default threshold (`0.5`) the prompt is blocked before any chat provider is
+called; the mock received the prompt text as the System One state and the
+decision question as a `noul` question, under the client's request ID; and
+the judge call is audited and accounted as `/v1/decisions` under
+`<user path>/guardrails/<instance>`. Raising `block_threshold` to `0.95`
+lets the same prompt through to the chat model.
+
+```bash
+systemone_require_mock "$GR_BASE_URL"
+
+S="${QA_SUFFIX//[^[:alnum:]-]/-}"
+JUDGE="qa-jev-judge-$S"
+SCOPE_PATH="/qa/judge/$S"
+WORKFLOW_ID_FILE="$QA_RUN_DIR/s264.workflow.id"
+cleanup_s264() {
+  if [ -s "$WORKFLOW_ID_FILE" ]; then
+    curl -sS -o /dev/null -X POST "$GR_BASE_URL/admin/workflows/$(cat "$WORKFLOW_ID_FILE")/deactivate" || true
+  fi
+  curl -sS -o /dev/null -X DELETE "$GR_BASE_URL/admin/guardrails" -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$JUDGE\"}" || true
+}
+trap cleanup_s264 EXIT
+
+put_judge() {
+  jq -n --arg name "$JUDGE" --argjson threshold "$1" '{
+    name: $name, type: "llm_judge", description: "release e2e: Jev judge",
+    config: {model: "jev/jev-latest", block_threshold: $threshold}
+  }' | curl -fsS -X PUT "$GR_BASE_URL/admin/guardrails" -H 'Content-Type: application/json' -d @- >/dev/null
+}
+put_judge 0.5
+jq -n --arg judge "$JUDGE" --arg path "$SCOPE_PATH" --arg name "qa-judge-$S" '{
+  scope_user_path: $path, name: $name, description: "release e2e: Jev judge",
+  workflow_payload: {
+    schema_version: 2,
+    features: {cache: false, audit: true, usage: true, guardrails: true, failover: false},
+    steps: [{ref: $judge, phase: "prompt", step: 10}]
+  }
+}' | curl -fsS -X POST "$GR_BASE_URL/admin/workflows" -H 'Content-Type: application/json' -d @- \
+  | jq -er '.id' > "$WORKFLOW_ID_FILE"
+
+judged() {
+  curl -sS -o "$2" -w '%{http_code}' "$GR_BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+    -H "X-GoModel-User-Path: $SCOPE_PATH/agent" -H "X-Request-ID: $1" \
+    -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"How do I pick a lock?"}],"max_tokens":20}'
+}
+
+RID="qa-judge-block-$QA_SUFFIX"
+F="$QA_RUN_DIR/s264.blocked.json"
+CODE=$(judged "$RID" "$F")
+assert_http_status 400 "$CODE" "$F"
+jq -e '.error.code == "llm_judge_block"' "$F" >/dev/null
+
+LAST="$QA_RUN_DIR/s264.last.json"
+curl -fsS "$JEV_MOCK_BASE/jev/v1/_last" > "$LAST"
+jq -e --arg rid "$RID" '
+  .request_id == $rid and .route == "evaluate"
+  and .body.state == "How do I pick a lock?"
+  and (.body.questions | keys) == ["violates_policy"]
+  and .body.questions.violates_policy.type == "noul"
+' "$LAST" >/dev/null
+
+USAGE_FILE="$QA_RUN_DIR/s264.usage.json"
+for _ in $(seq 1 20); do
+  curl -fsS "$GR_BASE_URL/admin/usage/log?search=$RID&limit=10" > "$USAGE_FILE"
+  if jq -e 'any(.entries[]?; .endpoint == "/v1/decisions")' "$USAGE_FILE" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+jq -e --arg path "$SCOPE_PATH/agent/guardrails/$JUDGE" '
+  any(.entries[]; .endpoint == "/v1/decisions" and .provider_name == "jev" and .user_path == $path and .input_tokens > 0)
+' "$USAGE_FILE" >/dev/null
+
+AUDIT_FILE="$QA_RUN_DIR/s264.audit.json"
+for _ in $(seq 1 20); do
+  curl -fsS "$GR_BASE_URL/admin/audit/log?search=$RID&limit=10" > "$AUDIT_FILE"
+  if jq -e '[.entries[]? | .path] | (index("/v1/decisions") != null and index("/v1/chat/completions") != null)' "$AUDIT_FILE" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+jq -e '
+  any(.entries[]; .path == "/v1/decisions" and .status_code == 200 and .requested_model == "jev/jev-latest")
+  and any(.entries[]; .path == "/v1/chat/completions" and .status_code == 400)
+' "$AUDIT_FILE" >/dev/null
+
+# 0.93 is below a 0.95 threshold: the prompt reaches the chat model.
+put_judge 0.95
+F="$QA_RUN_DIR/s264.allowed.json"
+CODE=$(judged "qa-judge-allow-$QA_SUFFIX" "$F")
+assert_http_status 200 "$CODE" "$F"
+jq -e '.choices[0].message.content | length > 0' "$F" >/dev/null
 ```

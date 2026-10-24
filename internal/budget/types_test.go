@@ -2,27 +2,23 @@ package budget
 
 import (
 	"math"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestApplySettingValueIgnoresUnknownNonInteger(t *testing.T) {
 	settings := DefaultSettings()
-	if err := applySettingValue(&settings, "unknown_setting", "not-an-int"); err != nil {
-		t.Fatalf("applySettingValue() error = %v, want nil for unknown setting", err)
-	}
+	err := applySettingValue(&settings, "unknown_setting", "not-an-int")
+	require.NoError(t, err)
 }
 
 func TestApplySettingValueRejectsKnownNonInteger(t *testing.T) {
 	settings := DefaultSettings()
 	err := applySettingValue(&settings, settingDailyResetHour, "not-an-int")
-	if err == nil {
-		t.Fatal("applySettingValue() error = nil, want parse error")
-	}
-	if !strings.Contains(err.Error(), "must be an integer") {
-		t.Fatalf("applySettingValue() error = %v", err)
-	}
+	require.ErrorContains(t, err, "must be an integer")
 }
 
 func TestNormalizeBudgetRejectsNonFiniteAmount(t *testing.T) {
@@ -42,12 +38,7 @@ func TestNormalizeBudgetRejectsNonFiniteAmount(t *testing.T) {
 				PeriodSeconds: PeriodDailySeconds,
 				Amount:        tt.amount,
 			})
-			if err == nil {
-				t.Fatal("NormalizeBudget() error = nil, want non-finite amount error")
-			}
-			if !strings.Contains(err.Error(), "amount must be a finite number greater than 0") {
-				t.Fatalf("NormalizeBudget() error = %v, want finite amount validation", err)
-			}
+			require.ErrorContains(t, err, "amount must be a finite number greater than 0")
 		})
 	}
 }
@@ -146,44 +137,95 @@ func TestPeriodBoundsUsesConfiguredAnchors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			start, end := PeriodBounds(tt.now, tt.period, settings)
-			if !start.Equal(tt.wantStart) {
-				t.Fatalf("start = %s, want %s", start, tt.wantStart)
-			}
-			if !end.Equal(tt.wantEnd) {
-				t.Fatalf("end = %s, want %s", end, tt.wantEnd)
-			}
+			require.True(t, start.Equal(tt.wantStart), "start = %s, want %s", start, tt.wantStart)
+			require.True(t, end.Equal(tt.wantEnd), "end = %s, want %s", end, tt.wantEnd)
 		})
 	}
 }
 
 func TestCheckResultUsageRatio(t *testing.T) {
-	if got := (CheckResult{Budget: Budget{Amount: 100}, Spent: 25}).UsageRatio(); got != 0.25 {
-		t.Fatalf("UsageRatio() = %v, want 0.25", got)
-	}
-	if got := (CheckResult{Budget: Budget{Amount: 0}, Spent: 25}).UsageRatio(); got != 0 {
-		t.Fatalf("UsageRatio() with zero amount = %v, want 0", got)
-	}
+	got := (CheckResult{Budget: Budget{Amount: 100}, Spent: 25}).UsageRatio()
+	require.Equal(t, 0.25, got)
+	got = (CheckResult{Budget: Budget{Amount: 0}, Spent: 25}).UsageRatio()
+	require.Equal(t, float64(0), got)
 	// Deliberately unclamped: >1 signals an exceeded budget to the dashboard.
-	if got := (CheckResult{Budget: Budget{Amount: 100}, Spent: 150}).UsageRatio(); got != 1.5 {
-		t.Fatalf("UsageRatio() exceeded = %v, want 1.5", got)
-	}
+	got = (CheckResult{Budget: Budget{Amount: 100}, Spent: 150}).UsageRatio()
+	require.Equal(t, 1.5, got)
 }
 
 func TestCheckResultPeriodRatio(t *testing.T) {
 	start := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	end := start.Add(10 * time.Hour)
 	result := CheckResult{PeriodStart: start, PeriodEnd: end}
+	got := result.PeriodRatio(start.Add(5 * time.Hour))
+	require.Equal(t, 0.5, got)
+	got = result.PeriodRatio(start.Add(-time.Hour))
+	require.Equal(t, float64(0), got)
+	got = result.PeriodRatio(end.Add(time.Hour))
+	require.Equal(t, float64(1), got)
+	got = (CheckResult{PeriodStart: start, PeriodEnd: start}).PeriodRatio(start)
+	require.Equal(t, float64(0), got)
+}
 
-	if got := result.PeriodRatio(start.Add(5 * time.Hour)); got != 0.5 {
-		t.Fatalf("PeriodRatio(midpoint) = %v, want 0.5", got)
+func TestNormalizeProviderBudget(t *testing.T) {
+	tests := []struct {
+		name    string
+		subject string
+		want    string
+		wantErr string
+	}{
+		{name: "lowercased and trimmed", subject: "  OpenAI-Prod ", want: "openai-prod"},
+		{name: "empty", subject: "  ", wantErr: "provider budget subject is required"},
+		{name: "qualified model", subject: "openai/gpt-4o", wantErr: "without slashes or spaces"},
+		{name: "inner space", subject: "open ai", wantErr: "without slashes or spaces"},
 	}
-	if got := result.PeriodRatio(start.Add(-time.Hour)); got != 0 {
-		t.Fatalf("PeriodRatio(before start) = %v, want 0 (clamped)", got)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := NormalizeBudget(Budget{
+				Scope:         "Provider",
+				Subject:       tt.subject,
+				PeriodSeconds: PeriodDailySeconds,
+				Amount:        10,
+			})
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, ScopeProvider, got.Scope)
+			require.Equal(t, tt.want, got.Subject)
+		})
 	}
-	if got := result.PeriodRatio(end.Add(time.Hour)); got != 1 {
-		t.Fatalf("PeriodRatio(after end) = %v, want 1 (clamped)", got)
+}
+
+func TestNormalizeProviderBudgetRejectsPerChild(t *testing.T) {
+	_, err := NormalizeBudget(Budget{
+		Scope:         ScopeProvider,
+		Subject:       "openai",
+		PerChild:      true,
+		PeriodSeconds: PeriodDailySeconds,
+		Amount:        10,
+	})
+	require.ErrorContains(t, err, "per_child is only valid for user_path budgets")
+}
+
+func TestProviderBudgetAppliesTo(t *testing.T) {
+	b := Budget{Scope: ScopeProvider, Subject: "openai-prod"}
+	tests := []struct {
+		name     string
+		subjects Subjects
+		want     bool
+	}{
+		{name: "same provider", subjects: Subjects{UserPath: "/team", Provider: "openai-prod"}, want: true},
+		{name: "case-insensitive", subjects: Subjects{UserPath: "/", Provider: "OpenAI-Prod"}, want: true},
+		{name: "other provider", subjects: Subjects{UserPath: "/", Provider: "openai-free"}, want: false},
+		{name: "route unknown", subjects: Subjects{UserPath: "/"}, want: false},
 	}
-	if got := (CheckResult{PeriodStart: start, PeriodEnd: start}).PeriodRatio(start); got != 0 {
-		t.Fatalf("PeriodRatio(zero-length period) = %v, want 0", got)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, b.appliesTo(tt.subjects))
+		})
 	}
 }

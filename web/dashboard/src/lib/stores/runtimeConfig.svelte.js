@@ -16,12 +16,14 @@ const CONFIG_KEYS = [
   "RATE_LIMITS_ENABLED",
   "PER_CHILD_QUOTAS_ENABLED",
   "GUARDRAILS_ENABLED",
+  "PLUGINS_ENABLED",
   "CACHE_ENABLED",
   "REDIS_URL",
   "SEMANTIC_CACHE_ENABLED",
   "USAGE_PRICING_RECALCULATION_ENABLED",
   "DASHBOARD_LIVE_LOGS_ENABLED",
   "MCP_ENABLED",
+  "MCP_TOOL_DISCOVERY",
   "VIRTUAL_MODEL_STRATEGIES",
   "USER_PATH_HEADER",
 ];
@@ -111,8 +113,18 @@ class RuntimeConfigStore {
     return this.booleanFlag("GUARDRAILS_ENABLED", true);
   }
 
+  pluginsVisible() {
+    return this.booleanFlag("PLUGINS_ENABLED", true);
+  }
+
   mcpVisible() {
     return this.booleanFlag("MCP_ENABLED", true);
+  }
+
+  // mcpToolDiscovery is the gateway's default MCP tool discovery mode:
+  // "search" or "off" (also for backends that predate the key).
+  mcpToolDiscovery() {
+    return this.flag("MCP_TOOL_DISCOVERY") === "search" ? "search" : "off";
   }
 
   liveLogsVisible() {

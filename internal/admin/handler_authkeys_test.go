@@ -1,18 +1,21 @@
 package admin
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"testing"
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 type authKeyTestStore struct {
@@ -36,6 +39,14 @@ func (s *authKeyTestStore) List(_ context.Context) ([]authkeys.AuthKey, error) {
 }
 
 func (s *authKeyTestStore) Create(_ context.Context, key authkeys.AuthKey) error {
+	s.keys[key.ID] = key
+	return nil
+}
+
+func (s *authKeyTestStore) UpdateImported(_ context.Context, key authkeys.AuthKey) error {
+	if _, ok := s.keys[key.ID]; !ok {
+		return authkeys.ErrNotFound
+	}
 	s.keys[key.ID] = key
 	return nil
 }
@@ -73,6 +84,17 @@ func (s *authKeyTestStore) UpdateDashboardAccess(_ context.Context, id string, a
 	return nil
 }
 
+func (s *authKeyTestStore) UpdatePassthroughAccess(_ context.Context, id string, allowed bool, now time.Time) error {
+	key, ok := s.keys[id]
+	if !ok {
+		return authkeys.ErrNotFound
+	}
+	key.PassthroughAccess = allowed
+	key.UpdatedAt = now.UTC()
+	s.keys[id] = key
+	return nil
+}
+
 func (s *authKeyTestStore) Deactivate(_ context.Context, id string, now time.Time) error {
 	key, ok := s.keys[id]
 	if !ok {
@@ -93,276 +115,314 @@ func (s *authKeyTestStore) Close() error { return nil }
 func newAuthKeyHandler(t *testing.T, store authkeys.Store) *Handler {
 	t.Helper()
 	service, err := authkeys.NewService(store)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+
 	return NewHandler(nil, nil, WithAuthKeys(service))
+}
+
+// newAuthKeyHandlerWithReader adds an audit reader, as initAdmin wires it.
+func newAuthKeyHandlerWithReader(t *testing.T, store authkeys.Store, reader auditlog.Reader) *Handler {
+	t.Helper()
+	service, err := authkeys.NewService(store)
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+
+	return NewHandler(nil, nil,
+		WithAuthKeys(service),
+		WithAuditReader(reader),
+	)
 }
 
 func TestAuthKeyEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 	h := NewHandler(nil, nil)
-	e := echo.New()
 
-	listCtx, listRec := newHandlerContext("/admin/auth-keys")
-	if err := h.ListAuthKeys(listCtx); err != nil {
-		t.Fatalf("ListAuthKeys() error = %v", err)
-	}
-	if listRec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("ListAuthKeys() status = %d, want 503", listRec.Code)
-	}
+	c, rec := echotest.Get(t, "/admin/auth-keys")
+	require.NoError(t, h.ListAuthKeys(c))
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 
-	createReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys", bytes.NewBufferString(`{"name":"primary"}`))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	createCtx := e.NewContext(createReq, createRec)
-	if err := h.CreateAuthKey(createCtx); err != nil {
-		t.Fatalf("CreateAuthKey() error = %v", err)
-	}
-	if createRec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("CreateAuthKey() status = %d, want 503", createRec.Code)
-	}
+	c, rec = echotest.Post(t, "/admin/auth-keys", `{"name":"primary"}`)
+	require.NoError(t, h.CreateAuthKey(c))
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 
-	deactivateReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys/test-key/deactivate", nil)
-	deactivateRec := httptest.NewRecorder()
-	deactivateCtx := e.NewContext(deactivateReq, deactivateRec)
-	deactivateCtx.SetPathValues(echo.PathValues{{Name: "id", Value: "test-key"}})
-	if err := h.DeactivateAuthKey(deactivateCtx); err != nil {
-		t.Fatalf("DeactivateAuthKey() error = %v", err)
-	}
-	if deactivateRec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("DeactivateAuthKey() status = %d, want 503", deactivateRec.Code)
-	}
+	c, rec = echotest.Post(t, "/admin/auth-keys/test-key/deactivate", nil, echotest.WithPathValue("id", "test-key"))
+	require.NoError(t, h.DeactivateAuthKey(c))
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 
-	labelsReq := httptest.NewRequest(http.MethodPut, "/admin/auth-keys/test-key/labels", bytes.NewBufferString(`{"labels":["a"]}`))
-	labelsReq.Header.Set("Content-Type", "application/json")
-	labelsRec := httptest.NewRecorder()
-	labelsCtx := e.NewContext(labelsReq, labelsRec)
-	labelsCtx.SetPathValues(echo.PathValues{{Name: "id", Value: "test-key"}})
-	if err := h.UpdateAuthKeyLabels(labelsCtx); err != nil {
-		t.Fatalf("UpdateAuthKeyLabels() error = %v", err)
-	}
-	if labelsRec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("UpdateAuthKeyLabels() status = %d, want 503", labelsRec.Code)
-	}
+	c, rec = echotest.Request(t, http.MethodPut, "/admin/auth-keys/test-key/labels", `{"labels":["a"]}`, echotest.WithPathValue("id", "test-key"))
+	require.NoError(t, h.UpdateAuthKeyLabels(c))
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+}
+
+func createAuthKey(t *testing.T, h *Handler, body string) authkeys.IssuedKey {
+	t.Helper()
+	c, rec := echotest.Post(t, "/admin/auth-keys", body)
+	require.NoError(t, h.CreateAuthKey(c))
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	return echotest.Decode[authkeys.IssuedKey](t, rec)
 }
 
 func TestCreateListAndDeactivateAuthKey(t *testing.T) {
 	h := newAuthKeyHandler(t, newAuthKeyTestStore())
-	e := echo.New()
 
-	createReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys", bytes.NewBufferString(`{"name":"primary","description":"prod key","user_path":" team//alpha/service/ ","labels":[" team-a ","batch","team-a"]}`))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	createCtx := e.NewContext(createReq, createRec)
+	issued := createAuthKey(t, h, `{"name":"primary","description":"prod key","user_path":" team//alpha/service/ ","labels":[" team-a ","batch","team-a"]}`)
+	require.NotEmpty(t, issued.Value)
+	require.NotEmpty(t, issued.ID)
+	assert.Equal(t, "/team/alpha/service", issued.UserPath)
+	assert.Equal(t, []string{"team-a", "batch"}, issued.Labels)
 
-	if err := h.CreateAuthKey(createCtx); err != nil {
-		t.Fatalf("CreateAuthKey() error = %v", err)
-	}
-	if createRec.Code != http.StatusCreated {
-		t.Fatalf("CreateAuthKey() status = %d, want 201", createRec.Code)
-	}
+	c, rec := echotest.Get(t, "/admin/auth-keys")
+	require.NoError(t, h.ListAuthKeys(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	views := echotest.Decode[[]authkeys.View](t, rec)
+	require.Len(t, views, 1)
+	assert.True(t, views[0].Active)
+	assert.Equal(t, "/team/alpha/service", views[0].UserPath)
+	assert.Equal(t, []string{"team-a", "batch"}, views[0].Labels)
 
-	var issued authkeys.IssuedKey
-	if err := json.Unmarshal(createRec.Body.Bytes(), &issued); err != nil {
-		t.Fatalf("unmarshal create response: %v", err)
-	}
-	if issued.Value == "" || issued.ID == "" {
-		t.Fatalf("issued response = %#v, want id and value", issued)
-	}
-	if issued.UserPath != "/team/alpha/service" {
-		t.Fatalf("issued.UserPath = %q, want /team/alpha/service", issued.UserPath)
-	}
-	if !reflect.DeepEqual(issued.Labels, []string{"team-a", "batch"}) {
-		t.Fatalf("issued.Labels = %v, want [team-a batch]", issued.Labels)
-	}
+	c, rec = echotest.Post(t, "/admin/auth-keys/"+issued.ID+"/deactivate", nil, echotest.WithPathValue("id", issued.ID))
+	require.NoError(t, h.DeactivateAuthKey(c))
+	require.Equal(t, http.StatusNoContent, rec.Code)
 
-	listCtx, listRec := newHandlerContext("/admin/auth-keys")
-	if err := h.ListAuthKeys(listCtx); err != nil {
-		t.Fatalf("ListAuthKeys() error = %v", err)
-	}
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("ListAuthKeys() status = %d, want 200", listRec.Code)
-	}
-
-	var views []authkeys.View
-	if err := json.Unmarshal(listRec.Body.Bytes(), &views); err != nil {
-		t.Fatalf("unmarshal list response: %v", err)
-	}
-	if len(views) != 1 || !views[0].Active {
-		t.Fatalf("list response = %#v, want one active key", views)
-	}
-	if views[0].UserPath != "/team/alpha/service" {
-		t.Fatalf("views[0].UserPath = %q, want /team/alpha/service", views[0].UserPath)
-	}
-	if !reflect.DeepEqual(views[0].Labels, []string{"team-a", "batch"}) {
-		t.Fatalf("views[0].Labels = %v, want [team-a batch]", views[0].Labels)
-	}
-
-	deactivateReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys/"+issued.ID+"/deactivate", nil)
-	deactivateRec := httptest.NewRecorder()
-	deactivateCtx := e.NewContext(deactivateReq, deactivateRec)
-	deactivateCtx.SetPathValues(echo.PathValues{{Name: "id", Value: issued.ID}})
-
-	if err := h.DeactivateAuthKey(deactivateCtx); err != nil {
-		t.Fatalf("DeactivateAuthKey() error = %v", err)
-	}
-	if deactivateRec.Code != http.StatusNoContent {
-		t.Fatalf("DeactivateAuthKey() status = %d, want 204", deactivateRec.Code)
-	}
-
-	listCtx, listRec = newHandlerContext("/admin/auth-keys")
-	if err := h.ListAuthKeys(listCtx); err != nil {
-		t.Fatalf("ListAuthKeys() error after deactivate = %v", err)
-	}
-	if err := json.Unmarshal(listRec.Body.Bytes(), &views); err != nil {
-		t.Fatalf("unmarshal list response after deactivate: %v", err)
-	}
-	if len(views) != 1 || views[0].Active {
-		t.Fatalf("list response after deactivate = %#v, want one inactive key", views)
-	}
+	c, rec = echotest.Get(t, "/admin/auth-keys")
+	require.NoError(t, h.ListAuthKeys(c))
+	views = echotest.Decode[[]authkeys.View](t, rec)
+	require.Len(t, views, 1)
+	assert.False(t, views[0].Active)
 }
 
 func TestUpdateAuthKeyDashboardAccess(t *testing.T) {
 	h := newAuthKeyHandler(t, newAuthKeyTestStore())
-	e := echo.New()
+	issued := createAuthKey(t, h, `{"name":"ops","dashboard_access":true}`)
+	require.True(t, issued.DashboardAccess)
 
-	createReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys", bytes.NewBufferString(`{"name":"ops","dashboard_access":true}`))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	if err := h.CreateAuthKey(e.NewContext(createReq, createRec)); err != nil {
-		t.Fatalf("CreateAuthKey() error = %v", err)
-	}
-	var issued authkeys.IssuedKey
-	if err := json.Unmarshal(createRec.Body.Bytes(), &issued); err != nil {
-		t.Fatalf("unmarshal create response: %v", err)
-	}
-	if !issued.DashboardAccess {
-		t.Fatal("issued.DashboardAccess = false, want true")
+	updateAccess := func(id, body string) *httptest.ResponseRecorder {
+		c, rec := echotest.Request(t, http.MethodPut, "/admin/auth-keys/"+id+"/dashboard-access", body, echotest.WithPathValue("id", id))
+		require.NoError(t, h.UpdateAuthKeyDashboardAccess(c))
+		return rec
 	}
 
-	updateAccess := func(id, body string) (*httptest.ResponseRecorder, error) {
-		req := httptest.NewRequest(http.MethodPut, "/admin/auth-keys/"+id+"/dashboard-access", bytes.NewBufferString(body))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-		ctx := e.NewContext(req, rec)
-		ctx.SetPathValues(echo.PathValues{{Name: "id", Value: id}})
-		return rec, h.UpdateAuthKeyDashboardAccess(ctx)
-	}
+	rec := updateAccess(issued.ID, `{"dashboard_access":false}`)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.False(t, echotest.Decode[authkeys.View](t, rec).DashboardAccess)
 
-	rec, err := updateAccess(issued.ID, `{"dashboard_access":false}`)
-	if err != nil {
-		t.Fatalf("UpdateAuthKeyDashboardAccess() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("UpdateAuthKeyDashboardAccess() status = %d, want 200", rec.Code)
-	}
-	var view authkeys.View
-	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
-		t.Fatalf("unmarshal update response: %v", err)
-	}
-	if view.DashboardAccess {
-		t.Fatal("view.DashboardAccess = true, want false after revoke")
-	}
-
-	rec, err = updateAccess("missing", `{"dashboard_access":true}`)
-	if err != nil {
-		t.Fatalf("UpdateAuthKeyDashboardAccess(missing) error = %v", err)
-	}
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("UpdateAuthKeyDashboardAccess(missing) status = %d, want 404", rec.Code)
-	}
+	rec = updateAccess("missing", `{"dashboard_access":true}`)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 
 	// Omitted or null values must be rejected, not treated as a revoke.
 	for _, body := range []string{`{}`, `{"dashboard_access":null}`} {
-		rec, err = updateAccess(issued.ID, body)
-		if err != nil {
-			t.Fatalf("UpdateAuthKeyDashboardAccess(%s) error = %v", body, err)
-		}
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("UpdateAuthKeyDashboardAccess(%s) status = %d, want 400", body, rec.Code)
-		}
+		rec = updateAccess(issued.ID, body)
+		assert.Equal(t, http.StatusBadRequest, rec.Code, body)
+	}
+}
+
+func TestUpdateAuthKeyPassthroughAccess(t *testing.T) {
+	h := newAuthKeyHandler(t, newAuthKeyTestStore())
+	assert.False(t, createAuthKey(t, h, `{"name":"plain"}`).PassthroughAccess, "new keys start without passthrough")
+	issued := createAuthKey(t, h, `{"name":"proxy","passthrough_access":true}`)
+	require.True(t, issued.PassthroughAccess)
+
+	updateAccess := func(id, body string) *httptest.ResponseRecorder {
+		c, rec := echotest.Request(t, http.MethodPut, "/admin/auth-keys/"+id+"/passthrough-access", body, echotest.WithPathValue("id", id))
+		require.NoError(t, h.UpdateAuthKeyPassthroughAccess(c))
+		return rec
+	}
+
+	rec := updateAccess(issued.ID, `{"passthrough_access":false}`)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.False(t, echotest.Decode[authkeys.View](t, rec).PassthroughAccess)
+
+	rec = updateAccess("missing", `{"passthrough_access":true}`)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+
+	// Omitted or null values must be rejected, not treated as a revoke.
+	for _, body := range []string{`{}`, `{"passthrough_access":null}`} {
+		rec = updateAccess(issued.ID, body)
+		assert.Equal(t, http.StatusBadRequest, rec.Code, body)
 	}
 }
 
 func TestUpdateAuthKeyLabels(t *testing.T) {
 	h := newAuthKeyHandler(t, newAuthKeyTestStore())
-	e := echo.New()
+	issued := createAuthKey(t, h, `{"name":"primary","labels":["old"]}`)
 
-	createReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys", bytes.NewBufferString(`{"name":"primary","labels":["old"]}`))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	if err := h.CreateAuthKey(e.NewContext(createReq, createRec)); err != nil {
-		t.Fatalf("CreateAuthKey() error = %v", err)
-	}
-	var issued authkeys.IssuedKey
-	if err := json.Unmarshal(createRec.Body.Bytes(), &issued); err != nil {
-		t.Fatalf("unmarshal create response: %v", err)
+	updateLabels := func(id, body string) *httptest.ResponseRecorder {
+		c, rec := echotest.Request(t, http.MethodPut, "/admin/auth-keys/"+id+"/labels", body, echotest.WithPathValue("id", id))
+		require.NoError(t, h.UpdateAuthKeyLabels(c))
+		return rec
 	}
 
-	updateLabels := func(id, body string) (*httptest.ResponseRecorder, error) {
-		req := httptest.NewRequest(http.MethodPut, "/admin/auth-keys/"+id+"/labels", bytes.NewBufferString(body))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-		ctx := e.NewContext(req, rec)
-		ctx.SetPathValues(echo.PathValues{{Name: "id", Value: id}})
-		return rec, h.UpdateAuthKeyLabels(ctx)
-	}
+	rec := updateLabels(issued.ID, `{"labels":[" prod ","batch","prod"]}`)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, []string{"prod", "batch"}, echotest.Decode[authkeys.View](t, rec).Labels)
 
-	rec, err := updateLabels(issued.ID, `{"labels":[" prod ","batch","prod"]}`)
-	if err != nil {
-		t.Fatalf("UpdateAuthKeyLabels() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("UpdateAuthKeyLabels() status = %d, want 200", rec.Code)
-	}
-	var view authkeys.View
-	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
-		t.Fatalf("unmarshal update response: %v", err)
-	}
-	if !reflect.DeepEqual(view.Labels, []string{"prod", "batch"}) {
-		t.Fatalf("view.Labels = %v, want [prod batch]", view.Labels)
-	}
+	rec = updateLabels(issued.ID, `{"labels":[]}`)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Nil(t, echotest.Decode[authkeys.View](t, rec).Labels)
 
-	rec, err = updateLabels(issued.ID, `{"labels":[]}`)
-	if err != nil {
-		t.Fatalf("UpdateAuthKeyLabels(clear) error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("UpdateAuthKeyLabels(clear) status = %d, want 200", rec.Code)
-	}
-	var clearedView authkeys.View
-	if err := json.Unmarshal(rec.Body.Bytes(), &clearedView); err != nil {
-		t.Fatalf("unmarshal clear response: %v", err)
-	}
-	if clearedView.Labels != nil {
-		t.Fatalf("view.Labels after clear = %v, want nil", clearedView.Labels)
-	}
-
-	rec, err = updateLabels("missing-id", `{"labels":["x"]}`)
-	if err != nil {
-		t.Fatalf("UpdateAuthKeyLabels(missing) error = %v", err)
-	}
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("UpdateAuthKeyLabels(missing) status = %d, want 404", rec.Code)
-	}
+	rec = updateLabels("missing-id", `{"labels":["x"]}`)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestCreateAuthKeyRejectsInvalidUserPath(t *testing.T) {
 	h := newAuthKeyHandler(t, newAuthKeyTestStore())
-	e := echo.New()
+	c, rec := echotest.Post(t, "/admin/auth-keys", `{"name":"primary","user_path":"/team/../alpha"}`)
+	require.NoError(t, h.CreateAuthKey(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
 
-	createReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys", bytes.NewBufferString(`{"name":"primary","user_path":"/team/../alpha"}`))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	createCtx := e.NewContext(createReq, createRec)
+func TestListAuthKeysIncludesLastUsed(t *testing.T) {
+	usedAt := time.Date(2026, 1, 16, 12, 30, 0, 0, time.UTC)
+	reader := &mockAuditReader{}
+	h := newAuthKeyHandlerWithReader(t, newAuthKeyTestStore(), reader)
+	usedKey := createAuthKey(t, h, `{"name":"used"}`)
+	unusedKey := createAuthKey(t, h, `{"name":"unused"}`)
+	reader.lastUsed = map[string]time.Time{usedKey.ID: usedAt}
 
-	if err := h.CreateAuthKey(createCtx); err != nil {
-		t.Fatalf("CreateAuthKey() error = %v", err)
+	c, rec := echotest.Get(t, "/admin/auth-keys")
+	require.NoError(t, h.ListAuthKeys(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := echotest.Decode[[]map[string]any](t, rec)
+
+	rowsByID := make(map[string]map[string]any, len(body))
+	for _, row := range body {
+		rowsByID[row["id"].(string)] = row
 	}
-	if createRec.Code != http.StatusBadRequest {
-		t.Fatalf("CreateAuthKey() status = %d, want 400", createRec.Code)
+	assert.Equal(t, usedAt.Format(time.RFC3339), rowsByID[usedKey.ID]["last_used_at"])
+	_, ok := rowsByID[unusedKey.ID]["last_used_at"]
+	assert.False(t, ok)
+	// A successful lookup (even without entries) reports availability.
+	assert.Equal(t, true, rowsByID[usedKey.ID]["last_used_available"])
+	assert.Equal(t, true, rowsByID[unusedKey.ID]["last_used_available"])
+
+	// Every listed key id reached the reader in one call.
+	assert.ElementsMatch(t, []string{usedKey.ID, unusedKey.ID}, reader.lastUsedKeyIDs)
+}
+
+func TestListAuthKeysWorksWithoutLastUsedData(t *testing.T) {
+	// Without an audit reader the list still answers, with no last-used data.
+	h := newAuthKeyHandler(t, newAuthKeyTestStore())
+	createAuthKey(t, h, `{"name":"any"}`)
+	c, rec := echotest.Get(t, "/admin/auth-keys")
+	require.NoError(t, h.ListAuthKeys(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	body := echotest.Decode[[]map[string]any](t, rec)
+	require.Len(t, body, 1)
+	_, ok := body[0]["last_used_at"]
+	assert.False(t, ok)
+	_, ok = body[0]["last_used_available"]
+	assert.False(t, ok)
+
+	// A failing reader degrades the same way.
+	reader := &mockAuditReader{lastUsedErr: errors.New("audit reader down")}
+	h = newAuthKeyHandlerWithReader(t, newAuthKeyTestStore(), reader)
+	createAuthKey(t, h, `{"name":"any"}`)
+	c, rec = echotest.Get(t, "/admin/auth-keys")
+	require.NoError(t, h.ListAuthKeys(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	body = echotest.Decode[[]map[string]any](t, rec)
+	require.Len(t, body, 1)
+	_, ok = body[0]["last_used_at"]
+	assert.False(t, ok)
+	_, ok = body[0]["last_used_available"]
+	assert.False(t, ok)
+}
+
+// asManagedKey makes c look like a request authenticated with the managed key
+// id, bound to userPath and limited to allowedModels.
+func asManagedKey(c *echo.Context, id, userPath string, allowedModels ...string) {
+	ctx := core.WithAuthKeyID(c.Request().Context(), id)
+	ctx = core.WithAccessScope(ctx, core.AccessScope{UserPath: userPath})
+	ctx = core.WithCredentialAllowedModels(ctx, allowedModels)
+	c.SetRequest(c.Request().WithContext(ctx))
+}
+
+// A key must not lift restrictions placed on it by editing itself.
+func TestAuthKeyCannotUpdateItself(t *testing.T) {
+	h := newAuthKeyHandler(t, newAuthKeyTestStore())
+	lead := createAuthKey(t, h, `{"name":"lead","user_path":"/team/a","dashboard_access":true,"allowed_models":["openai/gpt-4o-mini"],"labels":["team-a"]}`)
+	member := createAuthKey(t, h, `{"name":"member","user_path":"/team/a/svc","allowed_models":["openai/gpt-4o-mini"]}`)
+
+	tests := []struct {
+		name    string
+		path    string
+		body    string
+		handler func(*echo.Context) error
+	}{
+		{name: "labels", path: "labels", body: `{"labels":[]}`, handler: h.UpdateAuthKeyLabels},
+		{name: "allowed models", path: "allowed-models", body: `{"allowed_models":["openai/gpt-4o-mini"]}`, handler: h.UpdateAuthKeyAllowedModels},
+		{name: "dashboard access", path: "dashboard-access", body: `{"dashboard_access":true}`, handler: h.UpdateAuthKeyDashboardAccess},
+		{name: "passthrough access", path: "passthrough-access", body: `{"passthrough_access":false}`, handler: h.UpdateAuthKeyPassthroughAccess},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			update := func(id string) *httptest.ResponseRecorder {
+				c, rec := echotest.Request(t, http.MethodPut, "/admin/auth-keys/"+id+"/"+tt.path, tt.body, echotest.WithPathValue("id", id))
+				asManagedKey(c, lead.ID, "/team/a", "openai/gpt-4o-mini")
+				require.NoError(t, tt.handler(c))
+				return rec
+			}
+
+			rec := update(lead.ID)
+			require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+			assert.Contains(t, rec.Body.String(), codeAuthKeySelfUpdate)
+
+			rec = update(member.ID)
+			assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		})
+	}
+
+	view, err := h.authKeys.View(lead.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"openai/gpt-4o-mini"}, view.AllowedModels)
+	assert.Equal(t, []string{"team-a"}, view.Labels)
+
+	// Deactivating itself stays allowed.
+	c, rec := echotest.Post(t, "/admin/auth-keys/"+lead.ID+"/deactivate", nil, echotest.WithPathValue("id", lead.ID))
+	asManagedKey(c, lead.ID, "/team/a", "openai/gpt-4o-mini")
+	require.NoError(t, h.DeactivateAuthKey(c))
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+}
+
+// A key limited to a model allowlist must not issue keys broader than itself.
+func TestAuthKeyAllowedModelsMustStayWithinCaller(t *testing.T) {
+	tests := []struct {
+		name         string
+		callerModels []string
+		body         string
+		wantStatus   int
+	}{
+		{name: "subset", callerModels: []string{"openai/gpt-4o-mini", "openai/gpt-4o"}, body: `["openai/gpt-4o-mini"]`, wantStatus: http.StatusOK},
+		{name: "same list", callerModels: []string{"openai/gpt-4o-mini"}, body: `["openai/gpt-4o-mini"]`, wantStatus: http.StatusOK},
+		{name: "empty list is unrestricted", callerModels: []string{"openai/gpt-4o-mini"}, body: `[]`, wantStatus: http.StatusForbidden},
+		{name: "model outside the caller's list", callerModels: []string{"openai/gpt-4o-mini"}, body: `["openai/gpt-4o"]`, wantStatus: http.StatusForbidden},
+		{name: "unrestricted caller", body: `[]`, wantStatus: http.StatusOK},
+		{name: "provider-wide caller grants one model", callerModels: []string{"openai/"}, body: `["openai/gpt-4o-mini"]`, wantStatus: http.StatusOK},
+		{name: "provider-wide caller grants another provider", callerModels: []string{"openai/"}, body: `["anthropic/claude-sonnet-4-6"]`, wantStatus: http.StatusForbidden},
+		{name: "global selector caller grants unrestricted", callerModels: []string{"/"}, body: `[]`, wantStatus: http.StatusOK},
+		{name: "bare name caller grants that model on one provider", callerModels: []string{"gpt-4o-mini"}, body: `["openai/gpt-4o-mini"]`, wantStatus: http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name+"/create", func(t *testing.T) {
+			h := newAuthKeyHandler(t, newAuthKeyTestStore())
+			c, rec := echotest.Post(t, "/admin/auth-keys", `{"name":"child","allowed_models":`+tt.body+`}`)
+			asManagedKey(c, "caller", "/team/a", tt.callerModels...)
+			require.NoError(t, h.CreateAuthKey(c))
+			wantStatus := tt.wantStatus
+			if wantStatus == http.StatusOK {
+				wantStatus = http.StatusCreated
+			}
+			assert.Equal(t, wantStatus, rec.Code, rec.Body.String())
+		})
+		t.Run(tt.name+"/update", func(t *testing.T) {
+			h := newAuthKeyHandler(t, newAuthKeyTestStore())
+			child := createAuthKey(t, h, `{"name":"child","user_path":"/team/a/svc","allowed_models":["openai/gpt-4o-mini"]}`)
+			c, rec := echotest.Request(t, http.MethodPut, "/admin/auth-keys/"+child.ID+"/allowed-models", `{"allowed_models":`+tt.body+`}`, echotest.WithPathValue("id", child.ID))
+			asManagedKey(c, "caller", "/team/a", tt.callerModels...)
+			require.NoError(t, h.UpdateAuthKeyAllowedModels(c))
+			assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+		})
 	}
 }

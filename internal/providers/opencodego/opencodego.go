@@ -10,9 +10,9 @@ import (
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/anthropic"
+	"github.com/enterpilot/gomodel/internal/providers/deepseek"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 )
 
@@ -92,33 +92,17 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 	}
 }
 
-// NewWithHTTPClient creates a new OpenCode Go provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	resolved := providers.ResolveBaseURL(baseURL, defaultBaseURL)
-	headers := requestHeaders(loadSessionHeaderEnabled())
-	chat := openai.NewChatCompatibleWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(resolved, headers))
-	messages := anthropic.NewWithHTTPClient(apiKey, httpClient, hooks)
-	messages.SetBaseURL(resolved)
-	messages.SetRequestHeaders(headers)
-	return &Provider{
-		ChatCompatible: chat,
-		messages:       messages,
-		messagesModels: loadMessagesModels(),
-		headers:        headers,
-	}
-}
-
 // compatibleConfig describes the OpenAI-compatible /chat/completions half of
 // the provider. The AdaptChatRequest hook carries OpenCode Zen's reasoning
-// quirk (see reasoning.go) and ChatRequestHeaders its session/client
-// identification headers (see session.go), so /v1/responses picks both up
-// through ResponsesViaChat as well.
+// quirk (see reasoning.go) plus DeepSeek's rules for DeepSeek models (see
+// deepseek.go), and ChatRequestHeaders its session/client identification
+// headers (see session.go), so /v1/responses picks them up through
+// ResponsesViaChat as well.
 func compatibleConfig(baseURL string, headers func(context.Context) http.Header) openai.CompatibleProviderConfig {
 	return openai.CompatibleProviderConfig{
 		ProviderName:       "opencode_go",
 		BaseURL:            baseURL,
-		AdaptChatRequest:   adaptChatRequest(loadDefaultReasoningEffort()),
+		AdaptChatRequest:   chatRequestAdapter(loadDefaultReasoningEffort(), deepseek.LoadJSONSchemaMode()),
 		ChatRequestHeaders: chatRequestHeaders(headers),
 	}
 }
@@ -170,7 +154,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 // Responses dispatches through this provider's ChatCompletion so /v1/responses
 // honors the per-model /messages routing.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return providers.ResponsesViaChat(ctx, p, req)
+	return providers.ResponsesViaChat(ctx, p, req, "opencode_go")
 }
 
 // StreamResponses dispatches through this provider's streaming ChatCompletion so

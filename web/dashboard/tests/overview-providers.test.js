@@ -104,6 +104,13 @@ test("provider helper methods format configured models and resilience summaries"
     "3 retries, 1s initial, 30s max, factor 2, jitter 0.1",
   );
   assert.equal(providerCircuitBreakerSummary(provider), "5 fail, 2 success, 30s timeout");
+  provider.config.resilience.circuit_breaker.slow_call_threshold = "0s";
+  assert.equal(providerCircuitBreakerSummary(provider), "5 fail, 2 success, 30s timeout");
+  provider.config.resilience.circuit_breaker.slow_call_threshold = "45s";
+  assert.equal(
+    providerCircuitBreakerSummary(provider),
+    "5 fail, 2 success, 30s timeout, slow over 45s",
+  );
   assert.equal(providerLastChecked(provider), "2026-04-10T12:00:00Z");
   // The most recent of the two check timestamps wins, whichever side it is.
   assert.equal(
@@ -171,9 +178,17 @@ test("providerDocUrl links provider types with docs and stays empty otherwise", 
     providerDocUrl({ type: "sglang" }),
     "https://gomodel.enterpilot.io/docs/providers/sglang?utm_source=gomodel_dashboard",
   );
-  // Types without a provider-specific doc → no link (no icon).
-  assert.equal(providerDocUrl({ type: "openai" }), "");
-  assert.equal(providerDocUrl({ type: "ollama" }), "");
+  // Types registered but without a provider-specific doc page → fall back
+  // to the providers overview so every card still surfaces a help link.
+  assert.equal(
+    providerDocUrl({ type: "openai" }),
+    "https://gomodel.enterpilot.io/docs/providers/overview?utm_source=gomodel_dashboard",
+  );
+  assert.equal(
+    providerDocUrl({ type: "ollama" }),
+    "https://gomodel.enterpilot.io/docs/providers/multiple-ollama?utm_source=gomodel_dashboard",
+  );
+  // Provider with no type at all → no link.
   assert.equal(providerDocUrl({ name: "mystery" }), "");
   assert.equal(providerDocUrl(null), "");
 });

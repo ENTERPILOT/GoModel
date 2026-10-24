@@ -7,9 +7,10 @@
 //     skippedLiveUsageByRequestId, liveLogsLastSeq, auditGroupSessions,
 //     auditThreadChildren ({ [session_id]: {loading, entries, total} })
 //   - insert-gate fields: auditSearch, auditMethod, auditStatusCode,
-//     auditStream, customStartDate, customEndDate, usageLogSearch,
+//     auditStream, auditHiddenTypes, customStartDate, customEndDate, usageLogSearch,
 //     usageFilterModel, usageFilterProvider, usageFilterLabel,
-//     usageFilterUserPath, usageFilterSession, usageLogHideCached, page
+//     usageFilterUserPath, usageFilterSession, usageFilterAuthKey, usageFilterEndpoints,
+//     usageLogHideCached, page
 //   - optional cross-module hooks (guarded with typeof):
 //     fetchUsage, fetchAuditLog, isAuditEntryExpanded, cacheAuditRecord,
 //     noteLiveTokenUsage, fetchAuditEntryDetail
@@ -18,6 +19,7 @@
 // runs this file directly and cannot resolve the `$lib` alias.
 
 import { consumeEventStream } from "../../lib/api/eventStream.js";
+import { auditEntryTypeVisible } from "./audit-operations.js";
 import * as m from "../../lib/paraglide/messages.js";
 
 const LIVE_LOGS_STREAM_PATH = "/admin/live/logs?types=audit,usage";
@@ -121,7 +123,9 @@ export function liveLogsMethods() {
         usageLiveInsertAllowed() {
             return this.usageLog && this.usageLog.offset === 0 &&
                 !this.usageLogSearch && !this.usageFilterModel && !this.usageFilterProvider &&
-                !this.usageFilterLabel && !this.usageFilterUserPath && !this.usageFilterSession;
+                !this.usageFilterLabel && !this.usageFilterUserPath && !this.usageFilterSession &&
+                !this.usageFilterAuthKey &&
+                !(this.usageFilterEndpoints && this.usageFilterEndpoints.length);
         },
 
         mergeLiveAuditEntry(incoming, eventType) {
@@ -160,7 +164,7 @@ export function liveLogsMethods() {
             // List filters and pagination gate visual insertion only. The
             // normalized cache still receives every event so an already-open
             // Interactions drawer cannot lose its live continuation.
-            if (!this.auditLiveInsertAllowed()) {
+            if (!this.auditLiveInsertAllowed() || !auditEntryTypeVisible(patch, this.auditHiddenTypes)) {
                 this.cacheMergedAuditRecord(patch, eventType);
                 return;
             }

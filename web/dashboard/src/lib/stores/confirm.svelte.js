@@ -16,6 +16,8 @@ function emptyState() {
     confirmLabel: "Confirm",
     icon: TriangleAlert,
     dialogClass: "",
+    // Stacked modals render above another open modal (see Modal.svelte).
+    stacked: false,
     loading: false,
     onConfirm: null,
     onClose: null,

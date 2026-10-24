@@ -13,7 +13,8 @@ import "github.com/enterpilot/gomodel/internal/auditlog"
 // lazy-loads the full entry from /admin/audit/detail.
 //
 // slimAuditListEntry therefore strips the heavy payloads from a list entry
-// and records what the client needs to compensate:
+// (the plugin-provided guardrail outcome detail among them) and records what
+// the client needs to compensate:
 //   - BodiesOmitted tells the dashboard to fetch the detail endpoint on
 //     expand (and that the entry is persisted, i.e. not in-flight).
 //   - ConversationPayload preserves the drawer-eligibility signal that the
@@ -56,6 +57,18 @@ func slimAuditListEntry(resp *auditLogEntryResponse) {
 			}
 		}
 		slim.Attempts = attempts
+	}
+
+	if len(slim.Guardrails) > 0 {
+		outcomes := make([]auditlog.GuardrailOutcomeSnapshot, len(slim.Guardrails))
+		copy(outcomes, slim.Guardrails)
+		for i := range outcomes {
+			if outcomes[i].Detail != nil {
+				outcomes[i].Detail = nil
+				stripped = true
+			}
+		}
+		slim.Guardrails = outcomes
 	}
 
 	if len(slim.RequestRevisions) > 0 {
@@ -127,7 +140,7 @@ func looksLikeResponsesOutput(v any) bool {
 // reads from a conversation-thread entry. Request headers are retained because
 // the drawer uses the safe, redacted subset to continue the same session from
 // the original endpoint. Response headers and attempts only inflate the
-// response. Request revisions keep their metadata — the drawer's request-step
+// response, and so do the guardrail outcomes. Request revisions keep their metadata — the drawer's request-step
 // picker needs to know which rewrites ran — but drop the heavy per-revision
 // bodies and details; the drawer lazy-loads those from /admin/audit/detail.
 func slimConversationEntry(entry *auditlog.LogEntry) {
@@ -135,12 +148,13 @@ func slimConversationEntry(entry *auditlog.LogEntry) {
 	if d == nil {
 		return
 	}
-	if d.Attempts == nil && d.RequestRevisions == nil && d.ResponseHeaders == nil {
+	if d.Attempts == nil && d.RequestRevisions == nil && d.ResponseHeaders == nil && d.Guardrails == nil {
 		return
 	}
 	slim := *d
 	slim.Attempts = nil
 	slim.ResponseHeaders = nil
+	slim.Guardrails = nil
 	if len(slim.RequestRevisions) > 0 {
 		revisions := make([]auditlog.RequestRevisionSnapshot, len(slim.RequestRevisions))
 		copy(revisions, slim.RequestRevisions)

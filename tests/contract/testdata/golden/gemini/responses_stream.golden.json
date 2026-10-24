@@ -9,10 +9,29 @@
           "id": "resp_\u003cgenerated\u003e",
           "model": "gemini-2.5-flash",
           "object": "response",
+          "output": [],
           "provider": "gemini",
           "status": "in_progress"
         },
+        "sequence_number": 0,
         "type": "response.created"
+      }
+    },
+    {
+      "Done": false,
+      "Name": "response.in_progress",
+      "Payload": {
+        "response": {
+          "created_at": 0,
+          "id": "resp_\u003cgenerated\u003e",
+          "model": "gemini-2.5-flash",
+          "object": "response",
+          "output": [],
+          "provider": "gemini",
+          "status": "in_progress"
+        },
+        "sequence_number": 1,
+        "type": "response.in_progress"
       }
     },
     {
@@ -27,15 +46,64 @@
           "type": "message"
         },
         "output_index": 0,
+        "sequence_number": 2,
         "type": "response.output_item.added"
+      }
+    },
+    {
+      "Done": false,
+      "Name": "response.content_part.added",
+      "Payload": {
+        "content_index": 0,
+        "item_id": "msg_\u003cgenerated\u003e",
+        "output_index": 0,
+        "part": {
+          "annotations": [],
+          "text": "",
+          "type": "output_text"
+        },
+        "sequence_number": 3,
+        "type": "response.content_part.added"
       }
     },
     {
       "Done": false,
       "Name": "response.output_text.delta",
       "Payload": {
+        "content_index": 0,
         "delta": "Hello World",
+        "item_id": "msg_\u003cgenerated\u003e",
+        "output_index": 0,
+        "sequence_number": 4,
         "type": "response.output_text.delta"
+      }
+    },
+    {
+      "Done": false,
+      "Name": "response.output_text.done",
+      "Payload": {
+        "content_index": 0,
+        "item_id": "msg_\u003cgenerated\u003e",
+        "output_index": 0,
+        "sequence_number": 5,
+        "text": "Hello World",
+        "type": "response.output_text.done"
+      }
+    },
+    {
+      "Done": false,
+      "Name": "response.content_part.done",
+      "Payload": {
+        "content_index": 0,
+        "item_id": "msg_\u003cgenerated\u003e",
+        "output_index": 0,
+        "part": {
+          "annotations": [],
+          "text": "Hello World",
+          "type": "output_text"
+        },
+        "sequence_number": 6,
+        "type": "response.content_part.done"
       }
     },
     {
@@ -56,6 +124,7 @@
           "type": "message"
         },
         "output_index": 0,
+        "sequence_number": 7,
         "type": "response.output_item.done"
       }
     },
@@ -86,6 +155,7 @@
           "provider": "gemini",
           "status": "completed"
         },
+        "sequence_number": 8,
         "type": "response.completed"
       }
     },

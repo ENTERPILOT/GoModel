@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -97,7 +98,11 @@ func (m *mockLogStore) WaitForAPIEntries(count int, timeout time.Duration) []*au
 }
 
 // setupAuditLogTestServer creates a test server with audit logging enabled
-func setupAuditLogTestServer(t *testing.T, cfg auditlog.Config, store *mockLogStore) (string, func()) {
+// serverOption adjusts the server configuration an audit log test runs
+// against, for behavior that is decided outside the audit logger.
+type serverOption func(*server.Config)
+
+func setupAuditLogTestServer(t *testing.T, cfg auditlog.Config, store *mockLogStore, opts ...serverOption) (string, func()) {
 	t.Helper()
 
 	// Reserve a loopback listener up front so the port cannot be stolen before
@@ -120,9 +125,11 @@ func setupAuditLogTestServer(t *testing.T, cfg auditlog.Config, store *mockLogSt
 	logger := auditlog.NewLogger(store, cfg)
 
 	// Create server with audit logging
-	srv := server.New(router, &server.Config{
-		AuditLogger: logger,
-	})
+	serverCfg := &server.Config{AuditLogger: logger}
+	for _, opt := range opts {
+		opt(serverCfg)
+	}
+	srv := server.New(router, serverCfg)
 
 	// Start server (bind to loopback only)
 	serverURL := "http://" + listener.Addr().String()
@@ -194,7 +201,7 @@ func TestAuditLogMiddleware(t *testing.T) {
 		entry := entries[0]
 		assert.NotEmpty(t, entry.ID)
 		assert.NotZero(t, entry.Timestamp)
-		assert.Greater(t, entry.DurationNs, int64(0))
+		assert.Positive(t, entry.DurationNs)
 		assert.Equal(t, http.StatusOK, entry.StatusCode)
 		assert.Equal(t, "POST", entry.Method)
 		assert.Equal(t, "/v1/chat/completions", entry.Path)
@@ -321,7 +328,7 @@ func TestAuditLogMiddleware(t *testing.T) {
 		// Wait a bit and verify no API entries were logged
 		time.Sleep(500 * time.Millisecond)
 		entries := store.GetAPIEntries()
-		assert.Len(t, entries, 0, "Expected no API log entries when logging is disabled")
+		assert.Empty(t, entries, "Expected no API log entries when logging is disabled")
 	})
 
 	t.Run("hashes API key for identification", func(t *testing.T) {
@@ -471,7 +478,7 @@ func TestAuditLogStreaming(t *testing.T) {
 		entry := entries[0]
 
 		// Verify duration is captured (should be > 0 since streaming takes time)
-		assert.Greater(t, entry.DurationNs, int64(0), "DurationNs should be captured for streaming requests")
+		assert.Positive(t, entry.DurationNs, "DurationNs should be captured for streaming requests")
 		// Duration should be reasonable (less than 10 seconds for this test)
 		assert.Less(t, entry.DurationNs, int64(10*time.Second), "DurationNs should be reasonable")
 	})
@@ -630,7 +637,7 @@ func TestAuditLogErrorCapture(t *testing.T) {
 		assert.Equal(t, "/v1/chat/completions", entry.Path)
 		assert.Equal(t, "unsupported-model-xyz", entry.RequestedModel)
 		assert.Equal(t, "not_found_error", entry.ErrorType)
-		assert.Equal(t, "", entry.Provider)
+		assert.Empty(t, entry.Provider)
 	})
 
 	t.Run("logs unsupported passthrough provider requests", func(t *testing.T) {
@@ -858,4 +865,82 @@ func TestAuditLogOnlyModelInteractions(t *testing.T) {
 		require.Len(t, entries, 1, "Expected only 1 log entry (model endpoint)")
 		assert.Equal(t, "/v1/chat/completions", entries[0].Path)
 	})
+}
+
+// TestAuditLogClientIP checks that audit entries keep recording the
+// connection address by default, and record the forwarded client instead once
+// the gateway's own proxy network is listed as trusted.
+func TestAuditLogClientIP(t *testing.T) {
+	tests := []struct {
+		name    string
+		proxies []string
+		header  string
+		headers map[string]string
+		wantIP  string
+	}{
+		{
+			name:    "records the connection address when no proxies are trusted",
+			headers: map[string]string{"X-Forwarded-For": "198.51.100.23"},
+			wantIP:  "127.0.0.1",
+		},
+		{
+			name:    "records the forwarded client behind a trusted proxy network",
+			proxies: []string{"127.0.0.0/8"},
+			headers: map[string]string{"X-Forwarded-For": "203.0.113.9, 198.51.100.23"},
+			wantIP:  "198.51.100.23",
+		},
+		{
+			name:    "the loopback preset covers a proxy on the gateway host",
+			proxies: []string{"loopback"},
+			headers: map[string]string{"X-Forwarded-For": "198.51.100.23"},
+			wantIP:  "198.51.100.23",
+		},
+		{
+			name:    "a configured single-address header wins over the chain",
+			proxies: []string{"loopback"},
+			header:  "X-Real-IP",
+			headers: map[string]string{
+				"X-Real-IP":       "198.51.100.23",
+				"X-Forwarded-For": "203.0.113.9",
+			},
+			wantIP: "198.51.100.23",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			serverCfg := config.ServerConfig{TrustedProxies: tt.proxies, ClientIPHeader: tt.header}
+			require.NoError(t, config.ResolveClientIPPolicy(&serverCfg))
+
+			store := newMockLogStore()
+			cfg := auditlog.Config{
+				Enabled:               true,
+				BufferSize:            100,
+				FlushInterval:         100 * time.Millisecond,
+				OnlyModelInteractions: true,
+			}
+
+			serverURL, cleanup := setupAuditLogTestServer(t, cfg, store, func(c *server.Config) {
+				c.IPExtractor = server.ClientIPExtractor(serverCfg.ClientIP)
+			})
+			defer cleanup()
+
+			body, err := json.Marshal(defaultChatReq("Hello"))
+			require.NoError(t, err)
+			req, err := http.NewRequest(http.MethodPost, serverURL+"/v1/chat/completions", bytes.NewReader(body))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/json")
+			for name, value := range tt.headers {
+				req.Header.Set(name, value)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			defer closeBody(resp)
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+
+			entries := store.WaitForAPIEntries(1, 2*time.Second)
+			require.Len(t, entries, 1)
+			assert.Equal(t, tt.wantIP, entries[0].ClientIP)
+		})
+	}
 }

@@ -81,6 +81,9 @@ type RequestDialect string
 const (
 	RequestOriginExternal  RequestOrigin = "external"
 	RequestOriginGuardrail RequestOrigin = "guardrail"
+	// RequestOriginPlugin marks gateway-internal inference issued by a plugin
+	// instance through its Host (for example an LLM-based guardrail).
+	RequestOriginPlugin RequestOrigin = "plugin"
 
 	RequestDialectAnthropicMessages RequestDialect = "anthropic_messages"
 )
@@ -284,8 +287,8 @@ func GetEnforceReturningUsageData(ctx context.Context) bool {
 	return false
 }
 
-// WithPrimaryRouteSaturated marks the resolved primary route as rate-saturated.
-// The stored error is the 429 the client would have received; dispatch uses it
+// WithPrimaryRouteSaturated marks the resolved primary route as rate-saturated
+// or over its provider budget. The stored error is the 429 the client would have received; dispatch uses it
 // as the synthetic primary failure that triggers the failover sweep, and it
 // surfaces unchanged when no failover target can take the request.
 func WithPrimaryRouteSaturated(ctx context.Context, err error) context.Context {
@@ -295,7 +298,7 @@ func WithPrimaryRouteSaturated(ctx context.Context, err error) context.Context {
 	return context.WithValue(ctx, primaryRouteSaturatedKey, err)
 }
 
-// PrimaryRouteSaturated returns the rate-limit rejection recorded for the
+// PrimaryRouteSaturated returns the rate-limit or budget rejection recorded for the
 // resolved primary route, or nil when the route has capacity.
 func PrimaryRouteSaturated(ctx context.Context) error {
 	if v := ctx.Value(primaryRouteSaturatedKey); v != nil {
@@ -322,6 +325,24 @@ func GetGuardrailsHash(ctx context.Context) string {
 		}
 	}
 	return ""
+}
+
+// ResponseCacheVeto is implemented by the per-request plugin state
+// (Workflow.PluginState) so the response cache can ask whether a plugin
+// decision asked for the response not to be stored.
+type ResponseCacheVeto interface {
+	NoStore() bool
+}
+
+// PluginNoStore reports whether a plugin that ran for the request asked for
+// its response not to be stored in the response cache.
+func PluginNoStore(ctx context.Context) bool {
+	workflow := GetWorkflow(ctx)
+	if workflow == nil {
+		return false
+	}
+	veto, ok := workflow.PluginState.(ResponseCacheVeto)
+	return ok && veto.NoStore()
 }
 
 // WithFailoverUsed returns a new context marked as having used a failover model.

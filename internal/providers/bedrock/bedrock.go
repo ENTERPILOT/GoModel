@@ -69,8 +69,10 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 	p := &Provider{hooks: opts.Hooks}
 
 	region, endpoint := parseBaseURL(providerCfg.BaseURL)
-	// The SDK's own client would ignore the gateway's proxy and TLS trust.
-	loadOpts := []func(*awsconfig.LoadOptions) error{awsconfig.WithHTTPClient(httpclient.NewAWSSDKClient())}
+	// The SDK's own client would ignore the gateway's proxy and TLS trust. The
+	// factory supplies a proxy-aware client when the provider has an outbound
+	// proxy; both SDK clients and the credential chain must use it.
+	loadOpts := []func(*awsconfig.LoadOptions) error{awsconfig.WithHTTPClient(httpclient.NewAWSSDKClient(opts.HTTPClient))}
 	if region != "" {
 		loadOpts = append(loadOpts, awsconfig.WithRegion(region))
 	}
@@ -209,10 +211,11 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 			owner = strings.ToLower(*m.ProviderName)
 		}
 		models = append(models, core.Model{
-			ID:      *m.ModelId,
-			Object:  "model",
-			OwnedBy: owner,
-			Created: time.Now().Unix(),
+			ID:       *m.ModelId,
+			Object:   "model",
+			OwnedBy:  owner,
+			Created:  time.Now().Unix(),
+			Metadata: foundationModelMetadata(m),
 		})
 	}
 	return &core.ModelsResponse{
@@ -223,6 +226,28 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 
 func supportsTextOutput(modalities []bedrocktypes.ModelModality) bool {
 	return slices.Contains(modalities, bedrocktypes.ModelModalityText)
+}
+
+// foundationModelMetadata keeps what the Bedrock control plane says about a
+// listed model: its display name, whether it accepts images, and whether it
+// streams. Only text-output models reach here (see supportsTextOutput), so
+// every one is a chat model.
+func foundationModelMetadata(m bedrocktypes.FoundationModelSummary) *core.ModelMetadata {
+	modes := []string{"chat"}
+	metadata := &core.ModelMetadata{
+		Modes:      modes,
+		Categories: core.CategoriesForModes(modes),
+	}
+	if m.ModelName != nil {
+		metadata.DisplayName = strings.TrimSpace(*m.ModelName)
+	}
+	if slices.Contains(m.InputModalities, bedrocktypes.ModelModalityImage) {
+		metadata.Capabilities = providers.SetCapability(metadata.Capabilities, "vision", true)
+	}
+	if m.ResponseStreamingSupported != nil {
+		metadata.Capabilities = providers.SetCapability(metadata.Capabilities, "streaming", *m.ResponseStreamingSupported)
+	}
+	return metadata
 }
 
 // Embeddings returns an error: Bedrock embedding models use a different code
@@ -237,7 +262,7 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 	if err := p.ready(); err != nil {
 		return nil, err
 	}
-	return providers.ResponsesViaChat(ctx, p, req)
+	return providers.ResponsesViaChat(ctx, p, req, providerName)
 }
 
 // StreamResponses adapts the streaming Responses API onto Converse via the

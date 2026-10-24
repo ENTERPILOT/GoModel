@@ -13,10 +13,11 @@ import (
 )
 
 // CreateSpeech implements OpenAI text-to-speech (POST /audio/speech). The upstream
-// returns binary audio; the response is read raw and tagged with the upstream
-// Content-Type so it describes the bytes actually returned (see
-// speechResponseContentType), which usage relies on to price output-duration
-// models.
+// produces the audio as it synthesizes it, so the body is relayed as it arrives:
+// buffering it charges the client the whole generation before the first byte. The
+// response is tagged with the upstream Content-Type so it describes the bytes
+// actually returned (see speechResponseContentType), which usage relies on to
+// price output-duration models.
 func (p *CompatibleProvider) CreateSpeech(ctx context.Context, req *core.AudioSpeechRequest) (*core.AudioResponse, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("audio speech request is required", nil)
@@ -28,7 +29,7 @@ func (p *CompatibleProvider) CreateSpeech(ctx context.Context, req *core.AudioSp
 		return nil, core.NewInvalidRequestError("voice is required", nil)
 	}
 
-	raw, err := p.client.DoRaw(ctx, p.prepareRequest(llmclient.Request{
+	raw, err := p.client.DoStreamResponse(ctx, p.prepareRequest(llmclient.Request{
 		Method:   http.MethodPost,
 		Endpoint: "/audio/speech",
 		Body:     req,
@@ -38,7 +39,7 @@ func (p *CompatibleProvider) CreateSpeech(ctx context.Context, req *core.AudioSp
 	}
 	return &core.AudioResponse{
 		ContentType: speechResponseContentType(raw, req.ResponseFormat),
-		Data:        raw.Body,
+		Stream:      raw.Stream,
 	}, nil
 }
 
@@ -88,19 +89,70 @@ func (p *CompatibleProvider) createAudioTranscription(
 	}
 
 	body, contentType := audioTranscriptionMultipart(req, content, includeTranscriptionFields)
-	raw, err := p.client.DoRaw(ctx, p.prepareRequest(llmclient.Request{
+	upstream := p.prepareRequest(llmclient.Request{
 		Method:        http.MethodPost,
 		Endpoint:      endpoint,
 		RawBodyReader: body,
+		Model:         req.Model,
 		Headers:       http.Header{"Content-Type": {contentType}},
-	}))
+	})
+
+	// A forwarded stream=true makes the upstream answer with server-sent events
+	// as it transcribes, so the transcript is relayed as it arrives. Everything
+	// else is a single complete payload and stays on the buffered path, where
+	// providers layered on this adapter can still normalize the body.
+	if transcriptionStreamRequested(req) {
+		raw, err := p.client.DoStreamResponse(ctx, upstream)
+		if err != nil {
+			return nil, err
+		}
+		return &core.AudioResponse{
+			ContentType: transcriptionResponseContentType(raw, req.ResponseFormat),
+			Stream:      raw.Stream,
+		}, nil
+	}
+
+	raw, err := p.client.DoRaw(ctx, upstream)
 	if err != nil {
 		return nil, err
 	}
 	return &core.AudioResponse{
-		ContentType: core.TranscriptionResponseContentType(req.ResponseFormat),
+		ContentType: transcriptionResponseContentType(raw, req.ResponseFormat),
 		Data:        raw.Body,
 	}, nil
+}
+
+// transcriptionStreamRequested reports whether the client asked for an
+// incremental transcript. stream is not a field the gateway consumes, so it
+// travels in the passthrough form values (ADR-0011 rule 1) and is read back
+// from there rather than duplicated as a typed member.
+func transcriptionStreamRequested(req *core.AudioTranscriptionRequest) bool {
+	for _, field := range req.Fields {
+		if field.Name != "stream" {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(field.Value)) {
+		case "true", "1":
+			return true
+		}
+	}
+	return false
+}
+
+// transcriptionResponseContentType describes the transcript body the gateway
+// returns. A relayed body is whatever the upstream is producing, so only the
+// upstream type can describe it; a buffered reply keeps the response_format
+// mapping, except for server-sent events, which a JSON label would leave the
+// client unable to parse.
+func transcriptionResponseContentType(raw *llmclient.Response, format string) string {
+	if raw == nil {
+		return core.TranscriptionResponseContentType(format)
+	}
+	upstream := strings.TrimSpace(raw.ContentType)
+	if upstream != "" && (raw.Stream != nil || strings.HasPrefix(strings.ToLower(upstream), "text/event-stream")) {
+		return upstream
+	}
+	return core.TranscriptionResponseContentType(format)
 }
 
 // audioTranscriptionMultipart streams a multipart/form-data body for a
@@ -144,6 +196,18 @@ func audioTranscriptionMultipart(req *core.AudioTranscriptionRequest, content io
 					_ = pw.CloseWithError(core.NewInvalidRequestError("failed to write timestamp_granularities field", err))
 					return
 				}
+			}
+		}
+		// Fields the gateway does not consume itself travel verbatim (ADR-0011
+		// rule 1). Gateway-controlled parts are re-checked here so a request
+		// built outside the server layer cannot duplicate model or file.
+		for _, field := range req.Fields {
+			if core.ReservedAudioTranscriptionFormFields[field.Name] {
+				continue
+			}
+			if err := writer.WriteField(field.Name, field.Value); err != nil {
+				_ = pw.CloseWithError(core.NewInvalidRequestError("failed to write "+field.Name+" field", err))
+				return
 			}
 		}
 

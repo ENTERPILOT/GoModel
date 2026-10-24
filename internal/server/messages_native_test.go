@@ -4,14 +4,15 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -52,43 +53,22 @@ func TestMessages_NativeStreamingLogsUsage(t *testing.T) {
 	}
 	usageLogger := &collectingUsageLogger{config: usage.Config{Enabled: true}}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, usageLogger, nil)
 
 	reqBody := `{"model":"claude-fable-5","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"Hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
+	c, rec := echotest.Post(t, "/v1/messages", reqBody)
+	err := handler.Messages(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, provider.lastPassthroughReq)
+	require.Contains(t, rec.Body.String(), "message_stop")
+	require.Len(t, usageLogger.entries, 1)
 
-	if err := handler.Messages(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("Messages: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if provider.lastPassthroughReq == nil {
-		t.Fatal("native path was not taken")
-	}
-	if !strings.Contains(rec.Body.String(), "message_stop") {
-		t.Fatalf("stream not relayed: %s", rec.Body.String())
-	}
-
-	if len(usageLogger.entries) != 1 {
-		t.Fatalf("usage entries = %d, want 1", len(usageLogger.entries))
-	}
 	entry := usageLogger.entries[0]
-	if entry.InputTokens != 19560 {
-		t.Errorf("InputTokens = %d, want 19560", entry.InputTokens)
-	}
-	if entry.OutputTokens != 31 {
-		t.Errorf("OutputTokens = %d, want 31", entry.OutputTokens)
-	}
-	if entry.RawData["cache_creation_input_tokens"] != 100 {
-		t.Errorf("cache_creation_input_tokens = %v, want 100", entry.RawData["cache_creation_input_tokens"])
-	}
-	if entry.RawData["cache_read_input_tokens"] != 200 {
-		t.Errorf("cache_read_input_tokens = %v, want 200", entry.RawData["cache_read_input_tokens"])
-	}
+	assert.Equal(t, 19560, entry.InputTokens)
+	assert.Equal(t, 31, entry.OutputTokens)
+	assert.Equal(t, 100, entry.RawData["cache_creation_input_tokens"])
+	assert.Equal(t, 200, entry.RawData["cache_read_input_tokens"])
 }
 
 // A forwarded Accept-Encoding would make the upstream body arrive compressed,
@@ -100,12 +80,8 @@ func TestBuildPassthroughHeadersDropsAcceptEncoding(t *testing.T) {
 		"Anthropic-Beta":  {"claude-code-20250219"},
 	}
 	dst := buildPassthroughHeaders(t.Context(), src)
-	if got := dst.Get("Accept-Encoding"); got != "" {
-		t.Errorf("Accept-Encoding forwarded as %q, want stripped", got)
-	}
-	if got := dst.Get("Anthropic-Beta"); got != "claude-code-20250219" {
-		t.Errorf("Anthropic-Beta = %q, want preserved", got)
-	}
+	assert.Empty(t, dst.Get("Accept-Encoding"))
+	assert.Equal(t, "claude-code-20250219", dst.Get("Anthropic-Beta"))
 }
 
 const anthropicNonStreamingJSON = `{"id":"msg_1","type":"message","role":"assistant","model":"claude-fable-5","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":100,"cache_creation_input_tokens":7,"cache_read_input_tokens":9,"output_tokens":25}}`
@@ -125,46 +101,23 @@ func TestMessages_NativeNonStreamingLogsUsage(t *testing.T) {
 	}
 	usageLogger := &collectingUsageLogger{config: usage.Config{Enabled: true}}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, usageLogger, nil)
 
 	reqBody := `{"model":"claude-fable-5","max_tokens":64,"messages":[{"role":"user","content":"Hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
+	c, rec := echotest.Post(t, "/v1/messages", reqBody)
+	err := handler.Messages(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, provider.lastPassthroughReq)
+	require.Equal(t, anthropicNonStreamingJSON, rec.Body.String())
+	require.Len(t, usageLogger.entries, 1)
 
-	if err := handler.Messages(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("Messages: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if provider.lastPassthroughReq == nil {
-		t.Fatal("native path was not taken")
-	}
-	if rec.Body.String() != anthropicNonStreamingJSON {
-		t.Fatalf("body not relayed verbatim: %s", rec.Body.String())
-	}
-
-	if len(usageLogger.entries) != 1 {
-		t.Fatalf("usage entries = %d, want 1", len(usageLogger.entries))
-	}
 	entry := usageLogger.entries[0]
-	if entry.InputTokens != 100 {
-		t.Errorf("InputTokens = %d, want 100", entry.InputTokens)
-	}
-	if entry.OutputTokens != 25 {
-		t.Errorf("OutputTokens = %d, want 25", entry.OutputTokens)
-	}
-	if entry.RawData["cache_creation_input_tokens"] != 7 {
-		t.Errorf("cache_creation_input_tokens = %v, want 7", entry.RawData["cache_creation_input_tokens"])
-	}
-	if entry.RawData["cache_read_input_tokens"] != 9 {
-		t.Errorf("cache_read_input_tokens = %v, want 9", entry.RawData["cache_read_input_tokens"])
-	}
-	if entry.ProviderID != "msg_1" {
-		t.Errorf("ProviderID = %q, want msg_1", entry.ProviderID)
-	}
+	assert.Equal(t, 100, entry.InputTokens)
+	assert.Equal(t, 25, entry.OutputTokens)
+	assert.Equal(t, 7, entry.RawData["cache_creation_input_tokens"])
+	assert.Equal(t, 9, entry.RawData["cache_read_input_tokens"])
+	assert.Equal(t, "msg_1", entry.ProviderID)
 }
 
 // A provider body that fails mid-relay must not produce a usage entry: the
@@ -184,20 +137,13 @@ func TestMessages_NativeNonStreamingBodyErrorSkipsUsage(t *testing.T) {
 	}
 	usageLogger := &collectingUsageLogger{config: usage.Config{Enabled: true}}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, usageLogger, nil)
 
 	reqBody := `{"model":"claude-fable-5","max_tokens":64,"messages":[{"role":"user","content":"Hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
+	c, _ := echotest.Post(t, "/v1/messages", reqBody)
 
-	if err := handler.Messages(e.NewContext(req, rec)); err == nil {
-		t.Fatal("Messages: expected relay error, got nil")
-	}
-	if len(usageLogger.entries) != 0 {
-		t.Fatalf("usage entries = %d, want 0", len(usageLogger.entries))
-	}
+	require.Error(t, handler.Messages(c))
+	require.Empty(t, usageLogger.entries)
 }
 
 type failingReader struct{}
@@ -247,39 +193,21 @@ func TestMessages_NativeStreamingNotifiesFeedbackObservers(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
 
 	reqBody := `{"model":"claude-fable-5","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"Hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/messages", reqBody)
 
 	observer := &recordingFeedbackObserver{}
 	setResponseFeedbackObservers(c, []ext.ResponseFeedbackObserver{observer})
-
-	if err := handler.Messages(c); err != nil {
-		t.Fatalf("Messages: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if observer.calls != 1 {
-		t.Fatalf("ObserveResponse calls = %d, want 1", observer.calls)
-	}
-	if !observer.observed {
-		t.Error("usageObserved = false, want true")
-	}
-	if observer.input != 19560 {
-		t.Errorf("inputTokens = %d, want 19560", observer.input)
-	}
-	if observer.read != 200 {
-		t.Errorf("cachedInputTokens = %d, want 200", observer.read)
-	}
-	if observer.write != 100 {
-		t.Errorf("cacheWriteInputTokens = %d, want 100", observer.write)
-	}
+	err := handler.Messages(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, 1, observer.calls)
+	assert.True(t, observer.observed)
+	assert.Equal(t, 19560, observer.input)
+	assert.Equal(t, 200, observer.read)
+	assert.Equal(t, 100, observer.write)
 }
 
 // Extensions that requested response feedback must also hear about
@@ -295,39 +223,21 @@ func TestMessages_NativeNonStreamingNotifiesFeedbackObservers(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
 
 	reqBody := `{"model":"claude-fable-5","max_tokens":64,"messages":[{"role":"user","content":"Hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/messages", reqBody)
 
 	observer := &recordingFeedbackObserver{}
 	setResponseFeedbackObservers(c, []ext.ResponseFeedbackObserver{observer})
-
-	if err := handler.Messages(c); err != nil {
-		t.Fatalf("Messages: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if observer.calls != 1 {
-		t.Fatalf("ObserveResponse calls = %d, want 1", observer.calls)
-	}
-	if !observer.observed {
-		t.Error("usageObserved = false, want true")
-	}
-	if observer.input != 100 {
-		t.Errorf("inputTokens = %d, want 100", observer.input)
-	}
-	if observer.read != 9 {
-		t.Errorf("cachedInputTokens = %d, want 9", observer.read)
-	}
-	if observer.write != 7 {
-		t.Errorf("cacheWriteInputTokens = %d, want 7", observer.write)
-	}
+	err := handler.Messages(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, 1, observer.calls)
+	assert.True(t, observer.observed)
+	assert.Equal(t, 100, observer.input)
+	assert.Equal(t, 9, observer.read)
+	assert.Equal(t, 7, observer.write)
 }
 
 // The capture buffer must abandon oversized bodies without disturbing the
@@ -336,20 +246,17 @@ func TestCappedCaptureBufferOverflow(t *testing.T) {
 	capture := newCappedCaptureBuffer(8)
 	for range 3 {
 		n, err := capture.Write([]byte("abcde"))
-		if n != 5 || err != nil {
-			t.Fatalf("Write = (%d, %v), want (5, nil)", n, err)
-		}
-	}
-	if body, ok := capture.Captured(); ok {
-		t.Fatalf("Captured = (%q, true), want abandoned", body)
-	}
-
-	capture = newCappedCaptureBuffer(8)
-	if _, err := capture.Write([]byte("abcde")); err != nil {
-		t.Fatalf("Write: %v", err)
+		require.Equal(t, 5, n)
+		require.NoError(t, err)
 	}
 	body, ok := capture.Captured()
-	if !ok || string(body) != "abcde" {
-		t.Fatalf("Captured = (%q, %v), want (abcde, true)", body, ok)
-	}
+	require.False(t, ok, "Captured = (%q, true), want abandoned", body)
+
+	capture = newCappedCaptureBuffer(8)
+	_, err := capture.Write([]byte("abcde"))
+	require.NoError(t, err)
+
+	body, ok = capture.Captured()
+	require.True(t, ok)
+	require.Equal(t, "abcde", string(body), "Captured = (%q, %v), want (abcde, true)", body, ok)
 }

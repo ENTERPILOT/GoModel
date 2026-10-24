@@ -25,7 +25,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: '22.23.2'
 
@@ -33,7 +33,7 @@ jobs:
         run: make frontend
 
       - name: Upload dashboard build
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dashboard-dist
           path: internal/admin/dashboard/static/dist
@@ -51,16 +51,16 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Download dashboard build
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: dashboard-dist
           path: internal/admin/dashboard/static/dist
 
       - name: Set up QEMU (for multi-platform builds)
-        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
       - name: Login to Docker Hub
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
@@ -92,7 +92,7 @@ jobs:
 
       - name: Build and push by digest
         id: build
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64,linux/arm/v7
@@ -111,7 +111,7 @@ jobs:
     needs: docker
     steps:
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
       - name: Login to Docker Hub
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
@@ -188,7 +188,7 @@ jobs:
           fetch-depth: 0 # Required for git history/changelog
 
       - name: Download dashboard build
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: dashboard-dist
           path: internal/admin/dashboard/static/dist
@@ -196,11 +196,11 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: 1.27.0
+          go-version: 1.27.3
           cache: true
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7
         with:
           distribution: goreleaser
           version: "~> v2"
@@ -222,6 +222,109 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --verify-tag
+
+  discord-notify:
+    name: Announce release on Discord
+    runs-on: ubuntu-latest
+    needs: github-release
+    # Best-effort: a Discord outage must not fail the release.
+    continue-on-error: true
+    steps:
+      - name: Post release embed to Discord
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          # Webhook secret optional: forks without it simply skip the announce.
+          if [[ -z "$DISCORD_WEBHOOK_URL" ]]; then
+            echo "DISCORD_WEBHOOK_URL not set, skipping Discord announcement"
+            exit 0
+          fi
+
+          release_json="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json tagName,name,body,url)"
+          release_url="$(jq -r '.url' <<< "$release_json")"
+
+          # GoReleaser changelog lines look like:
+          #   * 1e4ecfb8f194af0e843f64d7dc694e3a01bef1dc feat(scope): msg (#1191)
+          # In the embed the verbatim SHA is noise and bare (#NNNN) is not
+          # clickable. Strip the leading commit SHA entirely and link #NNNN
+          # references to the official repository.
+          body="$(jq -r '.body // ""' <<< "$release_json" \
+            | sed -E -e 's/^(\s*[*-]\s+)[0-9a-f]{7,40}\s+/\1/' \
+                     -e 's/\(#([0-9]+)\)/([#\1](https:\/\/github.com\/ENTERPILOT\/GoModel\/pull\/\1))/g')"
+
+          # Discord embed descriptions cap at 4096 characters — jq counts
+          # characters, not bytes, so multibyte release notes stay within the
+          # limit. Oversized bodies are cut at the last complete changelog
+          # line and get a link to the full release notes instead of a
+          # mid-line ellipsis that could slice a Markdown link in half.
+          body="$(jq -nr --arg body "$body" --arg url "$release_url" '
+            $body
+            | if length <= 4000 then .
+              else "([Truncated](\($url)))" as $suffix
+                | (4000 - 1 - ($suffix | length)) as $budget
+                | (split("\n")) as $lines
+                | (reduce $lines[] as $line ({out: "", done: false};
+                    if .done then .
+                    else (.out | if . == "" then 0 else length + 1 end) as $cur
+                      | if $cur + ($line | length) <= $budget
+                        then {out: (if $cur == 0 then $line else .out + "\n" + $line end), done: false}
+                        else {out: .out, done: true}
+                        end
+                    end)) as $r
+                | if $r.out == "" then $suffix else $r.out + "\n" + $suffix end
+              end')"
+
+          # Discord embed titles cap at 256 characters — a release with a
+          # long name must not lose the whole announce to an HTTP 400.
+          title="$(jq -r '(.name // .tagName) | if length > 256 then .[0:253] + "..." else . end' <<< "$release_json")"
+
+          jq -n \
+            --arg title "$title" \
+            --arg url "$release_url" \
+            --arg description "$body" \
+            '{
+              embeds: [{
+                title: $title,
+                url: $url,
+                description: $description,
+                color: 5814783,
+                footer: { text: "GitHub Release" }
+              }]
+            }' > discord-payload.json
+
+          # Retry only on DNS/connect failures (curl exit 6/7), where the
+          # POST never happened. A --max-time timeout (exit 28) is not
+          # retried: --connect-timeout bounds the connect phase, so 28 means
+          # the request was already sent and retrying would risk a duplicate
+          # announce. Any HTTP response is final for the same reason.
+          # wait=true: Discord answers 200 with the saved message instead of
+          # queueing blindly (204), so curl success confirms the announce.
+          # The webhook URL may already carry query params (e.g. thread_id),
+          # so append wait=true with the right separator.
+          separator='?'
+          if [[ "$DISCORD_WEBHOOK_URL" == *\?* ]]; then
+            separator='&'
+          fi
+
+          rc=0
+          for attempt in 1 2 3; do
+            if curl -fsS --connect-timeout 10 --max-time 20 \
+                -H "Content-Type: application/json" \
+                -d @discord-payload.json \
+                "${DISCORD_WEBHOOK_URL}${separator}wait=true"; then
+              rc=0
+              break
+            else
+              rc=$?
+            fi
+            case $rc in
+              6|7) sleep 5 ;;
+              *) break ;;
+            esac
+          done
+          exit "$rc"
 
   deploy-demo:
     name: Update demo.enterpilot.io

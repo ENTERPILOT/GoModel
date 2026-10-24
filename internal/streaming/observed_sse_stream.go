@@ -159,7 +159,7 @@ func (s *ObservedSSEStream) processChunk(data []byte) {
 			continue
 		}
 
-		idx, sepLen := nextEventBoundary(data)
+		idx, sepLen := NextEventBoundary(data)
 		if idx == -1 {
 			s.savePending(data)
 			return
@@ -178,7 +178,7 @@ func (s *ObservedSSEStream) processChunk(data []byte) {
 
 func (s *ObservedSSEStream) processBufferedEvents(data []byte) {
 	for len(data) > 0 {
-		idx, sepLen := nextEventBoundary(data)
+		idx, sepLen := NextEventBoundary(data)
 		if idx == -1 {
 			s.processEvent(data)
 			return
@@ -194,7 +194,7 @@ func (s *ObservedSSEStream) processEvent(event []byte) {
 	// Fast path: a single-line event (the common shape for chat SSE) needs no
 	// line splitting or payload joining.
 	if bytes.IndexByte(event, '\n') == -1 {
-		if jsonData, ok := parseDataLine(event); ok {
+		if jsonData, ok := ParseDataLine(event); ok {
 			s.dispatchPayload(jsonData)
 		}
 		return
@@ -203,7 +203,7 @@ func (s *ObservedSSEStream) processEvent(event []byte) {
 	lines := bytes.Split(event, []byte("\n"))
 	payloadLines := make([][]byte, 0, len(lines))
 	for _, line := range lines {
-		jsonData, ok := parseDataLine(line)
+		jsonData, ok := ParseDataLine(line)
 		if !ok {
 			continue
 		}
@@ -244,7 +244,11 @@ func (s *ObservedSSEStream) payloadWanted(jsonData []byte) bool {
 	return false
 }
 
-func nextEventBoundary(data []byte) (idx int, sepLen int) {
+// NextEventBoundary returns the offset of the next SSE event boundary in data
+// and the length of the separator found there, or -1 when data holds no
+// boundary yet. Both the LF and CRLF forms are recognized, and the earlier one
+// wins when both appear.
+func NextEventBoundary(data []byte) (idx int, sepLen int) {
 	lfIdx := bytes.Index(data, lfEventBoundary)
 	crlfIdx := bytes.Index(data, crlfEventBoundary)
 
@@ -261,7 +265,11 @@ func nextEventBoundary(data []byte) (idx int, sepLen int) {
 	}
 }
 
-func parseDataLine(line []byte) ([]byte, bool) {
+// ParseDataLine returns the payload of one SSE "data:" line, dropping the
+// optional single space after the colon, and reports whether line was a data
+// line at all. A trailing CR is trimmed, so CRLF framing needs no special
+// handling from the caller.
+func ParseDataLine(line []byte) ([]byte, bool) {
 	line = bytes.TrimSuffix(line, []byte("\r"))
 	if !bytes.HasPrefix(line, dataPrefix) {
 		return nil, false
@@ -298,7 +306,7 @@ func nextJoinedEventBoundary(prefix, data []byte) (idx int, sepLen int) {
 		idx, sepLen = crossIdx, crossSepLen
 	}
 
-	dataIdx, dataSepLen := nextEventBoundary(data)
+	dataIdx, dataSepLen := NextEventBoundary(data)
 	if dataIdx != -1 {
 		combinedIdx := len(prefix) + dataIdx
 		if idx == -1 || combinedIdx < idx {

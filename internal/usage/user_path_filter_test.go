@@ -1,6 +1,10 @@
 package usage
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestUsageUserPathSubtreePattern(t *testing.T) {
 	tests := []struct {
@@ -22,9 +26,7 @@ func TestUsageUserPathSubtreePattern(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := usageUserPathSubtreePattern(tt.userPath); got != tt.want {
-				t.Fatalf("usageUserPathSubtreePattern(%q) = %q, want %q", tt.userPath, got, tt.want)
-			}
+			require.Equal(t, tt.want, usageUserPathSubtreePattern(tt.userPath))
 		})
 	}
 }

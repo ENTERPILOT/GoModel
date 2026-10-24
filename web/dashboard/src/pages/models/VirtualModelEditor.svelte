@@ -6,6 +6,8 @@
   import FormField from "$lib/components/molecules/FormField.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import SchemaFields from "$lib/components/molecules/SchemaFields.svelte";
+  import { pluginsStore } from "$lib/stores/plugins.svelte.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { virtualModelEditor } from "./virtualModelEditor.svelte.js";
   import {
@@ -28,10 +30,13 @@
   const hasPrimary = $derived(vmFormHasPrimaryTarget(vm.vmForm));
 
   // The strategy dropdown is server-driven (VIRTUAL_MODEL_STRATEGIES); make
-  // sure the runtime config is loaded by the time the editor shows it.
+  // sure the runtime config is loaded by the time the editor shows it. The
+  // plugin catalog supplies the route fields of "plugin:<name>" strategies;
+  // it is fetched once and shared with the Guardrails page.
   $effect(() => {
     if (vm.vmFormOpen) {
       runtimeConfig.ensureLoaded();
+      pluginsStore.ensureLoaded();
     }
   });
 </script>
@@ -142,14 +147,29 @@
     <select
       id="virtual-model-strategy"
       class="form-select"
-      bind:value={vm.vmForm.strategy}
+      value={vm.vmStrategySelection()}
       disabled={vm.vmFormManaged || vmFormStrategyPending(vm.vmForm)}
+      onchange={(event) => vm.setVmStrategy(event.currentTarget.value)}
     >
       {#each vm.vmStrategyOptions() as option (option.value)}
         <option value={option.value}>{option.label}</option>
       {/each}
     </select>
   </div>
+  {#if vm.vmForm.strategy === "plugin" && vm.vmRouteFields().length > 0}
+    <div class="vm-strategy-fields">
+      <p class="form-hint">
+        {m.models_strategy_plugin_fields_help({ name: vm.vmForm.strategy_plugin })}
+      </p>
+      <SchemaFields
+        fields={vm.vmRouteFields()}
+        config={vm.vmForm.strategy_config}
+        idPrefix="virtual-model-strategy-field"
+        disabled={vm.vmFormManaged || vmFormStrategyPending(vm.vmForm)}
+        onchange={(config) => vm.setVmStrategyConfig(config)}
+      />
+    </div>
+  {/if}
   {#if vmFormShowBalancingOptions(vm.vmForm)}
     <div class="form-field">
       <label class="vm-option-checkbox">
@@ -280,6 +300,20 @@
   }
 
   .vm-routing-summary {
+    margin: 0;
+  }
+
+  .vm-strategy-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+  }
+
+  .vm-strategy-fields > :global(p) {
     margin: 0;
   }
 

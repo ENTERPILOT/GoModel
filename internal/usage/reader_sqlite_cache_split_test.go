@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 )
 
@@ -17,15 +18,12 @@ import (
 // by summing each field separately and taking the max of the sums.
 func TestSQLiteReaderSummary_AggregatesProviderCacheSplit(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open sqlite database: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 
 	store, err := NewSQLiteStore(db, 0)
-	if err != nil {
-		t.Fatalf("failed to create sqlite store: %v", err)
-	}
+	require.NoError(t, err)
 
 	ts := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 
@@ -71,28 +69,21 @@ func TestSQLiteReaderSummary_AggregatesProviderCacheSplit(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := store.WriteBatch(ctx, append(append([]*UsageEntry{}, providerEntries...), localHit)); err != nil {
-		t.Fatalf("failed to seed usage entries: %v", err)
-	}
+	err = store.WriteBatch(ctx, append(append([]*UsageEntry{}, providerEntries...), localHit))
+	require.NoError(t, err)
 
 	reader, err := NewSQLiteReader(db)
-	if err != nil {
-		t.Fatalf("failed to create sqlite reader: %v", err)
-	}
+	require.NoError(t, err)
 
 	summary, err := reader.GetSummary(ctx, UsageQueryParams{
 		StartDate: time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC),
 		EndDate:   time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC),
 		TimeZone:  "UTC",
 	})
-	if err != nil {
-		t.Fatalf("GetSummary returned error: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Local-cache row excluded by the default uncached mode.
-	if summary.TotalRequests != len(providerEntries) {
-		t.Fatalf("TotalRequests = %d, want %d (local-cache row must be excluded)", summary.TotalRequests, len(providerEntries))
-	}
+	require.Equal(t, len(providerEntries), summary.TotalRequests)
 
 	// Oracle: sum EntryInputSegments over the same provider rows independently.
 	var wantUncached, wantCached, wantWrite int64
@@ -103,26 +94,14 @@ func TestSQLiteReaderSummary_AggregatesProviderCacheSplit(t *testing.T) {
 		wantWrite += w
 	}
 
-	if summary.UncachedInputTokens != wantUncached {
-		t.Fatalf("UncachedInputTokens = %d, want %d", summary.UncachedInputTokens, wantUncached)
-	}
-	if summary.CachedInputTokens != wantCached {
-		t.Fatalf("CachedInputTokens = %d, want %d", summary.CachedInputTokens, wantCached)
-	}
-	if summary.CacheWriteInputTokens != wantWrite {
-		t.Fatalf("CacheWriteInputTokens = %d, want %d", summary.CacheWriteInputTokens, wantWrite)
-	}
+	require.Equal(t, wantUncached, summary.UncachedInputTokens)
+	require.Equal(t, wantCached, summary.CachedInputTokens)
+	require.Equal(t, wantWrite, summary.CacheWriteInputTokens)
 
 	// Explicit magic numbers guard against a regression that still happens to be
 	// self-consistent with a broken oracle. cached = 80+90+0+120+10 = 300 can only
 	// be reached by per-row max-coalescing, not max(sum-per-field).
-	if summary.CachedInputTokens != 300 {
-		t.Fatalf("CachedInputTokens = %d, want 300", summary.CachedInputTokens)
-	}
-	if summary.CacheWriteInputTokens != 30 {
-		t.Fatalf("CacheWriteInputTokens = %d, want 30", summary.CacheWriteInputTokens)
-	}
-	if summary.UncachedInputTokens != 310 {
-		t.Fatalf("UncachedInputTokens = %d, want 310", summary.UncachedInputTokens)
-	}
+	require.Equal(t, int64(300), summary.CachedInputTokens)
+	require.Equal(t, int64(30), summary.CacheWriteInputTokens)
+	require.Equal(t, int64(310), summary.UncachedInputTokens)
 }

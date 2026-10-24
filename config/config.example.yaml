@@ -2,19 +2,37 @@
 # Copy to config/config.yaml to customize.
 # Environment variables always override values in this file.
 # All settings have sensible defaults — no config file is required.
+#
+# Any string value can be a secret reference, resolved after the file is read:
+#   ${env:NAME}         the variable's value; unset or empty stops startup
+#   ${file:/abs/path}   the file's contents minus one trailing newline (Docker/Kubernetes secrets)
+# References may sit inside a value ("Bearer ${env:TOKEN}"); write $${ for a literal ${.
+# The plain ${NAME} / ${NAME:-default} form still works and leaves an unset NAME in place.
 
 server:
   port: "8080"
   base_path: "/" # env: BASE_PATH; set to "/g" to serve the gateway under https://example.com/g/
   master_key: "your-secret-key"
+  master_key_disabled: false # env: MASTER_KEY_DISABLED; true forgets the master key, leaving managed gateway API keys and any configured authentication extension as the only credentials. The gateway then requires a credential on every request and keeps the admin API gated, so issue one with dashboard access first
   body_size_limit: "10M"
+  stream_stall_timeout: 60 # env: STREAM_STALL_TIMEOUT; seconds one response write on a model route may wait for the client to read it. Fires only when a client stops reading, never while the provider is slow; 0 disables
   swagger_enabled: false # env: SWAGGER_ENABLED; requires a binary built with -tags=swagger
   pprof_enabled: false # expose /debug/pprof/* for local profiling only
   enable_passthrough_routes: true # expose /p/{provider}/{endpoint} passthrough routes
   allow_passthrough_v1_alias: true # allow /p/{provider}/v1/... while keeping /p/{provider}/... canonical
   user_path_header: "X-GoModel-User-Path" # env: USER_PATH_HEADER; inbound header used for user_path scoping
   enabled_passthrough_providers: ["openai", "anthropic", "cohere", "openrouter", "kilo", "zai", "sglang", "vllm", "llmd", "deepseek", "bailian"] # providers enabled on /p/{provider}/...
+  auth_verify_enabled: false # env: AUTH_VERIFY_ENABLED; expose GET /v1/auth/verify, which reports whether the API key a request carries authenticates against this gateway (401 when it does not; 200 with {"valid":false,"method":"none"} when the gateway has no authentication configured). Outside /admin, so it works with the admin API disabled
   realtime_enabled: true # env: REALTIME_ENABLED; expose the /v1/realtime and /v1/realtime/translations websockets, their calls/client_secrets siblings, and /p/{provider}/v1/realtime upgrades
+  # Client address resolution. Leave trusted_proxies empty (default) and every
+  # client address GoModel reports is the socket peer, with forwarding headers
+  # ignored. Entries are CIDR networks, bare addresses, or the presets
+  # "loopback" and "private" (RFC 1918 + ULA); prefer the one subnet your proxy
+  # sits on over "private", which trusts every private client to set its own
+  # forwarded address.
+  # trusted_proxies: ["10.42.0.0/16", "loopback"]
+  # client_ip_header: "CF-Connecting-IP" # env: SERVER_CLIENT_IP_HEADER; default X-Forwarded-For, resolved hop by hop. Any other header carries one address and is taken verbatim, which is correct behind an edge like Cloudflare. Requires trusted_proxies; RFC 7239 Forwarded is not supported
+  # trusted_hops: 1 # env: SERVER_TRUSTED_HOPS; proxies between the client and the gateway. Takes the X-Forwarded-For entry at that depth instead of scanning the chain, for an edge at a fixed depth with addresses you cannot enumerate. Requires trusted_proxies
   pid_file: "data/gomodel.pid" # env: PID_FILE; where the running gateway records its process id so `gomodel --reload` can find it. Set per instance when several gateways share a host; empty writes no pid file and disables --reload; changing it needs a restart, not a reload
 
 models:
@@ -43,6 +61,11 @@ models:
 #     - header: X-Internal-Routing
 #       do_not_pass: true # stripped before forwarding to the provider
 #       delimiter: ";"
+#   # LiteLLM tags (x-litellm-tags header, body "tags", list metadata.tags) become
+#   # labels and are stripped before the provider; at most 32 per request, tags
+#   # over 128 characters are dropped. Clients choose them, so they can charge any
+#   # label budget they name: set false when label budgets must hold per team.
+#   litellm_tags_enabled: true # env: LITELLM_TAGS_ENABLED
 
 # Session keeping: identify which requests belong to one client session, for
 # sticky virtual-model load balancing and audit-log session grouping. Everything
@@ -65,7 +88,7 @@ models:
 #     target: anthropic/claude-sonnet-4-6
 #     slowdown: 0.5 # add 50%; use 0 to disable inherited slowdown (active range: 0.1-10)
 #   - source: smart # weighted round-robin load balancer
-#     strategy: round_robin # round_robin (default) | cost | failover | adaptive (uses a routing extension when registered; otherwise falls back to round_robin)
+#     strategy: round_robin # round_robin (default) | cost | failover | adaptive (uses a routing extension when registered; otherwise falls back to round_robin) | plugin (see smart-router below)
 #     targets:
 #       - { model: openai/gpt-4o, weight: 2 }
 #       - { model: anthropic/claude-sonnet-4-6 }
@@ -86,6 +109,16 @@ models:
 #       - { model: gpt-4o }
 #       - { model: azure/gpt-4o }
 #       - { model: gemini/gemini-2.5-pro }
+#   - source: smart-router # plugin: a routing-strategy plugin picks the target; weights are ignored
+#     strategy: plugin
+#     strategy_plugin: cheapest_healthy # built in; GET /admin/plugins lists loaded plugins with kind "route"
+#     strategy_config: # the plugin's route_fields, validated at startup; defaults apply when omitted
+#       prefer: cheapest # cheapest | fastest
+#       max_error_rate: 0.2
+#     targets:
+#       - { model: openai/gpt-4o }
+#       - { model: anthropic/claude-sonnet-4-6 }
+#       - { model: groq/llama-3.3-70b }
 
 # Users as infrastructure-as-code: per user-path model allowlists (groups and
 # users are the user paths behind your API keys). A node with no allowed_models
@@ -115,6 +148,10 @@ models:
 #   # page's Origin and Host agree with each other, so comparing them proves
 #   # nothing). Add an origin only if you serve an MCP web client from it.
 #   allowed_origins: [] # env: MCP_ALLOWED_ORIGINS; "*" disables the check
+#   # off (default) lists every tool; search lists only search_tools and call_tool,
+#   # so large catalogs stop costing model context. Clients override it per session
+#   # with the X-MCP-Tool-Discovery header.
+#   tool_discovery: off # env: MCP_TOOL_DISCOVERY
 #   servers:
 #     github:
 #       url: https://api.githubcopilot.com/mcp
@@ -122,9 +159,10 @@ models:
 #       headers:
 #         Authorization: "Bearer ${GITHUB_PAT}"
 #       description: GitHub tools
-#       allowed_tools: [] # allowlist of upstream tool names; empty = all
-#       disallowed_tools: [] # blocklist, applied after the allowlist
+#       allowed_tools: [] # allowlist of upstream tool names; empty = all (new upstream tools stay hidden when set)
+#       disallowed_tools: [] # tools to exclude, applied after the allowlist; edits apply without a reconnect
 #       user_paths: [] # restrict visibility to these user-path subtrees; empty = everyone
+#       disallowed_user_paths: [] # hide from these subtrees, even inside user_paths
 #       tool_timeout: 30s # per tools/call upper bound
 #     local-files: # stdio servers spawn a subprocess and are declarative-only:
 #       transport: stdio # the admin API and dashboard reject them by design
@@ -132,6 +170,14 @@ models:
 #       args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
 #       env: # subprocesses inherit only PATH/HOME/TMPDIR/USER/LANG — never the
 #         SOME_TOKEN: "${SOME_TOKEN}" # gateway's API keys; pass extras here explicitly
+#   # env: MCP_VIRTUAL_SERVERS. Each virtual server serves a subset of the servers
+#   # above at /mcp/{name}, with namespaced tool names. Names must not match a
+#   # server slug. It only narrows: every member keeps its user-path and tool rules.
+#   virtual_servers:
+#     coding:
+#       description: Code review tools
+#       servers: [github, linear]
+#       tool_discovery: search # optional; default: mcp.tool_discovery
 
 cache:
   model:
@@ -191,11 +237,25 @@ storage:
   mongodb:
     url: "mongodb://localhost:27017"
     database: "gomodel"
+  # Encrypts dashboard-managed secrets at rest. Prefer GOMODEL_ENCRYPTION_KEY
+  # from a secret manager over writing the key here.
+  # encryption_key: "${GOMODEL_ENCRYPTION_KEY}"
+  # encryption_key_previous: "${GOMODEL_ENCRYPTION_KEY_PREVIOUS}" # only during a key rotation
+
+# Where media files go: audio and images captured for the audit log (see
+# logging.log_audio_bodies / log_image_bodies). Metadata stays in storage
+# above; only the bytes are written here. Mount a volume at the path in
+# containers, or a shared mount (EFS, S3 FUSE) when running several replicas.
+media:
+  storage:
+    type: "filesystem" # "filesystem" (default) or "memory" (lost on restart)
+    path: "data/media" # default: data/media when ./data exists, else the OS data dir
 
 logging:
   enabled: true
   log_bodies: true # WARNING: may contain sensitive data
-  log_revision_bodies: true # store rewritten bodies from request rewriters (needs log_bodies)
+  log_revision_bodies: true # store rewritten bodies from request rewriters and prompt guardrails (needs log_bodies)
+  # log_guardrail_steps: true # one audit revision per editing prompt guardrail; false records the chain's edits as one revision
   # log_audio_bodies: false # embed audio bytes for /v1/audio/* entries (needs log_bodies)
   # log_image_bodies: false # embed image bytes for /v1/images/* entries (needs log_bodies)
   # log_image_bodies_scope: all # all | input | output
@@ -235,6 +295,14 @@ budgets:
       limits:
         - period: "monthly"
           amount: 500.00
+  providers:
+    # Caps one provider instance's spend across every user path and label;
+    # failover skips a provider whose budget is spent.
+    # Env equivalent: SET_PROVIDER_BUDGET_OPENAI="daily=100"
+    - name: "openai"
+      limits:
+        - period: "daily"
+          amount: 100.00
 
 rate_limits:
   enabled: true # env: RATE_LIMITS_ENABLED; with no configured rules this has no effect
@@ -295,10 +363,12 @@ opentelemetry:
   sampler: "parentbased_always_on" # e.g. "parentbased_traceidratio" with sampler_arg "0.1"
   # sampler_arg: "0.1"
   propagators: "tracecontext,baggage" # also b3, b3multi, jaeger, ottrace, none
+  capture_message_content: false # record prompts and completions on provider call spans
 
 http:
   timeout: 600 # seconds (10 minutes)
   response_header_timeout: 600
+  stream_idle_timeout: 300 # seconds of silence allowed mid-stream before a stalled stream fails; 0 disables
   # Client TLS trust for every outbound HTTPS connection (providers, model
   # catalog, update check, MCP upstreams, vector stores). All optional; the
   # default trusts the operating system certificate store.
@@ -315,31 +385,67 @@ workflows:
 # Individual providers can override any of these values.
 resilience:
   retry:
+    retry_on_statuses: [429, 502, 503, 504, 522, 524] # env: RETRY_ON_STATUSES; [] disables status-based retries
     max_retries: 3
     initial_backoff: 1s
     max_backoff: 30s
     backoff_factor: 2.0
     jitter_factor: 0.1
   circuit_breaker:
+    failure_on_statuses: [429, 5xx] # env: CIRCUIT_BREAKER_FAILURE_ON_STATUSES; [] disables status-based failures
+    scope: provider # env: CIRCUIT_BREAKER_SCOPE; model isolates each model within a provider
     # Set false to never fail fast on a struggling provider (default: true).
     enabled: true
     failure_threshold: 5
     success_threshold: 2
     timeout: 30s
+    # Count a call answered slower than this as a failure, so sustained latency
+    # opens the circuit (and fails over) like sustained errors. 0 disables it.
+    slow_call_threshold: 0s # env: CIRCUIT_BREAKER_SLOW_CALL_THRESHOLD; e.g. 60s
 
 guardrails:
   enabled: false
   enable_for_batch_processing: false
   rules:
-    # Each entry is a guardrail instance. Multiple instances of the same type are supported.
-    # Guardrails with the same "order" run in parallel; different orders run sequentially.
+    # Each entry is a guardrail instance built from a plugin (`type`). Built-in
+    # plugins: system_prompt, llm_based_altering, string_replace, tag_replace,
+    # header_edit, llm_judge, presidio; loaded .so plugins are referenced by their manifest
+    # name.
+    # Instances are seeded into the guardrails store and referenced by the
+    # default workflow at `order` in `phase` (prompt | response | stream,
+    # default prompt). Guardrails with the same "order" run in parallel;
+    # different orders run sequentially. `config` is validated against the
+    # plugin's schema (GET /admin/guardrails/types). `fail_mode` (closed |
+    # open, default closed) and `timeout_ms` (default 0 = none) bound failures.
 
     - name: "safety-prompt"
       type: "system_prompt"
       order: 0
-      system_prompt:
+      system_prompt: # typed shorthand; equivalent to config: {mode: ..., content: ...}
         mode: "decorator" # "inject", "override", or "decorator"
         content: "Always be safe and respectful."
+
+    # Example: redact a pattern from responses (response phase, generic config).
+    # - name: "mask-keys"
+    #   type: "string_replace"
+    #   phase: "response"
+    #   order: 10
+    #   fail_mode: "open"
+    #   config:
+    #     mode: "regex"                 # literal (default) | regex
+    #     rules: |                      # one "find => replace" per line (a YAML list also works)
+    #       sk-[A-Za-z0-9]{20,} => [redacted]
+
+    # Example: anonymize personal data with a Presidio analyzer sidecar
+    # (docker run -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer).
+    # - name: "pii"
+    #   type: "presidio"
+    #   order: 1
+    #   timeout_ms: 5000
+    #   config:
+    #     analyzer_url: "http://localhost:5002"
+    #     entities: ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
+    #     block_entities: ["CREDIT_CARD"]
 
     # Example: a second system_prompt instance running at the same order (parallel)
     # - name: "compliance-prompt"
@@ -356,12 +462,6 @@ guardrails:
     #   system_prompt:
     #     mode: "decorator"
     #     content: "Соблюдайте все правила безопасности."
-    # - name: "安全検査"
-    #   type: "system_prompt"
-    #   order: 1
-    #   system_prompt:
-    #     mode: "inject"
-    #     content: "Follow safety guidelines."
 
     # Example: rewrite user messages with an auxiliary model before the main call.
     # The default prompt is a LiteLLM-derived anonymization prompt; override it to
@@ -370,12 +470,28 @@ guardrails:
     #   type: "llm_based_altering"
     #   user_path: "/team/privacy" # optional base path for internal rewrite calls and audit logs
     #   order: 1
+    #   timeout_ms: 20000
     #   llm_based_altering:
     #     model: "gpt-4o-mini"
     #     roles: ["user"]
     #     max_tokens: 4096
     #     skip_content_prefix: "### safe"
     #     # prompt: "Custom rewrite instructions here."
+
+# The plugin system: built-in and loaded plugin types, the guardrails built
+# from them, routing-strategy plugins for virtual models, and the
+# /admin/plugins and /admin/guardrails endpoints. Off by default;
+# guardrails.enabled: true turns it on implicitly.
+# Shared-object plugins (.so) need a cgo build of GoModel (make build-plugins
+# or the gomodel:<version>-plugins image). A .so is trusted code: keep
+# search_paths root-owned and pin sha256 in production.
+plugins:
+  enabled: false # PLUGINS_ENABLED. Default: false
+  search_paths: [] # PLUGINS_SEARCH_PATHS (comma-separated). Default: empty (no .so loading)
+  load: []
+  # load:
+  #   - file: keyword_block.so        # relative to search_paths, or absolute
+  #     sha256: ""                    # optional pin; mismatch fails startup
 
 # Failover is a load-balancing behaviour of virtual models: when the target a
 # request was sent to fails, the redirect's remaining targets are tried in
@@ -414,7 +530,7 @@ failover:
 providers:
   openai:
     type: openai
-    api_key: "sk-..."
+    api_key: "sk-..." # or a secret reference: ${file:/run/secrets/openai}
     # Identified sessions stay on one key by default, preserving provider prompt
     # cache affinity while still spreading different sessions across keys.
     # Equivalent env vars: OPENAI_API_KEY_2, OPENAI_API_KEY_3, ...
@@ -423,6 +539,10 @@ providers:
     #   - "${OPENAI_API_KEY_3}"
     # Set false for strict per-request round robin (usually worse for prompt caching).
     # session_sticky_keys: false
+    # Send only this provider's traffic through an HTTP(S) or SOCKS5 proxy.
+    # Providers without one keep the process-wide HTTP_PROXY / HTTPS_PROXY / NO_PROXY.
+    # Equivalent env var: OPENAI_PROXY_URL
+    # proxy_url: "socks5://user:pass@10.0.0.1:1080"
     # Per-provider resilience overrides (optional).
     # Only specified fields override the global defaults above.
     # resilience:
@@ -496,12 +616,58 @@ providers:
     # base_url defaults to "https://llm.chutes.ai/v1".
     # Set base_url when using a different compatible endpoint.
 
+  edenai:
+    type: edenai
+    api_key: "${EDENAI_API_KEY}"
+    # base_url defaults to "https://api.edenai.run/v3".
+    # Multi-provider gateway: model IDs use provider/model notation and pass
+    # through unchanged. Models, context windows, capabilities, and per-token
+    # pricing are discovered from Eden's own /v3/models, and per-request cost
+    # comes from the exact USD "cost" Eden returns on each response, so no
+    # pricing metadata needs declaring here.
+    # GoModel's /v1/responses is served by translating to Eden's chat
+    # completions; Eden's own /v3/responses is a different API and is never used.
+    # models:
+    #   - id: "openai/gpt-4"
+    #   - id: "anthropic/claude-sonnet-latest"
+
   elevenlabs:
     type: elevenlabs
     api_key: "${ELEVENLABS_API_KEY}"
     # base_url defaults to "https://api.elevenlabs.io".
     # Voice-only provider: text-to-speech and speech-to-text, no chat. The
     # OpenAI "voice" field must be an ElevenLabs voice_id.
+
+  audiocpp:
+    type: audiocpp
+    base_url: "http://localhost:8099"
+    # Audio-only local server: text-to-speech and speech-to-text, no chat.
+    # base_url is required (audiocpp_server's default port collides with the
+    # gateway's own) and a trailing /v1 is accepted. api_key is optional and
+    # usually unset, since audio.cpp has no authentication of its own.
+
+  jev:
+    type: jev
+    api_key: "${JEV_API_KEY}"
+    # base_url defaults to "https://api.typesafe.ai". TypeSafe's System One
+    # API is a decision API: configuring this provider enables
+    # POST /v1/decisions, which answers OpenAI Decisions requests by
+    # translating them to System One, and POST /v1/systemone (also enabled
+    # by openrouter, which serves Jev natively), which forwards System One
+    # requests natively (point the TypeSafe SDK at the gateway root). A self-hosted Kev
+    # server speaks the same API without authentication: set base_url
+    # (e.g. "http://localhost:8009") and omit api_key. Name it "kev" to see
+    # that name in logs and usage; no separate provider type is needed.
+    # Pinned versions such as "jev-1.13.0" route here without being listed.
+    # Jev is priced per input token and is not in the upstream model catalog;
+    # declare its pricing here to have the gateway cost System One requests.
+    # models:
+    #   - id: "jev-1.13.0"
+    #     metadata:
+    #       pricing:
+    #         currency: USD
+    #         input_per_mtok: 0.042
+    #         output_per_mtok: 0
 
   meta:
     type: meta

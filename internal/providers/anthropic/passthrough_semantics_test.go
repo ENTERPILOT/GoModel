@@ -3,6 +3,9 @@ package anthropic
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
@@ -38,16 +41,9 @@ func TestPassthroughSemanticEnricher_Enrich(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := enricher.Enrich(nil, nil, tt.info)
-			if got == nil {
-				t.Fatal("Enrich() = nil")
-				return
-			}
-			if got.SemanticOperation != tt.wantOperation {
-				t.Fatalf("SemanticOperation = %q, want %q", got.SemanticOperation, tt.wantOperation)
-			}
-			if got.AuditPath != tt.wantAuditPath {
-				t.Fatalf("AuditPath = %q, want %q", got.AuditPath, tt.wantAuditPath)
-			}
+			require.NotNil(t, got)
+			assert.Equal(t, tt.wantOperation, got.SemanticOperation)
+			assert.Equal(t, tt.wantAuditPath, got.AuditPath)
 		})
 	}
 }

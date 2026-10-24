@@ -45,8 +45,13 @@ type PassthroughRouteInfo struct {
 	GenAIOperation     string // standard GenAI operation, if this is an inference call
 	Stream             bool   // explicit streaming intent derived from the request body
 	StreamUncertain    bool   // bounded opaque-body inspection could not determine stream intent
-	AuditPath          string
-	Model              string
+	// ModelAmbiguous reports that the opaque body names a model more than once,
+	// so no single value can be authorized: the upstream's parser decides which
+	// one wins, and the gateway cannot know. Such a request is rejected rather
+	// than forwarded unchecked.
+	ModelAmbiguous bool
+	AuditPath      string
+	Model          string
 }
 
 type semanticCacheKey string
@@ -343,6 +348,24 @@ func applyBodyStreamHint(env *WhiteBoxPrompt, stream, uncertain bool) {
 		cloned := *passthrough
 		cloned.Stream = stream
 		cloned.StreamUncertain = uncertain
+		CachePassthroughRouteInfo(env, &cloned)
+	}
+}
+
+// MarkPassthroughModelAmbiguous records that the opaque body carries more than
+// one top-level model field, so the request's model cannot be authorized. Any
+// model hint already taken from the body is dropped with it: a first-match
+// peek would have kept whichever value came first, which is not necessarily
+// the one the upstream's parser uses.
+func MarkPassthroughModelAmbiguous(env *WhiteBoxPrompt) {
+	if env == nil {
+		return
+	}
+	env.RouteHints.Model = ""
+	if passthrough := env.CachedPassthroughRouteInfo(); passthrough != nil {
+		cloned := *passthrough
+		cloned.ModelAmbiguous = true
+		cloned.Model = ""
 		CachePassthroughRouteInfo(env, &cloned)
 	}
 }

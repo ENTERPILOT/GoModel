@@ -344,11 +344,12 @@ func (i ResponsesOutputItem) MarshalJSON() ([]byte, error) {
 	return marshalWithUnknownJSONFields(alias(i), i.ExtraFields)
 }
 
-// MarshalJSON keeps `annotations` on the wire for output_text parts. OpenAI
-// always returns `annotations: []` there and OpenAI SDK consumers (for
-// example LangChain's Responses converter) index into it without a nil
-// check, so an omitted field breaks them. Input parts keep the field only
-// when a caller supplied it.
+// MarshalJSON keeps `text` and `annotations` on the wire for output_text
+// parts. Both are required by the OpenAI schema: OpenAI always returns
+// `annotations: []` there and OpenAI SDK consumers (for example LangChain's
+// Responses converter) index into it without a nil check, and an empty
+// assistant answer must still serialize `text: ""` rather than drop the
+// member. Input parts keep both fields only when a caller supplied them.
 func (c ResponsesContentItem) MarshalJSON() ([]byte, error) {
 	type alias ResponsesContentItem
 	if c.Type != "output_text" {
@@ -359,8 +360,9 @@ func (c ResponsesContentItem) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(struct {
 		alias
+		Text        string            `json:"text"`
 		Annotations []json.RawMessage `json:"annotations"`
-	}{alias(c), c.Annotations})
+	}{alias(c), c.Text, c.Annotations})
 }
 
 // ResponsesBlocksFromContentParts converts typed parts into generic content

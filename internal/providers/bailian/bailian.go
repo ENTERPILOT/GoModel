@@ -14,7 +14,6 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 )
@@ -50,13 +49,6 @@ type Provider struct {
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	compat := openai.NewCompatibleProvider(cfg.APIKey, opts, compatibleConfig(providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL)))
 	return newProvider(compat, opts.Keyring(cfg.APIKey))
-}
-
-// NewWithHTTPClient creates a new Bailian provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	compat := openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(defaultBaseURL))
-	return newProvider(compat, providers.NewKeyring(apiKey))
 }
 
 func newProvider(compat *openai.CompatibleProvider, keys *providers.Keyring) *Provider {
@@ -103,7 +95,7 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 
 // Responses sends a Responses API request translated through chat completions.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return providers.ResponsesViaChat(ctx, p, req)
+	return providers.ResponsesViaChat(ctx, p, req, "bailian")
 }
 
 // StreamResponses streams a Responses API request translated through chat completions.

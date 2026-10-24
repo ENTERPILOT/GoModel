@@ -9,49 +9,26 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
-
-func TestConfigureGatewayHTTPServer_PreservesServerWriteTimeoutDefault(t *testing.T) {
-	server := &http.Server{
-		ReadTimeout:  time.Second,
-		WriteTimeout: 30 * time.Second,
-	}
-
-	if err := configureGatewayHTTPServer(server); err != nil {
-		t.Fatalf("configureGatewayHTTPServer() error = %v", err)
-	}
-
-	if got := server.ReadTimeout; got != inboundServerReadTimeout {
-		t.Fatalf("ReadTimeout = %v, want %v", got, inboundServerReadTimeout)
-	}
-	if got := server.ReadHeaderTimeout; got != inboundServerReadHeaderTimeout {
-		t.Fatalf("ReadHeaderTimeout = %v, want %v", got, inboundServerReadHeaderTimeout)
-	}
-	if got := server.WriteTimeout; got != inboundServerWriteTimeout {
-		t.Fatalf("WriteTimeout = %v, want %v", got, inboundServerWriteTimeout)
-	}
-}
 
 func TestNewGatewayStartConfig_AppliesTimeoutOverrides(t *testing.T) {
 	cfg := newGatewayStartConfig(":0")
-	if cfg.BeforeServeFunc == nil {
-		t.Fatal("BeforeServeFunc = nil, want configured server overrides")
-	}
+	require.NotNil(t, cfg.BeforeServeFunc)
 
-	server := &http.Server{}
-	if err := cfg.BeforeServeFunc(server); err != nil {
-		t.Fatalf("BeforeServeFunc() error = %v", err)
+	// Seed every timeout so the callback is shown to replace existing values,
+	// not merely fill in unset ones.
+	server := &http.Server{
+		ReadTimeout:       time.Hour,
+		ReadHeaderTimeout: time.Hour,
+		WriteTimeout:      time.Hour,
 	}
-
-	if got := server.ReadTimeout; got != inboundServerReadTimeout {
-		t.Fatalf("ReadTimeout = %v, want %v", got, inboundServerReadTimeout)
-	}
-	if got := server.ReadHeaderTimeout; got != inboundServerReadHeaderTimeout {
-		t.Fatalf("ReadHeaderTimeout = %v, want %v", got, inboundServerReadHeaderTimeout)
-	}
-	if got := server.WriteTimeout; got != inboundServerWriteTimeout {
-		t.Fatalf("WriteTimeout = %v, want %v", got, inboundServerWriteTimeout)
-	}
+	err := cfg.BeforeServeFunc(server)
+	require.NoError(t, err)
+	require.Equal(t, inboundServerReadTimeout, server.ReadTimeout)
+	require.Equal(t, inboundServerReadHeaderTimeout, server.ReadHeaderTimeout)
+	require.Equal(t, inboundServerWriteTimeout, server.WriteTimeout)
 }
 
 // Leaving GracefulTimeout unset takes Echo's implicit 10s default and reports
@@ -62,12 +39,9 @@ func TestNewGatewayStartConfig_AppliesTimeoutOverrides(t *testing.T) {
 func TestNewGatewayStartConfig_ConfiguresGracefulDrain(t *testing.T) {
 	cfg := newGatewayStartConfig(":0")
 
-	if cfg.GracefulTimeout != GracefulDrainTimeout {
-		t.Fatalf("GracefulTimeout = %v, want %v", cfg.GracefulTimeout, GracefulDrainTimeout)
-	}
-	if cfg.OnShutdownError == nil {
-		t.Fatal("OnShutdownError = nil, want the drain cutoff reported by the gateway")
-	}
+	require.Equal(t, GracefulDrainTimeout, cfg.GracefulTimeout)
+	require.NotNil(t, cfg.OnShutdownError)
+
 	// A nil handler is Echo's signal to log it itself; ours must absorb the
 	// error without panicking on the deadline it will actually be handed.
 	cfg.OnShutdownError(context.DeadlineExceeded)
@@ -81,21 +55,54 @@ func TestModelInteractionWriteDeadlineMiddleware_ClearsDeadlineForModelRoutes(t 
 			req := httptest.NewRequest(http.MethodPost, path, nil)
 			c := e.NewContext(req, writer)
 
-			handler := modelInteractionWriteDeadlineMiddleware()(func(c *echo.Context) error {
+			handler := modelInteractionWriteDeadlineMiddleware(0)(func(c *echo.Context) error {
 				return c.String(http.StatusOK, "ok")
 			})
-
-			if err := handler(c); err != nil {
-				t.Fatalf("handler() error = %v", err)
-			}
-			if len(writer.deadlines) != 1 {
-				t.Fatalf("deadline calls = %d, want 1", len(writer.deadlines))
-			}
-			if !writer.deadlines[0].IsZero() {
-				t.Fatalf("deadline = %v, want zero time", writer.deadlines[0])
-			}
+			err := handler(c)
+			require.NoError(t, err)
+			require.Len(t, writer.deadlines, 1)
+			require.True(t, writer.deadlines[0].IsZero(), "deadline = %v, want zero time", writer.deadlines[0])
 		})
 	}
+}
+
+// With a stall timeout every write re-arms a deadline that far ahead, and the
+// handler's return clears it again so net/http's trailing writes are not held
+// to a deadline armed long before.
+func TestModelInteractionWriteDeadlineMiddleware_ArmsStallDeadlinePerWrite(t *testing.T) {
+	const stall = 45 * time.Second
+	e := echo.New()
+	writer := &deadlineTrackingWriter{ResponseRecorder: httptest.NewRecorder()}
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	c := e.NewContext(req, writer)
+
+	handler := modelInteractionWriteDeadlineMiddleware(stall)(func(c *echo.Context) error {
+		c.Response().WriteHeader(http.StatusOK)
+		for _, chunk := range []string{"data: one\n\n", "data: two\n\n"} {
+			if _, err := c.Response().Write([]byte(chunk)); err != nil {
+				return err
+			}
+			c.Response().(http.Flusher).Flush()
+		}
+		return nil
+	})
+
+	before := time.Now()
+	err := handler(c)
+	require.NoError(t, err)
+
+	after := time.Now()
+	got := // clear, then (write + flush) x 2, then clear.
+		len(writer.deadlines)
+	require.Equal(t, 6, got, "deadline calls = %d, want 6: %v", got, writer.deadlines)
+	require.True(t, writer.deadlines[0].IsZero(), "first deadline = %v, want zero time", writer.deadlines[0])
+	require.True(t, writer.deadlines[5].IsZero(), "last deadline = %v, want zero time", writer.deadlines[5])
+
+	for i, deadline := range writer.deadlines[1:5] {
+		require.False(t, deadline.Before(before.Add(stall)))
+		require.False(t, deadline.After(after.Add(stall)), "deadline[%d] = %v, want within %v of the write", i+1, deadline, stall)
+	}
+	require.Equal(t, "data: one\n\ndata: two\n\n", writer.Body.String(), "want both chunks relayed")
 }
 
 func TestModelInteractionWriteDeadlineMiddleware_LeavesNonModelRoutesUntouched(t *testing.T) {
@@ -104,16 +111,12 @@ func TestModelInteractionWriteDeadlineMiddleware_LeavesNonModelRoutesUntouched(t
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	c := e.NewContext(req, writer)
 
-	handler := modelInteractionWriteDeadlineMiddleware()(func(c *echo.Context) error {
+	handler := modelInteractionWriteDeadlineMiddleware(time.Minute)(func(c *echo.Context) error {
 		return c.String(http.StatusOK, "ok")
 	})
-
-	if err := handler(c); err != nil {
-		t.Fatalf("handler() error = %v", err)
-	}
-	if len(writer.deadlines) != 0 {
-		t.Fatalf("deadline calls = %d, want 0", len(writer.deadlines))
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.Empty(t, writer.deadlines)
 }
 
 type deadlineTrackingWriter struct {
@@ -132,30 +135,21 @@ func (w *deadlineTrackingWriter) SetWriteDeadline(deadline time.Time) error {
 // inbound timeouts and the drain window from every request the gateway served.
 func TestNewGatewayStartConfigForListener_KeepsTheServerConfiguration(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer listener.Close()
 
 	cfg := newGatewayStartConfigForListener(listener)
 
-	if cfg.Listener != listener {
-		t.Error("Listener = nil, want the pre-bound listener")
-	}
-	if cfg.GracefulTimeout != GracefulDrainTimeout {
-		t.Errorf("GracefulTimeout = %v, want %v", cfg.GracefulTimeout, GracefulDrainTimeout)
-	}
-	if cfg.OnShutdownError == nil {
-		t.Error("OnShutdownError = nil, want the drain cutoff reported by the gateway")
-	}
-	if cfg.BeforeServeFunc == nil {
-		t.Fatal("BeforeServeFunc = nil, want the inbound server timeouts")
-	}
+	assert.Equal(t, listener, cfg.Listener)
+	assert.Equal(t, GracefulDrainTimeout, cfg.GracefulTimeout)
+	assert.NotNil(t, cfg.OnShutdownError)
+	require.NotNil(t, cfg.BeforeServeFunc)
 
 	server := &http.Server{}
-	if err := cfg.BeforeServeFunc(server); err != nil {
-		t.Fatalf("BeforeServeFunc() error = %v", err)
-	}
+	err = cfg.BeforeServeFunc(server)
+	require.NoError(t, err)
+
 	for _, timeout := range []struct {
 		name string
 		got  time.Duration
@@ -165,9 +159,7 @@ func TestNewGatewayStartConfigForListener_KeepsTheServerConfiguration(t *testing
 		{"ReadHeaderTimeout", server.ReadHeaderTimeout, inboundServerReadHeaderTimeout},
 		{"WriteTimeout", server.WriteTimeout, inboundServerWriteTimeout},
 	} {
-		if timeout.got != timeout.want {
-			t.Errorf("%s = %v, want %v", timeout.name, timeout.got, timeout.want)
-		}
+		assert.Equal(t, timeout.want, timeout.got, "%s = %v, want %v", timeout.name, timeout.got, timeout.want)
 	}
 }
 
@@ -176,7 +168,5 @@ func TestNewGatewayStartConfigForListener_KeepsTheServerConfiguration(t *testing
 func TestStartWithListenerRejectsANilListener(t *testing.T) {
 	srv := New(nil, &Config{})
 
-	if err := srv.StartWithListener(context.Background(), nil); err == nil {
-		t.Fatal("StartWithListener(nil) error = nil, want an error")
-	}
+	require.Error(t, srv.StartWithListener(context.Background(), nil))
 }
