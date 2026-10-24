@@ -565,6 +565,12 @@ providers:
     api_key: "${CHATGPT_API_KEY}"
     # models: [gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5]
 
+  # GitHub Copilot subscription. The key is a GitHub OAuth token for the
+  # account, e.g. `gh auth token` (see docs/providers/github-copilot.mdx).
+  github-copilot:
+    type: github-copilot
+    api_key: "${GITHUB_COPILOT_API_KEY}"
+
   cohere:
     type: cohere
     api_key: "${COHERE_API_KEY}"

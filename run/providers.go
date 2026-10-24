@@ -19,6 +19,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers/elevenlabs"
 	"github.com/enterpilot/gomodel/internal/providers/fireworks"
 	"github.com/enterpilot/gomodel/internal/providers/gemini"
+	"github.com/enterpilot/gomodel/internal/providers/githubcopilot"
 	"github.com/enterpilot/gomodel/internal/providers/groq"
 	"github.com/enterpilot/gomodel/internal/providers/hetzner"
 	"github.com/enterpilot/gomodel/internal/providers/jev"
@@ -68,6 +69,7 @@ func defaultProviderFactory(cfg *config.Config) *providers.ProviderFactory {
 	factory.Add(elevenlabs.Registration)
 	factory.Add(fireworks.Registration)
 	factory.Add(gemini.Registration)
+	factory.Add(githubcopilot.Registration)
 	factory.Add(vertex.Registration)
 	factory.Add(groq.Registration)
 	factory.Add(hetzner.Registration)
