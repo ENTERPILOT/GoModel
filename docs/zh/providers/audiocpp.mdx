@@ -62,7 +62,7 @@ curl -s http://localhost:8080/v1/audio/transcriptions \
 
 `voice` 指定的是 audio.cpp 的音色预设、缓存的音色 id，或所配置音色库中的 wav 文件。audio.cpp 没有固定的音色集合，因此 OpenAI 的 `alloy`/`nova`/… 对它没有意义。使用 `GET /p/audiocpp/audio/voices?model=<id>` 可列出某个模型提供的音色。
 
-与 OpenAI API 一样，`/v1/audio/speech` 上的 `voice` 为必填项。如果希望 audio.cpp 改用模型所配置的 `default_voice_preset`，请通过透传调用该路由：`POST /p/audiocpp/audio/speech`。
+省略 `voice` 即可让 audio.cpp 使用模型所配置的 `default_voice_preset`。
 
 声音克隆参数（`voice_ref`、`reference_text`、`seed`、`max_tokens`、`options` 等）会原样转发，因此 audio.cpp 自身的请求字段可以通过标准端点使用。唯一的例外是指向服务端路径的 `voice_ref`（见下文）：
 
