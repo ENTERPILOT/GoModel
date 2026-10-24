@@ -1,0 +1,191 @@
+---
+title: "Images API"
+description: "通过 GoModel 使用兼容 OpenAI 的图片生成和编辑接口，按模型路由，并与聊天共享相同的访问规则、预算、速率限制和成本追踪。"
+icon: "image"
+keywords: ["Images API", "图片生成", "图片编辑", "局部重绘", "images API", "image generation", "image edit", "inpainting", "dall-e", "gpt-image-1", "grok-2-image"]
+---
+
+## 概览
+
+GoModel 暴露了用于图片生成和编辑的**兼容 OpenAI 的图片端点**。已经在调用 OpenAI `/v1/images/generations` 或 `/v1/images/edits` 的客户端和 SDK，无需修改即可指向 GoModel。
+
+请求通过与聊天和嵌入相同的注册表**按模型**路由，因此 `model` 选择、`provider` 提示、虚拟模型、按密钥的模型访问规则（[用户路径](/zh/features/user-path)）、[预算](/zh/features/budgets)和[速率限制](/zh/features/rate-limits)全部适用。图片生成由 OpenAI 以及实现了该端点的兼容 OpenAI 提供商（Azure OpenAI、OpenRouter、[xAI](/zh/providers/xai)）提供，也由 [Google Gemini](/zh/providers/gemini) 提供：Gemini 图片模型通过原生 API 提供，另有 [Vertex AI](/zh/providers/vertex) 上的 Imagen。图片编辑由 OpenAI 和 Azure OpenAI、Gemini 图片模型（`gemini-2.5-flash-image` 等），以及任何在 `/images/edits` 上接受 OpenAI 多部分（multipart）上传的兼容 OpenAI 提供商提供。不具备该能力的提供商会返回明确的 `model "…" does not support image generation`（或 `image edits`）错误，而不会错误路由；对于不支持图片的提供商，仅支持图片的模型会从 `/v1/models` 中隐藏。
+
+## 支持的端点
+
+| 端点 | 行为 |
+| --- | --- |
+| `POST /v1/images/generations` | 根据文本提示词生成图片。接受 JSON 请求体，返回 OpenAI 图片响应封装（`created`、`data[]`，可选的 `usage`）。 |
+| `POST /v1/images/edits` | 编辑或扩展上传的图片（可选蒙版的局部重绘、图生图）。接受 `multipart/form-data`，返回相同的响应封装。 |
+
+## 生成图片
+
+<CodeGroup>
+
+```bash curl
+curl https://your-gateway/v1/images/generations \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-image-1",
+    "prompt": "A watercolor painting of a lighthouse at dawn",
+    "n": 1,
+    "size": "1024x1024",
+    "quality": "medium"
+  }'
+```
+
+```python Python
+import base64
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://your-gateway/v1",
+    api_key=os.environ["GOMODEL_KEY"],
+)
+
+result = client.images.generate(
+    model="gpt-image-1",
+    prompt="A watercolor painting of a lighthouse at dawn",
+    size="1024x1024",
+    quality="medium",
+)
+
+with open("lighthouse.png", "wb") as f:
+    f.write(base64.b64decode(result.data[0].b64_json))
+```
+
+```javascript JavaScript
+import { writeFile } from "node:fs/promises";
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "https://your-gateway/v1",
+  apiKey: process.env.GOMODEL_KEY,
+});
+
+const result = await client.images.generate({
+  model: "gpt-image-1",
+  prompt: "A watercolor painting of a lighthouse at dawn",
+  size: "1024x1024",
+  quality: "medium",
+});
+
+await writeFile("lighthouse.png", Buffer.from(result.data[0].b64_json, "base64"));
+```
+
+</CodeGroup>
+
+`model` 和 `prompt` 为必填项。其他所有字段（`n`、`size`、`quality`、`style`、`response_format`、`background`、`output_format`、`output_compression`、`moderation`、`user`，以及未来的任何参数）都会**原样转发给提供商**，因此无需更新网关即可使用模型特有的选项。由提供商决定接受哪些值，否则返回其自身的错误。例外是 Gemini 的原生适配器，它会将 `n` 和 `size` 转换为对应的原生参数，请参阅 [Google Gemini](#google-gemini)。
+
+响应采用 OpenAI 图片响应封装。`data[]` 条目包含托管的 `url`（DALL·E，`response_format: "url"`）或内联的 `b64_json`（`gpt-image-1` 始终返回 base64）。GoModel 会添加一个 `provider` 字段，标明处理该请求的提供商类型；其余内容都会原样透传，包括 `usage` 块以及 `gpt-image-1` 回显的输出参数。
+
+<Tip>
+  当同一模型 ID 配置在多个提供商上时，请使用 `provider/model` 选择器（例如 `"model": "openai/dall-e-3"`）或 `"provider"` 提示，与聊天完全一致。
+</Tip>
+
+## 编辑图片
+
+编辑请求以 `multipart/form-data` 上传源图片和可选的蒙版，与 OpenAI 端点的要求完全一致。`image`、`prompt` 和 `model` 为必填项；多张源图片以 `image[]` 发送（gpt-image-1 最多接受 16 张）。`mask` 是一张 PNG 图片，其透明像素标记需要修改的区域。
+
+<CodeGroup>
+
+```bash curl
+curl https://your-gateway/v1/images/edits \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -F model="gpt-image-1" \
+  -F image="@lighthouse.png" \
+  -F mask="@mask.png" \
+  -F prompt="Add a sailboat on the horizon" \
+  -F size="1024x1024"
+```
+
+```python Python
+result = client.images.edit(
+    model="gpt-image-1",
+    image=open("lighthouse.png", "rb"),
+    mask=open("mask.png", "rb"),
+    prompt="Add a sailboat on the horizon",
+    size="1024x1024",
+)
+
+with open("lighthouse-edited.png", "wb") as f:
+    f.write(base64.b64decode(result.data[0].b64_json))
+```
+
+```javascript JavaScript
+import fs from "node:fs";
+
+const result = await client.images.edit({
+  model: "gpt-image-1",
+  image: fs.createReadStream("lighthouse.png"),
+  mask: fs.createReadStream("mask.png"),
+  prompt: "Add a sailboat on the horizon",
+  size: "1024x1024",
+});
+
+await writeFile("lighthouse-edited.png", Buffer.from(result.data[0].b64_json, "base64"));
+```
+
+</CodeGroup>
+
+与生成一样，其他所有表单字段（`n`、`size`、`quality`、`response_format`、`background`、`output_format`、`input_fidelity`、`user` 等）都会原样转发给提供商。上传的文件计入网关的请求体大小限制（`BODY_SIZE_LIMIT`）。
+
+## 成本追踪
+
+图片调用会记录在[用量追踪](/zh/features/cost-tracking)中，端点为 `/v1/images/generations` 和 `/v1/images/edits`：
+
+当提供商报告输入 Token 时，提示词始终按 `input_per_mtok` 计价。**生成的图片**按以下两种方式之一计费，绝不会同时使用两种方式，具体由报告的用量决定：
+
+- **按 Token 计费的模型**（`gpt-image-1`、Gemini 图片模型）会报告 `usage`。GoModel 存储 Token 数量，并按模型的 `output_image_per_mtok` 费率（回退到 `output_per_mtok`）为生成的 Token 计价。图片输出费率正是提供商在此收取的费率：`gpt-image-1` 根本没有文本输出价格，而 Gemini 3 Pro Image 的图片输出按 $120/Mtok 计费，文本则为 $12/Mtok。这种计价方式对任何尺寸和质量都是精确的。
+- **按图片计费的模型**（DALL·E、`grok-imagine-image`、Imagen）不报告 Token。GoModel 记录返回的图片数量（原始用量数据中的 `images`），并按模型的 `per_image` 费率计价。
+
+模型目录中的条目通常同时包含同一模型的这两种费率，因为 `per_image` 相当于一张典型图片 Token 费用的固定等价值（对于 1290 Token 的 `gemini-2.5-flash-image`，为 $0.039）。如果响应报告了生成的 Token，则仅按这些 Token 计价，因此两者永远不会叠加。
+
+如果定价无法计算生成图片的成本（没有适用于响应所报告的图片输出 Token 的费率，或者既没有报告输出 Token、也没有 `per_image`/`per_request` 费率），该用量记录会被标记一条成本计算说明，显示为“未报告的用量”，而不是一次免费调用。
+
+当模型目录中没有某个图片模型的价格时，可通过[定价覆盖](/zh/features/cost-tracking#覆盖定价)或在 `config.yaml` 中设置 `per_image`：
+
+```yaml
+providers:
+  openai:
+    type: openai
+    api_key: "${OPENAI_API_KEY}"
+    models:
+      - id: dall-e-3
+        metadata:
+          pricing:
+            currency: USD
+            per_image: 0.04
+```
+
+## 限制
+
+图片端点是一个按模型路由、直通提供商的轻量通道，**不会经过完整的推理编排器**。与 `/v1/chat/completions` 相比：
+
+- **不支持故障转移、护栏或响应缓存**：这些阶段会被跳过。请求仍会经过授权、预算检查、速率限制、计量，并写入[审计日志](/zh/advanced/admin-endpoints)。
+- **不支持流式传输**：`stream: true` 会被以 `400` 拒绝，因为流式图片生成以 Server-Sent Events 形式交付，而这些端点不会转发它们。省略 `stream`（或将其设置为 `false`）即可接收完整的 JSON 响应。
+- **不暴露变体接口**（`/v1/images/variations`）。请使用[透传 API](/zh/features/passthrough-api)（`/p/{provider}/v1/images/...`）在特定提供商上调用。
+- **入站使用 OpenAI 请求格式**：Google Gemini 的原生图片 API（Imagen `predict`、Gemini 图片模型 `generateContent`）会在这些端点背后进行转换；请参阅下文的[提供商说明](#google-gemini)。其他原生图片 API 与 OpenAI 不同的提供商不会被转换，请对它们使用透传。
+
+## Google Gemini
+
+当 Gemini 提供商处于原生 API 模式（默认）时，Gemini 图片模型（`gemini-2.5-flash-image` 等）通过 `generateContent` 生成图片，`imagen-*` 模型则通过 Imagen 的 `predict` API 生成。Google 已于 2026 年 8 月 17 日从 Gemini API（AI Studio）中下线 Imagen，请在该平台上使用 Gemini 图片模型；Imagen 仍可在 [Vertex AI](/zh/providers/vertex) 上使用。
+
+- Gemini 图片模型不支持多候选输出，因此 `n`（最大 10）会以 `n` 个并行的 `generateContent` 调用来处理，并合并其结果；每次调用都会由 Google 单独计费。对于 Imagen，`n` 映射为 `sampleCount`；`size` 映射为最接近的受支持宽高比（`1024x1024` → `1:1`、`1536x1024` → `3:2` 等），而 `"16:9"` 这样的原始比例会直接透传。未知的 JSON 字段会原样转发，因此原生参数（`personGeneration`、`sampleImageSize`、`imageConfig` 等）可直接使用。
+- 图片始终以 `b64_json` 返回。Gemini 图片模型随图片一起生成的任何文本都会以 `revised_prompt` 返回。
+- Gemini 图片模型会报告 Token `usage`（按 Token 计费）；Imagen 不报告（请按 `per_image` 计价）。
+- 编辑仅适用于 Gemini 图片模型：上传的内容会作为内联图片部分放在提示词之前。不支持 `mask`，请在提示词中描述需要修改的区域。Imagen 模型仅支持生成。
+
+在兼容 OpenAI 模式下，生成请求会转发到 Gemini 的 `/openai/images/generations` 端点，编辑请求会被拒绝（该接口没有编辑端点）。
+
+## 审计日志
+
+图片请求与其他模型交互一样会出现在审计日志中。启用 `LOGGING_LOG_BODIES` 时：
+
+- 生成请求以 JSON 形式存储。编辑请求以图片体形式存储：包含提示词和参数，以及每张上传的源图片和蒙版各一项（文件名、内容类型、大小）。
+- 响应同样以图片体形式存储：包含响应封装（`created`、`usage`、`size`、`quality` 等），以及每张返回的图片各一项。托管 URL 以链接形式保留。
+
+除非设置 [`LOGGING_LOG_IMAGE_BODIES=true`](/zh/advanced/configuration#审计日志)，否则**不会**存储像素本身。开启后，上传的图片和生成的图片会写入[媒体存储](/zh/advanced/configuration#媒体存储)，每一项都带有一个 `media_id`，控制台通过 `GET /admin/media/{id}` 内联显示；`LOGGING_LOG_IMAGE_BODIES_SCOPE` 可将范围限制为 `input`（编辑上传）或 `output`（结果）。未开启时，每张图片都是一个带大小信息的占位符（`stored: false`）。无论哪种方式，条目都会保持精简且完整：即使是很大的 `b64_json` 结果，也绝不会触发通用的 1 MB 请求体截断，且对每条记录中存储的图片没有数量上限。文件的保留时间与引用它们的审计条目相同（`LOGGING_RETENTION_DAYS`）。

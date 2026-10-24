@@ -1,0 +1,204 @@
+---
+title: "Jev / Kev（TypeSafe System One）"
+sidebarTitle: "Jev / Kev"
+description: "通过 GoModel 将 TypeSafe System One 决策请求路由到托管的 Jev API 或自托管的 Kev 服务器。"
+icon: "scale"
+keywords: ["Jev", "Kev", "TypeSafe", "System One", "决策模型", "分类", "自托管", "decision model", "Decisions API", "classification", "noul", "choice", "score", "self-hosted"]
+---
+
+[Jev](https://docs.typesafe.ai/introduction) 是 TypeSafe 的 System One 模型：它是一个决策模型，
+而不是文本生成器。请求携带一个 `state`（要评估的文本或记录）和一组带类型的问题，答案是针对每个问题
+经过校准的概率。[Kev](https://github.com/jaredpalmer/kev) 是一系列实现了相同 API 的小型开放权重模型，
+因此一个 `jev` 提供商类型即可同时覆盖两者。
+
+问题共有三种类型：
+
+| 类型 | 提问方式 | 答案 |
+| --- | --- | --- |
+| `noul` | 是/否问题 | `noul`：回答“是”的概率 |
+| `choice` | 从您定义的选项集中选择一项 | `choice`，以及 `probabilities` 和 `confidence` |
+| `score` | 按有序等级进行评级 | `score`，以及 `legend`、`probabilities` 和 `confidence` |
+
+GoModel 通过两种方式提供 `jev` 模型：
+
+- **OpenAI 的 [Decisions API](/zh/advanced/decisions-api)**，位于 `POST /v1/decisions`，
+  它可以提出同样的三类问题（`predicate` 对应 `noul`）。GoModel 会将请求转换为 System One 格式，
+  再将答案转换回来，因此为 `gpt-6-luna` 编写的 OpenAI SDK 和客户端无需修改即可使用 Jev 和 Kev。
+- **System One 本身**，位于 `POST /v1/systemone`，以原生方式转发而不做转换，供 TypeSafe SDK 使用；
+  仅配置 `openrouter` 提供商时也可使用。位于 `/p/jev/...` 的[透传](/zh/features/passthrough-api)
+  可以访问其他所有上游路由。
+
+对于 `jev` 模型，聊天、`/responses` 和 `/v1/embeddings` 会返回 `invalid_request_error`，
+并提示使用这两个决策端点。
+
+## 配置
+
+对于托管 API，只需设置密钥即可完成全部配置：
+
+```bash
+JEV_API_KEY=ts-...
+GOMODEL_MASTER_KEY=change-me
+```
+
+对于自托管的 Kev 服务器，请改为设置基础 URL。Kev 本身没有认证机制，因此请不要设置密钥：
+
+```bash
+JEV_BASE_URL=http://host.docker.internal:8009
+GOMODEL_MASTER_KEY=change-me
+```
+
+<Note>
+  默认基础 URL 为 `https://api.typesafe.ai`，即 TypeSafe SDK 所使用的源地址；末尾的 `/v1`
+  会被接受并去除，因此两种写法指向同一台服务器。要让托管 API 与本地 Kev 并行运行，请以带后缀的名称
+  注册第二个提供商：`JEV_KEV_BASE_URL=...` 会创建提供商 `jev-kev`，可通过 `/p/jev-kev/...` 访问。
+  在 `config.yaml` 中可以使用任意名称，例如 `kev: {type: jev, base_url: ...}`，日志、用量和模型前缀
+  中显示的就是该名称。
+</Note>
+
+## 验证
+
+```bash
+curl -s http://localhost:8080/v1/systemone \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "state": "Shoes arrived two weeks late and in the wrong size. Also I see two charges on my card.",
+    "model": "jev-latest",
+    "questions": {
+      "department": {"type": "choice", "instructions": "Which team should handle this?",
+                     "criteria": {"returns": "Exchanges, refunds, wrong or damaged items",
+                                  "shipping": "Delivery status, delays, lost packages",
+                                  "billing": "Charges, invoices, payment problems"}},
+      "escalate":   {"type": "noul", "instructions": "Does this need urgent human attention?"},
+      "frustration": {"type": "score", "instructions": "How frustrated is the customer?",
+                      "criteria": ["Calm", "Frustrated", "Very angry"]}
+    }
+  }'
+```
+
+```json
+{
+  "model": "jev-1.13.0",
+  "answers": {
+    "department":  {"type": "choice", "choice": "returns", "confidence": 0.21,
+                    "probabilities": {"returns": 0.47, "shipping": 0.28, "billing": 0.25}},
+    "escalate":    {"type": "noul", "noul": 0.93},
+    "frustration": {"type": "score", "score": 1.44, "confidence": 0.78,
+                    "legend": {"0": "Calm", "1": "Frustrated", "2": "Very angry"},
+                    "probabilities": {"0": 0.00, "1": 0.56, "2": 0.44}}
+  },
+  "usage": {"input_tokens": 101, "output_tokens": 161}
+}
+```
+
+在 Kev 服务器上请使用 `kev-latest` 作为模型；它也会响应 `jev-latest`。同样的请求也可以发送到
+`/p/jev/v1/systemone`，但该透传路由会跳过虚拟模型和护栏；请参阅[原生端点](#system-one-api)。
+
+通过 Decisions API 提出同样的问题，可使用 OpenAI SDK 或 `curl`：
+
+```bash
+curl -s http://localhost:8080/v1/decisions \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "jev-latest",
+    "input": "Shoes arrived two weeks late and in the wrong size. Also I see two charges on my card.",
+    "questions": [{"type": "predicate", "name": "escalate", "instructions": "Does this need urgent human attention?"}]
+  }'
+```
+
+```json
+{
+  "model": "jev-1.13.0",
+  "answers": [{"name": "escalate", "type": "predicate", "probability": 0.93}],
+  "usage": {"input_tokens": 101, "input_tokens_details": {"cache_write_tokens": 0, "cached_tokens": 0},
+            "output_tokens": 161, "output_tokens_details": {"reasoning_tokens": 0}, "total_tokens": 262}
+}
+```
+
+托管的 Jev 还可以读取以 base64 PNG 或 JPEG data URL 形式发送的图像，GoModel 会将其作为 System One
+图像资源发送；Kev 服务器只读取文本。完整的映射关系请参阅 [Jev 和 Kev](/zh/advanced/decisions-api#jev-和-kev)。
+
+## 使用 TypeSafe SDK
+
+SDK 会发送 `POST {base_url}/v1/systemone`，因此请将其指向网关本身，并使用您的 GoModel 密钥进行认证：
+
+<CodeGroup>
+```python Python
+from typesafe_sdk import Noul, TypeSafeClient
+
+client = TypeSafeClient(api_key="change-me", base_url="http://localhost:8080")
+response = client.system_one(
+    state="I was charged twice. Please fix this ASAP.",
+    questions={"billing": Noul(instructions="Is this ticket about billing?")},
+)
+print(response.nouls["billing"].noul)
+```
+
+```typescript JavaScript
+import { TypeSafeClient, noul } from "@typesafe-ai/sdk";
+
+const client = new TypeSafeClient({ apiKey: "change-me", baseURL: "http://localhost:8080" });
+const result = await client.systemOne({
+  state: "I was charged twice. Please fix this ASAP.",
+  questions: { billing: noul({ instructions: "Is this ticket about billing?" }) },
+});
+console.log(result.answers.billing.noul);
+```
+</CodeGroup>
+
+在环境中设置 `TYPESAFE_BASE_URL=http://localhost:8080` 和 `TYPESAFE_API_KEY=change-me` 也同样可行。
+存在多个 System One 提供商时，请用其提供商限定模型名称（`kev/kev-latest`），或使用
+[虚拟模型](/zh/features/virtual-models)。SDK 的模型列表功能期望 TypeSafe 的格式，而网关的 `/v1/models`
+采用 OpenAI 的格式；请在 `/p/jev/v1/models` 列出上游模型。
+
+## System One API
+
+`POST /v1/systemone` 是一个网关端点，而不是原始代理：它会应用虚拟模型、针对 `state` 的护栏、响应缓存、
+故障转移、审计和用量统计，并以原生方式转发请求而不做转换。Kev 的 `/v1/systemone/permute` 和
+`/v1/systemone/separate` 也以同样的方式工作。完整行为请参阅 [System One API](/zh/advanced/systemone-api)，
+其中也包括同样以原生方式提供 Jev 的 OpenRouter。
+
+其他所有上游路由都可以通过[透传](/zh/features/passthrough-api)访问，但不经过虚拟模型、护栏或缓存：
+
+| 路由 | 作用 |
+| --- | --- |
+| `GET /p/jev/v1/models` | `model` 字段可接受的名称，采用上游自身的格式 |
+| `POST /p/jev/v1/systemone` | 评估路由，按原样转发 |
+
+上游错误会保留其状态码，提供商的响应体会包含在网关错误消息中：格式错误的问题会返回 TypeSafe 的 `422`，
+并指出有问题的字段；`429` 或 `529` 表示需要退避后重试。
+
+## 模型、访问控制与成本
+
+`GET /v1/models` 会列出上游报告的内容，如 `jev/jev-latest` 等。TypeSafe 会列出其别名（`jev-latest`、
+`jev-preview`）；Kev 服务器会列出其检查点（`kev-latest`）及其响应的别名。`jev-1.13.0` 这类带版本号的 ID，
+无论是否被列出，`model` 字段都会接受。这些模型被归类为没有生成模式的工具类模型：它们响应 `/v1/decisions`
+和 `/v1/systemone`，而不响应聊天请求。基础 URL 为 TypeSafe 托管 API 的提供商会为其模型报告 `vision` 能力；
+其他任何基础 URL 都会被视为 Kev 服务器，其模型报告 `vision: false`，GoModel 会拒绝向其发送图像请求。
+
+每个 System One 请求都会指定其模型，因此 `/v1/systemone` 和透传接口都会像其他请求一样，
+对其应用调用方的[模型允许列表](/zh/features/users)。
+
+`jev-1.13.0` 这样的固定版本无需声明即可使用；关于未列出名称的路由方式，请参阅
+[模型](/zh/advanced/systemone-api#模型)。
+
+响应中的 `usage.input_tokens` 和 `usage.output_tokens` 会被记录，因此 System One 调用会以实际响应的模型
+（`jev-1.13.0` 或 Kev 检查点）出现在 Usage API 和控制台中。Jev 按输入 Token 计价，且不在上游模型目录中；
+请在提供商上声明其定价以便为这些记录计算成本，或者在[定价覆盖编辑器](/zh/features/cost-tracking)中进行设置：
+
+```yaml
+providers:
+  jev:
+    type: jev
+    api_key: "${JEV_API_KEY}"
+    models:
+      - id: "jev-1.13.0"
+        metadata:
+          pricing:
+            currency: USD
+            input_per_mtok: 0.042
+            output_per_mtok: 0
+```
+
+本地 Kev 服务器不按 Token 收费，因此无需设置定价。

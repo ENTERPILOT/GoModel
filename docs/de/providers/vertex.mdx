@@ -1,0 +1,97 @@
+---
+title: "Google Vertex AI"
+description: "Konfigurieren Sie Gemini auf Google Vertex AI in GoModel, einschließlich ADC- und Service-Account-Authentifizierung, Regionen sowie nativem und OpenAI-kompatiblem Routing."
+icon: "/brand/vertex.svg"
+keywords: ["Google Vertex AI", "Gemini", "ADC", "Service-Account", "service account", "Provider-Einrichtung"]
+---
+
+Diese Seite behandelt Gemini, gehostet auf **Google Vertex AI**. Für Gemini über API-Keys von
+Google AI Studio siehe den [Google-Gemini-Leitfaden](/de/providers/gemini).
+
+Vertex benötigt ein GCP-Projekt, eine Region, in der das Modell verfügbar ist, und entweder
+Application Default Credentials oder einen JSON-Key eines Service-Accounts. GoModel routet
+standardmäßig zum nativen Gemini-Publisher-Endpunkt von Vertex; wechseln Sie zum
+OpenAI-kompatiblen Endpunkt, wenn Sie dessen Kompatibilitätsverhalten benötigen.
+
+<Note>
+  Die Vertex-Authentifizierung ist auf Unternehmen ausgerichtet und kann in einem zukünftigen
+  Release kostenpflichtig oder lizenzpflichtig werden.
+</Note>
+
+## Konfigurieren
+
+```bash
+VERTEX_PROJECT=my-gcp-project
+VERTEX_LOCATION=us-central1
+VERTEX_AUTH_TYPE=gcp_adc       # Standard; ADC über gcloud, GKE Workload Identity oder Metadata-Server
+VERTEX_API_MODE=native         # oder openai_compatible
+```
+
+Oder in `config.yaml`:
+
+```yaml
+providers:
+  vertex:
+    type: vertex
+    auth_type: gcp_adc
+    vertex_project: my-gcp-project
+    vertex_location: us-central1
+    api_mode: native
+```
+
+### Authentifizierung per Service-Account
+
+```bash
+VERTEX_AUTH_TYPE=gcp_service_account
+VERTEX_SERVICE_ACCOUNT_FILE=/secrets/service-account.json
+# oder VERTEX_SERVICE_ACCOUNT_JSON / VERTEX_SERVICE_ACCOUNT_JSON_BASE64
+```
+
+### Mehrere Regionen oder Konten
+
+Verwenden Sie Umgebungsvariablen mit Suffix, um zusätzliche Vertex-Provider zu registrieren:
+
+```bash
+VERTEX_US_PROJECT=prod-ai
+VERTEX_US_LOCATION=us-central1
+VERTEX_US_AUTH_TYPE=gcp_adc
+
+VERTEX_EU_PROJECT=prod-ai
+VERTEX_EU_LOCATION=europe-west4
+VERTEX_EU_AUTH_TYPE=gcp_service_account
+VERTEX_EU_SERVICE_ACCOUNT_FILE=/secrets/vertex-eu.json
+```
+
+Damit werden `vertex-us` und `vertex-eu` registriert.
+
+## Base-URLs und Modi
+
+Die Standard-Basen werden aus Projekt und Standort abgeleitet:
+
+- OpenAI-kompatibel: `.../projects/{project}/locations/{location}/endpoints/openapi`
+- natives Gemini: `.../projects/{project}/locations/{location}/publishers/google`
+
+Vertex-Embeddings verwenden unabhängig von `VERTEX_API_MODE` die native Vorhersage (Prediction)
+von Vertex AI. Im nativen Modus (dem Standard) werden die [Bild-Endpunkte](/de/advanced/images-api)
+über die Publisher-Endpunkte bedient (Imagen über `predict`, Gemini-Bildmodelle über
+`generateContent`); im Modus `openai_compatible` wird die Bildgenerierung an den OpenAI-kompatiblen
+Endpunkt weitergeleitet, und Bildbearbeitungen werden abgelehnt. Vertex stellt weder Gemini Files
+noch OpenAI-kompatible Batch-Operationen bereit.
+
+## Bild-Input
+
+| Modus | `image_url` im OpenAI-Stil |
+| ---- | ----- |
+| `native` (Standard) | nur inline `data:`-URLs – entfernte `https://...`-URLs werden abgelehnt |
+| `openai_compatible` | Entfernte URLs im OpenAI-Stil werden an den OpenAI-kompatiblen Endpunkt von Vertex durchgereicht |
+
+## Noch nicht integriert
+
+- Automatisches Abrufen entfernter `image_url`-Werte im nativen Modus.
+- Vertex Files und die APIs für Batch-Vorhersagen.
+
+## Referenzen
+
+- [Vertex AI OpenAI compatibility](https://cloud.google.com/vertex-ai/generative-ai/docs/start/openai)
+- [Gemini API in Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference)
+- [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials)

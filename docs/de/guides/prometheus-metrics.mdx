@@ -1,0 +1,453 @@
+---
+title: "Prometheus-Metriken"
+description: "Aktivieren Sie die experimentellen Prometheus-Metriken von GoModel mit METRICS_ENABLED, scrapen Sie den /metrics-Endpunkt und sehen Sie, welche Gateway-Metriken exportiert werden."
+icon: "chart-line"
+keywords: ["Prometheus", "Metriken", "metrics", "Monitoring", "Observability", "Grafana"]
+---
+
+<Warning>
+  Die Prometheus-Unterstützung ist **experimentell**. Metriknamen, Labels und
+  Konfigurationsoptionen können sich ohne Vorankündigung ändern. Pinnen Sie eine bestimmte
+  GoModel-Version, wenn Sie auf ein stabiles Schema angewiesen sind.
+</Warning>
+
+Dieser Leitfaden erklärt, wie Sie den experimentellen Prometheus-Metrik-Endpunkt in GoModel
+konfigurieren.
+
+## Schnellstart
+
+### Standardmäßig deaktiviert
+
+Metriken sind **standardmäßig deaktiviert**. Um die Erfassung von Metriken zu aktivieren, setzen
+Sie `METRICS_ENABLED=true` und starten Sie GoModel:
+
+<CodeGroup>
+
+```bash Docker (.env-Datei)
+# Fügen Sie METRICS_ENABLED=true zu Ihrer .env-Datei hinzu, dann:
+docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
+# Metriken verfügbar unter http://localhost:8080/metrics
+```
+
+```bash Docker (inline -e)
+docker run --rm -p 8080:8080 \
+  -e METRICS_ENABLED=true \
+  enterpilot/gomodel
+# Metriken verfügbar unter http://localhost:8080/metrics
+```
+
+```bash Binary (make build)
+# Erfordert Go 1.27.3+; erzeugt bin/gomodel.
+make build
+
+export METRICS_ENABLED=true
+./bin/gomodel
+# Metriken verfügbar unter http://localhost:8080/metrics
+```
+
+</CodeGroup>
+
+<Note>
+  Im restlichen Leitfaden wird nur das Setzen der Variablen gezeigt. Wenden Sie sie über die oben
+  gewählte Startmethode an – `.env` plus `--env-file`, ein Inline-Flag `-e` oder `export` vor
+  `./bin/gomodel` – und starten Sie GoModel neu.
+</Note>
+
+### Metriken deaktivieren
+
+**Option 1: Umgebungsvariable**
+
+```bash
+METRICS_ENABLED=false
+```
+
+**Option 2: .env-Datei**
+
+```bash
+echo "METRICS_ENABLED=false" >> .env
+```
+
+**Option 3: config.yaml**
+
+```yaml
+metrics:
+  enabled: false
+```
+
+### Eigener Metrik-Endpunkt
+
+Ändern Sie den Standardpfad `/metrics`:
+
+```bash
+METRICS_ENABLED=true
+METRICS_ENDPOINT=/internal/prometheus
+```
+
+## Konfigurationsoptionen
+
+### Über Umgebungsvariablen
+
+| Variable           | Standardwert | Beschreibung                      |
+| ------------------ | ---------- | --------------------------------- |
+| `METRICS_ENABLED`  | `false`    | Erfassung von Metriken aktivieren/deaktivieren |
+| `METRICS_ENDPOINT` | `/metrics` | HTTP-Pfad des Metrik-Endpunkts    |
+
+### Über config.yaml
+
+```yaml
+metrics:
+  # Erfassung von Prometheus-Metriken aktivieren oder deaktivieren
+  # Wenn deaktiviert, werden keine Metriken erfasst und der Endpunkt gibt 404 zurück
+  enabled: true
+
+  # HTTP-Endpunktpfad, unter dem die Metriken bereitgestellt werden
+  endpoint: "/metrics"
+```
+
+## Beispiele
+
+### Produktiv-Setup (Metriken aktiviert)
+
+**.env**
+
+```bash
+PORT=8080
+GOMODEL_MASTER_KEY=your-secret-key
+METRICS_ENABLED=true
+METRICS_ENDPOINT=/metrics
+OPENAI_API_KEY=sk-...
+```
+
+### Entwicklungs-Setup (Metriken deaktiviert)
+
+**.env**
+
+```bash
+PORT=8080
+METRICS_ENABLED=false
+OPENAI_API_KEY=sk-...
+```
+
+### Eigener Endpunkt für internes Monitoring
+
+**config.yaml**
+
+```yaml
+server:
+  port: "8080"
+  master_key: "${GOMODEL_MASTER_KEY}"
+
+metrics:
+  enabled: true
+  endpoint: "/internal/prometheus" # Eigener Pfad
+
+providers:
+  openai:
+    type: "openai"
+    api_key: "${OPENAI_API_KEY}"
+```
+
+## Überprüfung
+
+### Prüfen, ob Metriken aktiviert sind
+
+Starten Sie den Server und achten Sie auf folgende Log-Meldungen:
+
+**Metriken aktiviert:**
+
+```json
+{ "level": "INFO", "msg": "prometheus metrics enabled", "endpoint": "/metrics" }
+```
+
+**Metriken deaktiviert:**
+
+```json
+{ "level": "INFO", "msg": "prometheus metrics disabled" }
+```
+
+### Metrik-Endpunkt testen
+
+**Wenn aktiviert:**
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/metrics
+# Gibt Prometheus-Metriken im Textformat zurück
+```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="unused")
+metrics = client.get("/metrics", cast_to=str)
+
+print(metrics)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "unused",
+});
+
+const metrics = await client.get("/metrics");
+console.log(metrics);
+```
+
+</CodeGroup>
+
+**Wenn deaktiviert:**
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/metrics
+# Gibt 404 Not Found zurück
+```
+
+```python Python
+from openai import NotFoundError, OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="unused")
+
+try:
+    client.get("/metrics", cast_to=str)
+except NotFoundError as error:
+    print(error.status_code)  # 404
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "unused",
+});
+
+try {
+  await client.get("/metrics");
+} catch (error) {
+  console.log(error.status); // 404
+}
+```
+
+</CodeGroup>
+
+## Auswirkungen auf die Performance
+
+### Metriken aktiviert
+
+- Minimaler Overhead: ca. 100 ns pro Request für die Ausführung der Hooks
+- Arbeitsspeicher: ca. 1 MB für die Speicherung der Metriken (abhängig von der Kardinalität)
+- CPU: Vernachlässigbare Auswirkung (`<0.1%` in Benchmarks)
+
+### Metriken deaktiviert
+
+- **Kein Overhead**: keine Hooks registriert, keine Erfassung
+- Die Metrik-Bibliothek ist weiterhin gelinkt, aber inaktiv
+- Empfohlen für maximale Performance in Nicht-Produktivumgebungen
+
+## Sicherheitsaspekte
+
+### Den Metrik-Endpunkt bereitstellen
+
+Der `/metrics`-Endpunkt ist durch Master-Key-Authentifizierung geschützt, wenn ein Master-Key
+konfiguriert ist, genau wie andere HTTP-Endpunkte. Ist kein Master-Key konfiguriert, ist der
+Endpunkt ohne Authentifizierung erreichbar, sodass Prometheus Metriken ohne Zugangsdaten scrapen
+kann.
+
+Wenn Sie den Metrik-Endpunkt zusätzlich schützen müssen:
+
+1. **Verwenden Sie einen eigenen internen Pfad:**
+
+   ```yaml
+   metrics:
+     endpoint: "/internal/prometheus" # Schwerer zu erraten
+   ```
+
+2. **Verwenden Sie Sicherheit auf Netzwerkebene:**
+   - Konfigurieren Sie Firewall-Regeln, die nur den Prometheus-Server zulassen
+   - Verwenden Sie ein privates Netzwerk für die Erfassung von Metriken
+   - Betreiben Sie Prometheus in derselben VPC bzw. demselben Netzwerk
+
+3. **Reverse Proxy mit Authentifizierung:**
+
+   ```nginx
+   location /metrics {
+       auth_basic "Metrics";
+       auth_basic_user_file /etc/nginx/.htpasswd;
+       proxy_pass http://gomodel:8080/metrics;
+   }
+   ```
+
+## Alerts bei leeren Responses
+
+Ein Provider antwortet manchmal mit `200`, liefert aber keine Choices, keinen Output oder keine
+Token-Nutzung. `gomodel_requests_total` zählt diese Aufrufe als Erfolge, daher erhöht GoModel
+zusätzlich `gomodel_empty_responses_total` und loggt eine Warnung
+(`provider returned 200 with an empty response`).
+
+| Label      | Werte                                     |
+| ---------- | ----------------------------------------- |
+| `provider` | Provider-Name aus Ihrer Konfiguration     |
+| `model`    | An den Upstream gesendetes Modell         |
+| `reason`   | `no_choices`, `no_output` oder `no_usage` |
+
+Eine Chat Completion ohne Choices gibt dem Client außerdem `502` zurück oder löst ein Failover
+aus, wenn ein Failover-Ziel existiert. Eine Response mit Inhalt, aber ohne Nutzungsangaben, wird
+trotzdem zurückgegeben; sie beeinträchtigt nur die Nutzungs- und Kostenerfassung.
+
+```promql
+sum(rate(gomodel_empty_responses_total[5m])) by (provider, model, reason) > 0
+```
+
+## Prometheus-Konfiguration
+
+### Scrape-Konfiguration
+
+**prometheus.yml**
+
+```yaml
+scrape_configs:
+  - job_name: "gomodel"
+    static_configs:
+      - targets: ["localhost:8080"]
+    metrics_path: "/metrics" # Oder Ihr eigener Pfad
+    scrape_interval: 15s
+    scrape_timeout: 10s
+```
+
+### Mit eigenem Endpunkt
+
+```yaml
+scrape_configs:
+  - job_name: "gomodel"
+    static_configs:
+      - targets: ["localhost:8080"]
+    metrics_path: "/internal/prometheus" # Eigener Pfad
+    scrape_interval: 15s
+```
+
+## Fehlerbehebung
+
+### Metrik-Endpunkt gibt 404 zurück
+
+**Ursache:** Metriken sind deaktiviert (der Standard).
+
+**Lösung:**
+
+```bash
+# Konfiguration prüfen
+echo $METRICS_ENABLED  # "true" aktiviert; leer oder "false" deaktiviert
+```
+
+Setzen Sie `METRICS_ENABLED=true` über Ihre `.env`-Datei, ein Inline-Flag
+`-e METRICS_ENABLED=true` oder `export METRICS_ENABLED=true` (die drei Startvarianten finden Sie
+im [Schnellstart](/de/guides/prometheus-metrics#standardmäßig-deaktiviert)) und starten Sie GoModel dann neu.
+
+### Es erscheinen keine Metrikdaten
+
+**Ursache:** Es wurden noch keine Requests gestellt.
+
+**Lösung:** Stellen Sie einige Requests, um Metriken zu erzeugen:
+
+<CodeGroup>
+
+```bash curl
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-master-key" \
+  -d '{"model": "gpt-4", "messages": [{"role": "user", "content": "Hi"}]}'
+
+# Dann die Metriken prüfen
+curl http://localhost:8080/metrics | grep gomodel_requests_total
+```
+
+```python Python
+from openai import OpenAI
+
+models = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="your-master-key",
+)
+models.chat.completions.create(
+    model="gpt-4",
+    messages=[{"role": "user", "content": "Hi"}],
+)
+
+gateway = OpenAI(base_url="http://localhost:8080", api_key="your-master-key")
+metrics = gateway.get("/metrics", cast_to=str)
+
+for line in metrics.splitlines():
+    if "gomodel_requests_total" in line:
+        print(line)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const models = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "your-master-key",
+});
+await models.chat.completions.create({
+  model: "gpt-4",
+  messages: [{ role: "user", content: "Hi" }],
+});
+
+const gateway = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "your-master-key",
+});
+const metrics = await gateway.get("/metrics");
+
+for (const line of metrics.split("\n")) {
+  if (line.includes("gomodel_requests_total")) console.log(line);
+}
+```
+
+</CodeGroup>
+
+### Eigener Endpunkt funktioniert nicht
+
+**Ursache:** Der Endpunkt muss mit `/` beginnen.
+
+**Falsch:**
+
+```bash
+export METRICS_ENDPOINT=metrics  # Führender Schrägstrich fehlt
+```
+
+**Richtig:**
+
+```bash
+export METRICS_ENDPOINT=/metrics  # Mit führendem Schrägstrich
+```
+
+## Best Practices
+
+### Entwicklung
+
+- **Deaktivieren Sie Metriken** für einen schnelleren Start und weniger Rauschen
+- Aktivieren Sie sie nur, wenn Sie Observability-Features testen
+
+### Staging
+
+- **Aktivieren Sie Metriken**, um das Monitoring-Setup zu testen
+- Verwenden Sie bei Bedarf aus Sicherheitsgründen einen eigenen Endpunkt
+
+### Produktion
+
+- **Aktivieren Sie Metriken** für vollständige Observability
+- Richten Sie Alerting in Prometheus ein
+- Verwenden Sie Grafana-Dashboards zur Visualisierung
+- Erwägen Sie aus Sicherheitsgründen einen eigenen Endpunkt
+- Überwachen Sie die Kardinalität der Metriken, um eine Explosion zu vermeiden
+
+## Siehe auch
+
+- [Konfiguration](/de/advanced/configuration) – vollständige Referenz der Umgebungsvariablen
+- [config.yaml](/de/advanced/config-yaml) – Referenz der YAML-Konfiguration

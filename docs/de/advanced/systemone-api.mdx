@@ -1,0 +1,226 @@
+---
+title: "System One API"
+description: "Senden Sie Entscheidungs-Requests an TypeSafe System One (Jev, Kev) über GoModel – nativ weitergeleitet, mit virtuellen Modellen, Guardrails, Caching, Failover, Audit und Nutzungserfassung."
+icon: "scale"
+keywords: ["System One", "systemone", "Jev", "Kev", "TypeSafe", "Entscheidungsmodell", "decision model", "noul", "choice", "score", "OpenRouter"]
+---
+
+`POST /v1/systemone` bedient die System One API von TypeSafe: Ein Request
+enthält einen `state` (den zu bewertenden Text oder Datensatz) und eine Map
+typisierter Fragen, und die Antwort ist eine kalibrierte Wahrscheinlichkeit pro
+Frage. Es handelt sich um eine Entscheidungs-API, nicht um einen Textgenerator,
+daher leitet GoModel sie **nativ** weiter und übersetzt sie nie in Chat oder aus
+Chat. Um dieselben Modelle mit den Request- und Antwortformaten von OpenAI zu
+erreichen, verwenden Sie die [Decisions API](/de/advanced/decisions-api), die
+GoModel in System One übersetzt.
+
+Der Endpunkt ist verfügbar, sobald ein [`jev`-Provider](/de/providers/jev)
+(gehostetes Jev oder ein selbst gehosteter Kev-Server) oder ein
+`openrouter`-Provider konfiguriert ist. Ohne einen solchen antwortet er mit
+`404`.
+
+## Request und Antwort
+
+```bash
+curl -s http://localhost:8080/v1/systemone \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "jev-latest",
+    "state": "Shoes arrived two weeks late and in the wrong size. Also I see two charges on my card.",
+    "questions": {
+      "department": {"type": "choice", "instructions": "Which team should handle this?",
+                     "criteria": {"returns": "Exchanges, refunds, wrong items",
+                                  "shipping": "Delivery status, delays",
+                                  "billing": "Charges, invoices"}},
+      "escalate":   {"type": "noul", "instructions": "Does this need urgent human attention?"},
+      "frustration": {"type": "score", "instructions": "How frustrated is the customer?",
+                      "criteria": ["Calm", "Frustrated", "Very angry"]}
+    }
+  }'
+```
+
+Die Antwort stammt vom Provider selbst und wird unverändert weitergegeben:
+
+```json
+{
+  "model": "jev-1.13.0",
+  "answers": {
+    "department":  {"type": "choice", "choice": "returns", "confidence": 0.21,
+                    "probabilities": {"returns": 0.47, "shipping": 0.28, "billing": 0.25}},
+    "escalate":    {"type": "noul", "noul": 0.93},
+    "frustration": {"type": "score", "score": 1.44, "confidence": 0.78,
+                    "legend": {"0": "Calm", "1": "Frustrated", "2": "Very angry"},
+                    "probabilities": {"0": 0.00, "1": 0.56, "2": 0.44}}
+  },
+  "usage": {"input_tokens": 101, "output_tokens": 161}
+}
+```
+
+Die TypeSafe-SDKs senden `POST {base_url}/v1/systemone`. Richten Sie sie daher
+mit Ihrem GoModel-Key auf das Gateway-Root (`base_url="http://localhost:8080"`)
+aus; siehe [Jev / Kev](/de/providers/jev#die-typesafe-sdks-verwenden).
+
+## Routen
+
+| Route | Funktion |
+| --- | --- |
+| `POST /v1/systemone` | Bewertet einen State anhand einer Map von Fragen |
+| `POST /v1/systemone/permute` | Nur Kev: führt eine Choice-Frage mit mehreren Optionsreihenfolgen aus (`n_perm`, 1 bis 64, Standard 6) |
+| `POST /v1/systemone/separate` | Nur Kev: führt jede Frage in einem eigenen Forward Pass aus |
+
+Die Kev-Routen verhalten sich wie `/v1/systemone`. Für OpenRouter werden sie
+abgelehnt, da OpenRouter nur die Bewertungsroute bedient; ein gehosteter
+TypeSafe-`jev`-Provider liefert für sie sein eigenes `404`.
+
+## Was das Gateway tut
+
+1. Löst `model` wie bei jedem anderen Endpunkt auf: einen einfachen Namen, einen
+   provider-qualifizierten Namen (`jev/jev-latest`) oder ein
+   [virtuelles Modell](/de/features/virtual-models). Anschließend wendet es die
+   [Modell-Allowlist](/de/features/users), die
+   [Rate-Limits](/de/features/rate-limits) und die
+   [Budgets](/de/features/budgets) des Aufrufers an.
+2. Führt die Prompt-[Guardrails](/de/advanced/guardrails) des Workflows auf
+   `state` aus.
+3. Bedient einen identischen früheren Request aus dem
+   [Response-Cache](/de/features/cache).
+4. Leitet den Body weiter, wobei nur `model` (der aufgelöste Name) und `state`
+   (falls ein Guardrail ihn bearbeitet hat) geändert werden. Fragen, Kriterien
+   und alle anderen Felder erreichen den Provider Byte für Byte.
+5. Gibt die Antwort unverändert weiter und erfasst sie im Audit-Log
+   (Request-Typ **Decisions**) und in der Nutzung.
+
+## Bilder
+
+[Bild](https://docs.typesafe.ai/images)-Requests von TypeSafe funktionieren so,
+wie sie gesendet werden: `assets` im JSON-Body oder das
+`multipart/form-data`-Formular von TypeSafe, mit dem JSON-Request als erstem
+Part namens `request` und jedem Bild als File-Part, den ein Asset über `part`
+benennt. Die TypeSafe-SDKs senden dieses Formular für `Image`-Objekte. GoModel
+bettet jeden Bild-Part als `data_base64` in sein Asset ein und leitet einen
+einzigen JSON-Request weiter, sodass Guardrails, Cache und Failover beide
+Formen gleich behandeln. Das Bild muss ein PNG oder JPEG sein; das `format` des
+Assets bleibt erhalten, wenn es angegeben ist, und wird andernfalls aus den
+Bytes des Bildes ermittelt. Ein Formular, das TypeSafe ablehnen würde, etwa ein
+Part, den kein Asset verwendet, ein Asset, das einen fehlenden Part benennt,
+oder ein Bild, das weder PNG noch JPEG ist, liefert `400`. Senden Sie den
+Header `TypeSafe-Danger-Zone-Images: true`, wie von TypeSafe verlangt; das
+Gateway leitet ihn weiter. Kev-Server lesen nur Text.
+
+```bash
+curl -s http://localhost:8080/v1/systemone \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "TypeSafe-Danger-Zone-Images: true" \
+  -F 'request={"model": "jev-latest", "state": {"door": "ref-door"},
+    "assets": {"ref-door": {"type": "image", "part": "door-photo"}},
+    "questions": {"person": {"type": "noul", "instructions": "Is there a person in `door`?"}}};type=application/json' \
+  -F 'door-photo=@door.png;type=image/png'
+```
+
+## Modelle
+
+| Provider | Modellnamen |
+| --- | --- |
+| `jev` (gehostet) | `jev/jev-latest`, `jev/jev-preview` und jede versionierte ID wie `jev/jev-1.13.0` |
+| `jev` (Kev-Server) | `kev/kev-latest` und die Aliase des Checkpoints, für einen Provider namens `kev` |
+| `openrouter` | `openrouter/typesafe/jev-1.13`, `openrouter/~typesafe/jev-latest` und die anderen Decision-Modelle von OpenRouter, etwa `openrouter/jaredpalmer/kev-4b` |
+
+System-One-Modelle werden in `GET /v1/models` als Utility-Modelle ohne
+Generierungsmodus aufgeführt.
+
+TypeSafe listet nur seine Aliase, akzeptiert aber jede versionierte ID, sodass
+eine fest gepinnte Version funktioniert, ohne deklariert zu werden: GoModel
+routet ein nicht gelistetes Modell an einen `jev`-Provider, wenn der Name angibt,
+an welchen (`jev/jev-1.13.0`), oder – bei einem einfachen Namen –, wenn genau
+ein `jev`-Provider konfiguriert ist. Ein virtuelles Modell kann eine Version auf
+dieselbe Weise pinnen.
+
+OpenRouter akzeptiert `jev-latest` selbst, GoModel routet aber anhand der
+Katalog-IDs. Damit ein einfaches `jev-latest` (der Standard der TypeSafe-SDKs)
+über OpenRouter weiterhin funktioniert, fügen Sie ein virtuelles Modell hinzu:
+
+```yaml
+virtual_models:
+  - source: jev-latest
+    target: openrouter/~typesafe/jev-latest
+```
+
+## Caching
+
+Bei aktiviertem [Response-Cache](/de/features/cache) wird ein identischer
+Request (gleiche Route, gleiches aufgelöstes Modell, gleiche Guardrails und
+gleicher Body nach Guardrail-Bearbeitungen) aus dem exakten Cache beantwortet
+(`X-Cache: HIT (exact)`) und in der Nutzung als Cache-Treffer erfasst. Der
+semantische Cache bedient System One nie: Ein lediglich ähnlicher State ist
+nicht dieselbe Entscheidung. Senden Sie `Cache-Control: no-cache`, um den Cache
+für einen einzelnen Request zu umgehen.
+
+## Failover
+
+Ein virtuelles Modell mit der Strategie `failover` verschiebt einen Request zum
+nächsten Ziel, wenn das aktuelle mit einem Verfügbarkeitsfehler fehlschlägt
+(standardmäßig `429` oder `5xx`, einschließlich des TypeSafe-Codes `529`; siehe
+[Failover](/de/features/failover)). Jedes Ziel erhält den Request in seiner
+eigenen System-One-Form. Ein Ziel ohne diese API, etwa ein Chat-Modell, wird
+übersprungen, ohne einen Failover-Versuch zu verbrauchen, und Client-Fehler wie
+eine fehlerhafte Frage (`422`) werden ohne Failover zurückgegeben:
+
+```yaml
+virtual_models:
+  - source: decider
+    strategy: failover
+    targets:
+      - { model: kev/kev-latest }                # zuerst lokales Kev
+      - { model: openrouter/typesafe/jev-1.13 }  # gehostetes Jev, wenn Kev ausgefallen ist
+```
+
+Das Audit-Log zeigt jeden Versuch, die Nutzung wird unter dem Ziel erfasst, das
+geantwortet hat, und eine Failover-Antwort wird nicht gecacht.
+
+## Guardrails
+
+Guardrails sehen `state` als eine einzelne User-Nachricht: einen String-State als
+dessen Text, jeden anderen JSON-Wert als sein kodiertes JSON, das auch nach
+einer Bearbeitung gültiges JSON sein muss. Das ist genau das, was
+anonymisierende und blockierende Guardrails benötigen; beispielsweise wird eine
+`string_replace`-Regel, die Kartennummern maskiert, auf `state` angewendet,
+bevor er das Gateway verlässt. Die Fragen sind das feste Schema Ihrer Anwendung
+und werden nicht offengelegt.
+
+Bearbeitungen, für die ein Entscheidungs-Request keinen Platz hat, etwa ein
+System-Prompt, der von einem auch für Chat-Modelle geltenden Guardrail
+eingefügt wird, werden verworfen. Das Gateway protokolliert pro Art verworfener
+Bearbeitung eine Warnung und Wiederholungen anschließend auf Debug-Ebene. Ein
+Guardrail, der den Request selbst beantworten würde, blockiert ihn stattdessen,
+da System-One-Aufrufer typisierte Antworten erwarten, keinen Text.
+
+Nur die Prompt-Phase greift. Die Antwort besteht aus typisierten Werten, nicht
+aus einer Completion, daher laufen Response- und Stream-Phasen-Guardrails nicht
+darauf, und sie wird unverändert weitergegeben; ein Workflow, der solche
+Guardrails für einen System-One-Request auswählt, protokolliert pro Guardrail
+eine Warnung.
+
+## Fehler und Fehlbedienung
+
+Der Endpunkt übersetzt nie und meldet es, wenn ein Request nicht funktionieren
+kann:
+
+| Situation | Ergebnis |
+| --- | --- |
+| Kein `jev`- oder `openrouter`-Provider konfiguriert | `404` |
+| `model` fehlt | `400` |
+| Modell auf einem Provider ohne System One oder ein Chat-, Embedding- oder anderes Generierungsmodell (auch über ein virtuelles Modell) | `400 invalid_request_error` mit Begründung; das Gateway protokolliert eine Warnung |
+| Ein System-One-Modell, das an `/v1/chat/completions`, `/v1/responses` oder `/v1/embeddings` gesendet wird | `400 invalid_request_error` mit Verweis auf `/v1/decisions` und `/v1/systemone` |
+| Upstream-Fehler, etwa eine fehlerhafte Frage | Der Status des Providers mit dessen Meldung |
+
+## Audit, Nutzung und Kosten
+
+Jeder Aufruf ist ein Audit-Eintrag unter seiner Route, mit angefordertem und
+aufgelöstem Modell, Provider, Request- und Response-Body, Guardrail-Ergebnissen
+und Failover-Versuchen; filtern Sie das Audit-Log nach dem Request-Typ
+**Decisions**. Die Nutzung erfasst `input_tokens` und `output_tokens` der
+Antwort unter dem Modell, das geantwortet hat. OpenRouter meldet seine eigenen
+`usage.cost`, die als Kosten des Requests erfasst werden; für gehostetes Jev
+deklarieren Sie die Preise am Provider (siehe
+[Jev / Kev](/de/providers/jev#modelle-zugriffskontrolle-und-kosten)).
