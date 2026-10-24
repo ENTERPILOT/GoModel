@@ -1,6 +1,8 @@
 <script>
-  // One usage breakdown section (by model, user path, label, or session): diverging /
-  // stacked horizontal bar chart with a table view toggle.
+  // One usage breakdown section (by model, user path, label, request type /
+  // endpoint, or session): diverging / stacked horizontal bar chart with a
+  // table view toggle.
+  import SegmentedControl from "$lib/components/atoms/SegmentedControl.svelte";
   import ChartCanvas from "$lib/components/molecules/ChartCanvas.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import Pagination from "$lib/components/molecules/Pagination.svelte";
@@ -17,6 +19,8 @@
   import {
     chartWrapHeight,
     divergingDataFrom,
+    endpointListSummary,
+    endpointsSelected,
     isChartView,
     labelColor,
     usageRowTotalTokens,
@@ -26,7 +30,7 @@
   import { horizontalUsageChartConfig } from "./usage-chart-config.js";
   import * as m from "$lib/paraglide/messages.js";
 
-  /** @type {{ kind: "model" | "userPath" | "label" | "session" }} */
+  /** @type {{ kind: "model" | "userPath" | "label" | "type" | "session" }} */
   let { kind } = $props();
 
   const META = {
@@ -48,6 +52,12 @@
       tokensTitle: m.usage_by_label(),
       costsTitle: m.usage_cost_by_label(),
     },
+    type: {
+      group: m.usage_type_view(),
+      noun: m.usage_type_noun(),
+      tokensTitle: m.usage_tokens_by_type(),
+      costsTitle: m.usage_cost_by_type(),
+    },
     session: {
       group: m.usage_session_view(),
       noun: m.usage_session_noun(),
@@ -62,7 +72,7 @@
       ? (row) => qualifiedModelDisplay(row)
       : kind === "userPath"
         ? (row) => row.user_path || "/"
-        : kind === "label"
+        : kind === "label" || kind === "type"
           ? (row) => row.label
           : (row) => row.session_id,
   );
@@ -72,6 +82,7 @@
       return (row.provider_name || row.provider || "-") + "/" + row.model;
     if (kind === "userPath") return row.user_path || "/";
     if (kind === "label") return row.label;
+    if (kind === "type") return byEndpoint ? row.endpoint : row.type;
     return JSON.stringify([row.session_id, row.user_path || "/"]);
   }
 
@@ -82,7 +93,9 @@
         ? usagePage.userPathUsage
         : kind === "label"
           ? usagePage.labelUsage
-          : usagePage.sessionUsage.entries,
+          : kind === "type"
+            ? usagePage.typeUsage
+            : usagePage.sessionUsage.entries,
   );
   const view = $derived(
     kind === "model"
@@ -91,7 +104,9 @@
         ? usagePage.userPathUsageView
         : kind === "label"
           ? usagePage.labelUsageView
-          : usagePage.sessionUsageView,
+          : kind === "type"
+            ? usagePage.typeUsageView
+            : usagePage.sessionUsageView,
   );
   const loading = $derived(
     kind === "model"
@@ -100,7 +115,9 @@
         ? usagePage.userPathUsageLoading
         : kind === "label"
           ? usagePage.labelUsageLoading
-          : usagePage.sessionUsageLoading,
+          : kind === "type"
+            ? usagePage.typeUsageLoading
+            : usagePage.sessionUsageLoading,
   );
   const costs = $derived(usagePage.usageMode === "costs");
   const visible = $derived(
@@ -108,7 +125,17 @@
   );
   // Named `heading` (not `title`) so the title() snippet below doesn't
   // shadow it — inside that snippet, `title` refers to the snippet itself.
-  const heading = $derived(costs ? meta.costsTitle : meta.tokensTitle);
+  // The request-type section can list each endpoint on its own row.
+  const byEndpoint = $derived(kind === "type" && usagePage.endpointUsageGrouping === "endpoint");
+  const heading = $derived(
+    byEndpoint
+      ? costs
+        ? m.usage_cost_by_endpoint()
+        : m.usage_tokens_by_endpoint()
+      : costs
+        ? meta.costsTitle
+        : meta.tokensTitle,
+  );
   const series = $derived(divergingDataFrom(rows, labelFor, costs));
   const tableRows = $derived(
     kind === "session" ? rows : usageRowsBySelectedValue(rows, costs),
@@ -187,6 +214,18 @@
         <h3>{heading}</h3>
         {#if loading}<Spinner size={14} label={m.usage_loading_breakdown({ noun: meta.noun })} />{/if}
       {/if}
+      {#if kind === "type"}
+        <SegmentedControl
+          class="usage-grouping-toggle"
+          ariaLabel={m.usage_group_by()}
+          options={[
+            { value: "type", label: m.usage_group_type() },
+            { value: "endpoint", label: m.usage_group_endpoint() },
+          ]}
+          value={usagePage.endpointUsageGrouping}
+          onchange={(grouping) => (usagePage.endpointUsageGrouping = grouping)}
+        />
+      {/if}
       {@render viewToggle()}
     </div>
     {#if isChartView(view)}
@@ -205,6 +244,14 @@
                 <th>{m.usage_column_user_path()}</th>
               {:else if kind === "label"}
                 <th>{m.usage_column_label()}</th>
+                <th class="col-price">{m.usage_column_requests()}</th>
+              {:else if byEndpoint}
+                <th>{m.usage_column_endpoint()}</th>
+                <th>{m.usage_column_type()}</th>
+                <th class="col-price">{m.usage_column_requests()}</th>
+              {:else if kind === "type"}
+                <th>{m.usage_column_type()}</th>
+                <th>{m.usage_column_endpoints()}</th>
                 <th class="col-price">{m.usage_column_requests()}</th>
               {:else}
                 <th>{m.usage_column_session_id()}</th>
@@ -242,6 +289,25 @@
                       onclick={() => usagePage.toggleUsageLabelFilter(row.label)}
                     >{row.label}</button>
                   </td>
+                  <td class="col-price">{formatNumber(row.requests)}</td>
+                {:else if kind === "type"}
+                  {@const endpoints = byEndpoint ? [row.endpoint] : row.endpoints}
+                  <td>
+                    <button
+                      type="button"
+                      class="usage-label-chip"
+                      class:mono={byEndpoint}
+                      class:active={endpointsSelected(usagePage.usageFilterEndpoints, endpoints)}
+                      style="--label-color: {labelColor(row.type)}"
+                      title={usagePage.usageEndpointsChipTitle(endpoints, row.label)}
+                      onclick={() => usagePage.toggleUsageEndpointsFilter(endpoints)}
+                    >{row.label}</button>
+                  </td>
+                  {#if byEndpoint}
+                    <td>{row.type_label}</td>
+                  {:else}
+                    <td class="mono font-size-md" title={row.endpoints.join("\n")}>{endpointListSummary(row.endpoints)}</td>
+                  {/if}
                   <td class="col-price">{formatNumber(row.requests)}</td>
                 {:else}
                   <td>
@@ -302,6 +368,12 @@
 {/if}
 
 <style>
+  /* Keep the grouping switch beside the view toggle, right of the title. */
+  .model-chart-header :global(.usage-grouping-toggle) {
+    margin-left: auto;
+    margin-right: -8px;
+  }
+
   .usage-breakdown-loading {
     display: flex;
     align-items: center;

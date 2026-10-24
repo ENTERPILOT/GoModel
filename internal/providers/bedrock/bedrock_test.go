@@ -815,3 +815,44 @@ func TestBedrockUsageExtrasCacheKeys(t *testing.T) {
 		})
 	}
 }
+
+func TestConvertTools_AllowedToolsNarrowsDeclaredTools(t *testing.T) {
+	tool := func(name string) map[string]any {
+		return map[string]any{"type": "function", "function": map[string]any{"name": name}}
+	}
+	tools := []map[string]any{tool("tool_a"), tool("tool_b"), tool("tool_c")}
+	allowed := func(mode string, names ...string) map[string]any {
+		entries := make([]any, 0, len(names))
+		for _, name := range names {
+			entries = append(entries, map[string]any{"type": "function", "function": map[string]any{"name": name}})
+		}
+		return map[string]any{"type": "allowed_tools", "allowed_tools": map[string]any{"mode": mode, "tools": entries}}
+	}
+	declared := func(cfg *brtypes.ToolConfiguration) []string {
+		var names []string
+		for _, tool := range cfg.Tools {
+			spec, ok := tool.(*brtypes.ToolMemberToolSpec)
+			require.True(t, ok)
+			names = append(names, awssdk.ToString(spec.Value.Name))
+		}
+		return names
+	}
+
+	cfg, err := convertTools(tools, allowed("required", "tool_b", "tool_c"))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"tool_b", "tool_c"}, declared(cfg))
+	assert.IsType(t, &brtypes.ToolChoiceMemberAny{}, cfg.ToolChoice)
+
+	cfg, err = convertTools(tools, allowed("auto", "tool_a"))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"tool_a"}, declared(cfg))
+	assert.IsType(t, &brtypes.ToolChoiceMemberAuto{}, cfg.ToolChoice)
+
+	_, err = convertTools(tools, allowed("required", "unknown"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tool_choice.allowed_tools.tools")
+
+	_, err = convertTools(nil, allowed("required", "tool_a"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tool_choice.allowed_tools.tools")
+}

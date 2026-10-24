@@ -100,6 +100,14 @@ reasoning behavior, include its `thinking` object as an extension:
 Thinking output is returned as the OpenAI-compatible `reasoning_content`
 extension in both normal and streaming responses.
 
+Cohere cannot limit a turn to a subset of the declared tools. For a
+`tool_choice` of type `allowed_tools`, GoModel sends only the listed functions,
+with `tool_choice: REQUIRED` when the mode is `required` and Cohere's default
+otherwise. A subset that names no declared function is rejected with a 400.
+`allowed_tools` exists so a client can send the same tool list on every turn and
+keep its prompt cache; narrowing changes the tool definitions sent to Cohere, so
+a subset that changes between turns changes the request prefix.
+
 ## Audio transcription
 
 Cohere audio uses a dedicated speech-to-text model and endpoint; Command chat

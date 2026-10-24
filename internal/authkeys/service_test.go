@@ -48,6 +48,14 @@ func (s *testStore) Create(_ context.Context, key AuthKey) error {
 	return nil
 }
 
+func (s *testStore) UpdateImported(_ context.Context, key AuthKey) error {
+	if _, ok := s.keys[key.ID]; !ok {
+		return ErrNotFound
+	}
+	s.keys[key.ID] = key
+	return nil
+}
+
 func (s *testStore) UpdateLabels(_ context.Context, id string, labels []string, now time.Time) error {
 	key, ok := s.keys[id]
 	if !ok {
@@ -76,6 +84,17 @@ func (s *testStore) UpdateDashboardAccess(_ context.Context, id string, allowed 
 		return ErrNotFound
 	}
 	key.DashboardAccess = allowed
+	key.UpdatedAt = now.UTC()
+	s.keys[id] = key
+	return nil
+}
+
+func (s *testStore) UpdatePassthroughAccess(_ context.Context, id string, allowed bool, now time.Time) error {
+	key, ok := s.keys[id]
+	if !ok {
+		return ErrNotFound
+	}
+	key.PassthroughAccess = allowed
 	key.UpdatedAt = now.UTC()
 	s.keys[id] = key
 	return nil
@@ -310,6 +329,39 @@ func TestServiceCreateDefaultsToNoDashboardAccess(t *testing.T) {
 	authenticated, err := service.Authenticate(context.Background(), issued.Value)
 	require.NoError(t, err)
 	require.False(t, authenticated.DashboardAccess)
+}
+
+func TestServicePassthroughAccessLifecycle(t *testing.T) {
+	ctx := context.Background()
+	service, err := NewService(newTestStore())
+	require.NoError(t, err)
+
+	plain, err := service.Create(ctx, CreateInput{Name: "plain"})
+	require.NoError(t, err)
+	require.False(t, plain.PassthroughAccess, "new keys start without passthrough")
+	granted, err := service.Create(ctx, CreateInput{Name: "proxy", PassthroughAccess: true})
+	require.NoError(t, err)
+	require.True(t, granted.PassthroughAccess)
+
+	authenticated, err := service.Authenticate(ctx, plain.Value)
+	require.NoError(t, err)
+	require.False(t, authenticated.PassthroughAccess)
+
+	view, err := service.UpdatePassthroughAccess(ctx, plain.ID, true)
+	require.NoError(t, err)
+	require.True(t, view.PassthroughAccess)
+	authenticated, err = service.Authenticate(ctx, plain.Value)
+	require.NoError(t, err)
+	require.True(t, authenticated.PassthroughAccess)
+
+	_, err = service.UpdatePassthroughAccess(ctx, granted.ID, false)
+	require.NoError(t, err)
+	authenticated, err = service.Authenticate(ctx, granted.Value)
+	require.NoError(t, err)
+	require.False(t, authenticated.PassthroughAccess)
+
+	_, err = service.UpdatePassthroughAccess(ctx, "missing", true)
+	require.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestServiceUpdateLabelsUnknownKeyReturnsNotFound(t *testing.T) {

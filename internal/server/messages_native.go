@@ -3,8 +3,9 @@ package server
 import (
 	"bytes"
 	"context"
-	// encoding/json rather than goccy: replaceTopLevelMember needs the
-	// decoder's InputOffset to splice a value in place.
+	// encoding/json rather than goccy (ADR-0015): replaceTopLevelMember
+	// splices a value in place at the decoder's InputOffset and relies on
+	// the standard library's documented offset contract.
 	"encoding/json"
 	"errors"
 	"io"

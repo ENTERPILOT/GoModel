@@ -76,7 +76,9 @@ func applyMCPVirtualEnv(cfg *Config) error {
 // /mcp/{name} with server slugs, so a clash with a declared server fails
 // startup. Members are not checked for existence here: admin-managed servers
 // live in the store, so the gateway resolves members at runtime instead.
-func normalizeMCPVirtualServers(cfg *MCPConfig) error {
+// Members and tool_discovery holding a secret reference keep their text in
+// the load pass; validateResolvedMCP checks them once resolved.
+func normalizeMCPVirtualServers(cfg *MCPConfig, pass mcpPass) error {
 	if len(cfg.VirtualServers) == 0 {
 		return nil
 	}
@@ -84,7 +86,7 @@ func normalizeMCPVirtualServers(cfg *MCPConfig) error {
 	normalized := make(map[string]MCPVirtualServerConfig, len(cfg.VirtualServers))
 	for name, virtual := range cfg.VirtualServers {
 		canonical := canonicalTextKey(name)
-		if err := validateMCPVirtualServerName(canonical); err != nil {
+		if err := ValidateMCPVirtualServerName(canonical); err != nil {
 			return fmt.Errorf("mcp.virtual_servers[%q]: %w", name, err)
 		}
 		if _, dup := normalized[canonical]; dup {
@@ -99,7 +101,7 @@ func normalizeMCPVirtualServers(cfg *MCPConfig) error {
 	sort.Strings(names)
 	for _, name := range names {
 		virtual := normalized[name]
-		if err := normalizeMCPVirtualServer(&virtual, normalized); err != nil {
+		if err := normalizeMCPVirtualServer(&virtual, normalized, pass); err != nil {
 			return fmt.Errorf("mcp.virtual_servers[%q]: %w", name, err)
 		}
 		normalized[name] = virtual
@@ -108,10 +110,11 @@ func normalizeMCPVirtualServers(cfg *MCPConfig) error {
 	return nil
 }
 
-// validateMCPVirtualServerName applies the server slug rules: the name is a
+// ValidateMCPVirtualServerName applies the server slug rules: the name is a
 // /mcp/{name} URL segment and prefixes nothing, but sharing the rules keeps
-// one alphabet for that path segment.
-func validateMCPVirtualServerName(name string) error {
+// one alphabet for that path segment. Shared by config loading and the admin
+// API.
+func ValidateMCPVirtualServerName(name string) error {
 	if name == "" {
 		return fmt.Errorf("virtual server name is required")
 	}
@@ -124,24 +127,52 @@ func validateMCPVirtualServerName(name string) error {
 	return nil
 }
 
-func normalizeMCPVirtualServer(virtual *MCPVirtualServerConfig, virtuals map[string]MCPVirtualServerConfig) error {
+// NormalizeMCPVirtualServer validates one admin-supplied definition and
+// normalizes it in place: description, members, and tool_discovery. Admin
+// input is literal, so nothing is left for secret resolution. The admin API
+// checks nesting and member existence itself.
+func NormalizeMCPVirtualServer(virtual *MCPVirtualServerConfig) error {
+	return normalizeMCPVirtualServer(virtual, nil, mcpLiteralPass)
+}
+
+func normalizeMCPVirtualServer(virtual *MCPVirtualServerConfig, virtuals map[string]MCPVirtualServerConfig, pass mcpPass) error {
 	virtual.Description = strings.TrimSpace(virtual.Description)
-	switch mode := strings.ToLower(strings.TrimSpace(virtual.ToolDiscovery)); mode {
-	case "", MCPToolDiscoveryOff, MCPToolDiscoverySearch:
-		virtual.ToolDiscovery = mode
-	default:
-		return fmt.Errorf("tool_discovery must be %q or %q, got %q", MCPToolDiscoveryOff, MCPToolDiscoverySearch, virtual.ToolDiscovery)
+	if pass.deferred(virtual.ToolDiscovery) {
+		virtual.ToolDiscovery = strings.TrimSpace(virtual.ToolDiscovery)
+	} else {
+		switch mode := strings.ToLower(strings.TrimSpace(virtual.ToolDiscovery)); mode {
+		case "", MCPToolDiscoveryOff, MCPToolDiscoverySearch:
+			virtual.ToolDiscovery = mode
+		default:
+			if pass == mcpResolvedPass {
+				return resolvedValueError("tool_discovery", fmt.Sprintf("must be %q or %q", MCPToolDiscoveryOff, MCPToolDiscoverySearch))
+			}
+			return fmt.Errorf("tool_discovery must be %q or %q, got %q", MCPToolDiscoveryOff, MCPToolDiscoverySearch, virtual.ToolDiscovery)
+		}
 	}
 	members := make([]string, 0, len(virtual.Servers))
-	for _, raw := range virtual.Servers {
+	for i, raw := range virtual.Servers {
+		if pass.deferred(raw) {
+			// Canonicalizing would lowercase the reference itself.
+			if member := strings.TrimSpace(raw); !slices.Contains(members, member) {
+				members = append(members, member)
+			}
+			continue
+		}
 		member := canonicalTextKey(raw)
 		if member == "" {
 			continue
 		}
 		if err := ValidateMCPServerSlug(member); err != nil {
+			if pass == mcpResolvedPass {
+				return resolvedValueError(fmt.Sprintf("servers[%d]", i), fmt.Sprintf("is not a valid server slug (at most %d characters matching %s)", maxMCPServerSlugLength, mcpServerSlugRegex.String()))
+			}
 			return fmt.Errorf("member %q: %w", raw, err)
 		}
 		if _, nested := virtuals[member]; nested {
+			if pass == mcpResolvedPass {
+				return resolvedValueError(fmt.Sprintf("servers[%d]", i), "names a virtual server; virtual servers can only include MCP servers")
+			}
 			return fmt.Errorf("member %q is a virtual server; virtual servers can only include MCP servers", member)
 		}
 		if !slices.Contains(members, member) {

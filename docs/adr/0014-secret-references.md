@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted. Sections 1–3 are implemented; sections 4–6 are planned and land in
-separate pull requests.
+Accepted. Sections 1–3 and 5 are implemented; sections 4 and 6 are planned
+and land in separate pull requests.
 
 ## Context
 
@@ -99,7 +99,15 @@ func (s *Secrets) Resolve(ctx context.Context, value string) (string, error)
 func (s *Secrets) HasReference(value string) bool
 func (s *Secrets) ResolveFields(ctx context.Context, path string, target any) error
 func HasSecretReference(value string) bool
-func (s *Secrets) NotifyChanged() // planned, see section 5
+func (s *Secrets) NotifyChanged() // see section 5
+// Core-side rotation plumbing, also section 5: Changes, Recheck returning a
+// *SecretRecheck (Fields, Value, Commit), and SecretNotifier with SetNotifier.
+
+// The field being resolved ("server.master_key", "providers.openai.api_key",
+// or "OPENAI_API_KEY_2" for an env-provided key) is on the context a resolver
+// receives. Field paths are not secret;
+// resolvers may audit-log them.
+func SecretFieldFromContext(ctx context.Context) (string, bool)
 
 // LoadResult.Secrets is set by Load. ResolveSecrets is step 3 below; it runs
 // once per generation, and a retry returns the first result, so a resolved
@@ -125,8 +133,20 @@ Resolution order for one generation:
    in the decoded section with the schemes registered at that moment, so an
    extension's own section can use them.
 3. `run` resolves every string in `Config` (except `extensions`, which are
-   decoded on demand). A load-time check that has to accept a reference, such
-   as the MCP server URL scheme, is repeated on the resolved value.
+   decoded on demand, and `guardrails.rules[].config`, see below). A
+   load-time check that has to accept a reference, such as the MCP server URL
+   scheme, is repeated on the resolved value.
+
+   Guardrail rules are seeded into the guardrail store, so resolving their
+   plugin config here would write resolved secrets to the database. Their
+   `config` block is tagged `secrets:"deferred"` and skipped: the seeder
+   resolves the fields that are not `InputSecret` fields of the plugin
+   (`guardrails.rules[<i>].config.<key>`), and stores the secret fields with
+   their references, which the guardrail service resolves once when it builds
+   the instance (section 4). No other configuration section is copied into a
+   store with secret values: MCP servers, users, tagging rules, and virtual
+   models stay in memory, and the seeded rate-limit and budget rules hold no
+   secrets.
 4. `providers.Init` merges the provider environment variables
    (`OPENAI_API_KEY=${vault:prod/llm#openai}`) into `RawProviders` and then
    resolves the providers that pass the credential filter. A `config.yaml`
@@ -151,51 +171,170 @@ string settings, and string values inside JSON variables, accept references.
 Any reference that is still unresolved after step 3 or 4 stops the
 generation with an error naming the field and the scheme, never the value.
 The error message for an unknown scheme says which extension usually
-provides it. A first start fails, and a reload keeps the running generation.
+provides it. A scheme GoModel knows nothing of (not built in, registered,
+or hinted) is not repeated: its name is text taken from the value, which
+may be a literal secret that only looks like a reference. A first start fails, and a reload keeps the running generation.
 A literal `${vault:...}` string is therefore never sent upstream as a
 credential. This replaces the old silent dropping of unresolved `${`
 provider values for references. Plain `${VAR}` keeps its historical
 behaviour.
 
+Core never logs a resolved value. An extension that wants defence in depth
+(GoModel Pro scrubs resolved vault values from log records) registers a
+`func(slog.Handler) slog.Handler` with `ext.Registry.WrapLogHandler`. Core
+applies it to every slog handler it builds: the startup logger and the one
+each reload installs before step 1, so what `config.Load` logs is covered
+too. Unlike the resolver, the wrapper is process-wide: `run.Run` reads the
+registered wrappers once, before it builds its first logger, and applies them
+in registration order to every generation.
+
 ### 4. Dashboard-managed entities accept references
 
-Provider credentials, MCP server headers and environment, and guardrail
-`InputSecret` fields accept references when they are saved. The admin API
-stores the reference and returns it unmasked: a reference names where a
-secret lives and is not itself secret. Literal values keep today's masking
-and merge-on-PUT behaviour. The entity is resolved when the service builds
-it. A reference that cannot be resolved at save time is rejected with a
-validation error.
+Provider credentials (API keys, service-account JSON and base64 JSON, proxy
+URL), MCP server headers, and guardrail `InputSecret` fields accept
+references when they are saved. Admin-managed MCP servers have no
+environment: stdio servers are declarative only, and their `env` values are
+configuration, resolved in step 3. The admin API stores the reference and
+returns it unmasked: a reference names where a secret lives and is not itself
+secret. Only a value made of references alone is unmasked (an MCP header may
+also start with an HTTP auth scheme, `Bearer ${env:TOKEN}`, and a proxy URL is
+shown when its password is made of references); a value that mixes literal
+text with a reference may carry a literal secret and is masked like one. Literal values keep today's masking and merge-on-PUT behaviour; the
+mask sent back keeps the stored value, literal or reference. The database
+holds the reference as typed; references are resolved by the service when it
+builds the provider, MCP connection, or guardrail instance, never in the
+store layer. A reference that cannot be resolved at save time is rejected
+with a validation error naming the field and scheme.
 
-An extension may also implement an optional writer on its resolver:
+A reference resolves on the gateway host, so whoever adds one can read any
+environment variable or file the gateway can, the master key included. When a
+master key is configured, only it may add or change a reference: for every
+other credential, authentication marks the request with
+`config.RestrictSecretReferences`, and `Secrets.StoreSecret` then rejects any
+reference the entity's stored row does not already hold with a 403
+(`secret_reference_requires_master_key`). Literals, the mask, and unchanged
+references still save. Repointing an entity sends it what its references
+resolve to, so `config.CheckSecretDestinations` refuses the same credentials
+a change to a destination field (MCP `url`; provider `type`, `base_url`,
+`backend`, `proxy_url`; guardrail type and plugin fields marked
+`pluginapi.Field.Destination`) while the saved entity holds a reference.
+
+Resolvers see field paths rooted at the entity: `provider_credentials.<name>.api_keys[<i>]`
+(also `.service_account_json`, `.service_account_json_base64`, `.proxy_url`),
+`mcp_servers.<slug>.headers.<Header>`, and
+`guardrail_definitions.<name>.config.<key>`. The guardrail root is not
+`guardrails` so it cannot collide with the `guardrails` section of
+`config.yaml`.
+
+These paths are deliberately not the identifiers encryption at rest
+(section 6) binds ciphertexts to. Its additional authenticated data uses the
+normalized credential name (`normalizeCredentialName`) and the field
+`api_keys` for every key, so reordering a credential's keys never breaks
+decryption. Reference paths use the name as saved and index each key
+(`api_keys[<i>]`), so rotation reports the key that changed. Do not unify the
+two.
+
+`Secrets.ResolveEntity` resolves one entity's fields as a unit and records
+them for rotation (section 5) only once the entity is installed, replacing
+whatever that entity recorded before; `Secrets.ForgetEntity` drops the
+records of a deleted entity.
+
+A stored entity whose references fail when it is loaded is handled like any
+other invalid stored row of its kind: a provider credential or MCP server is
+logged and skipped, and a running MCP server keeps its current headers. A
+reload whose replacement would skip one the serving generation runs fails
+instead, so the serving generation keeps it, as for a `config.yaml`
+reference; guardrails load as a set, so a failure fails the guardrail load (startup
+fails, a reload keeps the running generation, a periodic refresh keeps the
+current instances), which keeps guardrails failing closed.
+
+An extension may also register an optional writer, per generation like
+`Register`, with `Secrets.SetWriter`:
 
 ```go
+type SecretKey struct{ Entity, ID, Field string } // "provider_credentials", "openai", "api_keys[0]"
+
 type SecretWriter interface {
     WriteSecret(ctx context.Context, key SecretKey, value string) (reference string, err error)
     DeleteSecret(ctx context.Context, reference string) error
+    // OwnsReference reports whether WriteSecret created reference, so core
+    // never deletes a secret an operator referenced by hand.
+    OwnsReference(reference string) bool
 }
 ```
 
-When a writer is registered and enabled, a literal secret saved through the
-dashboard is written to the external store and only the returned reference
-is persisted. Core ships no writer.
+When a writer is registered, a literal secret saved through the admin API is
+written to the external store and only the returned reference is persisted.
+The writer receives the value the field would resolve to without one (each
+`$${` escape already turned into `${`) and must return exactly one
+`${scheme:reference}` with nothing around it. `WriteSecret` must create a new secret and return a distinct reference
+each time, never changing what an existing reference resolves to, because a
+save can still fail after the write.
+When an entity is deleted, or a field's owned reference is replaced, core
+calls `DeleteSecret` for each reference the writer owns, after the database
+commit, best effort (a failure is logged). A save that fails after the write
+deletes what it wrote. A save is rejected when it holds a reference the
+writer owns that the entity's stored row does not: one read before the row was
+replaced or deleted, or copied from another entity, may name a deleted secret.
+Saves and deletes of one entity kind are serialized from reading the stored
+row through deleting the secrets it held. Core ships no writer.
 
 ### 5. Rotation without restart
 
-`Secrets` remembers which field each reference resolved into, and a keyed
-fingerprint of the value (never the value itself). `NotifyChanged` (called
-by an extension when its backend reports a new version) re-resolves every recorded reference and compares fingerprints:
+`Secrets` remembers each field a reference resolved into: its path, the value
+as configured, and an HMAC-SHA256 fingerprint of the resolved value under a
+random per-process key (never the value itself). Fields are recorded under
+the label resolution reports them by (`server.master_key`,
+`extensions.vaults.token`). A provider API key is recorded under the source
+the operator wrote: its `config.yaml` path (`providers.openai.api_keys[1]`) or
+the environment variable that set it (`OPENAI_API_KEY_2`). Providers dropped
+for missing credentials are never resolved, so they are not tracked.
 
-- When only provider API keys changed, the affected providers' keyrings are
-  swapped in place. `Keyring` gains `Replace`, an atomic swap. Requests in
-  flight finish on the key they started with.
+`NotifyChanged`, called by an extension when its backend reports a new
+version, never blocks, and calls that arrive before the check runs coalesce
+into one. Core then re-resolves every recorded reference with the same
+resolvers and compares fingerprints:
+
+- When only provider API keys changed, the changed keys are patched by
+  source, key de-duplication and credential filtering run again, exactly as
+  at startup, and the affected providers' keyrings are swapped in place.
+  `Keyring` gains `Replace`, an atomic swap of an immutable key set. Requests
+  in flight finish on the key they started with. Session stickiness is rendezvous hashing over
+  the key set, so sessions on a removed key move, and a new key takes its
+  share of the rest.
 - When any other field changed (DSNs, master key, service-account JSON,
-  proxy URLs), core starts the same in-process generation reload that
-  `SIGHUP` triggers. A failed reload keeps the running generation, exactly
-  as today.
+  proxy URLs), a provider would lose its last key, or the changed key is also
+  copied elsewhere (the semantic cache embedder), core starts the same
+  in-process generation reload that `SIGHUP` triggers. A failed reload keeps
+  the running generation, exactly as today, and the change stays pending, so
+  the next notification retries it.
+- When a reference cannot be re-resolved, core logs a warning naming the
+  field and scheme, keeps every current value, and does not reload. A failed
+  lookup is not evidence that the running credential is stale; the extension
+  that notified decides that.
 - Dashboard-managed entities re-resolve their own references and reinstall
   the affected provider, MCP server, or guardrail through the existing
-  install path.
+  install path: a provider whose API keys alone changed has its keyring
+  swapped, any other provider change rebuilds that provider, an MCP server is
+  redialed, and a guardrail instance is rebuilt and the workflows recompiled.
+  Their fields never trigger a generation reload. An entity whose references
+  cannot be re-resolved keeps its current values, and its change stays
+  pending. A failed entity reference does not hold back other entities or
+  the configuration; a failed configuration reference holds back only the
+  configuration's own swap or reload.
+
+Each change is logged at info with the action and the field paths, never
+values.
+
+Every generation has its own `Secrets`, and an extension holds the one it saw
+last, which may belong to a reload that was rejected. So the process shares
+one `SecretNotifier` between all generations' `Secrets`, and only the
+generation that is serving listens: its watcher starts when its server starts
+and stops with it. A notification sent through any generation's `Secrets`
+reaches the serving one, which re-checks with its own `Secrets`. Stopping a
+watcher waits only briefly for a resolver; a check that outlives its
+generation takes no action and passes the notification on to the next one. `env` and
+`file` references are not polled; they rotate with a reload.
 
 Rotating `server.master_key` also changes the derived anonymous install ID,
 as it does today.
@@ -250,8 +389,9 @@ Vault keys, Vault Transit). The incorrect "stored encrypted" claim in
   once an encryption key is set. Losing the key makes those fields
   unrecoverable, which the documentation states plainly.
 - The open-core boundary is explicit: references, `env`, `file`, rotation,
-  and local encryption are core. External secret managers, write-back, and
-  KMS key wrapping are GoModel Pro, plugged in through `Secrets.Register`,
-  `SecretWriter`, and `KeyWrapper`.
+  and local encryption are core. External secret managers, write-back, KMS
+  key wrapping, and log scrubbing are GoModel Pro, plugged in through
+  `Secrets.Register`, `SecretWriter`, `KeyWrapper`, and
+  `ext.Registry.WrapLogHandler`.
 - Resolved values live in process memory for the life of a generation. Go
   gives no reliable way to zero them, and this ADR does not claim otherwise.

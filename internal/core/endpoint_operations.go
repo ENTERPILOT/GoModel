@@ -30,6 +30,7 @@ var operationPaths = map[Operation]OperationPaths{
 	}},
 	OperationMCP:                 {Prefixes: []string{"/mcp"}},
 	OperationSystemOne:           {Exact: []string{"/v1/systemone", "/v1/systemone/permute", "/v1/systemone/separate"}},
+	OperationDecisions:           {Exact: []string{"/v1/decisions"}},
 	OperationProviderPassthrough: {Prefixes: []string{"/p"}},
 }
 

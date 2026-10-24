@@ -3,6 +3,7 @@ package litellmmigrate
 import (
 	"fmt"
 	"math"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -263,11 +264,26 @@ func (c *converter) convertGeneralSettings() {
 		}
 	}
 	if _, ok := c.general.get("database_url"); ok {
-		c.report.warn("general_settings.database_url", "not reused: give GoModel its own database (storage.type: postgresql). Keys, teams, budgets, and spend live in the LiteLLM database and are not part of config.yaml")
+		c.report.info("general_settings.database_url", "not GoModel's storage: give GoModel its own database (storage.type: postgresql). The migration reads keys, teams, and budgets from it")
 	}
 	if _, ok := c.general.get("store_model_in_db"); ok {
 		c.report.warn("general_settings.store_model_in_db", "models added through the LiteLLM UI live in its database, not in config.yaml; recreate them in GoModel")
 	}
+}
+
+// setting returns a general_settings string with an os.environ/ reference
+// resolved from the environment, then from the config's
+// environment_variables, which LiteLLM loads into its environment.
+func (c *converter) setting(key string) string {
+	value, _ := c.general.values[key].(string)
+	name, isRef := envRef(value)
+	if !isRef {
+		return strings.TrimSpace(value)
+	}
+	if resolved := os.Getenv(name); resolved != "" {
+		return resolved
+	}
+	return c.src.EnvironmentVariables[name]
 }
 
 // masterKeyEnv is the variable GoModel reads its master key from. It

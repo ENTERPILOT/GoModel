@@ -47,6 +47,25 @@ func TestSchemaIsIdempotent(t *testing.T) {
 	})
 }
 
+func TestAddColumnsIsIdempotent(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := context.Background()
+		db = newConformanceDB(t, db)
+		// Column migrations also run on every start, against databases that
+		// already have the columns.
+		for range 3 {
+			err := sqlx.AddColumns(ctx, db,
+				`ALTER TABLE conformance ADD COLUMN note TEXT`,
+				`ALTER TABLE conformance ADD COLUMN enabled `+sqlx.TypeBool+` NOT NULL DEFAULT FALSE`,
+			)
+			require.NoError(t, err)
+		}
+
+		_, err := db.Exec(ctx, `INSERT INTO conformance (id, flag, updated_at, note) VALUES (?, ?, ?, ?)`, "a", true, int64(1), "n")
+		require.NoError(t, err)
+	})
+}
+
 func TestScalarRoundTrip(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
