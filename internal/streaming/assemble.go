@@ -288,6 +288,9 @@ func AssembleResponsesResponse(events []Event) (*core.ResponsesResponse, error) 
 	resp := &core.ResponsesResponse{Object: "response", Status: "incomplete"}
 	if base != nil {
 		resp.ID, resp.Model, resp.Provider, resp.CreatedAt = base.ID, base.Model, base.Provider, base.CreatedAt
+		// The opening event carries the request-echo members (instructions,
+		// metadata, tools…); an interrupted stream keeps them too.
+		resp.ExtraFields = core.CloneUnknownJSONFields(base.ExtraFields)
 	}
 	sort.Ints(order)
 	for _, index := range order {
