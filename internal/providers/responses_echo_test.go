@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -70,13 +72,9 @@ func TestResponsesRequestEcho(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			echo := ResponsesRequestEcho(tt.req)
-			if len(echo) != len(tt.want) {
-				t.Fatalf("echo keys = %v, want %v", echo, tt.want)
-			}
+			require.Len(t, echo, len(tt.want), "echo keys = %v, want %v", echo, tt.want)
 			for _, name := range tt.want {
-				if len(echo[name]) == 0 {
-					t.Fatalf("echo[%q] missing from %v", name, echo)
-				}
+				assert.NotEmpty(t, echo[name], "echo[%q] missing from %v", name, echo)
 			}
 		})
 	}
@@ -87,9 +85,7 @@ func TestResponsesRequestEcho(t *testing.T) {
 func TestResponsesRequestEchoCanonicalizesTruncation(t *testing.T) {
 	req := &core.ResponsesRequest{Model: "m", Input: "hi", Truncation: " disabled "}
 
-	if got := string(ResponsesRequestEcho(req)["truncation"]); got != `"disabled"` {
-		t.Fatalf("truncation = %s, want \"disabled\"", got)
-	}
+	assert.Equal(t, `"disabled"`, string(ResponsesRequestEcho(req)["truncation"]))
 }
 
 // Members the gateway does not model are decoded onto ExtraFields, and the
@@ -100,9 +96,7 @@ func TestResponsesRequestEchoFromDecodedExtraFields(t *testing.T) {
 		`"frequency_penalty":0.5,"presence_penalty":0.25,"max_tool_calls":4,` +
 		`"prompt_cache_key":"key-1","background":false,"x_client_trace":"t-1"}`
 	var req core.ResponsesRequest
-	if err := json.Unmarshal([]byte(body), &req); err != nil {
-		t.Fatalf("Unmarshal() error = %v", err)
-	}
+	require.NoError(t, json.Unmarshal([]byte(body), &req))
 
 	echo := ResponsesRequestEcho(&req)
 	want := map[string]string{
@@ -113,14 +107,10 @@ func TestResponsesRequestEchoFromDecodedExtraFields(t *testing.T) {
 		"background":        "false",
 	}
 	for name, value := range want {
-		if got := string(echo[name]); got != value {
-			t.Errorf("echo[%q] = %s, want %s", name, got, value)
-		}
+		assert.Equal(t, value, string(echo[name]), "echo[%q]", name)
 	}
 	for _, name := range []string{"x_client_trace", "stream", "model", "input"} {
-		if _, ok := echo[name]; ok {
-			t.Errorf("echo[%q] = %s, want it absent", name, echo[name])
-		}
+		assert.NotContains(t, echo, name)
 	}
 }
 
@@ -135,12 +125,8 @@ func TestApplyResponsesRequestEchoKeepsProviderMembers(t *testing.T) {
 
 	ApplyResponsesRequestEcho(resp, echoRequest())
 
-	if got := string(resp.ExtraFields.Lookup("instructions")); got != `"from provider"` {
-		t.Fatalf("instructions = %s, want the provider value", got)
-	}
-	if len(resp.ExtraFields.Lookup("metadata")) == 0 {
-		t.Fatal("metadata was not echoed alongside the provider member")
-	}
+	assert.Equal(t, `"from provider"`, string(resp.ExtraFields.Lookup("instructions")))
+	assert.NotEmpty(t, resp.ExtraFields.Lookup("metadata"), "metadata was not echoed alongside the provider member")
 }
 
 // A chat-translated provider answers with the same echoed members whether the
@@ -157,36 +143,22 @@ func TestResponsesViaChatEchoMatchesStream(t *testing.T) {
 	}
 
 	resp, err := ResponsesViaChat(context.Background(), provider, req, "anthropic")
-	if err != nil {
-		t.Fatalf("ResponsesViaChat() error = %v", err)
-	}
+	require.NoError(t, err)
 	encoded, err := json.Marshal(resp)
-	if err != nil {
-		t.Fatalf("marshal response: %v", err)
-	}
+	require.NoError(t, err)
 	var nonStream map[string]json.RawMessage
-	if err := json.Unmarshal(encoded, &nonStream); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	require.NoError(t, json.Unmarshal(encoded, &nonStream))
 
 	stream, err := StreamResponsesViaChat(context.Background(), provider, req.WithStreaming(), "anthropic")
-	if err != nil {
-		t.Fatalf("StreamResponsesViaChat() error = %v", err)
-	}
+	require.NoError(t, err)
 	defer func() { _ = stream.Close() }()
 	body, err := io.ReadAll(stream)
-	if err != nil && err != io.EOF {
-		t.Fatalf("read stream: %v", err)
-	}
+	require.NoError(t, err)
 	streamed := lastLifecycleResponse(t, string(body))
 
 	for name := range ResponsesRequestEcho(req) {
-		if len(nonStream[name]) == 0 {
-			t.Fatalf("non-streaming response is missing %q: %s", name, encoded)
-		}
-		if string(nonStream[name]) != string(streamed[name]) {
-			t.Fatalf("%q = %s non-streaming, %s streaming", name, nonStream[name], streamed[name])
-		}
+		require.NotEmpty(t, nonStream[name], "non-streaming response is missing %q: %s", name, encoded)
+		assert.Equal(t, string(nonStream[name]), string(streamed[name]), "%q non-streaming vs streaming", name)
 	}
 }
 
@@ -210,8 +182,6 @@ func lastLifecycleResponse(t *testing.T, body string) map[string]json.RawMessage
 			last = event.Response
 		}
 	}
-	if last == nil {
-		t.Fatalf("no lifecycle event found in stream: %s", body)
-	}
+	require.NotNil(t, last, "no lifecycle event found in stream: %s", body)
 	return last
 }

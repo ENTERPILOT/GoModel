@@ -1,8 +1,10 @@
 package providers
 
 import (
-	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -29,22 +31,15 @@ func TestConvertResponsesRequestToChatTruncation(t *testing.T) {
 
 			chatReq, err := ConvertResponsesRequestToChat(req)
 			if !tt.wantErr {
-				if err != nil {
-					t.Fatalf("ConvertResponsesRequestToChat() error = %v, want nil", err)
-				}
-				if chatReq == nil {
-					t.Fatal("ConvertResponsesRequestToChat() = nil")
-				}
+				require.NoError(t, err)
+				assert.NotNil(t, chatReq)
 				return
 			}
 
 			var gatewayErr *core.GatewayError
-			if !errors.As(err, &gatewayErr) {
-				t.Fatalf("ConvertResponsesRequestToChat() error = %v, want a gateway error", err)
-			}
-			if gatewayErr.Param == nil || *gatewayErr.Param != "truncation" {
-				t.Fatalf("param = %v, want truncation", gatewayErr.Param)
-			}
+			require.ErrorAs(t, err, &gatewayErr)
+			require.NotNil(t, gatewayErr.Param)
+			assert.Equal(t, "truncation", *gatewayErr.Param)
 		})
 	}
 }

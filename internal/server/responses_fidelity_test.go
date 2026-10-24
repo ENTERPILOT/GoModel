@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
@@ -44,16 +47,12 @@ func TestResponses_NonStreamingKeepsProviderResponseMembers(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("create status = %d, want 200 (%s)", rec.Code, rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code, "create: %s", rec.Body.String())
 	srv.handler.drainSnapshotWrites()
 
 	getRec := httptest.NewRecorder()
 	srv.ServeHTTP(getRec, httptest.NewRequest(http.MethodGet, "/v1/responses/resp_fidelity", nil))
-	if getRec.Code != http.StatusOK {
-		t.Fatalf("get status = %d, want 200 (%s)", getRec.Code, getRec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, getRec.Code, "get: %s", getRec.Body.String())
 
 	want := map[string]string{
 		"instructions":        `"be terse"`,
@@ -64,13 +63,9 @@ func TestResponses_NonStreamingKeepsProviderResponseMembers(t *testing.T) {
 	}
 	for name, payload := range map[string][]byte{"create": rec.Body.Bytes(), "retrieve": getRec.Body.Bytes()} {
 		var got map[string]json.RawMessage
-		if err := json.Unmarshal(payload, &got); err != nil {
-			t.Fatalf("decode %s response: %v", name, err)
-		}
+		require.NoError(t, json.Unmarshal(payload, &got), "decode %s response", name)
 		for member, value := range want {
-			if string(got[member]) != value {
-				t.Fatalf("%s response %q = %s, want %s (%s)", name, member, got[member], value, payload)
-			}
+			assert.Equal(t, value, string(got[member]), "%s response %q (%s)", name, member, payload)
 		}
 	}
 }
@@ -97,9 +92,7 @@ func TestResponses_MissingInputRejectedLocally(t *testing.T) {
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, req)
 
-			if rec.Code != tt.wantStatus {
-				t.Fatalf("status = %d, want %d (%s)", rec.Code, tt.wantStatus, rec.Body.String())
-			}
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
 			if tt.wantStatus != http.StatusBadRequest {
 				return
 			}
@@ -111,21 +104,13 @@ func TestResponses_MissingInputRejectedLocally(t *testing.T) {
 					Code    *string `json:"code"`
 				} `json:"error"`
 			}
-			if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
-				t.Fatalf("decode error body: %v", err)
-			}
-			if envelope.Error.Message != "Missing required parameter: 'input'." {
-				t.Fatalf("message = %q", envelope.Error.Message)
-			}
-			if envelope.Error.Type != "invalid_request_error" {
-				t.Fatalf("type = %q, want invalid_request_error", envelope.Error.Type)
-			}
-			if envelope.Error.Param == nil || *envelope.Error.Param != "input" {
-				t.Fatalf("param = %v, want input", envelope.Error.Param)
-			}
-			if envelope.Error.Code == nil || *envelope.Error.Code != "missing_required_parameter" {
-				t.Fatalf("code = %v, want missing_required_parameter", envelope.Error.Code)
-			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+			assert.Equal(t, "Missing required parameter: 'input'.", envelope.Error.Message)
+			assert.Equal(t, "invalid_request_error", envelope.Error.Type)
+			require.NotNil(t, envelope.Error.Param)
+			assert.Equal(t, "input", *envelope.Error.Param)
+			require.NotNil(t, envelope.Error.Code)
+			assert.Equal(t, "missing_required_parameter", *envelope.Error.Code)
 		})
 	}
 }
