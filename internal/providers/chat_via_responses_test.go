@@ -1,0 +1,888 @@
+package providers
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+type stubChatViaResponsesProvider struct {
+	capturedReq *core.ResponsesRequest
+	resp        *core.ResponsesResponse
+	respErr     error
+	streamData  string
+	streamErr   error
+}
+
+func (p *stubChatViaResponsesProvider) Responses(_ context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
+	p.capturedReq = req
+	return p.resp, p.respErr
+}
+
+func (p *stubChatViaResponsesProvider) StreamResponses(_ context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
+	p.capturedReq = req
+	if p.streamErr != nil {
+		return nil, p.streamErr
+	}
+	return io.NopCloser(strings.NewReader(p.streamData)), nil
+}
+
+func chatViaResponsesExtras(fields map[string]string) core.UnknownJSONFields {
+	raw := make(map[string]json.RawMessage, len(fields))
+	for key, value := range fields {
+		raw[key] = json.RawMessage(value)
+	}
+	return core.UnknownJSONFieldsFromMap(raw)
+}
+
+func TestConvertChatRequestToResponses(t *testing.T) {
+	temperature := 0.7
+	topP := 0.9
+	maxTokens := 1024
+	parallelToolCalls := false
+	req := &core.ChatRequest{
+		Model:             "gpt-5.1-codex",
+		Messages:          []core.Message{{Role: "user", Content: "hello"}},
+		Temperature:       &temperature,
+		TopP:              &topP,
+		MaxTokens:         &maxTokens,
+		ParallelToolCalls: &parallelToolCalls,
+		Stream:            true,
+		StreamOptions:     &core.StreamOptions{IncludeUsage: true},
+		Reasoning:         &core.Reasoning{Effort: "high"},
+		User:              "user-1",
+		ServiceTier:       "flex",
+		ExtraFields: chatViaResponsesExtras(map[string]string{
+			"metadata":      `{"session":"abc"}`,
+			"x_trace_token": `"keep-me"`,
+		}),
+	}
+
+	responsesReq, err := ConvertChatRequestToResponses(req)
+	require.NoError(t, err)
+
+	assert.Equal(t, "gpt-5.1-codex", responsesReq.Model)
+	assert.Equal(t, &temperature, responsesReq.Temperature)
+	assert.Equal(t, &topP, responsesReq.TopP)
+	assert.Equal(t, &parallelToolCalls, responsesReq.ParallelToolCalls)
+	assert.Equal(t, &core.Reasoning{Effort: "high"}, responsesReq.Reasoning)
+	assert.Equal(t, "user-1", responsesReq.User)
+	assert.Equal(t, "flex", responsesReq.ServiceTier)
+	assert.True(t, responsesReq.Stream)
+
+	require.NotNil(t, responsesReq.MaxOutputTokens)
+	assert.Equal(t, 1024, *responsesReq.MaxOutputTokens)
+
+	assert.Equal(t, map[string]string{"session": "abc"}, responsesReq.Metadata)
+
+	// stream_options is never forwarded: Responses stream options differ.
+	assert.Nil(t, responsesReq.StreamOptions)
+
+	// Unknown extras survive; mapped extras move onto typed fields.
+	assert.Equal(t, json.RawMessage(`"keep-me"`), responsesReq.ExtraFields.Lookup("x_trace_token"))
+	assert.Nil(t, responsesReq.ExtraFields.Lookup("metadata"))
+
+	require.NotNil(t, responsesReq.Input)
+	assert.Empty(t, responsesReq.Instructions)
+}
+
+func TestConvertChatRequestToResponses_RequiresRequest(t *testing.T) {
+	_, err := ConvertChatRequestToResponses(nil)
+	require.Error(t, err)
+
+	var gatewayErr *core.GatewayError
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
+}
+
+func TestConvertChatRequestToResponses_MaxTokensMapping(t *testing.T) {
+	maxTokens := 512
+
+	t.Run("max_tokens maps to max_output_tokens", func(t *testing.T) {
+		responsesReq, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:     "m",
+			Messages:  []core.Message{{Role: "user", Content: "hi"}},
+			MaxTokens: &maxTokens,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, responsesReq.MaxOutputTokens)
+		assert.Equal(t, 512, *responsesReq.MaxOutputTokens)
+	})
+
+	t.Run("explicit max_completion_tokens wins over max_tokens", func(t *testing.T) {
+		responsesReq, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:     "m",
+			Messages:  []core.Message{{Role: "user", Content: "hi"}},
+			MaxTokens: &maxTokens,
+			ExtraFields: chatViaResponsesExtras(map[string]string{
+				"max_completion_tokens": `2048`,
+			}),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, responsesReq.MaxOutputTokens)
+		assert.Equal(t, 2048, *responsesReq.MaxOutputTokens)
+		// Lifted onto the typed field, so it must not double-emit as an extra.
+		assert.Nil(t, responsesReq.ExtraFields.Lookup("max_completion_tokens"))
+	})
+
+	t.Run("null max_completion_tokens strips the extra and keeps max_tokens fallback", func(t *testing.T) {
+		responsesReq, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:     "m",
+			Messages:  []core.Message{{Role: "user", Content: "hi"}},
+			MaxTokens: &maxTokens,
+			ExtraFields: chatViaResponsesExtras(map[string]string{
+				"max_completion_tokens": `null`,
+			}),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, responsesReq.MaxOutputTokens)
+		assert.Equal(t, 512, *responsesReq.MaxOutputTokens)
+		assert.Nil(t, responsesReq.ExtraFields.Lookup("max_completion_tokens"))
+	})
+
+	t.Run("malformed max_completion_tokens rejected", func(t *testing.T) {
+		for _, raw := range []string{`2048.5`, `true`} {
+			_, err := ConvertChatRequestToResponses(&core.ChatRequest{
+				Model:    "m",
+				Messages: []core.Message{{Role: "user", Content: "hi"}},
+				ExtraFields: chatViaResponsesExtras(map[string]string{
+					"max_completion_tokens": raw,
+				}),
+			})
+			require.Error(t, err, "value %s", raw)
+			assert.Contains(t, err.Error(), "max_completion_tokens")
+		}
+	})
+
+	t.Run("unset when neither is present", func(t *testing.T) {
+		responsesReq, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+		})
+		require.NoError(t, err)
+		assert.Nil(t, responsesReq.MaxOutputTokens)
+	})
+}
+
+func TestConvertChatRequestToResponses_MessageConversionError(t *testing.T) {
+	// A message content part with no Responses equivalent fails the whole
+	// translation, and the message error reaches the caller unchanged.
+	_, err := ConvertChatRequestToResponses(&core.ChatRequest{
+		Model: "m",
+		Messages: []core.Message{
+			{Role: "user", Content: []core.ContentPart{
+				{Type: "video_url", VideoURL: &core.VideoURLContent{URL: "https://example.com/v.mp4"}},
+			}},
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "video_url")
+}
+
+func TestConvertChatRequestToResponses_MessagesAndInstructions(t *testing.T) {
+	req := &core.ChatRequest{
+		Model: "m",
+		Messages: []core.Message{
+			{Role: "system", Content: "You are helpful."},
+			{Role: "user", Content: "hello"},
+		},
+	}
+
+	responsesReq, err := ConvertChatRequestToResponses(req)
+	require.NoError(t, err)
+	assert.Equal(t, "You are helpful.", responsesReq.Instructions)
+	require.NotNil(t, responsesReq.Input)
+}
+
+func TestConvertChatRequestToResponses_FlattensTools(t *testing.T) {
+	parameters := map[string]any{"type": "object", "properties": map[string]any{}}
+
+	t.Run("nested chat function tool flattens", func(t *testing.T) {
+		responsesReq, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+			Tools: []map[string]any{
+				{
+					"type": "function",
+					"function": map[string]any{
+						"name":        "exec_command",
+						"description": "Run a command.",
+						"parameters":  parameters,
+						"strict":      true,
+					},
+				},
+			},
+		})
+		require.NoError(t, err)
+		require.Len(t, responsesReq.Tools, 1)
+		assert.Equal(t, map[string]any{
+			"type":        "function",
+			"name":        "exec_command",
+			"description": "Run a command.",
+			"parameters":  parameters,
+			"strict":      true,
+		}, responsesReq.Tools[0])
+	})
+
+	t.Run("already flat tool passes through", func(t *testing.T) {
+		responsesReq, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+			Tools: []map[string]any{
+				{"type": "function", "name": "exec_command", "parameters": parameters},
+			},
+		})
+		require.NoError(t, err)
+		require.Len(t, responsesReq.Tools, 1)
+		assert.Equal(t, map[string]any{
+			"type":       "function",
+			"name":       "exec_command",
+			"parameters": parameters,
+			"strict":     false,
+		}, responsesReq.Tools[0])
+	})
+
+	t.Run("nested chat custom tool rejected", func(t *testing.T) {
+		_, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+			Tools: []map[string]any{
+				{
+					"type": "custom",
+					"custom": map[string]any{
+						"name":        "exec_command",
+						"description": "Run a command.",
+						"format":      map[string]any{"type": "grammar", "syntax": "lark"},
+					},
+				},
+			},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "tools")
+	})
+
+	t.Run("already flat custom tool rejected", func(t *testing.T) {
+		_, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+			Tools:    []map[string]any{{"type": "custom", "name": "exec_command"}},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "tools")
+	})
+
+	t.Run("unknown tool type rejected", func(t *testing.T) {
+		_, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+			Tools:    []map[string]any{{"type": "web_search"}},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "tools")
+	})
+}
+
+func TestConvertChatRequestToResponses_ToolChoice(t *testing.T) {
+	tests := []struct {
+		name   string
+		choice any
+		want   any
+	}{
+		{name: "auto string passes", choice: "auto", want: "auto"},
+		{name: "required string passes", choice: "required", want: "required"},
+		{name: "none string passes", choice: "none", want: "none"},
+		{
+			name:   "nested function choice flattens",
+			choice: map[string]any{"type": "function", "function": map[string]any{"name": "exec_command"}},
+			want:   map[string]any{"type": "function", "name": "exec_command"},
+		},
+		{
+			name:   "already flat function choice passes through",
+			choice: map[string]any{"type": "function", "name": "exec_command"},
+			want:   map[string]any{"type": "function", "name": "exec_command"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			responsesReq, err := ConvertChatRequestToResponses(&core.ChatRequest{
+				Model:      "m",
+				Messages:   []core.Message{{Role: "user", Content: "hi"}},
+				ToolChoice: tt.choice,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, responsesReq.ToolChoice)
+		})
+	}
+
+	t.Run("unknown object type rejected", func(t *testing.T) {
+		_, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:      "m",
+			Messages:   []core.Message{{Role: "user", Content: "hi"}},
+			ToolChoice: map[string]any{"type": "allowed_tools", "tools": []any{}},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "tool_choice")
+	})
+
+	t.Run("unknown string rejected", func(t *testing.T) {
+		_, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:      "m",
+			Messages:   []core.Message{{Role: "user", Content: "hi"}},
+			ToolChoice: "web_search",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "tool_choice")
+	})
+
+	t.Run("non-string non-object rejected", func(t *testing.T) {
+		_, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:      "m",
+			Messages:   []core.Message{{Role: "user", Content: "hi"}},
+			ToolChoice: 42,
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "tool_choice")
+	})
+}
+
+func TestConvertChatRequestToResponses_ResponseFormat(t *testing.T) {
+	newRequest := func(responseFormat string) *core.ChatRequest {
+		return &core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+			ExtraFields: chatViaResponsesExtras(map[string]string{
+				"response_format": responseFormat,
+			}),
+		}
+	}
+
+	t.Run("text yields no text settings", func(t *testing.T) {
+		responsesReq, err := ConvertChatRequestToResponses(newRequest(`{"type":"text"}`))
+		require.NoError(t, err)
+		assert.Nil(t, responsesReq.Text)
+		assert.Nil(t, responsesReq.ExtraFields.Lookup("response_format"))
+	})
+
+	t.Run("json_object maps to text.format", func(t *testing.T) {
+		responsesReq, err := ConvertChatRequestToResponses(newRequest(`{"type":"json_object"}`))
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{
+			"format": map[string]any{"type": "json_object"},
+		}, responsesReq.Text)
+		assert.Nil(t, responsesReq.ExtraFields.Lookup("response_format"))
+	})
+
+	t.Run("json_schema flattens one level", func(t *testing.T) {
+		responsesReq, err := ConvertChatRequestToResponses(newRequest(
+			`{"type":"json_schema","json_schema":{"name":"out","schema":{"type":"object"},"strict":true}}`,
+		))
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{
+			"format": map[string]any{
+				"type":   "json_schema",
+				"name":   "out",
+				"schema": map[string]any{"type": "object"},
+				"strict": true,
+			},
+		}, responsesReq.Text)
+	})
+
+	t.Run("json_schema without schema object rejected", func(t *testing.T) {
+		_, err := ConvertChatRequestToResponses(newRequest(`{"type":"json_schema"}`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "response_format")
+	})
+
+	t.Run("unknown format type rejected", func(t *testing.T) {
+		_, err := ConvertChatRequestToResponses(newRequest(`{"type":"grammar"}`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "response_format")
+	})
+
+	t.Run("malformed value rejected", func(t *testing.T) {
+		_, err := ConvertChatRequestToResponses(newRequest(`"json_object"`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "response_format")
+	})
+}
+
+func TestConvertChatRequestToResponses_RejectsUnsupportedFields(t *testing.T) {
+	tests := []struct {
+		name  string
+		extra map[string]string
+		want  string
+	}{
+		{name: "n greater than one", extra: map[string]string{"n": `2`}, want: "n"},
+		{name: "logit_bias", extra: map[string]string{"logit_bias": `{"123":-100}`}, want: "logit_bias"},
+		{name: "stop", extra: map[string]string{"stop": `["END"]`}, want: "stop"},
+		{name: "seed", extra: map[string]string{"seed": `42`}, want: "seed"},
+		{name: "frequency_penalty", extra: map[string]string{"frequency_penalty": `0.5`}, want: "frequency_penalty"},
+		{name: "presence_penalty", extra: map[string]string{"presence_penalty": `0.5`}, want: "presence_penalty"},
+		{name: "logprobs", extra: map[string]string{"logprobs": `true`}, want: "logprobs"},
+		{name: "top_logprobs", extra: map[string]string{"top_logprobs": `3`}, want: "top_logprobs"},
+		{name: "modalities", extra: map[string]string{"modalities": `["text","audio"]`}, want: "modalities"},
+		{name: "audio", extra: map[string]string{"audio": `{"voice":"alloy","format":"wav"}`}, want: "audio"},
+		{name: "web_search_options", extra: map[string]string{"web_search_options": `{}`}, want: "web_search_options"},
+		{name: "function_call", extra: map[string]string{"function_call": `{"name":"exec_command"}`}, want: "function_call"},
+		{name: "functions", extra: map[string]string{"functions": `[{"name":"exec_command"}]`}, want: "functions"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &core.ChatRequest{
+				Model:       "m",
+				Messages:    []core.Message{{Role: "user", Content: "hi"}},
+				ExtraFields: chatViaResponsesExtras(tt.extra),
+			}
+
+			_, err := ConvertChatRequestToResponses(req)
+			require.Error(t, err)
+
+			var gatewayErr *core.GatewayError
+			require.ErrorAs(t, err, &gatewayErr)
+			assert.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
+			assert.Contains(t, gatewayErr.Message, tt.want)
+		})
+	}
+}
+
+func TestConvertChatRequestToResponses_AllowsSingleChoiceN(t *testing.T) {
+	responsesReq, err := ConvertChatRequestToResponses(&core.ChatRequest{
+		Model:       "m",
+		Messages:    []core.Message{{Role: "user", Content: "hi"}},
+		ExtraFields: chatViaResponsesExtras(map[string]string{"n": `1`}),
+	})
+	require.NoError(t, err)
+	// n=1 is a validated no-op; Responses has no n field, so it is
+	// stripped from the translated request rather than passed through.
+	assert.Nil(t, responsesReq.ExtraFields.Lookup("n"))
+}
+
+func TestConvertChatRequestToResponses_StripsPrediction(t *testing.T) {
+	responsesReq, err := ConvertChatRequestToResponses(&core.ChatRequest{
+		Model:    "m",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		ExtraFields: chatViaResponsesExtras(map[string]string{
+			"prediction":    `{"type":"content","content":"draft"}`,
+			"x_trace_token": `"keep-me"`,
+		}),
+	})
+	require.NoError(t, err)
+	// prediction is a pure speed hint with no Responses equivalent: it is
+	// tolerated but stripped, while unknown extras survive.
+	assert.Nil(t, responsesReq.ExtraFields.Lookup("prediction"))
+	assert.Equal(t, json.RawMessage(`"keep-me"`), responsesReq.ExtraFields.Lookup("x_trace_token"))
+}
+
+func TestConvertChatRequestToResponses_ToleratesExplicitNulls(t *testing.T) {
+	// An explicit JSON null spells "not set" on the wire; it must not trip
+	// the unsupported-field rejection.
+	responsesReq, err := ConvertChatRequestToResponses(&core.ChatRequest{
+		Model:    "m",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		ExtraFields: chatViaResponsesExtras(map[string]string{
+			"n":    `null`,
+			"stop": `null`,
+			"seed": `null`,
+		}),
+	})
+	require.NoError(t, err)
+	assert.Nil(t, responsesReq.ExtraFields.Lookup("n"))
+}
+
+func TestConvertChatRequestToResponses_ToleratesZeroValues(t *testing.T) {
+	// A zero value spells the default too: logprobs:false, top_logprobs:0,
+	// and the penalties at 0 change nothing, so clients sending them
+	// unconditionally must not be rejected.
+	responsesReq, err := ConvertChatRequestToResponses(&core.ChatRequest{
+		Model:    "m",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		ExtraFields: chatViaResponsesExtras(map[string]string{
+			"logprobs":          `false`,
+			"top_logprobs":      `0`,
+			"frequency_penalty": `0`,
+			"presence_penalty":  `0.0`,
+		}),
+	})
+	require.NoError(t, err)
+	for _, field := range []string{"logprobs", "top_logprobs", "frequency_penalty", "presence_penalty"} {
+		assert.Nil(t, responsesReq.ExtraFields.Lookup(field), "%s must not leak upstream", field)
+	}
+}
+
+func chatViaResponsesCompletedResponse() *core.ResponsesResponse {
+	return &core.ResponsesResponse{
+		ID:     "resp_123",
+		Object: "response",
+		Status: "completed",
+		Model:  "gpt-5.1-codex",
+		Output: []core.ResponsesOutputItem{
+			{
+				Type:    "message",
+				Role:    "assistant",
+				Content: []core.ResponsesContentItem{{Type: "output_text", Text: "hello"}},
+			},
+		},
+	}
+}
+
+func TestConvertChatRequestToResponses_LiftsFlatReasoningAndVerbosity(t *testing.T) {
+	chatViaResponsesExtrasFor := func(values map[string]string) core.UnknownJSONFields {
+		raw := make(map[string]json.RawMessage, len(values))
+		for k, v := range values {
+			raw[k] = json.RawMessage(v)
+		}
+		return core.UnknownJSONFieldsFromMap(raw)
+	}
+
+	t.Run("flat reasoning_effort fills empty Reasoning.Effort", func(t *testing.T) {
+		req, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+			ExtraFields: chatViaResponsesExtrasFor(map[string]string{
+				"reasoning_effort": `"high"`,
+			}),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, req.Reasoning)
+		assert.Equal(t, "high", req.Reasoning.Effort)
+		assert.False(t, req.ExtraFields.HasAny("reasoning_effort"),
+			"lifted reasoning_effort must not travel upstream as an unknown field")
+	})
+
+	t.Run("flat reasoning_effort does not override a typed value", func(t *testing.T) {
+		req, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:     "m",
+			Messages:  []core.Message{{Role: "user", Content: "hi"}},
+			Reasoning: &core.Reasoning{Effort: "low"},
+			ExtraFields: chatViaResponsesExtrasFor(map[string]string{
+				"reasoning_effort": `"high"`,
+			}),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, req.Reasoning)
+		assert.Equal(t, "low", req.Reasoning.Effort, "typed Reasoning.Effort wins over a flat duplicate")
+	})
+
+	t.Run("flat verbosity fills Text.verbosity", func(t *testing.T) {
+		req, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+			ExtraFields: chatViaResponsesExtrasFor(map[string]string{
+				"verbosity": `"low"`,
+			}),
+		})
+		require.NoError(t, err)
+		text, ok := req.Text.(map[string]any)
+		require.True(t, ok, "Text must become a map to carry verbosity")
+		assert.Equal(t, "low", text["verbosity"])
+		assert.False(t, req.ExtraFields.HasAny("verbosity"),
+			"lifted verbosity must not travel upstream as an unknown field")
+	})
+}
+
+func TestConvertChatRequestToResponses_ResponseFormatKeepsVerbosity(t *testing.T) {
+	newRequest := func(responseFormat string) *core.ChatRequest {
+		return &core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+			ExtraFields: chatViaResponsesExtras(map[string]string{
+				"verbosity":       `"low"`,
+				"response_format": responseFormat,
+			}),
+		}
+	}
+
+	t.Run("json_object merges with verbosity", func(t *testing.T) {
+		responsesReq, err := ConvertChatRequestToResponses(newRequest(`{"type":"json_object"}`))
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{
+			"verbosity": "low",
+			"format":    map[string]any{"type": "json_object"},
+		}, responsesReq.Text)
+	})
+
+	t.Run("text format keeps verbosity", func(t *testing.T) {
+		responsesReq, err := ConvertChatRequestToResponses(newRequest(`{"type":"text"}`))
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"verbosity": "low"}, responsesReq.Text)
+	})
+}
+
+func TestChatViaResponses(t *testing.T) {
+	t.Run("converts request and response", func(t *testing.T) {
+		provider := &stubChatViaResponsesProvider{resp: chatViaResponsesCompletedResponse()}
+		maxTokens := 64
+
+		chatResp, err := ChatViaResponses(context.Background(), provider, &core.ChatRequest{
+			Model:     "gpt-5.1-codex",
+			Messages:  []core.Message{{Role: "user", Content: "hi"}},
+			MaxTokens: &maxTokens,
+		}, "chatgpt")
+		require.NoError(t, err)
+		require.NotNil(t, chatResp)
+		assert.NotEmpty(t, chatResp.Choices)
+
+		require.NotNil(t, provider.capturedReq)
+		assert.Equal(t, "gpt-5.1-codex", provider.capturedReq.Model)
+		require.NotNil(t, provider.capturedReq.MaxOutputTokens)
+		assert.Equal(t, 64, *provider.capturedReq.MaxOutputTokens)
+		assert.False(t, provider.capturedReq.Stream)
+	})
+
+	t.Run("provider error passes through", func(t *testing.T) {
+		wantErr := errors.New("upstream exploded")
+		provider := &stubChatViaResponsesProvider{respErr: wantErr}
+
+		chatResp, err := ChatViaResponses(context.Background(), provider, &core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+		}, "chatgpt")
+		require.Nil(t, chatResp)
+		require.ErrorIs(t, err, wantErr)
+	})
+
+	t.Run("nil response rejected", func(t *testing.T) {
+		provider := &stubChatViaResponsesProvider{}
+
+		chatResp, err := ChatViaResponses(context.Background(), provider, &core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+		}, "chatgpt")
+		require.Nil(t, chatResp)
+
+		var gatewayErr *core.GatewayError
+		require.ErrorAs(t, err, &gatewayErr)
+		assert.Equal(t, http.StatusBadGateway, gatewayErr.HTTPStatusCode())
+		assert.Equal(t, "provider returned empty response", gatewayErr.Message)
+		assert.Equal(t, "chatgpt", gatewayErr.Provider)
+	})
+
+	t.Run("failed response is a provider error", func(t *testing.T) {
+		provider := &stubChatViaResponsesProvider{resp: &core.ResponsesResponse{
+			ID:     "resp_123",
+			Status: "failed",
+			Error:  &core.ResponsesError{Code: "server_error", Message: "boom upstream"},
+		}}
+
+		chatResp, err := ChatViaResponses(context.Background(), provider, &core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+		}, "chatgpt")
+		require.Nil(t, chatResp)
+
+		var gatewayErr *core.GatewayError
+		require.ErrorAs(t, err, &gatewayErr)
+		assert.Equal(t, http.StatusBadGateway, gatewayErr.HTTPStatusCode())
+		assert.Contains(t, gatewayErr.Message, "boom upstream")
+		assert.Equal(t, "chatgpt", gatewayErr.Provider)
+		require.NotNil(t, gatewayErr.Code)
+		assert.Equal(t, "server_error", *gatewayErr.Code)
+	})
+
+	t.Run("failed response without upstream error has generic message", func(t *testing.T) {
+		provider := &stubChatViaResponsesProvider{resp: &core.ResponsesResponse{
+			ID:     "resp_123",
+			Status: "failed",
+		}}
+
+		chatResp, err := ChatViaResponses(context.Background(), provider, &core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+		}, "chatgpt")
+		require.Nil(t, chatResp)
+
+		var gatewayErr *core.GatewayError
+		require.ErrorAs(t, err, &gatewayErr)
+		assert.Equal(t, http.StatusBadGateway, gatewayErr.HTTPStatusCode())
+		assert.Contains(t, gatewayErr.Message, "failed")
+	})
+
+	t.Run("unsupported field fails before upstream call", func(t *testing.T) {
+		provider := &stubChatViaResponsesProvider{resp: chatViaResponsesCompletedResponse()}
+
+		chatResp, err := ChatViaResponses(context.Background(), provider, &core.ChatRequest{
+			Model:       "m",
+			Messages:    []core.Message{{Role: "user", Content: "hi"}},
+			ExtraFields: chatViaResponsesExtras(map[string]string{"seed": `42`}),
+		}, "chatgpt")
+		require.Nil(t, chatResp)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "seed")
+		assert.Nil(t, provider.capturedReq)
+	})
+}
+
+func TestStreamChatViaResponses(t *testing.T) {
+	t.Run("forces stream and wraps converter", func(t *testing.T) {
+		provider := &stubChatViaResponsesProvider{streamData: "data: [DONE]\n\n"}
+
+		stream, err := StreamChatViaResponses(context.Background(), provider, &core.ChatRequest{
+			Model:         "gpt-5.1-codex",
+			Messages:      []core.Message{{Role: "user", Content: "hi"}},
+			Stream:        true,
+			StreamOptions: &core.StreamOptions{IncludeUsage: true},
+		}, "chatgpt")
+		require.NoError(t, err)
+		require.NotNil(t, stream)
+		defer func() {
+			_ = stream.Close()
+		}()
+
+		require.NotNil(t, provider.capturedReq)
+		assert.True(t, provider.capturedReq.Stream, "upstream Responses call must stream")
+		assert.Nil(t, provider.capturedReq.StreamOptions, "chat stream_options must not be forwarded")
+	})
+
+	t.Run("stream error passes through", func(t *testing.T) {
+		wantErr := errors.New("stream failed")
+		provider := &stubChatViaResponsesProvider{streamErr: wantErr}
+
+		stream, err := StreamChatViaResponses(context.Background(), provider, &core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+		}, "chatgpt")
+		require.Nil(t, stream)
+		require.ErrorIs(t, err, wantErr)
+	})
+
+	t.Run("usage policy forces the converter usage chunk", func(t *testing.T) {
+		provider := &stubChatViaResponsesProvider{streamData: chatViaResponsesTextStream()}
+		ctx := core.WithEnforceReturningUsageData(context.Background(), true)
+
+		stream, err := StreamChatViaResponses(ctx, provider, &core.ChatRequest{
+			Model:    "gpt-5.1-codex",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+			Stream:   true,
+		}, "chatgpt")
+		require.NoError(t, err)
+		defer func() {
+			_ = stream.Close()
+		}()
+
+		raw, err := io.ReadAll(stream)
+		require.NoError(t, err)
+		assert.Contains(t, string(raw), `"usage"`)
+		assert.Nil(t, provider.capturedReq.StreamOptions, "chat stream_options must not be forwarded")
+	})
+
+	t.Run("unsupported field fails before upstream call", func(t *testing.T) {
+		provider := &stubChatViaResponsesProvider{}
+
+		stream, err := StreamChatViaResponses(context.Background(), provider, &core.ChatRequest{
+			Model:       "m",
+			Messages:    []core.Message{{Role: "user", Content: "hi"}},
+			ExtraFields: chatViaResponsesExtras(map[string]string{"logprobs": `true`}),
+		}, "chatgpt")
+		require.Nil(t, stream)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "logprobs")
+		assert.Nil(t, provider.capturedReq)
+	})
+}
+
+func TestIsZeroJSONValue(t *testing.T) {
+	// The validator tolerates only the JSON zero values false and 0 for the
+	// zero-tolerated extra fields; everything else still rejects.
+	assert.False(t, isZeroJSONValue(json.RawMessage(`{`)), "invalid JSON is not a zero value")
+	assert.False(t, isZeroJSONValue(json.RawMessage(`true`)), "true is not zero")
+	assert.True(t, isZeroJSONValue(json.RawMessage(`false`)), "false is the bool zero value")
+	assert.True(t, isZeroJSONValue(json.RawMessage(`0`)), "0 is the numeric zero value")
+	assert.True(t, isZeroJSONValue(json.RawMessage(`0.0`)), "0.0 decodes to float64 zero")
+	assert.False(t, isZeroJSONValue(json.RawMessage(`1`)), "1 is not zero")
+	assert.False(t, isZeroJSONValue(json.RawMessage(`"0"`)), "a string is not a zero value")
+	assert.False(t, isZeroJSONValue(json.RawMessage(`null`)), "null decodes to nil, not zero")
+	assert.False(t, isZeroJSONValue(json.RawMessage(`[]`)), "an array is not a zero value")
+}
+
+func TestFlattenChatToolForResponses(t *testing.T) {
+	t.Run("empty map passes through unchanged", func(t *testing.T) {
+		// Defensive path: flattenChatToolsForResponses never forwards an
+		// empty tool, but the helper stays total on its own.
+		tool := map[string]any{}
+		assert.Equal(t, tool, flattenChatToolForResponses(tool))
+	})
+
+	t.Run("flat function tool passes through as a clone with strict default", func(t *testing.T) {
+		tool := map[string]any{"type": "function", "name": "fn", "parameters": map[string]any{"type": "object"}}
+		flattened := flattenChatToolForResponses(tool)
+		// Responses defaults to strict tools, which makes optional
+		// arguments required; the chat adapter sets strict:false
+		// explicitly to preserve the chat default.
+		assert.Equal(t, map[string]any{
+			"type":       "function",
+			"name":       "fn",
+			"parameters": map[string]any{"type": "object"},
+			"strict":     false,
+		}, flattened)
+		flattened["name"] = "mutated"
+		assert.Equal(t, "fn", tool["name"], "the pass-through must be a detached clone")
+	})
+
+	t.Run("flat function tool with explicit strict preserved", func(t *testing.T) {
+		tool := map[string]any{"type": "function", "name": "fn", "strict": true}
+		flattened := flattenChatToolForResponses(tool)
+		assert.Equal(t, true, flattened["strict"], "an explicit strict:true must not be overridden")
+	})
+
+	t.Run("type with surrounding whitespace flattens as function", func(t *testing.T) {
+		flattened := flattenChatToolForResponses(map[string]any{
+			"type":     " function ",
+			"function": map[string]any{"name": "fn"},
+		})
+		assert.Equal(t, map[string]any{"type": " function ", "name": "fn", "strict": false}, flattened)
+	})
+}
+
+func TestFlattenChatToolsForResponses_RejectsCustom(t *testing.T) {
+	// Custom tools have no Responses-native streaming or history mapping on
+	// this path yet; they are rejected before any upstream call to avoid
+	// silently dropping output the chat client cannot round-trip.
+	_, err := flattenChatToolsForResponses([]map[string]any{{
+		"type": "custom",
+		"custom": map[string]any{
+			"name":        "code_exec",
+			"description": "Run code.",
+			"format":      map[string]any{"type": "grammar", "syntax": "lark"},
+		},
+	}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tools")
+}
+
+func TestConvertChatRequestToResponses_ToleratedZeroValueEdgeCases(t *testing.T) {
+	t.Run("tolerated field with invalid JSON extra rejected", func(t *testing.T) {
+		// isZeroJSONValue cannot decide on undecodable data, so the field
+		// falls through to rejection like any non-zero value.
+		_, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+			ExtraFields: chatViaResponsesExtras(map[string]string{
+				"frequency_penalty": `{`,
+			}),
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "frequency_penalty")
+	})
+
+	t.Run("tolerated field with non-zero value rejected", func(t *testing.T) {
+		_, err := ConvertChatRequestToResponses(&core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+			ExtraFields: chatViaResponsesExtras(map[string]string{
+				"presence_penalty": `0.5`,
+			}),
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "presence_penalty")
+	})
+}
