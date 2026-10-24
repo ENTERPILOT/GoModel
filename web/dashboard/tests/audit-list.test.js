@@ -304,6 +304,12 @@ test("auditOutputTokensPerSecond divides output tokens by total duration", () =>
     { name: "responses", entry: entry({ path: "/v1/responses" }), want: 42 },
     { name: "anthropic messages", entry: entry({ path: "/v1/messages" }), want: 42 },
     { name: "passthrough", entry: entry({ path: "/p/openai/chat/completions" }), want: 42 },
+    { name: "passthrough v1 alias", entry: entry({ path: "/p/openai/v1/responses" }), want: 42 },
+    { name: "passthrough messages", entry: entry({ path: "/p/anthropic/messages?beta=true" }), want: 42 },
+    { name: "passthrough images", entry: entry({ path: "/p/openai/images/generations" }), want: null },
+    { name: "passthrough unknown", entry: entry({ path: "/p/openai/models" }), want: null },
+    { name: "exact cache hit", entry: entry({ cache_type: "exact" }), want: null },
+    { name: "semantic cache hit", entry: entry({ cache_type: "Semantic" }), want: null },
     { name: "string fields", entry: entry({ duration_ns: "500000000", usage: { output_tokens: "10" } }), want: 20 },
     { name: "embeddings", entry: entry({ path: "/v1/embeddings" }), want: null },
     { name: "images", entry: entry({ path: "/v1/images/generations" }), want: null },
@@ -324,6 +330,9 @@ test("formatTokensPerSecond keeps one decimal below 100", () => {
   assert.equal(formatTokensPerSecond(7), "7.0 tok/s");
   assert.equal(formatTokensPerSecond(99.96), "100 tok/s");
   assert.equal(formatTokensPerSecond(123.6), "124 tok/s");
+  assert.equal(formatTokensPerSecond(1234.4), "1,234 tok/s");
+  assert.equal(formatTokensPerSecond(1 / 30), "<0.1 tok/s");
+  assert.equal(formatTokensPerSecond(0.05), "0.1 tok/s");
   assert.equal(formatTokensPerSecond(null), "");
   assert.equal(formatTokensPerSecond(0), "");
   assert.equal(formatTokensPerSecond(Number.NaN), "");

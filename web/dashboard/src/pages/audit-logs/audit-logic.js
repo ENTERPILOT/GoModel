@@ -5,6 +5,7 @@
 
 import { formatJSON, formatNumber } from "../../lib/utils/format.js";
 import * as m from "../../lib/paraglide/messages.js";
+import { formatNumber as formatLocaleNumber } from "../../lib/i18n/locale.js";
 import { phaseLabel } from "../../lib/utils/pluginPhases.js";
 import {
   auditEntryTypeVisible,
@@ -474,14 +475,27 @@ export function formatDurationNs(ns) {
 // Request types whose output tokens are generated text, so output tokens over
 // duration reads as generation speed. Embeddings, images, audio, batches and
 // realtime sessions have no comparable per-request rate.
-const TOKEN_RATE_TYPES = new Set(["chat", "responses", "passthrough"]);
+const TOKEN_RATE_TYPES = new Set(["chat", "responses"]);
+
+// tokenRateType returns the request type the rate gate checks. A passthrough
+// path (/p/{provider}/{endpoint}) is typed by its provider endpoint, so a
+// passthrough image generation is not shown as text speed.
+function tokenRateType(path) {
+  const type = auditTypeForPath(path);
+  if (type !== "passthrough") return type;
+  const endpoint = String(path).trim().split("?")[0].split("/").slice(3).join("/");
+  return auditTypeForPath("/v1/" + endpoint.replace(/^v1\//, ""));
+}
 
 // auditOutputTokensPerSecond is output tokens over the entry's total duration
-// (time to first token included), or null when either is missing or zero or
-// the request does not generate text. Provider attempts carry no usage, so the
-// rate is only known per entry.
+// (time to first token included), or null when either is missing or zero, the
+// request does not generate text, or the reply came from the response cache
+// (its duration is the cache lookup, not generation). Provider attempts carry
+// no usage, so the rate is only known per entry.
 export function auditOutputTokensPerSecond(entry) {
-  if (!entry || !TOKEN_RATE_TYPES.has(auditTypeForPath(entry.path))) return null;
+  if (!entry || !TOKEN_RATE_TYPES.has(tokenRateType(entry.path))) return null;
+  const cacheType = String(entry.cache_type || "").trim().toLowerCase();
+  if (cacheType === "exact" || cacheType === "semantic") return null;
   const usage = auditUsage(entry);
   const outputTokens = Number(usage && usage.output_tokens);
   const durationNs = Number(entry.duration_ns);
@@ -490,15 +504,19 @@ export function auditOutputTokensPerSecond(entry) {
   return outputTokens / (durationNs / 1e9);
 }
 
-// formatTokensPerSecond renders a rate as "42.1 tok/s" (whole numbers from
-// 100 up), or "" when there is no rate.
+// formatTokensPerSecond renders a rate as "42.1 tok/s" in the active locale
+// (whole numbers from 100 up, "<0.1" for slower positive rates), or "" when
+// there is no rate.
 export function formatTokensPerSecond(rate) {
   const v = Number(rate);
   if (rate == null || !Number.isFinite(v) || v <= 0) return "";
+  const oneDecimal = { minimumFractionDigits: 1, maximumFractionDigits: 1 };
   const tenths = Math.round(v * 10) / 10;
-  return m.audit_tokens_per_second({
-    rate: tenths >= 100 ? String(Math.round(v)) : tenths.toFixed(1),
-  });
+  let text;
+  if (tenths >= 100) text = formatLocaleNumber(Math.round(v), { maximumFractionDigits: 0 });
+  else if (tenths < 0.1) text = "<" + formatLocaleNumber(0.1, oneDecimal);
+  else text = formatLocaleNumber(tenths, oneDecimal);
+  return m.audit_tokens_per_second({ rate: text });
 }
 
 export function statusCodeClass(statusCode) {

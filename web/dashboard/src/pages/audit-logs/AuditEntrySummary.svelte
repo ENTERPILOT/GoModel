@@ -150,9 +150,9 @@
       <span class="audit-timestamp-full" aria-hidden="true">{timestamp}</span>
       <span class="audit-timestamp-time" aria-hidden="true">{timestampTime}</span>
     </span>
-    <span class="mono font-size-md">{formatDurationNs(entry.duration_ns)}</span>
+    <span class="audit-timing mono font-size-md">{formatDurationNs(entry.duration_ns)}</span>
     {#if tokensPerSecond}
-      <span class="mono font-size-md" title={m.audit_tokens_per_second_title()}
+      <span class="audit-timing mono font-size-md" title={m.audit_tokens_per_second_title()}
         >{tokensPerSecond}</span
       >
     {/if}
@@ -360,6 +360,10 @@
     display: none;
   }
 
+  .audit-timing {
+    white-space: nowrap;
+  }
+
   .audit-provider-model {
     height: 24px;
     padding: 0 10px;
@@ -400,6 +404,7 @@
 
     .audit-entry-right {
         width: 100%;
+        flex-wrap: wrap;
         justify-content: space-between;
       }
 
