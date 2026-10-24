@@ -256,12 +256,12 @@ func writeBuildInfoOverlay(dir string, info pluginapi.BuildInfo) (string, func()
 	}
 	cleanup := func() { _ = os.RemoveAll(tmp) }
 	generated := filepath.Join(tmp, buildInfoFile)
-	if err := os.WriteFile(generated, []byte(buildInfoSource(info)), 0o644); err != nil {
+	if err := os.WriteFile(generated, []byte(buildInfoSource(info)), 0o600); err != nil {
 		cleanup()
 		return "", nil, err
 	}
 	overlay := filepath.Join(tmp, "overlay.json")
-	if err := os.WriteFile(overlay, []byte(overlayJSON(dir, generated)), 0o644); err != nil {
+	if err := os.WriteFile(overlay, []byte(overlayJSON(dir, generated)), 0o600); err != nil {
 		cleanup()
 		return "", nil, err
 	}

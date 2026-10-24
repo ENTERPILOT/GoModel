@@ -713,7 +713,7 @@ func TestSQLiteReaderUserPathSubtreeIsCaseSensitive(t *testing.T) {
 	} {
 		entries = append(entries, &UsageEntry{
 			ID: row.id, RequestID: "req-" + row.id, ProviderID: "p-" + row.id, Timestamp: now,
-			Model: "gpt-5", Provider: "openai", Endpoint: "/v1/chat/completions", UserPath: row.userPath, TotalTokens: 1,
+			Model: "gpt-5", Provider: "openai", Endpoint: "/v1/chat/completions", UserPath: row.userPath, InputTokens: 1, TotalTokens: 1,
 		})
 	}
 	require.NoError(t, store.WriteBatch(ctx, entries))
@@ -736,4 +736,31 @@ func TestSQLiteReaderUserPathSubtreeIsCaseSensitive(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, 2, summary.TotalRequests)
+
+	// The grouped views share the filter; daily usage without dates also
+	// derives its range from the filtered rows.
+	params := UsageQueryParams{UserPath: "/acme"}
+	byPath, err := reader.GetUsageByUserPath(ctx, params)
+	require.NoError(t, err)
+	paths = nil
+	for _, row := range byPath {
+		paths = append(paths, row.UserPath)
+	}
+	assert.ElementsMatch(t, []string{"/acme", "/acme/app"}, paths)
+
+	byModel, err := reader.GetUsageByModel(ctx, params)
+	require.NoError(t, err)
+	var modelTokens int64
+	for _, row := range byModel {
+		modelTokens += row.InputTokens
+	}
+	assert.Equal(t, int64(2), modelTokens)
+
+	daily, err := reader.GetDailyUsage(ctx, params)
+	require.NoError(t, err)
+	requests := 0
+	for _, row := range daily {
+		requests += row.Requests
+	}
+	assert.Equal(t, 2, requests)
 }

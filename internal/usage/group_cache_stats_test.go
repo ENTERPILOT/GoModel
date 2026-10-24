@@ -234,12 +234,12 @@ func TestFoldUsageCacheRowsScansNullableColumns(t *testing.T) {
 	// SQLite as stored text.
 	monday := time.Date(2026, 8, 24, 12, 30, 0, 0, time.UTC)
 	rows := &fakeRows{rows: [][]any{
-		// model, provider, provider_name, user_path, endpoint, labels, cache_type, input, output, raw_data, timestamp
-		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), str("/v1/chat/completions"), str(`["prod","batch"]`), nil, 100, 20, str(`{"prompt_cached_tokens": 60}`), monday},
-		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), str("/v1/chat/completions"), nil, str(CacheTypeExact), 100, 20, nil, "2026-08-24T12:31:00Z"},
-		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), str("/v1/chat/completions"), nil, nil, 50, 20, str(`{"prompt_cached_tokens": 10}`), "2026-08-29T08:00:00Z"},
-		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), str("/v1/chat/completions"), nil, nil, 30, 20, str(`{"prompt_cached_tokens": 5}`), "not a timestamp"},
-		{"gpt-4o", "openai", nil, nil, nil, nil, nil, 40, 10, nil, nil},
+		// model, provider, provider_name, user_path, endpoint, labels, cache_type, input, output, billed_cost, raw_data, timestamp
+		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), str("/v1/chat/completions"), str(`["prod","batch"]`), nil, 100, 20, new(2.0), str(`{"prompt_cached_tokens": 60}`), monday},
+		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), str("/v1/chat/completions"), nil, str(CacheTypeExact), 100, 20, new(1.5), nil, "2026-08-24T12:31:00Z"},
+		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), str("/v1/chat/completions"), nil, nil, 50, 20, nil, str(`{"prompt_cached_tokens": 10}`), "2026-08-29T08:00:00Z"},
+		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), str("/v1/chat/completions"), nil, nil, 30, 20, nil, str(`{"prompt_cached_tokens": 5}`), "not a timestamp"},
+		{"gpt-4o", "openai", nil, nil, nil, nil, nil, 40, 10, nil, nil, nil},
 	}}
 
 	stats, err := foldUsageCacheRows(rows, modelGroupKeys)
@@ -252,6 +252,8 @@ func TestFoldUsageCacheRowsScansNullableColumns(t *testing.T) {
 	require.Equal(t, int64(100), gpt5.LocalCachedInputTokens)
 	require.Equal(t, int64(20), gpt5.LocalCachedOutputTokens)
 	require.Equal(t, 1, gpt5.LocalRequests, "unexpected gpt-5 local stats: %+v", gpt5)
+	require.NotNil(t, gpt5.LocalBilledCost, "cache hits carry their billed cost")
+	require.Equal(t, 1.5, *gpt5.LocalBilledCost, "provider rows stay out of the cache-hit billed sum")
 	require.Equal(t, "primary", gpt5.ProviderName)
 
 	mondayKey := CachedPricingKey{Model: "gpt-5", Provider: "openai", ProviderName: "primary", Timed: true, Weekday: time.Monday, Minute: 12*60 + 30}
@@ -269,7 +271,7 @@ func TestFoldUsageCacheRowsScansNullableColumns(t *testing.T) {
 
 	// The same rows folded per label: only the labelled row contributes.
 	labelRows := &fakeRows{rows: [][]any{
-		{"gpt-5", "openai", nil, nil, nil, str(`["prod","batch"]`), nil, 100, 20, str(`{"prompt_cached_tokens": 60}`), nil},
+		{"gpt-5", "openai", nil, nil, nil, str(`["prod","batch"]`), nil, 100, 20, nil, str(`{"prompt_cached_tokens": 60}`), nil},
 	}}
 	labelStats, err := foldUsageCacheRows(labelRows, labelGroupKeys)
 	require.NoError(t, err)

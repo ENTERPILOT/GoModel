@@ -42,6 +42,7 @@ test("providerDocsUrl links every documented provider to its own page", () => {
     "edenai",
     "elevenlabs",
     "gemini",
+    "github-copilot",
     "hetzner",
     "kimicode",
     "llamacpp",

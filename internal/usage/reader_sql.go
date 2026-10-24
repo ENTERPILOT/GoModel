@@ -26,6 +26,9 @@ func NewSQLReader(db sqlx.DB) (*SQLReader, error) {
 
 const usageCostColumns = `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
 
+// usageBilledCostColumns adds the billed total to usageCostColumns.
+const usageBilledCostColumns = usageCostColumns + `, SUM(billed_cost)`
+
 // GetSummary returns aggregated usage statistics for the given query parameters.
 func (r *SQLReader) GetSummary(ctx context.Context, params UsageQueryParams) (*UsageSummary, error) {
 	conditions, args, err := r.dialect.usageConditions(params)
@@ -35,17 +38,25 @@ func (r *SQLReader) GetSummary(ctx context.Context, params UsageQueryParams) (*U
 	where := sqlutil.BuildWhereClause(conditions)
 
 	savingsCols := `, COALESCE(SUM(rewrite_tokens_saved), 0), SUM(rewrite_cost_saved)`
-	query := `SELECT COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + usageCostColumns + savingsCols + `
+	query := `SELECT COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + usageBilledCostColumns + savingsCols + `
 			FROM usage` + where
 
 	summary := &UsageSummary{}
 	err = r.db.QueryRow(ctx, query, args...).Scan(
 		&summary.TotalRequests, &summary.TotalInput, &summary.TotalOutput, &summary.TotalTokens,
-		&summary.TotalInputCost, &summary.TotalOutputCost, &summary.TotalCost,
+		&summary.TotalInputCost, &summary.TotalOutputCost, &summary.TotalCost, &summary.TotalBilledCost,
 		&summary.RewriteTokensSaved, &summary.RewriteCostSaved,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query usage summary: %w", err)
+	}
+
+	if mode := billedCacheHitsMode(params.CacheMode); mode != "" {
+		hits, err := r.billedCost(ctx, params, mode)
+		if err != nil {
+			return nil, err
+		}
+		summary.TotalBilledCost = addCost(summary.TotalBilledCost, hits)
 	}
 
 	if err := r.accumulateInputSegments(ctx, where, args, summary); err != nil {
@@ -53,6 +64,20 @@ func (r *SQLReader) GetSummary(ctx context.Context, params UsageQueryParams) (*U
 	}
 
 	return summary, nil
+}
+
+// billedCost sums billed_cost over the rows params matches in cacheMode.
+func (r *SQLReader) billedCost(ctx context.Context, params UsageQueryParams, cacheMode string) (*float64, error) {
+	params.CacheMode = cacheMode
+	conditions, args, err := r.dialect.usageConditions(params)
+	if err != nil {
+		return nil, err
+	}
+	var billed *float64
+	if err := r.db.QueryRow(ctx, `SELECT SUM(billed_cost) FROM usage`+sqlutil.BuildWhereClause(conditions), args...).Scan(&billed); err != nil {
+		return nil, fmt.Errorf("failed to query usage billed cost: %w", err)
+	}
+	return billed, nil
 }
 
 // accumulateInputSegments streams the matched rows and folds each row's
@@ -78,7 +103,7 @@ func (r *SQLReader) GetUsageByModel(ctx context.Context, params UsageQueryParams
 	where := sqlutil.BuildWhereClause(conditions)
 	providerNameExpr := usageGroupedProviderNameSQL("provider_name", "provider")
 
-	query := `SELECT model, provider, ` + providerNameExpr + ` AS provider_name, COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)` + usageCostColumns + `
+	query := `SELECT model, provider, ` + providerNameExpr + ` AS provider_name, COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)` + usageBilledCostColumns + `
 			FROM usage` + where + ` GROUP BY model, provider, ` + providerNameExpr
 
 	rows, err := r.db.Query(ctx, query, args...)
@@ -90,7 +115,7 @@ func (r *SQLReader) GetUsageByModel(ctx context.Context, params UsageQueryParams
 	result := make([]ModelUsage, 0)
 	for rows.Next() {
 		var m ModelUsage
-		if err := rows.Scan(&m.Model, &m.Provider, &m.ProviderName, &m.InputTokens, &m.OutputTokens, &m.InputCost, &m.OutputCost, &m.TotalCost); err != nil {
+		if err := rows.Scan(&m.Model, &m.Provider, &m.ProviderName, &m.InputTokens, &m.OutputTokens, &m.InputCost, &m.OutputCost, &m.TotalCost, &m.BilledCost); err != nil {
 			return nil, fmt.Errorf("failed to scan usage by model row: %w", err)
 		}
 		result = append(result, m)
@@ -129,7 +154,7 @@ func (r *SQLReader) usageCacheStats(ctx context.Context, params UsageQueryParams
 	conditions = append(conditions, extraConditions...)
 	where := sqlutil.BuildWhereClause(conditions)
 
-	rows, err := r.db.Query(ctx, `SELECT model, provider, provider_name, user_path, endpoint, labels, cache_type, input_tokens, output_tokens, raw_data, timestamp FROM usage`+where, args...)
+	rows, err := r.db.Query(ctx, `SELECT model, provider, provider_name, user_path, endpoint, labels, cache_type, input_tokens, output_tokens, billed_cost, raw_data, timestamp FROM usage`+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query usage cache stats: %w", err)
 	}
@@ -148,7 +173,7 @@ func (r *SQLReader) GetUsageByUserPath(ctx context.Context, params UsageQueryPar
 	}
 	where := sqlutil.BuildWhereClause(conditions)
 
-	query := `SELECT ` + userPathExpr + ` AS user_path, COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + usageCostColumns + `
+	query := `SELECT ` + userPathExpr + ` AS user_path, COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + usageBilledCostColumns + `
 			FROM usage` + where + ` GROUP BY ` + userPathExpr
 
 	rows, err := r.db.Query(ctx, query, args...)
@@ -160,7 +185,7 @@ func (r *SQLReader) GetUsageByUserPath(ctx context.Context, params UsageQueryPar
 	result := make([]UserPathUsage, 0)
 	for rows.Next() {
 		var u UserPathUsage
-		if err := rows.Scan(&u.UserPath, &u.InputTokens, &u.OutputTokens, &u.TotalTokens, &u.InputCost, &u.OutputCost, &u.TotalCost); err != nil {
+		if err := rows.Scan(&u.UserPath, &u.InputTokens, &u.OutputTokens, &u.TotalTokens, &u.InputCost, &u.OutputCost, &u.TotalCost, &u.BilledCost); err != nil {
 			return nil, fmt.Errorf("failed to scan usage by user path row: %w", err)
 		}
 		result = append(result, u)
@@ -191,7 +216,7 @@ func (r *SQLReader) GetUsageByLabel(ctx context.Context, params UsageQueryParams
 	where := sqlutil.BuildWhereClause(conditions)
 
 	label := r.dialect.labelValue
-	query := `SELECT ` + label + ` AS label, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + usageCostColumns + `
+	query := `SELECT ` + label + ` AS label, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + usageBilledCostColumns + `
 			FROM usage, ` + r.dialect.labelSource + where + ` GROUP BY ` + label + ` ORDER BY label`
 
 	rows, err := r.db.Query(ctx, query, args...)
@@ -203,7 +228,7 @@ func (r *SQLReader) GetUsageByLabel(ctx context.Context, params UsageQueryParams
 	result := make([]LabelUsage, 0)
 	for rows.Next() {
 		var l LabelUsage
-		if err := rows.Scan(&l.Label, &l.Requests, &l.InputTokens, &l.OutputTokens, &l.TotalTokens, &l.InputCost, &l.OutputCost, &l.TotalCost); err != nil {
+		if err := rows.Scan(&l.Label, &l.Requests, &l.InputTokens, &l.OutputTokens, &l.TotalTokens, &l.InputCost, &l.OutputCost, &l.TotalCost, &l.BilledCost); err != nil {
 			return nil, fmt.Errorf("failed to scan usage by label row: %w", err)
 		}
 		result = append(result, l)
@@ -323,7 +348,8 @@ func (d usageDialect) sessionUsageQueries(params SessionUsageParams) (countQuery
 
 const usageLogColumns = `id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels,
 		input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost, COALESCE(cost_source, ''), raw_data, COALESCE(costs_calculation_caveat, ''),
-		COALESCE(rewrite_tokens_saved, 0), rewrite_cost_saved, COALESCE(auth_key_id, '')`
+		COALESCE(rewrite_tokens_saved, 0), rewrite_cost_saved, COALESCE(auth_key_id, ''),
+		markup_percent, COALESCE(markup_selector, ''), billed_cost`
 
 // GetUsageLog returns a paginated list of individual usage log entries.
 func (r *SQLReader) GetUsageLog(ctx context.Context, params UsageLogParams) (*UsageLogResult, error) {

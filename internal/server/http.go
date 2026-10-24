@@ -363,15 +363,15 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 	bodyLimitBytes := parseBodySizeLimitBytes(bodySizeLimit)
 	e.Use(middleware.BodyLimit(bodyLimitBytes))
-	e.Use(requestDecompression(bodyLimitBytes))
 
 	e.Use(modelInteractionWriteDeadlineMiddleware(streamStallTimeout(cfg)))
 
 	// Ingress capture (before auth/audit/model validation so they can consume
-	// shared raw request state). Also assigns the per-request ID: the snapshot
-	// middleware runs unconditionally and calls ensureRequestID first thing, so
-	// a separate request-ID middleware would just repeat that work (a second
-	// context wrap + request copy) on every request.
+	// shared request state; the body is added after auth). Also assigns the
+	// per-request ID: the snapshot middleware runs unconditionally and calls
+	// ensureRequestID first thing, so a separate request-ID middleware would
+	// just repeat that work (a second context wrap + request copy) on every
+	// request.
 	userPathHeaderName := configuredUserPathHeader(cfg)
 	handler.userPathHeaderName = userPathHeaderName
 	e.Use(RequestSnapshotCapture(userPathHeaderName))
@@ -416,6 +416,11 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 			RequireCredential:     cfg.MasterKeyDisabled,
 		}))
 	}
+
+	// The body is read only once the caller is authenticated: a request
+	// without credentials must not make the gateway decompress or buffer it.
+	e.Use(requestDecompression(bodyLimitBytes))
+	e.Use(RequestBodyCapture())
 
 	// Session identification runs after auth so session ids are scoped by the
 	// EFFECTIVE user path (a managed key's bound path, not the ingress header)

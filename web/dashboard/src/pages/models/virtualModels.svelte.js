@@ -9,7 +9,9 @@ import { modelsStore } from "$lib/stores/models.svelte.js";
 import {
   buildDisplayModels,
   buildGlobalScopeRow,
+  displayRowEnabled,
   filterDisplayModels,
+  filterDisplayModelsByStatus,
   findModelOverrideView,
   groupDisplayModels,
   rowAccessSelector,
@@ -38,6 +40,8 @@ class VirtualModelsStore {
   aliasError = $state("");
   rowTogglingKey = $state("");
   rowDeletingKey = $state("");
+  // "all" | "enabled" | "disabled" — composes with modelsStore.filter.
+  statusFilter = $state("all");
 
   // ---- Display rows (derived from the shared model inventory) ----
 
@@ -59,7 +63,10 @@ class VirtualModelsStore {
   );
 
   filteredDisplayModels = $derived(
-    filterDisplayModels(this.displayModels, modelsStore.filter),
+    filterDisplayModelsByStatus(
+      filterDisplayModels(this.displayModels, modelsStore.filter),
+      this.statusFilter,
+    ),
   );
 
   filteredDisplayModelGroups = $derived.by(() => {
@@ -68,7 +75,7 @@ class VirtualModelsStore {
       0,
       Math.min(Number(this.modelRenderLimit || 0), filtered.length),
     );
-    if (!modelsStore.filter && limit >= this.displayModels.length) {
+    if (!this.filtersActive() && limit >= this.displayModels.length) {
       return this.displayModelGroups;
     }
     return groupDisplayModels(
@@ -84,6 +91,10 @@ class VirtualModelsStore {
   globalScopeRow = $derived(
     buildGlobalScopeRow(modelsStore.models, this.modelOverrideViews),
   );
+
+  filtersActive() {
+    return Boolean(modelsStore.filter) || this.statusFilter !== "all";
+  }
 
   modelsBusy() {
     return Boolean(modelsStore.loading || this.modelsRendering);
@@ -229,10 +240,7 @@ class VirtualModelsStore {
     if (!row) {
       return false;
     }
-    if (row.is_alias) {
-      return row.alias && row.alias.enabled !== false;
-    }
-    return Boolean(row.access && row.access.effective_enabled !== false);
+    return displayRowEnabled(row);
   }
 
   rowToggleLabel(row) {

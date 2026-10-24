@@ -35,13 +35,15 @@ func (s *SQLStore) RecalculatePricing(ctx context.Context, params RecalculatePri
 				update := recalculateEntryCosts(entry, resolver)
 				if _, err := q.Exec(ctx, `
 					UPDATE usage
-					SET input_cost = ?, output_cost = ?, total_cost = ?, rewrite_cost_saved = ?, cost_source = ?, costs_calculation_caveat = ?
+					SET input_cost = ?, output_cost = ?, total_cost = ?, rewrite_cost_saved = ?, billed_cost = CASE WHEN ? THEN billed_cost ELSE ? END, cost_source = ?, costs_calculation_caveat = ?
 					WHERE id = ?
 				`,
 					nullableFloat(update.InputCost),
 					nullableFloat(update.OutputCost),
 					nullableFloat(update.TotalCost),
 					nullableFloat(update.RewriteCostSaved),
+					update.KeepBilledCost,
+					nullableFloat(update.BilledCost),
 					update.CostSource,
 					update.Caveat,
 					update.ID,
@@ -75,7 +77,7 @@ func (s *SQLStore) recalculationEntries(ctx context.Context, q sqlx.Querier, par
 	args = append(args, batchSize)
 
 	rows, err := q.Query(ctx, `
-		SELECT id, timestamp, model, provider, provider_name, endpoint, input_tokens, output_tokens, rewrite_tokens_saved, raw_data, COALESCE(costs_calculation_caveat, '')
+		SELECT id, timestamp, model, provider, provider_name, endpoint, input_tokens, output_tokens, rewrite_tokens_saved, raw_data, COALESCE(costs_calculation_caveat, ''), COALESCE(cache_type, ''), markup_percent
 		FROM usage`+sqlutil.BuildWhereClause(conditions)+`
 		ORDER BY id
 		LIMIT ?`+s.dialect.lockRows, args...)
@@ -86,7 +88,7 @@ func (s *SQLStore) recalculationEntries(ctx context.Context, q sqlx.Querier, par
 
 	entries := make([]recalculationEntry, 0)
 	for rows.Next() {
-		var entry recalculationEntry
+		entry := recalculationEntry{Billing: params.Billing}
 		var timestamp usageTimestamp
 		var providerName, rawData *string
 		if err := rows.Scan(
@@ -101,6 +103,8 @@ func (s *SQLStore) recalculationEntries(ctx context.Context, q sqlx.Querier, par
 			&entry.RewriteTokensSaved,
 			&rawData,
 			&entry.Caveat,
+			&entry.CacheType,
+			&entry.MarkupPercent,
 		); err != nil {
 			return nil, fmt.Errorf("scan usage cost row: %w", err)
 		}

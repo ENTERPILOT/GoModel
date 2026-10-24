@@ -69,7 +69,7 @@ trap 'stop_gw; rm -rf "$WORK"' EXIT
 echo "############ IaC VIRTUAL MODELS (#433) ############"
 
 ############ valid declarative config boots on a COLD catalog (F3 regression) ############
-export VM_ENV='[{"source":"qa-iac-alias","target":"openai/gpt-4.1-nano"},{"source":"qa-iac-lb","strategy":"round_robin","session_affinity":false,"targets":[{"model":"openai/gpt-4.1-nano"},{"model":"groq/openai/gpt-oss-20b"}]},{"source":"qa-iac-lb-sticky","strategy":"round_robin","targets":[{"model":"openai/gpt-4.1-nano"},{"model":"groq/openai/gpt-oss-20b"}]}]'
+export VM_ENV='[{"source":"qa-iac-alias","target":"openai/gpt-4.1-mini"},{"source":"qa-iac-lb","strategy":"round_robin","session_affinity":false,"targets":[{"model":"openai/gpt-4.1-mini"},{"model":"groq/openai/gpt-oss-20b"}]},{"source":"qa-iac-lb-sticky","strategy":"round_robin","targets":[{"model":"openai/gpt-4.1-mini"},{"model":"groq/openai/gpt-oss-20b"}]}]'
 start_gw && ok "I0 gateway starts with valid VIRTUAL_MODELS" || { bad "I0 startup"; tail -20 "$WORK/server.log"; }
 # The in-memory cache is empty at startup, so config validation ran against a cold
 # catalog ("cached_models":0) yet the gateway still came up — this is the fix.
@@ -99,7 +99,7 @@ managed_rejected(){ # method, name, json
 }
 managed_rejected PUT    "I4 admin PUT on managed source rejected"    '{"source":"qa-iac-alias","target_model":"groq/openai/gpt-oss-20b"}'
 managed_rejected DELETE "I5 admin DELETE on managed source rejected" '{"source":"qa-iac-alias"}'
-managed_rejected PUT    "I6 rename of managed source rejected"       '{"source":"qa-iac-renamed","old_source":"qa-iac-alias","target_model":"openai/gpt-4.1-nano"}'
+managed_rejected PUT    "I6 rename of managed source rejected"       '{"source":"qa-iac-renamed","old_source":"qa-iac-alias","target_model":"openai/gpt-4.1-mini"}'
 stop_gw
 
 ############ managed overrides store row of same source (restart) ############
@@ -108,7 +108,7 @@ start_gw >/dev/null || bad "I7 setup gateway"
 curl -sS -o /dev/null -X PUT "$B/admin/virtual-models" -H 'Content-Type: application/json' -d '{"source":"qa-iac-ovr","target_model":"groq/openai/gpt-oss-20b"}'
 note "store baseline qa-iac-ovr -> $(chat_provider qa-iac-ovr)"
 stop_gw
-export VM_ENV='[{"source":"qa-iac-ovr","target":"openai/gpt-4.1-nano"}]'
+export VM_ENV='[{"source":"qa-iac-ovr","target":"openai/gpt-4.1-mini"}]'
 start_gw >/dev/null || bad "I7 override gateway"
 rows=$(curl -sS "$B/admin/virtual-models" | jq '[.[]|select(.source=="qa-iac-ovr")]|length')
 { [ "$(chat_provider qa-iac-ovr)" = openai ] && [ "$rows" = 1 ]; } && ok "I7 managed config overrides store row (resolves openai, single row)" || bad "I7 override (rows=$rows)"
@@ -128,7 +128,7 @@ virtual_models:
   - source: qa-iac-yamlonly
     target: groq/openai/gpt-oss-20b
 YAML
-export VM_ENV='[{"source":"qa-iac-merge","target":"openai/gpt-4.1-nano"}]'
+export VM_ENV='[{"source":"qa-iac-merge","target":"openai/gpt-4.1-mini"}]'
 start_gw >/dev/null || { bad "I8 merge gateway"; tail -20 "$WORK/server.log"; }
 [ "$(chat_provider qa-iac-merge)" = openai ] && ok "I8 env overrides YAML for matching source" || bad "I8 env-over-yaml"
 [ "$(chat_provider qa-iac-yamlonly)" = groq ] && ok "I8b YAML-only entry still loads" || bad "I8b yaml-only"
@@ -150,13 +150,13 @@ fail_start(){ # name, VM_ENV  -> expect the process to EXIT with a clear error
   else bad "$1 (no clear error)"; tail -3 "$WORK/neg.log"; fi
   kill "$(cat "$WORK/neg.pid")" 2>/dev/null; rm -f "$WORK/data/neg.db"* "$WORK/neg.pid"
 }
-fail_start "I9 unknown strategy aborts startup"         '[{"source":"qa-iac-bad","strategy":"weighted","targets":[{"model":"openai/gpt-4.1-nano"},{"model":"groq/openai/gpt-oss-20b"}]}]'
-fail_start "I10 self-referential target aborts startup" '[{"source":"openai/gpt-4.1-nano","target":"openai/gpt-4.1-nano"}]'
+fail_start "I9 unknown strategy aborts startup"         '[{"source":"qa-iac-bad","strategy":"weighted","targets":[{"model":"openai/gpt-4.1-mini"},{"model":"groq/openai/gpt-oss-20b"}]}]'
+fail_start "I10 self-referential target aborts startup" '[{"source":"openai/gpt-4.1-mini","target":"openai/gpt-4.1-mini"}]'
 # Explicit target provider names are static config, so a typo is caught before
 # any API call (#464) — unlike model availability, which stays a resolve-time
 # concern (I11). Only the explicit "provider" field is checked; the "target"
 # shorthand and slash-shaped model IDs are never treated as provider names.
-fail_start "I12 misspelled target provider aborts startup" '[{"source":"qa-iac-badprov","targets":[{"provider":"opnai","model":"gpt-4.1-nano"}]}]'
+fail_start "I12 misspelled target provider aborts startup" '[{"source":"qa-iac-badprov","targets":[{"provider":"opnai","model":"gpt-4.1-mini"}]}]'
 
 ############ availability is NOT a startup gate (F3 fix): unknown target boots, stays unavailable ############
 rm -f "$WORK/data/gomodel.db"*
