@@ -96,7 +96,10 @@ func convertResponsesInputItems(items []any) ([]core.Message, error) {
 			continue
 		}
 
-		if image, ok := responsesInputGeneratedImage(item); ok {
+		if image, ok, err := responsesInputGeneratedImage(item); ok {
+			if err != nil {
+				return nil, core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: image_generation_call", i), err)
+			}
 			if image.ImageURL == nil {
 				continue
 			}
@@ -203,41 +206,61 @@ func responsesInputReasoning(item any) (string, json.RawMessage, bool) {
 // responsesInputGeneratedImage recognizes a replayed image_generation_call item
 // and returns it as a chat image_url part with a base64 data URL, keeping its
 // extra_content so a provider can match the image to its replay state.
-func responsesInputGeneratedImage(item any) (core.ContentPart, bool) {
+func responsesInputGeneratedImage(item any) (core.ContentPart, bool, error) {
 	var raw json.RawMessage
 	switch typed := item.(type) {
 	case core.ResponsesInputElement:
 		if typed.Type != "image_generation_call" {
-			return core.ContentPart{}, false
+			return core.ContentPart{}, false, nil
 		}
 		raw = typed.Raw
+		if len(raw) == 0 {
+			// Without Raw there is no result to replay; skip the item.
+			return core.ContentPart{}, true, nil
+		}
 	case map[string]any:
 		if itemType, _ := typed["type"].(string); itemType != "image_generation_call" {
-			return core.ContentPart{}, false
+			return core.ContentPart{}, false, nil
 		}
-		raw, _ = json.Marshal(typed)
+		encoded, err := json.Marshal(typed)
+		if err != nil {
+			return core.ContentPart{}, true, err
+		}
+		raw = encoded
 	default:
-		return core.ContentPart{}, false
+		return core.ContentPart{}, false, nil
 	}
 	var payload struct {
-		Result       string          `json:"result"`
-		OutputFormat string          `json:"output_format"`
+		Result       json.RawMessage `json:"result"`
+		OutputFormat json.RawMessage `json:"output_format"`
 		ExtraContent json.RawMessage `json:"extra_content"`
 	}
-	_ = json.Unmarshal(raw, &payload)
-	if payload.Result == "" {
-		// Without the image there is nothing to replay; skip the item.
-		return core.ContentPart{}, true
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return core.ContentPart{}, true, err
 	}
-	format := payload.OutputFormat
+	var result, format string
+	if !core.IsJSONNull(payload.Result) {
+		if err := json.Unmarshal(payload.Result, &result); err != nil {
+			return core.ContentPart{}, true, fmt.Errorf("result must be a string: %w", err)
+		}
+	}
+	if !core.IsJSONNull(payload.OutputFormat) {
+		if err := json.Unmarshal(payload.OutputFormat, &format); err != nil {
+			return core.ContentPart{}, true, fmt.Errorf("output_format must be a string: %w", err)
+		}
+	}
+	if result == "" {
+		// Without the image there is nothing to replay; skip the item.
+		return core.ContentPart{}, true, nil
+	}
 	if format == "" {
 		format = "png"
 	}
-	image := &core.ImageURLContent{URL: "data:image/" + format + ";base64," + payload.Result}
+	image := &core.ImageURLContent{URL: "data:image/" + format + ";base64," + result}
 	if !core.IsJSONNull(payload.ExtraContent) {
 		image.ExtraFields = core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{core.ExtraContentField: payload.ExtraContent})
 	}
-	return core.ContentPart{Type: "image_url", ImageURL: image}, true
+	return core.ContentPart{Type: "image_url", ImageURL: image}, true, nil
 }
 
 // appendChatImage adds a generated image to an assistant message's images.

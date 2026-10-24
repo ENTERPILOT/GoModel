@@ -187,3 +187,23 @@ func TestConvertResponsesInput_SkipsImageWithoutResult(t *testing.T) {
 	assert.Equal(t, "user", messages[0].Role)
 	assert.Equal(t, "user", messages[1].Role)
 }
+
+func TestConvertResponsesInput_RejectsMalformedImageGenerationCall(t *testing.T) {
+	tests := []struct {
+		name string
+		item map[string]any
+	}{
+		{name: "result object", item: map[string]any{"type": "image_generation_call", "result": map[string]any{}}},
+		{name: "output_format object", item: map[string]any{"type": "image_generation_call", "result": "aW1n", "output_format": map[string]any{}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := providers.ConvertResponsesInputToMessages([]any{
+				map[string]any{"role": "user", "content": "draw"},
+				tt.item,
+			})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "index 1: image_generation_call")
+		})
+	}
+}
