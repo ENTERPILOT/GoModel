@@ -1,0 +1,625 @@
+---
+title: "配置"
+description: "通过环境变量、.env 文件或 config.yaml 配置 GoModel，并了解各配置层的优先级。每项设置都有默认值，因此零配置即可运行。"
+icon: "sliders-horizontal"
+keywords: ["配置", "环境变量", ".env", "设置", "configuration", "environment variables", "settings"]
+---
+
+## 良好的默认值
+
+GoModel 遵循“良好默认值”的理念：默认设置就足以满足使用需求。
+
+## 如何覆盖默认设置？
+
+我们使用三层配置管道。每项设置都有合理的默认值，因此您无需任何配置即可启动服务。
+
+{/* 环境变量（始终优先） → config.yaml（可选） → 代码默认值 */}
+
+```mermaid
+flowchart LR
+    A[环境变量] -->|始终优先| B[config.yaml]
+    B -->|可选| C[代码默认值]
+```
+
+<Tip>
+  GoModel 无需任何配置文件即可开箱即用，您可以在一分钟内完成试用。
+
+从这里开始：[快速开始](/zh/getting-started/quickstart)
+
+</Tip>
+
+GoModel 会根据常用的环境变量自动发现提供商。
+
+## 配置方式
+
+### 1. 环境变量
+
+这是配置 GoModel 最常用的方式。设置以下任意变量即可覆盖默认值。
+
+#### 服务器
+
+| 变量             | 说明                                           | 默认值                |
+| -------------------- | ----------------------------------------------------- | ---------------------- |
+| `PORT`               | HTTP 服务端口                                      | `8080`                 |
+| `BASE_PATH`          | 挂载路径前缀，例如 `/g`                   | `/`                    |
+| `GOMODEL_MASTER_KEY` | 用于保护网关的认证密钥           | _（空，不安全模式）_ |
+| `MASTER_KEY_DISABLED` | 关闭主密钥认证，仅保留[托管密钥](/zh/features/users)和认证扩展作为凭据 | `false`                |
+| `GOMODEL_DEMO_MODE`  | 在日志和控制台中启用公开演示警告  | `false`                |
+| `BODY_SIZE_LIMIT`    | 请求体大小上限（例如 `10M`、`1024K`、`500KB`），同时作用于压缩和解压后的大小 | `10M`                  |
+| `STREAM_STALL_TIMEOUT` | 模型路由上的单次响应写入等待客户端读取的秒数；`0` 表示禁用 | `60`                   |
+| `USER_PATH_HEADER`   | 用于读写请求 `user_path` 值的 Header  | `X-GoModel-User-Path`  |
+| `SERVER_TRUSTED_PROXIES` | 您自己的代理所在的网络；启用基于 Header 的客户端地址解析 | _（空）_ |
+| `SERVER_CLIENT_IP_HEADER` | 受信任代理用于传递客户端地址的 Header | `X-Forwarded-For` |
+| `SERVER_TRUSTED_HOPS` | 客户端与网关之间的代理数量；`0` 表示改为扫描整条链 | `0` |
+| `SWAGGER_ENABLED`    | 暴露 [Swagger UI](/zh/advanced/swagger-ui)；需要使用 `-tags=swagger` 构建 | `false`                |
+| `AUTH_VERIFY_ENABLED` | 暴露 [`GET /v1/auth/verify`](/zh/advanced/api-endpoints#密钥验证)，用于报告请求携带的 API 密钥是否有效 | `false`                |
+| `PID_FILE`           | 运行中的网关为 `gomodel --reload` 记录进程 ID 的位置。修改后需要重启 | 存在 `./data` 目录时为其中的 `data/gomodel.pid`，否则为用户级数据目录 |
+
+请求体可以使用 `Content-Encoding: gzip`（或 `x-gzip`）或 `zstd` 压缩；TypeSafe SDK 默认会对 1 KiB 及以上的请求体进行 zstd 压缩。网关会在路由前解码请求体，因此护栏、审计和提供商看到的都是原始请求体，并且 `BODY_SIZE_LIMIT` 同时作用于压缩后和解码后的大小（任一超出时返回 `413`）。其他编码返回 `415`。
+
+`STREAM_STALL_TIMEOUT`（YAML 中为 `server.stream_stall_timeout`）用于防止客户端打开流式响应后停止读取，从而拖累网关。每次向客户端写入都会获得新的截止时间，因此只有当客户端的 socket 持续满载这么长时间时才会触发，而不会在慢速模型暂无输出时触发。触发后，连接会被关闭，发往上游提供商的请求会被取消，审计条目会记录 `client_stalled`，即使该流来自响应缓存也是如此。如果您的客户端确实会暂停读取流超过一分钟，请调大该值；设置为 `0` 可禁用。
+
+#### 代理后的客户端地址
+
+GoModel 报告的所有客户端地址（审计条目、速率限制键、日志）都是连接到网关的那个连接的地址，因此在反向代理之后，它们都会显示为代理的地址。将 `SERVER_TRUSTED_PROXIES` 设置为您自己的代理所在的网络后，GoModel 会改为读取转发的客户端地址。在您明确列出之前，任何网络都不受信任，包括 loopback；修改这些设置需要重启。
+
+```bash
+SERVER_TRUSTED_PROXIES=10.42.0.0/16,loopback
+```
+
+条目可以是 CIDR 网络、单个地址（单台主机）或预设值：
+
+| 预设     | 展开为                                           |
+| ---------- | ---------------------------------------------------- |
+| `loopback` | `127.0.0.0/8`、`::1/128`                             |
+| `private`  | `10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`、`fc00::/7` |
+
+建议只填写代理所在的那一个子网。`private` 会信任所有私有地址的客户端自行设置转发地址；如果您的客户端也使用私有地址，这就是错误的选择。例如，一个家庭实验室的客户端位于 `192.168.1.0/24`、集群运行在 `10.42.0.0/16`，那么应只列出 `10.42.0.0/16`。
+
+默认情况下，GoModel 读取 `X-Forwarded-For`（每一跳都会追加其看到的地址），并记录最近的一个不属于受信任网络的跳：即您自己的基础设施写入的最后一个地址，也是客户端无法覆盖的最远地址。来自所列网络之外的请求、无法解析的链，以及完全由受信任网络组成的链，都会保留连接地址；最后一种情况下，链中每个条目都可能是内部客户端伪造的。
+
+有两个设置会改变 Header 的读取方式：
+
+- `SERVER_CLIENT_IP_HEADER` 指定另一个 Header。除 `X-Forwarded-For` 之外的 Header 只携带单个地址，并按原样采用；当边缘节点自行解析客户端地址时，这是正确的读取方式：在 Cloudflare 之后使用 `SERVER_CLIENT_IP_HEADER=CF-Connecting-IP`，在会设置该 Header 的 nginx 之后使用 `X-Real-IP`。不支持 RFC 7239 `Forwarded`。
+- `SERVER_TRUSTED_HOPS` 按固定深度读取 `X-Forwarded-For` 条目，而不是扫描整条链：`1` 表示最右侧的条目，`2` 表示它前面的一个。当您的边缘节点处于已知深度、但会轮换您无法枚举的地址时使用。连接仍必须来自受信任网络；如果链比配置的深度短，则回退到连接地址。
+
+这两个设置都需要配合 `SERVER_TRUSTED_PROXIES` 使用；单独设置时会导致启动报错，而不是静默地不生效。
+
+对于公开或共享的演示实例，请设置 `GOMODEL_DEMO_MODE=true`。GoModel 会在启动时以及每五分钟记录一条警告，在控制台顶部显示一条常驻警告，并通过白名单内的 `/admin/runtime/config` 响应暴露 `DEMO_MODE=on`。演示模式不会重置存储；请在部署中另行安排。
+
+演示模式也不会绕过认证。如果启动日志中的模式为 `managed_keys`，说明所配置的存储中仍至少有一个托管网关 API 密钥，因此即使 `GOMODEL_MASTER_KEY` 为空，请求也需要 Bearer Token。作为失败即拒绝（fail closed）的安全措施，已禁用或已过期的托管密钥也会使认证保持启用。删除所有托管密钥即可恢复为免认证模式，或配置一个主密钥用于恢复访问。
+
+#### 禁用主密钥
+
+主密钥是单一的全局凭据：持有它的人同时就是网关的所有用户。签发托管网关 API 密钥后，可设置 `MASTER_KEY_DISABLED=true`（YAML 中为 `server.master_key_disabled`）来停用主密钥，只保留这些密钥以及您运行的任何认证扩展（例如 SSO）作为访问方式。此后，按密钥配置的用户路径、预算、速率限制和审计记录将作用于每个请求，包括 Admin API。
+
+```bash
+MASTER_KEY_DISABLED=true
+```
+
+GoModel 会在启动时忽略任何已配置的主密钥，因此没有任何地方接受它或基于它派生：它对网关、对 [`GET /v1/auth/verify`](/zh/advanced/api-endpoints#密钥验证) 以及对 `/admin` 都会失败。留在环境变量或 `config.yaml` 中的密钥不会生效，也不会报错，因此您可以在移除它之前安全地打开这个开关。
+
+禁用主密钥与将 `GOMODEL_MASTER_KEY` 留空不同：留空会让网关以免认证方式运行，并开放 `/admin/*`，以便控制台引导创建第一个托管密钥。除非配置了认证扩展，否则即使已存在托管密钥，`/admin/*` 仍保持开放，GoModel 会在启动时记录安全警告；因此一旦签发了第一个具有控制台访问权限的密钥，请立即设置主密钥或将其禁用。禁用主密钥则是失败即拒绝（fail closed）：每个请求都需要凭据，Admin API 只能通过具有控制台访问权限的凭据访问。请在打开开关之前签发该凭据：如果既没有主密钥、也没有托管密钥和认证扩展，网关会拒绝所有请求，并在启动时记录相应警告。
+
+#### MCP 网关
+
+完整功能指南请参阅 [MCP 网关](/zh/features/mcp-gateway)。
+
+| 变量      | 说明                                                                                                                      | 默认值            |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `MCP_ENABLED` | 暴露 MCP 端点 `/mcp` 和 `/mcp/{server}`                                                                              | `true`             |
+| `MCP_SERVERS` | 上游 MCP 服务器的 JSON 对象，按名称合并覆盖 YAML 中的 `mcp.servers` 映射（这些条目在控制台中为只读）     | _（无）_           |
+| `MCP_ALLOWED_ORIGINS` | 允许调用 `/mcp` 的浏览器来源（`scheme://host[:port]`），以逗号分隔；默认不信任任何来源，以此阻止 DNS 重绑定。`*` 表示禁用该检查 | _（无）_           |
+| `MCP_TOOL_DISCOVERY` | `off` 列出所有工具；`search` 改为提供 `search_tools` 和 `call_tool`，避免大型工具目录占满模型上下文。客户端可通过 `X-MCP-Tool-Discovery` 按会话覆盖 | `off` |
+| `MCP_VIRTUAL_SERVERS` | 虚拟服务器的 JSON 对象，按名称合并覆盖 YAML 中的 `mcp.virtual_servers` 映射。每个虚拟服务器在 `/mcp/{name}` 提供部分 MCP 服务器 | _（无）_ |
+
+#### 日志
+
+运行时日志输出。关于持久化的 API 审计记录（请求/响应体、Header），请参阅下文的[审计日志](#审计日志)。
+
+| 变量     | 说明                                                                                                                                                                       | 默认值              |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
+| `LOG_FORMAT` | `text` 为带颜色的人类可读输出，`json` 为结构化日志。未设置时自动检测：TTY 上为 text，否则为 JSON。在生产环境 / CloudWatch / Datadog / GCP 中请强制使用 `json`。 | _（自动检测）_      |
+| `LOG_LEVEL`  | 最低日志级别：`debug`、`info`、`warn`、`error`。也接受别名 `dbg`、`inf`、`warning`、`err`。                                                                    | `info`               |
+
+#### 缓存
+
+| 变量            | 说明                       | 默认值          |
+| ------------------- | --------------------------------- | ---------------- |
+| `GOMODEL_CACHE_DIR` | 本地缓存文件目录   | `.cache`         |
+| `CACHE_REFRESH_INTERVAL` | 两次提供商模型重新发现之间的秒数 | `3600`（1 小时） |
+| `PROVIDER_RECHECK_INTERVAL` | 对上次刷新失败的提供商重新探测的间隔秒数（`0` 表示禁用） | `60` |
+| `MODEL_LIST_URL`    | 模型元数据目录：HTTP URL、本地文件路径（`/etc/gomodel/models.json` 或 `file://...`），或 `off` | GitHub 上的公共目录 |
+| `GOMODEL_OFFLINE`   | 离线（air-gap）开关：禁用更新检查并忽略 HTTP 目录 URL。本地目录文件和已配置的提供商不受影响 | `false` |
+| `REDIS_URL`         | Redis 连接 URL              | _（空）_        |
+| `REDIS_KEY_MODELS`     | 模型缓存的 Redis 键           | `gomodel:models`    |
+| `REDIS_KEY_RESPONSES`  | 响应缓存的 Redis 键        | `gomodel:response:` |
+| `REDIS_TTL_MODELS`     | 模型缓存的 TTL（秒）      | `86400`（24 小时）    |
+| `REDIS_TTL_RESPONSES`  | 响应缓存的 TTL（秒）   | `3600`（1 小时）      |
+
+<Tip>
+  关于精确缓存的行为、响应头、分析端点，以及仅凭 `user_path` 不会对精确缓存进行分区的说明，请参阅[缓存](/zh/features/cache)。
+</Tip>
+
+<Note>
+  `CACHE_REFRESH_INTERVAL` 还决定控制台重新检查提供商健康状态（"Last checked"）的频率，`PROVIDER_RECHECK_INTERVAL` 则决定对失败的提供商重新探测其是否恢复的速度。请参阅[弹性与容错](/zh/advanced/resilience#熔断器与控制台中的提供商健康状态)。
+</Note>
+
+#### 存储
+
+存储由审计日志、用量追踪以及 IAM 等未来功能共享。
+
+| 变量             | 说明                                   | 默认值           |
+| -------------------- | --------------------------------------------- | ----------------- |
+| `STORAGE_TYPE`       | 后端：`sqlite`、`postgresql` 或 `mongodb` | `sqlite`          |
+| `SQLITE_PATH`        | SQLite 数据库文件路径                     | `data/gomodel.db` |
+| `POSTGRES_URL`       | PostgreSQL 连接字符串                  | _（空）_         |
+| `POSTGRES_MAX_CONNS` | PostgreSQL 连接池大小               | `10`              |
+| `MONGODB_URL`        | MongoDB 连接字符串；会使用其路径中指定的数据库 | _（空）_ |
+| `MONGODB_DATABASE`   | MongoDB 数据库名称；覆盖 URL 路径中的名称 | `gomodel`         |
+| `GOMODEL_ENCRYPTION_KEY` | 对控制台管理的 Secret 进行静态数据加密；请参阅[静态数据加密](/zh/advanced/encryption-at-rest) | _（空）_ |
+| `GOMODEL_ENCRYPTION_KEY_PREVIOUS` | 密钥轮换期间的上一个密钥 | _（空）_ |
+
+<Warning>
+  **将 PostgreSQL 部署升级到 v0.1.59 之后的版本。** `workflow_versions` 表的 `created_at` 在 PostgreSQL 上以 `TIMESTAMPTZ` 存储，在 SQLite 上以 Unix 秒存储。现在两者已统一为 Unix 秒，首次启动时会就地转换该列。无需手动迁移，但该变更是单向的：旧版二进制文件在已转换的数据库上启动会失败。如果您可能需要回滚，请在升级前进行备份，并通过恢复备份来回滚，而不是替换二进制文件。工作流的 `created_at` 值会向下取整到整秒，并以 UTC 显示。SQLite 和 MongoDB 部署不受影响。
+</Warning>
+
+#### 媒体存储
+
+媒体文件（即开启 `LOGGING_LOG_AUDIO_BODIES` 或 `LOGGING_LOG_IMAGE_BODIES` 时为审计日志捕获的音频和图片）保存在数据库之外。其元数据保存在上述存储后端中；只有文件字节存放在这里，因此文件大小不受限制，数据库也能保持精简。请参阅 [ADR-0013](https://github.com/ENTERPILOT/GoModel/blob/main/docs/adr/0013-media-storage.md)。
+
+| 变量             | 说明                                                  | 默认值      |
+| -------------------- | ------------------------------------------------------------ | ------------ |
+| `MEDIA_STORAGE_TYPE` | Blob 后端：`filesystem` 或 `memory`（重启后丢失）     | `filesystem` |
+| `MEDIA_STORAGE_PATH` | 文件系统后端的目录                         | `data/media` |
+
+默认路径遵循与 SQLite 相同的规则：如果进程旁存在 `./data` 目录，则为 `./data/media`，否则为操作系统的用户级数据目录。在容器中请在该位置挂载卷；如果有多个副本，请使用共享挂载（EFS、S3 FUSE 挂载），使每个实例都能提供所有文件。文件的保留时间与引用它们的审计条目相同（`LOGGING_RETENTION_DAYS`），并由每小时执行一次的清理任务删除。
+
+#### 审计日志
+
+| 变量                          | 说明                                | 默认值 |
+| --------------------------------- | ------------------------------------------ | ------- |
+| `LOGGING_ENABLED`                 | 启用审计日志                       | `true`  |
+| `LOGGING_LOG_BODIES`              | 记录请求/响应体                | `true`  |
+| `LOGGING_LOG_REVISION_BODIES`     | 记录请求改写器和提示词护栏改写后的请求体 | `true`  |
+| `LOGGING_LOG_GUARDRAIL_STEPS`     | 每个编辑提示词的护栏生成一条审计修订（关闭时每条链生成一条） | `true`  |
+| `LOGGING_LOG_AUDIO_BODIES`        | 记录音频端点的输入/输出          | `false` |
+| `LOGGING_LOG_IMAGE_BODIES`        | 记录图片端点的输入/输出          | `false` |
+| `LOGGING_LOG_IMAGE_BODIES_SCOPE`  | 存储哪些图片字节：`all`、`input`、`output` | `all` |
+| `LOGGING_LOG_HEADERS`             | 记录 Header（敏感 Header 自动脱敏） | `true`  |
+| `LOGGING_ONLY_MODEL_INTERACTIONS` | 仅记录 AI 模型端点                | `true`  |
+| `LOGGING_BUFFER_SIZE`             | 刷写前的内存缓冲区大小              | `1000`  |
+| `LOGGING_FLUSH_INTERVAL`          | 刷写间隔（秒）                  | `5`     |
+| `LOGGING_RETENTION_DAYS`          | N 天后自动删除（0 = 永久保留）     | `30`    |
+
+审计条目记录网关解析出的客户端地址。在反向代理之后，除非您在 `SERVER_TRUSTED_PROXIES` 中列出代理所在网络，否则记录的是代理地址。请参阅[代理后的客户端地址](#代理后的客户端地址)。
+
+控制台实时预览和持久化审计日志是两个独立的功能。在 `DASHBOARD_LIVE_LOGS_ENABLED=true` 且 `LOGGING_ENABLED=false` 时，请求可以实时显示，但不会写入存储，刷新页面后即消失。启用审计日志时，写入是异步的，最多可能需要 `LOGGING_FLUSH_INTERVAL` 秒才能通过已存储日志 API 查询到。
+
+<Note>
+  在 PostgreSQL 上，审计日志的全文搜索使用内置 `pg_trgm` 扩展提供的三元组（trigram）索引。如果数据库角色具有相应权限，GoModel 会在启动时安装该扩展并构建索引；否则搜索仍然可用，但会扫描所选日期范围内的每一条记录。要在受限角色上启用它，请以超级用户身份执行一次 `CREATE EXTENSION pg_trgm;`，然后重启 GoModel。
+</Note>
+
+<Warning>
+  启用 `LOGGING_LOG_BODIES` 时，请求体和响应体会被完整存储，其中可能包含敏感数据，例如个人身份信息（PII）或嵌入在提示词中的 API 密钥。
+</Warning>
+
+<Note>
+  `LOGGING_LOG_REVISION_BODIES` 是 `LOGGING_LOG_BODIES` 针对入口请求改写链的细化设置，只有在启用请求体记录时才生效。两者都开启时，每个修改了请求的改写器（例如 GoModel Pro 的 Token 压缩）以及每个编辑了提示词的提示词护栏，都会在审计条目中把其输出的请求与原始客户端请求体一同保存，以便逐步查看整条编辑链。`LOGGING_LOG_GUARDRAIL_STEPS` 控制这种逐步记录（请求体的编码在请求路径之外进行）：关闭后，整条链的编辑会记录为一条修订，携带最终转发的请求，而不保存逐步快照。
+  禁用 `LOGGING_LOG_REVISION_BODIES` 会保留修订元数据（改写器名称、字节大小、节省的 Token 数、变更详情），但不保存额外的请求体副本，使每个被改写请求的审计存储大约减半。
+</Note>
+
+<Note>
+  `LOGGING_LOG_AUDIO_BODIES` 是 `LOGGING_LOG_BODIES` 针对音频端点的细化设置，只有在启用请求体记录时才生效。两者都开启时，`/v1/audio/speech` 会存储其文本输入和生成的音频（base64，上限 8 MB），以便在控制台中回放；`/v1/audio/transcriptions` 会存储上传的音频（base64，上限 8 MB，同样可回放）及其上传元数据。由于音频负载较大且会使审计存储快速增长，该设置默认为 `false`。启用请求体记录但关闭此项时，音频体（语音响应以及保留元数据的转写上传）会记录为一个轻量的 `{__audio__, content_type, bytes, stored: false}` 占位符；关闭请求体记录时，不会存储任何音频体。
+</Note>
+
+<Note>
+  `LOGGING_LOG_IMAGE_BODIES` 是 `LOGGING_LOG_BODIES` 针对 [Images API](/zh/advanced/images-api) 的细化设置，只有在启用请求体记录时才生效。两者都开启时，生成的图片（`/v1/images/generations`、`/v1/images/edits`）以及上传的编辑源图和蒙版会以 base64 存储（每条记录 8 MB，超出预算的图片会变为占位符），以便在控制台中显示。`LOGGING_LOG_IMAGE_BODIES_SCOPE` 可将范围缩小为 `input`（仅上传内容）或 `output`（仅结果）；默认值 `all` 同时存储两者。由于图片负载较大且会使审计存储快速增长，该设置默认为 `false`。启用请求体记录但关闭此项时，图片条目会保留除像素以外的所有内容：提示词和参数、响应封装（`usage`、`size`、`quality`）、托管 URL，以及每张图片一个带大小信息的 `{role, content_type, bytes, stored: false}` 占位符。
+</Note>
+
+#### Token 用量追踪
+
+| 变量                       | 说明                                    | 默认值 |
+| ------------------------------ | ---------------------------------------------- | ------- |
+| `USAGE_ENABLED`                | 启用 Token 用量追踪                    | `true`  |
+| `USAGE_PRICING_RECALCULATION_ENABLED` | 在支持时启用管理端的用量定价重新计算操作 | `true` |
+| `ENFORCE_RETURNING_USAGE_DATA` | 自动为流式请求添加 `include_usage` | `true`  |
+| `USAGE_BUFFER_SIZE`            | 刷写前的内存缓冲区大小                  | `1000`  |
+| `USAGE_FLUSH_INTERVAL`         | 刷写间隔（秒）                      | `5`     |
+| `USAGE_RETENTION_DAYS`         | N 天后自动删除（0 = 永久保留）         | `90`    |
+
+#### 预算
+
+预算基于已追踪的用量成本记录。如果禁用了用量追踪，GoModel 会在禁用预算管理的状态下启动，并记录一条警告。
+
+| 变量                     | 说明                                                                        | 默认值   |
+| ---------------------------- | ---------------------------------------------------------------------------------- | --------- |
+| `BUDGETS_ENABLED`            | 在启用用量追踪时，启用预算管理和工作流预算检查 | `true`    |
+| `SET_BUDGET_<PATH>`          | 为用户路径预置预算限额，例如 `daily=10`                             | _（空）_ |
+| `SET_PROVIDER_BUDGET_<NAME>` | 为提供商实例预置预算限额，例如 `daily=100`                    | _（空）_ |
+
+`SET_BUDGET_<PATH>` 支持标准周期 `hourly`、`daily`、`weekly` 和 `monthly`。`<PATH>` 后缀会被转换为小写；路径段之间使用双下划线（`__`），单下划线则保留在段内。例如，`SET_BUDGET_TEAM__ALPHA__SERVICE="daily=10"` 配置的是 `/team/alpha/service`，而 `SET_BUDGET_TEAM_ALPHA="daily=10"` 配置的是 `/team_alpha`。这与下文提供商的 `<SUFFIX>` 变量不同，后者会把提供商名称中的下划线转换为连字符；`SET_PROVIDER_BUDGET_<NAME>` 遵循提供商的规则，因此 `SET_PROVIDER_BUDGET_OPENAI_PROD` 限制的是 `openai-prod`。
+
+`SET_BUDGET_="monthly=500"` 表示一个字面名称为 `SET_BUDGET_` 的环境变量，用于配置根路径 `/`。POSIX 允许这个名称，但某些 shell 和编排工具（包括部分 Kubernetes 校验器）可能会拒绝它。如果您的环境无法设置该变量，请使用 YAML 或控制台。
+
+迁移说明：预算管理依赖于用量追踪。如果 `USAGE_ENABLED=false`，即使 `BUDGETS_ENABLED=true`，GoModel 也会在禁用预算的状态下启动并记录一条警告。要强制执行预算，请同时设置 `USAGE_ENABLED=true` 和 `BUDGETS_ENABLED=true`。
+
+关于 YAML 示例、周期、匹配规则和工作流强制执行，请参阅[预算](/zh/features/budgets)。
+
+#### 指标
+
+<Note>
+  Prometheus 支持目前为**实验性**功能。详情请参阅 [Prometheus 指标指南](/zh/guides/prometheus-metrics)。
+</Note>
+
+| 变量           | 说明                              | 默认值    |
+| ------------------ | ---------------------------------------- | ---------- |
+| `METRICS_ENABLED`  | 启用 Prometheus 指标（实验性） | `false`    |
+| `METRICS_ENDPOINT` | 指标的 HTTP 路径                    | `/metrics` |
+| `OTEL_ENABLED`     | 通过 OTLP 导出 OpenTelemetry Trace 和指标（请参阅 [OpenTelemetry](/zh/guides/opentelemetry)） | `false`    |
+
+#### 管理
+
+| 变量                              | 说明                                      | 默认值 |
+| ------------------------------------- | ------------------------------------------------ | ------- |
+| `ADMIN_ENDPOINTS_ENABLED`             | 启用管理 REST API                        | `true`  |
+| `ADMIN_UI_ENABLED`                    | 启用管理控制台 UI                    | `true`  |
+| `DASHBOARD_LIVE_LOGS_ENABLED`         | 推送控制台审计/用量实时预览   | `true`  |
+| `DASHBOARD_LIVE_LOGS_BUFFER_SIZE`     | 控制台实时事件的内存回放窗口 | `10000` |
+| `DASHBOARD_LIVE_LOGS_REPLAY_LIMIT`    | 向单个重连客户端回放的最大事件数   | `1000`  |
+| `DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS` | 空闲流的心跳间隔（秒）      | `15`    |
+
+控制台实时日志是 Audit Logs 和 Usage 页面的精简预览。它们会在异步数据库刷写完成之前更新行。已存储的审计表和用量表仍是唯一可信的数据来源；如果浏览器重连时携带的游标超出了回放窗口，控制台会通过常规 REST API 重新加载数据。
+
+#### HTTP 客户端
+
+以下设置控制发往 LLM 提供商的上游 API 请求的超时。
+
+| 变量                       | 说明                                  | 默认值        |
+| ------------------------------ | -------------------------------------------- | -------------- |
+| `HTTP_TIMEOUT`                 | 请求总超时（秒）           | `600`（10 分钟） |
+| `HTTP_RESPONSE_HEADER_TIMEOUT` | 等待响应头的时间（秒） | `600`（10 分钟） |
+| `HTTP_STREAM_IDLE_TIMEOUT`     | 流在收到首批字节后允许保持静默的最长时间（秒）；`0` 表示禁用 | `300`（5 分钟） |
+
+静默时间超过 `HTTP_STREAM_IDLE_TIMEOUT` 的流会以 `504` 提供商错误关闭，而不会一直挂起到 `HTTP_TIMEOUT`。等待首个 Token 的时间不计入其中，因此较慢的推理模型不受影响。仅当某个提供商确实会在流中途合理地暂停数分钟时，才需要调大该值。
+
+#### 提供商 API 密钥
+
+设置以下变量即可自动注册提供商，无需 YAML 配置。
+
+| 变量             | 提供商                                           |
+| -------------------- | -------------------------------------------------- |
+| `OPENAI_API_KEY`     | OpenAI                                             |
+| `ANTHROPIC_API_KEY`  | Anthropic                                          |
+| `COHERE_API_KEY`     | Cohere                                             |
+| `GEMINI_API_KEY`     | Google Gemini                                      |
+| `DEEPSEEK_API_KEY`   | DeepSeek                                           |
+| `DEEPINFRA_API_KEY`  | DeepInfra（`DEEPINFRA_BASE_URL` 可选）       |
+| `OPENROUTER_API_KEY` | OpenRouter                                         |
+| `KILO_API_KEY`       | Kilo AI Gateway                                    |
+| `EDENAI_API_KEY`     | Eden AI                                            |
+| `ZAI_API_KEY`        | Z.ai                                               |
+| `XAI_API_KEY`        | xAI (Grok)                                         |
+| `GROQ_API_KEY`       | Groq                                               |
+| `CHUTES_API_KEY`     | Chutes AI（`CHUTES_BASE_URL` 可选）             |
+| `AZURE_API_KEY`      | Azure OpenAI（还需要 `AZURE_BASE_URL`）     |
+| `ORACLE_API_KEY`     | Oracle GenAI（还需要 `ORACLE_BASE_URL`）    |
+| `OLLAMA_BASE_URL`    | Ollama（无需 API 密钥）                        |
+| `SGLANG_BASE_URL`    | SGLang（除非上游要求，否则无需 API 密钥） |
+| `VLLM_BASE_URL`      | vLLM（除非上游要求，否则无需 API 密钥） |
+| `LLAMACPP_BASE_URL`  | llama.cpp llama-server / LM Studio（除非以 `--api-key` 启动，否则无需 API 密钥） |
+| `LLMD_BASE_URL`      | llm-d Router/EPP（除非其 Gateway 要求，否则无需 API 密钥） |
+
+大多数提供商都可以通过 `<PROVIDER>_BASE_URL`（例如 `OPENAI_BASE_URL`）使用自定义 Base URL。Chutes AI 默认为 `https://llm.chutes.ai/v1`，可通过 `CHUTES_BASE_URL` 覆盖。DeepSeek 默认为 `https://api.deepseek.com`；仅在使用兼容代理或其他 DeepSeek 端点时才需设置 `DEEPSEEK_BASE_URL`。OpenRouter 默认为 `https://openrouter.ai/api/v1`，可通过 `OPENROUTER_BASE_URL` 覆盖。Kilo AI 默认为 `https://api.kilo.ai/api/gateway`，可通过 `KILO_BASE_URL` 覆盖。Eden AI 默认为 `https://api.edenai.run/v3`，可通过 `EDENAI_BASE_URL` 覆盖。Z.ai 默认为 `https://api.z.ai/api/paas/v4`；如需使用 GLM Coding Plan 端点，请设置 `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`。设置了 `SGLANG_API_KEY` 时，SGLang 默认为 `http://localhost:30000/v1`，但无密钥部署应显式设置 `SGLANG_BASE_URL` 才能注册该提供商。vLLM 采用相同的模式，默认地址为 `http://localhost:8000/v1`。llama.cpp 的 `LLAMACPP_BASE_URL` 始终必填（llama-server 的默认端口与 GoModel 自身的 8080 冲突，因此没有默认值）；`LLAMACPP_API_KEY` 为可选。llm-d 没有通用端点，因此 `LLMD_BASE_URL` 始终必填；`LLMD_API_KEY` 为可选。Azure 使用 `AZURE_BASE_URL` 作为其部署的 Base URL，并可通过可选的 `AZURE_API_VERSION` 覆盖 API 版本，否则默认为 `2024-10-21`。Oracle 需要 `ORACLE_BASE_URL`，因为其兼容 OpenAI 的端点因区域而异。
+
+每种提供商类型还接受通过 `<PROVIDER>_MODELS` 配置的逗号分隔模型列表，例如 `OPENROUTER_MODELS`、`ORACLE_MODELS`、`AZURE_MODELS`、`SGLANG_MODELS`、`VLLM_MODELS` 或 `LLMD_MODELS`。默认情况下，`CONFIGURED_PROVIDER_MODELS_MODE=fallback` 仅在上游 `/models` 失败、返回 nil 或返回空列表时使用配置的列表。没有 `/models` 端点（返回 404 或 405）的兼容 OpenAI 提供商会使用其配置的列表提供服务，并被报告为健康，这适用于语音转文字等单一 API 的服务器。设置 `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` 后，对于定义了列表的提供商，只暴露配置的模型，并跳过其上游 `/models` 调用。YAML 中的 `providers.<name>.models` 为命名的提供商块提供相同的模型列表输入。
+
+`GET /v1/models` 默认列出带提供商前缀的 ID（`openai/gpt-5`）。设置 `UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT=true`（YAML：`models.unqualified_model_ids_at_models_endpoint`）可改为列出不带前缀的模型 ID（`gpt-5`），适用于会根据列表校验所请求模型、且只认识纯名称的客户端。注意：当两个提供商暴露相同的模型 ID 时，只会列出不带前缀的请求所路由到的那个提供商（最先注册的那个）。可使用[虚拟模型](/zh/features/virtual-models#列出不带前缀的模型-id)将某个名称固定到特定提供商，例如 `source: gpt-5` 配合 `target: azure/gpt-5`。
+
+默认情况下，所有提供商模型都可用。设置 `MODELS_ENABLED_BY_DEFAULT=false`（YAML：`models.enabled_by_default`）后，则需要在[虚拟模型](/zh/features/virtual-models#默认的模型可用性)中显式添加允许条目：对其他模型的请求会以 `400 model_access_denied` 失败，且这些模型不会出现在 `GET /v1/models` 中。如果要在 `GET /v1/models` 中隐藏提供商模型、但仍保留其可路由性，请设置 `KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT=true`（YAML：`models.keep_only_aliases_at_models_endpoint`）；此时该端点只列出已启用的虚拟模型重定向。
+
+如果要缩小某个提供商的模型清单，而不是逐个列出模型，请使用 `<PROVIDER>_MODEL_FILTER_INCLUDE`、`<PROVIDER>_MODEL_FILTER_EXCLUDE` 和 `<PROVIDER>_MODEL_FILTER_MAX_PRICE_PER_MTOK`（YAML：`providers.<name>.model_filter`）。请参阅[过滤提供商的模型](/zh/advanced/config-yaml#过滤提供商的模型)。
+
+对于 OpenRouter，除非请求已自行设置，否则 GoModel 还会发送默认的归属（attribution）Header。可通过 `OPENROUTER_SITE_URL` 和 `OPENROUTER_APP_NAME` 覆盖这些默认值。
+
+### 2. `.env` 文件
+
+GoModel 启动时会自动从工作目录加载 `.env` 文件，便于本地开发。
+
+```bash
+# .env
+PORT=3000
+BASE_PATH=/g
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+将 `.env.template` 复制为 `.env`，并取消注释您需要的值：
+
+```bash
+cp .env.template .env
+```
+
+<Note>
+  真实的环境变量始终会覆盖 `.env` 文件中的值。`.env` 文件仅在存在时才会加载，缺少该文件不会报错。
+</Note>
+
+### 3. 配置文件（YAML）
+
+对于更复杂的场景，您可以使用可选的 YAML 配置文件。GoModel 会依次在以下两个位置查找：
+
+1. `config/config.yaml`
+2. `config.yaml`
+
+如果您还在考虑是否需要 YAML，请参阅 [config.yaml](/zh/advanced/config-yaml)。
+
+首先复制示例文件：
+
+```bash
+cp config/config.example.yaml config/config.yaml
+```
+
+然后取消注释并编辑您要修改的设置：
+
+```yaml
+server:
+  port: "3000"
+  base_path: "/g"
+  user_path_header: "X-GoModel-User-Path"
+  master_key: "my-secret-key"
+
+cache:
+  model:
+    redis:
+      url: "redis://my-redis:6379"
+
+budgets:
+  enabled: true
+  user_paths:
+    - path: "/team/alpha"
+      limits:
+        - period: "daily"
+          amount: 10.00
+        - period: "weekly"
+          amount: 50.00
+
+providers:
+  openai:
+    type: openai
+    api_key: "sk-..."
+
+  anthropic:
+    type: anthropic
+    api_key: "sk-ant-..."
+
+  # 自定义的兼容 OpenAI 提供商
+  my-custom-llm:
+    type: openai
+    base_url: "https://api.example.com/v1"
+    api_key: "..."
+```
+
+YAML 文件支持使用 `${VAR}` 和 `${VAR:-default}` 语法展开环境变量：
+
+```yaml
+server:
+  port: "${PORT:-8080}"
+
+providers:
+  openai:
+    type: openai
+    api_key: "${OPENAI_API_KEY}"
+```
+
+如果要从挂载的文件中读取值，或在变量未设置时让启动失败，请使用 [Secret 引用](/zh/advanced/secret-references)：`${file:/run/secrets/openai}` 或 `${env:OPENAI_API_KEY}`。
+
+<Tip>
+  YAML 文件完全是可选的。任何可以写在 YAML 中的设置，也都可以通过环境变量设置。当您需要按提供商覆盖弹性与容错设置、自动生成的提供商名称不够用，或更偏好结构化配置文件时，再使用 YAML。
+</Tip>
+
+## 提供商配置
+
+### 通过环境变量自动发现
+
+这是添加提供商最简单的方式。GoModel 会检查常用的 API 密钥环境变量并自动注册提供商：
+
+```bash
+export OPENAI_API_KEY="sk-..."      # 注册 "openai" 提供商
+export ANTHROPIC_API_KEY="sk-ant-..." # 注册 "anthropic" 提供商
+export COHERE_API_KEY="..."           # 注册 "cohere" 提供商
+export GEMINI_API_KEY="..."          # 注册 "gemini" 提供商
+export DEEPSEEK_API_KEY="..."        # 注册 "deepseek" 提供商
+export DEEPINFRA_API_KEY="..."       # 注册 "deepinfra" 提供商
+export XAI_API_KEY="..."             # 注册 "xai" 提供商
+export GROQ_API_KEY="gsk_..."        # 注册 "groq" 提供商
+export CHUTES_API_KEY="cpk_..."      # 注册 "chutes" 提供商
+export OPENROUTER_API_KEY="sk-or-..." # 注册 "openrouter" 提供商
+export KILO_API_KEY="..."            # 注册 "kilo" 提供商
+export EDENAI_API_KEY="..."          # 注册 "edenai" 提供商
+export ZAI_API_KEY="..."             # 注册 "zai" 提供商
+# 可选：export ZAI_BASE_URL="https://api.z.ai/api/coding/paas/v4"
+export AZURE_API_KEY="..."           # 与 AZURE_BASE_URL 一起设置时注册 "azure" 提供商
+export AZURE_BASE_URL="https://your-resource.openai.azure.com/openai/deployments/your-deployment"
+export ORACLE_API_KEY="..."          # 与 ORACLE_BASE_URL 一起设置时注册 "oracle" 提供商
+export ORACLE_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1"
+export ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3" # 可选的配置模型列表
+export OPENROUTER_MODELS="openai/gpt-oss-120b,anthropic/claude-sonnet-4"
+export KILO_MODELS="anthropic/claude-sonnet-4.5,openai/gpt-5.5"
+export CONFIGURED_PROVIDER_MODELS_MODE="fallback" # fallback 或 allowlist
+export OLLAMA_BASE_URL="http://localhost:11434/v1" # 注册 "ollama" 提供商
+export SGLANG_BASE_URL="http://localhost:30000/v1" # 注册无密钥的 "sglang" 提供商
+# 可选：export SGLANG_API_KEY="token-abc123"
+export VLLM_BASE_URL="http://localhost:8000/v1" # 注册无密钥的 "vllm" 提供商
+# 可选：export VLLM_API_KEY="token-abc123"
+export LLMD_BASE_URL="http://quickstart-epp.llm-d.svc.cluster.local/v1" # 注册无密钥的 "llmd" 提供商
+export LLMD_MODELS="Qwen/Qwen2.5-0.5B-Instruct"
+# 可选：export LLMD_INFERENCE_OBJECTIVE="standard-traffic"
+# 可选：export LLMD_FAIRNESS_FROM_USER_PATH="true"
+```
+
+不带后缀的 `<PROVIDER>_*` 变量优先于 `config.yaml` 中以该类型命名的提供商（`openai`）。对于您重命名过的提供商（`alpha: {type: openai}`），只会补充其留空的字段；其显式设置的 `api_key` 或 `base_url` 会被保留，被忽略的变量会在启动时记录为警告。当多个重命名的提供商共享同一类型时，不带后缀的变量会被忽略，并记录相同的警告。
+
+使用带后缀的变量，无需 YAML 即可注册同一提供商类型的多个实例。GoModel 会将后缀规范化为小写，并在配置的提供商名称中将下划线转换为连字符：
+
+```bash
+export OPENAI_EAST_API_KEY="sk-..." # 注册 "openai-east"，类型为 "openai"
+export OPENAI_EAST_BASE_URL="https://east.example.com/v1"
+
+export OPENAI_WEST_API_KEY="sk-..." # 注册 "openai-west"，类型为 "openai"
+export OPENAI_WEST_BASE_URL="https://west.example.com/v1"
+```
+
+同样的模式适用于所有已注册的提供商类型：`<PROVIDER>_<SUFFIX>_API_KEY`、`<PROVIDER>_<SUFFIX>_BASE_URL` 和 `<PROVIDER>_<SUFFIX>_MODELS`。Azure 还支持 `<PROVIDER>_<SUFFIX>_API_VERSION`。Azure 和 Oracle 仍然需要带后缀的 `BASE_URL` 值，因为它们的端点因部署或区域而异。
+
+Google Vertex AI 使用 `VERTEX_*` 前缀，并遵循与其他提供商相同的后缀到名称的规则：
+
+```bash
+export VERTEX_PROJECT="prod-ai"
+export VERTEX_LOCATION="us-central1" # 注册 "vertex"，类型为 "vertex"
+
+export VERTEX_US_PROJECT="prod-ai"
+export VERTEX_US_LOCATION="us-central1" # 注册 "vertex-us"，类型为 "vertex"
+```
+
+### YAML 提供商块
+
+如需更多控制（自定义名称、按提供商设置弹性与容错，或更大的结构化设置），请使用 YAML 文件：
+
+```yaml
+models:
+  # fallback 为默认值。当配置的提供商模型列表需要隐藏上游模型并跳过上游
+  # /models 调用时，使用 allowlist；如果要在发现的模型清单之上追加配置的模型
+  # （提供商可提供但未列出的模型），使用 merge。
+  configured_provider_models_mode: fallback
+  # 在 GET /v1/models 中列出不带前缀的模型 ID（gpt-5），而不是带提供商前缀的
+  # ID（openai/gpt-5）。当两个提供商暴露相同 ID 时，只会列出不带前缀的请求所路由到的
+  # 提供商（最先注册的那个）；可使用虚拟模型固定名称（source gpt-5 -> target azure/gpt-5）。
+  unqualified_model_ids_at_models_endpoint: false
+
+providers:
+  # 覆盖 OpenAI 的 Base URL
+  openai:
+    type: openai
+    api_key: "sk-..."
+    base_url: "https://my-proxy.example.com/v1"
+
+  # 添加第二个兼容 OpenAI 的端点
+  azure:
+    type: azure
+    base_url: "https://my-resource.openai.azure.com/openai/deployments/gpt-4"
+    api_key: "..."
+    api_version: "2024-10-21"
+
+  # 添加 Oracle 兼容 OpenAI 的端点
+  oracle:
+    type: oracle
+    base_url: "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1"
+    api_key: "..."
+    models:
+      - openai.gpt-oss-120b
+      - xai.grok-3
+
+  # 添加 DeepSeek。GoModel 会将 /v1/responses 转换为 DeepSeek 的 chat completions。
+  deepseek:
+    type: deepseek
+    base_url: "https://api.deepseek.com"
+    api_key: "..."
+
+  # 添加兼容 OpenAI 的 vLLM 服务器
+  vllm:
+    type: vllm
+    base_url: "http://localhost:8000/v1"
+    # api_key 为可选项；仅当 vllm serve 使用 --api-key 时才需设置。
+    # api_key: "token-abc123"
+
+  # 添加兼容 OpenAI 的 SGLang 服务器
+  sglang:
+    type: sglang
+    base_url: "http://localhost:30000/v1"
+    # api_key 为可选项；仅当 launch_server 使用 --api-key 时才需设置。
+    # api_key: "token-abc123"
+
+  # 为 fallback 或 allowlist 模式配置模型列表
+  gemini:
+    type: gemini
+    api_key: "..."
+    models:
+      - gemini-2.0-flash
+      - gemini-1.5-pro
+
+  # 添加 Google Vertex AI。project 和 location 为必填项。
+  vertex:
+    type: vertex
+    auth_type: gcp_adc
+    vertex_project: "prod-ai"
+    vertex_location: "us-central1"
+    api_mode: native
+    models:
+      - google/gemini-2.5-flash
+```
+
+<Note>
+  `models:` 适用于所有提供商块。在 fallback 模式下，它是上游 `/models` 不可用或为空时的兜底；在 allowlist 模式下，它成为该提供商对外暴露的模型清单，并跳过上游 `/models`。关于 Oracle GenAI 所需的 OCI 策略和经过测试的配置，请参阅 [Oracle GenAI 指南](/zh/providers/oracle)。
+</Note>
+
+### Ollama（本地模型）
+
+Ollama 不需要 API 密钥。设置 Base URL 即可启用：
+
+```bash
+export OLLAMA_BASE_URL="http://localhost:11434/v1"
+```
+
+或在 YAML 中配置：
+
+```yaml
+providers:
+  ollama:
+    type: ollama
+    base_url: "http://localhost:11434/v1"
+```
+
+### vLLM
+
+vLLM 使用其兼容 OpenAI 的 `/v1` API。在 Docker 中，设置 `VLLM_BASE_URL` 即可注册一个无密钥的 vLLM 服务器：
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e VLLM_BASE_URL="http://host.docker.internal:8000/v1" \
+  enterpilot/gomodel
+```
+
+如果上游服务器是以 `vllm serve ... --api-key token-abc123` 启动的，还需要设置：
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e VLLM_BASE_URL="http://host.docker.internal:8000/v1" \
+  -e VLLM_API_KEY="token-abc123" \
+  enterpilot/gomodel
+```
+
+您也可以不使用 YAML 注册多个 vLLM 实例：
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e VLLM_BASE_URL="http://host.docker.internal:8000/v1" \
+  -e VLLM_TEST_BASE_URL="http://host.docker.internal:8000/v1" \
+  enterpilot/gomodel
+```
+
+这会注册 `vllm` 和 `vllm-test` 两个提供商。只有当自动生成的提供商名称不够用，或需要更大的结构化配置块时，才需要使用 YAML。
+
+## 提供商行为说明
+
+### Anthropic `max_tokens` 默认值
+
+Anthropic 要求每个 `/v1/messages` 请求都包含 `max_tokens`。如果客户端省略了该字段，GoModel 会注入一个回退值，使请求仍能成功。OpenAI 和 Gemini 将该字段视为可选，GoModel 不会为它们注入默认值。
+
+| 变量                       | 说明                                       | 默认值 |
+| ------------------------------ | ------------------------------------------------- | ------- |
+| `ANTHROPIC_DEFAULT_MAX_TOKENS` | 调用方省略 `max_tokens` 时注入的值 | `4096`  |
+
+对于经常产生较长输出的较新模型（Sonnet 4.6、Opus 4.7），请调大该值。在请求中显式设置的 `max_tokens` 始终优先于由环境变量驱动的默认值。无效值或非正数值会回退为 `4096`。

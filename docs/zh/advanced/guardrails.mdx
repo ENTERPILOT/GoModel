@@ -1,0 +1,769 @@
+---
+title: "护栏"
+description: "运行插件实例，对提示词、响应和流式事件进行检查、修改、拦截或直接应答，可在 config.yaml 或管理控制台中配置。"
+icon: "shield-check"
+keywords: ["护栏", "guardrails", "请求拦截", "request interception", "内容过滤", "content filtering", "策略执行", "policy enforcement", "插件", "plugins"]
+---
+
+## 概览
+
+护栏是 [插件](/zh/advanced/plugins) 的一个具名、已配置的实例。
+护栏在每个引用它的 [工作流](/zh/advanced/workflows) 中运行，处于以下三个阶段之一：
+
+- **prompt**：路由之后、请求到达提供商之前
+- **response**：作用于完整响应，在其到达客户端之前
+- **stream**：作用于每个流式事件（或作用于缓冲后的整个流，取决于插件）
+
+护栏可以编辑内容、添加 Header、以错误拒绝请求、以安全消息直接应答，或者放行请求并附带警告。
+
+<Warning>
+  response 阶段的护栏需要完整响应，因此运行此类护栏的工作流会缓冲其匹配的每个流式请求：客户端仍然请求了
+  `stream: true`，也仍会收到 SSE，但会在提供商完成后一次性收到全部内容，首 Token 时间也就变成了总响应时间。
+  stream 阶段的护栏只有在其插件本身也支持流式处理时，才能保持增量交付；流式策略为缓冲的插件效果相同。
+</Warning>
+
+在 `/v1/responses` 上，stream 阶段的护栏可能会丢弃、合并或拆分事件，因此 GoModel 会对交付的事件重新编号：`sequence_number` 仍从 `0`
+开始且不留空隙，一直到终止事件 `response.completed`（流被截断时为 `response.incomplete`
+/ `response.failed`）。
+
+护栏适用于所有基于文本的端点：
+
+- `/v1/chat/completions`
+- `/v1/responses`
+- `/v1/messages`
+- `/v1/decisions` 和 `/v1/systemone`，仅 prompt 阶段（参见
+  [不同端点下的工作方式](#不同端点下的工作方式)）
+
+<Note>
+  针对图像、TTS、STT 和视频模型的护栏计划作为独立系统提供，不在本文讨论范围内。
+</Note>
+
+## 快速开始
+
+在 `config/config.yaml` 中添加 `guardrails` 配置段：
+
+```yaml
+guardrails:
+  enabled: true
+  rules:
+    - name: "safety-prompt"
+      type: "system_prompt"
+      order: 0
+      system_prompt:
+        mode: "decorator"
+        content: "Always respond safely and respectfully."
+```
+
+就是这样。现在每个请求的系统指令前都会加上这条安全提示词。
+
+## 在控制台中管理
+
+护栏定义也可以在管理控制台中创建和编辑，而不必使用 `config.yaml`——适合在无需重新部署的情况下迭代规则，或供不直接管理此仓库配置的运维人员使用。
+
+<img
+  src="/advanced/guardrails.png"
+  alt="GoModel 控制台的 Plugins &amp; Guardrails 页面，显示空的护栏列表、Create Guardrail 按钮以及已加载的插件列表"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+在侧边栏中打开 **Plugins & Guardrails**，点击 **Create Guardrail**：为其命名，选择类型（列出所有带有 prompt、response 或 stream
+钩子的已加载插件），可选地将其作用域限定到某个 `user_path`，然后填写插件声明的表单。**Advanced** 部分包含失败模式和超时设置。`config.yaml` 中的条目会在启动时写入同一存储，并与其保持同步，因此在控制台创建的护栏和在配置中声明的护栏会并列显示。页面底部的 **Plugins** 列表显示每个已加载的插件类型及其钩子、来源和健康状态。并非所有插件都是护栏：
+当插件的实例会对提示词、响应或流应用策略时，该插件会在其清单（manifest）中声明 `Guardrail: true`，控制台会用盾牌图标标记这类插件以及由其构建的实例。像
+`cheapest_healthy` 这样的路由策略也列在同一页面上，但它不是护栏。
+
+<Note>
+  护栏在运行时是否执行仍取决于 `GUARDRAILS_ENABLED`。关闭该选项时，您仍可在该页面管理定义——只是它们暂不会作用于实际流量。
+</Note>
+
+## 工作原理
+
+```mermaid
+flowchart LR
+    A[客户端请求] --> B[Prompt 链]
+    B --> C[LLM 提供商]
+    C --> D[Response 或 Stream 链]
+    D --> E[客户端]
+```
+
+1. 请求被映射为统一的 `Prompt`（包含带有稳定 ID 的 system、user、assistant 和 tool 消息）
+2. 运行 **prompt 链**：每个护栏编辑提示词，或决定拦截、应答或警告
+3. 编辑结果被应用回原始请求，请求随后继续发往提供商
+4. 在任何内容到达客户端之前，**response 链**作用于完整响应（或 **stream 链**作用于流）
+
+护栏从不接触原始的 API 请求类型——它们作用于统一的
+[`Exchange`](/zh/advanced/plugins#exchange-对象)。同一个护栏在 `/chat/completions`、`/responses` 和 `/messages` 上的行为完全一致。
+
+## 执行顺序
+
+每个护栏都有一个 `order` 值（即工作流步骤），用于控制其在所属阶段内的运行时机：
+
+- **相同 order** → **并行**运行（并发）
+- **不同 order** → **顺序**运行（升序）
+
+```mermaid
+flowchart LR
+    subgraph Order 0
+        A[safety-prompt]
+        B[content-policy]
+    end
+    subgraph Order 1
+        C[compliance-check]
+    end
+    subgraph Order 2
+        D[final-filter]
+        E[audit-tag]
+    end
+    Order 0 --> Order 1 --> Order 2
+```
+
+每个顺序组都会接收上一组的输出。**编辑内容**的护栏（`system_prompt`、`llm_based_altering`、
+`string_replace`、`presidio`）不能与另一个编辑型护栏共用同一个 order；每个 order 只能有一个编辑者，但可以与任意数量的非编辑型检查（`llm_judge`、
+`header_edit`）并列。当同一 order 上的多个护栏做出不同决定时，以最严格的决定为准：`block` > `respond` > `warn` >
+`allow`。
+
+## 配置
+
+### 完整结构
+
+```yaml
+guardrails:
+  enabled: true    # 总开关（默认：false）
+  enable_for_batch_processing: false   # 同时对内联的 /v1/batches 条目运行 prompt 链
+  rules:
+    - name: "rule-name"          # 此实例的唯一标识
+      type: "system_prompt"      # 插件名称
+      user_path: "/team/privacy" # 可选，内部辅助调用的基础路径
+      phase: "prompt"            # prompt（默认）| response | stream
+      order: 0                   # 阶段内的步骤
+      fail_mode: "closed"        # closed（默认）| open
+      timeout_ms: 0              # 单次调用超时；0 = 无（默认）
+      config:                    # 插件设置，按插件的 schema 校验
+        mode: "decorator"
+        content: "Your prompt text here."
+```
+
+`system_prompt` 和 `llm_based_altering` 也接受以类型命名的类型化块（`system_prompt:` / `llm_based_altering:`）来提供设置，如快速开始中所示。类型化块与 `config:` 等价；其他所有类型请使用 `config:`。
+面向行的键（如 `string_replace.rules` 和
+`header_edit` 的各个列表）既接受块标量（`|`），也接受字符串组成的 YAML 列表，后者会以换行符拼接。
+
+### 环境变量
+
+您无需编辑配置文件即可开关护栏：
+
+```bash
+export GUARDRAILS_ENABLED=true
+```
+
+护栏基于 [插件](/zh/advanced/plugins) 构建，因此启用护栏也会启用插件系统（`PLUGINS_ENABLED`，默认关闭）。两者都关闭时，护栏端点和控制台页面均不可用。
+
+### 规则字段
+
+| 字段 | 必填 | 说明 |
+| ----- | -------- | ----------- |
+| `name` | 是 | 便于阅读的标识。支持空格和 Unicode，但不支持 `/`。 |
+| `type` | 是 | 插件名称：下文的某个内置类型，或某个已加载插件在清单中的名称。 |
+| `user_path` | 否 | 可选，内部辅助请求的基础用户路径。 |
+| `phase` | 否 | `prompt`、`response` 或 `stream`。默认 `prompt`。 |
+| `order` | 否 | 阶段内的执行顺序。默认 `0`。值相同 = 并行，值不同 = 顺序执行。 |
+| `config` | 否 | 插件设置。键、默认值和校验规则由插件提供（`GET /admin/guardrails/types`）。 |
+| `fail_mode` | 否 | `closed`：护栏出错或超时时以 HTTP 500 拒绝请求；`open`：跳过该护栏继续处理。默认 `closed`。 |
+| `timeout_ms` | 否 | 护栏每次调用的时间上限，到期即强制执行。默认 `0`（无）。编辑内容的护栏如果超时，即使设置了 `fail_mode: open`，请求也会失败；参见 [失败模式与超时](/zh/advanced/plugins#失败模式与超时)。 |
+
+## 护栏类型
+
+GoModel 内置六种类型。每种都是一个内置插件；下表列出了它们在 `config:` 下和控制台表单中显示的配置键。
+
+### `system_prompt`
+
+在每个请求上添加、替换或装饰系统提示词。
+
+**阶段：** prompt。**编辑内容：** 是。
+
+#### 设置
+
+| 键 | 必填 | 默认值 | 说明 |
+| --- | -------- | ------- | ----------- |
+| `mode` | 否 | `inject` | `inject`、`override` 或 `decorator`。 |
+| `content` | 是 | | 要应用的系统提示词文本。 |
+
+#### 模式
+
+<Tabs>
+  <Tab title="inject">
+    **仅在不存在系统消息时**添加一条系统消息。已有的系统提示词保持不变。
+
+    ```yaml
+    - name: "default-system"
+      type: "system_prompt"
+      order: 0
+      system_prompt:
+        mode: "inject"
+        content: "You are a helpful assistant."
+    ```
+
+    **行为：**
+    - 请求中没有系统提示词 → 添加一条
+    - 请求中已有系统提示词 → 不做更改
+  </Tab>
+  <Tab title="override">
+    用配置的内容**替换**所有已有的系统消息。
+
+    ```yaml
+    - name: "strict-system"
+      type: "system_prompt"
+      order: 0
+      system_prompt:
+        mode: "override"
+        content: "You are a compliance-focused assistant. Follow all company policies."
+    ```
+
+    **行为：**
+    - 删除所有已有的系统提示词
+    - 设置一条新的系统提示词
+  </Tab>
+  <Tab title="decorator">
+    将配置的内容**前置**到已有的系统提示词之前（以换行符分隔）。如果不存在系统提示词，则添加一条。
+
+    ```yaml
+    - name: "safety-prefix"
+      type: "system_prompt"
+      order: 0
+      system_prompt:
+        mode: "decorator"
+        content: "Always respond safely and respectfully."
+    ```
+
+    **行为：**
+    - 已有的系统提示词 `"You are a coding assistant."` 变为：
+      ```
+      Always respond safely and respectfully.
+      You are a coding assistant.
+      ```
+    - 没有系统提示词 → 创建一条仅包含配置内容的系统提示词
+  </Tab>
+</Tabs>
+
+### `llm_based_altering`
+
+通过调用辅助模型改写选定消息角色的文本。
+在 prompt 阶段，它改写请求；在 response 阶段，它改写助手的回复（当 `roles` 包含 `assistant` 时）。这适用于 PII 匿名化以及其他保留内容含义的改写。
+
+默认的 `prompt` 源自 LiteLLM 的 `data_anonymization` 护栏，因此最小配置即可作为匿名化预处理器使用。
+
+**阶段：** prompt、response。**编辑内容：** 是。
+
+#### 设置
+
+| 键 | 必填 | 默认值 | 说明 |
+| --- | -------- | ------- | ----------- |
+| `model` | 是 | | 用于改写调用的模型、别名或 `provider/model` 选择器。 |
+| `provider` | 否 | | 可选的路由提示；会以 `provider/model` 的形式合并到 `model` 中。 |
+| `roles` | 否 | `["user"]` | 要改写的角色：`system`（包括 developer）、`user`、`assistant`、`tool`。 |
+| `max_tokens` | 否 | `4096` | 辅助改写调用的 `max_tokens`。 |
+| `skip_content_prefix` | 否 | | 当去除首尾空白后的文本以此前缀开头时，跳过改写。 |
+| `prompt` | 否 | 内置匿名化提示词 | 自定义改写指令。 |
+
+改写在进程内通过常规的翻译请求路径执行，因此工作流选择、故障转移、用量、审计和缓存行为依然适用。
+内部请求使用：
+
+- 路径：`/v1/chat/completions`
+- 用户路径：`{guardrail.user_path or caller user path}/guardrails/{guardrail name}`
+- 请求来源：`plugin`
+
+为避免递归，该内部请求会跳过护栏。改写失败（出错、回复为空或被截断、返回工具调用而非文本）即视为护栏失败，由 `fail_mode` 决定后续行为：`closed` 拒绝请求，`open` 使用原始文本继续。
+
+#### 示例
+
+```yaml
+- name: "privacy-rewrite"
+  type: "llm_based_altering"
+  user_path: "/team/privacy"
+  order: 1
+  timeout_ms: 20000
+  llm_based_altering:
+    model: "gpt-4o-mini"
+    roles: ["user"]
+```
+
+### `string_replace`
+
+对匹配一组字面量或正则表达式规则的文本进行替换、标记或拦截。适用于提示词、响应和流。在所有模式下，规则都只在单个文本部分（内容部分或工具结果部分）内匹配；
+跨两个部分的文本不会被匹配。
+
+**阶段：** prompt、response、stream。**编辑内容：** 是。
+
+#### 设置
+
+| 键 | 必填 | 默认值 | 说明 |
+| --- | -------- | ------- | ----------- |
+| `rules` | 是 | | 每行一条规则，格式为 `find => replace`（分隔符为带空格的 ` => `；替换内容可以为空）。空行和以 `#` 开头的行会被忽略。在 literal 模式下，两侧均可识别 `\n`、`\t` 和 `\\`；在 regex 模式下，仅替换侧可识别。 |
+| `mode` | 否 | `literal` | `literal` 按原样匹配文本；`regex` 使用 Go RE2 语法，替换内容中可使用 `$1`、`$2` 捕获组引用（字面美元符号写作 `$$`）。 |
+| `case_insensitive` | 否 | `false` | 匹配时忽略大小写。 |
+| `roles` | 否 | `["user"]` | 规则作用的提示词消息：`system`（包括 developer）、`user`、`assistant`、`tool`。在 response 阶段，目标始终是助手文本。 |
+| `on_match` | 否 | `replace` | `replace` 执行替换；`block` 以错误拒绝；`respond` 以 `message` 作为助手回复进行应答；`warn` 继续处理并记录匹配。只有 `replace` 会编辑文本。 |
+| `message` | 否 | `Request blocked by policy` | `block` 的错误消息、`respond` 的助手回复、`warn` 的审计备注。 |
+| `block_status` | 否 | 阶段默认值 | `block` 使用的单个 HTTP 状态码，范围为 400 到 599，例如 `403`。为空时，提示词被拦截返回 400，响应被拦截返回 502。 |
+| `stream_lookbehind` | 否 | `64` | 流式文本中暂扣的字符数，使跨两个分块的匹配仍能被改写；请至少设置为最长查找文本的长度。位于目前已流式输出文本末尾的匹配会被暂扣，直到它不再增长，因此像 `sk-[A-Za-z0-9]{20,}` 这样的开放式模式，在值不超过此长度时会被整体遮盖。用于 `replace` 和 `warn`。 |
+
+在 stream 阶段，`replace` 和 `warn` 使用配置的回看窗口在传输中转换事件。`block` 和 `respond` 会缓冲整个流，确保在做出决定前不泄露任何内容，代价是首 Token 会延迟到响应完成后才送达。
+
+#### 示例
+
+```yaml
+- name: "mask-internal-names"
+  type: "string_replace"
+  order: 0
+  config:
+    mode: "literal"
+    case_insensitive: true
+    rules: |
+      Project Falcon => [project]
+      ACME Corp => [company]
+```
+
+### `tag_replace`
+
+在调用提供商之前，将提示词文本中的 `{{gomodel.<tag>}}` 占位符替换为当前请求的值。可用它告诉模型自己以哪个模型身份运行，或今天的日期，而无需客户端发送这些信息。它与 `system_prompt` 搭配效果很好：把标签放在系统提示词中，并在更靠后的 `order` 上运行
+`tag_replace`。
+
+**阶段：** prompt。**编辑内容：** 是。
+
+#### 标签
+
+| 标签 | 值 |
+| --- | ----- |
+| `{{gomodel.requested_model}}` | 客户端请求的模型。 |
+| `{{gomodel.resolved_model}}` | 请求实际发往的提供商模型。 |
+| `{{gomodel.virtual_model}}` | 产生该解析结果的虚拟模型，否则为空。 |
+| `{{gomodel.provider_type}}` | 提供商类型，例如 `openai`。 |
+| `{{gomodel.provider_name}}` | 提供商实例名称。 |
+| `{{gomodel.user_path}}` | 生效的用户路径。 |
+| `{{gomodel.request_id}}` | 网关请求 ID。 |
+| `{{gomodel.session_id}}` | 检测到的会话 ID，没有时为空。 |
+| `{{gomodel.date}}` | 当前日期，`2026-09-15`。 |
+| `{{gomodel.time}}` | 当前时间，`14:05:00`。 |
+| `{{gomodel.datetime}}` | RFC 3339 格式的当前日期和时间，`2026-09-15T14:05:00Z`。 |
+| `{{gomodel.weekday}}` | 当前星期几，`Tuesday`。 |
+
+花括号内允许有空格。未知标签会保持原样。
+
+对请求而言没有值的标签（例如没有会话时的 `session_id`）会变为空。模型和提供商标签指向第一个被选中的提供商：
+prompt 阶段只运行一次，因此故障转移尝试会收到相同的文本。
+来自调用方的值（如 `user_path` 和 `session_id`）会按原样插入。提示词中有标签被展开的请求不会存入响应缓存，因为回复中可能会复述请求特定的值。
+
+<Warning>
+基于时间的标签可能会破坏提供商的提示词缓存并推高成本。提供商会缓存提示词的开头部分（通常是系统消息），并且只在完全相同时才复用。`{{gomodel.time}}` 和 `{{gomodel.datetime}}` 每秒都会变化，`{{gomodel.request_id}}` 每个请求都会变化，因此每次调用都要支付全额输入费用，等待时间也更长。`{{gomodel.date}}` 和
+`{{gomodel.weekday}}` 每天变化一次，每天只会造成一次缓存未命中。请优先使用
+`date` 而不是 `time` 或 `datetime`，并将易变的标签放在提示词末尾，而不是长系统消息的开头。
+</Warning>
+
+#### 设置
+
+| 键 | 必填 | 默认值 | 说明 |
+| --- | -------- | ------- | ----------- |
+| `roles` | 否 | `["system"]` | 展开标签的提示词消息：`system`（包括 developer）、`user`、`assistant`、`tool`。加入 `user` 后，调用方可以读取用户路径等请求值，并且其提示词中的模板文本也会被改写。 |
+| `timezone` | 否 | `UTC` | 日期和时间标签使用的 IANA 时区，例如 `Europe/Warsaw`。不接受主机时区 `Local`。 |
+
+#### 示例
+
+```yaml
+- name: "model-facts"
+  type: "system_prompt"
+  order: 0
+  system_prompt:
+    mode: "decorator"
+    content: "You are {{gomodel.resolved_model}}. Today is {{gomodel.weekday}}, {{gomodel.date}}."
+- name: "expand-tags"
+  type: "tag_replace"
+  order: 1
+  config:
+    timezone: "Europe/Warsaw"
+```
+
+### `header_edit`
+
+在请求、客户端响应和上游提供商调用上设置、添加和删除 HTTP Header。它从不编辑内容，因此可以与编辑型护栏共用同一个 order。
+
+**阶段：** prompt、response。**编辑内容：** 否。
+
+#### 设置
+
+每个键都是一个行列表。设置行和添加行的格式为 `Name: value`；
+删除行只写 `Name`。空行和 `#` 注释会被忽略。
+
+| 键 | 说明 |
+| --- | ----------- |
+| `request_set` | 在 prompt 阶段之后替换实时请求上的某个 Header：对后续护栏和请求日志可见，但不会转发给提供商。 |
+| `request_remove` | 在 prompt 阶段之后从实时请求中删除某个 Header。 |
+| `response_set` | 替换发送给客户端的响应上的某个 Header。 |
+| `response_add` | 向客户端响应 Header 追加一个值，保留已有值。即使实例在两个阶段都运行，每个请求也只应用一次。 |
+| `response_remove` | 从客户端响应中删除某个 Header，包括 GoModel 自身添加的 Header（例如 `X-Request-Id`）。 |
+| `upstream_set` | 用于提供商调用的静态 Header。在此版本中只记录、不转发。 |
+
+凭据类 Header（`Authorization`、`X-Api-Key`、`Cookie` 等）永远无法编辑，名称中包含 `secret` 或 `token` 的 Header 也无法设置。
+
+#### 示例
+
+```yaml
+- name: "served-by"
+  type: "header_edit"
+  order: 0
+  config:
+    response_add: |
+      X-Served-By: gomodel
+    response_remove: |
+      X-Request-Id
+```
+
+### `llm_judge`
+
+询问一个评判模型，提示词（或响应）是否违反策略，并根据裁决结果进行拦截、应答或标记。评判模型可以是聊天模型，也可以是决策模型：
+
+- **聊天模型**必须回复一个 JSON 对象
+  `{"verdict":"allow"|"block","reason":"..."}`。默认指令会要求模型这样做，并告诉模型忽略内容中的指令。
+- **决策模型**（Jev、Kev、OpenRouter 的决策模型，或通过 [Decisions API](/zh/advanced/decisions-api) 调用的 OpenAI 模型）会被提出一个“是或否”的问题，并返回“是”的概率。无需解析任何文本，且只按输入 Token 计费。参阅[使用决策模型进行评判](#使用决策模型进行评判)。
+
+**阶段：** prompt、response、stream（缓冲）。**编辑内容：** 否。
+
+#### 设置
+
+| 键 | 必填 | 默认值 | 说明 |
+| --- | -------- | ------- | ----------- |
+| `model` | 是 | | 评判模型：`provider/model`、别名或虚拟模型；可以是聊天模型或决策模型。其用量以来源 `plugin` 计入。 |
+| `engine` | 否 | `auto` | 评判模型的询问方式：`chat`、`decision` 或 `auto`。`auto` 对只回答决策的模型（任何 `jev` 模型、OpenRouter 的决策模型，或所有目标都属于此类的虚拟模型）使用 `decision`，其他情况使用 `chat`。 |
+| `user_path` | 否 | 当前请求的路径 | 评判调用在预算和审计上所归属的用户路径。 |
+| `prompt` | 否 | 内置策略 | 聊天引擎：评判模型的系统提示词。 |
+| `decision_question` | 否 | 内置策略 | 决策引擎：针对内容提出的“是或否”问题。“是”表示内容违反策略。 |
+| `block_threshold` | 否 | `0.5` | 决策引擎：“是”的概率（0 到 1），达到或超过该值时，内容视为 block 裁决。 |
+| `judge_images` | 否 | `false` | 决策引擎：同时发送被评判消息中的图像。 |
+| `target` | 否 | `auto` | prompt 阶段评判模型看到的内容：`auto` 或 `last_user`（最后一条用户消息）、`all_user`、`conversation`。在 response 阶段，它始终看到助手文本。 |
+| `action` | 否 | `block` | 裁决为 block 时：`block` 拒绝，`respond` 以 `respond_text` 应答，`warn` 继续处理并记录裁决。 |
+| `message` | 否 | `This request was blocked by policy` | `block` 的错误消息、`warn` 的审计备注。 |
+| `block_status` | 否 | 阶段默认值 | `block` 使用的单个 HTTP 状态码，范围为 400 到 599，例如 `403`。为空时，提示词被拦截返回 400，响应被拦截返回 502。 |
+| `respond_text` | 否 | `I can't help with that request.` | `respond` 的助手回复。 |
+| `on_unclear` | 否 | `warn` | 当评判回复无法解析、被 `max_tokens` 截断，或全部用于推理时：`allow`、`warn` 或 `block`（应用 `action`）。只有 JSON 对象或单独的 `allow` / `block` 才算裁决，句子中出现的单词不算。 |
+| `max_tokens` | 否 | `2048` | 聊天引擎：评判调用的补全上限。未用完的 Token 不产生费用；请按评判模型的推理需求而不是裁决长度来设置。 |
+| `temperature` | 否 | `0` | 聊天引擎：评判调用的采样温度（0 到 2）。 |
+
+相同的文本在每个请求中只评判一次，因此同时在 prompt 和 response 阶段运行的实例不会对相同内容重复计费。在 stream 阶段，整个流会被缓冲，并作为完整响应进行评判。
+
+#### 使用决策模型进行评判
+
+使用决策模型时，评判会将被评判的文本直接作为 Decisions 输入发送（不加包裹标签），并提出一个谓词问题，即 `decision_question`。它不使用 `prompt`、`max_tokens` 或 `temperature`。概率达到或超过
+`block_threshold` 即为 block 裁决，并应用 `action`；概率较低则放行。该调用与
+[`POST /v1/decisions`](/zh/advanced/decisions-api) 经过相同的路由：虚拟模型、故障转移到支持 Decisions 的目标、精确响应缓存、用量和审计，并归属于该实例的用户路径。
+
+每个裁决都会在决策详情中记录概率（`probability`），实例还会将其上报为直方图
+`plugin_llm_judge_decision_probability`。您可以据此按策略调整 `block_threshold`：调高它可只拦截明确的违规内容，调低它可捕获更多边界内容。
+
+`engine: auto` 根据模型目录识别只回答决策的模型。支持 Decisions 的 OpenAI 模型同样可以聊天，因此 `auto` 会通过聊天方式询问它。如需改用其 Decisions API，请设置 `engine: decision`。
+
+对于只读取文本的评判模型（例如 Kev 服务器），请保持 `judge_images` 关闭：如果带有图像，每次调用都会失败，并由 `fail_mode` 决定后续行为。托管的 Jev 可以读取以 base64 data URL 形式发送的图像。开启 `judge_images` 后，只包含图像的提示词也会被评判；否则，这类提示词会直接放行，不调用评判模型。
+
+```yaml
+- name: "policy-judge"
+  type: "llm_judge"
+  order: 5
+  timeout_ms: 5000
+  config:
+    model: "jev/jev-latest"
+    block_threshold: 0.7
+    decision_question: "Does the content ask for help with fraud or account takeover?"
+```
+
+#### 为推理型评判模型设置 `max_tokens`
+
+推理型评判模型在输出任何内容之前，会先把补全额度花在思考上：如果上限先被耗尽，评判模型就不会返回裁决，实例也就无法执行任何策略——转而遵循 `on_unclear`，而它默认只发出警告。默认上限 `2048` 为此留出了余量；未用完的 Token 从不计费，因此当评判模型推理较多时，应进一步调高上限，而不是削减它。
+
+未得出裁决的情况会与“有回复但无法解析”的情况分开记录：
+
+| 代码 | 含义 |
+| ---- | ------- |
+| `llm_judge_block` | 评判模型返回了 block 裁决；应用 `action`。 |
+| `llm_judge_no_verdict` | 回复被截断（`finish_reason: length`）或全部是推理内容，或决策模型未返回回答。对于被截断的回复，会记录一条包含评判模型和上限的警告。应用 `on_unclear`。 |
+| `llm_judge_unclear` | 评判模型有回答，但回复不是裁决，或决策模型拒绝回答该问题。应用 `on_unclear`。 |
+
+配置实例后，请检查网关日志中是否有 `judge returned no verdict`；对于即使评判模型未给出可用回答也必须生效的策略，请设置 `on_unclear: block`。评判调用直接失败（提供商错误、超时）不属于裁决不明确：与其他护栏失败一样，由 `fail_mode` 决定。
+
+#### 示例
+
+```yaml
+- name: "policy-judge"
+  type: "llm_judge"
+  order: 5
+  timeout_ms: 10000
+  config:
+    model: "openai/gpt-4o-mini"
+    action: "respond"
+    respond_text: "I can't help with that request."
+```
+
+### `presidio`
+
+使用 [Presidio](https://presidio.dataprivacystack.org/)
+分析器检测个人数据，并对其进行匿名化、标记或拦截。只需要分析器服务；GoModel 自行改写文本，因此可以把原始值还原到响应中。
+
+```bash
+docker run -d -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer:latest
+```
+
+**阶段：** prompt、response、stream。**编辑内容：** 是。
+
+#### 设置
+
+| 键 | 必填 | 默认值 | 说明 |
+| --- | -------- | ------- | ----------- |
+| `analyzer_url` | 否 | `http://localhost:5002` | 分析器服务的基础 URL。 |
+| `api_key` | 否 | | 以 `Authorization` 发送的 Bearer Token，用于位于认证代理之后的分析器。除非分析器位于 localhost，否则需要 `https://` URL。 |
+| `language` | 否 | `en` | 分析器使用的语言代码。默认镜像只包含 `en`；当分析器没有对应语言的模型时，实例显示为降级状态。 |
+| `entities` | 否 | 全部 | 要查找的实体类型（`PERSON`、`EMAIL_ADDRESS`、`PHONE_NUMBER`、`CREDIT_CARD`、`US_SSN` 等；参见分析器上的 `GET /supportedentities`）。 |
+| `block_entities` | 否 | | 无论 action 为何都会拒绝请求的实体类型（action 为 `respond` 时则以 `message` 应答）。 |
+| `score_threshold` | 否 | 分析器默认值 | 最低置信度，0 到 1。当常用词被误识别为姓名或日期时，请调高此值。 |
+| `allow_list` | 否 | | 永远不被视为个人数据的精确词语：产品名称、您的公司名称等。 |
+| `ad_hoc_recognizers` | 否 | | Presidio 模式识别器的 JSON 数组（`supported_entity` 加上 `patterns` 或 `deny_list`），用于您自己的标识符。 |
+| `roles` | 否 | `["user", "assistant", "tool"]` | 要分析的提示词消息，包括工具结果文本、工具调用参数以及回放的助手轮次中的推理内容。在 response 阶段，助手文本和工具调用参数始终会被分析。 |
+| `action` | 否 | `anonymize` | `anonymize` 改写这些值；`block` 以错误拒绝；`respond` 以 `message` 作为助手回复进行应答；`warn` 继续处理并记录实体类型。 |
+| `operator` | 否 | `replace` | `anonymize` 改写值的方式：`replace` 替换为带编号的占位符（`<PERSON_1>`，同一请求中该值的每次出现都使用同一个占位符），`mask` 将每个字符替换为 `*`，`redact`（删除），`hash`（SHA-256）。 |
+| `placeholder_format` | 否 | `<{entity}_{n}>` | `replace` 写入占位符的格式。`{entity}` 是实体类型，`{n}` 是其编号；格式必须以标点字符开头和结尾，且两者之间必须有内容。 |
+| `restore` | 否 | `false` | 在模型复述占位符的位置还原原始值。需要 `operator: replace`；见下文。 |
+| `restore_roles` | 否 | `["user", "assistant", "tool"]` | 其值会被还原的提示词角色。在设置了此项的实例上生效（无论是 prompt 还是 response 阶段）；如果两者都设置了，角色必须同时出现在两个列表中。 |
+| `restore_tools` | 否 | 全部 | 调用参数中会还原值的工具（函数名）。其余工具保留占位符。 |
+| `restore_tools_exclude` | 否 | | 即使被 `restore_tools` 选中，调用参数仍保留占位符的工具。 |
+| `message` | 否 | `Request blocked: it contains personal data` | `block` 的错误消息、`respond` 的助手回复、`warn` 的审计备注。 |
+| `block_status` | 否 | 阶段默认值 | `block` 使用的单个 HTTP 状态码，范围为 400 到 599。为空时，提示词被拦截返回 400，响应被拦截返回 502。 |
+| `stream_chunk` | 否 | `256` | 在分析器运行前收集的流式文本（或工具调用参数）字符数，使其能看到完整句子，并且每个分块只运行一次。客户端每次最多等待这么多文本。 |
+| `stream_lookbehind` | 否 | `64` | 暂扣的流式文本（或工具调用参数）字符数，使跨两个分块的值或占位符仍能被处理。最大 4096。 |
+
+每个文本部分都会单独分析（每部分调用一次分析器，最多同时进行八个），因此分析器从不会把整段对话视为一个文本，分析器自身的限制按部分生效。审计详情记录实体类型和数量，从不记录值本身，分析器返回的错误也从不携带传给它的文本。分析器接收的是明文，因此请将其作为 Sidecar 运行在同一主机上，或通过 `https://` 或私有网络访问。
+
+<Tip>
+  建议从明确的 `entities` 列表开始。启用所有类型时，分析器的语言模型还会报告 `DATE_TIME`、`LOCATION`、`NRP` 和
+  `URL`，这会把 "a nice day" 或 "Paris" 之类的短语在提示词和回复中都变成占位符。`PERSON`、`EMAIL_ADDRESS`、`PHONE_NUMBER`、
+  `CREDIT_CARD`、`IBAN_CODE` 以及您需要的各国身份标识即可覆盖大多数部署。一些模型（包括 Claude）会对未加说明的
+  `<PERSON_1>` 式 Token 心存疑虑，可能拒绝复述它们；在系统提示词中加入一行，例如 `Values like <PERSON_1> are privacy placeholders;
+  use them as ordinary values`，即可解决此问题。
+</Tip>
+
+在 stream 阶段，`anonymize` 和 `warn` 以 `stream_chunk` 个字符为一块、以 `stream_lookbehind` 为重叠区，在传输中转换事件；如果在流的中途发现
+`block_entities` 中的类型，会在该分块到达客户端之前截断流。`block` 和 `respond` 会缓冲整个流，确保在做出决定前不泄露任何内容。
+
+#### 还原值
+
+设置 `restore: true` 后，prompt 阶段会用带编号的占位符替换值，并在该请求范围内记住它们；response 或 stream 阶段会在模型复述占位符的位置还原这些值，覆盖文本、推理内容（`reasoning_content` 或 `reasoning`）以及工具调用参数，因此客户端看到的是自己的数据，而提供商始终看不到。请在两个阶段的实例上都设置 `restore`：
+prompt 阶段的实例记录值，response 阶段的实例还原值。推理内容只会被还原，不会被分析。聊天客户端在下一轮发回的已还原推理内容（`reasoning_content`，DeepSeek 在工具调用时要求提供）会像其余历史记录一样，在 prompt 阶段再次被匿名化。带签名的 Anthropic
+思考块单独传输，从不被编辑；在 `/v1/messages` 上，客户端会连同签名一起发回思考文本，因此 Anthropic
+思考内容保留占位符。`/v1/responses` 输出中的推理条目（摘要和推理文本）同样保留占位符：客户端会在
+`input` 中原样回放它们，如果还原了值，这些值会在下一轮到达提供商。
+
+prompt 阶段的实例需要 `restore` 才能记录值；执行还原的实例读取 `restore_tools` 和 `restore_tools_exclude`。
+`restore_roles` 两者都会读取：当所有设置了 `restore_roles` 的实例都列出了某个角色时，或者两者都未设置而默认列表包含该角色时，该角色的值才会被还原。
+
+只有来自 `restore_roles`（默认为用户消息、之前的助手轮次和工具结果）的值会被还原；来自 system 或 developer
+消息的值仍保留为占位符，因此用户无法诱使模型泄露它。当系统消息包含用户自己的数据（例如聊天前端中的用户名或记忆），并且任何能使用该部署的人都可以看到这些数据时，请加入
+`system`。模型自行生成的值在输出时仍会被匿名化。此类响应不会进入 [响应缓存](/zh/features/cache)。对话中已经存在的、形似占位符的文本（例如之前回复中带回的 `<PERSON_2>`）会保持原样，其编号也不会被新值复用。
+
+占位符在任意大小写形式下（`<Person_1>`）以及经过 Markdown
+或 HTML 转义时（`\<PERSON\_1\>`、`&lt;PERSON_1&gt;`）都能被识别。流式文本、推理内容以及每次调用的工具调用参数都会在传输中被还原，各自使用 `stream_lookbehind` 下的独立窗口，包括尖括号被提供商转义的占位符（Gemini 返回
+`\u003cPERSON_1\u003e`）。
+
+默认情况下，所有工具的工具调用参数都会被还原。会把参数发送给第三方的客户端工具（例如网页搜索）应保留占位符：将其列入 `restore_tools_exclude`，或者只在
+`restore_tools` 中列出需要这些值的工具（知识检索、向用户提问、文档生成）。
+
+会对 HTML 进行清洗的 Markdown 渲染器可能会隐藏回复中残留的占位符（模型自行编造的，或来自系统提示词的）。设置
+`placeholder_format: "[{entity}_{n}]"` 可让它们保持可见。处理同一请求的多个实例共享占位符，格式以第一个运行的实例为准，因此请为它们设置相同的格式。
+
+#### 示例
+
+```yaml
+- name: "pii-in"
+  type: "presidio"
+  order: 1
+  timeout_ms: 5000
+  config:
+    entities: ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
+    block_entities: ["CREDIT_CARD", "US_SSN"]
+    restore: true
+
+- name: "pii-out"
+  type: "presidio"
+  phase: "response"
+  order: 1
+  timeout_ms: 5000
+  fail_mode: "open"
+  config:
+    entities: ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
+    restore: true
+    restore_tools_exclude: ["web_search"]
+```
+
+## 示例
+
+### 单个安全护栏
+
+最简单的配置——为每个请求添加安全前缀：
+
+```yaml
+guardrails:
+  enabled: true
+  rules:
+    - name: "safety"
+      type: "system_prompt"
+      order: 0
+      system_prompt:
+        mode: "decorator"
+        content: "Always be safe, respectful, and helpful."
+```
+
+### 与编辑型护栏并行的检查
+
+非编辑型检查与系统提示词编辑者共用 order `0`，并与其并发运行：
+
+```yaml
+guardrails:
+  enabled: true
+  rules:
+    - name: "safety-prompt"
+      type: "system_prompt"
+      order: 0
+      system_prompt:
+        mode: "decorator"
+        content: "Always be safe and respectful."
+
+    - name: "policy-judge"
+      type: "llm_judge"
+      order: 0
+      config:
+        model: "openai/gpt-4o-mini"
+```
+
+### 顺序流水线
+
+order 不同的护栏依次运行。后面的组会看到前面组的输出：
+
+```yaml
+guardrails:
+  enabled: true
+  rules:
+    # 第 1 步：确保存在系统提示词
+    - name: "default-system"
+      type: "system_prompt"
+      order: 0
+      system_prompt:
+        mode: "inject"
+        content: "You are a helpful assistant."
+
+    # 第 2 步：装饰当前已存在的系统提示词
+    - name: "safety-prefix"
+      type: "system_prompt"
+      order: 1
+      system_prompt:
+        mode: "decorator"
+        content: "[SAFETY] Always respond within company guidelines."
+
+    # 第 3 步：在用户文本到达主模型前将其匿名化
+    - name: "privacy-rewrite"
+      type: "llm_based_altering"
+      order: 2
+      llm_based_altering:
+        model: "gpt-4o-mini"
+        roles: ["user"]
+```
+
+### Response 阶段：在输出时遮盖密钥
+
+在完整响应到达客户端之前运行。如果在护栏自身失败时，您宁愿返回未遮盖的回答也不愿返回 500，请设置
+`fail_mode: open`。
+
+```yaml
+guardrails:
+  enabled: true
+  rules:
+    - name: "mask-keys"
+      type: "string_replace"
+      phase: "response"
+      order: 10
+      config:
+        mode: "regex"
+        rules: |
+          sk-[A-Za-z0-9]{20,} => [redacted]
+          AKIA[0-9A-Z]{16} => [redacted]
+```
+
+### Stream 阶段：传输中遮盖并评判完整回答
+
+同一个实例可以在多个阶段中被引用。`mask-keys` 在传输中转换流式分块（回看窗口为 64 个字符，因此跨两个分块的密钥仍能被捕获）。`answer-judge` 需要完整回答，因此它会缓冲流，客户端在裁决完成后才收到内容。
+
+```yaml
+guardrails:
+  enabled: true
+  rules:
+    - name: "mask-keys"
+      type: "string_replace"
+      phase: "stream"
+      order: 10
+      config:
+        mode: "regex"
+        rules: |
+          sk-[A-Za-z0-9]{20,} => [redacted]
+
+    - name: "answer-judge"
+      type: "llm_judge"
+      phase: "stream"
+      order: 20
+      config:
+        model: "openai/gpt-4o-mini"
+        action: "respond"
+```
+
+<Tip>
+  `config.yaml` 中的一条规则只会把一个实例放在一个阶段中。如需在两个阶段运行同一个实例，请在控制台上或通过 `POST /admin/workflows` 将其两次加入工作流，并设置不同的
+  `phase` 值；参见 [工作流](/zh/advanced/workflows#护栏步骤)。
+</Tip>
+
+## 不同端点下的工作方式
+
+护栏在内部基于统一的消息格式运行。各 API 特定的请求类型与该格式之间的适配会自动完成：
+
+| 端点 | 系统提示词来源 | 用户消息来源 |
+| --- | --- | --- |
+| `/v1/chat/completions` | `role: "system"` 的 `messages` | `messages` 数组 |
+| `/v1/responses` | `instructions` 字段 | `input` 字段 |
+| `/v1/messages` | `system` 字段 | `messages` 数组 |
+| `/v1/decisions` | — | `input`（文本和图像部分） |
+| `/v1/systemone` | — | `state` |
+
+<Tip>
+  您无需关心用户调用的是哪个端点。一条护栏规则在所有支持的文本端点上的行为完全一致。
+</Tip>
+
+`/v1/decisions` 和 `/v1/systemone` 只运行 prompt 阶段：它们的回答是类型化的值而不是补全，因此会跳过 response 和 stream 阶段的护栏，并为每个护栏输出一条警告。它们无法承载的编辑（例如注入的系统提示词）会被丢弃。
+
+对于 `/v1/messages`，运行了任何护栏的请求都会走翻译路径（跳过原生透传）。被护栏截断的响应，在兼容 OpenAI 的端点上以
+`finish_reason: "content_filter"` 报告，在 `/v1/messages` 上以 `stop_reason: "end_turn"` 报告。
+
+## 护栏与响应缓存
+
+[响应缓存](/zh/features/cache) 存储的是 response 链和 stream 链已经处理后的回复，缓存命中时会直接回放，而不会再次运行这些链。因此，两个缓存层都以请求解析到的护栏链（涵盖全部三个阶段）作为键的一部分：
+
+- 编辑、添加或删除某个步骤后，所有存储在旧链下的条目都将无法命中；下一个请求会运行完整流水线，并存储自己的条目。
+- 链不同的两个工作流永远不会共享条目，因此工作流会在输出时进行遮盖的租户，永远不会收到其他租户未经遮盖的回复。
+- 被拦截的响应不可缓存，因此拦截型护栏永远不会因缓存命中而被跳过。
+
+prompt 阶段的护栏在查询缓存之前运行，因此 prompt 阶段的拦截或应答，也适用于原本会命中缓存的请求。护栏向其中还原了请求特定数据的响应，根本不会被缓存（参见 [`presidio`](#presidio) 下的 `restore`）。
+
+由于缓存命中时 response 链不会运行，命中请求的审计条目只记录 prompt 阶段的结果以及缓存类型。
+
+## 决定、错误与拒绝
+
+| 结果 | 客户端看到的内容 |
+| --- | --- |
+| **block** | 以端点原生格式返回的错误：HTTP 400（prompt 阶段）或 502（response 和 stream 阶段），除非护栏设置了 `block_status`；错误代码为 `guardrail_blocked`，除非插件设置了自己的代码。 |
+| **respond** | 一条普通的助手回复，HTTP 200（流式请求则为单轮流）。 |
+| **warn** | 未经更改的响应，外加 `X-GoModel-Guardrail: warn; code=<code>` 响应头；详情存储在审计记录中。对于流，只有在首批字节发出之前就做出了 warn 决定时（即缓冲响应）才会发送该响应头；之后的 warn 仅记入审计。 |
+| **护栏失败**（`fail_mode: closed`） | HTTP 500，代码为 `plugin_failure`。护栏名称出现在日志和审计记录中，不会出现在客户端消息里。 |
+
+被拦截的请求永远不会到达提供商；被拦截的响应永远不会到达客户端。关于多个护栏在同一 order 运行时决定如何合并，请参见 [插件](/zh/advanced/plugins#决策)。
+
+每个结果（包括静默放行）都会记录在请求审计条目的 `data.guardrails` 下，包含阶段、步骤、决定、护栏是否编辑了请求或响应，以及失败方式。控制台据此为审计条目工作流图中的护栏步骤着色：
+步骤通过或进行了编辑时为绿色，警告或 fail-open 错误为琥珀色，拦截、应答或 fail-closed 错误为红色，步骤从未运行时为灰暗色。字段说明参见 [插件](/zh/advanced/plugins#审计记录)。

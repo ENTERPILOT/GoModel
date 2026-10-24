@@ -1,0 +1,268 @@
+---
+title: "额外内容、思考块与思维签名"
+description: "GoModel 如何在多轮对话、不同 API 和不同提供商之间保留提供商的回放状态，例如 Gemini 3 思维签名（thought signature）和 Anthropic 思考块（thinking block）"
+icon: "fingerprint"
+---
+
+## 什么是额外内容
+
+部分提供商会在回复中附带不透明的状态，并期望在下一轮对话中原样传回。Gemini 3 会使用思维签名（thought signature）为其函数调用签名，如果历史记录回放该调用时缺少签名，请求会被拒绝。Anthropic 要求在继续进行的工具调用（tool use）轮次之前，带上助手轮次的思考块（thinking block），包括其签名。
+
+这类状态没有对应的兼容 OpenAI 的字段，因此 GoModel 将其统一放在一个位置：按厂商（vendor）分键的 `extra_content` 对象。
+
+```json
+{
+  "role": "assistant",
+  "tool_calls": [{
+    "id": "call_1",
+    "type": "function",
+    "function": {"name": "get_weather", "arguments": "{\"city\":\"Kraków\"}"},
+    "extra_content": {"google": {"thought_signature": "EvACCu0CARFNMg..."}}
+  }]
+}
+```
+
+GoModel 不存储任何内容。状态随响应传给客户端，再随客户端的消息历史传回。只要客户端将助手消息原样复制到历史记录中（OpenAI、Anthropic 和 Responses SDK 都是这样做的），就无需任何改动。
+
+该结构与 Google 自身的兼容 OpenAI 端点一致，因此基于该端点构建的客户端无需修改即可使用。
+
+### 出现位置
+
+| API | 位置 |
+| --- | --- |
+| Chat Completions | `tool_calls[].extra_content`；对于整轮级别的状态（如思考块），位于助手消息上；流式传输的 `tool_calls` 和消息增量（delta）中同样存在 |
+| Responses | `function_call` 输出项；`reasoning` 输出项；在流式传输过程中收到文本轮次签名时，位于助手 `message` 项上 |
+| Anthropic Messages | `tool_use` 内容块。思考块则使用该协议自身的 `signature` 和 `data` 字段。 |
+
+状态放在与提供商的单个部分（part）相对应的单元上。一个工具调用对应一个 Gemini `part`，因此每个调用的签名位于该工具调用上。思考块属于整个助手轮次，因此位于消息上。
+
+### 规则
+
+- **每次转换都会原样传递。** Chat、Responses 和 Anthropic Messages 的入口、流式传输以及助手轮次回显都会携带 `extra_content`，且不会查看其内容。
+- **每个提供商只能看到属于自己的厂商对象。** 在请求发往提供商之前，GoModel 会删除所有不属于该提供商的厂商对象。Gemini 签名绝不会发送到 Anthropic 或 OpenAI，在提供商之间迁移的历史记录也不会因外来字段而失败。
+- **只有所属的适配器会读写其中的内容。** 网关的其他部分都不会解析其内容。
+- **原样回显。** 不要改写、重排或裁剪该成员。
+
+## 思维签名保留
+
+Gemini 3 会为其发出的函数调用附加加密的 `thoughtSignature`。下一个请求必须在同一调用上携带相同的签名，否则 Gemini 会返回 HTTP 400 "Function call is missing a thought_signature"。下面是一次通过 Chat Completions 进行的工具调用轮次，仅展示相关字段。
+
+<Steps>
+  <Step title="客户端提出问题，并提供可用工具">
+    ```json
+    POST /v1/chat/completions
+    {
+      "model": "gemini-3.5-flash",
+      "messages": [
+        {"role": "user", "content": "What's the weather in Kraków?"}
+      ],
+      "tools": [{
+        "type": "function",
+        "function": {"name": "get_weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}}}
+      }]
+    }
+    ```
+  </Step>
+  <Step title="Gemini 返回函数调用和签名">
+    GoModel 将请求转换为 Gemini 原生的 `generateContent` 结构。Gemini 返回一个携带签名的 `functionCall` 部分。
+
+    ```json
+    {
+      "candidates": [{
+        "content": {
+          "role": "model",
+          "parts": [{
+            "functionCall": {"name": "get_weather", "args": {"city": "Kraków"}},
+            "thoughtSignature": "EvACCu0CARFNMg..."
+          }]
+        }
+      }]
+    }
+    ```
+  </Step>
+  <Step title="GoModel 返回该调用，签名位于 extra_content 下">
+    ```json
+    {
+      "choices": [{
+        "message": {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [{
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "get_weather", "arguments": "{\"city\":\"Kraków\"}"},
+            "extra_content": {"google": {"thought_signature": "EvACCu0CARFNMg..."}}
+          }]
+        },
+        "finish_reason": "tool_calls"
+      }]
+    }
+    ```
+  </Step>
+  <Step title="客户端执行工具，并发回完整的历史记录">
+    助手消息按收到的原样追加，因此 `extra_content` 会自动随之传回。
+
+    ```json
+    POST /v1/chat/completions
+    {
+      "model": "gemini-3.5-flash",
+      "messages": [
+        {"role": "user", "content": "What's the weather in Kraków?"},
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [{
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "get_weather", "arguments": "{\"city\":\"Kraków\"}"},
+            "extra_content": {"google": {"thought_signature": "EvACCu0CARFNMg..."}}
+          }]
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "{\"temp_c\": 18, \"sky\": \"cloudy\"}"}
+      ],
+      "tools": ["..."]
+    }
+    ```
+  </Step>
+  <Step title="GoModel 在对应的 Gemini 部分上回放签名">
+    ```json
+    {
+      "contents": [
+        {"role": "user", "parts": [{"text": "What's the weather in Kraków?"}]},
+        {"role": "model", "parts": [{
+          "functionCall": {"name": "get_weather", "args": {"city": "Kraków"}},
+          "thoughtSignature": "EvACCu0CARFNMg..."
+        }]},
+        {"role": "user", "parts": [{
+          "functionResponse": {"name": "get_weather", "response": {"temp_c": 18, "sky": "cloudy"}}
+        }]}
+      ]
+    }
+    ```
+
+    Gemini 接受该回放并返回文本。GoModel 返回一个普通的 Chat Completion。
+  </Step>
+</Steps>
+
+同一成员也会出现在流式传输的 `tool_calls` 增量、Responses API 的 `function_call` 项、Anthropic Messages 的 `tool_use` 块上；对于纯文本轮次，则出现在助手消息本身上。在 Responses API 中，纯文本轮次的签名位于消息之前的一个 `reasoning` 输出项上，该输出项本身不含推理文本；将该项回显后，签名会落到助手轮次上。在并行调用批次中，只有第一个调用携带签名。工具调用上扁平的 `thought_signature` 或 `thoughtSignature` 同样会被接受，因此基于其他网关构建的客户端也能继续工作。
+
+当 Gemini 3 的历史记录中包含没有任何签名的函数调用时（例如对话始于其他提供商，或客户端丢弃了该成员），GoModel 会发送 Google 文档中规定的占位值，而不是直接暴露 400 错误。只要有真实值，请始终回显真实值；使用占位值会让该轮次失去推理连续性。有关提供商的详细信息，请参阅 [Gemini 思维签名](/zh/providers/gemini#思考签名（thought-signatures）)。
+
+## 思考块
+
+Anthropic 的扩展思考（extended thinking）会在助手轮次中返回 `thinking` 和 `redacted_thinking` 内容块。当该轮次以工具调用结束时，后续请求必须在 `tool_use` 块之前回放这些块（包括签名）。通过 [Anthropic Messages API](/zh/advanced/anthropic-messages-api) 时，流程如下：
+
+<Steps>
+  <Step title="客户端发送包含思考块的历史记录">
+    ```json
+    POST /v1/messages
+    {
+      "model": "claude-sonnet-4-5",
+      "max_tokens": 1024,
+      "thinking": {"type": "enabled", "budget_tokens": 2048},
+      "messages": [
+        {"role": "user", "content": "What's the weather in Kraków?"},
+        {"role": "assistant", "content": [
+          {"type": "thinking", "thinking": "I should call the weather tool.", "signature": "EqQBCkYIBRgC..."},
+          {"type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": {"city": "Kraków"}}
+        ]},
+        {"role": "user", "content": [
+          {"type": "tool_result", "tool_use_id": "toolu_1", "content": "weather service timed out", "is_error": true}
+        ]}
+      ],
+      "tools": ["..."]
+    }
+    ```
+  </Step>
+  <Step title="GoModel 将这些块保存在 extra_content.anthropic 下">
+    在内部，历史记录采用 Chat 结构。思考块位于助手消息上，`is_error` 位于工具结果上。两者都没有对应的兼容 OpenAI 的字段，因此都放在 `anthropic` 厂商对象下。只有在结果失败时才会写入 `is_error`。
+
+    ```json
+    [
+      {"role": "user", "content": "What's the weather in Kraków?"},
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [{"id": "toolu_1", "type": "function", "function": {"name": "get_weather", "arguments": "{\"city\":\"Kraków\"}"}}],
+        "extra_content": {"anthropic": {"thinking_blocks": [
+          {"type": "thinking", "thinking": "I should call the weather tool.", "signature": "EqQBCkYIBRgC..."}
+        ]}}
+      },
+      {
+        "role": "tool", "tool_call_id": "toolu_1", "content": "weather service timed out",
+        "extra_content": {"anthropic": {"is_error": true}}
+      }
+    ]
+    ```
+  </Step>
+  <Step title="Anthropic 原样收到这些块">
+    当路由到 Anthropic 时，思考块会按发送时的原样放回 `tool_use` 块之前，`is_error` 也会恢复到 `tool_result` 上。其他任何提供商只会收到工具调用和结果文本。
+  </Step>
+</Steps>
+
+### 返回方向
+
+Anthropic 会为其返回的每个思考块签名，如果后续轮次回放某个思考块时缺少签名，请求会被拒绝：
+
+```text
+400 messages.1.content.0.thinking.signature: Field required
+```
+
+因此，这些块传给客户端的方式与传入时相同。Anthropic Messages API 会将其渲染为真实的内容块（包括签名），因为 Anthropic 客户端回显的正是这种结构：
+
+```json
+{
+  "content": [
+    {"type": "thinking", "thinking": "I should call the weather tool.", "signature": "EqQBCkYIBRgC..."},
+    {"type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": {"city": "Kraków"}}
+  ],
+  "stop_reason": "tool_use"
+}
+```
+
+流式传输时，签名会以 `signature_delta` 的形式在思考块关闭之前于块内发出，与 Anthropic 的行为完全一致。
+
+### 来自不签名提供商的推理内容
+
+DeepSeek、Fireworks 等提供商返回的推理文本不带任何认证信息。Anthropic Messages API 仍会将其渲染为 `thinking` 块，并带有 `signature: ""`：该 schema 将此成员标记为必填，严格类型化的客户端会拒绝缺少该成员的块；流式传输时，该块以空签名打开，且不会发送 `signature_delta`，这与 Anthropic 自身在真实签名到达之前流式发送的结构一致。请原样回显该轮次：该块会像其他块一样回放给对应的提供商。
+
+Anthropic 只接受由其自身签发的签名（缺少签名时报错 `signature: Field required`，其他情况报错 ``Invalid `signature` in
+`thinking` block``），因此当此类历史记录被路由到 Anthropic 时，未签名的块会被丢弃，该轮次的其余部分照常发送。
+
+其他协议没有思考块，因此它们会在 `extra_content.anthropic.thinking_blocks` 下携带相同的数据：在 Chat Completions 中位于助手消息上，在 Responses API 中位于 `reasoning` 输出项上。流式 Chat 增量会在思考块完成后、任何文本之前携带该值，且该值是累积的：最后收到的那个值包含整个轮次的内容。
+
+```json
+{
+  "role": "assistant",
+  "content": "Let me look that up.",
+  "reasoning_content": "I should call the weather tool.",
+  "extra_content": {"anthropic": {"thinking_blocks": [
+    {"type": "thinking", "thinking": "I should call the weather tool.", "signature": "EqQBCkYIBRgC..."}
+  ]}}
+}
+```
+
+`reasoning_content` 的含义保持不变：它是可读文本，不需要回放。`redacted_thinking` 块完全没有可读文本，因此只有 `extra_content` 能携带它。
+
+将助手轮次按收到的原样追加到历史记录中，回放就会自动完成。将该历史记录路由到其他提供商时，该成员会像所有外来厂商对象一样被丢弃，对话在没有它的情况下继续。
+
+
+## 在提供商之间迁移历史记录
+
+一段对话可能始于某个提供商，再在另一个提供商上继续。规则很简单：在每条路由、每种协议中，所有不属于目标提供商的厂商对象都会在发送前被移除。
+
+| 历史记录携带 | 路由到 | 提供商收到 |
+| --- | --- | --- |
+| `extra_content.google` | `gemini`、`vertex` | 签名，在对应的部分上回放 |
+| `extra_content.google` | 其他任何提供商 | 无；该成员被丢弃 |
+| `extra_content.anthropic` | `anthropic` | 思考块和 `is_error`，恢复到原位置；未经 Anthropic 签名的思考块会被丢弃 |
+| `extra_content.anthropic` | 其他任何提供商 | 无；该成员被丢弃 |
+
+客户端自身的历史记录永远不会被修改。过滤只作用于 GoModel 发往上游的副本。
+
+## 厂商参考
+
+| 厂商 | 提供商 | 成员 |
+| --- | --- | --- |
+| `google` | `gemini`、`vertex` | `thought_signature`：函数调用或文本轮次的 Gemini 3 签名。 |
+| `anthropic` | `anthropic` | `thinking_blocks`：助手轮次的 `thinking` 和 `redacted_thinking` 块（包括签名），写入响应并在请求中读回；`is_error`：将工具结果标记为失败，由 Anthropic Messages API 入口设置。 |

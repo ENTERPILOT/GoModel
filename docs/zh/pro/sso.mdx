@@ -1,0 +1,45 @@
+---
+title: "OIDC 单点登录"
+sidebarTitle: "OIDC SSO"
+description: "使用您的 OIDC 身份提供商，通过带 PKCE 的授权码流程保护 GoModel 控制台。"
+icon: "key-round"
+tag: "Pro"
+keywords: ["GoModel Pro", "OIDC", "SSO", "单点登录", "single sign-on", "PKCE", "控制台认证", "dashboard authentication"]
+---
+
+## 概览
+
+OIDC SSO 用于保护控制台，支持带 PKCE 的授权码（Authorization Code）流程、state 和 nonce 校验、服务发现，以及经过签名的 `HttpOnly`、
+`SameSite=Lax` 会话。
+
+与其他 Pro 功能不同，显式启用的 SSO 配置采用失败即拒绝（fail closed）策略：当缺少 `sso` 授权或配置无效时，启动会中止，以确保认证边界不会悄无声息地消失。
+
+## 配置 SSO
+
+在 GoModel 主 YAML 配置的 `extensions.sso` 下进行配置：
+
+```yaml
+extensions:
+  sso:
+    enabled: true
+    issuer_url: https://login.example.com
+    client_id: gomodel
+    client_secret: ${PRO_SSO_CLIENT_SECRET}
+    redirect_url: https://gomodel.example.com/sso/callback
+    session_secret: ${PRO_SSO_SESSION_SECRET}
+    admin_groups: [gomodel-admins]
+```
+
+`PRO_SSO_*` 环境变量会覆盖 YAML 中的值。重定向 URL
+必须以 `/sso/callback` 结尾（包括已配置的 `BASE_PATH`），并且除本地回环开发 URL 外均要求使用 HTTPS。默认情况下，至少需要一个管理员组；只有对于有意不加限制的 OIDC 客户端，才应设置 `PRO_SSO_ALLOW_ALL_ADMINS=true`。
+
+<Warning>
+  SSO 会话吊销仅在进程内生效。在提供共享的会话或吊销存储之前，请仅在一个活动的 GoModel Pro 副本上部署 SSO。
+</Warning>
+
+## 审计与访问控制
+
+成功登录、被策略拒绝的登录以及退出登录都会被记录为经过脱敏的审计事件。Token、授权码、Cookie、原始声明（claims）以及身份提供商的错误详情均不会被存储。
+
+SSO 会话与托管 API 密钥一样携带 `user_path`，因此 [用户](/zh/features/users) 页面上组级和用户级的模型允许列表，同样适用于通过 SSO 会话发出的请求。按密钥设置的 `allowed_models` 是托管
+API 密钥的设置，不适用于 SSO 会话。
