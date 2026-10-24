@@ -246,10 +246,11 @@ func TestRegistryLicenseDefaultsToNoneAndClearsOnEmptyBadge(t *testing.T) {
 	assert.False(t, ok)
 
 	expires := time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC)
-	reg.SetLicense(License{Badge: "PRO", Trial: true, ExpiresAt: expires, ValidUntil: expires})
+	want := License{Badge: "PRO", Trial: true, ExpiresAt: expires, ValidUntil: expires, WarningWindow: 7 * 24 * time.Hour}
+	reg.SetLicense(want)
 	got, ok := reg.License()
 	require.True(t, ok)
-	assert.Equal(t, License{Badge: "PRO", Trial: true, ExpiresAt: expires, ValidUntil: expires}, got)
+	assert.Equal(t, want, got)
 
 	reg.SetLicense(License{})
 	_, ok = reg.License()

@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -264,7 +265,8 @@ func dashboardRuntimeConfig(cfg *config.Config, usageEnabled, demoMode, adaptive
 }
 
 // setDashboardLicense copies the license a distribution registered into the
-// dashboard config. A zero time is left out, which hides the countdown.
+// dashboard config. A zero time or window is left out: no countdown, or no
+// notice or warning before the end.
 func setDashboardLicense(values *admin.DashboardConfigResponse, license ext.License) {
 	values.LicenseBadge = license.Badge
 	if license.Trial {
@@ -272,6 +274,18 @@ func setDashboardLicense(values *admin.DashboardConfigResponse, license ext.Lice
 	}
 	values.LicenseExpiresAt = dashboardTime(license.ExpiresAt)
 	values.LicenseValidUntil = dashboardTime(license.ValidUntil)
+	values.LicenseNoticeDays = dashboardDays(license.NoticeWindow)
+	values.LicenseWarningDays = dashboardDays(license.WarningWindow)
+}
+
+// dashboardDays is a window in whole days, rounded down, since the dashboard
+// counts days; "" for a window shorter than a day.
+func dashboardDays(window time.Duration) string {
+	days := int64(window / (24 * time.Hour))
+	if days <= 0 {
+		return ""
+	}
+	return strconv.FormatInt(days, 10)
 }
 
 func dashboardTime(t time.Time) string {

@@ -430,14 +430,25 @@ func TestSetDashboardLicense(t *testing.T) {
 		want    admin.DashboardConfigResponse
 	}{
 		{
-			name:    "trial in UTC",
-			license: ext.License{Badge: "PRO", Trial: true, ExpiresAt: expires, ValidUntil: expires},
-			want: admin.DashboardConfigResponse{
-				LicenseBadge:      "PRO",
-				LicenseTrial:      "on",
-				LicenseExpiresAt:  "2026-11-14T23:00:00Z",
-				LicenseValidUntil: "2026-11-14T23:00:00Z",
+			name: "trial in UTC",
+			license: ext.License{
+				Badge: "PRO", Trial: true, ExpiresAt: expires, ValidUntil: expires,
+				WarningWindow: 7 * 24 * time.Hour,
 			},
+			want: admin.DashboardConfigResponse{
+				LicenseBadge:       "PRO",
+				LicenseTrial:       "on",
+				LicenseExpiresAt:   "2026-11-14T23:00:00Z",
+				LicenseValidUntil:  "2026-11-14T23:00:00Z",
+				LicenseWarningDays: "7",
+			},
+		},
+		{
+			name: "windows round down to whole days",
+			license: ext.License{
+				Badge: "PRO", NoticeWindow: 21*24*time.Hour + 23*time.Hour, WarningWindow: 12 * time.Hour,
+			},
+			want: admin.DashboardConfigResponse{LicenseBadge: "PRO", LicenseNoticeDays: "21"},
 		},
 		{
 			name:    "no expiry leaves the times out",

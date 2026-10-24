@@ -6,14 +6,16 @@ import { licenseIndicator } from "../src/lib/utils/licenseIndicator.js";
 const NOW = Date.parse("2026-10-24T12:00:00Z");
 
 // A license whose term ends at midnight UTC after `day`, with `graceDays` of
-// grace, the way GoModel Pro reports it.
-function license(day, { trial = false, graceDays = 0 } = {}) {
+// grace and the 21-day notice and 7-day warning windows GoModel Pro sends.
+function license(day, { trial = false, graceDays = 0, notice = "21", warning = "7" } = {}) {
   const end = Date.parse(`${day}T00:00:00Z`) + 24 * 60 * 60 * 1000;
   return {
     LICENSE_BADGE: "PRO",
     LICENSE_TRIAL: trial ? "on" : "",
     LICENSE_EXPIRES_AT: new Date(end).toISOString(),
     LICENSE_VALID_UNTIL: new Date(end + graceDays * 86400000).toISOString(),
+    LICENSE_NOTICE_DAYS: notice,
+    LICENSE_WARNING_DAYS: warning,
   };
 }
 
@@ -48,6 +50,20 @@ test("a full license counts down only in its last 21 days", () => {
   assert.equal(soon.days, 12);
   assert.equal(soon.tone, "normal");
   assert.equal(licenseIndicator(license("2026-10-28", { graceDays: 7 }), NOW).chip.tone, "warning");
+});
+
+test("the windows come from the distribution", () => {
+  // A wider notice window shows a countdown 30 days out.
+  assert.equal(licenseIndicator(license("2026-11-22", { notice: "30" }), NOW).chip.days, 30);
+  // Without a notice window a full license is not counted down at all.
+  assert.equal(licenseIndicator(license("2026-10-26", { notice: "" }), NOW).chip, null);
+  // Without a warning window the countdown never turns to the warning color.
+  assert.equal(
+    licenseIndicator(license("2026-10-26", { trial: true, warning: "" }), NOW).chip.tone,
+    "normal",
+  );
+  // Garbage counts as no window.
+  assert.equal(licenseIndicator(license("2026-10-26", { notice: "soon" }), NOW).chip, null);
 });
 
 test("in the grace period the chip counts days since the end, in red", () => {

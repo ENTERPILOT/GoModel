@@ -2,19 +2,23 @@
 // (e.g. "PRO") and, for a trial or a license close to its end, a chip with
 // the days left. The gateway reports the license through the LICENSE_*
 // runtime-config keys; open-source builds report none and show nothing.
+//
+// The policy is the distribution's, not the dashboard's: LICENSE_NOTICE_DAYS
+// is how many days before the end a license that is not a trial starts
+// counting down (a trial always does), and LICENSE_WARNING_DAYS when the
+// countdown turns to the warning color. A missing window is zero.
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-// A full license is counted down only from this many days before it ends; a
-// trial always is.
-export const EXPIRY_NOTICE_DAYS = 21;
-// Within this many days the countdown turns to the warning color.
-export const WARNING_DAYS = 7;
 
 // The last day a time covers, as YYYY-MM-DD in UTC: a term that ends at
 // midnight ends on the day before it.
 function lastDay(ms) {
   return new Date(ms - 1).toISOString().slice(0, 10);
+}
+
+function parseDays(value) {
+  const days = Number.parseInt(String(value || ""), 10);
+  return Number.isFinite(days) && days > 0 ? days : 0;
 }
 
 function parseTime(value) {
@@ -48,13 +52,16 @@ export function licenseIndicator(config, now = Date.now()) {
 
   if (now < expiresAt) {
     const days = Math.ceil((expiresAt - now) / DAY_MS);
-    if (!trial && days > EXPIRY_NOTICE_DAYS) return { badge, chip: null };
+    if (!trial && days > parseDays(config?.LICENSE_NOTICE_DAYS)) {
+      return { badge, chip: null };
+    }
+    const warningDays = parseDays(config?.LICENSE_WARNING_DAYS);
     return {
       badge,
       chip: {
         kind: trial ? "trial" : "expiring",
         days,
-        tone: days <= WARNING_DAYS ? "warning" : "normal",
+        tone: days <= warningDays ? "warning" : "normal",
         endDate: lastDay(expiresAt),
       },
     };

@@ -31,6 +31,8 @@ const CONFIG_KEYS = [
   "LICENSE_TRIAL",
   "LICENSE_EXPIRES_AT",
   "LICENSE_VALID_UNTIL",
+  "LICENSE_NOTICE_DAYS",
+  "LICENSE_WARNING_DAYS",
 ];
 
 // Strategies every gateway supports; used when the backend predates the

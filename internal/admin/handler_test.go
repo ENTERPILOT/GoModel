@@ -1814,6 +1814,8 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 		LicenseTrial:           "on",
 		LicenseExpiresAt:       "2026-11-15T00:00:00Z",
 		LicenseValidUntil:      "2026-11-15T00:00:00Z",
+		LicenseNoticeDays:      "21",
+		LicenseWarningDays:     "7",
 	}
 	h := NewHandler(nil, nil, WithDashboardRuntimeConfig(cfg))
 	c, rec := echotest.Get(t, "/admin/runtime/config")
