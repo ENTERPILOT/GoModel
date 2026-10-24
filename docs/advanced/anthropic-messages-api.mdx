@@ -269,7 +269,10 @@ features that have no canonical equivalent are not preserved end to end:
   output itself because OpenAI rejects `stop` for them. Other OpenAI-family
   models conflate stop-parameter hits with natural stops in `finish_reason`,
   so completions there report `stop_reason: "end_turn"` (output is still
-  truncated correctly).
+  truncated correctly). OpenAI (other than the reasoning models above), Azure
+  OpenAI, and Groq accept at most four stop sequences; a longer list is
+  truncated to the first four (with a warning in the gateway log) instead of
+  failing the request. Anthropic accepts the full list.
 - **`output_config`**: `effort` sets the reasoning effort (taking precedence
   over the one derived from `thinking`), and `format` (or the older top-level
   `output_format`) becomes JSON-schema structured output — strict when the
