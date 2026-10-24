@@ -8544,6 +8544,10 @@ const docTemplate = `{
                 "PLUGINS_ENABLED": {
                     "type": "string"
                 },
+                "PRICING_MARKUPS_ENABLED": {
+                    "description": "PricingMarkups is \"on\" when pricing.markups declares at least one rule,\nso the dashboard shows billed cost only where it differs from cost.",
+                    "type": "string"
+                },
                 "RATE_LIMITS_ENABLED": {
                     "type": "string"
                 },
@@ -12874,6 +12878,11 @@ const docTemplate = `{
                 "start_date": {
                     "type": "string"
                 },
+                "total_billed_cost": {
+                    "description": "TotalBilledCost is what the period was billed at: provider cost plus\nmarkup. Unlike the other cost fields it includes billed response-cache\nhits in every cache mode, because those are billed to the caller too.",
+                    "type": "number",
+                    "x-nullable": true
+                },
                 "total_cost": {
                     "type": "number"
                 },
@@ -13090,6 +13099,10 @@ const docTemplate = `{
         "usage.LabelUsage": {
             "type": "object",
             "properties": {
+                "billed_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
                 "cache_write_input_tokens": {
                     "type": "integer"
                 },
@@ -13141,6 +13154,10 @@ const docTemplate = `{
         "usage.ModelUsage": {
             "type": "object",
             "properties": {
+                "billed_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
                 "cache_write_input_tokens": {
                     "type": "integer"
                 },
@@ -13342,6 +13359,9 @@ const docTemplate = `{
                 "auth_key_id": {
                     "type": "string"
                 },
+                "billed_cost": {
+                    "type": "number"
+                },
                 "cache_type": {
                     "type": "string"
                 },
@@ -13377,6 +13397,12 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "markup_percent": {
+                    "type": "number"
+                },
+                "markup_selector": {
+                    "type": "string"
                 },
                 "model": {
                     "type": "string"
@@ -13465,6 +13491,11 @@ const docTemplate = `{
                     "description": "Rewrite savings: prompt tokens request rewriters removed before the\nprovider call, and the estimated input cost avoided (nil when no\nmatched row had a priced savings estimate).",
                     "type": "integer"
                 },
+                "total_billed_cost": {
+                    "description": "TotalBilledCost is what the period was billed at: provider cost plus\nmarkup. Unlike the other cost fields it includes billed response-cache\nhits in every cache mode, because those are billed to the caller too.",
+                    "type": "number",
+                    "x-nullable": true
+                },
                 "total_cost": {
                     "type": "number"
                 },
@@ -13494,6 +13525,10 @@ const docTemplate = `{
         "usage.UserPathUsage": {
             "type": "object",
             "properties": {
+                "billed_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
                 "cache_write_input_tokens": {
                     "type": "integer"
                 },

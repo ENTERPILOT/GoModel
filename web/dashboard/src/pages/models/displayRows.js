@@ -147,6 +147,23 @@ export function filterDisplayModels(rows, modelFilter) {
   });
 }
 
+// displayRowEnabled reports the state the row's access toggle shows: an alias
+// follows its own enabled flag, a model its effective access (restricted
+// models are enabled).
+export function displayRowEnabled(row) {
+  if (!row) return false;
+  if (row.is_alias) return Boolean(row.alias && row.alias.enabled !== false);
+  return Boolean(row.access && row.access.effective_enabled !== false);
+}
+
+// filterDisplayModelsByStatus keeps the same identity guarantee as
+// filterDisplayModels: "all" (or an unknown status) returns the input array.
+export function filterDisplayModelsByStatus(rows, status) {
+  if (status !== "enabled" && status !== "disabled") return rows;
+  const wantEnabled = status === "enabled";
+  return rows.filter((row) => displayRowEnabled(row) === wantEnabled);
+}
+
 // ---- Provider grouping ----
 
 function providerGroupDisplayName(providerName, providerType) {

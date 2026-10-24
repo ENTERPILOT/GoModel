@@ -82,9 +82,8 @@ Stimmensatz, daher bedeuten OpenAIs `alloy`/`nova`/… für audio.cpp nichts. We
 Stimmen ein Modell anbietet, listen Sie mit
 `GET /p/audiocpp/audio/voices?model=<id>` auf.
 
-`voice` ist bei `/v1/audio/speech` erforderlich, wie in der OpenAI-API. Damit
-audio.cpp stattdessen das konfigurierte `default_voice_preset` eines Modells
-anwendet, rufen Sie die Route über Passthrough auf: `POST /p/audiocpp/audio/speech`.
+Lassen Sie `voice` weg, damit audio.cpp das konfigurierte
+`default_voice_preset` des Modells anwendet.
 
 Parameter für das Klonen von Stimmen (`voice_ref`, `reference_text`, `seed`,
 `max_tokens`, `options`, …) werden unverändert weitergeleitet, sodass die eigenen

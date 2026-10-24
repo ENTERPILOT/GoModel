@@ -81,6 +81,7 @@ func (b *bootstrap) initAdmin() error {
 			app.live,
 			b.requestHealth,
 			usagePricingRecalculationConfigured(appCfg),
+			usage.Billing{Enabled: appCfg.Pricing.MarkupsEnabled, BillCacheHits: appCfg.Pricing.BillCacheHits},
 			appCfg.Server.BasePath,
 			adminCfg.UIEnabled,
 		)
@@ -148,6 +149,7 @@ func newAdminHandlers(
 	liveBroker *live.Broker,
 	requestHealth admin.RequestHealthSource,
 	usagePricingRecalculationEnabled bool,
+	billing usage.Billing,
 	basePath string,
 	uiEnabled bool,
 ) (*admin.Handler, *dashboard.Handler, auditlog.Reader, error) {
@@ -195,6 +197,7 @@ func newAdminHandlers(
 		admin.WithConfiguredProviders(configuredProviders),
 		admin.WithUsagePricingRecalculator(pricingRecalculator),
 		admin.WithPricingResolver(pricingOverrideService),
+		admin.WithBilling(billing),
 		admin.WithAuditReader(auditReader),
 		admin.WithAuthKeys(authKeyService),
 		admin.WithUsers(userService),
@@ -248,6 +251,7 @@ func dashboardRuntimeConfig(cfg *config.Config, usageEnabled, demoMode, adaptive
 		CacheEnabled:           dashboardEnabledValue(cacheAnalyticsConfigured(cfg, usageEnabled)),
 		RedisURL:               dashboardEnabledValue(simpleResponseCacheConfigured(cfg)),
 		SemanticCacheEnabled:   dashboardEnabledValue(semanticResponseCacheConfigured(cfg)),
+		PricingMarkups:         dashboardEnabledValue(cfg != nil && cfg.Pricing.MarkupsEnabled),
 		LiveLogsEnabled:        dashboardEnabledValue(cfg != nil && cfg.Admin.LiveLogsEnabled),
 		MCPEnabled:             dashboardEnabledValue(cfg != nil && cfg.MCP.Enabled),
 		MCPToolDiscovery:       dashboardMCPToolDiscovery(cfg),

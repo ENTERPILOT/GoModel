@@ -2,9 +2,11 @@
   // One credential field of the provider editor, rendered from the schema the
   // gateway serves for the selected provider type: label and hint from the
   // field's presentation, control from its shape (key list, enumeration,
-  // multi-line secret, plain text), and an inline message when it is at fault.
+  // multi-line secret, model list, plain text), and an inline message when it
+  // is at fault.
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import ProviderModelsControl from "./ProviderModelsControl.svelte";
   import { providersConfig } from "./providersConfig.svelte.js";
   import { Plus, Trash2 } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
@@ -75,6 +77,8 @@
         <span>{m.providers_add_key()}</span>
       </button>
     </div>
+  {:else if field.control === "models"}
+    <ProviderModelsControl {id} invalid={Boolean(error)} {describedBy} />
   {:else if field.control === "select"}
     <select
       {id}

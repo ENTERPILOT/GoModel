@@ -61,7 +61,12 @@ komprimiert sein; die TypeSafe-SDKs komprimieren Bodys ab 1 KiB standardmäßig
 mit zstd. Das Gateway dekodiert sie vor dem Routing, sodass Guardrails, Audit
 und Provider den unkomprimierten Body sehen, und `BODY_SIZE_LIMIT` gilt sowohl
 für die komprimierte als auch für die dekodierte Größe (`413`, wenn eine davon
-überschritten wird). Andere Kodierungen liefern `415`.
+überschritten wird). Andere Kodierungen liefern `415`. Ein Body wird erst
+gelesen und dekodiert, nachdem der Request authentifiziert ist. Vom Body eines
+Requests ohne gültige Zugangsdaten wird daher nichts gelesen, und sein
+Audit-Eintrag enthält keinen Request-Body. Ein solcher Request erhält `401`,
+auch wenn sein Body dekodiert über dem Limit läge; nur eine angegebene Größe über
+dem Limit liefert weiterhin `413`.
 
 `STREAM_STALL_TIMEOUT` (`server.stream_stall_timeout` in YAML) schützt das
 Gateway vor Clients, die eine Streaming-Response öffnen und dann aufhören, sie
