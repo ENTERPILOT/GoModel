@@ -143,3 +143,30 @@ Recalculation reprices billed cost with the markup each row was billed at, and b
   result reports how many rows still lack pricing. Token counts are never
   modified.
 </Warning>
+
+## Combining usage from several instances
+
+The dashboard shows the usage stored in the database its instance uses.
+Instances that share one PostgreSQL or MongoDB database already show combined
+usage; see [running more than one replica](/guides/production#running-more-than-one-replica).
+That is the way to keep analytics combined from now on.
+
+To merge the history of an instance that had its own SQLite database, run this
+where the destination instance runs, with the same configuration:
+
+```bash
+gomodel usage import /path/to/other/gomodel.db
+```
+
+Rows keep their IDs, so running it again copies nothing twice. Imported rows
+count toward [budgets](/features/budgets) whose user path matches, and their
+managed API key IDs only resolve if the key exists on this instance.
+
+To merge a PostgreSQL or MongoDB instance into one that uses the same backend,
+copy the `usage` table or collection with the database's own tools. Start
+GoModel against the destination once first so the table exists:
+
+```bash
+pg_dump --data-only --table=usage --column-inserts --on-conflict-do-nothing "$SOURCE_URL" | psql "$DEST_URL"
+mongodump --uri "$SOURCE_URL" --collection usage --archive | mongorestore --uri "$DEST_URL" --archive
+```

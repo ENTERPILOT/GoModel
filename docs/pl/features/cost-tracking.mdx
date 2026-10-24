@@ -143,3 +143,31 @@ Przeliczanie ponownie wycenia koszt rozliczeniowy z narzutem, z jakim rozliczono
   podaje, ile wierszy nadal nie ma cennika. Liczby tokenów nigdy nie są
   modyfikowane.
 </Warning>
+
+## Łączenie użycia z kilku instancji
+
+Dashboard pokazuje użycie zapisane w bazie, której używa jego instancja.
+Instancje współdzielące jedną bazę PostgreSQL lub MongoDB już pokazują wspólne
+użycie; zobacz [Uruchamianie więcej niż jednej repliki](/pl/guides/production#uruchamianie-więcej-niż-jednej-repliki).
+Tak zachowasz połączone analizy od teraz.
+
+Aby scalić historię instancji, która miała własną bazę SQLite, uruchom to tam,
+gdzie działa instancja docelowa, z tą samą konfiguracją:
+
+```bash
+gomodel usage import /path/to/other/gomodel.db
+```
+
+Wiersze zachowują swoje ID, więc ponowne uruchomienie niczego nie kopiuje
+dwukrotnie. Zaimportowane wiersze wliczają się do [budżetów](/pl/features/budgets)
+o pasującej ścieżce użytkownika, a ich ID zarządzanych kluczy API rozwiązują się
+tylko wtedy, gdy klucz istnieje na tej instancji.
+
+Aby scalić instancję PostgreSQL lub MongoDB z instancją na tym samym backendzie,
+skopiuj tabelę lub kolekcję `usage` narzędziami samej bazy. Najpierw uruchom
+GoModel raz na bazie docelowej, aby tabela istniała:
+
+```bash
+pg_dump --data-only --table=usage --column-inserts --on-conflict-do-nothing "$SOURCE_URL" | psql "$DEST_URL"
+mongodump --uri "$SOURCE_URL" --collection usage --archive | mongorestore --uri "$DEST_URL" --archive
+```

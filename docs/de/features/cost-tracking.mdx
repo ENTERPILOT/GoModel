@@ -146,3 +146,32 @@ Die Neuberechnung bepreist die abgerechneten Kosten mit dem Aufschlag neu, zu de
   auflösen lässt. Das Ergebnis meldet, wie vielen Zeilen weiterhin Preise
   fehlen. Token-Anzahlen werden nie verändert.
 </Warning>
+
+## Usage mehrerer Instanzen zusammenführen
+
+Das Dashboard zeigt die Usage aus der Datenbank, die seine Instanz nutzt.
+Instanzen, die sich eine PostgreSQL- oder MongoDB-Datenbank teilen, zeigen
+bereits die gemeinsame Usage; siehe [Mehr als ein Replikat betreiben](/de/guides/production#mehr-als-ein-replikat-betreiben).
+So bleiben die Analysen künftig zusammengeführt.
+
+Um den Verlauf einer Instanz mit eigener SQLite-Datenbank zu übernehmen, führen
+Sie dies dort aus, wo die Zielinstanz läuft, mit derselben Konfiguration:
+
+```bash
+gomodel usage import /path/to/other/gomodel.db
+```
+
+Zeilen behalten ihre IDs, daher kopiert ein erneuter Lauf nichts doppelt.
+Importierte Zeilen zählen zu [Budgets](/de/features/budgets) mit passendem User
+Path, und ihre IDs verwalteter API-Keys lösen sich nur auf, wenn der Key auf
+dieser Instanz existiert.
+
+Um eine PostgreSQL- oder MongoDB-Instanz in eine mit demselben Backend zu
+übernehmen, kopieren Sie die Tabelle bzw. Collection `usage` mit den Werkzeugen
+der Datenbank. Starten Sie GoModel vorher einmal gegen das Ziel, damit die
+Tabelle existiert:
+
+```bash
+pg_dump --data-only --table=usage --column-inserts --on-conflict-do-nothing "$SOURCE_URL" | psql "$DEST_URL"
+mongodump --uri "$SOURCE_URL" --collection usage --archive | mongorestore --uri "$DEST_URL" --archive
+```

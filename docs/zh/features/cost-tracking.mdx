@@ -138,3 +138,25 @@ pricing:
   重新计算会**覆盖**每条匹配记录的成本字段，并**清除**模型已无法解析到定价的记录的成本。
   结果会报告仍然缺少定价的记录数量。Token 数永远不会被修改。
 </Warning>
+
+## 合并多个实例的用量
+
+控制台显示其所在实例所用数据库中的用量。共享同一个 PostgreSQL 或 MongoDB 数据库的实例已经会显示合并后的用量；
+参见[运行多个副本](/zh/guides/production#运行多个副本)。这是今后保持分析数据合并的方式。
+
+要合并一个曾使用独立 SQLite 数据库的实例的历史数据，请在目标实例运行的位置、使用相同配置执行：
+
+```bash
+gomodel usage import /path/to/other/gomodel.db
+```
+
+记录保留其 ID，因此重复运行不会重复复制。导入的记录会计入用户路径匹配的[预算](/zh/features/budgets)，
+其托管 API 密钥 ID 只有在该密钥存在于本实例时才能解析。
+
+要将 PostgreSQL 或 MongoDB 实例合并到使用相同后端的实例中，请用数据库自带的工具复制 `usage` 表或集合。
+请先让 GoModel 连接目标数据库启动一次，以便创建该表：
+
+```bash
+pg_dump --data-only --table=usage --column-inserts --on-conflict-do-nothing "$SOURCE_URL" | psql "$DEST_URL"
+mongodump --uri "$SOURCE_URL" --collection usage --archive | mongorestore --uri "$DEST_URL" --archive
+```
