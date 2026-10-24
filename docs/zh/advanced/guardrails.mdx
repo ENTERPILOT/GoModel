@@ -12,7 +12,7 @@ keywords: ["护栏", "guardrails", "请求拦截", "request interception", "内�
 
 - **prompt**：路由之后、请求到达提供商之前
 - **response**：作用于完整响应，在其到达客户端之前
-- **stream**：作用于每个流式事件（或作用于缓冲后的整个流，取决于插件）
+- **stream**：作用于每个流式事件（或作用于缓冲后的整个流，取决于插件），仅适用于 `stream: true` 的请求；非流式请求从不运行 stream 阶段的护栏
 
 护栏可以编辑内容、添加 Header、以错误拒绝请求、以安全消息直接应答，或者放行请求并附带警告。
 
@@ -302,9 +302,9 @@ GoModel 内置六种类型。每种都是一个内置插件；下表列出了它
 | `case_insensitive` | 否 | `false` | 匹配时忽略大小写。 |
 | `roles` | 否 | `["user"]` | 规则作用的提示词消息：`system`（包括 developer）、`user`、`assistant`、`tool`。在 response 阶段，目标始终是助手文本。 |
 | `on_match` | 否 | `replace` | `replace` 执行替换；`block` 以错误拒绝；`respond` 以 `message` 作为助手回复进行应答；`warn` 继续处理并记录匹配。只有 `replace` 会编辑文本。 |
-| `message` | 否 | `Request blocked by policy` | `block` 的错误消息、`respond` 的助手回复、`warn` 的审计备注。 |
+| `message` | 否 | `block` 和 `respond` 为 `Request blocked by policy`，`warn` 无默认值 | `block` 的错误消息、`respond` 的助手回复、`warn` 的审计备注。`warn` 只在设置了备注时才记录备注，因此该结果不会在控制台中被标记为拦截。 |
 | `block_status` | 否 | 阶段默认值 | `block` 使用的单个 HTTP 状态码，范围为 400 到 599，例如 `403`。为空时，提示词被拦截返回 400，响应被拦截返回 502。 |
-| `stream_lookbehind` | 否 | `64` | 流式文本中暂扣的字符数，使跨两个分块的匹配仍能被改写；请至少设置为最长查找文本的长度。位于目前已流式输出文本末尾的匹配会被暂扣，直到它不再增长，因此像 `sk-[A-Za-z0-9]{20,}` 这样的开放式模式，在值不超过此长度时会被整体遮盖。用于 `replace` 和 `warn`。 |
+| `stream_lookbehind` | 否 | `64` | 流式文本中暂扣的字符数，使跨两个分块的匹配仍能被改写；请至少设置为最长查找文本的长度。位于目前已流式输出文本末尾的匹配会被暂扣，直到它不再增长，因此像 `sk-[A-Za-z0-9_-]{20,}` 这样的开放式模式，在值不超过此长度时会被整体遮盖；更长的值会保留超出回看窗口的部分，因此请将其设置为高于预期最长密钥的长度。用于 `replace` 和 `warn`。 |
 
 在 stream 阶段，`replace` 和 `warn` 使用配置的回看窗口在传输中转换事件。`block` 和 `respond` 会缓冲整个流，确保在做出决定前不泄露任何内容，代价是首 Token 会延迟到响应完成后才送达。
 
@@ -537,12 +537,16 @@ docker run -d -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer:latest
 
 每个文本部分都会单独分析（每部分调用一次分析器，最多同时进行八个），因此分析器从不会把整段对话视为一个文本，分析器自身的限制按部分生效。审计详情记录实体类型和数量，从不记录值本身，分析器返回的错误也从不携带传给它的文本。分析器接收的是明文，因此请将其作为 Sidecar 运行在同一主机上，或通过 `https://` 或私有网络访问。
 
+<Warning>
+  匿名化只对提供商隐藏这些值，不会对审计日志隐藏。`LOGGING_LOG_BODIES` 默认为 `true`，存储的 `request_body` 和 `response_body` 是客户端发送和收到的原始内容，其中的个人数据为明文；只有保存在 `request_revisions` 下的改写后请求体是匿名化的。如果审计存储不得保存个人数据，请设置 [`LOGGING_LOG_BODIES=false`](/zh/advanced/configuration#审计日志)。`LOGGING_LOG_REVISION_BODIES=false` 只会丢弃匿名化的副本，原始请求体仍会被存储。
+</Warning>
+
 <Tip>
   建议从明确的 `entities` 列表开始。启用所有类型时，分析器的语言模型还会报告 `DATE_TIME`、`LOCATION`、`NRP` 和
   `URL`，这会把 "a nice day" 或 "Paris" 之类的短语在提示词和回复中都变成占位符。`PERSON`、`EMAIL_ADDRESS`、`PHONE_NUMBER`、
   `CREDIT_CARD`、`IBAN_CODE` 以及您需要的各国身份标识即可覆盖大多数部署。一些模型（包括 Claude）会对未加说明的
   `<PERSON_1>` 式 Token 心存疑虑，可能拒绝复述它们；在系统提示词中加入一行，例如 `Values like <PERSON_1> are privacy placeholders;
-  use them as ordinary values`，即可解决此问题。
+  use them as ordinary values`，即可解决此问题。分析器的 `PERSON` 片段还可能吞并相邻的全大写 Token（`TOOLESC Katarzyna` 会被报告为一个 `PERSON`），因此在 `string_replace` 步骤之前运行的 `presidio` 步骤可能会替换掉后续规则要查找的文本；当规则需要看到原始词语时，请为 `string_replace` 步骤设置更小的 `order` 使其先运行，或将这些词语加入 `allow_list`。
 </Tip>
 
 在 stream 阶段，`anonymize` 和 `warn` 以 `stream_chunk` 个字符为一块、以 `stream_lookbehind` 为重叠区，在传输中转换事件；如果在流的中途发现
@@ -555,6 +559,10 @@ prompt 阶段的实例记录值，response 阶段的实例还原值。推理内�
 思考块单独传输，从不被编辑；在 `/v1/messages` 上，客户端会连同签名一起发回思考文本，因此 Anthropic
 思考内容保留占位符。`/v1/responses` 输出中的推理条目（摘要和推理文本）同样保留占位符：客户端会在
 `input` 中原样回放它们，如果还原了值，这些值会在下一轮到达提供商。
+
+<Warning>
+  请将 prompt 阶段的实例与 **response** 阶段的实例搭配使用。response 阶段覆盖两类请求（流式请求会被缓冲），而 stream 阶段的实例只在流式响应上运行。如果只有 stream 阶段的实例，非流式请求会把原始的 `<PERSON_1>` 占位符返回给客户端，模型自行编造的个人数据也会未经遮盖地到达客户端。只有当每个需要还原的请求都是流式的、且必须保持增量交付时，stream 阶段的实例才是正确的选择。
+</Warning>
 
 prompt 阶段的实例需要 `restore` 才能记录值；执行还原的实例读取 `restore_tools` 和 `restore_tools_exclude`。
 `restore_roles` 两者都会读取：当所有设置了 `restore_roles` 的实例都列出了某个角色时，或者两者都未设置而默认列表包含该角色时，该角色的值才会被还原。
@@ -686,13 +694,13 @@ guardrails:
       config:
         mode: "regex"
         rules: |
-          sk-[A-Za-z0-9]{20,} => [redacted]
+          sk-[A-Za-z0-9_-]{20,} => [redacted]
           AKIA[0-9A-Z]{16} => [redacted]
 ```
 
 ### Stream 阶段：传输中遮盖并评判完整回答
 
-同一个实例可以在多个阶段中被引用。`mask-keys` 在传输中转换流式分块（回看窗口为 64 个字符，因此跨两个分块的密钥仍能被捕获）。`answer-judge` 需要完整回答，因此它会缓冲流，客户端在裁决完成后才收到内容。
+同一个实例可以在多个阶段中被引用。`mask-keys` 在传输中转换流式分块；`stream_lookbehind` 决定暂扣多少文本，因此请将其设置为高于预期最长密钥的长度（`sk-proj-…` 和 `sk-ant-…` 等提供商密钥远超默认的 64 个字符，超出回看窗口的部分会未经遮盖地到达客户端）。`answer-judge` 需要完整回答，因此它会缓冲流，客户端在裁决完成后才收到内容。
 
 ```yaml
 guardrails:
@@ -704,8 +712,9 @@ guardrails:
       order: 10
       config:
         mode: "regex"
+        stream_lookbehind: 256
         rules: |
-          sk-[A-Za-z0-9]{20,} => [redacted]
+          sk-[A-Za-z0-9_-]{20,} => [redacted]
 
     - name: "answer-judge"
       type: "llm_judge"

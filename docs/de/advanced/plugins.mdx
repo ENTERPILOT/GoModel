@@ -341,7 +341,7 @@ guardrails:
       config:                     # wird gegen das ConfigSchema des Plugins validiert
         mode: "regex"
         rules: |
-          sk-[A-Za-z0-9]{20,} => [redacted]
+          sk-[A-Za-z0-9_-]{20,} => [redacted]
 ```
 
 Regeln aus `config.yaml` werden in den verwalteten Standard-Workflow an der Position `order` in
