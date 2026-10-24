@@ -10,6 +10,8 @@
 //   extractResponseText      response body -> assistant text (non-streaming)
 //   createStreamAccumulator  SSE events    -> assistant text + assembled body
 
+import { suggestedModelInventory } from "../../lib/utils/minimaxModels.js";
+
 export const ENDPOINTS = [
   { id: "chat", path: "/v1/chat/completions" },
   { id: "responses", path: "/v1/responses" },
@@ -310,7 +312,9 @@ export function createStreamAccumulator(endpointID) {
 // show the provider once, as a tag; `id` stays the full selector to send.
 export function playgroundModelOptions(inventory) {
   const seen = new Map();
-  for (const entry of Array.isArray(inventory) ? inventory : []) {
+  const sorted = [...(Array.isArray(inventory) ? inventory : [])].sort((a, b) =>
+    String(a?.selector || a?.model?.id || "").localeCompare(String(b?.selector || b?.model?.id || "")));
+  for (const entry of suggestedModelInventory(sorted)) {
     const id = String(entry?.selector || entry?.model?.id || "").trim();
     if (!id || seen.has(id)) continue;
     if (entry?.access && entry.access.effective_enabled === false) continue;
@@ -325,7 +329,7 @@ export function playgroundModelOptions(inventory) {
       : id;
     seen.set(id, { id, label, provider });
   }
-  return [...seen.values()].sort((a, b) => a.id.localeCompare(b.id));
+  return [...seen.values()];
 }
 
 // --- User-path picker --------------------------------------------------------
