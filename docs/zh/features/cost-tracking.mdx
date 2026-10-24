@@ -1,0 +1,112 @@
+---
+title: "成本追踪"
+description: "GoModel 如何估算请求成本、定价数据来自哪里、如何覆盖定价，以及如何重新计算已存储的成本。"
+icon: "calculator"
+keywords: ["成本追踪", "LLM 成本", "Token 定价", "支出", "定价覆盖", "成本估算", "cost tracking", "LLM cost", "token pricing", "spend", "pricing override", "cost estimate"]
+---
+
+GoModel 根据模型定价估算每个被追踪请求的成本，并在控制台上显示汇总数据。
+
+<Warning>
+  这些成本是**估算值**，而不是账单记录。除非提供商报告了精确成本，否则 GoModel 会将提供商报告的
+  Token 数乘以该模型配置的费率，因此折扣、促销和提供商侧的取整都不会体现在内。请以提供商的控制台
+  为准，在将 GoModel 的数据用于开票或对账之前，先与其进行核对。
+</Warning>
+
+## 成本如何估算
+
+对于每个请求，GoModel 会对以下内容计价：
+
+- **输入**和**输出** Token，按模型的每百万 Token（MTok）费率计价。
+- **缓存输入**、**推理**和**音频** Token，在提供商报告时按各自的费率计价，因此大量使用缓存和推理的流量也能被正确计价。
+- **非 Token 单位**，适用于提供商按此方式计费的情况：生成的图像（`per_image` / `output_image_per_mtok`）、音频时长（`per_second_input`、`per_second_output`）以及语音字符数（`per_character_input`）。关于哪个模型适用哪种单位，请参阅[图像](/zh/advanced/images-api#成本追踪)和[音频](/zh/advanced/audio-api#成本追踪)。当某个费率和某个 Token 费率是同一笔费用的两种表达方式时（图像生成的 Token、音频片段的时长），只会应用其中一种。
+
+当提供商返回精确成本时（OpenRouter credits、xAI `cost_in_usd_ticks`），GoModel 会使用该值，而不是目录定价。每条记录会在其 `cost_source` 字段中记录所使用的方法：`model_pricing`、`openrouter_credits` 或 `xai_cost_in_usd_ticks`。
+
+<Note>
+  只有当模型的定价包含 `cached_input_per_mtok` 费率时，缓存 Token 才会享受折扣。
+  否则，它们会按完整的输入费率计价。
+</Note>
+
+Anthropic 按 TTL 对缓存写入计费：默认的 5 分钟写入按 `cache_write_per_mtok` 计费，1 小时写入（`"ttl": "1h"`）按 `cache_write_1h_per_mtok` 计费。GoModel 根据 `usage.cache_creation` 的拆分，以各自的费率对每部分计价。如果没有 `cache_write_1h_per_mtok` 费率，1 小时写入会按 `cache_write_per_mtok` 计价。
+
+## 分时段定价
+
+部分提供商会根据请求运行的时间收取不同的费率。例如，DeepSeek 在非高峰时段按高峰费率的一半计费，并将周末视为非高峰时段。目录将标准（高峰）费率作为模型的基础价格发布，并在 `pricing.time_windows` 下列出折扣时段：
+
+```json
+"pricing": {
+  "input_per_mtok": 0.44,
+  "output_per_mtok": 1.32,
+  "cached_input_per_mtok": 0.014,
+  "time_windows": [
+    {
+      "label": "off_peak",
+      "utc_ranges": [
+        { "days": ["mon", "tue", "wed", "thu", "fri"], "start": "00:00", "end": "01:00" },
+        { "days": ["mon", "tue", "wed", "thu", "fri"], "start": "04:00", "end": "06:00" },
+        { "days": ["mon", "tue", "wed", "thu", "fri"], "start": "10:00", "end": "24:00" },
+        { "days": ["sat", "sun"], "start": "00:00", "end": "24:00" }
+      ],
+      "pricing": { "input_per_mtok": 0.22, "output_per_mtok": 0.66, "cached_input_per_mtok": 0.007 }
+    }
+  ]
+}
+```
+
+GoModel 使用请求完成时刻生效的费率为每个请求计价，并且无论服务器或控制台使用哪个时区，都按 **UTC** 计算。时间范围为左闭右开（包含 `start`，不包含 `end`）；`end` 早于或等于 `start` 时表示跨越午夜，`days` 将范围限定在指定的星期几（省略时表示每天）。时段中未列出的费率保持基础价格，在所有时段之外则适用基础价格。重新计算已存储的成本时会使用每条记录存储的时间戳，因此历史记录会按其实际所处的时段重新计价。控制台的缓存输入成本估算按一周中的每分钟应用时段，与时段边界的精度一致。
+
+在 **Models** 页面上，价格旁的 `*` 表示该模型设置了时段；将鼠标悬停在其上即可查看时间表和费率。覆盖某项基础费率（输入、输出、缓存输入或缓存写入）也会替换目录中该费率的折扣：覆盖值会成为每个时段的价格。`config.yaml` 中的模型元数据也可以声明自己的 `time_windows`，它会替换目录中的时段设置。
+
+<Note>
+  时段只能是循环的 UTC 时间表。目录无法表达的规则（提供商的节假日，或有固定结束日期的促销活动）
+  不会被应用。
+</Note>
+
+## 定价来自哪里
+
+模型的定价按以下优先级顺序解析：
+
+1. 运维人员在控制台中设置的**覆盖**。
+2. **`config.yaml`** 中的 `providers.<name>.models` 元数据。
+3. **模型目录**，来源于 [`ai-model-list`](https://github.com/ENTERPILOT/ai-model-list) 注册表。
+
+模型目录为大多数模型提供默认定价。如果某个模型的价格看起来有误或缺少某项费率（例如缓存输入费率），请对照 [`ai-model-list`](https://github.com/ENTERPILOT/ai-model-list) 进行核对并在那里提交更正，或者设置覆盖以立即修复。
+
+定价是更广泛的元数据流水线的一部分，该流水线还会解析上下文窗口、能力和模型类别。完整的来源链请参阅[模型元数据](/zh/advanced/model-metadata)。
+
+## 覆盖定价
+
+当目录价格有误、缺失或与您协商的费率不同时，请覆盖定价。打开 **Models** 页面，找到该模型，然后打开其 **Pricing override** 编辑器。以美元为单位设置一种或多种价格类型（输入、输出、缓存输入等）。保存的字段会覆盖该选择器的目录定价和 `config.yaml` 定价；未设置的字段继续沿用继承的值。
+
+<Frame caption="Models 页面列出每个模型的价格；$ 操作会打开其定价覆盖">
+  <img
+    src="/features/pricing-override-models.png"
+    alt="GoModel 的 Models 页面，列出已注册的模型及其每 MTok 的输入和输出价格，每行都有一个定价覆盖操作"
+  />
+</Frame>
+
+<Frame caption="设置价格类型和美元金额；保存的字段会覆盖该选择器的目录定价和 config.yaml 定价">
+  <img
+    src="/features/pricing-override-editor.png"
+    alt="GoModel 的 Pricing override 编辑器，显示选择器、Input 每 MTok 美元价格类型及其美元金额"
+  />
+</Frame>
+
+覆盖适用于新请求。要对已经运行过的请求重新计算成本，请执行重新计算。
+
+## 控制台汇总
+
+- **Estimated Cost**：实时提供商请求的支出；不包括缓存命中。
+- **Saved Cost**：由缓存提供服务的请求原本需要花费的成本。
+
+`---` 表示由于没有可用的定价，成本未知，这与 `$0` 不同。
+
+## 重新计算已存储的成本
+
+重新计算会根据当前定价，重新计算匹配的用量记录中已存储的成本。请在更改覆盖之后，或在请求运行时定价不可用的情况下使用。该操作默认启用（`USAGE_PRICING_RECALCULATION_ENABLED`）；在用量视图中选择 **Recalculate**，然后输入 `recalculate` 进行确认。其范围限定为所选的日期范围、提供商或模型，以及用户路径。
+
+<Warning>
+  重新计算会**覆盖**每条匹配记录的成本字段，并**清除**模型已无法解析到定价的记录的成本。
+  结果会报告仍然缺少定价的记录数量。Token 数永远不会被修改。
+</Warning>

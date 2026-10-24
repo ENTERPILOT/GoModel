@@ -603,6 +603,11 @@ providers:
     # models:
     #   - id: "accounts/fireworks/models/gpt-oss-120b"
 
+  deepinfra:
+    type: deepinfra
+    api_key: "${DEEPINFRA_API_KEY}"
+    # base_url defaults to "https://api.deepinfra.com/v1/openai".
+
   chutes:
     type: chutes
     api_key: "${CHUTES_API_KEY}"

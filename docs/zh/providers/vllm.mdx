@@ -1,0 +1,173 @@
+---
+title: "vLLM"
+description: "将兼容 OpenAI 的 GoModel 请求路由到一个或多个 vLLM 服务器，支持包含斜杠的 Hugging Face 模型 ID。"
+icon: "server"
+keywords: ["vLLM", "自托管", "self-hosted", "Hugging Face 模型", "Hugging Face models", "兼容 OpenAI 的服务器", "OpenAI-compatible server"]
+---
+
+GoModel 通过 vLLM 兼容 OpenAI 的 HTTP 服务器与其通信。包含斜杠的 Hugging Face 模型 ID（例如 `meta-llama/Llama-3.1-8B-Instruct`）
+可以正常使用——GoModel 只会在第一个斜杠处拆分带提供商限定的选择器。
+
+首先启动 vLLM：
+
+```bash
+vllm serve meta-llama/Llama-3.1-8B-Instruct
+# 如果希望 vLLM 要求 Bearer 认证，请添加 --api-key token-abc123
+```
+
+## 配置
+
+```bash
+VLLM_BASE_URL=http://host.docker.internal:8000/v1   # 需包含 /v1
+# VLLM_API_KEY=token-abc123                         # 仅当 vLLM 以 --api-key 启动时需要
+GOMODEL_MASTER_KEY=change-me
+```
+
+<Note>
+  这些示例假设 GoModel 运行在 Docker 中，而 vLLM 运行在主机的 `localhost:8000` 上——因此使用 `host.docker.internal`。
+  如果两者运行在同一个 Docker 网络中，请使用 vLLM 的服务名称。如果 GoModel 直接运行在主机上，请使用 `http://localhost:8000/v1`。
+</Note>
+
+## 运行 GoModel
+
+<CodeGroup>
+
+```bash Docker (.env 文件)
+docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
+```
+
+```bash Docker (inline -e)
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e VLLM_BASE_URL="http://host.docker.internal:8000/v1" \
+  enterpilot/gomodel
+```
+
+```bash Binary (make build)
+make build
+./bin/gomodel
+```
+
+</CodeGroup>
+
+## 验证
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "vllm/meta-llama/Llama-3.1-8B-Instruct",
+    "messages": [{"role": "user", "content": "Reply with exactly ok."}]
+  }'
+```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="change-me")
+
+completion = client.chat.completions.create(
+    model="vllm/meta-llama/Llama-3.1-8B-Instruct",
+    messages=[{"role": "user", "content": "Reply with exactly ok."}],
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "change-me",
+});
+
+const completion = await client.chat.completions.create({
+  model: "vllm/meta-llama/Llama-3.1-8B-Instruct",
+  messages: [{ role: "user", content: "Reply with exactly ok." }],
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
+
+`GET /v1/models` 返回带有提供商名称前缀的 vLLM 模型 ID，例如 `vllm/meta-llama/Llama-3.1-8B-Instruct`。
+
+## 多个 vLLM 实例
+
+使用带后缀的环境变量，无需 YAML 即可注册多个实例：
+
+```bash
+VLLM_BASE_URL=http://host.docker.internal:8000/v1
+VLLM_TEST_BASE_URL=http://host.docker.internal:8001/v1
+```
+
+`VLLM_BASE_URL` 注册 `vllm`。`VLLM_TEST_BASE_URL` 注册 `vllm-test`（后缀会转换为小写，下划线变为连字符）。
+
+## vLLM 透传
+
+透传默认启用。可将其用于 vLLM 特有的端点，例如 `/tokenize`、`/detokenize`、`/pooling`、`/rerank`：
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/p/vllm/tokenize \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "meta-llama/Llama-3.1-8B-Instruct", "prompt": "Hello"}'
+```
+
+```python Python
+import httpx
+
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="change-me")
+tokens = client.post(
+    "/p/vllm/tokenize",
+    cast_to=httpx.Response,
+    body={
+        "model": "meta-llama/Llama-3.1-8B-Instruct",
+        "prompt": "Hello",
+    },
+)
+
+print(tokens.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "change-me",
+});
+
+const tokens = await client.post("/p/vllm/tokenize", {
+  body: {
+    model: "meta-llama/Llama-3.1-8B-Instruct",
+    prompt: "Hello",
+  },
+});
+
+console.log(tokens);
+```
+
+</CodeGroup>
+
+GoModel 会在转发之前剥离客户端的认证请求头，并在已配置时将 `VLLM_API_KEY` 应用于上游请求。
+
+<Note>
+  透传路由按提供商类型限定在 `/p/vllm/...` 下。如需在多 vLLM 部署中指定某个命名实例，请使用经过翻译的 `/v1/...` 请求，
+  并配合带提供商限定的模型 ID（例如 `vllm-test/meta-llama/Llama-3.1-8B-Instruct`）。
+</Note>
+
+## 尚未集成
+
+- vLLM 原生批处理 API。
+- 兼容 OpenAI 的文件生命周期。
+- Responses 生命周期工具类端点。

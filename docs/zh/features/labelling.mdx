@@ -1,0 +1,229 @@
+---
+title: "标签"
+description: "通过 HTTP 请求头或 API 密钥为请求附加标签，并按标签细分用量和审计日志。"
+icon: "tags"
+keywords: ["标签", "labels", "打标签", "tagging", "请求标签", "request labels", "请求头标签", "header tagging", "成本归属", "cost attribution"]
+---
+
+## 概览
+
+标签用于为每个请求标记归属：流量来自哪个团队、功能、任务或环境。可以通过两种方式为请求打标签，两种方式也可以同时生效：
+
+- **标签请求头**——从每个请求中已配置的 HTTP 请求头提取标签。
+- **API 密钥标签**——绑定到托管 API 密钥的标签，会应用到使用该密钥认证的每个请求。
+
+两种来源的标签会被合并并去重。它们会记录在用量条目和审计日志条目中，并为控制台中按标签细分的用量统计提供数据。
+
+## API 密钥标签
+
+在管理控制台中创建密钥时分配标签：
+
+`API Keys -> Create API Key -> Labels`
+
+<img
+  src="/features/auth-keys-labels.png"
+  alt="GoModel 控制台的 API Keys 页面，Labels 列中为每个密钥显示 env:demo、team:engineering 和 priority:high 等标签"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+**API Keys** 页面列出所有托管密钥，并在其用户路径旁以标签块的形式显示标签，因此无需逐个打开密钥即可一目了然地看到归属。
+之后如需修改，请点击某一行上的 **Edit Labels**。
+
+也可以通过 Admin API：
+
+<CodeGroup>
+
+```bash curl
+curl -X POST http://localhost:8080/admin/auth-keys \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "team-a-batch", "labels": ["team-a", "batch-jobs"]}'
+```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+auth_key = client.post(
+    "/admin/auth-keys",
+    cast_to=httpx.Response,
+    body={"name": "team-a-batch", "labels": ["team-a", "batch-jobs"]},
+)
+
+print(auth_key.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const authKey = await client.post("/admin/auth-keys", {
+  body: { name: "team-a-batch", labels: ["team-a", "batch-jobs"] },
+});
+
+console.log(authKey);
+```
+
+</CodeGroup>
+
+使用该密钥认证的每个请求都会携带这些标签——无需修改客户端。这是按团队或服务归属流量的最简单方式：为每个使用方签发一个带标签的独立密钥。
+
+之后可以在不轮换密钥的情况下修改标签，可在控制台（`API Keys -> Edit Labels`）中修改，也可以通过 Admin API：
+
+<CodeGroup>
+
+```bash curl
+curl -X PUT http://localhost:8080/admin/auth-keys/<key-id>/labels \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"labels": ["team-a", "realtime"]}'
+```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+auth_key = client.put(
+    "/admin/auth-keys/<key-id>/labels",
+    cast_to=httpx.Response,
+    body={"labels": ["team-a", "realtime"]},
+)
+
+print(auth_key.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const authKey = await client.put("/admin/auth-keys/<key-id>/labels", {
+  body: { labels: ["team-a", "realtime"] },
+});
+
+console.log(authKey);
+```
+
+</CodeGroup>
+
+新列表会替换旧列表；发送 `[]` 可删除所有标签。变更会立即应用于处理此次更新的实例上的新请求，并在大约一分钟内应用到其他副本
+（密钥会在后台从存储中刷新）。
+
+## 标签请求头
+
+标签规则指定哪些请求头的值携带标签。您可以在控制台（`Settings -> Tagging based on headers`）中管理它们，也可以以基础设施即代码的方式声明：
+
+<img
+  src="/features/tagging-headers.png"
+  alt="GoModel 控制台 Settings 页面中的 Tagging based on headers 表单，包含两行请求头（X-Team、X-Environment）以及前缀、分隔符和不向上游传递字段"
+  style={{ width: "100%", maxWidth: "1000px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+点击 **Add Header**，填写客户端将发送的请求头名称（例如 `X-Team`），可选地设置要去除的前缀和分隔符，然后点击 **Save
+Tagging Settings**。对于应在请求到达提供商之前剥离的请求头，请勾选 **Do not pass upstream**。
+
+```yaml config.yaml
+tagging:
+  headers:
+    - header: X-My-Tags
+      prefix: "tag-" # 可选："tag-alpha, beta" → 标签 "alpha"、"beta"
+    - header: X-Internal-Routing
+      do_not_pass: true # 在转发给提供商之前剥离
+      delimiter: ";" # 默认值：","
+```
+
+或者使用环境变量（环境变量条目会替换 YAML 中同名请求头的整个条目；未设置的配套变量会重置为默认值）：
+
+```bash
+TAGGING_HEADER_1=X-My-Tags
+TAGGING_HEADER_1_PREFIX=tag-    # 可选，仅从提取出的每个标签中去除
+TAGGING_HEADER_1_DONOTPASS=true # 可选，默认 false（请求头原样转发）
+TAGGING_HEADER_1_DELIMITER=";"  # 可选，默认 ","
+```
+
+随后，客户端可以这样为请求打标签：
+
+```http
+X-My-Tags: tag-alpha, beta
+```
+
+在 `config.yaml` 或环境变量中声明的规则在控制台中为只读。携带凭据的请求头（`Authorization`、`Cookie`、API 密钥请求头）不能作为标签来源。
+
+`do_not_pass` 会在透传和 Realtime 路由上转发之前剥离该请求头；翻译路由本来就不会转发客户端请求头。
+
+## LiteLLM 标签
+
+为 LiteLLM 编写的客户端无需任何配置即可保留其标签。GoModel 会从以下位置将其读取为标签：
+
+- `x-litellm-tags` 请求头（逗号分隔，`tags` 字符串也是如此）；
+- `/v1/chat/completions`、`/v1/responses`、`/v1/messages` 和 `/v1/embeddings` 请求体中的 `tags` 字段；
+- 这些请求体中的 `metadata.tags`（当其为列表时）。
+
+```json
+{
+  "model": "gpt-4o",
+  "messages": [{"role": "user", "content": "Hello"}],
+  "metadata": {"tags": ["search-team", "prod"]}
+}
+```
+
+GoModel 会在请求到达提供商之前移除它们，否则提供商会拒绝请求：OpenAI 没有 `tags` 参数，且其 `metadata` 的值必须是字符串。
+其他 `metadata` 键会原样透传，字符串形式的 `metadata.tags` 会作为普通的 OpenAI 元数据保持不变。审计日志会保留客户端发送的原始请求体。
+
+单个请求最多贡献 **32** 个不同的标签，按请求头和两个请求体字段的顺序依次计数；其余标签会被丢弃。长度超过 **128**
+个字符的标签会被丢弃，而不是截断。被丢弃的标签仍会在发往提供商之前被移除。
+
+<Warning>
+  标签由客户端自行选择，因此任何客户端只要指定某个标签名，就能让该标签的预算被扣费。如果标签预算必须严格按团队生效，
+  请关闭 LiteLLM 标签，并使用 [API 密钥标签](#api-密钥标签)或由您的代理设置的标签请求头来标记流量。
+</Warning>
+
+LiteLLM 标签默认开启。可通过以下方式关闭：
+
+```bash
+LITELLM_TAGS_ENABLED=false
+```
+
+```yaml config.yaml
+tagging:
+  litellm_tags_enabled: false
+```
+
+关闭后，GoModel 既不读取也不移除标签：请求会按客户端发送的原样到达提供商，因此拒绝 `tags` 的提供商会返回错误。
+
+## 标签的展示位置
+
+- **用量控制台**——用量页面显示按标签细分的统计（`GET /admin/usage/labels`）。带有多个标签的请求会在每个标签下各计一次。
+- **请求日志**——每个请求显示标签块，可使用 `GET /admin/usage/log` 的 `label` 查询参数进行筛选。
+- **审计日志**——记录在每个条目的 `data.labels` 下（审计日志默认启用）。
+- **API 密钥页面**——每个密钥的标签显示在其用户路径旁边。
+- **预算**——预算可以限定到某个标签，对携带该标签的所有请求的支出设置上限。请参阅[预算](/zh/features/budgets)。
+
+## 默认值
+
+标签功能默认开启，在您配置标签规则、创建带标签的密钥或客户端发送 LiteLLM 标签之前不会产生任何开销。没有标签的请求会像以前一样被追踪。
+
+| 设置 | 默认值 | 何时修改 |
+| --- | --- | --- |
+| `LITELLM_TAGS_ENABLED` / `tagging.litellm_tags_enabled` | `true` | 标签预算不得由客户端自选的标签扣费时。 |

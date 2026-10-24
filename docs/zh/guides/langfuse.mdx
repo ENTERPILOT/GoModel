@@ -1,0 +1,152 @@
+---
+title: "GoModel 与 Langfuse"
+description: "通过 OTLP 将包含 Token 用量和可选提示词的 GoModel 网关 Trace 发送到 Langfuse，或将 Langfuse SDK 指向 GoModel，并将两者合并为同一个 Trace。"
+icon: "telescope"
+keywords: ["Langfuse", "LLM 可观测性", "LLM observability", "链路追踪", "tracing", "OTLP", "OpenTelemetry", "提示词追踪", "prompt tracing", "langfuse.openai", "自托管", "self-hosted", "配置指南", "setup guide"]
+---
+
+## 概览
+
+Langfuse 是一个开源的 LLM 工程平台，提供 Trace、Token 与成本分析、提示词管理和评估（eval）功能。它可以通过两种互补的方式与 GoModel 搭配使用：
+
+- **网关 Trace。** GoModel 的 [OpenTelemetry 导出器](/zh/guides/opentelemetry)会为每个请求向 Langfuse 的 OTLP 端点发送一个 Trace。网关的所有客户端都会被覆盖，无需修改应用代码；每个 Trace 都会显示模型、实际提供服务的提供商、延迟、Token 用量和成本、状态，以及每一次重试或故障转移。只有在您开启内容采集后，才会附加提示词和补全内容。
+- **应用 Trace。** 使用 Langfuse SDK 的 OpenAI 即插即用封装，并将其 Base URL 指向 GoModel。Langfuse 记录完整的提示词、补全内容和 Token 用量；GoModel 在底层提供路由、故障转移、缓存，以及其自身的[审计日志](/zh/advanced/configuration#审计日志)和成本追踪。
+
+您可以单独使用其中任意一种，也可以同时使用两者：借助 W3C Trace 上下文传播，每个请求会合并为 Langfuse 中的单个 Trace（参阅[端到端单一 Trace](#3-端到端单一-trace)）。
+
+`App (Langfuse SDK) -> GoModel -> OpenAI/Anthropic/Gemini/...`，两跳的 Trace 都会到达 Langfuse。
+
+## 1. 将网关 Trace 发送到 Langfuse
+
+Langfuse 在 `/api/public/otel` 接收 OTLP Trace，并使用项目的 API 密钥对进行认证。先对密钥进行 Base64 编码：
+
+```bash
+echo -n "pk-lf-...:sk-lf-..." | base64
+```
+
+然后启用 GoModel 的导出器：
+
+<CodeGroup>
+
+```bash Self-hosted Langfuse
+OTEL_ENABLED=true
+OTEL_EXPORTER_OTLP_ENDPOINT=http://langfuse-web:3000/api/public/otel
+OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic <base64 above>,x-langfuse-ingestion-version=4"
+OTEL_METRICS_EXPORTER=none
+```
+
+```bash Langfuse Cloud
+OTEL_ENABLED=true
+OTEL_EXPORTER_OTLP_ENDPOINT=https://cloud.langfuse.com/api/public/otel
+OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic <base64 above>,x-langfuse-ingestion-version=4"
+OTEL_METRICS_EXPORTER=none
+```
+
+</CodeGroup>
+
+在 Shell 中，引号是必需的，因为请求头的值中包含空格。在 Docker `.env` 文件中请去掉引号，否则引号会成为值的一部分。
+
+| 变量 | 作用 |
+| --- | --- |
+| `OTEL_ENABLED` | GoModel 的导出开关；默认关闭。 |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Langfuse 的 OTLP 接收基础路径。SDK 会追加 `/v1/traces`。如果使用 Langfuse Cloud 的美国区域，请使用 `https://us.cloud.langfuse.com/...`。 |
+| `OTEL_EXPORTER_OTLP_HEADERS` | 由项目公钥和私钥生成的 Basic 认证，以及让数据直接写入 Langfuse 当前（v4）数据模型的请求头。 |
+| `OTEL_METRICS_EXPORTER` | Langfuse 只接受 Trace，因此请关闭指标导出，或改用 `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` 将指标发送到单独的采集器。 |
+
+请保持默认的 `http/protobuf` 协议：Langfuse 的 OTLP 端点不支持 gRPC。API 密钥可在 Langfuse 的 **Project Settings -> API Keys** 中获取；自托管部署也可以通过 [`LANGFUSE_INIT_*` 变量](https://langfuse.com/self-hosting/administration/headless-initialization)预先配置。如需自行运行 Langfuse，请参阅其 [docker compose 快速开始](https://langfuse.com/self-hosting/deployment/docker-compose)：执行 `git clone https://github.com/langfuse/langfuse.git && cd langfuse && docker compose up`，UI 位于 3000 端口。
+
+<Warning>
+  每次导出时，Basic 认证请求头都会携带您的 Langfuse 私钥。除非 Langfuse 与 GoModel 运行在同一主机上，否则请使用 `https://` 端点；当认证请求头配置在明文的非回环地址端点上时，GoModel 会在启动时发出警告。
+</Warning>
+
+### Langfuse 中显示的内容
+
+每个网关请求对应一个 Trace：一个 `POST /v1/chat/completions` Span，其中为每次提供商调用嵌套一个 generation，以操作和模型命名（`chat gpt-5-mini`）。generation 包含提供商实际响应的模型、输入和输出 Token 数，以及结束原因，因此 Langfuse 会根据其模型目录为其定价，并填充成本和 Token 看板。其元数据中还包含 `gen_ai.provider.name` 和 `gomodel.provider.name`（即您配置中的确切提供商），因此发生[故障转移](/zh/features/failover)的请求会为每次尝试显示一个 generation：哪个提供商失败了、属于哪类错误、最终由哪个提供商响应，用量记录在成功响应的那次尝试上。
+
+流式 Chat Completions、Responses API 以及经过转换的 `/v1/messages` 调用，会生成一个持续到流结束的 generation，用量信息相同。GoModel 原生转发给 Anthropic 提供商的 `/v1/messages` 请求不会显示用量。
+
+Langfuse 根据其自身的价格表计算成本。GoModel 的[成本追踪](/zh/features/cost-tracking)会应用您的定价覆盖和缓存费率，因此两者的总额可能不同。
+
+### 采集提示词和补全内容
+
+除非开启内容采集，否则提示词和补全内容不会进入遥测数据：
+
+```bash
+OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true
+```
+
+开启后，每个 generation 会将请求消息显示为输入，将响应显示为输出，包括工具调用和工具结果。图片和文件仅显示其类型，过长的文本会被截断；参阅[提示词和补全内容采集](/zh/guides/opentelemetry#提示词与补全内容捕获)。
+
+<Warning>
+  内容采集会将每个被采样的提示词和补全内容发送到 Langfuse。如果这些数据不得离开网关，请保持关闭；[审计日志](/zh/advanced/configuration#审计日志)会将其记录在您自己的存储中。
+</Warning>
+
+## 2. 使用 Langfuse SDK 从应用侧追踪
+
+如果您希望改为从应用侧追踪（例如将调用归入您自己的 Span，或关联 Langfuse 提示词版本），请使用 Langfuse 的 OpenAI 封装进行埋点，并将其指向 GoModel。对于现有的 OpenAI SDK 应用，只需修改两行代码：
+
+```python
+# pip install langfuse openai
+# 在环境变量中设置 LANGFUSE_PUBLIC_KEY、LANGFUSE_SECRET_KEY 和 LANGFUSE_BASE_URL
+# （自托管时例如 http://localhost:3000）
+from langfuse.openai import OpenAI  # 替代：from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",  # GoModel
+    api_key="<gomodel-api-key>",
+)
+
+response = client.chat.completions.create(
+    model="anthropic/claude-haiku-4-5-20251001",  # GoModel 提供的任意模型
+    messages=[{"role": "user", "content": "Hello"}],
+)
+```
+
+Langfuse 会记录每次调用（包括流式调用）的消息、补全内容和 Token 用量，并根据其模型目录定价。由于 Base URL 指向 GoModel，一个客户端即可通过带提供商前缀的模型 ID（`openai/gpt-5-mini`、`gemini/gemini-2.5-flash`、[虚拟模型](/zh/features/virtual-models)）访问所有已配置的提供商，且每次调用仍可享受 GoModel 的故障转移、缓存、预算和审计记录。[JS/TS 封装](https://langfuse.com/integrations/model-providers/openai-js)的用法相同。
+
+## 3. 端到端单一 Trace
+
+同时启用两种方式时，一次 LLM 调用会产生两个独立的 Langfuse Trace：一个来自 SDK，一个来自网关。传播 W3C Trace 上下文即可将它们合并：在请求中发送 `traceparent` 请求头，GoModel 就会将其 Span 挂在调用方的 Trace 之下。
+
+```python
+from langfuse import get_client
+from opentelemetry.propagate import inject
+
+langfuse = get_client()
+
+with langfuse.start_as_current_observation(name="my-feature", as_type="span"):
+    headers = {}
+    inject(headers)  # 写入当前的 traceparent
+    response = client.chat.completions.create(
+        model="openai/gpt-5-mini",
+        messages=[{"role": "user", "content": "Hello"}],
+        extra_headers=headers,
+    )
+```
+
+合并后的单个 Trace 依次嵌套应用 Span、包含提示词的 SDK generation、GoModel 的服务端 Span，以及提供商 generation。用户问了什么、花费多少、网关如何路由，都可以在同一视图中查看。
+
+该 Trace 中的两个 generation 都携带此次调用的 Token 用量，因此 Langfuse 会将其成本两次计入 Trace 总额。如果您依赖 Trace 级别的成本，请将成本视图过滤为两个 generation 中的一个，或将网关 Trace 发送到单独的 Langfuse 项目。
+
+<Note>
+  已使用 Langfuse v4.27.0（通过 docker compose 自托管）和 Langfuse Python SDK 4.15.1 验证：覆盖 OpenAI、Anthropic 和 Gemini 的缓冲式及流式 Chat 网关 OTLP Trace、故障转移 Span、经由 GoModel 的 SDK 提示词采集，以及合并两者的 Trace 上下文传播。
+</Note>
+
+## 故障排查
+
+| 现象 | 解决方法 |
+| --- | --- |
+| Langfuse 中没有任何 Trace | 检查 `Authorization` 请求头是否为 `Basic` + `pk-lf-...:sk-lf-...` 的 Base64 编码（而不是原始密钥），以及端点是否以 `/api/public/otel` 结尾。导出器开启时，GoModel 会在启动时记录 `opentelemetry enabled`。导出是批量进行的，请等待几秒钟。 |
+| 网关 generation 中没有提示词或补全内容 | 内容采集默认关闭。请设置 `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true`。 |
+| 流式 generation 中没有 Token 或成本 | 提供商没有发送用量数据块。GoModel 仅在用量追踪开启时（`USAGE_ENABLED`，默认开启）才会请求该数据块。 |
+| generation 有 Token 但没有成本 | Langfuse 找不到该模型的价格。请在 Langfuse 的 **Settings -> Models** 中添加该模型。 |
+| 使用 gRPC 端点时出现连接错误 | Langfuse 的 OTLP 端点仅支持 HTTP。请保持 `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`（默认值）。 |
+| 每个请求都显示为两个 Trace | 网关和 SDK 在没有共享上下文的情况下各自导出。请按上文所述传播 `traceparent`，或将两条路径分别发送到不同的 Langfuse 项目。 |
+| 自托管 Langfuse 上 `GET /api/public/traces` 返回 404 | Langfuse v4 通过其 v2 API 提供读取（例如 `/api/public/v2/observations`）；v1 的 Trace 端点已移除。请使用 UI 或 v2 API。 |
+| 相同的提示词总是返回相同的答案 | GoModel 的[响应缓存](/zh/features/cache)会重放相同的请求。这通常正是您想要的；如果不是，请禁用缓存。 |
+
+## 说明
+
+- 高流量网关可以对网关 Trace 进行采样（`OTEL_TRACES_SAMPLER=parentbased_traceidratio`、`OTEL_TRACES_SAMPLER_ARG=0.1`）。使用 `parentbased_*` 时，调用方已采样其 Trace 的请求会保留网关 Span，因此传播的 Trace 仍然完整。
+- 完整的导出器参考（YAML 配置、按信号类型的端点、采样器、重新加载行为）请参阅 [OpenTelemetry 指南](/zh/guides/opentelemetry)。其中所有内容均适用，Langfuse 只是 OTLP 后端。
+- 如需基于请求速率和延迟指标的看板，请搭配 [Prometheus 指标](/zh/guides/prometheus-metrics)使用：Langfuse 存储 Trace，Prometheus 存储指标。

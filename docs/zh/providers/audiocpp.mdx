@@ -1,0 +1,149 @@
+---
+title: "audio.cpp"
+description: "将 GoModel 的语音合成和转写请求路由到本地 audio.cpp 服务器，包括其原生的详细信息、对齐和实时流式路由。"
+icon: "audio-lines"
+keywords: ["audio.cpp", "audiocpp_server", "文本转语音", "语音识别", "本地模型", "自托管", "text-to-speech", "TTS", "speech-to-text", "ASR", "local models", "self-hosted", "GGUF"]
+---
+
+[audio.cpp](https://github.com/0xShug0/audio.cpp) 是一个基于 `ggml` 构建的本地 C++ 音频推理服务器，支持文本转语音、语音转文本、对齐、说话人分离、音源分离等功能，覆盖 80 多个模型系列。GoModel 为其提供了专用的 `audiocpp` 提供商类型。
+
+它是一个仅支持音频的提供商。`/v1/audio/speech` 和 `/v1/audio/transcriptions` 会路由到它；聊天、`/responses` 和 `/v1/embeddings` 会返回 `invalid_request_error`，因为 `audiocpp_server` 没有这些端点。
+
+请先启动服务器，并在配置中指定它提供的模型：
+
+```json
+{
+  "host": "127.0.0.1",
+  "port": 8099,
+  "backend": "metal",
+  "lazy_load": true,
+  "models": [
+    {"id": "moonshine-tiny", "family": "moonshine_asr", "path": "/models/moonshine-streaming-tiny-q8_0.gguf", "task": "asr", "mode": "streaming"},
+    {"id": "pocket-tts", "family": "pocket_tts", "path": "/models/pocket-tts", "task": "tts", "mode": "offline"}
+  ]
+}
+```
+
+```bash
+audiocpp_server --config server.json --no-ui
+```
+
+## 配置
+
+基础 URL 为必填项，用于注册该提供商。`audiocpp_server` 的默认端口（8080）与 GoModel 自身的端口冲突，因此没有默认值：
+
+```bash
+AUDIOCPP_BASE_URL=http://host.docker.internal:8099
+GOMODEL_MASTER_KEY=change-me
+```
+
+`AUDIOCPP_API_KEY` 为可选项，通常无需设置：audio.cpp 本身没有认证机制。仅当服务器前面的反向代理需要 Bearer Token 时才设置它。
+
+<Note>
+  这些示例假设 GoModel 运行在 Docker 中，而 audio.cpp 运行在宿主机上，因此使用 `host.docker.internal`。如果 GoModel 直接运行在宿主机上，请使用 `http://localhost:8099`。末尾的 `/v1` 会被接受并去除，因此两种写法指向同一个服务器。需要运行多个实例？请使用带后缀的名称分别注册：`AUDIOCPP_GPU_BASE_URL=...` 会创建提供商 `audiocpp-gpu`。
+</Note>
+
+## 验证
+
+```bash
+curl -s http://localhost:8080/v1/audio/speech \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -o speech.wav \
+  -d '{"model": "audiocpp/pocket-tts", "input": "Reply with exactly ok.", "voice": "alba"}'
+
+curl -s http://localhost:8080/v1/audio/transcriptions \
+  -H "Authorization: Bearer change-me" \
+  -F model=audiocpp/moonshine-tiny \
+  -F file=@speech.wav
+```
+
+## 音色使用 audio.cpp 的名称，而非 OpenAI 的名称
+
+`voice` 指定的是 audio.cpp 的音色预设、缓存的音色 id，或所配置音色库中的 wav 文件。audio.cpp 没有固定的音色集合，因此 OpenAI 的 `alloy`/`nova`/… 对它没有意义。使用 `GET /p/audiocpp/audio/voices?model=<id>` 可列出某个模型提供的音色。
+
+与 OpenAI API 一样，`/v1/audio/speech` 上的 `voice` 为必填项。如果希望 audio.cpp 改用模型所配置的 `default_voice_preset`，请通过透传调用该路由：`POST /p/audiocpp/audio/speech`。
+
+声音克隆参数（`voice_ref`、`reference_text`、`seed`、`max_tokens`、`options` 等）会原样转发，因此 audio.cpp 自身的请求字段可以通过标准端点使用。唯一的例外是指向服务端路径的 `voice_ref`（见下文）：
+
+```bash
+curl -s http://localhost:8080/v1/audio/speech \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -o cloned.wav \
+  -d '{
+    "model": "audiocpp/indextts2",
+    "input": "Cloned from an inline reference.",
+    "voice": "alba",
+    "voice_ref": {"type": "base64", "data": "UklGRh..."},
+    "reference_text": "Transcript of the reference audio."
+  }'
+```
+
+## 音频格式
+
+无论 `response_format` 请求的是什么格式，语音合成都会返回 WAV，除非服务器在构建时包含了 MP3 前端模块。响应会标注 audio.cpp 实际返回的类型（`audio/wav`），而不是所请求的类型。
+
+转写上传的文件必须是 WAV；服务器会拒绝其他容器格式，除非构建时包含了 `audio_decode` 前端模块（该模块增加了对 MP3 和 FLAC 的支持）。
+
+## 无需上传文件的转写
+
+audio.cpp 还可以读取其所在机器上的音频，其实时路由则完全不需要文件，直接传输原始 PCM。`/v1/audio/transcriptions` 不提供这两种形式：两者都允许调用方决定 audio.cpp 主机读取什么内容，或占用某个模型多长时间，而获得某个模型的使用授权并不等于获得了这两种操作的授权。它们仅保留在下文的原生接口中，由运维人员有意启用，并且只向受信任的调用方开放。
+
+出于同样的原因，`/v1/audio/speech` 上的 `voice_ref` 必须携带内联的 base64 音频；`{"type": "path"}` 和裸路径字符串会被拒绝，只能通过透传使用。
+
+## 流式传输
+
+对于配置了 `"mode": "streaming"` 的模型，`stream=true` 会返回 audio.cpp 的 OpenAI 格式转写事件（`transcript.text.delta`、`transcript.text.done`、`[DONE]`）。GoModel 会按原样转发该事件流，但会先将其完整读取，因此端到端的耗时不会缩短。能够在说话人仍在讲话时就输出文本的，是下文的*实时*路由。
+
+```bash
+curl -s http://localhost:8080/v1/audio/transcriptions \
+  -H "Authorization: Bearer change-me" \
+  -F model=audiocpp/moonshine-tiny \
+  -F file=@speech.wav \
+  -F stream=true
+```
+
+## 原生端点
+
+audio.cpp 中没有 OpenAI 等价物的路由，在运维人员选择启用后，可以通过 `/p/audiocpp/...` 上的[透传](/zh/features/passthrough-api)访问：
+
+```bash
+ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,...,audiocpp
+```
+
+与大多数提供商类型不同，它默认不启用：该接口对网关是不透明的，因此到达它的请求不会根据调用方的模型允许列表进行检查，而且 audio.cpp 在其中提供模型管理（`/models/load`、`/tasks/unload_models`）和服务器本地文件路径。请仅对受信任的调用方启用。
+
+`/v1` 前缀是可选的（`/p/audiocpp/audio/voices` 和 `/p/audiocpp/v1/audio/voices` 是同一个路由）；`/health` 由服务器根路径提供。
+
+| 路由 | 新增能力 |
+| --- | --- |
+| `POST /p/audiocpp/audio/transcriptions/details` | 返回普通转写响应中省略的单词时间戳、分段和说话人轮次 |
+| `POST /p/audiocpp/audio/transcriptions/live` | 在同一个连接上输入分块的原始 PCM，输出转写事件 |
+| `POST /p/audiocpp/audio/speech/live` | 语音到语音的实时输入变体 |
+| `POST /p/audiocpp/audio/alignments` | 将已知文本与音频进行强制对齐 |
+| `GET /p/audiocpp/audio/voices?model=<id>` | TTS 模型提供的音色 |
+| `POST /p/audiocpp/tasks/run` | audio.cpp 的通用框架请求，用于没有 OpenAI 端点的任务（音源分离、VAD、说话人分离、音乐） |
+| `GET /p/audiocpp/health` | 服务器就绪状态和已配置的模型数量 |
+
+实时路由可以在采集语音的同时进行转写：不需要文件，音频也无需保存到磁盘：
+
+```bash
+ffmpeg -f avfoundation -i ":0" -ar 16000 -ac 1 -f s16le - \
+  | curl -sN -X POST -H 'Expect:' \
+      -H "Authorization: Bearer change-me" \
+      -T - \
+      'http://localhost:8080/p/audiocpp/audio/transcriptions/live?model=moonshine-tiny&sample_rate=16000&channels=1&sample_format=s16le'
+```
+
+`-T -` 是保持实时传输的关键：`--data-binary @-` 会在建立连接之前读完 stdin，从而使采集重新变成文件上传。能否在采集*过程中*输出部分文本，取决于模型本身，而不是路由。
+
+## 模型元数据
+
+`GET /v1/models` 会报告 audio.cpp 关于每个已配置模型的信息：
+
+- **Family**：audio.cpp 的模型系列（`pocket_tts`、`moonshine_asr` 等）。
+- **Mode**：`tts` 模型为 `audio_speech`，`asr` 模型为 `audio_transcription`。为其他任务（`align`、说话人分离、音源分离等）注册的模型仍会列出，但没有 mode：GoModel 没有可将其路由到的端点，需要通过透传访问它们。
+- **Capabilities**：配置了 `"mode": "streaming"` 的模型为 `streaming`。
+
+这些只是默认值，而不是最终决定：您在该提供商的模型元数据中声明的任何内容都会优先生效。参阅[模型元数据](/zh/advanced/model-metadata)。

@@ -1,0 +1,161 @@
+---
+title: "Rotation von API-Keys"
+description: "Geben Sie einem Provider mehrere API-Keys, verteilen Sie Sessions darauf und erhalten Sie die Prompt-Cache-Affinität."
+icon: "key-round"
+keywords: ["Key Rotation", "API key rotation", "mehrere API-Keys", "multiple API keys", "Round Robin", "Rate-Limits"]
+---
+
+Ein Provider hat normalerweise einen API-Key, und jeder Request an ihn
+verwendet diesen Key. Konfigurieren Sie mehr als einen, verteilt GoModel
+identifizierte Sessions auf diese Keys. Jede Konversation bleibt standardmäßig
+bei einem Key, sodass sie weiterhin den Prompt-Cache des Providers treffen
+kann, während jeder Key nur einen Teil des gesamten Traffics trägt.
+
+Die Rotation ist deaktiviert, bis ein zweiter Key konfiguriert ist. Mit einem
+Key verhält sich alles genau wie bisher.
+
+<Note>
+  Requests ohne erkannte Session rotieren weiterhin im Round-Robin-Verfahren.
+  Unterstützte Session-Header, Body-Felder und die automatische Erkennung von
+  Konversationen beschreibt [Session Keeping](/de/features/session-keeping).
+</Note>
+
+## Konfigurieren
+
+Fügen Sie Keys mit nummerierten Umgebungsvariablen hinzu. `<PROVIDER>_API_KEY`
+ist der erste Key; `<PROVIDER>_API_KEY_2`, `_3` usw. fügen die weiteren hinzu.
+
+```bash
+OPENAI_API_KEY=sk-first
+OPENAI_API_KEY_2=sk-second
+OPENAI_API_KEY_3=sk-third
+```
+
+Bei drei Keys werden verschiedene Sessions deterministisch auf die drei Keys
+verteilt; jeder Request innerhalb einer Session wählt denselben Key.
+
+Oder in `config.yaml`:
+
+```yaml
+providers:
+  openai:
+    type: openai
+    api_keys:
+      - "${OPENAI_API_KEY}"
+      - "${OPENAI_API_KEY_2}"
+      - "${OPENAI_API_KEY_3}"
+```
+
+`api_key` und `api_keys` lassen sich kombinieren; `api_key` wird zuerst
+verwendet.
+
+Um wieder striktes Round Robin pro Request zu erhalten, deaktivieren Sie die
+Session-Bindung für diesen Provider:
+
+```yaml
+providers:
+  openai:
+    session_sticky_keys: false
+```
+
+Provider-Instanzen, die nur über Umgebungsvariablen definiert sind, verwenden
+dasselbe Provider-Präfix und optionale Suffix wie ihre API-Keys:
+
+```bash
+OPENAI_API_KEY=sk-primary
+OPENAI_API_KEY_2=sk-secondary
+OPENAI_SESSION_STICKY_KEYS=false
+
+OPENAI_EU_API_KEY=sk-eu-primary
+OPENAI_EU_API_KEY_2=sk-eu-secondary
+OPENAI_EU_SESSION_STICKY_KEYS=false
+```
+
+Dieselbe Einstellung entspricht dem Kontrollkästchen
+**Session-sticky API keys** im Provider-Editor des Dashboards. Es ist
+standardmäßig aktiviert.
+
+Jeder Provider, der sich mit einem API-Key authentifiziert, kann rotieren –
+`ANTHROPIC_API_KEY_2`, `GEMINI_API_KEY_2`, `GROQ_API_KEY_2` usw. Provider, die
+sich auf andere Weise authentifizieren (Vertex AI und Bedrock, die Google- bzw.
+AWS-Zugangsdaten verwenden), ignorieren diese Variablen.
+
+## Regeln
+
+- Die Nummerierung beginnt bei `2`, da `<PROVIDER>_API_KEY` Key 1 ist.
+  `<PROVIDER>_API_KEY_1` statt der Form ohne Suffix auszuschreiben,
+  funktioniert ebenfalls.
+- Lücken sind erlaubt. Werden nur `_API_KEY` und `_API_KEY_3` gesetzt, ergibt
+  das zwei Keys.
+- Doppelte Keys werden zusammengefasst, sodass ein in zwei Variablen
+  wiederholter Key keinen doppelten Anteil am Traffic erhält.
+- Keys werden in der konfigurierten Reihenfolge verwendet: zuerst der Key ohne
+  Suffix, dann aufsteigend nach Nummer.
+- Umgebungsvariablen ersetzen die gesamte `api_keys`-Liste des Providers aus
+  `config.yaml`, statt mit ihr zusammengeführt zu werden.
+- Ein Key, der sich nicht auflösen lässt – ein Platzhalter `${UNSET_VAR}` –,
+  wird verworfen. Ein Provider, der danach gar keine Keys mehr hat, wird nicht
+  registriert.
+
+<Note>
+  Bei aktivierter Session-Bindung verwenden Retries den an die Session
+  gebundenen Key. Bei deaktivierter Bindung nimmt jeder ausgehende Versuch am
+  Round Robin teil.
+</Note>
+
+## Rotation bei Providern mit Suffix
+
+Umgebungsvariablen mit Suffix registrieren einen *separaten Provider*
+desselben Typs. Beide Mechanismen lassen sich kombinieren, und die
+abschließende Nummer unterscheidet sie:
+
+```bash
+OPENAI_EU_API_KEY=sk-eu-first
+OPENAI_EU_API_KEY_2=sk-eu-second
+```
+
+Das ist der Provider `openai-eu` mit zwei Keys. Das abschließende `_2`
+bezeichnet einen Key.
+
+```bash
+OPENAI_REGION_2_API_KEY=sk-only
+```
+
+Das ist der Provider `openai-region-2` mit einem Key. Hier ist die `2` Teil des
+Provider-Suffixes, keine Key-Nummer.
+
+## Was die Rotation abdeckt
+
+Jeder Aufruf, den GoModel an den Provider richtet, verwendet dieselbe
+Auswahlrichtlinie: Chat Completions, Responses, Embeddings, Audio, Bilder,
+Batches, providernative [Passthrough-Routen](/de/features/passthrough-api) und
+Realtime-Sessions. Identifizierte Sessions sind fest gebunden; Traffic ohne
+Session läuft im Round Robin.
+
+Die Rotation gilt pro Gateway-Prozess. Die Zähler liegen im Speicher und werden
+beim Neustart zurückgesetzt, sodass `N` Replikate jeweils unabhängig rotieren –
+was in Ordnung ist, denn das Ziel ist, Last zu verteilen, nicht sie exakt zu
+sequenzieren.
+
+## Zwischen Rotation und separaten Providern wählen
+
+Beides ermöglicht mehrere Keys eines Provider-Typs. Die beiden Ansätze lösen
+unterschiedliche Probleme.
+
+| | Key Rotation | Provider mit Suffix |
+| --- | --- | --- |
+| Konfiguration | `OPENAI_API_KEY_2` | `OPENAI_EAST_API_KEY` |
+| Modell-IDs | unverändert (`gpt-4o`) | mit Provider-Angabe (`openai-east/gpt-4o`) |
+| Routing | automatisch, pro Session gebunden | der Aufrufer wählt, oder ein [virtuelles Modell](/de/features/virtual-models) verteilt |
+| Prompt-Caching | für identifizierte Sessions erhalten | pro Provider erhalten |
+| Geeignet für | Anheben von Rate-Limits für ein Konto | separate Konten, Regionen oder Base-URLs |
+
+Separate Provider sind weiterhin sinnvoll, wenn Keys auf unterschiedliche
+Konten, Regionen, Base-URLs oder Modellkataloge verweisen. Sie sind aber nicht
+mehr nötig, nur um Prompt-Caching über mehrere Keys hinweg zu erhalten.
+
+## Überprüfen
+
+Die Rotation wird nicht über die API gemeldet. Um sie zu bestätigen, beobachten
+Sie das Nutzungs-Dashboard des Providers selbst: Der Traffic sollte sich
+ungefähr gleichmäßig auf die Keys verteilen.
