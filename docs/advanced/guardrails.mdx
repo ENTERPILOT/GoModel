@@ -639,9 +639,9 @@ a sidecar on the same host or reach it over `https://` or a private network.
   `response_body` are the ones the client sent and received, with the personal
   data in clear — only the rewritten body kept under `request_revisions` is
   anonymized. Set
-  [`LOGGING_LOG_BODIES=false`](/advanced/configuration#audit-logging) (or
-  `LOGGING_LOG_REVISION_BODIES=false` to drop just the rewritten copies) when
-  the audit store must not hold personal data.
+  [`LOGGING_LOG_BODIES=false`](/advanced/configuration#audit-logging) when the
+  audit store must not hold personal data. `LOGGING_LOG_REVISION_BODIES=false`
+  only drops the anonymized copies; the original bodies are still stored.
 </Warning>
 
 <Tip>

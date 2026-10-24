@@ -293,6 +293,28 @@ func TestOnPromptDecisions(t *testing.T) {
 	}
 }
 
+func TestOnPromptRespondMessage(t *testing.T) {
+	tests := []struct {
+		name  string
+		cfg   string
+		reply string
+	}{
+		{"custom", `{"rules": "ACME => x", "on_match": "respond", "message": "I cannot discuss that."}`, "I cannot discuss that."},
+		{"omitted falls back", `{"rules": "ACME => x", "on_match": "respond"}`, DefaultMessage},
+		{"empty falls back", `{"rules": "ACME => x", "on_match": "respond", "message": ""}`, DefaultMessage},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := newPlugin(t, tt.cfg)
+			d, err := p.OnPrompt(context.Background(), plugintest.Exchange(prompt(), nil))
+			require.NoError(t, err)
+			assert.Equal(t, pluginapi.ActionRespond, d.Action)
+			require.NotNil(t, d.Response)
+			assert.Equal(t, tt.reply, d.Response.Text(0))
+		})
+	}
+}
+
 func completion() *pluginapi.Completion {
 	c := &pluginapi.Completion{Choices: []pluginapi.Choice{
 		{Index: 0, Message: pluginapi.Message{Role: pluginapi.RoleAssistant, Parts: []pluginapi.Part{
