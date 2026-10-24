@@ -79,6 +79,7 @@ func (b *bootstrap) initAdmin() error {
 			app.live,
 			b.requestHealth,
 			usagePricingRecalculationConfigured(appCfg),
+			appCfg.Pricing.BillCacheHits,
 			appCfg.Server.BasePath,
 			adminCfg.UIEnabled,
 		)
@@ -145,6 +146,7 @@ func newAdminHandlers(
 	liveBroker *live.Broker,
 	requestHealth admin.RequestHealthSource,
 	usagePricingRecalculationEnabled bool,
+	billCacheHits bool,
 	basePath string,
 	uiEnabled bool,
 ) (*admin.Handler, *dashboard.Handler, auditlog.Reader, error) {
@@ -192,6 +194,7 @@ func newAdminHandlers(
 		admin.WithConfiguredProviders(configuredProviders),
 		admin.WithUsagePricingRecalculator(pricingRecalculator),
 		admin.WithPricingResolver(pricingOverrideService),
+		admin.WithBillCacheHits(billCacheHits),
 		admin.WithAuditReader(auditReader),
 		admin.WithAuthKeys(authKeyService),
 		admin.WithUsers(userService),

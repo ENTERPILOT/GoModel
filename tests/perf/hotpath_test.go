@@ -519,7 +519,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 			name:      "shared_stream_audit_and_usage_observers",
 			bench:     BenchmarkSharedStreamingAuditAndUsageObservers,
 			maxAllocs: 157,  // baseline 155 (incl. request labels on both observers)
-			maxBytes:  9024, // baseline ~8.75 KB (incl. auth key id on the usage entry)
+			maxBytes:  9088, // baseline ~8.8 KB (incl. auth key id, markup and billed cost on the usage entry)
 		},
 		{
 			// Default configuration: audit body capture off, so the observed
@@ -537,7 +537,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 			name:      "streaming_observers_include_usage",
 			bench:     BenchmarkSharedStreamingObserversIncludeUsage,
 			maxAllocs: 50,   // baseline 48
-			maxBytes:  3136, // baseline ~2.9 KB
+			maxBytes:  3200, // baseline ~3.1 KB (incl. markup and billed cost on the usage entry)
 		},
 	}
 

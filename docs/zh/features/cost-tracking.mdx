@@ -2,7 +2,7 @@
 title: "成本追踪"
 description: "GoModel 如何估算请求成本、定价数据来自哪里、如何覆盖定价，以及如何重新计算已存储的成本。"
 icon: "calculator"
-keywords: ["成本追踪", "LLM 成本", "Token 定价", "支出", "定价覆盖", "成本估算", "cost tracking", "LLM cost", "token pricing", "spend", "pricing override", "cost estimate"]
+keywords: ["成本追踪", "LLM 成本", "Token 定价", "支出", "定价覆盖", "成本估算", "cost tracking", "LLM cost", "token pricing", "spend", "pricing override", "cost estimate", "加价", "成本分摊", "计费成本", "markup", "chargeback", "billed cost"]
 ---
 
 GoModel 根据模型定价估算每个被追踪请求的成本，并在控制台上显示汇总数据。
@@ -95,6 +95,28 @@ GoModel 使用请求完成时刻生效的费率为每个请求计价，并且无
 
 覆盖适用于新请求。要对已经运行过的请求重新计算成本，请执行重新计算。
 
+## 加价与计费成本
+
+当您转售模型访问权限时（例如按客户使用的 Token 向其收费），可以设置加价。GoModel 会为每个请求记录**计费成本**（用量记录中的 `billed_cost`）：即提供商成本加上加价。提供商成本本身不会改变，因此预算、控制台汇总和节省金额仍然衡量您向上游支付的费用。
+
+加价是在 `config.yaml` 中设置的百分比。未配置任何加价时（默认），计费成本等于提供商成本。
+
+```yaml
+pricing:
+  bill_cache_hits: true # env: PRICING_BILL_CACHE_HITS；默认 true
+  markups:
+    "/": 15                         # 所有模型
+    "openai/": 10                   # 一个提供商实例
+    "gpt-5": 20                     # 任意提供商上的某个模型
+    "anthropic/claude-opus-4-1": 25 # 某个提供商上的某个模型
+```
+
+最具体的选择器优先，顺序为：提供商/模型、模型、提供商、全局。加价不会叠加。提供商选择器指的是已配置的实例（`providers` 下的键名），未知的提供商会导致启动失败。20% 的加价会对 $1.00 的提供商成本收取 $1.20，即 16.7% 的利润率。
+
+`bill_cache_hits` 决定由 GoModel 响应缓存提供的响应如何计费。`true` 按命中发生时同一调用的成本（当前定价和分时段费率）加上加价来计费每次命中；`false` 按 $0 计费，即使其成本未知。提供商提示缓存（缓存的输入 Token）是真实的提供商成本，始终会计费。
+
+每条用量记录还会存储其计费时使用的加价（`markup_percent`、`markup_selector`），因此更改加价永远不会改写过去的账单。
+
 ## 控制台汇总
 
 - **Estimated Cost**：实时提供商请求的支出；不包括缓存命中。
@@ -105,6 +127,8 @@ GoModel 使用请求完成时刻生效的费率为每个请求计价，并且无
 ## 重新计算已存储的成本
 
 重新计算会根据当前定价，重新计算匹配的用量记录中已存储的成本。请在更改覆盖之后，或在请求运行时定价不可用的情况下使用。该操作默认启用（`USAGE_PRICING_RECALCULATION_ENABLED`）；在用量视图中选择 **Recalculate**，然后输入 `recalculate` 进行确认。其范围限定为所选的日期范围、提供商或模型，以及用户路径。
+
+重新计算会使用每条记录计费时的加价重新计算计费成本，并根据当前的 `bill_cache_hits` 对缓存命中计费。在加价功能出现之前记录的行按其提供商成本计费。
 
 <Warning>
   重新计算会**覆盖**每条匹配记录的成本字段，并**清除**模型已无法解析到定价的记录的成本。
