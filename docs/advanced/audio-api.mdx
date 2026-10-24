@@ -91,9 +91,13 @@ await writeFile("speech.wav", Buffer.from(await speech.arrayBuffer()));
 
 </CodeGroup>
 
-`model`, `input`, and `voice` are required. Optional fields — `instructions`,
-`response_format` (`mp3` default, plus `opus`, `aac`, `flac`, `wav`, `pcm`), and
-`speed` — are forwarded to the provider. The response `Content-Type` is the one
+`model` and `input` are required. `voice` is optional: when it is omitted,
+OpenAI and Azure OpenAI use `alloy`, and other providers use their own default
+speaker. ElevenLabs and MiniMax have no default and need a voice ID. Voice
+names are provider-specific, so OpenAI's `alloy`/`nova`/… only work on OpenAI
+and Azure. Optional fields — `instructions`, `response_format` (`mp3` default,
+plus `opus`, `aac`, `flac`, `wav`, `pcm`), and `speed` — are forwarded to the
+provider. The response `Content-Type` is the one
 the upstream returns, falling back to the type implied by `response_format` (for
 example `wav` → `audio/wav`).
 

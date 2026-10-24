@@ -37,13 +37,14 @@ func (s *PostgreSQLStore) RecalculatePricing(ctx context.Context, params Recalcu
 		update := recalculateEntryCosts(entry, resolver)
 		if _, err := tx.Exec(ctx, `
 			UPDATE usage
-			SET input_cost = $1, output_cost = $2, total_cost = $3, rewrite_cost_saved = $4, cost_source = $5, costs_calculation_caveat = $6
-			WHERE id = $7::uuid
+			SET input_cost = $1, output_cost = $2, total_cost = $3, rewrite_cost_saved = $4, billed_cost = $5, cost_source = $6, costs_calculation_caveat = $7
+			WHERE id = $8::uuid
 		`,
 			nullableFloat(update.InputCost),
 			nullableFloat(update.OutputCost),
 			nullableFloat(update.TotalCost),
 			nullableFloat(update.RewriteCostSaved),
+			nullableFloat(update.BilledCost),
 			update.CostSource,
 			update.Caveat,
 			update.ID,
@@ -66,7 +67,7 @@ func postgresRecalculationEntries(ctx context.Context, tx pgx.Tx, params Recalcu
 	}
 
 	rows, err := tx.Query(ctx, `
-		SELECT id::text, timestamp, model, provider, provider_name, endpoint, input_tokens, output_tokens, rewrite_tokens_saved, raw_data::text, COALESCE(costs_calculation_caveat, '')
+		SELECT id::text, timestamp, model, provider, provider_name, endpoint, input_tokens, output_tokens, rewrite_tokens_saved, raw_data::text, COALESCE(costs_calculation_caveat, ''), COALESCE(cache_type, ''), markup_percent
 		FROM usage`+sqlutil.BuildWhereClause(conditions)+`
 		FOR UPDATE`, args...)
 	if err != nil {
@@ -76,7 +77,7 @@ func postgresRecalculationEntries(ctx context.Context, tx pgx.Tx, params Recalcu
 
 	entries := make([]recalculationEntry, 0)
 	for rows.Next() {
-		var entry recalculationEntry
+		entry := recalculationEntry{BillCacheHits: params.BillCacheHits}
 		var providerName sql.NullString
 		var rawData *string
 		if err := rows.Scan(
@@ -91,6 +92,8 @@ func postgresRecalculationEntries(ctx context.Context, tx pgx.Tx, params Recalcu
 			&entry.RewriteTokensSaved,
 			&rawData,
 			&entry.Caveat,
+			&entry.CacheType,
+			&entry.MarkupPercent,
 		); err != nil {
 			return nil, fmt.Errorf("scan postgres usage cost row: %w", err)
 		}

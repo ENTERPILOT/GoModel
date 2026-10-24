@@ -78,9 +78,8 @@ w skonfigurowanej bibliotece głosów – audio.cpp nie ma stałego zestawu gło
 więc `alloy`/`nova`/… z OpenAI nic dla niego nie znaczą. Listę głosów oferowanych
 przez model uzyskasz przez `GET /p/audiocpp/audio/voices?model=<id>`.
 
-`voice` jest wymagane w `/v1/audio/speech`, tak jak w API OpenAI. Aby audio.cpp
-zastosował zamiast tego skonfigurowany dla modelu `default_voice_preset`, wywołaj
-trasę przez passthrough: `POST /p/audiocpp/audio/speech`.
+Pomiń `voice`, aby audio.cpp zastosował skonfigurowany dla modelu
+`default_voice_preset`.
 
 Parametry klonowania (`voice_ref`, `reference_text`, `seed`, `max_tokens`,
 `options`, …) są przekazywane bez zmian, więc własne pola requestu audio.cpp
