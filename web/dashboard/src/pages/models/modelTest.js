@@ -45,9 +45,11 @@ export function rowCanTestModel(row) {
 }
 
 // First user path a restricted model allows, sent on the user-path header so
-// the test passes the same access check the Playground's would.
+// the test passes the same access check the Playground's would. A scoped
+// virtual model is skipped for other paths, so alias rows use its own paths.
 export function modelTestUserPath(row) {
-  const paths = Array.isArray(row?.access?.user_paths) ? row.access.user_paths : [];
+  const scoped = row?.is_alias ? row.alias?.user_paths : row?.access?.user_paths;
+  const paths = Array.isArray(scoped) ? scoped : [];
   const path = paths.find((value) => typeof value === "string" && value.trim() !== "");
   return path ? path.trim() : "";
 }

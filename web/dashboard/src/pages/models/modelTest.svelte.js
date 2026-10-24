@@ -21,9 +21,16 @@ import {
 
 class ModelTestState {
   #results = $state({});
+  // auth.generation the results belong to; a key change hides them and
+  // drops replies to requests sent with the earlier key.
+  #generation = auth.generation;
+
+  #current() {
+    return this.#generation === auth.generation ? this.#results : {};
+  }
 
   result(row) {
-    return row && row.key ? this.#results[row.key] || null : null;
+    return row && row.key ? this.#current()[row.key] || null : null;
   }
 
   isRunning(row) {
@@ -32,13 +39,17 @@ class ModelTestState {
 
   dismiss(row) {
     if (!row || !row.key || this.isRunning(row)) return;
-    const next = { ...this.#results };
+    const next = { ...this.#current() };
     delete next[row.key];
+    this.#generation = auth.generation;
     this.#results = next;
   }
 
-  #set(key, value) {
-    this.#results = { ...this.#results, [key]: value };
+  #set(key, value, generation) {
+    if (generation !== auth.generation) return;
+    const current = this.#current();
+    this.#generation = generation;
+    this.#results = { ...current, [key]: value };
   }
 
   async run(row) {
@@ -51,8 +62,12 @@ class ModelTestState {
     const timeout = setTimeout(() => controller.abort(), MODEL_TEST_TIMEOUT_MS);
     const started = performance.now();
     const finish = (outcome, fallback = m.playground_request_failed()) =>
-      this.#set(key, summarizeModelTest({ ...outcome, durationMs: performance.now() - started }, fallback));
-    this.#set(key, { state: "running" });
+      this.#set(
+        key,
+        summarizeModelTest({ ...outcome, durationMs: performance.now() - started }, fallback),
+        generation,
+      );
+    this.#set(key, { state: "running" }, generation);
 
     try {
       // A restricted model needs its user path under the configured

@@ -76,6 +76,10 @@ test("modelTestUserPath picks the first allowed user path", () => {
   assert.equal(modelTestUserPath(modelRow()), "");
   assert.equal(modelTestUserPath(modelRow({ access: { user_paths: ["", " /team/a ", "/team/b"] } })), "/team/a");
   assert.equal(modelTestUserPath(aliasRow()), "");
+  assert.equal(
+    modelTestUserPath(aliasRow({ alias: { name: "smart", enabled: true, user_paths: ["/team/a"] } })),
+    "/team/a",
+  );
 });
 
 test("buildModelTestRequest sends the default prompt with a small token budget", () => {
