@@ -1,0 +1,88 @@
+---
+title: "GitHub Copilot"
+description: "通过 GitHub Copilot 订阅路由聊天、Responses 和 Embeddings 流量。"
+icon: "github"
+keywords: ["GitHub Copilot", "Copilot", "订阅", "subscription", "OAuth", "提供商配置", "provider setup"]
+---
+
+`github-copilot` 提供商使用您的 Copilot 套餐（Free、Pro、Pro+、Max、Business 或 Enterprise）所包含的模型调用 GitHub Copilot API。用量从套餐的 GitHub AI Credits 中扣除，而不是使用模型厂商的 API 密钥。
+
+类型名为 `github-copilot` 而不是 `copilot`，以免与 Microsoft Copilot 混淆。
+
+## 配置
+
+凭据是一个拥有 Copilot 访问权限的账号的 GitHub OAuth Token（`gho_...`）：
+
+```bash
+GITHUB_COPILOT_API_KEY=gho_...
+```
+
+或在 `config.yaml` 中：
+
+```yaml
+providers:
+  github-copilot:
+    type: github-copilot
+    api_key: "${GITHUB_COPILOT_API_KEY}"
+```
+
+GoModel 会原样发送该 Token，不做交换或刷新。
+
+### 获取 Token
+
+该账号的任何 GitHub OAuth Token 都可以使用，例如：
+
+```bash
+# GitHub CLI
+GITHUB_COPILOT_API_KEY=$(gh auth token)
+
+# Copilot 客户端的登录，例如执行 `opencode auth login` 之后
+GITHUB_COPILOT_API_KEY=$(jq -r '."github-copilot".refresh' ~/.local/share/opencode/auth.json)
+```
+
+哪些模型可用取决于您的 Copilot 套餐，而不是 Token。套餐未包含的模型会返回 `model_not_supported`，即使 `/models` 列出了它。
+
+### Business 和 Enterprise
+
+个人套餐（Free、Pro、Pro+、Max）使用默认 Base URL `https://api.githubcopilot.com`。Business 或 Enterprise 席位可能由其他端点提供服务；当请求返回 `401` 或 `model_not_supported` 时请设置它：
+
+```bash
+GITHUB_COPILOT_BASE_URL=https://api.business.githubcopilot.com
+```
+
+您账号的端点是
+`curl -H "Authorization: Bearer $GITHUB_COPILOT_API_KEY" https://api.github.com/copilot_internal/user`
+响应中的 `endpoints.api`。
+
+## 模型
+
+GoModel 从 Copilot 的 `/models` 获取模型列表。套餐列出但账号未启用的模型（policy 为 `disabled`）会被略去；在 [Copilot 设置](https://github.com/settings/copilot/features)中启用后，它们会在下一次刷新模型时出现。
+
+如只想提供其中一部分，请[过滤](/zh/advanced/config-yaml#过滤提供商的模型)列表：
+
+```bash
+GITHUB_COPILOT_MODEL_FILTER_INCLUDE=claude-sonnet-5.5,gpt-5.6-luna,gpt-4.1
+```
+
+`GITHUB_COPILOT_MODELS` 是备用列表，仅在 `/models` 失败或为空时使用；`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` 会使其成为唯一列表并跳过 `/models`。
+
+## 每个模型都支持 Chat Completions 和 Responses
+
+Copilot 仅通过 `/responses` 提供 GPT-5 及更新的模型，而 Claude、Kimi 和较旧的 GPT 模型仅通过 `/chat/completions` 提供。GoModel 从 `/models` 读取每个模型的端点，并为每个模型提供这两种 API：
+
+| 客户端调用 | 模型的服务端点 | GoModel |
+| ---------- | -------------- | ------- |
+| `/v1/chat/completions` | `/chat/completions` | 直接转发 |
+| `/v1/chat/completions` | 仅 `/responses` | 转换为 Responses 再转换回来 |
+| `/v1/responses` | `/responses` | 直接转发 |
+| `/v1/responses` | 仅 `/chat/completions` | 转换为 Chat Completions 再转换回来 |
+
+在 GoModel 读取到某个模型的端点之前（例如 `/models` 无法访问时），该模型的请求会发送到 `/chat/completions`。
+
+如果发往仅支持 Responses 的模型的聊天请求包含转换无法精确映射的字段（例如 `logit_bias`），该请求会以 `400` 被拒绝；请改为发送到 `/v1/responses`。
+
+支持 Embeddings（`text-embedding-3-small`）。Copilot 只接受列表形式的 `input`，因此单个字符串会被包装为只含一个元素的列表。
+
+## 成本
+
+Copilot 按各模型公布的 API 价格[对 Token 计费](https://docs.github.com/en/copilot/concepts/billing-and-usage/individuals/billing)，以 AI Credits 结算，并优先从套餐的每月额度中扣除。GoModel 根据自身的模型目录为同一流量定价，因此[成本](/zh/features/cost-tracking)只是对所用 Credits 的估算。它不考虑套餐包含的额度和 Copilot 的折扣，因此可能高于 GitHub 实际收取的费用。
