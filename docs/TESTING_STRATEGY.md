@@ -27,7 +27,7 @@ that is reachable:
 | Backend | Helper | How it is enabled |
 |---|---|---|
 | SQLite | `sqlxtest.Run` | always, in-memory |
-| PostgreSQL | `sqlxtest.Run` | `GOMODEL_TEST_POSTGRES_URL` set (CI: service container) |
+| PostgreSQL | `sqlxtest.Run` | `GOMODEL_TEST_POSTGRES_URL` set (CI: `tools/ci/postgres.sh`) |
 | MongoDB | `mongotest.Run` | `MONGO_TEST_DSN` set (CI: `tools/ci/mongo-replset.sh`) |
 
 Without the variable the backend's subtest skips, so a green run without
@@ -237,7 +237,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.27.1"
+          go-version: "1.27.3"
 
       # Unit + E2E (no external dependencies)
       - run: make test-all

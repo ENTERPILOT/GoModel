@@ -151,7 +151,7 @@ func TestManifest(t *testing.T) {
 	require.True(t, m.Guardrail)
 	assert.Equal(t, []pluginapi.Kind{pluginapi.KindPrompt, pluginapi.KindResponse, pluginapi.KindStream}, m.Kinds)
 
-	want := []string{"analyzer_url", "api_key", "language", "entities", "block_entities", "score_threshold", "allow_list", "ad_hoc_recognizers", "roles", "action", "operator", "restore", "message", "block_status", "stream_chunk", "stream_lookbehind"}
+	want := []string{"analyzer_url", "api_key", "language", "entities", "block_entities", "score_threshold", "allow_list", "ad_hoc_recognizers", "roles", "action", "operator", "placeholder_format", "restore", "restore_roles", "restore_tools", "restore_tools_exclude", "message", "block_status", "stream_chunk", "stream_lookbehind"}
 	var keys []string
 	for _, f := range m.ConfigSchema {
 		keys = append(keys, f.Key)

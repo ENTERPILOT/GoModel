@@ -101,6 +101,7 @@ type Config struct {
 	ConversationStore               conversationstore.Store                // Optional: Conversations lifecycle persistence store
 	LogOnlyModelInteractions        bool                                   // Only log AI model endpoints (default: true)
 	DisablePassthroughRoutes        bool                                   // Disable /p/{provider}/{endpoint} route registration
+	DisableLiteLLMTags              bool                                   // Leave LiteLLM tags alone: no labels from them and no stripping
 	RealtimeEnabled                 bool                                   // Enable the realtime websocket routes (/v1/realtime, /v1/realtime/translations) and passthrough upgrades
 	AuthVerifyEnabled               bool                                   // Enable the credential check route (GET /v1/auth/verify); off by default
 	MCPEnabled                      bool                                   // Enable the MCP gateway routes /mcp and /mcp/{server}
@@ -360,7 +361,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	if cfg != nil && cfg.BodySizeLimit != "" {
 		bodySizeLimit = cfg.BodySizeLimit
 	}
-	e.Use(middleware.BodyLimit(parseBodySizeLimitBytes(bodySizeLimit)))
+	bodyLimitBytes := parseBodySizeLimitBytes(bodySizeLimit)
+	e.Use(middleware.BodyLimit(bodyLimitBytes))
+	e.Use(requestDecompression(bodyLimitBytes))
 
 	e.Use(modelInteractionWriteDeadlineMiddleware(streamStallTimeout(cfg)))
 
@@ -422,6 +425,13 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// created earlier in the chain.
 	if cfg != nil && cfg.SessionDetector != nil {
 		e.Use(sessionCapture(cfg.SessionDetector, cfg.AuditReader, !authMiddlewareRegistered))
+	}
+
+	// LiteLLM tags become labels post-auth (only authenticated bodies are
+	// read) and before request rewriters and workflow resolution, which see
+	// the body without them. Turned off, requests keep their tags untouched.
+	if cfg == nil || !cfg.DisableLiteLLMTags {
+		e.Use(LiteLLMTags(auditLogger))
 	}
 
 	// Request rewriters run post-auth (rewriters only see authenticated
@@ -514,6 +524,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.POST("/v1/systemone", handler.SystemOne)
 	e.POST("/v1/systemone/permute", handler.SystemOnePermute)
 	e.POST("/v1/systemone/separate", handler.SystemOneSeparate)
+	// OpenAI Decisions. The handler answers 404 until an openai, jev, or openrouter
+	// provider is configured.
+	e.POST("/v1/decisions", handler.Decisions)
 	if cfg == nil || cfg.RealtimeEnabled {
 		e.GET("/v1/realtime", handler.Realtime)
 		e.POST("/v1/realtime/calls", handler.RealtimeCalls)

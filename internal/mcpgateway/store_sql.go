@@ -65,6 +65,9 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	if err := db.Schema(ctx, sqlIndexes...); err != nil {
 		return nil, fmt.Errorf("failed to create mcp_servers index: %w", err)
 	}
+	if err := db.Schema(ctx, sqlVirtualTable); err != nil {
+		return nil, fmt.Errorf("failed to create mcp_virtual_servers table: %w", err)
+	}
 	return &SQLStore{db: db}, nil
 }
 
@@ -114,17 +117,11 @@ func encodeSQLMCPServerJSON(server ManagedServer) (sqlMCPServerJSON, error) {
 	if encoded.headers, err = encodeJSONMap(server.Headers); err != nil {
 		return encoded, err
 	}
-	if encoded.allowed, err = encodeJSONList(server.AllowedTools); err != nil {
-		return encoded, err
-	}
-	if encoded.disallowed, err = encodeJSONList(server.DisallowedTools); err != nil {
-		return encoded, err
-	}
-	if encoded.paths, err = encodeJSONList(server.UserPaths); err != nil {
-		return encoded, err
-	}
-	encoded.disallowedPaths, err = encodeJSONList(server.DisallowedUserPaths)
-	return encoded, err
+	encoded.allowed = sqlutil.JSONStrings(server.AllowedTools)
+	encoded.disallowed = sqlutil.JSONStrings(server.DisallowedTools)
+	encoded.paths = sqlutil.JSONStrings(server.UserPaths)
+	encoded.disallowedPaths = sqlutil.JSONStrings(server.DisallowedUserPaths)
+	return encoded, nil
 }
 
 func (s *SQLStore) Upsert(ctx context.Context, server ManagedServer) error {
@@ -271,17 +268,17 @@ func scanSQLMCPServer(scanner sqlx.Row) (ManagedServer, error) {
 	if server.Headers, err = decodeJSONMap(headers); err != nil {
 		return ManagedServer{}, err
 	}
-	if server.AllowedTools, err = decodeJSONList(allowed); err != nil {
-		return ManagedServer{}, err
+	if server.AllowedTools, err = sqlutil.DecodeJSONStrings(allowed); err != nil {
+		return ManagedServer{}, fmt.Errorf("decode allowed_tools: %w", err)
 	}
-	if server.DisallowedTools, err = decodeJSONList(disallowed); err != nil {
-		return ManagedServer{}, err
+	if server.DisallowedTools, err = sqlutil.DecodeJSONStrings(disallowed); err != nil {
+		return ManagedServer{}, fmt.Errorf("decode disallowed_tools: %w", err)
 	}
-	if server.UserPaths, err = decodeJSONList(userPaths); err != nil {
-		return ManagedServer{}, err
+	if server.UserPaths, err = sqlutil.DecodeJSONStrings(userPaths); err != nil {
+		return ManagedServer{}, fmt.Errorf("decode user_paths: %w", err)
 	}
-	if server.DisallowedUserPaths, err = decodeJSONList(disallowedUserPaths); err != nil {
-		return ManagedServer{}, err
+	if server.DisallowedUserPaths, err = sqlutil.DecodeJSONStrings(disallowedUserPaths); err != nil {
+		return ManagedServer{}, fmt.Errorf("decode disallowed_user_paths: %w", err)
 	}
 	if server.DisplayName == "" {
 		server.DisplayName = server.Name

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/goccy/go-json"
 )
@@ -17,6 +18,20 @@ func EscapeLikeWildcards(s string) string {
 	s = strings.ReplaceAll(s, `%`, `\%`)
 	s = strings.ReplaceAll(s, `_`, `\_`)
 	return s
+}
+
+// UserPathSubtreeCondition matches column against userPath itself and every
+// path below it, binding its own arguments. The LIKE term keeps the prefix
+// index-friendly; the substr term repeats the prefix test case-sensitively,
+// because SQLite's LIKE ignores ASCII case while user paths do not. column
+// may be an expression; it is repeated in the predicate.
+func UserPathSubtreeCondition(column, userPath string) (string, []any) {
+	prefix := userPath + "/"
+	if userPath == "/" {
+		prefix = "/"
+	}
+	condition := "(" + column + " = ? OR (" + column + " LIKE ? ESCAPE '\\' AND substr(" + column + ", 1, ?) = ?))"
+	return condition, []any{userPath, EscapeLikeWildcards(prefix) + "%", utf8.RuneCountInString(prefix), prefix}
 }
 
 // BuildWhereClause joins condition strings into a SQL WHERE clause.
@@ -96,6 +111,33 @@ func NullableString(value string) any {
 		return nil
 	}
 	return value
+}
+
+// JSONStrings marshals values to a JSON array for a NOT NULL JSON column;
+// nil and empty both persist as "[]". Marshaling a []string cannot fail.
+func JSONStrings(values []string) string {
+	if values == nil {
+		values = []string{}
+	}
+	data, _ := json.Marshal(values)
+	return string(data)
+}
+
+// DecodeJSONStrings parses a JSON array column written by JSONStrings. Empty
+// input and an empty array both decode to nil. Unlike StringsFromJSON, a
+// malformed value is returned as an error.
+func DecodeJSONStrings(raw []byte) ([]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var values []string
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return nil, err
+	}
+	if len(values) == 0 {
+		return nil, nil
+	}
+	return values, nil
 }
 
 // NullableJSONStrings marshals values to a JSON array for binding to a JSON

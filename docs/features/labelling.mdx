@@ -190,6 +190,56 @@ rejected as tagging sources.
 `do_not_pass` strips the header before forwarding on passthrough and realtime
 routes; translated routes never forward client headers anyway.
 
+## LiteLLM tags
+
+Clients written for LiteLLM keep their tags with no configuration. GoModel
+reads them as labels from:
+
+- the `x-litellm-tags` header (comma-separated, as is a `tags` string);
+- a `tags` field in the body of `/v1/chat/completions`, `/v1/responses`,
+  `/v1/messages`, and `/v1/embeddings`;
+- `metadata.tags` in those bodies, when it is a list.
+
+```json
+{
+  "model": "gpt-4o",
+  "messages": [{"role": "user", "content": "Hello"}],
+  "metadata": {"tags": ["search-team", "prod"]}
+}
+```
+
+GoModel removes them before the request reaches the provider, which would
+reject them: OpenAI has no `tags` parameter, and its `metadata` values must be
+strings. Other `metadata` keys pass through, and a string `metadata.tags` is
+left alone as ordinary OpenAI metadata. Audit logs keep the body as the client
+sent it.
+
+One request contributes at most **32** distinct tags, counted across the
+header and both body fields in that order; the rest are dropped. Tags longer
+than **128** characters are dropped, not truncated. Dropped tags are still
+removed before the provider.
+
+<Warning>
+  Clients choose their own tags, so any client can charge a label budget by
+  naming its label. When label budgets must hold per team, turn LiteLLM tags
+  off and label traffic with [API key labels](#api-key-labels) or tagging
+  headers your proxy sets.
+</Warning>
+
+LiteLLM tags are on by default. Turn them off with:
+
+```bash
+LITELLM_TAGS_ENABLED=false
+```
+
+```yaml config.yaml
+tagging:
+  litellm_tags_enabled: false
+```
+
+When off, GoModel neither reads nor removes tags: requests reach the provider
+as the client sent them, so a provider that rejects `tags` returns its error.
+
 ## Where labels show up
 
 - **Usage dashboard** — the usage page shows a by-label breakdown
@@ -206,4 +256,8 @@ routes; translated routes never forward client headers anyway.
 ## Defaults
 
 Labelling is on by default and costs nothing until you configure a tagging
-rule or create a labelled key. Requests without labels are tracked as before.
+rule, create a labelled key, or a client sends LiteLLM tags. Requests without labels are tracked as before.
+
+| Setting | Default | Change it when |
+| --- | --- | --- |
+| `LITELLM_TAGS_ENABLED` / `tagging.litellm_tags_enabled` | `true` | Label budgets must not be chargeable by client-chosen tags. |

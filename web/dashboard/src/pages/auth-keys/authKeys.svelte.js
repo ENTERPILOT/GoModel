@@ -66,6 +66,7 @@ class AuthKeysStore {
   issuedValue = $state("");
   deactivatingID = $state("");
   dashboardAccessID = $state("");
+  passthroughAccessID = $state("");
   form = $state(defaultAuthKeyForm());
   labelsEditor = $state(emptyLabelsEditor());
   allowedModelsEditor = $state(emptyAllowedModelsEditor());
@@ -346,46 +347,69 @@ class AuthKeysStore {
     if (!key || !key.active || this.dashboardAccessID) {
       return;
     }
-    const grant = !key.dashboard_access;
-
     this.dashboardAccessID = key.id;
     try {
-      const outcome = await sendAdminMutation(
-        "/admin/auth-keys/" + encodeURIComponent(key.id) + "/dashboard-access",
-        "PUT",
-        { dashboard_access: grant },
-        {
-          label: "update API key dashboard access",
-          errorFallback: m.api_keys_access_update_failed(),
-          unavailableMessage: m.api_keys_feature_unavailable(),
-        },
-      );
-      if (outcome.status === "stale") {
-        return;
-      }
-      if (outcome.status === "unavailable") {
-        this.available = false;
-        flash.error(outcome.error);
-        return;
-      }
-      if (outcome.status === "error") {
-        if (outcome.result && outcome.result.status !== 401) {
-          console.error(
-            "Failed to update auth key dashboard access:",
-            outcome.result.status,
-            outcome.error,
-          );
-        }
-        flash.error(outcome.error);
-        return;
-      }
-      flash.success(grant
-        ? m.api_keys_access_granted({ name: key.name })
-        : m.api_keys_access_revoked({ name: key.name }));
-      void this.fetchKeys();
+      await this.updateKeyAccess(key, "dashboard_access", "dashboard-access", {
+        failed: m.api_keys_access_update_failed(),
+        granted: m.api_keys_access_granted({ name: key.name }),
+        revoked: m.api_keys_access_revoked({ name: key.name }),
+      });
     } finally {
       this.dashboardAccessID = "";
     }
+  }
+
+  async togglePassthroughAccess(key) {
+    if (!key || !key.active || this.passthroughAccessID) {
+      return;
+    }
+    this.passthroughAccessID = key.id;
+    try {
+      await this.updateKeyAccess(key, "passthrough_access", "passthrough-access", {
+        failed: m.api_keys_passthrough_update_failed(),
+        granted: m.api_keys_passthrough_granted({ name: key.name }),
+        revoked: m.api_keys_passthrough_revoked({ name: key.name }),
+      });
+    } finally {
+      this.passthroughAccessID = "";
+    }
+  }
+
+  // updateKeyAccess flips one boolean access field of key through its
+  // PUT /admin/auth-keys/{id}/{endpoint} route.
+  async updateKeyAccess(key, field, endpoint, messages) {
+    const grant = !key[field];
+    const outcome = await sendAdminMutation(
+      "/admin/auth-keys/" + encodeURIComponent(key.id) + "/" + endpoint,
+      "PUT",
+      { [field]: grant },
+      {
+        label: "update API key " + endpoint,
+        errorFallback: messages.failed,
+        unavailableMessage: m.api_keys_feature_unavailable(),
+      },
+    );
+    if (outcome.status === "stale") {
+      return;
+    }
+    if (outcome.status === "unavailable") {
+      this.available = false;
+      flash.error(outcome.error);
+      return;
+    }
+    if (outcome.status === "error") {
+      if (outcome.result && outcome.result.status !== 401) {
+        console.error(
+          "Failed to update auth key " + endpoint + ":",
+          outcome.result.status,
+          outcome.error,
+        );
+      }
+      flash.error(outcome.error);
+      return;
+    }
+    flash.success(grant ? messages.granted : messages.revoked);
+    void this.fetchKeys();
   }
 
   async deactivateKey(key) {

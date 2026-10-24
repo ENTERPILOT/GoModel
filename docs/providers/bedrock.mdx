@@ -151,6 +151,15 @@ BEDROCK_EU_MODELS=amazon.nova-lite-v1:0
 This registers providers `bedrock-us` and `bedrock-eu`. Bedrock credentials
 still come from the standard AWS credential chain.
 
+## Allowed tools
+
+Bedrock Converse cannot limit a turn to a subset of the declared tools. For a
+`tool_choice` of type `allowed_tools`, GoModel declares only the listed
+functions, with `toolChoice` `any` when the mode is `required` and `auto`
+otherwise. A subset that names no declared function is rejected with a 400.
+
+`allowed_tools` exists so a client can send the same tool list on every turn and keep its prompt cache. Narrowing changes the tool definitions sent upstream, and on Claude models they come before the system prompt in the cached prefix, so a subset that changes between turns invalidates the cache.
+
 ## Not yet integrated
 
 - Bedrock embeddings — the `InvokeModel` embedding path is model-specific and

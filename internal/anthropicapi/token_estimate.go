@@ -106,6 +106,12 @@ func contentBlockTokens(block ContentBlock) float64 {
 	case "tool_result":
 		result, _ := toolResultContent(block.Content, true)
 		return toolBlockOverhead + partsTokens(result)
+	case "server_tool_use":
+		return toolBlockOverhead + textTokens(toolSearchCallText(block.Input))
+	case "tool_search_tool_result":
+		return toolBlockOverhead + textTokens(toolReferencesText(block.References()))
+	case "tool_reference":
+		return textTokens(textBlockText(block))
 	case "search_result":
 		// Rendered for the model as its title, source, and body.
 		text, _ := searchResultText(block)

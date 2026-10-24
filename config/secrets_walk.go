@@ -40,7 +40,7 @@ func (r *LoadResult) resolveSecrets(ctx context.Context) error {
 	if err := r.Secrets.ResolveFields(ctx, "", r.Config); err != nil {
 		return err
 	}
-	return validateResolvedMCPServers(r.Config.MCP.Servers)
+	return validateResolvedMCP(&r.Config.MCP)
 }
 
 // ResolveFields resolves the secret references in every string reachable from
@@ -136,11 +136,18 @@ func (w secretWalker) walk(path string, v reflect.Value) error {
 	return nil
 }
 
+// secretsDeferred is the value of the `secrets` struct tag on a field whose
+// references the walk leaves in place, because the code consuming the field
+// resolves them itself: guardrail plugin configs are seeded into the database
+// with their references, which are resolved when the guardrail is built, so a
+// resolved secret is never stored.
+const secretsDeferred = "deferred"
+
 func (w secretWalker) walkStruct(path string, v reflect.Value) error {
 	t := v.Type()
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
-		if !field.IsExported() || field.Type == yamlNodeType {
+		if !field.IsExported() || field.Type == yamlNodeType || field.Tag.Get("secrets") == secretsDeferred {
 			continue
 		}
 		name, inline := yamlFieldName(field)

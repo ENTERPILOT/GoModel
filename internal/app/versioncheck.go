@@ -19,9 +19,8 @@ import (
 // that opted out never writes one.
 //
 // The identifier is kept in the deployment's database first and the data
-// directory second (see versioncheck.Identity), with the master key as the
-// fallback that survives a container recreated without either.
-func newVersionChecker(ctx context.Context, cfg config.VersionCheckConfig, backend storage.Storage, masterKey string) *versioncheck.Checker {
+// directory second (see versioncheck.Identity).
+func newVersionChecker(ctx context.Context, cfg config.VersionCheckConfig, backend storage.Storage) *versioncheck.Checker {
 	checkerCfg := versioncheck.Config{
 		Enabled:        cfg.Enabled,
 		URL:            cfg.URL,
@@ -41,9 +40,9 @@ func newVersionChecker(ctx context.Context, cfg config.VersionCheckConfig, backe
 				store = s
 			}
 		}
-		identity := versioncheck.NewIdentity(store, masterKey)
+		identity := versioncheck.NewIdentity(store)
 		id, source := identity.Resolve(ctx)
-		if source == versioncheck.SourceGenerated || source == versioncheck.SourceDerived {
+		if source == versioncheck.SourceGenerated {
 			slog.Info("install id created", "source", string(source))
 		}
 		// Resolved again per check rather than fixed here: if the database

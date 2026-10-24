@@ -4,6 +4,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/enterpilot/gomodel/internal/modeldata"
 )
 
 // Helpers for the metadata a provider reports about its own models
@@ -100,15 +102,8 @@ func CapabilitiesFromFeatures(capabilities map[string]bool, features []string) m
 // besides text. Text itself is not a capability.
 func CapabilitiesFromInputModalities(capabilities map[string]bool, modalities []string) map[string]bool {
 	for _, modality := range modalities {
-		switch strings.ToLower(strings.TrimSpace(modality)) {
-		case "image":
-			capabilities = SetCapability(capabilities, "vision", true)
-		case "audio":
-			capabilities = SetCapability(capabilities, "audio_input", true)
-		case "video":
-			capabilities = SetCapability(capabilities, "video_input", true)
-		case "file", "pdf", "document":
-			capabilities = SetCapability(capabilities, "pdf_input", true)
+		if key, ok := modeldata.InputModalityCapability(modality); ok {
+			capabilities = SetCapability(capabilities, key, true)
 		}
 	}
 	return capabilities

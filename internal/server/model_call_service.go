@@ -57,7 +57,7 @@ func (s *modelCallService) prepare(c *echo.Context, model, providerHint string) 
 			return nil, modelCallRoute{}, err
 		}
 	}
-	if err := enforceBudget(c, s.budgetChecker); err != nil {
+	if err := enforceBudget(c, s.budgetChecker, rateLimitRoute{provider: selectorProviderName(s.provider, selector)}); err != nil {
 		return nil, modelCallRoute{}, err
 	}
 	auditlog.EnrichEntry(c, selector.Model, "")
@@ -86,15 +86,22 @@ func (s *modelCallService) routeFor(selector core.ModelSelector, requestID strin
 		selector:     selector,
 		model:        selector.Model,
 		providerType: s.provider.GetProviderType(qualified),
-		providerName: selector.Provider,
+		providerName: selectorProviderName(s.provider, selector),
 		requestID:    requestID,
 	}
-	if resolver, ok := s.provider.(core.ProviderNameResolver); ok {
-		if name := resolver.GetProviderName(qualified); name != "" {
-			route.providerName = name
+	return route
+}
+
+// selectorProviderName returns the concrete provider instance name for a
+// resolved selector, falling back to the selector's provider when the router
+// exposes no name resolver.
+func selectorProviderName(provider core.RoutableProvider, selector core.ModelSelector) string {
+	if resolver, ok := provider.(core.ProviderNameResolver); ok {
+		if name := resolver.GetProviderName(selector.QualifiedModel()); name != "" {
+			return name
 		}
 	}
-	return route
+	return selector.Provider
 }
 
 // logUsage records one usage entry for a routed call when usage tracking is on.
@@ -119,6 +126,7 @@ func (s *modelCallService) logUsage(ctx context.Context, route modelCallRoute, e
 	entry.ProviderName = strings.TrimSpace(route.providerName)
 	entry.UserPath = core.UserPathFromContext(ctx)
 	entry.SessionID = core.SessionIDFromContext(ctx)
+	entry.AuthKeyID = core.GetAuthKeyID(ctx)
 	entry.Labels = core.RequestLabelsFromContext(ctx)
 	s.usageLogger.Write(entry)
 }

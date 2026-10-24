@@ -12,7 +12,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
-// BudgetsConfig holds per-user-path spend limits.
+// BudgetsConfig holds spend limits by user path, request label, and provider.
 type BudgetsConfig struct {
 	// Enabled controls whether budget checks are active.
 	// Default: true. Requires usage tracking because spend limits are evaluated
@@ -29,6 +29,11 @@ type BudgetsConfig struct {
 	// characters and casing that env var names cannot express. Declare them
 	// here or through the admin API.
 	Labels []BudgetLabelConfig `yaml:"labels"`
+
+	// Providers declares budget limits by configured provider name. A
+	// provider budget caps all spend routed to that provider instance;
+	// failover skips a provider whose budget is exhausted.
+	Providers []BudgetProviderConfig `yaml:"providers"`
 }
 
 // BudgetUserPathConfig declares one or more budget limits for a user path.
@@ -41,6 +46,12 @@ type BudgetUserPathConfig struct {
 // BudgetLabelConfig declares one or more budget limits for a request label.
 type BudgetLabelConfig struct {
 	Label  string              `yaml:"label"`
+	Limits []BudgetLimitConfig `yaml:"limits"`
+}
+
+// BudgetProviderConfig declares one or more budget limits for a provider.
+type BudgetProviderConfig struct {
+	Name   string              `yaml:"name"`
 	Limits []BudgetLimitConfig `yaml:"limits"`
 }
 
@@ -83,6 +94,24 @@ func applyBudgetEnv(cfg *Config, strict bool) error {
 		return err
 	}
 	cfg.Budgets.UserPaths = entries
+
+	// SET_PROVIDER_BUDGET_<NAME> follows SET_PROVIDER_RATE_LIMIT_<NAME>:
+	// underscores in the suffix become hyphens in the provider name.
+	providers, err := applyKeyedLimitEnv(
+		cfg.Budgets.Providers,
+		"SET_PROVIDER_BUDGET_",
+		rateLimitProviderNameFromEnvSuffix,
+		normalizeRateLimitProviderName,
+		func(entry BudgetProviderConfig) string { return entry.Name },
+		func(raw string) ([]BudgetLimitConfig, error) { return parseBudgetEnvLimits(raw, strict) },
+		func(name string, limits []BudgetLimitConfig) BudgetProviderConfig {
+			return BudgetProviderConfig{Name: name, Limits: limits}
+		},
+	)
+	if err != nil {
+		return err
+	}
+	cfg.Budgets.Providers = providers
 	return nil
 }
 
@@ -176,6 +205,20 @@ func validateBudgetConfig(cfg *BudgetsConfig) error {
 		}
 		cfg.Labels[labelIdx].Label = label
 		if err := validateBudgetLimits(cfg.Labels[labelIdx].Limits, field, "label", label, seen); err != nil {
+			return err
+		}
+	}
+	for providerIdx, entry := range cfg.Providers {
+		field := fmt.Sprintf("budgets.providers[%d]", providerIdx)
+		name, err := normalizeRateLimitProviderName(entry.Name)
+		if err != nil {
+			return fmt.Errorf("%s.name is required", field)
+		}
+		if strings.ContainsAny(name, "/ \t") {
+			return fmt.Errorf("%s.name must be a provider name without slashes or spaces", field)
+		}
+		cfg.Providers[providerIdx].Name = name
+		if err := validateBudgetLimits(cfg.Providers[providerIdx].Limits, field, "provider", name, seen); err != nil {
 			return err
 		}
 	}

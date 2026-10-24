@@ -37,6 +37,9 @@ type FailoverResolver interface {
 // ModelAuthorizer validates request-scoped access to concrete models.
 type ModelAuthorizer interface {
 	ValidateModelAccess(ctx context.Context, selector core.ModelSelector) error
+	// ValidateProviderAccess checks a request that names a provider but no
+	// model against the caller's allowlists.
+	ValidateProviderAccess(ctx context.Context, provider string) error
 	AllowsModel(ctx context.Context, selector core.ModelSelector) bool
 	FilterPublicModels(ctx context.Context, models []core.Model) []core.Model
 }
@@ -57,6 +60,12 @@ type TranslatedRequestPatcher interface {
 // it runs the prompt phase over a System One decision request's state.
 type SystemOneRequestPatcher interface {
 	PatchSystemOneRequest(ctx context.Context, req *core.SystemOneRequest) (*core.SystemOneRequest, error)
+}
+
+// DecisionRequestPatcher is an optional TranslatedRequestPatcher capability:
+// it runs the prompt phase over an OpenAI Decisions request's input.
+type DecisionRequestPatcher interface {
+	PatchDecisionRequest(ctx context.Context, req *core.DecisionRequest) (*core.DecisionRequest, error)
 }
 
 // PromptContentEditor is an optional TranslatedRequestPatcher capability: it

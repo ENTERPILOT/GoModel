@@ -39,14 +39,11 @@ var (
 
 const mongoReplicaSetName = "rs"
 
-// Images come from the AWS ECR Public mirror of Docker Hub's official library,
-// not from Docker Hub. Anonymous pulls of registry-1.docker.io intermittently
-// time out on GitHub runners and fail the job before a single test runs; the
-// mirror carries the same images over a different path and without Docker Hub's
-// anonymous pull limit.
+// Docker Hub library images, pulled from the first mirror in imageRegistries
+// that serves them.
 const (
-	postgresImage = "public.ecr.aws/docker/library/postgres:16-alpine"
-	mongoImage    = "public.ecr.aws/docker/library/mongo:7"
+	postgresImageName = "postgres:16-alpine"
+	mongoImageName    = "mongo:7"
 
 	// postgresURLEnv and mongoURLEnv name already-running databases. When set,
 	// the harness connects to them instead of starting a container, which lets
@@ -55,6 +52,9 @@ const (
 	postgresURLEnv = "GOMODEL_INTEGRATION_POSTGRES_URL"
 	mongoURLEnv    = "GOMODEL_INTEGRATION_MONGO_URL"
 )
+
+// postgresImage and mongoImage are the references TestMain pulled.
+var postgresImage, mongoImage string
 
 // mongoDatabaseName is the database the suite resets and points the gateway
 // at: the harness default, or the one an external URL names.
@@ -66,16 +66,16 @@ func TestMain(m *testing.M) {
 
 	// Pull before starting anything: the containers come up concurrently below,
 	// and two simultaneous anonymous pulls trip the registry's rate limit.
-	// Databases supplied through the environment (CI service containers)
-	// need no image at all.
-	var images []string
+	// Databases supplied through the environment (CI's PostgreSQL) need no
+	// image at all.
+	var err error
 	if os.Getenv(postgresURLEnv) == "" {
-		images = append(images, postgresImage)
+		postgresImage, err = dockerPullImage(testCtx, postgresImageName)
 	}
-	if os.Getenv(mongoURLEnv) == "" {
-		images = append(images, mongoImage)
+	if err == nil && os.Getenv(mongoURLEnv) == "" {
+		mongoImage, err = dockerPullImage(testCtx, mongoImageName)
 	}
-	if err := dockerPullImages(testCtx, images...); err != nil {
+	if err != nil {
 		log.Printf("Image pull failed: %v", err)
 		cancelFunc()
 		os.Exit(1)

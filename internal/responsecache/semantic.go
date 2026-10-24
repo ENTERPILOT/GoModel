@@ -129,8 +129,11 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 		return next()
 	}
 
+	// The header may only tighten matching. Entries are shared across callers,
+	// so a looser client threshold would return answers cached for unrelated
+	// prompts, including other tenants'.
 	threshold := m.cfg.SimilarityThreshold
-	if v := headerFloat64(ex.RequestHeader, "X-Cache-Semantic-Threshold"); v > 0 {
+	if v := headerFloat64(ex.RequestHeader, "X-Cache-Semantic-Threshold"); v > threshold {
 		threshold = v
 	}
 
