@@ -67,12 +67,12 @@ func (s *translatedInferenceService) dispatchNativeJSON(
 	c.SetRequest(c.Request().WithContext(gateway.WithAttemptRecorder(c.Request().Context())))
 	s.observeLiveProviderAttempts(c, workflow)
 
-	failovers := len(s.inference().FailoverSelectors(workflow))
-	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRouteFromWorkflow(workflow).withFailovers(failovers))
+	// A prompt guardrail may already have admitted the request.
+	adm, err := admitOnce(c, s.rateLimiter, s.budgetChecker, s.admissionRoute(workflow))
 	if err != nil {
 		return handleError(c, err)
 	}
-	defer adm.release()
+	defer releaseAdmission(c)
 	ctx := adm.dispatchContext(c.Request().Context())
 
 	headers := buildPassthroughHeaders(ctx, c.Request().Header)

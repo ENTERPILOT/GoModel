@@ -144,6 +144,7 @@ func (s *translatedInferenceService) serveSystemOne(c *echo.Context, route syste
 		return handleError(c, systemOneUnsupportedModelError(c, route, resolution, reason))
 	}
 
+	defer releaseAdmission(c)
 	body, err = s.guardSystemOneState(c, workflow, &req, body)
 	if err != nil {
 		return handleError(c, err)
@@ -358,6 +359,11 @@ func guardNativeMember[Req any](
 ) ([]byte, error) {
 	if !workflow.GuardrailsEnabled() {
 		return body, nil
+	}
+	// A prompt guardrail can spend on the gateway's behalf and end the
+	// request itself, so admission runs before it, as on translated routes.
+	if err := s.admitBeforePromptPhase(c)(c.Request().Context(), workflow); err != nil {
+		return nil, err
 	}
 	// Compare against a copy: a patcher may redact the member in place and
 	// return the same request, and that edit must still reach the body.

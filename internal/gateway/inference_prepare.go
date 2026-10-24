@@ -81,7 +81,7 @@ func prepareTranslated[Req any, Prepared any](
 	if spec.resolve != nil {
 		resolve = spec.resolve(o)
 	}
-	ctx, req, workflow, err := prepareTranslatedRequest(o, ctx, req, meta, model, provider, resolve, spec.patch(o), spec.valid, spec.patchNilMessage)
+	ctx, req, workflow, err := prepareTranslatedRequest(o, ctx, req, meta, model, provider, resolve, spec.patch(o), spec.valid, spec.patchNilMessage, meta.Admit)
 	if err != nil {
 		if workflow != nil {
 			// A patch-phase error (a guardrail block or short-circuit) still
@@ -105,6 +105,7 @@ func prepareTranslatedRequest[Req any](
 	patch func(context.Context, Req) (Req, error),
 	valid func(Req) bool,
 	patchNilMessage string,
+	admit func(context.Context, *core.Workflow) error,
 ) (context.Context, Req, *core.Workflow, error) {
 	ctx = contextWithRequestID(ctx, meta.RequestID)
 	workflow, err := o.ensureTranslatedRequestWorkflow(ctx, meta.Workflow, meta.RequestID, meta.Endpoint, model, provider)
@@ -113,6 +114,15 @@ func prepareTranslatedRequest[Req any](
 		return ctx, zero, nil, err
 	}
 	ctx = core.WithWorkflow(ctx, workflow)
+	// Admission runs before the prompt phase: a guardrail step may spend
+	// provider money deciding the request, and a decision it makes must not
+	// escape the limits the request would otherwise have been counted against.
+	if admit != nil {
+		if err := admit(ctx, workflow); err != nil {
+			var zero Req
+			return ctx, zero, workflow, err
+		}
+	}
 	if resolve != nil {
 		ctx, req, err = resolve(ctx, req, workflow)
 		if err != nil {
