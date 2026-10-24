@@ -63,7 +63,9 @@ providers see the plain body, and `BODY_SIZE_LIMIT` applies to both the
 compressed and the decoded size (`413` when either is over). Other encodings
 return `415`. A body is read and decoded only after the request is
 authenticated, so none of the body of a request without valid credentials is
-read, and its audit entry has no request body.
+read, and its audit entry has no request body. Such a request gets `401` even
+when its body would be over the limit once decoded; only a declared size over
+the limit is still `413`.
 
 `STREAM_STALL_TIMEOUT` (`server.stream_stall_timeout` in YAML) protects the
 gateway from clients that open a streaming response and stop reading it. Each

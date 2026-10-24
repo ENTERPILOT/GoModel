@@ -63,7 +63,9 @@ providerzy widzą zwykłe body, a `BODY_SIZE_LIMIT` dotyczy zarówno rozmiaru
 po kompresji, jak i po zdekodowaniu (`413`, gdy którykolwiek go przekracza). Inne kodowania
 zwracają `415`. Body jest odczytywane i dekodowane dopiero po uwierzytelnieniu
 requestu, więc z body requestu bez ważnych danych uwierzytelniających nie jest
-odczytywany żaden fragment, a jego wpis audytu nie zawiera body requestu.
+odczytywany żaden fragment, a jego wpis audytu nie zawiera body requestu. Taki
+request dostaje `401`, nawet jeśli jego body po zdekodowaniu przekroczyłoby limit;
+tylko zadeklarowany rozmiar powyżej limitu nadal zwraca `413`.
 
 `STREAM_STALL_TIMEOUT` (`server.stream_stall_timeout` w YAML) chroni
 gateway przed klientami, którzy otwierają odpowiedź streamingową i przestają ją czytać. Każdy

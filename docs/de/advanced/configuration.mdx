@@ -64,7 +64,9 @@ für die komprimierte als auch für die dekodierte Größe (`413`, wenn eine dav
 überschritten wird). Andere Kodierungen liefern `415`. Ein Body wird erst
 gelesen und dekodiert, nachdem der Request authentifiziert ist. Vom Body eines
 Requests ohne gültige Zugangsdaten wird daher nichts gelesen, und sein
-Audit-Eintrag enthält keinen Request-Body.
+Audit-Eintrag enthält keinen Request-Body. Ein solcher Request erhält `401`,
+auch wenn sein Body dekodiert über dem Limit läge; nur eine angegebene Größe über
+dem Limit liefert weiterhin `413`.
 
 `STREAM_STALL_TIMEOUT` (`server.stream_stall_timeout` in YAML) schützt das
 Gateway vor Clients, die eine Streaming-Response öffnen und dann aufhören, sie
