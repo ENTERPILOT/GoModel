@@ -110,6 +110,43 @@ func (r *ModelRegistry) lookupLocked(model string) (*ModelInfo, bool) {
 	return info, ok
 }
 
+// lookupSelectorLocked is lookupLocked for an already-parsed selector. It
+// finds the same entry the qualified string would, but builds
+// "<provider>/<model>" only on the rare second-chance paths, so the
+// per-request lookup does not allocate. Callers must hold r.mu.
+func (r *ModelRegistry) lookupSelectorLocked(selector core.ModelSelector) (*ModelInfo, bool) {
+	providerName := strings.TrimSpace(selector.Provider)
+	modelID := strings.TrimSpace(selector.Model)
+	if providerName == "" || modelID == "" || strings.Contains(providerName, "/") {
+		return r.lookupLocked(selector.QualifiedModel())
+	}
+	if providerModels, ok := r.modelsByProvider[providerName]; ok {
+		if info, exists := providerModels[modelID]; exists {
+			return info, true
+		}
+		if info, exists := providerModels[providerName+"/"+modelID]; exists {
+			return info, true
+		}
+	}
+	if r.hasConfiguredProviderNameLocked(providerName) {
+		return nil, false
+	}
+	info, ok := r.models[providerName+"/"+modelID]
+	return info, ok
+}
+
+// GetModelForSelector is GetModel for an already-parsed selector.
+// Callers must treat the returned data as read-only.
+func (r *ModelRegistry) GetModelForSelector(selector core.ModelSelector) *ModelInfo {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if info, ok := r.lookupSelectorLocked(selector); ok {
+		return info
+	}
+	return nil
+}
+
 // GetProvider returns the provider for the given model, or nil if not found
 func (r *ModelRegistry) GetProvider(model string) core.Provider {
 	r.mu.RLock()

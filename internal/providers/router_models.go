@@ -35,6 +35,12 @@ func (r *Router) GetProviderType(model string) string {
 	if err != nil {
 		return ""
 	}
+	if info, ok := r.selectorModel(selector); ok {
+		if info == nil {
+			return ""
+		}
+		return info.ProviderType
+	}
 	return r.lookup.GetProviderType(selector.QualifiedModel())
 }
 
@@ -44,6 +50,15 @@ func (r *Router) GetProviderName(model string) string {
 	selector, _, err := r.ResolveModel(core.NewRequestedModelSelector(model, ""))
 	if err != nil {
 		return ""
+	}
+	if info, ok := r.selectorModel(selector); ok {
+		if info == nil {
+			return ""
+		}
+		if selector.Provider != "" {
+			return selector.Provider
+		}
+		return info.ProviderName
 	}
 	if !r.lookup.Supports(selector.QualifiedModel()) {
 		return ""
@@ -111,7 +126,14 @@ func (r *Router) providerByName(providerName string) core.Provider {
 		if entry.ProviderName != providerName || entry.Model.ID == "" {
 			continue
 		}
-		if provider := r.lookup.GetProvider(core.ModelSelector{Provider: providerName, Model: entry.Model.ID}.QualifiedModel()); provider != nil {
+		selector := core.ModelSelector{Provider: providerName, Model: entry.Model.ID}
+		if info, ok := r.selectorModel(selector); ok {
+			if info != nil && info.Provider != nil {
+				return info.Provider
+			}
+			continue
+		}
+		if provider := r.lookup.GetProvider(selector.QualifiedModel()); provider != nil {
 			return provider
 		}
 	}

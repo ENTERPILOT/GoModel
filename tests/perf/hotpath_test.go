@@ -444,7 +444,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 		{
 			name:      "gateway_chat_completion_hot_path",
 			bench:     BenchmarkGatewayHotPathChatCompletion,
-			maxAllocs: 92,    // baseline 89 (85 + 2 per unknown-field-preserving response level: ChatResponse, Choice)
+			maxAllocs: 91,    // baseline 88 (84 + 2 per unknown-field-preserving response level: ChatResponse, Choice)
 			maxBytes:  14336, // baseline ~13.7 KB (incl. per-attempt response body/header capture fields)
 		},
 		{
@@ -455,7 +455,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// full catalog several times per request) would blow these limits.
 			name:      "gateway_chat_completion_hot_path_routed",
 			bench:     BenchmarkGatewayHotPathChatCompletionRouted,
-			maxAllocs: 103,   // baseline 100 (see the bare case; plus strings.Cut selector parsing)
+			maxAllocs: 97,    // baseline 94 (see the bare case; plus strings.Cut selector parsing and selector-keyed catalog lookups)
 			maxBytes:  14720, // baseline ~13.7 KB
 		},
 		{
@@ -465,7 +465,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// family as the bare routed case.
 			name:      "gateway_chat_completion_hot_path_routed_alias",
 			bench:     BenchmarkGatewayHotPathChatCompletionRoutedAlias,
-			maxAllocs: 104,   // baseline 101 (routed + resolver selector)
+			maxAllocs: 98,    // baseline 95 (routed + resolver selector)
 			maxBytes:  14656, // baseline ~13.7 KB
 		},
 		{
@@ -473,7 +473,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// selector index plus the model rewrite the upstream receives.
 			name:      "gateway_chat_completion_hot_path_routed_qualified",
 			bench:     BenchmarkGatewayHotPathChatCompletionRoutedQualified,
-			maxAllocs: 103,   // baseline 100
+			maxAllocs: 97,    // baseline 94
 			maxBytes:  14720, // baseline ~13.8 KB
 		},
 		{
@@ -484,7 +484,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// deployments actually run.
 			name:      "gateway_chat_completion_production_shape",
 			bench:     BenchmarkGatewayHotPathProductionShape,
-			maxAllocs: 161,   // baseline 158 (audit bodies kept as raw JSON instead of decoded into maps)
+			maxAllocs: 152,   // baseline 149 (audit bodies kept as raw JSON; selector-keyed lookups and memoized resolved-model strings)
 			maxBytes:  21056, // baseline ~19.6 KB
 		},
 		{
@@ -497,7 +497,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// request, and the ceiling is what keeps it from growing back.
 			name:      "gateway_chat_completion_production_shape_live_broker",
 			bench:     BenchmarkGatewayHotPathProductionShapeLiveBroker,
-			maxAllocs: 280,   // baseline 275
+			maxAllocs: 271,   // baseline 266
 			maxBytes:  44032, // baseline ~41.5 KB
 		},
 		{
