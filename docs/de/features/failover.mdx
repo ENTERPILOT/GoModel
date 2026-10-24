@@ -1,0 +1,257 @@
+---
+title: "Failover"
+description: "Wechseln Sie per Failover zwischen den Zielen eines virtuellen Modells und machen Sie mit der Failover-Strategie aus einer Zielliste eine strikte Prioritätsreihenfolge."
+icon: "shuffle"
+keywords: ["Failover", "failover", "Fallback", "Provider-Ausfall", "provider outage", "automatischer Retry", "Hochverfügbarkeit", "high availability", "Prioritäts-Routing"]
+---
+
+## Übersicht
+
+Failover ist Teil der [virtuellen Modelle](/de/features/virtual-models). Jede
+Weiterleitung mit zwei oder mehr Zielen wechselt per Failover zwischen ihnen:
+Liefert das Ziel, an das ein Request gesendet wurde, einen Fehler, der für
+Failover infrage kommt, wiederholt GoModel den Request bei den übrigen
+verfügbaren Zielen der Weiterleitung in der angegebenen Reihenfolge und hört
+beim ersten Erfolg auf.
+
+Die **Load-Balancing-Strategie** der Weiterleitung entscheidet nur darüber,
+welches Ziel zuerst versucht wird:
+
+| Strategie | Erstes Ziel | Danach |
+| --- | --- | --- |
+| Round-Robin | rotiert über die Ziele (gewichtet) | die übrigen Ziele in der angegebenen Reihenfolge |
+| Niedrigste Kosten | das günstigste verfügbare Ziel | die übrigen Ziele in der angegebenen Reihenfolge |
+| **Failover** | immer das erste verfügbare Ziel | die nächsten Ziele in der angegebenen Reihenfolge |
+
+Wählen Sie **Failover**, wenn die Zielliste eine Prioritätsreihenfolge ist –
+immer das beste Modell verwenden, außer es ist ausgefallen, und erst dann auf
+die Backups ausweichen.
+
+Bei den anderen Strategien zeigt der Editor ein Kontrollkästchen **Failover**
+an, das standardmäßig aktiviert ist. Deaktivieren Sie es (oder setzen Sie im
+Code `failover: false`), wenn eine Weiterleitung nur verteilen und ein
+fehlgeschlagener Request seinen Fehler zurückgeben soll, etwa wenn die Ziele
+nicht austauschbar sind und ein Client Retries selbst übernimmt. Die
+Failover-Strategie wechselt immer per Failover, daher wird das Kontrollkästchen
+dort nicht angeboten.
+
+## Eine Failover-Kette konfigurieren
+
+Öffnen Sie im Dashboard **Models** und bearbeiten Sie das Modell, das Sie
+absichern möchten: Das Modell ist bereits als erstes Ziel festgelegt. Fügen Sie
+die Fallbacks darunter in Prioritätsreihenfolge hinzu und speichern Sie – die
+Strategie ist standardmäßig **Failover**. Soll das Failover stattdessen unter
+einem neuen Namen laufen, erstellen Sie ein virtuelles Modell, listen Sie die
+Ziele in Prioritätsreihenfolge auf und wählen Sie im Dropdown
+**Load-balancing strategy** die Option **Failover**. Gewichte und
+Session-Bindung gelten für diese Strategie nicht, daher blendet der Editor sie
+aus. Wenn Sie die festgelegte Zeile entfernen, wird der Eintrag zu einer
+einfachen Redirect: Requests für das Modell gehen dann an die übrigen
+Ziele.
+
+Als Code (`config.yaml` oder die Umgebungsvariable `VIRTUAL_MODELS`):
+
+```yaml
+virtual_models:
+  # Ein neuer Name, der immer das erste Ziel bevorzugt.
+  - source: resilient-chat
+    strategy: failover
+    targets:
+      - { model: kimicode/kimi-k2 }
+      - { model: openai/gpt-4o }
+      - { model: ollama/qwen3:8b }
+
+  # Failover für ein reales Modell: Der Redirect überlagert `gpt-4o`,
+  # versucht es zuerst und danach die Fallbacks der Reihe nach. Wird die Quelle
+  # selbst als erstes Ziel aufgeführt, steht sie für das konkrete Modell, das er überlagert.
+  - source: gpt-4o
+    strategy: failover
+    targets:
+      - { model: gpt-4o }
+      - { model: azure/gpt-4o }
+      - { model: gemini/gemini-2.5-pro }
+```
+
+Ein Ziel kann auch ein anderes virtuelles Modell nennen
+([Verkettung](/de/features/virtual-models#virtuelle-modelle-verketten)); der Durchlauf
+versucht dann jedes konkrete Modell dahinter. Eine Ausnahme ermöglicht
+gegenseitige Absicherung: Wenn eine Kette, die ein reales Modell überlagert, ein
+anderes Modell aufführt, das auf dieselbe Weise überlagert wird, erreicht dieser
+Fallback nur das Modell selbst – dessen Fallbacks werden nicht ihrerseits
+durchlaufen. Dadurch kann `gpt-4o` auf `claude-sonnet-4-6` ausweichen, während
+`claude-sonnet-4-6` auf `gpt-4o` ausweicht. Jede andere Weiterleitung (ein
+Alias, ein virtuelles Modell unter neuem Namen), die ein abgesichertes Modell
+aufführt, durchläuft dagegen auch dessen Fallbacks.
+
+Bei Requests ohne Streaming laufen Provider-Retries vor dem Failover. Um
+Cloudflare-Responses mit `522`/`524` zu wiederholen und anschließend beim selben
+Provider das Modell zu wechseln, verwenden Sie
+[Ausfallsicherheits-Einstellungen mit Circuit Breakern pro Modell](/de/advanced/resilience#cloudflare-timeouts-wiederholen-dann-modell-wechseln).
+
+Failover reagiert auf fehlgeschlagene Versuche, nicht auf langsame. Um Traffic
+von einem Provider abzuziehen, der zwar noch antwortet, aber zu lange braucht,
+setzen Sie einen
+[Schwellenwert für langsame Aufrufe](/de/advanced/resilience#failover-weg-von-einem-langsamen-provider)
+für seinen Circuit Breaker.
+
+## Wann es greift
+
+Failover wird nur versucht, nachdem ein Versuch Folgendes zurückgegeben hat:
+
+- `5xx`
+- `429`, einschließlich eines Rate-Limits, das GoModel selbst für das Ziel
+  durchsetzt – ein ausgelastetes Ziel wird übersprungen, solange ein anderes
+  Ziel Kapazität hat
+- Fehler der Art „Modell nicht verfügbar“, „nicht unterstützt“ oder „nicht
+  gefunden“
+- Upstream-Fehlermeldungen, die mit einem `4xx`-Status weitergereicht werden
+  (Aggregator-Provider wie OpenCode Zen können einen vorübergehenden Fehler
+  ihres eigenen Upstreams als `400 "Upstream request failed"` melden)
+
+Es gilt für übersetzte Requests an `/v1/chat/completions`, `/v1/responses` und
+`/v1/messages`. Das Request-Log zeigt jeden Versuch, sodass ein ausgeliefertes
+Failover im Audit-Trail sichtbar ist und zum Preis des Modells abgerechnet
+wird, das geantwortet hat.
+
+Ein Zielmodell, das deaktiviert ist oder das der API-Key oder `user_path` des
+Requests nicht verwenden darf, wird nie versucht: Es wird sowohl bei der Wahl
+des ersten Ziels als auch in der Failover-Kette übersprungen, ohne als Versuch
+zu zählen.
+
+Ein Request, der seinen Provider im Feld `provider` nennt, umgeht virtuelle
+Modelle und erreicht das konkrete Modell direkt. Er erhält trotzdem die Kette
+eines virtuellen Modells, das genau dieses Modell überlagert und es als Ziel
+aufführt (die Form, die die Seite **Models** für ein reales Modell anlegt), da
+dieses virtuelle Modell dem Modell Failover hinzufügt, statt es zu ersetzen.
+
+<Note>
+  Eine Response, die von einem Failover-Ziel stammt, wird nicht in den
+  [Response-Cache](/de/features/cache#über-failover-bediente-responses-werden-nicht-gecacht)
+  geschrieben: Der Cache-Key wird aus der Auflösung vor dem Failover gehasht,
+  sonst würde die Antwort des Backups unter dem Key des primären Ziels erneut
+  ausgeliefert. Solange ein erstes Ziel ausgefallen ist, legt die Kette daher
+  keine neuen Cache-Einträge an; vor dem Ausfall geschriebene Einträge werden
+  weiterhin ausgeliefert, bis ihre TTL abläuft.
+</Note>
+
+Setzen Sie `FAILOVER_ENABLED=false` (oder `failover.enabled: false`), um den
+Durchlauf global abzuschalten; auch ein [Workflow](/de/advanced/workflows) kann
+ihn für seinen Geltungsbereich abschalten. Das gewählte Ziel wird weiterhin
+bedient, jedoch ohne Retries.
+
+## Die Failover-Richtlinie anpassen
+
+Die oben beschriebenen Standardwerte passen für die meisten Deployments. Drei
+Einstellungen unter `failover` (oder die entsprechenden Umgebungsvariablen)
+passen sie an:
+
+| Einstellung | Umgebungsvariable | Standardwert | Bedeutung |
+| --- | --- | --- | --- |
+| `max_attempts` | `FAILOVER_MAX_ATTEMPTS` | `0` (alle übrigen Ziele) | Wie viele Failover-Ziele ein Request versuchen darf, nachdem sein erster Versuch fehlgeschlagen ist. Ziele, die ohne Aufruf übersprungen werden (ausgeschöpftes Rate-Limit), zählen nicht. |
+| `retry_on_statuses` | `FAILOVER_RETRY_ON_STATUSES` | `[429, 5xx]` | Upstream-HTTP-Statuscodes, die Failover auslösen: exakte Codes (`408`) oder eine ganze Klasse (`5xx`). |
+| `retry_on_errors` | `FAILOVER_RETRY_ON_ERRORS` | siehe unten | Fehlerphrasen, die unabhängig vom Status Failover auslösen. |
+
+Eine nicht leere Liste **ersetzt** ihren Standardwert. Wiederholen Sie daher
+die Standardwerte, die Sie behalten möchten; eine leere oder weggelassene
+Liste behält den Standardwert bei (verwenden Sie `enabled: false`, um Failover
+abzuschalten). In Umgebungsvariablen trennen Sie Einträge durch Kommas.
+
+Eine Phrase in `retry_on_errors` trifft zu, wenn jedes ihrer Wörter im
+Fehlercode oder in der Fehlermeldung vorkommt (Groß-/Kleinschreibung wird
+ignoriert, Teilstring-Abgleich): `model not found` trifft auf
+`The model 'gpt-9' was not found` zu. Ein numerisches Wort – `404` oder `4xx` –
+schränkt stattdessen den HTTP-Status ein, nicht den Text. `404 deprecated`
+trifft also auf einen 404 zu, dessen Meldung „deprecated“ erwähnt, und auf
+nichts anderes. Die Standardliste lautet:
+
+```yaml
+retry_on_errors:
+  - model not found
+  - model does not exist
+  - model unsupported
+  - model unavailable
+  - model not available
+  - model deprecated
+  - model retired
+  - model disabled
+  - upstream failed
+  - upstream error
+  - upstream unavailable
+  - upstream timed out
+  - upstream timeout
+  - 404 unsupported
+  - 404 unavailable
+  - 404 not available
+  - 404 deprecated
+  - 404 retired
+  - 404 disabled
+```
+
+Eine Chat Completion ohne Streaming, die `200` mit einem leeren
+`choices`-Array zurückgibt, wird als `502` (`provider returned no choices`)
+behandelt und löst daher nach der Standardregel für `5xx` ein Failover aus.
+Jeder solche Versuch wird außerdem protokolliert und in
+`gomodel_empty_responses_total` gezählt.
+
+Streaming-Requests werden auf dieselbe Weise geprüft, bevor Bytes den Client
+erreichen. Ein `200`-Stream, der ohne Event endet, wird als `502`
+(`provider returned an empty stream`) behandelt, und ein Stream, dessen erstes
+Event ein `{"error": ...}`-Payload ist, schlägt mit dem Status fehl, den dieser
+Payload enthält (zum Beispiel ein In-Band-`429`), oder mit `502`, wenn er
+keinen enthält. Beide lösen nach den Standardregeln ein Failover aus. Die
+Response-Header warten auf dieses erste Event.
+
+[Fehlermodi von Providern](/de/advanced/provider-failure-modes) listet alle
+diese Fälle auf und zeigt, welche davon ein Failover auslösen.
+
+Beispiel: höchstens ein Backup versuchen, Timeouts als Failover-Grund
+behandeln, `429`-Responses aber weiterhin an den Client ausliefern und eine
+providerspezifische Überlastungsmeldung ergänzen:
+
+```yaml
+failover:
+  max_attempts: 1
+  retry_on_statuses: [408, 5xx]
+  retry_on_errors:
+    - model not found
+    - model does not exist
+    - upstream failed
+    - overloaded
+```
+
+Der Client erhält den Fehler des zuletzt versuchten Ziels. Mit
+`max_attempts: 1` meldet ein Request, der sein Limit ausschöpft, also den
+Fehler des Backups, nicht den des primären Ziels.
+
+## Migration von Failover-Regeln
+
+Frühere Releases verwalteten Failover als separate Zuordnungen pro Modell (das
+Shuffle-Symbol auf der Seite **Models** und die Konfiguration
+`failover.rules`). Beide werden automatisch umgewandelt:
+
+- Im Dashboard verwaltete Zuordnungen werden zu virtuellen Modellen mit der
+  Failover-Strategie, die ihr primäres Modell überdecken. Die Umwandlung läuft
+  einmalig beim Start und entfernt anschließend den alten
+  `failover_rules`-Speicher (in jeder seiner historischen Formen). Hat das
+  primäre Modell bereits eine einfache Einstellung pro Modell (eine
+  Verlangsamung oder Beschreibung, die über die Seite **Models** gesetzt
+  wurde), wird die Zuordnung darin zusammengeführt und die Einstellung
+  beibehalten. Ein primäres Modell, das bereits eine Weiterleitung oder eine
+  pfadbezogene Einstellung hat oder deaktiviert ist, wird protokolliert und
+  übersprungen, und der Speicher bleibt erhalten, bis dies aufgelöst ist –
+  fügen Sie seine Fallbacks als Ziele dieses virtuellen Modells mit der
+  Failover-Strategie hinzu und löschen Sie dann die Zeile. Eine Zuordnung,
+  deren Fallback ein virtuelles Modell nennt, das zurück zu ihrem primären
+  Modell routet, bleibt ebenso erhalten, da ihre Umwandlung einen Kettenzyklus
+  erzeugen würde – passen Sie dieses virtuelle Modell an oder entfernen Sie
+  es, und starten Sie dann neu. Ein primäres Modell, das in
+  `disabled_models` aufgeführt ist, wird als deaktiviertes virtuelles Modell
+  umgewandelt: Seine Fallbacks bleiben erhalten, aber inaktiv, bis Sie es auf
+  der Seite **Models** aktivieren.
+- `failover.rules`, `manual_rules_path`, `FAILOVER_RULES_JSON` und
+  `disabled_models` werden weiterhin geladen und bei jedem Start mit einer
+  Deprecation-Warnung in konfigurationsverwaltete virtuelle Modelle übersetzt.
+  Eine Regel, deren primäres Modell im Dashboard ein virtuelles Modell hat,
+  wird mit einer Warnung übersprungen, sodass sie das Routing dieses
+  virtuellen Modells nie ersetzt. Verschieben Sie die Regeln bei Gelegenheit
+  unter `virtual_models`.

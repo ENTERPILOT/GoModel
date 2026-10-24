@@ -1,0 +1,674 @@
+---
+title: "管理端点"
+description: "内置 REST API 和控制台，用于监控用量、预算、模型和网关健康状况。"
+icon: "server-cog"
+keywords: ["管理 API", "控制台", "REST API", "监控", "网关健康", "admin API", "dashboard", "monitoring", "gateway health"]
+---
+
+## 设计理念
+
+GoModel 的管理端点**默认启用**。目标很简单：部署 GoModel 后，您应能立即看到系统运行情况——无需额外服务、无需单独的监控栈、无需任何配置。
+
+管理层分为两个可独立控制的部分：
+
+1. **Admin REST API**（`/admin/*`）——机器可读的 JSON 端点，提供用量数据、预算和模型清单。与其他所有 API 路由一样，受 `GOMODEL_MASTER_KEY` 保护。
+2. **管理控制台 UI**（`/admin/dashboard`）——轻量级的内嵌 HTML 控制台，以可视化方式展示相同的数据。没有外部依赖，也无需安装 JavaScript 框架——它被编译进二进制文件中。
+
+两者都默认开启，因为可观测性不应需要手动开启。如果不需要，只需一个环境变量即可关闭。
+
+## 配置
+
+管理和控制台行为由环境变量（或等效的 `admin:` YAML 块）控制。完整的变量表、默认值以及等效的
+`admin:` YAML 块，请参阅[管理配置](/zh/advanced/configuration#管理)。
+
+<Note>
+  控制台 UI 依赖 REST API。如果您设置了
+  `ADMIN_ENDPOINTS_ENABLED=false` 但保留 `ADMIN_UI_ENABLED=true`，UI
+  会被自动禁用，并在日志中输出警告。
+</Note>
+
+## 认证
+
+Admin REST API 端点（`/admin/*`）接受以下两种凭据作为 Bearer Token：
+
+- **`GOMODEL_MASTER_KEY`**——始终拥有管理权限。
+- **具有控制台访问权限的托管 API 密钥**——托管密钥默认创建时*不带*控制台访问权限，因此分发给模型流量使用的密钥无法读取审计日志、签发新密钥或修改网关设置。使用缺少该权限的托管密钥发起的请求会返回 `403`，错误码为 `dashboard_access_denied`。
+
+<CodeGroup>
+
+```bash curl
+curl -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  http://localhost:8080/admin/usage/summary
+```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+summary = client.get("/admin/usage/summary", cast_to=httpx.Response)
+
+print(summary.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const summary = await client.get("/admin/usage/summary");
+console.log(summary);
+```
+
+</CodeGroup>
+
+您可以在控制台的 API Keys 页面上为每个密钥授予或撤销控制台访问权限，也可以在创建时设置（在 `POST /admin/auth-keys` 中使用 `"dashboard_access": true`），或在之后修改：
+
+<CodeGroup>
+
+```bash curl
+curl -X PUT http://localhost:8080/admin/auth-keys/<key-id>/dashboard-access \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"dashboard_access": true}'
+```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+auth_key = client.put(
+    "/admin/auth-keys/<key-id>/dashboard-access",
+    cast_to=httpx.Response,
+    body={"dashboard_access": True},
+)
+
+print(auth_key.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const authKey = await client.put(
+  "/admin/auth-keys/<key-id>/dashboard-access",
+  { body: { dashboard_access: true } },
+);
+
+console.log(authKey);
+```
+
+</CodeGroup>
+
+`GET /admin/auth-keys` 返回的每一行都包含 `restricted` 和 `effective_models`——即使用该密钥的请求实际可以调用的目录模型，已应用其用户路径策略、密钥自身的允许列表以及模型侧策略。
+
+要将密钥限制为特定模型，可在 `POST /admin/auth-keys` 中使用可选的 `allowed_models`（省略表示不设密钥级限制，与其他可选创建字段一致），或之后通过
+`PUT /admin/auth-keys/<key-id>/allowed-models` 设置（`{"allowed_models": ["anthropic/*", "openai/gpt-4o"]}`；
+显式传入空列表会解除密钥级限制；省略该字段会被拒绝）。组级和用户级允许列表通过[用户端点](#用户端点)管理。
+
+控制台访问权限只控制 `/admin/*`。模型端点和自助式 [`GET /v1/usage`](/zh/advanced/usage-api) 端点对所有托管密钥开放，但提供商透传路由（`/p/{provider}/...`）除外：托管密钥创建时不带透传访问权限，您可以通过在 `POST /admin/auth-keys` 中设置 `"passthrough_access": true` 或调用 `PUT /admin/auth-keys/<key-id>/passthrough-access` 来授予（参见[透传访问控制](/zh/features/passthrough-api#访问控制)）。
+
+### 从 LiteLLM 导入密钥
+
+`POST /admin/auth-keys/import` 通过 LiteLLM 为虚拟密钥存储的 SHA-256 哈希来添加该密钥，因此客户端可以继续发送相同的 `sk-...` Token。GoModel
+从不接收 Token 本身。
+
+```bash
+curl -X POST http://localhost:8080/admin/auth-keys/import \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "search-team",
+    "imported_from": "litellm",
+    "secret_hash": "<64-character hex token column from LiteLLM_VerificationToken>",
+    "redacted_value": "sk-...k6Hd",
+    "user_path": "/acme/search"
+  }'
+```
+
+它接受与 `POST /admin/auth-keys` 相同的可选字段（`description`、
+`user_path`、`labels`、`allowed_models`、`dashboard_access`、`expires_at`），
+并返回 `201` 和该密钥，此时密钥显示 `"imported_from": "litellm"`。
+`redacted_value` 是 LiteLLM 的 `key_name`，例如 `sk-...k6Hd`，默认值为
+`sk-...`。指向虚拟模型的 `allowed_models` 条目会被替换为该虚拟模型路由到的模型，因为 LiteLLM 密钥的模型列表使用的是模型组名称，而
+[允许列表](/zh/features/users#选择器)匹配的是解析后的模型。该列表只解析一次：之后重新设置虚拟模型的目标不会改变该密钥。
+导入此前已导入过的 Token 会更新该密钥并返回 `200`：更新其名称、路径、标签、允许的模型和过期时间。控制台访问权限和停用状态保持不变。`"enabled": false` 标记源系统中已被禁用的密钥：此前导入的密钥会被停用，其余保持不变；从未导入过的密钥则不会被创建（`204`）。如果哈希属于 GoModel 签发的密钥，则返回 `409`，错误码为 `auth_key_exists`。
+
+以 `sk-` 开头的 Token 只与导入的密钥比对，
+`sk_gom_` Token 只与 GoModel 签发的密钥比对。如果没有导入的密钥，
+`sk-` Token 会像以前一样被拒绝。停用导入的密钥与停用其他密钥的方式相同。导入端点需要全局管理权限。
+
+导入的密钥与 LiteLLM 密钥的强度完全相同。LiteLLM 允许您自定义密钥，例如 `sk-1234`；对于这类密钥，请改为创建新的 GoModel 密钥，而不要导入。
+
+### 作用域管理访问
+
+托管密钥的 `user_path` 同时限定了它可以管理的范围。具有控制台访问权限且没有 `user_path`（或为 `/`）的密钥是**全局管理员**，可以看到所有内容，与主密钥相同。绑定到 `/team/alpha` 的密钥是**作用域管理员**：它只能读取和管理 `/team/alpha` 及其子路径
+（`/team/alpha/service`、`/team/alpha/service/worker` 等）。
+`X-GoModel-User-Path` 请求头永远不会扩大密钥的作用域。
+
+SSO 会话等扩展身份遵循相同的规则：会话的用户路径就是它所管理的子树，因此扩展会将网关管理员绑定到 `/`，将团队管理员绑定到团队根路径。
+
+使用 `GET /admin/access` 可以查询某个凭据属于哪一种：
+
+```json
+{"scope": "global"}
+{"scope": "user_path", "user_path": "/team/alpha"}
+```
+
+对于作用域管理员：
+
+- 用量、审计、API 密钥、用户、预算和速率限制端点都会按作用域过滤。省略 `user_path` 过滤条件表示作用域根路径；作用域之外的
+  `user_path` 会返回 `403`，错误码为
+  `user_path_out_of_scope`。
+- 按 ID 访问、但属于其他子树的对象（审计条目、API 密钥）会返回 `404`，与对象不存在时完全一样。
+- 新建的 API 密钥和用户策略默认使用作用域根路径，且不能在作用域之外创建。以这种方式创建的具有控制台访问权限的密钥，相应地也是该子树的作用域管理员。
+- 密钥不能修改自身的标签、允许的模型或访问标志
+  （`403 auth_key_self_update`），但仍可以停用自身。设置了允许模型的密钥，只能为其创建或编辑的密钥授予它自己被允许的模型：`openai/*` 可以授予 `openai/gpt-4o-mini`，但不能授予
+  `anthropic/*` 或不受限制的密钥（`403 allowed_models_out_of_scope`）。
+  这些规则同样适用于全局密钥：全局密钥也不能导入模型范围更广的密钥，也不能重新导入自己的 Token，除非使用
+  `"enabled": false` 来停用它。
+- 只有用户路径预算和速率限制可见且可编辑；标签、提供商和模型规则作用于整个网关。
+- 网关级端点返回 `403`，错误码为 `admin_scope_denied`：提供商状态和凭据、运行时设置和刷新、API 密钥导入、标签设置、虚拟模型、工作流、护栏、MCP 服务器、定价覆盖、缓存概览、实时日志、Token 吞吐量、定价重新计算、预算和速率限制的全部重置，以及预算设置更新。控制台会隐藏相应的页面和操作。
+
+没有记录用户路径的行（例如使用主密钥且未带请求头发送的流量）仅对全局管理员可见。
+
+相同的作用域也适用于 `/v1` 生命周期对象；参见
+[用户路径 → 对象归属](/zh/features/user-path#对象归属)。
+
+控制台 UI 页面（`/admin/dashboard`）和静态资源（`/admin/static/*`）**跳过认证**，因此无需在浏览器中配置 API 密钥即可访问控制台外壳——但它加载的数据仍然需要具有控制台访问权限的密钥。
+
+<Warning>
+  如果您的 GoModel 实例可公开访问，请注意控制台
+  UI 不需要认证。请使用 `ADMIN_UI_ENABLED=false` 禁用它，或在网络层面限制访问。
+</Warning>
+
+## REST API 端点
+
+所有 Admin API 端点都挂载在 `/admin` 下。
+
+<Note>
+  **旧路径别名**——在 **2026-08-09** 之前，相同的端点也可以通过
+  `/admin/api/v1/*` 访问。旧路径上的响应带有
+  `Deprecation: true`、`Sunset: Sun, 09 Aug 2026 00:00:00 GMT`，以及指向新路径的 `Link`
+  响应头。迁移时，请在脚本中将 `/admin/api/v1/` 替换为
+  `/admin/`。另有一个端点在 `/admin` 内部迁移了位置：
+  `/admin/api/v1/dashboard/config` → `/admin/runtime/config`。
+</Note>
+
+### GET /admin/access
+
+返回调用方的管理作用域，便于脚本和控制台据此调整行为。参见
+[作用域管理访问](#作用域管理访问)。
+
+**响应：**
+
+```json
+{"scope": "user_path", "user_path": "/team/alpha"}
+```
+
+`scope` 为 `global`（主密钥，或没有 `user_path` 的密钥）或
+`user_path`；仅当凭据带有作用域时才会返回 `user_path`。
+
+### GET /admin/usage/summary
+
+返回可配置时间窗口内的 Token 用量汇总统计。
+
+**查询参数：**
+
+| 参数         | 类型   | 说明                                                     | 默认值               |
+| ------------ | ------ | -------------------------------------------------------- | -------------------- |
+| `start_date` | string | 范围起始日期，格式为 `YYYY-MM-DD`                        | 结束日期前 29 天     |
+| `end_date`   | string | 范围结束日期，格式为 `YYYY-MM-DD`                        | 今天                 |
+| `days`       | int    | 回溯窗口的简写（设置了日期时忽略）                       | `30`                 |
+| `cache_mode` | string | 统计哪些请求：`uncached`、`cached`、`all`（参见[缓存模式](#缓存模式)） | `uncached` |
+| `auth_key_id` | string | 发起请求所用托管认证密钥的精确 ID                       | —                    |
+
+使用 `start_date`/`end_date` 指定明确的范围，或使用 `days` 作为简写。两者同时提供时，以 `start_date`/`end_date` 为准。
+
+每条用量记录都会记下发起请求的托管认证密钥，因此
+`auth_key_id` 可以回答“这个密钥花了多少钱？”。除 `throughput` 外，`/admin/usage/*` 下的所有报表端点都接受该参数，`/admin/usage/log`
+的条目中也包含它。`/admin/usage/recalculate-pricing` 不接受此过滤条件。使用主密钥发起的请求，以及在该字段出现之前记录的行，都没有密钥 ID。
+
+```bash
+curl "http://localhost:8080/admin/usage/summary?auth_key_id=$KEY_ID" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+**响应：**
+
+```json
+{
+  "total_requests": 1542,
+  "total_input_tokens": 2450000,
+  "total_output_tokens": 890000,
+  "total_tokens": 3340000
+}
+```
+
+如果用量追踪已禁用，则返回全零值。
+
+### GET /admin/usage/daily
+
+返回可配置时间窗口内按周期划分的 Token 用量明细，按指定的间隔分组。
+
+**查询参数：**
+
+| 参数         | 类型   | 说明                                                     | 默认值               |
+| ------------ | ------ | -------------------------------------------------------- | -------------------- |
+| `start_date` | string | 范围起始日期，格式为 `YYYY-MM-DD`                        | 结束日期前 29 天     |
+| `end_date`   | string | 范围结束日期，格式为 `YYYY-MM-DD`                        | 今天                 |
+| `days`       | int    | 回溯窗口的简写（设置了日期时忽略）                       | `30`                 |
+| `interval`   | string | 分组方式：`daily`、`weekly`、`monthly`、`yearly`         | `daily`              |
+| `cache_mode` | string | 统计哪些请求：`uncached`、`cached`、`all`（参见[缓存模式](#缓存模式)） | `uncached` |
+
+响应中 `date` 字段的格式随间隔变化：`YYYY-MM-DD`（daily）、`YYYY-Www`（weekly）、`YYYY-MM`（monthly）或 `YYYY`（yearly）。
+
+**响应：**
+
+```json
+[
+  {
+    "date": "2026-02-17",
+    "requests": 84,
+    "input_tokens": 120000,
+    "output_tokens": 45000,
+    "total_tokens": 165000
+  },
+  {
+    "date": "2026-02-16",
+    "requests": 102,
+    "input_tokens": 155000,
+    "output_tokens": 58000,
+    "total_tokens": 213000
+  }
+]
+```
+
+如果用量追踪已禁用，或该周期内没有数据，则返回空数组。
+
+### GET /admin/usage/sessions
+
+返回按检测到的、以用户路径为作用域的会话分组的用量，结果分页且有上限，按会话最近活动时间排序。未检测到会话的行会被省略。
+
+请求数和 Token 总数包含本地响应缓存命中。成本总数只包含发往提供商的请求，因此因缓存而节省的成本不会被计为支出。
+
+**查询参数：**
+
+| 参数         | 类型   | 说明                                             | 默认值  |
+| ------------ | ------ | ------------------------------------------------ | ------- |
+| `days`       | int    | 天数                                             | `30`    |
+| `start_date` | string | 起始日期（`YYYY-MM-DD`）                         | —       |
+| `end_date`   | string | 结束日期（`YYYY-MM-DD`）                         | —       |
+| `session_id` | string | 检测到的会话的精确 ID                            | —       |
+| `auth_key_id` | string | 托管认证密钥的精确 ID                           | —       |
+| `user_path`  | string | 追踪的用户路径子树                               | —       |
+| `model`      | string | 精确的模型名称                                   | —       |
+| `provider`   | string | 提供商名称或类型                                 | —       |
+| `label`      | string | 精确的请求标签                                   | —       |
+| `limit`      | int    | 每页大小，上限为 200                             | `50`    |
+| `offset`     | int    | 分页偏移量                                       | `0`     |
+
+```json
+{
+  "entries": [
+    {
+      "session_id": "scoped-0123456789abcdef0123456789abcdef",
+      "user_path": "/team/alpha",
+      "requests": 8,
+      "input_tokens": 24000,
+      "output_tokens": 4100,
+      "total_tokens": 28100,
+      "input_cost": 0.42,
+      "output_cost": 0.16,
+      "total_cost": 0.58
+    }
+  ],
+  "total": 1,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+### GET /admin/usage/endpoints
+
+返回按请求端点分组的用量，便于您查看聊天、音频或嵌入的成本。每一行都带有其端点所属的 `operation`；含义相同的端点共用同一个 operation，因此 `/v1/chat/completions` 和
+`/v1/messages` 都属于 `chat_completions`。按 `operation` 对各行求和即可得到按操作划分的视图。对于网关未归类的端点，会省略 `operation`。
+
+它接受日期范围参数（`days`、`start_date`、`end_date`）以及数据过滤条件 `model`、`provider`、`label`、`user_path`、`session_id`、
+`auth_key_id`、`endpoint`、`operation` 和 `cache_mode`。
+
+```json
+[
+  {
+    "endpoint": "/v1/audio/transcriptions",
+    "operation": "audio_transcriptions",
+    "requests": 42,
+    "input_tokens": 0,
+    "output_tokens": 18000,
+    "total_tokens": 18000,
+    "input_cost": 0,
+    "output_cost": 1.26,
+    "total_cost": 1.26
+  },
+  {
+    "endpoint": "/v1/messages",
+    "operation": "chat_completions",
+    "requests": 310,
+    "input_tokens": 920000,
+    "output_tokens": 140000,
+    "total_tokens": 1060000,
+    "input_cost": 2.76,
+    "output_cost": 2.1,
+    "total_cost": 4.86
+  }
+]
+```
+
+### 端点和操作过滤条件
+
+除 `throughput` 外，`/admin/usage/*` 下的所有报表端点以及
+`/admin/cache/overview` 都接受两个端点过滤条件：
+
+| 参数        | 说明                                                               |
+| ----------- | ------------------------------------------------------------------ |
+| `endpoint`  | 以逗号分隔的精确请求端点，例如 `/v1/chat/completions,/v1/messages` |
+| `operation` | 以逗号分隔的操作；如果某行的端点属于其中任意一个，即视为匹配       |
+
+操作包括：`chat_completions`、`responses`、`conversations`、`embeddings`、
+`batches`、`files`、`audio_speech`、`audio_transcriptions`、
+`audio_translations`、`image_generations`、`image_edits`、`realtime`、`mcp`、
+`systemone` 和 `provider_passthrough`。未知的操作会返回 `400`。
+提供商透传流量（`/p/{provider}/...`）一律计为
+`provider_passthrough`，无论它到达上游的哪个端点。
+
+```bash
+# 过去 30 天音频花了多少钱？
+curl "http://localhost:8080/admin/usage/summary?operation=audio_speech,audio_transcriptions,audio_translations" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+两者都接受列表，因此您可以比较不同方言，或将它们汇总：
+
+```bash
+# Chat Completions、Responses 和 Messages 合计
+curl "http://localhost:8080/admin/usage/summary?endpoint=/v1/chat/completions,/v1/responses,/v1/messages" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+`/admin/usage/log` 还会将其 `search` 文本与端点进行匹配。
+
+### 缓存模式
+
+每次[响应缓存](/zh/features/cache)命中都会被记录为一条用量条目，带有调用方的 `user_path` 以及值为 `exact` 或 `semantic` 的 `cache_type`。用量端点默认不包含这些条目，因此请求数、Token 数和成本都反映的是提供商支出。传入 `cache_mode` 可以改变这一行为：
+
+| 值         | 统计范围                                                  |
+| ---------- | --------------------------------------------------------- |
+| `uncached` | 仅发往提供商的请求——默认值                                |
+| `cached`   | 仅本地缓存命中——即缓存免费提供的部分                      |
+| `all`      | 两者都包含，即网关的总请求量                              |
+
+```bash
+curl "http://localhost:8080/admin/usage/summary?user_path=/team/alpha&cache_mode=all" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+接受该参数的端点有：`/admin/usage/summary`、`/admin/usage/daily`、`/admin/usage/log`、
+`/admin/usage/models`、`/admin/usage/labels`、`/admin/usage/user-paths`、
+`/admin/usage/endpoints` 以及
+`/v1/usage`（参见[用量 API](/zh/advanced/usage-api#缓存模式)）。无法识别的值会回退为 `uncached`。`/admin/usage/sessions` 会忽略该参数：会话的请求数和 Token 总数始终包含缓存命中，而其成本字段只统计提供商部分。
+
+有两个端点按设计忽略该参数：`/admin/cache/overview` 始终只报告缓存命中，`/admin/usage/sessions` 始终包含缓存命中（其成本字段只统计提供商部分）。
+
+### GET /admin/audit/stats
+
+返回按时间分桶、并按 `2xx`/`4xx`/`5xx` 状态类别分组的请求数，以及整体成功率汇总和每个提供商的平均请求耗时。控制台 Overview 页面上的 "Requests by Status" 和 "Provider Latency" 图表即基于此端点。数据来自审计日志（审计日志默认启用；
+`LOGGING_ENABLED`）。
+
+**查询参数：**
+
+| 参数         | 类型   | 说明                                                     | 默认值               |
+| ------------ | ------ | -------------------------------------------------------- | -------------------- |
+| `start_date` | string | 范围起始日期，格式为 `YYYY-MM-DD`                        | 结束日期前 29 天     |
+| `end_date`   | string | 范围结束日期，格式为 `YYYY-MM-DD`                        | 今天                 |
+| `days`       | int    | 回溯窗口的简写（设置了日期时忽略）                       | `30`                 |
+
+不超过 3 天的范围使用小时分桶（`"interval": "hour"`）；更长的范围使用按天分桶（`"interval": "day"`）。从范围起始到当前时间的分桶会以零值填充。
+
+**响应：**
+
+```json
+{
+  "interval": "day",
+  "buckets": [
+    {
+      "start": "2026-02-17T00:00:00Z",
+      "requests": 84,
+      "status_2xx": 80,
+      "status_4xx": 3,
+      "status_5xx": 1,
+      "status_other": 0
+    }
+  ],
+  "summary": {
+    "requests": 84,
+    "status_2xx": 80,
+    "status_4xx": 3,
+    "status_5xx": 1,
+    "status_other": 0,
+    "success_rate": 0.952,
+    "avg_duration_ms": 812.4
+  },
+  "provider_latency": [
+    {
+      "provider": "openai",
+      "requests": [78],
+      "avg_duration_ms": [795.1]
+    }
+  ]
+}
+```
+
+每个 `provider_latency` 序列都与 `buckets` 按索引一一对应。如果某个分桶中该提供商没有成功处理任何请求，对应条目为
+`null`；平均值只涵盖到达提供商的成功（2xx）请求——本地响应缓存命中和失败的请求不计入。如果审计日志已禁用，则返回空分桶。
+
+### 预算端点
+
+预算在 `/admin/budgets` 下管理。这些端点仅在启用预算管理时可用。
+
+| 方法     | 路径                                  | 说明                                 |
+| -------- | ------------------------------------- | ------------------------------------ |
+| `GET`    | `/admin/budgets`               | 列出预算及其当前状态                 |
+| `PUT`    | `/admin/budgets/{user_path}/{period}` | 创建或更新一个预算                   |
+| `DELETE` | `/admin/budgets/{user_path}/{period}` | 删除一个预算                         |
+| `GET`    | `/admin/budgets/settings`      | 读取预算重置设置                     |
+| `PUT`    | `/admin/budgets/settings`      | 更新预算重置设置                     |
+| `POST`   | `/admin/budgets/reset-one`     | 重置一个预算周期                     |
+| `POST`   | `/admin/budgets/reset`         | 重置所有预算周期                     |
+
+`PUT`、`DELETE` 和 `reset-one` 通过复合键
+`(user_path, period)` 来标识一个预算，对于自定义周期则使用 `(user_path, period_seconds)`。
+这些操作并非按周期全局生效。对于带路径作用域的 `PUT` 和
+`DELETE` 路由，请对 `user_path` 进行 URL 编码；请求格式参见[预算](/zh/features/budgets)。
+
+请求示例和执行行为参见[预算](/zh/features/budgets)。
+
+### 用户端点
+
+| 方法     | 端点                                 | 说明                                          |
+| -------- | ------------------------------------ | --------------------------------------------- |
+| `GET`    | `/admin/users`                       | 带模型允许列表的用户路径树                    |
+| `PUT`    | `/admin/users`                       | 创建或替换一个节点的策略                      |
+| `DELETE` | `/admin/users?user_path=<path>`      | 删除一个节点的策略                            |
+
+`GET /admin/users` 返回网关已知的每个节点——已存储的策略、托管 API 密钥的用户路径及其祖先节点——按路径排序：
+
+```json
+{
+  "users": [
+    {
+      "user_path": "/acme",
+      "allowed_models": ["openai/", "anthropic/"],
+      "configured": true,
+      "key_count": 0,
+      "inherited_from": [],
+      "restricted": true,
+      "effective_models": ["openai/gpt-4o", "anthropic/claude-sonnet-4-6"],
+      "created_at": "2026-08-30T10:00:00Z",
+      "updated_at": "2026-08-30T10:00:00Z"
+    },
+    {
+      "user_path": "/acme/eng/alice",
+      "allowed_models": [],
+      "configured": false,
+      "key_count": 2,
+      "inherited_from": ["/acme"],
+      "restricted": true,
+      "effective_models": ["openai/gpt-4o", "anthropic/claude-sonnet-4-6"]
+    }
+  ]
+}
+```
+
+`allowed_models` 是节点自身的列表，采用规范形式（`anthropic/` 表示提供商通配符，`/` 表示全部）；`inherited_from` 列出其列表同样适用的祖先节点。`effective_models` 是路径级别的结果——节点自身的列表、祖先节点的列表以及模型侧的虚拟模型策略——通过推理时使用的同一授权器计算得出；托管 API 密钥自身的 `allowed_models` 可能会进一步缩小请求范围。空列表且 `restricted: true` 表示该节点的各个列表交集为空。对于仅由密钥或后代节点隐含存在的节点，`configured` 为 `false`；`managed: true` 标记在配置中声明的策略，这些策略在此处只读（`409`，错误码 `user_managed`）。
+
+`PUT /admin/users` 接受 `{"user_path": "/acme/eng", "allowed_models": ["anthropic/*"], "description": "..."}`
+并返回更新后的树。选择器会根据已配置的提供商进行校验。匹配规则参见[用户](/zh/features/users)。
+
+### GET /admin/models
+
+返回所有已注册的模型，同时包含提供商类型和已配置的提供商名称。
+
+**响应：**
+
+```json
+[
+  {
+    "model": {
+      "id": "gpt-4o",
+      "object": "model",
+      "created": 1715367049,
+      "owned_by": "system"
+    },
+    "provider_type": "openai",
+    "provider_name": "openai_primary",
+    "selector": "openai_primary/gpt-4o"
+  },
+  {
+    "model": {
+      "id": "claude-sonnet-4-5-20250929",
+      "object": "model",
+      "created": 1727568000,
+      "owned_by": "system"
+    },
+    "provider_type": "anthropic",
+    "provider_name": "anthropic_main",
+    "selector": "anthropic_main/claude-sonnet-4-5-20250929"
+  }
+]
+```
+
+它与标准的 `/v1/models` 端点不同：管理版本为每个模型同时提供 `provider_type` 和 `provider_name`，便于您同时了解提供商系列以及为该模型提供服务的具体提供商实例。
+
+
+### GET /admin/models/metadata
+
+返回某个模型元数据的来源：网关对外提供的合并后元数据（`effective`）以及参与合并的每一层。`provider` 是提供商在其自身模型列表中报告的内容，`catalog` 是
+[ai-model-list](https://github.com/ENTERPILOT/ai-model-list) 中的条目，
+`config` 是 `config.yaml` 中的元数据覆盖；值为 `null` 的层表示该层对此模型一无所知。`sources` 指明每个有效字段胜出的层
+（`config`、`provider`、`catalog`，或 `inferred`，表示根据模型 ID 推断出的模式）。优先级参见[模型元数据](/zh/advanced/model-metadata)。
+
+控制台的 **Models** 页面在展开某一行时会获取此数据。不会为此额外存储任何内容：各层数据本就按模型保存，目录条目则按需解析。
+
+**查询参数：**
+
+- `provider`（必填）：提供商实例名称或提供商类型
+- `model`（必填）：上游原始模型 ID
+
+**响应：**
+
+```json
+{
+  "selector": "local/gemma-3-4b-it",
+  "effective": { "display_name": "Gemma (local)", "modes": ["chat"], "context_window": 4096 },
+  "provider": { "context_window": 4096 },
+  "catalog": { "display_name": "Gemma 3 4B IT", "modes": ["chat"], "context_window": 131072 },
+  "config": { "display_name": "Gemma (local)" },
+  "sources": {
+    "display_name": "config",
+    "context_window": "provider",
+    "modes": "catalog",
+    "categories": "catalog"
+  }
+}
+```
+
+缺少参数时返回 `400`，模型未注册时返回 `404`。
+
+### 插件、护栏和工作流端点
+
+| 方法 | 路径 | 说明 |
+| ------ | ---- | ----------- |
+| `GET` | `/admin/plugins` | 所有已加载的插件类型：`name` 及其标题 `label`、清单、钩子类型、配置 Schema、来源、健康状况，以及是否为 `guardrail` |
+| `GET` | `/admin/guardrails/types` | 护栏类型及其编辑器 Schema、`phases`、`source`、`mutates` 和 `guardrail` |
+| `GET` | `/admin/guardrails` | 护栏实例，包含 `fail_mode`、`timeout_ms`、`phases`、`summary` 和 `guardrail` |
+| `PUT` | `/admin/guardrails` | 创建或更新一个实例（接受 `fail_mode` 和 `timeout_ms`；如果新类型缺少某个活动工作流使用该实例时所需的阶段，则会被拒绝） |
+| `DELETE` | `/admin/guardrails` | 删除一个实例（仍有活动工作流引用它时会被拒绝） |
+| `GET` | `/admin/workflows/guardrails` | 可用于工作流步骤的实例，以及每个实例支持的 `phases` |
+| `GET` | `/admin/workflows` | 活动工作流；视图带有按阶段划分的 `chain_hashes` |
+| `POST` | `/admin/workflows` | 创建一个工作流版本（`schema_version: 2`，配合 `steps[].phase`；仍接受版本 1） |
+
+响应格式参见[插件](/zh/advanced/plugins#管理端点)
+和[工作流](/zh/advanced/workflows#护栏步骤)。插件系统关闭时（`PLUGINS_ENABLED=false` 且 `GUARDRAILS_ENABLED=false`），插件和护栏端点返回 `503`，错误码为 `feature_unavailable`。
+
+## 管理控制台
+
+控制台是嵌入在 GoModel 二进制文件中的服务端渲染 HTML 页面。访问地址：
+
+```
+http://localhost:8080/admin/dashboard
+```
+
+它使用与上述 REST API 端点相同的数据，以可视化方式概览用量统计和已注册的模型。
+
+当 `DASHBOARD_LIVE_LOGS_ENABLED=true` 时，控制台会打开
+`GET /admin/live/logs`，以流式方式接收精简的审计/用量生命周期预览。这样，Audit Logs 和 Usage 页面可以在异步数据库写入完成之前，就展示请求在工作流中的处理进度。该流使用序列游标、有界重放和心跳事件，因此重新连接的浏览器可以在短暂断网后追上进度。
+
+持久化的审计表和用量表仍然是可信数据源。如果浏览器的游标超出了重放缓冲区，流会发送重置事件，控制台随后通过常规 REST 端点重新加载数据。
+
+## 禁用管理功能
+
+禁用所有管理功能：
+
+```bash
+export ADMIN_ENDPOINTS_ENABLED=false
+```
+
+这会同时禁用 REST API 和控制台 UI。如果要保留 API 但隐藏控制台：
+
+```bash
+export ADMIN_ENDPOINTS_ENABLED=true
+export ADMIN_UI_ENABLED=false
+```
+
+<Tip>
+  管理层被设计为可平滑降级。如果用量追踪已关闭，
+  用量端点会返回空结果而不是错误。如果模型注册表尚未就绪，模型端点会返回空数组。无论如何，网关都会继续运行。
+</Tip>

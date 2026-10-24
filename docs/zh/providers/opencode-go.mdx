@@ -1,0 +1,107 @@
+---
+title: "OpenCode Go：基础 URL 与兼容 OpenAI 的端点"
+sidebarTitle: "OpenCode Go"
+description: "通过兼容 OpenAI 的端点，在 GoModel 中配置 OpenCode Zen（Go 订阅）。"
+icon: "terminal"
+keywords: ["OpenCode Zen", "OpenCode Go", "OPENCODE_GO_BASE_URL", "OpenCode Go 端点", "提供商配置", "OpenCode Go endpoint", "provider setup"]
+---
+
+[OpenCode Zen](https://opencode.ai/docs/zen/) 通过兼容 OpenAI 的 API 提供其 “Go” 订阅模型。GoModel 内置了原生的 `opencode_go` 提供商，并为其设置了默认基础 URL，因此您只需提供 API 密钥。
+
+## 配置
+
+```bash
+OPENCODE_GO_API_KEY=sk-...
+# 可选：覆盖默认端点。
+# OPENCODE_GO_BASE_URL=https://opencode.ai/zen/go/v1
+```
+
+或者在 `config.yaml` 中配置：
+
+```yaml
+providers:
+  opencode_go:
+    type: opencode_go
+    api_key: "${OPENCODE_GO_API_KEY}"
+    # 可选：覆盖默认端点。
+    # base_url: "https://opencode.ai/zen/go/v1"
+```
+
+默认基础 URL 为 `https://opencode.ai/zen/go/v1`。认证使用 `Authorization: Bearer <api_key>`，密钥在 OpenCode Zen 控制台中生成。
+
+## 模型
+
+`GET /v1/models` 会代理 OpenCode Zen 的模型列表，提供 `glm-5.1`、`kimi-k2.7-code`、`deepseek-v4-pro` 和 `mimo-v2.5-pro` 等 ID。如果只需要其中一部分，可以通过配置列表限制对外公布的模型集合：
+
+```bash
+OPENCODE_GO_MODELS=glm-5.1,kimi-k2.7-code,deepseek-v4-pro
+```
+
+## 端点
+
+OpenCode Zen 在 OpenAI 风格的 `/chat/completions`（Bearer 认证）上提供大多数模型，另有少数模型仅在 Anthropic 原生的 `/messages` 端点（`x-api-key` 认证）上提供。GoModel 按模型进行路由：
+
+- **OpenAI 风格的模型**（GLM、Kimi、DeepSeek、MiMo、MiniMax 以及大多数 Qwen）发送到 `/chat/completions`。`/models` 和 `/v1/responses`（转换为聊天补全）使用同一路径。
+- **仅支持 Anthropic 格式的模型**会被转换为 Anthropic Messages 格式并发送到 `/messages`，这与 GoModel 处理原生 Anthropic 的方式一致。两条路径都会规范化为相同的兼容 OpenAI 的响应，因此无论客户端选择哪个模型，也无论调用的是 `/v1/chat/completions` 还是 `/v1/messages`，看到的都是一致的接口。
+
+仅支持 `/messages` 的模型集合目前需要手动维护（默认值：`qwen3.7-max`），因为 OpenCode Zen 尚未提供按模型区分的端点元数据。需要时可以覆盖它：
+
+```bash
+OPENCODE_GO_MESSAGES_MODELS=qwen3.7-max
+```
+
+<Note>
+  这种手动划分是临时措施；一旦上游模型列表能够区分端点，就会被基于元数据的路由所取代。
+</Note>
+
+## 会话请求头
+
+OpenCode Zen 要求每个客户端发送 `x-opencode-session` 请求头，以便将同一个对话路由到同一个上游，并保持其提示词缓存处于预热状态。上游已宣布，不带该请求头的请求可能会开始失败。GoModel 默认会为每个 OpenCode Go 请求添加该请求头（`/chat/completions` 和 `/messages` 路径均是如此），并使用第一个可用的值：
+
+1. 客户端发送的 `x-opencode-session` 请求头（来自 OpenCode 本身、pi 以及其他使用 OpenCode Zen 格式的工具）会被原样转发。
+2. 否则，使用 GoModel 通过[会话保持](/zh/features/session-keeping)检测到的会话：OpenCode 的 `X-Session-Id`、Claude Code 的会话 id、请求体中的会话字段，或者对于完全不发送任何信号的智能体，使用根据内容派生的 `auto-…` id。
+
+无法检测到会话的请求在发送时不带该请求头。按照上游[使用准则](https://opencode.ai/docs/go/#where-can-i-use-it)的要求，GoModel 还会通过 `x-opencode-client`（如果客户端提供了自己的值则转发该值，否则为 `gomodel`）和 `gomodel/<version>` User-Agent 标识自身。
+
+仅在上游要求时才禁用会话转发：
+
+```bash
+OPENCODE_GO_SESSION_HEADER=false
+```
+
+## 推理
+
+部分 OpenCode Zen 模型始终会进行思考，并拒绝省略推理参数的请求：
+
+```text
+[1210] This model always engages in thinking and cannot be disabled; please use low, high, or max
+```
+
+因此，当请求完全没有携带推理参数时，GoModel 会在 `/chat/completions` 上发送 `reasoning_effort: "low"`。忽略该参数的模型不受影响。可以按部署提高默认值：
+
+```bash
+OPENCODE_GO_DEFAULT_REASONING_EFFORT=high
+```
+
+将其设置为 `none`（或 `off`）则不注入任何内容，请求会原样转发。
+
+当客户端自行请求推理时，控制权仍在客户端：如果显式设置了 `reasoning.effort` 或顶层的 `reasoning_effort`，则不会注入任何内容。GoModel 可识别的推理强度级别会映射到 OpenCode Zen 所接受的 low / high / max 集合中最接近的值：
+
+| 请求的强度         | 发送到上游的值 |
+| ------------------------ | ------------- |
+| `none`、`minimal`、`low` | `low`         |
+| `medium`                 | `low`         |
+| `high`                   | `high`        |
+| `xhigh`、`max`           | `max`         |
+
+任何其他值（例如 `turbo`）会原样转发，由上游自行判断。`reasoning.effort` 是 GoModel 的规范字段，因此同时设置了它和顶层 `reasoning_effort` 的请求，会以映射后的 `reasoning.effort` 发送，这与 GoModel 其他所有提供商采用的优先级相同。
+
+路由到 `/messages` 的模型改用 Anthropic 的 thinking 格式，不受此映射影响。
+
+## DeepSeek 模型
+
+以 `deepseek` 开头的模型 ID 会获得与原生 DeepSeek 提供商相同的请求处理（包括通过虚拟模型路由到它们时）：存在工具时，会为之前的助手轮次填充 `reasoning_content`；`json_schema` 结构化输出遵循 `DEEPSEEK_JSON_SCHEMA_MODE`。详情请参阅 [DeepSeek](/zh/providers/deepseek#结构化输出)。
+
+## 不支持的功能
+
+- 嵌入（返回 `invalid_request_error`）。

@@ -1,0 +1,71 @@
+---
+title: "Roadmap"
+description: "Die GoModel-Roadmap, aufgeteilt in kommerzielle Features und die öffentlichen Meilensteine 0.2.0 und 0.3.0."
+icon: "list-todo"
+keywords: ["Roadmap", "Meilensteine", "geplante Features", "Releases", "roadmap", "milestones"]
+---
+
+## Roadmap zu 0.2.0
+
+- [ ] Verbesserung bzw. Neukonzeption der Teststrategie
+- [ ] Härtung der Guardrails: bessere UI, einfachere Architektur, einfachere benutzerdefinierte Guardrails sowie Response-seitige Guardrails, die angewendet werden, bevor die Ausgabe den Client erreicht
+- [x] Ausarbeitung des angepassten Code of Conduct
+- [x] Plugins – mindestens für Guardrails
+- [x] Unterstützung für OpenTelemetry (OTel)
+- [x] Vollständige Unterstützung des OpenAI-`/conversations`-Lebenszyklus
+- [x] Vollständige Unterstützung des OpenAI-`/responses`-Lebenszyklus
+- [x] Anthropic-kompatibler `/messages`-Eingang und `/messages/count_tokens`
+- [x] Budgetverwaltung mit Limits pro `user_path` und/oder API-Key
+- [x] Bearbeitbare Modellpreise für genaue Kostenerfassung und Budgetierung
+- [x] Sichtbarkeit des Prompt-Cachings: Anzeige, welcher Anteil jedes Prompts vom Provider gecacht wurde
+- [x] UI-Sichtbarkeit für Prompt-Caching und die Nutzung des lokalen Cache
+- [x] Korrigierte Failover-Diagramme im Dashboard
+
+## Roadmap zu 0.3.0
+
+- [ ] Härtung und Erweiterung der MCP-Proxy-Features
+- [ ] Verbesserung der Gesamtqualität und Einfachheit von Konfiguration und UI
+- [ ] Überdenken und Überarbeiten der Passthrough-API
+- [ ] Unterstützung der nativen Gemini-API und Übersetzung nativer Gemini-API-Aufrufe in andere Dialekte
+- [ ] Verbesserungen bei der Korrektheit der Standardpreise
+  - [ ] Einrichtung eines KI-Kurators bzw. -Agenten, der die Preise auf den Websites der Provider überwacht
+- [ ] Verbesserung der Performance der UI und der Audit-Log-Ansicht
+- [ ] Verbesserung der Ausfallsicherheits-Features (expliziter Fehler + Failover für Fälle wie ein vLLM, das mitten im Streaming stoppt usw.)
+- [ ] Erleichterung der Migration von LiteLLM zu GoModel
+  - [x] Konverter `gomodel migrate litellm` für config.yaml und [Migrationsleitfaden](/de/guides/migrate-from-litellm)
+  - [x] Import von virtuellen Keys, Teams, Benutzern, Budgets und Rate-Limits aus der LiteLLM-Datenbank
+  - [ ] Übernahme der LiteLLM-Ausgaben
+- [ ] Bessere Unterstützung für /audio-bezogene Endpunkte und Modalitäten
+- [ ] Bessere Unterstützung für Videogenerierung (Speichern von Artefakten und mehr)
+- [ ] Provider-nativer Passthrough für alle Provider, über die aktuelle Beta-Abdeckung hinaus
+- [ ] Failover für die Bild-Endpunkte, damit Bildgenerierung und -bearbeitung wie bei Chat auf andere Provider ausweichen können
+- [ ] Streaming-Bildgenerierung (SSE-Weiterleitung von Teilbildern auf `/v1/images/*`)
+- [ ] Härtung der Plugins
+- [ ] Modelleigenschaften stärker über Attribute der Datei models.json als über Modellnamen steuern
+  - [ ] \<think\>- / \<thinking\>-Blöcke statt eines separaten Felds in der Response
+  - [ ] Unterstützte Endpunkte pro Modell
+- [ ] Anpassbares Dashboard (mehr Diagramme, mehr sichtbare Daten, Wasserfalldiagramme)
+- [ ] Überarbeitung der Workflows mit besserer UI/UX und flexiblerem Design
+
+## Kommerzielle Features (Pro-/Enterprise-Version)
+
+- [x] Intelligentes Routing ([GoModel Pro](/de/pro/intelligent-routing), Beta)
+- [x] Komprimierung des Kontextfensters ([GoModel Pro](/de/pro/compression))
+- [x] OIDC-Single-Sign-On ([GoModel Pro](/de/pro/sso))
+- [x] Egress-Proxy-Pools mit Health Checks und Failover ([GoModel Pro](/de/pro/egress), Beta; `proxy_url` pro Provider ist im [Core](/de/providers/outbound-proxy) enthalten)
+- [ ] Cluster-Modus
+- [ ] LDAP-Integration
+- [ ] Rollenbasierte Zugriffskontrolle (RBAC) für Dashboard und Admin API
+- [ ] Integrationen von Secret-Managern (Vault, AWS Secrets Manager/KMS, Azure Key Vault, GCP Secret Manager) in GoModel Pro; [Secret-Referenzen](/de/advanced/secret-references) mit `env` und `file` sind im Core enthalten
+- [ ] Export/Streaming von Audit-Logs in Object Storage und Data Lakes
+- [ ] IP-/CIDR-Allowlists
+- [ ] LTS-Kanal mit signierten Artefakten, SBOM und Vorabbenachrichtigung zu CVEs
+- [ ] SAML 2.0 + SCIM-Verzeichnissynchronisation
+
+## Haben Sie Vorschläge?
+
+Die Roadmap richtet sich danach, was Benutzer tatsächlich brauchen – sagen Sie uns, was fehlt:
+
+- Chatten Sie mit uns auf [Discord](https://discord.gg/gaEB9BQSPH)
+- Melden Sie ein Problem oder wünschen Sie sich ein Feature auf [GitHub](https://github.com/ENTERPILOT/GoModel/issues)
+- [Vereinbaren Sie ein kurzes Gespräch](https://cal.com/jakubw/30) mit dem Team

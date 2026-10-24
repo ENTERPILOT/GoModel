@@ -1,0 +1,212 @@
+---
+title: "Anthropic"
+description: "在 GoModel 中配置 Anthropic（Claude），并了解推理强度如何映射到 Claude 的自适应思考和 effort 控制。"
+icon: "sparkles"
+keywords: ["Anthropic", "Claude", "推理强度", "扩展思考", "提供商配置", "reasoning effort", "extended thinking", "provider setup"]
+---
+
+配置 Anthropic 只需要一个 API 密钥。本页专门说明一个特殊之处：GoModel 如何将 OpenAI 风格的 `reasoning.effort` 参数映射到 Claude 原生的思考和 effort 控制上，而这些控制因模型代际而异。
+
+## 配置
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...
+# ANTHROPIC_BASE_URL=https://api.anthropic.com/v1   # 可选的覆盖值
+# ANTHROPIC_DEFAULT_MAX_TOKENS=4096                 # 调用方省略 max_tokens 时注入
+```
+
+或在 `config.yaml` 中：
+
+```yaml
+providers:
+  anthropic:
+    type: anthropic
+    api_key: "${ANTHROPIC_API_KEY}"
+```
+
+<Note>
+  Anthropic 的 `/v1/messages` 要求每个请求都带有 `max_tokens`。当调用方省略该字段时，GoModel
+  会注入 `ANTHROPIC_DEFAULT_MAX_TOKENS`（默认 `4096`），使兼容 OpenAI 的接口保持宽松。
+</Note>
+
+## Claude 订阅（OAuth Token）
+
+GoModel 也接受 Claude 订阅的 OAuth Token 作为 Anthropic 凭据。使用 `claude setup-token` 生成一个 Token（需要 Claude 订阅——Pro、Max、Team 或 Enterprise——以及 Claude Code CLI），并将其设置为提供商密钥：
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-oat01-...
+```
+
+带有 `sk-ant-oat` 前缀的 Token 会被自动识别：GoModel 会将其作为 `Authorization: Bearer` 发送，并附带 `oauth-2025-04-20` beta，而不是使用
+`x-api-key`。无需额外配置。
+
+<Warning>
+  Anthropic 仅授权订阅 OAuth Token 用于 **Claude Code 流量**。您可以借此让自己的 Claude Code 通过 GoModel 路由（参见
+  [Claude Code 指南](/zh/guides/claude-code)）；来自其他客户端的请求会被上游拒绝，并返回 "This credential is only authorized for use with
+  Claude Code"。Claude Code 使用范围之外的端点（例如模型列表）也可能被拒绝——如果提供商的模型发现失败，请为该提供商显式配置
+  `models` 列表。
+</Warning>
+
+## 推理强度映射
+
+GoModel 既接受 OpenAI 格式的 `"reasoning": {"effort": "..."}` 对象，也接受 Chat Completions 的字符串形式 `"reasoning_effort": "..."`（两者同时存在时，以非空的 `reasoning.effort` 为准；空对象会回退到字符串形式），并将其转换为 Claude 的原生控制。可接受的五个级别是 `low`、`medium`、`high`、`xhigh` 和 `max`；匹配时不区分大小写，其他任何值都会被降级为 `low` 并记录日志。转换方式取决于模型是否支持**自适应思考**。
+
+| 模型代际 | 思考配置 | effort 去向 |
+| ---------------- | --------------- | ------------------ |
+| 自适应——`claude-fable-5`、`claude-fable-5-1`、`claude-mythos-5`、`claude-mythos-5-1`、`claude-opus-5`、`claude-sonnet-5`、`claude-opus-4-8`、`claude-opus-4-7`、`claude-opus-4-6`、`claude-sonnet-4-6`（及其各自带日期的快照） | `thinking: {type: "adaptive"}` | `output_config.effort`（直接透传） |
+| 旧版（其他所有模型，例如 `claude-opus-4-5`、`claude-3-5-sonnet`） | `thinking: {type: "enabled", budget_tokens: N}` | 映射为 Token 预算 |
+
+<Note>
+  自适应路由使用显式的允许列表，而不是版本比较。新的模型 ID 在加入列表之前都会被视为旧版。对于 4.7 之前的模型，旧版回退方式通过 `budget_tokens` 继续有效；而从 Opus 4.7
+  起的模型会直接拒绝 `budget_tokens`，因此仅支持自适应思考的新模型 ID 在被加入允许列表之前，会因上游返回 400 而失败。
+</Note>
+
+对于旧版模型，effort 字符串会映射为思考预算；必要时会将 `max_tokens` 提高到预算之上。`xhigh` 和 `max` 是仅限自适应思考的级别，因此在旧版模型上它们会被限制为 `high` 的预算，而不是将
+`max_tokens` 抬高到超出这些模型所能输出的范围：
+
+| Effort | 预算 Token 数 |
+| ------ | ------------- |
+| `low` | 5000 |
+| `medium` | 10000 |
+| `high` / `xhigh` / `max` | 20000 |
+
+<Note>
+  省略 `reasoning` 即可让思考保持模型的默认行为。只有当您传入 `reasoning.effort`（或
+  `reasoning_effort`）时，GoModel 才会设置 `thinking: {type: "adaptive"}`。不传入时，
+  Opus 4.6 到 4.8 以及 Sonnet 4.6/5 不会启用扩展思考，而
+  Fable 5/5.1、Mythos 5/5.1 和 Opus 5 会自行进行自适应思考（参见下方关于始终开启的说明）。Effort 是一个独立的控制项，无论是否启用思考，它都控制整体 Token 支出（文本和工具调用）；未设置时，Anthropic 将其默认为 `high`。它是关于深度和详略程度的行为信号，而不是硬性预算——实际用量因请求而异，并受 `max_tokens` 限制。
+</Note>
+
+<Note>
+  Effort 级别在上游按模型限定：`xhigh` 适用于 Fable 5/5.1、
+  Opus 5、Sonnet 5 和 Opus 4.8/4.7；`max` 适用于上述模型以及 Opus 4.6 和
+  Sonnet 4.6。GoModel 会转发您发送的级别；如果目标模型不支持该级别，Anthropic 会返回 400 拒绝。从 Opus 4.7 起，手动 `budget_tokens` 思考会被拒绝，这就是 GoModel 对这些模型使用自适应思考的原因。
+</Note>
+
+<Note>
+  在 Fable 5/5.1、Mythos 5/5.1 和 Opus 5 上，无论您是否发送 `reasoning`，思考都始终开启；`reasoning.effort` 只调整其深度。思考所消耗的 Token 在 Chat
+  Completions 响应中以 `usage.completion_reasoning_tokens` 报告。推理文本本身不会返回，只返回 Token 数量。
+</Note>
+
+## 采样参数
+
+Anthropic 已从 Fable 5/5.1、Mythos 5/5.1、
+Opus 5、Sonnet 5 和 Opus 4.8/4.7 中移除了 `temperature` 和 `top_p`——任何值，包括 OpenAI SDK
+默认的 `temperature: 1`，都会被上游以 400 拒绝。对于这些模型，GoModel 会丢弃这两个字段并记录被丢弃的值，因此总是发送 temperature 的客户端仍能正常工作。较旧的模型仍会按原样接收这两个字段，但有一个例外，见下文。
+
+Anthropic 在所有模型上都将 `temperature` 和 `top_p` 视为互斥：同时携带两者的请求会被拒绝，并返回 ``400 "`temperature` and
+`top_p` cannot both be specified for this model"``。由于兼容 OpenAI 的客户端通常会同时填入两者的默认值，GoModel 在同时看到两者时，会转发 `temperature` 并丢弃 `top_p`（同时记录被丢弃的值）。如果您想控制的是这个参数，请只发送
+`top_p`。
+
+与模型无关，当启用扩展思考时，Anthropic
+要求 `temperature = 1`。GoModel 会丢弃任何其他 temperature 值（并记录日志），而不是让请求失败。
+
+## 结构化输出
+
+`response_format` 可用于 Anthropic 模型，它会被映射到 Claude 原生的结构化输出（`output_config.format`）。这同样适用于
+`/v1/responses` 上的 `text.format`，GoModel 会先将其转换为 `response_format`。
+
+| `response_format` | GoModel 发送的内容 |
+| --- | --- |
+| `{"type": "text"}`（或省略） | 不发送任何内容——即 Claude 的默认行为 |
+| `{"type": "json_schema", ...}` | 带有您的 Schema 的 `output_config.format`，由 Anthropic 约束输出 |
+| `{"type": "json_object"}` | 一条系统提示词指令——Anthropic 的原生格式只接受 `json_schema` |
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "anthropic/claude-haiku-4-5-20251001",
+    "messages": [{"role": "user", "content": "Describe Paris."}],
+    "response_format": {
+      "type": "json_schema",
+      "json_schema": {
+        "name": "city",
+        "strict": true,
+        "schema": {
+          "type": "object",
+          "properties": {"city": {"type": "string"}, "country": {"type": "string"}},
+          "required": ["city", "country"],
+          "additionalProperties": false
+        }
+      }
+    }
+  }'
+```
+
+响应是一个普通的 Chat Completion，其 `message.content` 为 JSON
+文本，`finish_reason: "stop"`——与 OpenAI 返回的格式相同。流式传输不受影响：JSON 以普通内容增量的形式到达。工具和
+`response_format` 可以同时发送；Claude 要么调用工具
+（`finish_reason: "tool_calls"`），要么以受 Schema 约束的 JSON 作答。
+
+Anthropic 的 Schema 编译器比 OpenAI 的更严格，因此 GoModel 会在发送前调整 Schema：
+
+- 每个对象 Schema 都会加上必需的 `"additionalProperties": false`，每个
+  `allOf` 分支也是如此——Anthropic 要求如此，并会自行合并各分支
+- Anthropic 不支持的仅用于校验的关键字（`minimum`、`maximum`、
+  `multipleOf`、`maxItems`、`uniqueItems`、`minLength`、`maxLength`、
+  `propertyNames`、`not`、`if`/`then`/`else` 等）会被丢弃
+- `pattern` 会被保留，因为 Anthropic 确实会强制执行它——但其引擎不支持的正则特性（环视、反向引用、`\b`/`\B`）除外，这些特性会导致请求返回 400；此类模式会被丢弃，并记录这一损失
+- `minItems` 为 `0` 或 `1`（Anthropic 唯一接受的值）时会被保留，否则会被丢弃
+- `oneOf` 会被放宽为 `anyOf`，未知的字符串 `format` 值会被丢弃。
+  同一层级同时带有 `oneOf` 和 `anyOf` 的 Schema 无法表达——Anthropic 会拒绝用于容纳第二个关键字的 `allOf`——因此
+  `oneOf` 会被丢弃，并记录这一损失
+- `required` 完全按发送内容保留：Anthropic 接受可选属性，因此您未列入 `required` 的属性仍然是可选的
+
+嵌套对象、数组、`enum`、`const`、`anyOf`、`allOf` 以及 `$ref`/`$defs`
+都会原样透传。`$ref` 存在一些 GoModel 无法弥补的限制，Anthropic 会返回 400 并逐一指出：引用必须是本地的（`#/$defs/…`
+——外部 URL 会被拒绝）、非递归的（直接或通过循环引用自身的定义会被拒绝），并且不能位于 `allOf` 内部（请在与 `allOf` 组合之前自行解析该引用）。
+
+<Note>
+  `strict` 不会被转发——Anthropic 总是强制执行它收到的 Schema。
+  因此，非 strict 的 Schema 同样会被强制执行，只是不包括上面列出的约束。结构化输出适用于 GoModel 当前可以访问的所有 Claude 模型。
+</Note>
+
+### 当内容不是符合 Schema 的 JSON 时
+
+Schema 约束的是模型生成的内容，而不是本轮对话如何结束。在解析 `message.content` 之前，请先检查补全结果：
+
+- `finish_reason: "length"`——回答达到了 `max_tokens`，JSON 在某个值中间被截断。请提高 `max_tokens` 并重试。
+- `finish_reason: "tool_calls"`——模型调用了工具而不是直接作答，因此 `message.content` 为空。
+- `finish_reason: "refusal"`——Claude 拒绝了该请求；GoModel 会原样透传 Anthropic 的拒绝停止原因，没有可解析的 JSON。
+
+只有 `finish_reason: "stop"` 且内容非空时，才值得交给 JSON 解析器；其他情况请视为错误，而不要尝试解析。
+
+## Developer 消息和 strict 工具
+
+`developer` 消息是 OpenAI 对 `system` 的新名称；GoModel 会将其作为系统内容发送给
+Anthropic，并遵循与 `system` 消息相同的放置规则。
+
+带有 `"strict": true` 的函数工具会作为 Anthropic strict 工具转发。
+strict 工具的 Schema 与结构化输出受相同的限制，因此 GoModel 会按照[结构化输出](#结构化输出)中的相同规则对其进行调整。
+没有 `strict` 的工具则完全按发送时的 Schema 保留。
+
+## 允许的工具
+
+Anthropic 无法将某一轮对话限制为已声明工具的子集。对于类型为 `allowed_tools` 的
+`tool_choice`，GoModel 只发送列出的函数；模式为 `required` 时附带 `tool_choice: any`，否则附带 `auto`。在不接受强制工具调用的模型上，`required` 会改为 `auto` 加上一条系统指令；参见
+[Fable 5.1 上的强制工具选择](#fable-5-1-上的强制工具选择)。如果子集中没有任何已声明的函数，请求会被以 400 拒绝。
+
+`allowed_tools` 的存在，是为了让客户端可以在每一轮都发送相同的工具列表，从而保留提示词缓存。缩小范围会改变发送到上游的工具定义，而在 Claude 模型上，工具定义位于缓存前缀中系统提示词之前，因此在各轮之间变化的子集会使缓存失效。
+
+## 详略程度
+
+OpenAI 的 `verbosity`（以及 `/v1/responses` 上的 `text.verbosity`）在 Anthropic 中没有对应项。GoModel 会记录请求的值并将其丢弃，而不是让请求失败。请改为在提示词中要求更简短或更详细的回答。
+
+## Fable 5.1 上的强制工具选择
+
+Fable 5.1 和 Mythos 5.1 只接受 `tool_choice: "auto"` 和 `"none"`；
+使用 `"required"` 或 `{"type": "function", ...}` 强制调用会导致 Anthropic 返回 400。GoModel 采用 Anthropic 文档中给出的替代方案：将该选择降级为 `auto`，并在系统提示词末尾追加一条指令——
+对于 `required`，追加 "You must respond by calling one of the provided tools."；对于指定名称的函数，追加 "You must respond by calling the tool named `<name>`."。
+降级会被记录到日志。`parallel_tool_calls: false` 仍然有效。Fable 5
+以及其他所有 Claude 模型的强制工具调用保持不变。
+
+<Warning>
+  该指令是强力引导，而不是硬性保证：模型仍可能以文本作答。如果您依赖强制工具选择来获取 JSON，请改用
+  [结构化输出](#结构化输出)。
+</Warning>
+
+## 原生透传
+
+如果要发送在兼容 OpenAI 的接口中没有对应项的 Claude 原生请求字段（例如在 `messages` 数组中内联的任务中途 `system` 条目），请使用透传路由 `/p/anthropic/messages`，它会原样转发请求体。

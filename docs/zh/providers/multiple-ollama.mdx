@@ -1,0 +1,107 @@
+---
+title: "Ollama"
+description: "通过带后缀的环境变量和带提供商限定的模型 ID，在一个 GoModel 实例中使用多个 Ollama 提供商。"
+icon: "network"
+keywords: ["Ollama", "本地模型", "自托管", "多提供商", "local models", "self-hosted", "multiple providers"]
+---
+
+GoModel 通过 `OLLAMA_BASE_URL` 注册 Ollama。要在同一个网关后面运行多个 Ollama 实例，请使用带后缀的环境变量。
+
+## 配置
+
+```bash
+OLLAMA_A_BASE_URL=http://host.docker.internal:11434/v1
+OLLAMA_B_BASE_URL=http://host.docker.internal:11435/v1
+GOMODEL_MASTER_KEY=change-me
+```
+
+`OLLAMA_A_BASE_URL` 注册提供商 `ollama-a`；`OLLAMA_B_BASE_URL` 注册 `ollama-b`。请为每个实例使用不同的端口或主机名。
+
+<Tip>
+  在 Linux 上，请在 `docker run` 命令中添加 `--add-host=host.docker.internal:host-gateway`，以便容器能够访问宿主机上的 Ollama。
+</Tip>
+
+## 运行 GoModel
+
+<CodeGroup>
+
+```bash Docker (.env 文件)
+docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
+```
+
+```bash Docker (inline -e)
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e OLLAMA_A_BASE_URL="http://host.docker.internal:11434/v1" \
+  -e OLLAMA_B_BASE_URL="http://host.docker.internal:11435/v1" \
+  enterpilot/gomodel
+```
+
+```bash Binary (make build)
+make build
+./bin/gomodel
+```
+
+</CodeGroup>
+
+## 路由到指定后端
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "ollama-a/llama3.2",
+    "messages": [{"role": "user", "content": "Reply with exactly ok."}]
+  }'
+```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="change-me")
+
+completion = client.chat.completions.create(
+    model="ollama-a/llama3.2",
+    messages=[{"role": "user", "content": "Reply with exactly ok."}],
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "change-me",
+});
+
+const completion = await client.chat.completions.create({
+  model: "ollama-a/llama3.2",
+  messages: [{ role: "user", content: "Reply with exactly ok." }],
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
+
+`GET /v1/models` 返回带提供商限定的 ID，例如 `ollama-a/llama3.2` 和 `ollama-b/llama3.2`。不带限定的模型名称会按注册顺序路由到第一个提供该模型的提供商；如需明确指定，请使用带限定的形式。
+
+## 何时仍需使用 YAML
+
+只有当 `ollama-a` 这类自动生成的名称不够用，或者您希望为每个提供商单独覆盖弹性与容错设置时，才需要使用 `config.yaml`：
+
+```yaml
+providers:
+  local-fast:
+    type: ollama
+    base_url: "http://ollama-fast:11434/v1"
+
+  local-large:
+    type: ollama
+    base_url: "http://ollama-large:11434/v1"
+```
