@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/version"
 )
 
@@ -116,7 +117,7 @@ func New(cfg Config) *Checker {
 		cfg.URL = DefaultURL
 	}
 	if cfg.Client == nil {
-		cfg.Client = &http.Client{Timeout: cfg.Timeout}
+		cfg.Client = httpclient.NewClientWithTimeout(cfg.Timeout)
 	}
 	manifest := manifestURL(cfg.URL, cfg.App)
 	return &Checker{cfg: cfg, url: manifest, safeURL: SafeURL(manifest)}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/pluginapi"
 	"github.com/stretchr/testify/require"
 )
@@ -163,7 +164,7 @@ func TestHostHTTPClient(t *testing.T) {
 	require.NotNil(t, client)
 	require.Equal(t, PluginHTTPTimeout, client.Timeout)
 
-	transport, ok := client.Transport.(*http.Transport)
+	transport, ok := httpclient.CurrentTransport(client)
 	require.True(t, ok)
 	require.NotNil(t, transport.Proxy, "default client transport = %T, want an *http.Transport with a proxy function", client.Transport)
 	require.Equal(t, PluginHTTPTimeout, transport.ResponseHeaderTimeout)

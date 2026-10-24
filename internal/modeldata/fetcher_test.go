@@ -405,6 +405,9 @@ func TestLocalPath(t *testing.T) {
 		{"http://example.com/m.json", "", false},
 		{"file:///etc/gomodel/models.json", "/etc/gomodel/models.json", true},
 		{"file://localhost/etc/models.json", "/etc/models.json", true},
+		{"file://LOCALHOST/etc/models.json", "/etc/models.json", true},
+		{"ftp://example.com/m.json", "", false},
+		{"C:/gomodel/models.json", "C:/gomodel/models.json", true},
 		{"/etc/gomodel/models.json", "/etc/gomodel/models.json", true},
 		{"./models.json", "./models.json", true},
 		{"  /tmp/m.json  ", "/tmp/m.json", true},
@@ -414,6 +417,12 @@ func TestLocalPath(t *testing.T) {
 		assert.Equal(t, tt.wantOK, gotOK)
 		assert.Equal(t, tt.wantPath, gotPath, "localPath(%q) = (%q, %v), want (%q, %v)", tt.in, gotPath, gotOK, tt.wantPath, tt.wantOK)
 	}
+}
+
+func TestFetchIfChanged_RejectsUnsupportedScheme(t *testing.T) {
+	_, err := FetchIfChanged(context.Background(), "ftp://example.com/models.json", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported protocol scheme")
 }
 
 func TestFetchIfChanged_LocalFileOversizedIsRejectedBeforeAllocation(t *testing.T) {
