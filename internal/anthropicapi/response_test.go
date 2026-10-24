@@ -2,9 +2,12 @@ package anthropicapi
 
 import (
 	"encoding/json"
+	"net/http"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFromChatResponseText(t *testing.T) {
@@ -17,21 +20,15 @@ func TestFromChatResponseText(t *testing.T) {
 		}},
 		Usage: core.Usage{PromptTokens: 12, CompletionTokens: 7},
 	})
-	if resp.ID != "msg_abc123" {
-		t.Errorf("ID = %q, want msg_abc123", resp.ID)
-	}
-	if resp.Type != "message" || resp.Role != "assistant" {
-		t.Errorf("envelope = %+v", resp)
-	}
-	if len(resp.Content) != 1 || resp.Content[0].Type != "text" || resp.Content[0].Text != "hello there" {
-		t.Fatalf("content = %+v", resp.Content)
-	}
-	if resp.StopReason != "end_turn" {
-		t.Errorf("StopReason = %q, want end_turn", resp.StopReason)
-	}
-	if resp.Usage.InputTokens != 12 || resp.Usage.OutputTokens != 7 {
-		t.Errorf("usage = %+v", resp.Usage)
-	}
+	assert.Equal(t, "msg_abc123", resp.ID)
+	assert.Equal(t, "message", resp.Type)
+	assert.Equal(t, "assistant", resp.Role, "envelope = %+v", resp)
+	require.Len(t, resp.Content, 1)
+	require.Equal(t, "text", resp.Content[0].Type)
+	require.Equal(t, "hello there", resp.Content[0].Text)
+	assert.Equal(t, "end_turn", resp.StopReason)
+	assert.Equal(t, 12, resp.Usage.InputTokens)
+	assert.Equal(t, 7, resp.Usage.OutputTokens, "usage = %+v", resp.Usage)
 }
 
 func TestFromChatResponseToolCalls(t *testing.T) {
@@ -50,19 +47,39 @@ func TestFromChatResponseToolCalls(t *testing.T) {
 			FinishReason: "tool_calls",
 		}},
 	})
-	if len(resp.Content) != 1 || resp.Content[0].Type != "tool_use" {
-		t.Fatalf("content = %+v", resp.Content)
-	}
+	require.Len(t, resp.Content, 1)
+	require.Equal(t, "tool_use", resp.Content[0].Type)
+
 	block := resp.Content[0]
-	if block.ID != "tu_1" || block.Name != "get_weather" {
-		t.Errorf("tool_use block = %+v", block)
-	}
-	if string(block.Input) != `{"city":"paris"}` {
-		t.Errorf("input = %s", block.Input)
-	}
-	if resp.StopReason != "tool_use" {
-		t.Errorf("StopReason = %q, want tool_use", resp.StopReason)
-	}
+	assert.Equal(t, "tu_1", block.ID)
+	assert.Equal(t, "get_weather", block.Name, "tool_use block = %+v", block)
+	assert.Equal(t, `{"city":"paris"}`, string(block.Input), "input = %s", block.Input)
+	assert.Equal(t, "tool_use", resp.StopReason)
+	assert.Empty(t, block.ExtraContent)
+}
+
+func TestFromChatResponseToolCallExtraContent(t *testing.T) {
+	extra := json.RawMessage(`{"google":{"thought_signature":"sig"}}`)
+	resp := FromChatResponse(&core.ChatResponse{
+		Choices: []core.Choice{{
+			Message: core.ResponseMessage{
+				Role: "assistant",
+				ToolCalls: []core.ToolCall{{
+					ID:          "tu_1",
+					Type:        "function",
+					Function:    core.FunctionCall{Name: "get_weather", Arguments: `{}`},
+					ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{core.ExtraContentField: extra}),
+				}},
+			},
+			FinishReason: "tool_calls",
+		}},
+	})
+	require.Len(t, resp.Content, 1)
+	require.Equal(t, string(extra), string(resp.Content[0].ExtraContent))
+
+	encoded, err := json.Marshal(resp.Content[0])
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"extra_content":{"google":{"thought_signature":"sig"}}`, "encoded block = %s", encoded)
 }
 
 func TestFromChatResponseThinking(t *testing.T) {
@@ -81,15 +98,10 @@ func TestFromChatResponseThinking(t *testing.T) {
 			FinishReason: "stop",
 		}},
 	})
-	if len(resp.Content) != 2 {
-		t.Fatalf("content = %+v, want thinking + text", resp.Content)
-	}
-	if resp.Content[0].Type != "thinking" || resp.Content[0].Thinking != "let me think" {
-		t.Errorf("thinking block = %+v", resp.Content[0])
-	}
-	if resp.Content[1].Type != "text" {
-		t.Errorf("text block = %+v", resp.Content[1])
-	}
+	require.Len(t, resp.Content, 2)
+	assert.Equal(t, "thinking", resp.Content[0].Type)
+	assert.Equal(t, "let me think", resp.Content[0].Thinking, "thinking block = %+v", resp.Content[0])
+	assert.Equal(t, "text", resp.Content[1].Type, "text block = %+v", resp.Content[1])
 }
 
 func TestFromChatResponseStopReasons(t *testing.T) {
@@ -102,7 +114,7 @@ func TestFromChatResponseStopReasons(t *testing.T) {
 		{name: "stop", finish: "stop", want: "end_turn"},
 		{name: "length", finish: "length", want: "max_tokens"},
 		{name: "tool_calls", finish: "tool_calls", want: "tool_use"},
-		{name: "content_filter", finish: "content_filter", want: "end_turn"},
+		{name: "content_filter", finish: "content_filter", want: "refusal"},
 		{name: "empty", finish: "", want: "end_turn"},
 		// A response carrying tool calls always reports "tool_use". OpenAI-family
 		// providers report finish_reason "stop" alongside tool calls when a tool
@@ -126,9 +138,7 @@ func TestFromChatResponseStopReasons(t *testing.T) {
 					FinishReason: tc.finish,
 				}},
 			})
-			if resp.StopReason != tc.want {
-				t.Errorf("StopReason = %q, want %q", resp.StopReason, tc.want)
-			}
+			assert.Equal(t, tc.want, resp.StopReason)
 		})
 	}
 }
@@ -144,16 +154,15 @@ func TestFromChatResponseCacheUsage(t *testing.T) {
 			},
 		},
 	})
-	if resp.Usage.CacheCreationInputTokens != 30 || resp.Usage.CacheReadInputTokens != 40 {
-		t.Errorf("cache usage = %+v", resp.Usage)
-	}
+	assert.Equal(t, 30, resp.Usage.CacheCreationInputTokens)
+	assert.Equal(t, 40, resp.Usage.CacheReadInputTokens, "cache usage = %+v", resp.Usage)
 }
 
 func TestFromChatResponseNil(t *testing.T) {
 	resp := FromChatResponse(nil)
-	if resp == nil || resp.Type != "message" || resp.Content == nil {
-		t.Fatalf("FromChatResponse(nil) = %+v", resp)
-	}
+	require.NotNil(t, resp)
+	require.Equal(t, "message", resp.Type)
+	require.NotNil(t, resp.Content)
 }
 
 func TestFromChatResponseStopSequence(t *testing.T) {
@@ -167,12 +176,9 @@ func TestFromChatResponseStopSequence(t *testing.T) {
 		}},
 	}
 	out := FromChatResponse(resp)
-	if out.StopReason != "stop_sequence" {
-		t.Errorf("StopReason = %q, want stop_sequence", out.StopReason)
-	}
-	if out.StopSequence == nil || *out.StopSequence != "7" {
-		t.Errorf("StopSequence = %v, want 7", out.StopSequence)
-	}
+	assert.Equal(t, "stop_sequence", out.StopReason)
+	require.NotNil(t, out.StopSequence)
+	assert.Equal(t, "7", *out.StopSequence)
 }
 
 func TestFromChatResponseStopSequenceDoesNotOverrideToolUse(t *testing.T) {
@@ -187,7 +193,134 @@ func TestFromChatResponseStopSequenceDoesNotOverrideToolUse(t *testing.T) {
 		}},
 	}
 	out := FromChatResponse(resp)
-	if out.StopReason != "tool_use" || out.StopSequence != nil {
-		t.Errorf("got stop_reason=%q stop_sequence=%v, want tool_use/nil", out.StopReason, out.StopSequence)
+	assert.Equal(t, "tool_use", out.StopReason)
+	assert.Nil(t, out.StopSequence)
+}
+
+// FromChatResponse renders thinking from the replay state a provider attached
+// when it has one, and falls back to plain reasoning_content text otherwise —
+// a provider with no thinking protocol of its own (DeepSeek, Cohere, …) still
+// has its reasoning surfaced, with the empty signature the Anthropic schema
+// requires on every thinking block.
+func TestFromChatResponseThinkingBlocks(t *testing.T) {
+	tests := []struct {
+		name   string
+		fields map[string]json.RawMessage
+		want   string
+	}{
+		{
+			name: "signed blocks are rendered verbatim",
+			fields: map[string]json.RawMessage{
+				"reasoning_content": json.RawMessage(`"Let me think."`),
+				core.ExtraContentField: json.RawMessage(
+					`{"anthropic":{"thinking_blocks":[{"type":"thinking","thinking":"Let me think.","signature":"sig-1"},{"type":"redacted_thinking","data":"opaque"}]}}`),
+			},
+			want: `[{"type":"thinking","thinking":"Let me think.","signature":"sig-1"},{"type":"redacted_thinking","data":"opaque"},{"type":"text","text":"Hi"}]`,
+		},
+		{
+			name:   "reasoning_content alone still renders a thinking block",
+			fields: map[string]json.RawMessage{"reasoning_content": json.RawMessage(`"Let me think."`)},
+			want:   `[{"type":"thinking","thinking":"Let me think.","signature":""},{"type":"text","text":"Hi"}]`,
+		},
+		{
+			name:   "the reasoning member alone still renders a thinking block",
+			fields: map[string]json.RawMessage{"reasoning": json.RawMessage(`"Let me think."`)},
+			want:   `[{"type":"thinking","thinking":"Let me think.","signature":""},{"type":"text","text":"Hi"}]`,
+		},
+		{
+			name: "reasoning_content wins over reasoning",
+			fields: map[string]json.RawMessage{
+				"reasoning_content": json.RawMessage(`"Canonical."`),
+				"reasoning":         json.RawMessage(`"Vendor."`),
+			},
+			want: `[{"type":"thinking","thinking":"Canonical.","signature":""},{"type":"text","text":"Hi"}]`,
+		},
+		{
+			name: "a non-string reasoning member is ignored",
+			fields: map[string]json.RawMessage{
+				"reasoning": json.RawMessage(`{"effort":"high"}`),
+			},
+			want: `[{"type":"text","text":"Hi"}]`,
+		},
+		{
+			name: "another vendor's replay state is not thinking",
+			fields: map[string]json.RawMessage{
+				core.ExtraContentField: json.RawMessage(`{"google":{"thought_signature":"sig"}}`),
+			},
+			want: `[{"type":"text","text":"Hi"}]`,
+		},
+		{
+			name: "a malformed member falls back to the reasoning text",
+			fields: map[string]json.RawMessage{
+				"reasoning_content":    json.RawMessage(`"Let me think."`),
+				core.ExtraContentField: json.RawMessage(`{"anthropic":{"thinking_blocks":"nope"}}`),
+			},
+			want: `[{"type":"thinking","thinking":"Let me think.","signature":""},{"type":"text","text":"Hi"}]`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := &core.ChatResponse{Choices: []core.Choice{{
+				Message: core.ResponseMessage{
+					Role:        "assistant",
+					Content:     "Hi",
+					ExtraFields: core.UnknownJSONFieldsFromMap(tt.fields),
+				},
+				FinishReason: "stop",
+			}}}
+			got, err := json.Marshal(FromChatResponse(resp).Content)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, string(got))
+		})
+	}
+}
+
+func TestFromModelsPage(t *testing.T) {
+	models := []core.Model{{ID: "a"}, {ID: "b"}, {ID: "c"}, {ID: "d"}, {ID: "e"}}
+	ids := func(list *ModelsList) []string {
+		out := []string{}
+		for _, m := range list.Data {
+			out = append(out, m.ID)
+		}
+		return out
+	}
+	tests := []struct {
+		name     string
+		page     ModelsPage
+		want     []string
+		wantMore bool
+	}{
+		{name: "no paging returns everything", page: ModelsPage{}, want: []string{"a", "b", "c", "d", "e"}},
+		{name: "first page", page: ModelsPage{Limit: 2}, want: []string{"a", "b"}, wantMore: true},
+		{name: "after_id", page: ModelsPage{Limit: 2, AfterID: "b"}, want: []string{"c", "d"}, wantMore: true},
+		{name: "last page", page: ModelsPage{Limit: 2, AfterID: "d"}, want: []string{"e"}},
+		{name: "before_id", page: ModelsPage{Limit: 2, BeforeID: "e"}, want: []string{"c", "d"}, wantMore: true},
+		{name: "before_id reaching the start", page: ModelsPage{Limit: 5, BeforeID: "c"}, want: []string{"a", "b"}},
+		{name: "after_id without limit", page: ModelsPage{AfterID: "c"}, want: []string{"d", "e"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := FromModelsPage(models, tt.page)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, ids(got))
+			assert.Equal(t, tt.wantMore, got.HasMore)
+			if len(tt.want) > 0 {
+				assert.Equal(t, tt.want[0], *got.FirstID)
+				assert.Equal(t, tt.want[len(tt.want)-1], *got.LastID)
+			}
+		})
+	}
+}
+
+// A cursor that names no listed model (removed by a refresh between pages) is
+// a 400, never an empty last page that would end the client's paging early.
+func TestFromModelsPage_UnknownCursor(t *testing.T) {
+	models := []core.Model{{ID: "a"}, {ID: "b"}}
+	for _, page := range []ModelsPage{{Limit: 1, AfterID: "gone"}, {Limit: 1, BeforeID: "gone"}} {
+		_, err := FromModelsPage(models, page)
+		var gwErr *core.GatewayError
+		require.ErrorAs(t, err, &gwErr)
+		assert.Equal(t, http.StatusBadRequest, gwErr.HTTPStatusCode())
 	}
 }

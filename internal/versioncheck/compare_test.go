@@ -1,6 +1,10 @@
 package versioncheck
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestIsNewer(t *testing.T) {
 	tests := []struct {
@@ -54,9 +58,8 @@ func TestIsNewer(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsNewer(tt.current, tt.latest); got != tt.want {
-				t.Fatalf("IsNewer(%q, %q) = %v, want %v", tt.current, tt.latest, got, tt.want)
-			}
+			got := IsNewer(tt.current, tt.latest)
+			require.Equal(t, tt.want, got, "IsNewer(%q, %q) = %v, want %v", tt.current, tt.latest, got, tt.want)
 		})
 	}
 }

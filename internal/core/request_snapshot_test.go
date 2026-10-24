@@ -1,6 +1,10 @@
 package core
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestNewRequestSnapshot_DefensivelyCopiesMutableFields(t *testing.T) {
 	routeParams := map[string]string{"provider": "openai"}
@@ -28,47 +32,33 @@ func TestNewRequestSnapshot_DefensivelyCopiesMutableFields(t *testing.T) {
 	headers["X-Test"][0] = "mutated"
 	rawBody[0] = '['
 	traceMetadata["Traceparent"] = "trace-2"
-
-	if got := snapshot.GetRouteParams()["provider"]; got != "openai" {
-		t.Fatalf("GetRouteParams provider = %q, want openai", got)
-	}
-	if got := snapshot.GetQueryParams()["limit"][0]; got != "5" {
-		t.Fatalf("GetQueryParams limit = %q, want 5", got)
-	}
-	if got := snapshot.GetHeaders()["X-Test"][0]; got != "a" {
-		t.Fatalf("GetHeaders X-Test = %q, want a", got)
-	}
-	if got := string(snapshot.CapturedBody()); got != `{"model":"gpt-5-mini"}` {
-		t.Fatalf("CapturedBody = %q, want original body", got)
-	}
-	if got := string(snapshot.CapturedBodyView()); got != `{"model":"gpt-5-mini"}` {
-		t.Fatalf("CapturedBodyView = %q, want original body", got)
-	}
-	if got := snapshot.GetTraceMetadata()["Traceparent"]; got != "trace-1" {
-		t.Fatalf("GetTraceMetadata Traceparent = %q, want trace-1", got)
-	}
-	if got := snapshot.UserPath; got != "/team/a" {
-		t.Fatalf("UserPath = %q, want /team/a", got)
-	}
+	got := snapshot.GetRouteParams()["provider"]
+	require.Equal(t, "openai", got)
+	got = snapshot.GetQueryParams()["limit"][0]
+	require.Equal(t, "5", got)
+	got = snapshot.GetHeaders()["X-Test"][0]
+	require.Equal(t, "a", got)
+	got = string(snapshot.CapturedBody())
+	require.Equal(t, `{"model":"gpt-5-mini"}`, got)
+	got = string(snapshot.CapturedBodyView())
+	require.Equal(t, `{"model":"gpt-5-mini"}`, got)
+	got = snapshot.GetTraceMetadata()["Traceparent"]
+	require.Equal(t, "trace-1", got)
+	got = snapshot.UserPath
+	require.Equal(t, "/team/a", got)
 
 	clonedHeaders := snapshot.GetHeaders()
 	clonedHeaders["X-Test"][0] = "changed-again"
-	if got := snapshot.GetHeaders()["X-Test"][0]; got != "a" {
-		t.Fatalf("GetHeaders returned mutable state, got %q", got)
-	}
+	got = snapshot.GetHeaders()["X-Test"][0]
+	require.Equal(t, "a", got)
 
 	view := snapshot.CapturedBodyView()
-	if len(view) == 0 || len(snapshot.capturedBody) == 0 {
-		t.Fatal("captured body unexpectedly empty")
-	}
-	if &view[0] != &snapshot.capturedBody[0] {
-		t.Fatal("CapturedBodyView did not return the underlying snapshot bytes")
-	}
+	require.NotEmpty(t, view)
+	require.NotEmpty(t, snapshot.capturedBody)
+	require.Same(t, &snapshot.capturedBody[0], &view[0])
 
 	clonedBody := snapshot.CapturedBody()
-	if &clonedBody[0] == &snapshot.capturedBody[0] {
-		t.Fatal("CapturedBody returned underlying snapshot bytes, want defensive copy")
-	}
+	require.NotSame(t, &snapshot.capturedBody[0], &clonedBody[0])
 }
 
 func TestNewRequestSnapshotWithOwnedMaps_TakesOwnershipOfCapturedBytes(t *testing.T) {
@@ -93,42 +83,30 @@ func TestNewRequestSnapshotWithOwnedMaps_TakesOwnershipOfCapturedBytes(t *testin
 	)
 
 	view := snapshot.CapturedBodyView()
-	if len(view) == 0 {
-		t.Fatal("captured body unexpectedly empty")
-	}
-	if got := snapshot.UserPath; got != "/team/a" {
-		t.Fatalf("UserPath = %q, want /team/a", got)
-	}
-	if &view[0] != &rawBody[0] {
-		t.Fatal("snapshot did not take ownership of the captured body bytes")
-	}
+	require.NotEmpty(t, view)
+	got := snapshot.UserPath
+	require.Equal(t, "/team/a", got)
+	require.Same(t, &rawBody[0], &view[0])
 
 	clonedBody := snapshot.CapturedBody()
-	if &clonedBody[0] == &rawBody[0] {
-		t.Fatal("CapturedBody returned owned bytes directly, want defensive copy")
-	}
+	require.NotSame(t, &rawBody[0], &clonedBody[0])
 
 	// Route/query/trace maps are owned: mutating the caller's map is visible
 	// through the snapshot (no defensive copy was taken at construction).
 	routeParams["provider"] = "anthropic"
-	if got := snapshot.GetRouteParams()["provider"]; got != "anthropic" {
-		t.Fatalf("route params not owned: provider = %q, want anthropic", got)
-	}
+	got = snapshot.GetRouteParams()["provider"]
+	require.Equal(t, "anthropic", got)
+
 	queryParams["limit"] = []string{"9"}
-	if got := snapshot.GetQueryParams()["limit"]; len(got) != 1 || got[0] != "9" {
-		t.Fatalf("query params not owned: limit = %v, want [9]", got)
-	}
+	require.Equal(t, []string{"9"}, snapshot.GetQueryParams()["limit"], "query params not owned")
 	traceMetadata["Traceparent"] = "trace-2"
-	if got := snapshot.GetTraceMetadata()["Traceparent"]; got != "trace-2" {
-		t.Fatalf("trace metadata not owned: Traceparent = %q, want trace-2", got)
-	}
+	got = snapshot.GetTraceMetadata()["Traceparent"]
+	require.Equal(t, "trace-2", got)
 
 	// Headers are still defensively cloned: mutating the caller's map after
 	// construction must not affect the snapshot.
 	headers["X-Test"] = []string{"b"}
-	if got := snapshot.HeadersView()["X-Test"]; len(got) != 1 || got[0] != "a" {
-		t.Fatalf("headers not cloned: X-Test = %v, want [a]", got)
-	}
+	require.Equal(t, []string{"a"}, snapshot.HeadersView()["X-Test"], "headers not cloned")
 }
 
 func BenchmarkNewRequestSnapshotClonedBody(b *testing.B) {
@@ -165,16 +143,11 @@ func TestRequestSnapshotWithUserPath_RewritesCapturedHeader(t *testing.T) {
 	)
 
 	updated := snapshot.WithUserPath("/team/from-auth-key")
-	if updated == nil {
-		t.Fatal("WithUserPath() = nil, want snapshot")
-	}
-	if got := updated.UserPath; got != "/team/from-auth-key" {
-		t.Fatalf("updated.UserPath = %q, want /team/from-auth-key", got)
-	}
-	if got := updated.GetHeaders()[UserPathHeader][0]; got != "/team/from-auth-key" {
-		t.Fatalf("updated header = %q, want /team/from-auth-key", got)
-	}
-	if got := snapshot.UserPath; got != "/team/from-header" {
-		t.Fatalf("original snapshot UserPath = %q, want /team/from-header", got)
-	}
+	require.NotNil(t, updated)
+	got := updated.UserPath
+	require.Equal(t, "/team/from-auth-key", got)
+	got = updated.GetHeaders()[UserPathHeader][0]
+	require.Equal(t, "/team/from-auth-key", got)
+	got = snapshot.UserPath
+	require.Equal(t, "/team/from-header", got)
 }

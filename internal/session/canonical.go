@@ -190,10 +190,10 @@ func canonicalStringOK(r gjson.Result) bool {
 
 const hexDigits = "0123456789abcdef"
 
-// appendJSONString appends s as a JSON string exactly as goccy's Marshal does
-// with HTML escaping on: \n, \r and \t use their short escapes, other control
-// characters (including \b and \f, unlike encoding/json), '<', '>', '&' and
-// U+2028/U+2029 are \u-escaped, and everything else is written verbatim.
+// appendJSONString appends s as a JSON string exactly as goccy's Marshal and
+// encoding/json do with HTML escaping on: \b, \f, \n, \r and \t use their
+// short escapes, other control characters, '<', '>', '&' and U+2028/U+2029 are
+// \u-escaped, and everything else is written verbatim.
 func appendJSONString(buf []byte, s string) []byte {
 	buf = append(buf, '"')
 	start := 0
@@ -214,6 +214,10 @@ func appendJSONString(buf []byte, s string) []byte {
 				buf = append(buf, '\\', 'r')
 			case '\t':
 				buf = append(buf, '\\', 't')
+			case '\b':
+				buf = append(buf, '\\', 'b')
+			case '\f':
+				buf = append(buf, '\\', 'f')
 			default:
 				buf = append(buf, '\\', 'u', '0', '0', hexDigits[c>>4], hexDigits[c&0xF])
 			}

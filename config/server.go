@@ -22,12 +22,18 @@ var bodySizeLimitRegex = regexp.MustCompile(`(?i)^(\d+)([KMG])?B?$`)
 
 // ServerConfig holds HTTP server configuration
 type ServerConfig struct {
-	Port           string `yaml:"port" env:"PORT"`
-	BasePath       string `yaml:"base_path" env:"BASE_PATH"`             // URL path prefix where the app is mounted (e.g., "/g")
-	MasterKey      string `yaml:"master_key" env:"GOMODEL_MASTER_KEY"`   // Optional: Master key for authentication
-	BodySizeLimit  string `yaml:"body_size_limit" env:"BODY_SIZE_LIMIT"` // Max request body size (e.g., "10M", "1024K")
-	SwaggerEnabled bool   `yaml:"swagger_enabled" env:"SWAGGER_ENABLED"` // Whether to expose the Swagger UI at /swagger/index.html
-	PprofEnabled   bool   `yaml:"pprof_enabled" env:"PPROF_ENABLED"`     // Whether to expose debug profiling routes at /debug/pprof/*
+	Port      string `yaml:"port" env:"PORT"`
+	BasePath  string `yaml:"base_path" env:"BASE_PATH"`           // URL path prefix where the app is mounted (e.g., "/g")
+	MasterKey string `yaml:"master_key" env:"GOMODEL_MASTER_KEY"` // Optional: Master key for authentication
+	// MasterKeyDisabled turns off master key authentication. Default: false.
+	// Set it to leave managed keys and any configured authentication extension
+	// as the only credentials: the master key is forgotten at startup, and the
+	// gateway then requires a credential on every request instead of falling
+	// back to unauthenticated access or opening the admin API for bootstrap.
+	MasterKeyDisabled bool   `yaml:"master_key_disabled" env:"MASTER_KEY_DISABLED"`
+	BodySizeLimit     string `yaml:"body_size_limit" env:"BODY_SIZE_LIMIT"` // Max request body size (e.g., "10M", "1024K")
+	SwaggerEnabled    bool   `yaml:"swagger_enabled" env:"SWAGGER_ENABLED"` // Whether to expose the Swagger UI at /swagger/index.html
+	PprofEnabled      bool   `yaml:"pprof_enabled" env:"PPROF_ENABLED"`     // Whether to expose debug profiling routes at /debug/pprof/*
 	// EnablePassthroughRoutes exposes provider-native passthrough endpoints under
 	// /p/{provider}/{endpoint}. Default: true.
 	EnablePassthroughRoutes bool `yaml:"enable_passthrough_routes" env:"ENABLE_PASSTHROUGH_ROUTES"`
@@ -39,13 +45,19 @@ type ServerConfig struct {
 	UserPathHeader string `yaml:"user_path_header" env:"USER_PATH_HEADER"`
 	// EnabledPassthroughProviders lists the provider types enabled on
 	// /p/{provider}/... passthrough routes. Default:
-	// ["openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llmd", "deepseek"].
+	// ["openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "jev"].
 	EnabledPassthroughProviders []string `yaml:"enabled_passthrough_providers" env:"ENABLED_PASSTHROUGH_PROVIDERS"`
 	// RealtimeEnabled exposes the realtime (speech-to-speech) websocket endpoints
 	// at /v1/realtime and /v1/realtime/translations, their WebRTC signaling
 	// siblings, and the /p/{provider}/v1/realtime passthrough upgrade.
 	// Default: true. Only providers implementing realtime accept sessions.
 	RealtimeEnabled bool `yaml:"realtime_enabled" env:"REALTIME_ENABLED"`
+	// AuthVerifyEnabled exposes GET /v1/auth/verify, which reports whether the
+	// API key a request carries authenticates against this gateway. It sits
+	// outside /admin so it keeps working when the admin API is disabled.
+	// Default: false — turn it on only when a service in front of the gateway
+	// needs to validate keys without holding a copy of them.
+	AuthVerifyEnabled bool `yaml:"auth_verify_enabled" env:"AUTH_VERIFY_ENABLED"`
 	// PIDFile records the process id of the running gateway so `gomodel --reload`
 	// can find it. Default: DefaultPIDFilePath(). Set it per instance when
 	// several gateways share a host, or to "" in config.yaml to write no pid
@@ -54,7 +66,56 @@ type ServerConfig struct {
 	// needs a restart — it names the process that is already running — so a
 	// reload only warns about it.
 	PIDFile string `yaml:"pid_file" env:"PID_FILE"`
+	// StreamStallTimeout bounds, in seconds, how long a single response write
+	// on a model interaction route may wait for the client to accept bytes
+	// before the connection is dropped. It fires only when the client has
+	// stopped reading (its socket buffer is full), never while the gateway is
+	// waiting on the provider, so slow models are unaffected. Without it a
+	// client that stops reading a stream pins a goroutine and the upstream
+	// provider connection until the provider side times out.
+	// Default: 60 (DefaultStreamStallTimeoutSeconds). 0 disables the limit.
+	StreamStallTimeout int `yaml:"stream_stall_timeout" env:"STREAM_STALL_TIMEOUT"`
+
+	// TrustedProxies lists the networks your own proxies sit on, enabling
+	// header-based client addresses everywhere the gateway reports one (audit
+	// entries, rate limit keys, logs). Entries are CIDR networks, bare
+	// addresses (a single host), or the presets "loopback" and "private".
+	//
+	// When empty (default), the gateway records the address of the socket peer
+	// that connected to it and ignores every forwarding header. Nothing is
+	// trusted implicitly, not even loopback: list the hops between your
+	// clients and the gateway, or name the preset that covers them.
+	// Example: ["10.42.0.0/16", "loopback"].
+	// Default: empty (forwarding headers ignored)
+	TrustedProxies []string `yaml:"trusted_proxies" env:"SERVER_TRUSTED_PROXIES"`
+
+	// ClientIPHeader is the header a trusted proxy passes the client address
+	// in. X-Forwarded-For (the default) carries a chain and is resolved hop by
+	// hop; any other header (X-Real-IP, CF-Connecting-IP, True-Client-IP)
+	// carries one address and is taken verbatim, which is the correct reading
+	// behind an edge like Cloudflare that writes the client itself. Requires
+	// TrustedProxies. RFC 7239 Forwarded is not supported.
+	// Default: X-Forwarded-For
+	ClientIPHeader string `yaml:"client_ip_header" env:"SERVER_CLIENT_IP_HEADER"`
+
+	// TrustedHops is how many proxies sit between the client and the gateway,
+	// selecting the X-Forwarded-For entry at that depth instead of scanning the
+	// chain against TrustedProxies. Use it when your edge is at a fixed depth
+	// but rotates through addresses you cannot enumerate; the socket peer must
+	// still be in TrustedProxies. A chain shorter than this depth falls back to
+	// the socket peer. Requires TrustedProxies and the default header.
+	// Default: 0 (scan the chain against TrustedProxies)
+	TrustedHops int `yaml:"trusted_hops" env:"SERVER_TRUSTED_HOPS"`
+
+	// ClientIP is the compiled form of the three settings above, resolved once
+	// at load. It is not configured directly.
+	ClientIP ClientIPPolicy `yaml:"-"`
 }
+
+// DefaultStreamStallTimeoutSeconds is the default ServerConfig.StreamStallTimeout.
+// It matches the send timeout most reverse proxies apply between two
+// successive writes to a client.
+const DefaultStreamStallTimeoutSeconds = 60
 
 // LegacyPIDFilePath is the pid file location used next to a project-local
 // ./data directory, matching where the SQLite database lands in the same setup.

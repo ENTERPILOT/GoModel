@@ -102,6 +102,19 @@ a portable cross-provider token-counting endpoint, and adding one would require 
 interface method. The heuristic keeps the endpoint dependency-free, deterministic, and
 universal. It is an **approximation**, not a tokenizer-exact count — see Consequences.
 
+**Amended.** Measured against Anthropic's count the flat heuristic under-counted ordinary
+agent traffic (source code plus tool schemas) by about a third and charged nothing for
+images, so clients sized requests that then failed upstream. Two changes:
+
+- The estimate weights text by character class (prose, code and JSON, CJK, emoji), adds
+  per-message and per-tool framing plus the tool-use system prompt, and prices images by
+  pixel area. It stays universal and dependency-free.
+- A provider may implement the optional `core.MessagesTokenCounter` interface, the same
+  pattern as the audio and image capabilities. The Anthropic provider does, forwarding the
+  request to its native `count_tokens` endpoint, so Anthropic models are counted exactly. The
+  estimate remains the answer for every other provider and whenever the upstream call fails,
+  so the endpoint never depends on an upstream being reachable.
+
 ### Errors
 
 All `/v1/messages` and `/v1/messages/count_tokens` failures are returned in the Anthropic error
@@ -147,9 +160,10 @@ end to end, including request-validation and upstream errors.
   locations, but thinking signatures and server tools do not. Mitigation: clients needing
   byte-exact Anthropic fidelity can still use the `/p/anthropic/v1/messages` passthrough. A future optimization
   could add an Anthropic → Anthropic fast path that skips the canonical hop.
-- **count_tokens is an estimate**, typically within ~10–25% of a tokenizer-exact count, and is
-  not model-specific. Mitigation: documented clearly; adequate for budgeting/UX sizing, not for
-  hard context-limit decisions.
+- **count_tokens is an estimate** for providers without a counting endpoint, typically within
+  ~10% of a tokenizer-exact count on ordinary traffic, and is not model-specific. Raw base64 in
+  text stays under-counted. Mitigation: documented clearly; Anthropic models are counted
+  exactly by the provider.
 - **`stop_reason` fidelity for stop sequences.** `stop_sequences` are honored end to end (the
   OpenAI `stop` field is mapped to Anthropic `stop_sequences`). The canonical chat type keeps the
   conservative OpenAI `finish_reason` but carries a natively-reported matched sequence as a
@@ -177,3 +191,5 @@ end to end, including request-validation and upstream errors.
   code path; the lossy round-trip is an acceptable, documented v1 tradeoff.
 - **Provider-backed count_tokens** (call Anthropic's native count endpoint) — rejected for v1:
   only one provider has such an endpoint, so it cannot be universal without a new interface.
+  Adopted later as an optional interface with the estimate as the universal fallback (see the
+  amendment above).

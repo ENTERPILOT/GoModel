@@ -2,13 +2,15 @@ package admin
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/modeldata"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
+	"github.com/stretchr/testify/require"
 )
 
 func newVMModelRegistry(t *testing.T) *providers.ModelRegistry {
@@ -23,9 +25,9 @@ func newVMModelRegistry(t *testing.T) *providers.ModelRegistry {
 		},
 	}
 	registry.RegisterProviderWithNameAndType(mock, "openai", "openai")
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize() error = %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
+
 	return registry
 }
 
@@ -33,12 +35,10 @@ func newVMServiceForRegistry(t *testing.T, registry *providers.ModelRegistry, de
 	t.Helper()
 	store := newVMTestStore(items...)
 	service, err := virtualmodels.NewService(store, registry, defaultEnabled)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+
 	return service
 }
 
@@ -51,39 +51,20 @@ func TestListModels_IncludesModelAccessState(t *testing.T) {
 	})
 
 	h := NewHandler(nil, registry, WithVirtualModels(service))
-	c, rec := newHandlerContext("/admin/models")
+	c, rec := echotest.Get(t, "/admin/models")
+	require.NoError(t, h.ListModels(c))
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.ListModels(c); err != nil {
-		t.Fatalf("ListModels() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-
-	var body []modelInventoryResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if len(body) != 1 {
-		t.Fatalf("len(body) = %d, want 1", len(body))
-	}
+	body := echotest.Decode[[]modelInventoryResponse](t, rec)
+	require.Len(t, body, 1)
 
 	row := body[0]
-	if row.Access.Selector != "openai/gpt-4o" {
-		t.Fatalf("row.Access.Selector = %q, want openai/gpt-4o", row.Access.Selector)
-	}
-	if row.Access.DefaultEnabled {
-		t.Fatal("row.Access.DefaultEnabled = true, want false")
-	}
-	if !row.Access.EffectiveEnabled {
-		t.Fatal("row.Access.EffectiveEnabled = false, want true")
-	}
-	if len(row.Access.UserPaths) != 1 || row.Access.UserPaths[0] != "/team/alpha" {
-		t.Fatalf("row.Access.UserPaths = %#v, want [/team/alpha]", row.Access.UserPaths)
-	}
-	if row.Access.Override == nil || row.Access.Override.Source != "openai/gpt-4o" {
-		t.Fatalf("row.Access.Override = %#v, want exact override", row.Access.Override)
-	}
+	require.Equal(t, "openai/gpt-4o", row.Access.Selector)
+	require.False(t, row.Access.DefaultEnabled)
+	require.True(t, row.Access.EffectiveEnabled)
+	require.Equal(t, []string{"/team/alpha"}, row.Access.UserPaths)
+	require.NotNil(t, row.Access.Override)
+	require.Equal(t, "openai/gpt-4o", row.Access.Override.Source)
 }
 
 func TestListModels_DisabledPolicyTurnsModelOff(t *testing.T) {
@@ -94,26 +75,15 @@ func TestListModels_DisabledPolicyTurnsModelOff(t *testing.T) {
 	})
 
 	h := NewHandler(nil, registry, WithVirtualModels(service))
-	c, rec := newHandlerContext("/admin/models")
+	c, rec := echotest.Get(t, "/admin/models")
+	require.NoError(t, h.ListModels(c))
 
-	if err := h.ListModels(c); err != nil {
-		t.Fatalf("ListModels() error = %v", err)
-	}
+	body := echotest.Decode[[]modelInventoryResponse](t, rec)
+	require.Len(t, body, 1)
 
-	var body []modelInventoryResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if len(body) != 1 {
-		t.Fatalf("len(body) = %d, want 1", len(body))
-	}
 	row := body[0]
-	if !row.Access.DefaultEnabled {
-		t.Fatal("row.Access.DefaultEnabled = false, want true")
-	}
-	if row.Access.EffectiveEnabled {
-		t.Fatal("row.Access.EffectiveEnabled = true, want false (disabled policy)")
-	}
+	require.True(t, row.Access.DefaultEnabled)
+	require.False(t, row.Access.EffectiveEnabled)
 }
 
 func TestListModels_AppliesProviderWideOverrideToConcreteModels(t *testing.T) {
@@ -125,29 +95,16 @@ func TestListModels_AppliesProviderWideOverrideToConcreteModels(t *testing.T) {
 	})
 
 	h := NewHandler(nil, registry, WithVirtualModels(service))
-	c, rec := newHandlerContext("/admin/models")
+	c, rec := echotest.Get(t, "/admin/models")
+	require.NoError(t, h.ListModels(c))
 
-	if err := h.ListModels(c); err != nil {
-		t.Fatalf("ListModels() error = %v", err)
-	}
+	body := echotest.Decode[[]modelInventoryResponse](t, rec)
+	require.Len(t, body, 1)
 
-	var body []modelInventoryResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if len(body) != 1 {
-		t.Fatalf("len(body) = %d, want 1", len(body))
-	}
 	row := body[0]
-	if row.Access.Selector != "openai/gpt-4o" {
-		t.Fatalf("row.Access.Selector = %q, want openai/gpt-4o", row.Access.Selector)
-	}
-	if len(row.Access.UserPaths) != 1 || row.Access.UserPaths[0] != "/team/provider" {
-		t.Fatalf("row.Access.UserPaths = %#v, want [/team/provider]", row.Access.UserPaths)
-	}
-	if row.Access.Override != nil {
-		t.Fatalf("row.Access.Override = %#v, want nil for provider-wide override", row.Access.Override)
-	}
+	require.Equal(t, "openai/gpt-4o", row.Access.Selector)
+	require.Equal(t, []string{"/team/provider"}, row.Access.UserPaths)
+	require.Nil(t, row.Access.Override)
 }
 
 func TestListModels_AppliesGlobalOverrideToConcreteModels(t *testing.T) {
@@ -159,24 +116,106 @@ func TestListModels_AppliesGlobalOverrideToConcreteModels(t *testing.T) {
 	})
 
 	h := NewHandler(nil, registry, WithVirtualModels(service))
-	c, rec := newHandlerContext("/admin/models")
+	c, rec := echotest.Get(t, "/admin/models")
+	require.NoError(t, h.ListModels(c))
 
-	if err := h.ListModels(c); err != nil {
-		t.Fatalf("ListModels() error = %v", err)
-	}
+	body := echotest.Decode[[]modelInventoryResponse](t, rec)
+	require.Len(t, body, 1)
 
-	var body []modelInventoryResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if len(body) != 1 {
-		t.Fatalf("len(body) = %d, want 1", len(body))
-	}
 	row := body[0]
-	if len(row.Access.UserPaths) != 1 || row.Access.UserPaths[0] != "/team/global" {
-		t.Fatalf("row.Access.UserPaths = %#v, want [/team/global]", row.Access.UserPaths)
+	require.Equal(t, []string{"/team/global"}, row.Access.UserPaths)
+	require.Nil(t, row.Access.Override)
+}
+
+func newLayeredModelRegistry(t *testing.T) *providers.ModelRegistry {
+	t.Helper()
+	registry := providers.NewModelRegistry()
+	runtimeContext := 4096
+	mock := &handlerMockProvider{
+		models: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{
+					ID:       "gemma-3-4b-it",
+					Object:   "model",
+					OwnedBy:  "llamacpp",
+					Metadata: &core.ModelMetadata{ContextWindow: &runtimeContext},
+				},
+			},
+		},
 	}
-	if row.Access.Override != nil {
-		t.Fatalf("row.Access.Override = %#v, want nil for global override", row.Access.Override)
+	registry.RegisterProviderWithNameAndType(mock, "local", "llamacpp")
+	registry.SetProviderMetadataOverrides("local", map[string]*core.ModelMetadata{
+		"gemma-3-4b-it": {DisplayName: "Gemma (local)"},
+	})
+	require.NoError(t, registry.Initialize(context.Background()))
+
+	raw := []byte(`{
+		"version": 1,
+		"updated_at": "2025-01-01T00:00:00Z",
+		"models": {
+			"gemma-3-4b-it": {"display_name": "Gemma 3 4B IT", "modes": ["chat"], "context_window": 131072}
+		}
+	}`)
+	list, err := modeldata.Parse(raw)
+	require.NoError(t, err)
+	registry.SetModelList(list, raw)
+	registry.EnrichModels()
+	return registry
+}
+
+func TestModelMetadataLayers_ReturnsLayersAndSources(t *testing.T) {
+	h := NewHandler(nil, newLayeredModelRegistry(t))
+	c, rec := echotest.Get(t, "/admin/models/metadata?provider=local&model=gemma-3-4b-it")
+	require.NoError(t, h.ModelMetadataLayers(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := echotest.Decode[providers.ModelMetadataLayers](t, rec)
+	require.Equal(t, "local/gemma-3-4b-it", body.Selector)
+	require.NotNil(t, body.Effective)
+	require.NotNil(t, body.Provider)
+	require.NotNil(t, body.Catalog)
+	require.NotNil(t, body.Config)
+	require.Equal(t, "Gemma (local)", body.Effective.DisplayName)
+	require.Equal(t, "Gemma 3 4B IT", body.Catalog.DisplayName)
+	require.NotNil(t, body.Provider.ContextWindow)
+	require.Equal(t, 4096, *body.Provider.ContextWindow)
+	require.Equal(t, modeldata.MetadataSourceConfig, body.Sources["display_name"])
+	require.Equal(t, modeldata.MetadataSourceProvider, body.Sources["context_window"])
+	require.Equal(t, modeldata.MetadataSourceCatalog, body.Sources["modes"])
+}
+
+func TestModelMetadataLayers_UnknownLayersAreNull(t *testing.T) {
+	h := NewHandler(nil, newVMModelRegistry(t))
+	c, rec := echotest.Get(t, "/admin/models/metadata?provider=openai&model=gpt-4o")
+	require.NoError(t, h.ModelMetadataLayers(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := echotest.Decode[map[string]any](t, rec)
+	require.Equal(t, "openai/gpt-4o", body["selector"])
+	require.Nil(t, body["provider"])
+	require.Nil(t, body["catalog"])
+	require.Nil(t, body["config"])
+}
+
+func TestModelMetadataLayers_Errors(t *testing.T) {
+	tests := []struct {
+		name     string
+		registry *providers.ModelRegistry
+		target   string
+		status   int
+	}{
+		{name: "missing provider", registry: newVMModelRegistry(t), target: "/admin/models/metadata?model=gpt-4o", status: http.StatusBadRequest},
+		{name: "missing model", registry: newVMModelRegistry(t), target: "/admin/models/metadata?provider=openai", status: http.StatusBadRequest},
+		{name: "unknown model", registry: newVMModelRegistry(t), target: "/admin/models/metadata?provider=openai&model=nope", status: http.StatusNotFound},
+		{name: "no registry", registry: nil, target: "/admin/models/metadata?provider=openai&model=gpt-4o", status: http.StatusNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := NewHandler(nil, tt.registry)
+			c, rec := echotest.Get(t, tt.target)
+			require.NoError(t, h.ModelMetadataLayers(c))
+			require.Equal(t, tt.status, rec.Code)
+		})
 	}
 }

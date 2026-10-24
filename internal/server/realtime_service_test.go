@@ -3,10 +3,12 @@ package server
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
+	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v5"
+	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsWebSocketUpgrade(t *testing.T) {
@@ -32,9 +34,7 @@ func TestIsWebSocketUpgrade(t *testing.T) {
 			if tt.upgrade != "" {
 				r.Header.Set("Upgrade", tt.upgrade)
 			}
-			if got := isWebSocketUpgrade(r); got != tt.want {
-				t.Errorf("isWebSocketUpgrade = %v, want %v", got, tt.want)
-			}
+			assert.Equal(t, tt.want, isWebSocketUpgrade(r))
 		})
 	}
 }
@@ -52,19 +52,12 @@ func TestRealtimeUpstreamHeaders(t *testing.T) {
 
 	got := realtimeUpstreamHeaders(context.Background(), client, target)
 
-	if got.Get("Authorization") != "Bearer upstream-key" {
-		t.Errorf("Authorization = %q, want injected upstream key", got.Get("Authorization"))
-	}
-	if got.Get("OpenAI-Beta") != "" {
-		t.Errorf("OpenAI-Beta = %q, want stripped (GA endpoint rejects it)", got.Get("OpenAI-Beta"))
-	}
-	if got.Get("X-Custom") != "keep-me" {
-		t.Errorf("X-Custom = %q, want forwarded", got.Get("X-Custom"))
-	}
+	assert.Equal(t, "Bearer upstream-key", got.Get("Authorization"))
+	assert.Empty(t, got.Get("OpenAI-Beta"))
+	assert.Equal(t, "keep-me", got.Get("X-Custom"))
+
 	for key := range got {
-		if len(key) >= 13 && http.CanonicalHeaderKey(key)[:13] == "Sec-Websocket" {
-			t.Errorf("handshake header leaked upstream: %q", key)
-		}
+		assert.False(t, strings.HasPrefix(http.CanonicalHeaderKey(key), "Sec-Websocket"), "handshake header leaked upstream: %q", key)
 	}
 }
 
@@ -77,19 +70,12 @@ func TestRealtimeForwardsTrimmedIntent(t *testing.T) {
 	}
 	handler := newRealtimeTestHandler(mock, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/realtime?model=gpt-4o-transcribe&intent=%20transcription%20", nil)
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
+	c, rec := echotest.Get(t, "/v1/realtime?model=gpt-4o-transcribe&intent=%20transcription%20")
 
 	_ = handler.Realtime(c)
 
-	if mock.capturedRealtime == nil {
-		t.Fatalf("router received no request (status %d, body %s)", rec.Code, rec.Body.String())
-	}
-	if mock.capturedRealtime.Intent != "transcription" {
-		t.Errorf("intent = %q, want trimmed %q", mock.capturedRealtime.Intent, "transcription")
-	}
-	if mock.capturedRealtime.Model != "gpt-4o-transcribe" || mock.capturedRealtime.CallID != "" {
-		t.Errorf("router received %+v, want the resolved model and no call id", mock.capturedRealtime)
-	}
+	require.NotNil(t, mock.capturedRealtime, "router received no request (status %d, body %s)", rec.Code, rec.Body.String())
+	assert.Equal(t, "transcription", mock.capturedRealtime.Intent)
+	assert.Equal(t, "gpt-4o-transcribe", mock.capturedRealtime.Model)
+	assert.Empty(t, mock.capturedRealtime.CallID)
 }

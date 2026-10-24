@@ -3,7 +3,6 @@ package budget
 import (
 	"context"
 	"errors"
-	"reflect"
 	"testing"
 	"time"
 
@@ -12,6 +11,8 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsMongoTransactionCapabilityError(t *testing.T) {
@@ -59,9 +60,8 @@ func TestIsMongoTransactionCapabilityError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isMongoTransactionCapabilityError(tt.err); got != tt.want {
-				t.Fatalf("isMongoTransactionCapabilityError(%v) = %v, want %v", tt.err, got, tt.want)
-			}
+			got := isMongoTransactionCapabilityError(tt.err)
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -69,81 +69,99 @@ func TestIsMongoTransactionCapabilityError(t *testing.T) {
 func TestUsagePathRegexBoundaries(t *testing.T) {
 	// The root pattern must also catch the rows a blank user path normalizes
 	// to; nested paths must not leak into a sibling that shares their prefix.
-	if got, want := usagePathRegex("/"), "^/"; got != want {
-		t.Fatalf("usagePathRegex(/) = %q, want %q", got, want)
-	}
-	if got, want := usagePathRegex("/team"), `^/team(?:/|$)`; got != want {
-		t.Fatalf("usagePathRegex(/team) = %q, want %q", got, want)
-	}
+	require.Equal(t, "^/", usagePathRegex("/"))
+	require.Equal(t, `^/team(?:/|$)`, usagePathRegex("/team"))
 }
 
 func TestMongoSubjectMatchUsesLabelMembership(t *testing.T) {
 	got, err := mongoSubjectMatch(SpendWindow{Scope: ScopeLabel, Subject: "iOS"})
-	if err != nil {
-		t.Fatalf("mongoSubjectMatch() failed: %v", err)
-	}
+	require.NoError(t, err)
+
 	want := bson.D{{Key: "$in", Value: bson.A{
-		"iOS",
+		bson.D{{Key: "$literal", Value: "iOS"}},
 		bson.D{{Key: "$ifNull", Value: bson.A{"$labels", bson.A{}}}},
 	}}}
 
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("mongoSubjectMatch(label iOS) = %#v, want %#v", got, want)
+	require.Equal(t, want, got)
+}
+
+// A subject that starts with "$" would otherwise be read as a field path
+// inside the aggregation expression instead of compared as text.
+func TestMongoSubjectMatchTreatsDollarSubjectsAsLiterals(t *testing.T) {
+	tests := []struct {
+		name   string
+		window SpendWindow
+		want   bson.D
+	}{
+		{
+			name:   "label",
+			window: SpendWindow{Scope: ScopeLabel, Subject: "$labels"},
+			want: bson.D{{Key: "$in", Value: bson.A{
+				bson.D{{Key: "$literal", Value: "$labels"}},
+				bson.D{{Key: "$ifNull", Value: bson.A{"$labels", bson.A{}}}},
+			}}},
+		},
+		{
+			name:   "provider",
+			window: SpendWindow{Scope: ScopeProvider, Subject: "$provider"},
+			want: bson.D{{Key: "$eq", Value: bson.A{
+				bson.D{{Key: "$toLower", Value: mongoTrimmedOr("$provider_name", "$provider")}},
+				bson.D{{Key: "$literal", Value: "$provider"}},
+			}}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := mongoSubjectMatch(tt.window)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
 	}
 }
 
 func TestMongoSubjectMatchRejectsBlankLabel(t *testing.T) {
-	if _, err := mongoSubjectMatch(SpendWindow{Scope: ScopeLabel, Subject: "  "}); err == nil {
-		t.Fatal("mongoSubjectMatch() error = nil, want blank label rejection")
-	}
+	_, err := mongoSubjectMatch(SpendWindow{Scope: ScopeLabel, Subject: "  "})
+	require.Error(t, err)
 }
 
 func TestMongoSubjectMatchNormalizesMissingUserPathToRoot(t *testing.T) {
 	got, err := mongoSubjectMatch(SpendWindow{Scope: ScopeUserPath, Subject: "/team"})
-	if err != nil {
-		t.Fatalf("mongoSubjectMatch() failed: %v", err)
-	}
+	require.NoError(t, err)
+
 	expression, ok := bsonField(got, "$regexMatch").(bson.D)
-	if !ok {
-		t.Fatalf("mongoSubjectMatch(user_path) = %#v, want a $regexMatch expression", got)
-	}
-	if regex := bsonField(expression, "regex"); regex != usagePathRegex("/team") {
-		t.Fatalf("regex = %v, want %q", regex, usagePathRegex("/team"))
-	}
+	require.True(t, ok, "mongoSubjectMatch(user_path) = %#v, want a $regexMatch expression", got)
+	regex := bsonField(expression, "regex")
+	require.Equal(t, usagePathRegex("/team"), regex)
 	// The input must fold missing and blank paths to "/" so a root budget still
 	// sees rows recorded without a user path.
-	if _, ok := bsonField(expression, "input").(bson.D); !ok {
-		t.Fatalf("input = %#v, want the normalizing $let expression", bsonField(expression, "input"))
-	}
+	_, ok = bsonField(expression, "input").(bson.D)
+	require.True(t, ok, "input = %#v, want the normalizing $let expression", bsonField(expression, "input"))
 }
 
 func TestMongoDBStoreRoundTripsPerChild(t *testing.T) {
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
 		ctx := context.Background()
 		store, err := NewMongoDBStore(ctx, db)
-		if err != nil {
-			t.Fatalf("NewMongoDBStore() failed: %v", err)
-		}
+		require.NoError(t, err)
+
 		budgets := []Budget{
 			{Scope: ScopeUserPath, Subject: "/shared", PeriodSeconds: PeriodDailySeconds, Amount: 10, Source: SourceManual},
 			{Scope: ScopeUserPath, Subject: "/customers", PerChild: true, PeriodSeconds: PeriodDailySeconds, Amount: 20, Source: SourceManual},
 		}
-		if err := store.UpsertBudgets(ctx, budgets); err != nil {
-			t.Fatalf("UpsertBudgets() failed: %v", err)
-		}
+		err = store.UpsertBudgets(ctx, budgets)
+		require.NoError(t, err)
 
 		got, err := store.ListBudgets(ctx)
-		if err != nil {
-			t.Fatalf("ListBudgets() failed: %v", err)
-		}
+		require.NoError(t, err)
+
 		bySubject := make(map[string]Budget, len(got))
 		for _, budget := range got {
 			bySubject[budget.Subject] = budget
 		}
 		for _, want := range budgets {
-			if persisted, ok := bySubject[want.Subject]; !ok || persisted.PerChild != want.PerChild {
-				t.Errorf("budget %q = %+v, want per_child=%v", want.Subject, persisted, want.PerChild)
-			}
+			persisted, ok := bySubject[want.Subject]
+			assert.True(t, ok)
+			assert.Equal(t, want.PerChild, persisted.PerChild, "budget %q = %+v, want per_child=%v", want.Subject, persisted, want.PerChild)
 		}
 	})
 }
@@ -174,9 +192,8 @@ func TestBsonNumberReadsEveryNumericShape(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, ok := bsonNumber(tt.value)
-			if got != tt.want || ok != tt.ok {
-				t.Fatalf("bsonNumber(%v) = %v/%v, want %v/%v", tt.value, got, ok, tt.want, tt.ok)
-			}
+			require.Equal(t, tt.want, got)
+			require.Equal(t, tt.ok, ok)
 		})
 	}
 }
@@ -189,53 +206,96 @@ func TestMongoDBStoreMigratesPreScopeDocuments(t *testing.T) {
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
 		ctx := context.Background()
 		budgets := db.Collection("budgets")
-		if _, err := budgets.Indexes().CreateOne(ctx, mongo.IndexModel{
+		_, err := budgets.Indexes().CreateOne(ctx, mongo.IndexModel{
 			Keys:    bson.D{{Key: "user_path", Value: 1}, {Key: "period_seconds", Value: 1}},
 			Options: options.Index().SetUnique(true),
-		}); err != nil {
-			t.Fatalf("create pre-scope index: %v", err)
-		}
+		})
+		require.NoError(t, err)
+
 		now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
 		// Two paths sharing one period: the case that collides.
-		if _, err := budgets.InsertMany(ctx, []any{
+		_, err = budgets.InsertMany(ctx, []any{
 			bson.D{{Key: "user_path", Value: "/team/alpha"}, {Key: "period_seconds", Value: PeriodDailySeconds},
 				{Key: "amount", Value: 10.0}, {Key: "source", Value: SourceManual},
 				{Key: "created_at", Value: now}, {Key: "updated_at", Value: now}},
 			bson.D{{Key: "user_path", Value: "/team/beta"}, {Key: "period_seconds", Value: PeriodDailySeconds},
 				{Key: "amount", Value: 20.0}, {Key: "source", Value: SourceManual},
 				{Key: "created_at", Value: now}, {Key: "updated_at", Value: now}},
-		}); err != nil {
-			t.Fatalf("seed pre-scope documents: %v", err)
-		}
+		})
+		require.NoError(t, err)
 
 		store, err := NewMongoDBStore(ctx, db)
-		if err != nil {
-			t.Fatalf("NewMongoDBStore() failed: %v", err)
-		}
+		require.NoError(t, err)
+
 		got, err := store.ListBudgets(ctx)
-		if err != nil {
-			t.Fatalf("ListBudgets() failed: %v", err)
-		}
-		if len(got) != 2 {
-			t.Fatalf("migrated budgets = %+v, want both pre-scope rows", got)
-		}
+		require.NoError(t, err)
+		require.Len(t, got, 2)
+
 		bySubject := map[string]Budget{}
 		for _, budget := range got {
-			if budget.Scope != ScopeUserPath {
-				t.Fatalf("migrated budget %+v, want scope user_path", budget)
-			}
+			require.Equal(t, ScopeUserPath, budget.Scope, "migrated budget %+v, want scope user_path", budget)
+
 			bySubject[budget.Subject] = budget
 		}
-		if bySubject["/team/alpha"].Amount != 10 || bySubject["/team/beta"].Amount != 20 {
-			t.Fatalf("migrated budgets = %+v, want both amounts preserved", got)
-		}
-
+		require.Equal(t, float64(10), bySubject["/team/alpha"].Amount)
+		require.Equal(t, float64(20), bySubject["/team/beta"].Amount, "migrated budgets = %+v, want both amounts preserved", got)
 		// The scoped unique index must now allow a label budget spelled like an
 		// existing user path.
-		if err := store.UpsertBudgets(ctx, []Budget{
+		err = store.UpsertBudgets(ctx, []Budget{
 			{Scope: ScopeLabel, Subject: "/team/alpha", PeriodSeconds: PeriodDailySeconds, Amount: 1},
-		}); err != nil {
-			t.Fatalf("UpsertBudgets() after migration failed: %v", err)
-		}
+		})
+		require.NoError(t, err)
+	})
+}
+
+func TestMongoDBStoreSumSpendMatchesProvider(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		ctx := context.Background()
+		store, err := NewMongoDBStore(ctx, db)
+		require.NoError(t, err)
+
+		now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
+		_, err = db.Collection("usage").InsertMany(ctx, []any{
+			bson.D{{Key: "timestamp", Value: now}, {Key: "provider", Value: "openai"}, {Key: "provider_name", Value: "OpenAI-Prod"}, {Key: "total_cost", Value: 2.0}},
+			bson.D{{Key: "timestamp", Value: now}, {Key: "provider", Value: "openai"}, {Key: "provider_name", Value: "openai-free"}, {Key: "total_cost", Value: 4.0}},
+			// Written before provider_name existed: only the provider type is set.
+			bson.D{{Key: "timestamp", Value: now}, {Key: "provider", Value: "openai"}, {Key: "total_cost", Value: 3.0}},
+			bson.D{{Key: "timestamp", Value: now}, {Key: "provider", Value: "openai"}, {Key: "provider_name", Value: "openai-prod"}, {Key: "cache_type", Value: "exact"}, {Key: "total_cost", Value: 10.0}},
+		})
+		require.NoError(t, err)
+
+		start, end := now.Add(-time.Hour), now.Add(time.Hour)
+		got, err := store.SumSpend(ctx, []SpendWindow{
+			{Scope: ScopeProvider, Subject: "openai-prod", Start: start, End: end},
+			{Scope: ScopeProvider, Subject: "openai", Start: start, End: end},
+			{Scope: ScopeProvider, Subject: "anthropic", Start: start, End: end},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []Spend{
+			{Total: 2, HasUsage: true}, // case-insensitive, cached row excluded
+			{Total: 3, HasUsage: true}, // only the row without a provider name
+			{},
+		}, got)
+	})
+}
+
+func TestMongoDBStoreSumSpendMatchesDollarLabelLiterally(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		ctx := context.Background()
+		store, err := NewMongoDBStore(ctx, db)
+		require.NoError(t, err)
+
+		now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
+		_, err = db.Collection("usage").InsertMany(ctx, []any{
+			bson.D{{Key: "timestamp", Value: now}, {Key: "labels", Value: bson.A{"$labels"}}, {Key: "total_cost", Value: 2.0}},
+			bson.D{{Key: "timestamp", Value: now}, {Key: "labels", Value: bson.A{"other"}}, {Key: "total_cost", Value: 4.0}},
+		})
+		require.NoError(t, err)
+
+		got, err := store.SumSpend(ctx, []SpendWindow{
+			{Scope: ScopeLabel, Subject: "$labels", Start: now.Add(-time.Hour), End: now.Add(time.Hour)},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []Spend{{Total: 2, HasUsage: true}}, got)
 	})
 }

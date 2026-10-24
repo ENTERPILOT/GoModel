@@ -6,6 +6,12 @@ const (
 	// TokenPrefix is the managed API key prefix returned to clients.
 	TokenPrefix = "sk_gom_"
 	secretBytes = 32
+
+	// ImportedFromLiteLLM marks a key imported from a LiteLLM proxy. Its
+	// SecretHash is the SHA-256 of the whole "sk-..." token, as LiteLLM stores
+	// it, so the old token keeps working without GoModel ever seeing it.
+	ImportedFromLiteLLM = "litellm"
+	liteLLMTokenPrefix  = "sk-"
 )
 
 // AuthKey is the persisted auth key record.
@@ -21,20 +27,30 @@ type AuthKey struct {
 	AllowedModels []string `json:"allowed_models,omitempty" bson:"allowed_models,omitempty"`
 	// DashboardAccess grants the key access to the admin API and dashboard.
 	// Keys without it can still call every model endpoint and /v1/usage.
-	DashboardAccess bool       `json:"dashboard_access" bson:"dashboard_access,omitempty"`
-	RedactedValue   string     `json:"redacted_value" bson:"redacted_value"`
-	SecretHash      string     `json:"-" bson:"secret_hash"`
-	Enabled         bool       `json:"enabled" bson:"enabled"`
-	ExpiresAt       *time.Time `json:"expires_at,omitempty" bson:"expires_at,omitempty"`
-	DeactivatedAt   *time.Time `json:"deactivated_at,omitempty" bson:"deactivated_at,omitempty"`
-	CreatedAt       time.Time  `json:"created_at" bson:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at" bson:"updated_at"`
+	DashboardAccess bool `json:"dashboard_access" bson:"dashboard_access,omitempty"`
+	// PassthroughAccess lets the key call the provider passthrough routes
+	// (/p/{provider}/...), which reach the provider account directly. Keys
+	// issued before the flag existed keep it; new keys start without it.
+	PassthroughAccess bool       `json:"passthrough_access" bson:"passthrough_access"`
+	RedactedValue     string     `json:"redacted_value" bson:"redacted_value"`
+	SecretHash        string     `json:"-" bson:"secret_hash"`
+	Enabled           bool       `json:"enabled" bson:"enabled"`
+	ExpiresAt         *time.Time `json:"expires_at,omitempty" bson:"expires_at,omitempty"`
+	DeactivatedAt     *time.Time `json:"deactivated_at,omitempty" bson:"deactivated_at,omitempty"`
+	CreatedAt         time.Time  `json:"created_at" bson:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at" bson:"updated_at"`
+	// ImportedFrom names the gateway an imported key came from, such as
+	// ImportedFromLiteLLM. Empty for keys GoModel issued.
+	ImportedFrom string `json:"imported_from,omitempty" bson:"imported_from,omitempty"`
 }
 
 // View is the admin-facing representation of a managed auth key.
 type View struct {
 	AuthKey
 	Active bool `json:"active"`
+	// LastUsedAt is the key's newest audit-log activity, overlaid by the admin
+	// list handler; presentation-only and never persisted.
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 }
 
 // IssuedKey is returned once on create and includes the plaintext token value.
@@ -45,14 +61,40 @@ type IssuedKey struct {
 
 // CreateInput captures the admin request for issuing a new auth key.
 type CreateInput struct {
-	Name            string
-	Description     string
-	UserPath        string
-	Labels          []string
-	AllowedModels   []string
-	DashboardAccess bool
-	ExpiresAt       *time.Time
+	Name              string
+	Description       string
+	UserPath          string
+	Labels            []string
+	AllowedModels     []string
+	DashboardAccess   bool
+	PassthroughAccess bool
+	ExpiresAt         *time.Time
 }
+
+// ImportInput captures the admin request for importing a key another gateway
+// issued. Only the token's hash is imported, never the token.
+type ImportInput struct {
+	CreateInput
+	ImportedFrom  string
+	SecretHash    string
+	RedactedValue string
+	// Disabled marks a key the source gateway blocked or expired: an
+	// existing import is deactivated, and a missing one is not created.
+	Disabled bool
+}
+
+// ImportOutcome reports what Import did with a key.
+type ImportOutcome int
+
+const (
+	// ImportCreated means the key was new and is now stored.
+	ImportCreated ImportOutcome = iota
+	// ImportUpdated means an earlier import of the key was brought up to date.
+	ImportUpdated
+	// ImportSkipped means a disabled key had never been imported, so nothing
+	// was stored.
+	ImportSkipped
+)
 
 // Active reports whether the key can currently authenticate requests.
 func (k AuthKey) Active(now time.Time) bool {

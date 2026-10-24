@@ -32,6 +32,38 @@ func measureSpeechDurationSeconds(data []byte, format string) (float64, bool) {
 	return 0, false
 }
 
+// measureUploadDurationSeconds returns the playback duration of an uploaded
+// transcription or translation file. Unlike synthesized speech, an upload's
+// declared type is whatever the client chose to send, so the container is
+// identified from the bytes themselves (RIFF/WAVE, or an MPEG stream with or
+// without a leading ID3 tag) rather than from the filename or Content-Type.
+// Formats the gateway cannot measure without decoding (m4a, ogg/opus, flac,
+// webm) return ok=false so the caller records a caveat instead of a wrong
+// duration.
+func measureUploadDurationSeconds(audio []byte) (float64, bool) {
+	if len(audio) == 0 {
+		return 0, false
+	}
+	if seconds, ok := wavDurationSeconds(audio); ok {
+		return seconds, true
+	}
+	if looksLikeMP3(audio) {
+		return mp3DurationSeconds(audio)
+	}
+	return 0, false
+}
+
+// looksLikeMP3 reports whether the buffer starts as an MPEG audio stream: an
+// ID3v2 tag, or a frame sync word at the very first byte.
+func looksLikeMP3(data []byte) bool {
+	pos := skipID3v2(data)
+	if pos > 0 {
+		return true
+	}
+	_, _, ok := parseMP3FrameHeader(data)
+	return ok
+}
+
 // normalizeAudioFormat reduces a response_format token or audio MIME type to a
 // bare lowercase codec name (e.g. "audio/wav" -> "wav", "audio/mpeg" -> "mp3").
 func normalizeAudioFormat(format string) string {
@@ -135,14 +167,22 @@ func parseMP3FrameHeader(buf []byte) (frameSize int, seconds float64, ok bool) {
 	return frameSize, float64(samples) / float64(sampleRate), true
 }
 
-// skipID3v2 returns the offset past a leading ID3v2 tag, whose size is encoded
-// as a 28-bit sync-safe integer, or 0 when no tag is present.
-func skipID3v2(data []byte) int {
+// id3v2TagSize returns the total byte length of a leading ID3v2 tag — its
+// 10-byte header plus the body size encoded there as a 28-bit sync-safe
+// integer — or 0 when the buffer does not start with one. It reads only that
+// header, so a streaming caller can discard a tag it has not fully received.
+func id3v2TagSize(data []byte) int {
 	if len(data) < 10 || string(data[0:3]) != "ID3" {
 		return 0
 	}
 	size := int(data[6]&0x7F)<<21 | int(data[7]&0x7F)<<14 | int(data[8]&0x7F)<<7 | int(data[9]&0x7F)
-	end := 10 + size
+	return 10 + size
+}
+
+// skipID3v2 returns the offset past a leading ID3v2 tag, or 0 when no tag is
+// present. A tag that overruns the buffer consumes all of it.
+func skipID3v2(data []byte) int {
+	end := id3v2TagSize(data)
 	if end > len(data) {
 		return len(data)
 	}
@@ -155,14 +195,34 @@ func skipID3v2(data []byte) int {
 // or overruns the buffer (some streamed encoders write 0 or 0xFFFFFFFF), falling
 // back to the trailing byte count in that case.
 func wavDurationSeconds(data []byte) (float64, bool) {
-	if len(data) < 12 || string(data[0:4]) != "RIFF" || string(data[8:12]) != "WAVE" {
+	byteRate, dataOffset, declaredSize, ok := wavHeader(data)
+	if !ok {
 		return 0, false
 	}
+	size := declaredSize
+	remaining := len(data) - dataOffset
+	if size <= 0 || size > remaining {
+		size = remaining
+	}
+	if size <= 0 {
+		return 0, false
+	}
+	return float64(size) / float64(byteRate), true
+}
 
-	var byteRate uint32
-	var dataSize int
+// wavHeader locates everything a RIFF/WAVE container's duration needs: the
+// format byte rate, the offset at which the data chunk body begins, and the
+// size that chunk declares. The declared size is returned unadjusted — it is 0
+// or 0xFFFFFFFF in a stream whose encoder did not know the length yet — so a
+// caller that only has the head of the audio can substitute the byte count it
+// observed. ok=false when the buffer is not a WAVE container or does not reach
+// both the fmt and data chunks.
+func wavHeader(data []byte) (byteRate uint32, dataOffset, declaredSize int, ok bool) {
+	if len(data) < 12 || string(data[0:4]) != "RIFF" || string(data[8:12]) != "WAVE" {
+		return 0, 0, 0, false
+	}
+
 	var haveFmt, haveData bool
-
 	pos := 12
 	for pos+8 <= len(data) {
 		id := string(data[pos : pos+4])
@@ -177,11 +237,8 @@ func wavDurationSeconds(data []byte) (float64, bool) {
 				haveFmt = true
 			}
 		case "data":
-			remaining := len(data) - body
-			if size <= 0 || size > remaining {
-				size = remaining
-			}
-			dataSize = size
+			dataOffset = body
+			declaredSize = size
 			haveData = true
 		}
 
@@ -198,8 +255,8 @@ func wavDurationSeconds(data []byte) (float64, bool) {
 		}
 	}
 
-	if !haveFmt || !haveData || byteRate == 0 || dataSize <= 0 {
-		return 0, false
+	if !haveFmt || !haveData || byteRate == 0 {
+		return 0, 0, 0, false
 	}
-	return float64(dataSize) / float64(byteRate), true
+	return byteRate, dataOffset, declaredSize, true
 }

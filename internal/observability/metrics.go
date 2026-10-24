@@ -51,6 +51,17 @@ var (
 		[]string{"provider", "provider_name", "operation"},
 	)
 
+	// EmptyResponsesTotal counts provider calls that returned 200 without
+	// choices, output, or usage. gomodel_requests_total records those calls as
+	// successes, so alert on this counter instead.
+	EmptyResponsesTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "gomodel_empty_responses_total",
+			Help: "Total number of provider responses that returned 200 without choices, output, or usage",
+		},
+		[]string{"provider", "model", "reason"},
+	)
+
 	// CircuitBreakerState reports each provider's circuit breaker state as of
 	// its most recent request (0=closed, 1=half-open, 2=open). The value is
 	// updated per request, so an idle provider keeps its last observed state.
@@ -140,6 +151,9 @@ func NewPrometheusHooks() llmclient.Hooks {
 				CircuitBreakerState.WithLabelValues(info.Provider).Set(value)
 			}
 		},
+		OnEmptyResponse: func(_ context.Context, info llmclient.EmptyResponseInfo) {
+			EmptyResponsesTotal.WithLabelValues(info.Provider, info.Model, info.Reason).Inc()
+		},
 	}
 }
 
@@ -156,6 +170,9 @@ func NewPrometheusHooks() llmclient.Hooks {
 //
 // Concurrent requests:
 //   gomodel_requests_in_flight
+//
+// Empty 200 responses by provider and reason:
+//   sum(rate(gomodel_empty_responses_total[5m])) by (provider, reason)
 
 // Example Grafana dashboard queries:
 //
@@ -180,5 +197,6 @@ func ResetMetrics() {
 	RequestDuration.Reset()
 	InFlightRequests.Reset()
 	ResponseSnapshotStoreFailures.Reset()
+	EmptyResponsesTotal.Reset()
 	CircuitBreakerState.Reset()
 }

@@ -1,0 +1,163 @@
+package encryption
+
+import (
+	"crypto/cipher"
+	"errors"
+	"fmt"
+	"log/slog"
+	"time"
+)
+
+// minReloadInterval bounds how often a read of an unknown key id makes a Box
+// re-read encryption_keys, so a corrupt row cannot turn every read into a
+// key-store round trip and an Argon2id derivation. Seals are not limited:
+// they reload only when the active key really changed.
+const minReloadInterval = 10 * time.Second
+
+// sealingKey returns the active key and its id as this Box knows them.
+func (b *Box) sealingKey() (string, cipher.AEAD) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.active, b.keys[b.active]
+}
+
+// currentSealingKey returns the key the database says is active, reloading
+// the key store when it differs from the one this Box holds. It fails rather
+// than fall back to a key that may have been replaced.
+func (b *Box) currentSealingKey() (string, cipher.AEAD, error) {
+	if b.activeID == nil {
+		active, aead := b.sealingKey()
+		return active, aead, nil
+	}
+	id, err := b.activeID()
+	if err != nil {
+		return "", nil, fmt.Errorf("check the active data key: %w", err)
+	}
+	active, aead := b.sealingKey()
+	if id == active {
+		return active, aead, nil
+	}
+	b.reloadKeys(true)
+	active, aead = b.sealingKey()
+	if id != active {
+		return "", nil, fmt.Errorf("data key %q is active but could not be loaded", id)
+	}
+	return active, aead, nil
+}
+
+// openingKey returns the data key with id, re-reading the key store once if
+// this Box does not hold it yet.
+func (b *Box) openingKey(id string) (cipher.AEAD, bool) {
+	b.mu.RLock()
+	aead, ok := b.keys[id]
+	b.mu.RUnlock()
+	if ok {
+		return aead, true
+	}
+	if b.reloadKeys(false) {
+		b.mu.RLock()
+		aead, ok = b.keys[id]
+		b.mu.RUnlock()
+	}
+	return aead, ok
+}
+
+// reloadKeys adopts the key store's current keys and active key, at most once
+// per minReloadInterval unless force is set. It reports whether the keys were
+// reloaded, by this call or by one that succeeded while it waited. A failed
+// reload still counts against the interval, but a caller queued behind it
+// does not take it for a reload: a forced caller tries again itself.
+//
+// The key store is read without holding mu: a reload lists keys and may run
+// Argon2id or call a KMS, and reads and seals of keys the Box already holds
+// must not wait for that. reloadMu only serializes reloads.
+func (b *Box) reloadKeys(force bool) bool {
+	if b.reload == nil {
+		return false
+	}
+	requested := time.Now()
+	b.reloadMu.Lock()
+	defer b.reloadMu.Unlock()
+	if b.lastSuccess.After(requested) {
+		return true
+	}
+	if !force && time.Since(b.lastReload) < minReloadInterval {
+		return false
+	}
+	next, err := b.reload()
+	// Stamped when the reload finishes, so callers that queued behind it
+	// see it as newer than their request and reuse it instead of repeating
+	// the key-store and KMS work.
+	b.lastReload = time.Now()
+	if err != nil {
+		slog.Warn("could not reload encryption keys", "error", err)
+		return false
+	}
+	if !next.Enabled() {
+		return false
+	}
+	next.mu.RLock()
+	keys, active := next.keys, next.active
+	next.mu.RUnlock()
+	b.mu.Lock()
+	b.keys, b.active = keys, active
+	b.mu.Unlock()
+	b.lastSuccess = b.lastReload
+	slog.Info("reloaded encryption keys", "active_key_id", active)
+	return true
+}
+
+// ErrSealUnconfirmed reports a save that was written but whose data key
+// could not be confirmed as current afterwards, so it may still be sealed
+// with a key a rotation replaced. The stored value stays readable.
+var ErrSealUnconfirmed = errors.New("the secret was saved, but its data key could not be confirmed; save it again or run `gomodel secrets reencrypt`")
+
+// RotatedSinceSeal reports whether the data key that sealed fields is no
+// longer active, according to the key store. Stores call it right after
+// writing freshly sealed values, which closes the race with a data key
+// rotation: if the key is still active, any rotation activates after the
+// write, so the rotation's re-encryption pass will read the row; if it is not,
+// the store re-seals the row itself. A Box without a key store, or fields with
+// nothing sealed, never report a rotation. It fails when the key store cannot
+// say which key is active.
+func (b *Box) RotatedSinceSeal(fields ...Field) (bool, error) {
+	if b == nil || b.activeID == nil {
+		return false, nil
+	}
+	sealedWith := ""
+	for _, field := range fields {
+		if keyID, _, ok := splitSealed(*field.Value); ok {
+			sealedWith = keyID
+			break
+		}
+	}
+	if sealedWith == "" {
+		return false, nil
+	}
+	active, err := b.activeID()
+	if err != nil {
+		return false, fmt.Errorf("check the active data key: %w", err)
+	}
+	return active != sealedWith, nil
+}
+
+// ConfirmSeal is what a store runs right after writing freshly sealed fields:
+// when RotatedSinceSeal reports a rotation, it calls reseal to rewrite the row
+// with the new key. A failed check is retried once after a forced key reload.
+// Any remaining failure wraps ErrSealUnconfirmed: the row is written, so the
+// caller must not treat the save as lost, but it must not report a clean
+// save either.
+func (b *Box) ConfirmSeal(reseal func() error, fields ...Field) error {
+	rotated, err := b.RotatedSinceSeal(fields...)
+	if err != nil {
+		b.reloadKeys(true)
+		rotated, err = b.RotatedSinceSeal(fields...)
+	}
+	if err == nil && rotated {
+		err = reseal()
+	}
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrSealUnconfirmed, err)
+	}
+	return nil
+}

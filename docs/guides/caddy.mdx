@@ -1,0 +1,148 @@
+---
+title: "GoModel & Caddy"
+description: "Use Caddy's forward_auth with GoModel's key verification endpoint to reject unauthenticated traffic at the edge and gate other services on GoModel API keys."
+icon: "shield-check"
+keywords: ["Caddy", "forward_auth", "reverse proxy", "API key verification", "/v1/auth/verify", "edge authentication", "block unauthenticated traffic"]
+---
+
+## Overview
+
+Caddy's [`forward_auth`](https://caddyserver.com/docs/caddyfile/directives/forward_auth)
+asks another service whether a request may proceed. Point it at GoModel's
+[`GET /v1/auth/verify`](/advanced/api-endpoints#key-verification) and Caddy
+gates traffic on GoModel API keys — without a copy of those keys anywhere in
+the proxy.
+
+Two things this is good for:
+
+- **Reject unauthenticated traffic at the edge.** Requests without a usable key
+  never reach the gateway, so scanners and misconfigured clients do not open
+  connections to it or land in its audit log. GoModel still authenticates every
+  request it serves; the edge check is a filter in front, not a replacement.
+- **Gate other services on GoModel keys.** An internal dashboard, a docs site,
+  or a metrics endpoint on the same host can require a valid GoModel key
+  without implementing authentication of its own.
+
+`/v1/auth/verify` is **disabled by default**. Enable it with
+`AUTH_VERIFY_ENABLED=true` (`server.auth_verify_enabled`). It is not an
+`/admin` route, so it keeps working with `ADMIN_ENDPOINTS_ENABLED=false`.
+
+## Why it works
+
+`forward_auth` decides on the **status code** alone:
+
+| GoModel answers | Caddy does |
+| --------------- | ---------- |
+| `200` — the key authenticates | Passes the request to the upstream |
+| `401` — unknown, disabled, or expired key, or no credential | Copies the response to the client and stops |
+
+GoModel's `401` body is its normal OpenAI-shaped error envelope, so a client
+that already understands GoModel errors sees a familiar shape from the proxy.
+The `200` body (`valid`, `method`, `key_id`, `user_path`) is ignored by Caddy —
+it is there for scripts and services that want to know *which* key answered.
+
+## Gate another service on GoModel keys
+
+The upstream here is any app you want behind GoModel's keys.
+
+```caddyfile
+{
+	auto_https off # drop this in production and use a real hostname
+}
+
+:8090 {
+	forward_auth 127.0.0.1:8080 {
+		uri /v1/auth/verify
+		copy_headers X-Gomodel-Auth-User
+	}
+
+	reverse_proxy 127.0.0.1:9000
+}
+```
+
+`forward_auth` sends the incoming request's own headers to GoModel, so the
+caller's `Authorization: Bearer sk_gom_...` (or `x-api-key`) is what gets
+checked. Nothing else is needed to make the credential reach the gateway.
+
+`copy_headers X-Gomodel-Auth-User` forwards GoModel's answer about *who* the
+caller is: for a managed key bound to a [user path](/features/user-path), the
+upstream receives that path and can scope what it shows. The header is empty
+for master-key callers and for keys with no bound path.
+
+Check it:
+
+```bash
+# No credential — rejected at the edge, upstream never sees it
+curl -i http://localhost:8090/
+
+# Valid managed key — reaches the upstream
+curl -i http://localhost:8090/ -H "Authorization: Bearer sk_gom_..."
+```
+
+## Filter traffic in front of the gateway
+
+To put the same check in front of GoModel itself, verify against the gateway
+and proxy to it:
+
+```caddyfile
+api.example.com {
+	forward_auth 127.0.0.1:8080 {
+		uri /v1/auth/verify
+	}
+
+	reverse_proxy 127.0.0.1:8080
+}
+```
+
+Every proxied request now costs one extra round trip to the gateway, and the
+gateway authenticates the request a second time when it serves it. That is the
+price of dropping unauthenticated traffic before it reaches the application —
+worth it at an internet-facing edge, not worth it on a private network where
+GoModel's own authentication is already the only gate.
+
+Two routes must stay reachable without a key if you use them:
+
+```caddyfile
+api.example.com {
+	@public path /health /health/ready /metrics
+	handle @public {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	handle {
+		forward_auth 127.0.0.1:8080 {
+			uri /v1/auth/verify
+		}
+		reverse_proxy 127.0.0.1:8080
+	}
+}
+```
+
+Health checks and Prometheus scrapes carry no API key, so without this they
+would be rejected by the edge gate even though GoModel serves them
+unauthenticated.
+
+<Warning>
+  **The gate is only as strong as the gateway's own authentication.** On a
+  GoModel instance with no master key and no managed keys — the unsafe
+  development default — every request is accepted, `/v1/auth/verify` answers
+  `200` with `{"valid": false, "method": "none"}` because there is no key to
+  confirm, and `forward_auth` passes everything through. Set
+  `GOMODEL_MASTER_KEY` or issue [managed keys](/features/users) before relying
+  on this to block anything.
+</Warning>
+
+## Notes
+
+- Caddy re-checks the key on every request. There is no result cache in
+  `forward_auth`, so the gateway sees one verification call per proxied
+  request; `/v1/auth/verify` does no provider work and answers from the key
+  store.
+- The endpoint answers `Cache-Control: no-store` — the answer describes one
+  caller's credential and must not be served to anyone else.
+- Enabling the endpoint exposes a key oracle: anyone who can reach it can test
+  whether a key is valid. Expose it only where you need it, and keep GoModel's
+  [rate limits](/features/rate-limits) in front of untrusted callers.
+- Caddy adds `X-Forwarded-Method` and `X-Forwarded-Uri` to the verification
+  subrequest. GoModel ignores both; the check is about the credential, not the
+  route being requested.

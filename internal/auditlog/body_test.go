@@ -2,76 +2,57 @@ package auditlog
 
 import (
 	"bytes"
-	"reflect"
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCaptureLoggedBody(t *testing.T) {
 	t.Run("json is kept verbatim as raw bytes", func(t *testing.T) {
 		src := []byte(` {"b": 1, "a": [1, 2], "big": 9007199254740993} `)
 		got, ok := captureLoggedBody(src).(json.RawMessage)
-		if !ok {
-			t.Fatalf("captured = %T, want json.RawMessage", captureLoggedBody(src))
-		}
-		if want := bytes.TrimSpace(src); !bytes.Equal(got, want) {
-			t.Fatalf("captured = %s, want %s", got, want)
-		}
+		require.True(t, ok, "captured = %T, want json.RawMessage", captureLoggedBody(src))
+		want := bytes.TrimSpace(src)
+		require.Equal(t, want, []byte(got))
+
 		// The entry outlives the request buffer, so the capture must own its bytes.
 		src[3] = 'x'
-		if bytes.Contains(got, []byte("x")) {
-			t.Fatal("captured body aliases the request buffer")
-		}
+		require.False(t, bytes.Contains(got, []byte("x")))
 	})
 
 	t.Run("scalars and arrays are json too", func(t *testing.T) {
 		for _, raw := range []string{`"text"`, `42`, `null`, `[1,2]`} {
-			if _, ok := captureLoggedBody([]byte(raw)).(json.RawMessage); !ok {
-				t.Errorf("%s: captured as %T, want json.RawMessage", raw, captureLoggedBody([]byte(raw)))
-			}
+			_, ok := captureLoggedBody([]byte(raw)).(json.RawMessage)
+			assert.True(t, ok, "%s: captured as %T, want json.RawMessage", raw, captureLoggedBody([]byte(raw)))
 		}
 	})
 
 	t.Run("invalid json falls back to a valid utf-8 string", func(t *testing.T) {
-		if got := captureLoggedBody([]byte("upstream is down")); got != "upstream is down" {
-			t.Fatalf("plain text = %#v", got)
-		}
-		if got := captureLoggedBody([]byte("{\"a\":\"x\x01y\"}")); got != "{\"a\":\"x\x01y\"}" {
-			t.Fatalf("control character body = %#v, want string fallback", got)
-		}
-		if got := captureLoggedBody([]byte("bad \xff utf8")); got != "bad � utf8" {
-			t.Fatalf("invalid utf-8 = %#v", got)
-		}
+		require.Equal(t, "upstream is down", captureLoggedBody([]byte("upstream is down")))
+		require.Equal(t, "{\"a\":\"x\x01y\"}", captureLoggedBody([]byte("{\"a\":\"x\x01y\"}")))
+		require.Equal(t, "bad � utf8", captureLoggedBody([]byte("bad \xff utf8")))
 		// encoding/json.Valid accepts invalid UTF-8 inside strings; stores do not.
-		if got := captureLoggedBody([]byte("{\"text\":\"\xff\"}")); got != "{\"text\":\"�\"}" {
-			t.Fatalf("json with invalid utf-8 = %#v, want coerced string", got)
-		}
+		require.Equal(t, "{\"text\":\"�\"}", captureLoggedBody([]byte("{\"text\":\"\xff\"}")))
 	})
 
 	t.Run("empty is nil", func(t *testing.T) {
-		if got := captureLoggedBody(nil); got != nil {
-			t.Fatalf("nil body = %#v", got)
-		}
-		if got := captureLoggedBody([]byte("  \n")); got != nil {
-			t.Fatalf("whitespace body = %#v", got)
-		}
+		require.Nil(t, captureLoggedBody(nil))
+		require.Nil(t, captureLoggedBody([]byte("  \n")))
 	})
 }
 
 func TestBodyDocument(t *testing.T) {
 	doc, ok := BodyDocument(json.RawMessage(`{"id":"resp_1","n":[1,2]}`)).(map[string]any)
-	if !ok || doc["id"] != "resp_1" {
-		t.Fatalf("raw json decoded to %#v", BodyDocument(json.RawMessage(`{"id":"resp_1","n":[1,2]}`)))
-	}
+	require.True(t, ok)
+	require.Equal(t, "resp_1", doc["id"], "raw json decoded to %#v", BodyDocument(json.RawMessage(`{"id":"resp_1","n":[1,2]}`)))
+
 	for _, passthrough := range []any{nil, "text", map[string]any{"already": "decoded"}, AudioBodyLog{ContentType: "audio/mpeg"}} {
-		if got := BodyDocument(passthrough); !reflect.DeepEqual(got, passthrough) {
-			t.Errorf("BodyDocument(%#v) = %#v, want unchanged", passthrough, got)
-		}
+		assert.Equal(t, passthrough, BodyDocument(passthrough))
 	}
-	if got := BodyDocument(json.RawMessage(`{bad`)); string(got.(json.RawMessage)) != `{bad` {
-		t.Fatalf("undecodable raw = %#v, want unchanged", got)
-	}
+	got := BodyDocument(json.RawMessage(`{bad`))
+	require.Equal(t, `{bad`, string(got.(json.RawMessage)))
 }
 
 func TestWithBodyDocumentsDecodesForDocumentStores(t *testing.T) {
@@ -93,43 +74,31 @@ func TestWithBodyDocumentsDecodesForDocumentStores(t *testing.T) {
 	doc := entry.withBodyDocuments()
 
 	revision, ok := doc.Data.RequestRevisions[0].Body.(map[string]any)
-	if !ok || revision["messages"] == nil {
-		t.Fatalf("revision body = %#v, want decoded document", doc.Data.RequestRevisions[0].Body)
-	}
-	if _, ok := entry.Data.RequestRevisions[0].Body.(json.RawMessage); !ok {
-		t.Fatalf("receiver revision body mutated to %T", entry.Data.RequestRevisions[0].Body)
-	}
+	require.True(t, ok)
+	require.NotNil(t, revision["messages"], "revision body = %#v, want decoded document", doc.Data.RequestRevisions[0].Body)
+	_, ok = entry.Data.RequestRevisions[0].Body.(json.RawMessage)
+	require.True(t, ok, "receiver revision body mutated to %T", entry.Data.RequestRevisions[0].Body)
 
 	req, ok := doc.Data.RequestBody.(map[string]any)
-	if !ok || req["previous_response_id"] != "resp_0" {
-		t.Fatalf("request body = %#v, want decoded document", doc.Data.RequestBody)
-	}
+	require.True(t, ok)
+	require.Equal(t, "resp_0", req["previous_response_id"])
+
 	resp, ok := doc.Data.ResponseBody.(map[string]any)
-	if !ok || resp["id"] != "resp_1" {
-		t.Fatalf("response body = %#v, want decoded document", doc.Data.ResponseBody)
-	}
+	require.True(t, ok)
+	require.Equal(t, "resp_1", resp["id"])
+
 	attempt, ok := doc.Data.Attempts[0].ResponseBody.(map[string]any)
-	if !ok || attempt["error"] == nil {
-		t.Fatalf("attempt body = %#v, want decoded document", doc.Data.Attempts[0].ResponseBody)
-	}
-	if doc.Data.Attempts[1].ResponseBody != "plain text" {
-		t.Fatalf("non-json attempt body = %#v, want unchanged", doc.Data.Attempts[1].ResponseBody)
-	}
-
+	require.True(t, ok)
+	require.NotNil(t, attempt["error"], "attempt body = %#v, want decoded document", doc.Data.Attempts[0].ResponseBody)
+	require.Equal(t, "plain text", doc.Data.Attempts[1].ResponseBody)
 	// The original entry is what other stores and the live feed still hold.
-	if _, ok := entry.Data.RequestBody.(json.RawMessage); !ok {
-		t.Fatalf("receiver request body mutated to %T", entry.Data.RequestBody)
-	}
-	if _, ok := entry.Data.Attempts[0].ResponseBody.(json.RawMessage); !ok {
-		t.Fatalf("receiver attempt body mutated to %T", entry.Data.Attempts[0].ResponseBody)
-	}
-
-	if (*LogEntry)(nil).withBodyDocuments() != nil {
-		t.Fatal("nil entry must stay nil")
-	}
-	if got := (&LogEntry{ID: "no-data"}).withBodyDocuments(); got.Data != nil {
-		t.Fatal("entry without data must keep nil data")
-	}
+	_, ok = entry.Data.RequestBody.(json.RawMessage)
+	require.True(t, ok, "receiver request body mutated to %T", entry.Data.RequestBody)
+	_, ok = entry.Data.Attempts[0].ResponseBody.(json.RawMessage)
+	require.True(t, ok, "receiver attempt body mutated to %T", entry.Data.Attempts[0].ResponseBody)
+	require.Nil(t, (*LogEntry)(nil).withBodyDocuments())
+	got := (&LogEntry{ID: "no-data"}).withBodyDocuments()
+	require.Nil(t, got.Data)
 }
 
 func TestExtractStringFieldReadsRawBodies(t *testing.T) {
@@ -137,12 +106,8 @@ func TestExtractStringFieldReadsRawBodies(t *testing.T) {
 		RequestBody:  json.RawMessage(`{"previous_response_id":" resp_0 "}`),
 		ResponseBody: json.RawMessage(`{"id":"resp_1"}`),
 	}}
-	if got := extractPreviousResponseID(entry); got != "resp_0" {
-		t.Fatalf("previous response id = %q, want resp_0", got)
-	}
-	if got := extractResponseID(entry); got != "resp_1" {
-		t.Fatalf("response id = %q, want resp_1", got)
-	}
+	require.Equal(t, "resp_0", extractPreviousResponseID(entry))
+	require.Equal(t, "resp_1", extractResponseID(entry))
 }
 
 func TestMarshalLogDataEmbedsRawBodiesAsJSON(t *testing.T) {
@@ -156,13 +121,9 @@ func TestMarshalLogDataEmbedsRawBodiesAsJSON(t *testing.T) {
 		RequestBody  map[string]any `json:"request_body"`
 		ResponseBody string         `json:"response_body"`
 	}
-	if err := json.Unmarshal(out, &decoded); err != nil {
-		t.Fatalf("stored data is not JSON: %v\n%s", err, out)
-	}
-	if decoded.RequestBody["model"] != "gpt-4o" || decoded.ResponseBody != "not json" {
-		t.Fatalf("stored data = %s", out)
-	}
-	if !bytes.Contains(out, []byte(`9007199254740993`)) {
-		t.Fatalf("large integer lost precision: %s", out)
-	}
+	err := json.Unmarshal(out, &decoded)
+	require.NoError(t, err, "stored data is not JSON: %v\n%s", err, out)
+	require.Equal(t, "gpt-4o", decoded.RequestBody["model"])
+	require.Equal(t, "not json", decoded.ResponseBody, "stored data = %s", out)
+	require.Contains(t, string(out), string([]byte(`9007199254740993`)))
 }

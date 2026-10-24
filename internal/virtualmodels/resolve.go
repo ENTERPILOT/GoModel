@@ -8,12 +8,10 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
-// Resolve resolves raw model/provider inputs through the redirect table.
-func (s *Service) Resolve(model, provider string) (Resolution, bool, error) {
-	return s.resolveRequested(core.NewRequestedModelSelector(model, provider), "", false, "")
-}
-
-func (s *Service) resolveRequested(requested core.RequestedModelSelector, userPath string, enforceUserPaths bool, sessionID string) (Resolution, bool, error) {
+// resolveRequested resolves one requested selector through the redirect
+// table. ctx is the request context when there is one: routing-strategy
+// plugins read request metadata from it and are bounded by it.
+func (s *Service) resolveRequested(ctx context.Context, requested core.RequestedModelSelector, userPath string, enforceUserPaths bool, sessionID string) (Resolution, bool, error) {
 	selector, err := requested.Normalize()
 	if err != nil {
 		return Resolution{}, false, err
@@ -23,7 +21,7 @@ func (s *Service) resolveRequested(requested core.RequestedModelSelector, userPa
 	}
 	snap := s.snapshot()
 	if entry, ok := snap.findRedirect(requested.Model, userPath, enforceUserPaths); ok {
-		if resolved, ok := s.balancedResolution(snap, entry, sessionID); ok {
+		if resolved, ok := s.balancedResolution(ctx, snap, entry, sessionID); ok {
 			return Resolution{Requested: selector, Resolved: resolved, Source: entry.vm.Source}, true, nil
 		}
 	}
@@ -34,7 +32,7 @@ func (s *Service) resolveRequested(requested core.RequestedModelSelector, userPa
 // chosen for execution. It does not consult user_paths; scoped redirects are
 // applied by ResolveModelForUserPath on the request path.
 func (s *Service) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
-	resolution, changed, err := s.resolveRequested(requested, "", false, "")
+	resolution, changed, err := s.resolveRequested(context.Background(), requested, "", false, "")
 	if err != nil {
 		return core.ModelSelector{}, false, err
 	}
@@ -45,7 +43,7 @@ func (s *Service) ResolveModel(requested core.RequestedModelSelector) (core.Mode
 // user_paths against the effective request user path. A redirect scoped to
 // user_paths the caller does not match falls through to the literal model name.
 func (s *Service) ResolveModelForUserPath(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
-	resolution, changed, err := s.resolveRequested(requested, core.UserPathFromContext(ctx), true, core.SessionIDFromContext(ctx))
+	resolution, changed, err := s.resolveRequested(ctx, requested, core.UserPathFromContext(ctx), true, core.SessionIDFromContext(ctx))
 	if err != nil {
 		return core.ModelSelector{}, false, err
 	}
@@ -78,19 +76,20 @@ func (s *Service) ResolveRefreshTarget(requested core.RequestedModelSelector) (c
 	return representative.selector, true, nil
 }
 
-// Supports reports whether a redirect currently resolves to a concrete model.
-func (s *Service) Supports(model string) bool {
-	_, ok := s.snapshot().resolveRedirect(model, s.catalog, "", false)
-	return ok
-}
-
-// GetProviderType returns the resolved provider type for a redirect, or empty
-// when unresolved.
-func (s *Service) GetProviderType(model string) string {
-	if resolution, ok := s.snapshot().resolveRedirect(model, s.catalog, "", false); ok {
-		return strings.TrimSpace(s.catalog.GetProviderType(resolution.Resolved.QualifiedModel()))
+// TargetModels returns the concrete models the virtual model named source
+// routes to, descending chained virtual models, whether or not they are
+// available right now. ok is false when source names no redirecting virtual
+// model.
+func (s *Service) TargetModels(source string) (models []string, ok bool) {
+	snap := s.snapshot()
+	entry, ok := snap.redirects[strings.TrimSpace(source)]
+	if !ok {
+		return nil, false
 	}
-	return ""
+	for _, target := range snap.declaredLeaves(entry) {
+		models = append(models, target.qualified)
+	}
+	return models, true
 }
 
 // ExposedModels returns enabled redirects projected as model-list entries.

@@ -46,7 +46,8 @@ func (c *Client) beginRequest(ctx context.Context, req Request, stream bool) (re
 
 	scope.breaker = c.breakerForModel(scope.requestInfo.Model)
 	if scope.breaker == nil && c.circuitBreaker != nil {
-		err := core.NewProviderError(c.config.ProviderName, http.StatusServiceUnavailable, "model circuit breaker capacity exhausted", nil)
+		err := core.NewProviderError(c.config.ProviderName, http.StatusServiceUnavailable,
+			"model circuit breaker capacity exhausted for provider "+c.config.ProviderName, nil)
 		c.finishRequest(scope, http.StatusServiceUnavailable, err)
 		return requestScope{}, err
 	}
@@ -54,7 +55,7 @@ func (c *Client) beginRequest(ctx context.Context, req Request, stream bool) (re
 		allowed, probe := scope.breaker.acquire()
 		if !allowed {
 			err := core.NewProviderError(c.config.ProviderName, http.StatusServiceUnavailable,
-				"circuit breaker is open - provider temporarily unavailable", nil)
+				"circuit breaker is open - provider "+c.config.ProviderName+" temporarily unavailable", nil)
 			c.finishRequest(scope, http.StatusServiceUnavailable, err)
 			return requestScope{}, err
 		}
@@ -197,7 +198,8 @@ func (c *Client) releaseHalfOpenProbe(scope requestScope) {
 // fallback shared by the retrying entry points (DoRaw, DoPassthrough). The
 // returned error is also reported through the scope.
 func (c *Client) failAfterRetries(scope requestScope) error {
-	err := core.NewProviderError(c.config.ProviderName, http.StatusBadGateway, "request failed after retries", nil)
+	err := core.NewProviderError(c.config.ProviderName, http.StatusBadGateway,
+		"request failed after retries for provider "+c.config.ProviderName, nil)
 	c.completeScope(scope, http.StatusBadGateway, err, err)
 	return err
 }
@@ -229,7 +231,7 @@ func (c *Client) recordCircuitBreakerCompletion(scope requestScope, statusCode i
 		scope.breaker.RecordFailure()
 		return
 	}
-	if c.shouldTripCircuitBreaker(statusCode) {
+	if c.shouldTripCircuitBreaker(statusCode) || c.isSlowCall(scope) {
 		scope.breaker.RecordFailure()
 		return
 	}
@@ -238,6 +240,15 @@ func (c *Client) recordCircuitBreakerCompletion(scope requestScope, statusCode i
 
 func (c *Client) shouldTripCircuitBreaker(statusCode int) bool {
 	return c.failureStatuses[statusCode]
+}
+
+// isSlowCall reports whether the provider took longer than the configured
+// slow-call threshold to answer. The clock covers the whole logical request,
+// retries included, and for streams stops at the first data event. The answer
+// is still returned to the caller; only the breaker treats it as a failure.
+func (c *Client) isSlowCall(scope requestScope) bool {
+	threshold := c.config.CircuitBreaker.SlowCallThreshold
+	return threshold > 0 && time.Since(scope.startedAt) > threshold
 }
 
 func (c *Client) maxAttempts() int {

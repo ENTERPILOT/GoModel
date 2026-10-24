@@ -21,6 +21,17 @@ type nativeFileService struct {
 	fileStore filestore.Store
 }
 
+// providerName returns the configured provider instance for a native-file
+// provider type, falling back to the type when the router cannot resolve it.
+func (s *nativeFileService) providerName(providerType string) string {
+	if resolver, ok := s.provider.(core.ProviderTypeNameResolver); ok {
+		if providerName := strings.TrimSpace(resolver.GetProviderNameForType(providerType)); providerName != "" {
+			return providerName
+		}
+	}
+	return strings.TrimSpace(providerType)
+}
+
 func (s *nativeFileService) router() (core.NativeFileRoutableProvider, error) {
 	nativeRouter, ok := s.provider.(core.NativeFileRoutableProvider)
 	if !ok {
@@ -40,7 +51,7 @@ func (s *nativeFileService) providerTypes() ([]string, error) {
 func (s *nativeFileService) fileByID(
 	c *echo.Context,
 	callFn func(core.NativeFileRoutableProvider, string, string) (any, error),
-	respondFn func(*echo.Context, any) error,
+	respondFn func(*echo.Context, string, any) error,
 	onSuccess func(context.Context, string, string) error,
 ) error {
 	nativeRouter, err := s.router()
@@ -84,7 +95,7 @@ func (s *nativeFileService) fileByID(
 				return handleError(c, err)
 			}
 		}
-		return respondFn(c, result)
+		return respondFn(c, s.providerName(providerType), result)
 	}
 
 	if tracked {
@@ -97,7 +108,7 @@ func (s *nativeFileService) fileByID(
 					return handleError(c, err)
 				}
 			}
-			return respondFn(c, result)
+			return respondFn(c, s.providerName(providerType), result)
 		}
 		if !isNotFoundGatewayError(err) && !isUnsupportedNativeFilesError(err) {
 			return handleError(c, err)
@@ -127,7 +138,7 @@ func (s *nativeFileService) fileByID(
 					return handleError(c, err)
 				}
 			}
-			return respondFn(c, result)
+			return respondFn(c, s.providerName(candidate), result)
 		}
 		if isNotFoundGatewayError(err) || isUnsupportedNativeFilesError(err) {
 			continue
@@ -280,7 +291,7 @@ func (s *nativeFileService) GetFile(c *echo.Context) error {
 		func(r core.NativeFileRoutableProvider, provider, id string) (any, error) {
 			return r.GetFile(c.Request().Context(), provider, id)
 		},
-		func(c *echo.Context, result any) error {
+		func(c *echo.Context, _ string, result any) error {
 			return c.JSON(http.StatusOK, result)
 		},
 		nil,
@@ -292,7 +303,7 @@ func (s *nativeFileService) DeleteFile(c *echo.Context) error {
 		func(r core.NativeFileRoutableProvider, provider, id string) (any, error) {
 			return r.DeleteFile(c.Request().Context(), provider, id)
 		},
-		func(c *echo.Context, result any) error {
+		func(c *echo.Context, _ string, result any) error {
 			return c.JSON(http.StatusOK, result)
 		},
 		func(ctx context.Context, providerType, id string) error {
@@ -309,10 +320,11 @@ func (s *nativeFileService) GetFileContent(c *echo.Context) error {
 		func(r core.NativeFileRoutableProvider, provider, id string) (any, error) {
 			return r.GetFileContent(c.Request().Context(), provider, id)
 		},
-		func(c *echo.Context, result any) error {
+		func(c *echo.Context, providerName string, result any) error {
 			resp, ok := result.(*core.FileContentResponse)
 			if !ok || resp == nil {
-				return handleError(c, core.NewProviderError("", http.StatusBadGateway, "provider returned empty file content response", nil))
+				return handleError(c, core.NewProviderError(providerName, http.StatusBadGateway,
+					"provider "+providerName+" returned empty file content response", nil))
 			}
 			contentType := strings.TrimSpace(resp.ContentType)
 			if contentType == "" {

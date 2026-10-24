@@ -9,6 +9,9 @@ import (
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/encryption"
+	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
@@ -36,6 +39,11 @@ func (r *Result) Close() error {
 		}
 
 		var errs []error
+		if r.Service != nil {
+			if err := r.Service.Close(context.Background()); err != nil {
+				errs = append(errs, fmt.Errorf("instances close: %w", err))
+			}
+		}
 		if r.Store != nil {
 			if err := r.Store.Close(); err != nil {
 				errs = append(errs, fmt.Errorf("store close: %w", err))
@@ -48,28 +56,28 @@ func (r *Result) Close() error {
 	return r.closeErr
 }
 
-// New creates a guardrails subsystem using an existing storage connection.
-func New(ctx context.Context, shared storage.Storage, refreshInterval time.Duration, executors ...ChatCompletionExecutor) (*Result, error) {
+// New creates a guardrails subsystem using an existing storage connection,
+// building instances from the plugin catalog. Secret config values are
+// sealed with box; a nil box stores them in plaintext. secrets resolves the
+// secret references stored configs hold.
+func New(ctx context.Context, shared storage.Storage, box *encryption.Box, refreshInterval time.Duration, catalog *plugins.Catalog, deps plugins.HostDeps, secrets *config.Secrets) (*Result, error) {
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
-	if err := validateExecutorCount(executors); err != nil {
-		return nil, err
-	}
-	return newResult(ctx, shared, refreshInterval, executors...)
-}
-
-func newResult(ctx context.Context, storeConn storage.Storage, refreshInterval time.Duration, executors ...ChatCompletionExecutor) (*Result, error) {
-	if err := validateExecutorCount(executors); err != nil {
-		return nil, err
-	}
-	store, err := createStore(ctx, storeConn)
+	rawStore, err := createStore(ctx, shared)
 	if err != nil {
 		return nil, err
 	}
-	service, err := NewService(store, executors...)
+	store := sealStore(rawStore, box, catalogSecretKeys(catalog))
+	service, err := NewService(store, catalog, deps)
 	if err != nil {
 		return nil, err
+	}
+	service.secrets = secrets
+	if refreshInterval > 0 {
+		// Workflows recompile on the same interval; two cycles later no
+		// compiled workflow references a replaced instance any more.
+		service.retireAfter = 2 * refreshInterval
 	}
 	if err := service.Refresh(ctx); err != nil {
 		return nil, err
@@ -81,6 +89,23 @@ func newResult(ctx context.Context, storeConn storage.Storage, refreshInterval t
 		RefreshErrors: refreshErrors,
 		stopRefresh:   stopRefresh,
 	}, nil
+}
+
+// Reencrypt seals every guardrail secret that is in plaintext or sealed with
+// a data key other than box's active one. The catalog identifies which config
+// values are secret; a plaintext secret of a plugin missing from it is left
+// as it is.
+func Reencrypt(ctx context.Context, shared storage.Storage, box *encryption.Box, catalog *plugins.Catalog) (encryption.Report, error) {
+	store, err := createStore(ctx, shared)
+	if err != nil {
+		return encryption.Report{Entity: "guardrail_definitions"}, err
+	}
+	defer func() { _ = store.Close() }()
+	swap, ok := store.(configSwapper)
+	if !ok {
+		return encryption.Report{Entity: "guardrail_definitions"}, fmt.Errorf("guardrail store %T cannot re-encrypt", store)
+	}
+	return (&sealedStore{Store: store, box: box, secretKeys: catalogSecretKeys(catalog), swap: swap}).reencrypt(ctx, swap)
 }
 
 func createStore(ctx context.Context, store storage.Storage) (Store, error) {
@@ -135,11 +160,4 @@ func startGuardrailRefreshLoop(parent context.Context, service *Service, interva
 			<-done
 		})
 	}, errs
-}
-
-func validateExecutorCount(executors []ChatCompletionExecutor) error {
-	if len(executors) > 1 {
-		return fmt.Errorf("only one ChatCompletionExecutor is supported")
-	}
-	return nil
 }

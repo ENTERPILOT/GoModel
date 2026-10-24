@@ -1,4 +1,4 @@
-{{- if .Values.podDisruptionBudget.enabled }}
+{{- if and .Values.podDisruptionBudget.enabled (or (gt (int .Values.replicaCount) 1) .Values.autoscaling.enabled) }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -6,14 +6,10 @@ metadata:
   labels:
     {{- include "gomodel.labels" . | nindent 4 }}
 spec:
-  {{- if and (not .Values.podDisruptionBudget.minAvailable) (not .Values.podDisruptionBudget.maxUnavailable) }}
-  {{- fail "PodDisruptionBudget requires either minAvailable or maxUnavailable to be set" }}
-  {{- end }}
-  {{- if .Values.podDisruptionBudget.minAvailable }}
-  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
-  {{- end }}
-  {{- if .Values.podDisruptionBudget.maxUnavailable }}
+  {{- if not (kindIs "invalid" .Values.podDisruptionBudget.maxUnavailable) }}
   maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
   {{- end }}
   selector:
     matchLabels:

@@ -67,11 +67,16 @@ func (s *SQLStore) Close() error {
 	return nil
 }
 
+// encodeRules serializes the stored form of rules. Managed is a runtime flag
+// (bson:"-" in the MongoDB store) and is dropped here too so the JSON tags
+// shared with the admin API do not persist it.
 func encodeRules(rules []Rule) ([]byte, error) {
-	if rules == nil {
-		rules = []Rule{}
+	stored := make([]Rule, len(rules))
+	for i, rule := range rules {
+		rule.Managed = false
+		stored[i] = rule
 	}
-	value, err := json.Marshal(rules)
+	value, err := json.Marshal(stored)
 	if err != nil {
 		return nil, fmt.Errorf("encode tagging rules: %w", err)
 	}

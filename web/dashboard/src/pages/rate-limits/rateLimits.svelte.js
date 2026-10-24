@@ -4,11 +4,13 @@
 
 import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
+import { confirmDialog } from "$lib/stores/confirm.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { access } from "$lib/stores/access.svelte.js";
 import { scopedSubjectAllowed } from "$lib/stores/accessScope.js";
 import * as m from "$lib/paraglide/messages.js";
 import * as logic from "./rateLimitsLogic.js";
+import { Trash2 } from "lucide";
 
 class RateLimitsStore {
   rateLimits = $state([]);
@@ -398,6 +400,25 @@ class RateLimitsStore {
     return true;
   }
 
+  // requestDeleteRateLimit drives the shared typed-confirmation dialog
+  // rather than deleting outright: a stray click on the list row can no
+  // longer remove a rule (#900). The operator types the rule's subject to
+  // confirm.
+  requestDeleteRateLimit(item) {
+    const subject = logic.rateLimitSubject(item) || "/";
+    confirmDialog.open({
+      title: m.rate_limits_delete_title(),
+      titleId: "rateLimitDeleteDialogTitle",
+      inputId: "rate-limit-delete-confirmation",
+      message: m.rate_limits_delete_message({ subject }),
+      requiredText: subject,
+      confirmLabel: m.rate_limits_delete(),
+      icon: Trash2,
+      dialogClass: "budget-reset-dialog",
+      onConfirm: () => this.deleteRateLimit(item),
+    });
+  }
+
   async deleteRateLimit(item) {
     const key = logic.rateLimitKey(item);
     if (this.rateLimitDeletingKey === key) {
@@ -423,12 +444,15 @@ class RateLimitsStore {
       return;
     }
     if (outcome.status !== "ok") {
-      flash.error(outcome.error);
+      // The failure stays inside the confirmation dialog, which is still
+      // open (like the provider-credential delete).
+      confirmDialog.error = outcome.error;
       return;
     }
     this.rateLimits = logic.normalizeRateLimitListPayload(outcome.result.data);
     this.normalizeActiveScope();
     flash.success(m.rate_limits_deleted());
+    confirmDialog.close();
   }
 
   async resetRateLimit(item) {

@@ -1,0 +1,65 @@
+---
+title: "Build from Source"
+description: "Build the GoModel binary from a release's source, with the prebuilt admin dashboard or with Node, including fully offline builds for package maintainers."
+icon: "hammer"
+keywords: ["build from source", "packaging", "offline build", "Nix", "Homebrew", "dashboard", "reproducible"]
+---
+
+Most users should install with the [Quick Start](/getting-started/quickstart)
+script, Docker, or a binary from
+[GitHub Releases](https://github.com/ENTERPILOT/GoModel/releases). Build from
+source when you package GoModel for a distribution or need a custom build.
+
+The admin dashboard is a Svelte app embedded into the binary at compile time.
+Its build output is not in the repository, so a plain `go build` on a source
+checkout produces a binary with the UI disabled. The gateway and admin API
+still work, and the log says the UI is disabled. Add the dashboard in one of two
+ways before `go build`.
+
+## Option 1: Use the prebuilt dashboard (no Node)
+
+Every release includes `gomodel_<version>_dashboard.tar.gz`, listed in that
+release's `checksums.txt`. It contains the exact dashboard embedded in the
+release binaries and Docker image. Its paths are relative to the repository
+root, so unpack it there:
+
+```bash
+VERSION=0.1.102
+git clone --depth 1 --branch "v${VERSION}" https://github.com/ENTERPILOT/GoModel.git
+cd GoModel
+
+curl -fsSLO "https://github.com/ENTERPILOT/GoModel/releases/download/v${VERSION}/gomodel_${VERSION}_dashboard.tar.gz"
+curl -fsSLO "https://github.com/ENTERPILOT/GoModel/releases/download/v${VERSION}/checksums.txt"
+grep " gomodel_${VERSION}_dashboard.tar.gz\$" checksums.txt | sha256sum -c -
+tar -xzf "gomodel_${VERSION}_dashboard.tar.gz"
+
+CGO_ENABLED=0 go build \
+  -ldflags "-s -w -X github.com/enterpilot/gomodel/internal/version.Version=${VERSION}" \
+  -o gomodel ./cmd/gomodel
+```
+
+Package recipes can pin the archive's SHA-256 next to the source checksum.
+
+## Option 2: Build the dashboard with Node
+
+Use Node 22.12 or later in the 22.x line, or Node 24+. Node 23 is not supported
+by the dashboard's build tools.
+
+```bash
+make build   # runs make frontend (npm ci + vite build), then writes bin/gomodel
+```
+
+Every file the dashboard build downloads is pinned with an integrity hash in
+`web/dashboard/package-lock.json`, so the build runs offline once the npm
+dependencies are fetched from the lockfile:
+
+```bash
+cd web/dashboard
+npm ci --offline --ignore-scripts && npm run build
+```
+
+## Version stamp
+
+Set `internal/version.Version` with `-ldflags` as shown above. Without it the
+binary reports `dev` and the [update check](/advanced/version-awareness) never
+reports a newer release.

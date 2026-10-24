@@ -2,8 +2,8 @@ package providers
 
 import (
 	"bytes"
+	"cmp"
 	"io"
-	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -36,6 +36,7 @@ type OpenAIResponsesStreamConverter struct {
 	sentCreate           bool
 	sentDone             bool
 	sawFinish            bool            // upstream signalled completion (finish_reason or [DONE])
+	finishReason         string          // first finish_reason seen, used for incomplete_details
 	pendingErr           error           // upstream read error deferred until terminal events are drained
 	cachedUsage          json.RawMessage // Stores usage from final chunk for inclusion in response.completed
 }
@@ -67,7 +68,9 @@ type openAIStreamChunk struct {
 		Delta struct {
 			Content          string                `json:"content"`
 			ReasoningContent string                `json:"reasoning_content"`
+			Reasoning        string                `json:"reasoning"`
 			ToolCalls        []openAIChunkToolCall `json:"tool_calls"`
+			ExtraContent     json.RawMessage       `json:"extra_content"`
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -274,11 +277,17 @@ func (sc *OpenAIResponsesStreamConverter) processChunk(data []byte) {
 	// Any finish_reason means the model finished generating; some providers
 	// close the stream without a trailing [DONE] marker (Postel's law).
 	if choice.FinishReason != "" {
-		sc.sawFinish = true
+		sc.recordFinishReason(choice.FinishReason)
 	}
 
-	if choice.Delta.ReasoningContent != "" {
-		sc.appendReasoningDelta(choice.Delta.ReasoningContent)
+	// Recorded before the text and tool calls of the same delta: a tool call
+	// closes the message item on the spot, and its output_item.done must
+	// already carry the state.
+	sc.setMessageExtraContent(choice.Delta.ExtraContent)
+	// "reasoning_content" wins over the vendor "reasoning" member (Groq,
+	// OpenRouter), the same precedence the streaming codec applies.
+	if reasoning := cmp.Or(choice.Delta.ReasoningContent, choice.Delta.Reasoning); reasoning != "" {
+		sc.appendReasoningDelta(reasoning)
 	}
 	if choice.Delta.Content != "" {
 		sc.appendTextDelta(choice.Delta.Content)
@@ -288,6 +297,18 @@ func (sc *OpenAIResponsesStreamConverter) processChunk(data []byte) {
 	}
 	if choice.FinishReason == "tool_calls" {
 		sc.buffer.AppendString(sc.completePendingToolCalls())
+	}
+}
+
+// setMessageExtraContent records turn-wide replay state carried on the
+// message delta (a Gemini 3 text-turn thought signature). It arrives on the
+// last delta, after the reasoning slot is gone, so it rides on the assistant
+// message item, which the Responses input side already replays. Callers
+// record it before the rest of the delta so an item closed by that same delta
+// carries it. A null delta leaves the value alone.
+func (sc *OpenAIResponsesStreamConverter) setMessageExtraContent(raw json.RawMessage) {
+	if extra := bytes.TrimSpace(raw); len(extra) > 0 && !bytes.Equal(extra, []byte("null")) {
+		sc.output.SetAssistantExtraContent(extra)
 	}
 }
 
@@ -321,7 +342,16 @@ func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
 		return
 	}
 	if delta, ok := choice["delta"].(map[string]any); ok {
-		if reasoning, ok := delta["reasoning_content"].(string); ok && reasoning != "" {
+		if extra, ok := delta["extra_content"]; ok && extra != nil {
+			if raw, err := json.Marshal(extra); err == nil {
+				sc.setMessageExtraContent(raw)
+			}
+		}
+		reasoning, _ := delta["reasoning_content"].(string)
+		if reasoning == "" {
+			reasoning, _ = delta["reasoning"].(string)
+		}
+		if reasoning != "" {
 			sc.appendReasoningDelta(reasoning)
 		}
 		if content, ok := delta["content"].(string); ok && content != "" {
@@ -333,7 +363,7 @@ func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
 	}
 	finishReason, _ := choice["finish_reason"].(string)
 	if finishReason != "" {
-		sc.sawFinish = true
+		sc.recordFinishReason(finishReason)
 	}
 	if finishReason == "tool_calls" {
 		sc.buffer.AppendString(sc.completePendingToolCalls())
@@ -396,26 +426,25 @@ func (sc *OpenAIResponsesStreamConverter) appendReasoningDelta(content string) {
 func (sc *OpenAIResponsesStreamConverter) appendTextDelta(content string) {
 	sc.buffer.AppendString(sc.output.CompleteReasoningOutput(reasoningOutputIndex))
 	sc.reserveAssistantOutput()
-	sc.buffer.AppendString(sc.output.StartAssistantOutput(sc.assistantOutputIndex))
-	sc.output.AppendAssistantText(content)
-	jsonData, err := json.Marshal(struct {
-		Type  string `json:"type"`
-		Delta string `json:"delta"`
-	}{Type: "response.output_text.delta", Delta: content})
-	if err != nil {
-		slog.Error("failed to marshal content delta event", "error", err, "response_id", sc.responseID)
-		return
+	sc.buffer.AppendString(sc.output.AppendAssistantDelta(sc.assistantOutputIndex, content))
+}
+
+// recordFinishReason marks the upstream turn finished and keeps the first
+// finish reason, which decides whether the response completed or stopped
+// early.
+func (sc *OpenAIResponsesStreamConverter) recordFinishReason(reason string) {
+	sc.sawFinish = true
+	if sc.finishReason == "" {
+		sc.finishReason = reason
 	}
-	sc.buffer.AppendString("event: response.output_text.delta\ndata: ")
-	sc.buffer.AppendBytes(jsonData)
-	sc.buffer.AppendString("\n\n")
 }
 
 // appendTerminalEvents flushes open output items and appends the terminal
 // event plus the trailing [DONE] marker exactly once. Streams the upstream
-// finished (a finish_reason or [DONE] was seen) end with response.completed;
-// interrupted streams end with response.incomplete and close their open items
-// with status "incomplete" instead of fabricating completion.
+// finished (a finish_reason or [DONE] was seen) end with response.completed,
+// unless the finish reason says the turn stopped early (max_output_tokens,
+// content_filter); interrupted streams end with response.incomplete and close
+// their open items with status "incomplete" instead of fabricating completion.
 func (sc *OpenAIResponsesStreamConverter) appendTerminalEvents() {
 	if sc.sentDone {
 		return
@@ -423,7 +452,11 @@ func (sc *OpenAIResponsesStreamConverter) appendTerminalEvents() {
 	sc.sentDone = true
 	status := "completed"
 	eventName := "response.completed"
-	if !sc.sawFinish {
+	incompleteReason := "interrupted"
+	if sc.sawFinish {
+		incompleteReason = ResponsesIncompleteReason(sc.finishReason)
+	}
+	if incompleteReason != "" {
 		status = "incomplete"
 		eventName = "response.incomplete"
 	}
@@ -439,8 +472,8 @@ func (sc *OpenAIResponsesStreamConverter) appendTerminalEvents() {
 		"created_at": sc.createdAt,
 		"output":     sc.output.FinalOutputItems(reasoningOutputIndex, sc.assistantOutputIndex, sc.toolCalls, false),
 	}
-	if status == "incomplete" {
-		responseData["incomplete_details"] = map[string]any{"reason": "interrupted"}
+	if incompleteReason != "" {
+		responseData["incomplete_details"] = map[string]any{"reason": incompleteReason}
 	}
 	// Include usage data if captured from OpenAI stream, renamed from Chat
 	// Completions field names (prompt_tokens/completion_tokens) to the
@@ -451,20 +484,7 @@ func (sc *OpenAIResponsesStreamConverter) appendTerminalEvents() {
 			responseData["usage"] = usage
 		}
 	}
-	doneEvent := map[string]any{
-		"type":     eventName,
-		"response": responseData,
-	}
-	jsonData, err := json.Marshal(doneEvent)
-	if err != nil {
-		slog.Error("failed to marshal terminal responses event", "error", err, "event", eventName, "response_id", sc.responseID)
-		return
-	}
-	sc.buffer.AppendString("event: ")
-	sc.buffer.AppendString(eventName)
-	sc.buffer.AppendString("\ndata: ")
-	sc.buffer.AppendBytes(jsonData)
-	sc.buffer.AppendString("\n\ndata: [DONE]\n\n")
+	sc.buffer.AppendString(sc.output.FinishResponse(eventName, responseData))
 }
 
 func (sc *OpenAIResponsesStreamConverter) appendFailedEvents(raw json.RawMessage) {
@@ -506,18 +526,7 @@ func (sc *OpenAIResponsesStreamConverter) appendFailedEvents(raw json.RawMessage
 			"message": upstream.Message,
 		},
 	}
-	failedEvent := map[string]any{
-		"type":     "response.failed",
-		"response": responseData,
-	}
-	jsonData, err := json.Marshal(failedEvent)
-	if err != nil {
-		slog.Error("failed to marshal response.failed event", "error", err, "response_id", sc.responseID)
-		return
-	}
-	sc.buffer.AppendString("event: response.failed\ndata: ")
-	sc.buffer.AppendBytes(jsonData)
-	sc.buffer.AppendString("\n\ndata: [DONE]\n\n")
+	sc.buffer.AppendString(sc.output.FinishResponse("response.failed", responseData))
 }
 
 // chatUsageToResponsesUsage renames a valid Chat Completions usage object into
@@ -572,28 +581,17 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 		return 0, pendingErr
 	}
 
-	// Send response.created event first
+	// Open the stream with response.created and response.in_progress first
 	if !sc.sentCreate {
 		sc.sentCreate = true
-		createdEvent := map[string]any{
-			"type": "response.created",
-			"response": map[string]any{
-				"id":         sc.responseID,
-				"object":     "response",
-				"status":     "in_progress",
-				"model":      sc.model,
-				"provider":   sc.provider,
-				"created_at": sc.createdAt,
-			},
-		}
-		jsonData, err := json.Marshal(createdEvent)
-		if err != nil {
-			slog.Error("failed to marshal response.created event", "error", err, "response_id", sc.responseID)
-			return 0, nil
-		}
-		sc.buffer.AppendString("event: response.created\ndata: ")
-		sc.buffer.AppendBytes(jsonData)
-		sc.buffer.AppendString("\n\n")
+		sc.buffer.AppendString(sc.output.StartResponse(map[string]any{
+			"id":         sc.responseID,
+			"object":     "response",
+			"status":     "in_progress",
+			"model":      sc.model,
+			"provider":   sc.provider,
+			"created_at": sc.createdAt,
+		}))
 		return sc.buffer.Read(p), nil
 	}
 

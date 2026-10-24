@@ -1,9 +1,12 @@
 package storage
 
 import (
+	"maps"
+	"slices"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 // Helpers shared by feature store backends (responsestore, conversationstore,
@@ -43,4 +46,29 @@ func MongoUnexpiredFilter(id string, now time.Time) bson.M {
 			bson.M{"expires_at": bson.M{"$gt": now.Unix()}},
 		},
 	}
+}
+
+// MongoSwapSubfields builds a conditional update of string values inside the
+// subdocument at field: the filter expression matches only while every key in
+// current still holds its value there, and the update pipeline sets each of
+// those keys to its value in next. Keys are addressed with $getField and
+// $setField rather than dotted paths, so names containing "." or starting with
+// "$" work too (MongoDB 5.0+). Compare key by key rather than the whole
+// subdocument: a stored subdocument's key order is not stable.
+func MongoSwapSubfields(field string, current, next map[string]string) (filter bson.M, update mongo.Pipeline) {
+	keys := slices.Sorted(maps.Keys(current))
+	conditions := make(bson.A, 0, len(keys))
+	var value any = "$" + field
+	for _, key := range keys {
+		conditions = append(conditions, bson.M{"$eq": bson.A{
+			bson.M{"$getField": bson.M{"field": bson.M{"$literal": key}, "input": "$" + field}},
+			bson.M{"$literal": current[key]},
+		}})
+		value = bson.M{"$setField": bson.M{
+			"field": bson.M{"$literal": key},
+			"input": value,
+			"value": bson.M{"$literal": next[key]},
+		}}
+	}
+	return bson.M{"$expr": bson.M{"$and": conditions}}, mongo.Pipeline{{{Key: "$set", Value: bson.M{field: value}}}}
 }

@@ -95,7 +95,7 @@
           </td>
         </tr>
         {#each group.rows as row (row.key)}
-          <ModelRow {row} {columns} />
+          <ModelRow {row} {columns} colspan={groupColspan} />
         {/each}
       </tbody>
     {/each}

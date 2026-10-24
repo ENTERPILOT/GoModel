@@ -119,6 +119,7 @@ func LogBatchUsageFromBatchResults(
 		entry.ID = deterministicBatchUsageID(stored.Batch, item, providerID)
 		entry.UserPath = stored.UserPath
 		entry.SessionID = stored.SessionID
+		entry.AuthKeyID = stored.AuthKeyID
 
 		usageLogger.Write(entry)
 		loggedEntries++

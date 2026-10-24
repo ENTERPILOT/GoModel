@@ -181,7 +181,7 @@ func (s *geminiStreamState) chatChunkChoice(candidate geminiCandidate, fallbackI
 		delta["tool_calls"] = streamToolCalls(toolCalls)
 	}
 	if signature != "" {
-		delta[extraContentField] = thoughtSignatureExtraFields(signature).Lookup(extraContentField)
+		delta[core.ExtraContentField] = thoughtSignatureExtraFields(signature).Lookup(core.ExtraContentField)
 	}
 
 	finish := finishReasonFromGemini(candidate.FinishReason, state.sawToolCalls)
@@ -231,8 +231,8 @@ func streamToolCalls(toolCalls []core.ToolCall) []map[string]any {
 				"arguments": call.Function.Arguments,
 			},
 		}
-		if extra := call.ExtraFields.Lookup(extraContentField); len(extra) > 0 {
-			chunk[extraContentField] = extra
+		if extra := call.ExtraFields.Lookup(core.ExtraContentField); len(extra) > 0 {
+			chunk[core.ExtraContentField] = extra
 		}
 		out = append(out, chunk)
 	}

@@ -29,6 +29,7 @@ import (
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/app"
 	"github.com/enterpilot/gomodel/internal/version"
+	"github.com/enterpilot/gomodel/pluginapi"
 )
 
 var shutdownTimeout = 30 * time.Second
@@ -59,7 +60,8 @@ type Options struct {
 	// Default: version.AppCore ("GoModel").
 	AppName string
 	// Extensions is the extension registry snapshotted at server
-	// construction. Default: ext.Default.
+	// construction. Its log handler wrappers are read earlier, when Run
+	// starts. Default: ext.Default.
 	Extensions *ext.Registry
 	// Args are the CLI arguments (without the program name). Default: os.Args[1:].
 	Args []string
@@ -74,7 +76,8 @@ type Options struct {
 	// gateway — after CLI parsing, --version/--health/--ready
 	// short-circuits, dotenv loading, and logging configuration, but before
 	// config loading. Register extensions here so operator tooling modes
-	// stay silent. A returned error aborts startup.
+	// stay silent; log handler wrappers are the exception and must be
+	// registered before Run. A returned error aborts startup.
 	Setup func(ctx context.Context) error
 	// SetupConfig runs once after the initial configuration has been loaded and
 	// before the application is constructed. It lets custom distributions
@@ -159,6 +162,26 @@ func Run(ctx context.Context, opts Options) error {
 		return &usageError{err: err}
 	}
 
+	if cliOpts.PluginArgs != nil {
+		return runPluginCommand(ctx, opts.ProductName, cliOpts.PluginArgs, opts.Stdout, opts.Stderr)
+	}
+
+	if cliOpts.MigrateArgs != nil {
+		return runMigrateCommand(opts.ProductName, cliOpts.MigrateArgs, opts.Stdout, opts.Stderr)
+	}
+
+	var secretsOpts *secretsOptions
+	if cliOpts.SecretsArgs != nil {
+		secretsOpts, err = parseSecretsArgs(opts.ProductName, cliOpts.SecretsArgs, opts.Stdout, opts.Stderr)
+		if err != nil {
+			fmt.Fprintln(opts.Stderr, err)
+			return &usageError{err: err}
+		}
+		if secretsOpts == nil {
+			return nil // help
+		}
+	}
+
 	if cliOpts.Version {
 		fmt.Fprintln(opts.Stdout, versionLine(opts.ProductName))
 		return nil
@@ -197,9 +220,19 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 
-	if err := configureLogging(opts.Stderr); err != nil {
+	// Read once, before the first logger is built: every generation's logger
+	// gets the same wrappers.
+	logWrappers := opts.Extensions.LogHandlerWrappers()
+	if err := configureLogging(opts.Stderr, logWrappers); err != nil {
 		fmt.Fprintf(opts.Stderr, "failed to configure logging: %v\n", err)
 		return err
+	}
+	if secretsOpts != nil {
+		if err := runSecretsReencrypt(ctx, opts, *secretsOpts); err != nil {
+			fmt.Fprintln(opts.Stderr, err)
+			return err
+		}
+		return nil
 	}
 	if demoMode {
 		demoCtx, stopDemoWarnings := context.WithCancel(ctx)
@@ -222,31 +255,55 @@ func Run(ctx context.Context, opts Options) error {
 
 	configure := configHooks(ctx, opts)
 
+	// Reload requests arrive as SIGHUP or from inside the process, when a
+	// referenced secret other than a provider API key rotates. Both land on
+	// this channel; signal.Notify is wired to it further down.
+	reload := make(chan os.Signal, 1)
+	requestReload := reloadRequester(reload)
+	// One notifier for every generation: an extension notifying the Secrets
+	// of a generation whose reload was rejected still reaches the one
+	// serving, which is the only one listening.
+	secretChanges := config.NewSecretNotifier()
+
 	// build produces one generation of the gateway from the configuration as it
 	// stands right now. It is called again for every reload, which is what lets
 	// a reload re-read every configuration value rather than a hand-picked
 	// subset — everything except what is fixed for the life of the process (see
 	// warnAboutStartupOnlySettings).
+	//
+	// serving is the generation built last: the one serving, or about to,
+	// which the next build replaces. Builds run one at a time.
+	var serving *app.App
 	build := func() (*app.App, *config.Config, error) {
 		result, err := config.Load()
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to load config: %w", err)
 		}
+		result.Secrets.SetNotifier(secretChanges)
 		if err := configure(result); err != nil {
 			return nil, nil, err
+		}
+		// After the hook, so schemes it registered (Pro's vault) resolve too.
+		// A failure rejects this generation: startup aborts, a reload keeps
+		// the running one.
+		if err := result.ResolveSecrets(ctx); err != nil {
+			return nil, nil, fmt.Errorf("failed to resolve secret references: %w", err)
 		}
 		opts.ConfigureSwaggerDocs(result.Config.Server.BasePath)
 
 		application, err := app.New(ctx, app.Config{
-			AppConfig:   result,
-			Factory:     defaultProviderFactory(result.Config),
-			Extensions:  opts.Extensions,
-			DemoMode:    demoMode,
-			ProductName: opts.ProductName,
+			AppConfig:     result,
+			Factory:       defaultProviderFactory(result.Config),
+			Extensions:    opts.Extensions,
+			DemoMode:      demoMode,
+			ProductName:   opts.ProductName,
+			RequestReload: requestReload,
+			Replaces:      serving,
 		})
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize application: %w", err)
 		}
+		serving = application
 		return application, result.Config, nil
 	}
 
@@ -268,7 +325,6 @@ func Run(ctx context.Context, opts Options) error {
 	// tells an operator or a process manager that this instance can be signalled,
 	// and until Notify runs, SIGHUP still carries its default disposition: it
 	// would kill the gateway instead of reloading it.
-	reload := make(chan os.Signal, 1)
 	signal.Notify(reload, reloadSignal)
 	defer signal.Stop(reload)
 
@@ -296,7 +352,7 @@ func Run(ctx context.Context, opts Options) error {
 			undoEnv()
 		}
 
-		if err := configureLogging(opts.Stderr); err != nil {
+		if err := configureLogging(opts.Stderr, logWrappers); err != nil {
 			rollback()
 			return nil, err
 		}
@@ -319,8 +375,13 @@ func Run(ctx context.Context, opts Options) error {
 
 // configHooks sequences a distribution's configuration hooks across
 // generations: SetupConfig for the first, ReloadConfig for every later one.
+//
+// A key wrapper set by SetupConfig is carried into later generations, like
+// the extensions it registers, unless ReloadConfig sets another one.
 func configHooks(ctx context.Context, opts Options) func(*config.LoadResult) error {
 	first := true
+	var keyWrapper config.KeyWrapper
+	var previousKeyWrappers []config.KeyWrapper
 	return func(result *config.LoadResult) error {
 		if first {
 			first = false
@@ -329,20 +390,23 @@ func configHooks(ctx context.Context, opts Options) func(*config.LoadResult) err
 					return fmt.Errorf("failed to set up configured extensions: %w", err)
 				}
 			}
+			keyWrapper, previousKeyWrappers = result.KeyWrapper(), result.PreviousKeyWrappers()
 			return nil
 		}
+		result.SetKeyWrapper(keyWrapper, previousKeyWrappers...)
 		if opts.ReloadConfig != nil {
 			if err := opts.ReloadConfig(ctx, result); err != nil {
 				return fmt.Errorf("configured extensions rejected the reloaded configuration: %w", err)
 			}
 		}
+		keyWrapper, previousKeyWrappers = result.KeyWrapper(), result.PreviousKeyWrappers()
 		return nil
 	}
 }
 
 func versionLine(productName string) string {
-	return fmt.Sprintf("%s %s (commit: %s, built: %s, %s)",
-		productName, version.Version, version.Commit, version.Date, runtime.Version())
+	return fmt.Sprintf("%s %s (commit: %s, built: %s, %s, pluginapi %s)",
+		productName, version.Version, version.Commit, version.Date, runtime.Version(), pluginapi.Version)
 }
 
 type lifecycleApp interface {
@@ -372,7 +436,7 @@ func serveUntilShutdown(ctx context.Context, reload <-chan os.Signal, socket *bo
 		startErr := serveGeneration(generationCtx, application, listener)
 		endGeneration()
 
-		next := <-replacement
+		next := awaitReplacement(replacement, startErr != nil || ctx.Err() != nil)
 		switch {
 		case next == nil:
 			return startErr
@@ -384,6 +448,28 @@ func serveUntilShutdown(ctx context.Context, reload <-chan os.Signal, socket *bo
 		}
 		application = next
 		slog.Info("configuration reloaded")
+	}
+}
+
+// awaitReplacement returns the replacement watchForReload yields. When the
+// gateway is stopping, a reload still building it is waited on for at most
+// shutdownTimeout: one stuck on a resolver that never returns must not keep
+// the process from exiting.
+func awaitReplacement(replacement <-chan lifecycleApp, stopping bool) lifecycleApp {
+	if !stopping {
+		return <-replacement
+	}
+	select {
+	case next := <-replacement:
+		return next
+	case <-time.After(shutdownTimeout):
+		slog.Warn("a configuration reload was still running at shutdown; abandoning it", "waited", shutdownTimeout)
+		go func() {
+			if next := <-replacement; next != nil {
+				_ = shutdownApplicationWithTimeout(next)
+			}
+		}()
+		return nil
 	}
 }
 

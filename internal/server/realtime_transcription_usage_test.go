@@ -12,6 +12,8 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/realtime"
@@ -45,9 +47,8 @@ func newTranscriptionSession(t *testing.T, upstream *realtimeUpstream) (*websock
 	t.Cleanup(cancel)
 	client, _, err := websocket.Dial(ctx,
 		"ws"+strings.TrimPrefix(gateway.URL, "http")+"/v1/realtime?model=gpt-4o-transcribe&intent=transcription", nil)
-	if err != nil {
-		t.Fatalf("client dial failed: %v", err)
-	}
+	require.NoError(t, err)
+
 	// Audio frames are far larger than the library default read limit; a real
 	// realtime client raises it the same way the relay does.
 	client.SetReadLimit(realtime.MaxFrameBytes)
@@ -57,12 +58,10 @@ func newTranscriptionSession(t *testing.T, upstream *realtimeUpstream) (*websock
 	// close that ends the session cannot outrun its accounting.
 	send := func(frame []byte) {
 		t.Helper()
-		if err := client.Write(ctx, websocket.MessageText, frame); err != nil {
-			t.Fatalf("client write failed: %v", err)
-		}
-		if _, _, err := client.Read(ctx); err != nil {
-			t.Fatalf("client read failed: %v", err)
-		}
+		err := client.Write(ctx, websocket.MessageText, frame)
+		require.NoError(t, err)
+		_, _, err = client.Read(ctx)
+		require.NoError(t, err)
 	}
 	return client, usageLogger, send
 }
@@ -75,9 +74,8 @@ func realtimeAudioFrame(t *testing.T, seconds int) []byte {
 		"type":  "input_audio_buffer.append",
 		"audio": base64.StdEncoding.EncodeToString(make([]byte, seconds*24000*2)),
 	})
-	if err != nil {
-		t.Fatalf("failed to build audio frame: %v", err)
-	}
+	require.NoError(t, err)
+
 	return frame
 }
 
@@ -103,19 +101,12 @@ func TestRealtimeTranscriptionWithoutUsageEventsRecordsAudioDuration(t *testing.
 
 	entries := waitForUsageEntries(t, usageLogger, 1)
 	entry := entries[0]
-	if entry.Endpoint != "/v1/realtime" {
-		t.Errorf("endpoint = %q, want the realtime surface", entry.Endpoint)
-	}
-	if entry.Model != "gpt-4o-transcribe" {
-		t.Errorf("model = %q, want the routed model", entry.Model)
-	}
+	assert.Equal(t, "/v1/realtime", entry.Endpoint)
+	assert.Equal(t, "gpt-4o-transcribe", entry.Model)
+
 	seconds, ok := entry.RawData["audio_seconds"].(float64)
-	if !ok {
-		t.Fatalf("raw data = %v, want metered audio seconds", entry.RawData)
-	}
-	if math.Abs(seconds-2) > 1e-9 {
-		t.Errorf("audio seconds = %v, want 2", seconds)
-	}
+	require.True(t, ok, "raw data = %v, want metered audio seconds", entry.RawData)
+	assert.LessOrEqual(t, math.Abs(seconds-2), 1e-9, "audio seconds = %v, want 2", seconds)
 }
 
 func TestRealtimeTranscriptionReportingUsageIsNotMeteredTwice(t *testing.T) {
@@ -139,12 +130,10 @@ func TestRealtimeTranscriptionReportingUsageIsNotMeteredTwice(t *testing.T) {
 
 	entries := waitForUsageEntries(t, usageLogger, 1)
 	entry := entries[0]
-	if entry.TotalTokens != 30 || entry.InputTokens != 25 {
-		t.Errorf("tokens = (%d,%d), want the reported (25,30)", entry.InputTokens, entry.TotalTokens)
-	}
-	if _, metered := entry.RawData["audio_seconds"]; metered {
-		t.Errorf("raw data = %v, want no metered duration for a session that reported usage", entry.RawData)
-	}
+	assert.Equal(t, 30, entry.TotalTokens)
+	assert.Equal(t, 25, entry.InputTokens)
+	_, metered := entry.RawData["audio_seconds"]
+	assert.False(t, metered)
 }
 
 func TestRealtimeTranscriptionZeroUsageStillMetersAudio(t *testing.T) {
@@ -170,9 +159,7 @@ func TestRealtimeTranscriptionZeroUsageStillMetersAudio(t *testing.T) {
 		seconds, _ := entry.RawData["audio_seconds"].(float64)
 		metered += seconds
 	}
-	if math.Abs(metered-2) > 1e-9 {
-		t.Errorf("metered audio seconds = %v, want the 2 seconds relayed: %+v", metered, entries)
-	}
+	assert.LessOrEqual(t, math.Abs(metered-2), 1e-9, "metered audio seconds = %v, want the 2 seconds relayed: %+v", metered, entries)
 }
 
 func TestRealtimeTranscriptionWithoutAudioRecordsNothing(t *testing.T) {
@@ -190,7 +177,6 @@ func TestRealtimeTranscriptionWithoutAudioRecordsNothing(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("upstream session did not end")
 	}
-	if entries := usageLogger.Entries(); len(entries) != 0 {
-		t.Errorf("usage entries = %d, want none for a session that relayed no audio", len(entries))
-	}
+	entries := usageLogger.Entries()
+	assert.Empty(t, entries)
 }

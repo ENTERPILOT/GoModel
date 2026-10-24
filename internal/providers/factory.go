@@ -5,16 +5,23 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"net/http"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 )
 
 // ProviderOptions bundles runtime settings passed from the factory to provider constructors.
 type ProviderOptions struct {
+	// Name is the configured provider instance name (for example "openai-eu").
+	// HTTP clients report it in errors, so two instances of one type stay
+	// distinguishable. It is empty for constructors invoked outside the factory.
+	Name       string
 	Hooks      llmclient.Hooks
 	Models     []string
 	Resilience config.ResilienceConfig
@@ -22,6 +29,13 @@ type ProviderOptions struct {
 	// nil for keyless providers and for constructors invoked outside the
 	// factory; use the Keyring method rather than reading it directly.
 	Keys *Keyring
+	// HTTPClient overrides the transport a provider's clients use. The factory
+	// sets it only when an outbound proxy applies to the provider and leaves
+	// it nil otherwise, so production keeps the pooled default; tests point it
+	// at their own server, and a provider that embeds another one passes its
+	// client down. Retry, circuit breaking and hooks still come from this
+	// struct, so overriding the transport does not change resilience.
+	HTTPClient *http.Client
 }
 
 // Keyring returns the key source a provider should authenticate with, falling
@@ -35,6 +49,16 @@ func (o ProviderOptions) Keyring(apiKey string) *Keyring {
 		return o.Keys
 	}
 	return NewKeyring(apiKey)
+}
+
+// ClientName returns the provider name an HTTP client reports in errors: the
+// configured instance name when the factory supplied one, providerType
+// otherwise.
+func (o ProviderOptions) ClientName(providerType string) string {
+	if name := strings.TrimSpace(o.Name); name != "" {
+		return name
+	}
+	return providerType
 }
 
 // ProviderConstructor is the constructor signature for providers.
@@ -74,6 +98,7 @@ type ProviderFactory struct {
 	discoveryConfigs     map[string]DiscoveryConfig
 	passthroughEnrichers map[string]core.PassthroughSemanticEnricher
 	hooks                llmclient.Hooks
+	proxySelector        ext.ProxySelector
 }
 
 // NewProviderFactory creates a new provider factory instance.
@@ -100,6 +125,14 @@ func (f *ProviderFactory) AddHooks(hooks llmclient.Hooks) {
 	f.hooks = llmclient.JoinHooks(f.hooks, hooks)
 }
 
+// emptyResponseHook returns the composed OnEmptyResponse hook. The router
+// fires it itself, with the route's identity, so providers never receive it.
+func (f *ProviderFactory) emptyResponseHook() func(context.Context, llmclient.EmptyResponseInfo) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.hooks.OnEmptyResponse
+}
+
 // Add adds a provider constructor to the factory.
 // Panics if reg.Type is empty or reg.New is nil — both are programming errors
 // caught at startup, not runtime conditions.
@@ -123,12 +156,19 @@ func (f *ProviderFactory) Add(reg Registration) {
 
 // Create instantiates a provider based on its resolved configuration.
 func (f *ProviderFactory) Create(cfg ProviderConfig) (core.Provider, error) {
+	return f.create(cfg, NewKeyringWithSessionStickiness(cfg.SessionStickyKeys, cfg.APIKeys...))
+}
+
+// create is Create with the provider's Keyring supplied, so a caller that
+// rotates keys in place (see keyRotation) keeps a handle on it.
+func (f *ProviderFactory) create(cfg ProviderConfig, keys *Keyring) (core.Provider, error) {
 	if err := config.ValidateResilience(cfg.Resilience); err != nil {
 		return nil, fmt.Errorf("invalid resilience configuration: %w", err)
 	}
 	f.mu.RLock()
 	builder, ok := f.builders[cfg.Type]
 	hooks := f.hooks
+	proxySelector := f.proxySelector
 	f.mu.RUnlock()
 
 	if !ok {
@@ -137,11 +177,20 @@ func (f *ProviderFactory) Create(cfg ProviderConfig) (core.Provider, error) {
 
 	// One Keyring per provider instance: every client this provider builds
 	// shares session affinity and the sessionless round-robin sequence.
+	// One trimmed name for the clients and the hooks, so both attribute a
+	// request to the same instance.
+	name := strings.TrimSpace(cfg.Name)
+	httpClient, err := providerHTTPClient(cfg, proxySelector)
+	if err != nil {
+		return nil, err
+	}
 	opts := ProviderOptions{
-		Hooks:      hooksWithProviderIdentity(hooks, cfg.Name, cfg.Type),
+		Name:       name,
+		Hooks:      hooksWithProviderIdentity(hooks, name, cfg.Type),
 		Models:     cfg.Models,
 		Resilience: cfg.Resilience,
-		Keys:       NewKeyringWithSessionStickiness(cfg.SessionStickyKeys, cfg.APIKeys...),
+		Keys:       keys,
+		HTTPClient: httpClient,
 	}
 
 	return builder(cfg, opts), nil

@@ -13,6 +13,7 @@ import (
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/server"
 	"github.com/enterpilot/gomodel/internal/session"
+	"github.com/stretchr/testify/require"
 )
 
 // recordingRewriter captures the ext.Input the stack hands to a request
@@ -92,14 +93,9 @@ func TestSessionIDVisibilityByBodySize(t *testing.T) {
 			srv.ServeHTTP(rec, req)
 
 			in, seen := rewriter.snapshot()
-			if !seen {
-				t.Fatalf("rewriter never ran (status %d): %s", rec.Code, rec.Body.String())
-			}
+			require.True(t, seen, "rewriter never ran (status %d): %s", rec.Code, rec.Body.String())
+			require.NotEmpty(t, strings.TrimSpace(in.SessionID), "no session id detected for %d KiB body (status %d)", len(body)/1024, rec.Code)
 
-			if strings.TrimSpace(in.SessionID) == "" {
-				t.Fatalf("no session id detected for %d KiB body (status %d)",
-					len(body)/1024, rec.Code)
-			}
 			t.Logf("body=%d KiB status=%d session_id=%q",
 				len(body)/1024, rec.Code, in.SessionID)
 		})

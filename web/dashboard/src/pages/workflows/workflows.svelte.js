@@ -9,14 +9,17 @@ import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { modelsStore } from "$lib/stores/models.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
+import { normalizeWorkflowPhase, phasesSupport } from "$lib/utils/pluginPhases.js";
+import { guardrailsStore } from "../guardrails/guardrails.svelte.js";
 import {
   defaultWorkflowForm,
   emptyHydratedScope,
   defaultWorkflowGuardrailStep,
-  parseWorkflowGuardrailStep,
+  nextWorkflowGuardrailStep,
   workflowNormalizedFeatures,
   workflowSourceFeatures,
   workflowSourceGuardrails,
+  workflowGuardrailRefOptions,
   workflowScopeProviderValue,
   workflowProviderOptions,
   workflowModelOptions,
@@ -41,6 +44,8 @@ class WorkflowsStore {
   submitting = $state(false);
   deactivatingID = $state("");
   formError = $state("");
+  // Set once a submit failed validation, so rows outline their bad fields.
+  formValidated = $state(false);
   formHydrated = $state(false);
   hydratedScope = $state(emptyHydratedScope());
   guardrailRefs = $state([]);
@@ -100,12 +105,24 @@ class WorkflowsStore {
     return workflowPreview(this.form, this.featureCaps());
   }
 
+  // refOptions lists the guardrail instances a step row may pick for its
+  // phase, keeping the row's current ref selectable.
+  refOptions(phase, current) {
+    return workflowGuardrailRefOptions(this.guardrailRefs, phase, current);
+  }
+
   // ─── Editor form ───
 
   openCreate(workflow) {
     this.formOpen = true;
     this.submitting = false;
     this.formError = "";
+    this.formValidated = false;
+    // The guardrail editor stacked on this form needs the type catalog and
+    // full definitions, which the ref list does not carry.
+    if (runtimeConfig.guardrailsVisible()) {
+      void guardrailsStore.fetchPage();
+    }
 
     if (!workflow) {
       this.formHydrated = false;
@@ -126,16 +143,8 @@ class WorkflowsStore {
       workflow.workflow_payload && workflow.workflow_payload.features
         ? workflowNormalizedFeatures(workflow.workflow_payload.features)
         : workflowSourceFeatures(workflow, this.featureCaps());
-    const storedGuardrails = Array.isArray(
-      workflow.workflow_payload && workflow.workflow_payload.guardrails,
-    )
-      ? workflow.workflow_payload.guardrails
-          .map((step) => ({
-            ref: String((step && step.ref) || "").trim(),
-            step: parseWorkflowGuardrailStep(step && step.step),
-          }))
-          .filter((step) => Number.isInteger(step.step) && step.step >= 0)
-      : workflowSourceGuardrails(workflow);
+    // Accepts both v2 `steps` and legacy `guardrails` (mapped to prompt).
+    const storedGuardrails = workflowSourceGuardrails(workflow);
     this.form = {
       scope_provider: workflowScopeProviderValue(workflow.scope),
       scope_model: String((workflow.scope && workflow.scope.scope_model) || ""),
@@ -152,6 +161,7 @@ class WorkflowsStore {
       },
       guardrails: storedGuardrails.map((step) => ({
         ref: String((step && step.ref) || ""),
+        phase: normalizeWorkflowPhase(step && step.phase),
         step: Number.isFinite(step && step.step) ? step.step : 10,
       })),
     };
@@ -161,6 +171,7 @@ class WorkflowsStore {
     this.formOpen = false;
     this.submitting = false;
     this.formError = "";
+    this.formValidated = false;
     this.formHydrated = false;
     this.hydratedScope = emptyHydratedScope();
     this.form = defaultWorkflowForm();
@@ -178,14 +189,54 @@ class WorkflowsStore {
     }
   }
 
-  addGuardrailStep() {
+  // addGuardrailStep appends a row to one phase's section, ordered after
+  // that phase's existing rows.
+  addGuardrailStep(phase) {
     const steps = Array.isArray(this.form.guardrails) ? this.form.guardrails : [];
-    const nextStep =
-      steps.reduce((maxStep, step) => {
-        const parsed = Number(step && step.step);
-        return Number.isFinite(parsed) ? Math.max(maxStep, parsed) : maxStep;
-      }, 0) + 10;
-    this.form.guardrails.push(defaultWorkflowGuardrailStep(nextStep));
+    this.form.guardrails.push(
+      defaultWorkflowGuardrailStep(nextWorkflowGuardrailStep(steps, phase), phase),
+    );
+  }
+
+  // ─── Guardrail instances (stacked guardrail editor) ───
+
+  // guardrailDefinition finds the full stored definition behind a ref, or
+  // null when the ref is unknown (unregistered, or not loaded yet).
+  guardrailDefinition(ref) {
+    const name = String(ref || "").trim();
+    if (!name) return null;
+    return guardrailsStore.guardrails.find((entry) => entry && entry.name === name) || null;
+  }
+
+  // openGuardrailCreate opens the guardrail editor over this form; the new
+  // instance fills the row it was started from when it supports the row's
+  // phase. Without a row it only refreshes the ref list.
+  openGuardrailCreate(index = null) {
+    guardrailsStore.onSaved = async (name) => {
+      await this.fetchGuardrailRefs();
+      const step =
+        Number.isInteger(index) && Array.isArray(this.form.guardrails)
+          ? this.form.guardrails[index]
+          : null;
+      if (!step || step.ref) return;
+      const entry = (this.guardrailRefs || []).find((item) =>
+        typeof item === "string" ? item.trim() === name : item && item.name === name,
+      );
+      const phases = typeof entry === "string" ? null : entry && entry.phases;
+      if (entry && phasesSupport(phases, step.phase)) {
+        step.ref = name;
+      }
+    };
+    guardrailsStore.openCreate();
+  }
+
+  openGuardrailEdit(ref) {
+    const definition = this.guardrailDefinition(ref);
+    if (!definition) return;
+    guardrailsStore.onSaved = () => {
+      void this.fetchGuardrailRefs();
+    };
+    guardrailsStore.openEdit(definition);
   }
 
   removeGuardrailStep(index) {
@@ -274,6 +325,7 @@ class WorkflowsStore {
     });
     if (validationError) {
       this.formError = validationError;
+      this.formValidated = true;
       return;
     }
 

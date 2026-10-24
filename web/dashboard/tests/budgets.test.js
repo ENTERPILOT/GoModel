@@ -87,10 +87,45 @@ test("buildBudgetFormPayload keeps a label subject verbatim", () => {
   assert.equal(blank.error, "Label is required.");
 });
 
+test("buildBudgetFormPayload lowercases a provider subject and rejects qualified names", () => {
+  const { payload, error } = buildBudgetFormPayload({
+    scope: "provider",
+    subject: " OpenAI-Prod ",
+    period: "daily",
+    amount: "100",
+  });
+  assert.equal(error, "");
+  assert.equal(payload.scope, "provider");
+  assert.equal(payload.subject, "openai-prod");
+  assert.equal(payload.per_child, false);
+
+  const blank = buildBudgetFormPayload({
+    scope: "provider",
+    subject: "  ",
+    period: "daily",
+    amount: "100",
+  });
+  assert.equal(blank.payload, null);
+  assert.equal(blank.error, "Provider name is required.");
+
+  const qualified = buildBudgetFormPayload({
+    scope: "provider",
+    subject: "openai/gpt-4o",
+    period: "daily",
+    amount: "100",
+  });
+  assert.equal(qualified.payload, null);
+  assert.equal(
+    qualified.error,
+    "Provider name must not contain slashes or spaces.",
+  );
+});
+
 test("budget scope metadata drives the selector and subject field", () => {
   assert.deepEqual(budgetScopeOptions(), [
     { value: "user_path", label: "User path" },
     { value: "label", label: "Label" },
+    { value: "provider", label: "Provider" },
   ]);
   assert.equal(budgetScopeLabel({ scope: "label" }), "label");
   // A budget without an explicit scope predates label budgets: treat it as a
@@ -100,6 +135,8 @@ test("budget scope metadata drives the selector and subject field", () => {
   assert.equal(budgetSubject({ scope: "label", subject: "iOS" }), "iOS");
   assert.equal(budgetSubjectFieldLabel({ scope: "label" }), "Label");
   assert.equal(budgetSubjectPlaceholder({ scope: "user_path" }), "/team/alpha");
+  assert.equal(budgetScopeLabel({ scope: "provider" }), "provider");
+  assert.equal(budgetSubjectFieldLabel({ scope: "provider" }), "Provider Name");
 });
 
 test("budgetScopeValueClass picks the scope modifier for the shared subject style", () => {

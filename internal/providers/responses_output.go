@@ -30,6 +30,11 @@ func ResponsesFunctionCallItemID(callID string) string {
 func buildResponsesMessageContent(content any) []core.ResponsesContentItem {
 	switch c := content.(type) {
 	case string:
+		// An empty string is no content: OpenAI never emits an empty text
+		// part, and a tool-call turn must not gain a blank message item.
+		if c == "" {
+			return nil
+		}
 		return []core.ResponsesContentItem{
 			{
 				Type:        "output_text",
@@ -123,18 +128,27 @@ func buildResponsesContentItemsFromParts(parts []core.ContentPart) []core.Respon
 // BuildResponsesOutputItems converts a response message into Responses API output items.
 func BuildResponsesOutputItems(msg core.ResponseMessage) []core.ResponsesOutputItem {
 	reasoningContent := responseMessageReasoningContent(msg)
+	// Replay state on the assistant message belongs to its reasoning, not to
+	// its text: Anthropic thinking signatures ride here. It is emitted even
+	// when there is no readable reasoning text, because a redacted thinking
+	// block has none and still has to reach the client.
+	reasoningExtra := msg.ExtraFields.Lookup(core.ExtraContentField)
 	output := make([]core.ResponsesOutputItem, 0, len(msg.ToolCalls)+2)
-	if reasoningContent != "" {
+	if reasoningContent != "" || len(reasoningExtra) > 0 {
+		extra := map[string]json.RawMessage{"summary": json.RawMessage(`[]`)}
+		if len(reasoningExtra) > 0 {
+			extra[core.ExtraContentField] = reasoningExtra
+		}
+		content := []core.ResponsesContentItem{}
+		if reasoningContent != "" {
+			content = append(content, core.ResponsesContentItem{Type: "reasoning_text", Text: reasoningContent})
+		}
 		output = append(output, core.ResponsesOutputItem{
-			ID:     "rs_" + uuid.New().String(),
-			Type:   "reasoning",
-			Status: "completed",
-			Content: []core.ResponsesContentItem{
-				{Type: "reasoning_text", Text: reasoningContent},
-			},
-			ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
-				"summary": json.RawMessage(`[]`),
-			}),
+			ID:          "rs_" + uuid.New().String(),
+			Type:        "reasoning",
+			Status:      "completed",
+			Content:     content,
+			ExtraFields: core.UnknownJSONFieldsFromMap(extra),
 		})
 	}
 	contentItems := buildResponsesMessageContent(msg.Content)
@@ -171,33 +185,70 @@ func BuildResponsesOutputItems(msg core.ResponseMessage) []core.ResponsesOutputI
 	return output
 }
 
-// toolCallExtraContentField is the OpenAI-compatible member holding provider
-// state a chat tool call needs back verbatim on the next turn, as used by
-// Google's OpenAI-compatible endpoint (extra_content.google.thought_signature).
-const toolCallExtraContentField = "extra_content"
-
 // toolCallExtraContent isolates the extra_content member of a chat tool call
 // so it survives on the Responses function_call item that clients replay. The
 // other unknown tool-call members are provider metadata, not replay state, so
 // only extra_content is forwarded.
 func toolCallExtraContent(fields core.UnknownJSONFields) core.UnknownJSONFields {
-	raw := fields.Lookup(toolCallExtraContentField)
+	raw := fields.Lookup(core.ExtraContentField)
 	if len(raw) == 0 {
 		return core.UnknownJSONFields{}
 	}
-	return core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{toolCallExtraContentField: raw})
+	return core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{core.ExtraContentField: raw})
 }
 
+// responseMessageReasoningContent returns the reasoning text a provider
+// surfaced on the message: "reasoning_content" (DeepSeek, Fireworks, the
+// anthropic provider) or the vendor "reasoning" member (Groq, OpenRouter),
+// the same precedence the streaming codec applies.
 func responseMessageReasoningContent(msg core.ResponseMessage) string {
-	raw := msg.ExtraFields.Lookup("reasoning_content")
-	if len(raw) == 0 {
+	for _, member := range []string{"reasoning_content", "reasoning"} {
+		raw := msg.ExtraFields.Lookup(member)
+		if len(raw) == 0 {
+			continue
+		}
+		var content string
+		if err := json.Unmarshal(raw, &content); err == nil && content != "" {
+			return content
+		}
+	}
+	return ""
+}
+
+// ResponsesIncompleteReason maps a Chat Completions finish reason onto the
+// OpenAI Responses incomplete_details reason, or returns "" when the turn
+// finished normally. OpenAI reports a truncated or filtered turn as status
+// "incomplete" with a reason, so translated providers must do the same
+// instead of claiming completion.
+func ResponsesIncompleteReason(finishReason string) string {
+	switch strings.TrimSpace(finishReason) {
+	case "length":
+		return "max_output_tokens"
+	case "content_filter":
+		return "content_filter"
+	default:
 		return ""
 	}
-	var content string
-	if err := json.Unmarshal(raw, &content); err != nil {
-		return ""
+}
+
+// ApplyResponsesFinishReason stamps a translated response with the status and
+// incomplete_details implied by the provider's finish reason. The message item
+// carries the same status, mirroring what OpenAI emits for a truncated turn.
+func ApplyResponsesFinishReason(resp *core.ResponsesResponse, finishReason string) {
+	if resp == nil {
+		return
 	}
-	return content
+	reason := ResponsesIncompleteReason(finishReason)
+	if reason == "" {
+		return
+	}
+	resp.Status = "incomplete"
+	resp.IncompleteDetails = &core.ResponsesIncompleteDetails{Reason: reason}
+	for i := range resp.Output {
+		if resp.Output[i].Type == "message" {
+			resp.Output[i].Status = "incomplete"
+		}
+	}
 }
 
 // ConvertChatResponseToResponses converts a ChatResponse to a ResponsesResponse.
@@ -223,7 +274,7 @@ func ConvertChatResponseToResponses(resp *core.ChatResponse) *core.ResponsesResp
 		}
 	}
 
-	return &core.ResponsesResponse{
+	converted := &core.ResponsesResponse{
 		ID:        resp.ID,
 		Object:    "response",
 		CreatedAt: resp.Created,
@@ -240,4 +291,8 @@ func ConvertChatResponseToResponses(resp *core.ChatResponse) *core.ResponsesResp
 			RawUsage:                resp.Usage.RawUsage,
 		},
 	}
+	if len(resp.Choices) > 0 {
+		ApplyResponsesFinishReason(converted, resp.Choices[0].FinishReason)
+	}
+	return converted
 }

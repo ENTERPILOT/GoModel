@@ -246,6 +246,12 @@ func CreateStreamEntry(ctx context.Context, baseEntry *LogEntry) *LogEntry {
 		UserPath:    baseEntry.UserPath,
 		SessionID:   baseEntry.SessionID,
 		Stream:      true, // Mark as streaming
+		// Revision work still running finishes into this copy, the entry
+		// that is written.
+		pendingRevisions: baseEntry.pendingRevisions,
+		// So do the guardrail outcomes: the response and stream phases run
+		// while the stream is read and are folded in when it closes.
+		guardrailOutcomes: baseEntry.guardrailOutcomes,
 	}
 
 	// This is a whitelist copy, so every request-side field of LogData must be
@@ -267,6 +273,7 @@ func CreateStreamEntry(ctx context.Context, baseEntry *LogEntry) *LogEntry {
 			RequestBody:               baseEntry.Data.RequestBody,
 			RequestBodyTooBigToHandle: baseEntry.Data.RequestBodyTooBigToHandle,
 			RequestRevisions:          copyRequestRevisions(baseEntry.Data.RequestRevisions),
+			Guardrails:                slices.Clone(baseEntry.Data.Guardrails),
 			Attempts:                  normalizeAttemptSnapshots(baseEntry.Data.Attempts),
 		}
 		if baseEntry.Data.WorkflowFeatures != nil {

@@ -32,15 +32,33 @@ func encodeTargets(targets []Target) (string, error) {
 	return string(data), nil
 }
 
-func encodeUserPaths(paths []string) (string, error) {
-	if paths == nil {
-		paths = []string{}
+// encodeStrategyConfig stores a strategy config as a JSON object; nil and
+// empty both persist as "{}".
+func encodeStrategyConfig(config map[string]any) (string, error) {
+	if config == nil {
+		config = map[string]any{}
 	}
-	data, err := json.Marshal(paths)
+	data, err := json.Marshal(config)
 	if err != nil {
-		return "", fmt.Errorf("encode user_paths: %w", err)
+		return "", fmt.Errorf("encode strategy_config: %w", err)
 	}
 	return string(data), nil
+}
+
+// decodeStrategyConfig reads a stored strategy config; an empty object loads
+// as nil so rows written before the column existed compare equal to new ones.
+func decodeStrategyConfig(data []byte) (map[string]any, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("decode strategy_config: %w", err)
+	}
+	if len(config) == 0 {
+		return nil, nil
+	}
+	return config, nil
 }
 
 func decodeTargets(data []byte) ([]Target, error) {
@@ -55,20 +73,6 @@ func decodeTargets(data []byte) ([]Target, error) {
 		return nil, nil
 	}
 	return targets, nil
-}
-
-func decodeUserPaths(data []byte) ([]string, error) {
-	if len(data) == 0 {
-		return nil, nil
-	}
-	var paths []string
-	if err := json.Unmarshal(data, &paths); err != nil {
-		return nil, fmt.Errorf("decode user_paths: %w", err)
-	}
-	if len(paths) == 0 {
-		return nil, nil
-	}
-	return paths, nil
 }
 
 // stampUpsert sets CreatedAt on insert and UpdatedAt on every write.

@@ -11,6 +11,7 @@ import { writeTextToClipboard } from "$lib/utils/clipboard.svelte.js";
 import { displayModelSelector } from "$lib/utils/modelSelectors.js";
 import {
   buildUpsertUserPayload,
+  countInactiveUserNodes,
   defaultUserForm,
   filterUserNodes,
   sortUserNodes,
@@ -22,8 +23,20 @@ class UsersStore {
   loading = $state(false);
   error = $state("");
   filter = $state("");
+  showInactive = $state(false);
 
-  visibleNodes = $derived(sortUserNodes(filterUserNodes(this.nodes, this.filter)));
+  visibleNodes = $derived(
+    sortUserNodes(filterUserNodes(this.nodes, this.filter, { showInactive: this.showInactive })),
+  );
+
+  // Count inactive only among rows matching the current filter, so the
+  // toggle badge never claims hidden rows the query would not surface.
+  inactiveCount = $derived(
+    countInactiveUserNodes(
+      filterUserNodes(this.nodes, this.filter, { showInactive: true }),
+      this.filter,
+    ),
+  );
 
   formOpen = $state(false);
   formSubmitting = $state(false);

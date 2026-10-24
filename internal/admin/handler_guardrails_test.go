@@ -1,18 +1,24 @@
 package admin
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/plugins"
+	"github.com/enterpilot/gomodel/internal/plugins/builtin"
+	"github.com/enterpilot/gomodel/internal/plugins/builtin/llmaltering"
 	"github.com/enterpilot/gomodel/internal/workflows"
 )
 
@@ -70,22 +76,24 @@ func (s *guardrailTestStore) Close() error { return nil }
 func rawGuardrailConfig(t *testing.T, value any) json.RawMessage {
 	t.Helper()
 	raw, err := json.Marshal(value)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	return raw
 }
 
 func newGuardrailService(t *testing.T, definitions ...guardrails.Definition) *guardrails.Service {
 	t.Helper()
 
-	service, err := guardrails.NewService(newGuardrailTestStore(definitions...))
-	if err != nil {
-		t.Fatalf("guardrails.NewService() error = %v", err)
+	catalog := plugins.NewCatalog()
+	for _, factory := range builtin.All() {
+		err := catalog.Register(factory, plugins.SourceBuiltin)
+		require.NoError(t, err)
 	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("guardrails.Refresh() error = %v", err)
-	}
+	service, err := guardrails.NewService(newGuardrailTestStore(definitions...), catalog, plugins.HostDeps{})
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+
 	return service
 }
 
@@ -104,226 +112,144 @@ func TestListGuardrails(t *testing.T) {
 		}),
 	})
 
-	c, rec := newHandlerContext("/admin/guardrails")
-	if err := h.ListGuardrails(c); err != nil {
-		t.Fatalf("ListGuardrails() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
+	c, rec := echotest.Get(t, "/admin/guardrails")
+	err := h.ListGuardrails(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	var body []guardrails.View
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-	if len(body) != 1 || body[0].Name != "policy-system" {
-		t.Fatalf("body = %#v, want one policy-system guardrail", body)
-	}
-	if body[0].Summary == "" {
-		t.Fatal("Summary = empty, want populated summary")
-	}
+	body := echotest.Decode[[]guardrails.View](t, rec)
+	require.Len(t, body, 1)
+	assert.Equal(t, "policy-system", body[0].Name)
+	assert.NotEmpty(t, body[0].Summary)
 }
 
 func TestListGuardrailTypes(t *testing.T) {
 	h := newGuardrailHandler(t)
-	c, rec := newHandlerContext("/admin/guardrails/types")
+	c, rec := echotest.Get(t, "/admin/guardrails/types")
+	err := h.ListGuardrailTypes(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.ListGuardrailTypes(c); err != nil {
-		t.Fatalf("ListGuardrailTypes() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
+	body := echotest.Decode[[]guardrails.TypeDefinition](t, rec)
 
-	var body []guardrails.TypeDefinition
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-	var sawSystemPrompt bool
-	var sawLLMBasedAltering bool
+	byType := map[string]guardrails.TypeDefinition{}
 	for _, typeDef := range body {
-		switch typeDef.Type {
-		case "system_prompt":
-			sawSystemPrompt = true
-		case "llm_based_altering":
-			sawLLMBasedAltering = true
+		byType[typeDef.Type] = typeDef
+	}
+	assert.Contains(t, byType, "system_prompt")
+	typeDef, ok := byType["llm_based_altering"]
+	require.True(t, ok, "body = %#v, want an llm_based_altering type definition", body)
+	require.NotEmpty(t, typeDef.Defaults)
+
+	var defaults map[string]any
+	err = json.Unmarshal(typeDef.Defaults, &defaults)
+	require.NoError(t, err)
+
+	prompt, ok := defaults["prompt"].(string)
+	require.True(t, ok, "llm_based_altering defaults.prompt = %#v, want string", defaults["prompt"])
+	assert.NotEmpty(t, strings.TrimSpace(prompt))
+	assert.Len(t, typeDef.Phases, 2)
+	assert.Equal(t, "builtin", typeDef.Source)
+	assert.True(t, typeDef.Mutates)
+	assert.True(t, typeDef.Guardrail)
+
+	foundMaxTokens := false
+	for _, field := range typeDef.Fields {
+		if field.Key == "max_tokens" {
+			foundMaxTokens = true
+			assert.Equal(t, fmt.Sprint(defaults["max_tokens"]), fmt.Sprint(field.Default), "max_tokens field default disagrees with defaults")
 		}
 	}
-	if !sawSystemPrompt || !sawLLMBasedAltering {
-		t.Fatalf("body = %#v, want system_prompt and llm_based_altering type definitions", body)
-	}
-	for _, typeDef := range body {
-		if typeDef.Type != "llm_based_altering" {
-			continue
-		}
-		if len(typeDef.Defaults) == 0 {
-			t.Fatal("llm_based_altering defaults = empty, want built-in defaults")
-		}
-		var defaults map[string]any
-		if err := json.Unmarshal(typeDef.Defaults, &defaults); err != nil {
-			t.Fatalf("json.Unmarshal(defaults) error = %v", err)
-		}
-		prompt, ok := defaults["prompt"].(string)
-		if !ok {
-			t.Fatalf("llm_based_altering defaults.prompt = %#v, want string", defaults["prompt"])
-		}
-		if got := strings.TrimSpace(prompt); got == "" {
-			t.Fatalf("llm_based_altering defaults.prompt = %q, want built-in prompt", got)
-		}
-		for _, field := range typeDef.Fields {
-			if field.Key == "provider" {
-				t.Fatalf("llm_based_altering fields = %#v, want provider field removed", typeDef.Fields)
-			}
-		}
-	}
+	assert.True(t, foundMaxTokens, "llm_based_altering fields = %#v, want a max_tokens field", typeDef.Fields)
 }
 
 func TestUpsertGuardrail(t *testing.T) {
 	h := newGuardrailHandler(t)
-	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/guardrails", bytes.NewBufferString(`{
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/guardrails", `{
 		"name":"policy-system",
 		"type":"system_prompt",
 		"description":"Default policy",
 		"user_path":"team/alpha",
 		"config":{"mode":"override","content":"Respond carefully."}
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.UpsertGuardrail(c); err != nil {
-		t.Fatalf("UpsertGuardrail() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
+	}`)
+	err := h.UpsertGuardrail(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
 
 	guardrail, ok := h.guardrailDefs.Get("policy-system")
-	if !ok || guardrail == nil {
-		t.Fatal("Get(policy-system) = missing, want saved guardrail")
-	}
-	if guardrail.Type != "system_prompt" {
-		t.Fatalf("guardrail.Type = %q, want system_prompt", guardrail.Type)
-	}
-	if guardrail.UserPath != "/team/alpha" {
-		t.Fatalf("guardrail.UserPath = %q, want /team/alpha", guardrail.UserPath)
-	}
+	require.True(t, ok)
+	require.NotNil(t, guardrail)
+	assert.Equal(t, "system_prompt", guardrail.Type)
+	assert.Equal(t, "/team/alpha", guardrail.UserPath)
 }
 
 func TestUpsertGuardrailLLMBasedAltering(t *testing.T) {
 	h := newGuardrailHandler(t)
-	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/guardrails", bytes.NewBufferString(`{
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/guardrails", `{
 		"name":"privacy",
 		"type":"llm_based_altering",
 		"description":"Rewrite user PII",
 		"config":{"model":"gpt-4o-mini","roles":["user","tool"]}
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.UpsertGuardrail(c); err != nil {
-		t.Fatalf("UpsertGuardrail() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
+	}`)
+	err := h.UpsertGuardrail(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
 
 	guardrail, ok := h.guardrailDefs.Get("privacy")
-	if !ok || guardrail == nil {
-		t.Fatal("Get(privacy) = missing, want saved guardrail")
-	}
-	if guardrail.Type != "llm_based_altering" {
-		t.Fatalf("guardrail.Type = %q, want llm_based_altering", guardrail.Type)
-	}
+	require.True(t, ok)
+	require.NotNil(t, guardrail)
+	assert.Equal(t, "llm_based_altering", guardrail.Type)
 
 	var cfg map[string]any
-	if err := json.Unmarshal(guardrail.Config, &cfg); err != nil {
-		t.Fatalf("json.Unmarshal(guardrail.Config) error = %v", err)
-	}
-	if cfg["model"] != "gpt-4o-mini" {
-		t.Fatalf("config.model = %#v, want gpt-4o-mini", cfg["model"])
-	}
-	if cfg["max_tokens"] != float64(guardrails.DefaultLLMBasedAlteringMaxTokens) {
-		t.Fatalf("config.max_tokens = %#v, want %d", cfg["max_tokens"], guardrails.DefaultLLMBasedAlteringMaxTokens)
-	}
+	err = json.Unmarshal(guardrail.Config, &cfg)
+	require.NoError(t, err)
+	assert.Equal(t, "gpt-4o-mini", cfg["model"])
+	assert.InDelta(t, float64(llmaltering.DefaultMaxTokens), cfg["max_tokens"], 0, "max_tokens default must be filled in")
 }
 
 func TestUpsertGuardrailLLMBasedAlteringNormalizesProviderHintIntoModel(t *testing.T) {
 	h := newGuardrailHandler(t)
-	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/guardrails", bytes.NewBufferString(`{
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/guardrails", `{
 		"name":"privacy",
 		"type":"llm_based_altering",
 		"description":"Rewrite user PII",
 		"config":{"model":"gpt-4o-mini","provider":"openai","roles":["user"]}
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.UpsertGuardrail(c); err != nil {
-		t.Fatalf("UpsertGuardrail() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
+	}`)
+	err := h.UpsertGuardrail(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
 
 	guardrail, ok := h.guardrailDefs.Get("privacy")
-	if !ok || guardrail == nil {
-		t.Fatal("Get(privacy) = missing, want saved guardrail")
-	}
+	require.True(t, ok)
+	require.NotNil(t, guardrail)
 
 	var cfg map[string]any
-	if err := json.Unmarshal(guardrail.Config, &cfg); err != nil {
-		t.Fatalf("json.Unmarshal(guardrail.Config) error = %v", err)
-	}
-	if cfg["model"] != "openai/gpt-4o-mini" {
-		t.Fatalf("config.model = %#v, want openai/gpt-4o-mini", cfg["model"])
-	}
-	if _, ok := cfg["provider"]; ok {
-		t.Fatalf("config.provider = %#v, want omitted after normalization", cfg["provider"])
-	}
+	err = json.Unmarshal(guardrail.Config, &cfg)
+	require.NoError(t, err)
+	assert.Equal(t, "openai/gpt-4o-mini", cfg["model"])
+	assert.NotContains(t, cfg, "provider", "provider hint must be folded into model")
 }
 
 func TestUpsertGuardrailRejectsSlashInName(t *testing.T) {
 	h := newGuardrailHandler(t)
-	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/guardrails", bytes.NewBufferString(`{
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/guardrails", `{
 		"name":"privacy/redactor",
 		"type":"llm_based_altering",
 		"config":{"model":"gpt-4o-mini","roles":["user"]}
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	}`)
+	err := h.UpsertGuardrail(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 
-	if err := h.UpsertGuardrail(c); err != nil {
-		t.Fatalf("UpsertGuardrail() error = %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-
-	envelope := decodeWorkflowErrorEnvelope(t, rec.Body.Bytes())
-	if envelope.Error.Type != string(core.ErrorTypeInvalidRequest) {
-		t.Fatalf("error type = %q, want %q", envelope.Error.Type, core.ErrorTypeInvalidRequest)
-	}
-	if envelope.Error.Message != "guardrail name cannot contain '/'" {
-		t.Fatalf("error message = %q, want guardrail name validation failure", envelope.Error.Message)
-	}
-	if envelope.Error.Param != nil {
-		t.Fatalf("error param = %v, want nil", *envelope.Error.Param)
-	}
-	if envelope.Error.Code != nil {
-		t.Fatalf("error code = %v, want nil", *envelope.Error.Code)
-	}
+	envelope := echotest.Decode[workflowErrorEnvelope](t, rec)
+	assert.Equal(t, string(core.ErrorTypeInvalidRequest), envelope.Error.Type)
+	assert.Equal(t, "guardrail name cannot contain '/'", envelope.Error.Message)
+	assert.Nil(t, envelope.Error.Param)
+	assert.Nil(t, envelope.Error.Code)
 }
 
 func TestDeleteGuardrailRejectsActiveWorkflowReference(t *testing.T) {
@@ -354,31 +280,18 @@ func TestDeleteGuardrailRejectsActiveWorkflowReference(t *testing.T) {
 		},
 	}
 	planService, err := workflows.NewService(planStore, workflows.NewCompilerWithFeatureCaps(guardrailService, core.DefaultWorkflowFeatures()))
-	if err != nil {
-		t.Fatalf("workflows.NewService() error = %v", err)
-	}
-	if err := planService.Refresh(context.Background()); err != nil {
-		t.Fatalf("planService.Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = planService.Refresh(context.Background())
+	require.NoError(t, err)
 
 	h := NewHandler(nil, nil, WithGuardrailService(guardrailService), WithWorkflows(planService))
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodDelete, "/admin/guardrails", bytes.NewBufferString(`{"name":"policy-system"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Request(t, http.MethodDelete, "/admin/guardrails", `{"name":"policy-system"}`)
+	err = h.DeleteGuardrail(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 
-	if err := h.DeleteGuardrail(c); err != nil {
-		t.Fatalf("DeleteGuardrail() error = %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-
-	envelope := decodeWorkflowErrorEnvelope(t, rec.Body.Bytes())
-	if envelope.Error.Message != "guardrail is used by active workflows: global" {
-		t.Fatalf("error message = %q, want active workflow reference", envelope.Error.Message)
-	}
+	envelope := echotest.Decode[workflowErrorEnvelope](t, rec)
+	assert.Equal(t, "guardrail is used by active workflows: global", envelope.Error.Message)
 }
 
 func TestDeleteGuardrailIgnoresDisabledWorkflowGuardrailRefs(t *testing.T) {
@@ -409,27 +322,107 @@ func TestDeleteGuardrailIgnoresDisabledWorkflowGuardrailRefs(t *testing.T) {
 		},
 	}
 	planService, err := workflows.NewService(planStore, workflows.NewCompilerWithFeatureCaps(guardrailService, core.DefaultWorkflowFeatures()))
-	if err != nil {
-		t.Fatalf("workflows.NewService() error = %v", err)
-	}
-	if err := planService.Refresh(context.Background()); err != nil {
-		t.Fatalf("planService.Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = planService.Refresh(context.Background())
+	require.NoError(t, err)
 
 	h := NewHandler(nil, nil, WithGuardrailService(guardrailService), WithWorkflows(planService))
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodDelete, "/admin/guardrails", bytes.NewBufferString(`{"name":"policy-system"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Request(t, http.MethodDelete, "/admin/guardrails", `{"name":"policy-system"}`)
+	err = h.DeleteGuardrail(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	_, ok := h.guardrailDefs.Get("policy-system")
+	assert.False(t, ok)
+}
 
-	if err := h.DeleteGuardrail(c); err != nil {
-		t.Fatalf("DeleteGuardrail() error = %v", err)
+// Retyping a guardrail must not strand an active workflow on a phase the
+// new type does not implement: the definition would be stored and the
+// recompile would fail.
+func TestUpsertGuardrailRejectsRetypeUsedInUnsupportedPhase(t *testing.T) {
+	guardrailService := newGuardrailService(t, guardrails.Definition{
+		Name:   "redact",
+		Type:   "string_replace",
+		Config: rawGuardrailConfig(t, map[string]any{"rules": "ACME => [co]"}),
+	})
+	planStore := &workflowTestStore{
+		versions: []workflows.Version{
+			{
+				ID:       "global-workflow",
+				Scope:    workflows.Scope{},
+				ScopeKey: "global",
+				Version:  1,
+				Active:   true,
+				Name:     "global",
+				Payload: workflows.Payload{
+					SchemaVersion: 2,
+					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: true},
+					Steps:         []workflows.Step{{Ref: "redact", Phase: "response", Step: 10}},
+				},
+				WorkflowHash: "hash-global",
+			},
+		},
 	}
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204", rec.Code)
+	planService, err := workflows.NewService(planStore, workflows.NewCompilerWithFeatureCaps(guardrailService, core.DefaultWorkflowFeatures()))
+	require.NoError(t, err)
+	err = planService.Refresh(context.Background())
+	require.NoError(t, err)
+
+	h := NewHandler(nil, nil, WithGuardrailService(guardrailService), WithWorkflows(planService))
+
+	upsert := func(body string) *httptest.ResponseRecorder {
+		c, rec := echotest.Request(t, http.MethodPut, "/admin/guardrails", body)
+		require.NoError(t, h.UpsertGuardrail(c))
+		return rec
 	}
-	if _, ok := h.guardrailDefs.Get("policy-system"); ok {
-		t.Fatal("Get(policy-system) = present, want deleted guardrail")
+
+	rec := upsert(`{"name":"redact","type":"system_prompt","config":{"mode":"inject","content":"be precise"}}`)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+
+	envelope := echotest.Decode[workflowErrorEnvelope](t, rec)
+	assert.Equal(t, "guardrail type system_prompt does not support the phases used by active workflows: global (response)", envelope.Error.Message)
+	got, _ := guardrailService.Get("redact")
+	require.NotNil(t, got)
+	assert.Equal(t, "string_replace", got.Type, "rejected retype must leave the definition untouched")
+
+	// The same type with a new config keeps the phase and is accepted.
+	rec = upsert(`{"name":"redact","type":"string_replace","config":{"rules":"ACME => [x]"}}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+}
+
+// unconfirmedGuardrailStore saves like guardrailTestStore but reports that
+// the saved row's data key could not be confirmed.
+type unconfirmedGuardrailStore struct{ *guardrailTestStore }
+
+func (s unconfirmedGuardrailStore) Upsert(ctx context.Context, definition guardrails.Definition) error {
+	if err := s.guardrailTestStore.Upsert(ctx, definition); err != nil {
+		return err
 	}
+	return encryption.ErrSealUnconfirmed
+}
+
+func TestUpsertGuardrailRefreshesWorkflowsWhenTheDataKeyIsUnconfirmed(t *testing.T) {
+	catalog := plugins.NewCatalog()
+	for _, factory := range builtin.All() {
+		require.NoError(t, catalog.Register(factory, plugins.SourceBuiltin))
+	}
+	guardrailService, err := guardrails.NewService(unconfirmedGuardrailStore{newGuardrailTestStore()}, catalog, plugins.HostDeps{})
+	require.NoError(t, err)
+	require.NoError(t, guardrailService.Refresh(context.Background()))
+	// The workflow service is not refreshed yet, so it matches nothing until
+	// the handler refreshes it after the save.
+	planStore := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
+	planService, err := workflows.NewService(planStore, workflows.NewCompilerWithFeatureCaps(guardrailService, core.DefaultWorkflowFeatures()))
+	require.NoError(t, err)
+	_, err = planService.Match(core.WorkflowSelector{})
+	require.Error(t, err)
+	h := NewHandler(nil, nil, WithGuardrailService(guardrailService), WithWorkflows(planService))
+
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/guardrails", `{"name":"policy-system","type":"system_prompt","config":{"mode":"inject","content":"be precise"}}`)
+	require.NoError(t, h.UpsertGuardrail(c))
+	assert.Equal(t, http.StatusBadGateway, rec.Code, "the save is reported as unconfirmed, not as a clean save")
+	assert.Contains(t, rec.Body.String(), "could not be confirmed")
+	_, applied := guardrailService.Get("policy-system")
+	assert.True(t, applied)
+	_, err = planService.Match(core.WorkflowSelector{})
+	assert.NoError(t, err, "workflows are refreshed after a saved but unconfirmed guardrail")
 }
