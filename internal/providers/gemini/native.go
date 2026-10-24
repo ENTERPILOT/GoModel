@@ -288,7 +288,16 @@ func geminiPartsFromMessage(msg core.Message, signatureRequired bool) ([]geminiP
 	if err != nil || strings.TrimSpace(msg.Role) != "assistant" {
 		return parts, err
 	}
-	return withThoughtSignature(parts, thoughtSignatureFromExtraFields(msg.ExtraFields)), nil
+	parts = withThoughtSignature(parts, thoughtSignatureFromExtraFields(msg.ExtraFields))
+	images, err := core.ChatImages(msg.ExtraFields)
+	if err != nil {
+		return nil, core.NewInvalidRequestError("invalid assistant images", err)
+	}
+	imageParts, err := geminiPartsFromContentParts(images)
+	if err != nil {
+		return nil, err
+	}
+	return append(parts, imageParts...), nil
 }
 
 func geminiPartsFromToolCallMessage(msg core.Message, signatureRequired bool) []geminiPart {
@@ -1020,8 +1029,9 @@ func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContent
 		if content == "" && len(toolCalls) > 0 {
 			messageContent = nil
 		}
-		if images := imagePartsFromGeminiParts(candidate.Content.Parts); len(images) > 0 {
-			messageContent = withLeadingText(content, images)
+		extraFields, err := withGeneratedImages(thoughtSignatureExtraFields(signature), candidate.Content.Parts)
+		if err != nil {
+			return nil, err
 		}
 		resp.Choices = append(resp.Choices, core.Choice{
 			Index: index,
@@ -1029,7 +1039,7 @@ func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContent
 				Role:        "assistant",
 				Content:     messageContent,
 				ToolCalls:   toolCalls,
-				ExtraFields: thoughtSignatureExtraFields(signature),
+				ExtraFields: extraFields,
 			},
 			FinishReason: finishReasonFromGemini(candidate.FinishReason, len(toolCalls) > 0),
 		})
@@ -1037,10 +1047,11 @@ func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContent
 	return resp, nil
 }
 
-// imagePartsFromGeminiParts returns generated images (inline image blobs) as
-// OpenAI image_url content parts carrying base64 data URLs and each image's
-// thought signature, which Gemini needs back to edit the image in a later turn.
-func imagePartsFromGeminiParts(parts []geminiPart) []core.ContentPart {
+// withGeneratedImages adds a candidate's generated images (inline image blobs)
+// to the message as an OpenRouter-style "images" member, keeping content a
+// string. Each image_url part carries a base64 data URL and the image's thought
+// signature, which Gemini needs back to edit the image in a later turn.
+func withGeneratedImages(fields core.UnknownJSONFields, parts []geminiPart) (core.UnknownJSONFields, error) {
 	var images []core.ContentPart
 	for _, part := range parts {
 		blob := part.inlineData()
@@ -1062,14 +1073,14 @@ func imagePartsFromGeminiParts(parts []geminiPart) []core.ContentPart {
 			},
 		})
 	}
-	return images
-}
-
-func withLeadingText(text string, parts []core.ContentPart) []core.ContentPart {
-	if text == "" {
-		return parts
+	if len(images) == 0 {
+		return fields, nil
 	}
-	return append([]core.ContentPart{{Type: "text", Text: text}}, parts...)
+	encoded, err := json.Marshal(images)
+	if err != nil {
+		return fields, core.NewProviderError("gemini", http.StatusBadGateway, "failed to encode generated images", err)
+	}
+	return core.MergeUnknownJSONFields(fields, map[string]json.RawMessage{core.ChatImagesField: encoded})
 }
 
 func geminiBlockedPromptError(resp *geminiGenerateContentResponse, providerName string) *core.GatewayError {
