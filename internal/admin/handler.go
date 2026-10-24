@@ -20,6 +20,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/mediastore"
+	"github.com/enterpilot/gomodel/internal/metadataoverrides"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -45,6 +46,7 @@ type Handler struct {
 	virtualModels       *virtualmodels.Service
 	mcpServers          MCPServerAdmin
 	pricingOverrides    *pricingoverrides.Service
+	metadataOverrides   *metadataoverrides.Service
 	workflows           *workflows.Service
 	budgets             *budget.Service
 	rateLimits          *ratelimit.Service
@@ -295,6 +297,13 @@ func WithUsers(service *users.Service) Option {
 func WithPricingOverrides(service *pricingoverrides.Service) Option {
 	return func(h *Handler) {
 		h.pricingOverrides = service
+	}
+}
+
+// WithMetadataOverrides enables model metadata override administration endpoints.
+func WithMetadataOverrides(service *metadataoverrides.Service) Option {
+	return func(h *Handler) {
+		h.metadataOverrides = service
 	}
 }
 

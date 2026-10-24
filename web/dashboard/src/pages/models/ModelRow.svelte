@@ -6,6 +6,7 @@
   import { virtualModels } from "./virtualModels.svelte.js";
   import { virtualModelEditor } from "./virtualModelEditor.svelte.js";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
+  import { metadataOverrides } from "./metadataOverrides.svelte.js";
   import { rateLimits } from "$pages/rate-limits/rateLimits.svelte.js";
   import {
   aliasRowCanRemove,
@@ -26,7 +27,7 @@ import {
   import ModelDetails from "./ModelDetails.svelte";
   import { modelDetailsState } from "./modelDetails.svelte.js";
   import { rowHasModelDetails } from "./modelDetails.js";
-  import { ChevronRight, CircleDollarSign, Gauge, Pencil, ShieldCheck, Split, Trash2 } from "lucide";
+  import { ChevronRight, CircleDollarSign, Gauge, Pencil, ShieldCheck, SlidersHorizontal, Split, Trash2 } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   // columns: the active category's column spec from categoryColumns.js
@@ -41,6 +42,7 @@ import {
   const detailsID = $derived("model-details-" + encodeURIComponent(String(row.key || "")));
 
   const pricing = $derived(pricingOverrides.modelRowPricing(row));
+  const hasMetadataOverride = $derived(metadataOverrides.hasOverride(row));
   const configuredSlowdown = $derived(
     row.is_alias
       ? row.alias && row.alias.slowdown
@@ -217,6 +219,16 @@ import {
             <Icon icon={CircleDollarSign} class="table-icon-svg" />
           </TableActionButton>
         {/if}
+        {#if metadataOverrides.canEdit(row)}
+          {@const subject = m.models_model_metadata_for({ name: row.display_name })}
+          <TableActionButton
+            label={hasMetadataOverride ? m.models_edit_action_override({ subject }) : m.models_edit_action({ subject })}
+            class="table-icon-btn {hasMetadataOverride ? 'table-action-btn-active' : ''}"
+            onclick={() => metadataOverrides.open(row)}
+          >
+            <Icon icon={SlidersHorizontal} class="table-icon-svg" />
+          </TableActionButton>
+        {/if}
         {#if rateLimits.rateLimitsEnabled() && rateLimits.rateLimitInspectorModelID(row)}
           <TableActionButton
             label={rateLimits.rateLimitGaugeTitle(row.display_name, rateLimits.rateLimitGaugeClassForModel(row))}
@@ -350,7 +362,7 @@ import {
 
   .model-row-actions {
     text-align: right;
-    width: 170px;
+    width: 205px;
   }
 
   @media (max-width: 768px) {

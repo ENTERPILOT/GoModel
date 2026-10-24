@@ -118,8 +118,8 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 	if list != nil {
 		metadataStats = enrichProviderModelMaps(list, r.snapshotProviderTypes(), newModelsByProvider, nil)
 	}
-	configOverrides := r.snapshotConfigOverrides()
-	metadataStats.Enriched += applyConfigMetadataOverrides(configOverrides, newModelsByProvider, nil)
+	overrides := r.snapshotMetadataOverrides()
+	metadataStats.Enriched += overrides.apply(newModelsByProvider, nil)
 	metadataStats.Enriched += applyInferredModelMetadata(newModelsByProvider, nil)
 
 	r.mu.Lock()

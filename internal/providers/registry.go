@@ -84,6 +84,9 @@ type ModelRegistry struct {
 	// instance name -> raw model ID. Applied after remote-registry enrichment as
 	// a higher-priority layer. nil if no overrides declared.
 	configMetadataOverrides map[string]map[string]*core.ModelMetadata
+	// dashboardMetadataOverrides holds dashboard-managed metadata in the same
+	// shape, applied after configMetadataOverrides so it wins field by field.
+	dashboardMetadataOverrides map[string]map[string]*core.ModelMetadata
 	// configuredProviderModels holds operator-supplied model inventories keyed by
 	// configured provider instance name. The mode decides whether these entries
 	// are fallback-only or an allowlist over the discovered upstream inventory.
