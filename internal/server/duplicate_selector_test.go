@@ -30,11 +30,12 @@ import (
 const duplicateSelectorErrPrefix = `duplicate top-level \"`
 
 // newDuplicateSelectorPipeline wires the production ingress middleware chain
-// (snapshot capture and workflow resolution) in front of the inference and
-// passthrough handlers.
+// (snapshot capture, body capture, and workflow resolution) in front of the
+// inference and passthrough handlers.
 func newDuplicateSelectorPipeline(provider *mockProvider, authorizer RequestModelAuthorizer) (*echo.Echo, *Handler) {
 	e := echo.New()
 	e.Use(RequestSnapshotCapture())
+	e.Use(RequestBodyCapture())
 	e.Use(WorkflowResolution(provider))
 	handler := newHandlerWithAuthorizer(provider, nil, nil, nil, nil, authorizer, nil, nil, nil)
 	e.POST("/v1/chat/completions", handler.ChatCompletion)

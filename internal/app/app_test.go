@@ -428,6 +428,28 @@ func TestDashboardRuntimeConfig_ExposesDemoMode(t *testing.T) {
 	require.Equal(t, "on", got, "dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigDemoMode, got)
 }
 
+func TestDashboardRuntimeConfig_PricingMarkups(t *testing.T) {
+	markups := map[string]float64{"/": 20}
+	tests := []struct {
+		name    string
+		enabled bool
+		markups map[string]float64
+		want    string
+	}{
+		{name: "enabled", enabled: true, markups: markups, want: "on"},
+		{name: "enabled without rules shows billed at cost", enabled: true, want: "on"},
+		{name: "rules without the flag", markups: markups, want: "off"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Pricing: config.PricingConfig{MarkupsEnabled: tt.enabled, Markups: tt.markups},
+			}
+			assert.Equal(t, tt.want, dashboardRuntimeConfig(cfg, false, false, false).PricingMarkups)
+		})
+	}
+}
+
 func TestDashboardRuntimeConfig_FailoverDisabled(t *testing.T) {
 	cfg := &config.Config{
 		Failover: config.FailoverConfig{

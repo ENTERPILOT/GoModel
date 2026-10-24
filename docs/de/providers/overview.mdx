@@ -43,6 +43,7 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
 | -------- | ---------- | ------------- | :--: | :----------: | :---: | :---: | :-----: | :------: | ----- |
 | OpenAI | `OPENAI_API_KEY` | `gpt-5.5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | ChatGPT-Abonnement | `CHATGPT_API_KEY` (Anmelde-Token von Codex) | `gpt-5.6-sol` | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | [ChatGPT-Abonnement](/de/providers/chatgpt) |
+| GitHub Copilot | `GITHUB_COPILOT_API_KEY` (GitHub-OAuth-Token) | `claude-sonnet-5.5` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [GitHub Copilot](/de/providers/github-copilot) |
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | [Anthropic](/de/providers/anthropic) |
 | Cohere | `COHERE_API_KEY` | `command-a-plus-05-2026` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Cohere](/de/providers/cohere) |
 | Google Gemini | `GEMINI_API_KEY` | `gemini-3.7-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | [Google Gemini](/de/providers/gemini) |
@@ -176,6 +177,13 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
   es auch auf der OpenAI Platform, daher ordnet die Registry dem pauschal abgerechneten
   Abonnement-Traffic ihre Preise pro Token zu – halten Sie Budgets und `cost`-Load-Balancing davon
   fern.
+- **GitHub Copilot** – wird pro Token in GitHub AI Credits abgerechnet, zuerst aus dem monatlichen
+  Kontingent des Copilot-Plans. Copilot bedient GPT-5 und neuer nur über `/responses` und andere
+  Modelle nur über `/chat/completions`; GoModel liest die Endpunkte jedes Modells aus `/models` und
+  übersetzt, sodass beide APIs für jedes Modell funktionieren. Setzen Sie `GITHUB_COPILOT_API_KEY`
+  auf ein GitHub-OAuth-Token des Kontos, etwa aus `gh auth token`; welche Modelle es aufrufen kann,
+  hängt vom Copilot-Plan ab. Die gemeldeten Kosten sind eine Schätzung, die das enthaltene
+  Kontingent des Plans nicht berücksichtigt.
 - **Kimi Code** – keine Preise pro Token; das Kontingent wird wöchentlich erneuert und ist zusätzlich
   durch ein rollierendes 5-Stunden-Fenster begrenzt. Die Kostenerfassung meldet für Kimi Code null,
   daher kann `cost`-Load-Balancing es nicht bepreisen; bevorzugen Sie konservative
@@ -311,6 +319,8 @@ Bei diesen Providern stoßen die meisten Benutzer auf Schwierigkeiten:
   `/messages`-Modelle wird manuell gepflegt, Standard `qwen3.7-max`).
 - **ChatGPT-Abonnement** – ein reiner Responses-Upstream mit einer strikten Parameter-Allowlist,
   der genutzt wird, um GoModel zwischen Codex und einen ChatGPT-Plan zu setzen.
+- **GitHub Copilot** – ein Token beschaffen, Endpunkte für Business und Enterprise und das Routing
+  pro Modell zwischen Chat Completions und Responses.
 
 <Tip>
   Jede Provider-Seite zeigt drei Startvarianten in einer CodeGroup: Docker mit `--env-file .env`

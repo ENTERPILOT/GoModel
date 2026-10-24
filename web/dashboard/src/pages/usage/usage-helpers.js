@@ -19,6 +19,7 @@ export function emptyUsagePageSummary() {
     total_input_cost: null,
     total_output_cost: null,
     total_cost: null,
+    total_billed_cost: null,
     rewrite_tokens_saved: 0,
     rewrite_cost_saved: null,
   };
@@ -291,6 +292,30 @@ export function cachedCostTitle(entry, baseTitle) {
   if (!usageEntryCached(entry)) return base;
   const prefix = m.usage_cache_not_charged();
   return base ? prefix + "\n" + base : prefix;
+}
+
+// --- Billed cost (pricing.markups) ---
+// The backend reports billed_cost on the model, user path, and label
+// aggregates only; endpoint and session breakdowns stay provider cost.
+const BILLED_BREAKDOWN_KINDS = new Set(["model", "userPath", "label"]);
+
+export function breakdownHasBilledCost(kind) {
+  return BILLED_BREAKDOWN_KINDS.has(kind);
+}
+
+// billedCostTitle names the markup rule a request-log row was billed at, or
+// says none matched (billed cost then equals provider cost).
+export function billedCostTitle(entry) {
+  const raw = entry && entry.markup_percent;
+  const percent = Number(raw);
+  if (raw == null || raw === "" || !Number.isFinite(percent)) {
+    return m.usage_billed_no_markup();
+  }
+  const selector = String((entry && entry.markup_selector) || "").trim();
+  const value = formatNumber(percent);
+  return selector
+    ? m.usage_billed_markup_rule({ percent: value, selector })
+    : m.usage_billed_markup({ percent: value });
 }
 
 function providerCacheRatio(entry) {

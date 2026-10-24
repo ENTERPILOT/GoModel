@@ -258,26 +258,26 @@ func DeriveWhiteBoxPrompt(snapshot *RequestSnapshot) *WhiteBoxPrompt {
 		CachePassthroughRouteInfo(env, derivePassthroughRouteInfoFromTransport(snapshot))
 	}
 
-	if snapshot.capturedBody == nil {
-		return env
-	}
+	ApplyCapturedBodySelectorHints(env, snapshot.capturedBody)
+	return env
+}
 
-	trimmed := bytes.TrimSpace(snapshot.capturedBody)
-	if len(trimmed) == 0 || trimmed[0] != '{' {
-		return env
+// ApplyCapturedBodySelectorHints records the model, provider, and stream hints
+// a captured JSON body carries, or the selector field it repeats. A body that
+// is not a JSON object is ignored.
+func ApplyCapturedBodySelectorHints(env *WhiteBoxPrompt, body []byte) {
+	trimmed := bytes.TrimSpace(body)
+	if env == nil || len(trimmed) == 0 || trimmed[0] != '{' {
+		return
 	}
-
 	hints := deriveSnapshotSelectorHintsGJSON(trimmed)
 	if hints.duplicate != "" {
 		env.DuplicateSelectorField = hints.duplicate
-		return env
+		return
 	}
-	if !hints.parsed {
-		return env
+	if hints.parsed {
+		ApplyBodySelectorHints(env, hints.model, hints.provider, hints.stream)
 	}
-	ApplyBodySelectorHints(env, hints.model, hints.provider, hints.stream)
-
-	return env
 }
 
 // RefreshWhiteBoxPrompt rebuilds request semantics after a deferred body read
