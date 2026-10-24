@@ -247,7 +247,7 @@ func dashboardRuntimeConfig(cfg *config.Config, usageEnabled, demoMode, adaptive
 		CacheEnabled:           dashboardEnabledValue(cacheAnalyticsConfigured(cfg, usageEnabled)),
 		RedisURL:               dashboardEnabledValue(simpleResponseCacheConfigured(cfg)),
 		SemanticCacheEnabled:   dashboardEnabledValue(semanticResponseCacheConfigured(cfg)),
-		PricingMarkups:         dashboardEnabledValue(cfg != nil && cfg.Usage.Enabled && len(cfg.Pricing.Markups) > 0),
+		PricingMarkups:         dashboardEnabledValue(cfg != nil && len(cfg.Pricing.Markups) > 0),
 		LiveLogsEnabled:        dashboardEnabledValue(cfg != nil && cfg.Admin.LiveLogsEnabled),
 		MCPEnabled:             dashboardEnabledValue(cfg != nil && cfg.MCP.Enabled),
 		MCPToolDiscovery:       dashboardMCPToolDiscovery(cfg),

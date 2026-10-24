@@ -438,7 +438,7 @@ func TestDashboardRuntimeConfig_PricingMarkups(t *testing.T) {
 	}{
 		{name: "markups with usage tracking", usageEnabled: true, markups: markups, want: "on"},
 		{name: "no markups", usageEnabled: true, want: "off"},
-		{name: "usage tracking disabled", markups: markups, want: "off"},
+		{name: "usage tracking disabled keeps billed history visible", markups: markups, want: "on"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

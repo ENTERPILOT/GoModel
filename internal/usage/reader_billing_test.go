@@ -184,6 +184,31 @@ func TestReadersReportBilledCost(t *testing.T) {
 	})
 }
 
+func TestApplyCacheStatsKeepsBilledZeroTokenGroups(t *testing.T) {
+	// A cache hit priced per request bills a charge without any tokens.
+	billed := func() map[string]*GroupCacheStats {
+		return map[string]*GroupCacheStats{"key": {Model: "dall-e-3", Provider: "openai", ProviderName: "openai", UserPath: "/acme", LocalRequests: 1, LocalBilledCost: new(0.04)}}
+	}
+	unbilled := map[string]*GroupCacheStats{"key": {Model: "dall-e-3", Provider: "openai", UserPath: "/acme", LocalRequests: 1, LocalBilledCost: new(0.0)}}
+
+	models := applyModelCacheStats(nil, billed())
+	require.Len(t, models, 1)
+	require.NotNil(t, models[0].BilledCost)
+	assert.Equal(t, 0.04, *models[0].BilledCost)
+
+	paths := applyUserPathCacheStats(nil, billed())
+	require.Len(t, paths, 1)
+	require.NotNil(t, paths[0].BilledCost)
+	assert.Equal(t, 0.04, *paths[0].BilledCost)
+
+	labels := applyLabelCacheStats(nil, billed())
+	require.Len(t, labels, 1)
+	require.NotNil(t, labels[0].BilledCost)
+	assert.Equal(t, 0.04, *labels[0].BilledCost)
+
+	assert.Empty(t, applyModelCacheStats(nil, unbilled), "unbilled zero-token hits add no row")
+}
+
 func TestAddCost(t *testing.T) {
 	assert.Nil(t, addCost(nil, nil))
 	assert.Equal(t, 1.5, *addCost(new(1.5), nil))

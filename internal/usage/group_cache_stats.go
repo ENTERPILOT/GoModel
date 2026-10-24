@@ -35,6 +35,13 @@ type GroupCacheStats struct {
 	CachedTokensByPricing map[CachedPricingKey]int64
 }
 
+// hasLocalActivity reports whether the group's cache hits earn it a row of
+// its own: they carry tokens, or a billed charge, which a hit priced per
+// request or per image can have without any tokens.
+func (s *GroupCacheStats) hasLocalActivity() bool {
+	return s.hasLocalTokens() || (s.LocalBilledCost != nil && *s.LocalBilledCost != 0)
+}
+
 // localBilledCost returns the group's billed cache-hit cost, nil-safe.
 func (s *GroupCacheStats) localBilledCost() *float64 {
 	if s == nil {
@@ -263,7 +270,7 @@ func applyModelCacheStats(rows []ModelUsage, stats map[string]*GroupCacheStats) 
 		rows[i].BilledCost = addCost(rows[i].BilledCost, stats[key].localBilledCost())
 	}
 	for key, s := range stats {
-		if seen[key] || !s.hasLocalTokens() {
+		if seen[key] || !s.hasLocalActivity() {
 			continue
 		}
 		row := ModelUsage{Model: s.Model, Provider: s.Provider, ProviderName: s.ProviderName, BilledCost: s.LocalBilledCost}
@@ -284,7 +291,7 @@ func applyUserPathCacheStats(rows []UserPathUsage, stats map[string]*GroupCacheS
 		rows[i].BilledCost = addCost(rows[i].BilledCost, stats[key].localBilledCost())
 	}
 	for key, s := range stats {
-		if seen[key] || !s.hasLocalTokens() {
+		if seen[key] || !s.hasLocalActivity() {
 			continue
 		}
 		row := UserPathUsage{UserPath: s.UserPath, BilledCost: s.LocalBilledCost}
@@ -306,7 +313,7 @@ func applyLabelCacheStats(rows []LabelUsage, stats map[string]*GroupCacheStats) 
 		rows[i].BilledCost = addCost(rows[i].BilledCost, stats[rows[i].Label].localBilledCost())
 	}
 	for key, s := range stats {
-		if seen[key] || !s.hasLocalTokens() {
+		if seen[key] || !s.hasLocalActivity() {
 			continue
 		}
 		row := LabelUsage{Label: key, Requests: s.LocalRequests, BilledCost: s.LocalBilledCost}
