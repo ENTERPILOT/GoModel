@@ -1,7 +1,6 @@
 package usage
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
 
@@ -82,8 +81,8 @@ func operationEndpoints(ops []core.Operation) (exact, prefixes []string) {
 	return exact, prefixes
 }
 
-// sqliteOperationCondition matches rows whose endpoint belongs to any of ops.
-func sqliteOperationCondition(ops []core.Operation) (string, []any) {
+// operationCondition matches rows whose endpoint belongs to any of ops.
+func operationCondition(ops []core.Operation) (string, []any) {
 	exact, prefixes := operationEndpoints(ops)
 	if len(exact) == 0 {
 		return "1 = 0", nil
@@ -98,24 +97,6 @@ func sqliteOperationCondition(ops []core.Operation) (string, []any) {
 		args = append(args, sqlutil.EscapeLikeWildcards(prefix)+"/%")
 	}
 	return "(" + strings.Join(clauses, " OR ") + ")", args
-}
-
-// pgOperationCondition matches rows whose endpoint belongs to any of ops,
-// numbering placeholders from argIdx.
-func pgOperationCondition(ops []core.Operation, argIdx int) (string, []any, int) {
-	exact, prefixes := operationEndpoints(ops)
-	if len(exact) == 0 {
-		return "1 = 0", nil, argIdx
-	}
-	clauses := []string{fmt.Sprintf("endpoint = ANY($%d)", argIdx)}
-	args := []any{exact}
-	argIdx++
-	for _, prefix := range prefixes {
-		clauses = append(clauses, fmt.Sprintf("endpoint LIKE $%d ESCAPE '\\'", argIdx))
-		args = append(args, sqlutil.EscapeLikeWildcards(prefix)+"/%")
-		argIdx++
-	}
-	return "(" + strings.Join(clauses, " OR ") + ")", args, argIdx
 }
 
 // mongoOperationFilter matches documents whose endpoint belongs to any of ops.
