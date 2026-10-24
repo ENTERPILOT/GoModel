@@ -81,6 +81,18 @@ func (s *stubStore) Get(_ context.Context, key string) (string, bool, error) {
 	return value, found, nil
 }
 
+func (s *stubStore) Replace(_ context.Context, key, old, value string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.setErr != nil {
+		return "", s.setErr
+	}
+	if s.values[key] == old {
+		s.values[key] = value
+	}
+	return s.values[key], nil
+}
+
 func (s *stubStore) SetDefault(_ context.Context, key, value string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

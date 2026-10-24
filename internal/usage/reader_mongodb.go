@@ -27,6 +27,7 @@ type mongoUsageLogRow struct {
 	Endpoint               string         `bson:"endpoint"`
 	UserPath               string         `bson:"user_path"`
 	SessionID              string         `bson:"session_id"`
+	AuthKeyID              string         `bson:"auth_key_id"`
 	CacheType              string         `bson:"cache_type"`
 	Labels                 []string       `bson:"labels"`
 	InputTokens            int            `bson:"input_tokens"`
@@ -73,6 +74,7 @@ func (row mongoUsageLogRow) toUsageLogEntry() UsageLogEntry {
 		Endpoint:               row.Endpoint,
 		UserPath:               row.UserPath,
 		SessionID:              row.SessionID,
+		AuthKeyID:              row.AuthKeyID,
 		CacheType:              normalizeCacheType(row.CacheType),
 		Labels:                 row.Labels,
 		InputTokens:            row.InputTokens,
@@ -372,6 +374,7 @@ func (r *MongoDBReader) usageCacheStats(ctx context.Context, params UsageQueryPa
 			Provider     string         `bson:"provider"`
 			ProviderName string         `bson:"provider_name"`
 			UserPath     string         `bson:"user_path"`
+			Endpoint     string         `bson:"endpoint"`
 			Labels       []string       `bson:"labels"`
 			CacheType    string         `bson:"cache_type"`
 			InputTokens  int            `bson:"input_tokens"`
@@ -450,6 +453,7 @@ func mongoUsageCacheStatsPipeline(params UsageQueryParams, canonicalUserPath boo
 		{Key: "provider", Value: 1},
 		{Key: "provider_name", Value: 1},
 		{Key: "user_path", Value: 1},
+		{Key: "endpoint", Value: 1},
 		{Key: "labels", Value: 1},
 		{Key: "cache_type", Value: 1},
 		{Key: "input_tokens", Value: 1},
@@ -642,6 +646,64 @@ func (r *MongoDBReader) GetUsageByLabel(ctx context.Context, params UsageQueryPa
 	result = applyLabelCacheStats(result, stats)
 
 	return result, nil
+}
+
+// GetUsageByEndpoint returns request, token, and cost totals grouped by
+// request endpoint, each tagged with its operation.
+func (r *MongoDBReader) GetUsageByEndpoint(ctx context.Context, params UsageQueryParams) ([]EndpointUsage, error) {
+	pipeline := bson.A{}
+	matchFilters, err := mongoUsageMatchFilters(params)
+	if err != nil {
+		return nil, err
+	}
+	if len(matchFilters) > 0 {
+		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
+	}
+
+	pipeline = append(pipeline,
+		bson.D{{Key: "$group", Value: bson.D{
+			{Key: "_id", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$endpoint", ""}}}},
+			{Key: "requests", Value: bson.D{{Key: "$sum", Value: 1}}},
+			{Key: "input_tokens", Value: bson.D{{Key: "$sum", Value: "$input_tokens"}}},
+			{Key: "output_tokens", Value: bson.D{{Key: "$sum", Value: "$output_tokens"}}},
+			{Key: "total_tokens", Value: bson.D{{Key: "$sum", Value: "$total_tokens"}}},
+			{Key: "input_cost", Value: mongoCostSum("$input_cost")},
+			{Key: "output_cost", Value: mongoCostSum("$output_cost")},
+			{Key: "total_cost", Value: mongoCostSum("$total_cost")},
+			{Key: "has_input_cost", Value: mongoCostPresenceCount("$input_cost")},
+			{Key: "has_output_cost", Value: mongoCostPresenceCount("$output_cost")},
+			{Key: "has_total_cost", Value: mongoCostPresenceCount("$total_cost")},
+		}}},
+		bson.D{{Key: "$sort", Value: bson.D{{Key: "_id", Value: 1}}}},
+	)
+
+	cursor, err := r.collection.Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, fmt.Errorf("failed to aggregate usage by endpoint: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	result, err := decodeGroupedUsageRows(ctx, cursor, "usage by endpoint", func(row mongoGroupedUsageRow) EndpointUsage {
+		return EndpointUsage{
+			Endpoint:     row.Key,
+			Requests:     row.Requests,
+			InputTokens:  row.InputTokens,
+			OutputTokens: row.OutputTokens,
+			TotalTokens:  row.TotalTokens,
+			InputCost:    costPtr(row.HasInputCost, row.InputCost),
+			OutputCost:   costPtr(row.HasOutputCost, row.OutputCost),
+			TotalCost:    costPtr(row.HasTotalCost, row.TotalCost),
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	stats, err := r.usageCacheStats(ctx, params, false, endpointGroupKeys)
+	if err != nil {
+		return nil, err
+	}
+	return applyEndpointCacheStats(result, stats), nil
 }
 
 // GetUsageBySession returns request, token, and cost totals grouped by the
@@ -1215,10 +1277,19 @@ func mongoUsageMatchFilters(params UsageQueryParams) (bson.D, error) {
 	if params.SessionID != "" {
 		matchFilters = append(matchFilters, bson.E{Key: "session_id", Value: params.SessionID})
 	}
+	if params.AuthKeyID != "" {
+		matchFilters = append(matchFilters, bson.E{Key: "auth_key_id", Value: params.AuthKeyID})
+	}
 	if params.Label != "" {
 		// Matching a scalar against an array field matches documents whose
 		// labels array contains the value.
 		matchFilters = append(matchFilters, bson.E{Key: "labels", Value: params.Label})
+	}
+	if len(params.Endpoints) > 0 {
+		matchFilters = append(matchFilters, bson.E{Key: "endpoint", Value: bson.D{{Key: "$in", Value: params.Endpoints}}})
+	}
+	if len(params.Operations) > 0 {
+		matchFilters = mongoAndFilters(matchFilters, mongoOperationFilter(params.Operations))
 	}
 	if params.Provider != "" {
 		matchFilters = mongoAndFilters(matchFilters, bson.D{{Key: "$or", Value: bson.A{
@@ -1244,6 +1315,7 @@ func mongoUsageLogMatchFilters(params UsageLogParams) (bson.D, error) {
 			bson.D{{Key: "model", Value: regex}},
 			bson.D{{Key: "provider", Value: regex}},
 			bson.D{{Key: "provider_name", Value: regex}},
+			bson.D{{Key: "endpoint", Value: regex}},
 			bson.D{{Key: "request_id", Value: regex}},
 			bson.D{{Key: "provider_id", Value: regex}},
 			bson.D{{Key: "session_id", Value: regex}},

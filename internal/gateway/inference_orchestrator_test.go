@@ -40,6 +40,7 @@ func TestInferenceOrchestratorLogUsageAssignsUserPathAndProviderName(t *testing.
 	logger := &usageCaptureLogger{config: usage.Config{Enabled: true}}
 	orchestrator := NewInferenceOrchestrator(InferenceConfig{UsageLogger: logger})
 	ctx := core.WithRequestSnapshot(context.Background(), &core.RequestSnapshot{UserPath: "/team/alpha"})
+	ctx = core.WithAuthKeyID(ctx, "key-a")
 
 	orchestrator.LogUsage(ctx, nil, "gpt-5-nano", "openai", "primary-openai", func(*core.ModelPricing) *usage.UsageEntry {
 		return &usage.UsageEntry{ID: "usage-1"}
@@ -50,6 +51,7 @@ func TestInferenceOrchestratorLogUsageAssignsUserPathAndProviderName(t *testing.
 	require.Equal(t, "/team/alpha", got)
 	got = logger.entries[0].ProviderName
 	require.Equal(t, "primary-openai", got)
+	assert.Equal(t, "key-a", logger.entries[0].AuthKeyID)
 }
 
 func TestExecuteChatCompletionPricesRequestedModelWhenResponseModelIsVersioned(t *testing.T) {

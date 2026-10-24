@@ -33,5 +33,11 @@ func TestMongoDBStoreRoundTrip(t *testing.T) {
 		stored, err = store.SetDefault(ctx, "install_id", "first")
 		require.NoError(t, err)
 		require.Equal(t, "first", stored)
+		stored, err = store.Replace(ctx, "install_id", "first", "second")
+		require.NoError(t, err)
+		require.Equal(t, "second", stored)
+		stored, err = store.Replace(ctx, "install_id", "first", "third")
+		require.NoError(t, err)
+		require.Equal(t, "second", stored)
 	})
 }

@@ -239,6 +239,9 @@ func buildDefaultConfig() *Config {
 			LiveLogsHeartbeatSeconds: 15,
 		},
 		Guardrails: GuardrailsConfig{},
+		Tagging: TaggingConfig{
+			LiteLLMTagsEnabled: true,
+		},
 		Session: SessionConfig{
 			Enabled:      true,
 			AutoDetect:   true,

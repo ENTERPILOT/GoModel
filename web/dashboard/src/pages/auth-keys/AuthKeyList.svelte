@@ -7,7 +7,7 @@
   import { displayModelSelector } from "$lib/utils/modelSelectors.js";
   import { authKeyDeactivated, authKeyExpired, labelChipStyle, lastUsedCellState } from "./authKeysLogic.js";
   import { authKeysStore as store } from "./authKeys.svelte.js";
-  import { Boxes, Info, Pencil, Power, ShieldCheck, ShieldOff, TriangleAlert } from "lucide";
+  import { Boxes, Info, Pencil, Plug, Power, ShieldCheck, ShieldOff, TriangleAlert, Unplug } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
@@ -33,6 +33,15 @@
             title={m.api_keys_dashboard_access_help()}
           >
             {m.api_keys_dashboard_access()}
+            <Icon icon={Info} width="13" height="13" />
+          </span>
+        </th>
+        <th>
+          <span
+            class="auth-key-th-help"
+            title={m.api_keys_passthrough_access_help()}
+          >
+            {m.api_keys_passthrough_access()}
             <Icon icon={Info} width="13" height="13" />
           </span>
         </th>
@@ -97,6 +106,13 @@
               class:auth-key-status-inactive={!key.dashboard_access}
             >{key.dashboard_access ? m.api_keys_allowed() : m.api_keys_denied()}</span>
           </td>
+          <td>
+            <span
+              class="auth-key-status-badge"
+              class:auth-key-status-active={key.passthrough_access}
+              class:auth-key-status-inactive={!key.passthrough_access}
+            >{key.passthrough_access ? m.api_keys_allowed() : m.api_keys_denied()}</span>
+          </td>
           <td title={key.expires_at ? formatTimestampUTC(key.expires_at) : ""}>
             {#if key.expires_at}
               <span class="auth-key-expiry">
@@ -144,6 +160,16 @@
                   disabled={Boolean(store.dashboardAccessID)}
                 >
                   <Icon icon={key.dashboard_access ? ShieldOff : ShieldCheck} class="table-icon-svg" />
+                </TableActionButton>
+                <TableActionButton
+                  label={key.passthrough_access
+                    ? m.api_keys_revoke_passthrough_action({ name: key.name })
+                    : m.api_keys_grant_passthrough_action({ name: key.name })}
+                  class="table-icon-btn"
+                  onclick={() => store.togglePassthroughAccess(key)}
+                  disabled={Boolean(store.passthroughAccessID)}
+                >
+                  <Icon icon={key.passthrough_access ? Unplug : Plug} class="table-icon-svg" />
                 </TableActionButton>
                 <TableActionButton
                   label={m.api_keys_edit_labels_action({ name: key.name })}

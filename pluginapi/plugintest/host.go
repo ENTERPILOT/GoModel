@@ -12,14 +12,16 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"slices"
 	"sync"
 
 	"github.com/enterpilot/gomodel/pluginapi"
 )
 
-// Host is a fake [pluginapi.Host]. Its zero value is usable: inference
-// answers with an empty completion, metrics are recorded, and HTTP goes
-// through [http.DefaultClient].
+// Host is a fake [pluginapi.Host] and [pluginapi.DecisionsHost]. Its zero
+// value is usable: inference answers with an empty completion, decisions
+// with refusals, metrics are recorded, and HTTP goes through
+// [http.DefaultClient].
 type Host struct {
 	// Replies are the inference replies, consumed in order; when they run
 	// out, Complete returns a completion without choices.
@@ -31,17 +33,27 @@ type Host struct {
 	// Reply, when set, answers every Complete call itself; Replies, Finish,
 	// and Err are then ignored.
 	Reply func(req pluginapi.InferenceRequest) (*pluginapi.Completion, error)
+	// Answer, when set, answers every Decisions().Decide call; otherwise
+	// every question is refused.
+	Answer func(req pluginapi.DecisionRequest) (*pluginapi.DecisionResult, error)
+	// DecisionModels lists the models DecisionModel reports as decision
+	// models.
+	DecisionModels []string
 	// Client is what HTTPClient returns; nil selects http.DefaultClient.
 	Client *http.Client
 	// Log is what Logger returns; nil selects a logger that discards.
 	Log *slog.Logger
 
-	mu       sync.Mutex
-	requests []pluginapi.InferenceRequest
-	metrics  Metrics
+	mu        sync.Mutex
+	requests  []pluginapi.InferenceRequest
+	decisions []pluginapi.DecisionRequest
+	metrics   Metrics
 }
 
-var _ pluginapi.Host = (*Host)(nil)
+var (
+	_ pluginapi.Host          = (*Host)(nil)
+	_ pluginapi.DecisionsHost = (*Host)(nil)
+)
 
 // NewHost returns a Host that answers inference with replies, in order.
 func NewHost(replies ...string) *Host {
@@ -53,6 +65,13 @@ func (h *Host) Requests() []pluginapi.InferenceRequest {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return append([]pluginapi.InferenceRequest(nil), h.requests...)
+}
+
+// DecisionRequests returns every decision request made so far.
+func (h *Host) DecisionRequests() []pluginapi.DecisionRequest {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]pluginapi.DecisionRequest(nil), h.decisions...)
 }
 
 // Recorded returns the metrics recorded so far.
@@ -72,6 +91,9 @@ func (h *Host) Logger() *slog.Logger {
 
 // Inference implements pluginapi.Host.
 func (h *Host) Inference() pluginapi.Inference { return h }
+
+// Decisions implements pluginapi.DecisionsHost.
+func (h *Host) Decisions() pluginapi.Decisions { return (*decider)(h) }
 
 // History implements pluginapi.Host; it reports no history.
 func (h *Host) History(context.Context, pluginapi.Meta) ([]pluginapi.Message, error) {
@@ -160,4 +182,25 @@ func (m *Metrics) init() {
 		m.Values = map[string][]float64{}
 		m.Labels = map[string]map[string]string{}
 	}
+}
+
+type decider Host
+
+func (d *decider) Decide(_ context.Context, req pluginapi.DecisionRequest) (*pluginapi.DecisionResult, error) {
+	d.mu.Lock()
+	d.decisions = append(d.decisions, req)
+	answer := d.Answer
+	d.mu.Unlock()
+	if answer != nil {
+		return answer(req)
+	}
+	answers := make([]pluginapi.Answer, len(req.Questions))
+	for i, q := range req.Questions {
+		answers[i] = pluginapi.Answer{Name: q.Name, Type: pluginapi.AnswerRefusal}
+	}
+	return &pluginapi.DecisionResult{Model: req.Model, Answers: answers}, nil
+}
+
+func (d *decider) DecisionModel(model string) bool {
+	return slices.Contains(d.DecisionModels, model)
 }

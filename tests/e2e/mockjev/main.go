@@ -16,8 +16,9 @@
 // model, state, questions, extra top-level fields, whether an Authorization
 // header arrived, the X-Request-Id, and a per-upstream request sequence), so
 // scenarios can assert what the gateway forwarded and whether a cached
-// answer was replayed. Malformed questions get a FastAPI-style 422, as the
-// hosted API returns.
+// answer was replayed; GET /<prefix>/v1/_last returns the last System One
+// request body and headers, for answers the gateway translates. Malformed
+// questions get a FastAPI-style 422, as the hosted API returns.
 //
 // PORT selects the listen port (default 18091). GET /healthz reports liveness.
 package main
@@ -45,6 +46,9 @@ type upstream struct {
 
 	mu  sync.Mutex
 	seq int
+	// last is the most recent System One request: its raw body and the
+	// headers the scenarios check, served at GET /v1/_last.
+	last map[string]any
 }
 
 // maxBodyBytes bounds a request body; the largest the matrix sends is about
@@ -149,6 +153,20 @@ func (u *upstream) serveModels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, u.models)
 }
 
+// serveLast answers GET /v1/_last with the most recent System One request,
+// so a scenario can check what reached the upstream when the gateway
+// translated the answer (Decisions drops the mock echo object).
+func (u *upstream) serveLast(w http.ResponseWriter, _ *http.Request) {
+	u.mu.Lock()
+	last := u.last
+	u.mu.Unlock()
+	if last == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"detail": "no System One request yet"})
+		return
+	}
+	writeJSON(w, http.StatusOK, last)
+}
+
 func (u *upstream) serveSystemOne(route string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -225,6 +243,13 @@ func (u *upstream) serveSystemOne(route string) http.HandlerFunc {
 		u.mu.Lock()
 		u.seq++
 		seq := u.seq
+		u.last = map[string]any{
+			"route":        route,
+			"body":         json.RawMessage(bytes.Clone(raw.Bytes())),
+			"content_type": r.Header.Get("Content-Type"),
+			"images":       r.Header.Get("TypeSafe-Danger-Zone-Images"),
+			"request_id":   r.Header.Get("X-Request-Id"),
+		}
 		u.mu.Unlock()
 
 		var top map[string]json.RawMessage
@@ -335,6 +360,7 @@ func main() {
 		mux.HandleFunc(prefix+"/v1/systemone", u.serveSystemOne("evaluate"))
 		mux.HandleFunc(prefix+"/v1/systemone/permute", u.serveSystemOne("permute"))
 		mux.HandleFunc(prefix+"/v1/systemone/separate", u.serveSystemOne("separate"))
+		mux.HandleFunc(prefix+"/v1/_last", u.serveLast)
 	}
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintln(w, "ok")

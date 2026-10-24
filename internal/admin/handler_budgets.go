@@ -2,6 +2,7 @@ package admin
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -400,12 +401,12 @@ func budgetRequestSubject(rawScope, rawSubject, rawUserPath string) (budget.Scop
 	rawSubject = strings.TrimSpace(rawSubject)
 	if rawSubject == "" {
 		if scope != budget.ScopeUserPath && strings.TrimSpace(rawUserPath) != "" {
-			return "", "", errors.New("subject is required for label budgets; user_path only names user-path budgets")
+			return "", "", fmt.Errorf("subject is required for %s budgets; user_path only names user-path budgets", scope)
 		}
 		rawSubject = rawUserPath
 	} else if scope != budget.ScopeUserPath && strings.TrimSpace(rawUserPath) != "" {
 		// Silently dropping the conflicting field would mask authoring mistakes.
-		return "", "", errors.New("user_path must not be set alongside subject for label budgets")
+		return "", "", fmt.Errorf("user_path must not be set alongside subject for %s budgets", scope)
 	}
 	subject, err := budget.NormalizeSubject(scope, rawSubject)
 	if err != nil {
@@ -464,7 +465,7 @@ func budgetRequestPeriodSeconds(period string, periodSeconds int64) (int64, erro
 }
 
 // scopedBudgetStatuses keeps only the user_path budgets a scoped credential
-// may see; label budgets are gateway-wide. Global scopes pass through.
+// may see; label and provider budgets are gateway-wide. Global scopes pass through.
 func scopedBudgetStatuses(scope core.AccessScope, statuses []budget.CheckResult) []budget.CheckResult {
 	if scope.Global() {
 		return statuses

@@ -3,6 +3,7 @@ package pluginapi
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -147,7 +148,9 @@ func (c *Config) number(key string) (f float64, ok bool) {
 		return 0, false
 	}
 	f, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
-	if err != nil {
+	// ParseFloat accepts "NaN" and "Inf", which JSON numbers cannot spell;
+	// NaN would also pass every range check.
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
 		c.fail(key, "must be a number, got %q", s)
 		return 0, false
 	}

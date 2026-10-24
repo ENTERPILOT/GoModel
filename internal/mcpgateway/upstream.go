@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -53,10 +54,15 @@ type upstream struct {
 	// reconcile). A stale background refresh must not redial it and leak an
 	// untracked session.
 	closed bool
+	// life bounds every HTTP request the upstream makes; close cancels it, so
+	// a dial hung on an unresponsive server ends with the upstream.
+	life       context.Context
+	lifeCancel context.CancelFunc
 }
 
 func newUpstream(spec ServerSpec, httpClient *http.Client) *upstream {
 	u := &upstream{spec: spec, httpClient: httpClient, status: StatusConnecting}
+	u.life, u.lifeCancel = context.WithCancel(context.Background())
 	if !spec.Enabled {
 		u.status = StatusDisabled
 	}
@@ -171,8 +177,17 @@ func (u *upstream) ensureSessionLocked(ctx context.Context) (*mcp.ClientSession,
 	dialCtx, cancel := context.WithTimeout(ctx, connectTimeout)
 	defer cancel()
 
-	transport, probe, err := u.transport()
+	// The SDK's Connect closes the session when the handshake fails and waits
+	// for in-flight requests, so cancelling dialCtx alone cannot end a dial
+	// whose server never answers. The dial's HTTP requests are therefore bound
+	// to requests, which the timeout, the caller, and close all cancel. A
+	// connected session keeps it for its own requests until close.
+	requests, abort := context.WithCancel(u.life)
+	stopAbort := context.AfterFunc(dialCtx, abort)
+
+	transport, probe, err := u.transport(requests)
 	if err != nil {
+		abort()
 		return nil, err
 	}
 	client := mcp.NewClient(&mcp.Implementation{
@@ -181,7 +196,14 @@ func (u *upstream) ensureSessionLocked(ctx context.Context) (*mcp.ClientSession,
 		Version: version.Version,
 	}, u.clientOptions())
 	session, err = client.Connect(dialCtx, transport, nil)
+	if !stopAbort() && err == nil {
+		// The dial ended as Connect returned, so its requests may already be
+		// aborted; the session is not trustworthy.
+		_ = session.Close()
+		err = dialCtx.Err()
+	}
 	if err != nil {
+		abort()
 		return nil, u.connectError(err, probe)
 	}
 
@@ -221,19 +243,20 @@ func (u *upstream) clientOptions() *mcp.ClientOptions {
 
 // transport builds a fresh transport for one dial attempt. HTTP transports
 // also return the probe watching that dial (nil for stdio); see connectError.
-func (u *upstream) transport() (mcp.Transport, *connectProbe, error) {
+// transport builds the dial's transport; requests bounds its HTTP requests.
+func (u *upstream) transport(requests context.Context) (mcp.Transport, *connectProbe, error) {
 	switch u.spec.Transport {
 	case "http", "":
 		probe := &connectProbe{method: http.MethodPost}
 		return &mcp.StreamableClientTransport{
 			Endpoint:   u.spec.URL,
-			HTTPClient: u.dialClient(probe),
+			HTTPClient: u.dialClient(probe, requests),
 		}, probe, nil
 	case "sse":
 		probe := &connectProbe{method: http.MethodGet}
 		return &mcp.SSEClientTransport{
 			Endpoint:   u.spec.URL,
-			HTTPClient: u.dialClient(probe),
+			HTTPClient: u.dialClient(probe, requests),
 		}, probe, nil
 	case "stdio":
 		cmd := exec.Command(u.spec.Command, u.spec.Args...)
@@ -264,7 +287,7 @@ func (u *upstream) transport() (mcp.Transport, *connectProbe, error) {
 // the shared HTTP client. The headers carry the upstream credential; the
 // client's own bearer token was terminated at the gateway and is never
 // forwarded.
-func (u *upstream) dialClient(probe *connectProbe) *http.Client {
+func (u *upstream) dialClient(probe *connectProbe, requests context.Context) *http.Client {
 	base := u.httpClient
 	if base == nil {
 		base = http.DefaultClient
@@ -282,8 +305,43 @@ func (u *upstream) dialClient(probe *connectProbe) *http.Client {
 	}
 	probe.base = transport
 	clone := *base
-	clone.Transport = probe
+	clone.Transport = &boundRoundTripper{base: probe, bound: requests}
 	return &clone
+}
+
+// boundRoundTripper cancels each request when bound ends, on top of the
+// request's own context. The binding lasts until the response body closes,
+// so a streamed response is cut off too.
+type boundRoundTripper struct {
+	base  http.RoundTripper
+	bound context.Context
+}
+
+func (t *boundRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	ctx, cancel := context.WithCancel(req.Context())
+	stop := context.AfterFunc(t.bound, cancel)
+	release := func() {
+		stop()
+		cancel()
+	}
+	resp, err := t.base.RoundTrip(req.WithContext(ctx))
+	if err != nil {
+		release()
+		return resp, err
+	}
+	resp.Body = &releasingBody{ReadCloser: resp.Body, release: sync.OnceFunc(release)}
+	return resp, nil
+}
+
+type releasingBody struct {
+	io.ReadCloser
+	release func()
+}
+
+func (b *releasingBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.release()
+	return err
 }
 
 // connectProbe watches one dial and remembers how the URL answered the first
@@ -597,6 +655,9 @@ func (u *upstream) close() {
 	session := u.session
 	u.session = nil
 	u.stateMu.Unlock()
+	// Cancel first: it ends requests a dial is stuck on, which the session
+	// close below would otherwise wait for.
+	u.lifeCancel()
 	if session != nil {
 		_ = session.Close()
 	}

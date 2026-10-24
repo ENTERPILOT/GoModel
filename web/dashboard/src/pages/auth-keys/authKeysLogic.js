@@ -11,6 +11,7 @@ export function defaultAuthKeyForm() {
     labels: "",
     allowed_models: [],
     dashboard_access: false,
+    passthrough_access: false,
     expires_at: "",
   };
 }
@@ -112,6 +113,7 @@ export function buildCreateAuthKeyPayload(form) {
     labels: labels.length ? labels : undefined,
     allowed_models: allowedModels.length ? allowedModels : undefined,
     dashboard_access: source.dashboard_access ? true : undefined,
+    passthrough_access: source.passthrough_access ? true : undefined,
   };
   if (source.expires_at) {
     payload.expires_at = source.expires_at + "T23:59:59Z";

@@ -34,6 +34,9 @@ type HostDeps struct {
 	Logger *slog.Logger
 	// Chat may be nil; Inference().Complete then fails with a clear error.
 	Chat ChatCompleter
+	// Decisions may be nil; Decisions().Decide then fails with
+	// ErrDecisionsUnavailable.
+	Decisions Decider
 	// Metrics may be nil; a no-op sink is used.
 	Metrics MetricsSink
 	// HTTP is the client handed to plugins for external calls. Nil selects
@@ -116,15 +119,10 @@ func (h *host) Complete(ctx context.Context, req pluginapi.InferenceRequest) (*p
 	if strings.TrimSpace(req.Model) == "" {
 		return nil, errors.New("plugins: inference model is required")
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	userPath, err := h.inferenceUserPath(ctx, req.UserPath)
+	ctx, err := h.inferenceContext(ctx, req.UserPath)
 	if err != nil {
 		return nil, err
 	}
-	ctx = core.WithRequestOrigin(ctx, core.RequestOriginPlugin)
-	ctx = core.WithEffectiveUserPath(ctx, userPath)
 	chatReq := exchange.ChatRequestFromMessages(req.Model, req.Messages, req.MaxTokens, req.Temperature)
 	resp, err := h.deps.Chat.ChatCompletion(ctx, chatReq)
 	if err != nil {
@@ -134,6 +132,20 @@ func (h *host) Complete(ctx context.Context, req pluginapi.InferenceRequest) (*p
 		return nil, errors.New("plugins: inference returned no response")
 	}
 	return exchange.FromChatResponse(resp)
+}
+
+// inferenceContext is the context of an internal call the instance makes:
+// origin "plugin", scoped to the instance's user path.
+func (h *host) inferenceContext(ctx context.Context, userPathOverride string) (context.Context, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	userPath, err := h.inferenceUserPath(ctx, userPathOverride)
+	if err != nil {
+		return nil, err
+	}
+	ctx = core.WithRequestOrigin(ctx, core.RequestOriginPlugin)
+	return core.WithEffectiveUserPath(ctx, userPath), nil
 }
 
 func (h *host) inferenceUserPath(ctx context.Context, override string) (string, error) {

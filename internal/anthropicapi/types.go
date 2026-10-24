@@ -66,11 +66,16 @@ type ContentBlock struct {
 	ID    string          `json:"id,omitempty"`
 	Name  string          `json:"name,omitempty"`
 	Input json.RawMessage `json:"input,omitempty" swaggertype:"object"`
-	// tool_result (Content also carries search_result text blocks and the
-	// custom-content variant of document sources)
+	// tool_result (Content also carries search_result text blocks, tool
+	// references, and the custom-content variant of document sources)
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   json.RawMessage `json:"content,omitempty" swaggertype:"object"`
 	IsError   bool            `json:"is_error,omitempty"`
+	// tool_reference: the name of a tool a tool search matched.
+	ToolName string `json:"tool_name,omitempty"`
+	// tool_search_tool_result: the search's matches, in a nested
+	// tool_search_tool_search_result object under Content.
+	SearchResult *ToolSearchResult `json:"-" swaggerignore:"true"`
 	// CacheControl preserves Anthropic prompt-cache breakpoints through the
 	// canonical chat representation when the request is routed back to Claude.
 	CacheControl json.RawMessage `json:"cache_control,omitempty" swaggertype:"object"`
@@ -78,6 +83,31 @@ type ContentBlock struct {
 	// core.ExtraContentField), so a tool-call history another provider produced
 	// through this API replays to it unchanged.
 	ExtraContent json.RawMessage `json:"extra_content,omitempty" swaggertype:"object"`
+}
+
+// ToolReference names a tool that a server-side tool search matched. Anthropic
+// returns it in tool_search_tool_result blocks and in tool_result content
+// marked deferred, and replays it as a tool_reference: the model loads the
+// tool's schema from the API rather than from the request's tool list.
+type ToolReference struct {
+	Type     string `json:"type"`
+	ToolName string `json:"tool_name"`
+}
+
+// ToolSearchResult is the content object of a tool_search_tool_result block.
+type ToolSearchResult struct {
+	Type           string          `json:"type"`
+	ToolReferences []ToolReference `json:"tool_references"`
+}
+
+// References returns the tools a tool_search_tool_result block matched. The
+// search keeps its matches in the nested content object; a block that carries
+// none has no result to report.
+func (block ContentBlock) References() []ToolReference {
+	if block.SearchResult == nil {
+		return nil
+	}
+	return block.SearchResult.ToolReferences
 }
 
 // Source describes an Anthropic image or document source: base64 inline
@@ -101,6 +131,11 @@ type Tool struct {
 	InputSchema  json.RawMessage `json:"input_schema,omitempty" swaggertype:"object"`
 	Strict       *bool           `json:"strict,omitempty"`
 	CacheControl json.RawMessage `json:"cache_control,omitempty" swaggertype:"object"`
+	// DeferLoading marks a tool whose schema the API loads only when tool
+	// search matches it. It is an ordinary custom tool that declares itself
+	// deferred, so the translated pipeline sends it like any other and drops
+	// the marker (see convertTools).
+	DeferLoading bool `json:"defer_loading,omitempty"`
 }
 
 // ToolChoice constrains how the model selects tools.

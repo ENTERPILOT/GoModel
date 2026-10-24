@@ -201,24 +201,32 @@ func (s *snapshot) findRedirect(name, userPath string, enforceUserPaths bool) (*
 func (s *snapshot) effectiveState(selector core.ModelSelector) EffectiveState {
 	model := strings.TrimSpace(selector.Model)
 	providerName := strings.TrimSpace(selector.Provider)
-	state := EffectiveState{
+	enabled, userPaths := s.access(selector)
+	return EffectiveState{
 		Selector:       selectorString(providerName, model),
 		ProviderName:   providerName,
 		Model:          model,
 		DefaultEnabled: s.defaultEnable,
-		Enabled:        s.defaultEnable,
+		Enabled:        enabled,
+		UserPaths:      append([]string(nil), userPaths...),
 	}
-	if model == "" && providerName == "" {
-		return state
-	}
+}
 
+// access returns whether selector is enabled and the user paths restricting
+// it: effectiveState without building the reported view, for the per-request
+// path. The returned slice is the snapshot's own and must not be modified.
+func (s *snapshot) access(selector core.ModelSelector) (bool, []string) {
+	model := strings.TrimSpace(selector.Model)
+	providerName := strings.TrimSpace(selector.Provider)
+	if model == "" && providerName == "" {
+		return s.defaultEnable, nil
+	}
 	if rule, ok := s.matchingPolicy(providerName, model); ok {
 		// Native Enabled: a disabled policy row turns the model OFF; an enabled
 		// row with user_paths restricts; an enabled row with no paths allows.
-		state.Enabled = rule.Enabled
-		state.UserPaths = append([]string(nil), rule.UserPaths...)
+		return rule.Enabled, rule.UserPaths
 	}
-	return state
+	return s.defaultEnable, nil
 }
 
 // matchingPolicy returns the most specific policy row matching providerName and

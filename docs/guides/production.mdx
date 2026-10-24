@@ -431,7 +431,9 @@ if the file size matters.
 - **Leave `pprof` disabled.** It is off by default and unauthenticated when on.
 - **Scope managed API keys.** Give each consumer its own key with its own
   [user path](/features/user-path), which is also what makes per-consumer rate
-  limits and budgets possible. Grant `dashboard_access` only where needed.
+  limits and budgets possible. Grant `dashboard_access` and
+  [`passthrough_access`](/features/passthrough-api#access-control) only where
+  needed.
 
 ## Production checklist
 
