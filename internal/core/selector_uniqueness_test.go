@@ -20,6 +20,12 @@ func TestDuplicateSelectorField(t *testing.T) {
 		{name: "duplicate stream", body: `{"stream":true,"stream":false}`, want: "stream"},
 		{name: "first repeated field wins the report", body: `{"stream":true,"model":"a","stream":false,"model":"b"}`, want: "stream"},
 		{name: "duplicate with escaped key", body: `{"model":"allowed","mod\u0065l":"blocked"}`, want: "model"},
+		{name: "duplicate model in another case", body: `{"model":"allowed","Model":"blocked"}`, want: "model"},
+		{name: "duplicate provider in upper case", body: `{"PROVIDER":"a","provider":"b"}`, want: "provider"},
+		{name: "duplicate stream with long s", body: "{\"stream\":false,\"\u017ftream\":true}", want: "stream"},
+		{name: "duplicate stream with escaped long s", body: `{"stream":false,"\u017ftream":true}`, want: "stream"},
+		{name: "single selector in another case", body: `{"Model":"m","Stream":true}`, want: ""},
+		{name: "longer key sharing a selector prefix", body: `{"model":"m","models":"x","streams":true}`, want: ""},
 		{name: "nested duplicates ignored", body: `{"model":"m","messages":[{"model":"a","model":"b"}],"x":{"stream":true,"stream":false}}`, want: ""},
 		{name: "duplicate other fields ignored", body: `{"model":"m","n":1,"n":2}`, want: ""},
 		{name: "pretty printed duplicate", body: "{\n  \"model\" : \"a\" ,\n  \"messages\": [ {\"x\": [1, 2]} ],\n  \"model\" : \"b\"\n}", want: "model"},
@@ -38,6 +44,22 @@ func TestDuplicateSelectorField(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, DuplicateSelectorField([]byte(tt.body)), "body: %s", tt.body)
 		})
+	}
+}
+
+func TestSelectorFieldName(t *testing.T) {
+	tests := map[string]string{
+		"model":       "model",
+		"MODEL":       "model",
+		"Provider":    "provider",
+		"sTrEaM":      "stream",
+		"\u017ftream": "stream",
+		"models":      "",
+		"mode":        "",
+		"":            "",
+	}
+	for key, want := range tests {
+		assert.Equal(t, want, SelectorFieldName(key), "key: %q", key)
 	}
 }
 

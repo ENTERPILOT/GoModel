@@ -189,10 +189,10 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 			return requestBodySelectorHints{}
 		}
 
-		switch key {
+		switch field := core.SelectorFieldName(key); field {
 		case "model":
 			if modelSeen {
-				return requestBodySelectorHints{duplicate: key}
+				return requestBodySelectorHints{duplicate: field}
 			}
 			modelSeen = true
 			model, ok, err := readOptionalJSONString(dec)
@@ -209,7 +209,7 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 			}
 		case "provider":
 			if providerSeen {
-				return requestBodySelectorHints{duplicate: key}
+				return requestBodySelectorHints{duplicate: field}
 			}
 			providerSeen = true
 			provider, ok, err := readOptionalJSONString(dec)
@@ -223,7 +223,7 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 			}
 		case "stream":
 			if streamSeen {
-				return requestBodySelectorHints{duplicate: key}
+				return requestBodySelectorHints{duplicate: field}
 			}
 			streamSeen = true
 			stream, ok, err := readOptionalJSONBool(dec)

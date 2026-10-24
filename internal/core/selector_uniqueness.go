@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/tidwall/gjson"
 )
@@ -14,7 +15,9 @@ import (
 // JSON parsers disagree on which duplicate wins: gjson keeps the first
 // occurrence, encoding/json and most provider parsers keep the last. A repeated
 // selector could therefore be authorized as one model and executed as another,
-// so the gateway rejects such bodies instead of picking a side.
+// so the gateway rejects such bodies instead of picking a side. Keys are
+// matched case-insensitively, as encoding/json matches them to struct fields,
+// so "Model" repeats "model".
 //
 // The scan walks only the top-level members and allocates nothing for the
 // common case; it never panics on malformed input but reports "" for it, so
@@ -75,20 +78,36 @@ func DuplicateSelectorField(body []byte) string {
 	}
 }
 
-// jsonMemberName returns the member name for a quoted JSON key. Keys without
-// escapes are viewed in place; escaped keys are decoded so "model" still
-// counts as "model".
+// jsonMemberName returns the selector field a quoted JSON key names, or "".
+// Keys without escapes are viewed in place; escaped keys are decoded so
+// "mod\u0065l" still counts as "model".
 func jsonMemberName(quoted []byte) string {
 	raw := quoted[1 : len(quoted)-1]
 	if slices.Contains(raw, '\\') {
-		return gjson.ParseBytes(quoted).Str
+		return SelectorFieldName(gjson.ParseBytes(quoted).Str)
 	}
-	switch string(raw) {
-	case "model":
+	// Longer keys cannot fold to a selector name; checking first keeps the
+	// conversion below on the stack.
+	if len(raw) > selectorFieldMaxLen {
+		return ""
+	}
+	return SelectorFieldName(string(raw))
+}
+
+// selectorFieldMaxLen is the longest key, in bytes, that can fold to a
+// selector name: "provider", or "stream" spelled with the two-byte long s.
+const selectorFieldMaxLen = len("provider") + 1
+
+// SelectorFieldName returns "model", "provider", or "stream" when key names
+// that top-level selector, ignoring case as encoding/json does when it
+// matches a key to a struct field, or "" otherwise.
+func SelectorFieldName(key string) string {
+	switch {
+	case strings.EqualFold(key, "model"):
 		return "model"
-	case "provider":
+	case strings.EqualFold(key, "provider"):
 		return "provider"
-	case "stream":
+	case strings.EqualFold(key, "stream"):
 		return "stream"
 	default:
 		return ""

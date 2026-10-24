@@ -103,6 +103,18 @@ func TestDuplicateSelector_TranslatedRoutesRejectedAtIngress(t *testing.T) {
 			field: "model",
 		},
 		{
+			name:  "chat duplicate model in another case",
+			path:  "/v1/chat/completions",
+			body:  `{"model":"allowed-model","Model":"blocked-model","messages":[{"role":"user","content":"hi"}]}`,
+			field: "model",
+		},
+		{
+			name:  "chat duplicate stream in another case",
+			path:  "/v1/chat/completions",
+			body:  `{"model":"allowed-model","stream":false,"STREAM":true,"messages":[{"role":"user","content":"hi"}]}`,
+			field: "stream",
+		},
+		{
 			name:  "responses duplicate model",
 			path:  "/v1/responses",
 			body:  `{"model":"allowed-model","model":"blocked-model","input":"hi"}`,
@@ -211,6 +223,22 @@ func TestDuplicateSelector_PassthroughRejectedBeforeForwarding(t *testing.T) {
 			name:  "duplicate provider",
 			body:  `{"model":"allowed-model","provider":"openai","provider":"groq"}`,
 			field: "provider",
+		},
+		{
+			name:  "duplicate model in another case",
+			body:  `{"model":"allowed-model","Model":"blocked-model"}`,
+			field: "model",
+		},
+		{
+			name:          "unknown length duplicate model in another case",
+			body:          `{"model":"allowed-model","Model":"blocked-model"}`,
+			field:         "model",
+			unknownLength: true,
+		},
+		{
+			name:  "oversized body with case-variant duplicate past the peek window",
+			body:  `{"model":"allowed-model","messages":[{"role":"user","content":"` + strings.Repeat("x", int(requestSelectorPeekLimit)) + `"}],"MODEL":"blocked-model"}`,
+			field: "model",
 		},
 		{
 			name:  "oversized body with duplicate past the peek window",

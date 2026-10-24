@@ -22,11 +22,14 @@ GoModel reads the top-level `model`, `provider`, and `stream` members of a JSON
 body to authorize and route the request. JSON parsers disagree on which value
 wins when an object repeats a member, so a body that repeats any of these three
 at the top level is rejected with `400 invalid_request_error` before anything
-is authorized, cached, or forwarded. This applies to the OpenAI-compatible and
+is authorized, cached, or forwarded. Keys are compared ignoring case, so
+`model` and `Model` count as a repeat. This applies to the OpenAI-compatible and
 Anthropic-compatible `/v1` JSON routes and to provider passthrough. Realtime
 client-secret routes are the exception: they decode the body once and send the
 provider a re-encoded copy, so a repeated member never reaches it as sent.
 Repeated members nested inside other objects are left as sent.
+
+## OpenAI-Compatible API
 
 | Endpoint                          | Method | Description                                                                                                  |
 | --------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------ |
