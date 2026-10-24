@@ -66,8 +66,9 @@ Clients such as coding agents read `metadata.context_window` and
 lists, for each of the two, the **smallest value any of its targets reports**,
 descending chained virtual models. Any target may serve a request — load
 balancing, failover, or a session moving — so sizing to the smallest one never
-overflows the target that gets the request. Targets that report no value are
-ignored; if none does, the field is omitted.
+overflows a target that reports a value. Targets that report no value are
+ignored, so the listed value does not bound them; if none reports one, the
+field is omitted. Set an explicit value when such a target accepts less.
 
 Set **Context window** or **Max output tokens** on a redirect to list your own
 value instead, for example when a large-context target only serves as a rare

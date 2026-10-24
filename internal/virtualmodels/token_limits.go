@@ -9,7 +9,8 @@ import "github.com/enterpilot/gomodel/internal/core"
 // limits first): any target may serve a request, so a client sizing prompts
 // to the smallest one never overflows the one it gets. Declared targets count
 // whether or not they are available right now, so the listed limits do not
-// flap with provider health. Targets reporting no value are ignored. Chains
+// flap with provider health. Targets reporting no value are ignored, so the
+// listed limits do not bound them; operators configure a value then. Chains
 // are acyclic by construction (see validateChains), so this terminates.
 func (s *snapshot) tokenLimits(entry *redirectEntry, catalog Catalog) (contextWindow, maxOutput int) {
 	configuredContext, configuredOutput := entry.vm.ContextWindow, entry.vm.MaxOutputTokens
@@ -47,22 +48,28 @@ func (s *snapshot) targetTokenLimits(owner *redirectEntry, target resolvedTarget
 }
 
 // applyTokenLimits sets a listed redirect's token limits on its metadata,
-// copying the metadata first because it is shared with the catalog entry.
+// copying the metadata first because it is shared with the catalog entry. An
+// unknown limit is omitted rather than left as the representative target's
+// non-positive value.
 func applyTokenLimits(model *core.Model, contextWindow, maxOutput int) {
-	if contextWindow <= 0 && maxOutput <= 0 {
+	if model.Metadata == nil && contextWindow <= 0 && maxOutput <= 0 {
 		return
 	}
 	metadata := model.Metadata.Clone()
 	if metadata == nil {
 		metadata = &core.ModelMetadata{}
 	}
-	if contextWindow > 0 {
-		metadata.ContextWindow = &contextWindow
-	}
-	if maxOutput > 0 {
-		metadata.MaxOutputTokens = &maxOutput
-	}
+	metadata.ContextWindow = knownLimit(contextWindow)
+	metadata.MaxOutputTokens = knownLimit(maxOutput)
 	model.Metadata = metadata
+}
+
+// knownLimit returns a pointer to a positive limit, or nil when it is unknown.
+func knownLimit(value int) *int {
+	if value <= 0 {
+		return nil
+	}
+	return &value
 }
 
 // minKnownLimit returns the smaller of two limits, treating zero as unknown.

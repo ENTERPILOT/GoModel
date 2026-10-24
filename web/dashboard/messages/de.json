@@ -671,7 +671,7 @@
   "models_context_window_field": "Kontextfenster (Tokens)",
   "models_max_output_tokens_field": "Max. Ausgabe-Tokens",
   "models_token_limit_from_targets": "Aus den Zielen",
-  "models_token_limits_help": "Limits, die für dieses virtuelle Modell in /v1/models gelistet werden und nach denen Clients ihre Prompts bemessen. Leer lassen, um den kleinsten Wert zu verwenden, den ein Ziel meldet – so passt eine Anfrage zu jedem Ziel, das sie bedient.",
+  "models_token_limits_help": "Limits, die für dieses virtuelle Modell in /v1/models gelistet werden und nach denen Clients ihre Prompts bemessen. Leer lassen, um den kleinsten von den Zielen gemeldeten Wert zu verwenden. Ziele ohne gemeldeten Wert werden übersprungen, für sie ist also nicht garantiert, dass eine Anfrage passt.",
   "models_status_summary": "Standardmäßig aktiviert: {default} · Derzeit effektiv: {effective}",
   "models_yes": "ja",
   "models_no": "nein",

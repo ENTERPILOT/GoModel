@@ -26,6 +26,7 @@ func newLimitsService(t *testing.T) (*Service, fakeCatalog) {
 			"openai/large":   limitsModel("openai/large", new(200000), new(8000)),
 			"openai/small":   limitsModel("openai/small", new(128000), new(16000)),
 			"openai/unknown": limitsModel("openai/unknown", nil, nil),
+			"openai/zero":    limitsModel("openai/zero", new(0), new(0)),
 		},
 	}
 	svc, err := NewService(newSQLVMStore(t), catalog, true)
@@ -94,6 +95,10 @@ func TestExposedModels_TokenLimits(t *testing.T) {
 		{
 			name: "no target reports a value",
 			rows: []VirtualModel{{Source: "vm", Targets: []Target{{Model: "openai/unknown"}}}},
+		},
+		{
+			name: "zero reported by the only target is omitted",
+			rows: []VirtualModel{{Source: "vm", Targets: []Target{{Model: "openai/zero"}}}},
 		},
 		{
 			name: "configured value on a target without metadata",

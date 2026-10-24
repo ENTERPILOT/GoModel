@@ -671,7 +671,7 @@
   "models_context_window_field": "Context window (tokens)",
   "models_max_output_tokens_field": "Max output tokens",
   "models_token_limit_from_targets": "From targets",
-  "models_token_limits_help": "Limits listed for this virtual model in /v1/models, which clients use to size prompts. Leave empty to use the smallest value any target reports, so a request fits whichever target serves it.",
+  "models_token_limits_help": "Limits listed for this virtual model in /v1/models, which clients use to size prompts. Leave empty to use the smallest value reported by the targets. Targets that report no value are skipped, so the value does not guarantee a fit for them.",
   "models_status_summary": "Default enabled: {default} · Effective now: {effective}",
   "models_yes": "yes",
   "models_no": "no",

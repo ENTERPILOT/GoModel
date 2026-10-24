@@ -679,7 +679,7 @@
   "models_context_window_field": "Okno kontekstu (tokeny)",
   "models_max_output_tokens_field": "Maks. tokenów wyjściowych",
   "models_token_limit_from_targets": "Z celów",
-  "models_token_limits_help": "Limity podawane dla tego modelu wirtualnego w /v1/models, według których klienci dopasowują rozmiar promptów. Pozostaw puste, aby użyć najmniejszej wartości zgłaszanej przez dowolny cel – wtedy żądanie zmieści się w każdym celu, który je obsłuży.",
+  "models_token_limits_help": "Limity podawane dla tego modelu wirtualnego w /v1/models, według których klienci dopasowują rozmiar promptów. Pozostaw puste, aby użyć najmniejszej wartości zgłaszanej przez cele. Cele, które nie zgłaszają wartości, są pomijane, więc nie ma gwarancji, że żądanie się w nich zmieści.",
   "models_status_summary": "Domyślnie włączony: {default} · Obecnie aktywny: {effective}",
   "models_yes": "tak",
   "models_no": "nie",

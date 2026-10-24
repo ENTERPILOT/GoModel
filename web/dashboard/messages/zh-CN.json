@@ -635,7 +635,7 @@
   "models_context_window_field": "上下文窗口（tokens）",
   "models_max_output_tokens_field": "最大输出 tokens",
   "models_token_limit_from_targets": "取自目标",
-  "models_token_limits_help": "在 /v1/models 中为此虚拟模型列出的限制，客户端据此确定提示词大小。留空则使用所有目标报告的最小值，确保请求无论由哪个目标处理都不会超限。",
+  "models_token_limits_help": "在 /v1/models 中为此虚拟模型列出的限制，客户端据此确定提示词大小。留空则使用各目标报告的最小值。未报告该值的目标会被跳过，因此无法保证请求不超出这些目标的限制。",
   "models_status_summary": "默认启用：{default} · 当前生效：{effective}",
   "models_yes": "是",
   "models_no": "否",
