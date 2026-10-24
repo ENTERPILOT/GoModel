@@ -1011,6 +1011,24 @@ test("vision routing is off by default and only the opt-in reaches the server", 
   assert.equal(buildAliasTogglePayload(alias).vision_routing, true);
 });
 
+test("vision routing survives saving and toggling a single-target virtual model", () => {
+  const form = defaultVirtualModelForm();
+  form.source = "smart";
+  form.target_model = "openai/gpt-4o";
+  form.vision_routing = true;
+  const { payload } = buildVirtualModelSavePayload(form, "", "create");
+  assert.equal(payload.target_model, "openai/gpt-4o");
+  assert.equal(payload.vision_routing, true);
+
+  const alias = mapRedirectView({
+    source: "smart",
+    targets: [{ model: "openai/gpt-4o" }],
+    vision_routing: true,
+    enabled: true,
+  });
+  assert.equal(buildAliasTogglePayload(alias).vision_routing, true);
+});
+
 test("virtualModelTargetOptions lists catalog models and other virtual models", () => {
   const models = [
     { selector: "openai/gpt-4o", provider_name: "openai", model: { id: "gpt-4o" } },
