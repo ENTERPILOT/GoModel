@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewKeyring(t *testing.T) {
@@ -28,19 +30,15 @@ func TestNewKeyring(t *testing.T) {
 			ring := NewKeyring(tt.keys...)
 
 			if len(tt.want) == 0 {
-				if ring != nil {
-					t.Fatalf("NewKeyring(%q) = %v, want nil for an unusable key set", tt.keys, ring.keys)
-				}
+				require.Nil(t, ring)
+
 				return
 			}
-			if ring.Len() != len(tt.want) {
-				t.Fatalf("Len() = %d, want %d", ring.Len(), len(tt.want))
-			}
+			require.Equal(t, len(tt.want), ring.Len())
+
 			// One full cycle reproduces the configured order.
 			for i, want := range tt.want {
-				if got := ring.Next(); got != want {
-					t.Errorf("Next() call %d = %q, want %q", i+1, got, want)
-				}
+				assert.Equal(t, want, ring.Next(), "Next() call %d", i)
 			}
 		})
 	}
@@ -49,16 +47,13 @@ func TestNewKeyring(t *testing.T) {
 func TestKeyringPinsIdentifiedSessionsByDefault(t *testing.T) {
 	ring := NewKeyring("k1", "k2", "k3")
 	want := ring.NextForSession("conversation-42")
-	for i := range 10 {
-		if got := ring.NextForSession("conversation-42"); got != want {
-			t.Fatalf("NextForSession() call %d = %q, want pinned key %q", i+2, got, want)
-		}
+	for range 10 {
+		require.Equal(t, want, ring.NextForSession("conversation-42"))
 	}
 
 	ctx := core.WithSessionID(context.Background(), "conversation-42")
-	if got := ring.NextForContext(ctx); got != want {
-		t.Fatalf("NextForContext() = %q, want %q", got, want)
-	}
+	got := ring.NextForContext(ctx)
+	require.Equal(t, want, got)
 }
 
 func TestKeyringSessionStickinessCanBeDisabled(t *testing.T) {
@@ -69,17 +64,14 @@ func TestKeyringSessionStickinessCanBeDisabled(t *testing.T) {
 		ring.NextForSession("same-session"),
 	}
 	want := []string{"k1", "k2", "k1"}
-	if !equalStrings(got, want) {
-		t.Fatalf("disabled sticky keys = %v, want round robin %v", got, want)
-	}
+	require.True(t, equalStrings(got, want), "disabled sticky keys = %v, want round robin %v", got, want)
 }
 
 func TestKeyringSessionlessTrafficRemainsRoundRobin(t *testing.T) {
 	ring := NewKeyring("k1", "k2")
 	got := []string{ring.NextForContext(context.Background()), ring.NextForContext(context.Background())}
-	if want := []string{"k1", "k2"}; !equalStrings(got, want) {
-		t.Fatalf("sessionless keys = %v, want %v", got, want)
-	}
+	want := []string{"k1", "k2"}
+	require.True(t, equalStrings(got, want), "sessionless keys = %v, want %v", got, want)
 }
 
 func TestKeyringStableForContext(t *testing.T) {
@@ -87,13 +79,12 @@ func TestKeyringStableForContext(t *testing.T) {
 	ctx := core.WithSessionID(context.Background(), "conversation-42")
 	want := sticky.NextForContext(ctx)
 	for range 3 {
-		if got, ok := sticky.StableForContext(ctx); !ok || got != want {
-			t.Fatalf("StableForContext() = %q, %v, want %q, true", got, ok, want)
-		}
+		got, ok := sticky.StableForContext(ctx)
+		require.True(t, ok)
+		require.Equal(t, want, got)
 	}
-	if got := sticky.Next(); got != "k1" {
-		t.Fatalf("stable lookup advanced round robin to %q", got)
-	}
+	got := sticky.Next()
+	require.Equal(t, "k1", got)
 
 	for name, ring := range map[string]*Keyring{
 		"sessionless": sticky,
@@ -104,9 +95,9 @@ func TestKeyringStableForContext(t *testing.T) {
 			if name == "disabled" {
 				testCtx = ctx
 			}
-			if key, ok := ring.StableForContext(testCtx); ok || key != "" {
-				t.Fatalf("StableForContext() = %q, %v, want empty, false", key, ok)
-			}
+			key, ok := ring.StableForContext(testCtx)
+			require.False(t, ok)
+			require.Empty(t, key)
 		})
 	}
 }
@@ -118,8 +109,8 @@ func TestKeyringRendezvousHashingOnlyRemapsSessionsOnChangedKey(t *testing.T) {
 		session := fmt.Sprintf("session-%d", i)
 		previous := before.NextForSession(session)
 		current := after.NextForSession(session)
-		if previous != "k2" && current != previous {
-			t.Fatalf("%q moved from %q to %q although its key remains", session, previous, current)
+		if previous != "k2" {
+			require.Equal(t, previous, current, "%q moved although its key remains", session)
 		}
 	}
 }
@@ -130,9 +121,8 @@ func TestKeyringNextCyclesRoundRobin(t *testing.T) {
 	// Two full cycles: the ring must wrap, not run dry.
 	want := []string{"k1", "k2", "k3", "k1", "k2", "k3"}
 	for i, expected := range want {
-		if got := ring.Next(); got != expected {
-			t.Errorf("Next() call %d = %q, want %q", i+1, got, expected)
-		}
+		got := ring.Next()
+		assert.Equal(t, expected, got, "Next() call %d", i+1)
 	}
 }
 
@@ -141,13 +131,11 @@ func TestKeyringNextCyclesRoundRobin(t *testing.T) {
 func TestKeyringSingleKeyNeverRotates(t *testing.T) {
 	ring := NewKeyring("only")
 
-	if ring.Rotates() {
-		t.Error("Rotates() = true, want false for one key")
-	}
+	assert.False(t, ring.Rotates())
+
 	for i := range 3 {
-		if got := ring.Next(); got != "only" {
-			t.Errorf("Next() call %d = %q, want %q", i+1, got, "only")
-		}
+		got := ring.Next()
+		assert.Equal(t, "only", got, "Next() call %d", i+1)
 	}
 }
 
@@ -155,32 +143,23 @@ func TestKeyringSingleKeyNeverRotates(t *testing.T) {
 // hold a nil ring; every method must stay safe.
 func TestKeyringNilIsEmpty(t *testing.T) {
 	var ring *Keyring
-
-	if got := ring.Next(); got != "" {
-		t.Errorf("Next() = %q, want empty", got)
-	}
-	if got := ring.Primary(); got != "" {
-		t.Errorf("Primary() = %q, want empty", got)
-	}
-	if got := ring.Len(); got != 0 {
-		t.Errorf("Len() = %d, want 0", got)
-	}
-	if ring.Rotates() {
-		t.Error("Rotates() = true, want false")
-	}
+	got := ring.Next()
+	assert.Empty(t, got)
+	got = ring.Primary()
+	assert.Empty(t, got)
+	assert.Zero(t, ring.Len())
+	assert.False(t, ring.Rotates())
 }
 
 func TestKeyringPrimaryDoesNotAdvance(t *testing.T) {
 	ring := NewKeyring("k1", "k2")
 
 	for range 3 {
-		if got := ring.Primary(); got != "k1" {
-			t.Fatalf("Primary() = %q, want k1", got)
-		}
+		got := ring.Primary()
+		require.Equal(t, "k1", got)
 	}
-	if got := ring.Next(); got != "k1" {
-		t.Errorf("Next() = %q, want k1: Primary must not consume a slot", got)
-	}
+	got := ring.Next()
+	assert.Equal(t, "k1", got)
 }
 
 // Providers are shared across concurrent requests, so the rotation must both be
@@ -206,9 +185,7 @@ func TestKeyringNextIsConcurrentAndEven(t *testing.T) {
 	wg.Wait()
 
 	for _, key := range []string{"k1", "k2", "k3"} {
-		if counts[key] != perKey {
-			t.Errorf("key %q used %d times, want %d", key, counts[key], perKey)
-		}
+		assert.Equal(t, perKey, counts[key], "key %q usage", key)
 	}
 }
 
@@ -216,20 +193,15 @@ func TestProviderOptionsKeyringFallsBackToStaticKey(t *testing.T) {
 	// Constructed outside the factory: no ring supplied, so the single
 	// constructor key is used.
 	opts := ProviderOptions{}
-	if got := opts.Keyring("sk-static").Next(); got != "sk-static" {
-		t.Errorf("Next() = %q, want sk-static", got)
-	}
+	got := opts.Keyring("sk-static").Next()
+	assert.Equal(t, "sk-static", got)
 
 	// Built by the factory: the configured ring wins over the primary key that
 	// the provider constructor happens to pass along.
 	opts = ProviderOptions{Keys: NewKeyring("k1", "k2")}
 	ring := opts.Keyring("k1")
-	if !ring.Rotates() {
-		t.Fatal("Rotates() = false, want true")
-	}
-	if got, want := []string{ring.Next(), ring.Next(), ring.Next()}, []string{"k1", "k2", "k1"}; !equalStrings(got, want) {
-		t.Errorf("keys = %v, want %v", got, want)
-	}
+	require.True(t, ring.Rotates())
+	assert.Equal(t, []string{"k1", "k2", "k1"}, []string{ring.Next(), ring.Next(), ring.Next()})
 }
 
 func equalStrings(a, b []string) bool {

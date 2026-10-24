@@ -297,7 +297,7 @@ func TestChatCompletionStreaming(t *testing.T) {
 		assert.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
 
 		chunks := readStreamingResponse(t, resp.Body)
-		require.Greater(t, len(chunks), 0)
+		require.NotEmpty(t, chunks)
 		assert.True(t, chunks[len(chunks)-1].Done, "Last chunk should be [DONE]")
 	})
 
@@ -426,7 +426,7 @@ func TestHealthAndModels(t *testing.T) {
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(&modelsResp))
 
 		assert.Equal(t, "list", modelsResp.Object)
-		assert.Greater(t, len(modelsResp.Data), 0)
+		assert.NotEmpty(t, modelsResp.Data)
 	})
 }
 

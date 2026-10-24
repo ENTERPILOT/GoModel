@@ -113,20 +113,128 @@ export function userSelectorOptions(models) {
   return modelSelectorOptions(models, (name) => m.model_selectors_provider_all({ name }));
 }
 
+// userNodeInactive reports whether every key bound to a node is inactive
+// (deactivated or expired). Nodes without keys are never inactive: they are
+// groups or configured policy rows and must stay visible.
+export function userNodeInactive(node) {
+  if (!node) {
+    return false;
+  }
+  return (node.key_count || 0) > 0 && (node.active_key_count || 0) === 0;
+}
+
+// inactiveAncestors returns the set of ancestor user_paths that are inactive
+// (all keys deactivated/expired) for the given path.  The path itself is
+// excluded — we only care about what sits above it in the tree.
+function inactiveAncestors(nodes, userPath) {
+  const trimmed = String(userPath || "").trim();
+  const raw = trimmed.startsWith("/") ? trimmed : "/" + trimmed;
+  const segments = raw.split("/").filter(Boolean);
+  const result = [];
+  for (let depth = segments.length - 1; depth >= 0; depth -= 1) {
+    const ancestor = depth === 0 ? "/" : "/" + segments.slice(0, depth).join("/");
+    const node = nodes.find((entry) => entry.user_path === ancestor);
+    if (node && userNodeInactive(node)) {
+      result.push(ancestor);
+    }
+  }
+  return result;
+}
+
 // filterUserNodes applies the toolbar query against the path, description,
-// and selectors.
-export function filterUserNodes(nodes, query) {
+// and selectors, and hides nodes whose keys are all inactive unless
+// `showInactive` is set.  An inactive node is retained when at least one of
+// its descendants remains visible so the tree keeps a valid ancestor chain.
+export function filterUserNodes(nodes, query, options = {}) {
+  const { showInactive = false } = options;
   const needle = String(query || "").trim().toLowerCase();
   const list = Array.isArray(nodes) ? nodes : [];
-  if (!needle) {
-    return list;
+
+  // Which inactive nodes should be retained?  An inactive node is retained
+  // only when it is an ancestor of at least one node that is naturally
+  // visible (not inactive).  Fully-inactive chains are not retained.
+  const inactiveRoots = new Set();
+  for (const node of list) {
+    if (userNodeInactive(node)) {
+      const ancestors = inactiveAncestors(list, node.user_path);
+      if (ancestors.length === 0) {
+        inactiveRoots.add(node.user_path);
+      }
+    }
   }
-  return list.filter((node) =>
-    [node.user_path, node.description, ...(node.allowed_models || [])]
+  const retainedInactive = new Set();
+  for (const node of list) {
+    if (userNodeInactive(node)) continue;
+    // Only retain inactive ancestors of nodes that match the query.
+    if (
+      needle &&
+      ![node.user_path, node.description, ...(node.allowed_models || [])]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(needle)
+    ) {
+      continue;
+    }
+    for (const anc of inactiveAncestors(list, node.user_path)) {
+      retainedInactive.add(anc);
+    }
+  }
+
+  return list.filter((node) => {
+    if (!showInactive && userNodeInactive(node)) {
+      return retainedInactive.has(node.user_path);
+    }
+    if (!needle) {
+      return true;
+    }
+    return [node.user_path, node.description, ...(node.allowed_models || [])]
       .filter(Boolean)
       .join(" ")
       .toLowerCase()
-      .includes(needle),
+      .includes(needle);
+  });
+}
+
+// countInactiveUserNodes counts the nodes hidden by the default view.
+// Inactive ancestors retained to anchor visible descendants are excluded.
+// When `needle` is provided, only inactive ancestors of nodes matching the
+// query are retained — matching filterUserNodes' query-aware scoping.
+export function countInactiveUserNodes(nodes, needle) {
+  const list = Array.isArray(nodes) ? nodes : [];
+  const search = String(needle || "").trim().toLowerCase();
+
+  // Recompute the same retained set used by filterUserNodes.
+  const inactiveRoots = new Set();
+  for (const node of list) {
+    if (userNodeInactive(node)) {
+      const ancestors = inactiveAncestors(list, node.user_path);
+      if (ancestors.length === 0) {
+        inactiveRoots.add(node.user_path);
+      }
+    }
+  }
+  const retained = new Set();
+  for (const node of list) {
+    if (userNodeInactive(node)) continue;
+    // Only retain inactive ancestors of query-matching active nodes.
+    if (
+      search &&
+      ![node.user_path, node.description, ...(node.allowed_models || [])]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(search)
+    ) {
+      continue;
+    }
+    for (const anc of inactiveAncestors(list, node.user_path)) {
+      retained.add(anc);
+    }
+  }
+  return list.reduce(
+    (total, node) => total + (userNodeInactive(node) && !retained.has(node.user_path) ? 1 : 0),
+    0,
   );
 }
 

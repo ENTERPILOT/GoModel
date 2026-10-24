@@ -2,7 +2,9 @@ package ext
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"sync"
 	"testing"
 
@@ -74,10 +76,30 @@ func TestRegistryCollectsMiddlewareAndRoutes(t *testing.T) {
 	reg.UseOuterMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 	reg.UseMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 	reg.RegisterRoutes(func(_ *echo.Echo) {})
+	reg.RegisterAdminRoutes(func(_ *echo.Group) {})
 
 	assert.Len(t, reg.OuterMiddleware(), 1)
 	assert.Len(t, reg.Middleware(), 1)
 	assert.Len(t, reg.Routes(), 1)
+	assert.Len(t, reg.AdminRoutes(), 1)
+}
+
+type namedHealthChecker struct{ name string }
+
+func (c namedHealthChecker) Name() string { return c.name }
+
+func (namedHealthChecker) CheckHealth(context.Context) HealthStatus { return HealthOK }
+
+func TestRegistryCollectsHealthCheckers(t *testing.T) {
+	reg := &Registry{}
+	reg.RegisterHealthChecker(namedHealthChecker{name: "vaults"})
+
+	snapshot := reg.HealthCheckers()
+	require.Len(t, snapshot, 1)
+	assert.Equal(t, "vaults", snapshot[0].Name())
+	reg.RegisterHealthChecker(namedHealthChecker{name: "other"})
+	assert.Len(t, snapshot, 1, "earlier snapshot must not grow")
+	assert.Len(t, reg.HealthCheckers(), 2)
 }
 
 func TestRegistryCollectsRequestAuthenticators(t *testing.T) {
@@ -125,7 +147,9 @@ func TestRegistryConcurrentRegistration(t *testing.T) {
 			reg.UseMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 			reg.AddPublicPaths("/p")
 			reg.EnableCapability(CapabilityQuotaTemplates)
+			reg.WrapLogHandler(func(h slog.Handler) slog.Handler { return h })
 			_ = reg.Rewriters()
+			_ = reg.LogHandlerWrappers()
 			_ = reg.HasCapability(CapabilityQuotaTemplates)
 		})
 	}
@@ -135,6 +159,7 @@ func TestRegistryConcurrentRegistration(t *testing.T) {
 	assert.Len(t, reg.OuterMiddleware(), workers)
 	assert.Len(t, reg.Middleware(), workers)
 	assert.Len(t, reg.PublicPaths(), workers)
+	assert.Len(t, reg.LogHandlerWrappers(), workers)
 	assert.True(t, reg.HasCapability(CapabilityQuotaTemplates))
 }
 
@@ -192,4 +217,24 @@ func TestRouteTargetQualified(t *testing.T) {
 func TestRejectionErrorMessage(t *testing.T) {
 	err := &RejectionError{Status: 422, Code: "policy_violation", Message: "blocked by policy"}
 	assert.Equal(t, "request rejected (422 policy_violation): blocked by policy", err.Error())
+}
+
+type namedProxySelector struct{ name string }
+
+func (s *namedProxySelector) Name() string { return s.name }
+
+func (s *namedProxySelector) SelectProxy(ProxyRequest) (*url.URL, error) { return nil, nil }
+
+func TestRegistryProxySelectorSingleSlot(t *testing.T) {
+	reg := &Registry{}
+	assert.Nil(t, reg.ProxySelector())
+
+	reg.RegisterProxySelector(&namedProxySelector{name: "first"})
+	reg.RegisterProxySelector(&namedProxySelector{name: "second"})
+	got := reg.ProxySelector()
+	require.NotNil(t, got)
+	assert.Equal(t, "second", got.Name())
+
+	reg.RegisterProxySelector(nil)
+	assert.Nil(t, reg.ProxySelector())
 }

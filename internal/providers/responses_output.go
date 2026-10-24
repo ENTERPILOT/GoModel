@@ -215,6 +215,42 @@ func responseMessageReasoningContent(msg core.ResponseMessage) string {
 	return ""
 }
 
+// ResponsesIncompleteReason maps a Chat Completions finish reason onto the
+// OpenAI Responses incomplete_details reason, or returns "" when the turn
+// finished normally. OpenAI reports a truncated or filtered turn as status
+// "incomplete" with a reason, so translated providers must do the same
+// instead of claiming completion.
+func ResponsesIncompleteReason(finishReason string) string {
+	switch strings.TrimSpace(finishReason) {
+	case "length":
+		return "max_output_tokens"
+	case "content_filter":
+		return "content_filter"
+	default:
+		return ""
+	}
+}
+
+// ApplyResponsesFinishReason stamps a translated response with the status and
+// incomplete_details implied by the provider's finish reason. The message item
+// carries the same status, mirroring what OpenAI emits for a truncated turn.
+func ApplyResponsesFinishReason(resp *core.ResponsesResponse, finishReason string) {
+	if resp == nil {
+		return
+	}
+	reason := ResponsesIncompleteReason(finishReason)
+	if reason == "" {
+		return
+	}
+	resp.Status = "incomplete"
+	resp.IncompleteDetails = &core.ResponsesIncompleteDetails{Reason: reason}
+	for i := range resp.Output {
+		if resp.Output[i].Type == "message" {
+			resp.Output[i].Status = "incomplete"
+		}
+	}
+}
+
 // ConvertChatResponseToResponses converts a ChatResponse to a ResponsesResponse.
 func ConvertChatResponseToResponses(resp *core.ChatResponse) *core.ResponsesResponse {
 	var output []core.ResponsesOutputItem
@@ -238,7 +274,7 @@ func ConvertChatResponseToResponses(resp *core.ChatResponse) *core.ResponsesResp
 		}
 	}
 
-	return &core.ResponsesResponse{
+	converted := &core.ResponsesResponse{
 		ID:        resp.ID,
 		Object:    "response",
 		CreatedAt: resp.Created,
@@ -255,4 +291,8 @@ func ConvertChatResponseToResponses(resp *core.ChatResponse) *core.ResponsesResp
 			RawUsage:                resp.Usage.RawUsage,
 		},
 	}
+	if len(resp.Choices) > 0 {
+		ApplyResponsesFinishReason(converted, resp.Choices[0].FinishReason)
+	}
+	return converted
 }

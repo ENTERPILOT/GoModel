@@ -1,90 +1,60 @@
 package auditlog
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v5"
+	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/stretchr/testify/require"
 )
 
 func TestEnrichEntryWithAuthMethodTrimsAndValidatesIdentifiers(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Get(t, "/")
 	entry := &LogEntry{}
 	c.Set(string(LogEntryKey), entry)
 
 	EnrichEntryWithAuthMethod(c, "  API_KEY  ")
-	if entry.AuthMethod != AuthMethodAPIKey {
-		t.Fatalf("entry auth method = %q, want %q", entry.AuthMethod, AuthMethodAPIKey)
-	}
+	require.Equal(t, AuthMethodAPIKey, entry.AuthMethod)
 
 	EnrichEntryWithAuthMethod(c, "master_key")
-	if entry.AuthMethod != AuthMethodMasterKey {
-		t.Fatalf("entry auth method = %q, want %q", entry.AuthMethod, AuthMethodMasterKey)
-	}
+	require.Equal(t, AuthMethodMasterKey, entry.AuthMethod)
 
 	EnrichEntryWithAuthMethod(c, "no_key")
-	if entry.AuthMethod != AuthMethodNoKey {
-		t.Fatalf("entry auth method = %q, want %q", entry.AuthMethod, AuthMethodNoKey)
-	}
+	require.Equal(t, AuthMethodNoKey, entry.AuthMethod)
 
 	EnrichEntryWithAuthMethod(c, "unknown")
-	if entry.AuthMethod != "unknown" {
-		t.Fatalf("entry auth method = %q, want %q", entry.AuthMethod, "unknown")
-	}
+	require.Equal(t, "unknown", entry.AuthMethod)
 
 	EnrichEntryWithAuthMethod(c, "  OAuth  ")
-	if entry.AuthMethod != "oauth" {
-		t.Fatalf("entry auth method = %q, want %q", entry.AuthMethod, "oauth")
-	}
+	require.Equal(t, "oauth", entry.AuthMethod)
 }
 
 func TestEnrichEntryWithAuthMethodIgnoresBlankAndUnsafeValues(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Get(t, "/")
 	entry := &LogEntry{}
 	c.Set(string(LogEntryKey), entry)
 
 	EnrichEntryWithAuthMethod(c, "   ")
-	if entry.AuthMethod != "" {
-		t.Fatalf("entry auth method = %q, want empty", entry.AuthMethod)
-	}
+	require.Empty(t, entry.AuthMethod)
 
 	EnrichEntryWithAuthMethod(c, "oauth\nsecret")
-	if entry.AuthMethod != "" {
-		t.Fatalf("entry auth method = %q, want empty", entry.AuthMethod)
-	}
+	require.Empty(t, entry.AuthMethod)
 
 	EnrichEntryWithAuthMethod(c, strings.Repeat("a", 65))
-	if entry.AuthMethod != "" {
-		t.Fatalf("entry auth method = %q, want empty", entry.AuthMethod)
-	}
+	require.Empty(t, entry.AuthMethod)
 }
 
 func TestEnrichEntryWithPrincipalIDTrimsAndPreservesExistingValue(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Get(t, "/")
 	entry := &LogEntry{PrincipalID: "existing"}
 	c.Set(string(LogEntryKey), entry)
 
 	EnrichEntryWithPrincipalID(c, "   ")
-	if entry.PrincipalID != "existing" {
-		t.Fatalf("blank principal replaced existing value with %q", entry.PrincipalID)
-	}
+	require.Equal(t, "existing", entry.PrincipalID)
 
 	EnrichEntryWithPrincipalID(c, "  oidc:principal-1  ")
-	if entry.PrincipalID != "oidc:principal-1" {
-		t.Fatalf("principal ID = %q, want oidc:principal-1", entry.PrincipalID)
-	}
+	require.Equal(t, "oidc:principal-1", entry.PrincipalID)
 
-	withoutEntry := e.NewContext(req, httptest.NewRecorder())
+	withoutEntry, _ := echotest.Get(t, "/")
 	EnrichEntryWithPrincipalID(withoutEntry, "ignored")
 }

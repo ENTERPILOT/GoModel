@@ -10,15 +10,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/enterpilot/gomodel/internal/admin"
 	"github.com/enterpilot/gomodel/internal/admin/dashboard"
-	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/usage"
-
-	_ "github.com/enterpilot/gomodel/cmd/gomodel/docs"
 
 	"github.com/labstack/echo/v5"
 )
@@ -34,13 +34,10 @@ func TestRequestIDMiddleware(t *testing.T) {
 		srv.ServeHTTP(rec, req)
 
 		got := rec.Header().Get("X-Request-ID")
-		if got == "" {
-			t.Fatal("expected X-Request-ID in response header, got empty")
-		}
+		require.NotEmpty(t, got)
+
 		// Validate UUID format (8-4-4-4-12 hex digits)
-		if len(got) != 36 {
-			t.Errorf("expected UUID (36 chars), got %q (%d chars)", got, len(got))
-		}
+		assert.Len(t, got, 36)
 	})
 
 	t.Run("preserves existing request ID", func(t *testing.T) {
@@ -52,15 +49,11 @@ func TestRequestIDMiddleware(t *testing.T) {
 
 		// Request header must not be overwritten
 		got := req.Header.Get("X-Request-ID")
-		if got != "my-custom-id" {
-			t.Errorf("expected request header to be preserved as %q, got %q", "my-custom-id", got)
-		}
+		assert.Equal(t, "my-custom-id", got)
 
 		// Response header must echo the client-provided ID back
 		respID := rec.Header().Get("X-Request-ID")
-		if respID != "my-custom-id" {
-			t.Errorf("expected response header X-Request-ID to be %q, got %q", "my-custom-id", respID)
-		}
+		assert.Equal(t, "my-custom-id", respID)
 	})
 }
 
@@ -79,12 +72,9 @@ func TestServerUsesDirectIPExtractorByDefault(t *testing.T) {
 
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-	if got := rec.Body.String(); got != "203.0.113.7" {
-		t.Fatalf("RealIP = %q, want remote address host", got)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
+	got := rec.Body.String()
+	require.Equal(t, "203.0.113.7", got)
 }
 
 func TestServerAllowsTrustedProxyIPExtractorOverride(t *testing.T) {
@@ -103,12 +93,9 @@ func TestServerAllowsTrustedProxyIPExtractorOverride(t *testing.T) {
 
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-	if got := rec.Body.String(); got != "198.51.100.8" {
-		t.Fatalf("RealIP = %q, want X-Forwarded-For client IP", got)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
+	got := rec.Body.String()
+	require.Equal(t, "198.51.100.8", got)
 }
 
 func TestStartWithListener(t *testing.T) {
@@ -116,9 +103,7 @@ func TestStartWithListener(t *testing.T) {
 	srv := New(mock, nil)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("net.Listen() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -135,9 +120,9 @@ func TestStartWithListener(t *testing.T) {
 			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
 				cancel()
-				if err := <-done; err != nil {
-					t.Fatalf("StartWithListener() error = %v", err)
-				}
+				err := <-done
+				require.NoError(t, err)
+
 				return
 			}
 			lastErr = nil
@@ -148,9 +133,9 @@ func TestStartWithListener(t *testing.T) {
 	}
 
 	cancel()
-	if err := <-done; err != nil {
-		t.Fatalf("StartWithListener() error after timeout = %v", err)
-	}
+	err = <-done
+	require.NoError(t, err)
+
 	t.Fatalf("health check never succeeded, last error: %v", lastErr)
 }
 
@@ -248,12 +233,10 @@ func TestMetricsEndpoint(t *testing.T) {
 
 			srv.ServeHTTP(rec, req)
 
-			if rec.Code != tt.expectedStatus {
-				t.Errorf("expected status %d, got %d", tt.expectedStatus, rec.Code)
-			}
+			assert.Equal(t, tt.expectedStatus, rec.Code)
 
-			if tt.expectBody != "" && !strings.Contains(rec.Body.String(), tt.expectBody) {
-				t.Errorf("expected body to contain %q, got: %s", tt.expectBody, rec.Body.String())
+			if tt.expectBody != "" {
+				assert.Contains(t, rec.Body.String(), tt.expectBody)
 			}
 		})
 	}
@@ -269,15 +252,39 @@ func TestMetricsEndpointDoesNotCollideWithPprof(t *testing.T) {
 	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	metricsRec := httptest.NewRecorder()
 	srv.ServeHTTP(metricsRec, metricsReq)
-	if metricsRec.Code != http.StatusOK || !strings.Contains(metricsRec.Body.String(), "go_goroutines") {
-		t.Fatalf("fallback metrics response = %d %q", metricsRec.Code, metricsRec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, metricsRec.Code)
+	require.Contains(t, metricsRec.Body.String(), "go_goroutines")
 
 	pprofReq := httptest.NewRequest(http.MethodGet, "/debug/pprof/goroutine", nil)
 	pprofRec := httptest.NewRecorder()
 	srv.ServeHTTP(pprofRec, pprofReq)
-	if pprofRec.Code != http.StatusOK || strings.Contains(pprofRec.Body.String(), "# HELP go_") {
-		t.Fatalf("pprof response = %d, unexpectedly served metrics", pprofRec.Code)
+	require.Equal(t, http.StatusOK, pprofRec.Code)
+	require.NotContains(t, pprofRec.Body.String(), "# HELP go_")
+}
+
+// The metrics path skips authentication, so a metrics endpoint inside an
+// authenticated route tree must not open that route to anonymous callers.
+func TestMetricsEndpointDoesNotOpenAuthenticatedRoutes(t *testing.T) {
+	for _, endpoint := range []string{"/admin/access", "/mcp"} {
+		t.Run(endpoint, func(t *testing.T) {
+			srv := New(&mockProvider{}, &Config{
+				MasterKey:             "master",
+				MetricsEnabled:        true,
+				MetricsEndpoint:       endpoint,
+				AdminEndpointsEnabled: true,
+				AdminHandler:          admin.NewHandler(nil, nil),
+			})
+
+			req := httptest.NewRequest(http.MethodGet, endpoint, nil)
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+			assert.Equal(t, http.StatusUnauthorized, rec.Code)
+
+			metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+			metricsRec := httptest.NewRecorder()
+			srv.ServeHTTP(metricsRec, metricsReq)
+			assert.Equal(t, http.StatusOK, metricsRec.Code)
+		})
 	}
 }
 
@@ -295,9 +302,7 @@ func TestOuterMiddlewarePanicIsRecovered(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
-	}
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
 func TestBasePathStripsPrefixBeforeRouting(t *testing.T) {
@@ -363,11 +368,10 @@ func TestBasePathStripsPrefixBeforeRouting(t *testing.T) {
 
 			srv.ServeHTTP(rec, req)
 
-			if rec.Code != tt.expectedStatus {
-				t.Fatalf("status = %d, want %d; body=%s", rec.Code, tt.expectedStatus, rec.Body.String())
-			}
-			if tt.expectBody != "" && !strings.Contains(rec.Body.String(), tt.expectBody) {
-				t.Fatalf("body = %q, want substring %q", rec.Body.String(), tt.expectBody)
+			require.Equal(t, tt.expectedStatus, rec.Code, rec.Body.String())
+
+			if tt.expectBody != "" {
+				assert.Contains(t, rec.Body.String(), tt.expectBody)
 			}
 		})
 	}
@@ -416,12 +420,9 @@ func TestBasePathPreservesEscapedPathParamsBeforeRouting(t *testing.T) {
 
 			srv.ServeHTTP(rec, req)
 
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
-			}
-			if got := rec.Body.String(); got != tt.expected {
-				t.Fatalf("body = %q, want %q", got, tt.expected)
-			}
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			got := rec.Body.String()
+			require.Equal(t, tt.expected, got)
 		})
 	}
 }
@@ -454,9 +455,7 @@ func TestBasePathRejectsInvalidRawPathPrefix(t *testing.T) {
 
 			srv.ServeHTTP(rec, req)
 
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
-			}
+			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 		})
 	}
 }
@@ -473,20 +472,14 @@ func TestMetricsEndpointReturnsPrometheusFormat(t *testing.T) {
 
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
 
 	body := rec.Body.String()
 
 	// Check for Prometheus text format indicators
 	// Prometheus metrics should contain HELP and TYPE comments
-	if !strings.Contains(body, "# HELP") {
-		t.Error("response should contain Prometheus HELP comments")
-	}
-	if !strings.Contains(body, "# TYPE") {
-		t.Error("response should contain Prometheus TYPE comments")
-	}
+	assert.Contains(t, body, "# HELP")
+	assert.Contains(t, body, "# TYPE")
 
 	// Check for standard Go runtime metrics that are always present
 	standardMetrics := []string{
@@ -497,16 +490,12 @@ func TestMetricsEndpointReturnsPrometheusFormat(t *testing.T) {
 	}
 
 	for _, metric := range standardMetrics {
-		if !strings.Contains(body, metric) {
-			t.Errorf("response should contain standard metric %q", metric)
-		}
+		assert.Contains(t, body, metric)
 	}
 
 	// Check Content-Type header
 	contentType := rec.Header().Get("Content-Type")
-	if !strings.Contains(contentType, "text/plain") {
-		t.Errorf("expected Content-Type to contain text/plain, got %s", contentType)
-	}
+	assert.Contains(t, contentType, "text/plain")
 }
 
 func TestServerWithMasterKeyAndMetrics(t *testing.T) {
@@ -525,9 +514,7 @@ func TestServerWithMasterKeyAndMetrics(t *testing.T) {
 		srv.ServeHTTP(rec, req)
 
 		// Should return 200 - metrics is public for load balancers and monitoring
-		if rec.Code != http.StatusOK {
-			t.Errorf("expected status 200 for public metrics endpoint, got %d", rec.Code)
-		}
+		assert.Equal(t, http.StatusOK, rec.Code)
 	})
 
 	t.Run("health endpoint is public even when master key is set", func(t *testing.T) {
@@ -538,9 +525,7 @@ func TestServerWithMasterKeyAndMetrics(t *testing.T) {
 		srv.ServeHTTP(rec, req)
 
 		// Should return 200 - health is public for load balancers
-		if rec.Code != http.StatusOK {
-			t.Errorf("expected status 200 for public health endpoint, got %d", rec.Code)
-		}
+		assert.Equal(t, http.StatusOK, rec.Code)
 	})
 
 	t.Run("API endpoints require auth when master key is set", func(t *testing.T) {
@@ -551,9 +536,7 @@ func TestServerWithMasterKeyAndMetrics(t *testing.T) {
 		srv.ServeHTTP(rec, req)
 
 		// Should return 401 - API requires auth
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("expected status 401 for protected API endpoint, got %d", rec.Code)
-		}
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	})
 
 	t.Run("API endpoints accessible with valid auth", func(t *testing.T) {
@@ -564,9 +547,7 @@ func TestServerWithMasterKeyAndMetrics(t *testing.T) {
 		srv.ServeHTTP(rec, req)
 
 		// Should return 200 with valid auth
-		if rec.Code != http.StatusOK {
-			t.Errorf("expected status 200 with valid auth, got %d", rec.Code)
-		}
+		assert.Equal(t, http.StatusOK, rec.Code)
 	})
 }
 
@@ -613,20 +594,15 @@ func TestServer_ManagedAuthKeyUserPathOverridesHeaderBeforeWorkflowResolution(t 
 
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if capturedSelector.UserPath != "/team/from-key" {
-		t.Fatalf("selector.UserPath = %q, want /team/from-key", capturedSelector.UserPath)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "/team/from-key", capturedSelector.UserPath)
 }
 
 func newDashboardHandler(t *testing.T) *dashboard.Handler {
 	t.Helper()
 	h, err := dashboard.NewWithBasePath("/")
-	if err != nil {
-		t.Fatalf("failed to create dashboard handler: %v", err)
-	}
+	require.NoError(t, err)
+
 	return h
 }
 
@@ -652,9 +628,7 @@ func TestAdminEndpoints_Enabled(t *testing.T) {
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusOK {
-			t.Errorf("expected 200 for %s, got %d", path, rec.Code)
-		}
+		assert.Equal(t, http.StatusOK, rec.Code, "expected 200 for %s, got %d", path, rec.Code)
 	}
 }
 
@@ -685,9 +659,8 @@ func TestAdminWorkflowEndpoints_AreRegistered(t *testing.T) {
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 
-		if rec.Code == http.StatusNotFound || rec.Code == http.StatusMethodNotAllowed {
-			t.Fatalf("%s %s returned %d, want registered route and method", tc.method, tc.path, rec.Code)
-		}
+		require.NotEqual(t, http.StatusNotFound, rec.Code)
+		require.NotEqual(t, http.StatusMethodNotAllowed, rec.Code, "%s %s returned %d, want registered route and method", tc.method, tc.path, rec.Code)
 	}
 }
 
@@ -705,12 +678,8 @@ func TestAdminDashboardConfigEndpoint_ReturnsHandlerResponse(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"FAILOVER_ENABLED":"on"`) {
-		t.Fatalf("response body = %s, want FAILOVER_ENABLED payload", rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code, "expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), `"FAILOVER_ENABLED":"on"`)
 }
 
 func TestAdminLegacyAlias_Deprecation(t *testing.T) {
@@ -740,26 +709,20 @@ func TestAdminLegacyAlias_Deprecation(t *testing.T) {
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, req)
 
-			if rec.Code != http.StatusOK {
-				t.Fatalf("%s returned %d, want 200; body=%s", tc.path, rec.Code, rec.Body.String())
-			}
+			require.Equal(t, http.StatusOK, rec.Code, "%s returned %d, want 200; body=%s", tc.path, rec.Code, rec.Body.String())
+
 			gotDeprecation := rec.Header().Get("Deprecation")
 			gotSunset := rec.Header().Get("Sunset")
 			gotLink := rec.Header().Get("Link")
 			if tc.wantDeprecated {
-				if gotDeprecation != "true" {
-					t.Errorf("Deprecation header = %q, want %q", gotDeprecation, "true")
-				}
-				if gotSunset == "" {
-					t.Error("Sunset header missing on legacy path")
-				}
-				if !strings.Contains(gotLink, `rel="successor-version"`) {
-					t.Errorf("Link header = %q, want rel=successor-version", gotLink)
-				}
+				assert.Equal(t, "true", gotDeprecation)
+				assert.NotEmpty(t, gotSunset)
+				assert.Contains(t, gotLink, `rel="successor-version"`)
+
 			} else {
-				if gotDeprecation != "" || gotSunset != "" || gotLink != "" {
-					t.Errorf("non-legacy path leaked deprecation headers: dep=%q sunset=%q link=%q", gotDeprecation, gotSunset, gotLink)
-				}
+				assert.Empty(t, gotDeprecation)
+				assert.Empty(t, gotSunset)
+				assert.Empty(t, gotLink)
 			}
 		})
 	}
@@ -775,9 +738,7 @@ func TestAdminEndpoints_Disabled(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected 404, got %d", rec.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestAdminUI_Enabled(t *testing.T) {
@@ -795,13 +756,10 @@ func TestAdminUI_Enabled(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
+	assert.Equal(t, http.StatusOK, rec.Code)
+
 	contentType := rec.Header().Get("Content-Type")
-	if !strings.Contains(contentType, "text/html") {
-		t.Errorf("expected text/html Content-Type, got %s", contentType)
-	}
+	assert.Contains(t, contentType, "text/html")
 }
 
 func TestAdminUI_Disabled(t *testing.T) {
@@ -816,9 +774,7 @@ func TestAdminUI_Disabled(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected 404, got %d", rec.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestAdminDashboard_SkipsAuth(t *testing.T) {
@@ -838,9 +794,7 @@ func TestAdminDashboard_SkipsAuth(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 (no auth), got %d", rec.Code)
-	}
+	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestAdminAPI_RequiresAuth(t *testing.T) {
@@ -857,9 +811,7 @@ func TestAdminAPI_RequiresAuth(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401, got %d", rec.Code)
-	}
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
 func TestAdminAPI_SkipsAuthWithoutMasterKey(t *testing.T) {
@@ -875,17 +827,13 @@ func TestAdminAPI_SkipsAuthWithoutMasterKey(t *testing.T) {
 	adminRec := httptest.NewRecorder()
 	srv.ServeHTTP(adminRec, adminReq)
 
-	if adminRec.Code != http.StatusOK {
-		t.Fatalf("expected admin API 200 without auth when master key is unset, got %d body=%s", adminRec.Code, adminRec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, adminRec.Code, "expected admin API 200 without auth when master key is unset, got %d body=%s", adminRec.Code, adminRec.Body.String())
 
 	modelReq := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	modelRec := httptest.NewRecorder()
 	srv.ServeHTTP(modelRec, modelReq)
 
-	if modelRec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected model API 401 without auth when managed keys are enabled, got %d body=%s", modelRec.Code, modelRec.Body.String())
-	}
+	require.Equal(t, http.StatusUnauthorized, modelRec.Code, "expected model API 401 without auth when managed keys are enabled, got %d body=%s", modelRec.Code, modelRec.Body.String())
 }
 
 func TestAdminPricingRecalculationSkipsAuthWithoutMasterKey(t *testing.T) {
@@ -913,12 +861,8 @@ func TestAdminPricingRecalculationSkipsAuthWithoutMasterKey(t *testing.T) {
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, req)
 
-			if rec.Code != http.StatusOK {
-				t.Fatalf("expected pricing recalculation 200 without auth when master key is unset, got %d body=%s", rec.Code, rec.Body.String())
-			}
-			if recalculator.calls != 1 {
-				t.Fatalf("recalculator calls = %d, want 1", recalculator.calls)
-			}
+			require.Equal(t, http.StatusOK, rec.Code, "expected pricing recalculation 200 without auth when master key is unset, got %d body=%s", rec.Code, rec.Body.String())
+			require.Equal(t, 1, recalculator.calls)
 		})
 	}
 }
@@ -938,12 +882,8 @@ func TestAdminPricingRecalculationRequiresAuthWithMasterKey(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected pricing recalculation 401 without auth when master key is set, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	if recalculator.calls != 0 {
-		t.Fatalf("recalculator calls after unauthorized request = %d, want 0", recalculator.calls)
-	}
+	require.Equal(t, http.StatusUnauthorized, rec.Code, "expected pricing recalculation 401 without auth when master key is set, got %d body=%s", rec.Code, rec.Body.String())
+	require.Equal(t, 0, recalculator.calls)
 
 	authReq := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", strings.NewReader(`{"confirmation":"recalculate"}`))
 	authReq.Header.Set("Content-Type", "application/json")
@@ -951,12 +891,8 @@ func TestAdminPricingRecalculationRequiresAuthWithMasterKey(t *testing.T) {
 	authRec := httptest.NewRecorder()
 	srv.ServeHTTP(authRec, authReq)
 
-	if authRec.Code != http.StatusOK {
-		t.Fatalf("expected authorized pricing recalculation 200, got %d body=%s", authRec.Code, authRec.Body.String())
-	}
-	if recalculator.calls != 1 {
-		t.Fatalf("recalculator calls after authorized request = %d, want 1", recalculator.calls)
-	}
+	require.Equal(t, http.StatusOK, authRec.Code, "expected authorized pricing recalculation 200, got %d body=%s", authRec.Code, authRec.Body.String())
+	require.Equal(t, 1, recalculator.calls)
 }
 
 func TestAdminStaticAssets_SkipAuth(t *testing.T) {
@@ -976,9 +912,7 @@ func TestAdminStaticAssets_SkipAuth(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 for static asset without auth, got %d", rec.Code)
-	}
+	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestHealthEndpointAlwaysAvailable(t *testing.T) {
@@ -1015,9 +949,7 @@ func TestHealthEndpointAlwaysAvailable(t *testing.T) {
 
 			srv.ServeHTTP(rec, req)
 
-			if rec.Code != http.StatusOK {
-				t.Errorf("expected status 200, got %d", rec.Code)
-			}
+			assert.Equal(t, http.StatusOK, rec.Code)
 		})
 	}
 }
@@ -1031,9 +963,7 @@ func TestSwaggerEndpoint_Disabled(t *testing.T) {
 
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected status 404, got %d", rec.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestSwaggerEndpoint_NilConfig(t *testing.T) {
@@ -1045,9 +975,7 @@ func TestSwaggerEndpoint_NilConfig(t *testing.T) {
 
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected status 404, got %d", rec.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestPprofEndpoint_Enabled(t *testing.T) {
@@ -1059,17 +987,11 @@ func TestPprofEndpoint_Enabled(t *testing.T) {
 
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", rec.Code)
-	}
+	assert.Equal(t, http.StatusOK, rec.Code)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "Types of profiles available:") {
-		t.Errorf("expected pprof index content, got: %s", body[:min(200, len(body))])
-	}
-	if !strings.Contains(body, "goroutine") {
-		t.Errorf("expected pprof index to list goroutine profile, got: %s", body[:min(200, len(body))])
-	}
+	assert.Contains(t, body, "Types of profiles available:")
+	assert.Contains(t, body, "goroutine")
 }
 
 func TestPprofEndpoint_Disabled(t *testing.T) {
@@ -1081,9 +1003,7 @@ func TestPprofEndpoint_Disabled(t *testing.T) {
 
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected status 404, got %d", rec.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestPprofEndpoint_NilConfig(t *testing.T) {
@@ -1095,9 +1015,7 @@ func TestPprofEndpoint_NilConfig(t *testing.T) {
 
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected status 404, got %d", rec.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestServerWithMasterKeyAndPprof(t *testing.T) {
@@ -1112,9 +1030,7 @@ func TestServerWithMasterKeyAndPprof(t *testing.T) {
 
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status 200 for public pprof endpoint, got %d", rec.Code)
-	}
+	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestProviderPassthroughRoute_EnabledByDefault(t *testing.T) {
@@ -1135,15 +1051,11 @@ func TestProviderPassthroughRoute_EnabledByDefault(t *testing.T) {
 
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
-	}
-	if got := mock.lastPassthroughProvider; got != "openai" {
-		t.Fatalf("provider = %q, want openai", got)
-	}
-	if mock.lastPassthroughReq == nil || !mock.lastPassthroughReq.Stream {
-		t.Fatalf("passthrough stream intent = %+v, want true", mock.lastPassthroughReq)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
+	got := mock.lastPassthroughProvider
+	require.Equal(t, "openai", got)
+	require.NotNil(t, mock.lastPassthroughReq)
+	require.True(t, mock.lastPassthroughReq.Stream)
 
 	mock.lastPassthroughProvider = ""
 	mock.lastPassthroughReq = nil
@@ -1161,15 +1073,14 @@ func TestProviderPassthroughRoute_EnabledByDefault(t *testing.T) {
 
 	srv.ServeHTTP(recV1, reqV1)
 
-	if recV1.Code != http.StatusOK {
-		t.Fatalf("expected normalized v1 route status 200, got %d", recV1.Code)
-	}
-	if got := mock.lastPassthroughProvider; got != "openai" {
-		t.Fatalf("normalized v1 provider = %q, want openai", got)
-	}
+	require.Equal(t, http.StatusOK, recV1.Code)
+	got = mock.lastPassthroughProvider
+	require.Equal(t, "openai", got)
 }
 
-func TestProviderPassthroughRoute_MarksOversizedStreamIntentUncertain(t *testing.T) {
+// An opaque body past the peek limit is read whole, so its model and stream
+// intent are known and the bytes reach the provider unchanged.
+func TestProviderPassthroughRoute_ReadsOversizedBodyCompletely(t *testing.T) {
 	mock := &mockProvider{
 		passthroughResponse: &core.PassthroughResponse{
 			StatusCode: http.StatusOK,
@@ -1185,12 +1096,86 @@ func TestProviderPassthroughRoute_MarksOversizedStreamIntentUncertain(t *testing
 
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, mock.lastPassthroughReq)
+	require.Equal(t, "gpt-5-mini", mock.lastPassthroughReq.Model)
+	require.True(t, mock.lastPassthroughReq.Stream)
+	require.False(t, mock.lastPassthroughReq.StreamUncertain)
+	forwarded, err := io.ReadAll(mock.lastPassthroughReq.Body)
+	require.NoError(t, err)
+	require.Equal(t, body, string(forwarded))
+}
+
+// A System One state is routinely longer than the peek limit. The model named
+// after it must still be checked against the caller's allowlist, or a key
+// restricted to other models could evaluate through /p/jev unchecked.
+func TestProviderPassthroughRoute_AuthorizesModelFromOversizedBody(t *testing.T) {
+	mock := &mockProvider{}
+	authorizer := &recordingModelAuthorizer{err: core.NewInvalidRequestError("requested model is not available for this API key", nil)}
+	srv := New(mock, &Config{ModelAuthorizer: authorizer})
+	body := `{"state":"` + strings.Repeat("x", 65*1024) + `","model":"jev-latest","questions":{"q":{"type":"noul","instructions":"?"}}}`
+	req := httptest.NewRequest(http.MethodPost, "/p/jev/v1/systemone", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "not available for this API key")
+	require.Equal(t, "jev-latest", authorizer.lastSelector.Model)
+	require.Nil(t, mock.lastPassthroughReq, "a denied request must not reach the provider")
+}
+
+// The body is forwarded as written, so a repeated top-level model would let
+// the upstream's parser pick a value the gateway never checked. Such a body
+// is rejected whether or not an allowlist is configured.
+func TestProviderPassthroughRoute_RejectsRepeatedModelField(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        string
+		knownLength bool
+	}{
+		{name: "small body captured inline", body: `{"model":"jev-latest","state":"x","questions":{},"model":"jev-preview"}`, knownLength: true},
+		{name: "small body with unknown length", body: `{"model":"jev-latest","state":"x","questions":{},"model":"jev-preview"}`},
+		{name: "repeat past the peek limit", body: `{"model":"jev-latest","state":"` + strings.Repeat("x", 65*1024) + `","model":"jev-preview"}`, knownLength: true},
 	}
-	if mock.lastPassthroughReq == nil || !mock.lastPassthroughReq.StreamUncertain {
-		t.Fatalf("passthrough stream metadata = %+v, want uncertain", mock.lastPassthroughReq)
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mock := &mockProvider{}
+			srv := New(mock, &Config{})
+			req := httptest.NewRequest(http.MethodPost, "/p/jev/systemone", strings.NewReader(test.body))
+			if !test.knownLength {
+				req.ContentLength = -1
+			}
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+
+			srv.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.Contains(t, rec.Body.String(), "model field is repeated")
+			require.Nil(t, mock.lastPassthroughReq)
+		})
 	}
+}
+
+// Reading an oversized body in full stays bounded by the body limit: a body
+// past it is refused with the limit's own 413 instead of being forwarded
+// with its model unchecked.
+func TestProviderPassthroughRoute_OversizedBodyHonorsBodyLimit(t *testing.T) {
+	mock := &mockProvider{}
+	srv := New(mock, &Config{BodySizeLimit: "100K"})
+	body := `{"state":"` + strings.Repeat("x", 120*1024) + `","model":"jev-latest"}`
+	req := httptest.NewRequest(http.MethodPost, "/p/jev/systemone", strings.NewReader(body))
+	req.ContentLength = -1 // a chunked upload, so the limit is hit while reading rather than declared up front
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+	require.Nil(t, mock.lastPassthroughReq)
 }
 
 func TestProviderPassthroughRoute_DisabledRequiresAuthBefore404(t *testing.T) {
@@ -1206,9 +1191,7 @@ func TestProviderPassthroughRoute_DisabledRequiresAuthBefore404(t *testing.T) {
 
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected status 401, got %d", rec.Code)
-	}
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
 
 	authReq := httptest.NewRequest(http.MethodPost, "/p/openai/responses", strings.NewReader(`{"model":"gpt-5-mini"}`))
 	authReq.Header.Set("Content-Type", "application/json")
@@ -1217,12 +1200,9 @@ func TestProviderPassthroughRoute_DisabledRequiresAuthBefore404(t *testing.T) {
 
 	srv.ServeHTTP(authRec, authReq)
 
-	if authRec.Code != http.StatusNotFound {
-		t.Fatalf("expected authenticated status 404, got %d", authRec.Code)
-	}
-	if mock.lastPassthroughProvider != "" || mock.lastPassthroughReq != nil {
-		t.Fatal("passthrough handler should not be invoked when provider passthrough is disabled")
-	}
+	require.Equal(t, http.StatusNotFound, authRec.Code)
+	require.Empty(t, mock.lastPassthroughProvider)
+	require.Nil(t, mock.lastPassthroughReq)
 }
 
 // A deployment with a custom user-path header must scope GET /v1/models by
@@ -1263,7 +1243,7 @@ func TestServerListModelsScopesByConfiguredUserPathHeader(t *testing.T) {
 	code, body = list(core.UserPathHeader, "/acme/eng/alice")
 	require.Equal(t, http.StatusOK, code)
 	require.Contains(t, body, `"id":"openai/gpt-4o"`)
-	require.Equal(t, "", authorizer.lastUserPath)
+	require.Empty(t, authorizer.lastUserPath)
 
 	code, body = list("X-Tenant-Path", "/acme/../eng")
 	require.Equal(t, http.StatusBadRequest, code)

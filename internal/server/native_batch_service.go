@@ -185,7 +185,7 @@ func batchAdmissionEnforcer(limiter RateLimiter, checker BudgetChecker) func(con
 			}
 		}
 		if checker != nil {
-			return enforceBudgetForContext(ctx, checker)
+			return enforceBudgetForContext(ctx, checker, rateLimitRoute{})
 		}
 		return nil
 	}

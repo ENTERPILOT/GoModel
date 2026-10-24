@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -156,9 +157,7 @@ func TestExpandString(t *testing.T) {
 			}()
 
 			result := expandString(tt.input)
-			if result != tt.expected {
-				t.Errorf("expandString(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result, "expandString(%q)", tt.input)
 		})
 	}
 }
@@ -178,9 +177,8 @@ func TestNormalizeBasePath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := NormalizeBasePath(tt.input); got != tt.expected {
-				t.Errorf("NormalizeBasePath(%q) = %q, want %q", tt.input, got, tt.expected)
-			}
+			got := NormalizeBasePath(tt.input)
+			assert.Equal(t, tt.expected, got, "NormalizeBasePath(%q)", tt.input)
 		})
 	}
 }
@@ -201,9 +199,8 @@ func TestJoinBasePath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := JoinBasePath(tt.basePath, tt.urlPath); got != tt.expected {
-				t.Errorf("JoinBasePath(%q, %q) = %q, want %q", tt.basePath, tt.urlPath, got, tt.expected)
-			}
+			got := JoinBasePath(tt.basePath, tt.urlPath)
+			assert.Equal(t, tt.expected, got, "JoinBasePath(%q, %q)", tt.basePath, tt.urlPath)
 		})
 	}
 }
@@ -219,117 +216,83 @@ func TestApplyEnvOverrides(t *testing.T) {
 			name:    "PORT override",
 			envVars: map[string]string{"PORT": "3000"},
 			check: func(t *testing.T, cfg *Config) {
-				if cfg.Server.Port != "3000" {
-					t.Errorf("Server.Port = %q, want %q", cfg.Server.Port, "3000")
-				}
+				assert.Equal(t, "3000", cfg.Server.Port)
 			},
 		},
 		{
 			name:    "GOMODEL_MASTER_KEY override",
 			envVars: map[string]string{"GOMODEL_MASTER_KEY": "my-secret"},
 			check: func(t *testing.T, cfg *Config) {
-				if cfg.Server.MasterKey != "my-secret" {
-					t.Errorf("Server.MasterKey = %q, want %q", cfg.Server.MasterKey, "my-secret")
-				}
+				assert.Equal(t, "my-secret", cfg.Server.MasterKey)
 			},
 		},
 		{
 			name:    "PPROF_ENABLED override",
 			envVars: map[string]string{"PPROF_ENABLED": "true"},
 			check: func(t *testing.T, cfg *Config) {
-				if !cfg.Server.PprofEnabled {
-					t.Error("Server.PprofEnabled should be true")
-				}
+				assert.True(t, cfg.Server.PprofEnabled)
 			},
 		},
 		{
 			name:    "passthrough v1 normalization override",
 			envVars: map[string]string{"ALLOW_PASSTHROUGH_V1_ALIAS": "false"},
 			check: func(t *testing.T, cfg *Config) {
-				if cfg.Server.AllowPassthroughV1Alias {
-					t.Error("Server.AllowPassthroughV1Alias should be false")
-				}
+				assert.False(t, cfg.Server.AllowPassthroughV1Alias)
 			},
 		},
 		{
 			name:    "storage overrides",
 			envVars: map[string]string{"STORAGE_TYPE": "postgresql", "POSTGRES_URL": "postgres://localhost/test", "POSTGRES_MAX_CONNS": "20"},
 			check: func(t *testing.T, cfg *Config) {
-				if cfg.Storage.Type != "postgresql" {
-					t.Errorf("Storage.Type = %q, want %q", cfg.Storage.Type, "postgresql")
-				}
-				if cfg.Storage.PostgreSQL.URL != "postgres://localhost/test" {
-					t.Errorf("Storage.PostgreSQL.URL = %q, want %q", cfg.Storage.PostgreSQL.URL, "postgres://localhost/test")
-				}
-				if cfg.Storage.PostgreSQL.MaxConns != 20 {
-					t.Errorf("Storage.PostgreSQL.MaxConns = %d, want %d", cfg.Storage.PostgreSQL.MaxConns, 20)
-				}
+				assert.Equal(t, "postgresql", cfg.Storage.Type)
+				assert.Equal(t, "postgres://localhost/test", cfg.Storage.PostgreSQL.URL)
+				assert.Equal(t, 20, cfg.Storage.PostgreSQL.MaxConns)
 			},
 		},
 		{
 			name:    "bool overrides",
 			envVars: map[string]string{"METRICS_ENABLED": "true", "LOGGING_ENABLED": "1", "LOGGING_LOG_BODIES": "false"},
 			check: func(t *testing.T, cfg *Config) {
-				if !cfg.Metrics.Enabled {
-					t.Error("Metrics.Enabled should be true")
-				}
-				if !cfg.Logging.Enabled {
-					t.Error("Logging.Enabled should be true")
-				}
-				if cfg.Logging.LogBodies {
-					t.Error("Logging.LogBodies should be false")
-				}
+				assert.True(t, cfg.Metrics.Enabled)
+				assert.True(t, cfg.Logging.Enabled)
+				assert.False(t, cfg.Logging.LogBodies)
 			},
 		},
 		{
 			name:    "guardrails batch flag override",
 			envVars: map[string]string{"ENABLE_GUARDRAILS_FOR_BATCH_PROCESSING": "true"},
 			check: func(t *testing.T, cfg *Config) {
-				if !cfg.Guardrails.EnableForBatchProcessing {
-					t.Error("Guardrails.EnableForBatchProcessing should be true")
-				}
+				assert.True(t, cfg.Guardrails.EnableForBatchProcessing)
 			},
 		},
 		{
 			name:    "HTTP timeout overrides",
 			envVars: map[string]string{"HTTP_TIMEOUT": "30", "HTTP_RESPONSE_HEADER_TIMEOUT": "60"},
 			check: func(t *testing.T, cfg *Config) {
-				if cfg.HTTP.Timeout != 30 {
-					t.Errorf("HTTP.Timeout = %d, want 30", cfg.HTTP.Timeout)
-				}
-				if cfg.HTTP.ResponseHeaderTimeout != 60 {
-					t.Errorf("HTTP.ResponseHeaderTimeout = %d, want 60", cfg.HTTP.ResponseHeaderTimeout)
-				}
+				assert.Equal(t, 30, cfg.HTTP.Timeout)
+				assert.Equal(t, 60, cfg.HTTP.ResponseHeaderTimeout)
 			},
 		},
 		{
 			name:    "CACHE_REFRESH_INTERVAL override",
 			envVars: map[string]string{"CACHE_REFRESH_INTERVAL": "1800"},
 			check: func(t *testing.T, cfg *Config) {
-				if cfg.Cache.Model.RefreshInterval != 1800 {
-					t.Errorf("Cache.Model.RefreshInterval = %d, want 1800", cfg.Cache.Model.RefreshInterval)
-				}
+				assert.Equal(t, 1800, cfg.Cache.Model.RefreshInterval)
 			},
 		},
 		{
 			name:    "no env vars set preserves defaults",
 			envVars: map[string]string{},
 			check: func(t *testing.T, cfg *Config) {
-				if cfg.Server.Port != "8080" {
-					t.Errorf("Server.Port = %q, want %q", cfg.Server.Port, "8080")
-				}
-				if cfg.HTTP.Timeout != 600 {
-					t.Errorf("HTTP.Timeout = %d, want 600", cfg.HTTP.Timeout)
-				}
+				assert.Equal(t, "8080", cfg.Server.Port)
+				assert.Equal(t, 600, cfg.HTTP.Timeout)
 			},
 		},
 		{
 			name:    "retry int override",
 			envVars: map[string]string{"RETRY_MAX_RETRIES": "7"},
 			check: func(t *testing.T, cfg *Config) {
-				if cfg.Resilience.Retry.MaxRetries != 7 {
-					t.Errorf("Resilience.Retry.MaxRetries = %d, want 7", cfg.Resilience.Retry.MaxRetries)
-				}
+				assert.Equal(t, 7, cfg.Resilience.Retry.MaxRetries)
 			},
 		},
 		{
@@ -339,12 +302,8 @@ func TestApplyEnvOverrides(t *testing.T) {
 				"RETRY_MAX_BACKOFF":     "20s",
 			},
 			check: func(t *testing.T, cfg *Config) {
-				if cfg.Resilience.Retry.InitialBackoff != 500*time.Millisecond {
-					t.Errorf("InitialBackoff = %v, want 500ms", cfg.Resilience.Retry.InitialBackoff)
-				}
-				if cfg.Resilience.Retry.MaxBackoff != 20*time.Second {
-					t.Errorf("MaxBackoff = %v, want 20s", cfg.Resilience.Retry.MaxBackoff)
-				}
+				assert.Equal(t, 500*time.Millisecond, cfg.Resilience.Retry.InitialBackoff)
+				assert.Equal(t, 20*time.Second, cfg.Resilience.Retry.MaxBackoff)
 			},
 		},
 		{
@@ -354,12 +313,8 @@ func TestApplyEnvOverrides(t *testing.T) {
 				"RETRY_JITTER_FACTOR":  "0.25",
 			},
 			check: func(t *testing.T, cfg *Config) {
-				if cfg.Resilience.Retry.BackoffFactor != 3.5 {
-					t.Errorf("BackoffFactor = %f, want 3.5", cfg.Resilience.Retry.BackoffFactor)
-				}
-				if cfg.Resilience.Retry.JitterFactor != 0.25 {
-					t.Errorf("JitterFactor = %f, want 0.25", cfg.Resilience.Retry.JitterFactor)
-				}
+				assert.Equal(t, 3.5, cfg.Resilience.Retry.BackoffFactor)
+				assert.Equal(t, 0.25, cfg.Resilience.Retry.JitterFactor)
 			},
 		},
 		{
@@ -369,21 +324,15 @@ func TestApplyEnvOverrides(t *testing.T) {
 				"CIRCUIT_BREAKER_SUCCESS_THRESHOLD": "1",
 			},
 			check: func(t *testing.T, cfg *Config) {
-				if cfg.Resilience.CircuitBreaker.FailureThreshold != 3 {
-					t.Errorf("FailureThreshold = %d, want 3", cfg.Resilience.CircuitBreaker.FailureThreshold)
-				}
-				if cfg.Resilience.CircuitBreaker.SuccessThreshold != 1 {
-					t.Errorf("SuccessThreshold = %d, want 1", cfg.Resilience.CircuitBreaker.SuccessThreshold)
-				}
+				assert.Equal(t, 3, cfg.Resilience.CircuitBreaker.FailureThreshold)
+				assert.Equal(t, 1, cfg.Resilience.CircuitBreaker.SuccessThreshold)
 			},
 		},
 		{
 			name:    "provider passthrough override",
 			envVars: map[string]string{"ENABLE_PASSTHROUGH_ROUTES": "false"},
 			check: func(t *testing.T, cfg *Config) {
-				if cfg.Server.EnablePassthroughRoutes {
-					t.Error("EnablePassthroughRoutes = true, want false")
-				}
+				assert.False(t, cfg.Server.EnablePassthroughRoutes)
 			},
 		},
 		{
@@ -392,31 +341,24 @@ func TestApplyEnvOverrides(t *testing.T) {
 			// test process (t.Setenv restores it) so the default is isolated.
 			envVars: map[string]string{"CIRCUIT_BREAKER_ENABLED": ""},
 			check: func(t *testing.T, cfg *Config) {
-				if !cfg.Resilience.CircuitBreaker.Enabled {
-					t.Error("CircuitBreaker.Enabled = false, want true by default")
-				}
+				assert.True(t, cfg.Resilience.CircuitBreaker.Enabled)
 			},
 		},
 		{
 			name:    "circuit breaker enabled override",
 			envVars: map[string]string{"CIRCUIT_BREAKER_ENABLED": "false"},
 			check: func(t *testing.T, cfg *Config) {
-				if cfg.Resilience.CircuitBreaker.Enabled {
-					t.Error("CircuitBreaker.Enabled = true, want false")
-				}
+				assert.False(t, cfg.Resilience.CircuitBreaker.Enabled)
+
 				// Disabling must not clobber the tuning values.
-				if cfg.Resilience.CircuitBreaker.FailureThreshold != 5 {
-					t.Errorf("FailureThreshold = %d, want 5", cfg.Resilience.CircuitBreaker.FailureThreshold)
-				}
+				assert.Equal(t, 5, cfg.Resilience.CircuitBreaker.FailureThreshold)
 			},
 		},
 		{
 			name:    "circuit breaker timeout override",
 			envVars: map[string]string{"CIRCUIT_BREAKER_TIMEOUT": "10s"},
 			check: func(t *testing.T, cfg *Config) {
-				if cfg.Resilience.CircuitBreaker.Timeout != 10*time.Second {
-					t.Errorf("Timeout = %v, want 10s", cfg.Resilience.CircuitBreaker.Timeout)
-				}
+				assert.Equal(t, 10*time.Second, cfg.Resilience.CircuitBreaker.Timeout)
 			},
 		},
 	}

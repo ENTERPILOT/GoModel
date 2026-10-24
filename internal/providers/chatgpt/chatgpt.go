@@ -14,6 +14,9 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
+
+	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
@@ -23,6 +26,11 @@ import (
 // defaultBaseURL is the Codex backend served to ChatGPT subscribers. Override
 // with CHATGPT_BASE_URL.
 const defaultBaseURL = "https://chatgpt.com/backend-api/codex"
+
+// sessionHeader carries the conversation id, as the Codex CLI sends it. The
+// backend routes its prompt cache on this header: measured against chatgpt.com,
+// prompt_cache_key alone gets no cache hits, the header alone gets them all.
+const sessionHeader = "session-id"
 
 // defaultModels lists the models a ChatGPT subscription may call through the
 // Codex backend. The backend exposes no /models endpoint, so the inventory is
@@ -60,7 +68,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 		keys:   opts.Keyring(cfg.APIKey),
 		models: resolveModels(opts.Models),
 	}
-	p.client = llmclient.New(llmclient.Config{
+	p.client = llmclient.NewWithOptionalHTTPClient(opts.HTTPClient, llmclient.Config{
 		ProviderName:   opts.ClientName("chatgpt"),
 		BaseURL:        providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
 		Retry:          opts.Resilience.Retry,
@@ -68,21 +76,6 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}, nil)
 	return p
-}
-
-// NewWithHTTPClient creates a new ChatGPT provider with a custom HTTP client.
-// If httpClient is nil, http.DefaultClient is used.
-func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
-	clientCfg := llmclient.DefaultConfig("chatgpt", providers.ResolveBaseURL(baseURL, defaultBaseURL))
-	clientCfg.Hooks = hooks
-	return &Provider{
-		client: llmclient.NewWithHTTPClient(httpClient, clientCfg, nil),
-		keys:   providers.NewKeyring(apiKey),
-		models: resolveModels(nil),
-	}
 }
 
 // resolveModels returns the operator-configured inventory when present,
@@ -131,13 +124,16 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 	if req == nil {
 		return nil, core.NewInvalidRequestError("responses request is required", nil)
 	}
-	body, err := newUpstreamRequest(req)
+	body, err := newUpstreamRequest(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	headers, err := authHeaders(p.keys.NextForContext(ctx))
 	if err != nil {
 		return nil, err
+	}
+	if id := cacheSessionID(ctx, body); id != "" {
+		headers.Set(sessionHeader, id)
 	}
 	stream, err := p.client.DoStream(ctx, llmclient.Request{
 		Method:    http.MethodPost,
@@ -152,6 +148,25 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 		return nil, err
 	}
 	return providers.EnsureResponsesDone(stream), nil
+}
+
+// cacheSessionID returns the session-id header value: the session GoModel
+// detected, else the prompt_cache_key being sent — the Codex CLI sends the same
+// value in both. A key carrying control characters is not a valid header value
+// and is left out of the header rather than failing the request.
+func cacheSessionID(ctx context.Context, body *core.ResponsesRequest) string {
+	if id := core.SessionIDFromContext(ctx); id != "" {
+		return id
+	}
+	var key string
+	if err := json.Unmarshal(body.ExtraFields.Lookup(promptCacheKeyField), &key); err != nil {
+		return ""
+	}
+	key = strings.TrimSpace(key)
+	if strings.ContainsFunc(key, unicode.IsControl) {
+		return ""
+	}
+	return key
 }
 
 // ChatCompletion is unsupported: the ChatGPT Codex backend serves only the

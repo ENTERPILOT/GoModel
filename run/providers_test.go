@@ -6,6 +6,8 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestDefaultProviderFactoryCredentialForms pins the credential form the
@@ -31,7 +33,7 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			// The plain shape every API-key provider derives.
 			providerType: "openai",
 			defaultURL:   "https://api.openai.com/v1",
-			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "models"},
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "proxy_url", "models"},
 			required:     []string{"api_keys"},
 			absent:       []string{"api_version", "vertex_project"},
 		},
@@ -40,51 +42,51 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			// every other type, so the dashboard can offer them immediately.
 			providerType: "chutes",
 			defaultURL:   "https://llm.chutes.ai/v1",
-			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "models"},
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "proxy_url", "models"},
 			required:     []string{"api_keys"},
 		},
 		{
 			// Voice-only provider (no chat); same plain API-key shape.
 			providerType: "elevenlabs",
 			defaultURL:   "https://api.elevenlabs.io",
-			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "models"},
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "proxy_url", "models"},
 			required:     []string{"api_keys"},
 		},
 		{
 			// A deployment URL is the provider, so it is required, and Azure
 			// is the one type that takes an API version.
 			providerType: "azure",
-			fields:       []string{"api_keys", "base_url", "api_version", "session_sticky_keys", "models"},
+			fields:       []string{"api_keys", "base_url", "api_version", "session_sticky_keys", "proxy_url", "models"},
 			required:     []string{"api_keys", "base_url"},
 		},
 		{
 			// Keyless: the endpoint is the whole configuration.
 			providerType: "ollama",
-			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "models"},
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "proxy_url", "models"},
 			required:     nil,
 		},
 		{
 			// llm-d can be keyless, but it has no meaningful universal endpoint.
 			providerType: "llmd",
-			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "models"},
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "proxy_url", "models"},
 			required:     []string{"base_url"},
 		},
 		{
 			// SGLang supports both unauthenticated and --api-key deployments.
 			providerType: "sglang",
-			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "models"},
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "proxy_url", "models"},
 			required:     nil,
 		},
 		{
 			// Authenticates through the AWS SDK credential chain, never a key.
 			providerType: "bedrock",
-			fields:       []string{"base_url", "models"},
+			fields:       []string{"base_url", "proxy_url", "models"},
 			absent:       []string{"api_keys"},
 		},
 		{
 			// Bearer token or AWS_BEARER_TOKEN_BEDROCK, plus a request shape.
 			providerType: "bedrock-mantle",
-			fields:       []string{"api_keys", "base_url", "api_mode", "session_sticky_keys", "models"},
+			fields:       []string{"api_keys", "base_url", "api_mode", "session_sticky_keys", "proxy_url", "models"},
 			required:     nil,
 			options:      map[string][]string{"api_mode": {"auto", "openai", "standard"}},
 		},
@@ -95,7 +97,7 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			fields: []string{
 				"api_keys", "backend", "base_url", "api_mode", "auth_type",
 				"vertex_project", "vertex_location", "service_account_json",
-				"service_account_file", "service_account_json_base64", "gcp_scope", "session_sticky_keys", "models",
+				"service_account_file", "service_account_json_base64", "gcp_scope", "session_sticky_keys", "proxy_url", "models",
 			},
 			required: nil,
 			options: map[string][]string{
@@ -111,7 +113,7 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			fields: []string{
 				"auth_type", "vertex_project", "vertex_location", "service_account_json",
 				"service_account_file", "service_account_json_base64", "base_url",
-				"api_mode", "gcp_scope", "models",
+				"api_mode", "gcp_scope", "proxy_url", "models",
 			},
 			absent:  []string{"api_keys"},
 			options: map[string][]string{"api_mode": {"native", "openai_compatible"}},
@@ -121,46 +123,37 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.providerType, func(t *testing.T) {
 			schema, ok := schemas[tt.providerType]
-			if !ok {
-				t.Fatalf("no credential schema for provider type %q", tt.providerType)
-			}
-			if tt.defaultURL != "" && schema.DefaultBaseURL != tt.defaultURL {
-				t.Errorf("DefaultBaseURL = %q, want %q", schema.DefaultBaseURL, tt.defaultURL)
+			require.True(t, ok, "no credential schema for provider type %q", tt.providerType)
+
+			if tt.defaultURL != "" {
+				assert.Equal(t, tt.defaultURL, schema.DefaultBaseURL, "DefaultBaseURL")
 			}
 
 			var names []string
 			for _, field := range schema.Fields {
 				names = append(names, field.Name)
 			}
-			if !slices.Equal(names, tt.fields) {
-				t.Errorf("fields = %v, want %v", names, tt.fields)
-			}
+			assert.True(t, slices.Equal(names, tt.fields), "fields = %v, want %v", names, tt.fields)
+
 			var requiredNames []string
 			for _, field := range schema.Fields {
 				if field.Required {
 					requiredNames = append(requiredNames, field.Name)
 				}
 			}
-			if !slices.Equal(requiredNames, tt.required) {
-				t.Errorf("required = %v, want %v", requiredNames, tt.required)
-			}
+			assert.True(t, slices.Equal(requiredNames, tt.required), "required = %v, want %v", requiredNames, tt.required)
+
 			for _, name := range tt.absent {
-				if schema.Accepts(name) {
-					t.Errorf("Accepts(%s) = true, want false for provider type %q", name, tt.providerType)
-				}
+				assert.False(t, schema.Accepts(name), "Accepts(%s) = true, want false for provider type %q", name, tt.providerType)
 			}
 			for name, want := range tt.options {
 				field, _ := schema.Field(name)
-				if !slices.Equal(field.Options, want) {
-					t.Errorf("%s.Options = %v, want %v", name, field.Options, want)
-				}
+				assert.True(t, slices.Equal(field.Options, want), "%s.Options = %v, want %v", name, field.Options, want)
 			}
 			// Every field a form renders must be one the API accepts, or the
 			// value would be dropped on save.
 			for _, name := range names {
-				if !slices.Contains(credentialPayloadFields, name) {
-					t.Errorf("field %q is not part of the upsert payload", name)
-				}
+				assert.True(t, slices.Contains(credentialPayloadFields, name), "field %q is not part of the upsert payload", name)
 			}
 		})
 	}
@@ -170,13 +163,13 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 var credentialPayloadFields = []string{
 	"api_keys", "session_sticky_keys", "base_url", "api_version", "backend", "auth_type", "api_mode",
 	"vertex_project", "vertex_location", "service_account_file", "service_account_json",
-	"service_account_json_base64", "gcp_scope", "models",
+	"service_account_json_base64", "gcp_scope", "proxy_url", "models",
 }
 
 func TestDefaultProviderFactoryRegistersAllProviderTypes(t *testing.T) {
 	expected := []string{
-		"anthropic", "azure", "bailian", "bedrock", "bedrock-mantle", "chatgpt", "chutes", "cohere", "deepseek", "elevenlabs",
-		"fireworks", "gemini", "groq", "hetzner", "kilo", "kimicode", "llamacpp", "llmd", "meta", "minimax", "ollama", "openai", "opencode_go",
+		"anthropic", "audiocpp", "azure", "bailian", "bedrock", "bedrock-mantle", "chatgpt", "chutes", "cohere", "deepseek", "edenai", "elevenlabs",
+		"fireworks", "gemini", "groq", "hetzner", "jev", "kilo", "kimicode", "llamacpp", "llmd", "meta", "minimax", "ollama", "openai", "opencode_go",
 		"openrouter", "oracle", "sglang", "vertex", "vllm", "xai", "xiaomi", "zai",
 	}
 
@@ -188,9 +181,7 @@ func TestDefaultProviderFactoryRegistersAllProviderTypes(t *testing.T) {
 		got := factory.RegisteredTypes()
 		slices.Sort(got)
 
-		if !slices.Equal(got, expected) {
-			t.Errorf("metrics=%v: registered types = %v, want %v", metricsEnabled, got, expected)
-		}
+		assert.True(t, slices.Equal(got, expected), "metrics=%v: registered types = %v, want %v", metricsEnabled, got, expected)
 
 		// CredentialSchemas is the source for
 		// GET /admin/provider-credentials/types, which drives the dashboard's
@@ -199,8 +190,6 @@ func TestDefaultProviderFactoryRegistersAllProviderTypes(t *testing.T) {
 		for _, schema := range factory.CredentialSchemas() {
 			dashboardTypes = append(dashboardTypes, schema.Type)
 		}
-		if !slices.Equal(dashboardTypes, expected) {
-			t.Errorf("metrics=%v: dashboard provider types = %v, want %v", metricsEnabled, dashboardTypes, expected)
-		}
+		assert.True(t, slices.Equal(dashboardTypes, expected), "metrics=%v: dashboard provider types = %v, want %v", metricsEnabled, dashboardTypes, expected)
 	}
 }

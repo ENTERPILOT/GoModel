@@ -104,6 +104,9 @@ func (s *translatedInferenceService) newInferenceOrchestrator() *gateway.Inferen
 	if s.rateLimiter != nil {
 		cfg.RouteGate = s.rateLimiter
 	}
+	if gate, ok := s.budgetChecker.(gateway.BudgetGate); ok {
+		cfg.BudgetGate = gate
+	}
 	return gateway.NewInferenceOrchestrator(cfg)
 }
 
@@ -146,7 +149,7 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 			markRequestFailoverUsed(c)
 		}
 		stream := s.wrapPluginStream(ctx, workflow, chatStreamDialect(includeStreamUsage(req)), chatPromptOf(req), result.Stream)
-		return s.handleStreamingReadCloser(c, workflow, result.Meta, stream, func(stream io.ReadCloser) io.ReadCloser {
+		return s.handleStreamingReadCloser(c, workflow, result.Meta, stream, result.GenerationObserver(), func(stream io.ReadCloser) io.ReadCloser {
 			return result.WrapDeliveryStream(ctx, stream)
 		})
 	}
@@ -380,7 +383,7 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 			stream = turn.persistingStream(ctx, stream)
 		}
 		stream = s.snapshotStream(ctx, workflow, req, result.Meta.ProviderType, result.Meta.ProviderName, requestID, stream)
-		return s.handleStreamingReadCloser(c, workflow, result.Meta, stream, func(stream io.ReadCloser) io.ReadCloser {
+		return s.handleStreamingReadCloser(c, workflow, result.Meta, stream, result.GenerationObserver(), func(stream io.ReadCloser) io.ReadCloser {
 			return result.WrapDeliveryStream(ctx, stream)
 		})
 	}
@@ -582,20 +585,24 @@ func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
 	}
 	attachPreparedWorkflow(c, prepared.Context, prepared.Workflow)
 
-	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRouteFromWorkflow(prepared.Workflow))
+	return handleWithCache(s, c, prepared.Request, prepared.Workflow, s.dispatchEmbeddings)
+}
+
+func (s *translatedInferenceService) dispatchEmbeddings(c *echo.Context, req *core.EmbeddingRequest, workflow *core.Workflow) error {
+	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRouteFromWorkflow(workflow))
 	if err != nil {
 		return handleError(c, err)
 	}
 	defer adm.release()
 
 	requestID := requestIDFromContextOrHeader(c.Request())
-	result, err := s.inference().ExecuteEmbeddings(c.Request().Context(), prepared.Workflow, prepared.Request, requestID, "/v1/embeddings")
+	result, err := s.inference().ExecuteEmbeddings(c.Request().Context(), workflow, req, requestID, "/v1/embeddings")
 	if err != nil {
 		return handleError(c, err)
 	}
 	auditlog.EnrichEntryWithResolvedRoute(
 		c,
-		qualifyExecutedModel(prepared.Workflow, result.Response.Model, result.Meta.ProviderName),
+		qualifyExecutedModel(workflow, result.Response.Model, result.Meta.ProviderName),
 		result.Meta.ProviderType,
 		result.Meta.ProviderName,
 	)
@@ -645,7 +652,9 @@ func cacheWorkflowResolutionHints(c *echo.Context, workflow *core.Workflow) {
 }
 
 // handleStreamingReadCloser flushes a provider SSE stream to the client while
-// fanning audit and usage observers off the canonical (OpenAI-shaped) stream.
+// fanning audit, usage, and generation-trace observers off the canonical
+// (OpenAI-shaped) stream. generation is the stream result's
+// GenerationObserver, nil for synthesized streams.
 // outerWrap, when non-nil, wraps the observed stream as the outermost layer —
 // used by the Anthropic /v1/messages dialect to re-encode the SSE events after
 // the observers have already seen the canonical form.
@@ -654,6 +663,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 	workflow *core.Workflow,
 	meta gateway.ExecutionMeta,
 	stream io.ReadCloser,
+	generation streaming.Observer,
 	outerWrap func(io.ReadCloser) io.ReadCloser,
 ) error {
 	model, provider, providerName := meta.Model, meta.ProviderType, meta.ProviderName
@@ -675,7 +685,10 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 
 	requestID := requestIDFromContextOrHeader(c.Request())
 	endpoint := c.Request().URL.Path
-	observers := make([]streaming.Observer, 0, 3)
+	observers := make([]streaming.Observer, 0, 4)
+	if generation != nil {
+		observers = append(observers, generation)
+	}
 	if auditEnabled && streamEntry != nil {
 		observers = append(observers, auditlog.NewStreamLogObserver(s.logger, streamEntry, endpoint))
 	}
@@ -684,6 +697,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 		if usageObserver != nil {
 			usageObserver.SetProviderName(providerName)
 			usageObserver.SetSessionID(core.SessionIDFromContext(c.Request().Context()))
+			usageObserver.SetAuthKeyID(core.GetAuthKeyID(c.Request().Context()))
 			usageObserver.SetLabels(core.RequestLabelsFromContext(c.Request().Context()))
 			usageObserver.SetRewriteTokensSaved(core.RewriteTokensSavedFromContext(c.Request().Context()))
 			observers = append(observers, usageObserver)
@@ -701,6 +715,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 			providerName: providerName,
 		})
 	}
+	stream = guardStreamCompletion(endpoint, stream)
 	wrappedStream := streaming.NewObservedSSEStream(stream, observers...)
 	if outerWrap != nil {
 		wrappedStream = outerWrap(wrappedStream)
@@ -751,6 +766,10 @@ func classifyStreamError(ctx context.Context, err error) string {
 	switch {
 	case errors.Is(err, ErrClientStall):
 		return "client_stalled"
+	case errors.Is(err, streaming.ErrStreamIncomplete) && (ctx == nil || ctx.Err() != context.Canceled):
+		// The provider stream failed while being read, so a connection reset
+		// it wraps is the provider's, not the client's.
+		return "stream_error"
 	case isClientDisconnect(ctx, err):
 		return "client_disconnected"
 	}

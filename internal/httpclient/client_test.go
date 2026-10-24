@@ -2,46 +2,32 @@ package httpclient
 
 import (
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDefaultConfig(t *testing.T) {
 	config := DefaultConfig()
 
-	if config.MaxIdleConns != 100 {
-		t.Errorf("Expected MaxIdleConns to be 100, got %d", config.MaxIdleConns)
-	}
-
-	if config.MaxIdleConnsPerHost != 100 {
-		t.Errorf("Expected MaxIdleConnsPerHost to be 100, got %d", config.MaxIdleConnsPerHost)
-	}
-
-	if config.IdleConnTimeout != 90*time.Second {
-		t.Errorf("Expected IdleConnTimeout to be 90s, got %v", config.IdleConnTimeout)
-	}
+	assert.Equal(t, 100, config.MaxIdleConns)
+	assert.Equal(t, 100, config.MaxIdleConnsPerHost)
+	assert.Equal(t, 90*time.Second, config.IdleConnTimeout)
 
 	// Default timeout is 600s (10 minutes) to match OpenAI/Anthropic SDKs
-	if config.Timeout != 600*time.Second {
-		t.Errorf("Expected Timeout to be 600s, got %v", config.Timeout)
-	}
-
-	if config.DialTimeout != 30*time.Second {
-		t.Errorf("Expected DialTimeout to be 30s, got %v", config.DialTimeout)
-	}
-
-	if config.KeepAlive != 30*time.Second {
-		t.Errorf("Expected KeepAlive to be 30s, got %v", config.KeepAlive)
-	}
-
-	if config.TLSHandshakeTimeout != 10*time.Second {
-		t.Errorf("Expected TLSHandshakeTimeout to be 10s, got %v", config.TLSHandshakeTimeout)
-	}
+	assert.Equal(t, 600*time.Second, config.Timeout)
+	assert.Equal(t, 30*time.Second, config.DialTimeout)
+	assert.Equal(t, 30*time.Second, config.KeepAlive)
+	assert.Equal(t, 10*time.Second, config.TLSHandshakeTimeout)
 
 	// Default ResponseHeaderTimeout is 600s (10 minutes) to match OpenAI/Anthropic SDKs
-	if config.ResponseHeaderTimeout != 600*time.Second {
-		t.Errorf("Expected ResponseHeaderTimeout to be 600s, got %v", config.ResponseHeaderTimeout)
-	}
+	assert.Equal(t, 600*time.Second, config.ResponseHeaderTimeout)
 }
 
 func TestDefaultConfigWithEnvOverrides(t *testing.T) {
@@ -51,18 +37,11 @@ func TestDefaultConfigWithEnvOverrides(t *testing.T) {
 
 	config := DefaultConfig()
 
-	if config.Timeout != 120*time.Second {
-		t.Errorf("Expected Timeout to be 120s from env, got %v", config.Timeout)
-	}
-
-	if config.ResponseHeaderTimeout != 90*time.Second {
-		t.Errorf("Expected ResponseHeaderTimeout to be 90s from env, got %v", config.ResponseHeaderTimeout)
-	}
+	assert.Equal(t, 120*time.Second, config.Timeout)
+	assert.Equal(t, 90*time.Second, config.ResponseHeaderTimeout)
 
 	// Other values should remain unchanged
-	if config.DialTimeout != 30*time.Second {
-		t.Errorf("Expected DialTimeout to be 30s, got %v", config.DialTimeout)
-	}
+	assert.Equal(t, 30*time.Second, config.DialTimeout)
 }
 
 func TestDefaultConfigWithDurationFormat(t *testing.T) {
@@ -71,9 +50,7 @@ func TestDefaultConfigWithDurationFormat(t *testing.T) {
 
 	config := DefaultConfig()
 
-	if config.Timeout != 2*time.Minute {
-		t.Errorf("Expected Timeout to be 2m from env, got %v", config.Timeout)
-	}
+	assert.Equal(t, 2*time.Minute, config.Timeout)
 }
 
 func TestDefaultConfigWithInvalidEnv(t *testing.T) {
@@ -83,9 +60,7 @@ func TestDefaultConfigWithInvalidEnv(t *testing.T) {
 	config := DefaultConfig()
 
 	// Should fall back to default value
-	if config.Timeout != 600*time.Second {
-		t.Errorf("Expected Timeout to fall back to 600s for invalid env, got %v", config.Timeout)
-	}
+	assert.Equal(t, 600*time.Second, config.Timeout)
 }
 
 func TestNewHTTPClient(t *testing.T) {
@@ -116,20 +91,12 @@ func TestNewHTTPClient(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client := NewHTTPClient(tt.config)
 
-			if client == nil {
-				t.Fatal("Expected client to be non-nil")
-				return
-			}
+			require.NotNil(t, client, "Expected client to be non-nil")
 
-			if client.Transport == nil {
-				t.Fatal("Expected transport to be non-nil")
-				return
-			}
+			require.NotNil(t, client.Transport, "Expected transport to be non-nil")
 
 			transport, ok := client.Transport.(*http.Transport)
-			if !ok {
-				t.Fatal("Expected transport to be *http.Transport")
-			}
+			require.True(t, ok)
 
 			expectedConfig := tt.config
 			if expectedConfig == nil {
@@ -138,39 +105,18 @@ func TestNewHTTPClient(t *testing.T) {
 			}
 
 			// Verify transport settings
-			if transport.MaxIdleConns != expectedConfig.MaxIdleConns {
-				t.Errorf("Expected MaxIdleConns to be %d, got %d", expectedConfig.MaxIdleConns, transport.MaxIdleConns)
-			}
-
-			if transport.MaxIdleConnsPerHost != expectedConfig.MaxIdleConnsPerHost {
-				t.Errorf("Expected MaxIdleConnsPerHost to be %d, got %d", expectedConfig.MaxIdleConnsPerHost, transport.MaxIdleConnsPerHost)
-			}
-
-			if transport.IdleConnTimeout != expectedConfig.IdleConnTimeout {
-				t.Errorf("Expected IdleConnTimeout to be %v, got %v", expectedConfig.IdleConnTimeout, transport.IdleConnTimeout)
-			}
-
-			if client.Timeout != expectedConfig.Timeout {
-				t.Errorf("Expected client Timeout to be %v, got %v", expectedConfig.Timeout, client.Timeout)
-			}
-
-			if transport.TLSHandshakeTimeout != expectedConfig.TLSHandshakeTimeout {
-				t.Errorf("Expected TLSHandshakeTimeout to be %v, got %v", expectedConfig.TLSHandshakeTimeout, transport.TLSHandshakeTimeout)
-			}
-
-			if transport.ResponseHeaderTimeout != expectedConfig.ResponseHeaderTimeout {
-				t.Errorf("Expected ResponseHeaderTimeout to be %v, got %v", expectedConfig.ResponseHeaderTimeout, transport.ResponseHeaderTimeout)
-			}
+			assert.Equal(t, expectedConfig.MaxIdleConns, transport.MaxIdleConns)
+			assert.Equal(t, expectedConfig.MaxIdleConnsPerHost, transport.MaxIdleConnsPerHost)
+			assert.Equal(t, expectedConfig.IdleConnTimeout, transport.IdleConnTimeout)
+			assert.Equal(t, expectedConfig.Timeout, client.Timeout)
+			assert.Equal(t, expectedConfig.TLSHandshakeTimeout, transport.TLSHandshakeTimeout)
+			assert.Equal(t, expectedConfig.ResponseHeaderTimeout, transport.ResponseHeaderTimeout)
 
 			// Verify ForceAttemptHTTP2 is enabled
-			if !transport.ForceAttemptHTTP2 {
-				t.Error("Expected ForceAttemptHTTP2 to be enabled")
-			}
+			assert.True(t, transport.ForceAttemptHTTP2)
 
 			// Verify Proxy is set
-			if transport.Proxy == nil {
-				t.Error("Expected Proxy to be set")
-			}
+			assert.NotNil(t, transport.Proxy)
 		})
 	}
 }
@@ -178,35 +124,19 @@ func TestNewHTTPClient(t *testing.T) {
 func TestNewDefaultHTTPClient(t *testing.T) {
 	client := NewDefaultHTTPClient()
 
-	if client == nil {
-		t.Fatal("Expected client to be non-nil")
-		return
-	}
+	require.NotNil(t, client, "Expected client to be non-nil")
 
-	if client.Transport == nil {
-		t.Fatal("Expected transport to be non-nil")
-		return
-	}
+	require.NotNil(t, client.Transport, "Expected transport to be non-nil")
 
 	transport, ok := client.Transport.(*http.Transport)
-	if !ok {
-		t.Fatal("Expected transport to be *http.Transport")
-	}
+	require.True(t, ok)
 
 	defaultConfig := DefaultConfig()
 
 	// Verify it uses default configuration
-	if transport.MaxIdleConns != defaultConfig.MaxIdleConns {
-		t.Errorf("Expected MaxIdleConns to be %d, got %d", defaultConfig.MaxIdleConns, transport.MaxIdleConns)
-	}
-
-	if transport.MaxIdleConnsPerHost != defaultConfig.MaxIdleConnsPerHost {
-		t.Errorf("Expected MaxIdleConnsPerHost to be %d, got %d", defaultConfig.MaxIdleConnsPerHost, transport.MaxIdleConnsPerHost)
-	}
-
-	if client.Timeout != defaultConfig.Timeout {
-		t.Errorf("Expected client Timeout to be %v, got %v", defaultConfig.Timeout, client.Timeout)
-	}
+	assert.Equal(t, defaultConfig.MaxIdleConns, transport.MaxIdleConns)
+	assert.Equal(t, defaultConfig.MaxIdleConnsPerHost, transport.MaxIdleConnsPerHost)
+	assert.Equal(t, defaultConfig.Timeout, client.Timeout)
 }
 
 func TestHTTPClientIsReusable(t *testing.T) {
@@ -215,21 +145,14 @@ func TestHTTPClientIsReusable(t *testing.T) {
 	client1 := NewDefaultHTTPClient()
 	client2 := NewDefaultHTTPClient()
 
-	if client1 == client2 {
-		t.Error("Expected different client instances")
-	}
+	assert.NotSame(t, client2, client1)
 
 	// But they should have the same configuration
 	transport1 := client1.Transport.(*http.Transport)
 	transport2 := client2.Transport.(*http.Transport)
 
-	if transport1.MaxIdleConns != transport2.MaxIdleConns {
-		t.Error("Expected same MaxIdleConns configuration")
-	}
-
-	if client1.Timeout != client2.Timeout {
-		t.Error("Expected same Timeout configuration")
-	}
+	assert.Equal(t, transport2.MaxIdleConns, transport1.MaxIdleConns)
+	assert.Equal(t, client2.Timeout, client1.Timeout)
 }
 
 func TestClientConfigZeroValues(t *testing.T) {
@@ -249,13 +172,8 @@ func TestClientConfigZeroValues(t *testing.T) {
 	transport := client.Transport.(*http.Transport)
 
 	// Zero values should be preserved (not replaced with defaults)
-	if transport.MaxIdleConns != 0 {
-		t.Errorf("Expected MaxIdleConns to be 0, got %d", transport.MaxIdleConns)
-	}
-
-	if client.Timeout != 0 {
-		t.Errorf("Expected Timeout to be 0, got %v", client.Timeout)
-	}
+	assert.Equal(t, 0, transport.MaxIdleConns)
+	assert.Equal(t, time.Duration(0), client.Timeout)
 }
 
 func TestDefaultConfigTimeoutPrecedence(t *testing.T) {
@@ -263,35 +181,138 @@ func TestDefaultConfigTimeoutPrecedence(t *testing.T) {
 
 	// Built-in default when nothing is configured.
 	SetConfiguredTimeouts(0, 0)
-	if got := DefaultConfig().Timeout; got != 600*time.Second {
-		t.Fatalf("built-in default Timeout = %v, want 600s", got)
-	}
+	got := DefaultConfig().Timeout
+	require.Equal(t, 600*time.Second, got)
 
 	// Config-file values apply when no env override is present.
 	SetConfiguredTimeouts(30, 40)
 	cfg := DefaultConfig()
-	if cfg.Timeout != 30*time.Second {
-		t.Fatalf("configured Timeout = %v, want 30s", cfg.Timeout)
-	}
-	if cfg.ResponseHeaderTimeout != 40*time.Second {
-		t.Fatalf("configured ResponseHeaderTimeout = %v, want 40s", cfg.ResponseHeaderTimeout)
-	}
+	require.Equal(t, 30*time.Second, cfg.Timeout)
+	require.Equal(t, 40*time.Second, cfg.ResponseHeaderTimeout)
 
 	// Env vars win over config-file values.
 	t.Setenv("HTTP_TIMEOUT", "50")
 	t.Setenv("HTTP_RESPONSE_HEADER_TIMEOUT", "60")
 	cfg = DefaultConfig()
-	if cfg.Timeout != 50*time.Second {
-		t.Fatalf("env-overridden Timeout = %v, want 50s", cfg.Timeout)
-	}
-	if cfg.ResponseHeaderTimeout != 60*time.Second {
-		t.Fatalf("env-overridden ResponseHeaderTimeout = %v, want 60s", cfg.ResponseHeaderTimeout)
-	}
+	require.Equal(t, 50*time.Second, cfg.Timeout)
+	require.Equal(t, 60*time.Second, cfg.ResponseHeaderTimeout)
 
 	// Non-positive values clear back to the built-in default.
 	t.Setenv("HTTP_TIMEOUT", "")
 	SetConfiguredTimeouts(-1, 0)
-	if got := DefaultConfig().Timeout; got != 600*time.Second {
-		t.Fatalf("cleared Timeout = %v, want 600s", got)
+	got = DefaultConfig().Timeout
+	require.Equal(t, 600*time.Second, got)
+}
+
+// tokenTransport adds a credential on every round trip, as the Google OAuth
+// transport does, so stripping headers in CheckRedirect could not stop it.
+type tokenTransport struct{ base http.RoundTripper }
+
+func (t tokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	req.Header.Set("Authorization", "Bearer ya29.token")
+	return t.base.RoundTrip(req)
+}
+
+// A redirect to another origin is handed back unfollowed, so neither the
+// provider credential, a token a wrapping transport adds, nor the request
+// body reaches the other host. Same-origin redirects are still followed.
+func TestNewHTTPClientDoesNotFollowCrossOriginRedirects(t *testing.T) {
+	var otherHits atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { otherHits.Add(1) }))
+	defer other.Close()
+
+	received := make(chan http.Header, 1)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/next", func(w http.ResponseWriter, r *http.Request) { received <- r.Header.Clone() })
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	serverURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	// localhost reaches the same listener as 127.0.0.1 but is another host.
+	mux.Handle("/other-host", http.RedirectHandler("http://localhost:"+serverURL.Port()+"/next", http.StatusTemporaryRedirect))
+	mux.Handle("/other-port", http.RedirectHandler(other.URL+"/next", http.StatusPermanentRedirect))
+	mux.Handle("/same-origin", http.RedirectHandler("/next", http.StatusTemporaryRedirect))
+
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		transport  func(http.RoundTripper) http.RoundTripper
+		wantStatus int
+	}{
+		{name: "other host", method: http.MethodGet, path: "/other-host", wantStatus: http.StatusTemporaryRedirect},
+		{name: "other port with body", method: http.MethodPost, path: "/other-port", wantStatus: http.StatusPermanentRedirect},
+		{
+			name: "token-adding transport", method: http.MethodPost, path: "/other-port", wantStatus: http.StatusPermanentRedirect,
+			transport: func(base http.RoundTripper) http.RoundTripper { return tokenTransport{base: base} },
+		},
+		{name: "same origin", method: http.MethodGet, path: "/same-origin", wantStatus: http.StatusOK},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			otherHits.Store(0)
+			client := NewHTTPClient(nil)
+			if tt.transport != nil {
+				client.Transport = tt.transport(client.Transport)
+			}
+			req, err := http.NewRequestWithContext(t.Context(), tt.method, server.URL+tt.path, strings.NewReader(`{"prompt":"secret"}`))
+			require.NoError(t, err)
+			req.Header.Set("X-Api-Key", "sk-ant")
+
+			resp, err := client.Do(req)
+			require.NoError(t, err)
+			require.NoError(t, resp.Body.Close())
+			assert.Equal(t, tt.wantStatus, resp.StatusCode)
+
+			if tt.wantStatus == http.StatusOK {
+				got := <-received
+				assert.Equal(t, "sk-ant", got.Get("X-Api-Key"), "same-origin redirect keeps the credential")
+				return
+			}
+			assert.Zero(t, otherHits.Load(), "cross-origin target was contacted")
+			select {
+			case <-received:
+				assert.Fail(t, "cross-origin redirect was followed")
+			default:
+			}
+		})
+	}
+}
+
+func TestStopCrossOriginRedirects(t *testing.T) {
+	tests := []struct {
+		from, to string
+		wantStop bool
+	}{
+		{from: "https://api.example.com/v1/x", to: "https://api.example.com/v1/y"},
+		{from: "https://api.example.com/v1/x", to: "https://API.example.com/v1/y"},
+		{from: "https://api.example.com/v1/x", to: "http://api.example.com/v1/y", wantStop: true},
+		{from: "https://api.example.com/v1/x", to: "https://api.example.com:8443/v1/y", wantStop: true},
+		{from: "https://api.example.com/v1/x", to: "https://files.example.com/v1/y", wantStop: true},
+		{from: "https://api.example.com/v1/x", to: "https://evil.test/", wantStop: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.to, func(t *testing.T) {
+			from := httptest.NewRequest(http.MethodGet, tt.from, nil)
+			to := httptest.NewRequest(http.MethodGet, tt.to, nil)
+			err := stopCrossOriginRedirects(to, []*http.Request{from})
+			if tt.wantStop {
+				assert.ErrorIs(t, err, http.ErrUseLastResponse)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestNewHTTPClientStopsAfterTenRedirects(t *testing.T) {
+	server := httptest.NewServer(http.RedirectHandler("/loop", http.StatusFound))
+	defer server.Close()
+
+	resp, err := NewHTTPClient(nil).Get(server.URL + "/loop")
+	if resp != nil {
+		require.NoError(t, resp.Body.Close())
+	}
+	require.ErrorContains(t, err, "stopped after 10 redirects")
 }

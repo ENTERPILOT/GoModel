@@ -2,13 +2,13 @@ package gateway
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 // stubFailoverResolver returns a fixed selector list regardless of input.
@@ -48,17 +48,11 @@ func TestTryFailoverResponseSkipsWhenContextCanceled(t *testing.T) {
 		return "", "", core.NewProviderError("openai", http.StatusBadGateway, "unexpected failover call", nil)
 	}
 
-	_, meta, err := tryFailoverResponse(ctx, o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+	_, meta, err := tryFailoverResponse(ctx, o, workflow, "openai/gpt-4o", "openai", primaryErr, nil, call)
 
-	if called {
-		t.Fatal("tryFailoverResponse invoked a failover provider on a canceled context; it must short-circuit")
-	}
-	if meta.UsedFailover {
-		t.Fatalf("didFailover = true, want false when context is canceled")
-	}
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("err = %v, want the primary error wrapping context.Canceled", err)
-	}
+	require.False(t, called)
+	require.False(t, meta.UsedFailover)
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 // The guard is scoped to a done context: a live request still attempts failover.
@@ -72,14 +66,12 @@ func TestTryFailoverResponseAttemptsWhenContextLive(t *testing.T) {
 		return "ok", "openai", nil
 	}
 
-	resp, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+	resp, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, nil, call)
 
-	if !called {
-		t.Fatal("tryFailoverResponse did not attempt failover on a live context")
-	}
-	if !meta.UsedFailover || err != nil || resp != "ok" {
-		t.Fatalf("failover result = (resp:%q didFailover:%v err:%v), want (ok true <nil>)", resp, meta.UsedFailover, err)
-	}
+	require.True(t, called)
+	require.True(t, meta.UsedFailover)
+	require.NoError(t, err)
+	require.Equal(t, "ok", resp)
 }
 
 // blockingRouteGate refuses the listed qualified models.
@@ -108,14 +100,14 @@ func TestTryFailoverResponseSkipsRateLimitedTargets(t *testing.T) {
 		return "ok", "anthropic", nil
 	}
 
-	resp, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+	resp, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, nil, call)
 
-	if len(attempted) != 1 || attempted[0] != "anthropic/claude" {
-		t.Fatalf("attempted = %v, want only anthropic/claude (rate-limited target skipped)", attempted)
-	}
-	if !meta.UsedFailover || err != nil || resp != "ok" || meta.FailoverModel != "anthropic/claude" {
-		t.Fatalf("failover result = (resp:%q model:%q didFailover:%v err:%v), want anthropic success", resp, meta.FailoverModel, meta.UsedFailover, err)
-	}
+	require.Len(t, attempted, 1)
+	require.Equal(t, "anthropic/claude", attempted[0])
+	require.True(t, meta.UsedFailover)
+	require.NoError(t, err)
+	require.Equal(t, "ok", resp)
+	require.Equal(t, "anthropic/claude", meta.FailoverModel)
 }
 
 // The stream sweep shares the route-gate skip with the response sweep.
@@ -136,13 +128,111 @@ func TestTryFailoverStreamSkipsRateLimitedTargets(t *testing.T) {
 
 	stream, meta, err := tryFailoverStream(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
 
-	if len(attempted) != 1 || attempted[0] != "anthropic/claude" {
-		t.Fatalf("attempted = %v, want only anthropic/claude (rate-limited target skipped)", attempted)
-	}
-	if err != nil || stream == nil || meta.FailoverModel != "anthropic/claude" {
-		t.Fatalf("failover result = (stream:%v model:%q err:%v), want anthropic success", stream != nil, meta.FailoverModel, err)
-	}
+	require.Len(t, attempted, 1)
+	require.Equal(t, "anthropic/claude", attempted[0])
+	require.NoError(t, err)
+	require.NotNil(t, stream)
+	require.Equal(t, "anthropic/claude", meta.FailoverModel)
+
 	stream.Close()
+}
+
+// namedRouteProvider resolves each model's provider type and instance name
+// from its qualified prefix, the way a configured router names instances.
+type namedRouteProvider struct {
+	core.RoutableProvider
+}
+
+func (namedRouteProvider) GetProviderType(model string) string {
+	provider, _, _ := strings.Cut(model, "/")
+	return provider
+}
+
+func (namedRouteProvider) GetProviderName(model string) string {
+	provider, _, _ := strings.Cut(model, "/")
+	return provider
+}
+
+// overBudgetGate refuses the listed provider names.
+type overBudgetGate struct {
+	exhausted map[string]bool
+}
+
+func (g overBudgetGate) ProviderWithinBudget(_ context.Context, providerName string) bool {
+	return !g.exhausted[providerName]
+}
+
+// A failover target whose provider budget is spent is skipped on both sweeps,
+// so failover can never route around an exhausted provider budget.
+func TestTryFailoverSkipsOverBudgetProviders(t *testing.T) {
+	newFixture := func() (*InferenceOrchestrator, *core.Workflow) {
+		o, workflow := failoverTestFixture()
+		o.failoverResolver = stubFailoverResolver{selectors: []core.ModelSelector{
+			{Provider: "openai", Model: "gpt-5"},
+			{Provider: "anthropic", Model: "claude"},
+		}}
+		o.provider = namedRouteProvider{}
+		o.budgetGate = overBudgetGate{exhausted: map[string]bool{"openai": true}}
+		return o, workflow
+	}
+	primaryErr := core.NewProviderError("openai", http.StatusInternalServerError, "primary boom", nil)
+
+	t.Run("response", func(t *testing.T) {
+		o, workflow := newFixture()
+		var attempted []string
+		call := func(selector core.ModelSelector, _, _ string) (string, string, error) {
+			attempted = append(attempted, selector.QualifiedModel())
+			return "ok", "anthropic", nil
+		}
+
+		_, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, nil, call)
+
+		require.NoError(t, err)
+		require.Equal(t, []string{"anthropic/claude"}, attempted)
+		require.Equal(t, "anthropic/claude", meta.FailoverModel)
+	})
+
+	t.Run("stream", func(t *testing.T) {
+		o, workflow := newFixture()
+		var attempted []string
+		call := func(selector core.ModelSelector, _, _ string) (io.ReadCloser, string, string, error) {
+			attempted = append(attempted, selector.QualifiedModel())
+			return io.NopCloser(strings.NewReader("data")), "anthropic", "claude", nil
+		}
+
+		stream, meta, err := tryFailoverStream(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+
+		require.NoError(t, err)
+		require.NotNil(t, stream)
+		defer stream.Close()
+		require.Equal(t, []string{"anthropic/claude"}, attempted)
+		require.Equal(t, "anthropic/claude", meta.FailoverModel)
+	})
+}
+
+// A workflow with budgets disabled skips budget checks at admission, so
+// failover must not gate targets on provider budgets either.
+func TestTryFailoverIgnoresBudgetsWhenWorkflowDisablesThem(t *testing.T) {
+	o, workflow := failoverTestFixture()
+	o.provider = namedRouteProvider{}
+	o.budgetGate = overBudgetGate{exhausted: map[string]bool{"openai": true}}
+	workflow.Policy = &core.ResolvedWorkflowPolicy{
+		VersionID: "workflow-v1",
+		Features:  core.WorkflowFeatures{Failover: true, Budget: false},
+	}
+
+	primaryErr := core.NewProviderError("openai", http.StatusInternalServerError, "primary boom", nil)
+	var attempted []string
+	call := func(selector core.ModelSelector, _, _ string) (string, string, error) {
+		attempted = append(attempted, selector.QualifiedModel())
+		return "ok", "openai", nil
+	}
+
+	_, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, nil, call)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"openai/gpt-5"}, attempted)
+	require.True(t, meta.UsedFailover)
 }
 
 func TestTryFailoverStreamSkipsWhenContextCanceled(t *testing.T) {
@@ -160,15 +250,9 @@ func TestTryFailoverStreamSkipsWhenContextCanceled(t *testing.T) {
 
 	stream, _, err := tryFailoverStream(ctx, o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
 
-	if called {
-		t.Fatal("tryFailoverStream invoked a failover provider on a canceled context; it must short-circuit")
-	}
-	if stream != nil {
-		t.Fatal("tryFailoverStream returned a stream on a canceled context")
-	}
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("err = %v, want the primary error wrapping context.Canceled", err)
-	}
+	require.False(t, called)
+	require.Nil(t, stream)
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestShouldAttemptFailover(t *testing.T) {
@@ -213,9 +297,8 @@ func TestShouldAttemptFailover(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := core.NewProviderError("anthropic", tt.status, tt.message, nil)
-			if got := ShouldAttemptFailover(err); got != tt.want {
-				t.Fatalf("ShouldAttemptFailover(%d, %q) = %v, want %v", tt.status, tt.message, got, tt.want)
-			}
+			got := ShouldAttemptFailover(err)
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -231,21 +314,20 @@ func TestExecuteTranslatedSkipsSaturatedPrimaryAndFailsOver(t *testing.T) {
 	resp, meta, err := executeTranslatedWithFailover(
 		ctx, o, workflow, "req", "openai/gpt-4o", "openai",
 		func(req string, selector core.ModelSelector) string { return selector.QualifiedModel() },
-		func(_ context.Context, req string) (string, string, error) {
+		func(_ context.Context, req string, _ string) (string, string, error) {
 			calls = append(calls, req)
-			if req == "req" {
-				t.Fatal("saturated primary route reached the provider")
-			}
+			require.NotEqual(t, "req", req)
+
 			return "ok", "openai", nil
 		},
 	)
 
-	if len(calls) != 1 || calls[0] != "openai/gpt-5" {
-		t.Fatalf("provider calls = %v, want only the failover target", calls)
-	}
-	if !meta.UsedFailover || err != nil || resp != "ok" || meta.FailoverModel != "openai/gpt-5" {
-		t.Fatalf("result = (resp:%q model:%q didFailover:%v err:%v), want failover success", resp, meta.FailoverModel, meta.UsedFailover, err)
-	}
+	require.Len(t, calls, 1)
+	require.Equal(t, "openai/gpt-5", calls[0])
+	require.True(t, meta.UsedFailover)
+	require.NoError(t, err)
+	require.Equal(t, "ok", resp)
+	require.Equal(t, "openai/gpt-5", meta.FailoverModel)
 }
 
 // When every failover target is also unavailable, the client receives the
@@ -259,19 +341,17 @@ func TestExecuteTranslatedSaturatedPrimarySurfaces429WhenNoTargetRemains(t *test
 	_, meta, err := executeTranslatedWithFailover(
 		ctx, o, workflow, "req", "openai/gpt-4o", "openai",
 		func(req string, selector core.ModelSelector) string { return selector.QualifiedModel() },
-		func(_ context.Context, _ string) (string, string, error) {
+		func(_ context.Context, _ string, _ string) (string, string, error) {
 			t.Fatal("no provider call expected: primary saturated, failover gated")
 			return "", "", nil
 		},
 	)
 
-	if meta.UsedFailover {
-		t.Fatal("didFailover = true, want false")
-	}
+	require.False(t, meta.UsedFailover)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) || gatewayErr.HTTPStatusCode() != http.StatusTooManyRequests {
-		t.Fatalf("err = %v, want the original 429", err)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, http.StatusTooManyRequests, gatewayErr.HTTPStatusCode())
 }
 
 // The stream path shares the skip.
@@ -285,20 +365,20 @@ func TestStreamTranslatedSkipsSaturatedPrimaryAndFailsOver(t *testing.T) {
 		o, ctx, workflow, "req", "openai/gpt-4o", "openai",
 		"openai", "openai", "gpt-4o",
 		func(req string, selector core.ModelSelector) string { return selector.QualifiedModel() },
-		func(_ context.Context, req string) (io.ReadCloser, error) {
+		func(_ context.Context, req string, _ string) (io.ReadCloser, error) {
 			calls = append(calls, req)
-			if req == "req" {
-				t.Fatal("saturated primary route reached the provider")
-			}
+			require.NotEqual(t, "req", req)
+
 			return io.NopCloser(strings.NewReader("data")), nil
 		},
 	)
 
-	if len(calls) != 1 || calls[0] != "openai/gpt-5" {
-		t.Fatalf("provider calls = %v, want only the failover target", calls)
-	}
-	if err != nil || stream == nil || !meta.UsedFailover || meta.FailoverModel != "openai/gpt-5" {
-		t.Fatalf("result = (stream:%v model:%q usedFailover:%v err:%v), want failover success", stream != nil, meta.FailoverModel, meta.UsedFailover, err)
-	}
+	require.Len(t, calls, 1)
+	require.Equal(t, "openai/gpt-5", calls[0])
+	require.NoError(t, err)
+	require.NotNil(t, stream)
+	require.True(t, meta.UsedFailover)
+	require.Equal(t, "openai/gpt-5", meta.FailoverModel)
+
 	stream.Close()
 }

@@ -74,6 +74,36 @@ are recorded: token counts are read from SSE usage events on streaming
 responses and from the `usage` member of JSON responses, so costs and budgets
 account for passthrough traffic like any other route.
 
+## Access control
+
+Passthrough reaches the provider account directly with the server's
+credential, including routes the gateway cannot scope to a caller, such as
+`GET /files`. Access is therefore limited:
+
+- **`GOMODEL_MASTER_KEY`** — always has passthrough access.
+- **Managed API keys** — created *without* passthrough access by default. Keys
+  that existed before passthrough access was introduced keep it. A key without
+  access gets `403` with error code `passthrough_access_denied`.
+- **Model allowlists** — a body that names a `model` is checked against the
+  caller's allowlist. A request that names no model acts on the whole provider,
+  so the allowlist must grant the whole provider (`anthropic/`) or everything
+  (`/`). A key limited to `anthropic/claude-sonnet-4-6` can call
+  `POST /p/anthropic/v1/messages` for that model, but not
+  `GET /p/anthropic/v1/models`.
+
+Grant passthrough access when you create a key (`"passthrough_access": true`
+on `POST /admin/auth-keys`), on the dashboard's API Keys page, or later.
+Only a global admin credential (the master key or a dashboard key without a
+user path) can grant it, because a passthrough key reaches beyond any user
+path; a user-path scoped admin gets `403 admin_scope_denied` but can revoke it.
+
+```bash
+curl -X PUT "http://localhost:8080/admin/auth-keys/${KEY_ID}/passthrough-access" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"passthrough_access": true}'
+```
+
 ## Anthropic SDK example
 
 Set the Anthropic SDK base URL to GoModel's Anthropic passthrough route. Use the
@@ -136,13 +166,22 @@ from passthrough requests before forwarding them upstream.
 
 Passthrough is intentionally narrow while the API is in beta.
 
-- `openai`, `anthropic`, `openrouter`, `kilo`, `zai`, `sglang`, `vllm`, `llamacpp`, `llmd`, and `deepseek`
+- `openai`, `anthropic`, `openrouter`, `kilo`, `zai`, `sglang`, `vllm`, `llamacpp`, `llmd`, `deepseek`, `edenai`, and `jev`
   are enabled by default.
 - Chutes supports passthrough but requires explicit operator opt-in because
   passthrough can forward provider-native routes that do not identify a model.
   Add `chutes` to `ENABLED_PASSTHROUGH_PROVIDERS` only when you intend to expose
   that surface.
 - GoModel does not translate passthrough request bodies or response bodies.
+- The `model` a JSON passthrough body names is checked against the caller's
+  model allowlist regardless of body size, up to the configured body limit;
+  a larger body is refused with the limit's own error. A body that repeats
+  the top-level `model` field is rejected, since the upstream would decide
+  which one wins. A request that names no model needs a provider-wide grant
+  (see [Access control](#access-control)).
+- The upstream account is shared. A key with passthrough access can reach
+  objects on it, such as files or batches, that other keys created. Grant
+  `passthrough_access` only to keys you trust with the whole provider account.
 - Provider-native error bodies and status codes are proxied instead of converted
   into OpenAI-compatible responses, so provider SDKs raise their own typed
   errors. Errors raised by GoModel itself (authentication, rate limits, budgets,
@@ -158,7 +197,7 @@ Passthrough routes are enabled by default:
 ```env
 ENABLE_PASSTHROUGH_ROUTES=true
 ALLOW_PASSTHROUGH_V1_ALIAS=true
-ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,openrouter,kilo,zai,sglang,vllm,llamacpp,llmd,deepseek
+ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,openrouter,kilo,zai,sglang,vllm,llamacpp,llmd,deepseek,edenai,jev
 ```
 
 Set `ENABLED_PASSTHROUGH_PROVIDERS` to the provider types you want to expose.

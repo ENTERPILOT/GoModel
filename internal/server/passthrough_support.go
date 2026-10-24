@@ -20,7 +20,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
-var defaultEnabledPassthroughProviders = []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "hetzner"}
+var defaultEnabledPassthroughProviders = []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "hetzner", "edenai", "jev"}
 
 const llmdDroppedReasonHeader = "X-Llm-D-Request-Dropped-Reason"
 
@@ -71,6 +71,9 @@ func (s *passthroughService) unsupportedPassthroughProviderError(providerType st
 
 func normalizePassthroughEndpoint(endpoint string, enabled bool) (string, error) {
 	endpoint = strings.TrimSpace(endpoint)
+	if err := validatePassthroughEndpoint(endpoint); err != nil {
+		return "", err
+	}
 	switch {
 	case endpoint == "v1":
 		if !enabled {
@@ -85,6 +88,23 @@ func normalizePassthroughEndpoint(endpoint string, enabled bool) (string, error)
 	default:
 		return endpoint, nil
 	}
+}
+
+// validatePassthroughEndpoint rejects endpoints that would not stay where the
+// provider's base URL points. The endpoint is the already-decoded request
+// path, so an encoded "." or ".." segment would climb out of the base path,
+// and an encoded "?" or "#" would start a query or fragment the client never
+// sent as one. The request's real query string is appended separately.
+func validatePassthroughEndpoint(endpoint string) error {
+	if strings.ContainsAny(endpoint, "?#") {
+		return core.NewInvalidRequestError("provider passthrough endpoint cannot contain '?' or '#'", nil)
+	}
+	for segment := range strings.SplitSeq(endpoint, "/") {
+		if segment == "." || segment == ".." {
+			return core.NewInvalidRequestError("provider passthrough endpoint cannot contain '.' or '..' segments", nil)
+		}
+	}
+	return nil
 }
 
 func buildPassthroughHeaders(ctx context.Context, src http.Header) http.Header {
@@ -465,6 +485,7 @@ const maxObservedJSONResponseBytes = 8 << 20
 type cappedCaptureBuffer struct {
 	buf      bytes.Buffer
 	max      int
+	total    int
 	overflow bool
 }
 
@@ -473,6 +494,7 @@ func newCappedCaptureBuffer(maxBytes int) *cappedCaptureBuffer {
 }
 
 func (b *cappedCaptureBuffer) Write(p []byte) (int, error) {
+	b.total += len(p)
 	if !b.overflow {
 		if b.buf.Len()+len(p) > b.max {
 			b.overflow = true
@@ -482,6 +504,12 @@ func (b *cappedCaptureBuffer) Write(p []byte) (int, error) {
 		}
 	}
 	return len(p), nil
+}
+
+// Total reports how many bytes were written, including any past the cap, so a
+// caller can describe a payload it could not keep.
+func (b *cappedCaptureBuffer) Total() int {
+	return b.total
 }
 
 func (b *cappedCaptureBuffer) Captured() ([]byte, bool) {
@@ -503,6 +531,7 @@ func passthroughUsageObserver(c *echo.Context, usageLogger usage.LoggerInterface
 	}
 	observer.SetProviderName(providerName)
 	observer.SetSessionID(core.SessionIDFromContext(c.Request().Context()))
+	observer.SetAuthKeyID(core.GetAuthKeyID(c.Request().Context()))
 	observer.SetLabels(core.RequestLabelsFromContext(c.Request().Context()))
 	observer.SetRewriteTokensSaved(core.RewriteTokensSavedFromContext(c.Request().Context()))
 	return observer

@@ -15,6 +15,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
+	"github.com/enterpilot/gomodel/internal/mediastore"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -71,6 +72,7 @@ func (b *bootstrap) initAdmin() error {
 			app.runtimeSettings,
 			app.mcpGateway,
 			app.providerCredentials,
+			app.media,
 			app,
 			adminRuntimeConfig,
 			b.quotaTemplatesEnabled,
@@ -136,6 +138,7 @@ func newAdminHandlers(
 	runtimeSettingsService *runtimesettings.Service,
 	mcpResult *mcpgateway.Result,
 	providerCredentialsResult *providers.CredentialsResult,
+	mediaResult *mediastore.Result,
 	runtimeRefresher admin.RuntimeRefresher,
 	runtimeConfig admin.DashboardConfigResponse,
 	quotaTemplatesEnabled bool,
@@ -178,6 +181,10 @@ func newAdminHandlers(
 	if providerCredentialsResult != nil && providerCredentialsResult.Service != nil {
 		providerCredentialsOption = admin.WithProviderCredentials(providerCredentialsResult.Service)
 	}
+	var mediaOption admin.Option
+	if mediaResult != nil && mediaResult.Service != nil {
+		mediaOption = admin.WithMediaStore(mediaResult.Service)
+	}
 
 	adminHandler := admin.NewHandler(
 		reader,
@@ -200,6 +207,7 @@ func newAdminHandlers(
 		admin.WithRuntimeSettings(runtimeSettingsService),
 		mcpOption,
 		providerCredentialsOption,
+		mediaOption,
 		admin.WithRuntimeRefresher(runtimeRefresher),
 		admin.WithDashboardRuntimeConfig(runtimeConfig),
 		admin.WithLiveBroker(liveBroker),
@@ -238,9 +246,19 @@ func dashboardRuntimeConfig(cfg *config.Config, usageEnabled, demoMode, adaptive
 		SemanticCacheEnabled:   dashboardEnabledValue(semanticResponseCacheConfigured(cfg)),
 		LiveLogsEnabled:        dashboardEnabledValue(cfg != nil && cfg.Admin.LiveLogsEnabled),
 		MCPEnabled:             dashboardEnabledValue(cfg != nil && cfg.MCP.Enabled),
+		MCPToolDiscovery:       dashboardMCPToolDiscovery(cfg),
 		VirtualModelStrategies: dashboardVirtualModelStrategies(adaptiveRouting, nil),
 		UserPathHeader:         dashboardUserPathHeader(cfg),
 	}
+}
+
+// dashboardMCPToolDiscovery is the default MCP tool discovery mode. Loaded
+// config is already normalized; an unset value means the "off" default.
+func dashboardMCPToolDiscovery(cfg *config.Config) string {
+	if cfg == nil || cfg.MCP.ToolDiscovery == "" {
+		return config.MCPToolDiscoveryOff
+	}
+	return cfg.MCP.ToolDiscovery
 }
 
 // dashboardUserPathHeader is the canonical user-path header name the public

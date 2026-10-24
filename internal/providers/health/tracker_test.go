@@ -10,6 +10,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func newTestTracker(start time.Time) (*Tracker, *time.Time) {
@@ -210,9 +212,7 @@ func TestTrackerHooksFeedRecord(t *testing.T) {
 	hooks.OnRequestEnd(t.Context(), llmclient.ResponseInfo{Provider: "openai", Model: "gpt-4o", StatusCode: 200})
 
 	snapshot := tracker.Snapshot()
-	if snapshot["openai"].Requests != 1 {
-		t.Fatalf("Snapshot()[openai].Requests = %d, want 1", snapshot["openai"].Requests)
-	}
+	require.Equal(t, 1, snapshot["openai"].Requests)
 }
 
 func TestTrackerEmptyResponsesFlagModel(t *testing.T) {
@@ -240,16 +240,15 @@ func TestTrackerEmptyResponsesFlagModel(t *testing.T) {
 			}
 
 			snapshot := tracker.Snapshot()["openai"]
-			if len(snapshot.Models) != 1 {
-				t.Fatalf("models = %+v, want one row", snapshot.Models)
-			}
+			require.Len(t, snapshot.Models, 1)
+
 			row := snapshot.Models[0]
-			if row.Requests != tt.wantRequests || row.Errors != tt.wantErrors || row.Flagged != tt.wantFlagged {
-				t.Fatalf("row = %+v, want requests=%d errors=%d flagged=%v", row, tt.wantRequests, tt.wantErrors, tt.wantFlagged)
-			}
-			if row.LastError == nil || row.LastError.StatusCode != 200 || !strings.Contains(row.LastError.Message, "no_choices") {
-				t.Fatalf("last error = %+v, want a 200 no_choices error", row.LastError)
-			}
+			assert.Equal(t, tt.wantRequests, row.Requests)
+			assert.Equal(t, tt.wantErrors, row.Errors)
+			assert.Equal(t, tt.wantFlagged, row.Flagged)
+			require.NotNil(t, row.LastError)
+			assert.Equal(t, 200, row.LastError.StatusCode)
+			assert.Contains(t, row.LastError.Message, "no_choices")
 		})
 	}
 }
@@ -270,9 +269,9 @@ func TestTrackerEmptyResponseInterleavedWithOtherRequests(t *testing.T) {
 	tracker.Record(success) // D
 
 	row := tracker.Snapshot()["openai"].Models[0]
-	if row.Requests != 4 || row.Errors != 3 || !row.Flagged {
-		t.Fatalf("row = %+v, want requests=4 errors=3 flagged", row)
-	}
+	assert.Equal(t, 4, row.Requests)
+	assert.Equal(t, 3, row.Errors)
+	assert.True(t, row.Flagged)
 }
 
 func TestTrackerEvictsStalestModel(t *testing.T) {
@@ -284,15 +283,9 @@ func TestTrackerEvictsStalestModel(t *testing.T) {
 	tracker.Record(llmclient.ResponseInfo{Provider: "openai", Model: "one-too-many", StatusCode: 200})
 
 	models := tracker.providers["openai"].models
-	if len(models) != maxTrackedModels {
-		t.Fatalf("tracked models = %d, want %d", len(models), maxTrackedModels)
-	}
-	if _, ok := models["model-000"]; ok {
-		t.Fatalf("expected stalest model model-000 to be evicted")
-	}
-	if _, ok := models["one-too-many"]; !ok {
-		t.Fatalf("expected newest model to be tracked")
-	}
+	require.Len(t, models, maxTrackedModels)
+	assert.NotContains(t, models, "model-000")
+	assert.Contains(t, models, "one-too-many")
 }
 
 func TestTrackerCapsEventsPerModel(t *testing.T) {
@@ -300,9 +293,7 @@ func TestTrackerCapsEventsPerModel(t *testing.T) {
 	for range maxEventsPerModel + 50 {
 		tracker.Record(llmclient.ResponseInfo{Provider: "openai", Model: "gpt-4o", StatusCode: 200})
 	}
-	if got := len(tracker.providers["openai"].models["gpt-4o"].events); got != maxEventsPerModel {
-		t.Fatalf("events kept = %d, want %d", got, maxEventsPerModel)
-	}
+	require.Len(t, tracker.providers["openai"].models["gpt-4o"].events, maxEventsPerModel)
 }
 
 func TestTrackerTruncatesLongErrorMessages(t *testing.T) {
@@ -314,12 +305,8 @@ func TestTrackerTruncatesLongErrorMessages(t *testing.T) {
 		Error:      errors.New(strings.Repeat("x", maxErrorMessageLen+100)),
 	})
 	message := tracker.Snapshot()["openai"].Models[0].LastError.Message
-	if len(message) > maxErrorMessageLen+len("…") {
-		t.Fatalf("error message length = %d, want <= %d", len(message), maxErrorMessageLen+len("…"))
-	}
-	if !strings.HasSuffix(message, "…") {
-		t.Fatalf("expected truncated message to end with ellipsis")
-	}
+	assert.LessOrEqual(t, len(message), maxErrorMessageLen+len("…"))
+	assert.True(t, strings.HasSuffix(message, "…"), "message = %q, want truncation marker", message)
 }
 
 func TestTrackerSnapshotCapsModelRowsTroubledFirst(t *testing.T) {
@@ -332,16 +319,12 @@ func TestTrackerSnapshotCapsModelRowsTroubledFirst(t *testing.T) {
 	}
 
 	snapshot := tracker.Snapshot()["openai"]
-	if len(snapshot.Models) != maxSnapshotModels {
-		t.Fatalf("model rows = %d, want %d", len(snapshot.Models), maxSnapshotModels)
-	}
-	if snapshot.Models[0].Model != "broken" || !snapshot.Models[0].Flagged {
-		t.Fatalf("expected flagged model first, got %+v", snapshot.Models[0])
-	}
+	require.Len(t, snapshot.Models, maxSnapshotModels)
+	assert.Equal(t, "broken", snapshot.Models[0].Model)
+	assert.True(t, snapshot.Models[0].Flagged, "expected flagged model first")
+
 	// Provider totals still cover every tracked model, not just listed rows.
-	if snapshot.Requests != maxSnapshotModels+5+4 {
-		t.Fatalf("provider requests = %d, want %d", snapshot.Requests, maxSnapshotModels+5+4)
-	}
+	assert.Equal(t, maxSnapshotModels+5+4, snapshot.Requests)
 }
 
 func TestTrackerProviderLastErrorSurvivesModelCap(t *testing.T) {
@@ -369,21 +352,12 @@ func TestTrackerProviderLastErrorSurvivesModelCap(t *testing.T) {
 	})
 
 	snapshot := tracker.Snapshot()["router"]
-	listed := false
 	for _, row := range snapshot.Models {
-		if row.Model == "quiet-model" {
-			listed = true
-		}
+		assert.NotEqual(t, "quiet-model", row.Model, "quiet-model should be dropped from the capped listing")
 	}
-	if listed {
-		t.Fatalf("expected quiet-model to be dropped by the snapshot cap")
-	}
-	if snapshot.LastError == nil || snapshot.LastError.Message != "newest failure" {
-		t.Fatalf("provider LastError = %+v, want newest failure", snapshot.LastError)
-	}
-	if snapshot.LastErrorModel != "quiet-model" {
-		t.Fatalf("LastErrorModel = %q, want quiet-model", snapshot.LastErrorModel)
-	}
+	require.NotNil(t, snapshot.LastError)
+	assert.Equal(t, "newest failure", snapshot.LastError.Message)
+	assert.Equal(t, "quiet-model", snapshot.LastErrorModel)
 }
 
 func TestErrorMessageTruncationIsRuneSafe(t *testing.T) {
@@ -396,12 +370,8 @@ func TestErrorMessageTruncationIsRuneSafe(t *testing.T) {
 		Error:      errors.New(strings.Repeat("é", maxErrorMessageLen)),
 	})
 	message := tracker.Snapshot()["openai"].Models[0].LastError.Message
-	if !strings.HasSuffix(message, "…") {
-		t.Fatalf("expected truncated message, got %q", message)
-	}
-	if !utf8.ValidString(message) {
-		t.Fatalf("truncated message is not valid UTF-8: %q", message)
-	}
+	assert.True(t, strings.HasSuffix(message, "…"), "expected truncated message, got %q", message)
+	assert.True(t, utf8.ValidString(message), "truncated message is not valid UTF-8: %q", message)
 }
 
 func TestProviderHealthFlaggedModels(t *testing.T) {
@@ -410,45 +380,34 @@ func TestProviderHealthFlaggedModels(t *testing.T) {
 		{Model: "b"},
 		{Model: "c", Flagged: true},
 	}}
-	got := snapshot.FlaggedModels()
-	if len(got) != 2 || got[0] != "a" || got[1] != "c" {
-		t.Fatalf("FlaggedModels() = %v, want [a c]", got)
-	}
+	assert.Equal(t, []string{"a", "c"}, snapshot.FlaggedModels())
 }
 
 func assertSnapshotsEqual(t *testing.T, got, want map[string]ProviderHealth) {
 	t.Helper()
-	if len(got) != len(want) {
-		t.Fatalf("snapshot providers = %d (%v), want %d", len(got), got, len(want))
-	}
+	require.Len(t, got, len(want), "snapshot providers = %v", got)
+
 	for name, wantProvider := range want {
 		gotProvider, ok := got[name]
-		if !ok {
-			t.Fatalf("missing provider %q in snapshot", name)
-		}
-		if gotProvider.CircuitState != wantProvider.CircuitState ||
-			gotProvider.WindowSeconds != wantProvider.WindowSeconds ||
-			gotProvider.Requests != wantProvider.Requests ||
-			gotProvider.Errors != wantProvider.Errors {
-			t.Fatalf("provider %q = %+v, want %+v", name, gotProvider, wantProvider)
-		}
-		if len(gotProvider.Models) != len(wantProvider.Models) {
-			t.Fatalf("provider %q models = %+v, want %+v", name, gotProvider.Models, wantProvider.Models)
-		}
+		require.True(t, ok, "missing provider %q in snapshot", name)
+		assert.Equal(t, wantProvider.CircuitState, gotProvider.CircuitState, "provider %q", name)
+		assert.Equal(t, wantProvider.WindowSeconds, gotProvider.WindowSeconds, "provider %q", name)
+		assert.Equal(t, wantProvider.Requests, gotProvider.Requests, "provider %q", name)
+		assert.Equal(t, wantProvider.Errors, gotProvider.Errors, "provider %q", name)
+		require.Len(t, gotProvider.Models, len(wantProvider.Models), "provider %q models = %+v", name, gotProvider.Models)
+
 		for i, wantModel := range wantProvider.Models {
 			gotModel := gotProvider.Models[i]
-			if gotModel.Model != wantModel.Model ||
-				gotModel.Requests != wantModel.Requests ||
-				gotModel.Errors != wantModel.Errors ||
-				gotModel.Flagged != wantModel.Flagged {
-				t.Fatalf("provider %q model[%d] = %+v, want %+v", name, i, gotModel, wantModel)
+			assert.Equal(t, wantModel.Model, gotModel.Model, "provider %q model[%d]", name, i)
+			assert.Equal(t, wantModel.Requests, gotModel.Requests, "provider %q model[%d]", name, i)
+			assert.Equal(t, wantModel.Errors, gotModel.Errors, "provider %q model[%d]", name, i)
+			assert.Equal(t, wantModel.Flagged, gotModel.Flagged, "provider %q model[%d]", name, i)
+			if wantModel.LastError == nil {
+				assert.Nil(t, gotModel.LastError, "provider %q model[%d] last_error", name, i)
+				continue
 			}
-			if (gotModel.LastError == nil) != (wantModel.LastError == nil) {
-				t.Fatalf("provider %q model[%d] last_error = %+v, want %+v", name, i, gotModel.LastError, wantModel.LastError)
-			}
-			if wantModel.LastError != nil && *gotModel.LastError != *wantModel.LastError {
-				t.Fatalf("provider %q model[%d] last_error = %+v, want %+v", name, i, *gotModel.LastError, *wantModel.LastError)
-			}
+			require.NotNil(t, gotModel.LastError, "provider %q model[%d] last_error", name, i)
+			assert.Equal(t, *wantModel.LastError, *gotModel.LastError, "provider %q model[%d] last_error", name, i)
 		}
 	}
 }

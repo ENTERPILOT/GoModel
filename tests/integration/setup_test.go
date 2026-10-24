@@ -295,6 +295,9 @@ func buildAppConfig(t *testing.T, cfg TestServerConfig, mockLLMURL string, port 
 				Local: &config.LocalCacheConfig{CacheDir: ".cache"},
 			},
 		},
+		Media: config.MediaConfig{
+			Storage: config.MediaStorageConfig{Type: config.MediaStorageMemory},
+		},
 		Logging: config.LogConfig{
 			Enabled:               cfg.AuditLogEnabled,
 			LogBodies:             cfg.LogBodies,
@@ -336,7 +339,7 @@ func buildAppConfig(t *testing.T, cfg TestServerConfig, mockLLMURL string, port 
 			Type: "mongodb",
 			MongoDB: config.MongoDBStorageConfig{
 				URL:      GetMongoURL(),
-				Database: "gomodel_test",
+				Database: mongoDatabaseName,
 			},
 		}
 	default:

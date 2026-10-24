@@ -8,7 +8,9 @@
   width: 100%;
   padding: var(--space-page);
   overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
+  /* No -webkit-overflow-scrolling here: iOS has scrolled with momentum
+     natively since iOS 13, and the property makes the column a stacking
+     context there, which paints the sidebar over fixed popovers inside it. */
   transition: width 0.2s;
 }
 

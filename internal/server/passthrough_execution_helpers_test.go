@@ -1,19 +1,17 @@
 package server
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 func TestPassthroughExecutionTarget_PrefersWorkflow(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/p/openai/v1/responses?trace=1", nil)
-	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
+	c, _ := echotest.Post(t, "/p/openai/v1/responses?trace=1", nil)
+	c.SetRequest(c.Request().WithContext(core.WithWorkflow(c.Request().Context(), &core.Workflow{
 		Mode:         core.ExecutionModePassthrough,
 		ProviderType: "openai",
 		Passthrough: &core.PassthroughRouteInfo{
@@ -22,57 +20,29 @@ func TestPassthroughExecutionTarget_PrefersWorkflow(t *testing.T) {
 			NormalizedEndpoint: "responses",
 			AuditPath:          "/v1/responses",
 		},
-	}))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	})))
 
 	providerType, _, endpoint, info, err := passthroughExecutionTarget(c, nil, false)
-	if err != nil {
-		t.Fatalf("passthroughExecutionTarget() error = %v", err)
-	}
-	if providerType != "openai" {
-		t.Fatalf("providerType = %q, want openai", providerType)
-	}
-	if endpoint != "responses?trace=1" {
-		t.Fatalf("endpoint = %q, want responses?trace=1", endpoint)
-	}
-	if info == nil {
-		t.Fatal("info = nil")
-	}
-	if info.NormalizedEndpoint != "responses" {
-		t.Fatalf("NormalizedEndpoint = %q, want responses", info.NormalizedEndpoint)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "openai", providerType)
+	require.Equal(t, "responses?trace=1", endpoint)
+	require.NotNil(t, info)
+	require.Equal(t, "responses", info.NormalizedEndpoint)
 }
 
 func TestPassthroughExecutionTarget_NormalizesFallbackFromPath(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/p/openai/v1/responses?trace=1", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/p/openai/v1/responses?trace=1", nil)
 
 	providerType, _, endpoint, info, err := passthroughExecutionTarget(c, nil, true)
-	if err != nil {
-		t.Fatalf("passthroughExecutionTarget() error = %v", err)
-	}
-	if providerType != "openai" {
-		t.Fatalf("providerType = %q, want openai", providerType)
-	}
-	if endpoint != "responses?trace=1" {
-		t.Fatalf("endpoint = %q, want responses?trace=1", endpoint)
-	}
-	if info == nil {
-		t.Fatal("info = nil")
-	}
-	if info.NormalizedEndpoint != "responses" {
-		t.Fatalf("NormalizedEndpoint = %q, want responses", info.NormalizedEndpoint)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "openai", providerType)
+	require.Equal(t, "responses?trace=1", endpoint)
+	require.NotNil(t, info)
+	require.Equal(t, "responses", info.NormalizedEndpoint)
 }
 
 func TestPassthroughExecutionTarget_ResolvesConfiguredProviderNameToType(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/p/openai_test/v1/responses?trace=1", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/p/openai_test/v1/responses?trace=1", nil)
 
 	provider := &mockProvider{
 		providerTypes: map[string]string{
@@ -84,22 +54,11 @@ func TestPassthroughExecutionTarget_ResolvesConfiguredProviderNameToType(t *test
 	}
 
 	providerType, providerName, endpoint, info, err := passthroughExecutionTarget(c, provider, true)
-	if err != nil {
-		t.Fatalf("passthroughExecutionTarget() error = %v", err)
-	}
-	if providerType != "openai" {
-		t.Fatalf("providerType = %q, want openai", providerType)
-	}
-	if providerName != "openai_test" {
-		t.Fatalf("providerName = %q, want openai_test", providerName)
-	}
-	if endpoint != "responses?trace=1" {
-		t.Fatalf("endpoint = %q, want responses?trace=1", endpoint)
-	}
-	if info == nil || info.Provider != "openai" {
-		t.Fatalf("info.Provider = %#v, want openai", info)
-	}
-	if info.ProviderName != "openai_test" {
-		t.Fatalf("info.ProviderName = %q, want openai_test", info.ProviderName)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "openai", providerType)
+	require.Equal(t, "openai_test", providerName)
+	require.Equal(t, "responses?trace=1", endpoint)
+	require.NotNil(t, info)
+	require.Equal(t, "openai", info.Provider)
+	require.Equal(t, "openai_test", info.ProviderName)
 }

@@ -18,10 +18,7 @@ import (
 )
 
 var (
-	cacheLFEventBoundary   = []byte("\n\n")
-	cacheCRLFEventBoundary = []byte("\r\n\r\n")
-	cacheDataPrefix        = []byte("data:")
-	cacheDonePayload       = []byte("[DONE]")
+	cacheDonePayload = []byte("[DONE]")
 )
 
 func cacheKeyRequestBody(path string, body []byte) []byte {
@@ -211,35 +208,6 @@ func cacheHeaderValue(cacheType string) string {
 	default:
 		return "HIT (" + cacheType + ")"
 	}
-}
-
-func nextCacheEventBoundary(data []byte) (idx int, sepLen int) {
-	lfIdx := bytes.Index(data, cacheLFEventBoundary)
-	crlfIdx := bytes.Index(data, cacheCRLFEventBoundary)
-
-	switch {
-	case lfIdx == -1:
-		if crlfIdx == -1 {
-			return -1, 0
-		}
-		return crlfIdx, len(cacheCRLFEventBoundary)
-	case crlfIdx == -1 || lfIdx < crlfIdx:
-		return lfIdx, len(cacheLFEventBoundary)
-	default:
-		return crlfIdx, len(cacheCRLFEventBoundary)
-	}
-}
-
-func parseCacheDataLine(line []byte) ([]byte, bool) {
-	line = bytes.TrimSuffix(line, []byte("\r"))
-	if !bytes.HasPrefix(line, cacheDataPrefix) {
-		return nil, false
-	}
-	payload := bytes.TrimPrefix(line, cacheDataPrefix)
-	if len(payload) > 0 && payload[0] == ' ' {
-		payload = payload[1:]
-	}
-	return payload, true
 }
 
 func normalizeStreamOptionsForCache(src *core.StreamOptions) *core.StreamOptions {

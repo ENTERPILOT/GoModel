@@ -2,10 +2,13 @@
 package httpclient
 
 import (
+	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -35,6 +38,11 @@ type ClientConfig struct {
 
 	// ResponseHeaderTimeout specifies the amount of time to wait for a server's response headers
 	ResponseHeaderTimeout time.Duration
+
+	// Proxy selects the outbound proxy for each request. Nil keeps the
+	// process-wide HTTP_PROXY / HTTPS_PROXY / NO_PROXY behaviour; a function
+	// returning nil sends that request directly.
+	Proxy func(*http.Request) (*url.URL, error)
 }
 
 // getEnvDuration reads a duration from an environment variable, returning the default if not set or invalid.
@@ -109,8 +117,12 @@ func NewHTTPClient(config *ClientConfig) *http.Client {
 		config = &cfg
 	}
 
+	proxy := config.Proxy
+	if proxy == nil {
+		proxy = http.ProxyFromEnvironment
+	}
 	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
+		Proxy: proxy,
 		DialContext: (&net.Dialer{
 			Timeout:   config.DialTimeout,
 			KeepAlive: config.KeepAlive,
@@ -125,10 +137,32 @@ func NewHTTPClient(config *ClientConfig) *http.Client {
 	}
 
 	return &http.Client{
-		Transport: transport,
-		Timeout:   config.Timeout,
+		Transport:     transport,
+		Timeout:       config.Timeout,
+		CheckRedirect: stopCrossOriginRedirects,
 	}
 }
+
+// stopCrossOriginRedirects follows redirects like net/http's default policy
+// while they stay on the original scheme, host, and port, and hands any other
+// redirect back to the caller unfollowed. Following one would resend the
+// request to another host: provider credentials that net/http does not strip
+// (X-Api-Key, Api-Key, X-Goog-Api-Key, xi-api-key, ...), tokens a wrapping
+// transport adds on every hop (Google OAuth), and, for 307 and 308, the
+// request body.
+func stopCrossOriginRedirects(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxRedirects)
+	}
+	origin := via[0].URL
+	if req.URL.Scheme != origin.Scheme || !strings.EqualFold(req.URL.Host, origin.Host) {
+		return http.ErrUseLastResponse
+	}
+	return nil
+}
+
+// maxRedirects matches net/http's default redirect limit.
+const maxRedirects = 10
 
 // NewDefaultHTTPClient creates a new HTTP client with default configuration.
 // This is a convenience function equivalent to NewHTTPClient(nil).

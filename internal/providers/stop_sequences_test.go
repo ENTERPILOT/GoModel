@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -30,24 +32,14 @@ func TestCapStopSequences(t *testing.T) {
 				"stop": json.RawMessage(tc.stop),
 				"seed": json.RawMessage("7"),
 			})
-			if err != nil {
-				t.Fatalf("MergeUnknownJSONFields: %v", err)
-			}
+			require.NoError(t, err)
 			req := &core.ChatRequest{Model: "gpt-4.1-mini", ExtraFields: extra}
 
 			adapted, err := CapStopSequences(req, tc.limit)
-			if err != nil {
-				t.Fatalf("CapStopSequences: %v", err)
-			}
-			if got := string(adapted.ExtraFields.Lookup("stop")); got != tc.want {
-				t.Errorf("stop = %s, want %s", got, tc.want)
-			}
-			if got := string(adapted.ExtraFields.Lookup("seed")); got != "7" {
-				t.Errorf("seed = %s, want 7", got)
-			}
-			if got := string(req.ExtraFields.Lookup("stop")); got != tc.stop {
-				t.Errorf("original request mutated: stop = %s, want %s", got, tc.stop)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, string(adapted.ExtraFields.Lookup("stop")))
+			assert.Equal(t, "7", string(adapted.ExtraFields.Lookup("seed")))
+			assert.Equal(t, tc.stop, string(req.ExtraFields.Lookup("stop")), "original request mutated")
 		})
 	}
 }
@@ -55,13 +47,10 @@ func TestCapStopSequences(t *testing.T) {
 func TestCapStopSequencesWithoutStopField(t *testing.T) {
 	req := &core.ChatRequest{Model: "gpt-4.1-mini"}
 	adapted, err := CapStopSequences(req, 4)
-	if err != nil {
-		t.Fatalf("CapStopSequences: %v", err)
-	}
-	if adapted != req {
-		t.Fatal("request without a stop field should be returned unchanged")
-	}
-	if adapted, err = CapStopSequences(nil, 4); err != nil || adapted != nil {
-		t.Fatalf("CapStopSequences(nil) = (%v, %v), want (nil, nil)", adapted, err)
-	}
+	require.NoError(t, err)
+	assert.Same(t, req, adapted, "request without a stop field should be returned unchanged")
+
+	adapted, err = CapStopSequences(nil, 4)
+	require.NoError(t, err)
+	assert.Nil(t, adapted)
 }

@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestBuildUsageInsert(t *testing.T) {
@@ -24,6 +26,7 @@ func TestBuildUsageInsert(t *testing.T) {
 			ProviderName:           "primary-openai",
 			Endpoint:               "/v1/chat/completions",
 			SessionID:              "session-1",
+			AuthKeyID:              "key-1",
 			CacheType:              CacheTypeExact,
 			Labels:                 []string{"alpha", "prod"},
 			InputTokens:            10,
@@ -59,67 +62,32 @@ func TestBuildUsageInsert(t *testing.T) {
 	})
 
 	normalized := strings.Join(strings.Fields(query), " ")
-	wantQuery := "INSERT INTO usage (id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels, input_tokens, output_tokens, total_tokens, rewrite_tokens_saved, rewrite_cost_saved, raw_data, input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23), ($24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46) ON CONFLICT (id) DO NOTHING"
-	if normalized != wantQuery {
-		t.Fatalf("query = %q, want %q", normalized, wantQuery)
-	}
+	wantQuery := "INSERT INTO usage (id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels, input_tokens, output_tokens, total_tokens, rewrite_tokens_saved, rewrite_cost_saved, raw_data, input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat, auth_key_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24), ($25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48) ON CONFLICT (id) DO NOTHING"
+	require.Equal(t, wantQuery, normalized)
 
-	if got, want := len(args), 46; got != want {
-		t.Fatalf("len(args) = %d, want %d", got, want)
-	}
-	if got := args[0]; got != "usage-1" {
-		t.Fatalf("args[0] = %v, want usage-1", got)
-	}
-	if got := args[6]; got != "primary-openai" {
-		t.Fatalf("args[6] = %v, want primary-openai", got)
-	}
-	if got := args[21]; got != CostSourceModelPricing {
-		t.Fatalf("args[21] = %v, want %q", got, CostSourceModelPricing)
-	}
-	if got := args[23]; got != "usage-2" {
-		t.Fatalf("args[23] = %v, want usage-2", got)
-	}
-	if got := args[9]; got != "session-1" {
-		t.Fatalf("args[9] = %v, want session-1", got)
-	}
-	if got := args[10]; got != CacheTypeExact {
-		t.Fatalf("args[10] = %v, want %q", got, CacheTypeExact)
-	}
-	if got := args[11]; got != `["alpha","prod"]` {
-		t.Fatalf("args[11] = %v, want labels JSON", got)
-	}
-	if got := args[15]; got != 42 {
-		t.Fatalf("args[15] = %v, want 42 rewrite_tokens_saved", got)
-	}
-	if got := args[16]; got != &rewriteCostSaved {
-		t.Fatalf("args[16] = %v, want rewrite_cost_saved pointer", got)
-	}
-	if got := string(args[17].([]byte)); got != `{"cached_tokens":3}` {
-		t.Fatalf("args[17] = %q, want %q", got, `{"cached_tokens":3}`)
-	}
-	if got := args[33]; got != nil {
-		t.Fatalf("args[33] = %v, want nil cache_type", got)
-	}
-	if got := args[34]; got != nil {
-		t.Fatalf("args[34] = %v, want nil labels", got)
-	}
-	if got := args[38]; got != 0 {
-		t.Fatalf("args[38] = %v, want 0 rewrite_tokens_saved", got)
-	}
-	if got := args[39].(*float64); got != nil {
-		t.Fatalf("args[39] = %v, want nil rewrite_cost_saved", got)
-	}
-	rawData, ok := args[40].([]byte)
-	if !ok {
-		t.Fatalf("args[40] has type %T, want []byte", args[40])
-	}
-	if rawData != nil {
-		t.Fatalf("args[40] = %v, want nil raw_data", rawData)
-	}
+	require.Len(t, args, 48)
+	require.Equal(t, "usage-1", args[0])
+	require.Equal(t, "primary-openai", args[6])
+	require.Equal(t, CostSourceModelPricing, args[21])
+	require.Equal(t, "key-1", args[23])
+	require.Equal(t, "usage-2", args[24])
+	require.Equal(t, "session-1", args[9])
+	require.Equal(t, CacheTypeExact, args[10])
+	require.Equal(t, `["alpha","prod"]`, args[11])
+	require.Equal(t, 42, args[15])
+	require.Equal(t, &rewriteCostSaved, args[16])
+	require.JSONEq(t, `{"cached_tokens":3}`, string(args[17].([]byte)))
+	require.Nil(t, args[34])
+	require.Nil(t, args[35])
+	require.Equal(t, 0, args[39])
+	require.Nil(t, args[40].(*float64), "rewrite_cost_saved")
+	rawData, ok := args[41].([]byte)
+	require.True(t, ok, "args[41] has type %T, want []byte", args[41])
+	require.Empty(t, args[47], "auth_key_id")
+	require.Nil(t, rawData)
 }
 
 func TestUsageInsertMaxRowsPerQueryRespectsPostgresLimit(t *testing.T) {
-	if got := usageInsertMaxRowsPerQuery * usageInsertColumnCount; got > postgresMaxBindParameters {
-		t.Fatalf("bind parameters = %d, want <= %d", got, postgresMaxBindParameters)
-	}
+	got := usageInsertMaxRowsPerQuery * usageInsertColumnCount
+	require.LessOrEqual(t, got, postgresMaxBindParameters)
 }

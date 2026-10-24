@@ -10,31 +10,35 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
+	"github.com/enterpilot/gomodel/internal/storage"
 )
 
 type mongoMCPServerDocument struct {
-	ID                 string            `bson:"_id"`
-	DisplayName        string            `bson:"display_name,omitempty"`
-	URL                string            `bson:"url,omitempty"`
-	Transport          string            `bson:"transport,omitempty"`
-	Headers            map[string]string `bson:"headers,omitempty"`
-	Description        string            `bson:"description,omitempty"`
-	Enabled            bool              `bson:"enabled"`
-	AllowedTools       []string          `bson:"allowed_tools,omitempty"`
-	DisallowedTools    []string          `bson:"disallowed_tools,omitempty"`
-	UserPaths          []string          `bson:"user_paths,omitempty"`
-	ToolTimeoutSeconds int               `bson:"tool_timeout_seconds,omitempty"`
-	CreatedAt          time.Time         `bson:"created_at"`
-	UpdatedAt          time.Time         `bson:"updated_at"`
+	ID                  string            `bson:"_id"`
+	DisplayName         string            `bson:"display_name,omitempty"`
+	URL                 string            `bson:"url,omitempty"`
+	Transport           string            `bson:"transport,omitempty"`
+	Headers             map[string]string `bson:"headers,omitempty"`
+	Description         string            `bson:"description,omitempty"`
+	Enabled             bool              `bson:"enabled"`
+	AllowedTools        []string          `bson:"allowed_tools,omitempty"`
+	DisallowedTools     []string          `bson:"disallowed_tools,omitempty"`
+	UserPaths           []string          `bson:"user_paths,omitempty"`
+	DisallowedUserPaths []string          `bson:"disallowed_user_paths,omitempty"`
+	ToolTimeoutSeconds  int               `bson:"tool_timeout_seconds,omitempty"`
+	CreatedAt           time.Time         `bson:"created_at"`
+	UpdatedAt           time.Time         `bson:"updated_at"`
 }
 
 type mongoMCPServerIDFilter struct {
 	ID string `bson:"_id"`
 }
 
-// MongoDBStore stores managed MCP servers in MongoDB.
+// MongoDBStore stores managed MCP servers and virtual servers in MongoDB.
 type MongoDBStore struct {
 	collection *mongo.Collection
+	virtuals   *mongo.Collection
 }
 
 // NewMongoDBStore creates collection indexes if needed.
@@ -53,26 +57,31 @@ func NewMongoDBStore(database *mongo.Database) (*MongoDBStore, error) {
 	if _, err := coll.Indexes().CreateMany(ctx, indexes); err != nil {
 		return nil, fmt.Errorf("create mcp_servers indexes: %w", err)
 	}
-	return &MongoDBStore{collection: coll}, nil
+	return &MongoDBStore{collection: coll, virtuals: database.Collection("mcp_virtual_servers")}, nil
 }
 
 func (s *MongoDBStore) List(ctx context.Context) ([]ManagedServer, error) {
-	cursor, err := s.collection.Find(ctx, bson.M{}, options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}))
+	return listMongo(ctx, s.collection, "mcp servers", managedServerFromMongo)
+}
+
+// listMongo reads a whole collection sorted by _id, converting each document.
+func listMongo[D, T any](ctx context.Context, coll *mongo.Collection, label string, convert func(D) T) ([]T, error) {
+	cursor, err := coll.Find(ctx, bson.M{}, options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}))
 	if err != nil {
-		return nil, fmt.Errorf("list mcp servers: %w", err)
+		return nil, fmt.Errorf("list %s: %w", label, err)
 	}
 	defer cursor.Close(ctx)
 
-	result := make([]ManagedServer, 0)
+	result := make([]T, 0)
 	for cursor.Next(ctx) {
-		var doc mongoMCPServerDocument
+		var doc D
 		if err := cursor.Decode(&doc); err != nil {
-			return nil, fmt.Errorf("decode mcp server: %w", err)
+			return nil, fmt.Errorf("decode %s: %w", label, err)
 		}
-		result = append(result, managedServerFromMongo(doc))
+		result = append(result, convert(doc))
 	}
 	if err := cursor.Err(); err != nil {
-		return nil, fmt.Errorf("iterate mcp servers: %w", err)
+		return nil, fmt.Errorf("iterate %s: %w", label, err)
 	}
 	return result, nil
 }
@@ -93,19 +102,7 @@ func (s *MongoDBStore) Get(ctx context.Context, name string) (*ManagedServer, er
 func (s *MongoDBStore) Upsert(ctx context.Context, server ManagedServer) error {
 	stampUpsert(&server)
 	update := bson.M{
-		"$set": bson.M{
-			"display_name":         server.DisplayName,
-			"url":                  server.URL,
-			"transport":            server.Transport,
-			"headers":              server.Headers,
-			"description":          server.Description,
-			"enabled":              server.Enabled,
-			"allowed_tools":        server.AllowedTools,
-			"disallowed_tools":     server.DisallowedTools,
-			"user_paths":           server.UserPaths,
-			"tool_timeout_seconds": server.ToolTimeoutSeconds,
-			"updated_at":           server.UpdatedAt,
-		},
+		"$set": mongoMCPServerFields(server),
 		"$setOnInsert": bson.M{
 			"created_at": server.CreatedAt,
 		},
@@ -117,6 +114,36 @@ func (s *MongoDBStore) Upsert(ctx context.Context, server ManagedServer) error {
 	return nil
 }
 
+func (s *MongoDBStore) Update(ctx context.Context, server ManagedServer) error {
+	stampUpsert(&server)
+	result, err := s.collection.UpdateOne(ctx, mongoMCPServerIDFilter{ID: strings.TrimSpace(server.Name)}, bson.M{"$set": mongoMCPServerFields(server)})
+	if err != nil {
+		return fmt.Errorf("update mcp server: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// mongoMCPServerFields is the $set document for one server's mutable fields.
+func mongoMCPServerFields(server ManagedServer) bson.M {
+	return bson.M{
+		"display_name":          server.DisplayName,
+		"url":                   server.URL,
+		"transport":             server.Transport,
+		"headers":               server.Headers,
+		"description":           server.Description,
+		"enabled":               server.Enabled,
+		"allowed_tools":         server.AllowedTools,
+		"disallowed_tools":      server.DisallowedTools,
+		"user_paths":            server.UserPaths,
+		"disallowed_user_paths": server.DisallowedUserPaths,
+		"tool_timeout_seconds":  server.ToolTimeoutSeconds,
+		"updated_at":            server.UpdatedAt,
+	}
+}
+
 func (s *MongoDBStore) Delete(ctx context.Context, name string) error {
 	result, err := s.collection.DeleteOne(ctx, mongoMCPServerIDFilter{ID: strings.TrimSpace(name)})
 	if err != nil {
@@ -126,6 +153,22 @@ func (s *MongoDBStore) Delete(ctx context.Context, name string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// swapHeaders replaces a server's header values only while they still hold
+// the values in current, and reports whether it did. Headers added since are
+// kept.
+func (s *MongoDBStore) swapHeaders(ctx context.Context, current, next ManagedServer) (bool, error) {
+	if len(current.Headers) == 0 {
+		return false, nil
+	}
+	match, update := storage.MongoSwapSubfields("headers", current.Headers, next.Headers)
+	match["_id"] = strings.TrimSpace(current.Name)
+	result, err := s.collection.UpdateOne(ctx, match, update)
+	if err != nil {
+		return false, fmt.Errorf("swap mcp server headers: %w", err)
+	}
+	return result.MatchedCount > 0, nil
 }
 
 func (s *MongoDBStore) Close() error {
@@ -158,6 +201,9 @@ func managedServerFromMongo(doc mongoMCPServerDocument) ManagedServer {
 	}
 	if len(doc.UserPaths) > 0 {
 		server.UserPaths = append([]string(nil), doc.UserPaths...)
+	}
+	if len(doc.DisallowedUserPaths) > 0 {
+		server.DisallowedUserPaths = append([]string(nil), doc.DisallowedUserPaths...)
 	}
 	return server
 }

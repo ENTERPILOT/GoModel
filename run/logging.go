@@ -17,14 +17,34 @@ const (
 	envLogLevel  = "LOG_LEVEL"
 )
 
-func configureLogging(w io.Writer) error {
+// configureLogging installs the process default logger for LOG_FORMAT and
+// LOG_LEVEL, wrapped by the extensions' log handler wrappers. It is the only
+// place core builds a slog handler, so no logger core creates escapes them.
+func configureLogging(w io.Writer, wrappers []func(slog.Handler) slog.Handler) error {
 	level, err := parseLogLevel(os.Getenv(envLogLevel))
 	if err != nil {
 		return err
 	}
 
-	slog.SetDefault(slog.New(newLogHandler(w, detectTTY(w), os.Getenv(envLogFormat), level)))
+	handler, err := wrapLogHandler(newLogHandler(w, detectTTY(w), os.Getenv(envLogFormat), level), wrappers)
+	if err != nil {
+		return err
+	}
+	slog.SetDefault(slog.New(handler))
 	return nil
+}
+
+// wrapLogHandler applies wrappers in registration order: the first wraps
+// handler and each later one wraps the result.
+func wrapLogHandler(handler slog.Handler, wrappers []func(slog.Handler) slog.Handler) (slog.Handler, error) {
+	for i, wrap := range wrappers {
+		wrapped := wrap(handler)
+		if wrapped == nil {
+			return nil, fmt.Errorf("log handler wrapper %d returned a nil handler", i)
+		}
+		handler = wrapped
+	}
+	return handler, nil
 }
 
 func detectTTY(w io.Writer) bool {

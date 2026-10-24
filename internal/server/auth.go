@@ -10,6 +10,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
@@ -35,12 +36,43 @@ func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerToken
 // authenticators such as OIDC sessions. Explicit bearer credentials always
 // take precedence over ambient request credentials such as cookies.
 func AuthMiddlewareWithRequestAuthenticators(masterKey string, authenticator BearerTokenAuthenticator, requestAuthenticators []ext.RequestAuthenticator, skipPaths []string, userPathHeader ...string) echo.MiddlewareFunc {
-	userPathHeaderName := configuredUserPathHeaderName(userPathHeader...)
+	return NewAuthMiddleware(AuthMiddlewareConfig{
+		MasterKey:             masterKey,
+		Authenticator:         authenticator,
+		RequestAuthenticators: requestAuthenticators,
+		SkipPaths:             skipPaths,
+		UserPathHeader:        configuredUserPathHeaderName(userPathHeader...),
+	})
+}
+
+// AuthMiddlewareConfig collects what the authentication middleware validates
+// against.
+type AuthMiddlewareConfig struct {
+	MasterKey             string                     // Optional: master key accepted as a bearer credential
+	Authenticator         BearerTokenAuthenticator   // Optional: managed API key authenticator
+	RequestAuthenticators []ext.RequestAuthenticator // Optional: extension authenticators such as OIDC sessions
+	SkipPaths             []string                   // Paths that bypass authentication; a "/*" suffix matches by prefix
+	UserPathHeader        string                     // Header carrying the request user path
+	// RequireCredential rejects requests that carry no valid credential even
+	// when no auth mechanism is configured, instead of allowing them. It is
+	// what keeps a gateway whose master key was turned off closed rather than
+	// wide open once its managed keys are gone.
+	RequireCredential bool
+}
+
+// NewAuthMiddleware creates the authentication middleware from cfg.
+func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
+	masterKey := cfg.MasterKey
+	authenticator := cfg.Authenticator
+	requestAuthenticators := cfg.RequestAuthenticators
+	skipPaths := cfg.SkipPaths
+	userPathHeaderName := configuredUserPathHeaderName(cfg.UserPathHeader)
 	hasRequestAuthenticator := hasRequestAuthenticators(requestAuthenticators)
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
-			// If no auth mechanism is configured, allow all requests.
-			if masterKey == "" && (authenticator == nil || !authenticator.Enabled()) && !hasRequestAuthenticator {
+			// If no auth mechanism is configured, allow all requests unless the
+			// deployment asked for a credential regardless.
+			if !cfg.RequireCredential && masterKey == "" && (authenticator == nil || !authenticator.Enabled()) && !hasRequestAuthenticator {
 				auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodNoKey)
 				setInteractionContinuationAllowed(c, true)
 				return next(c)
@@ -69,10 +101,11 @@ func AuthMiddlewareWithRequestAuthenticators(masterKey string, authenticator Bea
 				// sessions. Hide every identity value installed by outer extension
 				// middleware before validating the selected credential; clearing only
 				// the response header would leave downstream context consumers scoped
-				// to the wrong principal.
+				// to the wrong principal. The caller's own user-path header is not
+				// such an identity and is restored (see transportOwnedUserPath).
 				setAuthenticationUserHeader(c, "")
 				ctx := ext.WithoutAuthentication(c.Request().Context())
-				ctx = core.WithEffectiveUserPath(ctx, "")
+				ctx = core.WithEffectiveUserPath(ctx, transportOwnedUserPath(c.Request(), userPathHeaderName))
 				ctx = core.WithCredentialAllowedModels(ctx, nil)
 				ctx = core.WithAccessScope(ctx, core.AccessScope{})
 				c.SetRequest(c.Request().WithContext(ctx))
@@ -91,6 +124,7 @@ func AuthMiddlewareWithRequestAuthenticators(masterKey string, authenticator Bea
 					authResult, err := authenticator.Authenticate(c.Request().Context(), token)
 					if err == nil {
 						applyAuthKeyResult(c, authResult, userPathHeaderName)
+						restrictSecretReferences(c, masterKey)
 						return next(c)
 					}
 
@@ -118,6 +152,7 @@ func AuthMiddlewareWithRequestAuthenticators(masterKey string, authenticator Bea
 				if err := applyExtensionAuthResult(c, result, userPathHeaderName); err != nil {
 					return writeGatewayError(c, extensionAuthenticationError(c))
 				}
+				restrictSecretReferences(c, masterKey)
 				return next(c)
 			}
 
@@ -125,6 +160,27 @@ func AuthMiddlewareWithRequestAuthenticators(masterKey string, authenticator Bea
 			return writeGatewayError(c, authErr)
 		}
 	}
+}
+
+// transportOwnedUserPath returns the request's user-path header for model
+// endpoints that own their transport (MCP, realtime, audio uploads), and ""
+// for every other endpoint. Those endpoints take no request snapshot, so
+// RequestSnapshotCapture seeds the header path as the effective user path;
+// without restoring it here, master-key and unbound-key callers lose their
+// path there while ingress-managed endpoints keep it through the snapshot.
+// Only this middleware and RequestSnapshotCapture write the header, so the
+// value is the caller's own, never an outer extension session's. A key with
+// a bound user path still overrides it in applyAuthKeyResult.
+func transportOwnedUserPath(req *http.Request, headerName string) string {
+	desc := core.DescribeEndpoint(req.Method, req.URL.Path)
+	if desc.IngressManaged || !desc.ModelInteraction {
+		return ""
+	}
+	userPath, err := core.NormalizeUserPath(req.Header.Get(headerName))
+	if err != nil {
+		return ""
+	}
+	return userPath
 }
 
 func hasRequestAuthenticators(authenticators []ext.RequestAuthenticator) bool {
@@ -137,10 +193,16 @@ func hasRequestAuthenticators(authenticators []ext.RequestAuthenticator) bool {
 }
 
 func requestAuthenticatorIsNil(authenticator ext.RequestAuthenticator) bool {
-	if authenticator == nil {
+	return isNilExtension(authenticator)
+}
+
+// isNilExtension reports whether an extension-provided interface value is nil,
+// including a typed nil pointer, map, or func behind the interface.
+func isNilExtension(v any) bool {
+	if v == nil {
 		return true
 	}
-	value := reflect.ValueOf(authenticator)
+	value := reflect.ValueOf(v)
 	switch value.Kind() {
 	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
 		return value.IsNil()
@@ -214,6 +276,18 @@ func AdminAccessMiddleware() echo.MiddlewareFunc {
 	}
 }
 
+// restrictSecretReferences keeps a credential other than the master key from
+// adding or changing secret references in admin-saved entities while a master
+// key is configured (see config.RestrictSecretReferences). Without a master
+// key, dashboard credentials are the gateway's top credentials and keep
+// saving references.
+func restrictSecretReferences(c *echo.Context, masterKey string) {
+	if masterKey == "" {
+		return
+	}
+	c.SetRequest(c.Request().WithContext(config.RestrictSecretReferences(c.Request().Context())))
+}
+
 func extensionAuthenticationError(c *echo.Context) *core.GatewayError {
 	const (
 		message = "authentication failed"
@@ -257,6 +331,20 @@ func managedDashboardAccess(ctx context.Context) (allowed, isManagedKey bool) {
 	return allowed, isManagedKey
 }
 
+// managedPassthroughAccessKey marks requests authenticated with a managed key.
+// Its bool value is the key's passthrough access. Like
+// managedDashboardAccessKey, the master key, extension identities, and
+// unauthenticated requests never carry it.
+type managedPassthroughAccessKey struct{}
+
+// managedPassthroughAccess reports whether the request was authenticated with
+// a managed key and, if so, whether that key may call the provider
+// passthrough routes.
+func managedPassthroughAccess(ctx context.Context) (allowed, isManagedKey bool) {
+	allowed, isManagedKey = ctx.Value(managedPassthroughAccessKey{}).(bool)
+	return allowed, isManagedKey
+}
+
 func setInteractionContinuationAllowed(c *echo.Context, allowed bool) {
 	if c == nil {
 		return
@@ -278,6 +366,7 @@ func applyAuthKeyResult(c *echo.Context, authResult authkeys.AuthenticationResul
 	// objects it may address; a key without one stays global.
 	ctx = core.WithAccessScope(ctx, core.AccessScope{UserPath: strings.TrimSpace(authResult.UserPath)})
 	ctx = context.WithValue(ctx, managedDashboardAccessKey{}, authResult.DashboardAccess)
+	ctx = context.WithValue(ctx, managedPassthroughAccessKey{}, authResult.PassthroughAccess)
 	ctx = context.WithValue(ctx, interactionContinuationAllowedKey{}, authResult.DashboardAccess)
 	if len(authResult.AllowedModels) > 0 {
 		ctx = core.WithCredentialAllowedModels(ctx, authResult.AllowedModels)

@@ -23,12 +23,22 @@ import {
   maskingRoutingLabel,
 } from "./routing.js";
   import AccessToggle from "./AccessToggle.svelte";
-  import { CircleDollarSign, Gauge, Pencil, ShieldCheck, Split, Trash2 } from "lucide";
+  import ModelDetails from "./ModelDetails.svelte";
+  import { modelDetailsState } from "./modelDetails.svelte.js";
+  import { rowHasModelDetails } from "./modelDetails.js";
+  import { ChevronRight, CircleDollarSign, Gauge, Pencil, ShieldCheck, Split, Trash2 } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   // columns: the active category's column spec from categoryColumns.js
   // (ModelTable renders the matching <thead> from the same spec).
-  let { row, columns } = $props();
+  // colspan: the full table width, spanned by the details row.
+  let { row, columns, colspan } = $props();
+
+  // The model name doubles as the details accordion toggle whenever the row
+  // has a real model behind it; the details render as a second table row.
+  const detailsAvailable = $derived(rowHasModelDetails(row));
+  const expanded = $derived(detailsAvailable && modelDetailsState.isExpanded(row));
+  const detailsID = $derived("model-details-" + encodeURIComponent(String(row.key || "")));
 
   const pricing = $derived(pricingOverrides.modelRowPricing(row));
   const configuredSlowdown = $derived(
@@ -92,7 +102,24 @@ import {
   <td>
     <div class="model-name-cell">
       <div class="model-name-primary">
-        <span class="mono font-size-md">{row.display_name}</span>
+        {#if detailsAvailable}
+          <button
+            type="button"
+            class="model-details-toggle"
+            class:is-expanded={expanded}
+            aria-expanded={expanded}
+            aria-controls={expanded ? detailsID : undefined}
+            title={expanded
+              ? m.models_hide_details({ name: row.display_name })
+              : m.models_show_details({ name: row.display_name })}
+            onclick={() => modelDetailsState.toggle(row)}
+          >
+            <Icon icon={ChevronRight} class="model-details-toggle-icon" />
+            <span class="mono font-size-md">{row.display_name}</span>
+          </button>
+        {:else}
+          <span class="mono font-size-md">{row.display_name}</span>
+        {/if}
         {#if row.is_alias}
           <span class="model-kind-icon" role="img" aria-label={m.models_virtual_model()} title={m.models_virtual_model()}>
             <svg class="model-kind-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -221,6 +248,9 @@ import {
     {/if}
   </td>
 </tr>
+{#if expanded}
+  <ModelDetails {row} {colspan} id={detailsID} />
+{/if}
 
 <style>
   .model-name-cell {
@@ -239,6 +269,44 @@ import {
   .model-name-secondary {
     font-size: 12px;
     color: var(--text-muted);
+  }
+
+  .model-details-toggle {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .model-details-toggle:hover {
+    color: var(--accent);
+  }
+
+  .model-details-toggle:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 32%, transparent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* The class rides on the Icon child's own <svg>, so it needs :global. */
+  .model-details-toggle :global(.model-details-toggle-icon) {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    color: var(--text-muted);
+    transition: transform 0.2s ease;
+  }
+
+  .model-details-toggle.is-expanded :global(.model-details-toggle-icon) {
+    transform: rotate(90deg);
   }
 
   .model-redirect-remove-btn {

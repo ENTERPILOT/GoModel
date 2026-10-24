@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/labstack/echo/v5"
@@ -13,6 +12,7 @@ import (
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 type scopeRequestAuthenticator struct {
@@ -79,22 +79,20 @@ func TestAuthMiddleware_AccessScopeFollowsCredential(t *testing.T) {
 				return c.String(http.StatusOK, "ok")
 			})
 
-			req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+			opts := []echotest.Option{echotest.WithValue(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})}
 			if tt.bearer != "" {
-				req.Header.Set("Authorization", "Bearer "+tt.bearer)
+				opts = append(opts, echotest.WithHeader("Authorization", "Bearer "+tt.bearer))
 			}
 			if tt.cookie != "" {
-				req.Header.Set("Cookie", tt.cookie)
+				opts = append(opts, echotest.WithHeader("Cookie", tt.cookie))
 			}
 			if tt.pathHeader != "" {
-				req.Header.Set(core.UserPathHeader, tt.pathHeader)
+				opts = append(opts, echotest.WithHeader(core.UserPathHeader, tt.pathHeader))
 			}
+			c, rec := echotest.Get(t, "/v1/models", opts...)
 			if tt.seedScope != "" {
-				req = req.WithContext(core.WithAccessScope(req.Context(), core.AccessScope{UserPath: tt.seedScope}))
+				c.SetRequest(c.Request().WithContext(core.WithAccessScope(c.Request().Context(), core.AccessScope{UserPath: tt.seedScope})))
 			}
-			rec := httptest.NewRecorder()
-			c := echo.New().NewContext(req, rec)
-			c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})
 
 			require.NoError(t, handler(c))
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())

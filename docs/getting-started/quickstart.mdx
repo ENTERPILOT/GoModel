@@ -10,6 +10,13 @@ keywords: ["quick start", "install", "getting started", "AI gateway setup", "Doc
 ### 1. Install and start GoModel
 
 <Tabs>
+  <Tab title="Docker">
+    ```bash
+    docker run --rm -p 8080:8080 \
+      -v gomodel_data:/app/data \
+      enterpilot/gomodel
+    ```
+  </Tab>
   <Tab title="macOS / Linux">
     ```bash
     curl -fsSL https://gomodel.enterpilot.io/install.sh | sh
@@ -20,11 +27,6 @@ keywords: ["quick start", "install", "getting started", "AI gateway setup", "Doc
     ```powershell
     irm https://gomodel.enterpilot.io/install.ps1 | iex
     gomodel
-    ```
-  </Tab>
-  <Tab title="Docker">
-    ```bash
-    docker run --rm -p 8080:8080 enterpilot/gomodel
     ```
   </Tab>
   <Tab title="Live Demo" icon="monitor-play">

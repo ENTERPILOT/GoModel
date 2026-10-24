@@ -11,6 +11,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/plugins/builtin"
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/stretchr/testify/require"
 )
 
 type testStore struct {
@@ -83,9 +84,8 @@ func (s *testStore) Close() error { return nil }
 func rawConfig(t *testing.T, value any) json.RawMessage {
 	t.Helper()
 	raw, err := json.Marshal(value)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	return raw
 }
 
@@ -130,25 +130,22 @@ func testCatalog(t *testing.T) *plugins.Catalog {
 	t.Helper()
 	catalog := plugins.NewCatalog()
 	for _, factory := range builtin.All() {
-		if err := catalog.Register(factory, plugins.SourceBuiltin); err != nil {
-			t.Fatalf("Register() error = %v", err)
-		}
+		err := catalog.Register(factory, plugins.SourceBuiltin)
+		require.NoError(t, err)
 	}
-	if err := catalog.Register(func() pluginapi.Plugin { return &secretPlugin{} }, plugins.SourceRegistered); err != nil {
-		t.Fatalf("Register(secret) error = %v", err)
-	}
+	err := catalog.Register(func() pluginapi.Plugin { return &secretPlugin{} }, plugins.SourceRegistered)
+	require.NoError(t, err)
+
 	return catalog
 }
 
 func newService(t *testing.T, store Store, chat plugins.ChatCompleter) *Service {
 	t.Helper()
 	service, err := NewService(store, testCatalog(t), plugins.HostDeps{Chat: chat})
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+
 	return service
 }
 
@@ -164,32 +161,31 @@ func runPrompt(t *testing.T, chain *plugins.Chain, text string) *pluginapi.Promp
 	prompt.Reset()
 	x := plugins.NewRequestState().NewExchange(context.Background(), pluginapi.Meta{})
 	x.Prompt = prompt
-	if _, err := chain.RunPrompt(context.Background(), x); err != nil {
-		t.Fatalf("RunPrompt() error = %v", err)
-	}
+	_, err := chain.RunPrompt(context.Background(), x)
+	require.NoError(t, err)
+
 	return prompt
 }
 
 func TestServiceRefreshBuildsChainsFromDefinitions(t *testing.T) {
 	service := newService(t, newTestStore(systemPromptDefinition("safety", "be safe")), nil)
+	got := service.Names()
+	require.Len(t, got, 1)
+	require.Equal(t, "safety", got[0])
 
-	if got := service.Names(); len(got) != 1 || got[0] != "safety" {
-		t.Fatalf("Names() = %v, want [safety]", got)
-	}
 	chains, err := service.BuildChains([]StepReference{{Ref: "safety", Step: 10}})
-	if err != nil {
-		t.Fatalf("BuildChains() error = %v", err)
-	}
-	if chains.Prompt.Len() != 1 || chains.Prompt.Hash == "" || !chains.Response.Empty() {
-		t.Fatalf("chains = %+v", chains)
-	}
+	require.NoError(t, err)
+	require.Equal(t, 1, chains.Prompt.Len())
+	require.NotEmpty(t, chains.Prompt.Hash)
+	require.True(t, chains.Response.Empty(), "chains = %+v", chains)
+
 	prompt := runPrompt(t, chains.Prompt, "hi")
-	if len(prompt.Messages) != 2 || prompt.Messages[0].Role != pluginapi.RoleSystem || prompt.Messages[0].Text() != "be safe" {
-		t.Fatalf("messages = %+v, want injected system prompt", prompt.Messages)
-	}
-	if chains, err := service.BuildChains(nil); err != nil || chains != nil {
-		t.Fatalf("BuildChains(nil) = %v, %v", chains, err)
-	}
+	require.Len(t, prompt.Messages, 2)
+	require.Equal(t, pluginapi.RoleSystem, prompt.Messages[0].Role)
+	require.Equal(t, "be safe", prompt.Messages[0].Text())
+	chains, err = service.BuildChains(nil)
+	require.NoError(t, err)
+	require.Nil(t, chains)
 }
 
 func TestServiceBuildChainsErrors(t *testing.T) {
@@ -207,9 +203,8 @@ func TestServiceBuildChainsErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := service.BuildChains(tt.steps)
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("BuildChains() error = %v, want %q", err, tt.want)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.want)
 		})
 	}
 }
@@ -226,42 +221,34 @@ func TestServiceLLMBasedAlteringUsesChatCompleter(t *testing.T) {
 		return replyChat("[|---|](PERSON_1)")(ctx, req)
 	}))
 	chains, err := service.BuildChains([]StepReference{{Ref: "privacy", Step: 10}, {Ref: "privacy", Phase: pluginapi.KindResponse, Step: 10}})
-	if err != nil {
-		t.Fatalf("BuildChains() error = %v", err)
-	}
-	if chains.Response.Len() != 1 {
-		t.Fatal("response chain missing")
-	}
+	require.NoError(t, err)
+	require.Equal(t, 1, chains.Response.Len())
+
 	prompt := runPrompt(t, chains.Prompt, "John Smith")
-	if prompt.Messages[0].Text() != "[|---|](PERSON_1)" {
-		t.Fatalf("rewritten = %q", prompt.Messages[0].Text())
-	}
-	if captured == nil || captured.Model != "openai/gpt-4o-mini" {
-		t.Fatalf("captured request = %+v", captured)
-	}
+	require.Equal(t, "[|---|](PERSON_1)", prompt.Messages[0].Text())
+	require.NotNil(t, captured)
+	require.Equal(t, "openai/gpt-4o-mini", captured.Model)
 
 	service.SetChatCompleter(replyChat("[|---|](PERSON_2)"))
-	if prompt := runPrompt(t, chains.Prompt, "Jane"); prompt.Messages[0].Text() != "[|---|](PERSON_2)" {
-		t.Fatalf("after SetChatCompleter rewritten = %q", prompt.Messages[0].Text())
-	}
+	prompt = runPrompt(t, chains.Prompt, "Jane")
+	require.Equal(t, "[|---|](PERSON_2)", prompt.Messages[0].Text())
+
 	view, ok := service.GetView("privacy")
-	if !ok || view.Summary != "openai/gpt-4o-mini • user • default prompt" || strings.Join(view.Phases, ",") != "prompt,response" {
-		t.Fatalf("view = %+v", view)
-	}
+	require.True(t, ok)
+	require.Equal(t, "openai/gpt-4o-mini • user • default prompt", view.Summary)
+	require.Equal(t, "prompt,response", strings.Join(view.Phases, ","), "view = %+v", view)
 }
 
 func TestServiceRefreshReturnsGatewayErrorOnStoreFailure(t *testing.T) {
 	store := newTestStore()
 	store.listErr = errors.New("db down")
 	service, err := NewService(store, testCatalog(t), plugins.HostDeps{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	err = service.Refresh(context.Background())
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) || gatewayErr.HTTPStatusCode() != 502 {
-		t.Fatalf("Refresh() error = %v, want 502 gateway error", err)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, 502, gatewayErr.HTTPStatusCode())
 }
 
 func TestServiceUpsertValidation(t *testing.T) {
@@ -283,15 +270,10 @@ func TestServiceUpsertValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			service := newService(t, newTestStore(), nil)
 			err := service.Upsert(context.Background(), tt.def)
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("Upsert() error = %v, want %q", err, tt.want)
-			}
-			if !IsValidationError(err) {
-				t.Fatalf("Upsert() error %T is not a validation error", err)
-			}
-			if service.Len() != 0 {
-				t.Fatal("snapshot changed after a rejected upsert")
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.want)
+			require.True(t, IsValidationError(err))
+			require.Equal(t, 0, service.Len())
 		})
 	}
 }
@@ -307,65 +289,51 @@ func TestServiceUpsertNormalizesAndStoresFailModeAndTimeout(t *testing.T) {
 		TimeoutMS: 250,
 		Config:    json.RawMessage(`{"content":" be safe ","mode":""}`),
 	})
-	if err != nil {
-		t.Fatalf("Upsert() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	stored := store.definitions["safety"]
-	if stored.Type != "system_prompt" || stored.UserPath != "/team/alpha" || stored.FailMode != "open" || stored.TimeoutMS != 250 {
-		t.Fatalf("stored = %+v", stored)
-	}
-	if string(stored.Config) != `{"content":"be safe","mode":"inject"}` {
-		t.Fatalf("stored config = %s", stored.Config)
-	}
+	require.Equal(t, "system_prompt", stored.Type)
+	require.Equal(t, "/team/alpha", stored.UserPath)
+	require.Equal(t, "open", stored.FailMode)
+	require.Equal(t, 250, stored.TimeoutMS, "stored = %+v", stored)
+	require.Equal(t, `{"content":"be safe","mode":"inject"}`, string(stored.Config), "stored config = %s", stored.Config)
+
 	chains, err := service.BuildChains([]StepReference{{Ref: "safety", Step: 5}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	inst := chains.Prompt.Instances()[0]
-	if inst.FailMode != plugins.FailOpen || inst.Timeout.Milliseconds() != 250 {
-		t.Fatalf("instance = %+v", inst)
-	}
+	require.Equal(t, plugins.FailOpen, inst.FailMode)
+	require.Equal(t, int64(250), inst.Timeout.Milliseconds(), "instance = %+v", inst)
 }
 
 func TestServiceSecretsRedactedMergedAndCleared(t *testing.T) {
 	store := newTestStore()
 	service := newService(t, store, nil)
 	ctx := context.Background()
-	if err := service.Upsert(ctx, Definition{Name: "sec", Type: "secret_check", Config: json.RawMessage(`{"api_key":"s3cret"}`)}); err != nil {
-		t.Fatalf("Upsert() error = %v", err)
-	}
-	if string(store.definitions["sec"].Config) != `{"api_key":"s3cret","threshold":0.5}` {
-		t.Fatalf("stored = %s", store.definitions["sec"].Config)
-	}
+	err := service.Upsert(ctx, Definition{Name: "sec", Type: "secret_check", Config: json.RawMessage(`{"api_key":"s3cret"}`)})
+	require.NoError(t, err)
+	require.Equal(t, `{"api_key":"s3cret","threshold":0.5}`, string(store.definitions["sec"].Config), "stored = %s", store.definitions["sec"].Config)
+
 	def, _ := service.Get("sec")
-	if string(def.Config) != `{"api_key":"********","threshold":0.5}` {
-		t.Fatalf("Get() config = %s, want redacted", def.Config)
-	}
-	if views := service.ListViews(); string(views[0].Config) != `{"api_key":"********","threshold":0.5}` || views[0].Phases[0] != "response" {
-		t.Fatalf("ListViews() = %+v", views)
-	}
-	// Masked secret keeps the stored value; other fields are replaced.
-	if err := service.Upsert(ctx, Definition{Name: "sec", Type: "secret_check", Config: json.RawMessage(`{"api_key":"********","threshold":1}`)}); err != nil {
-		t.Fatalf("Upsert(masked) error = %v", err)
-	}
-	if string(store.definitions["sec"].Config) != `{"api_key":"s3cret","threshold":1}` {
-		t.Fatalf("stored after mask = %s", store.definitions["sec"].Config)
-	}
-	// Omitted fail_mode resets to the default.
-	if err := service.Upsert(ctx, Definition{Name: "sec", Type: "secret_check", FailMode: "open", Config: json.RawMessage(`{"api_key":"********"}`)}); err != nil {
-		t.Fatal(err)
-	}
-	if err := service.Upsert(ctx, Definition{Name: "sec", Type: "secret_check", Config: json.RawMessage(`{"api_key":"********"}`)}); err != nil {
-		t.Fatal(err)
-	}
-	if store.definitions["sec"].FailMode != "" {
-		t.Fatalf("fail_mode = %q, want reset", store.definitions["sec"].FailMode)
-	}
+	require.Equal(t, `{"api_key":"********","threshold":0.5}`, string(def.Config), "Get() config = %s, want redacted", def.Config)
+	views := service.ListViews()
+	require.Equal(t, `{"api_key":"********","threshold":0.5}`, string(views[0].Config))
+	require.Equal(t, "response", views[0].Phases[0], "ListViews() = %+v", views)
+	err = // Masked secret keeps the stored value; other fields are replaced.
+		service.Upsert(ctx, Definition{Name: "sec", Type: "secret_check", Config: json.RawMessage(`{"api_key":"********","threshold":1}`)})
+	require.NoError(t, err)
+	require.Equal(t, `{"api_key":"s3cret","threshold":1}`, string(store.definitions["sec"].Config), "stored after mask = %s", store.definitions["sec"].Config)
+	err = // Omitted fail_mode resets to the default.
+		service.Upsert(ctx, Definition{Name: "sec", Type: "secret_check", FailMode: "open", Config: json.RawMessage(`{"api_key":"********"}`)})
+	require.NoError(t, err)
+	err = service.Upsert(ctx, Definition{Name: "sec", Type: "secret_check", Config: json.RawMessage(`{"api_key":"********"}`)})
+	require.NoError(t, err)
+	require.Empty(t, store.definitions["sec"].FailMode)
+
 	// An empty secret clears it, which the required check rejects.
-	err := service.Upsert(ctx, Definition{Name: "sec", Type: "secret_check", Config: json.RawMessage(`{"api_key":""}`)})
-	if err == nil || !strings.Contains(err.Error(), "required") {
-		t.Fatalf("Upsert(cleared) error = %v, want required", err)
-	}
+	err = service.Upsert(ctx, Definition{Name: "sec", Type: "secret_check", Config: json.RawMessage(`{"api_key":""}`)})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "required")
 }
 
 func TestServiceTypeDefinitions(t *testing.T) {
@@ -376,46 +344,41 @@ func TestServiceTypeDefinitions(t *testing.T) {
 		byType[def.Type] = def
 	}
 	sys, ok := byType["system_prompt"]
-	if !ok {
-		t.Fatalf("system_prompt missing from %+v", defs)
-	}
-	if sys.Label != "System Prompt" || sys.Source != "builtin" || !sys.Mutates || strings.Join(sys.Phases, ",") != "prompt" {
-		t.Fatalf("system_prompt = %+v", sys)
-	}
-	if string(sys.Defaults) != `{"content":"","mode":"inject"}` {
-		t.Fatalf("defaults = %s", sys.Defaults)
-	}
-	if len(sys.Fields) != 2 || sys.Fields[0].Key != "mode" || sys.Fields[0].Default != "inject" || len(sys.Fields[0].Options) != 3 {
-		t.Fatalf("fields = %+v", sys.Fields)
-	}
+	require.True(t, ok, "system_prompt missing from %+v", defs)
+	require.Equal(t, "System Prompt", sys.Label)
+	require.Equal(t, "builtin", sys.Source)
+	require.True(t, sys.Mutates)
+	require.Equal(t, "prompt", strings.Join(sys.Phases, ","), "system_prompt = %+v", sys)
+	require.Equal(t, `{"content":"","mode":"inject"}`, string(sys.Defaults), "defaults = %s", sys.Defaults)
+	require.Len(t, sys.Fields, 2)
+	require.Equal(t, "mode", sys.Fields[0].Key)
+	require.Equal(t, "inject", sys.Fields[0].Default)
+	require.Len(t, sys.Fields[0].Options, 3)
+
 	llm := byType["llm_based_altering"]
-	if llm.Label != "LLM Based Altering" || strings.Join(llm.Phases, ",") != "prompt,response" {
-		t.Fatalf("llm = %+v", llm)
-	}
+	require.Equal(t, "LLM Based Altering", llm.Label)
+	require.Equal(t, "prompt,response", strings.Join(llm.Phases, ","), "llm = %+v", llm)
+
 	var defaults map[string]any
-	if err := json.Unmarshal(llm.Defaults, &defaults); err != nil || defaults["max_tokens"] != float64(4096) {
-		t.Fatalf("llm defaults = %s (%v)", llm.Defaults, err)
-	}
-	if sec := byType["secret_check"]; sec.Source != "registered" || sec.Fields[0].Input != "secret" {
-		t.Fatalf("secret_check = %+v", sec)
-	}
+	err := json.Unmarshal(llm.Defaults, &defaults)
+	require.NoError(t, err)
+	require.Equal(t, float64(4096), defaults["max_tokens"], "llm defaults = %s (%v)", llm.Defaults, err)
+	sec := byType["secret_check"]
+	require.Equal(t, "registered", sec.Source)
+	require.Equal(t, "secret", sec.Fields[0].Input, "secret_check = %+v", sec)
 }
 
 func TestServiceUpsertDefinitionsUpdatesSubsetAndPreservesCustomEntries(t *testing.T) {
 	store := newTestStore(systemPromptDefinition("custom", "keep me"), systemPromptDefinition("seeded", "old"))
 	service := newService(t, store, nil)
-	if err := service.UpsertDefinitions(context.Background(), []Definition{systemPromptDefinition("seeded", "new")}); err != nil {
-		t.Fatalf("UpsertDefinitions() error = %v", err)
-	}
-	if got := service.Names(); strings.Join(got, ",") != "custom,seeded" {
-		t.Fatalf("Names() = %v", got)
-	}
-	if def, _ := service.Get("seeded"); !strings.Contains(string(def.Config), "new") {
-		t.Fatalf("seeded config = %s", def.Config)
-	}
-	if err := service.UpsertDefinitions(context.Background(), nil); err != nil {
-		t.Fatalf("UpsertDefinitions(nil) error = %v", err)
-	}
+	err := service.UpsertDefinitions(context.Background(), []Definition{systemPromptDefinition("seeded", "new")})
+	require.NoError(t, err)
+	got := service.Names()
+	require.Equal(t, "custom,seeded", strings.Join(got, ","), "Names() = %v", got)
+	def, _ := service.Get("seeded")
+	require.Contains(t, string(def.Config), "new", "seeded config = %s", def.Config)
+	err = service.UpsertDefinitions(context.Background(), nil)
+	require.NoError(t, err)
 }
 
 func TestServiceMutationsLeaveSnapshotUnchangedWhenPersistenceFails(t *testing.T) {
@@ -424,60 +387,46 @@ func TestServiceMutationsLeaveSnapshotUnchangedWhenPersistenceFails(t *testing.T
 	store.upsertManyErr = errors.New("disk full")
 	store.upsertErr = errors.New("disk full")
 	store.deleteErr = errors.New("disk full")
-	if err := service.UpsertDefinitions(context.Background(), []Definition{systemPromptDefinition("b", "y")}); err == nil {
-		t.Fatal("UpsertDefinitions() error = nil")
-	}
-	if err := service.Upsert(context.Background(), systemPromptDefinition("c", "z")); err == nil {
-		t.Fatal("Upsert() error = nil")
-	}
-	if err := service.Delete(context.Background(), "a"); err == nil {
-		t.Fatal("Delete() error = nil")
-	}
-	if got := service.Names(); strings.Join(got, ",") != "a" {
-		t.Fatalf("Names() = %v, want [a]", got)
-	}
+	require.Error(t, service.UpsertDefinitions(context.Background(), []Definition{systemPromptDefinition("b", "y")}))
+	require.Error(t, service.Upsert(context.Background(), systemPromptDefinition("c", "z")))
+	require.Error(t, service.Delete(context.Background(), "a"))
+	got := service.Names()
+	require.Equal(t, "a", strings.Join(got, ","), "Names() = %v, want [a]", got)
+
 	store.deleteErr = nil
-	if err := service.Delete(context.Background(), "a"); err != nil {
-		t.Fatalf("Delete() error = %v", err)
-	}
-	if service.Len() != 0 {
-		t.Fatal("definition not removed")
-	}
-	if err := service.Delete(context.Background(), " "); err == nil {
-		t.Fatal("Delete(empty) error = nil")
-	}
+	err := service.Delete(context.Background(), "a")
+	require.NoError(t, err)
+	require.Equal(t, 0, service.Len())
+	require.Error(t, service.Delete(context.Background(), " "))
 }
 
 func TestServiceRejectsSecondInstanceOfSingleInstancePlugin(t *testing.T) {
 	catalog := plugins.NewCatalog()
 	shared := &secretPlugin{}
-	if err := catalog.Register(func() pluginapi.Plugin { return shared }, plugins.Source("/opt/plugins/secret.so"), plugins.RegisterOptions{SingleInstance: true}); err != nil {
-		t.Fatal(err)
-	}
+	err := catalog.Register(func() pluginapi.Plugin { return shared }, plugins.Source("/opt/plugins/secret.so"), plugins.RegisterOptions{SingleInstance: true})
+	require.NoError(t, err)
+
 	store := newTestStore(
 		Definition{Name: "one", Type: "secret_check", Config: json.RawMessage(`{"api_key":"a"}`)},
 		Definition{Name: "two", Type: "secret_check", Config: json.RawMessage(`{"api_key":"b"}`)},
 	)
 	service, err := NewService(store, catalog, plugins.HostDeps{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	err = service.Refresh(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "single configured instance") {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "single configured instance")
 }
 
 func TestServiceInstanceConfigIsUnredacted(t *testing.T) {
 	service := newService(t, newTestStore(), nil)
-	if err := service.Upsert(context.Background(), Definition{Name: "sec", Type: "secret_check", Config: json.RawMessage(`{"api_key":"s3cret"}`)}); err != nil {
-		t.Fatalf("Upsert() error = %v", err)
-	}
+	err := service.Upsert(context.Background(), Definition{Name: "sec", Type: "secret_check", Config: json.RawMessage(`{"api_key":"s3cret"}`)})
+	require.NoError(t, err)
+
 	config, pluginType, ok := service.InstanceConfig(" sec ")
-	if !ok || pluginType != "secret_check" || string(config) != `{"api_key":"s3cret","threshold":0.5}` {
-		t.Fatalf("InstanceConfig() = %s, %q, %v", config, pluginType, ok)
-	}
-	if _, _, ok := service.InstanceConfig("missing"); ok {
-		t.Fatal("InstanceConfig(missing) reported ok")
-	}
+	require.True(t, ok)
+	require.Equal(t, "secret_check", pluginType)
+	require.Equal(t, `{"api_key":"s3cret","threshold":0.5}`, string(config), "InstanceConfig() = %s, %q, %v", config, pluginType, ok)
+	_, _, ok = service.InstanceConfig("missing")
+	require.False(t, ok)
 }

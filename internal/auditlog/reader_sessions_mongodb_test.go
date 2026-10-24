@@ -2,7 +2,6 @@ package auditlog
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -10,13 +9,13 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMongoRequestCountLookup(t *testing.T) {
 	stage, err := bson.MarshalExtJSON(mongoRequestCountLookup("custom_audit_logs"), false, false)
-	if err != nil {
-		t.Fatalf("marshal request count lookup: %v", err)
-	}
+	require.NoError(t, err)
+
 	encoded := string(stage)
 	for _, want := range []string{
 		`"from":"custom_audit_logs"`,
@@ -26,9 +25,7 @@ func TestMongoRequestCountLookup(t *testing.T) {
 		`"$count":"count"`,
 		`"as":"request_count"`,
 	} {
-		if !strings.Contains(encoded, want) {
-			t.Fatalf("request count lookup = %s, want fragment %s", encoded, want)
-		}
+		require.Contains(t, encoded, want)
 	}
 }
 
@@ -38,39 +35,29 @@ func TestMongoDBReader_GetSessions(t *testing.T) {
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
 		ctx := context.Background()
 		store, err := NewMongoDBStore(db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
+
 		defer store.Close()
 
 		base := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
 		entries := sessionThreadFixture(base)
-		if err := store.WriteBatch(ctx, entries); err != nil {
-			t.Fatalf("WriteBatch failed: %v", err)
-		}
+		err = store.WriteBatch(ctx, entries)
+		require.NoError(t, err)
 
 		reader, err := NewMongoDBReader(db)
-		if err != nil {
-			t.Fatalf("failed to create reader: %v", err)
-		}
+		require.NoError(t, err)
 
 		result, err := reader.GetSessions(ctx, LogQueryParams{Limit: 10})
-		if err != nil {
-			t.Fatalf("GetSessions failed: %v", err)
-		}
-		if result.Total != 3 || len(result.Sessions) != 3 {
-			t.Fatalf("total=%d sessions=%d, want 3/3", result.Total, len(result.Sessions))
-		}
-		if got := result.Sessions[0].Latest.ID; got != "solo" {
-			t.Fatalf("sessions[0].Latest.ID = %q, want solo", got)
-		}
+		require.NoError(t, err)
+		require.Equal(t, 3, result.Total)
+		require.Len(t, result.Sessions, 3)
+		require.Equal(t, "solo", result.Sessions[0].Latest.ID)
+
 		threadA := result.Sessions[1]
-		if threadA.SessionID != "sess-a" || threadA.RequestCount != 2 || threadA.Latest.ID != "a-2" {
-			t.Fatalf("sess-a summary = %+v", threadA)
-		}
-		if result.Sessions[2].SessionID != "sess-b" {
-			t.Fatalf("sessions[2] = %+v", result.Sessions[2])
-		}
+		require.Equal(t, "sess-a", threadA.SessionID)
+		require.Equal(t, 2, threadA.RequestCount)
+		require.Equal(t, "a-2", threadA.Latest.ID, "sess-a summary = %+v", threadA)
+		require.Equal(t, "sess-b", result.Sessions[2].SessionID, "sessions[2] = %+v", result.Sessions[2])
 
 		assertGetSessionsHeadPayload(t, reader)
 		assertGetSessionsPaging(t, reader)
@@ -82,19 +69,15 @@ func TestMongoDBReader_GetConversationScopesSessionToUserPath(t *testing.T) {
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
 		ctx := context.Background()
 		store, err := NewMongoDBStore(db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
-		defer store.Close()
+		require.NoError(t, err)
 
-		if err := store.WriteBatch(ctx, conversationPathIsolationFixture(time.Now().UTC())); err != nil {
-			t.Fatalf("WriteBatch failed: %v", err)
-		}
+		defer store.Close()
+		err = store.WriteBatch(ctx, conversationPathIsolationFixture(time.Now().UTC()))
+		require.NoError(t, err)
 
 		reader, err := NewMongoDBReader(db)
-		if err != nil {
-			t.Fatalf("failed to create reader: %v", err)
-		}
+		require.NoError(t, err)
+
 		assertConversationUserPathIsolation(t, reader)
 	})
 }

@@ -11,10 +11,13 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/session"
 )
 
@@ -115,25 +118,15 @@ func TestRequestRewriteMiddlewareRewritesChatCompletions(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
-	}
-	if provider.capturedChatReq == nil {
-		t.Fatal("expected chat request to be captured")
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, provider.capturedChatReq)
+
 	content, _ := provider.capturedChatReq.Messages[0].Content.(string)
-	if content != "PONG" {
-		t.Errorf("provider saw content %q, want %q", content, "PONG")
-	}
-	if got := rec.Header().Get("X-Test-Rewritten"); got != "yes" {
-		t.Errorf("expected annotation header, got %q", got)
-	}
-	if seenAuth != "[REDACTED]" {
-		t.Errorf("rewriter saw Authorization %q, want it redacted", seenAuth)
-	}
-	if seenPlain != "trace-1" {
-		t.Errorf("rewriter saw X-Custom-Trace %q, want original value", seenPlain)
-	}
+	assert.Equal(t, "PONG", content)
+	got := rec.Header().Get("X-Test-Rewritten")
+	assert.Equal(t, "yes", got)
+	assert.Equal(t, "[REDACTED]", seenAuth)
+	assert.Equal(t, "trace-1", seenPlain)
 }
 
 func TestRequestRewriteMiddlewareDeliversProviderFeedback(t *testing.T) {
@@ -156,16 +149,14 @@ func TestRequestRewriteMiddlewareDeliversProviderFeedback(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
-	}
-	if len(rewriter.feedback) != 1 {
-		t.Fatalf("feedback count = %d, want 1", len(rewriter.feedback))
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Len(t, rewriter.feedback, 1)
+
 	got := rewriter.feedback[0]
-	if got.requestID != "feedback-request" || got.sessionID != "feedback-session" || got.cacheRead != 1536 || !got.usageObserved {
-		t.Fatalf("feedback = %+v", got)
-	}
+	require.Equal(t, "feedback-request", got.requestID)
+	require.Equal(t, "feedback-session", got.sessionID)
+	require.Equal(t, 1536, got.cacheRead)
+	require.True(t, got.usageObserved, "feedback = %+v", got)
 }
 
 func TestRequestRewriteMiddlewareHonorsResponseFeedbackFilter(t *testing.T) {
@@ -179,16 +170,10 @@ func TestRequestRewriteMiddlewareHonorsResponseFeedbackFilter(t *testing.T) {
 			attached = hasResponseFeedbackObservers(c)
 			return c.NoContent(http.StatusOK)
 		}
-		e := echo.New()
-		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
-			strings.NewReader(`{"model":"gpt-4o-mini","messages":[]}`))
-		c := e.NewContext(req, httptest.NewRecorder())
-		if err := RequestRewriteMiddleware([]ext.RequestRewriter{rewriter}, nil)(next)(c); err != nil {
-			t.Fatalf("want=%v: middleware: %v", want, err)
-		}
-		if attached != want {
-			t.Fatalf("want=%v: attached=%v", want, attached)
-		}
+		c, _ := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-4o-mini","messages":[]}`)
+		err := RequestRewriteMiddleware([]ext.RequestRewriter{rewriter}, nil)(next)(c)
+		require.NoError(t, err, "want=%v: middleware: %v", want, err)
+		require.Equal(t, want, attached)
 	}
 }
 
@@ -203,15 +188,9 @@ func TestRequestRewriteMiddlewareIsolatesResponseFeedbackFilterPanic(t *testing.
 	rec := postJSON(t, srv, "/v1/chat/completions",
 		`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hello"}]}`)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d (%s), want 200", rec.Code, rec.Body.String())
-	}
-	if provider.capturedChatReq == nil {
-		t.Fatal("provider was not called after feedback filter panic")
-	}
-	if len(rewriter.feedback) != 0 {
-		t.Fatalf("feedback count = %d, want 0 after filter panic", len(rewriter.feedback))
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, provider.capturedChatReq)
+	require.Empty(t, rewriter.feedback)
 }
 
 func TestRequestRewriteMiddlewareExposesSessionID(t *testing.T) {
@@ -253,16 +232,11 @@ func TestRequestRewriteMiddlewareExposesSessionID(t *testing.T) {
 
 			rec := postJSON(t, srv, "/v1/chat/completions",
 				`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`)
-			if rec.Code != http.StatusOK {
-				t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
-			}
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 			// The empty-session expectation must not pass vacuously.
-			if capturing.calls != 1 {
-				t.Fatalf("rewriter called %d times, want 1", capturing.calls)
-			}
-			if seenSession != tt.want {
-				t.Errorf("rewriter saw SessionID %q, want %q", seenSession, tt.want)
-			}
+			require.Equal(t, 1, capturing.calls)
+			assert.Equal(t, tt.want, seenSession)
 		})
 	}
 }
@@ -276,19 +250,13 @@ func TestRequestRewriteMiddlewareRewritesMessages(t *testing.T) {
 	rec := postJSON(t, srv, "/v1/messages",
 		`{"model":"gpt-4o-mini","max_tokens":16,"messages":[{"role":"user","content":"PING"}]}`)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
-	}
-	if provider.capturedChatReq == nil {
-		t.Fatal("expected chat request to be captured")
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, provider.capturedChatReq)
+
 	body, err := json.Marshal(provider.capturedChatReq)
-	if err != nil {
-		t.Fatalf("marshal captured request: %v", err)
-	}
-	if !strings.Contains(string(body), "PONG") || strings.Contains(string(body), "PING") {
-		t.Errorf("provider request not rewritten: %s", body)
-	}
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "PONG")
+	assert.NotContains(t, string(body), "PING", "provider request not rewritten: %s", body)
 }
 
 func TestRequestRewriteMiddlewareEndpointGating(t *testing.T) {
@@ -318,9 +286,7 @@ func TestRequestRewriteMiddlewareEndpointGating(t *testing.T) {
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, req)
 
-			if rewriter.calls != 0 {
-				t.Errorf("rewriter invoked %d times on %s %s, want 0", rewriter.calls, tt.method, tt.path)
-			}
+			assert.Equal(t, 0, rewriter.calls, "rewriter invoked %d times on %s %s, want 0", rewriter.calls, tt.method, tt.path)
 		})
 	}
 }
@@ -337,13 +303,10 @@ func TestRequestRewriteMiddlewareChainsInRegistrationOrder(t *testing.T) {
 	rec := postJSON(t, srv, "/v1/chat/completions",
 		`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"PING"}]}`)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 	content, _ := provider.capturedChatReq.Messages[0].Content.(string)
-	if content != "PING-A-B" {
-		t.Errorf("provider saw content %q, want chained rewrite %q", content, "PING-A-B")
-	}
+	assert.Equal(t, "PING-A-B", content)
 }
 
 func TestRequestRewriteMiddlewareRejectionError(t *testing.T) {
@@ -359,13 +322,11 @@ func TestRequestRewriteMiddlewareRejectionError(t *testing.T) {
 		rec := postJSON(t, srv, "/v1/chat/completions",
 			`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`)
 
-		if rec.Code != http.StatusUnprocessableEntity {
-			t.Fatalf("expected 422, got %d (%s)", rec.Code, rec.Body.String())
-		}
+		require.Equal(t, http.StatusUnprocessableEntity, rec.Code, rec.Body.String())
+
 		body := rec.Body.String()
-		if !strings.Contains(body, "invalid_request_error") || !strings.Contains(body, "policy_violation") {
-			t.Errorf("expected OpenAI error envelope with code, got: %s", body)
-		}
+		assert.Contains(t, body, "invalid_request_error")
+		assert.Contains(t, body, "policy_violation")
 	})
 
 	t.Run("anthropic dialect", func(t *testing.T) {
@@ -373,18 +334,14 @@ func TestRequestRewriteMiddlewareRejectionError(t *testing.T) {
 		rec := postJSON(t, srv, "/v1/messages",
 			`{"model":"gpt-4o-mini","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`)
 
-		if rec.Code != http.StatusUnprocessableEntity {
-			t.Fatalf("expected 422, got %d (%s)", rec.Code, rec.Body.String())
-		}
+		require.Equal(t, http.StatusUnprocessableEntity, rec.Code, rec.Body.String())
+
 		var envelope struct {
 			Type string `json:"type"`
 		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
-			t.Fatalf("invalid JSON error body: %v", err)
-		}
-		if envelope.Type != "error" {
-			t.Errorf("expected anthropic error envelope, got: %s", rec.Body.String())
-		}
+		err := json.Unmarshal(rec.Body.Bytes(), &envelope)
+		require.NoError(t, err)
+		assert.Equal(t, "error", envelope.Type, "expected anthropic error envelope, got: %s", rec.Body.String())
 	})
 }
 
@@ -401,12 +358,8 @@ func TestRequestRewriteMiddlewareInternalErrorFailsClosed(t *testing.T) {
 	rec := postJSON(t, srv, "/v1/chat/completions",
 		`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`)
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d (%s)", rec.Code, rec.Body.String())
-	}
-	if provider.capturedChatReq != nil {
-		t.Error("provider must not be called when a rewriter fails (fail-closed)")
-	}
+	require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
+	assert.Nil(t, provider.capturedChatReq)
 }
 
 func TestRequestRewriteMiddlewareLargeBody(t *testing.T) {
@@ -421,13 +374,10 @@ func TestRequestRewriteMiddlewareLargeBody(t *testing.T) {
 	body := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"NEEDLE ` + padding + `"}]}`
 	rec := postJSON(t, srv, "/v1/chat/completions", body)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 	content, _ := provider.capturedChatReq.Messages[0].Content.(string)
-	if !strings.HasPrefix(content, "REPLACED") {
-		t.Errorf("large body was not rewritten, content prefix: %.40q", content)
-	}
+	assert.True(t, strings.HasPrefix(content, "REPLACED"), "large body was not rewritten, content prefix: %.40q", content)
 }
 
 func TestExtensionRoutesMiddlewareAndAuthSkipPaths(t *testing.T) {
@@ -456,21 +406,16 @@ func TestExtensionRoutesMiddlewareAndAuthSkipPaths(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/sso/callback", nil)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK || rec.Body.String() != "callback" {
-			t.Fatalf("expected public 200 callback, got %d (%s)", rec.Code, rec.Body.String())
-		}
-		if rec.Header().Get("X-Ext-Middleware") != "ran" {
-			t.Error("extension middleware did not run")
-		}
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, "callback", rec.Body.String())
+		assert.Equal(t, "ran", rec.Header().Get("X-Ext-Middleware"))
 	})
 
 	t.Run("core routes still require auth", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
-		if rec.Code != http.StatusUnauthorized {
-			t.Fatalf("expected 401 without credentials, got %d", rec.Code)
-		}
+		require.Equal(t, http.StatusUnauthorized, rec.Code)
 	})
 }
 
@@ -485,25 +430,18 @@ func TestRequestRewriteMiddlewareAuditKeepsOriginalBody(t *testing.T) {
 	rec := postJSON(t, srv, "/v1/chat/completions",
 		`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"PING"}]}`)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 	content, _ := provider.capturedChatReq.Messages[0].Content.(string)
-	if content != "PONG" {
-		t.Fatalf("provider saw content %q, want rewritten %q", content, "PONG")
-	}
-	if len(auditLogger.entries) == 0 {
-		t.Fatal("expected an audit entry")
-	}
+	require.Equal(t, "PONG", content)
+	require.NotEmpty(t, auditLogger.entries)
+
 	entryJSON, err := json.Marshal(auditLogger.entries[0])
-	if err != nil {
-		t.Fatalf("marshal audit entry: %v", err)
-	}
-	if !strings.Contains(string(entryJSON), "PING") {
-		t.Errorf("audit entry must contain the original client body: %s", entryJSON)
-	}
-	if strings.Contains(string(entryJSON), "PONG") && !strings.Contains(string(entryJSON), `"ok"`) {
-		t.Errorf("audit request body appears rewritten: %s", entryJSON)
+	require.NoError(t, err)
+	assert.Contains(t, string(entryJSON), "PING", "audit entry must contain the original client body: %s", entryJSON)
+
+	if strings.Contains(string(entryJSON), "PONG") {
+		assert.Contains(t, string(entryJSON), `"ok"`, "audit request body appears rewritten")
 	}
 }
 
@@ -533,54 +471,42 @@ func TestRequestRewriteMiddlewareRecordsRevisions(t *testing.T) {
 		})
 		rec := postJSON(t, srv, "/v1/chat/completions",
 			`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"PING"}]}`)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
-		}
-		if len(auditLogger.entries) == 0 {
-			t.Fatal("expected an audit entry")
-		}
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.NotEmpty(t, auditLogger.entries)
+
 		return auditLogger.entries[0]
 	}
 
 	t.Run("with body logging", func(t *testing.T) {
 		entry := run(t, true, true)
 		revisions := entry.Data.RequestRevisions
-		if len(revisions) != 2 {
-			t.Fatalf("expected 2 revisions, got %d", len(revisions))
-		}
+		require.Len(t, revisions, 2)
+
 		first, second := revisions[0], revisions[1]
-		if first.Seq != 1 || first.Rewriter != "swap" || second.Seq != 2 || second.Rewriter != "upper" {
-			t.Errorf("revision order/naming wrong: %+v", revisions)
-		}
-		if first.BytesBefore == 0 || first.BytesAfter == 0 {
-			t.Errorf("revision sizes missing: %+v", first)
-		}
-		if first.Detail == nil {
-			t.Error("rewriter detail must be recorded")
-		}
+		assert.Equal(t, 1, first.Seq)
+		assert.Equal(t, "swap", first.Rewriter)
+		assert.Equal(t, 2, second.Seq)
+		assert.Equal(t, "upper", second.Rewriter, "revision order/naming wrong: %+v", revisions)
+		assert.NotZero(t, first.BytesBefore)
+		assert.NotZero(t, first.BytesAfter, "revision sizes missing: %+v", first)
+		assert.NotNil(t, first.Detail)
+
 		firstBody, _ := json.Marshal(first.Body)
 		secondBody, _ := json.Marshal(second.Body)
-		if !strings.Contains(string(firstBody), "PONG") || strings.Contains(string(firstBody), "PONG!") {
-			t.Errorf("first revision body must be the intermediate rewrite: %s", firstBody)
-		}
-		if !strings.Contains(string(secondBody), "PONG!") {
-			t.Errorf("second revision body must be the final rewrite: %s", secondBody)
-		}
+		assert.Contains(t, string(firstBody), "PONG")
+		assert.NotContains(t, string(firstBody), "PONG!", "first revision body must be the intermediate rewrite: %s", firstBody)
+		assert.Contains(t, string(secondBody), "PONG!", "second revision body must be the final rewrite: %s", secondBody)
 	})
 
 	t.Run("without body logging", func(t *testing.T) {
 		entry := run(t, false, true)
 		revisions := entry.Data.RequestRevisions
-		if len(revisions) != 2 {
-			t.Fatalf("expected 2 revisions, got %d", len(revisions))
-		}
+		require.Len(t, revisions, 2)
+
 		for _, revision := range revisions {
-			if revision.Body != nil {
-				t.Errorf("revision %d must not capture the body when body logging is off", revision.Seq)
-			}
-			if revision.BytesBefore == 0 || revision.BytesAfter == 0 {
-				t.Errorf("revision %d sizes missing", revision.Seq)
-			}
+			assert.Nil(t, revision.Body, "revision %d must not capture the body when body logging is off", revision.Seq)
+			assert.NotZero(t, revision.BytesBefore)
+			assert.NotZero(t, revision.BytesAfter, "revision %d sizes missing", revision.Seq)
 		}
 	})
 
@@ -589,18 +515,14 @@ func TestRequestRewriteMiddlewareRecordsRevisions(t *testing.T) {
 	t.Run("without revision body logging", func(t *testing.T) {
 		entry := run(t, true, false)
 		revisions := entry.Data.RequestRevisions
-		if len(revisions) != 2 {
-			t.Fatalf("expected 2 revisions, got %d", len(revisions))
-		}
+		require.Len(t, revisions, 2)
+
 		for _, revision := range revisions {
-			if revision.Body != nil {
-				t.Errorf("revision %d must not capture the body when revision body logging is off", revision.Seq)
-			}
-			if revision.BytesBefore == 0 || revision.BytesAfter == 0 {
-				t.Errorf("revision %d sizes missing", revision.Seq)
-			}
-			if revision.Detail == nil && revision.Rewriter == "swap" {
-				t.Error("rewriter detail must survive without the body")
+			assert.Nil(t, revision.Body, "revision %d must not capture the body when revision body logging is off", revision.Seq)
+			assert.NotZero(t, revision.BytesBefore)
+			assert.NotZero(t, revision.BytesAfter, "revision %d sizes missing", revision.Seq)
+			if revision.Rewriter == "swap" {
+				assert.NotNil(t, revision.Detail, "rewriter detail must survive without the body")
 			}
 		}
 	})
@@ -636,49 +558,37 @@ func TestRequestRewriteMiddlewareRecordsNoChangeRevisions(t *testing.T) {
 	})
 	rec := postJSON(t, srv, "/v1/chat/completions",
 		`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"PING"}]}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
-	}
-	if rec.Header().Get("X-Test-Rewriter") != "skipped" {
-		t.Error("response headers from a no-change rewriter must still be applied")
-	}
-	if len(auditLogger.entries) == 0 {
-		t.Fatal("expected an audit entry")
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, "skipped", rec.Header().Get("X-Test-Rewriter"))
+	require.NotEmpty(t, auditLogger.entries)
 
 	revisions := auditLogger.entries[0].Data.RequestRevisions
-	if len(revisions) != 3 {
-		t.Fatalf("expected 3 revisions (2 no-change + 1 rewrite), got %d: %+v", len(revisions), revisions)
-	}
+	require.Len(t, revisions, 3)
+
 	for i, want := range []struct {
 		rewriter string
 		noChange bool
 	}{{"quiet", true}, {"swap", false}, {"annotating", true}} {
 		got := revisions[i]
-		if got.Seq != i+1 || got.Rewriter != want.rewriter || got.NoChange != want.noChange {
-			t.Errorf("revision %d = %+v, want rewriter %q no_change=%v", i+1, got, want.rewriter, want.noChange)
-		}
+		assert.Equal(t, i+1, got.Seq)
+		assert.Equal(t, want.rewriter, got.Rewriter)
+		assert.Equal(t, want.noChange, got.NoChange, "revision %d = %+v, want rewriter %q no_change=%v", i+1, got, want.rewriter, want.noChange)
 	}
 
 	quietRev := revisions[0]
-	if quietRev.BytesBefore == 0 || quietRev.BytesAfter != quietRev.BytesBefore {
-		t.Errorf("no-change revision must report equal sizes: %+v", quietRev)
-	}
-	if quietRev.Body != nil || quietRev.TokensSaved != 0 {
-		t.Errorf("no-change revision must carry no body or savings: %+v", quietRev)
-	}
+	assert.NotZero(t, quietRev.BytesBefore)
+	assert.Equal(t, quietRev.BytesBefore, quietRev.BytesAfter, "no-change revision must report equal sizes: %+v", quietRev)
+	assert.Nil(t, quietRev.Body)
+	assert.Equal(t, 0, quietRev.TokensSaved, "no-change revision must carry no body or savings: %+v", quietRev)
+
 	// The trailing no-change step sees the body the previous rewriter produced.
-	if revisions[2].BytesBefore != revisions[1].BytesAfter {
-		t.Errorf("no-change revision must measure the current body: %+v", revisions[2])
-	}
+	assert.Equal(t, revisions[1].BytesAfter, revisions[2].BytesBefore, "no-change revision must measure the current body: %+v", revisions[2])
+
 	// A rewriter that reports why it changed nothing keeps that explanation.
 	detail, ok := revisions[2].Detail.(map[string]any)
-	if !ok || detail["reason"] != "nothing to compress" {
-		t.Errorf("no-change revision must keep the rewriter detail, got %+v", revisions[2].Detail)
-	}
-	if quietRev.Detail != nil {
-		t.Errorf("a rewriter that returned no result has no detail to record: %+v", quietRev)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "nothing to compress", detail["reason"], "no-change revision must keep the rewriter detail, got %+v", revisions[2].Detail)
+	assert.Nil(t, quietRev.Detail, "a rewriter that returned no result has no detail to record: %+v", quietRev)
 }
 
 func TestRequestRewriteMiddlewareStoresTokensSavedInContext(t *testing.T) {
@@ -709,18 +619,12 @@ func TestRequestRewriteMiddlewareStoresTokensSavedInContext(t *testing.T) {
 		return c.NoContent(http.StatusOK)
 	}
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
-		strings.NewReader(`{"model":"gpt-4o-mini","messages":[]}`))
-	c := e.NewContext(req, httptest.NewRecorder())
+	c, _ := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-4o-mini","messages":[]}`)
 
 	mw := RequestRewriteMiddleware([]ext.RequestRewriter{compressor, trimmer, phantom, noop}, nil)
-	if err := mw(next)(c); err != nil {
-		t.Fatalf("middleware returned error: %v", err)
-	}
-	if got != 130 {
-		t.Fatalf("context tokens saved = %d, want 130 (sum across applied rewriters only)", got)
-	}
+	err := mw(next)(c)
+	require.NoError(t, err)
+	require.Equal(t, 130, got)
 }
 
 func TestRequestRewriteMiddlewareIgnoresSavingsWithoutAppliedBody(t *testing.T) {
@@ -741,18 +645,12 @@ func TestRequestRewriteMiddlewareIgnoresSavingsWithoutAppliedBody(t *testing.T) 
 		return c.NoContent(http.StatusOK)
 	}
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
-		strings.NewReader(`{"model":"gpt-4o-mini","messages":[]}`))
-	c := e.NewContext(req, httptest.NewRecorder())
+	c, _ := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-4o-mini","messages":[]}`)
 
 	mw := RequestRewriteMiddleware([]ext.RequestRewriter{annotator}, nil)
-	if err := mw(next)(c); err != nil {
-		t.Fatalf("middleware returned error: %v", err)
-	}
-	if got != 0 {
-		t.Fatalf("context tokens saved = %d, want 0 when no body rewrite was applied", got)
-	}
+	err := mw(next)(c)
+	require.NoError(t, err)
+	require.Equal(t, 0, got)
 }
 
 func TestRequestRewriteMiddlewareNoSavingsLeavesContextZero(t *testing.T) {
@@ -762,18 +660,12 @@ func TestRequestRewriteMiddlewareNoSavingsLeavesContextZero(t *testing.T) {
 		return c.NoContent(http.StatusOK)
 	}
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
-		strings.NewReader(`{"model":"gpt-4o-mini","messages":[]}`))
-	c := e.NewContext(req, httptest.NewRecorder())
+	c, _ := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-4o-mini","messages":[]}`)
 
 	// A rewriter that changes the body without reporting savings must not
 	// invent a savings value.
 	mw := RequestRewriteMiddleware([]ext.RequestRewriter{replaceBodyRewriter("swap", "gpt", "GPT")}, nil)
-	if err := mw(next)(c); err != nil {
-		t.Fatalf("middleware returned error: %v", err)
-	}
-	if got != 0 {
-		t.Fatalf("context tokens saved = %d, want 0", got)
-	}
+	err := mw(next)(c)
+	require.NoError(t, err)
+	require.Equal(t, 0, got)
 }

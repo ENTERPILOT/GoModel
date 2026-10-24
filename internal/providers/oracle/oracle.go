@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 )
@@ -31,16 +30,6 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 		compat: openai.NewCompatibleProvider(cfg.APIKey, opts, openai.CompatibleProviderConfig{
 			ProviderName: "oracle",
 			BaseURL:      baseURL,
-			SetHeaders:   setHeaders,
-		}),
-	}
-}
-
-func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	return &Provider{
-		compat: openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, openai.CompatibleProviderConfig{
-			ProviderName: "oracle",
-			BaseURL:      defaultBaseURL,
 			SetHeaders:   setHeaders,
 		}),
 	}

@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"bytes"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -41,6 +42,23 @@ const (
 // model (not the raw user input) so the row groups and prices consistently with
 // the pricing lookup, mirroring the transcription extractor.
 func ExtractFromSpeechRequest(input string, output []byte, format, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
+	var seconds float64
+	var measured bool
+	if len(output) > 0 {
+		seconds, measured = measureSpeechDurationSeconds(output, format)
+	}
+	return speechUsageEntry(input, seconds, measured, format, requestID, model, provider, pricing...)
+}
+
+// ExtractFromStreamedSpeechRequest builds the same entry for a relayed response,
+// whose duration a SpeechDurationMeter measured as the audio streamed past
+// instead of from a retained body.
+func ExtractFromStreamedSpeechRequest(input string, meter *SpeechDurationMeter, format, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
+	seconds, measured := meter.Seconds()
+	return speechUsageEntry(input, seconds, measured, format, requestID, model, provider, pricing...)
+}
+
+func speechUsageEntry(input string, seconds float64, measured bool, format, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
 	entry := &UsageEntry{
 		ID:        uuid.New().String(),
 		RequestID: requestID,
@@ -61,10 +79,8 @@ func ExtractFromSpeechRequest(input string, output []byte, format, requestID, mo
 	if codec := normalizeAudioFormat(format); codec != "" {
 		raw[rawKeyAudioOutputFormat] = codec
 	}
-	if len(output) > 0 {
-		if seconds, ok := measureSpeechDurationSeconds(output, format); ok {
-			raw[rawKeyAudioOutputSeconds] = seconds
-		}
+	if measured {
+		raw[rawKeyAudioOutputSeconds] = seconds
 	}
 	if len(raw) > 0 {
 		entry.RawData = raw
@@ -106,6 +122,46 @@ func ExtractFromTranscriptionResponse(body, audio []byte, requestID, model, prov
 	return extractFromAudioTextResponse(body, audio, requestID, model, provider, endpointAudioTranscriptions, pricing...)
 }
 
+// sseDataPrefix opens a server-sent event payload line.
+var sseDataPrefix = []byte("data:")
+
+// TranscriptUsageBody returns the JSON object the transcription and translation
+// extractors read a provider's reported usage from. A buffered transcript
+// already is that object and passes through unchanged. A relayed transcript is
+// a stream of server-sent events whose terminal transcript.text.done event
+// carries the usage; its payload is returned so a streamed call is priced from
+// the provider's own numbers instead of falling back to the upload duration.
+// A body carrying no usage event is returned as-is, leaving that fallback in
+// place.
+func TranscriptUsageBody(body []byte) []byte {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 || trimmed[0] == '{' {
+		return body
+	}
+	var usageEvent []byte
+	for line := range bytes.Lines(trimmed) {
+		payload := bytes.TrimSpace(line)
+		if !bytes.HasPrefix(payload, sseDataPrefix) {
+			continue
+		}
+		payload = bytes.TrimSpace(payload[len(sseDataPrefix):])
+		if len(payload) == 0 || payload[0] != '{' {
+			continue
+		}
+		// Later events win: the transcript closes with the usage-bearing one.
+		var event struct {
+			Usage json.RawMessage `json:"usage"`
+		}
+		if json.Unmarshal(payload, &event) == nil && len(event.Usage) > 0 {
+			usageEvent = payload
+		}
+	}
+	if usageEvent != nil {
+		return usageEvent
+	}
+	return body
+}
+
 // ExtractFromTranslationResponse builds a usage entry for an audio translation
 // request while preserving the translations endpoint in usage records.
 func ExtractFromTranslationResponse(body, audio []byte, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
@@ -145,7 +201,8 @@ func extractFromAudioTextResponse(body, audio []byte, requestID, model, provider
 	// the upload the gateway already holds — so the same call costs the same
 	// whether the transcript comes back as json, text, srt or vtt.
 	var seconds float64
-	if !parsed.Usage.tokenBilled() {
+	tokenBilled := parsed.Usage.tokenBilled()
+	if !tokenBilled {
 		if parsed.Usage != nil && parsed.Usage.Seconds > 0 {
 			seconds = parsed.Usage.Seconds
 		} else if duration, ok := numericFloat(parsed.Duration); ok && duration > 0 {
@@ -160,8 +217,10 @@ func extractFromAudioTextResponse(body, audio []byte, requestID, model, provider
 
 	applyUsageCosts(entry, provider, endpoint, pricing...)
 	// Nothing billable was reported or measurable: a duration-priced model then
-	// costs $0, which reads as a free call rather than an unrecorded one.
-	if entry.CostsCalculationCaveat == "" && seconds <= 0 && entry.TotalTokens == 0 &&
+	// costs $0, which reads as a free call rather than an unrecorded one. A
+	// provider that named tokens as the billable unit did report its usage, so a
+	// zero-token response of that shape is an authoritative $0 — not a gap.
+	if entry.CostsCalculationCaveat == "" && seconds <= 0 && entry.TotalTokens == 0 && !tokenBilled &&
 		audioDurationAffectsCost(effectiveEndpointPricing(endpoint, entry.Timestamp, pricing...)) {
 		entry.CostsCalculationCaveat = caveatAudioMissingUsage
 	}

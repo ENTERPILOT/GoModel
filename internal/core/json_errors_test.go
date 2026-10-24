@@ -2,10 +2,11 @@ package core
 
 import (
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type decodeTestMessage struct {
@@ -48,12 +49,8 @@ func TestNewInvalidRequestBodyErrorNamesMemberOnCanonicalRequests(t *testing.T) 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.decode([]byte(tc.body))
-			if err == nil {
-				t.Fatalf("body %q decoded without error", tc.body)
-			}
-			if got := NewInvalidRequestBodyError([]byte(tc.body), err).Message; got != tc.want {
-				t.Errorf("message = %q, want %q", got, tc.want)
-			}
+			require.Error(t, err, "body %q decoded without error", tc.body)
+			assert.Equal(t, tc.want, NewInvalidRequestBodyError([]byte(tc.body), err).Message)
 		})
 	}
 }
@@ -64,16 +61,11 @@ func TestNewInvalidRequestBodyErrorNamesMemberOnCanonicalRequests(t *testing.T) 
 func TestNewInvalidRequestBodyErrorAttributesNestedResponsesInput(t *testing.T) {
 	body := []byte(`{"model":"gpt-4.1-mini","metadata":{"k":"v"},"input":[5]}`)
 	err := json.Unmarshal(body, &ResponsesRequest{})
-	if err == nil {
-		t.Fatal("body decoded without error")
-	}
+	require.Error(t, err)
 	gatewayErr := NewInvalidRequestBodyError(body, err)
-	if gatewayErr.Message != "invalid request body: input: must be an object" {
-		t.Errorf("message = %q, want it to blame input", gatewayErr.Message)
-	}
-	if gatewayErr.Param == nil || *gatewayErr.Param != "input" {
-		t.Errorf("param = %v, want input", gatewayErr.Param)
-	}
+	assert.Equal(t, "invalid request body: input: must be an object", gatewayErr.Message)
+	require.NotNil(t, gatewayErr.Param)
+	assert.Equal(t, "input", *gatewayErr.Param)
 }
 
 // A position landing on a member that already holds the expected type cannot
@@ -84,15 +76,11 @@ func TestDescribeJSONDecodeErrorDiscardsMisleadingPositions(t *testing.T) {
 	// An offset inside "messages", which is already the array the decoder wanted.
 	detail, param := describeJSONDecodeError(body, &json.UnmarshalTypeError{
 		Value:  "string",
-		Type:   reflect.TypeOf([]string{}),
+		Type:   reflect.TypeFor[[]string](),
 		Offset: 35,
 	})
-	if detail != "a field has the wrong type: expected an array" {
-		t.Errorf("detail = %q, want the unattributed message", detail)
-	}
-	if param != "" {
-		t.Errorf("param = %q, want empty", param)
-	}
+	assert.Equal(t, "a field has the wrong type: expected an array", detail, "want the unattributed message")
+	assert.Empty(t, param)
 }
 
 // Decoder wording must never reach the client: goccy reports a type mismatch
@@ -170,24 +158,16 @@ func TestNewInvalidRequestBodyError(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var req decodeTestRequest
 			err := json.Unmarshal([]byte(tc.body), &req)
-			if err == nil {
-				t.Fatalf("body %q decoded without error", tc.body)
-			}
+			require.Error(t, err, "body %q decoded without error", tc.body)
 			gatewayErr := NewInvalidRequestBodyError([]byte(tc.body), err)
-			if gatewayErr.Message != tc.message {
-				t.Errorf("message = %q, want %q", gatewayErr.Message, tc.message)
-			}
+			assert.Equal(t, tc.message, gatewayErr.Message)
 			param := ""
 			if gatewayErr.Param != nil {
 				param = *gatewayErr.Param
 			}
-			if param != tc.param {
-				t.Errorf("param = %q, want %q", param, tc.param)
-			}
+			assert.Equal(t, tc.param, param)
 			for _, leak := range []string{"json:", "Go struct field", "unexpected end of JSON input", "goccy"} {
-				if strings.Contains(gatewayErr.Message, leak) {
-					t.Errorf("message %q leaks decoder internals %q", gatewayErr.Message, leak)
-				}
+				assert.NotContains(t, gatewayErr.Message, leak, "message leaks decoder internals")
 			}
 		})
 	}

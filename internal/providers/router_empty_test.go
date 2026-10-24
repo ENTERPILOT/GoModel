@@ -7,6 +7,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/stretchr/testify/require"
 )
 
 func TestEmptyResponseReason(t *testing.T) {
@@ -38,9 +39,8 @@ func TestEmptyResponseReason(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := emptyResponseReason(tt.resp, tt.err); got != tt.want {
-				t.Fatalf("emptyResponseReason() = %q, want %q", got, tt.want)
-			}
+			got := emptyResponseReason(tt.resp, tt.err)
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -93,22 +93,18 @@ func TestRouterReportsEmptyResponses(t *testing.T) {
 				providerType: "openai",
 				modelID:      "gpt-4o",
 			}))
-			if err != nil {
-				t.Fatalf("NewRouter: %v", err)
-			}
+			require.NoError(t, err)
+
 			var reported []llmclient.EmptyResponseInfo
 			router.SetEmptyResponseHook(func(_ context.Context, info llmclient.EmptyResponseInfo) {
 				reported = append(reported, info)
 			})
-
-			if err := tt.call(router); err != nil {
-				t.Fatalf("call error = %v", err)
-			}
+			err = tt.call(router)
+			require.NoError(t, err)
 
 			if tt.wantReason == "" {
-				if len(reported) != 0 {
-					t.Fatalf("reported = %+v, want none", reported)
-				}
+				require.Empty(t, reported)
+
 				return
 			}
 			want := llmclient.EmptyResponseInfo{
@@ -118,9 +114,8 @@ func TestRouterReportsEmptyResponses(t *testing.T) {
 				Operation:    llmclient.OperationChat,
 				Reason:       tt.wantReason,
 			}
-			if len(reported) != 1 || reported[0] != want {
-				t.Fatalf("reported = %+v, want [%+v]", reported, want)
-			}
+			require.Len(t, reported, 1)
+			require.Equal(t, want, reported[0])
 		})
 	}
 }

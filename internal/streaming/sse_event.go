@@ -28,6 +28,9 @@ type Event struct {
 	// delta's tool_calls[].index in a chat stream, the output_index of the
 	// function_call item in a Responses stream. 0 for other kinds.
 	Call int
+	// Tool is the name of the tool a tool-call delta belongs to, once the
+	// stream has announced it. Empty for other kinds.
+	Tool string
 	// Text is the delta text for text and reasoning deltas, and the arguments
 	// fragment carried by a tool call delta. Empty for other kinds.
 	Text string
@@ -154,7 +157,7 @@ func (s *EventScanner) Feed(chunk []byte) []RawEvent {
 	}
 
 	for len(data) > 0 {
-		idx, sepLen := nextEventBoundary(data)
+		idx, sepLen := NextEventBoundary(data)
 		if idx == -1 {
 			break
 		}
@@ -219,7 +222,7 @@ func parseRawEvent(raw, body []byte) RawEvent {
 			if idx := bytes.IndexByte(body, '\n'); idx != -1 {
 				line, rest = body[:idx], body[idx+1:]
 			}
-			if data, ok := parseDataLine(line); ok {
+			if data, ok := ParseDataLine(line); ok {
 				dataLines = append(dataLines, data)
 			} else {
 				parseEventLine(&ev, line)
@@ -242,7 +245,7 @@ func parseEventLine(ev *RawEvent, line []byte) {
 	line = bytes.TrimSuffix(line, []byte("\r"))
 	switch {
 	case bytes.HasPrefix(line, dataPrefix):
-		data, _ := parseDataLine(line)
+		data, _ := ParseDataLine(line)
 		ev.Data = data
 	case bytes.HasPrefix(line, eventPrefix):
 		name := bytes.TrimPrefix(line, eventPrefix)

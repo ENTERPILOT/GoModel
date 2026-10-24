@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestApplyRequestHeadersReplaysOnlyEdits(t *testing.T) {
@@ -27,37 +29,26 @@ func TestApplyRequestHeadersReplaysOnlyEdits(t *testing.T) {
 
 	live := inbound.Clone()
 	changed := state.ApplyRequestHeaders(live)
-	if want := []string{"X-Drop", "X-New", "X-Trace"}; !slices.Equal(changed, want) {
-		t.Fatalf("changed = %v, want %v", changed, want)
-	}
-	if got := live.Get("X-Trace"); got != "edited" {
-		t.Errorf("X-Trace = %q", got)
-	}
-	if got := live.Get("X-New"); got != "added" {
-		t.Errorf("X-New = %q", got)
-	}
-	if _, ok := live["X-Drop"]; ok {
-		t.Errorf("X-Drop still present")
-	}
-	if got := live.Get("Authorization"); got != "Bearer secret" {
-		t.Errorf("credential header changed: %q", got)
-	}
-	if got := live.Get("X-Keep"); got != "same" {
-		t.Errorf("X-Keep = %q", got)
-	}
+	want := []string{"X-Drop", "X-New", "X-Trace"}
+	require.True(t, slices.Equal(changed, want))
+	got := live.Get("X-Trace")
+	assert.Equal(t, "edited", got)
+	got = live.Get("X-New")
+	assert.Equal(t, "added", got)
+	_, ok := live["X-Drop"]
+	assert.False(t, ok)
+	got = live.Get("Authorization")
+	assert.Equal(t, "Bearer secret", got)
+	got = live.Get("X-Keep")
+	assert.Equal(t, "same", got)
 }
 
 func TestCoerceTextareaAcceptsList(t *testing.T) {
 	got, err := coerceTextarea([]any{"a => b", " c => d "})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "a => b\nc => d" {
-		t.Fatalf("got %q", got)
-	}
-	if _, err := coerceTextarea([]any{1, map[string]any{}}); err == nil {
-		t.Fatal("expected an error for a non-string item")
-	}
+	require.NoError(t, err)
+	require.Equal(t, "a => b\nc => d", got)
+	_, err = coerceTextarea([]any{1, map[string]any{}})
+	require.Error(t, err)
 }
 
 func TestApplyResponseHeadersRemovesEmptyValues(t *testing.T) {
@@ -66,10 +57,8 @@ func TestApplyResponseHeadersRemovesEmptyValues(t *testing.T) {
 	state.AddResponseHeader("x-request-id", "")
 	dst := http.Header{"X-Request-Id": {"req-1"}, "Content-Type": {"application/json"}}
 	state.ApplyResponseHeaders(dst)
-	if _, still := dst["X-Request-Id"]; still {
-		t.Fatalf("X-Request-Id not removed: %v", dst)
-	}
-	if dst.Get("X-Extra") != "1" || dst.Get("Content-Type") != "application/json" {
-		t.Fatalf("headers = %v", dst)
-	}
+	_, still := dst["X-Request-Id"]
+	require.False(t, still, "X-Request-Id not removed: %v", dst)
+	require.Equal(t, "1", dst.Get("X-Extra"))
+	require.Equal(t, "application/json", dst.Get("Content-Type"), "headers = %v", dst)
 }

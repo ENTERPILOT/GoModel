@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestExtractFromRealtimeResponseDone(t *testing.T) {
@@ -21,22 +23,16 @@ func TestExtractFromRealtimeResponseDone(t *testing.T) {
 	}`)
 
 	entry := ExtractFromRealtimeResponseDone(payload, "req-1", "gpt-realtime", "openai")
-	if entry == nil {
-		t.Fatal("expected a usage entry")
-	}
-	if entry.Endpoint != endpointRealtime {
-		t.Errorf("endpoint = %q, want %q", entry.Endpoint, endpointRealtime)
-	}
-	if entry.InputTokens != 100 || entry.OutputTokens != 50 || entry.TotalTokens != 150 {
-		t.Errorf("tokens = (%d,%d,%d), want (100,50,150)", entry.InputTokens, entry.OutputTokens, entry.TotalTokens)
-	}
+	require.NotNil(t, entry)
+	assert.Equal(t, endpointRealtime, entry.Endpoint)
+	assert.Equal(t, 100, entry.InputTokens)
+	assert.Equal(t, 50, entry.OutputTokens)
+	assert.Equal(t, 150, entry.TotalTokens)
+
 	// Keys must match cost.go's priced rawData keys so audio is billed at audio rates.
-	if entry.RawData["prompt_audio_tokens"] != 60 || entry.RawData["completion_audio_tokens"] != 30 {
-		t.Errorf("audio token breakdown missing/miskeyed: %v", entry.RawData)
-	}
-	if entry.RawData["prompt_cached_tokens"] != 10 {
-		t.Errorf("cached tokens missing/miskeyed: %v", entry.RawData)
-	}
+	assert.Equal(t, 60, entry.RawData["prompt_audio_tokens"])
+	assert.Equal(t, 30, entry.RawData["completion_audio_tokens"], "audio token breakdown missing/miskeyed: %v", entry.RawData)
+	assert.Equal(t, 10, entry.RawData["prompt_cached_tokens"], "cached tokens missing/miskeyed: %v", entry.RawData)
 }
 
 func TestExtractFromRealtimeResponseDoneUSDCost(t *testing.T) {
@@ -58,30 +54,14 @@ func TestExtractFromRealtimeResponseDoneUSDCost(t *testing.T) {
 	}}}`)
 
 	entry := ExtractFromRealtimeResponseDone(payload, "r", "gpt-realtime-mini", "openai", pricing)
-	if entry == nil || entry.TotalCost == nil {
-		t.Fatal("expected a costed entry")
-	}
-	const wantInput, wantOutput = 7.2e-06, 0.0020496
-	if got := *entry.InputCost; !floatNear(got, wantInput) {
-		t.Errorf("input cost = %g, want %g", got, wantInput)
-	}
-	if got := *entry.OutputCost; !floatNear(got, wantOutput) {
-		t.Errorf("output cost = %g, want %g (29 text@2.40 + 99 audio@20)", got, wantOutput)
-	}
-	if got := *entry.TotalCost; !floatNear(got, wantInput+wantOutput) {
-		t.Errorf("total cost = %g, want %g", got, wantInput+wantOutput)
-	}
-	if entry.CostsCalculationCaveat != "" {
-		t.Errorf("unexpected caveat: %q", entry.CostsCalculationCaveat)
-	}
-}
+	require.NotNil(t, entry)
+	require.NotNil(t, entry.TotalCost)
 
-func floatNear(a, b float64) bool {
-	d := a - b
-	if d < 0 {
-		d = -d
-	}
-	return d < 1e-12
+	const wantInput, wantOutput = 7.2e-06, 0.0020496
+	assert.InDelta(t, wantInput, *entry.InputCost, 1e-12, "input cost")
+	assert.InDelta(t, wantOutput, *entry.OutputCost, 1e-12, "output cost (29 text@2.40 + 99 audio@20)")
+	assert.InDelta(t, wantInput+wantOutput, *entry.TotalCost, 1e-12, "total cost")
+	assert.Empty(t, entry.CostsCalculationCaveat)
 }
 
 func TestExtractFromRealtimeResponseDonePluralDetails(t *testing.T) {
@@ -96,29 +76,17 @@ func TestExtractFromRealtimeResponseDonePluralDetails(t *testing.T) {
 		}}
 	}`)
 	entry := ExtractFromRealtimeResponseDone(payload, "r", "qwen3-omni-flash-realtime", "bailian")
-	if entry == nil {
-		t.Fatal("expected entry")
-	}
-	if entry.TotalTokens != 203 {
-		t.Errorf("total = %d, want 203", entry.TotalTokens)
-	}
-	if entry.RawData["completion_audio_tokens"] != 9 {
-		t.Errorf("plural output audio tokens not captured: %v", entry.RawData)
-	}
-	if entry.RawData["prompt_text_tokens"] != 192 {
-		t.Errorf("plural input text tokens not captured: %v", entry.RawData)
-	}
+	require.NotNil(t, entry)
+	assert.Equal(t, 203, entry.TotalTokens)
+	assert.Equal(t, 9, entry.RawData["completion_audio_tokens"], "plural output audio tokens not captured: %v", entry.RawData)
+	assert.Equal(t, 192, entry.RawData["prompt_text_tokens"], "plural input text tokens not captured: %v", entry.RawData)
 }
 
 func TestExtractFromRealtimeResponseDoneTotalsFallback(t *testing.T) {
 	payload := []byte(`{"type":"response.done","response":{"usage":{"input_tokens":7,"output_tokens":3}}}`)
 	entry := ExtractFromRealtimeResponseDone(payload, "r", "m", "openai")
-	if entry == nil {
-		t.Fatal("expected entry")
-	}
-	if entry.TotalTokens != 10 {
-		t.Errorf("total = %d, want 10 (derived)", entry.TotalTokens)
-	}
+	require.NotNil(t, entry)
+	assert.Equal(t, 10, entry.TotalTokens)
 }
 
 func TestExtractFromRealtimeResponseDoneSkipsNonBillable(t *testing.T) {
@@ -130,9 +98,8 @@ func TestExtractFromRealtimeResponseDoneSkipsNonBillable(t *testing.T) {
 	}
 	for name, payload := range cases {
 		t.Run(name, func(t *testing.T) {
-			if entry := ExtractFromRealtimeResponseDone(payload, "r", "m", "openai"); entry != nil {
-				t.Errorf("expected nil entry, got %+v", entry)
-			}
+			entry := ExtractFromRealtimeResponseDone(payload, "r", "m", "openai")
+			assert.Nil(t, entry)
 		})
 	}
 }
@@ -153,18 +120,12 @@ func TestExtractFromRealtimeTranscriptionCompleted(t *testing.T) {
 	}`)
 
 	entry := ExtractFromRealtimeTranscriptionCompleted(payload, "req-1", "gpt-4o-transcribe", "openai")
-	if entry == nil {
-		t.Fatal("expected a usage entry")
-	}
-	if entry.Endpoint != endpointRealtime {
-		t.Errorf("endpoint = %q, want %q", entry.Endpoint, endpointRealtime)
-	}
-	if entry.InputTokens != 25 || entry.OutputTokens != 5 || entry.TotalTokens != 30 {
-		t.Errorf("tokens = (%d,%d,%d), want (25,5,30)", entry.InputTokens, entry.OutputTokens, entry.TotalTokens)
-	}
-	if entry.RawData["prompt_audio_tokens"] != 25 {
-		t.Errorf("audio token breakdown missing/miskeyed: %v", entry.RawData)
-	}
+	require.NotNil(t, entry)
+	assert.Equal(t, endpointRealtime, entry.Endpoint)
+	assert.Equal(t, 25, entry.InputTokens)
+	assert.Equal(t, 5, entry.OutputTokens)
+	assert.Equal(t, 30, entry.TotalTokens)
+	assert.Equal(t, 25, entry.RawData["prompt_audio_tokens"], "audio token breakdown missing/miskeyed: %v", entry.RawData)
 }
 
 func TestExtractFromRealtimeTranscriptionCompletedDuration(t *testing.T) {
@@ -178,16 +139,11 @@ func TestExtractFromRealtimeTranscriptionCompletedDuration(t *testing.T) {
 	pricing := &core.ModelPricing{PerSecondInput: new(0.0001)}
 
 	entry := ExtractFromRealtimeTranscriptionCompleted(payload, "req-1", "whisper-1", "openai", pricing)
-	if entry == nil {
-		t.Fatal("expected a usage entry")
-	}
-	if entry.TotalTokens != 0 {
-		t.Errorf("tokens = %d, want 0 for duration usage", entry.TotalTokens)
-	}
-	if entry.RawData[rawKeyAudioSeconds] != 2.5 {
-		t.Errorf("audio seconds missing/miskeyed: %v", entry.RawData)
-	}
-	assertCostPtrNear(t, "input cost", entry.InputCost, 0.00025)
+	require.NotNil(t, entry)
+	assert.Equal(t, 0, entry.TotalTokens)
+	assert.Equal(t, 2.5, entry.RawData[rawKeyAudioSeconds], "audio seconds missing/miskeyed: %v", entry.RawData)
+
+	assertCostNear(t, "input cost", entry.InputCost, 0.00025)
 }
 
 func TestNewRealtimeDurationEntry(t *testing.T) {
@@ -197,22 +153,14 @@ func TestNewRealtimeDurationEntry(t *testing.T) {
 	pricing := &core.ModelPricing{PerSecondInput: new(0.00056667)}
 
 	entry := NewRealtimeDurationEntry(90, "req-1", "gpt-realtime-translate", "openai", pricing)
-	if entry == nil {
-		t.Fatal("expected a usage entry")
-	}
-	if entry.Endpoint != endpointRealtime {
-		t.Errorf("endpoint = %q, want %q", entry.Endpoint, endpointRealtime)
-	}
-	if entry.Model != "gpt-realtime-translate" || entry.Provider != "openai" {
-		t.Errorf("entry = %+v, want the session's model and provider", entry)
-	}
-	if entry.TotalTokens != 0 {
-		t.Errorf("tokens = %d, want 0 for duration usage", entry.TotalTokens)
-	}
-	if entry.RawData[rawKeyAudioSeconds] != float64(90) {
-		t.Errorf("audio seconds missing/miskeyed: %v", entry.RawData)
-	}
-	assertCostPtrNear(t, "input cost", entry.InputCost, 0.0510003)
+	require.NotNil(t, entry)
+	assert.Equal(t, endpointRealtime, entry.Endpoint)
+	assert.Equal(t, "gpt-realtime-translate", entry.Model)
+	assert.Equal(t, "openai", entry.Provider, "entry = %+v, want the session's model and provider", entry)
+	assert.Equal(t, 0, entry.TotalTokens)
+	assert.Equal(t, float64(90), entry.RawData[rawKeyAudioSeconds], "audio seconds missing/miskeyed: %v", entry.RawData)
+
+	assertCostNear(t, "input cost", entry.InputCost, 0.0510003)
 }
 
 func TestExtractFromRealtimeTranscriptionCompletedSkipsNonBillable(t *testing.T) {
@@ -221,9 +169,8 @@ func TestExtractFromRealtimeTranscriptionCompletedSkipsNonBillable(t *testing.T)
 		"missing usage":   `{"type":"conversation.item.input_audio_transcription.completed","transcript":"Hi."}`,
 		"malformed frame": `{"type":`,
 	} {
-		if entry := ExtractFromRealtimeTranscriptionCompleted([]byte(payload), "req-1", "m", "openai"); entry != nil {
-			t.Errorf("%s: expected nil entry, got %+v", name, entry)
-		}
+		entry := ExtractFromRealtimeTranscriptionCompleted([]byte(payload), "req-1", "m", "openai")
+		assert.Nil(t, entry, "payload %q", name)
 	}
 }
 
@@ -245,9 +192,7 @@ func TestHasBillableUsage(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := HasBillableUsage(tt.entry); got != tt.want {
-				t.Errorf("HasBillableUsage() = %v, want %v", got, tt.want)
-			}
+			assert.Equal(t, tt.want, HasBillableUsage(tt.entry))
 		})
 	}
 }

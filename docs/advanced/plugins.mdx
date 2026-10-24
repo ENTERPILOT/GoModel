@@ -16,7 +16,7 @@ plugin:
 
 | How | When to use it | Registered by |
 | --- | --- | --- |
-| **Built in** | Ships with GoModel: `system_prompt`, `llm_based_altering`, `string_replace`, `header_edit`, `llm_judge`, and the `cheapest_healthy` routing strategy | nothing to do |
+| **Built in** | Ships with GoModel: `system_prompt`, `llm_based_altering`, `string_replace`, `tag_replace`, `header_edit`, `llm_judge`, and the `cheapest_healthy` routing strategy | nothing to do |
 | **Compiled in** | You build your own binary from the `run` package | `ext.RegisterPlugin(func() pluginapi.Plugin { ... })` before `run.Run` |
 | **Shared object** (`.so`) | You run the stock binary and want to add code at startup | `plugins.load` in `config.yaml` (needs the cgo build, see [Shared-object plugins](#shared-object-plugins)) |
 
@@ -222,6 +222,12 @@ among the transform instances of a stream applies to all of them, capped at
 16384 characters. `0`, the
 default, presents deltas as they arrive.
 
+**Signed reasoning**: on `/v1/messages`, Anthropic thinking reaches the
+client as the provider signed it, since the client sends it back with the
+signature. Its reasoning events carry `StreamEvent.Signed`; GoModel ignores
+`replace` and `drop` on them and undoes edits to that reasoning made on the
+assembled response (`buffer` plugins and the response phase).
+
 **Chat chunks with several choices** are split into one chunk per choice
 before plugins see them, so every choice is inspected; provider `usage`
 stays on the last of them.
@@ -366,6 +372,14 @@ A relative `file` must resolve inside one of the `search_paths` (symlinks are
 followed and checked). A file that cannot be resolved, verified, or opened is
 a startup error naming the file.
 
+Installations without a `config.yaml` can list the same entries through the
+environment: `PLUGINS_LOAD` is a comma-separated list of `file` values, each
+optionally `file=sha256` to pin the digest. Only the final `=` followed by
+exactly 64 hexadecimal characters starts a digest pin; any other entry is a
+file name. When non-empty, it replaces the
+`plugins.load` list from `config.yaml` (env > config, like every other
+env-configurable value).
+
 `GUARDRAILS_ENABLED` remains the switch that decides whether configured
 instances run on traffic.
 
@@ -432,8 +446,8 @@ refused load names both sides:
 
 ```
 plugin file /app/plugins/x.so was built with a different toolchain, flags, or
-pluginapi sources: it was built with go1.27.1, gomodel v0.1.90, flags -trimpath;
-this binary was built with go1.27.1, gomodel v0.1.91, flags (none). Rebuild it
+pluginapi sources: it was built with go1.27.3, gomodel v0.1.90, flags -trimpath;
+this binary was built with go1.27.3, gomodel v0.1.91, flags (none). Rebuild it
 with `gomodel plugin build` from this GoModel version
 ```
 
@@ -562,7 +576,8 @@ Notes for authors:
 - Set `Guardrail: true` when the plugin's instances are guardrails: policies
   applied to prompts, responses, or streams, whether they block, answer,
   warn, or rewrite. Every built-in traffic plugin sets it (`llm_judge`,
-  `string_replace`, `header_edit`, `system_prompt`, `llm_based_altering`);
+  `string_replace`, `tag_replace`, `header_edit`, `system_prompt`,
+  `llm_based_altering`);
   a routing strategy such as `cheapest_healthy` never touches traffic and
   leaves it false. The runtime ignores the flag; the dashboard marks
   guardrail plugins and their instances with a shield and lists them first.
@@ -576,6 +591,25 @@ Notes for authors:
   backstop; build requests with `http.NewRequestWithContext` so the
   instance `timeout_ms` bounds each call. `History()` returns an error in
   this release.
+- The host also implements the optional `pluginapi.DecisionsHost`. Assert it
+  on the `Host`, then call `Decisions().Decide(ctx, req)` to ask a decision
+  model typed questions about an input, the way `POST /v1/decisions` does. A
+  question is a predicate (probability of yes), a choice, or a score. The call
+  is scoped and accounted like `Inference().Complete`.
+  `Decisions().DecisionModel(model)` reports whether a model answers decisions
+  only, such as any `jev` model. `llm_judge` uses both to block on a
+  probability instead of parsing a chat verdict:
+
+  ```go
+  if dh, ok := host.(pluginapi.DecisionsHost); ok {
+  	result, err := dh.Decisions().Decide(ctx, pluginapi.DecisionRequest{
+  		Model:     "jev/jev-latest",
+  		Input:     []pluginapi.Message{pluginapi.TextMessage(pluginapi.RoleUser, text)},
+  		Questions: []pluginapi.Question{{Type: pluginapi.QuestionPredicate, Name: "spam", Instructions: "Is this spam?"}},
+  	})
+  	// result.Answers[0].Probability, unless result.Answers[0].Refused()
+  }
+  ```
 - Add `Summarize(config json.RawMessage) string` to render a one-line summary
   in the guardrails list, and `Normalize(config) (json.RawMessage, error)` to
   canonicalize a config before it is stored. Both are optional.
@@ -588,6 +622,13 @@ Notes for authors:
   as the reason, and is logged once per transition; the error text must not
   contain secrets and is truncated to 256 characters. Health is informational:
   traffic still runs through the instance under its `fail_mode`.
+- Implement `pluginapi.ContentEditor` (`EditsContent() bool`) when a plugin
+  that declares `Mutates` can be configured not to edit, such as a detector
+  set to flag instead of rewrite. GoModel asks a configured instance before
+  work it does only for editing plugins — replaying the stored history of a
+  chained Responses request rather than letting the provider resolve
+  `previous_response_id` itself. It never changes how a hook runs, and a
+  mutating plugin without it is taken to edit.
 - Field inputs `secret` and `model` exist for API keys of external classifiers
   and for model pickers; a `secret` value is masked in every admin response.
   Use `bool` for a switch and `list` for an open-ended list of strings
@@ -605,7 +646,9 @@ Notes for authors:
 `pluginapi/plugintest` tests a plugin without GoModel:
 
 - `plugintest.NewHost(replies...)` is a fake `Host`: scripted inference
-  replies (or a `Reply` function, or an `Err`), recorded `Requests()`,
+  replies (or a `Reply` function, or an `Err`), decisions answered by an
+  `Answer` function (every question refused without one), `DecisionModels`
+  for `DecisionModel`, recorded `Requests()` and `DecisionRequests()`,
   recorded `Recorded()` metrics, and a settable HTTP client for a fake
   sidecar started with `httptest`.
 - `plugintest.Init`, `Text`, `Prompt`, `Completion`, and `Exchange` build

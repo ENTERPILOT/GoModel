@@ -220,6 +220,11 @@ func cohereToolResult(text string) string {
 }
 
 func toCohereTools(tools []map[string]any, toolChoice any) ([]map[string]any, string, error) {
+	// Cohere has no subset choice: declare only the allowed functions.
+	tools, toolChoice, err := core.NarrowToAllowedTools(tools, toolChoice)
+	if err != nil {
+		return nil, "", err
+	}
 	converted := make([]map[string]any, 0, len(tools))
 	for i, tool := range tools {
 		function, ok := tool["function"].(map[string]any)

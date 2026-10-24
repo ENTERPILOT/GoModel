@@ -6,11 +6,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHealthProbeURL(t *testing.T) {
@@ -39,9 +39,7 @@ func TestHealthProbeURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := healthProbeURL(tt.server)
-			if got != tt.expected {
-				t.Fatalf("healthProbeURL() = %q, want %q", got, tt.expected)
-			}
+			require.Equal(t, tt.expected, got)
 		})
 	}
 }
@@ -88,23 +86,19 @@ func TestCheckHealthEndpoint(t *testing.T) {
 
 			err := checkHealthEndpoint(context.Background(), server.Client(), server.URL)
 			if tt.wantErr == "" {
-				if err != nil {
-					t.Fatalf("checkHealthEndpoint() error = %v, want nil", err)
-				}
+				require.NoError(t, err)
+
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-				t.Fatalf("checkHealthEndpoint() error = %v, want substring %q", err, tt.wantErr)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
 }
 
 func TestRunHealthProbe_UsesConfiguredPortAndBasePath(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
+	require.NoError(t, err)
 
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/g/health" {
@@ -118,13 +112,10 @@ func TestRunHealthProbe_UsesConfiguredPortAndBasePath(t *testing.T) {
 	defer server.Close()
 
 	_, port, err := net.SplitHostPort(listener.Addr().String())
-	if err != nil {
-		t.Fatalf("split listener address: %v", err)
-	}
+	require.NoError(t, err)
+
 	t.Setenv("PORT", port)
 	t.Setenv("BASE_PATH", "/g")
-
-	if err := runHealthProbe(time.Second); err != nil {
-		t.Fatalf("runHealthProbe() error = %v, want nil", err)
-	}
+	err = runHealthProbe(time.Second)
+	require.NoError(t, err)
 }

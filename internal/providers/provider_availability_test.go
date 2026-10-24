@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 func TestProbeAvailability(t *testing.T) {
@@ -42,16 +43,13 @@ func TestProbeAvailability(t *testing.T) {
 			registry := NewModelRegistry()
 
 			err := registry.probeAvailability(t.Context(), tt.provider, "probe-target", availabilityProbeTimeout)
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("probeAvailability() error = %v, want %v", err, tt.wantErr)
-			}
+			require.ErrorIs(t, err, tt.wantErr)
 
 			state, recorded := registry.providerRuntime["probe-target"]
-			if recorded != tt.wantRecord {
-				t.Fatalf("availability recorded = %t, want %t", recorded, tt.wantRecord)
-			}
-			if recorded && state.lastAvailabilityError != tt.wantMessage {
-				t.Fatalf("recorded error = %q, want %q", state.lastAvailabilityError, tt.wantMessage)
+			require.Equal(t, tt.wantRecord, recorded)
+
+			if recorded {
+				require.Equal(t, tt.wantMessage, state.lastAvailabilityError)
 			}
 		})
 	}
@@ -83,14 +81,11 @@ func TestProbeAvailability_CallerDeadlineBoundsUntimedProvider(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("probeAvailability() error = %v, want %v", err, context.DeadlineExceeded)
-		}
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+
 	case <-time.After(time.Second):
 		t.Fatal("probeAvailability() did not honor the caller's deadline")
 	}
-
-	if got := registry.providerRuntime["untimed"].lastAvailabilityError; got != context.DeadlineExceeded.Error() {
-		t.Fatalf("recorded error = %q, want %q", got, context.DeadlineExceeded.Error())
-	}
+	got := registry.providerRuntime["untimed"].lastAvailabilityError
+	require.Equal(t, context.DeadlineExceeded.Error(), got)
 }

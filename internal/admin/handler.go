@@ -19,6 +19,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
+	"github.com/enterpilot/gomodel/internal/mediastore"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -58,6 +59,7 @@ type Handler struct {
 	configuredProviders []providers.SanitizedProviderConfig
 	providerCredentials ProviderCredentialsAdmin
 	requestHealth       RequestHealthSource
+	media               *mediastore.Service
 	quotaTemplates      bool
 
 	mutationMu sync.Mutex
@@ -84,6 +86,7 @@ const (
 	DashboardConfigPricingRecalculation = "USAGE_PRICING_RECALCULATION_ENABLED"
 	DashboardConfigLiveLogsEnabled      = "DASHBOARD_LIVE_LOGS_ENABLED"
 	DashboardConfigMCPEnabled           = "MCP_ENABLED"
+	DashboardConfigMCPToolDiscovery     = "MCP_TOOL_DISCOVERY"
 	DashboardConfigVMStrategies         = "VIRTUAL_MODEL_STRATEGIES"
 	DashboardConfigUserPathHeader       = "USER_PATH_HEADER"
 )
@@ -109,6 +112,9 @@ type DashboardConfigResponse struct {
 	PricingRecalculation  string `json:"USAGE_PRICING_RECALCULATION_ENABLED,omitempty"`
 	LiveLogsEnabled       string `json:"DASHBOARD_LIVE_LOGS_ENABLED,omitempty"`
 	MCPEnabled            string `json:"MCP_ENABLED,omitempty"`
+	// MCPToolDiscovery is the gateway's default MCP tool discovery mode
+	// ("off" or "search"), so the dashboard can show how clients see tools.
+	MCPToolDiscovery string `json:"MCP_TOOL_DISCOVERY,omitempty"`
 	// VirtualModelStrategies is the comma-separated list of load-balancing
 	// strategies this deployment supports. "adaptive" appears only when a
 	// route-selector extension is registered, so the dashboard never offers
@@ -436,6 +442,7 @@ func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardCo
 		PricingRecalculation:   strings.TrimSpace(values.PricingRecalculation),
 		LiveLogsEnabled:        strings.TrimSpace(values.LiveLogsEnabled),
 		MCPEnabled:             strings.TrimSpace(values.MCPEnabled),
+		MCPToolDiscovery:       strings.TrimSpace(values.MCPToolDiscovery),
 		VirtualModelStrategies: strings.TrimSpace(values.VirtualModelStrategies),
 		UserPathHeader:         strings.TrimSpace(values.UserPathHeader),
 	}
@@ -493,6 +500,15 @@ func parseUsageParams(c *echo.Context) (usage.UsageQueryParams, error) {
 	params.Provider = strings.TrimSpace(c.QueryParam("provider"))
 	params.Label = strings.TrimSpace(c.QueryParam("label"))
 	params.SessionID = strings.TrimSpace(c.QueryParam("session_id"))
+	params.AuthKeyID = strings.TrimSpace(c.QueryParam("auth_key_id"))
+	params.Endpoints = parseCommaList(c.QueryParam("endpoint"))
+	if raw := c.QueryParam("operation"); raw != "" {
+		ops, unknown, ok := core.ParseOperations(raw)
+		if !ok {
+			return params, core.NewInvalidRequestError("invalid operation: "+unknown, nil)
+		}
+		params.Operations = ops
+	}
 
 	userPath, err := scopedUserPath(c, "user_path", c.QueryParam("user_path"))
 	if err != nil {
@@ -501,6 +517,22 @@ func parseUsageParams(c *echo.Context) (usage.UsageQueryParams, error) {
 	params.UserPath = userPath
 
 	return params, nil
+}
+
+// parseCommaList splits a comma-separated query value, trimming entries and
+// dropping blanks and duplicates.
+func parseCommaList(raw string) []string {
+	var values []string
+	seen := map[string]bool{}
+	for part := range strings.SplitSeq(raw, ",") {
+		value := strings.TrimSpace(part)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		values = append(values, value)
+	}
+	return values
 }
 
 func normalizeUserPathQueryParam(fieldName, raw string) (string, error) {

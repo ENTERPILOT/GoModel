@@ -80,10 +80,10 @@ personal data. Neither is ever sent.
 
 ### The install identifier
 
-A UUID chosen on first use: a random one, or one derived from your master key
-as described below. It encodes nothing about your host, your organization, or
-your configuration; it exists only so repeated checks from one deployment count
-as one deployment. Disabling the check means it is never created.
+A random UUID chosen on first use. It encodes nothing about your host, your
+organization, your configuration, or your master key; it exists only so
+repeated checks from one deployment count as one deployment. Disabling the
+check means it is never created.
 
 It is kept in the deployment's database, under the `install_id` key in the
 `runtime_settings` table (or collection), and mirrored to `install-id` in the
@@ -93,16 +93,18 @@ An `install-id` file from an earlier release is adopted unchanged the first time
 the gateway starts with this one, unless the database already holds an id — for
 instance because another replica sharing it started first — in which case the
 database's id wins and the file is rewritten to match. If the database cannot
-be reached at startup, the gateway uses the file (or the fallback below) until
+be reached at startup, the gateway uses the file (or a fresh random id) until
 it can, and switches to the database's id on a later check rather than keeping
 a provisional one for the life of the process.
 
 When neither copy exists — a container recreated without a volume, running
-SQLite — the identifier is derived from `GOMODEL_MASTER_KEY` with HMAC-SHA256,
-so the same configuration keeps the same identity. The key itself is never
-sent and cannot be recovered from the identifier. Rotating the key in that
-situation reads as a new deployment; without a master key a fresh random id
-is generated on every recreate.
+SQLite — a fresh random id is generated, and the recreated container reads as a
+new deployment. Mount a volume for the data directory to keep the same id.
+
+Earlier releases derived the identifier from `GOMODEL_MASTER_KEY` in that
+situation. An id saved that way is replaced with a random one, in both the
+database and the file, the first time this release starts, so the deployment
+reports as new once.
 
 ## Turning it off if you don't want to get the updates
 

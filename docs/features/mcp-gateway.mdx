@@ -17,8 +17,8 @@ the same way it already sits between your apps and model providers:
 - **Aggregation with namespacing.** Tools and prompts from every configured
   server appear in one catalog as `{slug}_{name}` (for example
   `github_create_issue`), in a stable, deterministic order.
-- **Least-privilege discovery.** A server can be scoped to `user_paths`;
-  callers outside the subtree do not merely get errors — the tools never
+- **Least-privilege discovery.** A server can be scoped to `user_paths` and
+  carved out with `disallowed_user_paths`; hidden callers do not merely get errors — the tools never
   appear in their `tools/list` at all. Operator-level `allowed_tools` /
   `disallowed_tools` filters trim noisy servers, which keeps agent context
   small.
@@ -51,14 +51,115 @@ as a bearer token:
 }
 ```
 
+The dashboard's **MCP Servers** page has a **Connect a client** panel with
+the endpoint URL and a ready-to-copy client config.
+
 For client-specific commands, environment-variable authentication, and
 verification steps, see [Connect Claude Code and Codex](/mcp-proxy/claude-code-and-codex).
 
-Three ways to narrow what a client sees:
+Four ways to narrow what a client sees:
 
 - `/mcp` — everything the key's user path may see, namespaced.
 - `/mcp/{slug}` — a single server with its **original** tool names.
+- `/mcp/{name}` — a [virtual server](#group-servers-into-virtual-servers): a
+  named subset of servers, namespaced.
 - `X-MCP-Servers: github,jira` header — a comma-separated subset on `/mcp`.
+
+## Group servers into virtual servers
+
+A virtual server serves a fixed subset of your MCP servers at its own URL. Use
+one for clients that accept only a URL and no custom headers, or to hand each
+team or agent a curated set.
+
+Create one on the **MCP Servers** page with **Add Virtual Server**: pick a
+name, the member servers, and optionally the tool list mode. Changes apply
+immediately. To manage them as code, declare them in config instead:
+
+```yaml
+mcp:
+  virtual_servers:
+    coding:
+      description: Code review tools
+      servers: [github, linear, sentry]
+      tool_discovery: search # optional; default: mcp.tool_discovery
+```
+
+Clients connect to `https://your-gateway/mcp/coding` and see tools namespaced
+as on `/mcp` (`github_create_issue`). The same map works as JSON in
+`MCP_VIRTUAL_SERVERS`.
+
+- **It only narrows.** Every member keeps its `user_paths` and tool filters, so
+  a key that cannot see `github` does not see it through `coding` either.
+  `X-MCP-Servers` narrows a virtual server further.
+- **Names share `/mcp/{name}` with server slugs.** Startup fails if a virtual
+  server in config is named after a server in config, and the dashboard
+  rejects a new server or virtual server whose name the other already uses. If
+  a server and a virtual server end up with the same name anyway (for example,
+  config added after a dashboard entry), the server keeps the URL and the
+  virtual server is not served; the log and the dashboard say so.
+- **Config entries win.** A virtual server declared in config hides a
+  dashboard one with the same name and is read-only in the dashboard.
+- **Missing members are skipped.** The dashboard only offers existing servers,
+  but a member deleted later, or one named in config before it exists, is
+  skipped with a warning and flagged on the **MCP Servers** page.
+
+The **Connect a client** panel can build the client config for each virtual
+server.
+
+With several gateway instances on one database, a dashboard change applies at
+once on the instance that saved it. The others pick it up on their next
+background refresh (`CACHE_REFRESH_INTERVAL`, default 1 hour) or a runtime
+refresh from the dashboard. Dashboard-added MCP servers propagate the same way.
+
+## Search tools instead of listing them
+
+Every tool in `tools/list` is sent to the model on every turn. With a few
+large servers that can be tens of thousands of tokens. Search discovery
+replaces the list with two tools:
+
+- `search_tools` takes keywords (or an exact tool name) and returns the
+  matching tools with their descriptions and input schemas.
+- `call_tool` runs a found tool by `name` with its `arguments`.
+
+It is off by default. Turn it on for every client:
+
+```yaml
+mcp:
+  tool_discovery: search # env: MCP_TOOL_DISCOVERY; default: off
+```
+
+Or per client, with a header that overrides the default for that session.
+The **Connect a client** panel shows the gateway default; its config snippet
+adds the header only when the mode you pick differs from that default:
+
+```json
+{
+  "mcpServers": {
+    "gomodel": {
+      "type": "http",
+      "url": "https://your-gateway/mcp",
+      "headers": {
+        "Authorization": "Bearer sk-your-gomodel-key",
+        "X-MCP-Tool-Discovery": "search"
+      }
+    }
+  }
+}
+```
+
+Use it for clients that send every tool to the model, such as custom agents
+and SDK loops. Leave it off for clients with their own tool search, such as
+Claude Code: they already defer tools, and they get per-tool permission
+prompts and read-only/destructive hints only when tools are listed directly.
+Through `call_tool`, every call looks like the same tool to the client.
+
+Search results and calls respect user paths and tool filters. Failures, such
+as an unknown name or an unreachable server, come back as tool errors the
+model can read and recover from. Usage entries and the request log record the
+real tool name, not `call_tool`. If the catalog is only
+large because of tools nobody uses, trimming it with
+[tool filters](#choose-which-tools-each-server-exposes) or `X-MCP-Servers`
+is simpler and keeps tools listed directly.
 
 ## Declare servers
 
@@ -82,8 +183,10 @@ Open **MCP Servers** and click **Add MCP Server**. Fill in:
 - **URL** — the upstream MCP endpoint.
 - **Headers** — upstream credentials (for example `Authorization: Bearer …`);
   saved values are shown redacted afterward.
-- Optional **allowed/disallowed tools** and **user paths** to scope
-  visibility, the same fields available in `config.yaml`.
+- **Tools** — check the tools clients may use; see
+  [Choose which tools each server exposes](#choose-which-tools-each-server-exposes).
+- Optional **user paths** and **excluded user paths** under **Advanced**; see
+  [Limit who can see a server](#limit-who-can-see-a-server).
 
 Save to connect immediately. Use the row's refresh icon to force a
 **Reconnect**, the list icon to open the catalog inspector, and the pencil
@@ -110,6 +213,7 @@ mcp:
       headers:
         Authorization: "Bearer ${GITHUB_PAT}"
       user_paths: ["/engineering"] # optional visibility scope
+      disallowed_user_paths: ["/engineering/contractors"] # carve-out; wins over user_paths
       disallowed_tools: ["delete_repo"]
     local-files:
       transport: stdio # declarative-only; see security notes
@@ -135,10 +239,65 @@ Per-server fields:
 | `allowed_tools` | all | Allowlist of upstream tool names |
 | `disallowed_tools` | none | Blocklist, applied after the allowlist |
 | `user_paths` | everyone | Visibility subtrees, like virtual models |
+| `disallowed_user_paths` | none | Subtrees that never see the server; wins over `user_paths` |
 | `tool_timeout` | `30s` | Upper bound for one `tools/call` |
 
 Invalid declarations (bad slug, missing `url`/`command`, unknown transport)
 abort startup with a clear error rather than silently dropping the server.
+
+### Run stdio servers with Docker
+
+The official image contains only the GoModel binary — no shell, Node, or
+Python — so `npx` and `uvx` commands cannot start inside it. stdio servers
+that ship as a static binary work: mount the binary and point `command` at it.
+
+For everything else, run the stdio server in its own container behind a
+stdio-to-HTTP bridge such as
+[supergateway](https://github.com/supercorp-ai/supergateway), and declare it
+as a regular `http` server:
+
+```yaml
+services:
+  mcp-files:
+    image: supercorp/supergateway
+    command:
+      - --stdio
+      - npx -y @modelcontextprotocol/server-filesystem /data
+      - --outputTransport
+      - streamableHttp
+      - --port
+      - "8000"
+    volumes:
+      - ./files:/data
+
+  gomodel:
+    image: enterpilot/gomodel
+    ports: ["8080:8080"]
+    environment:
+      GOMODEL_MASTER_KEY: change-me
+      MCP_SERVERS: '{"files":{"url":"http://mcp-files:8000/mcp"}}'
+    depends_on: [mcp-files]
+```
+
+This keeps the MCP server's runtime and dependencies out of the gateway
+container. The bridge has no authentication, so do not publish its port —
+leave it reachable only on the internal Compose network.
+
+To spawn the subprocess from the gateway itself, build your own image instead.
+The binary is static, so it runs on any base:
+
+```dockerfile
+FROM node:22-slim
+COPY --from=enterpilot/gomodel /gomodel /gomodel
+COPY --from=enterpilot/gomodel /app /app
+RUN chown -R node:node /app
+USER node
+WORKDIR /app
+EXPOSE 8080
+ENTRYPOINT ["/gomodel"]
+```
+
+You then own that image's updates and security patches.
 
 ## Health and lifecycle
 
@@ -151,14 +310,97 @@ immediately when the upstream sends a `list_changed` notification.
 **Reconnect** on the dashboard (or `POST /admin/mcp-servers/{slug}/reconnect`)
 forces a redial.
 
+A server saved from the dashboard starts as **connecting**: the first dial runs
+in the background so the save never blocks on upstream IO. The dashboard
+re-checks every few seconds until the row settles on connected or degraded, so
+no page reload is needed.
+
+A last error of `no MCP endpoint at that path` means the URL answered the
+handshake with HTTP 404: something listens there, but not an MCP endpoint at
+that path. Servers mount their endpoint under different paths, so `url` must
+include it — for example `http://localhost:18080/http` for mcp-devtools or
+`http://localhost:3000/v2/mcp` for self-hosted Firecrawl. A last error
+mentioning HTTP 405 means the path exists but rejects the handshake method,
+which is what a streamable HTTP endpoint answers when `transport` is `sse`
+(and an SSE endpoint when it is `http`): fix `transport` first, then the
+path. Stateless servers (no `Mcp-Session-Id`) need no extra configuration.
+
+A last error mentioning `x509: certificate signed by unknown authority` means
+the server's TLS certificate is issued by a CA the container does not trust.
+See [private CA certificates](/guides/production#upstream-certificates-behind-a-private-ca).
+
+## Choose which tools each server exposes
+
+By default every tool a server reports is exposed. Trim a server's tools to
+keep agent context small and to keep risky tools, such as deletes or merges,
+away from clients.
+
+In the dashboard, edit a server and use its **Tools** section. It lists every
+tool the server reports, with a checkbox for each, a filter box, and
+**Expose all** / **Exclude all** for the filtered rows. Tools the server
+annotates as `read-only` or `destructive` carry a badge. These hints come from
+the upstream; GoModel does not verify them.
+
+**Tools the server adds later** controls what happens when the upstream grows:
+
+| Choice | Saved as | New upstream tools |
+| --- | --- | --- |
+| **Expose automatically** (default) | `disallowed_tools`: the unchecked tools | Exposed |
+| **Keep hidden** | `allowed_tools`: the checked tools | Hidden until you check them |
+
+Choose **Keep hidden** for servers you do not control, so a new tool can never
+reach clients without review.
+
+You can also add a tool by name, for example before the server first
+connects. Names the server does not report stay in the list, marked
+**Not reported by the server**, so typos and removed tools stay visible.
+
+Changing tool filters applies immediately without reconnecting to the server.
+The change also covers MCP sessions that are already open: an excluded tool
+fails with an error even for a client that listed it before the change.
+
+In `config.yaml` the same filters use original, unprefixed tool names:
+
+```yaml
+mcp:
+  servers:
+    github:
+      url: https://api.githubcopilot.com/mcp
+      disallowed_tools: ["delete_repository", "merge_pull_request"]
+```
+
+## Limit who can see a server
+
+`user_paths` lists who may see a server; `disallowed_user_paths` carves callers
+out. Both match subtrees, so `/contractors` also covers `/contractors/acme`,
+and an exclusion wins over an allowed path.
+
+| Goal | Configuration |
+| --- | --- |
+| Everyone | leave both empty (default) |
+| Only engineering | `user_paths: ["/engineering"]` |
+| Everyone except contractors | `disallowed_user_paths: ["/contractors"]` |
+| Engineering except its contractors | both of the above, scoped under `/engineering` |
+
+The caller's user path comes from its API key when the key has one. Otherwise,
+including with the master key, it comes from the `X-GoModel-User-Path` header
+(or the header named by `USER_PATH_HEADER`), which is a quick way to check what
+a given subtree sees.
+
+Hidden servers are left out of `tools/list`, and `/mcp/{slug}` returns 404 for
+them. Like tool filters, visibility edits apply without reconnecting to the
+server and are checked on every call, so they also reach MCP sessions that are
+already open.
+
 ## Inspect a server's catalog
 
 The dashboard's catalog inspector (or
-`GET /admin/mcp-servers/{slug}/catalog`) lists exactly what a server
-currently exposes through the gateway — tools, prompts, resources, and
-resource templates with their descriptions, after your `allowed_tools` /
-`disallowed_tools` filters. Names are the upstream originals; the aggregated
-`/mcp` endpoint serves them as `{slug}_{name}`.
+`GET /admin/mcp-servers/{slug}/catalog`) lists what a server currently exposes
+through the gateway: tools, prompts, resources, and resource templates with
+their descriptions, after your `allowed_tools` / `disallowed_tools` filters.
+Tools that the server reports but the filters hide are listed separately under
+`excluded_tools`. Names are the upstream originals; the aggregated `/mcp`
+endpoint serves them as `{slug}_{name}`.
 
 ## Security notes
 

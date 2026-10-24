@@ -1,0 +1,87 @@
+name: Stale Branches
+
+# Deletes branches whose pull request was closed or merged more than DAYS ago.
+# Branches with an open PR, without any PR, protected, or with commits pushed
+# after the PR closed are kept. Deleted branches can be restored from the PR page.
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: Delete branches whose PR closed more than this many days ago
+        default: "30"
+      dry_run:
+        description: Only list branches that would be deleted
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: stale-branches
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      DAYS: ${{ inputs.days || '30' }}
+      DRY_RUN: ${{ inputs.dry_run || 'false' }}
+    steps:
+      - name: Delete stale branches
+        run: |
+          set -euo pipefail
+
+          if ! [[ "$DAYS" =~ ^[0-9]+$ ]] || [ "$DAYS" -lt 1 ]; then
+            echo "::error::days must be a positive integer, got '$DAYS'"
+            exit 1
+          fi
+
+          gh api --paginate "repos/$REPO/branches?per_page=100" \
+            --jq '.[] | select(.protected | not) | "\(.name) \(.commit.sha)"' > branches.txt
+          gh pr list -R "$REPO" --state open --limit 10000 \
+            --json headRefName --jq '.[].headRefName' > open.txt
+          if [ "$(wc -l < open.txt)" -ge 10000 ]; then
+            echo "::error::open pull request list may be truncated"
+            exit 1
+          fi
+          # Latest closed PR per branch, closed before the cutoff.
+          gh pr list -R "$REPO" --state closed --limit 10000 \
+            --json headRefName,headRefOid,closedAt,isCrossRepository \
+            --jq 'map(select(.isCrossRepository | not)) | group_by(.headRefName) | map(max_by(.closedAt))
+              | .[] | select(.closedAt < (now - ($ENV.DAYS | tonumber) * 86400 | todate)) | "\(.headRefName) \(.headRefOid)"' > stale.txt
+
+          repo_id=$(gh repo view "$REPO" --json id --jq .id)
+          # Deletes the ref only if it still points at the closed PR's commit.
+          delete_ref='mutation($repo: ID!, $ref: GitRefname!, $oid: GitObjectID!) {
+            updateRefs(input: {repositoryId: $repo, refUpdates: [{name: $ref, beforeOid: $oid, afterOid: "0000000000000000000000000000000000000000"}]}) { clientMutationId }
+          }'
+
+          deleted=0
+          while read -r ref oid; do
+            [ "$ref" = "$DEFAULT_BRANCH" ] && continue
+            grep -qxF "$ref" open.txt && continue
+            grep -qxF "$ref $oid" branches.txt || continue
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "would delete $ref"
+            elif [ "$(gh api -X GET "repos/$REPO/pulls" -f state=open -f head="${REPO%%/*}:$ref" --jq length)" != "0" ]; then
+              # A PR may have opened since open.txt was written; a failed check also keeps the branch.
+              echo "kept $ref: it has an open pull request"
+              continue
+            elif gh api graphql -f query="$delete_ref" -f repo="$repo_id" -f ref="refs/heads/$ref" -f oid="$oid" --silent; then
+              echo "deleted $ref"
+              sleep 1 # stay under the secondary rate limit for writes
+            else
+              echo "::warning::kept $ref: it changed or could not be deleted"
+              continue
+            fi
+            deleted=$((deleted + 1))
+          done < stale.txt
+
+          echo "### Stale branches: $deleted $([ "$DRY_RUN" = "true" ] && echo "would be deleted" || echo "deleted")" >> "$GITHUB_STEP_SUMMARY"
