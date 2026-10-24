@@ -236,14 +236,14 @@ func (b *Broker) replayAfterLocked(cursor uint64) ([]Event, bool) {
 	if cursor < oldest-1 {
 		return b.activeSnapshotsLocked(), true
 	}
-	if cursor < latest && latest-cursor > uint64(b.replayLimit) {
+	if cursor < latest && latest-cursor > uint64(b.replayLimit) { //nolint:gosec // G115: NewBroker keeps replayLimit positive.
 		return b.activeSnapshotsLocked(), true
 	}
 	// Sequences are consecutive within the buffer, so the first event after
 	// the cursor sits at a computable offset from the oldest.
 	start := 0
 	if cursor >= oldest {
-		start = int(cursor - oldest + 1)
+		start = int(cursor - oldest + 1) //nolint:gosec // G115: the cursor is inside the buffer here, so the offset is below count.
 	}
 	replay := make([]Event, 0, count-start)
 	for i := start; i < count; i++ {

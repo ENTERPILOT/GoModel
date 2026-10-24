@@ -2,6 +2,7 @@ package modelcache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -71,6 +72,11 @@ func (c *LocalCache) Set(ctx context.Context, cache *ModelCache) error {
 
 	// Write atomically using temp file + rename
 	tmpFile := c.filePath + ".tmp"
+	// WriteFile sets the mode only when it creates the file, so a leftover
+	// temp file would pass its old mode on to the cache file.
+	if err := os.Remove(tmpFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("failed to remove stale cache temp file: %w", err)
+	}
 	if err := os.WriteFile(tmpFile, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write cache file: %w", err)
 	}

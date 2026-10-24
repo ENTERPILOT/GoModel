@@ -1,6 +1,7 @@
 package core_test
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -11,9 +12,10 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
-// fuzzBatchFiles serves one input file and accepts any upload.
+// fuzzBatchFiles serves one input file and records the upload.
 type fuzzBatchFiles struct {
-	content []byte
+	content  []byte
+	uploaded []byte
 }
 
 func (f *fuzzBatchFiles) GetFileContent(_ context.Context, _, id string) (*core.FileContentResponse, error) {
@@ -21,12 +23,18 @@ func (f *fuzzBatchFiles) GetFileContent(_ context.Context, _, id string) (*core.
 }
 
 func (f *fuzzBatchFiles) CreateFile(_ context.Context, _ string, req *core.FileCreateRequest) (*core.FileObject, error) {
+	f.uploaded = req.Content
 	return &core.FileObject{ID: "file-rewritten", Object: "file", Filename: req.Filename, Purpose: req.Purpose}, nil
 }
 
+// fuzzRewrittenBody replaces every rewritten line's body in rewrite mode.
+const fuzzRewrittenBody = `{"rewritten":true}`
+
 // FuzzRewriteBatchSource feeds arbitrary JSONL input files through batch
-// preparation with an identity rewrite. Whatever the file holds, preparation
-// must not panic and must fail only with a gateway error.
+// preparation, with an identity rewrite or one that replaces the body.
+// Whatever the file holds, preparation must not panic and must fail only with
+// a gateway error. When it uploads a rewritten file, the batch must point at
+// that file, and every line of it must be JSON carrying the rewrite.
 func FuzzRewriteBatchSource(f *testing.F) {
 	for _, seed := range []struct {
 		endpoint string
@@ -44,22 +52,40 @@ func FuzzRewriteBatchSource(f *testing.F) {
 		{"/v1/chat/completions", "\n\n   \n"},
 		{"/v1/chat/completions", ""},
 	} {
-		f.Add(seed.endpoint, []byte(seed.content))
+		f.Add(seed.endpoint, []byte(seed.content), false)
+		f.Add(seed.endpoint, []byte(seed.content), true)
 	}
 
-	f.Fuzz(func(t *testing.T, endpoint string, content []byte) {
+	f.Fuzz(func(t *testing.T, endpoint string, content []byte, replace bool) {
 		req := &core.BatchRequest{InputFileID: "file-input", Endpoint: endpoint}
-		identity := func(_ context.Context, item core.BatchRequestItem, _ *core.DecodedBatchItemRequest) (json.RawMessage, error) {
+		rewrite := func(_ context.Context, item core.BatchRequestItem, _ *core.DecodedBatchItemRequest) (json.RawMessage, error) {
+			if replace {
+				return json.RawMessage(fuzzRewrittenBody), nil
+			}
 			return item.Body, nil
 		}
+		files := &fuzzBatchFiles{content: content}
 
-		result, err := core.RewriteBatchSource(t.Context(), "openai", req, &fuzzBatchFiles{content: content}, nil, identity)
+		result, err := core.RewriteBatchSource(t.Context(), "openai", req, files, nil, rewrite)
 		if err != nil {
 			var gatewayErr *core.GatewayError
 			assert.ErrorAs(t, err, &gatewayErr, "error %T is not a gateway error", err)
 			return
 		}
 		require.NotNil(t, result)
-		assert.NotNil(t, result.Request)
+		require.NotNil(t, result.Request)
+		if files.uploaded == nil {
+			return
+		}
+		assert.Equal(t, "file-rewritten", result.RewrittenInputFileID)
+		assert.Equal(t, "file-rewritten", result.Request.InputFileID)
+		if replace {
+			assert.Contains(t, string(files.uploaded), `"body":`+fuzzRewrittenBody)
+		}
+		for line := range bytes.SplitSeq(files.uploaded, []byte("\n")) {
+			if line = bytes.TrimSpace(line); len(line) > 0 {
+				assert.True(t, json.Valid(line), "uploaded line is not JSON: %q", line)
+			}
+		}
 	})
 }

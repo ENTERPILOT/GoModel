@@ -10,6 +10,7 @@ import (
 	"github.com/goccy/go-json"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 // fuzzKnownFields stands in for a request type's typed members.
@@ -60,7 +61,35 @@ func FuzzUnknownJSONFieldsRoundTrip(f *testing.F) {
 		joined, err := marshalWithUnknownJSONFields(known, extra)
 		require.NoError(t, err)
 		assert.Equal(t, decodeJSONPreservingNumbers(t, trimmed), decodeJSONPreservingNumbers(t, joined))
+
+		// Decoding keeps the last of repeated names, so the comparison above
+		// cannot see a member the split emitted twice. Without repeats in the
+		// input, the output must hold each member exactly once.
+		if names := memberNames(trimmed); !hasRepeats(names) {
+			assert.ElementsMatch(t, names, memberNames(joined))
+		}
 	})
+}
+
+// memberNames lists the top-level member names of a JSON object in order.
+func memberNames(data []byte) []string {
+	var names []string
+	gjson.ParseBytes(data).ForEach(func(key, _ gjson.Result) bool {
+		names = append(names, key.String())
+		return true
+	})
+	return names
+}
+
+func hasRepeats(names []string) bool {
+	seen := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		if _, ok := seen[name]; ok {
+			return true
+		}
+		seen[name] = struct{}{}
+	}
+	return false
 }
 
 // decodeJSONPreservingNumbers decodes data with numbers kept as their literal

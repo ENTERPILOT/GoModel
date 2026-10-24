@@ -17,7 +17,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/auditlog"
 )
 
-func gzipBytes(t *testing.T, body string) []byte {
+func gzipBytes(t testing.TB, body string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	w := gzip.NewWriter(&buf)
@@ -27,7 +27,7 @@ func gzipBytes(t *testing.T, body string) []byte {
 	return buf.Bytes()
 }
 
-func zstdBytes(t *testing.T, body string) []byte {
+func zstdBytes(t testing.TB, body string) []byte {
 	t.Helper()
 	enc, err := zstd.NewWriter(nil)
 	require.NoError(t, err)
@@ -50,7 +50,7 @@ func postEncoded(t *testing.T, srv *Server, path, encoding string, body []byte) 
 // reaches the provider uncompressed.
 func TestRequestDecompression_DecodesGzipAndZstd(t *testing.T) {
 	body := systemOneBody("kev/kev-latest")
-	encoders := map[string]func(*testing.T, string) []byte{
+	encoders := map[string]func(testing.TB, string) []byte{
 		"gzip":   gzipBytes,
 		"x-gzip": gzipBytes,
 		"zstd":   zstdBytes,
@@ -231,7 +231,7 @@ func TestRequestBody_NotReadWithInvalidCredential(t *testing.T) {
 func TestRequestDecompression_DecodesLongBodiesAfterAuth(t *testing.T) {
 	state := strings.Repeat("I was charged twice. ", 10_000)
 	body := `{"model":"kev/kev-latest","state":"` + state + `","questions":` + systemOneQuestions + `}`
-	encoders := map[string]func(*testing.T, string) []byte{"gzip": gzipBytes, "zstd": zstdBytes}
+	encoders := map[string]func(testing.TB, string) []byte{"gzip": gzipBytes, "zstd": zstdBytes}
 	for encoding, encode := range encoders {
 		t.Run(encoding, func(t *testing.T) {
 			provider := newSystemOneProvider(systemOneAnswer)
