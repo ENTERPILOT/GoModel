@@ -382,6 +382,97 @@ export function mcpCatalogIsEmpty(catalog) {
   return mcpCatalogSections(catalog).length === 0;
 }
 
+// --- all-tools catalog -------------------------------------------------------
+
+// mcpToolCatalogMembers resolves the catalog scope to the server slugs it
+// covers: null for every server (the aggregated /mcp endpoint), or one
+// virtual server's members. An unknown virtual server covers nothing.
+export function mcpToolCatalogMembers(virtualServers, scope) {
+  const name = String(scope || "");
+  if (!name) {
+    return null;
+  }
+  const virtual = (Array.isArray(virtualServers) ? virtualServers : []).find(
+    (item) => item?.name === name,
+  );
+  return virtual ? [...(virtual.servers || [])] : [];
+}
+
+// mcpToolCatalogRows flattens per-server catalogs into one list of tools
+// named as clients call them ({slug}_{name}), sorted by that name. members
+// (see mcpToolCatalogMembers) limits the servers; showExcluded adds the tools
+// the servers' filters hide; query narrows by name, server, or description.
+export function mcpToolCatalogRows(entries, { members = null, showExcluded = false, query = "" } = {}) {
+  const needle = String(query || "").trim().toLowerCase();
+  const scope = Array.isArray(members) ? new Set(members) : null;
+  const rows = [];
+  (Array.isArray(entries) ? entries : []).forEach((entry) => {
+    const server = String(entry?.server || "");
+    if (!server || !entry.catalog || (scope && !scope.has(server))) {
+      return;
+    }
+    const add = (excluded) => (item) => {
+      const name = String(item?.name || "").trim();
+      if (!name) {
+        return;
+      }
+      rows.push({
+        key: server + ":" + name,
+        server,
+        name,
+        aggregated: excluded ? "" : mcpNamespacedName({ server }, name),
+        description: String(item.description || "").trim(),
+        readOnly: item.read_only === true,
+        destructive: item.destructive === true,
+        excluded,
+      });
+    };
+    (entry.catalog.tools || []).forEach(add(false));
+    if (showExcluded) {
+      (entry.catalog.excluded_tools || []).forEach(add(true));
+    }
+  });
+  const filtered = needle
+    ? rows.filter((row) =>
+        [row.aggregated, row.name, row.server, row.description].some((value) =>
+          value.toLowerCase().includes(needle),
+        ),
+      )
+    : rows;
+  return filtered.sort(
+    (a, b) =>
+      Number(a.excluded) - Number(b.excluded) ||
+      a.server.localeCompare(b.server) ||
+      a.name.localeCompare(b.name),
+  );
+}
+
+// mcpToolCatalogSummary counts the exposed tools and the servers in scope,
+// before any search, so the header reads the same while the operator types.
+export function mcpToolCatalogSummary(entries, members = null) {
+  const scope = Array.isArray(members) ? new Set(members) : null;
+  const inScope = (Array.isArray(entries) ? entries : []).filter(
+    (entry) => entry?.server && (!scope || scope.has(entry.server)),
+  );
+  const tools = inScope.reduce((sum, entry) => sum + (entry.catalog?.tools || []).length, 0);
+  return { tools, servers: inScope.length };
+}
+
+// mcpToolCatalogIssues lists the servers in scope whose tools may be missing
+// from the combined list: the catalog failed to load, or the server is not
+// connected (a degraded server keeps its last catalog, so it is listed too).
+export function mcpToolCatalogIssues(entries, members = null) {
+  const scope = Array.isArray(members) ? new Set(members) : null;
+  return (Array.isArray(entries) ? entries : [])
+    .filter((entry) => entry?.server && (!scope || scope.has(entry.server)))
+    .filter((entry) => entry.error || mcpServerStatus(entry) !== "connected")
+    .map((entry) => ({
+      server: entry.server,
+      status: mcpServerStatus(entry),
+      error: String(entry.error || entry.last_error || "").trim(),
+    }));
+}
+
 // --- tool picker -----------------------------------------------------------
 
 function uniqueToolNames(names) {

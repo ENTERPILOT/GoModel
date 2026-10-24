@@ -30,6 +30,10 @@ import {
   normalizeMcpUserPaths,
   mcpDiscoveredTools,
   mcpToolFilterFromServer,
+  mcpToolCatalogIssues,
+  mcpToolCatalogMembers,
+  mcpToolCatalogRows,
+  mcpToolCatalogSummary,
   mcpToolModeSwitchable,
   mcpToolPickerRows,
   mcpToolSelectionSummary,
@@ -801,4 +805,103 @@ test("a virtual-server save only closes the editor that submitted it", () => {
   assert.match(submit, /const sameEditor = formSeq === this\.#virtualFormSeq;/);
   assert.match(submit, /if \(sameEditor\) \{\s*\n\s*this\.closeVirtualForm\(\);/, "only the submitting editor is closed");
   assert.equal(/\n      this\.closeVirtualForm\(\);/.test(submit), false, "no unconditional close remains");
+});
+
+function toolCatalogEntries() {
+  return [
+    {
+      server: "linear",
+      status: "connected",
+      catalog: normalizeMcpCatalog("linear", {
+        tools: [{ name: "list_issues", description: "List issues", read_only: true }],
+      }),
+      error: "",
+    },
+    {
+      server: "github",
+      status: "connected",
+      catalog: normalizeMcpCatalog("github", {
+        tools: [
+          { name: "search_code", description: "Search code" },
+          { name: "create_issue", description: "Open an issue" },
+        ],
+        excluded_tools: [{ name: "delete_repo", destructive: true }],
+      }),
+      error: "",
+    },
+    { server: "jira", status: "degraded", catalog: null, error: "dial failed" },
+  ];
+}
+
+test("mcpToolCatalogRows flattens every server's exposed tools under their /mcp names", () => {
+  const rows = mcpToolCatalogRows(toolCatalogEntries());
+  assert.deepEqual(
+    rows.map((row) => row.aggregated),
+    ["github_create_issue", "github_search_code", "linear_list_issues"],
+  );
+  assert.deepEqual(rows[2], {
+    key: "linear:list_issues",
+    server: "linear",
+    name: "list_issues",
+    aggregated: "linear_list_issues",
+    description: "List issues",
+    readOnly: true,
+    destructive: false,
+    excluded: false,
+  });
+});
+
+test("mcpToolCatalogRows filters by scope, hidden tools, and query", () => {
+  const entries = toolCatalogEntries();
+  const cases = [
+    { name: "virtual scope", options: { members: ["linear"] }, want: ["linear:list_issues"] },
+    { name: "empty scope", options: { members: [] }, want: [] },
+    {
+      name: "hidden tools last, without an /mcp name",
+      options: { members: ["github"], showExcluded: true },
+      want: ["github:create_issue", "github:search_code", "github:delete_repo"],
+    },
+    { name: "query by namespaced name", options: { query: "GITHUB_SEARCH" }, want: ["github:search_code"] },
+    { name: "query by server", options: { query: "linear" }, want: ["linear:list_issues"] },
+    { name: "query by description", options: { query: "open an" }, want: ["github:create_issue"] },
+  ];
+  for (const { name, options, want } of cases) {
+    assert.deepEqual(
+      mcpToolCatalogRows(entries, options).map((row) => row.key),
+      want,
+      name,
+    );
+  }
+  const hidden = mcpToolCatalogRows(entries, { showExcluded: true }).find((row) => row.excluded);
+  assert.equal(hidden.aggregated, "");
+  assert.equal(hidden.destructive, true);
+});
+
+test("mcpToolCatalogMembers resolves the scope to member slugs", () => {
+  const virtualServers = [{ name: "dev", servers: ["github", "linear"] }];
+  assert.equal(mcpToolCatalogMembers(virtualServers, ""), null);
+  assert.deepEqual(mcpToolCatalogMembers(virtualServers, "dev"), ["github", "linear"]);
+  assert.deepEqual(mcpToolCatalogMembers(virtualServers, "gone"), []);
+  assert.deepEqual(mcpToolCatalogMembers(undefined, "dev"), []);
+});
+
+test("mcpToolCatalogSummary counts exposed tools and servers in scope", () => {
+  const entries = toolCatalogEntries();
+  assert.deepEqual(mcpToolCatalogSummary(entries), { tools: 3, servers: 3 });
+  assert.deepEqual(mcpToolCatalogSummary(entries, ["github"]), { tools: 2, servers: 1 });
+  assert.deepEqual(mcpToolCatalogSummary([]), { tools: 0, servers: 0 });
+});
+
+test("mcpToolCatalogIssues lists servers whose tools may be missing", () => {
+  const entries = [
+    ...toolCatalogEntries(),
+    { server: "slack", status: "", catalog: null, error: "" },
+    { server: "notion", status: "connected", catalog: null, error: "Failed" },
+  ];
+  assert.deepEqual(mcpToolCatalogIssues(entries), [
+    { server: "jira", status: "degraded", error: "dial failed" },
+    { server: "slack", status: "connecting", error: "" },
+    { server: "notion", status: "connected", error: "Failed" },
+  ]);
+  assert.deepEqual(mcpToolCatalogIssues(entries, ["github"]), []);
 });
