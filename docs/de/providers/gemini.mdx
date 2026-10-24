@@ -1,0 +1,221 @@
+---
+title: "Google Gemini"
+description: "Konfigurieren Sie Google Gemini über AI Studio in GoModel, wählen Sie natives oder OpenAI-kompatibles Routing und verstehen Sie das Verhalten von image_url."
+icon: "sparkles"
+keywords: ["Google Gemini", "AI Studio", "native Gemini API", "Provider-Einrichtung", "provider setup"]
+---
+
+Diese Seite behandelt Gemini über API-Keys von **Google AI Studio**. Für Gemini
+auf Vertex AI von Google Cloud siehe den
+[Leitfaden zu Google Vertex AI](/de/providers/vertex).
+
+Standardmäßig routet GoModel Gemini-Requests für Chat, Responses, Embeddings
+und [Bilder](/de/advanced/images-api) über die nativen APIs von Gemini
+(`generateContent`, `batchEmbedContents`, Imagen `predict`). Wechseln Sie zum
+OpenAI-kompatiblen Endpunkt, wenn Sie Kompatibilitätsverhalten benötigen, das
+der native Adapter noch nicht implementiert (insbesondere entfernte
+`image_url`-Werte).
+
+## Konfigurieren
+
+```bash
+GEMINI_API_KEY=...
+GEMINI_API_MODE=native        # oder openai_compatible
+```
+
+Oder in `config.yaml`:
+
+```yaml
+providers:
+  gemini:
+    type: gemini
+    api_key: "${GEMINI_API_KEY}"
+    api_mode: native
+```
+
+<Note>
+  `USE_GOOGLE_GEMINI_NATIVE_API` wird weiterhin als veralteter globaler
+  Schalter berücksichtigt, wenn `GEMINI_API_MODE` pro Provider nicht gesetzt
+  ist. Verwenden Sie bevorzugt `GEMINI_API_MODE`.
+</Note>
+
+Der native AI-Studio-Modus kann außerdem GoModels Prompt-Cache-Pläne nach dem
+Routing als fünfminütige Cached-Content-Objekte von Gemini umsetzen. Die
+Wiederverwendung ist auf den für die Session gewählten API-Key beschränkt;
+Datenverkehr ohne Session mit rotierenden Keys überspringt das Anlegen der
+Objekte, damit eine Ressource nie unter falschen Zugangsdaten wiederverwendet
+wird. Vertex erhält derzeit den ursprünglichen Request ohne
+Cached-Content-Objekte.
+
+## Base-URLs
+
+GoModel verwendet intern getrennte Basis-URLs für natives Gemini und die
+OpenAI-kompatible API:
+
+- nativer Chat/Modelle: `https://generativelanguage.googleapis.com/v1beta`
+- OpenAI-kompatibel: `https://generativelanguage.googleapis.com/v1beta/openai`
+
+`GEMINI_BASE_URL` überschreibt sie. Endet der Wert auf `/openai`, verwendet
+GoModel ihn für den OpenAI-kompatiblen Client und leitet die native Basis ab,
+indem `/openai` entfernt wird. Dateien und Batches verwenden immer die
+OpenAI-kompatible Schnittstelle; Chat, Embeddings und Bilder folgen dem
+API-Modus.
+
+## Embeddings
+
+Im nativen Modus werden Embeddings über `models/{model}:batchEmbedContents`
+bedient. `dimensions` wird auf `outputDimensionality` abgebildet, und
+`encoding_format: "base64"` wird berücksichtigt. Gemini meldet auf keiner der
+beiden API-Schnittstellen eine Token-Nutzung für Embeddings. Embedding-Responses
+enthalten daher Token-Zahlen von null, und die Nutzungszeile wird mit einem
+Vorbehalt zur Kostenberechnung markiert.
+
+## Bildgenerierung und -bearbeitung
+
+Im nativen Modus funktionieren die
+[OpenAI-kompatiblen Bild-Endpunkte](/de/advanced/images-api) mit
+Gemini-Bildmodellen (`gemini-2.5-flash-image`, ..., über `generateContent`).
+Google hat Imagen im August 2026 aus der AI-Studio-API entfernt; Imagen wird
+weiterhin auf [Vertex AI](/de/providers/vertex) bereitgestellt.
+Bildbearbeitungen erfordern den nativen Modus und ein Gemini-Bildmodell; Masken
+werden nicht unterstützt. Details zur Parameterabbildung und zu den Preisen
+finden Sie in den
+[Provider-Hinweisen der Images API](/de/advanced/images-api#google-gemini).
+
+## Reasoning Effort
+
+Im nativen Modus wird `reasoning_effort` (oder `reasoning.effort`) in Geminis
+`thinkingConfig` übersetzt:
+
+| Modellfamilie | `none` / `minimal` | `low` / `medium` / `high` |
+| ------------ | ------------------ | ------------------------- |
+| Gemini 2.5 | `thinkingBudget` 0 / 1024 | `thinkingBudget` 1024 / 8192 / 24576 |
+| Gemini 3 Flash, 3.5, 3.6 | `thinkingLevel: minimal` | `thinkingLevel` wie angegeben |
+| Gemini 3 Pro, 3.1 Pro, 3.7 Flash, 3.8 Flash | `thinkingLevel: low` | `thinkingLevel` wie angegeben |
+
+Thinking lässt sich bei Gemini 3 nicht abschalten, und Pro-Modelle sowie 3.7
+und 3.8 Flash lehnen `minimal` ab. GoModel sendet daher die niedrigste Stufe,
+die diese Modelle akzeptieren, statt Googles 400 weiterzugeben. Ein explizites
+`extra_body.google.thinking_config` wird immer unverändert weitergeleitet.
+
+## Sampling-Parameter bei Gemini 3
+
+Googles Migrationsleitfäden für Gemini 3 empfehlen, `temperature`, `top_p` und
+`top_k` aus jedem Request zu entfernen, weil die Modelle auf ihre
+Standardwerte abgestimmt sind, und führen `candidate_count` für Gemini 3.x als
+nicht unterstützt. Im nativen Modus entfernt GoModel diese vier Felder daher
+für Gemini 3 und neuer (`gemini-3-*`, `gemini-3.5-*`, `gemini-3.8-*`, ...) und
+leitet sie für Gemini 2.5, Gemma und andere Modelle weiterhin weiter.
+`max_tokens`, `stop`, Penalties, `response_format` und Thinking-Einstellungen
+sind nicht betroffen.
+
+## Thought Signatures
+
+Gemini 3 hängt den von ihm ausgegebenen Funktionsaufrufen eine verschlüsselte
+`thoughtSignature` an und lehnt einen Folge-Request ab (HTTP 400, „Function
+call is missing a thought_signature“), wenn dieser Aufruf ohne Signatur im
+Verlauf zurückkommt. Im nativen Modus stellt GoModel die Signatur auf dieselbe
+Weise bereit wie Googles eigener OpenAI-kompatibler Endpunkt, sodass ein
+Client, der Assistant-Nachrichten unverändert zurücksendet, weiterhin
+funktioniert:
+
+```json
+{
+  "role": "assistant",
+  "tool_calls": [{
+    "id": "call_1",
+    "type": "function",
+    "function": {"name": "lookup_weather", "arguments": "{\"city\":\"Warsaw\"}"},
+    "extra_content": {"google": {"thought_signature": "EvACCu0CARFNMg..."}}
+  }]
+}
+```
+
+Dasselbe `extra_content`-Element erscheint bei gestreamten
+`tool_calls`-Deltas, bei `function_call`-Ausgabeelementen der Responses API,
+bei `tool_use`-Blöcken der Anthropic Messages API und (bei reinen
+Text-Turns) an der Assistant-Nachricht selbst. Senden Sie es unverändert
+zurück; nur der erste Aufruf eines parallelen Batches trägt eine Signatur.
+Andere Provider sehen es nie; die gemeinsame Konvention ist unter
+[Extra Content, Thinking-Blöcke und Thought Signatures](/de/advanced/extra-content)
+beschrieben. Eine flache `thought_signature` (oder `thoughtSignature`) am
+Tool-Aufruf oder an dessen `function`-Objekt wird ebenfalls akzeptiert, sodass
+Clients, die für andere Gateways gebaut wurden, weiterhin funktionieren.
+
+Enthält ein Gemini-3-Verlauf einen Funktionsaufruf ohne jede Signatur (die
+Konversation begann mit einem anderen Modell, oder der Client hat das Feld
+verworfen), sendet GoModel Googles dokumentierten Platzhalter
+`skip_thought_signature_validator`, statt den 400 weiterzugeben. Die
+Reasoning-Kontinuität ist für diesen Turn eingeschränkt, senden Sie daher
+bevorzugt die echte Signatur zurück.
+
+## Bildeingabe
+
+| Modus | `image_url` im OpenAI-Stil |
+| ---- | ----- |
+| `native` (Standard) | nur eingebettete `data:`-URLs – entfernte `https://...`-URLs werden abgelehnt |
+| `openai_compatible` | entfernte URLs im OpenAI-Stil werden an Googles OpenAI-kompatiblen Endpunkt durchgereicht |
+
+Für per URL gehostete Bilder im nativen Modus rufen Googles eigene Beispiele
+zuerst die URL ab und senden die Bytes an `generateContent`.
+
+## Videoeingabe
+
+| Modus | `video_url` im OpenAI-Stil |
+| ---- | ----- |
+| `native` (Standard) | eingebettete `data:`-URLs, YouTube-Links, URIs der Gemini Files API und `gs://`-Objekte |
+| `openai_compatible` | unverändert weitergeleitet, aber Googles OpenAI-kompatibler Endpunkt unterstützt keine Videoeingabe – verwenden Sie `native` |
+
+```json
+{"type":"video_url","video_url":{"url":"https://www.youtube.com/watch?v=abc123"}}
+```
+
+Im nativen Modus wird eine `data:`-URL zu einem eingebetteten Videoteil
+(standardmäßig `video/mp4`, wenn die Data-URL keinen Medientyp angibt), während
+URIs von YouTube, Files API und Cloud Storage als Dateireferenz gesendet
+werden, die Gemini selbst auflöst. Jede andere entfernte `https://...`-URL wird
+abgelehnt statt verworfen – laden Sie sie zuerst über die Gemini Files API
+hoch.
+
+## Nachrichten und Tools
+
+Im nativen Modus werden OpenAI-Chat-Felder wie folgt auf `generateContent`
+abgebildet:
+
+| OpenAI-Feld | Gemini `generateContent` |
+| ------------ | ------------------------ |
+| `system`- und `developer`-Nachrichten | `system_instruction` (Gemini hat keine eigene Developer-Rolle) |
+| `tool_choice: "auto"` / `"required"` / `"none"` | `functionCallingConfig.mode` `AUTO` / `ANY` / `NONE` |
+| `tool_choice`, das eine Funktion benennt | `ANY` mit `allowedFunctionNames: [name]` |
+| `tool_choice: {"type": "allowed_tools", ...}` mit Modus `required` | `ANY` mit `allowedFunctionNames` |
+| `tool_choice: {"type": "allowed_tools", ...}` mit Modus `auto` | `VALIDATED` mit `allowedFunctionNames` |
+| `strict: true` bei einem beliebigen Function-Tool | `VALIDATED` statt `AUTO`; `ANY` erzwingt das Schema bereits |
+| `parallel_tool_calls: false` | verworfen; Gemini hat keine Entsprechung |
+
+Gemini akzeptiert `allowedFunctionNames` nur mit `ANY` oder `VALIDATED`.
+Deshalb wird aus einer `auto`-Teilmenge `VALIDATED`: Das Modell kann weiterhin
+mit Text antworten, aber jeder Aufruf, den es tätigt, ist auf die
+aufgelisteten Tools beschränkt. `VALIDATED` gilt für den gesamten Request,
+sodass ein einziges strict-Tool dazu führt, dass jedes deklarierte Tool
+schemavalidiert wird.
+
+Gemini bietet keine Möglichkeit, einen Turn auf einen einzigen
+Funktionsaufruf zu beschränken, und das Benennen eines einzelnen Tools hilft
+nicht: Gemini kann dieselbe Funktion in einem Turn mehrfach aufrufen. Wenn
+`parallel_tool_calls: false` (oder Anthropics `disable_parallel_tool_use`)
+wichtig ist, behandeln oder verwerfen Sie die zusätzlichen Aufrufe in Ihrem
+Client.
+
+Eine `allowed_tools`-Auswahl mit leerer `tools`-Liste wird mit 400 abgelehnt,
+wie bei OpenAI.
+
+## Noch nicht integriert
+
+- Automatisches Abrufen entfernter `image_url`-Werte im nativen Modus.
+- Hochladen entfernter Bilder oder Videos über die Gemini Files API vor einem Chat-Request.
+
+## Referenzen
+
+- [Bildverständnis mit Gemini](https://ai.google.dev/gemini-api/docs/image-understanding)
+- [Videoverständnis mit Gemini](https://ai.google.dev/gemini-api/docs/video-understanding)
+- [OpenAI-Kompatibilität von Gemini](https://ai.google.dev/gemini-api/docs/openai)

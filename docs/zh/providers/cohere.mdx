@@ -1,0 +1,232 @@
+---
+title: "Cohere"
+description: "在 GoModel 中配置 Cohere，并通过兼容 OpenAI 的 API 使用 Command 聊天、工具调用、推理、图像输入、音频转录和 Embed 模型。"
+icon: "message-circle"
+keywords: ["Cohere", "Command 模型", "Command models", "Embed", "工具调用", "tool calling", "提供商配置", "provider setup"]
+---
+
+GoModel 会将兼容 OpenAI 的 Chat Completions、Responses、嵌入（Embeddings）和音频转录请求翻译为 Cohere 原生的 v2 API。模型发现使用 Cohere 的模型目录，并通过 `/v1/models` 公开聊天、嵌入和转录模型。
+
+## 配置
+
+```bash
+COHERE_API_KEY=...
+# COHERE_BASE_URL=https://api.cohere.com   # 可选覆盖
+```
+
+或者在 `config.yaml` 中：
+
+```yaml
+providers:
+  cohere:
+    type: cohere
+    api_key: "${COHERE_API_KEY}"
+```
+
+多个密钥使用标准的 `COHERE_API_KEY_2`、
+`COHERE_API_KEY_3` 等轮换约定。您可以使用 `COHERE_MODELS` 限制或补充模型发现的结果。
+
+## Chat 与 Responses
+
+通过任一兼容 OpenAI 的端点使用 Cohere Command 模型：
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "command-a-plus-05-2026",
+    "messages": [{"role": "user", "content": "Explain vector search briefly"}]
+  }'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_API_KEY"],
+)
+
+completion = client.chat.completions.create(
+    model="command-a-plus-05-2026",
+    messages=[{"role": "user", "content": "Explain vector search briefly"}],
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_API_KEY,
+});
+
+const completion = await client.chat.completions.create({
+  model: "command-a-plus-05-2026",
+  messages: [{ role: "user", content: "Explain vector search briefly" }],
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
+
+聊天流式传输、system 和 developer 消息、图像 URL 部分、JSON 响应格式、工具定义、工具调用和工具结果都会被翻译为 Cohere v2 格式。`/v1/responses` 使用相同的聊天适配器。
+
+Cohere 推理模型默认启用思考。如需控制 Cohere 原生的推理行为，请以扩展字段的形式包含其 `thinking` 对象：
+
+```json
+{
+  "model": "command-a-reasoning-08-2025",
+  "messages": [{"role": "user", "content": "Solve this carefully..."}],
+  "thinking": {"type": "enabled", "token_budget": 4000}
+}
+```
+
+无论是普通响应还是流式响应，思考输出都以兼容 OpenAI 的 `reasoning_content`
+扩展字段返回。
+
+Cohere 无法将某一轮限制为已声明工具的子集。对于类型为 `allowed_tools` 的
+`tool_choice`，GoModel 只发送列出的函数；当模式为 `required` 时附带 `tool_choice: REQUIRED`，否则使用 Cohere 的默认值。未指定任何已声明函数的子集会被以 400 拒绝。
+`allowed_tools` 的用途是让客户端可以在每一轮发送相同的工具列表并保留其提示词缓存；收窄范围会改变发送给 Cohere 的工具定义，因此在不同轮次之间变化的子集会改变请求前缀。
+
+## 音频转录
+
+Cohere 音频使用专用的语音转文本模型和端点；Command 聊天模型不接受混入 Chat Completions 或 Responses 中的音频内容。
+请通过兼容 OpenAI 的端点转录音频：
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/audio/transcriptions \
+  -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -F "model=cohere/cohere-transcribe-03-2026" \
+  -F "language=en" \
+  -F "response_format=json" \
+  -F "file=@recording.wav"
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_API_KEY"],
+)
+
+with open("recording.wav", "rb") as audio_file:
+    transcription = client.audio.transcriptions.create(
+        file=audio_file,
+        model="cohere/cohere-transcribe-03-2026",
+        language="en",
+        response_format="json",
+    )
+
+print(transcription.text)
+```
+
+```javascript JavaScript
+import { createReadStream } from "node:fs";
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_API_KEY,
+});
+
+const transcription = await client.audio.transcriptions.create({
+  file: createReadStream("recording.wav"),
+  model: "cohere/cohere-transcribe-03-2026",
+  language: "en",
+  response_format: "json",
+});
+
+console.log(transcription.text);
+```
+
+</CodeGroup>
+
+Cohere 转录 API 要求提供 `language`，并返回 JSON。GoModel
+接受兼容 OpenAI 的 `response_format=json` 字段，但会在原生请求中省略它，因为 JSON 是 Cohere 固定的响应格式。Cohere 不支持文本转语音、提示词提示、时间戳粒度或流式转录。
+
+## 嵌入
+
+GoModel 会补充 Cohere 要求的嵌入字段，同时保留 OpenAI 的请求结构：
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/embeddings \
+  -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "embed-v4.0",
+    "input": ["first document", "second document"],
+    "dimensions": 1024,
+    "input_type": "search_document"
+  }'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_API_KEY"],
+)
+
+embeddings = client.embeddings.create(
+    model="embed-v4.0",
+    input=["first document", "second document"],
+    dimensions=1024,
+    extra_body={"input_type": "search_document"},
+)
+
+print(embeddings.data[0].embedding)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_API_KEY,
+});
+
+const embeddings = await client.embeddings.create({
+  model: "embed-v4.0",
+  input: ["first document", "second document"],
+  dimensions: 1024,
+  input_type: "search_document",
+});
+
+console.log(embeddings.data[0].embedding);
+```
+
+</CodeGroup>
+
+`input_type` 默认为 `search_document`。当 `search_query`、
+`classification` 或 `clustering` 更能描述输入时，请改为相应的值。
+`encoding_format` 支持 `float`（默认）和 `base64`。Cohere 原生的
+`truncate`、`max_tokens` 和 `priority` 字段也会被透传。
+
+## 原生透传
+
+将 `cohere` 添加到 `server.enabled_passthrough_providers`，然后使用
+`/p/cohere/v2/chat` 或 `/p/cohere/v2/rerank` 等路径，调用在 GoModel 中没有兼容 OpenAI 接口的 Cohere 原生 API。
+
+关于原生字段和特定模型的能力，请参见 Cohere 的 [Chat API](https://docs.cohere.com/reference/chat)、
+[Embed API](https://docs.cohere.com/reference/embed)、
+[Audio Transcription API](https://docs.cohere.com/reference/create-audio-transcription)
+和 [推理指南](https://docs.cohere.com/docs/reasoning)。

@@ -1,0 +1,82 @@
+---
+title: "llama.cpp Server：接入 LLM 网关"
+sidebarTitle: "llama.cpp"
+description: "将兼容 OpenAI 的 GoModel 请求路由到 llama.cpp 的 llama-server 实例（同一提供商类型也适用于 LM Studio）。"
+icon: "server"
+keywords: ["llama.cpp", "llama-server", "llama.cpp router mode", "llama.cpp 路由模式", "LM Studio", "本地模型", "local models", "自托管", "self-hosted", "兼容 OpenAI 的服务器", "OpenAI-compatible server"]
+---
+
+llama.cpp 的 `llama-server` 直接支持 OpenAI API，GoModel 为其提供了专用的 `llamacpp` 提供商类型：API 密钥是可选的（llama-server 通常不使用密钥运行），并且可以通过透传访问 `/health`、`/rerank` 等提供商原生端点。**不要**将 llama.cpp 注册为 `ollama` 提供商：该类型使用 Ollama 的原生 API，而 llama.cpp 并未实现该 API。
+
+同一提供商类型也适用于 LM Studio 以及其他任何普通的兼容 OpenAI 的本地服务器。
+
+请先启动 llama-server。如果不设置 `--alias`，`/v1/models` 中的模型 ID 将是模型文件的路径。请设置别名，以便请求可以使用简洁的名称：
+
+```bash
+llama-server -hf ggml-org/gemma-3-4b-it-GGUF --alias gemma-3-4b-it --port 8081
+# 如果希望 llama-server 要求 Bearer 认证，请添加 --api-key token-abc123
+```
+
+## 配置
+
+Base URL 为必填项，用于注册该提供商。llama-server 的默认端口（8080）与 GoModel 自身的端口冲突，因此没有默认值：
+
+```bash
+LLAMACPP_BASE_URL=http://host.docker.internal:8081/v1   # 需包含 /v1
+# LLAMACPP_API_KEY=token-abc123                         # 仅当 llama-server 使用 --api-key 启动时需要
+GOMODEL_MASTER_KEY=change-me
+```
+
+<Note>
+  这些示例假设 GoModel 运行在 Docker 中，而 llama-server 运行在宿主机的 `localhost:8081` 上，因此使用 `host.docker.internal`。如果 GoModel 直接运行在宿主机上，请使用 `http://localhost:8081/v1`。需要运行多个 llama-server 实例？请使用带后缀的名称分别注册：`LLAMACPP_STUDIO_BASE_URL=...` 会创建提供商 `llamacpp-studio`。
+</Note>
+
+## 验证
+
+```bash
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llamacpp/gemma-3-4b-it",
+    "messages": [{"role": "user", "content": "Reply with exactly ok."}]
+  }'
+```
+
+`GET /v1/models` 返回带有提供商名称前缀的 llama-server 模型 ID。
+
+## 嵌入
+
+只要 llama-server 能够提供嵌入（Embeddings）服务，`/v1/embeddings` 就可以通过 GoModel 正常工作：已加载的模型必须使用 `none` 以外的池化类型。专用的嵌入 GGUF 通常会在元数据中声明池化类型；否则请传入 `--pooling mean`（或 `cls`/`last`）。`--embeddings` 参数是可选的，它会限制服务器只提供嵌入服务：
+
+```bash
+llama-server -hf nomic-ai/nomic-embed-text-v1.5-GGUF --embeddings --alias nomic-embed-text-v1.5 --port 8081
+```
+
+```bash
+curl -s http://localhost:8080/v1/embeddings \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "llamacpp/nomic-embed-text-v1.5", "input": "hello"}'
+```
+
+## 模型元数据
+
+本地 GGUF 不在上游模型目录中，因此 GoModel 会尽可能从 llama-server 本身读取信息，并通过 `GET /v1/models` 报告：
+
+- **上下文窗口**：llama-server 为该模型报告的每个槽位（slot）的 `n_ctx`，即模型*运行时*使用的上下文（`--ctx-size` 除以 `--parallel` 槽位数），而不是 GGUF 训练时的上下文。较新的版本会直接在列表中以 `meta.n_ctx` 报告；较旧的版本则通过 `/props` 查询。如果两者都无法获取（例如 LM Studio，或隐藏了 `/props` 的代理），则改用模型训练时的 `n_ctx_train`，但它只是一个上限，可能超出服务器实际接受的范围。
+- **模态**：多模态服务器（使用 `--mmproj` 启动）会在 `/props` 中报告 `vision`、`video` 和 `audio`；其中受支持的模态会成为模型的能力。
+
+`/props` 描述的是服务器已加载的那一个模型，因此仅在列表只有一个条目时才会查询。在[路由模式](https://github.com/ggml-org/llama.cpp/tree/master/tools/server)下，一个进程提供多个模型，每个模型都带有各自的 `meta.n_ctx`，完全不需要 `/props`。
+
+两者都只是默认值，而非最终决定：您在提供商的模型元数据下声明的任何内容都优先生效，参阅[模型元数据](/zh/advanced/model-metadata)。
+
+## 模型分类
+
+llama-server 不会报告任何可区分聊天模型和嵌入模型的信息，因此 GoModel 按 ID 对其模型进行分类：名称中包含 `embed` 或匹配常见嵌入模型系列（`bge`、`e5`、`gte`、`minilm`）的模型归类为嵌入模型，名称中包含 `rerank` 的归类为重排序模型；带命名空间的 ID 按其最后一个路径段检查。对于仍未分类的模型，请在提供商的模型元数据下声明 `modes`。分类仅影响控制台中的分组；无论分类如何，`/v1/embeddings` 都会路由到该提供商提供的任意模型。
+
+## 聊天与嵌入之外
+
+- **多模态输入**：当 llama-server 使用投影器（`--mmproj`，使用 `-hf` 时如可用会自动加载）启动时，多模态模型支持在聊天消息中*输入*图片和音频。这些请求照常通过 `/v1/chat/completions` 处理。
+- **原生端点**：llama-server 的提供商原生路由可以通过[透传](/zh/features/passthrough-api)在 `/p/llamacpp/...` 访问：OpenAI 风格的路径（`chat/completions`、`embeddings` 等）由 `/v1` 基础路径提供，其他路径（`/health`、`/props`、`/tokenize`、`/infill` 等）由服务器根路径提供。对于带后缀的配置，请使用实例名称，例如 `/p/llamacpp-studio/health`。
+- **重排序**：llama-server 支持重排序（使用重排序模型并以 `--rerank --embedding --pooling rank` 启动），但 GoModel 没有重排序端点；请通过透传访问：`POST /p/llamacpp/rerank`（或 `/p/llamacpp/v1/rerank`）。

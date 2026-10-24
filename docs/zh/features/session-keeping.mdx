@@ -1,0 +1,148 @@
+---
+title: "会话保持"
+description: "将来自同一客户端会话的请求归为一组，用于会话保持的负载均衡和按线程分组的审计日志"
+icon: "pin"
+---
+
+编程智能体和聊天应用会发送大量属于同一逻辑会话的请求——一段对话、一项智能体任务。GoModel 会检测该会话，并在整个路由和可观测性流程中使用它：
+
+- **会话保持的负载均衡**——负载均衡的虚拟模型会将一个会话的所有请求路由到首次为其提供服务的目标，从而保持提供商提示词缓存处于预热状态，并在对话过程中保持模型行为一致。
+- **会话保持的 API 密钥选择**——当一个提供商有多个密钥时，同一个已检测会话中的所有请求都使用同一个密钥，从而保留提供商提示词缓存的亲和性。
+- **按线程分组的审计日志**——控制台的 Audit Logs 页面会将一个会话的请求归入同一个线程：最新的请求作为一行显示，并带有展开器，可在其下方展开较早的请求。
+- **按会话统计用量和成本**——用量记录携带相同的、限定了作用域的会话 ID，因此控制台和 Admin API 可以报告单个对话或智能体任务的请求数、Token 数和提供商支出。
+
+会话保持无需任何配置即可工作。默认值适用于大多数场景；下面的选项只为少数不适用的情况而设。
+
+## 如何识别会话
+
+以第一个匹配的信号为准：
+
+1. **会话请求头**——内置注册表涵盖已知工具发送的请求头，以及网关惯例：
+
+   | 请求头 | 发送方 |
+   |---|---|
+   | `X-Session-Id` | OpenCode、Kilo Code、通用客户端 |
+   | `X-Opencode-Session` | OpenCode、pi，以及其他使用 OpenCode Zen 方言的客户端 |
+   | `X-Claude-Code-Session-Id` | Claude Code（面向网关的文档化请求头） |
+   | `Session-Id` / `Session_id` | Codex CLI（当前版本 / 旧版本）、Roo Code |
+   | `X-Litellm-Session-Id` | LiteLLM 惯例 |
+   | `Helicone-Session-Id` | Helicone 惯例 |
+   | `Agent-Session-Id` | Goose |
+
+2. **请求体字段**——用于在请求体中标记会话的客户端：
+   Anthropic 的 `metadata.user_id`（Claude Code 会将其会话 UUID 嵌入其中，当前格式和旧格式均可解析）、`session_id`（OpenRouter
+   惯例）、`litellm_session_id`、`prompt_cache_key`（Zed 以及其他在每个对话中复用缓存键的 OpenAI
+   客户端），以及 `/v1/responses` 的
+   `conversation` 引用。
+
+3. **自动检测**——没有显式信号的 chat 和 responses 请求，会按其对话开头进行分组：模型、系统上下文、工具，以及截至第一个用户轮次的消息。后续请求会原样重发该前缀，因此只是简单回放历史记录的智能体（Aider、Cline、Continue 等）无需修改客户端，也能获得稳定的会话 ID（`auto-…`）。
+
+基于请求体的信号和自动检测会读取 chat、responses 和 messages 请求的完整 JSON 请求体（包括分块传输的请求），因此长对话在上下文不断增长时仍能保持其会话 ID。只有提供商透传的请求体最多读取 1 MiB；更大的透传请求体会回退到请求头信号。
+
+客户端提供的会话 ID（包括 UUID 形式的值）会按 [用户路径](/zh/features/user-path) 限定作用域，因此一个租户无法通过复用相同的 ID 与另一个租户冲突。
+
+## 会话保持的负载均衡
+
+当请求携带会话，并通过具有多个目标的
+[虚拟模型](/zh/features/virtual-models) 解析时，第一个请求会通过重定向的策略（`round_robin` 或 `cost`）选择一个目标，之后的请求会固定使用该目标。如果被固定的目标变得不可用或已饱和，策略会重新选择，会话随之重新固定——会话永远不会被绑死在一个失效的目标上，而所有目标都饱和时如实返回 429 的行为保持不变。
+
+在 `adaptive` 策略下，固定关系会交给路由选择器处理，只要有不止一个可用目标，选择器就会在每个请求上决定该会话是否继续保持固定。（只有一个可用目标时没有可选的余地，因此会跳过选择器，重定向的行为与普通别名相同。）此时，“不可用”还包括被选择器退避的目标——即持续返回 429 或反复失败的目标——这类目标仍留在目标列表中，因此在上述检查中看起来一切正常。会话会转移到健康的目标并在那里重新固定。仅仅是*较慢*的目标仍会保留其会话：迁移会丢弃固定关系本应保护的提供商提示词缓存。参见
+[智能路由](/zh/pro/intelligent-routing)。
+
+亲和性默认开启，可以按重定向禁用：
+
+```yaml
+virtual_models:
+  - source: "smart"
+    strategy: round_robin
+    session_affinity: false   # 默认值：true
+    targets:
+      - model: "openai/gpt-4o"
+      - model: "anthropic/claude-sonnet-5"
+```
+
+同样的开关也可以在控制台的虚拟模型编辑器（"Session
+keeping"）以及 Admin API（`PUT /admin/virtual-models` 上的 `session_affinity`）中使用。
+
+固定关系按实例保存在内存中（与速率限制计数器类似）：重启后或在另一个副本上，会话的下一个请求只需重新固定即可。空闲会话在 6 小时后过期。
+
+API 密钥亲和性是确定性计算的，而不是存储的，因此相同的有序密钥集合在不同副本和重启之间都会选择相同的密钥。可按提供商通过
+`session_sticky_keys: false`、
+`<PROVIDER>[_SUFFIX]_SESSION_STICKY_KEYS=false` 或控制台中的
+**Session-sticky API keys**
+复选框禁用它。未检测到会话的请求仍采用轮询方式。
+
+## 按线程分组的审计日志
+
+审计条目会记录会话 ID（`session_id`），Audit Logs 页面默认按会话对其分组（"Group by session" 开关）。每个线程显示其最新请求以及一个计数徽标；左侧的展开器可展开较早的请求。徽标统计的是整个会话。过滤条件决定显示哪些会话，以及由哪个匹配的请求代表每个线程。
+`GET /admin/audit/sessions` 返回每个线程的 `request_count` 以及最新匹配的审计日志条目。`GET /admin/audit/log?session_id=…` 返回展开后会话中的所有请求。
+
+每个分组线程还有一个用量图表操作。它会打开 Usage Analytics 并选中该会话；展开单个请求时，其会话徽标上也提供相同的操作。
+
+## 按会话统计用量和成本
+
+Usage Analytics 包含一个通栏的 **Usage by Recent Session** 表格。每一行代表一个已检测到、按用户路径限定作用域的会话，并显示请求数、输入/输出/总 Token 数以及输入/输出/总成本。该表格和请求日志中的会话标签会过滤整个用量页面。
+
+Admin API 提供相同的有界报告：
+
+```bash
+curl -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  "http://localhost:8080/admin/usage/sessions?days=7&limit=50&offset=0"
+```
+
+```json
+{
+  "entries": [
+    {
+      "session_id": "scoped-0123456789abcdef0123456789abcdef",
+      "user_path": "/team/alpha",
+      "requests": 8,
+      "input_tokens": 24000,
+      "output_tokens": 4100,
+      "total_tokens": 28100,
+      "input_cost": 0.42,
+      "output_cost": 0.16,
+      "total_cost": 0.58
+    }
+  ],
+  "total": 1,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+请求数和 Token 数包括由 GoModel 本地响应缓存提供的响应。成本字段只包括实际发往提供商的请求，因为本地缓存命中时记录的成本是节省下来的费用，而不是实际花费。
+结果按会话最近活动时间排序；`limit` 默认为 50，上限为 200。常规的用量过滤条件（`session_id`、`user_path`、`model`、
+`provider`、`label` 以及日期范围）同样适用。
+
+## 配置
+
+所有功能默认开启。
+
+```bash
+# 会话识别的总开关
+SESSION_KEEPING_ENABLED=true
+# 对没有显式信号的请求进行基于内容的检测
+SESSION_AUTO_DETECT=true
+# 内置的请求头/请求体字段注册表
+SESSION_BUILTIN_RULES=true
+# 额外的会话请求头（从 1 开始编号），与内置规则合并。
+# 可选的转换 "session-uuid" 会提取 session_<uuid> 值。
+SESSION_HEADER_1=X-My-Session
+SESSION_HEADER_1_TRANSFORM=
+```
+
+或者在 `config.yaml` 中：
+
+```yaml
+session:
+  enabled: true
+  auto_detect: true
+  builtin_rules: true
+  headers:
+    - header: X-My-Session
+```
+
+携带凭据的请求头（`Authorization`、API 密钥请求头等）不能作为会话来源，因为会话 ID 会持久化到审计和用量记录中。
+
+**何时更改默认值：** 如果您只希望对显式标记的会话进行分组，请设置 `SESSION_AUTO_DETECT=false`；如果您更看重严格的负载分散而不是缓存亲和性（例如在相同部署之间进行纯轮询的容量均衡），请在重定向上设置 `session_affinity: false`。

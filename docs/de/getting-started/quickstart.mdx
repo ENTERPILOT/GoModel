@@ -1,0 +1,165 @@
+---
+title: "Schnellstart"
+description: "GoModel AI-Gateway: Starten Sie in 20 Sekunden ein OpenAI-kompatibles LLM-Gateway, senden Sie Ihren ersten Request und sehen Sie die Logs in Echtzeit."
+icon: "rocket"
+keywords: ["Schnellstart", "quick start", "Installation", "install", "Erste Schritte", "AI-Gateway einrichten", "KI-Gateway", "AI gateway setup", "Docker"]
+---
+
+## GoModel in 20 Sekunden starten
+
+### 1. GoModel installieren und starten
+
+<Tabs>
+  <Tab title="Docker">
+    ```bash
+    docker run --rm -p 8080:8080 \
+      -v gomodel_data:/app/data \
+      enterpilot/gomodel
+    ```
+  </Tab>
+  <Tab title="macOS / Linux">
+    ```bash
+    curl -fsSL https://gomodel.enterpilot.io/install.sh | sh
+    gomodel
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    irm https://gomodel.enterpilot.io/install.ps1 | iex
+    gomodel
+    ```
+  </Tab>
+  <Tab title="Live-Demo" icon="monitor-play">
+    [https://demo.enterpilot.io/admin/dashboard](https://demo.enterpilot.io/admin/dashboard?utm_source=gomodel_docs)
+  </Tab>
+</Tabs>
+
+### 2. Einen Provider einrichten
+
+Das geht über eine [Umgebungsvariable](/de/advanced/configuration#automatische-erkennung-über-umgebungsvariablen),
+eine [config.yaml-Datei](/de/advanced/config-yaml) (Infrastructure as Code) oder über
+die [Seite „Providers“](/de/providers/overview#provider-ohne-umgebungsvariablen-konfigurieren) im Dashboard
+(in diesem Fall ist kein Neustart erforderlich).
+
+![Dialog „Add Provider“ im GoModel-Dashboard](/getting-started/images/add-provider.png)
+
+### 3. Den ersten Request senden
+
+Verwenden Sie `curl`, das OpenAI-SDK oder das Anthropic-SDK für Python und JavaScript
+mit demselben Gateway:
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer change-me" \
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [{"role": "user", "content": "Say hello in one sentence."}]
+  }'
+```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="change-me",
+)
+
+completion = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "Say hello in one sentence."}],
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "change-me",
+});
+
+const completion = await client.chat.completions.create({
+  model: "gpt-4o-mini",
+  messages: [{ role: "user", content: "Say hello in one sentence." }],
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+```python Python (Anthropic)
+import anthropic
+
+client = anthropic.Anthropic(
+    base_url="http://localhost:8080",
+    api_key="change-me",
+)
+
+message = client.messages.create(
+    model="claude-sonnet-4-6",
+    max_tokens=256,
+    messages=[{"role": "user", "content": "Say hello in one sentence."}],
+)
+
+print(message.content[0].text)
+```
+
+```javascript JavaScript (Anthropic)
+import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic({
+  baseURL: "http://localhost:8080",
+  apiKey: "change-me",
+});
+
+const message = await client.messages.create({
+  model: "claude-sonnet-4-6",
+  max_tokens: 256,
+  messages: [{ role: "user", content: "Say hello in one sentence." }],
+});
+
+console.log(message.content[0].text);
+```
+
+</CodeGroup>
+
+<Tip>
+  Die Beispiele mit dem Anthropic-SDK rufen `POST /v1/messages` auf, den
+  [Anthropic-kompatiblen Endpunkt](/de/advanced/anthropic-messages-api) von GoModel. Dort
+  kann das Modell jedes konfigurierten Providers verwendet werden, nicht nur die von Anthropic.
+</Tip>
+
+## Vorschau des Admin-Panels
+
+Öffnen Sie diese URL im Browser, um das Verwaltungs-Dashboard, die Audit-Logs in Echtzeit und mehr zu sehen:
+
+`http://localhost:8080/admin/dashboard`
+
+<Tip>
+  Die Dashboard-UI ist standardmäßig aktiviert (`ADMIN_UI_ENABLED=true`). Die Admin-API-Endpunkte
+  liegen unter `/admin/*` und verwenden dieselbe Bearer-Authentifizierung wie die
+  Haupt-API.
+</Tip>
+
+### Nutzungsanalyse
+
+![Dashboard zur Nutzungsanalyse im GoModel AI-Gateway](/getting-started/images/usage-analytics.png)
+
+### Audit-Logs
+
+![Dashboard mit Audit-Logs im GoModel AI-Gateway](/getting-started/images/audit-logs.png)
+
+## Nächste Schritte
+
+- Ab in die Produktion: [Deployment in der Produktion](/de/guides/production)
+- Aktualisieren, eine Version festlegen oder deinstallieren: [FAQ](/de/about/faq)
+- Response-Caching verstehen: [Cache](/de/features/cache)
+- Ausgabenlimits hinzufügen: [Budgets](/de/features/budgets)
+- Produktionseinstellungen konfigurieren: [Konfiguration](/de/advanced/configuration)
+- Request-Richtlinien hinzufügen: [Guardrails](/de/advanced/guardrails)
+- OpenClaw anbinden: [GoModel mit OpenClaw verwenden](/de/guides/openclaw)

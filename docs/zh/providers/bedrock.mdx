@@ -1,0 +1,161 @@
+---
+title: "Amazon Bedrock：凭据与模型路由"
+sidebarTitle: "Amazon Bedrock"
+description: "在 GoModel 中使用 AWS 凭据和 Bedrock Runtime Converse API 配置 Amazon Bedrock。"
+icon: "/brand/bedrock.svg"
+keywords: ["Amazon Bedrock", "AWS 凭据", "Converse API", "Bedrock 模型路由", "提供商配置", "AWS credentials", "Bedrock model routing", "provider setup"]
+---
+
+GoModel 通过 Bedrock Runtime 的 Converse 和 ConverseStream API 路由 Bedrock 请求，并将不同模型系列（Anthropic、Amazon Nova、Meta Llama、Mistral、Cohere、AI21 等）的响应统一规范化为兼容 OpenAI 的 Chat Completions 格式。
+
+Bedrock 本身没有 API 密钥：GoModel 在运行时通过标准 AWS 凭据链（环境变量、`AWS_PROFILE`、IAM Identity Center、实例/容器角色）解析 AWS 凭据。
+
+## 配置
+
+```bash
+BEDROCK_BASE_URL=us-east-1   # 区域（推荐）或完整的 Bedrock 端点 URL
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+# AWS_SESSION_TOKEN=...      # 仅用于临时凭据
+GOMODEL_MASTER_KEY=change-me
+```
+
+在生产环境中，建议使用实例角色、IRSA 或 IAM Identity Center，而不是长期有效的访问密钥。当 `BEDROCK_BASE_URL` 为空时，GoModel 会回退到 `AWS_REGION` / `AWS_DEFAULT_REGION`。
+
+## 运行 GoModel
+
+<CodeGroup>
+
+```bash Docker (.env 文件)
+docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
+```
+
+```bash Docker (inline -e)
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e BEDROCK_BASE_URL="us-east-1" \
+  -e AWS_ACCESS_KEY_ID="..." \
+  -e AWS_SECRET_ACCESS_KEY="..." \
+  enterpilot/gomodel
+```
+
+```bash Binary (make build)
+make build
+./bin/gomodel
+```
+
+</CodeGroup>
+
+## 验证
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "anthropic.claude-3-5-haiku-20241022-v1:0",
+    "messages": [{"role": "user", "content": "Reply with the single word ok."}],
+    "max_tokens": 80
+  }'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+completion = client.chat.completions.create(
+    model="anthropic.claude-3-5-haiku-20241022-v1:0",
+    messages=[{"role": "user", "content": "Reply with the single word ok."}],
+    max_tokens=80,
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const completion = await client.chat.completions.create({
+  model: "anthropic.claude-3-5-haiku-20241022-v1:0",
+  messages: [{ role: "user", content: "Reply with the single word ok." }],
+  max_tokens: 80,
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
+
+`GET /v1/models` 返回 Bedrock 模型，其 `owned_by` 设置为原始厂商（例如 `anthropic`、`amazon`）。流式传输（`stream: true`）和 Responses API 会在内部桥接到 Converse。
+
+## 限制或扩展模型列表
+
+默认情况下，GoModel 会查询 Bedrock 的控制平面，并列出该账户有权访问的所有按需文本模型。如需固定推理配置文件（inference profile）ID 或自定义模型 ARN：
+
+```bash
+BEDROCK_MODELS=anthropic.claude-3-5-haiku-20241022-v1:0,amazon.nova-lite-v1:0
+```
+
+或在 `config.yaml` 中配置：
+
+```yaml
+providers:
+  bedrock:
+    type: bedrock
+    base_url: "us-east-1"
+    models:
+      - anthropic.claude-3-5-haiku-20241022-v1:0
+      - amazon.nova-lite-v1:0
+```
+
+其行为遵循全局的 `CONFIGURED_PROVIDER_MODELS_MODE`：`fallback`（默认）仅在 `ListFoundationModels` 不可用或返回为空时使用该列表；`allowlist` 只暴露配置的模型，并跳过上游调用。
+
+## 多个 Bedrock 提供商
+
+使用带后缀的环境变量注册不同的 Bedrock 实例：
+
+```bash
+BEDROCK_US_BASE_URL=us-east-1
+BEDROCK_US_MODELS=anthropic.claude-3-5-haiku-20241022-v1:0
+
+BEDROCK_EU_BASE_URL=eu-west-1
+BEDROCK_EU_MODELS=amazon.nova-lite-v1:0
+```
+
+这会注册 `bedrock-us` 和 `bedrock-eu` 两个提供商。Bedrock 凭据仍然来自标准 AWS 凭据链。
+
+## 允许的工具
+
+Bedrock Converse 无法将某一轮对话限制为已声明工具的一个子集。对于类型为 `allowed_tools` 的 `tool_choice`，GoModel 只声明列出的函数：当模式为 `required` 时 `toolChoice` 为 `any`，否则为 `auto`。如果子集中没有任何已声明的函数，请求会以 400 被拒绝。
+
+`allowed_tools` 的意义在于让客户端每一轮都发送相同的工具列表，从而保留其提示词缓存。缩小范围会改变发送到上游的工具定义，而在 Claude 模型上，工具定义在缓存前缀中位于系统提示词之前，因此在不同轮次之间变化的子集会使缓存失效。
+
+## 尚未集成
+
+- Bedrock 嵌入（Embeddings）：`InvokeModel` 的嵌入路径因模型而异，尚未接入。
+
+## 故障排查
+
+- **`AccessDeniedException` / `403`**：AWS 主体缺少 Bedrock 权限，或尚未在 Bedrock 控制台中授予模型访问权限。
+- **`on-demand throughput isn't supported`**：该模型需要推理配置文件或预置吞吐量。请将 `BEDROCK_MODELS` 设置为推理配置文件 ID。
+- **`model registry has no models`**：该区域没有按需文本模型，或控制平面调用失败。请设置 `BEDROCK_MODELS` 或检查 IAM。
+- **推断出的区域不正确**：请显式传入 `BEDROCK_BASE_URL`。使用完整端点 URL 时，只有当主机名以 `.amazonaws.com` 结尾时，GoModel 才会从中提取区域部分；自定义端点应配合 `AWS_REGION` 使用。
+
+## 参考
+
+- [Bedrock Runtime Converse API](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html)
+- [Model access in the Bedrock console](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html)
+- [AWS credential chain](https://docs.aws.amazon.com/sdkref/latest/guide/standardized-credentials.html)

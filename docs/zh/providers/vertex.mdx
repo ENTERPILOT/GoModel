@@ -1,0 +1,87 @@
+---
+title: "Google Vertex AI"
+description: "在 GoModel 中配置 Google Vertex AI 上的 Gemini，包括 ADC 和服务账号认证、区域，以及原生路由与兼容 OpenAI 路由。"
+icon: "/brand/vertex.svg"
+keywords: ["Google Vertex AI", "Gemini", "ADC", "服务账号", "service account", "提供商配置", "provider setup"]
+---
+
+本页介绍托管在 **Google Vertex AI** 上的 Gemini。如需通过 Google AI Studio API 密钥使用 Gemini，请参阅 [Google Gemini 指南](/zh/providers/gemini)。
+
+Vertex 需要一个 GCP 项目、一个提供该模型的区域，以及应用默认凭据（Application Default Credentials，ADC）或服务账号 JSON 密钥。GoModel 默认路由到 Vertex 原生的 Gemini 发布方（publisher）端点；如果您需要兼容 OpenAI 端点的兼容性行为，可以切换到该端点。
+
+<Note>
+  Vertex 认证面向企业场景，在未来的版本中可能会变为付费或需要授权许可的功能。
+</Note>
+
+## 配置
+
+```bash
+VERTEX_PROJECT=my-gcp-project
+VERTEX_LOCATION=us-central1
+VERTEX_AUTH_TYPE=gcp_adc       # 默认值；通过 gcloud、GKE Workload Identity 或元数据服务器获取 ADC
+VERTEX_API_MODE=native         # 或 openai_compatible
+```
+
+或者在 `config.yaml` 中配置：
+
+```yaml
+providers:
+  vertex:
+    type: vertex
+    auth_type: gcp_adc
+    vertex_project: my-gcp-project
+    vertex_location: us-central1
+    api_mode: native
+```
+
+### 服务账号认证
+
+```bash
+VERTEX_AUTH_TYPE=gcp_service_account
+VERTEX_SERVICE_ACCOUNT_FILE=/secrets/service-account.json
+# 或 VERTEX_SERVICE_ACCOUNT_JSON / VERTEX_SERVICE_ACCOUNT_JSON_BASE64
+```
+
+### 多个区域或账号
+
+使用带后缀的环境变量注册更多 Vertex 提供商：
+
+```bash
+VERTEX_US_PROJECT=prod-ai
+VERTEX_US_LOCATION=us-central1
+VERTEX_US_AUTH_TYPE=gcp_adc
+
+VERTEX_EU_PROJECT=prod-ai
+VERTEX_EU_LOCATION=europe-west4
+VERTEX_EU_AUTH_TYPE=gcp_service_account
+VERTEX_EU_SERVICE_ACCOUNT_FILE=/secrets/vertex-eu.json
+```
+
+这会注册 `vertex-us` 和 `vertex-eu`。
+
+## Base URL 与模式
+
+默认的基础 URL 由项目和区域推导得出：
+
+- 兼容 OpenAI：`.../projects/{project}/locations/{location}/endpoints/openapi`
+- 原生 Gemini：`.../projects/{project}/locations/{location}/publishers/google`
+
+无论 `VERTEX_API_MODE` 如何设置，Vertex 嵌入都使用 Vertex AI 原生预测接口。在原生模式（默认）下，[图片端点](/zh/advanced/images-api)通过发布方端点提供（Imagen 使用 `predict`，Gemini 图片模型使用 `generateContent`）；在 `openai_compatible` 模式下，图片生成会转发到兼容 OpenAI 的端点，图片编辑则会被拒绝。Vertex 不提供 Gemini Files 或兼容 OpenAI 的批处理操作。
+
+## 图片输入
+
+| 模式 | OpenAI 风格的 `image_url` |
+| ---- | ----- |
+| `native`（默认） | 仅支持内联的 `data:` URL；远程 `https://...` URL 会被拒绝 |
+| `openai_compatible` | OpenAI 风格的远程 URL 会透传到 Vertex 的兼容 OpenAI 端点 |
+
+## 尚未集成
+
+- 在原生模式下自动获取远程 `image_url` 值。
+- Vertex Files 和批量预测 API。
+
+## 参考
+
+- [Vertex AI OpenAI compatibility](https://cloud.google.com/vertex-ai/generative-ai/docs/start/openai)
+- [Gemini API in Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference)
+- [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials)
